@@ -473,7 +473,7 @@ MUT_TREE="$TMPROOT/mut-tree"
 mk_tree "$MUT_TREE"
 cp "$PROBE_TREE/tests/probe.test.sh" "$MUT_TREE/tests/probe.test.sh"
 MUT_SEAM="$MUT_TREE/tests/lib/resolve-roots.sh"
-anchor -E "$MUT_SEAM" '^  PATH="\$phys:\$PATH"' 1
+anchor insert tests/lib/resolve-roots.sh '  PATH="$phys:$PATH"'
 grep -vE '^  PATH="\$phys:\$PATH"' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
 expect_eq "6.3 the mutant seam still parses" "0" "$(bash -n "$MUT_SEAM" >/dev/null 2>&1; echo $?)"
 if [ -n "$ALT_BASH" ]; then
@@ -602,7 +602,7 @@ skip "7.19 a root owned by another user" "unprivileged: chown to another uid nee
 # planted link and PATH.
 T87_MUT="$TMPROOT/t87-mutant-seam.sh"
 T67_LINK_LINE='  [ ! -L "$1" ] || { _BIONIC_PIN_STEP="$1 is a symlink"; return 0; }'
-anchor "$SEAM" "$T67_LINK_LINE" 1
+anchor file tests/lib/resolve-roots.sh '  [ ! -L "$1" ] || { _BIONIC_PIN_STEP="$1 is a symlink"; return 0; }'
 grep -vxF "$T67_LINK_LINE" "$SEAM" > "$T87_MUT"
 expect_eq "7.20 the mutant seam still parses" "0" "$(bash -n "$T87_MUT" >/dev/null 2>&1; echo $?)"
 T87_FLIPS=""
@@ -722,8 +722,8 @@ expect_eq "7.32c a link to an open directory WITH the sticky bit builds its pin 
 # reads the directory with `ls -ldLe` and, where ls has no -e, with `ls -ldL`: both lines are turned).
 # The open-parent link is then accepted.
 T36_MUT3="$TMPROOT/t36-mut-nolink.sh"
-anchor "$SEAM" 'out="$(ls -ldLe "$1" 2>/dev/null)"' 1
-anchor "$SEAM" '[ -n "$out" ] || out="$(ls -ldL "$1" 2>/dev/null)"' 1
+anchor file tests/lib/resolve-roots.sh 'out="$(ls -ldLe "$1" 2>/dev/null)"'
+anchor file tests/lib/resolve-roots.sh '[ -n "$out" ] || out="$(ls -ldL "$1" 2>/dev/null)"'
 sed -e 's|out="$(ls -ldLe "$1"|out="$(ls -lde "$1"|' -e 's|out="$(ls -ldL "$1"|out="$(ls -ld "$1"|' "$SEAM" > "$T36_MUT3"
 expect_eq "7.33 the no-link mutant parses" "0" "$(bash -n "$T36_MUT3" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-ok-root"; pin_call "$T36_MUT3" "$R"
@@ -785,7 +785,7 @@ expect_contains "7.38b …naming the links" "$T56_CYC/a leads through more than 
 # The mutants. (1) The walk's call removed: the open holder is accepted. (2) The holder judged with
 # no sticky exemption: the sticky holder is refused. Each is proved to run before its claim is read.
 T56_MUT1="$TMPROOT/t56-mut-walk.sh"
-anchor "$SEAM" '_bionic_pin_links "$parent" 0' 1
+anchor file tests/lib/resolve-roots.sh '_bionic_pin_links "$parent" 0'
 grep -vF '_bionic_pin_links "$parent" 0' "$SEAM" > "$T56_MUT1"
 expect_eq "7.39 the no-walk mutant parses" "0" "$(bash -n "$T56_MUT1" >/dev/null 2>&1; echo $?)"
 R="$T56_CLOSED/lnk/mut-closed-root"; pin_call "$T56_MUT1" "$R"
@@ -795,7 +795,7 @@ expect_eq "7.39c under the no-walk mutant the link held in an open directory is 
 R="$T56_HOLD/lnk/fn-root"; pin_call "$SEAM" "$R"
 expect_ne "7.39d control: the shipped function refuses that same root" "0" "$PIN_RC"
 T56_MUT2="$TMPROOT/t56-mut-sticky.sh"
-anchor "$SEAM" '    ?????????[tT]*) sticky=1 ;;' 1
+anchor file tests/lib/resolve-roots.sh '    ?????????[tT]*) sticky=1 ;;'
 grep -vF '    ?????????[tT]*) sticky=1 ;;' "$SEAM" > "$T56_MUT2"
 expect_eq "7.40 the no-sticky mutant parses" "0" "$(bash -n "$T56_MUT2" >/dev/null 2>&1; echo $?)"
 R="$T36_LNK_OK/mut-nosticky-root"; pin_call "$T56_MUT2" "$R"
@@ -811,10 +811,10 @@ expect_eq "7.40d control: the shipped function builds under that same root" "0" 
 # string alone, so a macOS ACL letting everyone add and delete entries in a 0700 parent passed, and the
 # root and pin the function makes inherited it. Mutants first (their anchors, then the rows that use them).
 T57_MUT1="$TMPROOT/t57-mut-ancestor.sh"
-anchor -E "$SEAM" '^    cur="\$cur/\$part"$' 1
+anchor insert tests/lib/resolve-roots.sh '    cur="$cur/$part"'
 awk '{print} $0 == "    cur=\"$cur/$part\"" {print "    [ -L \"$cur\" ] || continue"}' "$SEAM" > "$T57_MUT1"
 T57_MUT2="$TMPROOT/t57-mut-acl.sh"
-anchor "$SEAM" '  _bionic_pin_acl "$1" "$out"' 1
+anchor file tests/lib/resolve-roots.sh '  _bionic_pin_acl "$1" "$out"'
 grep -vF '  _bionic_pin_acl "$1" "$out"' "$SEAM" > "$T57_MUT2"
 # t57_line <tmpdir> <why> <remedy> — the hand run's one stderr line, as the seam prints it
 t57_line() { printf 'resolve-roots.sh: no interpreter pin at %s — %s; %s, then run again' \
@@ -972,7 +972,7 @@ expect_eq "7.48j …and the pin is built there" "present" "$(there "$T57_LX/lx-m
 # reader is `stat`, and the stub answers for one directory name and passes every other call through.
 T59_ME="$(id -un)"
 T59_MUT_BASE="$TMPROOT/t59-mut-base.sh"
-anchor "$SEAM" '[ -n "$name" ] || continue' 1
+anchor file tests/lib/resolve-roots.sh '[ -n "$name" ] || continue'
 sed 's/\[ -n "\$name" \] || continue.*/case "$line" in user::*|mask::*) continue ;; esac/' "$SEAM" > "$T59_MUT_BASE"  # the reader as T57 shipped it
 t59_lx() {  # t59_lx <seam> <name> <mode> <getfacl text> [<root>] — a directory of this row's own, the stub's answer for it, pin_call under it
   local d="$T87_DIR/t59-lx-$2"
@@ -1046,7 +1046,7 @@ t59_own "$SEAM" "$T59_SUB/r4"
 expect_contains "7.52j the parent itself owned by another user: refused, naming it" "$T59_SUB $T59_WHY_OWN" "$PIN_ERR"
 rm -f "$T59_STAT_DIR/t59-sub"
 T59_MUT_OWN="$TMPROOT/t59-mut-owner.sh"
-anchor "$SEAM" '_bionic_pin_trusted "$owner" ||' 1
+anchor file tests/lib/resolve-roots.sh '_bionic_pin_trusted "$owner" ||'
 grep -vF '_bionic_pin_trusted "$owner" ||' "$SEAM" > "$T59_MUT_OWN"
 expect_eq "7.53 the no-owner mutant parses" "0" "$(bash -n "$T59_MUT_OWN" >/dev/null 2>&1; echo $?)"
 t59_own "$T59_MUT_OWN" "$T57_SUB/mut-owner-ctl"
@@ -1082,7 +1082,7 @@ t59_own "$SEAM" "$T59_LNK/r3"
 expect_eq "7.56h the same link owned by root: built" "0" "$PIN_RC"
 rm -f "$T59_STAT_DIR/t59-lnk.nf"
 T59_MUT_LNK="$TMPROOT/t59-mut-linkowner.sh"
-anchor "$SEAM" '_bionic_pin_trusted "$linkowner" ||' 1
+anchor file tests/lib/resolve-roots.sh '_bionic_pin_trusted "$linkowner" ||'
 grep -vF '_bionic_pin_trusted "$linkowner" ||' "$SEAM" > "$T59_MUT_LNK"
 expect_eq "7.57 the no-link-owner mutant parses" "0" "$(bash -n "$T59_MUT_LNK" >/dev/null 2>&1; echo $?)"
 printf '%s\n' "$T59_OTHER" > "$T59_STAT_DIR/t59-lnk.nf"
@@ -1147,7 +1147,7 @@ expect_eq "7.61c …and the root is still there" "present" "$(there "$T61_PLANT"
 rm -f "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID" "$T59_STAT_DIR/bionic-interpreter-pin.$STOP_UID.nf"
 # the mutant: the third trusted owner removed. The namespace shape is refused again (the defect 7.58 guards).
 T61_MUT="$TMPROOT/t61-mut-fsowner.sh"
-anchor "$SEAM" '[ "$1" = "$(_bionic_pin_owner /)" ]' 1
+anchor file tests/lib/resolve-roots.sh '[ "$1" = "$(_bionic_pin_owner /)" ]'
 T61_LINE='[ "$1" = "$(_bionic_pin_owner /)" ]' \
   awk 'index($0, ENVIRON["T61_LINE"]) { print "  return 1"; next } { print }' "$SEAM" > "$T61_MUT"
 expect_eq "7.62 the no-root-owner mutant parses" "0" "$(bash -n "$T61_MUT" >/dev/null 2>&1; echo $?)"
@@ -1229,7 +1229,7 @@ expect_contains "7.66d …and still offers to remove it (the owner it reads is t
 rm -f "$T61_FS"
 # the mutant: the missing-path refusal removed, T61's "not open" back. The race builds (the defect 7.63 guards).
 T63_MUT="$TMPROOT/t63-mut-missing.sh"
-anchor "$SEAM" '[ -e "$1" ] || { _BIONIC_PIN_OPEN="is not a directory"; return 0; }' 1
+anchor file tests/lib/resolve-roots.sh '[ -e "$1" ] || { _BIONIC_PIN_OPEN="is not a directory"; return 0; }'
 T63_LINE='[ -e "$1" ] || { _BIONIC_PIN_OPEN="is not a directory"; return 0; }' \
   awk 'index($0, ENVIRON["T63_LINE"]) { print "  [ -e \"$1\" ] || return 1"; next } { print }' "$SEAM" > "$T63_MUT"
 expect_eq "7.67 the missing-path mutant parses" "0" "$(bash -n "$T63_MUT" >/dev/null 2>&1; echo $?)"
@@ -1287,7 +1287,7 @@ expect_eq "7.68f …the planter's entry is still there, not replaced" "present" 
 # the mutant: the root's owner read removed. The swap builds through the link (the defect 7.68b guards).
 T65_MUT="$TMPROOT/t65-mut-rootowner.sh"
 T67_ENTRY_LINE='  _BIONIC_PIN_STEP="$(_bionic_pin_entry "$1")"'
-anchor "$SEAM" "$T67_ENTRY_LINE" 1
+anchor file tests/lib/resolve-roots.sh '  _BIONIC_PIN_STEP="$(_bionic_pin_entry "$1")"'
 grep -vxF "$T67_ENTRY_LINE" "$SEAM" > "$T65_MUT"
 expect_eq "7.69 the no-root-owner mutant parses" "0" "$(bash -n "$T65_MUT" >/dev/null 2>&1; echo $?)"
 t65_plant mut
@@ -1319,7 +1319,7 @@ expect_contains "7.71b …naming the entry and its owner" "$T65_PR/pin $T65_WHY"
 expect_eq "7.71c …and no bash link is made in it" "absent" "$(there "$T65_PR/pin/bash")"
 expect_eq "7.71d …PATH is as given" "$T59_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
 T65_MUT_PIN="$TMPROOT/t65-mut-pinowner.sh"
-anchor "$SEAM" "$T67_ENTRY_LINE" 1
+anchor file tests/lib/resolve-roots.sh '  _BIONIC_PIN_STEP="$(_bionic_pin_entry "$1")"'
 grep -vxF "$T67_ENTRY_LINE" "$SEAM" > "$T65_MUT_PIN"
 expect_eq "7.71e the no-pin-owner mutant parses" "0" "$(bash -n "$T65_MUT_PIN" >/dev/null 2>&1; echo $?)"
 t59_own "$T65_MUT_PIN" "$T65_PR"
@@ -1336,7 +1336,7 @@ expect_eq "7.72c …and it holds bash -> /bin/bash" "/bin/bash" "$(readlink "$T6
 expect_eq "7.72d …and it names no link: it is its own physical path" "$T65_FIRST" "$(phys "$T65_FIRST")"
 expect_eq "7.72e …the rest of PATH is unchanged" "$T65_FIRST:$PIN_GIVEN" "$PIN_PATH"
 T65_MUT_PHYS="$TMPROOT/t65-mut-phys.sh"
-anchor "$SEAM" 'cd -P -- "$dir" 2>/dev/null && pwd -P)"' 1
+anchor file tests/lib/resolve-roots.sh 'cd -P -- "$dir" 2>/dev/null && pwd -P)"'
 sed 's#cd -P -- "$dir" 2>/dev/null && pwd -P)"#cd -- "$dir" 2>/dev/null \&\& pwd)"#' "$SEAM" > "$T65_MUT_PHYS"
 expect_eq "7.73 the logical-path mutant parses" "0" "$(bash -n "$T65_MUT_PHYS" >/dev/null 2>&1; echo $?)"
 pin_call "$T65_MUT_PHYS" "$T65_DIR/phys/lnk/t65-mut-root"
@@ -1377,7 +1377,7 @@ t67_vanish() {
 # the mutant: the absent return restored. The vanished entry passes the owner read (the defect 7.74b guards).
 T67_MUT_ABS="$TMPROOT/t67-mut-absent.sh"
 T67_ABS_LINE='  [ -e "$1" ] || [ -L "$1" ] || { echo "$1 does not exist"; return 0; }'
-anchor "$SEAM" "$T67_ABS_LINE" 1
+anchor file tests/lib/resolve-roots.sh '  [ -e "$1" ] || [ -L "$1" ] || { echo "$1 does not exist"; return 0; }'
 T67_LINE="$T67_ABS_LINE" awk 'ENVIRON["T67_LINE"] == $0 { print "  [ -e \"$1\" ] || [ -L \"$1\" ] || return 0"; next } { print }' "$SEAM" > "$T67_MUT_ABS"
 t67_plant root; T67_R="$T67_DIR/root/par/t67-root"; T67_V="$T67_DIR/root/shared/work"
 t67_vanish "$SEAM" "$T67_R" "$T67_R" "$T67_V"
@@ -1442,7 +1442,7 @@ expect_eq "7.79d …PATH is as given" "$T67_STUB:$HAND_GIVEN_PATH" "$PIN_PATH"
 # the mutant: the mkdir refusal removed. The failure reads as a later reader's wording (the defect 7.78d guards).
 T67_MUT_MK="$TMPROOT/t67-mut-mkdir.sh"
 T67_MK_LINE='    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _bionic_pin_unmade "$1" "$2"; return 0; }'
-anchor "$SEAM" "$T67_MK_LINE" 1
+anchor file tests/lib/resolve-roots.sh '    mkdir -m 0700 "$1" 2>/dev/null && _BIONIC_PIN_MADE=1 || { _bionic_pin_unmade "$1" "$2"; return 0; }'
 T67_LINE="$T67_MK_LINE" awk 'ENVIRON["T67_LINE"] == $0 { print "    mkdir -m 0700 \"$1\" 2>/dev/null && _BIONIC_PIN_MADE=1"; next } { print }' "$SEAM" > "$T67_MUT_MK"
 expect_eq "7.80 the no-refusal mutant parses" "0" "$(bash -n "$T67_MUT_MK" >/dev/null 2>&1; echo $?)"
 t67_mk "$T67_MUT_MK" "$T67_DIR/mk/mut-root" '*'
@@ -1509,7 +1509,7 @@ expect_eq "7.85h control: an absolute root, the same call from a cwd of this sui
 # the mutant: the absolute test removed. The relative root builds through the open holder (the defect 7.85 guards).
 T69_MUT_ABS="$TMPROOT/t69-mut-abs.sh"
 T69_ABS_ARM=' /*) ;; *) why="$root is not an absolute path" ;;'
-anchor "$SEAM" "$T69_ABS_ARM" 1
+anchor file tests/lib/resolve-roots.sh ' /*) ;; *) why="$root is not an absolute path" ;;'
 T69_ARM="$T69_ABS_ARM" awk '{ i = index($0, ENVIRON["T69_ARM"]); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(ENVIRON["T69_ARM"])); print }' "$SEAM" > "$T69_MUT_ABS"
 expect_eq "7.86 the no-absolute-test mutant parses" "0" "$(bash -n "$T69_MUT_ABS" >/dev/null 2>&1; echo $?)"
 t69_rel "$T69_MUT_ABS" "$T69_DIR/ok/cwd/mut" "$T69_DIR/ok/cwd"
@@ -1562,7 +1562,7 @@ expect_absent "7.88g …and never offering to remove it" "remove" "$STOP_ERR"
 # the mutant: the race arm removed. The chooser offers to remove the root again (the defect 7.88 guards).
 T69_MUT_RACE="$TMPROOT/t69-mut-race.sh"
 T69_RACE_LINE='    race) echo "run again" ;;'
-anchor "$SEAM" "$T69_RACE_LINE" 1
+anchor file tests/lib/resolve-roots.sh '    race) echo "run again" ;;'
 grep -vF "$T69_RACE_LINE" "$SEAM" > "$T69_MUT_RACE"
 expect_eq "7.89 the no-race-arm mutant parses" "0" "$(bash -n "$T69_MUT_RACE" >/dev/null 2>&1; echo $?)"
 mk_stop "$T69_MUT_RACE" "$TMPROOT/stop-mut-race.test.sh"
@@ -1592,7 +1592,7 @@ t69_hooks "$SEAM" cd "$T69_DIR/repo-other"
 expect_eq "7.90b …and with CDPATH exported at a tree that holds tests/lib: the same" "$(phys "$T69_DIR/repo-cd")/hooks" "$T69_HOOKS"
 # the mutant: the repo cd's CDPATH unset removed (the defect 7.90b guards)
 T69_MUT_REPO="$TMPROOT/t69-mut-repo.sh"
-anchor "$SEAM" '_bionic_seam_repo="$(unset CDPATH; cd -- "$(dirname' 1
+anchor file tests/lib/resolve-roots.sh '_bionic_seam_repo="$(unset CDPATH; cd -- "$(dirname'
 sed 's/_bionic_seam_repo="$(unset CDPATH; cd -- /_bionic_seam_repo="$(cd /' "$SEAM" > "$T69_MUT_REPO"
 expect_eq "7.91 the repo-cd mutant parses" "0" "$(bash -n "$T69_MUT_REPO" >/dev/null 2>&1; echo $?)"
 t69_hooks "$T69_MUT_REPO" mctl
@@ -1616,7 +1616,7 @@ expect_eq "7.92d …the decoy the logical path names is untouched (a file, not t
   "$([ -f "$T73_DIR/r/pin/bash" ] && [ ! -L "$T73_DIR/r/pin/bash" ] && echo regular)"
 # the mutant: the pin's `cd` made logical again (the defect 7.92b guards)
 T73_MUT_CD="$TMPROOT/t73-mut-cd.sh"
-anchor "$SEAM" 'phys="$(cd -P -- "$dir"' 1
+anchor file tests/lib/resolve-roots.sh 'phys="$(cd -P -- "$dir"'
 sed 's/phys="$(cd -P -- "$dir"/phys="$(cd -- "$dir"/' "$SEAM" > "$T73_MUT_CD"
 expect_eq "7.93 the logical-cd mutant parses" "0" "$(bash -n "$T73_MUT_CD" >/dev/null 2>&1; echo $?)"
 pin_call "$T73_MUT_CD" "$T73_DIR/plain"
@@ -1670,7 +1670,7 @@ expect_eq "7.98b …and the remedy is the path's (nothing there to remove)" \
   "$(t57_line "$T73_SF" "cannot make $T73_SF/bionic-interpreter-pin.$STOP_UID/pin" "$T57_FIX")" "$STOP_ERR"
 # the mutant: a root taken down again no longer changes the class. The remedy offers to remove what is not there (the defect 7.98b guards).
 T73_MUT_ENT="$TMPROOT/t73-mut-entry.sh"
-anchor "$SEAM" 'rmdir "$root" 2>/dev/null && _BIONIC_PIN_CLASS=entry' 1
+anchor file tests/lib/resolve-roots.sh 'rmdir "$root" 2>/dev/null && _BIONIC_PIN_CLASS=entry'
 sed 's/rmdir "$root" 2>\/dev\/null && _BIONIC_PIN_CLASS=entry/rmdir "$root" 2>\/dev\/null/' "$SEAM" > "$T73_MUT_ENT"
 expect_eq "7.99 the taken-down-root mutant parses" "0" "$(bash -n "$T73_MUT_ENT" >/dev/null 2>&1; echo $?)"
 mk_stop "$T73_MUT_ENT" "$TMPROOT/stop-mut-ent.test.sh"
@@ -1680,9 +1680,11 @@ expect_eq "7.99b under the mutant the pin is still refused and the root taken do
 expect_contains "7.99c …but it offers to remove the root that is not there (the defect 7.98b guards)" "remove $T73_SM/bionic-interpreter-pin.$STOP_UID or set TMPDIR" "$STOP_ERR"
 
 # The rights that grant rights, on macOS: writesecurity and chown let their holder grant itself the rest.
+# THE ANCHOR SITS OUTSIDE THE `if` (wave-35 T23): a shaped call is declared once and counted by `finish`'s
+# agreement row, so it has to run on a machine with no ACLs too.
+anchor file tests/lib/resolve-roots.sh ' writesecurity chown; do'
 if [ "$T57_ACL" = 1 ]; then
   T59_MUT_WS="$TMPROOT/t59-mut-ws.sh"; T59_MUT_CH="$TMPROOT/t59-mut-chown.sh"
-  anchor "$SEAM" ' writesecurity chown; do' 1
   sed 's/ writesecurity chown; do/ chown; do/' "$SEAM" > "$T59_MUT_WS"
   sed 's/ writesecurity chown; do/ writesecurity; do/' "$SEAM" > "$T59_MUT_CH"
   expect_eq "7.54 the two rights mutants parse" "0" "$(bash -n "$T59_MUT_WS" >/dev/null 2>&1 && bash -n "$T59_MUT_CH" >/dev/null 2>&1; echo $?)"
@@ -1711,7 +1713,7 @@ fi
 # runs its check. (2) The parent check removed: the open parent is accepted. Each mutant is proved
 # to run before its claim is read.
 T36_MUT1="$TMPROOT/t36-mut-runon.sh"
-anchor "$SEAM" 'if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then' 1
+anchor file tests/lib/resolve-roots.sh 'if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then'
 sed 's|if ! bionic_interpreter_pin "$_bionic_pin_root" 2>/dev/null; then|if ! { bionic_interpreter_pin "$_bionic_pin_root" \|\| :; }; then|' \
   "$SEAM" > "$T36_MUT1"
 expect_eq "7.29 the run-on mutant parses" "0" "$(bash -n "$T36_MUT1" >/dev/null 2>&1; echo $?)"
@@ -1722,7 +1724,7 @@ stop_run "$TMPROOT/stop-mut1.test.sh" "$T36_LINK"
 expect_contains "7.29c under the run-on mutant a refused pin runs its check (the defect 7.24c guards)" \
   "check ran" "$STOP_LOG"
 T36_MUT2="$TMPROOT/t36-mut-parent.sh"
-anchor "$SEAM" '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' 1
+anchor file tests/lib/resolve-roots.sh '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"'
 grep -vF '[ -n "$why" ] || why="$(_bionic_pin_parent "$root")"' "$SEAM" > "$T36_MUT2"
 expect_eq "7.30 the parent mutant parses" "0" "$(bash -n "$T36_MUT2" >/dev/null 2>&1; echo $?)"
 R="$T87_DIR/t36-mut-sticky-root"; pin_call "$T36_MUT2" "$R"

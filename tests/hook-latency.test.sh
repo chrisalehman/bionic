@@ -11,11 +11,13 @@
 # machine-independent cost a shell hook can carry — jq, grep, awk, one more `git`
 # call — and unlike wall-clock ms it does not move between runs or machines.
 #
-# THE ONE EXCEPTION IS tests/hook-timeout.test.sh (wave-24-fixit-1811 T4, spec D7; Chris
-# 2026-10-03, design ledger Δ2). It gates wall-clock, 2 s per input, because the failure it
-# guards is a hook killed by its own `timeout:` in hooks.json — a cost that is quadratic in
-# the input, not a count of forks, and invisible here. Its margin is an order of magnitude
-# each way, so the noise argument above does not reach it. Every other number stays counts.
+# THERE IS NO EXCEPTION ANY MORE (wave-35 T11; spec D11, design ledger Δ6). tests/hook-timeout.test.sh
+# used to gate 2 s of wall-clock per input; it now counts the commands each hook runs on a small
+# and a large input of one shape and asserts the two equal, so a hook that walks its input in
+# shell steps fails there by count. What a count cannot see is ONE operation whose cost grows
+# with its operand — a `${v//pat/}` over the whole command, one awk read of it — and §5 below
+# is that class's guard: it counts the classifier's readings of the command by mode, so a
+# second whole reading is a number that moves here.
 #
 # THE COUNT, NOT THE NAME. `^\++ (cmd)( |$)` over the trace, summed across a fixed
 # roster of externals (jq grep awk sed cut tr git date stat find sort uniq head

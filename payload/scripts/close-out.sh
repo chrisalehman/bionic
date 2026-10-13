@@ -247,7 +247,9 @@ sdlc_header() {
 SECTION="$(sdlc_section)"
 [ -n "$SECTION" ] || _co_refuse "$PLAN carries no ## SDLC State section"
 INTEGRATION="$(sdlc_header integration-branch "$SECTION")"
-WORKING="$(sdlc_header working-branch "$SECTION")"
+# THE ONE READER OF THE WORKING BRANCH (wave-35 T10; A-orch-16, wave-35 T7): lib/run.sh `plan_working_branch`,
+# `## SDLC State` first, then the frontmatter, as `ready`, the stop wall, the card and the proof judge read it.
+WORKING="$(plan_working_branch "$PLAN")"
 # `run` closes a plan at Step 8 and nowhere else (critic3 P-3, wave-23 T17): the gate judges
 # whatever step `current:` names, so below 8 its refusal would be about a step this script
 # never writes, and above 8 there is nothing left for it to close.
@@ -267,7 +269,7 @@ fi
 command -v git >/dev/null 2>&1 || _co_refuse "git is not on PATH"
 command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry-run cannot be built without it"
 [ -n "$INTEGRATION" ] || _co_refuse "the plan's ## SDLC State names no integration-branch:"
-[ -n "$WORKING" ]     || _co_refuse "the plan's ## SDLC State names no working-branch:"
+[ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch: (## SDLC State or its frontmatter)"
 
 # THE WORKTREE CENSUS IS THE REGISTER, NEVER A NAME (D5, REQ-6; ADR-032). A tree is
 # this run's if and only if a `## Tasks` row names it — `wt_branches()` (below) reads
@@ -468,6 +470,18 @@ co_regression_runs() {  # -> sets RR_LINE
       RR_LINE="${n:-unknown} (the plan header's; the run records could not be counted)" ;;
     *) RR_LINE="$n" ;;
   esac
+}
+# THE HAND-HOLDS, READ BEFORE THE WIPE (wave-35 T12; D17, REQ-8 AC-8.1). `landing-report --hand-holds` folds the
+# uses of the escape-hatch verbs by kind from the lines the verbs wrote (hooks/session-poker.sh `hand_holds_report`
+# owns the rules). Three kinds (amend, hold, extend) are roster lines, and act 3 wipes the rosters before act 5
+# writes the continuation, so `run` reads the line before the wipe into CO_HH_LINE and the card and the
+# continuation both print that one reading. A report that cannot be read is a sentence, not a count.
+CO_HH_LINE=""
+co_hand_holds() {  # -> sets CO_HH_LINE
+  local out
+  out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
+  if [ -n "$out" ]; then CO_HH_LINE="$out"
+  else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
 }
 co_orphans() {  # <run|check> -> one `orphan:` line per live detached run under $TMP_DIR/runs
   local log out id prog
@@ -706,10 +720,11 @@ co_carried_debts() {  # -> the inherited debt: lines whose concept and kind the 
 }
 # co_cont_has_deferrals -> 0 when the existing continuation carries the heading outside a code fence
 # (a pasted example of the form is not the section; read-adversarial-p15 #4)
-co_cont_has_deferrals() {
-  awk '/^[[:space:]]*```/ { fence = !fence; next } !fence && $0 == "## Deferrals" { found = 1; exit }
+co_cont_has_heading() {  # <heading> -> 0 when the existing continuation carries it outside a code fence
+  CO_HEAD="$1" awk '/^[[:space:]]*```/ { fence = !fence; next } !fence && $0 == ENVIRON["CO_HEAD"] { found = 1; exit }
        END { exit !found }' "$CONT" 2>/dev/null
 }
+co_cont_has_deferrals() { co_cont_has_heading "## Deferrals"; }
 # co_deferrals_section -> the heading and its lines, written whether or not there is anything under it:
 # this run's own deferrals first, then what it carries (CO_CARRIED, read by act_continuation)
 co_deferrals_section() {
@@ -736,9 +751,9 @@ $CO_CARRIED}" awk '
     insec && !fence { have[$0] = 1 }
     END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !seen[w[i]]++) print w[i] }' "$CONT"
 }
-co_cont_merge() {  # <lines> -> $CONT with the lines added at the end of its ## Deferrals section
-  local tmp="$CONT.close-out.$$"
-  CO_ADD="$1" awk '
+co_cont_merge() {  # <lines> [<heading>] -> $CONT with the lines added at the end of that section (## Deferrals by default)
+  local tmp="$CONT.close-out.$$" head="${2:-## Deferrals}"
+  CO_ADD="$1" CO_HEAD="$head" awk '
     function fin(more,   i) {
       if (content) { print ENVIRON["CO_ADD"]; for (i = 0; i < blanks; i++) print "" }
       else { print ""; print ENVIRON["CO_ADD"]; if (more) print "" }
@@ -746,16 +761,16 @@ co_cont_merge() {  # <lines> -> $CONT with the lines added at the end of its ## 
     }
     /^[[:space:]]*```/ { fence = !fence }
     done { print; next }
-    !insec { print; if (!fence && $0 == "## Deferrals") insec = 1; next }
+    !insec { print; if (!fence && $0 == ENVIRON["CO_HEAD"]) insec = 1; next }
     !fence && /^## / { fin(1); print; next }
     NF == 0 { blanks++; next }
     { for (i = 0; i < blanks; i++) print ""; blanks = 0; content = 1; print }
     END { if (!done && insec) fin(0) }' "$CONT" > "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
-    _co_refuse "could not add the deferrals to the continuation at $CONT"
+    _co_refuse "could not add to $head in the continuation at $CONT"
   fi
-  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add the deferrals to the continuation at $CONT"; }
+  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add to $head in the continuation at $CONT"; }
 }
 co_added_phrase() {  # <lines> -> "<n> deferred line(s)"
   local n
@@ -764,6 +779,73 @@ co_added_phrase() {  # <lines> -> "<n> deferred line(s)"
 }
 co_added_ids() {  # <lines> -> the ids, space-joined
   printf '%s\n' "$1" | awk '{ printf "%s%s", (NR > 1 ? " " : ""), $2 } END { print "" }'
+}
+
+# THE MERGE OF THE HAND-HOLDS AND THE INHERITED DEBT INTO A CONTINUATION THAT EXISTS (wave-35 T33; D20, A-orch-32;
+# critic-adversarial #5). The template writes both sections, and an existing continuation is never overwritten, so
+# both take the deferrals' road: the section is inserted under its heading when the file has none, a line the
+# section lacks is added at its end, a line already there (fenced or not) is never written twice, and a person's
+# text is not touched. The hand-holds line counts as there when the section holds ANY `hand-holds: ` line: a second
+# close-out reads a different count (the roster is wiped), and a second, contradicting line would be worse than the
+# first reading standing (A-T33-1). The inherited lines match byte for byte, as the deferrals do.
+co_cont_missing_under() {  # <heading> <prefix|""> <wanted lines> -> the wanted lines the section lacks, in order
+  CO_WANT="$3" CO_HEAD="$1" CO_PFX="$2" awk '
+    BEGIN { n = split(ENVIRON["CO_WANT"], w, "\n"); p = ENVIRON["CO_PFX"] }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    !fence && !first && $0 == ENVIRON["CO_HEAD"] { first = insec = 1; next }
+    !fence && /^## / { insec = 0; next }
+    insec { have[$0] = 1; if (p != "" && index($0, p) == 1) pfx = 1 }
+    END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !pfx && !seen[w[i]]++) print w[i] }' "$CONT"
+}
+co_cont_insert() {  # <anchor heading> <section text> -> $CONT with the section after the end of the anchor's section
+  local tmp="$CONT.close-out.$$"
+  CO_TEXT="$2" CO_HEAD="$1" awk '
+    function fin(more,   i) {
+      print ""; print ENVIRON["CO_TEXT"]
+      for (i = 0; i < blanks; i++) print ""
+      if (more && !blanks) print ""
+      insec = 0; done = 1; blanks = 0
+    }
+    /^[[:space:]]*```/ { fence = !fence }
+    done { print; next }
+    !insec { print; if (!fence && $0 == ENVIRON["CO_HEAD"]) insec = 1; next }
+    !fence && /^## / { fin(1); print; next }
+    NF == 0 { blanks++; next }
+    { for (i = 0; i < blanks; i++) print ""; blanks = 0; print }
+    END { if (!done && insec) fin(0); if (!done) exit 3 }' "$CONT" > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; _co_refuse "could not add a section to the continuation at $CONT"; }
+  [ -s "$tmp" ] || { rm -f "$tmp"; _co_refuse "could not add a section to the continuation at $CONT"; }
+  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add a section to the continuation at $CONT"; }
+}
+co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would be (check) added; empty when nothing
+  local phr="" lines miss n mode="$1"
+  CO_SEC_MSG=""
+  [ -n "$CO_HH_LINE" ] || co_hand_holds
+  if ! co_cont_has_heading "## Hand-holds"; then
+    phr="the ## Hand-holds section"
+    [ "$mode" != write ] || co_cont_insert "## Deferrals" "$(co_hand_holds_section)"
+  else
+    miss="$(co_cont_missing_under "## Hand-holds" "hand-holds: " "$CO_HH_LINE")"
+    if [ -n "$miss" ]; then
+      phr="the hand-holds line under ## Hand-holds"
+      [ "$mode" != write ] || co_cont_merge "$miss" "## Hand-holds"
+    fi
+  fi
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  if [ -n "$lines" ]; then
+    if ! co_cont_has_heading "## Inherited debt"; then
+      phr="${phr:+$phr and }the ## Inherited debt section"
+      [ "$mode" != write ] || co_cont_insert "## Hand-holds" "$(co_inherited_section)"
+    else
+      miss="$(co_cont_missing_under "## Inherited debt" "" "$lines")"
+      if [ -n "$miss" ]; then
+        n="$(printf '%s\n' "$miss" | wc -l | tr -d ' ')"
+        phr="${phr:+$phr and }$n inherited line$([ "$n" = 1 ] || echo s) under ## Inherited debt"
+        [ "$mode" != write ] || co_cont_merge "$miss" "## Inherited debt"
+      fi
+    fi
+  fi
+  CO_SEC_MSG="$phr"
 }
 
 # THE RUN'S NUMBERS (wave-28 T14; D18, AC-4.5). A continuation written from the template carries the
@@ -783,6 +865,29 @@ co_landings_section() {
   else
     printf 'landings: not read — session-poker.sh landing-report --rows %s could not be read.\n' "$PLAN"
   fi
+}
+
+# co_hand_holds_section -> `## Hand-holds` and the line `co_hand_holds` read before the wipe, fenced as the
+# landings are; a reading that failed is its sentence, unfenced. Read now only when nothing read it before.
+co_hand_holds_section() {
+  [ -n "$CO_HH_LINE" ] || co_hand_holds
+  printf '## Hand-holds\n\n'
+  case "$CO_HH_LINE" in
+    "hand-holds: not read "*) printf '%s\n' "$CO_HH_LINE" ;;
+    *) printf '```\n%s\n```\n' "$CO_HH_LINE" ;;
+  esac
+}
+
+# co_inherited_section -> `## Inherited debt` and every `inherited:` line of the plan's `## SDLC State`, as the verb
+# wrote it, fenced as the hand-holds are; nothing at all for a plan that carries none, and the template then prints
+# nothing for it, so that continuation is byte for byte what it was (wave-35
+# T10; AC-1.6 "carried into the continuation", A-orch-18). The lines are lib/proof.sh `proof_inherited_lines`, the
+# one reader the floor's judge reads them through: debt the run inherited, red at its base and at its floor.
+co_inherited_section() {
+  local lines
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  [ -n "$lines" ] || return 0
+  printf '## Inherited debt\n\n```\n%s\n```\n' "$lines"
 }
 
 # co_task_count -> the build rows of the plan's ## Tasks table that were not dropped: the tasks the
@@ -845,8 +950,9 @@ co_patrol_sentence() {
 }
 
 continuation_template() {
-  local sha tasks regress reviews patrol
+  local sha tasks regress reviews patrol inherited
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  inherited="$(co_inherited_section)"
   tasks="$(co_task_count)"
   regress="$(co_regression_text)"
   reviews="$(co_reviews_text)"
@@ -874,6 +980,10 @@ $(co_deferrals_section)
 
 $(co_landings_section)
 
+$(co_hand_holds_section)
+${inherited:+
+$inherited
+}
 ## Resume instruction
 
 Nothing to resume: the run is delivered.${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
@@ -901,20 +1011,21 @@ act_continuation() {
   if [ -f "$CONT" ]; then
     # A CONTINUATION WRITTEN BEFORE THIS CLOSE-OUT KEEPS EVERY BYTE IT HAS; the deferrals the plan
     # owes are appended under their heading when it carries none, and merged into the section when it
-    # does (each line once, a person's lines kept), so the debt is never dropped.
+    # does (each line once, a person's lines kept), so the debt is never dropped. The hand-holds and the
+    # inherited debt follow the same road (co_cont_sections), after the Deferrals section is there.
+    CONT_LINE="$CONT_REL already written — left as it stands"
     if ! co_cont_has_deferrals; then
       { printf '\n'; co_deferrals_section; } >> "$CONT" 2>/dev/null \
         || _co_refuse "could not append the deferrals to the continuation at $CONT"
-      CONT_LINE="$CONT_REL already written — left as it stands, with the ## Deferrals section appended"
-      return 0
+      CONT_LINE="$CONT_LINE, with the ## Deferrals section appended"
     fi
     missing="$(co_cont_missing)"
     if [ -n "$missing" ]; then
       co_cont_merge "$missing"
-      CONT_LINE="$CONT_REL already written — left as it stands, with $(co_added_phrase "$missing") added under ## Deferrals"
-      return 0
+      CONT_LINE="$CONT_LINE, with $(co_added_phrase "$missing") added under ## Deferrals"
     fi
-    CONT_LINE="$CONT_REL already written — left as it stands"
+    co_cont_sections write
+    [ -z "$CO_SEC_MSG" ] || CONT_LINE="$CONT_LINE; added $CO_SEC_MSG"
     return 0
   fi
   git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1 \
@@ -1419,9 +1530,12 @@ facts_judge() {
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
   fi
-  FACTS_HEAD="$(git -C "$ROOT" rev-parse --verify -q "${WORKING}^{commit}" 2>/dev/null)"
+  # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, `refs/heads/<branch>`,
+  # the judge's one reading of it, which `current 7` and `current 8` ask too; never a checkout's head, and never
+  # whatever else git resolves the bare name to (a tag of the same name is not the branch).
+  FACTS_HEAD="$(proof_branch_head "$PLAN" "$ROOT" 2>/dev/null)" || FACTS_HEAD=""
   if [ -z "$FACTS_HEAD" ]; then
-    FACTS_WHY="the plan's working-branch '$WORKING' is not a branch in $ROOT, so there is no head to judge the facts the run owes at"
+    FACTS_WHY="the working branch $WORKING names no commit here, so the floor is uncovered and there is no head to judge the facts the run owes at"
     return 0
   fi
   out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
@@ -1519,7 +1633,7 @@ insert_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing
+  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing CK_LINE
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
@@ -1578,21 +1692,27 @@ do_check() {
   co_orphans check
   co_regression_runs
   say "regression-runs: $RR_LINE"
+  co_hand_holds
+  say "$CO_HH_LINE"
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
   say "$(co_debt_card)"
-  if [ -f "$CONT" ] && ! co_cont_has_deferrals; then
-    say "continuation: $CONT_REL already written — run appends the ## Deferrals section"
-  elif [ -f "$CONT" ]; then
-    CO_CARRIED="$(co_carried)" \
-      || _co_refuse "could not read the deferrals this run inherited (card.sh inherited)"
-    missing="$(co_cont_missing)"
-    if [ -n "$missing" ]; then
-      say "continuation: $CONT_REL already written — run adds $(co_added_phrase "$missing") under ## Deferrals: $(co_added_ids "$missing")"
+  if [ -f "$CONT" ]; then
+    if ! co_cont_has_deferrals; then
+      CK_LINE="continuation: $CONT_REL already written — run appends the ## Deferrals section"
     else
-      say "continuation: $CONT_REL already written — left as it stands"
+      CO_CARRIED="$(co_carried)" \
+        || _co_refuse "could not read the deferrals this run inherited (card.sh inherited)"
+      missing="$(co_cont_missing)"
+      if [ -n "$missing" ]; then
+        CK_LINE="continuation: $CONT_REL already written — run adds $(co_added_phrase "$missing") under ## Deferrals: $(co_added_ids "$missing")"
+      else
+        CK_LINE="continuation: $CONT_REL already written — left as it stands"
+      fi
     fi
+    co_cont_sections check
+    say "$CK_LINE${CO_SEC_MSG:+; run also adds $CO_SEC_MSG}"
   else
     say "continuation: $CONT_REL would be written from the close-out template"
   fi
@@ -1673,6 +1793,7 @@ do_run() {
   act_worktrees;    say "worktree-removed: $WT_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
+  co_hand_holds;    say "$CO_HH_LINE"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"

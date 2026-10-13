@@ -779,10 +779,13 @@ whole_card step3 "${CARD_INTREE}/wave-99-fixture.plan.md"; S3_IT="$WC_OUT"
 # very card renders from at every Step-1/2/3 approval gate in this wave, which
 # is the case the fix exists for.
 REAL_REQ="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-15-fixit-182.requirements.md"
-REAL_SPEC="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-15-fixit-182.spec.md"
+# THE STEP-2 CARD READS A SPEC IN THE SHAPE IT PARSES (wave-35 T8; REQ-6 AC-6.6): wave-15's spec predates the
+# `(D<n>; REQ-…)` tag, so its card is now refused (exit 64, stdout empty) where it rendered an empty Decisions table;
+# the width pin reads the newest spec, which carries the tag on every decision bullet.
+REAL_SPEC="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-35-no-workarounds.spec.md"
 REAL_PLAN="${CARD_ROOT_FOR_TEST}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-15-fixit-182.plan.md"
 whole_card step1 "$REAL_REQ"; S1_REAL="$WC_OUT"
-whole_card step2 "$REAL_SPEC"; S2_REAL="$WC_OUT"
+whole_card step2 "$REAL_SPEC"; S2_REAL="$WC_OUT"; S2_REAL_RC="$WC_RC"
 whole_card step3 "$REAL_PLAN"; S3_REAL="$WC_OUT"
 
 expect_empty "67: no line of the in-tree Step-1 fixture card exceeds the budget, Artifacts included" \
@@ -791,6 +794,8 @@ expect_empty "67a: …nor of the in-tree Step-2 fixture card" "$(over_budget "$S
 expect_empty "67b: …nor of the in-tree Step-3 fixture card" "$(over_budget "$S3_IT")"
 expect_empty "67c: nor of the Step-1 card over this wave's own requirements" \
   "$(over_budget "$S1_REAL")"
+expect_eq "67d0: precondition: the Step-2 card over the real spec renders (exit 0, its D8 row present)" "0|yes" \
+  "$S2_REAL_RC|$(printf '%s\n' "$S2_REAL" | /usr/bin/grep -q '^ *D8 ' && echo yes)"
 expect_empty "67d: …nor of the Step-2 card over this wave's own spec" "$(over_budget "$S2_REAL")"
 expect_empty "67e: …nor of the Step-3 card over this wave's own plan" "$(over_budget "$S3_REAL")"
 
@@ -2145,5 +2150,35 @@ expect_eq "INHERIT-mut2 …and lists the adopted deferral again, so INHERIT-6 go
   "$INH_L1
 $INH_L2" "$(inh_block "$INH_MOUT")"
 rm -rf "$INH_MUT"
+
+# ============================================================
+section "UNTAGGED — wave-35 T8 (REQ-6 AC-6.6; D15): the Step-2 card refuses an untagged decision bullet and an ADR line without its (D<n>) group, as it refuses a requirement with no provenance"
+# ============================================================
+#
+# fails-when: an empty table at exit 0. The Decisions table reads only `(D<n>; REQ-…)` tags and the ADR column only
+# `(D<n>)` groups beside a backticked adr- path, and through wave-34 any other bullet was dropped in silence (field
+# report item 9). A bullet of the decisions section without the tag, or an ADR line naming an adr- path without a
+# group, is the artifact's defect: exit 64, stdout empty, stderr naming the bullet.
+UT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/card-untagged.XXXXXX")"
+whole_card step2 "$SPEC_FIX"
+expect_eq "UT-0 control: the fixture spec, every bullet tagged, renders (exit 0, its D1 row present)" "0|1" \
+  "$WC_RC|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c 'D1')"
+awk '{ print } /^- \*\*`lib\/second.sh`\*\* owns the second thing/ { print "- **D3 — The third thing** is decided here, with no tag." }' \
+  "$SPEC_FIX" > "$UT_DIR/one-untagged.spec.md"
+expect_eq "UT-1 precondition: the planted bullet is in the copy" "1" "$(/usr/bin/grep -c '^- \*\*D3 — The third thing' "$UT_DIR/one-untagged.spec.md")"
+whole_card step2 "$UT_DIR/one-untagged.spec.md"
+expect_eq "UT-1b AC-6.6 a decision bullet with no (D<n>; REQ-…) tag beside tagged ones is refused: exit 64, stdout empty" "64|" "$WC_RC|$WC_OUT"
+expect_contains "UT-1c …naming the bullet" "decision bullet carries no (D<n>; REQ-…) tag: D3 — The third thing is decided here, with" "$WC_ERR"
+sed 's/ (D[12]; REQ-[12])$//; s/^\(  caller rather than doing it itself.\) (D1; REQ-1)$/\1/' "$SPEC_FIX" > "$UT_DIR/none-tagged.spec.md"
+expect_eq "UT-2 precondition: the copy carries no (D<n>; tag" "0" "$(/usr/bin/grep -c '(D[0-9]*;' "$UT_DIR/none-tagged.spec.md" || true)"
+whole_card step2 "$UT_DIR/none-tagged.spec.md"
+expect_eq "UT-2b a decisions section with no tagged bullet is refused, not rendered as an empty table: exit 64, stdout empty" "64|" "$WC_RC|$WC_OUT"
+expect_contains "UT-2c …naming the first bullet" "tag: lib/first.sh owns the first thing, and hands the second" "$WC_ERR"
+sed 's#^\(- ADR-099 — the fixture ruling: `adrs/epic-99/adr-099-fixture.md`\) (D1)\.$#\1.#' "$SPEC_FIX" > "$UT_DIR/adr-untagged.spec.md"
+expect_eq "UT-3 precondition: the copy's ADR line lost its group" "1" "$(/usr/bin/grep -c '^- ADR-099 — the fixture ruling: `adrs/epic-99/adr-099-fixture.md`\.$' "$UT_DIR/adr-untagged.spec.md")"
+whole_card step2 "$UT_DIR/adr-untagged.spec.md"
+expect_eq "UT-3b AC-6.6 an ADR line naming an adr- path with no (D<n>) group is refused: exit 64, stdout empty" "64|" "$WC_RC|$WC_OUT"
+expect_contains "UT-3c …naming the path" "ADR line names adrs/epic-99/adr-099-fixture.md with no (D<n>) group" "$WC_ERR"
+rm -rf "$UT_DIR"
 
 finish

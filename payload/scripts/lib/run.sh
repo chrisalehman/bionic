@@ -962,12 +962,42 @@ session_working_branch() {
     fallback\ *) printf 'no-bound-plan state=fallback plan=%s\n' "$plan"; return 1 ;;
     *) printf 'no-bound-plan state=none\n'; return 1 ;;
   esac
-  wb=$(plan_frontmatter_get "$plan" "working-branch")
+  wb=$(plan_working_branch "$plan")
   if [ -z "$wb" ]; then
     printf 'no-working-branch plan=%s\n' "$plan"
     return 4
   fi
   printf '%s\n' "$wb"
+}
+
+# plan_working_branch <plan> -> the plan's `working-branch:`, or nothing (wave-35 T7; REQ-5 AC-5.3, D14).
+# THE ONE READER OF THE WORKING BRANCH. The `## SDLC State` key first, the one the `current` verb writes
+# the Step-4 block from, then the frontmatter key of the same name, which a plan written by Step 0 also
+# carries. Fenced lines are not read, and the value is its first word, quotes off. `ready` (through
+# `session_working_branch`), the stop wall (lib/stop.sh's landing gate), the card (card.sh), `current 4`
+# (hooks/session-poker.sh), the proof judge (lib/proof.sh `proof_state`) and the evidence gate
+# (lib/walls.sh `validate_tests_head`) each call it, so a plan that names its branch in one place is read
+# by all six (tests/units.test.sh §BRANCH). It was six readers in three orders: `ready` refused a plan
+# that carried the key under SDLC State alone, which the proof judge read.
+_RUN_WB_SDLC_AWK='
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+  insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
+    v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
+    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+_RUN_WB_FM_AWK='
+  NR == 1 && $0 == "---" { f = 1; next }
+  f && $0 == "---" { exit }
+  f && /^[[:space:]]*working-branch[[:space:]]*:/ {
+    v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
+    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+plan_working_branch() {  # <plan>
+  local plan="${1:-}" wb
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  wb="$(_run_lines "$plan" | awk "$_RUN_WB_SDLC_AWK")"
+  [ -n "$wb" ] || wb="$(_run_lines "$plan" | awk "$_RUN_WB_FM_AWK")"
+  printf '%s' "$wb"
 }
 
 # ─── THE REVIEW RIGOR LEVEL (wave-28 T44; wave-30 T11: REQ-1, D1) ──────────────

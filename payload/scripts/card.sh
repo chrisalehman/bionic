@@ -736,7 +736,19 @@ function flush_dec(   line, id, serves) {
     line = clean(line)
     sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", line)
     print "DROW" OFS id OFS clean(firstsent(line)) OFS clean(serves)
+    return
   }
+  # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT (wave-35 T8; REQ-6 AC-6.6; D15): the section parses one
+  # shape, and a bullet out of it was dropped in silence, so a spec of untagged decisions rendered an empty
+  # Decisions table at exit 0. Refused as a requirement with no provenance is, naming the bullet.
+  gsub(/\*\*/, "", line)
+  err("decision bullet carries no (D<n>; REQ-…) tag: " words(clean(line), 10))
+}
+# words(s, n) -> the first n blank-separated words of s, re-joined by one space.
+function words(s, n,   a, m, k, o) {
+  m = split(s, a, /[ \t]+/); o = ""
+  for (k = 1; k <= m && k <= n; k++) o = o (o == "" ? "" : " ") a[k]
+  return o
 }
 # A `Worth your eye` bullet: one entry, its continuation lines joined, markup off.
 function flush_worth(   t) {
@@ -751,6 +763,9 @@ function flush_adr(   line, path, rest, id) {
   if (!match(line, /`[^`]*adr-[^`]*`/)) return
   path = substr(line, RSTART + 1, RLENGTH - 2)
   rest = line
+  # AN ADR LINE CARRIES ITS GROUP (wave-35 T8; AC-6.6): a backticked adr- path with no (D<n>) group beside it
+  # names an ADR no decision cites, and the ADR column would leave it out in silence.
+  if (rest !~ /\(D[0-9]+[^)]*\)/) { err("ADR line names " path " with no (D<n>) group"); return }
   while (match(rest, /\(D[0-9]+[^)]*\)/)) {
     id = substr(rest, RSTART + 1, RLENGTH - 2); sub(/[^0-9D].*$/, "", id)
     print "ADR" OFS id OFS path
@@ -763,8 +778,7 @@ NR == 1 && $0 == "---" { fm = 1; next }
 fm == 1 && $0 == "---" { fm = 0; next }
 fm == 1 {
   k = $0; sub(/:.*$/, "", k); v = $0; sub(/^[^:]*:[ \t]*/, "", v)
-  if (k == "working-branch") WB = v
-  else if (k == "scale") SCALE = v
+  if (k == "scale") SCALE = v
   else if (k == "integration-branch") IB = v
   else if (k == "base-sha") BASE = v
   else if (k == "rigor") RIGOR = v
@@ -922,7 +936,6 @@ END {
   if (verb == "step2" && !saweval && SCALE != "task") err("the spec has no ## Eval design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
   print "GOAL" OFS GOAL
-  print "META" OFS "wb" OFS WB
   print "META" OFS "ib" OFS IB
   print "META" OFS "base" OFS BASE
   print "META" OFS "rigor" OFS RIGOR
@@ -970,7 +983,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
         k="${rest%%"$CARD_TAB"*}"; v="${rest#*"$CARD_TAB"}"
         [ "$v" != "$rest" ] || v=""
         case "$k" in
-          wb) WCARD_WB="$v" ;;           ib) WCARD_IB="$v" ;;
+          ib) WCARD_IB="$v" ;;
           base) WCARD_BASE="$v" ;;       rigor) WCARD_RIGOR="$v" ;;
           walk) WCARD_WALK="$v" ;;       adrs) WCARD_ADRS="$v" ;;
           ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
@@ -997,6 +1010,10 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   # `max_writers=9 writers=3` read 9 here and 3 to every other reader, and it took a probe's
   # number for a ceiling. With no cap the card says the writers are not declared.
   WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
+  # THE WORKING BRANCH IS THE ANSWER OF lib/run.sh `plan_working_branch` (wave-35 T7; D14), the reader `ready`,
+  # the walls and the judge ask: SDLC State, then frontmatter. The card used to read the frontmatter alone,
+  # so a plan naming its branch under SDLC State showed `not declared` for a branch `ready` lands on.
+  WCARD_WB="$(plan_working_branch "$2")"
   # THE ONE ASSIGNMENT OF THE SCALE: the Step-2 card's artifact arms read it, and a whole
   # card is the only caller that can know it.
   case "$WCARD_SCALE" in

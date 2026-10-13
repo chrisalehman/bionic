@@ -42,7 +42,7 @@
 # Usage: bash tests/bash-walls.test.sh
 
 # SPLIT AT WAVE-30 T9 (D8): the §EG-DERIVE sections carry wall-clock bounds, so they moved to
-# tests/bash-walls-egd.test.sh, which is `# runner: solo`. The helpers both suites read live in
+# tests/bash-walls-egd.test.sh (it ran solo until wave-35 T2 retired the marker, D11). The helpers both suites read live in
 # tests/bash-walls.prelude.sh, sourced below before the framework.
 set -uo pipefail
 
@@ -1091,11 +1091,12 @@ expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c
 # line is built by `_budget_remedy_line` from `refuse_plugin_root`, which reads `$BIONIC_LIB`;
 # no hook can be loaded from a root this test makes up, so the function is driven directly,
 # extracted the way 15g2 extracts `_budget_wire_list`, with the loader's variable pointed at a
-# root whose name holds a space. The printed line is then read back as the shell reads it.
+# root whose name holds a space. Its callee `_budget_is_whole_run` (wave-35 T10) is extracted beside it,
+# or the call prints "command not found" on stderr and the suite's strict stderr check fails (wave-35 T31). The printed line is then read back as the shell reads it.
 SP_ROOT="$SANDBOX/plugin root"
 mkdir -p "$SP_ROOT/scripts/lib"
 SP_LINE=$(BIONIC_LIB="$SP_ROOT/scripts/lib" _BUDGET_ROW_NAME=t15sp bash -c '. "$1/refuse.sh"
-  eval "$(awk "/^_budget_remedy_line\(\)/,/^}/" "$1/walls.sh")"; _budget_remedy_line alpha.test.sh' \
+  eval "$(awk "/^_budget_is_whole_run\(\)/,/^}/; /^_budget_remedy_line\(\)/,/^}/" "$1/walls.sh")"; _budget_remedy_line alpha.test.sh' \
   _ "$WALLS_LIB")
 SP_LINE="${SP_LINE#widen it: }"; SP_LINE="${SP_LINE% (main runs it)}"
 expect_contains "15a13 precondition: the remedy line was built, under the spaced root" \
@@ -3087,8 +3088,8 @@ mk_door_mutant() {  # <dir> <shell text appended to walls.sh: a later definition
     *) printf '\n%s\n' "$2" >> "$1/scripts/lib/walls.sh" ;;
   esac
 }
-anchor -E "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_FN" 1
-anchor "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" "$DRP_READ" 1
+anchor insert payload/scripts/lib/walls.sh '_door_in_tree() {'
+anchor file payload/scripts/lib/walls.sh "grep -qF -- '--only'"
 DRP_KEEP="$HOOK"
 for _m in removed inverted unread; do
   DRP_DIR="$SANDBOX/door-pred-$_m"
@@ -3125,7 +3126,7 @@ DR_MUT="$SANDBOX/door-mutant"
 mkdir -p "$DR_MUT/hooks"
 cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$DR_MUT/scripts"
 cp "$HOOK" "$DR_MUT/hooks/bash-walls.sh"
-anchor "$DR_MUT/scripts/lib/walls.sh" '# ---- BEGIN THE ONE DOOR' 1
+anchor file payload/scripts/lib/walls.sh '# ---- BEGIN THE ONE DOOR'
 awk '/# ---- BEGIN THE ONE DOOR/ { skip = 1 } !skip { print } /# ---- END THE ONE DOOR ----/ { skip = 0 }' \
   "$DR_MUT/scripts/lib/walls.sh" > "$DR_MUT/walls.tmp" && mv "$DR_MUT/walls.tmp" "$DR_MUT/scripts/lib/walls.sh"
 expect_eq "DOOR.18 the mutant library parses" "0" "$(bash -n "$DR_MUT/scripts/lib/walls.sh" >/dev/null 2>&1; echo $?)"
@@ -3156,42 +3157,57 @@ sfe_commit() { run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"; }
 sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate admits at <current> bar what <body> leaves out
   eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
 }
+# From Step 7 the gate owes a floor proof line (wave-35 T31; D20, A-orch-50): the Step 7 and 8 plans carry one.
+SFE_FLOOR="proved: kind=floor head=$H_EG6 at=2026-10-12T00:00:00Z evidence=record/w27/floor.log"
 sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
 
-# Step 5: cmd, pass, total, output, head
+# Step 5: cmd, pass, total, output, head — written by the verb, read by no gate (wave-35 T31; D20, A-orch-32). Step 5
+# owes the matrix, the walk and the auditor; the floor is Step 7's. The refusal rows sit on `walk-artifact:`, a field
+# the verb writes and Step 5 still owes once a row is discharged at `walk: required`.
 sfe_set "$(sfe_plan 5 wave "")"
 sfe_commit
-expect_status "SFE-0 control: the Step-5 block without cmd, pass, total, output and head is refused by the gate" 2 "$ST"
-expect_contains "SFE-0b …naming the fields it lacks" "cmd pass total output" "$ERR"
+expect_status "SFE-0 D20 the Step-5 block without cmd, pass, total, output and head is admitted" 0 "$ST"
 sfe_verb step-field 5 cmd="bash tests/run.sh"
 expect_eq "SFE-1 step-field 5 cmd= writes the field (exit 0)" "0" "$SFE_RC"
 sfe_verb step-field 5 pass=3
 sfe_verb step-field 5 total=3
 sfe_verb step-field 5 output=record/generic-evidence.md
 sfe_commit
-expect_status "SFE-2 cmd, pass, total and output written by the verb, the head still absent: refused" 2 "$ST"
-expect_contains "SFE-2b …on the head alone" "carries no 'head:'" "$ERR"
+expect_status "SFE-2 D20 cmd, pass, total and output written by the verb, the head absent: admitted" 0 "$ST"
 sfe_verb step-field 5 head="$SFE_HEAD"
 expect_eq "SFE-3 step-field 5 head= writes the field (exit 0)" "0" "$SFE_RC"
 sfe_commit
-expect_status "SFE-4 the five fields the verb wrote are read by the gate: admitted" 0 "$ST"
+expect_status "SFE-4 the five fields the verb wrote: admitted" 0 "$ST"
 sfe_verb step-field 5 pass=2
 expect_eq "SFE-5 step-field 5 pass=2 replaces the field (exit 0)" "0" "$SFE_RC"
 sfe_commit
-expect_status "SFE-5b the gate reads the pass the verb wrote: pass 2 of total 3 is refused" 2 "$ST"
-expect_contains "SFE-5c …in the gate's words" "pass=2 but total=3" "$ERR"
+expect_status "SFE-5b D20 pass 2 of total 3, written by the verb: admitted (no gate compares them at Step 5)" 0 "$ST"
 expect_eq "SFE-5d …and the block holds one pass: line" "1" "$(awk '/^- Step 5:/ { f = 1; next } /^- Step 6:|^## / { f = 0 } f && /^  pass:/ { n++ } END { print n + 0 }' "$R_EG6/.bionic/docs/plans/active.md")"
 sfe_verb step-field 5 pass=3
 sfe_verb step-field 5 head=feedfacecafe
 sfe_commit
-expect_status "SFE-6 a head the verb replaced with a hash that is no commit here: refused" 2 "$ST"
-expect_contains "SFE-6b …in the gate's words" "is not a commit in the repository" "$ERR"
+expect_status "SFE-6 D20 a head the verb replaced with a hash that is no commit here: admitted" 0 "$ST"
 sfe_verb step-field 5 head="$SFE_HEAD"
 sfe_commit
-expect_status "SFE-7 the head replaced by the verb with the commit: admitted again" 0 "$ST"
+expect_status "SFE-7 the head replaced by the verb with the commit: admitted" 0 "$ST"
+# walk-artifact: owed at Step 5 once a row is discharged and the walk is required.
+sfe_set "$(sfe_plan 5 wave "" | awk '{ sub(/^walk: exempt$/, "walk: required"); print }')"
+sfe_commit
+expect_status "SFE-7b control: walk: required, a discharged row, no walk-artifact: refused by the gate" 2 "$ST"
+expect_contains "SFE-7c …naming the field it lacks" "no 'walk-artifact:' line" "$ERR"
+mkdir -p "$R_EG6/.bionic/docs/record/w27"; printf 'walked the panel: it opened and held its state\n' > "$R_EG6/.bionic/docs/record/w27/walk.md"
+sfe_verb step-field 5 walk-artifact=record/w27/walk.md
+expect_eq "SFE-7d step-field 5 walk-artifact= writes the field (exit 0)" "0" "$SFE_RC"
+sfe_commit
+expect_status "SFE-7e the gate reads the walk-artifact the verb wrote: admitted" 0 "$ST"
+sfe_verb step-field 5 walk-artifact=record/w27/no-such-walk.md
+sfe_commit
+expect_status "SFE-7f a walk-artifact the verb replaced with a file that does not exist: refused" 2 "$ST"
+expect_contains "SFE-7g …in the gate's words" "no file exists at" "$ERR"
 
 # Step 7: adr
-sfe_set "$(sfe_plan 7 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+sfe_set "$(sfe_plan 7 wave "$EG6_ALL
+$SFE_FLOOR" "- Step 6: review record/w27/review.md
 - Step 7: documenting")"
 sfe_commit
 expect_status "SFE-8 control: the Step-7 block with no adr, rca or n/a is refused" 2 "$ST"
@@ -3202,7 +3218,8 @@ sfe_commit
 expect_status "SFE-9b the gate reads the adr the verb wrote: admitted" 0 "$ST"
 
 # Step 8: merge, worktree-removed (cleanup: n/a is the block's own line)
-sfe_set "$(sfe_plan 8 wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+sfe_set "$(sfe_plan 8 wave "$EG6_ALL
+$SFE_FLOOR" "- Step 6: review record/w27/review.md
 - Step 8: integrating
   cleanup: n/a")"
 sfe_commit
@@ -3391,5 +3408,111 @@ run_hook "$(mk_payload "$CE_TREE" 'tests/run.sh --only alpha.test.sh' "$ACTOR" o
 expect_contains "CE.6 a classified suite keeps its own path: the booking wrap, which names the agent itself" \
   "booked.sh" "$(sb_cmd)"
 expect_absent "CE.6b …and no carry in front of it" "export BIONIC_GATE_AGENT" "$(sb_cmd)"
+
+section "§W10 — a run the wall cannot place leaves no stamp and says it did not count (wave-35 T6; REQ-5 AC-5.1; D14, Δ7)"
+# ============================================================
+#
+# 1.17.0: a writer's door run, typed from the main checkout as `cd <tree> || exit 1; …` with a `cd` the
+# wall could not read, was wrapped with no --stamp-dir, so the shim stamped where it stood: a red run
+# in the writer's dirty tree became a clean record at the main head (research-walls §5). Now the wall
+# hands such a run --unplaced, and the shim writes no stamp and prints `not counted` on the run's own
+# output. W10's pin in tests/background-suite-guard.test.sh is the wrap text; this is the run.
+# FIXTURE FIDELITY: the real hook wraps the call, and the wrap it returns is what runs, detached as an
+# agent's run is, from the main checkout, into a linked writer tree with an uncommitted red suite.
+# fails-when: a green record appears at the main head (any stamp the unplaced run leaves).
+R_W10="$(mk_repo w10place)"
+W10_T="$R_W10/.worktrees/T1"
+# The main checkout is clean, as it was in 1.17.0, so a stamp there would be a record the floor judge reads.
+printf '.bionic\n.bionic/\n.worktrees/\n' > "$R_W10/.gitignore"
+printf '#!/bin/bash\n# usage: tests/run.sh [--only <suite>.test.sh ...]\n[ "${1:-}" = --only ] && shift\nbash "tests/$1"\n' > "$R_W10/tests/run.sh"
+chmod +x "$R_W10/tests/run.sh"
+git -C "$R_W10" add .gitignore tests/run.sh && git -C "$R_W10" commit -qm "w10: the door" 2>/dev/null
+git -C "$R_W10" worktree add -q -b wt/T1 "$W10_T" >/dev/null 2>&1
+printf '#!/bin/bash\necho "FAIL: x ran red in the writer tree"\necho; echo "x.test.sh: 0/1 passed, 1 failed  sections=1 setup=0"\nexit 1\n' > "$W10_T/tests/x.test.sh"
+bw_dispatched "$R_W10" w10writer suites_allowed=x.test.sh suites_source=declared files=
+w10_stamps() {  # -> every stamp line in every git dir of the repository, `<git dir>|<line>`
+  local _f
+  for _f in "$R_W10/.git/bionic-stamps" "$R_W10/.git/worktrees"/*/bionic-stamps; do
+    [ -f "$_f" ] && sed "s#^#${_f%/bionic-stamps}|#" "$_f"
+  done
+  return 0
+}
+w10_run() {  # <command> — the hook's wrap of it, run from the main checkout -> W10_WRAP W10_OUT W10_RC
+  run_hook "$(mk_payload "$R_W10" "$1" "$ACTOR" omit Bash test-runner 1800000)"
+  W10_WRAP="$(updated_command_of)"
+  W10_OUT="$(cd "$R_W10" && env -u BIONIC_GATE_AGENT T="$W10_T" BIONIC_GATE_DIR="$SANDBOX/w10-gate" \
+    CLAUDE_CODE_SESSION_ID="$SID" bash -c "${W10_WRAP:-false}" 2>&1)"
+  W10_RC=$?
+}
+expect_eq "W10.0 precondition: the main checkout is clean and the writer tree is dirty (its suite is uncommitted)" "0 1" \
+  "$(git -C "$R_W10" status --porcelain | awk 'END { print NR }') $(git -C "$W10_T" status --porcelain | awk 'END { print NR }')"
+w10_run 'cd "$T" || exit 1; tests/run.sh --only x.test.sh'
+expect_contains "W10.1 the wall wraps a run behind a cd it cannot read with --unplaced" " --unplaced " "$W10_WRAP"
+expect_absent "W10.1b …and no --stamp-dir" "--stamp-dir" "$W10_WRAP"
+expect_eq "W10.2 the run ran, red, in the writer tree (its code is the suite's)" "1 1" \
+  "$W10_RC $(printf '%s\n' "$W10_OUT" | grep -c 'FAIL: x ran red in the writer tree')"
+expect_contains "W10.3 AC-5.1 the run's own output says it did not count" "not counted" "$W10_OUT"
+expect_eq "W10.4 AC-5.1 …and it left no stamp in any git dir: no record at the main head" "" "$(w10_stamps)"
+# The positive on the same extractor and fixture: the same run behind a literal `cd` the wall can place
+# is stamped in the writer tree's own git dir, dirty, and nowhere else.
+w10_run "cd $W10_T || exit 1; tests/run.sh --only x.test.sh"
+expect_contains "W10.5 [positive] a literal cd is placed: --stamp-dir the writer tree" " --stamp-dir $W10_T " "$W10_WRAP"
+expect_absent "W10.5b …with no --unplaced" "--unplaced" "$W10_WRAP"
+expect_absent "W10.5c …and no not-counted line (W10.3 is the positive)" "not counted" "$W10_OUT"
+expect_regex "W10.6 [positive] …and its one stamp is in the writer tree's git dir, red and dirty" \
+  "^$R_W10/.git/worktrees/T1\\|stamp/v1\\|head=[0-9a-f]{40}\\|dirty=[1-9][0-9]*\\|rc=1\\|" "$(w10_stamps)"
+expect_eq "W10.6b …one stamp in all" "1" "$(w10_stamps | awk 'END { print NR }')"
+
+# ============================================================
+section "§SCRIPT-CLAIM — a script's door line is budgeted as the line typed inline is (wave-35 T4; REQ-4 AC-4.3, D13)"
+# ============================================================
+#
+# THE FAULT (A-orch-17, wave-34; research-walls item 6). `bash mutant.sh`, mutant.sh running
+# `tests/run.sh --only session-poker-4.test.sh`, a suite ON the writer's budget, was refused:
+# "suite-run refused — … the script runs: bash tests/run.sh --only … widen it: … --reexec+ '<cmd>'".
+# The same line typed inline was admitted ten seconds later. A door line read inside a script was a
+# `run` claim, held to `re_executes=` alone. It is now the claim the line gets inline (tests/
+# cmd-class.test.sh §SCRIPT): `only <suite>`, judged against `suites_allowed=`, so a budgeted suite
+# is admitted, an unbudgeted one is refused naming `--suites+ <suite>`, and `--reexec+` is named
+# only for a runner form. FIXTURE FIDELITY: a dispatched row of the recorder's own join
+# (bw_dispatched), real scripts in the agent's tree, a project whose runner takes `--only`.
+# fails-when: a budgeted suite in a script is refused, or an unbudgeted one is sent to `--reexec+`.
+R_SC="$(mk_repo scriptclaim)"
+bw_dispatched "$R_SC" t4writer "suites_allowed=alpha.test.sh" suites_source=declared files=
+printf '#!/bin/bash\nset -e\ntests/run.sh --only alpha.test.sh\n' > "$R_SC/budgeted.sh"
+printf '#!/bin/bash\nset -e\ntests/run.sh --only beta.test.sh\n' > "$R_SC/unbudgeted.sh"
+printf '#!/bin/bash\njest\n' > "$R_SC/runner.sh"
+printf '#!/bin/bash\nbash tests/alpha.test.sh\n' > "$R_SC/bare.sh"
+sc_drive() { run_hook "$(mk_payload "$R_SC" "$1" "$ACTOR" omit Bash test-runner 1800000)"; }
+sc_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
+
+sc_drive 'tests/run.sh --only alpha.test.sh'
+expect_status "SC.0 control: the budgeted suite typed inline through the door is admitted" 0 "$ST"
+sc_drive 'tests/run.sh --only beta.test.sh'
+expect_status "SC.0b control: the unbudgeted suite typed inline is refused" 2 "$ST"
+SC_INLINE_LINE="$(sc_line)"
+expect_contains "SC.0c …naming --suites+ for it (the remedy SC.2 must match)" "--suites+ beta.test.sh" "$ERR"
+
+sc_drive 'bash budgeted.sh'
+expect_status "SC.1 AC-4.3 a script running the budgeted suite through the door is admitted" 0 "$ST"
+expect_absent "SC.1b …with no refusal line" "refused" "$ERR"
+
+sc_drive 'bash unbudgeted.sh'
+expect_status "SC.2 AC-4.3 a script running an unbudgeted suite through the door is refused" 2 "$ST"
+expect_eq "SC.2b …with the inline line's refusal" "$SC_INLINE_LINE" "$(sc_line)"
+expect_contains "SC.2c …naming the suite's flag, --suites+ beta.test.sh" "--suites+ beta.test.sh" "$ERR"
+expect_absent "SC.2d …and never --reexec+ (SC.3 is the positive on the same reader)" "--reexec+" "$ERR"
+expect_contains "SC.2e …and the script that runs it" "bash unbudgeted.sh" "$ERR"
+
+sc_drive 'bash runner.sh'
+expect_status "SC.3 a script running a runner form (jest) is refused, as before" 2 "$ST"
+expect_contains "SC.3b …naming --reexec+, the flag a run takes" "--reexec+" "$ERR"
+expect_absent "SC.3c …and not --suites+ (SC.2c is the positive on the same reader)" "--suites+" "$ERR"
+
+sc_drive 'bash tests/alpha.test.sh'
+SC_BARE_LINE="$(sc_line)"
+expect_contains "SC.4 control: a bare budgeted suite typed inline is sent to the door" "use tests/run.sh --only alpha.test.sh" "$SC_BARE_LINE"
+sc_drive 'bash bare.sh'
+expect_eq "SC.4b AC-4.3 …and the same line in a script meets the same refusal (a file claim, as inline)" "2|$SC_BARE_LINE" "$ST|$(sc_line)"
 
 finish

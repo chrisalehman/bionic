@@ -162,7 +162,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Eval design table |
 | 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — tasks, sequencing, and the verification matrix rendered from Step 2's Eval design |
 | 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
-| 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; the regression green; every matrix row discharged at tier or waived; auditor CONFIRMED |
+| 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; every matrix row discharged at tier or waived; auditor CONFIRMED |
 | 6 Review | `steps/6.md` | `canonical-sdlc` | One fact per owed question at the head, or its waiver |
 | 7 Document | `steps/7.md` | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `steps/8.md` | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp ephemera wiped |
@@ -208,7 +208,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 0 | `prereqs: ok` |
 | 1, 2, 3 | pointer (presence only) |
 | 4 | pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale |
-| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, the floor being one whole green run at a commit on the branch plus every later commit proved by the suites its row named (a build row runs its brief's suites; one whole run after the last lands, when `regression:` is `yes`; a fix row the red suites plus its own; a second whole run on `session-poker.sh approve regression-2`), or, at `regression: no`, the line `regression: no (Step 0, <user>) — <where it runs>` in place of `cmd`/`pass`/`total`/`output`/`head`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
+| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` optional, read by no gate; a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), once no row is `pending`/`blocked` a non-empty `auditor:`, and at `regression: no` the line `regression: no (Step 0, <user>) — <where it runs>`. The whole run is Step 6's last act; Step 7 is where the floor is demanded, as the judge closes it (`steps/5.md`) |
 | 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |

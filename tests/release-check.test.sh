@@ -19,6 +19,16 @@
 #                   unstruck bullets is stated beside 1.16.0's 20 and equals the bullets counted,
 #                   and the narrowed per-tree-marker limit names no launcher. Read from the
 #                   repository's own CHANGELOG.md; each rule has a doctored copy that goes red.
+#   §ENTRY-1.18.0   the 1.18.0 block against wave-35's REQ-9 (AC-9.2) and REQ-3 (AC-3.2): the newest
+#                   heading is 1.18.0; the catalogue table has one row for each of the twelve items and
+#                   the three "also" items, each citing a record; the floor rule, the pass removal's
+#                   why, the deleted timed cases and the correction of the 1.17.0 default line are each
+#                   named; the stated count of Known limits equals the bullets counted; and the 1.17.0
+#                   block is byte-for-byte as released; the also-3 cell carries a verdict, not "pending
+#                   T17". Each rule has a doctored copy that goes red, except the newest-heading rule.
+#   §ADR            ADR-053's front-matter status is Superseded and names ADR-054, ADR-054's is Accepted
+#                   (wave-35 AC-3.2), read from the docs tree when its two files exist. With neither
+#                   file the section prints one skipped line and passes. A doctored copy of each goes red.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -325,5 +335,185 @@ expect_contains "(s3g) the narrowed limit naming a launcher again: red" "strike:
 
 doctor blur edit_bullet '^- \(2\) Known limit, struck' 'sub(/Known limit, struck/, "Known limit")'
 expect_contains "(s3h) a limit neither struck nor carried: red, naming (2)" "strike: (2) is neither struck nor carried" "$(strike_check "$TMP/doctored.blur")"
+
+section "§ENTRY-1.18.0 — the 1.18.0 block names each fix (REQ-9 AC-9.2, REQ-3 AC-3.2)"
+
+# cl_block <file> <version> — the block's lines, heading included, up to the next `## ` heading
+cl_block() {
+  awk -v v="$2" '/^## / { inb = (index($0, "## " v " ") == 1) } inb' "$1"
+}
+# cl_cksum — the cksum of stdin, trailing blanks trimmed
+cl_cksum() { cksum | sed 's/[[:space:]]*$//'; }
+# The 1.17.0 block as released: its cksum at c83de86d, the commit before this wave. A deliberate later
+# edit of that block updates this pair; an accidental one goes red.
+BLOCK_1170_CKSUM="1817012127 27102"
+# The catalogue's rows by their first cell: items 1 to 12 of the charter and its three "also" items
+ENTRY_ROWS="1 2 3 4 5 6 7 8 9 10 11 12 also-1 also-2 also-3"
+
+# entry_check <file> — one `entry:` line per broken rule; no output when the block keeps them all
+entry_check() {
+  local f="$1" blk row n stated actual
+  blk="$(cl_block "$f" 1.18.0)"
+  [ -n "$blk" ] || { echo "entry: no 1.18.0 block"; return 0; }
+  [ "$(grep -m 1 '^## ' "$f" | sed -n 's/^## \([0-9.]*\) .*/\1/p')" = "1.18.0" ] ||
+    echo "entry: the newest heading is not 1.18.0"
+  for row in $ENTRY_ROWS; do
+    n="$(printf '%s\n' "$blk" | grep -c -E "^\| $row \|" || true)"
+    if [ "$n" != 1 ]; then
+      echo "entry: catalogue item $row is on $n rows, not one"
+    else
+      printf '%s\n' "$blk" | grep -E "^\| $row \|" | grep -q -E '`[A-Za-z0-9._-]+\.(md|log)(:[0-9]+)?`' ||
+        echo "entry: catalogue item $row cites no record"
+    fi
+  done
+  for row in 'proof-add inherited' 'approve regression-2' 'current 7' 'floor-run'; do
+    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the floor rule does not name $row"
+  done
+  for row in 'ADR-053' 'ADR-054' 'Superseded' 'T16-pass-measure.md'; do
+    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the pass removal does not name $row"
+  done
+  for row in 'hook-timeout a1, a2, b, c and g' 'session-start 16.8 and 16.2'; do
+    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the deleted timed cases do not name $row"
+  done
+  printf '%s\n' "$blk" | grep -q -F 'the 1.17.0 block'"'"'s `background-pass` default line' ||
+    echo "entry: the 1.17.0 background-pass default line is not corrected"
+  stated="$(printf '%s\n' "$blk" | tr '\n' ' ' | sed -n 's/.*The count of Known limits in this block is \([0-9][0-9]*\)\..*/\1/p')"
+  actual="$(printf '%s\n' "$blk" | grep -c -E '^- Known limit' || true)"
+  if [ -z "$stated" ]; then
+    echo "entry: the count of Known limits is not stated"
+  elif [ "$stated" != "$actual" ]; then
+    echo "entry: the count says $stated and the block holds $actual"
+  fi
+  row="$(printf '%s\n' "$blk" | grep -E '^\| also-3 \|' || true)"
+  case "$row" in *'pending T17'*) echo "entry: catalogue item also-3 still reads pending T17" ;; esac
+  for n in T28 T29; do
+    case "$row" in *"$n"*) ;; *) echo "entry: catalogue item also-3 does not name its fix $n" ;; esac
+  done
+  printf '%s\n' "$blk" | grep -q -E 'pending T[0-9]' && echo "entry: the 1.18.0 block still carries a pending T marker"
+  for n in T31 T32 T33 T34; do
+    # the bullet "- <n> (…" runs to the next bullet or heading; its record is a `<n>-….md` name
+    printf '%s\n' "$blk" | awk -v n="$n" '
+      /^- |^#/ { f = (index($0, "- " n " (") == 1) }
+      f && index($0, "`" n "-") && /\.md`/ { ok = 1 }
+      END { exit !ok }' || echo "entry: the fix row $n names no record"
+  done
+  [ "$(cl_block "$f" 1.17.0 | cl_cksum)" = "$BLOCK_1170_CKSUM" ] ||
+    echo "entry: the 1.17.0 block is not as released"
+  return 0
+}
+
+# --- the extractors are not vacuous: the 1.17.0 block is found and is the pinned one
+expect_nonempty "(e0) the 1.17.0 block is found" "$(cl_block "$CL" 1.17.0)"
+expect_eq "(e0) …and its cksum is the pinned one" "$BLOCK_1170_CKSUM" "$(cl_block "$CL" 1.17.0 | cl_cksum)"
+
+# --- the repository's own block keeps every rule
+OUT="$(entry_check "$CL")"
+expect_eq "(e1) the repository's CHANGELOG keeps every rule of the 1.18.0 entry" "" "$OUT"
+expect_eq "(e1) …and the catalogue row pattern finds item 1 once, so (e1) read a real table" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^\| 1 \|')"
+
+# --- doctored copies: each rule has one that goes red, named by its rule
+doctor dropitem sed '/^| 7 |/d'
+expect_contains "(e2a) a catalogue without item 7: red, naming 7" "entry: catalogue item 7 is on 0 rows" "$(entry_check "$TMP/doctored.dropitem")"
+doctor norecord sed '/^| 4 |/s/`[A-Za-z0-9._-]*\.md`/X/g'
+expect_contains "(e2b) a catalogue row that cites no record: red, naming 4" "entry: catalogue item 4 cites no record" "$(entry_check "$TMP/doctored.norecord")"
+doctor nofloor sed 's/approve regression-2/approve something/g'
+expect_contains "(e2c) a floor rule that does not name approve regression-2: red" "entry: the floor rule does not name approve regression-2" "$(entry_check "$TMP/doctored.nofloor")"
+doctor nowhy sed 's/T16-pass-measure\.md/the-measure/g'
+expect_contains "(e2d) a pass removal that cites no measurement: red" "entry: the pass removal does not name T16-pass-measure.md" "$(entry_check "$TMP/doctored.nowhy")"
+doctor nocases sed 's/session-start 16\.8 and 16\.2/session-start cases/g'
+expect_contains "(e2e) deleted timed cases not named: red" "entry: the deleted timed cases do not name session-start 16.8 and 16.2" "$(entry_check "$TMP/doctored.nocases")"
+doctor nocount sed 's/The count of Known limits in this block is/The Known limits here number/'
+expect_contains "(e2f) a block with no stated count: red" "entry: the count of Known limits is not stated" "$(entry_check "$TMP/doctored.nocount")"
+doctor wrongcount sed 's/The count of Known limits in this block is [0-9]*\./The count of Known limits in this block is 99./'
+expect_contains "(e2g) a stated count that is not the bullets counted: red" "entry: the count says 99" "$(entry_check "$TMP/doctored.wrongcount")"
+doctor edit1170 awk '{ print } /^## 1\.17\.0 — /{ print "" }'
+expect_contains "(e2h) a touched 1.17.0 block: red" "entry: the 1.17.0 block is not as released" "$(entry_check "$TMP/doctored.edit1170")"
+doctor oldfirst sed 's/^## 1\.18\.0 — /## 1.17.9 — /'
+expect_contains "(e2i) a block whose heading is not 1.18.0: red, no 1.18.0 block" "entry: no 1.18.0 block" "$(entry_check "$TMP/doctored.oldfirst")"
+
+doctor stale3 sed '/^| also-3 |/s/T28/pending T17/g'
+expect_contains "(e2j) an also-3 cell that reads pending T17 again: red" "entry: catalogue item also-3 still reads pending T17" "$(entry_check "$TMP/doctored.stale3")"
+doctor nofix3 sed '/^| also-3 |/s/T29/T2x/g'
+expect_contains "(e2k) an also-3 cell that does not name T29: red" "entry: catalogue item also-3 does not name its fix T29" "$(entry_check "$TMP/doctored.nofix3")"
+doctor pend sed 's/^- T33 (.*$/- T33, `pending T33`: the continuation merge./'
+expect_contains "(e2l) a fix row that reads pending T33 again: red" "entry: the 1.18.0 block still carries a pending T marker" "$(entry_check "$TMP/doctored.pend")"
+doctor norec sed 's/`T32-floor-run-dirty\.md`/the record/g'
+expect_contains "(e2m) a fix row T32 that names no record: red" "entry: the fix row T32 names no record" "$(entry_check "$TMP/doctored.norec")"
+expect_eq "(e2m) …and the fix-row pattern finds T32 once, so (e1) read a real row" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^- T32 \(')"
+expect_eq "(e2k) …and the also-3 row pattern finds the cell once, so (e1) read a real row" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^\| also-3 \|')"
+
+section "§ADR — ADR-053 is Superseded naming ADR-054 and ADR-054 is Accepted (AC-3.2)"
+
+ADR_DIR="${BIONIC_ADR_DIR:-${BIONIC_SCRIPTS_DIR}/.bionic/docs/adrs/epic-23-bionic-tech-debt}"
+# adr_status <file> — the front matter's `status:` line, nothing from the body
+adr_status() { awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { exit } fm && /^status:/ { print; exit }' "$1"; }
+# adr_check <dir> — one `adr:` line per broken rule; a directory with neither file prints one `skipped:` line
+adr_check() {
+  local d="$1" f53 f54 s53 s54
+  f53="$(ls "$d"/adr-053-*.md 2>/dev/null | head -n 1)"
+  f54="$(ls "$d"/adr-054-*.md 2>/dev/null | head -n 1)"
+  if [ -z "$f53" ] && [ -z "$f54" ]; then
+    echo "skipped: no ADR files at $d"
+    return 0
+  fi
+  [ -n "$f53" ] || echo "adr: no ADR-053 file at $d"
+  [ -n "$f54" ] || echo "adr: no ADR-054 file at $d"
+  if [ -n "$f53" ]; then
+    s53="$(adr_status "$f53")"
+    case "$s53" in "status: Superseded"*) ;; *) echo "adr: ADR-053's status is not Superseded: ${s53:-(no status line)}" ;; esac
+    case "$s53" in *[Aa][Dd][Rr]-054*) ;; *) echo "adr: ADR-053's status does not name ADR-054: ${s53:-(no status line)}" ;; esac
+  fi
+  if [ -n "$f54" ]; then
+    s54="$(adr_status "$f54")"
+    case "$s54" in "status: Accepted"*) ;; *) echo "adr: ADR-054's status is not Accepted: ${s54:-(no status line)}" ;; esac
+  fi
+  return 0
+}
+
+# fx_adr <file> <status line> — an ADR whose front matter carries <status line>, the body a Status paragraph
+fx_adr() {
+  printf -- '---\nwave: wave-35-no-workarounds\n%s\ncreated: 2026-10-11\n---\n# ADR\n\n## Status\n\n**Accepted** in the body, which no rule reads.\n' "$2" > "$1"
+}
+S53='status: Superseded (Step 7, 2026-10-12, 1.18.0) by adr-054-the-floor-is-one-whole-run-plus-the-greens-of-what-changed.md'
+S54='status: Accepted (Step 7, 2026-10-12, 1.18.0)'
+# adr_world <dir> <053 status> <054 status> — a directory holding the two fixture ADRs
+adr_world() {
+  mkdir -p "$1" && fx_adr "$1/adr-053-background-work-takes-only-spare-capacity.md" "$2" &&
+  fx_adr "$1/adr-054-the-floor-is-one-whole-run-plus-the-greens-of-what-changed.md" "$3"
+}
+
+# --- the extractor is not vacuous: it returns the status line of a fixture, front matter only
+adr_world "$TMP/adr-ok" "$S53" "$S54"
+expect_eq "(a0) the extractor returns ADR-053's front-matter status line, not the body" "$S53" "$(adr_status "$TMP/adr-ok"/adr-053-*.md)"
+expect_eq "(a0) …and ADR-054's" "$S54" "$(adr_status "$TMP/adr-ok"/adr-054-*.md)"
+
+# --- the fixture pair keeps every rule; the repository's own pair does when its files exist
+expect_eq "(a1) a pair of Superseded-naming-ADR-054 and Accepted: no line" "" "$(adr_check "$TMP/adr-ok")"
+OUT="$(adr_check "$ADR_DIR")"
+case "$OUT" in
+  skipped:*) ok "(a2) $OUT" ;;
+  *) expect_eq "(a2) the repository's ADR-053 and ADR-054 keep every rule" "" "$OUT"
+     expect_nonempty "(a2) …and the repository's ADR-053 status line was read" "$(adr_status "$ADR_DIR"/adr-053-*.md)" ;;
+esac
+
+# --- no ADR file in the directory: one skipped line, and the section passes
+mkdir -p "$TMP/adr-none"
+OUT="$(adr_check "$TMP/adr-none")"
+expect_eq "(a3) a directory with neither ADR file: the one skipped line" "skipped: no ADR files at $TMP/adr-none" "$OUT"
+expect_eq "(a3) …and only one line" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
+
+# --- doctored copies: each rule has one that goes red, named by its rule
+adr_world "$TMP/adr-a53" 'status: Accepted (Step 7, 2026-10-12, 1.18.0)' "$S54"
+expect_contains "(a4a) ADR-053 reading Accepted: red, not Superseded" "adr: ADR-053's status is not Superseded" "$(adr_check "$TMP/adr-a53")"
+adr_world "$TMP/adr-n53" 'status: Superseded (Step 7, 2026-10-12, 1.18.0)' "$S54"
+expect_contains "(a4b) ADR-053 Superseded and naming no ADR-054: red" "adr: ADR-053's status does not name ADR-054" "$(adr_check "$TMP/adr-n53")"
+adr_world "$TMP/adr-p54" "$S53" 'status: Proposed'
+expect_contains "(a4c) ADR-054 reading Proposed: red, not Accepted" "adr: ADR-054's status is not Accepted" "$(adr_check "$TMP/adr-p54")"
+adr_world "$TMP/adr-s54" "$S53" 'status: Superseded (Step 7) by adr-055-x.md'
+expect_contains "(a4d) ADR-054 reading Superseded: red, not Accepted" "adr: ADR-054's status is not Accepted" "$(adr_check "$TMP/adr-s54")"
+adr_world "$TMP/adr-half" "$S53" "$S54"; rm "$TMP/adr-half"/adr-054-*.md
+expect_contains "(a4e) ADR-054's file absent beside ADR-053's: red, named" "adr: no ADR-054 file at $TMP/adr-half" "$(adr_check "$TMP/adr-half")"
+adr_world "$TMP/adr-body" "$S53" "$S54"; sed -i.bak 's/^status:.*//' "$TMP/adr-body"/adr-054-*.md; rm -f "$TMP/adr-body"/*.bak
+expect_contains "(a4f) ADR-054 with no status line in its front matter: red" "adr: ADR-054's status is not Accepted" "$(adr_check "$TMP/adr-body")"
 
 finish

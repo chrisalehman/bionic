@@ -48,7 +48,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
   | piece | shape |
   |---|---|
   | reads cell | comma-separated: a `Files` path · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>` · `live:<artifact>`; empty takes the kind default |
-  | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head`, and at Step 7 or later an `approval:` read written out (`approval:release` for the release) · integrate `proof:floor, proof:review, head` · close the integrate row's merge |
+  | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor, proof:review, head`, and `approval:release` when the plan carries a release row · close the integrate row's merge |
   | read row | a `review` row reading `live:head:<q>[+<q>]`, each `<q>` one of `evidence` · `adversarial` · `structure`, holds, ranges (the tick's `RANGE` line) and returns to pending per question; a bare `live:head` keeps one range. Under one review disposition the read row is `reads: approval:plan, head`, ready once the last build row lands (`steps/6.md`) |
 
 - **`size`** — the row's expected duration in minutes.
@@ -71,7 +71,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 | declared debt | a brief's one `Lands-red: <name>.test.sh until <ext:slug\|approval:name>` with `Red-evidence: <path under record/>`, recorded by the dispatch wall alone (`amend` cannot add them). `land` accepts that one suite red, every other suite green, when the evidence holds `head: <40-hex>` naming the head landed, and appends `debt: id=… row=… suite=… token=…` to the landing record. It stays open until a regression or task proof shows the suite green after the red landing (and after the `approved:` line, for `approval:`); `current 8`, close-out, the integrate row and, from Step 6, the commit gate refuse while it is open |
 | debt ledger | `## Debt ledger` below |
 
-**The regression, once.** A build row runs the suites its brief names; a fix row runs the red suites plus its own. The floor is one whole green run at a commit on the branch plus every later commit proved by the suites its row named (`steps/5.md`). A second whole run needs the user's word, `session-poker.sh approve regression-2`: the dispatch wall reads a suite set holding `run.sh` as a whole run and refuses one at `regression: no`, while a row the regression waits on writes tracked files, on a proved head, or a second on this plan unless the row reads `approval:regression-2` and its `approved:` line exists.
+**The regression, once** (`steps/5.md` holds the rule). A second whole run needs the user's word, `session-poker.sh approve regression-2`: the dispatch wall reads a suite set holding `run.sh` as a whole run and refuses one at `regression: no`, while a row the regression waits on writes tracked files, on a proved head, or a second on this plan unless the row reads `approval:regression-2` and its `approved:` line exists.
 
 **`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and `worktree_land_for_session` merges a landed tree into it. A plan naming none falls back to the main checkout's branch, announced inert.
 
