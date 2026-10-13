@@ -1960,8 +1960,8 @@ carry_req "$PZ" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $C
 mkdir -p "$PZ/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nNothing.\n' > "$PZ/$CONT_REL"
 run_close "$PZ" run
-expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Resume instruction||Nothing.|" \
+expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side)" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Resume instruction||Nothing.|" \
   "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
@@ -2218,6 +2218,55 @@ expect_eq "HH-7 the continuation carries ## Hand-holds once, with the line (read
   "$(/usr/bin/grep -c '^## Hand-holds$' "$PH/$CONT_REL" | tr -d ' ')/$(hh_section "$PH/$CONT_REL")"
 expect_eq "HH-7b …and the section sits after ## Landings and before the Resume instruction" "yes" \
   "$(awk '/^## Landings$/ { a = NR } /^## Hand-holds$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PH/$CONT_REL")"
+# T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
+# hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
+# there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
+hh_count() { /usr/bin/grep -c '^hand-holds: ' "$1" | tr -d ' '; }
+PHE="$(mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
+mkdir -p "$PHE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PHE/$CONT_REL"
+HHE_CK0="$(cksum < "$PHE/$CONT_REL")"
+run_close "$PHE" check
+expect_contains "HH-8 check over an existing continuation without the section names the append run will make" \
+  "run also adds the ## Hand-holds section" "$CO_OUT"
+expect_eq "HH-8a …and writes nothing" "$HHE_CK0" "$(cksum < "$PHE/$CONT_REL")"
+run_close "$PHE" run
+expect_eq "HH-9 run over it exits 0, and the continuation carries ## Hand-holds once, with the line the card printed" "0/1/$HH_WANT" \
+  "$CO_RC/$(/usr/bin/grep -c '^## Hand-holds$' "$PHE/$CONT_REL" | tr -d ' ')/$(hh_section "$PHE/$CONT_REL")"
+expect_eq "HH-9a …the line is present once in the whole file" "1" "$(hh_count "$PHE/$CONT_REL")"
+expect_eq "HH-9b …the person's own text is kept, byte for byte, line for line" "1/1/1/1" \
+  "$(/usr/bin/grep -c '^# continuation — hand written$' "$PHE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^my own note on the close$' "$PHE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^none, said the person$' "$PHE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^edited by a person$' "$PHE/$CONT_REL" | tr -d ' ')"
+expect_eq "HH-9c …and the person's Resume instruction is still the last section" "## Resume instruction" \
+  "$(/usr/bin/grep '^## ' "$PHE/$CONT_REL" | tail -n 1)"
+expect_contains "HH-9d …and run says what it added" "added the ## Hand-holds section" "$CO_OUT"
+# a second close-out over what the first left (planted in a fresh fixture: a closed plan refuses a second run)
+PHE2="$(mk_fixture handholds-existing2)"; advance_to "$PHE2" 8; hh_plant "$PHE2"
+mkdir -p "$PHE2/${CONT_REL%/*}"; cp "$PHE/$CONT_REL" "$PHE2/$CONT_REL"
+HHE_CK1="$(cksum < "$PHE2/$CONT_REL")"
+expect_eq "HH-10 precondition: the planted continuation is the first run's, with the line once" "1" "$(hh_count "$PHE2/$CONT_REL")"
+run_close "$PHE2" run
+expect_eq "HH-10a run twice: exits 0, the line is still there once, and the file is byte for byte what the first run left" "0/1/$HHE_CK1" \
+  "$CO_RC/$(hh_count "$PHE2/$CONT_REL")/$(cksum < "$PHE2/$CONT_REL")"
+expect_absent "HH-10b …and the card reports no add" "added the ## Hand-holds" "$CO_OUT"
+# the heading is there and the line is not: the line goes under it, after what the person wrote there
+PHE3="$(mk_fixture handholds-existing3)"; advance_to "$PHE3" 8; hh_plant "$PHE3"
+mkdir -p "$PHE3/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\nthe person counted two by hand\n\n## Resume instruction\n\nedited by a person\n' > "$PHE3/$CONT_REL"
+run_close "$PHE3" run
+expect_eq "HH-11 over a continuation with the heading and no line: the person's sentence stays and the line is added under it, once" \
+  "0/1/1/the person counted two by hand|$HH_WANT" \
+  "$CO_RC/$(/usr/bin/grep -c '^## Hand-holds$' "$PHE3/$CONT_REL" | tr -d ' ')/$(hh_count "$PHE3/$CONT_REL")/$(awk '/^## / { s = ($0 == "## Hand-holds"); next } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
+expect_eq "HH-11a …and the Resume instruction after it is as it was" "## Resume instruction|edited by a person" \
+  "$(awk '/^## Resume instruction$/ { s = 1 } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
+# the heading and the line are both there (as a person typed it, unfenced): nothing is added
+PHE4="$(mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
+mkdir -p "$PHE4/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
+HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
+run_close "$PHE4" run
+expect_eq "HH-12 the heading and the line already there: run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
+  "$CO_RC/$(cksum < "$PHE4/$CONT_REL")/$(hh_count "$PHE4/$CONT_REL")"
+
 # the mutation arms: a continuation template without the section, and a fold that counts a line it should not
 HH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-hh-mut.XXXXXX")"
 mkdir -p "$HH_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$HH_MUT/scripts/lib"
@@ -2709,5 +2758,52 @@ run_close "$PINO" run
 expect_eq "INH-3 a plan with no inherited: line: run closes it and writes the continuation (its Hand-holds there)" "0|1" \
   "$CO_RC|$(/usr/bin/grep -c '^## Hand-holds$' "$PINO/$CONT_REL" | tr -d ' ')"
 expect_eq "INH-3b …and no Inherited debt heading at all" "0" "$(/usr/bin/grep -c '^## Inherited debt' "$PINO/$CONT_REL" | tr -d ' ')"
+
+# T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md gains the inherited lines under ## Inherited debt,
+# each once, the person's own text untouched; the section follows ## Hand-holds, which the same merge writes.
+inh_count() { /usr/bin/grep -c -F -x "$2" "$1" | tr -d ' '; }
+PIE="$(mk_fixture inherited-existing)"; advance_to "$PIE" 8
+INE_H="$(fixture_git "$PIE" rev-parse --verify -q wave/01-fixture)"
+INE_A="$(inh_line a.test.sh "$INE_H")"; INE_B="$(inh_line b.test.sh "$INE_H")"
+inh_place "$PIE" "$INE_A"; inh_place "$PIE" "$INE_B"
+mkdir -p "$PIE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PIE/$CONT_REL"
+INE_CK0="$(cksum < "$PIE/$CONT_REL")"
+run_close "$PIE" check
+expect_contains "INH-4 check over an existing continuation without the section names the append run will make" \
+  "run also adds the ## Hand-holds section and the ## Inherited debt section" "$CO_OUT"
+expect_eq "INH-4a …and writes nothing" "$INE_CK0" "$(cksum < "$PIE/$CONT_REL")"
+run_close "$PIE" run
+expect_eq "INH-5 run over it exits 0; ## Inherited debt is there once with both lines as the verb wrote them" \
+  "0|1|$INE_A|$INE_B" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt$' "$PIE/$CONT_REL" | tr -d ' ')|$(inh_section "$PIE/$CONT_REL" | paste -sd'|' -)"
+expect_eq "INH-5a …each line is in the file once" "1/1" "$(inh_count "$PIE/$CONT_REL" "$INE_A")/$(inh_count "$PIE/$CONT_REL" "$INE_B")"
+expect_eq "INH-5b …the person's own text is kept, line for line" "1/1/1/1" \
+  "$(/usr/bin/grep -c '^# continuation — hand written$' "$PIE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^my own note on the close$' "$PIE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^none, said the person$' "$PIE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^edited by a person$' "$PIE/$CONT_REL" | tr -d ' ')"
+expect_eq "INH-5c …the section follows ## Hand-holds and comes before the Resume instruction" "yes" \
+  "$(awk '/^## Hand-holds$/ { a = NR } /^## Inherited debt$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PIE/$CONT_REL")"
+PIE2="$(mk_fixture inherited-existing2)"; advance_to "$PIE2" 8
+inh_place "$PIE2" "$INE_A"; inh_place "$PIE2" "$INE_B"
+mkdir -p "$PIE2/${CONT_REL%/*}"; cp "$PIE/$CONT_REL" "$PIE2/$CONT_REL"
+INE_CK1="$(cksum < "$PIE2/$CONT_REL")"
+run_close "$PIE2" run
+expect_eq "INH-6 run twice: exits 0, each line still once, the file byte for byte what the first run left" "0/1/1/$INE_CK1" \
+  "$CO_RC/$(inh_count "$PIE2/$CONT_REL" "$INE_A")/$(inh_count "$PIE2/$CONT_REL" "$INE_B")/$(cksum < "$PIE2/$CONT_REL")"
+# the heading holds one of the two lines (typed unfenced) and a note: the other is added under it, nothing twice
+PIE3="$(mk_fixture inherited-existing3)"; advance_to "$PIE3" 8
+inh_place "$PIE3" "$INE_A"; inh_place "$PIE3" "$INE_B"
+mkdir -p "$PIE3/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Inherited debt\n\nthe person looked at a.test.sh\n%s\n\n## Resume instruction\n\nedited by a person\n' "$INE_A" > "$PIE3/$CONT_REL"
+run_close "$PIE3" run
+expect_eq "INH-7 a heading holding one line and a note: the note and the line stay, the other is added, each once" \
+  "0|1|the person looked at a.test.sh|$INE_A|$INE_B|1/1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt$' "$PIE3/$CONT_REL" | tr -d ' ')|$(inh_section "$PIE3/$CONT_REL" | paste -sd'|' -)|$(inh_count "$PIE3/$CONT_REL" "$INE_A")/$(inh_count "$PIE3/$CONT_REL" "$INE_B")"
+# a plan with no inherited: line gives an existing continuation no Inherited debt heading
+PIE4="$(mk_fixture inherited-existing4)"; advance_to "$PIE4" 8
+mkdir -p "$PIE4/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PIE4/$CONT_REL"
+run_close "$PIE4" run
+expect_eq "INH-8 no inherited: line in the plan: run over an existing continuation adds no Inherited debt heading (and its Hand-holds)" "0|0|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt' "$PIE4/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^## Hand-holds$' "$PIE4/$CONT_REL" | tr -d ' ')"
 
 finish
