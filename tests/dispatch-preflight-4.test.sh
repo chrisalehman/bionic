@@ -3283,4 +3283,94 @@ expect_eq "RMK.6b the mutant still runs and admits the dispatch" "allow" "$GATE_
 expect_eq "RMK.6c …and with the call made a no-op the tree still names w-T1 (RMK.1b is red on it)" "w-T1" "$(rmk_marker "$RMK_TREE")"
 GATE="$RMK_SAVED_GATE"; rm -rf "$RMK_ROOT"
 
+# ============================================================================
+section "§OWED-REG2 — the whole-run wall reads an owed floor on the regression-2 road (wave-35 T10; REQ-1 AC-1.3, AC-1.8; T9 concern 1)"
+# ============================================================================
+# The floor judge (lib/proof.sh, T9) answers `owed<TAB><suites>` when the floor's whole run left suites red and no
+# later landing has run them green. The whole-run wall knew `covered` and `uncovered` alone, so an owed floor fell to
+# `not checked` and a second whole run was admitted with no approval. An owed floor means the first whole run has
+# been run: a second is the user's word (`approve regression-2`), as on the uncovered road, and the refusal names
+# the suites still owed, which a fix row runs instead.
+# FIXTURE FIDELITY: S28's pf_repo (a real repository on wave/99-test, five suites), its plan carrying one floor proof
+# at the working head in proof-add floor's shape with `owed=a.test.sh`; every earlier run the wall counts is one this
+# gate journalled.
+# fails-when: a second whole run is admitted over an owed floor with no approval; the refusal names no owed suite.
+REPO=$(pf_repo rowed)
+write_attestation "$REPO" "$SID_A"
+OW_H="$(git -C "$REPO" rev-parse HEAD)"
+PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt verify 'T1')"
+PF_STATE_EXTRA=""
+expect_eq "OW.0 precondition: proof_state reads the floor owed, naming a.test.sh" "$(printf 'owed\ta.test.sh')" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
+expect_eq "OW.1 the plan's first whole-run dispatch is ADMITTED on an owed floor (rule 4)" "allow" "$GATE_VERDICT"
+expect_status "OW.1b …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-ow-again")"
+expect_eq "OW.2 T9 concern 1 a second whole run over an owed floor is REFUSED with no approval (rule 5)" "deny" "$GATE_VERDICT"
+expect_contains "OW.2b …the one line says it is a second whole run, naming the approval" "a second whole run on this plan" "$(pf_line)"
+expect_contains "OW.2c …the detail names the suite the floor still owes" "a.test.sh" "$GATE_VERR"
+expect_absent "OW.2d …and the arm is not left unchecked" "not checked: full-run" "$GATE_ERR$GATE_VERR"
+expect_status "OW.2e …and journalled nothing" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ============================================================================
+section "§REMEDY — the full-tree refusal names floor-run, and the line, run as printed, is admitted (wave-35 T10; REQ-1 AC-1.8; D10)"
+# ============================================================================
+# The budget arm refuses `tests/run.sh` to an agent whose row does not carry run.sh. The whole run has one path a
+# runner is given, `session-poker.sh floor-run`, held to the full-run rules; the refusal prints that path as a line of
+# its own, never `amend --reexec+ '<cmd>'` (an amend would widen a writer's budget to the whole tree, the run the
+# rules hold). A refused suite FILE keeps `--suites+ <suite>`. The printed line, put back through the same wall as
+# the same agent, is admitted as typed.
+# FIXTURE FIDELITY: a real dispatch through this gate (Suites: tests/a.test.sh), the agent identified by the real
+# execution recorder, and every command judged by the real hooks/bash-walls.sh for that agent, in a repository whose
+# tests/run.sh takes --only (the door).
+# fails-when: the full-tree refusal names --reexec+, or its printed remedy is refused again.
+REPO=$(make_repo rremedy yes)
+write_attestation "$REPO" "$SID_A"
+mkdir -p "$REPO/tests"
+printf '#!/bin/bash\n# takes --only\nexit 0\n' > "$REPO/tests/run.sh"
+for s in a b; do printf '#!/bin/bash\nexit 0\n' > "$REPO/tests/$s.test.sh"; done
+git -C "$REPO" add tests >/dev/null 2>&1 && git -C "$REPO" commit -qm suites >/dev/null 2>&1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wrm.md
+Expected duration: ~15 minutes.
+Files: lib/x.sh
+Suites: tests/a.test.sh' "wrm-T1")"
+expect_eq "RM.0 precondition: the writer is admitted with a.test.sh as its budget" "allow|a.test.sh" \
+  "$GATE_VERDICT|$(roster_field "$(grep -F '|name=wrm-T1|' "$(roster_path "$REPO" "$SID_A")" | tail -1)" suites_allowed)"
+RM_ID="awrm-4000000000000001"
+printf '{}\n' > "$REPO/rm-transcript.jsonl"
+jq -n --arg s "$SID_A" --arg c "$REPO" --arg a "$RM_ID" \
+  '{session_id:$s, transcript_path:($c+"/rm-transcript.jsonl"), cwd:$c, agent_id:$a,
+    agent_type:"wrm-T1", hook_event_name:"SubagentStart"}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "${BIONIC_HOOKS_DIR}/execution-recorder.sh" >/dev/null 2>&1
+rm_wall() {  # <command> -> RM_RC, RM_ERR, RM_OUT: the real bash wall's answer for the identified agent
+  jq -n --arg s "$SID_A" --arg c "$REPO" --arg m "$1" --arg a "$RM_ID" \
+    '{session_id:$s, transcript_path:($c+"/rm-transcript.jsonl"), cwd:$c,
+      permission_mode:"bypassPermissions", hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$m}, tool_use_id:"toolu_rm", agent_id:$a, agent_type:"bionic:test-runner"}' \
+    | env -u CLAUDE_PROJECT_DIR HOME="$REPO" CLAUDE_CODE_SESSION_ID="$SID_A" \
+        bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" > "$SANDBOX/rm.out" 2> "$SANDBOX/rm.err"
+  RM_RC=$?; RM_ERR="$(cat "$SANDBOX/rm.err")"; RM_OUT="$(cat "$SANDBOX/rm.out")"
+}
+rm_wall 'tests/run.sh --only a.test.sh'
+expect_eq "RM.1 precondition: the agent's budgeted suite through the door is admitted (the arm reads this agent's row)" "0" "$RM_RC"
+rm_wall 'tests/run.sh'
+expect_eq "RM.2 the full tree is refused to the writer (rc 2)" "2" "$RM_RC"
+expect_contains "RM.2b …by the full-tree arm" "full tree refused" "$RM_ERR"
+RM_LINE="$(printf '%s\n' "$RM_ERR" | /usr/bin/grep -E '^    bash .*session-poker\.sh.? floor-run$' | head -n 1 | sed 's/^    //')"
+expect_nonempty "RM.3 AC-1.8 the refusal prints the whole run's path as a line of its own: session-poker.sh floor-run" "$RM_LINE"
+RM_SCRIPT="$(eval "set -- $RM_LINE"; printf '%s' "${2:-}")"
+expect_true "RM.3b …the plugin's own verb, by a path that is this tree's session-poker.sh" test "$RM_SCRIPT" -ef "${BIONIC_HOOKS_DIR}/session-poker.sh"
+expect_absent "RM.3c …and never the amend flag for a run, --reexec+" "--reexec+" "$RM_ERR"
+rm_wall "$RM_LINE"
+expect_eq "RM.4 AC-1.8 the printed remedy, run as printed by the same agent, is admitted (rc 0)" "0" "$RM_RC"
+expect_absent "RM.4b …as typed: the wall neither refuses nor rewrites it" "permissionDecision" "$RM_OUT"
+expect_absent "RM.4c …and says nothing refused" "refused" "$RM_ERR"
+rm_wall 'tests/run.sh --only b.test.sh'
+expect_eq "RM.5 a suite FILE off the budget is still refused (rc 2)" "2" "$RM_RC"
+expect_contains "RM.5b …and its remedy keeps --suites+ <suite>" "--suites+ b.test.sh" "$RM_ERR"
+expect_absent "RM.5c …never the whole run's path" "floor-run" "$RM_ERR"
+
 finish

@@ -2787,7 +2787,8 @@ fi
 #   3. `covered` refuses it: the working head is the tree the last floor proof read, and nothing
 #      is owed.
 #   4. Otherwise (`uncovered`, whatever the reason: no proof yet, a later commit no run proved, an
-#      outside merge) the plan's FIRST whole run is admitted.
+#      outside merge; or `owed`, the whole run's reds not yet run green, wave-35 T10) the plan's FIRST
+#      whole run is admitted.
 #   5. A second is refused, naming the approval, unless the dispatch's bound row reads
 #      `approval:regression-2` and `## SDLC State` carries its `approved: regression-2` line. The
 #      approval wall above is the one reader of both (DP_APPROVAL_WAITS, DP_APPROVALS_HAD), and a
@@ -2931,8 +2932,13 @@ Fix: land or drop those rows, then dispatch the whole run."
 Fix: dispatch no whole run. That proof stands for this head; a change landed after it is
 proved by the suites its row names."
             dp_finding "head ${_fr_short} is already proved" "keep the regression proof; run nothing" "$_dp_detail" ;;
-          uncovered*)
+          uncovered*|owed*)
             # RULES 4 AND 5. The first whole run is admitted; a second needs the user's word.
+            # AN OWED FLOOR IS ON THIS ROAD (wave-35 T10; T9 concern 1): `owed<TAB><suites>` says the floor's whole
+            # run was run and left those suites red, each closed by a later green landing of it (a fix row), so a
+            # second whole run is the user's word as on the uncovered road, and the refusal names what is owed.
+            _fr_owed=""
+            case "$_fr_state" in owed*) _fr_owed="${_fr_state#owed}"; _fr_owed="${_fr_owed#$'\t'}" ;; esac
             _fr_first="$(fr_whole_run)"
             if [ -n "$_fr_first" ]; then
               _fr_reads2=""
@@ -2941,14 +2947,17 @@ proved by the suites its row names."
               # A row that reads the approval with no line is the approval wall's refusal, already
               # recorded above with the verb; this wall adds nothing to it, and admits it with the line.
               if [ -z "$_fr_reads2" ]; then
+                _fr_owes=""
+                [ -z "$_fr_owed" ] || _fr_owes="
+The floor's whole run left ${_fr_owed} red, each owed until a later landing runs it green."
                 _dp_detail="A whole run was launched on this plan (${_fr_first%%$'\t'*} at ${_fr_first#*$'\t'}); a second needs the user's word:
 a row that reads approval:regression-2, and session-poker.sh approve regression-2 '<reply>'.
-    Plan: ${PLAN}
+    Plan: ${PLAN}${_fr_owes}
 
 The floor is one whole green run plus every later commit proved by the suites its row
 named: a change after the whole run is proved by a fix row, the red suites plus its own.
 
-Fix: dispatch the fix row's suites. For a second whole run, add a verify row that reads
+Fix: dispatch the fix row's suites${_fr_owed:+ (${_fr_owed})}. For a second whole run, add a verify row that reads
 approval:regression-2, head; put it to the user, and on their reply record it:
        bash ${_fr_poker} approve regression-2 '<the reply, verbatim>'"
                 dp_finding "a second whole run on this plan" "session-poker.sh approve regression-2" "$_dp_detail"
