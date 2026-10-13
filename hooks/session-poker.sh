@@ -2381,7 +2381,7 @@ TOA
 }
 
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
-  local rows waiting all offered line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl
+  local rows waiting all offered held line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
@@ -2389,6 +2389,10 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
   susp="$(suspect_lines "$SCHED_PLAN")"
   all="${SCHED_READY_ALL:-}"
   offered="$(printf '%s' "${SCHED_READY:-}" | tr '\n' ' ')"
+  # THE ROWS A ROSTER HOLDS (wave-35 T28; AC-5.5, D14): a pending row open on any roster, this
+  # session's or another's, is left out of the ready set (`fill_held_ids`, lib/fill.sh), and its WAIT
+  # names the writer and the roster's session: `WAIT <id> — <name> open on roster <sid, first 8>`.
+  held="$(fill_held_ids "$SCHED_PLAN" "$(printf '%s\n' "$rows" | awk -F'\t' '$10 == "pending" { print $1 }')" 2>/dev/null)"
   SCHED_BEHIND=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -2399,12 +2403,14 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
     say "$wl"
     tick_owed_approval "${base#* — }" "poker: $wl"
   done <<TICK_WAIT
-$(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n' "$rows" "$waiting" "$susp" | awk -F'\t' \
+$(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n' "$rows" "$waiting" "$susp" "$held" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
   $0 == SUBSEP "rows" { part = 1; next }
   $0 == SUBSEP "wait" { part = 2; next }
   $0 == SUBSEP "susp" { part = 3; next }
+  $0 == SUBSEP "held" { part = 4; next }
   part == 3 && $1 != "" { sus[$1, $2] = $3; next }
+  part == 4 && $1 != "" { hold[$1] = $2 " open on roster " substr($3, 1, 8); next }
   part == 1 && $1 != "" { n++; id[n] = $1; knd[$1] = $3; st[$1] = $10; next }
   part == 2 && $1 != "" {
     key = $1 SUBSEP $2
@@ -2444,6 +2450,8 @@ $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n' "$rows" "$waiting" "$susp"
       } else if (index(all, " " i " ")) {
         if (index(declined, " " i " ")) reason = "ready; answered by the standing fill-declined"
         else reason = "ready; no writer slot free (gap " gap ")"
+      } else if (i in hold) {
+        reason = hold[i]
       } else continue
       printf "%s — %s\n", i, reason
     }
@@ -2922,56 +2930,8 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
   ' "$1" 2>/dev/null
 }
 
-# AN ACK TAKEN IN ANOTHER SESSION (wave-34 T6; REQ-14 AC-14.3, D23). `adopt_fold` reads the
-# predecessor's own ledger, and the ack that closes its row is often not there: the operator who resumed
-# after a `/clear` acks in the session they are in, and `adopt --report-only` then kept listing the acked
-# row open (field report 2026-10-11, item 3). So every ledger in the root is read, each ack with what its
-# OWN session's roster says the name meant there: `<name> TAB <at> TAB <ids> TAB <sid>`, where <ids> is
-# empty when that roster holds no row of the name, `=<id>` when every row of it carries that one id (an
-# adopted copy of one agent), and `*` otherwise (the session's own agent of that name). `adopt_acked_elsewhere`
-# closes a predecessor row only on an ack that cannot be about another agent: empty, or its own id.
-adopt_cross_acks() {  # <state dir> -> one line per ack in any ledger of the root
-  local d="$1" l
-  for l in "$d"/sweeper-*.state; do
-    [ -f "$l" ] && [ ! -L "$l" ] || continue
-    /usr/bin/grep -q '|event=ack|' "$l" 2>/dev/null || continue
-    printf '%s\n' "$l"
-  done | awk '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
-    {
-      led = $0; sid = led; sub(/^.*\/sweeper-/, "", sid); sub(/\.state$/, "", sid)
-      ros = led; sub(/sweeper-[^\/]*$/, "roster-" sid ".state", ros)
-      split("", ids); split("", nids); split("", noid)
-      while ((getline line < ros) > 0) {
-        if (index(line, "roster-state/") != 1) continue
-        nm = kv(line, "name"); if (nm == "") continue
-        id = kv(line, "agent_id")
-        if (id == "") { noid[nm] = 1; continue }
-        if (!((nm SUBSEP id) in ids)) { ids[nm SUBSEP id] = 1; nids[nm]++; one[nm] = id }
-      }
-      close(ros)
-      while ((getline line < led) > 0) {
-        if (index(line, "sweeper-ledger/v1|") != 1 || kv(line, "event") != "ack") continue
-        nm = kv(line, "name"); at = kv(line, "at"); if (nm == "" || at == "") continue
-        sig = ""
-        if ((nm in noid) || (nm in nids)) sig = ((nm in noid) || nids[nm] != 1) ? "*" : "=" one[nm]
-        printf "%s\t%s\t%s\t%s\n", nm, at, sig, sid
-      }
-      close(led)
-    }' 2>/dev/null
-}
-
-adopt_acked_elsewhere() {  # <cross acks> <origin sid> <name> <id> <launched ISO> -> 0 closed by an ack, 1 not
-  [ -n "$1" ] && [ -n "$4" ] || return 1
-  printf '%s\n' "$1" | awk -F'\t' -v o="$2" -v n="$3" -v id="$4" -v l="$5" '
-    function ok(s) { return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) }
-    $1 == n && $4 != o && ($3 == "" || $3 == "=" id) && ok($2) && ok(l) && $2 > l { f = 1 }
-    END { exit !f }'
-}
+# AN ACK TAKEN IN ANOTHER SESSION: `adopt_cross_acks` and `adopt_acked_elsewhere` live in lib/fill.sh beside
+# the roster walk (wave-35 T28; AC-5.5), because the fill and the dispatch wall read the same acks `adopt` does.
 
 # TWO READS A CADENCE APART (wave-34 T6; REQ-14 AC-14.1, D23). A transcript's mtime says when the agent
 # last wrote, which is as true of an agent SIGKILLed a minute ago as of one at work; growth between two
@@ -6339,16 +6299,12 @@ case "$VERB" in
     ADOPT_XACKS="$(adopt_cross_acks "$ADOPT_DIR")"
     adopt_handoff_note "$ADOPT_OWN_PLAN" "$REPO_REAL" "$ADOPT_DIR"
 
-    for ADOPT_RF in "$ADOPT_DIR"/roster-*.state; do
-      [ -f "$ADOPT_RF" ] || continue
-      # Symlinks are not followed, the same posture every other .bionic/tmp reader takes.
-      [ -L "$ADOPT_RF" ] && continue
-      OSID="${ADOPT_RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
+    # THE WALK IS lib/fill.sh's `fill_roster_walk` (wave-35 T28; AC-5.5, D14): every regular, unlinked
+    # `roster-<sid>.state` but this session's, each with its own ledger, an unreadable one said and left
+    # out. The fill and the dispatch wall take the same walk, so a row this verb lists open is a row the
+    # tick never offers. Read on fd 3: nothing in the body may eat the walk.
+    while IFS=$'\t' read -r OSID ADOPT_RF ADOPT_LEDGER <&3; do
       [ -n "$OSID" ] || continue
-      [ "$OSID" = "$SESSION_ID" ] && continue
-
-      ADOPT_LEDGER="$ADOPT_DIR/sweeper-${OSID}.state"
-      [ -f "$ADOPT_LEDGER" ] && [ ! -L "$ADOPT_LEDGER" ] || ADOPT_LEDGER=""
       ADOPT_OUT="$(adopt_fold "$ADOPT_RF" "$ADOPT_LEDGER")"
       [ -n "$ADOPT_OUT" ] || continue
       # THE RESIDUE QUESTION, ONCE PER ROSTER (REQ-9 AC-9.1). A dead session whose files the
@@ -6861,7 +6817,9 @@ case "$VERB" in
       done <<EOF
 $ADOPT_OUT
 EOF
-    done
+    done 3<<ADOPT_WALK
+$(fill_roster_walk "$ADOPT_DIR" "$SESSION_ID")
+ADOPT_WALK
 
     # THE READS ARE KEPT BY THE WRITING VERB ONLY; `--report-only` writes nothing.
     if [ "$ADOPT_REPORT_ONLY" != yes ] && ! adopt_reads_write "$ADOPT_READS_FILE" "$ADOPT_READS_NEW" "$ADOPT_NOW"; then
