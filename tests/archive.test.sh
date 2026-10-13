@@ -440,7 +440,7 @@ expect_eq "7d: …and the archived: evidence line" "yes" "$(contains "$STEP9" "a
 
 # --- fails-when: a doctored copy with the archiving paragraph stripped is what "a silent
 # move" would look like — the pin must discriminate it. ---
-anchor "$SKILL_MD" '**Archiving.**' 1
+anchor file skills/canonical-sdlc/steps/9.md '**Archiving.**'
 DOCTORED="$SANDBOX/skill-no-archiving.md"
 awk '/^\*\*Archiving\.\*\*/{skip=1} skip && /^$/{skip=0; next} skip{next} {print}' "$SKILL_MD" > "$DOCTORED"
 DOCTORED_STEP9="$(step9_span "$DOCTORED")"
