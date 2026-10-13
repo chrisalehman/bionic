@@ -872,4 +872,124 @@ for c in $HD_B_CASES; do
   fi
 done
 
+section "CLOCK — no case passes or fails by the clock outside the census's deferrals (wave-35 T11; REQ-2 AC-2.3, D11)"
+# THE CENSUS (.bionic/docs/record/wave-35-no-workarounds/clock-census.md) lists every case under
+# tests/ that reads a clock, a load average or a sleep into an assertion, each marked rewritten,
+# deleted or deferred with the trigger that retires it, and classifies every other read: a
+# fixture wait for a detached process, a holder that lives while a row runs, a stamp built
+# relative to now, a reading printed and never asserted. The LEDGER below is that census's
+# machine half, kept here because the record tree is not part of a checkout: per file, how many
+# lines read a clock and how many sleep, as a ceiling. A new read anywhere in tests/ — a case
+# that times itself, a sleep a row waits on — goes over its file's ceiling or names a file the
+# ledger does not, and this section says which, so the census is where it gets its class.
+#
+# THE SWEEP is the census's own: the case files (tests/*.test.sh, tests/*.prelude.sh,
+# tests/lib/*.sh), comment lines skipped, one awk over all of them. A line is a CLOCK line when
+# it reads the shell's seconds counter, an epoch from date, the uptime or a load average, or a
+# python or perl clock; a SLEEP line when it runs sleep. The patterns are assembled from pieces
+# so this file's own source matches none of them.
+#
+# ANTI-VACUITY: the sweep proves it read files and found lines of both kinds, and the ledger
+# proves it parsed. The mutation arm plants a clock line in a copy of a ledgered file and a new
+# file that sleeps, each built by printf, and the same checker must name both, while the copy
+# of the tree it changed nothing in reads clean.
+CLOCK_LEDGER="$(cat <<'LEDGER'
+# file                                clock  sleep
+tests/bash-walls.test.sh               1      2
+tests/booked.test.sh                   0      15
+tests/close-out.test.sh                0      3
+tests/cross-gate-agreement.test.sh     1      0
+tests/detect-probes.test.sh            9      10
+tests/dispatch-preflight-4.test.sh     2      1
+tests/doctor-fleet.test.sh             0      1
+tests/doctor-patrol.test.sh            0      2
+tests/doctor-reads.test.sh             0      1
+tests/doctor-version.test.sh           0      1
+tests/doctor-walls.test.sh             0      1
+tests/engage.test.sh                   1      1
+tests/execution-recorder.test.sh       12     9
+tests/fail-direction-table.test.sh     0      1
+tests/fresh-home.test.sh               2      1
+tests/gate.test.sh                     2      12
+tests/hook-latency.test.sh             2      0
+tests/landing-gate.test.sh             0      2
+tests/landing-line.test.sh             0      21
+tests/name-scan.test.sh                10     2
+tests/notify.test.sh                   0      2
+tests/permission-answer.test.sh        0      1
+tests/rc-item.test.sh                  4      4
+tests/refuse.test.sh                   6      0
+tests/resources.test.sh                7      0
+tests/runner-roster.test.sh            2      13
+tests/runner-width.test.sh             0      1
+tests/session-poker-2.test.sh          0      7
+tests/session-poker-3.test.sh          0      5
+tests/session-poker-4.test.sh          2      2
+tests/session-poker.test.sh            1      3
+tests/session-start.test.sh            0      7
+tests/session-sweep.test.sh            3      2
+tests/session-sweeper.test.sh          2      2
+tests/slots.test.sh                    10     24
+tests/spawn-worktree.test.sh           0      5
+tests/stop-check.test.sh               0      2
+tests/stop-guard.test.sh               6      1
+tests/stop-orders.test.sh              1      1
+tests/stop.test.sh                     2      4
+tests/units.test.sh                    3      3
+tests/width.test.sh                    1      0
+tests/worktree.test.sh                 4      16
+tests/dispatch-preflight.prelude.sh    4      0
+tests/session-poker.prelude.sh         0      1
+tests/lib/wait.sh                      0      2
+LEDGER
+)"
+CLOCK_AWK='
+BEGIN {
+  ck = "[$({ (]SECOND" "S([^A-Za-z0-9_]|$)|dat" "e( -u)? +[\"\047]?[+]%s|uptim" "e|loadav" "g|load averag" "e"
+  ck = ck "|time[.](monotonic|time|perf_counter|sleep)[(]|Time::HiRe" "s"
+  sl = "(^|[^A-Za-z0-9_.-])slee" "p( |;|$)"
+}
+FNR == 1 { if (f != "" && (c || s)) printf "%s\t%d\t%d\n", f, c, s; f = FILENAME; c = 0; s = 0 }
+/^[ \t]*#/ { next }
+$0 ~ ck { c++ }
+$0 ~ sl { s++ }
+END { if (f != "" && (c || s)) printf "%s\t%d\t%d\n", f, c, s }'
+clock_sweep() {  # <root> -> "<file relative to root>\t<clock lines>\t<sleeping lines>" per file with any
+  ( cd "$1" && awk "$CLOCK_AWK" tests/*.test.sh tests/*.prelude.sh tests/lib/*.sh )
+}
+clock_over() {  # <sweep> -> one line per file over its ledger ceiling, or absent from the ledger
+  printf '%s\n' "$1" | CK_LEDGER="$CLOCK_LEDGER" awk -F'\t' '
+    BEGIN { n = split(ENVIRON["CK_LEDGER"], L, "\n"); for (i = 1; i <= n; i++) { if (L[i] ~ /^#/ || L[i] == "") continue
+              split(L[i], p, /[ \t]+/); C[p[1]] = p[2]; S[p[1]] = p[3] } }
+    $1 == "" { next }
+    !($1 in C) { print $1 ": " $2 " clock and " $3 " sleeping line(s), and the ledger has no row for it"; next }
+    $2 > C[$1] || $3 > S[$1] { print $1 ": " $2 " clock line(s) against a ceiling of " C[$1] ", " $3 " sleeping line(s) against " S[$1] }' \
+    || printf 'the ledger check itself failed to run\n'
+}
+CLOCK_SWEEP="$(clock_sweep "$REPO")"
+CLOCK_ROWS="$(printf '%s\n' "$CLOCK_LEDGER" | awk '!/^#/ && NF >= 3 { n++ } END { print n + 0 }')"
+expect_true "CLOCK.0 the sweep read the case files and found lines of both kinds ($(printf '%s\n' "$CLOCK_SWEEP" | grep -c .) files)" \
+  test -n "$(printf '%s\n' "$CLOCK_SWEEP" | awk -F'\t' '$2 > 0' | head -1)" -a -n "$(printf '%s\n' "$CLOCK_SWEEP" | awk -F'\t' '$3 > 0' | head -1)"
+expect_true "CLOCK.0b …and the ledger parsed ($CLOCK_ROWS rows)" test "$CLOCK_ROWS" -gt 0
+expect_eq "CLOCK.1 every file that reads a clock or sleeps is in the census's ledger, at or under its ceiling" \
+  "" "$(clock_over "$CLOCK_SWEEP")"
+expect_eq "CLOCK.2 hook-timeout, bash-walls-egd and session-start read no clock at all (AC-2.2)" "0 0 0" \
+  "$(for _ck in hook-timeout bash-walls-egd session-start; do printf '%s\n' "$CLOCK_SWEEP" | awk -F'\t' -v f="tests/$_ck.test.sh" '$1 == f { c = $2 } END { printf "%d ", c }'; done | sed 's/ $//')"
+expect_true "CLOCK.2b …while the sweep does see their sleeps, so the zero is a reading (session-start's fixtures sleep)" \
+  test -n "$(printf '%s\n' "$CLOCK_SWEEP" | awk -F'\t' '$1 == "tests/session-start.test.sh" && $3 > 0')"
+# The mutation arm: a copy of the case files, one ledgered file given one more clock line and one
+# new file that sleeps. Each planted line is printed here, so this file's source holds neither.
+CK_COPY="$TMP/clock-copy"
+mkdir -p "$CK_COPY/tests/lib"
+cp "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$CK_COPY/tests/"
+cp "$TESTS_DIR"/lib/*.sh "$CK_COPY/tests/lib/"
+expect_eq "CLOCK.3 the unchanged copy reads as the tree does: clean (the control)" "" "$(clock_over "$(clock_sweep "$CK_COPY")")"
+printf 'T0=$%s\n' "SECOND""S" >> "$CK_COPY/tests/session-start.test.sh"
+printf 'slee%s 1\n' "p" > "$CK_COPY/tests/clock-planted.test.sh"
+CK_MUT="$(clock_over "$(clock_sweep "$CK_COPY")")"
+expect_contains "CLOCK.4 a clock line planted in session-start is named, over its ceiling" \
+  "tests/session-start.test.sh: 1 clock line(s) against a ceiling of 0" "$CK_MUT"
+expect_contains "CLOCK.5 …and a new file that sleeps is named, absent from the ledger" \
+  "tests/clock-planted.test.sh: 0 clock and 1 sleeping line(s), and the ledger has no row for it" "$CK_MUT"
+
 finish
