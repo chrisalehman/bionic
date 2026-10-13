@@ -941,7 +941,7 @@ case "$VERB" in
   # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
   # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    PF_USAGE="proof-add takes two arguments, <floor|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand)."
+    PF_USAGE="proof-add takes two arguments, <floor|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
     if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
     PF_KIND="$1"; PF_EVID="$2"; PF_QUESTION=""; PF_READER=""; shift 2
     while [ $# -gt 0 ]; do
@@ -953,6 +953,11 @@ case "$VERB" in
     done
     if [ -n "$PF_QUESTION$PF_READER" ]; then
       { [ -n "$PF_QUESTION" ] && [ -n "$PF_READER" ] && [ "$PF_KIND" = review ]; } || usage "$PF_USAGE"
+    fi
+    # INHERITED TAKES A SUITE'S FILE NAME (wave-35 T9; AC-1.6): a word of letters, digits, `.`, `_` and `-`, so
+    # the line it writes and the path it runs hold nothing else.
+    if [ "$PF_KIND" = inherited ]; then
+      case "${PF_EVID##*/}" in ''|*[!A-Za-z0-9._-]*) usage "$PF_USAGE" ;; esac
     fi
     ;;
   # THE WAIVER VERB (wave-27 T9; D2). Two operands, both required: the reading question and the
@@ -9836,8 +9841,93 @@ BRF_EOF
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
+    # INHERITED DEBT (wave-35 T9; D8, AC-1.6; ADR-054). A suite the floor's whole run left red that is ALSO red
+    # at the run's base commit is debt the run inherited, not a regression it made. This verb asks the base
+    # itself: it makes a scratch tree at `base-sha:` through spawn-worktree.sh, runs the suite there (the
+    # project's tests/run.sh --only <suite> when the base has one, else the suite file), keeps the run's
+    # log in the record, and removes the tree and its branch. Red there, it writes
+    #
+    #     inherited: <suite> base=<base> head=<the floor's head> at=<ISO-UTC> evidence=record/<wave>/<log>
+    #
+    # under `## SDLC State` through the plan transaction, and the judge (lib/proof.sh `_proof_floor_judge`)
+    # owes the floor nothing for that suite and stands on the rest. Green there, it is a regression, and the
+    # verb refuses to carry it. Only a suite the floor's proof line lists as owed can be inherited: the line
+    # is the whole run's own word that the suite is red at its head.
+    if [ "$PF_KIND" = inherited ]; then
+      PF_SUITE="${PF_EVID##*/}"
+      plan_verb_open proof-add
+      PF_FHEAD="$(proof_last "$PV_PLAN" floor)"
+      if [ -z "$PF_FHEAD" ]; then
+        die "REFUSED — $PV_PLAN carries no floor proof, so no whole run says $PF_SUITE is red at the head; run the regression and proof-add floor first. The plan is unchanged."
+        exit 1
+      fi
+      PF_OWED="$(_proof_last_read "$PV_PLAN" floor owed)"
+      case ",$PF_OWED," in
+        *",$PF_SUITE,"*) : ;;
+        *)
+          die "REFUSED — $PF_SUITE is not red in the floor's whole run (the proof at ${PF_FHEAD:0:12} owes ${PF_OWED:-nothing}); only a suite that run left red can be inherited debt. The plan is unchanged."
+          exit 1 ;;
+      esac
+      PF_BASE="$(proof_plan_base "$PV_PLAN" "$PV_REPO")"; PF_BASEH=""
+      proof_base_id "$PF_BASE" && PF_BASEH="$(git -C "$PV_REPO" rev-parse --verify -q "${PF_BASE}^{commit}" 2>/dev/null)"
+      if [ -z "$PF_BASEH" ]; then
+        die "REFUSED — $PV_PLAN names no base-sha: that is a commit here${PF_BASE:+ (it says $(clean "$PF_BASE"))}, so there is no base to run $PF_SUITE at; add base-sha: <the commit the work started from>. The plan is unchanged."
+        exit 1
+      fi
+      PF_RECD="$(proof_debt_record "$PV_PLAN" "$PV_REPO" 2>/dev/null)"; PF_RECD="${PF_RECD%/*}"
+      PF_DOCS="$(cd "$(docs_root "$PV_REPO")" 2>/dev/null && pwd -P)"
+      case "$PF_RECD" in
+        "$PF_DOCS"/record/?*) : ;;
+        *) die "REFUSED — the plan's record directory cannot be resolved under $PF_DOCS/record/; the plan is unchanged."; exit 2 ;;
+      esac
+      mkdir -p "$PF_RECD" 2>/dev/null
+      PF_LOG="$PF_RECD/inherited-$PF_SUITE-${PF_BASEH:0:12}.log"; PF_REL="${PF_LOG#"$PF_DOCS"/}"
+      PF_SW="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
+      PF_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/bionic-inherited.XXXXXX" 2>/dev/null)" || PF_PARENT=""
+      PF_BR="bionic-inherited/${PF_SUITE%.sh}-${PF_BASEH:0:12}-$$"
+      PF_OK=""; [ -z "$PF_PARENT" ] || PF_OK="$(cd "$PV_REPO" && bash "$PF_SW" create "$PF_BASEH" "$PF_BR" "$PF_PARENT" 2>&1)"
+      PF_WT="$(printf '%s
+' "$PF_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"
+      _pf_drop() {
+        [ -z "$PF_WT" ] || ( cd "$PV_REPO" && bash "$PF_SW" remove "$PF_WT" ) >/dev/null 2>&1
+        git -C "$PV_REPO" branch -q -D "$PF_BR" >/dev/null 2>&1
+        [ -z "$PF_PARENT" ] || rm -rf "$PF_PARENT"
+      }
+      if [ -z "$PF_WT" ] || [ ! -d "$PF_WT" ]; then
+        _pf_drop
+        die "REFUSED — spawn-worktree.sh could not make a scratch tree at the base ${PF_BASEH:0:12}: $(clean "$(printf '%s' "$PF_OK" | tail -n 1)"). The plan is unchanged."
+        exit 2
+      fi
+      if [ ! -f "$PF_WT/tests/$PF_SUITE" ]; then
+        _pf_drop
+        die "REFUSED — $PF_SUITE is not at the base ${PF_BASEH:0:12}, so its red is this run's own, not inherited; fix it on a fix row. The plan is unchanged."
+        exit 1
+      fi
+      if [ -f "$PF_WT/tests/run.sh" ]; then PF_CMD="bash tests/run.sh --only $PF_SUITE"; else PF_CMD="bash tests/$PF_SUITE"; fi
+      ( cd "$PF_WT" && bash -c "$PF_CMD" ) > "$PF_LOG.out" 2>&1; PF_RC=$?
+      { printf 'head=%s suite=%s rc=%s
+command: %s
+' "$PF_BASEH" "$PF_SUITE" "$PF_RC" "$PF_CMD"; cat "$PF_LOG.out" 2>/dev/null; } > "$PF_LOG"
+      rm -f "$PF_LOG.out"; _pf_drop
+      case "$PF_RC" in
+        0)
+          die "REFUSED — $PF_SUITE is green at the base ${PF_BASEH:0:12} (its log: $PF_REL): a regression, not debt; a fix row closes it. The plan is unchanged."
+          exit 1 ;;
+        75|69)
+          die "REFUSED — $PF_SUITE did not run at the base (exit $PF_RC: the gate never admitted it; its log: $PF_REL); run proof-add inherited again. The plan is unchanged."
+          exit 1 ;;
+      esac
+      PF_LINE="inherited: $PF_SUITE base=$PF_BASEH head=$PF_FHEAD at=$(iso_now) evidence=$PF_REL"
+      if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+        die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the line; the plan is unchanged."
+        exit 1
+      fi
+      plan_verb_swap proof-add "$PF_SUITE inherited at ${PF_BASEH:0:12}" writer
+      say "proof-add — inherited: $PF_SUITE red at the base ${PF_BASEH:0:12} (rc=$PF_RC) and at the floor's head ${PF_FHEAD:0:12}; written to $PV_PLAN, its log $PF_REL; the floor stands on the rest."
+      exit 0
+    fi
     if ! proof_kind_ok "$PF_KIND"; then
-      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task. The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task (or proof-add inherited <suite>). The plan is unchanged."
       exit 1
     fi
     # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
@@ -10103,6 +10193,13 @@ PF_OTHER_LIST
       fi
     fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
+    # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took the log whole and
+    # every red named; the line lists them as owed, and the judge reads them there.
+    PF_OWED=""
+    if [ "$PF_KIND" = floor ]; then
+      PF_OWED="$(proof_floor_owed "$PF_REAL")"
+      PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED")"
+    fi
     # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21): one `deferred:` line per finding
     # the table defers, right after its proof line, in the same write (lib/proof.sh
     # `proof_finding_lines`). No `check:` line: a reader's rating is final (wave-31 T32; D6).
@@ -10167,7 +10264,8 @@ $PF_PLANL"
     fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
-    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l"; done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that reading."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."

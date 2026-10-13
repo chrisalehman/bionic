@@ -1705,7 +1705,9 @@ printf 'floor log\nhead=%s dirty=0\n───── x: captured output ───
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-red.txt
 s42_unchanged "46f12 F1 a red run at the head, on a clean tree" 1 "$P46"
-expect_contains "46f12b …naming the verdict and the fix" "did not pass (Gating: 40 passed, 3 failed); fix it, run it again" "$OUT"
+# A RED WHOLE RUN IS A CANDIDATE (wave-35 T9; D8): this one counts 43 suites at a head that has 3, so it is refused as
+# not whole, by that sentence.
+expect_contains "46f12b …naming the verdict as not a whole run" "is not a whole run (40 passed and 3 failed of 3 suites at its head)" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
 s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
 expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
@@ -2424,7 +2426,10 @@ P54="$(s42_plan "$R54" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S54_BASE}
   branch: wave/01-fixture")"
 awk '
-  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
+  /^current: / && !wb { print; print "working-branch: wave/01-fixture"
+    # §54 PROVES INTEGRATE WAITS ON THE WALK, not the cover (wave-35 T9; D9): its suites declare no anchor, so the
+    # plan carries the approval that waives the cover; the evidence gate §FLOOR-COVER proves the cover itself.
+    print "approved: regression-2 by Dana Fixture 2026-10-04T00:00:00Z \"the cover is proved elsewhere\""; wb = 1; next }
   /^- T5: / { print; print "- T3: integrate at Step 8"; next }
   /^\| id \| step \|/ { intab = 1
     print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"

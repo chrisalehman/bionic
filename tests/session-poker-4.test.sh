@@ -4309,4 +4309,76 @@ expect_eq "CR-3b …the refusal ends on the line missing" "poker: missing: the l
   "$(printf '%s\n' "$OUT" | tail -1)"
 POKE_BOUND="$CR_BOUND_WAS"
 
+
+# ============================================================
+section "§INHERITED: proof-add inherited <suite> runs the suite at the base in a scratch tree; red at both heads is inherited debt, green at the base is a regression (wave-35 T9; REQ-1 AC-1.6; D8, ADR-054)"
+# ============================================================
+# The floor's whole run at F left suites red. A suite red at F and red at the plan's base commit is debt the
+# run inherited, not a regression it caused: `proof-add inherited <suite>` makes a scratch tree at `base-sha:`
+# through spawn-worktree.sh, runs the suite there, and writes `inherited: <suite> base=<base> head=<F> …` to
+# `## SDLC State` when it is red there too; the judge (lib/proof.sh) then owes the floor nothing for it and
+# stands on the rest. Green at the base, it is a regression and the verb refuses it as debt.
+# FIXTURE FIDELITY: a real repository; three suites at the base (a red, b and c green), F makes b red; the
+# floor proofs are written by the product's writer pair against whole-run logs in tests/run.sh's shape. The
+# verb runs the real suite file in the real scratch tree (no tests/run.sh in the fixture: the file itself).
+# fails-when: a green-at-base suite is carried, or the red-at-base one blocks the floor.
+IH_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=120
+RIH="$(make_repo inherited)"
+mkdir -p "$RIH/tests" "$RIH/lib"
+printf '#!/bin/bash\necho a is broken at the base; exit 1\n' > "$RIH/tests/a.test.sh"
+printf '#!/bin/bash\nexit 0\n' > "$RIH/tests/b.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$RIH/tests/c.test.sh"
+printf 'one\n' > "$RIH/lib/x.sh"
+( cd "$RIH" && git add tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
+IH_B="$(git -C "$RIH" rev-parse HEAD)"
+printf '#!/bin/bash\nexit 1\n' > "$RIH/tests/b.test.sh"
+IH_F="$(s57_commit "$RIH" lib/x.sh 'F: the build that broke b')"
+( cd "$RIH" && git add tests && git commit -qm 'F2: b broken' ) >/dev/null 2>&1
+IH_F="$(git -C "$RIH" rev-parse HEAD)"
+PIH="$(s42_plan "$RIH" 6 "  worktree: .worktrees/01-fixture
+  base-sha: $IH_B
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / { print "working-branch: wave/01-fixture" }' "$PIH" > "$PIH.x" && mv "$PIH.x" "$PIH"
+IH_REC="$RIH/.bionic/docs/record/wave-01-fixture"; mkdir -p "$IH_REC"
+ih_log() {  # <file> <passed> <failed> <red suite>... -> a whole-run log at F in tests/run.sh's shape
+  local f="$IH_REC/$1" p="$2" m="$3" x; shift 3
+  { printf 'head=%s dirty=0\n' "$IH_F"; printf 'Gating: %s passed, %s failed\nFailed:\n' "$p" "$m"
+    for x in "$@"; do printf '    - %s\n' "$x"; done; } > "$f"
+}
+ih_prove() {  # <log file> -> a floor proof at F as proof-add floor writes it (its reds from the log), committed
+  bash -c '. "$1" && proof_add_line "$2" "$(proof_floor_line "$3" 2026-10-12T04:00:00Z "record/wave-01-fixture/$4" "$(proof_floor_owed "$5/$4")")"' \
+    _ "$S46_LIB" "$PIH" "$IH_F" "$1" "$IH_REC" > "$PIH.n" && mv "$PIH.n" "$PIH"
+  s42_snap "$RIH" "$PIH"
+}
+ih_state() { bash -c '. "${1%/*}/roots.sh"; . "$1" && proof_state "$2" "$3"' _ "$S46_LIB" "$PIH" "$RIH" 2>/dev/null; }
+ih_log red-a.log 2 1 a.test.sh
+ih_prove red-a.log
+expect_eq "IH-0 precondition: the floor proof at F with a.test.sh red owes it (the judge reads the run's Failed: block)" \
+  "owed	a.test.sh" "$(ih_state)"
+expect_eq "IH-0b precondition: a.test.sh is red at the base and b.test.sh green there (the files as committed)" "1 0" \
+  "$(git -C "$RIH" show "$IH_B:tests/a.test.sh" | bash >/dev/null 2>&1; printf '%s' "$?") $(git -C "$RIH" show "$IH_B:tests/b.test.sh" | bash >/dev/null 2>&1; printf '%s' "$?")"
+poke "$RIH" proof-add inherited a.test.sh
+expect_eq "IH-1 AC-1.6 proof-add inherited a.test.sh, red at the base and at F: exit 0" "0" "$RC"
+expect_regex "IH-1b …the ledger line names the suite and both heads" \
+  "^inherited: a\\.test\\.sh base=${IH_B} head=${IH_F} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/[^ ]+\$" \
+  "$(/usr/bin/grep '^inherited: ' "$PIH")"
+IH_EV="$(/usr/bin/grep '^inherited: ' "$PIH" | sed 's/.* evidence=//')"
+expect_contains "IH-1c …and its evidence is the base run's log, which says where it ran and how it ended" \
+  "head=${IH_B} suite=a.test.sh rc=1" "$(cat "$RIH/.bionic/docs/$IH_EV" 2>/dev/null)"
+expect_eq "IH-1d …the scratch tree is gone: one worktree, the checkout, and no scratch branch left" "1 0" \
+  "$(git -C "$RIH" worktree list | awk 'END { print NR }') $(git -C "$RIH" branch --list 'bionic-inherited/*' | awk 'END { print NR }')"
+expect_eq "IH-2 AC-1.6 …and the floor stands on the rest: covered at the working head" \
+  "$(printf 'covered\t%s' "$(git -C "$RIH" rev-parse wave/01-fixture)")" "$(ih_state)"
+ih_log red-ab.log 1 2 a.test.sh b.test.sh
+ih_prove red-ab.log
+expect_eq "IH-3 precondition: a floor at F red on a and b owes b alone (a is inherited)" "owed	b.test.sh" "$(ih_state)"
+s42_snap "$RIH" "$PIH"
+poke "$RIH" proof-add inherited b.test.sh
+s42_unchanged "IH-4 AC-1.6 proof-add inherited b.test.sh, green at the base" 1 "$PIH"
+expect_contains "IH-4b …refused as a regression, not debt" "regression, not debt" "$OUT"
+expect_eq "IH-4c …and b stays owed" "owed	b.test.sh" "$(ih_state)"
+poke "$RIH" proof-add inherited c.test.sh
+s42_unchanged "IH-5 proof-add inherited c.test.sh, not red in the floor's whole run" 1 "$PIH"
+expect_contains "IH-5b …refused, naming the run it is not red in" "c.test.sh is not red in the floor's whole run" "$OUT"
+POKE_BOUND="$IH_BOUND_WAS"
+
 finish

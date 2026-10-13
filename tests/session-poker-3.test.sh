@@ -400,10 +400,10 @@ s57_reset; s57_floor "$S57_C4"
 for s57q in evidence adversarial structure; do s57_fact "$s57q" "$S57_C2" pass piece; done
 s57_fact adversarial "$S57_C2" pass whole; s57_fact structure "$S57_C2" pass whole
 s57_state "$P57" "$S57_C3"
-# C3 is not the working checkout's head (C4), so the floor, which proof_state judges there, is
-# uncovered from its proof's head (T45; review pass 13 F3); every reading line is covered.
+# C3 is an older head than the floor proof's (C4), so the floor is uncovered from its proof's head (T45; review pass
+# 13 F3), with the judge's reason after the range (wave-35 T9); every reading line is covered.
 expect_eq "57c §JUDGE a docs-only tail: past the last head only the docs root changed, so every reading line is covered" \
-  "$(s57_all "uncovered	${S57_C4}..${S57_C3}" covered covered covered covered covered)" "$S57_OUT"
+  "$(s57_all "uncovered	${S57_C4}..${S57_C3}	the proved head ${S57_C4:0:7} is not in the history of ${S57_C3:0:12}" covered covered covered covered covered)" "$S57_OUT"
 expect_eq "57c2 …rc 1, for the floor alone" "1" "$S57_RC"
 s57_state "$P57" "$S57_C4"
 expect_eq "57c3 …and one code commit more is uncovered from the same last head" "uncovered	${S57_C2}..${S57_C4}" "$(s57_of "$S57_EV")"
@@ -1649,13 +1649,22 @@ expect_eq "63h7 F10 readings naming a non-commit, asked at that same string, are
 # ---------- §FLOOR-HEAD (F3): the floor line answers for the head proof_state judged ----------
 S63_N="$(git -C "$R63" commit-tree "$S63_H^{tree}" -p "$S63_H" -m 'one past the checkout')"
 expect_eq "63f0 precondition: the commit one past the checkout's head is not checked out" "$S63_H" "$(git -C "$S63_WT" rev-parse HEAD)"
+# THE HEAD ASKED IS THE HEAD JUDGED (wave-35 T9; A-orch-45): no checkout is compared. One past the checkout with
+# the proof's tree is covered; one past it that adds a code file with no run recorded is uncovered, naming it.
 s57_state "$P63" "$S63_N"
-expect_eq "63f F3 asked about a commit one past the checkout's head: the floor is uncovered from the floor proof's head" \
-  "uncovered	${S63_H}..${S63_N}" "$(s57_of floor)"
+expect_eq "63f F3 asked about a commit one past the checkout's head with the proof's tree: the floor is covered at it" \
+  "covered" "$(s57_of floor)"
 expect_eq "63f2 …the review lines, which changed no file, covered" "covered" "$(s57_of "$S63_TAD")"
-expect_eq "63f3 …and the exit 1" "1" "$S57_RC"
+expect_eq "63f3 …and the exit 0" "0" "$S57_RC"
+S63_N2="$(cd "$R63" && export GIT_INDEX_FILE="$TMPROOT/s63-n2.index" && git read-tree "$S63_H" \
+  && git update-index --add --cacheinfo "100644,$(printf 'new\n' | git hash-object -w --stdin),lib/n2.sh" \
+  && git commit-tree "$(git write-tree)" -p "$S63_H" -m 'one past the checkout, adding code' )"
+s57_state "$P63" "$S63_N2"
+expect_eq "63f3b …one past it that adds lib/n2.sh with no run at it: uncovered from the proof's head, naming the commit" \
+  "uncovered	${S63_H}..${S63_N2}	commit ${S63_N2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(s57_of floor)"
 s57_state "$P63" "$S63_U"
-expect_eq "63f4 asked about an older head: the floor is uncovered too, never covered" "uncovered	${S63_H}..${S63_U}" "$(s57_of floor)"
+expect_eq "63f4 asked about an older head: the floor is uncovered too, never covered" \
+  "uncovered	${S63_H}..${S63_U}	the proved head ${S63_H:0:7} is not in the history of ${S63_U:0:12}" "$(s57_of floor)"
 sed '/^proved: kind=floor /d' "$P63" > "$R63/.bionic/tmp/nofloor.plan.md"
 s57_state "$R63/.bionic/tmp/nofloor.plan.md" "$S63_N"
 expect_eq "63f5 with no floor proof the floor line is absent, at any head" "absent" "$(s57_of floor)"
@@ -3325,7 +3334,10 @@ s72_world() {
   branch: wave/72-fixture")"
   awk '{ print } /^current: / && !d { print "working-branch: wave/72-fixture"; d = 1 }' "$S72P" > "$S72P.tmp" && mv "$S72P.tmp" "$S72P"
   mkdir -p "$S72R/tests" "$S72R/lib"
-  for s in a b c d; do printf '#!/bin/bash\nexit 0\n' > "$S72R/tests/$s.test.sh"; done
+  # EVERY SUITE DECLARES BOTH LIB FILES (wave-35 T9; D9): §72 proves the walk, so the cover a commit owes (a suite it
+  # ran that declares each code file it changed) is met by every suite; the calls follow `exit 0`, where the shim's
+  # runs never reach them and lib/anchors.sh still reads them. §FLOOR-COVER (evidence gate) proves the cover itself.
+  for s in a b c d; do printf '#!/bin/bash\nexit 0\n%s file lib/one.sh %s\n%s file lib/two.sh %s\n' anchor "'one'" anchor "'two'" > "$S72R/tests/$s.test.sh"; done
   printf 'one\n' > "$S72R/lib/one.sh"; printf 'two\n' > "$S72R/lib/two.sh"
   ( cd "$S72R" && git add -f "$S72P" tests lib && git commit -qm wb \
     && git worktree add -q -b wave/72-fixture "$S72R/.worktrees/72-fixture" ) >/dev/null 2>&1
@@ -3488,8 +3500,8 @@ expect_eq "72h proof_state: the floor proof at F, the hand commit after it unpro
 expect_contains "72h2 …its reason names the commit (proof_state answers covered or uncovered, nothing else)" \
   "commit ${S72C7:0:12} (no landing row) is not proved" "$S72STATE"
 s57_state "$S72P" "$S72C7"
-expect_eq "72h3 facts_state's floor line carries that reason" \
-  "$(printf 'uncovered\t%s' "${S72STATE#*	}")" "$(s57_of floor)"
+expect_eq "72h3 facts_state's floor line is uncovered from the proof's head to the head asked, then that reason (wave-35 T9)" \
+  "$(printf 'uncovered\t%s..%s\t%s' "$S72F" "$S72C7" "${S72STATE#*	}")" "$(s57_of floor)"
 s72_run a.test.sh "bash tests/a.test.sh"
 expect_eq "72h4 …and a run at it makes proof_state covered" "$(printf 'covered\t%s' "$S72C7")" "$(s72_state)"
 s57_state "$S72P" "$S72C7"
@@ -3517,7 +3529,10 @@ expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\n' "$S72H" > "$S72REC/floor-red-H.txt"
 s72_add floor-red-H.txt
 s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
-expect_contains "72i7 …is refused as red, as before" "did not pass (Gating: 3 passed, 1 failed)" "$OUT"
+# A RED WHOLE RUN IS A CANDIDATE NOW (wave-35 T9; D8, AC-1.3) only when its Failed: block names its reds; this
+# log counts one failed and names none, so it says nothing of what is owed and stays refused.
+expect_contains "72i7 …refused: its Failed: block names none of the reds its verdict counts" \
+  "counts 1 failed but its Failed: block names 0" "$OUT"
 s72_add floor-F.txt
 s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
 expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
