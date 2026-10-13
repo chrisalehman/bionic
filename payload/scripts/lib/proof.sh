@@ -105,21 +105,27 @@ proof_floor_owed() {
     END { if (o != "") print o }' "${1:-/dev/null}" 2>/dev/null
 }
 
-# proof_inherited <plan> -> the suites the plan carries as inherited debt, comma-joined on one line: each
-# `inherited: <suite> base=<sha> head=<sha> …` line of its unfenced `## SDLC State` (wave-35 T9; D8, AC-1.6),
-# written by `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base. The floor's
-# judge owes nothing for a suite named here, and stands on the rest.
-proof_inherited() {
+# proof_inherited_lines <plan> -> each `inherited: <suite> base=<sha> head=<sha> …` line of the plan's unfenced
+# `## SDLC State`, whole and as written, one per line (wave-35 T9; D8, AC-1.6): THE ONE READER of the inherited-debt
+# lines, written by `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base. The judge
+# reads their suites (`proof_inherited`); close-out carries the lines into the continuation (wave-35 T10; A-orch-18).
+proof_inherited_lines() {
   [ -f "${1:-}" ] || return 0
   awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^inherited:[ \t]+[^ \t]/ && / base=[0-9a-f]+/ && / head=[0-9a-f]+/ {
-      split($0, w, /[ \t]+/); s = w[2]; sub(/.*\//, "", s)
-      if (!(s in seen)) { seen[s] = 1; o = o (o == "" ? "" : ",") s }
-    }
-    END { if (o != "") print o }' "$1"
+    insdlc && /^inherited:[ \t]+[^ \t]/ && / base=[0-9a-f]+/ && / head=[0-9a-f]+/' "$1"
+}
+
+# proof_inherited <plan> -> the suites the plan carries as inherited debt, comma-joined on one line, each once by
+# its file name, read off `proof_inherited_lines`. The floor's judge owes nothing for a suite named here, and
+# stands on the rest.
+proof_inherited() {
+  proof_inherited_lines "${1:-}" | awk '
+    { split($0, w, /[ \t]+/); s = w[2]; sub(/.*\//, "", s)
+      if (!(s in seen)) { seen[s] = 1; o = o (o == "" ? "" : ",") s } }
+    END { if (o != "") print o }'
 }
 
 # proof_approved <plan> <name> -> 0 when the plan's unfenced `## SDLC State` carries an `approved: <name> by …`

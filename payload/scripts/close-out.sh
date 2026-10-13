@@ -247,7 +247,9 @@ sdlc_header() {
 SECTION="$(sdlc_section)"
 [ -n "$SECTION" ] || _co_refuse "$PLAN carries no ## SDLC State section"
 INTEGRATION="$(sdlc_header integration-branch "$SECTION")"
-WORKING="$(sdlc_header working-branch "$SECTION")"
+# THE ONE READER OF THE WORKING BRANCH (wave-35 T10; A-orch-16, wave-35 T7): lib/run.sh `plan_working_branch`,
+# `## SDLC State` first, then the frontmatter, as `ready`, the stop wall, the card and the proof judge read it.
+WORKING="$(plan_working_branch "$PLAN")"
 # `run` closes a plan at Step 8 and nowhere else (critic3 P-3, wave-23 T17): the gate judges
 # whatever step `current:` names, so below 8 its refusal would be about a step this script
 # never writes, and above 8 there is nothing left for it to close.
@@ -267,7 +269,7 @@ fi
 command -v git >/dev/null 2>&1 || _co_refuse "git is not on PATH"
 command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry-run cannot be built without it"
 [ -n "$INTEGRATION" ] || _co_refuse "the plan's ## SDLC State names no integration-branch:"
-[ -n "$WORKING" ]     || _co_refuse "the plan's ## SDLC State names no working-branch:"
+[ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch: (## SDLC State or its frontmatter)"
 
 # THE WORKTREE CENSUS IS THE REGISTER, NEVER A NAME (D5, REQ-6; ADR-032). A tree is
 # this run's if and only if a `## Tasks` row names it — `wt_branches()` (below) reads
@@ -808,6 +810,18 @@ co_hand_holds_section() {
   esac
 }
 
+# co_inherited_section -> `## Inherited debt` and every `inherited:` line of the plan's `## SDLC State`, as the verb
+# wrote it, fenced as the hand-holds are; nothing at all for a plan that carries none, and the template then prints
+# nothing for it, so that continuation is byte for byte what it was (wave-35
+# T10; AC-1.6 "carried into the continuation", A-orch-18). The lines are lib/proof.sh `proof_inherited_lines`, the
+# one reader the floor's judge reads them through: debt the run inherited, red at its base and at its floor.
+co_inherited_section() {
+  local lines
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  [ -n "$lines" ] || return 0
+  printf '## Inherited debt\n\n```\n%s\n```\n' "$lines"
+}
+
 # co_task_count -> the build rows of the plan's ## Tasks table that were not dropped: the tasks the
 # template says went RED then GREEN. Zero when the plan carries no table.
 co_task_count() {
@@ -868,8 +882,9 @@ co_patrol_sentence() {
 }
 
 continuation_template() {
-  local sha tasks regress reviews patrol
+  local sha tasks regress reviews patrol inherited
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  inherited="$(co_inherited_section)"
   tasks="$(co_task_count)"
   regress="$(co_regression_text)"
   reviews="$(co_reviews_text)"
@@ -898,7 +913,9 @@ $(co_deferrals_section)
 $(co_landings_section)
 
 $(co_hand_holds_section)
-
+${inherited:+
+$inherited
+}
 ## Resume instruction
 
 Nothing to resume: the run is delivered.${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
@@ -1444,9 +1461,12 @@ facts_judge() {
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
   fi
-  FACTS_HEAD="$(git -C "$ROOT" rev-parse --verify -q "${WORKING}^{commit}" 2>/dev/null)"
+  # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, `refs/heads/<branch>`,
+  # the judge's one reading of it, which `current 7` and `current 8` ask too; never a checkout's head, and never
+  # whatever else git resolves the bare name to (a tag of the same name is not the branch).
+  FACTS_HEAD="$(proof_branch_head "$PLAN" "$ROOT" 2>/dev/null)" || FACTS_HEAD=""
   if [ -z "$FACTS_HEAD" ]; then
-    FACTS_WHY="the plan's working-branch '$WORKING' is not a branch in $ROOT, so there is no head to judge the facts the run owes at"
+    FACTS_WHY="the working branch $WORKING names no commit here, so the floor is uncovered and there is no head to judge the facts the run owes at"
     return 0
   fi
   out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
