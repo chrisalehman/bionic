@@ -5356,6 +5356,11 @@ launch_sync_project() {
   local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
   local us=$'\037'
   local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LBR LROW FINAL LGID LGAG LGDT pairs lpairs
+  # THE LEDGER'S ARRAYS ARE SET BEFORE ANY ROW IS READ (wave-35 T29). They are assigned only per existing
+  # ledger row, and a header-only `## Dispatch ledger` has none: `${#LGAG[@]}` in launch_sync_ledgered and
+  # `${#LGID[@]}` in the id search then read a declared-but-unset array, which bash 5.x under `set -u`
+  # aborts ("LGAG: unbound variable"), the first dispatch of every fresh plan. `=()` makes them empty.
+  LGID=(); LGAG=(); LGDT=()
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""; LS_PROOFS=""; LS_PROOFS_READ=no
   open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
   [ -n "$open" ] || return 1
