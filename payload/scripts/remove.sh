@@ -223,7 +223,14 @@ RM_RC_END='# ─── bionic:rc:end ───'
 # §T78 pins both line for line.
 rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
-    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" && grep -Eqs "\"name\"[[:space:]]*:[[:space:]]*\"bionic\"" "$r/payload/.claude-plugin/plugin.json" && set -- --plugin-dir "$r/payload" "$@"; command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    claude-proxy) printf '%s\n' \
+      'unalias claude 2>/dev/null || true' \
+      'claude() {' \
+      '  local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" || r=""' \
+      "  if [ -n \"\$r\" ] && grep -Eqs '\"name\" *: *\"bionic\"' \"\$r/payload/.claude-plugin/plugin.json\"" \
+      '  then set -- --plugin-dir "$r/payload" "$@"; fi' \
+      '  command claude --allow-dangerously-skip-permissions "$@"' \
+      '}' ;;
     *)            return 1 ;;
   esac
   return 0
