@@ -3684,7 +3684,10 @@ ANR="$AN/proj"; mkdir -p "$ANR"
 an_git() { git -C "$ANR" -c user.name=a -c user.email=a@x.invalid -c commit.gpgsign=false "$@"; }
 an_git init -q && an_git symbolic-ref HEAD refs/heads/main
 printf '.bionic\n.bionic/\n' > "$ANR/.gitignore"; printf 'one\n' > "$ANR/x.txt"
-an_git add .gitignore x.txt && an_git commit -qm base && an_git checkout -qb wave/a
+# x.test.sh DECLARES x.txt (wave-35 T9; D9): a row's changed code file is covered only by a suite it ran
+# that declares it, so the suite the rows below run carries the declaration (lib/anchors.sh reads it).
+mkdir -p "$ANR/tests"; printf '#!/bin/bash\n%s file x.txt %s\n' anchor "'one'" > "$ANR/tests/x.test.sh"
+an_git add .gitignore x.txt tests && an_git commit -qm base && an_git checkout -qb wave/a
 ANP="$ANR/.bionic/docs/plans/epic-a/wave-a.plan.md"; ANREC="$ANR/.bionic/docs/record/wave-a"
 mkdir -p "${ANP%/*}" "$ANREC" "$ANR/.bionic/tmp"
 printf -- '---\nworking-branch: wave/a\n---\n# plan\n\n## SDLC State\n\ncurrent: 5\n' > "$ANP"
@@ -3730,5 +3733,146 @@ AN_M="$(an_run "$AN_MUT" 'proof_state "$ANP" "$ANR"' || true)"
 expect_contains "AN-7 MUTANT the walk stops at F: it runs and reads F alone, which no row's run proves" \
   "commit ${AN_F:0:12} (no landing row) is not proved" "$AN_M"
 expect_eq "AN-7b MUTANT …so F+2 reads uncovered (the pin can fail)" "uncovered" "$(printf '%s\n' "$AN_M" | cut -f1)"
+
+
+section "§FLOOR-OWED: a red whole run is the floor's candidate, each red suite owed until a later green landing of it (wave-35 T9; REQ-1 AC-1.3; D8, ADR-054)"
+# The floor is one whole run at a commit F, green or red, plus for each suite red in it one later green
+# run of that suite by a landing, plus every commit after F proved by its row's suites. The judge (lib/proof.sh
+# `proof_attested floor`, what `proof-add floor` runs) takes a red whole run's log as the candidate and reads
+# its red suites from the runner's own `Failed:` block (`proof_floor_owed`); `proof_state` and `facts_state`
+# say `owed <suite>` while one is open, and a landing's green verdict of that suite at a later commit (the
+# record's file-name key, wave-35 T6) closes it. A green stamp is no landing and closes nothing.
+# FIXTURE FIDELITY: a real repository on its working branch with three suites; the whole-run log is in
+# tests/run.sh's shape (header, captured red suite, `Gating:` verdict, `Failed:` block), the landing record in
+# lib/line.sh's event shape, a stamp in booked.sh's; proof lines are written by the product's writer pair.
+# fails-when: the plan reads `uncovered` with only a red suite open, or `covered` with the red still open.
+FO_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+FO="$(mktemp -d)"; cleanup_dirs+=("$FO"); FO="$(cd "$FO" && pwd -P)"
+FOR="$FO/proj"; mkdir -p "$FOR/tests" "$FOR/lib"
+fo_git() { git -C "$FOR" -c user.name=a -c user.email=a@x.invalid -c commit.gpgsign=false "$@"; }
+fo_git init -q && fo_git symbolic-ref HEAD refs/heads/main
+printf '.bionic\n.bionic/\n' > "$FOR/.gitignore"
+# a.test.sh declares lib/x.sh (the shaped call lib/anchors.sh extracts); b and c declare nothing.
+printf '#!/bin/bash\n%s file lib/x.sh %s\n' anchor "'x one'" > "$FOR/tests/a.test.sh"
+printf '#!/bin/bash\n' > "$FOR/tests/b.test.sh"; printf '#!/bin/bash\n' > "$FOR/tests/c.test.sh"
+printf 'x one\n' > "$FOR/lib/x.sh"; printf 'y one\n' > "$FOR/lib/y.sh"
+fo_git add .gitignore tests lib && fo_git commit -qm base && fo_git checkout -qb wave/a
+FO_B="$(fo_git rev-parse HEAD)"
+FOP="$FOR/.bionic/docs/plans/epic-a/wave-a.plan.md"; FOREC="$FOR/.bionic/docs/record/wave-a"
+mkdir -p "${FOP%/*}" "$FOREC" "$FOR/.bionic/tmp"
+printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\n---\n# plan\n\n## SDLC State\n\ncurrent: 6\nworking-branch: wave/a\n' "$FO_B" > "$FOP"
+fo_commit() {  # <path> <text> -> the new commit on wave/a (a path under .bionic is added with -f)
+  mkdir -p "$(dirname "$FOR/$1")"; printf '%s\n' "$2" >> "$FOR/$1"
+  fo_git add -f "$1" && fo_git commit -qm "$1: $2" && fo_git rev-parse HEAD
+}
+FO_F="$(fo_commit lib/x.sh 'x two')"
+fo_log() {  # <file> <head> <passed> <failed> <listed suite>... -> a whole-run log in tests/run.sh's shape
+  local f="$FOREC/$1" h="$2" p="$3" m="$4" s; shift 4
+  { printf 'env: os=darwin bash=3.2.57 locale=C path=/pin\nhead=%s dirty=0\nRoots: hooks=/h skills=/s scripts=/x\n\n' "$h"
+    for s in "$@"; do printf '%s ✗ FAIL\n───── %s: captured output ─────\nFAIL: (1) it broke\n───── end %s ─────\n' "$s" "$s" "$s"; done
+    printf '──────────────\nGating: %s passed, %s failed\nenv: os=darwin\n' "$p" "$m"
+    if [ "$m" -gt 0 ]; then printf 'Failed:\n'; for s in "$@"; do printf '    - %s\n' "$s"; done; fi
+  } > "$f"
+}
+fo_run() {  # <script> -> bash with the proof library (and what it reads) from FO_LIB
+  env FOR="$FOR" FOP="$FOP" FOREC="$FOREC" bash -c '. "$1/worktree.sh" && . "$1/session.sh" && . "$1/roots.sh" && . "$1/proof.sh" || exit 99
+    eval "$2"' _ "$FO_LIB" "$1" 2>&1
+}
+fo_prove() {  # <head> <log file> -> the floor proof line as proof-add floor writes it: its owed reds read from the log
+  fo_run "proof_add_line \"\$FOP\" \"\$(proof_floor_line $1 2026-10-12T01:00:00Z record/wave-a/$2 \"\$(proof_floor_owed \"\$FOREC/$2\")\")\" > \"\$FOP.n\" && mv \"\$FOP.n\" \"\$FOP\"" >/dev/null
+}
+fo_ev() { printf 'line/v1|%s|at=%s\n' "$1" "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" >> "$FOREC/landing-proofs.log"; }  # <event> [<at>]
+fo_land() {  # <row> <path> <text> <suites> -> the landing commit: its ready and published events
+  local c; c="$(fo_commit "$2" "$3")"
+  fo_ev "ev=ready|row=$1|name=w-$1|commit=$c|branch=wt/$1|tree=-|suites=$4|debt=-"
+  fo_ev "ev=published|row=$1|commit=$c|kind=queue|by=-|why=-"
+  printf '%s' "$c"
+}
+fo_verdict() { fo_ev "ev=verdict|row=$1|commit=$2|suite=$3|result=$4|log=-" "${5:-}"; }  # <row> <commit> <suite> <green|red> [<at>]
+fo_state() { fo_run 'proof_state "$FOP" "$FOR"' || true; }
+fo_facts() {  # <head> -> facts_state's floor state for the plan at <head>
+  fo_run "facts_state \"\$FOP\" $1" | awk 'index($0, "floor\t") == 1 && !d { print substr($0, 7); d = 1 }' || true
+}
+FO_JUDGE='o="$(proof_attested floor "$FOREC/$L" "$FOR" "$FOP" "" "$FOR")"; echo "rc=$? $o"'
+fo_log red-F.log "$FO_F" 2 1 a.test.sh
+expect_eq "FO-0 precondition: the roster at F is three suites, and the log's verdict counts all three" "3 3" \
+  "$(fo_git ls-tree --name-only "$FO_F" tests/ | awk '/\.test\.sh$/ { n++ } END { print n }') $(awk '/^Gating:/ { print $2 + $4 }' "$FOREC/red-F.log")"
+expect_eq "FO-1 AC-1.3 the judge takes a red whole run's log at F as the floor's candidate (exit 0, head F)" \
+  "rc=0 ${FO_F}" "$(L=red-F.log fo_run "$FO_JUDGE")"
+expect_eq "FO-1b …and lists its red suite as owed, read from the runner's Failed: block" "a.test.sh" \
+  "$(fo_run 'proof_floor_owed "$FOREC/red-F.log"')"
+fo_log red-unlisted.log "$FO_F" 2 1
+expect_contains "FO-2 a red run whose Failed: block names fewer suites than its verdict counts is refused" \
+  "rc=1 " "$(L=red-unlisted.log fo_run "$FO_JUDGE")"
+expect_contains "FO-2b …saying so" "counts 1 failed but its Failed: block names 0" "$(L=red-unlisted.log fo_run "$FO_JUDGE")"
+fo_log red-part.log "$FO_F" 1 1 a.test.sh
+expect_contains "FO-2c a red run that is not whole is refused as not whole" "is not a whole run (1 passed and 1 failed of 3 suites at its head)" \
+  "$(L=red-part.log fo_run "$FO_JUDGE")"
+fo_prove "$FO_F" red-F.log
+expect_eq "FO-3 AC-1.3 the floor proof at F with a.test.sh red and nothing landed: proof_state reads owed a.test.sh" \
+  "owed	a.test.sh" "$(fo_state)"
+expect_eq "FO-3b …and facts_state's floor line says owed a.test.sh, never uncovered" "owed	a.test.sh" "$(fo_facts "$FO_F")"
+expect_eq "FO-3c …the judge's head is the working branch's ref (proof_branch_head)" "$FO_F" \
+  "$(fo_run 'proof_branch_head "$FOP" "$FOR"')"
+FO_S1="$(fo_commit lib/x.sh 'x three')"
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=%s|suites=a.test.sh|cmd=bash tests/a.test.sh\n' "$FO_S1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >> "$(fo_git rev-parse --absolute-git-dir)/bionic-stamps"
+expect_eq "FO-4 a green stamp of a.test.sh at a later commit is no landing: the commit is proved by it, the red stays owed" \
+  "owed	a.test.sh" "$(fo_state)"
+FO_C1="$(fo_land T7 lib/x.sh 'x four' tests/a.test.sh)"
+fo_verdict T7 "$FO_C1" tests/a.test.sh red 2099-01-01T00:00:00Z
+FO_ST="$(fo_state)"
+expect_eq "FO-5 the fix row's landing of a.test.sh red: its commit is not proved, so uncovered" "uncovered" "${FO_ST%%	*}"
+expect_contains "FO-5b …naming the suite red at the fix commit (a later red supersedes the stamp's green at the commit before it)" \
+  "commit ${FO_S1:0:12} (no landing row) is not proved: a.test.sh is red at ${FO_C1:0:12}" "$FO_ST"
+FO_FS="$(fo_facts "$FO_C1")"
+expect_eq "FO-5c …and facts_state's floor line is uncovered F..head, then the reason" \
+  "uncovered	${FO_F}..${FO_C1}	${FO_ST#*	}" "$FO_FS"
+fo_verdict T7 "$FO_C1" tests/a.test.sh green 2099-01-01T00:00:01Z
+expect_eq "FO-6 AC-1.3 a later green landing of a.test.sh (file-name key: the record says tests/a.test.sh) closes it: covered" \
+  "covered	${FO_C1}" "$(fo_state)"
+expect_eq "FO-6b …and facts_state's floor line is covered" "covered" "$(fo_facts "$FO_C1")"
+expect_eq "FO-6c …with no second whole run: the proof line still names F" "1 ${FO_F}" \
+  "$(grep -c '^proved: kind=floor' "$FOP") $(fo_run 'proof_last "$FOP" floor')"
+
+section "§FLOOR-COVER: a fix row is covered when every code file it changed is declared by a suite it ran; an undeclared one owes a second whole run, or approve regression-2 (wave-35 T9; REQ-1 AC-1.4; D9)"
+# Continues §FLOOR-OWED's repository at covered: T7 changed lib/x.sh and ran a.test.sh, which declares it.
+# The cover is the anchor index at the judged head (lib/anchors.sh `anchors_index`), keyed by file name; a
+# code file is a path outside tests/, the docs and the timing table.
+# fails-when: an undeclared file passes, or a declared one owes a second run.
+expect_eq "FC-0 precondition: the index the judge reads says a.test.sh declares lib/x.sh, and nothing declares lib/y.sh" \
+  "lib/x.sh	tests/a.test.sh" "$(fo_run '. "$1/anchors.sh" && anchors_index "$FOR" HEAD')"
+FO_C2="$(fo_land T8 tests/b.test.sh 'echo more' tests/b.test.sh)"
+fo_verdict T8 "$FO_C2" tests/b.test.sh green
+expect_eq "FC-1 a fix row that changed only a test file owes no declaration: covered" "covered	${FO_C2}" "$(fo_state)"
+FO_C3="$(fo_land T9 lib/y.sh 'y two' tests/a.test.sh)"
+fo_verdict T9 "$FO_C3" tests/a.test.sh green
+FO_ST="$(fo_state)"
+expect_eq "FC-2 AC-1.4 a fix row that changed lib/y.sh, which no suite it ran declares: uncovered" "uncovered" "${FO_ST%%	*}"
+expect_contains "FC-2b …naming the row, the file and the second whole run owed" \
+  "commit ${FO_C3:0:12} (row T9) is not proved: lib/y.sh is declared by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$FO_ST"
+expect_eq "FC-2c …and facts_state's floor line is uncovered F..head" "uncovered	${FO_F}..${FO_C3}" "$(fo_facts "$FO_C3" | cut -f1,2)"
+printf 'approved: regression-2 by Dana Fixture 2026-10-12T02:00:00Z "no second run, the y change is a message"\n' >> "$FOP"
+expect_eq "FC-3 AC-1.4 approve regression-2: the undeclared file is the user's to waive, covered" "covered	${FO_C3}" "$(fo_state)"
+expect_eq "FC-3b …and facts_state's floor line covered" "covered" "$(fo_facts "$FO_C3")"
+
+section "§FLOOR-DOCS: a commit that touches only non-code paths inherits its parent's standing (wave-35 T9; REQ-1 AC-1.5; D8)"
+# Continues §FLOOR-COVER's repository at covered. The non-code paths are lib/proof.sh `_proof_docs_path`'s one
+# list (CHANGELOG.md, README.md, CLAUDE.md, .bionic/, .claude/rules/, the timing table tests/timing.tsv) and
+# the docs root; no run is recorded at any commit below.
+# fails-when: the docs-only commit reads `uncovered`.
+FO_D1="$(printf 'notes\n' >> "$FOR/CHANGELOG.md"; mkdir -p "$FOREC"; printf 'x\n' > "$FOR/.bionic/docs/record/x.md"
+  fo_git add -f CHANGELOG.md .bionic/docs/record/x.md && fo_git commit -qm 'docs: changelog and a record' && fo_git rev-parse HEAD)"
+expect_eq "FD-0 precondition: the commit touches CHANGELOG.md and .bionic/docs/record/x.md, nothing else" \
+  "$(printf '.bionic/docs/record/x.md\nCHANGELOG.md')" "$(fo_git show --name-only --format= "$FO_D1" | sort)"
+expect_eq "FD-1 AC-1.5 a docs-only commit after F with no run recorded at it: covered, its parent's standing" \
+  "covered	${FO_D1}" "$(fo_state)"
+expect_eq "FD-1b …and facts_state's floor line covered" "covered" "$(fo_facts "$FO_D1")"
+FO_D2="$(fo_commit tests/timing.tsv 'a.test.sh	3')"
+expect_eq "FD-2 the timing table alone: covered" "covered	${FO_D2}" "$(fo_state)"
+FO_D3="$(fo_commit lib/x.sh 'x five')"
+FO_ST="$(fo_state)"
+expect_eq "FD-3 control: a code commit with no run recorded at it is uncovered" "uncovered" "${FO_ST%%	*}"
+expect_contains "FD-3b …naming it" "commit ${FO_D3:0:12} (no landing row) is not proved: no suite run is recorded at it" "$FO_ST"
 
 finish

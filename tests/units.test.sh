@@ -3790,6 +3790,9 @@ fs_stamp() {  # <suite> <rc> <at> -> one stamp at the checkout's head, clean, in
 mkdir -p "$FS_REPO/tests" "$FS_REPO/lib" "$(dirname "$FS_PLAN")"
 fs_git init -q 2>/dev/null; fs_git checkout -q -b wave/99-fs 2>/dev/null
 for s in a b c d e; do printf '#!/bin/bash\n' > "$FS_REPO/tests/$s.test.sh"; done
+# a and b DECLARE lib/one.sh (wave-35 T9; D9): a commit past the floor is covered only by a suite run at it
+# that declares each code file it changed (lib/anchors.sh reads the shaped call), so the runs below are of them.
+for s in a b; do printf '#!/bin/bash\n%s file lib/one.sh %s\n' anchor "'one'" > "$FS_REPO/tests/$s.test.sh"; done
 printf 'one\n' > "$FS_REPO/lib/one.sh"
 printf '.bionic/\n' > "$FS_REPO/.gitignore"
 fs_git add .gitignore tests lib && fs_git commit -qm base
@@ -3944,11 +3947,16 @@ awk '/^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef012345
   "$FS_PLAN" > "$FS_REPO/.bionic/foreign.md"
 expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ", the proved head is not a commit here;" \
   "$(call units_waiting "$FS_REPO/.bionic/foreign.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
+# THE HEAD IS THE BRANCH'S REF, NEVER A CHECKOUT'S (wave-35 T9; A-orch-45; lib/proof.sh `proof_branch_head`): a
+# detached checkout changes nothing the judge reads, and a branch that names no commit is uncovered.
 fs_git checkout -q --detach 2>/dev/null
-expect_contains "FS.14 a detached checkout: no checkout holds the working branch, and the wait says so" \
-  ", no checkout holds the working branch wave/99-fs;" "$(fs_why)"
-fs_git checkout -q wave/99-fs 2>/dev/null
-expect_eq "FS.14b …and back on the branch, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.14 A-orch-45 a detached checkout: the judge reads the working branch's ref, so the floor at its head stands" \
+  "T3" "$(call units_ready "$FS_PLAN" 8)"
+fs_git branch -q -D wave/99-fs 2>/dev/null
+expect_contains "FS.14b …and with the branch deleted the wait says the working branch names no commit" \
+  ", the working branch wave/99-fs names no commit here;" "$(fs_why)"
+fs_git checkout -q -b wave/99-fs 2>/dev/null
+expect_eq "FS.14c …and the branch back, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 unset UNITS_FACTS_STATE
 
@@ -4727,5 +4735,85 @@ expect_eq "BR-mut2 AC-5.3 with no SDLC-State arm, ready prints no-working-branch
 expect_eq "BR-mut3 …the card reads no branch" "working not declared" "$(br_card "$BR_MUT")"
 expect_eq "BR-mut4 …the proof judge reads no branch" "uncovered	the plan names no working-branch" "$(br_proof "$BR_MUT")"
 expect_eq "BR-mut5 …and the evidence gate holds the head against the checkout instead" "(HEAD of $BR_REPO)" "$(br_gate "$BR_MUT")"
+
+
+# ============================================================
+section "§FLOOR-ROW — wave-35 T9: the floor row reads proof:review and head, so it waits for every owed reading and every fix row born of one (REQ-1 AC-1.1; D8, ADR-054)"
+# ============================================================
+# The floor is Step 6's last act: one whole run once the readings and their fix rows have landed. A test row
+# at Step 6 or later takes `approval:plan, proof:review, head` as its kind default (`kdef`), and its
+# `proof:review` is met by the readings alone: lib/proof.sh `facts_state`'s review lines at the working
+# branch's head, asked once by the program when a pending row's answer turns on them (`_units_readings_state`),
+# never by the floor fact the row itself writes. The integrate row keeps the whole judge (UNITS_FACTS_STATE).
+# FIXTURE FIDELITY: a real repository on its working branch; the plan at Step 6 with the floor row's reads cell
+# empty (the kind default), the review row landed, two of the three readings at the head written by the
+# product's writer (`proof_line`), the evidence reading absent.
+# fails-when: the floor row is ready while a question has no fact at head.
+FR="$SANDBOX/floor-row"; FR_PLAN="$FR/.bionic/docs/plans/epic-99/wave-99-fr.plan.md"
+mkdir -p "$FR/lib" "${FR_PLAN%/*}"
+fr_git() { git -C "$FR" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
+fr_git init -q 2>/dev/null; fr_git checkout -q -b main 2>/dev/null
+printf '.bionic/\n' > "$FR/.gitignore"; printf 'one\n' > "$FR/lib/one.sh"
+fr_git add .gitignore lib && fr_git commit -qm base
+FR_B="$(fr_git rev-parse HEAD)"
+fr_git checkout -q -b wave/99-fr 2>/dev/null
+printf 'two\n' > "$FR/lib/one.sh"; fr_git commit -qam 'T1 landed'
+FR_H="$(fr_git rev-parse HEAD)"
+fr_reading() {  # <question> -> the reading's proof line at the head, by the product's writer
+  call proof_line review "$FR_H" 2026-10-12T03:00:00Z "record/fr/$1.md" "$1" w-read pass piece
+}
+fr_plan() {  # <reading lines> <floor row's reads cell> [<extra row>] -> the plan at Step 6
+  { printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\n---\n\n## SDLC State\n\ncurrent: 6\nworking-branch: wave/99-fr\n' "$FR_B"
+    printf 'approved-by: fixture 2026-10-12T00:00:00Z "approved"\n%s\n\n' "$1"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/one.sh |  | landed |\n'
+    printf '| T2 | 6 | review | the readings | critic | — | 30 | REQ-x | .bionic/docs/record/fr/r.md |  | landed |\n'
+    [ -z "${3:-}" ] || printf '%s\n' "$3"
+    printf '| T14 | 6 | test | the floor | test-runner | — | 45 | REQ-x | — | %s | pending |\n' "$2"
+  } > "$FR_PLAN"
+}
+fr_why() { call units_waiting "$FR_PLAN" 6 | awk -F'\t' '$1 == "T14" && index($2, "proof:review") == 1 { print $2 }'; }
+FR_TWO="$(fr_reading adversarial; printf '\n'; fr_reading structure)"
+fr_plan "$FR_TWO" ""
+expect_contains "FR-0 precondition: facts_state at the head deals the evidence question and finds no fact for it" \
+  "$(printf 'review\tevidence\tbionic:auditor\tpiece\tabsent')" \
+  "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_state "$2" "$3"' _ "${LIB%/*}" "$FR_PLAN" "$FR_H" 2>/dev/null)"
+expect_eq "FR-0b …while the two written readings are covered at the head (the extractor reads real lines)" "covered covered" \
+  "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_state "$2" "$3"' _ "${LIB%/*}" "$FR_PLAN" "$FR_H" 2>/dev/null \
+     | awk -F'\t' '$1 == "review" && ($2 == "adversarial" || $2 == "structure") { printf "%s%s", (n++ ? " " : ""), $NF }')"
+expect_eq "FR-1 AC-1.1 an open evidence question at the head: the floor row is not ready" "" "$(call units_ready "$FR_PLAN" 6)"
+expect_contains "FR-1b …and its wait is proof:review, naming the question the readings lack" "review evidence bionic:auditor piece absent" "$(fr_why)"
+fr_plan "$FR_TWO
+$(fr_reading evidence)" ""
+expect_eq "FR-2 AC-1.1 the evidence reading added at the head: the floor row is ready" "T14" "$(call units_ready "$FR_PLAN" 6)"
+expect_eq "FR-2b …and nothing is told for its proof:review" "" "$(fr_why)"
+fr_plan "$FR_TWO
+$(fr_reading evidence)" "" '| T7 | 6 | build | fix a finding · born: review | implementor | — | 30 | REQ-x | lib/one.sh |  | active |'
+expect_eq "FR-3 AC-1.1 a fix row born of a reading still open: the floor row waits on head" "" "$(call units_ready "$FR_PLAN" 6)"
+expect_eq "FR-3b …naming the fix row as the head's writer" "yes" \
+  "$(has_line "$(call units_waiting "$FR_PLAN" 6 | awk -F'\t' '$1 == "T14" { print $2 "\t" $3 }')" "head	T7")"
+fr_plan "$FR_TWO
+$(fr_reading evidence)" "approval:plan, proof:review, head"
+expect_eq "FR-4 the same reads written in the cell (the plan's own T14): ready, the default is the cell's equal" "T14" "$(call units_ready "$FR_PLAN" 6)"
+fr_plan "$FR_TWO" "approval:plan, proof:review, head"
+expect_eq "FR-4b …and not ready with the evidence fact absent" "" "$(call units_ready "$FR_PLAN" 6)"
+# THE INTEGRATE ROW WAITS ON AN OWED RED (wave-35 T9; AC-1.3): the floor at the head names a red of its whole run
+# (`owed=`, as proof-add floor writes it), so proof_state says owed and the wait says which suite and the way out.
+fr_integrate() {  # <floor line> -> the plan with the floor row landed, the integrate row pending, the facts handed covered
+  fr_plan "$FR_TWO
+$(fr_reading evidence)
+$1" "" '| T21 | 8 | integrate | merge | — | — | 10 | REQ-x | — |  | pending |'
+  sed 's/^| T14 \(.*\) pending |$/| T14 \1 landed |/' "$FR_PLAN" > "$FR_PLAN.x" && mv "$FR_PLAN.x" "$FR_PLAN"
+}
+fr_integrate "$(call proof_floor_line "$FR_H" 2026-10-12T04:00:00Z record/fr/floor.log)"
+expect_eq "FR-5 control: a green floor at the head, the readings covered: integrate is ready" "T21" \
+  "$(UNITS_FACTS_STATE=covered call units_ready "$FR_PLAN" 8)"
+fr_integrate "$(call proof_floor_line "$FR_H" 2026-10-12T04:00:00Z record/fr/floor.log a.test.sh)"
+expect_eq "FR-5b AC-1.3 the floor at the head owes a.test.sh: integrate is not ready" "" \
+  "$(UNITS_FACTS_STATE=covered call units_ready "$FR_PLAN" 8)"
+expect_contains "FR-5c …and its proof:floor wait names the red suite and the way out" \
+  "proof:floor: the whole run at ${FR_H:0:12} left a.test.sh red, each owed until a later landing runs it green" \
+  "$(UNITS_FACTS_STATE=covered call units_waiting "$FR_PLAN" 8 | awk -F'\t' '$1 == "T21" && index($2, "proof:floor") == 1 { print $2 }')"
 
 finish
