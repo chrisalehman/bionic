@@ -174,7 +174,10 @@ ht_count() {
   HT_N=$(LC_ALL=C grep -o '|HTCOUNT|' "$tr" 2>/dev/null | wc -l | tr -d ' ')
   rm -f "$tr"
 }
-ht_bytes() { jq -r '.tool_input.command // .tool_input.file_path' "$1" | wc -c | tr -d ' '; }
+ht_bytes() {  # <payload> -> the bytes of its command, or of the file an Edit names
+  local c; c="$(jq -r '.tool_input.command // empty' "$1")"
+  if [ -n "$c" ]; then printf '%s' "$c" | wc -c | tr -d ' '; else wc -c < "$(jq -r '.tool_input.file_path' "$1")" | tr -d ' '; fi
+}
 
 # ---------- the fixtures ----------
 
