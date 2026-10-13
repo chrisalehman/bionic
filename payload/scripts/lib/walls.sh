@@ -3858,9 +3858,8 @@ Plan: $PLAN
 Fix: record the hex sha the regression ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
     refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"
   fi
-  wb=$(echo "$SECTION" | grep -E '^[[:space:]]*working-branch[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*//; s/[[:space:]].*$//')
-  [ -n "$wb" ] || wb=$(plan_frontmatter_get "$PLAN" working-branch)
+  # The plan's working branch through lib/run.sh's one reader, SDLC State then frontmatter (wave-35 T7; D14).
+  wb=$(plan_working_branch "$PLAN")
   tip=""
   [ -n "$wb" ] && tip=$(git -C "$dir" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)
   [ -n "$tip" ] || { wb=""; tip=$(git -C "$dir" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null); }
