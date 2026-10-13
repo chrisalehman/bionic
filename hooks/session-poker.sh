@@ -8312,7 +8312,15 @@ EOF
     # THE FINDINGS A ROW ANSWERS (wave-33 T13; REQ-5, D6): each is a finding of a reading the plan registered,
     # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
     # before off, and the guards below hold it as they hold a typed rating.
-    TA_BORN_MARK=""
+    # A FINDING THE PERSON MOVED TO FIX IS ASKED, NOT UNASKED (wave-35 T34; A-orch-48): its effective priority
+    # (`finding_read`'s FR_P, a `moved:` line) is fix, and `disposition` tells the orchestrator to born a row of
+    # it, so the policy guard holds each finding to the policy OR to the person's move, the first that is
+    # neither refused with the remedy. The marker keeps the reader's rating, never re-rated.
+    TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""
+    TA_POL="$(plan_frontmatter_get "$TA_PLAN" fix-policy)"
+    if [ -z "$TA_POL" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$TA_PLAN" 2>/dev/null; then
+      TA_POL="$FIX_POLICY_DEFAULT"
+    fi
     if [ -n "$TA_BORN_IDS" ]; then
       TA_BEST=""
       for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
@@ -8322,17 +8330,20 @@ EOF
         fi
         TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
         if [ -z "$TA_BEST" ] || [ "$TA_RANK" -lt "$TA_BEST" ]; then TA_BEST="$TA_RANK"; TA_BORN="review $FR_S $FR_R"; fi
+        if [ -z "$TA_OFF" ] && [ "$FR_P" != fix ] && ! fix_policy_covers "$TA_POL" "$FR_S" "$FR_R"; then
+          TA_OFF="$TA_BID"; TA_OFF_RATING="review $FR_S $FR_R"
+        fi
       done
       TA_BORN_MARK=" of=$TA_BORN_IDS"
+      if [ -n "$TA_OFF" ]; then
+        die "task-add refused — born: $TA_OFF_RATING is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3). To fix $(clean "$TA_OFF") anyway: disposition $(clean "$TA_OFF") fix '<their words>' '<why>', then task-add again."
+        exit 1
+      fi
     fi
     TA_CELL_TASK="$TA_TASK"
     if [ -n "$TA_BORN" ]; then
       TA_RATING="${TA_BORN#review }"
-      TA_POL="$(plan_frontmatter_get "$TA_PLAN" fix-policy)"
-      if [ -z "$TA_POL" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$TA_PLAN" 2>/dev/null; then
-        TA_POL="$FIX_POLICY_DEFAULT"
-      fi
-      if ! fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }"; then
+      if [ -z "$TA_BORN_IDS" ] && ! fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }"; then
         die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3)."
         exit 1
       fi
