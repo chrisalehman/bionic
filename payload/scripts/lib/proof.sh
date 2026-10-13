@@ -1034,7 +1034,7 @@ _proof_walk() {
     else case "$f" in tests/*) cls=test ;; *) cls=code ;; esac; fi
     changed="$changed${changed:+$'\n'}C	$c	$cls	$f"
   done <<PROOF_WALK_FILES
-$(git -C "$co" log --first-parent -m --no-renames --name-only --format='%x01%H' "${from}..${to}" 2>/dev/null)
+$(git -C "$co" log --no-renames --first-parent -m --name-only --format='%x01%H' "${from}..${to}" 2>/dev/null)
 PROOF_WALK_FILES
   case "$changed" in
     *"	code	"*) [ "$waive" = 1 ] || { _proof_anchors_load && idx="$(anchors_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')"; } ;;

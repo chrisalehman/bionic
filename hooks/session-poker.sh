@@ -9927,7 +9927,7 @@ command: %s
       exit 0
     fi
     if ! proof_kind_ok "$PF_KIND"; then
-      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review, task or inherited. The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task (or proof-add inherited <suite>). The plan is unchanged."
       exit 1
     fi
     # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
