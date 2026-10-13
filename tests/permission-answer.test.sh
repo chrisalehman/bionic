@@ -429,7 +429,7 @@ MUT="$SANDBOX/mut"
 mkdir -p "$MUT/hooks" "$MUT/scripts/lib"
 cp "$LIBDIR"/*.sh "$MUT/scripts/lib/"
 cp "$HOOK" "$MUT/hooks/permission-answer.sh" 2>/dev/null
-anchor "$HOOK" "trap '_pa_on_exit' EXIT" 1
+anchor file hooks/permission-answer.sh "trap '_pa_on_exit' EXIT"
 for plant in 'exit 0' 'exit 3' 'printf %s "$PA_NEVER_SET_VARIABLE"'; do
   awk -v p="$plant" '{ print } $0 == "trap '"'"'_pa_on_exit'"'"' EXIT" { print p }' "$HOOK" > "$MUT/hooks/pa-mutant.sh"
   expect_eq "A5.g0 [$plant] the plant landed (the mutant differs from the hook by one line)" "1" \

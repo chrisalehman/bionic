@@ -717,7 +717,7 @@ cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/hooks/session-sweeper.sh"
 # would still match a reindented copy the awk no longer touches, leaving a mutant that
 # is byte-identical to the shipped gate and every row below it green against it. The
 # count was measured against the shipped gate before this call was written.
-anchor -E "$GATE_SRC" '^    if \(aid != ""\) agent\[name\] = aid$' 1
+anchor insert payload/scripts/lib/stop.sh '    if (aid != "") agent[name] = aid'
 awk '{
        if ($0 == "    if (aid != \"\") agent[name] = aid") {
          print "    if (aid == \"\") agent[name] = aid"
@@ -1321,8 +1321,8 @@ cp "$HOOKS_DIR/session-sweeper.sh" "$SUPDIR/hooks/session-sweeper.sh"
 # latest state, so the UNMET comparison rejects it too. The mutant is therefore the
 # over-broad implementation this arm could plausibly have been written as — supersede any
 # teammate row whose artifact is on disk — rather than a single-character typo.
-anchor -E "$GATE_SRC" '\(nm in mstate\)' 1
-anchor -E "$GATE_SRC" 'mstate\[nm\] !=' 1
+anchor file payload/scripts/lib/stop.sh '(nm in mstate)'
+anchor file payload/scripts/lib/stop.sh 'mstate[nm] !='
 awk '{
        if (index($0, "(nm in mstate)") > 0 || index($0, "mstate[nm] !=") > 0) {
          print "        if (0) continue"
@@ -1583,8 +1583,8 @@ mkdir -p "$SM_DIR" "$SM_DIR2" "$SM_DIR3"
 # BOTH ANCHORS ONCE, IMMEDIATELY BEFORE THE THREE MUTANTS THEY GUARD — the pair below and
 # the two single-line variants further down are the same two rewrites in three
 # combinations, so anchoring each pattern once is anchoring all three.
-anchor -E "$GATE_SRC" '^SWEPT_SCHEMA=' 1
-anchor -E "$GATE_SRC" '^swept_marker_write\(\)' 1
+anchor insert payload/scripts/lib/stop.sh 'SWEPT_SCHEMA='
+anchor insert payload/scripts/lib/stop.sh 'swept_marker_write()'
 sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' -e 's/^swept_marker_write()/  swept_marker_write()/' \
   "$GATE_SRC" > "$SM_DIR/stop.sh"
 sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' "$GATE_SRC" > "$SM_DIR2/stop.sh"
