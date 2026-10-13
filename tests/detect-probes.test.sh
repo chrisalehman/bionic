@@ -903,7 +903,10 @@ section "Group 6f: detect_rc_claude_proxy — a block the user changed is its ow
 # read with the system tools on the PATH (`markers_regular` needs `cmp`).
 RS='# ─── bionic:rc:start ───'; RE='# ─── bionic:rc:end ───'
 RC_UN='unalias claude 2>/dev/null || true'
-RC_FN='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+# bionic's current function line, read from env.sh (wave-36 T1 changed it); the 1.18.0 line is an
+# earlier body (`rc_earlier`): alone it is the pre-T75 body, under the unalias line the 1.18.0 one.
+RC_FN="$(bash -c '. "$1"; rc_default claude-proxy' _ "${REPO}/payload/scripts/lib/env.sh" | sed 1d)"
+RC_FN_118='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
 rc_probe() {  # <name> <block line…> — the fact for an rc holding that block
   local f="$TMP/rc-$1"; shift
   { printf '%s\n' 'export V1=1' "$RS"; [ $# -gt 0 ] && printf '%s\n' "$@"; printf '%s\n' "$RE" 'export V2=2'; } > "$f"
@@ -912,10 +915,12 @@ rc_probe() {  # <name> <block line…> — the fact for an rc holding that block
 expect_eq "rc proxy: bionic's two lines are yes" "env:rc-claude-proxy present=yes" "$(rc_probe cur "$RC_UN" "$RC_FN")"
 expect_eq "rc proxy: …with a user's line between them, still yes" "env:rc-claude-proxy present=yes" \
   "$(rc_probe between "$RC_UN" 'export V9=9' "$RC_FN")"
-expect_eq "rc proxy: the earlier one-line body is stale" "env:rc-claude-proxy present=stale" "$(rc_probe old "$RC_FN")"
+expect_eq "rc proxy: the current line is not the 1.18.0 one (the rows below are not vacuous)" "" "$([ "$RC_FN" = "$RC_FN_118" ] && echo same)"
+expect_eq "rc proxy: the earlier one-line body is stale" "env:rc-claude-proxy present=stale" "$(rc_probe old "$RC_FN_118")"
+expect_eq "rc proxy: the 1.18.0 two-line body is stale (wave-36 T1)" "env:rc-claude-proxy present=stale" "$(rc_probe old118 "$RC_UN" "$RC_FN_118")"
 expect_eq "rc proxy: an empty block is stale" "env:rc-claude-proxy present=stale" "$(rc_probe empty)"
 expect_eq "rc proxy: the earlier body with a user's line is changed" "env:rc-claude-proxy present=changed" \
-  "$(rc_probe old-u "$RC_FN" 'export V9=9')"
+  "$(rc_probe old-u "$RC_FN_118" 'export V9=9')"
 expect_eq "rc proxy: bionic's lines swapped are changed" "env:rc-claude-proxy present=changed" \
   "$(rc_probe swapped "$RC_FN" "$RC_UN")"
 RC_RO_BEFORE="$(shasum -a 256 "$TMP/rc-old-u")"
