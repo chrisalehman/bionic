@@ -389,6 +389,14 @@ entry_check() {
   for n in T28 T29; do
     case "$row" in *"$n"*) ;; *) echo "entry: catalogue item also-3 does not name its fix $n" ;; esac
   done
+  printf '%s\n' "$blk" | grep -q -E 'pending T[0-9]' && echo "entry: the 1.18.0 block still carries a pending T marker"
+  for n in T31 T32 T33 T34; do
+    # the bullet "- <n> (…" runs to the next bullet or heading; its record is a `<n>-….md` name
+    printf '%s\n' "$blk" | awk -v n="$n" '
+      /^- |^#/ { f = (index($0, "- " n " (") == 1) }
+      f && index($0, "`" n "-") && /\.md`/ { ok = 1 }
+      END { exit !ok }' || echo "entry: the fix row $n names no record"
+  done
   [ "$(cl_block "$f" 1.17.0 | cl_cksum)" = "$BLOCK_1170_CKSUM" ] ||
     echo "entry: the 1.17.0 block is not as released"
   return 0
@@ -427,6 +435,11 @@ doctor stale3 sed '/^| also-3 |/s/T28/pending T17/g'
 expect_contains "(e2j) an also-3 cell that reads pending T17 again: red" "entry: catalogue item also-3 still reads pending T17" "$(entry_check "$TMP/doctored.stale3")"
 doctor nofix3 sed '/^| also-3 |/s/T29/T2x/g'
 expect_contains "(e2k) an also-3 cell that does not name T29: red" "entry: catalogue item also-3 does not name its fix T29" "$(entry_check "$TMP/doctored.nofix3")"
+doctor pend sed 's/^- T33 (.*$/- T33, `pending T33`: the continuation merge./'
+expect_contains "(e2l) a fix row that reads pending T33 again: red" "entry: the 1.18.0 block still carries a pending T marker" "$(entry_check "$TMP/doctored.pend")"
+doctor norec sed 's/`T32-floor-run-dirty\.md`/the record/g'
+expect_contains "(e2m) a fix row T32 that names no record: red" "entry: the fix row T32 names no record" "$(entry_check "$TMP/doctored.norec")"
+expect_eq "(e2m) …and the fix-row pattern finds T32 once, so (e1) read a real row" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^- T32 \(')"
 expect_eq "(e2k) …and the also-3 row pattern finds the cell once, so (e1) read a real row" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^\| also-3 \|')"
 
 section "§ADR — ADR-053 is Superseded naming ADR-054 and ADR-054 is Accepted (AC-3.2)"
