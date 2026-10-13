@@ -4672,6 +4672,87 @@ expect_contains "FN-7b …naming the setting" "regression: no" "$OUT"
 expect_eq "FN-7c …and nothing ran" "2" "$(fn_runs)"
 POKE_BOUND="$FN_BOUND_WAS"
 
+
+# ============================================================
+# §HOLD — FILL never offers a row a roster holds open, another session's or this one's (wave-35 T28; REQ-5 AC-5.5, D14; A-orch-27)
+# ============================================================
+# T17 reproduced it (record/wave-35-no-workarounds/two-writers.md): session B's tick printed `FILL T1 T2`
+# while `adopt --report-only`, a second earlier, listed w01-T1 open on row T1 from session A's roster. The
+# fill read the plan alone. It now asks lib/fill.sh `fill_roster_holds`: the open names of every
+# `roster-<sid>.state` under .bionic/tmp (the walk `adopt` takes), each roster's acks applied and an ack
+# taken in another session too, kept to the rows dispatched under the plan being filled. A ready row such
+# a name holds is not offered, and its WAIT line names the writer and the roster's session.
+# FIXTURES: this session's roster empty; the plan one pending build row T1; a second roster, session
+# HD_SID_B, holding w01-T1 (identified, an agent id, row=T1, plan= this plan). SYNTHESIZED.
+# fails-when: the tick prints FILL T1 while w01-T1 is open on either roster; the WAIT line does not name the
+# writer and its session; an ack on that roster leaves the row held; a row of another plan holds T1; an
+# unreadable roster stops the fill or goes unsaid.
+HD_SID_B="5b0e2f4a-9d3c-4e71-8a62-2f6c1d0b7e93"
+hd_world() {  # <label> [<plan= value>] -> RHD, PHD; the other roster holding w01-T1 on row T1 (plan= this plan unless given)
+  RHD="$(make_repo "$1")"; new_roster "$RHD"
+  PHD="$(s47_plan "$RHD" 2 "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-x | payload/x.sh | pending | |")"
+  add_row_to "$RHD" "$HD_SID_B" status=identified name=w01-T1 agent_id=a7c3e19f0b2d4a581 \
+    launched_at=2026-10-13T03:20:51Z "plan=${2:-$(real_path_of "$PHD")}" row=T1
+}
+hd_fill() { s47_lines FILL | /usr/bin/grep -v '^poker: FILL — '; }  # the FILL line itself, not its "named for dispatch" note
+hd_decision() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|' | tr '|' '\n' | /usr/bin/grep '^decision='; }
+hd_ack_b() {  # <repo> <name> <at> — an ack on HD_SID_B's own ledger, in the sweeper's shape
+  local le="$1/.bionic/tmp/sweeper-${HD_SID_B}.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' "$3" "$HD_SID_B" "$2" >> "$le"
+}
+
+# control: the other roster's row is of another plan, so it holds nothing here
+hd_world hd-other-plan "$TMPROOT/elsewhere/.bionic/docs/plans/epic-98-x/wave-01-x.plan.md"
+poke_pressure "$RHD" 8192 1.0 tick
+expect_eq "HD.0 control: a row open on another roster under ANOTHER plan holds nothing — the tick fills T1" \
+  "poker: FILL T1" "$(hd_fill)"
+expect_eq "HD.0c …and its decision line reads decision=FILL" "decision=FILL" "$(hd_decision)"
+expect_empty "HD.0b …and prints no WAIT for T1 (HD.1 is the positive, same extractor)" "$(s47_lines WAIT | /usr/bin/grep ' T1 ')"
+
+hd_world hd-two
+poke "$RHD" adopt --report-only
+expect_contains "HD.1pre adopt --report-only lists w01-T1 open from the other session (the set the fill reads)" \
+  "from=${HD_SID_B}|name=w01-T1|" "$OUT"
+poke_pressure "$RHD" 8192 1.0 tick
+expect_eq "HD.1 AC-5.5 with w01-T1 open on session B's roster, the tick prints WAIT for T1 naming the writer and the session" \
+  "poker: WAIT T1 — w01-T1 open on roster ${HD_SID_B:0:8}" "$(s47_lines WAIT | /usr/bin/grep ' T1 ')"
+expect_empty "HD.1b AC-5.5 …and no FILL line (HD.0 is the positive, same extractor)" "$(hd_fill)"
+expect_eq "HD.1c …and its decision is not FILL (HD.0's line reads decision=FILL, same extractor)" "decision=QUIET" "$(hd_decision)"
+
+hd_ack_b "$RHD" w01-T1 2026-10-13T03:30:00Z
+forget_digest "$RHD"
+poke_pressure "$RHD" 8192 1.0 tick
+expect_eq "HD.2 the same row acked on that roster's own ledger after its launch: the tick fills T1" "poker: FILL T1" "$(hd_fill)"
+expect_empty "HD.2b …and no WAIT for T1 (HD.1 is the positive)" "$(s47_lines WAIT | /usr/bin/grep ' T1 ')"
+
+# AN ACK TAKEN IN ANOTHER SESSION closes it too (adopt's own cross-session read): this session adopted
+# a7c3e19f0b2d4a581 under the same name and acked it here.
+hd_world hd-xack
+add_row "$RHD" status=identified name=w01-T1 agent_id=a7c3e19f0b2d4a581 launched_at=2026-10-13T03:20:51Z \
+  "plan=$(real_path_of "$PHD")" row=T1
+s20_ack "$RHD" w01-T1 2026-10-13T03:30:00Z
+poke_pressure "$RHD" 8192 1.0 tick
+expect_eq "HD.3 the agent adopted here and acked here is closed on both rosters: the tick fills T1" "poker: FILL T1" "$(hd_fill)"
+
+# THIS SESSION'S OWN ROSTER holds too: its open row used to reach the fill as a count alone (TICK_OCCUPIED).
+RHD="$(make_repo hd-own)"; new_roster "$RHD"
+PHD="$(s47_plan "$RHD" 2 "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-x | payload/x.sh | pending | |")"
+add_row "$RHD" status=identified name=w01-T1 agent_id=a7c3e19f0b2d4a582 launched_at="$(iso_ago 60)" \
+  "plan=$(real_path_of "$PHD")" row=T1
+poke_pressure "$RHD" 8192 1.0 tick
+expect_eq "HD.4 AC-5.5 with w01-T1 open on this session's own roster, the tick prints WAIT for T1 naming it" \
+  "poker: WAIT T1 — w01-T1 open on roster ${SID:0:8}" "$(s47_lines WAIT | /usr/bin/grep ' T1 ')"
+expect_empty "HD.4b …and no FILL line" "$(hd_fill)"
+
+# A ROSTER THE SESSION CANNOT READ HOLDS NOTHING, and is said: never fatal.
+hd_world hd-unreadable
+chmod 000 "$(roster_of "$RHD" "$HD_SID_B")"
+poke_pressure "$RHD" 8192 1.0 tick
+chmod 644 "$(roster_of "$RHD" "$HD_SID_B")"
+expect_eq "HD.5 an unreadable roster holds nothing: the tick still fills T1 (rc 0)" "0|poker: FILL T1" "$RC|$(hd_fill)"
+expect_contains "HD.5b …and the tick says the roster cannot be read" "roster-${HD_SID_B}.state cannot be read" "$OUT"
+
 # ============================================================
 section "§SYNC-EMPTY: launch-sync on a plan whose ## Dispatch ledger has no rows records the first dispatch, under every bash found, set -u included (wave-35 T29; two-writers.md; A-orch-27)"
 # ============================================================

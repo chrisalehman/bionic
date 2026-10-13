@@ -1482,6 +1482,11 @@ expect_contains "GATES1c the control: with approved-by: written, the ready set o
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T1" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES1d …and the dispatch wall admits the writer for T1" "0" "$GATE_ST"
+# THE LAUNCH NOW HOLDS ITS ROW (wave-35 T28; AC-5.5): w-T1 is open on this session's roster, so the same
+# set no longer offers T1 (GATES1c is the positive, same extractor). GATES1e/1f therefore ask on a repo of
+# their own, where no launch holds T1.
+expect_absent "GATES1g AC-5.5 …and once w-T1 is launched for T1, the ready set no longer offers T1" "T1 " "$(gates_ready "$GATES_P")"
+REPO=$(make_repo rgates1l yes)
 # A TABLE WITHOUT `reads` applies no kind default, so nothing in the table itself waits for the
 # approval: the ready set's own gate is all that holds it. Keyed on `current: >= 4`, it would
 # offer T1 here.
@@ -1516,10 +1521,14 @@ expect_contains "GATES2d the ready set on the same plan offers T1 (the extractor
 expect_absent "GATES2e …and not the release" "T9" "$GATES_READY"
 GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED
 $GATES_RELEASE")"
+# The ready set is read before the release's launch: once w-T9 is on the roster it holds T9 (GATES2h).
+GATES_READY="$(gates_ready "$GATES_P")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$GATES_BRIEF" "w-T9" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "GATES2f with approved: release written, the release dispatch is admitted" "0" "$GATE_ST"
-expect_contains "GATES2g …and the ready set offers it" "T9" "$(gates_ready "$GATES_P")"
+expect_contains "GATES2g …and the ready set offers it" "T9" "$GATES_READY"
+expect_absent "GATES2h AC-5.5 …until its launch: with w-T9 open on the roster, the set no longer offers T9 (GATES2g is the positive)" \
+  "T9" "$(gates_ready "$GATES_P")"
 
 # --- GATES3: a doc row is not held by its step ---
 expect_contains "GATES3 AC-6.2 at current: 4 the Step-7 doc row whose reads exist is ready" \
@@ -3372,5 +3381,81 @@ rm_wall 'tests/run.sh --only b.test.sh'
 expect_eq "RM.5 a suite FILE off the budget is still refused (rc 2)" "2" "$RM_RC"
 expect_contains "RM.5b …and its remedy keeps --suites+ <suite>" "--suites+ b.test.sh" "$RM_ERR"
 expect_absent "RM.5c …never the whole run's path" "floor-run" "$RM_ERR"
+
+
+# ============================================================================
+section "§HOLD — a dispatch onto a row a roster holds open is refused, whichever session's roster (wave-35 T28; REQ-5 AC-5.5, D14; A-orch-27)"
+# ============================================================================
+# T17 (record/wave-35-no-workarounds/two-writers.md, finding 2) drove session B's launch of row T1 while
+# w01-T1 was open on session A's roster: the wall admitted it, because the live-writer arm (T7) reads this
+# session's roster alone. The arm now reads the set the fill reads, lib/fill.sh `fill_roster_holds`: every
+# roster's open names under .bionic/tmp, acks applied, the rows of this plan. A row-bound writer dispatch
+# onto a row one of those names holds is refused naming the writer and its session, unless it is this
+# session's own name. FIXTURES: make_repo's plan with one pending build row T1 (no agent, no tree); a
+# launch row through the one writer (`roster_row_fixture`) on SID_B's or SID_A's roster, identified, row=T1,
+# plan= this plan. SYNTHESIZED.
+# fails-when: a dispatch onto T1 is admitted while another session's or this session's roster holds T1
+# open under another name; the refusal names no writer or no session; an acked hold, or one of another
+# plan, still refuses; an unreadable roster refuses or goes unsaid.
+hdw_repo() {  # <tag> -> REPO, HDW_PLAN (physical); row T1 pending, no agent, no tree
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"; write_attestation "$REPO" "$SID_B"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | — | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  HDW_PLAN="$(cd "$REPO/.bionic/docs/plans/epic-99-test" && pwd -P)/wave-01-test.plan.md"
+}
+hdw_hold() {  # <repo> <sid> <name> [<plan= value>] — an open launch row of <name> on row T1
+  local f; f="$(roster_path "$1" "$2")"; mkdir -p "${f%/*}"
+  roster_row_fixture status=identified "session=$2" "name=$3" "agent_id=a-$3" launched_at=2026-09-02T00:00:00Z \
+    subagent_type=implementor "plan=${4:-$HDW_PLAN}" row=T1 >> "$f"
+}
+HDW_BRIEF="$(adv_brief 'Row: T1
+Lands-on: widget')"
+
+hdw_repo hdw1
+hdw_hold "$REPO" "$SID_B" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.1 AC-5.5 with w-T1 open on session B's roster, session A's dispatch onto row T1 is refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.1b …naming the writer" "row T1 has a live writer w-T1" "$GATE_REASON"
+expect_contains "HDW.1c …and its session" "session ${SID_B:0:8}" "$GATE_REASON"
+expect_eq "HDW.1d …and no launch row of w-T1-r1 was written" "0" \
+  "$(cat "$(roster_path "$REPO" "$SID_A")" 2>/dev/null | /usr/bin/grep -c '|name=w-T1-r1|')"
+
+hdw_repo hdw2
+hdw_hold "$REPO" "$SID_B" w-T1
+s22_ack "$REPO" "$SID_B" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.2 with w-T1 acked on session B's ledger after its launch, the same dispatch is admitted" "allow" "$GATE_VERDICT"
+
+hdw_repo hdw3
+hdw_hold "$REPO" "$SID_B" w-T1 "$SANDBOX/elsewhere/.bionic/docs/plans/epic-98-x/wave-01-x.plan.md"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.3 a row open on session B's roster under ANOTHER plan holds nothing here: admitted" "allow" "$GATE_VERDICT"
+
+# T17 FINDING 3, PINNED: the same session dispatching the row again under another name while its first
+# writer is open. The plan row names no writer and no tree, so T7's reads (`line_row_writer`, the marker)
+# have nothing to go on; the roster's row=T1 does.
+hdw_repo hdw4
+hdw_hold "$REPO" "$SID_A" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-again)"
+expect_eq "HDW.4 AC-5.5 with w-T1 open on this session's roster, a second dispatch of row T1 as w-T1-again is refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.4b …naming the writer" "row T1 has a live writer w-T1" "$GATE_REASON"
+expect_contains "HDW.4c …and the session, its own" "session ${SID_A:0:8}" "$GATE_REASON"
+
+# T17 case 2: session B launching the row under session A's own name. Names are per session; the
+# writer is not B's.
+hdw_repo hdw5
+hdw_hold "$REPO" "$SID_A" w-T1
+run_gate "$(mk_agent_payload "$SID_B" "$REPO" "$HDW_BRIEF" w-T1)"
+expect_eq "HDW.5 AC-5.5 session B dispatching row T1 under A's open name w-T1 is refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.5b …naming A's writer and A's session" "row T1 has a live writer w-T1 (session ${SID_A:0:8})" "$GATE_REASON"
+
+# A ROSTER THE SESSION CANNOT READ HOLDS NOTHING, and is said; never fatal.
+hdw_repo hdw6
+hdw_hold "$REPO" "$SID_B" w-T1
+chmod 000 "$(roster_path "$REPO" "$SID_B")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+chmod 644 "$(roster_path "$REPO" "$SID_B")"
+expect_eq "HDW.6 an unreadable roster on session B holds nothing: the dispatch is admitted" "allow" "$GATE_VERDICT"
+expect_contains "HDW.6b …and the wall says the roster cannot be read" "roster-${SID_B}.state cannot be read" "$GATE_ERR"
 
 finish
