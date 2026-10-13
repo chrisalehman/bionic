@@ -16,7 +16,8 @@ each line changes an act no hook can check.
   fed.
 - **The card parses one shape.** The Step-2 card parses decisions only as
   `- **D<n> — title** (D<n>; REQ…)` list items, and ADR links only as `(D<n>; …)` after a
-  backticked `adr-` path. Write the spec in that shape, or the card leaves the decision out.
+  backticked `adr-` path. Write the spec in that shape: the card refuses an untagged decision
+  bullet, or an ADR line with an `adr-` path and no `(D<n>)` group, exits 64 and names the shape.
 - **Verify a source of truth first.** Before you propose something as a design's source of
   truth, check what it actually carries.
 
