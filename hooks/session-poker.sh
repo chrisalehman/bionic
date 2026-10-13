@@ -465,6 +465,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names the row they wait on (declined-on=); a file or a word is refused"
+  die "  bash ${HOOK_DIR}/session-poker.sh decline lift [<ids>]   end the standing decline for those rows (every row it answers with no ids): one ledger line, and the next tick offers the rows it ended"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes"
@@ -479,6 +480,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the floor's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
@@ -10825,7 +10827,18 @@ RC_TAGS
         exit 1
       fi
     fi
-    FR_DIRTY="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
+    FR_DIRT="$(_wt_piece_dirt "$FR_CO")"
+    FR_DIRTY="$(printf '%s' "$FR_DIRT" | awk 'END { print NR + 0 }')"
+    # A DIRTY TREE IS REFUSED BEFORE THE RUN, NOT LOGGED AFTER IT (wave-35 T32; D20, A-orch-32). The log of a dirty
+    # whole run counted as the first whole run (rule 4) while proof-add floor refuses it, so the re-run its own message
+    # asked for was refused as a second whole run and the one allowed run was spent on nothing. The after-the-run
+    # comparison below stays: it guards a run that dirtied a clean tree.
+    if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -ne 0 ]; then
+      FR_PATHS="$(printf '%s\n' "$FR_DIRT" | sed -n '1,5p' | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $0 }')"
+      FR_MORE=""; [ "$FR_DIRTY" -le 5 ] || FR_MORE=", and $((FR_DIRTY - 5)) more"
+      die "REFUSED — the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) is dirty (dirty=$FR_DIRTY): $(clean "$FR_PATHS")$FR_MORE. The whole run proves a committed head, and a log of a dirty tree is refused by proof-add floor yet would count as the first whole run; nothing was run and no log was written; commit or stash it and run floor-run again."
+      exit 1
+    fi
     FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-floor-run.XXXXXX")" || {
       die "REFUSED — no scratch file for the regression's output can be made under ${TMPDIR:-/tmp}; nothing was run."
       exit 1
