@@ -2180,7 +2180,7 @@ hh_plant() {
                    print; next }
     /^## Tasks/ { print "```"; print "proved: kind=floor head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
                   print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
-                  print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "```"; print ""; print; next }
+                  print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "\140\140\140"; print ""; print; next }
     /^  readback:/ && !wr { print; print "  waiver: Chris Lehman 2026-10-06 \"waive the row\" — fixture"
                             print "  waiver: someone said we might waive this later"; wr = 1; next }
     { print }' "$plan" > "$w" && mv "$w" "$plan"
