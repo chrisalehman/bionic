@@ -4679,6 +4679,27 @@ expect_eq "FN-0b precondition: …holding two suites and the runner, and no conf
 expect_eq "FN-0c precondition: the plan's build rows are landed (nothing the regression waits on writes the head)" "" \
   "$(bash -c '. "$1/run.sh" && . "$1/units.sh" && units_floor_holds "$2" ""' _ "$C7_LIB" "$PFN" 2>/dev/null)"
 
+# ---------- a dirty checkout: refused before anything runs, naming the paths; no log, no proof, no spent run (wave-35 T32; D20) ----------
+# The log a dirty run wrote counted as the first whole run (rule 4) and proof-add floor refuses it, so the re-run its
+# own message asked for was refused as a second whole run. The dirty tree is now read before the run starts.
+# fails-when: a dirty checkout runs the suite, writes a floor-run log, or moves the plan; the refusal omits the paths,
+# the count or the remedy; a clean checkout is refused (FN-1 is the positive on the same checkout).
+for FN_I in 1 2 3 4 5 6 7; do printf 'x\n' > "$FN_WT/stray$FN_I.txt"; done
+s42_snap "$RFN" "$PFN"
+poke "$RFN" floor-run
+expect_eq "FN-D1 a dirty checkout: floor-run is refused (exit 1)" "1" "$RC"
+s42_unchanged "FN-D1b …and the plan's proof ledger is unchanged" 1 "$PFN"
+expect_eq "FN-D1c …nothing ran, and no floor-run log of any name was written" "0|0" \
+  "$(fn_runs)|$(ls "$FN_REC"/floor-run-*.log 2>/dev/null | awk 'END { print NR + 0 }')"
+expect_contains "FN-D1d …the refusal names the dirty checkout" "is dirty" "$OUT"
+expect_contains "FN-D1e …names the first five paths" "stray1.txt, ?? stray2.txt, ?? stray3.txt, ?? stray4.txt, ?? stray5.txt" "$OUT"
+expect_absent "FN-D1f …and not the sixth (FN-D1e is the positive, same output)" "stray6.txt" "$OUT"
+expect_contains "FN-D1g …then the count of the rest" "and 2 more" "$OUT"
+expect_contains "FN-D1h …and the remedy: commit or stash, then the same verb again" "commit or stash" "$OUT"
+rm -f "$FN_WT"/stray*.txt
+expect_eq "FN-D0 the checkout is clean again (the first whole run below is spent on a clean tree)" "" \
+  "$(git -C "$FN_WT" status --porcelain 2>/dev/null)"
+
 # ---------- the first whole run, red: run, logged, recorded with its red owed ----------
 s42_snap "$RFN" "$PFN"
 poke "$RFN" floor-run
@@ -4739,6 +4760,15 @@ poke "$RFN" floor-run
 s42_unchanged "FN-7 floor-run on a plan that declares regression: no" 1 "$PFN"
 expect_contains "FN-7b …naming the setting" "regression: no" "$OUT"
 expect_eq "FN-7c …and nothing ran" "2" "$(fn_runs)"
+
+# ---------- the verb listing (the unknown-verb path prints it) names decline lift and proof-add inherited (wave-35 T32; D20) ----------
+# fails-when: the listing omits the verb or a form of it a person is told to run elsewhere (the walk found `decline lift`
+# and `proof-add inherited` only in refusals and source).
+poke "$RFN" no-such-verb
+expect_eq "FN-L0 the unknown verb is the usage error (exit 2) and prints the listing (the extractor reads the decline line)" "2|yes" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'session-poker.sh decline <id>' && echo yes)"
+expect_contains "FN-L1 the listing has a line for decline lift [<ids>]" "session-poker.sh decline lift [<ids>]" "$OUT"
+expect_contains "FN-L2 the listing has a line for proof-add inherited <suite>" "session-poker.sh proof-add inherited <suite>" "$OUT"
 POKE_BOUND="$FN_BOUND_WAS"
 
 
