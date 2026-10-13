@@ -9,6 +9,10 @@
 #   bionic <version> (installed) · <sha or unknown> · <install path> · <this checkout |
 #   OTHER checkout | github feed | unregistered>
 #
+# — or, when a live session in this project runs a checkout in place (wave-36 T1, D7),
+#
+#   bionic <version> (in place) · <commit> · <root>
+#
 # — where:
 #   <version>      plugin.json's `.version`, via `detect_plugin_integrity` — the same
 #                  reader doctor.sh's header uses, so the two can never disagree.
@@ -54,6 +58,9 @@ if [ ! -f "${VERSION_LIB}/detect.sh" ]; then
 fi
 # shellcheck source=/dev/null
 . "${VERSION_LIB}/detect.sh"
+# root.sh for `project_root`: the load record lives under the PROJECT's .bionic/tmp.
+# shellcheck source=/dev/null
+. "${VERSION_LIB}/root.sh" 2>/dev/null || :
 
 # THIS CHECKOUT'S OWN ROOT — the same three-levels-up climb doctor.sh's DOCTOR_REPO_ROOT
 # uses (lib -> scripts -> payload -> repo root), resolved from THIS SCRIPT's own
@@ -61,6 +68,20 @@ fi
 # asking" question is about where this file physically lives, and an env override that
 # redirected it would make the comparison answer a question nobody asked.
 VERSION_REPO_ROOT="$(cd "${VERSION_LIB}/../../.." && pwd -P)"
+
+# ─── What runs, before what is installed (wave-36 T1, D7, ADR-055) ───────────
+#
+# A session started in a checkout through bionic's rc line runs the checkout, and the
+# registry below still names the installed release. The verdict reads a live session's
+# load record first; when it says `in place`, the one line detect.sh renders is the
+# answer — `bionic <v> (in place) · <commit> · <root>` — and the registry is not asked.
+VERSION_PROJECT_ROOT=""
+if declare -F project_root >/dev/null 2>&1; then VERSION_PROJECT_ROOT="$(project_root "$PWD" 2>/dev/null)"; fi
+if [ -n "$VERSION_PROJECT_ROOT" ] \
+   && [ "$(detect_checkout_verdict "$VERSION_REPO_ROOT" "$VERSION_PROJECT_ROOT")" = "in place" ]; then
+  detect_loaded_line "$VERSION_PROJECT_ROOT"
+  exit 0
+fi
 
 # ─── The version ─────────────────────────────────────────────────────────────
 PLUGIN_FACT="$(detect_plugin_integrity)"
