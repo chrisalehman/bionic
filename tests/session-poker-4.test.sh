@@ -4672,4 +4672,70 @@ expect_contains "FN-7b …naming the setting" "regression: no" "$OUT"
 expect_eq "FN-7c …and nothing ran" "2" "$(fn_runs)"
 POKE_BOUND="$FN_BOUND_WAS"
 
+# ============================================================
+section "§SYNC-EMPTY: launch-sync on a plan whose ## Dispatch ledger has no rows records the first dispatch, under every bash found, set -u included (wave-35 T29; two-writers.md; A-orch-27)"
+# ============================================================
+#
+# fails-when: the first dispatch of a fresh plan leaves its row pending. `launch_sync_project` declared
+# `local -a LGID LGAG LGDT` and assigned them only per existing ledger row, so on a header-only
+# `## Dispatch ledger` the reads `${#LGAG[@]}` (launch_sync_ledgered) and `${#LGID[@]}` (the id search)
+# met a declared-but-unset array under `set -u` and aborted with "LGAG: unbound variable", silently from
+# the recorder's detached call and as one stderr line in the tick. THE INTERPRETER MATTERS: the abort is
+# bash 5.x's (observed on 5.3.15); /bin/bash 3.2.57 reads such an array as empty (A-T29-1), so the pin
+# runs the verb under every distinct bash this machine has (/bin/bash, PATH's, Homebrew's) and the row
+# goes red wherever the trap is live. FIXTURE FIDELITY: §49's plan (a build row with a real linked
+# worktree, a roster row from the production writer); the one difference is a ledger heading with its
+# header and separator and no row. SE-0 proves the extractor on a ledger WITH a row before the empty
+# ones are read.
+SE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+se_ledger_rows() { awk '/^## Dispatch ledger/ { f = 1; next } /^## / { f = 0 } f && /^\| *T[0-9]/' "$1"; }
+se_world() {  # <label> [seed] -> RSE, PSE: a repo with T6 pending, a header-only ledger (a T1 row when seed), T6 launched in a real tree
+  RSE="$(make_repo "sync-empty-$1")"; ( cd "$RSE" && git commit -q --allow-empty -m init )
+  PSE="$(s34_plan "$RSE" 4)"
+  awk '{ print } /^- T5: pending dispatch/ { print "- T6: pending dispatch" }
+    /^\| T2 \| 4 \| build/ {
+    print "| T6 | 4 | build | the sixth build | — | — | 30 | REQ-1 | f.sh | — | — | pending |" }' "$PSE" > "$PSE.tmp" && mv "$PSE.tmp" "$PSE"
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n' >> "$PSE"
+  [ -z "${2:-}" ] || printf '| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$PSE"
+  new_roster "$RSE"
+  add_row "$RSE" name=w-T6 agent_id=a-w-T6 launched_at="$(iso_ago 60)" deliverable=t6.md duration="45 minutes" \
+    subagent_type=bionic:implementor
+  SE_TREE="$(cd "$RSE" && pwd -P)/.worktrees/01-T6"; git -C "$RSE" worktree add -q -b wt/01-T6 "$SE_TREE" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=w-T6|path=%s|branch=wt/01-T6|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$SID" "$SE_TREE" "$PSE" >> "$RSE/.bionic/tmp/workspaces-$SID.state"
+}
+se_expect() {  # <tag> <bash> <seed> -> launch-sync under <bash>: the row goes active and the ledger takes its line
+  local tag="$1" b="$2" seed="${3:-}" want=1
+  [ -z "$seed" ] || want=2
+  se_world "$tag" "$seed"
+  expect_contains "SE-$tag-0 precondition: T6 is in the table, pending" "| f.sh | — | — | pending |" "$(grep '^| T6 |' "$PSE")"
+  expect_eq "SE-$tag-0b precondition: the ledger holds ${seed:+one row}${seed:-no row}" "$((want - 1))" "$(se_ledger_rows "$PSE" | wc -l | tr -d ' ')"
+  POKE_BASH="$b" poke "$RSE" launch-sync
+  expect_eq "SE-$tag-1 launch-sync exits 0" "0" "$RC"
+  expect_absent "SE-$tag-1b …without an unbound variable" "unbound variable" "$OUT"
+  expect_contains "SE-$tag-1c …and says it recorded the launch" "poker: LAUNCHED T6 w-T6" "$OUT"
+  expect_contains "SE-$tag-2 …row T6 is active in its tree" "| w-T6 | — | 30 | REQ-1 | f.sh | .worktrees/01-T6 | 01234567 | active |" \
+    "$(grep '^| T6 |' "$PSE")"
+  expect_contains "SE-$tag-3 …and the ledger holds T6's line" "| T6 | implementor (w-T6) |" "$(se_ledger_rows "$PSE")"
+  expect_eq "SE-$tag-3b …after exactly the rows it had and its own" "$want" "$(se_ledger_rows "$PSE" | wc -l | tr -d ' ')"
+  cp "$PSE" "$TMPROOT/se-before"
+  POKE_BASH="$b" poke "$RSE" launch-sync
+  expect_eq "SE-$tag-4 a second launch-sync finds the line and exits 0" "0" "$RC"
+  expect_true "SE-$tag-4b …and writes nothing: the plan is byte-identical" cmp -s "$TMPROOT/se-before" "$PSE"
+  expect_absent "SE-$tag-4c …and says nothing of a launch" "poker: LAUNCHED" "$OUT"
+}
+# the extractor's positive first: a ledger WITH a row (T1) records T6 beside it, under PATH's bash
+se_expect seeded "$(command -v bash)" seed
+SE_SEEN=""
+for SE_B in /bin/bash "$(command -v bash)" /opt/homebrew/bin/bash /usr/local/bin/bash; do
+  [ -x "$SE_B" ] || continue
+  SE_V="$("$SE_B" -c 'printf %s "$BASH_VERSION"' 2>/dev/null)"
+  case " $SE_SEEN " in *" ${SE_V%%(*} "*) continue ;; esac
+  SE_SEEN="$SE_SEEN ${SE_V%%(*}"
+  se_expect "bash-${SE_V%%(*}" "$SE_B"
+done
+expect_nonempty "SE-5 the empty-ledger rows ran under at least one bash" "$SE_SEEN"
+POKE_BOUND="$SE_BOUND_WAS"
+
+
 finish
