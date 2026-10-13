@@ -2984,47 +2984,79 @@ esac
 # its tree, and the marker does not move. THE TREE is the one the open writer recorded
 # (lib/worktree.sh `workspace_for_name`, the record the launch sync fills the plan cell from) when it has
 # one, else the plan row's `worktree` cell, so a re-dispatch made before the sync still finds it. Only a
-# writer is judged, and only a row-bound, named dispatch; another session's roster is not read (names are
-# per session, as the in-flight arm says). COST: the open-name awk, once per row-bound writer dispatch; the
-# landing library loads, and git is asked for the marker, only when some other name is open.
-# [WALL: tests/dispatch-preflight-4.test.sh §REMARK]
+# writer is judged, and only a row-bound, named dispatch. COST: the open-name awk, once per row-bound
+# writer dispatch; the landing library loads, and git is asked for the marker, only when some other name
+# is open.
+#
+# EVERY ROSTER'S HOLD, THE SET THE FILL READS (wave-35 T28; REQ-5 AC-5.5, D14; A-orch-27). T17 drove a
+# second session's launch of a row the first session's roster held open, and a same-session second launch
+# under another name: both were admitted, because the reads above are this session's roster and the plan
+# row's cells. So the arm then asks lib/fill.sh `fill_held_ids` of the bound row: the open names of every
+# roster under .bionic/tmp, this session's included, acks applied (across sessions too), the rows of this
+# plan. A name holding the row is a live writer unless it is this dispatch's own name in this session
+# (the in-flight arm's case), and the refusal names it and its session. The tick reads the same set, so
+# a row the wall refuses is a row the tick never offered.
+# [WALL: tests/dispatch-preflight-4.test.sh §REMARK, §HOLD]
 dp_tree_of() {  # <cell or path> -> the linked tree it names, absolute, or nothing
   local t="${1:-}"
   case "$t" in ''|—|-) return 0 ;; /*) ;; *) t="$BIONIC_ROOT/$t" ;; esac
   [ -f "$t/.git" ] && printf '%s' "$t"
 }
-dp_live_writer() {  # sets DP_BOUND_TREE (the row's tree, or empty) and DP_LIVE_WRITER (an open writer, or empty)
-  local open t m
-  DP_BOUND_TREE="$(dp_tree_of "$(units_field "$DP_BOUND_REC" worktree)")"; DP_LIVE_WRITER=""
+dp_live_writer() {  # sets DP_BOUND_TREE (the row's tree, or empty), DP_LIVE_WRITER (an open writer, or empty) and DP_LIVE_SID (its session)
+  local open t m hold h_name h_sid h_row
+  DP_BOUND_TREE="$(dp_tree_of "$(units_field "$DP_BOUND_REC" worktree)")"; DP_LIVE_WRITER=""; DP_LIVE_SID=""
   open="$(roster_open_names "$ROSTER_FILE" "$ACK_LEDGER_FILE" | /usr/bin/grep -vxF -- "$AGENT_NAME")"
-  [ -n "$open" ] || return 0
-  { declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; }; } >/dev/null 2>&1
-  if declare -F line_row_writer >/dev/null 2>&1 \
-     && line_row_writer "$ROSTER_FILE" "$PLAN" "$DP_BOUND_ROW" "$(units_field "$DP_BOUND_REC" agent)" \
-     && /usr/bin/grep -qxF -- "$LINE_WRITER" <<< "$open"; then
-    DP_LIVE_WRITER="$LINE_WRITER"
-    t="$(workspace_for_name "$BIONIC_ROOT" "$BIONIC_SID" "$LINE_WRITER" 2>/dev/null)" && t="$(dp_tree_of "$t")" \
-      && [ -n "$t" ] && DP_BOUND_TREE="$t"
-    return 0
+  if [ -n "$open" ]; then
+    { declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; }; } >/dev/null 2>&1
+    if declare -F line_row_writer >/dev/null 2>&1 \
+       && line_row_writer "$ROSTER_FILE" "$PLAN" "$DP_BOUND_ROW" "$(units_field "$DP_BOUND_REC" agent)" \
+       && /usr/bin/grep -qxF -- "$LINE_WRITER" <<< "$open"; then
+      DP_LIVE_WRITER="$LINE_WRITER"; DP_LIVE_SID="$BIONIC_SID"
+      t="$(workspace_for_name "$BIONIC_ROOT" "$BIONIC_SID" "$LINE_WRITER" 2>/dev/null)" && t="$(dp_tree_of "$t")" \
+        && [ -n "$t" ] && DP_BOUND_TREE="$t"
+      return 0
+    fi
+    if [ -n "$DP_BOUND_TREE" ] && declare -F worktree_marker >/dev/null 2>&1 \
+       && m="$(worktree_marker "$DP_BOUND_TREE")" && /usr/bin/grep -qxF -- "$m" <<< "$open"; then
+      DP_LIVE_WRITER="$m"; DP_LIVE_SID="$BIONIC_SID"
+      return 0
+    fi
   fi
-  [ -n "$DP_BOUND_TREE" ] && declare -F worktree_marker >/dev/null 2>&1 || return 0
-  m="$(worktree_marker "$DP_BOUND_TREE")" && /usr/bin/grep -qxF -- "$m" <<< "$open" && DP_LIVE_WRITER="$m"
+  # EVERY ROSTER'S HOLD (T28). fill.sh is loaded here as the approval arm loads it; a library that cannot
+  # be loaded leaves the reads above standing alone, as a copied hook predating it would.
+  { declare -F fill_roster_holds >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/fill.sh" ] && . "$BIONIC_LIB/fill.sh"; }; } >/dev/null 2>&1
+  declare -F fill_roster_holds >/dev/null 2>&1 || return 0
+  # Every holder of the row is asked, not only the first: this dispatch's own name in this session is
+  # skipped (the in-flight arm's case), and another name may still hold the row behind it. The walk's
+  # note on an unreadable roster reaches stderr.
+  hold="$(fill_roster_holds "$(fill_state_dir "$PLAN")" "$PLAN" | while IFS=$'\t' read -r h_sid h_name h_row; do
+            [ -n "$h_sid" ] || continue
+            [ "$h_sid" = "$BIONIC_SID" ] && [ "$h_name" = "$AGENT_NAME" ] && continue
+            fill_row_launched "$DP_BOUND_ROW" "$h_row" && { printf '%s\t%s\n' "$h_sid" "$h_name"; break; }
+          done)"
+  [ -n "$hold" ] || return 0
+  DP_LIVE_SID="${hold%%$'\t'*}"; DP_LIVE_WRITER="${hold#*$'\t'}"
+  t="$(workspace_for_name "$BIONIC_ROOT" "$DP_LIVE_SID" "$DP_LIVE_WRITER" 2>/dev/null)" && t="$(dp_tree_of "$t")" \
+    && [ -n "$t" ] && DP_BOUND_TREE="$t"
   return 0
 }
-DP_BOUND_TREE=""; DP_LIVE_WRITER=""
+DP_BOUND_TREE=""; DP_LIVE_WRITER=""; DP_LIVE_SID=""
 if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ] && [ -n "$AGENT_NAME" ] && ! role_is_readonly "$DP_SUBAGENT"; then
   dp_live_writer
 fi
 if [ -n "$DP_LIVE_WRITER" ]; then
-  dp_finding "row ${DP_BOUND_ROW} has a live writer ${DP_LIVE_WRITER}" "stop it or ack it" \
-    "    row: ${DP_BOUND_ROW}   ·   live writer: ${DP_LIVE_WRITER}   ·   dispatch: ${AGENT_NAME}
+  _dp_lw_roster="this session's roster"
+  [ "$DP_LIVE_SID" = "$BIONIC_SID" ] || _dp_lw_roster="the roster of session ${DP_LIVE_SID:0:8} (.bionic/tmp/roster-${DP_LIVE_SID}.state)"
+  dp_finding "row ${DP_BOUND_ROW} has a live writer ${DP_LIVE_WRITER} (session ${DP_LIVE_SID:0:8})" "stop it or ack it" \
+    "    row: ${DP_BOUND_ROW}   ·   live writer: ${DP_LIVE_WRITER}   ·   session: ${DP_LIVE_SID}   ·   dispatch: ${AGENT_NAME}
     tree: ${DP_BOUND_TREE:-(none recorded)}
 
-The row's writer is open on this session's roster, so its tree is still its own: marking it for
-${AGENT_NAME} would put two writers in one tree, the second asking every wall as the first.
+The row's writer is open on ${_dp_lw_roster}, so the row and its tree are still its own:
+dispatching ${AGENT_NAME} onto it would put two writers on one row, the second asking every wall as the first.
 
 Fix: if ${DP_LIVE_WRITER} is finished, land it and let the Patrol's ack close it, or stop it (stop-orders.sh
-stopped writes the ack); then dispatch again. If it is still working, let it finish."
+stopped writes the ack, in the session that launched it); then dispatch again. If it is still working, let it
+finish. A writer of another session that is gone is taken over with session-poker.sh adopt, then acked."
 fi
 
 # ================================================ THE ONE REFUSAL, FOR EVERY FAULT
