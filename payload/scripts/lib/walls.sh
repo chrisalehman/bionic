@@ -6743,8 +6743,32 @@ $_how"
 # EVERY PLACEHOLDER IS QUOTED (wave-21 T14; critic-4e6d4a9 I4). A bare `<why>` is a redirect from
 # a file named `why` followed by a `>` with no word, so the pasted line was a parse error before
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
+# THE WHOLE RUN IS NO WIDENING (wave-35 T10; D10, REQ-1 AC-1.8). A refused run that is the project's whole tree,
+# `run.sh` or `tests/run.sh` with no `--only`, is never sent to `--reexec+ '<cmd>'`: an amend would hand a row the
+# whole tree outside the full-run rules. Its one path is `session-poker.sh floor-run`, which holds those rules
+# itself (hooks/session-poker.sh, the floor-run arm) and which this wall admits as typed, so the line printed,
+# run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
+# the full-tree arm's detail.
+_budget_whole_run_cmd() {
+  printf 'bash %s floor-run' "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")"
+}
+_budget_is_whole_run() {  # <the refused suite or run> -> 0 when it is the whole tree's runner, run whole
+  case " ${1:-} " in
+    *" --only "*|*" --one "*) return 1 ;;
+  esac
+  case "${1:-}" in
+    run.sh|tests/run.sh|./tests/run.sh|*/tests/run.sh|"bash tests/run.sh"|"bash ./tests/run.sh"|"bash "*/tests/run.sh) return 0 ;;
+    "tests/run.sh "*|"./tests/run.sh "*|"bash tests/run.sh "*|"bash ./tests/run.sh "*) return 0 ;;
+  esac
+  return 1
+}
+
 _budget_remedy_line() {  # <the refused suite or run>
   local _widen="--reexec+ '<cmd>'"
+  if _budget_is_whole_run "${1:-}"; then
+    printf 'run the whole suite by its one path, held to the full-run rules: %s' "$(_budget_whole_run_cmd)"
+    return 0
+  fi
   case "${1:-}" in
     *[[:space:]]*) : ;;
     *.test.sh) _widen="--suites+ $(refuse_shell_word "$1")" ;;
@@ -6823,18 +6847,17 @@ while IFS=$'\t' read -r _kind _target _run; do
       "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall.
-The full suite runs once, on the head being released, by one dispatched runner whose row
-carries tests/run.sh. A writer proves its change by the suites its brief names; a full run
-from a writer row costs forty minutes and proves a head nobody is releasing.
-
+The full suite runs once, on the head being released, by one runner, held to the
+full-run rules; a writer proves its change by the suites its brief names.
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead, through the one door (wave-28 T36):
+Run the suites your brief named, through the one door (wave-28 T36):
     tests/run.sh --only ${_ft_first:-<suite>.test.sh}
-\`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
-queue only the runner itself builds, and it is the full-tree runner as far as this budget
-is concerned. If the change reaches past the suites your brief names, say so in your report:
-the orchestrator widens the brief or dispatches the runner."
+The whole run's one path, run as printed (\`tests/run.sh --one\` is the runner's
+internal worker mode, the full tree to this budget):
+    $(_budget_whole_run_cmd)
+If the change reaches past your suites, say so in your report: the orchestrator
+widens the brief or dispatches the runner."
     return 2
   fi
   # ---- BEGIN THE ONE DOOR (wave-28 T36; D27, REQ-10 AC-10.1) ----

@@ -27,7 +27,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's declared regression in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
+#     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session (writes the plan)
@@ -482,7 +482,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
-  die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run .bionic/config.yaml's floor: command in the working branch's checkout; write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
+  die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run the regression in the working branch's checkout, .bionic/config.yaml's floor: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered readings (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
@@ -1024,9 +1024,10 @@ case "$VERB" in
   release-check)
     [ $# -eq 0 ] || usage "release-check takes no arguments: it runs from the nearest tag reachable from the plan's integration-branch that is a proper ancestor of the working head (else its base-sha) to that head."
     ;;
-  # NO OPERAND (wave-28 T75; D36): the command is the project's `floor:` and the head is the working one.
+  # NO OPERAND (wave-28 T75; D36): the command is the project's `floor:`, else its tests/run.sh (wave-35 T10), and the
+  # head is the working one.
   floor-run)
-    [ $# -eq 0 ] || usage "floor-run takes no arguments: it runs .bionic/config.yaml's floor: command at the working branch's head."
+    [ $# -eq 0 ] || usage "floor-run takes no arguments: it runs .bionic/config.yaml's floor: command, else tests/run.sh, at the working branch's head."
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -2118,21 +2119,21 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # THE WORKING BRANCH'S HEAD, the one fact the readiness program cannot read from the plan
 # (wave-26 T14; D10, review 5 F8). A `live:head` review is ready again once the head has moved
 # past the last `proved: kind=review` line, and the head lives in git: the tick reads it here,
-# from the checkout holding the plan's `working-branch:` (lib/proof.sh `proof_head`, the same
-# answer `proof-add` records), and hands it to every ready-set question this tick asks through
-# UNITS_LIVE_HEAD. Only a plan that carries a review proof needs it — before the first one, a
-# landed row is enough — so a tick on any other plan runs no git. No head (no branch, no
-# checkout) is no head: the review waits, saying so. The stop wall reads no git of its own, so
-# it hands in none (A-T14.2).
+# from the working branch's REF (lib/proof.sh `proof_branch_head`, the judge's one reading of the
+# head; wave-35 T10, AC-1.7), never from a checkout holding it, and hands it to every ready-set
+# question this tick asks through UNITS_LIVE_HEAD. Only a plan that carries a review proof needs
+# it — before the first one, a landed row is enough — so a tick on any other plan runs no git. No
+# head (no branch named, or a branch that names no commit) is no head: the review waits, saying
+# so. The stop wall reads no git of its own, so it hands in none (A-T14.2).
 sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
   UNITS_LIVE_HEAD=""
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
   /usr/bin/grep -q '^[[:space:]-]*proved:.*kind=review' "$SCHED_PLAN" 2>/dev/null || return 0
-  if ! declare -F proof_head >/dev/null 2>&1; then
+  if ! declare -F proof_branch_head >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
   fi
-  declare -F proof_head >/dev/null 2>&1 || return 0
-  UNITS_LIVE_HEAD="$(proof_head "$1" "$(plan_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  UNITS_LIVE_HEAD="$(proof_branch_head "$SCHED_PLAN" "$1" 2>/dev/null)" || UNITS_LIVE_HEAD=""
   return 0
 }
 
@@ -2162,13 +2163,13 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
   fi
   declare -F facts_state >/dev/null 2>&1 || return 0
+  # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7), `proof_branch_head`, as `current 7`/`8` and
+  # close-out read it: a branch no checkout holds is judged where its ref points.
   head="${UNITS_LIVE_HEAD:-}"
+  [ -n "$head" ] || head="$(proof_branch_head "$SCHED_PLAN" "$1" 2>/dev/null)" || head=""
   if [ -z "$head" ]; then
     wb="$(plan_working_branch "$SCHED_PLAN")"
-    [ -z "$wb" ] || head="$(proof_head "$1" "$wb" 2>/dev/null)" || head=""
-  fi
-  if [ -z "$head" ]; then
-    UNITS_FACTS_STATE="no checkout holds the working branch, so there is no head to judge them at"
+    UNITS_FACTS_STATE="the working branch ${wb:-(none named)} names no commit here, so there is no head to judge them at"
     return 0
   fi
   out="$(facts_state "$SCHED_PLAN" "$head" 2>/dev/null)"; rc=$?
@@ -4428,24 +4429,35 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
   return 0
 }
 
-# cur8_judge -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
-# the working head (the head of the checkout holding the plan's `working-branch:`, the head `waive`
-# and `proof-add` record), with that head in PV_HEAD8; otherwise refuses `current 8`, exit 1, the
-# plan unchanged, printing each owed line that does not hold (wave-27 T14; D3). The judge's rc 2, a
-# plan it cannot deal, refuses too, printing whatever the judge printed, whatever the reason.
-cur8_judge() {
-  local wb out rc err
+# cur8_judge <step> -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
+# the working head, with that head in PV_HEAD8; otherwise refuses `current <step>`, exit 1, the plan unchanged,
+# printing each owed line that does not hold, in the judge's own words: the owed suite, or the commit the walk
+# cannot prove (wave-27 T14; D3). The judge's rc 2, a plan it cannot deal, refuses too, printing whatever the
+# judge printed, whatever the reason.
+# STEPS 7 AND 8 ASK IT (wave-35 T10; D10, AC-1.2): Step 7 is entered once the floor is Step 6's last act, so
+# `current 7` is held to the same judge `current 8` is, and a run never leaves Step 6 with its floor behind
+# the head.
+# THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, the judge's one
+# reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
+# and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
+# uncovered.
+cur8_judge() {  # <step>   (named for Step 8, its first caller; it judges Step 7 too)
+  local step="$1" wb out rc err
   if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F facts_state >/dev/null 2>&1; then
-    die "REFUSED — current: 8 is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    die "REFUSED — current: $step is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
   wb="$(plan_working_branch "$PV_PLAN")"
-  PV_HEAD8=""; [ -z "$wb" ] || PV_HEAD8="$(proof_head "$PV_REPO" "$wb")" || PV_HEAD8=""
+  if [ -z "$wb" ]; then
+    die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the plan names no working-branch: (## SDLC State or its frontmatter), so the floor is uncovered; the plan is unchanged."
+    exit 1
+  fi
+  PV_HEAD8="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || PV_HEAD8=""
   case "$PV_HEAD8" in
     [0-9a-f]*) : ;;
     *)
-      die "REFUSED — current: 8 is admitted on the facts the run owes at the working head, and no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out; the plan is unchanged."
+      die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the working branch $wb names no commit here, so the floor is uncovered (there is no head to judge); the plan is unchanged."
       exit 1 ;;
   esac
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
@@ -4453,12 +4465,12 @@ cur8_judge() {
   [ "$rc" -eq 2 ] || cur8_owed_waivers "$out"
   [ "$rc" -eq 0 ] && return 0
   if [ "$rc" -eq 2 ]; then
-    die "REFUSED — current: 8 is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
+    die "REFUSED — current: $step is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
     [ -z "$err" ] || printf '%s\n' "$err" >&2
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     exit 1
   fi
-  die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
+  die "REFUSED — current: $step is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
   printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
@@ -9735,10 +9747,15 @@ BRF_EOF
     # working head: the regression, and each reading its rigor and scale deal. Each line that does not
     # hold is printed as the judge gave it.
     # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
+    # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2), and then dry-commits at Step 7 as every other step
+    # does: the judge holds the facts, the gate the plan's shape.
     PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
     case "$PV_KEY" in
+      7)
+        cur8_judge 7
+        PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state); dry-committed at that step first" ;;
       8|8a|8b)
-        cur8_judge
+        cur8_judge 8
         PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     esac
     plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
@@ -10742,15 +10759,31 @@ RC_TAGS
   # `command: <cmd>`, then the output, and the verb exits with the command's code.
   # IT RUNS AND LOGS; IT WRITES NO PROOF. `release-check` writes its own fact because a check is a run the
   # verb owns; a regression is evidence the run cites, and `proof-add floor` stays the one writer of its line
-  # (lib/proof.sh `_proof_floor_declared` judges the log there). With no key it refuses and runs nothing.
+  # (lib/proof.sh `_proof_floor_declared` judges the log there).
+  #
+  # WITH NO floor: KEY THE REGRESSION IS THE PROJECT'S tests/run.sh (wave-35 T10; D10, REQ-1 AC-1.8). The verb runs
+  # it, whole, in the same checkout at the same head and logs it the same way, `command: tests/run.sh`; the runner
+  # asks the machine's gate itself, kind whole (tests/run.sh THE ONE ADMISSION; ADR-051). Its log is the evidence
+  # `proof-add floor` judges by the runner's own report (lib/proof.sh `proof_attested`): a red whole run is the
+  # floor's candidate, its reds owed (wave-35 T9), so the record line is printed red or green. A run the gate never
+  # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, and a
+  # project whose floor is the user's attestation (`floor-attestation:`) has no command to run.
+  # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, HELD TO THE FULL-RUN RULES (AC-1.8): the dispatch wall's
+  # (hooks/dispatch-preflight.sh, THE FULL-RUN WALL), asked of the same facts in the same order, before anything
+  # runs: `regression: no` refuses it (`plan_regression`); a row the regression waits on that still writes the head
+  # refuses it (`units_floor_holds`); a covered head refuses it (`proof_state`); and a second whole run — the plan
+  # already carries a floor proof, or a floor-run log of tests/run.sh — needs the user's `approved: regression-2`
+  # (`proof_approved`). The bash wall's full-tree refusal names this verb as the whole run's path (lib/walls.sh).
   floor-run)
-    FR_CMD="$(config_value "$(project_root "$PWD")" floor "" 2>/dev/null)"
-    if [ -z "$FR_CMD" ]; then
-      die "REFUSED — this project declares no floor: in .bionic/config.yaml; its regression is tests/run.sh, whose log proof-add floor reads. Nothing was run."
+    FR_ROOT="$(project_root "$PWD")"
+    FR_CMD="$(config_value "$FR_ROOT" floor "" 2>/dev/null)"
+    FR_ATT="$(config_value "$FR_ROOT" floor-attestation "" 2>/dev/null)"
+    if [ -z "$FR_CMD" ] && [ -n "$FR_ATT" ]; then
+      die "REFUSED — this project's floor is the user's attestation (floor-attestation: $(clean "$FR_ATT") in .bionic/config.yaml), which names no command to run; proof-add floor reads the user's record of it. Nothing was run."
       exit 1
     fi
-    if ! { declare -F proof_checkout >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_checkout >/dev/null 2>&1; then
+    if ! { declare -F proof_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_state >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
       exit 2
     fi
@@ -10764,16 +10797,76 @@ RC_TAGS
         die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${FR_WB:-(none named)} checked out, so there is no head to run the regression at; nothing was run."
         exit 1 ;;
     esac
+    FR_WAVE="${PV_PLAN##*/}"; FR_WAVE="${FR_WAVE%.plan.md}"
+    FR_DOCS="$(docs_root "$PV_REPO")"
+    FR_WHOLE=""
+    if [ -z "$FR_CMD" ]; then
+      if [ ! -f "$FR_CO/tests/run.sh" ]; then
+        die "REFUSED — this project declares no floor: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare floor: <command> there. Nothing was run."
+        exit 1
+      fi
+      FR_WHOLE=yes; FR_CMD="tests/run.sh"
+      # RULE 1. The setting, not a run.
+      if [ "$(plan_regression "$PV_PLAN")" = no ]; then
+        die "REFUSED — the plan declares regression: no (Step 0), so it owes no whole run, and no approval overrides the setting; put it to the user and change it with: bash ${HOOK_DIR}/session-poker.sh regression yes '<the user's reply>'. Nothing was run."
+        exit 1
+      fi
+      # RULE 2. A row the regression waits on still writes the head.
+      FR_OPEN="$(units_floor_holds "$PV_PLAN" "" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
+      if [ -n "$FR_OPEN" ]; then
+        die "REFUSED — rows the regression waits on still write tracked files: $FR_OPEN; the whole run comes once, after the last of them lands, or it proves a head that does not survive their landing. Nothing was run."
+        exit 1
+      fi
+      # RULE 3. A proved head owes no run.
+      FR_STATE="$(proof_state "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
+      case "$FR_STATE" in
+        covered*)
+          die "REFUSED — the working head ${FR_HEAD:0:12} is already proved: the plan's floor covers it ($(clean "$(proof_last_line "$PV_PLAN" floor)")); a change landed after it is proved by the suites its row names. Nothing was run."
+          exit 1 ;;
+      esac
+      # RULES 4 AND 5. The first whole run runs; a second is the user's word.
+      FR_FIRST=""
+      FR_LAST="$(proof_last "$PV_PLAN" floor)"
+      [ -z "$FR_LAST" ] || FR_FIRST="the floor proof at ${FR_LAST:0:12}"
+      if [ -z "$FR_FIRST" ]; then
+        for _fr_l in "$FR_DOCS/record/$FR_WAVE"/floor-run-*.log; do
+          [ -f "$_fr_l" ] || continue
+          [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
+          FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
+        done
+      fi
+      if [ -n "$FR_FIRST" ] && ! proof_approved "$PV_PLAN" regression-2; then
+        FR_OWED=""; case "$FR_STATE" in owed"	"*) FR_OWED="${FR_STATE#owed	}" ;; esac
+        if [ -n "$FR_OWED" ]; then
+          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and it left $FR_OWED red, each owed until a later landing runs it green. Dispatch a fix row that runs $FR_OWED; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'. Nothing was run."
+        else
+          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and the floor reads $(clean "${FR_STATE//	/ }"). A change after the whole run is proved by a fix row's suites; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'. Nothing was run."
+        fi
+        exit 1
+      fi
+    fi
     FR_DIRTY="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
     FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-floor-run.XXXXXX")" || {
       die "REFUSED — no scratch file for the regression's output can be made under ${TMPDIR:-/tmp}; nothing was run."
       exit 1
     }
-    ( cd "$FR_CO" 2>/dev/null || exit 1
-      set -f
-      # shellcheck disable=SC2086  # the configured command splits on blanks, as release-check's does
-      exec $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
+    if [ -n "$FR_WHOLE" ]; then
+      ( cd "$FR_CO" 2>/dev/null || exit 1
+        exec bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
+    else
+      ( cd "$FR_CO" 2>/dev/null || exit 1
+        set -f
+        # shellcheck disable=SC2086  # the configured command splits on blanks, as release-check's does
+        exec $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
+    fi
     FR_RC=$?
+    # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: exit 75 before any suite, no verdict), so
+    # there is no run of the head to log.
+    if [ -n "$FR_WHOLE" ] && [ "$FR_RC" -eq 75 ] && ! /usr/bin/grep -q '^Gating: ' "$FR_TMP" 2>/dev/null; then
+      cat "$FR_TMP"; rm -f "$FR_TMP"
+      die "floor-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run floor-run again."
+      exit 75
+    fi
     FR_NOW="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     FR_DIRTY2="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
     FR_MOVED=""
@@ -10784,8 +10877,6 @@ RC_TAGS
       die "REFUSED — the regression ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run floor-run again."
       exit 1
     fi
-    FR_WAVE="${PV_PLAN##*/}"; FR_WAVE="${FR_WAVE%.plan.md}"
-    FR_DOCS="$(docs_root "$PV_REPO")"
     FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD.log"; FR_NTH=1
     while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD-$FR_NTH.log"; done
     FR_LOG="$FR_DOCS/$FR_REL"
@@ -10794,6 +10885,18 @@ RC_TAGS
       cat "$FR_TMP"; rm -f "$FR_TMP"
       die "REFUSED — the regression exited $FR_RC, but its log $FR_LOG cannot be written."
       exit 1
+    fi
+    if [ -n "$FR_WHOLE" ]; then
+      FR_VERDICT="$(/usr/bin/grep '^Gating: ' "$FR_TMP" 2>/dev/null | tail -n 1)"
+      rm -f "$FR_TMP"
+      say "floor-run — the whole run (tests/run.sh) at ${FR_HEAD:0:12} exited $FR_RC${FR_VERDICT:+ ($FR_VERDICT)}: head=$FR_HEAD dirty=$FR_DIRTY rc=$FR_RC evidence=$FR_REL"
+      if [ "$FR_DIRTY" -ne 0 ]; then
+        say "floor-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add floor refuses this log; commit and run floor-run again."
+      else
+        [ "$FR_RC" -eq 0 ] || say "floor-run — a red whole run is the floor's candidate: proof-add floor records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
+        say "floor-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add floor $FR_REL"
+      fi
+      exit "$FR_RC"
     fi
     if [ "$FR_RC" -ne 0 ]; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
