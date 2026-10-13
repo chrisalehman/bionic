@@ -1015,20 +1015,29 @@ DP_MINE_AWK='
       return (length(b) > l + 1 && substr(b, length(b) - l) == "-" id)
     }'
 # dp_row_reader — sets DP_ROW (the brief's `Row:`, or empty), DP_NAME_ROWS (every plan row the name
-# matches, one per line), DP_NAME_ROW (the first) and DP_BOUND_ROW: the row this dispatch is bound to.
+# matches, one per line), DP_NAME_ROW (the first), DP_BOUND_ROW: the row this dispatch is bound to, and
+# DP_BOUND_REC: that row's record, `units_rows`' thirteen cells, read here once (wave-35 T7; burns debt
+# bound-row-read). The approval arm, the full-run wall's regression row and the live-writer arm read their
+# cells off it with `units_field`; none reads the table again.
 # A name that matches more than one row, with no `Row:` to say which, binds NOTHING and is refused
 # (wave-28 T58): the launch record records no row for such a name either (session-poker NOT-RECORDED),
 # and binding the first would let the approval arm pass a second match that waits for approval.
 dp_row_reader() {
-  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""; DP_NAME_AMBIG=""
-  if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
-    DP_NAME_ROWS="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1 }')"
+  local rows=""
+  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""; DP_NAME_AMBIG=""; DP_BOUND_REC=""
+  if [ -n "$PLAN" ] && { [ -n "$DP_ROW_NAME" ] || [ -n "$DP_ROW" ]; }; then
+    rows="$(units_rows "$PLAN" 2>/dev/null)"
+  fi
+  if [ -n "$rows" ] && [ -n "$DP_ROW_NAME" ]; then
+    DP_NAME_ROWS="$(printf '%s\n' "$rows" | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1 }')"
     DP_NAME_ROW="${DP_NAME_ROWS%%$'\n'*}"
     case "$DP_NAME_ROWS" in *$'\n'*) DP_NAME_AMBIG=1 ;; esac
   fi
   DP_BOUND_ROW="${DP_ROW:-$DP_NAME_ROW}"
+  [ -z "$DP_BOUND_ROW" ] || [ -z "$rows" ] \
+    || DP_BOUND_REC="$(printf '%s\n' "$rows" | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print; exit }')"
   if [ -z "$DP_ROW" ] && [ -n "$DP_NAME_AMBIG" ]; then
-    DP_BOUND_ROW=""
+    DP_BOUND_ROW=""; DP_BOUND_REC=""
     _ar_rest="${DP_NAME_ROWS#*$'\n'}"
     dp_finding "the name matches rows $(bionic_trunc "$DP_NAME_ROW" 11), $(bionic_trunc "${_ar_rest%%$'\n'*}" 11)" \
       "add Row: <id>" \
@@ -1048,9 +1057,9 @@ Then retry the dispatch."
   fi
 }
 dp_row_reader
-if [ -n "$PLAN" ] && [ -n "$DP_BOUND_ROW" ]; then
-  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v id="$DP_BOUND_ROW" '
-    $1 != "" && $1 == id {
+if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ]; then
+  DP_APPROVAL_WAITS=$(printf '%s\n' "$DP_BOUND_REC" | awk -F'\t' '
+    $1 != "" {
       m = split($13, a, ",")
       for (k = 1; k <= m; k++) {
         t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
@@ -2806,8 +2815,7 @@ fi
 fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each row the regression waits on that writes the head
   local floor=""
   [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
-  [ -z "$DP_BOUND_ROW" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
-    | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print $1; exit }')"
+  [ -z "$DP_BOUND_REC" ] || floor="$(units_field "$DP_BOUND_REC" id)"
   units_floor_holds "$PLAN" "$floor" 2>/dev/null
 }
 # fr_whole_run -> `name<TAB>launched_at` of the earliest whole run any roster of the project holds
@@ -2954,6 +2962,61 @@ approval:regression-2, head; put it to the user, and on their reply record it:
     fi
     ;;
 esac
+
+# ================== THE ROW'S LIVE WRITER KEEPS ITS TREE (wave-35 T7; REQ-5 AC-5.4, D14)
+#
+# The re-mark below the journal rewrites the marker of the tree a row's earlier launch recorded, for this
+# dispatch's name. Done while that tree's writer is still running, it hands one tree to two writers, and
+# the second asks every wall under the first one's place. So, before anything is written, this arm asks
+# THIS session's roster who holds the row: the row's writer as the landing reads it (lib/line.sh
+# `line_row_writer`, the name `ready` holds a landing to) and the name the tree's marker records
+# (lib/worktree.sh `worktree_marker`). Either one open (`roster_open_names`, acks applied, the in-flight
+# arm's predicate) and not this dispatch's own name is a live writer: the dispatch is refused naming it and
+# its tree, and the marker does not move. THE TREE is the one the open writer recorded
+# (lib/worktree.sh `workspace_for_name`, the record the launch sync fills the plan cell from) when it has
+# one, else the plan row's `worktree` cell, so a re-dispatch made before the sync still finds it. Only a
+# writer is judged, and only a row-bound, named dispatch; another session's roster is not read (names are
+# per session, as the in-flight arm says). COST: the open-name awk, once per row-bound writer dispatch; the
+# landing library loads, and git is asked for the marker, only when some other name is open.
+# [WALL: tests/dispatch-preflight-4.test.sh §REMARK]
+dp_tree_of() {  # <cell or path> -> the linked tree it names, absolute, or nothing
+  local t="${1:-}"
+  case "$t" in ''|—|-) return 0 ;; /*) ;; *) t="$BIONIC_ROOT/$t" ;; esac
+  [ -f "$t/.git" ] && printf '%s' "$t"
+}
+dp_live_writer() {  # sets DP_BOUND_TREE (the row's tree, or empty) and DP_LIVE_WRITER (an open writer, or empty)
+  local open t m
+  DP_BOUND_TREE="$(dp_tree_of "$(units_field "$DP_BOUND_REC" worktree)")"; DP_LIVE_WRITER=""
+  open="$(roster_open_names "$ROSTER_FILE" "$ACK_LEDGER_FILE" | /usr/bin/grep -vxF -- "$AGENT_NAME")"
+  [ -n "$open" ] || return 0
+  { declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; }; } >/dev/null 2>&1
+  if declare -F line_row_writer >/dev/null 2>&1 \
+     && line_row_writer "$ROSTER_FILE" "$PLAN" "$DP_BOUND_ROW" "$(units_field "$DP_BOUND_REC" agent)" \
+     && /usr/bin/grep -qxF -- "$LINE_WRITER" <<< "$open"; then
+    DP_LIVE_WRITER="$LINE_WRITER"
+    t="$(workspace_for_name "$BIONIC_ROOT" "$BIONIC_SID" "$LINE_WRITER" 2>/dev/null)" && t="$(dp_tree_of "$t")" \
+      && [ -n "$t" ] && DP_BOUND_TREE="$t"
+    return 0
+  fi
+  [ -n "$DP_BOUND_TREE" ] && declare -F worktree_marker >/dev/null 2>&1 || return 0
+  m="$(worktree_marker "$DP_BOUND_TREE")" && /usr/bin/grep -qxF -- "$m" <<< "$open" && DP_LIVE_WRITER="$m"
+  return 0
+}
+DP_BOUND_TREE=""; DP_LIVE_WRITER=""
+if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ] && [ -n "$AGENT_NAME" ] && ! role_is_readonly "$DP_SUBAGENT"; then
+  dp_live_writer
+fi
+if [ -n "$DP_LIVE_WRITER" ]; then
+  dp_finding "row ${DP_BOUND_ROW} has a live writer ${DP_LIVE_WRITER}" "stop it or ack it" \
+    "    row: ${DP_BOUND_ROW}   ·   live writer: ${DP_LIVE_WRITER}   ·   dispatch: ${AGENT_NAME}
+    tree: ${DP_BOUND_TREE:-(none recorded)}
+
+The row's writer is open on this session's roster, so its tree is still its own: marking it for
+${AGENT_NAME} would put two writers in one tree, the second asking every wall as the first.
+
+Fix: if ${DP_LIVE_WRITER} is finished, land it and let the Patrol's ack close it, or stop it (stop-orders.sh
+stopped writes the ack); then dispatch again. If it is still working, let it finish."
+fi
 
 # ================================================ THE ONE REFUSAL, FOR EVERY FAULT
 #
@@ -3246,22 +3309,16 @@ fi
 
 # THE TREE NAMES ITS NEW WRITER (wave-34 T28; D24, REQ-1 AC-1.1). The gate names a writer that carries
 # no name by its tree's marker (lib/gate.sh THE PLACE), and `spawn-worktree.sh create --for` writes it
-# for a tree's first writer. A row dispatched again into the tree its earlier launch recorded, the
-# plan row's `worktree` cell, is re-marked here for the new name by the one writer, `mark`, once the
-# launch is on the roster and before the agent exists, so its first suite asks as itself. Only a
+# for a tree's first writer. A row dispatched again into the tree its earlier launch recorded is
+# re-marked here for the new name by the one writer, `mark`, once the launch is on the roster and before
+# the agent exists, so its first suite asks as itself. The tree is `DP_BOUND_TREE`, which the live-writer
+# arm above read off the bound row's record (or the open writer's own record), and a live writer there
+# has already refused the dispatch (wave-35 T7; D14), so a tree reaching this line has none. Only a
 # linked tree, and only for a writer: a cell naming the main checkout or a tree that is gone, an
 # empty cell (a first dispatch, whose cell the launch sync fills after it), an unnamed launch and a
-# read-only role (a test-runner sent to the row's tree is not its writer) mark nothing. COST: one
-# plan read (~11 ms on a 600-line plan) per row-bound writer dispatch; the call (~41 ms: one bash,
-# one git) only when the cell names a linked tree. A mark that fails is said, not refused: the launch
-# is the roster's already.
-DP_BOUND_TREE=""
-if [ -n "$PLAN" ] && [ -n "$DP_BOUND_ROW" ] && [ -n "$AGENT_NAME" ] && ! role_is_readonly "$DP_SUBAGENT"; then
-  DP_BOUND_TREE="$(units_rows "$PLAN" 2>/dev/null \
-    | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print $11; exit }')"
-fi
-case "$DP_BOUND_TREE" in ''|/*) ;; *) DP_BOUND_TREE="$BIONIC_ROOT/$DP_BOUND_TREE" ;; esac
-[ -n "$DP_BOUND_TREE" ] && [ -f "$DP_BOUND_TREE/.git" ] || DP_BOUND_TREE=""
+# read-only role (a test-runner sent to the row's tree is not its writer) mark nothing. COST: the call
+# (~41 ms: one bash, one git) only when the row names a linked tree. A mark that fails is said, not
+# refused: the launch is the roster's already.
 [ -z "$DP_BOUND_TREE" ] \
   || bash "$BIONIC_LIB/../spawn-worktree.sh" mark "$DP_BOUND_TREE" --for "$AGENT_NAME" >/dev/null 2>&1 \
   || warn "the tree ${DP_BOUND_TREE} still names its last writer: spawn-worktree.sh mark --for ${AGENT_NAME} failed"

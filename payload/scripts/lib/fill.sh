@@ -515,10 +515,16 @@ fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the nam
 # answers nothing (review C4). Read from the ledger's last FILL_STANDING_WINDOW lines; a decline
 # older than that stands for nothing, which refuses more. A ledger that is a symlink is not read.
 #
+# A DECLINE ENDS WHEN IT IS LIFTED (wave-35 T8; REQ-6 AC-6.2; D15). `session-poker.sh decline lift
+# [<ids>]` appends a `state=lift` line of this session with `lifted=` the rows it ends and no
+# `declined=`; every lift after the latest declined line comes off its answered set, so a hold the
+# user ended stops standing and the next tick prints the FILL it held. A later declined line starts
+# afresh: the lifts before it are history.
+#
 # Prints `<at>US<reason>US<ids, space-joined>` (US = \037), or nothing when no decline stands.
 FILL_STANDING_WINDOW=2000
 fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
-  local led="${1:-}" sid="${2:-}" cur="${3:-}" line at st_cur ready launched reason id ids=""
+  local led="${1:-}" sid="${2:-}" cur="${3:-}" line at st_cur ready launched reason lifted id ids=""
   [ -n "$led" ] && [ -n "$sid" ] && [ -f "$led" ] && [ ! -L "$led" ] || return 0
   line="$(tail -n "$FILL_STANDING_WINDOW" "$led" 2>/dev/null | awk -v sid="$sid" '
     function kv(line, key,   i, n, parts) {
@@ -526,14 +532,19 @@ fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
       for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
       return ""
     }
-    index($0, "fill-ledger/v1|") == 1 && kv($0, "session") == sid && kv($0, "declined") ~ /[[:alnum:]]/ {
+    index($0, "fill-ledger/v1|") != 1 || kv($0, "session") != sid { next }
+    kv($0, "declined") ~ /[[:alnum:]]/ {
       last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
+      lifted = ""
+      next
     }
-    END { if (last != "") print last }')"
+    kv($0, "state") == "lift" && last != "" { lifted = lifted (lifted == "" ? "" : ",") kv($0, "lifted") }
+    END { if (last != "") print last "\037" lifted }')"
   [ -n "$line" ] || return 0
-  IFS=$'\037' read -r at st_cur ready launched reason <<< "$line"
+  IFS=$'\037' read -r at st_cur ready launched reason lifted <<< "$line"
   for id in ${ready//,/ }; do
     fill_row_launched "$id" "$launched" && continue
+    case ",$lifted," in *",$id,"*) continue ;; esac
     ids="${ids}${ids:+ }${id}"
   done
   [ -n "$ids" ] || return 0
