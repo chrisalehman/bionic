@@ -1712,12 +1712,16 @@ section "§CAUSE: a standing red names its cause and the run that disagrees; the
 # `a` is red at the accepted head while $LL_SIG/<tag>.env exists (a fact outside the tree, as the share
 # is) and green otherwise. T2 merges the head first, so the candidate's tree is T2's own, where a door
 # run (its stamp, as booked.sh writes one) can be green: that run disagrees with the landing's red.
+# a.test.sh DECLARES T2's code file (wave-35 T38; A-T38-1): since T9 the floor judge proves a commit's code
+# only through the suites the anchor index names for it (lib/anchors.sh `anchors_index`), and T2 commits
+# T2.txt (world_repo's `T2 work`), so the suite carries the shaped call the index reads. This a.test.sh is
+# RUN by the landing and sources no assert.sh, so `anchor` is a no-op here; the extractor reads the call.
 ll_cause_world() {  # <tag> [<lands_on>; default a] -> root
   local r
   r="$(ll_world)" || return 1
   ll_launch "$r" T2 "${2:-a}"
-  printf '#!/bin/bash\necho "PASS: a ran"\nif [ -e "$LL_SIG/%s.env" ]; then echo "FAIL: a reads its environment"; echo; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1; fi\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' \
-    "$1" > "$r/tests/a.test.sh"
+  printf '#!/bin/bash\nanchor() { :; }\nanchor file T2.txt %s\necho "PASS: a ran"\nif [ -e "$LL_SIG/%s.env" ]; then echo "FAIL: a reads its environment"; echo; echo "a.test.sh: 1/2 passed, 1 failed  sections=1 setup=0"; exit 1; fi\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' \
+    "'T2 work'" "$1" > "$r/tests/a.test.sh"
   git -C "$r" commit -qam "a reads its environment" || return 1
   git -C "$r/.worktrees/T2" merge -q --no-edit wave/x >/dev/null 2>&1 || return 1
   : > "$LL_SIG/$1.env"

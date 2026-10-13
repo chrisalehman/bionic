@@ -3073,7 +3073,7 @@ s69_verdict() {  # <rc> <words> -> admitted | debt | other
   else case "$2" in *'a declared red is still owed'*) printf 'debt' ;; *) printf 'other' ;; esac; fi
 }
 s69_real() {  # <step> <state> -> the gate's answer to a real bound commit of the plan at <step>
-  s69_state "$2"; s69_plan "$1" "$S69_X"
+  s69_state "$2"; s69_plan "$1" "$(s69_text "$1")"
   s34_gate "$R69"; s69_verdict "$GATE_RC" "$GATE_ERR"
 }
 # THE MOVE TO STEP 7 ASKS THE FACTS JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-11, A-T10-12): after the dry commit,
@@ -3085,12 +3085,18 @@ s69_real() {  # <step> <state> -> the gate's answer to a real bound commit of th
 S69_FACTS7="$(s69_line floor "$S69_H" 2026-10-04T10:00:00Z record/w27/floor.log)
 $(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/adversarial-whole.md adversarial w-read pass whole)
 $(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure-whole.md structure w-read pass whole)"
+# ONE TEXT FOR BOTH COMMITS (wave-35 T38; A-T38-2): the real commit and the dry commit judge the same plan
+# lines, so at Step 7 both carry S69_FACTS7. Until T38 only the move did; T31's Step-7 floor arm then refused
+# the real commit of `none` and `voided` (no floor line) while the dry commit (T10's floor line) was admitted:
+# the row compared two texts. The floorless plan is pinned on purpose, wall and judge both driven, in
+# tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5.
+s69_text() {  # <step> -> the plan's extra lines for the state s69_state set: S69_X, behind S69_FACTS7 at Step 7
+  if [ "$1" = 7 ]; then printf '%s%s' "$S69_FACTS7" "${S69_X:+
+$S69_X}"; else printf '%s' "$S69_X"; fi
+}
 s69_move() {  # <step> <state> -> `current <step>` from the step before it: the answer, and the current: line after
-  local x
-  s69_state "$2"; x="$S69_X"
-  [ "$1" != 7 ] || x="$S69_FACTS7${S69_X:+
-$S69_X}"
-  s69_plan "$(($1 - 1))" "$x" "$1"
+  s69_state "$2"
+  s69_plan "$(($1 - 1))" "$(s69_text "$1")" "$1"
   poke "$R69" current "$1"
   printf '%s %s' "$(s69_verdict "$RC" "$OUT")" "$(/usr/bin/grep -m1 '^current:' "$P69")"
 }
@@ -3146,6 +3152,24 @@ for s69n in 6 7; do
   done
 done
 expect_eq "69f2 …and the table holds both answers (two debts, one covered, at Step 7)" "debt" "$(s69_real 7 two)"
+# THE FLOORLESS PLAN AT STEP 7, ON PURPOSE (wave-35 T38; A-T38-2): T10's facts without their floor line, no debt.
+# The real commit is refused by the wall's Step-7 arm and `current 7` answers the same, in the judge's words for
+# absent, which both read through lib/proof.sh `proof_floor_absent`. The two calls this section drives are
+# anchored: the wall's arm (69f3) and facts_state's floor branch, which `current 7` asks in 69f-7-*.
+anchor file payload/scripts/lib/walls.sh 'why="$(proof_floor_absent "$PLAN")" || return 0'
+anchor file payload/scripts/lib/proof.sh 'if proof_floor_absent "$plan" >/dev/null; then st=absent'
+S69_WHOLE7="$(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -v '^proved: kind=floor ')"
+expect_eq "69f3-pre the facts without their floor line keep the two whole readings and lose the one floor line" "2 0 1" \
+  "$(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=review ') $(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=floor ') $(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -c '^proved: kind=floor ')"
+s69_words() { case "$1" in *'no regression proof on this plan yet'*) printf 'floor-absent' ;; *) printf 'other-words' ;; esac; }
+s69_state none; s69_plan 7 "$S69_WHOLE7"; s34_gate "$R69"
+S69_FR="$(s69_verdict "$GATE_RC" "$GATE_ERR") $(s69_words "$GATE_ERR")"
+s69_state none; s69_plan 6 "$S69_WHOLE7" 7; poke "$R69" current 7
+S69_FD="$(s69_verdict "$RC" "$OUT") $(s69_words "$OUT") $(/usr/bin/grep -m1 '^current:' "$P69")"
+expect_eq "69f3 a plan at Step 7 with no floor line: the real commit is refused in the judge's words for absent" \
+  "other floor-absent" "$S69_FR"
+expect_eq "69f3b …and the dry commit of current 7 answers as the real commit, in the same words, current: 6 kept" \
+  "$S69_FR current: 6" "$S69_FD"
 
 # ---------- the current verb's copy is its own file (A-orch-171) ----------
 # The caller's working directory holds the user's own files named `as-is` and `judged`; a move that
