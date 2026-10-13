@@ -2555,7 +2555,10 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 # (validate_tests_block); the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
 # regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
 # no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
-# says "no regression proof on this plan yet"). A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
+# says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
+# debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state, the floor judge and
+# facts_state ask, so the wall and the judge read one plan's floor line one way (FL-5 drives both).
+# A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
 # that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
 # green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes
 # this arm whatever its `owed=`. A plan at `regression: no` owes no floor here (facts_owed deals none).
@@ -2563,11 +2566,9 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 _eg_refuse_floor_absent() {
   local why
   [ "$(plan_regression "$PLAN")" = no ] && return 0
-  if declare -F proof_awk >/dev/null 2>&1; then
-    printf '%s\n' "$SECTION" | awk "$(proof_awk)"'
-      proof_fields($0) && PROOF_KIND == "floor" { f = 1 }
-      END { exit !f }' && return 0
-    why="its section holds no 'proved: kind=floor' line: no regression proof on this plan yet (the judge's floor absent)"
+  if declare -F proof_floor_absent >/dev/null 2>&1; then
+    why="$(proof_floor_absent "$PLAN")" || return 0
+    why="its section holds no 'proved: kind=floor' line: ${why} (the judge's floor absent)"
   else
     why="the floor's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
