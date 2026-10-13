@@ -1101,7 +1101,18 @@ _eg_cd_targets() {
     *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
     *) return 0 ;;
   esac
-  IFS=$';&|\n' read -r -d '' -a _segs <<< "$_rest" || :
+  # ONLY THE SEGMENTS THAT CAN ANSWER ARE WALKED (wave-35 T11). A segment changes the answer
+  # only when it opens with `cd`, holds the `git` that ends the scan, or opens with a spelling
+  # `git_argv_is_git` must judge (G, gI, giT); every other segment walked past costs a loop
+  # step and says nothing. One awk hands the loop below those segments alone, in order, up to
+  # the first that holds `git`: a 64 KB heredoc of 500 lines was 500 steps of this loop, and a
+  # 200 KB one three times as many (tests/hook-timeout.test.sh row b4, counted at both sizes).
+  IFS=$'\037' read -r -d '' -a _segs <<< "$(printf '%s' "$_rest" | LC_ALL=C awk '
+    { n = split($0, f, /[;&|]/)
+      for (i = 1; i <= n; i++) {
+        t = f[i]; sub(/^[ \t({]+/, "", t)
+        if (index(f[i], "git") || t ~ /^(cd|G|gI|giT)/) { printf "%s\037", f[i]; if (index(f[i], "git")) exit }
+      } }')" || :
   _n=${#_segs[@]}
   while [ "$_i" -lt "$_n" ] && [ "$_last" = 0 ]; do
     _seg="${_segs[_i]}"; _i=$((_i + 1))
@@ -1407,7 +1418,8 @@ _eg_commit_count() {
 }
 
 # _eg_git_only <text> -> 0 when every segment of <text> is a simple command whose first word
-# is `git`, `true`, `:` or `exit`; 1 for anything else.
+# is `git`, `true`, `:` or `exit`, or one of the eight file and print words below under their
+# guards; 1 for anything else.
 #
 # AN ALLOW-LIST, NOT A DENY-LIST (review R2-2, wave-19 T6e). This reader used to name the words
 # that move the shell (`cd`, `pushd`, `eval`, a shell) and pass everything else. That was
@@ -1434,13 +1446,33 @@ _eg_commit_count() {
 # adds, at a trailing separator, has the empty first word the shell loop also passed — and the
 # same leading-blank strip and first word. `LC_ALL=C` reads bytes; every character it tests is
 # ASCII. The text arrives through ENVIRON, never `-v`, which would read its backslashes.
+#
+# THE LIST GREW BY EIGHT WORDS, AND ONLY EIGHT (wave-35 T4; REQ-4 AC-4.2, D13). A walker's
+# `cd <scratch> && ln -s … && git add … && git commit` lost the exemption to its `ln` and was then
+# judged against this run's plan (A-orch-30, wave-34). `ln mkdir cp mv rm touch printf echo` are
+# read past now: the first six run in a child process and `printf`/`echo` print, so none of them
+# moves the shell or redirects git. Builtins and keywords stay off (`export`, `pwd`, `set`,
+# `pushd`…), and so does a `NAME=value` prefix, `GIT_*=` among them: either changes the shell
+# that commits.
+#
+# WHAT THOSE WORDS CAN STILL DO is write a file, and a `.git` in the scratch directory naming the
+# root's repository sends the one commit into the ROOT while the reader, which asks git before
+# the command runs, places it outside. So a segment one of them starts must carry no `$` and no
+# glob character (`*`, `?`, `[`), each of which can spell `.git` without writing it, and `printf`
+# no `-v`, which assigns in the shell that commits; `_eg_placed` costs the exemption for a
+# literal `.git` path anywhere in the text. The three rounds of deny-list that were beaten (R1,
+# C1, R2-2) are why this stays an allow-list: a word is read past only when it is named here.
+#
+# _EG_GO_WHY names what cost the exemption, for the jurisdiction refusal (empty on 0).
+_EG_GO_WHY=""
 _eg_git_only() {
-  local _t="${1:-}"
+  local _t="${1:-}" _rc
+  _EG_GO_WHY=""
   case "$_t" in
-    *'sh -c'*|*'sh	-c'*) return 1 ;;
-    *[\(\)\{\}\`]*) return 1 ;;
+    *'sh -c'*|*'sh	-c'*) _EG_GO_WHY="it carries an sh -c string"; return 1 ;;
+    *[\(\)\{\}\`]*) _EG_GO_WHY="it opens a subshell, a group, a function body or a backtick"; return 1 ;;
   esac
-  _EG_GO_TEXT="$_t" LC_ALL=C awk '
+  _EG_GO_WHY="$(_EG_GO_TEXT="$_t" LC_ALL=C awk '
     BEGIN {
       t = ENVIRON["_EG_GO_TEXT"]
       gsub(/>&/, ">", t); gsub(/<&/, "<", t); gsub(/&>/, ">", t)
@@ -1449,10 +1481,20 @@ _eg_git_only() {
         w = seg[i]
         sub(/^[ \t]+/, "", w)
         sub(/[ \t].*$/, "", w)
-        if (w != "" && w != "git" && w != "true" && w != ":" && w != "exit") exit 1
+        if (w == "" || w == "git" || w == "true" || w == ":" || w == "exit") continue
+        if (w == "ln" || w == "mkdir" || w == "cp" || w == "mv" || w == "rm" || w == "touch" || w == "printf" || w == "echo") {
+          if (seg[i] ~ /[$*?[]/) { printf "a %s segment carries a $ or a glob, which can name .git unwritten", w; exit 1 }
+          if (w == "printf" && seg[i] ~ /[ \t]-v/) { printf "printf -v assigns in the shell that commits"; exit 1 }
+          continue
+        }
+        printf "%s starts a segment, and only git, true, :, exit, ln, mkdir, cp, mv, rm, touch, printf and echo are read past", w
+        exit 1
       }
       exit 0
-    }' </dev/null
+    }' </dev/null)"
+  _rc=$?
+  [ "$_rc" -eq 0 ] && _EG_GO_WHY=""
+  return "$_rc"
 }
 
 # _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
@@ -1483,22 +1525,47 @@ _eg_git_only() {
 # allow-list needs no matching change: it already fails closed on any first word that is not
 # byte-for-byte `git`, `true`, `:` or `exit`, so a quote- or backslash-split `git` itself is
 # already judged rather than exempted (A-T6.13).
+#
+# A `.git` PATH ANYWHERE IN THE TEXT costs the exemption too (wave-35 T4; D13). The words
+# `_eg_git_only` gained write files, and `ln -s <root>/.git .git` or `echo "gitdir: …" > .git` in
+# the scratch directory sends the one commit into the root's repository after this reader has
+# asked git where it lands. A `.git` that ends the word or is followed by `/` is the repository's
+# directory; `.gitignore`, `.git-blame-ignore-revs` and `foo.git` are not it. Read on the raw text
+# and on the stripped copy, like the flags above. WITHOUT REGARD TO CASE (wave-35 T31; D20,
+# critic-adversarial finding 4): a case-insensitive filesystem (APFS, as this machine's) opens `.GIT`
+# and `.Git` as `.git`, and a probe committed into the root through `ln -s <root>/.GIT .GIT`. Spelled
+# as bracket classes, so no shell option is set and restored around the two tests.
+#
+# _EG_PLACED_WHY names what cost the exemption, for the jurisdiction refusal (empty on 0).
+_EG_PLACED_WHY=""
+_eg_dotgit_re='(^|[^A-Za-z0-9_.-])\.[Gg][Ii][Tt]([^A-Za-z0-9_-]|$)'
 _eg_placed() {
   local _c _sep _dq
+  _EG_PLACED_WHY=""
   # THE SHARED STRIP (`_wall_screen`; wave-24-fixit-1811 T4). It also joins a
   # backslash-newline, which the shell does too, so `--git-\<newline>dir` now costs
   # the exemption as well — the fail-closed direction this copy exists for.
   _wall_screen "$COMMAND"; _dq="$_WALL_STRIPPED"
   case "$COMMAND" in
-    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
+      _EG_PLACED_WHY="it names the repository outright (--git-dir, --work-tree or a GIT_DIR-family variable)"; return 1 ;;
   esac
   case "$_dq" in
-    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
+      _EG_PLACED_WHY="it names the repository outright (--git-dir, --work-tree or a GIT_DIR-family variable)"; return 1 ;;
+  esac
+  case "$COMMAND$_dq" in
+    *.[Gg][Ii][Tt]*)
+      if [[ "$COMMAND" =~ $_eg_dotgit_re ]] || [[ "$_dq" =~ $_eg_dotgit_re ]]; then
+        _EG_PLACED_WHY="it names a .git path, which can point the directory at another repository"; return 1
+      fi ;;
   esac
   case "$_EG_CWD_SRC" in
-    -C) [ "$_EG_COMMIT_NC" -eq 1 ] && _eg_git_only "$COMMAND" ;;
+    -C)
+      [ "$_EG_COMMIT_NC" -eq 1 ] || { _EG_PLACED_WHY="the commit carries more than one directory override (-C)"; return 1; }
+      _eg_git_only "$COMMAND" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
     cd)
-      [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
+      [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C after the leading cd"; return 1; }
       _c="$COMMAND"
       # Behind a `case`, as in `_eg_commit_cwd` (wave-24-fixit-1811 T4).
       while :; do case "$_c" in ' '*) _c="${_c# }" ;; '	'*) _c="${_c#	}" ;; *) break ;; esac; done
@@ -1507,12 +1574,14 @@ _eg_placed() {
         '&&'*) _sep="${_sep#&&}" ;;
         '||'*) _sep="${_sep#||}" ;;
         ';'*|$'\n'*) _sep="${_sep#?}" ;;
-        *) return 1 ;;
+        *) _EG_PLACED_WHY="the leading cd is not followed by &&, || or ;, so it moves no shell the commit runs in"; return 1 ;;
       esac
-      _eg_git_only "$_sep" ;;
+      _eg_git_only "$_sep" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
     payload)
-      [ "$_EG_COMMIT_NC" -eq 0 ] && _eg_git_only "$COMMAND" ;;
-    *) return 1 ;;
+      [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C that is not absolute"; return 1; }
+      _eg_git_only "$COMMAND" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
+    env-C) _EG_PLACED_WHY="env -C moves the commit, and the wall places only git -C, a leading cd or the cwd"; return 1 ;;
+    *) _EG_PLACED_WHY="the wall could not read where the commit runs"; return 1 ;;
   esac
 }
 
@@ -1521,10 +1590,35 @@ _eg_placed() {
 # engaged root's; 1 otherwise, and for every case the gate judges instead. It reads COMMAND,
 # the payload's cwd and BIONIC_ROOT, which its caller was handed, and asks git; it reads no
 # plan, roster or marker (D11).
+#
+# AND WHEN IT CANNOT EXEMPT, IT SAYS WHETHER THE COMMIT WAS PLACED OUTSIDE (wave-35 T4; REQ-4
+# AC-4.2, D13). _EG_JUR_UNPLACED is set, naming why, when the directory the reader places the
+# commit in is outside the engaged repository but the command around it is one the wall cannot
+# place exactly as git will: two commits, a word off `_eg_git_only`'s list, a second `-C`, a
+# `.git` path. The gate refuses such a commit for the split and never judges it against the bound
+# plan, whose evidence has nothing to say about another repository's work (A-orch-30, wave-34:
+# a scratch repository's commit was refused because "Step-5 head … is not a commit in the
+# repository at <scratch>"). It stays empty for a commit placed inside, for one the reader cannot
+# place at all, and for a leading `cd` followed by a second directory, which the two-directory
+# arm already refuses naming both. So the git question is asked of every commit now, not only of
+# a placeable one: one `rev-parse` per commit command.
+_EG_JUR_UNPLACED=""
 eg_commit_outside_root() {
+  _EG_JUR_UNPLACED=""
   _eg_commit_cwd
   _eg_commit_count
-  [ "$_EG_COMMITS" -eq 1 ] && _eg_placed && _eg_outside_root "$_EG_CWD"
+  [ "$_EG_COMMITS" -ge 1 ] || return 1
+  _eg_outside_root "$_EG_CWD" || return 1
+  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; then
+    return 1
+  fi
+  if [ "$_EG_COMMITS" -ne 1 ]; then
+    _EG_JUR_UNPLACED="it carries $_EG_COMMITS commits, and the wall places one"
+    return 1
+  fi
+  _eg_placed && return 0
+  _EG_JUR_UNPLACED="${_EG_PLACED_WHY:-the wall could not read where the commit runs}"
+  return 1
 }
 
 # THE STEP FROM WHICH THE GATE READS A RUN'S READINGS AND VERDICTS, named once (wave-28 T72; D33, D19).
@@ -1564,8 +1658,9 @@ eg_plan_reads_readings() {
 # advice appended to an already-refused call, so a false positive costs a
 # sentence and a false negative costs the loop this exists to break.
 plan_write_note() {
-  local rel="$PLAN"
-  [ -n "$PLAN" ] || return 0
+  # `${PLAN:-}`: the jurisdiction refusal (wave-35 T4) is made before any plan is read.
+  local rel="${PLAN:-}"
+  [ -n "$rel" ] || return 0
   case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
   case "$COMMAND" in
     *"$PLAN"*|*"$rel"*)
@@ -1921,6 +2016,22 @@ if eg_commit_outside_root; then
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
     "$_EG_JUR_TOP" "$BIONIC_ROOT" >&2
   exit 0
+fi
+
+# AN OUTSIDE COMMIT THE WALL CANNOT PLACE IS REFUSED HERE, FOR THE SPLIT (wave-35 T4; REQ-4
+# AC-4.2, D13). The reader placed it in another repository, and the command around it is one the
+# wall cannot place exactly as git will (`eg_commit_outside_root` names why). It used to fall
+# through and be judged against this run's plan, whose evidence says nothing about another
+# repository: a walker's scratch commit was refused for this run's Step-5 head (A-orch-30). It is
+# refused instead, before any plan is read, and the refusal names the one shape that is exempt.
+# Every §REQ-9 9a moving form (`if cd`, `time cd`, `pushd`, a second `-C`, two commits) still
+# lands here refused: the commit is not admitted, and a writer who meant the root splits it the
+# same way, with `git -C <root> commit`, which is judged as before.
+if [ -n "$_EG_JUR_UNPLACED" ]; then
+  refuse exit2 commit "cannot place this outside commit" "split it: setup, then commit alone" \
+"evidence-gate: $_EG_JUR_TOP is outside the engaged repository ($BIONIC_ROOT), but the wall cannot place this commit exactly as git will: $_EG_JUR_UNPLACED.
+An outside commit the wall cannot place is not exempt, and this run's plan is not read for it: it is refused here.
+Split it: run the setup as its own command, then commit alone with: git -C $_EG_JUR_TOP commit"
 fi
 
 # THE DOCS ROOT, FROM THE LIBRARY. This hook carried `resolve_docs_root()` and was the
@@ -2440,6 +2551,33 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
   refuse exit2 commit "a reading question is unanswered" "record or waive each reading" "$_eg_detail"
 }
 
+# THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key
+# (validate_tests_block); the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
+# regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
+# no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
+# says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
+# debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state, the floor judge and
+# facts_state ask, so the wall and the judge read one plan's floor line one way (FL-5 drives both).
+# A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
+# that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
+# green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes
+# this arm whatever its `owed=`. A plan at `regression: no` owes no floor here (facts_owed deals none).
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+_eg_refuse_floor_absent() {
+  local why
+  [ "$(plan_regression "$PLAN")" = no ] && return 0
+  if declare -F proof_floor_absent >/dev/null 2>&1; then
+    why="$(proof_floor_absent "$PLAN")" || return 0
+    why="its section holds no 'proved: kind=floor' line: ${why} (the judge's floor absent)"
+  else
+    why="the floor's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
+  fi
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the floor is owed: ${why}.
+Plan: $PLAN
+Fix: run the whole run with 'session-poker.sh floor-run' and record its log with 'session-poker.sh proof-add floor <log>'. Whether that floor is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
+  refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add floor" "$_eg_detail"
+}
+
 # ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
 #
 # ONE LINE PER `## Tasks` ROW, and the refusal says so. The arm used to name ONE id and ask
@@ -2775,7 +2913,7 @@ Fix: remove the '${ac}:' block, or repoint its 'task:' to the build task that ci
 
 # The repository a commit is made in: the directory the commit runs in when git places it in one,
 # else the engaged root's — the plan's own repository. Assigns `_EG_REPO`. Read by
-# `validate_tests_head` (whether `head:` is a commit here) and `validate_net_zero` (whose index).
+# `validate_net_zero` (whose index).
 _eg_commit_repo() {
   _EG_REPO="${_EG_CWD:-}"
   { [ -d "$_EG_REPO" ] && git -C "$_EG_REPO" rev-parse --git-dir >/dev/null 2>&1; } || _EG_REPO="$BIONIC_ROOT"
@@ -2798,8 +2936,8 @@ _eg_commit_repo() {
 #
 # THE INDEX READ IS A NEW REACH, AND THE RULED EXCEPTION TO THE FREEZE (.claude/rules/hook-authoring.md:
 # a wall never fetches its own facts). No payload field says what a commit will hold, and D13 is
-# approved ("option 2"); this gate already asks git about the commit's repository
-# (`validate_tests_head`). The common case costs one `git diff --cached --quiet` over the set's
+# approved ("option 2"); this gate already asks git which repository the commit is made in
+# (`_eg_commit_repo`). The common case costs one `git diff --cached --quiet` over the set's
 # directories; the sums are taken only when something there is staged.
 #
 # A RESIDUAL, NAMED AND NOT CLOSED: `git commit -a` and `git commit <pathspec>` stage at commit time,
@@ -3680,99 +3818,29 @@ step_prefix() {
   echo "canonical-sdlc step $1"
 }
 
-# Tests modality: cmd/pass/total/output present, pass and total integers,
-# pass==total. Used by the Step-5 verify gate.
-# AT `regression: no` THE BLOCK OWES THE STEP-0 LINE INSTEAD (wave-31 T27; REQ-12 AC-12.2; D4). The
-# regression is a Step-0 setting (`session-poker.sh regression`); a plan whose frontmatter reads
-# exactly `regression: no` owes no floor here: no cmd/pass/total/output/head, and in their place
+# THE STEP-5 BLOCK OWES NO FLOOR KEYS (wave-35 T31; D20, A-orch-32). Until 1.18.0 this function demanded
+# cmd/pass/total/output/head at `current: 5`, refused unless pass equalled total, and held head: against
+# the release head. The doctrine moved the floor to Step 6's last act and its candidate may be a red
+# whole run (ADR-054), so a run following it could not take Step 5 honestly. The floor is judged by
+# lib/proof.sh `facts_state` at `current 7` and from Step 7 on; the keys may still be written
+# (`floor-run`, `proof-add floor`, `step-field`) and no gate reads them. The walk, the matrix and the
+# auditor are judged by the caller as they always were.
+# AT `regression: no` THE BLOCK STILL OWES THE STEP-0 LINE (wave-31 T27; REQ-12 AC-12.2; D4): the
+# regression is a Step-0 setting (`session-poker.sh regression`), and a plan whose frontmatter reads
+# exactly `regression: no` records who chose it and where the regression runs instead:
 #     regression: no (Step 0, <user>) — <where it runs>
-# with the user and the place each non-empty. The walk, the matrix and the auditor are judged by the
-# caller as they always were. AN ABSENT KEY, OR ANY OTHER VALUE, READS `yes` (fail-closed, as an absent
-# `walk:` reads `required`), and the arm below is the arm it was. `regression-override:` is never read.
+# with the user and the place each non-empty. Any other value, or none, owes no line here.
+# `regression-override:` is never read.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
-  local step="$1" pass total prefix advisory rline
-  if [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ]; then
-    rline=$(block_get regression)
-    if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
-      _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line stands in place of cmd/pass/total/output/head (got '${rline:-(none)}').
+  local step="$1" rline
+  [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ] || return 0
+  rline=$(block_get regression)
+  if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
+    _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line records who chose it and where the regression runs (got '${rline:-(none)}').
 Plan: $PLAN
 Fix: add to the Step 5 block the line 'regression: no (Step 0, <user>) — <where it runs>', naming who chose it at Step 0 and where the regression runs instead."
-      refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
-    fi
-    return 0
-  fi
-  shape_block cmd pass total output
-  pass=$(block_get pass)
-  total=$(block_get total)
-  # THE GATE RECORDS THE ADVISORY COUNTER AND NEVER JUDGES IT (wave-17 REQ-10, AC-10.2).
-  # `pass:`/`total:` are the GATING rows — the ones a red suite fails on. An advisory
-  # reading is a measurement the framework took and nothing gated on (tests/run.sh prints
-  # `Advisory: N readings, M exceeded` beneath `Gating:` when one was taken), so the block
-  # may carry it and this function reads it into nothing: it appears in no comparison
-  # below, and a block that omits it is the pre-wave block, unchanged. The key was already
-  # INERT — shape_block asserts presence and there is no unknown-key arm anywhere in this
-  # file — so this read is the CONTRACT made explicit, not a new refusal.
-  advisory=$(block_get 'advisory-exceeded')
-  : "$advisory"
-  prefix=$(step_prefix "$step")
-  if ! grep -qE '^[0-9]+$' <<< "$pass" || ! grep -qE '^[0-9]+$' <<< "$total"; then
-    _eg_detail="${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}').
-Plan: $PLAN"
-    refuse exit2 commit "'pass:' and 'total:' are not both integers" "write both as integers" "$_eg_detail"
-  fi
-  if [ "$pass" -ne "$total" ]; then
-    _eg_detail="${prefix} evidence has pass=${pass} but total=${total}; the suite is not fully green.
-Plan: $PLAN
-Fix: do not commit step ${step} until pass equals total."
-    refuse exit2 commit "the suite is not fully green" "make pass equal total" "$_eg_detail"
-  fi
-  validate_tests_head "$prefix"
-}
-
-# THE PASS NAMES THE HEAD IT READ (wave-26 T4; REQ-3 AC-3.2, D5). A green count says nothing
-# about WHICH code was green, so the block carries `head:`, and three facts about it are
-# refused here, after the counters, so a red block still meets the counters' words first:
-# no `head:` at all; a value that is not a commit in the repository the commit is made in (a
-# hex id, abbreviated or full — a symbolic `HEAD` would name whatever is checked out at commit
-# time, which is no record); and a commit the RELEASE HEAD does not contain. The release head
-# is the tip of the plan's `working-branch:` when it names one that resolves — the regression runs
-# on that branch, and the plan verbs' dry commit and a main-root commit at Step 5 are made
-# from the main checkout, whose own HEAD never holds a wave head before Step 8. A plan that
-# names no such branch is judged against the HEAD of the directory the commit is made in.
-# Whether a contained head is STALE is proof_state's question (lib/proof.sh), not this one.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_tests_head() {
-  local prefix="$1" head dir wb tip
-  head=$(block_get head)
-  if [ -z "$head" ]; then
-    _eg_detail="${prefix} evidence carries no 'head:' — the commit its regression ran on.
-Plan: $PLAN
-Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as 'head=<sha>' in its header."
-    refuse exit2 commit "this step's evidence names no head" "add head: <sha the run read>" "$_eg_detail"
-  fi
-  # The repository the commit is made in; when the commit's directory is in none, the engaged
-  # root's — the plan's own repository, the one place left that can hold the commit.
-  _eg_commit_repo; dir="$_EG_REPO"
-  if ! grep -qE '^[0-9a-f]{7,40}$' <<< "$head" \
-     || ! git -C "$dir" cat-file -e "${head}^{commit}" 2>/dev/null; then
-    _eg_detail="${prefix} 'head: ${head}' is not a commit in the repository at ${dir}.
-Plan: $PLAN
-Fix: record the hex sha the regression ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
-    refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"
-  fi
-  wb=$(echo "$SECTION" | grep -E '^[[:space:]]*working-branch[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*//; s/[[:space:]].*$//')
-  [ -n "$wb" ] || wb=$(plan_frontmatter_get "$PLAN" working-branch)
-  tip=""
-  [ -n "$wb" ] && tip=$(git -C "$dir" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)
-  [ -n "$tip" ] || { wb=""; tip=$(git -C "$dir" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null); }
-  if [ -z "$tip" ] || ! git -C "$dir" merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
-    if [ -n "$wb" ]; then wb="working-branch $wb"; else wb="HEAD of $dir"; fi
-    _eg_detail="${prefix} 'head: ${head}' is not contained in the release head ${tip:-(none)} (${wb}).
-Plan: $PLAN
-Fix: run the regression on the release head, or on a commit it contains, and record that run's head."
-    refuse exit2 commit "the release head does not contain head:" "run the regression on that head" "$_eg_detail"
+    refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
   fi
 }
 
@@ -4487,9 +4555,8 @@ validate_walk_artifact() {
 #
 # AC-23: this arm reads only the DECLARATION and the Step-5
 # `environments-covered:` line — never a derived suite set. It is
-# independent of validate_tests_block, which is what actually requires the
-# unconditional whole-suite regression; nothing here substitutes for that,
-# and nothing here is consulted by it.
+# independent of the floor, which lib/proof.sh `facts_state` judges from
+# Step 7 (wave-35 T31; D20); nothing here substitutes for that.
 #
 # Fires at current: 5..9, the same durable-prefix span as
 # validate_walk_artifact: the covered claim cannot quietly go stale once
@@ -4621,8 +4688,9 @@ validate_environments() {
   return 0
 }
 
-# Verify gate: regression, the Verification Matrix, and — at double rigor,
-# once no row is still pending — a non-empty `auditor:` pointer.
+# Verify gate: the Verification Matrix, the walk artifact, the Step-0 line at
+# `regression: no`, and — at double rigor, once no row is still pending — a
+# non-empty `auditor:` pointer. No floor key: the floor is Step 7's (D20).
 # At `single` that pointer is not demanded (matrix_auditor_required).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step() {
@@ -4906,6 +4974,10 @@ dispatch() {
   # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
   case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
+  esac
+  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7 (wave-35 T31; D20, A-orch-50), asked last.
+  case "${CURRENT%[ab]}" in
+    7|8|9) _eg_refuse_floor_absent "the run" ;;
   esac
 }
 
@@ -5443,8 +5515,8 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --detach]
-#                                          [--stamp-dir <dir>] [--suites <names>] -- '<the command>'
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--kill-after <s> | --detach]
+#                                          [--stamp-dir <dir> | --unplaced] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5470,19 +5542,20 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # shell does not know its agent, so the wrap names it: the roster row's `name=` the budget arm
 # already read, else the payload's `agent_id`; a main-thread call names none (the gate's `main`).
 #
-# --quiet: a suite segment carrying `BIONIC_QUIET=1` in its prefix, or a suite file whose
-# first 30 lines hold `# runner: solo` (tests/run.sh's `_is_solo_suite` rule, read the same
-# way), takes the whole machine for a timing check.
+# NO --quiet (wave-35 T2; D11, AC-2.1): the wrap never asks the shim for the whole machine. Neither
+# `BIONIC_QUIET=1` in a suite segment's prefix nor a `# runner: solo` line in a suite file is read:
+# nothing passes or fails by the clock, so no suite is owed a quiet machine.
 #
 # --stamp-dir: WHERE THE SUITE RUNS, when a leading literal `cd` moves it (wave-26 T56, final
 # review B1). The shim stands in the payload's cwd, so without it `cd <tree> || exit 1; bash
 # tests/x` from the main checkout stamps the main checkout and the tree lands on no stamp.
-# `_bsg_cd_walk` says when it is sure; otherwise there is no option and the shim stamps its own
-# directory, as before.
+# `_bsg_cd_walk` says when it is sure. --unplaced: a move ahead of the suite the walk cannot follow
+# (wave-35 T6; D14): the shim writes no stamp and says on the run's output that it did not count.
+# With no move at all there is neither option, and the shim stamps its own directory.
 #
 # --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
-# the one the solo check reads too.
+# the one reading of the command's targets.
 #
 # --detach: THE RUN OUTLIVES THE CALL (wave-30 T12; D6, A-orch-7; REQ-3 AC-3.1). The shim runs the
 # whole run, the wait at the gate included, in a session of its own and waits on it from the call:
@@ -5518,37 +5591,21 @@ _wall_harness_shell() {  # -> sets _WALL_HSHELL to the harness's bash or zsh; rc
   return 1
 }
 
-_wall_prefix_sets() {  # <segment> <NAME> <value> -> 0 when the segment's leading assignments set NAME=value
-  local _s="$1" _re='^[A-Za-z_][A-Za-z0-9_]*='
-  _s="${_s#"${_s%%[![:space:]]*}"}"
-  case "$_s" in env[[:space:]]*) _s="${_s#env}"; _s="${_s#"${_s%%[![:space:]]*}"}" ;; esac
-  while [[ $_s =~ $_re ]]; do
-    case "$_s" in
-      "$2=$3"|"$2=$3"[[:space:]]*|"$2='$3'"|"$2='$3'"[[:space:]]*|"$2=\"$3\""|"$2=\"$3\""[[:space:]]*)
-        return 0 ;;
-    esac
-    _s="${_s#*=}"
-    case "$_s" in
-      \'*) _s="${_s#\'}"; _s="${_s#*\'}" ;;
-      \"*) _s="${_s#\"}"; _s="${_s#*\"}" ;;
-    esac
-    _s="${_s#"${_s%%[[:space:]]*}"}"
-    _s="${_s#"${_s%%[![:space:]]*}"}"
-  done
-  return 1
-}
-
 # _bsg_cd_walk <class lines> — THE ONE WALK of the command's leading literal `cd` segments, up
 # to its first suite segment, read twice (wave-26 T56, final review B1). Pure parameter
-# expansion: no fork beyond the one `bionic_jq .cwd` the solo reader always paid. It sets
+# expansion: no fork beyond the one `bionic_jq .cwd`. It sets
 #
 #   _BSG_CD_DIR     the payload cwd moved by every `cd` the walk can read as a literal; one it
-#                   cannot read is skipped. The solo reader's base: a miss there costs --quiet.
+#                   cannot read is skipped.
 #   _BSG_CWD        the payload cwd itself, where the shim stamps when there is no --stamp-dir.
 #   _BSG_STAMP_DIR  where the first suite segment runs, when a `cd` moved it and the walk is
 #                   SURE of it; "" otherwise. The shim's --stamp-dir: a guess there would put a
-#                   run's stamp in another tree, so anything unsure gives none and the shim
-#                   stamps its own directory, as before T56.
+#                   run's stamp in another tree, so anything unsure gives none.
+#   _BSG_UNPLACED   1 when a move ahead of the suite (a `cd`, `pushd` or `popd` in any form) left
+#                   the walk unsure where it runs, else 0. The shim's --unplaced (wave-35 T6; D14,
+#                   design ledger Δ7): its own directory was the guess that stamped a red run in a
+#                   writer's dirty tree as a clean green at the main head (1.17.0), so such a run
+#                   leaves no stamp at all. With no move, the suite runs where the shim stands.
 #
 # SURE means: every `cd` ahead of the suite is a literal path (bare, single- or double-quoted
 # with nothing to expand; `~` and `~/…` from HOME; bare `cd` is HOME) or, after one that is not,
@@ -5556,11 +5613,11 @@ _wall_prefix_sets() {  # <segment> <NAME> <value> -> 0 when the segment's leadin
 # (`if cd x`, `X=1 cd x`); and the raw text ahead of the suite holds no subshell, pipe,
 # background job or command substitution (`( … )`, `|`, `&`, a backquote), nor a `cd` behind
 # `||`, which may not run. The class lines flatten all of those away, so the raw text is asked.
-_BSG_CD_DIR=""; _BSG_STAMP_DIR=""
+_BSG_CD_DIR=""; _BSG_STAMP_DIR=""; _BSG_UNPLACED=0
 _bsg_cd_walk() {
-  local _cls _seg _p _q _sure=1 _moved=0 _pre _t
+  local _cls _seg _p _q _sure=1 _moved=0 _seen=0 _pre _t
   _BSG_CD_DIR="$(bionic_jq .cwd)"; [ -n "$_BSG_CD_DIR" ] || _BSG_CD_DIR="${BIONIC_CWD:-}"
-  _BSG_CWD="$_BSG_CD_DIR"; _BSG_STAMP_DIR=""
+  _BSG_CWD="$_BSG_CD_DIR"; _BSG_STAMP_DIR=""; _BSG_UNPLACED=0
   [ -n "$_BSG_CD_DIR" ] || _sure=0
   _seg=""
   while IFS=$'\t' read -r _cls _seg; do
@@ -5570,10 +5627,11 @@ _bsg_cd_walk() {
       cd|cd[[:space:]]*) : ;;
       *)
         case " $_seg " in
-          *[[:space:]]cd[[:space:]]*|*[[:space:]]pushd[[:space:]]*|*[[:space:]]popd[[:space:]]*) _sure=0 ;;
+          *[[:space:]]cd[[:space:]]*|*[[:space:]]pushd[[:space:]]*|*[[:space:]]popd[[:space:]]*) _sure=0; _seen=1 ;;
         esac
         continue ;;
     esac
+    _seen=1
     _p="${_seg#cd}"; _p="${_p#"${_p%%[![:space:]]*}"}"; _p="${_p%"${_p##*[![:space:]]}"}"
     _q=0
     case "$_p" in
@@ -5594,6 +5652,7 @@ _bsg_cd_walk() {
     esac
     _moved=1
   done <<< "$1"
+  _BSG_UNPLACED="$_seen"
   [ "$_moved" = 1 ] && [ "$_sure" = 1 ] && [ "$_cls" = suite ] && [ -n "$_seg" ] || return 0
   _pre="${COMMAND%%"$_seg"*}"
   [ "$_pre" != "$COMMAND" ] || return 0
@@ -5601,7 +5660,7 @@ _bsg_cd_walk() {
   case "$_t" in *'||cd'*|*'||{cd'*) return 0 ;; esac
   _t="${_t//||/}"; _t="${_t//&&/}"
   case "$_t" in *[\(\)\|\&\`]*) return 0 ;; esac
-  _BSG_STAMP_DIR="$_BSG_CD_DIR"
+  _BSG_STAMP_DIR="$_BSG_CD_DIR"; _BSG_UNPLACED=0
   return 0
 }
 
@@ -5627,32 +5686,9 @@ _door_in_tree() {
 }
 
 # _BSG_TARGETS — the command's suite claims, cmd-class.sh's `targets` reading: one
-# `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61):
-# the solo check and the suite names below both read it, so naming the suites costs no fork.
+# `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61),
+# for the suite names below.
 _BSG_TARGETS=""
-
-# _bsg_solo_target — 0 when a suite file the command runs declares `# runner: solo` in its
-# first 30 lines. The path is the claim's own (_BSG_TARGETS), resolved
-# against _BSG_CD_DIR, which `_bsg_cd_walk` set from this command's class lines just before.
-# Only a regular file is read, so a FIFO cannot hang the hook.
-_bsg_solo_target() {
-  local _dir="$_BSG_CD_DIR" _p _k _b _r _f _n _l _rest
-  while IFS=$'\t' read -r _k _b _r _p; do
-    [ "$_k" = file ] && [ -n "$_p" ] || continue
-    case "$_p" in *'$'*|*'`'*) continue ;; /*) _f="$_p" ;; *) _f="$_dir/$_p" ;; esac
-    [ -f "$_f" ] && [ -r "$_f" ] || continue
-    _n=0
-    while [ "$_n" -lt 30 ] && IFS= read -r _l; do
-      _n=$((_n + 1))
-      case "$_l" in
-        '# runner: solo'*)
-          _rest="${_l#'# runner: solo'}"
-          [ -z "${_rest//[[:space:]]/}" ] && return 0 ;;
-      esac
-    done < "$_f"
-  done <<< "$_BSG_TARGETS"
-  return 1
-}
 
 # _bsg_suites — sets _BSG_SUITES to the shim's --suites value (wave-26 T61, critic F1; T63, critic
 # K4-S1/N1/N2): one NAME per suite the command runs, from _BSG_TARGETS, in position order, each
@@ -5710,19 +5746,18 @@ _bsg_suites() {
   [ "$_only" = 0 ] || [ "$_other" = 1 ] || _BSG_RUNNER=1
 }
 
-# wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
+# wall_booked_argv <command> [<shim option>...] — sets WALL_BOOKED_ARGV to the
 # wrapped call, word by word; rc 1 when this plugin carries no shim. THE ONE BUILDER of the
 # shim's argument list (T9 adds `--kill-after <s>` through the extra options). The plugin
 # root is the one whose library this hook loaded: `$BIONIC_LIB` is `<root>/scripts/lib`.
 WALL_BOOKED_ARGV=()
 wall_booked_argv() {
-  local _cmd="$1" _quiet="$2" _root
-  shift 2
+  local _cmd="$1" _root
+  shift
   _root="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)" || return 1
   [ -f "$_root/booked.sh" ] || return 1
   WALL_BOOKED_ARGV=(bash "$_root/booked.sh")
   if _wall_harness_shell; then WALL_BOOKED_ARGV+=(--shell "$_WALL_HSHELL"); fi
-  [ "$_quiet" != 1 ] || WALL_BOOKED_ARGV+=(--quiet)
   [ "$#" -eq 0 ] || WALL_BOOKED_ARGV+=("$@")
   WALL_BOOKED_ARGV+=(-- "$_cmd")
   return 0
@@ -5750,7 +5785,7 @@ _bsg_agent() {
   _BSG_AGENT="${_BUDGET_ROW_NAME:-$_id}"
 }
 _bsg_wrap_text() {
-  local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
+  local _c _w _lines _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
   _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
   case "$_c" in
@@ -5773,25 +5808,21 @@ _bsg_wrap_text() {
   # ONE READING OF THE COMMAND PER HOOK (wave-26 T39): the class above and these lines are the
   # reading farm-out or the suite guard already made of this text, when one did.
   _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
-  while IFS=$'\t' read -r _cls _seg; do
-    [ "$_cls" = suite ] || continue
-    ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
-  done <<< "$_lines"
-  # ONE WALK, TWO READERS (T56): where the leading `cd` segments lead is the solo reader's base
-  # and, when the walk is sure of it, the shim's --stamp-dir.
+  # ONE WALK (T56): where the leading `cd` segments lead, when the walk is sure of it, is the shim's
+  # --stamp-dir.
   _bsg_cd_walk "$_lines"
-  # ONE TARGETS READING, TWO READERS (T61): the solo check and the shim's --suites.
+  # ONE TARGETS READING (T61): the shim's --suites.
   _BSG_TARGETS="$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
   _bsg_suites
-  [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
   _bsg_agent
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
   if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else set -- "$@" --detach; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
+  [ "$_BSG_UNPLACED" != 1 ] || set -- "$@" --unplaced
   set -- "$@" --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
-  wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
+  wall_booked_argv "$COMMAND" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
     _BSG_WRAP_TEXT="${_BSG_WRAP_TEXT:+$_BSG_WRAP_TEXT }$_WALL_WORD"
@@ -6610,6 +6641,14 @@ On the budget: ${2:-(nothing — this brief declared Suites: none)}
 ${_spell}"
       return 2 ;;
   esac
+  # A SUITE CLAIMED THROUGH A SCRIPT (wave-35 T4; D13) is refused by its own name, so the remedy
+  # names `--suites+ <suite>`; the command that ran it is named beside it, when it does not
+  # already name the suite.
+  local _via=""
+  case "${_run:-}" in
+    ''|*"$1"*) : ;;
+    *) _via=" (run by: ${_run})" ;;
+  esac
   fold_block exit2 suite-run \
     "$(_budget_wire_fact "allowed: " suite-run "run only the budgeted suites" "$2")" \
     "run only the budgeted suites" \
@@ -6618,7 +6657,7 @@ forty minutes of a machine nobody else can use. The set was recorded on this age
 roster row at dispatch, from the files its brief declared.
 
 On the budget: ${2:-(nothing — this brief declared Suites: none)}
-You asked for: $1
+You asked for: $1${_via}
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
@@ -6669,8 +6708,32 @@ $_how"
 # EVERY PLACEHOLDER IS QUOTED (wave-21 T14; critic-4e6d4a9 I4). A bare `<why>` is a redirect from
 # a file named `why` followed by a `>` with no word, so the pasted line was a parse error before
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
+# THE WHOLE RUN IS NO WIDENING (wave-35 T10; D10, REQ-1 AC-1.8). A refused run that is the project's whole tree,
+# `run.sh` or `tests/run.sh` with no `--only`, is never sent to `--reexec+ '<cmd>'`: an amend would hand a row the
+# whole tree outside the full-run rules. Its one path is `session-poker.sh floor-run`, which holds those rules
+# itself (hooks/session-poker.sh, the floor-run arm) and which this wall admits as typed, so the line printed,
+# run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
+# the full-tree arm's detail.
+_budget_whole_run_cmd() {
+  printf 'bash %s floor-run' "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")"
+}
+_budget_is_whole_run() {  # <the refused suite or run> -> 0 when it is the whole tree's runner, run whole
+  case " ${1:-} " in
+    *" --only "*|*" --one "*) return 1 ;;
+  esac
+  case "${1:-}" in
+    run.sh|tests/run.sh|./tests/run.sh|*/tests/run.sh|"bash tests/run.sh"|"bash ./tests/run.sh"|"bash "*/tests/run.sh) return 0 ;;
+    "tests/run.sh "*|"./tests/run.sh "*|"bash tests/run.sh "*|"bash ./tests/run.sh "*) return 0 ;;
+  esac
+  return 1
+}
+
 _budget_remedy_line() {  # <the refused suite or run>
   local _widen="--reexec+ '<cmd>'"
+  if _budget_is_whole_run "${1:-}"; then
+    printf 'run the whole suite by its one path, held to the full-run rules: %s' "$(_budget_whole_run_cmd)"
+    return 0
+  fi
   case "${1:-}" in
     *[[:space:]]*) : ;;
     *.test.sh) _widen="--suites+ $(refuse_shell_word "$1")" ;;
@@ -6749,18 +6812,17 @@ while IFS=$'\t' read -r _kind _target _run; do
       "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall.
-The full suite runs once, on the head being released, by one dispatched runner whose row
-carries tests/run.sh. A writer proves its change by the suites its brief names; a full run
-from a writer row costs forty minutes and proves a head nobody is releasing.
-
+The full suite runs once, on the head being released, by one runner, held to the
+full-run rules; a writer proves its change by the suites its brief names.
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead, through the one door (wave-28 T36):
+Run the suites your brief named, through the one door (wave-28 T36):
     tests/run.sh --only ${_ft_first:-<suite>.test.sh}
-\`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
-queue only the runner itself builds, and it is the full-tree runner as far as this budget
-is concerned. If the change reaches past the suites your brief names, say so in your report:
-the orchestrator widens the brief or dispatches the runner."
+The whole run's one path, run as printed (\`tests/run.sh --one\` is the runner's
+internal worker mode, the full tree to this budget):
+    $(_budget_whole_run_cmd)
+If the change reaches past your suites, say so in your report: the orchestrator
+widens the brief or dispatches the runner."
     return 2
   fi
   # ---- BEGIN THE ONE DOOR (wave-28 T36; D27, REQ-10 AC-10.1) ----

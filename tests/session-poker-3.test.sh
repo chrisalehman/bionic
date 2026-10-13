@@ -400,10 +400,10 @@ s57_reset; s57_floor "$S57_C4"
 for s57q in evidence adversarial structure; do s57_fact "$s57q" "$S57_C2" pass piece; done
 s57_fact adversarial "$S57_C2" pass whole; s57_fact structure "$S57_C2" pass whole
 s57_state "$P57" "$S57_C3"
-# C3 is not the working checkout's head (C4), so the floor, which proof_state judges there, is
-# uncovered from its proof's head (T45; review pass 13 F3); every reading line is covered.
+# C3 is an older head than the floor proof's (C4), so the floor is uncovered from its proof's head (T45; review pass
+# 13 F3), with the judge's reason after the range (wave-35 T9); every reading line is covered.
 expect_eq "57c §JUDGE a docs-only tail: past the last head only the docs root changed, so every reading line is covered" \
-  "$(s57_all "uncovered	${S57_C4}..${S57_C3}" covered covered covered covered covered)" "$S57_OUT"
+  "$(s57_all "uncovered	${S57_C4}..${S57_C3}	the proved head ${S57_C4:0:7} is not in the history of ${S57_C3:0:12}" covered covered covered covered covered)" "$S57_OUT"
 expect_eq "57c2 …rc 1, for the floor alone" "1" "$S57_RC"
 s57_state "$P57" "$S57_C4"
 expect_eq "57c3 …and one code commit more is uncovered from the same last head" "uncovered	${S57_C2}..${S57_C4}" "$(s57_of "$S57_EV")"
@@ -1649,13 +1649,22 @@ expect_eq "63h7 F10 readings naming a non-commit, asked at that same string, are
 # ---------- §FLOOR-HEAD (F3): the floor line answers for the head proof_state judged ----------
 S63_N="$(git -C "$R63" commit-tree "$S63_H^{tree}" -p "$S63_H" -m 'one past the checkout')"
 expect_eq "63f0 precondition: the commit one past the checkout's head is not checked out" "$S63_H" "$(git -C "$S63_WT" rev-parse HEAD)"
+# THE HEAD ASKED IS THE HEAD JUDGED (wave-35 T9; A-orch-45): no checkout is compared. One past the checkout with
+# the proof's tree is covered; one past it that adds a code file with no run recorded is uncovered, naming it.
 s57_state "$P63" "$S63_N"
-expect_eq "63f F3 asked about a commit one past the checkout's head: the floor is uncovered from the floor proof's head" \
-  "uncovered	${S63_H}..${S63_N}" "$(s57_of floor)"
+expect_eq "63f F3 asked about a commit one past the checkout's head with the proof's tree: the floor is covered at it" \
+  "covered" "$(s57_of floor)"
 expect_eq "63f2 …the review lines, which changed no file, covered" "covered" "$(s57_of "$S63_TAD")"
-expect_eq "63f3 …and the exit 1" "1" "$S57_RC"
+expect_eq "63f3 …and the exit 0" "0" "$S57_RC"
+S63_N2="$(cd "$R63" && export GIT_INDEX_FILE="$TMPROOT/s63-n2.index" && git read-tree "$S63_H" \
+  && git update-index --add --cacheinfo "100644,$(printf 'new\n' | git hash-object -w --stdin),lib/n2.sh" \
+  && git commit-tree "$(git write-tree)" -p "$S63_H" -m 'one past the checkout, adding code' )"
+s57_state "$P63" "$S63_N2"
+expect_eq "63f3b …one past it that adds lib/n2.sh with no run at it: uncovered from the proof's head, naming the commit" \
+  "uncovered	${S63_H}..${S63_N2}	commit ${S63_N2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(s57_of floor)"
 s57_state "$P63" "$S63_U"
-expect_eq "63f4 asked about an older head: the floor is uncovered too, never covered" "uncovered	${S63_H}..${S63_U}" "$(s57_of floor)"
+expect_eq "63f4 asked about an older head: the floor is uncovered too, never covered" \
+  "uncovered	${S63_H}..${S63_U}	the proved head ${S63_H:0:7} is not in the history of ${S63_U:0:12}" "$(s57_of floor)"
 sed '/^proved: kind=floor /d' "$P63" > "$R63/.bionic/tmp/nofloor.plan.md"
 s57_state "$R63/.bionic/tmp/nofloor.plan.md" "$S63_N"
 expect_eq "63f5 with no floor proof the floor line is absent, at any head" "absent" "$(s57_of floor)"
@@ -3064,11 +3073,30 @@ s69_verdict() {  # <rc> <words> -> admitted | debt | other
   else case "$2" in *'a declared red is still owed'*) printf 'debt' ;; *) printf 'other' ;; esac; fi
 }
 s69_real() {  # <step> <state> -> the gate's answer to a real bound commit of the plan at <step>
-  s69_state "$2"; s69_plan "$1" "$S69_X"
+  s69_state "$2"; s69_plan "$1" "$(s69_text "$1")"
   s34_gate "$R69"; s69_verdict "$GATE_RC" "$GATE_ERR"
 }
+# THE MOVE TO STEP 7 ASKS THE FACTS JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-11, A-T10-12): after the dry commit,
+# which still answers as the real commit, so a step-7 move that the gate admits carries the facts the judge owes at
+# the head: a floor proof dated 10:00, before every debt this section
+# writes, so it covers none of them, and the two whole-scope readings a double wave plan is dealt. They go ahead of the
+# state's own lines, so a covering floor proof (`covered`, `two`) is still the plan's last. The rows then test what
+# they were written for: the debt arm, and the dry commit answering as the real commit.
+S69_FACTS7="$(s69_line floor "$S69_H" 2026-10-04T10:00:00Z record/w27/floor.log)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/adversarial-whole.md adversarial w-read pass whole)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure-whole.md structure w-read pass whole)"
+# ONE TEXT FOR BOTH COMMITS (wave-35 T38; A-T38-2): the real commit and the dry commit judge the same plan
+# lines, so at Step 7 both carry S69_FACTS7. Until T38 only the move did; T31's Step-7 floor arm then refused
+# the real commit of `none` and `voided` (no floor line) while the dry commit (T10's floor line) was admitted:
+# the row compared two texts. The floorless plan is pinned on purpose, wall and judge both driven, in
+# tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5.
+s69_text() {  # <step> -> the plan's extra lines for the state s69_state set: S69_X, behind S69_FACTS7 at Step 7
+  if [ "$1" = 7 ]; then printf '%s%s' "$S69_FACTS7" "${S69_X:+
+$S69_X}"; else printf '%s' "$S69_X"; fi
+}
 s69_move() {  # <step> <state> -> `current <step>` from the step before it: the answer, and the current: line after
-  s69_state "$2"; s69_plan "$(($1 - 1))" "$S69_X" "$1"
+  s69_state "$2"
+  s69_plan "$(($1 - 1))" "$(s69_text "$1")" "$1"
   poke "$R69" current "$1"
   printf '%s %s' "$(s69_verdict "$RC" "$OUT")" "$(/usr/bin/grep -m1 '^current:' "$P69")"
 }
@@ -3124,6 +3152,24 @@ for s69n in 6 7; do
   done
 done
 expect_eq "69f2 …and the table holds both answers (two debts, one covered, at Step 7)" "debt" "$(s69_real 7 two)"
+# THE FLOORLESS PLAN AT STEP 7, ON PURPOSE (wave-35 T38; A-T38-2): T10's facts without their floor line, no debt.
+# The real commit is refused by the wall's Step-7 arm and `current 7` answers the same, in the judge's words for
+# absent, which both read through lib/proof.sh `proof_floor_absent`. The two calls this section drives are
+# anchored: the wall's arm (69f3) and facts_state's floor branch, which `current 7` asks in 69f-7-*.
+anchor file payload/scripts/lib/walls.sh 'why="$(proof_floor_absent "$PLAN")" || return 0'
+anchor file payload/scripts/lib/proof.sh 'if proof_floor_absent "$plan" >/dev/null; then st=absent'
+S69_WHOLE7="$(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -v '^proved: kind=floor ')"
+expect_eq "69f3-pre the facts without their floor line keep the two whole readings and lose the one floor line" "2 0 1" \
+  "$(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=review ') $(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=floor ') $(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -c '^proved: kind=floor ')"
+s69_words() { case "$1" in *'no regression proof on this plan yet'*) printf 'floor-absent' ;; *) printf 'other-words' ;; esac; }
+s69_state none; s69_plan 7 "$S69_WHOLE7"; s34_gate "$R69"
+S69_FR="$(s69_verdict "$GATE_RC" "$GATE_ERR") $(s69_words "$GATE_ERR")"
+s69_state none; s69_plan 6 "$S69_WHOLE7" 7; poke "$R69" current 7
+S69_FD="$(s69_verdict "$RC" "$OUT") $(s69_words "$OUT") $(/usr/bin/grep -m1 '^current:' "$P69")"
+expect_eq "69f3 a plan at Step 7 with no floor line: the real commit is refused in the judge's words for absent" \
+  "other floor-absent" "$S69_FR"
+expect_eq "69f3b …and the dry commit of current 7 answers as the real commit, in the same words, current: 6 kept" \
+  "$S69_FR current: 6" "$S69_FD"
 
 # ---------- the current verb's copy is its own file (A-orch-171) ----------
 # The caller's working directory holds the user's own files named `as-is` and `judged`; a move that
@@ -3325,7 +3371,10 @@ s72_world() {
   branch: wave/72-fixture")"
   awk '{ print } /^current: / && !d { print "working-branch: wave/72-fixture"; d = 1 }' "$S72P" > "$S72P.tmp" && mv "$S72P.tmp" "$S72P"
   mkdir -p "$S72R/tests" "$S72R/lib"
-  for s in a b c d; do printf '#!/bin/bash\nexit 0\n' > "$S72R/tests/$s.test.sh"; done
+  # EVERY SUITE DECLARES BOTH LIB FILES (wave-35 T9; D9): §72 proves the walk, so the cover a commit owes (a suite it
+  # ran that declares each code file it changed) is met by every suite; the calls follow `exit 0`, where the shim's
+  # runs never reach them and lib/anchors.sh still reads them. §FLOOR-COVER (evidence gate) proves the cover itself.
+  for s in a b c d; do printf '#!/bin/bash\nexit 0\n%s file lib/one.sh %s\n%s file lib/two.sh %s\n' anchor "'one'" anchor "'two'" > "$S72R/tests/$s.test.sh"; done
   printf 'one\n' > "$S72R/lib/one.sh"; printf 'two\n' > "$S72R/lib/two.sh"
   ( cd "$S72R" && git add -f "$S72P" tests lib && git commit -qm wb \
     && git worktree add -q -b wave/72-fixture "$S72R/.worktrees/72-fixture" ) >/dev/null 2>&1
@@ -3400,11 +3449,11 @@ expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'cove
 printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$S72F" > "$S72REC/floor-part.txt"
 s72_add floor-part.txt
 s42_unchanged "72b a run of one suite at F, every later commit proved" 1 "$S72P"
-expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed and 0 void of 4 suites at its head)" "$OUT"
+expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed of 4 suites at its head)" "$OUT"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\n' "$S72C2" > "$S72REC/floor-part-H.txt"
 s72_add floor-part-H.txt
 s42_unchanged "72b3 a run of two suites at the working head itself" 1 "$S72P"
-expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed and 0 void of 4 suites at its head)" "$OUT"
+expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed of 4 suites at its head)" "$OUT"
 
 # ---------- (c) a fix row after the full run: its red suite and its own, each run green ----------
 S72C3="$(s72_land T8 lib/one.sh d.test.sh,a.test.sh)"
@@ -3488,8 +3537,8 @@ expect_eq "72h proof_state: the floor proof at F, the hand commit after it unpro
 expect_contains "72h2 …its reason names the commit (proof_state answers covered or uncovered, nothing else)" \
   "commit ${S72C7:0:12} (no landing row) is not proved" "$S72STATE"
 s57_state "$S72P" "$S72C7"
-expect_eq "72h3 facts_state's floor line carries that reason" \
-  "$(printf 'uncovered\t%s' "${S72STATE#*	}")" "$(s57_of floor)"
+expect_eq "72h3 facts_state's floor line is uncovered from the proof's head to the head asked, then that reason (wave-35 T9)" \
+  "$(printf 'uncovered\t%s..%s\t%s' "$S72F" "$S72C7" "${S72STATE#*	}")" "$(s57_of floor)"
 s72_run a.test.sh "bash tests/a.test.sh"
 expect_eq "72h4 …and a run at it makes proof_state covered" "$(printf 'covered\t%s' "$S72C7")" "$(s72_state)"
 s57_state "$S72P" "$S72C7"
@@ -3517,7 +3566,10 @@ expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\n' "$S72H" > "$S72REC/floor-red-H.txt"
 s72_add floor-red-H.txt
 s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
-expect_contains "72i7 …is refused as red, as before" "did not pass (Gating: 3 passed, 1 failed)" "$OUT"
+# A RED WHOLE RUN IS A CANDIDATE NOW (wave-35 T9; D8, AC-1.3) only when its Failed: block names its reds; this
+# log counts one failed and names none, so it says nothing of what is owed and stays refused.
+expect_contains "72i7 …refused: its Failed: block names none of the reds its verdict counts" \
+  "counts 1 failed but its Failed: block names 0" "$OUT"
 s72_add floor-F.txt
 s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
 expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
@@ -3637,5 +3689,66 @@ expect_eq "74o2 …and the plan passes its own validator" "rc=0" "$(s74_valid "$
 s34_gate "$R74N"
 expect_eq "74o3 …and the real commit gate admits it" "0" "$GATE_RC"
 POKE_BOUND="$S74_BOUND_WAS"
+
+# ============================================================
+section "§BRIEF-SUITES: brief on a code row reads the anchor index for its Suites, else marks the orchestrator's slot, never Suites: none (wave-35 T8; REQ-6 AC-6.3; D15, D9)"
+# ============================================================
+#
+# fails-when: `brief` prints `Suites: none` for a row that writes code. Wave-34's T11 named eleven code files and
+# no test, and its brief derived `Suites: none`, a waiver nobody chose (A-orch-11). A row whose Files name no
+# *.test.sh and write a path outside the record now takes, from `anchors index` at the working branch's head, the
+# suites whose anchors name its files (by file name, sorted, once each); a row no anchor covers gets the slot
+# marked for the orchestrator. A row that writes no code (Files — or record paths only) keeps `Suites: none`.
+# FIXTURE FIDELITY: T11's Files cell is wave-34's plan row T11, verbatim; the anchored suites are committed on the
+# working branch, whose head the index is read at, as `brief` reads the working head.
+BS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBS="$(make_repo brief-suites)"; ( cd "$RBS" && git commit -q --allow-empty -m init )
+mkdir -p "$RBS/lib" "$RBS/tests"
+printf 'the needle line\nthe other line\n' > "$RBS/lib/anch.sh"
+printf 'the second needle\n' > "$RBS/lib/two.sh"
+printf "#!/bin/bash\nanchor file lib/anch.sh 'the needle line'\nanchor file lib/two.sh 'the second needle'\n" > "$RBS/tests/anch.test.sh"
+printf "#!/bin/bash\nanchor file lib/two.sh 'the second needle'\n" > "$RBS/tests/beta.test.sh"
+( cd "$RBS" && git add lib tests && git commit -qm "anchored suites" )
+PBS="$(s42_plan "$RBS" 4)"
+BS_T11_FILES="hooks/session-poker.sh, hooks/bash-walls.sh, payload/scripts/lib/root.sh, payload/scripts/lib/roots.sh, payload/scripts/lib/run.sh, payload/scripts/lib/units.sh, payload/scripts/lib/roster.sh, payload/scripts/lib/session.sh, payload/scripts/lib/binding.sh, payload/scripts/lib/walls.sh"
+BS_TABLE="$TMPROOT/bs-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T11 | 4 | build | Hot helpers are fork-free (D19, AC-9.2), wave-34 T11 | senior-implementor | — | 180 | REQ-1 | %s | — | — | pending |\n' "$BS_T11_FILES"
+  printf '| T12 | 4 | build | a piece one suite anchors | implementor | — | 30 | REQ-1 | lib/anch.sh, .bionic/docs/record/wave-01-fixture/T12.md | — | — | pending |\n'
+  printf '| T13 | 4 | build | a piece two suites anchor | implementor | — | 30 | REQ-1 | lib/*.sh, .bionic/docs/record/wave-01-fixture/T13.md | — | — | pending |\n'
+  printf '| T14 | 5 | verify | the walk | researcher | — | 30 | REQ-1 | — | — | — | pending |\n'
+  printf '\n'
+} > "$BS_TABLE"
+awk -v t="$BS_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBS" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBS.new" && mv "$PBS.new" "$PBS"
+( cd "$RBS" && git add -f "$PBS" && git commit -qm "brief-suites fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
+BS_FILE="$RBS/.bionic/docs/record/wave-01-fixture/briefs"
+bs_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
+  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+}
+expect_eq "BS-0 precondition: the index at the working head names both anchored files" \
+  "lib/anch.sh	tests/anch.test.sh|lib/two.sh	tests/anch.test.sh,tests/beta.test.sh" \
+  "$(bash "$POKER" anchors index "$RBS" --at wave/01-fixture 2>/dev/null | paste -sd'|' -)"
+poke "$RBS" brief T11
+expect_eq "BS-1 brief T11 (wave-34's row) exits 0 (positive: Row reads)" "0|T11" "$RC|$(bs_field "$BS_FILE/T11.md" Row)"
+expect_eq "BS-1b AC-6.3 a code row no anchor covers gets the orchestrator's slot for Suites, never none" "1" \
+  "$(bs_field "$BS_FILE/T11.md" Suites | /usr/bin/grep -c '^<ORCHESTRATOR: ')"
+expect_eq "BS-1c …and for Lands-on" "1" "$(bs_field "$BS_FILE/T11.md" Lands-on | /usr/bin/grep -c '^<ORCHESTRATOR: ')"
+expect_eq "BS-1d …so neither line reads none" "0" "$(/usr/bin/grep -c '^\(Suites\|Lands-on\): none' "$BS_FILE/T11.md" || true)"
+poke "$RBS" brief T12
+expect_eq "BS-2 a code row one suite anchors: Suites is that suite, by file name" "0|anch.test.sh" "$RC|$(bs_field "$BS_FILE/T12.md" Suites)"
+expect_eq "BS-2b …and Lands-on the same set" "anch.test.sh" "$(bs_field "$BS_FILE/T12.md" Lands-on)"
+poke "$RBS" brief T13
+expect_eq "BS-3 a Files glob covering two anchored files: every suite declaring either, sorted, once each" "anch.test.sh, beta.test.sh" \
+  "$(bs_field "$BS_FILE/T13.md" Suites)"
+poke "$RBS" brief T14
+expect_eq "BS-4 control: a row that writes no code keeps Suites: none (positive: BS-2 read a suite from the same extractor)" "none" \
+  "$(bs_field "$BS_FILE/T14.md" Suites)"
+expect_eq "BS-5 a build row naming no artifact anywhere keeps the artifact slot marked, not invented" "1" \
+  "$(bs_field "$BS_FILE/T11.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
+POKE_BOUND="$BS_BOUND_WAS"
 
 finish

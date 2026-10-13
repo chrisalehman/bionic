@@ -2139,6 +2139,50 @@ expect_contains "READS.12 a task id in deps beside a reads column is refused, na
   "T4: dep T1 is not ext:<slug>" "$VAL_DEPS_ID"
 expect_eq "READS.12b …and the verb exits 1" "1" "$(call_rc units_validate "$SANDBOX/reads-deps-id.md")"
 
+# ============================================================
+section "RECORD-READ — wave-35 T8: a record path is read only when a row's Files writes it (REQ-6 AC-6.1; D15)"
+# ============================================================
+#
+# fails-when: T2 reading T1's record artifact is ready while T1 is pending. Through wave-34 a path read waited
+# only on the open rows whose Files cover it, and no row's cell named its record artifact, so the read was met at
+# once (A-orch-10). A code path no row writes is still satisfied (READS.8, lib/old.sh); a RECORD path (under
+# .bionic/, or record/ spelled from the docs root) that no row of the table writes, whatever its status, is
+# refused at the write, naming the token and the row whose artifact it is when its file name begins with an id.
+rr_plan() {  # <file> <T1 Files cell> <T2 reads cell> <T1 status>
+  {
+    printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n- Step 4: in flight\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the profile, written to record/w/T1.md | implementor | — | 30 | REQ-x | %s |  | %s |\n' "$2" "$4"
+    printf '| T2 | 4 | build | reads the profile | implementor | — | 30 | REQ-x | lib/c.sh | %s | pending |\n' "$3"
+  } > "$1"
+}
+rr_plan "$SANDBOX/rr-bare.md" 'lib/p.sh' 'approval:plan, record/w/T1.md' pending
+VAL_RR="$(call units_validate "$SANDBOX/rr-bare.md")"
+expect_eq "RR.1 a record path no row's Files covers is refused (exit 1)" "1" "$(call_rc units_validate "$SANDBOX/rr-bare.md")"
+expect_eq "RR.1b …naming the token and the writer row, whose id begins the file name" \
+  "T2: read record/w/T1.md names a record path no row writes; add it to T1's Files" "$VAL_RR"
+rr_plan "$SANDBOX/rr-dot.md" 'lib/p.sh' 'approval:plan, live:.bionic/docs/record/w/profile.md' pending
+expect_eq "RR.2 the .bionic/ spelling, behind live:, is the same read; a name no id begins names the writer row by its role" \
+  "T2: read live:.bionic/docs/record/w/profile.md names a record path no row writes; add it to the writer row's Files" \
+  "$(call units_validate "$SANDBOX/rr-dot.md")"
+rr_plan "$SANDBOX/rr-code.md" 'lib/p.sh' 'approval:plan, lib/old.sh' pending
+expect_eq "RR.3 control: a code path no row writes stays a legal read (READS.8's rule)" "0" "$(call_rc units_validate "$SANDBOX/rr-code.md")"
+rr_plan "$SANDBOX/rr-cov.md" 'lib/p.sh, .bionic/docs/record/w/T1.md' 'approval:plan, record/w/T1.md' pending
+expect_eq "RR.4 T1's Files gains its artifact: the table validates clean" "0" "$(call_rc units_validate "$SANDBOX/rr-cov.md")"
+expect_eq "RR.4b …and T2 waits on T1, its writer, while T1 is pending" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/rr-cov.md" 4)" "T2${TAB}record/w/T1.md${TAB}T1${TAB}pending")"
+expect_eq "RR.4c …so T2 is not ready, and T1 is (the positive on the same ready set)" "no yes" \
+  "$(R="$(call units_ready "$SANDBOX/rr-cov.md" 4)"; printf '%s %s' "$(has_line "$R" T2)" "$(has_line "$R" T1)")"
+rr_plan "$SANDBOX/rr-landed.md" 'lib/p.sh, .bionic/docs/record/w/T1.md' 'approval:plan, record/w/T1.md' landed
+expect_eq "RR.5 a landed writer still covers the path: the table validates clean, and T2 is ready" "0 yes" \
+  "$(call_rc units_validate "$SANDBOX/rr-landed.md") $(has_line "$(call units_ready "$SANDBOX/rr-landed.md" 4)" T2)"
+sed 's/| approval:plan, record\/w\/T1.md | pending |$/| approval:plan, record\/w\/T1.md | landed |/' "$SANDBOX/rr-bare.md" > "$SANDBOX/rr-reader-landed.md"
+expect_eq "RR.6 precondition: the copy differs from RR.1's plan in T2's status alone" "1" \
+  "$(diff "$SANDBOX/rr-bare.md" "$SANDBOX/rr-reader-landed.md" | grep -c '^>')"
+expect_eq "RR.6b only an open row is held to it (A-T13.1's rule): a landed T2 reading the same path validates (RR.1 is the refusal)" "0" \
+  "$(call_rc units_validate "$SANDBOX/rr-reader-landed.md")"
+
 # A READ NAMES SOMETHING: a path in the Files grammar or a named artifact. A token that names
 # neither is refused at the write, and never read as satisfied.
 for _bad in nonsense proof:bogus foo:bar 'lib/a b.sh'; do
@@ -2244,8 +2288,8 @@ awk -F'|' -v OFS='|' '
   { print }' "$SANDBOX/replay-legacy.md" > "$SANDBOX/replay.md"
 printf '| T32 | 4 | build | a record-only write-up (fixture row) | w24-T32 | — | 20 | REQ-1 | .bionic/docs/record/wave-24-fixit-1811/T32-notes.md | .worktrees/24-T32 | c0d6ab04 | active |  |\n' \
   >> "$SANDBOX/replay.md"
-# THE RELEASE NAMES ITS APPROVAL (wave-26 T62; K2-F3): a Step-7 doc row reads approval:release, and
-# head as its default does, so it is the one cell the transform does not leave empty.
+# THE RELEASE CELL wave-26 T62 (K2-F3) WROTE: approval:release, and head as its default does. From
+# wave-35 T5 the release validates on its default too (§RELEASE-READ); the replay keeps the cell it had.
 sed '/^| T18 | 7 | doc /s/  |$/ approval:release, head |/' "$SANDBOX/replay.md" > "$SANDBOX/replay.tmp" && mv "$SANDBOX/replay.tmp" "$SANDBOX/replay.md"
 
 expect_eq "EDGES.0 the reads replay carries the column and validates clean" "0 0" \
@@ -3603,31 +3647,53 @@ expect_eq "RUN-EDGES.F1h in a table with reads every row already there is byte-i
 expect_eq "RUN-EDGES.F1i …and its floor is held by the late build through head all the same" "T4${TAB}4${TAB}pending" \
   "$(call units_floor_holds "$SANDBOX/e1-rds-add.md" T2)"
 
-# K2-F3 — THE RELEASE READS ITS APPROVAL. In a reads table a doc row at Step 7 or later is the
-# release (the hold a table without the column keeps names it so), and D3 says it reads
-# approval:release. The validator refuses one that names no approval, and readiness never offers
-# one that slipped past it (a hand edit) before approved: release exists.
+# §RELEASE-READ — THE RELEASE APPROVAL IS THE INTEGRATE ROW'S READ (wave-35 T5; REQ-4 AC-4.1; D13).
+# Through wave-34 a doc row at Step 7 or later had to read approval:release (wave-26 T62, K2-F3),
+# so the release text waited on the person while nothing about writing it did, and the critic queued
+# behind it (A-orch-34). The approval now sits where the merge does: the release text is ready at
+# its kind default, approval:plan, head, and the integrate row of a plan that carries a release
+# waits for `approved: release` with every proof met.
 edges_plan "$SANDBOX/e3.md" 4 "" "$E_RDS" \
   '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
   '| T2 | 5 | verify | floor | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending | — |' \
   '| T3 | 7 | doc | release 1.2.0: CHANGELOG, version | w-T3 | — | 10 | REQ-1 | CHANGELOG.md, plugin.json | — | — | pending | — |' \
   '| T4 | 8 | integrate | merge | — | — | 10 | REQ-1 | — | — | — | pending | — |'
-expect_eq "RUN-EDGES.F3a a Step-7 doc row with an empty reads cell is refused, naming the read to write" \
-  "T3: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)" \
-  "$(call units_validate "$SANDBOX/e3.md")"
-expect_eq "RUN-EDGES.F3a2 …exit 1" "1" "$(call_rc units_validate "$SANDBOX/e3.md")"
-expect_eq "RUN-EDGES.F3b readiness at current: 4 offers the floor and never the release (the probe read T2 T3)" "T2" \
-  "$(call units_ready "$SANDBOX/e3.md" 4)"
-expect_eq "RUN-EDGES.F3c …which waits for approval:release" "yes" \
-  "$(has_line "$(call units_waiting "$SANDBOX/e3.md" 4)" "T3${TAB}approval:release${TAB}-${TAB}-")"
-sed '/^| T3 /s/| pending | — |$/| pending | head |/' "$SANDBOX/e3.md" > "$SANDBOX/e3-head.md"
-expect_eq "RUN-EDGES.F3d a release whose reads name no approval (head alone) is refused the same way" "yes" \
-  "$(has_line "$(call units_validate "$SANDBOX/e3-head.md")" "T3: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)")"
+expect_eq "RELEASE-READ.1 AC-4.1 a Step-7 doc row with an empty reads cell validates" "0" "$(call_rc units_validate "$SANDBOX/e3.md")"
+expect_eq "RELEASE-READ.1b …and the validator prints nothing about it" "" "$(call units_validate "$SANDBOX/e3.md")"
+expect_eq "RELEASE-READ.2 AC-4.1 at current: 4 with no approved: release, the release text is ready beside the floor" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/e3.md" 4)"
+E3W="$(call units_waiting "$SANDBOX/e3.md" 4)"
+expect_eq "RELEASE-READ.2b …it waits on no approval:release (the waiting extractor reads real lines: the merge waits on it)" "no yes" \
+  "$(has_line "$E3W" "T3${TAB}approval:release${TAB}-${TAB}-") $(has_line "$E3W" "T4${TAB}approval:release${TAB}-${TAB}-")"
 sed '/^| T3 /s/| pending | — |$/| pending | approval:release |/' "$SANDBOX/e3.md" > "$SANDBOX/e3-ok.md"
-expect_eq "RUN-EDGES.F3e the release that reads approval:release validates" "0" "$(call_rc units_validate "$SANDBOX/e3-ok.md")"
-awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T12:00:00Z \"ship it\"" }' "$SANDBOX/e3.md" > "$SANDBOX/e3-appr.md"
-expect_eq "RUN-EDGES.F3f once approved: release is written the release is ready" "yes" \
-  "$(has_line "$(call units_ready "$SANDBOX/e3-appr.md" 4)" T3)"
+expect_eq "RELEASE-READ.3 a doc row that writes approval:release into its own cell still validates and waits for it" "0 no" \
+  "$(call_rc units_validate "$SANDBOX/e3-ok.md") $(has_line "$(call units_ready "$SANDBOX/e3-ok.md" 4)" T3)"
+# THE MERGE HOLDS FOR IT. Every proof met at the head (as RUN-EDGES.F5c below), the release written:
+# without `approved: release` the integrate row is not ready and says what it waits for.
+edges_plan "$SANDBOX/e6.md" 8 "$E_PROOFS" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 6 | review | final review | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/review-1.md | — | — | landed | — |' \
+  '| T5 | 5 | verify | floor | w-T5 | — | 10 | REQ-1 | .bionic/docs/record/x/floor.log | — | — | landed | — |' \
+  '| T7 | 7 | doc | release 1.2.0: CHANGELOG, version | w-T7 | — | 10 | REQ-1 | CHANGELOG.md | — | — | landed | — |' \
+  '| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-1 | — | — | — | pending | — |'
+floor_at_head "$SANDBOX/e6.md" "$FLOOR_REPO/e6.md"
+expect_eq "RELEASE-READ.4 AC-4.1 an integrate row with its proofs met and no approved: release is not ready" "" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6.md" 8)"
+expect_eq "RELEASE-READ.4b …it waits for approval:release" "yes" \
+  "$(has_line "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_waiting "$FLOOR_REPO/e6.md" 8)" "T3${TAB}approval:release${TAB}-${TAB}-")"
+awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T12:00:00Z \"ship it\"" }' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-appr.md"
+expect_eq "RELEASE-READ.4c …and once approved: release is written, it is ready" "T3" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6-appr.md" 8)"
+sed '/^| T3 /s/| pending | — |$/| pending | proof:floor, proof:review, head, approval:merge |/' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-cell.md"
+expect_eq "RELEASE-READ.4d an integrate cell written by hand without approval:release waits for it all the same" "yes" \
+  "$(has_line "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_waiting "$FLOOR_REPO/e6-cell.md" 8)" "T3${TAB}approval:release${TAB}-${TAB}-")"
+expect_eq "RELEASE-READ.4e …and approve can record it: the approval names an open row reads include release" "yes" \
+  "$(has_line "$(call units_approval_names "$FLOOR_REPO/e6.md")" release)"
+# A PLAN WITH NO RELEASE HAS NONE TO APPROVE (A-T5-1): RUN-EDGES.F4a and F5c below are that case,
+# integrate ready at its proofs alone. A dropped release row is no release.
+sed '/^| T7 /s/| landed | — |$/| dropped | — |/' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-drop.md"
+expect_eq "RELEASE-READ.5 a plan whose only release row is dropped: integrate is ready at its proofs" "T3" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6-drop.md" 8)"
 # A PLAIN DOC ROW WORKS AS TODAY: on its kind default before Step 7, or reading approval:plan at
 # Step 7 (HOLD.1), it validates and is ready.
 edges_plan "$SANDBOX/e3-plain.md" 4 "" "$E_RDS" \
@@ -3724,6 +3790,9 @@ fs_stamp() {  # <suite> <rc> <at> -> one stamp at the checkout's head, clean, in
 mkdir -p "$FS_REPO/tests" "$FS_REPO/lib" "$(dirname "$FS_PLAN")"
 fs_git init -q 2>/dev/null; fs_git checkout -q -b wave/99-fs 2>/dev/null
 for s in a b c d e; do printf '#!/bin/bash\n' > "$FS_REPO/tests/$s.test.sh"; done
+# a and b DECLARE lib/one.sh (wave-35 T9; D9): a commit past the floor is covered only by a suite run at it
+# that declares each code file it changed (lib/anchors.sh reads the shaped call), so the runs below are of them.
+for s in a b; do printf '#!/bin/bash\n%s file lib/one.sh %s\n' anchor "'one'" > "$FS_REPO/tests/$s.test.sh"; done
 printf 'one\n' > "$FS_REPO/lib/one.sh"
 printf '.bionic/\n' > "$FS_REPO/.gitignore"
 fs_git add .gitignore tests lib && fs_git commit -qm base
@@ -3878,11 +3947,16 @@ awk '/^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef012345
   "$FS_PLAN" > "$FS_REPO/.bionic/foreign.md"
 expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ", the proved head is not a commit here;" \
   "$(call units_waiting "$FS_REPO/.bionic/foreign.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
+# THE HEAD IS THE BRANCH'S REF, NEVER A CHECKOUT'S (wave-35 T9; A-orch-45; lib/proof.sh `proof_branch_head`): a
+# detached checkout changes nothing the judge reads, and a branch that names no commit is uncovered.
 fs_git checkout -q --detach 2>/dev/null
-expect_contains "FS.14 a detached checkout: no checkout holds the working branch, and the wait says so" \
-  ", no checkout holds the working branch wave/99-fs;" "$(fs_why)"
-fs_git checkout -q wave/99-fs 2>/dev/null
-expect_eq "FS.14b …and back on the branch, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.14 A-orch-45 a detached checkout: the judge reads the working branch's ref, so the floor at its head stands" \
+  "T3" "$(call units_ready "$FS_PLAN" 8)"
+fs_git branch -q -D wave/99-fs 2>/dev/null
+expect_contains "FS.14b …and with the branch deleted the wait says the working branch names no commit" \
+  ", the working branch wave/99-fs names no commit here;" "$(fs_why)"
+fs_git checkout -q -b wave/99-fs 2>/dev/null
+expect_eq "FS.14c …and the branch back, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 unset UNITS_FACTS_STATE
 
@@ -3990,7 +4064,7 @@ expect_eq "SF-10 a value with & \\1 .* and a quote is written as typed" '  cmd: 
 # THE MUTATION ARM: a copy of the library whose replace mode writes the new line AFTER the old one (an append
 # where a replacement belongs) turns SF-1b, SF-1d and SF-4 red. The copy is made in the sandbox, never in the tree.
 SF_NEEDLE='if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
-anchor "$LIB" "$SF_NEEDLE" 1
+anchor file payload/scripts/lib/units.sh 'if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
 SF_MUT="$SANDBOX/units-mut-append.sh"
 SF_R='if (replace && (i in at_line)) { print L[i]; print "  " key[at_line[i]] ": " val[at_line[i]] }'
 SF_N="$SF_NEEDLE" SF_R="$SF_R" awk 'BEGIN { n = ENVIRON["SF_N"]; r = ENVIRON["SF_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$LIB" > "$SF_MUT"
@@ -4024,7 +4098,9 @@ expect_eq "RH-2 the same row reading approval:plan, head validates (the default,
   "$(call_rc units_validate "$SANDBOX/rh-default.md")|$(call units_validate "$SANDBOX/rh-default.md")"
 expect_eq "RH-2b …and that row waits for T1, the open build row (the structural readiness)" "yes" \
   "$(has_line "$(call units_waiting "$SANDBOX/rh-default.md" 4)" "T2${TAB}head${TAB}T1${TAB}pending")"
-rh_cell "approval:plan, .bionic/docs/record/w/build-log.md, head" "$SANDBOX/rh-both.md"
+# The record path is one a row of the table writes (T3's review.md): a record read no row writes is refused on
+# its own account since wave-35 T8 (§RECORD-READ), and this row is about head.
+rh_cell "approval:plan, .bionic/docs/record/w/review.md, head" "$SANDBOX/rh-both.md"
 expect_eq "RH-3 a record path beside head is admitted: head is what is asked for" "0" \
   "$(call_rc units_validate "$SANDBOX/rh-both.md")"
 rh_cell "approval:plan" "$SANDBOX/rh-approval.md"
@@ -4548,5 +4624,182 @@ done
 dbc_hits() { /usr/bin/grep -rlF -- "$1" "$REPO_ROOT/hooks" "$REPO_ROOT/payload" "$REPO_ROOT/tests" 2>/dev/null | wc -l | tr -d ' '; }
 expect_eq "DBC-6 positive: the live ledger reader is found by the same search" "yes" "$([ "$(dbc_hits units_findings)" -gt 0 ] && echo yes || echo no)"
 expect_eq "DBC-6b AC-9.2: the unlined reader and its pin are gone from hooks, payload and tests" "0" "$(dbc_hits "units_""unlined")"
+
+
+section "§BRANCH — wave-35 T7: one reader of the working branch, SDLC State first then frontmatter, serves ready, the stop wall, the card, current 4 and the proof judge (REQ-5 AC-5.3; D14)"
+# ---------------------------------------------------------------------------
+# lib/run.sh `plan_working_branch <plan>` is the one reader: the `## SDLC State` key, then the frontmatter
+# key, fenced lines unread, the first word of the value. Five surfaces read the plan's working branch and
+# each calls it: `ready` (through `session_working_branch`), the stop wall (stop.sh's landing gate), the
+# card (card.sh's Branches), `current 4` (session-poker.sh's Step-4 fill) and the proof judge (proof.sh
+# `proof_state`). The evidence gate was a sixth (walls.sh `validate_tests_head`) until wave-35 T31 (D20,
+# A-orch-51): Step 5 owes no head:, so the gate reads no working branch and its rows BR-5 and BR-mut5 are gone.
+# FIXTURE: a plan whose `working-branch:` sits only under `## SDLC State`, the case `ready` used to refuse as
+# `no-working-branch`. Three surfaces are driven from a copy of the plugin; the stop wall and `current 4` are hooks whose drive
+# needs a whole Stop or plan-verb fixture, so their call to the reader is counted at its site (BR-6), and
+# the census (BR-7) holds that no other line of the surfaces' files reads the key itself.
+# THE MUTATION ARM: a copy of the plugin whose reader has no SDLC-State arm. On the same plan, every driven
+# surface reads no branch, and `ready`'s reader prints `no-working-branch`.
+# fails-when: `ready` prints `no-working-branch` on the SDLC-State-only plan, or a surface reads the
+# frontmatter alone, or a second reader of the key stands in one of the surfaces' files.
+BR="$SANDBOX/branch"; BR_REPO="$BR/repo"; BR_SID="branch-session-01"
+mkdir -p "$BR_REPO"
+git -C "$BR_REPO" init -q -b main
+git -C "$BR_REPO" config user.email t7@example.invalid; git -C "$BR_REPO" config user.name t7
+printf '.bionic/\n' > "$BR_REPO/.gitignore"; git -C "$BR_REPO" add .gitignore; git -C "$BR_REPO" commit -q -m init
+git -C "$BR_REPO" checkout -q -b wave/35-fixture main; git -C "$BR_REPO" commit -q --allow-empty -m wave
+BR_HEAD="$(git -C "$BR_REPO" rev-parse HEAD)"
+BR_PLAN="$BR_REPO/.bionic/docs/plans/epic-x/wave-x.plan.md"
+mkdir -p "${BR_PLAN%/*}" "$BR_REPO/.bionic/tmp"
+br_plan() {  # <out> <front: branch or -> <sdlc: branch or -> [fenced] — a plan the card renders and the judge reads
+  { printf -- '---\nsdlc-step: 3\n'
+    [ "$2" = - ] || printf 'working-branch: %s\n' "$2"
+    printf -- 'integration-branch: main\n---\n\n# fixture · plan\n\n## Goal\n\nLand the fixture on its branch.\n\n## SDLC State\n\ncurrent: 4\n'
+    [ -z "${4:-}" ] || printf '```\nworking-branch: wave/35-fenced\n```\n'
+    [ "$3" = - ] || printf 'working-branch: %s\n' "$3"
+    printf 'proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n\n' "$BR_HEAD"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | REQ-1: the fixture row | implementor | — | 30 | REQ-1 | a.sh | — | pending |\n\n'
+    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1.1 | T0 | pending | — | — |\n'
+  } > "$1"
+}
+printf 'plan=%s\nengaged_at=2026-10-12T00:00:00Z\n' "$BR_PLAN" > "$BR_REPO/.bionic/tmp/engaged-${BR_SID}.state"
+# The four drivers, each against the plugin rooted at <root>: what the surface read, as it says it.
+br_ready() { bash -c '. "$1/payload/scripts/lib/run.sh" >/dev/null 2>&1; session_working_branch "$2" "$3"' _ "$1" "$BR_REPO" "$BR_SID" 2>/dev/null; }
+br_card()  { bash "$1/payload/scripts/card.sh" step3 "$BR_PLAN" 2>/dev/null </dev/null | /usr/bin/grep -E '^ +working ' | sed -E 's/^ +//; s/ +/ /g'; }
+br_proof() { bash -c '. "$1/payload/scripts/lib/proof.sh" >/dev/null 2>&1; proof_state "$2" "$3"' _ "$1" "$BR_PLAN" "$BR_REPO" 2>/dev/null | head -n 1; }
+br_reader() { bash -c '. "$1/payload/scripts/lib/run.sh" >/dev/null 2>&1; plan_working_branch "$2"' _ "$REPO_ROOT" "$1" 2>/dev/null; }
+
+# BR-1: the reader's order, on the four shapes and a fenced line.
+br_plan "$BR/sdlc.md" - wave/35-fixture
+br_plan "$BR/front.md" wave/35-front -
+br_plan "$BR/both.md" wave/35-front wave/35-fixture
+br_plan "$BR/none.md" - -
+br_plan "$BR/fenced.md" wave/35-front - fenced
+expect_eq "BR-1 the reader reads the SDLC State key on a plan that carries it there alone" "wave/35-fixture" "$(br_reader "$BR/sdlc.md")"
+expect_eq "BR-1b …the frontmatter key on a plan that carries it there alone" "wave/35-front" "$(br_reader "$BR/front.md")"
+expect_eq "BR-1c …SDLC State first when the plan carries both" "wave/35-fixture" "$(br_reader "$BR/both.md")"
+expect_eq "BR-1d …a fenced line under SDLC State is not read: the frontmatter answers" "wave/35-front" "$(br_reader "$BR/fenced.md")"
+expect_eq "BR-1e …and a plan that names none reads nothing (BR-1 is the positive)" "" "$(br_reader "$BR/none.md")"
+
+# BR-2..4: the three driven surfaces on the SDLC-State-only plan.
+br_plan "$BR_PLAN" - wave/35-fixture
+expect_eq "BR-2 AC-5.3 ready's reader reads the SDLC-State-only plan's branch" "wave/35-fixture" "$(br_ready "$REPO_ROOT")"
+expect_eq "BR-3 AC-5.3 the card's Branches names it" "working wave/35-fixture" "$(br_card "$REPO_ROOT")"
+expect_eq "BR-4 AC-5.3 the proof judge holds the floor against its checkout" "covered	$BR_HEAD" "$(br_proof "$REPO_ROOT")"
+
+# BR-6: the two hook surfaces call the reader at their site, once each.
+anchor file payload/scripts/lib/stop.sh 'LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")'
+anchor file hooks/session-poker.sh 'PV_WB="$(plan_working_branch "$PV_PLAN")"'
+
+# BR-7: THE CENSUS. A line that reads the key itself: the key as a regex an awk, grep or sed matches, the key
+# compared as a frontmatter name, or the key handed to the frontmatter getter. Comments are not read.
+br_readers() {  # <file>... -> file:line of each line that reads the working-branch key itself
+  awk '/^[[:space:]]*#/ { next }
+    /working-branch\[\[:space:\]\]\*:/ || /== "working-branch"/ || /plan_frontmatter_get[^#]*working-branch/ { print FILENAME ":" FNR }' "$@"
+}
+BR_FILES="payload/scripts/lib/line.sh payload/scripts/lib/worktree.sh payload/scripts/lib/stop.sh payload/scripts/card.sh hooks/session-poker.sh payload/scripts/lib/proof.sh payload/scripts/lib/walls.sh"
+expect_nonempty "BR-7 positive: the census finds the one reader's own lines in run.sh" \
+  "$(cd "$REPO_ROOT" && br_readers payload/scripts/lib/run.sh)"
+# shellcheck disable=SC2086
+expect_eq "BR-7b AC-5.3 …and no line of the surfaces' seven files reads the key itself" "" \
+  "$(cd "$REPO_ROOT" && br_readers $BR_FILES)"
+# shellcheck disable=SC2086
+expect_eq "BR-7c …nor names the retired proof-side reader" "0" \
+  "$(cd "$REPO_ROOT" && cat $BR_FILES | /usr/bin/grep -c 'proof_''working_branch')"
+
+# THE MUTATION ARM: the reader's SDLC-State arm deleted, in a copy of the plugin.
+BR_MUT="$BR/mut"; mkdir -p "$BR_MUT/payload/scripts"
+cp -R "$REPO_ROOT/hooks" "$BR_MUT/hooks"; cp -R "$REPO_ROOT/payload/scripts/." "$BR_MUT/payload/scripts/"
+anchor file payload/scripts/lib/run.sh 'wb="$(_run_lines "$plan" | awk "$_RUN_WB_SDLC_AWK")"' 'wb=""' "$BR_MUT/payload/scripts/lib/run.sh"
+expect_eq "BR-mut0 the mutant differs from the reader in one line" "1" \
+  "$(diff "$REPO_ROOT/payload/scripts/lib/run.sh" "$BR_MUT/payload/scripts/lib/run.sh" | /usr/bin/grep -c '^>')"
+br_plan "$BR_PLAN" wave/35-front -
+expect_eq "BR-mut1 the mutant runs: on a frontmatter plan ready's reader still reads the branch" "wave/35-front" "$(br_ready "$BR_MUT")"
+br_plan "$BR_PLAN" - wave/35-fixture
+expect_eq "BR-mut2 AC-5.3 with no SDLC-State arm, ready prints no-working-branch on the SDLC-State-only plan" \
+  "no-working-branch plan=$BR_PLAN" "$(br_ready "$BR_MUT")"
+expect_eq "BR-mut3 …the card reads no branch" "working not declared" "$(br_card "$BR_MUT")"
+expect_eq "BR-mut4 …the proof judge reads no branch" "uncovered	the plan names no working-branch" "$(br_proof "$BR_MUT")"
+
+
+# ============================================================
+section "§FLOOR-ROW — wave-35 T9: the floor row reads proof:review and head, so it waits for every owed reading and every fix row born of one (REQ-1 AC-1.1; D8, ADR-054)"
+# ============================================================
+# The floor is Step 6's last act: one whole run once the readings and their fix rows have landed. A test row
+# at Step 6 or later takes `approval:plan, proof:review, head` as its kind default (`kdef`), and its
+# `proof:review` is met by the readings alone: lib/proof.sh `facts_state`'s review lines at the working
+# branch's head, asked once by the program when a pending row's answer turns on them (`_units_readings_state`),
+# never by the floor fact the row itself writes. The integrate row keeps the whole judge (UNITS_FACTS_STATE).
+# FIXTURE FIDELITY: a real repository on its working branch; the plan at Step 6 with the floor row's reads cell
+# empty (the kind default), the review row landed, two of the three readings at the head written by the
+# product's writer (`proof_line`), the evidence reading absent.
+# fails-when: the floor row is ready while a question has no fact at head.
+FR="$SANDBOX/floor-row"; FR_PLAN="$FR/.bionic/docs/plans/epic-99/wave-99-fr.plan.md"
+mkdir -p "$FR/lib" "${FR_PLAN%/*}"
+fr_git() { git -C "$FR" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
+fr_git init -q 2>/dev/null; fr_git checkout -q -b main 2>/dev/null
+printf '.bionic/\n' > "$FR/.gitignore"; printf 'one\n' > "$FR/lib/one.sh"
+fr_git add .gitignore lib && fr_git commit -qm base
+FR_B="$(fr_git rev-parse HEAD)"
+fr_git checkout -q -b wave/99-fr 2>/dev/null
+printf 'two\n' > "$FR/lib/one.sh"; fr_git commit -qam 'T1 landed'
+FR_H="$(fr_git rev-parse HEAD)"
+fr_reading() {  # <question> -> the reading's proof line at the head, by the product's writer
+  call proof_line review "$FR_H" 2026-10-12T03:00:00Z "record/fr/$1.md" "$1" w-read pass piece
+}
+fr_plan() {  # <reading lines> <floor row's reads cell> [<extra row>] -> the plan at Step 6
+  { printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\n---\n\n## SDLC State\n\ncurrent: 6\nworking-branch: wave/99-fr\n' "$FR_B"
+    printf 'approved-by: fixture 2026-10-12T00:00:00Z "approved"\n%s\n\n' "$1"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/one.sh |  | landed |\n'
+    printf '| T2 | 6 | review | the readings | critic | — | 30 | REQ-x | .bionic/docs/record/fr/r.md |  | landed |\n'
+    [ -z "${3:-}" ] || printf '%s\n' "$3"
+    printf '| T14 | 6 | test | the floor | test-runner | — | 45 | REQ-x | — | %s | pending |\n' "$2"
+  } > "$FR_PLAN"
+}
+fr_why() { call units_waiting "$FR_PLAN" 6 | awk -F'\t' '$1 == "T14" && index($2, "proof:review") == 1 { print $2 }'; }
+FR_TWO="$(fr_reading adversarial; printf '\n'; fr_reading structure)"
+fr_plan "$FR_TWO" ""
+expect_contains "FR-0 precondition: facts_state at the head deals the evidence question and finds no fact for it" \
+  "$(printf 'review\tevidence\tbionic:auditor\tpiece\tabsent')" \
+  "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_state "$2" "$3"' _ "${LIB%/*}" "$FR_PLAN" "$FR_H" 2>/dev/null)"
+expect_eq "FR-0b …while the two written readings are covered at the head (the extractor reads real lines)" "covered covered" \
+  "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_state "$2" "$3"' _ "${LIB%/*}" "$FR_PLAN" "$FR_H" 2>/dev/null \
+     | awk -F'\t' '$1 == "review" && ($2 == "adversarial" || $2 == "structure") { printf "%s%s", (n++ ? " " : ""), $NF }')"
+expect_eq "FR-1 AC-1.1 an open evidence question at the head: the floor row is not ready" "" "$(call units_ready "$FR_PLAN" 6)"
+expect_contains "FR-1b …and its wait is proof:review, naming the question the readings lack" "review evidence bionic:auditor piece absent" "$(fr_why)"
+fr_plan "$FR_TWO
+$(fr_reading evidence)" ""
+expect_eq "FR-2 AC-1.1 the evidence reading added at the head: the floor row is ready" "T14" "$(call units_ready "$FR_PLAN" 6)"
+expect_eq "FR-2b …and nothing is told for its proof:review" "" "$(fr_why)"
+fr_plan "$FR_TWO
+$(fr_reading evidence)" "" '| T7 | 6 | build | fix a finding · born: review | implementor | — | 30 | REQ-x | lib/one.sh |  | active |'
+expect_eq "FR-3 AC-1.1 a fix row born of a reading still open: the floor row waits on head" "" "$(call units_ready "$FR_PLAN" 6)"
+expect_eq "FR-3b …naming the fix row as the head's writer" "yes" \
+  "$(has_line "$(call units_waiting "$FR_PLAN" 6 | awk -F'\t' '$1 == "T14" { print $2 "\t" $3 }')" "head	T7")"
+fr_plan "$FR_TWO
+$(fr_reading evidence)" "approval:plan, proof:review, head"
+expect_eq "FR-4 the same reads written in the cell (the plan's own T14): ready, the default is the cell's equal" "T14" "$(call units_ready "$FR_PLAN" 6)"
+fr_plan "$FR_TWO" "approval:plan, proof:review, head"
+expect_eq "FR-4b …and not ready with the evidence fact absent" "" "$(call units_ready "$FR_PLAN" 6)"
+# THE INTEGRATE ROW WAITS ON AN OWED RED (wave-35 T9; AC-1.3): the floor at the head names a red of its whole run
+# (`owed=`, as proof-add floor writes it), so proof_state says owed and the wait says which suite and the way out.
+fr_integrate() {  # <floor line> -> the plan with the floor row landed, the integrate row pending, the facts handed covered
+  fr_plan "$FR_TWO
+$(fr_reading evidence)
+$1" "" '| T21 | 8 | integrate | merge | — | — | 10 | REQ-x | — |  | pending |'
+  sed 's/^| T14 \(.*\) pending |$/| T14 \1 landed |/' "$FR_PLAN" > "$FR_PLAN.x" && mv "$FR_PLAN.x" "$FR_PLAN"
+}
+fr_integrate "$(call proof_floor_line "$FR_H" 2026-10-12T04:00:00Z record/fr/floor.log)"
+expect_eq "FR-5 control: a green floor at the head, the readings covered: integrate is ready" "T21" \
+  "$(UNITS_FACTS_STATE=covered call units_ready "$FR_PLAN" 8)"
+fr_integrate "$(call proof_floor_line "$FR_H" 2026-10-12T04:00:00Z record/fr/floor.log a.test.sh)"
+expect_eq "FR-5b AC-1.3 the floor at the head owes a.test.sh: integrate is not ready" "" \
+  "$(UNITS_FACTS_STATE=covered call units_ready "$FR_PLAN" 8)"
+expect_contains "FR-5c …and its proof:floor wait names the red suite and the way out" \
+  "proof:floor: the whole run at ${FR_H:0:12} left a.test.sh red, each owed until a later landing runs it green" \
+  "$(UNITS_FACTS_STATE=covered call units_waiting "$FR_PLAN" 8 | awk -F'\t' '$1 == "T21" && index($2, "proof:floor") == 1 { print $2 }')"
 
 finish

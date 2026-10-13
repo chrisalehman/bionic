@@ -114,7 +114,7 @@ cd "$REPO"
 #
 # A WHOLE RUN (no --only, the default mode) asks the machine's one gate
 # (payload/scripts/lib/gate.sh) once, `whole tests/run.sh`, before its batch, and holds it until
-# its solo drain is done: it is admitted only while nothing else admitted is unfinished, and
+# its batch is done: it is admitted only while nothing else admitted is unfinished, and
 # nothing else is admitted while it holds. Every worker inherits it, so the run's width is JOBS,
 # the share's room (`gate_width`), and none of its suites waits on the gate. Before wave-32 each
 # worker asked for its own suite and the gate's load test let them through one at a time: in
@@ -202,8 +202,7 @@ if [ "${1:-}" = "--one" ]; then
   _one_cmd="$(awk -F'\t' -v l="$_one_label" '$1 == l { print $2; exit }' "$_one_queue")"
   # THE ASK (T12): this worker asks for its own suite and holds the admission while it runs —
   # under --only. In a whole run it inherits the run's one admission (wave-32 T2), which the gate
-  # believes for a descendant of its holder, so it asks nothing and ends nothing; a solo suite's
-  # worker inherits the admission its drain hands it the same way.
+  # believes for a descendant of its holder, so it asks nothing and ends nothing.
   if ! _gate_ask_for work "$_one_label"; then
     # REFUSED AT THE ASK (wave-33 T3): never run. The verdict reads <label>.budget, as it reads an
     # adoption refusal, and the line is the capture.
@@ -239,9 +238,8 @@ if [ "${1:-}" = "--one" ]; then
   # the summary's `last` names the suite whose verdict was written last.
   printf '%s\n' "$_one_label" >>"$_one_work/landed"
   # THE PROGRESS LINE, WHERE THE VERDICT FIRST EXISTS. This is the only writer
-  # during a default run and it covers both drains — the parallel batch and the
-  # solo suites below re-enter this same worker — so one append here is every
-  # suite, as it lands. A suite whose worker dies before this line simply has no
+  # during a default run and every suite of the batch runs through this worker,
+  # so one append here is every suite, as it lands. A suite whose worker dies before this line simply has no
   # line, which is the property the file is for: it never names a suite that did
   # not finish.
   #
@@ -268,7 +266,7 @@ fi
 # children, so the destination can only reach them through the environment — but
 # four suites in this roster drive a NESTED `bash tests/run.sh` over a scratch
 # tree, and a nested run inheriting the knob would append its fixture labels
-# (`w-ok.test.sh`, `aaa-solo.test.sh`, …) to the file a human is watching. So the
+# (`w-ok.test.sh`, …) to the file a human is watching. So the
 # knob is read once, HERE, in the parent: the public name is unset and the
 # workers are handed `_BIONIC_TEST_PROGRESS_FILE` instead. A nested run re-runs
 # this block, finds no public knob, and clears the private name it inherited —
@@ -489,28 +487,6 @@ if [ "$ONLY" -eq 1 ]; then
   set -- ${_only_files+"${_only_files[@]}"}
 fi
 
-# ── TIMING-BOUND SUITES RUN SOLO (T20, A-orch-28; why-session-start-slow.md) ──
-#
-# THE DEFECT. The default mode drains its roster through `xargs -P "$JOBS"`, up to
-# eight-wide, and a suite that bounds WALL-CLOCK SECONDS of one drive is dilated by
-# however many siblings share the CPU with it during that drive — measured 1.270s
-# alone, 3.395s inside an eight-wide batch on an otherwise-quiet machine, same tree
-# (floor-057caa2-run2.txt). The bound is right to keep; the scheduling is what was
-# wrong.
-#
-# THE MARKER. A suite that declares itself timing-bound carries a header comment
-# line, verbatim, `# runner: solo`, within its first 30 lines. Such a suite is held
-# out of the parallel batch and run alone, one at a time, AFTER the batch has fully
-# drained — on the runner's own otherwise-idle process — so its wall-clock assertion
-# measures its own drive rather than a batch it happens to share. This changes
-# SCHEDULING ONLY: roster-order printing, the tally, and the `--serial` path (which
-# already runs one suite at a time, in roster order, and therefore never shares a
-# solo suite's drive with anything) are unaffected.
-_is_solo_suite() {  # <file> -> 0 if it declares `# runner: solo` in its first 30 lines
-  [ -r "$1" ] || return 1
-  head -n 30 "$1" 2>/dev/null | grep -qE '^# runner: solo[[:space:]]*$'
-}
-
 # ── job width from the machine's own pressure rung (S9, spec AC-15, R4) ──────
 # Sample now, then read the median-smoothed rung over the ceiling Step 0 derived
 # (BIONIC_TEST_JOBS_CEILING; the old literal default of 8 is the fallback for a
@@ -566,13 +542,6 @@ _runner_width() {
   fi
   _WIDTH=8
   if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
-  # A BACKGROUND PASS RUNS AT ITS PROMISE (wave-34 T9; D15): a whole run under a `pass` admission (its
-  # one ask believed through the lineage) has the free cores the gate promised it, not the share's width.
-  if [ -n "${_RUN_GATE_ID:-}" ] && declare -F gate_dir >/dev/null 2>&1; then
-    _pw="$(awk -F'[=:]' '/^kind=/ { k = $2 } /^promise=/ { w = $3 } END { if (k == "pass") print w }' \
-      "$(gate_dir)/requests/$_RUN_GATE_ID" 2>/dev/null)"
-    case "$_pw" in ''|*[!0-9]*|0) : ;; *) _WIDTH="$_pw" ;; esac
-  fi
   case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
   _ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
   if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
@@ -602,8 +571,8 @@ fi
 # is simply unknown and runs after the known ones until the next full run measures it.
 #
 # THE ORDER IS A LAUNCH ORDER AND NOTHING ELSE. The report still walks the queue in label order
-# (a reader comparing two runs compares rosters, not schedules), the solo suites still wait for
-# the batch to drain (T20), and `--serial` — which prints as it runs — runs in table order. The
+# (a reader comparing two runs compares rosters, not schedules), and `--serial` — which prints as
+# it runs — runs in table order. The
 # table is read here and nowhere else; a tree without one orders nothing and says nothing.
 #
 # THE REWRITE (end of this file) is a SEPARATE act from BIONIC_TEST_TIMING above, and it is
@@ -627,26 +596,13 @@ _order_labels() {  # stdin: labels, one per line -> stdout: <label>TAB<seconds|-
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "JOBS=$JOBS"
-  # A DRY RUN LISTS SOLO SUITES AS SUCH (T20) — the width line alone would fold a
-  # timing-bound suite silently into the parallel count it is in fact held out of.
-  _dry_batch=""; _dry_solo=""; _dry_all=""
+  # THEN THE ORDER IT WOULD RUN IN (T10): one sequence, longest-first. Every suite is in it: no
+  # suite is held out of the batch (wave-35 T2; D11 — the `# runner: solo` marker is read by nobody).
+  _dry_all=""
   for _dry_file in "$@"; do
     _dry_all="${_dry_all}${_dry_file##*/}"$'\n'
-    if _is_solo_suite "$_dry_file"; then
-      echo "solo: ${_dry_file##*/}"
-      _dry_solo="${_dry_solo}${_dry_file##*/}"$'\n'
-    else
-      _dry_batch="${_dry_batch}${_dry_file##*/}"$'\n'
-    fi
   done
-  # THEN THE ORDER IT WOULD RUN IN (T10): the parallel batch, then the solo drain, each
-  # longest-first. With --serial there is one sequence.
-  if [ "$SERIAL" -eq 1 ]; then
-    printf '%s' "$_dry_all" | _order_labels
-  else
-    printf '%s' "$_dry_batch" | _order_labels
-    printf '%s' "$_dry_solo" | _order_labels
-  fi
+  printf '%s' "$_dry_all" | _order_labels
   exit 0
 fi
 
@@ -719,10 +675,6 @@ printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
 
 QUEUE="$TMP/queue"; : >"$QUEUE"
 export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
-# SOLO is the sub-list of QUEUE's labels (T20) that carry the `# runner: solo`
-# marker: still enqueued into QUEUE, for the roster-order report walk, but held out
-# of the parallel LAUNCH file below and run afterward, one at a time.
-SOLO="$TMP/solo"; : >"$SOLO"
 
 # ── THE ADOPTION WALL (wave-01 verification-cannot-lie S10, spec AC-12) ──────
 #
@@ -783,7 +735,6 @@ _wall_suite() {
 }
 
 pass=0; fail=0; failed=""; budget=0
-void=0; voided=""
 
 # Opt-in, and opt-in on purpose: no per-suite timing has ever existed (W7 S8
 # finding (c) had to answer "which suite is the long pole" with a line-count
@@ -822,7 +773,7 @@ _lost_command() {
 # _verdict <label> <exit-status-or-empty> <captured-output-file>
 # The one place a result is judged and printed, so the two modes cannot drift.
 _verdict() {
-  local label="$1" rc="$2" out="$3" sig="" lost="" vwhy="" also=""
+  local label="$1" rc="$2" out="$3" sig="" lost=""
   # The adoption wall refused this suite before it ran (S10). It never had an
   # exit status, so it is judged from the refusal the wall left behind.
   # REFUSED AT THE GATE'S ASK by the asking agent's budget (wave-33 T3; D7): never run, so it
@@ -843,39 +794,28 @@ _verdict() {
     echo "───── end ${label} ─────"
     return
   fi
-  # EVERY TRY OF A SOLO SUITE WAS DISTURBED (wave-26 T8), or it was never measured at all.
-  # Its timing rows measured the machine, not the code. That says how the suite was timed,
-  # not whether it passed (T43, review 8 F1): a void suite that passed is a reading and not a
-  # verdict, printed here, listed under `Void:`, and counted in neither tally; a void suite
-  # that failed is judged below like any failure, counted once in the fail tally with its
-  # capture shown, and its void reason rides on its verdict line and its `Failed:` entry.
-  [ -f "$TMP/${label}.void" ] && vwhy="$(cat "$TMP/${label}.void")"
+  # ONE RUN, ONE VERDICT (wave-35 T2; D11, AC-2.1, AC-2.4): a suite's verdict is its exit code
+  # from the one run it had. Nothing is VOID and nothing is re-run: a suite that passes or fails by
+  # the clock is a defect in the suite, not a reading for the runner to excuse.
   lost="$(_lost_command "$out")"
   if [ "$rc" = "0" ] && [ -z "$lost" ]; then
-    if [ -n "$vwhy" ]; then
-      echo "~ VOID (timing not measured: ${vwhy})"
-      void=$((void+1))
-      voided="${voided}\n    - ${label} (${vwhy})"
-      return
-    fi
     echo "✓ PASS"; pass=$((pass+1)); return
   fi
-  [ -n "$vwhy" ] && also="; also VOID (timing not measured: ${vwhy})"
   fail=$((fail+1))
   if [ "$rc" = "0" ]; then
     # Exited 0, but the interpreter said a command it called does not exist.
-    echo "✗ FAIL (exited 0; a command it called was not found)${also}"
-    failed="${failed}\n    - ${label} (exited 0, but: ${lost})${also}"
+    echo "✗ FAIL (exited 0; a command it called was not found)"
+    failed="${failed}\n    - ${label} (exited 0, but: ${lost})"
   elif [ -z "$rc" ]; then
     # No .rc file: the worker itself did not survive to write one.
-    echo "✗ KILLED (no exit status recorded)${also}"
-    failed="${failed}\n    - ${label} (killed, no exit status)${also}"
+    echo "✗ KILLED (no exit status recorded)"
+    failed="${failed}\n    - ${label} (killed, no exit status)"
   elif [ "$rc" -gt 128 ] 2>/dev/null && sig="$(kill -l $((rc - 128)) 2>/dev/null)" && [ -n "$sig" ]; then
-    echo "✗ KILLED (SIG${sig})${also}"
-    failed="${failed}\n    - ${label} (killed by SIG${sig})${also}"
+    echo "✗ KILLED (SIG${sig})"
+    failed="${failed}\n    - ${label} (killed by SIG${sig})"
   else
-    echo "✗ FAIL${also}"
-    failed="${failed}\n    - ${label}${also}"
+    echo "✗ FAIL"
+    failed="${failed}\n    - ${label}"
   fi
   echo "───── ${label}: captured output ─────"
   [ -f "$out" ] && cat "$out"
@@ -921,12 +861,6 @@ run() {  # run <label> <cmd...>   — gating
     _verdict "$label" "$rc" "$TMP/${label}.out"
   else
     printf '%s\t%s\n' "$label" "$*" >>"$QUEUE"
-    # SOLO SUITES ARE STILL ENQUEUED (roster-order printing depends on QUEUE
-    # holding every label), but also named here so the drain below can hold them
-    # out of the parallel LAUNCH file (T20).
-    if [ -n "$_suite" ] && _is_solo_suite "$_suite"; then
-      printf '%s\n' "$label" >>"$SOLO"
-    fi
   fi
 }
 echo "Gating suites:"
@@ -966,16 +900,12 @@ if [ "$SERIAL" -eq 0 ]; then
   while IFS="$(printf '\t')" read -r label _queued_cmd; do
     [ -n "$label" ] || continue
     [ -f "$TMP/${label}.refused" ] && continue
-    # SOLO SUITES SKIP THE PARALLEL LAUNCH FILE (T20) — they run below, alone,
-    # once this batch has drained.
-    grep -qxF "$label" "$SOLO" 2>/dev/null && continue
     printf '%s\n' "$label" >>"$LAUNCH"
   done <"$QUEUE"
-  # LAUNCHED LONGEST-FIRST (T10), and the solo drain the same way; the queue stays in label order.
+  # LAUNCHED LONGEST-FIRST (T10); the queue stays in label order.
   _order_labels <"$LAUNCH" | cut -f1 >"$LAUNCH.ordered" && mv "$LAUNCH.ordered" "$LAUNCH"
-  _order_labels <"$SOLO" | cut -f1 >"$SOLO.ordered" && mv "$SOLO.ordered" "$SOLO"
   # THE ONE ADMISSION (wave-32 T2; D1, AC-1.1, ADR-051). A whole run — no --only — asks the gate
-  # once, `whole tests/run.sh`, before its batch, and holds it through the solo drain: admitted
+  # once, `whole tests/run.sh`, before its batch, and holds it until the batch is done: admitted
   # only while nothing else admitted is unfinished, and nothing else is admitted while it holds.
   # Every `--one` worker inherits it in BIONIC_GATE_ADMIT, which the gate believes for a
   # descendant of its holder, so a worker asks nothing and ends nothing, and the run's width is
@@ -986,7 +916,7 @@ if [ "$SERIAL" -eq 0 ]; then
   # cannot be written leaves _RUN_GATE_ID empty: the gate's own line says so, and every worker
   # asks for itself and runs unadmitted, as before.
   _RUN_GATE_ID=""; _RUN_GATE_OWN=0
-  if [ "$ONLY" -eq 0 ] && { [ -s "$LAUNCH" ] || [ -s "$SOLO" ]; }; then
+  if [ "$ONLY" -eq 0 ] && [ -s "$LAUNCH" ]; then
     if ! _gate_ask_for whole tests/run.sh; then
       # A WHOLE RUN THE ASKING AGENT'S BUDGET DOES NOT CARRY (wave-33 T3; D7, AC-6.2): nothing ran.
       printf '%s\n' "$_GATE_REFUSAL"
@@ -999,196 +929,7 @@ if [ "$SERIAL" -eq 0 ]; then
   # fresh sample, once the machine is its own (_runner_width, above). --only read it at the top.
   [ "$ONLY" -eq 1 ] || _runner_width sample
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
-  # THEN THE SOLO SUITES, ONE AT A TIME, ON THE NOW-IDLE RUNNER (T20, A-orch-28).
-  # Reuses the exact `--one` worker every parallel suite already runs through —
-  # same capture files, same PASS/FAIL shape — just launched serially instead of
-  # under xargs, so nothing else is contending for the CPU during its drive.
-  # Its stdin is /dev/null, as under xargs: the loop below reads its labels from
-  # stdin, and a suite that read stdin would eat the labels after its own.
-  #
-  # AND ON THE WHOLE MACHINE (wave-26 T8; D8, REQ-6 AC-6.4; the gate since wave-28 T12, D10).
-  # Held out of this run's batch was only half of it: another run on the machine — another
-  # session's, another agent's — still shared a solo suite's drive. So before each solo suite
-  # the runner asks the gate for the whole machine (`gate_ask whole <suite>`: admitted only
-  # while nothing else admitted is unfinished, and nothing else is admitted while it holds),
-  # then waits for a settled load (`resources_settled`: the load now, not the ring's median).
-  # The admission is this runner's, ended after the suite with its code. IN A WHOLE RUN the
-  # runner already holds the whole machine (THE ONE ADMISSION, above; wave-32 T2), so a solo
-  # suite asks nothing and ends nothing: it settles, is checked and retried as below, under the
-  # run's admission, which ends once the drain is done.
-  #
-  # VOID, NOT FAILED. The load is read again after the suite, less the suite's own share
-  # of it (`resources_own_load`, from the CPU its worker used; wave-26 T26, review 4 F4).
-  # If what is left rose above the settled line, something else disturbed the drive and
-  # its timing rows measured that: the suite settles and runs again under the same admission,
-  # up to SOLO_RETRIES more times, and if every try was disturbed it is reported VOID (see
-  # _verdict). A settle that gave up at the ceiling is a disturbance too; the suite still
-  # runs once, so its output is there to read, but it is not retried — waiting the whole
-  # ceiling again would only say the same thing. Each try rewrites the suite's .rc and .out,
-  # so its verdict is its last run's; a void only marks how that run was timed, and a last
-  # run that failed is a failure of the run (T43).
-  #
-  # ONE CEILING PER SUITE (wave-26 T26, review 4 F3). The settle and every retry of one solo
-  # suite give up at one deadline, BIONIC_SETTLE_MAX_WAIT seconds (1200 unless set) from its
-  # admission. The wait at the gate before it has none: a wait never ends a run (AC-2.6). A
-  # retry the ceiling has no room for is not started, and the suite is not run again either —
-  # its disturbed run already left its output.
-  #
-  # A STORE THAT CANNOT BE WRITTEN (review 4 F5): the gate refuses at once; the suite runs
-  # once, unadmitted, and its VOID says that the store could not be written.
-  #
-  # NESTING. A run started inside a solo suite inherits that suite's whole admission, which
-  # the gate believes: its solo suites run at once and settle and void nothing, because the
-  # hold they run in is already the whole machine and the outer run reads the load for it.
-  # A run started inside an ordinary suite inherits a work admission: its solo suites run
-  # under it (asking for the whole machine from inside an admission would wait for the
-  # admission to end, which waits for them), and settle and void as usual.
-  #
-  # NOT THROUGH booked.sh. The shim stamps the tree's git directory with its
-  # command's rc, and a worker always exits 0 (its verdict is the .rc file), so a
-  # stamp per solo suite would record a green the run never gave. The runner calls
-  # the library the shim calls.
-  #
-  # A TREE WITHOUT THE LIBRARY (a scratch copy of this runner) runs its solo suites
-  # without the whole machine, as before, and says so once.
-  SOLO_RETRIES=2
-  case "${BIONIC_SETTLE_MAX_WAIT:-}" in ''|*[!0-9]*) SOLO_MAX=1200 ;; *) SOLO_MAX=$BIONIC_SETTLE_MAX_WAIT ;; esac
-  _solo_settle() {  # <cores> <deadline> — wait for a settled load, until the suite's one ceiling
-    local noted=0
-    while ! resources_settled "$1"; do
-      [ "$SECONDS" -lt "$2" ] || return 1
-      if [ "$noted" -eq 0 ]; then
-        echo "tests/run.sh: holding the whole machine, waiting for the load ($(_res_load_now)) to settle at or below $(resources_settled_line "$1")" >&2
-        noted=1
-      fi
-      sleep "${BIONIC_GATE_POLL:-2}"
-    done
-  }
-  # _solo_cpu — sets _SOLO_CPU to the CPU seconds this shell's finished children have used:
-  # the second line of `times`. Called directly, never in `$( )`, which has no children. The
-  # `--one` worker is such a child and waits for its suite, so the suite's CPU lands here
-  # when the worker is reaped.
-  _SOLO_CPU=0
-  _solo_cpu() {
-    _SOLO_CPU=0
-    times >"$TMP/solo.times" 2>/dev/null || return 0
-    _SOLO_CPU="$(awk '
-      function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
-      NR == 2 { printf "%.3f\n", sec($1) + sec($2) }' "$TMP/solo.times" 2>/dev/null)"
-    [ -n "$_SOLO_CPU" ] || _SOLO_CPU=0
-  }
-  # A TRY THAT WRITES NOTHING READS AS NOTHING (wave-26 T49; review 12 F1). A worker writes
-  # <label>.rc and <label>.sec only after its suite ends, so a worker killed before that leaves
-  # the files of the try before it, and the report walk judged the retry by them: a pass
-  # printed for a run that never finished, and a timing row from a disturbed try. The files
-  # are removed right before each worker launch, so a worker that ends without a result leaves
-  # no .rc, which _verdict reports as KILLED (no exit status recorded), and no .sec, which
-  # the walk times nothing from. The capture goes too: it is the other half of a try's result,
-  # and the advisory tally and a KILLED verdict both print what is in it.
-  _solo_clear() {  # <label> — forget the previous try's result
-    rm -f "$TMP/${1}.rc" "$TMP/${1}.sec" "$TMP/${1}.out"
-  }
-  _solo_one() {  # <label> — one try, its worker handed this run's admission
-    _solo_clear "$1"
-    BIONIC_GATE_ADMIT="${_GATE_ID:-${BIONIC_GATE_ADMIT:-}}" bash "$SELF" --one "$1" </dev/null
-  }
-  # _solo_run <label> — one solo suite; leaves <label>.void when it was never measured. RUN IN A
-  # SUBSHELL: its `$$` is still this runner's (the holder), and its `times`, which gate_end reads,
-  # hold this suite's tries only, not the parallel batch's.
-  _solo_run() {
-    local label="$1" tries=0 why last="" cores deadline cpu0 t0 own
-    rm -f "$TMP/${label}.void"
-    if [ "$_SOLO_BOOK" != yes ]; then
-      _solo_one "$label"
-      return 0
-    fi
-    if [ "$_RUN_GATE_OWN" -eq 1 ]; then
-      # UNDER THE RUN'S OWN ADMISSION (T2): the whole machine is already this runner's, so the
-      # suite asks nothing and ends nothing; the runner is the outer run that reads the load, so
-      # the settle, the check after the run and the retries below still apply, and the suite's
-      # one ceiling counts from its turn.
-      _GATE_OWN=0
-    else
-      if ! _gate_ask_for whole "$label"; then
-        _solo_clear "$label"
-        printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"
-        printf '75\n' >"$TMP/${label}.rc"
-        return 0
-      fi
-      if [ -z "$_GATE_ID" ]; then
-        why="the store $(gate_dir) could not be written, so the whole machine was not had"
-        _solo_one "$label"
-        printf '%s\n' "$why" >"$TMP/${label}.void"
-        echo "tests/run.sh: void — ${label}: ${why}; it ran unadmitted and is not retried" >&2
-        return 0
-      fi
-      if [ "$_GATE_OWN" -eq 0 ]; then
-        case "$(sed -n 's/^kind=//p' "$(gate_dir)/requests/$_GATE_ID" 2>/dev/null | tail -n 1)" in
-          whole)
-            _solo_one "$label"      # inside a whole admission already (NESTING, above)
-            return 0 ;;
-          pass)
-            # INSIDE A BACKGROUND PASS (wave-34 T9; D15, Δ9): the pass has only the spare room, never the
-            # machine, so its solo suite runs once, unsettled, and is void; its own --only run proves it.
-            why="a background pass runs it unsettled; its own --only run proves it for the floor"
-            _solo_one "$label"
-            printf '%s\n' "$why" >"$TMP/${label}.void"
-            echo "tests/run.sh: void — ${label}: ${why}" >&2
-            return 0 ;;
-        esac
-      fi
-    fi
-    cores="$(_res_cores)"
-    deadline=$((SECONDS + SOLO_MAX))
-    while :; do
-      why=""
-      _solo_settle "$cores" "$deadline" || \
-        why="the load ($(_res_load_now)) never settled at or below $(resources_settled_line "$cores") within the ceiling of ${SOLO_MAX}s"
-      if [ -n "$why" ]; then
-        if [ "$tries" -gt 0 ]; then
-          # Its disturbed run already left its output; there is no room for another.
-          why="the ceiling of ${SOLO_MAX}s ran out before a retry could start"
-          printf '%s; %s\n' "$last" "$why" >"$TMP/${label}.void"
-          echo "tests/run.sh: void — ${label}: ${last}; ${why}" >&2
-          break
-        fi
-        _solo_one "$label"
-        printf '%s\n' "$why" >"$TMP/${label}.void"
-        echo "tests/run.sh: void — ${label}: ${why}; it ran once and is not retried" >&2
-        break
-      fi
-      _solo_cpu; cpu0=$_SOLO_CPU; t0=$SECONDS
-      _solo_one "$label"
-      _solo_cpu
-      own="$(resources_own_load "$(awk -v a="$cpu0" -v b="$_SOLO_CPU" 'BEGIN { d = b - a; printf "%.3f\n", (d > 0 ? d : 0) }')" "$((SECONDS - t0))")"
-      [ -n "$own" ] || own=0
-      resources_undisturbed "$cores" "$own" || \
-        why="the load rose to $(_res_load_now) during the run (about ${own} of it the suite's own), above the settled line $(resources_settled_line "$cores")"
-      [ -n "$why" ] || break
-      last="$why"
-      tries=$((tries + 1))
-      if [ "$tries" -gt "$SOLO_RETRIES" ]; then
-        printf '%s, on every try\n' "$why" >"$TMP/${label}.void"
-        echo "tests/run.sh: void — ${label}: ${why}; no retry left" >&2
-        break
-      fi
-      echo "tests/run.sh: void — ${label}: ${why}; retrying (${tries} of ${SOLO_RETRIES})" >&2
-    done
-    _gate_end_for "$(cat "$TMP/${label}.rc" 2>/dev/null || echo 1)"
-  }
-  if [ -s "$SOLO" ]; then
-    _SOLO_BOOK=no
-    if _gate_load; then
-      _SOLO_BOOK=yes
-    else
-      echo "tests/run.sh: no payload/scripts/lib/gate.sh — the solo suites run without the whole machine" >&2
-    fi
-    while IFS= read -r _solo_label; do
-      [ -n "$_solo_label" ] || continue
-      ( _solo_run "$_solo_label" )
-    done <"$SOLO"
-  fi
-  # THE RUN'S ADMISSION ENDS HERE (T2), once the solo drain is done, with 0 when every suite it
+  # THE RUN'S ADMISSION ENDS HERE (T2), once the batch is done, with 0 when every suite it
   # launched left a 0 and 1 otherwise. The end is this shell's: it is the holder, and its `times`
   # hold the whole run's children, which is the cost the gate learns for `tests/run.sh`.
   _RUN_T1="$(date +%s)"
@@ -1198,7 +939,7 @@ if [ "$SERIAL" -eq 0 ]; then
       [ -n "$_run_label" ] || continue
       [ "$(cat "$TMP/${_run_label}.rc" 2>/dev/null)" = 0 ] || _run_rc=1
     done <<EOF_RUN_LABELS
-$(cat "$LAUNCH" "$SOLO" 2>/dev/null)
+$(cat "$LAUNCH" 2>/dev/null)
 EOF_RUN_LABELS
     _GATE_ID="$_RUN_GATE_ID"; _GATE_OWN=1
     _gate_end_for "$_run_rc"
@@ -1208,9 +949,7 @@ EOF_RUN_LABELS
     _label "$label"
     rc=""
     [ -f "$TMP/${label}.rc" ] && rc="$(cat "$TMP/${label}.rc")"
-    # A void suite's seconds are disturbed ones (T48; review 11 N1): the file holds measurements
-    # only, and a row has no field to say otherwise, so a void suite gets no row at all.
-    [ -f "$TMP/${label}.sec" ] && [ ! -f "$TMP/${label}.void" ] && _timing "$label" "$(cat "$TMP/${label}.sec")" "$rc"
+    [ -f "$TMP/${label}.sec" ] && _timing "$label" "$(cat "$TMP/${label}.sec")" "$rc"
     _verdict "$label" "$rc" "$TMP/${label}.out"
   done <"$QUEUE"
 fi
@@ -1220,7 +959,7 @@ fi
 # measured; a default run leaves the tree clean for its stamp (dirty=0) and writes nothing. One line per
 # suite of this roster, sorted by label, written to a temp file beside it and moved into place.
 # A row comes only from a suite that exited 0 and was timed. A suite without one (it failed, it
-# was void, it was killed) keeps its old row, and a row whose suite is no longer in the roster
+# was killed) keeps its old row, and a row whose suite is no longer in the roster
 # goes. `--only` never gets here with a full roster and does not write; the BIONIC_TEST_TIMING
 # knob is a different act and is untouched. A table that cannot be written is said once on
 # stderr and changes no verdict.
@@ -1273,17 +1012,11 @@ fi
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed"
 [ -n "$_advisory" ] && echo "$_advisory"
-# VOID IS SAID, AND IT IS NOT A FAILURE (wave-26 T8). Its own line, like `Advisory:`, so the
-# `Gating:` line above keeps its shape; and the run exits on its failures alone. What it does
-# not do is call itself all green: a void suite's timing was never measured. Each entry says
-# why, since a disturbance is only one of the causes (wave-26 T26). Only a suite that passed
-# is listed here; one that failed is under `Failed:`, its reason beside it (T43).
-[ "$void" -ne 0 ] && echo -e "Void: ${void} — not timed, each for the reason given; advisory, not a failure:${voided}"
 # THE WALL LINE (wave-32 T2; D6, AC-1.3). A whole run in the default mode says what it cost by its
-# own clock: the wall from this runner's start to the end of its solo drain, the suite-seconds its
-# workers measured (every .sec file, a void try's included: that work was done), the width it ran
-# at, and the suite whose verdict landed last. `Gating:` above keeps its shape (proof.sh reads it),
-# and the `Advisory:` and `Void:` lines stay directly under it; this line comes after them. The
+# own clock: the wall from this runner's start to the end of its batch, the suite-seconds its
+# workers measured (every .sec file), the width it ran at, and the suite whose verdict landed
+# last. `Gating:` above keeps its shape (proof.sh reads it), and the `Advisory:` line stays
+# directly under it; this line comes after it. The
 # re-measure a tune row cites is this line.
 if [ "$SERIAL" -eq 0 ] && [ "$ONLY" -eq 0 ]; then
   _wall_work="$(cat "$TMP"/*.sec 2>/dev/null | LC_ALL=C awk '$1 ~ /^[0-9]+$/ { s += $1 } END { print s + 0 }')"
@@ -1298,9 +1031,5 @@ if [ "$fail" -ne 0 ]; then
   # not start, so a caller tells "refused" from "red". A suite that failed is still exit 1.
   [ "$budget" -ne "$fail" ] || exit 75
   exit 1
-fi
-if [ "$void" -ne 0 ]; then
-  echo "No gating suite failed; ${void} void — re-run on a quiet machine to time it"
-  exit 0
 fi
 echo "All gating suites green ✓"

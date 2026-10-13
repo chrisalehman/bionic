@@ -40,6 +40,14 @@
 #   fill_launched_rows <roster> <sid> <names>
 #                                      the same names, each replaced by the `row=` its latest
 #                                      row in that session carries (wave-28 T7, D17).
+#   fill_roster_walk <state dir> [<skip sid>]
+#                                      every roster in the directory with its ack ledger, the
+#                                      walk `adopt` takes (wave-35 T28; AC-5.5, D14).
+#   fill_roster_holds <state dir> [<plan>]
+#                                      the names every roster holds open, acks applied, each
+#                                      with its session and its row.
+#   fill_held_ids <plan> <ids>         of <ids>, the ones a roster holds open, with the name
+#                                      and the session; the fill leaves them out.
 #
 # WHY A LIBRARY AT ALL (D2). Both of these lived inside `hooks/session-poker.sh` — the ready
 # set inline in the `tick` verb, reading five shell variables the tick had built, and
@@ -287,15 +295,21 @@ fill_ready_set() {  # <plan> <rung> <open> [<answered ids, space-joined>] -> rea
 # above ask only the approval line (read once per process with `current:`) and arithmetic, so a
 # ledger that is not live still reads no table at all.
 _fill_ready_rows() {  # <plan> <gap> [<answered ids> [tagged]]
-  local plan="${1:-}" gap="${2:-0}" skip=" ${3:-} " tag="${4:-}" step ready id n=0 ro tab=$'\t'
+  local plan="${1:-}" gap="${2:-0}" skip=" ${3:-} " tag="${4:-}" step ready id n=0 ro held tab=$'\t'
   step="$(fill_step_token "$plan")"
   [ -n "$step" ] || return 0
   ready="$(units_ready "$plan" "$step")" || return 0
   [ -n "$ready" ] || return 0
+  # A ROW A ROSTER HOLDS OPEN IS NOT READY (wave-35 T28; AC-5.5, D14): any roster under the plan's
+  # .bionic/tmp, this session's included (`fill_held_ids`, below). It is left out before the trim, so
+  # it takes no slot. `units_ready`'s own roster operand reads one roster with one ledger, so the set of
+  # every roster is subtracted here, by the same id-to-name rule (`fill_row_launched`).
+  held=" $(fill_held_ids "$plan" "$ready" | cut -f1 | tr '\n' ' ') "
   ro=" $(fill_readonly_ids "$plan") "
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     case "$skip" in *" $id "*) continue ;; esac
+    case "$held" in *" $id "*) continue ;; esac
     case "$ro" in *" $id "*) printf '%s%s\n' "$id" "${tag:+${tab}r}"; continue ;; esac
     [ "$n" -lt "$gap" ] || continue
     printf '%s%s\n' "$id" "${tag:+${tab}w}"
@@ -515,10 +529,16 @@ fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the nam
 # answers nothing (review C4). Read from the ledger's last FILL_STANDING_WINDOW lines; a decline
 # older than that stands for nothing, which refuses more. A ledger that is a symlink is not read.
 #
+# A DECLINE ENDS WHEN IT IS LIFTED (wave-35 T8; REQ-6 AC-6.2; D15). `session-poker.sh decline lift
+# [<ids>]` appends a `state=lift` line of this session with `lifted=` the rows it ends and no
+# `declined=`; every lift after the latest declined line comes off its answered set, so a hold the
+# user ended stops standing and the next tick prints the FILL it held. A later declined line starts
+# afresh: the lifts before it are history.
+#
 # Prints `<at>US<reason>US<ids, space-joined>` (US = \037), or nothing when no decline stands.
 FILL_STANDING_WINDOW=2000
 fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
-  local led="${1:-}" sid="${2:-}" cur="${3:-}" line at st_cur ready launched reason id ids=""
+  local led="${1:-}" sid="${2:-}" cur="${3:-}" line at st_cur ready launched reason lifted id ids=""
   [ -n "$led" ] && [ -n "$sid" ] && [ -f "$led" ] && [ ! -L "$led" ] || return 0
   line="$(tail -n "$FILL_STANDING_WINDOW" "$led" 2>/dev/null | awk -v sid="$sid" '
     function kv(line, key,   i, n, parts) {
@@ -526,16 +546,204 @@ fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
       for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
       return ""
     }
-    index($0, "fill-ledger/v1|") == 1 && kv($0, "session") == sid && kv($0, "declined") ~ /[[:alnum:]]/ {
+    index($0, "fill-ledger/v1|") != 1 || kv($0, "session") != sid { next }
+    kv($0, "declined") ~ /[[:alnum:]]/ {
       last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
+      lifted = ""
+      next
     }
-    END { if (last != "") print last }')"
+    kv($0, "state") == "lift" && last != "" { lifted = lifted (lifted == "" ? "" : ",") kv($0, "lifted") }
+    END { if (last != "") print last "\037" lifted }')"
   [ -n "$line" ] || return 0
-  IFS=$'\037' read -r at st_cur ready launched reason <<< "$line"
+  IFS=$'\037' read -r at st_cur ready launched reason lifted <<< "$line"
   for id in ${ready//,/ }; do
     fill_row_launched "$id" "$launched" && continue
+    case ",$lifted," in *",$id,"*) continue ;; esac
     ids="${ids}${ids:+ }${id}"
   done
   [ -n "$ids" ] || return 0
   printf '%s\037%s\037%s\n' "$at" "$reason" "$ids"
+}
+
+# ── THE ROSTERS' HOLD (wave-35 T28; REQ-5 AC-5.5, D14; A-orch-27) ────────────
+#
+# A ROW A ROSTER HOLDS OPEN IS NOT OFFERED, WHOSEVER THE ROSTER. T17 reproduced two writers on one row
+# (record/wave-35-no-workarounds/two-writers.md): session A's launch was on A's roster and not yet on the
+# plan, and session B's tick offered the row, because the fill read the plan alone and this session's
+# open rows reached it only as a count (the tick's TICK_OCCUPIED). `adopt` (hooks/session-poker.sh) walked
+# every roster all along. So the walk lives here, once, and three readers take it: `adopt` for its
+# predecessors, `_fill_ready_rows` above for the rows it offers, and the dispatch wall's live-writer arm
+# for the row a launch binds. `adopt`'s fold, `adopt_fold`, stays in the poker (its source text is pinned
+# there by tests/cross-gate-agreement.test.sh §CG-close); the acks `adopt` reads across sessions moved here.
+#
+# fill_roster_walk <state dir> [<skip sid>] -> sid TAB roster TAB ack ledger, one line per roster
+#   Every `roster-<sid>.state` in <state dir> that is a regular file and no symlink (the posture every
+#   .bionic/tmp reader takes), with its own ledger beside it (`sweeper-<sid>.state`; empty when there is
+#   none or it is a symlink). A roster the session cannot read holds nothing: it is said on stderr and
+#   left out, never fatal. A malformed one needs no case: the open-name predicate reads only its rows.
+fill_roster_walk() {
+  local d="${1:-}" skip="${2:-}" rf sid led
+  [ -n "$d" ] && [ -d "$d" ] || return 0
+  for rf in "$d"/roster-*.state; do
+    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
+    sid="${rf##*/}"; sid="${sid#roster-}"; sid="${sid%.state}"
+    [ -n "$sid" ] || continue
+    [ -n "$skip" ] && [ "$sid" = "$skip" ] && continue
+    if [ ! -r "$rf" ]; then
+      printf 'bionic: note: %s cannot be read — it is counted as holding no row\n' "$rf" >&2
+      continue
+    fi
+    led="$d/sweeper-${sid}.state"
+    { [ -f "$led" ] && [ ! -L "$led" ]; } || led=""
+    printf '%s\t%s\t%s\n' "$sid" "$rf" "$led"
+  done
+  return 0
+}
+
+# AN ACK TAKEN IN ANOTHER SESSION (wave-34 T6; REQ-14 AC-14.3, D23). `adopt_fold` reads the
+# predecessor's own ledger, and the ack that closes its row is often not there: the operator who resumed
+# after a `/clear` acks in the session they are in, and `adopt --report-only` then kept listing the acked
+# row open (field report 2026-10-11, item 3). So every ledger in the root is read, each ack with what its
+# OWN session's roster says the name meant there: `<name> TAB <at> TAB <ids> TAB <sid>`, where <ids> is
+# empty when that roster holds no row of the name, `=<id>` when every row of it carries that one id (an
+# adopted copy of one agent), and `*` otherwise (the session's own agent of that name). `adopt_acked_elsewhere`
+# closes a predecessor row only on an ack that cannot be about another agent: empty, or its own id.
+adopt_cross_acks() {  # <state dir> -> one line per ack in any ledger of the root
+  local d="$1" l
+  for l in "$d"/sweeper-*.state; do
+    [ -f "$l" ] && [ ! -L "$l" ] || continue
+    /usr/bin/grep -q '|event=ack|' "$l" 2>/dev/null || continue
+    printf '%s\n' "$l"
+  done | awk '
+    function kv(line, key,   i, n, p) {
+      n = split(line, p, "|")
+      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
+      return ""
+    }
+    {
+      led = $0; sid = led; sub(/^.*\/sweeper-/, "", sid); sub(/\.state$/, "", sid)
+      ros = led; sub(/sweeper-[^\/]*$/, "roster-" sid ".state", ros)
+      split("", ids); split("", nids); split("", noid)
+      while ((getline line < ros) > 0) {
+        if (index(line, "roster-state/") != 1) continue
+        nm = kv(line, "name"); if (nm == "") continue
+        id = kv(line, "agent_id")
+        if (id == "") { noid[nm] = 1; continue }
+        if (!((nm SUBSEP id) in ids)) { ids[nm SUBSEP id] = 1; nids[nm]++; one[nm] = id }
+      }
+      close(ros)
+      while ((getline line < led) > 0) {
+        if (index(line, "sweeper-ledger/v1|") != 1 || kv(line, "event") != "ack") continue
+        nm = kv(line, "name"); at = kv(line, "at"); if (nm == "" || at == "") continue
+        sig = ""
+        if ((nm in noid) || (nm in nids)) sig = ((nm in noid) || nids[nm] != 1) ? "*" : "=" one[nm]
+        printf "%s\t%s\t%s\t%s\n", nm, at, sig, sid
+      }
+      close(led)
+    }' 2>/dev/null
+}
+
+adopt_acked_elsewhere() {  # <cross acks> <origin sid> <name> <id> <launched ISO> -> 0 closed by an ack, 1 not
+  [ -n "$1" ] && [ -n "$4" ] || return 1
+  printf '%s\n' "$1" | awk -F'\t' -v o="$2" -v n="$3" -v id="$4" -v l="$5" '
+    function ok(s) { return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) }
+    $1 == n && $4 != o && ($3 == "" || $3 == "=" id) && ok($2) && ok(l) && $2 > l { f = 1 }
+    END { exit !f }'
+}
+
+# fill_state_dir <plan> -> the `.bionic/tmp` nearest above the plan, or nothing
+#   The rosters of the project the plan is in. Walked up from the plan's own directory, so a docs root
+#   anywhere under the project finds it; a plan outside any project holds nothing.
+fill_state_dir() {
+  local d="${1:-}"
+  [ -n "$d" ] || return 0
+  case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
+  d="${d%/*}"
+  while [ -n "$d" ]; do
+    [ -d "$d/.bionic/tmp" ] && { printf '%s/.bionic/tmp' "$d"; return 0; }
+    d="${d%/*}"
+  done
+  return 0
+}
+
+# _fill_plan_key <plan path> <project root> -> the path with its directory resolved, for comparing
+_fill_plan_key() {
+  local p="${1:-}" dir
+  [ -n "$p" ] || return 0
+  case "$p" in /*) ;; *) p="${2:-$PWD}/$p" ;; esac
+  dir="$(cd "${p%/*}" 2>/dev/null && pwd -P)" || { printf '%s' "$p"; return 0; }
+  printf '%s/%s' "$dir" "${p##*/}"
+}
+
+# fill_roster_holds <state dir> [<plan>] -> sid TAB name TAB row, one line per name a roster holds open
+#   For each roster of the walk, this session's included: the names `roster_open_names` reads open with
+#   that roster's own ledger applied (the one close predicate), less a name an ack taken in ANOTHER
+#   session closes (`adopt_acked_elsewhere`, asked as `adopt` asks it: the origin is the roster's session). <row> is the name's latest `row=`
+#   (the dispatch wall writes the brief's `Row:` there), else the name, which `fill_row_launched` matches
+#   by the id-to-name rule. Given <plan>, only the names whose latest row was dispatched under it (`plan=`,
+#   compared as resolved paths): a name of another plan, or of none, holds no row of this one.
+fill_roster_holds() {
+  local d="${1:-}" plan="${2:-}" root pkey="" xacks sid rf led open name id launched hasplan rplan row
+  local lastraw="" lastkey=""
+  [ -n "$d" ] && declare -F roster_open_names >/dev/null 2>&1 || return 0
+  root="${d%/.bionic/tmp}"
+  [ -z "$plan" ] || pkey="$(_fill_plan_key "$plan" "$root")"
+  xacks="$(adopt_cross_acks "$d")"
+  while IFS=$'\t' read -r sid rf led; do
+    [ -n "$sid" ] || continue
+    open="$(roster_open_names "$rf" "$led")"
+    [ -n "$open" ] || continue
+    while IFS='|' read -r name id launched hasplan rplan row; do
+      [ -n "$name" ] || continue
+      if [ -n "$pkey" ]; then
+        [ "$hasplan" = 1 ] && [ -n "$rplan" ] && [ "$rplan" != none ] || continue
+        [ "$rplan" = "$lastraw" ] || { lastraw="$rplan"; lastkey="$(_fill_plan_key "$rplan" "$root")"; }
+        [ "$lastkey" = "$pkey" ] || continue
+      fi
+      adopt_acked_elsewhere "$xacks" "$sid" "$name" "$id" "$launched" && continue
+      printf '%s\t%s\t%s\n' "$sid" "$name" "${row:-$name}"
+    done <<FILL_HOLD_ROWS
+$(FILL_HOLD_OPEN="$open" awk -F'|' '
+  BEGIN { n = split(ENVIRON["FILL_HOLD_OPEN"], o, "\n"); for (i = 1; i <= n; i++) if (o[i] != "") isopen[o[i]] = 1 }
+  $1 ~ /^roster-state\// {
+    split("", kv)
+    for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1) kv[substr($i, 1, e - 1)] = substr($i, e + 1) }
+    nm = kv["name"]; if (nm == "" || !(nm in isopen)) next
+    if (!(nm in seen)) { seen[nm] = 1; order[++cnt] = nm }
+    if (kv["launched_at"] != "") la[nm] = kv["launched_at"]
+    if ("plan" in kv) { hp[nm] = 1; pl[nm] = kv["plan"] }
+    if ("row" in kv) rw[nm] = kv["row"]
+    if (kv["status"] == "identified" || kv["status"] == "confirmed") if (kv["agent_id"] != "") id[nm] = kv["agent_id"]
+  }
+  END { for (i = 1; i <= cnt; i++) { nm = order[i]; printf "%s|%s|%s|%s|%s|%s\n", nm, id[nm], la[nm], hp[nm], pl[nm], rw[nm] } }
+' "$rf" 2>/dev/null)
+FILL_HOLD_ROWS
+  done <<FILL_HOLD_WALK
+$(fill_roster_walk "$d")
+FILL_HOLD_WALK
+  return 0
+}
+
+# fill_held_ids <plan> <ids, one per line> -> id TAB name TAB sid, for each id a roster holds open
+#   The first holding name, in walk order. What `_fill_ready_rows` leaves out, and what the tick's WAIT
+#   line names: `WAIT <id> — <name> open on roster <sid, first 8>`.
+fill_held_ids() {
+  local plan="${1:-}" ids="${2:-}" d holds id sid name row
+  [ -n "$plan" ] && [ -n "$ids" ] || return 0
+  d="$(fill_state_dir "$plan")"
+  [ -n "$d" ] || return 0
+  holds="$(fill_roster_holds "$d" "$plan")"
+  [ -n "$holds" ] || return 0
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    while IFS=$'\t' read -r sid name row; do
+      [ -n "$sid" ] || continue
+      fill_row_launched "$id" "$row" && { printf '%s\t%s\t%s\n' "$id" "$name" "$sid"; break; }
+    done <<FILL_HELD_HOLDS
+$holds
+FILL_HELD_HOLDS
+  done <<FILL_HELD_IDS
+$ids
+FILL_HELD_IDS
+  return 0
 }

@@ -1960,8 +1960,8 @@ carry_req "$PZ" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $C
 mkdir -p "$PZ/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nNothing.\n' > "$PZ/$CONT_REL"
 run_close "$PZ" run
-expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Resume instruction||Nothing.|" \
+expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side)" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Resume instruction||Nothing.|" \
   "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
@@ -2106,6 +2106,183 @@ LAND_UMRC=$?
 expect_eq "LAND-mut4 the doctored run still closes and fences the line (two fence lines), which LAND-9b forbids" "0|2" \
   "$LAND_UMRC|$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLV/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$LAND_UMUT"
+
+# ============================================================
+section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count is folded from the lines the escape-hatch verbs wrote"
+# ============================================================
+# `landing-report --hand-holds <plan>` adds one line to the report: the uses of the escape-hatch verbs, by kind,
+# each counted from the line its verb wrote and from nothing else. A prose line saying `by-hand` counts nothing.
+# close-out prints that line on its card and writes it into the continuation under `## Hand-holds`; it reads it
+# BEFORE the tmp wipe, because three kinds (amend, hold, extend) live on the roster and act 3 wipes the roster.
+#
+# THE SOURCES, each in the shape its writer prints (the fixture plants the shape, the roster through the one
+# production row writer, the plan's proof lines through lib/proof.sh's own line builders):
+#   by-hand        landing record      line/v1|ev=published|…|kind=hand|…            (lib/line.sh)
+#   declines/lifts fill ledger         fill-ledger/v1|…|state=decline| and |state=lift|   (the verbs; the Stop hook writes ok and hold)
+#   amends         roster              distinct (name, amended=<value>) of the run's plan
+#   holds          roster              distinct (name, held=<value>)
+#   extensions     roster              distinct (name, extended=<value>)
+#   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
+#   regression-2   plan                `approved: regression-2` under ## SDLC State
+#   second-floors  plan                `proved: kind=floor` lines past the first
+# A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
+HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
+HH_C="$(printf 'd%.0s' $(seq 40))"
+HH_WANT="hand-holds: total=11 · by-hand=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1"
+# hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
+hh_report() {
+  local proj="$1"; shift
+  ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report "$@" "$proj/$PLAN_REL" 2>/dev/null )
+}
+# hh_plant <project> -> one use of every verb, and the prose that must count for nothing
+hh_plant() {
+  local p="$1" plan="$1/$PLAN_REL" rec="$1/.bionic/docs/record/wave-01-fixture" h w
+  case "$p" in "$SANDBOX"/*) : ;; *) echo "hh_plant: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
+  mkdir -p "$rec"
+  # the landing record: a queue landing, a by-hand landing, and a prose line that says by-hand
+  {
+    printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$HH_C" "$p"
+    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
+    printf 'line/v1|ev=published|row=T2|commit=%s|kind=hand|by=Chris|why=the line was down|at=2026-10-06T10:40:00Z\n' "$HH_C"
+    printf 'note: T3 was landed by-hand outside the line (kind=hand), says this prose line\n'
+  } > "$rec/landing-proofs.log"
+  # the fill ledger: a decline and its lift (the verbs' shapes), the Stop hook's hold and ok lines, and prose
+  {
+    printf 'fill-ledger/v1|at=2026-10-06T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1|declined-on=-\n'
+    printf 'fill-ledger/v1|at=2026-10-06T09:10:00Z|session=fixture|turn=|current=4|state=lift|ceiling=6|width=|open=|free=|ready=|launched=|declined=|missed=0|idle=|room=|lifted=T1\n'
+    printf 'fill-ledger/v1|at=2026-10-06T09:20:00Z|session=fixture|turn=t1|current=4|state=hold|ceiling=|width=6|open=6|free=0|ready=T1|launched=|declined=|missed=0|idle=|room=0\n'
+    printf 'fill-ledger/v1|at=2026-10-06T09:30:00Z|session=fixture|turn=t2|current=4|state=ok|ceiling=|width=6|open=5|free=1|ready=|launched=T1|declined=|missed=0|idle=|room=1\n'
+    printf 'the orchestrator wrote state=decline here by hand and nobody counted it\n'
+  } > "$rec/fill-ledger.log"
+  # the roster: two amends (one row re-written twice), a hold, an extension, and another run's amend
+  {
+    roster_row_fixture status=identified name=w-a agent_id=aa plan="$plan" amended="2026-10-06T10:00:00Z widen the files"
+    roster_row_fixture status=confirmed name=w-a agent_id=aa plan="$plan" amended="2026-10-06T10:00:00Z widen the files"
+    roster_row_fixture status=identified name=w-b agent_id=ab plan="$plan" amended="2026-10-06T11:00:00Z add a suite"
+    roster_row_fixture status=identified name=w-a agent_id=aa plan="$plan" held="2026-10-06T12:00:00Z waiting on the reader fp=1-2-3"
+    roster_row_fixture status=identified name=w-c agent_id=ac plan="$plan" extended="2026-10-06T12:30:00Z more work"
+    roster_row_fixture status=identified name=w-z agent_id=az plan="/elsewhere/wave-99-other.plan.md" amended="2026-10-06T13:00:00Z another run's"
+  } >> "$p/.bionic/tmp/roster-fixture.state"
+  # the plan: a second floor, a waive, a waive-row, an approve regression-2, and the prose that must count nothing
+  h="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_last "$2" floor' _ "$REPO_ROOT/payload/scripts/lib" "$plan")"
+  expect_nonempty "HH-0a precondition: the fixture plan already holds one floor proof, whose head the second reuses" "$h"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    plan="$2"; h="$3"
+    proof_add_line "$plan" "$(proof_line floor "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
+    proof_add_line "$plan" "$(proof_waiver_line evidence "$h" "Chris Lehman" 2026-10-06T13:10:00Z "waive it")" > "$plan.pf" && mv "$plan.pf" "$plan"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
+  w="$(mktemp "$SANDBOX/hh-plan.XXXXXX")"
+  awk '
+    /^approved-by:/ { print; print "approved: regression-2 by Chris Lehman 2026-10-06T12:00:00Z \"yes\""; next }
+    /^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed"
+                   print; next }
+    /^## Tasks/ { print "```"; print "proved: kind=floor head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
+                  print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
+                  print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "\140\140\140"; print ""; print; next }
+    /^  readback:/ && !wr { print; print "  waiver: Chris Lehman 2026-10-06 \"waive the row\" — fixture"
+                            print "  waiver: someone said we might waive this later"; wr = 1; next }
+    { print }' "$plan" > "$w" && mv "$w" "$plan"
+}
+PH="$(mk_fixture handholds)"; advance_to "$PH" 8
+hh_plant "$PH"
+expect_eq "HH-0 precondition: the plan carries both waiver forms, the approval and two floor proofs as flush-left lines (the extractors find them)" "1/1/1/2" \
+  "$(grep -c '^waived: question=evidence ' "$PH/$PLAN_REL")/$(grep -c '^  waiver: Chris Lehman 2026-10-06 ' "$PH/$PLAN_REL")/$(grep -c '^approved: regression-2 by Chris Lehman' "$PH/$PLAN_REL")/$(awk '/^```/ { f = !f; next } !f && /^proved: kind=floor / { n++ } END { print n + 0 }' "$PH/$PLAN_REL")"
+HH_OUT="$(hh_report "$PH" --hand-holds)"
+expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
+  "$(printf '%s\n' "$HH_OUT" | grep '^hand-holds: ')"
+expect_eq "HH-2 …after the landings line, which is the one the default prints" "1/2" \
+  "$(printf '%s\n' "$HH_OUT" | grep -c '^landings: ')/$(printf '%s\n' "$HH_OUT" | grep -n '^hand-holds: ' | cut -d: -f1)"
+expect_eq "HH-3 the default landing-report prints no hand-holds line (its output stays what it was)" "0" \
+  "$(hh_report "$PH" | grep -c '^hand-holds')"
+# the same fixture with the verbs' lines removed and the prose kept: nothing is counted
+PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
+mkdir -p "$PHP/.bionic/docs/record/wave-01-fixture"
+printf 'note: T3 was landed by-hand (kind=hand); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
+awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print; next } { print }' \
+  "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
+HH_PROSE="$(hh_report "$PHP" --hand-holds)"
+expect_eq "HH-4 a run whose only by-hand, decline, lift, waiver and approval are prose counts zero in every kind" \
+  "hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0" \
+  "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
+# the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
+run_close "$PH" check
+expect_eq "HH-5 check prints the hand-holds line on the card" "$HH_WANT" "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
+run_close "$PH" run
+expect_eq "HH-6 run exits 0, prints the same line on the card, and the wipe took the roster it read" "0/$HH_WANT/0" \
+  "$CO_RC/$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')/$(tmp_entries "$PH")"
+hh_section() { awk '/^## / { s = ($0 == "## Hand-holds"); next } s && NF && !/^```/ { print }' "$1"; }
+expect_eq "HH-7 the continuation carries ## Hand-holds once, with the line (read before the wipe)" "1/$HH_WANT" \
+  "$(/usr/bin/grep -c '^## Hand-holds$' "$PH/$CONT_REL" | tr -d ' ')/$(hh_section "$PH/$CONT_REL")"
+expect_eq "HH-7b …and the section sits after ## Landings and before the Resume instruction" "yes" \
+  "$(awk '/^## Landings$/ { a = NR } /^## Hand-holds$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PH/$CONT_REL")"
+# T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
+# hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
+# there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
+hh_count() { /usr/bin/grep -c '^hand-holds: ' "$1" | tr -d ' '; }
+PHE="$(mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
+mkdir -p "$PHE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PHE/$CONT_REL"
+HHE_CK0="$(cksum < "$PHE/$CONT_REL")"
+run_close "$PHE" check
+expect_contains "HH-8 check over an existing continuation without the section names the append run will make" \
+  "run also adds the ## Hand-holds section" "$CO_OUT"
+expect_eq "HH-8a …and writes nothing" "$HHE_CK0" "$(cksum < "$PHE/$CONT_REL")"
+run_close "$PHE" run
+expect_eq "HH-9 run over it exits 0, and the continuation carries ## Hand-holds once, with the line the card printed" "0/1/$HH_WANT" \
+  "$CO_RC/$(/usr/bin/grep -c '^## Hand-holds$' "$PHE/$CONT_REL" | tr -d ' ')/$(hh_section "$PHE/$CONT_REL")"
+expect_eq "HH-9a …the line is present once in the whole file" "1" "$(hh_count "$PHE/$CONT_REL")"
+expect_eq "HH-9b …the person's own text is kept, byte for byte, line for line" "1/1/1/1" \
+  "$(/usr/bin/grep -c '^# continuation — hand written$' "$PHE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^my own note on the close$' "$PHE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^none, said the person$' "$PHE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^edited by a person$' "$PHE/$CONT_REL" | tr -d ' ')"
+expect_eq "HH-9c …and the person's Resume instruction is still the last section" "## Resume instruction" \
+  "$(/usr/bin/grep '^## ' "$PHE/$CONT_REL" | tail -n 1)"
+expect_contains "HH-9d …and run says what it added" "added the ## Hand-holds section" "$CO_OUT"
+# a second close-out over what the first left (planted in a fresh fixture: a closed plan refuses a second run)
+PHE2="$(mk_fixture handholds-existing2)"; advance_to "$PHE2" 8; hh_plant "$PHE2"
+mkdir -p "$PHE2/${CONT_REL%/*}"; cp "$PHE/$CONT_REL" "$PHE2/$CONT_REL"
+HHE_CK1="$(cksum < "$PHE2/$CONT_REL")"
+expect_eq "HH-10 precondition: the planted continuation is the first run's, with the line once" "1" "$(hh_count "$PHE2/$CONT_REL")"
+run_close "$PHE2" run
+expect_eq "HH-10a run twice: exits 0, the line is still there once, and the file is byte for byte what the first run left" "0/1/$HHE_CK1" \
+  "$CO_RC/$(hh_count "$PHE2/$CONT_REL")/$(cksum < "$PHE2/$CONT_REL")"
+expect_absent "HH-10b …and the card reports no add" "added the ## Hand-holds" "$CO_OUT"
+# the heading is there and the line is not: the line goes under it, after what the person wrote there
+PHE3="$(mk_fixture handholds-existing3)"; advance_to "$PHE3" 8; hh_plant "$PHE3"
+mkdir -p "$PHE3/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\nthe person counted two by hand\n\n## Resume instruction\n\nedited by a person\n' > "$PHE3/$CONT_REL"
+run_close "$PHE3" run
+expect_eq "HH-11 over a continuation with the heading and no line: the person's sentence stays and the line is added under it, once" \
+  "0/1/1/the person counted two by hand|$HH_WANT" \
+  "$CO_RC/$(/usr/bin/grep -c '^## Hand-holds$' "$PHE3/$CONT_REL" | tr -d ' ')/$(hh_count "$PHE3/$CONT_REL")/$(awk '/^## / { s = ($0 == "## Hand-holds"); next } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
+expect_eq "HH-11a …and the Resume instruction after it is as it was" "## Resume instruction|edited by a person" \
+  "$(awk '/^## Resume instruction$/ { s = 1 } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
+# the heading and the line are both there (as a person typed it, unfenced): nothing is added
+PHE4="$(mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
+mkdir -p "$PHE4/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
+HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
+run_close "$PHE4" run
+expect_eq "HH-12 the heading and the line already there: run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
+  "$CO_RC/$(cksum < "$PHE4/$CONT_REL")/$(hh_count "$PHE4/$CONT_REL")"
+
+# the mutation arms: a continuation template without the section, and a fold that counts a line it should not
+HH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-hh-mut.XXXXXX")"
+mkdir -p "$HH_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$HH_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$HH_MUT/scripts/card.sh"
+sed 's/^\$(co_hand_holds_section)$//' "$SCRIPT" > "$HH_MUT/scripts/close-out.sh"
+expect_eq "HH-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$HH_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PHM="$(mk_fixture handholds-mut)"; advance_to "$PHM" 8; hh_plant "$PHM"
+( cd "$PHM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    BIONIC_GATE_DIR="$HH_GATE" bash "$HH_MUT/scripts/close-out.sh" "$PHM/$PLAN_REL" run ) > "$SANDBOX/hh-mut.out" 2>&1
+HH_MRC=$?
+expect_eq "HH-mut1 the doctored run still closes and writes its continuation, still printing the card line (the mutant runs)" "0|1|1" \
+  "$HH_MRC|$(/usr/bin/grep -c '^## Deferrals$' "$PHM/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^hand-holds: ' "$SANDBOX/hh-mut.out" | tr -d ' ')"
+expect_eq "HH-mut2 …and the continuation carries no ## Hand-holds, so HH-7 goes red on it" "0" \
+  "$(/usr/bin/grep -c '^## Hand-holds$' "$PHM/$CONT_REL" | tr -d ' ')"
+rm -rf "$HH_MUT"
 
 
 # ============================================================
@@ -2483,5 +2660,150 @@ FQ_RC=$?
 expect_eq "FILL.18 with a poker that cannot report landings the close still finishes (rc 0)" "0" "$FQ_RC"
 expect_eq "FILL.19 …the landings section says so in a sentence, and the marks left are still only the five" "yes/$(printf '%s' "$OWED_MARKS" | tr '\n' '|')" \
   "$(contains "$(cat "$FQ/$CONT_REL")" "landings: not read")/$(fill_marks "$FQ/$CONT_REL" | tr '\n' '|' | sed 's/|$//')"
+
+# ============================================================
+section "§REF — wave-35 T10 (REQ-1 AC-1.7, D10): the facts judge reads the working branch's ref through the one reader; a branch that names no commit stays uncovered"
+# ============================================================
+# close-out's facts judge (`facts_judge`) hands lib/proof.sh `facts_state` the head of the working branch, and it now
+# reads that head through lib/proof.sh `proof_branch_head` (`refs/heads/<branch>`), the reader `current 7`, `current 8`
+# and the floor judge share, never a checkout's and never whatever else git would resolve the bare name to. The
+# branch name itself is read through lib/run.sh `plan_working_branch` (SDLC State, then frontmatter), so close-out
+# has no second reader of it (A-orch-16).
+# FIXTURE FIDELITY: mk_fixture's run at Step 8: wave/01-fixture merged into main, every fact planted at its head by
+# the product's pair, the branch checked out in `<project>-wave`. Each row then takes away one thing a run that has
+# merged takes away: the worktree, the branch, the SDLC-State key.
+# fails-when: the judge reads the checkout's head, or a ref other than the branch; a deleted branch reads covered;
+# a plan whose working-branch: is in its frontmatter alone is refused for naming none.
+ref_head() { fixture_git "$1" rev-parse --verify -q "refs/heads/wave/01-fixture" 2>/dev/null; }
+PREF="$(mk_fixture ref-merged)"; advance_to "$PREF" 8
+REF_H="$(ref_head "$PREF")"
+fixture_git "$PREF" worktree remove --force "$PREF-wave" >/dev/null 2>&1
+expect_eq "REF-0 precondition: the branch names a commit, no checkout holds it, and the main checkout is on main" "yes|0|main" \
+  "$([ -n "$REF_H" ] && echo yes)|$(fixture_git "$PREF" worktree list --porcelain | grep -c '^branch refs/heads/wave/01-fixture$' | tr -d ' ')|$(fixture_git "$PREF" symbolic-ref --short HEAD)"
+run_close "$PREF" check
+expect_contains "REF-1 AC-1.7 branch merged, its tree removed, the checkout on main: the judge reads the branch's head and every fact holds" \
+  "facts: every fact the run owes holds at $REF_H" "$CO_OUT"
+run_close "$PREF" run
+expect_eq "REF-2 …and run closes the plan (rc 0)" "0|1" "$CO_RC|$(run_open_rc "$PREF/$PLAN_REL")"
+
+PREFD="$(mk_fixture ref-deleted)"; advance_to "$PREFD" 8
+fixture_git "$PREFD" worktree remove --force "$PREFD-wave" >/dev/null 2>&1
+fixture_git "$PREFD" branch -D wave/01-fixture >/dev/null 2>&1
+expect_eq "REF-3 precondition: the working branch is deleted (no ref names it)" "" "$(ref_head "$PREFD")"
+run_close "$PREFD" check
+expect_contains "REF-3b AC-1.7 a deleted branch: check says the facts would be refused" "facts: WOULD REFUSE" "$CO_OUT"
+expect_contains "REF-3c …saying the branch names no commit, the floor uncovered" \
+  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+# A TAG OF THE SAME NAME IS NOT THE BRANCH. `git rev-parse <name>` resolves refs/tags/<name> before refs/heads/<name>, so a
+# judge that asks git for the bare name reads a tag where the branch is gone; the branch's ref reader does not.
+fixture_git "$PREFD" tag wave/01-fixture main >/dev/null 2>&1
+expect_nonempty "REF-4 precondition: a tag of the branch's name names a commit" \
+  "$(fixture_git "$PREFD" rev-parse --verify -q 'refs/tags/wave/01-fixture^{commit}' 2>/dev/null)"
+run_close "$PREFD" check
+expect_contains "REF-4b AC-1.7 …the deleted branch stays uncovered beside the tag: the judge reads refs/heads/ alone" \
+  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+expect_absent "REF-4c …and never judges the tag's commit" "facts: every fact the run owes holds" "$CO_OUT"
+
+PREFF="$(mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8
+awk '
+  NR == 1 && $0 == "---" { print; fm = 1; next }
+  fm && $0 == "---" { print "working-branch: wave/01-fixture"; print; fm = 0; next }
+  /^## SDLC State/ { s = 1 }
+  s && /^working-branch: / { next }
+  { print }' "$PREFF/$PLAN_REL" > "$PREFF/$PLAN_REL.wb" && mv "$PREFF/$PLAN_REL.wb" "$PREFF/$PLAN_REL"
+expect_eq "REF-5 precondition: working-branch: is in the frontmatter alone" "1|0" \
+  "$(awk '/^---$/ { n++; next } n == 1 && /^working-branch: / { c++ } END { print c + 0 }' "$PREFF/$PLAN_REL")|$(awk '/^## SDLC State/ { s = 1 } s && /^working-branch: / { c++ } END { print c + 0 }' "$PREFF/$PLAN_REL")"
+run_close "$PREFF" check
+expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reader: a frontmatter key is not refused as none" \
+  "names no working-branch" "$CO_OUT"
+expect_contains "REF-5c …and the judge holds the facts at that branch's head" \
+  "facts: every fact the run owes holds at $(ref_head "$PREFF")" "$CO_OUT"
+
+# ============================================================
+section "§INHERITED-CONT — wave-35 T10 (REQ-1 AC-1.6, A-orch-18): the continuation carries every inherited: line under its own heading; a plan with none prints none"
+# ============================================================
+# `proof-add inherited <suite>` writes `inherited: <suite> base=<sha> head=<sha> at=<ISO> evidence=<log>` under
+# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. AC-1.6 says it is carried into the
+# continuation, so close-out lists every such line under `## Inherited debt`, beside the hand-holds, as written. A
+# line inside a fence is prose, not a line the verb wrote, and is not carried.
+# FIXTURE FIDELITY: mk_fixture at Step 8; the lines are placed by lib/proof.sh `proof_add_line`, the placer the verb
+# calls, in the verb's own shape.
+# fails-when: an inherited: line is missing from the continuation, or a plan with none gets the heading.
+inh_line() {  # <suite> <sha> -> the line proof-add inherited writes
+  printf 'inherited: %s base=%s head=%s at=2026-10-12T04:00:00Z evidence=record/wave-01-fixture/inherited-%s-%.12s.log' "$1" "$2" "$2" "$1" "$2"
+}
+inh_place() {  # <project> <line> -> the line placed under ## SDLC State by the product's placer
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_add_line "$2" "$3" > "$2.pf" && mv "$2.pf" "$2"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "$2"
+}
+inh_section() { awk '/^## / { s = ($0 == "## Inherited debt"); next } s && NF && !/^```/ { print }' "$1"; }
+PINH="$(mk_fixture inherited-cont)"; advance_to "$PINH" 8
+INH_H="$(fixture_git "$PINH" rev-parse --verify -q wave/01-fixture)"
+inh_place "$PINH" "$(inh_line a.test.sh "$INH_H")"
+inh_place "$PINH" "$(inh_line b.test.sh "$INH_H")"
+awk '/^## Tasks/ { print "```"; print "inherited: fenced.test.sh base=0123456789ab head=0123456789ab at=x evidence=y"; print "```"; print "" } { print }' \
+  "$PINH/$PLAN_REL" > "$PINH/$PLAN_REL.f" && mv "$PINH/$PLAN_REL.f" "$PINH/$PLAN_REL"
+expect_eq "INH-0 precondition: the plan carries two unfenced inherited: lines and one fenced (the extractor reads them)" "2|1" \
+  "$(awk '/^```/ { f = !f; next } !f && /^inherited: / { n++ } END { print n + 0 }' "$PINH/$PLAN_REL")|$(awk '/^```/ { f = !f; next } f && /^inherited: / { n++ } END { print n + 0 }' "$PINH/$PLAN_REL")"
+run_close "$PINH" run
+expect_eq "INH-1 run closes the plan (rc 0)" "0" "$CO_RC"
+expect_eq "INH-2 AC-1.6 the continuation carries ## Inherited debt once, with both lines as the verb wrote them" \
+  "1|$(inh_line a.test.sh "$INH_H")|$(inh_line b.test.sh "$INH_H")" \
+  "$(/usr/bin/grep -c '^## Inherited debt$' "$PINH/$CONT_REL" | tr -d ' ')|$(inh_section "$PINH/$CONT_REL" | paste -sd'|' -)"
+expect_absent "INH-2b …and not the fenced line" "fenced.test.sh" "$(inh_section "$PINH/$CONT_REL")"
+expect_eq "INH-2c …beside the hand-holds: the section follows ## Hand-holds, before the Resume instruction" "yes" \
+  "$(awk '/^## Hand-holds$/ { a = NR } /^## Inherited debt$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PINH/$CONT_REL")"
+PINO="$(mk_fixture inherited-none)"; advance_to "$PINO" 8
+run_close "$PINO" run
+expect_eq "INH-3 a plan with no inherited: line: run closes it and writes the continuation (its Hand-holds there)" "0|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Hand-holds$' "$PINO/$CONT_REL" | tr -d ' ')"
+expect_eq "INH-3b …and no Inherited debt heading at all" "0" "$(/usr/bin/grep -c '^## Inherited debt' "$PINO/$CONT_REL" | tr -d ' ')"
+
+# T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md gains the inherited lines under ## Inherited debt,
+# each once, the person's own text untouched; the section follows ## Hand-holds, which the same merge writes.
+inh_count() { /usr/bin/grep -c -F -x "$2" "$1" | tr -d ' '; }
+PIE="$(mk_fixture inherited-existing)"; advance_to "$PIE" 8
+INE_H="$(fixture_git "$PIE" rev-parse --verify -q wave/01-fixture)"
+INE_A="$(inh_line a.test.sh "$INE_H")"; INE_B="$(inh_line b.test.sh "$INE_H")"
+inh_place "$PIE" "$INE_A"; inh_place "$PIE" "$INE_B"
+mkdir -p "$PIE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PIE/$CONT_REL"
+INE_CK0="$(cksum < "$PIE/$CONT_REL")"
+run_close "$PIE" check
+expect_contains "INH-4 check over an existing continuation without the section names the append run will make" \
+  "run also adds the ## Hand-holds section and the ## Inherited debt section" "$CO_OUT"
+expect_eq "INH-4a …and writes nothing" "$INE_CK0" "$(cksum < "$PIE/$CONT_REL")"
+run_close "$PIE" run
+expect_eq "INH-5 run over it exits 0; ## Inherited debt is there once with both lines as the verb wrote them" \
+  "0|1|$INE_A|$INE_B" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt$' "$PIE/$CONT_REL" | tr -d ' ')|$(inh_section "$PIE/$CONT_REL" | paste -sd'|' -)"
+expect_eq "INH-5a …each line is in the file once" "1/1" "$(inh_count "$PIE/$CONT_REL" "$INE_A")/$(inh_count "$PIE/$CONT_REL" "$INE_B")"
+expect_eq "INH-5b …the person's own text is kept, line for line" "1/1/1/1" \
+  "$(/usr/bin/grep -c '^# continuation — hand written$' "$PIE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^my own note on the close$' "$PIE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^none, said the person$' "$PIE/$CONT_REL" | tr -d ' ')/$(/usr/bin/grep -c '^edited by a person$' "$PIE/$CONT_REL" | tr -d ' ')"
+expect_eq "INH-5c …the section follows ## Hand-holds and comes before the Resume instruction" "yes" \
+  "$(awk '/^## Hand-holds$/ { a = NR } /^## Inherited debt$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PIE/$CONT_REL")"
+PIE2="$(mk_fixture inherited-existing2)"; advance_to "$PIE2" 8
+inh_place "$PIE2" "$INE_A"; inh_place "$PIE2" "$INE_B"
+mkdir -p "$PIE2/${CONT_REL%/*}"; cp "$PIE/$CONT_REL" "$PIE2/$CONT_REL"
+INE_CK1="$(cksum < "$PIE2/$CONT_REL")"
+run_close "$PIE2" run
+expect_eq "INH-6 run twice: exits 0, each line still once, the file byte for byte what the first run left" "0/1/1/$INE_CK1" \
+  "$CO_RC/$(inh_count "$PIE2/$CONT_REL" "$INE_A")/$(inh_count "$PIE2/$CONT_REL" "$INE_B")/$(cksum < "$PIE2/$CONT_REL")"
+# the heading holds one of the two lines (typed unfenced) and a note: the other is added under it, nothing twice
+PIE3="$(mk_fixture inherited-existing3)"; advance_to "$PIE3" 8
+inh_place "$PIE3" "$INE_A"; inh_place "$PIE3" "$INE_B"
+mkdir -p "$PIE3/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Inherited debt\n\nthe person looked at a.test.sh\n%s\n\n## Resume instruction\n\nedited by a person\n' "$INE_A" > "$PIE3/$CONT_REL"
+run_close "$PIE3" run
+expect_eq "INH-7 a heading holding one line and a note: the note and the line stay, the other is added, each once" \
+  "0|1|the person looked at a.test.sh|$INE_A|$INE_B|1/1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt$' "$PIE3/$CONT_REL" | tr -d ' ')|$(inh_section "$PIE3/$CONT_REL" | paste -sd'|' -)|$(inh_count "$PIE3/$CONT_REL" "$INE_A")/$(inh_count "$PIE3/$CONT_REL" "$INE_B")"
+# a plan with no inherited: line gives an existing continuation no Inherited debt heading
+PIE4="$(mk_fixture inherited-existing4)"; advance_to "$PIE4" 8
+mkdir -p "$PIE4/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PIE4/$CONT_REL"
+run_close "$PIE4" run
+expect_eq "INH-8 no inherited: line in the plan: run over an existing continuation adds no Inherited debt heading (and its Hand-holds)" "0|0|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt' "$PIE4/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^## Hand-holds$' "$PIE4/$CONT_REL" | tr -d ' ')"
 
 finish

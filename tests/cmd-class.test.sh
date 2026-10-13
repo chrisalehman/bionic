@@ -1907,7 +1907,7 @@ D${T}/a/r" "$(printf '%s\n' "$FX_OUT" | grep -E '^(W|D)')"
 FX_MUT="$SANDBOX/cmd-class.fx-mutant.sh"
 # The unknown line is held for fx_flush (T19), so the mutant empties the one function that holds it.
 FX_UNK_LINE='function fx_unk(r, s) { FXO[++FXON] = "?\t" fx_flat(r) "\t" fx_flat(s) }'
-anchor "$LIB" "$FX_UNK_LINE" 1
+anchor file payload/scripts/lib/cmd-class.sh 'function fx_unk(r, s) { FXO[++FXON] = "?\t" fx_flat(r) "\t" fx_flat(s) }'
 A="$FX_UNK_LINE" awk '{ if (index($0, ENVIRON["A"])) print "    function fx_unk(r, s) { }"; else print }' "$LIB" > "$FX_MUT"
 expect_true "§FX mutant: the library without its unknown line still parses" bash -n "$FX_MUT"
 expect_eq "§FX mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f /a/b')"
@@ -1917,13 +1917,13 @@ expect_eq "§FX shipped: the same incident is unknown" "?" "$(fx_shape "$FX_INC"
 
 # --- mutation controls for the two orchestrator additions: the check taken out is the defect ---
 FX_MUT2="$SANDBOX/cmd-class.fx-mutant-rop.sh"
-anchor "$LIB" 'fx_unk("unresolved read operand", t)' 1
+anchor file payload/scripts/lib/cmd-class.sh 'fx_unk("unresolved read operand", t)'
 grep -vF 'fx_unk("unresolved read operand", t)' "$LIB" > "$FX_MUT2"
 expect_true "§FX read-operand mutant parses" bash -n "$FX_MUT2"
 expect_eq "§FX read-operand mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT2" fx_shape 'rm -f /a/b')"
 expect_eq "§FX read-operand mutant: the globbed key read is no effect — the defect" "" "$(FX_LIB="$FX_MUT2" fx_shape 'cat ~/.ss?/id_ed25519')"
 FX_MUT3="$SANDBOX/cmd-class.fx-mutant-follow.sh"
-anchor "$LIB" 'fx_unk("find follows symlinks", t)' 1
+anchor file payload/scripts/lib/cmd-class.sh 'fx_unk("find follows symlinks", t)'
 grep -vF 'fx_unk("find follows symlinks", t)' "$LIB" > "$FX_MUT3"
 expect_true "§FX find-follow mutant parses" bash -n "$FX_MUT3"
 expect_eq "§FX find-follow mutant: plain -delete is still a D (the mutant runs)" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find /a -delete')"
@@ -2291,7 +2291,7 @@ expect_eq "§FOLDAGREE the two folds agree on every word" "" \
   "$(diff <(printf '%s\n' "$FOLD_SH_OUT") <(printf '%s\n' "$FOLD_AWK_OUT"))"
 # The planted defect: one never list loses a word. The row above must see it.
 FOLD_GA_MUT="$SANDBOX/git-argv.fold-mutant.sh"
-anchor "$GA_LIB" '    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;' 1
+anchor insert payload/scripts/lib/git-argv.sh '    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;'
 sed 's/^    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;$/    cd|pushd|popd|exit|return|exec|eval|source) return 0 ;;/' "$GA_LIB" > "$FOLD_GA_MUT"
 expect_true "§FOLDAGREE mutant parses" bash -n "$FOLD_GA_MUT"
 FOLD_MUT_OUT="$(fold_sh "$FOLD_GA_MUT")"
@@ -2455,7 +2455,7 @@ expect_eq "§SCRIPT-TEXT two scripts, two claims, each with its own run" "run	je
 expect_eq "§SCRIPT-TEXT a script calling a script is read through it (depth 2)" "run:jest" "$(st_rows 'bash outer.sh')"
 expect_eq "§SCRIPT-TEXT a --dry-run after a script is the script's argument, not the runner's mode" "run:jest" \
   "$(st_rows 'bash red.sh --dry-run')"
-expect_eq "§SCRIPT-TEXT a script running a suite file bare claims that run" "run:bash tests/a.test.sh" "$(st_rows 'bash bare.sh')"
+expect_eq "§SCRIPT-TEXT a script running a suite file bare claims that suite, as the line inline does (wave-35 T4, §SCRIPT)" "file:a.test.sh" "$(st_rows 'bash bare.sh')"
 expect_eq "§SCRIPT-TEXT a script running the full tree is the full-tree claim" "file:run.sh" "$(st_rows 'bash full.sh')"
 expect_eq "§SCRIPT-TEXT AC-6.1 a command word built from a variable claims nothing: a script start, no refusal" "script:var.sh" \
   "$(st_rows 'bash var.sh')"
@@ -2505,7 +2505,7 @@ expect_eq "§SCRIPT-TEXT tracked: the fixture is committed and two scripts are e
   "$(git -C "$GT" status --porcelain | sort | paste -sd'|' -)"
 expect_eq "§SCRIPT-TEXT tracked and unchanged, a literal jest in it: claimed, run jest" "run:jest" "$(gt_rows 'bash tjest.sh')"
 expect_eq "§SCRIPT-TEXT tracked and unchanged, its \$ lines claim nothing (tjest.sh beside it is the positive)" "script:tvar.sh" "$(gt_rows 'bash tvar.sh')"
-expect_eq "§SCRIPT-TEXT tracked, a literal door run in it: claimed as run" "run:tests/run.sh --only a.test.sh" "$(gt_rows 'bash tdoor.sh')"
+expect_eq "§SCRIPT-TEXT tracked, a literal door run in it: claimed as the door claims it inline (wave-35 T4, §SCRIPT)" "only:a.test.sh" "$(gt_rows 'bash tdoor.sh')"
 expect_eq "§SCRIPT-TEXT tracked, a literal tests/run.sh in it: the full-tree claim (A-T11-9)" "file:run.sh" "$(gt_rows 'bash tfull.sh')"
 expect_eq "§SCRIPT-TEXT modified red.sh running jest: run jest" "run:jest" "$(gt_rows 'bash red.sh')"
 expect_eq "§SCRIPT-TEXT AC-6.1 modified, a \$ command word: read as the tracked one is, no refusal" "script:mvar.sh" "$(gt_rows 'bash mvar.sh')"
@@ -2686,5 +2686,69 @@ expect_eq "§CASE-FOLD case-exact: ./TESTS/RUN.SH is a start" "script:./TESTS/RU
 CF_WANT=0; [ -e "$SANDBOX/CBPROBE" ] && CF_WANT=1
 expect_eq "§CASE-FOLD cmd_case_blind answers what this filesystem does (probe: CBPROBE finds cbprobe = $CF_WANT)" "$CF_WANT" \
   "$(env -u BIONIC_PROBE_CASE_BLIND bash -c '. "$1" || exit 9; if cmd_case_blind "$2"; then echo 1; else echo 0; fi' _ "$LIB" "$SANDBOX")"
+
+
+section "§SCRIPT — wave-35 T4 (D13, REQ-4 AC-4.3): a line read inside a script gets the claim the same line typed inline gets"
+# A door call read inside a script was a `run` claim (its target the line as written), which the
+# wall holds to `re_executes=` alone: so `bash mutant.sh`, mutant.sh running
+# `tests/run.sh --only <a budgeted suite>`, was refused and sent to `--reexec+`, while the same
+# line typed inline was admitted (A-orch-17, wave-34; research-walls item 6). Now each line is
+# claimed as it is inline: the door is an `only` claim per suite it names, a bare suite a `file`
+# claim, a runner form (jest, pytest) a `run` claim as before, the full tree the `file run.sh`
+# claim as before; every suite line of the script is claimed, not only the first, and a `$` line
+# still claims nothing. The claim's run column stays the command as typed. Because a script's exit
+# code need not speak for the suites in it, a reading that claims a suite through a script closes
+# with `split`, so the stamp names none (as the `run` claim never named one).
+# FIXTURE FIDELITY: real files under a temp root, as an agent's tree holds them; the root is the
+# budget's `$BIONIC_ROOT`, the cwd its payload `.cwd`.
+SCL="$SANDBOX/scl"; mkdir -p "$SCL/tests"
+printf '#!/bin/bash\nset -e\ntests/run.sh --only x.test.sh\n' > "$SCL/door.sh"
+printf '#!/bin/bash\nbash tests/run.sh --only a.test.sh b.test.sh 2>&1 | tee log\n' > "$SCL/door2.sh"
+printf '#!/bin/bash\nbash tests/x.test.sh\n' > "$SCL/bare.sh"
+printf '#!/bin/bash\ntests/run.sh --only a.test.sh\necho between\ntests/run.sh --only b.test.sh\n' > "$SCL/twolines.sh"
+printf '#!/bin/bash\njest\ntests/run.sh --only a.test.sh\n' > "$SCL/mixed.sh"
+printf '#!/bin/bash\ncd %s; bash tests/run.sh --only x.test.sh\n' "$SCL" > "$SCL/cdroot.sh"
+printf '#!/bin/bash\nT=%s\ncd "$T"\nbash tests/run.sh --only x.test.sh\n' "$SCL" > "$SCL/cdvar.sh"
+printf '#!/bin/bash\nbash "$T/tests/run.sh" --only x.test.sh\n' > "$SCL/varpath.sh"
+printf '#!/bin/bash\ntests/run.sh --only "$S"\n' > "$SCL/varname.sh"
+printf '#!/bin/bash\nbash door.sh\n' > "$SCL/outer.sh"
+printf '#!/bin/bash\ntests/run.sh\n' > "$SCL/full.sh"
+scl_rows() {  # <command> -> the claims under root $SCL as <kind>:<target>, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$SCL" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+scl_full() {  # <command> -> the claims under root $SCL, all three columns, `|`-joined
+  bash -c '. "$1" || exit 9; cmd_suite_claims "$2" "$3" "$3"' _ "$LIB" "$1" "$SCL" 2>&1 | paste -sd'|' -
+}
+scl_raw() {  # <command> -> the targets reading as the stamp reads it (split line included), `|`-joined
+  bash -c '. "$1" || exit 9; printf "%s" "$2" | _CMD_SCRIPT_ROOT="$3" _CMD_SCRIPT_CWD="$3" _cmd_class_awk targets' _ "$LIB" "$1" "$SCL" 2>&1 \
+    | awk -F'\t' '{ print $1 ":" $2 }' | paste -sd'|' -
+}
+expect_eq "§SCRIPT AC-4.3 a script line 'tests/run.sh --only x.test.sh' is an only claim on x.test.sh" "only:x.test.sh" \
+  "$(scl_rows 'bash door.sh')"
+expect_eq "§SCRIPT …the claim the same line gets typed inline" "$(scl_rows 'tests/run.sh --only x.test.sh')" \
+  "$(scl_rows 'bash door.sh')"
+expect_eq "§SCRIPT …its run column is the command as typed" "only	x.test.sh	bash door.sh" "$(scl_full 'bash door.sh')"
+expect_eq "§SCRIPT a door line naming two suites claims each, as inline (the evidence shape too)" "only:a.test.sh|only:b.test.sh" \
+  "$(scl_rows 'bash door2.sh')"
+expect_eq "§SCRIPT AC-4.3 a bare suite line 'bash tests/x.test.sh' is a file claim on x.test.sh" "file:x.test.sh" \
+  "$(scl_rows 'bash bare.sh')"
+expect_eq "§SCRIPT …the claim the same line gets typed inline" "$(scl_rows 'bash tests/x.test.sh')" "$(scl_rows 'bash bare.sh')"
+expect_eq "§SCRIPT every suite line is claimed, not only the first" "only:a.test.sh|only:b.test.sh" "$(scl_rows 'bash twolines.sh')"
+expect_eq "§SCRIPT a runner form stays a run claim beside a door line" "run:jest|only:a.test.sh" "$(scl_rows 'bash mixed.sh')"
+expect_eq "§SCRIPT a literal cd before the door line (research-walls item 6, form 1)" "only:x.test.sh" "$(scl_rows 'bash cdroot.sh')"
+expect_eq "§SCRIPT a cd to a variable before a literal door line (item 6, form 2): the line is literal, so claimed" "only:x.test.sh" \
+  "$(scl_rows 'bash cdvar.sh')"
+expect_eq "§SCRIPT a runner path built from a variable claims nothing: a script start (item 6, form 4)" "script:varpath.sh" \
+  "$(scl_rows 'bash varpath.sh')"
+expect_eq "§SCRIPT a door line naming a variable claims nothing: a script start (door.sh is the positive)" "script:varname.sh" \
+  "$(scl_rows 'bash varname.sh')"
+expect_eq "§SCRIPT a script calling a script with a door line is read through it (depth 2)" "only:x.test.sh" \
+  "$(scl_rows 'bash outer.sh')"
+expect_eq "§SCRIPT the full tree in a script stays the full-tree claim" "file:run.sh" "$(scl_rows 'bash full.sh')"
+expect_eq "§SCRIPT the stamp's reading of the script closes with split: the script's exit code names no suite" \
+  "only:x.test.sh|split:" "$(scl_raw 'bash door.sh')"
+expect_eq "§SCRIPT …while the same line inline closes with none (the extractor reads real lines)" \
+  "only:x.test.sh" "$(scl_raw 'tests/run.sh --only x.test.sh')"
 
 finish
