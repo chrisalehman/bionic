@@ -1100,8 +1100,19 @@ _detect_marketplace_is_github() {
 #   "OTHER checkout"                      any other real, different directory, or a
 #                                          registration naming a path that does not
 #                                          exist — an unrelated tree.
-detect_checkout_verdict() {  # <realpath to compare against> -> one of the four answers
+#
+# AND ONE ANSWER BEFORE ALL FIVE (wave-36 T1, spec D7, ADR-055): given the caller's
+# PROJECT root, a live session's load record naming a checkout commit answers
+#   "in place"                            this session runs the checkout it was started
+#                                          in (`--plugin-dir`); the registry still names
+#                                          the installed release, which is not what runs.
+# Without a project root, or with no such record, the five above, unchanged.
+detect_checkout_verdict() {  # <realpath to compare against> [<project root>] -> one answer
   local compare_root="${1:-}" mp_path st mp_real gc_mp gc_cmp
+  if [ -n "${2:-}" ] && detect_loaded_line "$2" >/dev/null; then
+    printf 'in place\n'
+    return 0
+  fi
   mp_path="$(detect_marketplace_source_path)"; st=$?
   if [ "$st" -ne 0 ] || [ -z "$mp_path" ]; then
     printf 'unregistered\n'
@@ -1130,6 +1141,89 @@ detect_checkout_verdict() {  # <realpath to compare against> -> one of the four 
   fi
   printf 'OTHER checkout\n'
   return 0
+}
+
+# ─── The loaded root ─────────────────────────────────────────────────────────
+#
+# WHAT A SESSION LOADED, READ BEFORE WHAT THE REGISTRY INSTALLED (wave-36 T1, spec D7,
+# ADR-055). hooks/session-start.sh writes `.bionic/tmp/loaded-<sid>.state` at every
+# start: `root=`, `commit=` when the root is a checkout of the plugin, `started=`, and a
+# sha256 per loaded file. The writer is the hook's; this is the one reader, and
+# `detect_checkout_verdict`, version.sh and doctor ask it.
+#
+# A LIVE SESSION'S RECORD, AND LIVE IS THE CLI'S OWN WORD: `<claude-home>/sessions/
+# <pid>.json` with the pid alive, through patrol.sh's `patrol_live_session_ids` (the one
+# live-set reader; sourced here only when a caller asks, so no other fact in this file
+# pays for it). A record outlives its session for close-out's sake, so a record alone
+# proves nothing about what runs now. Reading liveness from the claude-home also keeps a
+# suite that points BIONIC_CLAUDE_HOME at a fixture from seeing the session it was
+# launched from, whatever CLAUDE_CODE_SESSION_ID it inherited.
+#
+# WHOSE RECORD. The asking session's own (`CLAUDE_CODE_SESSION_ID`) and no other: a
+# neighbour running a checkout says nothing about this session. With no session id — a
+# terminal — the newest record of any live session. A link is never a record.
+_detect_live_ids() {
+  if ! declare -F patrol_live_session_ids >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(_detect_self_dir)" && pwd -P)/patrol.sh" 2>/dev/null || return 1
+  fi
+  patrol_live_session_ids 2>/dev/null
+}
+
+detect_loaded_record() {  # <project root> -> the record's path; rc 1 when no live session has one
+  local dir="${1:-}/.bionic/tmp" sid="${CLAUDE_CODE_SESSION_ID:-}" live f s m best="" bestm=-1
+  [ -n "${1:-}" ] && [ -d "$dir" ] || return 1
+  live="$(_detect_live_ids)" || return 1
+  [ -n "$live" ] || return 1
+  live="
+${live}
+"
+  if [ -n "$sid" ]; then
+    case "$live" in *"
+${sid}
+"*) ;; *) return 1 ;; esac
+    f="${dir}/loaded-${sid}.state"
+    [ -f "$f" ] && [ ! -L "$f" ] || return 1
+    printf '%s\n' "$f"
+    return 0
+  fi
+  for f in "$dir"/loaded-*.state; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    s="${f##*/loaded-}"; s="${s%.state}"
+    case "$live" in *"
+${s}
+"*) ;; *) continue ;; esac
+    m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
+    case "$m" in ''|*[!0-9]*) continue ;; esac
+    if [ "$m" -gt "$bestm" ]; then bestm="$m"; best="$f"; fi
+  done
+  [ -n "$best" ] || return 1
+  printf '%s\n' "$best"
+}
+
+detect_loaded_field() {  # <record> <key> -> the key's value, empty when absent
+  local line
+  [ -f "${1:-}" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "${2:-}="*) printf '%s\n' "${line#*=}"; return 0 ;; esac
+  done < "$1"
+  return 0
+}
+
+# THE ONE LINE version.sh and doctor print for a session that runs in place:
+#   bionic <version> (in place) · <commit, 8> · <root>
+# The version is the recorded root's own plugin.json, read by `detect_plugin_integrity`
+# pointed at that root. rc 1, and nothing printed, unless a live session's record names a
+# commit — a cache root has none, and is the installed release the registry describes.
+detect_loaded_line() {  # <project root>
+  local rec root commit v
+  rec="$(detect_loaded_record "${1:-}")" || return 1
+  commit="$(detect_loaded_field "$rec" commit)"
+  [ -n "$commit" ] || return 1
+  root="$(detect_loaded_field "$rec" root)"
+  v="$(BIONIC_PLUGIN_ROOT="$root" detect_plugin_integrity)"
+  v="${v#plugin: version=}"; v="${v%% *}"
+  printf 'bionic %s (in place) · %.8s · %s\n' "${v:-unknown}" "$commit" "$root"
 }
 
 detect_plugin_registered() {

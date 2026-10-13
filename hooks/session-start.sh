@@ -33,7 +33,10 @@
 # can make is calling `session-poker.sh sweep`, silently, once, near the end of
 # every run — see "the silent auto-sweep" below for the whole story, including the
 # age gate and why REQ-R2 is a deliberate reversal of session-poker.sh's own D-5.
-# Every OTHER byte in this file is still pure detection: the report above is built
+# The second write (wave-36 T1, D7) is this session's own load record,
+# `.bionic/tmp/loaded-<sid>.state`, written only when the CLI handed the hook a
+# CLAUDE_PLUGIN_ROOT — see "the load record" below. Every OTHER byte in this file is
+# still pure detection: the report above is built
 # from reads alone, and the re-arm line it prints is an instruction for the model
 # reading it, whose ORDER is the whole point — CronList BEFORE CronCreate, because
 # a predecessor job that is still firing has to be deleted rather than raced
@@ -222,6 +225,66 @@ SOURCE="$(pfield .source)"
 # the main checkout and reports the main checkout's state, not a second copy of it.
 [ -d "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic" ] || exit 0
 TMP="$BIONIC_ROOT/.bionic/tmp"
+
+# ---------------------------------------------------------------- the load record
+#
+# WHAT THIS SESSION LOADED (wave-36 T1, spec D7, ADR-055). A session started with
+# `--plugin-dir <checkout>/payload` runs the checkout, and this hook is the one bionic
+# code that runs at load, so it writes down what was loaded, keyed by the session id:
+#
+#   .bionic/tmp/loaded-<sid>.state
+#     root=<CLAUDE_PLUGIN_ROOT, physical>
+#     commit=<HEAD>                      only when the root is a checkout of the plugin
+#     started=<ISO-8601 UTC>
+#     <sha256> <path under root>         one line per hooks/hooks.json, skills/**/*.md,
+#                                        agents/**/*.md, commands/*.md
+#
+# Those four sets are what the CLI snapshots at start; hook SCRIPTS are read per call,
+# so they are not in it. `detect.sh` reads the record before the registry, so version
+# and doctor name the root that runs, and the restart reader compares content against
+# these lines rather than file times.
+#
+# EVERY START WRITES IT: startup, clear (a new id), resume and compact (the same id,
+# rewritten with what is on disk now). No CLAUDE_PLUGIN_ROOT means the CLI did not
+# launch this hook and there is no load to record. The record outlives its session on
+# purpose: close-out reads the records of a run's sessions after they end, so it is not
+# a sweep class. Written to a sibling and moved into place, so a link planted at the
+# path is replaced, never written through, and a reader never sees half a record.
+# Fails open like everything here: any step that cannot be done writes nothing.
+ss_load_record() {
+  local root top commit="" rec tmpf f
+  local -a files
+  [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "${BIONIC_SID:-}" ] || return 0
+  root="$(cd "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || return 0
+  [ -n "$root" ] && [ -d "$TMP" ] || return 0
+  # A checkout of the plugin is a work tree whose top is the root or the root's parent
+  # (`--plugin-dir <checkout>/payload`). A root merely inside some other repository —
+  # a claude-home kept in git — is no checkout and lends the record no commit.
+  top="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" 2>/dev/null && pwd -P)" || top=""
+  if [ -n "$top" ] && { [ "$top" = "$root" ] || [ "$top/payload" = "$root" ]; }; then
+    commit="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || commit=""
+  fi
+  while IFS= read -r f; do [ -n "$f" ] && files[${#files[@]}]="$f"; done <<SS_LOADED_FILES
+$(cd "$root" 2>/dev/null && {
+    [ -f hooks/hooks.json ] && printf '%s\n' hooks/hooks.json
+    for d in skills agents; do [ -d "$d" ] && find -L "$d" -type f -name '*.md' 2>/dev/null; done
+    [ -d commands ] && find -L commands -maxdepth 1 -type f -name '*.md' 2>/dev/null
+  } | LC_ALL=C sort)
+SS_LOADED_FILES
+  rec="$TMP/loaded-$BIONIC_SID.state"
+  tmpf="$TMP/.loaded-$BIONIC_SID.$$"
+  {
+    printf 'root=%s\n' "$root"
+    [ -n "$commit" ] && printf 'commit=%s\n' "$commit"
+    printf 'started=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ "${#files[@]}" -gt 0 ]; then
+      ( cd "$root" && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -- "${files[@]}"; else sha256sum -- "${files[@]}"; fi ) 2>/dev/null \
+        | while read -r h p; do printf '%s %s\n' "$h" "$p"; done
+    fi
+  } > "$tmpf" 2>/dev/null && mv -f "$tmpf" "$rec" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  return 0
+}
+ss_load_record
 
 # ---------------------------------------------------------------- the three channels
 #

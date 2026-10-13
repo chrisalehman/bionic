@@ -22,7 +22,9 @@
 # inversion tests/patrol-revive.test.sh was written to prevent one file over. The
 # `snap` helper fingerprints the whole `.bionic` subtree (paths and mtimes) before
 # and after every drive, so a write of any kind — including a poker subprocess
-# that stamped on the way past — fails the group that caused it.
+# that stamped on the way past — fails the group that caused it. The one write a
+# start makes for itself, the load record (§21, wave-36 T1), needs a CLAUDE_PLUGIN_ROOT,
+# and `drive` hands the hook an empty one unless a row names a root.
 #
 # ACCELERATED CLOCK, NEVER A WAIT. Staleness is manufactured by backdating the
 # stamp's mtime against a tiny `poker-interval:` in the fixture's own config —
@@ -219,6 +221,8 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
   OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
+  # DRIVE_PLUGIN_ROOT=<dir>: the CLAUDE_PLUGIN_ROOT the CLI hands the hook (§21, wave-36 T1). Empty by
+  # default, and set empty rather than inherited, so no section reads the root of whatever ran the suite.
   # DRIVE_LIVE=<sid>: one more LIVE session in the fixture home (T15), at this suite's own pid,
   # which is alive for the whole run — the CLI's pid-file shape the wrapper writes for the hook.
   if [ -n "${DRIVE_LIVE:-}" ]; then
@@ -229,7 +233,7 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
     cd "$proj" || exit 1
     printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"%s"}' \
       "$psid" "$home/t.jsonl" "$proj" "$src" \
-    | CLAUDE_CODE_SESSION_ID="$esid" BIONIC_CLAUDE_HOME="$home" \
+    | CLAUDE_CODE_SESSION_ID="$esid" BIONIC_CLAUDE_HOME="$home" CLAUDE_PLUGIN_ROOT="${DRIVE_PLUGIN_ROOT:-}" \
       bash "$WRAP" "$home" "$fsid" "$HOOK" > "$WORK/last.out" 2>"$WORK/last.err"
   )
   printf '%s' "$?" > "$WORK/last.rc"
@@ -1360,5 +1364,95 @@ drive "$P20d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
 has   "20.9 no .bionic anywhere above the cwd: the line is there" "$STANDING_MARK" "$(raw)"
 eq    "20.10 …and the hook still created nothing" "" "$(ls -A "$P20d")"
 eq    "20.11 …and drive's returned report is empty (the line is not part of it)" "" "$(drive "$P20d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")"
+
+section "21 — the load record: what this session loaded, keyed by its id (wave-36 T1, D7; AC-1.1)"
+# THE RECORD (spec D7, ADR-055). A session started with `--plugin-dir <checkout>/payload` runs the
+# checkout; the start hook is the one bionic code that runs at load, so it writes what was loaded:
+# `.bionic/tmp/loaded-<sid>.state` holding `root=` (CLAUDE_PLUGIN_ROOT), `commit=` when that root is a
+# checkout, `started=`, and one `<sha256> <path>` line per file of hooks/hooks.json, skills/**/*.md,
+# agents/**/*.md and commands/*.md. The fixture is shaped like this repository: payload/hooks and
+# payload/agents are links to the repo's own directories, so a reader that does not follow links
+# misses them. The expected set is spelled here file by file, never by the hook's own glob.
+L_REPO=$(mktemp -d "$WORK/plugin.XXXXXX")
+mkdir -p "$L_REPO/hooks" "$L_REPO/agents/sub" "$L_REPO/payload/.claude-plugin" \
+  "$L_REPO/payload/skills/x/steps" "$L_REPO/payload/commands/sub"
+printf '{"name":"bionic","version":"9.9.9"}\n' > "$L_REPO/payload/.claude-plugin/plugin.json"
+printf '{"hooks":{}}\n'   > "$L_REPO/hooks/hooks.json"
+printf 'echo\n'           > "$L_REPO/hooks/other.sh"
+printf 'agent a\n'        > "$L_REPO/agents/a.md"
+printf 'agent deep\n'     > "$L_REPO/agents/sub/b.md"
+printf 'skill\n'          > "$L_REPO/payload/skills/x/SKILL.md"
+printf 'step one\n'       > "$L_REPO/payload/skills/x/steps/1.md"
+printf 'echo\n'           > "$L_REPO/payload/skills/x/run.sh"
+printf 'command\n'        > "$L_REPO/payload/commands/c.md"
+printf 'nested command\n' > "$L_REPO/payload/commands/sub/deep.md"
+ln -s ../hooks  "$L_REPO/payload/hooks"
+ln -s ../agents "$L_REPO/payload/agents"
+git -C "$L_REPO" init -q && git -C "$L_REPO" add -A \
+  && git -C "$L_REPO" -c user.email=t@t -c user.name=t commit -qm fixture
+L_HEAD=$(git -C "$L_REPO" rev-parse HEAD)
+L_ROOT=$(cd "$L_REPO/payload" && pwd -P)
+l_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'; }
+L_WANT=$(for f in agents/a.md agents/sub/b.md commands/c.md hooks/hooks.json skills/x/SKILL.md skills/x/steps/1.md; do
+  printf '%s %s\n' "$(l_sha "$L_ROOT/$f")" "$f"; done)
+l_hashes() { grep -E '^[0-9a-f]{64} ' "$1" 2>/dev/null | LC_ALL=C sort -k2; }
+
+P21=$(make_env 3600s)
+L_REC="$P21/.bionic/tmp/loaded-$CUR_SID.state"
+OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq   "21.1 exit 0" "0" "$(rc)"
+eq   "21.2 the record is a regular file under the session's id" "file" "$([ -f "$L_REC" ] && [ ! -L "$L_REC" ] && echo file)"
+eq   "21.3 root= is CLAUDE_PLUGIN_ROOT" "root=$L_ROOT" "$(grep '^root=' "$L_REC" 2>/dev/null)"
+eq   "21.4 commit= is the checkout's HEAD" "commit=$L_HEAD" "$(grep '^commit=' "$L_REC" 2>/dev/null)"
+eq   "21.5 started= is an ISO-8601 UTC instant" "1" "$(grep -cE '^started=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$L_REC" 2>/dev/null)"
+eq   "21.6 one sha256 line per loaded file: hooks.json, skills/**, agents/** through the links, commands/*" \
+  "$L_WANT" "$(l_hashes "$L_REC")"
+hasnt "21.7 …a script beside a skill is not a loaded file" "skills/x/run.sh" "$(cat "$L_REC" 2>/dev/null)"
+hasnt "21.8 …nor a command one directory down (commands/*.md only)" "commands/sub/deep.md" "$(cat "$L_REC" 2>/dev/null)"
+hasnt "21.9 …nor a hook script (hooks.json names them; they are read per call)" "hooks/other.sh" "$(cat "$L_REC" 2>/dev/null)"
+eq   "21.10 the record adds nothing to what the hook prints" "" "$OUT"
+
+# Each start writes its own: a /clear re-keys the session, and a resume or a compaction of the same
+# id rewrites the one record with what is on disk now.
+OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21" clear "$OLD_SID" "$OLD_SID" "$OLD_SID")
+eq   "21.11 a /clear's new id gets its own record" "root=$L_ROOT" "$(grep '^root=' "$P21/.bionic/tmp/loaded-$OLD_SID.state" 2>/dev/null)"
+eq   "21.12 …and the first id's record stays" "root=$L_ROOT" "$(grep '^root=' "$L_REC" 2>/dev/null)"
+printf 'command, edited\n' > "$L_REPO/payload/commands/c.md"
+for L_SRC in resume compact; do
+  DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21" "$L_SRC" "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+  eq "21.13 $L_SRC rewrites the record with the file as it is now" \
+    "$(l_sha "$L_ROOT/commands/c.md") commands/c.md" "$(grep ' commands/c.md$' "$L_REC" 2>/dev/null)"
+done
+
+# A root that is no checkout (the plugin cache) has no commit, and says so by the key's absence.
+L_CACHE=$(mktemp -d "$WORK/cache.XXXXXX")
+mkdir -p "$L_CACHE/skills/y" && printf 'skill\n' > "$L_CACHE/skills/y/SKILL.md"
+L_CACHE=$(cd "$L_CACHE" && pwd -P)
+P21b=$(make_env 3600s)
+DRIVE_PLUGIN_ROOT="$L_CACHE" drive "$P21b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.14 a cache root: root= names it" "root=$L_CACHE" "$(grep '^root=' "$P21b/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+eq   "21.15 …and carries no commit=" "0" "$(grep -c '^commit=' "$P21b/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+# A directory inside some other repository is not a checkout of the plugin: ~/.claude kept in git
+# must not lend the cache its commit.
+L_OUTER=$(mktemp -d "$WORK/outer.XXXXXX")
+mkdir -p "$L_OUTER/plugins/cache/v/skills/z" && printf 'skill\n' > "$L_OUTER/plugins/cache/v/skills/z/SKILL.md"
+git -C "$L_OUTER" init -q && git -C "$L_OUTER" add -A && git -C "$L_OUTER" -c user.email=t@t -c user.name=t commit -qm outer
+P21c=$(make_env 3600s)
+DRIVE_PLUGIN_ROOT="$(cd "$L_OUTER/plugins/cache/v" && pwd -P)" drive "$P21c" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.16 a root inside another repository: the record is written" "1" "$(grep -c '^root=' "$P21c/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+eq   "21.17 …and carries no commit=" "0" "$(grep -c '^commit=' "$P21c/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+
+# No CLAUDE_PLUGIN_ROOT: the CLI did not launch this hook, there is no load to record (positive: 21.2).
+P21d=$(make_env 3600s)
+S21D_BEFORE=$(snap "$P21d")
+drive "$P21d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.18 no CLAUDE_PLUGIN_ROOT: no record, nothing written" "$S21D_BEFORE" "$(snap "$P21d")"
+# A link planted at the record's path is replaced, never written through.
+P21e=$(make_env 3600s)
+printf 'victim\n' > "$WORK/victim"
+ln -s "$WORK/victim" "$P21e/.bionic/tmp/loaded-$CUR_SID.state"
+DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21e" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.19 a link at the record path: its target is untouched" "victim" "$(cat "$WORK/victim")"
+eq   "21.20 …and the record is a regular file in its place" "root=$L_ROOT" "$([ -L "$P21e/.bionic/tmp/loaded-$CUR_SID.state" ] || grep '^root=' "$P21e/.bionic/tmp/loaded-$CUR_SID.state")"
 
 finish
