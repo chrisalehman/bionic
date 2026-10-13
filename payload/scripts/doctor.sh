@@ -2361,7 +2361,21 @@ fi
 # know without being told is WHICH payload just answered them, and on a machine
 # carrying a plugin install, a checkout and a marketplace copy of the same thing,
 # that is the fact every other line below is relative to.
-echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
+#
+# AND WHAT RUNS COMES BEFORE WHAT IS INSTALLED (wave-36 T1, D7, ADR-055). A session started
+# in a checkout through bionic's rc line runs that checkout while the registry names the
+# release; detect.sh's verdict reads a live session's load record first, and when it says
+# `in place` the header is the very line `/bionic:version` prints.
+if [ "$(detect_checkout_verdict "$DOCTOR_REPO_ROOT" "$DOCTOR_ROOT")" = "in place" ]; then
+  DOCTOR_IN_PLACE="$(detect_loaded_line "$DOCTOR_ROOT")"
+else
+  DOCTOR_IN_PLACE=""
+fi
+if [ -n "$DOCTOR_IN_PLACE" ]; then
+  echo "Bionic Doctor — ${DOCTOR_IN_PLACE}"
+else
+  echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
+fi
 
 # WHICH CHECKOUT THE CLI ACTUALLY LOADS THE PLUGIN FROM (W4 4/4) — the other half
 # of the header's provenance claim, on a machine that can carry more than one
@@ -2391,7 +2405,12 @@ echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
 # not) and never re-derives the worktree fact itself.
 if [ "$MP_SOURCE_STATE" -eq 0 ] && [ -n "$MP_SOURCE_PATH" ]; then
   _doctor_checkout_verdict="$(detect_checkout_verdict "$DOCTOR_REPO_ROOT")"
-  if [ "$_doctor_checkout_verdict" = "this checkout" ]; then
+  # IN PLACE, THE REGISTRATION IS STILL A FACT, BUT NOT THE ONE THAT RUNS: the header above
+  # names the checkout, and this row names the install without claiming the CLI loads it.
+  if [ -n "$DOCTOR_IN_PLACE" ]; then
+    printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" \
+      " [${_doctor_checkout_verdict}, installed — not what this session runs]")")"
+  elif [ "$_doctor_checkout_verdict" = "this checkout" ]; then
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [this checkout]")")"
   elif [ "$_doctor_checkout_verdict" = "github feed" ]; then
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [github feed]")")"
