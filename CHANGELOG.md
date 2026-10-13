@@ -8,6 +8,173 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.18.0 — 2026-10-12
+
+A wave now owes one whole run of the tests, after its review, and the machine counts what changed since that
+run instead of asking for a second one. The background pass built in 1.17.0 is removed, because it sat on the
+critical path at a fixed width of 2 and took 28% of the wall. Nothing passes or fails by the clock any more:
+the solo, quiet and VOID machinery is gone and the timed cases that had no deterministic form are deleted.
+Sixteen rows landed: the twelve walls and plan-machinery faults of the 1.17.0 run's catalogue, the anchors
+every mutation test stands on, the hand-hold count, the step doctrine and the decision brief. This is a minor
+release by the policy above: the floor judge, the anchor index and the new verbs are new capability.
+`canonical_sdlc_version` stays 14. This run's own floor is Step 6's last act and is recorded in the wave's
+record, not here, because the release text is written before it.
+
+**Migration.** None is required. Eight behaviours changed that a script of yours may have leaned on.
+
+- The pass is gone. `ready` prints no `pass:` line and starts nothing. `spawn-worktree.sh pass`, the gate's
+  `pass` request kind (`gate_ask pass` exits 2), `booked.sh --no-follow` and the tick's `ev=pass` read are
+  deleted. A `background-pass:` line left in `.bionic/config.yaml` is read by nothing (`T1-pass-removed.md`).
+- Nothing waits for a quiet machine. The `# runner: solo` marker is not read, `tests/run.sh` prints no `Void:`
+  line and never re-runs a red suite, and `booked.sh --quiet` and `BIONIC_QUIET` exit 2 as usage
+  (`T2-no-solo-void.md`).
+- A red whole run is a floor candidate. The judge accepts it, lists each red suite as owed, and closes a suite
+  on one later green run of it by a landing. `session-poker.sh proof-add inherited <suite>` records a red that
+  is red at the base commit too (`T9-floor-judge.md`).
+- `current 7` runs the judge `current 8` runs, at the head the working branch's ref names, and refuses in its
+  words. `floor-run` in a project with no `floor:` runs `tests/run.sh` whole (`T10-step-verb.md`).
+- `approval:release` is read by the integrate row of a plan that carries a release row, and the Step-7 doc row
+  is ready at `approval:plan, head`. `approve release` records it there (`T5-row-reads.md`).
+- The commit wall's jurisdiction ends at the engaged repository. An outside commit preceded by `ln`, `mkdir`,
+  `cp`, `mv`, `rm`, `touch`, `printf` or `echo` is exempt. An outside commit the wall cannot place is refused
+  with the split named, and is never judged against the run's plan (`T4-wall-jurisdiction.md`).
+- A run the wall cannot place leaves no stamp. After a `cd`, `pushd` or `popd` it could not follow, the shim
+  prints `not counted` and proves nothing. A suite's key in every record is its file name (`T6-placed-stamp.md`).
+- Three verbs and a section are new: `session-poker.sh anchors check` and `anchors index`, `decline lift`, and
+  `landing-report --hand-holds`. A mutation test declares its anchor with the `anchor file`, `anchor fn` or
+  `anchor insert` shape, and `ready` refuses a landing whose anchor has moved (`T3-anchors.md`, `T8-plan-machinery.md`,
+  `T12-hand-holds.md`).
+
+### The catalogue of twelve
+
+Each row is a fault of the 1.17.0 run, the fix, and the record that proves it. The "also" rows are the three
+loose ends the charter listed beside the twelve.
+
+| item | what refused or misled | the fix | record |
+|---|---|---|---|
+| 1 | `approval:release` sat on the doc row, so the release text gated the reviews | the integrate row reads it, the doc row is ready at `approval:plan, head`, and the validator's refusal and `task-add`'s retry are deleted; units §RELEASE-READ was 7 red and is green | `T5-row-reads.md` |
+| 2 | the facts judge read the checkout's branch, so after the merge it read the floor as uncovered at an empty range | every head is read from the branch's ref by one function; a deleted branch is refused as naming no commit; close-out takes the same reader | `T7-one-branch-reader.md`, `T10-step-verb.md` |
+| 3 | a whole run by a test-runner needed `Suites: tests/run.sh`, and `floor-run` refused a project with no `floor:` | `floor-run` runs `tests/run.sh` whole and accepts its log red or green; the wall's full-tree refusal prints that line and the wall admits it as printed (dispatch-preflight-4 RM.3 to RM.5) | `T10-step-verb.md` |
+| 4 | the commit wall judged a scratch repository's commit against the session's bound plan | the jurisdiction ends at the engaged repository; bash-walls-egd §JURIS holds 92 assertions | `T4-wall-jurisdiction.md` |
+| 5 | `ready` labelled code drift `cause=environment`: a red writer-tree run was stamped clean at the main head, and a path-qualified suite did not meet the file-name key | a run the wall could not place leaves no stamp; one suite grammar and one key, the file name, in the cause and the floor judge; bash-walls §W10 and landing-line §CAUSE-TREE and §KEY | `T6-placed-stamp.md` |
+| 6 | one scratch mutant script was admitted and the next refused | a script's every suite line is claimed, to depth 2, and the refusal names the command that ran the suite; bash-walls §SCRIPT-CLAIM 15 rows, cmd-class §SCRIPT 17 | `T4-wall-jurisdiction.md` |
+| 7 | the tick's "unchanged" short-circuit skipped the backstop's re-check until `arm` | an unchanged tick prints every `NOT-LANDED` line above `unchanged since`; session-poker-4 §HOLD-RIDES | `T5-row-reads.md` |
+| 8 | a reinstall did not refresh a running session's loaded skills, and nothing said so | `doctor` compares each live session's start with the newest hook, skill and agent file and names it, and every tick prints its own session's line; doctor-restart §FILES was 12 of 21 and is green | `T5-row-reads.md` |
+| 9 | a read of a record path no row's Files names was silently met, and a hand-hold needed `decline --on` | the validator refuses such a read, naming the token and the writer row (units §RECORD-READ); `decline lift` ends a decline; hand-holds are counted from the verbs' lines | `T8-plan-machinery.md`, `T12-hand-holds.md` |
+| 10 | `brief` derived `Suites: none` for a row whose Files name no test, and left a reader's artifact to be invented | `brief` reads the anchor index at the working head, else leaves the orchestrator's slot; a verify, test or review row gets `<record>/<row>.md` (session-poker-3 §BRIEF-SUITES) | `T8-plan-machinery.md` |
+| 11 | `matrix-render` wrote the Approach as provenance, `current N` read like a malformed plan, the Step-2 card rendered an empty table in silence, a decline outlived its lifting | provenance and criterion text come from the requirements file; the refusal ends on one `poker: missing:` line; the card exits 64 on an untagged bullet or an ADR line with no `(D<n>)` group; `decline lift` | `T8-plan-machinery.md` |
+| 12 | mutation anchors on source and comment text drifted silently, and three rows broke anchors in suites they never ran | one anchor helper, a checker (`MOVED`, `NONLITERAL`) and a checker that `ready` runs and an index the floor judge and `brief` read; the index named 2 files and now names 42 after the legacy calls were converted | `T3-anchors.md`, `T23-legacy-anchors.md` |
+| also-1 | two readers of the working branch | one reader, `plan_working_branch`, behind every surface; the `bound-row-read` and `row-writer-lookup` debt lines burned there | `T7-one-branch-reader.md` |
+| also-2 | the re-mark's liveness check and plan-cell read | a dispatch that would re-mark a tree whose row still has a live writer is refused, naming the row, the writer and the tree (dispatch-preflight-4 RMK.9 to RMK.11) | `T7-one-branch-reader.md` |
+| also-3 | two writers on one row report, unreproduced | pending T17: the verdict of its reproduction is not on disk as this entry is written | `T17.progress.md` |
+
+The four fixes of the 1.16.0 field report's items 7 to 10 are rows 11 and 9 above: `matrix-render` (item 7),
+the `current N` refusal (item 8), the Step-2 card (item 9) and `decline lift` (item 10), all in
+`T8-plan-machinery.md`.
+
+### The floor
+
+The floor is one whole run plus the greens of what changed since it (ADR-054, `adr-054-the-floor-is-one-whole-run-plus-the-greens-of-what-changed.md`).
+
+- One whole run at a commit F, green or red, is the candidate. Each suite red in it is owed.
+- A later green run of an owed suite by a landing closes it. No second whole run is asked for a red a fix row
+  covers.
+- A fix row covers its change when every code file it touched is declared by a suite it ran, read from the anchor
+  index. A file no ran suite declares owes a second whole run, or the user's `approve regression-2`. Each
+  second whole run and each `regression-2` is counted in the hand-hold section.
+- A commit that touches only non-code paths inherits the standing of its parent.
+- A suite red at the head and at the base commit is inherited debt, recorded by `proof-add inherited`. A suite
+  green at the base is a regression, and the verb refuses it as such.
+- The floor is Step 6's last act. `current 7` demands it and refuses with the owed suite or the unproved commit
+  named, and the release text no longer waits on it. Records: `T9-floor-judge.md`, `T10-step-verb.md`,
+  `T13-doctrine.md`.
+
+### The background pass is removed, and why
+
+ADR-053, background work takes only spare capacity, is Superseded by ADR-054; ADR-054 is Accepted. The pass
+was built to find reds earlier, and on its first run it found the floor no sooner. `T16-pass-measure.md` of
+the 1.17.0 run measured it: both passes ran at width 2, fixed at their ask and never widened, each for about
+62 minutes, against 33 to 34 minutes for a whole run at width 7. They began after the last code row, on the
+critical path, and with the red fix they were 28% of a wall of about 573 minutes. Deleted: the `pass` request
+kind, the per-branch lock, the detached start in `ready`, `spawn-worktree.sh pass`, the tick's read, the
+`background-pass` switch and their tests (gate §PASS, landing-line §PASS, session-poker-4 §PASS, evidence-gate
+§FLOOR). The ancestor pin the pass kept alive moved to evidence-gate-2 §ANCESTOR (`T1-pass-removed.md`). The
+pass is recoverable from the v1.17.0 tag if a project with a long suite ever asks.
+
+The 1.17.0 block is untouched. This entry corrects the 1.17.0 block's `background-pass` default line, "on unless
+the config says off", which no longer holds: nothing reads the key. Six of its Known limits end with the
+mechanism they described (the fixed width, the wait during a pass, memory under a pass, the pass told nothing,
+VOID under a quota and the runner's behaviour under a pass). The rest are carried as they stood and were not
+re-triaged here.
+
+### Nothing passes or fails by the clock
+
+The solo marker, the settle wait, VOID, the retry of a red suite and `--quiet` are deleted from the runner, the
+booked shim, the gate's wrap and the resource reader (`T2-no-solo-void.md`; runner-width §NO-VOID and §NO-RETRY
+were 17 red of 55). The suites that used them assert counts where they asserted seconds: hook-timeout,
+bash-walls-egd and session-start (`T11-no-clock.md`). A census of 46 files lists 100 clock lines and 194 sleep
+lines and names 27 deferred cases, each with its trigger and deterministic form (`clock-census.md`); shell-lint
+§CLOCK holds every case file at or under its ledger.
+
+Deleted because they had no deterministic form: hook-timeout a1, a2, b, c and g, the self-checks that timed one
+`${v/…}`, `${v//…}` or awk operation against 2 s, and session-start 16.8 and 16.2, the advisory rows that
+printed seconds. A count cannot see a single slow operation, and a clock is not evidence.
+
+The converted rows found three walks in the shipped hooks that grew with their input in shell steps. All three
+are fixed:
+
+- `git-argv.sh` rebuilt an argument rest one word at a time. A 200 KB quote-dense command took 247 s, against
+  the hook's 10 s registration, so the wall failed open. It now takes 20 s.
+- The commit gate's later-`cd` scan walked every heredoc line. It now walks only the segments that can open a
+  `cd` or end the scan, and its count is flat in the input.
+- `session-start` forked once per predecessor roster, from a `$(printf '\t')` in a `while` condition.
+
+One cost remains and is carried below.
+
+### The decision brief and the doctrine
+
+The decision skill's Altitude section opens on the act: reframe at a conceptual level in plain language, name the
+one thing the options differ on as a contrast, cut detail before sentences, and only then write the four labels.
+decision-skill §CLIMB pins it against five doctored copies. Three fresh headless sessions on the door-pool
+scenario wrote briefs with no identifiers in the Goal or Options, and each Goal named live against stored; the
+first rewrite failed that half of the live check and the second commit is the fix it found (`T24-brief-climbs.md`,
+`T24-altitude-live.md`). The step doctrine now says Step 5 owes each row's evidence and Step 6 ends on the floor,
+and the order of operations is pinned by render §DOCTRINE and §ORDER (`T13-doctrine.md`). The two standing reds
+the first landings found, a refusal inventory missing two bullets and a close-out fixture line, are green
+(`T25-standing-reds.md`).
+
+### Known limits
+
+Carried to the next release. The count of Known limits in this block is 10.
+
+- Known limit: a suite whose worker dies by a signal makes `xargs` abandon the rest of the batch's launches.
+  It was true of every non-solo suite before this release; the solo drain had hidden it for the one fixture that
+  kills its worker, which now waits for its siblings (`T2-no-solo-void.md`).
+- Known limit: the doctor's restart read costs 0.42 s on every tick, and its fix line is cut at 80 columns
+  (`T5-row-reads.md`).
+- Known limit: a quote-dense command of 200 KB still costs the bash wall 20 s under bash 3.2, past the hook's
+  10 s registration, so it fails open. The cause is four reads of the whole command by one awk program, about
+  3.3 s each, flat in input size, so no count row can see it. The fix reads the segments once per hook and is a
+  design change for 1.19.0 (`T11-no-clock.md`). hook-timeout takes about 4.5 minutes.
+- Known limit: close-out.test.sh line 2181 holds the same literal three-backtick print that line 2183 did, and
+  is hidden from the refusal-inventory scan only because its pattern carries an unquoted `#`
+  (`T25-standing-reds.md`).
+- Known limit: the anchor index names only suites that declare a shaped anchor. Ten legacy calls remain: two in
+  cross-gate-agreement whose text is the live version pin, and eight in framework that test the old helper.
+  A fix row whose code file is in no index line owes a second whole run (`T23-legacy-anchors.md`).
+- Known limit: `proof-add`, `waive` and `deliver` still read the head of a checkout, not the branch's ref. After
+  the merge, with no checkout holding the branch, they refuse where the judge would answer (`T10-step-verb.md`).
+- Known limit: `floor-run` starts the run in the working checkout, so an agent running it asks the gate as main
+  unless that checkout carries a writer marker (`T10-step-verb.md`).
+- Known limit: the re-mark's live-writer check reads this session's roster only, so another session's live writer
+  on the same row is not seen (`T7-one-branch-reader.md`).
+- Known limit: three orchestrator hand-holds of this run, the observed park of a solo suite, the parked shim processes the orchestrator ended and the ruling that deleted the solo marker (A-orch-9, A-orch-10 and A-orch-11 of this wave), are not in the hand-hold count, because the
+  count is of lines the verbs wrote and no verb wrote them. They came from the installed 1.17.0 gate, which still
+  read the solo marker this release deletes (`T12-hand-holds.md`).
+- Known limit: a declared test runner for Jest and other suites in `Suites:` and `Lands-on:` (field report item 6)
+  is not built. 1.19.0, unless the other project is waiting; any suite derivation built here keys on a declared
+  suite, not a `.test.sh` suffix, so it widens without a rewrite.
+
 ## 1.17.0 — 2026-10-12
 
 A landing now starts the full test pass itself, in the room the machine has spare, and the gate learns whose
