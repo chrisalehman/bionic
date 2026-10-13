@@ -15,11 +15,11 @@ run instead of asking for a second one. The background pass built in 1.17.0 is r
 critical path at a fixed width of 2 and took 22% of the wall on its own, and 28% with the red fix it caused.
 The solo, quiet and VOID machinery is gone and the timed cases that had no deterministic form are deleted;
 27 cases the clock census names still gate on the clock and are deferred, each with the change that retires it.
-Nineteen rows landed: the twelve walls and plan-machinery faults of the 1.17.0 run's catalogue, the anchors
-every mutation test stands on, the hand-hold count, the step doctrine, the decision brief, and the two-writers
+Twenty-four rows landed: the twelve walls and plan-machinery faults of the 1.17.0 run's catalogue, the anchors
+every mutation test stands on, the hand-hold count, the step doctrine, the decision brief, the two-writers
 fault the run found in its own tick (a fill that offered a row another session held, and a launch sync that
-aborted on an empty ledger). This is a minor release by the policy above: the floor judge, the anchor index
-and the new verbs are new capability.
+aborted on an empty ledger), and the four fixes the review ordered. This is a minor release by the policy
+above: the floor judge, the anchor index and the new verbs are new capability.
 `canonical_sdlc_version` stays 14. This run's own floor is Step 6's last act and is recorded in the wave's
 record, not here, because the release text is written before it.
 
@@ -152,17 +152,21 @@ the first landings found, a refusal inventory missing two bullets and a close-ou
 
 ### Fixes the review ordered
 
-Findings of the whole-run reading were ruled fixed in this wave (D20, `critic-adversarial.md`). Each is ordered
-as a row, and none has a record on disk as this entry is written; the record of each replaces its marker when
-it lands.
+Findings of the whole-run reading were ruled fixed in this wave (D20, `critic-adversarial.md`). Each is a row, and
+each row's record is named beside it.
 
-- T31, `pending T31`: the Verify gate no longer demands the floor keys at Step 5, because the judge at `current 7`
-  does; the doctrine row and the preflight refusal say the floor is demanded at Step 7; and the commit wall's
+- T31 (`T31-verify-gate.md`): the Verify gate no longer demands the floor keys at Step 5, because the judge at
+  `current 7` does; from Step 7 the commit wall refuses a plan that claims a regression and carries no floor proof
+  line; the doctrine row and the preflight refusal say the floor is demanded at Step 7; and the commit wall's
   jurisdiction `.git` check compares case-insensitively.
-- T32, `pending T32`: `floor-run` refuses a dirty tree before it runs, so the first whole run is spent only on a
-  clean tree; `help` lists `decline lift`, and the verb listing names `decline lift` and `proof-add inherited`.
-- T33, `pending T33`: an existing `continuation.md` gains the inherited-debt lines and the hand-hold count, merged
-  and never overwritten.
+- T32 (`T32-floor-run-dirty.md`): `floor-run` refuses a dirty tree before it runs, naming the first five paths, so
+  the first whole run is spent only on a clean tree; `help` lists `decline lift`, and the verb listing names
+  `decline lift` and `proof-add inherited`.
+- T33 (`T33-continuation-merge.md`): an existing `continuation.md` gains the inherited-debt lines and the hand-hold
+  count, merged under their headings, never twice and never over the person's text.
+- T34 (`T34-born-honors-move.md`): `task-add --born` admits a finding the person moved to fix, whatever its
+  reader's rating, and refuses an unmoved finding outside the fix policy with the remedy, so the instruction the
+  disposition verb prints for a moved finding is true.
 
 ### Known limits
 
