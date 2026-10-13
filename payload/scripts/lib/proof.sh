@@ -1282,6 +1282,18 @@ proof_last_line() {
   _proof_last_read "$1" "$2" line "${3:-}"
 }
 
+# proof_floor_absent <plan> -> the judge's words for a plan with no floor proof, `no regression proof on this
+# plan yet`, exit 0, when the plan's unfenced `## SDLC State` holds no `proved: kind=floor` line (proof_last's
+# reading); nothing, exit 1, when it holds one, whatever its head or owed= (wave-35 T38; critic-structure-3,
+# debt `unpinned-pair floor-absent`). THE ONE READER OF "IS THERE A FLOOR LINE": the commit wall's Step-7 arm
+# (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state, the floor judge and facts_state
+# ask it, so the wall and the judge cannot answer one plan's text two ways. It reads text and runs no git.
+# Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
+proof_floor_absent() {
+  [ -n "$(proof_last "${1:-}" floor)" ] && return 1
+  printf '%s' 'no regression proof on this plan yet'
+}
+
 # _proof_last_read <plan> <kind> <head|line|owed> [<question>] -> the one reader behind the two above, and the
 # `owed=` field of that last line (wave-35 T9), nothing when it carries none.
 _proof_last_read() {
@@ -1442,7 +1454,7 @@ _proof_roots_load() {
 # no proof yet, no branch, a head git cannot read — answers it.
 proof_state() {
   local plan="$1" tree="$2" c wb st
-  [ -n "$(proof_last "$plan" floor)" ] || { printf 'uncovered\tno regression proof on this plan yet\n'; return 0; }
+  st="$(proof_floor_absent "$plan")" && { printf 'uncovered\t%s\n' "$st"; return 0; }
   _proof_run_load
   wb="$(plan_working_branch "$plan")"
   [ -n "$wb" ] || { printf 'uncovered\tthe plan names no working-branch\n'; return 0; }
@@ -1475,8 +1487,8 @@ proof_branch_head() {
 # `_proof_walk` walks F..<head> with the reds and the cover's waiver (`approved: regression-2`).
 _proof_floor_judge() {
   local plan="$1" tree="$2" c="$3" h owed inh files rec why rc waive=0
+  why="$(proof_floor_absent "$plan")" && { printf 'uncovered\t%s\n' "$why"; return 0; }
   h="$(proof_last "$plan" floor)"
-  [ -n "$h" ] || { printf 'uncovered\tno regression proof on this plan yet\n'; return 0; }
   h="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
   c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" \
@@ -1827,9 +1839,9 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")" ;; esac
         # THE FLOOR AT <head> (wave-35 T9; D8, AC-1.3; A-orch-45): the judge itself, at the head handed in, never
         # a checkout's: owed while a red of the whole run is open, uncovered F..<head> with the reason only for
         # a commit it cannot prove.
-        x="$(proof_last "$plan" floor)"
-        if [ -z "$x" ]; then st=absent
+        if proof_floor_absent "$plan" >/dev/null; then st=absent
         else
+          x="$(proof_last "$plan" floor)"
           st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
           case "$st" in
             covered|owed"	"?*) : ;;
