@@ -113,7 +113,7 @@ mkdir -p "$EGD_MUT/hooks"
 cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$EGD_MUT/scripts"
 cp "$HOOK" "$EGD_MUT/hooks/bash-walls.sh"
 EGD_NEEDLE='r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
-anchor "$EGD_MUT/scripts/lib/walls.sh" "$EGD_NEEDLE" 1
+anchor file payload/scripts/lib/walls.sh 'r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
 EGD_N="$EGD_NEEDLE" awk 'BEGIN { n = ENVIRON["EGD_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "r[PROOF_QUESTION] = PROOF_RESULT;" substr($0, i + length(n)); print }' \
   "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" > "$EGD_MUT/scripts/lib/walls.sh"
 expect_eq "EGD-mut0 the mutant library differs from the shipped one in one line" "1" \
@@ -238,7 +238,7 @@ HOOK="$EGD_PROBE"
 # ---------- the mutation arms ----------
 # (1) the step gate removed from the collector: the commit at current 4 is derived for
 EGD_GATE=' && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"'
-anchor "$EGD_HOOK_KEEP" "$EGD_GATE" 1
+anchor file hooks/bash-walls.sh ' && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"'
 EGD_MG="$SANDBOX/egd-mut-gate"; mkdir -p "$EGD_MG/hooks"; ln -s "$EGD_SCRIPTS" "$EGD_MG/scripts"
 EGD_N_="$EGD_GATE" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(n)); print }' \
   "$EGD_PROBE" > "$EGD_MG/hooks/bash-walls.sh"
@@ -278,7 +278,7 @@ expect_eq "EGD-mut3 the per-reading copy derives the same lines (the extractor r
 expect_eq "EGD-mut4 …but not in under $EGD_BOUND_MS ms (took $EGD_MDMS ms): EGD-8 goes red" "slow" "$(egd_within "$EGD_MDMS" "$EGD_BOUND_MS" | cut -c1-4)"
 # (3) nothing binds, yet the collector hands the lines over: the no-binding-line exit removed
 EGD_NB='if (!nbind && ENVIRON["PROOF_HAS_FIXED"] == "") exit'
-anchor "$EGD_SCRIPTS/lib/proof.sh" "$EGD_NB" 1
+anchor file payload/scripts/lib/proof.sh 'if (!nbind && ENVIRON["PROOF_HAS_FIXED"] == "") exit'
 EGD_MB="$SANDBOX/egd-mut-bind"; rm -rf "$EGD_MB"; cp -R "$EGD_SCRIPTS" "$EGD_MB"
 EGD_N_="$EGD_NB" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "if (0) exit" substr($0, i + length(n)); print }' \
   "$EGD_SCRIPTS/lib/proof.sh" > "$EGD_MB/lib/proof.sh"
@@ -289,7 +289,7 @@ eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
 expect_eq "EGD-mut6 the mutant hands the wall the readings' written results as derived lines: EGD-9 goes red" "seen|3" "$(egd_seen)"
 # (4) the plan guard removed from the wall: lines handed for another plan are read
 EGD_GUARD='[ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1'
-anchor "$EGD_SCRIPTS/lib/walls.sh" "$EGD_GUARD" 1
+anchor file payload/scripts/lib/walls.sh '[ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1'
 EGD_MW="$SANDBOX/egd-mut-guard"; rm -rf "$EGD_MW"; cp -R "$EGD_SCRIPTS" "$EGD_MW"
 EGD_N_="$EGD_GUARD" awk 'BEGIN { n = ENVIRON["EGD_N_"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "handed=1" substr($0, i + length(n)); print }' \
   "$EGD_SCRIPTS/lib/walls.sh" > "$EGD_MW/lib/walls.sh"
