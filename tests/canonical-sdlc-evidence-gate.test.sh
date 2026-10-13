@@ -4424,6 +4424,48 @@ hFL4=$(make_home)
 write_plan "$hFL4" "$(plan 7 "$v9_step7_body" "$matrix_complete" | awk '{ print } /^walk: exempt$/ { print "regression: no" }')" > /dev/null
 expect_eq "FL-4 precondition: the plan reads regression: no" "1" "$(/usr/bin/grep -c '^regression: no$' "$hFL4/.bionic/docs/plans/active.md")"
 expect_allow "FL-4 …a regression: no plan at current: 7 owes no floor line → admitted" "$hFL4" 'git commit -m "x"'
+# FL-5 THE WALL AND THE JUDGE READ ONE FLOOR LINE (wave-35 T38; critic-structure-3 debt `unpinned-pair floor-absent`;
+# A-T38-3, A-T38-4). Each plan text at current: 7 goes to the real wall (hooks/bash-walls.sh) and to the judge
+# (lib/proof.sh `proof_state`) as the same file. Each answers `absent` (the wall refuses in the judge's words for
+# absent; the judge prints those words) or `present` (the wall admits; the judge answers anything else, the line's
+# state being git's question, A-orch-50). The line and a line whose head is gone are the positives; the plan with
+# none and four shapes the reader does not count are the negatives, read through the same two extractors. Both call sites are anchored, so
+# a landing that drops either call names this suite.
+anchor file payload/scripts/lib/walls.sh 'why="$(proof_floor_absent "$PLAN")" || return 0'
+anchor file payload/scripts/lib/proof.sh 'why="$(proof_floor_absent "$plan")" && {'
+fl_wall() {  # <home> -> absent | present | other:<the refusal line>, the real wall's answer to a commit
+  run_hook "$1" 'git commit -m "x"'
+  if [ "$HOOK_EXIT" = 0 ]; then printf present
+  elif [ "$HOOK_EXIT" = 2 ] && printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep -qF "$FL_WHY"; then printf absent
+  else printf 'other:%s' "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep -m1 '^bionic: ')"; fi
+}
+fl_judge() {  # <plan> <home> -> absent | present, from proof_state's line; unread when it printed none
+  local st
+  st="$(bash -c '. "$1/payload/scripts/lib/proof.sh" && proof_state "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$1" "$2" 2>/dev/null | awk 'NR == 1')"
+  if [ -z "$st" ]; then printf unread
+  elif [ "$st" = "uncovered	$FL_WHY" ]; then printf absent
+  else printf present; fi
+}
+hFL5=$(make_home)
+fl5_row() {  # <name> <plan content> <expected: absent | present>
+  local p
+  p="$(write_plan "$hFL5" "$2")"
+  expect_eq "FL-5-$1 the wall and the judge answer one plan text alike: $3" "$3 $3" "$(fl_wall "$hFL5") $(fl_judge "$p" "$hFL5")"
+}
+FL5_PLAN="$(plan 7 "$v9_step7_body" "$matrix_complete")"
+fl5_row none "$FL5_PLAN" absent
+fl5_row line "$(fl_with "$FL5_PLAN" "$FL_FLOOR")" present
+fl5_row gone "$(fl_with "$FL5_PLAN" "proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-12T00:00:00Z evidence=record/floor.log")" present
+fl5_row fenced "$(fl_with "$FL5_PLAN" "$(printf '```\n%s\n```' "$FL_FLOOR")")" absent
+fl5_row bulleted "$(fl_with "$FL5_PLAN" "- $FL_FLOOR")" absent
+fl5_row headless "$(fl_with "$FL5_PLAN" "proved: kind=floor head=none at=2026-10-12T00:00:00Z evidence=record/floor.log")" absent
+fl5_row elsewhere "$(eg_readings "$FL5_PLAN")
+## Notes
+
+$FL_FLOOR" absent
+expect_eq "FL-5b the judge's answer for a plan with no floor line is its words for absent, the ones the wall refuses in" \
+  "uncovered	$FL_WHY" \
+  "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && proof_state "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_PLAN")" "$hFL5" 2>/dev/null)"
 
 # ============================================================
 # Two sections moved here from after Section 40 when the suite was sharded (wave-30 T3).
