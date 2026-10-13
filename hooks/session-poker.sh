@@ -9747,13 +9747,19 @@ BRF_EOF
     # working head: the regression, and each reading its rigor and scale deal. Each line that does not
     # hold is printed as the judge gave it.
     # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
-    # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2), and then dry-commits at Step 7 as every other step
-    # does: the judge holds the facts, the gate the plan's shape.
+    # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-12). The copy is dry-committed at Step 7 first, as
+    # every other step's is, so the gate refuses what a real commit at Step 7 would refuse in its own words (a
+    # declared red still owed, a missing line); then the judge holds the facts the run owes at the working head;
+    # then the swap, which does not commit the copy a second time. A plan already at 7 is the swap's to say.
     PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
     case "$PV_KEY" in
       7)
-        cur8_judge 7
-        PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state); dry-committed at that step first" ;;
+        if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
+          plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
+          cur8_judge 7
+          PV_DRYMODE=judged
+          PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
+        fi ;;
       8|8a|8b)
         cur8_judge 8
         PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
