@@ -289,23 +289,23 @@ section "§PIN — a doctored copy fails the pin; nothing runs per decision (AC-
 
 # Each doctored copy is proved to differ from the shipped file, and to carry the plant, before its
 # failure is read: a sed that matched nothing would leave a copy that fails for no reason at all.
-anchor -E "$SKILL" '^\*\*Recommendation:\*\*' 1
+anchor insert skills/decision/SKILL.md '**Recommendation:**'
 doctor "$SKILL" "$TMP/renamed.md" 's/^\*\*Recommendation:\*\*/**Rationale:**/'
 expect_true "12a: the renamed copy carries the plant" grep -q '^\*\*Rationale:\*\*' "$TMP/renamed.md"
 expect_false "12b: a copy renaming Recommendation to Rationale fails the labels pin" labels_ok "$TMP/renamed.md"
 
-anchor -E "$SKILL" '^\*\*Significance:\*\*' 1
+anchor insert skills/decision/SKILL.md '**Significance:**'
 doctor "$SKILL" "$TMP/rename2.md" 's/^\*\*Significance:\*\*/**Impact:**/'
 expect_true "13a: the second renamed copy carries the plant" grep -q '^\*\*Impact:\*\*' "$TMP/rename2.md"
 expect_false "13b: a copy renaming Significance fails the labels pin" labels_ok "$TMP/rename2.md"
 
-anchor "$SKILL" 'first principles' 1
+anchor file skills/decision/SKILL.md 'first principles'
 doctor "$SKILL" "$TMP/no-altitude.md" '/first principles/d'
 expect_false "14a: the clause-dropped copy lost the clause" grep -q 'first principles' "$TMP/no-altitude.md"
 expect_true "14b: …and still carries the others (the copy is not empty)" grep -qi 'plain language' "$TMP/no-altitude.md"
 expect_false "14c: a copy dropping one altitude clause fails the altitude pin" altitude_ok "$TMP/no-altitude.md"
 
-anchor "$SKILL" "$REPLY_LINE" 1
+anchor insert skills/decision/SKILL.md 'Reply 1, 2 or 3 · or matrix, diagram, page'
 awk -v r="$REPLY_LINE" '{ print } index($0, r) == 1 && length($0) == length(r) { print "Anything else?" }' \
   "$SKILL" > "$TMP/after-reply.md"
 expect_true "15a: the text-after copy carries the plant" grep -q '^Anything else?$' "$TMP/after-reply.md"
@@ -354,7 +354,7 @@ expect_false "27d: …and the doctored copy (case removed) fails the pin" reach_
 section "§NUMBER — every decision is numbered on a heading above the Goal (AC-12.1)"
 
 expect_true "28a: the layout opens on the heading, and the numbers run in the order asked" number_ok "$SKILL"
-anchor "$SKILL" "$HEADING" 1
+anchor file skills/decision/SKILL.md '**D<n> · Step <s>**'
 grep -vF "$HEADING" "$SKILL" > "$TMP/no-number.md"
 expect_false "28b: the number-dropped copy lost the heading" grep -qF "$HEADING" "$TMP/no-number.md"
 expect_true "28c: …and still carries the Goal (the copy is not empty)" grep -q '^\*\*Goal:\*\*' "$TMP/no-number.md"
@@ -363,7 +363,7 @@ expect_false "28d: a copy dropping the numbered heading fails the number pin" nu
 section "§GOAL — the Goal is one sentence, an optional short paragraph after it (AC-12.2)"
 
 expect_true "29a: the altitude says the Goal is one sentence, and the paragraph after it is optional" goal_ok "$SKILL"
-anchor "$SKILL" 'The Goal is one sentence' 1
+anchor file skills/decision/SKILL.md 'The Goal is one sentence'
 doctor "$SKILL" "$TMP/long-goal.md" 's/The Goal is one sentence/The Goal may run to several sentences/'
 expect_true "29b: the long-goal copy carries the plant" grep -q 'may run to several sentences' "$TMP/long-goal.md"
 expect_false "29c: a copy letting the Goal run to several sentences fails the goal pin" goal_ok "$TMP/long-goal.md"
@@ -374,11 +374,11 @@ for f in "$CORE" "$STEP2" "$CORE_TMPL" "$STEP2_TMPL"; do
   expect_true "30: ${f#"$REPO"/} lets small decisions share a turn, a momentous one alone, and never says one per turn" \
     batch_ok "$f"
 done
-anchor -E "$SKILL" 'momentous (one|decision) always goes alone' 1
+anchor file skills/decision/SKILL.md 'momentous decision always goes alone'
 doctor "$SKILL" "$TMP/no-alone.md" 's/[Mm]omentous (one|decision) always goes alone/momentous one may join them/'
 expect_true "31a: the momentous-dropped copy carries the plant" grep -q 'momentous one may join them' "$TMP/no-alone.md"
 expect_false "31b: a copy without momentous-alone fails the batch pin" batch_ok "$TMP/no-alone.md"
-anchor "$CORE" 'small decisions may share a turn' 1
+anchor file skills/canonical-sdlc/SKILL.md 'small decisions may share a turn'
 doctor "$CORE" "$TMP/core-old.md" 's/small decisions may share a turn/one decision per turn, small decisions may share a turn/'
 expect_true "32a: the core copy carries the old sentence" grep -q 'one decision per turn' "$TMP/core-old.md"
 expect_false "32b: a core that still says one per turn fails the batch pin" batch_ok "$TMP/core-old.md"
@@ -388,15 +388,24 @@ expect_true "33: each decision of a batch keeps its own number and reply line" \
 section "§ALTITUDE — concepts not mechanisms, and the four clauses that make it so (AC-13.1)"
 
 expect_true "34a: the five design-altitude clauses are present" altitude2_ok "$SKILL"
-i=0
-for c in "${ALT_CLAUSES[@]}"; do
-  i=$((i + 1))
-  anchor "$SKILL" "$c" 1
-  awk -v c="$c" '{ p = index($0, c); if (p) $0 = substr($0, 1, p - 1) "DROPPED" substr($0, p + length(c)); print }' \
-    "$SKILL" > "$TMP/alt-$i.md"
-  expect_true "34b.$i: the copy without clause $i carries the plant" grep -q 'DROPPED' "$TMP/alt-$i.md"
-  expect_false "34c.$i: a copy without clause $i fails the altitude pin" altitude2_ok "$TMP/alt-$i.md"
-done
+# One block per clause, each with its own shaped anchor (wave-35 T23; D16): an anchor in a loop
+# runs once per pass but is declared once, so the checker would read one call for five runs.
+alt_drop() {  # <i> <clause> — the copy without clause <i>, and the two rows that read it
+  awk -v c="$2" '{ p = index($0, c); if (p) $0 = substr($0, 1, p - 1) "DROPPED" substr($0, p + length(c)); print }' \
+    "$SKILL" > "$TMP/alt-$1.md"
+  expect_true "34b.$1: the copy without clause $1 carries the plant" grep -q 'DROPPED' "$TMP/alt-$1.md"
+  expect_false "34c.$1: a copy without clause $1 fails the altitude pin" altitude2_ok "$TMP/alt-$1.md"
+}
+anchor file skills/decision/SKILL.md 'concepts, not mechanisms: its Goal and Options carry no file, function, row, task or version identifiers'
+alt_drop 1 "${ALT_CLAUSES[0]}"
+anchor file skills/decision/SKILL.md 'short plain paragraph after the Goal explains the problem before any option'
+alt_drop 2 "${ALT_CLAUSES[1]}"
+anchor file skills/decision/SKILL.md 'option is named as an idea and says what it means for the user'
+alt_drop 3 "${ALT_CLAUSES[2]}"
+anchor file skills/decision/SKILL.md 'names the principle that decides it'
+alt_drop 4 "${ALT_CLAUSES[3]}"
+anchor file skills/decision/SKILL.md 'Significance names the rule the choice sets for later work'
+alt_drop 5 "${ALT_CLAUSES[4]}"
 
 section "§EXAMPLES — three worked pairs, three kinds, in the skill file (AC-13.2)"
 
@@ -406,17 +415,17 @@ expect_true "35b: three pairs, one of each kind: enforced, built, shared" pairs_
 expect_true "35c: each pair's mechanism half carries identifiers, its design-altitude half none" \
   altitude_halves_ok "$SKILL"
 
-anchor "$SKILL" '### What a wave builds' 1
+anchor file skills/decision/SKILL.md '### What a wave builds'
 awk '/^### What a wave builds$/ { skip = 1; next } skip && /^#/ { skip = 0 } !skip' "$SKILL" > "$TMP/two-pairs.md"
 expect_eq "36a: the two-pair copy carries two pairs" "2" "$(pairs "$TMP/two-pairs.md" | grep -c .)"
 expect_false "36b: a copy with two pairs fails the examples pin" pairs_ok "$TMP/two-pairs.md"
 
-anchor "$SKILL" '### How a shared resource is shared' 1
+anchor file skills/decision/SKILL.md '### How a shared resource is shared'
 doctor "$SKILL" "$TMP/same-kind.md" 's/^### How a shared resource is shared$/### How a rule is enforced/'
 expect_eq "37a: the same-kind copy carries the enforced kind twice" "2" "$(pairs "$TMP/same-kind.md" | grep -c 'enforced')"
 expect_false "37b: a copy with two pairs of one kind fails the examples pin" pairs_ok "$TMP/same-kind.md"
 
-anchor "$SKILL" '## Worked pairs' 1
+anchor file skills/decision/SKILL.md '## Worked pairs'
 awk '/^## Worked pairs$/ { print "## Worked pairs"; print ""; print "See examples.md beside this file."; skip = 1; next }
      skip && /^## / { skip = 0 } !skip' "$SKILL" > "$TMP/moved.md"
 expect_true "38a: the moved-out copy points elsewhere" grep -q 'See examples.md' "$TMP/moved.md"
@@ -461,7 +470,7 @@ expect_nonempty "40a: the Altitude span extractor reads the section" "$SPAN"
 expect_true "40b: the section opens on the reframe and keeps the act's order" climb_ok "$SKILL"
 
 # The climb-first sentence deleted: the section no longer opens on the reframe.
-anchor "$SKILL" 'conceptual level' 1
+anchor file skills/decision/SKILL.md 'conceptual level'
 grep -viF 'conceptual level' "$SKILL" > "$TMP/no-climb.md"
 expect_false "41a: the no-reframe copy lost the climb-first sentence" grep -qiF 'conceptual level' "$TMP/no-climb.md"
 expect_true "41b: …and still carries the one-difference rule (the copy is not empty)" \
@@ -469,7 +478,7 @@ expect_true "41b: …and still carries the one-difference rule (the copy is not 
 expect_false "41c: a copy without the climb-first sentence fails the climb pin" climb_ok "$TMP/no-climb.md"
 
 # The failure moved to open the section: it opens on what to avoid, not on the act.
-anchor "$SKILL" 'failure to avoid' 1
+anchor file skills/decision/SKILL.md 'failure to avoid'
 awk '/failure to avoid/ { next } { print } $0 == "## Altitude" { print ""; print "The failure to avoid is a brief written at the level of mechanisms." }' \
   "$SKILL" > "$TMP/failure-first.md"
 expect_true "42a: the failure-first copy opens its Altitude section on the failure" \
@@ -477,19 +486,19 @@ expect_true "42a: the failure-first copy opens its Altitude section on the failu
 expect_false "42b: a copy opening on the failure fails the climb pin" climb_ok "$TMP/failure-first.md"
 
 # The one-difference rule removed.
-anchor "$SKILL" 'one thing the options differ on' 1
+anchor file skills/decision/SKILL.md 'one thing the options differ on'
 doctor "$SKILL" "$TMP/no-difference.md" 's/one thing the options differ on/options/'
 expect_true "43a: the no-difference copy still opens on the reframe" grep -qiF 'conceptual level' "$TMP/no-difference.md"
 expect_false "43b: a copy without the one-difference rule fails the climb pin" climb_ok "$TMP/no-difference.md"
 
 # Concise pulled the wrong way: sentences cut before detail.
-anchor "$SKILL" 'detail before cutting sentences' 1
+anchor file skills/decision/SKILL.md 'detail before cutting sentences'
 doctor "$SKILL" "$TMP/sentences-first.md" 's/detail before cutting sentences/sentences before cutting detail/'
 expect_true "44a: the sentences-first copy carries the plant" grep -qF 'sentences before cutting detail' "$TMP/sentences-first.md"
 expect_false "44b: a copy cutting sentences before detail fails the climb pin" climb_ok "$TMP/sentences-first.md"
 
 # The difference named, but not as a contrast.
-anchor "$SKILL" ', as a contrast: whether this, or that' 1
+anchor file skills/decision/SKILL.md ', as a contrast: whether this, or that'
 doctor "$SKILL" "$TMP/no-contrast.md" 's/, as a contrast: whether this, or that//'
 expect_true "45a: the no-contrast copy still names the one difference" \
   grep -qiF 'one thing the options differ on' "$TMP/no-contrast.md"

@@ -4064,7 +4064,7 @@ expect_eq "SF-10 a value with & \\1 .* and a quote is written as typed" '  cmd: 
 # THE MUTATION ARM: a copy of the library whose replace mode writes the new line AFTER the old one (an append
 # where a replacement belongs) turns SF-1b, SF-1d and SF-4 red. The copy is made in the sandbox, never in the tree.
 SF_NEEDLE='if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
-anchor "$LIB" "$SF_NEEDLE" 1
+anchor file payload/scripts/lib/units.sh 'if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]'
 SF_MUT="$SANDBOX/units-mut-append.sh"
 SF_R='if (replace && (i in at_line)) { print L[i]; print "  " key[at_line[i]] ": " val[at_line[i]] }'
 SF_N="$SF_NEEDLE" SF_R="$SF_R" awk 'BEGIN { n = ENVIRON["SF_N"]; r = ENVIRON["SF_R"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$LIB" > "$SF_MUT"
@@ -4702,8 +4702,8 @@ expect_eq "BR-4 AC-5.3 the proof judge holds the floor against its checkout" "co
 expect_eq "BR-5 AC-5.3 the evidence gate holds the head against its tip" "(working-branch wave/35-fixture)" "$(br_gate "$REPO_ROOT")"
 
 # BR-6: the two hook surfaces call the reader at their site, once each.
-anchor "$REPO_ROOT/payload/scripts/lib/stop.sh" 'LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")' 1
-anchor "$REPO_ROOT/hooks/session-poker.sh" 'PV_WB="$(plan_working_branch "$PV_PLAN")"' 1
+anchor file payload/scripts/lib/stop.sh 'LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")'
+anchor file hooks/session-poker.sh 'PV_WB="$(plan_working_branch "$PV_PLAN")"'
 
 # BR-7: THE CENSUS. A line that reads the key itself: the key as a regex an awk, grep or sed matches, the key
 # compared as a frontmatter name, or the key handed to the frontmatter getter. Comments are not read.
