@@ -1,15 +1,7 @@
 #!/bin/bash
-# runner: solo
-# TIMING-BOUND (T20, A-orch-28): §16.2 below READS one hook drive's WALL-CLOCK
-# seconds against 400 aged predecessors. It is an advisory row since T24 (D13) and no
-# longer gates, but it is still a reading worth taking honestly, and so is 16.2b's
-# control drive beside it - a ratio cancels load only if both terms meet the same
-# machine. The marker below is therefore still earned. Sharing the CPU with
-# seven other suites in tests/run.sh's parallel batch is not — measured 1.270s
-# alone, 3.395s inside an eight-wide batch on a quiet machine, same tree
-# (record/wave-12-fixit-171/floor-057caa2-run2.txt). The marker above holds this
-# suite out of that batch; it runs alone, after the batch drains. See
-# record/wave-12-fixit-171/why-session-start-slow.md for the full mechanism.
+# NOTHING HERE PASSES OR FAILS BY THE CLOCK (wave-35 T11; REQ-2 AC-2.2, D11). §16's cost rows
+# count forks over 8 and 400 predecessors and §17.13 counts the bound's polls, where they once
+# read seconds and ratios of seconds; see THE COUNT in §16.
 #
 # Tests for hooks/session-start.sh — THE POST-`/clear` DETECTOR (bionic 1.4.0,
 # spec AC-1, AC-4's "the block runs the report", AC-11's symlink listing; plan
@@ -825,9 +817,7 @@ section "16 — 400 aged predecessor files: bounded, not a linear scan (AC-6.1, 
 # a `stat` for the stamp's age) with no upper bound on how many predecessor
 # files can accumulate under .bionic/tmp — measured ~10.4s at 400 dead sessions
 # against the CLI's 10s hook timeout. This section plants exactly that shape
-# and times ONE drive with `date +%s` (whole seconds, per the task's own
-# tolerance — sub-second timing needs python3, not a portability bet worth
-# taking here).
+# and counts what the drives over it do (THE COUNT, below).
 #
 # WHAT MUST STILL WORK (AC-6.2): a predecessor this run has no reason to treat
 # as settled — a FRESH roster/stamp pair under its own sid, never backdated —
@@ -861,38 +851,82 @@ write_stamp "$P16" "$FRESH_SID"
 roster_rows "$P16/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
 write_stamp "$P16" "$CUR_SID"
 
-# SUB-SECOND, via python3 — a whole-second `date +%s` difference is off by up
-# to a full second either way from where the two calls happen to straddle a
-# tick, which is exactly wide enough to misjudge a genuine ~1.something-second
-# run as "2". python3's wall clock is what every timing comment elsewhere in
-# this suite already reasons in when precision matters; this is the one
-# section short enough (~1-2s) for that boundary to matter.
-T16_PY() { python3 -c 'import time; print(time.time())' 2>/dev/null; }
+# THE COUNT, NEVER THE CLOCK (wave-35 T11; REQ-2 AC-2.2, D11). This section used to time its
+# drives and gate a ratio of two of them; it now counts what each drive does, with
+# tests/hook-timeout.test.sh's tracer: every bash a drive starts sources a prelude through
+# BASH_ENV that points xtrace at fd 87 (the hook uses 9 itself) with a marker in PS4, and the
+# markers are counted as bytes. What REQ-6 bounded is the FORKS — an `awk` and a `stat` per
+# predecessor file, then a `$( )` per predecessor — while the filtering loop that stays is pure
+# builtins and runs once per file by design. So a fork is what is counted: an external command
+# on the trace (the roster below), and a command run inside a subshell (`BASH_SUBSHELL` > 0,
+# which PS4 carries). Both must come out the same at 8 predecessors and at 400.
+# SS_TRACE_ROLE scopes the trace: `all` is every bash the drive starts; `sweep` is the sweep
+# (`session-poker.sh`, which the hook starts) and what it starts, and nothing of the hook.
+SS_PRELUDE="$WORK/ss-xtrace-prelude.sh"
+cat > "$SS_PRELUDE" <<'PRELUDE'
+# bash 3.2 sets `$0` to the shell, not the script, while BASH_ENV runs, so the sweep is known by
+# its command line (one `ps` before tracing starts, never counted).
+if [ "${SS_TRACING:-}" != 1 ]; then
+  case "${SS_TRACE_ROLE:-}" in
+    all) SS_TRACING=1; export SS_TRACING ;;
+    sweep) case "$(ps -o args= -p $$ 2>/dev/null)" in
+             *session-poker.sh\ sweep*) SS_TRACING=1; export SS_TRACING ;;
+           esac ;;
+  esac
+fi
+if [ "${SS_TRACING:-}" = 1 ]; then
+  exec 87>>"$SS_TRACE_OUT"
+  PS4='+|SSCOUNT|${BASH_SUBSHELL}|${BASH_SOURCE##*/}:${LINENO}| '
+  if [ "${BASH_VERSINFO[0]}" -ge 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; then
+    BASH_XTRACEFD=87
+  else
+    exec 2>&87
+    set -T
+    trap 'exec 2>&87' DEBUG
+  fi
+  set -x
+fi
+PRELUDE
+SS_TRACE="$WORK/ss-trace"
+SS_EXTERNAL="jq grep awk sed cut tr git date stat find sort uniq head tail wc python3 basename dirname readlink realpath rm mkdir cat ls ps mv cp touch mktemp sleep env perl xargs"
+ss_counts() {  # -> "<commands> <external> <in-subshell>" read off $SS_TRACE
+  local all ext sub cmd c
+  all="$(LC_ALL=C grep -o '|SSCOUNT|' "$SS_TRACE" 2>/dev/null | wc -l | tr -d ' ')"
+  sub="$(LC_ALL=C grep -oE '\|SSCOUNT\|[1-9][0-9]*\|' "$SS_TRACE" 2>/dev/null | wc -l | tr -d ' ')"
+  ext=0
+  for cmd in $SS_EXTERNAL; do
+    c="$(LC_ALL=C grep -oE "\|SSCOUNT\|[0-9]+\|[^| ]*\| ${cmd}( |\$)" "$SS_TRACE" 2>/dev/null | wc -l | tr -d ' ')"
+    ext=$((ext + ${c:-0}))
+  done
+  printf '%s %s %s' "$all" "$ext" "$sub"
+}
+ss_count_drive() {  # <role> <hook> <project> -> stdout of the drive; counts in $WORK/ss-counts
+  local keep="$HOOK"
+  : > "$SS_TRACE"
+  HOOK="$2"
+  BASH_ENV="$SS_PRELUDE" SS_TRACE_OUT="$SS_TRACE" SS_TRACE_ROLE="$1" \
+    drive "$3" clear "$CUR_SID" "$CUR_SID" "$CUR_SID"
+  HOOK="$keep"
+  ss_counts > "$WORK/ss-counts"
+}
 
-# TWO DRIVES, BECAUSE REQ-8 GAVE THIS HOOK A SECOND COST (epic-23 wave-16). Until the
-# whole-directory age gate was deleted, FRESH_SID's just-written files deferred the WHOLE
-# sweep, so a drive over this fixture never called the verb at all and one number covered
-# the hook. The verb now defers FRESH_SID alone and deletes the other four hundred, which is
-# the point of the change — and it is work the old shape never did here. Timing them
-# together would have retired AC-6.1's own number (the report loops, measured at ~10.4s
-# before REQ-6 bounded them) into a figure dominated by deletion.
-#
-# SO THE FIRST DRIVE ISOLATES THE REPORT. `BIONIC_SWEEP_BOUND_SECONDS=0` makes the bounded
-# wrapper kill its sweep on the first poll — the verb is called and bounded at once, the way
-# §17 drives the same machinery — so what is left on the clock is the two loops AC-6.1 is
-# about. Its cost is one killed fork, and a `sweep-failed` marker this section clears before
-# the second drive reads it.
-# A CONTROL DRIVE AT SMALL n, SO THE BIG ONE CAN BE READ (T22). Every wall-clock bound in
-# this section states a number of SECONDS, and seconds are a property of the machine as much
-# as of the code: this suite already runs solo (`# runner: solo`, T20/A-orch-28, honoured by
-# tests/run.sh), and the wave floor at 2c882be STILL measured §16.8 at 8.296s against the
-# 5.067s the identical tree gives on a quiet runner — because holding the runner's own batch
-# off the CPU does nothing about the six other agents a wave has working on the same machine.
-# So a second, load-CANCELLING reading is taken beside each absolute one. This control is the
-# same hook, the same drive, the same process, moments apart, over EIGHT aged predecessors
-# instead of four hundred — eight being the real field pile-up this section's own comment
-# below cites. Contention scales the control and the measurement together, so their RATIO is
-# the hook's own scaling in n and nothing else, which is what rows 16.2b and 16.8b assert.
+# THE REPORT, ALONE, FROM A COPY OF THE HOOK WITH NO POKER BESIDE IT. The hook sweeps only when
+# `session-poker.sh` sits next to it (`[ -f "$SS_POKER" ]`), so a copy in a `hooks/` directory
+# of its own, beside the real payload, runs every line of the report and starts no sweep at all
+# — and nothing deletes the predecessors these drives read. (This used to be a drive with the
+# sweep's bound set to 0, killed on its first poll: a race between the kill and the sweep's
+# first deletions, and a trace whose length was the race's.)
+SS_REPORT_ONLY="$WORK/report-only"
+mkdir -p "$SS_REPORT_ONLY/hooks"
+_ss_root="$(cd "$(dirname "$HOOK")/.." && pwd -P)"
+[ -d "$_ss_root/payload" ] && ln -s "$_ss_root/payload" "$SS_REPORT_ONLY/payload"
+[ -d "$_ss_root/scripts" ] && ln -s "$_ss_root/scripts" "$SS_REPORT_ONLY/scripts"
+cp "$HOOK" "$SS_REPORT_ONLY/hooks/session-start.sh"
+expect_false "16.0 the report-only copy has no poker beside it, so it starts no sweep" \
+  test -e "$SS_REPORT_ONLY/hooks/session-poker.sh"
+
+# A CONTROL AT SMALL n, the same drive over EIGHT aged predecessors instead of four hundred —
+# eight being the real field pile-up this section's own comment below cites.
 P16C=$(make_env 3600s)
 CTL_I=1
 while [ "$CTL_I" -le 8 ]; do
@@ -905,49 +939,26 @@ while [ "$CTL_I" -le 8 ]; do
 done
 roster_rows "$P16C/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
 write_stamp "$P16C" "$CUR_SID"
-T16C_START="$(T16_PY)"
-OUT16C=$(BIONIC_SWEEP_BOUND_SECONDS=0 drive "$P16C" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
-T16C_END="$(T16_PY)"
-T16C_ELAPSED="$(python3 -c "print(f'{${T16C_END:-0} - ${T16C_START:-0}:.3f}')" 2>/dev/null || echo 0)"
-# THE CONTROL IS ITSELF ASSERTED, so a ratio is never taken over a drive that did not happen:
-# a zero or unreadable control would make every ratio below divide by nothing and pass.
-expect_true "16.1c the control drive ran and timed (${T16C_ELAPSED}s over 8 predecessors)" \
-  python3 -c "import sys; sys.exit(0 if ${T16C_ELAPSED:-0} > 0 else 1)"
+
+OUT16C=$(ss_count_drive all "$SS_REPORT_ONLY/hooks/session-start.sh" "$P16C")
+read -r SS_C8 SS_X8 SS_S8 < "$WORK/ss-counts"
+eq    "16.1c the control drive exits 0" "0" "$(rc)"
 has   "16.1d …and it is the same report, listing the control predecessors" \
   "predecessor stamps:" "$OUT16C"
-
-T16_START="$(T16_PY)"
-OUT=$(BIONIC_SWEEP_BOUND_SECONDS=0 drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
-T16_END="$(T16_PY)"
-T16_ELAPSED="$(python3 -c "print(f'{${T16_END:-0} - ${T16_START:-0}:.3f}')" 2>/dev/null || echo 999)"
+OUT=$(ss_count_drive all "$SS_REPORT_ONLY/hooks/session-start.sh" "$P16")
+read -r SS_C400 SS_X400 SS_S400 < "$WORK/ss-counts"
+echo "      (16.2 counts — 8 predecessors: $SS_C8 commands, $SS_X8 external, $SS_S8 in subshells; 400: $SS_C400, $SS_X400, $SS_S400)"
 
 eq    "16.1 exit 0" "0" "$(rc)"
-# 16.2 IS AC-6.1'S OWN NUMBER AND IT IS NOT MOVED HERE. Two seconds is the criterion, not a
-# margin this suite chose, so T22 left it exactly where it is and wrote down what it holds
-# under instead: a runner on which this suite is the only bionic suite (the solo marker
-# above), measured 0.83-0.87s idle and 1.389s on the wave floor at 2c882be. It is an
-# ABSOLUTE bound on a shared machine, so it can still be outrun by contention rather than by
-# a regression — which is exactly what happened once at 5.336s (A-T1.11), and was root-caused
-# afterwards to the sweep's cost landing inside a report-loop bound and fixed by splitting
-# the drives (A-T8.8), not to load. 16.2b is the row that stays readable either way.
-# AND SO IT IS REPORTED, NOT GATED (T24, D13/Δ12). The number stays; what changes is the
-# row kind. Two seconds is a claim about a MACHINE - this one, at this hour, under whatever
-# else is on it - and a gate that welds that to the claim about the CODE cannot say which
-# kind a red is, so a human adjudicates every one. Three waves running, that human was right
-# every time, which is how a gate teaches its own author to override it. `advise` prints the
-# reading against AC-6.1's reference and moves nothing; 16.2b below is the gating row, and it
-# holds exactly the same criterion in units load cannot counterfeit.
-advise "16.2 the two report loops against 400 aged predecessors" \
-  "${T16_ELAPSED}s against AC-6.1's ruled 2 seconds — a wall-clock reading of THIS machine, not of the code; the algorithm's own cost is what 16.2b gates" \
-  python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-999} < 2 else 1)"
-# THE SAME CRITERION, MEASURED SO THAT LOAD CANCELS: fifty times the predecessors must not
-# cost more than eight times the report. Measured 3.31, 3.39 and 3.33 on three drives. The
-# regression AC-6.1 exists to stop — the report loops as they cost before REQ-6 bounded them,
-# ~10.4s over this fixture — lands near forty on this ratio, so the bound is generous to the
-# machine and still nowhere near the defect. A bound on the RATIO cannot be outrun by a busy
-# machine, because a busy machine slows the control in the same proportion (A-T22.6).
-expect_true "16.2b …and fifty times the predecessors costs under eight times the report, whatever the machine is doing (${T16_ELAPSED}s / ${T16C_ELAPSED}s)" \
-  python3 -c "import sys; sys.exit(0 if ${T16C_ELAPSED:-0} > 0 and ${T16_ELAPSED:-999} < 8 * ${T16C_ELAPSED:-0} else 1)"
+# 16.2 IS AC-6.1'S CRITERION, IN THE UNITS THAT CAUSED IT. The report loops cost ~10.4s at 400
+# dead sessions because each file forked an `awk` and a `stat`; T16 then took a `$( )` per file
+# out of both loops. A fork per predecessor is a count that grows from 8 to 400 on any machine.
+expect_true "16.2a the tracer counted both report drives forking (${SS_X8} external commands at 8)" \
+  test "${SS_X8:-0}" -gt 0 -a "${SS_C400:-0}" -gt "${SS_C8:-0}"
+eq    "16.2 the report runs as many external commands over 400 aged predecessors as over 8: no fork per file (AC-6.1)" \
+  "$SS_X8" "$SS_X400"
+eq    "16.2b …and as many commands inside subshells: no \$( ) per file either" \
+  "$SS_S8" "$SS_S400"
 has   "16.3 the fresh predecessor roster is still listed" "roster-$FRESH_SID.state" "$OUT"
 has   "16.4 the predecessor stamps section still appears" "predecessor stamps:" "$OUT"
 has   "16.5 …naming the fresh predecessor by its short id" "${FRESH_SID:0:8}" "$OUT"
@@ -956,108 +967,71 @@ hasnt "16.6 THIS session's own roster is never listed as a predecessor" \
 hasnt "16.7 THIS session's own stamp is never listed as a predecessor" \
   "  ${CUR_SID:0:8} " "$OUT"
 
-# AND THE SECOND DRIVE IS THE WHOLE HOOK, sweep included, against the wall that actually
-# binds it: hooks/hooks.json registers this hook with a 10-second CLI timeout, and the report
-# is printed AFTER the sweep returns, so a sweep that outran the timeout would cost the
-# reader the page. The bound below is deliberately the CLI's own number less a margin rather
-# than 16.2's two seconds: four hundred dead sessions is the pathological one-off this change
-# exists to stop accumulating, and the cost of clearing it once is not the cost of a session
-# start on a healthy machine (the field pile-up this was measured on, 2026-09-19, was eight).
-rm -f "$P16/.bionic/tmp/sweep-failed.state"
-T16B_START="$(T16_PY)"
-OUT16B=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
-T16B_END="$(T16_PY)"
-T16B_ELAPSED="$(python3 -c "print(f'{${T16B_END:-0} - ${T16B_START:-0}:.3f}')" 2>/dev/null || echo 999)"
-# THE BOUND IS THE CLI'S OWN NUMBER, READ FROM THE FILE THAT DECLARES IT (T22). This row
-# used to assert 8 seconds — T8's margin under a 10-second timeout, not a ruled criterion —
-# and the wave floor at 2c882be measured 8.296s and failed it, on a runner where this suite
-# ran ALONE (the solo marker holds off tests/run.sh's batch, and the floor honoured it). The
-# same tree gives 5.067s on a quiet machine, so what the failing row measured was the other
-# agents on the machine, not the hook. A typed margin cannot tell those apart, and raising it
-# until it passes would only move the next false failure further out. So the assertion is now
-# the contract the CLI actually enforces, parsed out of hooks/hooks.json rather than typed
-# here: past this number the hook is KILLED and the reader loses the page, which is a real
-# consequence at any load. (T24 changed what this row DOES about that, and nothing about the
-# number or where it is read from - see the paragraph below.) The design budget it used to
-# carry moves to 16.8b, where load cannot counterfeit it.
+# AND THE SECOND DRIVE IS THE WHOLE HOOK, sweep included. The sweep is bounded
+# (`BIONIC_SWEEP_BOUND_SECONDS`, default 10, hooks/session-start.sh), and the bound is the one
+# clock this section cannot remove: it is the hook's, and §17 proves what it does when it fires.
+# Here it is set past any sweep's reach, so the drive's outcome is the sweep's own and not the
+# machine's — whether a loaded runner let four hundred deletions finish inside ten seconds was
+# the question rows 16.9 and 16.11 used to branch on. The trace covers the sweep alone
+# (SS_TRACE_ROLE=sweep): the hook's poll loop counts its own ticks, which is the bound's pace.
+SS_FAR=86400
+OUT16BC=$(BIONIC_SWEEP_BOUND_SECONDS=$SS_FAR ss_count_drive sweep "$HOOK" "$P16C")
+read -r SS_W8 SS_WX8 SS_WS8 < "$WORK/ss-counts"
+OUT16B=$(BIONIC_SWEEP_BOUND_SECONDS=$SS_FAR ss_count_drive sweep "$HOOK" "$P16")
+read -r SS_W400 SS_WX400 SS_WS400 < "$WORK/ss-counts"
+echo "      (16.8 sweep counts — 8 dead sessions: $SS_W8 commands, $SS_WX8 external, $SS_WS8 in subshells; 400: $SS_W400, $SS_WX400, $SS_WS400)"
+
 SS_TIMEOUT="$(jq -r '.hooks.SessionStart[]?.hooks[]?
   | select(.command | test("session-start\\.sh$")) | .timeout' \
   "${BIONIC_HOOKS_DIR}/hooks.json" 2>/dev/null | head -1)"
 case "$SS_TIMEOUT" in ''|*[!0-9]*) SS_TIMEOUT="" ;; esac
-# PAIRED, so the row below cannot pass because the timeout could not be read: a comparison
-# against an empty bound is a comparison against nothing.
 expect_eq "16.8a hooks.json declares this hook's CLI timeout, and it is readable" "yes" \
   "$([ -n "$SS_TIMEOUT" ] && echo yes || echo no)"
-# AND IT IS REPORTED, NOT GATED (T24, D13/Δ12) - WHICH IS NOT THE SAME AS WAIVED. This
-# cliff is real: past the CLI's number the hook is KILLED and the reader loses the page. What
-# an exceeded reading here says is an OPERATIONAL fact about the machine that took it - this
-# machine, today, cannot run the hook inside its contract - and that is worth printing in
-# full. What it is not is a code defect, and the wave floor proved the difference: 17.623s
-# here while 16.8b read 3.36x against a bound of 8, on a tree that measures 5.067s on a quiet
-# runner. A ratio of two drives of the same hook in the same process is unitless; a second is
-# a property of the hardware. So the second is reported with its consequence spelled out, and
-# the unitless number gates. 16.8a still GATES the bound's readability, so this row can never
-# be read against a timeout nobody could parse.
-advise "16.8 the whole hook, sweeping that residue, against the CLI timeout hooks.json gives it" \
-  "${T16B_ELAPSED}s against the ${SS_TIMEOUT:-?}s contract — past that number the CLI KILLS this hook and the reader loses the page, so an exceeded reading is an operational fact about THIS machine (it cannot run the hook inside its contract under today's load), never a code defect; the code's own cost is what 16.8b gates" \
-  python3 -c "import sys; sys.exit(0 if ${SS_TIMEOUT:-0} > 0 and ${T16B_ELAPSED:-999} < ${SS_TIMEOUT:-0} else 1)"
-# AND THE DESIGN BUDGET, MEASURED SO THAT LOAD CANCELS. The sweep is roughly four fifths of
-# this hook's cost, so the whole drive against the report-only drive over the SAME fixture,
-# in the same process seconds apart, is the sweep's own share — and it is the reading that
-# survives a busy machine. Measured 5.831 on a quiet runner and 5.973 on the wave floor whose
-# absolute numbers were 64% higher: a 2.4% spread against a 64% swing, which is what makes a
-# ratio the honest instrument here and eight a bound with room in it (A-T22.5).
-expect_true "16.8b …and the sweep costs under eight times the report it is bundled with, whatever the machine is doing (${T16B_ELAPSED}s / ${T16_ELAPSED}s)" \
-  python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-0} > 0 and ${T16B_ELAPSED:-999} < 8 * ${T16_ELAPSED:-0} else 1)"
-expect_true "16.10 …while the fresh predecessor, inside one interval, is deferred" \
-  test -f "$P16/.bionic/tmp/patrol-$FRESH_SID.state"
-
-# THE SWEEP'S OUTCOME IS AN INPUT TO THE TWO ROWS BELOW, NEVER AN ASSUMPTION (T24, D13).
-#
-# WHAT THEY USED TO DO. `16.9 the aged residue is gone` and `16.11 nothing failed on the way`
-# were two `expect_false`s on file existence that silently assumed the sweep had been allowed
-# to finish. It is a BOUNDED operation - `SS_BOUND="${BIONIC_SWEEP_BOUND_SECONDS:-10}"`
-# (hooks/session-start.sh) - and on the wave floor at 09069b7 the whole drive took 17.623s,
-# the sweep outran its ten seconds, and the wrapper cut it off at rc 124 exactly as §17
-# proves it is designed to. It then wrote `sweep-failed.state` (16.11 red) and had therefore
-# never reached the residue (16.9 red). Two rows reporting a REQ-8 defect that did not exist,
-# because each reached for a fact nobody had handed it. The fact was on disk the whole time.
-#
-# SO THEY READ IT. The marker is the sweep's own report of its outcome and it carries `rc=`.
-# The pair below is a predicate over facts this test HOLDS: when the sweep returned inside
-# its bound the residue MUST be gone and the hook must have told the reader nothing; when it
-# was cut off the marker MUST name the bound (rc 124, not rc 2 - a refusal is still a
-# failure) and the hook MUST have said so in its one line, with the same rc on both surfaces.
-# Every arm can be made to fail by breaking what it names.
-#
-# WHAT THE CUT-OFF ARM DELIBERATELY DOES NOT ASSERT is that the residue SURVIVED. A bounded
-# sweep is killed wherever it had got to, so it may have deleted an arbitrary prefix of the
-# four hundred first; requiring a particular one to remain would be a coin flip dressed as a
-# contract, which is the class of row this task exists to remove. What survives being cut off
-# is the EXPLANATION, and that is what is asserted.
-#
-# AND REQ-8'S BEHAVIOUR IS NOT GATED HERE EITHER WAY. §6.7 sweeps a 600s-old stamp over a
-# fixture small enough that no bound can be reached, deterministically, on any machine; that
-# is REQ-8's fails-when and it is untouched. This section's subject is SCALE, and at scale
-# the honest question is whether the outcome and the disposition agree.
+expect_true "16.8 the tracer counted both sweeps, and the larger one did more (${SS_W8:-0} commands over 8 dead sessions, ${SS_W400:-0} over 400)" \
+  test "${SS_W8:-0}" -gt 0 -a "${SS_W400:-0}" -gt "${SS_W8:-0}"
+# 16.8b IS THE SAME DESIGN BUDGET, IN COMMANDS. Deleting four hundred dead sessions is work done
+# per session, so the sweep's count grows with them, as its seconds did; what T22 bounded was
+# its share beside the report it is bundled with — under eight times — and a ratio of two counts
+# of the same fixture is one no machine can move (it read 5.8-6.0 in seconds).
+expect_true "16.8b …and the sweep of 400 dead sessions runs under eight times the commands of the report over them (${SS_W400:-?} against ${SS_C400:-?})" \
+  test "${SS_C400:-0}" -gt 0 -a "${SS_W400:-0}" -lt "$((8 * ${SS_C400:-0}))"
 SS_MARKER="$P16/.bionic/tmp/sweep-failed.state"
 SS_RESIDUE="$P16/.bionic/tmp/patrol-dead0000-dead-dead-dead-000000000001.state"
-# THE POSITIVE CONTROL FOR BOTH NEGATIVES BELOW: a drive that printed nothing at all would
+# THE POSITIVE CONTROL FOR THE NEGATIVES BELOW: a drive that printed nothing at all would
 # satisfy any `hasnt` over its output. This row proves $OUT16B is a real render.
 has   "16.8c the whole-hook drive printed its block, so a row reading that output is reading something" \
   "predecessor stamps:" "$OUT16B"
-if [ -e "$SS_MARKER" ]; then
-  expect_regex "16.9 the sweep was CUT OFF by its own bound and its marker names that, so residue it never reached is an explained outcome and not a REQ-8 failure" \
-    'sweep-failed/v1\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\|rc=124' \
-    "$(cat "$SS_MARKER" 2>/dev/null)"
-  has   "16.11 …and the hook told the READER so, in its one line, carrying the same rc as the marker (AC-R2.4)" \
-    "bionic: the automatic dead-session sweep failed (rc=124)" "$OUT16B"
-else
-  expect_false "16.9 the sweep returned inside its bound, so the aged residue is gone at four hundred sessions' scale (REQ-8)" \
-    test -e "$SS_RESIDUE"
-  hasnt "16.11 …and nothing failed on the way: the hook told the reader nothing about a sweep failure" \
-    "the automatic dead-session sweep failed" "$OUT16B"
-fi
+# THE SWEEP'S OUTCOME, NO LONGER AN INPUT. 16.9 and 16.11 used to read the sweep-failed marker
+# and branch: a sweep the bound cut off (on a loaded floor, 17.6 s for the whole drive) took
+# the other arm. With the bound out of reach the sweep returns, so the arm is fixed and both
+# rows assert it on every machine. The cut-off arm has its own drive below, with the bound at 0.
+expect_false "16.9 the sweep returned, so the aged residue is gone at four hundred sessions' scale (REQ-8)" \
+  test -e "$SS_RESIDUE"
+expect_true "16.10 …while the fresh predecessor, inside one interval, is deferred" \
+  test -f "$P16/.bionic/tmp/patrol-$FRESH_SID.state"
+expect_false "16.11 …and nothing failed on the way: no sweep-failed marker" test -e "$SS_MARKER"
+hasnt "16.11b …and the hook told the reader nothing about a sweep failure" \
+  "the automatic dead-session sweep failed" "$OUT16B"
+# THE CUT-OFF ARM, ON PURPOSE: the bound at 0 is spent before the first poll, so the sweep is
+# stopped wherever it got to. What survives being cut off is the EXPLANATION — the marker with
+# rc=124 (a bound, not a refusal) and the same rc in the hook's one line — and that is what is
+# asserted; which predecessors the sweep reached first is not.
+P16K=$(make_env 3600s)
+KIL_I=1
+while [ "$KIL_I" -le 8 ]; do
+  KIL_SID=$(printf 'kil00000-kil0-kil0-kil0-%012d' "$KIL_I")
+  roster_rows "$P16K/.bionic/tmp/roster-$KIL_SID.state" "$KIL_SID" "W-KIL$KIL_I"
+  backdate "$P16K/.bionic/tmp/roster-$KIL_SID.state" 604800
+  write_stamp "$P16K" "$KIL_SID"
+  backdate "$P16K/.bionic/tmp/patrol-$KIL_SID.state" 604800
+  KIL_I=$((KIL_I + 1))
+done
+OUT16K=$(BIONIC_SWEEP_BOUND_SECONDS=0 drive "$P16K" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+expect_regex "16.12 a sweep cut off by its bound leaves a marker naming the bound, rc=124" \
+  'sweep-failed/v1\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\|rc=124' \
+  "$(cat "$P16K/.bionic/tmp/sweep-failed.state" 2>/dev/null)"
+has   "16.13 …and the hook tells the READER so, in its one line, carrying the same rc (AC-R2.4)" \
+  "bionic: the automatic dead-session sweep failed (rc=124)" "$OUT16K"
 
 
 section "17 — the sweep's own bound: the fork's noise, and the bound without a group (T23)"
@@ -1217,24 +1191,34 @@ cat > "$WORK/s17-timeout.sh" <<'S17TO'
 BIONIC_ROOT="$4"
 gcfile="$2"; rm -f "$gcfile"
 export S17_GCFILE="$gcfile"
-start="$(date +%s)"
 ss_bounded_sweep "$3" 2 >/dev/null 2>/dev/null
 rc=$?
-elapsed=$(( $(date +%s) - start ))
 gc="$(cat "$gcfile" 2>/dev/null)"
 sleep 1
 alive=no
 if [ -n "$gc" ] && kill -0 "$gc" 2>/dev/null; then alive=yes; kill -TERM "$gc" 2>/dev/null; fi
-echo "rc=$rc elapsed=${elapsed}s grandchild=$gc grandchild_alive=$alive"
+echo "rc=$rc grandchild=$gc grandchild_alive=$alive"
 S17TO
 
 S17_TO="$(bash "$WORK/s17-timeout.sh" "$S17_LIB" "$WORK/s17-gc2" "$WORK/s17-poker-hang.sh" "$WORK" 2>/dev/null)"
 has "17.12 a sweep that outruns its bound is cut off, and says so with 124" "rc=124" "$S17_TO"
-expect_true "17.13 …inside the bound rather than at the sweep's own pace" \
-  bash -c 'case "$1" in *elapsed=[0-9]s*) exit 0 ;; *) exit 1 ;; esac' _ "$S17_TO"
+# 17.13 COUNTS THE POLLS, NOT THE SECONDS. The bound is a number of ticks
+# (`max_ticks = limit * SS_POLL_TICKS_PER_SEC`), so a wrapper that stops at its bound polls
+# exactly that many times and then cuts the sweep off, while one that waited at the sweep's own
+# pace would poll until the sweep's forty seconds ran out. The same drive, traced, says which:
+# every `sleep` the poll loop ran is a line of the trace.
+S17_TPS="$(sed -n 's/^SS_POLL_TICKS_PER_SEC=\([0-9][0-9]*\).*/\1/p' "$S17_LIB")"
+: > "$SS_TRACE"
+BASH_ENV="$SS_PRELUDE" SS_TRACE_OUT="$SS_TRACE" SS_TRACE_ROLE=all \
+  bash "$WORK/s17-timeout.sh" "$S17_LIB" "$WORK/s17-gc3" "$WORK/s17-poker-hang.sh" "$WORK" >/dev/null 2>&1
+S17_POLLS="$(LC_ALL=C grep -oE '\|SSCOUNT\|[0-9]+\|s17-bound\.sh:[0-9]+\| sleep 0\.1' "$SS_TRACE" | wc -l | tr -d ' ')"
+expect_true "17.13a the tick constant was read from the hook ($S17_TPS a second)" \
+  test -n "$S17_TPS"
+expect_eq "17.13 …inside the bound rather than at the sweep's own pace: it polled exactly its 2 s of ticks, then cut the sweep off" \
+  "$((2 * ${S17_TPS:-0}))" "$S17_POLLS"
 has "17.14 …and its grandchild is not left running on the machine afterwards" \
   "grandchild_alive=no" "$S17_TO"
-echo "      (timeout arm: $S17_TO, bound=2s, sweep sleeps 40s)"
+echo "      (timeout arm: $S17_TO, bound=2s, sweep sleeps 40s, polls=$S17_POLLS)"
 
 section "18 — a predecessor's open rows are the one close predicate's (epic-23 wave-20 T17, REQ-10; D10)"
 # THE DEFECT (T2's carry-over). This hook's open-row count closed a name on a
