@@ -3781,14 +3781,14 @@ fo_run() {  # <script> -> bash with the proof library (and what it reads) from F
 fo_prove() {  # <head> <log file> -> the floor proof line as proof-add floor writes it: its owed reds read from the log
   fo_run "proof_add_line \"\$FOP\" \"\$(proof_floor_line $1 2026-10-12T01:00:00Z record/wave-a/$2 \"\$(proof_floor_owed \"\$FOREC/$2\")\")\" > \"\$FOP.n\" && mv \"\$FOP.n\" \"\$FOP\"" >/dev/null
 }
-fo_ev() { printf 'line/v1|%s|at=%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$FOREC/landing-proofs.log"; }
+fo_ev() { printf 'line/v1|%s|at=%s\n' "$1" "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" >> "$FOREC/landing-proofs.log"; }  # <event> [<at>]
 fo_land() {  # <row> <path> <text> <suites> -> the landing commit: its ready and published events
   local c; c="$(fo_commit "$2" "$3")"
   fo_ev "ev=ready|row=$1|name=w-$1|commit=$c|branch=wt/$1|tree=-|suites=$4|debt=-"
   fo_ev "ev=published|row=$1|commit=$c|kind=queue|by=-|why=-"
   printf '%s' "$c"
 }
-fo_verdict() { fo_ev "ev=verdict|row=$1|commit=$2|suite=$3|result=$4|log=-"; }  # <row> <commit> <suite> <green|red>
+fo_verdict() { fo_ev "ev=verdict|row=$1|commit=$2|suite=$3|result=$4|log=-" "${5:-}"; }  # <row> <commit> <suite> <green|red> [<at>]
 fo_state() { fo_run 'proof_state "$FOP" "$FOR"' || true; }
 fo_facts() {  # <head> -> facts_state's floor state for the plan at <head>
   fo_run "facts_state \"\$FOP\" $1" | awk 'index($0, "floor\t") == 1 && !d { print substr($0, 7); d = 1 }' || true
@@ -3820,7 +3820,7 @@ printf 'stamp/v1|head=%s|dirty=0|rc=0|at=%s|suites=a.test.sh|cmd=bash tests/a.te
 expect_eq "FO-4 a green stamp of a.test.sh at a later commit is no landing: the commit is proved by it, the red stays owed" \
   "owed	a.test.sh" "$(fo_state)"
 FO_C1="$(fo_land T7 lib/x.sh 'x four' tests/a.test.sh)"
-fo_verdict T7 "$FO_C1" tests/a.test.sh red
+fo_verdict T7 "$FO_C1" tests/a.test.sh red 2099-01-01T00:00:00Z
 FO_ST="$(fo_state)"
 expect_eq "FO-5 the fix row's landing of a.test.sh red: its commit is not proved, so uncovered" "uncovered" "${FO_ST%%	*}"
 expect_contains "FO-5b …naming the suite red at the fix commit (a later red supersedes the stamp's green at the commit before it)" \
@@ -3828,8 +3828,7 @@ expect_contains "FO-5b …naming the suite red at the fix commit (a later red su
 FO_FS="$(fo_facts "$FO_C1")"
 expect_eq "FO-5c …and facts_state's floor line is uncovered F..head, then the reason" \
   "uncovered	${FO_F}..${FO_C1}	${FO_ST#*	}" "$FO_FS"
-sleep 1
-fo_verdict T7 "$FO_C1" tests/a.test.sh green
+fo_verdict T7 "$FO_C1" tests/a.test.sh green 2099-01-01T00:00:01Z
 expect_eq "FO-6 AC-1.3 a later green landing of a.test.sh (file-name key: the record says tests/a.test.sh) closes it: covered" \
   "covered	${FO_C1}" "$(fo_state)"
 expect_eq "FO-6b …and facts_state's floor line is covered" "covered" "$(fo_facts "$FO_C1")"
