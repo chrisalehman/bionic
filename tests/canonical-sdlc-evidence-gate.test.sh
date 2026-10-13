@@ -835,14 +835,14 @@ write_plan "$h17j1" "$(plan 5 "  cmd: bash test.sh
 expect_block "17j Step-5 missing auditor → block" \
   "$h17j1" 'git commit -m "x"' "auditor"
 
-# 17j — Step-5 block missing the tests floor (cmd) → block (validator reuse).
+# 17j2 — Step-5 block missing the tests floor (cmd) → allow: Step 5 owes no floor key (wave-35 T31; D20).
 h17j2=$(make_home)
 write_plan "$h17j2" "$(plan 5 "  pass: 332
   total: 332
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md" "$matrix_complete")" > /dev/null
-expect_block "17j Step-5 missing tests floor cmd → block" \
-  "$h17j2" 'git commit -m "x"' "cmd"
+expect_allow "17j2 D20 Step-5 block missing the floor's cmd → allow (the floor is Step 7's)" \
+  "$h17j2" 'git commit -m "x"'
 
 # 17l — false-green entry with NO paired rewritten entry → block.
 h17l1=$(make_home)
@@ -2675,8 +2675,9 @@ echo "-- 25g(c)-(f): THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027, AC-
 # gate reads the row, and the commit is judged at THAT row's step.
 #
 # THE FIXTURE IS ONE PLAN, DRIVEN FROM THREE PLACES — that is the whole discrimination. The
-# same \`current: 5\` plan carries a Step-5 block that is NOT green (pass 331 of 332), so a
-# main-root commit must still be refused for it; a commit from the tree row T3 owns must be
+# same \`current: 5\` plan carries a Step-5 block that names NO auditor while its one matrix row is
+# discharged, so a main-root commit must still be refused for it (until wave-35 T31 the block was
+# not green, 331 of 332; Step 5 judges no counter now, D20); a commit from the tree row T3 owns must be
 # judged at Step 4 and allowed; and a commit from the tree row T9 owns, whose step is AHEAD
 # of the run, must be refused naming the row and both steps. One plan, three verdicts. --"
 
@@ -2684,13 +2685,10 @@ s25r_step4="  worktree: .worktrees/wt-T3
   base-sha: 0fe69ed
   branch: wt/14-T3"
 
-# NOT GREEN, deliberately: this is the byte that makes 25g(d) a real control rather than a
-# second copy of 25g(c).
-s25r_step5_red="  cmd: bash test.sh
-  pass: 331
-  total: 332
-  output: .bionic/docs/plans/wave-01.plan.md#step-5
-  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+# NO AUDITOR, deliberately: this is the line that makes 25g(d) a real control rather than a
+# second copy of 25g(c). `S25_JUDGED` is the refusal every row judged at current: 5 reads.
+s25r_step5_red="  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+S25_JUDGED="requires 'auditor:"
 
 # The register. The `worktree` cell sits between `Files` and `status`, where this wave's own
 # plan carries it.
@@ -2757,11 +2755,11 @@ fi
 
 # --- 25g(d) / AC-2.2: the main root is untouched ------------------------------------------
 run_hook_with_project "$(make_home)" "$s25r_main" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR"; then
-  ok "25g(d) AC-2.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total"
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR"; then
+  ok "25g(d) AC-2.2 the SAME plan still refuses a main-root commit at current: 5 for its Step-5 block"
 else
-  no "25g(d) AC-2.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total" \
-    "expected block naming pass=331; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(d) AC-2.2 the SAME plan still refuses a main-root commit at current: 5 for its Step-5 block" \
+    "expected the Step-5 refusal; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(e) / AC-2.3, RE-AUTHORED BY wave-20 REQ-5 (Δ6, AC-5.1): a row AHEAD of the run ----
@@ -2814,11 +2812,11 @@ fi
 # --- 25g(f): a tree no row owns keeps today's behaviour, and says so ----------------------
 #
 # FAIL-SAFE, NOT FAIL-OPEN: the commit is judged at `current:` exactly as it is today — so it
-# is refused for the same not-green Step-5 block 25g(d) is refused for — and one line on
+# is refused for the same Step-5 block 25g(d) is refused for — and one line on
 # stderr names the tree, so a writer whose row was never ledgered finds out from the wall
 # rather than from the verdict.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-stray" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
    && grep -q "wt-stray" <<<"$HOOK_STDERR"; then
   ok "25g(f) a tree no ## Tasks row names is judged at current: and the note names the tree"
 else
@@ -2885,7 +2883,7 @@ printf 'gitdir: /nowhere/at/all/.git/worktrees/wt-T3\n' > "$s25r_forged/.git"
 expect_eq "25g(i) the forged tree really does answer row T3's name to a file read" "wt-T3" \
   "$(_g=$(head -1 "$s25r_forged/.git"); _g="${_g#gitdir: }"; printf '%s' "${_g##*/}")"
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "cd $s25r_forged || exit 1; git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
    && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
   ok "25g(i) a forged .git naming row T3's tree is declined and the commit is judged at current: 5"
 else
@@ -2942,7 +2940,7 @@ fi
 # directory, one `cd`, is judged at `current:` exactly as 25g(i) and 25g(d) are.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
   "cd $s25r_main/.bionic/docs/record/w25g || exit 1; git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
    && ! grep -qF "two directories" <<<"$HOOK_STDERR"; then
   ok "25g(j2) …and ONE cd into that same directory is still judged at current: 5, not refused as ambiguous"
 else
@@ -3141,7 +3139,7 @@ s25n_plan > "$s25n_main/.bionic/docs/plans/wave-01-x.plan.md"
 git -C "$s25n_main" worktree add -q "$s25n_tmp/wt-T5" -b s25n-t5
 
 run_hook_cwd "$(make_home)" "$s25n_main" "$s25n_tmp/wt-T5" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
    && grep -q "canonical-sdlc step 5" <<<"$HOOK_VSTDERR" \
    && ! grep -q "task arms" <<<"$HOOK_STDERR"; then
   ok "25g(k2) AC-1.3 a commit from a LANDED row's tree is still judged at current:, and the refusal names step 5"
@@ -3240,7 +3238,7 @@ fi
 s25r_cont="g\\
 it commit -m \"x\""
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "$s25r_cont"
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR"; then
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR"; then
   ok "25g(n) a 'g\\<newline>it commit' reaches the gate and is refused like any other commit"
 else
   no "25g(n) a 'g\\<newline>it commit' reaches the gate and is refused like any other commit" \
@@ -3275,7 +3273,7 @@ printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "a
 git -C "$s25c_main" worktree add -q "$s25c_main/.worktrees/14-TC" -b s25c-tc
 
 run_hook_cwd "$(make_home)" "$s25c_main" "$s25c_main/.worktrees/14-TC" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
    && grep -q "TA" <<<"$HOOK_STDERR" && grep -q "TB" <<<"$HOOK_STDERR"; then
   ok "25g(l) two ## Tasks rows naming one tree decline to resolve, and the note names both"
 else
@@ -3414,9 +3412,9 @@ expect_ne "25g(p) …and that common dir is not the bound plan's repository" \
 
 # --- 25g(p) / AC-4.1: the foreign tree is exempt, and the line names the boundary ---------
 #
-# The bound plan is the SAME `current: 5` fixture with the red Step-5 block that refuses
+# The bound plan is the SAME `current: 5` fixture with the unaudited Step-5 block that refuses
 # 25g(d), 25g(f), 25g(i) and 25g(k2). If the exemption were not there this commit would be
-# refused for `pass=331` like all of them, which is what makes the allow below a verdict
+# refused for it like all of them, which is what makes the allow below a verdict
 # about the repository boundary and not about a lenient fixture.
 # RE-AUTHORED BY wave-19 T6 (REQ-9, D10). The jurisdiction arm now asks every commit which
 # repository it lands in, before the plan is read, and a linked worktree of ANOTHER repository
@@ -3516,9 +3514,10 @@ engage "$s25t_main"
 git -C "$s25t_main" worktree add -q "$s25t_main/.worktrees/18-T1" -b s25t-t1 2>/dev/null
 s25t_wt="$s25t_main/.worktrees/18-T1"
 
-# s25t_plan <current> <task|wave> -> the one plan, row T1 at step 4 owning tree 18-T1. The Step-5
-# block is deliberately NOT green (331 of 332), so a main-root commit at `current: 5` is still
-# refused by the run's own Verify arm — 25gT(c) is that control, and it is what makes 25gT(b) a
+# s25t_plan <current> <task|wave> -> the one plan, row T1 at step 4 owning tree 18-T1. Its matrix
+# carries no `stack-health:` line, so a main-root commit at `current: 5` is still refused by the
+# run's own Verify arm — 25gT(c) is that control (until wave-35 T31 the refusal was the not-green
+# Step-5 block, 331 of 332, which Step 5 no longer judges, D20), and it is what makes 25gT(b) a
 # discrimination rather than a fixture that admits everything.
 s25t_plan() {
   local p="$s25t_tmp/gen/$2/plans/epic-99-fixture/task-01-x.plan.md"
@@ -3531,7 +3530,7 @@ s25t_write() { s25t_plan "$@" > "$s25t_main/.bionic/docs/plans/task-01-x.plan.md
 
 expect_eq "25gT(a) the fixture's tree really is a LINKED worktree, named 18-T1 by git" \
   "18-T1" "$(basename "$(git -C "$s25t_wt" rev-parse --git-dir)")"
-expect_eq "25gT(a2) …and the plan carries the row's tree and the not-green Step-5 block" "2" \
+expect_eq "25gT(a2) …and the plan carries the row's tree and a Step-5 block" "2" \
   "$(s25t_plan 5 task | /usr/bin/grep -cE '^\| T1 \| 4 \| .*\| 18-T1 \||^  pass: 331$')"
 
 # --- 25gT(b) / AC-11.2: the tree's commit is judged at its row's step, at scale: task -------
@@ -3547,10 +3546,10 @@ fi
 
 # --- 25gT(c) / AC-11.2: the main root still meets the run's numbered-step block ------------
 run_hook_with_project "$(make_home)" "$s25t_main" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(c) AC-11.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total"
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "is missing the 'stack-health:' line" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(c) AC-11.2 the SAME plan still refuses a main-root commit at current: 5 in the Verify arm"
 else
-  no "25gT(c) AC-11.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total" \
+  no "25gT(c) AC-11.2 the SAME plan still refuses a main-root commit at current: 5 in the Verify arm" \
     "expected the Step-5 block; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
@@ -4221,15 +4220,18 @@ expect_eq "KX-4c …so no tier names a retired key (0 matches over all five)" "0
 # ============================================================
 # §REGRESSION-NO: the regression is a Step-0 setting, and the Step-5 arm reads it (wave-31 T27; REQ-12 AC-12.2; D4)
 # ============================================================
-section "§REGRESSION-NO: at 'regression: no' the Step-5 block carries 'regression: no (Step 0, <user>) — <where it runs>' in place of cmd/pass/total/output/head; at yes, or with the key absent, the floor is owed (wave-31 T27; REQ-12 AC-12.2; D4)"
+section "§REGRESSION-NO: at 'regression: no' the Step-5 block carries 'regression: no (Step 0, <user>) — <where it runs>'; at yes, or with the key absent, Step 5 owes no floor keys, and the floor is owed to the judge at Step 7 (wave-31 T27; REQ-12 AC-12.2; D4; wave-35 T31, D20)"
 
-# fails-when: a `no` plan is blocked at Step 5 for a missing floor, or a `yes` plan passes without one.
+# fails-when: a `no` plan is admitted without its Step-0 line, or any plan is blocked at Step 5 for floor
+# keys it no longer owes.
 #
 # THE KEY IS THE PLAN'S FRONTMATTER `regression: yes|no`, written at Step 0 by `session-poker.sh
 # regression` (session-poker-4 §REGRESSION-SET). AN ABSENT KEY READS `yes`, fail-closed as an absent
-# `walk:` reads `required` (Section 26e): every plan written before the key keeps being asked for
-# `pass == total`. Only the exact value `no` relaxes the arm. `regression-override:` is the record of
-# who chose against the scale default; its presence changes nothing here and it is never parsed.
+# `walk:` reads `required` (Section 26e): (v) below pins that the floor is then dealt. At Step 5 the
+# block owes no `cmd`/`pass`/`total`/`output`/`head` at any value (wave-35 T31; D20, A-orch-32): the
+# floor is judged by `facts_state` at `current 7` and from Step 7 on, so a `yes` block without the keys,
+# or with pass below total, is admitted here. Only the exact value `no` adds the Step-0 line.
+# `regression-override:` is the record of who chose against the scale default; it is never parsed.
 #
 # The fixture is Section 26's: double wave, a complete matrix, `walk: exempt` so the walk arm stays
 # out of the way, and the auditor pointer the finished matrix owes at double.
@@ -4262,14 +4264,14 @@ expect_block "RN-2 AC-12.2 regression: no, the same block without the line → b
 hRN3=$(make_home)
 write_plan "$hRN3" "$(rn_plan 'regression: yes' "$RN_LINE
 $RN_AUD")" > /dev/null
-expect_block "RN-3 AC-12.2 regression: yes without a floor (the line instead of cmd/pass/total) → blocked for the fields" \
-  "$hRN3" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+expect_allow "RN-3 D20 regression: yes, no cmd/pass/total/output/head → admitted at current: 5 (the floor is Step 7's)" \
+  "$hRN3" 'git commit -m "x"'
 hRN3b=$(make_home)
 write_plan "$hRN3b" "$(rn_plan 'regression: yes' "$RN_RED
 $RN_LINE
 $RN_AUD")" > /dev/null
-expect_block "RN-3b regression: yes with pass != total → blocked: the line does not stand in for a green run" \
-  "$hRN3b" 'git commit -m "x"' "the suite is not fully green"
+expect_allow "RN-3b D20 regression: yes with pass != total → admitted: the gate no longer compares pass with total at Step 5" \
+  "$hRN3b" 'git commit -m "x"'
 hRN3c=$(make_home)
 write_plan "$hRN3c" "$(rn_plan 'regression: yes' "$RN_FLOOR
 $RN_AUD")" > /dev/null
@@ -4280,8 +4282,8 @@ expect_allow "RN-3c regression: yes with a green floor → admitted (the arm at 
 hRN4=$(make_home)
 write_plan "$hRN4" "$(rn_plan '' "$RN_LINE
 $RN_AUD")" > /dev/null
-expect_block "RN-4 no regression: key, the line and no floor → blocked: an absent key reads yes (fail-closed)" \
-  "$hRN4" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+expect_allow "RN-4 D20 no regression: key, no floor keys → admitted at Step 5 (an absent key reads yes; (v) pins the floor dealt)" \
+  "$hRN4" 'git commit -m "x"'
 hRN4b=$(make_home)
 write_plan "$hRN4b" "$(rn_plan '' "$RN_FLOOR
 $RN_AUD")" > /dev/null
@@ -4289,8 +4291,8 @@ expect_allow "RN-4b …and the same plan with a green floor is admitted" "$hRN4b
 hRN4c=$(make_home)
 write_plan "$hRN4c" "$(rn_plan 'regression: off' "$RN_LINE
 $RN_AUD")" > /dev/null
-expect_block "RN-4c regression: off (a value that is not no) reads yes → blocked for the fields" \
-  "$hRN4c" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+expect_allow "RN-4c D20 regression: off (a value that is not no) reads yes → admitted at Step 5 without the keys" \
+  "$hRN4c" 'git commit -m "x"'
 
 # (iii) the override line is presence-only, never parsed.
 hRN5=$(make_home)
@@ -4303,8 +4305,8 @@ hRN5b=$(make_home)
 write_plan "$hRN5b" "$(rn_plan 'regression: yes
 regression-override: Dana Fixture 2026-10-09 derived=no chosen=no' "$RN_LINE
 $RN_AUD")" > /dev/null
-expect_block "RN-5b regression: yes beside an override saying chosen=no → blocked: the key decides, the override is not parsed" \
-  "$hRN5b" 'git commit -m "x"' "missing required field(s): cmd pass total output"
+expect_allow "RN-5b D20 regression: yes beside an override saying chosen=no → admitted at Step 5 (the override is not parsed)" \
+  "$hRN5b" 'git commit -m "x"'
 
 # (iv) the line's grammar: `no (Step 0, <user>) — <where it runs>`, each part non-empty.
 rn_bad() {  # <label> <line>
@@ -4349,6 +4351,32 @@ expect_eq "RN-8d the decline line's read-back of the default drops it too at no"
   "$(rn_lib units_hold_read "$RN_DIR/no.md" T3 T1)"
 expect_eq "RN-8e …and keeps it at yes" "reads='proof:floor, proof:review, head, lib/a.sh'" \
   "$(rn_lib units_hold_read "$RN_DIR/yes.md" T3 T1)"
+
+# ============================================================
+# §STEP5-FLOOR: Step 5 owes the matrix, the walk and the auditor; the floor is Step 7's (wave-35 T31; D20, A-orch-32)
+# ============================================================
+section "§STEP5-FLOOR: at current: 5 the block owes no head/cmd/pass/total/output and the gate compares no pass with total; the keys may be written and no gate reads them (wave-35 T31; REQ-1; D20)"
+# fails-when: a Step-5 block is refused for a floor key it lacks or for counters that disagree, or the
+# block the gate still reads (the auditor pointer) stops being read.
+# FIXTURE FIDELITY: the prelude's `plan` (double wave, `walk: exempt`, the complete matrix, so the
+# auditor pointer is owed); the gate is the real one through hooks/bash-walls.sh.
+SF_AUD="  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+hSF1=$(make_home)
+write_plan "$hSF1" "$(plan 5 "$SF_AUD" "$matrix_complete")" > /dev/null
+expect_allow "SF-1 D20 a Step-5 block with no head/cmd/pass/total/output, the matrix complete and the auditor named → admitted at current: 5" \
+  "$hSF1" 'git commit -m "x"'
+write_plan "$hSF1" "$(plan 5 "  output: .bionic/docs/plans/wave-01.plan.md#step-5" "$matrix_complete")" > /dev/null
+expect_block "SF-1b control: the same plan without the auditor pointer → blocked: the gate still reads this block" \
+  "$hSF1" 'git commit -m "x"' "requires 'auditor:"
+hSF2=$(make_home)
+write_plan "$hSF2" "$(plan 5 "  cmd: bash tests/run.sh
+  pass: most of them
+  total: 72
+  head: 0123456789abcdef0123456789abcdef01234567
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+$SF_AUD" "$matrix_complete")" > /dev/null
+expect_allow "SF-2 D20 the keys written with counters that are no integers and a head that is no commit → admitted: no gate reads them" \
+  "$hSF2" 'git commit -m "x"'
 
 # ============================================================
 # Two sections moved here from after Section 40 when the suite was sharded (wave-30 T3).
