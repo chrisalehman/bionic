@@ -2954,8 +2954,10 @@ The floor's whole run left ${_fr_owed} red, each owed until a later landing runs
 a row that reads approval:regression-2, and session-poker.sh approve regression-2 '<reply>'.
     Plan: ${PLAN}${_fr_owes}
 
-The floor is one whole green run plus every later commit proved by the suites its row
-named: a change after the whole run is proved by a fix row, the red suites plus its own.
+Step 5 owes the matrix, the walk and the auditor. Step 7 is where the floor is demanded,
+as the judge closes it: one whole run, green or red, each red owed until a later landing
+runs it green, and every later commit proved by the suites its row named. A change after
+the whole run is proved by a fix row, the red suites plus its own.
 
 Fix: dispatch the fix row's suites${_fr_owed:+ (${_fr_owed})}. For a second whole run, add a verify row that reads
 approval:regression-2, head; put it to the user, and on their reply record it:
