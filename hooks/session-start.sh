@@ -515,7 +515,10 @@ ROSTERS=""
 if [ -n "$ROSTER_MANIFEST" ]; then
   ROSTER_RAW="$(printf '%s' "$ROSTER_MANIFEST" | roster_open_counts)"
   if [ -n "$ROSTER_RAW" ]; then
-    while IFS="$(printf '\t')" read -r OSID N RF; do
+    # `$'\t'`, NOT `$(printf '\t')` (wave-35 T11): a `while` re-runs its condition every
+    # step, so the substitution forked once per predecessor roster — the T16 class above,
+    # counted by tests/session-start.test.sh 16.2b at 8 and at 400.
+    while IFS=$'\t' read -r OSID N RF; do
       [ -n "$OSID" ] || continue
       ROSTERS="${ROSTERS}  ${OSID:0:8} — $N open row(s) — ${RF##*/}
 "
