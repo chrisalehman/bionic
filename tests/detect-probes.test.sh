@@ -905,7 +905,7 @@ RS='# ─── bionic:rc:start ───'; RE='# ─── bionic:rc:end ──
 RC_UN='unalias claude 2>/dev/null || true'
 # bionic's current function line, read from env.sh (wave-36 T1 changed it); the 1.18.0 line is an
 # earlier body (`rc_earlier`): alone it is the pre-T75 body, under the unalias line the 1.18.0 one.
-RC_FN="$(bash -c '. "$1"; rc_default claude-proxy' _ "${REPO}/payload/scripts/lib/env.sh" | tail -n 1)"
+RC_FN="$(bash -c '. "$1"; rc_default claude-proxy' _ "${REPO}/payload/scripts/lib/env.sh" | sed 1d)"
 RC_FN_118='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
 rc_probe() {  # <name> <block line…> — the fact for an rc holding that block
   local f="$TMP/rc-$1"; shift

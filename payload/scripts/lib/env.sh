@@ -367,13 +367,22 @@ rc_file() {
 #                  is the release. Nothing is copied and no registry is written.
 #                  THE COST IS THE CALL'S, NEVER THE SHELL'S: defining the function
 #                  runs nothing; typing `claude` runs one git and one grep. `grep
-#                  -E` and not jq, which a machine may not have. The pattern is in
-#                  double quotes so the body holds no single quote, and this case
-#                  arm, remove.sh's copy and rc-item.test.sh can each carry it
-#                  verbatim between single quotes.
+#                  -E` and not jq, which a machine may not have.
+#                  SEVEN LINES, NONE OVER 91 COLUMNS: setup prints the body for the
+#                  person to read before they consent, and every line of that page
+#                  fits 100 columns (setup.test.sh §PROXY P18). One printf argument
+#                  per line, so no line of this function is a bare `}` and
+#                  rc-item.test.sh's line-for-line copy check reads it whole.
 rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
-    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" && grep -Eqs "\"name\"[[:space:]]*:[[:space:]]*\"bionic\"" "$r/payload/.claude-plugin/plugin.json" && set -- --plugin-dir "$r/payload" "$@"; command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    claude-proxy) printf '%s\n' \
+      'unalias claude 2>/dev/null || true' \
+      'claude() {' \
+      '  local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" || r=""' \
+      "  if [ -n \"\$r\" ] && grep -Eqs '\"name\" *: *\"bionic\"' \"\$r/payload/.claude-plugin/plugin.json\"" \
+      '  then set -- --plugin-dir "$r/payload" "$@"; fi' \
+      '  command claude --allow-dangerously-skip-permissions "$@"' \
+      '}' ;;
     *)            return 1 ;;
   esac
   return 0

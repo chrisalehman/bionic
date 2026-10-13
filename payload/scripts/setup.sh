@@ -1251,7 +1251,8 @@ setup_claude_proxy() {
   say "   ${rc} does not carry bionic's claude() shell function:"
   for item_name in $missing; do
     while IFS= read -r _setup_rc_line; do say "   ${_setup_rc_line}"; done <<< "$(rc_default "$item_name")"
-    say "   — $(_setup_rc_why "$item_name")"
+    _setup_rc_lead="   — "
+    while IFS= read -r _setup_rc_line; do say "${_setup_rc_lead}${_setup_rc_line}"; _setup_rc_lead="     "; done <<< "$(_setup_rc_why "$item_name")"
   done
   consent "   Add it to ${rc}?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${rc} is unchanged."; action "add bionic's claude() shell function to ${rc} — $(_setup_answer_yes claude-proxy)"; return 0; fi  # consent gate: rc item
@@ -1343,8 +1344,10 @@ _setup_rc_why() {  # <item>
     # 55-character line ("launches claude with bypass available in the mode
     # cycle") with this longer and more exact one — the flag stopped starting
     # the session in bypass and started only offering it — which is what spends
-    # most of the room. There is none left for another clause.
-    claude-proxy) echo "keeps bypass selectable in the shift+tab cycle; the session still starts in your default mode" ;;
+    # most of the room. There is none left for another clause, so wave-36 T1's
+    # (D7) is a second line under the same budget, printed beneath the first.
+    claude-proxy) echo "keeps bypass selectable in the shift+tab cycle; the session still starts in your default mode"
+                  echo "in a bionic checkout, the session runs that checkout's plugin instead of the installed one" ;;
     *)            echo "a shell line bionic needs" ;;
   esac
 }
