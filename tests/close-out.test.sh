@@ -2612,4 +2612,102 @@ expect_eq "FILL.18 with a poker that cannot report landings the close still fini
 expect_eq "FILL.19 …the landings section says so in a sentence, and the marks left are still only the five" "yes/$(printf '%s' "$OWED_MARKS" | tr '\n' '|')" \
   "$(contains "$(cat "$FQ/$CONT_REL")" "landings: not read")/$(fill_marks "$FQ/$CONT_REL" | tr '\n' '|' | sed 's/|$//')"
 
+# ============================================================
+section "§REF — wave-35 T10 (REQ-1 AC-1.7, D10): the facts judge reads the working branch's ref through the one reader; a branch that names no commit stays uncovered"
+# ============================================================
+# close-out's facts judge (`facts_judge`) hands lib/proof.sh `facts_state` the head of the working branch, and it now
+# reads that head through lib/proof.sh `proof_branch_head` (`refs/heads/<branch>`), the reader `current 7`, `current 8`
+# and the floor judge share, never a checkout's and never whatever else git would resolve the bare name to. The
+# branch name itself is read through lib/run.sh `plan_working_branch` (SDLC State, then frontmatter), so close-out
+# has no second reader of it (A-orch-16).
+# FIXTURE FIDELITY: mk_fixture's run at Step 8: wave/01-fixture merged into main, every fact planted at its head by
+# the product's pair, the branch checked out in `<project>-wave`. Each row then takes away one thing a run that has
+# merged takes away: the worktree, the branch, the SDLC-State key.
+# fails-when: the judge reads the checkout's head, or a ref other than the branch; a deleted branch reads covered;
+# a plan whose working-branch: is in its frontmatter alone is refused for naming none.
+ref_head() { fixture_git "$1" rev-parse --verify -q "refs/heads/wave/01-fixture" 2>/dev/null; }
+PREF="$(mk_fixture ref-merged)"; advance_to "$PREF" 8
+REF_H="$(ref_head "$PREF")"
+fixture_git "$PREF" worktree remove --force "$PREF-wave" >/dev/null 2>&1
+expect_eq "REF-0 precondition: the branch names a commit, no checkout holds it, and the main checkout is on main" "yes|0|main" \
+  "$([ -n "$REF_H" ] && echo yes)|$(fixture_git "$PREF" worktree list --porcelain | grep -c '^branch refs/heads/wave/01-fixture$' | tr -d ' ')|$(fixture_git "$PREF" symbolic-ref --short HEAD)"
+run_close "$PREF" check
+expect_contains "REF-1 AC-1.7 branch merged, its tree removed, the checkout on main: the judge reads the branch's head and every fact holds" \
+  "facts: every fact the run owes holds at $REF_H" "$CO_OUT"
+run_close "$PREF" run
+expect_eq "REF-2 …and run closes the plan (rc 0)" "0|1" "$CO_RC|$(run_open_rc "$PREF/$PLAN_REL")"
+
+PREFD="$(mk_fixture ref-deleted)"; advance_to "$PREFD" 8
+fixture_git "$PREFD" worktree remove --force "$PREFD-wave" >/dev/null 2>&1
+fixture_git "$PREFD" branch -D wave/01-fixture >/dev/null 2>&1
+expect_eq "REF-3 precondition: the working branch is deleted (no ref names it)" "" "$(ref_head "$PREFD")"
+run_close "$PREFD" check
+expect_contains "REF-3b AC-1.7 a deleted branch: check says the facts would be refused" "facts: WOULD REFUSE" "$CO_OUT"
+expect_contains "REF-3c …saying the branch names no commit, the floor uncovered" \
+  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+# A TAG OF THE SAME NAME IS NOT THE BRANCH. `git rev-parse <name>` resolves refs/tags/<name> before refs/heads/<name>, so a
+# judge that asks git for the bare name reads a tag where the branch is gone; the branch's ref reader does not.
+fixture_git "$PREFD" tag wave/01-fixture main >/dev/null 2>&1
+expect_nonempty "REF-4 precondition: a tag of the branch's name names a commit" \
+  "$(fixture_git "$PREFD" rev-parse --verify -q 'refs/tags/wave/01-fixture^{commit}' 2>/dev/null)"
+run_close "$PREFD" check
+expect_contains "REF-4b AC-1.7 …the deleted branch stays uncovered beside the tag: the judge reads refs/heads/ alone" \
+  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+expect_absent "REF-4c …and never judges the tag's commit" "facts: every fact the run owes holds" "$CO_OUT"
+
+PREFF="$(mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8
+awk '
+  NR == 1 && $0 == "---" { print; fm = 1; next }
+  fm && $0 == "---" { print "working-branch: wave/01-fixture"; print; fm = 0; next }
+  /^## SDLC State/ { s = 1 }
+  s && /^working-branch: / { next }
+  { print }' "$PREFF/$PLAN_REL" > "$PREFF/$PLAN_REL.wb" && mv "$PREFF/$PLAN_REL.wb" "$PREFF/$PLAN_REL"
+expect_eq "REF-5 precondition: working-branch: is in the frontmatter alone" "1|0" \
+  "$(awk '/^---$/ { n++; next } n == 1 && /^working-branch: / { c++ } END { print c + 0 }' "$PREFF/$PLAN_REL")|$(awk '/^## SDLC State/ { s = 1 } s && /^working-branch: / { c++ } END { print c + 0 }' "$PREFF/$PLAN_REL")"
+run_close "$PREFF" check
+expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reader: a frontmatter key is not refused as none" \
+  "names no working-branch" "$CO_OUT"
+expect_contains "REF-5c …and the judge holds the facts at that branch's head" \
+  "facts: every fact the run owes holds at $(ref_head "$PREFF")" "$CO_OUT"
+
+# ============================================================
+section "§INHERITED-CONT — wave-35 T10 (REQ-1 AC-1.6, A-orch-18): the continuation carries every inherited: line under its own heading; a plan with none prints none"
+# ============================================================
+# `proof-add inherited <suite>` writes `inherited: <suite> base=<sha> head=<sha> at=<ISO> evidence=<log>` under
+# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. AC-1.6 says it is carried into the
+# continuation, so close-out lists every such line under `## Inherited debt`, beside the hand-holds, as written. A
+# line inside a fence is prose, not a line the verb wrote, and is not carried.
+# FIXTURE FIDELITY: mk_fixture at Step 8; the lines are placed by lib/proof.sh `proof_add_line`, the placer the verb
+# calls, in the verb's own shape.
+# fails-when: an inherited: line is missing from the continuation, or a plan with none gets the heading.
+inh_line() {  # <suite> <sha> -> the line proof-add inherited writes
+  printf 'inherited: %s base=%s head=%s at=2026-10-12T04:00:00Z evidence=record/wave-01-fixture/inherited-%s-%.12s.log' "$1" "$2" "$2" "$1" "$2"
+}
+inh_place() {  # <project> <line> -> the line placed under ## SDLC State by the product's placer
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_add_line "$2" "$3" > "$2.pf" && mv "$2.pf" "$2"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "$2"
+}
+inh_section() { awk '/^## / { s = ($0 == "## Inherited debt"); next } s && NF && !/^```/ { print }' "$1"; }
+PINH="$(mk_fixture inherited-cont)"; advance_to "$PINH" 8
+INH_H="$(fixture_git "$PINH" rev-parse --verify -q wave/01-fixture)"
+inh_place "$PINH" "$(inh_line a.test.sh "$INH_H")"
+inh_place "$PINH" "$(inh_line b.test.sh "$INH_H")"
+awk '/^## Tasks/ { print "```"; print "inherited: fenced.test.sh base=0123456789ab head=0123456789ab at=x evidence=y"; print "```"; print "" } { print }' \
+  "$PINH/$PLAN_REL" > "$PINH/$PLAN_REL.f" && mv "$PINH/$PLAN_REL.f" "$PINH/$PLAN_REL"
+expect_eq "INH-0 precondition: the plan carries two unfenced inherited: lines and one fenced (the extractor reads them)" "2|1" \
+  "$(awk '/^```/ { f = !f; next } !f && /^inherited: / { n++ } END { print n + 0 }' "$PINH/$PLAN_REL")|$(awk '/^```/ { f = !f; next } f && /^inherited: / { n++ } END { print n + 0 }' "$PINH/$PLAN_REL")"
+run_close "$PINH" run
+expect_eq "INH-1 run closes the plan (rc 0)" "0" "$CO_RC"
+expect_eq "INH-2 AC-1.6 the continuation carries ## Inherited debt once, with both lines as the verb wrote them" \
+  "1|$(inh_line a.test.sh "$INH_H")|$(inh_line b.test.sh "$INH_H")" \
+  "$(/usr/bin/grep -c '^## Inherited debt$' "$PINH/$CONT_REL" | tr -d ' ')|$(inh_section "$PINH/$CONT_REL" | paste -sd'|' -)"
+expect_absent "INH-2b …and not the fenced line" "fenced.test.sh" "$(inh_section "$PINH/$CONT_REL")"
+expect_eq "INH-2c …beside the hand-holds: the section follows ## Hand-holds, before the Resume instruction" "yes" \
+  "$(awk '/^## Hand-holds$/ { a = NR } /^## Inherited debt$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PINH/$CONT_REL")"
+PINO="$(mk_fixture inherited-none)"; advance_to "$PINO" 8
+run_close "$PINO" run
+expect_eq "INH-3 a plan with no inherited: line: run closes it and writes the continuation (its Hand-holds there)" "0|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Hand-holds$' "$PINO/$CONT_REL" | tr -d ' ')"
+expect_eq "INH-3b …and no Inherited debt heading at all" "0" "$(/usr/bin/grep -c '^## Inherited debt' "$PINO/$CONT_REL" | tr -d ' ')"
+
 finish

@@ -3076,8 +3076,21 @@ s69_real() {  # <step> <state> -> the gate's answer to a real bound commit of th
   s69_state "$2"; s69_plan "$1" "$S69_X"
   s34_gate "$R69"; s69_verdict "$GATE_RC" "$GATE_ERR"
 }
+# THE MOVE TO STEP 7 ASKS THE FACTS JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-11, A-T10-12): after the dry commit,
+# which still answers as the real commit, so a step-7 move that the gate admits carries the facts the judge owes at
+# the head: a floor proof dated 10:00, before every debt this section
+# writes, so it covers none of them, and the two whole-scope readings a double wave plan is dealt. They go ahead of the
+# state's own lines, so a covering floor proof (`covered`, `two`) is still the plan's last. The rows then test what
+# they were written for: the debt arm, and the dry commit answering as the real commit.
+S69_FACTS7="$(s69_line floor "$S69_H" 2026-10-04T10:00:00Z record/w27/floor.log)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/adversarial-whole.md adversarial w-read pass whole)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure-whole.md structure w-read pass whole)"
 s69_move() {  # <step> <state> -> `current <step>` from the step before it: the answer, and the current: line after
-  s69_state "$2"; s69_plan "$(($1 - 1))" "$S69_X" "$1"
+  local x
+  s69_state "$2"; x="$S69_X"
+  [ "$1" != 7 ] || x="$S69_FACTS7${S69_X:+
+$S69_X}"
+  s69_plan "$(($1 - 1))" "$x" "$1"
   poke "$R69" current "$1"
   printf '%s %s' "$(s69_verdict "$RC" "$OUT")" "$(/usr/bin/grep -m1 '^current:' "$P69")"
 }
