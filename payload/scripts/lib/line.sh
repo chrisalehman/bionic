@@ -99,14 +99,16 @@ line_record() {  # <plan> -> the landing record's path
   _wt_proofs_path "$root" "$1"
 }
 _line_load_run() {
-  declare -F plan_frontmatter_get >/dev/null 2>&1 && return 0
+  declare -F plan_working_branch >/dev/null 2>&1 && return 0
   # shellcheck source=/dev/null
   [ -r "$_LINE_LIB_DIR/run.sh" ] && . "$_LINE_LIB_DIR/run.sh" 2>/dev/null
-  declare -F plan_frontmatter_get >/dev/null 2>&1
+  declare -F plan_working_branch >/dev/null 2>&1
 }
+# The plan's working branch through lib/run.sh `plan_working_branch`, the one reader: SDLC State, then
+# frontmatter (wave-35 T7; D14). It read the frontmatter alone, so the publish disagreed with `ready`.
 _line_branch() {  # <plan> -> its working-branch
   _line_load_run || return 1
-  plan_frontmatter_get "$1" working-branch
+  plan_working_branch "$1"
 }
 line_head() {  # <plan> -> the accepted head
   local root b
@@ -396,11 +398,13 @@ _line_plan_write() {  # <plan> <row> <commit> <at> -> 0 written or nothing to wr
 }
 
 # THE ROSTER MARK (wave-28 T6; D7): the row's roster line gains `landed=<40-hex> landed_at=<ISO-UTC>`
-# (lib/roster.sh `roster_mark_landed`, the roster's one marker). The row's line is its launch line's
-# name, found as `ready` finds it: by `row=`, else by the plan row's agent. Sets LINE_MARKED to the
-# name marked (empty when the row has no line on this session's roster, as a hand landing may not).
+# (lib/roster.sh `roster_mark_landed`, the roster's one marker). The name marked is the row's writer as
+# `ready` held the landing to it, `line_row_writer`'s answer (wave-35 T7; burns debt row-writer-lookup):
+# this function used to resolve the launch line's name for itself, so an agent whose latest row carries
+# another name was held under one name and marked under the other. Sets LINE_MARKED to the name marked
+# (empty when the row has no writer on this session's roster, as a hand landing may not).
 _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
-  local roster launch name
+  local roster
   LINE_MARKED=""
   [ -n "$LINE_SID" ] || return 0
   if ! declare -F roster_mark_landed >/dev/null 2>&1; then
@@ -409,13 +413,10 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
     declare -F roster_mark_landed >/dev/null 2>&1 || return 0
   fi
   roster="${2%/}/.bionic/tmp/roster-${LINE_SID}.state"
-  # THE NAME the way `line_ready` finds it (wave-28 T64): the launch line's, else the plan agent's cell, so a
-  # run adopted after a clear (no launch line on this roster) is marked too. No row of the name, no mark.
-  launch="$(_wt_launch_row "$roster" row "$3")" \
-    || launch="$(_wt_launch_row "$roster" name "$(_line_plan_agent "$1" "$3")")" || launch=""
-  name="${launch:+$(_wt_field "$launch" name)}"; [ -n "$name" ] || name="$(_line_plan_agent "$1" "$3")"
-  [ -n "$name" ] || return 0
-  roster_mark_landed "$roster" "$name" "$4" "$5" && LINE_MARKED="$name"
+  # A run adopted after a clear (no launch line on this roster) is marked too: the writer is then the
+  # plan row's agent cell. No row of the name, no mark.
+  line_row_writer "$roster" "$1" "$3" || return 0
+  roster_mark_landed "$roster" "$LINE_WRITER" "$4" "$5" && LINE_MARKED="$LINE_WRITER"
 }
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock

@@ -1917,6 +1917,16 @@ worktree_mark() {  # <tree> <name>
     || { rm -f "$gd/bionic-agent.$$"; printf 'marker-unwritable'; return 1; }
 }
 
+# worktree_marker <tree> -> the name the tree's marker holds; rc 1 and nothing when it carries none (wave-35
+# T7; D14). The dispatch wall asks it before `mark` rewrites the marker, so a tree whose recorded writer is
+# still open on the roster is not handed to a second one (hooks/dispatch-preflight.sh, THE ROW'S LIVE WRITER).
+worktree_marker() {  # <tree>
+  local gd m=""
+  gd="$(git -C "${1:-}" rev-parse --absolute-git-dir 2>/dev/null)" && [ -f "$gd/bionic-agent" ] || return 1
+  IFS= read -r m < "$gd/bionic-agent" || [ -n "$m" ] || return 1
+  [ -n "$m" ] && printf '%s' "$m"
+}
+
 # rc 0 when no component of the absolute <path> is a symbolic link, so the path is its own
 # physical name. Read with `[ -L ]` per component rather than `_wt_abs`, which costs a subshell
 # per candidate on the permission hook's path; the two agree here because a candidate has

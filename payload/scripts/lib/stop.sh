@@ -1156,7 +1156,8 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       fi
 
       LG_WORKING_BRANCH=""
-      [ -n "$LG_RUN_PLAN" ] && LG_WORKING_BRANCH=$(plan_frontmatter_get "$LG_RUN_PLAN" "working-branch")
+      # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
+      [ -n "$LG_RUN_PLAN" ] && LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")
       LG_MAIN_BRANCH=""
       LG_BASE_SRC=""
       if [ -n "$LG_WORKING_BRANCH" ] \

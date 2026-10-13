@@ -578,30 +578,6 @@ PROOF_READING_FINDINGS
   _proof_result_var "$out"; PROOF_DERIVED="$_PROOF_RESULT"
 }
 
-# proof_working_branch <plan> -> the plan's `working-branch:`, or nothing. The `## SDLC State`
-# key first — the one the `current` verb reads to fill the Step-4 block — then the frontmatter
-# key of the same name, which a plan written by Step 0 also carries. Fenced lines are not read.
-proof_working_branch() {
-  local plan="$1" wb
-  [ -f "$plan" ] || return 0
-  wb="$(awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
-      v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-      print v; exit }' "$plan")"
-  if [ -z "$wb" ]; then
-    wb="$(awk '
-      NR == 1 && $0 == "---" { f = 1; next }
-      f && $0 == "---" { exit }
-      f && /^[[:space:]]*working-branch[[:space:]]*:/ {
-        v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-        gsub(/^["\047]|["\047]$/, "", v); print v; exit }' "$plan")"
-  fi
-  printf '%s' "$wb"
-}
-
 # proof_checkout <repo> <branch> -> the path of the checkout of <repo> that has <branch> checked
 # out; exit 1 with nothing printed when none does.
 proof_checkout() {
@@ -1303,7 +1279,12 @@ proof_state() {
   local plan="$1" tree="$2" h c wb wt files rec why
   h="$(proof_last "$plan" floor)"
   [ -n "$h" ] || { printf 'uncovered\tno regression proof on this plan yet\n'; return 0; }
-  wb="$(proof_working_branch "$plan")"
+  # The working branch is lib/run.sh `plan_working_branch`'s answer, the one reader (wave-35 T7; D14).
+  if ! declare -F plan_working_branch >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/run.sh" >/dev/null 2>&1
+  fi
+  wb="$(plan_working_branch "$plan")"
   [ -n "$wb" ] || { printf 'uncovered\tthe plan names no working-branch\n'; return 0; }
   wt="$(proof_checkout "$tree" "$wb")" \
     || { printf 'uncovered\tno checkout holds the working branch %s\n' "$wb"; return 0; }
@@ -1633,7 +1614,7 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")" ;; esac
       floor)
         x="$(proof_last "$plan" floor)"
         if [ -z "$x" ]; then st=absent
-        elif [ "$(proof_head "$tree" "$(proof_working_branch "$plan")" 2>/dev/null)" != "$head" ]; then
+        elif [ "$(proof_head "$tree" "$(plan_working_branch "$plan")" 2>/dev/null)" != "$head" ]; then
           st="uncovered	$x..$head"
         else
           st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"

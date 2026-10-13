@@ -3638,4 +3638,65 @@ s34_gate "$R74N"
 expect_eq "74o3 …and the real commit gate admits it" "0" "$GATE_RC"
 POKE_BOUND="$S74_BOUND_WAS"
 
+# ============================================================
+section "§BRIEF-SUITES: brief on a code row reads the anchor index for its Suites, else marks the orchestrator's slot, never Suites: none (wave-35 T8; REQ-6 AC-6.3; D15, D9)"
+# ============================================================
+#
+# fails-when: `brief` prints `Suites: none` for a row that writes code. Wave-34's T11 named eleven code files and
+# no test, and its brief derived `Suites: none`, a waiver nobody chose (A-orch-11). A row whose Files name no
+# *.test.sh and write a path outside the record now takes, from `anchors index` at the working branch's head, the
+# suites whose anchors name its files (by file name, sorted, once each); a row no anchor covers gets the slot
+# marked for the orchestrator. A row that writes no code (Files — or record paths only) keeps `Suites: none`.
+# FIXTURE FIDELITY: T11's Files cell is wave-34's plan row T11, verbatim; the anchored suites are committed on the
+# working branch, whose head the index is read at, as `brief` reads the working head.
+BS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBS="$(make_repo brief-suites)"; ( cd "$RBS" && git commit -q --allow-empty -m init )
+mkdir -p "$RBS/lib" "$RBS/tests"
+printf 'the needle line\nthe other line\n' > "$RBS/lib/anch.sh"
+printf 'the second needle\n' > "$RBS/lib/two.sh"
+printf "#!/bin/bash\nanchor file lib/anch.sh 'the needle line'\nanchor file lib/two.sh 'the second needle'\n" > "$RBS/tests/anch.test.sh"
+printf "#!/bin/bash\nanchor file lib/two.sh 'the second needle'\n" > "$RBS/tests/beta.test.sh"
+( cd "$RBS" && git add lib tests && git commit -qm "anchored suites" )
+PBS="$(s42_plan "$RBS" 4)"
+BS_T11_FILES="hooks/session-poker.sh, hooks/bash-walls.sh, payload/scripts/lib/root.sh, payload/scripts/lib/roots.sh, payload/scripts/lib/run.sh, payload/scripts/lib/units.sh, payload/scripts/lib/roster.sh, payload/scripts/lib/session.sh, payload/scripts/lib/binding.sh, payload/scripts/lib/walls.sh"
+BS_TABLE="$TMPROOT/bs-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T11 | 4 | build | Hot helpers are fork-free (D19, AC-9.2), wave-34 T11 | senior-implementor | — | 180 | REQ-1 | %s | — | — | pending |\n' "$BS_T11_FILES"
+  printf '| T12 | 4 | build | a piece one suite anchors | implementor | — | 30 | REQ-1 | lib/anch.sh, .bionic/docs/record/wave-01-fixture/T12.md | — | — | pending |\n'
+  printf '| T13 | 4 | build | a piece two suites anchor | implementor | — | 30 | REQ-1 | lib/*.sh, .bionic/docs/record/wave-01-fixture/T13.md | — | — | pending |\n'
+  printf '| T14 | 5 | verify | the walk | researcher | — | 30 | REQ-1 | — | — | — | pending |\n'
+  printf '\n'
+} > "$BS_TABLE"
+awk -v t="$BS_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBS" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBS.new" && mv "$PBS.new" "$PBS"
+( cd "$RBS" && git add -f "$PBS" && git commit -qm "brief-suites fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
+BS_FILE="$RBS/.bionic/docs/record/wave-01-fixture/briefs"
+bs_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
+  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+}
+expect_eq "BS-0 precondition: the index at the working head names both anchored files" \
+  "lib/anch.sh	tests/anch.test.sh|lib/two.sh	tests/anch.test.sh,tests/beta.test.sh" \
+  "$(bash "$POKER" anchors index "$RBS" --at wave/01-fixture 2>/dev/null | paste -sd'|' -)"
+poke "$RBS" brief T11
+expect_eq "BS-1 brief T11 (wave-34's row) exits 0 (positive: Row reads)" "0|T11" "$RC|$(bs_field "$BS_FILE/T11.md" Row)"
+expect_eq "BS-1b AC-6.3 a code row no anchor covers gets the orchestrator's slot for Suites, never none" "1" \
+  "$(bs_field "$BS_FILE/T11.md" Suites | /usr/bin/grep -c '^<ORCHESTRATOR: ')"
+expect_eq "BS-1c …and for Lands-on" "1" "$(bs_field "$BS_FILE/T11.md" Lands-on | /usr/bin/grep -c '^<ORCHESTRATOR: ')"
+expect_eq "BS-1d …so neither line reads none" "0" "$(/usr/bin/grep -c '^\(Suites\|Lands-on\): none' "$BS_FILE/T11.md" || true)"
+poke "$RBS" brief T12
+expect_eq "BS-2 a code row one suite anchors: Suites is that suite, by file name" "0|anch.test.sh" "$RC|$(bs_field "$BS_FILE/T12.md" Suites)"
+expect_eq "BS-2b …and Lands-on the same set" "anch.test.sh" "$(bs_field "$BS_FILE/T12.md" Lands-on)"
+poke "$RBS" brief T13
+expect_eq "BS-3 a Files glob covering two anchored files: every suite declaring either, sorted, once each" "anch.test.sh, beta.test.sh" \
+  "$(bs_field "$BS_FILE/T13.md" Suites)"
+poke "$RBS" brief T14
+expect_eq "BS-4 control: a row that writes no code keeps Suites: none (positive: BS-2 read a suite from the same extractor)" "none" \
+  "$(bs_field "$BS_FILE/T14.md" Suites)"
+expect_eq "BS-5 a build row naming no artifact anywhere keeps the artifact slot marked, not invented" "1" \
+  "$(bs_field "$BS_FILE/T11.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
+POKE_BOUND="$BS_BOUND_WAS"
+
 finish
