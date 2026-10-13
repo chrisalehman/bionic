@@ -357,9 +357,23 @@ rc_file() {
 #                  zero where no alias stands, so it cannot fail an rc under
 #                  `set -e`. An alias defined BELOW the block still wins when
 #                  `claude` is typed: an alias is looked up before a function.
+#                  A SESSION IN A BIONIC CHECKOUT RUNS THE CHECKOUT (wave-36 T1,
+#                  spec D7, ADR-055). When the cwd is inside a git checkout whose
+#                  payload/.claude-plugin/plugin.json names bionic — from any
+#                  directory of it, by `git rev-parse --show-toplevel` — the call
+#                  adds `--plugin-dir <root>/payload`, which loads that payload in
+#                  place for the one session and silently stands in for the
+#                  installed bionic. Anywhere else it adds nothing and the install
+#                  is the release. Nothing is copied and no registry is written.
+#                  THE COST IS THE CALL'S, NEVER THE SHELL'S: defining the function
+#                  runs nothing; typing `claude` runs one git and one grep. `grep
+#                  -E` and not jq, which a machine may not have. The pattern is in
+#                  double quotes so the body holds no single quote, and this case
+#                  arm, remove.sh's copy and rc-item.test.sh can each carry it
+#                  verbatim between single quotes.
 rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
-    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" && grep -Eqs "\"name\"[[:space:]]*:[[:space:]]*\"bionic\"" "$r/payload/.claude-plugin/plugin.json" && set -- --plugin-dir "$r/payload" "$@"; command claude --allow-dangerously-skip-permissions "$@"; }' ;;
     *)            return 1 ;;
   esac
   return 0
@@ -376,6 +390,8 @@ rc_earlier() {  # <item> <n> — prints the nth earlier body, rc 1 when there is
     claude-proxy:1) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
     # 40be1c30 (2026-08-27) until 484afee2 (wave-27 T75), which put `unalias` above it.
     claude-proxy:2) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    # 484afee2 (wave-27 T75) until wave-36 T1, which put the checkout's --plugin-dir in front.
+    claude-proxy:3) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
     *) return 1 ;;
   esac
   return 0

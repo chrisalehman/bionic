@@ -223,7 +223,7 @@ RM_RC_END='# ─── bionic:rc:end ───'
 # §T78 pins both line for line.
 rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
-    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" && grep -Eqs "\"name\"[[:space:]]*:[[:space:]]*\"bionic\"" "$r/payload/.claude-plugin/plugin.json" && set -- --plugin-dir "$r/payload" "$@"; command claude --allow-dangerously-skip-permissions "$@"; }' ;;
     *)            return 1 ;;
   esac
   return 0
@@ -235,6 +235,8 @@ rc_earlier() {  # <item> <n> — prints the nth earlier body, rc 1 when there is
     claude-proxy:1) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
     # 40be1c30 (2026-08-27) until 484afee2 (wave-27 T75), which put `unalias` above it.
     claude-proxy:2) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    # 484afee2 (wave-27 T75) until wave-36 T1, which put the checkout's --plugin-dir in front.
+    claude-proxy:3) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
     *) return 1 ;;
   esac
   return 0
