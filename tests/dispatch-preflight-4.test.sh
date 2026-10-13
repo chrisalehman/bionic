@@ -3322,6 +3322,10 @@ expect_contains "OW.2b …the one line says it is a second whole run, naming the
 expect_contains "OW.2c …the detail names the suite the floor still owes" "a.test.sh" "$GATE_VERR"
 expect_absent "OW.2d …and the arm is not left unchecked" "not checked: full-run" "$GATE_ERR$GATE_VERR"
 expect_status "OW.2e …and journalled nothing" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+# THE REFUSAL STATES THE FLOOR AS THE JUDGE HOLDS IT (wave-35 T31; D20, critic-adversarial finding 8): Step 5 owes
+# the matrix, the walk and the auditor, and Step 7 is where the floor is demanded; no "one whole green run".
+expect_contains "OW.2f D20 the detail says Step 7 is where the floor is demanded, as the judge closes it" "Step 7 is where the floor is demanded" "$GATE_VERR"
+expect_absent "OW.2g …and no longer calls the floor one whole green run" "one whole green run" "$GATE_VERR"
 
 # ============================================================================
 section "§REMEDY — the full-tree refusal names floor-run, and the line, run as printed, is admitted (wave-35 T10; REQ-1 AC-1.8; D10)"

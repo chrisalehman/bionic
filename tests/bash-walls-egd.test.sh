@@ -454,4 +454,14 @@ jur_refused "JURIS-7d …and an ANSI-C spelling of it, ln -s <root>/\$'\\x2egit'
 jur_refused "JURIS-7e …and 'printf -v', which sets a variable in the shell that commits" \
   "cd $JUR_S && printf -v PATH %s /x && git commit -m m"
 
+# A CASE-INSENSITIVE FILESYSTEM TAKES `.GIT` AS THE REPOSITORY DIRECTORY (wave-35 T31; D20, critic-adversarial
+# finding 4): APFS opens `.GIT` and `.Git` as `.git`, and a probe committed into the root through
+# `rm -rf .GIT && ln -s <root>/.GIT .GIT`. The `.git` check compares without regard to case.
+jur_refused "JURIS-7f 'cd <scratch> && rm -rf .GIT && ln -s <root>/.GIT .GIT && git commit' is refused (case-insensitive)" \
+  "cd $JUR_S && rm -rf .GIT && ln -s $JUR_R/.GIT .GIT && git commit -m m"
+jur_refused "JURIS-7g …and 'echo \"gitdir: <root>/.Git\" > .Git' before the commit" \
+  "cd $JUR_S && echo \"gitdir: $JUR_R/.Git\" > .Git && git commit -m m"
+jur_exempt "JURIS-7h control: a '.GITIGNORE' file is not the repository directory, exempt as '.gitignore' is" \
+  "cd $JUR_S && touch .GITIGNORE && git add -A && git commit -m m"
+
 finish
