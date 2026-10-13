@@ -2107,6 +2107,134 @@ expect_eq "LAND-mut4 the doctored run still closes and fences the line (two fenc
   "$LAND_UMRC|$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLV/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$LAND_UMUT"
 
+# ============================================================
+section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count is folded from the lines the escape-hatch verbs wrote"
+# ============================================================
+# `landing-report --hand-holds <plan>` adds one line to the report: the uses of the escape-hatch verbs, by kind,
+# each counted from the line its verb wrote and from nothing else. A prose line saying `by-hand` counts nothing.
+# close-out prints that line on its card and writes it into the continuation under `## Hand-holds`; it reads it
+# BEFORE the tmp wipe, because three kinds (amend, hold, extend) live on the roster and act 3 wipes the roster.
+#
+# THE SOURCES, each in the shape its writer prints (the fixture plants the shape, the roster through the one
+# production row writer, the plan's proof lines through lib/proof.sh's own line builders):
+#   by-hand        landing record      line/v1|ev=published|…|kind=hand|…            (lib/line.sh)
+#   declines/lifts fill ledger         fill-ledger/v1|…|state=decline| and |state=lift|   (the verbs; the Stop hook writes ok and hold)
+#   amends         roster              distinct (name, amended=<value>) of the run's plan
+#   holds          roster              distinct (name, held=<value>)
+#   extensions     roster              distinct (name, extended=<value>)
+#   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
+#   regression-2   plan                `approved: regression-2` under ## SDLC State
+#   second-floors  plan                `proved: kind=floor` lines past the first
+# A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
+HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
+HH_C="$(printf 'd%.0s' $(seq 40))"
+HH_WANT="hand-holds: total=11 · by-hand=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1"
+# hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
+hh_report() {
+  local proj="$1"; shift
+  ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report "$@" "$proj/$PLAN_REL" 2>/dev/null )
+}
+# hh_plant <project> -> one use of every verb, and the prose that must count for nothing
+hh_plant() {
+  local p="$1" plan="$1/$PLAN_REL" rec="$1/.bionic/docs/record/wave-01-fixture" h w
+  case "$p" in "$SANDBOX"/*) : ;; *) echo "hh_plant: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
+  mkdir -p "$rec"
+  # the landing record: a queue landing, a by-hand landing, and a prose line that says by-hand
+  {
+    printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$HH_C" "$p"
+    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
+    printf 'line/v1|ev=published|row=T2|commit=%s|kind=hand|by=Chris|why=the line was down|at=2026-10-06T10:40:00Z\n' "$HH_C"
+    printf 'note: T3 was landed by-hand outside the line (kind=hand), says this prose line\n'
+  } > "$rec/landing-proofs.log"
+  # the fill ledger: a decline and its lift (the verbs' shapes), the Stop hook's hold and ok lines, and prose
+  {
+    printf 'fill-ledger/v1|at=2026-10-06T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1|declined-on=-\n'
+    printf 'fill-ledger/v1|at=2026-10-06T09:10:00Z|session=fixture|turn=|current=4|state=lift|ceiling=6|width=|open=|free=|ready=|launched=|declined=|missed=0|idle=|room=|lifted=T1\n'
+    printf 'fill-ledger/v1|at=2026-10-06T09:20:00Z|session=fixture|turn=t1|current=4|state=hold|ceiling=|width=6|open=6|free=0|ready=T1|launched=|declined=|missed=0|idle=|room=0\n'
+    printf 'fill-ledger/v1|at=2026-10-06T09:30:00Z|session=fixture|turn=t2|current=4|state=ok|ceiling=|width=6|open=5|free=1|ready=|launched=T1|declined=|missed=0|idle=|room=1\n'
+    printf 'the orchestrator wrote state=decline here by hand and nobody counted it\n'
+  } > "$rec/fill-ledger.log"
+  # the roster: two amends (one row re-written twice), a hold, an extension, and another run's amend
+  {
+    roster_row_fixture status=identified name=w-a agent_id=aa plan="$plan" amended="2026-10-06T10:00:00Z widen the files"
+    roster_row_fixture status=confirmed name=w-a agent_id=aa plan="$plan" amended="2026-10-06T10:00:00Z widen the files"
+    roster_row_fixture status=identified name=w-b agent_id=ab plan="$plan" amended="2026-10-06T11:00:00Z add a suite"
+    roster_row_fixture status=identified name=w-a agent_id=aa plan="$plan" held="2026-10-06T12:00:00Z waiting on the reader fp=1-2-3"
+    roster_row_fixture status=identified name=w-c agent_id=ac plan="$plan" extended="2026-10-06T12:30:00Z more work"
+    roster_row_fixture status=identified name=w-z agent_id=az plan="/elsewhere/wave-99-other.plan.md" amended="2026-10-06T13:00:00Z another run's"
+  } >> "$p/.bionic/tmp/roster-fixture.state"
+  # the plan: a second floor, a waive, a waive-row, an approve regression-2, and the prose that must count nothing
+  h="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_last "$2" floor' _ "$REPO_ROOT/payload/scripts/lib" "$plan")"
+  expect_nonempty "HH-0a precondition: the fixture plan already holds one floor proof, whose head the second reuses" "$h"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    plan="$2"; h="$3"
+    proof_add_line "$plan" "$(proof_line floor "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
+    proof_add_line "$plan" "$(proof_waiver_line evidence "$h" "Chris Lehman" 2026-10-06T13:10:00Z "waive it")" > "$plan.pf" && mv "$plan.pf" "$plan"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
+  w="$(mktemp "$SANDBOX/hh-plan.XXXXXX")"
+  awk '
+    /^approved-by:/ { print; print "approved: regression-2 by Chris Lehman 2026-10-06T12:00:00Z \"yes\""; next }
+    /^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed"
+                   print; next }
+    /^## Tasks/ { print "```"; print "proved: kind=floor head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
+                  print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
+                  print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "```"; print ""; print; next }
+    /^  readback:/ && !wr { print; print "  waiver: Chris Lehman 2026-10-06 \"waive the row\" — fixture"
+                            print "  waiver: someone said we might waive this later"; wr = 1; next }
+    { print }' "$plan" > "$w" && mv "$w" "$plan"
+}
+PH="$(mk_fixture handholds)"; advance_to "$PH" 8
+hh_plant "$PH"
+expect_eq "HH-0 precondition: the plan carries both waiver forms, the approval and two floor proofs as flush-left lines (the extractors find them)" "1/1/1/2" \
+  "$(grep -c '^waived: question=evidence ' "$PH/$PLAN_REL")/$(grep -c '^  waiver: Chris Lehman 2026-10-06 ' "$PH/$PLAN_REL")/$(grep -c '^approved: regression-2 by Chris Lehman' "$PH/$PLAN_REL")/$(awk '/^```/ { f = !f; next } !f && /^proved: kind=floor / { n++ } END { print n + 0 }' "$PH/$PLAN_REL")"
+HH_OUT="$(hh_report "$PH" --hand-holds)"
+expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
+  "$(printf '%s\n' "$HH_OUT" | grep '^hand-holds: ')"
+expect_eq "HH-2 …after the landings line, which is the one the default prints" "1/2" \
+  "$(printf '%s\n' "$HH_OUT" | grep -c '^landings: ')/$(printf '%s\n' "$HH_OUT" | grep -n '^hand-holds: ' | cut -d: -f1)"
+expect_eq "HH-3 the default landing-report prints no hand-holds line (its output stays what it was)" "0" \
+  "$(hh_report "$PH" | grep -c '^hand-holds')"
+# the same fixture with the verbs' lines removed and the prose kept: nothing is counted
+PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
+mkdir -p "$PHP/.bionic/docs/record/wave-01-fixture"
+printf 'note: T3 was landed by-hand (kind=hand); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
+awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print; next } { print }' \
+  "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
+HH_PROSE="$(hh_report "$PHP" --hand-holds)"
+expect_eq "HH-4 a run whose only by-hand, decline, lift, waiver and approval are prose counts zero in every kind" \
+  "hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0" \
+  "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
+# the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
+run_close "$PH" check
+expect_eq "HH-5 check prints the hand-holds line on the card" "$HH_WANT" "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
+run_close "$PH" run
+expect_eq "HH-6 run exits 0, prints the same line on the card, and the wipe took the roster it read" "0/$HH_WANT/0" \
+  "$CO_RC/$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')/$(tmp_entries "$PH")"
+hh_section() { awk '/^## / { s = ($0 == "## Hand-holds"); next } s && NF && !/^```/ { print }' "$1"; }
+expect_eq "HH-7 the continuation carries ## Hand-holds once, with the line (read before the wipe)" "1/$HH_WANT" \
+  "$(/usr/bin/grep -c '^## Hand-holds$' "$PH/$CONT_REL" | tr -d ' ')/$(hh_section "$PH/$CONT_REL")"
+expect_eq "HH-7b …and the section sits after ## Landings and before the Resume instruction" "yes" \
+  "$(awk '/^## Landings$/ { a = NR } /^## Hand-holds$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PH/$CONT_REL")"
+# the mutation arms: a continuation template without the section, and a fold that counts a line it should not
+HH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-hh-mut.XXXXXX")"
+mkdir -p "$HH_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$HH_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$HH_MUT/scripts/card.sh"
+sed 's/^\$(co_hand_holds_section)$//' "$SCRIPT" > "$HH_MUT/scripts/close-out.sh"
+expect_eq "HH-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$HH_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PHM="$(mk_fixture handholds-mut)"; advance_to "$PHM" 8; hh_plant "$PHM"
+( cd "$PHM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    BIONIC_GATE_DIR="$HH_GATE" bash "$HH_MUT/scripts/close-out.sh" "$PHM/$PLAN_REL" run ) > "$SANDBOX/hh-mut.out" 2>&1
+HH_MRC=$?
+expect_eq "HH-mut1 the doctored run still closes and writes its continuation, still printing the card line (the mutant runs)" "0|1|1" \
+  "$HH_MRC|$(/usr/bin/grep -c '^## Deferrals$' "$PHM/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^hand-holds: ' "$SANDBOX/hh-mut.out" | tr -d ' ')"
+expect_eq "HH-mut2 …and the continuation carries no ## Hand-holds, so HH-7 goes red on it" "0" \
+  "$(/usr/bin/grep -c '^## Hand-holds$' "$PHM/$CONT_REL" | tr -d ' ')"
+rm -rf "$HH_MUT"
+
 
 # ============================================================
 section "§FLOOR-DECLARED (wave-28 T75; REQ-17 AC-17.1, D36): close-out proceeds on a declared floor's log"
