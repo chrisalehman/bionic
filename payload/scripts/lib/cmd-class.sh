@@ -2631,11 +2631,17 @@ _CMD_PLACE_AWK='
     # It must sit in the target group or an enclosing one, in the target branch or an
     # enclosing one; not behind || or in a pipeline; not piped on or backgrounded; behind &&
     # only when && carries on to the target; and the target not on its own failure branch.
+    # THE END OF THE COMMAND (ti past the last segment) IS REACHED WHETHER OR NOT A STEP
+    # FAILS, so for it the && rule asks the other way (wave-36 T43): a cd behind && moves
+    # the end only when every link ahead of it on its && run is a cd pl_ran can read, which
+    # the reader takes as done, as it takes every readable cd. `cd A && cd B` ends in B;
+    # `true && cd B` may end where it began, and stays unsure.
     function pl_sure(j, ti, tg, tc, k,   pv, nx, x, br) {
       if (!pl_ganc(PL_SG[j], tg) || !inst_anc(CI[j], tc)) return 0
       pv = (j > 1 ? PL_SK[j - 1] : ""); nx = PL_SK[j]
       if (pv == "||" || pv == "|" || pv == "|&") return 0
       if (nx == "|" || nx == "|&" || nx == "&") return 0
+      if (pv == "&&" && ti > k) return pl_ran(j)
       if (pv == "&&") for (x = j; x < ti; x++) if (PL_SK[x] != "&&" && PL_SK[x] != "(") return 0
       if (nx == "||" && ti <= k) {
         br = 0
@@ -2643,6 +2649,20 @@ _CMD_PLACE_AWK='
         if (!br) return 0
       }
       return 1
+    }
+    # 1 when the cd at j, opened by &&, has run whenever the shell reaches the end: walking back
+    # along its && run, every segment ahead of it is a direct cd with a literal operand in the
+    # same group and branch instance, and the run opens the command or follows a ; or a
+    # newline. Anything else ahead (a command that may fail, an unreadable cd, a ||, a pipe, a
+    # group boundary) leaves the end unsure.
+    function pl_ran(j,   x) {
+      for (x = j - 1; x >= 1; x--) {
+        if (PL_SG[x] != PL_SG[j] || CI[x] != CI[j] || NX[x] != 1) return 0
+        if (pl_direct(trim(XT[x, 1])) != 1 || pl_cd_dir(trim(XT[x, 1]), "/") == "") return 0
+        if (x == 1 || PL_SK[x - 1] == ";" || PL_SK[x - 1] == "\n") return 1
+        if (PL_SK[x - 1] != "&&") return 0
+      }
+      return 0
     }
     # The directory a direct cd names, folded, or "" when it is not a literal: bare, quoted
     # with nothing to expand, ~ or ~/ from HOME, bare cd for HOME, -- allowed; never an

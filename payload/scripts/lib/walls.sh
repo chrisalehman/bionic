@@ -1860,7 +1860,7 @@ fi
 # directories named before the commit": the reader follows a cd chain it can read, so two literal
 # directories are one answer now, and only a move it cannot follow is left to refuse.
 if [ "$_EG_CWD_SRC" = moving ]; then
-  refuse exit2 commit "the wall cannot follow this commit's move" "cd to an absolute path first" \
+  refuse exit2 commit "the wall cannot follow this commit's move" "cd first, or commit alone" \
 "evidence-gate: $(place_moving_line "$_EG_MOVING").
 The commit is not judged on this run's plan: the wall cannot say which tree or repository it lands in.
 Fix: open the command with a literal cd <absolute dir> (or a variable set in the same command), or commit as its own call."
@@ -5683,8 +5683,21 @@ _BSG_COMMIT_VERBS="commit merge revert cherry-pick am rebase commit-tree update-
 # place_moving_line <segment> -> the one line a `moving` placement is refused with: the segment as
 # cmd_place typed it, and the two ways to give the wall a place. Every caller that refuses a
 # moving answer prints this line (T25's commit readers among them), so a reader sees one sentence.
+# THE ADVICE FITS THE MOVE (wave-36 T43; walk.md shape six). A segment that is already a cd to one
+# absolute literal path lost the place by where it sits, not by what it names (behind a step that
+# may fail, behind `||` or a pipe, in a closed group or branch), so it is told to open the command
+# or run alone; telling it to cd to an absolute path first is advice it has already taken.
 place_moving_line() {
-  printf 'moving-form: `%s` moves the shell where the wall cannot follow, so it cannot place this command; cd to an absolute path first, or run it as its own call' "${1:-}"
+  local _s="${1:-}" _fix="cd to an absolute path first, or run it as its own call" _op
+  case "$_s" in
+    'cd /'*|'{ cd /'*)
+      _op="${_s#\{ }"; _op="${_op#cd }"
+      case "$_op" in
+        *[[:space:]\$\`\\\*\?\[\'\"]*) : ;;
+        *) _fix="the path is absolute, but the cd sits where it may not run; open the command with it, or run it as its own call" ;;
+      esac ;;
+  esac
+  printf 'moving-form: `%s` moves the shell where the wall cannot follow, so it cannot place this command; %s' "$_s" "$_fix"
 }
 
 # _bsg_under <path> <dir> -> 0 when <path> is <dir> or below it (both already physical).

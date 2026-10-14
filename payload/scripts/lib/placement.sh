@@ -48,7 +48,10 @@
 #   ITS REACH IS SURE when the cd sits in the target's subshell group or an enclosing one and
 #   in the target's compound branch or an enclosing one; is not behind `||` or a pipe; is not
 #   piped on or backgrounded; is behind `&&` only when `&&` carries on unbroken to the target;
-#   and the target is not on the cd's own `||` failure branch.
+#   and the target is not on the cd's own `||` failure branch. For THE END OF THE COMMAND, which
+#   is reached whether or not a step fails, a cd behind `&&` is sure only when every link ahead
+#   of it on its `&&` run is a cd with a literal operand (wave-36 T43): `cd /a && cd /b` ends in
+#   /b, `true && cd /b` is moving.
 #   EVERY OTHER MOVE LOSES THE PLACE: pushd, popd, a cd it cannot read, a cd whose reach is
 #   unsure, and a cd behind anything in front of the command word or inside a string the
 #   segment runs (`X=1 cd`, `if cd`, `then cd`, `! cd`, `command cd`, `builtin cd`, `eval cd`,
