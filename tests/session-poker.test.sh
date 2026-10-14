@@ -2996,13 +2996,25 @@ rm -rf "$R16/plans"
 poke "$R16" bind "$P16B_REAL"
 expect_eq       "…and the fixture is back on B for the refusal cases below" "0" "$RC"
 
-# ---------- 16c: a delivered plan is refused — it is not an OPEN run ----------
-_m16_before="$(cksum < "$M16")"
+# ---------- 16c: a delivered plan binds, bound-closed; an abandoned one is refused ----------
+# wave-36 T14 (D13, AC-7.7; ruling r1791955629-34788): `task-set --reason` amends a delivered plan from the session
+# bound to it, so the verb binds a delivered run of this root, and the session reads it bound-closed. A plan neither
+# open nor delivered (abandoned) is still refused, as not an open run, the marker left where it was.
 poke "$R16" bind "$P16D"
-expect_eq       "bind to a delivered plan exits 1" "1" "$RC"
+expect_eq       "bind to a delivered plan exits 0" "0" "$RC"
+expect_contains "…and says what it bound" "poker: bound $P16D" "$OUT"
+expect_contains "…and that the session reads it bound-closed, open to task-set --reason alone" "bound-closed" "$OUT"
+expect_contains "…the marker names it" "plan=$(real_path_of "$P16D")" "$(cat "$M16")"
+P16X="$(plan_at "$R16" 'epic-16/wave-abandoned.plan.md' "$(printf -- '---\nabandoned: 2026-10-01 superseded\n---\n\n'; plan_body 4)")"
+_m16_x="$(cksum < "$M16")"
+poke "$R16" bind "$P16X"
+expect_eq       "bind to an abandoned plan, neither open nor delivered, exits 1" "1" "$RC"
 expect_contains "…and names the reason" "poker: REFUSED — not an open run" "$OUT"
-expect_eq       "…leaving the marker byte-for-byte where it was" "$_m16_before" "$(cksum < "$M16")"
-expect_contains "…so the session is still bound to what it was bound to" "plan=$P16B_REAL" "$(cat "$M16")"
+expect_eq       "…leaving the marker byte-for-byte where it was" "$_m16_x" "$(cksum < "$M16")"
+poke "$R16" bind "$P16B_REAL"
+expect_eq       "…and the fixture is back on B for the refusal cases below" "0" "$RC"
+_m16_before="$(cksum < "$M16")"
+expect_contains "…so the session is bound to B again" "plan=$P16B_REAL" "$(cat "$M16")"
 
 # ---------- 16d: a path outside this root is not a plan of this root ----------
 printf '%s' "$(plan_body 3)" > "$TMPROOT/outside-plan.md"
@@ -3124,13 +3136,13 @@ poke "$R16" bind "$P16Q"
 expect_eq       "a plan untouched for eight days, but still OPEN, binds (exit 0)" "0" "$RC"
 expect_contains "…and the marker names it" "plan=$P16Q_REAL" "$(cat "$M16")"
 # THE PAIRED NEGATIVE, on the same fixture: age is not what makes a run bindable. A plan
-# equally old whose run is DELIVERED is still refused, so 16k proves "openness decides",
-# not "everything binds".
+# equally old whose run is ABANDONED is still refused, so 16k proves "openness (or delivery,
+# wave-36 T14) decides", not "everything binds".
 P16QD="$(plan_at "$R16" 'epic-16/wave-quiet-done.plan.md' \
-  "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')")"
+  "$(printf -- '---\nabandoned: 2026-10-01 superseded\n---\n\n'; plan_body 4)")"
 backdate "$P16QD" 691200
 poke "$R16" bind "$P16QD"
-expect_eq       "…while an equally old DELIVERED run is still refused" "1" "$RC"
+expect_eq       "…while an equally old ABANDONED run is still refused" "1" "$RC"
 expect_contains "…as not an open run" "poker: REFUSED — not an open run" "$OUT"
 
 # ---------- 16l: one canonicalizer — two spellings, one plan= (AC-23) ----------
