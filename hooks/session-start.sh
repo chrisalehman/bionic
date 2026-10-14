@@ -253,7 +253,7 @@ TMP="$BIONIC_ROOT/.bionic/tmp"
 # Fails open like everything here: any step that cannot be done writes nothing.
 ss_load_record() {
   local root top commit="" rec tmpf f
-  local -a files
+  local -a files=()
   [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "${BIONIC_SID:-}" ] || return 0
   root="$(cd "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || return 0
   [ -n "$root" ] && [ -d "$TMP" ] || return 0
@@ -264,7 +264,7 @@ ss_load_record() {
   if [ -n "$top" ] && { [ "$top" = "$root" ] || [ "$top/payload" = "$root" ]; }; then
     commit="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || commit=""
   fi
-  while IFS= read -r f; do [ -n "$f" ] && files[${#files[@]}]="$f"; done <<SS_LOADED_FILES
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<SS_LOADED_FILES
 $(cd "$root" 2>/dev/null && {
     [ -f hooks/hooks.json ] && printf '%s\n' hooks/hooks.json
     for d in skills agents; do [ -d "$d" ] && find -L "$d" -type f -name '*.md' 2>/dev/null; done
