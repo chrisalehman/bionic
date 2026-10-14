@@ -3472,47 +3472,11 @@ adopt_abs() {  # <path> <repo root>
 
 # ---------------------------------------------------------------- is this session's residue gone?
 #
-# THE SWEEP'S OWN QUESTION, ASKED OF ONE SESSION (REQ-9 AC-9.1; D10). `adopt` offered every
-# row on every roster in the project, so a wave released two days ago was still offering its
-# agents at every resume. A session nobody can act on, whose state files the next
-# SessionStart deletes, has nothing left to adopt — and the two halves of that sentence are
-# the two facts the `sweep` verb already decides with: the session is not in
-# `patrol_live_session_ids`, and its own newest state file is older than the window a
-# windowed sweep defers inside.
-#
-# BOTH HALVES, NEVER ONE. Deadness alone is the WRONG answer here and would break the verb's
-# whole purpose: a `/clear` leaves the predecessor id dead within seconds while its roster is
-# the freshest file in the directory, and that is precisely the roster `adopt` exists to read.
-# The sweep defers exactly that session (hooks/session-start.sh passes `--window`), so this
-# verb defers with it and the two agree by construction.
-#
-# THE LIVE SET IS RESOLVED ONCE PER RUN, by the caller, and handed in: it reads one file per
-# running process out of the claude home and is the same answer for every roster in the walk.
-#
-# A SESSION WHOSE FILES CANNOT BE STAT'D AT ALL is treated as old enough, exactly as the
-# sweep treats it (its own comment: an age gate exists to protect a session that JUST died,
-# not to withhold state this verb can no longer measure).
-adopt_residue_swept() {  # <root> <sid> <live id list> <window s> <now> -> 0 the sweep would take it
-  local root="$1" sid="$2" live="$3" window="$4" now="$5" f mt newest=0
-  [ -n "$sid" ] || return 1
-  case "
-$live
-" in
-    *"
-$sid
-"*) return 1 ;;
-  esac
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    mt="$(file_mtime "$f")"
-    case "$mt" in ''|*[!0-9]*) continue ;; esac
-    [ "$mt" -gt "$newest" ] && newest="$mt"
-  done <<EOF
-$(patrol_session_state_files "$root" "$sid")
-EOF
-  [ "$newest" -gt 0 ] && [ $(( now - newest )) -lt "$window" ] && return 1
-  return 0
-}
+# THE SWEEP'S OWN QUESTION, ASKED OF ONE SESSION (REQ-9 AC-9.1; D10), lives in lib/fill.sh as the first
+# arm of `roster_row_open` (wave-36 T10; AC-4.4): dead (not among the live ids) AND every state file older
+# than the window `sweep --window` defers inside. Both halves, never one: a `/clear` leaves the
+# predecessor dead within seconds while its roster is the freshest file here. The dispatch wall's hold
+# asks the same function, so a row this verb counts closed is a row the wall admits over.
 
 # ---------------------------------------------------------------- is this row too quiet?
 #
@@ -6413,9 +6377,6 @@ case "$VERB" in
     ADOPT_WINDOW="$(poker_interval_seconds 2>/dev/null)"
     case "$ADOPT_WINDOW" in ''|*[!0-9]*) ADOPT_WINDOW="$(parse_seconds "$POKER_INTERVAL_DEFAULT" 2>/dev/null)" ;; esac
     case "$ADOPT_WINDOW" in ''|*[!0-9]*) ADOPT_WINDOW=1200 ;; esac
-    # ONE ANSWER PER PREDECESSOR SESSION, not one per row: the residue question is about the
-    # session's files, and every row on a roster shares them.
-    ADOPT_SESSION_SWEPT=no
 
     # THE EVIDENCE, READ ONCE (wave-34 T6; REQ-14 AC-14.1/14.3, D23). Liveness used to be an mtime and
     # LANDED the deliverable's presence, so a SIGKILLed probe read LANDED and a just-killed one RUNNING
@@ -6440,7 +6401,9 @@ case "$VERB" in
     ADOPT_READS_OLD=""
     [ -f "$ADOPT_READS_FILE" ] && [ ! -L "$ADOPT_READS_FILE" ] && ADOPT_READS_OLD="$(cat "$ADOPT_READS_FILE" 2>/dev/null)"
     ADOPT_READS_NEW=""
-    ADOPT_XACKS="$(adopt_cross_acks "$ADOPT_DIR")"
+    # THE ONE CLOSURE RULE (wave-36 T10; AC-4.4, D10): lib/fill.sh `roster_row_open`, which the dispatch
+    # wall's hold asks too, handed the inputs this run already resolved. It reads every ledger's acks.
+    roster_closure_begin "$ADOPT_DIR" "$ADOPT_LIVE_IDS" "$ADOPT_WINDOW" "$ADOPT_NOW"
     adopt_handoff_note "$ADOPT_OWN_PLAN" "$REPO_REAL" "$ADOPT_DIR"
 
     # THE WALK IS lib/fill.sh's `fill_roster_walk` (wave-35 T28; AC-5.5, D14): every regular, unlinked
@@ -6451,12 +6414,6 @@ case "$VERB" in
       [ -n "$OSID" ] || continue
       ADOPT_OUT="$(adopt_fold "$ADOPT_RF" "$ADOPT_LEDGER")"
       [ -n "$ADOPT_OUT" ] || continue
-      # THE RESIDUE QUESTION, ONCE PER ROSTER (REQ-9 AC-9.1). A dead session whose files the
-      # next sweep takes has nothing to hand over; its rows are counted `closed` below and
-      # printed nowhere.
-      ADOPT_SESSION_SWEPT=no
-      adopt_residue_swept "$REPO_REAL" "$OSID" "$ADOPT_LIVE_IDS" "$ADOPT_WINDOW" "$ADOPT_NOW" \
-        && ADOPT_SESSION_SWEPT=yes
       # COUNTED WHEN IT CONTRIBUTES, not when it is merely read. A predecessor whose every
       # row is closed is residue, and "N open row(s) from M predecessor session(s)" would be
       # a sentence naming sessions the reader was shown nothing from.
@@ -6498,20 +6455,18 @@ case "$VERB" in
         # about it can be read, so the row is listed as UNREADABLE with the path, never
         # adopted and never counted closed — `session_run`'s `bound-unreadable`, asked of the
         # row's plan instead of the session's (cross-gate §S.4g).
+        #
+        # THE RULE IS lib/fill.sh's `roster_row_open` (wave-36 T10; AC-4.4, D10), the one the dispatch
+        # wall's hold asks, in this order: a dead, sweepable session closes (asked once per session);
+        # an unreadable plan answers 2, listed UNREADABLE below; a closed run closes; an ack taken in
+        # another session after the launch closes. A row the wall admits over is a row this verb skips.
         ADOPT_ROW_CLOSED=no
         ADOPT_ROW_UNREADABLE=""
-        if [ "$ADOPT_SESSION_SWEPT" = yes ]; then
-          ADOPT_ROW_CLOSED=yes
-        elif [ -n "$RPLAN" ] && [ "$RPLAN" != none ]; then
-          ADOPT_ROW_PLAN_ABS="$(adopt_abs "$RPLAN" "$REPO_REAL")"
-          if plan_unreadable "$ADOPT_ROW_PLAN_ABS" >/dev/null; then
-            ADOPT_ROW_UNREADABLE="$ADOPT_ROW_PLAN_ABS"
-          elif [ -f "$ADOPT_ROW_PLAN_ABS" ] && ! run_open "$ADOPT_ROW_PLAN_ABS"; then
-            ADOPT_ROW_CLOSED=yes
-          fi
-        fi
-        [ "$ADOPT_ROW_CLOSED" = no ] && [ -z "$ADOPT_ROW_UNREADABLE" ] \
-          && adopt_acked_elsewhere "$ADOPT_XACKS" "$OSID" "$RNAME" "$RID" "$RLAUNCH" && ADOPT_ROW_CLOSED=yes
+        roster_row_open "$OSID" "$RNAME" "$RID" "$RLAUNCH" "$RPLAN"
+        case $? in
+          1) ADOPT_ROW_CLOSED=yes ;;
+          2) ADOPT_ROW_UNREADABLE="$ROSTER_ROW_WHY" ;;
+        esac
         if [ "$ADOPT_ROW_CLOSED" = yes ]; then
           ADOPT_CLOSED=$((ADOPT_CLOSED + 1))
           continue

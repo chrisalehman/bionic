@@ -44,8 +44,12 @@
 #                                      every roster in the directory with its ack ledger, the
 #                                      walk `adopt` takes (wave-35 T28; AC-5.5, D14).
 #   fill_roster_holds <state dir> [<plan>]
-#                                      the names every roster holds open, acks applied, each
-#                                      with its session and its row.
+#                                      the names every roster holds open, the closure rule
+#                                      applied, each with its session and its row.
+#   roster_closure_begin <state dir> [<live ids> [<window s> [<now>]]]
+#   roster_row_open <sid> <name> <id> <launched> [<plan>]
+#                                      the one closure rule of a roster row, which the hold
+#                                      and `adopt` both ask (wave-36 T10; AC-4.4, D10).
 #   fill_held_ids <plan> <ids>         of <ids>, the ones a roster holds open, with the name
 #                                      and the session; the fill leaves them out.
 #
@@ -651,6 +655,121 @@ adopt_acked_elsewhere() {  # <cross acks> <origin sid> <name> <id> <launched ISO
     END { exit !f }'
 }
 
+# ONE CLOSURE RULE (wave-36 T10; REQ-4 AC-4.4, D10). "Is this roster row still someone's work" had two
+# readers with two rules: the dispatch wall's hold (`fill_roster_holds`, so the fill and the tick too) applied
+# acks alone, while `adopt` also closed a row whose session is dead and whose files the sweep already takes,
+# or whose own run is closed. A row the hold refused was a row adopt never offered, and the refusal's remedy,
+# "adopt, then acked", looped (debt roster-open-fold). Both now ask `roster_row_open`, asked of a row its own
+# roster already reads open (`roster_open_names`, its own ledger applied).
+#
+#   roster_closure_begin <state dir> [<live ids> [<window s> [<now epoch>]]]
+#     The closure's inputs for one walk of that directory's rosters: the acks of every ledger in it
+#     (`adopt_cross_acks`), the live session ids, the sweep's window and the clock. A caller that already
+#     holds the last three (adopt resolves them once per run) hands them in; otherwise each is read the first
+#     time a row needs it, so a walk whose every row is acked or live never reads the claude home or the
+#     interval. The live set read here adds this process's own session (CLAUDE_CODE_SESSION_ID): a session
+#     is live by construction to itself, whatever the claude home says.
+#
+#   roster_row_open <sid> <name> <agent id> <launched ISO> [<row plan>] -> 0 open · 1 closed · 2 neither
+#     ROSTER_ROW_WHY is set on 1 to `swept`, `plan-closed` or `acked`, and on 2 to the plan's absolute path.
+#     Asked in this order:
+#     1 closed `swept` — the session that launched it is dead and its files are sweepable. Dead: <sid>, the
+#       session the roster names, is not among the live ids (`patrol_live_session_ids`: a sessions file whose
+#       pid answers). Sweepable: the sweep's own question, every state file of that session
+#       (`patrol_session_state_files`) older than the window, the poker interval `sweep --window` defers
+#       inside; a session whose files cannot be stat'd at all is old enough, as the sweep reads it. Both
+#       halves, never one: a `/clear` leaves its predecessor dead within seconds while that roster is the
+#       freshest file here, and it is the roster adopt exists to read. Answered once per session per walk.
+#     2 neither — <row plan> is there and cannot be read (`plan_unreadable`): its run may be mid-flight, so
+#       the row is never counted closed; the hold reads it as open, adopt lists it UNREADABLE.
+#     1 closed `plan-closed` — <row plan> is a file here and its run is closed (`run_open`). A plan that is
+#       not a file here (another root's, since deleted) says nothing, and the row stays open.
+#     1 closed `acked` — an ack taken in another session after its launch closes it (`adopt_acked_elsewhere`).
+#     0 open otherwise.
+#   A fact this process cannot read is never guessed: with patrol.sh not loaded no session reads dead, and
+#   with run.sh not loaded no plan reads closed or unreadable. <row plan> resolves against the directory's
+#   project root when relative; `none` or empty is no plan.
+_RRO_DIR=""; _RRO_ROOT=""; _RRO_XACKS=""; _RRO_LIVE=""; _RRO_LIVE_READ=no; _RRO_WINDOW=""; _RRO_NOW=""
+_RRO_SWEPT="|"; _RRO_KEPT="|"; _RRO_PLAN=""; _RRO_PLAN_RC=""
+roster_closure_begin() {
+  _RRO_DIR="${1:-}"; _RRO_ROOT="${_RRO_DIR%/.bionic/tmp}"
+  _RRO_XACKS=""; [ -n "$_RRO_DIR" ] && _RRO_XACKS="$(adopt_cross_acks "$_RRO_DIR")"
+  _RRO_LIVE=""; _RRO_LIVE_READ=no; [ $# -ge 2 ] && { _RRO_LIVE="$2"; _RRO_LIVE_READ=yes; }
+  _RRO_WINDOW="${3:-}"; _RRO_NOW="${4:-}"
+  _RRO_SWEPT="|"; _RRO_KEPT="|"; _RRO_PLAN=""; _RRO_PLAN_RC=""
+  return 0
+}
+
+_rro_window() {  # -> the sweep's window in seconds: the poker's own interval, read as `sweep --window` reads it
+  local w=""
+  if declare -F poker_interval_seconds >/dev/null 2>&1; then
+    w="$(poker_interval_seconds 2>/dev/null)"
+    case "$w" in ''|*[!0-9]*) w="$(parse_seconds "${POKER_INTERVAL_DEFAULT:-20m}" 2>/dev/null)" ;; esac
+  elif declare -F patrol_interval >/dev/null 2>&1; then
+    w="$(patrol_interval "$_RRO_ROOT" 2>/dev/null)"; w="${w%% *}"
+  fi
+  case "$w" in ''|*[!0-9]*) w=1200 ;; esac
+  printf '%s' "$w"
+}
+
+_rro_swept() {  # <sid> -> 0 dead and sweepable, 1 not (or not readable here)
+  local s="${1:-}" f mt newest=0
+  [ -n "$s" ] || return 1
+  case "$_RRO_KEPT" in *"|$s|"*) return 1 ;; esac
+  case "$_RRO_SWEPT" in *"|$s|"*) return 0 ;; esac
+  declare -F patrol_session_state_files >/dev/null 2>&1 || return 1
+  if [ "$_RRO_LIVE_READ" != yes ]; then
+    declare -F patrol_live_session_ids >/dev/null 2>&1 || return 1
+    _RRO_LIVE="$(patrol_live_session_ids)"
+    [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || _RRO_LIVE="${_RRO_LIVE}${_RRO_LIVE:+
+}${CLAUDE_CODE_SESSION_ID}"
+    _RRO_LIVE_READ=yes
+  fi
+  case "
+$_RRO_LIVE
+" in
+    *"
+$s
+"*) _RRO_KEPT="${_RRO_KEPT}$s|"; return 1 ;;
+  esac
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"  # GNU first: its `stat -f` prints filesystem text
+    case "$mt" in ''|*[!0-9]*) continue ;; esac
+    [ "$mt" -gt "$newest" ] && newest="$mt"
+  done <<RRO_FILES
+$(patrol_session_state_files "$_RRO_ROOT" "$s")
+RRO_FILES
+  if [ "$newest" -gt 0 ]; then
+    [ -n "$_RRO_WINDOW" ] || _RRO_WINDOW="$(_rro_window)"
+    [ -n "$_RRO_NOW" ] || _RRO_NOW="$(date +%s)"
+    if [ $(( _RRO_NOW - newest )) -lt "$_RRO_WINDOW" ]; then _RRO_KEPT="${_RRO_KEPT}$s|"; return 1; fi
+  fi
+  _RRO_SWEPT="${_RRO_SWEPT}$s|"
+  return 0
+}
+
+roster_row_open() {  # <sid> <name> <agent id> <launched ISO> [<row plan>] -> 0 open · 1 closed · 2 neither
+  local rs="${1:-}" rn="${2:-}" ri="${3:-}" rl="${4:-}" rp="${5:-}"
+  ROSTER_ROW_WHY=""
+  if _rro_swept "$rs"; then ROSTER_ROW_WHY=swept; return 1; fi
+  if [ -n "$rp" ] && [ "$rp" != none ]; then
+    case "$rp" in /*) ;; *) rp="$_RRO_ROOT/$rp" ;; esac
+    if [ "$rp" != "$_RRO_PLAN" ]; then
+      _RRO_PLAN="$rp"; _RRO_PLAN_RC=0
+      if declare -F plan_unreadable >/dev/null 2>&1 && plan_unreadable "$rp" >/dev/null; then _RRO_PLAN_RC=2
+      elif [ -f "$rp" ] && declare -F run_open >/dev/null 2>&1 && ! run_open "$rp"; then _RRO_PLAN_RC=1
+      fi
+    fi
+    case "$_RRO_PLAN_RC" in
+      2) ROSTER_ROW_WHY="$rp"; return 2 ;;
+      1) ROSTER_ROW_WHY=plan-closed; return 1 ;;
+    esac
+  fi
+  if adopt_acked_elsewhere "$_RRO_XACKS" "$rs" "$rn" "$ri" "$rl"; then ROSTER_ROW_WHY=acked; return 1; fi
+  return 0
+}
+
 # fill_state_dir <plan> -> the `.bionic/tmp` nearest above the plan, or nothing
 #   The rosters of the project the plan is in. Walked up from the plan's own directory, so a docs root
 #   anywhere under the project finds it; a plan outside any project holds nothing.
@@ -677,18 +796,19 @@ _fill_plan_key() {
 
 # fill_roster_holds <state dir> [<plan>] -> sid TAB name TAB row, one line per name a roster holds open
 #   For each roster of the walk, this session's included: the names `roster_open_names` reads open with
-#   that roster's own ledger applied (the one close predicate), less a name an ack taken in ANOTHER
-#   session closes (`adopt_acked_elsewhere`, asked as `adopt` asks it: the origin is the roster's session). <row> is the name's latest `row=`
+#   that roster's own ledger applied (the one close predicate), less a name `roster_row_open` closes, the
+#   one closure rule adopt asks too (wave-36 T10; AC-4.4): an ack taken in ANOTHER session, a dead session
+#   whose files are sweepable, a closed run. <row> is the name's latest `row=`
 #   (the dispatch wall writes the brief's `Row:` there), else the name, which `fill_row_launched` matches
 #   by the id-to-name rule. Given <plan>, only the names whose latest row was dispatched under it (`plan=`,
 #   compared as resolved paths): a name of another plan, or of none, holds no row of this one.
 fill_roster_holds() {
-  local d="${1:-}" plan="${2:-}" root pkey="" xacks sid rf led open name id launched hasplan rplan row
+  local d="${1:-}" plan="${2:-}" root pkey="" sid rf led open name id launched hasplan rplan row rpa
   local lastraw="" lastkey=""
   [ -n "$d" ] && declare -F roster_open_names >/dev/null 2>&1 || return 0
   root="${d%/.bionic/tmp}"
   [ -z "$plan" ] || pkey="$(_fill_plan_key "$plan" "$root")"
-  xacks="$(adopt_cross_acks "$d")"
+  roster_closure_begin "$d"
   while IFS=$'\t' read -r sid rf led; do
     [ -n "$sid" ] || continue
     open="$(roster_open_names "$rf" "$led")"
@@ -700,7 +820,8 @@ fill_roster_holds() {
         [ "$rplan" = "$lastraw" ] || { lastraw="$rplan"; lastkey="$(_fill_plan_key "$rplan" "$root")"; }
         [ "$lastkey" = "$pkey" ] || continue
       fi
-      adopt_acked_elsewhere "$xacks" "$sid" "$name" "$id" "$launched" && continue
+      rpa=""; [ "$hasplan" = 1 ] && rpa="$rplan"
+      roster_row_open "$sid" "$name" "$id" "$launched" "$rpa" || { [ $? -eq 1 ] && continue; }
       printf '%s\t%s\t%s\n' "$sid" "$name" "${row:-$name}"
     done <<FILL_HOLD_ROWS
 $(FILL_HOLD_OPEN="$open" awk -F'|' '
