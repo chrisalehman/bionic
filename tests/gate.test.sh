@@ -16,6 +16,9 @@
 #                      unmoved reading; a dead holder's lock is taken over
 #   §NUMBER    AC-2.6  an ask whose time runs out exits 75 before --within, having run nothing;
 #                      its next ask resumes its number and is served before a later one
+#   §RESUME-KIND D8, AC-2.1 (wave-36 T11) a request is resumed only by its who, key and kind once
+#                      its holder cleared it; a dead holder's is ended (rc=gone) and the ask takes a
+#                      fresh number; gate_end on a never-admitted id is accepted only with --by
 #   §FIRST     AC-2.7  a writer's number waits, a landing's arrives, and the landing is admitted
 #                      first. Mutation: landing-before-work removed admits the writer
 #   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
@@ -110,7 +113,8 @@
 # of payload/scripts/lib under the world's directory, each anchored first and each proved
 # to run (its own positive row) before its claim is read; §COST adds one more, and §REAPED,
 # §OWN and §CLEARED one each (T47). §OPEN adds four (T71); §SHARE-ROOM two (wave-33 T1);
-# §BUDGET-AT-ASK one (wave-33 T3).
+# §BUDGET-AT-ASK one (wave-33 T3); §RESUME-KIND one (wave-36 T11), and §OWN's arm reads its
+# mutant's new harm: blind to liveness, it ends the live waiter's request (rc=gone).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The machine, the clock and the duration records are SYNTHESIZED by design (the world's
@@ -509,6 +513,90 @@ expect_eq "N.10 when room appears the resumed number is admitted" "0" "$(rc_of n
 expect_eq "N.11 it is the number first taken" "${na_id:-none}" "$(id_of na)"
 expect_false "N.12 the later number is still waiting" has nb.rc
 expect_eq "N.13 and holds no admitted line (asked|admitted)" "1008|" "$(field "$(req_of nb)" asked)|$(field "$(req_of nb)" admitted)"
+
+# ── §RESUME-KIND ─────────────────────────────────────────────────────────────
+section "§RESUME-KIND — the gate ends what it cannot resume (wave-36 T11; D8, AC-2.1; C2, C3)"
+# A request is resumed only by the same who, key AND kind, and only one whose holder handed it
+# back (holder=-, a 75). A never-admitted request whose holder died (a shim killed in its wait) is
+# ended at that who's next ask for the key, `ended=<now> rc=gone`, and the ask gets a fresh
+# number: wave-35 saw request 2156 read kind=whole after a work ask resumed it. gate_end on a
+# never-admitted id is refused unless the end names who stopped it (`--by`, stop-run's call).
+newest_req() { ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | grep '^[0-9][0-9]*$' | sort -n | tail -n 1; }
+holder_was() {  # <id> <pid> — the request still names that (dead) pid as its holder
+  case "$(field "$1" holder)" in "$2:"*) return 0 ;; esac
+  return 1
+}
+fresh resume-kind
+world_machine 8 8192 60 6.0
+world_cost h 30
+world_cost k 30
+HOLD=1 ask_bg rh work h 0; wait_for 20 has rh.rc
+expect_eq "N.12a precondition: a holder is admitted, so a whole ask waits" "0" "$(rc_of rh)"
+AGENT=rk HOLD=1 ask_bg rw whole k 600
+wait_for 20 asked_by rk
+rw_id="$(req_of rk)"; rw_pid="$(cat "$D/rw.pid" 2>/dev/null)"
+expect_eq "N.12b precondition: the whole ask filed a request that waits (kind|admitted)" "whole|" \
+  "$(field "$rw_id" kind)|$(field "$rw_id" admitted)"
+kill_tree "$rw_pid"; wait "$rw_pid" 2>/dev/null; wait_for 20 dead "$rw_pid"
+expect_true "N.12c precondition: its asker is killed and the request still names it as holder" holder_was "$rw_id" "$rw_pid"
+AGENT=rk ask_fg rn work k 0 >/dev/null
+rn_id="$(newest_req)"
+expect_eq "N.12 AC-2.1 a work ask by the same who for the same key, the whole request's holder dead, takes a fresh number" \
+  "3 yes" "$(nreq) $([ -n "$rn_id" ] && [ "$rn_id" != "$rw_id" ] && echo yes || echo no)"
+expect_eq "N.12d …which reads kind=work, never the dead request's kind" "work" "$(field "$rn_id" kind)"
+expect_eq "N.12e the dead holder's request is ended at that ask: ended=<now> rc=gone (ended|rc)" "1000|gone" \
+  "$(field "$rw_id" ended)|$(field "$rw_id" rc)"
+expect_match "N.12f gate_list reads it ended" "$rw_id ended kind=whole *rc=gone key=k" \
+  "$(glist | grep "^$rw_id ")"
+# the same kind: a dead holder's request is ended whatever the kind of the next ask
+AGENT=rs HOLD=1 ask_bg rs1 whole k 600
+wait_for 20 asked_by rs
+rs_id="$(req_of rs)"; rs_pid="$(cat "$D/rs1.pid" 2>/dev/null)"
+kill_tree "$rs_pid"; wait "$rs_pid" 2>/dev/null; wait_for 20 dead "$rs_pid"
+expect_true "N.12g precondition: a second whole ask's asker is killed, its request names it" holder_was "$rs_id" "$rs_pid"
+AGENT=rs ask_fg rs2 whole k 0 >/dev/null
+expect_eq "N.12h the same whole ask by that who takes a fresh number too, and the dead one reads rc=gone (requests|rc|new kind)" \
+  "5|gone|whole" "$(nreq)|$(field "$rs_id" rc)|$(field "$(newest_req)" kind)"
+# cleared_kind_rows <gate lib> <name> — a whole ask returned 75 (holder cleared), then a work
+# ask, then a whole ask, all by one who for one key, a holder admitted throughout. Sets CK_ID (the
+# cleared request), CK_N1 (requests after the work ask), CK_W (the work ask's request), CK_N2
+# (requests after the second whole ask).
+cleared_kind_rows() {
+  fresh "$2"
+  world_machine 8 8192 60 6.0
+  world_cost h 30
+  world_cost k 30
+  GATE_LIB="$1" HOLD=1 ask_bg ch work h 0; wait_for 20 has ch.rc
+  GATE_LIB="$1" AGENT=rc ask_fg rc1 whole k 0 >/dev/null
+  CK_ID="$(req_of rc)"
+  GATE_LIB="$1" AGENT=rc ask_fg rc2 work k 0 >/dev/null
+  CK_N1="$(nreq)"; CK_W="$(newest_req)"
+  GATE_LIB="$1" AGENT=rc ask_fg rc3 whole k 0 >/dev/null
+  CK_N2="$(nreq)"
+}
+cleared_kind_rows "$GATE" resume-cleared
+expect_eq "N.12i precondition: the whole ask returned 75 and its request is nobody's (rc|kind|holder)" "75|whole|-" \
+  "$(rc_of rc1)|$(field "$CK_ID" kind)|$(field "$CK_ID" holder)"
+expect_eq "N.12j a work ask by the same who for the same key does not resume the cleared whole request: a fresh number, kind=work" \
+  "3 work" "$CK_N1 $(field "$CK_W" kind)"
+expect_eq "N.12k …and the cleared request is left as it was: kind=whole, holder -, no ended line (kind|holder|ended)" "whole|-|" \
+  "$(field "$CK_ID" kind)|$(field "$CK_ID" holder)|$(field "$CK_ID" ended)"
+expect_eq "N.12l the who's next whole ask resumes the cleared number: no new request" "3" "$CK_N2"
+# gate_end on a never-admitted id: refused from a caller that never asked, accepted from stop-run's call
+GE_OUT="$( . "$GATE" 2>/dev/null; gate_end "$CK_W" 143 2>&1; echo "rc=$?")"
+expect_eq "N.12m gate_end on a never-admitted id with no --by is refused (rc 2), as before" "rc=2" "${GE_OUT##*$'\n'}"
+expect_contains "N.12n …saying it was never admitted, and writes no end" "was never admitted" "$GE_OUT"
+expect_eq "N.12o …the request holds no ended line" "" "$(field "$CK_W" ended)"
+GE_OUT="$( . "$GATE" 2>/dev/null; gate_end "$CK_W" 143 --by "$WORLD_SID" --why 'parked by a test' 2>&1; echo "rc=$?")"
+expect_eq "N.12p gate_end <id> 143 --by <sid> --why <reason> on a never-admitted id is accepted (rc 0)" "rc=0" "${GE_OUT##*$'\n'}"
+expect_eq "N.12q …and writes the end with who stopped it and why (ended|rc|by|why)" "1000|143|$WORLD_SID|parked by a test" \
+  "$(field "$CK_W" ended)|$(field "$CK_W" rc)|$(field "$CK_W" by)|$(field "$CK_W" why)"
+MK="$(mutant resume-kind)"
+anchor file payload/scripts/lib/gate.sh 'elif [ -z "$_GATE_ID" ] && [ "$_R_kind" = "$1" ]; then'
+sed -i.bak 's/ \&\& \[ "\$_R_kind" = "\$1" \]; then$/; then/' "$MK"
+cleared_kind_rows "$MK" resume-cleared-mut
+expect_eq "N.12r the mutant (no kind test on resume) still files the whole ask's request" "whole" "$(field "$CK_ID" kind)"
+expect_eq "N.12s the mutant hands the work ask the cleared whole request — the kind test is the rule" "2" "$CK_N1"
 
 # ── §FIRST ───────────────────────────────────────────────────────────────────
 # first_rows <gate lib> <prefix> — a writer waits, a landing arrives, room appears; sets FIRST
@@ -1830,7 +1918,11 @@ anchor file payload/scripts/lib/gate.sh '&& [ "$_R_key" = "$2" ] && ! _gate_aliv
 sed -i.bak 's/ \&\& ! _gate_alive; then$/; then/' "$MO"
 own_rows "$MO" own-mut
 expect_eq "O.11 the mutant (no liveness test on reuse) still takes the first ask's number" "2" "$OW_FIRST"
-expect_eq "O.12 the mutant hands the second ask the live waiter's number — the test is the rule" "2" "$OW_N"
+# wave-36 T11 (D8): a request whose holder is not alive and not cleared is a dead holder's, which the
+# next ask by its who for its key ends (rc=gone); so the mutant, blind to liveness, ends the live
+# waiter's request under it and files the second ask a fresh number.
+expect_eq "O.12 the mutant ends the live waiter's request under it (requests|rc) — the test is the rule" "3|gone" \
+  "$OW_N|$(field "$OW_FIRST" rc)"
 
 # ── §CLEARED ─────────────────────────────────────────────────────────────────
 section "§CLEARED — a request returned 75 is nobody's until its who asks again (T47; request row)"
