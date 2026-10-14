@@ -3513,6 +3513,93 @@ expect_eq "FP-7 code past the fix's landing that no born row landed is still unr
   "uncovered	${FP_C1}..${FP_C3}" "$(fp_of "$FP_AD")"
 
 # ============================================================
+section "§COVER — a reading covers its head; a later commit extends it when its paths are all prose or it lands a born row, and each commit prints its basis (wave-36 T7; REQ-3 AC-3.2, AC-3.3, AC-3.5; D9, D2, D3)"
+# ============================================================
+# `facts_state` reads every reading, whole or piece, as covered to its head, and extends it over <head>..<asked>
+# commit by commit on the first-parent line: a commit holds when every path it touched is prose
+# (`_proof_docs_path`, with tests/run.sh and tests/lib/ code), or when the landing record names it as the
+# landing of a row whose `- T<n>:` line carries ` born: review …` or ` born: floor …`. Any other commit owes,
+# whatever kind its row declared. `facts_cover <plan> <from> <to>` prints the judge's basis, one
+# `cover <sha> prose|born-review|born-floor|owes` line per commit, oldest first; rc 0 only when none owes.
+# The whole-scope rule ("any whole reading covers whatever its head") is gone: a whole line needs a whole
+# reading, and holds only as far as its question's chain does.
+#
+# FIXTURE FIDELITY. §FIXED-PASSES's repository on its working branch: init (the base), one code commit (R, the
+# readings' head), then five commits, each the shape it stands for: a CHANGELOG.md edit; the landing of T7, a
+# row born of a review (` born: review S2 on`, the rating form, which `proof_fixed` does not read, so only the
+# landing-record path holds it), touching b.sh; the landing of T8, a row born of the floor's red
+# (` born: floor a.test.sh`), touching c.sh; the landing of T9, a doc row touching payload/x.sh; a commit
+# touching tests/lib/assert.sh alone. The landing record's `ev=published` events are lib/line.sh's shape.
+RCV="$(fp_repo cover)"
+CV_B="$(git -C "$RCV" rev-parse HEAD)"
+CV_R="$(fp_commit "$RCV" a.sh one)"
+CV_D1="$(fp_commit "$RCV" CHANGELOG.md 'a wording fix')"
+mkdir -p "$RCV/payload" "$RCV/tests/lib"
+CV_D2="$(fp_commit "$RCV" b.sh 'the fix the review asked for')"
+CV_D3="$(fp_commit "$RCV" c.sh 'the fix of the floor red')"
+CV_D4="$(fp_commit "$RCV" payload/x.sh 'a doc row that touched code')"
+CV_D5="$(fp_commit "$RCV" tests/lib/assert.sh 'a test library edit')"
+cv_published() {  # <row> <commit> -> one published event, lib/line.sh's shape
+  printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-04T13:00:00Z' "$1" "$2" "$1"
+}
+cv_whole() {  # <head> <question> -> a whole reading's proof line, as proof_line writes it
+  bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" pass w-read whole' _ "$FP_LIB" "$1" "$FP_REC/$2-whole.md" "$2"
+}
+fp_record "$RCV" adv.md adversarial pass "${CV_B:0:10}..${CV_R:0:10}" 'findings: 0'
+fp_record "$RCV" adversarial-whole.md adversarial pass "${CV_B:0:10}..${CV_R:0:10}" 'findings: 0'
+fp_plan "$RCV" "${CV_B:0:10}" "$(cv_whole "$CV_R" adversarial)
+$(fp_proved "$CV_R" adv.md adversarial pass)
+- T7: landed $CV_D2 2026-10-04T13:00:00Z born: review S2 on
+- T8: landed $CV_D3 2026-10-04T13:00:00Z born: floor a.test.sh
+- T9: landed $CV_D4 2026-10-04T13:00:00Z" \
+  "| T7 | 4 | build | fix the b reader · born: review | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |
+| T8 | 4 | build | fix the floor red · born: floor | implementor | — | 30 | REQ-1 | c.sh | — | — | landed |
+| T9 | 4 | doc | a wording row | implementor | — | 30 | REQ-1 | payload/x.sh | — | — | landed |"
+fp_landing "$RCV" "$(cv_published T7 "$CV_D2")" "$(cv_published T8 "$CV_D3")" "$(cv_published T9 "$CV_D4")"
+CV_ADW="$(printf 'review\tadversarial\tbionic:critic\twhole')"
+cv_cover() {  # <from> <to> -> CV_OUT, CV_RC: facts_cover over the plan
+  CV_RC=0
+  CV_OUT="$(bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && facts_cover "$2" "$3" "$4"' _ "$FP_LIB" "$(fp_plan_path "$RCV")" "$1" "$2" 2>/dev/null)" || CV_RC=$?
+}
+
+expect_eq "CV-0 precondition: each commit after R touches the one path it stands for" \
+  "CHANGELOG.md|b.sh|c.sh|payload/x.sh|tests/lib/assert.sh" \
+  "$(for c in "$CV_D1" "$CV_D2" "$CV_D3" "$CV_D4" "$CV_D5"; do git -C "$RCV" show --name-only --format= "$c"; done | paste -sd'|' -)"
+fp_state "$RCV" "$CV_R"
+expect_eq "CV-0b precondition: at R itself the reading and its whole read are covered (the judge reads this fixture)" \
+  "covered covered" "$(fp_of "$FP_AD") $(fp_of "$CV_ADW")"
+
+fp_state "$RCV" "$CV_D1"
+expect_eq "CV-1 AC-3.2 a docs-only commit past R: covered" "covered" "$(fp_of "$FP_AD")"
+fp_state "$RCV" "$CV_D2"
+expect_eq "CV-2 AC-3.2 the landing of a born: review row touching code: covered" "covered" "$(fp_of "$FP_AD")"
+fp_state "$RCV" "$CV_D3"
+expect_eq "CV-3 AC-3.2 the landing of a born: floor row touching code: covered" "covered" "$(fp_of "$FP_AD")"
+expect_eq "CV-3b …and the whole read holds as far as its question's chain does" "covered" "$(fp_of "$CV_ADW")"
+fp_state "$RCV" "$CV_D4"
+expect_eq "CV-4 AC-3.2 a doc-declared row's landing touching payload/x.sh: uncovered from R" \
+  "uncovered	${CV_R}..${CV_D4}" "$(fp_of "$FP_AD")"
+expect_eq "CV-4b the whole-scope rule is gone: a whole read at R is uncovered past code nobody read" \
+  "uncovered	${CV_R}..${CV_D4}" "$(fp_of "$CV_ADW")"
+
+cv_cover "$CV_R" "$CV_D5"
+expect_eq "CV-5 AC-3.3 every commit after R prints its basis, oldest first" \
+  "cover $CV_D1 prose
+cover $CV_D2 born-review
+cover $CV_D3 born-floor
+cover $CV_D4 owes
+cover $CV_D5 owes" "$CV_OUT"
+expect_eq "CV-5b …rc 1, for a commit owes" "1" "$CV_RC"
+cv_cover "$CV_D4" "$CV_D5"
+expect_eq "CV-6 AC-3.5 a commit touching tests/lib/assert.sh alone, not born: owes (positive: CV-5 read prose through the same walk)" \
+  "cover $CV_D5 owes" "$CV_OUT"
+cv_cover "$CV_R" "$CV_D3"
+expect_eq "CV-7 a range where every commit holds: three basis lines and rc 0" "3 0" \
+  "$(printf '%s\n' "$CV_OUT" | awk 'NF' | wc -l | tr -d ' ') $CV_RC"
+cv_cover "$CV_R" "$CV_R"
+expect_eq "CV-8 asked at its own head: no commit, no line, rc 0" "|0" "$CV_OUT|$CV_RC"
+
+# ============================================================
 section "§DISPOSITION — one verb renders every finding of the registered readings and records the person's ruling per finding (wave-33 T13; REQ-5 AC-5.1; D6)"
 # ============================================================
 #   disposition                    one `finding` line per finding of every registered reading: its identity, rating,

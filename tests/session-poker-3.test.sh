@@ -395,7 +395,8 @@ expect_eq "57b §JUDGE AC-2.3 code landed past the last adversarial head: uncove
   "uncovered	${S57_C1}..${S57_C4}" "$(s57_of "$S57_AD")"
 expect_eq "57b2 …the run does not hold (rc 1)" "1" "$S57_RC"
 expect_eq "57b3 …while the questions read at the head stay covered" "covered" "$(s57_of "$S57_ST")"
-expect_eq "57b4 …and the whole read, taken once, is not owed again for the later code" "covered" "$(s57_of "$S57_ADW")"
+expect_eq "57b4 …and the whole read taken at C1 holds only as far as its question's chain: uncovered over the same range (wave-36 T7; D9: the whole-scope rule is gone)" \
+  "uncovered	${S57_C1}..${S57_C4}" "$(s57_of "$S57_ADW")"
 s57_reset; s57_floor "$S57_C4"
 for s57q in evidence adversarial structure; do s57_fact "$s57q" "$S57_C2" pass piece; done
 s57_fact adversarial "$S57_C2" pass whole; s57_fact structure "$S57_C2" pass whole
@@ -1776,14 +1777,14 @@ expect_eq "63e0b precondition: gone is not on the history of the working head" "
 S63_NEEDLE_ANC='git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1'
 S63_NEEDLE_REN="--no-renames --name-only --format='%x01%H' \"\$lh..\$hh\""
 S63_NEEDLE_MRG='--first-parent -m --no-renames'
-S63_NEEDLE_ALL='[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1'
+S63_NEEDLE_ALL='[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || prose=0'
 for s63n in "$S63_NEEDLE_ANC" "$S63_NEEDLE_REN" "$S63_NEEDLE_MRG" "$S63_NEEDLE_ALL"; do
   expect_eq "63e0c precondition: the mutation site is one line of the shipped proof.sh: $s63n" "1" "$(/usr/bin/grep -cF -- "$s63n" "$S57_LIB")"
 done
 S63_M_ANC="$(s63_mut anc "$S63_NEEDLE_ANC" ':')"
 S63_M_REN="$(s63_mut ren "$S63_NEEDLE_REN" "--name-only --format='%x01%H' \"\$lh..\$hh\"")"
 S63_M_MRG="$(s63_mut mrg "$S63_NEEDLE_MRG" '--first-parent --diff-merges=off --no-renames')"
-S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" '[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1; return 0')"
+S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" '[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || prose=0; [ "$prose" = 0 ] || prose=2')"
 # A merge, counted as what it brought in.
 s63_edge_plan "$S63E_H0"
 expect_eq "63e control: asked at the readings' own head, covered" "covered" "$(s63_adv_with "$S57_LIB" "$S63E_H0")"
@@ -3751,4 +3752,29 @@ expect_eq "BS-5 a build row naming no artifact anywhere keeps the artifact slot 
   "$(bs_field "$BS_FILE/T11.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
 POKE_BOUND="$BS_BOUND_WAS"
 
+
+# ============================================================
+section "§BORN-FLOOR: task-add --born floor:<suite> writes the floor-born marker the judge holds a landing by (wave-36 T7; REQ-3 AC-3.2; D9, D2)"
+# ============================================================
+# A row born of the floor's red carries ` born: floor <suite>` on its `- <id>:` line; lib/proof.sh's judge holds
+# the commit the landing record names as its landing (evidence-gate-2 §COVER). `--born floor:<suite>` takes one
+# suite by its file name (`<name>.test.sh`, the key the floor's records use); a floor-born row is no review-born
+# row, so fix-policy: and fix-cap: do not hold it, and its task cell says ` · born: floor`. FIXTURE FIDELITY: §74's
+# gate-admitted plan without reads; the verb is the real one.
+SBF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBF="$(make_repo s-born-floor)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
+PBF="$(s42_plan "$RBF" 4)"
+SBF_SUM="$(cksum < "$PBF")"
+poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:lib/a.sh
+expect_eq "BFV-1 --born floor: with a path that is no suite file name is the usage error, exit 2" "2" "$RC"
+expect_contains "BFV-1b …naming the shape" "floor:<suite>" "$OUT"
+expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
+expect_eq "BFV-2 task-add --born floor:a.test.sh exits 0" "0" "$RC"
+expect_regex "BFV-3 …the row's line ends born: floor a.test.sh" \
+  '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh$' "$(/usr/bin/grep '^- T6:' "$PBF")"
+expect_contains "BFV-4 …the task cell says born: floor" "| T6 | 4 | build | fix the floor red · born: floor |" "$(cat "$PBF")"
+expect_contains "BFV-5 …and the verb says it is floor-born" "T6 is floor-born (a.test.sh)" "$OUT"
+expect_absent "BFV-5b …and counts it against no fix-cap" "review-born rows:" "$OUT"
+POKE_BOUND="$SBF_BOUND_WAS"
 finish
