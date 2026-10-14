@@ -4230,6 +4230,82 @@ expect_eq "BR-19e a review row whose Files name no record entry gains its artifa
   "0|notes/review.txt, .bionic/docs/record/wave-01-fixture/T11.md" "$RC|$(ta_files T11)"
 
 # ============================================================
+section "§FILES: task-set <id> files=<list> corrects a pending row's Files cell that no roster names; a live or landed row's stays amend's (wave-36 T41; REQ-7 AC-7.1, AC-10.2; D13; A-orch-5, A-orch-6, A-orch-9, A-orch-10)"
+# ============================================================
+#
+# fails-when: a pending row no roster names refuses files=, a corrected cell is not what `brief` derives its Suites
+# and Files from, an active, landed or roster-named row accepts files=, a list the dispatch grammar refuses is
+# written, a refusal changes one byte of the plan, or a group with one refused row writes the others.
+#
+# THE RULE IS ONE: a row with no launch behind it has no contract, so its Files cell is the table's and task-set
+# writes it, judged as task-add judges it; a row with a launch has a contract on a roster, and amend widens that.
+# The fixture is §34's plan (T1 landed, T2 active, T5 a pending verify row) with two pending build rows added by
+# task-add; T7 is named by a roster row (a launch in flight), T6 by none. Expected cells are the fixture's own text.
+RFL="$(make_repo files-pending)"; ( cd "$RFL" && git commit -q --allow-empty -m init )
+git -C "$RFL" branch wave/01-fixture
+PFL="$(s42_plan "$RFL" 4)"
+poke "$RFL" task-add T6 4 build 'a piece the Files cell of which is wrong' implementor — 30 REQ-1 'hooks/d.sh'
+expect_eq "FILES-0 precondition: task-add writes the pending build row T6 (exit 0)" "0" "$RC"
+poke "$RFL" task-add T7 4 build 'a piece a launch is in flight for' implementor — 30 REQ-1 'hooks/e.sh'
+expect_eq "FILES-0b precondition: task-add writes the pending build row T7 (exit 0)" "0" "$RC"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PFL" > "$PFL.tmp" && mv "$PFL.tmp" "$PFL"
+new_roster "$RFL"
+add_row "$RFL" name=implementor agent_id=a-implementor launched_at="$(iso_ago 600)"
+printf '%s|row=T7\n' "$(mkrow name=w-T7 agent_id=a-w-T7 launched_at="$(iso_ago 60)" deliverable=e.md duration="30 minutes" subagent_type=bionic:implementor)" >> "$(roster_of "$RFL")"
+( cd "$RFL" && git add -f "$PFL" && git commit -qm "files fixture" ) >/dev/null 2>&1
+fl_cell() { awk -F'|' -v id="$1" '{ c = $2; gsub(/[ \t]/, "", c) } c == id { v = $10; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit }' "$PFL"; }
+fl_field() { awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"; }
+FL_REC=".bionic/docs/record/wave-01-fixture"
+expect_eq "FILES-0c precondition: the extractor reads T6's, T7's and T2's cells from the fixture plan" "hooks/d.sh|hooks/e.sh|b.sh" "$(fl_cell T6)|$(fl_cell T7)|$(fl_cell T2)"
+expect_contains "FILES-0d precondition: the roster names T7 by row=" "|row=T7" "$(cat "$(roster_of "$RFL")")"
+
+# ---------- a pending row no roster names: the cell is replaced whole, and brief reads it ----------
+poke "$RFL" task-set T6 files="hooks/d.sh, tests/b.test.sh, $FL_REC/T6-d.md"
+expect_eq "FILES-1 task-set T6 files= on a pending row no roster names exits 0" "0" "$RC"
+expect_eq "FILES-1b …and the cell is replaced whole with the list" "hooks/d.sh, tests/b.test.sh, $FL_REC/T6-d.md" "$(fl_cell T6)"
+expect_contains "FILES-1c …and the verb says what it wrote" "task-set — T6" "$OUT"
+poke "$RFL" brief T6
+expect_eq "FILES-1d brief T6 exits 0" "0" "$RC"
+FL_BRIEF="$RFL/$FL_REC/briefs/T6.md"
+expect_eq "FILES-1e …its Files is the corrected cell (positive: the extractor reads a value from the real file)" \
+  "hooks/d.sh, tests/b.test.sh, $FL_REC/T6-d.md" "$(fl_field "$FL_BRIEF" Files)"
+expect_eq "FILES-1f …and its Suites is the *.test.sh entry the corrected cell added" "b.test.sh" "$(fl_field "$FL_BRIEF" Suites)"
+s34_gate "$RFL"
+expect_eq "FILES-1g …and the next commit is admitted by the real gate" "0" "$GATE_RC"
+
+# ---------- a launched or landed row: refused as before, naming amend ----------
+s42_snap "$RFL" "$PFL"
+poke "$RFL" task-set T2 files=c.sh
+s42_unchanged "FILES-2 an ACTIVE row" 1 "$PFL"
+expect_contains "FILES-2b …names amend, in today's line" "task-set does not write Files — widen a dispatched contract with amend" "$OUT"
+poke "$RFL" task-set T1 Files=c.sh
+s42_unchanged "FILES-3 a LANDED row, in any case" 1 "$PFL"
+expect_contains "FILES-3b …names amend" "widen a dispatched contract with amend" "$OUT"
+poke "$RFL" task-set T7 files=c.sh
+s42_unchanged "FILES-4 a PENDING row a roster row names (its launch is in flight)" 1 "$PFL"
+expect_contains "FILES-4b …names amend" "widen a dispatched contract with amend" "$OUT"
+poke "$RFL" task-set T6 status=active files=c.sh
+s42_unchanged "FILES-5 a pending row set to active in the same call has a launch coming; the cell is the call's, not the table's" 1 "$PFL"
+
+# ---------- the list is judged as task-add judges a Files cell ----------
+poke "$RFL" task-set T6 files='<path of the file>'
+s42_unchanged "FILES-6 a list the dispatch grammar reads as no path (a template slot)" 1 "$PFL"
+expect_contains "FILES-6b …said in the grammar's words, as task-add says it" "would be refused by the dispatch grammar" "$OUT"
+poke "$RFL" task-set T6 'files=a.sh | b.sh'
+s42_unchanged "FILES-7 a pipe in the list, which no table cell can hold" 1 "$PFL"
+poke "$RFL" task-set T5 files=c.sh
+expect_eq "FILES-8 control: a pending reader row (T5 verify) takes files= too (exit 0)" "0" "$RC"
+expect_eq "FILES-8b …and gains its record artifact after the list, as task-add gives a reader row" "c.sh, $FL_REC/T5.md" "$(fl_cell T5)"
+poke "$RFL" task-set T5 files=—
+expect_eq "FILES-9 files=— is the table's none, as task-add takes it (exit 0)" "0" "$RC"
+
+# ---------- one transaction: a refused row in a group writes none of the group ----------
+s42_snap "$RFL" "$PFL"
+poke "$RFL" task-set T6 files=hooks/z.sh -- T2 files=c.sh
+s42_unchanged "FILES-10 a group whose second row is active" 1 "$PFL"
+expect_eq "FILES-10b …leaves the first row's cell as it was" "hooks/d.sh, tests/b.test.sh, $FL_REC/T6-d.md" "$(fl_cell T6)"
+
+# ============================================================
 section "§WAIT-CEILING: wait on a detached run the gate did not admit prints the shim's one line, then FINISHED rc=75 (wave-31 T12; REQ-9 AC-9.4; D10, A-orch-51)"
 # ============================================================
 #
