@@ -1302,7 +1302,7 @@ clean() {  # <value> [<field name>]
   # THE CUT IS PER-FIELD, NOT UNIVERSAL (REQ-9, carry-over P2). Every caller still gets
   # control characters and `|` folded to spaces — that half of this function is unchanged
   # and applies with no exception. What used to be unconditional is the trailing
-  # 400-character cut: `suites_allowed=` and `files=` are LIST-valued fields (a space- or
+  # 400-character cut: `suites_allowed=`, `files=` and `lands_on=` are LIST-valued fields (a space- or
   # comma-joined set, S13's suite-allowance wall and the brief's declared budget), and a
   # dispatch touching enough files or naming enough suites overflows 400 characters on a
   # perfectly ordinary brief — the cut then silently drops suites off the end, which is a
@@ -1323,7 +1323,7 @@ clean() {  # <value> [<field name>]
   # characters is a budget entry nothing can ever equal — and because a cut landing inside
   # an escape would decode into garbage.
   case "${2:-}" in
-    suites_allowed|files) printf '%s' "$out" ;;
+    suites_allowed|files|lands_on) printf '%s' "$out" ;;
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
@@ -3399,7 +3399,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     "adopted_from=$(clean "$osid")"
     tool_use_id=
     "plan=$(clean "$plan")"
-    ${lon:+"lands_on=$(clean "$lon")"}
+    ${lon:+"lands_on=$(clean "$lon" lands_on)"}
     ${lred:+"lands_red=$(clean "$lred")"}
     ${revid:+"red_evidence=$(clean "$revid")"}
     ${lrow:+"row=$(clean "$lrow")"}
