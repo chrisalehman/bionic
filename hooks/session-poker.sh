@@ -19,7 +19,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
-#     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' | ruling-ack <id> | rulings <writer>
+#     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
@@ -461,14 +461,14 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>'   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown"
+  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names the row they wait on (declined-on=); a file or a word is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh decline lift [<ids>]   end the standing decline for those rows (every row it answers with no ids): one ledger line, and the next tick offers the rows it ended"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born floor:<suite> marks a row born of the floor's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]...   set cells of ## Tasks rows (any header column but Files, which amend widens), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
@@ -604,9 +604,16 @@ case "$VERB" in
   # A RULING AND ITS READS (wave-33 T10; REQ-1, D1). `rule` takes the writer and the text, which must
   # hold something once blanks are gone: a ruling with nothing to say is nothing to deliver. `ruling-ack`
   # takes the one id the push printed; `rulings` the writer whose rulings to read.
+  # `--words '<the user's words>'` (wave-36 T9; D10) quotes what the person typed: held to lib/said.sh
+  # `user_said` across the run's recorded sessions, and carried in the ruling as `words="…" session=<sid>`.
   rule)
+    RULE_WORDS=""
+    if [ $# -eq 4 ] && [ "$3" = --words ]; then
+      [ -n "${4//[[:space:]]/}" ] || usage "rule --words takes the user's words, quoted from a prompt they typed."
+      RULE_WORDS="$4"; set -- "$1" "$2"
+    fi
     if [ $# -ne 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "rule takes exactly two arguments: the writer's roster name and the ruling's text."
+      usage "rule takes two arguments, the writer's roster name and the ruling's text, and optionally --words '<the user's words>'."
     fi
     RULE_WRITER="$1"
     RULE_TEXT="$2"
@@ -686,13 +693,25 @@ case "$VERB" in
   # `--born <record>#<n>[,<record>#<n>…]` (wave-33 T13; REQ-5, D6) names the findings the row answers, each a
   # finding of a registered reading: the rating is then read from the record, never typed. A value of neither
   # shape is the usage error; a finding the plan has not registered is the verb's refusal (1).
+  # `--born floor:<suite>` (wave-36 T7; REQ-3, D9) marks a row born of the floor's red in <suite>, named by its file
+  # name (`<name>.test.sh`, the key the floor's records use): the line ends ` born: floor <suite>`, which the judge
+  # holds the row's landing by (lib/proof.sh `_facts_born_landings`). It is no review-born row, so fix-policy: and
+  # fix-cap: do not hold it. Any other `floor:` value is the usage error.
   task-add)
-    TA_BORN=""; TA_BORN_IDS=""
-    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], or 'review S<n> <on|off>', the reader's rating." ;; esac
+    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_FLOOR=""
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or floor:<suite>, the suite whose floor red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
       case "$TA_BORN" in
         'review S'[1-4]' on'|'review S'[1-4]' off') : ;;
+        floor:*)
+          TA_BORN_FLOOR="${TA_BORN#floor:}"; TA_BORN=""
+          case "$TA_BORN_FLOOR" in
+            *[!A-Za-z0-9._-]*|.test.sh|'') TA_BORN_FLOOR="" ;;
+            *.test.sh) : ;;
+            *) TA_BORN_FLOOR="" ;;
+          esac
+          [ -n "$TA_BORN_FLOOR" ] || usage "task-add: --born '${*: -1}' names no suite; write floor:<suite>, the suite's file name (<name>.test.sh) whose floor red the row fixes." ;;
         *)
           TA_BORN_IDS="$TA_BORN"; TA_BORN=""
           case "$TA_BORN_IDS" in
@@ -709,7 +728,7 @@ case "$VERB" in
       set -- "${@:1:$(($# - 2))}"
     fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…] or --born 'review S<n> <on|off>'."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born floor:<suite>."
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
@@ -4461,11 +4480,15 @@ pv_file_swap() {
 # THE USER'S WORDS, REFUSED IN ONE VOICE (wave-33 T7). finding-move and waive-row hold their words to
 # lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
 # own constant. <act> is what the words make: `a move`, `a waiver`.
+#
+# THE RUN'S SESSIONS (wave-36 T9; D10): `user_said` reads every session the plan records, then this one,
+# and says which it read (SAID_SESSIONS) and asked for (SAID_TRIED); a refusal names them, so a reader can
+# tell "not typed" from "typed in a session the run never recorded".
 said_refuse() {  # <user_said rc> <the words, folded> <act> -> the refusal on stderr
   case "$1" in
-    2) die "REFUSED — this session's transcript cannot be found or read (session ${CLAUDE_CODE_SESSION_ID:-none} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
+    2) die "REFUSED — the transcript cannot be found or read for any session read (${SAID_TRIED:-${CLAUDE_CODE_SESSION_ID:-none}} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
     3) die "REFUSED — the words \"$(clean "$2")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged." ;;
-    *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session; $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
+    *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session or another session the run recorded (read: ${SAID_SESSIONS:-none}); $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
   esac
 }
 
@@ -7392,9 +7415,15 @@ EOF
     esac
 
     BIND_RC=0
-    bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" || BIND_RC=$?
+    bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" bind || BIND_RC=$?
     if [ "$BIND_RC" -eq 0 ]; then
       say "bound $BIND_PATH"
+      # THE RUN'S SESSIONS (wave-36 T9; D10): `bind_plan` writes this session's `- session:` line
+      # into the plan beside the marker, `by bind`; a plan that could not take it is said, not hidden.
+      case "${BIND_SESSION:-}" in
+        recorded) say "session $SESSION_ID recorded under ## SDLC State of $BIND_PATH" ;;
+        failed) die "the session line could not be written into $BIND_PATH (the plan changed, or is not a regular file); bind again to write it" ;;
+      esac
       exit 0
     else
       if [ "$BIND_RC" -ge 2 ]; then
@@ -7646,6 +7675,24 @@ EOF
         if ! roster_open_names "$ROSTER_FILE" "$(roster_ack_ledger "$ROSTER_FILE")" | grep -qxF "$RULE_WRITER"; then
           die "REFUSED — $RULE_WRITER's row is closed (ended, or acked after its launch): a ruling for it would never be shown. Nothing written."
           exit 2
+        fi
+        if [ -n "$RULE_WORDS" ]; then
+          # THE USER'S WORDS, AS finding-move HOLDS THEM (wave-36 T9; D10): looked for in every session the
+          # bound plan records, then this one; refused in said_refuse's voice, exit 2 as this arm refuses.
+          if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
+            . "$BIONIC_LIB/said.sh"
+          fi
+          if ! declare -F user_said >/dev/null 2>&1; then
+            die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing written."
+            exit 2
+          fi
+          RULE_PLAN="$(session_plan "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || RULE_PLAN=""
+          user_said "$RULE_WORDS" "$RULE_PLAN"; RULE_SAID=$?
+          if [ "$RULE_SAID" -ne 0 ]; then
+            said_refuse "$RULE_SAID" "$(said_fold "$RULE_WORDS")" "a ruling's quote"
+            exit 2
+          fi
+          RULE_TEXT="$RULE_TEXT words=\"$(said_fold "$RULE_WORDS" | tr '"' "'")\" session=$SAID_SESSION"
         fi
         RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
         if [ -z "$RULE_ID" ]; then
@@ -8476,9 +8523,10 @@ $(_units_split_tokens "$TA_FILES")
 EOF
       TA_CELL_TASK="$TA_TASK · born: review"
     fi
+    [ -z "$TA_BORN_FLOOR" ] || TA_CELL_TASK="$TA_TASK · born: floor"
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_FLOOR:+floor $TA_BORN_FLOOR}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -8496,6 +8544,7 @@ EOF
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
+    [ -z "$TA_BORN_FLOOR" ] || say "task-add — $TA_ID is floor-born ($TA_BORN_FLOOR): its landing holds every reading's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
@@ -9074,7 +9123,7 @@ EOF
       die "REFUSED — no git user.name is set for $PV_REPO, and a waiver records who made it; set it, then waive again. The plan is unchanged."
       exit 1
     fi
-    user_said "$WR_RAW"; WR_SAID=$?
+    user_said "$WR_RAW" "$PV_PLAN"; WR_SAID=$?
     if [ "$WR_SAID" -ne 0 ]; then
       said_refuse "$WR_SAID" "$WR_WORDS" "a waiver"
       exit 1
@@ -10468,7 +10517,10 @@ $PF_PLANL"
   # (lib/proof.sh `proof_finding_rating`), is never deferred. The move is written in place after the
   # finding's last line, through the plan transaction:
   #
-  #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"
+  #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" session=<sid> why="<why>"
+  #
+  # the words are looked for in every session the plan records, then this one (wave-36 T9; D10), and
+  # session= names the one whose transcript holds them (lib/said.sh SAID_SESSION);
   #
   # the words folded to one line by lib/said.sh's own fold (`said_fold`, the rule the check is made
   # through; the verb passes the raw words to `user_said`), the why by `deferral_fold` (the same fold), both escaped as a
@@ -10520,7 +10572,7 @@ FM_FINDING
       die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
       exit 1
     fi
-    user_said "$FM_RAW"; FM_SAID=$?
+    user_said "$FM_RAW" "$PV_PLAN"; FM_SAID=$?
     if [ "$FM_SAID" -ne 0 ]; then
       said_refuse "$FM_SAID" "$FM_WORDS" "a move"
       exit 1
@@ -10535,7 +10587,7 @@ FM_FINDING
       fi
       mv -f "$PV_NEW.2" "$PV_NEW"
     fi
-    FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" why=\"$(deferral_escape "$FM_WHY")\""
+    FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" session=$SAID_SESSION why=\"$(deferral_escape "$FM_WHY")\""
     # IN PLACE: after the last line of the block naming the finding (its deferred:, check: or an earlier
     # moved: line), else after the last proof line naming its record; else where proof_add_line puts it.
     FM_LINE="$FM_LINE" awk -v id="$FM_ID" -v ev="$FM_REC" '
@@ -11585,15 +11637,22 @@ $(run_groups "$RUN_PID")"
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
     # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
-    # the skills and the role files as they were at its start; doctor.sh `--restart-lines` is the one
-    # comparison (the newest of the three sets against each live session's start), and the tick prints
-    # its own session's line, if any, above everything else on every tick, changed or unchanged.
+    # the skills, the role files and the commands as they were at its start; doctor.sh `--restart-lines`
+    # is the one comparison, and the tick prints its own session's line, if any, above everything else
+    # on every tick, changed or unchanged. From wave-36 T2 (D7, AC-1.3) the comparison is content: the
+    # session's load record against the tree a restart loads, one line naming the classes that moved
+    # (`<pid> <sid> <started> <classes> <reloaded-since|->`), and `or reloaded since <ISO>` when the
+    # registry installed after the record was written.
     TICK_RESTART=""
     TICK_RESTART_ROW="$(bash "$BIONIC_LIB/../doctor.sh" --restart-lines 2>/dev/null \
       | awk -F'\t' -v s="$SESSION_ID" 'NF >= 5 && $2 == s { print; exit }')"
     if [ -n "$TICK_RESTART_ROW" ]; then
-      IFS=$'\t' read -r _tr_pid _ _ _ _tr_file <<< "$TICK_RESTART_ROW"
-      TICK_RESTART="restart needed — ${_tr_file} changed after this session started (pid ${_tr_pid}): exit claude and start it again"
+      IFS=$'\t' read -r _tr_pid _ _ _tr_classes _tr_reload <<< "$TICK_RESTART_ROW"
+      if [ "${_tr_reload:--}" != - ]; then
+        TICK_RESTART="restart needed — ${_tr_classes} changed after this session loaded them, or reloaded since ${_tr_reload} (pid ${_tr_pid}): exit claude and start it again"
+      else
+        TICK_RESTART="restart needed — ${_tr_classes} changed after this session loaded them (pid ${_tr_pid}): exit claude and start it again"
+      fi
     fi
     case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
     if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then

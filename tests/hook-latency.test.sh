@@ -832,4 +832,53 @@ expect_eq "11f: in bypass mode a budget costs the call nothing: no roster read, 
 expect_eq "11g: in default mode a budget costs the call nothing: no roster read, no rewrite" "$DEF_D" "$DEF_C"
 expect_eq "11h: …and bypass mode costs what default mode does" "$DEF_C" "$BYP_C"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "PLACE: the placement reader's cost is its segment count, never the text's length (wave-36 T3; D11, AC-5.5)"
+
+# WHAT THIS SECTION OWNS. The raw-text walk payload/scripts/lib/placement.sh replaces cut and
+# scanned the command in shell steps, so its cost grew with a quoted body it had no business
+# reading. `cmd_place` reads cmd-class's parsed segments in one pass, so a 2 KB and a 200 KB
+# quoted body ahead of the suite are the same three segments and must cost the same commands.
+# THE COUNT IS EVERY TRACED COMMAND (`^\++ `), builtins included, not just the external roster
+# above: a loop over the body's characters forks nothing and would be invisible to that roster.
+# The body holds no newline, so one traced command is one trace line however long its operand.
+# NOT VACUOUS: both readings must place the run at the tree (PL-a, PL-b) and the trace must hold
+# the reader's one cmd-class reading (PL-c) before their counts are compared.
+PLACE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/placement.sh"
+PLACE_T="$SANDBOX/trees/t1"
+place_cmd() {  # <body bytes> -> a command whose quoted python body ahead of the suite is that long
+  # Each 32 bytes become one 32-byte unit holding a parenthesis, a pipe, a backquote and a cd.
+  local body
+  body="$(head -c "$1" /dev/zero | tr '\0' 'x' | sed 's/x\{32\}/x = (1 | 2); cd \/elsewhere`a`   /g')"
+  printf 'cd %s || exit 1; python3 -c "%s"; tests/run.sh --only a.test.sh' "$PLACE_T" "$body"
+}
+place_trace() {  # <command> <trace-out> -> the reader's answer on stdout, its xtrace in <trace-out>
+  bash -x -c '. "$1" && cmd_place "$2" "$3" suite' _ "$PLACE_LIB" "$1" "$SANDBOX/proj" 2>"$2"
+}
+PLACE_CMD_SMALL="$(place_cmd 2048)"; PLACE_CMD_LARGE="$(place_cmd 204800)"
+PLACE_SMALL="$(place_trace "$PLACE_CMD_SMALL" "$SANDBOX/trace-place-2k.txt")"
+PLACE_LARGE="$(place_trace "$PLACE_CMD_LARGE" "$SANDBOX/trace-place-200k.txt")"
+PLACE_N_SMALL="$(grep -cE '^\++ ' "$SANDBOX/trace-place-2k.txt" 2>/dev/null || true)"
+PLACE_N_LARGE="$(grep -cE '^\++ ' "$SANDBOX/trace-place-200k.txt" 2>/dev/null || true)"
+echo "hook-latency: cmd_place traced commands — 2 KB body = ${PLACE_N_SMALL:-0}, 200 KB body = ${PLACE_N_LARGE:-0}"
+expect_true "PL-0: the two commands are the sizes they claim (over 2 KB, over 200 KB)" \
+  test "${#PLACE_CMD_SMALL}" -gt 2048 -a "${#PLACE_CMD_LARGE}" -gt 204800
+expect_eq "PL-a: the 2 KB command is placed at the tree" "$PLACE_T" "$PLACE_SMALL"
+expect_eq "PL-b: the 200 KB command is placed at the tree" "$PLACE_T" "$PLACE_LARGE"
+expect_true "PL-c: the trace saw the reader's own reading (one awk in mode place)" \
+  test "$(grep -cE '^\++ awk -v mode=place( |$)' "$SANDBOX/trace-place-2k.txt" 2>/dev/null || true)" = 1
+expect_eq "PL-d: a 200 KB quoted body costs the commands a 2 KB one does" "${PLACE_N_SMALL:-0}" "${PLACE_N_LARGE:-0}"
+# THE MUTATION CONTROL: the same counter over a reader that steps through its text 1 KB at a time
+# in the shell must see the two sizes differ, or PL-d could pass over a counter that sees nothing.
+place_mutant() {  # <command> <trace-out> -> the mutant's answer; its xtrace in <trace-out>
+  bash -x -c '. "$1" && cmd_place() { local i=0; while [ "$i" -lt "${#1}" ]; do i=$((i + 1024)); done; echo mutant; }
+    cmd_place "$2" "$3" suite' _ "$PLACE_LIB" "$1" "$SANDBOX/proj" 2>"$2"
+}
+PLACE_MUT="$(place_mutant "$PLACE_CMD_LARGE" "$SANDBOX/trace-place-mut-200k.txt")"
+place_mutant "$PLACE_CMD_SMALL" "$SANDBOX/trace-place-mut-2k.txt" >/dev/null
+expect_eq "PL-e-positive: the mutant reader ran" "mutant" "$PLACE_MUT"
+expect_ne "PL-e: the counter tells a reader that walks its text apart: the mutant's two counts differ" \
+  "$(grep -cE '^\++ ' "$SANDBOX/trace-place-mut-2k.txt" 2>/dev/null || true)" \
+  "$(grep -cE '^\++ ' "$SANDBOX/trace-place-mut-200k.txt" 2>/dev/null || true)"
+
 finish

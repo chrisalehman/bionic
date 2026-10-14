@@ -4350,6 +4350,28 @@ expect_eq "BR-2 the same plan with the markers taken off has no review-born row 
   "$(call units_born "$SANDBOX/born-none.md")|$(call_rc units_born "$SANDBOX/born-none.md")"
 
 # ============================================================
+section "§BORN-FLOOR — wave-36 T7: a row born of the floor's red carries \` born: floor <suite>\`, and units_born_marks reads both born markers for the judge (REQ-3 AC-3.2; D9, D2)"
+# ============================================================
+# `task-add --born floor:<suite>` hands units_add_row the born value `floor <suite>`, so the row's `- <id>:` line
+# ends ` born: floor <suite>`. units_born_marks prints `<id>\t<review|floor>\t<rating or suite>` per `- <id>:` line
+# carrying either marker, read where units_born reads (the first line per id, fences skipped): what lib/proof.sh's
+# judge joins with the landing record to hold a born row's landing. units_born, the fix-cap's count, reads the
+# review marker alone, so a floor-born row counts nothing against the cap.
+call units_add_row "$SANDBOX/born.md" T5 4 build 'fix the floor red' w-T5 '—' 30 REQ-x payload/d.sh '' 'floor a.test.sh' > "$SANDBOX/born-floor.md"
+expect_regex "BF-1 units_add_row with the born value floor a.test.sh: the row's line ends born: floor a.test.sh" \
+  '^- T5: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh$' "$(/usr/bin/grep '^- T5:' "$SANDBOX/born-floor.md")"
+expect_eq "BF-2 units_born_marks reads both markers, each with its rating or suite; the fenced example is not one" \
+  "T2${TAB}review${TAB}S2 on
+T4${TAB}review${TAB}S1 off
+T5${TAB}floor${TAB}a.test.sh" "$(call units_born_marks "$SANDBOX/born-floor.md")"
+expect_eq "BF-2b …exit 0" "0" "$(call_rc units_born_marks "$SANDBOX/born-floor.md")"
+expect_eq "BF-3 the fix-cap's count reads the review marker alone: T5 is not a review-born row" \
+  "T2 T4" "$(call units_born "$SANDBOX/born-floor.md" | awk -F'\t' '{ printf "%s%s", (NR > 1 ? " " : ""), $1 }')"
+expect_eq "BF-4 a plan with no marker: units_born_marks prints nothing, exit 0 (positive: BF-2 read three from the same reader)" "|0" \
+  "$(call units_born_marks "$SANDBOX/born-none.md")|$(call_rc units_born_marks "$SANDBOX/born-none.md")"
+expect_eq "BF-5 an unreadable plan: exit 1" "1" "$(call_rc units_born_marks "$SANDBOX/no-such-plan.md")"
+
+# ============================================================
 section "§ONE-SHAPE — wave-31 T5: a plan in the retired task-scale shape is refused aloud; the one table validates at task scale (REQ-1 AC-1.2, AC-1.3; D2)"
 # ============================================================
 #

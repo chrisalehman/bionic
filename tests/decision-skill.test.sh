@@ -47,7 +47,7 @@ CORE="${REPO}/skills/canonical-sdlc/SKILL.md"
 STEP2="${REPO}/skills/canonical-sdlc/steps/2.md"
 CORE_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"
 STEP2_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl"
-HEADING='**D<n> · Step <s>**'
+HEADING='**D<n> · <what is decided, in a few words>**'
 KINDS='How a rule is enforced|How a shared resource is shared|What a wave builds'
 # The skill's size cap (AC-12.4): raised from 5,000 bytes to carry the three worked pairs.
 SIZE_CAP=10000
@@ -160,19 +160,27 @@ reach_ok() {
   grep -qi 'is a decision too: put it in the shape' <<<"$d"
 }
 
-# number_ok <file> — the layout opens on the numbered heading, and the skill says the numbers run in
-# the order asked. Bash string equality: the heading carries a multibyte middle dot.
+# number_ok <file> — the layout opens on the numbered, named heading; the skill says the numbers run
+# in the order asked and the name says what is decided. Bash string equality: the heading carries a
+# multibyte middle dot. The step the decision is asked at is not on the heading: it told the reader
+# nothing a name does not, and the name is what a transcript is scanned for.
 number_ok() {
   local first
   first="$(layout "$1" | sed '/^[[:space:]]*$/d' | head -1)"
   [ "$first" = "$HEADING" ] || return 1
-  grep -qi 'in one sequence, in the order asked' "$1"
+  grep -qi 'in one sequence, in the order asked' "$1" || return 1
+  grep -qi 'a few plain words saying what is decided' "$1" || return 1
+  ! grep -qF 'Step <s>' "$1"
 }
 
-# goal_ok <file> — the Goal is one sentence; a short paragraph may follow it, and is optional.
+# goal_ok <file> — the Goal is as long as clarity needs and no longer: one sentence when one carries
+# it, a short paragraph after it when the problem must be stated first. A fixed length either way
+# is the failure: a one-sentence cap buried the problem, and no cap invites the research back in.
 goal_ok() {
-  grep -qi 'the goal is one sentence' "$1" || return 1
-  grep -i 'short plain paragraph after the goal' "$1" | grep -qi 'optional'
+  grep -qi 'as long as clarity needs and no longer' "$1" || return 1
+  grep -qi 'one sentence when one carries it' "$1" || return 1
+  grep -qi 'short plain paragraph after the goal explains the problem' "$1" || return 1
+  ! grep -qi 'the goal is one sentence' "$1"
 }
 
 # batch_ok <file> — small decisions may share a turn, a momentous one always goes alone, and no
@@ -354,19 +362,23 @@ expect_false "27d: …and the doctored copy (case removed) fails the pin" reach_
 section "§NUMBER — every decision is numbered on a heading above the Goal (AC-12.1)"
 
 expect_true "28a: the layout opens on the heading, and the numbers run in the order asked" number_ok "$SKILL"
-anchor file skills/decision/SKILL.md '**D<n> · Step <s>**'
+anchor file skills/decision/SKILL.md '**D<n> · <what is decided, in a few words>**'
 grep -vF "$HEADING" "$SKILL" > "$TMP/no-number.md"
 expect_false "28b: the number-dropped copy lost the heading" grep -qF "$HEADING" "$TMP/no-number.md"
 expect_true "28c: …and still carries the Goal (the copy is not empty)" grep -q '^\*\*Goal:\*\*' "$TMP/no-number.md"
 expect_false "28d: a copy dropping the numbered heading fails the number pin" number_ok "$TMP/no-number.md"
+# The name replaced by the step: the heading the skill carried before, which told the reader nothing.
+doctor "$SKILL" "$TMP/step-heading.md" 's/<what is decided, in a few words>/Step <s>/'
+expect_true "28e: the step-heading copy carries the plant" grep -qF 'D<n> · Step <s>' "$TMP/step-heading.md"
+expect_false "28f: a copy naming the step instead of the decision fails the number pin" number_ok "$TMP/step-heading.md"
 
-section "§GOAL — the Goal is one sentence, an optional short paragraph after it (AC-12.2)"
+section "§GOAL — the Goal is as long as clarity needs: a sentence, or a short paragraph after it (AC-12.2)"
 
-expect_true "29a: the altitude says the Goal is one sentence, and the paragraph after it is optional" goal_ok "$SKILL"
-anchor file skills/decision/SKILL.md 'The Goal is one sentence'
-doctor "$SKILL" "$TMP/long-goal.md" 's/The Goal is one sentence/The Goal may run to several sentences/'
-expect_true "29b: the long-goal copy carries the plant" grep -q 'may run to several sentences' "$TMP/long-goal.md"
-expect_false "29c: a copy letting the Goal run to several sentences fails the goal pin" goal_ok "$TMP/long-goal.md"
+expect_true "29a: the altitude says the Goal runs as long as clarity needs and no longer" goal_ok "$SKILL"
+anchor file skills/decision/SKILL.md 'as long as clarity needs and no longer'
+doctor "$SKILL" "$TMP/capped-goal.md" 's/as long as clarity needs and no longer/always one sentence: the Goal is one sentence/'
+expect_true "29b: the capped-goal copy carries the plant" grep -q 'the Goal is one sentence' "$TMP/capped-goal.md"
+expect_false "29c: a copy capping the Goal at one sentence fails the goal pin" goal_ok "$TMP/capped-goal.md"
 
 section "§BATCH — the batching rule on the skill, the core and Step 2, in the templates too (AC-12.3)"
 

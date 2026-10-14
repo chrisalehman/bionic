@@ -637,7 +637,9 @@ if [ "$EVENT" = "PostToolUse" ]; then
   fi
 
   GS_BIND_RC=0
-  bind_plan "$GS_BIND_ROOT" "$BIONIC_SID" "$GS_BIND_TARGET" || GS_BIND_RC=$?
+  # `write` is this act's word in the plan's `- session:` line (wave-36 T9; D10), written by
+  # `bind_plan` beside the marker.
+  bind_plan "$GS_BIND_ROOT" "$BIONIC_SID" "$GS_BIND_TARGET" write || GS_BIND_RC=$?
   if [ "$GS_BIND_RC" -eq 0 ]; then
     echo "governing-skill: session bound to $GS_BIND_TARGET" >&2
   else
