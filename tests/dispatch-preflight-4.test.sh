@@ -2668,6 +2668,52 @@ expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound wri
   "deny" "$GATE_VERDICT"
 expect_contains "LO8b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
 
+# §LANDS-ON, THE READS INDEX (wave-36 T27; REQ-6 AC-6.1; D12, ADR-056). A writer binding a row lands on every suite
+# that reads its Files: lib/anchors.sh `reads_index`, read once per dispatch at the plan's working head (the tree
+# here, the plan naming no working branch), routes a file to each suite whose text names it, and the wall refuses a
+# Lands-on: that omits one, printing the missing suites and a whole Lands-on: line the author can paste. A declared
+# `none <reason>` is refused the same way: a reason does not unread a file. FIXTURES: t7_gate's plan, with the
+# tree holding payload/scripts/lib/widget.sh, read by widget.test.sh and by reader.test.sh's grep; other.test.sh
+# reads neither. fails-when: a Lands-on: omitting reader.test.sh is admitted, or one naming both is refused.
+li_gate() {  # <repo tag> <brief> -> GATE_*, T7_ROW: t7_gate's plan, its tree holding the reading suites
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
+  printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"; printf 'the gadget\n' > "$REPO/payload/scripts/lib/gadget.sh"
+  printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
+  printf '#!/bin/bash\ngrep -c widget "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/reader.test.sh"
+  printf '#!/bin/bash\necho other\n' > "$REPO/tests/other.test.sh"
+  git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "suites that read the widget" >/dev/null 2>&1
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$2" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+li_brief() {  # <Lands-on line> [<Suites line>] [<Files line>] -> adv_brief's contract with those lines
+  adv_brief "$1" | sed "s#^Suites: .*#${2:-Suites: tests/widget.test.sh}#; s#^Files: .*#${3:-Files: payload/scripts/lib/widget.sh}#"
+}
+li_gate li0 "$(li_brief 'Lands-on: widget')"
+expect_eq "LI-0 precondition: the reads index of the fixture names widget.test.sh and reader.test.sh for the widget, not other.test.sh" \
+  "payload/scripts/lib/widget.sh	tests/reader.test.sh,tests/widget.test.sh" \
+  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$REPO" 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/widget.sh"')"
+expect_eq "LI-1 AC-6.1 a Lands-on: omitting reader.test.sh, which greps the brief's Files, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LI-1b …the line says Lands-on: omits a suite that reads the Files" "Lands-on: omits reader.test.sh" "$(t7_first)"
+expect_eq "LI-1c …its first line is at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_contains "LI-1d …the detail prints the missing suites on one line" "    Missing:  reader.test.sh" "$GATE_VERR"
+expect_contains "LI-1e …and the whole line to paste" "    Lands-on: widget.test.sh, reader.test.sh" "$GATE_VERR"
+expect_absent "LI-1f …never a suite that reads none of the Files (positive: LI-1d read reader.test.sh from the same detail)" \
+  "other.test.sh" "$GATE_VERR"
+expect_eq "LI-1g …and no row is written" "" "$T7_ROW"
+li_gate li2 "$(li_brief 'Lands-on: widget, reader' 'Suites: tests/widget.test.sh, tests/reader.test.sh')"
+expect_eq "LI-2 AC-6.1 a Lands-on: naming every suite the index names for the Files is admitted, written whole" \
+  "allow|widget.test.sh,reader.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+li_gate li3 "$(li_brief 'Lands-on: none — the row edits only prose no suite reads')"
+expect_eq "LI-3 Lands-on: none with a reason, on Files the index routes to suites, is refused the same way" "deny" "$GATE_VERDICT"
+expect_contains "LI-3b …naming the suites it omits" "    Missing:  reader.test.sh, widget.test.sh" "$GATE_VERR"
+expect_contains "LI-3c …and the line to paste in place of none" "    Lands-on: reader.test.sh, widget.test.sh" "$GATE_VERR"
+li_gate li4 "$(li_brief 'Lands-on: none — the gadget is read by no suite' '' 'Files: payload/scripts/lib/gadget.sh')"
+expect_eq "LI-4 control: Files no suite reads, Lands-on: none with its reason, is admitted (positive: LI-3 refused on the same tree)" \
+  "allow|none" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+
 # ============================================================================
 
 section "§ROW-LABEL — Row: binds the dispatch to a row of the plan, and a Row: the name contradicts is refused (wave-28 T7, T55; REQ-3 AC-3.4, D17)"

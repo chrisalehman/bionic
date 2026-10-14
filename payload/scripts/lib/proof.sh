@@ -334,6 +334,19 @@ proof_findings() {
   _proof_findings_span "$1" "$span"
 }
 
+# proof_record_debts <record> -> the `debt` rows proof_findings gives, read from every flush-left `debt:`
+# line of ANY record, a `reviewed:` line or not (wave-36 T13; D13, REQ-7 AC-7.2, census C24): a writer's or
+# the orchestrator's `assumptions.md` hole line is read as a reading's is, by the one debt arm below, and
+# refused in its words. The kinds are PROOF_DEBT_KINDS', so a caller widens them by setting it for the
+# call (the debt verb hands lib/debt.sh's DEBT_KINDS, `hole` among them). Exit 0, nothing printed for a
+# record with no debt line; or 1 with the arm's sentence.
+proof_record_debts() {
+  local span
+  [ -f "${1:-}" ] && [ -r "$1" ] || { printf 'no readable record at %s' "${1:-}"; return 1; }
+  span="$(printf 'findings: 0\n'; awk '/^debt:/' "$1" 2>/dev/null)"
+  _proof_findings_span "$1" "$span"
+}
+
 # _proof_findings_span <record> <its pass> -> proof_findings' answer for a pass already cut.
 _proof_findings_span() {
   local out
@@ -344,7 +357,7 @@ _proof_findings_span() {
       for (i = 1; i <= n; i++) { k = c[i]; sub(/=.*$/, "", k); v = c[i]; sub(/^[^=]*=/, "", v); pri[k] = v }
       n = split(ENVIRON["PROOF_SEV"], c, " "); for (i = 1; i <= n; i++) sev[c[i]] = 1
       n = split(ENVIRON["PROOF_REACH"], c, " "); for (i = 1; i <= n; i++) rch[c[i]] = 1
-      n = split(ENVIRON["PROOF_DK"], c, " "); for (i = 1; i <= n; i++) dk[c[i]] = 1
+      n = split(ENVIRON["PROOF_DK"], c, " "); for (i = 1; i <= n; i++) { dk[c[i]] = 1; dkl = (i == 1 ? "" : dkl (i == n ? " or " : ", ")) c[i] }
     }
     function bad(m) { if (err == "") err = "the reading " rec " " m }
     function rest(s, k,   i) { for (i = 0; i < k; i++) sub(/^[^ \t]+[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -376,7 +389,7 @@ _proof_findings_span() {
       line = $0; sub(/[ \t]+$/, "", line); m = split(line, f, /[ \t,]+/)
       for (i = 2; i <= m; i++) if ((f[i] in sev) || (f[i] in rch)) {
         bad("rates its debt line (" line ") with '"'"'" f[i] "'"'"', and debt is rated by kind and concept, never by severity or reach; write debt: <kind> <concept> <path>:<line>[, <path>:<line>]"); next }
-      if (!(f[2] in dk)) { bad("has a debt line (" line ") whose kind '"'"'" f[2] "'"'"' is not one of duplicate, unpinned-pair or one-case-abstraction; name the kind on the debt table in severity.md"); next }
+      if (!(f[2] in dk)) { bad("has a debt line (" line ") whose kind '"'"'" f[2] "'"'"' is not one of " dkl "; name the kind on the debt table in severity.md"); next }
       if (m < 4) { bad("has a debt line (" line ") with no site; write the concept, then each <path>:<line> it lives at"); next }
       k = split(rest(line, 3), st, /[ \t]*,[ \t]*/); ss = ""; ok = 1
       for (i = 1; i <= k && ok; i++) if (st[i] !~ /^[^ \t]+:[0-9]+$/) {
@@ -696,16 +709,12 @@ proof_checkout() {
   printf '%s' "$wt"
 }
 
-# proof_head <repo> <branch> -> the 40-hex HEAD of the checkout of <repo> that has <branch>
-# checked out; exit 1 with nothing printed when no checkout holds it.
-proof_head() {
-  local wt
-  wt="$(proof_checkout "$1" "$2")" || return 1
-  git -C "$wt" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
-}
-
-# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] [<root>] -> the 40-hex head the evidence
-# attests, exit 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
+# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] [<root>] [<head>] -> the 40-hex head the
+# evidence attests, exit 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
+# <head> is the working head the evidence is held against: `proof-add` hands it the working branch's ref
+# (`proof_branch_head`, the judge's one reading of the head) and its repository as <checkout>, so a branch no
+# checkout holds is read as the judge reads it (wave-36 T12; D13, AC-7.4; C30). With none, <checkout>'s HEAD.
+# "The checkout's HEAD" below means that head.
 #   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
 #          prints before any suite, so the last run in the log is the one judged (T52). <n>
 #          must be 0; the runner's verdict after it must read
@@ -740,7 +749,7 @@ proof_head() {
 #          at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster fl fa owed nred
-  head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
+  head="$(git -C "$co" rev-parse --verify -q "${7:-HEAD}^{commit}" 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   if [ "$kind" = floor ] && [ -n "$root" ]; then
     _proof_roots_load
@@ -1042,10 +1051,10 @@ _proof_records() {
 # every suite owed at or before its commit red there, and a newer run, the whole or the suite's own,
 # decides again (wave-31 T41).
 #
-# A SUITE COVERS WHAT IT DECLARES (wave-35 T9; D9, AC-1.4; design-ledger Δ2): a commit whose owed suites are
-# all green is still not proved when it changed a code file that none of them declares, by the anchor index
-# at H (lib/anchors.sh `anchors_index`, keyed by file name); a code file is a path outside tests/ and the
-# non-code paths above. That commit owes a second whole run, unless <waive cover> is 1, the plan's
+# A SUITE COVERS WHAT IT READS (wave-35 T9; D9, AC-1.4; design-ledger Δ2; wave-36 T27, D12, ADR-056): a commit
+# whose owed suites are all green is still not proved when it changed a code file that none of them reads, by
+# the reads index at H (lib/anchors.sh `reads_index`, the one file-to-suite fact `brief` and the dispatch wall's
+# Lands-on arm read, keyed by file name); a code file is a path outside tests/ and the non-code paths above. That commit owes a second whole run, unless <waive cover> is 1, the plan's
 # `approved: regression-2` (the caller's to read).
 #
 # AN OWED RED IS CLOSED BY A LANDING (wave-35 T9; D8, AC-1.3): a suite of <owed> is closed when the last walked
@@ -1087,7 +1096,7 @@ _proof_walk() {
 $(git -C "$co" log --no-renames --first-parent -m --name-only --format='%x01%H' "${from}..${to}" 2>/dev/null)
 PROOF_WALK_FILES
   case "$changed" in
-    *"	code	"*) [ "$waive" = 1 ] || { _proof_anchors_load && idx="$(anchors_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')"; } ;;
+    *"	code	"*) [ "$waive" = 1 ] || { _proof_anchors_load && idx="$(reads_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')"; } ;;
   esac
   printf '%s\n%s\n%s\n%s\n%s\n' "$pairs" "$walk" "$recs" "$changed" "$idx" | PROOF_OWED_SET="$owed" awk -F'\t' -v waive="$waive" '
     $1 == "T" { tr[$2] = $3; next }
@@ -1142,7 +1151,7 @@ PROOF_WALK_FILES
           for (y = 1; y <= m && !d; y++) if (index(decl[a[x]], "," ow[y] ",")) d = 1
           if (!d) { un = un (nu++ ? ", " : "") a[x] }
         }
-        if (nu) { print lead un (nu > 1 ? " are" : " is") " declared by no suite it ran (" ran "); a second whole run owed, or approve regression-2"; exit 1 }
+        if (nu) { print lead un (nu > 1 ? " are" : " is") " read by no suite it ran (" ran "); a second whole run owed, or approve regression-2"; exit 1 }
       }
       no = split(ENVIRON["PROOF_OWED_SET"], o, ","); open = ""
       for (x = 1; x <= no; x++) {
@@ -1155,15 +1164,15 @@ PROOF_WALK_FILES
     }'
 }
 
-# _proof_anchors_load -> 0 once lib/anchors.sh's index is defined, sourced from beside this file: the cover's
-# one reader (wave-35 T9; D9), loaded only when a walked commit changed a code file.
+# _proof_anchors_load -> 0 once lib/anchors.sh's reads index is defined, sourced from beside this file: the
+# cover's one reader (wave-35 T9; D9; wave-36 T27, D12), loaded only when a walked commit changed a code file.
 _proof_anchors_load() {
   local d
-  declare -F anchors_index >/dev/null 2>&1 && return 0
+  declare -F reads_index >/dev/null 2>&1 && return 0
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   # shellcheck source=/dev/null
   [ -n "$d" ] && [ -r "$d/anchors.sh" ] && . "$d/anchors.sh" 2>/dev/null
-  declare -F anchors_index >/dev/null 2>&1
+  declare -F reads_index >/dev/null 2>&1
 }
 
 # _proof_floor_declared <evidence> <working head> <floor: command> <floor-attestation: value> -> the head,
@@ -1340,8 +1349,9 @@ proof_last_line() {
 # plan yet`, exit 0, when the plan's unfenced `## SDLC State` holds no `proved: kind=floor` line (proof_last's
 # reading); nothing, exit 1, when it holds one, whatever its head or owed= (wave-35 T38; critic-structure-3,
 # debt `unpinned-pair floor-absent`). THE ONE READER OF "IS THERE A FLOOR LINE": the commit wall's Step-7 arm
-# (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state, the floor judge and facts_state
-# ask it, so the wall and the judge cannot answer one plan's text two ways. It reads text and runs no git.
+# (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state and facts_state ask it, so the
+# wall and the judge cannot answer one plan's text two ways; both ask it before the floor judge, which therefore
+# never asks it again (wave-36 T12; C35). It reads text, through lib/run.sh `plan_lines`, and runs no git.
 # Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
 proof_floor_absent() {
   [ -n "$(proof_last "${1:-}" floor)" ] && return 1
@@ -1349,16 +1359,19 @@ proof_floor_absent() {
 }
 
 # _proof_last_read <plan> <kind> <head|line|owed> [<question>] -> the one reader behind the two above, and the
-# `owed=` field of that last line (wave-35 T9), nothing when it carries none.
+# `owed=` field of that last line (wave-35 T9), nothing when it carries none. The plan's lines come from lib/run.sh
+# `plan_lines`, the one plan line reader, CR translated (wave-36 T12; D13, AC-7.5): a raw read saw a CR-only plan as
+# one line, so its floor line was absent to the wall and the judge alike (C34).
 _proof_last_read() {
   local plan="$1" kind="$2" what="$3" q="${4:-}"
   [ -f "$plan" ] || return 0
-  awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
+  _proof_run_load
+  plan_lines "$plan" | awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && proof_fields($0) && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = $0; lastowed = PROOF_OWED }
-    END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed } else print last } }' "$plan"
+    END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed } else print last } }'
 }
 
 # proof_add_line <plan> <line> -> the plan with <line> placed inside `## SDLC State`: after the
@@ -1538,10 +1551,12 @@ proof_branch_head() {
 # or `uncovered<TAB><reason>` (wave-35 T9; D8, D9, AC-1.3 to AC-1.6). THE JUDGE, which proof_state and facts_state
 # both ask. The plan's last `kind=floor` proof names F and the suites its whole run left red (`owed=`); a suite
 # the plan carries as inherited debt (`proof_inherited`) is not owed. At F itself the reds decide; past it,
-# `_proof_walk` walks F..<head> with the reds and the cover's waiver (`approved: regression-2`).
+# `_proof_walk` walks F..<head> with the reds and the cover's waiver (`approved: regression-2`). BOTH CALLERS ASK
+# `proof_floor_absent` FIRST and answer an absent floor themselves, so the judge never sees a plan with no floor
+# line; the call it made here never decided (wave-36 T12; C35). Should one reach it, the empty head is no commit
+# and the answer is uncovered, the safe direction.
 _proof_floor_judge() {
   local plan="$1" tree="$2" c="$3" h owed inh files rec why rc waive=0
-  why="$(proof_floor_absent "$plan")" && { printf 'uncovered\t%s\n' "$why"; return 0; }
   h="$(proof_last "$plan" floor)"
   h="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }

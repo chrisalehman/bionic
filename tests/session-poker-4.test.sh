@@ -578,6 +578,65 @@ poke "$RSEV" debt adopt
 expect_eq "DEBT-A7 debt adopt with no continuation is a usage error (exit 2)" "2" "$RC"
 rm -f "$DBT_LEDGER"
 
+# ---------- §DEBT (wave-36 T13; D13, REQ-7 AC-7.2, AC-7.3, AC-7.8; C24, C25, A-orch-1, A-orch-2) ----------
+# `debt add` reads any record carrying grammar-true `debt:` lines, a `reviewed:` line no longer required:
+# a writer's or the orchestrator's `assumptions.md` hole line reaches debt.md by verb, never by hand
+# (AC-7.2). Each line it would write is held to the one debt-line grammar, lib/debt.sh `debt_line_ok`,
+# before anything is written. `debt adopt` with no plan named and no plan bound refuses naming `bind`
+# and writes nothing: it never takes the newest plan by mtime, a closed predecessor's (AC-7.3).
+# fails-when: a hole line never reaches debt.md; the unbound adopt writes the predecessor's ledger.
+DBT_ASM="$SEV_DIR/assumptions.md"
+printf '%s\n' "# assumptions — wave-01-fixture" "" \
+  "- A-orch-1 (by hand): adopt carries open rows only, so the readers of a re-keyed session are orphaned." \
+  'debt: hole adopt-orphans hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112' \
+  "- A-orch-2: a second assumption, prose only." > "$DBT_ASM"
+DBT_HL='adopt-orphans | hole | hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112 | raised-by record/wave-01-fixture/assumptions.md | touches 0 | —'
+expect_false "DEBT-H0 precondition: the run has no ledger yet, and the record carries no reviewed: line" \
+  test -e "$DBT_LEDGER" -o -n "$(/usr/bin/grep '^reviewed:' "$DBT_ASM")"
+poke "$RSEV" debt add record/wave-01-fixture/assumptions.md "$PSEV"
+expect_eq "DEBT-H1 §DEBT debt add takes an assumptions.md hole line with no reviewed: line (exit 0)" "0" "$RC"
+expect_eq "DEBT-H1b …one debt.md line for the one debt: line, raised by the record" \
+  "$DBT_HEAD|$DBT_HL" "$(paste -sd'|' - < "$DBT_LEDGER" 2>/dev/null)"
+expect_contains "DEBT-H1c …saying what it added" "poker: debt add — 1 added, 0 already there: record/$DBT_SLUG/debt.md" "$OUT"
+expect_absent "DEBT-H1d …and the reading's refusal is gone (C24)" "carries no reviewed:" "$OUT"
+cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+printf '%s\n' "# assumptions" "" 'debt: hole step-line-born hooks/session-poker.sh step-line (the born marker is lost)' > "$SEV_DIR/asm-free.md"
+poke "$RSEV" debt add record/wave-01-fixture/asm-free.md "$PSEV"
+expect_eq "DEBT-H2 a hole line whose site is prose, not <path>:<line>, is refused (exit 1)" "1" "$RC"
+expect_contains "DEBT-H2b …naming the site" "naming 'hooks/session-poker.sh step-line (the born marker is lost)' where a site takes <path>:<line>" "$OUT"
+expect_true "DEBT-H2c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+mkdir -p "$SEV_DIR/two words"
+printf '%s\n' 'debt: hole spaced-source lib/s.sh:1' > "$SEV_DIR/two words/assumptions.md"
+poke "$RSEV" debt add "record/wave-01-fixture/two words/assumptions.md" "$PSEV"
+expect_eq "DEBT-H3 a record whose path holds a space would write raised-by with a space (A-orch-1's shape): refused (exit 1)" "1" "$RC"
+expect_contains "DEBT-H3b …naming the debt line that does not parse" \
+  'does not parse as a debt line: debt: spaced-source hole "lib/s.sh:1" touches=0 raised-by=record/wave-01-fixture/two words/assumptions.md' "$OUT"
+expect_true "DEBT-H3c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+rm -rf "$SEV_DIR/two words" "$SEV_DIR/asm-free.md" "$DBT_ASM"
+rm -f "$DBT_LEDGER"
+
+# The unbound adopt (C25, A-orch-2): an engaged session bound to no plan, in a root whose only plan is a
+# CLOSED predecessor that keeps its own ledger. `resolve_run`'s `none` arm hands the tick the newest plan
+# by mtime so it can DISARM; the debt verb is a writer and takes no plan it was not given or bound to.
+RDU="$(make_repo dbt-unbound)"; ( cd "$RDU" && git commit -q --allow-empty -m init )
+DBU_PLAN="$RDU/.bionic/docs/plans/epic-99-fixture/wave-00-prior.plan.md"; mkdir -p "${DBU_PLAN%/*}"
+printf '%s\n' "# prior wave" "" "## SDLC State" "" "current: 9" "" \
+  "- Step 9: delivered: 2026-10-01T00:00Z wave-00-prior" > "$DBU_PLAN"
+DBU_LED="$RDU/.bionic/docs/record/wave-00-prior/debt.md"; mkdir -p "${DBU_LED%/*}"
+printf '%s\n' "$DBT_HEAD" "$DBT_AL2" > "$DBU_LED"
+DBU_SHA="$(shasum "$DBU_LED" | awk '{ print $1 }')"
+expect_eq "DEBT-U0 precondition: the root's newest plan is the closed predecessor, which active_plan hands an unbound session" \
+  "$DBU_PLAN|closed" "$(bash -c '. "$1/run.sh"; p="$(active_plan "$2")"; printf "%s|" "$p"; run_open "$p" >/dev/null 2>&1 && echo open || echo closed' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RDU" 2>/dev/null)"
+expect_eq "DEBT-U0b precondition: the session's marker binds no plan" "" "$(cat "$RDU/.bionic/tmp/engaged-$SID.state")"
+poke "$RDU" debt adopt "$DBT_CONT"
+expect_eq "DEBT-U1 §DEBT debt adopt with no plan named and none bound is refused (exit 2)" "2" "$RC"
+expect_contains "DEBT-U1b …naming bind" "bind" "$OUT"
+expect_absent "DEBT-U1c …and it adopted nothing" "adopted" "$OUT"
+expect_eq "DEBT-U1d …the predecessor's debt.md is unchanged (sha)" "$DBU_SHA" "$(shasum "$DBU_LED" | awk '{ print $1 }')"
+poke "$RDU" debt adopt "$DBT_CONT" "$DBU_PLAN"
+expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's ledger (exit 0)" \
+  "0|poker: debt adopt — 1 adopted, 1 already there: record/wave-00-prior/debt.md" "$RC|$OUT"
+
 # ============================================================
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
 # ============================================================
@@ -3362,6 +3421,97 @@ expect_eq "NC-5b …with the same corrected call" "bash $PV7_HOOK decline T3 'wa
 poke "$R7C" decline T3 'T3 builds on what T1 writes' --on T1
 expect_eq "NC-6 beside NC-4: decline --on a row is still recorded (exit 0)" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
 
+# ---------- §MATRIX-HEADING: one AC-block heading, written by matrix-render and found by the verbs that read the block (wave-36 T24; REQ-7 AC-7.9; D13) ----------
+# matrix-render writes `AC-<id>: <criterion text>` (MR-3: the text rides the AC line). matrix_block_key and
+# matrix_block_has read the heading by bare equality, so matrix-set, waive-row and the waiver check refused a plan the
+# hook itself had just rendered ("has no AC-n: block"), and wave-35's 41 headings were stripped by hand (A-orch-3).
+# The matcher is units.sh `units_ac_head_awk`, one text for the writers here and the wall's matrix_block.
+# FIXTURE FIDELITY: §MATRIX-RENDER's plan (mr_fixture), rendered by the real verb; the writers are the real verbs, the
+# wall's reader is the real library sourced in a subshell; the evidence is the plan's own bytes.
+MH_LIB="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)"
+mh_wall() {  # <lib dir> <plan> <AC> -> the wall's matrix_block for that AC (the indented lines under its heading)
+  # matrix_section and matrix_block are defined inside the wall's body (_eg_body), so each is cut out of walls.sh by its
+  # own first and last line and defined in a subshell, beside the libraries it asks for: the real text, not a copy.
+  ( set +e; PLAN="$2"; . "$1/run.sh" >/dev/null 2>&1; . "$1/units.sh" >/dev/null 2>&1
+    eval "$(awk '/^(matrix_section|matrix_block)\(\) \{/ { f = 1 } f { print } f && /^}/ { f = 0 }' "$1/walls.sh")"
+    MATRIX="$(matrix_section)"; matrix_block "$3" )
+}
+RMH="$(make_repo mh-head)"; ( cd "$RMH" && git commit -q --allow-empty -m init )
+git -C "$RMH" config user.name 'Fixture User'
+PMH="$(s42_plan "$RMH" 3)"
+mr_fixture "$PMH"
+poke "$RMH" matrix-render
+expect_eq "MH-0 matrix-render writes the fixture's blocks (exit 0)" "0" "$RC"
+expect_eq "MH-0b …AC-2.1's heading carries its criterion text (the extractor, positive)" "AC-2.1: the second criterion" "$(mr_block "$PMH" AC-2.1 | head -1)"
+expect_eq "MH-0c …and AC-1.2's heading is bare (the control block: no text to carry)" "AC-1.2:" "$(mr_block "$PMH" AC-1.2 | head -1)"
+cp "$PMH" "$TMPROOT/mh-rendered"
+
+s42_snap "$RMH" "$PMH"
+poke "$RMH" matrix-set AC-2.1 task=T5 evidence=record/wave-01-fixture/T5-a.log
+expect_eq "MH-1 matrix-set finds the block matrix-render wrote under a heading with text (exit 0)" "0" "$RC"
+expect_eq "MH-1b …the block's task and evidence keys are written, its heading as rendered" \
+  "AC-2.1: the second criterion|  task: T5|  evidence: record/wave-01-fixture/T5-a.log" \
+  "$(mr_block "$PMH" AC-2.1 | /usr/bin/grep -E '^(AC-2\.1:|  task:|  evidence:)' | paste -sd'|' -)"
+poke "$RMH" matrix-set AC-2.2 task=T5
+expect_eq "MH-1c …and a bare heading, beside it, is found as before (AC-2.2, the control)" "0|  task: T5" "$RC|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
+
+# AC-2.1 is never AC-2.11: a block whose heading begins with the id of another is not that block.
+awk '/^AC-2\.2:/ { print "AC-2.11: eleven, whose id begins with AC-2.1\n  evidence: pending\n  task: pending\n" } { print }' "$PMH" > "$PMH.e" && mv "$PMH.e" "$PMH"
+awk '/^\| AC-2\.2 \|/ { print "| AC-2.11 | T0 | pending | — | — |" } { print }' "$PMH" > "$PMH.e" && mv "$PMH.e" "$PMH"
+expect_eq "MH-2 precondition: the AC-2.11 block stands in the plan (the extractor, positive)" "AC-2.11: eleven, whose id begins with AC-2.1|  evidence: pending" \
+  "$(mr_block "$PMH" AC-2.11 | head -2 | paste -sd'|' -)"
+MH_E11="$(mr_block "$PMH" AC-2.11)"
+poke "$RMH" matrix-set AC-2.1 evidence=record/wave-01-fixture/T5-b.log
+expect_eq "MH-2b matrix-set AC-2.1 writes its own block (exit 0, the new path)" "0|  evidence: record/wave-01-fixture/T5-b.log" \
+  "$RC|$(mr_block "$PMH" AC-2.1 | /usr/bin/grep '^  evidence:')"
+expect_eq "MH-2c …and leaves the AC-2.11 block as it was" "$MH_E11" "$(mr_block "$PMH" AC-2.11)"
+poke "$RMH" matrix-set AC-2.11 task=T5
+expect_eq "MH-2d …and matrix-set AC-2.11 writes the AC-2.11 block alone" "0|  task: T5|  task: T5" \
+  "$RC|$(mr_block "$PMH" AC-2.11 | /usr/bin/grep '^  task:')|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
+
+pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
+poke "$RMH" waive-row AC-2.1 'I waive AC-2.1' 'the requirement is amended next wave'
+expect_eq "MH-3 waive-row finds the block under a heading with text (exit 0)" "0" "$RC"
+expect_regex "MH-3b …the waiver line is in AC-2.1's block" '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive AC-2.1" — the requirement is amended next wave$' \
+  "$(mr_block "$PMH" AC-2.1 | /usr/bin/grep '^  waiver:')"
+poke "$RMH" matrix-set AC-2.1 status=waived
+expect_eq "MH-3c matrix-set status=waived finds that waiver: line (matrix_block_has, exit 0)" "0|| AC-2.1 | T3 | waived | record/wave-01-fixture/T5-b.log | — |" "$RC|$(/usr/bin/grep '^| AC-2\.1 ' "$PMH")"
+poke "$RMH" discharge AC-2.1
+expect_eq "MH-4 discharge on the rendered row (exit 0, the auditor cell CONFIRMED)" "0|CONFIRMED" "$RC|$(mr_cell "$PMH" AC-2.1 6)"
+s34_gate "$RMH"
+expect_eq "MH-5 the plan these verbs wrote is admitted by the real gate" "0" "$GATE_RC"
+
+# the wall's reader, the same fixture: matrix_block returns the lines under each heading the writers found.
+expect_eq "MH-6 the wall's matrix_block reads AC-2.1's block, the lines mr_block shows under its heading (non-empty, equal)" \
+  "$(mr_block "$PMH" AC-2.1 | tail -n +2)" "$(mh_wall "$MH_LIB" "$PMH" AC-2.1)"
+expect_eq "MH-6b …AC-2.1 does not read AC-2.11's block (the wall's own invariant, kept)" "0" \
+  "$(mh_wall "$MH_LIB" "$PMH" AC-2.1 | /usr/bin/grep -c 'eleven' || true)"
+expect_eq "MH-6c …and AC-1.2's bare block reads as before" "$(mr_block "$PMH" AC-1.2 | tail -n +2)" "$(mh_wall "$MH_LIB" "$PMH" AC-1.2)"
+
+# the mutant: bare equality restored in the shared matcher. The bare heading is still found, the heading with text is not.
+anchor file payload/scripts/lib/units.sh 'index(line, ac ":") == 1'
+MHM_DIR="$TMPROOT/poker-mh-mut"; rm -rf "$MHM_DIR"; mkdir -p "$MHM_DIR/hooks" "$MHM_DIR/scripts"
+cp -R "$MH_LIB" "$MHM_DIR/scripts/lib"
+for _mh_f in "$(dirname "$POKER")"/*; do [ "${_mh_f##*/}" = session-poker.sh ] || ln -s "$_mh_f" "$MHM_DIR/hooks/${_mh_f##*/}"; done
+cp "$POKER" "$MHM_DIR/hooks/session-poker.sh"
+sed 's/index(line, ac ":") == 1/line == ac ":"/' "$MH_LIB/units.sh" > "$MHM_DIR/scripts/lib/units.sh"
+expect_eq "MH-mut0 the copy of units.sh differs from it in one line" "1" "$(diff "$MH_LIB/units.sh" "$MHM_DIR/scripts/lib/units.sh" | /usr/bin/grep -c '^>')"
+cp "$TMPROOT/mh-rendered" "$PMH"
+MHM_POKER="$POKER"; POKER="$MHM_DIR/hooks/session-poker.sh"
+poke "$RMH" matrix-set AC-1.2 task=T1
+MHM_RC_BARE="$RC|$(mr_block "$PMH" AC-1.2 | /usr/bin/grep '^  task:')"
+s42_snap "$RMH" "$PMH"
+poke "$RMH" matrix-set AC-2.1 task=T5
+MHM_RC_TEXT="$RC"; MHM_OUT_TEXT="$OUT"
+POKER="$MHM_POKER"
+expect_eq "MH-mut1 the mutant runs: a bare heading is found (exit 0, task written)" "0|  task: T1" "$MHM_RC_BARE"
+expect_eq "MH-mut2 …but the heading with text is refused: no AC-2.1: block (exit 1, plan byte-identical)" "1|yes" \
+  "$MHM_RC_TEXT|$(cmp -s "$TMPROOT/s42-before" "$PMH" && echo yes)"
+expect_contains "MH-mut2b …saying the block is missing" "has no AC-2.1: block" "$MHM_OUT_TEXT"
+expect_eq "MH-mut3 the wall under the mutant: the bare block reads (non-empty), the block with text reads empty" "yes|0" \
+  "$([ -n "$(mh_wall "$MHM_DIR/scripts/lib" "$PMH" AC-1.2)" ] && echo yes)|$(mh_wall "$MHM_DIR/scripts/lib" "$PMH" AC-2.1 | wc -l | tr -d ' ')"
+cp "$TMPROOT/mh-rendered" "$PMH"
+
 if [ "$PV7_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$PV7_CCD_WAS"; fi
 POKE_BOUND="$PV7_BOUND_WAS"
 
@@ -4990,6 +5140,62 @@ expect_nonempty "SE-5 the empty-ledger rows ran under at least one bash" "$SE_SE
 POKE_BOUND="$SE_BOUND_WAS"
 
 
+# ============================================================
+section "§HEAD: proof-add, waive and deliver read the head from the working branch's ref, as the judge does, so a merged branch whose worktree is gone still answers (wave-36 T12; REQ-7 AC-7.4; D13)"
+# ============================================================
+# Through wave-35 the three verbs read the head of a CHECKOUT holding the working branch (lib/proof.sh `proof_head`),
+# while the judge read the branch's ref (`proof_branch_head`). After a wave merges and its worktree is removed no
+# checkout holds the branch, so each verb refused "no checkout … has the plan's working-branch … checked out" while
+# the ref still named the head the judge reads (C30). They now ask `proof_branch_head`, the one reader of the head.
+# FIXTURE FIDELITY: §DELIVER's plan writer (`dv_plan`) in a repository of its own: the working branch got its commit
+# C1 in a linked worktree, was merged into the default branch with a merge commit (so the checkout's HEAD is not
+# C1), and its worktree was removed; the checkout stays on the default branch. The reading is a critic's record on
+# the roster, registered through proof-add itself.
+# fails-when: any of the three verbs refuses, or records a head other than the ref's.
+HD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RHD="$(make_repo hd-head)"; ( cd "$RHD" && git commit -q --allow-empty -m init )
+git -C "$RHD" config user.name "Dana Fixture"
+HD_B="$(git -C "$RHD" rev-parse HEAD)"
+HD_DIR="$RHD/$DV_REL"; mkdir -p "$HD_DIR"
+HD_DVB_WAS="$DV_B"; DV_B="$HD_B"; PHD="$(dv_plan "$RHD")"; DV_B="$HD_DVB_WAS"
+HD_DEF="$(git -C "$RHD" symbolic-ref --short HEAD)"
+( cd "$RHD" && git worktree add -q -b wave/01-fixture "$RHD/.worktrees/01-fixture" "$(git rev-parse HEAD)" ) >/dev/null 2>&1
+HD_C1="$(s57_commit "$RHD/.worktrees/01-fixture" lib/a.sh C1)"
+( cd "$RHD" && git merge -q --no-ff -m "merge wave/01-fixture" wave/01-fixture && git worktree remove --force "$RHD/.worktrees/01-fixture" ) >/dev/null 2>&1
+HD_MAIN="$(git -C "$RHD" rev-parse HEAD)"
+hd_ledger() { awk -v id="$1" '/^## Dispatch ledger/ { l = 1; next } /^## / { l = 0 } l && /^\|/ { c = $2; gsub(/ /, "", c); if (c == id) { print; exit } }' FS='|' "$PHD"; }
+hd_last() { /usr/bin/grep -E "^$1" "$PHD" | tail -n 1; }
+expect_regex "HD-0 precondition: the working branch's ref names C1, a 40-hex commit" '^[0-9a-f]{40}$' "$HD_C1"
+expect_eq "HD-0b precondition: no checkout holds wave/01-fixture, whose ref still names C1, and the checkout is on the default branch at the merge" \
+  "0|$HD_C1|$HD_DEF|yes" \
+  "$(git -C "$RHD" worktree list --porcelain | /usr/bin/grep -c '^branch refs/heads/wave/01-fixture$' | tr -d ' ')|$(git -C "$RHD" rev-parse wave/01-fixture)|$(git -C "$RHD" symbolic-ref --short HEAD)|$(git -C "$RHD" merge-base --is-ancestor "$HD_C1" "$HD_MAIN" && [ "$HD_MAIN" != "$HD_C1" ] && echo yes)"
+expect_eq "HD-0c precondition: the ledger extractor reads T5's row, its landed cell empty" \
+  "| T5 | test-runner (w-T5) | — | 30 min | $DV_REL/T5-floor.md | — | batch 2 |" "$(hd_ledger T5)"
+
+# deliver: a verify row with its artifact lands at the ref's head
+printf 'floor: green\n' > "$HD_DIR/T5-floor.md"
+poke "$RHD" deliver T5
+expect_eq "HD-1 §HEAD AC-7.4 deliver lands the row with no checkout of the branch (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_regex "HD-1b …at the head the branch's ref names, C1, not the checkout's merge" \
+  "^\| T5 \| test-runner \(w-T5\) \| — \| 30 min \| $DV_REL/T5-floor\.md \| landed $DV_AT_RE $HD_C1 \| batch 2 \|$" "$(hd_ledger T5)"
+
+# proof-add: a critic's reading over base..C1 registers at C1
+new_roster "$RHD"
+printf '%s|questions=adversarial\n' \
+  "$(roster_row_fixture session="$SID" name=dv-crit agent_id=a-dv-crit subagent_type=bionic:critic files="$DV_REL/T3-read.md")" >> "$(roster_of "$RHD")"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nnothing found\n' "${HD_B:0:10}" "$HD_C1" > "$HD_DIR/T3-read.md"
+poke "$RHD" proof-add review record/wave-01-fixture/T3-read.md --question adversarial --reader dv-crit
+expect_eq "HD-2 §HEAD AC-7.4 proof-add registers the reading with no checkout of the branch (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "HD-2b …its proof line at C1, the ref's head" "proved: kind=review head=$HD_C1 " "$(hd_last 'proved: kind=review')"
+
+# waive: the waiver is written at the ref's head
+poke "$RHD" waive structure 'I waive the structure reading for now'
+expect_eq "HD-3 §HEAD AC-7.4 waive records the reply with no checkout of the branch (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "HD-3b …at C1, the ref's head" "waived: question=structure head=$HD_C1 " "$(hd_last 'waived: ')"
+POKE_BOUND="$HD_BOUND_WAS"
 
 # ============================================================
 section "§FIXED §BM: a finding a landed row already fixed is moved to fixed by verb, whatever the row's ancestry, and counts against no cap; a finding moved to defer is born no row (wave-36 T8; REQ-3 AC-3.4, REQ-4 AC-4.5; D9, D10)"

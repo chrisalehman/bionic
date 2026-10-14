@@ -508,7 +508,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place: written: (date -u), the working and integration heads, the open rows, the live agents and the last proof, with the five human lines carried; never written by hand"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a reading's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   write each debt: line the continuation carries under ## Deferrals into the run's ledger, its touches and raised-by kept"
@@ -1212,7 +1212,7 @@ case "$VERB" in
     DEBT_SUB="${1:-}"; [ $# -eq 0 ] || shift
     DEBT_A=""; DEBT_B=""; DEBT_PLAN_ARG=""
     case "$DEBT_SUB" in
-      add)     { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt add takes a reading record and at most one plan."
+      add)     { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt add takes a record and at most one plan."
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
       touched) { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt touched takes a concept and at most one plan."
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
@@ -2531,6 +2531,25 @@ tick_finding_report() {  # -> says one FINDING line per finding the plan defers 
   done <<TICK_FINDINGS
 $(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
 TICK_FINDINGS
+}
+
+# THE DETACHED LAUNCH-SYNC'S FAILURE, TOLD ONCE (wave-36 T12; D13, AC-7.1; C13). The launch recorder
+# (hooks/execution-recorder.sh `launch_sync_start`) writes the call's output and then `rc=<n>` to
+# `.bionic/tmp/launch-sync-<sid>.log`, rewriting it at each launch. A log whose last status is not 0
+# and that carries no `told=` line prints
+#
+#   poker: launch-sync failed — <log>
+#
+# and gets a `told=<ISO>` line, so the line prints once per failure, never per tick: the next launch
+# rewrites the log and a new failure is told again. A log with no `rc=` line is a call still running,
+# or one killed before it ended, and says nothing; so does a symbolic link.
+tick_launch_sync_failed() {  # <root> <session-id> -> says the line when the log holds an untold failure
+  local log="$1/.bionic/tmp/launch-sync-$2.log" rc
+  [ -f "$log" ] && [ ! -L "$log" ] || return 0
+  rc="$(awk '/^rc=/ { r = substr($0, 4) } /^told=/ { t = 1 } END { if (!t) print r }' "$log" 2>/dev/null)"
+  case "$rc" in ''|0) return 0 ;; esac
+  printf 'told=%s\n' "$(iso_now)" >> "$log" 2>/dev/null || return 0
+  say "launch-sync failed — $log"
 }
 
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
@@ -3959,14 +3978,17 @@ poker_brief_task_record() {
   }'
 }
 
-# poker_brief_index_suites <root> <at> <Files cell> -> the suites lib/anchors.sh `anchors_index` names, at <at> (a commit,
+# poker_brief_index_suites <root> <at> <Files cell> -> the suites lib/anchors.sh `reads_index` names, at <at> (a commit,
 # or - for the files under <root>), for any file an entry of the cell covers (lib/units.sh `cell_covers`, the scheduler's
-# matcher): by file name, sorted, once each, comma-joined. Nothing when no anchor names such a file, or the library
-# cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9).
+# matcher): by file name, sorted, once each, comma-joined. Nothing when no suite reads such a file, or the library
+# cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE FILE-TO-SUITE FACT (wave-36 T27; REQ-6 AC-6.1; D12):
+# a suite reads a file its text names, a library of a hook it names, or a file its anchor names (T5's contract), and
+# the dispatch wall's Lands-on arm and the floor's cover rule ask the same index.
 poker_brief_index_suites() {
-  declare -F anchors_index >/dev/null 2>&1 \
+  declare -F reads_index >/dev/null 2>&1 \
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
-  anchors_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" "$(_units_files_awk)"'
+  declare -F reads_index >/dev/null 2>&1 || return 0
+  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" "$(_units_files_awk)"'
     $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
     | LC_ALL=C sort -u | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
 }
@@ -4344,12 +4366,13 @@ matrix_row_cell() {
       if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
 }
 
-# THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix` and the
-# indented lines under it (matrix-render's shape, the one walls.sh `matrix_block` reads). The key's
+# THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix`, text after the
+# colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
+# the one walls.sh `matrix_block` reads); both read the heading through lib/units.sh `units_ac_head_awk` (wave-36 T24). The key's
 # first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
 matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
-  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk '
-    BEGIN { a = ENVIRON["MB_AC"] ":"; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
+  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk "$(units_ac_head_awk)"'
+    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
     { L[++nl] = $0 }
     END {
       for (i = 1; i <= nl; i++) {
@@ -4359,7 +4382,7 @@ matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
         if (x ~ /^## /) { inm = (x ~ /^## Verification Matrix/); inb = 0; continue }
         if (!inm) continue
         y = x; sub(/[ \t]+$/, "", y)
-        if (!found && y == a) { found = i; last = i; inb = 1; continue }
+        if (!found && ac_head(x, a)) { found = i; last = i; inb = 1; continue }
         if (inb && x ~ /^[ \t]+[^ \t]/) {
           last = i; sub(/^[ \t]+/, "", y)
           if (!at && index(y, k) == 1) at = i
@@ -4378,14 +4401,14 @@ matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
 
 # matrix_block_has <plan> <AC> <key> -> 0 when the AC block carries that key.
 matrix_block_has() {
-  MB_AC="$2" MB_KEY="$3" awk '
-    BEGIN { a = ENVIRON["MB_AC"] ":"; k = ENVIRON["MB_KEY"] ":" }
+  MB_AC="$2" MB_KEY="$3" awk "$(units_ac_head_awk)"'
+    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":" }
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
     /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
     !inm { next }
     { y = $0; sub(/[ \t]+$/, "", y) }
-    y == a { inb = 1; next }
+    ac_head($0, a) { inb = 1; next }
     inb && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { hit = 1; exit } next }
     { inb = 0 }
     END { exit !hit }' "$1"
@@ -4914,8 +4937,8 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 deliver_check() {
   local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster rulings
   call="bash $HOOK_DIR/session-poker.sh"
-  if ! { declare -F proof_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_head >/dev/null 2>&1; then
+  if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_branch_head >/dev/null 2>&1; then
     die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
@@ -5014,14 +5037,16 @@ DELIVER_FILES
       exit 2
     fi
   fi
+  # THE HEAD IS THE WORKING BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, the
+  # judge's one reading of the head, so a merged branch whose worktree is gone still lands its record rows.
   wb="$(plan_working_branch "$PV_PLAN")"
-  head=""; [ -z "$wb" ] || head="$(proof_head "$PV_REPO" "$wb")" || head=""
+  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
   case "$head" in
     [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;;
     *) head="" ;;
   esac
   if [ -z "$head" ]; then
-    die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out, so there is no head to land $PV_ID at; check the branch out (its worktree), then $call deliver $PV_ID. The plan is unchanged."
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>), then $call deliver $PV_ID. The plan is unchanged."
     exit 2
   fi
   # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
@@ -9641,15 +9666,22 @@ $HO_AGENTS"; fi
       if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
     fi
 
-    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files' *.test.sh entries, else
-    # (a row whose Files write code) the suites whose anchors name those files at the working head (wave-35 T8;
-    # REQ-6 AC-6.3; D15, D9), else the slot: `none` is a waiver nobody chose for a row that writes code.
+    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files' *.test.sh entries, in
+    # order, and then (a row whose Files write the head) every further suite that reads those files at the working
+    # head (wave-35 T8; wave-36 T27, REQ-6 AC-6.1, D12: the reads index, the fact the dispatch wall holds Lands-on:
+    # to), sorted, once each; else the slot: `none` is a waiver nobody chose for a row that writes code.
     BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
-    if poker_brief_none "$BRF_SUITES"; then BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"; fi
     BRF_SUITE_SLOT=""
-    if [ -z "$BRF_SUITES" ] && units_writes_head "$BRF_FILES"; then
-      BRF_SUITES="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
-      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite's anchor names these Files (anchors index); write the suites that pin them>"
+    if poker_brief_none "$BRF_SUITES"; then
+      BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
+      if units_writes_head "$BRF_FILES"; then
+        BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
+        BRF_SUITES="$(printf '%s\n%s\n' "$BRF_SUITES" "$BRF_IDX" | awk '{
+          n = split($0, s, /[ \t]*,[ \t]*/)
+          for (i = 1; i <= n; i++) if (s[i] != "" && !(s[i] in seen)) { seen[s[i]] = 1; o = o (o == "" ? "" : ", ") s[i] } }
+          END { printf "%s", o }')"
+        [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
+      fi
     fi
     BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
     if poker_brief_none "$BRF_LANDS"; then
@@ -9955,7 +9987,7 @@ BRF_EOF
   # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
   # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
   # unproved is the difference since the head it names. The head is the one the evidence attests
-  # (its run header or its reviewed: range, held against the working-branch checkout; T14),
+  # (its run header or its reviewed: range, held against the working branch's ref; T14, wave-36 T12),
   # never an operand. The line goes in through the shared transaction; every refusal below
   # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
@@ -10246,22 +10278,24 @@ PF_OTHER_LIST
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
       exit 1
     fi
-    PF_HEAD="$(proof_head "$PV_REPO" "$PF_WB")" || PF_HEAD=""
+    # THE WORKING HEAD IS THE BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, as the
+    # judge reads it, so a reading of a merged branch whose worktree is gone still registers.
+    PF_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || PF_HEAD=""
     case "$PF_HEAD" in
       [0-9a-f]*) : ;;
       *)
-        die "REFUSED — no checkout of $PV_REPO has working-branch $(clean "$PF_WB") checked out, so its head cannot be read; check the branch out (its worktree) and run proof-add again. The plan is unchanged."
+        die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
-    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The checkout's head only
+    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The working head only
     # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
     # on its history, and the proof names what the evidence attests (lib/proof.sh
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
     # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
     # The project root goes too: a project that declares its regression has it judged by its own contract (T75; D36).
-    PF_CO="$(proof_checkout "$PV_REPO" "$PF_WB")"
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO")"; then
+    # The repository reads the objects and the ref's head bounds the evidence: no checkout is asked (T12).
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PV_REPO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO" "$PF_HEAD")"; then
       die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
@@ -10400,7 +10434,7 @@ $PF_PLANL"
   #
   #   waived: question=<q> head=<working head> by <git user.name> <ISO-UTC> "<reply>"
   #
-  # covering that question up to the head of the plan's working-branch checkout, the head the judge
+  # covering that question up to the head the plan's working branch's ref names, the head the judge
   # (lib/proof.sh `facts_state`) is asked about. It goes in through the plan transaction, placed
   # with the proof lines by `proof_add_line`, so a fact written after it is newer than it.
   waive)
@@ -10424,12 +10458,14 @@ $PF_PLANL"
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; the plan is unchanged."
       exit 1
     fi
+    # THE HEAD IS THE WORKING BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, the head
+    # the judge reads the waiver against.
     WV_WB="$(plan_working_branch "$PV_PLAN")"
-    WV_HEAD=""; [ -z "$WV_WB" ] || WV_HEAD="$(proof_head "$PV_REPO" "$WV_WB")" || WV_HEAD=""
+    WV_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || WV_HEAD=""
     case "$WV_HEAD" in
       [0-9a-f]*) : ;;
       *)
-        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${WV_WB:-(none named)} checked out, so there is no head to waive at; the plan is unchanged."
+        die "REFUSED — the plan's working-branch ${WV_WB:-(none named)} names no commit in $PV_REPO, so there is no head to waive at; the plan is unchanged."
         exit 1 ;;
     esac
     WV_LINE="$(proof_waiver_line "$WV_Q" "$WV_HEAD" "$WV_WHO" "$(iso_now)" "$WV_REPLY")"
@@ -11073,8 +11109,9 @@ RC_TAGS
   # the record holds.
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). `record/<run>/debt.md` (lib/proof.sh
   # `proof_debt_ledger_path`, whose comment holds the line's shape) has this verb as its one writer, under
-  # a lock beside the file (`launch_sync_lock`, the plan writer's own). `add` reads the reading's
-  # `debt:` lines through `proof_findings`, the registering verb's reader, and writes a line per concept
+  # a lock beside the file (`launch_sync_lock`, the plan writer's own). `add` reads a record's `debt:`
+  # lines, a reading's or any other's (`proof_record_debts`, the registering verb's debt arm; wave-36
+  # T13), holds each to the one grammar (lib/debt.sh `debt_line_ok`), and writes a line per concept
   # and kind it does not hold yet; `touched` adds one to the touches of every unburned item of the
   # concept (the dispatch wall's advisory calls it); `burn` writes `burned <row>` in their last cell; `adopt`
   # reads the `debt:` lines close-out carried under `## Deferrals` of a continuation (AC-11.2's read-back,
@@ -11105,16 +11142,27 @@ RC_TAGS
         die "REFUSED — no session key, and no plan named; name the plan: debt $DEBT_SUB … <plan>."
         exit 3
       fi
-      resolve_run "$REPO_REAL" "$SESSION_ID"
-      DEBT_PLAN="$POKER_RUN_PLAN"
+      # A WRITER TAKES ONLY THE PLAN IT IS BOUND TO (wave-36 T13; D13, REQ-7 AC-7.3, census C25, A-orch-2).
+      # `resolve_run`'s `none` arm hands an unbound session the root's newest plan by mtime, closed or
+      # not, so the tick can DISARM; through it `debt adopt` at Step 1 wrote the predecessor's ledger.
+      # The verb asks the binding itself: a `bound-*` verdict names this session's plan, anything else
+      # refuses naming `bind`, and nothing is written.
+      DEBT_BIND="$(session_run "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || :  # exit 2 is bound-closed, still bound
+      case "$DEBT_BIND" in bound-*' '*) DEBT_PLAN="${DEBT_BIND#* }" ;; *) DEBT_PLAN="" ;; esac
       if [ -z "$DEBT_PLAN" ] || [ ! -f "$DEBT_PLAN" ]; then
-        die "REFUSED — this session has no run; bind its plan first, or name it: debt $DEBT_SUB … <plan>."
+        die "REFUSED — this session is bound to no plan, so debt $DEBT_SUB has no ledger of its own to write; bind its plan first (session-poker.sh bind <plan>), or name it: debt $DEBT_SUB … <plan>."
         exit 2
       fi
     fi
     if ! { declare -F proof_debt_items >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }; } \
        || ! declare -F proof_debt_items >/dev/null 2>&1; then
       die "REFUSED — lib/proof.sh cannot be loaded, so the debt ledger cannot be read; reinstall the plugin."
+      exit 2
+    fi
+    # THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): lib/debt.sh, which close-out and card.sh source too.
+    if ! { declare -F debt_line_ok >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/debt.sh" ] && . "$BIONIC_LIB/debt.sh" 2>/dev/null; }; } \
+       || ! declare -F debt_line_ok >/dev/null 2>&1; then
+      die "REFUSED — lib/debt.sh cannot be loaded, so no debt line can be held to its grammar; reinstall the plugin."
       exit 2
     fi
     DEBT_ROOT="$(cd "$(project_root "${DEBT_PLAN%/*}")" 2>/dev/null && pwd -P)"
@@ -11137,19 +11185,33 @@ RC_TAGS
         *)  DEBT_REC="$DEBT_DOCS/$DEBT_A"; [ -f "$DEBT_REC" ] || DEBT_REC="$REPO_REAL/$DEBT_A" ;;
       esac
       if [ ! -f "$DEBT_REC" ]; then
-        die "REFUSED — no reading record at $DEBT_A; name it as proof-add does, record/<wave>/<file>."
+        die "REFUSED — no record at $DEBT_A; name it as proof-add does, record/<wave>/<file>."
         exit 2
       fi
       DEBT_RECREL="$DEBT_A"
       case "$DEBT_REC" in "$DEBT_DOCS"/*) DEBT_RECREL="${DEBT_REC#"$DEBT_DOCS"/}" ;; esac
-      if ! DEBT_ROWS="$(proof_findings "$DEBT_REC")"; then
+      # ANY RECORD, A `reviewed:` LINE OR NOT (wave-36 T13; AC-7.2, C24): a reading's, a writer's, the
+      # orchestrator's assumptions.md hole line, each read by the reading's own debt arm, `hole` a kind.
+      if ! DEBT_ROWS="$(PROOF_DEBT_KINDS="$DEBT_KINDS" proof_record_debts "$DEBT_REC")"; then
         die "REFUSED — $DEBT_ROWS"
         exit 1
       fi
       DEBT_ROWS="$(printf '%s\n' "$DEBT_ROWS" | awk -F'\t' '$1 == "debt"')"
       if [ -z "$DEBT_ROWS" ]; then
-        say "debt add — the reading $DEBT_RECREL carries no debt: line; nothing added"
+        say "debt add — the record $DEBT_RECREL carries no debt: line; nothing added"
         exit 0
+      fi
+      # EACH LINE IS HELD TO THE GRAMMAR BEFORE ANY IS WRITTEN (AC-7.8): the line close-out would carry
+      # for it, raised by this record, must parse, or the lot is refused naming it — a raised-by with a
+      # space (A-orch-1's shape) is refused here, where it is written, and never reaches a continuation.
+      DEBT_FROM="${DEBT_PLAN##*/}"; DEBT_FROM="${DEBT_FROM%.plan.md}"
+      DEBT_BADL="$(printf '%s\n' "$DEBT_ROWS" | while IFS="$(printf '\t')" read -r _dk _dkind _dcon _dsites _ddisp; do
+        _dl="debt: $_dcon $_dkind \"$_dsites\" touches=0 raised-by=$DEBT_RECREL from=$DEBT_FROM"
+        debt_line_ok "$_dl" || { printf '%s\n' "$_dl"; break; }
+      done)"
+      if [ -n "$DEBT_BADL" ]; then
+        die "REFUSED — a debt: line of $DEBT_RECREL does not parse as a debt line: $DEBT_BADL; nothing added."
+        exit 1
       fi
       mkdir -p "${DEBT_FILE%/*}" 2>/dev/null
     fi
@@ -11165,14 +11227,15 @@ RC_TAGS
         exit 2
       fi
       # The carry shape (close-out's co_debts), read under the first `## Deferrals` outside a fence. A
-      # `debt:` line there that is not of the shape is a BAD row, and one BAD row refuses the lot.
-      DEBT_ROWS="$(awk '
+      # `debt:` line there that the one grammar (lib/debt.sh `DEBT_LINE_ERE`, wave-36 T13) does not parse
+      # is a BAD row, and one BAD row refuses the lot.
+      DEBT_ROWS="$(DEBT_LINE_ERE="$DEBT_LINE_ERE" awk '
         { sub(/\r$/, "") }
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^## / { s = ($0 ~ /^## Deferrals[ \t]*$/); next }
         s && /^debt:[ \t]/ {
-          if ($0 !~ /^debt:[ \t]+[^ \t|]+[ \t]+[^ \t|]+[ \t]+"[^"|]*"[ \t]+touches=[0-9]+[ \t]+raised-by=[^ \t|]+[ \t]+from=[^ \t]+[ \t]*$/) { print "BAD\t" $0; next }
+          if ($0 !~ ENVIRON["DEBT_LINE_ERE"]) { print "BAD\t" $0; next }
           split($0, w, /[ \t]+/)
           q = index($0, "\""); r = substr($0, q + 1); e = index(r, "\""); sites = substr(r, 1, e - 1)
           split(substr(r, e + 1), t, /[ \t]+/)
@@ -11915,6 +11978,10 @@ $(run_groups "$RUN_PID")"
     if [ -f "$ROSTER_FILE" ]; then
       ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" launch-sync 2>&1 ) || :
     fi
+    # The recorder's detached call has a log of its own; its failure is told once, outside the held output, so an
+    # unchanged tick still says it (wave-36 T12; D13, AC-7.1).
+    if [ -n "$TICK_BUF" ]; then tick_launch_sync_failed "$REPO_REAL" "$SESSION_ID" >&3
+    else tick_launch_sync_failed "$REPO_REAL" "$SESSION_ID"; fi
 
     # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
     #
