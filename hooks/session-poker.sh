@@ -3978,14 +3978,17 @@ poker_brief_task_record() {
   }'
 }
 
-# poker_brief_index_suites <root> <at> <Files cell> -> the suites lib/anchors.sh `anchors_index` names, at <at> (a commit,
+# poker_brief_index_suites <root> <at> <Files cell> -> the suites lib/anchors.sh `reads_index` names, at <at> (a commit,
 # or - for the files under <root>), for any file an entry of the cell covers (lib/units.sh `cell_covers`, the scheduler's
-# matcher): by file name, sorted, once each, comma-joined. Nothing when no anchor names such a file, or the library
-# cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9).
+# matcher): by file name, sorted, once each, comma-joined. Nothing when no suite reads such a file, or the library
+# cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE FILE-TO-SUITE FACT (wave-36 T27; REQ-6 AC-6.1; D12):
+# a suite reads a file its text names, a library of a hook it names, or a file its anchor names (T5's contract), and
+# the dispatch wall's Lands-on arm and the floor's cover rule ask the same index.
 poker_brief_index_suites() {
-  declare -F anchors_index >/dev/null 2>&1 \
+  declare -F reads_index >/dev/null 2>&1 \
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
-  anchors_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" "$(_units_files_awk)"'
+  declare -F reads_index >/dev/null 2>&1 || return 0
+  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" "$(_units_files_awk)"'
     $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
     | LC_ALL=C sort -u | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
 }
@@ -9663,15 +9666,22 @@ $HO_AGENTS"; fi
       if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
     fi
 
-    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files' *.test.sh entries, else
-    # (a row whose Files write code) the suites whose anchors name those files at the working head (wave-35 T8;
-    # REQ-6 AC-6.3; D15, D9), else the slot: `none` is a waiver nobody chose for a row that writes code.
+    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files' *.test.sh entries, in
+    # order, and then (a row whose Files write the head) every further suite that reads those files at the working
+    # head (wave-35 T8; wave-36 T27, REQ-6 AC-6.1, D12: the reads index, the fact the dispatch wall holds Lands-on:
+    # to), sorted, once each; else the slot: `none` is a waiver nobody chose for a row that writes code.
     BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
-    if poker_brief_none "$BRF_SUITES"; then BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"; fi
     BRF_SUITE_SLOT=""
-    if [ -z "$BRF_SUITES" ] && units_writes_head "$BRF_FILES"; then
-      BRF_SUITES="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
-      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite's anchor names these Files (anchors index); write the suites that pin them>"
+    if poker_brief_none "$BRF_SUITES"; then
+      BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
+      if units_writes_head "$BRF_FILES"; then
+        BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
+        BRF_SUITES="$(printf '%s\n%s\n' "$BRF_SUITES" "$BRF_IDX" | awk '{
+          n = split($0, s, /[ \t]*,[ \t]*/)
+          for (i = 1; i <= n; i++) if (s[i] != "" && !(s[i] in seen)) { seen[s[i]] = 1; o = o (o == "" ? "" : ", ") s[i] } }
+          END { printf "%s", o }')"
+        [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
+      fi
     fi
     BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
     if poker_brief_none "$BRF_LANDS"; then

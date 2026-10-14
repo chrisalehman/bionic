@@ -1051,10 +1051,10 @@ _proof_records() {
 # every suite owed at or before its commit red there, and a newer run, the whole or the suite's own,
 # decides again (wave-31 T41).
 #
-# A SUITE COVERS WHAT IT DECLARES (wave-35 T9; D9, AC-1.4; design-ledger Δ2): a commit whose owed suites are
-# all green is still not proved when it changed a code file that none of them declares, by the anchor index
-# at H (lib/anchors.sh `anchors_index`, keyed by file name); a code file is a path outside tests/ and the
-# non-code paths above. That commit owes a second whole run, unless <waive cover> is 1, the plan's
+# A SUITE COVERS WHAT IT READS (wave-35 T9; D9, AC-1.4; design-ledger Δ2; wave-36 T27, D12, ADR-056): a commit
+# whose owed suites are all green is still not proved when it changed a code file that none of them reads, by
+# the reads index at H (lib/anchors.sh `reads_index`, the one file-to-suite fact `brief` and the dispatch wall's
+# Lands-on arm read, keyed by file name); a code file is a path outside tests/ and the non-code paths above. That commit owes a second whole run, unless <waive cover> is 1, the plan's
 # `approved: regression-2` (the caller's to read).
 #
 # AN OWED RED IS CLOSED BY A LANDING (wave-35 T9; D8, AC-1.3): a suite of <owed> is closed when the last walked
@@ -1096,7 +1096,7 @@ _proof_walk() {
 $(git -C "$co" log --no-renames --first-parent -m --name-only --format='%x01%H' "${from}..${to}" 2>/dev/null)
 PROOF_WALK_FILES
   case "$changed" in
-    *"	code	"*) [ "$waive" = 1 ] || { _proof_anchors_load && idx="$(anchors_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')"; } ;;
+    *"	code	"*) [ "$waive" = 1 ] || { _proof_anchors_load && idx="$(reads_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')"; } ;;
   esac
   printf '%s\n%s\n%s\n%s\n%s\n' "$pairs" "$walk" "$recs" "$changed" "$idx" | PROOF_OWED_SET="$owed" awk -F'\t' -v waive="$waive" '
     $1 == "T" { tr[$2] = $3; next }
@@ -1151,7 +1151,7 @@ PROOF_WALK_FILES
           for (y = 1; y <= m && !d; y++) if (index(decl[a[x]], "," ow[y] ",")) d = 1
           if (!d) { un = un (nu++ ? ", " : "") a[x] }
         }
-        if (nu) { print lead un (nu > 1 ? " are" : " is") " declared by no suite it ran (" ran "); a second whole run owed, or approve regression-2"; exit 1 }
+        if (nu) { print lead un (nu > 1 ? " are" : " is") " read by no suite it ran (" ran "); a second whole run owed, or approve regression-2"; exit 1 }
       }
       no = split(ENVIRON["PROOF_OWED_SET"], o, ","); open = ""
       for (x = 1; x <= no; x++) {
@@ -1164,15 +1164,15 @@ PROOF_WALK_FILES
     }'
 }
 
-# _proof_anchors_load -> 0 once lib/anchors.sh's index is defined, sourced from beside this file: the cover's
-# one reader (wave-35 T9; D9), loaded only when a walked commit changed a code file.
+# _proof_anchors_load -> 0 once lib/anchors.sh's reads index is defined, sourced from beside this file: the
+# cover's one reader (wave-35 T9; D9; wave-36 T27, D12), loaded only when a walked commit changed a code file.
 _proof_anchors_load() {
   local d
-  declare -F anchors_index >/dev/null 2>&1 && return 0
+  declare -F reads_index >/dev/null 2>&1 && return 0
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   # shellcheck source=/dev/null
   [ -n "$d" ] && [ -r "$d/anchors.sh" ] && . "$d/anchors.sh" 2>/dev/null
-  declare -F anchors_index >/dev/null 2>&1
+  declare -F reads_index >/dev/null 2>&1
 }
 
 # _proof_floor_declared <evidence> <working head> <floor: command> <floor-attestation: value> -> the head,
