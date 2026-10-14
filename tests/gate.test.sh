@@ -526,14 +526,19 @@ holder_was() {  # <id> <pid> — the request still names that (dead) pid as its 
   case "$(field "$1" holder)" in "$2:"*) return 0 ;; esac
   return 1
 }
+# An asker is killed only once it is PARKED: it said it waits, which gate_ask prints after it unlocks,
+# and its poll is 30 s, so the kill lands in its sleep. A SIGKILL inside the lock's claim (mkdir done,
+# pid not yet written) leaves a lock no one may steal for a while, and the next ask's --within 0 then
+# files nothing: a row about resume must not hang on the lock's own window.
+parked() { grep -q 'waits for its turn' "$D/$1.err" 2>/dev/null; }
 fresh resume-kind
 world_machine 8 8192 60 6.0
 world_cost h 30
 world_cost k 30
 HOLD=1 ask_bg rh work h 0; wait_for 20 has rh.rc
 expect_eq "N.12a precondition: a holder is admitted, so a whole ask waits" "0" "$(rc_of rh)"
-AGENT=rk HOLD=1 ask_bg rw whole k 600
-wait_for 20 asked_by rk
+BIONIC_GATE_POLL=30 AGENT=rk HOLD=1 ask_bg rw whole k 600
+wait_for 20 asked_by rk; wait_for 20 parked rw
 rw_id="$(req_of rk)"; rw_pid="$(cat "$D/rw.pid" 2>/dev/null)"
 expect_eq "N.12b precondition: the whole ask filed a request that waits (kind|admitted)" "whole|" \
   "$(field "$rw_id" kind)|$(field "$rw_id" admitted)"
@@ -549,8 +554,8 @@ expect_eq "N.12e the dead holder's request is ended at that ask: ended=<now> rc=
 expect_match "N.12f gate_list reads it ended" "$rw_id ended kind=whole *rc=gone key=k" \
   "$(glist | grep "^$rw_id ")"
 # the same kind: a dead holder's request is ended whatever the kind of the next ask
-AGENT=rs HOLD=1 ask_bg rs1 whole k 600
-wait_for 20 asked_by rs
+BIONIC_GATE_POLL=30 AGENT=rs HOLD=1 ask_bg rs1 whole k 600
+wait_for 20 asked_by rs; wait_for 20 parked rs1
 rs_id="$(req_of rs)"; rs_pid="$(cat "$D/rs1.pid" 2>/dev/null)"
 kill_tree "$rs_pid"; wait "$rs_pid" 2>/dev/null; wait_for 20 dead "$rs_pid"
 expect_true "N.12g precondition: a second whole ask's asker is killed, its request names it" holder_was "$rs_id" "$rs_pid"

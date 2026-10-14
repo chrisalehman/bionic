@@ -3450,8 +3450,11 @@ section "§STOP-RUN: stop-run ends a gate request — a parked shim's, by its id
 # store (never the runner's BIONIC_GATE_DIR), each in a process group of its own as a Bash-tool command is;
 # the holder's liveness and death are the gate's own rule read on them. SYNTHESIZED: one planted request
 # whose holder pid is dead (a shim SIGKILLed in its wait), in the store's own line shape.
-SR_GATE_WAS="$BIONIC_GATE_DIR"
-export BIONIC_GATE_DIR="$TMPROOT/sr-gate" BIONIC_GATE_POLL=0.1
+SR_GATE_WAS="$BIONIC_GATE_DIR"; SR_POLL_WAS="${BIONIC_GATE_POLL:-}"
+# A parked asker polls every 30 s, so the TERM stop-run sends lands in its sleep, never inside the lock's
+# claim (a holder killed between the lock's mkdir and its pid write leaves a lock no one may steal for a
+# while, which would stall the next row's asks on the lock rather than on what this section reads).
+export BIONIC_GATE_DIR="$TMPROOT/sr-gate" BIONIC_GATE_POLL=30
 mkdir -p "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost" "$TMPROOT/sr"
 SR_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
 RSR="$(make_repo s-stoprun)"; ( cd "$RSR" && git commit -q --allow-empty -m init )
@@ -3541,6 +3544,6 @@ expect_eq "SR.9 a number that names no request and no run is a usage error, exit
 expect_contains "SR.9b …naming what it looked for" "no run named 901" "$OUT"
 touch "$TMPROOT/sr/sr-hold.go"
 s56_until 10 sr_gone "$(sr_pid sr-hold)"
-export BIONIC_GATE_DIR="$SR_GATE_WAS"
+export BIONIC_GATE_DIR="$SR_GATE_WAS" BIONIC_GATE_POLL="$SR_POLL_WAS"
 
 finish
