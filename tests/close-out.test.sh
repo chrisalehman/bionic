@@ -3106,13 +3106,15 @@ section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the r
 # consent boundary (ruling r1791954201-85499).
 # fails-when: a delivered plan reads a row its merge landed as pending; task-set --reason on it is refused; the
 # marker is gone after a refusal midway.
-lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, each with its step line
+lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, each with its step line,
+  # and the `- Step 4:` line every plan past Step 4 carries (row-landed's dry commit judges a writer's copy at current: 4)
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "lands_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk '
     /^\| T2 \|/ { print
                   print "| T3 | 8 | integrate | merge the wave into main | — | — | 10 | AC-1 | none | pending | — |"
                   print "| T4 | 9 | close | close-out, continuation.md | — | — | 10 | AC-1 | none | pending | — |"; next }
+    /^- Step 7:/ { print "- Step 4: implement: opened 2026-09-14T00:10Z"; print; next }
     /^- Step 8:/ { print "- T3: pending dispatch — —"; print "- T4: pending dispatch — —"; print; next }
     { print }' "$plan" > "$plan.l" && mv "$plan.l" "$plan"
 }

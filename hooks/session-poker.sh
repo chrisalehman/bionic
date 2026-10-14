@@ -471,7 +471,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born floor:<suite> marks a row born of the floor's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]...   set cells of ## Tasks rows (any header column but Files, which amend widens), every group in one transaction, the table judged once"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column but Files, which amend widens), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
@@ -788,6 +788,14 @@ case "$VERB" in
   # newline-joined as amend's are: a value with a line break must reach the verb to be refused
   # by name, not split into two operands here.
   task-set|ledger-add|ledger-set)
+    # A REASON, TRAILING (wave-36 T14; D13, AC-7.7): `task-set … --reason '<why>'` also writes the session's own
+    # delivered plan (bound-closed), and records the reason on each row's `- T<n>:` line. Taken off the end, as
+    # epic-row's `--plan` is, before the groups are read.
+    PV_REASON=""
+    if [ "$VERB" = task-set ] && [ $# -ge 2 ] && [ "${*: -2:1}" = --reason ]; then
+      PV_REASON="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+      [ -n "${PV_REASON//[[:space:]]/}" ] || usage "task-set: --reason takes why the cells are set."
+    fi
     if [ $# -lt 2 ] || [ -z "$1" ]; then
       usage "$VERB takes an id and at least one <column>=<value>."
     fi
@@ -4125,10 +4133,12 @@ EOF
 # Set here, before any verb runs, so a value in the caller's environment never chooses the exit
 # (wave-26 T54; review 17 N2).
 PV_RACE_RC=""
-# plan_verb_open <verb> -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
-# and arms the cleanup; exits on every refusal above.
+# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
+# and arms the cleanup; exits on every refusal above. `closed-ok` (task-set --reason, wave-36 T14; AC-7.7) also
+# takes the session's own closed run (bound-closed) when its plan is on disk; engagement is asked first either way
+# (ruling r1791954201-85499: engagement is the consent boundary).
 plan_verb_open() {
-  local verb="$1" sid run
+  local verb="$1" closed="${2:-}" sid run
   sid="$(session_id)" || sid=""
   if [ -z "$sid" ]; then
     die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
@@ -4145,13 +4155,19 @@ plan_verb_open() {
     exit 2
   fi
   run="$(session_run "$PV_REPO" "$sid")"
+  PV_PLAN=""
   case "$run" in
     'bound-open '*) PV_PLAN="${run#bound-open }" ;;
-    *)
-      die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
-      die "Bind this session to its run first (this script's bind verb), then run $verb again."
-      exit 1 ;;
+    'bound-closed '*) [ "$closed" != closed-ok ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
   esac
+  if [ -z "$PV_PLAN" ]; then
+    die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
+    die "Bind this session to its run first (this script's bind verb), then run $verb again."
+    case "$run" in
+      'bound-closed '*) [ "$verb" != task-set ] || die "A delivered run takes task-set with --reason '<why>', which records the reason on each row's step line." ;;
+    esac
+    exit 1
+  fi
   PV_CUR="$(_fill_current_field "$PV_PLAN")"
   # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
   # between the read and the swap is an edit the comparison sees.
@@ -5863,7 +5879,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · regression-2=<n> · second-floors=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · regression-2=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -5886,11 +5902,17 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #   regression-2   the plan's `approved: regression-2` line under `## SDLC State` (`approve`).
 #   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
 #                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
+#   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
+#                  `adopted_from=<sid>`), DISTINCT (agent_id, adopted_from) over the run's rosters, as the amends are
+#                  (wave-36 T14; D13, AC-7.6). Its printed `poker-adopt/v1|…` report is kept in no file, so the row is
+#                  the line the verb wrote. A verb act: never counted as by-hand.
+#   fixed          the plan's `moved: <record>#<n> to=fixed row=<T> …` line under `## SDLC State` (`finding-move …
+#                  fixed`, wave-36 T8), one per line (wave-36 T14; AC-7.6). A verb act: never counted as by-hand.
 #
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
 # continuation (and a person).
 hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
-  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 pl
+  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 ado=0 fix=0 pl
   slug="${plan##*/}"; slug="${slug%.plan.md}"
   if [ -f "$rec" ] && [ ! -L "$rec" ]; then
     read -r hand stp <<< "$(awk -F'|' '
@@ -5910,13 +5932,16 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
       }
       END { print d + 0, l + 0 }' "$led")"
   fi
-  read -r amd hld ext <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
+  read -r amd hld ext ado <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
       [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"
     done 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" '
       index($0, "roster-state/") == 1 {
-        name = ""; plan = ""; a = ""; h = ""; x = ""
+        name = ""; plan = ""; a = ""; h = ""; x = ""; id = ""; src = ""; af = ""
         for (i = 2; i <= NF; i++) {
           if (index($i, "name=") == 1) name = substr($i, 6)
+          else if (index($i, "agent_id=") == 1) id = substr($i, 10)
+          else if (index($i, "source=") == 1) src = substr($i, 8)
+          else if (index($i, "adopted_from=") == 1) af = substr($i, 14)
           else if (index($i, "plan=") == 1) plan = substr($i, 6)
           else if (index($i, "amended=") == 1) a = substr($i, 9)
           else if (index($i, "held=") == 1) h = substr($i, 6)
@@ -5926,12 +5951,13 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
         if (a != "") A[name SUBSEP a] = 1
         if (h != "") H[name SUBSEP h] = 1
         if (x != "") X[name SUBSEP x] = 1
+        if (src == "adopted" && af != "" && id != "") D[id SUBSEP af] = 1
       }
-      END { for (k in A) na++; for (k in H) nh++; for (k in X) nx++; print na + 0, nh + 0, nx + 0 }')"
+      END { for (k in A) na++; for (k in H) nh++; for (k in X) nx++; for (k in D) nd++; print na + 0, nh + 0, nx + 0, nd + 0 }')"
   if [ -f "$plan" ] && [ ! -L "$plan" ]; then
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
     if declare -F proof_awk >/dev/null 2>&1; then
-      read -r fl wv r2 <<< "$(awk "$(proof_awk)"'
+      read -r fl wv r2 fix <<< "$(awk "$(proof_awk)"'
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
@@ -5939,6 +5965,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
           if (proof_fields($0) && PROOF_KIND == "floor") f++
           else if ($0 ~ /^waived:[ \t]+question=/) w++
           else if ($0 ~ /^approved:[ \t]+regression-2([ \t]|$)/) r++
+          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) x++
           next
         }
         sec == "mx" {
@@ -5949,12 +5976,12 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
           }
           inb = 0
         }
-        END { print f + 0, w + 0, r + 0 }' "$plan")"
+        END { print f + 0, w + 0, r + 0, x + 0 }' "$plan")"
     fi
   fi
   [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d\n' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + r2 + fl )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d · adoptions=%d · fixed=%d\n' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + r2 + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl" "$ado" "$fix"
   return 0
 }
 
@@ -7408,6 +7435,10 @@ EOF
     bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" bind || BIND_RC=$?
     if [ "$BIND_RC" -eq 0 ]; then
       say "bound $BIND_PATH"
+      # A DELIVERED RUN (wave-36 T14; ruling r1791955629-34788): bound, and read bound-closed, so every verb keeps
+      # its closed-run refusal but task-set --reason.
+      [ "${BIND_DELIVERED:-}" != yes ] \
+        || say "$BIND_PATH is delivered: this session reads it bound-closed, and only task-set … --reason '<why>' writes it"
       # THE RUN'S SESSIONS (wave-36 T9; D10): `bind_plan` writes this session's `- session:` line
       # into the plan beside the marker, `by bind`; a plan that could not take it is said, not hidden.
       case "${BIND_SESSION:-}" in
@@ -8624,7 +8655,21 @@ EOF
         PV_COLS="${PV_COLS:-} $_pv_l"
       done
     done
-    plan_verb_open "$VERB"
+    if [ -n "${PV_REASON:-}" ]; then
+      if ! plan_verb_value_ok "$PV_REASON"; then
+        die "REFUSED — the reason carries a |, a tab or a line break, which no step line can hold; the plan is unchanged."
+        exit 1
+      fi
+      for _pv_s in "${PV_SETS[@]}"; do
+        pv_set_pairs "$_pv_s"
+        case "$PV_SET_ID" in
+          T[0-9]*) : ;;
+          *) die "REFUSED — a reason is recorded on the row's - T<n>: line, and $PV_SET_ID has none; the plan is unchanged."
+             exit 1 ;;
+        esac
+      done
+    fi
+    plan_verb_open "$VERB" ${PV_REASON:+closed-ok}
     PV_TABLE="## Tasks"; [ "$VERB" = task-set ] || PV_TABLE="## Dispatch ledger"
     # AN UNKNOWN COLUMN NAMES THE CALL THAT SUCCEEDS (wave-33 T7; REQ-4 AC-4.3). The header's columns are
     # listed, and the call is printed again with each unknown name replaced by the one column it was
@@ -8642,6 +8687,7 @@ EOF
         [ "${#PV_FIXED[@]}" -eq 0 ] || call+=("${PV_FIXED[0]}")
         [ -z "$PV_UNKNOWN" ] || out="${out:+$out, }$PV_UNKNOWN"
       done
+      [ -z "${PV_REASON:-}" ] || call+=(--reason "$PV_REASON")
       die "The $PV_TABLE columns: $(printf '%s\n' "$cols" | paste -sd, - | sed 's/,/, /g')."
       [ -z "${out:-}" ] || die "No column is like: ${out}; the call below leaves it out."
       pv_next "$VERB" "${call[@]}"
@@ -8689,6 +8735,21 @@ EOF
         printf '%s\n' "$PV_VIOL" >&2
         exit 1
       fi
+    fi
+    # THE REASON ON THE STEP LINE (wave-36 T14; AC-7.7): ` reason: <why>` after each named row's own text, once (a
+    # line that already ends so is left), in the same copy, so the cells and the reason are one write.
+    if [ -n "${PV_REASON:-}" ]; then
+      for _pv_s in "${PV_SETS[@]}"; do
+        pv_set_pairs "$_pv_s"
+        _pv_rest="$(units_step_text "$PV_NEW" "$PV_SET_ID" 2>/dev/null)"
+        case "$_pv_rest " in *" reason: $PV_REASON "|"reason: $PV_REASON ") continue ;; esac
+        if ! units_step_line "$PV_NEW" "$PV_SET_ID" "${_pv_rest:+$_pv_rest }reason: $PV_REASON" > "$PV_NEW.2" 2>/dev/null; then
+          die "REFUSED — $PV_PLAN carries no ## SDLC State section for the $PV_SET_ID line; the plan is unchanged."
+          exit 1
+        fi
+        mv -f "$PV_NEW.2" "$PV_NEW"
+      done
+      PV_WHAT="$PV_WHAT; reason: $PV_REASON"
     fi
     [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
     plan_verb_swap "$VERB" "$PV_WHAT" writer
