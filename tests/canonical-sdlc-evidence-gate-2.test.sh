@@ -3240,9 +3240,9 @@ sLA_pred() {  # <home> <name> <subagent_type> <plan= value> — a launch row on 
   printf '%s|event=ack|at=2026-10-13T01:00:00Z|epoch=1791853200|pid=%s|session=%s|name=%s|by=human\n' \
     "$sLA_LEDGER_SCHEMA" "$$" "$sLA_SID_B" "$2" >> "$1/.bionic/tmp/sweeper-$sLA_SID_B.state"
 }
-sLA_adopt() {  # <home> [--report-only] -> session A's adopt over the home, its whole output
+sLA_adopt() {  # <home> [--report-only] -> session A's adopt over the home, its whole output (exit 1 lists rows)
   ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$EG_SID" CLAUDE_CONFIG_DIR="$1/.claude" HOME="$1" \
-      bash "$BIONIC_HOOKS_DIR/session-poker.sh" adopt ${2:+"$2"} 2>&1 )
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" adopt ${2:+"$2"} 2>&1 ) || :
 }
 
 sLA_home w36-R1
