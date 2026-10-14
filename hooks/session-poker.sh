@@ -4344,12 +4344,13 @@ matrix_row_cell() {
       if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
 }
 
-# THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix` and the
-# indented lines under it (matrix-render's shape, the one walls.sh `matrix_block` reads). The key's
+# THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix`, text after the
+# colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
+# the one walls.sh `matrix_block` reads); both read the heading through lib/units.sh `units_ac_head_awk` (wave-36 T24). The key's
 # first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
 matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
-  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk '
-    BEGIN { a = ENVIRON["MB_AC"] ":"; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
+  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk "$(units_ac_head_awk)"'
+    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
     { L[++nl] = $0 }
     END {
       for (i = 1; i <= nl; i++) {
@@ -4359,7 +4360,7 @@ matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
         if (x ~ /^## /) { inm = (x ~ /^## Verification Matrix/); inb = 0; continue }
         if (!inm) continue
         y = x; sub(/[ \t]+$/, "", y)
-        if (!found && y == a) { found = i; last = i; inb = 1; continue }
+        if (!found && ac_head(x, a)) { found = i; last = i; inb = 1; continue }
         if (inb && x ~ /^[ \t]+[^ \t]/) {
           last = i; sub(/^[ \t]+/, "", y)
           if (!at && index(y, k) == 1) at = i
@@ -4378,14 +4379,14 @@ matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
 
 # matrix_block_has <plan> <AC> <key> -> 0 when the AC block carries that key.
 matrix_block_has() {
-  MB_AC="$2" MB_KEY="$3" awk '
-    BEGIN { a = ENVIRON["MB_AC"] ":"; k = ENVIRON["MB_KEY"] ":" }
+  MB_AC="$2" MB_KEY="$3" awk "$(units_ac_head_awk)"'
+    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":" }
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
     /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
     !inm { next }
     { y = $0; sub(/[ \t]+$/, "", y) }
-    y == a { inb = 1; next }
+    ac_head($0, a) { inb = 1; next }
     inb && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { hit = 1; exit } next }
     { inb = 0 }
     END { exit !hit }' "$1"
