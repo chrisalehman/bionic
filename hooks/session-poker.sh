@@ -480,12 +480,12 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
-  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add floor <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the floor's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
-  die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run the regression in the working branch's checkout, .bionic/config.yaml's floor: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
+  die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run the regression in the working branch's checkout, .bionic/config.yaml's floor: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the reading or after it, as a moved: to=fixed line under ## SDLC State"
@@ -972,14 +972,20 @@ case "$VERB" in
   # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
   # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    PF_USAGE="proof-add takes two arguments, <floor|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
+    PF_USAGE="proof-add takes two arguments, <floor|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add floor takes one log or several, proof-add floor <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
     if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
-    PF_KIND="$1"; PF_EVID="$2"; PF_QUESTION=""; PF_READER=""; shift 2
+    # SEVERAL LOGS ON ONE LINE (wave-36 T35; D13, AC-7.10): a floor may be the logs of several runners, each its own
+    # operand after the first, newline-joined in PF_EVIDS (a path holding a line break is refused below, by name).
+    PF_KIND="$1"; PF_EVID="$2"; PF_EVIDS="$2"; PF_QUESTION=""; PF_READER=""; shift 2
     while [ $# -gt 0 ]; do
       case "$1" in
         --question) [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_QUESTION" ] || usage "$PF_USAGE"; PF_QUESTION="$2"; shift 2 ;;
         --reader)   [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_READER" ] || usage "$PF_USAGE"; PF_READER="$2"; shift 2 ;;
-        *) usage "$PF_USAGE" ;;
+        -*|'') usage "$PF_USAGE" ;;
+        *$'\n'*) usage "$PF_USAGE" ;;
+        *[!0123456789abcdefABCDEF]*|*/*) [ "$PF_KIND" = floor ] || usage "$PF_USAGE"; PF_EVIDS="$PF_EVIDS
+$1"; shift ;;
+        *) usage "$PF_USAGE" ;;   # a bare hex word is a head, and a head is never an operand
       esac
     done
     if [ -n "$PF_QUESTION$PF_READER" ]; then
@@ -10172,35 +10178,51 @@ command: %s
     plan_verb_open proof-add
     PF_DOCS="$(docs_root "$PV_REPO")"
     PF_DOCS="$(cd "$PF_DOCS" 2>/dev/null && pwd -P)"
-    case "$PF_EVID" in
-      *[[:space:]]*|*'|'*)
-        die "REFUSED — the evidence path '$(clean "$PF_EVID")' carries a space, a tab, a line break or a |, which the space-separated proof line cannot hold; rename the file. The plan is unchanged."
-        exit 1 ;;
-    esac
-    case "$PF_EVID" in
-      /*) PF_ABS="$PF_EVID" ;;
-      *)  PF_ABS="$PF_DOCS/$PF_EVID" ;;
-    esac
-    # A SYMLINK IS NOT A RECORD (wave-26 T46; review 10 F7). The check below resolves the
-    # directory, not the file, so a link under record/ to a log elsewhere would be admitted and the
-    # evidence it cites could change after the proof. Refused by name, before it is read.
-    if [ -L "$PF_ABS" ]; then
-      die "REFUSED — the evidence $(clean "$PF_EVID") is a symbolic link (to $(clean "$(readlink "$PF_ABS")")), and what it points at can change after the proof; copy the log into the record (cp it to that path) and run proof-add again. The plan is unchanged."
-      exit 1
-    fi
-    PF_REAL=""
-    [ -n "$PF_DOCS" ] && [ -f "$PF_ABS" ] \
-      && PF_REAL="$(cd "$(dirname "$PF_ABS")" 2>/dev/null && pwd -P)/$(basename "$PF_ABS")"
-    if [ -z "$PF_REAL" ]; then
-      die "REFUSED — the evidence file $(clean "$PF_EVID") does not exist (read as $(clean "$PF_ABS")); write the record first, then add its proof. The plan is unchanged."
-      exit 1
-    fi
-    case "$PF_REAL" in
-      "$PF_DOCS"/record/*) PF_REL="${PF_REAL#"$PF_DOCS"/}" ;;
-      *)
-        die "REFUSED — the evidence $(clean "$PF_EVID") is not under record/ of the docs root ($PF_DOCS/record/); a proof cites a record. The plan is unchanged."
-        exit 1 ;;
-    esac
+    # EACH LOG IS HELD TO THE SAME RECORD RULES (wave-36 T35; AC-7.10): a floor's several logs are read one by one, and
+    # PF_PAIRS keeps each one's real path and its path under the docs root, tab-joined; PF_REAL and PF_REL name the
+    # first, which is the evidence of every other kind.
+    PF_PAIRS=""; PF_REAL=""; PF_REL=""
+    while IFS= read -r PF_EVID; do
+      case "$PF_EVID" in
+        *[[:space:]]*|*'|'*)
+          die "REFUSED — the evidence path '$(clean "$PF_EVID")' carries a space, a tab, a line break or a |, which the space-separated proof line cannot hold; rename the file. The plan is unchanged."
+          exit 1 ;;
+        *,*)
+          if [ "$PF_KIND" = floor ] && [ "$PF_EVIDS" != "$PF_EVID" ]; then
+            die "REFUSED — the evidence path '$(clean "$PF_EVID")' carries a comma, and a floor proof of several logs names them comma-joined on one evidence= field; rename the file. The plan is unchanged."
+            exit 1
+          fi ;;
+      esac
+      case "$PF_EVID" in
+        /*) PF_ABS="$PF_EVID" ;;
+        *)  PF_ABS="$PF_DOCS/$PF_EVID" ;;
+      esac
+      # A SYMLINK IS NOT A RECORD (wave-26 T46; review 10 F7). The check below resolves the
+      # directory, not the file, so a link under record/ to a log elsewhere would be admitted and the
+      # evidence it cites could change after the proof. Refused by name, before it is read.
+      if [ -L "$PF_ABS" ]; then
+        die "REFUSED — the evidence $(clean "$PF_EVID") is a symbolic link (to $(clean "$(readlink "$PF_ABS")")), and what it points at can change after the proof; copy the log into the record (cp it to that path) and run proof-add again. The plan is unchanged."
+        exit 1
+      fi
+      _pf_real=""
+      [ -n "$PF_DOCS" ] && [ -f "$PF_ABS" ] \
+        && _pf_real="$(cd "$(dirname "$PF_ABS")" 2>/dev/null && pwd -P)/$(basename "$PF_ABS")"
+      if [ -z "$_pf_real" ]; then
+        die "REFUSED — the evidence file $(clean "$PF_EVID") does not exist (read as $(clean "$PF_ABS")); write the record first, then add its proof. The plan is unchanged."
+        exit 1
+      fi
+      case "$_pf_real" in
+        "$PF_DOCS"/record/*) _pf_rel="${_pf_real#"$PF_DOCS"/}" ;;
+        *)
+          die "REFUSED — the evidence $(clean "$PF_EVID") is not under record/ of the docs root ($PF_DOCS/record/); a proof cites a record. The plan is unchanged."
+          exit 1 ;;
+      esac
+      [ -n "$PF_REAL" ] || { PF_REAL="$_pf_real"; PF_REL="$_pf_rel"; }
+      PF_PAIRS="$PF_PAIRS$_pf_real	$_pf_rel
+"
+    done <<PF_EVIDS_LIST
+$PF_EVIDS
+PF_EVIDS_LIST
     # A READING CARRIES ITS QUESTION, ITS RESULT AND ITS SCOPE (wave-27 T2; D1, AC-2.1). The record's
     # own flush-left lines say them, and for `structure` it answers every check id the shipped
     # checks file names, the file resolved through this hook's own lib root, as execution-recorder
@@ -10358,9 +10380,36 @@ PF_OTHER_LIST
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
     # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
-    # The project root goes too: a project that declares its regression has it judged by its own contract (T75; D36).
+    # The project root goes too: a config still carrying the removed floor-attestation: key is refused by name (T35).
     # The repository reads the objects and the ref's head bounds the evidence: no checkout is asked (T12).
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PV_REPO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO" "$PF_HEAD")"; then
+    # A FLOOR'S LOGS ARE EACH READ, AND SHARE ONE HEAD (wave-36 T35; D13, AC-7.10): every log is judged by the floor's one
+    # grammar (lib/proof.sh `_proof_floor_log`), the first refusal is the verb's, and logs that read different heads
+    # are refused naming each, for a floor is the runs of one head. The owed reds are the union of each log's.
+    PF_OWED=""
+    if [ "$PF_KIND" = floor ]; then
+      PF_FH=""; PF_FHEADS=""; PF_FRELS=""; PF_SPLIT=""
+      while IFS='	' read -r _pf_real _pf_rel; do
+        [ -n "$_pf_real" ] || continue
+        if ! _pf_h="$(proof_attested floor "$_pf_real" "$PV_REPO" "$PV_PLAN" "" "$PV_REPO" "$PF_HEAD")"; then
+          die "REFUSED — $(clean_whole "$_pf_h"). The plan is unchanged."
+          exit 1
+        fi
+        [ -z "$PF_FH" ] || [ "$_pf_h" = "$PF_FH" ] || PF_SPLIT=1
+        PF_FH="${PF_FH:-$_pf_h}"
+        PF_FHEADS="${PF_FHEADS:+$PF_FHEADS, }$_pf_rel read ${_pf_h:0:12}"
+        PF_FRELS="${PF_FRELS:+$PF_FRELS,}$_pf_rel"
+        PF_OWED="$(printf '%s,%s\n' "$PF_OWED" "$(proof_floor_owed "$_pf_real")" | awk -F, '
+          { for (i = 1; i <= NF; i++) if ($i != "" && !($i in s)) { s[$i] = 1; o = o (o == "" ? "" : ",") $i } }
+          END { print o }')"
+      done <<PF_PAIRS_LIST
+$PF_PAIRS
+PF_PAIRS_LIST
+      if [ -n "$PF_SPLIT" ]; then
+        die "REFUSED — the logs read different heads: $(clean "$PF_FHEADS"); a floor is the runs of one head, so run each at one head and cite those logs together. The plan is unchanged."
+        exit 1
+      fi
+      PF_HEAD="$PF_FH"; PF_REL="$PF_FRELS"
+    elif ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PV_REPO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO" "$PF_HEAD")"; then
       die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
@@ -10408,11 +10457,9 @@ PF_OTHER_LIST
     # whole reading whatever its head. The judge now reaches only as far as the question's chain (wave-36 T7;
     # A-T7-5), so what lands after the reading is the cover rule's to judge, and the verb holds nothing.
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
-    # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took the log whole and
-    # every red named; the line lists them as owed, and the judge reads them there.
-    PF_OWED=""
+    # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took each log and every red
+    # named; the line lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35).
     if [ "$PF_KIND" = floor ]; then
-      PF_OWED="$(proof_floor_owed "$PF_REAL")"
       PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED")"
     fi
     # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21): one `deferred:` line per finding
@@ -10990,19 +11037,22 @@ RC_TAGS
   # count (`_wt_piece_dirt`, land's reading: untracked files count, the record link does not) before the
   # run and again after it: a run that moved either is not a run of the head it read, so it is refused
   # and no log is written. Otherwise every run keeps its log, `record/<wave>/floor-run-<head>.log`, the
-  # n-th at one head `floor-run-<head>-<n>.log`, opening `head=<40-hex> dirty=<n> rc=<n>`, then
-  # `command: <cmd>`, then the output, and the verb exits with the command's code.
+  # n-th at one head `floor-run-<head>-<n>.log`, in the floor's one grammar (wave-36 T35; D13, AC-7.10): opening
+  # `head=<40-hex> dirty=<n>`, then `command: <cmd>`, then the output, and closing `rc=<n>`, its last line; the
+  # verb exits with the command's code.
   # IT RUNS AND LOGS; IT WRITES NO PROOF. `release-check` writes its own fact because a check is a run the
   # verb owns; a regression is evidence the run cites, and `proof-add floor` stays the one writer of its line
-  # (lib/proof.sh `_proof_floor_declared` judges the log there).
+  # (lib/proof.sh `_proof_floor_log` judges the log there as it judges any log: `floor:` is a convenience, never
+  # a privilege, and a project may run its regression itself and cite that log).
   #
   # WITH NO floor: KEY THE REGRESSION IS THE PROJECT'S tests/run.sh (wave-35 T10; D10, REQ-1 AC-1.8). The verb runs
   # it, whole, in the same checkout at the same head and logs it the same way, `command: tests/run.sh`; the runner
   # asks the machine's gate itself, kind whole (tests/run.sh THE ONE ADMISSION; ADR-051). Its log is the evidence
   # `proof-add floor` judges by the runner's own report (lib/proof.sh `proof_attested`): a red whole run is the
   # floor's candidate, its reds owed (wave-35 T9), so the record line is printed red or green. A run the gate never
-  # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, and a
-  # project whose floor is the user's attestation (`floor-attestation:`) has no command to run.
+  # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, naming the
+  # other way: run the regression and cite its log. A config carrying `floor-attestation:`, a key removed in wave-36
+  # (T35), is refused first, naming it (lib/proof.sh `proof_floor_retired`).
   # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, HELD TO THE FULL-RUN RULES (AC-1.8): the dispatch wall's
   # (hooks/dispatch-preflight.sh, THE FULL-RUN WALL), asked of the same facts in the same order, before anything
   # runs: `regression: no` refuses it (`plan_regression`); a row the regression waits on that still writes the head
@@ -11012,15 +11062,14 @@ RC_TAGS
   floor-run)
     FR_ROOT="$(project_root "$PWD")"
     FR_CMD="$(config_value "$FR_ROOT" floor "" 2>/dev/null)"
-    FR_ATT="$(config_value "$FR_ROOT" floor-attestation "" 2>/dev/null)"
-    if [ -z "$FR_CMD" ] && [ -n "$FR_ATT" ]; then
-      die "REFUSED — this project's floor is the user's attestation (floor-attestation: $(clean "$FR_ATT") in .bionic/config.yaml), which names no command to run; proof-add floor reads the user's record of it. Nothing was run."
-      exit 1
-    fi
     if ! { declare -F proof_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_state >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
       exit 2
+    fi
+    if FR_RETIRED="$(proof_floor_retired "$FR_ROOT")"; then
+      die "REFUSED — $(clean "$FR_RETIRED"). Nothing was run."
+      exit 1
     fi
     plan_verb_open floor-run
     FR_WB="$(plan_working_branch "$PV_PLAN")"
@@ -11037,7 +11086,7 @@ RC_TAGS
     FR_WHOLE=""
     if [ -z "$FR_CMD" ]; then
       if [ ! -f "$FR_CO/tests/run.sh" ]; then
-        die "REFUSED — this project declares no floor: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare floor: <command> there. Nothing was run."
+        die "REFUSED — this project declares no floor: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare floor: <command> there, or run the regression yourself and cite its log (its first head= line head=<40-hex> dirty=0, its last line rc=0) with proof-add floor <log> [<log>…]. Nothing was run."
         exit 1
       fi
       FR_WHOLE=yes; FR_CMD="tests/run.sh"
@@ -11127,7 +11176,7 @@ RC_TAGS
     while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD-$FR_NTH.log"; done
     FR_LOG="$FR_DOCS/$FR_REL"
     if ! mkdir -p "${FR_LOG%/*}" 2>/dev/null \
-       || ! { printf 'head=%s dirty=%s rc=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_RC" "$FR_CMD"; cat "$FR_TMP"; } > "$FR_LOG" 2>/dev/null; then
+       || ! { printf 'head=%s dirty=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_CMD"; awk '{ print }' "$FR_TMP"; printf 'rc=%s\n' "$FR_RC"; } > "$FR_LOG" 2>/dev/null; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
       die "REFUSED — the regression exited $FR_RC, but its log $FR_LOG cannot be written."
       exit 1

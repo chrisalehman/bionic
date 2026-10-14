@@ -5074,8 +5074,8 @@ FN_LOG="$FN_REC/floor-run-$FN_W.log"
 expect_eq "FN-1 AC-1.8 floor-run with no floor: runs tests/run.sh once, in the working branch's checkout" \
   "1|cwd=$(cd "$FN_WT" && pwd -P) args=" "$(fn_runs)|$(tail -n 1 "$FN_SEEN" 2>/dev/null)"
 expect_eq "FN-1b …and exits with the run's own code (1: b.test.sh red)" "1" "$RC"
-expect_eq "FN-1c …its log opens head=<working head> dirty=0 rc=1, then command: tests/run.sh" \
-  "head=$FN_W dirty=0 rc=1|command: tests/run.sh" "$(head -n 2 "$FN_LOG" 2>/dev/null | paste -sd'|' -)"
+expect_eq "FN-1c …its log opens head=<working head> dirty=0, then command: tests/run.sh, and closes rc=1 (wave-36 T35: the one grammar)" \
+  "head=$FN_W dirty=0|command: tests/run.sh|rc=1" "$(head -n 2 "$FN_LOG" 2>/dev/null | paste -sd'|' -)|$(tail -n 1 "$FN_LOG" 2>/dev/null)"
 expect_contains "FN-1d …and carries the runner's own report" "Gating: 1 passed, 1 failed" "$(cat "$FN_LOG" 2>/dev/null)"
 expect_contains "FN-1e …and the verb prints the proof-add floor line to run, red as it is" \
   "proof-add floor record/wave-01-fixture/floor-run-$FN_W.log" "$OUT"
@@ -5099,8 +5099,8 @@ fn_set '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana
 echo green > "$FN_MODE"
 poke "$RFN" floor-run
 expect_eq "FN-4 with approved: regression-2 the second whole run runs, green (exit 0)" "0|2" "$RC|$(fn_runs)"
-expect_eq "FN-4b …its log the second at the head, opening rc=0" "head=$FN_W dirty=0 rc=0" \
-  "$(head -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)"
+expect_eq "FN-4b …its log the second at the head, opening head= dirty=0 and closing rc=0 (wave-36 T35)" "head=$FN_W dirty=0|rc=0" \
+  "$(head -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)|$(tail -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)"
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W-2.log"
 expect_eq "FN-4c AC-1.8 proof-add floor accepts the green run's log, nothing owed" "0|0" \
   "$RC|$(fn_proved | /usr/bin/grep -c ' owed=' | tr -d ' ')"
