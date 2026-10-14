@@ -4372,6 +4372,60 @@ expect_eq "BF-4 a plan with no marker: units_born_marks prints nothing, exit 0 (
 expect_eq "BF-5 an unreadable plan: exit 1" "1" "$(call_rc units_born_marks "$SANDBOX/no-such-plan.md")"
 
 # ============================================================
+section "§STEP-LINE — wave-36 T10: units_step_line rewrites a \`- T<n>:\` line's text and keeps every \` <key>: \` marker after it (REQ-4 AC-4.3; D10)"
+# ============================================================
+# task-add writes ` born: review S<n> <reach> of=<record>#<n>` (or ` born: floor <suite>`) at the end of the row's
+# `- T<n>:` line, and a later verb may add its own ` <key>: <value>`. step-line's replace mode used to overwrite the
+# whole text, so the landing summary lost the born marker the judge and the fix-cap read (debt step-line-drops-born,
+# wave-35 A-orch-52). The line is now `- T<n>: <text>[ <key>: <value>]…`: the text is what precedes the first
+# ` <key>: `, a rewrite replaces (or, with append, extends) the text alone, and each marker follows it in its order,
+# once — a marker whose key the new text already carries is the new text's. A `Step N:` line is not a task line and
+# is rewritten whole, as before.
+cat > "$SANDBOX/sl.md" <<'SL_EOF'
+## SDLC State
+
+current: 4
+
+- Step 4: in progress; current: T5
+- T5: pending dispatch — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2
+- T6: pending dispatch — added by task-add at 2026-10-13T20:45:00Z born: floor a.test.sh fixed: T9 at 2026-10-14T00:00:00Z
+- T7: pending dispatch — .worktrees/36-T7
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T5 | 4 | build | fix it · born: review | w-T5 | — | 30 | REQ-x | payload/a.sh | pending |
+| T6 | 4 | build | fix the floor | w-T6 | — | 30 | REQ-x | payload/b.sh | pending |
+| T7 | 4 | build | other | w-T7 | — | 30 | REQ-x | payload/c.sh | pending |
+SL_EOF
+{ call units_step_line "$SANDBOX/sl.md" T5 'landed abc1234 2026-10-14T01:00:00Z'; echo; } > "$SANDBOX/sl-1.md"
+expect_eq "SL-1 AC-4.3 step-line T5 over a born row: the text is replaced and the born marker task-add wrote follows it" \
+  "- T5: landed abc1234 2026-10-14T01:00:00Z born: review S3 on of=record/w/r.md#2" "$(/usr/bin/grep '^- T5:' "$SANDBOX/sl-1.md")"
+expect_eq "SL-1b …and the marker's reader still reads the finding off the rewritten line" \
+  "T5${TAB}pending${TAB}record/w/r.md#2" "$(call units_born_findings "$SANDBOX/sl-1.md")"
+{ call units_step_line "$SANDBOX/sl.md" T6 'landed def5678 2026-10-14T01:10:00Z'; echo; } > "$SANDBOX/sl-2.md"
+expect_eq "SL-2 two markers, task-add's and a later verb's: both kept, in their order" \
+  "- T6: landed def5678 2026-10-14T01:10:00Z born: floor a.test.sh fixed: T9 at 2026-10-14T00:00:00Z" \
+  "$(/usr/bin/grep '^- T6:' "$SANDBOX/sl-2.md")"
+{ call units_step_line "$SANDBOX/sl.md" T5 'merge 9abc' append; echo; } > "$SANDBOX/sl-3.md"
+expect_eq "SL-3 append extends the text, before the markers" \
+  "- T5: pending dispatch — added by task-add at 2026-10-13T20:44:06Z; merge 9abc born: review S3 on of=record/w/r.md#2" \
+  "$(/usr/bin/grep '^- T5:' "$SANDBOX/sl-3.md")"
+{ call units_step_line "$SANDBOX/sl.md" T5 'landed abc1234 2026-10-14T01:00:00Z — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2'; echo; } > "$SANDBOX/sl-4.md"
+expect_eq "SL-4 a new text that carries the marker itself (row-landed folds the old text in): written once, as given" \
+  "- T5: landed abc1234 2026-10-14T01:00:00Z — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2" \
+  "$(/usr/bin/grep '^- T5:' "$SANDBOX/sl-4.md")"
+{ call units_step_line "$SANDBOX/sl.md" T7 'landed ghi9012 2026-10-14T01:20:00Z'; echo; } > "$SANDBOX/sl-5.md"
+expect_eq "SL-5 a task line with no marker is replaced whole" \
+  "- T7: landed ghi9012 2026-10-14T01:20:00Z" "$(/usr/bin/grep '^- T7:' "$SANDBOX/sl-5.md")"
+{ call units_step_line "$SANDBOX/sl.md" 4 'done'; echo; } > "$SANDBOX/sl-6.md"
+expect_eq "SL-6 a Step line is not a task line: its text is replaced whole, \` current: \` included" \
+  "- Step 4: done" "$(/usr/bin/grep '^- Step 4:' "$SANDBOX/sl-6.md")"
+expect_eq "SL-7 …and every other line of the plan is unchanged (one line differs in each of SL-1, SL-2, SL-3, SL-5, SL-6)" \
+  "1 1 1 1 1" "$(for n in 1 2 3 5 6; do diff "$SANDBOX/sl.md" "$SANDBOX/sl-$n.md" | /usr/bin/grep -c '^>'; done | tr '\n' ' ' | sed 's/ $//')"
+
+# ============================================================
 section "§ONE-SHAPE — wave-31 T5: a plan in the retired task-scale shape is refused aloud; the one table validates at task scale (REQ-1 AC-1.2, AC-1.3; D2)"
 # ============================================================
 #
