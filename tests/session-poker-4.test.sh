@@ -1226,7 +1226,7 @@ s42_snap "$RSEV" "$PSEV"
 poke "$RSEV" finding-move "$(mv_id mv-def)" defer "$(printf 'defer the flag  wording\nuntil the next wave, it can wait')" 'the wording waits for the docs pass'
 expect_eq "MOVE-1 §MOVE AC-8.9 words that stand in a typed prompt move the finding (exit 0)" "0" "$RC"
 expect_regex "MOVE-1b …the moved: line carries who, when, the words folded and why" \
-  "^moved: $(mv_id mv-def) to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z words=\"$MV_P\" why=\"the wording waits for the docs pass\"\$" \
+  "^moved: $(mv_id mv-def) to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z words=\"$MV_P\" session=$SID why=\"the wording waits for the docs pass\"\$" \
   "$(mv_moved mv-def)"
 expect_eq "MOVE-1c …a move to defer writes the finding's deferred: line" \
   "deferred: $(mv_id mv-def) S2 on \"a flag the help text misnames\"" "$(/usr/bin/grep "^deferred: $(mv_id mv-def) " "$PSEV")"
@@ -1331,12 +1331,12 @@ MV_NMOVES="$(/usr/bin/grep -c "^moved: $(mv_id mv-fix) " "$PSEV")"
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$(printf 'fix \t it')" 'the whole prompt is the word'
 expect_eq "MOVE-11 a quote of two words that is the user's whole prompt moves the finding (exit 0, one more moved: line)" \
   "0|$((MV_NMOVES + 1))" "$RC|$(/usr/bin/grep -c "^moved: $(mv_id mv-fix) " "$PSEV")"
-expect_regex "MOVE-11b …its words= folded once, by the one rule" "words=\"fix it\" why=\"the whole prompt is the word\"\$" \
+expect_regex "MOVE-11b …its words= folded once, by the one rule" "words=\"fix it\" session=$SID why=\"the whole prompt is the word\"\$" \
   "$(/usr/bin/grep "^moved: $(mv_id mv-fix) " "$PSEV" | tail -1)"
 mv_prompts 'please defer it now'
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$(printf 'defer it\001now')" 'a control character is white space'
 expect_regex "MOVE-12 a control character in the words is folded as white space, in the check and in the line (exit 0)" \
-  "^0\|moved: .* words=\"defer it now\" why=\"a control character is white space\"\$" \
+  "^0\|moved: .* words=\"defer it now\" session=$SID why=\"a control character is white space\"\$" \
   "$RC|$(/usr/bin/grep "^moved: $(mv_id mv-fix) " "$PSEV" | tail -1)"
 mv_tx typed
 
@@ -1385,6 +1385,78 @@ else
 $MV_KEY_ROWS
 EOF2
 fi
+
+# ---------- §SAID (wave-36 T9; REQ-4 AC-4.2; D10, D5): words are read across the run's recorded sessions ----------
+#
+# A `/clear` re-keys the session, and the words the person typed before it stand in the predecessor's
+# transcript, which a reader keyed by the live session id never opens (research C17). The run records its
+# sessions (`- session: <sid> bound <ISO> by <act>` under ## SDLC State, lib/binding.sh), and
+# `user_said <text> <plan>` reads every recorded session's transcript, then this session's: on rc 0
+# SAID_SESSION names the session the words came from, and finding-move and rule quote it as
+# `words="<words>" session=<sid>`. Two sessions here: the predecessor SAID_A typed SAID_WA; this
+# session ($SID) typed MV_P. The lines are written by the one writer, as the binding acts write them.
+SAID_A="5a1d0000-0000-4000-8000-00000000000a"
+SAID_WA='hold the parser change until the next wave please'
+SAID_LIBDIR="${SAID_LIB%/*}"
+said_bind() {  # <sid> <act> -> bind_plan's rc and BIND_SESSION, as the binding acts call it
+  bash -c '. "$1/run.sh" && . "$1/binding.sh" || exit 9; bind_plan "$2" "$3" "$4" "$5"; st=$?; printf "%s|%s" "$st" "${BIND_SESSION:-}"' \
+    _ "$SAID_LIBDIR" "$RSEV" "$1" "$PSEV" "$2" 2>/dev/null
+}
+said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config
+  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
+    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null
+}
+jq -c --arg p "Thanks. $SAID_WA, it is not urgent." '.message.content = $p' "$MV_FX/typed.jsonl" | cat "$MV_FX/frame.jsonl" - > "$MV_PROJ/$SAID_A.jsonl"
+mv_tx typed
+expect_eq "SAID-0 precondition: the predecessor binds by engage, this session by bind; each line is recorded" "0|recorded 0|recorded" \
+  "$(said_bind "$SAID_A" engage) $(said_bind "$SID" bind)"
+expect_eq "SAID-0b …and the run's sessions read in the order they bound" "$SAID_A $SID" \
+  "$(bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2"' _ "$SAID_LIBDIR" "$PSEV" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "SAID-u1 §SAID AC-4.2 the predecessor's words, read through the run: found (rc 0), from the predecessor" "0|$SAID_A" "$(said_run "$SAID_WA" "$PSEV")"
+expect_eq "SAID-u2 …this session's words through the run: found, from this session" "0|$SID" "$(said_run "$MV_P" "$PSEV")"
+expect_eq "SAID-u3 …the predecessor's words with no plan named: this session alone is read, not found (rc 1)" "1|" "$(said_run "$SAID_WA")"
+expect_eq "SAID-u4 …words neither session typed, through the run: not found (rc 1)" "1|" "$(said_run 'start every review again from the top' "$PSEV")"
+# THE MUTATION ARM (the spec's falsifier): the session list replaced by this session alone.
+SAID_NEEDLE='_SAID_SIDS="$(_said_sessions "${2:-}")"'
+anchor file payload/scripts/lib/said.sh '_SAID_SIDS="$(_said_sessions "${2:-}")"'
+mkdir -p "$MV_MUT/s"
+SAID_N="$SAID_NEEDLE" awk 'BEGIN { n = ENVIRON["SAID_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "_SAID_SIDS=\"$(session_id)\"" substr($0, i + length(n)); print }' \
+  "$SAID_LIB" > "$MV_MUT/s/said.sh"
+expect_eq "SAID-mut0 the one-session mutant differs from the library in one line" "1" "$(diff "$SAID_LIB" "$MV_MUT/s/said.sh" | /usr/bin/grep -c '^>')"
+expect_eq "SAID-mut1 the mutant runs: it finds this session's words as the library does" "0|$SID" "$(said_run "$MV_P" "$PSEV" "$MV_MUT/s/said.sh")"
+expect_eq "SAID-mut2 …and refuses the predecessor's words, so SAID-u1 goes red under it" "1|" "$(said_run "$SAID_WA" "$PSEV" "$MV_MUT/s/said.sh")"
+
+# The verb: a finding of its own, so no later row of this file reads a move it did not make.
+printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
+  "$(roster_row_fixture session="$SID" name=said-crit agent_id=a-said-crit subagent_type=bionic:critic files="$(sev_files "said-a")")" >> "$SEV_RS"
+sev_cur 4
+sev_rec said-a flag "findings: 1" "finding: 1 S2 off - a parser message names the wrong flag"
+sev_add said-a said-crit
+expect_eq "SAID-1-pre precondition: a deferral registers (exit 0)" "0" "$RC"
+s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id said-a)" fix "$SAID_WA" 'the person ruled before the clear'
+expect_eq "SAID-1 §SAID AC-4.2 words the predecessor session typed move the finding (exit 0)" "0" "$RC"
+expect_regex "SAID-1b …and the moved: line quotes the words with the session they came from" \
+  "^moved: $(mv_id said-a) to=fix by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z words=\"$SAID_WA\" session=$SAID_A why=\"the person ruled before the clear\"\$" \
+  "$(mv_moved said-a)"
+s42_snap "$RSEV" "$PSEV"
+poke "$RSEV" finding-move "$(mv_id said-a)" defer 'start every review again from the top' 'nobody typed this'
+s42_unchanged "SAID-2 §SAID words neither recorded session typed" 1 "$PSEV"
+expect_contains "SAID-2b …saying they stand in no prompt the user typed" "in no prompt the user typed" "$OUT"
+expect_contains "SAID-2c …and naming the sessions it read" "$SAID_A" "$OUT"
+
+# rule quotes the words as finding-move does: `rule <writer> <text> --words '<words>'`.
+poke "$RSEV" rule said-crit 'leave the parser for the next wave' --words "$SAID_WA"
+expect_eq "SAID-3 §SAID rule --words on the predecessor's words records the ruling (exit 0)" "0" "$RC"
+poke "$RSEV" rulings said-crit
+expect_contains "SAID-3b …and the ruling quotes the words with the session they came from" \
+  "leave the parser for the next wave words=\"$SAID_WA\" session=$SAID_A" "$OUT"
+poke "$RSEV" rule said-crit 'start over' --words 'start every review again from the top'
+expect_eq "SAID-4 …rule --words on words no recorded session typed is refused (exit 2)" "2" "$RC"
+expect_contains "SAID-4b …saying they stand in no prompt the user typed" "in no prompt the user typed" "$OUT"
+poke "$RSEV" rulings said-crit
+expect_absent "SAID-4c …and no ruling carries them" "start over" "$OUT"
+expect_contains "SAID-4d …positive on the same read: the accepted ruling is there" "leave the parser for the next wave" "$OUT"
 
 POKE_BOUND="$MV_BOUND_WAS"
 if [ "$MV_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$MV_CCD_WAS"; fi
@@ -2348,7 +2420,7 @@ MP_NBSP="$(printf '\302\240')"; MP_LS="$(printf '\342\200\250')"; MP_NEL="$(prin
 mv_tx typed; sev_cur 4
 poke "$RSEV" finding-move "$(mv_id mv-fix)" fix "$(printf 'defer the flag wording\302\240until the next wave, it can wait')" "the${MP_NBSP}docs${MP_LS}pass${MP_NEL}here"
 expect_regex "MP-f1 §MOVE-FOLD a no-break space, a line separator and a next-line in the why fold as white space, as in the words (exit 0)" \
-  "^0\|moved: .* words=\"$MV_P\" why=\"the docs pass here\"\$" "$RC|$(mv_moved mv-fix | tail -1)"
+  "^0\|moved: .* words=\"$MV_P\" session=$SID why=\"the docs pass here\"\$" "$RC|$(mv_moved mv-fix | tail -1)"
 
 # ---------- §MOVE-SELF (ruling 2d): session.sh is found beside the library at source time ----------
 MP_LIBDIR="${SAID_LIB%/*}"

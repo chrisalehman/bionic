@@ -44,6 +44,8 @@
 #                              `- <id>:` line's ` born: review` marker (wave-30 T21, AC-10.2).
 #   units_born_findings <plan> `<id>\t<status>\t<record>#<n>` per finding a born row names on that
 #                              marker's ` of=` list (wave-33 T13; REQ-5, D6).
+#   units_born_marks <plan>    `<id>\t<review|floor>\t<rating or suite>` per born row, read off its
+#                              `- <id>:` line's ` born: review` or ` born: floor` marker (wave-36 T7, D9).
 #   units_fix_cap <plan>      the plan's fix-cap: rendered as a number, the level's default when
 #                              absent (wave-30 T21, AC-2.3); needs lib/run.sh loaded.
 #
@@ -2240,7 +2242,8 @@ _units_ledger() {
 #      `pending dispatch — added by task-add at <iso>` is not a placeholder to the evidence
 #      gate (`is_placeholder_value` refuses only the bare words). With a twelfth operand
 #      `<born>` (`review S<n> <reach>`, wave-30 T21; AC-10.2) the line ends ` born: <born>`:
-#      the review-born marker `units_born` reads and the landing report counts. The line's
+#      the review-born marker `units_born` reads and the landing report counts; `floor <suite>`
+#      (wave-36 T7; D9) writes the floor-born marker, which `units_born_marks` reads. The line's
 #      later writers (`row-landed`) append to its text, so the marker stays.
 #
 # NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
@@ -2996,6 +2999,36 @@ units_born_findings() {
       n = split(v, ids, ",")
       for (i = 1; i <= n; i++) if (ids[i] ~ /^[^#]+#[1-9][0-9]*$/) printf "%s\t%s\t%s\n", k, st[k], ids[i]
     }'
+}
+
+# units_born_marks <plan> -> `<id>\t<review|floor>\t<rating or suite>`, one line per `## SDLC State` `- <id>:` line
+#   carrying ` born: review S<n> <on|off>` or ` born: floor <suite>` (wave-36 T7; REQ-3, D9, D2), read where
+#   `units_born` reads (fences skipped, the first line per id), in the section's order. Nothing, exit 0, when none;
+#   exit 1 when the plan cannot be read. `task-add --born <record>#<n>` or `--born 'review S<n> <on|off>'` writes the
+#   review marker, `task-add --born floor:<suite>` the floor one (units_add_row's <born> operand, `floor <suite>`).
+#   Reader: lib/proof.sh `_facts_born_landings`, which holds the landing of each such row on a reading's chain.
+#   `units_born`, the fix-cap's count, reads the review marker alone, so a floor-born row counts against no cap.
+units_born_marks() {
+  local plan="${1:-}"
+  [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  /usr/bin/grep -qE ' born: (review|floor) ' "$plan" 2>/dev/null || return 0
+  awk '
+    { sub(/\r$/, "") }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { insec = 1; next }
+    /^## / { insec = 0 }
+    !insec { next }
+    {
+      l = $0; sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
+      c = index(l, ":"); if (c == 0) next
+      k = substr(l, 1, c - 1); sub(/[[:space:]]+$/, "", k)
+      if (k !~ /^T[0-9]/ || (k in seen)) next
+      seen[k] = 1
+      if (match(l, / born: review S[0-9]+ (on|off)( |$)/)) {
+        r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r); printf "%s\treview\t%s\n", k, r
+      } else if (match(l, / born: floor [^ \t;]+/)) printf "%s\tfloor\t%s\n", k, substr(l, RSTART + 13, RLENGTH - 13)
+    }' "$plan"
 }
 
 # units_fix_cap <plan> -> the plan's `fix-cap:` as a number (lib/run.sh `fix_cap_render`): the field,

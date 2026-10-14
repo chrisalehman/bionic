@@ -206,8 +206,10 @@ TODAY="$(date -u +%Y-%m-%d)"
 # `unknown` rather than an empty string when the manifest cannot be read: an attestation
 # that names no version is still an attestation, and a blank after "close-out.sh" reads
 # like a truncation.
-co_version() {
-  local f="$(plugin_root)/.claude-plugin/plugin.json" v=""
+co_version() { co_plugin_version "$(plugin_root)"; }
+# co_plugin_version <plugin root> -> that root's manifest version, or `unknown` (co_version's reading, for any root)
+co_plugin_version() {
+  local f="${1:-}/.claude-plugin/plugin.json" v=""
   if [ -f "$f" ]; then
     v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)"
   fi
@@ -482,6 +484,60 @@ co_hand_holds() {  # -> sets CO_HH_LINE
   out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
+}
+# WHAT GOVERNED THE RUN, READ BEFORE THE WIPE (wave-36 T2; D7, REQ-1 AC-1.4, ADR-055). hooks/session-start.sh writes
+# one load record per session start under the project's tmp (wave-36 T1): `root=`, `commit=` when the root is a
+# checkout of the plugin, `started=`, then a sha256 per loaded file. A record outlives its session for this reader's
+# sake, and is no sweep class, so act 3 removes it as an unkeyed entry: `run` reads it first into CO_GOV_LINES, and
+# the card and the continuation both print that one reading, as the hand-holds are.
+#
+# THE WINDOW is the run's Step 4 to now: the first ISO instant on the `- Step 4:` line or its indented lines, else the
+# plan's `approved-by:` instant (the plan's approval is Step 4's start), else every record. A session started before
+# it governed none of the run's rows. One line per root and commit, dated by the first session that ran it, in that
+# order: `governed-by: <root> <commit> from <ISO>`. A record with no commit ran an installed copy, named by that
+# copy's own manifest: `governed-by: <root> installed <version> from <ISO>`. None in the window: the installed
+# version this script runs from, `governed-by: installed <version>`. A link is never a record.
+CO_GOV_LINES=""
+co_iso_secs() {  # <text> -> its first ISO-8601 UTC instant as YYYY-MM-DDTHH:MM:SSZ, or nothing
+  local iso
+  iso="$(printf '%s\n' "${1:-}" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z' | head -n 1)"
+  case "${#iso}" in
+    17) printf '%s:00Z' "${iso%Z}" ;;
+    20) printf '%s' "$iso" ;;
+  esac
+}
+co_window_start() {  # -> the run's Step-4 instant, else its approval's, as YYYY-MM-DDTHH:MM:SSZ; nothing when neither
+  local s step4 from
+  s="$(sdlc_section)"
+  step4="$(printf '%s\n' "$s" | awk '/^- Step 4:/ { f = 1; print; next } f && /^[[:space:]]+[^[:space:]]/ && !/^[[:space:]]*- / { print; next } { f = 0 }')"
+  from="$(co_iso_secs "$step4")"
+  [ -n "$from" ] || from="$(co_iso_secs "$(sdlc_header approved-by "$s")")"
+  printf '%s' "$from"
+}
+co_governed_rows() {  # <window start|""> -> "<started>\t<root>\t<commit, or installed <version>>" per record in it
+  local from="${1:-}" f l root commit started
+  for f in "$TMP_DIR"/loaded-*.state; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    root=""; commit=""; started=""
+    while IFS= read -r l || [ -n "$l" ]; do
+      case "$l" in
+        root=*) root="${l#root=}" ;;
+        commit=*) commit="${l#commit=}" ;;
+        started=*) started="${l#started=}" ;;
+        *) break ;;
+      esac
+    done < "$f"
+    [ -n "$root" ] && [ -n "$started" ] || continue
+    if [ -n "$from" ] && [[ "$started" < "$from" ]]; then continue; fi
+    [ -n "$commit" ] || commit="installed $(co_plugin_version "$root")"
+    printf '%s\t%s\t%s\n' "$started" "$root" "$commit"
+  done
+  return 0
+}
+co_governed() {  # -> sets CO_GOV_LINES
+  CO_GOV_LINES="$(co_governed_rows "$(co_window_start)" | LC_ALL=C sort \
+    | awk -F'\t' '!seen[$2 FS $3]++ { printf "governed-by: %s %s from %s\n", $2, $3, $1 }')"
+  [ -n "$CO_GOV_LINES" ] || CO_GOV_LINES="governed-by: installed $VERSION"
 }
 co_orphans() {  # <run|check> -> one `orphan:` line per live detached run under $TMP_DIR/runs
   local log out id prog
@@ -845,6 +901,20 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
       fi
     fi
   fi
+  # THE GOVERNED-BY LINES (wave-36 T2): the hand-holds' road. The section goes in after ## Hand-holds (so before an
+  # ## Inherited debt inserted above), and it counts as there when it holds ANY `governed-by: ` line: a second close
+  # reads no record (the first one's wipe took them), and its installed line must not contradict the first reading.
+  [ -n "$CO_GOV_LINES" ] || co_governed
+  if ! co_cont_has_heading "## Governed by"; then
+    phr="${phr:+$phr and }the ## Governed by section"
+    [ "$mode" != write ] || co_cont_insert "## Hand-holds" "$(co_governed_section)"
+  else
+    miss="$(co_cont_missing_under "## Governed by" "governed-by: " "$CO_GOV_LINES")"
+    if [ -n "$miss" ]; then
+      phr="${phr:+$phr and }the governed-by lines under ## Governed by"
+      [ "$mode" != write ] || co_cont_merge "$miss" "## Governed by"
+    fi
+  fi
   CO_SEC_MSG="$phr"
 }
 
@@ -876,6 +946,12 @@ co_hand_holds_section() {
     "hand-holds: not read "*) printf '%s\n' "$CO_HH_LINE" ;;
     *) printf '```\n%s\n```\n' "$CO_HH_LINE" ;;
   esac
+}
+
+# co_governed_section -> `## Governed by` and the lines `co_governed` read before the wipe, fenced as the hand-holds are.
+co_governed_section() {
+  [ -n "$CO_GOV_LINES" ] || co_governed
+  printf '## Governed by\n\n```\n%s\n```\n' "$CO_GOV_LINES"
 }
 
 # co_inherited_section -> `## Inherited debt` and every `inherited:` line of the plan's `## SDLC State`, as the verb
@@ -981,6 +1057,8 @@ $(co_deferrals_section)
 $(co_landings_section)
 
 $(co_hand_holds_section)
+
+$(co_governed_section)
 ${inherited:+
 $inherited
 }
@@ -1694,6 +1772,8 @@ do_check() {
   say "regression-runs: $RR_LINE"
   co_hand_holds
   say "$CO_HH_LINE"
+  co_governed
+  say "$CO_GOV_LINES"
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
@@ -1794,6 +1874,7 @@ do_run() {
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
   co_hand_holds;    say "$CO_HH_LINE"
+  co_governed;      say "$CO_GOV_LINES"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
