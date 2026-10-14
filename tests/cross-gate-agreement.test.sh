@@ -12677,9 +12677,14 @@ section "CG-ledger — ONE ledger reader: the gate's refusal ids ARE the tick's 
 # the first tick of every run). With no roster both readers take the no-roster rule, so T3's
 # agent-named active row is an `evidence` finding there rather than a `launch` one, and the
 # gate folds the two evidence rows into one refusal.
-# cgl_case <label> <five-minute load> <roster: yes|no> <want kinds> <want refusals>
+#
+# AND OVER THE RUN'S ROSTERS (wave-36 T29; REQ-4 AC-4.1; D10). Both readers take one list,
+# `units_run_rosters`: this session's roster, then every roster of the plan. `-run` keeps every launch
+# row on session B's roster, dispatched under this plan, and this session's roster empty, so a reader
+# that reads `roster-<sid>` alone names T4 too and the repaired plan never commits or ticks clean.
+# cgl_case <label> <five-minute load> <roster: yes|no> <want kinds> <want refusals> [<launch rows: own|run>]
 cgl_case() {
-  local lbl="$1" load5="$2" roster="$3" want_kinds="$4" want_n="$5"
+  local lbl="$1" load5="$2" roster="$3" want_kinds="$4" want_n="$5" home="${6:-own}"
   CGL_R=$(new_repo "cgl${lbl}")
   CGL_P="$CGL_R/.bionic/docs/plans/epic-99/cgl.plan.md"
   CGL_RO="$CGL_R/.bionic/tmp/roster-$SID_A.state"
@@ -12724,12 +12729,21 @@ Step 4:
 | T4 | 4 | build | active, launched | w-T4 | — | 30m | REQ-x | d.sh | active |
 | T5 | 4 | build | active, self-owned | — | — | 30m | REQ-x | e.sh | active |
 CGLEOF
+  s4_bind "$CGL_R" "$SID_A" "$CGL_P"
+  # WHERE THE LAUNCH ROWS GO: this session's roster, or session B's under this plan's binding.
+  CGL_RL="$CGL_RO"; CGL_RSID="$SID_A"; CGL_RPLAN=none
+  if [ "$home" = run ]; then
+    CGL_RL="$CGL_R/.bionic/tmp/roster-$SID_B.state"; CGL_RSID="$SID_B"
+    CGL_RPLAN="$(sed -n 's/^plan=//p' "$CGL_R/.bionic/tmp/engaged-$SID_A.state")"
+    roster_header > "$CGL_RL"
+  fi
   if [ "$roster" = yes ]; then
     roster_header > "$CGL_RO"
-    roster_row_fixture status=identified session="$SID_A" name=w-T4 agent_id=a-w-T4 \
-      tool_use_id=toolu_01CGLT4 deliverable= >> "$CGL_RO"
+    roster_row_fixture status=identified session="$CGL_RSID" name=w-T4 agent_id=a-w-T4 \
+      tool_use_id=toolu_01CGLT4 deliverable= plan="$CGL_RPLAN" >> "$CGL_RL"
   fi
-  s4_bind "$CGL_R" "$SID_A" "$CGL_P"
+  [ "$home" = own ] || expect_eq "CG-ledger${lbl} precondition: w-T4 is on session B's roster under this plan, none on this one" \
+    "1 0" "$(/usr/bin/grep -cF "|plan=$CGL_RPLAN" "$CGL_RL") $(/usr/bin/grep -c '^roster-state/' "$CGL_RO")"
   s4_attest "$CGL_R" "$SID_A"
   # THE FIRST TICK OF A RUN IS AN ARMED ONE: with no roster file the tick answers QUIET only
   # for a session that armed here (session-poker.sh's AC-38 split), and refuses otherwise.
@@ -12763,8 +12777,8 @@ CGLEOF
         evidence) awk -v id="$_cgl_id" '{ print } $0 == "- T4: dispatched to w-T4" { print "- " id ": bash suite 9/9 green" }' \
                     "$CGL_P" > "$CGL_P.new" && mv "$CGL_P.new" "$CGL_P" ;;
         launch)   sed -i.bak "s/| bionic:implementor |/| w-${_cgl_id} |/" "$CGL_P"
-                  roster_row_fixture status=identified session="$SID_A" name="w-${_cgl_id}" \
-                    agent_id="a-w-${_cgl_id}" tool_use_id="toolu_01CGL${_cgl_id}" deliverable= >> "$CGL_RO" ;;
+                  roster_row_fixture status=identified session="$CGL_RSID" name="w-${_cgl_id}" \
+                    agent_id="a-w-${_cgl_id}" tool_use_id="toolu_01CGL${_cgl_id}" deliverable= plan="$CGL_RPLAN" >> "$CGL_RL" ;;
         *) no "CG-ledger${lbl} the gate refused $_cgl_id, which the tick never named" "$CGL_OUT" ;;
       esac
     done
@@ -12793,6 +12807,7 @@ cgl_gate() {
 cgl_case ""          1.0 yes "evidence launch status " 3
 cgl_case "-hold"     7.0 yes "evidence launch status " 3
 cgl_case "-noroster" 1.0 no  "evidence status " 2
+cgl_case "-run"      1.0 yes "evidence launch status " 3 run
 
 
 # ============================================================

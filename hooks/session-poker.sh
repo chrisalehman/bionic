@@ -2325,9 +2325,10 @@ sched_owed() {
 #     been printed.
 #   LEDGER (T5; D4, ADR-037 decision 3). `units_findings` is the reader the commit gate refuses
 #     on — a status off the enum, a row at its terminal word with no `- T<n>:` line, an
-#     `active` row whose agent cell names no row on THIS session's roster — and each finding
-#     prints as `poker: LEDGER <id> <kind> [<value>]`. The roster is the one this tick reads;
-#     a missing one (the first tick) is the reader's no-roster rule, which is the gate's too.
+#     `active` row whose agent cell names no row on the run's rosters nor its Dispatch ledger —
+#     and each finding prints as `poker: LEDGER <id> <kind> [<value>]`. The rosters are
+#     `units_run_rosters`' list, this tick's own first, the list the gate reads (wave-36 T29;
+#     D10); with none to read (the first tick) it is the reader's no-roster rule, the gate's too.
 #
 # AN UNREADABLE BOUND PLAN, OR NO PLAN, REPORTS NOTHING: there is no table to read, and the
 # arms that decide say why themselves. A `current:` that will not parse still lints the
@@ -2360,7 +2361,7 @@ EOF
     case "$rest" in *" "*) val="${rest#* }" ;; esac
     say "LEDGER ${rest%% *} ${kind}${val:+ $(clean "$val")}"
   done <<EOF
-$(units_findings "$SCHED_PLAN" "$ROSTER_FILE" 2>/dev/null)
+$(units_findings "$SCHED_PLAN" "$(units_run_rosters "${ROSTER_FILE%/*}" "$SCHED_PLAN" "$ROSTER_FILE")" 2>/dev/null)
 EOF
   return 0
 }
@@ -6461,6 +6462,17 @@ case "$VERB" in
     # wall's hold asks too, handed the inputs this run already resolved. It reads every ledger's acks.
     roster_closure_begin "$ADOPT_DIR" "$ADOPT_LIVE_IDS" "$ADOPT_WINDOW" "$ADOPT_NOW"
     adopt_handoff_note "$ADOPT_OWN_PLAN" "$REPO_REAL" "$ADOPT_DIR"
+    # THE ACTIVE READERS (wave-36 T29; REQ-4 AC-4.1; D10). A reader (auditor, critic) is swept MET when
+    # its record lands and is acked on its own session's ledger, while its plan row stays `active` until
+    # the orchestrator registers the reading. A `/clear` in between left it closed here, so it came out
+    # on no roster and the launch arm refused its row (wave-35 A-orch-46). So a read-only role's row
+    # (`role_is_readonly`) whose name is the agent cell of an `active` row of this session's bound plan
+    # is carried as an open writer row is, its own ledger's ack notwithstanding; it is then listed,
+    # adopted and closed by `roster_row_open` exactly as every row is. A writer stays closed by its ack:
+    # a writer's tree and takeover are not a reader's. The agent cells are read once per run.
+    ADOPT_ACTIVE=""
+    [ -z "$ADOPT_OWN_PLAN" ] || ADOPT_ACTIVE="$(units_rows "$(adopt_abs "$ADOPT_OWN_PLAN" "$REPO_REAL")" 2>/dev/null \
+      | awk -F'\t' '$10 == "active" && $5 ~ /[A-Za-z0-9]/ { print $5 }')"
 
     # THE WALK IS lib/fill.sh's `fill_roster_walk` (wave-35 T28; AC-5.5, D14): every regular, unlinked
     # `roster-<sid>.state` but this session's, each with its own ledger, an unreadable one said and left
@@ -6469,6 +6481,27 @@ case "$VERB" in
     while IFS=$'\t' read -r OSID ADOPT_RF ADOPT_LEDGER <&3; do
       [ -n "$OSID" ] || continue
       ADOPT_OUT="$(adopt_fold "$ADOPT_RF" "$ADOPT_LEDGER")"
+      if [ -n "$ADOPT_ACTIVE" ]; then
+        # THE SAME FOLD WITH NO ACKS, kept to the active readers of this run the open fold left out.
+        while IFS= read -r ADOPT_AR; do
+          ADOPT_AR_N="${ADOPT_AR%%|*}"; ADOPT_AR_T="${ADOPT_AR#*|*|}"; ADOPT_AR_T="${ADOPT_AR_T%%|*}"
+          [ -n "$ADOPT_AR_N" ] && role_is_readonly "$ADOPT_AR_T" || continue
+          case "
+$ADOPT_ACTIVE
+" in *"
+$ADOPT_AR_N
+"*) ;; *) continue ;; esac
+          case "
+$ADOPT_OUT" in *"
+$ADOPT_AR_N|"*) continue ;; esac
+          ADOPT_AR_P="$(printf '%s' "$ADOPT_AR" | cut -d'|' -f9)"
+          [ -n "$ADOPT_OWN_KEY" ] && [ "$(adopt_plan_key "$ADOPT_AR_P")" = "$ADOPT_OWN_KEY" ] || continue
+          ADOPT_OUT="${ADOPT_OUT}${ADOPT_OUT:+
+}${ADOPT_AR}"
+        done <<ADOPT_READERS
+$(adopt_fold "$ADOPT_RF" "")
+ADOPT_READERS
+      fi
       [ -n "$ADOPT_OUT" ] || continue
       # COUNTED WHEN IT CONTRIBUTES, not when it is merely read. A predecessor whose every
       # row is closed is residue, and "N open row(s) from M predecessor session(s)" would be
@@ -6852,7 +6885,10 @@ case "$VERB" in
           *) ROW_LISTED_ONLY=yes ;;
         esac
 
-        say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
+        # A READER SAYS SO on its verdict line (wave-36 T29): it holds no tree and no writer slot.
+        ADOPT_ROLE_WORD=""
+        role_is_readonly "$RTYPE" && ADOPT_ROLE_WORD=" · reader"
+        say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — ${VERDICT}${ADOPT_ROLE_WORD}"
         # THE PATH, ON EVERY UNREADABLE ROW WHATEVER ITS ID, because the cure is on the plan.
         [ "$PARTITION" = unreadable ] \
           && printf '  plan        : UNREADABLE — %s is there and cannot be read\n' "$(clean "$ADOPT_ROW_UNREADABLE")"

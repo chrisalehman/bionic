@@ -2017,6 +2017,81 @@ expect_eq "17d.16 a CR-only plan reads the same" \
   "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
 # ============================================================
+section "17L — wave-36 T29: the launch finding reads the run — this session's roster, every roster of the plan, and the Dispatch ledger (D10; AC-4.1)"
+# ============================================================
+#
+# THE DEFECT (research C16; wave-35 A-orch-46). The reader took ONE roster, `roster-<sid>`. A `/clear`
+# re-keys the session, so a reader (auditor, critic) launched by the predecessor and still at work on
+# an `active` row was a `launch` finding the moment the successor committed: its name is on the
+# predecessor's roster and on the plan's `## Dispatch ledger`, never on the new roster. Now
+# `units_run_rosters <state dir> <plan> [<own roster>]` lists the set, this session's roster first and
+# then every roster under the state dir that carries a `plan=<plan>` row, and `units_findings` takes
+# that list: the first path is read whole (today's rule), every later one for its rows of this plan
+# only, and the names the ledger's `agent` column carries join the set.
+# fails-when: a reader on a predecessor roster of this plan is a launch finding; a roster of another
+# plan admits a name; the lister lists a roster of another plan or misses one of this plan.
+S17L="$SANDBOX/17L"; mkdir -p "$S17L/tmp"
+S17L_PLAN="$S17L/plans/run.plan.md"; mkdir -p "$S17L/plans"
+cat > "$S17L_PLAN" <<'L17_EOF'
+## SDLC State
+
+current: 4
+
+- T1: bash suite 9/9 green
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed with its line | w-T1 | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | review | a predecessor's reader, still reading | w-R1 | — | 30m | REQ-x | — | active |
+| T3 | 4 | review | a reader the ledger names | w-R2 | — | 30m | REQ-x | — | active |
+
+## Dispatch ledger
+
+| id | agent | dispatched | expected | artifact | landed | notes |
+|---|---|---|---|---|---|---|
+| R2 | auditor (w-R2) | 2026-10-13T14:08Z | 30 min | r2.md | — | a reader |
+L17_EOF
+S17L_OWN="$S17L/tmp/roster-own.state"
+roster_header > "$S17L_OWN"
+{
+  roster_header
+  roster_row_fixture status=identified session=pred name=w-R1 agent_id=a-R1 subagent_type=bionic:auditor plan="$S17L_PLAN"
+} > "$S17L/tmp/roster-pred.state"
+{
+  roster_header
+  roster_row_fixture status=identified session=other name=w-R1 agent_id=a-oR1 subagent_type=bionic:auditor plan="$S17L/plans/other.plan.md"
+} > "$S17L/tmp/roster-other.state"
+# The lister.
+expect_eq "17L.1 the lister: this session's roster first, then the roster of this plan, never the other plan's" \
+  "$(printf '%s\n%s' "$S17L_OWN" "$S17L/tmp/roster-pred.state")" \
+  "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "$S17L_OWN")"
+expect_eq "17L.1b …with no roster of its own the first line is empty and the run's rosters follow" \
+  "$(printf '\n%s' "$S17L/tmp/roster-pred.state")" \
+  "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "")"
+expect_eq "17L.1c …asked for the other plan, it lists the other plan's roster alone (positive: 17L.1)" \
+  "$(printf '%s\n%s' "$S17L_OWN" "$S17L/tmp/roster-other.state")" \
+  "$(call units_run_rosters "$S17L/tmp" "$S17L/plans/other.plan.md" "$S17L_OWN")"
+# The reader, over the list.
+expect_eq "17L.2 AC-4.1 this roster empty, the predecessor's roster of this plan holds w-R1, the ledger names w-R2: no finding" \
+  "" "$(call units_findings "$S17L_PLAN" "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "$S17L_OWN")")"
+expect_eq "17L.2b …and the verb exits 0" "0" \
+  "$(call_rc units_findings "$S17L_PLAN" "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "$S17L_OWN")")"
+expect_eq "17L.3 the mutant: this session's roster alone names neither reader (positive: 17L.2 reads the same plan clean)" \
+  "$(printf 'launch T2 w-R1')" "$(call units_findings "$S17L_PLAN" "$S17L_OWN")"
+expect_eq "17L.4 a later roster's row of ANOTHER plan admits no name: only the ledger's w-R2 is known" \
+  "launch T2 w-R1" \
+  "$(call units_findings "$S17L_PLAN" "$(printf '%s\n%s' "$S17L_OWN" "$S17L/tmp/roster-other.state")")"
+# The first path is this session's roster, read whole as before: a row there with no plan= of this
+# plan still launches (17d's fixtures carry plan=none).
+expect_eq "17L.5 the first path is read whole: the other plan's roster in first place admits w-R1" \
+  "" "$(call units_findings "$S17L_PLAN" "$S17L/tmp/roster-other.state")"
+# The ledger's names count only beside a roster read: with none, today's no-roster rule (17d.4).
+expect_eq "17L.6 no roster at all: the agent-named active rows owe their lines, the ledger notwithstanding" \
+  "$(printf 'evidence T2\nevidence T3')" "$(call units_findings "$S17L_PLAN" "")"
+
+# ============================================================
 section "READS — wave-26 T2: a row declares what it reads; an empty cell takes its kind default (REQ-5, AC-5.1; D1)"
 # ============================================================
 #

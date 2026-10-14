@@ -32,11 +32,15 @@
 #                              wait between two open rows (wave-26 T2, D1).
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
-#   units_findings <plan> <roster>
+#   units_findings <plan> <rosters>
 #                              one line per ledger finding — `status <id> <value>`,
 #                              `evidence <id>`, `launch <id> <agent>` — the one reader the
 #                              commit gate and the Patrol tick share (wave-21 T5; D4). Exit 1
-#                              if any line was printed, else 0.
+#                              if any line was printed, else 0. <rosters> is the run's roster
+#                              set, `units_run_rosters`' answer (wave-36 T29; D10).
+#   units_run_rosters <state dir> <plan> [<own roster>]
+#                              this session's roster, then every roster under <state dir> that
+#                              carries a `plan=<plan>` row: the set `units_findings` reads.
 #   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [<born>]
 #                              the WHOLE plan with one row added, on stdout; the file is
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
@@ -2184,7 +2188,8 @@ units_validate() {
 #   evidence <id>          the row is `landed` and `## SDLC State` carries
 #                          no non-empty `- <id>:` line for it
 #   launch <id> <agent>    the row is `active`, its agent cell names someone, and no
-#                          `roster-state/` row on <roster> carries that `name=`
+#                          `roster-state/` row of the run's rosters carries that `name=`,
+#                          nor does the plan's `## Dispatch ledger` name it
 #
 # BOTH CALLERS ASK THIS AND NEITHER PARSES THE TABLE. The commit gate refuses on these lines and
 # the Patrol tick prints them as `poker: LEDGER <id> <kind> [<value>]`, so a plan the gate would
@@ -2200,10 +2205,22 @@ units_validate() {
 # four-spellings-of-nothing reading the `deps` and `worktree` cells take. Nobody was launched
 # for that row, so neither a roster row nor a line is asked of it.
 #
-# NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). An empty <roster>, a path naming no
-# regular file, or a symlink (the fleet never follows one into a roster) computes no `launch`
-# finding: an agent-named `active` row then owes its line, exactly as it did before this
-# reader. A missing roster therefore fails toward the old refusal, never toward silence.
+# THE KNOWN AGENTS ARE THE RUN'S, NOT THE SESSION'S (wave-36 T29; REQ-4 AC-4.1; D10). <rosters> is
+# a list, one path per line, as `units_run_rosters` prints it. Its FIRST line is this session's
+# roster, read whole as it always was (a row there with `plan=none`, or no `plan=`, launches). Every
+# LATER line is another roster of the run, and only its launch rows whose `plan=` is <plan>, byte for
+# byte, count: a roster of another plan names nobody here, because the bind partitions the fleet.
+# The names in the `agent` column of the plan's first `## Dispatch ledger` table join the set — the
+# `<role> (<name>)` cell gives the name in its last parentheses, any other cell itself, trimmed. A
+# `/clear` re-keys the session, so a reader the predecessor launched and the successor never
+# re-dispatched is on the predecessor's roster and on the ledger, never on `roster-<sid>`; reading
+# that file alone refused its commit as "names no launched agent" (wave-35 A-orch-46).
+#
+# NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). A list in which no path names a regular,
+# unlinked file (an empty list, a missing file, a symlink: the fleet never follows one into a
+# roster) computes no `launch` finding: an agent-named `active` row then owes its line, exactly as
+# it did before this reader, whatever the ledger names. A missing roster therefore fails toward the
+# old refusal, never toward silence.
 #
 # ONE ENUM AT EVERY SCALE (wave-31 T5; D2): pending · active · landed · dropped, terminal `landed`.
 # A row in the retired task-scale words (`done`) is a `status` finding, never a second enum.
@@ -2215,7 +2232,27 @@ units_validate() {
 # already holding a memo for the plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
 units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
 
-# _units_ledger <findings> <plan> <roster> — the ONE program behind `units_findings`.
+# units_run_rosters <state dir> <plan> [<own roster>] -> the run's roster set, one path per line.
+#
+# THE ONE LISTER (wave-36 T29; REQ-4 AC-4.1; D10; ruling r1791960157-89690). The commit gate's launch
+# arm (walls.sh `_eg_roster_path`) and the Patrol tick's LEDGER read hand `units_findings` this list,
+# so the gate and the tick read one set. Line 1 is <own roster> as given, empty when there is none,
+# whether or not it exists (the reader tests each path). Every later line is a regular, unlinked
+# `roster-*.state` under <state dir>, other than <own roster>, holding a `|plan=<plan>` field. It
+# runs on every commit: ONE glob and ONE grep, no subshell per roster. The grep is a substring
+# preselect; the reader keeps only the rows whose `plan=` is <plan> exactly.
+units_run_rosters() {
+  local d="${1:-}" plan="${2:-}" own="${3:-}" rf
+  printf '%s\n' "$own"
+  [ -n "$d" ] && [ -d "$d" ] && [ -n "$plan" ] || return 0
+  grep -lF -e "|plan=$plan" -- "$d"/roster-*.state 2>/dev/null | while IFS= read -r rf; do
+    [ "$rf" != "$own" ] && [ -f "$rf" ] && [ ! -L "$rf" ] || continue
+    printf '%s\n' "$rf"
+  done
+  return 0
+}
+
+# _units_ledger <findings> <plan> <rosters> — the ONE program behind `units_findings`.
 #
 # THE `- <id>:` LOOKUP IS THE GATE'S, TO THE BYTE OF ITS MEANING: line endings normalised
 # (`normalize_newlines`' two substitutions), fences skipped, every `## SDLC State` section read
@@ -2223,22 +2260,43 @@ units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:
 # `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:` — its value trimmed, an empty value counting as
 # no line. Keyed on the whole id, so `- T1:` never answers for T10.
 #
-# ONE STREAM, THREE PARTS, each opened by a SUBSEP-led marker line no table row, plan line or
+# ONE STREAM, FOUR PARTS, each opened by a SUBSEP-led marker line no table row, plan line or
 # roster row can begin with: the rows (`units_rows`, so a memoised caller pays no second parse),
-# the plan's text, and — only when there is one to read — the roster.
+# the plan's text, and — only when there is one to read — this session's roster, then the run's
+# other rosters, one after another.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" roster="${3:-}" rows useroster=0
+  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
-  if [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; then useroster=1; fi
+  while IFS= read -r rf; do
+    if [ "$first" -eq 1 ]; then
+      first=0
+      if [ -n "$rf" ] && [ -f "$rf" ] && [ ! -L "$rf" ]; then own="$rf"; fi
+      continue
+    fi
+    [ -n "$rf" ] && [ "$rf" != "$own" ] && [ -f "$rf" ] && [ ! -L "$rf" ] || continue
+    run="${run}${rf}"$'\n'
+  done <<UNITS_ROSTERS
+$rosters
+UNITS_ROSTERS
+  if [ -n "$own" ] || [ -n "$run" ]; then useroster=1; fi
   {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
-    if [ "$useroster" -eq 1 ]; then printf '\034roster\n'; cat "$roster" 2>/dev/null; fi
-  } | awk -F'\t' -v mode="$mode" -v useroster="$useroster" '
+    if [ -n "$own" ]; then printf '\034roster\n'; cat "$own" 2>/dev/null; printf '\n'; fi
+    if [ -n "$run" ]; then
+      printf '\034run\n'
+      while IFS= read -r rf; do [ -n "$rf" ] && { cat "$rf" 2>/dev/null; printf '\n'; }; done <<UNITS_RUN
+$run
+UNITS_RUN
+    fi
+  } | UNITS_LEDGER_PLAN="$plan" awk -F'\t' -v mode="$mode" -v useroster="$useroster" '
+    BEGIN { lplan = ENVIRON["UNITS_LEDGER_PLAN"] }
+    function ltrim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     $0 == SUBSEP "rows"   { part = 1; next }
     $0 == SUBSEP "plan"   { part = 2; next }
     $0 == SUBSEP "roster" { part = 3; next }
+    $0 == SUBSEP "run"    { part = 4; next }
     part == 1 {
       if ($1 == "") next
       n++; id[n] = $1; ag[n] = $5; st[n] = $10
@@ -2247,6 +2305,23 @@ _units_ledger() {
     part == 2 {
       if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
       if (fence) next
+      # THE DISPATCH LEDGER (wave-36 T29): the first `## Dispatch ledger` section, its header-keyed
+      # `agent` column. The name of a row is the last parenthesised word of its cell, else the cell.
+      if ($0 ~ /^## /) {
+        inled = 0; insec = 0
+        if (!ledseen && $0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/) { inled = 1; ledseen = 1; lcol = 0; next }
+      }
+      if (inled) {
+        if (index($0, "|") == 0) next
+        lm = split($0, lc, "|")
+        if (!lcol) { for (j = 2; j < lm; j++) if (tolower(ltrim(lc[j])) == "agent") lcol = j; next }
+        if (lcol >= lm) next
+        cell = ltrim(lc[lcol])
+        if (cell ~ /^:?-+:?$/) next
+        if (match(cell, /\([^()]*\)$/)) cell = ltrim(substr(cell, RSTART + 1, RLENGTH - 2))
+        if (cell ~ /[A-Za-z0-9]/) names[cell] = 1
+        next
+      }
       if ($0 ~ /^## SDLC State/) { insec = 1; next }
       if ($0 ~ /^## /) { insec = 0 }
       if (!insec) next
@@ -2263,12 +2338,18 @@ _units_ledger() {
       val[k] = v
       next
     }
-    part == 3 {
+    part == 3 || part == 4 {
       # A LAUNCH ROW, by its schema prefix — never a `landing-swept/` marker, which carries a
-      # `name=` too. The FIRST `name=` field, the fleet-wide by-key reading (roster.sh).
+      # `name=` too. The FIRST `name=` and `plan=` fields, the fleet-wide by-key reading
+      # (roster.sh). Another roster of the run (part 4) launches only under this plan.
       if (index($0, "roster-state/") != 1) next
-      m = split($0, f, "|")
-      for (j = 2; j <= m; j++) if (index(f[j], "name=") == 1) { names[substr(f[j], 6)] = 1; break }
+      m = split($0, f, "|"); gotn = 0; gotp = 0; nm = ""; pl = ""
+      for (j = 2; j <= m; j++) {
+        if (!gotn && index(f[j], "name=") == 1) { nm = substr(f[j], 6); gotn = 1 }
+        else if (!gotp && index(f[j], "plan=") == 1) { pl = substr(f[j], 6); gotp = 1 }
+      }
+      if (part == 4 && (!gotp || pl != lplan)) next
+      if (gotn) names[nm] = 1
       next
     }
     END {
