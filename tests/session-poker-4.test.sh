@@ -3210,6 +3210,7 @@ mr_walk_fixture() {  # <repo> <label> -> the plan path: current 5, walk: require
   mr_fixture "$p"
   sed 's/^walk: exempt$/walk: required/' "$p" > "$p.w" && mv "$p.w" "$p"
   mkdir -p "$repo/.bionic/docs/record/x"; printf 'the walk, narrated\n' > "$repo/.bionic/docs/record/x/walk.md"; printf 'log\n' > "$repo/.bionic/docs/record/x/ev.md"
+  awk '{ print } /^- Step 5:/ { print "  auditor: every row confirmed (record/x/ev.md)" }' "$p" > "$p.a" && mv "$p.a" "$p"
   s42_snap "$repo" "$p"
   printf '%s' "$p"
 }
@@ -3221,7 +3222,7 @@ PWP="$(mr_walk_fixture "$RWP")"
 poke "$RWP" matrix-render
 mr_discharge_all "$PWP"
 s42_snap "$RWP" "$PWP"
-expect_eq "MR-15 precondition: the render, with no pointer in the Step-5 block yet, wrote the stub (exit 0, one stub line)" "0|walk-artifact: pending|- Step 5: (pending)" \
+expect_eq "MR-15 precondition: the render, with no pointer in the Step-5 block yet, wrote the stub (exit 0, one stub line)" "0|walk-artifact: pending|- Step 5: (pending)|  auditor: every row confirmed (record/x/ev.md)" \
   "$RC|$(mr_walkline "$PWP")|$(mr_step5 "$PWP")"
 s34_gate "$RWP"
 expect_eq "MR-15b …and the real gate, every row discharged, refuses that stub (the failure this row closes)" "2" "$GATE_RC"
@@ -3229,7 +3230,7 @@ expect_contains "MR-15c …naming the walk-artifact: line as the stub" "the walk
 poke "$RWP" step-field 5 walk-artifact=record/x/walk.md
 expect_eq "MR-16 step-field 5 walk-artifact= exits 0 on the rendered plan" "0" "$RC"
 expect_eq "MR-16b …the matrix line reads the path, the stub gone" "walk-artifact: record/x/walk.md" "$(mr_walkline "$PWP")"
-expect_eq "MR-16c …and the Step-5 block carries the same path, the walk gate's one reader" "- Step 5: (pending)|  walk-artifact: record/x/walk.md" "$(mr_step5 "$PWP")"
+expect_eq "MR-16c …and the Step-5 block carries the same path, the walk gate's one reader" "- Step 5: (pending)|  auditor: every row confirmed (record/x/ev.md)|  walk-artifact: record/x/walk.md" "$(mr_step5 "$PWP")"
 expect_eq "MR-16d …two lines touched: one added to the block, one replaced in the matrix (git diff --numstat)" "2 1;" "$(s42_numstat "$RWP")"
 s34_gate "$RWP"
 expect_eq "MR-16e …and the gate's dry run at current: 5, every row discharged, is green" "0" "$GATE_RC"
@@ -3242,7 +3243,7 @@ expect_true "MR-17b …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s4
 RWQ="$(make_repo mr-walkfirst)"; ( cd "$RWQ" && git commit -q --allow-empty -m init )
 PWQ="$(mr_walk_fixture "$RWQ")"
 poke "$RWQ" step-field 5 walk-artifact=record/x/walk.md
-expect_eq "MR-18 precondition: the pointer is in the Step-5 block before any render (exit 0)" "0|- Step 5: (pending)|  walk-artifact: record/x/walk.md" "$RC|$(mr_step5 "$PWQ" | cut -d'|' -f1)|$(mr_step5 "$PWQ" | cut -d'|' -f2)"
+expect_eq "MR-18 precondition: the pointer is in the Step-5 block before any render (exit 0)" "0|- Step 5: (pending)|  auditor: every row confirmed (record/x/ev.md)|  walk-artifact: record/x/walk.md" "$RC|$(mr_step5 "$PWQ")"
 s42_snap "$RWQ" "$PWQ"
 poke "$RWQ" matrix-render
 expect_eq "MR-18b a render on it exits 0 and the head gains stack-health: alone" "0|stack-health" "$RC|$(mr_heads "$PWQ")"
