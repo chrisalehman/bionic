@@ -3435,4 +3435,115 @@ expect_contains "(le8b) …and the second line says 0" "
 poker: evidence: 0 cell(s) written by landing" "$OUT"
 POKE_BOUND="$LE_BOUND_WAS"
 
+
+# ============================================================
+section "§STOP-RUN: stop-run ends a gate request — a parked shim's, by its id or its holder's name (wave-36 T11; REQ-2 AC-2.2; D8)"
+# ============================================================
+#
+# A shim parked in `gate_ask` is no detached run, so before D8 no verb could end its request: `gate_end`
+# refused a never-admitted id and `stop-run` knew only `.bionic/tmp/runs/`. `stop-run` now takes a request
+# id or a holder's name as well: it ends the request with `by=<sid> why=<reason>` (gate_end's stop-run
+# call, accepted on a never-admitted id), TERMs the holder's process group, and writes `ev=stop-run` to the
+# bound run's landing record, which the hand-hold fold counts under its own kind.
+#
+# FIXTURE FIDELITY: the askers are REAL processes running the shipped lib/gate.sh against this section's own
+# store (never the runner's BIONIC_GATE_DIR), each in a process group of its own as a Bash-tool command is;
+# the holder's liveness and death are the gate's own rule read on them. SYNTHESIZED: one planted request
+# whose holder pid is dead (a shim SIGKILLed in its wait), in the store's own line shape.
+SR_GATE_WAS="$BIONIC_GATE_DIR"; SR_POLL_WAS="${BIONIC_GATE_POLL:-}"
+# A parked asker polls every 30 s, so the TERM stop-run sends lands in its sleep, never inside the lock's
+# claim (a holder killed between the lock's mkdir and its pid write leaves a lock no one may steal for a
+# while, which would stall the next row's asks on the lock rather than on what this section reads).
+export BIONIC_GATE_DIR="$TMPROOT/sr-gate" BIONIC_GATE_POLL=30
+mkdir -p "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost" "$TMPROOT/sr"
+SR_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
+RSR="$(make_repo s-stoprun)"; ( cd "$RSR" && git commit -q --allow-empty -m init )
+PSR="$(s42_plan "$RSR" 4)"
+SR_REC="$RSR/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+cat > "$TMPROOT/sr-ask.sh" <<'ASK'
+# <lib> <agent> <kind> <key> <dir> — one asker; admitted, it holds until <dir>/<agent>.go
+. "$1/gate.sh" || exit 127
+export BIONIC_GATE_AGENT="$2"
+printf '%s\n' "$$" > "$5/$2.pid"
+id="$(gate_ask "$3" "$4" 2>/dev/null)"; rc=$?
+printf '%s\n' "$rc" > "$5/$2.rc"
+[ "$rc" = 0 ] || exit "$rc"
+i=0; while [ ! -f "$5/$2.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
+gate_end "$id" 0
+ASK
+sr_ask() {  # <agent> <kind> <key> — a real asker in a process group of its own (its pgid is its pid)
+  set -m
+  ( cd "$RSR" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$TMPROOT/sr-ask.sh" "$SR_LIB" "$1" "$2" "$3" "$TMPROOT/sr" ) >/dev/null 2>&1 &
+  set +m
+  s56_until 10 test -s "$TMPROOT/sr/$1.pid"
+}
+sr_reqs() {  # <agent> -> the ids of that agent's requests, lowest first
+  grep -l "^who=$SID:$1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | sed 's#.*/##' | sort -n | tr '\n' ' ' | sed 's/ $//'
+}
+sr_field() { sed -n "s/^$2=//p" "$BIONIC_GATE_DIR/requests/$1" 2>/dev/null | tail -n 1; }
+sr_pid() { cat "$TMPROOT/sr/$1.pid" 2>/dev/null; }
+sr_gone() { ! kill -0 "$1" 2>/dev/null; }
+sr_stops() { grep -c '^line/v1|ev=stop-run|' "$SR_REC" 2>/dev/null | tr -d ' '; }
+
+sr_ask sr-hold work h.test.sh
+s56_until 10 grep -qx 0 "$TMPROOT/sr/sr-hold.rc"
+expect_eq "SR.0a precondition: a holder is admitted, so a whole ask parks behind it" "0" "$(cat "$TMPROOT/sr/sr-hold.rc" 2>/dev/null)"
+sr_ask w-park whole tests/run.sh
+s56_until 10 test -n "$(sr_reqs w-park)"
+SR_ID="$(sr_reqs w-park)"; SR_P="$(sr_pid w-park)"
+expect_eq "SR.0b precondition: the parked shim holds one request that waits, its holder alive (kind|admitted|holder|alive)" \
+  "whole||$SR_P|yes" "$(sr_field "$SR_ID" kind)|$(sr_field "$SR_ID" admitted)|$(sr_field "$SR_ID" holder | cut -d: -f1)|$(kill -0 "$SR_P" 2>/dev/null && echo yes)"
+poke "$RSR" stop-run "$SR_ID" --why 'parked behind the holder'
+expect_eq "SR.1 AC-2.2 stop-run <request id> on a waiting request exits 0" "0" "$RC"
+expect_contains "SR.1b …naming the request it ended" "poker: stop-run request $SR_ID " "$OUT"
+expect_absent "SR.1c …and never says the request was never admitted" "was never admitted" "$OUT"
+expect_eq "SR.2 the request is ended by this session, with the reason (ended set|by|why)" "yes|$SID|parked behind the holder" \
+  "$([ -n "$(sr_field "$SR_ID" ended)" ] && echo yes)|$(sr_field "$SR_ID" by)|$(sr_field "$SR_ID" why)"
+expect_true "SR.3 the holder's process group is gone" s56_until 5 sr_gone "$SR_P"
+expect_eq "SR.4 one ev=stop-run line in the bound run's landing record" "1" "$(sr_stops)"
+expect_match "SR.4b …naming the request, who stopped it and why" "*|request=$SR_ID|*|by=$SID|why=parked behind the holder|*" \
+  "$(grep '^line/v1|ev=stop-run|' "$SR_REC" 2>/dev/null | tail -n 1)|"
+poke "$RSR" stop-run "$SR_ID"
+expect_eq "SR.5 stop-run on a request already ended says so, exit 0, and writes nothing more (rc|ended lines|record lines)" "0|1|1" \
+  "$RC|$(grep -c '^ended=' "$BIONIC_GATE_DIR/requests/$SR_ID" | tr -d ' ')|$(sr_stops)"
+expect_contains "SR.5b …in its own words" "nothing to stop" "$OUT"
+# by the holder's name
+sr_ask w-name whole tests/run.sh
+s56_until 10 test -n "$(sr_reqs w-name)"
+SR_NID="$(sr_reqs w-name)"; SR_NP="$(sr_pid w-name)"
+poke "$RSR" stop-run w-name --why 'by its name'
+expect_eq "SR.6 stop-run <holder's name> ends that holder's waiting request (rc|by|why)" "0|$SID|by its name" \
+  "$RC|$(sr_field "$SR_NID" by)|$(sr_field "$SR_NID" why)"
+expect_true "SR.6b …and its group is gone" s56_until 5 sr_gone "$SR_NP"
+expect_eq "SR.6c …and the record holds a second ev=stop-run" "2" "$(sr_stops)"
+# a name holding two open requests is refused, naming both: nothing is guessed
+sr_ask w-twin whole tests/run.sh
+s56_until 10 test -n "$(sr_reqs w-twin)"
+SR_T1P="$(sr_pid w-twin)"
+( cd "$RSR" && exec env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_AGENT=w-twin bash -c '. "$1/gate.sh"; gate_ask whole other.test.sh' _ "$SR_LIB" ) >/dev/null 2>&1 &
+SR_T2BG=$!
+s56_until 10 test "$(sr_reqs w-twin | wc -w | tr -d ' ')" = 2
+SR_TIDS="$(sr_reqs w-twin)"
+poke "$RSR" stop-run w-twin
+expect_eq "SR.7 a holder's name with two open requests is refused, exit 2" "2" "$RC"
+expect_contains "SR.7b …naming both ids to choose from" "${SR_TIDS% *}" "$OUT"
+expect_contains "SR.7c …the second too" "${SR_TIDS#* }" "$OUT"
+expect_eq "SR.7d …and ends neither: no ended line, the first asker alive" "||yes" \
+  "$(sr_field "${SR_TIDS% *}" ended)|$(sr_field "${SR_TIDS#* }" ended)|$(kill -0 "$SR_T1P" 2>/dev/null && echo yes)"
+kill -TERM -- "-$SR_T1P" 2>/dev/null; kill -TERM "$SR_T2BG" 2>/dev/null; wait "$SR_T2BG" 2>/dev/null
+# a never-admitted request whose holder died: nothing to TERM, and the end is accepted
+sleep 0 & SR_DEAD=$!; wait "$SR_DEAD" 2>/dev/null
+printf 'key=k.test.sh\nkind=work\nwho=%s:w-dead\ntree=%s\nasked=1700000000\nholder=%s:Mon Oct 12 00:00:00 2026\n' \
+  "$SID" "$RSR" "$SR_DEAD" > "$BIONIC_GATE_DIR/requests/900"
+poke "$RSR" stop-run 900 --why 'its shim was killed'
+expect_eq "SR.8 AC-2.2 stop-run on a never-admitted id whose holder is dead is accepted (rc|by|why)" "0|$SID|its shim was killed" \
+  "$RC|$(sr_field 900 by)|$(sr_field 900 why)"
+expect_absent "SR.8b …never 'was never admitted'" "was never admitted" "$OUT"
+poke "$RSR" stop-run 901
+expect_eq "SR.9 a number that names no request and no run is a usage error, exit 2" "2" "$RC"
+expect_contains "SR.9b …naming what it looked for" "no run named 901" "$OUT"
+touch "$TMPROOT/sr/sr-hold.go"
+s56_until 10 sr_gone "$(sr_pid sr-hold)"
+export BIONIC_GATE_DIR="$SR_GATE_WAS" BIONIC_GATE_POLL="$SR_POLL_WAS"
+
 finish

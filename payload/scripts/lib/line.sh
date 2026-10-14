@@ -16,7 +16,7 @@
 #   line_ready <tree> <root> <sid> <within> <again>  `spawn-worktree.sh ready [--within <s>]` (T4)
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
-# file copied by one write(2), no lock), so two writers' lines never interleave. Seven events:
+# file copied by one write(2), no lock), so two writers' lines never interleave. Eight events:
 #   ready     row name commit branch tree suites debt carrier   (a carrier is `<pid>:<start>`)
 #   candidate row base commit tree
 #   verdict   row commit suite result log      (green | red | none | discarded)
@@ -25,6 +25,9 @@
 #   returned  row why detail                   (red | conflict | guard)
 #   stalled   row logs
 #   published row commit kind by why           (queue | hand | git)
+#   stop-run  request who kind key by why, or run name by why   (hooks/session-poker.sh `stop-run`,
+#             through `line_event`; wave-36 T11, D8): an act, not an entry's — the fold below reads no
+#             row from it, and the hand-hold count (`hand_holds_report`) counts it as `stop-runs`
 # A value holding `|` or a line break is refused unwritten: the line is `|`-separated.
 #
 # THE FOLD. `line_state` prints one tab-separated line per entry neither published nor returned:

@@ -1962,7 +1962,7 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 run_close "$PZ" run
 CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
   "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
@@ -2119,6 +2119,7 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # THE SOURCES, each in the shape its writer prints (the fixture plants the shape, the roster through the one
 # production row writer, the plan's proof lines through lib/proof.sh's own line builders):
 #   by-hand        landing record      line/v1|ev=published|…|kind=hand|…            (lib/line.sh)
+#   stop-runs      landing record      line/v1|ev=stop-run|…                         (session-poker.sh stop-run; wave-36 T11, D8)
 #   declines/lifts fill ledger         fill-ledger/v1|…|state=decline| and |state=lift|   (the verbs; the Stop hook writes ok and hold)
 #   amends         roster              distinct (name, amended=<value>) of the run's plan
 #   holds          roster              distinct (name, held=<value>)
@@ -2129,7 +2130,7 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
 HH_C="$(printf 'd%.0s' $(seq 40))"
-HH_WANT="hand-holds: total=11 · by-hand=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1"
+HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1"
 # hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
 hh_report() {
   local proj="$1"; shift
@@ -2147,6 +2148,7 @@ hh_plant() {
     printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$HH_C" "$p"
     printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
     printf 'line/v1|ev=published|row=T2|commit=%s|kind=hand|by=Chris|why=the line was down|at=2026-10-06T10:40:00Z\n' "$HH_C"
+    printf 'line/v1|ev=stop-run|request=2156|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked behind a dead holder|at=2026-10-06T10:50:00Z\n'
     printf 'note: T3 was landed by-hand outside the line (kind=hand), says this prose line\n'
   } > "$rec/landing-proofs.log"
   # the fill ledger: a decline and its lift (the verbs' shapes), the Stop hook's hold and ok lines, and prose
@@ -2200,13 +2202,13 @@ expect_eq "HH-3 the default landing-report prints no hand-holds line (its output
 # the same fixture with the verbs' lines removed and the prose kept: nothing is counted
 PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
 mkdir -p "$PHP/.bionic/docs/record/wave-01-fixture"
-printf 'note: T3 was landed by-hand (kind=hand); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+printf 'note: T3 was landed by-hand (kind=hand); its run was stopped (ev=stop-run); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
 awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print; next } { print }' \
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
-expect_eq "HH-4 a run whose only by-hand, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0" \
+expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
@@ -2219,6 +2221,21 @@ expect_eq "HH-7 the continuation carries ## Hand-holds once, with the line (read
   "$(/usr/bin/grep -c '^## Hand-holds$' "$PH/$CONT_REL" | tr -d ' ')/$(hh_section "$PH/$CONT_REL")"
 expect_eq "HH-7b …and the section sits after ## Landings and before the Resume instruction" "yes" \
   "$(awk '/^## Landings$/ { a = NR } /^## Hand-holds$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PH/$CONT_REL")"
+# wave-36 T11 (D8; REQ-2 AC-2.3): a stop-run is a verb act, counted under its own kind and never as by-hand. A run
+# whose only escape hatch is one `ev=stop-run` (stop-run's own line) reads stop-runs=1 · by-hand=0 on close-out's card,
+# through close-out.sh's existing landing-report call.
+PHS="$(mk_fixture handholds-stoprun)"; advance_to "$PHS" 8
+mkdir -p "$PHS/.bionic/docs/record/wave-01-fixture"
+{
+  printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$HH_C" "$PHS"
+  printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
+  printf 'line/v1|ev=stop-run|request=2156|who=fixture:w-T1|kind=whole|key=tests/run.sh|by=fixture|why=parked behind a dead holder|at=2026-10-06T10:50:00Z\n'
+} > "$PHS/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+expect_eq "HH-13a precondition: the record holds one ev=stop-run line and one published line of kind queue" "1/1" \
+  "$(/usr/bin/grep -c '^line/v1|ev=stop-run|' "$PHS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" | tr -d ' ')/$(/usr/bin/grep -c '^line/v1|ev=published|.*|kind=queue|' "$PHS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" | tr -d ' ')"
+run_close "$PHS" check
+expect_contains "HH-13 AC-2.3 one ev=stop-run reads stop-runs=1 · by-hand=0 on the card, counted in the total" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=1 · declines=0 " "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 # T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
 # hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
 # there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
