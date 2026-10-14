@@ -14283,11 +14283,11 @@ pl_gate() {  # <hooks dir> -> the repository the evidence gate's boundary line n
   [ -n "$l" ] || { printf 'none'; return 0; }
   l="${l#evidence-gate: }"; printf '%s' "${l%% is outside the engaged repository*}"
 }
-pl_role() {  # <hooks dir> -> `refused` when the read-only role arm refuses a test-runner's `git commit` from R, else `exempt`
+pl_role() {  # <hooks dir> [command] -> `refused` when the read-only role arm refuses a test-runner's commit from R (default `git commit`), else `exempt`
   # The role arm is armed by the session's roster file; an empty one names no row, so the agent type
   # judges. It stands for this probe alone: a roster with no row would refuse the suite pl_stamp drives.
   : > "$PL_R/.bionic/tmp/roster-${PL_SID}.state"
-  pl_hook "$1" 'git commit -q --allow-empty -m x' bionic:test-runner
+  pl_hook "$1" "${2:-git commit -q --allow-empty -m x}" bionic:test-runner
   rm -f "$PL_R/.bionic/tmp/roster-${PL_SID}.state"
   case "$PL_ERR" in *'a read-only role never commits'*) printf 'refused' ;; *) printf 'exempt' ;; esac
 }
@@ -14305,6 +14305,44 @@ expect_eq "§PLACE stamp [mutant] the wrap's --stamp-dir is U" "$PL_U" "$(pl_sta
 expect_eq "§PLACE gate tree [mutant] the shim asks the gate from U" "$PL_U" "$(pl_tree "$PL_MUT/scripts/booked.sh")"
 expect_eq "§PLACE commit cwd [mutant] the evidence gate places 'git commit' in U and names it outside" "$PL_U" "$(pl_gate "$PL_MUT/hooks")"
 expect_eq "§PLACE jurisdiction [mutant] the role arm places the commit in U, outside the project: exempt" "exempt" "$(pl_role "$PL_MUT/hooks")"
+
+# TWO CALLERS, ONE CHAIN (wave-36 T43; D11, AC-5.6; walk.md shape six). The one-tree mutant above
+# answers U whatever it is asked, so it cannot see a caller that asks a different question than its
+# siblings: the auditor refuted AC-5.6 on `cd A && cd B && git commit`, which the evidence gate (it
+# asks for the git) placed at B and the role arm (it asks for the git and for the end of the command,
+# and needs the two equal) refused as moving-form `cd B`. Pinned twice. On the shipped reader, both
+# commit callers place that chain at U, so a read-only role's commit there is exempt and the gate
+# names U. And a second doctored copy whose `cmd_place` answers a DIFFERENT tree per target, Us for
+# suite, U for git and Ue for the end of the command, reads every caller's question off its answer:
+# the stamp and the gate's tree ask suite, the commit's cwd asks git, the role arm asks git and the
+# end and so sees them differ. A caller that asks another target than these reads another tree, and
+# its row goes red.
+PL_CHAIN="cd $PL_D && cd $PL_U && git commit -q --allow-empty -m x"
+expect_eq "§PLACE chain [shipped] a read-only role's 'cd A && cd U && git commit', both absolute, is exempt: the role arm places it at U" \
+  "exempt" "$(pl_role "$BIONIC_HOOKS_DIR" "$PL_CHAIN")"
+pl_hook "$BIONIC_HOOKS_DIR" "$PL_CHAIN"
+expect_contains "§PLACE chain [shipped] …and the evidence gate names U outside, the same place" \
+  "$PL_U is outside the engaged repository" "$PL_ERR"
+PL_US="$PL_D/us"; PL_UE="$PL_D/ue"; mkdir -p "$PL_US" "$PL_UE"
+PL_US="$(cd "$PL_US" && pwd -P)"; PL_UE="$(cd "$PL_UE" && pwd -P)"
+PL_MUT3="$PL_D/mut3"
+mkdir -p "$PL_MUT3/hooks" "$PL_MUT3/scripts/lib"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$PL_MUT3/hooks/" 2>/dev/null
+cp "$PL_LIB"/*.sh "$PL_MUT3/scripts/lib/" 2>/dev/null
+cp "$PL_LIB/../booked.sh" "$PL_MUT3/scripts/booked.sh" 2>/dev/null
+printf "\ncmd_place() { case \"\${3-}\" in suite) printf '%%s\\\\n' '%s' ;; git) printf '%%s\\\\n' '%s' ;; *) printf '%%s\\\\n' '%s' ;; esac; return 0; }\n" \
+  "$PL_US" "$PL_U" "$PL_UE" >> "$PL_MUT3/scripts/lib/placement.sh"
+expect_eq "§PLACE per-target mutation: the doctored placement.sh parses, and answers Us, U and Ue for suite, git and the end" \
+  "0 $PL_US $PL_U $PL_UE" "$(bash -n "$PL_MUT3/scripts/lib/placement.sh"; printf '%s ' "$?"
+    bash -c '. "$1" && printf "%s " "$(cmd_place x /x suite)" "$(cmd_place x /x git)" && cmd_place x /x' _ "$PL_MUT3/scripts/lib/placement.sh" 2>/dev/null)"
+expect_eq "§PLACE stamp [per-target] the stamp asks suite: --stamp-dir Us" "$PL_US" "$(pl_stamp "$PL_MUT3/hooks")"
+expect_eq "§PLACE gate tree [per-target] the gate's tree asks suite: Us" "$PL_US" "$(pl_tree "$PL_MUT3/scripts/booked.sh")"
+expect_eq "§PLACE commit cwd [per-target] the commit's cwd asks git: U" "$PL_U" "$(pl_gate "$PL_MUT3/hooks")"
+pl_role "$PL_MUT3/hooks" > "$PL_D/role3.out"   # not in a substitution: the next row reads its PL_ERR
+expect_eq "§PLACE jurisdiction [per-target] the role arm asks git and the end, sees U and Ue differ: refused" \
+  "refused" "$(cat "$PL_D/role3.out")"
+expect_contains "§PLACE jurisdiction [per-target] …naming the git's place and the end's, so it asked exactly those two" \
+  "the first git runs in $PL_U but the shell ends in $PL_UE" "$PL_ERR"
 
 # ============================================================
 section "DEBT-LINE — one debt-line grammar, owned once in lib/debt.sh and sourced by its three consumers (wave-36 T13; D13; REQ-7 AC-7.8; ownership row 'the debt line')"
