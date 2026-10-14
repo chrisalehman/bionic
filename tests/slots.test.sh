@@ -430,10 +430,6 @@ section "TAKING — a claim in progress is stale in seconds, not a minute (wave-
 # `taking`. The gap is microseconds, so the line for it is a few seconds (SLOTS_TAKING_SEC, named
 # once in lib/slots.sh), and a stealer takes it as it takes a dead holder's.
 newrow tk
-tk_age() {  # <dir> <seconds> — set the directory's mtime that many seconds into the past
-  local t=$(( $(date +%s) - $2 ))
-  touch -t "$(date -r "$t" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$t" +%Y%m%d%H%M.%S)" "$1"
-}
 tk_killed() {  # <dir> — a real claimer, SIGKILLed after its mkdir and before its pid write
   bash -c 'mkdir "$1" && kill -KILL $$' _ "$1" 2>/dev/null
   [ -d "$1" ] && [ ! -e "$1/pid" ]
@@ -452,30 +448,28 @@ expect_true "TK2 a claimer killed after its mkdir leaves a lock with no pid (the
 expect_eq "TK2a a lock left that way is taking at first" "taking" "$(tk_state "$ROW/killed")"
 expect_regex "TK2b …and a claim on it is refused, the claimer may still be writing (rc 1)" \
   '^1' "$(tk_take "$ROW/killed")"
-tk_age "$ROW/killed" 2
-expect_eq "TK3 a lock with no pid under the bound is still taking" "taking" "$(tk_state "$ROW/killed")"
+expect_eq "TK3 a lock with no pid under the bound (just made, 0 s old) is still taking" "taking" "$(tk_state "$ROW/killed")"
 expect_regex "TK3a …and is left alone (rc 1)" '^1' "$(tk_take "$ROW/killed")"
-tk_age "$ROW/killed" 10
-expect_eq "TK4 the same lock past the bound, 10 s old, is stale" "orphan" "$(tk_state "$ROW/killed")"
+touch -t 202001010000 "$ROW/killed"
+expect_eq "TK4 the same lock past the bound (dated 2020) is stale" "orphan" "$(tk_state "$ROW/killed")"
 TK4_OUT="$(tk_take "$ROW/killed")"
 expect_regex "TK4a …and the next claim steals it and goes through (rc 0, a pid)" '^0 [0-9]+$' "$TK4_OUT"
 
 # A lock whose pid is written keeps the rule it had: held while the pid lives and started then.
-sleep 60 & TK_LIVE=$!; BG="$BG $TK_LIVE"
+TK_LIVE=$$   # this shell: a live pid
 mkdir -p "$ROW/held"
 ( . "$SLOTS"; _slots_since "$TK_LIVE" ) > "$ROW/held/since"
 printf '%s\n' "$TK_LIVE" > "$ROW/held/pid"
-tk_age "$ROW/held" 120
+touch -t 202001010000 "$ROW/held"
 expect_eq "TK5 a lock with a live holder's pid is live however old it is" "live" "$(tk_state "$ROW/held")"
 expect_regex "TK5a …and is not taken (rc 1)" '^1 ' "$(tk_take "$ROW/held")"
 mkdir -p "$ROW/gone"; printf '%s\n' "$(dead_pid)" > "$ROW/gone/pid"
 expect_eq "TK5b a lock with a dead holder's pid is dead at once" "dead" "$(tk_state "$ROW/gone")"
-kill "$TK_LIVE" 2>/dev/null; wait "$TK_LIVE" 2>/dev/null
 
-# The gate's own lock is this claim: a lock a killed claimer left, 10 s old, is taken by the
+# The gate's own lock is this claim: a lock a killed claimer left, long past the bound, is taken by the
 # next caller (rc 0, its pid in the lock) and not waited out (rc 1 at the ceiling).
 tk_killed "$ROW/gate/lock" || { mkdir -p "$ROW/gate"; tk_killed "$ROW/gate/lock"; }
-tk_age "$ROW/gate/lock" 10
+touch -t 202001010000 "$ROW/gate/lock"
 TK6_OUT="$(env BIONIC_GATE_DIR="$ROW/gate" bash -c '. "$1"; _GD="$2"; _gate_lock; echo "$? ${_GATE_ME:+me}"' _ \
   "$REPO_ROOT/payload/scripts/lib/gate.sh" "$ROW/gate" 2>&1 | tail -n 1)"
 expect_eq "TK6 the gate lock a killed claimer left is taken by the next caller" "0 me" "$TK6_OUT"
