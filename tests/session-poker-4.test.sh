@@ -4990,6 +4990,62 @@ expect_nonempty "SE-5 the empty-ledger rows ran under at least one bash" "$SE_SE
 POKE_BOUND="$SE_BOUND_WAS"
 
 
+# ============================================================
+section "§HEAD: proof-add, waive and deliver read the head from the working branch's ref, as the judge does, so a merged branch whose worktree is gone still answers (wave-36 T12; REQ-7 AC-7.4; D13)"
+# ============================================================
+# Through wave-35 the three verbs read the head of a CHECKOUT holding the working branch (lib/proof.sh `proof_head`),
+# while the judge read the branch's ref (`proof_branch_head`). After a wave merges and its worktree is removed no
+# checkout holds the branch, so each verb refused "no checkout … has the plan's working-branch … checked out" while
+# the ref still named the head the judge reads (C30). They now ask `proof_branch_head`, the one reader of the head.
+# FIXTURE FIDELITY: §DELIVER's plan writer (`dv_plan`) in a repository of its own: the working branch got its commit
+# C1 in a linked worktree, was merged into the default branch with a merge commit (so the checkout's HEAD is not
+# C1), and its worktree was removed; the checkout stays on the default branch. The reading is a critic's record on
+# the roster, registered through proof-add itself.
+# fails-when: any of the three verbs refuses, or records a head other than the ref's.
+HD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RHD="$(make_repo hd-head)"; ( cd "$RHD" && git commit -q --allow-empty -m init )
+git -C "$RHD" config user.name "Dana Fixture"
+HD_B="$(git -C "$RHD" rev-parse HEAD)"
+HD_DIR="$RHD/$DV_REL"; mkdir -p "$HD_DIR"
+HD_DVB_WAS="$DV_B"; DV_B="$HD_B"; PHD="$(dv_plan "$RHD")"; DV_B="$HD_DVB_WAS"
+HD_DEF="$(git -C "$RHD" symbolic-ref --short HEAD)"
+( cd "$RHD" && git worktree add -q -b wave/01-fixture "$RHD/.worktrees/01-fixture" "$(git rev-parse HEAD)" ) >/dev/null 2>&1
+HD_C1="$(s57_commit "$RHD/.worktrees/01-fixture" lib/a.sh C1)"
+( cd "$RHD" && git merge -q --no-ff -m "merge wave/01-fixture" wave/01-fixture && git worktree remove --force "$RHD/.worktrees/01-fixture" ) >/dev/null 2>&1
+HD_MAIN="$(git -C "$RHD" rev-parse HEAD)"
+hd_ledger() { awk -v id="$1" '/^## Dispatch ledger/ { l = 1; next } /^## / { l = 0 } l && /^\|/ { c = $2; gsub(/ /, "", c); if (c == id) { print; exit } }' FS='|' "$PHD"; }
+hd_last() { /usr/bin/grep -E "^$1" "$PHD" | tail -n 1; }
+expect_regex "HD-0 precondition: the working branch's ref names C1, a 40-hex commit" '^[0-9a-f]{40}$' "$HD_C1"
+expect_eq "HD-0b precondition: no checkout holds wave/01-fixture, whose ref still names C1, and the checkout is on the default branch at the merge" \
+  "0|$HD_C1|$HD_DEF|yes" \
+  "$(git -C "$RHD" worktree list --porcelain | /usr/bin/grep -c '^branch refs/heads/wave/01-fixture$' | tr -d ' ')|$(git -C "$RHD" rev-parse wave/01-fixture)|$(git -C "$RHD" symbolic-ref --short HEAD)|$(git -C "$RHD" merge-base --is-ancestor "$HD_C1" "$HD_MAIN" && [ "$HD_MAIN" != "$HD_C1" ] && echo yes)"
+expect_eq "HD-0c precondition: the ledger extractor reads T5's row, its landed cell empty" \
+  "| T5 | test-runner (w-T5) | — | 30 min | $DV_REL/T5-floor.md | — | batch 2 |" "$(hd_ledger T5)"
+
+# deliver: a verify row with its artifact lands at the ref's head
+printf 'floor: green\n' > "$HD_DIR/T5-floor.md"
+poke "$RHD" deliver T5
+expect_eq "HD-1 §HEAD AC-7.4 deliver lands the row with no checkout of the branch (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_regex "HD-1b …at the head the branch's ref names, C1, not the checkout's merge" \
+  "^\| T5 \| test-runner \(w-T5\) \| — \| 30 min \| $DV_REL/T5-floor\.md \| landed $DV_AT_RE $HD_C1 \| batch 2 \|$" "$(hd_ledger T5)"
+
+# proof-add: a critic's reading over base..C1 registers at C1
+new_roster "$RHD"
+printf '%s|questions=adversarial\n' \
+  "$(roster_row_fixture session="$SID" name=dv-crit agent_id=a-dv-crit subagent_type=bionic:critic files="$DV_REL/T3-read.md")" >> "$(roster_of "$RHD")"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nnothing found\n' "${HD_B:0:10}" "$HD_C1" > "$HD_DIR/T3-read.md"
+poke "$RHD" proof-add review record/wave-01-fixture/T3-read.md --question adversarial --reader dv-crit
+expect_eq "HD-2 §HEAD AC-7.4 proof-add registers the reading with no checkout of the branch (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "HD-2b …its proof line at C1, the ref's head" "proved: kind=review head=$HD_C1 " "$(hd_last 'proved: kind=review')"
+
+# waive: the waiver is written at the ref's head
+poke "$RHD" waive structure 'I waive the structure reading for now'
+expect_eq "HD-3 §HEAD AC-7.4 waive records the reply with no checkout of the branch (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "HD-3b …at C1, the ref's head" "waived: question=structure head=$HD_C1 " "$(hd_last 'waived: ')"
+POKE_BOUND="$HD_BOUND_WAS"
 
 # ============================================================
 section "§FIXED §BM: a finding a landed row already fixed is moved to fixed by verb, whatever the row's ancestry, and counts against no cap; a finding moved to defer is born no row (wave-36 T8; REQ-3 AC-3.4, REQ-4 AC-4.5; D9, D10)"

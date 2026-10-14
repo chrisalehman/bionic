@@ -2557,8 +2557,12 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 # regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
 # no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
 # says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
-# debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state, the floor judge and
-# facts_state ask, so the wall and the judge read one plan's floor line one way (FL-5 drives both).
+# debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state and facts_state ask before
+# the floor judge, so the wall and the judge read one plan's floor line one way (FL-5 drives both). THE PLAN'S LINES
+# ARE lib/run.sh `plan_lines`'s, the one plan line reader, CR translated, which that reader reads through (wave-36
+# T12; D13, AC-7.5; C34): a CR-only plan's floor line is a line to this arm and the judge alike (FL-5-cr), where a
+# raw read had refused it here as absent while the gate's own parse read the plan's steps. `plan_regression`
+# reads the frontmatter through the same translation.
 # A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
 # that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
 # green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes

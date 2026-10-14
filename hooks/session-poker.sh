@@ -2533,6 +2533,25 @@ $(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
 TICK_FINDINGS
 }
 
+# THE DETACHED LAUNCH-SYNC'S FAILURE, TOLD ONCE (wave-36 T12; D13, AC-7.1; C13). The launch recorder
+# (hooks/execution-recorder.sh `launch_sync_start`) writes the call's output and then `rc=<n>` to
+# `.bionic/tmp/launch-sync-<sid>.log`, rewriting it at each launch. A log whose last status is not 0
+# and that carries no `told=` line prints
+#
+#   poker: launch-sync failed — <log>
+#
+# and gets a `told=<ISO>` line, so the line prints once per failure, never per tick: the next launch
+# rewrites the log and a new failure is told again. A log with no `rc=` line is a call still running,
+# or one killed before it ended, and says nothing; so does a symbolic link.
+tick_launch_sync_failed() {  # <root> <session-id> -> says the line when the log holds an untold failure
+  local log="$1/.bionic/tmp/launch-sync-$2.log" rc
+  [ -f "$log" ] && [ ! -L "$log" ] || return 0
+  rc="$(awk '/^rc=/ { r = substr($0, 4) } /^told=/ { t = 1 } END { if (!t) print r }' "$log" 2>/dev/null)"
+  case "$rc" in ''|0) return 0 ;; esac
+  printf 'told=%s\n' "$(iso_now)" >> "$log" 2>/dev/null || return 0
+  say "launch-sync failed — $log"
+}
+
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
 # once for everything it asks (`units_memoised`, payload/scripts/lib/units.sh); a tick with no
 # readable plan runs it bare, since there is no table to hold.
@@ -4914,8 +4933,8 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 deliver_check() {
   local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster rulings
   call="bash $HOOK_DIR/session-poker.sh"
-  if ! { declare -F proof_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_head >/dev/null 2>&1; then
+  if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_branch_head >/dev/null 2>&1; then
     die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
@@ -5014,14 +5033,16 @@ DELIVER_FILES
       exit 2
     fi
   fi
+  # THE HEAD IS THE WORKING BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, the
+  # judge's one reading of the head, so a merged branch whose worktree is gone still lands its record rows.
   wb="$(plan_working_branch "$PV_PLAN")"
-  head=""; [ -z "$wb" ] || head="$(proof_head "$PV_REPO" "$wb")" || head=""
+  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
   case "$head" in
     [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;;
     *) head="" ;;
   esac
   if [ -z "$head" ]; then
-    die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out, so there is no head to land $PV_ID at; check the branch out (its worktree), then $call deliver $PV_ID. The plan is unchanged."
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>), then $call deliver $PV_ID. The plan is unchanged."
     exit 2
   fi
   # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
@@ -9955,7 +9976,7 @@ BRF_EOF
   # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
   # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
   # unproved is the difference since the head it names. The head is the one the evidence attests
-  # (its run header or its reviewed: range, held against the working-branch checkout; T14),
+  # (its run header or its reviewed: range, held against the working branch's ref; T14, wave-36 T12),
   # never an operand. The line goes in through the shared transaction; every refusal below
   # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
@@ -10246,22 +10267,24 @@ PF_OTHER_LIST
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
       exit 1
     fi
-    PF_HEAD="$(proof_head "$PV_REPO" "$PF_WB")" || PF_HEAD=""
+    # THE WORKING HEAD IS THE BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, as the
+    # judge reads it, so a reading of a merged branch whose worktree is gone still registers.
+    PF_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || PF_HEAD=""
     case "$PF_HEAD" in
       [0-9a-f]*) : ;;
       *)
-        die "REFUSED — no checkout of $PV_REPO has working-branch $(clean "$PF_WB") checked out, so its head cannot be read; check the branch out (its worktree) and run proof-add again. The plan is unchanged."
+        die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
-    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The checkout's head only
+    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The working head only
     # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
     # on its history, and the proof names what the evidence attests (lib/proof.sh
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
     # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
     # The project root goes too: a project that declares its regression has it judged by its own contract (T75; D36).
-    PF_CO="$(proof_checkout "$PV_REPO" "$PF_WB")"
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO")"; then
+    # The repository reads the objects and the ref's head bounds the evidence: no checkout is asked (T12).
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PV_REPO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO" "$PF_HEAD")"; then
       die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
@@ -10400,7 +10423,7 @@ $PF_PLANL"
   #
   #   waived: question=<q> head=<working head> by <git user.name> <ISO-UTC> "<reply>"
   #
-  # covering that question up to the head of the plan's working-branch checkout, the head the judge
+  # covering that question up to the head the plan's working branch's ref names, the head the judge
   # (lib/proof.sh `facts_state`) is asked about. It goes in through the plan transaction, placed
   # with the proof lines by `proof_add_line`, so a fact written after it is newer than it.
   waive)
@@ -10424,12 +10447,14 @@ $PF_PLANL"
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; the plan is unchanged."
       exit 1
     fi
+    # THE HEAD IS THE WORKING BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, the head
+    # the judge reads the waiver against.
     WV_WB="$(plan_working_branch "$PV_PLAN")"
-    WV_HEAD=""; [ -z "$WV_WB" ] || WV_HEAD="$(proof_head "$PV_REPO" "$WV_WB")" || WV_HEAD=""
+    WV_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || WV_HEAD=""
     case "$WV_HEAD" in
       [0-9a-f]*) : ;;
       *)
-        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${WV_WB:-(none named)} checked out, so there is no head to waive at; the plan is unchanged."
+        die "REFUSED — the plan's working-branch ${WV_WB:-(none named)} names no commit in $PV_REPO, so there is no head to waive at; the plan is unchanged."
         exit 1 ;;
     esac
     WV_LINE="$(proof_waiver_line "$WV_Q" "$WV_HEAD" "$WV_WHO" "$(iso_now)" "$WV_REPLY")"
@@ -11915,6 +11940,10 @@ $(run_groups "$RUN_PID")"
     if [ -f "$ROSTER_FILE" ]; then
       ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" launch-sync 2>&1 ) || :
     fi
+    # The recorder's detached call has a log of its own; its failure is told once, outside the held output, so an
+    # unchanged tick still says it (wave-36 T12; D13, AC-7.1).
+    if [ -n "$TICK_BUF" ]; then tick_launch_sync_failed "$REPO_REAL" "$SESSION_ID" >&3
+    else tick_launch_sync_failed "$REPO_REAL" "$SESSION_ID"; fi
 
     # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
     #
