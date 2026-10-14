@@ -698,7 +698,10 @@ case "$VERB" in
   # `--born floor:<suite>` (wave-36 T7; REQ-3, D9) marks a row born of the floor's red in <suite>, named by its file
   # name (`<name>.test.sh`, the key the floor's records use): the line ends ` born: floor <suite>`, which the judge
   # holds the row's landing by (lib/proof.sh `_facts_born_landings`). It is no review-born row, so fix-policy: and
-  # fix-cap: do not hold it. Any other `floor:` value is the usage error.
+  # fix-cap: do not hold it. Any other `floor:` value is the usage error. THE MARKER NAMES ITS RED (wave-36 T42; D9,
+  # Δ8): the verb admits it only when the plan's floor proof owes the suite or the landing record holds an `ev=standing`
+  # event for it at a commit on the working branch (`born_floor_backing`), and writes ` born: floor <suite> of=floor`
+  # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
     TA_BORN=""; TA_BORN_IDS=""; TA_BORN_FLOOR=""
     case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or floor:<suite>, the suite whose floor red the row fixes." ;; esac
@@ -3870,6 +3873,35 @@ poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
       ;;
     warn) note "$2" ;;
   esac
+}
+
+# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`floor` or `standing@<12-hex>`) and rc 0 when a red the machine
+# recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the refusal's words
+# (wave-36 T42; D9, design-ledger Δ8, born of critic-adversarial #1). THE TWO FACTS, asked in this order: (a) the
+# plan's newest floor proof owes the suite (lib/proof.sh `_proof_last_read` floor owed, the reader `proof-add
+# inherited` asks), or (b) the run's landing record (`proof_debt_record`) holds an `ev=standing` event for the suite
+# whose head is a commit on the working branch's ref (`proof_branch_head`), the newest such event first. A marker the
+# judge holds every chain by is no declaration. No library gives a standing event a reader; this is the one awk, over
+# the file, and it reads the fields as lib/line.sh's fold does (`fv`, a suite by its file name).
+BFB_OF=""; BFB_OWED=""; BFB_BRANCH=""
+born_floor_backing() {
+  local plan="$1" repo="$2" suite="$3" rec bh h
+  BFB_OF=""; BFB_OWED="$(_proof_last_read "$plan" floor owed)"; BFB_BRANCH="$(plan_working_branch "$plan" 2>/dev/null)"
+  case ",$BFB_OWED," in *",$suite,"*) BFB_OF=floor; return 0 ;; esac
+  rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
+  bh="$(proof_branch_head "$plan" "$repo")" || return 1
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    h="$(git -C "$repo" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || continue
+    git -C "$repo" merge-base --is-ancestor "$h" "$bh" 2>/dev/null || continue
+    BFB_OF="standing@${h:0:12}"; return 0
+  done <<BFB_STANDING
+$(awk -F'|' -v want="$suite" '
+    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    $1 == "line/v1" && $2 == "ev=standing" { s = fv("suite"); sub(/.*\//, "", s); if (s == want && fv("head") != "") h[++n] = fv("head") }
+    END { for (i = n; i >= 1; i--) print h[i] }' "$rec" 2>/dev/null)
+BFB_STANDING
+  return 1
 }
 
 # poker_files_cell <id> <kind> <agent> <Files cell> <repo> <plan> -> PFC_OUT (the cell to write) and PFC_ART (the
@@ -8642,10 +8674,19 @@ $(_units_split_tokens "$TA_FILES")
 EOF
       TA_CELL_TASK="$TA_TASK · born: review"
     fi
-    [ -z "$TA_BORN_FLOOR" ] || TA_CELL_TASK="$TA_TASK · born: floor"
+    # A FLOOR-BORN MARKER NAMES ITS RED (wave-36 T42; D9, Δ8): the marker is admitted only with a red the machine
+    # recorded behind it (`born_floor_backing`), and it records which, ` of=floor` or ` of=standing@<12-hex>`.
+    TA_BORN_OF=""
+    if [ -n "$TA_BORN_FLOOR" ]; then
+      if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_FLOOR"; then
+        die "task-add refused — born: floor $TA_BORN_FLOOR names no red the machine recorded; it is admitted when the plan's floor proof owes $TA_BORN_FLOOR (it owes ${BFB_OWED:-nothing}; proof-add floor, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_FLOOR at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+        exit 1
+      fi
+      TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: floor"
+    fi
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_FLOOR:+floor $TA_BORN_FLOOR}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_FLOOR:+floor $TA_BORN_FLOOR of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -8663,7 +8704,7 @@ EOF
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
-    [ -z "$TA_BORN_FLOOR" ] || say "task-add — $TA_ID is floor-born ($TA_BORN_FLOOR): its landing holds every reading's cover (D9), and it counts against no fix-cap."
+    [ -z "$TA_BORN_FLOOR" ] || say "task-add — $TA_ID is floor-born ($TA_BORN_FLOOR), backed by of=$TA_BORN_OF: its landing holds every reading's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"

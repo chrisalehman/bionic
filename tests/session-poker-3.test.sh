@@ -3843,7 +3843,10 @@ SBF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RBF="$(make_repo s-born-floor)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
 SBF_C1="$(git -C "$RBF" rev-parse HEAD)"
 git -C "$RBF" branch wave/01-fixture
-PBF="$(s42_plan "$RBF" 4)"
+PBF="$(s42_plan "$RBF" 4 "  worktree: .worktrees/01-fixture
+  base-sha: abc1234
+  branch: wave/01-fixture
+  working-branch: wave/01-fixture")"
 SBF_OFF="$(git -C "$RBF" rev-parse HEAD)"
 SBF_SUM="$(cksum < "$PBF")"
 poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:lib/a.sh
