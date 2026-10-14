@@ -86,6 +86,10 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # And `budget_cap`, the one reader of a person's writer cap (wave-28 T9; D15).
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/run.sh"
+# THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): a carried `debt:` line is read by `DEBT_LINE_ERE`,
+# the regex `debt add` holds each line to and close-out carries by, never a third copy of it here.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/debt.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The scales
 # differ in their artifacts and never in the `## Tasks` ledger (wave-31 T5, D2): a task-scale
@@ -1488,7 +1492,8 @@ _card_disposals() {  # <requirements file> -> `<adopted|again|closed>\t<id>\t<li
 #
 # A CARRIED DEBT LINE (wave-30 T32; REQ-11 AC-11.2) is read beside them: `debt: <concept> <kind> "<sites>"
 # touches=<N> raised-by=<record> from=<wave>`, close-out's co_debts form, prints `open\t<line>`, so the
-# Step 1 card lists it. One that does not parse prints `unknown\t<line>`. No disposal reaches it: it names
+# Step 1 card lists it. One that does not parse (lib/debt.sh `DEBT_LINE_ERE`, wave-36 T13) prints
+# `unknown\t<line>`. No disposal reaches it: it names
 # no id, and it is faced by `session-poker.sh debt adopt`, which writes it into the run's ledger.
 _card_inherited() {
   local root cont slug
@@ -1497,7 +1502,7 @@ _card_inherited() {
   slug="${1##*/}"; slug="${slug%.requirements.md}"
   cont="$(_card_predecessor "$(docs_root "$root")" "$slug")"
   [ -n "$cont" ] || cont=/dev/null
-  CARD_DISPOSALS="$(_card_disposals "$1")" awk '
+  CARD_DISPOSALS="$(_card_disposals "$1")" DEBT_LINE_ERE="$DEBT_LINE_ERE" awk '
     BEGIN {
       n = split(ENVIRON["CARD_DISPOSALS"], d, "\n")
       for (i = 1; i <= n; i++) {
@@ -1514,7 +1519,7 @@ _card_inherited() {
       print ((f[2] in kind) ? kind[f[2]] : "open") "\t" $0
     }
     s && /^debt:[ \t]/ {
-      print (($0 ~ /^debt:[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]+"[^"]*"[ \t]+touches=[0-9]+[ \t]+raised-by=[^ \t]+[ \t]+from=[^ \t]+[ \t]*$/) ? "open" : "unknown") "\t" $0
+      print (($0 ~ ENVIRON["DEBT_LINE_ERE"]) ? "open" : "unknown") "\t" $0
     }
     END { for (i = 1; i <= m; i++) if (!(ord[i] in seen)) print "unknown\t" said[ord[i]] }' "$cont"
 }

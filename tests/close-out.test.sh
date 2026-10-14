@@ -2450,6 +2450,56 @@ expect_eq "DEBT-RECARRY-5 a run with no ledger exits 0 and carries both inherite
 $RC_LOOSE" "$CO_RC|$(carry_section "$PRN/$CONT_REL" | /usr/bin/grep '^debt: ')"
 
 # ============================================================
+section "DEBT-LINES — wave-36 T13 (D13; REQ-7 AC-7.8; A-orch-1): close-out carries only debt lines that parse, refusing a debt.md line that does not, naming it"
+# ============================================================
+# The one debt-line grammar is lib/debt.sh `debt_line_ok`, read by `debt add`, by close-out's `co_debts`
+# and by card.sh's inherited reader. A debt.md item whose carried line would not parse (A-orch-1: a
+# `raised-by` cell holding a space, `assumptions.md A-orch-46`) refuses `run` before its first act and is
+# named; `check` says it would refuse. Corrected, the line is carried, and the next run's `card.sh step1`
+# over the continuation renders it instead of refusing. fails-when: the continuation carries the
+# unparseable line, or the next run's Step-1 card is refused on it.
+# FIXTURE FIDELITY: the ledger is debt_plant's, in the shape `session-poker.sh debt` writes, with one
+# item's source cell written by hand as wave-35's two hole lines were.
+DL_BAD='hole_x | hole | lib/e.sh:5 | raised-by record/wave-01-fixture/assumptions.md A-orch-46 | touches 0 | —'
+DL_GOOD='hole_x | hole | lib/e.sh:5 | raised-by record/wave-01-fixture/assumptions.md#A-orch-46 | touches 0 | —'
+PDL="$(mk_fixture debtlines1)"; advance_to "$PDL" 8
+debt_plant "$PDL"
+DL_LED="$PDL/.bionic/docs/record/wave-01-fixture/debt.md"
+printf '%s\n' "$DL_BAD" >> "$DL_LED"
+run_close "$PDL" check
+expect_eq "DEBT-LINES-1 check exits 0 over a ledger with an unparseable line" "0" "$CO_RC"
+expect_contains "DEBT-LINES-1b …and says run would refuse it, naming the line" \
+  "debt-lines: WOULD REFUSE — record/wave-01-fixture/debt.md carries a line that does not parse as a debt line: $DL_BAD" "$CO_OUT"
+cp "$PDL/$PLAN_REL" "$SANDBOX/dl-plan-before"
+run_close "$PDL" run
+expect_eq "DEBT-LINES-2 AC-7.8 run refuses a debt.md line with a space in its source cell (exit 2)" "2" "$CO_RC"
+expect_contains "DEBT-LINES-2b …naming the line" \
+  "bionic: close-out refused — record/wave-01-fixture/debt.md carries a line that does not parse as a debt line: $DL_BAD" "$CO_OUT"
+expect_false "DEBT-LINES-2c …and no continuation was written" test -e "$PDL/$CONT_REL"
+expect_true "DEBT-LINES-2d …the plan byte-identical, nothing done" cmp -s "$SANDBOX/dl-plan-before" "$PDL/$PLAN_REL"
+awk -v bad="$DL_BAD" -v good="$DL_GOOD" '$0 == bad { $0 = good } { print }' "$DL_LED" > "$DL_LED.new" && mv "$DL_LED.new" "$DL_LED"
+expect_eq "DEBT-LINES-3 precondition: the corrected ledger holds the line with its anchor and not the spaced one" "1|0" \
+  "$(/usr/bin/grep -cxF "$DL_GOOD" "$DL_LED")|$(/usr/bin/grep -cxF "$DL_BAD" "$DL_LED")"
+run_close "$PDL" run
+expect_eq "DEBT-LINES-3b the corrected ledger closes (exit 0)" "0" "$CO_RC"
+DL_CARRY="debt: hole_x hole \"lib/e.sh:5\" touches=0 raised-by=record/wave-01-fixture/assumptions.md#A-orch-46 from=$CARRY_W"
+expect_eq "DEBT-LINES-3c …and the continuation carries the unburned items, the corrected one last" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W
+$DL_CARRY" "$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep '^debt: ')"
+# The next run's Step 1: its requirements beside this run's, the continuation the newest other one.
+DL_REQ="$PDL/.bionic/docs/specs/epic-fx/wave-02-next.requirements.md"; mkdir -p "${DL_REQ%/*}"
+printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
+  '# next wave · requirements' '' '## Goal' '' 'Read the debt the predecessor carried.' '' \
+  '## Not Doing' '' '- Nothing excluded.' '' '## Requirements and acceptance criteria' '' \
+  '### REQ-1 — the one requirement' '' 'provenance: user 2026-10-13 "carry it"' \
+  '- AC-1.1 the criterion. Fails when: it does not hold.' > "$DL_REQ"
+DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
+expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \
+  "$DL_CRC|$(cat "$SANDBOX/dl-card.err")"
+expect_contains "DEBT-LINES-4b …listing the corrected debt line among the inherited ones" "hole_x hole" "$DL_CARD"
+
+# ============================================================
 section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
 # ============================================================
 #

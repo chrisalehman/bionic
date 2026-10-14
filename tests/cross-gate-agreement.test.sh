@@ -14191,4 +14191,81 @@ expect_eq "RIGOR mutation: …and still runs, relaxing the auditor at 'low'" "re
 expect_ne "RIGOR mutation: …so it reads an old word as a level, and the low row goes red" \
   "$(rv_site "$RV_WALLS" low auditor)" "$(rv_site "$RV_MUT" low auditor)"
 
+
+# ============================================================
+section "DEBT-LINE — one debt-line grammar, owned once in lib/debt.sh and sourced by its three consumers (wave-36 T13; D13; REQ-7 AC-7.8; ownership row 'the debt line')"
+# ============================================================
+#
+# Three regexes read one carried debt before this row: card.sh's inherited reader, the debt verb's adopt
+# arm, and close-out's co_debts, which wrote the line and checked nothing (A-orch-1: two hand-written
+# lines whose `raised-by=` held a space reached a continuation and refused the next Step-1 card). Now
+# `DEBT_LINE_ERE` is assigned once, in payload/scripts/lib/debt.sh, with `debt_line_ok` and
+# `debt_carry_lines` beside it, and `debt add`, close-out and card.sh source it. fails-when: a consumer
+# holds a debt-line regex of its own, or a mutant of the one regex leaves any consumer's verdict unchanged.
+DL_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/debt.sh"
+DL_CONSUMERS="payload/scripts/card.sh payload/scripts/close-out.sh hooks/session-poker.sh"
+dl_defs() {  # <pattern> -> path:line of each flush-left match in hooks/ and payload/scripts/
+  ( cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rnE "$1" hooks payload/scripts --include='*.sh' 2>/dev/null )
+}
+expect_eq "DEBT-LINE 1 the grammar is assigned once in the tree, in lib/debt.sh" "payload/scripts/lib/debt.sh" \
+  "$(dl_defs '^DEBT_LINE_ERE=' | cut -d: -f1 | sort -u | paste -sd' ' -)"
+expect_eq "DEBT-LINE 1b …assigned exactly once" "1" "$(dl_defs '^DEBT_LINE_ERE=' | wc -l | tr -d ' ')"
+expect_eq "DEBT-LINE 1c debt_line_ok is defined once, in lib/debt.sh" "payload/scripts/lib/debt.sh" \
+  "$(dl_defs '^debt_line_ok\(\)' | cut -d: -f1 | paste -sd' ' -)"
+for dl_c in $DL_CONSUMERS; do
+  expect_nonempty "DEBT-LINE 2 $dl_c sources lib/debt.sh" "$(/usr/bin/grep -nE '/debt\.sh"' "$BIONIC_SCRIPTS_DIR/$dl_c")"
+  expect_eq "DEBT-LINE 2b $dl_c holds no debt-line regex of its own (no raised-by=[ or touches=[ pattern)" "0" \
+    "$(/usr/bin/grep -cE 'raised-by=\[|touches=\[0-9\]' "$BIONIC_SCRIPTS_DIR/$dl_c")"
+done
+expect_nonempty "DEBT-LINE 2c precondition: the census pattern finds the one regex in lib/debt.sh" \
+  "$(/usr/bin/grep -nE 'raised-by=\[' "$DL_LIB")"
+
+# THE MUTANT: a copy of the payload and hooks whose one regex spells the field `raised_by=`. Each consumer
+# is asked the same question against the real tree and the mutant: the card's inherited reader, `debt add`
+# (the verb, run), and close-out's carry (`debt_carry_lines`, the reader co_debts calls).
+DL_D="$SANDBOX/debt-line"; mkdir -p "$DL_D/real" "$DL_D/mut/payload"
+cp -R "$BIONIC_SCRIPTS_DIR/hooks" "$DL_D/mut/hooks"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$DL_D/mut/payload/scripts"
+sed '/^DEBT_LINE_ERE=/s/raised-by=/raised_by=/' "$DL_LIB" > "$DL_D/mut/payload/scripts/lib/debt.sh"
+expect_eq "DEBT-LINE mut0 the mutant differs from lib/debt.sh in exactly one line" "1" \
+  "$(diff "$DL_LIB" "$DL_D/mut/payload/scripts/lib/debt.sh" | /usr/bin/grep -c '^>')"
+DL_P="$DL_D/proj"; mkdir -p "$DL_P/.bionic/docs/plans/epic-9" "$DL_P/.bionic/docs/record/wave-09-dl" "$DL_P/.bionic/docs/specs/epic-9" "$DL_P/.bionic/tmp"
+( cd "$DL_P" && git init -q . ) >/dev/null 2>&1
+printf '# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$DL_P/.bionic/docs/plans/epic-9/wave-09-dl.plan.md"
+DL_LINE='debt: tree_count duplicate "lib/a.sh:1, lib/b.sh:2" touches=4 raised-by=record/wave-08-x/critic-structure.md from=wave-08-x'
+printf '%s\n' "# continuation — wave-09-dl" "" "## Deferrals" "" "$DL_LINE" > "$DL_P/.bionic/docs/record/wave-09-dl/continuation.md"
+printf '# requirements\n' > "$DL_P/.bionic/docs/specs/epic-9/wave-10-next.requirements.md"
+printf '%s\n' "# assumptions" "" 'debt: hole adopt-orphans hooks/a.sh:1' > "$DL_P/.bionic/docs/record/wave-09-dl/assumptions.md"
+printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
+  'tree_count | duplicate | lib/a.sh:1 | raised-by record/wave-08-x/critic-structure.md | touches 4 | —' > "$DL_D/ledger.md"
+dl_card() {  # <payload scripts dir> -> card.sh inherited-debt over the fixture
+  bash "$1/card.sh" inherited-debt "$DL_P/.bionic/docs/specs/epic-9/wave-10-next.requirements.md" 2>/dev/null 0<&-
+}
+dl_add() {  # <hooks dir> -> "<rc>|<output>" of debt add over the fixture's hole line, the plan named
+  local o r
+  rm -f "$DL_P/.bionic/docs/record/wave-09-dl/debt.md"
+  o="$(cd "$DL_P" && CLAUDE_CODE_SESSION_ID=dl-sid bash "$1/session-poker.sh" debt add record/wave-09-dl/assumptions.md \
+    .bionic/docs/plans/epic-9/wave-09-dl.plan.md 2>&1)"; r=$?
+  printf '%s|%s' "$r" "$o"
+}
+dl_carry() {  # <debt.sh> -> debt_carry_lines over the fixture ledger
+  bash -c '. "$1"; debt_carry_lines "$2" wave-09-dl' _ "$1" "$DL_D/ledger.md" 2>/dev/null
+}
+expect_eq "DEBT-LINE 3 card: the real reader lists the carried line" "$DL_LINE" "$(dl_card "$BIONIC_SCRIPTS_DIR/payload/scripts")"
+expect_eq "DEBT-LINE 3b …and the mutant's lists nothing (the line reads as unknown)" "" "$(dl_card "$DL_D/mut/payload/scripts")"
+DL_ADD_REAL="$(dl_add "$BIONIC_HOOKS_DIR")"
+expect_eq "DEBT-LINE 4 debt add: the real verb adds the hole line (exit 0)" \
+  "0|poker: debt add — adopt-orphans hole hooks/a.sh:1" "$(printf '%s\n' "$DL_ADD_REAL" | head -1)"
+DL_ADD_MUT="$(dl_add "$DL_D/mut/hooks")"
+expect_eq "DEBT-LINE 4b …and the mutant's refuses it (exit 1), the line not parsing" "1" "${DL_ADD_MUT%%|*}"
+expect_contains "DEBT-LINE 4c …saying so" "does not parse as a debt line" "$DL_ADD_MUT"
+expect_eq "DEBT-LINE 5 close-out's carry: the real reader carries the item" \
+  "$(printf 'ok\tdebt: tree_count duplicate "lib/a.sh:1" touches=4 raised-by=record/wave-08-x/critic-structure.md from=wave-09-dl')" \
+  "$(dl_carry "$DL_LIB")"
+expect_eq "DEBT-LINE 5b …and the mutant's names the ledger line it cannot carry" \
+  "$(printf 'bad\ttree_count | duplicate | lib/a.sh:1 | raised-by record/wave-08-x/critic-structure.md | touches 4 | —')" \
+  "$(dl_carry "$DL_D/mut/payload/scripts/lib/debt.sh")"
+expect_nonempty "DEBT-LINE 5c close-out's co_debts reads the carry through debt_carry_lines" \
+  "$(awk '/^co_debts\(\) *\{/ { f = 1 } f && /debt_carry_lines/ { print; exit } f && /^}/ { f = 0 }' "$BIONIC_SCRIPTS_DIR/payload/scripts/close-out.sh")"
+rm -rf "$DL_D"
+
 finish

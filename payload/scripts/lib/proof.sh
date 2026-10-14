@@ -334,6 +334,19 @@ proof_findings() {
   _proof_findings_span "$1" "$span"
 }
 
+# proof_record_debts <record> -> the `debt` rows proof_findings gives, read from every flush-left `debt:`
+# line of ANY record, a `reviewed:` line or not (wave-36 T13; D13, REQ-7 AC-7.2, census C24): a writer's or
+# the orchestrator's `assumptions.md` hole line is read as a reading's is, by the one debt arm below, and
+# refused in its words. The kinds are PROOF_DEBT_KINDS', so a caller widens them by setting it for the
+# call (the debt verb hands lib/debt.sh's DEBT_KINDS, `hole` among them). Exit 0, nothing printed for a
+# record with no debt line; or 1 with the arm's sentence.
+proof_record_debts() {
+  local span
+  [ -f "${1:-}" ] && [ -r "$1" ] || { printf 'no readable record at %s' "${1:-}"; return 1; }
+  span="$(printf 'findings: 0\n'; awk '/^debt:/' "$1" 2>/dev/null)"
+  _proof_findings_span "$1" "$span"
+}
+
 # _proof_findings_span <record> <its pass> -> proof_findings' answer for a pass already cut.
 _proof_findings_span() {
   local out
@@ -344,7 +357,7 @@ _proof_findings_span() {
       for (i = 1; i <= n; i++) { k = c[i]; sub(/=.*$/, "", k); v = c[i]; sub(/^[^=]*=/, "", v); pri[k] = v }
       n = split(ENVIRON["PROOF_SEV"], c, " "); for (i = 1; i <= n; i++) sev[c[i]] = 1
       n = split(ENVIRON["PROOF_REACH"], c, " "); for (i = 1; i <= n; i++) rch[c[i]] = 1
-      n = split(ENVIRON["PROOF_DK"], c, " "); for (i = 1; i <= n; i++) dk[c[i]] = 1
+      n = split(ENVIRON["PROOF_DK"], c, " "); for (i = 1; i <= n; i++) { dk[c[i]] = 1; dkl = (i == 1 ? "" : dkl (i == n ? " or " : ", ")) c[i] }
     }
     function bad(m) { if (err == "") err = "the reading " rec " " m }
     function rest(s, k,   i) { for (i = 0; i < k; i++) sub(/^[^ \t]+[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -376,7 +389,7 @@ _proof_findings_span() {
       line = $0; sub(/[ \t]+$/, "", line); m = split(line, f, /[ \t,]+/)
       for (i = 2; i <= m; i++) if ((f[i] in sev) || (f[i] in rch)) {
         bad("rates its debt line (" line ") with '"'"'" f[i] "'"'"', and debt is rated by kind and concept, never by severity or reach; write debt: <kind> <concept> <path>:<line>[, <path>:<line>]"); next }
-      if (!(f[2] in dk)) { bad("has a debt line (" line ") whose kind '"'"'" f[2] "'"'"' is not one of duplicate, unpinned-pair or one-case-abstraction; name the kind on the debt table in severity.md"); next }
+      if (!(f[2] in dk)) { bad("has a debt line (" line ") whose kind '"'"'" f[2] "'"'"' is not one of " dkl "; name the kind on the debt table in severity.md"); next }
       if (m < 4) { bad("has a debt line (" line ") with no site; write the concept, then each <path>:<line> it lives at"); next }
       k = split(rest(line, 3), st, /[ \t]*,[ \t]*/); ss = ""; ok = 1
       for (i = 1; i <= k && ok; i++) if (st[i] !~ /^[^ \t]+:[0-9]+$/) {
