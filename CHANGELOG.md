@@ -20,8 +20,9 @@ and lose nothing, the 1.18.0 release text is corrected below, and the run ran on
 build rows landed. The census rows no row touched are debt-class and are carried in the wave's continuation, not here.
 The walk and the reviews of the settled whole found four more fixes (T42, T43, T44 and T47), and they landed.
 This is a minor release by the policy above: the placement reader, the reads index, the judge's cover rule and the new
-verbs are new capability. `canonical_sdlc_version` stays 14. This run's own floor is Step 6's last act and is recorded
-in the wave's record, not here, because the release text is written before it.
+verbs are new capability. `canonical_sdlc_version` stays 14. This run's whole run, the floor, ran at d81d2c91 (99 of 100
+suites green, `floor-run-d81d2c91673c649c4190c53e364778e38f26e1f0.log` in the wave's record) and owed one suite; the row
+born of it is named under the standing reds below.
 
 **Migration.** A person who runs bionic's own checkout runs `/bionic:setup` once, to take the new shell function (T1);
 everyone else needs nothing. Eleven rows added or changed a refusal that a script of yours may have met, and the
@@ -147,6 +148,11 @@ Each landing ran its own suites, so the reds it caused in suites outside them we
 repaired at its site: T33 (`T33-said-no-pipe.md`), T36 (`T36-stop-wall-pins.md`), T37 (`T37-shell-lint-reds.md`), T38
 (`T38-one-roster-reader.md`) and T39 (`T39-sp2-pins.md`). The reads index (D12) is what now routes a later row to the
 suites that read its files.
+
+The run's whole run owed one suite, `session-start.test.sh`. Its §16.4 failed under load in the whole run and passed alone
+at the same head: the suite's own `has` and `hasnt` helpers pipe a 61 KB report into `grep -q` under `set -o pipefail`,
+the shape T33 repaired in `said.sh`. T48 (`T48-stamps-under-load.md`) is the row born of it, marked `born: floor`, and a
+later green of that suite by a landing closes the floor.
 
 ### The doctrine and this release (D14)
 
