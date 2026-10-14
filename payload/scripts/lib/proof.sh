@@ -2127,7 +2127,7 @@ _facts_docs_prefix() {
 # marker naming findings of several readings holds on each of their questions; a rating-form marker, or a record no
 # registered reading names, gives no question, so that landing owes on every chain.
 _facts_born_landings() {
-  local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec=""
+  local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec="" want
   if /usr/bin/grep -qE ' born: (review|floor) ' "$plan" 2>/dev/null && _proof_units_load \
     && declare -F units_born_marks >/dev/null 2>&1; then
     marks="$(units_born_marks "$plan" 2>/dev/null)"
@@ -2136,7 +2136,9 @@ _facts_born_landings() {
     fi
   fi
   [ -n "$fixed" ] || [ -n "$rec" ] || return 0
-  if [ -n "$fixed" ] || printf '%s\n' "$marks" | /usr/bin/grep -q '	review	'; then
+  # A fixed finding or a review mark needs the askers; a `case` on the string, never a pipe into a quitting grep (§BP).
+  want="$fixed"; case "$marks" in *"	review	"*) want=1 ;; esac
+  if [ -n "$want" ]; then
     ! declare -F units_born_findings >/dev/null 2>&1 || finds="$(units_born_findings "$plan" 2>/dev/null)"
     asks="$(awk "$(proof_awk)"'
       /^[[:space:]]*```/ { fence = !fence; next }
