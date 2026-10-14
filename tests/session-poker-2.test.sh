@@ -2532,15 +2532,22 @@ expect_contains "54b1b …saying what it lacks" \
   ") is not proved: no suite run is recorded at it${S54_OUT}; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
   "$(s54_wait)"
 expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
-# THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
-# ask the ready set. The walk's one git call is what the shim counts.
+# THE COST: one tick walks each state it owes once (wave-36 T40; D9, AC-3.6). The integrate row owes two: the
+# regression (proof_state, through the floor memo) and the readings (facts_state, through the judge). The
+# schedule and the change fingerprint each ask the ready set, and gate_report reads the budget a second time,
+# so a state asked twice would be walked twice. The walk's one git call is what the shim counts; each state is
+# measured alone under the same shim, and the tick must walk their sum.
 : > "$S54_COUNT"; PATH="$S54_SHIM:$PATH" s54_tick; S54_TICK_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
 : > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
 S54_PS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; facts_state "$P54" "$(proof_branch_head "$P54" "$R54")" ) >/dev/null 2>&1
+S54_FS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
 expect_true "54b2c precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
   test "$S54_PS_WALKS" -gt 0
-expect_eq "54b2d …and one tick walks them exactly as often: the floor state is computed once per tick" \
-  "$S54_PS_WALKS" "$S54_TICK_WALKS"
+expect_true "54b2c2 precondition: …and so does one facts_state (the counter reads real calls)" \
+  test "$S54_FS_WALKS" -gt 0
+expect_eq "54b2d …and one tick walks each state once: the sum of one proof_state and one facts_state" \
+  "$((S54_PS_WALKS + S54_FS_WALKS))" "$S54_TICK_WALKS"
 s54_floor floor-2.log
 expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add floor (exit 0)" "0" "$RC"
 expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
