@@ -73,7 +73,7 @@ mode.
 
 **rigor** — how many independent minds answer the questions: `single` (one) or `double` (two). A level sets four things, each the user's to set at Step 0: the readers, `review-cadence:`, `fix-policy:` and `fix-cap:`.
 
-Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the regression `pass == total`. The other three are read by independent minds: `evidence`, is the proof honest; `adversarial`, what is wrong that nobody asked about; `structure`, is it built from what exists, and shaped well.
+Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the floor: one whole run plus the greens of what changed. The other three are read by independent minds: `evidence`, is the proof honest; `adversarial`, what is wrong that nobody asked about; `structure`, is it built from what exists, and shaped well.
 
 Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.
 
@@ -118,11 +118,11 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
 .bionic/.gitignore                # literally `*` — written on tree creation; this is what
                                   # keeps the whole tree out of git, not the project .gitignore
 .bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default;
-                                  # `release-check:`, and `floor: <command>` or `floor-attestation: user`
+                                  # `release-check:`, and `floor: <command>`
                                   # when a project's regression is not tests/run.sh
 ```
 
-The regression's verbs and keys still spell it `floor` (`proof-add floor`, `floor-run`, `floor:`, `floor-attestation:`) until bionic2.
+The regression's verbs and keys still spell it `floor` (`proof-add floor`, `floor-run`, `floor:`) until bionic2.
 
 The first five are lifecycle artifacts and are gated: the governing-skill hook enforces
 frontmatter on them and blocks a canonical artifact written anywhere else. `record/` and
