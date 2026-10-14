@@ -2394,7 +2394,8 @@ expect_absent "…and names no step it filtered by" "pending step-" "$OUT"
 # mismatch: BASE is `landed` in the plan (no `active` row anywhere) while its roster row is
 # still open (never acked; its deliverable is not on disk). writers=2, one open → gap one.
 # The tick fills ONE. Pre-fix the wall read the plan's `active` column (zero) and named
-# ONE and TWO; post-fix it reads the roster and names ONE. The row carries no `agent_id=`,
+# ONE and TWO; post-fix it read the roster and named ONE; since wave-36 T32 the wall names every
+# ready row with room (ONE TWO here, 12l2), the tick still filling ONE. The row carries no `agent_id=`,
 # so the landing gate in the same Stop hook cannot place it and stays out of the verdict.
 STOP_HOOK_12L="${BIONIC_HOOKS_DIR}/stop.sh"
 # HERMETIC PANEL (T2d, A-T2.13). §12a-T22 unsets CLAUDE_CONFIG_DIR on its way out, and a tick
@@ -2432,7 +2433,11 @@ for _id in BASE ONE TWO; do
 done
 expect_eq "12l the tick fills one row against one open roster row (the fixture discriminates)" \
   "ONE " "$S12L_TICK"
-expect_eq "12l2 AC-5.2 the stop wall names exactly the ids the tick filled" "$S12L_TICK" "$S12L_WALL"
+# 12l2 reads T32's rule (wave-36; D13, AC-7.1): the wall is ONE refusal line naming EVERY ready row
+# the gate has room for, not only the ids the tick's FILL line printed. The tick filled ONE
+# (12l, above); ONE and TWO are both ready with room, so the wall names both.
+expect_eq "12l2 AC-7.1 (T32) on the UNMET-open shape the stop wall names every ready row with room, not only the one the tick filled" \
+  "ONE TWO " "$S12L_WALL"
 
 # 12l3–12l6 — THE END-OF-BATCH SHAPE (wave-19 audit V-2; T2d). 12l's BASE row is UNMET, and
 # on an UNMET row the tick and the wall already agreed. They did not agree on a MET row the
@@ -2484,8 +2489,9 @@ expect_contains "12l3 precondition: the MET row's agent is still listed, so the 
   "poker: STANDDOWN done-writer" "$OUT"
 S12L3_TICK="$(s12l_tick_ids "$OUT")"
 expect_eq "12l3 a MET row the ack has not closed still occupies: writers=2 fills ONE" "ONE " "$S12L3_TICK"
-expect_eq "12l4 AC-5.2 on the end-of-batch shape: the stop wall names exactly the ids the tick filled" \
-  "$S12L3_TICK" "$(s12l_wall_ids "$R12L3")"
+# 12l4 reads T32's rule: the tick filled ONE (12l3), and the wall names every ready row with room.
+expect_eq "12l4 AC-7.1 (T32) on the end-of-batch shape the stop wall names every ready row with room, not only the one the tick filled" \
+  "ONE TWO " "$(s12l_wall_ids "$R12L3")"
 
 R12L5="$(s12l_met_repo s12-differential-met-gone)"
 s12_answer fresh "somebody-else:running"
@@ -2521,8 +2527,9 @@ poke_pressure "$R12L7" 8192 1.0 tick
 S12L7_TICK="$(s12l_tick_ids "$OUT")"
 expect_eq "12l7 R2-5: an UNMET row absent from a fresh panel still occupies: writers=2 fills ONE" \
   "ONE " "$S12L7_TICK"
-expect_eq "12l7b …and the stop wall, reading the same predicate, names the same one" \
-  "$S12L7_TICK" "$(s12l_wall_ids "$R12L7")"
+# 12l7b reads T32's rule: same predicate for tick and wall (the occupancy), the wall names all ready.
+expect_eq "12l7b …and the stop wall, reading the same predicate, names every ready row with room (T32)" \
+  "ONE TWO " "$(s12l_wall_ids "$R12L7")"
 
 # 12l7c — R2-6/C2-5: the tick now names the gone-UNMET row and the verb that closes it, so a
 # crashed writer does not stall a fill slot silently until a human happens to run `stopped`.
