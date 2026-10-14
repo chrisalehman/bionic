@@ -29,8 +29,9 @@
 # more invocation; the cost of engaging wrongly is every wall in the fleet binding a
 # session that never consented, which is the bug this exists to fix.
 #
-# IT NEVER BLOCKS, AND SPEAKS ONCE. Exit is 0 on every path — a trigger that could refuse
-# the skill it exists to notice would be a wall in front of the front door. The one thing it
+# IT NEVER BLOCKS, AND SPEAKS ONCE. Exit is 0 on every hook path — a trigger that could refuse
+# the skill it exists to notice would be a wall in front of the front door. (The typed verb
+# `engage.sh --root <dir>`, below, exits 2 on its own misuse: no hook ever passes it.) The one thing it
 # says is said to the MODEL, on stdout as `hookSpecificOutput.additionalContext`: when the
 # count rule declined a run because another live session holds it (see THE HELD RUN below).
 # Registered twice in hooks/hooks.json.
@@ -40,7 +41,47 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-INPUT=$(cat)
+
+# ---------- THE VERB: `engage.sh --root <dir>` (wave-36 T4; D11, AC-5.4) ----------
+#
+# THE FAULT (research-landing-and-walls.md C44). The root below is CLAUDE_PROJECT_DIR, else the
+# payload's cwd, walked up to the nearest `.bionic`. A walker's scratch project inside this
+# project's tree therefore engaged THIS project, and no verb engaged an outside root. `--root
+# <dir>` engages <dir> itself: the root is <dir>, never walked up and never overridden by
+# CLAUDE_PROJECT_DIR, and the marker goes under `<dir>/.bionic/tmp`. Every hook whose root
+# resolves to <dir> afterwards (the walk stops at the `.bionic` made here) reads it engaged, the
+# recorder's scratch line included.
+#
+# THE VERB IS THE TRIGGER. hooks.json passes no argument, so `--root` arrives only from a command
+# someone typed: that is the consent the trigger test below asks for, and no payload is read. The
+# session id is the environment's (L-SESSION: env primary), as for every hook.
+#
+# MISUSE EXITS 2 WITH ONE LINE: no operand, an operand that is not a directory, no session id.
+# The hook paths still exit 0 on every path; a verb that failed silently would leave its caller
+# believing a root is engaged. Past argument checking the verb takes the hook's own path, so its
+# refusals (a linked `.bionic`, an unwritable tmp) are the hook's, and the one line it prints on
+# success is printed only when the marker is there.
+ROOT_ARG=""
+ROOT_MODE=0
+if [ "${1:-}" = "--root" ]; then
+  ROOT_MODE=1
+  if [ $# -ne 2 ] || [ -z "${2:-}" ]; then
+    echo "engage: usage: engage.sh --root <dir> — engages <dir> for this session (CLAUDE_CODE_SESSION_ID)" >&2
+    exit 2
+  fi
+  ROOT_ARG="$(cd "$2" 2>/dev/null && pwd -P)" || ROOT_ARG=""
+  if [ -z "$ROOT_ARG" ] || [ ! -d "$ROOT_ARG" ]; then
+    echo "engage: --root $2 is not a directory — nothing engaged" >&2
+    exit 2
+  fi
+  if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+    echo "engage: --root needs this session's id in CLAUDE_CODE_SESSION_ID — nothing engaged" >&2
+    exit 2
+  fi
+  INPUT=""
+else
+  INPUT=$(cat)
+fi
 
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
@@ -49,28 +90,34 @@ _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 # Asked before anything else is read, and before a single byte is written anywhere: this
 # hook is delivered on every Skill call and every command expansion in every project on
 # the machine, and for all but one name it must cost nothing and do nothing.
-NAME=""
-case "$(_jq '.hook_event_name')" in
-  PreToolUse)
-    [ "$(_jq '.tool_name')" = "Skill" ] || exit 0
-    NAME=$(_jq '.tool_input.skill')
-    ;;
-  UserPromptExpansion)
-    NAME=$(_jq '.command_name')
-    ;;
-  *) exit 0 ;;
-esac
+if [ "$ROOT_MODE" -eq 0 ]; then
+  NAME=""
+  case "$(_jq '.hook_event_name')" in
+    PreToolUse)
+      [ "$(_jq '.tool_name')" = "Skill" ] || exit 0
+      NAME=$(_jq '.tool_input.skill')
+      ;;
+    UserPromptExpansion)
+      NAME=$(_jq '.command_name')
+      ;;
+    *) exit 0 ;;
+  esac
 
-# `^(bionic:)?canonical-sdlc$`, anchored at both ends, plus the leading slash the typed
-# form may carry. `canonical-sdlc-notes` and `other:canonical-sdlc` are not this skill.
-case "${NAME#/}" in
-  canonical-sdlc|bionic:canonical-sdlc) ;;
-  *) exit 0 ;;
-esac
+  # `^(bionic:)?canonical-sdlc$`, anchored at both ends, plus the leading slash the typed
+  # form may carry. `canonical-sdlc-notes` and `other:canonical-sdlc` are not this skill.
+  case "${NAME#/}" in
+    canonical-sdlc|bionic:canonical-sdlc) ;;
+    *) exit 0 ;;
+  esac
+fi
 
-CWD="${CLAUDE_PROJECT_DIR:-}"
-if [ -z "$CWD" ]; then
-  CWD=$(_jq '.cwd')
+if [ "$ROOT_MODE" -eq 1 ]; then
+  CWD="$ROOT_ARG"
+else
+  CWD="${CLAUDE_PROJECT_DIR:-}"
+  if [ -z "$CWD" ]; then
+    CWD=$(_jq '.cwd')
+  fi
 fi
 [ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
 
@@ -194,7 +241,13 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "engage"; fi
 # preferred the payload would write a file nobody reads. `engaged_marker_path` owns the
 # whole shape rule — empty, `unknown`, and any character outside [A-Za-z0-9_-] are refused
 # there, once, rather than restated here.
-REPO=$(project_root "$CWD")
+# Under `--root` the root is the directory named, never the walk's answer: the walk is what
+# carried a nested scratch directory up into the project around it (C44).
+if [ "$ROOT_MODE" -eq 1 ]; then
+  REPO="$ROOT_ARG"
+else
+  REPO=$(project_root "$CWD")
+fi
 [ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
 
 SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
@@ -443,8 +496,18 @@ if [ -n "$ENGAGE_HELD_BY" ] && [ "$(session_plan "$REPO" "$SID" 2>/dev/null || e
   ENGAGE_EVENT=$(_jq '.hook_event_name')
   ENGAGE_CTX="bionic: this session was left unbound — the root's one live run is bound to live session $ENGAGE_HELD_BY; bind to it only if this session is joining that run.
 $(run_unbound_advisory "$ENGAGE_HELD_PLAN")"
-  jq -nc --arg e "$ENGAGE_EVENT" --arg c "$ENGAGE_CTX" \
-    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null || :
+  if [ "$ROOT_MODE" -eq 1 ]; then
+    # The verb has no event to answer on: its reader is whoever typed it, on stderr.
+    printf '%s\n' "$ENGAGE_CTX" >&2
+  else
+    jq -nc --arg e "$ENGAGE_EVENT" --arg c "$ENGAGE_CTX" \
+      '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null || :
+  fi
+fi
+
+# THE VERB SAYS WHAT IT ENGAGED, once, and only when the marker is there to say it.
+if [ "$ROOT_MODE" -eq 1 ] && [ -f "$MARKER" ] && [ ! -L "$MARKER" ]; then
+  printf 'engage: engaged %s for session %s\n' "$REPO" "$SID"
 fi
 
 exit 0
