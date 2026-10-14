@@ -791,7 +791,7 @@ expect_contains "58g10 …from the absolute deliverable's reader, as a pass" \
 POKER="$S58_POKER_REAL"
 
 # ---------- controls: a floor, a task and a plain review proof are written as before ----------
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$S58_C4" > "$S58_REC/floor.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$S58_C4" > "$S58_REC/floor.txt"
 printf '# review\n\nreviewed: %s..%s\n' "$S58_C1" "$S58_C4" > "$S58_REC/plain.md"
 s42_snap "$R58" "$P58"
 poke "$R58" proof-add floor record/wave-01-fixture/floor.txt
@@ -3136,7 +3136,7 @@ expect_eq "69e0 control: at current: 6 with the debt open a real commit is refus
 poke "$R69" step-line T9 'landed red on widget.test.sh, owed'
 expect_eq "69e00 a writer verb at current: 6 with the debt open (step-line): admitted, its copy judged at current: 4" "0" "$RC"
 expect_contains "69e00b …and its line is written" "- T9: landed red on widget.test.sh, owed" "$(cat "$P69")"
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\n' "$S69_H" \
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\nrc=0\n' "$S69_H" \
   > "$R69/.bionic/docs/record/w27/floor-late.log"
 poke "$R69" proof-add floor record/w27/floor-late.log
 expect_eq "69e proof-add floor of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
@@ -3350,7 +3350,8 @@ POKE_BOUND="$S71_BOUND_WAS"
 section "Section 72 §FLOOR-RECORD: the floor is one whole run at a commit on the branch, and every later commit proved by the runs recorded at it (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.3, AC-13.4; D3; A-T25-1 to A-T25-4)"
 # ============================================================
 #
-# `proof-add floor` takes ONE log of one whole green run on a clean tree, at a commit F. When F is
+# `proof-add floor` takes the log of a green run on a clean tree, at a commit F: since wave-36 T35 (AC-7.10) any
+# log that opens head=<F> dirty=0 and ends rc=0, no roster counted (§72 (b)). When F is
 # not the working head H, F must be an ancestor of H and the walk must hold: each commit on the
 # working branch's first-parent line after F owes its row's Lands-on suites (the `ready` event
 # before the `published` one naming it) and every suite a run recorded at its tree names; a hand
@@ -3420,8 +3421,8 @@ s72_add() {  # <evidence relative to the record> -> poke proof-add floor, the pl
   s42_snap "$S72R" "$S72P"
   poke "$S72R" proof-add floor "record/wave-01-fixture/$1"
 }
-s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>
-  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\n' "$2" > "$S72REC/$1"
+s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35)
+  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\nrc=0\n' "$2" > "$S72REC/$1"
 }
 s72_state() {  # -> proof_state's one line for the plan
   bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null
@@ -3457,15 +3458,18 @@ expect_eq "72a5 AC-13.4 a whole run at an ancestor F, every later commit proved 
 expect_eq "72a6 …and the proof names F, the head the run read" "$S72F" "$(s46_last "$S72P" floor)"
 expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'covered\t%s' "$S72C2")" "$(s72_state)"
 
-# ---------- (b) the stamps alone, with no whole run, are no floor ----------
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$S72F" > "$S72REC/floor-part.txt"
+# ---------- (b) what the run ran is the plan's word: no roster is counted (inverted by wave-36 T35; AC-7.10) ----------
+# Through wave-35 the judge counted the suites at the head, and a run of one suite of four was refused as not whole.
+# The floor reads no roster now: the plan's regression row names what ran, and a log that opens head=<F> dirty=0 and
+# ends rc=0, every later commit proved, is accepted whatever it ran.
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$S72F" > "$S72REC/floor-part.txt"
 s72_add floor-part.txt
-s42_unchanged "72b a run of one suite at F, every later commit proved" 1 "$S72P"
-expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed of 4 suites at its head)" "$OUT"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\n' "$S72C2" > "$S72REC/floor-part-H.txt"
+expect_eq "72b a run of one suite at F, every later commit proved: accepted, no roster counted (exit 0)" "0" "$RC"
+expect_eq "72b2 AC-7.10 …the proof naming F" "$S72F" "$(s46_last "$S72P" floor)"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nrc=0\n' "$S72C2" > "$S72REC/floor-part-H.txt"
 s72_add floor-part-H.txt
-s42_unchanged "72b3 a run of two suites at the working head itself" 1 "$S72P"
-expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed of 4 suites at its head)" "$OUT"
+expect_eq "72b3 a run of two suites at the working head itself: accepted (exit 0)" "0" "$RC"
+expect_eq "72b4 …the proof naming the working head" "$S72C2" "$(s46_last "$S72P" floor)"
 
 # ---------- (c) a fix row after the full run: its red suite and its own, each run green ----------
 S72C3="$(s72_land T8 lib/one.sh d.test.sh,a.test.sh)"
@@ -3533,7 +3537,7 @@ s42_unchanged "72g a whole run at a commit off the working branch" 1 "$S72P"
 expect_contains "72g2 …says it is not in the working branch's history" \
   "floor-X.txt read head ${S72X:0:12}, which is not in the history of the working branch (at ${S72C6:0:12})" "$OUT"
 s72_config "floor: true"
-printf 'head=%s dirty=0 rc=0\ncommand: true\n' "$S72F" > "$S72REC/floor-run-F.log"
+printf 'head=%s dirty=0\ncommand: true\nrc=0\n' "$S72F" > "$S72REC/floor-run-F.log"
 s72_add floor-run-F.log
 expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
 S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
@@ -3575,13 +3579,13 @@ expect_contains "72i4 …naming the oldest commit owing a suite, and the whole r
 s57_state "$S72P" "$S72H"
 S72FL="$(s57_of floor)"
 expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	*}"
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\n' "$S72H" > "$S72REC/floor-red-H.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\nrc=1\n' "$S72H" > "$S72REC/floor-red-H.txt"
 s72_add floor-red-H.txt
 s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
 # A RED WHOLE RUN IS A CANDIDATE NOW (wave-35 T9; D8, AC-1.3) only when its Failed: block names its reds; this
-# log counts one failed and names none, so it says nothing of what is owed and stays refused.
-expect_contains "72i7 …refused: its Failed: block names none of the reds its verdict counts" \
-  "counts 1 failed but its Failed: block names 0" "$OUT"
+# log ends rc=1 and names none, so it says nothing of what is owed and stays refused, by its rc (wave-36 T35).
+expect_contains "72i7 …refused: it ended rc=1 and its Failed: block names none of its reds" \
+  "floor-red-H.txt ended rc=1, so the regression did not pass" "$OUT"
 s72_add floor-F.txt
 s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
 expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
