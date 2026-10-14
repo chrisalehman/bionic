@@ -3841,18 +3841,55 @@ section "§BORN-FLOOR: task-add --born floor:<suite> writes the floor-born marke
 # gate-admitted plan without reads; the verb is the real one.
 SBF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RBF="$(make_repo s-born-floor)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
+SBF_C1="$(git -C "$RBF" rev-parse HEAD)"
+git -C "$RBF" branch wave/01-fixture
 PBF="$(s42_plan "$RBF" 4)"
+SBF_OFF="$(git -C "$RBF" rev-parse HEAD)"
 SBF_SUM="$(cksum < "$PBF")"
 poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:lib/a.sh
 expect_eq "BFV-1 --born floor: with a path that is no suite file name is the usage error, exit 2" "2" "$RC"
 expect_contains "BFV-1b …naming the shape" "floor:<suite>" "$OUT"
 expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+
+# THE MARKER NAMES ITS RED (wave-36 T42; D9, Δ8; born of critic-adversarial #1). The verb checks the shape, and the
+# judge holds a floor-born landing on every question chain, so a marker typed with no red behind it is an exemption
+# nothing earned. It is admitted when (a) the plan's floor proof owes the suite (`owed=`), or (b) the landing record
+# holds an `ev=standing` event for it whose head is a commit on the working branch; the marker then says which
+# (`of=floor` or `of=standing@<12-hex>`). With neither it is refused naming the two facts that would admit it.
+poke "$RBF" task-add T10 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
+expect_eq "BFV-6 no floor proof and no record: --born floor:a.test.sh is refused, exit 1" "1" "$RC"
+expect_contains "BFV-6b …naming the first fact that would admit it: the floor proof owes the suite" "floor proof owes a.test.sh" "$OUT"
+expect_contains "BFV-6c …and the second: a standing event for the suite at a commit on the working branch" "standing event for a.test.sh" "$OUT"
+expect_eq "BFV-6d …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S46_LIB" "$PBF" \
+  "proved: kind=floor head=${SBF_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh" > "$PBF.new" && mv "$PBF.new" "$PBF"
+( cd "$RBF" && git add -f "$PBF" && git commit -qm floor ) >/dev/null 2>&1
+SBF_SUM="$(cksum < "$PBF")"
+poke "$RBF" task-add T11 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:x.test.sh
+expect_eq "BFV-7 a floor proof that owes a.test.sh does not back x.test.sh: refused, exit 1" "1" "$RC"
+expect_contains "BFV-7b …the refusal says what the floor proof owes" "owes a.test.sh" "$OUT"
+expect_eq "BFV-7c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+SBF_REC="$RBF/.bionic/docs/record/wave-01-fixture/landing-proofs.log"; mkdir -p "${SBF_REC%/*}"
+{ printf 'line/v1|ev=standing|head=%s|suite=o.test.sh|lines=1|log=x.log|cause=code|against=-|at=2026-10-14T00:01:00Z\n' "$SBF_OFF"
+  printf 'line/v1|ev=standing|head=%s|suite=s.test.sh|lines=2|log=x.log|cause=code|against=-|at=2026-10-14T00:02:00Z\n' "$SBF_C1"; } > "$SBF_REC"
+poke "$RBF" task-add T12 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:o.test.sh
+expect_eq "BFV-8 a standing event whose head is no commit on the working branch does not back o.test.sh: refused, exit 1" "1" "$RC"
+expect_eq "BFV-8b …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+
 poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
-expect_eq "BFV-2 task-add --born floor:a.test.sh exits 0" "0" "$RC"
-expect_regex "BFV-3 …the row's line ends born: floor a.test.sh" \
-  '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh$' "$(/usr/bin/grep '^- T6:' "$PBF")"
+expect_eq "BFV-2 task-add --born floor:a.test.sh, which the floor proof owes, exits 0" "0" "$RC"
+expect_regex "BFV-3 …the row's line ends born: floor a.test.sh of=floor" \
+  '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh of=floor$' "$(/usr/bin/grep '^- T6:' "$PBF")"
 expect_contains "BFV-4 …the task cell says born: floor" "| T6 | 4 | build | fix the floor red · born: floor |" "$(cat "$PBF")"
 expect_contains "BFV-5 …and the verb says it is floor-born" "T6 is floor-born (a.test.sh)" "$OUT"
 expect_absent "BFV-5b …and counts it against no fix-cap" "review-born rows:" "$OUT"
+
+poke "$RBF" task-add T7 4 build 'fix the standing red' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:s.test.sh
+expect_eq "BFV-9 a standing event for s.test.sh at a commit on the working branch admits it, exit 0" "0" "$RC"
+expect_regex "BFV-9b …the line ends born: floor s.test.sh of=standing@ and the first 12 hex of the head" \
+  "^- T7: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor s\\.test\\.sh of=standing@${SBF_C1:0:12}\$" "$(/usr/bin/grep '^- T7:' "$PBF")"
+SBF_MARKS="$(bash -c '. "$1" && units_born_marks "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh" "$PBF" 2>/dev/null)"
+expect_contains "BFV-10 the judge's reader still reads the floor marker that carries of=floor" "$(printf 'T6\tfloor\ta.test.sh')" "$SBF_MARKS"
+expect_contains "BFV-10b …and the one that carries of=standing@" "$(printf 'T7\tfloor\ts.test.sh')" "$SBF_MARKS"
 POKE_BOUND="$SBF_BOUND_WAS"
 finish
