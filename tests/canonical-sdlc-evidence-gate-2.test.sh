@@ -2747,6 +2747,21 @@ s9_expect_juris() {  # <label> <payload cwd> <command> <the scratch repository's
   fi
 }
 
+# A MOVE THE PLACEMENT READER CANNOT FOLLOW IS REFUSED NAMING IT (wave-36 T25; D11, AC-5.3). The
+# gate asks `cmd_place … git` (lib/placement.sh) where the first git runs; a `moving <segment>` answer
+# (`pushd`, `if cd`, `time cd`, `! cd`, a loop's `cd`, a piped `cd`) is refused before any plan is
+# read, from any cwd, with `place_moving_line`'s line naming that segment — never judged on the plan
+# and never split as an outside commit, since nothing says which repository it lands in.
+s9_expect_moving() {  # <label> <payload cwd> <command> <the segment the reader names>
+  run_hook_cwd "$s9_home" "$s9_root" "$2" "$3"
+  if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check && grep -qF "moving-form: \`$4\`" <<<"$HOOK_STDERR$HOOK_VSTDERR" \
+     && ! grep -q "$S9_JUDGED" <<<"$HOOK_VSTDERR"; then
+    ok "$1"
+  else
+    no "$1" "expected refusal exit 2 naming moving-form \`$4\` and no plan judgment; exit=$HOOK_EXIT line='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  fi
+}
+
 # --- 9c: THE CONTROL — inside the root, refused exactly as before ------------------------
 s9_expect_judged "9c AC-9.1 a commit in the engaged root at current: 5 without the auditor pointer is refused as before" \
   "$s9_root" 'git commit -m "x"' "$S9_JUDGED"
@@ -2770,11 +2785,13 @@ mkdir -p "$s9_scratch/sub/dir"
 s9_expect_outside "9a …and '-C' at a subdirectory of the scratch repo names the repository's toplevel" \
   "$s9_root" "git -C $s9_scratch/sub/dir commit -m x" "$s9_scratch"
 
-# THE TWO-DIRECTORY ARM STILL OWNS AN AMBIGUOUS COMMAND. The leading `cd` names the scratch
-# repo but a second `cd` walks back into the root before the commit: the shell commits in the
-# ROOT. Exempting on the leading directory would be the fail-open that arm exists to close.
-s9_expect_judged "9a …but 'cd <scratch> && cd <root> && git commit' is not exempted — two directories, refused" \
-  "$s9_root" "cd $s9_scratch && cd $s9_root && git commit -m x" "changes into"
+# THE PLACEMENT READER OWNS A cd CHAIN (wave-36 T25; D11). The leading `cd` names the scratch repo
+# but a second `cd` walks back into the root before the commit: the shell commits in the ROOT.
+# Exempting on the leading directory would be the fail-open the old two-directory arm closed by
+# refusing; the reader follows the chain instead, places the commit in the root, and the plan
+# judges it there, exactly as 9c's in-root commit.
+s9_expect_judged "9a …but 'cd <scratch> && cd <root> && git commit' is not exempted — placed in the root, judged by its plan" \
+  "$s9_root" "cd $s9_scratch && cd $s9_root && git commit -m x" "$S9_JUDGED"
 
 # ONE COMMIT SEGMENT OR NONE EXEMPTED (review R1, wave-19). The arm places the FIRST commit it
 # finds, so a command carrying two used to be exempted for the first one's repository while the
@@ -2812,16 +2829,18 @@ s9_expect_juris "9a C1 …and 'cd <scratch> && git --git-dir=<root>/.git --work-
   "$s9_root" "cd $s9_scratch && git --git-dir=$s9_root/.git --work-tree=$s9_root commit -m x" "$s9_scratch"
 s9_expect_juris "9a C1 …and 'cd <scratch> && GIT_DIR=… GIT_WORK_TREE=… git commit' is judged" \
   "$s9_root" "cd $s9_scratch && GIT_DIR=$s9_root/.git GIT_WORK_TREE=$s9_root git commit -m x" "$s9_scratch"
-s9_expect_juris "9a C1 …and 'cd <scratch> && pushd <root> && git commit' is judged" \
-  "$s9_root" "cd $s9_scratch && pushd $s9_root && git commit -m x" "$s9_scratch"
-s9_expect_juris "9a C1 …and 'cd <scratch> && bash -c \"cd <root> && git commit\"' is judged" \
-  "$s9_root" "cd $s9_scratch && bash -c 'cd $s9_root && git commit -m x'" "$s9_scratch"
+s9_expect_moving "9a C1 …and 'cd <scratch> && pushd <root> && git commit' is refused naming the pushd" \
+  "$s9_root" "cd $s9_scratch && pushd $s9_root && git commit -m x" "pushd $s9_root"
+# The reader finds no git outside the string (cmd_place rc 3), so the commit reader keeps the payload
+# cwd, the root, never exempt: the commit is judged there by the plan, which is where it lands (T25).
+s9_expect_judged "9a C1 …and 'cd <scratch> && bash -c \"cd <root> && git commit\"' is judged by the plan at the root" \
+  "$s9_root" "cd $s9_scratch && bash -c 'cd $s9_root && git commit -m x'" "$S9_JUDGED"
 s9_expect_juris "9a C1 …and 'cd <scratch> && git -C ../../root commit' is judged (a relative -C after the cd)" \
   "$s9_root" "cd $s9_scratch && git -C ../../root commit -m x" "$s9_scratch"
-s9_expect_juris "9a C1 …and 'cd <scratch> | cat; git commit' is judged (a piped cd moves nothing)" \
-  "$s9_root" "cd $s9_scratch | cat; git commit -m x" "$s9_scratch"
-s9_expect_juris "9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit' is judged" \
-  "$s9_scratch" "pushd $s9_root && git commit -m x" "$s9_scratch"
+s9_expect_moving "9a C1 …and 'cd <scratch> | cat; git commit' is refused naming the piped cd" \
+  "$s9_root" "cd $s9_scratch | cat; git commit -m x" "cd $s9_scratch"
+s9_expect_moving "9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit' is refused naming it" \
+  "$s9_scratch" "pushd $s9_root && git commit -m x" "pushd $s9_root"
 s9_expect_juris "9a C1 …and a payload cwd in the scratch repo with 'git -C ../../root commit' is judged" \
   "$s9_scratch" "git -C ../../root commit -m x" "$s9_scratch"
 # CONTROLS: the shapes the arm CAN place stay admitted — the writer brief's own `cd … || exit 1;`
@@ -2837,24 +2856,25 @@ s9_expect_outside "9a C1 control: 'git -C <scratch> commit -C HEAD' is still adm
 # and its first word was none of those, so each command below was exempted for the scratch repo
 # while it committed in the ROOT. Three rounds (R1, C1, R2-2) each patched that list. Now every
 # segment after the placing prefix must start with `git`, `true`, `:` or `exit`, and any `(`,
-# `)`, `{`, `}` or backtick costs the exemption. Each of these is judged at the run's step.
-s9_expect_juris "9a R2-2 payload cwd in the scratch repo with 'if cd <root>; then :; fi; git commit' is judged" \
-  "$s9_scratch" "if cd $s9_root; then :; fi; git commit -m x" "$s9_scratch"
-s9_expect_juris "9a R2-2 …and 'time cd <root> && git commit' is judged" \
-  "$s9_scratch" "time cd $s9_root && git commit -m x" "$s9_scratch"
-s9_expect_juris "9a R2-2 …and '! cd <root> || git commit' is judged" \
-  "$s9_scratch" "! cd $s9_root || git commit -m x" "$s9_scratch"
-s9_expect_juris "9a R2-2 …and 'while ! cd <root>; do :; done; git commit' is judged" \
-  "$s9_scratch" "while ! cd $s9_root; do :; done; git commit -m x" "$s9_scratch"
-s9_expect_juris "9a R2-2 …and 'cd <scratch> && if cd <root>; then git commit; fi' is judged" \
-  "$s9_root" "cd $s9_scratch && if cd $s9_root; then git commit -m x; fi" "$s9_scratch"
-s9_expect_juris "9a R2-2 …and 'cd <scratch> && time cd <root> && git commit' is judged" \
-  "$s9_root" "cd $s9_scratch && time cd $s9_root && git commit -m x" "$s9_scratch"
+# `)`, `{`, `}` or backtick costs the exemption. Since wave-36 T25 each `cd` move below is the
+# placement reader's `moving` answer, refused naming its segment; the git function stays the split.
+s9_expect_moving "9a R2-2 payload cwd in the scratch repo with 'if cd <root>; then :; fi; git commit' is refused naming it" \
+  "$s9_scratch" "if cd $s9_root; then :; fi; git commit -m x" "if cd $s9_root"
+s9_expect_moving "9a R2-2 …and 'time cd <root> && git commit' is refused naming it" \
+  "$s9_scratch" "time cd $s9_root && git commit -m x" "time cd $s9_root"
+s9_expect_moving "9a R2-2 …and '! cd <root> || git commit' is refused naming it" \
+  "$s9_scratch" "! cd $s9_root || git commit -m x" "! cd $s9_root"
+s9_expect_moving "9a R2-2 …and 'while ! cd <root>; do :; done; git commit' is refused naming it" \
+  "$s9_scratch" "while ! cd $s9_root; do :; done; git commit -m x" "while ! cd $s9_root"
+s9_expect_moving "9a R2-2 …and 'cd <scratch> && if cd <root>; then git commit; fi' is refused naming the if cd" \
+  "$s9_root" "cd $s9_scratch && if cd $s9_root; then git commit -m x; fi" "if cd $s9_root"
+s9_expect_moving "9a R2-2 …and 'cd <scratch> && time cd <root> && git commit' is refused naming the time cd" \
+  "$s9_root" "cd $s9_scratch && time cd $s9_root && git commit -m x" "time cd $s9_root"
 # THE LIST IS OF WHAT IS ALLOWED, SO A WORD NOBODY NAMED IS JUDGED TOO. `until` is a reserved
 # word the old reader never listed; a function named `git` shadows the binary, so the one
 # `git -C <scratch> commit` in the text runs `git -C <root> commit` instead.
-s9_expect_juris "9a R2-2 …and 'until cd <root>; do :; done; git commit' is judged (a word no list named)" \
-  "$s9_scratch" "until cd $s9_root; do :; done; git commit -m x" "$s9_scratch"
+s9_expect_moving "9a R2-2 …and 'until cd <root>; do :; done; git commit' is refused naming it (a word no list named)" \
+  "$s9_scratch" "until cd $s9_root; do :; done; git commit -m x" "until cd $s9_root"
 s9_expect_juris "9a R2-2 …and a function named git shadowing 'git -C <scratch> commit' is judged" \
   "$s9_root" "git() { command git -C $s9_root commit -m x; }; git -C $s9_scratch commit -m y" "$s9_scratch"
 # CONTROL: a redirection is not a segment. '2>&1' carries an '&' and still leaves the one commit
