@@ -4990,4 +4990,206 @@ expect_nonempty "SE-5 the empty-ledger rows ran under at least one bash" "$SE_SE
 POKE_BOUND="$SE_BOUND_WAS"
 
 
+
+# ============================================================
+section "§FIXED §BM: a finding a landed row already fixed is moved to fixed by verb, whatever the row's ancestry, and counts against no cap; a finding moved to defer is born no row (wave-36 T8; REQ-3 AC-3.4, REQ-4 AC-4.5; D9, D10)"
+# ============================================================
+#
+#   finding-move <record>#<n> fixed <row>
+#
+# The third move (D9; ADR-056: "a finding fixed before or beside the reading is fixed"). It writes
+# `moved: <record>#<n> to=fixed row=<T> by=<git user.name> at=<ISO-UTC>` in place after the finding's own lines; the
+# row is one of the plan's `## Tasks` rows. lib/proof.sh `proof_fixed` reads a row so named once its status is
+# `landed` and the run's landing record holds its green verdicts, WHATEVER ITS ANCESTRY: a row that landed before
+# the reading's head fixes the finding, which a born row cannot (canonical-sdlc-evidence-gate-2 FP-5). `disposition`
+# prints it `fixed by <row>`. The fix-cap counts ` born: review` markers alone (lib/units.sh `units_born`), so the
+# move costs nothing against it. `task-add --born <record>#<n>` refuses a finding whose newest move is `defer`,
+# naming the move, whatever its reader's rating (D10): the fix policy admitted an S2 on the person had deferred.
+#
+# FIXTURE FIDELITY. A real repository on its working branch: an init commit (the base), T3's landing (a code commit,
+# the commit its green verdict names), then a code commit the reading reads to (its head), so T3 landed BEFORE the
+# reading's head. The plan and the landing record are fixture text in their writers' shapes (proof.sh `proof_line`,
+# units.sh `units_add_row`'s step line, lib/line.sh's verdict event), as canonical-sdlc-evidence-gate-2 §DISPOSITION
+# writes them; the session is bound by the real `bound_marker`; the deferrals are the real verb's, on words typed in a
+# transcript under a scratch CLAUDE_CONFIG_DIR. The verbs are the real ones.
+FX_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+FX_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+FX_REC="record/wave-01-fixture"
+FX_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+RFX="$TMPROOT/fixed-move"; mkdir -p "$RFX"
+( cd "$RFX" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+  && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+mkdir -p "$RFX/.bionic/tmp" "$RFX/.bionic/docs/$FX_REC" "$RFX/.bionic/docs/plans/epic-99-fixture" "$RFX/.bionic/docs/specs/epic-99-fixture"
+: > "$RFX/.bionic/tmp/engaged-$SID.state"
+fx_commit() {  # <path> <text> -> the new commit's sha
+  printf '%s\n' "$2" > "$RFX/$1"
+  ( cd "$RFX" && git add -f "$1" && git commit -qm "$1: $2" ) >/dev/null 2>&1
+  git -C "$RFX" rev-parse HEAD
+}
+FX_B="$(git -C "$RFX" rev-parse HEAD)"
+FX_C1="$(fx_commit a.sh one)"
+FX_C2="$(fx_commit b.sh two)"
+PFX="$RFX/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+printf '# requirements\n' > "$RFX/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# spec\n' > "$RFX/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+{ printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 5\n' "${FX_B:0:10}" "${FX_C2:0:10}"
+  printf '%s\n' 'finding: 1 S2 on a.sh:1 data lost on a second run' 'shown: 1 bash a.sh; bash a.sh' \
+    'finding: 2 S2 on b.sh:1 the lock is never taken' 'shown: 2 bash b.sh & bash b.sh' \
+    'finding: 3 S2 on b.sh:2 a side path loses data' 'shown: 3 bash b.sh --side' \
+    'finding: 4 S3 off - a message could be clearer' \
+    'finding: 5 S2 on b.sh:3 the parser crashes on an empty file' 'shown: 5 bash b.sh < /dev/null'
+  printf '\nwhat the reader found\n'; } > "$RFX/.bionic/docs/$FX_REC/adv.md"
+FX_PROVED="$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" adversarial w-read fail piece' _ "$FX_LIB" "$FX_C2" "$FX_REC/adv.md")"
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+  printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+  printf 'walk: exempt\ndeploy_target: n/a\n'
+  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+  printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+  printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+  printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+  printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+  printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+  printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${FX_B:0:10}"
+  printf -- '- T1: landed at record/T1.md\n'
+  printf -- '- T3: landed %s 2026-10-04T11:00:00Z\n' "$FX_C1"
+  printf -- '- T4: pending dispatch\n'
+  printf -- '- T7: pending dispatch born: review S2 on of=%s/adv.md#2\n' "$FX_REC"
+  printf '%s\n' "$FX_PROVED"
+  printf '\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+  printf '| T3 | 4 | build | the a writer | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+  printf '| T4 | 4 | build | the b parser | implementor | — | 30 | REQ-1 | b.sh | — | — | pending |\n'
+  printf '| T7 | 4 | build | take the lock · born: review | implementor | — | 30 | REQ-1 | b.sh | — | — | pending |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+} > "$PFX"
+printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=/fixture/T3.log|at=2026-10-04T11:00:00Z\n' "$FX_C1" \
+  > "$RFX/.bionic/docs/$FX_REC/landing-proofs.log"
+( cd "$RFX" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RFX" "$SID" "$PFX" >/dev/null 2>&1
+FX_CFG="$TMPROOT/fx-cfg"; mkdir -p "$FX_CFG/projects/fixture"
+export CLAUDE_CONFIG_DIR="$FX_CFG"
+fx_typed() {  # <prompt> -> one typed prompt appended to this session's transcript
+  jq -cn --arg c "$1" --arg s "$SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_CFG/projects/fixture/$SID.jsonl"
+}
+fx_typed "defer the side path finding to the next wave please"
+fx_typed "defer the message wording as well please"
+fx_id() { printf '%s/adv.md#%s' "$FX_REC" "$1"; }
+fx_finding() {  # <n> -> the disposition's line for finding <n>, out of OUT
+  printf '%s\n' "$OUT" | F="poker: finding $(fx_id "$1") " awk 'index($0, ENVIRON["F"]) == 1 { print; exit }'
+}
+fx_fixed() {  # -> proof_fixed's lines over the plan, the first three columns, '|'-joined per line
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_fixed "$2" "$3"' _ "$FX_LIB" "$PFX" "$RFX" 2>/dev/null \
+    | awk -F'\t' '{ printf "%s%s|%s|%s", (NR > 1 ? " " : ""), $1, $2, $3 }'
+}
+fx_fixed_ids() {  # -> the findings of adv.md the readers count fixed at the reading's head (`_proof_fixed_var`)
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" || exit 9; _proof_fixed_var "$(proof_fixed "$2" "$3")" "$4" "$5" "$3"; printf "%s" "$_PROOF_FIXED_IDS"' \
+    _ "$FX_LIB" "$PFX" "$RFX" "$FX_REC/adv.md" "$FX_C2" 2>/dev/null | awk 'NF' | paste -sd' ' -
+}
+fx_born() { bash -c '. "$1/units.sh" && units_born "$2"' _ "$FX_LIB" "$PFX" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s", (n++ ? " " : ""), $1 }'; }
+
+expect_eq "FX-0 precondition: T3's landing is an ancestor of the reading's head, not a descendant (it landed before the reading)" \
+  "before" "$(git -C "$RFX" merge-base --is-ancestor "$FX_C1" "$FX_C2" && ! git -C "$RFX" merge-base --is-ancestor "$FX_C2" "$FX_C1" && echo before)"
+expect_eq "FX-0b precondition: the review-born rows the cap counts are T7 alone (the extractor reads the marker)" "T7" "$(fx_born)"
+poke "$RFX" disposition
+expect_eq "FX-0c precondition: disposition exits 0" "0" "$RC"
+expect_eq "FX-0d precondition: finding 1 is open, the person's to rule (nothing fixes it yet)" \
+  "poker: finding $(fx_id 1) S2 user-facing=on record=$FX_REC/adv.md at=a.sh:1 row=— state=open decision=\"the person's: fix it, defer it, or waive adversarial\" title=\"data lost on a second run\"" \
+  "$(fx_finding 1)"
+expect_eq "FX-0e precondition: finding 2 waits on its born row, T7 (the row= column reads)" \
+  "poker: finding $(fx_id 2) S2 user-facing=on record=$FX_REC/adv.md at=b.sh:1 row=T7 state=open decision=\"none: waits on T7 landing green\" title=\"the lock is never taken\"" \
+  "$(fx_finding 2)"
+expect_eq "FX-0f precondition: proof_fixed names nothing (no born row landed)" "" "$(fx_fixed)"
+
+# ---------- §FIXED (AC-3.4): the third move ----------
+s42_snap "$RFX" "$PFX"
+poke "$RFX" finding-move "$(fx_id 1)" fixed T3
+expect_eq "FIXED-1 §FIXED AC-3.4 finding-move <id> fixed T3 on a row landed before the reading's head (exit 0)" "0" "$RC"
+expect_absent "FIXED-1a …not refused as a direction the verb does not take" "finding-move takes" "$OUT"
+expect_regex "FIXED-1b …the moved: line carries the row, who and when" \
+  "^moved: $FX_REC/adv\\.md#1 to=fixed row=T3 by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "$(/usr/bin/grep "^moved: $(fx_id 1) " "$PFX")"
+expect_eq "FIXED-1c …in place, after the reading's proof line (the last line naming its record)" "moved: $(fx_id 1)" \
+  "$(/usr/bin/grep -A1 -F "$FX_PROVED" "$PFX" | tail -1 | awk '{ print $1, $2 }')"
+expect_eq "FIXED-2 §FIXED proof_fixed names the finding fixed by T3 at T3's green landing, whatever its ancestry" \
+  "$(fx_id 1)|T3|$FX_C1" "$(fx_fixed)"
+expect_eq "FIXED-2b …and the readers count it fixed at the reading's head, which T3's landing precedes" "$(fx_id 1)" "$(fx_fixed_ids)"
+poke "$RFX" disposition
+expect_eq "FIXED-3 §FIXED AC-3.4 disposition prints the finding fixed by T3, nothing to decide" \
+  "poker: finding $(fx_id 1) S2 user-facing=on record=$FX_REC/adv.md at=a.sh:1 row=T3 state=fixed decision=\"none: fixed by T3, landed green at ${FX_C1:0:12}\" title=\"data lost on a second run\"" \
+  "$(fx_finding 1)"
+expect_eq "FIXED-3b …and still prints finding 2 waiting on its born row (the same read, another finding)" \
+  "poker: finding $(fx_id 2) S2 user-facing=on record=$FX_REC/adv.md at=b.sh:1 row=T7 state=open decision=\"none: waits on T7 landing green\" title=\"the lock is never taken\"" \
+  "$(fx_finding 2)"
+expect_eq "FIXED-4 §FIXED AC-3.4 the review-born rows are unchanged: T7 alone (the move writes no born marker)" "T7" "$(fx_born)"
+
+# A row not yet landed: the move is written, and the finding waits on the row.
+poke "$RFX" finding-move "$(fx_id 5)" fixed T4
+expect_eq "FIXED-5 finding-move <id> fixed T4 on a pending row (exit 0)" "0" "$RC"
+poke "$RFX" disposition
+expect_eq "FIXED-5b …disposition names T4 against it and what it waits on" \
+  "poker: finding $(fx_id 5) S2 user-facing=on record=$FX_REC/adv.md at=b.sh:3 row=T4 state=open decision=\"none: waits on T4 landing green\" title=\"the parser crashes on an empty file\"" \
+  "$(fx_finding 5)"
+expect_eq "FIXED-5c …and proof_fixed still names finding 1 alone" "$(fx_id 1)|T3|$FX_C1" "$(fx_fixed)"
+
+# Refusals: a row the table does not carry; the operands.
+s42_snap "$RFX" "$PFX"
+poke "$RFX" finding-move "$(fx_id 2)" fixed T99
+s42_unchanged "FIXED-6 a row the ## Tasks table does not carry" 1 "$PFX"
+expect_contains "FIXED-6b …naming it" "T99" "$OUT"
+for c in "FIXED-7@no row@$(fx_id 2)@fixed@" "FIXED-7b@a row that is not T<n>@$(fx_id 2)@fixed@three"; do
+  IFS=@ read -r lbl why1 id to row <<EOF
+$c
+EOF
+  s42_snap "$RFX" "$PFX"
+  if [ -n "$row" ]; then poke "$RFX" finding-move "$id" "$to" "$row"; else poke "$RFX" finding-move "$id" "$to"; fi
+  s42_unchanged "$lbl usage: $why1" 2 "$PFX"
+done
+s42_snap "$RFX" "$PFX"; poke "$RFX" finding-move "$(fx_id 2)" fixed T3 'the words' 'why'
+s42_unchanged "FIXED-7c usage: fixed takes the row alone" 2 "$PFX"
+s42_snap "$RFX" "$PFX"; poke "$RFX" finding-move "$(fx_id 2)" fix T3
+s42_unchanged "FIXED-7d usage: fix still takes the user's words and why (three operands)" 2 "$PFX"
+
+# ---------- §BM (AC-4.5): a finding moved to defer is born no row ----------
+poke "$RFX" finding-move "$(fx_id 3)" defer "defer the side path finding to the next wave" "the person deferred it"
+expect_eq "BM-0 precondition: the S2 on is moved to defer on the person's typed words (exit 0)" "0" "$RC"
+FX_MV3="$(/usr/bin/grep "^moved: $(fx_id 3) " "$PFX")"
+expect_contains "BM-0b …its moved: line is on the plan" "moved: $(fx_id 3) to=defer by=Dana Fixture" "$FX_MV3"
+s42_snap "$RFX" "$PFX"
+poke "$RFX" task-add T8 4 build 'fix the side path' implementor '—' 30 REQ-1 'b.sh' --born "$(fx_id 3)"
+s42_unchanged "BM-1 §BM AC-4.5 task-add --born on an S2 on (inside fix-policy) the person moved to defer" 1 "$PFX"
+expect_contains "BM-1b …naming the move" "$FX_MV3" "$OUT"
+expect_absent "BM-1c …refused for the move, not for the policy" "outside fix-policy" "$OUT"
+poke "$RFX" finding-move "$(fx_id 4)" defer "defer the message wording as well" "the person deferred it"
+expect_eq "BM-2-pre precondition: the S3 off is moved to defer (exit 0)" "0" "$RC"
+FX_MV4="$(/usr/bin/grep "^moved: $(fx_id 4) " "$PFX")"
+s42_snap "$RFX" "$PFX"
+poke "$RFX" task-add T8 4 build 'fix the message' implementor '—' 30 REQ-1 'b.sh' --born "$(fx_id 4)"
+s42_unchanged "BM-2 §BM AC-4.5 task-add --born on an S3 off moved to defer, whatever its rating" 1 "$PFX"
+expect_contains "BM-2b …naming the move" "$FX_MV4" "$OUT"
+expect_absent "BM-2c …refused for the move, before the policy is asked" "outside fix-policy" "$OUT"
+
+# The person's later word decides: moved back to fix, the same row is born, and the cap counts it beside T7 alone.
+fx_typed "fix the side path finding now after all"
+poke "$RFX" finding-move "$(fx_id 3)" fix "fix the side path finding now after all" "the person changed their mind"
+expect_eq "BM-3-pre precondition: the S2 on moved back to fix (exit 0)" "0" "$RC"
+poke "$RFX" task-add T8 4 build 'fix the side path' implementor '—' 30 REQ-1 'b.sh' --born "$(fx_id 3)"
+expect_eq "BM-3 positive on the same finding: its newest move is fix, so task-add --born writes the row (exit 0)" "0" "$RC"
+expect_regex "BM-3b …its line carries the finding it answers" \
+  "^- T8: pending dispatch — added by task-add at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z born: review S2 on of=$FX_REC/adv\\.md#3\$" \
+  "$(awk '/^- T8:/ { print; exit }' "$PFX")"
+expect_contains "FIXED-8 §FIXED AC-3.4 the cap counts T7 and T8: the rows T3 and T4 fix by move cost nothing" \
+  "review-born rows: 2 of cap 4" "$OUT"
+expect_eq "FIXED-8b …and units_born reads the same two" "T7 T8" "$(fx_born)"
+
+POKE_BOUND="$FX_BOUND_WAS"
+if [ "$FX_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$FX_CCD_WAS"; fi
+
+
 finish
