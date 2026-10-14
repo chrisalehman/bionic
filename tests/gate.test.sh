@@ -476,6 +476,19 @@ printf '%s\n' "$deadpid" > "$BIONIC_GATE_DIR/lock/pid"
 dead "$deadpid" || no "T.4 the planted lock's holder is dead" "pid $deadpid lives"
 expect_eq "T.5 a lock left by a dead holder is taken over: the ask is decided (rc 0)" "0" "$(ask_fg l1 work k 0)"
 expect_false "T.6 and the lock is given back" test -d "$BIONIC_GATE_DIR/lock"
+# wave-36 T34 (D8, AC-2.1): a lock with no pid is a claim in progress, stale past a few seconds. One
+# left by a claimer killed between its mkdir and its pid write (dated 2020 here) was never taken at
+# all at 67325f32: _gate_steal made its token INSIDE the lock, which set the lock's age to now, so
+# its own recheck read `taking` and the ask failed at the ten-second ceiling.
+fresh two-lock-taking
+world_machine 8 8192 30 1.0
+world_cost k 30
+mkdir -p "$BIONIC_GATE_DIR/lock"
+touch -t 202001010000 "$BIONIC_GATE_DIR/lock"
+expect_false "T.7 the planted lock has no pid (the fixture is the killed claimer's)" test -e "$BIONIC_GATE_DIR/lock/pid"
+expect_eq "T.8 a lock left with no pid, long past the bound, is taken over: the ask is decided (rc 0)" "0" "$(ask_fg l1 work k 0)"
+expect_false "T.9 and the lock is given back, with no steal token left beside it" \
+  bash -c 'test -d "$1/lock" || ls -d "$1"/lock.steal* 2>/dev/null | grep -q .' _ "$BIONIC_GATE_DIR"
 
 # ── §NUMBER ──────────────────────────────────────────────────────────────────
 section "§NUMBER — a wait never ends in a kill, and the number holds its turn (AC-2.6)"
@@ -2211,7 +2224,9 @@ expect_eq "B.45 …and the run's duration line, in the fixture repository's proj
 # from its own cwd, so the request read `tree=<main checkout>` while the stamp went to the row
 # tree, and the landing's busy check took every writer's suite for a run in the main checkout.
 # The request now names the tree the stamp goes to: --stamp-dir's checkout, else the `cd <tree>`
-# opening the command, else the shim's cwd.
+# opening the command, else the shim's cwd. Since wave-36 T25 the `cd <tree>` is read by cmd_place
+# for the command's FIRST SUITE segment, so N.17's command carries one (a bare `true` is no suite
+# and places nothing; gate.test.sh was outside T25's suites, so the pin went red unseen).
 fresh number-tree
 world_machine 8 8192 40 1.0
 world_cost t.test.sh 30
@@ -2227,7 +2242,7 @@ expect_eq "N.16 …and its request records tree=<the row tree>, the stamp's tree
 expect_match "N.16b …while the stamp went to the row tree's git dir" "stamp/v1|*|suites=t.test.sh|*" \
   "$(tail -n 1 "$(git -C "$NT_ROW" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null)"
 expect_eq "N.17 with no --stamp-dir, the \`cd <tree>\` opening the command names the tree" "0 $NT_ROW_P" \
-  "$(book_fg nt2 --agent nt2 --max-wait 30 --suites t.test.sh -- "cd $NT_ROW || exit 1; true") $(field "$(req_of nt2)" tree)"
+  "$(book_fg nt2 --agent nt2 --max-wait 30 --suites t.test.sh -- "cd $NT_ROW || exit 1; bash tests/t.test.sh 2>/dev/null; true") $(field "$(req_of nt2)" tree)"
 expect_eq "N.18 a command that opens with no cd names the shim's own checkout (the positive for the cwd)" \
   "0 $NT_WR_P" "$(book_fg nt3 --agent nt3 --max-wait 30 --suites t.test.sh -- 'true') $(field "$(req_of nt3)" tree)"
 expect_eq "N.19 …and the shim's command still runs where the shim stands (its own cd moves it)" "$NT_WR_P" \

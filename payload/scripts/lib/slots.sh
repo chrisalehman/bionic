@@ -11,8 +11,10 @@
 # It holds while that pid lives AND started at that time, so a pid the OS has since handed to
 # another process does not hold (T36, review 4 F2). A record with no start (written by an older
 # bionic) falls back to `kill -0`. A claim directory with no pid yet is a claim in progress, left
-# alone unless it is older than a minute, which only a claimer killed between `mkdir` and its pid
-# write leaves behind.
+# alone unless it is older than SLOTS_TAKING_SEC seconds, which only a claimer killed between
+# `mkdir` and its pid write leaves behind (that gap is microseconds, so a few seconds is generous
+# and a minute is a wedge: every gate call waits behind it, wave-36 T34). A claim with a pid
+# keeps the minute (SLOTS_ORPHAN_MIN) the readers below give an old directory.
 #
 # THE PRIMITIVE IS mkdir (bash 3.2, and no flock on macOS): of two claimers racing for one
 # directory exactly one creates it. A removal is a `mv` to a scratch name first, so a reader sees
@@ -33,7 +35,8 @@
 # [WALL: tests/slots.test.sh]
 # [WALL: tests/gate.test.sh]
 
-SLOTS_ORPHAN_MIN=1   # a claim with no pid this many minutes old was left by a killed claimer
+SLOTS_ORPHAN_MIN=1   # a claim WITH a pid this many minutes old is stale (_slots_old)
+SLOTS_TAKING_SEC=5   # a claim with NO pid this many seconds old was left by a killed claimer
 _SLOTS_SINCE=""; _SLOTS_SINCE_PID=""
 
 _slots_pid_of() {  # <dir> -> the pid recorded in <dir>/pid, or nothing
@@ -79,8 +82,19 @@ _slots_holds() {
   _slots_live "$2" "$s"
 }
 
-_slots_old() {  # <dir> — rc 0 when it is older than SLOTS_ORPHAN_MIN minutes
-  [ -n "$(find "$1" -maxdepth 0 -mmin +"$SLOTS_ORPHAN_MIN" 2>/dev/null)" ]
+# _slots_old <dir> — rc 0 when <dir> is stale by age: a directory with no pid yet (a claim in
+# progress, or the token a stealer made) is stale past SLOTS_TAKING_SEC seconds, since the gap it
+# stands for is microseconds; one with a pid, past SLOTS_ORPHAN_MIN minutes. The mtime is read
+# the fleet's way, BSD `stat -f` then GNU `stat -c`; a directory that cannot be read is not old.
+_slots_old() {
+  local m
+  if [ -n "$(_slots_pid_of "$1")" ]; then
+    [ -n "$(find "$1" -maxdepth 0 -mmin +"$SLOTS_ORPHAN_MIN" 2>/dev/null)" ]
+    return
+  fi
+  m="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
+  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  [ $(( $(date +%s) - m )) -gt "$SLOTS_TAKING_SEC" ]
 }
 
 _slots_state() {  # <dir> -> free | live | taking | dead | orphan
