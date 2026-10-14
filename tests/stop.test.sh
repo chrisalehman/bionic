@@ -1643,22 +1643,34 @@ expect_contains "LS4d: …while a launch the plan cannot record still refuses th
 # ─────────────────────────────────────────────────────────────────────────────
 section "LH: on a tick's turn the wall judges live:head against the tick's head (wave-26 T32; A-T14.2)"
 
-# After the first review proof a `live:head` review is ready only when the working branch's head
-# has moved past the proof's head, and the head lives in git. The tick reads it; the wall reads
-# no git, so through T14 it handed the ready set no head and never owed a follow-up review the
-# tick had offered. The tick now writes the head it judged against into its digest (`head=`),
-# and on that tick's turn the wall hands the same head in. The digest here is written as the
-# tick writes it, fresh for the turn; the control is the same digest naming the proof's head.
-LH_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-LH_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-lh_fixture() {  # -> project dir; T1 landed (writes lib/a.sh), T2 a review proved at LH_A
-  local d
+# After the first review proof a `live:head` review is ready again only when the judge (lib/proof.sh
+# `facts_state`) reads a question it carries owed at the working branch's head (wave-36 T28; D9), and
+# the head lives in git. The tick reads it; the wall reads no git of its own, so through T14 it handed
+# the ready set no head and never owed a follow-up review the tick had offered. The tick now writes
+# the head it judged against into its digest (`head=`), and on that tick's turn the wall hands the
+# same head in, and the ready set asks the judge at the branch's head. The digest here is written as
+# the tick writes it, fresh for the turn; the control is the same digest naming the proof's head.
+# FIXTURE FIDELITY (wave-36 T28): a real repository on its working branch, the base, then A (T1's
+# landing, the proof's head) and B (a code landing past it, owed), committed at fixed dates so every
+# fixture carries the same A and B. Through T28 the heads were fixed hex in a directory that is no
+# repository, which the judge cannot walk.
+lh_fixture() {  # -> project dir; T1 landed (writes lib/a.sh) at A, a code landing B past it, T2 a review proved at A
+  local d a
   d=$(cd "$(mktemp -d)" && pwd -P)
-  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture" "$d/lib"
+  lh_git() { GIT_AUTHOR_DATE=2026-10-04T00:00:00Z GIT_COMMITTER_DATE=2026-10-04T00:00:00Z \
+    git -C "$d" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
+  lh_git init -q 2>/dev/null; lh_git symbolic-ref HEAD refs/heads/main
+  printf '.bionic/tmp/\n.bionic/docs/plans/\n' > "$d/.gitignore"; printf 'base\n' > "$d/lib/a.sh"
+  lh_git add .gitignore lib/a.sh && lh_git commit -qm base
+  lh_git checkout -q -b wave/01-fixture 2>/dev/null
+  printf 'A\n' >> "$d/lib/a.sh"; lh_git commit -qam 'T1 landed'; a="$(lh_git rev-parse HEAD)"
+  printf 'B\n' >> "$d/lib/a.sh"; lh_git commit -qam 'a code landing past the review'
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
-    printf 'proved: kind=review head=%s at=2026-10-04T00:00:00Z evidence=record/r.txt\n\n- Step 4: in progress\n\n' "$LH_A"
+    printf 'rigor: double\nscale: task\nbase-sha: %s\n' "$(lh_git rev-parse main)"
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
+    printf 'proved: kind=review head=%s at=2026-10-04T00:00:00Z evidence=record/r.txt\n\n- Step 4: in progress\n\n' "$a"
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -1676,6 +1688,9 @@ lh_digest() {  # <project> <head> [at] -> the tick digest, as the tick writes it
 }
 require_helpers lh_fixture lh_digest
 LH_D="$(lh_fixture)"
+LH_A="$(git -C "$LH_D" rev-parse wave/01-fixture~1)"; LH_B="$(git -C "$LH_D" rev-parse wave/01-fixture)"
+expect_eq "LH0 precondition: A and B are two commits on the working branch, the plan's review proof at A" "yes yes" \
+  "$(git -C "$LH_D" merge-base --is-ancestor "$LH_A" "$LH_B" && [ "$LH_A" != "$LH_B" ] && echo yes) $(grep -q "^proved: kind=review head=$LH_A " "$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" && echo yes)"
 LH_TX="$(mktemp)"
 s7_transcript "$LH_TX" "poker: FILL T2"
 lh_digest "$LH_D" "$LH_B"
@@ -1777,6 +1792,21 @@ s7_transcript "$LH_TX" "poker: FILL T3"
 lh_digest "$LHQ_D" "$LH_B"
 s7_fire "$LHQ_D" "$LH_TX"
 expect_eq "LH-Q3: at B the wall owes the adversarial row alone; the evidence row read B already" "T3" "$(lhq_owed)"
+# LH-Q4 (wave-36 T28; D9, AC-3.6): A DOCS-ONLY LANDING OWES NO READING. The branch moves to D, a commit on A that
+# writes only the record; the judge reads it as prose, both questions stay covered, and the wall owes neither row
+# though the tick's head moved past both readings.
+LHQ_DOC="$(cd "$LHQ_D" && export GIT_INDEX_FILE="$LHQ_D/.bionic/tmp/lhq.index" && git read-tree "$LH_A" \
+  && git update-index --add --cacheinfo "100644,$(printf 'notes\n' | git hash-object -w --stdin),.bionic/docs/record/notes.md" \
+  && git -c user.name=fixture -c user.email=fixture@example.invalid commit-tree "$(git write-tree)" -p "$LH_A" -m 'notes landed')"
+git -C "$LHQ_D" update-ref refs/heads/wave/01-fixture "$LHQ_DOC"
+sed -i.bak "s/^\(proved: kind=review head=\)$LH_B\( at=2026-10-04T00:00:00Z evidence=record\/ev.md question=evidence\)/\1$LH_A\2/" "$LHQ_P"
+expect_eq "LH-Q4 precondition: the branch is at D, one commit past A that touches only the record, both readings at A" \
+  "$LHQ_DOC .bionic/docs/record/notes.md 2" \
+  "$(git -C "$LHQ_D" rev-parse wave/01-fixture) $(git -C "$LHQ_D" diff --name-only "$LH_A" "$LHQ_DOC") $(grep -c "^proved: kind=review head=$LH_A " "$LHQ_P")"
+s7_transcript "$LH_TX" "poker: FILL T2 T3"
+lh_digest "$LHQ_D" "$LHQ_DOC"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_absent "LH-Q4: past a docs-only landing the wall owes neither read row" "ready with room:" "$(reason_of)$STOP_ERR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
