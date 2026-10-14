@@ -2224,7 +2224,9 @@ expect_eq "B.45 …and the run's duration line, in the fixture repository's proj
 # from its own cwd, so the request read `tree=<main checkout>` while the stamp went to the row
 # tree, and the landing's busy check took every writer's suite for a run in the main checkout.
 # The request now names the tree the stamp goes to: --stamp-dir's checkout, else the `cd <tree>`
-# opening the command, else the shim's cwd.
+# opening the command, else the shim's cwd. Since wave-36 T25 the `cd <tree>` is read by cmd_place
+# for the command's FIRST SUITE segment, so N.17's command carries one (a bare `true` is no suite
+# and places nothing; gate.test.sh was outside T25's suites, so the pin went red unseen).
 fresh number-tree
 world_machine 8 8192 40 1.0
 world_cost t.test.sh 30
@@ -2240,7 +2242,7 @@ expect_eq "N.16 …and its request records tree=<the row tree>, the stamp's tree
 expect_match "N.16b …while the stamp went to the row tree's git dir" "stamp/v1|*|suites=t.test.sh|*" \
   "$(tail -n 1 "$(git -C "$NT_ROW" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null)"
 expect_eq "N.17 with no --stamp-dir, the \`cd <tree>\` opening the command names the tree" "0 $NT_ROW_P" \
-  "$(book_fg nt2 --agent nt2 --max-wait 30 --suites t.test.sh -- "cd $NT_ROW || exit 1; true") $(field "$(req_of nt2)" tree)"
+  "$(book_fg nt2 --agent nt2 --max-wait 30 --suites t.test.sh -- "cd $NT_ROW || exit 1; bash tests/t.test.sh 2>/dev/null; true") $(field "$(req_of nt2)" tree)"
 expect_eq "N.18 a command that opens with no cd names the shim's own checkout (the positive for the cwd)" \
   "0 $NT_WR_P" "$(book_fg nt3 --agent nt3 --max-wait 30 --suites t.test.sh -- 'true') $(field "$(req_of nt3)" tree)"
 expect_eq "N.19 …and the shim's command still runs where the shim stands (its own cd moves it)" "$NT_WR_P" \
