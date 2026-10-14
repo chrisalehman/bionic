@@ -2198,6 +2198,11 @@ add_row_to "$RIA" "$RIA_PRED" name=ri-debt status=identified agent_id=ari-debt-6
 add_row_to "$RIA" "$RIA_PRED" name=ri-plain status=identified agent_id=ari-plain-680000000000002 subagent_type=bionic:implementor \
   duration="45 minutes" cadence="10 minutes" deliverable="$RIA/.bionic/docs/record/ri-plain.md" \
   files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared
+# T47 (D10; AC-4.1): a landing set past 400 characters, as the dispatch wall writes it (real suite names joined by commas)
+RIA_LONG="session-poker-4.test.sh,background-suite-guard.test.sh,bash-walls.test.sh,canonical-sdlc-evidence-gate-2.test.sh,canonical-sdlc-evidence-gate.test.sh,card.test.sh,close-out.test.sh,cmd-class.test.sh,context-spend.test.sh,cross-gate-agreement.test.sh,dispatch-preflight-2.test.sh,dispatch-preflight-3.test.sh,dispatch-preflight-4.test.sh,dispatch-preflight.test.sh,doctor-fleet.test.sh,doctor-patrol.test.sh,doctor-reads.test.sh,doctor-restart.test.sh,doctor-version.test.sh,execution-recorder.test.sh,framework.test.sh,gate.test.sh,hook-adoption.test.sh,hook-timeout.test.sh,inbox.test.sh,interpreter-pin.test.sh,landing-gate.test.sh,landing-line.test.sh,notify.test.sh,patrol-duties-gate.test.sh,patrol-marker.test.sh,patrol-revive.test.sh,patrol-stale.test.sh,roster.test.sh,session-poker-2.test.sh,session-poker-3.test.sh,session-poker.test.sh,session-start.test.sh,session-sweep.test.sh,shell-lint.test.sh,stop-guard.test.sh,stop-orders.test.sh,stop.test.sh,units.test.sh"
+add_row_to "$RIA" "$RIA_PRED" name=ri-long status=identified agent_id=ari-long-6800000000000003 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" deliverable="$RIA/.bionic/docs/record/ri-long.md" \
+  files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared row=T47 lands_on="$RIA_LONG"
 poke "$RIA" adopt
 RIA_DEBT="$(/usr/bin/grep -F '|name=ri-debt|' "$(roster_of "$RIA")" | tail -1)"
 RIA_PLAIN="$(/usr/bin/grep -F '|name=ri-plain|' "$(roster_of "$RIA")" | tail -1)"
@@ -2207,6 +2212,12 @@ expect_eq "RI-AD1 the adopted row carries the row, the lands-on, the declared de
   "$(s30_field "$RIA_DEBT" row)|$(s30_field "$RIA_DEBT" lands_on)|$(s30_field "$RIA_DEBT" lands_red)|$(s30_field "$RIA_DEBT" red_evidence)"
 expect_eq "RI-AD2 …and a row that carried none carries none (an adopted row is not given a debt it never declared)" \
   "0" "$(printf '%s' "$RIA_PLAIN" | tr '|' '\n' | /usr/bin/grep -cE '^(row|lands_on|lands_red|red_evidence)=')"
+
+RIA_LONGROW="$(/usr/bin/grep -F '|name=ri-long|' "$(roster_of "$RIA")" | tail -1)"
+expect_contains "RI-AD3 precondition: the long-landing row is adopted, and the planted landing set is past 400 characters (not vacuous)" "|adopted_from=$RIA_PRED|" "$RIA_LONGROW"
+expect_eq "RI-AD3a the planted landing set is longer than the 400-character cut" "yes" "$([ "${#RIA_LONG}" -gt 400 ] && echo yes || echo no)"
+expect_eq "RI-AD3b an adopted row whose lands_on= exceeds 400 characters carries it byte for byte (D10; AC-4.1: the whole set, not its first 400 characters)" \
+  "${#RIA_LONG}|$RIA_LONG" "$(s30_field "$RIA_LONGROW" lands_on | awk '{ printf "%d|%s", length($0), $0 }')"
 
 # ---------- the mutation arms: each rule undone turns its row red ----------
 RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-ri-mut.XXXXXX")"
