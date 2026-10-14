@@ -372,6 +372,9 @@ END {
   for (k in out) print k
 }'
 
+# The command form's usage refusal: one line to stderr, exit 2. Defined at file scope so sourcing defines it too.
+_rd_usage() { echo "usage: bash anchors.sh reads_index [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
+
 reads_index() {  # <root> <at>
   local root="${1:-}" at="${2:--}"
   { _rd_files "$root" "$at" | sed 's/^/F	/'
@@ -384,7 +387,6 @@ reads_index() {  # <root> <at>
 # Run as a command: `bash anchors.sh reads_index [<root>] [--at <commit>]`. Sourced, it defines and does
 # nothing.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  _rd_usage() { echo "usage: bash anchors.sh reads_index [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
   [ "${1:-}" = reads_index ] || _rd_usage "the one verb is reads_index"
   shift; RD_ROOT=""; RD_AT=-
   while [ $# -gt 0 ]; do
