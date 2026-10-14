@@ -2704,7 +2704,8 @@ matrix_section() {
 # per-tier key loop saw no keys and blocked a conformant plan, and both
 # `waiver:` exemptions (per-tier and post-Verify CONFIRMED) lost their token.
 # One extractor, four behaviors, so the leader was a whole-contract bypass.
-# The strip runs on a COPY (`hdr`), which keeps two invariants: the terminator
+# The strip runs on a COPY inside lib/units.sh `units_ac_head_awk` (wave-36 T24: the one matcher the
+# hook's matrix_block_key and matrix_block_has read too), which keeps two invariants: the terminator
 # below still tests the RAW line, so a following list item still ends the
 # previous block; and the index test still runs against a line that begins with
 # the AC id, so AC-1 still does not match `- AC-11:`. Accepted: the three
@@ -2713,9 +2714,8 @@ matrix_section() {
 # terminator could never end a block it introduced.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_block() {
-  echo "$MATRIX" | awk -v ac="$1:" '
-    { hdr = $0; sub(/^[-*+][[:space:]]+/, "", hdr) }
-    index(hdr, ac)==1 {f=1; next}
+  echo "$MATRIX" | awk -v ac="$1" "$(units_ac_head_awk)"'
+    ac_head($0, ac) {f=1; next}
     /^[^[:space:]]/ {f=0}
     f'
 }
