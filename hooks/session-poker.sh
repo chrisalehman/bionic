@@ -2153,16 +2153,19 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 }
 
 # THE WORKING BRANCH'S HEAD, the one fact the readiness program cannot read from the plan
-# (wave-26 T14; D10, review 5 F8). A `live:head` review is ready again once the head has moved
-# past the last `proved: kind=review` line, and the head lives in git: the tick reads it here,
-# from the working branch's REF (lib/proof.sh `proof_branch_head`, the judge's one reading of the
-# head; wave-35 T10, AC-1.7), never from a checkout holding it, and hands it to every ready-set
-# question this tick asks through UNITS_LIVE_HEAD. Only a plan that carries a review proof needs
-# it — before the first one, a landed row is enough — so a tick on any other plan runs no git. No
-# head (no branch named, or a branch that names no commit) is no head: the review waits, saying
-# so. The stop wall reads no git of its own, so it hands in none (A-T14.2).
-sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
-  UNITS_LIVE_HEAD=""
+# (wave-26 T14; D10, review 5 F8), AND WHAT THE JUDGE READS AT IT (wave-36 T28; D9, AC-3.6). Past
+# its last reading a `live:head` review is ready again only when lib/proof.sh `facts_state` reads
+# one of its questions uncovered at the head, never because the head moved. Both live in git:
+# the tick reads the head here, from the working branch's REF (lib/proof.sh `proof_branch_head`,
+# the judge's one reading of the head; wave-35 T10, AC-1.7), never from a checkout holding it,
+# and asks the judge once (lib/units.sh `_units_readings_state`, the review lines of facts_state),
+# handing both to every ready-set question this tick asks through UNITS_LIVE_HEAD and
+# UNITS_READINGS_STATE. Only a plan that carries a review proof needs them — before the first
+# one, a landed row is enough — so a tick on any other plan runs no git. No head (no branch
+# named, or a branch that names no commit) is no head: the review waits, saying so. The stop
+# wall takes the tick's head from its digest (A-T14.2), and the program asks the judge itself.
+sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD and UNITS_READINGS_STATE, or clears them
+  UNITS_LIVE_HEAD=""; UNITS_READINGS_STATE=""
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
   /usr/bin/grep -q '^[[:space:]-]*proved:.*kind=review' "$SCHED_PLAN" 2>/dev/null || return 0
   if ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -2170,6 +2173,7 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
   fi
   declare -F proof_branch_head >/dev/null 2>&1 || return 0
   UNITS_LIVE_HEAD="$(proof_branch_head "$SCHED_PLAN" "$1" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  [ -z "$UNITS_LIVE_HEAD" ] || UNITS_READINGS_STATE="$(_units_readings_state "$SCHED_PLAN")"
   return 0
 }
 
@@ -10311,8 +10315,8 @@ PF_OTHER_LIST
     # everything; it is accepted only when the range starts at the plan's base-sha: or an ancestor
     # of it (proof_attested has already resolved the start, so here it is a commit).
     if [ "$PF_SCOPE" = whole ]; then
-      PF_BASE="$(proof_plan_base "$PV_PLAN" "$PF_CO")"; PF_BASEH=""
-      proof_base_id "$PF_BASE" && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
+      PF_BASE="$(proof_plan_base "$PV_PLAN" "$PV_REPO")"; PF_BASEH=""
+      proof_base_id "$PF_BASE" && PF_BASEH="$(git -C "$PV_REPO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
       if [ -z "$PF_BASEH" ]; then
         # THE SAME PLACE THE FIRST-READING REFUSAL NAMES (wave-27 T14; review pass 20 F4), and a word
         # such as HEAD is said to be no commit id (F1).
@@ -10322,24 +10326,16 @@ PF_OTHER_LIST
         die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but $PF_BASEWHY, so nothing shows it read from the start of the run; add base-sha: <the commit the work started from> to the frontmatter of $PV_PLAN, or write scope: piece. The plan is unchanged."
         exit 1
       fi
-      PF_FROMH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
-      if [ -z "$PF_FROMH" ] || ! git -C "$PF_CO" merge-base --is-ancestor "$PF_FROMH" "$PF_BASEH" 2>/dev/null; then
+      PF_FROMH="$(git -C "$PV_REPO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
+      if [ -z "$PF_FROMH" ] || ! git -C "$PV_REPO" merge-base --is-ancestor "$PF_FROMH" "$PF_BASEH" 2>/dev/null; then
         die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but its range starts at $(clean "$(printf '%s' "${PF_FROMH:-$PF_FROM}" | cut -c1-12)"), past the plan's base ${PF_BASEH:0:12}; a whole reading reads from the base, so write reviewed: ${PF_BASEH:0:12}..<b>, or scope: piece. The plan is unchanged."
         exit 1
       fi
     fi
-    # A WHOLE READ WAITS FOR THE LAST BUILD PIECE (wave-27 T45; review pass 13 F2; D10). The judge
-    # covers a whole line with any whole reading whatever its head, so its time is held here, on the
-    # plan text the verb already holds: refused while a `## Tasks` row of kind build is pending or
-    # active, naming them. A plan with no `## Tasks` table is not held to it.
-    if [ "$PF_SCOPE" = whole ]; then
-      PF_OPEN="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '
-        $3 == "build" && ($10 == "pending" || $10 == "active") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $10 }')"
-      if [ -n "$PF_OPEN" ]; then
-        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but build rows are still open: $(clean "$PF_OPEN"); a whole read is taken once the last build piece has landed (D10), so register it after they land, or scope: piece. The plan is unchanged."
-        exit 1
-      fi
-    fi
+    # A READING REGISTERS AT THE HEAD IT NAMES, OPEN BUILD ROWS OR NONE (wave-36 T28; D9, AC-3.1). Through wave-35
+    # a whole read was refused while a build row was open (D10), because the judge covered a whole line with any
+    # whole reading whatever its head. The judge now reaches only as far as the question's chain (wave-36 T7;
+    # A-T7-5), so what lands after the reading is the cover rule's to judge, and the verb holds nothing.
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
     # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took the log whole and
     # every red named; the line lists them as owed, and the judge reads them there.

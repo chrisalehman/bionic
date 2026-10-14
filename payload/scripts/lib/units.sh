@@ -453,19 +453,25 @@ units_rows() {
 # always exists, a proof or an approval once its line is written, a path unless only open rows
 # write it. A token that names none of these (`live:foo`, `live:ext:ci`, `live:T9`) is never
 # satisfied (review 5 F4). `live:head` IS A REVIEW THAT FOLLOWS THE BUILD (wave-26 T14; D10):
-# it is satisfied when landed work exists that the last `proved: kind=review` line has not read,
-# and no other row of the same kind is open — none active, and no pending `live:head` row of
-# that kind above it, so one pass runs at a time and the first goes first. "Past the last proof"
-# compares the proof line's `head=` with THE WORKING BRANCH'S HEAD NOW, which this program does
-# not fetch: the caller sets UNITS_LIVE_HEAD (the Patrol tick reads it from git; the stop wall
-# sets none). A plan with no review proof yet needs no head: the first review is ready once a
-# row writing outside the record has landed. With a proof and no head handed in, nothing past
-# the proof can be seen, so the row waits (the cautious direction, as below). Each wait names
-# why after the read: `live:head: nothing has landed yet`, `…: nothing landed past the review
-# proof at <12 hex>`, `…: the head past the review proof at <12 hex> is not known here`,
-# `…: review T5 is open (active)`, `…: review T3 goes first`. `units_live_range` prints the
-# difference a ready review reads; `units_live_rows` the rows `proof-add review` returns to
-# `pending`.
+# it is satisfied when landed work exists that its questions' readings do not cover, and no
+# other row of the same kind is open — none active, and no pending `live:head` row of that kind
+# above it, so one pass runs at a time and the first goes first. A plan with no review proof yet
+# needs no head: the first review is ready once a row writing outside the record has landed.
+# PAST A READING, THE JUDGE DECIDES (wave-36 T28; D9, AC-3.6): the row is ready again only when
+# lib/proof.sh `facts_state` reads one of its questions `uncovered` at THE WORKING BRANCH'S HEAD
+# (or `absent`: a question nobody has read is owed its first reading), never because the head
+# moved. A docs-only landing is prose to the judge, so it leaves the question covered and the row
+# idle; a code landing no born row made owes. The head is the caller's, UNITS_LIVE_HEAD (the
+# Patrol tick reads it from git; the stop wall takes the tick's), and so is the judge's answer,
+# UNITS_READINGS_STATE (the tick asks it once, session-poker.sh `sched_live_head`); unhanded, the
+# program asks it (`_units_readings_state`). With a proof and no head handed in, nothing past the
+# proof can be seen, so the row waits (the cautious direction, as below). Each wait names why
+# after the read: `live:head: nothing has landed yet`, `…: nothing landed past the review proof
+# at <12 hex>`, `…: the head past the review proof at <12 hex> is not known here`, `…: the judge
+# (facts_state) reads <q> covered at <12 hex>; only an uncovered question is read again`,
+# `…: the readings are not known here: <why>`, `…: review T5 is open (active)`, `…: review T3
+# goes first`. `units_live_range` prints the difference a ready review reads; `units_live_rows`
+# the rows `proof-add review` returns to `pending`.
 #
 # AN UNMERGEABLE PATH HOLDS A ROW (D11). Rows that write one file run side by side and reconcile
 # on landing; a `Files` entry ending in `!` cannot be reconciled, so a pending row is held while
@@ -996,6 +1002,9 @@ _units_proof_awk() {
 # ONE VALUE FROM OUTSIDE THE PLAN (wave-26 T14; review 5 F8): UNITS_LIVE_HEAD, the working
 # branch's head as the caller read it, which `live:head` compares with the last review proof's
 # `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
+# PAST IT, THE READINGS' STATE (wave-36 T28; D9): UNITS_READINGS_STATE, `_units_readings_state`'s
+# answer as the tick asked it once (`sched_live_head`); unhanded, it is asked here, by exit 4, as the
+# floor row's proof:review asks it.
 # AND ONE ANSWER (wave-27 T14; D3): UNITS_FACTS_STATE, `covered` when lib/proof.sh `facts_state`
 # holds the plan at that head, else the lines that do not hold; `proof:review` is met only by
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
@@ -1021,16 +1030,17 @@ _units_sched() {
   # with the answer. Every other plan, and every other moment of this one, runs no git here.
   # THE READINGS' STATE THE SAME WAY (wave-35 T9; AC-1.1): exit 4 asks it (`_units_readings_state`) and the
   # program runs again with it, after the regression state if that was asked first.
-  fst="$(_units_floor_kept "$plan")"; rst=""
+  # EITHER MAY BE ASKED FIRST (wave-36 T28): a live row past its reading asks the readings before the floor is
+  # judged, so each state is asked once, in the order the program asks for them, and never twice.
+  fst="$(_units_floor_kept "$plan")"; rst="${UNITS_READINGS_STATE:-}"
   _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst"; rc=$?
-  if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then
-    fst="$(_units_floor_state "$plan")"
+  for i in 1 2; do
+    if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then fst="$(_units_floor_state "$plan")"
+    elif [ "$rc" -eq 4 ] && [ -z "$rst" ]; then rst="$(_units_readings_state "$plan")"
+    else break
+    fi
     _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst"; rc=$?
-  fi
-  if [ "$rc" -eq 4 ]; then
-    rst="$(_units_readings_state "$plan")"
-    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst"; rc=$?
-  fi
+  done
   return "$rc"
 }
 
@@ -1080,6 +1090,9 @@ _units_readings_state() {
   local plan="${1:-}" tree head out rc
   declare -F facts_state >/dev/null 2>&1 && declare -F proof_branch_head >/dev/null 2>&1 \
     || { printf 'the readings cannot be judged here (lib/proof.sh)'; return 0; }
+  # THE DOCS ROOT IS PROSE TO THE WALK (wave-36 T28): facts_state reads it through lib/roots.sh `docs_root`,
+  # which a shell that sourced this file alone has not loaded; without it a docs-only landing would owe.
+  declare -F _proof_roots_load >/dev/null 2>&1 && _proof_roots_load
   tree="$(_units_plan_tree "$plan")"
   head="$(proof_branch_head "$plan" "$tree" 2>/dev/null)" \
     || { printf 'the working branch names no commit, so there is no head to judge the readings at'; return 0; }
@@ -1425,6 +1438,7 @@ _units_sched_awk() {
     # THE IDLE ROW ABOVE MAY BE BARE (wave-27 T43; review pass 17 F1): only the row below need name
     # a question. A bare row is idle after every pass, and a bare row above that held for good would
     # hold the read row, and the integrate row through it. Between two bare rows 1.11.0 holds.
+    # PAST THE READING THE JUDGE ANSWERS (wave-36 T28; D9, AC-3.6): live_judge, never the moved head.
     function live_head(i,   j, h, k, o) {
       if (rbadq[i]) { lwhy = "the read names a question outside " pq " or sits on a row that is not a review"; return 0 }
       for (j = 1; j <= n; j++) {
@@ -1442,7 +1456,7 @@ _units_sched_awk() {
           lwhy = "the head past the " o " review proof at " substr(prvq[o], 1, 12) " is not known here"; return 0
         }
         if (live_oldest(i, 1) == "") { lwhy = "nothing landed past the " qlab[i] " review proof at " substr(livehead, 1, 12); return 0 }
-        return 1
+        return live_judge(i)
       }
       if (!("review" in prvh)) {
         for (j = 1; j <= n; j++) if (j != i && st[j] == satisfied && code[j]) return 1
@@ -1451,18 +1465,71 @@ _units_sched_awk() {
       h = prvh["review"]
       if (livehead == "") { lwhy = "the head past the review proof at " substr(h, 1, 12) " is not known here"; return 0 }
       if (livehead == h) { lwhy = "nothing landed past the review proof at " substr(h, 1, 12); return 0 }
-      return 1
+      return live_judge(i)
+    }
+
+    # THE ANSWER OF THE JUDGE PER QUESTION (wave-36 T28; D9, AC-3.6). readst is what `_units_readings_state` printed:
+    # `covered`, or the review lines of facts_state that do not hold, each `review <q> <role> <scope> <state> …`,
+    # `; `-joined, or a sentence saying why the judge could not be asked. rdparse() -> 1 when readst is an answer of
+    # the judge, with rdq[q] the state of the piece line of question q wherever it is not covered (past a whole
+    # reading the whole line reads as the piece line does, A-T7-5).
+    function rdparse(   m, E, k, f) {
+      if (rdp) return rdok
+      rdp = 1; rdok = (readst == "covered")
+      m = split(readst, E, "; ")
+      for (k = 1; k <= m; k++) {
+        split(E[k], f, " ")
+        if (f[1] == "review" && f[4] == "piece" && f[2] != "") { rdok = 1; rdq[f[2]] = f[5] }
+      }
+      return rdok
+    }
+    # live_owes(i) -> 1 when the judge owes row i a reading: one of its questions, or any question for a bare row,
+    # reads `uncovered` (a commit past its reading owes) or `absent` (nobody has read it). rdparse() first.
+    function live_owes(i,   k, q) {
+      if (nq[i]) { for (k = 1; k <= nq[i]; k++) { q = rq[i, k]; if ((q in rdq) && (rdq[q] == "uncovered" || rdq[q] == "absent")) return 1 } return 0 }
+      for (q in rdq) if (rdq[q] == "uncovered" || rdq[q] == "absent") return 1
+      return 0
+    }
+    # live_judge(i) -> 1 when row i, past its reading, is owed one; else 0 with why in lwhy: what the judge reads per
+    # question, or why it could not be asked. Not handed in, it is asked (needread; the program exits 4 first).
+    function live_judge(i,   k, q, s, m, Q) {
+      if (readst == "") { needread = 1; lwhy = "the readings are judged by facts_state and are not known here"; return 0 }
+      if (!rdparse()) { lwhy = "the readings are not known here: " readst; return 0 }
+      if (live_owes(i)) return 1
+      s = ""
+      if (nq[i]) m = nq[i]; else m = split(pq, Q, " ")
+      for (k = 1; k <= m; k++) {
+        q = (nq[i] ? rq[i, k] : Q[k])
+        s = s (k > 1 ? ", " : "") q " " ((q in rdq) ? rdq[q] : "covered")
+      }
+      lwhy = "the judge (facts_state) reads " s " at " substr(livehead, 1, 12) "; only an uncovered question is read again"
+      return 0
+    }
+    # live_past(i) -> 1 when pending row i reads live:head past a reading, with a head handed in: the judge decides it.
+    function live_past(i,   k) {
+      if (!rlive[i] || rbadq[i] || livehead == "") return 0
+      if (!nq[i]) return (("review" in prvh) && livehead != prvh["review"])
+      for (k = 1; k <= nq[i]; k++) if (!(rq[i, k] in prvq)) return 0
+      return (live_oldest(i, 1) != "")
     }
 
     # live_idle(j) -> 1 when row j live:head read waits because nothing landed past the review proof:
     # the head handed in is the one the proof names. A pending row whose live read is idle writes
     # no newer proof until something lands (wave-26 T62; K2-F4); with the head unknown it may. A
-    # read row is idle when every one of its questions was last read at that head (wave-27 T10).
+    # read row is idle when every one of its questions was last read at that head (wave-27 T10),
+    # OR WHEN THE JUDGE OWES IT NOTHING past them (wave-36 T28; D9): after a docs-only landing it
+    # writes no newer proof either, so integrate does not wait on it.
     function live_idle(j,   k) {
-      if (!nq[j]) return (("review" in prvh) && livehead != "" && livehead == prvh["review"])
+      if (!nq[j]) {
+        if (!("review" in prvh) || livehead == "") return 0
+        if (livehead == prvh["review"]) return 1
+        return (readst != "" && rdparse() && !live_owes(j))
+      }
       if (livehead == "") return 0
-      for (k = 1; k <= nq[j]; k++) if (!(rq[j, k] in prvq) || prvq[rq[j, k]] != livehead) return 0
-      return 1
+      for (k = 1; k <= nq[j]; k++) if (!(rq[j, k] in prvq)) return 0
+      for (k = 1; k <= nq[j]; k++) if (prvq[rq[j, k]] != livehead) break
+      if (k > nq[j]) return 1
+      return (readst != "" && rdparse() && !live_owes(j))
     }
 
     # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
@@ -1632,6 +1699,11 @@ _units_sched_awk() {
         m = split(dep[i], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
+      # THE STATE OF THE READINGS FOR A LIVE ROW PAST ITS READING (wave-36 T28; D9): live_head and live_idle turn on
+      # what the judge reads, so a ready, held, waiting, edges or holds answer with such a pending row and no state handed
+      # in prints nothing and exits 4 (_units_sched asks `_units_readings_state` and runs the program again).
+      if ((mode == "ready" || mode == "held" || mode == "waiting" || mode == "edges" || mode == "holds") && readst == "")
+        for (i = 1; i <= n; i++) if (st[i] == "pending" && live_past(i)) exit 4
       # THE RANGE OF ONE READ ROW (wave-27 T10; D4): the last heads of its questions not read at the
       # head handed in, one per line, and nothing while one has no reading; units_live_range picks
       # the start among them by ancestry (T43; review pass 17 F2). A bare row, an unknown id, or no
