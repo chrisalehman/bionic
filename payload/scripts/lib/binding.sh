@@ -121,19 +121,44 @@ _bind_resolve() {
   esac
 }
 
+# bind_delivered <root> <resolved plan> -> 0 when the plan is one of the root's run candidates (the walk `open_runs`
+# reads, lib/run.sh `_run_candidates`) whose run closed by delivery: `run_open` calls it closed, its frontmatter
+# carries no `abandoned:`, and a `Step 9:` line carries `delivered:` (run_open's own test). 1 otherwise, silent.
+bind_delivered() {
+  local root="$1" want="$2" droot f c lines
+  droot=$(docs_root "$root") || return 1
+  while IFS= read -r -d '' f; do
+    c=$(_bind_resolve "$f") || continue
+    [ "$c" = "$want" ] || continue
+    run_open "$f" && return 1
+    lines=$(_run_lines "$f")
+    awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^abandoned:/ { a = 1 } END { exit !a }' \
+      <<< "$lines" && return 1
+    grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"
+    return
+  done < <(_run_candidates "$droot")
+  return 1
+}
+
 # bind_plan <root> <sid> <plan|none> [<act>] -> write the session's binding; with an act and a
 # plan, the session's line in that plan too (THE RUN'S SESSIONS, above; never changes the status).
 #
 #   0  written: the marker is exactly `plan=<value>\nengaged_at=<iso>\n`, mode 600, and
 #      <value> is the plan's CANONICAL spelling (`_bind_resolve`'s) or the literal `none`
 #   1  refused: the sid is misshapen, the marker path or either of its two directories is a
-#      symlink, or the plan is not an absolute path that `open_runs "$root"` lists
+#      symlink, or the plan is not an absolute path that `open_runs "$root"` lists (with the act
+#      `bind`, or that `bind_delivered` admits)
 #   2  the write itself failed (unwritable tree, a directory in the way, no clock)
+#
+# THE BIND VERB MAY NAME A DELIVERED RUN (wave-36 T14; D13, AC-7.7; ruling r1791955629-34788). With the act `bind`
+# (session-poker.sh's verb, and only it), a delivered plan of this root is admitted too, and BIND_DELIVERED reads
+# `yes`: the session then reads it `bound-closed`, which opens nothing but `task-set --reason`. Engagement
+# (`engage`), the governing skill's Write (`write`) and an act-less call keep the open-run set, unchanged.
 bind_plan() {
   local root="$1" sid="$2" plan="$3" act="${4:-}"
   local path
   # CLEARED FIRST, ABOVE EVERY ARM THAT COULD REFUSE.
-  BIND_REFUSAL=""; BIND_SESSION=""
+  BIND_REFUSAL=""; BIND_SESSION=""; BIND_DELIVERED=""
   path=$(engaged_marker_path "$root" "$sid") || { BIND_REFUSAL="sid"; return 1; }
 
   # THE WHOLE MARKER PATH, NOT JUST ITS LEAF (S10a, review SEC F1). A leaf-only `-L` test
@@ -167,13 +192,20 @@ bind_plan() {
   if [ "$plan" != "none" ]; then
     local want runs cand c found=0
     want=$(_bind_resolve "$plan") || { BIND_REFUSAL="unresolvable"; return 1; }
-    runs=$(open_runs "$root" 2>/dev/null) || { BIND_REFUSAL="unresolvable"; return 1; }
+    runs=$(open_runs "$root" 2>/dev/null) || runs=""
     while IFS= read -r cand; do
       [ -n "$cand" ] || continue
       c=$(_bind_resolve "$cand") || continue
       if [ "$c" = "$want" ]; then found=1; break; fi
     done <<< "$runs"
-    [ "$found" -eq 1 ] || { BIND_REFUSAL="not-an-open-run"; return 1; }
+    if [ "$found" -eq 0 ] && [ "$act" = bind ] && bind_delivered "$root" "$want"; then
+      found=1; BIND_DELIVERED=yes
+    fi
+    if [ "$found" -eq 0 ]; then
+      # An open-run set that could not be read stays `unresolvable`, as it was before the delivered arm.
+      [ -n "$runs" ] || { BIND_REFUSAL="unresolvable"; return 1; }
+      BIND_REFUSAL="not-an-open-run"; return 1
+    fi
     value="$want"
   fi
 
