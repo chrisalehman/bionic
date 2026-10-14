@@ -34,7 +34,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its group, then KILL (signals, may write its end)
+#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
@@ -493,7 +493,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
-  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id> [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end"
+  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
@@ -1086,15 +1086,17 @@ case "$VERB" in
     case "$WT_FOR" in '') : ;; *[!0-9]*) usage "wait --for takes whole seconds." ;; esac
     ;;
   stop-run)
-    SR_ARG=""; SR_REPORT_ONLY=no
-    for _sr_a in "$@"; do
-      case "$_sr_a" in
-        --report-only) SR_REPORT_ONLY=yes ;;
-        -*) usage "stop-run takes one name and at most --report-only." ;;
-        *) [ -z "$SR_ARG" ] || usage "stop-run takes one name."; SR_ARG="$_sr_a" ;;
+    SR_ARG=""; SR_REPORT_ONLY=no; SR_WHY=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --report-only) SR_REPORT_ONLY=yes; shift ;;
+        --why) [ $# -ge 2 ] || usage "stop-run --why takes the reason, one line."; SR_WHY="$2"; shift 2 ;;
+        -*) usage "stop-run takes one name, run id or gate request id, and at most --report-only and --why '<reason>'." ;;
+        *) [ -z "$SR_ARG" ] || usage "stop-run takes one name."; SR_ARG="$1"; shift ;;
       esac
     done
-    [ -n "$SR_ARG" ] || usage "stop-run takes the name of a roster row (or a run id) whose run to stop."
+    [ -n "$SR_ARG" ] || usage "stop-run takes the name of a roster row (or a run id, or a gate request id) whose run to stop."
+    case "$SR_WHY" in *$'\n'*|*$'\r'*|*'|'*) usage "stop-run --why takes one line, without a '|'." ;; esac
     ;;
   regression-runs)
     RR_WRITE=no
@@ -2691,6 +2693,102 @@ run_groups() {
       for (p in keep) if (p in pg) g[pg[p]] = 1
       for (x in g) print x
     }'
+}
+
+# THE GATE'S HALF OF stop-run (wave-36 T11; D8, REQ-2 AC-2.2). A shim parked in `gate_ask` is no detached run:
+# no `.bionic/tmp/runs/` log names it, and before D8 `gate_end` refused its never-admitted request. The verb
+# reads the gate's store through lib/gate.sh's own reader and rule (`_gate_read`, `_gate_open`), never a copy.
+#
+# stop_run_request <operand> -> SR_REQ and rc 0 when the operand names a gate request: a whole number names
+# that request's file (run ids are never bare numbers: `<agent>-<suites>[-<n>]`); a name names the one OPEN
+# request whose who's agent half it is. rc 1 when it names none; rc 2 with the ids, lowest first, in
+# SR_REQS when a name holds more than one open request — nothing is guessed.
+stop_run_request() {
+  local arg="$1" gd f
+  SR_REQ=""; SR_REQS=""
+  declare -F _gate_read >/dev/null 2>&1 && declare -F gate_dir >/dev/null 2>&1 || return 1
+  gd="$(gate_dir)"
+  case "$arg" in
+    ''|*[!0-9]*) : ;;
+    *) [ -f "$gd/requests/$arg" ] || return 1; SR_REQ="$arg"; return 0 ;;
+  esac
+  for f in "$gd"/requests/[0-9]*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    _gate_read "$f" 2>/dev/null || continue
+    [ "${_R_who#*:}" = "$arg" ] || continue
+    _gate_open || continue
+    SR_REQS="$SR_REQS ${f##*/}"
+  done
+  SR_REQS="$(printf '%s\n' $SR_REQS | sort -n | tr '\n' ' ')"; SR_REQS="${SR_REQS% }"
+  case "$SR_REQS" in '') return 1 ;; *' '*) return 2 ;; esac
+  SR_REQ="$SR_REQS"
+  return 0
+}
+
+# stop_run_record <key=value>... -> appends `line/v1|ev=stop-run|…` (lib/line.sh `line_event`) to the landing
+# record of the run this session is bound to; rc 1, nothing written, with no bound run. The hand-hold fold
+# (`hand_holds_report`) counts it under its own kind: a stop is a verb act, never a by-hand one.
+stop_run_record() {
+  local sid
+  sid="$(session_id 2>/dev/null)" || sid=""
+  [ -n "$sid" ] || return 1
+  resolve_run "$REPO_REAL" "$sid" 2>/dev/null
+  [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
+  declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  declare -F line_event >/dev/null 2>&1 || return 1
+  line_event "$POKER_RUN_PLAN" stop-run "$@"
+}
+
+# stop_run_gate <id> -> stops gate request <id> and says what it did; rc 0, or 2 when the end could not be
+# written. THE ORDER: the end is written first, `gate_end <id> 143 --by <sid> --why <reason>` (accepted on a
+# never-admitted id from this call alone), so the parked or running shim, TERMed next, finds its request
+# ended and its own trap's end changes nothing; then its holder's process group is TERMed (never this call's
+# own group: then the holder alone), KILLed after 5 s if it lives on; then the record line.
+stop_run_gate() {
+  local id="$1" gd f sid who kind key state hp hs pg self what i rec=""
+  gd="$(gate_dir)"; f="$gd/requests/$id"
+  _gate_read "$f" 2>/dev/null || { die "stop-run — gate request $id cannot be read"; return 2; }
+  who="${_R_who#*:}"; kind="$_R_kind"; key="${_R_key//|/ }"
+  if [ -n "$_R_ended" ]; then
+    say "stop-run request $id ${who:--} $kind $key — ended rc=${_R_rc:--}; nothing to stop"
+    return 0
+  fi
+  _R_state=""; _gate_open 2>/dev/null || :
+  state="$_R_state"
+  hp=""; hs=""
+  if _gate_alive; then hp="${_R_holder%%:*}"; hs="${_R_holder#*:}"; fi
+  if [ "$SR_REPORT_ONLY" = yes ]; then
+    if [ -n "$hp" ]; then what="would end it and TERM its holder's process group (pid $hp)"; else what="would end it; its holder is gone"; fi
+    say "stop-run request $id ${who:--} $kind $key — $state; $what (report-only: nothing was sent)"
+    return 0
+  fi
+  sid="$(session_id 2>/dev/null)" || sid=""; sid="${sid:-none}"
+  if ! gate_end "$id" 143 --by "$sid" --why "${SR_WHY:--}" 2>/dev/null; then
+    die "stop-run — gate request $id could not be ended (the gate's store or lock); nothing was sent"
+    return 2
+  fi
+  what="its holder is gone, so nothing was sent"
+  if [ -n "$hp" ]; then
+    self="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
+    pg="$(ps -o pgid= -p "$hp" 2>/dev/null | tr -d ' ')"
+    case "$pg" in ''|0|1|*[!0-9]*) pg="" ;; esac
+    [ "$pg" != "$self" ] || pg=""
+    if [ -n "$pg" ]; then kill -TERM -- "-$pg" 2>/dev/null || kill -TERM "$hp" 2>/dev/null
+    else kill -TERM "$hp" 2>/dev/null; fi
+    what="TERM"
+    i=0
+    while [ "$i" -lt 50 ] && _slots_live "$hp" "$hs"; do sleep 0.1; i=$((i + 1)); done
+    if _slots_live "$hp" "$hs"; then
+      if [ -n "$pg" ]; then kill -KILL -- "-$pg" 2>/dev/null; fi
+      kill -KILL "$hp" 2>/dev/null
+      what="TERM, then KILL"
+    fi
+    what="its holder's process group stopped ($what)"
+  fi
+  stop_run_record "request=$id" "who=${_R_who//|/ }" "kind=$kind" "key=$key" "by=$sid" "why=${SR_WHY:--}" \
+    || rec="; no bound run, so no ev=stop-run line was written"
+  say "stop-run request $id ${who:--} $kind $key — $state; ended by=$sid why=${SR_WHY:--}, $what$rec"
+  return 0
 }
 
 # regression_runs_count <project root> -> the number of full-runner runs the project's rosters
@@ -5743,13 +5841,15 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · regression-2=<n> · second-floors=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · regression-2=<n> · second-floors=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
 # own assumptions counts nothing, and so does anything the orchestrator did that no verb recorded.
 #
 #   by-hand        the landing record's `line/v1|ev=published|…|kind=hand|…` (lib/line.sh), one per landing.
+#   stop-runs      the landing record's `line/v1|ev=stop-run|…`, one per `stop-run` that stopped a run or ended a
+#                  gate request (wave-36 T11; D8, AC-2.3). A stop is a verb act: never counted as by-hand.
 #   declines       the run's fill ledger's `fill-ledger/v1|…|state=decline|…` lines, one per `decline`. The Stop hook
 #   lifts          writes `state=ok` and `state=hold` only, so a `hold` there is the fill's wait and not the `hold` verb.
 #                  `state=lift` is `decline lift`'s line.
@@ -5768,16 +5868,17 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
 # continuation (and a person).
 hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
-  local rec="$1" root="$2" plan="$3" slug led rf hand=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 pl
+  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 pl
   slug="${plan##*/}"; slug="${slug%.plan.md}"
   if [ -f "$rec" ] && [ ! -L "$rec" ]; then
-    hand="$(awk -F'|' '
+    read -r hand stp <<< "$(awk -F'|' '
       index($0, "line/v1|") == 1 {
         ev = ""; k = ""
         for (i = 2; i <= NF; i++) { if (index($i, "ev=") == 1) ev = substr($i, 4); else if (index($i, "kind=") == 1) k = substr($i, 6) }
         if (ev == "published" && k == "hand") n++
+        else if (ev == "stop-run") s++
       }
-      END { print n + 0 }' "$rec")"
+      END { print n + 0, s + 0 }' "$rec")"
   fi
   led="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || led=""
   if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
@@ -5830,8 +5931,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     fi
   fi
   [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
-  printf 'hand-holds: total=%d · by-hand=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d\n' \
-    $(( hand + dec + lif + amd + hld + ext + wv + r2 + fl )) "$hand" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d\n' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + r2 + fl )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl"
   return 0
 }
 
@@ -11316,11 +11417,22 @@ RC_TAGS
   stop-run)
     REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
     [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
-    if ! run_find "$REPO_REAL" "$SR_ARG"; then
-      die "stop-run — no run named $SR_ARG: no roster row of this project carries a run for it, and there is no $REPO_REAL/.bionic/tmp/runs/$SR_ARG.log"
+    SR_FOUND=no
+    if run_find "$REPO_REAL" "$SR_ARG"; then run_read; SR_FOUND=yes; fi
+    # A GATE REQUEST, when the operand names no detached run that still runs (wave-36 T11; D8): a request id,
+    # or the name of a holder parked in `gate_ask` or running under an admission.
+    if [ "$SR_FOUND" = no ] || [ "$RUN_STATE" != RUNNING ]; then
+      stop_run_request "$SR_ARG"; _sr_rc=$?
+      if [ "$_sr_rc" -eq 2 ]; then
+        die "stop-run — $SR_ARG holds more than one open gate request ($SR_REQS); name the one to stop by its id"
+        exit 2
+      fi
+      if [ "$_sr_rc" -eq 0 ]; then stop_run_gate "$SR_REQ"; exit $?; fi
+    fi
+    if [ "$SR_FOUND" = no ]; then
+      die "stop-run — no run named $SR_ARG: no roster row of this project carries a run for it, there is no $REPO_REAL/.bionic/tmp/runs/$SR_ARG.log, and no gate request is $SR_ARG or held by it"
       exit 2
     fi
-    run_read
     case "$RUN_STATE" in
       FINISHED) say "stop-run $RUN_NAME run=$RUN_ID — FINISHED rc=$RUN_RC; nothing to stop"; exit 0 ;;
       LOST)     say "stop-run $RUN_NAME run=$RUN_ID — LOST last-written=$RUN_LAST_WRITTEN; no process of it is left to stop"; exit 0 ;;
@@ -11363,6 +11475,9 @@ $(run_groups "$RUN_PID")"
       *)
         say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — stopped ($SR_HOW); the run wrote its own end, rc=$SR_RC" ;;
     esac
+    # THE ACT IS RECORDED (wave-36 T11; D8): one ev=stop-run in the bound run's landing record, as for a request.
+    _sr_sid="$(session_id 2>/dev/null)" || _sr_sid=""
+    stop_run_record "run=$RUN_ID" "name=$RUN_NAME" "by=${_sr_sid:-none}" "why=${SR_WHY:--}" || :
     exit 0
     ;;
 
