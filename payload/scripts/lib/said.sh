@@ -115,7 +115,7 @@ _said_sessions() {
   fi
   declare -F session_id >/dev/null 2>&1 && me="$(session_id 2>/dev/null)" || me=""
   [ -z "$rec" ] || printf '%s\n' "$rec"
-  if [ -n "$me" ] && ! printf '%s\n' "$rec" | grep -qxF -- "$me"; then printf '%s\n' "$me"; fi
+  if [ -n "$me" ] && ! grep -qxF -- "$me" <<<"$rec"; then printf '%s\n' "$me"; fi
 }
 
 # _said_transcript <sid> -> that session's transcript path on stdout; exit 1 when there is none.
