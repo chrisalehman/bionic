@@ -11470,15 +11470,22 @@ $(run_groups "$RUN_PID")"
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
     # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
-    # the skills and the role files as they were at its start; doctor.sh `--restart-lines` is the one
-    # comparison (the newest of the three sets against each live session's start), and the tick prints
-    # its own session's line, if any, above everything else on every tick, changed or unchanged.
+    # the skills, the role files and the commands as they were at its start; doctor.sh `--restart-lines`
+    # is the one comparison, and the tick prints its own session's line, if any, above everything else
+    # on every tick, changed or unchanged. From wave-36 T2 (D7, AC-1.3) the comparison is content: the
+    # session's load record against the tree a restart loads, one line naming the classes that moved
+    # (`<pid> <sid> <started> <classes> <reloaded-since|->`), and `or reloaded since <ISO>` when the
+    # registry installed after the record was written.
     TICK_RESTART=""
     TICK_RESTART_ROW="$(bash "$BIONIC_LIB/../doctor.sh" --restart-lines 2>/dev/null \
       | awk -F'\t' -v s="$SESSION_ID" 'NF >= 5 && $2 == s { print; exit }')"
     if [ -n "$TICK_RESTART_ROW" ]; then
-      IFS=$'\t' read -r _tr_pid _ _ _ _tr_file <<< "$TICK_RESTART_ROW"
-      TICK_RESTART="restart needed — ${_tr_file} changed after this session started (pid ${_tr_pid}): exit claude and start it again"
+      IFS=$'\t' read -r _tr_pid _ _ _tr_classes _tr_reload <<< "$TICK_RESTART_ROW"
+      if [ "${_tr_reload:--}" != - ]; then
+        TICK_RESTART="restart needed — ${_tr_classes} changed after this session loaded them, or reloaded since ${_tr_reload} (pid ${_tr_pid}): exit claude and start it again"
+      else
+        TICK_RESTART="restart needed — ${_tr_classes} changed after this session loaded them (pid ${_tr_pid}): exit claude and start it again"
+      fi
     fi
     case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
     if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
