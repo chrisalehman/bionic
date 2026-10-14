@@ -13876,8 +13876,8 @@ expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extra
 expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
 expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
   "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
-expect_eq "FACT-FINAL current 8's code asks the judge (the extractor reads the verb's file)…" "1" \
-  "$(/usr/bin/grep -c '^cur8_judge() {' "$PRF_POKER")"
+expect_eq "FACT-FINAL current 7 and 8 ask the judge, cur7_judge, named for the first step it judges (the extractor reads the verb's file)…" "1" \
+  "$(/usr/bin/grep -c '^cur7_judge() {' "$PRF_POKER")"
 expect_eq "FACT-FINAL …and no reader of checks, by name" "0" \
   "$(/usr/bin/grep -c 'proof_checks_open\|cur8_checks' "$PRF_POKER")"
 
