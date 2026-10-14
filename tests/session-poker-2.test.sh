@@ -143,7 +143,7 @@ s35q_stop() {  # <stop_hook_active true|false> -> the hook's stdout
 jq -nc '{type:"user",uuid:"u-35q-1",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$S35Q_TR"
 s35q_agent toolu_35Q1 W-T1
 S35Q_OUT1="$(s35q_stop false)"
-expect_contains "35q precondition: the first Stop is refused for the row left out" "Fillable gap" "$S35Q_OUT1"
+expect_contains "35q precondition: the first Stop is refused for the row left out" "ready with room:" "$S35Q_OUT1"
 jq -nc '{type:"user",isMeta:true,uuid:"u-35q-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$S35Q_TR"
 s35q_agent toolu_35Q2 W-T2
 s35q_stop true >/dev/null
