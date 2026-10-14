@@ -851,10 +851,11 @@ expect_contains "42b4 …and that line is the row with exactly those cells" \
 s34_gate "$R42"
 expect_eq "42b5 …and the next commit is admitted" "0" "$GATE_RC"
 s42_snap "$R42" "$P42"
-poke "$R42" task-set T5 Files=c.sh
-s42_unchanged "42c §VERB Files= is refused" 1 "$P42"
+# THE ROW IS T2, A LAUNCHED ONE (landed since 42b): a pending row no roster names takes files= (wave-36 T41; session-poker-4 §FILES).
+poke "$R42" task-set T2 Files=c.sh
+s42_unchanged "42c §VERB Files= on a launched row is refused" 1 "$P42"
 expect_contains "42c2 …naming amend" "task-set does not write Files — widen a dispatched contract with amend" "$OUT"
-poke "$R42" task-set T5 files=c.sh
+poke "$R42" task-set T2 files=c.sh
 s42_unchanged "42c3 §VERB …and so is files=, in any case" 1 "$P42"
 
 # ---------- §VERB-bad (AC-9.2): refused, byte-identical ----------
