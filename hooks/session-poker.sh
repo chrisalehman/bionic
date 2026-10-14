@@ -19,7 +19,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
-#     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' | ruling-ack <id> | rulings <writer>
+#     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
@@ -461,7 +461,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>'   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown"
+  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names the row they wait on (declined-on=); a file or a word is refused"
@@ -604,9 +604,16 @@ case "$VERB" in
   # A RULING AND ITS READS (wave-33 T10; REQ-1, D1). `rule` takes the writer and the text, which must
   # hold something once blanks are gone: a ruling with nothing to say is nothing to deliver. `ruling-ack`
   # takes the one id the push printed; `rulings` the writer whose rulings to read.
+  # `--words '<the user's words>'` (wave-36 T9; D10) quotes what the person typed: held to lib/said.sh
+  # `user_said` across the run's recorded sessions, and carried in the ruling as `words="…" session=<sid>`.
   rule)
+    RULE_WORDS=""
+    if [ $# -eq 4 ] && [ "$3" = --words ]; then
+      [ -n "${4//[[:space:]]/}" ] || usage "rule --words takes the user's words, quoted from a prompt they typed."
+      RULE_WORDS="$4"; set -- "$1" "$2"
+    fi
     if [ $# -ne 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "rule takes exactly two arguments: the writer's roster name and the ruling's text."
+      usage "rule takes two arguments, the writer's roster name and the ruling's text, and optionally --words '<the user's words>'."
     fi
     RULE_WRITER="$1"
     RULE_TEXT="$2"
@@ -4375,11 +4382,15 @@ pv_file_swap() {
 # THE USER'S WORDS, REFUSED IN ONE VOICE (wave-33 T7). finding-move and waive-row hold their words to
 # lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
 # own constant. <act> is what the words make: `a move`, `a waiver`.
+#
+# THE RUN'S SESSIONS (wave-36 T9; D10): `user_said` reads every session the plan records, then this one,
+# and says which it read (SAID_SESSIONS) and asked for (SAID_TRIED); a refusal names them, so a reader can
+# tell "not typed" from "typed in a session the run never recorded".
 said_refuse() {  # <user_said rc> <the words, folded> <act> -> the refusal on stderr
   case "$1" in
-    2) die "REFUSED — this session's transcript cannot be found or read (session ${CLAUDE_CODE_SESSION_ID:-none} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
+    2) die "REFUSED — the transcript cannot be found or read for any session read (${SAID_TRIED:-${CLAUDE_CODE_SESSION_ID:-none}} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
     3) die "REFUSED — the words \"$(clean "$2")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged." ;;
-    *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session; $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
+    *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session or another session the run recorded (read: ${SAID_SESSIONS:-none}); $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
   esac
 }
 
@@ -7303,9 +7314,15 @@ EOF
     esac
 
     BIND_RC=0
-    bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" || BIND_RC=$?
+    bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" bind || BIND_RC=$?
     if [ "$BIND_RC" -eq 0 ]; then
       say "bound $BIND_PATH"
+      # THE RUN'S SESSIONS (wave-36 T9; D10): `bind_plan` writes this session's `- session:` line
+      # into the plan beside the marker, `by bind`; a plan that could not take it is said, not hidden.
+      case "${BIND_SESSION:-}" in
+        recorded) say "session $SESSION_ID recorded under ## SDLC State of $BIND_PATH" ;;
+        failed) die "the session line could not be written into $BIND_PATH (the plan changed, or is not a regular file); bind again to write it" ;;
+      esac
       exit 0
     else
       if [ "$BIND_RC" -ge 2 ]; then
@@ -7557,6 +7574,24 @@ EOF
         if ! roster_open_names "$ROSTER_FILE" "$(roster_ack_ledger "$ROSTER_FILE")" | grep -qxF "$RULE_WRITER"; then
           die "REFUSED — $RULE_WRITER's row is closed (ended, or acked after its launch): a ruling for it would never be shown. Nothing written."
           exit 2
+        fi
+        if [ -n "$RULE_WORDS" ]; then
+          # THE USER'S WORDS, AS finding-move HOLDS THEM (wave-36 T9; D10): looked for in every session the
+          # bound plan records, then this one; refused in said_refuse's voice, exit 2 as this arm refuses.
+          if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
+            . "$BIONIC_LIB/said.sh"
+          fi
+          if ! declare -F user_said >/dev/null 2>&1; then
+            die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing written."
+            exit 2
+          fi
+          RULE_PLAN="$(session_plan "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || RULE_PLAN=""
+          user_said "$RULE_WORDS" "$RULE_PLAN"; RULE_SAID=$?
+          if [ "$RULE_SAID" -ne 0 ]; then
+            said_refuse "$RULE_SAID" "$(said_fold "$RULE_WORDS")" "a ruling's quote"
+            exit 2
+          fi
+          RULE_TEXT="$RULE_TEXT words=\"$(said_fold "$RULE_WORDS" | tr '"' "'")\" session=$SAID_SESSION"
         fi
         RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
         if [ -z "$RULE_ID" ]; then
@@ -8987,7 +9022,7 @@ EOF
       die "REFUSED — no git user.name is set for $PV_REPO, and a waiver records who made it; set it, then waive again. The plan is unchanged."
       exit 1
     fi
-    user_said "$WR_RAW"; WR_SAID=$?
+    user_said "$WR_RAW" "$PV_PLAN"; WR_SAID=$?
     if [ "$WR_SAID" -ne 0 ]; then
       said_refuse "$WR_SAID" "$WR_WORDS" "a waiver"
       exit 1
@@ -10381,7 +10416,10 @@ $PF_PLANL"
   # (lib/proof.sh `proof_finding_rating`), is never deferred. The move is written in place after the
   # finding's last line, through the plan transaction:
   #
-  #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" why="<why>"
+  #   moved: <record>#<n> to=<defer|fix> by=<git user.name> at=<ISO-UTC> words="<words>" session=<sid> why="<why>"
+  #
+  # the words are looked for in every session the plan records, then this one (wave-36 T9; D10), and
+  # session= names the one whose transcript holds them (lib/said.sh SAID_SESSION);
   #
   # the words folded to one line by lib/said.sh's own fold (`said_fold`, the rule the check is made
   # through; the verb passes the raw words to `user_said`), the why by `deferral_fold` (the same fold), both escaped as a
@@ -10433,7 +10471,7 @@ FM_FINDING
       die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
       exit 1
     fi
-    user_said "$FM_RAW"; FM_SAID=$?
+    user_said "$FM_RAW" "$PV_PLAN"; FM_SAID=$?
     if [ "$FM_SAID" -ne 0 ]; then
       said_refuse "$FM_SAID" "$FM_WORDS" "a move"
       exit 1
@@ -10448,7 +10486,7 @@ FM_FINDING
       fi
       mv -f "$PV_NEW.2" "$PV_NEW"
     fi
-    FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" why=\"$(deferral_escape "$FM_WHY")\""
+    FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" session=$SAID_SESSION why=\"$(deferral_escape "$FM_WHY")\""
     # IN PLACE: after the last line of the block naming the finding (its deferred:, check: or an earlier
     # moved: line), else after the last proof line naming its record; else where proof_add_line puts it.
     FM_LINE="$FM_LINE" awk -v id="$FM_ID" -v ev="$FM_REC" '

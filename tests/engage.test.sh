@@ -1342,4 +1342,112 @@ e12_fire "$SID" "$R46"
 expect_eq "E13e an empty marker re-engaging stays unbound: plan=none" "none" "$(plan_of "$M46")"
 
 # ============================================================
+section "E14 §SESSION (wave-36 T9; D10, D5; AC-4.2) — the act that binds records the session in the run"
+# ============================================================
+#
+# THE RUN OWNS ITS SESSION HISTORY (spec D10, design ledger Δ3). A `/clear` re-keys the
+# session, and every reader keyed by the live session id loses what the session before it
+# did; so the act that binds a plan writes the binding INTO THE PLAN, one line per session,
+# under `## SDLC State`:
+#
+#   - session: <sid> bound <ISO-UTC> by <engage|bind|write>
+#
+# `bind_plan`'s fourth operand names the act; it is written once per session (a second
+# binding by the same session leaves the line it has), never for `none`, never without an
+# act, and `bind_sessions <plan>` is its one reader. Three acts, three callers: engage.sh,
+# `session-poker.sh bind`, and the governing skill's bind on the Write that creates a plan.
+SESS_RE='bound [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z by'
+sess_lines() { grep -E '^- session: ' "$1" 2>/dev/null; }
+sess_count() { sess_lines "$1" | grep -c . ; }
+sdlc_body() {  # <plan> -> the lines of its `## SDLC State` section, heading excluded
+  awk '/^## /{ ins = ($0 ~ /^## SDLC State/); next } ins' "$1"
+}
+mk_tasks_plan() {  # <root> <relname> -> an open plan with a section after `## SDLC State`
+  local p="$1/.bionic/docs/plans/$2"
+  mkdir -p "$(dirname "$p")"
+  printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: tasks in flight\n- T1: pending\n\n## Tasks\n\n| id | step |\n|---|---|\n| T1 | 4 |\n' > "$p"
+  printf '%s' "$p"
+}
+call_bind_act() {  # <root> <sid> <plan|none> <act> -> sets BIND_ST, and BIND_OUT to BIND_SESSION
+  BIND_OUT=$(bash -c 'set -u; . "$1" || exit 9; . "$2" || exit 9; bind_plan "$3" "$4" "$5" "$6"; st=$?; printf "%s" "${BIND_SESSION:-}"; exit $st' \
+    _ "$LIB" "$BINDLIB" "$1" "$2" "$3" "$4" 2>"$SANDBOX/.berr")
+  BIND_ST=$?
+}
+call_sessions() { bash -c 'set -u; . "$1" || exit 9; . "$2" || exit 9; bind_sessions "$3"' _ "$LIB" "$BINDLIB" "$1" 2>/dev/null; }
+
+# (a) A FIRST ENGAGEMENT THAT BINDS THE SOLE OPEN RUN WRITES ITS SESSION LINE, inside the section.
+R50="$(make_repo_planless)"; mkdir -p "$R50/.bionic/docs/plans"
+P50="$(mk_tasks_plan "$R50" wave-01.plan.md)"
+M50="$(marker_path "$R50" "$SID")"
+expect_eq "E14a §SESSION the plan holds no session line before the first engagement (non-vacuity)" "0" "$(sess_count "$P50")"
+mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+touch -t "$(rel_stamp 600)" "$P50"; E14_MT="$(mtime_of "$P50")"
+expect_regex "E14a the plan's mtime reads as a number (non-vacuity for the row after the engagement)" '^[0-9]+$' "$E14_MT"
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R50"
+expect_eq "E14a …the engagement binds the sole live run" "$P50" "$(plan_of "$M50")"
+expect_eq "E14a …and the plan keeps its mtime: recording a session is not activity on the run" "$E14_MT" "$(mtime_of "$P50")"
+expect_regex "E14a …and the plan carries this session's line, by engage" "^- session: $SID $SESS_RE engage\$" "$(sess_lines "$P50")"
+expect_eq "E14a …exactly one, and it stands under ## SDLC State, not under ## Tasks" "1|1" \
+  "$(sess_count "$P50")|$(sdlc_body "$P50" | grep -c '^- session: ')"
+expect_eq "E14a …and the rest of the plan is the same lines in the same order" \
+  "$(grep -v '^- session: ' "$P50" | grep -c .)" "$(printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: tasks in flight\n- T1: pending\n\n## Tasks\n\n| id | step |\n|---|---|\n| T1 | 4 |\n' | grep -c .)"
+
+# (b) RE-ENGAGING WRITES NOTHING MORE: one line per session, the first binding's.
+E14_FIRST="$(sess_lines "$P50")"
+e12_fire "$SID" "$R50"
+expect_eq "E14b re-engaging a bound session keeps one session line, the first one written" "1|$E14_FIRST" \
+  "$(sess_count "$P50")|$(sess_lines "$P50")"
+
+# (c) A SECOND SESSION BINDING BY HAND appends its own line after the first, by bind.
+call_bind_act "$R50" "$OTHER_SID" "$P50" bind
+expect_eq "E14c bind_plan <root> <sid> <plan> bind writes (exit 0) and reports the line recorded" "0|recorded" "$BIND_ST|$BIND_OUT"
+expect_regex "E14c …the second line follows the first, by bind" "^- session: $SID $SESS_RE engage
+- session: $OTHER_SID $SESS_RE bind\$" "$(sess_lines "$P50")"
+expect_eq "E14c …and bind_sessions reads both sessions, in the order they bound" "$SID
+$OTHER_SID" "$(call_sessions "$P50")"
+call_bind_act "$R50" "$OTHER_SID" "$P50" bind
+expect_eq "E14c …a second bind by the same session reports the line present, and writes none" "0|present|2" "$BIND_ST|$BIND_OUT|$(sess_count "$P50")"
+
+# (d) NO ACT, NO LINE; `none`, NO LINE — each beside the positive on the same root.
+R51="$(make_repo_planless)"; mkdir -p "$R51/.bionic/docs/plans"
+P51="$(mk_tasks_plan "$R51" wave-01.plan.md)"
+call_bind "$R51" "$SID" "$P51"
+expect_eq "E14d bind_plan with no act binds (exit 0) and records no session" "0|$P51|0" "$BIND_ST|$(plan_of "$(marker_path "$R51" "$SID")")|$(sess_count "$P51")"
+call_bind_act "$R51" "$OTHER_SID" none engage
+expect_eq "E14d …binding none with an act records no session" "0|0" "$BIND_ST|$(sess_count "$P51")"
+call_bind_act "$R51" "$OTHER_SID" "$P51" frobnicate
+expect_eq "E14d …an act outside engage|bind|write binds and records nothing, saying so" "0|act|0" "$BIND_ST|$BIND_OUT|$(sess_count "$P51")"
+call_bind_act "$R51" "$OTHER_SID" "$P51" write
+expect_eq "E14d …positive, the same root and session: the act write records it" "0|recorded|1" "$BIND_ST|$BIND_OUT|$(sess_count "$P51")"
+expect_regex "E14d …by write" "^- session: $OTHER_SID $SESS_RE write\$" "$(sess_lines "$P51")"
+
+# (e) TWO OPEN RUNS BIND NOTHING, so neither plan gains a line; one run on the same root does.
+R52="$(make_repo_planless)"; mkdir -p "$R52/.bionic/docs/plans"
+P52A="$(mk_tasks_plan "$R52" wave-01.plan.md)"; P52B="$(mk_tasks_plan "$R52" wave-02.plan.md)"
+M52="$(marker_path "$R52" "$SID")"
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R52"
+expect_eq "E14e two live runs: the session is left unbound and neither plan has a session line" "none|0|0" \
+  "$(plan_of "$M52")|$(sess_count "$P52A")|$(sess_count "$P52B")"
+rm -f "$P52B" "$M52"
+e12_fire "$SID" "$R52"
+expect_eq "E14e …positive, one run left on the same root: bound, and the line is written" "$P52A|1" "$(plan_of "$M52")|$(sess_count "$P52A")"
+
+# (f) THE WRITE THAT CREATES A PLAN (the governing skill's PostToolUse arm) records by write.
+GS_HOOK="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+R53="$(make_repo_planless)"; mkdir -p "$R53/.bionic/docs/plans/epic-01"
+M53="$(marker_path "$R53" "$SID")"
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R53"
+expect_eq "E14f a planless root engages unbound (non-vacuity)" "none" "$(plan_of "$M53")"
+P53="$(mk_tasks_plan "$R53" epic-01/wave-01.plan.md)"
+mkdir -p "$SANDBOX/e14-home"
+E14_PAY="$(jq -nc --arg s "$SID" --arg p "$P53" --arg c "$R53" \
+  '{session_id:$s,cwd:$c,hook_event_name:"PostToolUse",tool_name:"Write",tool_input:{file_path:$p,content:""},tool_response:{type:"create",filePath:$p}}')"
+HOME="$SANDBOX/e14-home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" bash "$GS_HOOK" <<< "$E14_PAY" >/dev/null 2>"$SANDBOX/.gserr"
+expect_eq "E14f the Write that creates the plan binds the session to it" "$P53" "$(plan_of "$M53")"
+expect_regex "E14f …and records the session in it, by write" "^- session: $SID $SESS_RE write\$" "$(sess_lines "$P53")"
+
+# ============================================================
 finish
