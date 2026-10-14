@@ -3220,6 +3220,106 @@ expect_block "D4h3 REQ-1 the retired six-column table at task scale is refused, 
   "$hD4h3" 'git commit -m "x"' "## Tasks: missing column step"
 
 # ============================================================
+section "§LAUNCH — the launch arm and adopt read the run: a predecessor's reader on a roster of this plan, or on the Dispatch ledger, is launched; adopt lists it active (wave-36 T29; REQ-4 AC-4.1; D10)"
+# ============================================================
+#
+# THE DEFECT (research C16; wave-35 A-orch-46, debt adopt-orphans-active-readers). The launch arm
+# read `roster-<sid>` alone, and a `/clear` re-keys the session. A reader the predecessor launched
+# (auditor, critic), swept MET and acked on the predecessor's ledger before the clear, still at work
+# on its `active` row, was refused at the successor's next commit as "names no launched agent", and
+# `adopt` skipped it as closed, so no remedy but emptying the agent cell existed. Now the arm reads
+# this session's roster, every roster under .bionic/tmp whose rows carry `plan=` this plan, and the
+# plan's `## Dispatch ledger` names; and `adopt` carries a reader whose plan row is active as it
+# carries an open writer, closed only by `roster_row_open`.
+# FIXTURE: T2 is `active` and names w36-R1, a bionic:auditor on session B's roster, dispatched under
+# this plan, acked on B's own ledger after its launch. This session's roster is empty.
+# fails-when: `launch T2` refuses the commit (the mutant: the arm reads `roster-<sid>` alone); a
+# roster of another plan admits the name; adopt reports nothing for w36-R1; an acked writer is adopted.
+sLA_SID_B="5d6e7f80-1a2b-4c3d-8e9f-0a1b2c3d4e5f"
+sLA_LEDGER_SCHEMA="$(/usr/bin/grep -m1 '^LEDGER_SCHEMA=' "${BIONIC_HOOKS_DIR}/session-sweeper.sh" | cut -d'"' -f2)"
+sLA_home() {  # <T2 agent> [<ledger rows>] -> a bound home, sLA_PLAN its marker's plan; this roster empty
+  local h
+  h=$(make_home)
+  sLA_P="$(write_plan "$h" "$(d7_wave_plan "$(sD4_tasks "$1" active)${2:+
+
+## Dispatch ledger
+
+| id | agent | dispatched | expected | artifact | landed | notes |
+|---|---|---|---|---|---|---|
+$2}" "- T1: bash suite 9/9 green")")"
+  bound_marker "$h" "$EG_SID" "$sLA_P"
+  sLA_PLAN="$(sed -n 's/^plan=//p' "$h/.bionic/tmp/engaged-$EG_SID.state")"
+  roster_header > "$h/.bionic/tmp/roster-$EG_SID.state"
+  sLA_H="$h"
+}
+sLA_pred() {  # <home> <name> <subagent_type> <plan= value> — a launch row on session B's roster, acked on B's ledger
+  local f="$1/.bionic/tmp/roster-$sLA_SID_B.state"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status=identified session="$sLA_SID_B" name="$2" agent_id="a-$2" subagent_type="$3" \
+    launched_at=2026-10-13T00:00:00Z plan="$4" >> "$f"
+  printf '%s|event=ack|at=2026-10-13T01:00:00Z|epoch=1791853200|pid=%s|session=%s|name=%s|by=human\n' \
+    "$sLA_LEDGER_SCHEMA" "$$" "$sLA_SID_B" "$2" >> "$1/.bionic/tmp/sweeper-$sLA_SID_B.state"
+}
+sLA_adopt() {  # <home> [--report-only] -> session A's adopt over the home, its whole output (exit 1 lists rows)
+  ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$EG_SID" CLAUDE_CONFIG_DIR="$1/.claude" HOME="$1" \
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" adopt ${2:+"$2"} 2>&1 ) || :
+}
+
+sLA_home w36-R1
+sLA_pred "$sLA_H" w36-R1 bionic:auditor "$sLA_PLAN"
+expect_eq "LA.0 precondition: session B's row carries this session's plan, verbatim" "1" \
+  "$(/usr/bin/grep -cF "|plan=$sLA_PLAN" "$sLA_H/.bionic/tmp/roster-$sLA_SID_B.state")"
+expect_eq "LA.0b precondition: …and this session's roster names nobody" "0" \
+  "$(/usr/bin/grep -c '^roster-state/' "$sLA_H/.bionic/tmp/roster-$EG_SID.state")"
+expect_allow "LA.1 AC-4.1 a predecessor's reader on a roster of this plan: the active row's commit is admitted" \
+  "$sLA_H" 'git commit -m "x"'
+sLA_OUT="$(sLA_adopt "$sLA_H" --report-only)"
+expect_contains "LA.2 AC-4.1 adopt --report-only lists the acked reader whose row is active" \
+  "|name=w36-R1|" "$sLA_OUT"
+expect_contains "LA.2b …as this run's own row" "|subagent_type=bionic:auditor|" \
+  "$(printf '%s\n' "$sLA_OUT" | /usr/bin/grep '|name=w36-R1|' | /usr/bin/grep '|partition=own$')"
+expect_contains "LA.2c …and its verdict line says reader" "w36-R1 (bionic:auditor) from session $sLA_SID_B" \
+  "$(printf '%s\n' "$sLA_OUT" | /usr/bin/grep '^poker: w36-R1 .*· reader$')"
+sLA_adopt "$sLA_H" > /dev/null
+expect_eq "LA.3 AC-4.1 adopt puts w36-R1 on this session's roster" "1" \
+  "$(/usr/bin/grep '^roster-state/' "$sLA_H/.bionic/tmp/roster-$EG_SID.state" | /usr/bin/grep -c '|name=w36-R1|')"
+
+# A ROSTER OF ANOTHER PLAN IS NEVER READ (the bind partitions the fleet): the same reader under
+# another plan's dispatch launches nothing here. LA.1 is the positive.
+sLA_home w36-R1
+sLA_pred "$sLA_H" w36-R1 bionic:auditor "$sLA_H/.bionic/docs/plans/another.plan.md"
+expect_block "LA.4 the reader on a roster of ANOTHER plan: still refused, naming the launch" \
+  "$sLA_H" 'git commit -m "x"' "1 active task names no launched agent"
+
+# THE DISPATCH LEDGER NAMES ARE KNOWN AGENTS: `<role> (<name>)` in its agent column. No roster holds
+# w36-R2; the ledger does.
+sLA_home w36-R2 "| R2 | auditor (w36-R2) | 2026-10-13T14:08Z | 30 min | r2.md | — | a reader |"
+expect_allow "LA.5 AC-4.1 an active row naming a reader the Dispatch ledger names commits" \
+  "$sLA_H" 'git commit -m "x"'
+sLA_home w36-R9 "| R2 | auditor (w36-R2) | 2026-10-13T14:08Z | 30 min | r2.md | — | a reader |"
+expect_block "LA.5b …and one naming a reader the ledger does not name is refused (LA.5 the positive)" \
+  "$sLA_H" 'git commit -m "x"' "1 active task names no launched agent"
+
+# THE PARTITION STAYS: a writer acked on B's ledger is closed whatever its row says, as before. One
+# fixture, both kinds: the reader (T2, active) is listed, the writer (w36-T7, acked) is not.
+sLA_home w36-R1
+sLA_pred "$sLA_H" w36-R1 bionic:auditor "$sLA_PLAN"
+sLA_pred "$sLA_H" w36-T7 bionic:senior-implementor "$sLA_PLAN"
+sLA_OUT="$(sLA_adopt "$sLA_H" --report-only)"
+expect_contains "LA.6 the reader of the same fixture is listed (the positive)" "|name=w36-R1|" "$sLA_OUT"
+expect_absent "LA.6b …an acked writer is not: an ack closes a writer's row, as it always has" "|name=w36-T7|" "$sLA_OUT"
+# A READER WHOSE ROW IS NOT ACTIVE IS CLOSED BY ITS ACK, as before: T2 landed.
+sLA_h7=$(make_home)
+sLA_P7="$(write_plan "$sLA_h7" "$(d7_wave_plan "$(sD4_tasks w36-R1 landed)" "- T1: bash suite 9/9 green
+- T2: a reading landed")")"
+bound_marker "$sLA_h7" "$EG_SID" "$sLA_P7"
+sLA_pred "$sLA_h7" w36-R1 bionic:auditor "$(sed -n 's/^plan=//p' "$sLA_h7/.bionic/tmp/engaged-$EG_SID.state")"
+sLA_OUT="$(sLA_adopt "$sLA_h7" --report-only)"
+expect_absent "LA.7 an acked reader whose row has landed is closed: adopt does not list it" "|name=w36-R1|" "$sLA_OUT"
+expect_contains "LA.7b …and says why nothing is offered (the walk read the roster: positive)" \
+  "nothing to adopt" "$sLA_OUT"
+
+# ============================================================
 section "§HEAD: Step 5 no longer owes head: — absent, no commit, or not contained, the block is admitted; the floor's head is the judge's at Step 7 (wave-26 T4; wave-35 T31, D20)"
 # ============================================================
 #

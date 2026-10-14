@@ -2454,18 +2454,24 @@ $(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
   refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
 }
 
-# THIS SESSION'S ROSTER, as the gate reads it (wave-21 T5; spec assumption 1). The same path the
-# suite-budget arm builds from the same two facts (`roster-<sid>.state` under the root's
-# `.bionic/tmp`). With no session id there is no roster to name, and `units_findings` then
-# computes no `launch` finding: an agent-named `active` row owes its line, as it did before.
+# THE RUN'S ROSTERS, as the gate reads them (wave-36 T29; REQ-4 AC-4.1; D10; was this session's
+# roster alone, wave-21 T5). lib/units.sh `units_run_rosters` lists them, the one lister the Patrol
+# tick asks too: this session's roster first — the path the suite-budget arm builds from the same
+# two facts (`roster-<sid>.state` under the root's `.bionic/tmp`), empty with no session id — then
+# every roster there whose rows carry `plan=` this plan. A `/clear` re-keys the session, so a reader
+# the predecessor launched lives on the predecessor's roster; reading `roster-<sid>` alone refused
+# its commit (wave-35 A-orch-46). With no roster at all `units_findings` computes no `launch`
+# finding: an agent-named `active` row owes its line, as it did before.
 _eg_roster_path() {
-  [ -n "${BIONIC_SID:-}" ] || return 0
-  printf '%s' "$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  local own=""
+  [ -z "${BIONIC_SID:-}" ] || own="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  units_run_rosters "$BIONIC_ROOT/.bionic/tmp" "${PLAN:-}" "$own"
 }
 
 # THE LAUNCH FINDING, REFUSED (wave-21 T5; REQ-4, AC-4.1; D4). An `active` row whose agent cell
-# names someone no row on this session's roster names: the dispatch that would have launched it
-# left no record, so the row claims a writer the machine never saw. Every such row in one pass,
+# names someone no row on the run's rosters names, and the plan's `## Dispatch ledger` does not
+# (wave-36 T29): the dispatch that would have launched it left no record, so the row claims a
+# writer the machine never saw. Every such row in one pass,
 # as the line arm does, each with the cell it carries — the repair is that cell, written as the
 # name the dispatch recorded, or emptied for a row this session works itself (self-owned).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2481,9 +2487,9 @@ refuse_unlaunched_rows() {  # $1 = `<id>: <agent cell>` lines (the reader's laun
     verdict="${count} active tasks name no launched agent"
     subject="${count} active '## Tasks' rows have"
   fi
-  _eg_detail="canonical-sdlc: ${subject} an agent cell that names no row on this session's roster.
+  _eg_detail="canonical-sdlc: ${subject} an agent cell that names no row on this session's roster, on another roster of this plan, or in its '## Dispatch ledger'.
 Plan: $PLAN
-Roster: $(_eg_roster_path)
+Rosters: $(_eg_roster_path | awk 'NF { s = s (s == "" ? "" : " ") $0 } END { print s }')
 Fix: write the name the dispatch recorded (the roster row's name=) in each agent cell below, or empty the cell for a row this session works itself.
 $(printf '%s\n' "$rows" | sed -E 's/^/- /')"
   refuse exit2 commit "$verdict" "write the roster name as agent" "$_eg_detail"
@@ -4621,7 +4627,8 @@ validate_intent_evidence() {
 #      — status in {pending,active,landed,dropped} among them — else exit 2; then
 #      the reader's ledger findings (`units_findings`, wave-21 T5, D4): a `landed`
 #      row with no `- T<n>:` line in ## SDLC State, or an `active` row whose agent
-#      cell names no row on this session's roster, else exit 2; a line that is
+#      cell names no row on this session's roster, on another roster of this plan,
+#      or in its `## Dispatch ledger` (wave-36 T29), else exit 2; a line that is
 #      there must not be a placeholder, else exit 2.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
