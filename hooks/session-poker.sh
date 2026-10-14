@@ -471,7 +471,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born floor:<suite> marks a row born of the floor's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column but Files, which amend widens), every group in one transaction, the table judged once"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
@@ -3866,6 +3866,51 @@ poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
   esac
 }
 
+# poker_files_cell <id> <kind> <agent> <Files cell> <repo> <plan> -> PFC_OUT (the cell to write) and PFC_ART (the
+# record artifact a reader row gained, or empty); returns 0, or 1 / 2 with the refusal printed. THE ONE JUDGE OF A
+# ROW'S FILES CELL (wave-36 T41; REQ-7 AC-7.1, AC-10.2; D13): `task-add` writes a row's cell and `task-set files=`
+# corrects a pending row's, and both are held to it. A reader row (verify, test, review) whose cell names no record
+# gains <record dir>/<id>.md, the artifact `brief` gives it; the cell is then read as the dispatch wall will read it
+# (`lift_contract_fields` and `brief_validate_fields`), a cell the lift reads as no path being refused now in the
+# grammar's words. `—`, `-` and empty declare nothing to judge. ONE FACT IS THE BRIEF'S, NOT THE CELL'S: a `Files:`
+# line alone names no suite, and here that is a note, the row going in.
+PFC_OUT=""; PFC_ART=""
+poker_files_cell() {
+  local id="$1" kind="$2" agent="$3" files="$4" repo="$5" plan="$6" fact cell_facts=""
+  PFC_OUT="$files"; PFC_ART=""
+  if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact)" ]; then
+    PFC_ART="$(docs_root "$repo")/record/$(basename "$plan" .plan.md)/$id.md"
+    case "$PFC_ART" in "$repo"/*) PFC_ART="${PFC_ART#"$repo"/}" ;; esac
+    case "$files" in ''|'—'|'-') PFC_OUT="$PFC_ART" ;; *) PFC_OUT="$files, $PFC_ART" ;; esac
+  fi
+  case "$PFC_OUT" in
+    ''|'—'|'-') return 0 ;;
+  esac
+  if ! poker_brief_load; then
+    die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    return 2
+  fi
+  POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+  brief_validate_fields "$(lift_contract_fields "Files: $PFC_OUT" "$agent")" \
+    "$agent" "$repo" poker_brief_sink || :
+  while IFS= read -r fact; do
+    [ -n "$fact" ] || continue
+    case "$fact" in
+      'Files: alone names no suite')
+        note "$fact — a dispatch of $id will need a Suites: or Re-executes: line" ;;
+      *) cell_facts="${cell_facts}${fact}"$'\n' ;;
+    esac
+  done <<EOF
+$POKER_BRIEF_FACTS
+EOF
+  if [ -n "$cell_facts" ]; then
+    die "REFUSED — a dispatch of $id with Files: $PFC_OUT would be refused by the dispatch grammar; the plan is unchanged:"
+    printf '%s' "$POKER_BRIEF_WORDS" >&2
+    return 1
+  fi
+  return 0
+}
+
 # A brief span out of newline-joined additions: `Files:` and `Suites:` take the words as
 # they are, `Re-executes:` marks each run with backticks, the one spelling the lift reads a
 # run from. <runs, marked> is text already in that shape (a row's stored value).
@@ -4923,6 +4968,30 @@ plan_verb_id_ok() {
   case "$1" in ["$PV_ID_ALNUM"]*) : ;; *) return 1 ;; esac
   case "$1" in *[!"$PV_ID_ALNUM"._-]*) return 1 ;; esac
   return 0
+}
+
+# pv_roster_names_row <row id> -> 0 when a roster of this project holds a launch of the row for this plan, else 1: a
+# `roster-state/` row carrying `row=<id>` whose `plan=` is this plan's, or that carries no `plan=` (the rows written
+# before it existed). The one question a pending row's Files cell asks before it is the table's (wave-36 T41): a
+# launch in flight has a contract, and amend is its verb. Reads the files itself, never through a quitting pipe.
+pv_roster_names_row() {
+  local rf pb
+  pb="$(basename "$PV_PLAN")"
+  for rf in "$PV_REPO"/.bionic/tmp/roster-*.state; do
+    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
+    awk -F'|' -v id="$1" -v pb="$pb" '
+      index($0, "roster-state/") == 1 {
+        row = ""; plan = ""; has = 0
+        for (i = 2; i <= NF; i++) {
+          if (index($i, "row=") == 1) row = substr($i, 5)
+          else if (index($i, "plan=") == 1) { plan = substr($i, 6); has = 1 }
+        }
+        n = split(plan, seg, "/"); base = seg[n]
+        if (row == id && (!has || base == pb)) found = 1
+      }
+      END { exit found ? 0 : 1 }' "$rf" && return 0
+  done
+  return 1
 }
 
 # ---------------------------------------------------------------- a record row lands itself
@@ -8478,13 +8547,6 @@ EOF
     # A READER ROW WRITES ITS RECORD (wave-35 T8; REQ-6 AC-6.1; D15). A verify, test or review row whose Files
     # name no record artifact gets <record dir>/<id>.md in its cell, the artifact `brief` gives it, so a row that
     # reads that record waits on this one (the validator refuses a record read no row's Files cover).
-    TA_ART=""
-    if poker_reader_kind "$TA_KIND" && [ -z "$(poker_brief_record_entry "$TA_FILES" artifact)" ]; then
-      TA_ART="$(docs_root "$REPO_REAL")/record/$(basename "$TA_PLAN" .plan.md)/$TA_ID.md"
-      case "$TA_ART" in "$REPO_REAL"/*) TA_ART="${TA_ART#"$REPO_REAL"/}" ;; esac
-      case "$TA_FILES" in ''|'—'|'-') TA_FILES="$TA_ART" ;; *) TA_FILES="$TA_FILES, $TA_ART" ;; esac
-    fi
-
     # THE FILES CELL IS JUDGED BY THE DISPATCH GRAMMAR (wave-20 T9; D4, Δ10; T6 carry-over).
     # The cell becomes a brief's `Files:` line at dispatch, so it is read here exactly as the
     # dispatch wall will read it: a cell the lift reads as no path — a template slot, a bare
@@ -8493,34 +8555,8 @@ EOF
     # nothing to judge. ONE FACT IS THE BRIEF'S, NOT THE CELL'S: a `Files:` line alone names
     # no suite. A dispatch answers it with a `Suites:` or `Re-executes:` line, which the plan
     # row has no column for, so here it is a note and the row goes in.
-    case "$TA_FILES" in
-      ''|'—'|'-') : ;;
-      *)
-        if ! poker_brief_load; then
-          die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-          exit 2
-        fi
-        POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT")" \
-          "$TA_AGENT" "$REPO_REAL" poker_brief_sink || :
-        TA_CELL_FACTS=""
-        while IFS= read -r TA_FACT; do
-          [ -n "$TA_FACT" ] || continue
-          case "$TA_FACT" in
-            'Files: alone names no suite')
-              note "$TA_FACT — a dispatch of $TA_ID will need a Suites: or Re-executes: line" ;;
-            *) TA_CELL_FACTS="${TA_CELL_FACTS}${TA_FACT}"$'\n' ;;
-          esac
-        done <<EOF
-$POKER_BRIEF_FACTS
-EOF
-        if [ -n "$TA_CELL_FACTS" ]; then
-          die "REFUSED — a dispatch of $TA_ID with Files: $TA_FILES would be refused by the dispatch grammar; the plan is unchanged:"
-          printf '%s' "$POKER_BRIEF_WORDS" >&2
-          exit 1
-        fi
-        ;;
-    esac
+    poker_files_cell "$TA_ID" "$TA_KIND" "$TA_AGENT" "$TA_FILES" "$REPO_REAL" "$TA_PLAN" || exit $?
+    TA_FILES="$PFC_OUT"; TA_ART="$PFC_ART"
 
     # A ROW REVIEW MADE UNASKED (wave-30 T21; REQ-10 AC-10.1, AC-10.2; D4, Δ3). Three guards, whatever the
     # policy says, each a refusal with the plan byte-identical: (1) the rating is inside the plan's
@@ -8636,10 +8672,10 @@ EOF
   # THE ROW-CELL VERBS (wave-24 T15; REQ-9 AC-9.1/9.2, D14). `task-set` sets cells of a
   # `## Tasks` row, `ledger-set` of a `## Dispatch ledger` row, and `ledger-add` appends a ledger
   # row; each through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
-  # the header carries by `units_has_column`, except two:
-  # `id`, the key the row is found by, and `Files`, which is a dispatched agent's CONTRACT once
-  # it is on the roster (editing the plan row changes nothing a wall reads), so the refusal
-  # names `amend`, the verb that widens it. `task-set` is judged by `units_validate` before the
+  # the header carries by `units_has_column`, except `id`, the key the row is found by, and, for a row with a
+  # launch behind it, `Files`: a dispatched agent's CONTRACT once it is on the roster (editing the plan row
+  # changes nothing a wall reads), so the refusal names `amend`, the verb that widens it. A PENDING row no
+  # roster names has no contract, and `files=<list>` is the table's to set (wave-36 T41; the pre-pass below). `task-set` is judged by `units_validate` before the
   # gate, as `task-add` is: a status, step or deps cell is a schedule change.
   task-set|ledger-add|ledger-set)
     # THE ROWS A CALL SETS (wave-33 T7). One entry per row: its id and its pairs, joined by the unit
@@ -8693,9 +8729,7 @@ EOF
         [ "$VERB" = task-set ] || continue
         _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
         case "$_pv_l" in
-          files)
-            die "REFUSED — task-set does not write Files — widen a dispatched contract with amend: bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason <why>. The plan is unchanged."
-            exit 1 ;;
+          files) PV_FILES_ASKED=1; continue ;;  # a fixed column, judged after the plan is open, not an optional one the header lists
           id)
             die "REFUSED — id is the key task-set finds $PV_SET_ID by, not a cell to set; the plan is unchanged."
             exit 1 ;;
@@ -8751,6 +8785,42 @@ EOF
         pv_cols_refuse "$(pv_header_cells "$PV_PLAN" tasks | awk '{ l = tolower($0) } l != "id" && l != "files" { print l }')"
         exit 1
       fi
+    fi
+    # A PENDING ROW'S FILES CELL IS THE TABLE'S, A LAUNCHED ROW'S IS A CONTRACT (wave-36 T41; REQ-7 AC-7.1, AC-10.2;
+    # D13; A-orch-5, A-orch-6, A-orch-9, A-orch-10). One rule: a row `pending` with no roster row naming it has no
+    # launch behind it, so `files=<list>` replaces its cell whole and the list is judged as task-add judges a cell
+    # (`poker_files_cell`); a row with a launch has a contract on a roster, which only `amend` widens, so an active,
+    # landed or roster-named row (or one this same call sets to another status) is refused as it always was, naming
+    # amend. The judged value takes the place of the operand in its set, so the write below is the one transaction.
+    if [ "$VERB" = task-set ] && [ -n "${PV_FILES_ASKED:-}" ]; then
+      PV_JUDGED=()
+      for _pv_s in "${PV_SETS[@]}"; do
+        pv_set_pairs "$_pv_s"
+        _pv_row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_SET_ID" '$1 == id { print; exit }')"
+        _pv_new="$PV_SET_ID"
+        for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+          _pv_l="$(printf '%s' "${_pv_a%%=*}" | tr '[:upper:]' '[:lower:]')"
+          if [ "$_pv_l" = files ] && [ -n "$_pv_row" ]; then
+            _pv_status="$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $10 }')"
+            _pv_moved=""
+            for _pv_b in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+              case "$(printf '%s' "${_pv_b%%=*}" | tr '[:upper:]' '[:lower:]')" in
+                status) [ "${_pv_b#*=}" = pending ] || _pv_moved=1 ;;
+              esac
+            done
+            if [ "$_pv_status" != pending ] || [ -n "$_pv_moved" ] || pv_roster_names_row "$PV_SET_ID"; then
+              die "REFUSED — task-set does not write Files — widen a dispatched contract with amend: bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason <why>. The plan is unchanged."
+              exit 1
+            fi
+            poker_files_cell "$PV_SET_ID" "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $3 }')" \
+              "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $5 }')" "${_pv_a#*=}" "$PV_REPO" "$PV_PLAN" || exit $?
+            _pv_a="${_pv_a%%=*}=$PFC_OUT"
+          fi
+          _pv_new="$_pv_new"$'\037'"$_pv_a"
+        done
+        PV_JUDGED+=("$_pv_new")
+      done
+      PV_SETS=("${PV_JUDGED[@]}")
     fi
     case "$VERB" in
       task-set)   PV_MODE=set; PV_SECT=tasks ;;
