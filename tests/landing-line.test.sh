@@ -1835,6 +1835,28 @@ ct_run "$RT"
 expect_eq "(ct4) [positive] the same run, stamped where the shim stands, is a green record at the main head" "1" \
   "$(ct_green_at "$RT" "$HT4")"
 expect_absent "(ct4b) …and says nothing of not counting" "not counted" "$CT_OUT"
+# THE GATE'S TREE IS THE PLACEMENT READER'S (wave-36 T25; D11, AC-5.1). The shim asks the gate from the
+# tree the run is in: its --stamp-dir, else `cmd_place <command> <cwd> suite` (lib/placement.sh), the
+# question the wall asks for the stamp. Before T25 it read only a plain-word `cd` opening the text, so a
+# pinned variable or a cd behind `true &&` asked from the main checkout while the run went to the tree.
+# Read off the one request the shim's run leaves at the gate (its `tree=`, the toplevel git names).
+ct_tree() {  # <root> <command> -> the tree= of the request the shim's run of <command> wrote, from the main checkout
+  local before after f
+  before="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null)"
+  ( cd "$1" && T="$1/.worktrees/T2" bash "$CT_SHIM" --suites a.test.sh -- "$2" >/dev/null 2>&1 )
+  after="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null)"
+  f="$(comm -13 <(printf '%s\n' "$before" | sort) <(printf '%s\n' "$after" | sort) | grep . | head -n 1)"
+  [ -n "$f" ] && sed -n 's/^tree=//p' "$BIONIC_GATE_DIR/requests/$f" | tail -n 1
+}
+CT_T2="$(cd "$RT/.worktrees/T2" && pwd -P)"; CT_MAIN="$(cd "$RT" && pwd -P)"
+expect_eq "(ct5-pre) [positive] a literal leading cd asks from the tree it names" "$CT_T2" \
+  "$(ct_tree "$RT" "cd $RT/.worktrees/T2 && bash tests/a.test.sh")"
+expect_eq "(ct5) AC-5.1 a pinned variable's cd asks from the tree it names, not the main checkout" "$CT_T2" \
+  "$(ct_tree "$RT" "D=$RT/.worktrees/T2; cd \"\$D\" && bash tests/a.test.sh")"
+expect_eq "(ct6) AC-5.1 …and so does a literal cd behind 'true &&'" "$CT_T2" \
+  "$(ct_tree "$RT" "true && cd $RT/.worktrees/T2 && bash tests/a.test.sh")"
+expect_eq "(ct7) a cd the reader cannot be sure of asks from where the shim stands" "$CT_MAIN" \
+  "$(ct_tree "$RT" 'cd "$T" || exit 1; bash tests/a.test.sh')"
 
 # ---------------------------------------------------------------------------
 section "§PATH: a landing runs a Lands-on suite where it lives, not only under tests/ (wave-34 T7; D23, AC-14.4)"
