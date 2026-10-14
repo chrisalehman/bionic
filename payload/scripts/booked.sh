@@ -495,14 +495,17 @@ booked_not_admitted() {  # the gate did not admit the command within the call's 
   exit "$BOOKED_WAITED_RC"
 }
 
-# booked_cd_dir — the directory a literal `cd <dir>` opening the command names, or nothing. A
-# plain word only: a quote, an expansion, a glob or a `~` is not read, and the ask then names
-# where the shim stands.
+# booked_cd_dir — where the command's first suite segment runs, or nothing: the one placement reader's
+# answer (wave-36 T25; D11, AC-5.1), `cmd_place "$cmd" "$PWD" suite` (lib/placement.sh), the question
+# the wall asks for the stamp's --stamp-dir, so the gate names the tree the stamp names. A `moving`
+# answer, any other, or a reader that cannot load gives nothing, and the ask names where the shim
+# stands. Until T25 this read a plain word after a `cd` opening the text, and nothing else.
 booked_cd_dir() {
-  local c="${cmd#"${cmd%%[![:space:]]*}"}" d
-  case "$c" in cd[[:space:]]*) : ;; *) return 0 ;; esac
-  d="${c#cd}"; d="${d#"${d%%[![:space:]]*}"}"; d="${d%%[[:space:];&|]*}"
-  case "$d" in ''|-*|*[\'\"\$\`\\~*?\[]*) return 0 ;; esac
+  local d
+  [ -r "$BOOKED_SELF_DIR/lib/placement.sh" ] || return 0
+  # shellcheck source=/dev/null
+  . "$BOOKED_SELF_DIR/lib/placement.sh" 2>/dev/null || return 0
+  d="$(cmd_place "$cmd" "$PWD" suite 2>/dev/null)" || return 0
   printf '%s' "$d"
 }
 BOOKED_ASK_DIR="$stamp_dir"

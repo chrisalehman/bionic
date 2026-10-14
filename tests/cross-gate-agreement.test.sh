@@ -14191,6 +14191,105 @@ expect_eq "RIGOR mutation: …and still runs, relaxing the auditor at 'low'" "re
 expect_ne "RIGOR mutation: …so it reads an old word as a level, and the low row goes red" \
   "$(rv_site "$RV_WALLS" low auditor)" "$(rv_site "$RV_MUT" low auditor)"
 
+# ============================================================
+section "§PLACE — one placement reader, four callers: a mutant cmd_place moves the stamp, the gate's tree, the commit's cwd and the jurisdiction arm at once (wave-36 T25; D11, AC-5.6)"
+# ============================================================
+#
+# ONE SOURCE, FOUR READERS. Where a command runs is `cmd_place` (payload/scripts/lib/placement.sh)
+# and nothing else: the shim's stamp (walls.sh `_bsg_cd_walk`, the wrap's --stamp-dir), the gate's
+# tree (booked.sh `booked_cd_dir`, the request's tree=), the evidence gate's commit cwd (walls.sh
+# `_eg_commit_cwd`, its boundary line) and the read-only role's jurisdiction arm (walls.sh ARM C,
+# `_bsg_commit_outside`). Before wave-36 T25 the first three read the command text with grammars
+# of their own. Pinned here: a doctored copy of the plugin whose `cmd_place` answers tree U for every
+# question is driven through the real hook and the real shim, and every one of the four readers
+# reads U, where the shipped reader gives each its own true place. A caller that kept a grammar of
+# its own would not move with the mutant, and its row goes red.
+#
+# FIXTURE FIDELITY: an engaged git repository R with a suite, and U, a git repository outside it.
+# Nothing in a command below names U, so U can reach a reader only through `cmd_place`.
+PL_D="$SANDBOX/fx/place"; PL_R="$PL_D/repo"; PL_U="$PL_D/u"; PL_SID="plcplace-0000-0000-0000-000000000000"
+mkdir -p "$PL_R/.bionic/tmp" "$PL_R/tests" "$PL_U" "$PL_D/home"
+git -C "$PL_R" init -q 2>/dev/null; git -C "$PL_U" init -q 2>/dev/null
+PL_R="$(cd "$PL_R" && pwd -P)"; PL_U="$(cd "$PL_U" && pwd -P)"
+: > "$PL_R/.bionic/tmp/engaged-${PL_SID}.state"
+printf '#!/bin/bash\necho "PASS: a"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$PL_R/tests/a.test.sh"
+PL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -r "$PL_LIB/placement.sh" ] || PL_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
+# THE DOCTORED SITE: a copy of the plugin whose placement.sh ends by defining `cmd_place` again, to
+# answer U, at rc 0, whatever it is asked.
+PL_MUT="$PL_D/mut"
+mkdir -p "$PL_MUT/hooks" "$PL_MUT/scripts/lib"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$PL_MUT/hooks/" 2>/dev/null
+cp "$PL_LIB"/*.sh "$PL_MUT/scripts/lib/" 2>/dev/null
+cp "$PL_LIB/../booked.sh" "$PL_MUT/scripts/booked.sh" 2>/dev/null
+anchor file payload/scripts/lib/placement.sh 'cmd_place() {'
+printf "\ncmd_place() { printf '%%s\\\\n' '%s'; return 0; }\n" "$PL_U" >> "$PL_MUT/scripts/lib/placement.sh"
+expect_eq "§PLACE mutation: the doctored placement.sh parses, and its cmd_place answers U for any question" \
+  "0 $PL_U" "$(bash -n "$PL_MUT/scripts/lib/placement.sh"; printf '%s ' "$?"; bash -c '. "$1" && cmd_place "bash tests/a.test.sh" /x suite' _ "$PL_MUT/scripts/lib/placement.sh" 2>/dev/null)"
+expect_eq "§PLACE mutation: …while the shipped one answers the cwd for a command that moves nothing" \
+  "$PL_R" "$(bash -c '. "$1" && cmd_place "bash tests/a.test.sh" "$2" suite' _ "$PL_LIB/placement.sh" "$PL_R" 2>/dev/null)"
+
+pl_hook() {  # <hooks dir> <command> [agent_type] -> PL_ST, PL_ERR, PL_WRAP from the bash walls on that payload
+  local p out
+  if [ -n "${3:-}" ]; then
+    p="$(jq -nc --arg s "$PL_SID" --arg c "$PL_R" --arg cmd "$2" --arg t "$3" \
+      '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+        hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+        tool_use_id:"toolu_pl", agent_id:"aplplace-0123456789abcdef", agent_type:$t}')"
+  else
+    p="$(jq -nc --arg s "$PL_SID" --arg c "$PL_R" --arg cmd "$2" \
+      '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+        hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+        tool_use_id:"toolu_pl"}')"
+  fi
+  PL_ERR="$(printf '%s' "$p" | env HOME="$PL_D/home" CLAUDE_CONFIG_DIR="$PL_D/home/.claude" CLAUDE_CODE_SESSION_ID="$PL_SID" \
+      CLAUDE_PROJECT_DIR= BIONIC_PLUGINS_DIR="$PL_D/no-plugins" SHELL=/bin/bash CLAUDE_CODE_SHELL= \
+      bash "$1/bash-walls.sh" 2>&1 >"$PL_D/hook.out")"; PL_ST=$?
+  PL_WRAP="$(jq -r '.hookSpecificOutput.updatedInput.command // ""' "$PL_D/hook.out" 2>/dev/null)"
+}
+pl_stamp() {  # <hooks dir> -> the --stamp-dir the wall hands the shim for a suite that moves nothing; "none" when it hands none
+  local w
+  pl_hook "$1" 'bash tests/a.test.sh' test-runner
+  case "$PL_WRAP" in *booked.sh*) : ;; *) printf 'unwrapped'; return 0 ;; esac
+  case "$PL_WRAP" in *' --stamp-dir '*) w="${PL_WRAP#* --stamp-dir }"; printf '%s' "${w%% *}" ;; *) printf 'none' ;; esac
+}
+pl_tree() {  # <shim> -> the tree= the gate recorded for the shim's run of a suite that moves nothing, from R
+  local before after f
+  before="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null)"
+  ( cd "$PL_R" && env CLAUDE_CODE_SESSION_ID="$PL_SID" bash "$1" --suites a.test.sh -- 'bash tests/a.test.sh' >/dev/null 2>&1 )
+  after="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null)"
+  f="$(comm -13 <(printf '%s\n' "$before" | sort) <(printf '%s\n' "$after" | sort) | grep . | head -n 1)"
+  [ -n "$f" ] && sed -n 's/^tree=//p' "$BIONIC_GATE_DIR/requests/$f" | tail -n 1
+}
+pl_gate() {  # <hooks dir> -> the repository the evidence gate's boundary line names for `git commit` from R; "none" when it names none
+  local l
+  pl_hook "$1" 'git commit -q --allow-empty -m x'
+  l="$(printf '%s\n' "$PL_ERR" | grep -F 'is outside the engaged repository' | head -n 1)"
+  [ -n "$l" ] || { printf 'none'; return 0; }
+  l="${l#evidence-gate: }"; printf '%s' "${l%% is outside the engaged repository*}"
+}
+pl_role() {  # <hooks dir> -> `refused` when the read-only role arm refuses a test-runner's `git commit` from R, else `exempt`
+  # The role arm is armed by the session's roster file; an empty one names no row, so the agent type
+  # judges. It stands for this probe alone: a roster with no row would refuse the suite pl_stamp drives.
+  : > "$PL_R/.bionic/tmp/roster-${PL_SID}.state"
+  pl_hook "$1" 'git commit -q --allow-empty -m x' bionic:test-runner
+  rm -f "$PL_R/.bionic/tmp/roster-${PL_SID}.state"
+  case "$PL_ERR" in *'a read-only role never commits'*) printf 'refused' ;; *) printf 'exempt' ;; esac
+}
+
+# The shipped reader: each caller reads R, where the command runs.
+expect_eq "§PLACE stamp [shipped] a suite that moves nothing is stamped where it stands: no --stamp-dir" "none" "$(pl_stamp "$BIONIC_HOOKS_DIR")"
+expect_eq "§PLACE gate tree [shipped] …and the shim asks the gate from R" "$PL_R" "$(pl_tree "$PL_LIB/../booked.sh")"
+expect_eq "§PLACE commit cwd [shipped] 'git commit' from R is inside: the gate names no outside repository" "none" "$(pl_gate "$BIONIC_HOOKS_DIR")"
+pl_hook "$BIONIC_HOOKS_DIR" "cd $PL_U && git commit -q --allow-empty -m x"
+expect_contains "§PLACE commit cwd [shipped, positive] …while 'cd U && git commit' is named outside, on the same extractor" \
+  "$PL_U is outside the engaged repository" "$PL_ERR"
+expect_eq "§PLACE jurisdiction [shipped] a read-only role's 'git commit' in R is refused by the role arm" "refused" "$(pl_role "$BIONIC_HOOKS_DIR")"
+# The mutant: every caller reads U, from the one reader, with nothing in the command naming it.
+expect_eq "§PLACE stamp [mutant] the wrap's --stamp-dir is U" "$PL_U" "$(pl_stamp "$PL_MUT/hooks")"
+expect_eq "§PLACE gate tree [mutant] the shim asks the gate from U" "$PL_U" "$(pl_tree "$PL_MUT/scripts/booked.sh")"
+expect_eq "§PLACE commit cwd [mutant] the evidence gate places 'git commit' in U and names it outside" "$PL_U" "$(pl_gate "$PL_MUT/hooks")"
+expect_eq "§PLACE jurisdiction [mutant] the role arm places the commit in U, outside the project: exempt" "exempt" "$(pl_role "$PL_MUT/hooks")"
 
 # ============================================================
 section "DEBT-LINE — one debt-line grammar, owned once in lib/debt.sh and sourced by its three consumers (wave-36 T13; D13; REQ-7 AC-7.8; ownership row 'the debt line')"

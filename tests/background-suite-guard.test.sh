@@ -1320,6 +1320,16 @@ w10 t 'cd "$T"; cd t1 && tests/run.sh --only t.test.sh' -
 w10 u "tests/run.sh --only t.test.sh; cd $W10_ABS; tests/run.sh --only t.test.sh" "" "'?'"
 # A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
 w10 v "true && cd $W10_ABS && tests/run.sh --only t.test.sh" "$W10_ABS"
+# THE SHAPES WAVE-35 SAW LEFT UNPLACED (wave-36 T25; D11, AC-5.1). The stamp asks the one placement
+# reader (`cmd_place … suite`, lib/placement.sh), which reads cmd-class's parsed segments: text inside
+# quotes, a heredoc body, a `$(…)` in a segment that moves nothing, a redirection after the cd and a
+# pipe in a note move nothing, so each of these runs in the tree the literal cd names. The raw-text walk
+# before it read the parenthesis, the pipe, the `&` of `2>&1` and the backquote in the text ahead of the
+# suite, and the redirection after the cd, and left every one of them unplaced.
+w10 w "cd $W10_ABS || exit 1; echo \"done (7 FAIL) | see the log\" >> p.md; tests/run.sh --only t.test.sh" "$W10_ABS"
+w10 x "$(printf 'cd %s || exit 1; cat > n.md <<%sEOF%s\n(a) | `b` & c\nEOF\ntests/run.sh --only t.test.sh' "$W10_ABS" "'" "'")" "$W10_ABS"
+w10 y "cd $W10_ABS || exit 1; LOG=\$(mktemp); echo start > \"\$LOG\" 2>&1; tests/run.sh --only t.test.sh >> \"\$LOG\" 2>&1" "$W10_ABS"
+w10 z "cd $W10_ABS 2>/dev/null || exit 1; tests/run.sh --only t.test.sh" "$W10_ABS"
 
 # WHICH SUITES THE STAMP NAMES (wave-26 T61, critic F1; T63, critic K4-S1/N1/N2). The land keeps
 # the newest stamp of each suite, so the wall hands the shim `--suites <names>`, one per suite the

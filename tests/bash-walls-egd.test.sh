@@ -400,6 +400,13 @@ jur_refused() {  # <label> <command> [payload cwd] -> refused by jurisdiction: t
   expect_absent "$1 …and never judged by the bound plan" "$JUR_PLAN_TEXT" "$ERR"
 }
 
+jur_moving() {  # <label> <command> <the segment as the reader names it> [payload cwd] -> refused naming the move, the plan never read
+  jur_drive "$2" "${4:-}"
+  expect_status "$1" 2 "$ST"
+  expect_contains "$1 …refused as a moving form" "moving-form: \`$3\`" "$ERR"
+  expect_absent "$1 …and never judged by the bound plan" "$JUR_PLAN_TEXT" "$ERR"
+}
+
 # ---------- the control: the plan judges what lands inside, and its text is what the rows below assert absent ----------
 jur_drive 'git commit -m x'
 expect_status "JURIS-0 control: a commit in the engaged root under block_plan is judged and refused" 2 "$ST"
@@ -417,14 +424,17 @@ jur_exempt "JURIS-2b …and from a payload cwd in the scratch repo, 'touch a && 
   "touch a && git add a && git commit -m m" "$JUR_S"
 
 # ---------- §REQ-9 9a: the moving forms are still refused ----------
-jur_refused "JURIS-3 9a R2-2 'cd <scratch> && if cd <root>; then git commit; fi' is still refused" \
-  "cd $JUR_S && if cd $JUR_R; then git commit -m x; fi"
-jur_refused "JURIS-3b 9a R2-2 …and 'cd <scratch> && time cd <root> && git commit'" \
-  "cd $JUR_S && time cd $JUR_R && git commit -m x"
-jur_refused "JURIS-3c 9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit'" \
-  "pushd $JUR_R && git commit -m x" "$JUR_S"
-jur_refused "JURIS-3d …and a moving word behind a word the list gained: 'cd <scratch> && mkdir -p d && pushd <root> && git commit'" \
-  "cd $JUR_S && mkdir -p d && pushd $JUR_R && git commit -m x"
+# Since wave-36 T25 (D11, AC-5.3) the commit's place is the one placement reader's (`cmd_place … git`),
+# and a move it cannot be sure of is refused naming that segment, before any plan is read, from any
+# cwd: the four moves below are `moving` answers, not outside commits the wall cannot place.
+jur_moving "JURIS-3 9a R2-2 'cd <scratch> && if cd <root>; then git commit; fi' is still refused" \
+  "cd $JUR_S && if cd $JUR_R; then git commit -m x; fi" "if cd $JUR_R"
+jur_moving "JURIS-3b 9a R2-2 …and 'cd <scratch> && time cd <root> && git commit'" \
+  "cd $JUR_S && time cd $JUR_R && git commit -m x" "time cd $JUR_R"
+jur_moving "JURIS-3c 9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit'" \
+  "pushd $JUR_R && git commit -m x" "pushd $JUR_R" "$JUR_S"
+jur_moving "JURIS-3d …and a moving word behind a word the list gained: 'cd <scratch> && mkdir -p d && pushd <root> && git commit'" \
+  "cd $JUR_S && mkdir -p d && pushd $JUR_R && git commit -m x" "pushd $JUR_R"
 jur_refused "JURIS-3e 9a C1 …and 'git -C <scratch> -C <root> commit' (git obeys the last -C)" \
   "git -C $JUR_S -C $JUR_R commit -m x"
 jur_refused "JURIS-3f 9a R1 …and two commits, both into the scratch repo (the count decides)" \
@@ -463,5 +473,17 @@ jur_refused "JURIS-7g …and 'echo \"gitdir: <root>/.Git\" > .Git' before the co
   "cd $JUR_S && echo \"gitdir: $JUR_R/.Git\" > .Git && git commit -m m"
 jur_exempt "JURIS-7h control: a '.GITIGNORE' file is not the repository directory, exempt as '.gitignore' is" \
   "cd $JUR_S && touch .GITIGNORE && git add -A && git commit -m m"
+
+# ---------- AC-5.3: a variable target is a moving form, refused naming it, never judged on this plan ----------
+# `cd $D && git commit` with D set nowhere in the command: the reader cannot say where the commit
+# runs, so the wall refuses it naming `cd $D`, from the root's cwd and from the scratch repository's
+# alike. Before T25 the leading cd's reader took no variable, fell back to the payload cwd, and the
+# commit was judged on this run's plan (JURIS-0b's text) or exempted as the scratch repository's.
+jur_moving "JURIS-8 AC-5.3 'cd \$D && git commit' from the root is refused as a moving form naming the segment" \
+  'cd $D && git commit -m x' 'cd $D'
+jur_moving "JURIS-8b AC-5.3 …and from a payload cwd in the scratch repository, never exempted there" \
+  'cd $D && git commit -m x' 'cd $D' "$JUR_S"
+expect_absent "JURIS-8c …with no boundary line: the scratch repository is not where the reader placed it" \
+  "is outside the engaged repository" "$ERR"
 
 finish
