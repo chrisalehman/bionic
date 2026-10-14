@@ -51,8 +51,13 @@ set -uo pipefail
 HOOK="${BIONIC_SESSION_START_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-start.sh}"
 
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-has() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing '$2' in: $3"; fi; }
-hasnt() { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpected '$2' in: $3"; else ok "$1"; fi; }
+# has/hasnt READ THE HAYSTACK WITHOUT A PIPE (wave-36 T48; §16.4a/b). They were
+# `printf '%s' "$3" | grep -qF`, which under `pipefail` fails a present needle once the report
+# outgrows the pipe buffer (grep leaves at its first match, printf takes EPIPE) and, in hasnt,
+# reads that same present needle as absent. tests/lib/assert.sh's quoted-`case` helpers are the
+# same containment with no pipe; the 400-character message cut is theirs.
+has()   { expect_contains "$@"; }
+hasnt() { expect_absent "$@"; }
 
 command -v jq >/dev/null 2>&1 || { echo "session-start: jq absent — suite cannot run"; exit 1; }
 
