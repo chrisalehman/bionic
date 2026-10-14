@@ -3999,7 +3999,7 @@ printf 'floor: bash floor.sh\n' > "$ANR/.bionic/config.yaml"
 printf 'two\n' > "$ANR/x.txt"; an_git commit -qam "F: T1 landed"
 AN_F="$(an_git rev-parse HEAD)"
 AN_LOG="$ANREC/floor-${AN_F:0:12}.log"
-printf 'head=%s dirty=0 rc=0\ncommand: bash floor.sh\nfloor: 3 passed, 0 failed\n' "$AN_F" > "$AN_LOG"
+printf 'head=%s dirty=0\ncommand: bash floor.sh\nfloor: 3 passed, 0 failed\nrc=0\n' "$AN_F" > "$AN_LOG"
 printf 'three\n' > "$ANR/x.txt"; an_git commit -qam "F+1: T2 landed"; AN_F1="$(an_git rev-parse HEAD)"
 printf 'four\n' > "$ANR/x.txt"; an_git commit -qam "F+2: T3 landed"; AN_F2="$(an_git rev-parse HEAD)"
 an_verdict() {  # <row> <commit> — the row's green verdict at <commit>, in the landing record
@@ -4076,6 +4076,8 @@ fo_log() {  # <file> <head> <passed> <failed> <listed suite>... -> a whole-run l
     for s in "$@"; do printf '%s ✗ FAIL\n───── %s: captured output ─────\nFAIL: (1) it broke\n───── end %s ─────\n' "$s" "$s" "$s"; done
     printf '──────────────\nGating: %s passed, %s failed\nenv: os=darwin\n' "$p" "$m"
     if [ "$m" -gt 0 ]; then printf 'Failed:\n'; for s in "$@"; do printf '    - %s\n' "$s"; done; fi
+    # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it.
+    if [ "$m" -gt 0 ]; then printf 'rc=1\n'; else printf 'rc=0\n'; fi
   } > "$f"
 }
 fo_run() {  # <script> -> bash with the proof library (and what it reads) from FO_LIB
@@ -4105,13 +4107,18 @@ expect_eq "FO-1 AC-1.3 the judge takes a red whole run's log at F as the floor's
   "rc=0 ${FO_F}" "$(L=red-F.log fo_run "$FO_JUDGE")"
 expect_eq "FO-1b …and lists its red suite as owed, read from the runner's Failed: block" "a.test.sh" \
   "$(fo_run 'proof_floor_owed "$FOREC/red-F.log"')"
-fo_log red-unlisted.log "$FO_F" 2 1
+fo_log red-unlisted.log "$FO_F" 1 2 a.test.sh
 expect_contains "FO-2 a red run whose Failed: block names fewer suites than its verdict counts is refused" \
   "rc=1 " "$(L=red-unlisted.log fo_run "$FO_JUDGE")"
-expect_contains "FO-2b …saying so" "counts 1 failed but its Failed: block names 0" "$(L=red-unlisted.log fo_run "$FO_JUDGE")"
+expect_contains "FO-2b …saying so" "counts 2 failed but its Failed: block names 1" "$(L=red-unlisted.log fo_run "$FO_JUDGE")"
+# FO-2c INVERTED BY WAVE-36 T35 (AC-7.10): the floor counts no roster, so what the regression ran is the plan's word;
+# a red run over two suites of the three, its red named, is the candidate all the same.
 fo_log red-part.log "$FO_F" 1 1 a.test.sh
-expect_contains "FO-2c a red run that is not whole is refused as not whole" "is not a whole run (1 passed and 1 failed of 3 suites at its head)" \
-  "$(L=red-part.log fo_run "$FO_JUDGE")"
+expect_eq "FO-2c a red run over fewer suites than the roster, its red named, is the candidate: no roster counted (exit 0, head F)" \
+  "rc=0 ${FO_F}" "$(L=red-part.log fo_run "$FO_JUDGE")"
+fo_log red-none.log "$FO_F" 2 1
+expect_contains "FO-2d a red run whose Failed: block names none of its reds is refused naming its rc (wave-36 T35)" \
+  "red-none.log ended rc=1, so the regression did not pass" "$(L=red-none.log fo_run "$FO_JUDGE")"
 fo_prove "$FO_F" red-F.log
 expect_eq "FO-3 AC-1.3 the floor proof at F with a.test.sh red and nothing landed: proof_state reads owed a.test.sh" \
   "owed	a.test.sh" "$(fo_state)"

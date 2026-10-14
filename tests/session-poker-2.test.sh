@@ -1600,8 +1600,9 @@ for s46s in a b c; do printf '#!/bin/bash\n' > "$R46/tests/$s46s.test.sh"; done
 W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/elsewhere"
 # THE EVIDENCE ATTESTS ITS HEAD (wave-26 T14; review 7 F1): a floor log carries the suite runner's
-# header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line.
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+# header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line. Since wave-36 T35 (AC-7.10) a floor log
+# also closes with its run's code, `rc=<n>`, its last line: the floor's one grammar is that header and that close.
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
 printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
 expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
@@ -1654,7 +1655,7 @@ expect_eq "46b5 the floor log of an ancestor head, after a landing that changed 
 expect_eq "46b5 …and one line is added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=floor head=${W46_HEAD} " "$OUT"
 expect_eq "46b6 proof_last floor reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
@@ -1697,7 +1698,9 @@ s42_unchanged "46f11 a floor proof never reads a review's range" 1 "$P46"
 # the run read, the runner's last `Gating:` line how it ended; a red run, a note quoting the
 # header, a void suite, and a green inner verdict above a red outer one prove nothing. The green
 # log at the same head (floor2.txt, 46b6b) is this block's positive control.
-printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 3 failed\n' "$W46_HEAD2" > "$S46_REC/floor-red.txt"
+# MOVED BY WAVE-36 T35 (AC-7.10): the floor reads a log's header and its closing rc= line, nothing between, so each
+# refusal below names the line the log lacks or the rc it ended with; the red log closes rc=1, as its run would.
+printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 3 failed\nrc=1\n' "$W46_HEAD2" > "$S46_REC/floor-red.txt"
 printf '# review notes\nThe runner printed:\nhead=%s dirty=0\n(no run here)\n' "$W46_HEAD2" > "$S46_REC/floor-quote.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 0 failed\nVoid: 1 — not timed\n' "$W46_HEAD2" > "$S46_REC/floor-void.txt"
 printf 'floor log\nhead=%s dirty=0\n───── x: captured output ─────\nGating: 5 passed, 0 failed\n───── end x ─────\nGating: 40 passed, 2 failed\n' \
@@ -1705,15 +1708,15 @@ printf 'floor log\nhead=%s dirty=0\n───── x: captured output ───
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-red.txt
 s42_unchanged "46f12 F1 a red run at the head, on a clean tree" 1 "$P46"
-# A RED WHOLE RUN IS A CANDIDATE (wave-35 T9; D8): this one counts 43 suites at a head that has 3, so it is refused as
-# not whole, by that sentence.
-expect_contains "46f12b …naming the verdict as not a whole run" "is not a whole run (40 passed and 3 failed of 3 suites at its head)" "$OUT"
+# A RED WHOLE RUN IS A CANDIDATE (wave-35 T9; D8) only when its Failed: block names its reds; this one names none, so it
+# is refused by the rc it ended with (wave-36 T35; was: not a whole run, 43 suites counted at a head that has 3).
+expect_contains "46f12b …naming the rc it ended with" "floor-red.txt ended rc=1, so the regression did not pass" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
 s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
-expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
+expect_contains "46f13b …naming the close it lacks (wave-36 T35; was: the Gating: verdict)" "floor-quote.txt does not end with an rc=<n> line" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
-s42_unchanged "46f14 F1 a run whose tally does not reach the roster, with a Void: line" 1 "$P46"
-expect_contains "46f14b …naming the tally against the roster (no void term, wave-35 T2)" "40 passed of 3 suites" "$OUT"
+s42_unchanged "46f14 F1 a run log with a Void: line and no closing rc= line" 1 "$P46"
+expect_contains "46f14b …naming the close it lacks (wave-36 T35; was: the tally against the roster)" "floor-void.txt does not end with an rc=<n> line" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
 s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
 poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
@@ -1727,26 +1730,32 @@ printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: capture
   "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
   "$W46_HEAD2" > "$S46_REC/floor-appended.txt"
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nVoid: 1 — not timed, each for the reason given; advisory, not a failure:\n    - c.test.sh (the machine was busy)\nNo gating suite failed; 1 void\n' \
   "$W46_HEAD2" > "$S46_REC/floor-whole-void.txt"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' \
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' \
   "$W46_HEAD2" "$W46_HEAD2" > "$S46_REC/floor-rerun.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-cut.txt
 s42_unchanged "46f17 S3 a log cut off after a nested green verdict inside a capture" 1 "$P46"
-expect_contains "46f17b …saying the verdict is inside a captured output" "inside a suite's captured output" "$OUT"
+expect_contains "46f17b …saying the log does not close with its run's code (wave-36 T35; was: inside a captured output)" \
+  "floor-cut.txt does not end with an rc=<n> line" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-appended.txt
 s42_unchanged "46f18 S3 a red run for this head with another head's green run appended" 1 "$P46"
-expect_contains "46f18b …judged by the last run, which read another head" "read head 0123456789ab" "$OUT"
+expect_contains "46f18b …refused: the log does not close with its run's code (wave-36 T35; was: the last run's other head)" \
+  "floor-appended.txt does not end with an rc=<n> line" "$OUT"
+# 46f19 INVERTED BY WAVE-36 T35 (AC-7.10): the floor counts no roster; what the regression ran is the plan's word, so a
+# log at the head that opens head=<h> dirty=0 and ends rc=0 is a floor whatever it ran (until wave-36 it was refused).
 poke "$R46" proof-add floor record/wave-01-fixture/floor-part.txt
-s42_unchanged "46f19 N1 a green verdict over one suite of the three at the head" 1 "$P46"
-expect_contains "46f19b …naming the tally against the roster" "1 passed of 3 suites" "$OUT"
+expect_eq "46f19 N1 a green log over one suite of the three at the head, closed rc=0: accepted (exit 0)" "0" "$RC"
+expect_eq "46f19b …the proof naming the head, no roster counted" "$W46_HEAD2" "$(s46_last "$P46" floor)"
+s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-whole-void.txt
 # 46f20 INVERTED BY WAVE-35 T2 (D11, AC-2.1): the floor judge has no void term, so two passed and a
 # `Void:` line naming the third is two of three suites, not a whole run (until wave-35 it was a floor).
-s42_unchanged "46f20 N2 a run of two passed with a Void: line naming the third is not a floor" 1 "$P46"
-expect_contains "46f20b …naming the tally against the roster: the Void: line counts for nothing" "2 passed of 3 suites" "$OUT"
+# MOVED BY WAVE-36 T35: no roster is counted; the log is refused because it does not close with its run's code.
+s42_unchanged "46f20 N2 a run of two passed with a Void: line naming the third, no closing rc= line, is not a floor" 1 "$P46"
+expect_contains "46f20b …naming the close it lacks: the Void: line counts for nothing" "floor-whole-void.txt does not end with an rc=<n> line" "$OUT"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-rerun.txt
 expect_eq "46f21 S3 a red run then a green rerun on the same head: the last run is judged, and it passed" "0" "$RC"
@@ -1782,7 +1791,7 @@ expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
 # REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
 # directory, not the file, so a link to a log elsewhere was admitted and the evidence could
 # change after the proof. The same bytes as a regular file under record/ are admitted.
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
 ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
 expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
@@ -1798,6 +1807,8 @@ s42_unchanged "46c8 an evidence path with a space (the line is space-separated)"
 poke "$R46" proof-add floor
 s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
+# Since wave-36 T35 (AC-7.10) proof-add floor takes several logs, each a path under record/; a bare hex word is a head,
+# never a log, so it stays the usage error.
 s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
 
 # The head is held against the working branch's checkout, so a plan whose branch no checkout
@@ -2450,6 +2461,9 @@ s54_full() {
       BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
       BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
       bash tests/run.sh ) > "$S54_REC/$1" 2>&1
+  # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it,
+  # so the floor's one grammar (its first head= line, its last rc= line) reads the run.
+  printf 'rc=%s\n' "$?" >> "$S54_REC/$1"
 }
 # s54_land <id> <path> <content> -> a task tree on wt/01-<id> commits one file and NO suite runs
 # in it (no stamp); the real land merges it. Leaves S54_LAND.

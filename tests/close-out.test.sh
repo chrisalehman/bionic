@@ -2325,8 +2325,9 @@ FL_H="$(fixture_git "$PFL" rev-parse wave/01-fixture)"
 expect_eq "FL0 precondition: the plan carries no floor fact, and the working head no tests/ directory" "0|0" \
   "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
 fl_poke floor-run
-expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 rc=0" \
-  "0|head=$FL_H dirty=0 rc=0" "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
+expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 and closing rc=0 (wave-36 T35)" \
+  "0|head=$FL_H dirty=0|rc=0" \
+  "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
 # with the project root, as proof-add calls it, attests the declared log, and proof_add_line places the line.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
@@ -2342,6 +2343,32 @@ expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed 
 run_close "$PFL" run
 expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc 0), the plan closed" "0|1" \
   "$CO_RC|$(run_open_rc "$PFL/$PLAN_REL")"
+
+# A PROJECT WITH NO tests/*.test.sh AND NO floor: CLOSES ITS RUN ON ITS OWN RUNNER'S LOG (wave-36 T35; REQ-7 AC-7.10; D13).
+# The floor is a fact: the log the project's own runner left, opening head=<the working head> dirty=0 and ending rc=0,
+# is the evidence as it stands, with no config key and no floor-run. The judge and writer are driven as FL2 drives them.
+PFN="$(mk_fixture floor-any)"
+FN_SID="closeout-floor-2"
+sed '/^proved: kind=floor /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
+( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
+FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
+mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
+printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FN_H" > "$PFN/.bionic/docs/record/wave-01-fixture/ci.log"
+expect_eq "FL5 precondition: no floor fact, no tests/ at the working head, and no floor: or floor-attestation: in the config" "0|0|0" \
+  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
+FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
+  h="$(proof_attested floor "$2/record/wave-01-fixture/ci.log" "$3" "" "" "$4")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$5" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
+expect_eq "FL6 AC-7.10 the judge attests the project's own runner's log, no key and no roster, and the floor fact is written from it" \
+  "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"
+FN_RC="$( ( in_fixture "$PFN" || exit 9
+  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    CLAUDE_CODE_SESSION_ID="$FN_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/fn-poker" 2>&1; echo $?)"
+expect_eq "FL7 AC-7.10 current 8 is admitted on that floor (exit 0)" "0|8" "$FN_RC|$(sed -n 's/^current: //p' "$PFN/$PLAN_REL")"
+run_close "$PFN" run
+expect_eq "FL8 AC-7.10 close-out.sh run delivers on the project's own runner's log (rc 0), the plan closed" "0|1" \
+  "$CO_RC|$(run_open_rc "$PFN/$PLAN_REL")"
 
 section "DEBT-CARD — wave-30 T22 (AC-11.4, AC-11.2; D2, P2): the release card says the run's touches and burns; the continuation carries each unburned item"
 # ============================================================
