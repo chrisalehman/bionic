@@ -8,6 +8,202 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.19.0 — 2026-10-14
+
+This is the zero machine errors release: the 1.18.0 run's census of 32 open machine errors
+(`record/wave-35-no-workarounds/machine-census.md`) is worked down to eight root causes, D7 to D14, and each is fixed
+once, at the layer it lives in. Every fix has one
+shape: a fact that had several readers with several answers, or none, now has one owner that every consumer asks. Where
+a command runs, what a suite reads, which sessions a run has had, what a branch's head is, what governs a session,
+whether a review still covers, and how a gate request ends are each one reader now. The ledger verbs read the branch
+and lose nothing, the 1.18.0 release text is corrected below, and the run ran on its own branch from Step 4 on. Thirty-six
+build rows landed. The census rows no row touched are debt-class and are carried in the wave's continuation, not here.
+The walk and the reviews of the settled whole found four more fixes (T42, T43, T44 and T47), and they landed.
+This is a minor release by the policy above: the placement reader, the reads index, the judge's cover rule and the new
+verbs are new capability. `canonical_sdlc_version` stays 14. This run's own floor is Step 6's last act and is recorded
+in the wave's record, not here, because the release text is written before it.
+
+**Migration.** A person who runs bionic's own checkout runs `/bionic:setup` once, to take the new shell function (T1);
+everyone else needs nothing. Eleven rows added or changed a refusal that a script of yours may have met, and the
+behaviours around them changed too.
+
+- T1: the `claude()` line setup writes adds `--plugin-dir <checkout>/payload` when the working directory is inside a git
+  checkout whose `plugin.json` names bionic, and nothing elsewhere. `doctor` reads the 1.18.0 two-line body as stale and
+  says so. `version` and `doctor` print `(in place) · <commit> · <root>` for a session that runs a checkout
+  (`T1-run-on-branch.md`).
+- T4 and T25: a commit whose directory the shell cannot place is refused, naming the segment as typed, and is never judged
+  against the run's plan. That is a `cd` through an unpinned variable, in a subshell or under an `if`. A commit placed
+  outside the project root and outside every tree the roster knows is exempt, so a read-only agent commits in its
+  scratch repository. The "two directories" refusal is gone (`T4-jurisdiction.md`, `T25-callers.md`).
+- T7 and T31: the judge reads cover from what a commit changed. A whole reading no longer covers whatever its head names,
+  a commit that touches `tests/run.sh` or `tests/lib/` is code, and a review-born fix row covers only the question whose
+  reading bore it. A question can read `uncovered` where 1.18.0 read it covered (`T7-cover-judge.md`,
+  `T31-fix-seen-by-asker.md`).
+- T8: `task-add --born` refuses a finding whose newest move is `defer`, quoting the move; a later move to fix lifts it.
+  `finding-move <record>#<n> fixed <row>` refuses a row the plan's Tasks table does not carry (`T8-fixed-move.md`).
+- T13: `debt add` reads any record with grammar-true `debt:` lines and no longer needs a `reviewed:` line. It refuses a line
+  that does not parse and writes nothing. Any `debt` verb that names no plan, in a session bound to none, refuses and
+  names `bind`. close-out
+  `run` refuses a `debt.md` line that fails the grammar before its first act, naming the line (`T13-debt-grammar.md`).
+- T14: close-out lands the plan's open integrate and close rows itself, and refuses before its first act when it has such
+  rows to land and no session is bound to the plan. `task-set --reason '<why>'` is accepted on a delivered plan and refuses a reason that carries `|`,
+  a tab or a line break (`T14-close-out-state.md`).
+- T27: the dispatch wall refuses a `Lands-on:` that omits a suite the reads index names for the brief's Files, and `none
+  <reason>` for such a row. It prints the missing suites and the whole line to paste (`T27-consumers.md`).
+- T32: the stop wall refuses with one line that names every ready row while a writer slot is free; one decline answers all
+  of them. Before this it named only as many rows as there were free slots (`T32-one-width-fact.md`).
+- T35: `floor-attestation:` is removed, and `proof-add floor` and `floor-run` refuse a config that carries it; delete the
+  line and cite the regression's log. A floor log is read in one grammar: its first line is `head=<40-hex> dirty=0` and its
+  last line is `rc=<n>`. A log with no closing `rc=` line is refused. `floor-run`'s own log moved to that shape, so one written
+  by 1.18.0 does not pass: run `floor-run` again. `proof-add floor` takes several logs of one head (`T35-floor-is-a-fact.md`).
+- T42: `task-add --born floor:<suite>` is refused unless the newest floor proof owes that suite or the landing record holds
+  an `ev=standing` event for it at a commit on the working branch; the refusal names both facts (`T42-born-floor-backed.md`).
+- T9 and T11: `rule` and `finding-move` read the user's words across every session the plan records, and name the sessions
+  they read when they refuse. `stop-run` takes a gate request id or a holder's name as well as a detached run
+  (`T9-run-sessions.md`, `T11-gate-lifecycle.md`).
+
+### A session in a checkout runs the checkout (D7, ADR-055)
+
+The tool that governs a bionic run and the tool the run is building are one thing. ADR-055 is Accepted.
+
+- T1 (`T1-run-on-branch.md`): the session-start hook writes `.bionic/tmp/loaded-<sid>.state` (the loaded root, its commit,
+  the start time and one sha256 per hook, skill, agent and command file), and the verdict `version` and `doctor` print
+  reads a live session's record before the registry.
+- T30 (`T30-start-hook-bash5.md`): the hook indexed an unset array under `set -u`, which bash 4 and 5 refuse, so no load
+  record was written. Found by T2 mid-build; the array is initialised.
+- T2 (`T2-restart-truth.md`): "restart needed" is a content fact. `doctor` re-hashes the recorded set in the recorded root
+  and names each class whose hash moved, and prints nothing for an mtime-only change. close-out writes one `governed-by:
+  <root> <commit> from <ISO>` line per root to the card and the continuation.
+
+### The gate ends what it cannot resume (D8)
+
+- T11 (`T11-gate-lifecycle.md`): a never-admitted request whose holder is dead is ended (`rc=gone`) and the ask gets a fresh
+  one. `stop-run` ends a request, terminates the holder's process group and writes `ev=stop-run` to the landing record,
+  and the hand-hold count shows it under its own kind. This ends the 1.18.0 Known limit that the gate resumed such a
+  request under its old kind.
+- T34 (`T34-taking-lock-stale.md`): a claim in progress is stale in five seconds. The gate's steal made its token inside the
+  lock, which reset the lock's age, so it never stole a lock with no pid at any age.
+
+### The judge holds one cover rule (D9, ADR-056)
+
+ADR-056 is Accepted, and it amends ADR-054's cover term.
+
+- T7 (`T7-cover-judge.md`): every reading is covered to its head, and a later commit extends it when every path it touched is
+  prose or it is the landing of a row born of a reading or of the floor. Each commit the judge reads prints `cover <sha>
+  prose|born-review|born-floor|owes`.
+- T31 (`T31-fix-seen-by-asker.md`): a review-born landing holds only on the chain of the question whose reading bore the row.
+- T28 (`T28-verbs-ask-the-judge.md`): `proof-add review` loses the build-rows hold and registers at the reading's head. A
+  review row is ready again only when the judge reads a question `uncovered`. `task-add --born floor:<suite>` writes the
+  marker.
+- T40 (`T40-tick-asks-once.md`): one tick walked the commits three times; it asks the judge once.
+- T42 (`T42-born-floor-backed.md`): the marker names its red. Six rows of this run (T33, T36, T37, T38, T39 and T40) carry
+  `born: floor`, and no floor proof stood in the plan when they were added. They stand as landed, and the verb refuses an
+  unbacked marker from now on.
+
+### The run records its sessions, and verbs read the run (D10)
+
+- T9 (`T9-run-sessions.md`): binding appends `- session: <sid> bound <ISO> by <act>` to the plan, and the user's words are
+  read across every recorded session.
+- T29 (`T29-launch-arm-and-adopt.md`): the commit gate's launch arm reads every roster whose `plan=` is this plan and the
+  Dispatch ledger, and `adopt` carries active reader rows as it carries writer rows.
+- T10 (`T10-closure-and-markers.md`): a task line keeps every ` <key>: ` marker when its text is rewritten, and one closure
+  rule serves the dispatch hold and `adopt`; a dead session's row whose files are sweepable is closed and the hold's
+  remedy names `sweep`.
+- T47 (`T47-adopt-lands-on-whole.md`): `adopt` cut every adopted row's `lands_on=` at 400 characters, so a long landing set
+  was lost. It keeps the whole set.
+
+### One placement reader (D11)
+
+- T3 (`T3-placement.md`): `cmd_place` reads where a command runs from the parsed segments, in one pass, so its cost is the
+  segment count and never the text's length.
+- T4 (`T4-jurisdiction.md`): the evidence gate asks it before the role arm, and `engage.sh --root <dir>` engages that root.
+- T25 (`T25-callers.md`): the shim's stamp, the gate's tree and the evidence gate's commit reader are its callers; the
+  raw-text clauses are deleted.
+- T43 (`T43-two-cd-chain.md`): the walk found `cd A && cd B && git commit` placed at B by one caller and as moving by the
+  other. Both place it alike.
+
+### One file-to-suite fact (D12)
+
+- T5 (`T5-reads-index.md`): `anchors.sh reads_index` prints the suites that read each file, from the suites' own text.
+- T27 (`T27-consumers.md`): `brief`, the dispatch wall's Lands-on arm and the cover rule read it.
+- T6 (`T6-pinned-text.md`): `refuse` §INV keys a refusal site by `file:function`, so a reworded line stays green and a moved
+  call goes red.
+
+### Ledger verbs tell the truth and read the branch (D13)
+
+- T12 (`T12-branch-reads.md`): a failed launch sync leaves a log and the tick prints it once. `proof-add`, `waive` and
+  `deliver` read the branch's ref, which ends the 1.18.0 Known limit that they read a checkout's head. One plan-line
+  reader serves the judge and the wall.
+- T13 (`T13-debt-grammar.md`) and T14 (`T14-close-out-state.md`): one debt-line grammar; close-out lands the rows its merge
+  lands, merges a line into a fenced section, and clears the engaged marker last.
+- T24 (`T24-block-heading.md`): one AC-block heading matcher, so a block `matrix-render` wrote is found by the verbs.
+- T32 (`T32-one-width-fact.md`), T41 (`T41-task-set-files.md`) and T44 (`T44-walk-pointer.md`): the stop wall's refusal names
+  every ready row once; a pending row's Files cell is corrected by `task-set`; the walk pointer has one writer.
+- T35 (`T35-floor-is-a-fact.md`): the floor is the log of a run, in one grammar, and no person's word.
+
+### Standing reds the landings found
+
+Each landing ran its own suites, so the reds it caused in suites outside them were found by the next landing. Each is
+repaired at its site: T33 (`T33-said-no-pipe.md`), T36 (`T36-stop-wall-pins.md`), T37 (`T37-shell-lint-reds.md`), T38
+(`T38-one-roster-reader.md`) and T39 (`T39-sp2-pins.md`). The reads index (D12) is what now routes a later row to the
+suites that read its files.
+
+### The doctrine and this release (D14)
+
+T15 (`T15-doctrine.md`): the three loaded sentences that still stated the old floor rule state ADR-054's. ADR-055 and
+ADR-056 are Accepted, and ADR-054 is amended by ADR-056.
+
+### Corrections to 1.18.0
+
+The 1.18.0 block above is untouched; release-check §ENTRY-1.18.0 holds its checksum. Four things in it were wrong or
+silent, and this section states them.
+
+- **Two refusals 1.18.0 introduced and its Migration list omitted.** From Step 7 the commit wall refuses a plan that claims a
+  regression and carries no floor proof line (T31 of that run, `T31-verify-gate.md`), and `floor-run` refuses a dirty
+  checkout before it runs, naming the first five paths (T32 of that run, `T32-floor-run-dirty.md`). The part headed "Fixes
+  the review ordered" describes them, but a script's author reads Migration, and its Migration said "None is required".
+  The same row also dropped Step 5's demand for the floor keys, which Migration did not list either.
+- **The text-only floor arm.** The Step 7 refusal above reads text only (A-orch-50): it sees that a floor line is absent,
+  never whether that floor is covered, owed or uncovered. That is by design, since ADR-054 puts the verdict with the
+  judge and the commit wall reads no git (`T12-branch-reads.md`, section C27). It is stated under Known limits.
+- **D22's two deferred sentences.** The 1.18.0 run deferred six findings and its Known limits carried four of them. The
+  other two are stated below, and both are closed in this release, by T8 and by T10.
+- **The count of fixes.** "The four fixes the review ordered" and the part headed "Fixes the review ordered" count T34. The
+  review ordered three fixes, T31, T32 and T33. T34 was raised by the orchestrator (A-orch-48), not by the review
+  (wave-35 `critic-adversarial-3.md` finding 6). The three omitted limits bring 1.18.0's twelve to fifteen.
+
+### Known limits
+
+Carried to the next release, with the limits 1.18.0 left out. The count of Known limits in this block is 9. The first
+seven are carried and the last two are closed in this release.
+
+- Known limit: The judge prints each commit cover basis only through facts_cover, which no verb, wall, tick or card
+  calls yet; the basis is read in tests and by hand. (`critic-adversarial.md#2`)
+- Known limit: The reads index misses a suite that reads a library by glob or through the test prelude, so a pin in
+  such a suite can still go red at a later landing rather than at the row that caused it. (`critic-adversarial.md#3`)
+- Known limit: A row touching a widely read library lands on 44 to 71 of the suites, and a landing can take two hours
+  on an 8-core machine; no width ceiling exists yet. (`critic-adversarial.md#4`)
+- Known limit: The words that authorize a finding move are read from the transcripts of every session the plan
+  records, in any project directory, not only this one. (`critic-adversarial.md#5`)
+- Known limit: The floor proof accepts any log whose first head= line and last rc=0 line fit the grammar, including
+  one no runner wrote; the grammar is the one the synth-vision filing asked for. (`critic-adversarial.md#6`)
+- Known limit: The brief verb takes the first record path on a row Files line as its Expected artifact, so a row
+  naming another record first needs that line corrected by hand. (`critic-adversarial.md#7`)
+- Known limit: from Step 7 the commit wall refuses a plan that claims a regression and carries no `proved: kind=floor`
+  line, and it reads text only, so a floor line that owes suites passes it and the judge holds them at `current 7` and
+  `current 8`. (A-orch-50, `T12-branch-reads.md`)
+- Known limit, closed by T8: `task-add --born` still admits a finding the person moved to defer when its reader's
+  rating is inside the fix policy; the guard reads a move to fix, not a move to defer. (omitted from 1.18.0; wave-35
+  `critic-adversarial-3.md#1`)
+- Known limit, closed by T10: a dead session's open row whose files are already sweepable still holds its plan row,
+  and the refusal's remedy (`adopt`) lists nothing for that session; `session-poker.sh sweep` clears it. (omitted from
+  1.18.0; wave-35 `critic-adversarial-3.md#2`)
+
+The twelve Known limits of 1.18.0 are carried as they stood and were not re-triaged here, except three this release ends:
+`proof-add`, `waive` and `deliver` read a checkout's head (T12), the gate resumed a dead holder's request under its old kind
+(T11), and the cover rule read every path under `tests/` as non-code, which now holds for every path but `tests/run.sh`
+and `tests/lib/` (T7).
+
 ## 1.18.0 — 2026-10-12
 
 A wave now owes one whole run of the tests, after its review, and the machine counts what changed since that
