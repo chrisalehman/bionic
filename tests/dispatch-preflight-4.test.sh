@@ -3493,6 +3493,58 @@ chmod 644 "$(roster_path "$REPO" "$SID_B")"
 expect_eq "HDW.6 an unreadable roster on session B holds nothing: the dispatch is admitted" "allow" "$GATE_VERDICT"
 expect_contains "HDW.6b …and the wall says the roster cannot be read" "roster-${SID_B}.state cannot be read" "$GATE_ERR"
 
+# ONE CLOSURE RULE (wave-36 T10; REQ-4 AC-4.4, D10). The hold applied acks but not adopt's closure, so a row
+# held by a session that is gone and whose files the sweep already takes was refused with a remedy, "adopt, then
+# acked", that loops: adopt counts that row closed and never offers it (research C15). Both now ask lib/fill.sh
+# `roster_row_open`: a dead session's row whose files are sweepable is closed. A dead session is one the roster
+# names whose pid is not live (patrol_live_session_ids reads <claude home>/sessions/*.json); sweepable is the
+# sweep's own window, every state file of that session older than the poker interval. FIXTURES: hdw_repo's T1
+# held on session B's roster; `hdw_age` dates every one of B's files under .bionic/tmp to 2026-01-01;
+# `hdw_live` writes a sessions file naming B with this shell's pid, so B is live.
+# fails-when: a dead sweepable session's row still refuses the dispatch; a live session's row, however old its
+# files, is admitted; a dead session's young row is admitted, or refused with a remedy that names no sweep;
+# adopt and the wall answer the same fixture differently.
+hdw_age() {  # <repo> <sid> — every state file of <sid> under .bionic/tmp dated 2026-01-01
+  find "$1/.bionic/tmp" -name "*$2*" -exec touch -t 202601010000 {} + 2>/dev/null
+}
+HDW_SESSIONS="$PROBE_ENV_HOME/.claude/sessions"
+hdw_live() {  # <sid> <repo> — a sessions file naming <sid> with a live pid (this shell's)
+  mkdir -p "$HDW_SESSIONS"
+  printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$1" "$2" > "$HDW_SESSIONS/hdw-live.json"
+}
+hdw_unlive() { rm -f "$HDW_SESSIONS/hdw-live.json"; }
+
+hdw_repo hdw7
+hdw_hold "$REPO" "$SID_B" w-T1
+hdw_age "$REPO" "$SID_B"
+expect_eq "HDW.7-0 the fixture: every file of session B is dated 2026-01-01" "0" \
+  "$(find "$REPO/.bionic/tmp" -name "*$SID_B*" -newermt 2026-01-02 2>/dev/null | /usr/bin/grep -c .)"
+expect_true "HDW.7-0b …and session B's roster is one of them" test -f "$(roster_path "$REPO" "$SID_B")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.7 AC-4.4 w-T1 open on session B's roster, B dead and its files sweepable: the dispatch onto T1 is admitted" \
+  "allow" "$GATE_VERDICT"
+expect_eq "HDW.7b …and the launch row of w-T1-r1 is written" "1" \
+  "$(cat "$(roster_path "$REPO" "$SID_A")" 2>/dev/null | /usr/bin/grep -c '|name=w-T1-r1|')"
+HDW7_ADOPT="$(cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$PROBE_ENV_HOME/.claude" HOME="$PROBE_ENV_HOME" \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" adopt --report-only 2>&1)"
+expect_contains "HDW.7c the same fixture asked of adopt: the row is closed there too (one rule, two callers)" \
+  "1 row(s) skipped" "$HDW7_ADOPT"
+
+hdw_repo hdw8
+hdw_hold "$REPO" "$SID_B" w-T1
+hdw_age "$REPO" "$SID_B"
+hdw_live "$SID_B" "$REPO"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+hdw_unlive
+expect_eq "HDW.8 the same old files, session B live: the row is still B's, refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.8b …naming the writer and B's session" "row T1 has a live writer w-T1 (session ${SID_B:0:8})" "$GATE_REASON"
+
+hdw_repo hdw9
+hdw_hold "$REPO" "$SID_B" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.9 session B dead, its files inside the poker interval: not yet sweepable, refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.9b AC-4.4 …and the remedy names sweep" "session-poker.sh sweep" "$GATE_REASON"
+
 # ============================================================================
 section "§FILES — a template's rendered outputs join the row's Files, and the wall prints them (wave-36 T6; D12, AC-6.3; C68)"
 # ============================================================================
