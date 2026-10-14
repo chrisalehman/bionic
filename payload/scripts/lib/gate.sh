@@ -216,22 +216,25 @@ _gate_lock() {  # rc 0 holding $_GD/lock; rc 1 when it cannot be had in about te
   done
 }
 
-# _gate_steal <lock> — drop a dead holder's lock, one stealer at a time: the token is made
-# inside the lock, so it goes with it, and the lock is dropped only while it is still dead
-# under the pid this stealer saw. A token older than a minute was left by a killed stealer.
+# _gate_steal <lock> — drop a stale lock (a dead holder's, or one with no pid left by a claimer
+# killed after its mkdir), one stealer at a time. The token sits BESIDE the lock (<lock>.steal, as
+# lib/slots.sh's _slots_steal keeps its own): inside it, the token's mkdir would reset the lock's
+# age and a lock with no pid would read `taking` to the stealer itself, so the gate never stole
+# one (wave-36 T34). The lock is dropped only while it is still stale under the pid this stealer
+# saw. A token older than the bound was left by a killed stealer; _slots_old clears it.
 _gate_steal() {
-  local p
+  local p tok="$1.steal"
   p="$(_slots_pid_of "$1")"
-  if ! mkdir "$1/steal" 2>/dev/null; then
-    _slots_old "$1/steal" && rmdir "$1/steal" 2>/dev/null
+  if ! mkdir "$tok" 2>/dev/null; then
+    _slots_old "$tok" && rmdir "$tok" 2>/dev/null
     return 1
   fi
   if [ "$(_slots_pid_of "$1")" = "$p" ]; then
     case "$(_slots_state "$1")" in
-      dead|orphan) _slots_drop "$_GD" "$1"; return 0 ;;
+      dead|orphan) _slots_drop "$_GD" "$1"; rmdir "$tok" 2>/dev/null; return 0 ;;
     esac
   fi
-  rmdir "$1/steal" 2>/dev/null
+  rmdir "$tok" 2>/dev/null
   return 1
 }
 
