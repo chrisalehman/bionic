@@ -1834,7 +1834,12 @@ S48_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 
 R48="$(make_repo s48-review)"; new_roster "$R48"; ( cd "$R48" && git commit -q --allow-empty -m init )
 add_row "$R48" name=w-T2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 600)"
-P48="$(s42_plan "$R48" 4)"
+# A BASE THE JUDGE CAN HOLD (wave-36 T39; D9, as T28 gave s59_world): live:head asks facts_state, which judges only a plan
+# whose base-sha: is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder abc1234.
+S48_BASE="$(git -C "$R48" rev-parse HEAD)"
+P48="$(s42_plan "$R48" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S48_BASE:0:8}
+  branch: wave/01-fixture")"
 awk '
   /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
   /^- T5: / { print "- T3: review passes, one per landed difference — record/wave-01-fixture/review.md" }
@@ -1853,7 +1858,7 @@ awk '
   && git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the first build lands" ) >/dev/null 2>&1
 mkdir -p "$R48/.bionic/docs/record/wave-01-fixture"
 W48_A="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
-printf '# review\n\nreviewed: %s..%s (the first build)\n' "$(git -C "$R48" rev-parse HEAD)" "$W48_A" \
+printf '# review\n\nreviewed: %s..%s (the first build)\n' "$S48_BASE" "$W48_A" \
   > "$R48/.bionic/docs/record/wave-01-fixture/review.md"
 expect_eq "48a0 precondition: the T3 row is a review with an empty reads cell, pending" \
   "T3|6|review|follows the build|critic|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
@@ -1895,7 +1900,9 @@ expect_eq "48d2 AC-6.5 at the proof's head the review is not offered" "no" "$(s4
 expect_eq "48d3 …its WAIT line names the proof head it has not moved past" \
   "poker: WAIT T3 — live:head: nothing landed past the review proof at ${W48_A:0:12}" \
   "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
-git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the second build lands" >/dev/null 2>&1
+# THE LANDING TOUCHES CODE (wave-36 T39; D9): the judge reads a commit that touches nothing as prose, and a review row is
+# ready again only past a commit that owes (the question reads uncovered), so B changes a.sh as s59_world's landings do.
+( cd "$R48/.worktrees/01-fixture" && printf 'B\n' >> a.sh && git add a.sh && git commit -q -m "the second build lands" ) >/dev/null 2>&1
 W48_B="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 expect_true "48e0 precondition: the working branch moved past A" test "$W48_B" != "$W48_A"
 poke_pressure "$R48" 8192 1.0 tick
