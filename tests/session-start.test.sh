@@ -972,6 +972,26 @@ hasnt "16.6 THIS session's own roster is never listed as a predecessor" \
 hasnt "16.7 THIS session's own stamp is never listed as a predecessor" \
   "  ${CUR_SID:0:8} " "$OUT"
 
+# 16.4 WAS RED AT THE FLOOR FOR A REASON THAT IS NOT THE HOOK'S (wave-36 T48; D10; AC-4.1, AC-6.1).
+# The hook printed `predecessor stamps:` — the floor's own quoted block carries it — and `has`
+# said it was missing, because `has` piped the 61 KB report into `grep -qF` under `pipefail`:
+# grep leaves at its first match, the printf still writing takes EPIPE, and the pipeline fails
+# on a needle that is present (`printf: write error: Broken pipe`, session-start.test.sh:54,
+# in the floor log). That race needs load to lose, so it is forced here: a haystack past any
+# pipe buffer with the needle on its first line and SIGPIPE ignored, which makes the write error
+# certain. `hasnt` had the same pipeline and failed the other way — a present needle read as
+# absent, so the row PASSED. Each helper's verdict is captured from a subshell so the forced
+# case is judged by these rows and not counted twice.
+SS_BIG="$(printf 'needle-first-line\n'; head -c 300000 /dev/zero | tr '\0' 'x')"
+SS_HAS_V="$(trap '' PIPE; has "probe" "needle-first-line" "$SS_BIG" 2>&1 | head -1)"
+SS_HASNT_V="$(trap '' PIPE; hasnt "probe" "needle-first-line" "$SS_BIG" 2>&1 | head -1)"
+eq    "16.4a has finds a needle on the first line of a haystack past the pipe buffer, with SIGPIPE ignored" \
+  "PASS: probe" "$SS_HAS_V"
+eq    "16.4b hasnt reports that same present needle as present: a broken pipe cannot read it as absent" \
+  "FAIL: probe" "$SS_HASNT_V"
+has   "16.4c …and a needle truly absent from the same haystack still passes hasnt" \
+  "PASS: probe" "$(trap '' PIPE; hasnt "probe" "needle-not-there" "$SS_BIG" 2>&1 | head -1)"
+
 # AND THE SECOND DRIVE IS THE WHOLE HOOK, sweep included. The sweep is bounded
 # (`BIONIC_SWEEP_BOUND_SECONDS`, default 10, hooks/session-start.sh), and the bound is the one
 # clock this section cannot remove: it is the hook's, and §17 proves what it does when it fires.
