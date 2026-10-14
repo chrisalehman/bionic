@@ -1773,13 +1773,13 @@ C_RE_EXECUTES=$(brief_field "$LIFTED" re_executes)
 # channel with the advisories below, and recorded on the roster as the row's Files. A project with no
 # agents-src/render.sh has no units, and its Files are what the brief declared.
 dp_rendered_twins() {  # <render.sh> <files, comma-joined> <root> -> one `<template>|<output>` per twin not in files, then `|<manifest>`
-  awk -v files="$2" -v root="$3" '
+  # The unit table is read by lib/units.sh `units_render_units` (wave-36 T38; D12, AC-6.3): `unit<TAB><templates dir><TAB><output dir>`
+  # per unit, and `manifest<TAB><path>`. This function only matches the Files against it.
+  units_render_units "$1" 2>/dev/null | awk -F'\t' -v files="$2" -v root="$3" '
     function norm(t) { sub(/^[[:space:]]+/, "", t); sub(/[[:space:]]+$/, "", t); if (root != "" && index(t, root "/") == 1) t = substr(t, length(root) + 2); sub(/^\.\//, "", t); return t }
-    function units(buf,   w, k, m, p) { m = split(buf, w, /[[:space:]]+/); for (k = 1; k <= m; k++) if (split(w[k], p, "|") == 2 && p[1] != "" && p[2] != "") { src[++nu] = p[1]; dst[nu] = p[2] } }
     BEGIN { n = split(files, f, ","); for (i = 1; i <= n; i++) { f[i] = norm(f[i]); have[f[i]] = 1 } }
-    inu { if (index($0, "\"")) { units(substr($0, 1, index($0, "\"") - 1)); inu = 0 } else units($0); next }
-    /^RENDER_UNITS="/ { b = substr($0, 15); if (index(b, "\"")) units(substr(b, 1, index(b, "\"") - 1)); else { units(b); inu = 1 }; next }
-    /^MANIFEST_REL="[^"]+"/ { manifest = substr($0, 15); manifest = substr(manifest, 1, index(manifest, "\"") - 1) }
+    $1 == "unit" { src[++nu] = $2; dst[nu] = $3; next }
+    $1 == "manifest" { manifest = $2; next }
     END {
       for (i = 1; i <= n; i++) {
         t = f[i]
@@ -1791,7 +1791,7 @@ dp_rendered_twins() {  # <render.sh> <files, comma-joined> <root> -> one `<templ
         }
       }
       if (any && manifest != "" && !(manifest in have)) print "|" manifest
-    }' "$1" 2>/dev/null
+    }'
 }
 DP_TWINS_SAID=""
 if [ -n "$C_FILES" ] && [ -f "$BIONIC_ROOT/agents-src/render.sh" ]; then
