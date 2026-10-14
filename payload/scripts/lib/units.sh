@@ -2511,6 +2511,16 @@ units_table_cells() {
 # THE LINE IS FOUND AS THE GATE FINDS IT: `^[ \t]*-?[ \t]*Step[ \t]+N[ \t]*:` (walls.sh's own
 # pattern), the first one in the section. Its prefix — indent, marker, key, colon — is kept;
 # only the text after it is replaced, and the block lines under it are not touched.
+#
+# A TASK LINE'S MARKERS OUTLIVE ITS TEXT (wave-36 T10; REQ-4 AC-4.3, D10). A `- T<n>:` line is
+# `- T<n>: <text>[ <key>: <value>]…`: task-add ends it with ` born: review S<n> <reach> of=…` or
+# ` born: floor <suite>`, the marker the judge, the fix-cap and `disposition` read, and a later verb
+# may add its own ` <key>: <value>`. The text is what precedes the first ` <key>: ` (a lowercase
+# key); a rewrite replaces the text, or with `append` extends it, and each marker follows in its
+# order. A marker whose ` <key>: ` the new text already carries is the new text's, so row-landed,
+# which folds the old text into the new one, writes each marker once. Replace mode used to drop
+# the born marker at the landing summary (debt step-line-drops-born). A `Step N:` line carries no
+# markers: its text, ` current: ` and all, is replaced whole as before.
 units_step_line() {
   local plan="${1:-}" key="${2:-}" text="${3:-}" app="${4:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 1
@@ -2521,6 +2531,7 @@ units_step_line() {
       isstep = (key !~ /^T/)
       kq = key; gsub(/[.]/, "[.]", kq)
       pat = isstep ? ("^[ \t]*-?[ \t]*Step[ \t]+" kq "[ \t]*:") : ("^[ \t]*-?[ \t]*" kq "[ \t]*:")
+      mk = " [a-z][a-z0-9_-]*: "
     }
     { L[++nl] = $0 }
     END {
@@ -2549,7 +2560,18 @@ units_step_line() {
         line = L[at]; match(line, pat)
         pre = substr(line, 1, RLENGTH); rest = substr(line, RLENGTH + 1)
         sub(/^[ \t]+/, "", rest); sub(/[ \t]+$/, "", rest)
-        L[at] = pre " " ((app && rest != "") ? rest "; " text : text)
+        marks = ""
+        if (!isstep && match(" " rest, mk)) {
+          marks = substr(" " rest, RSTART); rest = substr(rest, 1, RSTART - 1); sub(/[ \t]+$/, "", rest)
+        }
+        out = (app && rest != "") ? rest "; " text : text
+        while (marks != "") {
+          match(marks, "^" mk); hl = RLENGTH; k = substr(marks, 2, hl - 3); tail = substr(marks, hl + 1)
+          if (match(tail, mk)) { seg = substr(marks, 1, hl + RSTART - 1); marks = substr(tail, RSTART) }
+          else { seg = marks; marks = "" }
+          if (!index(" " out, " " k ": ")) out = out seg
+        }
+        L[at] = pre " " out
       } else {
         # AFTER a line, or BEFORE the first task line when a step line has no step to follow.
         newl = (isstep ? "- Step " key ": " : "- " key ": ") text

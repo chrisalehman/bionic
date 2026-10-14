@@ -441,7 +441,9 @@ proof_finding_lines() {
 # (wave-31 T32; D6), so no line of the plan re-rates it. The priority is the table's for that rating
 # (`proof_priority`); a `moved: <record>#<n> to=<defer|fix>` line (T42, `_proof_moved_to`) replaces
 # the priority alone, so the third word is the one a move changes — except that an S1 is never
-# deferred, whoever wrote the line (AC-8.9). A caller reads `set -- $(…)`: three words, rated.
+# deferred, whoever wrote the line (AC-8.9). A move to fixed (`moved: … to=fixed row=<T>`, wave-36 T8) puts the
+# finding on the fix side, as a move to fix does: it reads fix until its row lands green, and then drops out as
+# fixed (`proof_fixed`). A caller reads `set -- $(…)`: three words, rated.
 proof_finding_rating() {
   _proof_rating_apply "$(_proof_moved_to "$1" "$2")" "$3" "$4"
   printf '%s' "$_PROOF_RATING"
@@ -454,17 +456,18 @@ _proof_rating_apply() {
   local mv="$1" s="$2" r="$3" p
   _proof_priority_var "$s" "$r"; p="$_PROOF_P"
   case "$mv" in
-    fix) p=fix ;;
+    fix|fixed) p=fix ;;
     defer) [ "$s" = S1 ] || p=defer ;;
   esac
   _PROOF_RATING="$s $r $p"
 }
 
-# _proof_moved_to <plan> <record>#<n> -> `defer` or `fix`, the priority the LAST `moved:` line of
-# `## SDLC State` naming it (fences skipped) moved the finding to, or nothing when there is none
-# (wave-28 T42; D34, AC-8.9). A later move is the user's later word, so the last line decides. A line
-# is a move only when it carries who, when, the words and why, as `finding-move` writes it:
-# `moved: <record>#<n> to=<defer|fix> by=<name> at=<ISO-UTC> words="<words>" why="<why>"`.
+# _proof_moved_to <plan> <record>#<n> -> `defer`, `fix` or `fixed`, where the LAST `moved:` line of
+# `## SDLC State` naming it (fences skipped) moved the finding, or nothing when there is none
+# (wave-28 T42; D34, AC-8.9). A later move is the later word, so the last line decides. A line is a
+# move only when it is whole, as `finding-move` writes it (`proof_move_of`):
+# `moved: <record>#<n> to=<defer|fix> by=<name> at=<ISO-UTC> words="<words>" why="<why>"`, or
+# `moved: <record>#<n> to=fixed row=<T> by=<name> at=<ISO-UTC>` (wave-36 T8; D9).
 _proof_moved_to() {
   [ -f "$1" ] || return 0
   awk -v id="$2" "$(proof_bind_awk)"'
@@ -473,6 +476,38 @@ _proof_moved_to() {
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && /^moved:[ \t]/ && proof_bound($0) == id { m = proof_move_of($0); if (m != "") to = m }
     END { if (to != "") print to }' "$1"
+}
+
+# proof_move_line <plan> <record>#<n> -> the finding's newest whole `moved:` line, verbatim, the one
+# `_proof_moved_to` reads its direction from; nothing when the plan carries none (wave-36 T8; D10). What a
+# refusal quotes when it names the move it read: `task-add --born` refuses a finding whose newest move is
+# to defer, and `disposition` names the row a move to fixed names.
+proof_move_line() {
+  [ -f "$1" ] || return 0
+  awk -v id="$2" "$(proof_bind_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && /^moved:[ \t]/ && proof_bound($0) == id && proof_move_of($0) != "" { l = $0 }
+    END { if (l != "") print l }' "$1"
+}
+
+# _proof_moved_fixed <plan> -> `<row><TAB><record>#<n>`, one line per finding whose newest whole move is to
+# fixed (`moved: <record>#<n> to=fixed row=<T> …`, wave-36 T8; D9), in the order the findings were first
+# moved; a later move to defer or fix takes the finding back. `proof_fixed`'s second source.
+_proof_moved_fixed() {
+  [ -f "$1" ] || return 0
+  awk "$(proof_bind_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && /^moved:[ \t]/ {
+      id = proof_bound($0); m = proof_move_of($0)
+      if (id == "" || m == "") next
+      if (!(id in last)) ord[++n] = id
+      last[id] = m; row[id] = proof_move_row($0)
+    }
+    END { for (i = 1; i <= n; i++) if (last[ord[i]] == "fixed") printf "%s\t%s\n", row[ord[i]], ord[i] }' "$1"
 }
 
 # proof_findings_owed <plan> -> one line per finding the plan's `## SDLC State` carries a `deferred:`
@@ -530,30 +565,40 @@ _proof_reading_result_var() {
   _proof_reading_derive "$droot" "$ev" "$res" "$tab" "$_PROOF_FIXED_IDS"
 }
 
-# proof_fixed <plan> [<tree>] -> `<record>#<n><TAB><row><TAB><commit>`, one line per finding a fix row answers
-# and has landed green (wave-33 T13; REQ-5 AC-5.2, D6): the row names the finding on its born marker
-# (lib/units.sh `units_born_findings`, which `task-add --born <record>#<n>` writes), its `## Tasks` status is
-# `landed`, and the run's landing record (`proof_debt_record`, lib/line.sh's events) holds a verdict for it
-# whose commit is the row's newest verdict commit and whose every suite there reads `result=green`, the last
-# word per suite. <commit> is that commit, the landing the green verdicts name. Nothing when no born marker
-# names a finding, so a plan without one pays one grep. Whether <commit> is at or after a reading's head is
-# the reader's to ask (`_proof_fixed_var`). RED has no machine record (research-verbs-landing.md G1): the
-# green landing is the proof read.
+# proof_fixed <plan> [<tree>] -> `<record>#<n><TAB><row><TAB><commit><TAB><born|moved>`, one line per finding a
+# fix row answers and has landed green (wave-33 T13; REQ-5 AC-5.2, D6). The row answers the finding in one of
+# two ways: it names the finding on its born marker (lib/units.sh `units_born_findings`, which `task-add --born
+# <record>#<n>` writes), `born`; or the finding's newest move names it (`moved: <record>#<n> to=fixed row=<T>`,
+# which `finding-move <record>#<n> fixed <row>` writes; wave-36 T8, D9), `moved`, born marker or none. A
+# finding both answer is printed once, as `moved`. Either way the row's `## Tasks` status is `landed`, and the
+# run's landing record (`proof_debt_record`, lib/line.sh's events) holds a verdict for it whose commit is the
+# row's newest verdict commit and whose every suite there reads `result=green`, the last word per suite.
+# <commit> is that commit, the landing the green verdicts name. Nothing when no born marker names a finding and
+# no move names a row, so a plan without either pays one grep. Whether <commit> must be at or after a reading's
+# head is the reader's to ask (`_proof_fixed_var`): a born row's must, a moved row's need not, since the move
+# says the row fixed the finding whatever its ancestry (ADR-056: "a finding fixed before or beside the reading
+# is fixed"). RED has no machine record (research-verbs-landing.md G1): the green landing is the proof read.
 proof_fixed() {
-  local plan="${1:-}" tree="${2:-}" born rec
+  local plan="${1:-}" tree="${2:-}" born moved rec
   [ -f "$plan" ] || return 0
-  /usr/bin/grep -q ' born: review S[0-9][0-9]* o[nf]f* of=' "$plan" 2>/dev/null || return 0
+  /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=|^moved:[[:space:]]+[^[:space:]]+[[:space:]]+to=fixed[[:space:]]' "$plan" 2>/dev/null || return 0
   _proof_units_load || return 0
-  declare -F units_born_findings >/dev/null 2>&1 || return 0
-  born="$(units_born_findings "$plan" 2>/dev/null | awk -F'\t' '$2 == "landed"')"
-  [ -n "$born" ] || return 0
+  declare -F units_born_findings >/dev/null 2>&1 && declare -F units_rows >/dev/null 2>&1 || return 0
+  born="$(units_born_findings "$plan" 2>/dev/null | awk -F'\t' '$2 == "landed" { print $1 "\t" $3 "\tborn" }')"
+  moved="$({ printf '\034rows\n'; units_rows "$plan" 2>/dev/null; printf '\034moved\n'; _proof_moved_fixed "$plan"; } | awk -F'\t' '
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "moved" { part = 2; next }
+    part == 1 { if ($10 == "landed") landed[$1] = 1; next }
+    part == 2 && ($1 in landed) { print $1 "\t" $2 "\tmoved" }')"
+  [ -n "$born" ] || [ -n "$moved" ] || return 0
   rec="$(proof_debt_record "$plan" "$tree")" || return 0
   [ -f "$rec" ] || return 0
-  { printf '\034born\n%s\n\034rec\n' "$born"; cat "$rec" 2>/dev/null; } | awk -F'|' '
+  { printf '\034born\n'; [ -z "$moved" ] || printf '%s\n' "$moved"; [ -z "$born" ] || printf '%s\n' "$born"
+    printf '\034rec\n'; cat "$rec" 2>/dev/null; } | awk -F'|' '
     function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
     $0 == SUBSEP "born" { part = 1; next }
     $0 == SUBSEP "rec" { part = 2; next }
-    part == 1 { split($0, b, "\t"); nb++; brow[nb] = b[1]; bid[nb] = b[3]; want[b[1]] = 1; next }
+    part == 1 { split($0, b, "\t"); if (b[2] in seen1) next; seen1[b[2]] = 1; nb++; brow[nb] = b[1]; bid[nb] = b[2]; bhow[nb] = b[3]; want[b[1]] = 1; next }
     part == 2 && substr($0, 1, 8) == "line/v1|" && fv("ev") == "verdict" {
       r = fv("row"); if (!(r in want)) next
       c = fv("commit"); s = fv("suite"); v = fv("result")
@@ -564,20 +609,22 @@ proof_fixed() {
     }
     END {
       for (r in lc) { ok[r] = (ns[r] > 0); for (i = 1; i <= ns[r]; i++) if (res[r, sl[r, i]] != "green") ok[r] = 0 }
-      for (i = 1; i <= nb; i++) if ((brow[i] in ok) && ok[brow[i]]) printf "%s\t%s\t%s\n", bid[i], brow[i], lc[brow[i]]
+      for (i = 1; i <= nb; i++) if ((brow[i] in ok) && ok[brow[i]]) printf "%s\t%s\t%s\t%s\n", bid[i], brow[i], lc[brow[i]], bhow[i]
     }'
 }
 
 # _proof_fixed_var <proof_fixed lines> <record> <reading head> <tree> -> in `_PROOF_FIXED_IDS` the findings of
-# <record> fixed at or after <reading head> (the landing's commit has the head on its history), newline-wrapped
-# (`\n<record>#<n>\n…`); empty when none. No fork but one `git merge-base` per fixed finding of the record.
+# <record> fixed for a reading at <reading head>, newline-wrapped (`\n<record>#<n>\n…`); empty when none. A born
+# row's fix counts at or after the head (the landing's commit has the head on its history); a moved row's counts
+# whatever its ancestry (wave-36 T8; D9). No fork but one `git merge-base` per born-fixed finding of the record.
 _proof_fixed_var() {
-  local id row c nl=$'\n'
+  local id row c how nl=$'\n'
   _PROOF_FIXED_IDS=""
   [ -n "${1:-}" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] || return 0
-  while IFS='	' read -r id row c; do
+  while IFS='	' read -r id row c how; do
     case "$id" in "$2#"*) : ;; *) continue ;; esac
-    [ -n "$c" ] && git -C "$4" merge-base --is-ancestor "$3" "$c" 2>/dev/null || continue
+    [ -n "$c" ] || continue
+    [ "$how" = moved ] || git -C "$4" merge-base --is-ancestor "$3" "$c" 2>/dev/null || continue
     _PROOF_FIXED_IDS="$_PROOF_FIXED_IDS$nl$id"
   done <<PROOF_FIXED_LINES
 $1
@@ -1244,7 +1291,9 @@ proof_awk() {
 #     proof_bound(line)       the `<record>#<n>` a binding line is keyed to, else ""
 #     proof_binds(line, rec)  1 when the line is keyed to a finding of the record <rec>
 #     proof_move_of(line)     `defer` or `fix` when a `moved:` line is a whole move (who, when, the words
-#                             and why, as `finding-move` writes it), else ""
+#                             and why, as `finding-move` writes it), `fixed` for a whole move to fixed
+#                             (the row, who and when: `to=fixed row=<T> by=… at=…`, wave-36 T8), else ""
+#     proof_move_row(line)    the <T> of a move to fixed, else ""
 proof_bind_awk() {
   printf '%s' '
     function proof_bound(s,   f) {
@@ -1254,9 +1303,17 @@ proof_bind_awk() {
     function proof_binds(s, rec) { return index(proof_bound(s), rec "#") == 1 }
     function proof_move_of(s,   f) {
       split(s, f, /[ \t]+/)
+      if (f[3] == "to=fixed") {
+        if (f[4] !~ /^row=T[0-9]+$/ || s !~ / by=[^ \t]/ || s !~ / at=[0-9][0-9][0-9][0-9]-/) return ""
+        return "fixed"
+      }
       if (f[3] != "to=defer" && f[3] != "to=fix") return ""
       if (s !~ / by=[^ \t]/ || s !~ / at=[0-9][0-9][0-9][0-9]-/ || s !~ / words="/ || s !~ / why="/) return ""
       return substr(f[3], 4)
+    }
+    function proof_move_row(s,   f) {
+      split(s, f, /[ \t]+/)
+      return (f[3] == "to=fixed" && f[4] ~ /^row=T[0-9]+$/) ? substr(f[4], 5) : ""
     }
   '
 }
