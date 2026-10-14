@@ -110,6 +110,18 @@ _run_lines() {
   normalize_newlines "$1" 2>/dev/null
 }
 
+# plan_lines <plan> -> the plan's lines, CR TRANSLATED (`normalize_newlines`: CRLF and a lone CR both end a
+# line), nothing for a path that is no file (wave-36 T12; D13, AC-7.5; C34). THE ONE PLAN LINE READER for a
+# reader outside this file: lib/proof.sh `_proof_last_read`, behind every `proved:` reading, the wall's Step-7
+# arm (lib/walls.sh `_eg_refuse_floor_absent`, through `proof_floor_absent`) and the judge, reads the plan
+# through it, so a CR-only plan's floor line is one line to all of them (tests/canonical-sdlc-evidence-gate.test.sh
+# FL-5-cr). Through wave-35 that reader handed the raw file to awk, which saw a CR-only plan as ONE line: the
+# floor line was absent to the wall and the judge alike while this file's own readers saw it.
+plan_lines() {  # <plan>
+  [ -f "${1:-}" ] || return 0
+  _run_lines "$1"
+}
+
 # plan_frontmatter_get <plan> <key> -> the value of that leading-frontmatter key, one
 # quote layer stripped and trailing whitespace trimmed; empty when the key is absent, the
 # plan has no frontmatter, or the file cannot be read.

@@ -113,10 +113,19 @@ _line_branch() {  # <plan> -> its working-branch
   _line_load_run || return 1
   plan_working_branch "$1"
 }
+# The accepted head is the working branch's REF, read by lib/proof.sh `proof_branch_head`, the one reader of the
+# head the judge, proof-add, waive and deliver ask (wave-36 T12; D13; burns debt `working-head`): this read the
+# ref by hand, a second spelling of the same question.
+_line_load_proof() {
+  declare -F proof_branch_head >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
+  declare -F proof_branch_head >/dev/null 2>&1
+}
 line_head() {  # <plan> -> the accepted head
-  local root b
-  root="$(_line_root "${1:-}")" && b="$(_line_branch "$1")" && [ -n "$b" ] || return 1
-  git -C "$root" rev-parse --verify -q "refs/heads/${b}"
+  local root
+  root="$(_line_root "${1:-}")" && _line_load_proof || return 1
+  proof_branch_head "$1" "$root"
 }
 
 line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
