@@ -4878,4 +4878,95 @@ expect_contains "FR-5c …and its proof:floor wait names the red suite and the w
   "proof:floor: the whole run at ${FR_H:0:12} left a.test.sh red, each owed until a later landing runs it green" \
   "$(UNITS_FACTS_STATE=covered call units_waiting "$FR_PLAN" 8 | awk -F'\t' '$1 == "T21" && index($2, "proof:floor") == 1 { print $2 }')"
 
+
+# ============================================================
+section "§LIVE-HEAD — wave-36 T28: a review row is ready again only when the judge reads its question uncovered (REQ-3 AC-3.6; D9)"
+# ============================================================
+# `live:head` asks lib/proof.sh `facts_state`, the judge, and nothing else: past its last reading a review row is
+# ready again only when its question reads `uncovered` at the working branch's head, never because the head moved.
+# A docs-only landing is prose to the judge, so the question stays covered and the row waits, saying the judge's
+# answer; a code landing no born row made owes, so the row is ready for the range past its reading. The readings'
+# state is the tick's to hand in (UNITS_READINGS_STATE, set by session-poker.sh `sched_live_head`), and the
+# program asks it itself when it is not handed (`_units_readings_state`). When the judge cannot answer, the row
+# waits, saying why. An idle row, covered past its reading, writes no newer proof, so integrate's proof:review
+# does not wait on it (K2-F4).
+# FIXTURE FIDELITY: a real repository on its working branch; the reading written by the product's writer
+# (`proof_line`); the docs-only commit under the default docs root. The branch's ref is the head the judge reads,
+# so each step commits and then asks.
+# fails-when: a review row is ready after a docs-only landing, or not ready after a code landing that owes.
+LH="$SANDBOX/live-head"; LH_PLAN="$LH/.bionic/docs/plans/epic-99/wave-99-lh.plan.md"
+mkdir -p "$LH/lib" "${LH_PLAN%/*}" "$LH/.bionic/docs/record/lh"
+lh_git() { git -C "$LH" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
+lh_git init -q 2>/dev/null; lh_git checkout -q -b main 2>/dev/null
+printf '.bionic/tmp/\n.bionic/docs/plans/\n' > "$LH/.gitignore"; printf 'one\n' > "$LH/lib/one.sh"
+lh_git add .gitignore lib && lh_git commit -qm base
+LH_B="$(lh_git rev-parse HEAD)"
+lh_git checkout -q -b wave/99-lh 2>/dev/null
+printf 'two\n' > "$LH/lib/one.sh"; lh_git commit -qam 'T1 landed'
+LH_R="$(lh_git rev-parse HEAD)"
+LH_READ="$(call proof_line review "$LH_R" 2026-10-13T03:00:00Z record/lh/adv.md adversarial w-crit pass piece)"
+LH_T3Q="| T3 | 6 | review | the adversarial read | critic | — | 30 | REQ-x | .bionic/docs/record/lh/adv.md | approval:plan, live:head:adversarial | pending |"
+LH_T3B="| T3 | 6 | review | the bare read | critic | — | 30 | REQ-x | .bionic/docs/record/lh/adv.md |  | pending |"
+lh_plan() {  # <file> <branch> <T3 row> -> the plan at Step 6: the build landed, the reading at R, integrate pending
+  { printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\n---\n\n## SDLC State\n\ncurrent: 6\nworking-branch: %s\n' "$LH_B" "$2"
+    printf 'approved-by: fixture 2026-10-13T00:00:00Z "approved"\n%s\n\n' "$LH_READ"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/one.sh |  | landed |\n'
+    printf '%s\n' "$3"
+    printf '| T9 | 8 | integrate | merge | — | — | 10 | REQ-x | — |  | pending |\n'
+  } > "$1"
+}
+LH_BARE="${LH_PLAN%.plan.md}-bare.plan.md"; LH_GONE="${LH_PLAN%.plan.md}-gone.plan.md"
+lh_plan "$LH_PLAN" wave/99-lh "$LH_T3Q"; lh_plan "$LH_BARE" wave/99-lh "$LH_T3B"; lh_plan "$LH_GONE" wave/99-gone "$LH_T3Q"
+lh_ready() { UNITS_LIVE_HEAD="$1" call units_ready "$2" 6; }                  # <head> <plan> -> the ready ids
+lh_wait() { UNITS_LIVE_HEAD="$1" call units_waiting "$2" 6 | awk -F'\t' '$1 == "T3" { print $2 }'; }  # T3's wait
+lh_edge() { has_line "$(UNITS_LIVE_HEAD="$1" call units_edges "$2")" "T3${TAB}T9${TAB}proof:review"; }
+lh_judge() {  # <plan> <head> -> the adversarial piece line's state from facts_state, the judge itself
+  bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_state "$2" "$3"' _ "${LIB%/*}" "$1" "$2" 2>/dev/null \
+    | awk -F'\t' '$1 == "review" && $2 == "adversarial" && $4 == "piece" { print $5 }'
+}
+lh_cover() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_cover "$2" "$3" "$4"' _ "${LIB%/*}" "$@" 2>/dev/null | tr '\n' '|'; }
+
+expect_eq "LH-0 precondition: the judge reads the adversarial question covered at the reading's head R" "covered" "$(lh_judge "$LH_PLAN" "$LH_R")"
+expect_eq "LH-1 control: at R the review row is not ready" "no" "$(has_line "$(lh_ready "$LH_R" "$LH_PLAN")" T3)"
+expect_eq "LH-1b …and waits on nothing landed past its reading, as before" \
+  "live:head:adversarial: nothing landed past the adversarial review proof at ${LH_R:0:12}" "$(lh_wait "$LH_R" "$LH_PLAN")"
+
+# A DOCS-ONLY LANDING: prose to the judge, so the question stays covered and the row stays idle.
+printf 'notes\n' > "$LH/.bionic/docs/record/lh/notes.md"; lh_git add -f .bionic/docs/record/lh/notes.md; lh_git commit -qm 'notes landed'
+LH_D="$(lh_git rev-parse HEAD)"
+expect_eq "LH-2 precondition: the judge reads the docs-only commit as prose" "cover ${LH_D} prose|" "$(lh_cover "$LH_PLAN" "$LH_R" "$LH_D")"
+expect_eq "LH-2a precondition: …and the adversarial question covered at D" "covered" "$(lh_judge "$LH_PLAN" "$LH_D")"
+expect_eq "LH-2b AC-3.6 a docs-only landing past the reading: the review row is not ready" "no" "$(has_line "$(lh_ready "$LH_D" "$LH_PLAN")" T3)"
+expect_eq "LH-2c …and its wait names the judge's answer at D" \
+  "live:head:adversarial: the judge (facts_state) reads adversarial covered at ${LH_D:0:12}; only an uncovered question is read again" \
+  "$(lh_wait "$LH_D" "$LH_PLAN")"
+expect_eq "LH-2d K2-F4 …and, idle, it writes no newer proof: integrate's proof:review does not wait on it" "no" "$(lh_edge "$LH_D" "$LH_PLAN")"
+expect_eq "LH-2e a bare live:head row past the same docs-only landing is not ready either" "no" "$(has_line "$(lh_ready "$LH_D" "$LH_BARE")" T3)"
+expect_contains "LH-2f …and its wait names the judge" "live:head: the judge (facts_state) reads " "$(lh_wait "$LH_D" "$LH_BARE")"
+
+# A CODE LANDING NO BORN ROW MADE: it owes, the question reads uncovered, the row is ready for R..C.
+printf 'three\n' > "$LH/lib/one.sh"; lh_git commit -qam 'T5 landed'
+LH_C="$(lh_git rev-parse HEAD)"
+expect_eq "LH-3 precondition: the judge reads the code commit as owing" "cover ${LH_D} prose|cover ${LH_C} owes|" "$(lh_cover "$LH_PLAN" "$LH_R" "$LH_C")"
+expect_eq "LH-3a precondition: …and the adversarial question uncovered from R to C" "uncovered" "$(lh_judge "$LH_PLAN" "$LH_C")"
+expect_eq "LH-3b AC-3.6 a code landing not born past the reading: the review row is ready" "yes" "$(has_line "$(lh_ready "$LH_C" "$LH_PLAN")" T3)"
+expect_eq "LH-3c …and, no longer idle, integrate's proof:review waits on it" "yes" "$(lh_edge "$LH_C" "$LH_PLAN")"
+expect_eq "LH-3d …and the range it reads is R..C" "${LH_R}..${LH_C}" "$(UNITS_LIVE_HEAD="$LH_C" call units_live_range "$LH_PLAN" T3)"
+expect_eq "LH-3e the bare row past the same landing is ready" "yes" "$(has_line "$(lh_ready "$LH_C" "$LH_BARE")" T3)"
+
+# THE HANDED ANSWER IS THE ONE READ: the tick hands the readings' state in, and the program asks no second judge.
+expect_eq "LH-4 handed covered at C: the review row is not ready" "no" \
+  "$(has_line "$(UNITS_READINGS_STATE=covered lh_ready "$LH_C" "$LH_PLAN")" T3)"
+expect_eq "LH-4b handed adversarial uncovered at D: the review row is ready" "yes" \
+  "$(has_line "$(UNITS_READINGS_STATE="review adversarial bionic:critic piece uncovered ${LH_R}..${LH_D}" lh_ready "$LH_D" "$LH_PLAN")" T3)"
+
+# NO FACTS STATE: the judge cannot answer (the working branch names no commit), so the row waits, saying so.
+expect_eq "LH-5 the judge cannot be asked: the review row is not ready, though the head moved past its reading" "no" \
+  "$(has_line "$(lh_ready "$LH_C" "$LH_GONE")" T3)"
+expect_eq "LH-5b …and its wait says the readings are not known here, and why" \
+  "live:head:adversarial: the readings are not known here: the working branch names no commit, so there is no head to judge the readings at" \
+  "$(lh_wait "$LH_C" "$LH_GONE")"
+
 finish
