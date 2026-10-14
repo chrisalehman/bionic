@@ -3362,6 +3362,97 @@ expect_eq "NC-5b …with the same corrected call" "bash $PV7_HOOK decline T3 'wa
 poke "$R7C" decline T3 'T3 builds on what T1 writes' --on T1
 expect_eq "NC-6 beside NC-4: decline --on a row is still recorded (exit 0)" "0|$((PV7_N + 1))" "$RC|$(pv7_led_n)"
 
+# ---------- §MATRIX-HEADING: one AC-block heading, written by matrix-render and found by the verbs that read the block (wave-36 T24; REQ-7 AC-7.9; D13) ----------
+# matrix-render writes `AC-<id>: <criterion text>` (MR-3: the text rides the AC line). matrix_block_key and
+# matrix_block_has read the heading by bare equality, so matrix-set, waive-row and the waiver check refused a plan the
+# hook itself had just rendered ("has no AC-n: block"), and wave-35's 41 headings were stripped by hand (A-orch-3).
+# The matcher is units.sh `units_ac_head_awk`, one text for the writers here and the wall's matrix_block.
+# FIXTURE FIDELITY: §MATRIX-RENDER's plan (mr_fixture), rendered by the real verb; the writers are the real verbs, the
+# wall's reader is the real library sourced in a subshell; the evidence is the plan's own bytes.
+MH_LIB="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)"
+mh_wall() {  # <lib dir> <plan> <AC> -> the wall's matrix_block for that AC (the indented lines under its heading)
+  # matrix_section and matrix_block are defined inside the wall's body (_eg_body), so each is cut out of walls.sh by its
+  # own first and last line and defined in a subshell, beside the libraries it asks for: the real text, not a copy.
+  ( set +e; PLAN="$2"; . "$1/run.sh" >/dev/null 2>&1; . "$1/units.sh" >/dev/null 2>&1
+    eval "$(awk '/^(matrix_section|matrix_block)\(\) \{/ { f = 1 } f { print } f && /^}/ { f = 0 }' "$1/walls.sh")"
+    MATRIX="$(matrix_section)"; matrix_block "$3" )
+}
+RMH="$(make_repo mh-head)"; ( cd "$RMH" && git commit -q --allow-empty -m init )
+git -C "$RMH" config user.name 'Fixture User'
+PMH="$(s42_plan "$RMH" 3)"
+mr_fixture "$PMH"
+poke "$RMH" matrix-render
+expect_eq "MH-0 matrix-render writes the fixture's blocks (exit 0)" "0" "$RC"
+expect_eq "MH-0b …AC-2.1's heading carries its criterion text (the extractor, positive)" "AC-2.1: the second criterion" "$(mr_block "$PMH" AC-2.1 | head -1)"
+expect_eq "MH-0c …and AC-1.2's heading is bare (the control block: no text to carry)" "AC-1.2:" "$(mr_block "$PMH" AC-1.2 | head -1)"
+cp "$PMH" "$TMPROOT/mh-rendered"
+
+s42_snap "$RMH" "$PMH"
+poke "$RMH" matrix-set AC-2.1 task=T5 evidence=record/wave-01-fixture/T5-a.log
+expect_eq "MH-1 matrix-set finds the block matrix-render wrote under a heading with text (exit 0)" "0" "$RC"
+expect_eq "MH-1b …the block's task and evidence keys are written, its heading as rendered" \
+  "AC-2.1: the second criterion|  task: T5|  evidence: record/wave-01-fixture/T5-a.log" \
+  "$(mr_block "$PMH" AC-2.1 | /usr/bin/grep -E '^(AC-2\.1:|  task:|  evidence:)' | paste -sd'|' -)"
+poke "$RMH" matrix-set AC-2.2 task=T5
+expect_eq "MH-1c …and a bare heading, beside it, is found as before (AC-2.2, the control)" "0|  task: T5" "$RC|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
+
+# AC-2.1 is never AC-2.11: a block whose heading begins with the id of another is not that block.
+awk '/^AC-2\.2:/ { print "AC-2.11: eleven, whose id begins with AC-2.1\n  evidence: pending\n  task: pending\n" } { print }' "$PMH" > "$PMH.e" && mv "$PMH.e" "$PMH"
+awk '/^\| AC-2\.2 \|/ { print "| AC-2.11 | T0 | pending | — | — |" } { print }' "$PMH" > "$PMH.e" && mv "$PMH.e" "$PMH"
+expect_eq "MH-2 precondition: the AC-2.11 block stands in the plan (the extractor, positive)" "AC-2.11: eleven, whose id begins with AC-2.1|  evidence: pending" \
+  "$(mr_block "$PMH" AC-2.11 | head -2 | paste -sd'|' -)"
+MH_E11="$(mr_block "$PMH" AC-2.11)"
+poke "$RMH" matrix-set AC-2.1 evidence=record/wave-01-fixture/T5-b.log
+expect_eq "MH-2b matrix-set AC-2.1 writes its own block (exit 0, the new path)" "0|  evidence: record/wave-01-fixture/T5-b.log" \
+  "$RC|$(mr_block "$PMH" AC-2.1 | /usr/bin/grep '^  evidence:')"
+expect_eq "MH-2c …and leaves the AC-2.11 block as it was" "$MH_E11" "$(mr_block "$PMH" AC-2.11)"
+poke "$RMH" matrix-set AC-2.11 task=T5
+expect_eq "MH-2d …and matrix-set AC-2.11 writes the AC-2.11 block alone" "0|  task: T5|  task: T5" \
+  "$RC|$(mr_block "$PMH" AC-2.11 | /usr/bin/grep '^  task:')|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
+
+pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
+poke "$RMH" waive-row AC-2.1 'I waive AC-2.1' 'the requirement is amended next wave'
+expect_eq "MH-3 waive-row finds the block under a heading with text (exit 0)" "0" "$RC"
+expect_regex "MH-3b …the waiver line is in AC-2.1's block" '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive AC-2.1" — the requirement is amended next wave$' \
+  "$(mr_block "$PMH" AC-2.1 | /usr/bin/grep '^  waiver:')"
+poke "$RMH" matrix-set AC-2.1 status=waived
+expect_eq "MH-3c matrix-set status=waived finds that waiver: line (matrix_block_has, exit 0)" "0|| AC-2.1 | T3 | waived | record/wave-01-fixture/T5-b.log | — |" "$RC|$(/usr/bin/grep '^| AC-2\.1 ' "$PMH")"
+poke "$RMH" discharge AC-2.1
+expect_eq "MH-4 discharge on the rendered row (exit 0, the auditor cell CONFIRMED)" "0|CONFIRMED" "$RC|$(mr_cell "$PMH" AC-2.1 6)"
+s34_gate "$RMH"
+expect_eq "MH-5 the plan these verbs wrote is admitted by the real gate" "0" "$GATE_RC"
+
+# the wall's reader, the same fixture: matrix_block returns the lines under each heading the writers found.
+expect_eq "MH-6 the wall's matrix_block reads AC-2.1's block, the lines mr_block shows under its heading (non-empty, equal)" \
+  "$(mr_block "$PMH" AC-2.1 | tail -n +2)" "$(mh_wall "$MH_LIB" "$PMH" AC-2.1)"
+expect_eq "MH-6b …AC-2.1 does not read AC-2.11's block (the wall's own invariant, kept)" "0" \
+  "$(mh_wall "$MH_LIB" "$PMH" AC-2.1 | /usr/bin/grep -c 'eleven' || true)"
+expect_eq "MH-6c …and AC-1.2's bare block reads as before" "$(mr_block "$PMH" AC-1.2 | tail -n +2)" "$(mh_wall "$MH_LIB" "$PMH" AC-1.2)"
+
+# the mutant: bare equality restored in the shared matcher. The bare heading is still found, the heading with text is not.
+anchor file payload/scripts/lib/units.sh 'index(line, ac ":") == 1'
+MHM_DIR="$TMPROOT/poker-mh-mut"; rm -rf "$MHM_DIR"; mkdir -p "$MHM_DIR/hooks" "$MHM_DIR/scripts"
+cp -R "$MH_LIB" "$MHM_DIR/scripts/lib"
+for _mh_f in "$(dirname "$POKER")"/*; do [ "${_mh_f##*/}" = session-poker.sh ] || ln -s "$_mh_f" "$MHM_DIR/hooks/${_mh_f##*/}"; done
+cp "$POKER" "$MHM_DIR/hooks/session-poker.sh"
+sed 's/index(line, ac ":") == 1/line == ac ":"/' "$MH_LIB/units.sh" > "$MHM_DIR/scripts/lib/units.sh"
+expect_eq "MH-mut0 the copy of units.sh differs from it in one line" "1" "$(diff "$MH_LIB/units.sh" "$MHM_DIR/scripts/lib/units.sh" | /usr/bin/grep -c '^>')"
+cp "$TMPROOT/mh-rendered" "$PMH"
+MHM_POKER="$POKER"; POKER="$MHM_DIR/hooks/session-poker.sh"
+poke "$RMH" matrix-set AC-1.2 task=T1
+MHM_RC_BARE="$RC|$(mr_block "$PMH" AC-1.2 | /usr/bin/grep '^  task:')"
+s42_snap "$RMH" "$PMH"
+poke "$RMH" matrix-set AC-2.1 task=T5
+MHM_RC_TEXT="$RC"; MHM_OUT_TEXT="$OUT"
+POKER="$MHM_POKER"
+expect_eq "MH-mut1 the mutant runs: a bare heading is found (exit 0, task written)" "0|  task: T1" "$MHM_RC_BARE"
+expect_eq "MH-mut2 …but the heading with text is refused: no AC-2.1: block (exit 1, plan byte-identical)" "1|yes" \
+  "$MHM_RC_TEXT|$(cmp -s "$TMPROOT/s42-before" "$PMH" && echo yes)"
+expect_contains "MH-mut2b …saying the block is missing" "has no AC-2.1: block" "$MHM_OUT_TEXT"
+expect_eq "MH-mut3 the wall under the mutant: the bare block reads (non-empty), the block with text reads empty" "yes|0" \
+  "$([ -n "$(mh_wall "$MHM_DIR/scripts/lib" "$PMH" AC-1.2)" ] && echo yes)|$(mh_wall "$MHM_DIR/scripts/lib" "$PMH" AC-2.1 | wc -l | tr -d ' ')"
+cp "$TMPROOT/mh-rendered" "$PMH"
+
 if [ "$PV7_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$PV7_CCD_WAS"; fi
 POKE_BOUND="$PV7_BOUND_WAS"
 
