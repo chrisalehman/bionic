@@ -2179,6 +2179,12 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # named, or a branch that names no commit) is no head: the review waits, saying so. The stop
 # wall takes the tick's head from its digest (A-T14.2), and the program asks the judge itself.
 sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD and UNITS_READINGS_STATE, or clears them
+  # ONCE PER PLAN PER TICK (wave-36 T40; D9, AC-3.6), as `sched_facts_state` is below: `gate_report` reads the
+  # budget a second time, and the judge walks the commits on every ask, so a second ask walked one state twice.
+  # The first call for a plan asks and keeps both; a later call in this process returns what it kept, clearing
+  # nothing. A different plan, or a new process, asks again.
+  [ "${SCHED_LIVE_PLAN:-}" = "${SCHED_PLAN:-}" ] && [ -n "${SCHED_LIVE_PLAN:-}" ] && return 0
+  SCHED_LIVE_PLAN="${SCHED_PLAN:-}"
   UNITS_LIVE_HEAD=""; UNITS_READINGS_STATE=""
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
   /usr/bin/grep -q '^[[:space:]-]*proved:.*kind=review' "$SCHED_PLAN" 2>/dev/null || return 0
