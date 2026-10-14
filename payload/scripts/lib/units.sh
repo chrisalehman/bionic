@@ -3064,3 +3064,17 @@ units_fix_cap() {
   n="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$1 != "" { n++ } END { print n + 0 }')"
   fix_cap_render "$(plan_frontmatter_get "$plan" fix-cap)" "$(plan_frontmatter_get "$plan" rigor)" "$n"
 }
+
+# units_ac_head_awk -> the awk text of `ac_head(line, ac)`, THE ONE MATCHER OF AN AC BLOCK'S HEADING (wave-36 T24;
+#   REQ-7 AC-7.9; D13). A heading is `<ac>:` at the start of a flush-left line, with the text after it optional:
+#   matrix-render writes `AC-2.1: <the criterion's text>`, and the wall's matrix_block, session-poker.sh's
+#   matrix_block_key and matrix_block_has all read that line through this one function, as
+#   `awk "$(units_ac_head_awk)"'...'`. A list bullet (`-`, `*`, `+` and spaces) is stripped from a COPY first, so
+#   `- AC-1:` reads as `AC-1:`; an INDENTED line is no heading, and the colon after the id is why `AC-1` never
+#   begins the `AC-11:` block. Nothing is required after the colon. Pure, silent, and defined at source time.
+units_ac_head_awk() {
+  printf '%s\n' 'function ac_head(line, ac) {' \
+    '  sub(/^[-*+][[:space:]]+/, "", line)' \
+    '  return index(line, ac ":") == 1' \
+    '}'
+}
