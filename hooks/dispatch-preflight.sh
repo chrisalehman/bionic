@@ -2815,6 +2815,63 @@ the suite to the brief's Suites: or Files: line so the row runs it.
 Then retry the dispatch."
 fi
 
+# A ROW LANDS ON EVERY SUITE THAT READS ITS FILES (wave-36 T27; REQ-6 AC-6.1; D12, ADR-056). The one file-to-suite
+# fact is lib/anchors.sh `reads_index`: a suite reads a file its text names outside a comment, a library of a hook
+# it names, or a file its anchor names. `brief` derives Lands-on: from it (session-poker.sh
+# `poker_brief_index_suites`), and this arm asks the same question of the brief's declared Files: (before the
+# rendered twins above), at the plan's working-branch tip, else the tree: a writer binding a row whose Lands-on:
+# omits a suite the index names for those files is refused, the missing suites printed with a whole line to
+# paste. `none <reason>` is refused the same way, since a reason does not unread a file. One index read per
+# dispatch, and only for a writer whose Files write the head. What the index misses (paths built from variables,
+# globs, a library a library loads) it does not claim, and neither does this arm: the floor is their catch-all.
+dp_lands_index_suites() {  # <root> <at> <Files, comma-joined> -> the suites reading them, by file name, sorted, one per line
+  declare -F reads_index >/dev/null 2>&1 \
+    || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
+  declare -F reads_index >/dev/null 2>&1 || return 0
+  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" -v root="$1" "$(_units_files_awk)"'
+    BEGIN { m = split(cell, e, ","); cell = ""; for (k = 1; k <= m; k++) { t = e[k]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (index(t, root "/") == 1) t = substr(t, length(root) + 2); cell = cell (k > 1 ? "," : "") t } }
+    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
+    | LC_ALL=C sort -u
+}
+_li_files="$(brief_field "$LIFTED" files)"
+if [ -n "$_lo_binds" ] && [ -n "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_li_files" ] \
+   && ! role_is_readonly "$DP_SUBAGENT" && units_writes_head "$_li_files"; then
+  _li_at=""; _li_wb=""
+  [ -z "$PLAN" ] || _li_wb="$(plan_working_branch "$PLAN" 2>/dev/null)"
+  [ -z "$_li_wb" ] || _li_at="$(git -C "$BIONIC_ROOT" rev-parse --verify -q "refs/heads/${_li_wb}^{commit}" 2>/dev/null)"
+  _li_given=" "
+  if [ "$DP_LANDS_ON" != none ]; then
+    for _lo_s in ${DP_LANDS_ON//,/ }; do _li_given="${_li_given}${_lo_s##*/} "; done
+  fi
+  _li_miss=""; _li_n=0
+  while IFS= read -r _lo_s; do
+    [ -n "$_lo_s" ] || continue
+    case "$_li_given" in *" $_lo_s "*) continue ;; esac
+    _li_miss="${_li_miss:+$_li_miss, }$_lo_s"; _li_n=$((_li_n + 1))
+  done <<DP_LANDS_INDEX_EOF
+$(dp_lands_index_suites "$BIONIC_ROOT" "${_li_at:--}" "$_li_files")
+DP_LANDS_INDEX_EOF
+  if [ "$_li_n" -gt 0 ]; then
+    _li_line="$_li_miss"
+    [ "$DP_LANDS_ON" = none ] || _li_line="${DP_LANDS_ON//,/, }, $_li_miss"
+    _li_more=""; [ "$_li_n" -lt 2 ] || _li_more=" and $((_li_n - 1)) more"
+    dp_finding "Lands-on: omits $(bionic_trunc "${_li_miss%%,*}" 20)${_li_more} reading Files" "add them" \
+      "A row lands on every suite that reads its Files, and the reads index names suites this Lands-on: omits:
+    Given:    Lands-on: ${DP_LANDS_ON}${_lo_reason:+ ${_lo_reason}}
+    Missing:  ${_li_miss}
+    Files:    ${_li_files}
+    Read at:  ${_li_at:-the tree} (lib/anchors.sh reads_index)
+
+A suite reads a file its text names, a library of a hook it names, or a file its anchor names; a change to
+the file can turn it red, so ready runs it. A reason after none does not unread a file.
+
+Fix: paste this line in place of the brief's Lands-on: line, and name the same suites on its Suites: line —
+    Lands-on: ${_li_line}
+
+Then retry the dispatch."
+  fi
+fi
+
 # ===================================================== THE FULL-RUN WALL (wave-31 REQ-13, D3, D4)
 # (replaces the map-bounded wall of wave-26 REQ-3 D6, which replaced 1.10's one-regression wall.)
 #

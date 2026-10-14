@@ -3754,6 +3754,69 @@ POKE_BOUND="$BS_BOUND_WAS"
 
 
 # ============================================================
+section "§BRIEF: brief derives Suites and Lands-on from the reads index for the row's Files (wave-36 T27; REQ-6 AC-6.1; D12)"
+# ============================================================
+#
+# fails-when: the grep-reading suite or the hook-running suite is missing from a code row's derived Suites: or
+# Lands-on:. lib/anchors.sh `reads_index`, read at the working branch's head, routes a file to every suite whose
+# text names it outside a comment, every suite that names a hook whose BIONIC_LIB_WANT lists it, and every suite
+# whose anchor names it (T5's contract). `brief` takes the suites it names for any file the row's Files cover
+# (by file name, sorted, once each), after the Files' own *.test.sh entries (A-T5-5: a suite in Files names
+# itself, and a suite the row adds is in no tree yet). A suite that reads none of the files is not named. A
+# second `brief` call keeps what the orchestrator wrote under ## Judgment and derives the same sets again.
+# FIXTURE FIDELITY: three suites read payload/scripts/lib/walls.sh by the three routes the spec names, committed on
+# the working branch; the index is the real one, read by the real verb.
+SB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RSB="$(make_repo brief-reads)"; ( cd "$RSB" && git commit -q --allow-empty -m init )
+mkdir -p "$RSB/payload/scripts/lib" "$RSB/hooks" "$RSB/tests"
+printf 'the wall line\n' > "$RSB/payload/scripts/lib/walls.sh"
+printf '#!/bin/bash\nBIONIC_LIB_WANT="walls.sh"\n' > "$RSB/hooks/h.sh"
+printf '#!/bin/bash\ngrep -c wall "$REPO/payload/scripts/lib/walls.sh"\n' > "$RSB/tests/s-grep.test.sh"
+printf "#!/bin/bash\nanchor file payload/scripts/lib/walls.sh 'the wall line'\n" > "$RSB/tests/s-anchor.test.sh"
+printf '#!/bin/bash\nbash "$REPO/hooks/h.sh"\n' > "$RSB/tests/s-hook.test.sh"
+printf '#!/bin/bash\n# payload/scripts/lib/walls.sh is named only in this comment\necho none\n' > "$RSB/tests/s-none.test.sh"
+( cd "$RSB" && git add payload hooks tests && git commit -qm "three suites read walls.sh" )
+PSB="$(s42_plan "$RSB" 4)"
+SB_TABLE="$TMPROOT/sb-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T31 | 4 | build | the wall library | senior-implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, .bionic/docs/record/wave-01-fixture/T31.md | — | — | pending |\n'
+  printf '| T32 | 4 | build | the wall and a new suite | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, tests/zz-new.test.sh, .bionic/docs/record/wave-01-fixture/T32.md | — | — | pending |\n'
+  printf '\n'
+} > "$SB_TABLE"
+awk -v t="$SB_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PSB" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PSB.new" && mv "$PSB.new" "$PSB"
+( cd "$RSB" && git add -f "$PSB" && git commit -qm "brief-reads fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
+SB_FILE="$RSB/.bionic/docs/record/wave-01-fixture/briefs"
+expect_eq "SB-0 precondition: the reads index at the working head names the three reading suites for walls.sh, and not s-none" \
+  "payload/scripts/lib/walls.sh	tests/s-anchor.test.sh,tests/s-grep.test.sh,tests/s-hook.test.sh" \
+  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$RSB" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh"')"
+expect_eq "SB-0b …while the anchor index names the anchoring suite alone (the reads index is the wider fact)" \
+  "payload/scripts/lib/walls.sh	tests/s-anchor.test.sh" \
+  "$(bash "$POKER" anchors index "$RSB" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh"')"
+poke "$RSB" brief T31
+expect_eq "SB-1 AC-6.1 brief T31: Suites names the grep-reading, anchoring and hook-running suites, sorted" \
+  "0|s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bs_field "$SB_FILE/T31.md" Suites)"
+expect_eq "SB-1b …and Lands-on the same set" "s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bs_field "$SB_FILE/T31.md" Lands-on)"
+expect_absent "SB-1c …a suite naming the file only in a comment is not named (positive: SB-1 read three from the same line)" \
+  "s-none.test.sh" "$(bs_field "$SB_FILE/T31.md" Suites)"
+poke "$RSB" brief T32
+expect_eq "SB-2 a row whose Files name a suite no tree holds yet: that suite first, then the index's, once each" \
+  "0|zz-new.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bs_field "$SB_FILE/T32.md" Suites)"
+expect_eq "SB-2b …and Lands-on the same set" "zz-new.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" \
+  "$(bs_field "$SB_FILE/T32.md" Lands-on)"
+awk '/^Research to read:/ { print "Research to read: the T5 record, whole"; next } { print }' "$SB_FILE/T31.md" > "$SB_FILE/T31.md.new" \
+  && mv "$SB_FILE/T31.md.new" "$SB_FILE/T31.md"
+poke "$RSB" brief T31
+expect_eq "SB-3 a second brief T31 keeps what the orchestrator wrote under ## Judgment" \
+  "0|the T5 record, whole" "$RC|$(bs_field "$SB_FILE/T31.md" 'Research to read')"
+expect_eq "SB-3b …and derives the same Suites again" "s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bs_field "$SB_FILE/T31.md" Suites)"
+POKE_BOUND="$SB_BOUND_WAS"
+
+
+# ============================================================
 section "§BORN-FLOOR: task-add --born floor:<suite> writes the floor-born marker the judge holds a landing by (wave-36 T7; REQ-3 AC-3.2; D9, D2)"
 # ============================================================
 # A row born of the floor's red carries ` born: floor <suite>` on its `- <id>:` line; lib/proof.sh's judge holds

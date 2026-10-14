@@ -586,31 +586,44 @@ pushed_onto() {  # <a placing row> -> that row, carrying `pushed=`
 # so the hook returns at once and the harness has nothing of it to wait for. It takes `--wait`,
 # so it queues behind another launch's transaction rather than giving up.
 #
-# A FAILURE STILL SURFACES. The detached call prints to nowhere, and that is safe only because
-# it is not the only caller: the Patrol tick and the turn-end wall (payload/scripts/lib/stop.sh)
-# run the same transaction, and whichever runs next prints what it could not record and the
-# commands to run by hand. A kill of the detached call cannot leave half a launch: the row and
-# its line are one write, by one rename.
+# A FAILURE STILL SURFACES, ON A CHANNEL OF ITS OWN (wave-36 T12; D13, AC-7.1; C13). The call's
+# output and its exit status go to `.bionic/tmp/launch-sync-<sid>.log`, rewritten by each launch,
+# the status last as `rc=<n>`; the Patrol tick prints `poker: launch-sync failed — <log>` once for
+# a log whose status is not 0 (session-poker.sh `tick_launch_sync_failed`). Through wave-35 every
+# stream went to /dev/null and only the next caller of the transaction (the tick, the turn-end
+# wall in payload/scripts/lib/stop.sh) could say what it had not recorded, so a refusal reached
+# whichever session ran it next. Those callers still run it and still print what they could not
+# record. A kill of the detached call cannot leave half a launch: the row and its line are one
+# write, by one rename; a log with no `rc=` line is a call still running, or killed, and says nothing.
 #
 # NO RUN PREDICATE HERE (T32; tests/hook-adoption.test.sh §4). This hook is the roster
 # lifecycle and reads nothing out of the plan; the verb asks whose run the session is in, and
 # exits silently when there is none, as it does before Step 4 and without a roster.
 #
-# BIONIC_LAUNCH_SYNC_INLINE=1 runs the call in the foreground, still silent, so a test can read
-# the plan the moment the hook returns. Nothing in a session sets it.
+# BIONIC_LAUNCH_SYNC_INLINE=1 runs the call in the foreground, still silent and still logged, so a
+# test can read the plan and the log the moment the hook returns. Nothing in a session sets it.
 POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh"
 
 launch_sync_start() {  # -> 0 always; starts this session's launch-sync and does not wait for it
+  local log=/dev/null
   [ -f "$POKER" ] || return 0
+  # The log lives beside the roster this arm just wrote; a tmp dir that is not there, or a log path
+  # that is a symbolic link, gets no log rather than a write through it.
+  if [ -d "$BIONIC_ROOT/.bionic/tmp" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp/launch-sync-${BIONIC_SID}.log" ]; then
+    log="$BIONIC_ROOT/.bionic/tmp/launch-sync-${BIONIC_SID}.log"
+  fi
   if [ "${BIONIC_LAUNCH_SYNC_INLINE:-}" = 1 ]; then
-    ( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
-        "${BASH:-bash}" "$POKER" launch-sync --wait ) </dev/null >/dev/null 2>&1
+    ( cd "$BIONIC_ROOT" 2>/dev/null || exit 0
+      CLAUDE_CODE_SESSION_ID="$BIONIC_SID" "${BASH:-bash}" "$POKER" launch-sync --wait >"$log" 2>&1
+      printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1
     return 0
   fi
   ( set -m
     cd "$BIONIC_ROOT" 2>/dev/null || exit 0
-    CLAUDE_CODE_SESSION_ID="$BIONIC_SID" nohup "${BASH:-bash}" "$POKER" launch-sync --wait \
-      </dev/null >/dev/null 2>&1 &
+    # The wrapper that writes the status outlives the hook as the call does: a hangup is ignored by both.
+    ( trap '' HUP
+      CLAUDE_CODE_SESSION_ID="$BIONIC_SID" nohup "${BASH:-bash}" "$POKER" launch-sync --wait >"$log" 2>&1
+      printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1 &
   ) </dev/null >/dev/null 2>&1
   return 0
 }

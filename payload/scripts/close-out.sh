@@ -88,7 +88,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh; do
+for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -114,6 +114,10 @@ fi
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/proof.sh"
+# THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): the carry is rendered and checked by lib/debt.sh,
+# which `debt add` and card.sh read too (co_debts, co_debt_refusal).
+# shellcheck source=/dev/null
+. "${CO_LIB}/debt.sh"
 # THE PERSON'S LEDGER AND ITS ONE SENDER (wave-33 T12; REQ-2 AC-2.3, D2), for the delivery notice at
 # the end of `run`. NOT in the list above and sourced only when readable: a payload without it
 # closes a run exactly as 1.15.0 did, and nothing here can make a close refuse.
@@ -714,11 +718,25 @@ co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned d
 #
 # A burned item is paid and is not carried. The merge into an existing continuation is the deferrals'
 # (co_cont_missing), so a line already under the heading is not written twice.
+#
+# ONLY A LINE THAT PARSES IS CARRIED (wave-36 T13; D13, AC-7.8; A-orch-1). The line is rendered and held to
+# the one grammar by lib/debt.sh `debt_carry_lines`, the reader `debt add` and card.sh agree with; a ledger
+# line it cannot carry is never written here, and `run` refuses it, naming it, before its first act
+# (co_debt_refusal) — so the next run's Step-1 card is never refused on a line this run carried.
 co_debts() {
   local led
   led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
-  proof_debt_items "$led" | awk -F'\t' -v w="$WAVE_SLUG" \
-    '$6 == "-" { printf "debt: %s %s \"%s\" touches=%s raised-by=%s from=%s\n", $1, $2, $3, $5, $4, w }'
+  debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
+}
+
+# co_debt_refusal -> the sentence naming the first debt.md line the continuation could not carry
+# (debt_carry_lines' `bad`), or nothing when every line parses. `run` refuses on it; `check` says it would.
+co_debt_refusal() {
+  local led bad
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
+  bad="$(debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
+  [ -n "$bad" ] || return 0
+  printf '%s carries a line that does not parse as a debt line: %s' "${led#"$(docs_root "$ROOT")"/}" "$bad"
 }
 
 # THE CARD'S DEBT LINE (wave-30 T22; P2, AC-11.4): `debt: touched <N> · burned <M>` for the run, N the
@@ -1778,6 +1796,8 @@ do_check() {
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
   say "$(co_debt_card)"
+  CO_DEBT_BAD="$(co_debt_refusal)"
+  [ -z "$CO_DEBT_BAD" ] || say "debt-lines: WOULD REFUSE — $CO_DEBT_BAD"
   if [ -f "$CONT" ]; then
     if ! co_cont_has_deferrals; then
       CK_LINE="continuation: $CONT_REL already written — run appends the ## Deferrals section"
@@ -1846,8 +1866,9 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL SIX OF THESE PASS (critic3 P-1, P-3), in this order: the
-  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), the merge
+  # NOTHING IS TOUCHED UNTIL ALL SEVEN OF THESE PASS (critic3 P-1, P-3), in this order: the
+  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), every debt.md
+  # line the continuation carries parsing (co_debt_refusal, wave-36 T13), the merge
   # verdict (act 1 is a readback and touches nothing), the
   # branch census, the facts the run owes (`facts_judge`, wave-27 T14), and the gate's answer about
   # the plan `run` will write. Any refusal leaves
@@ -1855,6 +1876,9 @@ do_run() {
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_refuse "$MISSING — nothing was done"
+  # A DEBT LINE THAT WOULD NOT PARSE IS REFUSED HERE, NAMED (wave-36 T13; AC-7.8), never carried.
+  CO_DEBT_BAD="$(co_debt_refusal)"
+  [ -z "$CO_DEBT_BAD" ] || _co_refuse "$CO_DEBT_BAD — nothing was done"
   act_merge
   refuse_unreached
   facts_judge
