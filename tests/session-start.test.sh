@@ -203,7 +203,7 @@ if [ "$2" != "-" ]; then
   mkdir -p "$1/sessions"
   printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$2" "$PWD" > "$1/sessions/$$.json"
 fi
-bash "$3"
+"${DRIVE_HOOK_BASH:-bash}" "$3"
 WRAP_EOF
 
 # One drive. Prints stdout, and leaves stdout/stderr/rc in three files.
@@ -223,6 +223,7 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
   OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
   # DRIVE_PLUGIN_ROOT=<dir>: the CLAUDE_PLUGIN_ROOT the CLI hands the hook (§21, wave-36 T1). Empty by
   # default, and set empty rather than inherited, so no section reads the root of whatever ran the suite.
+  # DRIVE_HOOK_BASH=<path>: the bash that runs the hook (§22); `bash` on the PATH by default.
   # DRIVE_LIVE=<sid>: one more LIVE session in the fixture home (T15), at this suite's own pid,
   # which is alive for the whole run — the CLI's pid-file shape the wrapper writes for the hook.
   if [ -n "${DRIVE_LIVE:-}" ]; then
@@ -234,7 +235,7 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
     printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"%s"}' \
       "$psid" "$home/t.jsonl" "$proj" "$src" \
     | CLAUDE_CODE_SESSION_ID="$esid" BIONIC_CLAUDE_HOME="$home" CLAUDE_PLUGIN_ROOT="${DRIVE_PLUGIN_ROOT:-}" \
-      bash "$WRAP" "$home" "$fsid" "$HOOK" > "$WORK/last.out" 2>"$WORK/last.err"
+      DRIVE_HOOK_BASH="${DRIVE_HOOK_BASH:-bash}" bash "$WRAP" "$home" "$fsid" "$HOOK" > "$WORK/last.out" 2>"$WORK/last.err"
   )
   printf '%s' "$?" > "$WORK/last.rc"
   # The STANDING decision line (T27, AC-11.2) is printed in every session and is not part of the
@@ -1454,5 +1455,35 @@ ln -s "$WORK/victim" "$P21e/.bionic/tmp/loaded-$CUR_SID.state"
 DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21e" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
 eq   "21.19 a link at the record path: its target is untouched" "victim" "$(cat "$WORK/victim")"
 eq   "21.20 …and the record is a regular file in its place" "root=$L_ROOT" "$([ -L "$P21e/.bionic/tmp/loaded-$CUR_SID.state" ] || grep '^root=' "$P21e/.bionic/tmp/loaded-$CUR_SID.state")"
+
+section "22 — the start hook under bash 4 and 5 (wave-36 T30, D7; AC-1.1)"
+# `ss_load_record` once declared `local -a files` and indexed `files[${#files[@]}]` on the unset array,
+# which `set -u` refuses under bash 4.0+ ("files: unbound variable"): no load record was written and the
+# rest of the hook never ran. /bin/bash 3.2, the shebang, was the only bash it worked under. The hook runs
+# here under a bash of major version 4 or more found on this machine, with the §21 fixture: the record is
+# written, and a line from the far end of the hook (the standing decision line, printed in every session)
+# is on stdout. With no such bash the rows are recorded `ok` with the reason in the label (no skip idiom
+# in this harness, as canonical-sdlc-governing-skill 8.1h).
+B5_BASH=""
+for b5_c in /opt/homebrew/bin/bash /usr/local/bin/bash "$(command -v bash 2>/dev/null)"; do
+  [ -n "$b5_c" ] && [ -x "$b5_c" ] || continue
+  b5_v="$("$b5_c" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null)"
+  case "$b5_v" in ''|*[!0-9]*) continue ;; esac
+  if [ "$b5_v" -ge 4 ]; then B5_BASH="$b5_c"; break; fi
+done
+if [ -n "$B5_BASH" ]; then
+  P22=$(make_env 3600s)
+  B5_REC="$P22/.bionic/tmp/loaded-$CUR_SID.state"
+  DRIVE_HOOK_BASH="$B5_BASH" DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P22" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+  eq    "22.1 the hook under $B5_BASH exits 0" "0" "$(rc)"
+  hasnt "22.2 …with no unbound variable on stderr" "unbound variable" "$(errtext)"
+  eq    "22.3 …the load record is written" "root=$L_ROOT" "$(grep '^root=' "$B5_REC" 2>/dev/null)"
+  eq    "22.4 …with one sha256 line per loaded file, as under bash 3.2" \
+    "$(printf '%s\n' "$L_WANT" | wc -l | tr -d ' ')" "$(l_hashes "$B5_REC" | wc -l | tr -d ' ')"
+  has   "22.5 …and the hook's later lines ran: the standing decision line is on stdout" \
+    "$STANDING_MARK" "$(cat "$WORK/last.out" 2>/dev/null)"
+else
+  ok "22.1-22.5: skip: no bash >= 4 on this machine (looked for /opt/homebrew/bin/bash, /usr/local/bin/bash, bash on PATH)"
+fi
 
 finish
