@@ -3160,10 +3160,10 @@ lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge --reason 'named the agent
 expect_eq "LANDS-6 an unengaged session is refused at the consent boundary: rc 0, the plan unchanged" \
   "0|landed|—" "$LP_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T3 6)"
 expect_contains "LANDS-6b …saying NOT-ENGAGED" "NOT-ENGAGED" "$LP_OUT"
-# `bind` admits open runs only (lib/binding.sh, not-an-open-run), so the state of a session whose bound plan closed
-# under it, its marker still naming the plan, is planted in the marker's own shape (A-T14-7)
-printf 'plan=%s\n' "$PLA/$PLAN_REL" > "$PLA/.bionic/tmp/engaged-$LA_SID.state"
-expect_contains "LANDS-7a precondition: the session reads its delivered plan as bound-closed (lib/run.sh session_run)" "bound-closed $PLA/$PLAN_REL" \
+# the session re-engages and binds its delivered plan by the verb (ruling r1791955629-34788): bound-closed
+lands_bind "$PLA" "$LA_SID"
+expect_eq "LANDS-7a the bind verb binds the delivered plan (rc 0)" "0" "$LP_RC"
+expect_contains "LANDS-7a2 precondition: the session reads its delivered plan as bound-closed (lib/run.sh session_run)" "bound-closed $PLA/$PLAN_REL" \
   "$(bash -c '. "$1/roots.sh" && . "$1/run.sh" || exit 9; session_run "$2" "$3"' _ "$REPO_ROOT/payload/scripts/lib" "$PLA" "$LA_SID")"
 LA_CK1="$(cksum < "$PLA/$PLAN_REL")"
 lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge
