@@ -3231,3 +3231,23 @@ units_ac_head_awk() {
     '  return index(line, ac ":") == 1' \
     '}'
 }
+
+# units_render_units <render.sh> -> THE RENDER TABLE, AS render.sh DECLARES IT (wave-36 T38; D12, AC-6.3; found by
+#   w36-T29's landing). render.sh's `RENDER_UNITS` is a list of `<templates dir>|<output dir>` words split on white
+#   space, and its `MANIFEST_REL` names the checksum manifest. This reads both and prints one line per unit,
+#   `unit<TAB><templates dir><TAB><output dir>`, then, when the file declares one, `manifest<TAB><path>`. A word that
+#   is not `<a>|<b>` with both halves non-empty is no unit. Nothing, and rc 0, for a file that is absent or declares
+#   neither. The dispatch wall's rendered-twins arm (hooks/dispatch-preflight.sh `dp_rendered_twins`) asks this and
+#   reads tab fields, so the hook carries no split on a pipe of its own for the unit words.
+units_render_units() {
+  [ -n "${1:-}" ] || return 0
+  awk '
+    function units(buf,   w, k, m, p) { m = split(buf, w, /[[:space:]]+/); for (k = 1; k <= m; k++) if (split(w[k], p, "|") == 2 && p[1] != "" && p[2] != "") { src[++nu] = p[1]; dst[nu] = p[2] } }
+    inu { if (index($0, "\"")) { units(substr($0, 1, index($0, "\"") - 1)); inu = 0 } else units($0); next }
+    /^RENDER_UNITS="/ { b = substr($0, 15); if (index(b, "\"")) units(substr(b, 1, index(b, "\"") - 1)); else { units(b); inu = 1 }; next }
+    /^MANIFEST_REL="[^"]+"/ { manifest = substr($0, 15); manifest = substr(manifest, 1, index(manifest, "\"") - 1) }
+    END {
+      for (k = 1; k <= nu; k++) printf "unit\t%s\t%s\n", src[k], dst[k]
+      if (manifest != "") printf "manifest\t%s\n", manifest
+    }' "$1" 2>/dev/null
+}
