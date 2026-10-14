@@ -3512,6 +3512,25 @@ fp_state "$RFP" "$FP_C3"
 expect_eq "FP-7 code past the fix's landing that no born row landed is still unread: uncovered from the reading's head" \
   "uncovered	${FP_C1}..${FP_C3}" "$(fp_of "$FP_AD")"
 
+# A ROW FIXED BY MOVE (wave-36 T8; REQ-3 AC-3.4; D9): `finding-move <record>#<n> fixed <row>` names a row that fixed the
+# finding whatever its ancestry, so its green landing BEFORE the reading's head fixes it, as FP-5's born row's cannot.
+# The row carries no born marker. The move line is fixture text in finding-move's shape.
+FP_T7_PLAIN='| T7 | 4 | build | the a writer | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |'
+fp_plan "$RFP" "${FP_B:0:10}" "$(fp_proved "$FP_C1" adv.md adversarial fail)
+- T7: landed $FP_B 2026-10-04T11:00:00Z" "$FP_T7_PLAIN"
+fp_landing "$RFP" "$(fp_verdict T7 "$FP_B" green)"
+fp_state "$RFP" "$FP_C1"
+expect_eq "FP-8 precondition: a row landed green before the reading's head, no born marker and no move: failing" \
+  "failing	$FP_REC/adv.md" "$(fp_of "$FP_AD")"
+fp_plan "$RFP" "${FP_B:0:10}" "$(fp_proved "$FP_C1" adv.md adversarial fail)
+- T7: landed $FP_B 2026-10-04T11:00:00Z
+moved: $FP_REC/adv.md#1 to=fixed row=T7 by=Dana Fixture at=2026-10-04T14:00:00Z" "$FP_T7_PLAIN"
+fp_state "$RFP" "$FP_C1"
+expect_eq "FP-8b AC-3.4 the same row named by moved: to=fixed: the S2 is fixed whatever the row's ancestry, covered" \
+  "covered" "$(fp_of "$FP_AD")"
+expect_eq "FP-8c …and the wall is handed the same answer: the written fail derives to flag" \
+  "$FP_REC/adv.md	fail	flag" "$(fp_derived "$RFP")"
+
 # ============================================================
 section "§COVER — a reading covers its head; a later commit extends it when its paths are all prose or it lands a born row, and each commit prints its basis (wave-36 T7; REQ-3 AC-3.2, AC-3.3, AC-3.5; D9, D2, D3)"
 # ============================================================
@@ -3676,7 +3695,7 @@ expect_eq "DP-1 AC-5.1 disposition exits 0" "0" "$DP_RC"
 expect_eq "DP-1b …one finding line per finding of the two registered readings: four, no more" "4" \
   "$(printf '%s\n' "$DP_OUT" | /usr/bin/grep -c '^poker: finding ' | tr -d ' ')"
 expect_eq "DP-2 …the fixed S2: rating, user-facing, record path, place, its fix row, fixed, nothing to decide" \
-  "poker: finding $FP_REC/adv.md#1 S2 user-facing=on record=$FP_REC/adv.md at=a.sh:1 row=T7 state=fixed decision=\"none: T7 landed green at ${DP_C2:0:12}\" title=\"data lost on a second run\"" \
+  "poker: finding $FP_REC/adv.md#1 S2 user-facing=on record=$FP_REC/adv.md at=a.sh:1 row=T7 state=fixed decision=\"none: fixed by T7, landed green at ${DP_C2:0:12}\" title=\"data lost on a second run\"" \
   "$(dp_finding adv.md#1)"
 expect_eq "DP-3 …the S3 the table defers: deferred, its changelog sentence owed" \
   "poker: finding $FP_REC/st.md#1 S3 user-facing=on record=$FP_REC/st.md at=b.sh:1 row=— state=deferred decision=\"its changelog sentence: finding-stated $FP_REC/st.md#1 '<sentence>'\" stated=- title=\"a message could be clearer\"" \

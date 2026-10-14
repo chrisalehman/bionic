@@ -31,6 +31,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
@@ -487,6 +488,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run the regression in the working branch's checkout, .bionic/config.yaml's floor: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the reading or after it, as a moved: to=fixed line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered readings (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
@@ -1008,16 +1010,27 @@ case "$VERB" in
   # FOUR OPERANDS (wave-28 T42; D34): the finding (`<record>#<n>`), where it goes (defer or fix), the
   # user's words as typed and why. A missing or blank operand, another direction or an id of another
   # shape is the usage error; whether the words stand in a typed prompt is the verb's own refusal (1).
+  # OR THREE (wave-36 T8; D9): the finding, `fixed`, and the row that fixed it, `T<n>`; words or a why
+  # after it are the usage error. Whether the plan's table carries the row is the verb's own refusal (1).
   finding-move)
-    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why."
-    [ $# -eq 4 ] && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE"
-    case "$2" in defer|fix) : ;; *) usage "$FM_USAGE" ;; esac
+    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why; or <record>#<n>, fixed, and the row that fixed it."
+    FM_ROW=""
+    case "${2:-}" in
+      defer|fix) [ $# -eq 4 ] && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE" ;;
+      fixed)
+        [ $# -eq 3 ] || usage "$FM_USAGE"
+        case "$3" in T[0123456789]*) : ;; *) usage "$FM_USAGE" ;; esac
+        case "${3#T}" in *[!0123456789]*) usage "$FM_USAGE" ;; esac
+        FM_ROW="$3" ;;
+      *) usage "$FM_USAGE" ;;
+    esac
     case "$1" in
       *?#[0123456789]*) : ;;
       *) usage "finding-move: '$1' is not <record>#<n>." ;;
     esac
     case "${1##*#}" in *[!0123456789]*) usage "finding-move: '$1' is not <record>#<n>." ;; esac
-    FM_ID="$1"; FM_TO="$2"; FM_RAW="$3"; FM_WHY_RAW="$4"
+    FM_ID="$1"; FM_TO="$2"; FM_RAW="${3:-}"; FM_WHY_RAW="${4:-}"
+    [ -z "$FM_ROW" ] || FM_RAW=""
     ;;
   # NO OPERAND RENDERS; FOUR OR FIVE RULE (wave-33 T13; REQ-5 AC-5.1, D6): the finding (`<record>#<n>`), fix or
   # defer, the person's words as typed, why, and for a deferral optionally its changelog sentence. Another count,
@@ -8471,11 +8484,18 @@ EOF
     if [ -z "$TA_POL" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$TA_PLAN" 2>/dev/null; then
       TA_POL="$FIX_POLICY_DEFAULT"
     fi
+    # A FINDING THE PERSON MOVED TO DEFER IS BORN NO ROW (wave-36 T8; REQ-4 AC-4.5, D10): its newest move
+    # (lib/proof.sh `proof_move_line`) is the person's last word, whatever its reader's rating, so an S2 on the
+    # fix-policy admits is refused as an S3 off is, naming the move, before the policy is asked.
     if [ -n "$TA_BORN_IDS" ]; then
       TA_BEST=""
       for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
         if ! finding_read "$TA_PLAN" "$REPO_REAL" "$TA_BID"; then
           die "task-add refused — $FR_WHY; the plan is unchanged."
+          exit 1
+        fi
+        if [ "$(_proof_moved_to "$TA_PLAN" "$TA_BID")" = defer ]; then
+          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); the plan is unchanged. To fix it after all: disposition $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
           exit 1
         fi
         TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
@@ -10526,6 +10546,17 @@ $PF_PLANL"
   # through; the verb passes the raw words to `user_said`), the why by `deferral_fold` (the same fold), both escaped as a
   # deferral's sentence is (`deferral_escape`); a move to defer first writes the finding's `deferred:`
   # line when the plan holds none (placed by `proof_add_line`). Every read then takes the priority the last move gave it.
+  #
+  # THE THIRD MOVE (wave-36 T8; REQ-3 AC-3.4, D9; ADR-056). `finding-move <record>#<n> fixed <row>` says a row of the
+  # plan's `## Tasks` table fixed the finding: landed before the reading, beside it, or still to land. It is a fact
+  # about the table, not a ruling across the line, so it takes no words; the row must be one the table carries. It
+  # writes, in the same place:
+  #
+  #   moved: <record>#<n> to=fixed row=<T> by=<git user.name> at=<ISO-UTC>
+  #
+  # The finding reads fix until the row lands green, and then fixed (lib/proof.sh `proof_fixed`, whatever the row's
+  # ancestry); the row needs no born marker, so it counts against no fix-cap. A row now answers the finding, so its
+  # owed item closes, as `task-add --born` closes it.
   # Main thread only, by the existing arm's list (lib/walls.sh `_wall_poker_contract_verb`).
   finding-move)
     if ! { declare -F proof_finding_rating >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -10536,11 +10567,11 @@ $PF_PLANL"
     if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
       . "$BIONIC_LIB/said.sh"
     fi
-    if ! declare -F user_said >/dev/null 2>&1; then
+    if [ -z "$FM_ROW" ] && ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
-    FM_WORDS="$(said_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"
+    if [ -z "$FM_ROW" ]; then FM_WORDS="$(said_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"; fi
     plan_verb_open finding-move
     FM_REC="${FM_ID%#*}"; FM_N="${FM_ID##*#}"
     if ! awk -v ev="$FM_REC" '
@@ -10567,15 +10598,21 @@ FM_FINDING
       die "REFUSED — $(clean "$FM_ID") is rated S1 $FM_R, and an S1 is never deferred, whoever asks; the plan is unchanged."
       exit 1
     fi
+    if [ -n "$FM_ROW" ] && ! units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v r="$FM_ROW" '$1 == r { f = 1 } END { exit !f }'; then
+      die "REFUSED — $FM_ROW is no row of the ## Tasks table of $PV_PLAN, and a finding is fixed only by a row the plan carries; the plan is unchanged."
+      exit 1
+    fi
     FM_WHO="$(deferral_fold "$(git -C "$PV_REPO" config user.name 2>/dev/null)")"
     if [ -z "$FM_WHO" ]; then
       die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
       exit 1
     fi
-    user_said "$FM_RAW" "$PV_PLAN"; FM_SAID=$?
-    if [ "$FM_SAID" -ne 0 ]; then
-      said_refuse "$FM_SAID" "$FM_WORDS" "a move"
-      exit 1
+    if [ -z "$FM_ROW" ]; then
+      user_said "$FM_RAW" "$PV_PLAN"; FM_SAID=$?
+      if [ "$FM_SAID" -ne 0 ]; then
+        said_refuse "$FM_SAID" "$FM_WORDS" "a move"
+        exit 1
+      fi
     fi
     cp "$PV_PLAN" "$PV_NEW"
     FM_DEF=""
@@ -10587,7 +10624,11 @@ FM_FINDING
       fi
       mv -f "$PV_NEW.2" "$PV_NEW"
     fi
-    FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" session=$SAID_SESSION why=\"$(deferral_escape "$FM_WHY")\""
+    if [ -n "$FM_ROW" ]; then
+      FM_LINE="moved: $FM_ID to=fixed row=$FM_ROW by=$FM_WHO at=$(iso_now)"
+    else
+      FM_LINE="moved: $FM_ID to=$FM_TO by=$FM_WHO at=$(iso_now) words=\"$(deferral_escape "$FM_WORDS")\" session=$SAID_SESSION why=\"$(deferral_escape "$FM_WHY")\""
+    fi
     # IN PLACE: after the last line of the block naming the finding (its deferred:, check: or an earlier
     # moved: line), else after the last proof line naming its record; else where proof_add_line puts it.
     FM_LINE="$FM_LINE" awk -v id="$FM_ID" -v ev="$FM_REC" '
@@ -10608,6 +10649,11 @@ FM_FINDING
     }
     mv -f "$PV_NEW.2" "$PV_NEW"
     plan_verb_swap finding-move "the move of $FM_ID" writer
+    if [ -n "$FM_ROW" ]; then
+      poker_owed_close "$PV_REPO" "$(finding_owed_key "$FM_ID")" "finding-move fixed $FM_ROW"
+      say "finding-move — $(clean "$FM_ID") fixed by $FM_ROW, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first. It reads fixed once $FM_ROW has landed green, and counts against no fix-cap."
+      exit 0
+    fi
     say "finding-move — $(clean "$FM_ID") to $FM_TO on the user's words, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first."
     [ -z "$FM_DEF" ] || say "finding-move — $(clean "$FM_DEF")"
     exit 0
@@ -10620,10 +10666,12 @@ FM_FINDING
   #   finding <record>#<n> <S> user-facing=<on|off> record=<record> at=<path:line|-> row=<T<k>[,…]|—>
   #           state=<open|fixed|deferred|accepted> decision="<what it needs>" [stated="<sentence>"|stated=-] title="<title>"
   #
-  # the state read as the judge reads it: fixed when a row born of it landed green at or after the reading's head
-  # (lib/proof.sh `proof_fixed`), else by the priority the plan's moves give it (`proof_finding_rating`): fix is
-  # open, defer is deferred, note is accepted. An open finding no row answers and no ruling has moved needs the
-  # person, and gets one owed item, `finding_owed_key` (lib/owed.sh; opening is idempotent per key). A reading's
+  # the state read as the judge reads it: fixed when a row born of it landed green at or after the reading's head,
+  # or the row its newest move names (`moved: … to=fixed row=<T>`, wave-36 T8) landed green whatever its ancestry
+  # (lib/proof.sh `proof_fixed`), decision="none: fixed by <row>, landed green at <commit>"; else by the priority
+  # the plan's moves give it (`proof_finding_rating`): fix is open, defer is deferred, note is accepted. row= names
+  # the rows born of it and the row a move to fixed names. An open finding no row answers and no ruling has moved
+  # needs the person, and gets one owed item, `finding_owed_key` (lib/owed.sh; opening is idempotent per key). A reading's
   # debt: lines go to the run's debt ledger through `debt add`, run as a child. Nothing in the plan is written.
   #
   # A RULING (four or five operands) is the person's word on one finding, recorded through finding-move (their
@@ -10683,12 +10731,16 @@ FM_FINDING
         set -- $(proof_finding_rating "$PV_PLAN" "$DSP_FID" "$DSP_S" "$DSP_R")
         DSP_P="${3:-}"
         DSP_ROWS="$(printf '%s\n' "$DSP_BORN" | awk -F'\t' -v id="$DSP_FID" '$3 == id { printf "%s%s", (k++ ? "," : ""), $1 }')"
+        if [ "$(_proof_moved_to "$PV_PLAN" "$DSP_FID")" = fixed ]; then
+          DSP_MV="$(proof_move_line "$PV_PLAN" "$DSP_FID" | awk '{ sub(/^row=/, "", $4); print $4 }')"
+          case ",$DSP_ROWS," in *",$DSP_MV,"*) : ;; *) DSP_ROWS="${DSP_ROWS:+$DSP_ROWS,}$DSP_MV" ;; esac
+        fi
         DSP_STATED=""
         case "$_PROOF_FIXED_IDS" in
           *$'\n'"$DSP_FID"$'\n'*)
             DSP_STATE=fixed
             DSP_FROW="$(printf '%s\n' "$DSP_FIXED" | awk -F'\t' -v id="$DSP_FID" '$1 == id { print $2 "\t" $3; exit }')"
-            DSP_DEC="none: ${DSP_FROW%%	*} landed green at $(printf '%.12s' "${DSP_FROW#*	}")" ;;
+            DSP_DEC="none: fixed by ${DSP_FROW%%	*}, landed green at $(printf '%.12s' "${DSP_FROW#*	}")" ;;
           *)
             case "$DSP_P" in
               fix)
