@@ -906,6 +906,7 @@ tests/doctor-patrol.test.sh            0      2
 tests/doctor-reads.test.sh             0      1
 tests/doctor-version.test.sh           0      1
 tests/doctor-walls.test.sh             0      1
+tests/doctor.test.sh                   0      1
 tests/engage.test.sh                   1      1
 tests/execution-recorder.test.sh       12     9
 tests/fail-direction-table.test.sh     0      1
@@ -922,7 +923,7 @@ tests/refuse.test.sh                   6      0
 tests/resources.test.sh                7      0
 tests/runner-roster.test.sh            2      13
 tests/runner-width.test.sh             0      1
-tests/session-poker-2.test.sh          0      7
+tests/session-poker-2.test.sh          0      9
 tests/session-poker-3.test.sh          0      5
 tests/session-poker-4.test.sh          2      2
 tests/session-poker.test.sh            1      3
