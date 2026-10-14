@@ -578,6 +578,65 @@ poke "$RSEV" debt adopt
 expect_eq "DEBT-A7 debt adopt with no continuation is a usage error (exit 2)" "2" "$RC"
 rm -f "$DBT_LEDGER"
 
+# ---------- §DEBT (wave-36 T13; D13, REQ-7 AC-7.2, AC-7.3, AC-7.8; C24, C25, A-orch-1, A-orch-2) ----------
+# `debt add` reads any record carrying grammar-true `debt:` lines, a `reviewed:` line no longer required:
+# a writer's or the orchestrator's `assumptions.md` hole line reaches debt.md by verb, never by hand
+# (AC-7.2). Each line it would write is held to the one debt-line grammar, lib/debt.sh `debt_line_ok`,
+# before anything is written. `debt adopt` with no plan named and no plan bound refuses naming `bind`
+# and writes nothing: it never takes the newest plan by mtime, a closed predecessor's (AC-7.3).
+# fails-when: a hole line never reaches debt.md; the unbound adopt writes the predecessor's ledger.
+DBT_ASM="$SEV_DIR/assumptions.md"
+printf '%s\n' "# assumptions — wave-01-fixture" "" \
+  "- A-orch-1 (by hand): adopt carries open rows only, so the readers of a re-keyed session are orphaned." \
+  'debt: hole adopt-orphans hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112' \
+  "- A-orch-2: a second assumption, prose only." > "$DBT_ASM"
+DBT_HL='adopt-orphans | hole | hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112 | raised-by record/wave-01-fixture/assumptions.md | touches 0 | —'
+expect_false "DEBT-H0 precondition: the run has no ledger yet, and the record carries no reviewed: line" \
+  test -e "$DBT_LEDGER" -o -n "$(/usr/bin/grep '^reviewed:' "$DBT_ASM")"
+poke "$RSEV" debt add record/wave-01-fixture/assumptions.md "$PSEV"
+expect_eq "DEBT-H1 §DEBT debt add takes an assumptions.md hole line with no reviewed: line (exit 0)" "0" "$RC"
+expect_eq "DEBT-H1b …one debt.md line for the one debt: line, raised by the record" \
+  "$DBT_HEAD|$DBT_HL" "$(paste -sd'|' - < "$DBT_LEDGER" 2>/dev/null)"
+expect_contains "DEBT-H1c …saying what it added" "poker: debt add — 1 added, 0 already there: record/$DBT_SLUG/debt.md" "$OUT"
+expect_absent "DEBT-H1d …and the reading's refusal is gone (C24)" "carries no reviewed:" "$OUT"
+cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+printf '%s\n' "# assumptions" "" 'debt: hole step-line-born hooks/session-poker.sh step-line (the born marker is lost)' > "$SEV_DIR/asm-free.md"
+poke "$RSEV" debt add record/wave-01-fixture/asm-free.md "$PSEV"
+expect_eq "DEBT-H2 a hole line whose site is prose, not <path>:<line>, is refused (exit 1)" "1" "$RC"
+expect_contains "DEBT-H2b …naming the site" "naming 'hooks/session-poker.sh step-line (the born marker is lost)' where a site takes <path>:<line>" "$OUT"
+expect_true "DEBT-H2c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+mkdir -p "$SEV_DIR/two words"
+printf '%s\n' 'debt: hole spaced-source lib/s.sh:1' > "$SEV_DIR/two words/assumptions.md"
+poke "$RSEV" debt add "record/wave-01-fixture/two words/assumptions.md" "$PSEV"
+expect_eq "DEBT-H3 a record whose path holds a space would write raised-by with a space (A-orch-1's shape): refused (exit 1)" "1" "$RC"
+expect_contains "DEBT-H3b …naming the debt line that does not parse" \
+  'does not parse as a debt line: debt: spaced-source hole "lib/s.sh:1" touches=0 raised-by=record/wave-01-fixture/two words/assumptions.md' "$OUT"
+expect_true "DEBT-H3c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+rm -rf "$SEV_DIR/two words" "$SEV_DIR/asm-free.md" "$DBT_ASM"
+rm -f "$DBT_LEDGER"
+
+# The unbound adopt (C25, A-orch-2): an engaged session bound to no plan, in a root whose only plan is a
+# CLOSED predecessor that keeps its own ledger. `resolve_run`'s `none` arm hands the tick the newest plan
+# by mtime so it can DISARM; the debt verb is a writer and takes no plan it was not given or bound to.
+RDU="$(make_repo dbt-unbound)"; ( cd "$RDU" && git commit -q --allow-empty -m init )
+DBU_PLAN="$RDU/.bionic/docs/plans/epic-99-fixture/wave-00-prior.plan.md"; mkdir -p "${DBU_PLAN%/*}"
+printf '%s\n' "# prior wave" "" "## SDLC State" "" "current: 9" "" \
+  "- Step 9: delivered: 2026-10-01T00:00Z wave-00-prior" > "$DBU_PLAN"
+DBU_LED="$RDU/.bionic/docs/record/wave-00-prior/debt.md"; mkdir -p "${DBU_LED%/*}"
+printf '%s\n' "$DBT_HEAD" "$DBT_AL2" > "$DBU_LED"
+DBU_SHA="$(shasum "$DBU_LED" | awk '{ print $1 }')"
+expect_eq "DEBT-U0 precondition: the root's newest plan is the closed predecessor, which active_plan hands an unbound session" \
+  "$DBU_PLAN|closed" "$(bash -c '. "$1/run.sh"; p="$(active_plan "$2")"; printf "%s|" "$p"; run_open "$p" >/dev/null 2>&1 && echo open || echo closed' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RDU" 2>/dev/null)"
+expect_eq "DEBT-U0b precondition: the session's marker binds no plan" "" "$(cat "$RDU/.bionic/tmp/engaged-$SID.state")"
+poke "$RDU" debt adopt "$DBT_CONT"
+expect_eq "DEBT-U1 §DEBT debt adopt with no plan named and none bound is refused (exit 2)" "2" "$RC"
+expect_contains "DEBT-U1b …naming bind" "bind" "$OUT"
+expect_absent "DEBT-U1c …and it adopted nothing" "adopted" "$OUT"
+expect_eq "DEBT-U1d …the predecessor's debt.md is unchanged (sha)" "$DBU_SHA" "$(shasum "$DBU_LED" | awk '{ print $1 }')"
+poke "$RDU" debt adopt "$DBT_CONT" "$DBU_PLAN"
+expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's ledger (exit 0)" \
+  "0|poker: debt adopt — 1 adopted, 1 already there: record/wave-00-prior/debt.md" "$RC|$OUT"
+
 # ============================================================
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
 # ============================================================
