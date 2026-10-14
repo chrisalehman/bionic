@@ -1791,7 +1791,7 @@ expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
 # REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
 # directory, not the file, so a link to a log elsewhere was admitted and the evidence could
 # change after the proof. The same bytes as a regular file under record/ are admitted.
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
 ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
 expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
@@ -1807,6 +1807,8 @@ s42_unchanged "46c8 an evidence path with a space (the line is space-separated)"
 poke "$R46" proof-add floor
 s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
+# Since wave-36 T35 (AC-7.10) proof-add floor takes several logs, each a path under record/; a bare hex word is a head,
+# never a log, so it stays the usage error.
 s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
 
 # The head is held against the working branch's checkout, so a plan whose branch no checkout

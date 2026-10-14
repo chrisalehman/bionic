@@ -93,16 +93,18 @@ proof_floor_line() {
 # proof_floor_owed <whole-run log> -> the suites the log's LAST run left red, comma-joined on one line, each
 # by its file name (wave-35 T9; D8, AC-1.3); nothing for a green run. Read from the runner's own `Failed:`
 # block (tests/run.sh), the lines `    - <suite>[ (<why>)]` after the last `Gating:` verdict that follows the
-# last `head=<sha> dirty=<n>` header, so a log with an earlier run in it is judged by its last.
+# last `head=<sha> dirty=<n>` header, so a log with an earlier run in it is judged by its last. A LOG THAT ENDS
+# `rc=0` OWES NOTHING (wave-36 T35; AC-7.10): its run passed, whatever a block above its close says.
 proof_floor_owed() {
   awk '
+    NF { last = $0 }
     /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; o = ""; inf = 0; next }
     !seen { next }
     /^Gating: [0-9]+ passed, [0-9]+ failed$/ { o = ""; inf = 0; v = 1; next }
     v && $0 == "Failed:" { inf = 1; next }
     inf && /^    - [^ ]/ { s = substr($0, 7); sub(/ .*$/, "", s); sub(/.*\//, "", s); o = o (o == "" ? "" : ",") s; next }
     inf { inf = 0 }
-    END { if (o != "") print o }' "${1:-/dev/null}" 2>/dev/null
+    END { if (o != "" && last !~ /^rc=0[ \t\r]*$/) print o }' "${1:-/dev/null}" 2>/dev/null
 }
 
 # proof_inherited_lines <plan> -> each `inherited: <suite> base=<sha> head=<sha> …` line of the plan's unfenced
@@ -715,20 +717,14 @@ proof_checkout() {
 # (`proof_branch_head`, the judge's one reading of the head) and its repository as <checkout>, so a branch no
 # checkout holds is read as the judge reads it (wave-36 T12; D13, AC-7.4; C30). With none, <checkout>'s HEAD.
 # "The checkout's HEAD" below means that head.
-#   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
-#          prints before any suite, so the last run in the log is the one judged (T52). <n>
-#          must be 0; the runner's verdict after it must read
-#          `Gating: <p> passed, <m> failed` with <p> > 0, outside any suite's captured output; and the run
-#          must be WHOLE: <p> + <m> equals the suites at <sha> (no void term: wave-35 T2, D11). A RED WHOLE
-#          RUN IS THE CANDIDATE TOO (wave-35 T9; D8, AC-1.3): its `Failed:` block must name all <m> suites,
-#          which `proof_floor_owed` reads and `proof-add floor` writes onto the line as owed.
+#   floor  THE LOG OF A RUN, IN THE FLOOR'S ONE GRAMMAR (wave-36 T35; D13, AC-7.10): its first
+#          `head=<40-hex> dirty=0` line and its last line `rc=0`, nothing between read, whatever
+#          ran it (`_proof_floor_log`, which says the rule whole). No roster is counted, no `Gating:`
+#          verdict asked for and no config key needed; a <root> whose `.bionic/config.yaml` still
+#          carries `floor-attestation:`, a removed key, is refused by name (`proof_floor_retired`).
 #          THE FLOOR IS A RECORD OF RUNS (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.4; D3): <sha> is
 #          the checkout's HEAD, or an ancestor of it from which `_proof_walk` proves every later
 #          commit by the runs recorded at it (`_proof_floor_walk`). The run itself is judged first.
-#          UNLESS THE PROJECT DECLARES ITS REGRESSION (wave-28 T75; REQ-17, D36): with a <root> whose
-#          `.bionic/config.yaml` names `floor:` or `floor-attestation:`, the evidence is judged by
-#          `_proof_floor_declared` instead, and neither the verdict nor the roster is read. With
-#          neither key, or no <root>, this rule stands as it was.
 #   review a review: its first `reviewed: <a>..<b>` line. <b> must resolve to a commit that is
 #          the checkout's HEAD or an ancestor of it; the proof names that commit — a review of an
 #          older head is a true proof of that older head, and what landed since is unread.
@@ -748,13 +744,12 @@ proof_checkout() {
 #          command passed, and <sha> must be the checkout's HEAD: the command ran in that checkout
 #          at that head.
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster fl fa owed nred
+  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict
   head="$(git -C "$co" rev-parse --verify -q "${7:-HEAD}^{commit}" 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
-  if [ "$kind" = floor ] && [ -n "$root" ]; then
-    _proof_roots_load
-    fl="$(config_value "$root" floor "" 2>/dev/null)"; fa="$(config_value "$root" floor-attestation "" 2>/dev/null)"
-    [ -z "$fl$fa" ] || { _proof_floor_declared "$ev" "$head" "$fl" "$fa" "$co" "$plan" "$root"; return $?; }
+  if [ "$kind" = floor ]; then
+    proof_floor_retired "$root" && return 1
+    _proof_floor_log "$ev" "$head" "$co" "$plan" "$root"; return $?
   fi
   if [ "$kind" = check ]; then
     sha="$(awk '/^check-changed: / { next } { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
@@ -770,7 +765,6 @@ proof_attested() {
   stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
   rng="$(awk '/^reviewed:[ \t]/ { sub(/^reviewed:[ \t]+/, ""); sub(/[ \t].*$/, ""); print; exit }' "$ev" 2>/dev/null)"
   case "$kind" in
-    floor) rng="" ;;
     review) stamp="" ;;
     task) [ -n "$stamp" ] && rng="" ;;
   esac
@@ -779,11 +773,7 @@ proof_attested() {
     if [ "$sha" = none ]; then
       printf 'the run in %s read no repository (head=none); run it in the working branch checkout and cite that log' "$ev"; return 1
     fi
-    if [ "$sha" != "$head" ]; then
-      if [ "$kind" != floor ]; then _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; fi
-      git -C "$co" rev-parse --verify -q "$sha^{commit}" >/dev/null 2>&1 \
-        || { _proof_floor_walk "$ev" "$sha" "$head" "$co" "$plan" "$root"; return 1; }
-    fi
+    if [ "$sha" != "$head" ]; then _proof_read_elsewhere "$ev" "$sha" "$head"; return 1; fi
     [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
     # THE RUN MUST ALSO HAVE PASSED (wave-26 T5; review 10 F1). A header says which head a run
     # read, not how it ended: a red run, or a note that quotes the header, attests the head all
@@ -812,41 +802,9 @@ proof_attested() {
     if [ "$3" != 0 ]; then
       printf 'the last verdict in %s sits inside a suite'"'"'s captured output (a ───── end line follows it), so the run itself has none; cite the whole log of a full run that finished' "$ev"; return 1
     fi
-    # A RED WHOLE RUN IS THE FLOOR'S CANDIDATE (wave-35 T9; D8, AC-1.3; ADR-054): its red suites are owed,
-    # each closed by a later green landing of it (`_proof_walk`), so a regression's log is judged whole, not
-    # green. A task proof still cites a green run, and a run with nothing passed proves nothing.
-    if [ "$1" = 0 ] || { [ "$2" != 0 ] && [ "$kind" != floor ]; }; then
+    # A TASK PROOF CITES A GREEN RUN, and a run with nothing passed proves nothing.
+    if [ "$1" = 0 ] || [ "$2" != 0 ]; then
       printf 'the run in %s did not pass (Gating: %s passed, %s failed); fix it, run it again and cite that log' "$ev" "$1" "$2"; return 1
-    fi
-    # A REGRESSION IS A WHOLE RUN (T52; review 14 N1). The runner's roster is every tests/*.test.sh
-    # in the tree, with no skip list and no subset mode (a match that is not a suite stops the
-    # run before any verdict), and every suite on it ends passed or failed. So a regression's
-    # passed and failed together equal the suites at the head the run read: one git call, here in the
-    # verb, never in a wall. A clean tree (dirty=0, checked above) holds no untracked suite.
-    if [ "$kind" = floor ]; then
-      roster="$(git -C "$co" ls-tree --name-only "$sha" tests/ 2>/dev/null \
-        | awk '/^tests\/[^\/]+\.test\.sh$/ { n++ } END { print n + 0 }')"
-      if [ "$(($1 + $2))" -ne "${roster:-0}" ]; then
-        if [ "$2" = 0 ]; then
-          printf 'the run in %s is not a whole run (%s passed of %s suites at its head); cite the log of a full run' \
-            "$ev" "$1" "${roster:-0}"
-        else
-          printf 'the run in %s is not a whole run (%s passed and %s failed of %s suites at its head); cite the log of a full run' \
-            "$ev" "$1" "$2" "${roster:-0}"
-        fi
-        return 1
-      fi
-      # EVERY RED IS NAMED (wave-35 T9; AC-1.3): the runner lists each failed suite under `Failed:`, and the
-      # owed set is that list, so a log whose list is shorter than its count cannot say what is owed.
-      owed="$(proof_floor_owed "$ev")"; nred=0
-      [ -z "$owed" ] || nred="$(printf '%s\n' "$owed" | awk -F, '{ print NF }')"
-      if [ "$nred" != "$2" ]; then
-        printf 'the run in %s counts %s failed but its Failed: block names %s; cite the whole log of a full run, as tests/run.sh wrote it' \
-          "$ev" "$2" "$nred"; return 1
-      fi
-      # THE RUN IS GOOD; NOW THE COMMITS SINCE IT (wave-31 T25; D3): a whole run at an ancestor stands for the
-      # working head when every commit after it is proved by its recorded runs; its reds stay owed.
-      [ "$sha" = "$head" ] || _proof_floor_walk "$ev" "$sha" "$head" "$co" "$plan" "$root" "$owed" || return 1
     fi
     printf '%s' "$sha"; return 0
   fi
@@ -902,7 +860,6 @@ proof_attested() {
     printf '%s' "$bh"; return 0
   fi
   case "$kind" in
-    floor) printf 'the evidence %s carries no head=<sha> dirty=<n> line; a regression proof cites the log of a full run, whose header prints it' "$ev" ;;
     review) printf 'the evidence %s carries no reviewed: <a>..<b> line; a review proof cites a review whose header names the range it read' "$ev" ;;
     *) printf 'the evidence %s carries neither a head=<sha> dirty=<n> run header nor a reviewed: <a>..<b> line; cite a run log or a review' "$ev" ;;
   esac
@@ -1175,44 +1132,58 @@ _proof_anchors_load() {
   declare -F reads_index >/dev/null 2>&1
 }
 
-# _proof_floor_declared <evidence> <working head> <floor: command> <floor-attestation: value> -> the head,
-# exit 0; or exit 1 with the refusal's sentence (wave-28 T75; REQ-17, D36). WHAT A PROJECT'S REGRESSION IS
-# BELONGS TO THE PROJECT: the judge asks only that a regression was declared, ran at a clean working head and
-# passed, never what its runner printed. Two shapes, either key alone enough:
-#   floor: <command>         the log `floor-run` writes, whose FIRST line is `head=<40-hex> dirty=<n>
-#                            rc=<n>`: the head the working head, dirty 0, rc 0. No Gating: verdict, no roster.
-#   floor-attestation: user  the user's record: a `head=<40-hex> dirty=0` line (the last one) naming the
-#                            working head, and a `floor-attested-by: <who> <when> <what ran>` line, three
-#                            words or more after the key. A missing line is refused by its name.
-# With both keys the declared shape is tried first: a first line in its shape is judged as one, so a red
-# run is refused as red and never read again as an attestation. Any value of floor-attestation: but
-# `user` is refused, whatever else the configuration says (fail closed).
-_proof_floor_declared() {
-  local ev="$1" head="$2" fl="$3" fa="$4" co="${5:-}" plan="${6:-}" root="${7:-}" hdr sha dirty rc who
-  case "$fa" in
-    ''|user) : ;;
-    *) printf 'the floor-attestation: in .bionic/config.yaml is %s, and the one value it takes is user; write floor-attestation: user or remove the line' "$fa"; return 1 ;;
+# _proof_floor_log <evidence> <working head> <checkout> [<plan>] [<root>] -> the 40-hex head the log read, exit 0;
+# or exit 1 with the refusal's sentence (wave-36 T35; D13, AC-7.10; the synth-vision filing). THE FLOOR'S ONE
+# GRAMMAR. What a project's regression is belongs to the project; the judge asks only that a run of it read a
+# clean working head and said how it ended, so it reads two lines of the log the run left and nothing between:
+#   the header  the first line that opens `head=`, read as `head=<40-hex> dirty=<n>`: <n> must be 0, and the head
+#               the working head or an ancestor of it `_proof_floor_walk` proves every later commit from. Lines
+#               before it (a runner's preamble: tests/run.sh prints `rung=` and `env:` first) are not read.
+#   the close   the last line that is not blank, `rc=<n>`: rc=0 is a pass.
+# A RED RUN is refused naming its rc, unless the runner's own `Failed:` block names its reds (`proof_floor_owed`),
+# as many as its last `Gating:` counts failed: then it is the floor's red candidate, those suites owed (wave-35 T9;
+# ADR-054). No tests/*.test.sh roster is counted, no `Gating:` verdict is asked for and no config key is needed,
+# so tests/run.sh's log, floor-run's log and the log of a project's own runner are each one such log.
+_proof_floor_log() {
+  local ev="$1" head="$2" co="$3" plan="${4:-}" root="${5:-}" hdr sha dirty rc owed nred m
+  hdr="$(awk '/^head=/ { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+$/) { split($0, w, /[ =]/); print w[2] " " w[4] } else print "bad " $0; exit }' "$ev" 2>/dev/null)"
+  case "$hdr" in
+    '') printf 'the evidence %s carries no head=<sha> dirty=<n> line; a regression proof cites the log of a run, which opens with it' "$ev"; return 1 ;;
+    'bad head=none dirty=none') printf 'the run in %s read no repository (head=none); run it in the working branch checkout and cite that log' "$ev"; return 1 ;;
+    bad\ *) printf 'the run header in %s reads %s, not head=<40-hex> dirty=<n>; cite the log of a run that opens with that line' "$ev" "${hdr#bad }"; return 1 ;;
   esac
-  if [ -n "$fl" ]; then
-    hdr="$(awk 'NR == 1 { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+ rc=[0-9]+$/) { gsub(/(head|dirty|rc)=/, ""); print } exit }' "$ev" 2>/dev/null)"
-    sha="${hdr%% *}"
-    if [ "${#sha}" -eq 40 ]; then
-      dirty="${hdr#* }"; rc="${dirty#* }"; dirty="${dirty%% *}"
-      [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
-      [ "$rc" = 0 ] || { printf 'the regression in %s did not pass (rc=%s); fix it, run floor-run again and cite that log' "$ev" "$rc"; return 1; }
-      [ "$sha" = "$head" ] || _proof_floor_walk "$ev" "$sha" "$head" "$co" "$plan" "$root" || return 1
-      printf '%s' "$sha"; return 0
-    fi
-    if [ -z "$fa" ]; then
-      printf 'the evidence %s does not open with head=<40-hex> dirty=<n> rc=<n>, the line floor-run writes; run floor-run and cite its log' "$ev"; return 1
-    fi
+  sha="${hdr%% *}"; dirty="${hdr#* }"
+  [ "${#sha}" -eq 40 ] || { printf 'the run header in %s names head %s, which is not 40 hex; cite the log of a run that opens with head=<40-hex> dirty=<n>' "$ev" "$sha"; return 1; }
+  [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
+  rc="$(awk 'NF { l = $0 } END { sub(/[ \t\r]+$/, "", l); print l }' "$ev" 2>/dev/null)"
+  case "$rc" in rc=[0-9]*) rc="${rc#rc=}" ;; *) rc=x ;; esac
+  case "$rc" in *[!0-9]*) printf 'the log %s does not end with an rc=<n> line, so it does not say how its run ended; end it with the run'"'"'s exit code (rc=$?) and cite it' "$ev"; return 1 ;; esac
+  owed=""
+  if [ "$rc" != 0 ]; then
+    owed="$(proof_floor_owed "$ev")"
+    [ -n "$owed" ] || { printf 'the run in %s ended rc=%s, so the regression did not pass; fix what it names, run it again and cite that log' "$ev" "$rc"; return 1; }
+    nred="$(printf '%s\n' "$owed" | awk -F, '{ print NF }')"
+    m="$(awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { m = $4 } END { print m + 0 }' "$ev" 2>/dev/null)"
+    [ "$nred" = "$m" ] || { printf 'the run in %s counts %s failed but its Failed: block names %s; cite the whole log of a full run, as tests/run.sh wrote it' "$ev" "$m" "$nred"; return 1; }
   fi
-  sha="$(awk '/^head=[0-9a-f]+ dirty=0$/ { s = $1 } END { sub(/^head=/, "", s); print s }' "$ev" 2>/dev/null)"
-  who="$(awk '/^floor-attested-by:[ \t]/ { sub(/^floor-attested-by:[ \t]+/, ""); sub(/[ \t]+$/, ""); if (split($0, w, /[ \t]+/) >= 3) { print; exit } }' "$ev" 2>/dev/null)"
-  [ "${#sha}" -eq 40 ] || { printf 'the attestation %s carries no head=<40-hex> dirty=0 line naming the working head' "$ev"; return 1; }
-  [ -n "$who" ] || { printf 'the attestation %s carries no floor-attested-by: <who> <when> <what ran> line' "$ev"; return 1; }
-  [ "$sha" = "$head" ] || _proof_floor_walk "$ev" "$sha" "$head" "$co" "$plan" "$root" || return 1
+  # THE RUN IS GOOD; NOW THE COMMITS SINCE IT (wave-31 T25; D3): a run at an ancestor stands for the working head
+  # when every commit after it is proved by its recorded runs; a red candidate's reds stay owed.
+  [ "$sha" = "$head" ] || _proof_floor_walk "$ev" "$sha" "$head" "$co" "$plan" "$root" "$owed" || return 1
   printf '%s' "$sha"
+}
+
+# proof_floor_retired <root> -> exit 0 with the refusal's sentence when <root>'s `.bionic/config.yaml` carries
+# `floor-attestation:` (wave-36 T35; D13, AC-7.10). Wave-28 T75's key named a person's record that a run passed as
+# the floor; a log is the fact, so nothing reads the key, and a config that still carries it is refused by its name
+# rather than passed over. Exit 1, nothing printed, otherwise (no <root> included). `proof_attested floor`, so
+# `proof-add floor`, and `floor-run` ask it first.
+proof_floor_retired() {
+  local v
+  [ -n "${1:-}" ] || return 1
+  _proof_roots_load
+  v="$(config_value "$1" floor-attestation "" 2>/dev/null)"
+  [ -n "$v" ] || return 1
+  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the floor is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add floor <log> [<log>...]' "$v"
 }
 
 # proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
