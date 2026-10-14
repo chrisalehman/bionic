@@ -11486,8 +11486,8 @@ cgc_stopwall() {  # <repo> -> open | closed | other:<reason>
   out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
   case "$out" in
-    *"Fillable gap"*"R1"*) printf 'closed' ;;
-    *"Fillable gap"*|*"Fill budget unreadable"*) printf 'other:%s' "$out" ;;
+    *"ready with room:"*"R1"*) printf 'closed' ;;
+    *"ready with room:"*|*"Fill budget unreadable"*) printf 'other:%s' "$out" ;;
     *) printf 'open' ;;
   esac
 }
@@ -11549,7 +11549,7 @@ cgc_ring
 _cgc_mut=$(s4_stop_payload "$_cgc_r" "$SID_A" "$_cgc_r/cgc-transcript.jsonl" \
   | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_MUT_HOOK/stop.sh" 2>/dev/null)
 expect_contains "CG-close MUTANT a name-only stop wall frees the re-dispatched name's slot (the row discriminates)" \
-  "Fillable gap" "$_cgc_mut"
+  "ready with room:" "$_cgc_mut"
 
 # ============================================================
 section "CG-close-all — the three remaining readers ask the one close predicate (epic-23 wave-20 T17, REQ-10 AC-10.1; D10)"
@@ -11962,7 +11962,9 @@ section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave
 #   tick         how many of the ten ready rows its FILL names: the gate has room for all
 #                ten, so the cap is the width (wave-28 T13: the rung line it used to read is gone)
 #   preflight    the budget refusal's `writers: budget=<n>` (ten open rows, so any n refuses)
-#   stop wall    the width of the ready set it names, over ten ready rows and an empty roster
+#   stop wall    the free slots its fill-ledger line records, over ten ready rows and an empty
+#                roster (wave-36 T32: its refusal names every ready row while a slot is free,
+#                so its width is read where it records it, never off the names)
 #   gov hook     presence only (its one use is "does a writers= exist"): the Write is
 #                refused on the budget arm iff it reads none
 # and the governing-skill hook is driven over TEXT (the Write's content), the other three over
@@ -12013,9 +12015,13 @@ cgb_stopwall() {  # <repo> -> writers
   case "$out" in
     '') printf -- '-'; return 0 ;;
   esac
-  ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
-  if [ -z "$ids" ]; then printf '?'; return 0; fi
-  printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
+  case "$out" in *"ready with room:"*) ;; *) printf '?'; return 0 ;; esac
+  cgb_wall_free "$1"
+}
+cgb_wall_free() {  # <repo> -> the free= of the stop wall's last fill-ledger line, or ?
+  local free
+  free=$(cat "$1"/.bionic/docs/record/*/fill-ledger.log 2>/dev/null | tail -1 | sed -n 's/.*|free=\([0-9]*\)|.*/\1/p')
+  printf '%s' "${free:-?}"
 }
 cgb_govskill() {  # <budget line verbatim> -> present | absent (sets CGB_GS_OUT)
   local r plan content
@@ -12085,7 +12091,7 @@ while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   _cgb_w="$_cgb_want"; [ "$_cgb_want" = "-" ] && _cgb_w=10
   expect_eq "CG-budget ${_cgb_label}: the tick fills ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_tk"
   expect_eq "CG-budget ${_cgb_label}: dispatch preflight reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_pf"
-  expect_eq "CG-budget ${_cgb_label}: the stop wall names ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_st"
+  expect_eq "CG-budget ${_cgb_label}: the stop wall refuses with ${_cgb_w} free (cap ${_cgb_want})" "$_cgb_w" "$_cgb_st"
   expect_eq "CG-budget ${_cgb_label}: the governing-skill hook admits the Write (no plan owes the line)" \
     "admitted" "$_cgb_gs"
   if [ "$_cgb_want" = "-" ]; then
@@ -12124,13 +12130,14 @@ section "§ROOM — the tick and the stop wall give one answer on width (wave-28
 room_world() {  # <label> -> repo path, with ten ready rows under a cap of eight
   cgb_world "room-$1" 'parallel-budget: writers=8 suites=2 source=user'
 }
-room_stop() {  # <repo> -> how many writer rows the stop wall owes, 0 when it refuses nothing
-  local out ids
+room_stop() {  # <repo> -> the writer slots the stop wall finds free, 0 when it refuses nothing
+  local out
   out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
-  ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
-  if [ -z "$ids" ]; then printf '0'; return 0; fi
-  printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
+  # Its width is its ledger line's free= (wave-36 T32: the refusal names every ready row while a
+  # slot is free, so the count of names is no longer the width).
+  case "$out" in *"ready with room:"*) ;; *) printf '0'; return 0 ;; esac
+  cgb_wall_free "$1"
 }
 room_tick() {  # <repo> — sets ROOM_TICK_OUT (the tick's channel) and ROOM_TK (rows its FILL names)
   local ids
@@ -12418,7 +12425,7 @@ cgt_stop() {  # <stop_hook_active true|false>
 jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$CGT_TR"
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
-expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
+expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "ready with room:" "$CGT_OUT"
 # THE LAUNCHED SET IS THE RECORDER'S (wave-28 T38; REQ-13, D30). The task-entry duty that also read it
 # went at wave-31 T32 (D6, AC-6.5): the Stop the recorder's line names is refused for the fill alone.
 expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
@@ -13118,7 +13125,7 @@ section "UB — UNBOUND MEANS NO RUN: every acting arm announces the fallback an
 #   context-spend     no spend state written                         state names <p>
 #   landing guard     no row lookup: "session unbound", checkout     the row's declared base, silent
 #   duties gate       a write naming <p> discharges nothing          that write discharges the refresh
-#   fill gate         no refusal for <p>'s ready row                 refused: not launched: T5
+#   fill gate         no refusal for <p>'s ready row                 refused: ready with room: T5
 #   patrol-revive     a stale stamp revives nothing                  the stale stamp blocks
 #   dispatch wall     judged with no plan: writer refused to bind    refused by <p>'s writers=1 budget
 #   commit gate       the commit is not judged against <p>           refused: <p>'s step has no evidence
@@ -13154,7 +13161,7 @@ ub_stop() {
 }
 ub_decision() { printf '%s' "$UB_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 # ub_names_id <text> <id> -> the lines that name <id> as a word of its own: a row id a hook
-# printed (`FILL T5`, `not launched: T5`, `T4→T5`, `fill=T5`), or an agent's name that ends in it
+# printed (`FILL T5`, `ready with room: T5`, `T4→T5`, `fill=T5`), or an agent's name that ends in it
 # (`w-T5`, `(w26-T5)`), never the same letters inside a path or a longer name
 # (`.worktrees/26-T5/`, `/tmp/T47-T5`, `T50`). A row id is judged by what the hook SAYS about the
 # row; the paths it prints are wherever this suite and its sandbox happen to sit, and a tree or
@@ -13171,14 +13178,14 @@ require_helpers ub_mode ub_adv ub_stop ub_decision ub_iso ub_names_id
 # The extractor on a planted text: an id inside a path or a longer name is not a mention, an id
 # the hook printed as a row is, on each line kind that names one.
 expect_eq "UB ub_names_id keeps the lines that name T5 as a row or an agent, and only those" \
-  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|not launched: T5.|poker: dispatch w-T5 now|poker: LAUNCHED (w26-T5)" \
+  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|ready with room: T5 (dispatch them or decline them)|poker: dispatch w-T5 now|poker: LAUNCHED (w26-T5)" \
   "$(ub_names_id "poker: note: run \`bash /x/.worktrees/26-T5/hooks/session-poker.sh arm\`
 run resolved by newest-plan fallback (session unbound) — /tmp/T47-T5/w1r/run.md; bind
 poker: FILL T5
 poker-tick/v1|decision=FILL|fill=T5
 poker: CHAIN T4→T5 (30 min)
 poker: WAIT T50 — needs T4
-not launched: T5.
+ready with room: T5 (dispatch them or decline them)
 poker: dispatch w-T5 now
 poker: tree at /x/.worktrees/26-T5
 poker: tmp /tmp/T47-T5
@@ -13297,7 +13304,7 @@ ub_collect fill-gate "$UB_ERR" "$UB4_P"
 ub_mode "$UB4" "$SID_A" "$UB4_P" bound
 ub_stop "$UB4" "$SID_A" "$UB4/turn.jsonl"
 expect_eq "UB.4 fill gate, bound-open (control): the same turn is refused" "block" "$(ub_decision)"
-expect_contains "UB.4 …naming T5 as not launched" "not launched: T5" "$(ub_names_id "$UB_ERR" T5)"
+expect_contains "UB.4 …naming T5 as ready with room" "ready with room: T5" "$(ub_names_id "$UB_ERR" T5)"
 
 # ---- UB.5 patrol-revive ------------------------------------------------------
 UB5=$(new_repo "ub-revive"); UB5_P="$UB5/.bionic/docs/plans/epic-99/run.md"
@@ -13461,11 +13468,11 @@ expect_eq "UB.9 …and A's binding is untouched" "plan=$UB9_P" \
   "$(grep -m1 '^plan=' "$UB9/.bionic/tmp/engaged-$SID_A.state" 2>/dev/null)"
 ub_stop "$UB9" "$SID_C" "$UB9/turn.jsonl"
 expect_eq "UB.9 C's turn end: no refusal" "" "$(ub_decision)"
-expect_absent "UB.9 …and A's ready row is named nowhere" "not launched: T5" "$UB_OUT$UB_ERR"
+expect_absent "UB.9 …and A's ready row is named nowhere" "ready with room: T5" "$UB_OUT$UB_ERR"
 expect_eq "UB.9 …nor T5 at all" "" "$(ub_names_id "$UB_OUT$UB_ERR" T5)"
 ub_stop "$UB9" "$SID_A" "$UB9/turn.jsonl"
 expect_eq "UB.9 A's turn end on the same tree (control): refused" "block" "$(ub_decision)"
-expect_contains "UB.9 …naming T5 as not launched" "not launched: T5" "$(ub_names_id "$UB_ERR$UB_OUT" T5)"
+expect_contains "UB.9 …naming T5 as ready with room" "ready with room: T5" "$(ub_names_id "$UB_ERR$UB_OUT" T5)"
 
 # ============================================================
 section "SD — a standing fill decline: the tick's FILL and the stop wall's refusal name the same rows (wave-24 T27; REQ-4 AC-4.7; D2; Step-6 review C2/U1)"
@@ -13504,8 +13511,8 @@ sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, spa
   cgc_ring
   s4_stop_payload "$1" "$SID_A" "$1/sd-turn.jsonl" | sd_env bash "$CGSD_STOP" 2>/dev/null \
     | jq -r '.reason // ""' 2>/dev/null \
-    | sed -n 's/.*these rows are ready to dispatch — \(.*\) — and this turn.*/\1/p' | tr ' ' '\n' \
-    | LC_ALL=C sort | tr '\n' ' '
+    | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' '\n' | LC_ALL=C sort | tr '\n' ' '
 }
 SD_R=$(sd_world some R1)
 SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
