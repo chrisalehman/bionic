@@ -842,9 +842,16 @@ for s59st in intended confirmed; do
   s59_row w-crit bionic:critic "$s59st" adversarial,structure "$S59_REL/adv.md" "$S59_REL/adv-2.md,$S59_REL/str-2.md"
   s59_row w-rev bionic:critic "$s59st" structure "$S59_REL/str-rev.md" ""
 done
-P59="$(s42_plan "$R59" 4)"
+# A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
+# is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
+P59="$(s42_plan "$R59" 4 "  worktree: .worktrees/01-fixture
+  base-sha: $(git -C "$R59" rev-parse --short=8 HEAD)
+  branch: wave/01-fixture")"
+# EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a review
+# row is ready again only past a commit that owes, so A, B and C each change a.sh.
 ( cd "$R59" && git worktree add -q -b wave/01-fixture "$R59/.worktrees/01-fixture" \
-  && for c in A B C; do git -C "$R59/.worktrees/01-fixture" commit -q --allow-empty -m "landing $c"; done ) >/dev/null 2>&1
+  && for c in A B C; do printf '%s\n' "$c" >> "$R59/.worktrees/01-fixture/a.sh" \
+       && git -C "$R59/.worktrees/01-fixture" add a.sh && git -C "$R59/.worktrees/01-fixture" commit -q -m "landing $c"; done ) >/dev/null 2>&1
 S59_A="$(git -C "$R59/.worktrees/01-fixture" rev-parse HEAD~2 2>/dev/null)"
 S59_B="$(git -C "$R59/.worktrees/01-fixture" rev-parse HEAD~1 2>/dev/null)"
 S59_C="$(git -C "$R59/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
@@ -1018,15 +1025,28 @@ s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S60_INIT"
 s60_tick
 expect_eq "60b one fix after the whole read, the other landed before it: C is a commit no header names, so one MOVED unknown line (re-pinned, wave-27 T34)" \
   "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
-# A docs-only tail: the whole reading at C, every row landed by C, and one commit past C no row landed.
+# A tail made by hand: the whole reading at C, every row landed by C, and one commit past C no row landed. RE-PINNED
+# BY wave-36 T28 (D9): the tail changes code, so the judge reads the structure question uncovered and the row is
+# offered; through T28 it was an empty commit, which the judge reads as prose (60c3 below).
 s60_world s60-tail @C whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
-git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "a docs-only tail" >/dev/null 2>&1
-S60_D="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+S60_D="$(s57_commit "$R59W/.worktrees/01-fixture" a.sh "a tail made by hand")"
 s60_tick
 expect_eq "60c a tail made straight on the working branch: RANGE C..D, and MOVED unknown, never none (re-pinned, wave-27 T34)" \
   "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s60_moved)"
+# THE TICK ASKS THE JUDGE (wave-36 T28; D9, AC-3.6): the same world with a docs-only tail. The judge reads the record
+# commit as prose, the structure question stays covered at D, and the tick offers no range and says why.
+s60_world s60-tail-doc @C whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+S60_DD="$(s57_commit "$R59W/.worktrees/01-fixture" .bionic/docs/record/wave-01-fixture/notes.md "a docs-only tail")"
+expect_eq "60c2 precondition: the docs-only tail is one commit past C touching only the record" \
+  "$S59W_C .bionic/docs/record/wave-01-fixture/notes.md" \
+  "$(git -C "$R59W" rev-parse "$S60_DD~1") $(git -C "$R59W" diff --name-only "$S59W_C" "$S60_DD")"
+s60_tick
+expect_eq "60c3 a docs-only tail past the structure reading: no RANGE line, and T3 waits on what the judge reads" \
+  "|poker: WAIT T3 — live:head:structure: the judge (facts_state) reads structure covered at ${S60_DD:0:12}; only an uncovered question is read again" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
 # No whole fact yet: the structure reading at A is a piece read. The range prints, and no MOVED line.
 s60_world s60-nowhole @A piece
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"

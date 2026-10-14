@@ -2484,8 +2484,14 @@ lv_plan() {  # <file> <state lines> <rows...> -> an approved reads table
     for r in "$@"; do printf '%s\n' "$r"; done; } > "$f"
 }
 lv_proof() { printf 'proved: kind=review head=%s at=2026-10-04T0%s:00:00Z evidence=record/w/review.md' "$1" "${2:-1}"; }
-# live_call <head> <fn> <args...> -> `call` with UNITS_LIVE_HEAD in the child's environment.
-live_call() { local h="$1"; shift; UNITS_LIVE_HEAD="$h" call "$@"; }
+# live_call <head> <fn> <args...> -> `call` with UNITS_LIVE_HEAD in the child's environment, and the
+# judge's answer beside it as the tick hands it (wave-36 T28; D9): UNITS_READINGS_STATE, unless the
+# caller sets its own, reads every question uncovered past its reading, the answer at a head past a
+# code landing. The heads here are fixed hex or empty commits the judge cannot walk, and these
+# sections pin the live read's mechanics (ranges, order, idleness at the reading's head); §LIVE-HEAD
+# pins the judge itself, on a real repository.
+LIVE_OWES="review evidence bionic:auditor piece uncovered a..b; review adversarial bionic:critic piece uncovered a..b; review structure bionic:critic piece uncovered a..b"
+live_call() { local h="$1"; shift; UNITS_LIVE_HEAD="$h" UNITS_READINGS_STATE="${UNITS_READINGS_STATE-$LIVE_OWES}" call "$@"; }
 LV_BUILD_LANDED="| T1 | 4 | build | landed work | implementor | — | 30 | REQ-x | lib/a.sh |  | landed |"
 LV_BUILD_OPEN="| T2 | 4 | build | still building | implementor | — | 30 | REQ-x | lib/b.sh |  | active |"
 LV_REVIEW="| T3 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md |  | pending |"
@@ -4907,9 +4913,9 @@ LH_R="$(lh_git rev-parse HEAD)"
 LH_READ="$(call proof_line review "$LH_R" 2026-10-13T03:00:00Z record/lh/adv.md adversarial w-crit pass piece)"
 LH_T3Q="| T3 | 6 | review | the adversarial read | critic | — | 30 | REQ-x | .bionic/docs/record/lh/adv.md | approval:plan, live:head:adversarial | pending |"
 LH_T3B="| T3 | 6 | review | the bare read | critic | — | 30 | REQ-x | .bionic/docs/record/lh/adv.md |  | pending |"
-lh_plan() {  # <file> <branch> <T3 row> -> the plan at Step 6: the build landed, the reading at R, integrate pending
+lh_plan() {  # <file> <branch> <T3 row> [<readings>] -> the plan at Step 6: the build landed, the readings at R, integrate pending
   { printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\n---\n\n## SDLC State\n\ncurrent: 6\nworking-branch: %s\n' "$LH_B" "$2"
-    printf 'approved-by: fixture 2026-10-13T00:00:00Z "approved"\n%s\n\n' "$LH_READ"
+    printf 'approved-by: fixture 2026-10-13T00:00:00Z "approved"\n%s\n\n' "${4:-$LH_READ}"
     printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/one.sh |  | landed |\n'
@@ -4918,7 +4924,11 @@ lh_plan() {  # <file> <branch> <T3 row> -> the plan at Step 6: the build landed,
   } > "$1"
 }
 LH_BARE="${LH_PLAN%.plan.md}-bare.plan.md"; LH_GONE="${LH_PLAN%.plan.md}-gone.plan.md"
-lh_plan "$LH_PLAN" wave/99-lh "$LH_T3Q"; lh_plan "$LH_BARE" wave/99-lh "$LH_T3B"; lh_plan "$LH_GONE" wave/99-gone "$LH_T3Q"
+# A bare row reads every question: its plan holds a reading of each at R, so a question nobody read is not what readies it.
+LH_READ3="$LH_READ
+$(call proof_line review "$LH_R" 2026-10-13T03:01:00Z record/lh/ev.md evidence w-aud pass piece)
+$(call proof_line review "$LH_R" 2026-10-13T03:02:00Z record/lh/str.md structure w-crit pass piece)"
+lh_plan "$LH_PLAN" wave/99-lh "$LH_T3Q"; lh_plan "$LH_BARE" wave/99-lh "$LH_T3B" "$LH_READ3"; lh_plan "$LH_GONE" wave/99-gone "$LH_T3Q"
 lh_ready() { UNITS_LIVE_HEAD="$1" call units_ready "$2" 6; }                  # <head> <plan> -> the ready ids
 lh_wait() { UNITS_LIVE_HEAD="$1" call units_waiting "$2" 6 | awk -F'\t' '$1 == "T3" { print $2 }'; }  # T3's wait
 lh_edge() { has_line "$(UNITS_LIVE_HEAD="$1" call units_edges "$2")" "T3${TAB}T9${TAB}proof:review"; }
@@ -4943,8 +4953,11 @@ expect_eq "LH-2c …and its wait names the judge's answer at D" \
   "live:head:adversarial: the judge (facts_state) reads adversarial covered at ${LH_D:0:12}; only an uncovered question is read again" \
   "$(lh_wait "$LH_D" "$LH_PLAN")"
 expect_eq "LH-2d K2-F4 …and, idle, it writes no newer proof: integrate's proof:review does not wait on it" "no" "$(lh_edge "$LH_D" "$LH_PLAN")"
-expect_eq "LH-2e a bare live:head row past the same docs-only landing is not ready either" "no" "$(has_line "$(lh_ready "$LH_D" "$LH_BARE")" T3)"
-expect_contains "LH-2f …and its wait names the judge" "live:head: the judge (facts_state) reads " "$(lh_wait "$LH_D" "$LH_BARE")"
+expect_eq "LH-2e a bare live:head row, every question read at R, past the same docs-only landing: not ready either" "no" \
+  "$(has_line "$(lh_ready "$LH_D" "$LH_BARE")" T3)"
+expect_eq "LH-2f …and its wait names the judge's answer for every question" \
+  "live:head: the judge (facts_state) reads evidence covered, adversarial covered, structure covered at ${LH_D:0:12}; only an uncovered question is read again" \
+  "$(lh_wait "$LH_D" "$LH_BARE")"
 
 # A CODE LANDING NO BORN ROW MADE: it owes, the question reads uncovered, the row is ready for R..C.
 printf 'three\n' > "$LH/lib/one.sh"; lh_git commit -qam 'T5 landed'
@@ -4968,5 +4981,15 @@ expect_eq "LH-5 the judge cannot be asked: the review row is not ready, though t
 expect_eq "LH-5b …and its wait says the readings are not known here, and why" \
   "live:head:adversarial: the readings are not known here: the working branch names no commit, so there is no head to judge the readings at" \
   "$(lh_wait "$LH_C" "$LH_GONE")"
+
+# BOTH STATES IN ONE ANSWER: a regression proof the integrate row reads, beside the live row past its reading. The
+# program asks the readings first, then the floor, and answers once it holds both: never the floor's exit status.
+LH_FLOOR="${LH_PLAN%.plan.md}-floor.plan.md"
+lh_plan "$LH_FLOOR" wave/99-lh "$LH_T3Q" "$LH_READ
+$(call proof_floor_line "$LH_R" 2026-10-13T04:00:00Z record/lh/floor.log)"
+expect_eq "LH-6 precondition: the plan carries the regression proof the integrate row reads" "1" \
+  "$(grep -c '^proved: kind=floor ' "$LH_FLOOR")"
+expect_eq "LH-6b at Step 8, a live row past its reading and a floor to judge: the review row is ready, and the answer exits 0" "yes 0" \
+  "$(has_line "$(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8)" T3) $(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8 >/dev/null; printf '%s' "$CALL_RC")"
 
 finish
