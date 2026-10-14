@@ -3322,10 +3322,41 @@ expect_contains "OW.2b …the one line says it is a second whole run, naming the
 expect_contains "OW.2c …the detail names the suite the floor still owes" "a.test.sh" "$GATE_VERR"
 expect_absent "OW.2d …and the arm is not left unchecked" "not checked: full-run" "$GATE_ERR$GATE_VERR"
 expect_status "OW.2e …and journalled nothing" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-# THE REFUSAL STATES THE FLOOR AS THE JUDGE HOLDS IT (wave-35 T31; D20, critic-adversarial finding 8): Step 5 owes
-# the matrix, the walk and the auditor, and Step 7 is where the floor is demanded; no "one whole green run".
-expect_contains "OW.2f D20 the detail says Step 7 is where the floor is demanded, as the judge closes it" "Step 7 is where the floor is demanded" "$GATE_VERR"
-expect_absent "OW.2g …and no longer calls the floor one whole green run" "one whole green run" "$GATE_VERR"
+# THE WALL HOLDS THE FLOOR AS THE JUDGE HOLDS IT (wave-35 T31; D20, critic-adversarial finding 8), pinned by what it
+# does, never by its sentence (wave-36 T6; D12, AC-6.3; C53): the floor is one whole run, green or red, so over an
+# owed floor the fix row the refusal names is admitted, and a second whole run is admitted on the user's word alone.
+# fails-when: the owed suite's fix row is refused; the approved second whole run over an owed floor is refused.
+OW_FIX_BRIEF='Your task: run the suite the floor still owes green, with its fix.
+Expected artifact: .bionic/docs/record/w99-fix.txt
+Expected duration: ~20 minutes.
+Files: tests/a.test.sh
+Suites: tests/a.test.sh
+Lands-on: a.test.sh'
+PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T12 5 active .bionic/docs/record/w99-floor.txt verify 'T1')" \
+  "$(pf_row T14 5 pending tests/a.test.sh build 'T12')"
+expect_eq "OW.2f precondition: the floor is still read owed, naming a.test.sh" "$(printf 'owed\ta.test.sh')" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$OW_FIX_BRIEF" "w99-T14")"
+expect_eq "OW.2f D20 the fix row the refusal names, the owed suite's, is ADMITTED over the owed floor" "allow" "$GATE_VERDICT"
+expect_status "OW.2f …and journalled" "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh
+approved: regression-2 by dana 2026-10-12T05:00:00Z \"yes, run it again\""
+pf_plan "$REPO" ""
+PF_STATE_EXTRA=""
+# The approval is read from the row's reads column, which pf_plan's table does not carry.
+{
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+  printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '%s\n' '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |' \
+    '| T12 | 5 | verify | the regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor.txt |  | active |' \
+    '| T13 | 5 | verify | the second regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor2.txt | approval:regression-2, head | pending |'
+} >> "$(pf_plan_path "$REPO")"
+expect_eq "OW.2g precondition: the floor is still read owed with the approval written" "$(printf 'owed\ta.test.sh')" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T13")"
+expect_eq "OW.2g D20 …and a second whole run on the user's word is ADMITTED over it: a red floor is the whole run, not a demand for a green one" "allow" "$GATE_VERDICT"
+expect_status "OW.2g …and journalled" "3" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
 # ============================================================================
 section "§REMEDY — the full-tree refusal names floor-run, and the line, run as printed, is admitted (wave-35 T10; REQ-1 AC-1.8; D10)"
