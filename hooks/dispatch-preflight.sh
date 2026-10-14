@@ -1763,6 +1763,50 @@ C_DONE=$(sanitize "$(field_of done)" 300)   # the Done marker (wave-24 T9, D3); 
 C_FILES=$(brief_field "$LIFTED" files)
 C_SUITES=$(brief_field "$LIFTED" suites)
 C_RE_EXECUTES=$(brief_field "$LIFTED" re_executes)
+# THE RENDERED TWINS (wave-36 T6; D12, AC-6.3; C68). A template under agents-src/ is never edited alone:
+# render.sh rewrites its output and the checksum manifest from it, so a row whose Files named the template and
+# not those was refused at its stop for the files its own render wrote. The relation is render.sh's, so it is
+# read there and nowhere else: the unit table `RENDER_UNITS` (`<templates dir>|<output dir>`, split on white
+# space as render.sh's own loop splits it) and `MANIFEST_REL`. A Files entry `<templates dir>/<name>.md.tmpl`
+# whose directory IS a unit's (never a parent of it, as render.sh globs one level deep) adds
+# `<output dir>/<name>.md`, and any such entry adds the manifest. What is added is printed on the model's
+# channel with the advisories below, and recorded on the roster as the row's Files. A project with no
+# agents-src/render.sh has no units, and its Files are what the brief declared.
+dp_rendered_twins() {  # <render.sh> <files, comma-joined> <root> -> one `<template>|<output>` per twin not in files, then `|<manifest>`
+  awk -v files="$2" -v root="$3" '
+    function norm(t) { sub(/^[[:space:]]+/, "", t); sub(/[[:space:]]+$/, "", t); if (root != "" && index(t, root "/") == 1) t = substr(t, length(root) + 2); sub(/^\.\//, "", t); return t }
+    function units(buf,   w, k, m, p) { m = split(buf, w, /[[:space:]]+/); for (k = 1; k <= m; k++) if (split(w[k], p, "|") == 2 && p[1] != "" && p[2] != "") { src[++nu] = p[1]; dst[nu] = p[2] } }
+    BEGIN { n = split(files, f, ","); for (i = 1; i <= n; i++) { f[i] = norm(f[i]); have[f[i]] = 1 } }
+    inu { if (index($0, "\"")) { units(substr($0, 1, index($0, "\"") - 1)); inu = 0 } else units($0); next }
+    /^RENDER_UNITS="/ { b = substr($0, 15); if (index(b, "\"")) units(substr(b, 1, index(b, "\"") - 1)); else { units(b); inu = 1 }; next }
+    /^MANIFEST_REL="[^"]+"/ { manifest = substr($0, 15); manifest = substr(manifest, 1, index(manifest, "\"") - 1) }
+    END {
+      for (i = 1; i <= n; i++) {
+        t = f[i]
+        if (t !~ /\.md\.tmpl$/ || index(t, "/") == 0) continue
+        d = t; sub(/\/[^\/]*$/, "", d); nm = substr(t, length(d) + 2); sub(/\.md\.tmpl$/, "", nm)
+        for (k = 1; k <= nu; k++) if (src[k] == d) {
+          any = 1; o = dst[k] "/" nm ".md"
+          if (!(o in have)) { print t "|" o; have[o] = 1 }
+        }
+      }
+      if (any && manifest != "" && !(manifest in have)) print "|" manifest
+    }' "$1" 2>/dev/null
+}
+DP_TWINS_SAID=""
+if [ -n "$C_FILES" ] && [ -f "$BIONIC_ROOT/agents-src/render.sh" ]; then
+  while IFS='|' read -r _tw_tmpl _tw_out; do
+    [ -n "$_tw_out" ] || continue
+    C_FILES="${C_FILES},${_tw_out}"
+    if [ -n "$_tw_tmpl" ]; then _tw_line="rendered: ${_tw_tmpl} renders ${_tw_out}, added to this row's Files"
+    else _tw_line="rendered: agents-src/render.sh rewrites ${_tw_out} with any template, added to this row's Files"
+    fi
+    DP_TWINS_SAID="${DP_TWINS_SAID:+$DP_TWINS_SAID
+}${_tw_line}"
+  done <<DP_TWINS_EOF
+$(dp_rendered_twins "$BIONIC_ROOT/agents-src/render.sh" "$C_FILES" "$BIONIC_ROOT")
+DP_TWINS_EOF
+fi
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -3139,6 +3183,8 @@ DP_DEBT_EOF
 fi
 [ -z "$_dp_debt" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
 }$_dp_debt"
+[ -z "$DP_TWINS_SAID" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
+}$DP_TWINS_SAID"
 if [ -n "$_dp_adv_all" ]; then
   _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
 $_dp_adv_all"

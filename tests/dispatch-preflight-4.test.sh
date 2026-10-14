@@ -3493,4 +3493,71 @@ chmod 644 "$(roster_path "$REPO" "$SID_B")"
 expect_eq "HDW.6 an unreadable roster on session B holds nothing: the dispatch is admitted" "allow" "$GATE_VERDICT"
 expect_contains "HDW.6b …and the wall says the roster cannot be read" "roster-${SID_B}.state cannot be read" "$GATE_ERR"
 
+# ============================================================================
+section "§FILES — a template's rendered outputs join the row's Files, and the wall prints them (wave-36 T6; D12, AC-6.3; C68)"
+# ============================================================================
+# A row whose Files name a template under agents-src/ edits what render.sh rewrites: the template's own output
+# and the checksum manifest. Nothing carried that relation, so a writer was refused at its stop for the file its
+# own render wrote. The wall reads the unit table (RENDER_UNITS) and the manifest path (MANIFEST_REL) from the
+# project's agents-src/render.sh, adds each named template's output and the manifest to the Files the row is
+# recorded with, and prints each on the model's channel. A unit is matched by the template's own directory, so a
+# steps template renders under skills/canonical-sdlc/steps, never one level up.
+# FIXTURE FIDELITY: the shipped agents-src/render.sh, copied into a real fixture repository; the row read back from
+# the roster this gate wrote; the advisory read from stdout as the harness reads it.
+# fails-when: a template's output or the manifest is missing from files=; the wall prints neither; a steps
+# template renders into the wrong unit; a twin already in Files is added twice; a Files line with no template
+# gains anything.
+tw_brief() {  # <Files value> -> adv_brief's contract with that Files: line
+  adv_brief 'Scope constraint: the files below.' | sed "s|^Files: payload/scripts/lib/widget.sh\$|Files: $1|"
+}
+tw_files() {  # <repo> <n> -> files= of the roster's nth row
+  roster_field "$(roster_nth_row "$(roster_path "$1" "$SID_A")" "$2")" files
+}
+tw_has() {  # <files value> <path> -> how many of the value's comma-joined items are exactly <path>
+  printf '%s\n' "$1" | tr ',' '\n' | /usr/bin/grep -cxF -- "$2"
+}
+REPO=$(make_repo twins yes)
+write_attestation "$REPO" "$SID_A"
+mkdir -p "$REPO/agents-src"; cp "$BIONIC_SCRIPTS_DIR/agents-src/render.sh" "$REPO/agents-src/render.sh"
+expect_contains "TW.0 precondition: the fixture carries the shipped render.sh and its unit table" \
+  "agents-src/templates/skills/canonical-sdlc/steps|skills/canonical-sdlc/steps" "$(cat "$REPO/agents-src/render.sh")"
+TW_B1="$(tw_brief 'agents-src/templates/implementor.md.tmpl, payload/scripts/lib/widget.sh')"
+expect_contains "TW.0 precondition: the brief declares the template" \
+  "Files: agents-src/templates/implementor.md.tmpl, payload/scripts/lib/widget.sh" "$TW_B1"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$TW_B1" "w99-tw1")"
+expect_eq "TW.1 a brief naming a template is admitted" "allow" "$GATE_VERDICT"
+TW_F1="$(tw_files "$REPO" 1)"
+expect_eq "TW.1 the template stays in the row's Files" "1" "$(tw_has "$TW_F1" agents-src/templates/implementor.md.tmpl)"
+expect_eq "TW.1 …and its rendered output joins them" "1" "$(tw_has "$TW_F1" agents/implementor.md)"
+expect_eq "TW.1 …and so does the manifest render.sh rewrites" "1" "$(tw_has "$TW_F1" payload/integrity/rendered.sha256)"
+expect_eq "TW.1 …and the declared file is kept" "1" "$(tw_has "$TW_F1" payload/scripts/lib/widget.sh)"
+TW_CTX1="$(adv_ctx)"
+expect_contains "TW.2 the wall prints the output it added, beside its template" \
+  "agents-src/templates/implementor.md.tmpl renders agents/implementor.md" "$TW_CTX1"
+expect_contains "TW.2 …and the manifest" "payload/integrity/rendered.sha256" "$TW_CTX1"
+# A steps template is matched by its own directory, the deeper unit.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl')" "w99-tw3")"
+expect_eq "TW.3 a brief naming a steps template is admitted" "allow" "$GATE_VERDICT"
+TW_F3="$(tw_files "$REPO" 2)"
+expect_eq "TW.3 its output is under skills/canonical-sdlc/steps" "1" "$(tw_has "$TW_F3" skills/canonical-sdlc/steps/4.md)"
+expect_eq "TW.3 …and not one level up, in the skill's own unit (one rendered path, the manifest beside it)" \
+  "agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl,skills/canonical-sdlc/steps/4.md,payload/integrity/rendered.sha256" "$TW_F3"
+# A twin already declared is not added twice.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'agents-src/templates/critic.md.tmpl, agents/critic.md')" "w99-tw4")"
+expect_eq "TW.4 a brief naming a template and its output is admitted" "allow" "$GATE_VERDICT"
+TW_F4="$(tw_files "$REPO" 3)"
+expect_eq "TW.4 the declared output is in the row's Files once, not twice" "1" "$(tw_has "$TW_F4" agents/critic.md)"
+expect_eq "TW.4 …and the manifest is still added" "1" "$(tw_has "$TW_F4" payload/integrity/rendered.sha256)"
+# A Files line with no template gains nothing, in the same repository.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'payload/scripts/lib/widget.sh')" "w99-tw5")"
+expect_eq "TW.5 a brief naming no template is admitted" "allow" "$GATE_VERDICT"
+expect_eq "TW.5 …and its row's Files are what it declared" "payload/scripts/lib/widget.sh" "$(tw_files "$REPO" 4)"
+expect_absent "TW.5 …and the wall prints no rendered output" " renders " "$(adv_ctx)"
+# A project with no agents-src/render.sh has no units: a .md.tmpl there is a file like any other.
+REPO=$(make_repo twnone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'agents-src/templates/implementor.md.tmpl')" "w99-tw6")"
+expect_eq "TW.6 with no render.sh the brief is admitted" "allow" "$GATE_VERDICT"
+expect_eq "TW.6 …and its row's Files are what it declared" "agents-src/templates/implementor.md.tmpl" "$(tw_files "$REPO" 1)"
+
 finish
