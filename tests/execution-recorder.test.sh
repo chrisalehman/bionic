@@ -3589,6 +3589,25 @@ expect_true "SC-a8 …under the project root" test "$SCA_D1" -ef "$SCA_REPO/.bio
 expect_eq "SC-a9 the line, exactly" "Your scratch directory is $SCA_D2/$SC_TAIL" "$SCA_L2"
 expect_eq "SC-a10 …and the rest of the string is survival.md byte for byte" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 
+# ---- SC-a11: a root engaged by `engage.sh --root` names its own tmp (wave-36 T4; D11, AC-5.4) ----
+# The walker's shape (research-landing-and-walls.md C44): a scratch project nested in the dispatching
+# project's tree. Engaged by the verb, a start whose cwd is in it is pushed a scratch directory under
+# ITS `.bionic/tmp`, never the dispatching project's (SC-a8 is the positive on that project).
+SCX_ROOT="$SCA_REPO/.bionic/tmp/scratch/${SID_A}/walker/x"
+mkdir -p "$SCX_ROOT"
+env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID_A" bash "$HERE/engage.sh" --root "$SCX_ROOT" </dev/null >/dev/null 2>&1
+expect_true "SC-a11 fixture — engage.sh --root wrote the marker under the scratch project" \
+  test -f "$SCX_ROOT/.bionic/tmp/engaged-${SID_A}.state"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCA_TR" "$SCX_ROOT" bionic:researcher "a0000000000scxout")" terms
+SCX_L="$(sc_line)"; SCX_D="$(sc_dir "$SCX_L")"
+expect_nonempty "SC-a11 a start in the engaged root closes its terms with a scratch line" "$SCX_D"
+expect_true "SC-a12 …naming the engaged root's tmp" \
+  test "$SCX_D" -ef "$SCX_ROOT/.bionic/tmp/scratch/${SID_A}/a0000000000scxout"
+expect_false "SC-a13 …never the dispatching project's" \
+  test -e "$SCA_REPO/.bionic/tmp/scratch/${SID_A}/a0000000000scxout"
+SCX_ROOT_P="$(cd "$SCX_ROOT" && pwd -P)"
+expect_eq "SC-a14 the line, exactly (the root read physically, as the walk reads it)" "Your scratch directory is $SCX_ROOT_P/.bionic/tmp/scratch/${SID_A}/a0000000000scxout/$SC_TAIL" "$SCX_L"
+
 # ---- SC-b: an agent with no roster name gets a directory named by its agent id ----
 IFS='|' read -r SCB_REPO SCB_TR SCB_SUB SCB_CFG <<< "$(make_world scratchnoname yes)"
 pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCB_TR" "$SCB_REPO" bionic:test-runner "a0000000000scbnon")" terms

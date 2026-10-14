@@ -1450,4 +1450,86 @@ expect_eq "E14f the Write that creates the plan binds the session to it" "$P53" 
 expect_regex "E14f …and records the session in it, by write" "^- session: $SID $SESS_RE write\$" "$(sess_lines "$P53")"
 
 # ============================================================
+section "E15 §ROOT (wave-36 T4; D11, AC-5.4) — engage.sh --root <dir> engages that root"
+# ============================================================
+#
+# THE FAULT (research-landing-and-walls.md C44). The root was CLAUDE_PROJECT_DIR, else the
+# payload's cwd, walked up to the nearest `.bionic`. A walker's scratch project inside this
+# project's tree therefore engaged THIS project: no verb engaged an outside root. `--root <dir>`
+# engages <dir> itself: the marker under `<dir>/.bionic/tmp`, the tree made there, the flag
+# winning over CLAUDE_PROJECT_DIR. The verb is the trigger, so it reads no payload; the session
+# id is the environment's (L-SESSION, env primary). Misuse exits 2 with one line; every hook
+# path still exits 0.
+#
+# fails-when: `--root` is ignored and the dispatching project is engaged; the marker lands
+# anywhere but `<dir>/.bionic/tmp`; a missing directory or a missing session id writes a marker.
+fire_root() {  # <sid or empty> <args...> -> HOOK_OUT HOOK_ERR HOOK_RC, no payload on stdin
+  local sid="$1"; shift
+  if [ -n "$sid" ]; then
+    HOOK_OUT=$(env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$sid" bash "$HOOK" "$@" </dev/null 2>"$SANDBOX/.err")
+  else
+    HOOK_OUT=$(env -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID bash "$HOOK" "$@" </dev/null 2>"$SANDBOX/.err")
+  fi
+  HOOK_RC=$?
+  HOOK_ERR=$(cat "$SANDBOX/.err" 2>/dev/null)
+}
+
+# (a) THE CONTROL, the census row itself: the trigger with its cwd in a scratch directory nested in
+# a project's tree engages the PROJECT, and makes nothing under the scratch directory.
+R60="$(make_repo root-ctl)"
+X60="$R60/.bionic/tmp/scratch/$SID/walker/x"; mkdir -p "$X60"
+fire "$SID" "$(skill_payload "$SID" "$X60" "bionic:canonical-sdlc")"
+expect_true "E15a control — the trigger from a nested scratch cwd engages the enclosing project" test -f "$(marker_path "$R60" "$SID")"
+expect_false "E15a …and no marker under the scratch directory" test -e "$(marker_path "$X60" "$SID")"
+
+# (b) THE VERB, on the same shape in a fresh project: the scratch directory is engaged, the project
+# is not touched.
+R61="$(make_repo root-verb)"
+X61="$R61/.bionic/tmp/scratch/$SID/walker/x"; mkdir -p "$X61"
+fire_root "$SID" --root "$X61"
+expect_eq "E15b AC-5.4 — engage.sh --root <dir> exits 0" "0" "$HOOK_RC"
+expect_true "E15b …and writes the marker under <dir>/.bionic/tmp" test -f "$(marker_path "$X61" "$SID")"
+expect_false "E15b …a regular file, never a link" test -L "$(marker_path "$X61" "$SID")"
+expect_false "E15b …while the enclosing project gets no marker" test -e "$(marker_path "$R61" "$SID")"
+expect_eq "E15b …and it says what it engaged, on one line" \
+  "engage: engaged $X61 for session $SID" "$HOOK_OUT"
+call_engaged "$X61" "$SID"
+expect_eq "E15b …which the library's engaged_session reads as engaged" "0" "$ES_ST"
+call_engaged "$X61" "$OTHER_SID"
+expect_eq "E15b …for this session only" "1" "$ES_ST"
+
+# (c) THE FLAG WINS OVER CLAUDE_PROJECT_DIR: the dispatching project is in the environment, as it
+# is for every hook a session runs, and the marker still lands under <dir>.
+R62="$(make_repo root-env)"
+X62="$SANDBOX/outside-62"; mkdir -p "$X62"
+HOOK_OUT=$(CLAUDE_PROJECT_DIR="$R62" CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" --root "$X62" </dev/null 2>"$SANDBOX/.err"); HOOK_RC=$?
+expect_eq "E15c --root with CLAUDE_PROJECT_DIR naming another project exits 0" "0" "$HOOK_RC"
+expect_true "E15c …and engages <dir>" test -f "$(marker_path "$X62" "$SID")"
+expect_false "E15c …never the project the environment names" test -e "$(marker_path "$R62" "$SID")"
+expect_true "E15c …making <dir>/.bionic with its ignore-everything file" test -f "$X62/.bionic/.gitignore"
+
+# (d) MISUSE: a missing directory, no operand, no session id. Each exits 2 with one line and writes
+# nothing; each is paired with (b)'s positive on the same verb.
+fire_root "$SID" --root "$SANDBOX/no-such-dir"
+expect_eq "E15d a --root that is not a directory exits 2" "2" "$HOOK_RC"
+expect_contains "E15d …naming it" "$SANDBOX/no-such-dir" "$HOOK_ERR"
+expect_false "E15d …and makes nothing there" test -e "$SANDBOX/no-such-dir"
+fire_root "$SID" --root
+expect_eq "E15d a --root with no operand exits 2" "2" "$HOOK_RC"
+expect_contains "E15d …with the usage" "engage.sh --root <dir>" "$HOOK_ERR"
+X63="$SANDBOX/outside-63"; mkdir -p "$X63"
+fire_root "" --root "$X63"
+expect_eq "E15d a --root with no session id in the environment exits 2" "2" "$HOOK_RC"
+expect_contains "E15d …saying so" "CLAUDE_CODE_SESSION_ID" "$HOOK_ERR"
+expect_false "E15d …and engages nothing" test -e "$X63/.bionic"
+
+# (e) A LINKED .bionic UNDER <dir> IS STILL REFUSED (the hook's own guard): nothing is written
+# through it, and the verb says it engaged nothing.
+X64="$SANDBOX/outside-64"; mkdir -p "$X64" "$SANDBOX/elsewhere-64"
+ln -s "$SANDBOX/elsewhere-64" "$X64/.bionic"
+fire_root "$SID" --root "$X64"
+expect_false "E15e a symlinked <dir>/.bionic is not written through" test -e "$SANDBOX/elsewhere-64/tmp/engaged-$SID.state"
+expect_absent "E15e …and the verb does not claim it engaged" "engage: engaged" "$HOOK_OUT"
+
+# ============================================================
 finish
