@@ -508,7 +508,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh handoff   rewrite the bound plan's ## Handoff in place: written: (date -u), the working and integration heads, the open rows, the live agents and the last proof, with the five human lines carried; never written by hand"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt add <reading record> [<plan>]   write one record/<run>/debt.md line per debt: line of the reading, each concept and kind once"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a reading's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   write each debt: line the continuation carries under ## Deferrals into the run's ledger, its touches and raised-by kept"
@@ -1212,7 +1212,7 @@ case "$VERB" in
     DEBT_SUB="${1:-}"; [ $# -eq 0 ] || shift
     DEBT_A=""; DEBT_B=""; DEBT_PLAN_ARG=""
     case "$DEBT_SUB" in
-      add)     { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt add takes a reading record and at most one plan."
+      add)     { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt add takes a record and at most one plan."
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
       touched) { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt touched takes a concept and at most one plan."
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
@@ -11098,8 +11098,9 @@ RC_TAGS
   # the record holds.
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). `record/<run>/debt.md` (lib/proof.sh
   # `proof_debt_ledger_path`, whose comment holds the line's shape) has this verb as its one writer, under
-  # a lock beside the file (`launch_sync_lock`, the plan writer's own). `add` reads the reading's
-  # `debt:` lines through `proof_findings`, the registering verb's reader, and writes a line per concept
+  # a lock beside the file (`launch_sync_lock`, the plan writer's own). `add` reads a record's `debt:`
+  # lines, a reading's or any other's (`proof_record_debts`, the registering verb's debt arm; wave-36
+  # T13), holds each to the one grammar (lib/debt.sh `debt_line_ok`), and writes a line per concept
   # and kind it does not hold yet; `touched` adds one to the touches of every unburned item of the
   # concept (the dispatch wall's advisory calls it); `burn` writes `burned <row>` in their last cell; `adopt`
   # reads the `debt:` lines close-out carried under `## Deferrals` of a continuation (AC-11.2's read-back,
@@ -11130,16 +11131,27 @@ RC_TAGS
         die "REFUSED — no session key, and no plan named; name the plan: debt $DEBT_SUB … <plan>."
         exit 3
       fi
-      resolve_run "$REPO_REAL" "$SESSION_ID"
-      DEBT_PLAN="$POKER_RUN_PLAN"
+      # A WRITER TAKES ONLY THE PLAN IT IS BOUND TO (wave-36 T13; D13, REQ-7 AC-7.3, census C25, A-orch-2).
+      # `resolve_run`'s `none` arm hands an unbound session the root's newest plan by mtime, closed or
+      # not, so the tick can DISARM; through it `debt adopt` at Step 1 wrote the predecessor's ledger.
+      # The verb asks the binding itself: a `bound-*` verdict names this session's plan, anything else
+      # refuses naming `bind`, and nothing is written.
+      DEBT_BIND="$(session_run "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || :  # exit 2 is bound-closed, still bound
+      case "$DEBT_BIND" in bound-*' '*) DEBT_PLAN="${DEBT_BIND#* }" ;; *) DEBT_PLAN="" ;; esac
       if [ -z "$DEBT_PLAN" ] || [ ! -f "$DEBT_PLAN" ]; then
-        die "REFUSED — this session has no run; bind its plan first, or name it: debt $DEBT_SUB … <plan>."
+        die "REFUSED — this session is bound to no plan, so debt $DEBT_SUB has no ledger of its own to write; bind its plan first (session-poker.sh bind <plan>), or name it: debt $DEBT_SUB … <plan>."
         exit 2
       fi
     fi
     if ! { declare -F proof_debt_items >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }; } \
        || ! declare -F proof_debt_items >/dev/null 2>&1; then
       die "REFUSED — lib/proof.sh cannot be loaded, so the debt ledger cannot be read; reinstall the plugin."
+      exit 2
+    fi
+    # THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): lib/debt.sh, which close-out and card.sh source too.
+    if ! { declare -F debt_line_ok >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/debt.sh" ] && . "$BIONIC_LIB/debt.sh" 2>/dev/null; }; } \
+       || ! declare -F debt_line_ok >/dev/null 2>&1; then
+      die "REFUSED — lib/debt.sh cannot be loaded, so no debt line can be held to its grammar; reinstall the plugin."
       exit 2
     fi
     DEBT_ROOT="$(cd "$(project_root "${DEBT_PLAN%/*}")" 2>/dev/null && pwd -P)"
@@ -11162,19 +11174,33 @@ RC_TAGS
         *)  DEBT_REC="$DEBT_DOCS/$DEBT_A"; [ -f "$DEBT_REC" ] || DEBT_REC="$REPO_REAL/$DEBT_A" ;;
       esac
       if [ ! -f "$DEBT_REC" ]; then
-        die "REFUSED — no reading record at $DEBT_A; name it as proof-add does, record/<wave>/<file>."
+        die "REFUSED — no record at $DEBT_A; name it as proof-add does, record/<wave>/<file>."
         exit 2
       fi
       DEBT_RECREL="$DEBT_A"
       case "$DEBT_REC" in "$DEBT_DOCS"/*) DEBT_RECREL="${DEBT_REC#"$DEBT_DOCS"/}" ;; esac
-      if ! DEBT_ROWS="$(proof_findings "$DEBT_REC")"; then
+      # ANY RECORD, A `reviewed:` LINE OR NOT (wave-36 T13; AC-7.2, C24): a reading's, a writer's, the
+      # orchestrator's assumptions.md hole line, each read by the reading's own debt arm, `hole` a kind.
+      if ! DEBT_ROWS="$(PROOF_DEBT_KINDS="$DEBT_KINDS" proof_record_debts "$DEBT_REC")"; then
         die "REFUSED — $DEBT_ROWS"
         exit 1
       fi
       DEBT_ROWS="$(printf '%s\n' "$DEBT_ROWS" | awk -F'\t' '$1 == "debt"')"
       if [ -z "$DEBT_ROWS" ]; then
-        say "debt add — the reading $DEBT_RECREL carries no debt: line; nothing added"
+        say "debt add — the record $DEBT_RECREL carries no debt: line; nothing added"
         exit 0
+      fi
+      # EACH LINE IS HELD TO THE GRAMMAR BEFORE ANY IS WRITTEN (AC-7.8): the line close-out would carry
+      # for it, raised by this record, must parse, or the lot is refused naming it — a raised-by with a
+      # space (A-orch-1's shape) is refused here, where it is written, and never reaches a continuation.
+      DEBT_FROM="${DEBT_PLAN##*/}"; DEBT_FROM="${DEBT_FROM%.plan.md}"
+      DEBT_BADL="$(printf '%s\n' "$DEBT_ROWS" | while IFS="$(printf '\t')" read -r _dk _dkind _dcon _dsites _ddisp; do
+        _dl="debt: $_dcon $_dkind \"$_dsites\" touches=0 raised-by=$DEBT_RECREL from=$DEBT_FROM"
+        debt_line_ok "$_dl" || { printf '%s\n' "$_dl"; break; }
+      done)"
+      if [ -n "$DEBT_BADL" ]; then
+        die "REFUSED — a debt: line of $DEBT_RECREL does not parse as a debt line: $DEBT_BADL; nothing added."
+        exit 1
       fi
       mkdir -p "${DEBT_FILE%/*}" 2>/dev/null
     fi
@@ -11190,14 +11216,15 @@ RC_TAGS
         exit 2
       fi
       # The carry shape (close-out's co_debts), read under the first `## Deferrals` outside a fence. A
-      # `debt:` line there that is not of the shape is a BAD row, and one BAD row refuses the lot.
-      DEBT_ROWS="$(awk '
+      # `debt:` line there that the one grammar (lib/debt.sh `DEBT_LINE_ERE`, wave-36 T13) does not parse
+      # is a BAD row, and one BAD row refuses the lot.
+      DEBT_ROWS="$(DEBT_LINE_ERE="$DEBT_LINE_ERE" awk '
         { sub(/\r$/, "") }
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^## / { s = ($0 ~ /^## Deferrals[ \t]*$/); next }
         s && /^debt:[ \t]/ {
-          if ($0 !~ /^debt:[ \t]+[^ \t|]+[ \t]+[^ \t|]+[ \t]+"[^"|]*"[ \t]+touches=[0-9]+[ \t]+raised-by=[^ \t|]+[ \t]+from=[^ \t]+[ \t]*$/) { print "BAD\t" $0; next }
+          if ($0 !~ ENVIRON["DEBT_LINE_ERE"]) { print "BAD\t" $0; next }
           split($0, w, /[ \t]+/)
           q = index($0, "\""); r = substr($0, q + 1); e = index(r, "\""); sites = substr(r, 1, e - 1)
           split(substr(r, e + 1), t, /[ \t]+/)
