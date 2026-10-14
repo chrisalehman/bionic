@@ -3712,7 +3712,7 @@ dp_poke disposition "$FP_REC/st.md#2" defer "defer the side path finding to the 
   "A side path may lose data; the next wave fixes it."
 expect_eq "DP-10 AC-5.1 the person's ruling on the open S2 is recorded (exit 0)" "0" "$DP_RC"
 expect_regex "DP-10b …as finding-move writes a move: their words, who, when, why" \
-  "^moved: $FP_REC/st\\.md#2 to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z words=\"defer the side path finding to the next wave\" why=\"the person deferred it\"\$" \
+  "^moved: $FP_REC/st\\.md#2 to=defer by=Dana Fixture at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z words=\"defer the side path finding to the next wave\" session=$FP_SID why=\"the person deferred it\"\$" \
   "$(/usr/bin/grep "^moved: $FP_REC/st.md#2 " "$DP_PLAN")"
 expect_eq "DP-10c …the deferral stated with its changelog sentence" \
   "deferred: $FP_REC/st.md#2 S2 on \"a side path loses data\" stated=\"A side path may lose data; the next wave fixes it.\"" \
