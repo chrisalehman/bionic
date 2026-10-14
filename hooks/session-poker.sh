@@ -4776,6 +4776,10 @@ function val(cr, k,    r) {
   if (k == "task") return taskof(cr)
   return "pending"
 }
+function wptr(l,   v) {  # a Step-5 line naming a real walk-artifact: value: not empty, not the stub token
+  v = l; sub(/^.*walk-artifact[ \t]*:[ \t]*/, "", v); sub(/[ \t]*;.*$/, "", v); sub(/[ \t]+$/, "", v)
+  if (v != "" && tolower(v) != "pending") haptr = 1
+}
 BEGIN {
   nk = split(ENVIRON["MR_KEYS"], kl, "\n")
   for (i = 1; i <= nk; i++) { split(kl[i], kv, "\t"); if (kv[1] != "") keys[kv[1]] = kv[2] }
@@ -4789,6 +4793,16 @@ END {
     line = L[i]
     if (line ~ /^[ \t]*```/) { fence = !fence; continue }
     if (fence) continue
+    # THE POINTER IN THE STEP-5 BLOCK (wave-36 T44; REQ-7 AC-7.1, D13): the walk gate reads walk-artifact: from the Step 5
+    # block alone, so a plan whose block already names its record needs no matrix-level stub as the reminder of it.
+    if (line ~ /^## /) { insd = (line ~ /^##[ \t]+SDLC State/); in5 = 0 }
+    else if (insd) {
+      if (line ~ /^[ \t]*-?[ \t]*Step[ \t]+5[ \t]*:/) { in5 = 1; if (line ~ /walk-artifact[ \t]*:/) wptr(line) }
+      else if (in5 && line !~ /^[ \t]*$/) {
+        if (line ~ /^[^ \t]/ || line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) in5 = 0
+        else if (line ~ /^[ \t]*walk-artifact[ \t]*:/) wptr(line)
+      }
+    }
     if (line ~ /^## /) {
       inm = 0; reqh = ""; evh = 0
       inev = (line ~ /^## Eval design[ \t]*$/); if (inev) sawev = 1
@@ -4842,7 +4856,7 @@ END {
   written = 0; added = 0; same = 0; nb = ""
   heads = ""
   if (!hassh) { heads = heads "stack-health: pending\n"; added++ }
-  if (walk != "exempt" && !haswa) { heads = heads "walk-artifact: pending\n"; added++ }
+  if (walk != "exempt" && !haswa && !haptr) { heads = heads "walk-artifact: pending\n"; added++ }
   if (heads != "") { if (hassh) ins[hassh] = ins[hassh] heads; else ins[mhead] = ins[mhead] "\n" heads }
   for (e = 1; e <= ne; e++) {
     cr = ec[e]; owed = "provenance fails-when eval task evidence"
@@ -9078,6 +9092,24 @@ EOF
       *) die "REFUSED — the field cannot be written (units_step_fields exit $PV_RC); the plan is unchanged."
          exit 1 ;;
     esac
+    # THE POINTER HAS ONE WRITER (wave-36 T44; REQ-7 AC-7.1, AC-10.2; D13). matrix-render writes a matrix-level
+    # `walk-artifact: pending` stub that the gate refuses as a placeholder once every row is discharged, and no verb filled
+    # it: the fix was a hand edit. The Step 5 block stays the walk gate's one reader; the matrix line, when the plan has
+    # one, takes the same value in the same transaction. A matrix with no such line gains none.
+    if [ "$PV_FKEY" = walk-artifact ]; then
+      PV_RC=0
+      SF_WV="$PV_FVAL" awk '
+        { if ($0 ~ /^[ \t]*```/) fence = !fence }
+        /^## / { m = ($0 ~ /^## Verification Matrix/) }
+        !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
+          ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["SF_WV"]; done = 1; next }
+        { print }' "$PV_NEW" > "$PV_NEW.m" 2>/dev/null || PV_RC=$?
+      if [ "$PV_RC" -ne 0 ]; then
+        die "REFUSED — the matrix walk-artifact: line cannot be written (awk exit $PV_RC); the plan is unchanged."
+        exit 1
+      fi
+      mv "$PV_NEW.m" "$PV_NEW"
+    fi
     plan_verb_swap step-field "Step $PV_KEY $PV_FKEY" writer
     say "step-field — Step $PV_KEY $PV_FKEY: written to $PV_PLAN; dry-committed first."
     exit 0
