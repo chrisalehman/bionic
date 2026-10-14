@@ -1960,8 +1960,9 @@ carry_req "$PZ" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $C
 mkdir -p "$PZ/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nNothing.\n' > "$PZ/$CONT_REL"
 run_close "$PZ" run
-expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side)" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Resume instruction||Nothing.|" \
+CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
+expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
   "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
@@ -2261,10 +2262,10 @@ expect_eq "HH-11a …and the Resume instruction after it is as it was" "## Resum
 # the heading and the line are both there (as a person typed it, unfenced): nothing is added
 PHE4="$(mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
 mkdir -p "$PHE4/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Governed by\n\ngoverned-by: installed 0.0.0, typed by a person\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
 HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
 run_close "$PHE4" run
-expect_eq "HH-12 the heading and the line already there: run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
+expect_eq "HH-12 the heading and the line already there (and a governed-by line, wave-36 T2): run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
   "$CO_RC/$(cksum < "$PHE4/$CONT_REL")/$(hh_count "$PHE4/$CONT_REL")"
 
 # the mutation arms: a continuation template without the section, and a fold that counts a line it should not
@@ -2805,5 +2806,130 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 run_close "$PIE4" run
 expect_eq "INH-8 no inherited: line in the plan: run over an existing continuation adds no Inherited debt heading (and its Hand-holds)" "0|0|1" \
   "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt' "$PIE4/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^## Hand-holds$' "$PIE4/$CONT_REL" | tr -d ' ')"
+
+
+# ============================================================
+section "§GOVERNED — wave-36 T2 (REQ-1 AC-1.4, D7; ADR-055): the continuation names the root and commit that governed the run"
+# ============================================================
+# hooks/session-start.sh writes `.bionic/tmp/loaded-<sid>.state` at every session start (wave-36 T1): `root=`,
+# `commit=` when the root is a checkout of the plugin, `started=`, then one `<sha256> <path>` per loaded file. close-out
+# reads the records of the sessions in the run's Step-4..9 window (the Step-4 line's instant, else the plan's
+# `approved-by:` instant, to now), BEFORE the tmp wipe takes them, and writes one `governed-by: <root> <commit> from
+# <ISO>` per root and commit, in order of the first session that ran it, under `## Governed by` of the continuation
+# and on the card. A record with no commit ran an installed copy: `governed-by: <root> installed <version> from <ISO>`.
+# No record in the window: `governed-by: installed <version>`. The records below are in the writer's shape; the first is
+# this run's own record (wave-36, session 1cee5232, at T1's land), copied, never read live.
+GOV_ROOT="/Users/admin/workspace/personal/bionic/payload"
+GOV_C1="7cb98434e04d97d1a32495806d1f14c54efb8171"
+GOV_C2="1d7930259c3a5e0f2b4d6e8a0c1f3e5d7b9a2c4e"
+GOV_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
+expect_nonempty "GOV-00 precondition: the payload under test names its version (the none line's)" "$GOV_VER"
+# gov_record <project> <sid> <root> <commit|-> <started> -> a load record in the writer's shape
+gov_record() {
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_record: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  {
+    printf 'root=%s\n' "$3"
+    [ "$4" = - ] || printf 'commit=%s\n' "$4"
+    printf 'started=%s\n' "$5"
+    printf '612909030be5dc2a241a1afdb61732d28b567a830e7c905752826d69a5ba2acd agents/auditor.md\n'
+    printf '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a hooks/hooks.json\n'
+  } > "$1/.bionic/tmp/loaded-$2.state"
+}
+# gov_step4 <project> <text> -> the plan's `- Step 4:` line, written in front of the Step-7 line
+gov_step4() {
+  local plan="$1/$PLAN_REL"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_step4: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  GOV_TEXT="$2" awk '/^- Step 7:/ && !d { print "- Step 4: " ENVIRON["GOV_TEXT"]; print "  worktree: ."; d = 1 } { print }' \
+    "$plan" > "$plan.g" && mv "$plan.g" "$plan"
+}
+gov_section() { awk '/^## / { s = ($0 == "## Governed by"); next } s && NF && !/^```/ { print }' "$1"; }
+gov_card() { printf '%s\n' "$CO_OUT" | /usr/bin/grep '^governed-by: '; }
+
+PG="$(mk_fixture governed)"; advance_to "$PG" 8
+gov_step4 "$PG" "implement: opened 2026-10-13T20:39Z, writers in .worktrees/36-T<n>"
+GOV_CACHE="$SANDBOX/governed-cache/bionic/1.18.0"
+mkdir -p "$GOV_CACHE/.claude-plugin"; printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$GOV_CACHE/.claude-plugin/plugin.json"
+gov_record "$PG" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-10-13T19:00:00Z   # before Step 4
+gov_record "$PG" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
+gov_record "$PG" s2 "$GOV_ROOT" "$GOV_C1" 2026-10-14T01:00:00Z
+gov_record "$PG" s3 "$GOV_ROOT" "$GOV_C2" 2026-10-14T03:00:00Z
+gov_record "$PG" s4 "$GOV_CACHE" - 2026-10-13T21:00:00Z
+ln -s "$PG/.bionic/tmp/loaded-s0.state" "$PG/.bionic/tmp/loaded-s5.state"   # a link is never a record
+GOV_WANT="governed-by: $GOV_CACHE installed 1.18.0 from 2026-10-13T21:00:00Z
+governed-by: $GOV_ROOT $GOV_C1 from 2026-10-13T23:55:11Z
+governed-by: $GOV_ROOT $GOV_C2 from 2026-10-14T03:00:00Z"
+expect_eq "GOV-0 precondition: five records and a link planted, and the plan's Step-4 line carries its instant" "5/1/1" \
+  "$(find "$PG/.bionic/tmp" -name 'loaded-*.state' -type f | wc -l | tr -d ' ')/$(find "$PG/.bionic/tmp" -name 'loaded-*.state' -type l | wc -l | tr -d ' ')/$(/usr/bin/grep -c '^- Step 4: implement: opened 2026-10-13T20:39Z' "$PG/$PLAN_REL" | tr -d ' ')"
+GOV_CK0="$(find "$PG/.bionic/tmp" -name 'loaded-*' | wc -l | tr -d ' ')"
+run_close "$PG" check
+expect_eq "GOV-1 AC-1.4 check prints one governed-by line per root and commit in the window, in order of first start" "$GOV_WANT" "$(gov_card)"
+expect_absent "GOV-1b …not the session that started before Step 4" "/elsewhere/old/payload" "$CO_OUT"
+expect_eq "GOV-1c …and check removes no record" "$GOV_CK0" "$(find "$PG/.bionic/tmp" -name 'loaded-*' | wc -l | tr -d ' ')"
+run_close "$PG" run
+expect_eq "GOV-2 AC-1.4 run exits 0 and prints the same lines on the card" "0|$GOV_WANT" "$CO_RC|$(gov_card)"
+expect_eq "GOV-2b …the wipe took the records it read" "0" "$(find "$PG/.bionic/tmp" -name 'loaded-*' 2>/dev/null | wc -l | tr -d ' ')"
+expect_eq "GOV-3 AC-1.4 the continuation carries ## Governed by once, with the lines read before the wipe" "1|$GOV_WANT" \
+  "$(/usr/bin/grep -c '^## Governed by$' "$PG/$CONT_REL" | tr -d ' ')|$(gov_section "$PG/$CONT_REL")"
+expect_eq "GOV-3b …after ## Hand-holds and before the Resume instruction" "yes" \
+  "$(awk '/^## Hand-holds$/ { a = NR } /^## Governed by$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PG/$CONT_REL")"
+
+# none in the window: the installed version, on the card and in the continuation
+PGN="$(mk_fixture governed-none)"; advance_to "$PGN" 8
+gov_step4 "$PGN" "implement: opened 2026-10-13T20:39Z"
+gov_record "$PGN" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-10-13T19:00:00Z
+run_close "$PGN" run
+expect_eq "GOV-4 AC-1.4 no record in the window: governed-by: installed <version>, on the card and in the continuation" \
+  "0|governed-by: installed $GOV_VER|governed-by: installed $GOV_VER" "$CO_RC|$(gov_card)|$(gov_section "$PGN/$CONT_REL")"
+
+# no instant on the Step-4 line (or no Step-4 line): the window opens at the plan's approved-by
+PGA="$(mk_fixture governed-approved)"; advance_to "$PGA" 8
+gov_record "$PGA" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-09-13T23:00:00Z
+gov_record "$PGA" s1 "$GOV_ROOT" "$GOV_C1" 2026-09-14T00:30:00Z
+expect_eq "GOV-5 precondition: the fixture plan has no Step-4 line and is approved at 2026-09-14T00:00Z" "0/1" \
+  "$(/usr/bin/grep -c '^- Step 4:' "$PGA/$PLAN_REL" | tr -d ' ')/$(/usr/bin/grep -c '^approved-by: fixture 2026-09-14T00:00Z' "$PGA/$PLAN_REL" | tr -d ' ')"
+run_close "$PGA" check
+expect_eq "GOV-5a the window opens at approved-by: the later record governs, the earlier does not" \
+  "governed-by: $GOV_ROOT $GOV_C1 from 2026-09-14T00:30:00Z" "$(gov_card)"
+
+# an existing continuation: the section is merged in, the person's text kept, and a second close adds nothing
+PGE="$(mk_fixture governed-existing)"; advance_to "$PGE" 8
+gov_step4 "$PGE" "implement: opened 2026-10-13T20:39Z"
+gov_record "$PGE" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
+mkdir -p "$PGE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PGE/$CONT_REL"
+run_close "$PGE" check
+expect_contains "GOV-6 check over an existing continuation without the section names the add run will make" \
+  "the ## Governed by section" "$CO_OUT"
+run_close "$PGE" run
+expect_eq "GOV-6a run adds ## Governed by once with the line, keeps the person's text, and says so" \
+  "0|1|governed-by: $GOV_ROOT $GOV_C1 from 2026-10-13T23:55:11Z|1|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Governed by$' "$PGE/$CONT_REL" | tr -d ' ')|$(gov_section "$PGE/$CONT_REL")|$(/usr/bin/grep -c '^my own note on the close$' "$PGE/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^edited by a person$' "$PGE/$CONT_REL" | tr -d ' ')"
+expect_contains "GOV-6b …and run says what it added" "added the ## Hand-holds section and the ## Governed by section" "$CO_OUT"
+PGE2="$(mk_fixture governed-existing2)"; advance_to "$PGE2" 8
+mkdir -p "$PGE2/${CONT_REL%/*}"; cp "$PGE/$CONT_REL" "$PGE2/$CONT_REL"
+GOV_CK1="$(cksum < "$PGE2/$CONT_REL")"
+run_close "$PGE2" run
+expect_eq "GOV-6c a second close over it (no record left, so its own reading is the installed line) adds nothing: byte for byte" \
+  "0|$GOV_CK1|governed-by: installed $GOV_VER" "$CO_RC|$(cksum < "$PGE2/$CONT_REL")|$(gov_card)"
+
+# the mutation arm: a doctored copy that finds no record — it still closes, and names the installed version while the
+# records name the checkout, so GOV-3 goes red on it
+GOV_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-gov-mut.XXXXXX")"
+mkdir -p "$GOV_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$GOV_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$GOV_MUT/scripts/card.sh"
+sed 's#/loaded-\*\.state#/no-such-record-*.state#' "$SCRIPT" > "$GOV_MUT/scripts/close-out.sh"
+expect_eq "GOV-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$GOV_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PGM="$(mk_fixture governed-mut)"; advance_to "$PGM" 8
+gov_step4 "$PGM" "implement: opened 2026-10-13T20:39Z"
+gov_record "$PGM" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
+( cd "$PGM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    bash "$GOV_MUT/scripts/close-out.sh" "$PGM/$PLAN_REL" run ) > "$SANDBOX/gov-mut.out" 2>&1
+GOV_MRC=$?
+expect_eq "GOV-mut1 the doctored run still closes and writes its continuation (the mutant runs)" "0|1" \
+  "$GOV_MRC|$(/usr/bin/grep -c '^## Governed by$' "$PGM/$CONT_REL" | tr -d ' ')"
+expect_eq "GOV-mut2 …and its continuation names the installed version while a record named the checkout" \
+  "governed-by: installed $GOV_VER" "$(gov_section "$PGM/$CONT_REL")"
+rm -rf "$GOV_MUT"
 
 finish
