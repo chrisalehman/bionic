@@ -649,16 +649,12 @@ proof_checkout() {
   printf '%s' "$wt"
 }
 
-# proof_head <repo> <branch> -> the 40-hex HEAD of the checkout of <repo> that has <branch>
-# checked out; exit 1 with nothing printed when no checkout holds it.
-proof_head() {
-  local wt
-  wt="$(proof_checkout "$1" "$2")" || return 1
-  git -C "$wt" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
-}
-
-# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] [<root>] -> the 40-hex head the evidence
-# attests, exit 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
+# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] [<root>] [<head>] -> the 40-hex head the
+# evidence attests, exit 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
+# <head> is the working head the evidence is held against: `proof-add` hands it the working branch's ref
+# (`proof_branch_head`, the judge's one reading of the head) and its repository as <checkout>, so a branch no
+# checkout holds is read as the judge reads it (wave-36 T12; D13, AC-7.4; C30). With none, <checkout>'s HEAD.
+# "The checkout's HEAD" below means that head.
 #   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
 #          prints before any suite, so the last run in the log is the one judged (T52). <n>
 #          must be 0; the runner's verdict after it must read
@@ -693,7 +689,7 @@ proof_head() {
 #          at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster fl fa owed nred
-  head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
+  head="$(git -C "$co" rev-parse --verify -q "${7:-HEAD}^{commit}" 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   if [ "$kind" = floor ] && [ -n "$root" ]; then
     _proof_roots_load
@@ -1283,8 +1279,9 @@ proof_last_line() {
 # plan yet`, exit 0, when the plan's unfenced `## SDLC State` holds no `proved: kind=floor` line (proof_last's
 # reading); nothing, exit 1, when it holds one, whatever its head or owed= (wave-35 T38; critic-structure-3,
 # debt `unpinned-pair floor-absent`). THE ONE READER OF "IS THERE A FLOOR LINE": the commit wall's Step-7 arm
-# (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state, the floor judge and facts_state
-# ask it, so the wall and the judge cannot answer one plan's text two ways. It reads text and runs no git.
+# (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state and facts_state ask it, so the
+# wall and the judge cannot answer one plan's text two ways; both ask it before the floor judge, which therefore
+# never asks it again (wave-36 T12; C35). It reads text, through lib/run.sh `plan_lines`, and runs no git.
 # Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
 proof_floor_absent() {
   [ -n "$(proof_last "${1:-}" floor)" ] && return 1
@@ -1292,16 +1289,19 @@ proof_floor_absent() {
 }
 
 # _proof_last_read <plan> <kind> <head|line|owed> [<question>] -> the one reader behind the two above, and the
-# `owed=` field of that last line (wave-35 T9), nothing when it carries none.
+# `owed=` field of that last line (wave-35 T9), nothing when it carries none. The plan's lines come from lib/run.sh
+# `plan_lines`, the one plan line reader, CR translated (wave-36 T12; D13, AC-7.5): a raw read saw a CR-only plan as
+# one line, so its floor line was absent to the wall and the judge alike (C34).
 _proof_last_read() {
   local plan="$1" kind="$2" what="$3" q="${4:-}"
   [ -f "$plan" ] || return 0
-  awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
+  _proof_run_load
+  plan_lines "$plan" | awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && proof_fields($0) && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = $0; lastowed = PROOF_OWED }
-    END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed } else print last } }' "$plan"
+    END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed } else print last } }'
 }
 
 # proof_add_line <plan> <line> -> the plan with <line> placed inside `## SDLC State`: after the
@@ -1481,10 +1481,12 @@ proof_branch_head() {
 # or `uncovered<TAB><reason>` (wave-35 T9; D8, D9, AC-1.3 to AC-1.6). THE JUDGE, which proof_state and facts_state
 # both ask. The plan's last `kind=floor` proof names F and the suites its whole run left red (`owed=`); a suite
 # the plan carries as inherited debt (`proof_inherited`) is not owed. At F itself the reds decide; past it,
-# `_proof_walk` walks F..<head> with the reds and the cover's waiver (`approved: regression-2`).
+# `_proof_walk` walks F..<head> with the reds and the cover's waiver (`approved: regression-2`). BOTH CALLERS ASK
+# `proof_floor_absent` FIRST and answer an absent floor themselves, so the judge never sees a plan with no floor
+# line; the call it made here never decided (wave-36 T12; C35). Should one reach it, the empty head is no commit
+# and the answer is uncovered, the safe direction.
 _proof_floor_judge() {
   local plan="$1" tree="$2" c="$3" h owed inh files rec why rc waive=0
-  why="$(proof_floor_absent "$plan")" && { printf 'uncovered\t%s\n' "$why"; return 0; }
   h="$(proof_last "$plan" floor)"
   h="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
