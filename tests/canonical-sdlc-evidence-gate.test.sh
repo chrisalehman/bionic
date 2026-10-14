@@ -4432,7 +4432,7 @@ expect_allow "FL-4 …a regression: no plan at current: 7 owes no floor line →
 # none and four shapes the reader does not count are the negatives, read through the same two extractors. Both call sites are anchored, so
 # a landing that drops either call names this suite.
 anchor file payload/scripts/lib/walls.sh 'why="$(proof_floor_absent "$PLAN")" || return 0'
-anchor file payload/scripts/lib/proof.sh 'why="$(proof_floor_absent "$plan")" && {'
+anchor file payload/scripts/lib/proof.sh 'st="$(proof_floor_absent "$plan")" && {'
 fl_wall() {  # <home> -> absent | present | other:<the refusal line>, the real wall's answer to a commit
   run_hook "$1" 'git commit -m "x"'
   if [ "$HOOK_EXIT" = 0 ]; then printf present
@@ -4463,6 +4463,16 @@ fl5_row elsewhere "$(eg_readings "$FL5_PLAN")
 ## Notes
 
 $FL_FLOOR" absent
+# FL-5-cr ONE PLAN LINE READER (wave-36 T12; D13, AC-7.5; C34). The same plan with its floor line, every line ending
+# a lone CR (classic-Mac). The wall's Step-7 arm and the judge read the floor line through lib/run.sh `plan_lines`,
+# which translates the CR, so both answer present; a raw read saw one line and answered absent, wall and judge alike.
+FL5_CR="$(fl_with "$FL5_PLAN" "$FL_FLOOR" | tr '\n' '\r')"
+expect_eq "FL-5-cr precondition: the plan text carries no LF, only CRs" "0" "$(printf '%s' "$FL5_CR" | tr -cd '\n' | wc -c | tr -d ' ')"
+fl5_row cr "$FL5_CR" present
+expect_eq "FL-5-cr2 …and proof_floor_absent itself says present on that file (exit 1, nothing printed)" "1|" \
+  "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && o="$(proof_floor_absent "$2")"; printf "%s|%s" "$?" "$o"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_CR")" 2>/dev/null)"
+expect_eq "FL-5-cr3 positive twin: on the LF plan with no floor line it says absent (exit 0, its words)" "0|$FL_WHY" \
+  "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && o="$(proof_floor_absent "$2")"; printf "%s|%s" "$?" "$o"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_PLAN")" 2>/dev/null)"
 expect_eq "FL-5b the judge's answer for a plan with no floor line is its words for absent, the ones the wall refuses in" \
   "uncovered	$FL_WHY" \
   "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && proof_state "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_PLAN")" "$hFL5" 2>/dev/null)"

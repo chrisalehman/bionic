@@ -2386,6 +2386,32 @@ expect_contains "17e7 …and the ledger's" "ledger-add T4" "$SYNC_OUT"
 expect_eq "17e8 …exits 1" "1" "$SYNC_RC"
 expect_true "17e9 …and the plan is unchanged" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
 
+# ---------- 17e10: the detached call's failure has a channel of its own (wave-36 T12; D13, AC-7.1) ----------
+# The recorder's call prints to nowhere, so through wave-35 its failure reached only whichever caller ran the
+# transaction next (C13). It now writes `.bionic/tmp/launch-sync-<sid>.log`, the verb's own output and an
+# `rc=<n>` line, and the Patrol tick prints `poker: launch-sync failed — <log>` once for a failed log: the first
+# tick that reads it says so and marks it told, so the ticks after it are silent until a launch writes a new one.
+# 17e above ran the call INLINE, so its log is on disk the moment the hook returned.
+# fails-when: no log, no rc in it, no tick line, or the tick prints it on every tick.
+ACT_SLOG="$ACT_A/.bionic/tmp/launch-sync-${SID_A}.log"
+act_tick() {  # <repo> -> TICK_OUT, the tick's stdout and stderr
+  TICK_OUT="$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" tick 2>&1 )"
+}
+expect_true "17e10 §SYNC AC-7.1 the failed launch-sync wrote its log" test -f "$ACT_SLOG"
+expect_contains "17e11 …holding the verb's own output" "poker: NOT-RECORDED T4" "$(cat "$ACT_SLOG" 2>/dev/null)"
+expect_eq "17e12 …and its exit status, last" "rc=1" "$(/usr/bin/grep '^rc=' "$ACT_SLOG" 2>/dev/null | tail -n 1)"
+act_tick "$ACT_A"
+expect_nonempty "17e13 precondition: the tick prints its lines (the extractor reads real output)" \
+  "$(printf '%s\n' "$TICK_OUT" | /usr/bin/grep '^poker: ')"
+# The tick names the log under the root it resolved, the physical path (`pwd -P`: /private/var on macOS).
+ACT_SLOG_P="$(cd "$ACT_A/.bionic/tmp" 2>/dev/null && pwd -P)/launch-sync-${SID_A}.log"
+expect_eq "17e14 §SYNC AC-7.1 the next tick prints the failure once, naming the log" \
+  "poker: launch-sync failed — $ACT_SLOG_P" "$(printf '%s\n' "$TICK_OUT" | /usr/bin/grep '^poker: launch-sync failed')"
+act_tick "$ACT_A"
+expect_nonempty "17e15 precondition: the second tick prints its lines" "$(printf '%s\n' "$TICK_OUT" | /usr/bin/grep '^poker: ')"
+expect_eq "17e16 …and the tick after it does not print it again: once per failure, never per tick" "" \
+  "$(printf '%s\n' "$TICK_OUT" | /usr/bin/grep '^poker: launch-sync failed')"
+
 # ---------- 17h: below current: 4 nothing is written ----------
 ACT_H="$(act_world early 3)"
 cp "$(act_plan "$ACT_H")" "$SANDBOX/act-h-before"
