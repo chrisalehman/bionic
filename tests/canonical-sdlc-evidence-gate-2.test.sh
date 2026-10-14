@@ -3931,22 +3931,35 @@ expect_eq "FO-6b …and facts_state's floor line is covered" "covered" "$(fo_fac
 expect_eq "FO-6c …with no second whole run: the proof line still names F" "1 ${FO_F}" \
   "$(grep -c '^proved: kind=floor' "$FOP") $(fo_run 'proof_last "$FOP" floor')"
 
-section "§FLOOR-COVER: a fix row is covered when every code file it changed is declared by a suite it ran; an undeclared one owes a second whole run, or approve regression-2 (wave-35 T9; REQ-1 AC-1.4; D9)"
-# Continues §FLOOR-OWED's repository at covered: T7 changed lib/x.sh and ran a.test.sh, which declares it.
-# The cover is the anchor index at the judged head (lib/anchors.sh `anchors_index`), keyed by file name; a
+section "§FLOOR-COVER: a fix row is covered when every code file it changed is read by a suite it ran; an unread one owes a second whole run, or approve regression-2 (wave-35 T9; wave-36 T27; REQ-1 AC-1.4, REQ-6 AC-6.1; D9, D12)"
+# Continues §FLOOR-OWED's repository at covered: T7 changed lib/x.sh and ran a.test.sh, which reads it.
+# The cover is the reads index at the judged head (lib/anchors.sh `reads_index`, wave-36 T27), keyed by file name; a
 # code file is a path outside tests/, the docs and the timing table.
-# fails-when: an undeclared file passes, or a declared one owes a second run.
-expect_eq "FC-0 precondition: the index the judge reads says a.test.sh declares lib/x.sh, and nothing declares lib/y.sh" \
+# fails-when: an unread file passes, or a read one owes a second run.
+expect_eq "FC-0 precondition: the anchor index says a.test.sh declares lib/x.sh, and nothing declares lib/y.sh" \
   "lib/x.sh	tests/a.test.sh" "$(fo_run '. "$1/anchors.sh" && anchors_index "$FOR" HEAD')"
 FO_C2="$(fo_land T8 tests/b.test.sh 'echo more' tests/b.test.sh)"
 fo_verdict T8 "$FO_C2" tests/b.test.sh green
 expect_eq "FC-1 a fix row that changed only a test file owes no declaration: covered" "covered	${FO_C2}" "$(fo_state)"
+# THE COVER READS THE READS INDEX (wave-36 T27; REQ-6 AC-6.1; D12, ADR-056): a suite covers what it reads. b.test.sh
+# comes to grep lib/z.sh, which no anchor names; a fix row that changed lib/z.sh and ran b.test.sh is covered.
+# fails-when: lib/z.sh reads `declared by no suite it ran` (the anchor index's answer).
+FO_C4="$(fo_land T10 tests/b.test.sh 'grep -c zed "$REPO/lib/z.sh"' tests/b.test.sh)"
+fo_verdict T10 "$FO_C4" tests/b.test.sh green
+FO_C5="$(fo_land T11 lib/z.sh 'zed one' tests/b.test.sh)"
+fo_verdict T11 "$FO_C5" tests/b.test.sh green
+expect_eq "FC-R0 precondition: the reads index at the head routes lib/z.sh to b.test.sh" "lib/z.sh	tests/b.test.sh" \
+  "$(fo_run '. "$1/anchors.sh" && reads_index "$FOR" HEAD' | awk -F'\t' '$1 == "lib/z.sh"')"
+expect_eq "FC-R0b …while the anchor index names lib/x.sh and not lib/z.sh (positive and negative on one extractor)" "lib/x.sh|" \
+  "$(fo_run '. "$1/anchors.sh" && anchors_index "$FOR" HEAD' | awk -F'\t' '$1 == "lib/x.sh" { x = $1 } $1 == "lib/z.sh" { z = $1 } END { print x "|" z }')"
+expect_eq "FC-R1 AC-6.1 a fix row that changed lib/z.sh, which a suite it ran reads and no anchor names: covered" \
+  "covered	${FO_C5}" "$(fo_state)"
 FO_C3="$(fo_land T9 lib/y.sh 'y two' tests/a.test.sh)"
 fo_verdict T9 "$FO_C3" tests/a.test.sh green
 FO_ST="$(fo_state)"
-expect_eq "FC-2 AC-1.4 a fix row that changed lib/y.sh, which no suite it ran declares: uncovered" "uncovered" "${FO_ST%%	*}"
+expect_eq "FC-2 AC-1.4 a fix row that changed lib/y.sh, which no suite it ran reads: uncovered" "uncovered" "${FO_ST%%	*}"
 expect_contains "FC-2b …naming the row, the file and the second whole run owed" \
-  "commit ${FO_C3:0:12} (row T9) is not proved: lib/y.sh is declared by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$FO_ST"
+  "commit ${FO_C3:0:12} (row T9) is not proved: lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$FO_ST"
 expect_eq "FC-2c …and facts_state's floor line is uncovered F..head" "uncovered	${FO_F}..${FO_C3}" "$(fo_facts "$FO_C3" | cut -f1,2)"
 printf 'approved: regression-2 by Dana Fixture 2026-10-12T02:00:00Z "no second run, the y change is a message"\n' >> "$FOP"
 expect_eq "FC-3 AC-1.4 approve regression-2: the undeclared file is the user's to waive, covered" "covered	${FO_C3}" "$(fo_state)"
