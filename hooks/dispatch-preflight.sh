@@ -3042,6 +3042,12 @@ esac
 # plan. A name holding the row is a live writer unless it is this dispatch's own name in this session
 # (the in-flight arm's case), and the refusal names it and its session. The tick reads the same set, so
 # a row the wall refuses is a row the tick never offered.
+#
+# ONE CLOSURE RULE WITH ADOPT (wave-36 T10; REQ-4 AC-4.4, D10). The set is closed by lib/fill.sh
+# `roster_row_open`, the rule `adopt` asks too: besides acks, a row whose session is dead and whose files
+# are sweepable is closed, so a row adopt will never offer no longer holds the dispatch. A dead session
+# whose files are still inside the poker interval holds it, and the remedy names both ways out: adopt,
+# then ack; or wait out the interval and `sweep`.
 # [WALL: tests/dispatch-preflight-4.test.sh §REMARK, §HOLD]
 dp_tree_of() {  # <cell or path> -> the linked tree it names, absolute, or nothing
   local t="${1:-}"
@@ -3102,7 +3108,8 @@ dispatching ${AGENT_NAME} onto it would put two writers on one row, the second a
 
 Fix: if ${DP_LIVE_WRITER} is finished, land it and let the Patrol's ack close it, or stop it (stop-orders.sh
 stopped writes the ack, in the session that launched it); then dispatch again. If it is still working, let it
-finish. A writer of another session that is gone is taken over with session-poker.sh adopt, then acked."
+finish. A writer of a session that is gone is taken over with session-poker.sh adopt, then acked; once that
+session's files are older than the poker interval, session-poker.sh sweep removes them, and the row is free."
 fi
 
 # ================================================ THE ONE REFUSAL, FOR EVERY FAULT
