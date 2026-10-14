@@ -4512,7 +4512,7 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
   return 0
 }
 
-# cur8_judge <step> -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
+# cur7_judge <step> -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
 # the working head, with that head in PV_HEAD8; otherwise refuses `current <step>`, exit 1, the plan unchanged,
 # printing each owed line that does not hold, in the judge's own words: the owed suite, or the commit the walk
 # cannot prove (wave-27 T14; D3). The judge's rc 2, a plan it cannot deal, refuses too, printing whatever the
@@ -4524,7 +4524,7 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
 # uncovered.
-cur8_judge() {  # <step>   (named for Step 8, its first caller; it judges Step 7 too)
+cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judges Step 8 too)
   local step="$1" wb out rc err
   if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F facts_state >/dev/null 2>&1; then
@@ -9882,12 +9882,12 @@ BRF_EOF
       7)
         if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
           plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
-          cur8_judge 7
+          cur7_judge 7
           PV_DRYMODE=judged
           PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
         fi ;;
       8|8a|8b)
-        cur8_judge 8
+        cur7_judge 8
         PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     esac
     plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
