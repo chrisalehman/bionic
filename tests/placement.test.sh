@@ -136,6 +136,22 @@ placed "C22 .. folds" "cd $T/../u2/./ && $SUITE" "$U"
 placed "C23 an assignment and a grep ahead of a pinned cd (T38 #297)" \
   "S=$SANDBOX/trees; R=x; grep -c y z; cd \$S/t1 || exit 1; $SUITE" "$T"
 placed "C24 the cd's failure branch exits, then a later statement" "cd $T || { echo no; exit 1; }; $SUITE" "$T"
+# A CD CHAINED BEHIND A CD, ASKED FOR THE END OF THE COMMAND (wave-36 T43; D11, AC-5.6; walk.md shape
+# six). The git target placed `cd A && cd B && git commit` at B while the end of the same command
+# answered `moving cd B`, so the jurisdiction arm, which asks both and needs them equal, refused a
+# chain whose cds are both absolute. The end is reached whether or not the git runs, so a cd opened
+# by && moves the end only when every link ahead of it on that && run is a cd the reader reads.
+place "cd $SANDBOX/trees && cd $T && git commit -m x" "$CWD"
+expect_eq "C25 two absolute cds then a commit: the end of the command is the second" "$T" "$P_OUT"
+expect_status "C25 …exit 0" 0 "$P_RC"
+place "cd $SANDBOX/trees && cd $T && git commit -m x" "$CWD" git
+expect_eq "C25b …and the git target agrees" "$T" "$P_OUT"
+place "cd $SANDBOX/trees && cd t1 && git commit -m x" "$CWD"
+expect_eq "C26 …the second relative, joined to the first: the end" "$T" "$P_OUT"
+place "cd $SANDBOX && cd $SANDBOX/trees && cd $U" "$CWD"
+expect_eq "C27 three cds on one && run: the end is the last" "$U" "$P_OUT"
+place "cd $SANDBOX/trees && cd $T" "$CWD"
+expect_eq "C28 two cds and nothing after them: the end is the second" "$T" "$P_OUT"
 
 section "MOVING — a move the reader cannot be sure of names its segment, never a guess"
 moving "M1 an unpinned variable" "cd \"\$T\" || exit 1; $SUITE" "cd \"\$T\""
@@ -168,6 +184,15 @@ moving "M21 the target moves inside its own shell string" "bash -c 'cd $T && $SU
 moving "M22 ~user" "cd ~nobody; $SUITE" "cd ~nobody"
 moving "M23 the target behind the cd's own failure branch" "cd $T || $SUITE" "cd $T"
 moving "M24 a negated cd" "! cd $T; $SUITE" "! cd $T"
+# The other side of C25: a step that may fail ahead of the cd on its && run leaves the end unsure,
+# though the git behind the same cd runs only where the cd put it.
+place "true && cd $T && git commit -m x" "$CWD"
+expect_eq "M25 a non-cd link ahead of the cd: the end is moving, naming the cd" "moving cd $T" "$P_OUT"
+expect_status "M25 …exit 1" 1 "$P_RC"
+place "true && cd $T && git commit -m x" "$CWD" git
+expect_eq "M25b …while the git behind it is placed (the positive on the same fixture)" "$T" "$P_OUT"
+place "cd \"\$X\" && cd $T" "$CWD"
+expect_eq "M26 an unreadable cd ahead of it on the && run: the end is moving, naming that cd" "moving cd \"\$X\"" "$P_OUT"
 
 section "INVISIBLE — quoted text and heredoc bodies move nothing"
 placed "I1 a cd inside an echo's quotes" "echo \"cd $U\"; $SUITE" "$CWD"
