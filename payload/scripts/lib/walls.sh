@@ -2006,7 +2006,8 @@ bionic_context 2>/dev/null || exit 0
 # AND IT EXEMPTS THIS GATE ALONE, as the rc-4 arm does: the `exit 0` leaves `_eg_body`'s
 # subshell, and the walls folded beside it in hooks/bash-walls.sh — protect-main, the
 # read-only-role arm, the background-suite guard — keep their verdicts wherever the commit
-# lands (tests/bash-walls.test.sh §18).
+# lands (tests/bash-walls.test.sh §18). The read-only-role arm asks its own jurisdiction
+# question since wave-36 T4 (`_bsg_commit_outside`), through the placement reader, not this one.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # The one predicate (file scope, above `wall_evidence_gate`), which hooks/bash-walls.sh's debt
@@ -5886,6 +5887,143 @@ _bsg_own_deliver() {
   [ "$_n" -eq 1 ]
 }
 
+# ─── JURISDICTION BEFORE ROLE (wave-36 T4; D11, AC-5.2; ruled at D6) ────────────────────────
+#
+# THE FAULT (research-landing-and-walls.md C42). ARM C refused every commit verb from a read-only
+# role wherever the commit landed, so a walker could not commit in its own scratch repository.
+# The evidence gate had already learned that another repository is outside its jurisdiction; the
+# role arm had not. It now asks the one placement reader (`cmd_place`, lib/placement.sh, T3) where
+# the commit runs BEFORE it reads the role: a commit placed outside the project root and outside
+# every tree of the project's repository is outside jurisdiction, and exempt whoever runs it. An
+# in-root commit by a read-only role is still refused.
+#
+# ONE READER, NO SECOND GRAMMAR. The place is `cmd_place`'s answer for the first git segment, and
+# it must equal its answer for the end of the command: a command whose first git runs outside but
+# whose shell ends elsewhere has a cd between them the arm will not guess about (A-T4-2). A
+# `moving` answer is not exempt, and the refusal names the segment in `place_moving_line`'s one
+# line. cmd_place reads cd moves only, so a commit that names its repository itself (`git -C`,
+# `--git-dir`, `--work-tree`, `env -C`, a GIT_DIR-family variable) is not exempted here at all: it
+# is the commit reader's to place, and this arm stays closed on it (A-T4-3).
+#
+# OUTSIDE IS READ ON DISK, PHYSICALLY. The place and the root are resolved through their longest
+# existing ancestor (`_bionic_root_abs`, lib/root.sh), so a link that leads into the root is
+# inside, and so is a repository nested under it. "Every tree the roster knows" is every working
+# tree of the project's repository (`git worktree list`): the roster rows name no tree of their
+# own, and every tree a writer is given is one of these (A-T4-1).
+
+# THE EIGHT VERBS THAT MAKE A COMMIT, named once: ARM C's screen and the relocation screen below.
+_BSG_COMMIT_VERBS="commit merge revert cherry-pick am rebase commit-tree update-ref"
+
+# place_moving_line <segment> -> the one line a `moving` placement is refused with: the segment as
+# cmd_place typed it, and the two ways to give the wall a place. Every caller that refuses a
+# moving answer prints this line (T25's commit readers among them), so a reader sees one sentence.
+place_moving_line() {
+  printf 'moving-form: `%s` moves the shell where the wall cannot follow, so it cannot place this command; cd to an absolute path first, or run it as its own call' "${1:-}"
+}
+
+# _bsg_under <path> <dir> -> 0 when <path> is <dir> or below it (both already physical).
+_bsg_under() {
+  [ -n "$2" ] || return 1
+  [ "$1" = "$2" ] && return 0
+  case "$1" in "$2"/*) return 0 ;; esac
+  return 1
+}
+
+# _bsg_git_relocates -> 0, with _BSG_JUR_WHY set, when a commit-creating git segment names its own
+# repository or directory, so cmd_place's answer is not where git commits; 1 otherwise. The verbs
+# and the option walk are `_eg_commit_count`'s reading of git's global options.
+_bsg_git_relocates() {
+  local _line _oldifs="$IFS" _hadf
+  case "$COMMAND" in
+    *GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
+      _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement reader does not read"
+      return 0 ;;
+  esac
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    git_argv_parse "$_line" || continue
+    case " $_BSG_COMMIT_VERBS " in *" $GIT_SUB "*) : ;; *) continue ;; esac
+    _git_argv_skip "$_line"
+    if [ -n "$GIT_ARGV_ENV_CHDIR" ]; then
+      _BSG_JUR_WHY="env -C moves the commit to a directory the placement reader does not read; cd there and commit"
+      return 0
+    fi
+    [ -n "$GIT_ARGV_REST" ] || continue
+    _hadf=0
+    case "$-" in *f*) _hadf=1 ;; esac
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"
+    [ "$_hadf" -eq 1 ] || set +f
+    shift   # argv[0], the git binary
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -C|--git-dir|--git-dir=*|--work-tree|--work-tree=*)
+          _BSG_JUR_WHY="the commit names its repository itself (git -C, --git-dir or --work-tree), which the placement reader does not read; cd into that repository and commit there"
+          return 0 ;;
+        -c|--namespace|--exec-path|--config-env|--super-prefix) shift; [ $# -gt 0 ] && shift ;;
+        -*) shift ;;
+        *) break ;;
+      esac
+    done
+  done <<< "$(git_argv_expand "$COMMAND")"
+  return 1
+}
+
+# _bsg_commit_outside -> 0 when the commit is outside the project's jurisdiction (exempt from ARM C
+# whoever runs it); 1 when it is inside or cannot be placed, with _BSG_JUR_WHY naming why for the
+# refusal's detail when the arm knows. Reads COMMAND, the payload's cwd and BIONIC_ROOT.
+_BSG_JUR_WHY=""
+_bsg_commit_outside() {
+  local _cwd _at _end _rc _d _root _wts _wt
+  _BSG_JUR_WHY=""
+  _cwd="$(bionic_jq .cwd)"
+  # A reader that cannot load places nothing, so nothing is exempt: the role arm judges.
+  wall_libs background-suite-guard placement.sh || return 1
+  declare -F cmd_place >/dev/null 2>&1 || return 1
+  _at="$(cmd_place "$COMMAND" "$_cwd" git 2>/dev/null)"; _rc=$?
+  case "$_rc" in
+    0) : ;;
+    1) _BSG_JUR_WHY="$(place_moving_line "${_at#moving }")"; return 1 ;;
+    *) return 1 ;;
+  esac
+  _end="$(cmd_place "$COMMAND" "$_cwd" 2>/dev/null)"; _rc=$?
+  case "$_rc" in
+    0) : ;;
+    1) _BSG_JUR_WHY="$(place_moving_line "${_end#moving }")"; return 1 ;;
+    *) return 1 ;;
+  esac
+  if [ "$_at" != "$_end" ]; then
+    _BSG_JUR_WHY="the first git runs in $_at but the shell ends in $_end, so the wall cannot place the commit in one tree; commit in its own call"
+    return 1
+  fi
+  _bsg_git_relocates && return 1
+  _d="$(_bionic_root_abs "$_at")"
+  _root="$(_bionic_root_abs "$BIONIC_ROOT")"
+  if _bsg_under "$_d" "$_root"; then
+    _BSG_JUR_WHY="the commit is placed inside the project root ($BIONIC_ROOT)"
+    return 1
+  fi
+  if ! _wts="$(git -C "$BIONIC_ROOT" worktree list --porcelain 2>/dev/null)"; then
+    # No repository at the root has no trees to be inside. A repository git cannot list is not
+    # read as treeless: the arm stays closed.
+    [ -e "$BIONIC_ROOT/.git" ] || return 0
+    _BSG_JUR_WHY="git could not list the project's trees, so the wall cannot say the commit is outside them"
+    return 1
+  fi
+  while IFS= read -r _wt; do
+    case "$_wt" in "worktree "*) : ;; *) continue ;; esac
+    _wt="$(_bionic_root_abs "${_wt#worktree }")"
+    if _bsg_under "$_d" "$_wt"; then
+      _BSG_JUR_WHY="the commit is placed in $_wt, a tree of the project's own repository"
+      return 1
+    fi
+  done <<< "$_wts"
+  return 0
+}
+
 # _bsg_own_amend — is the matched `session-poker.sh amend` (`_WALL_POKER_ARGS`) a writer's Files
 # amend of its OWN roster row (wave-31 T11; REQ-8 AC-8.3, D9; A-orch-41.6, A-orch-46.2)? rc 0 with
 # `_BSG_AM_UPD` the tool_input to stage: the call rebuilt from the words the wall read, each one
@@ -6157,8 +6295,13 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # gives Bash, are read-only here too. roster.sh is not in the carrier's BIONIC_LIB_WANT, so
   # it is sourced through `wall_libs` at the one moment it is needed: a commit in an agent
   # context. A missing library steps this arm aside with the advisory line, like cmd-class.sh.
+  #
+  # JURISDICTION FIRST (wave-36 T4; D11, AC-5.2): `_bsg_commit_outside`, above, asks the placement
+  # reader where the commit runs before the role is read. A commit placed outside the project root
+  # and outside every tree of its repository is not this arm's, whoever runs it.
   if _wall_mentions_git "$COMMAND" \
-     && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
+     && git_argv_has_any_sub "$COMMAND" "$_BSG_COMMIT_VERBS" \
+     && ! _bsg_commit_outside; then
     local _bsg_role _bsg_whence _bsg_pick _bsg_seg _bsg_segs _bsg_row=0
     # ONE PICK, ONE SITE (wave-22 T10; review 2): the row is `roster_row_for_id`'s — the budget
     # arm's own pick, the LAST `roster-state/` row whose FIRST `agent_id=` is this actor — and
@@ -6186,7 +6329,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
     if role_is_readonly "$_bsg_role"; then
       fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
         "$_bsg_whence, and a read-only role's deliverable is its report, never a commit. Leave
-the tree as it is and send the report; the orchestrator lands the work."
+the tree as it is and send the report; the orchestrator lands the work.${_BSG_JUR_WHY:+
+A commit placed outside the project root and outside every tree of its repository is exempt; this one is not: $_BSG_JUR_WHY.}"
       return 2
     fi
   fi

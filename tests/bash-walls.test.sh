@@ -1656,14 +1656,15 @@ expect_status "17l: AC-3.3 — …and spelled 'git -C <tree> merge --no-ff', ADM
 
 
 # ---------------------------------------------------------------------------
-section "18 — a commit into another repository is outside the evidence gate, and only it (wave-19 REQ-9, D10)"
+section "18 — a commit into another repository is outside the evidence gate; outside the project, outside the role arm too (wave-19 REQ-9, D10; wave-36 T4, D11)"
 #
 # THE FAULT (A-T11.1). From an engaged session, `git -C <scratch repo> commit` was judged by
 # the evidence gate against THIS repository's plan and refused for its evidence. The gate now
 # asks which repository the commit lands in before it reads a plan; another repository — a
 # scratch one, or one NESTED under the root — is admitted with one line. The walls folded
-# beside the gate never read a plan and are not exempted with it: the read-only-role arm (T5)
-# still refuses a test-runner's commit wherever it lands.
+# beside the gate never read a plan and are not exempted with it. The read-only-role arm asks
+# its own jurisdiction question (wave-36 T4): a commit the placement reader puts outside the
+# project root and outside every tree of the project is not its business either (18d, 18m-18t).
 #
 # R_COMMIT carries `block_plan` (current: 5, a placeholder Step-5 line), so every commit the
 # gate still judges there is refused — the control that makes each allow a boundary verdict.
@@ -1688,16 +1689,71 @@ run_hook "$(mk_payload "$R_COMMIT" "git -C $R_NEST commit -q --allow-empty -m x"
 expect_status "18c: AC-9.3 — a repository nested at <root>/.bionic/docs/record/x/bed is ADMITTED" 0 "$ST"
 expect_eq "18c: …with the same one line" "$(jur_line "$R_NEST")" "$ERR"
 
-# THE EXEMPTION IS THE GATE'S ALONE. A bionic:test-runner row committing into the scratch
-# repo is outside the gate's jurisdiction and still inside the role arm's: refused, by ARM C.
+# JURISDICTION BEFORE ROLE (wave-36 T4; D11, AC-5.2). The role arm used to refuse a read-only
+# role's commit wherever it landed, so a walker could not commit in its own scratch repository
+# (research-landing-and-walls.md C42). It now asks the one placement reader (`cmd_place`, lib/
+# placement.sh) where the commit runs before it reads the role: a commit placed outside the
+# project root and outside every tree of the project's repository is outside jurisdiction, and
+# exempt whoever runs it. An in-root commit by the same role is still refused, on the same
+# fixture. `git -C` is the commit reader's own, not the placement reader's, so a commit that
+# names its repository itself is not exempted by this arm (A-T4-3).
 R_JUR_RO="$(mk_repo jurisdiction-ro)"; block_plan "$R_JUR_RO"
 roster_header > "$R_JUR_RO/.bionic/tmp/roster-$SID.state"
 ro_rows "$R_JUR_RO" w19-jur-runner ajurrunner-0123456789abcdef bionic:test-runner
+run_hook "$(mk_payload "$R_JUR_RO" "cd $R_SCR && git add -A && git commit -q --allow-empty -m x" ajurrunner-0123456789abcdef omit Bash w19-jur-runner)"
+expect_status "18d: AC-5.2 — a bionic:test-runner's commit placed in the scratch repo (a cd outside the root) is ADMITTED" 0 "$ST"
+expect_absent "18d: …the role arm says nothing" "read-only role" "$ERR"
+expect_eq "18d: …and the gate only names the boundary, in its one line" "$(jur_line "$R_SCR" "$R_JUR_RO")" "$ERR"
 run_hook "$(mk_payload "$R_JUR_RO" "git -C $R_SCR commit -q --allow-empty -m x" ajurrunner-0123456789abcdef omit Bash w19-jur-runner)"
-expect_status "18d: a bionic:test-runner's commit into the scratch repo is still REFUSED (the role arm is not exempt)" 2 "$ST"
+expect_status "18d: a commit that names its repository with git -C is not exempted by the role arm: REFUSED" 2 "$ST"
 expect_contains "18d: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18d: …saying the arm does not read -C" "git -C" "$ERR"
 expect_contains "18d: …while the gate itself only names the boundary" "$(jur_line "$R_SCR" "$R_JUR_RO")" "$ERR"
 expect_eq "18d: …so exactly one refusal is rendered" "1" "$(printf '%s\n' "$ERR" | grep -c 'refused')"
+
+# THE BOUNDARY, ROW BY ROW, on §17's R_RO: no plan, so the gate admits every commit and the role
+# arm is the only speaker. Each refusal below is paired with the admitted scratch-repo commit on
+# the same fixture (18m), so an arm that exempts nothing, or everything, fails one side.
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18m: AC-5.2 — a bionic:test-runner's 'cd <scratch> && git commit' is ADMITTED" 0 "$ST"
+expect_absent "18m: …silently on the role arm" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && git merge -q x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18m: …and every commit-creating verb placed there ('git merge') is ADMITTED" 0 "$ST"
+run_hook "$(mk_payload "$R_RO" 'git commit -q --allow-empty -m x' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18m: AC-5.2 — the same role's commit inside the root is still REFUSED" 2 "$ST"
+expect_contains "18m: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18m: …whose detail says where the commit was placed" "inside the project root ($R_RO)" "$ERR"
+# shellcheck disable=SC2016  # the variable is the command's, unexpanded on purpose
+run_hook "$(mk_payload "$R_RO" 'cd "$SCRATCH_DIR" && git commit -m x' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18n: a commit behind a cd the reader cannot read (an unpinned variable) is REFUSED" 2 "$ST"
+expect_contains "18n: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18n: …naming the move as moving-form" "moving-form" "$ERR"
+# shellcheck disable=SC2016
+expect_contains "18n: …and the segment as typed" 'cd "$SCRATCH_DIR"' "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && git init -q && cd $R_RO && git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18o: a command whose first git is outside but whose shell ends in the root is REFUSED" 2 "$ST"
+expect_contains "18o: …by the role arm" "a read-only role never commits" "$ERR"
+R_RO_NEST="$R_RO/.bionic/docs/record/nest"
+mkdir -p "$R_RO_NEST"; git -C "$R_RO_NEST" init -q 2>/dev/null
+run_hook "$(mk_payload "$R_RO" "cd $R_RO_NEST && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18p: a repository nested inside the project root is inside jurisdiction: REFUSED" 2 "$ST"
+expect_contains "18p: …by the role arm" "a read-only role never commits" "$ERR"
+R_RO_WT="$SANDBOX/ro-outside-wt"
+git -C "$R_RO" worktree add -q "$R_RO_WT" -b wt/ro-outside 2>/dev/null
+expect_true "18q: fixture — a linked worktree of the project sits outside its root" test -d "$R_RO_WT/.git" -o -f "$R_RO_WT/.git"
+run_hook "$(mk_payload "$R_RO" "cd $R_RO_WT && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18q: a tree of the project's own repository outside the root is inside jurisdiction: REFUSED" 2 "$ST"
+expect_contains "18q: …by the role arm" "a read-only role never commits" "$ERR"
+ln -s "$R_RO" "$SANDBOX/ro-link"
+run_hook "$(mk_payload "$R_RO" "cd $SANDBOX/ro-link && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18r: a path outside the root that is a link into it is inside jurisdiction: REFUSED" 2 "$ST"
+expect_contains "18r: …by the role arm" "a read-only role never commits" "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && GIT_DIR=$R_RO/.git git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18s: a commit placed outside that names the root's repository through GIT_DIR is REFUSED" 2 "$ST"
+expect_contains "18s: …by the role arm" "a read-only role never commits" "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && env -C $R_RO git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18t: a commit placed outside that env -C moves back into the root is REFUSED" 2 "$ST"
+expect_contains "18t: …by the role arm" "a read-only role never commits" "$ERR"
 
 # A LINKED WORKTREE of the engaged repository shares its common dir and is inside: judged.
 git -C "$R_COMMIT" worktree add -q "$R_COMMIT/.worktrees/19-T6" -b wt/19-T6 2>/dev/null
