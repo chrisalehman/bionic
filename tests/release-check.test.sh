@@ -28,7 +28,7 @@
 #                   block is byte-for-byte as released; the also-3 cell carries a verdict, not "pending
 #                   T17". Each rule has a doctored copy that goes red, except the newest-heading rule.
 #   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
-#                   AC-9.2): the newest heading is 1.19.0 and equals plugin.json's version; the Corrections
+#                   AC-9.2): the block exists at its own heading, dated; the Corrections
 #                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
 #                   deferred sentences and the corrected fix count; Known limits carries every `deferred:`
 #                   stated sentence of the bound plan; Migration names every row that added a refusal; every
@@ -503,12 +503,9 @@ plan_deferred() { sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p' "$1
 
 # corr_check <file> <plugin.json> <plan> — one `corr:` line per broken rule; no output when all hold
 corr_check() {
-  local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual ver t13 t13hit
+  local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual t13 t13hit
   blk="$(cl_block "$f" 1.19.0)"
   [ -n "$blk" ] || { echo "corr: no 1.19.0 block"; return 0; }
-  ver="$(grep -m 1 '^## ' "$f" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
-  [ "$ver" = "1.19.0" ] || echo "corr: the newest heading is $ver, not 1.19.0"
-  [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = "1.19.0" ] || echo "corr: plugin.json does not read 1.19.0"
   printf '%s\n' "$blk" | grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "corr: the 1.19.0 heading carries no date"
   lead="$(cl_lead "$f" 1.19.0)"
   for s in 'zero machine errors' 'D7' 'D14'; do
@@ -560,6 +557,14 @@ EOT
   [ "$(cl_block "$f" 1.18.0 | cl_cksum)" = "$BLOCK_1180_CKSUM" ] || echo "corr: the 1.18.0 block is not as released"
   return 0
 }
+# pair_check <file> <plugin.json> — one `corr:` line when plugin.json does not read the newest heading (the live pair,
+# whichever release is newest; the 1.19.0 rules above hold that block at its own heading)
+pair_check() {
+  local ver pv
+  ver="$(grep -m 1 '^## ' "$1" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+  pv="$(jq -r '.version // empty' "$2" 2>/dev/null)"
+  [ -n "$ver" ] && [ "$pv" = "$ver" ] || echo "corr: plugin.json reads ${pv:-nothing}, not the newest heading ${ver:-none}"
+}
 # help_check — the rendered pages read the plugin's version and are the pages render.sh renders
 help_check() {
   local ver pg
@@ -587,8 +592,8 @@ expect_eq "(c0) the table of build rows holds 36 rows" "36" "$(printf '%s\n' $RO
 # --- the repository's own entry keeps every rule
 expect_eq "(c1) the repository's 1.19.0 entry keeps every rule" "" "$(corr_check "$CL" "$PLUGIN_JSON" "$PLAN_36")"
 expect_eq "(c1) …and the rendered pages read plugin.json's version and are the rendered pages" "" "$(help_check)"
-expect_eq "(c1) …and plugin.json reads 1.19.0" "1.19.0" "$(jq -r '.version' "$PLUGIN_JSON")"
-expect_eq "(c1) …and the newest CHANGELOG heading reads 1.19.0 (AC-9.1)" "1.19.0" "$(grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+expect_nonempty "(c1) …and the newest CHANGELOG heading is found" "$(grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+expect_eq "(c1) …and plugin.json reads the newest CHANGELOG heading (AC-9.1, AC-10.1)" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
 
 # --- doctored copies: each rule has one that goes red, named by its rule
 cor_check() { corr_check "$1" "$PLUGIN_JSON" "$PLAN_36"; }
@@ -633,7 +638,7 @@ expect_contains "(c2p) the born: floor rows not named: red" "corr: the entry doe
 doctor c_edit1180 awk '{ print } /^## 1\.18\.0 — /{ print "" }'
 expect_contains "(c2q) a touched 1.18.0 block: red" "corr: the 1.18.0 block is not as released" "$(cor_check "$TMP/doctored.c_edit1180")"
 printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$TMP/plugin.old.json"
-expect_contains "(c2r) a plugin.json that still reads 1.18.0: red" "corr: plugin.json does not read 1.19.0" "$(corr_check "$CL" "$TMP/plugin.old.json" "$PLAN_36")"
+expect_contains "(c2r) a plugin.json that still reads 1.18.0: red, naming both versions" "corr: plugin.json reads 1.18.0, not the newest heading $(grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')" "$(pair_check "$CL" "$TMP/plugin.old.json")"
 doctor c_nodate sed 's/^## 1\.19\.0 — .*/## 1.19.0 —/'
 expect_contains "(c2s) a 1.19.0 heading with no date: red" "corr: the 1.19.0 heading carries no date" "$(cor_check "$TMP/doctored.c_nodate")"
 
@@ -734,5 +739,51 @@ adr_world "$TMP/adr-p56" "$S53" "$S54" "$S55" 'status: Proposed (Step 2, 2026-10
 expect_contains "(a4i) ADR-056 reading Proposed: red, not Accepted" "adr: ADR-056's status is not Accepted" "$(adr_check "$TMP/adr-p56")"
 adr_world "$TMP/adr-no55" "$S53" "$S54"; rm "$TMP/adr-no55"/adr-055-*.md
 expect_contains "(a4j) ADR-055's file absent beside the others: red, named" "adr: no ADR-055 file at $TMP/adr-no55" "$(adr_check "$TMP/adr-no55")"
+
+section "§REL-1.20.0 — the 1.20.0 entry names each landed row's record, the landing numbers and the Known limits (wave-37 AC-10.1, AC-10.2, AC-1.4)"
+
+# Every landed build row of wave 37 and the record that proves it; the entry names each
+ROWS_1200="T1:T1-landing-drain.md T2:T2-dry-copy-slug.md T3:T3-map-rules.md T4:T4-run-line.md T5:T5-words-witness.md
+T6:T6-brief-artifact.md T7:T7-list-fields.md T8:T8-basis-line.md T9:T9-report-split.md T18:T18-decline-reopens.md
+T19:T19-bounded-ready.md"
+
+# rel_check <file> — one `rel:` line per broken rule; no output when all hold
+rel_check() {
+  local f="$1" blk lim land pair row rec s
+  blk="$(cl_block "$f" 1.20.0)"
+  [ -n "$blk" ] || { echo "rel: no 1.20.0 block"; return 0; }
+  printf '%s\n' "$blk" | grep -q -E '^## 1\.20\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "rel: the 1.20.0 heading carries no date"
+  for pair in $ROWS_1200; do
+    row="${pair%%:*}"; rec="${pair#*:}"
+    printf '%s\n' "$blk" | grep -q -F -- '`'"$rec"'`' || echo "rel: the entry names no record for $row ($rec)"
+  done
+  for s in D3 D4 D5 D6 D7 D8 D9 D10 D11 D12 D13; do
+    printf '%s\n' "$blk" | grep -q -E "^### .*\($s[,)]" || echo "rel: no section for $s"
+  done
+  has "$blk" 'timing.tsv' && has "$blk" 'no suite was split' || echo "rel: the entry does not cite timing.tsv with no suite split (AC-1.4)"
+  land="$(cl_part "$f" 1.20.0 'The landing numbers')"
+  [ -n "$land" ] || echo "rel: no landing numbers section"
+  has "$land" 'median=' && has "$land" 'wait=' && has "$land" 'prove=' && has "$land" 'width=' || echo "rel: the landing numbers carry no median, wait, prove and width"
+  has "$land" '29.4' && has "$land" '107.4' && has "$land" '170.8' || echo "rel: the landing numbers do not stand beside wave 36's"
+  lim="$(cl_part "$f" 1.20.0 'Known limits')"
+  [ -n "$lim" ] || echo "rel: no Known limits section"
+  has "$blk" '**Migration.**' || echo "rel: no Migration paragraph"
+}
+expect_nonempty "(r0) the 1.20.0 block is found" "$(cl_block "$CL" 1.20.0)"
+expect_nonempty "(r0) …and its landing numbers part" "$(cl_part "$CL" 1.20.0 'The landing numbers')"
+expect_nonempty "(r0) …and its Known limits part" "$(cl_part "$CL" 1.20.0 'Known limits')"
+expect_eq "(r1) the repository's 1.20.0 entry keeps every rule" "" "$(rel_check "$CL")"
+doctor r_norec sed 's/`T18-decline-reopens\.md`/the record/g'
+expect_contains "(r2a) a row with no record named: red" "rel: the entry names no record for T18" "$(rel_check "$TMP/doctored.r_norec")"
+doctor r_nolim sed 's/^### Known limits$/### Notes/'
+expect_contains "(r2b) no Known limits section: red" "rel: no Known limits section" "$(rel_check "$TMP/doctored.r_nolim")"
+doctor r_nonum sed 's/^### The landing numbers$/### Numbers/'
+expect_contains "(r2c) no landing numbers section: red" "rel: no landing numbers section" "$(rel_check "$TMP/doctored.r_nonum")"
+doctor r_nowave36 sed 's/170\.8 m/gone/'
+expect_contains "(r2d) a landing table with no wave 36 max: red" "rel: the landing numbers do not stand beside wave 36's" "$(rel_check "$TMP/doctored.r_nowave36")"
+doctor r_nod7 sed 's/^### The landing record holds the run (D7, ADR-057)$/### The run/'
+expect_contains "(r2e) no D7 section: red" "rel: no section for D7" "$(rel_check "$TMP/doctored.r_nod7")"
+doctor r_nodate sed 's/^## 1\.20\.0 — .*/## 1.20.0 —/'
+expect_contains "(r2f) a 1.20.0 heading with no date: red" "rel: the 1.20.0 heading carries no date" "$(rel_check "$TMP/doctored.r_nodate")"
 
 finish
