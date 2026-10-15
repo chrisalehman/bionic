@@ -583,7 +583,7 @@ _proof_reading_result_var() {
   _proof_reading_derive "$droot" "$ev" "$res" "$tab" "$_PROOF_FIXED_IDS"
 }
 
-# proof_fixed <plan> [<tree>] -> `<record>#<n><TAB><row><TAB><commit><TAB><born|moved>`, one line per finding a
+# proof_fixed <plan> [<tree>] [<record plan>] -> `<record>#<n><TAB><row><TAB><commit><TAB><born|moved>`, one line per finding a
 # fix row answers and has landed green (wave-33 T13; REQ-5 AC-5.2, D6). The row answers the finding in one of
 # two ways: it names the finding on its born marker (lib/units.sh `units_born_findings`, which `task-add --born
 # <record>#<n>` writes), `born`; or the finding's newest move names it (`moved: <record>#<n> to=fixed row=<T>`,
@@ -596,8 +596,10 @@ _proof_reading_result_var() {
 # head is the reader's to ask (`_proof_fixed_var`): a born row's must, a moved row's need not, since the move
 # says the row fixed the finding whatever its ancestry (ADR-056: "a finding fixed before or beside the reading
 # is fixed"). RED has no machine record (research-verbs-landing.md G1): the green landing is the proof read.
+# <record plan> is the plan whose landing record is read, <plan> when not given: a plan verb's dry copy is read for
+# its text (its rows, its moves) and its origin for the record (wave-37 T2; REQ-9 AC-9.1, D12; hooks/bash-walls.sh).
 proof_fixed() {
-  local plan="${1:-}" tree="${2:-}" born moved rec
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" born moved rec
   [ -f "$plan" ] || return 0
   /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=|^moved:[[:space:]]+[^[:space:]]+[[:space:]]+to=fixed[[:space:]]' "$plan" 2>/dev/null || return 0
   _proof_units_load || return 0
@@ -609,7 +611,7 @@ proof_fixed() {
     part == 1 { if ($10 == "landed") landed[$1] = 1; next }
     part == 2 && ($1 in landed) { print $1 "\t" $2 "\tmoved" }')"
   [ -n "$born" ] || [ -n "$moved" ] || return 0
-  rec="$(proof_debt_record "$plan" "$tree")" || return 0
+  rec="$(proof_debt_record "$rplan" "$tree")" || return 0
   [ -f "$rec" ] || return 0
   { printf '\034born\n'; [ -z "$moved" ] || printf '%s\n' "$moved"; [ -z "$born" ] || printf '%s\n' "$born"
     printf '\034rec\n'; cat "$rec" 2>/dev/null; } | awk -F'|' '
@@ -1496,7 +1498,7 @@ proof_pass_conflict() {
     END { if (other != "") print "head " other; else if (child) print "settled " head }' "$1"
 }
 
-# proof_readings_derived <plan> <tree> -> `<evidence><TAB><written result><TAB><derived result>` for each
+# proof_readings_derived <plan> <tree> [<record plan>] -> `<evidence><TAB><written result><TAB><derived result>` for each
 # reading proof line (`kind=review` with a `question=`) of the plan's unfenced `## SDLC State`, the
 # derived result what `_proof_reading_result` gives it (wave-28 T60; D33, AC-8.6; A-orch-161), and
 # NOTHING when no binding line (`proof_bind_awk`) is in the plan: every derived result is then the
@@ -1510,15 +1512,17 @@ proof_pass_conflict() {
 #
 # A FIXED FINDING BINDS TOO (wave-33 T13; REQ-5 AC-5.2, D6): with a <tree>, the plan's fixed findings
 # (`proof_fixed`) are read once, and a reading one of whose findings a born row fixed at or after its head is
-# derived as the judge derives it, so the wall and the judge read a fixed question one way.
+# derived as the judge derives it, so the wall and the judge read a fixed question one way. <record plan> is the
+# plan whose landing record `proof_fixed` reads, <plan> when not given (wave-37 T2; REQ-9 AC-9.1, D12): the wall hands
+# a plan verb's dry copy as <plan> and the plan it was copied from (`proof_debt_origin`) as <record plan>.
 proof_readings_derived() {
-  local plan="${1:-}" tree="${2:-}" droot="" k a b c d tab="" nl fixed=""
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" droot="" k a b c d tab="" nl fixed=""
   [ -f "$plan" ] || return 0
   nl=$'\n'
   if [ -n "$tree" ]; then
     _proof_roots_load
     ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
-    fixed="$(proof_fixed "$plan" "$tree")"
+    fixed="$(proof_fixed "$plan" "$tree" "$rplan")"
   fi
   while IFS='	' read -r k a b c d; do
     case "$k" in
@@ -1753,12 +1757,13 @@ proof_debts() {
 
 # proof_debt_record <plan> [<tree>] -> `<docs-root>/record/<the plan's name less .plan.md>/
 # landing-proofs.log`, the record `land` writes for that plan (lib/worktree.sh `_wt_proofs_path`, the
-# same rule: this file does not load worktree.sh). rc 1 when no path can be named.
+# same rule: this file does not load worktree.sh). rc 1 when no path can be named. It takes a plan path and no
+# session, since the judge asks it with none: a caller holding a plan verb's copy hands the origin
+# (`proof_debt_origin`), as hooks/bash-walls.sh does.
 proof_debt_record() {
   local plan="${1:-}" tree="${2:-}" slug
   [ -f "$plan" ] || return 1
-  slug="${plan##*/}"; slug="${slug%.plan.md}"
-  [ -n "$slug" ] || return 1
+  slug="$(proof_plan_slug "$plan")" || return 1
   [ -n "$tree" ] || tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
   [ -n "$tree" ] || return 1
   _proof_roots_load
@@ -1791,6 +1796,22 @@ proof_debt_origin() {
     ''|*[!a-z-]*) printf '%s' "$plan" ;;
     *) printf '%s' "$from" ;;
   esac
+}
+
+# proof_plan_slug <plan> [<sid> <marker>] -> the plan's slug, its file name less `.plan.md`, the directory its run's
+# records live in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the
+# hooks and the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it,
+# so a second slug is never derived beside it. Given a session and its marker, a plan verb's dry copy
+# `<plan>.<verb>-dry.<pid>` reads as the plan it was copied from, under `proof_debt_origin`'s three-part guard and
+# only that; with no session, or under any other, a copy reads its own literal name. Never a name-only strip: a
+# session bound to a file named `X.plan.md.anything` reads its own name, not X's record (review pass 60 P0-1). A
+# name reader: the file need not exist. rc 1 when the name leaves no slug.
+proof_plan_slug() {
+  local plan="${1:-}" slug
+  [ "$#" -lt 2 ] || plan="$(proof_debt_origin "${2:-}" "${3:-}" "$plan")"
+  slug="${plan##*/}"; slug="${slug%.plan.md}"
+  [ -n "$slug" ] || return 1
+  printf '%s' "$slug"
 }
 
 # proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
@@ -2345,9 +2366,9 @@ PROOF_DEBT_HEADER='# debt ledger: concept | kind | sites | raised-by <record> | 
 
 # proof_debt_ledger_path <root> <plan> -> the run's ledger path.
 proof_debt_ledger_path() {
-  local slug="${2##*/}"
-  slug="${slug%.plan.md}"
-  [ -n "${1:-}" ] && [ -n "$slug" ] || return 1
+  local slug
+  slug="$(proof_plan_slug "${2:-}")" || return 1
+  [ -n "${1:-}" ] || return 1
   printf '%s/record/%s/debt.md\n' "$(docs_root "$1")" "$slug"
 }
 

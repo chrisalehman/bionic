@@ -4013,4 +4013,92 @@ expect_absent "SCV-10d …and prints no cover line (beside SCV-6b, which reads t
 expect_eq "SCV-10e …so the row SCV-6 holds goes red" "red" "$(scv_verb_reads "$SCV_MROOT/hooks/session-poker.sh")"
 rm -rf "$SCV_MROOT"
 
+# ============================================================
+section "§DRY: the step verb's dry copy reads the origin plan's landing record, so a finding fixed by a landed row is fixed on the copy (wave-37 T2; REQ-9 AC-9.1; D12)"
+# ============================================================
+# `current <n>` proves its move by a dry commit of a COPY of the plan, `<plan>.current-dry.<pid>`, under the session
+# `planverb-<pid>`, whose marker says `dry_of=<plan>` (`plan_verb_dry`). From Step 6 the commit wall derives each
+# reading's result (lib/proof.sh `proof_readings_derived`), and a finding a landed row fixed (`moved: <record>#<n>
+# to=fixed row=<T>`) is found through the run's landing record. Until wave-37 the wall asked for that record by the
+# copy's name, `record/wave-x.plan.md.current-dry.<pid>/landing-proofs.log`, which no landing writes: the fix was
+# invisible, the reading kept its written `fail`, and `current 6` refused a plan the judge reads as fixed. The wall
+# now maps the copy to its origin (`proof_debt_origin`) BEFORE the derivation and hands the origin over as the
+# record's plan; the copy's text stays the text read.
+#
+# FIXTURE FIDELITY. A real repository on a feature branch: a base commit, the reading's head (a code commit), the
+# fix's landing (a code commit, the one T9's green verdict names). A double wave plan at `current: 5` bound to this
+# session, every reading in the production writer's shape (`proof_line`), the adversarial reading `fail` with one
+# S2 finding and one S3 note in its record, T9 `landed` in `## Tasks`, the move in `finding-move`'s shape, and the landing record
+# at `record/wave-x/landing-proofs.log` holding T9's verdict in T1's grammar (`width=` after `log=`). The move is the
+# real verb, so the libraries load as the hook loads them (wave-36 A-orch-16 blamed a `declare -F` guard by running
+# a sourced function with no library loaded; this row runs nothing but the hook).
+# fails-when: `current 6` refuses the moved-and-landed reading on the copy while the judge reads it fixed.
+SDR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+SDR_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+SDR_R="$(make_repo dry-fixed)"
+git -C "$SDR_R" config user.email t@example.com; git -C "$SDR_R" config user.name "Dana Fixture"
+printf '.bionic\n' > "$SDR_R/.gitignore"; printf 'seed\n' > "$SDR_R/README.md"
+mkdir -p "$SDR_R/tests" "$SDR_R/lib" "$SDR_R/.bionic/docs/plans" "$SDR_R/.bionic/docs/record/w37" "$SDR_R/.bionic/docs/record/wave-x"
+printf '#!/bin/bash\nexit 0\n' > "$SDR_R/tests/x.test.sh"
+( cd "$SDR_R" && git add README.md .gitignore tests && git commit -qm seed && git checkout -q -b feature/t2 ) >/dev/null 2>&1
+SDR_B="$(git -C "$SDR_R" rev-parse HEAD)"
+sdr_commit() {  # <text> -> lib/x.sh holds <text>, committed; the new commit's sha
+  printf '%s\n' "$1" > "$SDR_R/lib/x.sh"
+  ( cd "$SDR_R" && git add lib/x.sh && git commit -qm "lib/x.sh: $1" ) >/dev/null 2>&1
+  git -C "$SDR_R" rev-parse HEAD
+}
+SDR_H="$(sdr_commit 'the reading head')"
+SDR_F="$(sdr_commit 'the fix T9 landed')"
+printf 'generic fixture proof\n' > "$SDR_R/.bionic/docs/record/generic-evidence.md"
+{ printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 2\n' "${SDR_B:0:10}" "${SDR_H:0:10}"
+  printf 'finding: 1 S2 on lib/x.sh:1 the value is lost on a second run\nshown: 1 bash lib/x.sh; bash lib/x.sh\nfinding: 2 S3 off lib/x.sh:1 a message could be clearer\n\nwhat the reader found\n'
+} > "$SDR_R/.bionic/docs/record/w37/adversarial.md"
+SDR_P="$SDR_R/.bionic/docs/plans/wave-x.plan.md"
+SDR_REC="$SDR_R/.bionic/docs/record/wave-x/landing-proofs.log"
+printf 'line/v1|ev=verdict|row=T9|commit=%s|suite=x.test.sh|result=green|log=%s/.bionic/docs/record/wave-x/line/T9-x.log|width=1|at=2026-10-04T13:00:00Z\n' \
+  "$SDR_F" "$SDR_R" > "$SDR_REC"
+sdr_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$SDR_LIB" "$@"; }
+SDR_MOVED="moved: record/w37/adversarial.md#1 to=fixed row=T9 by=Dana Fixture at=2026-10-04T14:00:00Z"
+sdr_plan() {  # <extra SDLC line> -> SDR_P at current: 5, bound to this session
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nworking-branch: feature/t2\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: 5\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+    printf -- '- Step 4: dispatched, record/w37/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t2\n' "$SDR_B"
+    printf -- '- T9: landed %s 2026-10-04T13:00:00Z\n' "$SDR_F"
+    printf -- '- Step 5: floor green, record/w37/floor.log\n'
+    sdr_line review "$SDR_H" 2026-10-04T12:00:00Z record/w37/evidence.md evidence w-read pass piece
+    sdr_line review "$SDR_H" 2026-10-04T12:00:00Z record/w37/adversarial.md adversarial w-read fail piece
+    sdr_line review "$SDR_H" 2026-10-04T12:00:00Z record/w37/structure.md structure w-read pass piece
+    [ -z "$1" ] || printf '%s\n' "$1"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T9 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed |\n'
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+    printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
+  } > "$SDR_P"
+  bind_marker "$SDR_R" "$SDR_P"
+}
+
+# ---------- the control: with no move, the copy is refused on the reading, and the plan is unchanged ----------
+sdr_plan ""
+cp "$SDR_P" "$TMPROOT/sdr-before"
+poke "$SDR_R" current 6
+expect_eq "SDR-0 control: the fail reading with no move names no fixed finding, so current 6 is refused (exit 1)" "1" "$RC"
+expect_contains "SDR-0b …on the adversarial reading's record" "record/w37/adversarial.md" "$OUT"
+expect_true "SDR-0c …and the plan is byte-identical, current: 5 kept (cmp)" cmp -s "$TMPROOT/sdr-before" "$SDR_P"
+
+# ---------- the row: the move names T9, T9 landed green, and the copy's commit finds it ----------
+sdr_plan "$SDR_MOVED"
+expect_eq "SDR-1 precondition: on the plan itself the wall's deriver reads the written fail as flag (the S2 fixed, the S3 note left)" \
+  "record/w37/adversarial.md	fail	flag" \
+  "$(bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_readings_derived "$2" "$3"' _ "$SDR_LIB" "$SDR_P" "$SDR_R" 2>/dev/null | awk -F'\t' '$1 == "record/w37/adversarial.md"')"
+poke "$SDR_R" current 6
+expect_eq "SDR-2 AC-9.1 current 6 over a fail reading whose one finding is moved to=fixed by a landed row: admitted (exit 0)" "0" "$RC"
+expect_eq "SDR-2b …and the plan moved to current: 6" "current: 6" "$(/usr/bin/grep -m1 '^current:' "$SDR_P")"
+POKE_BOUND="$SDR_BOUND_WAS"
+
 finish
