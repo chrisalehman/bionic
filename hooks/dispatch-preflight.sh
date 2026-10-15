@@ -2817,21 +2817,19 @@ fi
 
 # A ROW LANDS ON EVERY SUITE THAT READS ITS FILES (wave-36 T27; REQ-6 AC-6.1; D12, ADR-056). The one file-to-suite
 # fact is lib/anchors.sh `reads_index`: a suite reads a file its text names outside a comment, a library of a hook
-# it names, or a file its anchor names. `brief` derives Lands-on: from it (session-poker.sh
-# `poker_brief_index_suites`), and this arm asks the same question of the brief's declared Files: (before the
+# it names, a file its anchor names, what a prelude it names reads, or a directory it walks. `brief` derives
+# Lands-on: from it (session-poker.sh `poker_brief_index_suites`), and this arm asks the same question of the
+# brief's declared Files through the same reader, lib/anchors.sh `reads_suites` (wave-37 T3; D4) (before the
 # rendered twins above), at the plan's working-branch tip, else the tree: a writer binding a row whose Lands-on:
 # omits a suite the index names for those files is refused, the missing suites printed with a whole line to
 # paste. `none <reason>` is refused the same way, since a reason does not unread a file. One index read per
-# dispatch, and only for a writer whose Files write the head. What the index misses (paths built from variables,
-# globs, a library a library loads) it does not claim, and neither does this arm: the floor is their catch-all.
+# dispatch, and only for a writer whose Files write the head. What the index misses (paths built from variables past
+# the first, a library a library loads) it does not claim, and neither does this arm: the floor is their catch-all.
 dp_lands_index_suites() {  # <root> <at> <Files, comma-joined> -> the suites reading them, by file name, sorted, one per line
-  declare -F reads_index >/dev/null 2>&1 \
+  declare -F reads_suites >/dev/null 2>&1 \
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
-  declare -F reads_index >/dev/null 2>&1 || return 0
-  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" -v root="$1" "$(_units_files_awk)"'
-    BEGIN { m = split(cell, e, ","); cell = ""; for (k = 1; k <= m; k++) { t = e[k]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (index(t, root "/") == 1) t = substr(t, length(root) + 2); cell = cell (k > 1 ? "," : "") t } }
-    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
-    | LC_ALL=C sort -u
+  declare -F reads_suites >/dev/null 2>&1 || return 0
+  reads_suites "$1" "$2" "$3"
 }
 _li_files="$(brief_field "$LIFTED" files)"
 if [ -n "$_lo_binds" ] && [ -n "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_li_files" ] \

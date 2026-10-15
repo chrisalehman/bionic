@@ -705,14 +705,29 @@ detect_legacy_skill_copy() {
 # The root is `BIONIC_ROOT` when a caller names one, else the working directory;
 # lib/checks.sh resolves a working directory to its project root first. The home
 # is the same `BIONIC_CLAUDE_HOME` seam every claude-home reader here uses.
+# THE PROJECT TRANSCRIPT DIRECTORY NAME (wave-37 T5; D9, ADR-058). The CLI keeps a project's
+# sessions and memory under `<config>/projects/<name>/`, the name being the directory's PHYSICAL
+# path with every character outside [a-zA-Z0-9] turned to `-` (measured: /Users/admin/workspace/
+# personal/bionic is `-Users-admin-workspace-personal-bionic`, and `/.` becomes `--`). One function,
+# three callers: `detect_auto_memory` below, hooks/stop-orders.sh `own_transcript` and lib/said.sh
+# `_said_transcript`, where the name is a trust input (a session's words count only under this
+# project's own name). The name is not one-to-one (`/a/b-c` and `/a-b/c` meet, `bionic2` extends
+# `bionic`), so a caller compares it by equality, never as a prefix. A path that cannot be entered
+# is named as written. tests/cross-gate-agreement.test.sh §SLUG pins the one encoder.
+project_slug() {  # <path> -> the directory name on stdout; exit 1 for no path
+  local p="${1:-}" phys
+  [ -n "$p" ] || return 1
+  phys="$(cd "$p" 2>/dev/null && pwd -P)" || phys=""
+  [ -n "$phys" ] || phys="$p"
+  printf '%s' "$phys" | sed 's/[^a-zA-Z0-9]/-/g'
+}
+
 DETECT_AUTO_MEMORY_KEY='CLAUDE_CODE_DISABLE_AUTO_MEMORY'
 
 detect_auto_memory() {
-  local home root phys slug rel f v override=none dir=none n=0 m val
+  local home root slug rel f v override=none dir=none n=0 m val
   home="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
   root="${BIONIC_ROOT:-$PWD}"
-  phys="$(cd "$root" 2>/dev/null && pwd -P)" || phys=""
-  [ -n "$phys" ] || phys="$root"
 
   for rel in .claude/settings.local.json .claude/settings.json; do
     f="${root}/${rel}"
@@ -745,7 +760,7 @@ detect_auto_memory() {
     break
   done
 
-  slug="$(printf '%s' "$phys" | sed 's/[^a-zA-Z0-9]/-/g')"
+  slug="$(project_slug "$root")"
   if [ -d "${home}/projects/${slug}/memory" ]; then
     dir="${home}/projects/${slug}/memory"
     for m in "$dir"/*; do

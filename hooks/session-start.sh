@@ -236,6 +236,7 @@ TMP="$BIONIC_ROOT/.bionic/tmp"
 #     root=<CLAUDE_PLUGIN_ROOT, physical>
 #     commit=<HEAD>                      only when the root is a checkout of the plugin
 #     started=<ISO-8601 UTC>
+#     cwd=<the start directory, physical> (wave-37 T5; D9) the name its transcript is filed under
 #     <sha256> <path under root>         one line per hooks/hooks.json, skills/**/*.md,
 #                                        agents/**/*.md, commands/*.md
 #
@@ -252,7 +253,7 @@ TMP="$BIONIC_ROOT/.bionic/tmp"
 # path is replaced, never written through, and a reader never sees half a record.
 # Fails open like everything here: any step that cannot be done writes nothing.
 ss_load_record() {
-  local root top commit="" rec tmpf f
+  local root top commit="" rec tmpf f cwd
   local -a files=()
   [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "${BIONIC_SID:-}" ] || return 0
   root="$(cd "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || return 0
@@ -271,12 +272,19 @@ $(cd "$root" 2>/dev/null && {
     [ -d commands ] && find -L commands -maxdepth 1 -type f -name '*.md' 2>/dev/null
   } | LC_ALL=C sort)
 SS_LOADED_FILES
+  # THE START CWD (wave-37 T5; D9, ADR-058): the physical directory the session started in, which
+  # names the directory the CLI files its transcript under (lib/detect.sh `project_slug`). A session
+  # started in a subdirectory or a worktree files it under a name other than the root's, and the words
+  # reader (lib/said.sh) looks under this one too. After started=, so a header reader that stops at a
+  # key it does not know (close-out.sh) has read root=, commit= and started= first.
+  cwd="$(cd "${BIONIC_CWD:-$PWD}" 2>/dev/null && pwd -P)" || cwd=""
   rec="$TMP/loaded-$BIONIC_SID.state"
   tmpf="$TMP/.loaded-$BIONIC_SID.$$"
   {
     printf 'root=%s\n' "$root"
     [ -n "$commit" ] && printf 'commit=%s\n' "$commit"
     printf 'started=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    [ -n "$cwd" ] && printf 'cwd=%s\n' "$cwd"
     if [ "${#files[@]}" -gt 0 ]; then
       ( cd "$root" && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -- "${files[@]}"; else sha256sum -- "${files[@]}"; fi ) 2>/dev/null \
         | while read -r h p; do printf '%s %s\n' "$h" "$p"; done

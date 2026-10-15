@@ -983,14 +983,20 @@ tick_digest_field() {  # <digest file> <key>
 # copy of it. The ledger is the Patrol's measure: did the scheduler keep every slot busy.
 #
 # THE PATH IS DERIVED, NOT CONFIGURED: `<docs-root>/record/<plan slug>/fill-ledger.log`, the
-# slug being the plan's basename less `.plan.md` — exactly how close-out.sh derives a run's
-# record directory, so no new plan key exists to drift. `.bionic/` is machine-local, so the
-# ledger is too, like every record.
+# slug being the plan's basename less `.plan.md` — lib/proof.sh `proof_plan_slug`, the one reader
+# close-out.sh and every other record path asks (wave-37 T2; AC-9.2), so no new plan key exists to
+# drift. `.bionic/` is machine-local, so the ledger is too, like every record. proof.sh is loaded
+# on first use, not at source time: most of this file's callers never name a ledger.
+_patrol_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
+  declare -F proof_plan_slug >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
+  declare -F proof_plan_slug >/dev/null 2>&1
+}
 fill_ledger_path() {  # <project root> <plan path> -> the ledger's absolute path
   local root="${1:-}" plan="${2:-}" slug
   [ -n "$root" ] && [ -n "$plan" ] || return 1
-  slug="${plan##*/}"; slug="${slug%.plan.md}"
-  [ -n "$slug" ] || return 1
+  _patrol_proof_load && slug="$(proof_plan_slug "$plan")" || return 1
   printf '%s/record/%s/fill-ledger.log\n' "$(docs_root "$root")" "$slug"
 }
 

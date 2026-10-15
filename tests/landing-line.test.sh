@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -875,7 +875,8 @@ expect_eq "(a3) …and only T2 is published" "T2" "$(ll_ev "$RA" published | sed
 RA2="$(ll_ahead_world m)"
 ll_verb_bg "$RA2" T1 "$WORLD_ROOT/m-T1.out"
 ll_wait_lines "$LL_SIG/m-T1.runs" 1
-LL_MUTANT='s/_line_replaced "\$2" "\$1" "\$3" "\$5"/false/' LL_MUTANT_FN=_line_prove ll_drive "$RA2" T2 "$WORLD_ROOT/m-T2.out"
+# The watch over every live runner is the drain's (wave-37 T1; D3): `_line_drain_next` starts and watches them.
+LL_MUTANT='s/_line_replaced "\$2" "\$1" "\$3" "\$5"/false/' LL_MUTANT_FN=_line_drain_next ll_drive "$RA2" T2 "$WORLD_ROOT/m-T2.out"
 expect_true "(a4m-pre) the mutant ran: T2's first run started" ll_wait_lines "$LL_SIG/m-T2.runs" 1
 touch "$LL_SIG/m-T1.go"; ll_wait_file "$WORLD_ROOT/m-T1.out.rc" 300
 sleep 3
@@ -1952,5 +1953,128 @@ expect_contains "(pa6b) …its verdict filed under the declared path" "|suite=sc
 expect_eq "(pa6c) …saying DEBT for the declared suite, once" "1" "$(printf '%s\n' "$LL_OUT" | grep -c '^DEBT T1 x.test.sh ')"
 expect_eq "(pa6d) …and the gate's reader of the bound plan deals the debt" "debt	x.test.sh	T9" \
   "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$PF")" | cut -f1-3)"
+
+# ---------------------------------------------------------------------------
+section "§DRAIN: a landing drains its suites at most J at once, J the floor's width rule; one tree per candidate, the red judge in another (wave-37 T1; D3, REQ-1 AC-1.1)"
+#
+# The fixture rung: share 80 on 3 cores is room 2.4, so gate_width is 2 and, on a clear machine,
+# pressure_level answers 2: J=2. The branch carries four suites. `a` fails one planted line on the
+# candidate and at the accepted head alike (a standing red, judged by a run at the head); `b`, `c`
+# and `d` each write `start <HEAD> <tree>`, wait for their go file, write `end <HEAD> <tree>` and end
+# green. T1 adds a file of its own and lands on all four. The landing tree's points are read by a spy
+# over `landing_tree_point` (the anchor below), so "pointed once" is counted, not inferred.
+ll_drain_body() {  # <tag> <name> — start, ll_block_body's wait for <tag>-<name>.go (30 s at most), end; green
+  printf 'echo "start $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-%s.runs"\n%s\necho "end $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-%s.runs"\necho "PASS: %s"; echo; echo "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"; exit 0\n' \
+    "$1" "$2" "$(ll_block_body "$1-$2" "$2" green | sed -n 2p)" "$1" "$2" "$2" "$2"
+}
+ll_drain_world() {  # <tag> -> root; T1 lands on a b c d, all four carried by the branch
+  local r s
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T1 'a b c d'
+  printf '#!/bin/bash\necho "run $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-a.runs"\necho "FAIL: a planted red"\necho; echo "a.test.sh: 0/1 passed, 1 failed  sections=1 setup=0"; exit 1\n' \
+    "$1" > "$r/tests/a.test.sh"
+  for s in b c d; do printf '#!/bin/bash\n%s' "$(ll_drain_body "$1" "$s")" > "$r/tests/$s.test.sh"; done
+  git -C "$r" add tests && git -C "$r" commit -qm "the branch's four suites" || return 1
+  printf 'T1 adds this\n' > "$r/.worktrees/T1/drain.txt"
+  git -C "$r/.worktrees/T1" add drain.txt && git -C "$r/.worktrees/T1" commit -qm "T1: a file of its own" || return 1
+  printf '%s' "$r"
+}
+ll_live_landings() {  # -> the keys of the landing requests admitted and not ended, sorted
+  local f
+  for f in "$BIONIC_GATE_DIR"/requests/*; do
+    grep -q '^admitted=' "$f" && ! grep -q '^ended=' "$f" && grep -q '^kind=landing$' "$f" && sed -n 's/^key=//p' "$f"
+  done | sort | tr '\n' ' ' | sed 's/ $//'
+}
+ll_widths() {  # <root> <commit> -> `suite:result:width` of each verdict on <commit>, in record order
+  ll_ev "$1" verdict | grep -F "|commit=$2|" | while IFS= read -r v; do
+    printf '%s:%s:%s ' "$(ll_field "$v" suite)" "$(ll_field "$v" result)" "$(ll_field "$v" width)"
+  done | sed 's/ $//'
+}
+world_machine 3 8192 40 0.5
+RDR="$(ll_drain_world d)"; HDR="$(ll_head "$RDR")"
+# THE SPY IS NO MUTATION, so it is no shaped anchor: framework §21 checks this suite's anchors on a copy
+# that holds line.sh and not worktree.sh. Its precondition is the row below, and (dr4)'s first row.
+DR_SPY='s/local t="/echo "$1 $2" >> "$LL_SIG\/d.points"; local t="/'
+expect_contains "(dr0-pre) the spy is in landing_tree_point as the driver defines it" 'echo "$1 $2" >> "$LL_SIG/d.points"; local t=' \
+  "$(declare -f landing_tree_point | sed "$DR_SPY")"
+LL_MUTANT="$DR_SPY" LL_MUTANT_FN=landing_tree_point ll_drive "$RDR" T1 "$WORLD_ROOT/d.out"; DR_BG=$!
+expect_true "(dr1-pre) a ran and was judged, and c started while b waits" ll_wait_lines "$LL_SIG/d-c.runs" 1 300
+expect_eq "(dr1) two runner jobs live at once: b's and c's landings admitted, neither ended" "b.test.sh c.test.sh" "$(ll_live_landings)"
+expect_eq "(dr1) …and no third asked while two run (J=2): b and c started once each, d not at all" "1 1 0" \
+  "$(ll_lines "$LL_SIG/d-b.runs") $(ll_lines "$LL_SIG/d-c.runs") $(ll_lines "$LL_SIG/d-d.runs")"
+touch "$LL_SIG/d-b.go" "$LL_SIG/d-c.go" "$LL_SIG/d-d.go"
+ll_wait_file "$WORLD_ROOT/d.out.rc" 600 || ll_kill_bg "$DR_BG"
+KDR="$(ll_last_cand "$RDR" T1)"
+expect_nonempty "(dr2-pre) a candidate was built" "$KDR"
+expect_eq "(dr2) the row lands: exit 0, the branch at its candidate" "0 $KDR" "$(cat "$WORLD_ROOT/d.out.rc" 2>/dev/null) $(ll_head "$RDR")"
+expect_eq "(dr2) …four verdicts on the candidate, in the order named, each with width=2" \
+  "a.test.sh:red:2 b.test.sh:green:2 c.test.sh:green:2 d.test.sh:green:2" "$(ll_widths "$RDR" "$KDR")"
+expect_eq "(dr2) …and the judge's run at the head writes its verdict with width=2 too" "a.test.sh:red:2" "$(ll_widths "$RDR" "$HDR")"
+expect_eq "(dr3) every run of b, c and d started and ended on the candidate" "6 6" \
+  "$(cat "$LL_SIG"/d-[bcd].runs 2>/dev/null | awk 'END { print NR }') $(cat "$LL_SIG"/d-[bcd].runs 2>/dev/null | awk -v k="$KDR" '$2 == k { n++ } END { print n + 0 }')"
+DR_LT="$(awk 'NR == 1 { print $3 }' "$LL_SIG/d-b.runs" 2>/dev/null)"
+expect_eq "(dr3) …all in one landing tree" "6" "$(cat "$LL_SIG"/d-[bcd].runs 2>/dev/null | awk -v t="$DR_LT" '$3 == t { n++ } END { print n + 0 }')"
+expect_eq "(dr4) the spy saw the candidate built in that tree (its base pointed once)" "1" \
+  "$(awk -v t="$DR_LT" -v h="$HDR" '$1 == t && $2 == h { n++ } END { print n + 0 }' "$LL_SIG/d.points" 2>/dev/null)"
+expect_eq "(dr4) …and that tree pointed at the candidate exactly once" "1" \
+  "$(awk -v t="$DR_LT" -v k="$KDR" '$1 == t && $2 == k { n++ } END { print n + 0 }' "$LL_SIG/d.points" 2>/dev/null)"
+expect_eq "(dr4) …never at the head after it was built" "0" \
+  "$(awk -v t="$DR_LT" -v h="$HDR" '$1 == t { if (b) { if ($2 == h) n++ } else if ($2 == h) b = 1 } END { print n + 0 }' "$LL_SIG/d.points" 2>/dev/null)"
+expect_eq "(dr5) a ran twice: on the candidate in that tree, then at the head in another (tree n+1)" "$KDR yes|$HDR no" \
+  "$(awk -v t="$DR_LT" 'NR <= 2 { printf "%s%s %s", (NR > 1 ? "|" : ""), $2, ($3 == t ? "yes" : "no") }' "$LL_SIG/d-a.runs" 2>/dev/null)"
+# MUTANT: the judge re-points the candidate's tree at the head mid-drain (the hazard the drain retires).
+# b is still running in it, and c starts in it after: both run on the head while their verdicts name
+# the candidate.
+RDM="$(ll_drain_world dm)"; HDM="$(ll_head "$RDM")"
+anchor fn payload/scripts/lib/line.sh 'landing_tree_point "$jt" "$head"' _line_red_owner 'landing_tree_point "$_LINE_LT" "$head"'
+LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_red_owner ll_drive "$RDM" T1 "$WORLD_ROOT/dm.out"; DM_BG=$!
+ll_wait_lines "$LL_SIG/dm-c.runs" 1 300
+touch "$LL_SIG/dm-b.go" "$LL_SIG/dm-c.go" "$LL_SIG/dm-d.go"
+ll_wait_file "$WORLD_ROOT/dm.out.rc" 600 || ll_kill_bg "$DM_BG"
+KDM="$(ll_last_cand "$RDM" T1)"
+expect_eq "(dr6m-pre) the mutant ran: a was judged at the head" "$HDM" "$(awk 'NR == 2 { print $2 }' "$LL_SIG/dm-a.runs" 2>/dev/null)"
+expect_true "(dr6m) MUTANT the candidate's tree re-pointed mid-drain: a sibling ran on the head, its verdict on the candidate (the rows can fail)" \
+  test "$(cat "$LL_SIG"/dm-[bcd].runs 2>/dev/null | awk -v h="$HDM" '$2 == h { n++ } END { print n + 0 }')" -ge 1
+world_machine 8 8192 40 0.5
+
+# ---------------------------------------------------------------------------
+section "§GRAMMAR: a verdict's width= goes after log=, so every positional reader reads it (wave-37 T1; D3, AC-3.2; ownership row 'the landing record grammar')"
+#
+# `line/v1|ev=verdict|row=<row>|commit=<candidate>|suite=<suite>|result=<result>|log=<log>|width=<J>|at=<UTC>`.
+# The readers that read by position (`_line_proved`, `_line_red_log`, `_line_none_logs`,
+# `_line_head_verdict`, `_line_declared`) read $2..$7; `_line_fold` and the landing report read by key.
+# One writer, `_line_verdict_put`, writes every verdict line a landing writes.
+RGR="$(ll_world)"; PGR="$(ll_plan "$RGR")"; RECGR="$(ll_rec "$RGR")"; KGR="$(ll_head "$RGR")"
+# The ready names the row's own commit: a commit the head already holds would be counted published by git.
+line_event "$PGR" ready row=T1 name=wx-T1 "commit=$(git -C "$RGR/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
+  debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
+ll_grammar_put() {  # <plan> — three verdicts by the writer, J=2
+  LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" a.test.sh green /logs/a.log \
+    && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" b.test.sh red /logs/b.log \
+    && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" c.test.sh none /logs/c.log
+}
+ll_grammar_read() {  # <record> -> every positional reader's answer, one line
+  printf '%s|%s|%s|%s|%s' "$(_line_proved "$1" T1 "$KGR" a.test.sh && echo proved)" "$(_line_red_log "$1" T1 "$KGR" b.test.sh)" \
+    "$(_line_none_logs "$1" T1 "$KGR" c.test.sh)" "$(_line_head_verdict "$1" "$KGR" b.test.sh | tr '\t' ' ')" "$(_line_declared "$1" T1 "$KGR")"
+}
+ll_grammar_put "$PGR"
+expect_regex "(g1) the writer puts width= after log=, and at= last" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|width=2\\|at=[0-9T:-]+Z$" \
+  "$(ll_ev "$RGR" verdict)"
+expect_eq "(g2) every positional reader reads it: green proved, the red's log, the none's log, the head's verdict, the declared debt" \
+  "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$(ll_grammar_read "$RECGR")"
+line_event "$PGR" candidate row=T1 "base=$KGR" "commit=$KGR" tree=/t >/dev/null
+LINE_WIDTH=2 _line_verdict_put "$PGR" T1 "$KGR" c.test.sh green /logs/c-2.log
+expect_eq "(g3) the fold reads them by key: a and c green, b the declared debt's red, so the entry is declared" "T1 declared" \
+  "$(line_state "$PGR" | awk -F'\t' '$1 == "T1" { print $1, $7 }')"
+# MUTANT: the field placed before log=. The positional readers then read width= as the log.
+RGM="$(ll_world)"; PGM="$(ll_plan "$RGM")"
+line_event "$PGM" ready row=T1 name=wx-T1 "commit=$(git -C "$RGM/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
+  debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
+anchor fn payload/scripts/lib/line.sh '"log=$6" "width=${LINE_WIDTH:-1}"' _line_verdict_put '"width=${LINE_WIDTH:-1}" "log=$6"'
+GM_READ="$( eval "$(declare -f _line_verdict_put | sed "$ANCHOR_SED")"; ll_grammar_put "$PGM"; ll_grammar_read "$(ll_rec "$RGM")" )"
+expect_contains "(g4m-pre) the mutant wrote: width= before log=" "|result=red|width=2|log=/logs/b.log|" "$(ll_ev "$RGM" verdict)"
+expect_true "(g4m) MUTANT width= before log=: the positional readers read another answer (the rows can fail)" \
+  test "$GM_READ" != "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh"
 
 finish

@@ -821,7 +821,8 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
   local c rc s said anchored=""
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
-  trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"' EXIT
+  _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
+  trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
   _line_me
   line_event "$plan" ready "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
     "suites=${suites}" "debt=${debt}" "carrier=${LINE_ME}" >/dev/null \
@@ -878,52 +879,67 @@ EOF
         *) _wt_refuse "anchors-unreadable row=${row} — ${c:-the check printed nothing}"; return 2 ;;
       esac
     fi
-    # 3. THE PROOF: each named suite not yet green on this candidate, in the order named. A suite
-    # already red on it is not run again: its red is judged again from its log (below).
+    # 3. THE PROOF, A DRAIN (wave-37 T1; D3, AC-1.1): each named suite not yet green on this candidate, at
+    # most J runners at once, J the floor's width rule (`_line_width`) read once a pass; each runner files its
+    # own `landing` ask, and the next is asked as one ends. The results are taken in the order named, so the
+    # record reads as a serial landing's. A suite already red on it is not run again: its red is judged again
+    # from its log (below), in its turn. A suite asked twice with no verdict since the entry's ready stalls
+    # the entry before anything starts (D8, AC-9.1, AC-9.2): the second time, it is put to the orchestrator
+    # with both logs.
+    LINE_WIDTH="$(_line_width)"; _LINE_REPASS=""
+    _line_drain_init
     for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
       [ "$s" != none ] || break
       _line_proved "$rec" "$row" "$cand" "$s" && continue
-      [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
-      LINE_LOG="$(_line_red_log "$rec" "$row" "$cand" "$s")"
-      if [ -n "$LINE_LOG" ]; then
-        LINE_RESULT=judge
-      else
-        # Each run starts from the candidate, clean, in a landing tree this carrier holds (a carrier
-        # run again finds the candidate built by the one before it, and no tree yet).
-        landing_tree_point "$_LINE_LT" "$cand" || { _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${cand}"; return 2; }
-        _line_prove "$plan" "$rec" "$row" "$cand" "$cbase" "$_LINE_LT" "$s" "$deadline"
+      said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
+      if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
+        said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
+        line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
+        printf 'STALLED %s %s\n' "$row" "$said"; return 70
       fi
+      _line_drain_add "$s"
+    done
+    if [ "$_LINE_DN" -gt 0 ]; then
+      [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
+      # ONE TREE PER CANDIDATE, POINTED ONCE (D3): every run of the pass starts from the candidate, clean, in
+      # the landing tree this carrier holds; nothing points it again while a sibling runs on it (a carrier
+      # run again finds the candidate built by the one before it, and no tree yet).
+      landing_tree_point "$_LINE_LT" "$cand" || { _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${cand}"; return 2; }
+    fi
+    while _line_drain_next "$plan" "$rec" "$row" "$cand" "$cbase" "$_LINE_LT" "$deadline"; do
+      s="$LINE_SUITE"
       case "$LINE_RESULT" in
-        green) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=green "log=${LINE_LOG}" >/dev/null
+        green) _line_verdict_put "$plan" "$row" "$cand" "$s" green "$LINE_LOG" >/dev/null
           continue ;;
-        waiting) _line_waiting "$row" "$again"; return 75 ;;
-        replaced) continue 2 ;;
-        discarded) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=discarded "log=${LINE_LOG}" >/dev/null
+        waiting) _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
+          _line_waiting "$row" "$again"; return 75 ;;
+        # THE BASE REPLACED: every sibling is stopped with its suite (a run the gate had begun is discarded).
+        replaced) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
           continue 2 ;;
-        # NO VERDICT (D8, AC-9.1, AC-9.2): the entry keeps its place and the suite is asked again; the
-        # second time, the entry is stalled and put to the orchestrator with both logs.
-        none) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=none "log=${LINE_LOG}" >/dev/null
-          said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
-          if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
-            said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
-            line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
-            printf 'STALLED %s %s\n' "$row" "$said"; return 70
-          fi
+        # NO VERDICT (D8, AC-9.1): the entry keeps its place, every sibling ends with its verdict written, and
+        # the pass starts again, where the suite is asked again or the entry stalls.
+        none) _line_verdict_put "$plan" "$row" "$cand" "$s" none "$LINE_LOG" >/dev/null
+          _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
           continue 2 ;;
-        red) line_event "$plan" verdict "row=${row}" "commit=${cand}" "suite=${s}" result=red "log=${LINE_LOG}" >/dev/null ;;
+        red) _line_verdict_put "$plan" "$row" "$cand" "$s" red "$LINE_LOG" >/dev/null ;;
         judge) : ;;
-        *) _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
+        *) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
+          _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
       esac
       # A RED IS THE ROW'S ONLY WHEN IT IS NEW (D8, AC-9.3, AC-9.4): the declared debt suite's red, and a
       # red whose failing lines all fail at the accepted head too, count for this row as passed.
       c="$LINE_LOG"
       _line_red_owner "$plan" "$rec" "$row" "$cbase" "$s" "$c" "$debt" "$deadline" "$cand"
       case "$LINE_RED" in
-        declared|standing) : ;;
-        waiting) _line_waiting "$row" "$again"; return 75 ;;
-        replaced) continue 2 ;;
-        gate) _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
-        *) line_event "$plan" returned "row=${row}" why=red "detail=${c}" >/dev/null
+        declared|standing) [ -z "$_LINE_REPASS" ] || continue 2 ;;
+        waiting) _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
+          _line_waiting "$row" "$again"; return 75 ;;
+        replaced) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
+          continue 2 ;;
+        gate) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
+          _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
+        *) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
+           line_event "$plan" returned "row=${row}" why=red "detail=${c}" >/dev/null
            printf 'RED %s %s %s\n' "$row" "$s" "$c"; return 1 ;;
       esac
     done
@@ -1018,7 +1034,7 @@ _line_red_log() {  # <rec> <row> <candidate> <suite>
 # landing reports, one `STANDING <row> <suite> cause=environment against=<run> log=<head's log>` line; the
 # floor judge does not count it as the suite's state (lib/proof.sh `_proof_records`).
 _line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <debt> <deadline> <candidate>
-  local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl="" cause against
+  local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl="" cause against jt
   if [ "${s##*/}" = "$7" ]; then LINE_RED=declared; return 0; fi
   LINE_RED=row
   head="$(line_head "$plan")" || return 0
@@ -1026,12 +1042,22 @@ _line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <deb
 $(_line_head_verdict "$rec" "$head" "$s")
 EOT
   if [ -z "$hr" ]; then
-    landing_tree_point "$_LINE_LT" "$head" || { LINE_RED=gate; LINE_LOG="landing-tree-unpointable tree=${_LINE_LT} base=${head}"; return 0; }
-    _line_prove "$plan" "$rec" "$row" "$head" "$4" "$_LINE_LT" "$s" "$8"
+    # THE JUDGE'S TREE (wave-37 T1; D3): the run at the head never points the candidate's tree elsewhere,
+    # where siblings of the drain may still run. It takes a tree of its own (`landing_tree_take` hands out
+    # tree n+1), held until the carrier ends. Refused one, it lets every sibling end first and runs in the
+    # candidate's tree, and the pass starts again, pointing that tree at the candidate (_LINE_REPASS).
+    [ -n "$_LINE_JT" ] || _LINE_JT="$(landing_tree_take "$(_line_root "$plan")")" || _LINE_JT=""
+    jt="$_LINE_JT"
+    if [ -z "$jt" ]; then
+      _line_drain_stop await "$plan" "$rec" "$row" "${9:-}" "$4"
+      jt="$_LINE_LT"; _LINE_REPASS=1
+    fi
+    landing_tree_point "$jt" "$head" || { LINE_RED=gate; LINE_LOG="landing-tree-unpointable tree=${jt} base=${head}"; return 0; }
+    _line_prove "$plan" "$rec" "$row" "$head" "$4" "$jt" "$s" "$8"
     case "$LINE_RESULT" in
-      green|red|none) line_event "$plan" verdict "row=${row}" "commit=${head}" "suite=${s}" "result=${LINE_RESULT}" "log=${LINE_LOG}" >/dev/null
+      green|red|none) _line_verdict_put "$plan" "$row" "$head" "$s" "$LINE_RESULT" "$LINE_LOG" >/dev/null
         hr="$LINE_RESULT"; hl="$LINE_LOG" ;;
-      discarded) line_event "$plan" verdict "row=${row}" "commit=${head}" "suite=${s}" result=discarded "log=${LINE_LOG}" >/dev/null
+      discarded) _line_verdict_put "$plan" "$row" "$head" "$s" discarded "$LINE_LOG" >/dev/null
         LINE_RED=replaced; return 0 ;;
       *) LINE_RED="$LINE_RESULT"; return 0 ;;
     esac
@@ -1175,32 +1201,151 @@ _line_kill_tree() {  # <pid>
 # it: when the carrier stops a run whose base was replaced, the runner and its suite are killed, the
 # gate counts the request killed and learns no cost from it. While a run lasts the carrier watches
 # the fold. Sets LINE_RESULT (green | red | none | discarded | replaced | waiting | gate) and LINE_LOG.
+# The drain (`_line_drain_next`) starts and ends its runners with the same three pieces; this one runs
+# the red judge's suite at the head, alone.
 _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite> <deadline>
-  local within="" res rp r
-  LINE_RESULT=""; LINE_LOG="$(_line_suite_log "$2" "$3" "$7" "$4")"
-  if [ -n "$8" ]; then within="$(_line_time_for "${7##*/}" "$8" "$6")" || { LINE_RESULT=waiting; return 0; }; fi
-  res="${LINE_LOG%.log}.run"; : > "$res"
-  # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
-  # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).
-  bionic_job bash -c '. "$1/line.sh" && _line_load_gate && shift && _line_runner "$@"' _ \
-    "$_LINE_LIB_DIR" "$7" "$within" "$6" "$LINE_LOG" "$res" "${LINE_ME%%:*}"
-  rp="$BIONIC_JOB_PID"
+  local rp res
+  _line_prove_start "$2" "$3" "$4" "$6" "$7" "$8"
+  [ -z "$LINE_RESULT" ] || return 0
+  rp="$LINE_RP"; res="$LINE_RES"
   while kill -0 "$rp" 2>/dev/null; do
     if _line_replaced "$2" "$1" "$3" "$5"; then
-      _line_kill_tree "$rp"; wait "$rp" 2>/dev/null
-      if grep -q '^admitted=' "$res" 2>/dev/null; then LINE_RESULT=discarded; else LINE_RESULT=replaced; fi
-      rm -f "$res"; return 0
+      _line_prove_kill "$rp" "$res"; return 0
     fi
     sleep "$LINE_POLL"
   done
   wait "$rp" 2>/dev/null
-  r="$(sed -n 's/^gate=//p' "$res" 2>/dev/null)"
+  _line_prove_end "$res"
+}
+# ONE RUNNER STARTED on <tree> (wave-37 T1): sets LINE_LOG, LINE_RES (the runner's result file) and LINE_RP
+# (its pid); LINE_RESULT=waiting, and nothing started, when the suite's promised seconds are not left
+# (`_line_time_for`, D3), which is checked before each runner is asked.
+_line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
+  local within=""
+  LINE_RESULT=""; LINE_RP=""; LINE_RES=""; LINE_LOG="$(_line_suite_log "$1" "$2" "$5" "$3")"
+  if [ -n "$6" ]; then within="$(_line_time_for "${5##*/}" "$6" "$4")" || { LINE_RESULT=waiting; return 0; }; fi
+  # THE LOG CLAIMED BEFORE THE RUNNER STARTS: a sibling started next (the same suite named twice, by path
+  # and by name) is then given the next free path, never this one.
+  : > "$LINE_LOG"; LINE_RES="${LINE_LOG%.log}.run"; : > "$LINE_RES"
+  # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
+  # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).
+  bionic_job bash -c '. "$1/line.sh" && _line_load_gate && shift && _line_runner "$@"' _ \
+    "$_LINE_LIB_DIR" "$5" "$within" "$4" "$LINE_LOG" "$LINE_RES" "${LINE_ME%%:*}"
+  LINE_RP="$BIONIC_JOB_PID"
+}
+# An ended runner's result, LINE_LOG its log: LINE_RESULT green | red | none by `_line_verdict`, or waiting |
+# gate when the gate did not admit it (LINE_LOG then says why). Its result file is removed.
+_line_prove_end() {  # <result file>
+  local r
+  r="$(sed -n 's/^gate=//p' "$1" 2>/dev/null)"
   if [ -n "$r" ]; then
     if [ "$r" = 75 ]; then LINE_RESULT=waiting; else LINE_RESULT=gate; LINE_LOG="gate_ask rc ${r}"; fi
   else
-    LINE_RESULT="$(_line_verdict "$(sed -n 's/^rc=//p' "$res" 2>/dev/null)" "$LINE_LOG")"
+    LINE_RESULT="$(_line_verdict "$(sed -n 's/^rc=//p' "$1" 2>/dev/null)" "$LINE_LOG")"
   fi
-  rm -f "$res"
+  rm -f "$1"
+}
+# A runner stopped with its suite: LINE_RESULT discarded when the gate had admitted it (a run begun and
+# thrown away), replaced when it had not. Its result file is removed.
+_line_prove_kill() {  # <pid> <result file>
+  _line_kill_tree "$1"; wait "$1" 2>/dev/null
+  if grep -q '^admitted=' "$2" 2>/dev/null; then LINE_RESULT=discarded; else LINE_RESULT=replaced; fi
+  rm -f "$2"
+}
+
+# ---------------------------------------------------------------------------- the drain (wave-37 T1; D3)
+# THE DRAIN'S WIDTH (AC-3.2): the floor's rule, read by calling the two functions tests/run.sh's
+# `_runner_width` calls, `pressure_level` over `gate_width`; never a literal, and no knob of its own. An
+# answer that is no positive whole number is 1, the serial loop.
+_line_width() {
+  local j=""
+  _line_load_gate && j="$(pressure_level "$(gate_width)" 2>/dev/null)"
+  case "$j" in ''|*[!0-9]*|0) j=1 ;; esac
+  printf '%s\n' "$j"
+}
+# THE VERDICT LINE, the one writer of every verdict a landing writes (on the candidate and at the head):
+# `line/v1|ev=verdict|row=|commit=|suite=|result=|log=|width=<J>|at=`. The readers that read by position
+# (`_line_proved`, `_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`) read $2..$7,
+# so a field added to it goes after `log=`.
+_line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log>
+  line_event "$1" verdict "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "width=${LINE_WIDTH:-1}"
+}
+# THE PASS'S SUITES, in the order named. For each: its suite (_LINE_DS), its runner's pid (_LINE_DP: empty
+# until started, `-` for a red judged from its log), result file (_LINE_DR) and log (_LINE_DL). _LINE_DK is
+# the next to start, _LINE_DH the next to take, _LINE_DN how many (bash 3.2: indexed arrays only).
+_line_drain_init() {
+  _LINE_DS=(); _LINE_DP=(); _LINE_DR=(); _LINE_DL=(); _LINE_DH=0; _LINE_DK=0; _LINE_DN=0
+}
+_line_drain_add() {  # <suite>
+  _LINE_DS[$_LINE_DN]="$1"; _LINE_DP[$_LINE_DN]=""; _LINE_DR[$_LINE_DN]=""; _LINE_DL[$_LINE_DN]=""
+  _LINE_DN=$((_LINE_DN + 1))
+}
+_line_drain_ended() {  # <i> -> 0 once that runner has ended: its result written, or its process gone
+  grep -qE '^(rc|gate)=' "${_LINE_DR[$1]}" 2>/dev/null && return 0
+  ! kill -0 "${_LINE_DP[$1]}" 2>/dev/null
+}
+_line_drain_live() {  # -> how many of the pass's runners have started and not ended
+  local i="$_LINE_DH" n=0
+  while [ "$i" -lt "$_LINE_DK" ]; do
+    case "${_LINE_DP[$i]}" in ''|-) ;; *) _line_drain_ended "$i" || n=$((n + 1)) ;; esac
+    i=$((i + 1))
+  done
+  printf '%s' "$n"
+}
+# THE NEXT RESULT: starts runners while fewer than LINE_WIDTH run, then gives the first suite named whose
+# run has ended. Sets LINE_SUITE, LINE_RESULT and LINE_LOG as `_line_prove` does (judge for a red already
+# on the candidate; waiting, nothing started, for a suite whose time is not left); replaced, when the
+# entry's base moves while its runners run (the watch covers every one of them). rc 1 once all are taken.
+_line_drain_next() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <deadline>
+  local i p
+  while :; do
+    while [ "$_LINE_DK" -lt "$_LINE_DN" ] && [ "$(_line_drain_live)" -lt "${LINE_WIDTH:-1}" ]; do
+      i="$_LINE_DK"; _LINE_DK=$((i + 1))
+      _LINE_DL[$i]="$(_line_red_log "$2" "$3" "$4" "${_LINE_DS[$i]}")"
+      if [ -n "${_LINE_DL[$i]}" ]; then _LINE_DP[$i]=-; continue; fi
+      _line_prove_start "$2" "$3" "$4" "$6" "${_LINE_DS[$i]}" "$7"
+      if [ "$LINE_RESULT" = waiting ]; then LINE_SUITE="${_LINE_DS[$i]}"; return 0; fi
+      _LINE_DP[$i]="$LINE_RP"; _LINE_DR[$i]="$LINE_RES"; _LINE_DL[$i]="$LINE_LOG"
+    done
+    [ "$_LINE_DH" -lt "$_LINE_DK" ] || return 1
+    i="$_LINE_DH"; p="${_LINE_DP[$i]}"
+    LINE_SUITE="${_LINE_DS[$i]}"; LINE_LOG="${_LINE_DL[$i]}"
+    if [ "$p" = - ]; then _LINE_DH=$((i + 1)); LINE_RESULT=judge; return 0; fi
+    if _line_drain_ended "$i"; then
+      wait "$p" 2>/dev/null; _LINE_DH=$((i + 1))
+      _line_prove_end "${_LINE_DR[$i]}"; return 0
+    fi
+    if _line_replaced "$2" "$1" "$3" "$5"; then LINE_RESULT=replaced; return 0; fi
+    sleep "$LINE_POLL"
+  done
+}
+# THE DRAIN STOPPED: nothing more is asked. `await` lets each runner started and not yet taken end, and
+# writes its verdict, in the order named; `kill` does the same for a runner already ended and stops every
+# other with its suite, a run the gate had begun written `discarded`, as a replaced base's run always was.
+# An await whose base moves under it kills what is left. The next pass reads the record again: a red
+# written here is judged from its log, a none is asked again or stalls the entry.
+_line_drain_stop() {  # kill|await <plan> <rec> <row> <candidate> <cbase>
+  local how="$1" i p
+  i="$_LINE_DH"
+  while [ "$i" -lt "$_LINE_DK" ]; do
+    p="${_LINE_DP[$i]}"
+    case "$p" in ''|-) i=$((i + 1)); continue ;; esac
+    while [ "$how" = await ] && ! _line_drain_ended "$i"; do
+      if _line_replaced "$3" "$2" "$4" "$6"; then how=kill; break; fi
+      sleep "$LINE_POLL"
+    done
+    LINE_LOG="${_LINE_DL[$i]}"
+    if _line_drain_ended "$i"; then
+      wait "$p" 2>/dev/null; _line_prove_end "${_LINE_DR[$i]}"
+    else
+      _line_prove_kill "$p" "${_LINE_DR[$i]}"
+    fi
+    case "$LINE_RESULT" in
+      green|red|none|discarded) _line_verdict_put "$2" "$4" "$5" "${_LINE_DS[$i]}" "$LINE_RESULT" "$LINE_LOG" >/dev/null ;;
+    esac
+    i=$((i + 1))
+  done
+  _LINE_DH="$_LINE_DN"; _LINE_DK="$_LINE_DN"
 }
 # WHERE A SUITE LIVES (wave-34 T7; D23, AC-14.4). A path-qualified suite is run at exactly the path declared
 # (wave-34 T27; critic S2): never a same-named file elsewhere, and a path the tree lacks cannot start, so it

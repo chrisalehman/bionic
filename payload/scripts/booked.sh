@@ -774,6 +774,34 @@ booked_run_open() {  # at the start of the tail, in the detached side
     "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || BOOKED_ROSTER=""
 }
 
+# booked_run_line <rc> — THE RUN, RECORDED WHERE A FLOOR PROOF LOOKS (wave-37 T4; D7, REQ-6 AC-6.1; ADR-057): after the
+# log's rc line and before `<log>.rc`, one line in the landing record of the plan this session is bound to (lib/run.sh
+# `session_plan`, the engaged marker's `plan=`, as every verb reads the binding; lib/line.sh `line_event`, through
+# `_wt_proofs_put`):
+#   line/v1|ev=run|log=<the log from the project root>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+# the head and dirty count the stamp read before anything ran, the hash through lib/detect.sh `_detect_sha256`.
+# lib/proof.sh `_proof_floor_match` reads it as it reads floor-run's. A run with no git head, no valid
+# CLAUDE_CODE_SESSION_ID or no bound plan writes nothing (A-T4-5): there is no plan whose proof could cite it.
+booked_run_line() {
+  local r sid="${CLAUDE_CODE_SESSION_ID:-}" plan sha
+  case "$stamp_head" in ''|*[!0-9a-f]*) return 0 ;; esac
+  [ "${#stamp_head}" -eq 40 ] || return 0
+  case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
+  r="$(booked_project_root)"
+  [ -n "$r" ] && [ -f "$run_log" ] || return 0
+  # shellcheck disable=SC1091
+  { declare -F session_plan >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/run.sh"; } >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC1091
+  { declare -F line_event >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/line.sh"; } >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC1091
+  { declare -F _detect_sha256 >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/detect.sh"; } >/dev/null 2>&1 || return 0
+  plan="$(session_plan "$r" "$sid" 2>/dev/null)" || return 0
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  sha="$(_detect_sha256 "$run_log")" || return 0
+  line_event "$plan" run "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" 2>/dev/null
+  return 0
+}
+
 booked_run_close() {  # <rc> — the exit trap of the detached side
   rm -f ${BOOKED_IDF:+"$BOOKED_IDF"}
   if [ -n "$BOOKED_ROSTER" ]; then
@@ -783,6 +811,7 @@ booked_run_close() {  # <rc> — the exit trap of the detached side
   # THE RC LINE IS A LINE OF ITS OWN: a command whose output ends without a newline would glue it.
   [ -z "$(tail -c 1 "$run_log" 2>/dev/null)" ] || printf '\n' >> "$run_log"
   printf 'rc=%s\n' "$1" >> "$run_log"
+  booked_run_line "$1"
   # THE END, FOR A READER: `<log>.rc`, written after the log's rc line and by nothing else, so a
   # waiter never mistakes a command's own `rc=<n>` output for the run's end.
   printf '%s\n' "$1" > "$run_log.rc"
