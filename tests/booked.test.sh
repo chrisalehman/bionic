@@ -384,4 +384,73 @@ expect_true "WL.3 the caller's group SIGKILLed mid-run, the run still ends its l
 expect_eq "WL.4 …and that line is the suite's own rc=0" "rc=0" "$(tail -n 1 "${WL_LOG:-$D/none}" 2>/dev/null)"
 expect_eq "WL.5 …and the suite ran once" "1" "$(wc -l < "$D/wl.count" 2>/dev/null | tr -d ' ')"
 
+# =====================================================================================
+section "§RUNLINE — the run close writes the run's line to the bound plan's landing record, and the floor's one reader reads it (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
+# =====================================================================================
+#
+# THE OTHER WRITER. floor-run is one (session-poker-4 §RUNLINE); booked.sh's run close is the other: a detached run
+# whose session is bound to a plan appends, after the log's rc line and before `<log>.rc`,
+#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+# to that plan's landing record. Its log lies under the project's .bionic/tmp/runs, so `log=` is the path from the
+# project root. ONE READER: lib/proof.sh `proof_attested floor` (what `proof-add floor` runs) reads booked's line as
+# it reads floor-run's: the log in place, and a byte copy of it under record/ (the only place proof-add cites from),
+# known by its hash. THE MUTANT: the reader with its hash comparison dropped accepts the log edited after its run.
+#
+# FIXTURE FIDELITY. A fresh world repository (the earlier sections dirtied T1 and emptied the engaged marker): its
+# plan bound to WORLD_SID, T1 clean. The command is SYNTHESIZED: it prints the floor grammar's header for the head it
+# stands on, a body, and exits 0, as a project's own runner run detached would.
+RL_WR="$(world_repo)"
+RL_T="$RL_WR/.worktrees/T1"
+RL_PLAN="$RL_WR/.bionic/docs/plans/epic-x/wave-x.plan.md"
+RL_RECORD="$RL_WR/.bionic/docs/record/wave-x/landing-proofs.log"
+RL_H="$(git -C "$RL_T" rev-parse HEAD 2>/dev/null)"
+RL_PROOF="$REPO/payload/scripts/lib/proof.sh"
+RL_ROOTS="$REPO/payload/scripts/lib/roots.sh"
+rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
+rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
+# rl_judge <proof.sh> <log> -> "<exit>|<what proof_attested floor printed>|<proof_floor_run's answer>"
+rl_judge() {
+  bash -c '. "$1" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "$5" "" "$6")"; r=$?
+    printf "%s|%s|%s" "$r" "$o" "$(proof_floor_run "$3" "$5" "$6" 2>/dev/null)"' \
+    _ "$RL_ROOTS" "$1" "$2" "$RL_T" "$RL_PLAN" "$RL_WR" 2>/dev/null
+}
+expect_eq "BR-0 precondition: T1 is clean at a 40-hex head, and the plan's record holds no run line" "|yes|0" \
+  "$(git -C "$RL_T" status --porcelain 2>/dev/null)|$(printf '%s' "$RL_H" | grep -qE '^[0-9a-f]{40}$' && echo yes)|$(rl_runs | awk 'END { print NR + 0 }')"
+
+RL_CMD="printf 'head=%s dirty=0\\n' \"\$(git rev-parse HEAD)\"; echo floor-body; exit 0"
+bk_caller rl "$RL_T" --detach --agent wx-T1 --suites rl.test.sh -- "$RL_CMD"
+bk_wait 10 bk_grep '^booked: started ' "$D/rl.out"
+RL_LOG="$(bk_started rl log)"
+expect_true "BR-1 the detached run ends: its log's last line is rc=0 and <log>.rc is written" \
+  bk_wait 20 test -s "${RL_LOG:-$D/none}.rc"
+bk_kill_group "$BK_PG"
+RL_SHA="$(rl_sha "${RL_LOG:-$D/none}")"
+expect_regex "BR-1b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
+expect_eq "BR-2 AC-6.1 the run close appends exactly one run line to the bound plan's landing record" "1" \
+  "$(rl_runs | awk 'END { print NR + 0 }')"
+expect_regex "BR-2b …in the grammar: the log from the project root, T1's head, dirty=0, rc=0, the log's sha256, when" \
+  "^line/v1[|]ev=run[|]log=${RL_LOG#"$RL_WR"/}[|]head=${RL_H}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "$(rl_runs | tail -n 1)"
+RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
+
+# ONE READER: the floor's judge reads booked's line, in place and as a copy under record/.
+expect_eq "BR-3 AC-6.2 the floor's one reader accepts booked's log by its run line, and names the run (at, head, rc)" \
+  "0|$RL_H|$RL_AT $RL_H 0" "$(rl_judge "$RL_PROOF" "$RL_LOG")"
+mkdir -p "${RL_RECORD%/*}"; cp "$RL_LOG" "${RL_RECORD%/*}/booked-floor.log"
+expect_eq "BR-4 …and a byte copy under record/, where proof-add cites from, is the same run by its hash" \
+  "0|$RL_H|$RL_AT $RL_H 0" "$(rl_judge "$RL_PROOF" "${RL_RECORD%/*}/booked-floor.log")"
+
+# THE HASH BINDS THE LOG: edited after its run, refused; the mutant that drops the comparison accepts it.
+sed 's/floor-body/floor-body-edited/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.tmp" "$RL_LOG"
+RL_EDIT="$(rl_judge "$RL_PROOF" "$RL_LOG")"
+expect_contains "BR-5 AC-6.1 the log edited after its run is refused (exit 1)…" "1|" "${RL_EDIT%%|*}|"
+expect_contains "BR-5b …naming the fact" "the log changed since its run" "$RL_EDIT"
+RL_MUT="$D/rl-mutlib"; rm -rf "$RL_MUT"; cp -R "$REPO/payload/scripts/lib" "$RL_MUT"
+sed 's/s == h \&\& fv("head")/fv("head")/' "$RL_PROOF" > "$RL_MUT/proof.sh"
+expect_false "BR-mut0 the mutant differs from the reader (its hash comparison dropped)" cmp -s "$RL_PROOF" "$RL_MUT/proof.sh"
+expect_eq "BR-mut1 …and still runs: it accepts the unedited copy as the reader does" \
+  "0|$RL_H|$RL_AT $RL_H 0" "$(rl_judge "$RL_MUT/proof.sh" "${RL_RECORD%/*}/booked-floor.log")"
+expect_eq "BR-mut2 MUTANT: a hash mismatch accepted — the edited log passes the mutant, which BR-5 refuses" \
+  "0|$RL_H" "$(rl_judge "$RL_MUT/proof.sh" "$RL_LOG" | cut -d'|' -f1-2)"
+
 finish
