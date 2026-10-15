@@ -3941,7 +3941,7 @@ poker_files_cell() {
   local id="$1" kind="$2" agent="$3" files="$4" repo="$5" plan="$6" fact cell_facts=""
   PFC_OUT="$files"; PFC_ART=""
   if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact "$id")" ]; then
-    PFC_ART="$(docs_root "$repo")/record/$(basename "$plan" .plan.md)/$id.md"
+    PFC_ART="$(docs_root "$repo")/record/$(proof_plan_slug "$plan")/$id.md"
     case "$PFC_ART" in "$repo"/*) PFC_ART="${PFC_ART#"$repo"/}" ;; esac
     case "$files" in ''|'—'|'-') PFC_OUT="$PFC_ART" ;; *) PFC_OUT="$files, $PFC_ART" ;; esac
   fi
@@ -6120,7 +6120,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # continuation (and a person).
 hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 ado=0 fix=0 pl
-  slug="${plan##*/}"; slug="${slug%.plan.md}"
+  slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ]; then
     read -r hand stp <<< "$(awk -F'|' '
       index($0, "line/v1|") == 1 {
@@ -6371,7 +6371,7 @@ case "$VERB" in
         exit 2
       fi
     fi
-    FR_SLUG="${FR_PLAN##*/}"; FR_SLUG="${FR_SLUG%.plan.md}"
+    FR_SLUG="$(proof_plan_slug "$FR_PLAN")"
     FR_OPEN=no
     run_open "$FR_PLAN" && FR_OPEN=yes
     FR_FILE="$(fill_ledger_path "$REPO_REAL" "$FR_PLAN")"
@@ -9127,7 +9127,7 @@ EOF
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
     # A hand landing's record carries no verdict, so it writes none. Same copy, same dry commit, same swap.
-    RL_SLUG="${PV_PLAN##*/}"; RL_SLUG="${RL_SLUG%.plan.md}"
+    RL_SLUG="$(proof_plan_slug "$PV_PLAN")"
     RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
       die "REFUSED — the evidence cells of the criteria $PV_ID serves cannot be written; the plan is unchanged."
@@ -9692,7 +9692,7 @@ EOF
     pv_file_open continuation-fill "$CF_FIELD=$CF_TEXT"
     CF_DOCS="$(docs_root "$PV_REPO")"
     case "$PV_RPLAN" in */plans/*) CF_DOCS="${PV_RPLAN%/plans/*}" ;; esac
-    CF_SLUG="${PV_RPLAN##*/}"; CF_SLUG="${CF_SLUG%.plan.md}"
+    CF_SLUG="$(proof_plan_slug "$PV_RPLAN")"
     CF_FILE="$CF_DOCS/record/$CF_SLUG/continuation.md"
     if [ ! -f "$CF_FILE" ] || [ -L "$CF_FILE" ]; then
       die "REFUSED — no continuation at $CF_FILE (close-out writes it at close); nothing was written."
@@ -9982,7 +9982,7 @@ $HO_AGENTS"; fi
     BRF_STATUS="$(units_field "$BRF_ROW" status)"
     BRF_SERVES="$(units_field "$BRF_ROW" serves)"
     BRF_DEPS="$(units_field "$BRF_ROW" deps)"
-    BRF_WAVE="$(basename "$PV_PLAN" .plan.md)"
+    BRF_WAVE="$(proof_plan_slug "$PV_PLAN")"
     BRF_DOCS="$(docs_root "$PV_REPO")"
     BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
@@ -11263,7 +11263,7 @@ RC_TAGS
     [ "$RC_NOW" = "$RC_HEAD" ] || RC_LEFT="moved the head of $RC_CO from ${RC_HEAD:0:12} to ${RC_NOW:-<none>}"
     git -C "$RC_CO" diff-index --quiet HEAD -- 2>/dev/null \
       || RC_LEFT="${RC_LEFT:+$RC_LEFT and }left tracked files changed in $RC_CO (git -C $RC_CO status)"
-    RC_WAVE="${PV_PLAN##*/}"; RC_WAVE="${RC_WAVE%.plan.md}"
+    RC_WAVE="$(proof_plan_slug "$PV_PLAN")"
     RC_DOCS="$(docs_root "$PV_REPO")"
     RC_REL="record/$RC_WAVE/release-check-$RC_HEAD.log"; RC_NTH=1
     while [ -e "$RC_DOCS/$RC_REL" ]; do RC_NTH=$((RC_NTH + 1)); RC_REL="record/$RC_WAVE/release-check-$RC_HEAD-$RC_NTH.log"; done
@@ -11366,7 +11366,7 @@ RC_TAGS
         die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${FR_WB:-(none named)} checked out, so there is no head to run the regression at; nothing was run."
         exit 1 ;;
     esac
-    FR_WAVE="${PV_PLAN##*/}"; FR_WAVE="${FR_WAVE%.plan.md}"
+    FR_WAVE="$(proof_plan_slug "$PV_PLAN")"
     FR_DOCS="$(docs_root "$PV_REPO")"
     FR_WHOLE=""
     if [ -z "$FR_CMD" ]; then
@@ -11621,7 +11621,7 @@ RC_TAGS
       # EACH LINE IS HELD TO THE GRAMMAR BEFORE ANY IS WRITTEN (AC-7.8): the line close-out would carry
       # for it, raised by this record, must parse, or the lot is refused naming it — a raised-by with a
       # space (A-orch-1's shape) is refused here, where it is written, and never reaches a continuation.
-      DEBT_FROM="${DEBT_PLAN##*/}"; DEBT_FROM="${DEBT_FROM%.plan.md}"
+      DEBT_FROM="$(proof_plan_slug "$DEBT_PLAN")"
       DEBT_BADL="$(printf '%s\n' "$DEBT_ROWS" | while IFS="$(printf '\t')" read -r _dk _dkind _dcon _dsites _ddisp; do
         _dl="debt: $_dcon $_dkind \"$_dsites\" touches=0 raised-by=$DEBT_RECREL from=$DEBT_FROM"
         debt_line_ok "$_dl" || { printf '%s\n' "$_dl"; break; }
@@ -12443,7 +12443,7 @@ RUNNING $TR_NAME $RUN_ID"
     LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
-      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$POKER_RUN_PLAN" .plan.md)/landing-proofs.log"
+      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$POKER_RUN_PLAN")/landing-proofs.log"
     if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}"; then
       lt_f() { printf '%s\n' "$LT_EV" | tr '|' '\n' | sed -n "s/^$1=//p" | head -1; }   # <key> -> its value in the event
       while IFS= read -r LT_EV; do
@@ -13527,7 +13527,7 @@ EOF
             SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
             [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
             [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
-            LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$SCHED_PLAN" .plan.md)/landing-proofs.log"
+            LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$SCHED_PLAN")/landing-proofs.log"
             if ! LR_IN="$(git -C "$REPO_REAL" rev-list --first-parent "$SCHED_RANGE" 2>/dev/null)"; then
               say "MOVED unknown — the range's commits cannot be listed"
               continue
