@@ -13519,12 +13519,21 @@ sd_world() {  # <label> <ready ids the ledger line answered, comma-joined> -> re
     > "$r/sd-turn.jsonl"
   printf '%s' "$r"
 }
-sd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/sd-no-config" "${CGC_ENV[@]}" "$@"; }
+# THE GATE'S ROOM IS THE FIXTURE'S (wave-37 T18; REQ-11 AC-11.4; D13). A decline stands only while the gate gives
+# no room or no writer slot is free, so the worlds read the tick at room=no (SD_BUSY5=8.0: the five-minute busy
+# cores over the share (the fixture shares 92%), session-poker.test.sh 11a) to see what a decline answers, and at room=yes to see it lapse.
+# The wall passes the reader no room: it reads the lapse line the tick wrote, so after a tick the two agree.
+sd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/sd-no-config" BIONIC_PROBE_BUSY_CORES_5M="${SD_BUSY5:-1.0}" "${CGC_ENV[@]}" "$@"; }
 sd_tick() {  # <repo> <poker> -> the ids the tick's FILL line names, sorted, space-joined
   cgc_ring
   ( cd "$1" && sd_env bash "$2" tick 2>&1 ) > "$1/sd-tick.out"
   sed -n 's/^poker: FILL \([A-Za-z0-9_. -]*\)$/\1/p' "$1/sd-tick.out" | head -1 | tr ' ' '\n' \
     | LC_ALL=C sort | tr '\n' ' '
+}
+sd_owed_noroom() {  # <repo> <poker> -> the ids the tick at room=no does NOT answer by the standing decline, sorted
+  rm -f "$1/.bionic/tmp/tick-digest-$SID_A.state"   # a quiet tick prints only what changed since the last
+  SD_BUSY5=8.0 sd_tick "$1" "$2" >/dev/null
+  sed -n 's/^poker: WAIT \([A-Za-z0-9_.-]*\) — ready; no writer slot free.*$/\1/p' "$1/sd-tick.out" | LC_ALL=C sort | tr '\n' ' '
 }
 sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, space-joined
   cgc_ring
@@ -13534,18 +13543,27 @@ sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, spa
     | sed 's/.* decline //' | tr ',' '\n' | LC_ALL=C sort | tr '\n' ' '
 }
 SD_R=$(sd_world some R1)
-SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
-expect_contains "SD precondition: the tick prints the standing decline" \
+SD_OWED=$(sd_owed_noroom "$SD_R" "$CGSD_POKER")
+expect_contains "SD precondition: the tick at room=no prints the standing decline" \
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — R1 waits on the base merge" "$(cat "$SD_R/sd-tick.out")"
-expect_eq "SD1 the tick fills the row the decline did not answer" "R2 " "$SD_TICK"
-expect_eq "SD2 …and the stop wall refuses the silent turn for exactly that row" "$SD_TICK" "$(sd_wall "$SD_R")"
+expect_eq "SD0 …and answers R1 by it, leaving R2, the row the decline did not see, to wait for a slot" "R2 " "$SD_OWED"
+expect_eq "SD0b …and the stop wall refuses the silent turn for exactly that row" "$SD_OWED" "$(sd_wall "$SD_R")"
+SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
+expect_contains "SD1a AC-11.4 the tick at room=yes with a free slot records the lapse" \
+  "poker: fill-declined lapsed — room=yes" "$(cat "$SD_R/sd-tick.out")"
+expect_eq "SD1 …and fills both rows, the declined one asked again" "R1 R2 " "$SD_TICK"
+expect_eq "SD2 …and the stop wall, reading the lapse the tick wrote, owes the same rows" "$SD_TICK" "$(sd_wall "$SD_R")"
 SD_RA=$(sd_world all R1,R2)
-expect_eq "SD3 a decline that answered both: the tick fills nothing" "" "$(sd_tick "$SD_RA" "$CGSD_POKER")"
+expect_eq "SD3 a decline that answered both: the tick at room=no waits on neither for a slot" "" "$(sd_owed_noroom "$SD_RA" "$CGSD_POKER")"
 expect_contains "SD3b …while it prints the decline as standing" "poker: fill-declined standing since " \
   "$(cat "$SD_RA/sd-tick.out")"
 expect_eq "SD4 …and the stop wall owes nothing either" "" "$(sd_wall "$SD_RA")"
-# THE MUTATION ARM. A planted poker whose standing read is gone: it prints `FILL R1 R2` over the
-# same fixture while the wall still refuses for R2 alone, and the pin must go red.
+SD_TICK_A=$(sd_tick "$SD_RA" "$CGSD_POKER")
+expect_eq "SD4b AC-11.4 …and at room=yes with a free slot the tick asks both again" "R1 R2 " "$SD_TICK_A"
+expect_eq "SD4c …and the wall, reading the lapse, owes both" "$SD_TICK_A" "$(sd_wall "$SD_RA")"
+# THE MUTATION ARM. A planted poker whose standing read and lapse are gone: it prints `FILL R1 R2` over the
+# same fixture and records no lapse, so the wall still reads the decline standing and owes nothing, and the pin
+# must go red.
 SD_MUT="$SANDBOX/fx/sd-mut"
 mkdir -p "$SD_MUT/hooks" "$SD_MUT/scripts"
 ln -s "$CGC_LIBDIR" "$SD_MUT/scripts/lib"
@@ -13553,7 +13571,9 @@ for _sd_sib in "$BIONIC_HOOKS_DIR"/*; do
   [ "$(basename "$_sd_sib")" = session-poker.sh ] || ln -s "$_sd_sib" "$SD_MUT/hooks/$(basename "$_sd_sib")"
 done
 anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline '
-sed 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
+anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing '
+sed -e 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' \
+    -e 's/^\( *\)SCHED_LAPSE="\$(fill_decline_lapsing .*$/\1SCHED_LAPSE=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
 SD_RM=$(sd_world mut R1,R2)
 SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
 expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
@@ -13576,26 +13596,27 @@ sd_world_verb() {  # <label> <ids to decline, comma-joined> -> repo
 }
 SDV_R=$(sd_world_verb some R1)
 expect_contains "SDV precondition: the verb recorded the decline" "decline — " "$(cat "$SDV_R/sd-decline.out")"
-SDV_TICK=$(sd_tick "$SDV_R" "$CGSD_POKER")
-expect_contains "SDV0 the tick prints the verb's decline as standing, in the reply form's words" \
+SDV_OWED=$(sd_owed_noroom "$SDV_R" "$CGSD_POKER")
+expect_contains "SDV0 the tick at room=no prints the verb's decline as standing, in the reply form's words" \
   "— R1 waits on the base merge" "$(/usr/bin/grep '^poker: fill-declined standing since ' "$SDV_R/sd-tick.out")"
-expect_eq "SDV1 the tick fills the row the verb did not name" "R2 " "$SDV_TICK"
-expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that row" "$SDV_TICK" "$(sd_wall "$SDV_R")"
+expect_eq "SDV1 …and leaves R2, the row the verb did not name, to wait for a slot" "R2 " "$SDV_OWED"
+expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that row" "$SDV_OWED" "$(sd_wall "$SDV_R")"
 SDV_RA=$(sd_world_verb all R1,R2)
-expect_eq "SDV3 a verb decline naming both: the tick fills nothing" "" "$(sd_tick "$SDV_RA" "$CGSD_POKER")"
+expect_eq "SDV3 a verb decline naming both: the tick at room=no waits on neither for a slot" "" "$(sd_owed_noroom "$SDV_RA" "$CGSD_POKER")"
 expect_eq "SDV4 …and the stop wall owes nothing either" "" "$(sd_wall "$SDV_RA")"
 # THE LIFT (wave-35 T8; REQ-6 AC-6.2; D15). `decline lift [<ids>]` writes a ledger line of its own that ends
 # the standing decline for the rows it names, every row it answered when it names none. The one reader stops
-# at it, so the tick prints the FILL the decline held and the wall owes the same rows.
+# at it, so the tick offers the rows the decline held and the wall owes the same rows. Read at room=no (a decline
+# that finds room lapses by itself); the lift is the way a hold ends while the gate gives none.
 ( cd "$SDV_RA" && sd_env bash "$CGSD_POKER" decline lift R1 ) > "$SDV_RA/sd-lift.out" 2>&1
 expect_contains "SDL precondition: the verb recorded the lift" "decline lift — R1" "$(cat "$SDV_RA/sd-lift.out")"
-SDL_TICK=$(sd_tick "$SDV_RA" "$CGSD_POKER")
-expect_eq "SDL1 after lifting R1 the tick fills R1, the row the decline held" "R1 " "$SDL_TICK"
-expect_eq "SDL2 …and the stop wall refuses the silent turn for exactly that row" "$SDL_TICK" "$(sd_wall "$SDV_RA")"
+SDL_OWED=$(sd_owed_noroom "$SDV_RA" "$CGSD_POKER")
+expect_eq "SDL1 after lifting R1 the tick no longer answers R1 by the decline, the row it held" "R1 " "$SDL_OWED"
+expect_eq "SDL2 …and the stop wall refuses the silent turn for exactly that row" "$SDL_OWED" "$(sd_wall "$SDV_RA")"
 ( cd "$SDV_RA" && sd_env bash "$CGSD_POKER" decline lift ) > "$SDV_RA/sd-lift2.out" 2>&1
-SDL_TICK2=$(sd_tick "$SDV_RA" "$CGSD_POKER")
-expect_eq "SDL3 a lift naming no row ends the rest: the tick fills both" "R1 R2 " "$SDL_TICK2"
-expect_eq "SDL4 …and the stop wall owes both" "$SDL_TICK2" "$(sd_wall "$SDV_RA")"
+SDL_OWED2=$(sd_owed_noroom "$SDV_RA" "$CGSD_POKER")
+expect_eq "SDL3 a lift naming no row ends the rest: the tick answers neither by it" "R1 R2 " "$SDL_OWED2"
+expect_eq "SDL4 …and the stop wall owes both" "$SDL_OWED2" "$(sd_wall "$SDV_RA")"
 
 # ============================================================
 section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"

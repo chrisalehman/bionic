@@ -4858,13 +4858,20 @@ PLF="$(s47_plan "$RLF" 4 \
 lf_led() { cat "$RLF/$LF_REC/fill-ledger.log" 2>/dev/null; }
 lf_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'; }
 lf_tick() { forget_digest "$RLF"; poke_pressure "$RLF" 8192 1.0 tick; }
+# THE DECLINE STANDS WHILE THE GATE GIVES NO ROOM (wave-37 T18; AC-11.4): at room=yes with a writer slot free a
+# decline lapses by itself (§REOPEN), so the pins of what a decline and its lift do read the tick at room=no, where
+# the row's WAIT line says whose answer holds it.
+lf_tick_noroom() { forget_digest "$RLF"; BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$RLF" 8192 1.0 tick; }
 lf_fill() { printf '%s %s' "$(s48_fill_has T4)" "$(s48_fill_has T5)"; }
+lf_wait() { printf '%s\n' "$OUT" | sed -n "s/^poker: WAIT $1 — ready; //p" | head -1; }
+LF_STANDING="answered by the standing fill-declined"; LF_NOSLOT="no writer slot free (gap 0)"
 lf_tick
 expect_eq "LF-0 precondition: the tick fills both ready rows" "yes yes" "$(lf_fill)"
 poke "$RLF" decline T4,T5 'held by hand until the user says build on Opus'
 expect_eq "LF-1 the decline is recorded (exit 0)" "0" "$RC"
-lf_tick
-expect_eq "LF-2 the decline stands: the tick fills neither row (LF-0 is the extractor's positive)" "no no" "$(lf_fill)"
+lf_tick_noroom
+expect_eq "LF-2 the decline stands: with no room the tick answers both rows by it (LF-0 is the extractor's positive)" \
+  "$LF_STANDING|$LF_STANDING" "$(lf_wait T4)|$(lf_wait T5)"
 cp "$RLF/$LF_REC/fill-ledger.log" "$TMPROOT/lf-before"
 poke "$RLF" decline lift T9
 expect_eq "LF-3 a lift naming a row no standing decline answers is refused (exit 1)" "1" "$RC"
@@ -4876,12 +4883,15 @@ LF_LINE="$(lf_led | tail -1)"
 expect_eq "LF-4b its ledger line is its own: state=lift, lifted=T4, this session, no declined= reason" "lift|T4|$SID|" \
   "$(lf_field "$LF_LINE" state)|$(lf_field "$LF_LINE" lifted)|$(lf_field "$LF_LINE" session)|$(lf_field "$LF_LINE" declined)"
 expect_contains "LF-4c …and the verb says what it ended and what still stands" "decline lift — T4: ended; the decline still stands for T5" "$OUT"
-lf_tick
-expect_eq "LF-5 AC-6.2 the next tick prints the FILL the decline held: T4, and T5 still declined" "yes no" "$(lf_fill)"
+lf_tick_noroom
+expect_eq "LF-5 AC-6.2 the next tick no longer answers T4 by the decline (it waits for room as any ready row), and T5 still is" \
+  "$LF_NOSLOT|$LF_STANDING" "$(lf_wait T4)|$(lf_wait T5)"
 poke "$RLF" decline lift
 expect_eq "LF-6 decline lift with no ids ends what still stands (exit 0), lifted=T5" "0|T5" "$RC|$(lf_field "$(lf_led | tail -1)" lifted)"
+lf_tick_noroom
+expect_eq "LF-6b …and the next tick answers neither row by it" "$LF_NOSLOT|$LF_NOSLOT" "$(lf_wait T4)|$(lf_wait T5)"
 lf_tick
-expect_eq "LF-6b …and the next tick fills both" "yes yes" "$(lf_fill)"
+expect_eq "LF-6c …and with room it fills both" "yes yes" "$(lf_fill)"
 cp "$RLF/$LF_REC/fill-ledger.log" "$TMPROOT/lf-before"
 poke "$RLF" decline lift
 expect_eq "LF-7 with no decline standing, a lift is refused (exit 1) and records nothing" "1|yes" \
@@ -6166,6 +6176,112 @@ wt_loaded "$WT_X"
 
 POKE_BOUND="$WT_BOUND_WAS"
 if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi
+
+# ============================================================
+section "§REOPEN: a declined row is asked again when room appears — the standing decline answers its rows only while the gate shows no room or no writer slot is free, and the fill ledger records the lapse (wave-37 T18; REQ-11 AC-11.4; D13)"
+# ============================================================
+#
+# fails-when: a tick with room and a free writer slot prints no FILL for a declined ready row. Wave 37's own
+# T8 was declined at 04:54 "no writer slot free (gap 6)", the tick answered "ready; answered by the standing
+# fill-declined" at every tick after it, and the row waited seven hours through room=yes until it was
+# dispatched by hand (A-orch-14). `fill_standing_decline` (lib/fill.sh), the ONE reader the tick and the stop
+# wall ask, takes the gate's `room=` answer and the free writer slots as two more operands; a decline stands only
+# while room is no or no slot is free. The tick that finds it lapsed appends one `state=lapsed` line naming the
+# decline's `at=` and its rows, says so, and names the rows in its FILL; a lapsed decline never stands again, for
+# the wall too, which reads the ledger alone (it passes no operands: the line is what it reads).
+#
+# The gate is the suite's own: 8 cores, 30% used, one busy core, so room=yes; BIONIC_PROBE_BUSY_CORES_5M=7.0 on
+# the call is room=no (session-poker.test.sh 11a). One ready writer row, writers=4, no roster row open.
+RO_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RO_REC=".bionic/docs/record/wave-01-fixture"
+RRO="$(make_repo reopen)"; new_roster "$RRO"
+PRO="$(s47_plan "$RRO" 4 \
+  "| T4 | 4 | build | declined for want of a slot | implementor | — | 20 | REQ-x | payload/d.sh | pending | |")"
+ro_led() { cat "$RRO/$RO_REC/fill-ledger.log" 2>/dev/null; }
+ro_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'; }
+ro_room_yes() { forget_digest "$RRO"; poke_pressure "$RRO" 8192 1.0 tick; }
+ro_room_no() { forget_digest "$RRO"; BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$RRO" 8192 1.0 tick; }
+RO_WHY='no writer slot free (gap 6)'
+
+ro_room_yes
+expect_eq "REOPEN-0 precondition: the tick at room=yes fills the row (the extractor's positive)" "yes" "$(s48_fill_has T4)"
+poke "$RRO" decline T4 "$RO_WHY"
+expect_eq "REOPEN-1 the decline is recorded (exit 0)" "0" "$RC"
+RO_DECLINE_AT="$(ro_field "$(ro_led | tail -1)" at)"
+expect_eq "REOPEN-1b …its ledger line is the decline" "decline|T4" "$(ro_field "$(ro_led | tail -1)" state)|$(ro_field "$(ro_led | tail -1)" named)"
+
+ro_room_no
+expect_contains "REOPEN-2 AC-11.4 at room=no the decline still answers the row: WAIT, answered by the standing fill-declined" \
+  "poker: WAIT T4 — ready; answered by the standing fill-declined" "$OUT"
+expect_eq "REOPEN-2b …and the tick names no FILL" "no" "$(s48_fill_has T4)"
+expect_contains "REOPEN-2c …and the decline is printed as standing (the positive for the absence below)" \
+  "poker: fill-declined standing since $RO_DECLINE_AT" "$OUT"
+expect_eq "REOPEN-2d …and writes no lapse: the ledger still ends on the decline" "decline" "$(ro_field "$(ro_led | tail -1)" state)"
+
+ro_room_yes
+expect_contains "REOPEN-3 AC-11.4 at room=yes with a free writer slot the tick prints the FILL" "poker: FILL T4" "$OUT"
+expect_contains "REOPEN-3b …and says the decline lapsed and what the gate gave (one ready row, so one slot)" "poker: fill-declined lapsed — room=yes, 1 writer slot(s) free" "$OUT"
+expect_absent "REOPEN-3c …and no longer prints the decline as standing" "fill-declined standing" "$OUT"
+RO_LAPSED="$(ro_led | tail -1)"
+expect_eq "REOPEN-3d the fill ledger's last line is state=lapsed" "lapsed" "$(ro_field "$RO_LAPSED" state)"
+expect_eq "REOPEN-3e …naming the decline's at= and its rows, in this session" "$RO_DECLINE_AT|T4|$SID" \
+  "$(ro_field "$RO_LAPSED" lapsed-at)|$(ro_field "$RO_LAPSED" lapsed)|$(ro_field "$RO_LAPSED" session)"
+expect_eq "REOPEN-3f …carrying the decline's reason, and no declined= of its own (it is no decline)" "$RO_WHY|" \
+  "$(ro_field "$RO_LAPSED" lapsed-why)|$(ro_field "$RO_LAPSED" declined)"
+expect_eq "REOPEN-3g …and the room it saw" "yes" "$(ro_field "$RO_LAPSED" room)"
+RO_LINES="$(ro_led | wc -l | tr -d ' ')"
+
+ro_room_yes
+expect_eq "REOPEN-4 a second tick at room=yes names the row again (it is a FILL, not a one-off)" "yes" "$(s48_fill_has T4)"
+expect_eq "REOPEN-4b …and writes no second lapse: the ledger is as long as it was" "$RO_LINES" "$(ro_led | wc -l | tr -d ' ')"
+ro_room_no
+expect_absent "REOPEN-5 a lapsed decline never stands again: at room=no the row is not answered by it" \
+  "answered by the standing fill-declined" "$OUT"
+expect_contains "REOPEN-5b …it waits for the want of room, as an undeclined row does" "poker: WAIT T4 — ready; no writer slot free" "$OUT"
+expect_absent "REOPEN-5c …and no decline is printed as standing" "fill-declined standing" "$OUT"
+
+# ---------- the one reader, driven as the stop wall drives it (no operands) and as the tick does ----------
+RO_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/fill.sh"
+ro_sd() {  # <lib file> <ledger> <room> <free> -> the reader's answer, US shown as /
+  bash -c '. "$1"; fill_standing_decline "$2" "$3" "" ${4:+"$4"} ${5:+"$5"}' _ "$1" "$2" "$SID" "${3:-}" "${4:-}" 2>/dev/null | tr '\037' '/'
+}
+RO_L="$TMPROOT/ro-ledger.log"; : > "$RO_L"
+printf 'fill-ledger/v1|at=2026-10-15T04:54:47Z|session=%s|turn=|current=4|state=decline|ceiling=8|width=|open=|free=|ready=T4,T5|launched=|declined=%s|missed=0|idle=|room=|named=T4,T5|declined-on=-\n' "$SID" "$RO_WHY" >> "$RO_L"
+expect_eq "REOPEN-6 the reader with no operands (the stop wall's call) reads the ledger alone: the decline stands" \
+  "2026-10-15T04:54:47Z/$RO_WHY/T4 T5" "$(ro_sd "$RO_LIB" "$RO_L")"
+expect_eq "REOPEN-6b room=no with slots free: it stands" "2026-10-15T04:54:47Z/$RO_WHY/T4 T5" "$(ro_sd "$RO_LIB" "$RO_L" no 3)"
+expect_eq "REOPEN-6c room=yes with no slot free: it stands" "2026-10-15T04:54:47Z/$RO_WHY/T4 T5" "$(ro_sd "$RO_LIB" "$RO_L" yes 0)"
+expect_eq "REOPEN-6d room=yes with a slot free: it stands for nothing" "" "$(ro_sd "$RO_LIB" "$RO_L" yes 1)"
+printf 'fill-ledger/v1|at=2026-10-15T11:56:10Z|session=%s|turn=|current=4|state=lapsed|ceiling=8|width=|open=|free=3|ready=|launched=|declined=|missed=0|idle=|room=yes|lapsed-at=2026-10-15T04:54:47Z|lapsed=T4,T5|lapsed-why=x\n' "$SID" >> "$RO_L"
+expect_eq "REOPEN-7 a lapsed line ends the decline for a reader with no operands (the wall reads what the tick wrote)" "" "$(ro_sd "$RO_LIB" "$RO_L")"
+expect_eq "REOPEN-7b …and at room=no" "" "$(ro_sd "$RO_LIB" "$RO_L" no 0)"
+printf 'fill-ledger/v1|at=2026-10-15T12:10:00Z|session=%s|turn=|current=4|state=decline|ceiling=8|width=|open=|free=|ready=T4|launched=|declined=waits on T9|missed=0|idle=|room=|named=T4|declined-on=T9\n' "$SID" >> "$RO_L"
+expect_eq "REOPEN-7c a decline written after the lapse stands afresh" "2026-10-15T12:10:00Z/waits on T9/T4" "$(ro_sd "$RO_LIB" "$RO_L")"
+
+# ---------- the mutant: the tick's call drops the room operands ----------
+# A copy of the poker whose two reader calls (the lapsing one and the standing one) pass no room
+# and no free slots reads the ledger alone: the decline stands at room=yes and the row is never asked again. The
+# copy sits beside a copy of the libraries, so it loads its own; REOPEN-3 goes red under it.
+RO_MUT="$TMPROOT/ro-mut"; mkdir -p "$RO_MUT/hooks" "$RO_MUT/payload/scripts"
+cp "${BIONIC_HOOKS_DIR}"/*.sh "$RO_MUT/hooks/"
+cp -R "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RO_MUT/payload/scripts/lib"
+RO_POKER_WAS="$POKER"
+anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
+anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"'
+RO_MUT_SRC="$RO_MUT/hooks/session-poker.sh"
+awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
+expect_eq "REOPEN-mut0 the mutant differs from the poker by the two calls" "2" "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$RO_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
+poke "$RRO" decline T4 'declined again, after the lapse'
+expect_eq "REOPEN-mut-pre a fresh decline of the row is recorded (it stands afresh after the lapse)" "0" "$RC"
+POKER="$RO_MUT/hooks/session-poker.sh"
+ro_room_yes
+RO_MUT_OUT="$OUT"
+POKER="$RO_POKER_WAS"
+expect_contains "REOPEN-mut1 the mutant runs (it prints the gate line at room=yes)" "room=yes" "$RO_MUT_OUT"
+expect_absent "REOPEN-mut2 …and under it the tick names no FILL for the declined row, so REOPEN-3 goes red under it" "poker: FILL T4" "$RO_MUT_OUT"
+ro_room_yes
+expect_contains "REOPEN-mut3 …while the shipped poker, over the same fresh decline, asks the row again" "poker: FILL T4" "$OUT"
+POKE_BOUND="$RO_BOUND_WAS"
 
 # ============================================================
 section "§REPORT: the report splits wait from run and prints the width, from the landing record alone (wave-37 T9; D8, AC-1.3, AC-3.2)"

@@ -2224,20 +2224,23 @@ expect_eq "65b2 §DECLINE-LOG AC-15.5 the run's fill ledger gains one line namin
 expect_eq "65b3 …its reason" "the machine is saturated" "$(s65_field "$S65_LINE" declined)"
 S65_AT="$(s65_field "$S65_LINE" at)"
 expect_regex "65b4 …and its time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$S65_AT"
-poke_pressure "$R65" 8192 1.0 tick
+# A DECLINE STANDS WHILE THE GATE GIVES NO ROOM (wave-37 T18; REQ-11 AC-11.4; D13): the ticks that read what a
+# decline answers run at room=no (BIONIC_PROBE_BUSY_CORES_5M=7.0); at room=yes with a writer slot free it lapses.
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$R65" 8192 1.0 tick
 expect_contains "65c AC-15.1 the next tick prints the standing decline, its time and its reason, in the reply form's words" \
   "poker: fill-declined standing since ${S65_AT} — the machine is saturated" "$OUT"
 expect_absent "65c2 …and no FILL for the rows it named" "poker: FILL" "$OUT"
 awk '{ print } /^\| T3 \| 4 \| build \|/ { print "| T4 | 4 | build | a unit nobody declined | implementor | — | — | 30 | REQ-1 | d.sh | — | — | pending |" }' \
   "$P65" > "$P65.tmp" && mv "$P65.tmp" "$P65"
-poke_pressure "$R65" 8192 1.0 tick
-expect_eq "65d a row the decline did not name is ready: the tick fills it alone" "poker: FILL T4" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
 S65_TR="$(s31_transcript "$R65" "carry on")"
 s31_stop "$R65" "$S65_TR"
-expect_eq "65e …and the wall refuses the silent turn" "block" "$(s31_decision)"
-expect_contains "65e2 …naming T4 in the verb it prints" "session-poker.sh decline T4 'why they wait'" "$(s31_reason)"
+expect_eq "65e a row the decline did not name is ready: the wall refuses the silent turn" "block" "$(s31_decision)"
+expect_contains "65e2 …naming T4 alone in the verb it prints" "session-poker.sh decline T4 'why they wait'" "$(s31_reason)"
 expect_absent "65e3 …and asking for no line in the reply" 'write "fill-declined:' "$(s31_reason)"
+poke_pressure "$R65" 8192 1.0 tick
+expect_contains "65d AC-11.4 the tick at room=yes with a free slot lapses the decline and asks every ready row again" "poker: fill-declined lapsed — room=yes" "$OUT"
+expect_eq "65d2 …the FILL names T2 and T3 with the row the decline never named" "poker: FILL T2 T3 T4" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
 S65_N="$(s65_count "$R65")"
 poke "$R65" decline T9 'no such row'
 expect_eq "65f an id that is no plan row is refused (exit 1)" "1" "$RC"
@@ -2253,8 +2256,8 @@ expect_eq "65j …and no refusal wrote a ledger line" "$S65_N" "$(s65_count "$R6
 expect_ne "65j2 precondition: the count is of real lines" "0" "$S65_N"
 poke "$R65" decline T4 'T4 waits for the same machine'
 expect_eq "65k §DECLINE-LOG each decline is one more line" "$((S65_N + 1))" "$(s65_count "$R65")"
-poke_pressure "$R65" 8192 1.0 tick
-expect_absent "65k2 …and the rows the first decline named stay answered beside the second's" "poker: FILL" "$OUT"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$R65" 8192 1.0 tick
+expect_absent "65k2 …and with no room the tick offers nothing beside it" "poker: FILL" "$OUT"
 expect_contains "65k3 …the newer reason standing" "— T4 waits for the same machine" "$OUT"
 
 # ---------- §BUDGET-USER (AC-15.4): the user's cap is written into the header ----------
