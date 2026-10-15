@@ -8,6 +8,171 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.20.0 — 2026-10-15
+
+This is the landing pace release: the serial landing loop is replaced by a drain that proves a row's suites side by
+side, at most J at a time, J the floor's own width rule on spare capacity (D3). The six places where a
+reader told the machine something false are fixed once, each at the layer it lives in: what a suite reads (D4), what
+a floor proof cites (D7), whose words count (D9), what a row owes (D10), which fields a roster carries (D11) and which
+directory a plan owns (D12). The refusal that hid its basis now prints it (D8). Two idle-slot defects the wave found
+in its own run, a decline that held a free slot and a landing wait that held a writer's turn, were ruled into the wave
+at Step 4 (D13). Verdict sharing across landings was measured and withdrawn (D5), and no suite was split (D6). Eleven
+build rows landed. The floor, the wave's whole regression run, ran at b775aaa4 (100 of 100 suites green,
+`floor-run-b775aaa46a6c8e15f342e84f7757aad73046d650.log` in the wave's record) and owes nothing. The landing target
+was missed by every landing, and the numbers are below. This is a minor release by the policy above: the drain, the
+`cover` verb, the `ev=run` line and the new `landing-report --rows` fields are new capability.
+`canonical_sdlc_version` stays 14.
+
+**Migration.** No artifact needs migrating and no setup step changes. Four rows added or widened a refusal that a
+script of yours may have met. T3: a brief's `Lands-on:` that was complete at 1.19.0 can now be refused by the
+dispatch wall, which prints the missing suites and the whole line to paste, because the reads index names more suites
+per file (a library row averages 46.2 suites, up from 25.9). T4: `proof-add floor` refuses a floor log that no
+`ev=run` line in the plan's landing record names, and a log whose hash, head or exit moved since its run; run
+`floor-run` (or the detached runner) again and cite the log it writes, and a log written by hand has no path to a
+proof. T5: `finding-move`, `waive-row` and `rule --words` read the words of a recorded session only when this project
+witnesses it, a transcript under this project's encoded directory and a `loaded-<sid>.state` under this root, and the
+refusal names the session and the missing witness. T6: `task-set files=` refuses a Files value that leaves a record
+row with no artifact, naming `artifact=<path>` as the remedy.
+
+### The drain (D3)
+
+- T1 (`T1-landing-drain.md`): a landing runs at most J suites at once, each runner filing its own `landing` ask, with
+  one landing tree per candidate and the red judge's head run in the next tree, and every verdict line carries
+  `width=<J>` after `log=`.
+- T9 (`T9-report-split.md`): `landing-report --rows` prints `wait=`, `prove=`, `line=` and `width=` for each row, read
+  from the landing record alone.
+
+### The map is complete and keeps its reach (D4)
+
+- T3 (`T3-map-rules.md`): a prelude or test library a suite sources is scanned as the suite's own text, and a line
+  that walks a directory reads every tracked file under it; `brief` and the dispatch wall read one `reads_suites`.
+
+### Verdict sharing is not built (D5)
+
+- REQ-2 is withdrawn on the measurement (29 of 633 wave-36 verdicts shareable, each a stale-green risk); the direction
+  is kept in `design-ledger.md` and nothing ships.
+
+### No suite is split (D6)
+
+- AC-1.4: the floor ran with per-suite timing, `record/wave-37-landing-pace/timing.tsv` holds the 100 durations, and
+  no suite was split because the longest, close-out at 963 s, is under the 30-minute target on its own; the five
+  longest are close-out (963 s), rc-item (909 s), cross-gate-agreement (854 s), dispatch-preflight-4 (838 s) and
+  worktree (836 s).
+
+### The landing record holds the run (D7, ADR-057)
+
+ADR-057 is Accepted.
+
+- T4 (`T4-run-line.md`): `floor-run` and the detached runner write `line/v1|ev=run|log=|head=|dirty=|rc=|sha256=|at=`
+  to the landing record, `proof-add floor` cites a log only with a run line that matches it on head, exit and hash,
+  and the proof line ends with the run it read.
+
+### The refusal prints the basis (D8)
+
+- T8 (`T8-basis-line.md`): each `uncovered` line `current 7` refuses with ends in `ask: session-poker.sh cover <q>
+  <a>..<b>` and prints that range's `cover <sha> <basis>` lines, and the new read-only `cover` verb prints the same.
+
+### The project witnesses a session (D9, ADR-058)
+
+ADR-058 is Accepted.
+
+- T5 (`T5-words-witness.md`): a session's typed words count only when its transcript lies under this project's encoded
+  directory and its load record exists under this root; `project_slug` is the one encoder, and the start hook records
+  the start directory as `cwd=` in the load record.
+
+### The row's own record is its artifact (D10)
+
+- T6 (`T6-brief-artifact.md`): `brief` and `task-set files=` read one rule, the `artifact` cell, else the Files entry
+  named `<row>.md` or `<row>-*`, else the first record entry, and the plan template header gains the optional
+  `suites`, `lands-on` and `artifact` columns.
+
+### List fields are a set, named once (D11)
+
+- T7 (`T7-list-fields.md`): `ROSTER_LIST_FIELDS` names the six list fields once, both `clean()` copies test
+  membership in it, `adopt` carries `questions=` and `claims=` byte for byte, and a census arm is red on a
+  `roster_row` key that is in neither the list set nor the scalar set.
+
+### One plan slug (D12)
+
+- T2 (`T2-dry-copy-slug.md`): `proof_plan_slug` is the one slug reader and maps a plan verb's dry copy to its origin
+  under `proof_debt_origin`'s three-part guard, so `current 6` sees a finding moved to fixed on the copy.
+
+### The two idle-slot defects (D13)
+
+- T18 (`T18-decline-reopens.md`): a standing fill decline answers its rows only while the gate reads `room=no` or no
+  writer slot is free, and with room and a slot the tick records it `lapsed` and offers the rows again.
+- T19 (`T19-bounded-ready.md`): the dispatch doctrine and the brief scaffold say a writer lands by `ready --within
+  <seconds>` in the foreground, and `WAITING` keeps its place; the rule lives once, and the doctrine set is 29 bytes under the base.
+
+### The landing numbers
+
+`landing-report --rows` at the wave's head (every landing the wave made, ready to landed, as the landing record has it).
+Rows T1 and T3 to T8 are the serial rows, landed under the old loop; T19, T2, T9 and T18 are the drain rows. A row's
+`waited=` is the gate's total over every ask of its runs, so it can exceed the row's own minutes:
+
+```
+landings: queue=11 hand=0 git=0 · ready-to-landed median=206.3m p75=262.8m max=490.6m · runs: green=672 red=2 none=0 discarded=25 red-then-green=0 run=35 · waited median=12s · killed=26
+T6 queue ready=2026-10-15T05:28:15Z landed=2026-10-15T08:54:34Z minutes=206.3 runs=46 waited=3329s wait=0.0 prove=206.0 line=0.3 width=-
+T3 queue ready=2026-10-15T05:32:46Z landed=2026-10-15T09:02:27Z minutes=209.7 runs=50 waited=3543s wait=0.0 prove=209.4 line=0.2 width=-
+T7 queue ready=2026-10-15T06:01:34Z landed=2026-10-15T09:25:16Z minutes=203.7 runs=57 waited=3231s wait=0.0 prove=203.4 line=0.3 width=-
+T4 queue ready=2026-10-15T07:58:00Z landed=2026-10-15T12:39:00Z minutes=281.0 runs=78 waited=44s wait=73.3 prove=207.5 line=0.2 width=-
+T5 queue ready=2026-10-15T06:50:58Z landed=2026-10-15T12:39:13Z minutes=348.2 runs=86 waited=1784s wait=0.0 prove=345.7 line=2.5 width=-
+T8 queue ready=2026-10-15T12:26:55Z landed=2026-10-15T14:46:13Z minutes=139.3 runs=51 waited=197s wait=12.3 prove=126.7 line=0.3 width=-
+T1 queue ready=2026-10-15T06:56:00Z landed=2026-10-15T15:06:33Z minutes=490.6 runs=75 waited=306s wait=135.3 prove=355.0 line=0.3 width=-
+T19 queue ready=2026-10-15T14:04:17Z landed=2026-10-15T15:31:13Z minutes=86.9 runs=23 waited=439s wait=0.0 prove=86.6 line=0.3 width=7
+T2 queue ready=2026-10-15T15:55:49Z landed=2026-10-15T18:27:43Z minutes=151.9 runs=71 waited=44947s wait=0.0 prove=151.4 line=0.5 width=7
+T9 queue ready=2026-10-15T16:04:56Z landed=2026-10-15T19:04:45Z minutes=179.8 runs=99 waited=49429s wait=0.0 prove=179.6 line=0.2 width=7
+T18 queue ready=2026-10-15T16:09:05Z landed=2026-10-15T20:13:35Z minutes=244.5 runs=63 waited=9266s wait=10.6 prove=233.7 line=0.2 width=7
+```
+
+| | wave 36 | wave 37 |
+|---|---|---|
+| ready-to-landed median | 29.4 m | 206.3 m |
+| p75 | 107.4 m | 262.8 m |
+| max | 170.8 m | 490.6 m (T1, serial) |
+| the floor's wall time | 2206 s at width 7 | 2183 s at width 7 |
+
+The wave's landings were slower than wave 36's, not faster: the serial rows have a median of 209.7 minutes and the
+drain rows 165.9 minutes, and every landing missed AC-1.2's 30-minute target. The widest landing, T2 (71 suites), took
+151.9 minutes at width 7 (wait 0.0, prove 151.4, line 0.5); the longest drain landing, T18, took 244.5 (wait 10.6,
+prove 233.7, line 0.2), and the longest landing of the wave was T1's, the last serial one, at 490.6 (wait 135.3, prove
+355.0, line 0.3). The target is a tune number, not a gate; the miss and its causes are the first Known limits below
+(`A-orch-28` in `assumptions.md`). The floor's whole run took 2183 seconds for 14816 seconds of suite work, against
+2206 seconds for 14959 at wave 36's floor, so the same suites finish in the same wall time at the same width.
+
+### Standing reds
+
+None. The floor is 100 of 100 and no row is born of it.
+
+### Known limits
+
+- Every landing of this wave missed AC-1.2's 30-minute target. T2, the widest, took 151.9 minutes at width 7 under
+  three-way contention among the drains of T2, T9 and T18, and T18 alone proved 59 suites in 48 minutes once the
+  others had drained (`A-orch-28`, `A-orch-21`).
+- The drain's J is the share's width, not the machine's spare capacity, so three drains at once saturate the gate by
+  design (`critic-adversarial.md#5`).
+- `landing-report`'s wait and prove split books the gate's queue time inside `prove=`, so a starved row reads as slow
+  proving (auditor AC-1.3, `critic-adversarial.md#4`).
+- A review row's `suites` cell renders only on a plan whose Tasks header carries the `suites` column, so a plan
+  written before 1.20.0 has no cell to render it from (auditor AC-7.3, `A-orch-29`).
+- The slug reader's dry-copy arm has no caller in production code, only in the fixtures that plant one (auditor AC-9.2,
+  `critic-adversarial.md#10`).
+- A library sourced only by another library is still unmapped: `line.sh` sources `worktree.sh`, `slots.sh` and
+  `suite.sh`, and the reads index does not follow that second hop (`A-orch-10`). The floor stays the catch-all.
+- `run.sh` reaches all 100 suites, because `tests/lib/assert.sh` and `tests/lib/resolve-roots.sh` spell a bare `run.sh`
+  in case patterns and the first rule reads a bare name as every file of that basename (`A-orch-10`).
+- A regression run outside `floor-run` and the detached runner, and so outside the landing record, has no path to a
+  floor proof (D7, ADR-057).
+- Verdict sharing across landings is withdrawn and not built (D5; `design-ledger.md`).
+- The doctrine pick leaves three options unbuilt: no width ceiling, no finer map (the fan-out stays: every hook
+  sources every wanted library at load), and no out-of-order publish, so the first landing in line publishes first.
+- The stop wall reads a lapsed decline one tick late: it reads the lapse line the tick wrote, so between room
+  appearing and the next tick it still treats the decline as standing (`A-orch-19`, `T18-decline-reopens.md`).
+- A bounded `ready` that returns `WAITING` asks the gate again on re-entry and is the youngest in its turn order, so
+  it can starve behind an older drain, and a killed waiter re-enters the line youngest; the ask of a dead carrier
+  stays in the gate's store (`A-orch-23`, `A-orch-21`).
+
+
 ## 1.19.0 — 2026-10-14
 
 This is the zero machine errors release: the 1.18.0 run's census of 32 open machine errors
