@@ -1549,7 +1549,7 @@ rp_ready() {  # <row> <name> <at hh:mm:ss> [<commit>, default RP_C1]
   rp_ev "ev=ready|row=$1|name=$2|commit=${4:-$RP_C1}|branch=wt/01-$1|tree=$RP_ROOT/.worktrees/01-$1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T$3Z"
 }
 rp_cand() { rp_ev "ev=candidate|row=$1|base=${3:-$RP_C1}|commit=${4:-$RP_C2}|tree=$RP_ROOT/.bionic/tmp/landing/1|at=2026-10-06T$2Z"; }   # <row> <at> [<base>, default RP_C1] [<candidate>, default RP_C2]
-rp_verdict() { rp_ev "ev=verdict|row=$1|commit=${5:-$RP_C2}|suite=$2|result=$3|log=/rec/$1-$2.log|at=2026-10-06T$4Z"; }   # <row> <suite> <result> <at> [<commit>, default RP_C2]
+rp_verdict() { rp_ev "ev=verdict|row=$1|commit=${5:-$RP_C2}|suite=$2|result=$3|log=/rec/$1-$2.log${6:+|width=$6}|at=2026-10-06T$4Z"; }   # <row> <suite> <result> <at> [<commit>, default RP_C2] [<width>: the drain writes `width=` after `log=`]
 rp_pub() { rp_ev "ev=published|row=$1|commit=$RP_C2|kind=$2|by=-|why=-|at=2026-10-06T$3Z"; }
 rp_req() {  # <id> <who agent> <tree> <asked> <admitted|-> [<extra line>...] -> one request file
   local id="$1" who="$2" tree="$3" asked="$4" adm="$5"; shift 5
@@ -1593,20 +1593,20 @@ expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landin
 rp_report --rows
 expect_eq "RTL2 --rows prints the same line first" "$RP_RTL_LINE" "$(printf '%s\n' "$OUT" | head -1)"
 expect_eq "RTL3 …then a line per landed row in the record's order: T1's minutes run from its FIRST ready (30.0, not 10.0), a hand and a git landing print -" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s wait=- prove=- line=- width=-|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s wait=- prove=- line=- width=-|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(rp_rows)"
 # A-orch-12: a request may carry `peak=` and a line no reader knows; the fold reads only its own keys.
 printf 'peak=62\ncolour=blue\n' >> "$RP_GATE/requests/4"; printf 'peak=71\n' >> "$RP_GATE/requests/1"
 rp_report --rows
 expect_eq "RTL4 a request carrying peak= and an unknown line folds to the same report" \
-  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-" \
   "$(rp_line)|$(rp_rows | cut -d'|' -f1)"
 # THE PLAN OPERAND (A-orch-145): a named plan first, else the session's bound run (RTL1 to RTL4 read the
 # bound run), else the verb's no-run refusal. The named plan is read from another project, unbound.
 RP_NORUN="$(make_repo rp-norun)"; ( cd "$RP_NORUN" && git commit -q --allow-empty -m init )
 BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report "$P59W" --rows
 expect_eq "RTL10 a named plan, from an unbound session in another project: exit 0, that plan's line and rows, its waits scoped to its own project" \
-  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-" \
   "$RC|$(rp_line)|$(rp_rows | cut -d'|' -f1)"
 BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report
 expect_eq "RTL11 no plan named and no run bound: the verb's no-run refusal (2), and no line" \
@@ -1650,10 +1650,10 @@ RP_REAL_POKER="$POKER"; POKER="$RD_MUT/lastready/hooks/session-poker.sh"
 rp_report --rows
 POKER="$RP_REAL_POKER"
 expect_eq "RTL-mut1 the last-ready mutant still runs (exit 0) and reads T1's minutes from its LAST ready, 10.0, where RTL3 reads 30.0" \
-  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s" "$RC|$(rp_rows)"
+  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s wait=- prove=- line=- width=-" "$RC|$(rp_rows)"
 rp_report --rows
 expect_eq "RTL-mut1b …control: the real poker over the same record reads 30.0" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s wait=- prove=- line=- width=-" "$(rp_rows)"
 rm -rf "$RD_MUT"
 
 # ---------- §REPORT-KINDS: landings by kind, runs by outcome, killed runs ----------
@@ -1681,8 +1681,8 @@ expect_eq "RK1 a queue, a hand and a git landing each count under their own kind
   "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2" \
   "$(rp_line)"
 expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
-  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
-expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s" \
+  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
+expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T3 ')"
 expect_eq "RK4 …and rows that never landed print no row" "T1|T2|T3" "$(rp_rows | tr '|' '\n' | awk '{ print $1 }' | tr '\n' '|' | sed 's/|$//')"
 # A malformed line is skipped and counted, never fatal.
@@ -1730,7 +1730,7 @@ printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/confi
 BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
 expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
 expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
-  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s wait=- prove=- line=- width=-|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
@@ -1767,14 +1767,14 @@ expect_eq "RK-K1 a row's red, then the accepted head's green run under the row i
 rp_ready T1 w-T1 11:00:00; rp_verdict T1 a.test.sh green 11:05:00 "$RP_C2"; rp_pub T1 queue 11:06:00
 rp_report --rows
 expect_eq "RK-K2 …fixed, re-readied, green, landed: the row's runs=2 (its red and its green, not the head's), and the line reads green=1 red=1 red-then-green=0" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=0s wait=0.5 prove=64.5 line=1.0 width=-" "$(rk_runs)|$(rp_rows)"
 # a true flake: two verdicts for one commit, red first, no ready between; the head's run sits between them
 rp_world rk-key2
 rp_ready T2 w-T2 10:00:00; rp_cand T2 10:00:30 "$RK_H" "$RK_C3"
 rp_verdict T2 a.test.sh red 10:05:00 "$RK_C3"; rp_verdict T2 a.test.sh green 10:08:00 "$RK_H"; rp_verdict T2 a.test.sh green 10:12:00 "$RK_C3"; rp_pub T2 queue 10:13:00
 rp_report --rows
 expect_eq "RK-K3 a flake (a PLANTED shape: lib/line.sh never writes it, A-T68.4): red, the head's run between, green at the same commit and no ready between: red-then-green=1, green=1 red=1, runs=2" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=0s wait=0.5 prove=11.5 line=1.0 width=-" "$(rk_runs)|$(rp_rows)"
 # a red, then a green at ANOTHER candidate of the same ready (the head moved): two commits, so not a flake
 rp_world rk-key3
 rp_ready T3 w-T3 10:00:00; rp_cand T3 10:00:30 "$RK_H" "$RK_C3"; rp_verdict T3 a.test.sh red 10:05:00 "$RK_C3"
@@ -2128,7 +2128,7 @@ expect_nonempty "RI-P1 precondition: …and the row extractor reads both rows" "
 expect_eq "RI-P1a T2 behind T1, red, the head's run under T2's id at H, fixed and landed: green=2 red=1 (T1's green, T2's red and T2's green; the head's run counted nowhere)" \
   "0|runs: green=2 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
 expect_eq "RI-P1b …T1 runs=1 and T2 runs=2" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s|T2 queue ready=2026-10-06T10:01:00Z landed=2026-10-06T10:26:00Z minutes=25.0 runs=2 waited=0s" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s wait=0.2 prove=3.8 line=5.0 width=-|T2 queue ready=2026-10-06T10:01:00Z landed=2026-10-06T10:26:00Z minutes=25.0 runs=2 waited=0s wait=0.2 prove=23.8 line=1.0 width=-" "$(rp_rows)"
 
 # ---------- P2 (the control): the head run after the row ahead landed is excluded by either rule ----------
 rp_world ri-p2
@@ -2138,7 +2138,7 @@ rp_verdict T2 a.test.sh green 10:14:00 "$RK_C3"
 rp_ev "ev=returned|row=T2|why=red|detail=/rec/T2.log|at=2026-10-06T10:14:01Z"
 rp_report --rows
 expect_eq "RI-P2 the writer's case: T2's red at its own candidate and the head's green at T1's landed commit: green=1 red=1, and T1's row runs=1" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s wait=0.2 prove=3.8 line=5.0 width=-" "$(rk_runs)|$(rp_rows)"
 
 # ---------- P3: a row landing twice; its first candidate is not its second landing's own ----------
 ri_p3() {  # <label> -> the record of pass 43's probe P3
@@ -2153,14 +2153,14 @@ rp_report --rows
 expect_eq "RI-P3a a row landing twice: the line reads green=2 red=1 (its two landings' own runs; the head's run at its first candidate is not counted)" \
   "0|runs: green=2 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
 expect_eq "RI-P3b …the first landing runs=1 and the second runs=2" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:05:00Z minutes=5.0 runs=1 waited=0s|T1 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:23:00Z minutes=13.0 runs=2 waited=0s" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:05:00Z minutes=5.0 runs=1 waited=0s wait=0.2 prove=3.8 line=1.0 width=-|T1 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:23:00Z minutes=13.0 runs=2 waited=0s wait=0.2 prove=11.8 line=1.0 width=-" "$(rp_rows)"
 
 # ---------- a row with no candidate since its last landing keeps T14's count: every verdict under its id ----------
 rp_world ri-nocand
 rp_ready T4 w-T4 10:00:00 "$RI_A1"; rp_verdict T4 a.test.sh red 10:05:00 "$RP_C2"; rp_verdict T4 a.test.sh green 10:06:00 "$RK_H"; rp_pub T4 queue 10:10:00
 rp_report --rows
 expect_eq "RI-N a row with a ready and verdicts but no candidate counts both its verdicts (there is no commit of its own to include by)" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s wait=- prove=- line=4.0 width=-" "$(rk_runs)|$(rp_rows)"
 
 # ---------- ruling (3): killed is decided once, through the gate's rule, and an exit over 128 is a kill (D18) ----------
 # (A-orch-233, T72: "137 only" of A-orch-179/198 is withdrawn; the spec's figure is "admitted, no end, holder gone,
@@ -6166,5 +6166,80 @@ wt_loaded "$WT_X"
 
 POKE_BOUND="$WT_BOUND_WAS"
 if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi
+
+# ============================================================
+section "§REPORT: the report splits wait from run and prints the width, from the landing record alone (wave-37 T9; D8, AC-1.3, AC-3.2)"
+# ============================================================
+#
+# `landing-report --rows` prints, after each row's present prefix, `wait= prove= line= width=`: wait is the row's
+# first `ready` to its first `candidate`, prove that candidate to the row's last `verdict`, line that verdict to
+# `published`, in minutes, and width the `width=` the drain (lib/line.sh, 1.20.0) writes on the row's verdicts after
+# `log=`. They are read from the landing record ALONE: the gate's requests are pruned after BIONIC_GATE_KEEP, so a
+# close-of-wave report built on them would have lost the early rows. FIXTURE FIDELITY: the events are planted in the
+# shape lib/line.sh writes them (rp_verdict's sixth operand is the drain's `width=`); the gate store is EMPTY.
+RR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+rp_world rr-split
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:02:00
+rp_verdict T1 a.test.sh green 10:05:00 "$RP_C2" 2; rp_verdict T1 b.test.sh green 10:09:00 "$RP_C2" 2; rp_verdict T1 c.test.sh green 10:14:00 "$RP_C2" 2
+rp_pub T1 queue 10:20:00
+# a row written before 1.20.0 (or by the serial line): its verdicts carry no width=
+rp_ready T2 w-T2 10:30:00; rp_cand T2 10:31:00; rp_verdict T2 a.test.sh green 10:35:00; rp_pub T2 queue 10:40:00
+# a hand landing: nothing to split
+rp_ready T3 - 10:50:00; rp_cand T3 10:50:10; rp_pub T3 hand 10:50:30
+RR_T1_PRE="T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:20:00Z minutes=20.0 runs=3 waited=0s"
+RR_T2_PRE="T2 queue ready=2026-10-06T10:30:00Z landed=2026-10-06T10:40:00Z minutes=10.0 runs=1 waited=0s"
+RR_T3_PRE="T3 hand ready=- landed=2026-10-06T10:50:30Z minutes=- runs=0 waited=0s"
+rr_row() { rp_rows | tr '|' '\n' | /usr/bin/grep "^$1 "; }
+rp_report --rows
+expect_eq "RR0 precondition: the gate store is empty (nothing in it can be what the split reads)" "0" "$(ls "$RP_GATE/requests" | wc -l | tr -d ' ')"
+expect_nonempty "RR0b precondition: the row extractor reads the report's rows" "$(rr_row T1)"
+expect_eq "RR1 ready at t0, candidate at +2, verdicts at +5 +9 +14 each width=2, published at +20: the row prints its present prefix, then wait=2.0 prove=12.0 line=6.0 width=2" \
+  "$RR_T1_PRE wait=2.0 prove=12.0 line=6.0 width=2" "$(rr_row T1)"
+expect_eq "RR2 a row whose verdicts carry no width= prints width=- (absent, never 0), its split still read from the record" \
+  "$RR_T2_PRE wait=1.0 prove=4.0 line=5.0 width=-" "$(rr_row T2)"
+expect_eq "RR3 a hand landing prints all four as - , as it prints ready=- and minutes=-" \
+  "$RR_T3_PRE wait=- prove=- line=- width=-" "$(rr_row T3)"
+expect_eq "RR4 the first line is unchanged by the split (close-out's parse and the tick's print depend on it)" \
+  "landings: queue=2 hand=1 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=4 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+  "$(rp_line)"
+expect_eq "RR5 the row's present prefix is byte for byte what it was: cut at the new fields, T1 is the old line" \
+  "$RR_T1_PRE" "$(rr_row T1 | sed 's/ wait=.*$//')"
+# the width is the drain's: a line a reader sees with a bad width is absent too
+rp_world rr-bad
+rp_ready T4 w-T4 10:00:00; rp_cand T4 10:01:00; rp_verdict T4 a.test.sh green 10:03:00 "$RP_C2" x; rp_pub T4 queue 10:04:00
+rp_report --rows
+expect_eq "RR6 a non-numeric width= is absent: width=-" "T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=0s wait=1.0 prove=2.0 line=1.0 width=-" "$(rr_row T4)"
+# the split restarts at each landing: a row landing twice reads each of its own
+rp_world rr-twice
+rp_ready T5 w-T5 10:00:00; rp_cand T5 10:01:00; rp_verdict T5 a.test.sh green 10:03:00 "$RP_C2" 2; rp_pub T5 queue 10:04:00
+rp_ready T5 w-T5 10:10:00; rp_cand T5 10:15:00; rp_verdict T5 a.test.sh green 10:16:00 "$RP_C2" 4; rp_pub T5 queue 10:20:00
+rp_report --rows
+expect_eq "RR7 a row landing twice: each landing's split starts from its own ready, candidate and verdicts" \
+  "T5 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=0s wait=1.0 prove=2.0 line=1.0 width=2|T5 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:20:00Z minutes=10.0 runs=1 waited=0s wait=5.0 prove=1.0 line=4.0 width=4" \
+  "$(rp_rows)"
+
+# ---------- the mutation arms: a split read from the gate store; the fields written before waited= ----------
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rr-mut.XXXXXX")"
+rd_mutant fromgate 's#pw\[n\] = mins(pfrom\[n\], fcn);#pw[n] = "-"; for (i = 1; i <= nq; i++) if (qw[i] == pname[n] \&\& num(qd[i])) { pw[n] = sprintf("%.1f", (qd[i] - qa[i]) / 60); break };#'
+rd_mutant beforewaited 's#^        print pre1 wt tl$#        print pre1 tl wt#'
+expect_eq "RR-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
+  "$(diff "$POKER" "$RD_MUT/fromgate/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/beforewaited/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+rp_world rr-mut
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:02:00
+rp_verdict T1 a.test.sh green 10:05:00 "$RP_C2" 2; rp_verdict T1 b.test.sh green 10:09:00 "$RP_C2" 2; rp_verdict T1 c.test.sh green 10:14:00 "$RP_C2" 2
+rp_pub T1 queue 10:20:00
+RR_REAL_POKER="$POKER"
+POKER="$RD_MUT/fromgate/hooks/session-poker.sh"; rp_report --rows; RR_M1_RC="$RC"; RR_M1="$(rr_row T1)"
+POKER="$RD_MUT/beforewaited/hooks/session-poker.sh"; rp_report --rows; RR_M2_RC="$RC"; RR_M2="$(rr_row T1)"
+POKER="$RR_REAL_POKER"
+expect_eq "RR-mut1 the gate-store mutant runs (exit 0) and, the store being empty, reads wait=- where RR1 reads 2.0 (RR1 goes red on it)" \
+  "0|$RR_T1_PRE wait=- prove=12.0 line=6.0 width=2" "$RR_M1_RC|$RR_M1"
+expect_eq "RR-mut2 the fields-before-waited= mutant runs (exit 0) and writes wait= ahead of waited=, so RR1 and RR5 go red on it" \
+  "0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:20:00Z minutes=20.0 runs=3 wait=2.0 prove=12.0 line=6.0 width=2 waited=0s" "$RR_M2_RC|$RR_M2"
+rp_report --rows
+expect_eq "RR-mut3 …control: the real poker over the same record reads RR1's row" "$RR_T1_PRE wait=2.0 prove=12.0 line=6.0 width=2" "$(rr_row T1)"
+rm -rf "$RD_MUT"
+POKE_BOUND="$RR_BOUND_WAS"
+
 
 finish
