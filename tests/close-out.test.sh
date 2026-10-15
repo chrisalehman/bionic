@@ -2016,7 +2016,8 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # record and the gate's requests and only printed. The plan is NAMED to the report, never resolved
 # through the session: act 3 has wiped the session's binding before the continuation is written.
 # FIXTURE FIDELITY: the events are PLANTED in the Interfaces table's `line/v1` shape, which
-# lib/line.sh writes; the gate store is the sandbox's own, empty.
+# lib/line.sh writes; the gate store is the sandbox's own, empty. Each row line carries the wait/run split
+# and the width (wave-37 T9; AC-11.3): the report reads them from this record alone, and the block fences the rows whole.
 LAND_GATE="$SANDBOX/land-gate"; mkdir -p "$LAND_GATE/requests"
 LAND_C="$(printf 'c%.0s' $(seq 40))"
 # land_section <continuation> -> what stands under `## Landings`, up to the next `## `, fences and blank
@@ -2027,7 +2028,8 @@ land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing
   case "$1" in "$SANDBOX"/*) : ;; *) echo "land_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   mkdir -p "${rec%/*}"
   printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
+  printf 'line/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
   printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
   printf 'line/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
 }
@@ -2040,8 +2042,8 @@ expect_eq "LAND-2 the continuation carries the heading ## Landings exactly once"
 expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-4 …the report's line, then a line per landed row, as landing-report --rows prints them" \
 "landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0
-T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=0s
-T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=0s wait=2.0 prove=18.0 line=10.0 width=2
+T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-5 …and the heading sits after ## Deferrals and before the Resume instruction" "yes" \
   "$(awk '/^## Deferrals$/ { a = NR } /^## Landings$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PLD/$CONT_REL")"

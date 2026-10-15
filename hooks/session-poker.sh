@@ -34,6 +34,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
@@ -494,6 +495,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
+  die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
@@ -1117,6 +1119,22 @@ $1"; shift ;;
         *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
+    ;;
+  # THE BASIS VERB (wave-37 T8; D8, REQ-4 AC-4.2). Two operands: the question the judge holds a range by, and
+  # the range `<a>..<b>` its `review <q> … uncovered <a>..<b>` line names. Read-only; the lines are
+  # `cover_basis`'s, the ones `cur7_judge` prints under that line. The shape of the range is the usage error (2);
+  # whether both ends are commits here is the verb's refusal (1).
+  cover)
+    { [ $# -eq 2 ] && [ -n "$1" ] && [ -n "$2" ]; } || usage "cover takes a question and a range: cover <evidence|adversarial|structure> <a>..<b>."
+    case "$1" in evidence|adversarial|structure) : ;; *) usage "cover: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a question; it is evidence, adversarial or structure." ;; esac
+    COV_Q="$1"; COV_A="${2%%..*}"; COV_B="${2#*..}"
+    case "$2" in
+      *..*) : ;;
+      *) usage "cover takes its range as <a>..<b>, two commits and nothing else." ;;
+    esac
+    case "$COV_A:$COV_B" in
+      :*|*:|-*|*:-*|*..*|*[[:space:]]*|*[[:cntrl:]]*) usage "cover takes its range as <a>..<b>, two commits and nothing else." ;;
+    esac
     ;;
   # THE RUN VERBS (wave-30 T12; D6, D7d). `wait` and `stop-run` take ONE operand: a roster row's name,
   # a run id (`run=` as the shim printed it), or a run's log path. `wait` takes `--for <seconds>`, a
@@ -3923,7 +3941,7 @@ poker_files_cell() {
   local id="$1" kind="$2" agent="$3" files="$4" repo="$5" plan="$6" fact cell_facts=""
   PFC_OUT="$files"; PFC_ART=""
   if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact "$id")" ]; then
-    PFC_ART="$(docs_root "$repo")/record/$(basename "$plan" .plan.md)/$id.md"
+    PFC_ART="$(docs_root "$repo")/record/$(proof_plan_slug "$plan")/$id.md"
     case "$PFC_ART" in "$repo"/*) PFC_ART="${PFC_ART#"$repo"/}" ;; esac
     case "$files" in ''|'—'|'-') PFC_OUT="$PFC_ART" ;; *) PFC_OUT="$files, $PFC_ART" ;; esac
   fi
@@ -4655,6 +4673,19 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
 # uncovered.
+# cover_basis <plan> <question> <a> <b> -> lib/proof.sh `facts_cover`'s lines for that range and question, with its rc
+# (wave-37 T8; D8, AC-4.1, AC-4.2). THE ONE CALL OF THE LIBRARY'S BASIS in this file, shared by what prints it under
+# a refused line (`cur7_judge`) and what prints it on ask (the `cover` verb), so the two cannot say different
+# things of one range. Never called from the tick, `sched_facts_state`, `live_judge` or any wall: a person asks.
+cover_basis() {
+  if ! { declare -F facts_cover >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F facts_cover >/dev/null 2>&1; then
+    printf 'cover: the proof record (lib/proof.sh) cannot be loaded from %s\n' "$BIONIC_LIB" >&2
+    return 2
+  fi
+  facts_cover "$1" "$3" "$4" "$2"
+}
+
 cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judges Step 8 too)
   local step="$1" wb out rc err
   if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -4685,7 +4716,24 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
     exit 1
   fi
   die "REFUSED — current: $step is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
-  printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
+  # THE BASIS UNDER THE LINE (wave-37 T8; D8, AC-4.1): a `review <q> … uncovered <a>..<b>` line is a judge's "no"
+  # with no why; under it go the `cover <sha> <basis>` lines for that range and question, and the line ends with
+  # the ask that reproduces them (the `cover` verb). The text above is the refusal's own and does not change.
+  local cv_line cv_k cv_q cv_rest cv_st cv_rng
+  while IFS= read -r cv_line; do
+    [ -n "$cv_line" ] || continue
+    IFS='	' read -r cv_k cv_q cv_rest cv_rest cv_st cv_rng <<COVER_LINE
+$cv_line
+COVER_LINE
+    case "$cv_k:$cv_st:$cv_rng" in
+      review:uncovered:?*..?*)
+        printf '%s · ask: session-poker.sh cover %s %s\n' "$cv_line" "$cv_q" "$cv_rng" >&2
+        cover_basis "$PV_PLAN" "$cv_q" "${cv_rng%%..*}" "${cv_rng##*..}" >&2 || : ;;
+      *) printf '%s\n' "$cv_line" >&2 ;;
+    esac
+  done <<COVER_JUDGED
+$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')
+COVER_JUDGED
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
 }
@@ -5901,7 +5949,14 @@ SWEEP_SCHEMA="poker-sweep/v1"
 #
 # and with rows, one line per landed row in the record's order:
 #
-#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s
+#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s wait=<m|-> prove=<m|-> line=<m|-> width=<J|->
+#
+# THE SPLIT (wave-37 T9; AC-1.3, AC-3.2). The last four fields are read from the landing record alone, never from the
+# gate's requests, which are pruned after BIONIC_GATE_KEEP: wait is the row's first `ready` to its first `candidate`,
+# prove is that first `candidate` to the row's last `verdict`, line is that last `verdict` to the `published` event, all
+# since the row last landed and in minutes (%.1f). width is the `width=` on the row's verdict lines (lib/line.sh's drain
+# writes it after `log=`; the last one numeric), `-` for a row whose verdicts carry none (written before 1.20.0, or by the
+# serial line): absent, never 0. A segment missing either end prints `-`. A hand or a git landing prints all four `-`.
 #
 # NOTHING READS THESE NUMBERS TO DECIDE (D18). The tick prints the first line outside its digest, so a
 # landing moves no decision; no hook or wall library names the report (tests/docs-pins.test.sh §W28-46).
@@ -5962,6 +6017,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
   [ -f "$rec" ] && [ ! -L "$rec" ] || rec=/dev/null
   out="$(printf '%s' "$reqs" | awk -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK"'
     function num(s) { return s ~ /^[0-9]+$/ }
+    function seg(a, b) { return (a == "" || b == "" || b < a) ? "-" : sprintf("%.1f", (b - a) / 60) }
     function sortn(a, n,   i, j, t) { for (i = 2; i <= n; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t } }
     function pct(a, n, p,   pos, lo, fr) {
       if (n == 0) return 0
@@ -5979,12 +6035,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       if (ev == "run") nrl++
       if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
       if (ev == "candidate") hasc[g] = 1
+      if (ev == "candidate" && e >= 0 && !(rk in fc)) fc[rk] = e
       if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
       if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
       if (ev == "published" && kv["kind"] !~ /^(queue|hand|git)$/) { mal++; next }
       if (t0 == "") t0 = e
       iso[e] = kv["at"]
+      if (ev == "verdict") { lv[rk] = e; if (kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"] }
     }
     ev == "ready" {
       if (!(rk in rdy)) rdy[rk] = e
@@ -6003,7 +6061,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pe[n] = e; pruns[n] = nrun[rk] + 0
       pfrom[n] = ((rk in rdy) ? rdy[rk] : ""); pname[n] = ((rk in nm) ? nm[rk] : "-")
       if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
-      delete rdy[rk]; nrun[rk] = 0; delete nm[rk]
+      # THE SPLIT, from this record alone (wave-37 T9; AC-1.3, AC-3.2): each segment needs both its ends, else `-`.
+      pw[n] = pp[n] = pl[n] = pwd[n] = "-"
+      if (k == "queue") {
+        fcn = ((rk in fc) ? fc[rk] : ""); lvn = ((rk in lv) ? lv[rk] : "")
+        pw[n] = seg(pfrom[n], fcn); pp[n] = seg(fcn, lvn); pl[n] = seg(lvn, e)
+        if (rk in wd) pwd[n] = wd[rk]
+      }
+      delete rdy[rk]; nrun[rk] = 0; delete nm[rk]; delete fc[rk]; delete lv[rk]; delete wd[rk]
       gen[rk]++
     }
     END {
@@ -6021,8 +6086,12 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         w = 0
         if (pname[r] != "-" && pfrom[r] != "") for (i = 1; i <= nq; i++)
           if (inq[i] && num(qd[i]) && qw[i] == pname[r] && qa[i] >= pfrom[r] && qa[i] <= pe[r]) w += qd[i] - qa[i]
-        if (r in pmin) printf "%s %s ready=%s landed=%s minutes=%.1f runs=%d waited=%ds\n", prow[r], pk[r], iso[pfrom[r]], pat[r], pmin[r], pruns[r], w
-        else printf "%s %s ready=- landed=%s minutes=- runs=%d waited=%ds\n", prow[r], pk[r], pat[r], pruns[r], w
+        rd = "-"; mn = "-"
+        if (r in pmin) { rd = iso[pfrom[r]]; mn = sprintf("%.1f", pmin[r]) }
+        pre1 = sprintf("%s %s ready=%s landed=%s minutes=%s runs=%d", prow[r], pk[r], rd, pat[r], mn, pruns[r])
+        wt = sprintf(" waited=%ds", w)
+        tl = sprintf(" wait=%s prove=%s line=%s width=%s", pw[r], pp[r], pl[r], pwd[r])
+        print pre1 wt tl
       }
       if (mal) printf "#malformed %d\n", mal
     }' phase=0 - phase=1 "$rec")"
@@ -6072,7 +6141,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # continuation (and a person).
 hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 ado=0 fix=0 pl
-  slug="${plan##*/}"; slug="${slug%.plan.md}"
+  slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ]; then
     read -r hand stp <<< "$(awk -F'|' '
       index($0, "line/v1|") == 1 {
@@ -6323,7 +6392,7 @@ case "$VERB" in
         exit 2
       fi
     fi
-    FR_SLUG="${FR_PLAN##*/}"; FR_SLUG="${FR_SLUG%.plan.md}"
+    FR_SLUG="$(proof_plan_slug "$FR_PLAN")"
     FR_OPEN=no
     run_open "$FR_PLAN" && FR_OPEN=yes
     FR_FILE="$(fill_ledger_path "$REPO_REAL" "$FR_PLAN")"
@@ -9079,7 +9148,7 @@ EOF
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
     # A hand landing's record carries no verdict, so it writes none. Same copy, same dry commit, same swap.
-    RL_SLUG="${PV_PLAN##*/}"; RL_SLUG="${RL_SLUG%.plan.md}"
+    RL_SLUG="$(proof_plan_slug "$PV_PLAN")"
     RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
       die "REFUSED — the evidence cells of the criteria $PV_ID serves cannot be written; the plan is unchanged."
@@ -9644,7 +9713,7 @@ EOF
     pv_file_open continuation-fill "$CF_FIELD=$CF_TEXT"
     CF_DOCS="$(docs_root "$PV_REPO")"
     case "$PV_RPLAN" in */plans/*) CF_DOCS="${PV_RPLAN%/plans/*}" ;; esac
-    CF_SLUG="${PV_RPLAN##*/}"; CF_SLUG="${CF_SLUG%.plan.md}"
+    CF_SLUG="$(proof_plan_slug "$PV_RPLAN")"
     CF_FILE="$CF_DOCS/record/$CF_SLUG/continuation.md"
     if [ ! -f "$CF_FILE" ] || [ -L "$CF_FILE" ]; then
       die "REFUSED — no continuation at $CF_FILE (close-out writes it at close); nothing was written."
@@ -9934,7 +10003,7 @@ $HO_AGENTS"; fi
     BRF_STATUS="$(units_field "$BRF_ROW" status)"
     BRF_SERVES="$(units_field "$BRF_ROW" serves)"
     BRF_DEPS="$(units_field "$BRF_ROW" deps)"
-    BRF_WAVE="$(basename "$PV_PLAN" .plan.md)"
+    BRF_WAVE="$(proof_plan_slug "$PV_PLAN")"
     BRF_DOCS="$(docs_root "$PV_REPO")"
     BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
@@ -11215,7 +11284,7 @@ RC_TAGS
     [ "$RC_NOW" = "$RC_HEAD" ] || RC_LEFT="moved the head of $RC_CO from ${RC_HEAD:0:12} to ${RC_NOW:-<none>}"
     git -C "$RC_CO" diff-index --quiet HEAD -- 2>/dev/null \
       || RC_LEFT="${RC_LEFT:+$RC_LEFT and }left tracked files changed in $RC_CO (git -C $RC_CO status)"
-    RC_WAVE="${PV_PLAN##*/}"; RC_WAVE="${RC_WAVE%.plan.md}"
+    RC_WAVE="$(proof_plan_slug "$PV_PLAN")"
     RC_DOCS="$(docs_root "$PV_REPO")"
     RC_REL="record/$RC_WAVE/release-check-$RC_HEAD.log"; RC_NTH=1
     while [ -e "$RC_DOCS/$RC_REL" ]; do RC_NTH=$((RC_NTH + 1)); RC_REL="record/$RC_WAVE/release-check-$RC_HEAD-$RC_NTH.log"; done
@@ -11318,7 +11387,7 @@ RC_TAGS
         die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${FR_WB:-(none named)} checked out, so there is no head to run the regression at; nothing was run."
         exit 1 ;;
     esac
-    FR_WAVE="${PV_PLAN##*/}"; FR_WAVE="${FR_WAVE%.plan.md}"
+    FR_WAVE="$(proof_plan_slug "$PV_PLAN")"
     FR_DOCS="$(docs_root "$PV_REPO")"
     FR_WHOLE=""
     if [ -z "$FR_CMD" ]; then
@@ -11455,6 +11524,22 @@ RC_TAGS
     exit 0
     ;;
 
+  # THE BASIS, ON ASK (wave-37 T8; D8, REQ-4 AC-4.2). `cover <question> <a>..<b>` prints, on stdout, the
+  # `cover <sha> <basis>` lines `cover_basis` builds for that range and question, the ones `cur7_judge` prints under
+  # its `review <question> … uncovered <a>..<b>` line, and ends that line by asking for. It writes nothing and asks
+  # the judge nothing more: a range every commit of which holds prints no line, exit 0. A head that is no commit
+  # here, or a plan the library cannot read, is the library's sentence on stderr and exit 1. Never called from the
+  # tick or any wall.
+  cover)
+    plan_verb_open cover
+    COV_VERB_LINES="$(cover_basis "$PV_PLAN" "$COV_Q" "$COV_A" "$COV_B")"; COV_RC=$?
+    [ "$COV_RC" -ne 2 ] || exit 1
+    if [ -n "${COV_VERB_LINES}" ]; then
+      printf '%s\n' "$COV_VERB_LINES"
+    fi
+    exit 0
+    ;;
+
   # THE RUN'S NUMBERS (wave-28 T14; D18, REQ-4). The fold and its definitions are `landing_report`'s,
   # above the verbs. The plan is the one named, resolved as fill-report resolves its operand (a path
   # from the project root, else from the docs root), or else this session's bound run; the record is
@@ -11557,7 +11642,7 @@ RC_TAGS
       # EACH LINE IS HELD TO THE GRAMMAR BEFORE ANY IS WRITTEN (AC-7.8): the line close-out would carry
       # for it, raised by this record, must parse, or the lot is refused naming it — a raised-by with a
       # space (A-orch-1's shape) is refused here, where it is written, and never reaches a continuation.
-      DEBT_FROM="${DEBT_PLAN##*/}"; DEBT_FROM="${DEBT_FROM%.plan.md}"
+      DEBT_FROM="$(proof_plan_slug "$DEBT_PLAN")"
       DEBT_BADL="$(printf '%s\n' "$DEBT_ROWS" | while IFS="$(printf '\t')" read -r _dk _dkind _dcon _dsites _ddisp; do
         _dl="debt: $_dcon $_dkind \"$_dsites\" touches=0 raised-by=$DEBT_RECREL from=$DEBT_FROM"
         debt_line_ok "$_dl" || { printf '%s\n' "$_dl"; break; }
@@ -12379,7 +12464,7 @@ RUNNING $TR_NAME $RUN_ID"
     LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
-      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$POKER_RUN_PLAN" .plan.md)/landing-proofs.log"
+      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$POKER_RUN_PLAN")/landing-proofs.log"
     if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}"; then
       lt_f() { printf '%s\n' "$LT_EV" | tr '|' '\n' | sed -n "s/^$1=//p" | head -1; }   # <key> -> its value in the event
       while IFS= read -r LT_EV; do
@@ -13490,7 +13575,7 @@ EOF
             SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
             [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
             [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
-            LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$SCHED_PLAN" .plan.md)/landing-proofs.log"
+            LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$SCHED_PLAN")/landing-proofs.log"
             if ! LR_IN="$(git -C "$REPO_REAL" rev-list --first-parent "$SCHED_RANGE" 2>/dev/null)"; then
               say "MOVED unknown — the range's commits cannot be listed"
               continue

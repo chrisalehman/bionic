@@ -1308,11 +1308,17 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
 # merge=<40-hex> at=<ISO-UTC>`, then the stamp lines `_wt_stale_proof` judged at <head>, as the
 # stamp file holds them. A row's landing is the `merge=` of the last header carrying its `row=`
 # (the tick reads it, T43). The path is derived as fill_ledger_path (lib/patrol.sh) derives its
-# own, in the project's docs tree, never in the tree being removed.
+# own, in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
+# one reader (wave-37 T2; AC-9.2), loaded on first use as units.sh and slots.sh are here.
+_wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
+  declare -F proof_plan_slug >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
+  declare -F proof_plan_slug >/dev/null 2>&1
+}
 _wt_proofs_path() {  # <root> <plan> -> the record's path
-  local slug="${2##*/}"
-  slug="${slug%.plan.md}"
-  [ -n "$slug" ] || return 1
+  local slug
+  _wt_proof_load && slug="$(proof_plan_slug "${2:-}")" || return 1
   printf '%s/record/%s/landing-proofs.log' "$(docs_root "$1")" "$slug"
 }
 
