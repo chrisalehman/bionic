@@ -1992,9 +1992,12 @@ ll_widths() {  # <root> <commit> -> `suite:result:width` of each verdict on <com
 }
 world_machine 3 8192 40 0.5
 RDR="$(ll_drain_world d)"; HDR="$(ll_head "$RDR")"
-anchor fn payload/scripts/lib/worktree.sh 'local t="${1:-}" c="${2:-}"' landing_tree_point \
-  'echo "$1 $2" >> "$LL_SIG/d.points"; local t="${1:-}" c="${2:-}"'
-LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=landing_tree_point ll_drive "$RDR" T1 "$WORLD_ROOT/d.out"; DR_BG=$!
+# THE SPY IS NO MUTATION, so it is no shaped anchor: framework §21 checks this suite's anchors on a copy
+# that holds line.sh and not worktree.sh. Its precondition is the row below, and (dr4)'s first row.
+DR_SPY='s/local t="/echo "$1 $2" >> "$LL_SIG\/d.points"; local t="/'
+expect_contains "(dr0-pre) the spy is in landing_tree_point as the driver defines it" 'echo "$1 $2" >> "$LL_SIG/d.points"; local t=' \
+  "$(declare -f landing_tree_point | sed "$DR_SPY")"
+LL_MUTANT="$DR_SPY" LL_MUTANT_FN=landing_tree_point ll_drive "$RDR" T1 "$WORLD_ROOT/d.out"; DR_BG=$!
 expect_true "(dr1-pre) a ran and was judged, and c started while b waits" ll_wait_lines "$LL_SIG/d-c.runs" 1 300
 expect_eq "(dr1) two runner jobs live at once: b's and c's landings admitted, neither ended" "b.test.sh c.test.sh" "$(ll_live_landings)"
 expect_eq "(dr1) …and no third asked while two run (J=2): b and c started once each, d not at all" "1 1 0" \
