@@ -32,28 +32,28 @@ reach no one. Send it, then stop.
 <!-- BRIEF-SCAFFOLD-READER-BEGIN -->
 ### Your brief
 Expected duration: your time budget.
-Expected artifact: the one path that makes you done.
+Expected artifact: the path that makes you done.
 Progress artifact: append to it at least every Cadence (tasks of 15 min or more).
-Cadence: that interval (tasks of 15 min or more).
+Cadence: that interval.
 Done marker: write it after your report.
-Subprocess claim: the backgrounded process main will look for.
+Subprocess claim: the process main watches.
 Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
 Questions: yours to answer.
-Row: the plan row you run.
-Lands-on: the suites `ready` proves through the gate: when green, say ready from your tree; it is your last act.
-Lands-red: the one suite you may land red.
-Red-evidence: a file holding head: <40-hex>, your head.
+Row: your plan row.
+Lands-on: the suites `ready` proves. Last act, foreground: `ready --within <seconds under your Bash timeout>` from your tree; WAITING keeps your place, say it again; never backgrounded, no monitor.
+Lands-red: the suite you may land red.
+Red-evidence: a file with head: <40-hex>, your head.
 Deliverable-waiver: report by message, not a file.
 <!-- BRIEF-SCAFFOLD-READER-END -->
 
 <!-- DISPATCH-RULES-BEGIN -->
 - **Where `tests/run.sh` takes `--only`, use the door**: `tests/run.sh --only <name>.test.sh`, one call each.
-- **Never end your turn with a command or an external run (CI, a background task) in flight**:
+- **Never end your turn with a command or external run (CI, background task) in flight**:
   watch it in the foreground.
-- **A multi-step script goes in a file in your workspace**, run as `bash <file>`, never inline
-  as `bash -c '…'`: the platform refuses some inline scripts outright, never the file.
+- **A multi-step script goes in a workspace file**, run as `bash <file>`, never inline
+  as `bash -c '…'`: the platform refuses some inline scripts, never the file.
 <!-- DISPATCH-RULES-END -->
 
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.
