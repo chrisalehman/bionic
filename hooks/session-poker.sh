@@ -5949,7 +5949,14 @@ SWEEP_SCHEMA="poker-sweep/v1"
 #
 # and with rows, one line per landed row in the record's order:
 #
-#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s
+#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s wait=<m|-> prove=<m|-> line=<m|-> width=<J|->
+#
+# THE SPLIT (wave-37 T9; AC-1.3, AC-3.2). The last four fields are read from the landing record alone, never from the
+# gate's requests, which are pruned after BIONIC_GATE_KEEP: wait is the row's first `ready` to its first `candidate`,
+# prove is that first `candidate` to the row's last `verdict`, line is that last `verdict` to the `published` event, all
+# since the row last landed and in minutes (%.1f). width is the `width=` on the row's verdict lines (lib/line.sh's drain
+# writes it after `log=`; the last one numeric), `-` for a row whose verdicts carry none (written before 1.20.0, or by the
+# serial line): absent, never 0. A segment missing either end prints `-`. A hand or a git landing prints all four `-`.
 #
 # NOTHING READS THESE NUMBERS TO DECIDE (D18). The tick prints the first line outside its digest, so a
 # landing moves no decision; no hook or wall library names the report (tests/docs-pins.test.sh §W28-46).
@@ -6010,6 +6017,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
   [ -f "$rec" ] && [ ! -L "$rec" ] || rec=/dev/null
   out="$(printf '%s' "$reqs" | awk -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK"'
     function num(s) { return s ~ /^[0-9]+$/ }
+    function seg(a, b) { return (a == "" || b == "" || b < a) ? "-" : sprintf("%.1f", (b - a) / 60) }
     function sortn(a, n,   i, j, t) { for (i = 2; i <= n; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t } }
     function pct(a, n, p,   pos, lo, fr) {
       if (n == 0) return 0
@@ -6027,12 +6035,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       if (ev == "run") nrl++
       if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
       if (ev == "candidate") hasc[g] = 1
+      if (ev == "candidate" && e >= 0 && !(rk in fc)) fc[rk] = e
       if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
       if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
       if (ev == "published" && kv["kind"] !~ /^(queue|hand|git)$/) { mal++; next }
       if (t0 == "") t0 = e
       iso[e] = kv["at"]
+      if (ev == "verdict") { lv[rk] = e; if (kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"] }
     }
     ev == "ready" {
       if (!(rk in rdy)) rdy[rk] = e
@@ -6051,7 +6061,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pe[n] = e; pruns[n] = nrun[rk] + 0
       pfrom[n] = ((rk in rdy) ? rdy[rk] : ""); pname[n] = ((rk in nm) ? nm[rk] : "-")
       if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
-      delete rdy[rk]; nrun[rk] = 0; delete nm[rk]
+      # THE SPLIT, from this record alone (wave-37 T9; AC-1.3, AC-3.2): each segment needs both its ends, else `-`.
+      pw[n] = pp[n] = pl[n] = pwd[n] = "-"
+      if (k == "queue") {
+        fcn = ((rk in fc) ? fc[rk] : ""); lvn = ((rk in lv) ? lv[rk] : "")
+        pw[n] = seg(pfrom[n], fcn); pp[n] = seg(fcn, lvn); pl[n] = seg(lvn, e)
+        if (rk in wd) pwd[n] = wd[rk]
+      }
+      delete rdy[rk]; nrun[rk] = 0; delete nm[rk]; delete fc[rk]; delete lv[rk]; delete wd[rk]
       gen[rk]++
     }
     END {
@@ -6069,8 +6086,12 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         w = 0
         if (pname[r] != "-" && pfrom[r] != "") for (i = 1; i <= nq; i++)
           if (inq[i] && num(qd[i]) && qw[i] == pname[r] && qa[i] >= pfrom[r] && qa[i] <= pe[r]) w += qd[i] - qa[i]
-        if (r in pmin) printf "%s %s ready=%s landed=%s minutes=%.1f runs=%d waited=%ds\n", prow[r], pk[r], iso[pfrom[r]], pat[r], pmin[r], pruns[r], w
-        else printf "%s %s ready=- landed=%s minutes=- runs=%d waited=%ds\n", prow[r], pk[r], pat[r], pruns[r], w
+        rd = "-"; mn = "-"
+        if (r in pmin) { rd = iso[pfrom[r]]; mn = sprintf("%.1f", pmin[r]) }
+        pre1 = sprintf("%s %s ready=%s landed=%s minutes=%s runs=%d", prow[r], pk[r], rd, pat[r], mn, pruns[r])
+        wt = sprintf(" waited=%ds", w)
+        tl = sprintf(" wait=%s prove=%s line=%s width=%s", pw[r], pp[r], pl[r], pwd[r])
+        print pre1 wt tl
       }
       if (mal) printf "#malformed %d\n", mal
     }' phase=0 - phase=1 "$rec")"
