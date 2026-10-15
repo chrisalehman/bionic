@@ -31,6 +31,12 @@ SWEEPER="$HERE/session-sweeper.sh"
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-orders-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
+# THE NAME A SESSION'S TRANSCRIPT IS FILED UNDER is lib/detect.sh `project_slug`'s, over the PHYSICAL path, the one
+# encoder own_transcript asks (wave-37 T5; D9, cross-gate-agreement §SLUG). The sandbox is a logical path (macOS
+# /var is /private/var), so a copy of the rule over the logical path names a directory own_transcript no longer
+# asks first, and its walk of every project directory then finds another fixture's transcript of the same session.
+so_slug() { bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$HERE/../payload/scripts/lib" "$1" 2>/dev/null; }  # <path>
+
 # expect_status, expect_contains, expect_absent are the framework's
 # (tests/lib/assert.sh) — S9b removed the private shadows here (AC-12); same
 # semantics (contains/absent are literal substring, argument order unchanged).
@@ -438,7 +444,7 @@ section "Section 7: standdown reports LIVENESS beside a held row, and still writ
 
 R8="$(make_repo liveness)"
 R8CFG="$SANDBOX/liveness-cfg"
-R8SLUG=$(printf '%s' "$R8" | sed 's/[^a-zA-Z0-9]/-/g')
+R8SLUG=$(so_slug "$R8")
 mkdir -p "$R8CFG/projects/$R8SLUG"
 R8TR="$R8CFG/projects/$R8SLUG/$SID.jsonl"
 
@@ -605,7 +611,7 @@ section "Section 8: stopped <name> acks the row it stops; standdown drops a row 
 # closes `landed`, UNMET closes `abandoned`, any other state is refused, naming it. The ack it writes is `--by human`, never `--by patrol`: this is a
 # deliberate model-callable verb, not the tick's own automated sweep.
 R9="$(make_repo stopped)"
-R9SLUG=$(printf '%s' "$R9" | sed 's/[^a-zA-Z0-9]/-/g')
+R9SLUG=$(so_slug "$R9")
 mkdir -p "$R8CFG/projects/$R9SLUG"
 R9TR="$R8CFG/projects/$R9SLUG/$SID.jsonl"
 so_roster_row "$R9" "open-one" ".bionic/docs/record/never.md" "" "open-one@session-6c85684c"
@@ -698,7 +704,7 @@ expect_contains "…and says so" "the target comes first" "$ERR"
 
 # ---------- standdown: an acked row keeps its address until a FRESH panel shows it gone ----------
 R10="$(make_repo standdown-acked)"
-R10SLUG=$(printf '%s' "$R10" | sed 's/[^a-zA-Z0-9]/-/g')
+R10SLUG=$(so_slug "$R10")
 mkdir -p "$R8CFG/projects/$R10SLUG"
 R10TR="$R8CFG/projects/$R10SLUG/$SID.jsonl"
 so_roster_row "$R10" "acked-live" ".bionic/docs/record/n1.md" "" "acked-live@session-6c85684c"
@@ -736,7 +742,7 @@ echo work > "$R11/.worktrees/acked-gone-lease/work.txt"
 git -C "$R11/.worktrees/acked-gone-lease" add -A >/dev/null 2>&1
 git -C "$R11/.worktrees/acked-gone-lease" commit -qm "acked-gone-lease work" >/dev/null 2>&1
 
-R11SLUG=$(printf '%s' "$R11" | sed 's/[^a-zA-Z0-9]/-/g')
+R11SLUG=$(so_slug "$R11")
 mkdir -p "$R8CFG/projects/$R11SLUG"
 R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
 # THE DELIVERABLE IS WRITTEN (wave-19 T1f, review R2-1). Before T1f this row's n3.md was never
@@ -787,7 +793,7 @@ echo partial > "$R12/.worktrees/half-done/partial.txt"
 git -C "$R12/.worktrees/half-done" add -A >/dev/null 2>&1
 git -C "$R12/.worktrees/half-done" commit -qm "half-done WIP" >/dev/null 2>&1
 
-R12SLUG=$(printf '%s' "$R12" | sed 's/[^a-zA-Z0-9]/-/g')
+R12SLUG=$(so_slug "$R12")
 mkdir -p "$R8CFG/projects/$R12SLUG"
 R12TR="$R8CFG/projects/$R12SLUG/$SID.jsonl"
 # The deliverable is never written: the row is UNMET when its agent goes.
@@ -838,7 +844,7 @@ section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, a
 # fact the panel cannot speak to either way (it lists this session's roster of agents, not
 # the processes one may have started), so that shape stays refused even panel-gone.
 R13="$(make_repo stopped-still-live)"
-R13SLUG=$(printf '%s' "$R13" | sed 's/[^a-zA-Z0-9]/-/g')
+R13SLUG=$(so_slug "$R13")
 mkdir -p "$R8CFG/projects/$R13SLUG"
 R13TR="$R8CFG/projects/$R13SLUG/$SID.jsonl"
 s13_ledger() { cat "$R13/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
@@ -919,7 +925,7 @@ echo partial > "$R14/.worktrees/still-working/partial14.txt"
 git -C "$R14/.worktrees/still-working" add -A >/dev/null 2>&1
 git -C "$R14/.worktrees/still-working" commit -qm "still-working WIP" >/dev/null 2>&1
 
-R14SLUG=$(printf '%s' "$R14" | sed 's/[^a-zA-Z0-9]/-/g')
+R14SLUG=$(so_slug "$R14")
 mkdir -p "$R8CFG/projects/$R14SLUG"
 R14TR="$R8CFG/projects/$R14SLUG/$SID.jsonl"
 R14PROG="$R14/.bionic/docs/record/progress14.md"
@@ -1047,7 +1053,7 @@ git -C "$R16/.worktrees/fu-closed" commit -qm "fu-closed work" >/dev/null 2>&1
 # ITS OWN CONFIG DIR: the sweeper reads the first project folder holding this session's
 # transcript, and R8CFG holds one per section above, so a shared dir would hide this send.
 R16CFG="$SANDBOX/r16-config"
-R16SLUG=$(printf '%s' "$R16" | sed 's/[^a-zA-Z0-9]/-/g')
+R16SLUG=$(so_slug "$R16")
 mkdir -p "$R16CFG/projects/$R16SLUG"
 R16TR="$R16CFG/projects/$R16SLUG/$SID.jsonl"
 r16_orders() {  # <args…> — run_orders_cfg with this section's config dir
@@ -1106,7 +1112,7 @@ done
 # mk-a, mk-c and mk-d land as the line lands a row: merged onto the working branch, the merge the landed commit.
 for t in mk-a mk-c mk-d; do git -C "$R17" merge -q --no-ff -m "merge $t (land)" "$t" >/dev/null 2>&1; done
 R17_L="$(git -C "$R17" rev-parse HEAD)"
-R17SLUG=$(printf '%s' "$R17" | sed 's/[^a-zA-Z0-9]/-/g')
+R17SLUG=$(so_slug "$R17")
 mkdir -p "$R8CFG/projects/$R17SLUG"
 R17TR="$R8CFG/projects/$R17SLUG/$SID.jsonl"
 echo done > "$R17/.bionic/docs/record/mk-a.md"
@@ -1172,7 +1178,7 @@ for t in mk-e mk-f; do
 done
 for t in mk-e mk-f; do git -C "$R18" merge -q --no-ff -m "merge $t (land)" "$t" >/dev/null 2>&1; done
 R18_L="$(git -C "$R18" rev-parse HEAD)"
-R18SLUG=$(printf '%s' "$R18" | sed 's/[^a-zA-Z0-9]/-/g')
+R18SLUG=$(so_slug "$R18")
 mkdir -p "$R8CFG/projects/$R18SLUG"
 R18TR="$R8CFG/projects/$R18SLUG/$SID.jsonl"
 for t in mk-e mk-f; do

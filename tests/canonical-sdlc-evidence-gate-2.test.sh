@@ -3850,10 +3850,14 @@ DP_B="$(git -C "$RDP" rev-parse HEAD)"
 DP_C1="$(fp_commit "$RDP" a.sh one)"
 DP_C2="$(fp_commit "$RDP" a.sh two)"
 DP_PLAN="$(fp_plan_path "$RDP")"
-DP_CFG="$FP_ROOT/dp-config"; mkdir -p "$DP_CFG/projects/fixture" "$DP_CFG/bionic" "$FP_ROOT/dp-home" "$FP_ROOT/dp-gate"
+DP_CFG="$FP_ROOT/dp-config"; mkdir -p "$DP_CFG/bionic" "$FP_ROOT/dp-home" "$FP_ROOT/dp-gate"
+# The transcript under the repository's own name (lib/detect.sh `project_slug`) and the session's load record
+# under it: the two witnesses the words reader asks for (wave-37 T5; D9, session-poker-4 §WITNESS).
+DP_PROJ="$DP_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$FP_LIB" "$RDP")"; mkdir -p "$DP_PROJ"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RDP" > "$RDP/.bionic/tmp/loaded-$FP_SID.state"
 dp_typed() {  # <prompt> -> one typed prompt appended to the session's transcript
   jq -cn --arg c "$1" --arg s "$FP_SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
-    message: {role: "user", content: $c}, sessionId: $s}' >> "$DP_CFG/projects/fixture/$FP_SID.jsonl"
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$DP_PROJ/$FP_SID.jsonl"
 }
 dp_typed "defer the side path finding to the next wave please"
 dp_typed "defer the parser crash finding as well"
