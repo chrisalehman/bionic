@@ -3916,7 +3916,7 @@ PFC_OUT=""; PFC_ART=""
 poker_files_cell() {
   local id="$1" kind="$2" agent="$3" files="$4" repo="$5" plan="$6" fact cell_facts=""
   PFC_OUT="$files"; PFC_ART=""
-  if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact)" ]; then
+  if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact "$id")" ]; then
     PFC_ART="$(docs_root "$repo")/record/$(basename "$plan" .plan.md)/$id.md"
     case "$PFC_ART" in "$repo"/*) PFC_ART="${PFC_ART#"$repo"/}" ;; esac
     case "$files" in ''|'—'|'-') PFC_OUT="$PFC_ART" ;; *) PFC_OUT="$files, $PFC_ART" ;; esac
@@ -4058,18 +4058,24 @@ poker_brief_suites() {
     print out }'
 }
 
-# poker_brief_record_entry <Files cell> <artifact|progress> -> the first entry under record/ that is the row's
-# artifact (not a progress file, not assumptions.md) or its progress file (ends .progress.md); nothing when none.
+# poker_brief_record_entry <Files cell> <artifact|progress|named> <row id> -> an entry under record/ for the row; nothing
+# when none. THE ONE RULE FOR A ROW'S RECORD (wave-37 T6; REQ-7 AC-7.1, AC-7.2; D10), read by `brief` and judged by
+# `task-set files=`: `named` is the entry whose basename is <row>.md or starts <row>- (never a progress file);
+# `artifact` is the named entry, else the first entry that is neither a progress file nor assumptions.md; `progress`
+# is the first entry ending .progress.md.
 poker_brief_record_entry() {
-  printf '%s' "$1" | awk -F',' -v kind="$2" '{
+  printf '%s' "$1" | awk -F',' -v kind="$2" -v row="$3" '{
     for (i = 1; i <= NF; i++) {
       e = $i; gsub(/`/, "", e); sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e)
       if (e == "" || e ~ /[ \t]/ || index(e, "record/") == 0 || substr(e, length(e) - 2) != ".md") continue
       n = split(e, p, "/"); b = p[n]
       isprog = (length(b) > 12 && substr(b, length(b) - 11) == ".progress.md")
-      if (kind == "progress" ? isprog : (!isprog && b != "assumptions.md")) { print e; exit }
+      if (kind == "progress") { if (isprog) { print e; exit } continue }
+      if (isprog || b == "assumptions.md") continue
+      if (row != "" && (b == row ".md" || index(b, row "-") == 1)) { print e; hit = 1; exit }
+      if (fb == "") fb = e
     }
-  }'
+  } END { if (!hit && kind == "artifact" && fb != "") print fb }'
 }
 
 # poker_brief_task_record <task text> -> the first record path the text names (a token holding record/ and ending .md); nothing when none.
@@ -8839,7 +8845,11 @@ EOF
     if [ "$VERB" = task-set ]; then
       PV_BAD=""
       for _pv_l in ${PV_COLS:-}; do
-        units_has_column "$PV_PLAN" "$_pv_l" || PV_BAD="${PV_BAD:+$PV_BAD, }$_pv_l"
+        # `artifact` is the row's record cell (wave-37 T6; D10): the refusal below names `artifact=<path>` as the remedy, so the
+        # header's own cell takes it, though the units control line lists only the contract columns.
+        units_has_column "$PV_PLAN" "$_pv_l" \
+          || { [ "$_pv_l" = artifact ] && pv_header_cells "$PV_PLAN" tasks | /usr/bin/grep -ix artifact >/dev/null; } \
+          || PV_BAD="${PV_BAD:+$PV_BAD, }$_pv_l"
       done
       if [ -n "$PV_BAD" ]; then
         die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $PV_BAD; the plan is unchanged."
@@ -8875,6 +8885,18 @@ EOF
             fi
             poker_files_cell "$PV_SET_ID" "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $3 }')" \
               "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $5 }')" "${_pv_a#*=}" "$PV_REPO" "$PV_PLAN" || exit $?
+            # A RECORD ROW KEEPS ITS ARTIFACT (wave-37 T6; REQ-7 AC-7.3; D10; A-T6-1): a row whose cell names an entry for
+            # it, or which carries an `artifact` cell, is not left with neither, by the one rule `brief` reads.
+            _pv_art="$(poker_brief_cell "$PV_PLAN" Tasks "$PV_SET_ID" artifact)" || _pv_art=""
+            _pv_had="$_pv_art"
+            for _pv_b in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+              case "$(printf '%s' "${_pv_b%%=*}" | tr '[:upper:]' '[:lower:]')" in artifact) _pv_art="${_pv_b#*=}" ;; esac
+            done
+            if { ! poker_brief_none "$_pv_had" || [ -n "$(poker_brief_record_entry "$(units_field "$_pv_row" Files)" named "$PV_SET_ID")" ]; } \
+               && poker_brief_none "$_pv_art" && [ -z "$(poker_brief_record_entry "$PFC_OUT" named "$PV_SET_ID")" ]; then
+              die "task-set refused — Files leaves $PV_SET_ID with no artifact: name a record $PV_SET_ID-<name>.md in Files or set artifact=<path>"
+              exit 1
+            fi
             _pv_a="${_pv_a%%=*}=$PFC_OUT"
           fi
           _pv_new="$_pv_new"$'\037'"$_pv_a"
@@ -9897,13 +9919,18 @@ $HO_AGENTS"; fi
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
     BRF_OUT="$BRF_RECDIR/briefs/$BRF_ID.md"
 
-    # THE ARTIFACT: the ledger's cell for the row, then Files, then the record the task names. One path or nothing.
+    # THE ARTIFACT (wave-37 T6; REQ-7 AC-7.1; D10): the row's own `artifact` Tasks cell, the ledger's cell for the
+    # row, the Files entry named for the row, the first record entry, then the record the task names. One path or nothing.
     BRF_ART=""
+    BRF_ACELL="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" artifact)" || BRF_ACELL=""
+    if ! poker_brief_none "$BRF_ACELL"; then
+      case "$BRF_ACELL" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_ACELL" ;; esac
+    fi
     BRF_LEDGER="$(poker_brief_cell "$PV_PLAN" "Dispatch ledger" "$BRF_ID" artifact)" || BRF_LEDGER=""
-    if ! poker_brief_none "$BRF_LEDGER"; then
+    if [ -z "$BRF_ART" ] && ! poker_brief_none "$BRF_LEDGER"; then
       case "$BRF_LEDGER" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_LEDGER" ;; esac
     fi
-    [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_record_entry "$BRF_FILES" artifact)"
+    [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_record_entry "$BRF_FILES" artifact "$BRF_ID")"
     [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_task_record "$BRF_TASK")"
     # A READER ROW'S ARTIFACT IS ITS RECORD (wave-35 T8; REQ-6 AC-6.1; D15): a verify, test or review row that
     # names none writes <record dir>/<row>.md, the progress artifact's convention, and its Files line carries it.
@@ -9952,7 +9979,7 @@ $HO_AGENTS"; fi
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
     BRF_LEFT=""
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
-    BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress)"
+    BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
     [ -n "$BRF_PROG" ] || BRF_PROG="$BRF_RECREL/$BRF_ID.progress.md"
     while IFS= read -r BRF_L; do
       case "$BRF_L" in
