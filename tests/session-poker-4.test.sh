@@ -21,6 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -1088,12 +1089,18 @@ section "§MOVE: a finding crosses the line only on words the user typed in this
 # FIXTURE FIDELITY. The transcript is assembled from tests/fixtures/transcript-move/, one file per kind
 # of entry, its key sets measured on CLI 2.1.291 transcripts and every word invented (that directory's
 # README). It sits where the CLI writes one, `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session id>.jsonl`,
-# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts. Every
+# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts; the slug
+# is §SEV's repository's own name (lib/detect.sh `project_slug`), and the session's load record sits
+# under that root, the two witnesses the words reader asks for (wave-37 T5; D9, §WITNESS). Every
 # decoy carries the words the typed prompt carries (MOVE-<kind>-pre), so a reader that counted it would
 # find them. The findings are registered by the real verb on §SEV's repository and plan.
 MV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 MV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
-MV_CFG="$TMPROOT/mv-cfg"; MV_PROJ="$MV_CFG/projects/-work-project"; mkdir -p "$MV_PROJ"
+MV_CFG="$TMPROOT/mv-cfg"
+MV_PROJ="$MV_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RSEV")"
+mkdir -p "$MV_PROJ"
+mv_loaded() { printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RSEV" > "$RSEV/.bionic/tmp/loaded-$1.state"; }  # <sid>
+mv_loaded "$SID"
 export CLAUDE_CONFIG_DIR="$MV_CFG"
 MV_TX="$MV_PROJ/$SID.jsonl"
 MV_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
@@ -1102,10 +1109,11 @@ MV_P='defer the flag wording until the next wave, it can wait'
 MV_Q='and move the third one to fix now'
 MV_F='start the review of the parser'
 mv_tx() { local f; cat "$MV_FX/frame.jsonl" > "$MV_TX"; for f in "$@"; do cat "$MV_FX/$f.jsonl" >> "$MV_TX"; done; }
-mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config
-  # the library finds session.sh beside itself; a mutant copy in another directory has none, so it is
-  # given the session function first (the library itself is run as the verb meets it, alone)
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || . "$3"; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}/session.sh}" 2>/dev/null
+mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config, in §SEV's root
+  # the library finds session.sh, root.sh and detect.sh beside itself; a mutant copy in another directory
+  # has none, so it is given their functions first (the library itself is run as the verb meets it, alone)
+  ( cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || { . "$3/session.sh"; . "$3/root.sh"; . "$3/detect.sh"; } >/dev/null 2>&1; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' \
+    _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}}" 2>/dev/null )
 }
 mv_id() { printf 'record/wave-01-fixture/%s.md#%s' "$1" "${2:-1}"; }
 mv_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(mv_id "$1") "; }
@@ -1461,11 +1469,12 @@ said_bind() {  # <sid> <act> -> bind_plan's rc and BIND_SESSION, as the binding 
   bash -c '. "$1/run.sh" && . "$1/binding.sh" || exit 9; bind_plan "$2" "$3" "$4" "$5"; st=$?; printf "%s|%s" "$st" "${BIND_SESSION:-}"' \
     _ "$SAID_LIBDIR" "$RSEV" "$1" "$PSEV" "$2" 2>/dev/null
 }
-said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
-    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null
+said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config, in §SEV's root
+  ( cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$4/root.sh"; . "$4/detect.sh" >/dev/null 2>&1; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
+    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null )
 }
 jq -c --arg p "Thanks. $SAID_WA, it is not urgent." '.message.content = $p' "$MV_FX/typed.jsonl" | cat "$MV_FX/frame.jsonl" - > "$MV_PROJ/$SAID_A.jsonl"
+mv_loaded "$SAID_A"
 mv_tx typed
 expect_eq "SAID-0 precondition: the predecessor binds by engage, this session by bind; each line is recorded" "0|recorded 0|recorded" \
   "$(said_bind "$SAID_A" engage) $(said_bind "$SID" bind)"
@@ -1577,7 +1586,7 @@ rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "e
 rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
 rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
 rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
-RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=30s · killed=0"
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=30s · killed=0"
 rp_report
 expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, waits over the project's requests" \
   "0|$RP_RTL_LINE" "$RC|$(rp_line)"
@@ -1612,18 +1621,18 @@ rp_world rp-even
 rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
 rp_report
 expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
-  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$(rp_line)"
 rp_world rp-one
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
 rp_report
 expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
-  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$(rp_line)"
 # Empty and absent records: the line with zeros, exit 0.
 rp_world rp-empty
 rp_report
-RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
 expect_eq "RTL7 an empty record prints the line with zeros and exits 0" "0|$RP_ZERO" "$RC|$(rp_line)"
 rm -f "$S60_REC"
 rp_report --rows
@@ -1669,7 +1678,7 @@ sed "s/^holder=.*/holder=$RP_LIVE:$RP_LIVE_START/" "$RP_GATE/requests/4" > "$RP_
 expect_contains "RK0 precondition: request 4's holder is the live sleeper, by pid and start" "holder=$RP_LIVE:" "$(cat "$RP_GATE/requests/4")"
 rp_report --rows
 expect_eq "RK1 a queue, a hand and a git landing each count under their own kind; green, red, none, discarded and red-then-green each as planted; two runs killed" \
-  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2" \
+  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2" \
   "$(rp_line)"
 expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
   "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
@@ -1682,7 +1691,7 @@ rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
 rp_ev "ev=ready|row=T9|at=not-a-time"
 rp_report
 expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
-  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
   "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
 
 # ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
@@ -1696,7 +1705,7 @@ expect_eq "RP1 a record with no published event: the tick prints no landings lin
 rp_pub T1 queue 10:30:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
-  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
 rp_tick
 expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
 expect_eq "RP3b …and prints no landings line: an unchanged tick is the one line the Patrol ends on, \"printed only unchanged: end it\" (wave-28 T62; T68 folded RK-T3 into this row)" "" "$(rp_tl)"
@@ -1721,7 +1730,7 @@ printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/confi
 BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
 expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
 expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
-  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
   "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
@@ -1777,13 +1786,13 @@ expect_eq "RK-K4 a red at one candidate and a green at the next (no ready betwee
 # ---------- (2) the landings line prints on a tick that is not unchanged ----------
 rp_world rk-tick
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
-RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T1 a tick that prints in full (no digest yet) carries the landings line" "$RK_LINE" "$(rp_tl)"
 rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T6 the next tick that prints in full carries the line with the new landing's figures" \
-  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
 
 # ---------- (3) a record with no line/v1 event is unmeasured, never zeros ----------
 RK_UNM="landings: unmeasured — the landing record holds no line/v1 events"
@@ -1852,7 +1861,7 @@ POKER="$RK_REAL_POKER"
 rp_world rk-mut4
 printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
 POKER="$RD_MUT/nounm/hooks/session-poker.sh"; rp_report --rows
-expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$RC|$OUT"
 POKER="$RK_REAL_POKER"
 rm -rf "$RD_MUT"
@@ -2493,13 +2502,16 @@ expect_regex "MP-f1 §MOVE-FOLD a no-break space, a line separator and a next-li
   "^0\|moved: .* words=\"$MV_P\" session=$SID why=\"the docs pass here\"\$" "$RC|$(mv_moved mv-fix | tail -1)"
 
 # ---------- §MOVE-SELF (ruling 2d): session.sh is found beside the library at source time ----------
+# The working directory moves to §SEV's root, not to `/`: since wave-37 T5 (D9) the words are held to the root of the
+# working directory, whose load record and transcript directory witness the session, and `/` is no root. The rows
+# still prove what they did: a call-time `./` would now name the root, where no library is.
 MP_LIBDIR="${SAID_LIB%/*}"
 expect_eq "MP-d1 §MOVE-SELF the library sourced by a relative path, the working directory then moved: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd "$2"; user_said "$1"; echo "$?"' _ "$MV_P" "$RSEV" 2>/dev/null)"
 expect_eq "MP-d2 …sourced by a bare name, the working directory then moved: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
-expect_eq "MP-d3 …positive, the working directory kept: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd "$2"; user_said "$1"; echo "$?"' _ "$MV_P" "$RSEV" 2>/dev/null)"
+expect_eq "MP-d3 …positive, sourced by its absolute path, the working directory kept at the root: found (rc 0)" "0" \
+  "$(cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$2/said.sh"; user_said "$1"; echo "$?"' _ "$MV_P" "$MP_LIBDIR" 2>/dev/null)"
 
 # ---------- §MOVE-MIN (ruling 2e): "three" is one constant ----------
 MP_MIN="$(bash -c '. "$1" 2>/dev/null; printf "%s" "$SAID_MIN_WORDS"' _ "$SAID_LIB")"
@@ -2741,11 +2753,13 @@ FD_EOF
 fd_runs() { [ -f "$FD_SEEN" ] && awk 'END { print NR + 0 }' "$FD_SEEN" || echo 0; }
 fd_config() { printf '%s\n' "$@" > "$RFD/.bionic/config.yaml"; }  # <line>... -> the project's config, exactly these lines
 fd_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFD" | tail -n 1; }
-# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library sourced first,
-# the checkout the working tree and the project root RFD: the judge itself, for the mutants below.
+# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library and the hash helper
+# (lib/detect.sh, which a doctored copy outside lib/ cannot load from beside itself) sourced first, the checkout the
+# working tree, the plan PFD (its landing record holds the runs) and the project root RFD: the judge itself, for the
+# mutants below.
 fd_attest() {
-  bash -c '. "$1" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
-    _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" 2>/dev/null
+  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
+    _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" "${FD_ROOTS%/*}/detect.sh" "$PFD" 2>/dev/null
 }
 expect_regex "FD-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$FD_W"
 expect_eq "FD-0b precondition: …and holds no tests/*.test.sh roster" "0" \
@@ -2789,14 +2803,14 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-a6 proof-add floor accepts the declared floor's log (exit 0)" "0" "$RC"
 expect_regex "FD-a7 …and writes the proof line at the working head, naming that log" \
-  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
+  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 expect_eq "FD-a8 …which proof_last reads back as the floor at the working head, with no roster counted" "$FD_W" "$(s46_last "$PFD" floor)"
 
 # ---------- AC-17.1: the same log at another head, dirty, red, or with no closing rc= line is refused ----------
 FD_OTHER="0123456789abcdef0123456789abcdef01234567"
-{ printf 'head=%s dirty=0\n' "$FD_OTHER"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-other.log"
+sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
 { printf 'head=%s dirty=2\n' "$FD_W"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-dirty.log"
-{ printf 'head=%s dirty=0\n' "$FD_W"; sed '1d;$d' "$FD_LOG"; printf 'rc=1\n'; } > "$FD_REC/fd-red.log"
+sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD_REC/fd-runner.log"
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
@@ -2898,7 +2912,7 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-c1 AC-7.10 with neither key the floor-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
 expect_regex "FD-c1b …the proof line naming it at the working head" \
-  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
+  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, with no closing rc= line, is refused" 1 "$PFD"
@@ -2948,8 +2962,10 @@ section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirt
 # FIXTURE FIDELITY. The project the filing came from: NO tests/ directory at the working head and NO floor key in
 # .bionic/config.yaml. s42_plan's bound plan, its working branch in a linked worktree: A, a code commit past the base,
 # then H, an empty commit (the working head; A is its ancestor with no change since, so a log at A stands for H). Every
-# other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written by hand,
-# as a project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp.
+# other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written as a
+# project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp. Each log
+# that is to be accepted is written by tests/lib/floor-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
+# the machine recorded no run of is refused (§RUNLINE); the grammar's refusals below are read before any run line.
 FA_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 FA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 FA_ROOTS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roots.sh"
@@ -2982,14 +2998,15 @@ fa_keys() {  # -> "<floor:>|<floor-attestation:>", read by the product's config 
 }
 fa_fact evidence piece; fa_fact structure piece; fa_fact structure whole; fa_fact adversarial piece; fa_fact adversarial whole
 # The logs, as a project's own runner leaves them: `{ echo "head=… dirty=…"; pnpm ci:local; echo "rc=$?"; } > <log>`.
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci.log"
-printf 'head=%s dirty=0\n$ npx playwright test\n38 passed (2.1m)\nrc=0\n' "$FA_H" > "$FA_REC/e2e.log"
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
+printf '$ npx playwright test\n38 passed (2.1m)\n' | floor_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
 printf 'head=%s dirty=0\n$ npx playwright test\n36 passed, 2 failed (2.3m)\nrc=1\n' "$FA_H" > "$FA_REC/e2e-red.log"
 printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\n' "$FA_H" > "$FA_REC/ci-open.log"
 printf 'head=%s dirty=3\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci-dirty.log"
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_A" > "$FA_REC/ci-at-a.log"
-printf 'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin\nhead=%s dirty=0\nRoots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\nrc=0\n' \
-  "$FA_H" > "$FA_REC/run-sh.log"
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
+printf 'Roots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\n' \
+  | floor_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
+    "$PFA" "$FA_REC/run-sh.log" "$FA_H" 0 0
 
 expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H one commit past A that changes no file" \
   '^[0-9a-f]{40} [0-9a-f]{40} 1 0$' \
@@ -3041,21 +3058,21 @@ if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -
 fa_add record/wave-01-fixture/run-sh.log
 expect_eq "FA-a1 AC-7.10 a tests/run.sh log (its preamble before the stamp, its Gating: verdict between) is still accepted, no roster counted (exit 0)" "0" "$RC"
 expect_regex "FA-a1b …the proof line naming it at H" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci-at-a.log
 expect_eq "FA-a2 a hand-run log at A, an ancestor with no change since, is accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a2b …the proof naming A, the head the run read" \
-  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci.log record/wave-01-fixture/e2e.log
 expect_eq "FA-a3 AC-7.10 two logs on one line, both green at H: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a3b …one proof line naming the head they share and both logs" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
 expect_contains "FA-a3c …and the verb says so" \
   "proof-add — kind=floor head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
 fa_add record/wave-01-fixture/ci.log
 expect_eq "FA-a4 AC-7.10 the hand-run log alone, no roster and no key: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a4b …the proof line naming it at H, nothing owed" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-c1 AC-7.10 current 8 passes on that proof (exit 0, the plan at 8)" "0|8" "$RC|$(fa_now)"
@@ -3419,9 +3436,13 @@ section "§REPLAY §NEXT-CALL §FILL-VERBS: every hand edit wave-32 made to its 
 PV7_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 PV7_HOOK="$(cd "$(dirname "$POKER")" && pwd)/session-poker.sh"
 PV7_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
-PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects/-pv7-project"
+PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects"
 export CLAUDE_CONFIG_DIR="$PV7_CFG"
-PV7_TX="$PV7_CFG/projects/-pv7-project/$SID.jsonl"
+PV7_TX=""
+pv7_at() {  # <repo> -> this session's transcript under the repo's own name, and its load record there: the two witnesses (wave-37 T5; D9)
+  PV7_TX="$PV7_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$1")/$SID.jsonl"; mkdir -p "${PV7_TX%/*}"
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$1" > "$1/.bionic/tmp/loaded-$SID.state"
+}
 PV7_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 pv7_prompts() {  # <prompt>... -> this session's transcript: the frame, then one typed prompt each
   local p; cat "$PV7_FX/frame.jsonl" > "$PV7_TX"
@@ -3488,7 +3509,7 @@ pv7_refused "RP-2g an evidence value outside record/" 1 "record/" "$R7" "$P7" ma
 pv7_refused "RP-2h one invalid key refuses the whole call: the valid status beside it is not written" 1 "" "$R7" "$P7" matrix-set AC-1.2 status=blocked tier=T1
 
 # ---------- §REPLAY waive-row: the row waiver on the user's words (wave-32 plan:256, 311, 324, 337; A-orch-49) ----------
-pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
+pv7_at "$R7"; pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
 poke "$R7" waive-row AC-1.1 'I waive all 4' 'the requirement is amended next wave'
 expect_eq "RP-3 §REPLAY waive-row exits 0" "0" "$RC"
 expect_eq "RP-3b …the row's status reads waived, its other cells as they were" "| AC-1.1 | T2 | waived | — | — |" "$(/usr/bin/grep '^| AC-1\.1 ' "$P7")"
@@ -3691,7 +3712,7 @@ poke "$RMH" matrix-set AC-2.11 task=T5
 expect_eq "MH-2d …and matrix-set AC-2.11 writes the AC-2.11 block alone" "0|  task: T5|  task: T5" \
   "$RC|$(mr_block "$PMH" AC-2.11 | /usr/bin/grep '^  task:')|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
 
-pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
+pv7_at "$RMH"; pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
 poke "$RMH" waive-row AC-2.1 'I waive AC-2.1' 'the requirement is amended next wave'
 expect_eq "MH-3 waive-row finds the block under a heading with text (exit 0)" "0" "$RC"
 expect_regex "MH-3b …the waiver line is in AC-2.1's block" '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive AC-2.1" — the requirement is amended next wave$' \
@@ -4204,7 +4225,8 @@ expect_absent "BR-5f …and none of those labels is written into the file as pro
 # scratch HOME and a fixture attestation, patrol stamp and engagement, as dispatch-preflight.test.sh's own
 # fixtures do; an allowed dispatch journals a roster row, which is the positive that the wall really lifted
 # the brief's fields.
-BR_HOME="$TMPROOT/brief-home"; mkdir -p "$BR_HOME/.claude/projects/-brief"; : > "$BR_HOME/.claude/projects/-brief/$SID.jsonl"
+BR_HOME="$TMPROOT/brief-home"; BR_PROJ="$BR_HOME/.claude/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RBR")"  # the repo's own name (wave-37 T5)
+mkdir -p "$BR_PROJ"; : > "$BR_PROJ/$SID.jsonl"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBR/.bionic/tmp/patrol-$SID.state"
 printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBR" > "$RBR/.bionic/tmp/preflight-$SID.state"
 BR_GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
@@ -5236,7 +5258,7 @@ expect_true "FN-1f …and the plan is byte-identical: the verb runs and logs, an
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W.log"
 expect_eq "FN-2 AC-1.8 proof-add floor accepts floor-run's log of a red whole run (exit 0)" "0" "$RC"
 expect_regex "FN-2b …and writes the floor proof at the working head, b.test.sh owed" \
-  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh$" "$(fn_proved)"
+  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
 
 # ---------- a second whole run: refused, naming the owed suite and the approval ----------
 s42_snap "$RFN" "$PFN"
@@ -5257,7 +5279,7 @@ expect_eq "FN-4b …its log the second at the head, opening head= dirty=0 and cl
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W-2.log"
 expect_eq "FN-4c AC-1.8 proof-add floor accepts the green run's log, nothing owed" "0|0" \
   "$RC|$(fn_proved | /usr/bin/grep -c ' owed=' | tr -d ' ')"
-expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log$" "$(fn_proved)"
+expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
 
 # ---------- a proved head: refused, nothing run ----------
 s42_snap "$RFN" "$PFN"
@@ -5576,11 +5598,15 @@ printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=/fi
   > "$RFX/.bionic/docs/$FX_REC/landing-proofs.log"
 ( cd "$RFX" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
 bound_marker "$RFX" "$SID" "$PFX" >/dev/null 2>&1
-FX_CFG="$TMPROOT/fx-cfg"; mkdir -p "$FX_CFG/projects/fixture"
+FX_CFG="$TMPROOT/fx-cfg"
+# The transcript under the repository's own name and the session's load record under it: the two witnesses
+# the words reader asks for (wave-37 T5; D9, §WITNESS).
+FX_PROJ="$FX_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RFX")"; mkdir -p "$FX_PROJ"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFX" > "$RFX/.bionic/tmp/loaded-$SID.state"
 export CLAUDE_CONFIG_DIR="$FX_CFG"
 fx_typed() {  # <prompt> -> one typed prompt appended to this session's transcript
   jq -cn --arg c "$1" --arg s "$SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
-    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_CFG/projects/fixture/$SID.jsonl"
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_PROJ/$SID.jsonl"
 }
 fx_typed "defer the side path finding to the next wave please"
 fx_typed "defer the message wording as well please"
@@ -5875,5 +5901,270 @@ expect_eq "LIST-2c the planted copy differs from roster.sh by exactly the one pl
 expect_eq "LIST-2d a planted key in neither set goes red: it is the one the census reports" "zzplanted" \
   "$(ls_unclassified "$LS_PLANT" | tr '\n' ' ' | sed 's/ $//')"
 rm -f "$LS_PLANT"
+
+# ============================================================
+section "§RUNLINE: a floor proof cites a run the machine recorded: floor-run writes one ev=run line beside its log, and proof-add floor accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
+# ============================================================
+#
+# THE RUN LINE (ADR-057): `floor-run`, right after it writes its log, appends to the plan's landing record
+#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+# and lib/proof.sh `_proof_floor_log` keeps the floor's grammar as its first check, then requires one `ev=run` line
+# naming the log whose head=, rc= and sha256= match the file as it is now. A log no run line names is refused "no run
+# recorded for this log"; a log edited after its run is refused "the log changed since its run"; the accepted proof
+# line ends `run=<at> head=<sha> rc=<n>`, naming the run it read (AC-6.2). booked.test.sh §RUNLINE proves the other
+# writer, booked.sh's run close, parses by the same reader, and carries the mutant (a hash mismatch accepted).
+# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add floor.
+#
+# FIXTURE FIDELITY. §FLOOR-DECLARED's shape: s42_plan's bound plan, its working branch in a linked worktree one empty
+# commit past the main checkout, NO tests/ directory, and a declared `floor:` command (a script this section writes)
+# that floor-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
+RL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRL="$(make_repo runline)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
+PRL="$(s42_plan "$RRL" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
+( cd "$RRL" && git add -f "$PRL" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RRL/.worktrees/01-fixture" \
+  && git -C "$RRL/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+RL_WT="$RRL/.worktrees/01-fixture"
+RL_W="$(git -C "$RL_WT" rev-parse HEAD 2>/dev/null)"
+RL_REC="$RRL/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RL_REC"
+RL_RECORD="$RL_REC/landing-proofs.log"
+RL_STUB="$TMPROOT/rl-floor.sh"
+printf '#!/bin/bash\necho "floor: 2 passed, 0 failed"\nexit 0\n' > "$RL_STUB"
+printf 'floor: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+rl_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PRL" | tail -n 1; }
+rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
+rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
+expect_regex "RL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$RL_W"
+expect_eq "RL-0b precondition: …its checkout is clean, and the record holds no run line yet" "|0" \
+  "$(git -C "$RL_WT" status --porcelain 2>/dev/null)|$(rl_runs | awk 'END { print NR + 0 }')"
+
+# ---------- AC-6.1: a hand-written log at the real head, rc=0, no run line: refused ----------
+printf 'head=%s dirty=0\n$ make check\nall green\nrc=0\n' "$RL_W" > "$RL_REC/hand.log"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor record/wave-01-fixture/hand.log
+s42_unchanged "RL-1 AC-6.1 a hand-written log opening head=<the real working head> dirty=0 and ending rc=0, no run recorded" 1 "$PRL"
+expect_contains "RL-1b …refused naming the missing fact" "no run recorded for this log" "$OUT"
+expect_contains "RL-1c …and the log it read" "hand.log" "$OUT"
+
+# ---------- AC-6.1: floor-run writes the log and its run line; proof-add floor accepts it, naming the run ----------
+poke "$RRL" floor-run
+RL_LOG="$RL_REC/floor-run-$RL_W.log"
+expect_eq "RL-2 floor-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
+RL_SHA="$(rl_sha "$RL_LOG")"
+expect_regex "RL-2b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
+expect_eq "RL-3 …and appends exactly one run line to the plan's landing record" "1" "$(rl_runs | awk 'END { print NR + 0 }')"
+expect_regex "RL-3b …in the grammar: the log by its record path, the head, dirty, rc, the log's sha256 and when" \
+  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/floor-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "$(rl_runs | tail -n 1)"
+RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
+expect_eq "RL-4 AC-6.1 proof-add floor accepts the log its run line matches (exit 0)" "0" "$RC"
+expect_regex "RL-4b AC-6.2 …and the proof line names the run it read: run=<its at> head=<sha> rc=<n>" \
+  "^proved: kind=floor head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
+  "$(rl_proved)"
+
+# ---------- AC-6.1: the same log edited after its run: refused on the hash ----------
+sed 's/2 passed/3 passed/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.tmp" "$RL_LOG"
+expect_false "RL-5-pre precondition: the edit changed the log's hash" test "$(rl_sha "$RL_LOG")" = "$RL_SHA"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
+s42_unchanged "RL-5 AC-6.1 the floor-run log edited after its run" 1 "$PRL"
+expect_contains "RL-5b …refused naming the fact" "the log changed since its run" "$OUT"
+expect_contains "RL-5c …the log, and the hash its run recorded" "floor-run-$RL_W.log" "$OUT"
+expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
+
+# ---------- AC-6.2: landing-report lists the floor run among the run's runs ----------
+mkdir -p "$TMPROOT/rl-gate"
+BIONIC_GATE_DIR="$TMPROOT/rl-gate" poke "$RRL" landing-report "$PRL"
+expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run line under runs: as run=1 (§REPORT-RTL pins run=0 on records with none)" \
+  "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 · ' | tr -d ' ')"
+
+POKE_BOUND="$RL_BOUND_WAS"
+
+
+# ============================================================
+section "§WITNESS: a session's words count only when the project witnesses the session — its transcript under this root's own directory, its load record under this root (wave-37 T5; REQ-5 AC-5.1, AC-5.2, AC-5.3; D9, ADR-058)"
+# ============================================================
+#
+# The three verbs that act on what the user typed — finding-move, waive-row and rule --words — read the
+# transcripts of the sessions the plan's `- session:` lines name, then this session's (lib/said.sh
+# `user_said`). A `- session:` line is plan text, and one appended by hand reads exactly as one a binding act
+# wrote; before D9 the transcript was then found under ANY project's directory. Now a session counts only
+# when the project witnesses it: its transcript is `<config>/projects/<project_slug root>/<sid>.jsonl` (or
+# under the slug of the start cwd its load record names), by exact name, and `.bionic/tmp/loaded-<sid>.state`
+# exists under this root. A session failing either is refused, and the refusal names it with the missing
+# witness, `refused: <sid> (<reason>)`, beside `read: <sids>`. The threat is a hand or an agent appending a
+# plan line, not a forger editing the config directory (spec §5).
+#
+# FIXTURE FIDELITY. §FX's shape: a real repository on its working branch, the plan and its registered reading
+# in their writers' shapes (proof.sh `proof_line`), a matrix row with its block, the session bound by the real
+# `bound_marker`, a writer row from the production row writer for `rule`. The other session's `- session:` line
+# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`). Every transcript is the
+# CLI's typed-prompt shape (tests/fixtures/transcript-move/typed.jsonl) under a config dir of this section's;
+# the load record is session-start's shape (`root=`, `started=`, `cwd=`).
+WT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+WT_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+WT_REC="record/wave-01-fixture"
+WT_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+WT_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+RWT="$TMPROOT/witness"; mkdir -p "$RWT"
+( cd "$RWT" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+  && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+RWT="$(cd "$RWT" && pwd -P)"
+mkdir -p "$RWT/.bionic/tmp" "$RWT/.bionic/docs/$WT_REC" "$RWT/.bionic/docs/plans/epic-99-fixture" "$RWT/.bionic/docs/specs/epic-99-fixture" "$RWT/sub"
+: > "$RWT/.bionic/tmp/engaged-$SID.state"
+WT_B="$(git -C "$RWT" rev-parse HEAD)"
+printf 'one\n' > "$RWT/a.sh"; ( cd "$RWT" && git add a.sh && git commit -qm a ) >/dev/null 2>&1
+WT_C1="$(git -C "$RWT" rev-parse HEAD)"
+PWT="$RWT/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+printf '# requirements\n' > "$RWT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# spec\n' > "$RWT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+{ printf 'question: adversarial\nresult: flag\nscope: piece\nreviewed: %s..%s\nfindings: 2\n' "${WT_B:0:10}" "${WT_C1:0:10}"
+  printf '%s\n' 'finding: 1 S3 off - a message could be clearer' 'finding: 2 S3 off - a second message could be clearer'
+  printf '\nwhat the reader found\n'; } > "$RWT/.bionic/docs/$WT_REC/adv.md"
+WT_PROVED="$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" adversarial w-read flag piece' _ "$WT_LIB" "$WT_C1" "$WT_REC/adv.md")"
+# The other session, and the line a hand appends for it.
+WT_X="5a1d0000-0000-4000-8000-0000000000b7"
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+  printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+  printf 'walk: exempt\ndeploy_target: n/a\n'
+  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+  printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+  printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n'
+  printf -- '- session: %s bound 2026-10-14T00:00:00Z by bind\n\n' "$WT_X"
+  printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+  printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+  printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+  printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${WT_B:0:10}"
+  printf -- '- T1: landed at record/T1.md\n'
+  printf '%s\n' "$WT_PROVED"
+  printf '\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+} > "$PWT"
+( cd "$RWT" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RWT" "$SID" "$PWT" >/dev/null 2>&1
+new_roster "$RWT"
+roster_row_fixture session="$SID" name=wt-crit agent_id=a-wt-crit subagent_type=bionic:critic >> "$(roster_of "$RWT")"
+WT_CFG="$TMPROOT/wt-cfg"; mkdir -p "$WT_CFG/projects"
+export CLAUDE_CONFIG_DIR="$WT_CFG"
+wt_slug() { bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$WT_LIB" "$1" 2>/dev/null; }  # <path> -> the library's name for it
+WT_SLUG="$(wt_slug "$RWT")"; WT_SUBSLUG="$(wt_slug "$RWT/sub")"
+wt_prompts() {  # <transcript> <prompt>... -> the frame, then one typed prompt each
+  local f="$1" p; shift; mkdir -p "${f%/*}"; cat "$WT_FX/frame.jsonl" > "$f"
+  for p in "$@"; do jq -c --arg p "$p" '.message.content = $p' "$WT_FX/typed.jsonl" >> "$f"; done
+}
+wt_loaded() {  # <sid> [<cwd>] -> the session's load record under the root, in session-start's shape
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "${2:-$RWT}" > "$RWT/.bionic/tmp/loaded-$1.state"
+}
+WT_WM='defer the message wording to the next wave please'
+WT_WW='I waive row AC-1.1 because the live check moves on'
+WT_WR='leave the parser alone until the review lands'
+# This session is witnessed throughout and typed none of the words; the other session typed them all.
+wt_prompts "$WT_CFG/projects/$WT_SLUG/$SID.jsonl" 'start the review of the parser'
+wt_loaded "$SID"
+wt_x_at() {  # <slug> -> the other session's transcript, holding the three prompts, under that slug alone
+  rm -rf "$WT_CFG/projects"/*/"$WT_X.jsonl"
+  wt_prompts "$WT_CFG/projects/$1/$WT_X.jsonl" "$WT_WM" "$WT_WW" "$WT_WR"
+}
+wt_try() {  # <label> <want rc> -> the three verbs on the other session's words; WT_OUT_<verb> their output
+  local label="$1" rc="$2"
+  s42_snap "$RWT" "$PWT"
+  poke "$RWT" finding-move "$WT_REC/adv.md#1" defer "$WT_WM" 'the person deferred it'
+  WT_RC_M="$RC"; WT_OUT_M="$OUT"
+  [ "$rc" = 0 ] || expect_true "$label finding-move — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PWT"
+  s42_snap "$RWT" "$PWT"
+  poke "$RWT" waive-row AC-1.1 "$WT_WW" 'the live check moves to the next wave'
+  WT_RC_W="$RC"; WT_OUT_W="$OUT"
+  [ "$rc" = 0 ] || expect_true "$label waive-row — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PWT"
+  poke "$RWT" rule wt-crit 'leave the parser for now' --words "$WT_WR"
+  WT_RC_R="$RC"; WT_OUT_R="$OUT"
+}
+
+expect_eq "WITNESS-0 precondition: the fixture root's transcript directory name is project_slug's, the CLI's rule over the physical path" \
+  "$(printf '%s' "$RWT" | sed 's/[^a-zA-Z0-9]/-/g')" "$WT_SLUG"
+expect_eq "WITNESS-0b precondition: the plan records the other session (bind_sessions reads the hand-added line)" "$WT_X" \
+  "$(bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2"' _ "$WT_LIB" "$PWT" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- AC-5.1: the words under another project's directory, the session bound and loaded here ----------
+wt_x_at -other-project; wt_loaded "$WT_X"
+expect_contains "WITNESS-1-pre precondition: the other project's transcript carries the move's words, as a raw read finds them" \
+  "$WT_WM" "$(cat "$WT_CFG/projects/-other-project/$WT_X.jsonl")"
+wt_try "WITNESS-1" 1
+expect_eq "WITNESS-1 §WITNESS AC-5.1 finding-move on words typed only under another project's directory is refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-1b …naming the session and the witness it lacks: no transcript under this root's directory" \
+  "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_M"
+expect_contains "WITNESS-1c AC-5.3 …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-1d waive-row on them is refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-1e …naming the session and the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_W"
+expect_eq "WITNESS-1f rule --words on them is refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-1g …naming the session and the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_R"
+
+# ---------- prefix is not equality: the root's name with a character more is another project ----------
+wt_x_at "${WT_SLUG}2"
+wt_try "WITNESS-2" 1
+expect_eq "WITNESS-2 the words under <this root's name>2 (bionic beside bionic2): finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-2b …naming the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_M"
+
+# ---------- AC-5.2: the transcript in place, no load record under this root ----------
+wt_x_at "$WT_SLUG"; rm -f "$RWT/.bionic/tmp/loaded-$WT_X.state"
+wt_try "WITNESS-3" 1
+expect_eq "WITNESS-3 §WITNESS AC-5.2 the transcript under this root's directory but no loaded-<sid>.state: finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-3b …naming the session and the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_M"
+expect_contains "WITNESS-3c AC-5.3 …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-3d waive-row refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-3e …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_W"
+expect_eq "WITNESS-3f rule --words refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-3g …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_R"
+
+# ---------- both witnesses: accepted, by all three ----------
+wt_loaded "$WT_X"
+wt_try "WITNESS-4" 0
+expect_eq "WITNESS-4 §WITNESS the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
+expect_regex "WITNESS-4b …quoting the words with the session they came from" \
+  "^moved: $WT_REC/adv\\.md#1 to=defer by=Dana Fixture at=[0-9T:Z-]+ words=\"$WT_WM\" session=$WT_X why=" \
+  "$(/usr/bin/grep -F "moved: $WT_REC/adv.md#1 " "$PWT")"
+expect_eq "WITNESS-4c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
+expect_contains "WITNESS-4d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
+expect_eq "WITNESS-4e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
+poke "$RWT" rulings wt-crit
+expect_contains "WITNESS-4f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
+
+# ---------- the start cwd: a session started in a subdirectory files its transcript under that name ----------
+wt_x_at "$WT_SUBSLUG"; wt_loaded "$WT_X" "$RWT/sub"
+expect_ne "WITNESS-5-pre precondition: the subdirectory's name is not the root's" "$WT_SLUG" "$WT_SUBSLUG"
+poke "$RWT" finding-move "$WT_REC/adv.md#2" defer "$WT_WM" 'the person deferred it'
+expect_eq "WITNESS-5 the transcript under the slug of the start cwd its load record names: finding-move moves it (exit 0)" "0" "$RC"
+wt_loaded "$WT_X" "$RWT"
+poke "$RWT" rule wt-crit 'leave it again' --words "$WT_WR"
+expect_eq "WITNESS-5b …and with the load record naming the root instead, the same transcript is refused (exit 2)" "2" "$RC"
+expect_contains "WITNESS-5c …naming the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$OUT"
+
+# ---------- the mutation arm (the ownership row's falsifier): the state check dropped ----------
+# A copy of the library whose _said_sessions has no load-record check reads the transcript of a session that
+# never loaded here; the shipped library refuses it. WITNESS-3 goes red under it.
+wt_said() {  # <lib dir> <text> -> "<rc>|<SAID_SESSION>|<SAID_REFUSED>", user_said over the plan, in the root
+  ( cd "$RWT" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/said.sh" 2>/dev/null; user_said "$2" "$3"; printf "%s|%s|%s" "$?" "${SAID_SESSION:-}" "${SAID_REFUSED:-}"' \
+    _ "$1" "$2" "$PWT" 2>/dev/null )
+}
+WT_MUT="$TMPROOT/wt-mut"; mkdir -p "$WT_MUT"; cp "$WT_LIB"/*.sh "$WT_MUT/"
+anchor file payload/scripts/lib/said.sh 'printf '"'"'%s (no loaded-%s.state)\n'"'"
+/usr/bin/grep -vF 'printf '"'"'%s (no loaded-%s.state)\n'"'" "$WT_LIB/said.sh" > "$WT_MUT/said.sh"
+wt_x_at "$WT_SLUG"; rm -f "$RWT/.bionic/tmp/loaded-$WT_X.state"
+expect_eq "WITNESS-mut0 the mutant differs from the library by the one state check" "1" "$(diff "$WT_LIB/said.sh" "$WT_MUT/said.sh" | /usr/bin/grep -c '^<')"
+expect_eq "WITNESS-mut1 the shipped library refuses the session with no load record" "1||$WT_X (no loaded-$WT_X.state)" "$(wt_said "$WT_LIB" "$WT_WM")"
+expect_eq "WITNESS-mut2 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-3 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUT" "$WT_WM")"
+wt_loaded "$WT_X"
+
+POKE_BOUND="$WT_BOUND_WAS"
+if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi
 
 finish
