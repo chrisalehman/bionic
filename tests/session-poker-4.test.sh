@@ -21,6 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -1577,7 +1578,7 @@ rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "e
 rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
 rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
 rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
-RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=30s · killed=0"
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=30s · killed=0"
 rp_report
 expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, waits over the project's requests" \
   "0|$RP_RTL_LINE" "$RC|$(rp_line)"
@@ -1612,18 +1613,18 @@ rp_world rp-even
 rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
 rp_report
 expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
-  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$(rp_line)"
 rp_world rp-one
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
 rp_report
 expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
-  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$(rp_line)"
 # Empty and absent records: the line with zeros, exit 0.
 rp_world rp-empty
 rp_report
-RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
 expect_eq "RTL7 an empty record prints the line with zeros and exits 0" "0|$RP_ZERO" "$RC|$(rp_line)"
 rm -f "$S60_REC"
 rp_report --rows
@@ -1669,7 +1670,7 @@ sed "s/^holder=.*/holder=$RP_LIVE:$RP_LIVE_START/" "$RP_GATE/requests/4" > "$RP_
 expect_contains "RK0 precondition: request 4's holder is the live sleeper, by pid and start" "holder=$RP_LIVE:" "$(cat "$RP_GATE/requests/4")"
 rp_report --rows
 expect_eq "RK1 a queue, a hand and a git landing each count under their own kind; green, red, none, discarded and red-then-green each as planted; two runs killed" \
-  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2" \
+  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2" \
   "$(rp_line)"
 expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
   "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
@@ -1682,7 +1683,7 @@ rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
 rp_ev "ev=ready|row=T9|at=not-a-time"
 rp_report
 expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
-  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
   "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
 
 # ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
@@ -1696,7 +1697,7 @@ expect_eq "RP1 a record with no published event: the tick prints no landings lin
 rp_pub T1 queue 10:30:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
-  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
 rp_tick
 expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
 expect_eq "RP3b …and prints no landings line: an unchanged tick is the one line the Patrol ends on, \"printed only unchanged: end it\" (wave-28 T62; T68 folded RK-T3 into this row)" "" "$(rp_tl)"
@@ -1721,7 +1722,7 @@ printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/confi
 BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
 expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
 expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
-  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
   "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
@@ -1777,13 +1778,13 @@ expect_eq "RK-K4 a red at one candidate and a green at the next (no ready betwee
 # ---------- (2) the landings line prints on a tick that is not unchanged ----------
 rp_world rk-tick
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
-RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T1 a tick that prints in full (no digest yet) carries the landings line" "$RK_LINE" "$(rp_tl)"
 rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T6 the next tick that prints in full carries the line with the new landing's figures" \
-  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
 
 # ---------- (3) a record with no line/v1 event is unmeasured, never zeros ----------
 RK_UNM="landings: unmeasured — the landing record holds no line/v1 events"
@@ -1852,7 +1853,7 @@ POKER="$RK_REAL_POKER"
 rp_world rk-mut4
 printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
 POKER="$RD_MUT/nounm/hooks/session-poker.sh"; rp_report --rows
-expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$RC|$OUT"
 POKER="$RK_REAL_POKER"
 rm -rf "$RD_MUT"
@@ -2741,11 +2742,13 @@ FD_EOF
 fd_runs() { [ -f "$FD_SEEN" ] && awk 'END { print NR + 0 }' "$FD_SEEN" || echo 0; }
 fd_config() { printf '%s\n' "$@" > "$RFD/.bionic/config.yaml"; }  # <line>... -> the project's config, exactly these lines
 fd_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFD" | tail -n 1; }
-# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library sourced first,
-# the checkout the working tree and the project root RFD: the judge itself, for the mutants below.
+# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library and the hash helper
+# (lib/detect.sh, which a doctored copy outside lib/ cannot load from beside itself) sourced first, the checkout the
+# working tree, the plan PFD (its landing record holds the runs) and the project root RFD: the judge itself, for the
+# mutants below.
 fd_attest() {
-  bash -c '. "$1" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
-    _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" 2>/dev/null
+  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
+    _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" "${FD_ROOTS%/*}/detect.sh" "$PFD" 2>/dev/null
 }
 expect_regex "FD-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$FD_W"
 expect_eq "FD-0b precondition: …and holds no tests/*.test.sh roster" "0" \
@@ -2789,14 +2792,14 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-a6 proof-add floor accepts the declared floor's log (exit 0)" "0" "$RC"
 expect_regex "FD-a7 …and writes the proof line at the working head, naming that log" \
-  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
+  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 expect_eq "FD-a8 …which proof_last reads back as the floor at the working head, with no roster counted" "$FD_W" "$(s46_last "$PFD" floor)"
 
 # ---------- AC-17.1: the same log at another head, dirty, red, or with no closing rc= line is refused ----------
 FD_OTHER="0123456789abcdef0123456789abcdef01234567"
-{ printf 'head=%s dirty=0\n' "$FD_OTHER"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-other.log"
+sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
 { printf 'head=%s dirty=2\n' "$FD_W"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-dirty.log"
-{ printf 'head=%s dirty=0\n' "$FD_W"; sed '1d;$d' "$FD_LOG"; printf 'rc=1\n'; } > "$FD_REC/fd-red.log"
+sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD_REC/fd-runner.log"
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
@@ -2898,7 +2901,7 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-c1 AC-7.10 with neither key the floor-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
 expect_regex "FD-c1b …the proof line naming it at the working head" \
-  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
+  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, with no closing rc= line, is refused" 1 "$PFD"
@@ -2948,8 +2951,10 @@ section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirt
 # FIXTURE FIDELITY. The project the filing came from: NO tests/ directory at the working head and NO floor key in
 # .bionic/config.yaml. s42_plan's bound plan, its working branch in a linked worktree: A, a code commit past the base,
 # then H, an empty commit (the working head; A is its ancestor with no change since, so a log at A stands for H). Every
-# other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written by hand,
-# as a project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp.
+# other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written as a
+# project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp. Each log
+# that is to be accepted is written by tests/lib/floor-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
+# the machine recorded no run of is refused (§RUNLINE); the grammar's refusals below are read before any run line.
 FA_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 FA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 FA_ROOTS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roots.sh"
@@ -2982,14 +2987,15 @@ fa_keys() {  # -> "<floor:>|<floor-attestation:>", read by the product's config 
 }
 fa_fact evidence piece; fa_fact structure piece; fa_fact structure whole; fa_fact adversarial piece; fa_fact adversarial whole
 # The logs, as a project's own runner leaves them: `{ echo "head=… dirty=…"; pnpm ci:local; echo "rc=$?"; } > <log>`.
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci.log"
-printf 'head=%s dirty=0\n$ npx playwright test\n38 passed (2.1m)\nrc=0\n' "$FA_H" > "$FA_REC/e2e.log"
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
+printf '$ npx playwright test\n38 passed (2.1m)\n' | floor_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
 printf 'head=%s dirty=0\n$ npx playwright test\n36 passed, 2 failed (2.3m)\nrc=1\n' "$FA_H" > "$FA_REC/e2e-red.log"
 printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\n' "$FA_H" > "$FA_REC/ci-open.log"
 printf 'head=%s dirty=3\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci-dirty.log"
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_A" > "$FA_REC/ci-at-a.log"
-printf 'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin\nhead=%s dirty=0\nRoots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\nrc=0\n' \
-  "$FA_H" > "$FA_REC/run-sh.log"
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
+printf 'Roots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\n' \
+  | floor_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
+    "$PFA" "$FA_REC/run-sh.log" "$FA_H" 0 0
 
 expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H one commit past A that changes no file" \
   '^[0-9a-f]{40} [0-9a-f]{40} 1 0$' \
@@ -3041,21 +3047,21 @@ if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -
 fa_add record/wave-01-fixture/run-sh.log
 expect_eq "FA-a1 AC-7.10 a tests/run.sh log (its preamble before the stamp, its Gating: verdict between) is still accepted, no roster counted (exit 0)" "0" "$RC"
 expect_regex "FA-a1b …the proof line naming it at H" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci-at-a.log
 expect_eq "FA-a2 a hand-run log at A, an ancestor with no change since, is accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a2b …the proof naming A, the head the run read" \
-  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci.log record/wave-01-fixture/e2e.log
 expect_eq "FA-a3 AC-7.10 two logs on one line, both green at H: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a3b …one proof line naming the head they share and both logs" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
 expect_contains "FA-a3c …and the verb says so" \
   "proof-add — kind=floor head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
 fa_add record/wave-01-fixture/ci.log
 expect_eq "FA-a4 AC-7.10 the hand-run log alone, no roster and no key: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a4b …the proof line naming it at H, nothing owed" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-c1 AC-7.10 current 8 passes on that proof (exit 0, the plan at 8)" "0|8" "$RC|$(fa_now)"
@@ -5236,7 +5242,7 @@ expect_true "FN-1f …and the plan is byte-identical: the verb runs and logs, an
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W.log"
 expect_eq "FN-2 AC-1.8 proof-add floor accepts floor-run's log of a red whole run (exit 0)" "0" "$RC"
 expect_regex "FN-2b …and writes the floor proof at the working head, b.test.sh owed" \
-  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh$" "$(fn_proved)"
+  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
 
 # ---------- a second whole run: refused, naming the owed suite and the approval ----------
 s42_snap "$RFN" "$PFN"
@@ -5257,7 +5263,7 @@ expect_eq "FN-4b …its log the second at the head, opening head= dirty=0 and cl
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W-2.log"
 expect_eq "FN-4c AC-1.8 proof-add floor accepts the green run's log, nothing owed" "0|0" \
   "$RC|$(fn_proved | /usr/bin/grep -c ' owed=' | tr -d ' ')"
-expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log$" "$(fn_proved)"
+expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
 
 # ---------- a proved head: refused, nothing run ----------
 s42_snap "$RFN" "$PFN"
@@ -5768,6 +5774,12 @@ s42_unchanged "RL-5 AC-6.1 the floor-run log edited after its run" 1 "$PRL"
 expect_contains "RL-5b …refused naming the fact" "the log changed since its run" "$OUT"
 expect_contains "RL-5c …the log, and the hash its run recorded" "floor-run-$RL_W.log" "$OUT"
 expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
+
+# ---------- AC-6.2: landing-report lists the floor run among the run's runs ----------
+mkdir -p "$TMPROOT/rl-gate"
+BIONIC_GATE_DIR="$TMPROOT/rl-gate" poke "$RRL" landing-report "$PRL"
+expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run line under runs: as run=1 (§REPORT-RTL pins run=0 on records with none)" \
+  "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 · ' | tr -d ' ')"
 
 POKE_BOUND="$RL_BOUND_WAS"
 
