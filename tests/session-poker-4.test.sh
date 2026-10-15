@@ -5696,4 +5696,96 @@ POKE_BOUND="$FX_BOUND_WAS"
 if [ "$FX_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$FX_CCD_WAS"; fi
 
 
+
+section "§LIST: the list fields are a set named once, and adopt carries every one of them byte for byte (wave-37 T7; REQ-8 AC-8.1, AC-8.2; D11)"
+# ============================================================
+#
+# THE DEFECT (research-false-tellers §E). `clean()` cut every field at 400 characters but the
+# three it named (`suites_allowed|files|lands_on`) and the decoded `re_executes`, and
+# `adopt_write_row` took its list fields as positional operands: `questions=` had no operand at all
+# (an adopted reader lost the very field that made it a reader of a question) and `claims=` was
+# written empty. Each of those is the same slip, a list field the name list did not know. The cure
+# is a shape: `ROSTER_LIST_FIELDS` in payload/scripts/lib/roster.sh, named once, and the census arm
+# below that goes red when a `roster_row` key is classified in neither that set nor
+# `ROSTER_SCALAR_FIELDS`.
+#
+# THE SET IS READ, NEVER RETYPED. tests/lib/roster-row.sh sources roster.sh, so the shell already
+# holds the constants; an empty read is itself a red row (LIST-0), not a loop over nothing.
+LS_LIST="${ROSTER_LIST_FIELDS:-}"
+LS_SCALAR="${ROSTER_SCALAR_FIELDS:-}"
+expect_nonempty "LIST-0 the list-field set is defined in roster.sh (read, not retyped)" "$LS_LIST"
+expect_nonempty "LIST-0b …and so is the scalar set" "$LS_SCALAR"
+expect_eq "LIST-0c …and the list set names questions and claims beside the four it always held" \
+  "claims files lands_on questions re_executes suites_allowed" \
+  "$(printf '%s\n' $LS_LIST | sort | tr '\n' ' ' | sed 's/ $//')"
+
+# One value per list field, over 400 characters, made of real tokens of that field's own shape.
+ls_value() {  # <field> -> a value of that field's shape, over 400 characters
+  local f="$1" tok sep=","
+  case "$f" in
+    files)          tok="hooks/session-poker.sh" ;;
+    suites_allowed) tok="session-poker-4.test.sh"; sep=" " ;;
+    lands_on)       tok="cross-gate-agreement.test.sh" ;;
+    re_executes)    tok="grep -E 'alpha|beta|gamma' tests/run.sh"; sep="; " ;;
+    questions)      tok="evidence,adversarial,structure" ;;
+    claims)         tok="bash tests/run.sh --only session-poker-4.test.sh"; sep="; " ;;
+    *)              tok="${f}-token" ;;
+  esac
+  local out="$tok"
+  while [ "${#out}" -le 450 ]; do out="${out}${sep}${tok}"; done
+  printf '%s' "$out"
+}
+
+RLS="$(make_repo list-fields)"; new_roster "$RLS"
+LS_PRED="77777777-aaaa-4bbb-8ccc-000000000037"
+LS_SRC_ROSTER="$(roster_of "$RLS" "$LS_PRED")"
+[ -f "$LS_SRC_ROSTER" ] || roster_header > "$LS_SRC_ROSTER"
+LS_ARGS=()
+for _f in $LS_LIST; do LS_ARGS+=("$_f=$(ls_value "$_f")"); done
+roster_row_fixture session="$LS_PRED" status=identified name=ls-wide agent_id=als-wide-3700000000000001 \
+  subagent_type=bionic:critic launched_at="$(iso_ago 60)" deliverable="$RLS/.bionic/docs/record/ls-wide.md" \
+  duration="45 minutes" cadence="10 minutes" suites_source=declared ${LS_ARGS[@]+"${LS_ARGS[@]}"} >> "$LS_SRC_ROSTER"
+LS_SRC_ROW="$(/usr/bin/grep -F '|name=ls-wide|' "$LS_SRC_ROSTER" | tail -1)"
+poke "$RLS" adopt
+LS_ADOPTED="$(/usr/bin/grep -F '|name=ls-wide|' "$(roster_of "$RLS")" | tail -1)"
+expect_contains "LIST-1 precondition: the predecessor's row is adopted (not vacuous)" "|adopted_from=$LS_PRED|" "$LS_ADOPTED"
+for _f in $LS_LIST; do
+  _src="$(s30_field "$LS_SRC_ROW" "$_f")"
+  expect_eq "LIST-1a precondition: the source row's $_f= is over 400 characters" "yes" \
+    "$([ "${#_src}" -gt 400 ] && echo yes || echo no)"
+  expect_eq "LIST-1b the adopted row's $_f= is the source's, byte for byte (AC-8.1)" \
+    "${#_src}|$_src" "$(s30_field "$LS_ADOPTED" "$_f" | awk '{ printf "%d|%s", length($0), $0 }')"
+done
+
+# ---------- the census arm (AC-8.2): every roster_row key is a list field or a scalar one ----------
+ls_keys() {  # <roster.sh> -> the keys of roster_row's key-to-variable `case`, one per line
+  awk '/^roster_row\(\) \{/ { f = 1 }
+       f && /^    case "\$key" in$/ { n++; next }
+       f && n == 2 && /^    esac$/ { exit }
+       f && n == 2 && match($0, /^      [a-z_]+\)/) { print substr($0, 7, RLENGTH - 7) }' "$1"
+}
+ls_unclassified() {  # <roster.sh> -> the keys that sit in neither set
+  local k
+  while IFS= read -r k; do
+    case " $LS_LIST $LS_SCALAR " in *" $k "*) ;; *) printf '%s\n' "$k" ;; esac
+  done < <(ls_keys "$1")
+}
+LS_ROSTER_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
+LS_KEYS="$(ls_keys "$LS_ROSTER_SH")"
+expect_eq "LIST-2 the census extractor reads roster_row's keys: both ends of the case and the six list fields are in it" \
+  "status questions claims re_executes files suites_allowed lands_on" \
+  "$(for _k in status questions claims re_executes files suites_allowed lands_on; do printf '%s\n' "$LS_KEYS" | /usr/bin/grep -qx "$_k" && printf '%s ' "$_k"; done | sed 's/ $//')"
+expect_eq "LIST-2a every roster_row key is classified as a list field or a scalar one" "" \
+  "$(ls_unclassified "$LS_ROSTER_SH" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "LIST-2b …and the two sets together hold exactly the keys of the case: no stale name, none twice" \
+  "$(printf '%s\n' "$LS_KEYS" | sort | tr '\n' ' ')" \
+  "$(printf '%s\n' $LS_LIST $LS_SCALAR | sort | tr '\n' ' ')"
+LS_PLANT="$TMPROOT/ls-planted-roster.sh"
+awk '{ print } /^      status\)        status="\$val" ;;$/ { print "      zzplanted)     zzplanted=\"$val\" ;;" }' "$LS_ROSTER_SH" > "$LS_PLANT"
+expect_eq "LIST-2c the planted copy differs from roster.sh by exactly the one planted arm" "1" \
+  "$(diff "$LS_ROSTER_SH" "$LS_PLANT" | /usr/bin/grep -c '^>')"
+expect_eq "LIST-2d a planted key in neither set goes red: it is the one the census reports" "zzplanted" \
+  "$(ls_unclassified "$LS_PLANT" | tr '\n' ' ' | sed 's/ $//')"
+rm -f "$LS_PLANT"
+
 finish
