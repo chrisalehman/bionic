@@ -875,7 +875,8 @@ expect_eq "(a3) …and only T2 is published" "T2" "$(ll_ev "$RA" published | sed
 RA2="$(ll_ahead_world m)"
 ll_verb_bg "$RA2" T1 "$WORLD_ROOT/m-T1.out"
 ll_wait_lines "$LL_SIG/m-T1.runs" 1
-LL_MUTANT='s/_line_replaced "\$2" "\$1" "\$3" "\$5"/false/' LL_MUTANT_FN=_line_prove ll_drive "$RA2" T2 "$WORLD_ROOT/m-T2.out"
+# The watch over every live runner is the drain's (wave-37 T1; D3): `_line_drain_next` starts and watches them.
+LL_MUTANT='s/_line_replaced "\$2" "\$1" "\$3" "\$5"/false/' LL_MUTANT_FN=_line_drain_next ll_drive "$RA2" T2 "$WORLD_ROOT/m-T2.out"
 expect_true "(a4m-pre) the mutant ran: T2's first run started" ll_wait_lines "$LL_SIG/m-T2.runs" 1
 touch "$LL_SIG/m-T1.go"; ll_wait_file "$WORLD_ROOT/m-T1.out.rc" 300
 sleep 3
@@ -1962,9 +1963,9 @@ section "§DRAIN: a landing drains its suites at most J at once, J the floor's w
 # and `d` each write `start <HEAD> <tree>`, wait for their go file, write `end <HEAD> <tree>` and end
 # green. T1 adds a file of its own and lands on all four. The landing tree's points are read by a spy
 # over `landing_tree_point` (the anchor below), so "pointed once" is counted, not inferred.
-ll_drain_body() {  # <tag> <name> — start, wait for <tag>-<name>.go (60 s at most), end; green
-  printf 'echo "start $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-%s.runs"\ni=0; while [ ! -e "$LL_SIG/%s-%s.go" ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done\necho "end $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-%s.runs"\necho "PASS: %s"; echo; echo "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"; exit 0\n' \
-    "$1" "$2" "$1" "$2" "$1" "$2" "$2" "$2"
+ll_drain_body() {  # <tag> <name> — start, ll_block_body's wait for <tag>-<name>.go (30 s at most), end; green
+  printf 'echo "start $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-%s.runs"\n%s\necho "end $(git rev-parse HEAD) $(pwd -P)" >> "$LL_SIG/%s-%s.runs"\necho "PASS: %s"; echo; echo "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"; exit 0\n' \
+    "$1" "$2" "$(ll_block_body "$1-$2" "$2" green | sed -n 2p)" "$1" "$2" "$2" "$2"
 }
 ll_drain_world() {  # <tag> -> root; T1 lands on a b c d, all four carried by the branch
   local r s
@@ -2041,7 +2042,8 @@ section "§GRAMMAR: a verdict's width= goes after log=, so every positional read
 # `_line_head_verdict`, `_line_declared`) read $2..$7; `_line_fold` and the landing report read by key.
 # One writer, `_line_verdict_put`, writes every verdict line a landing writes.
 RGR="$(ll_world)"; PGR="$(ll_plan "$RGR")"; RECGR="$(ll_rec "$RGR")"; KGR="$(ll_head "$RGR")"
-line_event "$PGR" ready row=T1 name=wx-T1 "commit=$KGR" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
+# The ready names the row's own commit: a commit the head already holds would be counted published by git.
+line_event "$PGR" ready row=T1 name=wx-T1 "commit=$(git -C "$RGR/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
 ll_grammar_put() {  # <plan> — three verdicts by the writer, J=2
   LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" a.test.sh green /logs/a.log \
@@ -2064,7 +2066,7 @@ expect_eq "(g3) the fold reads them by key: a and c green, b the declared debt's
   "$(line_state "$PGR" | awk -F'\t' '$1 == "T1" { print $1, $7 }')"
 # MUTANT: the field placed before log=. The positional readers then read width= as the log.
 RGM="$(ll_world)"; PGM="$(ll_plan "$RGM")"
-line_event "$PGM" ready row=T1 name=wx-T1 "commit=$KGR" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
+line_event "$PGM" ready row=T1 name=wx-T1 "commit=$(git -C "$RGM/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
 anchor fn payload/scripts/lib/line.sh '"log=$6" "width=${LINE_WIDTH:-1}"' _line_verdict_put '"width=${LINE_WIDTH:-1}" "log=$6"'
 GM_READ="$( eval "$(declare -f _line_verdict_put | sed "$ANCHOR_SED")"; ll_grammar_put "$PGM"; ll_grammar_read "$(ll_rec "$RGM")" )"
