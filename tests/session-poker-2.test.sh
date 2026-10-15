@@ -791,23 +791,32 @@ s41_sd_line() {  # <repo> <session> <current> <ready> <declined>
     "$2" "$3" "$4" "$5" >> "$d/fill-ledger.log"
 }
 s41_fill_line() { printf '%s\n' "$1" | /usr/bin/grep '^poker: FILL ' | head -1; }
+# A DECLINE STANDS WHILE THE GATE GIVES NO ROOM (wave-37 T18; REQ-11 AC-11.4; D13). With room=yes and a writer
+# slot free it lapses (tests/session-poker-4.test.sh §REOPEN), so the pins of what a standing decline answers read
+# the tick at room=no (BIONIC_PROBE_BUSY_CORES_5M=8.0 over the rung fixture's share, session-poker.test.sh 11a), and the control ticks at room=yes.
 R41S="$(mk_rung_repo s41-sd-some)"
 s41_sd_line "$R41S" "$SID" 4 ONE,TWO "ONE and TWO wait on the BASE merge"
-poke_rung "$R41S" 60 0 tick
+BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_rung "$R41S" 60 0 tick
 expect_contains "41i C2 AC-4.7 the tick prints the standing decline, its instant and its reason" \
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — ONE and TWO wait on the BASE merge" "$OUT"
-expect_eq "41i2 …and fills only the rows it did not answer" "poker: FILL THREE FOUR" "$(s41_fill_line "$OUT")"
+expect_eq "41i2 …and with no room names no FILL, the declined rows answered" "" "$(s41_fill_line "$OUT")"
+forget_digest "$R41S"; poke_rung "$R41S" 60 0 tick
+expect_contains "41i2b AC-11.4 …and with room and a free slot the decline lapses and the tick asks every ready row" \
+  "poker: fill-declined lapsed — room=yes" "$OUT"
+expect_eq "41i2c …naming the rows it answered with the rest" "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
 R41A="$(mk_rung_repo s41-sd-all)"
 s41_sd_line "$R41A" "$SID" 4 ONE,TWO,THREE,FOUR "the batch waits on the BASE merge"
-poke_rung "$R41A" 60 0 tick
+BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_rung "$R41A" 60 0 tick
 expect_contains "41i3 a decline that answered every ready row prints as standing" \
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — the batch waits on the BASE merge" "$OUT"
 expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
+forget_digest "$R41A"; poke_rung "$R41A" 60 0 tick
+expect_eq "41i5b AC-11.4 …and with room and a free slot the batch is asked again" "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
 # A moved current: is not one of the ways a line stands for nothing (wave-26 T15; D16).
 R41M="$(mk_rung_repo s41-sd-moved)"
 s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
-poke_rung "$R41M" 60 0 tick
+BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_rung "$R41M" 60 0 tick
 expect_contains "41i6 wave-26 T15 (D16) a decline taken at another current: still stands over the same ready set" \
   "fill-declined standing since " "$OUT"
 expect_eq "41i7 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
@@ -1560,7 +1569,7 @@ R47R="$(make_repo s47-waiting-declined)"; new_roster "$R47R"; s47_quiet "$R47R" 
 mkdir -p "$R47R/.bionic/docs/record/wave-01-fixture"
 printf 'fill-ledger/v1|at=2026-10-04T00:00:00Z|session=%s|turn=u-47r|current=4|state=ok|ceiling=2|width=2|open=1|free=1|ready=T2|launched=|declined=T2 waits on the merge|missed=1\n' "$SID" \
   > "$R47R/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
-poke_pressure "$R47R" 8192 1.0 tick
+BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_pressure "$R47R" 8192 1.0 tick
 expect_contains "47v precondition: the standing decline is read" "fill-declined standing since" "$OUT"
 expect_contains "47v2 F3 a ready row the standing decline answered is named, and why" \
   "poker: WAIT T2 — ready; answered by the standing fill-declined" "$OUT"
