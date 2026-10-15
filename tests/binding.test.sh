@@ -259,4 +259,53 @@ call_bind "$R6" "$TSID" "$P6"
 call_holders "$R6" "$SID" "$P6"
 expect_eq "…paired: the same id as a real marker holds it" "$TSID" "$HOLD_IDS"
 
+# ============================================================
+section "7 — the bind verb's act admits a delivered plan: the session reads it bound-closed (wave-36 T14; D13, AC-7.7; ruling r1791955629-34788)"
+# ============================================================
+#
+# `task-set --reason` amends a delivered plan from the session bound to it, and after a close-out the session has no
+# marker, so `bind` must be able to reach that state. Only the bind VERB's act (`bind`) admits a delivered plan;
+# engagement (`engage`), the governing skill's Write (`write`) and an act-less call keep §2's refusal, so the
+# newest-plan fallback and engagement are unchanged. A plan neither open nor delivered (abandoned) is still refused.
+call_bind_act() {  # <root> <sid> <plan|none> <act> -> sets BIND_ST / BIND_WHY / BIND_ERR / BIND_RUN (session_run after)
+  local out
+  out=$(bash -c '
+      set -u
+      . "$1" || exit 9
+      . "$2" || exit 9
+      rc=0
+      bind_plan "$3" "$4" "$5" "$6" || rc=$?
+      printf "%s|%s|%s|" "$rc" "${BIND_REFUSAL:-}" "$(session_run "$3" "$4" 2>/dev/null)"
+    ' _ "$RUNLIB" "$BINDLIB" "$1" "$2" "$3" "$4" 2>"$SANDBOX/.err")
+  BIND_ST="${out%%|*}"; out="${out#*|}"
+  BIND_WHY="${out%%|*}"; out="${out#*|}"
+  BIND_RUN="${out%|}"
+  BIND_ERR=$(cat "$SANDBOX/.err" 2>/dev/null)
+}
+R7="$(make_repo r7)"
+P7="$R7/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+D7="$R7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md"
+closed_body > "$D7"
+A7="$R7/.bionic/docs/plans/epic-01-demo/wave-03-abandoned.plan.md"
+printf -- '---\ncanonical_sdlc_version: 14\nabandoned: 2026-10-01 superseded\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n' > "$A7"
+call_bind_act "$R7" "$SID" "$P7" bind
+expect_eq "7a paired positive: the root's open plan binds by the verb's act, bound-open" "0||bound-open $P7" "$BIND_ST|$BIND_WHY|$BIND_RUN"
+call_bind_act "$R7" "$SID" "$D7" bind
+expect_eq "7b the bind verb's act binds a DELIVERED plan of the root (exit 0, no refusal)" "0|" "$BIND_ST|$BIND_WHY"
+expect_eq "…the marker names it" "plan=$D7" "$(grep -m1 '^plan=' "$(marker_of "$R7")")"
+expect_eq "…and the session reads it bound-closed" "bound-closed $D7" "$BIND_RUN"
+call_bind_act "$R7" "$SID" "$A7" bind
+expect_eq "7c an ABANDONED plan, neither open nor delivered, is still refused not-an-open-run" "1|not-an-open-run" "$BIND_ST|$BIND_WHY"
+expect_eq "…the marker still names the delivered plan" "plan=$D7" "$(grep -m1 '^plan=' "$(marker_of "$R7")")"
+for act in engage write; do
+  call_bind_act "$R7" "$SID" "$P7" bind
+  call_bind_act "$R7" "$SID" "$D7" "$act"
+  expect_eq "7d the $act act keeps the refusal on a delivered plan (not-an-open-run), the marker unchanged" "1|not-an-open-run|plan=$P7" \
+    "$BIND_ST|$BIND_WHY|$(grep -m1 '^plan=' "$(marker_of "$R7")")"
+done
+OTHER7="$(make_repo r7-other)"
+closed_body > "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md"
+call_bind_act "$R7" "$SID" "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md" bind
+expect_eq "7e a delivered plan of ANOTHER root is refused not-an-open-run" "1|not-an-open-run" "$BIND_ST|$BIND_WHY"
+
 finish

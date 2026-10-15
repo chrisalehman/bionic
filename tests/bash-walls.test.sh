@@ -1656,14 +1656,15 @@ expect_status "17l: AC-3.3 — …and spelled 'git -C <tree> merge --no-ff', ADM
 
 
 # ---------------------------------------------------------------------------
-section "18 — a commit into another repository is outside the evidence gate, and only it (wave-19 REQ-9, D10)"
+section "18 — a commit into another repository is outside the evidence gate; outside the project, outside the role arm too (wave-19 REQ-9, D10; wave-36 T4, D11)"
 #
 # THE FAULT (A-T11.1). From an engaged session, `git -C <scratch repo> commit` was judged by
 # the evidence gate against THIS repository's plan and refused for its evidence. The gate now
 # asks which repository the commit lands in before it reads a plan; another repository — a
 # scratch one, or one NESTED under the root — is admitted with one line. The walls folded
-# beside the gate never read a plan and are not exempted with it: the read-only-role arm (T5)
-# still refuses a test-runner's commit wherever it lands.
+# beside the gate never read a plan and are not exempted with it. The read-only-role arm asks
+# its own jurisdiction question (wave-36 T4): a commit the placement reader puts outside the
+# project root and outside every tree of the project is not its business either (18d, 18m-18t).
 #
 # R_COMMIT carries `block_plan` (current: 5, a placeholder Step-5 line), so every commit the
 # gate still judges there is refused — the control that makes each allow a boundary verdict.
@@ -1688,16 +1689,71 @@ run_hook "$(mk_payload "$R_COMMIT" "git -C $R_NEST commit -q --allow-empty -m x"
 expect_status "18c: AC-9.3 — a repository nested at <root>/.bionic/docs/record/x/bed is ADMITTED" 0 "$ST"
 expect_eq "18c: …with the same one line" "$(jur_line "$R_NEST")" "$ERR"
 
-# THE EXEMPTION IS THE GATE'S ALONE. A bionic:test-runner row committing into the scratch
-# repo is outside the gate's jurisdiction and still inside the role arm's: refused, by ARM C.
+# JURISDICTION BEFORE ROLE (wave-36 T4; D11, AC-5.2). The role arm used to refuse a read-only
+# role's commit wherever it landed, so a walker could not commit in its own scratch repository
+# (research-landing-and-walls.md C42). It now asks the one placement reader (`cmd_place`, lib/
+# placement.sh) where the commit runs before it reads the role: a commit placed outside the
+# project root and outside every tree of the project's repository is outside jurisdiction, and
+# exempt whoever runs it. An in-root commit by the same role is still refused, on the same
+# fixture. `git -C` is the commit reader's own, not the placement reader's, so a commit that
+# names its repository itself is not exempted by this arm (A-T4-3).
 R_JUR_RO="$(mk_repo jurisdiction-ro)"; block_plan "$R_JUR_RO"
 roster_header > "$R_JUR_RO/.bionic/tmp/roster-$SID.state"
 ro_rows "$R_JUR_RO" w19-jur-runner ajurrunner-0123456789abcdef bionic:test-runner
+run_hook "$(mk_payload "$R_JUR_RO" "cd $R_SCR && git add -A && git commit -q --allow-empty -m x" ajurrunner-0123456789abcdef omit Bash w19-jur-runner)"
+expect_status "18d: AC-5.2 — a bionic:test-runner's commit placed in the scratch repo (a cd outside the root) is ADMITTED" 0 "$ST"
+expect_absent "18d: …the role arm says nothing" "read-only role" "$ERR"
+expect_eq "18d: …and the gate only names the boundary, in its one line" "$(jur_line "$R_SCR" "$R_JUR_RO")" "$ERR"
 run_hook "$(mk_payload "$R_JUR_RO" "git -C $R_SCR commit -q --allow-empty -m x" ajurrunner-0123456789abcdef omit Bash w19-jur-runner)"
-expect_status "18d: a bionic:test-runner's commit into the scratch repo is still REFUSED (the role arm is not exempt)" 2 "$ST"
+expect_status "18d: a commit that names its repository with git -C is not exempted by the role arm: REFUSED" 2 "$ST"
 expect_contains "18d: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18d: …saying the arm does not read -C" "git -C" "$ERR"
 expect_contains "18d: …while the gate itself only names the boundary" "$(jur_line "$R_SCR" "$R_JUR_RO")" "$ERR"
 expect_eq "18d: …so exactly one refusal is rendered" "1" "$(printf '%s\n' "$ERR" | grep -c 'refused')"
+
+# THE BOUNDARY, ROW BY ROW, on §17's R_RO: no plan, so the gate admits every commit and the role
+# arm is the only speaker. Each refusal below is paired with the admitted scratch-repo commit on
+# the same fixture (18m), so an arm that exempts nothing, or everything, fails one side.
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18m: AC-5.2 — a bionic:test-runner's 'cd <scratch> && git commit' is ADMITTED" 0 "$ST"
+expect_absent "18m: …silently on the role arm" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && git merge -q x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18m: …and every commit-creating verb placed there ('git merge') is ADMITTED" 0 "$ST"
+run_hook "$(mk_payload "$R_RO" 'git commit -q --allow-empty -m x' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18m: AC-5.2 — the same role's commit inside the root is still REFUSED" 2 "$ST"
+expect_contains "18m: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18m: …whose detail says where the commit was placed" "inside the project root ($R_RO)" "$ERR"
+# shellcheck disable=SC2016  # the variable is the command's, unexpanded on purpose
+run_hook "$(mk_payload "$R_RO" 'cd "$SCRATCH_DIR" && git commit -m x' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18n: a commit behind a cd the reader cannot read (an unpinned variable) is REFUSED" 2 "$ST"
+expect_contains "18n: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18n: …naming the move as moving-form" "moving-form" "$ERR"
+# shellcheck disable=SC2016
+expect_contains "18n: …and the segment as typed" 'cd "$SCRATCH_DIR"' "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && git init -q && cd $R_RO && git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18o: a command whose first git is outside but whose shell ends in the root is REFUSED" 2 "$ST"
+expect_contains "18o: …by the role arm" "a read-only role never commits" "$ERR"
+R_RO_NEST="$R_RO/.bionic/docs/record/nest"
+mkdir -p "$R_RO_NEST"; git -C "$R_RO_NEST" init -q 2>/dev/null
+run_hook "$(mk_payload "$R_RO" "cd $R_RO_NEST && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18p: a repository nested inside the project root is inside jurisdiction: REFUSED" 2 "$ST"
+expect_contains "18p: …by the role arm" "a read-only role never commits" "$ERR"
+R_RO_WT="$SANDBOX/ro-outside-wt"
+git -C "$R_RO" worktree add -q "$R_RO_WT" -b wt/ro-outside 2>/dev/null
+expect_true "18q: fixture — a linked worktree of the project sits outside its root" test -d "$R_RO_WT/.git" -o -f "$R_RO_WT/.git"
+run_hook "$(mk_payload "$R_RO" "cd $R_RO_WT && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18q: a tree of the project's own repository outside the root is inside jurisdiction: REFUSED" 2 "$ST"
+expect_contains "18q: …by the role arm" "a read-only role never commits" "$ERR"
+ln -s "$R_RO" "$SANDBOX/ro-link"
+run_hook "$(mk_payload "$R_RO" "cd $SANDBOX/ro-link && git commit -q --allow-empty -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18r: a path outside the root that is a link into it is inside jurisdiction: REFUSED" 2 "$ST"
+expect_contains "18r: …by the role arm" "a read-only role never commits" "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && GIT_DIR=$R_RO/.git git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18s: a commit placed outside that names the root's repository through GIT_DIR is REFUSED" 2 "$ST"
+expect_contains "18s: …by the role arm" "a read-only role never commits" "$ERR"
+run_hook "$(mk_payload "$R_RO" "cd $R_SCR && env -C $R_RO git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "18t: a commit placed outside that env -C moves back into the root is REFUSED" 2 "$ST"
+expect_contains "18t: …by the role arm" "a read-only role never commits" "$ERR"
 
 # A LINKED WORKTREE of the engaged repository shares its common dir and is inside: judged.
 git -C "$R_COMMIT" worktree add -q "$R_COMMIT/.worktrees/19-T6" -b wt/19-T6 2>/dev/null
@@ -2435,40 +2491,35 @@ for _mu in \
 done
 
 # ---------------------------------------------------------------------------
-section "§CDT — the later-cd scan reads every segment before the first git, in one split (T28)"
+section "§CDT — the commit's place is the placement reader's: every cd before the first git is read in order (wave-36 T25; D11, AC-5.3; was T28's later-cd scan)"
 #
-# `_eg_cd_targets` lists the `cd` targets after the command's first separator and before its
-# first `git`, for the evidence gate's ambiguity check. T28 replaced its one-pass-per-segment
-# loop with a single `read` split (the 64 KB timing is tests/hook-timeout.test.sh b4). These
-# rows pin what the split must still answer: the four separators, the empty segments a
-# doubled or trailing separator leaves, a `git` inside a segment ending the scan there, and
-# nothing read after it. Each row answers the same on the loop it replaced.
-# The function is defined past walls.sh's early `return`, so it is extracted the way 15g2
-# extracts `_budget_wire_list`: awk between its own `()` line and its closing `}`, then eval.
-cdt_of() {  # <command> -> the targets, `|`-terminated
-  # git-argv.sh is sourced first, as the evidence gate always has it (wave-25 T12): the scan
-  # asks it whether a segment's word is git in another letter case.
-  bash -c '. "${1%/*}/git-argv.sh"; eval "$(awk "/^_eg_cd_targets\(\)/,/^}/" "$1")"; _eg_cd_targets "$2"
-    printf "%s" "$_EG_CDS" | tr "\n" "|"' _ "$WALLS_LIB" "$1"
-}
-expect_contains "§CDT the extractor finds the function" "_eg_cd_targets()" \
-  "$(awk '/^_eg_cd_targets\(\)/,/^}/' "$WALLS_LIB")"
-expect_eq "§CDT the leading cd is not in the list; the second is" "/b|" "$(cdt_of 'cd /a && cd /b && git commit')"
-expect_eq "§CDT every separator splits, and a bare cd is home" "/b|/c d|/e|~|" \
-  "$(cdt_of "$(printf 'cd /a; cd /b|cd "/c d"&cd %s/e%s\ncd\ngit commit' "'" "'")")"
-expect_eq "§CDT doubled and trailing separators name nothing" "/b|" "$(cdt_of 'cd /a;; ;cd /b ;')"
-expect_eq "§CDT blank lines name nothing" "/b|" "$(cdt_of "$(printf 'cd /a\n\n\ncd /b\n\ngit commit')")"
-expect_eq "§CDT a subshell opener comes off the front" "/b|" "$(cdt_of 'cd /a && (cd /b && git commit)')"
-expect_eq "§CDT the first git ends the scan, inside a word too" "/b|" "$(cdt_of 'cd /a && cd /b && echo legit; cd /c')"
-expect_eq "§CDT a cd after the commit is never read" "" "$(cdt_of 'cd /a && git commit -m x && cd /z')"
-expect_eq "§CDT one segment has nothing after it to read" "" "$(cdt_of 'cd /a')"
-# wave-25 T12: a commit spelled GIT ends the scan exactly as git does. Before T12 the scan cut
-# only at the literal `git`, so a cd AFTER `GIT commit` was read as a second directory and the
-# commit refused where its lower-case form passes. Only a segment whose WORD folds to git
-# ends it: an `echo GITHUB` is no commit, and the scan reads on past it.
-expect_eq "§CDT a cd after a GIT commit is never read, as after git" "" "$(cdt_of 'cd /a && GIT commit -m x && cd /z')"
-expect_eq "§CDT …nor after Git, behind its own subshell opener" "/b|" "$(cdt_of 'cd /a && cd /b && (Git commit -m x); cd /z')"
-expect_eq "§CDT an uppercase word that is not git ends nothing" "/b|" "$(cdt_of 'cd /a && echo GITHUB && cd /b && git commit -m x')"
+# Until wave-36 the evidence gate read a commit's directory with a grammar of its own: the leading
+# `cd <absolute dir>`, then a raw-text scan (`_eg_cd_targets`) that listed every later `cd` before
+# the first `git`, and an arm that refused any list naming a second directory ("two directories are
+# named before the commit"), because nothing in the text said where the shell stood. The gate now
+# asks the one placement reader (`cmd_place … git`, lib/placement.sh), which reads cmd-class's
+# segments and follows the cd chain the way the shell does, so a later cd decides where the commit
+# runs and a move it cannot be sure of is refused by name (bash-walls-egd JURIS-3, JURIS-8). Driven
+# through the real hook on §18's fixture: R_COMMIT under block_plan, so a commit the gate judges is
+# refused, and R_SCR, a scratch repository beside it, so a commit placed there is exempt with one line.
+run_hook "$(mk_payload "$R_COMMIT" "cd $R_COMMIT && cd $R_SCR && git commit -q --allow-empty -m x")"
+expect_status "§CDT1 'cd <root> && cd <scratch> && git commit' is placed where the second cd leads: exempt" 0 "$ST"
+expect_eq "§CDT1 …with the one boundary line naming the scratch repository" "$(jur_line "$R_SCR")" "$ERR"
+run_hook "$(mk_payload "$R_COMMIT" "cd ${R_SCR%/*}; cd ${R_SCR##*/} && git commit -q --allow-empty -m x")"
+expect_status "§CDT2 a relative cd after an absolute one is joined to it: 'cd <dir>; cd <repo> && git commit' is exempt" 0 "$ST"
+expect_eq "§CDT2 …naming the scratch repository the two lead to" "$(jur_line "$R_SCR")" "$ERR"
+run_hook "$(mk_payload "$R_COMMIT" "cd $R_SCR && cd $R_COMMIT && git commit -m x")"
+expect_status "§CDT3 'cd <scratch> && cd <root> && git commit' commits in the root: judged, and refused by its plan" 2 "$ST"
+expect_contains "§CDT3 …by the evidence gate" "commit refused" "$ERR"
+expect_absent "§CDT3 …which no longer refuses two named directories (the reader knows where the commit runs)" \
+  "cannot tell which directory" "$ERR"
+expect_absent "§CDT3 …and does not exempt it for the scratch repository it passed through" \
+  "is outside the engaged repository" "$ERR"
+# The control: a cd AFTER the commit cannot move it, and the allow-list still reads past no cd once a
+# git has run, so the one outside commit is not exempt: it is refused for the split, as before T25.
+run_hook "$(mk_payload "$R_COMMIT" "cd $R_SCR && git commit -q --allow-empty -m x && cd $R_COMMIT")"
+expect_status "§CDT4 control: 'cd <scratch> && git commit && cd <root>' is refused for the split" 2 "$ST"
+expect_contains "§CDT4 …naming the split" "Split it" "$ERR"
 
 section "§WAIT-CEIL — a wrapped suite run is detached; only a short call is bounded inside its call (wave-27 T6, AC-8.3; wave-30 T12, AC-3.1)"
 #
@@ -3462,6 +3513,15 @@ expect_absent "W10.5c …and no not-counted line (W10.3 is the positive)" "not c
 expect_regex "W10.6 [positive] …and its one stamp is in the writer tree's git dir, red and dirty" \
   "^$R_W10/.git/worktrees/T1\\|stamp/v1\\|head=[0-9a-f]{40}\\|dirty=[1-9][0-9]*\\|rc=1\\|" "$(w10_stamps)"
 expect_eq "W10.6b …one stamp in all" "1" "$(w10_stamps | awk 'END { print NR }')"
+# A SHAPE THE RAW-TEXT WALK LEFT UNPLACED (wave-36 T25; D11, AC-5.1): a redirection after the cd. The
+# stamp asks the placement reader now, which reads the cd's one operand and ignores its redirection, so
+# the run is stamped in the writer tree like W10.5's. Before T25 the walk read `<tree> 2>/dev/null` as
+# the operand, could not read it, and the run went unplaced.
+w10_run "cd $W10_T 2>/dev/null || exit 1; tests/run.sh --only x.test.sh"
+expect_contains "W10.7 AC-5.1 'cd <tree> 2>/dev/null || exit 1; …' is placed: --stamp-dir the writer tree" " --stamp-dir $W10_T " "$W10_WRAP"
+expect_absent "W10.7b …with no --unplaced" "--unplaced" "$W10_WRAP"
+expect_eq "W10.7c …and its stamp joins W10.6's in the writer tree's git dir, the main checkout still holding none" \
+  "2 0" "$(w10_stamps | awk -F'|' -v w="$R_W10/.git/worktrees/T1" '$1 == w { t++ } $1 != w { o++ } END { print t + 0, o + 0 }')"
 
 # ============================================================
 section "§SCRIPT-CLAIM — a script's door line is budgeted as the line typed inline is (wave-35 T4; REQ-4 AC-4.3, D13)"

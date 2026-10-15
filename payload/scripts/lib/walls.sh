@@ -1036,7 +1036,7 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
 
 # ── THE JURISDICTION HELPERS, AT FILE SCOPE (wave-27 T80) ──────────────────────
 #
-# The eight helpers below are the evidence gate's own: from the command text, the payload and
+# The helpers below are the evidence gate's own: from the command text, the payload and
 # git, they answer which repository a commit lands in. They were nested in `_eg_body`, so they
 # existed only inside the gate's subshell, and hooks/bash-walls.sh's debt collector, which runs
 # before the fold, resolved this run's plan and read its landing record for a commit that lands
@@ -1044,114 +1044,6 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
 # both: `eg_commit_outside_root`, after them, is the one predicate the gate's jurisdiction arm
 # and the collector ask, so the two cannot disagree. Moved verbatim; the arm's own reasoning
 # stays at the arm, under JURISDICTION in `_eg_body`.
-
-# _eg_cd_targets <command text> -> sets _EG_CDS to EVERY directory the text changes into
-# before the commit AFTER the leading one, in the order the shell would obey them, one per
-# line; empty when the text names only the leading directory.
-#
-# WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
-# below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
-# later `cd` in the command was invisible to it — and `cd <worktree> && cd <main> && git
-# commit` was attributed to the worktree while the commit landed in main, at the worktree
-# row's lower step. Nothing in the TEXT says which directory the shell is standing in when
-# the commit finally runs: a `||`, a failed `cd`, a subshell and a plain `&&` all read alike
-# here, and this repo's own dispatch block warns about the neighbouring hazard (A-46, "a
-# failed cd with `;`-chained commands runs them in the main checkout"). So the arm stops
-# guessing: two named directories is an ambiguity the writer can spell away, and a wall that
-# cannot tell refuses.
-#
-# ONLY WHAT PRECEDES THE COMMIT COUNTS. A `cd` after the commit cannot move a commit that has
-# already run, so the scan stops at the first `git` in the text. If the text carries none this
-# reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
-# scanned, which refuses rather than allows.
-#
-# EVERY TARGET, NOT THE FIRST OF THEM (W6, the re-walk at 4e2ac66). This reader used to take
-# the first `cd` after the first separator and return, which cost nothing while the PRESENCE
-# of a second `cd` refused: the command was already refused before a third target could
-# matter. Once two targets that fold alike became one directory (C3), `cd X && cd X && cd Y
-# && git commit` walked through the arm and was judged at X's row with Y never read — while
-# the shell commits in Y, which another row owns at another step. That is the fail-open this
-# arm exists to close, one `&&` away from the shape it does close. So the scan collects the
-# whole list and the caller folds all of it.
-#
-# ONE PER LINE, AND THE SEPARATOR IS SAFE BY CONSTRUCTION: a newline is one of the four
-# characters this scan splits segments on, so no target it yields can contain one. A path
-# holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
-# guard is what keeps it intact downstream.
-#
-# ONE SPLIT, NOT ONE PASS PER SEGMENT (wave-24 T28). The segments come off in a single `read`
-# split on the four characters, and the first `git` is cut from the segment that holds it.
-# Taking them off the front one at a time cost a whole-remainder `${_rest#*[;&|…]}` per
-# segment, and cutting the remainder at `git` with `%%git*` one more: `cd <dir> && <64 KB
-# heredoc> … git commit` took 17.75 s under 3.2 and 7.02 s under 5.3, past the hook's 10 s.
-# The empty segments the split adds (a doubled separator, a trailing one) name no `cd`.
-#
-# UNDER `LC_ALL=C` (wave-25 T12). In a UTF-8 locale bash 3.2 widens the whole subject string
-# before every glob, so each `case` on a segment is a pass over it, and the any-case test below
-# added one per segment (measured +15 ms on tests/hook-timeout.test.sh row b4). Every character
-# this function tests or cuts at is ASCII, and no UTF-8 byte of a longer character equals one,
-# so reading bytes gives the same lists; `local` ends the locale with the function.
-_EG_CDS=""
-_eg_cd_targets() {
-  local LC_ALL=C
-  local _t="${1:-}" _rest _seg _p _i=0 _n _last=0
-  local -a _segs=()
-  _EG_CDS=""
-  case "$_t" in
-    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
-    *) return 0 ;;
-  esac
-  # ONLY THE SEGMENTS THAT CAN ANSWER ARE WALKED (wave-35 T11). A segment changes the answer
-  # only when it opens with `cd`, holds the `git` that ends the scan, or opens with a spelling
-  # `git_argv_is_git` must judge (G, gI, giT); every other segment walked past costs a loop
-  # step and says nothing. One awk hands the loop below those segments alone, in order, up to
-  # the first that holds `git`: a 64 KB heredoc of 500 lines was 500 steps of this loop, and a
-  # 200 KB one three times as many (tests/hook-timeout.test.sh row b4, counted at both sizes).
-  IFS=$'\037' read -r -d '' -a _segs <<< "$(printf '%s' "$_rest" | LC_ALL=C awk '
-    { n = split($0, f, /[;&|]/)
-      for (i = 1; i <= n; i++) {
-        t = f[i]; sub(/^[ \t({]+/, "", t)
-        if (index(f[i], "git") || t ~ /^(cd|G|gI|giT)/) { printf "%s\037", f[i]; if (index(f[i], "git")) exit }
-      } }')" || :
-  _n=${#_segs[@]}
-  while [ "$_i" -lt "$_n" ] && [ "$_last" = 0 ]; do
-    _seg="${_segs[_i]}"; _i=$((_i + 1))
-    case "$_seg" in *git*) _seg="${_seg%%git*}"; _last=1 ;; esac
-    while [ -n "$_seg" ]; do
-      case "$_seg" in
-        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
-        *) break ;;
-      esac
-    done
-    # A COMMIT SPELLED IN ANOTHER LETTER CASE ENDS THE SCAN TOO (wave-25 T12). The cut above
-    # finds the literal `git` only, so after `GIT commit` the scan read on and took a later
-    # `cd` for a second directory: a refusal of a commit whose lower-case form passes. Only a
-    # segment whose WORD is git ends it here, asked of git-argv.sh's `git_argv_is_git` (the
-    # gate always loads it) and only for a segment that opens with one of the three spellings
-    # the literal cut cannot have taken (`G`, `gI`, `giT`): the word is cut off those few
-    # segments, never off every one. `echo GITHUB` is no commit, and the scan reads on past
-    # it. A path to git (`/usr/bin/GIT commit`) is not cut here and reads on, which can only
-    # refuse.
-    case "$_seg" in
-      G*|gI*|giT*) if git_argv_is_git "${_seg%%[ 	]*}"; then _seg=""; _last=1; fi ;;
-    esac
-    case "$_seg" in
-      'cd'|'cd '*|'cd	'*)
-        _p="${_seg#cd}"
-        while :; do case "$_p" in ' '*) _p="${_p# }" ;; *) break ;; esac; done
-        while :; do case "$_p" in '	'*) _p="${_p#	}" ;; *) break ;; esac; done
-        while :; do case "$_p" in *' ') _p="${_p% }" ;; *) break ;; esac; done
-        case "$_p" in
-          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
-          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
-        esac
-        [ -n "$_p" ] || _p='~'
-        _EG_CDS="${_EG_CDS}${_p}"$'\n'
-        ;;
-    esac
-  done
-  return 0
-}
 
 # _eg_path_fold <path> -> _EG_FOLD, the same path with its empty and `.` components folded
 # away, so `/a/b`, `/a//b`, `/a/b/` and `/a/./b` are one string.
@@ -1180,85 +1072,40 @@ _eg_path_fold() {
   _EG_FOLD="${_out:-/}"
 }
 
-# _eg_cd_one_dir -> 0 when EVERY `cd` target the text names RESOLVES to ONE directory, and
-# 1 with _EG_CD_DIFF set to the first target that does not — the one the refusal names.
-#
-# THE ARM FIRED ON THE SECOND `cd` TOKEN, NEVER ON A DIFFERENCE (critic C3). `cd X && cd X`
-# and `cd X && cd .` were both refused, and the refusal read "the command changes into 'X'
-# and then into 'X'" — a sentence that answers its own complaint. D4 ratified that the gate
-# does not interpret the shell; comparing targets it has ALREADY extracted is not
-# interpretation, and every value is in hand here.
-#
-# ALL OF THEM, IN ORDER (W6). Reading only the first two let a third `cd` into another
-# directory through: two matching targets answered for a command that goes on to name a
-# third. So the whole list is walked and the command names one directory only when every
-# target folds onto the leading one. Each target is read as the leading one is, and a
-# relative target is joined to the directory the PREVIOUS target left the shell standing in.
-# The walk stops at the first difference, so that previous directory is always the leading
-# one — a relative target after a divergence is never resolved against a guess.
-#
-# NOTHING IS STAT-ED AND NOTHING IS EXPANDED, so `~`, an unexpanded variable and any `..`
-# component stay a second directory and stay refused (A-T22.2, and the D11 freeze).
-#
-# IT NAMES THE PAIR THAT DISAGREES rather than the first two tokens: the refusal's detail is
-# built from `_EG_CWD` and `_EG_CD_DIFF`, so a reader is always shown a real disagreement.
-_EG_CD_DIFF=""
-_eg_cd_one_dir() {
-  local _first _prev _rest _one
-  _EG_CD_DIFF=""
-  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"; _prev="$_first"
-  _rest="$_EG_CDS"
-  while [ -n "$_rest" ]; do
-    # THE LIST IS CONSUMED WITHOUT ASSUMING ITS SHAPE. Every entry `_eg_cd_targets` writes is
-    # newline-TERMINATED, so the `*` branch is unreachable today — and a `${_rest#*NL}` on a
-    # string carrying no newline returns it unchanged, which is a wall that never returns and
-    # therefore a commit that never lands. The branch costs one `case` and removes that class.
-    case "$_rest" in
-      *$'\n'*) _one="${_rest%%$'\n'*}"; _rest="${_rest#*$'\n'}" ;;
-      *)        _one="$_rest"; _rest="" ;;
-    esac
-    [ -n "$_one" ] || continue
-    case "$_one" in
-      /*) _eg_path_fold "$_one" ;;
-      *)  _eg_path_fold "${_prev%/}/${_one}" ;;
-    esac
-    if [ "$_EG_FOLD" != "$_first" ]; then
-      _EG_CD_DIFF="$_one"
-      return 1
-    fi
-    _prev="$_EG_FOLD"
-  done
-  return 0
-}
-
 # _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
-# of the three spellings answered) and, through `_eg_cd_targets`, _EG_CDS.
+# reading answered) and, for a move the placement reader cannot follow, _EG_MOVING.
 #
-# THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
-#   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
-#   2. a LEADING `cd <absolute dir>` — the shape every bionic writer brief mandates
-#      (`cd <worktree> || exit 1` as the first statement). The harness posts the SESSION's
-#      cwd in the payload and the `cd` runs afterwards, so without this the dominant real
-#      shape would read as a main-root commit and REQ-2 would hold only for fixtures;
-#   3. the payload's `.cwd`.
-# Only an ABSOLUTE path is taken from the command: a relative path is resolved against a cwd
-# this hook would have to re-derive, and guessing it wrong is how a commit gets judged at
-# another task's step. Anything unreadable falls through to (3), which is today's answer.
+# TWO READINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
+#   1. `git -C <dir> commit` (and `env -C <dir>`) — git's own cwd override, and it wins over
+#      everything. It is the commit reader's own reading, as wave-36 T4 left it (A-T4-3): the
+#      placement reader reads cd moves only.
+#   2. where the first git segment runs, asked of the one placement reader (wave-36 T25; D11,
+#      AC-5.3): `cmd_place "$COMMAND" <payload cwd> git` (lib/placement.sh). It reads cmd-class's
+#      parsed segments and follows the cd chain the way the shell does: every literal cd ahead of
+#      the git, a pinned variable, `~`, a relative cd joined to the one before it. Its answer is
+#      `_EG_CWD`, with `_EG_CWD_SRC` = place. The payload's cwd is its answer when nothing moves.
+# A `moving <segment>` answer (a cd the reader cannot read or cannot be sure reaches the git: an
+# unpinned variable, `pushd`, `if cd`, a cd behind `||` or a pipe) sets _EG_CWD_SRC = moving and
+# _EG_MOVING to the segment; the gate refuses it naming that segment, before any plan is read
+# (`place_moving_line`), never judging it on this plan from the payload cwd. A reader that cannot
+# load, or a command whose git it cannot find (`sh -c 'git commit'`), leaves the payload cwd with
+# _EG_CWD_SRC = unread, which `_eg_placed` never exempts: fail closed, as ARM C is.
 #
-# A RELATIVE `-C` FALLS THROUGH RATHER THAN ANSWERING (critic issue 2, wave-14 T24). Branch
-# (1) used to return `.` or `sub` verbatim; `_eg_wt_name` then rejected it for not starting
-# with `/` and the row was LOST, so `git -C . commit` from inside a worktree was refused for
-# Step-5 evidence that cannot exist yet — the exact failure REQ-2 exists to remove, and the
-# same commit spelled `git commit` was allowed. A relative `-C` resolves against the shell's
-# cwd at that moment, which is precisely what (2) and (3) answer, so it defers to them.
+# UNTIL wave-36 THIS READ THE TEXT ITSELF: a leading `cd <absolute existing dir>` taken off the front
+# of the raw command, every later `cd` before the first `git` listed by a raw split
+# (`_eg_cd_targets`), and an arm that refused a list naming two directories because nothing in the
+# text said which one the commit ran in. The reader says, so the list and the arm are gone.
 #
-# IT ASSIGNS RATHER THAN PRINTS (the `_wall_flatten` pattern, and now a correctness
-# requirement rather than a saved fork): two of its three answers are facts about the
-# COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
-# a cwd — and a command substitution would leave them behind in a subshell.
+# A RELATIVE `-C` FALLS THROUGH RATHER THAN ANSWERING (critic issue 2, wave-14 T24). A relative
+# `-C` resolves against the shell's cwd at that moment, which is what (2) answers, so it defers to
+# it; `_eg_placed` then costs the exemption for the `-C` it cannot fold.
+#
+# IT ASSIGNS RATHER THAN PRINTS (the `_wall_flatten` pattern): the moving answer is a fact about the
+# COMMAND that only the caller can act on, and a command substitution would leave it in a subshell.
+_EG_MOVING=""
 _eg_commit_cwd() {
   local _line _oldifs _hadf _p _c _gc
-  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
+  _EG_CWD=""; _EG_CWD_SRC=""; _EG_MOVING=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   # `env` in any letter case: the argv reader folds the prefix word (wave-25 T12), so
   # `ENV -C <dir> git commit` is placed by its directory exactly as `env -C <dir>` is.
@@ -1306,44 +1153,16 @@ _eg_commit_cwd() {
       done <<< "$(git_argv_expand "$COMMAND")"
       ;;
   esac
-  # (2) — the leading `cd`, read off the front of the command and nowhere else.
-  #
-  # THE LEADING BLANKS COME OFF BEHIND A `case` (wave-24-fixit-1811 T4). `[ "${_c# }" != "$_c" ]`
-  # asked bash to try every prefix of the command against one space before it could answer no,
-  # and on a 64 KB command holding any multibyte character that one test cost 0.7 s under 3.2
-  # and 5.3 alike (tests/hook-timeout.test.sh row b'). A `case` on the first character answers
-  # at once, and the removal then runs only when it matches.
-  _c="$COMMAND"
-  while :; do case "$_c" in ' '*) _c="${_c# }" ;; *) break ;; esac; done
-  while :; do case "$_c" in '	'*) _c="${_c#	}" ;; *) break ;; esac; done
-  #
-  # THE SAME HOLDS FOR THE PATH AFTER `cd` (wave-24 T28). `_p` is cut at the first `;&|` or
-  # newline FIRST, so the blanks come off a few bytes rather than the whole command, and each
-  # comes off behind a `case`: the `[ "${_p# }" != "$_p" ]` loops that stood here failed once
-  # per loop on the whole command, 1.27 s under 3.2 and 5.3 on a 64 KB heredoc.
-  case "$_c" in
-    'cd '*|'cd	'*)
-      _p="${_c#cd}"
-      _p="${_p%%[;&|$'\n']*}"
-      while :; do case "$_p" in ' '*) _p="${_p# }" ;; *) break ;; esac; done
-      while :; do case "$_p" in '	'*) _p="${_p#	}" ;; *) break ;; esac; done
-      while :; do case "$_p" in *' ') _p="${_p% }" ;; *) break ;; esac; done
-      case "$_p" in
-        '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
-        "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
-      esac
-      case "$_p" in
-        /*) if [ -d "$_p" ]; then
-              _EG_CWD="$_p"; _EG_CWD_SRC="cd"
-              _eg_cd_targets "$_c"
-              return 0
-            fi ;;
-      esac
-      ;;
+  # (2) — the one placement reader.
+  _c="$(bionic_jq .cwd)"
+  _EG_CWD="$_c"; _EG_CWD_SRC="unread"
+  wall_libs evidence-gate placement.sh || return 0
+  declare -F cmd_place >/dev/null 2>&1 || return 0
+  _p="$(cmd_place "$COMMAND" "$_c" git 2>/dev/null)"
+  case "$?" in
+    0) [ -z "$_p" ] || { _EG_CWD="$_p"; _EG_CWD_SRC="place"; } ;;
+    1) _EG_CWD_SRC="moving"; _EG_MOVING="${_p#moving }" ;;
   esac
-  # (3)
-  _EG_CWD="$(bionic_jq .cwd)"
-  _EG_CWD_SRC="payload"
   return 0
 }
 
@@ -1463,24 +1282,33 @@ _eg_commit_count() {
 # literal `.git` path anywhere in the text. The three rounds of deny-list that were beaten (R1,
 # C1, R2-2) are why this stays an allow-list: a word is read past only when it is named here.
 #
+# A `cd` IS READ PAST BEFORE THE FIRST git, AND ONLY WHEN THE CALLER ASKS (wave-36 T25; D11). The
+# placement reader placed the first git segment, every cd ahead of it included, so `_eg_placed`
+# passes `cd` for a commit it placed: `cd <dir> && cd <repo> && git commit` is one directory the
+# reader is sure of. A cd AFTER the first git is never read past: the commit may be a later git
+# segment, and the reader's answer is the first one's (`cd <scratch> && git add . && cd <root> &&
+# git commit` lands in the root).
+#
 # _EG_GO_WHY names what cost the exemption, for the jurisdiction refusal (empty on 0).
 _EG_GO_WHY=""
-_eg_git_only() {
+_eg_git_only() {  # <text> [cd] -> 0 when every segment's first word is on the list
   local _t="${1:-}" _rc
   _EG_GO_WHY=""
   case "$_t" in
     *'sh -c'*|*'sh	-c'*) _EG_GO_WHY="it carries an sh -c string"; return 1 ;;
     *[\(\)\{\}\`]*) _EG_GO_WHY="it opens a subshell, a group, a function body or a backtick"; return 1 ;;
   esac
-  _EG_GO_WHY="$(_EG_GO_TEXT="$_t" LC_ALL=C awk '
+  _EG_GO_WHY="$(_EG_GO_TEXT="$_t" _EG_GO_CD="${2:-}" LC_ALL=C awk '
     BEGIN {
-      t = ENVIRON["_EG_GO_TEXT"]
+      t = ENVIRON["_EG_GO_TEXT"]; cd = (ENVIRON["_EG_GO_CD"] == "cd"); seen = 0
       gsub(/>&/, ">", t); gsub(/<&/, "<", t); gsub(/&>/, ">", t)
       n = split(t, seg, /[;&|\n]/)
       for (i = 1; i <= n; i++) {
         w = seg[i]
         sub(/^[ \t]+/, "", w)
         sub(/[ \t].*$/, "", w)
+        if (w == "git") seen = 1
+        if (cd && !seen && w == "cd") continue
         if (w == "" || w == "git" || w == "true" || w == ":" || w == "exit") continue
         if (w == "ln" || w == "mkdir" || w == "cp" || w == "mv" || w == "rm" || w == "touch" || w == "printf" || w == "echo") {
           if (seg[i] ~ /[$*?[]/) { printf "a %s segment carries a $ or a glob, which can name .git unwritten", w; exit 1 }
@@ -1498,18 +1326,18 @@ _eg_git_only() {
 }
 
 # _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
-# reader does, and 1 for every other shape (critic C1, review R2-2, wave-19). Only these three
-# place, and each needs `_eg_git_only` to hold over the text it names:
+# reader does, and 1 for every other shape (critic C1, review R2-2, wave-19). Only these two
+# place, and each needs `_eg_git_only` to hold over the whole text:
 #   (a) `git -C <absolute dir> commit`. The commit's global options carry exactly ONE `-C`,
-#       because git takes the LAST of several and the reader took the first. The WHOLE text
-#       must pass `_eg_git_only`, so a function named `git` cannot redirect the commit.
-#   (b) a leading `cd <absolute dir>` followed by `&&`, `||`, `;` or a newline. A pipe or a
-#       lone `&` runs the `cd` in a subshell that moves nothing, so neither places. The commit
-#       carries no `-C`, and everything after the separator must pass `_eg_git_only`.
-#   (c) the payload cwd. The commit carries no `-C`, and the whole text must pass
-#       `_eg_git_only`. This is the writer standing in the scratch repository or the nested
-#       bed (AC-9.1, AC-9.3).
-# And in all three, no `--git-dir`, `--work-tree`, `GIT_DIR`, `GIT_WORK_TREE` or
+#       because git takes the LAST of several and the reader took the first, and no word but
+#       the list's runs anywhere, so a function named `git` cannot redirect the commit.
+#   (b) the placement reader's answer (wave-36 T25; D11): `cmd_place` placed the first git
+#       segment, at the payload cwd or where the cd chain ahead of it leads (a pipe, a `&`, a
+#       subshell or a `||` that may not run are the reader's to judge, and a move it is unsure of
+#       never gets here). The commit carries no `-C`, and the list holds over the whole text with
+#       `cd` read past before the first git. This is the writer standing in, or cd-ing into, the
+#       scratch repository or the nested bed (AC-9.1, AC-9.3).
+# And in both, no `--git-dir`, `--work-tree`, `GIT_DIR`, `GIT_WORK_TREE` or
 # `GIT_COMMON_DIR` anywhere in the command: each names the repository outright, whatever
 # directory the commit runs in. The check is on the raw text, so the words inside a commit
 # message cost the exemption too — the fail-closed direction, and a writer commits with `-F`.
@@ -1540,7 +1368,7 @@ _eg_git_only() {
 _EG_PLACED_WHY=""
 _eg_dotgit_re='(^|[^A-Za-z0-9_.-])\.[Gg][Ii][Tt]([^A-Za-z0-9_-]|$)'
 _eg_placed() {
-  local _c _sep _dq
+  local _dq
   _EG_PLACED_WHY=""
   # THE SHARED STRIP (`_wall_screen`; wave-24-fixit-1811 T4). It also joins a
   # backslash-newline, which the shell does too, so `--git-\<newline>dir` now costs
@@ -1564,23 +1392,10 @@ _eg_placed() {
     -C)
       [ "$_EG_COMMIT_NC" -eq 1 ] || { _EG_PLACED_WHY="the commit carries more than one directory override (-C)"; return 1; }
       _eg_git_only "$COMMAND" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
-    cd)
-      [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C after the leading cd"; return 1; }
-      _c="$COMMAND"
-      # Behind a `case`, as in `_eg_commit_cwd` (wave-24-fixit-1811 T4).
-      while :; do case "$_c" in ' '*) _c="${_c# }" ;; '	'*) _c="${_c#	}" ;; *) break ;; esac; done
-      _sep="${_c#"${_c%%[;&|$'\n']*}"}"
-      case "$_sep" in
-        '&&'*) _sep="${_sep#&&}" ;;
-        '||'*) _sep="${_sep#||}" ;;
-        ';'*|$'\n'*) _sep="${_sep#?}" ;;
-        *) _EG_PLACED_WHY="the leading cd is not followed by &&, || or ;, so it moves no shell the commit runs in"; return 1 ;;
-      esac
-      _eg_git_only "$_sep" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
-    payload)
+    place)
       [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C that is not absolute"; return 1; }
-      _eg_git_only "$COMMAND" || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
-    env-C) _EG_PLACED_WHY="env -C moves the commit, and the wall places only git -C, a leading cd or the cwd"; return 1 ;;
+      _eg_git_only "$COMMAND" cd || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
+    env-C) _EG_PLACED_WHY="env -C moves the commit, and the wall places only git -C or the placement reader's answer"; return 1 ;;
     *) _EG_PLACED_WHY="the wall could not read where the commit runs"; return 1 ;;
   esac
 }
@@ -1599,19 +1414,17 @@ _eg_placed() {
 # plan, whose evidence has nothing to say about another repository's work (A-orch-30, wave-34:
 # a scratch repository's commit was refused because "Step-5 head … is not a commit in the
 # repository at <scratch>"). It stays empty for a commit placed inside, for one the reader cannot
-# place at all, and for a leading `cd` followed by a second directory, which the two-directory
-# arm already refuses naming both. So the git question is asked of every commit now, not only of
-# a placeable one: one `rev-parse` per commit command.
+# place at all, and for a `moving` answer (wave-36 T25), which the gate refuses naming the segment
+# the reader could not follow. So the git question is asked of every commit now, not only of a
+# placeable one: one `rev-parse` per commit command.
 _EG_JUR_UNPLACED=""
 eg_commit_outside_root() {
   _EG_JUR_UNPLACED=""
   _eg_commit_cwd
+  [ "$_EG_CWD_SRC" != moving ] || return 1
   _eg_commit_count
   [ "$_EG_COMMITS" -ge 1 ] || return 1
   _eg_outside_root "$_EG_CWD" || return 1
-  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; then
-    return 1
-  fi
   if [ "$_EG_COMMITS" -ne 1 ]; then
     _EG_JUR_UNPLACED="it carries $_EG_COMMITS commits, and the wall places one"
     return 1
@@ -1969,16 +1782,16 @@ bionic_context 2>/dev/null || exit 0
 # `-ef` — so a symlinked spelling of the root is the root.
 #
 # ONLY A POSITIVE ANSWER EXEMPTS. No git, a directory git places in no repository, a root
-# whose common dir cannot be read (a `.bionic/` above the repository), a relative directory,
-# a command that names two directories before the commit: each keeps today's verdict and is
-# judged below. A wall that cannot place a commit does not wave it through; only git naming a
-# DIFFERENT repository does. The two-directory case is the one that matters — `cd <scratch>
-# && cd <root> && git commit` commits in the root, and the leading `cd` must not buy it an
-# exemption; the ambiguity arm further down refuses it as before.
+# whose common dir cannot be read (a `.bionic/` above the repository), a relative directory:
+# each keeps today's verdict and is judged below. A wall that cannot place a commit does not
+# wave it through; only git naming a DIFFERENT repository does. `cd <scratch> && cd <root> &&
+# git commit` commits in the root, and the placement reader says so (wave-36 T25): the scratch
+# directory it passed through buys it nothing. A move the reader cannot follow is refused just
+# below, naming it.
 #
 # AND A POSITIVE ANSWER IS ABOUT ONE COMMIT. `_eg_commit_cwd` places the FIRST commit the text
-# carries — the first `git -C <abs> commit`, else the leading `cd` — and says nothing about any
-# commit after it. So the arm exempts only a command whose text carries EXACTLY ONE commit
+# carries — the first `git -C <abs> commit`, else where the placement reader puts the first git —
+# and says nothing about any commit after it. So the arm exempts only a command whose text carries EXACTLY ONE commit
 # segment (`_eg_commit_count`, over the same `sh -c`/`eval`-expanded segment list every wall
 # reads) and places that one outside. Two or more commit segments are judged as before, even
 # when every one of them lands outside: `git -C <scratch> commit && git commit` and `cd
@@ -1987,13 +1800,14 @@ bionic_context 2>/dev/null || exit 0
 # R1, wave-19). Zero is judged too — a commit this reader cannot see is not one it can place.
 #
 # AND THE ONE COMMIT MUST BE PLACED EXACTLY AS GIT WILL PLACE IT (critic C1, wave-19). The reader
-# names the FIRST absolute `-C`, the leading `cd` or the payload cwd; git obeys the LAST `-C`,
+# names the FIRST absolute `-C`, else the placement reader's answer; git obeys the LAST `-C`,
 # `--git-dir`/`--work-tree`/`GIT_DIR` name the repository outright, and a `pushd`, a nested
 # `bash -c 'cd …'` or a piped `cd` moves the shell where the reader never looks. Every one of
 # those single commits was exempted for a scratch repository while it landed in the root.
-# `_eg_placed` admits only the three shapes the reader reads exactly: one `-C`, a leading `cd`,
-# or the payload cwd. Each holds only when every other segment of the text starts with `git`,
-# `true`, `:` or `exit` (`_eg_git_only`), with no `(`, `{` or backtick anywhere. That is an
+# `_eg_placed` admits only the two shapes the reader reads exactly: one `-C`, or the placement
+# reader's answer (a cd before the first git read past, wave-36 T25). Each holds only when every
+# other segment of the text starts with a word on `_eg_git_only`'s list, with no `(`, `{` or
+# backtick anywhere. That is an
 # ALLOW-LIST (review R2-2): `if cd <root>; then :; fi; git commit`, `time cd <root> && git
 # commit` and a function named `git` all cost the exemption because their first word is not on
 # it, not because a list of moves names them. Everything else is judged below. The exotic
@@ -2006,11 +1820,12 @@ bionic_context 2>/dev/null || exit 0
 # AND IT EXEMPTS THIS GATE ALONE, as the rc-4 arm does: the `exit 0` leaves `_eg_body`'s
 # subshell, and the walls folded beside it in hooks/bash-walls.sh — protect-main, the
 # read-only-role arm, the background-suite guard — keep their verdicts wherever the commit
-# lands (tests/bash-walls.test.sh §18).
+# lands (tests/bash-walls.test.sh §18). The read-only-role arm asks its own jurisdiction
+# question since wave-36 T4 (`_bsg_commit_outside`), through the placement reader, not this one.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # The one predicate (file scope, above `wall_evidence_gate`), which hooks/bash-walls.sh's debt
-# collector asks too. It sets _EG_CWD, _EG_CWD_SRC and _EG_CDS — once, for this arm and every
+# collector asks too. It sets _EG_CWD, _EG_CWD_SRC and _EG_MOVING — once, for this arm and every
 # reader below — and _EG_COMMITS and _EG_COMMIT_NC: only ONE commit can be placed outside.
 if eg_commit_outside_root; then
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
@@ -2032,6 +1847,23 @@ if [ -n "$_EG_JUR_UNPLACED" ]; then
 "evidence-gate: $_EG_JUR_TOP is outside the engaged repository ($BIONIC_ROOT), but the wall cannot place this commit exactly as git will: $_EG_JUR_UNPLACED.
 An outside commit the wall cannot place is not exempt, and this run's plan is not read for it: it is refused here.
 Split it: run the setup as its own command, then commit alone with: git -C $_EG_JUR_TOP commit"
+fi
+
+# A COMMIT THE PLACEMENT READER CANNOT FOLLOW IS REFUSED HERE, NAMING THE MOVE (wave-36 T25; D11,
+# AC-5.3). `_eg_commit_cwd` asks the one placement reader where the first git runs, and a `moving`
+# answer means a move ahead of it the reader cannot read or cannot be sure reaches it: `cd $D` with D
+# set nowhere in the command, `pushd`, `if cd`, a cd behind `||` or a pipe. Nothing says which
+# repository or which tree the commit lands in, so it is not judged on this plan from the payload cwd
+# (the wall would be sentencing a commit for a tree it has not named) and it is not exempted either:
+# it is refused, before any plan is read, from any cwd, with `place_moving_line`'s one line, the line
+# every caller of the reader refuses a moving answer with. It replaces the arm that refused "two
+# directories named before the commit": the reader follows a cd chain it can read, so two literal
+# directories are one answer now, and only a move it cannot follow is left to refuse.
+if [ "$_EG_CWD_SRC" = moving ]; then
+  refuse exit2 commit "the wall cannot follow this commit's move" "cd first, or commit alone" \
+"evidence-gate: $(place_moving_line "$_EG_MOVING").
+The commit is not judged on this run's plan: the wall cannot say which tree or repository it lands in.
+Fix: open the command with a literal cd <absolute dir> (or a variable set in the same command), or commit as its own call."
 fi
 
 # THE DOCS ROOT, FROM THE LIBRARY. This hook carried `resolve_docs_root()` and was the
@@ -2556,8 +2388,12 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 # regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
 # no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
 # says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
-# debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state, the floor judge and
-# facts_state ask, so the wall and the judge read one plan's floor line one way (FL-5 drives both).
+# debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state and facts_state ask before
+# the floor judge, so the wall and the judge read one plan's floor line one way (FL-5 drives both). THE PLAN'S LINES
+# ARE lib/run.sh `plan_lines`'s, the one plan line reader, CR translated, which that reader reads through (wave-36
+# T12; D13, AC-7.5; C34): a CR-only plan's floor line is a line to this arm and the judge alike (FL-5-cr), where a
+# raw read had refused it here as absent while the gate's own parse read the plan's steps. `plan_regression`
+# reads the frontmatter through the same translation.
 # A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
 # that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
 # green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes
@@ -2618,18 +2454,24 @@ $(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
   refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
 }
 
-# THIS SESSION'S ROSTER, as the gate reads it (wave-21 T5; spec assumption 1). The same path the
-# suite-budget arm builds from the same two facts (`roster-<sid>.state` under the root's
-# `.bionic/tmp`). With no session id there is no roster to name, and `units_findings` then
-# computes no `launch` finding: an agent-named `active` row owes its line, as it did before.
+# THE RUN'S ROSTERS, as the gate reads them (wave-36 T29; REQ-4 AC-4.1; D10; was this session's
+# roster alone, wave-21 T5). lib/units.sh `units_run_rosters` lists them, the one lister the Patrol
+# tick asks too: this session's roster first — the path the suite-budget arm builds from the same
+# two facts (`roster-<sid>.state` under the root's `.bionic/tmp`), empty with no session id — then
+# every roster there whose rows carry `plan=` this plan. A `/clear` re-keys the session, so a reader
+# the predecessor launched lives on the predecessor's roster; reading `roster-<sid>` alone refused
+# its commit (wave-35 A-orch-46). With no roster at all `units_findings` computes no `launch`
+# finding: an agent-named `active` row owes its line, as it did before.
 _eg_roster_path() {
-  [ -n "${BIONIC_SID:-}" ] || return 0
-  printf '%s' "$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  local own=""
+  [ -z "${BIONIC_SID:-}" ] || own="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  units_run_rosters "$BIONIC_ROOT/.bionic/tmp" "${PLAN:-}" "$own"
 }
 
 # THE LAUNCH FINDING, REFUSED (wave-21 T5; REQ-4, AC-4.1; D4). An `active` row whose agent cell
-# names someone no row on this session's roster names: the dispatch that would have launched it
-# left no record, so the row claims a writer the machine never saw. Every such row in one pass,
+# names someone no row on the run's rosters names, and the plan's `## Dispatch ledger` does not
+# (wave-36 T29): the dispatch that would have launched it left no record, so the row claims a
+# writer the machine never saw. Every such row in one pass,
 # as the line arm does, each with the cell it carries — the repair is that cell, written as the
 # name the dispatch recorded, or emptied for a row this session works itself (self-owned).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2645,9 +2487,9 @@ refuse_unlaunched_rows() {  # $1 = `<id>: <agent cell>` lines (the reader's laun
     verdict="${count} active tasks name no launched agent"
     subject="${count} active '## Tasks' rows have"
   fi
-  _eg_detail="canonical-sdlc: ${subject} an agent cell that names no row on this session's roster.
+  _eg_detail="canonical-sdlc: ${subject} an agent cell that names no row on this session's roster, on another roster of this plan, or in its '## Dispatch ledger'.
 Plan: $PLAN
-Roster: $(_eg_roster_path)
+Rosters: $(_eg_roster_path | awk 'NF { s = s (s == "" ? "" : " ") $0 } END { print s }')
 Fix: write the name the dispatch recorded (the roster row's name=) in each agent cell below, or empty the cell for a row this session works itself.
 $(printf '%s\n' "$rows" | sed -E 's/^/- /')"
   refuse exit2 commit "$verdict" "write the roster name as agent" "$_eg_detail"
@@ -2703,7 +2545,8 @@ matrix_section() {
 # per-tier key loop saw no keys and blocked a conformant plan, and both
 # `waiver:` exemptions (per-tier and post-Verify CONFIRMED) lost their token.
 # One extractor, four behaviors, so the leader was a whole-contract bypass.
-# The strip runs on a COPY (`hdr`), which keeps two invariants: the terminator
+# The strip runs on a COPY inside lib/units.sh `units_ac_head_awk` (wave-36 T24: the one matcher the
+# hook's matrix_block_key and matrix_block_has read too), which keeps two invariants: the terminator
 # below still tests the RAW line, so a following list item still ends the
 # previous block; and the index test still runs against a line that begins with
 # the AC id, so AC-1 still does not match `- AC-11:`. Accepted: the three
@@ -2712,9 +2555,8 @@ matrix_section() {
 # terminator could never end a block it introduced.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_block() {
-  echo "$MATRIX" | awk -v ac="$1:" '
-    { hdr = $0; sub(/^[-*+][[:space:]]+/, "", hdr) }
-    index(hdr, ac)==1 {f=1; next}
+  echo "$MATRIX" | awk -v ac="$1" "$(units_ac_head_awk)"'
+    ac_head($0, ac) {f=1; next}
     /^[^[:space:]]/ {f=0}
     f'
 }
@@ -3340,47 +3182,15 @@ _eg_row_for_worktree() {
 
 _EG_WT=""
 _EG_SUBSTITUTED=0    # set by BOTH substitution forks below (step-below, active-status); read at the pointer-step exit (D7)
-# _EG_CWD, _EG_CWD_SRC and _EG_CDS were set by `_eg_commit_cwd` at the jurisdiction arm, above
-# the plan read (wave-19 REQ-9); the command and the payload have not changed since.
+# _EG_CWD and _EG_CWD_SRC were set by `_eg_commit_cwd` at the jurisdiction arm, above the plan read
+# (wave-19 REQ-9); the command and the payload have not changed since.
 
-# WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
-# command text names a second directory before the commit, no reading of the text answers
-# that, so the arm refuses and names both rather than judging at the first one.
-#
-# ASKED BEFORE ANY DIRECTORY IS RESOLVED, AND THAT IS THE REPAIR (bug 6). The arm used to sit
-# inside the `if [ -n "$_EG_WT" ]` block below, so it was reached only when git had already
-# confirmed the FIRST directory as a linked worktree of this repository. Every other first
-# directory — the main checkout, a record/ directory under it, /tmp — left `_EG_WT` empty,
-# skipped the whole block, and the commit was judged at the run's `current:` with nothing said
-# about the second `cd`: fail-open for `cd <records-dir>; …; cd <tree> && git commit`, which is
-# the shape a consumer actually wrote. THE AMBIGUITY IS THE COMMAND'S PROPERTY, not the first
-# directory's: a `;` runs the rest wherever the shell is standing, a failed `cd` leaves it
-# where it was, and a `&&` only looks decisive. So the question is asked of the text, here,
-# where it costs no `read` and no fork and reaches every first directory alike.
-#
-# `_EG_CDS` IS SET ONLY BY THE LEADING-`cd` BRANCH of `_eg_commit_cwd` — a `git -C <dir>`
-# commit never consults it — so the `_EG_CWD_SRC` test names the branch that answered rather
-# than narrowing the arm.
-#
-# TWO TOKENS ARE NOT TWO DIRECTORIES (critic C3). `cd X && cd X` and `cd X && cd .` name one
-# directory twice, and the arm used to refuse them with a sentence that answered its own
-# complaint. `_eg_cd_one_dir` compares the RESOLVED targets — the values this arm already
-# prints — and only a real difference is an ambiguity.
-#
-# AND IT COMPARES EVERY ONE OF THEM (W6). The reader behind C3's fix stopped at the first
-# `cd` after the leading one, so `cd X && cd X && cd Y && git commit` was allowed and judged
-# at X while the shell commits in Y: two matching targets answered for a command that goes
-# on to name a third. `_eg_cd_one_dir` now walks the whole list and the arm fires on the
-# FIRST target that disagrees with the leading directory, which is the pair the detail names.
-# A `git -C <dir> commit` still overrides all of it — branch (1) answers before this list is
-# ever built, which is why the Fix line below can offer that spelling as the way out.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; then
-  _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD_DIFF}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
-Plan: $PLAN
-Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
-  refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
-fi
+# WHICH DIRECTORY DOES THIS COMMIT RUN IN is the placement reader's answer (wave-36 T25; D11), read
+# once at the jurisdiction arm above. The arm that stood here refused a command naming two
+# directories before the commit (critic issue 1, wave-17; C3; W6), because the gate's own reader of
+# the text could not tell which one the commit ran in. `cmd_place` follows the cd chain, so it can:
+# `cd <tree1> && cd <tree2> && git commit` is judged at tree2's row, and a move it cannot follow was
+# refused above, naming the segment.
 
 if [ -n "$BIONIC_WORKTREE" ] && [ "$_EG_CWD" = "$BIONIC_CWD" ]; then
   _EG_WT="$BIONIC_WORKTREE"          # the ladder already asked GIT about this very directory
@@ -4817,7 +4627,8 @@ validate_intent_evidence() {
 #      — status in {pending,active,landed,dropped} among them — else exit 2; then
 #      the reader's ledger findings (`units_findings`, wave-21 T5, D4): a `landed`
 #      row with no `- T<n>:` line in ## SDLC State, or an `active` row whose agent
-#      cell names no row on this session's roster, else exit 2; a line that is
+#      cell names no row on this session's roster, on another roster of this plan,
+#      or in its `## Dispatch ledger` (wave-36 T29), else exit 2; a line that is
 #      there must not be a placeholder, else exit 2.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
@@ -5546,10 +5357,10 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # `BIONIC_QUIET=1` in a suite segment's prefix nor a `# runner: solo` line in a suite file is read:
 # nothing passes or fails by the clock, so no suite is owed a quiet machine.
 #
-# --stamp-dir: WHERE THE SUITE RUNS, when a leading literal `cd` moves it (wave-26 T56, final
-# review B1). The shim stands in the payload's cwd, so without it `cd <tree> || exit 1; bash
-# tests/x` from the main checkout stamps the main checkout and the tree lands on no stamp.
-# `_bsg_cd_walk` says when it is sure. --unplaced: a move ahead of the suite the walk cannot follow
+# --stamp-dir: WHERE THE SUITE RUNS, when a `cd` moves it (wave-26 T56, final review B1). The shim
+# stands in the payload's cwd, so without it `cd <tree> || exit 1; bash tests/x` from the main
+# checkout stamps the main checkout and the tree lands on no stamp. `_bsg_cd_walk` asks the one
+# placement reader (wave-36 T25). --unplaced: a move ahead of the suite the reader cannot follow
 # (wave-35 T6; D14): the shim writes no stamp and says on the run's output that it did not count.
 # With no move at all there is neither option, and the shim stamps its own directory.
 #
@@ -5591,87 +5402,46 @@ _wall_harness_shell() {  # -> sets _WALL_HSHELL to the harness's bash or zsh; rc
   return 1
 }
 
-# _bsg_cd_walk <class lines> — THE ONE WALK of the command's leading literal `cd` segments, up
-# to its first suite segment, read twice (wave-26 T56, final review B1). Pure parameter
-# expansion: no fork beyond the one `bionic_jq .cwd`. It sets
+# _bsg_cd_walk — WHERE THE FIRST SUITE SEGMENT RUNS, asked of the one placement reader (wave-36 T25;
+# D11, AC-5.1; it was wave-26 T56's walk of the leading literal `cd` segments). It sets
 #
-#   _BSG_CD_DIR     the payload cwd moved by every `cd` the walk can read as a literal; one it
-#                   cannot read is skipped.
-#   _BSG_CWD        the payload cwd itself, where the shim stamps when there is no --stamp-dir.
-#   _BSG_STAMP_DIR  where the first suite segment runs, when a `cd` moved it and the walk is
-#                   SURE of it; "" otherwise. The shim's --stamp-dir: a guess there would put a
-#                   run's stamp in another tree, so anything unsure gives none.
-#   _BSG_UNPLACED   1 when a move ahead of the suite (a `cd`, `pushd` or `popd` in any form) left
-#                   the walk unsure where it runs, else 0. The shim's --unplaced (wave-35 T6; D14,
-#                   design ledger Δ7): its own directory was the guess that stamped a red run in a
-#                   writer's dirty tree as a clean green at the main head (1.17.0), so such a run
-#                   leaves no stamp at all. With no move, the suite runs where the shim stands.
+#   _BSG_CWD        the payload cwd (else BIONIC_CWD), where the shim stamps when there is no
+#                   --stamp-dir.
+#   _BSG_STAMP_DIR  where the first suite segment runs, when a move took it somewhere else and the
+#                   reader is sure of it; "" otherwise. The shim's --stamp-dir.
+#   _BSG_UNPLACED   1 when the reader cannot say where the suite runs, else 0. The shim's --unplaced
+#                   (wave-35 T6; D14, Δ7): such a run leaves no stamp at all, since a guess at its
+#                   tree once stamped a writer's red run as a clean green at the main head (1.17.0).
 #
-# SURE means: every `cd` ahead of the suite is a literal path (bare, single- or double-quoted
-# with nothing to expand; `~` and `~/…` from HOME; bare `cd` is HOME) or, after one that is not,
-# an absolute one re-anchors; no other segment ahead of it names `cd`, `pushd` or `popd`
-# (`if cd x`, `X=1 cd x`); and the raw text ahead of the suite holds no subshell, pipe,
-# background job or command substitution (`( … )`, `|`, `&`, a backquote), nor a `cd` behind
-# `||`, which may not run. The class lines flatten all of those away, so the raw text is asked.
-_BSG_CD_DIR=""; _BSG_STAMP_DIR=""; _BSG_UNPLACED=0
+# THE ANSWER IS `cmd_place "$COMMAND" <cwd> suite` (lib/placement.sh), mapped as T3's contract says:
+# exit 0 at the cwd stamps in place, exit 0 elsewhere is --stamp-dir <path>, exit 1 (`moving
+# <segment>`) is --unplaced. The reader reads cmd-class's parsed segments, so text inside quotes, a
+# heredoc body, the inside of `$(…)` and a redirection after the cd move nothing, and the gate's tree
+# (booked.sh `booked_cd_dir`) and the commit readers ask the same reader. Any other answer, or a
+# reader that cannot load, is --unplaced: fail closed, no stamp, never a guess.
+_BSG_STAMP_DIR=""; _BSG_UNPLACED=0
 _bsg_cd_walk() {
-  local _cls _seg _p _q _sure=1 _moved=0 _seen=0 _pre _t
-  _BSG_CD_DIR="$(bionic_jq .cwd)"; [ -n "$_BSG_CD_DIR" ] || _BSG_CD_DIR="${BIONIC_CWD:-}"
-  _BSG_CWD="$_BSG_CD_DIR"; _BSG_STAMP_DIR=""; _BSG_UNPLACED=0
-  [ -n "$_BSG_CD_DIR" ] || _sure=0
-  _seg=""
-  while IFS=$'\t' read -r _cls _seg; do
-    [ "$_cls" = suite ] && break
-    _seg="${_seg#\{}"; _seg="${_seg#"${_seg%%[![:space:]]*}"}"
-    case "$_seg" in
-      cd|cd[[:space:]]*) : ;;
-      *)
-        case " $_seg " in
-          *[[:space:]]cd[[:space:]]*|*[[:space:]]pushd[[:space:]]*|*[[:space:]]popd[[:space:]]*) _sure=0; _seen=1 ;;
-        esac
-        continue ;;
-    esac
-    _seen=1
-    _p="${_seg#cd}"; _p="${_p#"${_p%%[![:space:]]*}"}"; _p="${_p%"${_p##*[![:space:]]}"}"
-    _q=0
-    case "$_p" in
-      '') _p="${HOME:-}"; _q=1 ;;
-      \'*\') _p="${_p#\'}"; _p="${_p%\'}"; _q=1; case "$_p" in *\'*) _p="" ;; esac ;;
-      \"*\") _p="${_p#\"}"; _p="${_p%\"}"; _q=1; case "$_p" in *[\"\$\`\\]*) _p="" ;; esac ;;
-    esac
-    if [ "$_q" = 0 ]; then
-      case "$_p" in
-        '~'|'~/'*) [ -n "${HOME:-}" ] && _p="${HOME}${_p#\~}" || _p="" ;;
-        *[[:space:]\'\"\\\$\`\*\?\[\~]*) _p="" ;;
-      esac
-    fi
-    case "$_p" in ''|-*) _sure=0; continue ;; esac
-    case "$_p" in
-      /*) _BSG_CD_DIR="$_p"; _sure=1 ;;
-      *)  _BSG_CD_DIR="$_BSG_CD_DIR/$_p" ;;
-    esac
-    _moved=1
-  done <<< "$1"
-  _BSG_UNPLACED="$_seen"
-  [ "$_moved" = 1 ] && [ "$_sure" = 1 ] && [ "$_cls" = suite ] && [ -n "$_seg" ] || return 0
-  _pre="${COMMAND%%"$_seg"*}"
-  [ "$_pre" != "$COMMAND" ] || return 0
-  _t="${_pre//[[:space:]]/}"
-  case "$_t" in *'||cd'*|*'||{cd'*) return 0 ;; esac
-  _t="${_t//||/}"; _t="${_t//&&/}"
-  case "$_t" in *[\(\)\|\&\`]*) return 0 ;; esac
-  _BSG_STAMP_DIR="$_BSG_CD_DIR"; _BSG_UNPLACED=0
+  local _at _rc
+  _BSG_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CWD" ] || _BSG_CWD="${BIONIC_CWD:-}"
+  _BSG_STAMP_DIR=""; _BSG_UNPLACED=1
+  wall_libs background-suite-guard placement.sh || return 0
+  declare -F cmd_place >/dev/null 2>&1 || return 0
+  _at="$(cmd_place "$COMMAND" "$_BSG_CWD" suite 2>/dev/null)"; _rc=$?
+  [ "$_rc" -eq 0 ] && [ -n "$_at" ] || return 0
+  _BSG_UNPLACED=0
+  _eg_path_fold "$_BSG_CWD"
+  [ "$_at" = "$_EG_FOLD" ] || _BSG_STAMP_DIR="$_at"
   return 0
 }
 
 # _door_in_tree — sets _DOOR_HERE to yes when THE PROJECT THE RUN IS IN HAS THE RUNNER'S DOOR, else no
 # (wave-28 T54, D27; A-orch-124/125). The one predicate behind both halves of the door: the arm that
 # refuses a bare run, and the wrap that tells the shim `--runner`. The project is the tree the shim
-# asks from (booked.sh's `tree=`: `--stamp-dir`, else a leading `cd <dir>`, else the payload's cwd):
-# `_bsg_cd_walk`'s `_BSG_STAMP_DIR` when the walk is sure of a `cd`, else the payload's cwd
-# (`_BSG_CWD`), the same expression `_bsg_suites` roots its stamp names at; so the caller has walked
-# the command first. A walk that is not sure falls back to the cwd, as the shim does when it reads no
-# `cd` it can trust. Its checkout's tests/run.sh must say `--only`: a project with
+# asks from (booked.sh's `tree=`: `--stamp-dir`, else the placement reader's answer, else the
+# payload's cwd): `_bsg_cd_walk`'s `_BSG_STAMP_DIR` when the reader placed the suite elsewhere, else
+# the payload's cwd (`_BSG_CWD`), the same expression `_bsg_suites` roots its stamp names at; so the
+# caller has walked the command first. An unplaced run falls back to the cwd, as the shim does when
+# the reader cannot place it. Its checkout's tests/run.sh must say `--only`: a project with
 # suites and no runner, or a runner of its own that takes no flag, has no door to point an agent at.
 # A tree the walk cannot name (no cwd in the payload, a `cd` into nothing) has no runner to find;
 # `git -C ""` would read the hook's own directory instead, so it is not asked.
@@ -5785,7 +5555,7 @@ _bsg_agent() {
   _BSG_AGENT="${_BUDGET_ROW_NAME:-$_id}"
 }
 _bsg_wrap_text() {
-  local _c _w _lines _k="${WALL_SHORT_KILL_AFTER:-}"
+  local _c _w _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
   _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
   case "$_c" in
@@ -5805,12 +5575,9 @@ _bsg_wrap_text() {
     ! cmd_backgrounded "$COMMAND" || return 1
     _BSG_WRAP_WHY=""
   fi
-  # ONE READING OF THE COMMAND PER HOOK (wave-26 T39): the class above and these lines are the
-  # reading farm-out or the suite guard already made of this text, when one did.
-  _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
-  # ONE WALK (T56): where the leading `cd` segments lead, when the walk is sure of it, is the shim's
-  # --stamp-dir.
-  _bsg_cd_walk "$_lines"
+  # WHERE THE SUITE RUNS (wave-36 T25): the placement reader's answer is the shim's --stamp-dir or
+  # --unplaced.
+  _bsg_cd_walk
   # ONE TARGETS READING (T61): the shim's --suites.
   _BSG_TARGETS="$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
   _bsg_suites
@@ -5884,6 +5651,156 @@ _bsg_own_deliver() {
   [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
   [ "$_n" -eq 1 ]
+}
+
+# ─── JURISDICTION BEFORE ROLE (wave-36 T4; D11, AC-5.2; ruled at D6) ────────────────────────
+#
+# THE FAULT (research-landing-and-walls.md C42). ARM C refused every commit verb from a read-only
+# role wherever the commit landed, so a walker could not commit in its own scratch repository.
+# The evidence gate had already learned that another repository is outside its jurisdiction; the
+# role arm had not. It now asks the one placement reader (`cmd_place`, lib/placement.sh, T3) where
+# the commit runs BEFORE it reads the role: a commit placed outside the project root and outside
+# every tree of the project's repository is outside jurisdiction, and exempt whoever runs it. An
+# in-root commit by a read-only role is still refused.
+#
+# ONE READER, NO SECOND GRAMMAR. The place is `cmd_place`'s answer for the first git segment, and
+# it must equal its answer for the end of the command: a command whose first git runs outside but
+# whose shell ends elsewhere has a cd between them the arm will not guess about (A-T4-2). A
+# `moving` answer is not exempt, and the refusal names the segment in `place_moving_line`'s one
+# line. cmd_place reads cd moves only, so a commit that names its repository itself (`git -C`,
+# `--git-dir`, `--work-tree`, `env -C`, a GIT_DIR-family variable) is not exempted here at all: it
+# is the commit reader's to place, and this arm stays closed on it (A-T4-3).
+#
+# OUTSIDE IS READ ON DISK, PHYSICALLY. The place and the root are resolved through their longest
+# existing ancestor (`_bionic_root_abs`, lib/root.sh), so a link that leads into the root is
+# inside, and so is a repository nested under it. "Every tree the roster knows" is every working
+# tree of the project's repository (`git worktree list`): the roster rows name no tree of their
+# own, and every tree a writer is given is one of these (A-T4-1).
+
+# THE EIGHT VERBS THAT MAKE A COMMIT, named once: ARM C's screen and the relocation screen below.
+_BSG_COMMIT_VERBS="commit merge revert cherry-pick am rebase commit-tree update-ref"
+
+# place_moving_line <segment> -> the one line a `moving` placement is refused with: the segment as
+# cmd_place typed it, and the two ways to give the wall a place. Every caller that refuses a
+# moving answer prints this line (T25's commit readers among them), so a reader sees one sentence.
+# THE ADVICE FITS THE MOVE (wave-36 T43; walk.md shape six). A segment that is already a cd to one
+# absolute literal path lost the place by where it sits, not by what it names (behind a step that
+# may fail, behind `||` or a pipe, in a closed group or branch), so it is told to open the command
+# or run alone; telling it to cd to an absolute path first is advice it has already taken.
+place_moving_line() {
+  local _s="${1:-}" _fix="cd to an absolute path first, or run it as its own call" _op
+  case "$_s" in
+    'cd /'*|'{ cd /'*)
+      _op="${_s#\{ }"; _op="${_op#cd }"
+      case "$_op" in
+        *[[:space:]\$\`\\\*\?\[\'\"]*) : ;;
+        *) _fix="the path is absolute, but the cd sits where it may not run; open the command with it, or run it as its own call" ;;
+      esac ;;
+  esac
+  printf 'moving-form: `%s` moves the shell where the wall cannot follow, so it cannot place this command; %s' "$_s" "$_fix"
+}
+
+# _bsg_under <path> <dir> -> 0 when <path> is <dir> or below it (both already physical).
+_bsg_under() {
+  [ -n "$2" ] || return 1
+  [ "$1" = "$2" ] && return 0
+  case "$1" in "$2"/*) return 0 ;; esac
+  return 1
+}
+
+# _bsg_git_relocates -> 0, with _BSG_JUR_WHY set, when a commit-creating git segment names its own
+# repository or directory, so cmd_place's answer is not where git commits; 1 otherwise. The verbs
+# and the option walk are `_eg_commit_count`'s reading of git's global options.
+_bsg_git_relocates() {
+  local _line _oldifs="$IFS" _hadf
+  case "$COMMAND" in
+    *GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
+      _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement reader does not read"
+      return 0 ;;
+  esac
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    git_argv_parse "$_line" || continue
+    case " $_BSG_COMMIT_VERBS " in *" $GIT_SUB "*) : ;; *) continue ;; esac
+    _git_argv_skip "$_line"
+    if [ -n "$GIT_ARGV_ENV_CHDIR" ]; then
+      _BSG_JUR_WHY="env -C moves the commit to a directory the placement reader does not read; cd there and commit"
+      return 0
+    fi
+    [ -n "$GIT_ARGV_REST" ] || continue
+    _hadf=0
+    case "$-" in *f*) _hadf=1 ;; esac
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"
+    [ "$_hadf" -eq 1 ] || set +f
+    shift   # argv[0], the git binary
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -C|--git-dir|--git-dir=*|--work-tree|--work-tree=*)
+          _BSG_JUR_WHY="the commit names its repository itself (git -C, --git-dir or --work-tree), which the placement reader does not read; cd into that repository and commit there"
+          return 0 ;;
+        -c|--namespace|--exec-path|--config-env|--super-prefix) shift; [ $# -gt 0 ] && shift ;;
+        -*) shift ;;
+        *) break ;;
+      esac
+    done
+  done <<< "$(git_argv_expand "$COMMAND")"
+  return 1
+}
+
+# _bsg_commit_outside -> 0 when the commit is outside the project's jurisdiction (exempt from ARM C
+# whoever runs it); 1 when it is inside or cannot be placed, with _BSG_JUR_WHY naming why for the
+# refusal's detail when the arm knows. Reads COMMAND, the payload's cwd and BIONIC_ROOT.
+_BSG_JUR_WHY=""
+_bsg_commit_outside() {
+  local _cwd _at _end _rc _d _root _wts _wt
+  _BSG_JUR_WHY=""
+  _cwd="$(bionic_jq .cwd)"
+  # A reader that cannot load places nothing, so nothing is exempt: the role arm judges.
+  wall_libs background-suite-guard placement.sh || return 1
+  declare -F cmd_place >/dev/null 2>&1 || return 1
+  _at="$(cmd_place "$COMMAND" "$_cwd" git 2>/dev/null)"; _rc=$?
+  case "$_rc" in
+    0) : ;;
+    1) _BSG_JUR_WHY="$(place_moving_line "${_at#moving }")"; return 1 ;;
+    *) return 1 ;;
+  esac
+  _end="$(cmd_place "$COMMAND" "$_cwd" 2>/dev/null)"; _rc=$?
+  case "$_rc" in
+    0) : ;;
+    1) _BSG_JUR_WHY="$(place_moving_line "${_end#moving }")"; return 1 ;;
+    *) return 1 ;;
+  esac
+  if [ "$_at" != "$_end" ]; then
+    _BSG_JUR_WHY="the first git runs in $_at but the shell ends in $_end, so the wall cannot place the commit in one tree; commit in its own call"
+    return 1
+  fi
+  _bsg_git_relocates && return 1
+  _d="$(_bionic_root_abs "$_at")"
+  _root="$(_bionic_root_abs "$BIONIC_ROOT")"
+  if _bsg_under "$_d" "$_root"; then
+    _BSG_JUR_WHY="the commit is placed inside the project root ($BIONIC_ROOT)"
+    return 1
+  fi
+  if ! _wts="$(git -C "$BIONIC_ROOT" worktree list --porcelain 2>/dev/null)"; then
+    # No repository at the root has no trees to be inside. A repository git cannot list is not
+    # read as treeless: the arm stays closed.
+    [ -e "$BIONIC_ROOT/.git" ] || return 0
+    _BSG_JUR_WHY="git could not list the project's trees, so the wall cannot say the commit is outside them"
+    return 1
+  fi
+  while IFS= read -r _wt; do
+    case "$_wt" in "worktree "*) : ;; *) continue ;; esac
+    _wt="$(_bionic_root_abs "${_wt#worktree }")"
+    if _bsg_under "$_d" "$_wt"; then
+      _BSG_JUR_WHY="the commit is placed in $_wt, a tree of the project's own repository"
+      return 1
+    fi
+  done <<< "$_wts"
+  return 0
 }
 
 # _bsg_own_amend — is the matched `session-poker.sh amend` (`_WALL_POKER_ARGS`) a writer's Files
@@ -6157,8 +6074,13 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # gives Bash, are read-only here too. roster.sh is not in the carrier's BIONIC_LIB_WANT, so
   # it is sourced through `wall_libs` at the one moment it is needed: a commit in an agent
   # context. A missing library steps this arm aside with the advisory line, like cmd-class.sh.
+  #
+  # JURISDICTION FIRST (wave-36 T4; D11, AC-5.2): `_bsg_commit_outside`, above, asks the placement
+  # reader where the commit runs before the role is read. A commit placed outside the project root
+  # and outside every tree of its repository is not this arm's, whoever runs it.
   if _wall_mentions_git "$COMMAND" \
-     && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
+     && git_argv_has_any_sub "$COMMAND" "$_BSG_COMMIT_VERBS" \
+     && ! _bsg_commit_outside; then
     local _bsg_role _bsg_whence _bsg_pick _bsg_seg _bsg_segs _bsg_row=0
     # ONE PICK, ONE SITE (wave-22 T10; review 2): the row is `roster_row_for_id`'s — the budget
     # arm's own pick, the LAST `roster-state/` row whose FIRST `agent_id=` is this actor — and
@@ -6186,7 +6108,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
     if role_is_readonly "$_bsg_role"; then
       fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
         "$_bsg_whence, and a read-only role's deliverable is its report, never a commit. Leave
-the tree as it is and send the report; the orchestrator lands the work."
+the tree as it is and send the report; the orchestrator lands the work.${_BSG_JUR_WHY:+
+A commit placed outside the project root and outside every tree of its repository is exempt; this one is not: $_BSG_JUR_WHY.}"
       return 2
     fi
   fi
@@ -6784,7 +6707,7 @@ while IFS=$'\t' read -r _kind _target _run; do
   # by the full-tree arm just below, and a bare suite run goes on to the budget.
   _DOOR_HERE=no
   if [ "$_kind" = "file" ] || [ "$_kind" = "only" ]; then
-    _wall_class_read "$COMMAND"; _bsg_cd_walk "$_WALL_CLASS_LINES"; _door_in_tree
+    _bsg_cd_walk; _door_in_tree
     if [ "$_kind" = "only" ] && [ "$_DOOR_HERE" != yes ]; then _kind="file"; _target="run.sh"; fi
   fi
 

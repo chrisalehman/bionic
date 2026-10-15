@@ -1118,7 +1118,7 @@ ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
 fire "$d"; expect_block "60b3: …while one ready row left out is refused for the fill, naming no task entry" \
-  "Fillable gap" "task entries set in progress"
+  "ready with room: T3" "task entries set in progress"
 
 # 60c: …and a turn that dispatched ONE of the two is refused, naming only the other.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
@@ -1260,7 +1260,9 @@ fire "$d"; expect_block "64a3c: another session's rows are not this session's oc
 
 # 64a3d: THE LATEST ROW OF A NAME WINS, as every roster reader folds it: one name written
 # three times (intended, identified, confirmed) is one row in flight, not three. Seven such
-# names fill seven of eight, so exactly one row is named.
+# names fill seven of eight, so exactly one slot is free, and the refusal names both ready rows once
+# (wave-36 T32: a free slot is room for the refusal, never a trim of it). A fold that counted 21
+# would leave none, and the turn would pass.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
@@ -1269,7 +1271,8 @@ u_prompt "$d" "anything else to start?"
 # ROOM FOR THE ROSTER (wave-33 T1; Δ10): a writer not yet showing costs one core, and seven of
 # them under a load of 1.0 fill the clear gate's 6.4; this row tests the roster's fold, not the
 # gate, so its machine is 32 cores (25.6). 71a–71c below are pinned the same way.
-BIONIC_PROBE_CORES=32 fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" " T3"
+BIONIC_PROBE_CORES=32 fire "$d"; expect_block "64a3d: a name written three times occupies once — the turn is refused" "ready with room: T2 T3"
+expect_contains "64a3d2 …on seven open, one free" "|open=7|free=1|" "$(tail -1 "$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log" 2>/dev/null)"
 
 # 64a4: AC-5.1's own shape — a roster with two open rows and a plan with no `active` row:
 # gap = the gate's width − 2. On the loaded gate (room for two writers not yet showing) the two
@@ -1279,12 +1282,14 @@ ledger_roster "$d" open W1 W2
 u_prompt "$d" "anything else ready?"
 gate_loaded
 fire "$d"; expect_allow "64a4: two open roster rows not yet showing take the loaded gate's room: no gap"
-# …and with one of the two acked the gap is one: exactly T2 is named, never T3.
+# …and with one of the two acked the gap is one: the turn is refused, naming both ready rows once
+# (wave-36 T32), on one free slot.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1
 ledger_roster "$d" acked W2
 u_prompt "$d" "anything else ready?"
-fire "$d"; expect_block "64a5: one open roster row on the loaded gate leaves room for one row" "T2" " T3"
+fire "$d"; expect_block "64a5: one open roster row on the loaded gate leaves room: the turn is refused" "ready with room: T2 T3"
+expect_contains "64a5b …on one open, one free" "|open=1|free=1|" "$(tail -1 "$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log" 2>/dev/null)"
 gate_clear
 
 # …and one row in flight leaves room, so the same table with seven refuses.
@@ -1300,7 +1305,9 @@ fire "$d"; expect_block "64b: one row in flight against writers=8 leaves room, a
 # rows. The REAL tick runs on this same fixture repo — the same roster, the same plan, the
 # same ledger — and its printed FILL is compared with the ids the wall's refusal names on an
 # ordinary turn. Pre-fix the tick dropped the MET row from its occupancy and filled T2 T3;
-# the wall counts every unacked row and names T2 alone.
+# the wall counts every unacked row and finds one slot. Since wave-36 T32 the refusal names every
+# ready row on that one slot, the tick's FILL and the rest, so one decline answers them: the
+# differential is the room (the ledger's free=) and the names a superset of the tick's.
 POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
 d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=user' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
@@ -1337,8 +1344,8 @@ for _id in T1 T2 T3; do
   case " $(reason_of | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) WALL_64M="${WALL_64M}${_id} " ;; esac
 done
 expect_eq "64m: the tick's FILL on a MET-unacked roster is the wall's gap of one" "T2 " "$FILL_64M"
-expect_eq "64m2: …and the wall names exactly the ids the tick printed (AC-5.2 differential)" \
-  "$FILL_64M" "$WALL_64M"
+expect_contains "64m2: …and the wall finds the same one slot (AC-5.2 differential)" "|free=1|" "$(tail -1 "$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log" 2>/dev/null)"
+expect_eq "64m3: …naming the tick's FILL and every other ready row, once (wave-36 T32)" "T2 T3 " "$WALL_64M"
 rm -rf "$CFG_64M"
 
 # 64n: THE SAME DIFFERENTIAL, ON AN UNMET ROW (wave-19 delta review R2-5/C2-5, on 64m). 64m
@@ -1372,8 +1379,8 @@ for _id in T1 T2 T3; do
   case " $(reason_of | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) WALL_64N="${WALL_64N}${_id} " ;; esac
 done
 expect_eq "64n R2-5: the tick's FILL on an UNMET-gone roster is the wall's gap of one" "T2 " "$FILL_64N"
-expect_eq "64n2 …and the wall names exactly the ids the tick printed (AC-5.2 differential)" \
-  "$FILL_64N" "$WALL_64N"
+expect_contains "64n2 …and the wall finds the same one slot (AC-5.2 differential)" "|free=1|" "$(tail -1 "$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log" 2>/dev/null)"
+expect_eq "64n2b …naming the tick's FILL and every other ready row, once (wave-36 T32)" "T2 T3 " "$WALL_64N"
 expect_contains "64n3 R2-6/C2-5: the tick names the gone-UNMET row and the closing verb" \
   "poker: GONE W-UNMET — UNMET and absent from a fresh panel; close it with: bash ${BIONIC_HOOKS_DIR}/stop-orders.sh stopped W-UNMET" \
   "$TICK_64N"
@@ -1478,16 +1485,19 @@ pd_idhook_fire() {  # <project> — `fire` with the copied hook
 require_helpers refusal_rows expect_block_unnamed pd_idhook_fire
 
 # 69: THE GATE, NOT THE CEILING (Step-6 review R1, wave-18 T2b; wave-28 T13). Three rows are
-# ready (T2, T3, T20) against a declared cap of 8 — a wall sized by the cap would name all
-# three. The loaded gate has room for two writers, so the wall must name exactly T2 and T3,
-# and never T20, which the tick's own asks would not offer either.
+# ready (T2, T3, T20) against a declared cap of 8 — a wall sized by the cap would count eight free.
+# The loaded gate has room for two writers, so the wall's width is two (the ledger's free=2). Since
+# wave-36 T32 the refusal names every ready row while a slot is free, T20 with them, so one
+# decline answers all three; the room is the gate's, read on the ledger line.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LEDGER_READY_20")
 u_prompt "$d" "anything else ready?"
 gate_loaded
 fire "$d"; expect_block "69a: a gate with room for two caps the refusal below the cap" "T2"
 fire "$d"; expect_block "69b: …and the second row, at the gate's width" "T3"
-fire "$d"; expect_block_unnamed "69c: …and never the ceiling's wider count — T20 stays unnamed" "T20"
-pd_idhook_fire "$d"; expect_block_unnamed "69c2: …the same, fired from a hooks directory whose path holds T20, T8 and T13" "T20"
+expect_contains "69c: …and the width is the gate's two, never the ceiling's eight" "|free=2|" "$(tail -1 "$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log" 2>/dev/null)"
+expect_eq "69c1 …while the decline names every ready row once (wave-36 T32)" "T2 T3 T20" "$(refusal_rows)"
+pd_idhook_fire "$d"; expect_eq "69c2: …the same row list, fired from a hooks directory whose path holds T20, T8 and T13" \
+  "T2 T3 T20" "$(refusal_rows)"
 expect_contains "69c3: …whose refusal carries that path (so a whole-text must-not would read T20)" "$PD_IDDIR" "$(reason_of)"
 gate_clear
 

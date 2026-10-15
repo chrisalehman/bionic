@@ -1446,7 +1446,7 @@ return 2
 stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
-  local RITUAL RITUAL_REASON TICK_MARK FILL_MISSING FILL_REASON
+  local RITUAL RITUAL_REASON TICK_MARK FILL_MISSING FILL_REASON FILL_DECLINE _fill_detail
   local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
@@ -1665,13 +1665,15 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 #     `text` block, `fill-declined: <reason>` at the start of a line.
 # JUDGED BY COUNT: after the turn's launches, `missed = min(free writer slots, ready writer rows
 # this turn did not launch) + the ready read-only rows it did not launch` (a verify or review row
-# takes no writer slot; wave-26 T13, D9), and a turn with `missed > 0`, a gate that gave room
-# and no decline is refused once, naming those rows. No id is ever matched against a
+# takes no writer slot; wave-26 T13, D9) is what the ledger records, and a turn with a ready row
+# unanswered, a gate that gave room and no decline is refused once, naming EVERY such row
+# (wave-36 T32; D13, AC-7.1): until wave-36 it named `min(free, ready)` of them, so one free slot
+# and fourteen ready rows took fourteen declines, a turn apiece. No id is ever matched against a
 # dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the launch recorder
 # (hooks/execution-recorder.sh, wave-26 T12) sets it `active`, and until then the turn that
 # launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
 # the inverse of `fill_name`) takes it out of what the turn missed (wave-20 T11b, A-T11b.2).
-# The headline says how many of the ready rows the turn launched and names the ones it did not.
+# The headline names the ready rows the turn did not launch and no decline answers (wave-36 T32).
 #
 # THE DECLINE IS NOT A LOOPHOLE — it is the point. There are good reasons not to fill (a
 # dependency landing this minute, a merge in flight), and every one of them is worth one line
@@ -1694,29 +1696,32 @@ if [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_
 fi
 
 if [ "$FILL_SRC" = "GAP" ]; then
-  # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
-  # the state — the ledger is live, these rows are ready, slots are free after this turn's
-  # launches — whether or not a tick fired in it.
-  # THE DECLINE IS A VERB (wave-27 T34; REQ-15, D24): the refusal hands the one command that records
-  # it on disk, its rows comma-joined and its reason the poker's quoted placeholder, and asks for no
-  # line in the reply, which the user would read on every turn. A reply line is still read.
+  # ONE LINE, EVERY UNANSWERED ROW (wave-36 T32; D13, AC-7.1). Until wave-36 this was a six-line
+  # paragraph naming `min(free slots, ready rows)` of the rows, and the decline it printed answered
+  # only those: with one slot and fourteen ready rows a run declined by hand fourteen times, a turn
+  # apiece. Now the user reads one line naming every ready row no standing decline answers
+  # (`_ST_NAMED`), so one decline answers them all; the rule behind it lives in the dispatch
+  # doctrine ('The FILL line is advice; the wall counts'). The model's copy carries one more line,
+  # the decline as a command it can paste (THE DECLINE IS A VERB, wave-27 T34; REQ-15, D24), the
+  # rows comma-joined and the reason the poker's quoted placeholder, which the verb refuses run as
+  # printed (`DECLINE_REASON_SLOT`). `FILL_REASON` is the same two facts as one line, the form a
+  # duty paragraph takes when this refusal rides beside a stand-down's.
   _fd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
-  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} writer slot(s) are free after this turn's launches (a verify or review row takes none), and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row (the launch recorder sets it active; the wall reads the plan and the roster, never the Agent call's words), or record why they wait: bash ${_fd_poker} decline ${FILL_MISSING// /,} 'why they wait' — it stands for those rows until a row it did not name is ready. Then stop again — this gate blocks once."
-  [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The decline recorded earlier still stands for the rows it answered; these were not among them."
-  # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
-  # beside a ledger line that named the turn's launches. It now says how many of the plan's
-  # ready rows the turn launched and names the ones it did not — never a row it launched. The
-  # user line has width.sh's 100 columns, so the fact keeps to 55 of them: every name when they
-  # all fit, else the names that fit within 46 and "+N more" for the rest, which the detail
-  # below names in full.
-  FILL_FACT="launched ${_ST_SENT:-0} of ${_ST_READY_N:-0} ready rows; not launched:"
+  FILL_DECLINE="bash ${_fd_poker} decline ${FILL_MISSING// /,} 'why they wait'"
+  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them or decline: ${FILL_DECLINE}"
+  # THE LINE HAS width.sh's 100 COLUMNS, and refuse.sh writes it `bionic: stop refused — <fact>
+  # (<fix>)`: 23 columns before the fact and 32 after it with this fix, so the fact keeps to 44 and
+  # the line to 99. Every id when they fit; else the ids that fit with "+N more" for the rest, which
+  # the decline line names in full.
+  FILL_FIX="dispatch them or decline them"
+  FILL_FACT="ready with room:"
   _FF_SHOWN=""; _FF_MORE=0
   read -r -a _FF_IDS <<< "$FILL_MISSING"
-  if [ $(( ${#FILL_FACT} + 1 + ${#FILL_MISSING} )) -le 55 ]; then
+  if [ $(( ${#FILL_FACT} + 1 + ${#FILL_MISSING} )) -le 44 ]; then
     _FF_SHOWN=" ${FILL_MISSING}"
   else
     for _FF_ID in ${_FF_IDS[@]+"${_FF_IDS[@]}"}; do
-      if [ "$_FF_MORE" -eq 0 ] && [ $(( ${#FILL_FACT} + ${#_FF_SHOWN} + 1 + ${#_FF_ID} )) -le 46 ]; then
+      if [ "$_FF_MORE" -eq 0 ] && [ $(( ${#FILL_FACT} + ${#_FF_SHOWN} + 1 + ${#_FF_ID} )) -le 34 ]; then
         _FF_SHOWN="${_FF_SHOWN} ${_FF_ID}"
       else
         _FF_MORE=$((_FF_MORE + 1))
@@ -1725,7 +1730,6 @@ if [ "$FILL_SRC" = "GAP" ]; then
   fi
   FILL_FACT="${FILL_FACT}${_FF_SHOWN}"
   [ "$_FF_MORE" -gt 0 ] && FILL_FACT="${FILL_FACT} +${_FF_MORE} more"
-  FILL_FIX="dispatch or decline"
 else
   FILL_REASON=""
 fi
@@ -1922,9 +1926,13 @@ if [ -n "$TELL_REASON" ]; then
     fold_block block stop "a FILL and a STANDDOWN went unanswered" \
       "dispatch, stop, or decline" "$TELL_REASON"
   elif [ -n "$FILL_REASON" ]; then
-    # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap.
-    fold_block block stop "$FILL_FACT" "$FILL_FIX" \
-      "$TELL_REASON"
+    # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap. Its detail is
+    # the decline line alone (wave-36 T32), on a line of its own so it pastes whole; a marker turn's
+    # or a launch's paragraph rides below it, as it rode in the old paragraph.
+    _fill_detail="$FILL_DECLINE"
+    [ -n "$NOTICK_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${NOTICK_REASON}"
+    [ -n "$LAUNCH_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${LAUNCH_REASON}"
+    fold_block block stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
   elif [ -n "$STANDDOWN_REASON" ]; then
     fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
       "$TELL_REASON"
@@ -1977,9 +1985,10 @@ return "$_adv"
 #   _ST_STANDING    the reason of this session's latest fill decline while it stands — written
 #                   in an earlier turn, its `current=` still the plan's — else empty
 #   _ST_STANDING_IDS  the ids that decline answered: its line's ready set less its launches
-#   _ST_GAP         min(free, |ready not launched and not answered by the standing decline|) —
-#                   what the wall refuses on; _ST_MISSED when nothing stands
-#   _ST_NAMED       the first _ST_GAP of those ids, the ones a refusal names
+#   _ST_GAP         |ready not launched and not answered by the standing decline|, the writers
+#                   among them counted only while a slot is free — what the wall refuses on
+#   _ST_NAMED       those ids, every one, the ones a refusal names: a slot free is room for the
+#                   refusal, never a trim of it, so one decline answers them all (wave-36 T32)
 #   (`_ST_TICK_DUTY`, `_ST_RECONCILE` and `_ST_ENTERED`, the task-list duties' inputs, went with
 #   those duties at wave-31 T32; the tick still writes `duty=` and `reconcile=`, read by no wall)
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
@@ -2277,8 +2286,12 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # not yet showing counted as owed (`fill_gate_owed`), and a person's cap obeyed. The tick and
   # this wall size their fill by the one function, so on one reading they name the same rows: the
   # rows a standing decline answered stay in the count, as they stay in `missed` (the ledger
-  # charges their idle time to the decline), and the loop below names only the others, up to the
-  # free slots. A gate that gives no row when a row waits and no cap holds it is the HOLD the
+  # charges their idle time to the decline), and the loop below names only the others, every one
+  # while a slot is free (wave-36 T32). ONE QUESTION, NOT TWO: `fill_gate_width`'s first ask,
+  # `gate_room --owed <owed>`, is the tick's own gate line (`gate_report`, hooks/session-poker.sh),
+  # so on one reading a tick that ends `no FILL — the gate gives no room` and this wall agree; a
+  # later reading answers for the turn's end, after its acks and launches (tests/stop.test.sh
+  # §GAP). A gate that gives no row when a row waits and no cap holds it is the HOLD the
   # ledger records: a machine fact the plan cannot hold. Counted in this shell, never inside
   # `$( )`: bash 3.2 reads a `case` pattern's `)` there as the substitution's end.
   want=0
@@ -2317,12 +2330,12 @@ ST_WANT
     count=$((count + 1))
     case " $_ST_STANDING_IDS " in *" $rest "*) continue ;; esac
     gap=$((gap + 1))
-    [ "$gap" -le "$_ST_FREE" ] && _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
+    [ "$_ST_FREE" -gt 0 ] && _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
   done <<ST_READY
 $ready
 ST_READY
   _ST_MISSED=$(( (count < _ST_FREE ? count : _ST_FREE) + rcount ))
-  _ST_GAP=$(( (gap < _ST_FREE ? gap : _ST_FREE) + rgap ))
+  _ST_GAP=$(( (_ST_FREE > 0 ? gap : 0) + rgap ))
   return 0
 }
 

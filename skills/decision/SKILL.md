@@ -15,11 +15,11 @@ Typed as `/bionic:decision` with no argument, it puts what was last under discus
 ## The shape
 
 ```text
-**D<n> · Step <s>**
+**D<n> · <what is decided, in a few words>**
 
-**Goal:** <one sentence: what is being decided, and why it matters now>
+**Goal:** <what is being decided, and why it matters now: as short as it can be and still be clear>
 
-<optional: a short plain paragraph that explains the problem>
+<when the options make no sense until the problem is stated: the problem, short and plain>
 
 **Options:**
 
@@ -34,7 +34,7 @@ Typed as `/bionic:decision` with no argument, it puts what was last under discus
 Reply 1, 2 or 3 · or matrix, diagram, page
 ```
 
-- The heading numbers the decision. `D<n>` counts the decisions of a run in one sequence, in the order asked, and never restarts; `Step <s>` is the step it is asked at. With no run open the heading is `D<n>` alone. The user can answer by the number.
+- The heading numbers and names the decision. `D<n>` counts the decisions of a run in one sequence, in the order asked, and never restarts; with no run open it counts the conversation's. The name is a few plain words saying what is decided, so a reader scanning a transcript knows which decision this is before reading on. The user can answer by the number.
 - The four labels are bold, end in a colon, and come in this order. Nothing else is a label.
 - The reasoning lives inside Recommendation. There is no separate rationale part.
 - Options are a numbered list of two or more, never lettered or bulleted.
@@ -51,8 +51,7 @@ Before any label, reframe the decision at a conceptual level, in plain language,
 4. Then write the four labels:
 
 - Frame the decision as concepts, not mechanisms: its Goal and Options carry no file, function, row, task or version identifiers.
-- The goal says what and why: what is being decided, and why it matters now. The Goal is one sentence, and it states that contrast.
-- A short plain paragraph after the Goal explains the problem before any option. It is optional, and brief.
+- The goal says what and why: what is being decided, and why it matters now, stated as that contrast. The Goal runs as long as clarity needs and no longer: one sentence when one carries it; when the options make no sense until the problem is stated, a short plain paragraph after the Goal explains the problem before any option.
 - Each option is named as an idea and says what it means for the user.
 - By default the recommendation favours the most architecturally elegant choice, reasoned from first principles, and names the principle that decides it.
 - Significance names the rule the choice sets for later work.

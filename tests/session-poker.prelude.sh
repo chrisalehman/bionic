@@ -722,9 +722,16 @@ S59_REL=".bionic/docs/record/wave-01-fixture"
 s59_world() {
   local lab="$1" st="$2"; shift 2
   R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
-  P59W="$(s42_plan "$R59W" 4)"
+  # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
+  # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
+  P59W="$(s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
+  base-sha: $(git -C "$R59W" rev-parse --short=8 HEAD)
+  branch: wave/01-fixture")"
+  # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a
+  # review row is ready again only past a commit that owes, so A, B and C each change a.sh.
   ( cd "$R59W" && git worktree add -q -b wave/01-fixture "$R59W/.worktrees/01-fixture" \
-    && for c in A B C; do git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "landing $c"; done ) >/dev/null 2>&1
+    && for c in A B C; do printf '%s\n' "$c" >> "$R59W/.worktrees/01-fixture/a.sh" \
+         && git -C "$R59W/.worktrees/01-fixture" add a.sh && git -C "$R59W/.worktrees/01-fixture" commit -q -m "landing $c"; done ) >/dev/null 2>&1
   S59W_A="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD~2 2>/dev/null)"
   S59W_B="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD~1 2>/dev/null)"
   S59W_C="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"

@@ -2668,6 +2668,52 @@ expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound wri
   "deny" "$GATE_VERDICT"
 expect_contains "LO8b …the line says the brief names none" "the brief has no Lands-on: line" "$(t7_first)"
 
+# §LANDS-ON, THE READS INDEX (wave-36 T27; REQ-6 AC-6.1; D12, ADR-056). A writer binding a row lands on every suite
+# that reads its Files: lib/anchors.sh `reads_index`, read once per dispatch at the plan's working head (the tree
+# here, the plan naming no working branch), routes a file to each suite whose text names it, and the wall refuses a
+# Lands-on: that omits one, printing the missing suites and a whole Lands-on: line the author can paste. A declared
+# `none <reason>` is refused the same way: a reason does not unread a file. FIXTURES: t7_gate's plan, with the
+# tree holding payload/scripts/lib/widget.sh, read by widget.test.sh and by reader.test.sh's grep; other.test.sh
+# reads neither. fails-when: a Lands-on: omitting reader.test.sh is admitted, or one naming both is refused.
+li_gate() {  # <repo tag> <brief> -> GATE_*, T7_ROW: t7_gate's plan, its tree holding the reading suites
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
+  printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"; printf 'the gadget\n' > "$REPO/payload/scripts/lib/gadget.sh"
+  printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
+  printf '#!/bin/bash\ngrep -c widget "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/reader.test.sh"
+  printf '#!/bin/bash\necho other\n' > "$REPO/tests/other.test.sh"
+  git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "suites that read the widget" >/dev/null 2>&1
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$2" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+li_brief() {  # <Lands-on line> [<Suites line>] [<Files line>] -> adv_brief's contract with those lines
+  adv_brief "$1" | sed "s#^Suites: .*#${2:-Suites: tests/widget.test.sh}#; s#^Files: .*#${3:-Files: payload/scripts/lib/widget.sh}#"
+}
+li_gate li0 "$(li_brief 'Lands-on: widget')"
+expect_eq "LI-0 precondition: the reads index of the fixture names widget.test.sh and reader.test.sh for the widget, not other.test.sh" \
+  "payload/scripts/lib/widget.sh	tests/reader.test.sh,tests/widget.test.sh" \
+  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$REPO" 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/widget.sh"')"
+expect_eq "LI-1 AC-6.1 a Lands-on: omitting reader.test.sh, which greps the brief's Files, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LI-1b …the line says Lands-on: omits a suite that reads the Files" "Lands-on: omits reader.test.sh" "$(t7_first)"
+expect_eq "LI-1c …its first line is at most 100 columns" "ok" "$(t7_cols_ok)"
+expect_contains "LI-1d …the detail prints the missing suites on one line" "    Missing:  reader.test.sh" "$GATE_VERR"
+expect_contains "LI-1e …and the whole line to paste" "    Lands-on: widget.test.sh, reader.test.sh" "$GATE_VERR"
+expect_absent "LI-1f …never a suite that reads none of the Files (positive: LI-1d read reader.test.sh from the same detail)" \
+  "other.test.sh" "$GATE_VERR"
+expect_eq "LI-1g …and no row is written" "" "$T7_ROW"
+li_gate li2 "$(li_brief 'Lands-on: widget, reader' 'Suites: tests/widget.test.sh, tests/reader.test.sh')"
+expect_eq "LI-2 AC-6.1 a Lands-on: naming every suite the index names for the Files is admitted, written whole" \
+  "allow|widget.test.sh,reader.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+li_gate li3 "$(li_brief 'Lands-on: none — the row edits only prose no suite reads')"
+expect_eq "LI-3 Lands-on: none with a reason, on Files the index routes to suites, is refused the same way" "deny" "$GATE_VERDICT"
+expect_contains "LI-3b …naming the suites it omits" "    Missing:  reader.test.sh, widget.test.sh" "$GATE_VERR"
+expect_contains "LI-3c …and the line to paste in place of none" "    Lands-on: reader.test.sh, widget.test.sh" "$GATE_VERR"
+li_gate li4 "$(li_brief 'Lands-on: none — the gadget is read by no suite' '' 'Files: payload/scripts/lib/gadget.sh')"
+expect_eq "LI-4 control: Files no suite reads, Lands-on: none with its reason, is admitted (positive: LI-3 refused on the same tree)" \
+  "allow|none" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
+
 # ============================================================================
 
 section "§ROW-LABEL — Row: binds the dispatch to a row of the plan, and a Row: the name contradicts is refused (wave-28 T7, T55; REQ-3 AC-3.4, D17)"
@@ -3322,10 +3368,41 @@ expect_contains "OW.2b …the one line says it is a second whole run, naming the
 expect_contains "OW.2c …the detail names the suite the floor still owes" "a.test.sh" "$GATE_VERR"
 expect_absent "OW.2d …and the arm is not left unchecked" "not checked: full-run" "$GATE_ERR$GATE_VERR"
 expect_status "OW.2e …and journalled nothing" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-# THE REFUSAL STATES THE FLOOR AS THE JUDGE HOLDS IT (wave-35 T31; D20, critic-adversarial finding 8): Step 5 owes
-# the matrix, the walk and the auditor, and Step 7 is where the floor is demanded; no "one whole green run".
-expect_contains "OW.2f D20 the detail says Step 7 is where the floor is demanded, as the judge closes it" "Step 7 is where the floor is demanded" "$GATE_VERR"
-expect_absent "OW.2g …and no longer calls the floor one whole green run" "one whole green run" "$GATE_VERR"
+# THE WALL HOLDS THE FLOOR AS THE JUDGE HOLDS IT (wave-35 T31; D20, critic-adversarial finding 8), pinned by what it
+# does, never by its sentence (wave-36 T6; D12, AC-6.3; C53): the floor is one whole run, green or red, so over an
+# owed floor the fix row the refusal names is admitted, and a second whole run is admitted on the user's word alone.
+# fails-when: the owed suite's fix row is refused; the approved second whole run over an owed floor is refused.
+OW_FIX_BRIEF='Your task: run the suite the floor still owes green, with its fix.
+Expected artifact: .bionic/docs/record/w99-fix.txt
+Expected duration: ~20 minutes.
+Files: tests/a.test.sh
+Suites: tests/a.test.sh
+Lands-on: a.test.sh'
+PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T12 5 active .bionic/docs/record/w99-floor.txt verify 'T1')" \
+  "$(pf_row T14 5 pending tests/a.test.sh build 'T12')"
+expect_eq "OW.2f precondition: the floor is still read owed, naming a.test.sh" "$(printf 'owed\ta.test.sh')" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$OW_FIX_BRIEF" "w99-T14")"
+expect_eq "OW.2f D20 the fix row the refusal names, the owed suite's, is ADMITTED over the owed floor" "allow" "$GATE_VERDICT"
+expect_status "OW.2f …and journalled" "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh
+approved: regression-2 by dana 2026-10-12T05:00:00Z \"yes, run it again\""
+pf_plan "$REPO" ""
+PF_STATE_EXTRA=""
+# The approval is read from the row's reads column, which pf_plan's table does not carry.
+{
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+  printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '%s\n' '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |' \
+    '| T12 | 5 | verify | the regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor.txt |  | active |' \
+    '| T13 | 5 | verify | the second regression | test-runner | T1 | 30 | REQ-1 | .bionic/docs/record/w99-floor2.txt | approval:regression-2, head | pending |'
+} >> "$(pf_plan_path "$REPO")"
+expect_eq "OW.2g precondition: the floor is still read owed with the approval written" "$(printf 'owed\ta.test.sh')" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T13")"
+expect_eq "OW.2g D20 …and a second whole run on the user's word is ADMITTED over it: a red floor is the whole run, not a demand for a green one" "allow" "$GATE_VERDICT"
+expect_status "OW.2g …and journalled" "3" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
 # ============================================================================
 section "§REMEDY — the full-tree refusal names floor-run, and the line, run as printed, is admitted (wave-35 T10; REQ-1 AC-1.8; D10)"
@@ -3461,5 +3538,124 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
 chmod 644 "$(roster_path "$REPO" "$SID_B")"
 expect_eq "HDW.6 an unreadable roster on session B holds nothing: the dispatch is admitted" "allow" "$GATE_VERDICT"
 expect_contains "HDW.6b …and the wall says the roster cannot be read" "roster-${SID_B}.state cannot be read" "$GATE_ERR"
+
+# ONE CLOSURE RULE (wave-36 T10; REQ-4 AC-4.4, D10). The hold applied acks but not adopt's closure, so a row
+# held by a session that is gone and whose files the sweep already takes was refused with a remedy, "adopt, then
+# acked", that loops: adopt counts that row closed and never offers it (research C15). Both now ask lib/fill.sh
+# `roster_row_open`: a dead session's row whose files are sweepable is closed. A dead session is one the roster
+# names whose pid is not live (patrol_live_session_ids reads <claude home>/sessions/*.json); sweepable is the
+# sweep's own window, every state file of that session older than the poker interval. FIXTURES: hdw_repo's T1
+# held on session B's roster; `hdw_age` dates every one of B's files under .bionic/tmp to 2026-01-01;
+# `hdw_live` writes a sessions file naming B with this shell's pid, so B is live.
+# fails-when: a dead sweepable session's row still refuses the dispatch; a live session's row, however old its
+# files, is admitted; a dead session's young row is admitted, or refused with a remedy that names no sweep;
+# adopt and the wall answer the same fixture differently.
+hdw_age() {  # <repo> <sid> — every state file of <sid> under .bionic/tmp dated 2026-01-01
+  find "$1/.bionic/tmp" -name "*$2*" -exec touch -t 202601010000 {} + 2>/dev/null
+}
+HDW_SESSIONS="$PROBE_ENV_HOME/.claude/sessions"
+hdw_live() {  # <sid> <repo> — a sessions file naming <sid> with a live pid (this shell's)
+  mkdir -p "$HDW_SESSIONS"
+  printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$1" "$2" > "$HDW_SESSIONS/hdw-live.json"
+}
+hdw_unlive() { rm -f "$HDW_SESSIONS/hdw-live.json"; }
+
+hdw_repo hdw7
+hdw_hold "$REPO" "$SID_B" w-T1
+hdw_age "$REPO" "$SID_B"
+expect_eq "HDW.7-0 the fixture: every file of session B is dated 2026-01-01" "0" \
+  "$(find "$REPO/.bionic/tmp" -name "*$SID_B*" -newermt 2026-01-02 2>/dev/null | /usr/bin/grep -c .)"
+expect_true "HDW.7-0b …and session B's roster is one of them" test -f "$(roster_path "$REPO" "$SID_B")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.7 AC-4.4 w-T1 open on session B's roster, B dead and its files sweepable: the dispatch onto T1 is admitted" \
+  "allow" "$GATE_VERDICT"
+expect_eq "HDW.7b …and the launch row of w-T1-r1 is written" "1" \
+  "$(cat "$(roster_path "$REPO" "$SID_A")" 2>/dev/null | /usr/bin/grep -c '|name=w-T1-r1|')"
+HDW7_ADOPT="$(cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$PROBE_ENV_HOME/.claude" HOME="$PROBE_ENV_HOME" \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" adopt --report-only 2>&1)"
+expect_contains "HDW.7c the same fixture asked of adopt: the row is closed there too (one rule, two callers)" \
+  "1 row(s) skipped" "$HDW7_ADOPT"
+
+hdw_repo hdw8
+hdw_hold "$REPO" "$SID_B" w-T1
+hdw_age "$REPO" "$SID_B"
+hdw_live "$SID_B" "$REPO"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+hdw_unlive
+expect_eq "HDW.8 the same old files, session B live: the row is still B's, refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.8b …naming the writer and B's session" "row T1 has a live writer w-T1 (session ${SID_B:0:8})" "$GATE_REASON"
+
+hdw_repo hdw9
+hdw_hold "$REPO" "$SID_B" w-T1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$HDW_BRIEF" w-T1-r1)"
+expect_eq "HDW.9 session B dead, its files inside the poker interval: not yet sweepable, refused" "deny" "$GATE_VERDICT"
+expect_contains "HDW.9b AC-4.4 …and the remedy names sweep" "session-poker.sh sweep" "$GATE_REASON"
+
+# ============================================================================
+section "§FILES — a template's rendered outputs join the row's Files, and the wall prints them (wave-36 T6; D12, AC-6.3; C68)"
+# ============================================================================
+# A row whose Files name a template under agents-src/ edits what render.sh rewrites: the template's own output
+# and the checksum manifest. Nothing carried that relation, so a writer was refused at its stop for the file its
+# own render wrote. The wall reads the unit table (RENDER_UNITS) and the manifest path (MANIFEST_REL) from the
+# project's agents-src/render.sh, adds each named template's output and the manifest to the Files the row is
+# recorded with, and prints each on the model's channel. A unit is matched by the template's own directory, so a
+# steps template renders under skills/canonical-sdlc/steps, never one level up.
+# FIXTURE FIDELITY: the shipped agents-src/render.sh, copied into a real fixture repository; the row read back from
+# the roster this gate wrote; the advisory read from stdout as the harness reads it.
+# fails-when: a template's output or the manifest is missing from files=; the wall prints neither; a steps
+# template renders into the wrong unit; a twin already in Files is added twice; a Files line with no template
+# gains anything.
+tw_brief() {  # <Files value> -> adv_brief's contract with that Files: line
+  adv_brief 'Scope constraint: the files below.' | sed "s|^Files: payload/scripts/lib/widget.sh\$|Files: $1|"
+}
+tw_files() {  # <repo> <n> -> files= of the roster's nth row
+  roster_field "$(roster_nth_row "$(roster_path "$1" "$SID_A")" "$2")" files
+}
+tw_has() {  # <files value> <path> -> how many of the value's comma-joined items are exactly <path>
+  printf '%s\n' "$1" | tr ',' '\n' | /usr/bin/grep -cxF -- "$2"
+}
+REPO=$(make_repo twins yes)
+write_attestation "$REPO" "$SID_A"
+mkdir -p "$REPO/agents-src"; cp "$BIONIC_SCRIPTS_DIR/agents-src/render.sh" "$REPO/agents-src/render.sh"
+expect_contains "TW.0 precondition: the fixture carries the shipped render.sh and its unit table" \
+  "agents-src/templates/skills/canonical-sdlc/steps|skills/canonical-sdlc/steps" "$(cat "$REPO/agents-src/render.sh")"
+TW_B1="$(tw_brief 'agents-src/templates/implementor.md.tmpl, payload/scripts/lib/widget.sh')"
+expect_contains "TW.0 precondition: the brief declares the template" \
+  "Files: agents-src/templates/implementor.md.tmpl, payload/scripts/lib/widget.sh" "$TW_B1"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$TW_B1" "w99-tw1")"
+expect_eq "TW.1 a brief naming a template is admitted" "allow" "$GATE_VERDICT"
+TW_F1="$(tw_files "$REPO" 1)"
+expect_eq "TW.1 the template stays in the row's Files" "1" "$(tw_has "$TW_F1" agents-src/templates/implementor.md.tmpl)"
+expect_eq "TW.1 …and its rendered output joins them" "1" "$(tw_has "$TW_F1" agents/implementor.md)"
+expect_eq "TW.1 …and so does the manifest render.sh rewrites" "1" "$(tw_has "$TW_F1" payload/integrity/rendered.sha256)"
+expect_eq "TW.1 …and the declared file is kept" "1" "$(tw_has "$TW_F1" payload/scripts/lib/widget.sh)"
+TW_CTX1="$(adv_ctx)"
+expect_contains "TW.2 the wall prints the output it added, beside its template" \
+  "agents-src/templates/implementor.md.tmpl renders agents/implementor.md" "$TW_CTX1"
+expect_contains "TW.2 …and the manifest" "payload/integrity/rendered.sha256" "$TW_CTX1"
+# A steps template is matched by its own directory, the deeper unit.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl')" "w99-tw3")"
+expect_eq "TW.3 a brief naming a steps template is admitted" "allow" "$GATE_VERDICT"
+TW_F3="$(tw_files "$REPO" 2)"
+expect_eq "TW.3 its output is under skills/canonical-sdlc/steps" "1" "$(tw_has "$TW_F3" skills/canonical-sdlc/steps/4.md)"
+expect_eq "TW.3 …and not one level up, in the skill's own unit (one rendered path, the manifest beside it)" \
+  "agents-src/templates/skills/canonical-sdlc/steps/4.md.tmpl,skills/canonical-sdlc/steps/4.md,payload/integrity/rendered.sha256" "$TW_F3"
+# A twin already declared is not added twice.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'agents-src/templates/critic.md.tmpl, agents/critic.md')" "w99-tw4")"
+expect_eq "TW.4 a brief naming a template and its output is admitted" "allow" "$GATE_VERDICT"
+TW_F4="$(tw_files "$REPO" 3)"
+expect_eq "TW.4 the declared output is in the row's Files once, not twice" "1" "$(tw_has "$TW_F4" agents/critic.md)"
+expect_eq "TW.4 …and the manifest is still added" "1" "$(tw_has "$TW_F4" payload/integrity/rendered.sha256)"
+# A Files line with no template gains nothing, in the same repository.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'payload/scripts/lib/widget.sh')" "w99-tw5")"
+expect_eq "TW.5 a brief naming no template is admitted" "allow" "$GATE_VERDICT"
+expect_eq "TW.5 …and its row's Files are what it declared" "payload/scripts/lib/widget.sh" "$(tw_files "$REPO" 4)"
+expect_absent "TW.5 …and the wall prints no rendered output" " renders " "$(adv_ctx)"
+# A project with no agents-src/render.sh has no units: a .md.tmpl there is a file like any other.
+REPO=$(make_repo twnone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(tw_brief 'agents-src/templates/implementor.md.tmpl')" "w99-tw6")"
+expect_eq "TW.6 with no render.sh the brief is admitted" "allow" "$GATE_VERDICT"
+expect_eq "TW.6 …and its row's Files are what it declared" "agents-src/templates/implementor.md.tmpl" "$(tw_files "$REPO" 1)"
 
 finish

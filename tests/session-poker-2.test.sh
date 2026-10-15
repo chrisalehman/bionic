@@ -143,7 +143,7 @@ s35q_stop() {  # <stop_hook_active true|false> -> the hook's stdout
 jq -nc '{type:"user",uuid:"u-35q-1",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$S35Q_TR"
 s35q_agent toolu_35Q1 W-T1
 S35Q_OUT1="$(s35q_stop false)"
-expect_contains "35q precondition: the first Stop is refused for the row left out" "Fillable gap" "$S35Q_OUT1"
+expect_contains "35q precondition: the first Stop is refused for the row left out" "ready with room:" "$S35Q_OUT1"
 jq -nc '{type:"user",isMeta:true,uuid:"u-35q-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$S35Q_TR"
 s35q_agent toolu_35Q2 W-T2
 s35q_stop true >/dev/null
@@ -851,10 +851,11 @@ expect_contains "42b4 …and that line is the row with exactly those cells" \
 s34_gate "$R42"
 expect_eq "42b5 …and the next commit is admitted" "0" "$GATE_RC"
 s42_snap "$R42" "$P42"
-poke "$R42" task-set T5 Files=c.sh
-s42_unchanged "42c §VERB Files= is refused" 1 "$P42"
+# THE ROW IS T2, A LAUNCHED ONE (landed since 42b): a pending row no roster names takes files= (wave-36 T41; session-poker-4 §FILES).
+poke "$R42" task-set T2 Files=c.sh
+s42_unchanged "42c §VERB Files= on a launched row is refused" 1 "$P42"
 expect_contains "42c2 …naming amend" "task-set does not write Files — widen a dispatched contract with amend" "$OUT"
-poke "$R42" task-set T5 files=c.sh
+poke "$R42" task-set T2 files=c.sh
 s42_unchanged "42c3 §VERB …and so is files=, in any case" 1 "$P42"
 
 # ---------- §VERB-bad (AC-9.2): refused, byte-identical ----------
@@ -1600,8 +1601,9 @@ for s46s in a b c; do printf '#!/bin/bash\n' > "$R46/tests/$s46s.test.sh"; done
 W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/elsewhere"
 # THE EVIDENCE ATTESTS ITS HEAD (wave-26 T14; review 7 F1): a floor log carries the suite runner's
-# header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line.
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+# header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line. Since wave-36 T35 (AC-7.10) a floor log
+# also closes with its run's code, `rc=<n>`, its last line: the floor's one grammar is that header and that close.
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
 printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
 expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
@@ -1654,7 +1656,7 @@ expect_eq "46b5 the floor log of an ancestor head, after a landing that changed 
 expect_eq "46b5 …and one line is added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=floor head=${W46_HEAD} " "$OUT"
 expect_eq "46b6 proof_last floor reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
@@ -1697,7 +1699,9 @@ s42_unchanged "46f11 a floor proof never reads a review's range" 1 "$P46"
 # the run read, the runner's last `Gating:` line how it ended; a red run, a note quoting the
 # header, a void suite, and a green inner verdict above a red outer one prove nothing. The green
 # log at the same head (floor2.txt, 46b6b) is this block's positive control.
-printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 3 failed\n' "$W46_HEAD2" > "$S46_REC/floor-red.txt"
+# MOVED BY WAVE-36 T35 (AC-7.10): the floor reads a log's header and its closing rc= line, nothing between, so each
+# refusal below names the line the log lacks or the rc it ended with; the red log closes rc=1, as its run would.
+printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 3 failed\nrc=1\n' "$W46_HEAD2" > "$S46_REC/floor-red.txt"
 printf '# review notes\nThe runner printed:\nhead=%s dirty=0\n(no run here)\n' "$W46_HEAD2" > "$S46_REC/floor-quote.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 0 failed\nVoid: 1 — not timed\n' "$W46_HEAD2" > "$S46_REC/floor-void.txt"
 printf 'floor log\nhead=%s dirty=0\n───── x: captured output ─────\nGating: 5 passed, 0 failed\n───── end x ─────\nGating: 40 passed, 2 failed\n' \
@@ -1705,15 +1709,15 @@ printf 'floor log\nhead=%s dirty=0\n───── x: captured output ───
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-red.txt
 s42_unchanged "46f12 F1 a red run at the head, on a clean tree" 1 "$P46"
-# A RED WHOLE RUN IS A CANDIDATE (wave-35 T9; D8): this one counts 43 suites at a head that has 3, so it is refused as
-# not whole, by that sentence.
-expect_contains "46f12b …naming the verdict as not a whole run" "is not a whole run (40 passed and 3 failed of 3 suites at its head)" "$OUT"
+# A RED WHOLE RUN IS A CANDIDATE (wave-35 T9; D8) only when its Failed: block names its reds; this one names none, so it
+# is refused by the rc it ended with (wave-36 T35; was: not a whole run, 43 suites counted at a head that has 3).
+expect_contains "46f12b …naming the rc it ended with" "floor-red.txt ended rc=1, so the regression did not pass" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
 s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
-expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
+expect_contains "46f13b …naming the close it lacks (wave-36 T35; was: the Gating: verdict)" "floor-quote.txt does not end with an rc=<n> line" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
-s42_unchanged "46f14 F1 a run whose tally does not reach the roster, with a Void: line" 1 "$P46"
-expect_contains "46f14b …naming the tally against the roster (no void term, wave-35 T2)" "40 passed of 3 suites" "$OUT"
+s42_unchanged "46f14 F1 a run log with a Void: line and no closing rc= line" 1 "$P46"
+expect_contains "46f14b …naming the close it lacks (wave-36 T35; was: the tally against the roster)" "floor-void.txt does not end with an rc=<n> line" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
 s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
 poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
@@ -1727,26 +1731,32 @@ printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: capture
   "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
   "$W46_HEAD2" > "$S46_REC/floor-appended.txt"
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nVoid: 1 — not timed, each for the reason given; advisory, not a failure:\n    - c.test.sh (the machine was busy)\nNo gating suite failed; 1 void\n' \
   "$W46_HEAD2" > "$S46_REC/floor-whole-void.txt"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' \
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' \
   "$W46_HEAD2" "$W46_HEAD2" > "$S46_REC/floor-rerun.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-cut.txt
 s42_unchanged "46f17 S3 a log cut off after a nested green verdict inside a capture" 1 "$P46"
-expect_contains "46f17b …saying the verdict is inside a captured output" "inside a suite's captured output" "$OUT"
+expect_contains "46f17b …saying the log does not close with its run's code (wave-36 T35; was: inside a captured output)" \
+  "floor-cut.txt does not end with an rc=<n> line" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-appended.txt
 s42_unchanged "46f18 S3 a red run for this head with another head's green run appended" 1 "$P46"
-expect_contains "46f18b …judged by the last run, which read another head" "read head 0123456789ab" "$OUT"
+expect_contains "46f18b …refused: the log does not close with its run's code (wave-36 T35; was: the last run's other head)" \
+  "floor-appended.txt does not end with an rc=<n> line" "$OUT"
+# 46f19 INVERTED BY WAVE-36 T35 (AC-7.10): the floor counts no roster; what the regression ran is the plan's word, so a
+# log at the head that opens head=<h> dirty=0 and ends rc=0 is a floor whatever it ran (until wave-36 it was refused).
 poke "$R46" proof-add floor record/wave-01-fixture/floor-part.txt
-s42_unchanged "46f19 N1 a green verdict over one suite of the three at the head" 1 "$P46"
-expect_contains "46f19b …naming the tally against the roster" "1 passed of 3 suites" "$OUT"
+expect_eq "46f19 N1 a green log over one suite of the three at the head, closed rc=0: accepted (exit 0)" "0" "$RC"
+expect_eq "46f19b …the proof naming the head, no roster counted" "$W46_HEAD2" "$(s46_last "$P46" floor)"
+s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-whole-void.txt
 # 46f20 INVERTED BY WAVE-35 T2 (D11, AC-2.1): the floor judge has no void term, so two passed and a
 # `Void:` line naming the third is two of three suites, not a whole run (until wave-35 it was a floor).
-s42_unchanged "46f20 N2 a run of two passed with a Void: line naming the third is not a floor" 1 "$P46"
-expect_contains "46f20b …naming the tally against the roster: the Void: line counts for nothing" "2 passed of 3 suites" "$OUT"
+# MOVED BY WAVE-36 T35: no roster is counted; the log is refused because it does not close with its run's code.
+s42_unchanged "46f20 N2 a run of two passed with a Void: line naming the third, no closing rc= line, is not a floor" 1 "$P46"
+expect_contains "46f20b …naming the close it lacks: the Void: line counts for nothing" "floor-whole-void.txt does not end with an rc=<n> line" "$OUT"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-rerun.txt
 expect_eq "46f21 S3 a red run then a green rerun on the same head: the last run is judged, and it passed" "0" "$RC"
@@ -1782,7 +1792,7 @@ expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
 # REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
 # directory, not the file, so a link to a log elsewhere was admitted and the evidence could
 # change after the proof. The same bytes as a regular file under record/ are admitted.
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
 ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
 expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
@@ -1798,6 +1808,8 @@ s42_unchanged "46c8 an evidence path with a space (the line is space-separated)"
 poke "$R46" proof-add floor
 s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
+# Since wave-36 T35 (AC-7.10) proof-add floor takes several logs, each a path under record/; a bare hex word is a head,
+# never a log, so it stays the usage error.
 s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
 
 # The head is held against the working branch's checkout, so a plan whose branch no checkout
@@ -1834,7 +1846,12 @@ S48_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 
 R48="$(make_repo s48-review)"; new_roster "$R48"; ( cd "$R48" && git commit -q --allow-empty -m init )
 add_row "$R48" name=w-T2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 600)"
-P48="$(s42_plan "$R48" 4)"
+# A BASE THE JUDGE CAN HOLD (wave-36 T39; D9, as T28 gave s59_world): live:head asks facts_state, which judges only a plan
+# whose base-sha: is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder abc1234.
+S48_BASE="$(git -C "$R48" rev-parse HEAD)"
+P48="$(s42_plan "$R48" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S48_BASE:0:8}
+  branch: wave/01-fixture")"
 awk '
   /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
   /^- T5: / { print "- T3: review passes, one per landed difference — record/wave-01-fixture/review.md" }
@@ -1853,7 +1870,7 @@ awk '
   && git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the first build lands" ) >/dev/null 2>&1
 mkdir -p "$R48/.bionic/docs/record/wave-01-fixture"
 W48_A="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
-printf '# review\n\nreviewed: %s..%s (the first build)\n' "$(git -C "$R48" rev-parse HEAD)" "$W48_A" \
+printf '# review\n\nreviewed: %s..%s (the first build)\n' "$S48_BASE" "$W48_A" \
   > "$R48/.bionic/docs/record/wave-01-fixture/review.md"
 expect_eq "48a0 precondition: the T3 row is a review with an empty reads cell, pending" \
   "T3|6|review|follows the build|critic|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
@@ -1895,7 +1912,9 @@ expect_eq "48d2 AC-6.5 at the proof's head the review is not offered" "no" "$(s4
 expect_eq "48d3 …its WAIT line names the proof head it has not moved past" \
   "poker: WAIT T3 — live:head: nothing landed past the review proof at ${W48_A:0:12}" \
   "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
-git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the second build lands" >/dev/null 2>&1
+# THE LANDING TOUCHES CODE (wave-36 T39; D9): the judge reads a commit that touches nothing as prose, and a review row is
+# ready again only past a commit that owes (the question reads uncovered), so B changes a.sh as s59_world's landings do.
+( cd "$R48/.worktrees/01-fixture" && printf 'B\n' >> a.sh && git add a.sh && git commit -q -m "the second build lands" ) >/dev/null 2>&1
 W48_B="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 expect_true "48e0 precondition: the working branch moved past A" test "$W48_B" != "$W48_A"
 poke_pressure "$R48" 8192 1.0 tick
@@ -2450,6 +2469,9 @@ s54_full() {
       BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
       BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
       bash tests/run.sh ) > "$S54_REC/$1" 2>&1
+  # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it,
+  # so the floor's one grammar (its first head= line, its last rc= line) reads the run.
+  printf 'rc=%s\n' "$?" >> "$S54_REC/$1"
 }
 # s54_land <id> <path> <content> -> a task tree on wt/01-<id> commits one file and NO suite runs
 # in it (no stamp); the real land merges it. Leaves S54_LAND.
@@ -2511,15 +2533,22 @@ expect_contains "54b1b …saying what it lacks" \
   ") is not proved: no suite run is recorded at it${S54_OUT}; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
   "$(s54_wait)"
 expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
-# THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
-# ask the ready set. The walk's one git call is what the shim counts.
+# THE COST: one tick walks each state it owes once (wave-36 T40; D9, AC-3.6). The integrate row owes two: the
+# regression (proof_state, through the floor memo) and the readings (facts_state, through the judge). The
+# schedule and the change fingerprint each ask the ready set, and gate_report reads the budget a second time,
+# so a state asked twice would be walked twice. The walk's one git call is what the shim counts; each state is
+# measured alone under the same shim, and the tick must walk their sum.
 : > "$S54_COUNT"; PATH="$S54_SHIM:$PATH" s54_tick; S54_TICK_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
 : > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
 S54_PS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; facts_state "$P54" "$(proof_branch_head "$P54" "$R54")" ) >/dev/null 2>&1
+S54_FS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
 expect_true "54b2c precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
   test "$S54_PS_WALKS" -gt 0
-expect_eq "54b2d …and one tick walks them exactly as often: the floor state is computed once per tick" \
-  "$S54_PS_WALKS" "$S54_TICK_WALKS"
+expect_true "54b2c2 precondition: …and so does one facts_state (the counter reads real calls)" \
+  test "$S54_FS_WALKS" -gt 0
+expect_eq "54b2d …and one tick walks each state once: the sum of one proof_state and one facts_state" \
+  "$((S54_PS_WALKS + S54_FS_WALKS))" "$S54_TICK_WALKS"
 s54_floor floor-2.log
 expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add floor (exit 0)" "0" "$RC"
 expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
@@ -3434,5 +3463,116 @@ expect_eq "(le8) a hand-filled cell is never overwritten, though the row serves 
 expect_contains "(le8b) …and the second line says 0" "
 poker: evidence: 0 cell(s) written by landing" "$OUT"
 POKE_BOUND="$LE_BOUND_WAS"
+
+
+# ============================================================
+section "§STOP-RUN: stop-run ends a gate request — a parked shim's, by its id or its holder's name (wave-36 T11; REQ-2 AC-2.2; D8)"
+# ============================================================
+#
+# A shim parked in `gate_ask` is no detached run, so before D8 no verb could end its request: `gate_end`
+# refused a never-admitted id and `stop-run` knew only `.bionic/tmp/runs/`. `stop-run` now takes a request
+# id or a holder's name as well: it ends the request with `by=<sid> why=<reason>` (gate_end's stop-run
+# call, accepted on a never-admitted id), TERMs the holder's process group, and writes `ev=stop-run` to the
+# bound run's landing record, which the hand-hold fold counts under its own kind.
+#
+# FIXTURE FIDELITY: the askers are REAL processes running the shipped lib/gate.sh against this section's own
+# store (never the runner's BIONIC_GATE_DIR), each in a process group of its own as a Bash-tool command is;
+# the holder's liveness and death are the gate's own rule read on them. SYNTHESIZED: one planted request
+# whose holder pid is dead (a shim SIGKILLed in its wait), in the store's own line shape.
+SR_GATE_WAS="$BIONIC_GATE_DIR"; SR_POLL_WAS="${BIONIC_GATE_POLL:-}"
+# A parked asker polls every 30 s, so the TERM stop-run sends lands in its sleep, never inside the lock's
+# claim (a holder killed between the lock's mkdir and its pid write leaves a lock no one may steal for a
+# while, which would stall the next row's asks on the lock rather than on what this section reads).
+export BIONIC_GATE_DIR="$TMPROOT/sr-gate" BIONIC_GATE_POLL=30
+mkdir -p "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost" "$TMPROOT/sr"
+SR_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
+RSR="$(make_repo s-stoprun)"; ( cd "$RSR" && git commit -q --allow-empty -m init )
+PSR="$(s42_plan "$RSR" 4)"
+SR_REC="$RSR/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+cat > "$TMPROOT/sr-ask.sh" <<'ASK'
+# <lib> <agent> <kind> <key> <dir> — one asker; admitted, it holds until <dir>/<agent>.go
+. "$1/gate.sh" || exit 127
+export BIONIC_GATE_AGENT="$2"
+printf '%s\n' "$$" > "$5/$2.pid"
+id="$(gate_ask "$3" "$4" 2>/dev/null)"; rc=$?
+printf '%s\n' "$rc" > "$5/$2.rc"
+[ "$rc" = 0 ] || exit "$rc"
+i=0; while [ ! -f "$5/$2.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
+gate_end "$id" 0
+ASK
+sr_ask() {  # <agent> <kind> <key> — a real asker in a process group of its own (its pgid is its pid)
+  set -m
+  ( cd "$RSR" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$TMPROOT/sr-ask.sh" "$SR_LIB" "$1" "$2" "$3" "$TMPROOT/sr" ) >/dev/null 2>&1 &
+  set +m
+  s56_until 10 test -s "$TMPROOT/sr/$1.pid"
+}
+sr_reqs() {  # <agent> -> the ids of that agent's requests, lowest first
+  grep -l "^who=$SID:$1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | sed 's#.*/##' | sort -n | tr '\n' ' ' | sed 's/ $//'
+}
+sr_field() { sed -n "s/^$2=//p" "$BIONIC_GATE_DIR/requests/$1" 2>/dev/null | tail -n 1; }
+sr_pid() { cat "$TMPROOT/sr/$1.pid" 2>/dev/null; }
+sr_gone() { ! kill -0 "$1" 2>/dev/null; }
+sr_stops() { grep -c '^line/v1|ev=stop-run|' "$SR_REC" 2>/dev/null | tr -d ' '; }
+
+sr_ask sr-hold work h.test.sh
+s56_until 10 grep -qx 0 "$TMPROOT/sr/sr-hold.rc"
+expect_eq "SR.0a precondition: a holder is admitted, so a whole ask parks behind it" "0" "$(cat "$TMPROOT/sr/sr-hold.rc" 2>/dev/null)"
+sr_ask w-park whole tests/run.sh
+s56_until 10 test -n "$(sr_reqs w-park)"
+SR_ID="$(sr_reqs w-park)"; SR_P="$(sr_pid w-park)"
+expect_eq "SR.0b precondition: the parked shim holds one request that waits, its holder alive (kind|admitted|holder|alive)" \
+  "whole||$SR_P|yes" "$(sr_field "$SR_ID" kind)|$(sr_field "$SR_ID" admitted)|$(sr_field "$SR_ID" holder | cut -d: -f1)|$(kill -0 "$SR_P" 2>/dev/null && echo yes)"
+poke "$RSR" stop-run "$SR_ID" --why 'parked behind the holder'
+expect_eq "SR.1 AC-2.2 stop-run <request id> on a waiting request exits 0" "0" "$RC"
+expect_contains "SR.1b …naming the request it ended" "poker: stop-run request $SR_ID " "$OUT"
+expect_absent "SR.1c …and never says the request was never admitted" "was never admitted" "$OUT"
+expect_eq "SR.2 the request is ended by this session, with the reason (ended set|by|why)" "yes|$SID|parked behind the holder" \
+  "$([ -n "$(sr_field "$SR_ID" ended)" ] && echo yes)|$(sr_field "$SR_ID" by)|$(sr_field "$SR_ID" why)"
+expect_true "SR.3 the holder's process group is gone" s56_until 5 sr_gone "$SR_P"
+expect_eq "SR.4 one ev=stop-run line in the bound run's landing record" "1" "$(sr_stops)"
+expect_match "SR.4b …naming the request, who stopped it and why" "*|request=$SR_ID|*|by=$SID|why=parked behind the holder|*" \
+  "$(grep '^line/v1|ev=stop-run|' "$SR_REC" 2>/dev/null | tail -n 1)|"
+poke "$RSR" stop-run "$SR_ID"
+expect_eq "SR.5 stop-run on a request already ended says so, exit 0, and writes nothing more (rc|ended lines|record lines)" "0|1|1" \
+  "$RC|$(grep -c '^ended=' "$BIONIC_GATE_DIR/requests/$SR_ID" | tr -d ' ')|$(sr_stops)"
+expect_contains "SR.5b …in its own words" "nothing to stop" "$OUT"
+# by the holder's name
+sr_ask w-name whole tests/run.sh
+s56_until 10 test -n "$(sr_reqs w-name)"
+SR_NID="$(sr_reqs w-name)"; SR_NP="$(sr_pid w-name)"
+poke "$RSR" stop-run w-name --why 'by its name'
+expect_eq "SR.6 stop-run <holder's name> ends that holder's waiting request (rc|by|why)" "0|$SID|by its name" \
+  "$RC|$(sr_field "$SR_NID" by)|$(sr_field "$SR_NID" why)"
+expect_true "SR.6b …and its group is gone" s56_until 5 sr_gone "$SR_NP"
+expect_eq "SR.6c …and the record holds a second ev=stop-run" "2" "$(sr_stops)"
+# a name holding two open requests is refused, naming both: nothing is guessed
+sr_ask w-twin whole tests/run.sh
+s56_until 10 test -n "$(sr_reqs w-twin)"
+SR_T1P="$(sr_pid w-twin)"
+( cd "$RSR" && exec env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_AGENT=w-twin bash -c '. "$1/gate.sh"; gate_ask whole other.test.sh' _ "$SR_LIB" ) >/dev/null 2>&1 &
+SR_T2BG=$!
+s56_until 10 test "$(sr_reqs w-twin | wc -w | tr -d ' ')" = 2
+SR_TIDS="$(sr_reqs w-twin)"
+poke "$RSR" stop-run w-twin
+expect_eq "SR.7 a holder's name with two open requests is refused, exit 2" "2" "$RC"
+expect_contains "SR.7b …naming both ids to choose from" "${SR_TIDS% *}" "$OUT"
+expect_contains "SR.7c …the second too" "${SR_TIDS#* }" "$OUT"
+expect_eq "SR.7d …and ends neither: no ended line, the first asker alive" "||yes" \
+  "$(sr_field "${SR_TIDS% *}" ended)|$(sr_field "${SR_TIDS#* }" ended)|$(kill -0 "$SR_T1P" 2>/dev/null && echo yes)"
+kill -TERM -- "-$SR_T1P" 2>/dev/null; kill -TERM "$SR_T2BG" 2>/dev/null; wait "$SR_T2BG" 2>/dev/null
+# a never-admitted request whose holder died: nothing to TERM, and the end is accepted
+sleep 0 & SR_DEAD=$!; wait "$SR_DEAD" 2>/dev/null
+printf 'key=k.test.sh\nkind=work\nwho=%s:w-dead\ntree=%s\nasked=1700000000\nholder=%s:Mon Oct 12 00:00:00 2026\n' \
+  "$SID" "$RSR" "$SR_DEAD" > "$BIONIC_GATE_DIR/requests/900"
+poke "$RSR" stop-run 900 --why 'its shim was killed'
+expect_eq "SR.8 AC-2.2 stop-run on a never-admitted id whose holder is dead is accepted (rc|by|why)" "0|$SID|its shim was killed" \
+  "$RC|$(sr_field 900 by)|$(sr_field 900 why)"
+expect_absent "SR.8b …never 'was never admitted'" "was never admitted" "$OUT"
+poke "$RSR" stop-run 901
+expect_eq "SR.9 a number that names no request and no run is a usage error, exit 2" "2" "$RC"
+expect_contains "SR.9b …naming what it looked for" "no run named 901" "$OUT"
+touch "$TMPROOT/sr/sr-hold.go"
+s56_until 10 sr_gone "$(sr_pid sr-hold)"
+export BIONIC_GATE_DIR="$SR_GATE_WAS" BIONIC_GATE_POLL="$SR_POLL_WAS"
 
 finish

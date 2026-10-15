@@ -88,7 +88,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh; do
+for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -114,6 +114,10 @@ fi
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/proof.sh"
+# THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): the carry is rendered and checked by lib/debt.sh,
+# which `debt add` and card.sh read too (co_debts, co_debt_refusal).
+# shellcheck source=/dev/null
+. "${CO_LIB}/debt.sh"
 # THE PERSON'S LEDGER AND ITS ONE SENDER (wave-33 T12; REQ-2 AC-2.3, D2), for the delivery notice at
 # the end of `run`. NOT in the list above and sourced only when readable: a payload without it
 # closes a run exactly as 1.15.0 did, and nothing here can make a close refuse.
@@ -206,8 +210,10 @@ TODAY="$(date -u +%Y-%m-%d)"
 # `unknown` rather than an empty string when the manifest cannot be read: an attestation
 # that names no version is still an attestation, and a blank after "close-out.sh" reads
 # like a truncation.
-co_version() {
-  local f="$(plugin_root)/.claude-plugin/plugin.json" v=""
+co_version() { co_plugin_version "$(plugin_root)"; }
+# co_plugin_version <plugin root> -> that root's manifest version, or `unknown` (co_version's reading, for any root)
+co_plugin_version() {
+  local f="${1:-}/.claude-plugin/plugin.json" v=""
   if [ -f "$f" ]; then
     v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)"
   fi
@@ -333,6 +339,58 @@ act_merge() {
     return 0
   fi
   _co_refuse "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
+}
+
+# ─── Act 1b: the rows the merge lands (wave-36 T14; D13, AC-7.7; C70) ─────────
+#
+# THE PLAN CLOSE-OUT DELIVERS READS THE ROWS ITS MERGE LANDED AS LANDED. wave-35 closed with its integrate and close
+# rows still `pending dispatch`, and the act that wiped the engaged marker had also taken the only way to write them.
+# The rows the merge lands are the plan's open (pending or active) `## Tasks` rows of kind `integrate` (the merge
+# itself) and `close` (the row units.sh's `merge` read binds to that merge); a build row still open is not landed
+# here, because nothing showed its work on the branch (A-T14-1). Each is landed through the one landing writer,
+# `session-poker.sh row-landed <id> <integration head> <now>`, in THIS session: it is a plan verb, so the session must
+# be engaged and bound to this plan, and `run` refuses before its first act when it is not (A-T14-2). Act 3 keeps the
+# engaged marker for it and for every verb a refusal later in the tail leaves to the person; the marker goes last.
+LANDS_LINE=""
+co_lands_rows() {  # -> the open integrate and close rows' ids, space-joined, in table order; nothing when none
+  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '($3 == "integrate" || $3 == "close") && ($10 == "pending" || $10 == "active") {
+    printf "%s%s", (n++ ? " " : ""), $1 } END { if (n) print "" }'
+}
+co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
+  local rows="$1" run bound
+  [ -n "$rows" ] || return 0
+  if [ -z "$CO_SID" ]; then
+    printf 'rows %s cannot be landed: no session key (CLAUDE_CODE_SESSION_ID), and row-landed writes only the plan its session is bound to — run close-out from the session bound to %s' "$rows" "$PLAN"
+    return 0
+  fi
+  run="$(session_run "$ROOT" "$CO_SID" 2>/dev/null)" || :
+  bound=""
+  case "$run" in 'bound-open '*) bound="${run#bound-open }" ;; esac
+  [ -z "$bound" ] || bound="$(cd "${bound%/*}" 2>/dev/null && pwd -P)/${bound##*/}"
+  if [ "$bound" != "$PLAN" ]; then
+    printf 'rows %s cannot be landed: this session (%s) is not bound to this open run (%s), and row-landed writes only the plan its session is bound to — bind %s first' "$rows" "$CO_SID" "${run:-none}" "$PLAN"
+  fi
+  return 0
+}
+act_lands() {  # <rows> -> each landed by row-landed at the integration head; LANDS_LINE
+  local rows="$1" id ih at out left
+  if [ -z "$rows" ]; then
+    LANDS_LINE="none — no open integrate or close row"
+    return 0
+  fi
+  ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)" \
+    || _co_refuse "the integration branch '$INTEGRATION' names no commit to land rows $rows at"
+  at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  for id in $rows; do
+    if ! out="$(cd "$ROOT" && CLAUDE_CODE_SESSION_ID="$CO_SID" bash "$(co_poker)" row-landed "$id" "$ih" "$at" 2>&1)"; then
+      printf '%s\n' "$out" >&2
+      _co_refuse "row-landed $id refused (its words above) — rows before it are landed; run close-out again"
+    fi
+  done
+  # The readback: the act's own result, asked of the plan rather than assumed from row-landed's status.
+  left="$(co_lands_rows)"
+  [ -z "$left" ] || _co_refuse "rows $left still read open after row-landed — the plan is not as row-landed reported"
+  LANDS_LINE="$rows at $INTEGRATION @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
 }
 
 # ─── Act 2: worktree branches ────────────────────────────────────────────────
@@ -483,6 +541,60 @@ co_hand_holds() {  # -> sets CO_HH_LINE
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
 }
+# WHAT GOVERNED THE RUN, READ BEFORE THE WIPE (wave-36 T2; D7, REQ-1 AC-1.4, ADR-055). hooks/session-start.sh writes
+# one load record per session start under the project's tmp (wave-36 T1): `root=`, `commit=` when the root is a
+# checkout of the plugin, `started=`, then a sha256 per loaded file. A record outlives its session for this reader's
+# sake, and is no sweep class, so act 3 removes it as an unkeyed entry: `run` reads it first into CO_GOV_LINES, and
+# the card and the continuation both print that one reading, as the hand-holds are.
+#
+# THE WINDOW is the run's Step 4 to now: the first ISO instant on the `- Step 4:` line or its indented lines, else the
+# plan's `approved-by:` instant (the plan's approval is Step 4's start), else every record. A session started before
+# it governed none of the run's rows. One line per root and commit, dated by the first session that ran it, in that
+# order: `governed-by: <root> <commit> from <ISO>`. A record with no commit ran an installed copy, named by that
+# copy's own manifest: `governed-by: <root> installed <version> from <ISO>`. None in the window: the installed
+# version this script runs from, `governed-by: installed <version>`. A link is never a record.
+CO_GOV_LINES=""
+co_iso_secs() {  # <text> -> its first ISO-8601 UTC instant as YYYY-MM-DDTHH:MM:SSZ, or nothing
+  local iso
+  iso="$(printf '%s\n' "${1:-}" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z' | head -n 1)"
+  case "${#iso}" in
+    17) printf '%s:00Z' "${iso%Z}" ;;
+    20) printf '%s' "$iso" ;;
+  esac
+}
+co_window_start() {  # -> the run's Step-4 instant, else its approval's, as YYYY-MM-DDTHH:MM:SSZ; nothing when neither
+  local s step4 from
+  s="$(sdlc_section)"
+  step4="$(printf '%s\n' "$s" | awk '/^- Step 4:/ { f = 1; print; next } f && /^[[:space:]]+[^[:space:]]/ && !/^[[:space:]]*- / { print; next } { f = 0 }')"
+  from="$(co_iso_secs "$step4")"
+  [ -n "$from" ] || from="$(co_iso_secs "$(sdlc_header approved-by "$s")")"
+  printf '%s' "$from"
+}
+co_governed_rows() {  # <window start|""> -> "<started>\t<root>\t<commit, or installed <version>>" per record in it
+  local from="${1:-}" f l root commit started
+  for f in "$TMP_DIR"/loaded-*.state; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    root=""; commit=""; started=""
+    while IFS= read -r l || [ -n "$l" ]; do
+      case "$l" in
+        root=*) root="${l#root=}" ;;
+        commit=*) commit="${l#commit=}" ;;
+        started=*) started="${l#started=}" ;;
+        *) break ;;
+      esac
+    done < "$f"
+    [ -n "$root" ] && [ -n "$started" ] || continue
+    if [ -n "$from" ] && [[ "$started" < "$from" ]]; then continue; fi
+    [ -n "$commit" ] || commit="installed $(co_plugin_version "$root")"
+    printf '%s\t%s\t%s\n' "$started" "$root" "$commit"
+  done
+  return 0
+}
+co_governed() {  # -> sets CO_GOV_LINES
+  CO_GOV_LINES="$(co_governed_rows "$(co_window_start)" | LC_ALL=C sort \
+    | awk -F'\t' '!seen[$2 FS $3]++ { printf "governed-by: %s %s from %s\n", $2, $3, $1 }')"
+  [ -n "$CO_GOV_LINES" ] || CO_GOV_LINES="governed-by: installed $VERSION"
+}
 co_orphans() {  # <run|check> -> one `orphan:` line per live detached run under $TMP_DIR/runs
   local log out id prog
   [ -d "$TMP_DIR/runs" ] || return 0
@@ -545,9 +657,16 @@ _co_tmp_owner() {
   return 0
 }
 
+# THIS SESSION'S ENGAGED MARKER IS KEPT, AND REMOVED AS THE LAST ACT (wave-36 T14; D13, C70). It is also the
+# session's binding, and every plan verb asks it first: wiped here, a close-out refused later in the tail left the
+# person with no verb to repair the plan by (NOT-ENGAGED). `act_disengage` removes it after everything else.
 act_tmp() {
-  local before after entry owner dead_ids spare_list="" removed=0 spared=0 is_spared
+  local before after entry owner dead_ids spare_list="" removed=0 spared=0 is_spared keep="" kept=0
   before="$(tmp_count)"
+  if [ -n "$CO_SID" ]; then
+    keep="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)" || keep=""
+    [ -n "$keep" ] && [ -f "$keep" ] && [ ! -L "$keep" ] || keep=""
+  fi
 
   if [ -d "$TMP_DIR" ]; then
     dead_ids="$(patrol_dead_sessions "$ROOT")"
@@ -589,13 +708,33 @@ $spare_list" in
 $entry
 "*) is_spared="yes" ;;
       esac
+      if [ "$is_spared" != "yes" ] && [ -n "$keep" ] && [ "$entry" = "$keep" ]; then kept=1; continue; fi
       [ "$is_spared" = "yes" ] || { rm -rf "$entry"; removed=$((removed + 1)); }
     done <<< "$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)"
   fi
 
   after="$(tmp_count)"
-  [ "$after" = "$spared" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe ($spared expected, for a live neighbour's spared state)"
-  TMP_LINE="$before entries under $TMP_DIR ($removed removed, $spared spared for a live neighbour session; this session's own state and every dead session's are never spared)"
+  [ "$after" = "$((spared + kept))" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe ($((spared + kept)) expected, for a live neighbour's spared state and this session's engaged marker)"
+  TMP_LINE="$before entries under $TMP_DIR ($removed removed, $spared spared for a live neighbour session"
+  [ "$kept" -eq 0 ] || TMP_LINE="$TMP_LINE, 1 kept: this session's engaged marker, removed as close-out's last act"
+  TMP_LINE="$TMP_LINE; this session's own state and every dead session's are never spared)"
+}
+
+# act_disengage -> close-out's LAST act: this session's engaged marker (its binding) removed, after the continuation,
+# the epic row, the blocks, the archive and the notice, so any refusal before it left the session engaged (wave-36 T14).
+act_disengage() {
+  local m
+  if [ -z "$CO_SID" ] || ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+    say "disengaged: no session key — no engaged marker to remove"
+    return 0
+  fi
+  if [ ! -e "$m" ] && [ ! -L "$m" ]; then
+    say "disengaged: this session holds no engaged marker — nothing to remove"
+    return 0
+  fi
+  rm -f "$m" 2>/dev/null
+  [ ! -e "$m" ] && [ ! -L "$m" ] || _co_refuse "the engaged marker $m survived its removal"
+  say "disengaged: $m removed — close-out's last act; this session is no longer engaged"
 }
 
 # ─── Act 4: the task list ────────────────────────────────────────────────────
@@ -658,11 +797,25 @@ co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned d
 #
 # A burned item is paid and is not carried. The merge into an existing continuation is the deferrals'
 # (co_cont_missing), so a line already under the heading is not written twice.
+#
+# ONLY A LINE THAT PARSES IS CARRIED (wave-36 T13; D13, AC-7.8; A-orch-1). The line is rendered and held to
+# the one grammar by lib/debt.sh `debt_carry_lines`, the reader `debt add` and card.sh agree with; a ledger
+# line it cannot carry is never written here, and `run` refuses it, naming it, before its first act
+# (co_debt_refusal) — so the next run's Step-1 card is never refused on a line this run carried.
 co_debts() {
   local led
   led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
-  proof_debt_items "$led" | awk -F'\t' -v w="$WAVE_SLUG" \
-    '$6 == "-" { printf "debt: %s %s \"%s\" touches=%s raised-by=%s from=%s\n", $1, $2, $3, $5, $4, w }'
+  debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
+}
+
+# co_debt_refusal -> the sentence naming the first debt.md line the continuation could not carry
+# (debt_carry_lines' `bad`), or nothing when every line parses. `run` refuses on it; `check` says it would.
+co_debt_refusal() {
+  local led bad
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
+  bad="$(debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
+  [ -n "$bad" ] || return 0
+  printf '%s carries a line that does not parse as a debt line: %s' "${led#"$(docs_root "$ROOT")"/}" "$bad"
 }
 
 # THE CARD'S DEBT LINE (wave-30 T22; P2, AC-11.4): `debt: touched <N> · burned <M>` for the run, N the
@@ -751,20 +904,37 @@ $CO_CARRIED}" awk '
     insec && !fence { have[$0] = 1 }
     END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !seen[w[i]]++) print w[i] }' "$CONT"
 }
+# A SECTION THAT IS ONE FENCED LIST TAKES THE LINES INSIDE ITS FENCE (wave-36 T14; D13, C38). The lines went after the
+# section's last non-blank line, and a closing fence is one, so a line owed to close-out's own fenced sections
+# (## Hand-holds, ## Governed by, ## Inherited debt) landed under the fence, outside its list. When the section's first
+# and last non-blank lines are the two fence lines of its one fenced block, the lines go before the closing fence; any
+# other section takes them after its last non-blank line, as before. ## Deferrals is read unfenced by every reader
+# (card.sh's inherited reader, `debt adopt`, `co_cont_missing` above), so its lines always go after: a carried line in a
+# fence there is one the next run never reads (A-T14-4).
 co_cont_merge() {  # <lines> [<heading>] -> $CONT with the lines added at the end of that section (## Deferrals by default)
   local tmp="$CONT.close-out.$$" head="${2:-## Deferrals}"
   CO_ADD="$1" CO_HEAD="$head" awk '
-    function fin(more,   i) {
-      if (content) { print ENVIRON["CO_ADD"]; for (i = 0; i < blanks; i++) print "" }
-      else { print ""; print ENVIRON["CO_ADD"]; if (more) print "" }
-      insec = 0; done = 1; blanks = 0
+    function isfence(l) { return l ~ /^[[:space:]]*```/ }
+    function fin(more,   i, f, l, nf) {
+      f = 0; l = 0; nf = 0
+      for (i = 1; i <= nb; i++) { if (isfence(buf[i])) nf++; if (buf[i] ~ /^[[:space:]]*$/) continue; if (!f) f = i; l = i }
+      if (!l) { print ""; print ENVIRON["CO_ADD"]; if (more) print "" }
+      else if (ENVIRON["CO_HEAD"] != "## Deferrals" && nf == 2 && f < l && isfence(buf[f]) && isfence(buf[l])) {
+        for (i = 1; i < l; i++) print buf[i]
+        print ENVIRON["CO_ADD"]
+        for (i = l; i <= nb; i++) print buf[i]
+      } else {
+        for (i = 1; i <= l; i++) print buf[i]
+        print ENVIRON["CO_ADD"]
+        for (i = l + 1; i <= nb; i++) print buf[i]
+      }
+      insec = 0; done = 1; nb = 0
     }
     /^[[:space:]]*```/ { fence = !fence }
     done { print; next }
     !insec { print; if (!fence && $0 == ENVIRON["CO_HEAD"]) insec = 1; next }
     !fence && /^## / { fin(1); print; next }
-    NF == 0 { blanks++; next }
-    { for (i = 0; i < blanks; i++) print ""; blanks = 0; content = 1; print }
+    { buf[++nb] = $0 }
     END { if (!done && insec) fin(0) }' "$CONT" > "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
@@ -845,6 +1015,20 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
       fi
     fi
   fi
+  # THE GOVERNED-BY LINES (wave-36 T2): the hand-holds' road. The section goes in after ## Hand-holds (so before an
+  # ## Inherited debt inserted above), and it counts as there when it holds ANY `governed-by: ` line: a second close
+  # reads no record (the first one's wipe took them), and its installed line must not contradict the first reading.
+  [ -n "$CO_GOV_LINES" ] || co_governed
+  if ! co_cont_has_heading "## Governed by"; then
+    phr="${phr:+$phr and }the ## Governed by section"
+    [ "$mode" != write ] || co_cont_insert "## Hand-holds" "$(co_governed_section)"
+  else
+    miss="$(co_cont_missing_under "## Governed by" "governed-by: " "$CO_GOV_LINES")"
+    if [ -n "$miss" ]; then
+      phr="${phr:+$phr and }the governed-by lines under ## Governed by"
+      [ "$mode" != write ] || co_cont_merge "$miss" "## Governed by"
+    fi
+  fi
   CO_SEC_MSG="$phr"
 }
 
@@ -876,6 +1060,12 @@ co_hand_holds_section() {
     "hand-holds: not read "*) printf '%s\n' "$CO_HH_LINE" ;;
     *) printf '```\n%s\n```\n' "$CO_HH_LINE" ;;
   esac
+}
+
+# co_governed_section -> `## Governed by` and the lines `co_governed` read before the wipe, fenced as the hand-holds are.
+co_governed_section() {
+  [ -n "$CO_GOV_LINES" ] || co_governed
+  printf '## Governed by\n\n```\n%s\n```\n' "$CO_GOV_LINES"
 }
 
 # co_inherited_section -> `## Inherited debt` and every `inherited:` line of the plan's `## SDLC State`, as the verb
@@ -981,6 +1171,8 @@ $(co_deferrals_section)
 $(co_landings_section)
 
 $(co_hand_holds_section)
+
+$(co_governed_section)
 ${inherited:+
 $inherited
 }
@@ -1659,6 +1851,14 @@ do_check() {
     verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
   fi
   say "merge: $verdict"
+  CO_LANDS="$(co_lands_rows)"
+  if [ -z "$CO_LANDS" ]; then
+    say "rows-landed: none — no open integrate or close row"
+  elif [ -n "$(co_lands_refusal "$CO_LANDS")" ]; then
+    say "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")"
+  else
+    say "rows-landed: run would land $CO_LANDS at $INTEGRATION @ ${is:-?}"
+  fi
 
   # THE CENSUS NAMES ITS SOURCE, NOT JUST ITS RESULT (D5). `wt_branches` reads the
   # register now — no scoped glob to report — so the line instead says how many
@@ -1694,10 +1894,14 @@ do_check() {
   say "regression-runs: $RR_LINE"
   co_hand_holds
   say "$CO_HH_LINE"
+  co_governed
+  say "$CO_GOV_LINES"
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
   say "$(co_debt_card)"
+  CO_DEBT_BAD="$(co_debt_refusal)"
+  [ -z "$CO_DEBT_BAD" ] || say "debt-lines: WOULD REFUSE — $CO_DEBT_BAD"
   if [ -f "$CONT" ]; then
     if ! co_cont_has_deferrals; then
       CK_LINE="continuation: $CONT_REL already written — run appends the ## Deferrals section"
@@ -1766,8 +1970,10 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL SIX OF THESE PASS (critic3 P-1, P-3), in this order: the
-  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), the merge
+  # NOTHING IS TOUCHED UNTIL ALL EIGHT OF THESE PASS (critic3 P-1, P-3), in this order: the
+  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), every debt.md
+  # line the continuation carries parsing (co_debt_refusal, wave-36 T13), this session bound to the
+  # plan when it has rows the merge lands (co_lands_refusal, wave-36 T14), the merge
   # verdict (act 1 is a readback and touches nothing), the
   # branch census, the facts the run owes (`facts_judge`, wave-27 T14), and the gate's answer about
   # the plan `run` will write. Any refusal leaves
@@ -1775,6 +1981,13 @@ do_run() {
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_refuse "$MISSING — nothing was done"
+  # A DEBT LINE THAT WOULD NOT PARSE IS REFUSED HERE, NAMED (wave-36 T13; AC-7.8), never carried.
+  CO_DEBT_BAD="$(co_debt_refusal)"
+  [ -z "$CO_DEBT_BAD" ] || _co_refuse "$CO_DEBT_BAD — nothing was done"
+  # THE ROWS THE MERGE LANDS NEED THIS SESSION BOUND TO THIS PLAN (wave-36 T14; AC-7.7), asked before any act.
+  CO_LANDS="$(co_lands_rows)"
+  CO_LANDS_BAD="$(co_lands_refusal "$CO_LANDS")"
+  [ -z "$CO_LANDS_BAD" ] || _co_refuse "$CO_LANDS_BAD — nothing was done"
   act_merge
   refuse_unreached
   facts_judge
@@ -1790,10 +2003,12 @@ do_run() {
   fi
                     say "preflight: the commit gate allows the plan this run will write"
   act_merge;        say "merge: $MERGE_LINE"
+  act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
   act_worktrees;    say "worktree-removed: $WT_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
   co_hand_holds;    say "$CO_HH_LINE"
+  co_governed;      say "$CO_GOV_LINES"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
@@ -1815,6 +2030,7 @@ do_run() {
   insert_archived
                     say "archived: $ARCHIVED_LINE"
   co_deliver_notice
+  act_disengage
 }
 
 # THE DELIVERY CALLS THE PERSON (wave-33 T12; REQ-2 AC-2.3, D2). A run that reached `delivered:` and

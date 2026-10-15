@@ -111,12 +111,14 @@ LONGSEG="$(printf 'segment-%.0s' $(seq 1 8))"
 # the proxy was on, depended on whose machine ran the suite. It is now bionic's
 # own block at a deliberately long path: deterministic, and long enough that the
 # row it renders needs the column budget to survive.
+# bionic's current block body, read from the payload's env.sh (wave-36 T1): the fixture is the
+# block setup writes today, so the row reads `on` whatever text rc_default carries.
+RC_PROXY_BODY="$(bash -c '. "$1"; rc_default claude-proxy' _ "${PAYLOAD}/scripts/lib/env.sh")"
 FIXTURE_RC="${TMP}/${LONGSEG}/${LONGSEG}/dot.zshrc"
 mkdir -p "$(dirname "$FIXTURE_RC")"
 {
   echo '# ─── bionic:rc:start ───'
-  echo 'unalias claude 2>/dev/null || true'
-  echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+  printf '%s\n' "$RC_PROXY_BODY"
   echo '# ─── bionic:rc:end ───'
 } > "$FIXTURE_RC"
 
@@ -413,8 +415,7 @@ expect_all_lines_fit "18: git feed, missing manifest, long path — every line f
 HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
 {
   echo '# ─── bionic:rc:start ───'
-  echo 'unalias claude 2>/dev/null || true'
-  echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+  printf '%s\n' "$RC_PROXY_BODY"
   echo '# ─── bionic:rc:end ───'
   # The retired env block, between its markers: since wave-27 T66 a bare export of
   # that name is the user's (A-orch-119 (3)), and only the block is bionic's footprint.

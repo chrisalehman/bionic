@@ -16,7 +16,7 @@
 #   line_ready <tree> <root> <sid> <within> <again>  `spawn-worktree.sh ready [--within <s>]` (T4)
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
-# file copied by one write(2), no lock), so two writers' lines never interleave. Seven events:
+# file copied by one write(2), no lock), so two writers' lines never interleave. Eight events:
 #   ready     row name commit branch tree suites debt carrier   (a carrier is `<pid>:<start>`)
 #   candidate row base commit tree
 #   verdict   row commit suite result log      (green | red | none | discarded)
@@ -25,6 +25,9 @@
 #   returned  row why detail                   (red | conflict | guard)
 #   stalled   row logs
 #   published row commit kind by why           (queue | hand | git)
+#   stop-run  request who kind key by why, or run name by why   (hooks/session-poker.sh `stop-run`,
+#             through `line_event`; wave-36 T11, D8): an act, not an entry's — the fold below reads no
+#             row from it, and the hand-hold count (`hand_holds_report`) counts it as `stop-runs`
 # A value holding `|` or a line break is refused unwritten: the line is `|`-separated.
 #
 # THE FOLD. `line_state` prints one tab-separated line per entry neither published nor returned:
@@ -110,10 +113,19 @@ _line_branch() {  # <plan> -> its working-branch
   _line_load_run || return 1
   plan_working_branch "$1"
 }
+# The accepted head is the working branch's REF, read by lib/proof.sh `proof_branch_head`, the one reader of the
+# head the judge, proof-add, waive and deliver ask (wave-36 T12; D13; burns debt `working-head`): this read the
+# ref by hand, a second spelling of the same question.
+_line_load_proof() {
+  declare -F proof_branch_head >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
+  declare -F proof_branch_head >/dev/null 2>&1
+}
 line_head() {  # <plan> -> the accepted head
-  local root b
-  root="$(_line_root "${1:-}")" && b="$(_line_branch "$1")" && [ -n "$b" ] || return 1
-  git -C "$root" rev-parse --verify -q "refs/heads/${b}"
+  local root
+  root="$(_line_root "${1:-}")" && _line_load_proof || return 1
+  proof_branch_head "$1" "$root"
 }
 
 line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not

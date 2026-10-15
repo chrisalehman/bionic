@@ -1300,6 +1300,14 @@ expect_contains "32j …which splits a roster LINE, not a markdown table" \
   "split(line, parts" "$(/usr/bin/grep -hE 'split\([^)]*\|' "$S32_HOOK")"
 expect_eq "32j …and no arm of this hook scans for a ## Tasks heading of its own" \
   "0" "$(/usr/bin/grep -cE '/\^#+ *Tasks/' "$S32_HOOK")"
+# THE RENDER TABLE'S READER IS THE LIBRARY'S TOO (wave-36 T38; D12, AC-6.3). The rendered-twins arm reads
+# render.sh's RENDER_UNITS through units.sh `units_render_units`, so its unit words are split in the library and
+# the count above stays at the one roster-line reader. The hook neither names RENDER_UNITS in an awk pattern nor
+# splits the words itself; the library holds the one reader.
+expect_status "32j …the hook reads the render table through units_render_units" "yes" \
+  "$([ "$(/usr/bin/grep -c 'units_render_units' "$S32_HOOK")" -ge 1 ] && echo yes || echo no)"
+expect_eq "32j …and no awk pattern of the hook reads RENDER_UNITS itself" \
+  "0" "$(/usr/bin/grep -cE '^[[:space:]]*/\^RENDER_UNITS' "$S32_HOOK")"
 
 # ============================================================================
 

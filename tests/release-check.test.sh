@@ -19,16 +19,25 @@
 #                   unstruck bullets is stated beside 1.16.0's 20 and equals the bullets counted,
 #                   and the narrowed per-tree-marker limit names no launcher. Read from the
 #                   repository's own CHANGELOG.md; each rule has a doctored copy that goes red.
-#   §ENTRY-1.18.0   the 1.18.0 block against wave-35's REQ-9 (AC-9.2) and REQ-3 (AC-3.2): the newest
-#                   heading is 1.18.0; the catalogue table has one row for each of the twelve items and
+#   §ENTRY-1.18.0   the 1.18.0 block against wave-35's REQ-9 (AC-9.2) and REQ-3 (AC-3.2): the block
+#                   is byte-for-byte as released (wave-36 AC-8.4: it is corrected in the 1.19.0 entry,
+#                   never edited); the catalogue table has one row for each of the twelve items and
 #                   the three "also" items, each citing a record; the floor rule, the pass removal's
 #                   why, the deleted timed cases and the correction of the 1.17.0 default line are each
 #                   named; the stated count of Known limits equals the bullets counted; and the 1.17.0
 #                   block is byte-for-byte as released; the also-3 cell carries a verdict, not "pending
 #                   T17". Each rule has a doctored copy that goes red, except the newest-heading rule.
+#   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
+#                   AC-9.2): the newest heading is 1.19.0 and equals plugin.json's version; the Corrections
+#                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
+#                   deferred sentences and the corrected fix count; Known limits carries every `deferred:`
+#                   stated sentence of the bound plan; Migration names every row that added a refusal; every
+#                   build row names its record; the 1.18.0 block is as released; help.md and version.md
+#                   read the version and `render.sh --check` is green. Each rule has a doctored copy.
 #   §ADR            ADR-053's front-matter status is Superseded and names ADR-054, ADR-054's is Accepted
-#                   (wave-35 AC-3.2), read from the docs tree when its two files exist. With neither
-#                   file the section prints one skipped line and passes. A doctored copy of each goes red.
+#                   (wave-35 AC-3.2) and names ADR-056 as its amendment, ADR-055 and ADR-056 are Accepted
+#                   (wave-36 D14), read from the docs tree when its files exist. With none of them the
+#                   section prints one skipped line and passes. A doctored copy of each goes red.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -347,6 +356,9 @@ cl_cksum() { cksum | sed 's/[[:space:]]*$//'; }
 # The 1.17.0 block as released: its cksum at c83de86d, the commit before this wave. A deliberate later
 # edit of that block updates this pair; an accidental one goes red.
 BLOCK_1170_CKSUM="1817012127 27102"
+# The 1.18.0 block as released: its cksum at 3287c6a7, the commit before wave-36 (AC-8.4: the 1.19.0 entry
+# corrects it and the block itself is never edited).
+BLOCK_1180_CKSUM="2015167781 19033"
 # The catalogue's rows by their first cell: items 1 to 12 of the charter and its three "also" items
 ENTRY_ROWS="1 2 3 4 5 6 7 8 9 10 11 12 also-1 also-2 also-3"
 
@@ -355,8 +367,6 @@ entry_check() {
   local f="$1" blk row n stated actual
   blk="$(cl_block "$f" 1.18.0)"
   [ -n "$blk" ] || { echo "entry: no 1.18.0 block"; return 0; }
-  [ "$(grep -m 1 '^## ' "$f" | sed -n 's/^## \([0-9.]*\) .*/\1/p')" = "1.18.0" ] ||
-    echo "entry: the newest heading is not 1.18.0"
   for row in $ENTRY_ROWS; do
     n="$(printf '%s\n' "$blk" | grep -c -E "^\| $row \|" || true)"
     if [ "$n" != 1 ]; then
@@ -399,6 +409,8 @@ entry_check() {
   done
   [ "$(cl_block "$f" 1.17.0 | cl_cksum)" = "$BLOCK_1170_CKSUM" ] ||
     echo "entry: the 1.17.0 block is not as released"
+  [ "$(cl_block "$f" 1.18.0 | cl_cksum)" = "$BLOCK_1180_CKSUM" ] ||
+    echo "entry: the 1.18.0 block is not as released"
   return 0
 }
 
@@ -428,6 +440,8 @@ doctor wrongcount sed 's/The count of Known limits in this block is [0-9]*\./The
 expect_contains "(e2g) a stated count that is not the bullets counted: red" "entry: the count says 99" "$(entry_check "$TMP/doctored.wrongcount")"
 doctor edit1170 awk '{ print } /^## 1\.17\.0 — /{ print "" }'
 expect_contains "(e2h) a touched 1.17.0 block: red" "entry: the 1.17.0 block is not as released" "$(entry_check "$TMP/doctored.edit1170")"
+doctor edit1180 awk '{ print } /^## 1\.18\.0 — /{ print "" }'
+expect_contains "(e2h) a touched 1.18.0 block: red" "entry: the 1.18.0 block is not as released" "$(entry_check "$TMP/doctored.edit1180")"
 doctor oldfirst sed 's/^## 1\.18\.0 — /## 1.17.9 — /'
 expect_contains "(e2i) a block whose heading is not 1.18.0: red, no 1.18.0 block" "entry: no 1.18.0 block" "$(entry_check "$TMP/doctored.oldfirst")"
 
@@ -442,22 +456,207 @@ expect_contains "(e2m) a fix row T32 that names no record: red" "entry: the fix 
 expect_eq "(e2m) …and the fix-row pattern finds T32 once, so (e1) read a real row" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^- T32 \(')"
 expect_eq "(e2k) …and the also-3 row pattern finds the cell once, so (e1) read a real row" "1" "$(cl_block "$CL" 1.18.0 | grep -c -E '^\| also-3 \|')"
 
-section "§ADR — ADR-053 is Superseded naming ADR-054 and ADR-054 is Accepted (AC-3.2)"
+section "§CORR — the 1.19.0 entry names the run and corrects 1.18.0 (REQ-8 AC-8.1, AC-8.3, AC-8.4; REQ-9 AC-9.1, AC-9.2)"
+
+PLAN_36="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-36-zero-machine-errors.plan.md"
+PLUGIN_JSON="${BIONIC_SCRIPTS_DIR}/payload/.claude-plugin/plugin.json"
+# Every landed build row of the run and the record that proves it; the entry names each record
+ROWS_1190="T1:T1-run-on-branch.md T2:T2-restart-truth.md T3:T3-placement.md T4:T4-jurisdiction.md
+T5:T5-reads-index.md T6:T6-pinned-text.md T7:T7-cover-judge.md T8:T8-fixed-move.md T9:T9-run-sessions.md
+T10:T10-closure-and-markers.md T11:T11-gate-lifecycle.md T12:T12-branch-reads.md T13:T13-debt-grammar.md
+T14:T14-close-out-state.md T15:T15-doctrine.md T24:T24-block-heading.md T25:T25-callers.md
+T27:T27-consumers.md T28:T28-verbs-ask-the-judge.md T29:T29-launch-arm-and-adopt.md
+T30:T30-start-hook-bash5.md T31:T31-fix-seen-by-asker.md T32:T32-one-width-fact.md T33:T33-said-no-pipe.md
+T34:T34-taking-lock-stale.md T35:T35-floor-is-a-fact.md T36:T36-stop-wall-pins.md T37:T37-shell-lint-reds.md
+T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-task-set-files.md
+T42:T42-born-floor-backed.md T43:T43-two-cd-chain.md T44:T44-walk-pointer.md T47:T47-adopt-lands-on-whole.md"
+# The rows that added a refusal; the Migration paragraph names each (AC-9.2)
+MIG_ROWS="T4 T7 T8 T13 T14 T25 T27 T31 T32 T35 T42"
+# D22's two deferred sentences, as wave-35's continuation states them and 1.18.0's Known limits omitted them
+D22_A='`task-add --born` still admits a finding the person moved to defer when its reader'"'"'s rating is inside the fix policy; the guard reads a move to fix, not a move to defer.'
+D22_B='a dead session'"'"'s open row whose files are already sweepable still holds its plan row, and the refusal'"'"'s remedy (`adopt`) lists nothing for that session; `session-poker.sh sweep` clears it.'
+# The text-only floor arm's sentence (A-orch-50)
+TEXT_ONLY='from Step 7 the commit wall refuses a plan that claims a regression and carries no `proved: kind=floor` line, and it reads text only, so a floor line that owes suites passes it and the judge holds them at `current 7` and `current 8`.'
+
+# cl_part <file> <version> <heading> — the lines of the block's `### <heading>` part, up to the next `### ` or `## `
+cl_part() {
+  awk -v v="$2" -v h="### $3" '
+    /^## / { inb = (index($0, "## " v " ") == 1); inp = 0; next }
+    !inb { next }
+    /^### / { inp = (index($0, h) == 1); next }
+    inp' "$1"
+}
+# cl_lead <file> <version> — the block's lines before its first `### ` part (lead and Migration)
+cl_lead() {
+  awk -v v="$2" '
+    /^## / { inb = (index($0, "## " v " ") == 1); inp = 0; if (inb) print; next }
+    !inb { next }
+    /^### / { inp = 1 }
+    !inp' "$1"
+}
+# flat — stdin on one line, white space squeezed, so a wrapped sentence compares as written
+flat() { tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g'; }
+# has <text> <phrase> — 0 when the phrase is in the text, white space squeezed on both sides
+has() { local t p; t="$(printf '%s' "$1" | flat)"; p="$(printf '%s' "$2" | flat)"; case "$t" in *"$p"*) return 0 ;; esac; return 1; }
+# plan_deferred — the stated sentence of each `deferred:` line of the bound plan, one per line
+plan_deferred() { sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p' "$1"; }
+
+# corr_check <file> <plugin.json> <plan> — one `corr:` line per broken rule; no output when all hold
+corr_check() {
+  local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual ver t13 t13hit
+  blk="$(cl_block "$f" 1.19.0)"
+  [ -n "$blk" ] || { echo "corr: no 1.19.0 block"; return 0; }
+  ver="$(grep -m 1 '^## ' "$f" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+  [ "$ver" = "1.19.0" ] || echo "corr: the newest heading is $ver, not 1.19.0"
+  [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = "1.19.0" ] || echo "corr: plugin.json does not read 1.19.0"
+  printf '%s\n' "$blk" | grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "corr: the 1.19.0 heading carries no date"
+  lead="$(cl_lead "$f" 1.19.0)"
+  for s in 'zero machine errors' 'D7' 'D14'; do
+    has "$lead" "$s" || echo "corr: the lead does not name $s"
+  done
+  mig="$(printf '%s\n' "$lead" | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
+  [ -n "$mig" ] || echo "corr: no Migration paragraph"
+  for s in $MIG_ROWS; do
+    printf '%s\n' "$mig" | grep -q -w -- "$s" || echo "corr: Migration does not name $s"
+  done
+  # T13's bullet names the refusal of the two verbs that apply the debt grammar to a carried line (D14; AC-9.2)
+  t13="$(printf '%s\n' "$mig" | awk '/^- T13:/ { p = 1; print; next } p && /^- / { p = 0 } p')"
+  t13hit="$(printf '%s\n' "$t13" | flat | awk '{ n = split($0, a, /\. /); for (i = 1; i <= n; i++) print a[i] }' \
+    | grep -F -- 'debt adopt' | grep -F -- 'Step-1 card' | grep -F -- 'refuse' | grep -F -- 'prose site' \
+    | grep -F -- 'unlisted kind' | grep -F -- '1.18.0' || true)"
+  [ -n "$t13hit" ] || echo "corr: the T13 Migration bullet does not say debt adopt and the Step-1 card refuse a prose site or an unlisted kind"
+  cor="$(cl_part "$f" 1.19.0 'Corrections to 1.18.0')"
+  [ -n "$cor" ] || echo "corr: no Corrections to 1.18.0 section"
+  has "$cor" '`T31-verify-gate.md`' && has "$cor" 'no floor proof line' || echo "corr: Corrections does not name T31's floor-proof refusal"
+  has "$cor" '`T32-floor-run-dirty.md`' && has "$cor" 'dirty checkout' || echo "corr: Corrections does not name T32's dirty-checkout refusal"
+  has "$cor" 'A-orch-50' && has "$cor" 'text-only' || echo "corr: Corrections does not name the text-only floor arm"
+  has "$cor" 'D22' || echo "corr: Corrections does not name D22's two deferred sentences"
+  has "$cor" 'three fixes' && has "$cor" 'T34' && has "$cor" 'A-orch-48' || echo "corr: Corrections does not correct the count of fixes the review ordered"
+  lim="$(cl_part "$f" 1.19.0 'Known limits')"
+  [ -n "$lim" ] || echo "corr: no Known limits section"
+  has "$lim" "$TEXT_ONLY" || echo "corr: Known limits does not carry the text-only floor arm"
+  has "$lim" "$D22_A" || echo "corr: Known limits does not carry D22's first deferred sentence"
+  has "$lim" "$D22_B" || echo "corr: Known limits does not carry D22's second deferred sentence"
+  if [ -r "$plan" ]; then
+    cnt=0
+    while IFS= read -r s; do
+      [ -n "$s" ] || continue
+      cnt=$((cnt + 1))
+      has "$lim" "$s" || echo "corr: Known limits lacks the deferred sentence: $s"
+    done <<EOT
+$(plan_deferred "$plan")
+EOT
+    [ "$cnt" -gt 0 ] || echo "corr: the plan holds no deferred sentence to pin"
+  fi
+  stated="$(printf '%s\n' "$lim" | flat | sed -n 's/.*The count of Known limits in this block is \([0-9][0-9]*\)\..*/\1/p')"
+  actual="$(printf '%s\n' "$lim" | grep -c -E '^- Known limit' || true)"
+  if [ -z "$stated" ]; then echo "corr: the count of Known limits is not stated"
+  elif [ "$stated" != "$actual" ]; then echo "corr: the count says $stated and Known limits holds $actual"; fi
+  for pair in $ROWS_1190; do
+    row="${pair%%:*}"; rec="${pair#*:}"
+    printf '%s\n' "$blk" | grep -q -F -- '`'"$rec"'`' || echo "corr: the entry names no record for $row ($rec)"
+  done
+  has "$blk" 'T33, T36, T37, T38, T39 and T40' && has "$blk" '`born: floor`' || echo "corr: the entry does not name the six rows born: floor"
+  [ "$(cl_block "$f" 1.18.0 | cl_cksum)" = "$BLOCK_1180_CKSUM" ] || echo "corr: the 1.18.0 block is not as released"
+  return 0
+}
+# help_check — the rendered pages read the plugin's version and are the pages render.sh renders
+help_check() {
+  local ver pg
+  ver="$(jq -r '.version // empty' "$PLUGIN_JSON" 2>/dev/null)"
+  for pg in help version; do
+    grep -q -F -- "bionic $ver (installed)" "${BIONIC_SCRIPTS_DIR}/payload/commands/$pg.md" || echo "corr: payload/commands/$pg.md does not read bionic $ver (installed)"
+  done
+  bash "${BIONIC_SCRIPTS_DIR}/agents-src/render.sh" --check >/dev/null 2>&1 || echo "corr: render.sh --check is not green"
+}
+
+# --- the extractors are not vacuous
+expect_nonempty "(c0) the 1.19.0 block is found" "$(cl_block "$CL" 1.19.0)"
+expect_nonempty "(c0) …and its Corrections part" "$(cl_part "$CL" 1.19.0 'Corrections to 1.18.0')"
+expect_nonempty "(c0) …and its Known limits part" "$(cl_part "$CL" 1.19.0 'Known limits')"
+expect_nonempty "(c0) …and its Migration paragraph" "$(cl_lead "$CL" 1.19.0 | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
+expect_eq "(c0) …and the 1.18.0 block is the pinned one" "$BLOCK_1180_CKSUM" "$(cl_block "$CL" 1.18.0 | cl_cksum)"
+if [ -r "$PLAN_36" ]; then
+  expect_eq "(c0) the bound plan's deferred lines each yield a stated sentence" "$(grep -c '^deferred: ' "$PLAN_36")" "$(plan_deferred "$PLAN_36" | grep -c .)"
+  expect_nonempty "(c0) …and the plan holds at least one" "$(plan_deferred "$PLAN_36")"
+else
+  ok "(c0) skipped: no plan file at $PLAN_36, so the deferred sentences are not pinned"
+fi
+expect_eq "(c0) the table of build rows holds 36 rows" "36" "$(printf '%s\n' $ROWS_1190 | grep -c .)"
+
+# --- the repository's own entry keeps every rule
+expect_eq "(c1) the repository's 1.19.0 entry keeps every rule" "" "$(corr_check "$CL" "$PLUGIN_JSON" "$PLAN_36")"
+expect_eq "(c1) …and the rendered pages read plugin.json's version and are the rendered pages" "" "$(help_check)"
+expect_eq "(c1) …and plugin.json reads 1.19.0" "1.19.0" "$(jq -r '.version' "$PLUGIN_JSON")"
+expect_eq "(c1) …and the newest CHANGELOG heading reads 1.19.0 (AC-9.1)" "1.19.0" "$(grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+
+# --- doctored copies: each rule has one that goes red, named by its rule
+cor_check() { corr_check "$1" "$PLUGIN_JSON" "$PLAN_36"; }
+doctor c_no119 sed 's/^## 1\.19\.0 — /## 1.18.9 — /'
+expect_contains "(c2a) no 1.19.0 block: red" "corr: no 1.19.0 block" "$(cor_check "$TMP/doctored.c_no119")"
+doctor c_nocor sed 's/^### Corrections to 1\.18\.0/### Notes/'
+expect_contains "(c2b) a block with no Corrections section: red" "corr: no Corrections to 1.18.0 section" "$(cor_check "$TMP/doctored.c_nocor")"
+doctor c_t31 sed 's/T31-verify-gate\.md/the-record/g'
+expect_contains "(c2c) Corrections that does not name T31's refusal record: red" "corr: Corrections does not name T31's floor-proof refusal" "$(cor_check "$TMP/doctored.c_t31")"
+doctor c_t32 perl -0pe 's/dirty\s+checkout/dirty tree/g'
+expect_contains "(c2d) Corrections that does not say dirty checkout: red" "corr: Corrections does not name T32's dirty-checkout refusal" "$(cor_check "$TMP/doctored.c_t32")"
+doctor c_textonly sed 's/text-only/wall-only/g'
+expect_contains "(c2e) Corrections that does not say text-only: red" "corr: Corrections does not name the text-only floor arm" "$(cor_check "$TMP/doctored.c_textonly")"
+doctor c_d22 sed 's/D22/D2x/g'
+expect_contains "(c2f) Corrections that does not name D22: red" "corr: Corrections does not name D22's two deferred sentences" "$(cor_check "$TMP/doctored.c_d22")"
+doctor c_count sed 's/three fixes/four fixes/g'
+expect_contains "(c2g) a fix count left at four: red" "corr: Corrections does not correct the count of fixes the review ordered" "$(cor_check "$TMP/doctored.c_count")"
+doctor c_d22a sed 's/still admits a finding the person moved to defer/admits a finding/'
+expect_contains "(c2h) Known limits without D22's first sentence: red" "corr: Known limits does not carry D22's first deferred sentence" "$(cor_check "$TMP/doctored.c_d22a")"
+doctor c_d22b sed 's/lists nothing for that session/lists nothing/'
+expect_contains "(c2i) Known limits without D22's second sentence: red" "corr: Known limits does not carry D22's second deferred sentence" "$(cor_check "$TMP/doctored.c_d22b")"
+doctor c_floorarm sed 's/it reads text only/it reads the tree/'
+expect_contains "(c2j) Known limits without the text-only arm: red" "corr: Known limits does not carry the text-only floor arm" "$(cor_check "$TMP/doctored.c_floorarm")"
+if [ -r "$PLAN_36" ]; then
+  FIRST_DEFERRED="$(plan_deferred "$PLAN_36" | head -n 1)"
+  expect_nonempty "(c2k) setup: the first deferred sentence was read" "$FIRST_DEFERRED"
+  doctor c_deferred env FD="$FIRST_DEFERRED" perl -pe 'BEGIN { $s = $ENV{FD} } $i = index($_, substr($s, 0, 30)); substr($_, $i, 30) = "X" x 30 if $i >= 0'
+  expect_contains "(c2k) Known limits that lost a deferred sentence: red, naming it" "corr: Known limits lacks the deferred sentence: $FIRST_DEFERRED" "$(cor_check "$TMP/doctored.c_deferred")"
+fi
+doctor c_klcount sed 's/The count of Known limits in this block is [0-9]*\./The count of Known limits in this block is 99./'
+expect_contains "(c2l) a stated count that is not the bullets counted: red" "corr: the count says 99" "$(cor_check "$TMP/doctored.c_klcount")"
+doctor c_klnone sed 's/The count of Known limits in this block is/The Known limits here number/'
+expect_contains "(c2m) no stated count: red" "corr: the count of Known limits is not stated" "$(cor_check "$TMP/doctored.c_klnone")"
+doctor c_mig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T35/, "Tnn") } { print }'
+expect_contains "(c2n) a Migration paragraph that does not name T35: red" "corr: Migration does not name T35" "$(cor_check "$TMP/doctored.c_mig")"
+doctor c_t13 sed 's/`debt adopt` and the Step-1 card now refuse/the card now refuses/'
+expect_contains "(c2n2) a T13 bullet that does not name debt adopt and the Step-1 card refusal: red" "corr: the T13 Migration bullet does not say debt adopt and the Step-1 card refuse" "$(cor_check "$TMP/doctored.c_t13")"
+doctor c_rec sed 's/`T27-consumers\.md`/the record/g'
+expect_contains "(c2o) a build row with no record named: red" "corr: the entry names no record for T27" "$(cor_check "$TMP/doctored.c_rec")"
+doctor c_born sed 's/T33, T36, T37, T38, T39 and T40/the six rows/'
+expect_contains "(c2p) the born: floor rows not named: red" "corr: the entry does not name the six rows born: floor" "$(cor_check "$TMP/doctored.c_born")"
+doctor c_edit1180 awk '{ print } /^## 1\.18\.0 — /{ print "" }'
+expect_contains "(c2q) a touched 1.18.0 block: red" "corr: the 1.18.0 block is not as released" "$(cor_check "$TMP/doctored.c_edit1180")"
+printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$TMP/plugin.old.json"
+expect_contains "(c2r) a plugin.json that still reads 1.18.0: red" "corr: plugin.json does not read 1.19.0" "$(corr_check "$CL" "$TMP/plugin.old.json" "$PLAN_36")"
+doctor c_nodate sed 's/^## 1\.19\.0 — .*/## 1.19.0 —/'
+expect_contains "(c2s) a 1.19.0 heading with no date: red" "corr: the 1.19.0 heading carries no date" "$(cor_check "$TMP/doctored.c_nodate")"
+
+section "§ADR — ADR-053 is Superseded naming ADR-054, ADR-054 is Accepted and amended by ADR-056, ADR-055 and ADR-056 are Accepted (AC-3.2; wave-36 D14)"
 
 ADR_DIR="${BIONIC_ADR_DIR:-${BIONIC_SCRIPTS_DIR}/.bionic/docs/adrs/epic-23-bionic-tech-debt}"
 # adr_status <file> — the front matter's `status:` line, nothing from the body
 adr_status() { awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { exit } fm && /^status:/ { print; exit }' "$1"; }
 # adr_check <dir> — one `adr:` line per broken rule; a directory with neither file prints one `skipped:` line
 adr_check() {
-  local d="$1" f53 f54 s53 s54
+  local d="$1" f53 f54 f55 f56 s53 s54 s55 s56
   f53="$(ls "$d"/adr-053-*.md 2>/dev/null | head -n 1)"
   f54="$(ls "$d"/adr-054-*.md 2>/dev/null | head -n 1)"
-  if [ -z "$f53" ] && [ -z "$f54" ]; then
+  f55="$(ls "$d"/adr-055-*.md 2>/dev/null | head -n 1)"
+  f56="$(ls "$d"/adr-056-*.md 2>/dev/null | head -n 1)"
+  if [ -z "$f53" ] && [ -z "$f54" ] && [ -z "$f55" ] && [ -z "$f56" ]; then
     echo "skipped: no ADR files at $d"
     return 0
   fi
   [ -n "$f53" ] || echo "adr: no ADR-053 file at $d"
   [ -n "$f54" ] || echo "adr: no ADR-054 file at $d"
+  [ -n "$f55" ] || echo "adr: no ADR-055 file at $d"
+  [ -n "$f56" ] || echo "adr: no ADR-056 file at $d"
   if [ -n "$f53" ]; then
     s53="$(adr_status "$f53")"
     case "$s53" in "status: Superseded"*) ;; *) echo "adr: ADR-053's status is not Superseded: ${s53:-(no status line)}" ;; esac
@@ -466,6 +665,15 @@ adr_check() {
   if [ -n "$f54" ]; then
     s54="$(adr_status "$f54")"
     case "$s54" in "status: Accepted"*) ;; *) echo "adr: ADR-054's status is not Accepted: ${s54:-(no status line)}" ;; esac
+    case "$s54" in *[Aa][Dd][Rr]-056*) ;; *) echo "adr: ADR-054's status does not name ADR-056 as its amendment: ${s54:-(no status line)}" ;; esac
+  fi
+  if [ -n "$f55" ]; then
+    s55="$(adr_status "$f55")"
+    case "$s55" in "status: Accepted"*) ;; *) echo "adr: ADR-055's status is not Accepted: ${s55:-(no status line)}" ;; esac
+  fi
+  if [ -n "$f56" ]; then
+    s56="$(adr_status "$f56")"
+    case "$s56" in "status: Accepted"*) ;; *) echo "adr: ADR-056's status is not Accepted: ${s56:-(no status line)}" ;; esac
   fi
   return 0
 }
@@ -475,11 +683,14 @@ fx_adr() {
   printf -- '---\nwave: wave-35-no-workarounds\n%s\ncreated: 2026-10-11\n---\n# ADR\n\n## Status\n\n**Accepted** in the body, which no rule reads.\n' "$2" > "$1"
 }
 S53='status: Superseded (Step 7, 2026-10-12, 1.18.0) by adr-054-the-floor-is-one-whole-run-plus-the-greens-of-what-changed.md'
-S54='status: Accepted (Step 7, 2026-10-12, 1.18.0)'
-# adr_world <dir> <053 status> <054 status> — a directory holding the two fixture ADRs
+S54='status: Accepted (Step 7, 2026-10-12, 1.18.0), amended by adr-056-cover-is-a-fact-of-the-tree.md (Step 7, 2026-10-14, 1.19.0)'
+S55='status: Accepted (Step 7, 2026-10-14, 1.19.0)'
+# adr_world <dir> <053 status> <054 status> [<055 status> [<056 status>]] — a directory holding the four fixture ADRs
 adr_world() {
   mkdir -p "$1" && fx_adr "$1/adr-053-background-work-takes-only-spare-capacity.md" "$2" &&
-  fx_adr "$1/adr-054-the-floor-is-one-whole-run-plus-the-greens-of-what-changed.md" "$3"
+  fx_adr "$1/adr-054-the-floor-is-one-whole-run-plus-the-greens-of-what-changed.md" "$3" &&
+  fx_adr "$1/adr-055-a-run-is-governed-by-its-launch.md" "${4:-$S55}" &&
+  fx_adr "$1/adr-056-cover-is-a-fact-of-the-tree.md" "${5:-$S55}"
 }
 
 # --- the extractor is not vacuous: it returns the status line of a fixture, front matter only
@@ -515,5 +726,13 @@ adr_world "$TMP/adr-half" "$S53" "$S54"; rm "$TMP/adr-half"/adr-054-*.md
 expect_contains "(a4e) ADR-054's file absent beside ADR-053's: red, named" "adr: no ADR-054 file at $TMP/adr-half" "$(adr_check "$TMP/adr-half")"
 adr_world "$TMP/adr-body" "$S53" "$S54"; sed -i.bak 's/^status:.*//' "$TMP/adr-body"/adr-054-*.md; rm -f "$TMP/adr-body"/*.bak
 expect_contains "(a4f) ADR-054 with no status line in its front matter: red" "adr: ADR-054's status is not Accepted" "$(adr_check "$TMP/adr-body")"
+adr_world "$TMP/adr-n56" "$S53" 'status: Accepted (Step 7, 2026-10-12, 1.18.0)'
+expect_contains "(a4g) ADR-054 Accepted and not naming ADR-056: red" "adr: ADR-054's status does not name ADR-056 as its amendment" "$(adr_check "$TMP/adr-n56")"
+adr_world "$TMP/adr-p55" "$S53" "$S54" 'status: Proposed (Step 2, 2026-10-13, 1.19.0)'
+expect_contains "(a4h) ADR-055 reading Proposed: red, not Accepted" "adr: ADR-055's status is not Accepted" "$(adr_check "$TMP/adr-p55")"
+adr_world "$TMP/adr-p56" "$S53" "$S54" "$S55" 'status: Proposed (Step 2, 2026-10-13, 1.19.0)'
+expect_contains "(a4i) ADR-056 reading Proposed: red, not Accepted" "adr: ADR-056's status is not Accepted" "$(adr_check "$TMP/adr-p56")"
+adr_world "$TMP/adr-no55" "$S53" "$S54"; rm "$TMP/adr-no55"/adr-055-*.md
+expect_contains "(a4j) ADR-055's file absent beside the others: red, named" "adr: no ADR-055 file at $TMP/adr-no55" "$(adr_check "$TMP/adr-no55")"
 
 finish

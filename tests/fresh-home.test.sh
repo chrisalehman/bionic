@@ -1311,6 +1311,9 @@ section "Group 4e: --all leaves a changed claude() block alone and names it"
 
 cp "$RC_FILE_FIX" "$TMP/rc-before-4e"
 T77_FN="${RC_PROXY_LINE#*$'\n'}"
+# The function's own line count: one through wave-35, six since wave-36 T1. Every line range
+# below is derived from it rather than spelled.
+T77_FN_N="$(printf '%s\n' "$T77_FN" | wc -l | tr -d ' ')"
 T77_N="$(rc_nonblock_lines "$RC_FILE_FIX" | wc -l | tr -d ' ')"
 { rc_nonblock_lines "$RC_FILE_FIX"
   printf '%s\n' "$RC_START_LIT" "$T77_FN" 'export V9=9' "$RC_END_LIT"; } > "$TMP/rc-changed-4e"
@@ -1319,8 +1322,13 @@ expect_ne "4e precondition: the earlier line is not the whole body" "$RC_PROXY_L
 SETUP_OUT_E="$TMP/setup-changed-all.txt"
 printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_E" 2>&1
 expect_contains "4e: the changed block is named by its lines" \
-  "lines $((T77_N + 1)) to $((T77_N + 4)) of" "$(cat "$SETUP_OUT_E")"
-expect_contains "4e: …with bionic's lines for the user's hand" "     ${T77_FN}" "$(cat "$SETUP_OUT_E")"
+  "lines $((T77_N + 1)) to $((T77_N + 3 + T77_FN_N)) of" "$(cat "$SETUP_OUT_E")"
+T77_HAND=""
+while IFS= read -r _t77_l; do
+  case "$(cat "$SETUP_OUT_E")" in *"     ${_t77_l}"*) ;; *) T77_HAND="${T77_HAND}${_t77_l}|" ;; esac
+done <<< "$T77_FN"
+expect_contains "4e: …with bionic's lines for the user's hand (the first)" "     ${T77_FN%%$'\n'*}" "$(cat "$SETUP_OUT_E")"
+expect_eq "4e: …and every one of the function's lines, indented for the hand" "" "$T77_HAND"
 expect_contains "4e: the page was printed (the row below is not vacuous)" "Do all of the above?" "$(cat "$SETUP_OUT_E")"
 expect_absent "4e: …and does not offer the claude() function" "add bionic's claude() shell function" "$(cat "$SETUP_OUT_E")"
 expect_absent "4e: …and the user's line is never printed" "V9=9" "$(cat "$SETUP_OUT_E")"
@@ -1344,7 +1352,7 @@ T78_N="$(rc_nonblock_lines "$RC_FILE_FIX" | wc -l | tr -d ' ')"
   printf '%s\n' "$RC_START_LIT" "$T78_UNALIAS" 'export V9=9' "$T77_FN" "$RC_END_LIT"; } > "$TMP/rc-changed-4f"
 cp "$TMP/rc-changed-4f" "$RC_FILE_FIX"
 expect_ne "4f precondition: the block's first line is not its second" "$T78_UNALIAS" "$T77_FN"
-T78_NAMED="lines $((T78_N + 1)) to $((T78_N + 5)) of ~/.zshrc are bionic's claude() block, changed since bionic wrote it:"
+T78_NAMED="lines $((T78_N + 1)) to $((T78_N + 4 + T77_FN_N)) of ~/.zshrc are bionic's claude() block, changed since bionic wrote it:"
 REMOVE_OUT_F="$(printf 'n\n' | run_payload "$REMOVE_SH" --all 2>&1)"
 REMOVE_PAGE_F="${REMOVE_OUT_F%%Do all of the above?*}"
 expect_ne "4f: the page is on the output, ahead of its question" "$REMOVE_OUT_F" "$REMOVE_PAGE_F"

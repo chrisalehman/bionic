@@ -77,7 +77,21 @@ command -v jq  >/dev/null 2>&1 || { echo "rc-item.test.sh: jq is required"; exit
 # ---------------------------------------------------------------------------
 RC_START_LIT='# ─── bionic:rc:start ───'
 RC_END_LIT='# ─── bionic:rc:end ───'
-PROXY_LINE='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+# The function, six lines (wave-36 T1): it launches the checkout it is typed in. Built line by
+# line, so `PROXY_LINE` is the function's text with no trailing newline, as one `printf '%s\n'`
+# argument writes it. `PROXY_CALL` is its one line that names the call, for a count.
+PROXY_LINE="$(printf '%s\n' 'claude() {' \
+  '  local r; r="$(git rev-parse --show-toplevel 2>/dev/null)" || r=""' \
+  "  if [ -n \"\$r\" ] && grep -Eqs '\"name\" *: *\"bionic\"' \"\$r/payload/.claude-plugin/plugin.json\"" \
+  '  then set -- --plugin-dir "$r/payload" "$@"; fi' \
+  '  command claude --allow-dangerously-skip-permissions "$@"' \
+  '}')"
+PROXY_CALL='  command claude --allow-dangerously-skip-permissions "$@"'
+PROXY_N="$(printf '%s\n' "$PROXY_LINE" | wc -l | tr -d ' ')"   # the function's line count
+# The function line bionic wrote from 40be1c30 through 1.18.0 (wave-36 T1 put the checkout's
+# `--plugin-dir` in front): alone, the pre-T75 body; under the unalias line, the 1.18.0 body.
+# Both are `rc_earlier` bodies, so a block holding either is stale, never changed.
+PROXY_LINE_118='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
 # The block's first line clears an alias named `claude`, which would otherwise expand
 # into the function's definition line (wave-27 T75, A-orch-185). The body is both.
 PROXY_UNALIAS='unalias claude 2>/dev/null || true'
@@ -383,7 +397,7 @@ expect_same_bytes "a second consented run leaves the rc byte-identical" \
 expect_eq "exactly one start marker after two runs" "1" \
   "$(count_lines_equal "$SB_YES/.zshrc" "$RC_START_LIT")"
 expect_eq "exactly one proxy line after two runs" "1" \
-  "$(count_lines_equal "$SB_YES/.zshrc" "$PROXY_LINE")"
+  "$(count_lines_equal "$SB_YES/.zshrc" "$PROXY_CALL")"
 
 section "setup: consent no writes nothing"
 
@@ -592,7 +606,7 @@ expect_nonempty "the stale fixture had a block before setup" "$STALE_BLOCK_BEFOR
 expect_eq "after setup the block holds exactly the unalias line and the proxy function" \
   "$PROXY_BODY" "$(rc_block_lines "$SB_ST1/.zshrc")"
 expect_eq "after setup the proxy line appears exactly once" "1" \
-  "$(count_lines_equal "$SB_ST1/.zshrc" "$PROXY_LINE")"
+  "$(count_lines_equal "$SB_ST1/.zshrc" "$PROXY_CALL")"
 expect_eq "after setup the stale line is gone" "0" \
   "$(count_lines_equal "$SB_ST1/.zshrc" "$STALE_LINE")"
 expect_eq "the stale line was in the fixture to go" "1" \
@@ -694,8 +708,8 @@ plant_rc_shape() {  # <file> <shape>
   case "$2" in
     start-only) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" 'export MINE=1' >> "$1" ;;
     end-only)   printf '%s\n' "$RC_END_LIT" 'export MINE=1' >> "$1" ;;
-    two-starts) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
-    two-blocks) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" 'export MINE=1' \
+    two-starts) printf '%s\n' "$RC_START_LIT" "$PROXY_CALL" "$RC_START_LIT" "$PROXY_CALL" "$RC_END_LIT" >> "$1" ;;
+    two-blocks) printf '%s\n' "$RC_START_LIT" "$PROXY_CALL" "$RC_END_LIT" 'export MINE=1' \
                   "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
   esac
 }
@@ -2172,7 +2186,7 @@ for T75_SH in zsh bash; do
   # The old one-line body under the same alias: the error this row exists for (kept as
   # its mutant, so the rows above can fail).
   T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
-  printf '%s\n' "alias claude='echo ALIAS'" "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" 'export AFTER=1' > "$T75_RC"
+  printf '%s\n' "alias claude='echo ALIAS'" "$RC_START_LIT" "$PROXY_LINE_118" "$RC_END_LIT" 'export AFTER=1' > "$T75_RC"
   T75_ST="$(t75p_source "$T75_SH" "$T75_SB" "$T75_RC")"
   expect_absent "T75 claude() (${T75_SH}, old body under an alias): the line after the block does not run" "AFTER=1 " "$T75_ST"
   expect_ne "T75 claude() (${T75_SH}, old body under an alias): …and the rc errors on stderr" "ERR=" "${T75_ST#*|}"
@@ -2183,7 +2197,7 @@ done
 # the rc as it was before setup.
 T66_SHELL=/bin/zsh
 T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
-printf '%s\n' 'export A=1' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" > "$T75_RC"
+printf '%s\n' 'export A=1' "$RC_START_LIT" "$PROXY_LINE_118" "$RC_END_LIT" > "$T75_RC"
 printf '%s\n' 'export A=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" > "$TMP/t75p-new"
 T75_OUT="$(t66_door "$T75_SB" setup-only y claude-proxy)"
 expect_contains "T75 claude() bytes: an old block is offered again (not written)" "[y/N]" "$T75_OUT"
@@ -2205,7 +2219,8 @@ t75p_get() {  # <body line…> — rc_get's answer on a block holding those line
   if env_run "$sb" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1; then echo written; else echo not; fi
 }
 expect_eq "T75 rc_get: the new body is written" "written" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE")"
-expect_eq "T75 rc_get: the old one-line body is not" "not" "$(t75p_get "$PROXY_LINE")"
+expect_eq "T75 rc_get: the old one-line body is not" "not" "$(t75p_get "$PROXY_LINE_118")"
+expect_eq "T75 rc_get: the 1.18.0 two-line body is not (wave-36 T1)" "not" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE_118")"
 expect_eq "T75 rc_get: the new body's lines swapped are not" "not" "$(t75p_get "$PROXY_LINE" "$PROXY_UNALIAS")"
 T75_SB="$(new_sandbox)"; printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$PROXY_UNALIAS" "$RC_END_LIT" > "$T75_SB/.zshrc"
 expect_eq "T75 rc_state: …they are the changed state, never offered (T77)" "changed" \
@@ -2236,11 +2251,12 @@ t77_body() {  # <shape> — the lines between the markers
     u-above)     printf '%s\n' "$T77_U" "$PROXY_UNALIAS" "$PROXY_LINE" ;;
     u-between)   printf '%s\n' "$PROXY_UNALIAS" "$T77_U" "$PROXY_LINE" ;;
     u-below)     printf '%s\n' "$PROXY_UNALIAS" "$PROXY_LINE" "$T77_U" ;;
-    old2)        printf '%s\n' "$PROXY_LINE" ;;
+    old2)        printf '%s\n' "$PROXY_LINE_118" ;;
+    old3)        printf '%s\n' "$PROXY_UNALIAS" "$PROXY_LINE_118" ;;
     old1)        printf '%s\n' "$T77_OLD1" ;;
     empty)       ;;
-    old-u-below) printf '%s\n' "$PROXY_LINE" "$T77_U" ;;
-    old-u-above) printf '%s\n' "$T77_U" "$PROXY_LINE" ;;
+    old-u-below) printf '%s\n' "$PROXY_LINE_118" "$T77_U" ;;
+    old-u-above) printf '%s\n' "$T77_U" "$PROXY_LINE_118" ;;
     swapped)     printf '%s\n' "$PROXY_LINE" "$PROXY_UNALIAS" ;;
     edited)      printf '%s\n' "$PROXY_UNALIAS" "$T77_EDIT" ;;
   esac
@@ -2258,14 +2274,14 @@ t77_after_yes() {  # <file> <shape>
     *)    printf '%s\n' 'export V1=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" 'export V2=2' > "$1" ;;
   esac
 }
-t77_state() { case "$1" in cur|u-*) echo written ;; old1|old2|empty) echo stale ;; none) echo no ;; *) echo changed ;; esac; }
+t77_state() { case "$1" in cur|u-*) echo written ;; old1|old2|old3|empty) echo stale ;; none) echo no ;; *) echo changed ;; esac; }
 t77_last() { local n; n="$(t77_body "$1" | wc -l)"; echo $(( 3 + ${n// /} )); }  # the end marker's line
-T77_ALL="cur u-above u-between u-below old2 old1 empty none old-u-below old-u-above swapped edited"
+T77_ALL="cur u-above u-between u-below old3 old2 old1 empty none old-u-below old-u-above swapped edited"
 
 # THE ONE OWNER. env.sh `rc_state` answers every shape, and the fixture's shapes are
 # what this section says they are (the extractor reads the block back non-empty).
-expect_eq "T77 fixture: the u-between block holds three lines" "3" "$(t66_rc_tmp="$TMP/t77-fx"; t77_plant "$t66_rc_tmp" u-between; rc_block_lines "$t66_rc_tmp" | wc -l | tr -d ' ')"
-expect_eq "T77 fixture: the swapped block ends at line 5" "5" "$(t77_last swapped)"
+expect_eq "T77 fixture: the u-between block holds the unalias line, the user's and the function" "$((2 + PROXY_N))" "$(t66_rc_tmp="$TMP/t77-fx"; t77_plant "$t66_rc_tmp" u-between; rc_block_lines "$t66_rc_tmp" | wc -l | tr -d ' ')"
+expect_eq "T77 fixture: the swapped block ends after the function and the unalias line" "$((3 + PROXY_N + 1))" "$(t77_last swapped)"
 for T77_S in $T77_ALL; do
   T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" "$T77_S"
   expect_eq "T77 rc_state ${T77_S}: $(t77_state "$T77_S")" "$(t77_state "$T77_S")" \
@@ -2296,7 +2312,8 @@ for T77_SH in zsh bash; do
       changed)
         expect_contains "${T77_L}: named by its line range" "lines 2 to $(t77_last "$T77_S") of" "$T77_OUT"
         expect_contains "${T77_L}: …with bionic's first line for the user's hand" "     ${PROXY_UNALIAS}" "$T77_OUT"
-        expect_contains "${T77_L}: …and bionic's second" "     ${PROXY_LINE}" "$T77_OUT"
+        expect_contains "${T77_L}: …and bionic's second" "     claude() {" "$T77_OUT"
+        expect_contains "${T77_L}: …through the call" "     ${PROXY_CALL}" "$T77_OUT"
         expect_absent "${T77_L}: …nothing asked" "[y/N]" "$T77_OUT"
         expect_absent "${T77_L}: …no user's line printed" "V9=9" "$T77_OUT"
         expect_absent "${T77_L}: …nor the user's edit" "--verbose" "$T77_OUT"
@@ -2368,7 +2385,7 @@ for T77_SH in zsh bash; do
   T66_SHELL="/bin/$T77_SH"
   for T77_W in first last between nonl endnonl; do
     T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"
-    t77_place "$T77_RC" "$T77_W" "$PROXY_LINE"
+    t77_place "$T77_RC" "$T77_W" "$PROXY_LINE_118"
     t77_place "$TMP/t77-want" "$T77_W" "$PROXY_UNALIAS" "$PROXY_LINE"
     T77_OUT="$(t66_door "$T77_SB" setup-only y claude-proxy)"
     expect_contains "T77 in place (${T77_SH}, ${T77_W}): the stale block was offered" "[y/N]" "$T77_OUT"
@@ -2381,7 +2398,7 @@ T66_SHELL=/bin/zsh
 # call writes in place (the twin).
 T77_SB="$(new_sandbox)"
 { for _i in $(seq 1 150); do printf 'export MY_VAR_%s=mine\n' "$_i"; done
-  printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT"
+  printf '%s\n' "$RC_START_LIT" "$PROXY_LINE_118" "$RC_END_LIT"
   for _i in $(seq 151 300); do printf 'export MY_VAR_%s=mine\n' "$_i"; done; } > "$T77_SB/.zshrc"
 cp "$T77_SB/.zshrc" "$TMP/t77-before"; T77_LS="$(ls -A "$T77_SB")"
 T77_OUT="$(t40_env "$T77_SB" 'trap "" XFSZ; ulimit -f 2; rc_set claude-proxy; echo "rc=$?"')"
@@ -2450,12 +2467,12 @@ section "wave-27 T78: remove never deletes a line the user added inside bionic's
 # both shells; two marker pairs are malformed, named by their faults and never asked
 # about. The shapes are T77's (`t77_body`): `export V1=1`, the block from line 2,
 # `export V2=2`.
-T78_OURS="cur old2 old1 empty"
+T78_OURS="cur old3 old2 old1 empty"
 T78_CHANGED="u-above u-between u-below old-u-below old-u-above edited swapped"
 t78_plant() {  # <file> <shape> — T77's shapes, and `two`: two marker pairs
   if [ "$2" = two ]; then
-    printf '%s\n' 'export V1=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" 'export V2=2' \
-      "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" > "$1"
+    printf '%s\n' 'export V1=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_CALL" "$RC_END_LIT" 'export V2=2' \
+      "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_CALL" "$RC_END_LIT" > "$1"
   else t77_plant "$1" "$2"; fi
 }
 t78_named() {  # <rc name> <shape> — the first line a changed block is named with
@@ -2470,8 +2487,8 @@ t78_page() { printf '%s' "${1%%Do all of the above?*}"; }
 t78_after_items() { local p; p="$(t78_page "$1")"; printf '%s' "${p##*  • }"; }
 
 # THE FIXTURES ARE WHAT THEY SAY: the extractor reads each shape's block back non-empty.
-expect_eq "T78 fixture: the u-above block holds three lines, the user's first" \
-  "${T77_U}|${PROXY_UNALIAS}|${PROXY_LINE}|" "$(t78_plant "$TMP/t78-fx" u-above; rc_block_lines "$TMP/t78-fx" | tr '\n' '|')"
+expect_eq "T78 fixture: the u-above block holds the user's line first, then bionic's" \
+  "$(printf '%s\n' "$T77_U" "$PROXY_UNALIAS" "$PROXY_LINE" | tr '\n' '|')" "$(t78_plant "$TMP/t78-fx" u-above; rc_block_lines "$TMP/t78-fx" | tr '\n' '|')"
 expect_eq "T78 fixture: two marker pairs hold four lines between them" "4" \
   "$(t78_plant "$TMP/t78-fx" two; rc_block_lines "$TMP/t78-fx" | wc -l | tr -d ' ')"
 
@@ -2650,8 +2667,9 @@ T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"
 { for _i in $(seq 1 1200); do printf 'export MY_VAR_%s=mine\n' "$_i"; done
   printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$T77_U" "$PROXY_LINE" "$RC_END_LIT"; } > "$T78_RC"
 T78_OUT="$(t66_door "$T78_SB" rm-payload y claude-proxy)"
-T78_LINE="$(report_row "$T78_OUT" "lines 1201 to 1205 of ~/.bashrc")"
-expect_nonempty "T78 width: the changed line at lines 1201 to 1205 of ~/.bashrc was printed" "$T78_LINE"
+T78_END=$((1203 + PROXY_N + 1))
+T78_LINE="$(report_row "$T78_OUT" "lines 1201 to ${T78_END} of ~/.bashrc")"
+expect_nonempty "T78 width: the changed line at lines 1201 to ${T78_END} of ~/.bashrc was printed" "$T78_LINE"
 expect_true "T78 width: …and fits 100 columns (${#T78_LINE})" test "${#T78_LINE}" -le 100
 T78_SB="$(new_sandbox)"; T78_RC="$(t66_rc "$T78_SB")"; t78_plant "$T78_RC" cur
 T78_LINE="$(report_row "$(t66_door "$T78_SB" rm-payload n claude-proxy)" "$T78_WARN")"
