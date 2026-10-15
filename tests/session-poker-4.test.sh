@@ -5696,4 +5696,80 @@ POKE_BOUND="$FX_BOUND_WAS"
 if [ "$FX_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$FX_CCD_WAS"; fi
 
 
+# ============================================================
+section "§RUNLINE: a floor proof cites a run the machine recorded: floor-run writes one ev=run line beside its log, and proof-add floor accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
+# ============================================================
+#
+# THE RUN LINE (ADR-057): `floor-run`, right after it writes its log, appends to the plan's landing record
+#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+# and lib/proof.sh `_proof_floor_log` keeps the floor's grammar as its first check, then requires one `ev=run` line
+# naming the log whose head=, rc= and sha256= match the file as it is now. A log no run line names is refused "no run
+# recorded for this log"; a log edited after its run is refused "the log changed since its run"; the accepted proof
+# line ends `run=<at> head=<sha> rc=<n>`, naming the run it read (AC-6.2). booked.test.sh §RUNLINE proves the other
+# writer, booked.sh's run close, parses by the same reader, and carries the mutant (a hash mismatch accepted).
+# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add floor.
+#
+# FIXTURE FIDELITY. §FLOOR-DECLARED's shape: s42_plan's bound plan, its working branch in a linked worktree one empty
+# commit past the main checkout, NO tests/ directory, and a declared `floor:` command (a script this section writes)
+# that floor-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
+RL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRL="$(make_repo runline)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
+PRL="$(s42_plan "$RRL" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
+( cd "$RRL" && git add -f "$PRL" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RRL/.worktrees/01-fixture" \
+  && git -C "$RRL/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+RL_WT="$RRL/.worktrees/01-fixture"
+RL_W="$(git -C "$RL_WT" rev-parse HEAD 2>/dev/null)"
+RL_REC="$RRL/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RL_REC"
+RL_RECORD="$RL_REC/landing-proofs.log"
+RL_STUB="$TMPROOT/rl-floor.sh"
+printf '#!/bin/bash\necho "floor: 2 passed, 0 failed"\nexit 0\n' > "$RL_STUB"
+printf 'floor: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+rl_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PRL" | tail -n 1; }
+rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
+rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
+expect_regex "RL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$RL_W"
+expect_eq "RL-0b precondition: …its checkout is clean, and the record holds no run line yet" "|0" \
+  "$(git -C "$RL_WT" status --porcelain 2>/dev/null)|$(rl_runs | awk 'END { print NR + 0 }')"
+
+# ---------- AC-6.1: a hand-written log at the real head, rc=0, no run line: refused ----------
+printf 'head=%s dirty=0\n$ make check\nall green\nrc=0\n' "$RL_W" > "$RL_REC/hand.log"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor record/wave-01-fixture/hand.log
+s42_unchanged "RL-1 AC-6.1 a hand-written log opening head=<the real working head> dirty=0 and ending rc=0, no run recorded" 1 "$PRL"
+expect_contains "RL-1b …refused naming the missing fact" "no run recorded for this log" "$OUT"
+expect_contains "RL-1c …and the log it read" "hand.log" "$OUT"
+
+# ---------- AC-6.1: floor-run writes the log and its run line; proof-add floor accepts it, naming the run ----------
+poke "$RRL" floor-run
+RL_LOG="$RL_REC/floor-run-$RL_W.log"
+expect_eq "RL-2 floor-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
+RL_SHA="$(rl_sha "$RL_LOG")"
+expect_regex "RL-2b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
+expect_eq "RL-3 …and appends exactly one run line to the plan's landing record" "1" "$(rl_runs | awk 'END { print NR + 0 }')"
+expect_regex "RL-3b …in the grammar: the log by its record path, the head, dirty, rc, the log's sha256 and when" \
+  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/floor-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "$(rl_runs | tail -n 1)"
+RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
+expect_eq "RL-4 AC-6.1 proof-add floor accepts the log its run line matches (exit 0)" "0" "$RC"
+expect_regex "RL-4b AC-6.2 …and the proof line names the run it read: run=<its at> head=<sha> rc=<n>" \
+  "^proved: kind=floor head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
+  "$(rl_proved)"
+
+# ---------- AC-6.1: the same log edited after its run: refused on the hash ----------
+sed 's/2 passed/3 passed/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.tmp" "$RL_LOG"
+expect_false "RL-5-pre precondition: the edit changed the log's hash" test "$(rl_sha "$RL_LOG")" = "$RL_SHA"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
+s42_unchanged "RL-5 AC-6.1 the floor-run log edited after its run" 1 "$PRL"
+expect_contains "RL-5b …refused naming the fact" "the log changed since its run" "$OUT"
+expect_contains "RL-5c …the log, and the hash its run recorded" "floor-run-$RL_W.log" "$OUT"
+expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
+
+POKE_BOUND="$RL_BOUND_WAS"
+
+
 finish
