@@ -1731,7 +1731,9 @@ remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 c
 # The transcript is resolved EXACTLY as hooks/dispatch-preflight.sh resolves it for its own
 # liveness question (`roster_session_live`): a session's transcript is `<sid>.jsonl` under
 # some project directory of CLAUDE_CONFIG_DIR/projects. Not resolvable means SILENT — a
-# detector that cannot read cannot report.
+# detector that cannot read cannot report. lib/said.sh no longer mirrors this scan, on purpose
+# (wave-37 T5; D9, A-T5-7): the words reader decides trust and opens only this project's own
+# directory names, while this one finds an address and decides nothing.
 
 session_transcript() {  # <session-id> -> path on stdout, nonzero if none
   local sid="$1" cfg d f
@@ -4601,12 +4603,24 @@ pv_file_swap() {
 # THE RUN'S SESSIONS (wave-36 T9; D10): `user_said` reads every session the plan records, then this one,
 # and says which it read (SAID_SESSIONS) and asked for (SAID_TRIED); a refusal names them, so a reader can
 # tell "not typed" from "typed in a session the run never recorded".
+#
+# THE SESSIONS THE PROJECT DOES NOT WITNESS (wave-37 T5; D9, AC-5.3): a session with no load record under
+# this root, or no transcript under this project's own directory, is not read (lib/said.sh SAID_REFUSED);
+# after the sentence, the refusal lists `read: <sids>` and one `refused: <sid> (<reason>)` per such session.
 said_refuse() {  # <user_said rc> <the words, folded> <act> -> the refusal on stderr
+  local sr_l
   case "$1" in
     2) die "REFUSED — the transcript cannot be found or read for any session read (${SAID_TRIED:-${CLAUDE_CODE_SESSION_ID:-none}} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
     3) die "REFUSED — the words \"$(clean "$2")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged." ;;
     *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session or another session the run recorded (read: ${SAID_SESSIONS:-none}); $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
   esac
+  [ -n "${SAID_REFUSED:-}" ] || return 0
+  die "read: ${SAID_SESSIONS:-none}"
+  while IFS= read -r sr_l; do
+    [ -z "$sr_l" ] || die "refused: $(clean "$sr_l")"
+  done <<SAID_REFUSE
+$SAID_REFUSED
+SAID_REFUSE
 }
 
 # A FAILING QUESTION IS THE PERSON'S TO WAIVE (wave-33 T35; AC-2.2, D2). A reading whose newest fact is
@@ -5883,7 +5897,7 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # THE RUN'S NUMBERS ARE FOLDED FROM THE TWO RECORDS, AND ONLY PRINTED (wave-28 T14; D18, REQ-4).
 # `landing_report` reads the landing record's `line/v1` events and the gate's request files, and prints
 #
-#   landings: queue=<n> hand=<n> git=<n> · ready-to-landed median=<m>m p75=<m>m max=<m>m · runs: green=<n> red=<n> none=<n> discarded=<n> red-then-green=<n> · waited median=<s>s · killed=<n>
+#   landings: queue=<n> hand=<n> git=<n> · ready-to-landed median=<m>m p75=<m>m max=<m>m · runs: green=<n> red=<n> none=<n> discarded=<n> red-then-green=<n> run=<n> · waited median=<s>s · killed=<n>
 #
 # and with rows, one line per landed row in the record's order:
 #
@@ -5902,7 +5916,9 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # counted nowhere; a row that landed before starts its own set again at its next `ready`, and a row with no
 # candidate since its last landing has no commit of its own to include by, so every verdict under its id counts
 # (T14's count). Red-then-green is a red then a green for one row,
-# one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Waited is a request's `admitted` less its
+# one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Run
+# counts the record's `ev=run` lines, one per regression run floor-run or a detached booked.sh run recorded (wave-37
+# T4; D7, AC-6.2). Waited is a request's `admitted` less its
 # `asked`; killed is a request admitted that ended with an exit over 128 (a signal: 137 from the reaper, 143
 # from a TERMed suite) or whose holder is dead with no `ended` line, as D18 says (lib/gate.sh `_gate_open`'s
 # state, read through `_gate_read`, not retyped here; wave-28 T68, T72).
@@ -5960,6 +5976,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       for (i = 2; i <= nf; i++) { j = index(p[i], "="); if (j > 1) kv[substr(p[i], 1, j - 1)] = substr(p[i], j + 1) }
       ev = kv["ev"]; rk = kv["row"]; e = iso2epoch(kv["at"])
       g = rk SUBSEP (gen[rk] + 0)
+      if (ev == "run") nrl++
       if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
       if (ev == "candidate") hasc[g] = 1
       if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
@@ -5997,9 +6014,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         if (num(qd[i]) && qx[i] == 1) killed++
       }
       wm = pct(wts, nw, 0.5)
-      printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d · waited median=%ds · killed=%d\n",
+      printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d run=%d · waited median=%ds · killed=%d\n",
         kinds["queue"], kinds["hand"], kinds["git"], pct(mins, nm2, 0.5), pct(mins, nm2, 0.75), pct(mins, nm2, 1),
-        cnt["green"], cnt["red"], cnt["none"], cnt["discarded"], rtg, int(wm + 0.5), killed
+        cnt["green"], cnt["red"], cnt["none"], cnt["discarded"], rtg, nrl, int(wm + 0.5), killed
       if (rows == "yes") for (r = 1; r <= n; r++) {
         w = 0
         if (pname[r] != "-" && pfrom[r] != "") for (i = 1; i <= nq; i++)
@@ -10603,13 +10620,17 @@ PF_OTHER_LIST
     # are refused naming each, for a floor is the runs of one head. The owed reds are the union of each log's.
     PF_OWED=""
     if [ "$PF_KIND" = floor ]; then
-      PF_FH=""; PF_FHEADS=""; PF_FRELS=""; PF_SPLIT=""
+      PF_FH=""; PF_FHEADS=""; PF_FRELS=""; PF_SPLIT=""; PF_RUNAT=""; PF_RUNRC=""
       while IFS='	' read -r _pf_real _pf_rel; do
         [ -n "$_pf_real" ] || continue
         if ! _pf_h="$(proof_attested floor "$_pf_real" "$PV_REPO" "$PV_PLAN" "" "$PV_REPO" "$PF_HEAD")"; then
           die "REFUSED — $(clean_whole "$_pf_h"). The plan is unchanged."
           exit 1
         fi
+        # THE PROOF NAMES THE RUN IT READ (wave-37 T4; AC-6.2): the recorded run the judge matched the log to.
+        _pf_run="$(proof_floor_run "$_pf_real" "$PV_PLAN" "$PV_REPO")" || _pf_run=""
+        PF_RUNAT="${PF_RUNAT:+$PF_RUNAT,}$(printf '%s' "$_pf_run" | cut -d' ' -f1)"
+        PF_RUNRC="${PF_RUNRC:+$PF_RUNRC,}$(printf '%s' "$_pf_run" | cut -d' ' -f3)"
         [ -z "$PF_FH" ] || [ "$_pf_h" = "$PF_FH" ] || PF_SPLIT=1
         PF_FH="${PF_FH:-$_pf_h}"
         PF_FHEADS="${PF_FHEADS:+$PF_FHEADS, }$_pf_rel read ${_pf_h:0:12}"
@@ -10676,7 +10697,7 @@ PF_PAIRS_LIST
     # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took each log and every red
     # named; the line lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35).
     if [ "$PF_KIND" = floor ]; then
-      PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED")"
+      PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED" "run=$PF_RUNAT head=$PF_HEAD rc=$PF_RUNRC")"
     fi
     # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21): one `deferred:` line per finding
     # the table defers, right after its proof line, in the same write (lib/proof.sh
@@ -11396,6 +11417,16 @@ RC_TAGS
       cat "$FR_TMP"; rm -f "$FR_TMP"
       die "REFUSED — the regression exited $FR_RC, but its log $FR_LOG cannot be written."
       exit 1
+    fi
+    # THE RUN IS RECORDED WHERE ITS PROOF WILL LOOK (wave-37 T4; D7, AC-6.1; ADR-057): one `ev=run` line in the plan's
+    # landing record (lib/line.sh `line_event`, through `_wt_proofs_put`), the log by its record path, the head and
+    # dirty count read before the run, its exit, and the log's sha256 (lib/proof.sh `_proof_sha256`), so `proof-add
+    # floor` accepts this log, and this log as it is now, and no hand-written one.
+    FR_SHA="$(_proof_sha256 "$FR_LOG")" || FR_SHA=""
+    declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
+       || ! line_event "$PV_PLAN" run "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" 2>/dev/null; then
+      die "floor-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add floor will refuse this log as no recorded run."
     fi
     if [ -n "$FR_WHOLE" ]; then
       FR_VERDICT="$(/usr/bin/grep '^Gating: ' "$FR_TMP" 2>/dev/null | tail -n 1)"

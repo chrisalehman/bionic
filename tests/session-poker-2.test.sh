@@ -16,6 +16,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -1603,7 +1604,10 @@ mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/els
 # THE EVIDENCE ATTESTS ITS HEAD (wave-26 T14; review 7 F1): a floor log carries the suite runner's
 # header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line. Since wave-36 T35 (AC-7.10) a floor log
 # also closes with its run's code, `rc=<n>`, its last line: the floor's one grammar is that header and that close.
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+# Since wave-37 T4 (D7, ADR-057) a floor log is accepted only beside the run line the machine recorded for it, so each
+# log below that is to be accepted is written by tests/lib/floor-fixture.sh, the log and its run line together.
+printf 'all suites passed\nGating: 3 passed, 0 failed\n' | floor_fixture --pre $'floor log\nenv: os=fixture' \
+  "$P46" "$R46/.bionic/docs/record/wave-01-fixture/floor.txt" "$W46_HEAD" 0 0
 printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
 expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
@@ -1621,7 +1625,7 @@ expect_eq "46a proof-add floor exits 0" "0" "$RC"
 expect_contains "46a2 …and says what it wrote" "proof-add — kind=floor head=$W46_HEAD" "$OUT"
 expect_eq "46a3 …git diff --numstat shows one line added" "1 0;" "$(s42_numstat "$R46")"
 expect_regex "46a4 …in the proof line's shape, with the working branch's head" \
-  "^proved: kind=floor head=${W46_HEAD} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor.txt$" \
+  "^proved: kind=floor head=${W46_HEAD} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${W46_HEAD} rc=0$" \
   "$(s46_proved "$P46")"
 expect_eq "46a5 …inside ## SDLC State" "SDLC" \
   "$(awk '/^##[[:space:]]/ { s = $2 } /^proved: / { print s; exit }' "$P46")"
@@ -1656,7 +1660,7 @@ expect_eq "46b5 the floor log of an ancestor head, after a landing that changed 
 expect_eq "46b5 …and one line is added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=floor head=${W46_HEAD} " "$OUT"
 expect_eq "46b6 proof_last floor reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
+printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P46" "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt" "$W46_HEAD2" 0 0
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
@@ -1731,11 +1735,11 @@ printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: capture
   "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
   "$W46_HEAD2" > "$S46_REC/floor-appended.txt"
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
+printf 'Gating: 1 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P46" "$S46_REC/floor-part.txt" "$W46_HEAD2" 0 0
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nVoid: 1 — not timed, each for the reason given; advisory, not a failure:\n    - c.test.sh (the machine was busy)\nNo gating suite failed; 1 void\n' \
   "$W46_HEAD2" > "$S46_REC/floor-whole-void.txt"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' \
-  "$W46_HEAD2" "$W46_HEAD2" > "$S46_REC/floor-rerun.txt"
+printf 'Gating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" \
+  | floor_fixture --pre 'floor log' "$P46" "$S46_REC/floor-rerun.txt" "$W46_HEAD2" 0 0
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-cut.txt
 s42_unchanged "46f17 S3 a log cut off after a nested green verdict inside a capture" 1 "$P46"
@@ -1792,7 +1796,7 @@ expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
 # REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
 # directory, not the file, so a link to a log elsewhere was admitted and the evidence could
 # change after the proof. The same bytes as a regular file under record/ are admitted.
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
+printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P46" "$R46/.bionic/docs/plans/elsewhere/run.log" "$W46_HEAD2" 0 0
 ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
 expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
@@ -2468,10 +2472,12 @@ s54_full() {
       -u BIONIC_LOAD_NOW_FILE BIONIC_GATE_DIR="$TMPROOT/s54-gate" BIONIC_GATE_POLL=0.1 \
       BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
       BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
-      bash tests/run.sh ) > "$S54_REC/$1" 2>&1
+      bash tests/run.sh ) > "$TMPROOT/s54-run.out" 2>&1
+  local rc=$?
   # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it,
-  # so the floor's one grammar (its first head= line, its last rc= line) reads the run.
-  printf 'rc=%s\n' "$?" >> "$S54_REC/$1"
+  # so the floor's one grammar (its first head= line, its last rc= line) reads the run. THE RUN IS RECORDED (wave-37 T4;
+  # D7): tests/lib/floor-fixture.sh writes the log, the runner's own output as its body, and the run line beside it.
+  floor_fixture "$P54" "$S54_REC/$1" "$(git -C "$S54_WT" rev-parse HEAD)" 0 "$rc" < "$TMPROOT/s54-run.out"
 }
 # s54_land <id> <path> <content> -> a task tree on wt/01-<id> commits one file and NO suite runs
 # in it (no stamp); the real land merges it. Leaves S54_LAND.
