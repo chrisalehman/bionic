@@ -404,8 +404,9 @@ iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 # THE SECOND ARGUMENT IS THE POKER'S OWN ADDITION (T9, REQ-9), carried here so the two
 # copies stay code-identical (tests/cross-gate-agreement.test.sh §O) — this file never
 # calls clean() with one, since none of its own values are the list-valued fields
-# (`suites_allowed=`, `files=`, `lands_on=`) the poker's `adopt_write_row` exempts from the cut. Every
-# call in THIS file stays on the `*)` branch below, cut at 400 exactly as before.
+# (`ROSTER_LIST_FIELDS`, payload/scripts/lib/roster.sh, named once: wave-37 T7, D11) the poker's
+# `adopt_write_row` exempts from the cut. Every call in THIS file stays on the cut branch below,
+# at 400 exactly as before.
 #
 # THE `re_executes` ARM IS CARRIED THE SAME WAY (T4, REQ-7/D4). The roster stores the
 # declared runs percent-encoded — `payload/scripts/lib/roster.sh` owns that encoding and
@@ -420,11 +421,14 @@ clean() {  # <value>
   while :; do case "$out" in *"  "*) out="${out//  / }" ;; *) break ;; esac; done
   out="${out# }"; out="${out% }"
   case "${2:-}" in
-    suites_allowed|files|lands_on) printf '%s' "$out" ;;
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
-    *) printf '%s' "${out:0:400}" ;;
+    *)
+      case " $ROSTER_LIST_FIELDS " in
+        *" ${2:-} "*) printf '%s' "$out" ;;
+        *) printf '%s' "${out:0:400}" ;;
+      esac ;;
   esac
 }
 

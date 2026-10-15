@@ -5695,5 +5695,185 @@ expect_eq "FIXED-8b …and units_born reads the same two" "T7 T8" "$(fx_born)"
 POKE_BOUND="$FX_BOUND_WAS"
 if [ "$FX_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$FX_CCD_WAS"; fi
 
+# ============================================================
+section "§BRIEF (the row artifact) §ARTIFACT: brief and task-set read one rule for a row's artifact — the Tasks artifact cell, the ledger cell, the Files entry named for the row, then the first record entry; a review row's suites cell renders; task-set files= may not strand a record row without its artifact (wave-37 T6; REQ-7 AC-7.1, AC-7.2, AC-7.3; D10)"
+# ============================================================
+#
+# fails-when: brief renders the FIRST record entry of Files when an entry named for the row (<row>.md or <row>-*)
+# stands later in the cell; an `artifact` Tasks cell loses to Files or to a ledger cell; a review row's `suites`
+# cell is not the Suites line, or a second brief after a ## Judgment edit moves it; task-set files= strips a record
+# row of the entry the brief reads as its artifact while the row has no `artifact` cell, or refuses when the cell
+# stands, or changes a byte of the plan when it refuses.
+#
+# THE EXPECTED VALUES ARE THIS FIXTURE'S OWN TEXT. The fixture's Tasks header carries suites, lands-on and artifact.
+# The rule: the row's `artifact` cell (non-empty), else the ledger's cell, else the Files entry whose basename is
+# <row>.md or starts <row>-, else the first record entry, else the task's own record, else the reader default.
+RAR="$(make_repo row-artifact)"; ( cd "$RAR" && git commit -q --allow-empty -m init )
+git -C "$RAR" branch wave/01-fixture
+PAR="$(s42_plan "$RAR" 4)"
+AR_REC=".bionic/docs/record/wave-01-fixture"
+AR_TABLE="$TMPROOT/ar-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | — | — | — |\n'
+  printf '| T9 | 4 | build | the ninth piece | implementor | — | 30 | REQ-1 | %s/other.md, %s/T9-report.md | — | — | pending | — | — | — |\n' "$AR_REC" "$AR_REC"
+  printf '| T10 | 4 | build | the tenth piece | implementor | — | 30 | REQ-1 | hooks/t.sh, %s/T10-files.md | — | — | pending | — | — | %s/T10-chosen.md |\n' "$AR_REC" "$AR_REC"
+  printf '| T11 | 6 | review | the eleventh reading | critic | — | 20 | REQ-1 | — | — | — | pending | a.test.sh, b.test.sh | — | — |\n'
+  printf '| T12 | 4 | build | the twelfth piece | implementor | — | 20 | REQ-1 | hooks/t.sh, %s/T12-x.md | — | — | pending | — | — | — |\n' "$AR_REC"
+  printf '| T13 | 4 | build | the thirteenth piece | implementor | — | 20 | REQ-1 | hooks/t.sh, %s/T13-x.md | — | — | pending | — | — | %s/T13-kept.md |\n' "$AR_REC" "$AR_REC"
+  printf '| T14 | 4 | build | the fourteenth piece, no record at all | implementor | — | 20 | REQ-1 | hooks/t.sh | — | — | pending | — | — | — |\n'
+  printf '| T15 | 4 | build | the fifteenth piece, a first entry and a progress file | implementor | — | 20 | REQ-1 | %s/other.md, %s/T15.progress.md, %s/T15-body.md | — | — | pending | — | — | — |\n' "$AR_REC" "$AR_REC" "$AR_REC"
+  printf '\n'
+} > "$AR_TABLE"
+awk -v t="$AR_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PAR" > "$PAR.new"
+awk '{ print } /^\| T1 \| implementor \(w-T1\)/ { print "| T10 | implementor (w-T10) | 2026-10-11T00:00Z | 30 min | '"$AR_REC"'/T10-ledgered.md | — | batch 1 |" }' "$PAR.new" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PAR" && rm -f "$PAR.new"
+new_roster "$RAR"
+( cd "$RAR" && git add -f "$PAR" && git commit -qm "row-artifact fixture" ) >/dev/null 2>&1
+AR_BR="$RAR/$AR_REC/briefs"
+ar_field() { awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"; }
+ar_cell() {  # <row> <column number> -> that cell of the fixture plan's own text, trimmed
+  awk -F'|' -v id="$1" -v c="$2" '/^\| T[0-9]+ \|/ { i = $2; gsub(/[ \t]/, "", i); if (i == id) { v = $c; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit } }' "$PAR"
+}
+expect_eq "AR-0 precondition: the extractor reads T9's Files and T10's artifact cell from the fixture plan's own text" \
+  "$AR_REC/other.md, $AR_REC/T9-report.md|$AR_REC/T10-chosen.md" "$(ar_cell T9 10)|$(ar_cell T10 16)"
+
+poke "$RAR" brief T9
+expect_eq "AR-1 brief T9 exits 0" "0" "$RC"
+expect_eq "AR-1b the artifact is the Files entry named for the row, not the first record entry (Files lists other.md first)" \
+  "$AR_REC/T9-report.md" "$(ar_field "$AR_BR/T9.md" 'Expected artifact')"
+poke "$RAR" brief T10
+expect_eq "AR-2 an artifact cell wins over the ledger's cell and over a Files entry named for the row (positive: Row reads)" \
+  "T10|$AR_REC/T10-chosen.md" "$(ar_field "$AR_BR/T10.md" Row)|$(ar_field "$AR_BR/T10.md" 'Expected artifact')"
+poke "$RAR" brief T15
+expect_eq "AR-3 control: the Files entry named for the row skips a progress file that also begins with the row id" \
+  "$AR_REC/T15-body.md" "$(ar_field "$AR_BR/T15.md" 'Expected artifact')"
+poke "$RAR" brief T11
+expect_eq "AR-4 a review row's suites cell is its Suites line (positive: Row reads)" "T11|a.test.sh, b.test.sh" \
+  "$(ar_field "$AR_BR/T11.md" Row)|$(ar_field "$AR_BR/T11.md" Suites)"
+{ awk '/^## Judgment/ { exit } { print }' "$AR_BR/T11.md"; printf '## Judgment\n\nResearch to read: none\nRulings: none\n'; } > "$TMPROOT/ar-t11-judged.md"
+cp "$TMPROOT/ar-t11-judged.md" "$AR_BR/T11.md"
+poke "$RAR" brief T11
+expect_eq "AR-4b …and a second brief after a ## Judgment edit leaves that line, and the Lands-on, unchanged" \
+  "a.test.sh, b.test.sh|a.test.sh, b.test.sh" "$(ar_field "$AR_BR/T11.md" Suites)|$(ar_field "$AR_BR/T11.md" Lands-on)"
+expect_contains "AR-4c …and keeps the orchestrator's ## Judgment" "Rulings: none" "$(cat "$AR_BR/T11.md")"
+
+# ---------- task-set files= may not strand a record row without its artifact ----------
+ar_files() { awk -F'|' -v id="$1" '{ c = $2; gsub(/[ \t]/, "", c) } c == id { v = $10; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit }' "$PAR"; }
+( cd "$RAR" && git add -f "$PAR" && git commit -qm "ar snap" ) >/dev/null 2>&1
+s42_snap "$RAR" "$PAR"
+AR_WANT="task-set refused — Files leaves T9 with no artifact: name a record T9-<name>.md in Files or set artifact=<path>"
+poke "$RAR" task-set T9 files="$AR_REC/other.md"
+s42_unchanged "AR-5 task-set T9 files= naming no entry for T9, T9 having no artifact cell" 1 "$PAR"
+expect_contains "AR-5b …prints the refusal line, verbatim" "$AR_WANT" "$OUT"
+poke "$RAR" task-set T12 files="hooks/t.sh"
+s42_unchanged "AR-6 a build row whose record entry the new list drops, with no artifact cell" 1 "$PAR"
+expect_contains "AR-6b …names the row in the same line" "task-set refused — Files leaves T12 with no artifact: name a record T12-<name>.md in Files or set artifact=<path>" "$OUT"
+poke "$RAR" task-set T13 files="$AR_REC/other.md"
+expect_eq "AR-7 the same list on a row that carries an artifact cell is accepted (exit 0)" "0" "$RC"
+expect_eq "AR-7b …and the cell is the list" "$AR_REC/other.md" "$(ar_files T13)"
+poke "$RAR" task-set T12 files="hooks/t.sh, $AR_REC/T12-y.md"
+expect_eq "AR-8 control: a list that still names an entry for the row is accepted (exit 0)" "0" "$RC"
+expect_eq "AR-8b …and the cell is the list" "hooks/t.sh, $AR_REC/T12-y.md" "$(ar_files T12)"
+poke "$RAR" task-set T14 files="hooks/u.sh"
+expect_eq "AR-9 control: a build row that never named a record is not held to one (exit 0)" "0|hooks/u.sh" "$RC|$(ar_files T14)"
+poke "$RAR" task-set T12 files="hooks/t.sh" artifact="$AR_REC/T12-set.md"
+expect_eq "AR-10 an artifact= set in the same call keeps the row's artifact (exit 0)" "0" "$RC"
+expect_eq "AR-10b …and the row's artifact cell is what the call set" "$AR_REC/T12-set.md" "$(ar_cell T12 16)"
+
+
+
+section "§LIST: the list fields are a set named once, and adopt carries every one of them byte for byte (wave-37 T7; REQ-8 AC-8.1, AC-8.2; D11)"
+# ============================================================
+#
+# THE DEFECT (research-false-tellers §E). `clean()` cut every field at 400 characters but the
+# three it named (`suites_allowed|files|lands_on`) and the decoded `re_executes`, and
+# `adopt_write_row` took its list fields as positional operands: `questions=` had no operand at all
+# (an adopted reader lost the very field that made it a reader of a question) and `claims=` was
+# written empty. Each of those is the same slip, a list field the name list did not know. The cure
+# is a shape: `ROSTER_LIST_FIELDS` in payload/scripts/lib/roster.sh, named once, and the census arm
+# below that goes red when a `roster_row` key is classified in neither that set nor
+# `ROSTER_SCALAR_FIELDS`.
+#
+# THE SET IS READ, NEVER RETYPED. tests/lib/roster-row.sh sources roster.sh, so the shell already
+# holds the constants; an empty read is itself a red row (LIST-0), not a loop over nothing.
+LS_LIST="${ROSTER_LIST_FIELDS:-}"
+LS_SCALAR="${ROSTER_SCALAR_FIELDS:-}"
+expect_nonempty "LIST-0 the list-field set is defined in roster.sh (read, not retyped)" "$LS_LIST"
+expect_nonempty "LIST-0b …and so is the scalar set" "$LS_SCALAR"
+expect_eq "LIST-0c …and the list set names questions and claims beside the four it always held" \
+  "claims files lands_on questions re_executes suites_allowed" \
+  "$(printf '%s\n' $LS_LIST | sort | tr '\n' ' ' | sed 's/ $//')"
+
+# One value per list field, over 400 characters, made of real tokens of that field's own shape.
+ls_value() {  # <field> -> a value of that field's shape, over 400 characters
+  local f="$1" tok sep=","
+  case "$f" in
+    files)          tok="hooks/session-poker.sh" ;;
+    suites_allowed) tok="session-poker-4.test.sh"; sep=" " ;;
+    lands_on)       tok="cross-gate-agreement.test.sh" ;;
+    re_executes)    tok="grep -E 'alpha|beta|gamma' tests/run.sh"; sep="; " ;;
+    questions)      tok="evidence,adversarial,structure" ;;
+    claims)         tok="bash tests/run.sh --only session-poker-4.test.sh"; sep="; " ;;
+    *)              tok="${f}-token" ;;
+  esac
+  local out="$tok"
+  while [ "${#out}" -le 450 ]; do out="${out}${sep}${tok}"; done
+  printf '%s' "$out"
+}
+
+RLS="$(make_repo list-fields)"; new_roster "$RLS"
+LS_PRED="77777777-aaaa-4bbb-8ccc-000000000037"
+LS_SRC_ROSTER="$(roster_of "$RLS" "$LS_PRED")"
+[ -f "$LS_SRC_ROSTER" ] || roster_header > "$LS_SRC_ROSTER"
+LS_ARGS=()
+for _f in $LS_LIST; do LS_ARGS+=("$_f=$(ls_value "$_f")"); done
+roster_row_fixture session="$LS_PRED" status=identified name=ls-wide agent_id=als-wide-3700000000000001 \
+  subagent_type=bionic:critic launched_at="$(iso_ago 60)" deliverable="$RLS/.bionic/docs/record/ls-wide.md" \
+  duration="45 minutes" cadence="10 minutes" suites_source=declared ${LS_ARGS[@]+"${LS_ARGS[@]}"} >> "$LS_SRC_ROSTER"
+LS_SRC_ROW="$(/usr/bin/grep -F '|name=ls-wide|' "$LS_SRC_ROSTER" | tail -1)"
+poke "$RLS" adopt
+LS_ADOPTED="$(/usr/bin/grep -F '|name=ls-wide|' "$(roster_of "$RLS")" | tail -1)"
+expect_contains "LIST-1 precondition: the predecessor's row is adopted (not vacuous)" "|adopted_from=$LS_PRED|" "$LS_ADOPTED"
+for _f in $LS_LIST; do
+  _src="$(s30_field "$LS_SRC_ROW" "$_f")"
+  expect_eq "LIST-1a precondition: the source row's $_f= is over 400 characters" "yes" \
+    "$([ "${#_src}" -gt 400 ] && echo yes || echo no)"
+  expect_eq "LIST-1b the adopted row's $_f= is the source's, byte for byte (AC-8.1)" \
+    "${#_src}|$_src" "$(s30_field "$LS_ADOPTED" "$_f" | awk '{ printf "%d|%s", length($0), $0 }')"
+done
+
+# ---------- the census arm (AC-8.2): every roster_row key is a list field or a scalar one ----------
+ls_keys() {  # <roster.sh> -> the keys of roster_row's key-to-variable `case`, one per line
+  awk '/^roster_row\(\) \{/ { f = 1 }
+       f && /^    case "\$key" in$/ { n++; next }
+       f && n == 2 && /^    esac$/ { exit }
+       f && n == 2 && match($0, /^      [a-z_]+\)/) { print substr($0, 7, RLENGTH - 7) }' "$1"
+}
+ls_unclassified() {  # <roster.sh> -> the keys that sit in neither set
+  local k
+  while IFS= read -r k; do
+    case " $LS_LIST $LS_SCALAR " in *" $k "*) ;; *) printf '%s\n' "$k" ;; esac
+  done < <(ls_keys "$1")
+}
+LS_ROSTER_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
+LS_KEYS="$(ls_keys "$LS_ROSTER_SH")"
+expect_eq "LIST-2 the census extractor reads roster_row's keys: both ends of the case and the six list fields are in it" \
+  "status questions claims re_executes files suites_allowed lands_on" \
+  "$(for _k in status questions claims re_executes files suites_allowed lands_on; do printf '%s\n' "$LS_KEYS" | /usr/bin/grep -qx "$_k" && printf '%s ' "$_k"; done | sed 's/ $//')"
+expect_eq "LIST-2a every roster_row key is classified as a list field or a scalar one" "" \
+  "$(ls_unclassified "$LS_ROSTER_SH" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "LIST-2b …and the two sets together hold exactly the keys of the case: no stale name, none twice" \
+  "$(printf '%s\n' "$LS_KEYS" | sort | tr '\n' ' ')" \
+  "$(printf '%s\n' $LS_LIST $LS_SCALAR | sort | tr '\n' ' ')"
+LS_PLANT="$TMPROOT/ls-planted-roster.sh"
+awk '{ print } /^      status\)        status="\$val" ;;$/ { print "      zzplanted)     zzplanted=\"$val\" ;;" }' "$LS_ROSTER_SH" > "$LS_PLANT"
+expect_eq "LIST-2c the planted copy differs from roster.sh by exactly the one planted arm" "1" \
+  "$(diff "$LS_ROSTER_SH" "$LS_PLANT" | /usr/bin/grep -c '^>')"
+expect_eq "LIST-2d a planted key in neither set goes red: it is the one the census reports" "zzplanted" \
+  "$(ls_unclassified "$LS_PLANT" | tr '\n' ' ' | sed 's/ $//')"
+rm -f "$LS_PLANT"
 
 finish

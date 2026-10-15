@@ -9689,8 +9689,12 @@ expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
 # LIST-valued fields it exempts from the 400-char cut (`suites_allowed=`, `files=`) survive
 # whole; the call site's literal text changed, the property this pin checks (one group,
 # one call) did not.
-expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
-  "$(grep -c 'suites_allowed=\$(clean "\$sallow" suites_allowed)' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+# SPELLING UPDATED AGAIN (wave-37 T7, D11): the list fields are the set `ROSTER_LIST_FIELDS` names
+# once, and `adopt_write_row` passes each one the source row carries by name through the same
+# `clean` in one loop; the group rule (a stated group lacking `files=` or `suites_allowed=` gets the
+# empty member, and `suites_source=` goes with them) is two lines beside it. Both are counted.
+expect_eq "S13.4 …and session-poker builds its three as one group: every list field through clean by name, the group's missing members empty" "1 1 1" \
+  "$(grep -c 'LIST_FIELDS_ARGS+=("\$lf=\$(clean "\$(line_field "\$src" "\$lf")" "\$lf")")' "$BIONIC_HOOKS_DIR/session-poker.sh") $(grep -c 'row_has_key "\$src" suites_allowed || LIST_FIELDS_ARGS+=("suites_allowed=")' "$BIONIC_HOOKS_DIR/session-poker.sh") $(grep -c 'LIST_FIELDS_ARGS+=("suites_source=\$(clean "\$ssrc")")' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 
 # MUTATION (§N-shaped, :3572-3588) — the shape-aware grep must actually REJECT a planted
 # assembler, not merely fail to see one that was never there. TWO copies of

@@ -293,6 +293,25 @@ roster_pipe_unescape() {  # <stored value> -> the value as its author typed it
   printf '%s' "${v//\%25/%}"
 }
 
+# ---------- THE LIST FIELDS ARE A SET, NAMED ONCE (wave-37 T7, REQ-8, D11) -------------------------
+#
+# A LIST FIELD holds a list or an encoded command, and a cut inside one drops entries off its end:
+# a budget the wall never agreed to (`suites_allowed`), a landing set short of its suites
+# (`lands_on`), a declared run nothing can ever equal (`re_executes`). The invariant is the same for
+# all six: never cut, never dropped, carried byte for byte when a successor adopts the row.
+#
+# `clean()` in hooks/session-poker.sh and in hooks/session-sweeper.sh tests membership in this set
+# (the two copies stay code for code, tests/cross-gate-agreement.test.sh §O), and `adopt_write_row`
+# lifts every one of these off the source row by key. Before this set each of them held its own
+# name list: `clean()` cut `questions=` and `claims=` at 400 characters, and `adopt_write_row` took
+# `questions=` from no operand at all, so an adopted reader lost the field that made it a reader.
+#
+# ROSTER_SCALAR_FIELDS is every other key `roster_row` takes: prose, a path, an id, a word, a time.
+# tests/session-poker-4.test.sh §LIST reads the `case "$key"` of `roster_row` below and goes red on
+# a key in neither set, so a new field is classified the day it is added.
+ROSTER_LIST_FIELDS="files suites_allowed lands_on re_executes questions claims"
+ROSTER_SCALAR_FIELDS="status session name agent_id launched_at subagent_type model deliverable source duration progress cadence absent waiver suites_source teammate_id adopted_from amended extended held done reason tool_use_id plan lands_red red_evidence pushed row landed landed_at run_pid run_log run_head run_cmd run_started_at run_rc run_ended_at"
+
 roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or a bare word
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
   local model="" deliverable="" source="" duration="" progress="" claims=""

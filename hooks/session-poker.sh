@@ -1302,8 +1302,9 @@ clean() {  # <value> [<field name>]
   # THE CUT IS PER-FIELD, NOT UNIVERSAL (REQ-9, carry-over P2). Every caller still gets
   # control characters and `|` folded to spaces — that half of this function is unchanged
   # and applies with no exception. What used to be unconditional is the trailing
-  # 400-character cut: `suites_allowed=`, `files=` and `lands_on=` are LIST-valued fields (a space- or
-  # comma-joined set, S13's suite-allowance wall and the brief's declared budget), and a
+  # 400-character cut: the LIST-valued fields (`ROSTER_LIST_FIELDS`, payload/scripts/lib/roster.sh,
+  # named once: wave-37 T7, D11, which added `questions=` and `claims=` to the four it used to name
+  # here) are space- or comma-joined sets (S13's suite-allowance wall and the brief's declared budget), and a
   # dispatch touching enough files or naming enough suites overflows 400 characters on a
   # perfectly ordinary brief — the cut then silently drops suites off the end, which is a
   # budget the wall never agreed to and the operator never asked for. Every OTHER field
@@ -1323,11 +1324,14 @@ clean() {  # <value> [<field name>]
   # characters is a budget entry nothing can ever equal — and because a cut landing inside
   # an escape would decode into garbage.
   case "${2:-}" in
-    suites_allowed|files|lands_on) printf '%s' "$out" ;;
     re_executes)
       out="${out//\%7C/|}"
       printf '%s' "${out//\%25/%}" ;;
-    *) printf '%s' "${out:0:400}" ;;
+    *)
+      case " $ROSTER_LIST_FIELDS " in
+        *" ${2:-} "*) printf '%s' "$out" ;;
+        *) printf '%s' "${out:0:400}" ;;
+      esac ;;
   esac
 }
 
@@ -3020,12 +3024,12 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes|done|lands_on|lands_red|red_evidence|row
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|suites_source|done|lands_red|red_evidence|row|<source row: the merged list fields, row-shaped>
   # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
   # stands — no session filter, because every row on it carries the predecessor's own id.
   # Handed to awk through the environment rather than `-v`, which would read a backslash in
   # a name as an escape.
-  AF_OPEN="$(roster_open_names "$1" "$2")" awk '
+  AF_OPEN="$(roster_open_names "$1" "$2")" AF_LISTS="$ROSTER_LIST_FIELDS" AF_SCHEMA="roster-state/${ROSTER_SCHEMA_VERSION}" awk '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
       for (i = 1; i <= n; i++) {
@@ -3039,6 +3043,7 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
     BEGIN {
       no = split(ENVIRON["AF_OPEN"], ol, "\n")
       for (i = 1; i <= no; i++) if (ol[i] != "") isopen[ol[i]] = 1
+      nl = split(ENVIRON["AF_LISTS"], lf, " ")
     }
     /^roster-state\/v1\|/ {
       n = kv($0, "name"); if (n == "") next
@@ -3059,27 +3064,22 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # before it ever asks about a deliverable, so an empty copy verdicted as an unmet
       # SILENT row instead.
       v = kv($0, "waiver");        if (v != "") waiv[n]   = v
-      # THE THREE INSTRUMENT FIELDS (wave-01 S13, spec AC-20), carried forward exactly as
-      # the contract fields above are. They are what the writer-side budget guard reads:
-      # a resumed agent whose adopted row lost `suites_allowed=` would come out of a
-      # /clear with no budget on it, and the wall that refuses an off-budget suite would
-      # go quiet for exactly the agents a clear leaves running longest.
-      v = kv($0, "files");          if (v != "") files[n]  = v
-      v = kv($0, "suites_allowed"); if (v != "") sallow[n] = v
+      # THE LIST FIELDS (wave-37 T7, D11; was the three instrument fields wave-01 S13 named, then the
+      # declared runs and the landing set one at a time), carried forward as the contract fields above
+      # are: the merged value of each field of the set the roster library names once, in
+      # `ROSTER_LIST_FIELDS`, handed in through the environment so this program holds no copy of it.
+      # They are what the writer-side budget guard reads: a resumed agent whose adopted row lost
+      # `suites_allowed=` would come out of a /clear with no budget on it, and the wall that refuses
+      # an off-budget suite would go quiet for exactly the agents a clear leaves running longest;
+      # one that lost `questions=` is no longer a reader of anything. `suites_source` is the one
+      # scalar that travels beside them.
+      for (li = 1; li <= nl; li++) { v = kv($0, lf[li]); if (v != "") lv[n, lf[li]] = v }
       v = kv($0, "suites_source");  if (v != "") ssrc[n]   = v
-      # THE DECLARED RUNS (REQ-1 AC-1.1, this wave). A trailing optional field carried
-      # forward exactly as the three instrument fields above are, and for the same reason:
-      # it is a BUDGET declaration, and the writer-side guard reads it off the row for the
-      # agent own id. A resumed writer whose adopted row lost it comes out of a clear with
-      # no budget on it. An apostrophe cannot appear in this comment: the awk program is one
-      # single-quoted argument.
-      v = kv($0, "re_executes");    if (v != "") rex[n]    = v
       # THE DONE MARKER (wave-24 T9, D3): the same contract, so its completion signal too.
       v = kv($0, "done");           if (v != "") dmark[n]  = v
-      # THE LANDING KEYS (wave-28 T68; A-orch-216): `lands_on=`, `lands_red=`, `red_evidence=` and `row=` are what the
+      # THE LANDING KEYS (wave-28 T68; A-orch-216): `lands_on=` (a list field, above), `lands_red=`, `red_evidence=` and `row=` are what the
       # dispatch wall wrote from the brief, and what `ready` reads the suites and the declared debt from. Carried
       # forward as the instrument fields are, or an adopted row would be proved on its budget with its debt dropped.
-      v = kv($0, "lands_on");       if (v != "") lon[n]    = v
       v = kv($0, "lands_red");      if (v != "") lred[n]   = v
       v = kv($0, "red_evidence");   if (v != "") revid[n]  = v
       v = kv($0, "row");            if (v != "") lrow[n]   = v
@@ -3100,10 +3100,15 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       for (i = 1; i <= cnt; i++) {
         n = order[i]
         if (!(n in isopen)) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        # THE SOURCE ROW, LAST: row-shaped, so the caller reads a list field off it by key and the
+        # tail of its `read` takes the whole of it, `|` and all. A key is there only where the
+        # predecessor stated a value.
+        src = ENVIRON["AF_SCHEMA"]
+        for (li = 1; li <= nl; li++) if ((n, lf[li]) in lv) src = src "|" lf[li] "=" lv[n, lf[li]]
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
-               files[n], sallow[n], ssrc[n], rex[n], dmark[n], lon[n], lred[n], revid[n], lrow[n]
+               ssrc[n], dmark[n], lred[n], revid[n], lrow[n], src
       }
     }
   ' "$1" 2>/dev/null
@@ -3306,14 +3311,15 @@ EOF
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> [<done> [<lands_on> <lands_red> <red_evidence> <row>]] -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> [<source row> [<suites_source> [<done> [<lands_red> <red_evidence> <row>]]]] -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
-  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}" dmark="${18:-}"
-  local lon="${19:-}" lred="${20:-}" revid="${21:-}" lrow="${22:-}"
+  local src="${14:-}" ssrc="${15:-}" dmark="${16:-}"
+  local lred="${17:-}" revid="${18:-}" lrow="${19:-}"
   local -a RR_ARGS
   local ROW=""
-  local -a INSTRUMENT_FIELDS
+  local -a LIST_FIELDS_ARGS
+  local lf
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -3356,23 +3362,39 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # before any verb decides anything — and that is a guard in another file for another
   # reason, not this writer's own.
   #
-  # THE THREE INSTRUMENT FIELDS TRAVEL AS A GROUP, AND ONLY WHEN THE SOURCE ROW HAD THEM
-  # (wave-01 S13, spec AC-20). `roster_row` emits them present-if-PASSED, and the
-  # distinction is load-bearing at the writer-side guard: a row with `suites_allowed=`
-  # empty stated a budget that came out empty, while a row with no such key at all was
-  # written before the wall existed. Adopting the second kind must not manufacture the
-  # first. All three go or none do — an empty member of a stated group is itself a
-  # statement, and splitting them would let a resumed row claim a source for a set it
-  # does not carry.
-  INSTRUMENT_FIELDS=()
-  if [ -n "$files" ] || [ -n "$sallow" ] || [ -n "$ssrc" ]; then
-    INSTRUMENT_FIELDS=("files=$(clean "$files" files)" \
-                       "suites_allowed=$(clean "$sallow" suites_allowed)" \
-                       "suites_source=$(clean "$ssrc")")
+  # THE LIST FIELDS ARE READ OFF THE SOURCE ROW BY KEY, EVERY ONE OF THE SET (wave-37 T7, REQ-8,
+  # D11). `ROSTER_LIST_FIELDS` (payload/scripts/lib/roster.sh) names them once, and `<source row>`
+  # is the row-shaped string `adopt_fold` built from the predecessor's roster: the merged value of
+  # each list field the name ever carried, a key present only where the predecessor stated one.
+  # Each field present is passed whole, so `questions=` and `claims=` travel as `files=` does,
+  # byte for byte, where they used to be dropped and written empty. The field name goes to
+  # `clean` so the cut is skipped for the set and `re_executes=` is decoded (see `clean`): the
+  # value reaches `roster_row` as the brief spelled it and is encoded there, once.
+  #
+  # THREE OF THEM TRAVEL AS A GROUP BESIDE `suites_source=`, AND ONLY WHEN THE SOURCE ROW HAD THE
+  # GROUP (wave-01 S13, spec AC-20). `roster_row` emits `files=`, `suites_allowed=` and
+  # `suites_source=` present-if-PASSED, and the distinction is load-bearing at the writer-side
+  # guard: a row with `suites_allowed=` empty stated a budget that came out empty, while a row
+  # with no such key at all was written before the wall existed. Adopting the second kind must
+  # not manufacture the first. All three go or none do — an empty member of a stated group is
+  # itself a statement, and splitting them would let a resumed row claim a source for a set it
+  # does not carry. The group rule is unchanged by the set above: it adds the empty member a
+  # stated group is missing, and nothing else.
+  LIST_FIELDS_ARGS=()
+  for lf in $ROSTER_LIST_FIELDS; do
+    if row_has_key "$src" "$lf"; then
+      LIST_FIELDS_ARGS+=("$lf=$(clean "$(line_field "$src" "$lf")" "$lf")")
+    fi
+  done
+  if [ -n "$ssrc" ] || row_has_key "$src" files || row_has_key "$src" suites_allowed; then
+    row_has_key "$src" files || LIST_FIELDS_ARGS+=("files=")
+    row_has_key "$src" suites_allowed || LIST_FIELDS_ARGS+=("suites_allowed=")
+    LIST_FIELDS_ARGS+=("suites_source=$(clean "$ssrc")")
   fi
   # THE ROW IS BUILT BY `roster_row` (payload/scripts/lib/roster.sh), not by a format string
-  # here (spec AC-25, ledger D3). The eleven fields this writer leaves EMPTY are still named
-  # — `model=`, `duration=`, `claims=`, `absent=` and the rest — because an omitted key and
+  # here (spec AC-25, ledger D3). The fields this writer leaves EMPTY are still named
+  # — `model=`, `duration=`, `absent=` and the rest; `claims=` is the library's own empty unless
+  # the source row stated one — because an omitted key and
   # an empty one are different rows to a by-key reader, and this writer has always emitted
   # both of the fields no other writer does (`teammate_id=`, `adopted_from=`), empty address
   # included. `clean()` stays here: it is this file's cap on a value, while the row's SHAPE
@@ -3389,45 +3411,27 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     source=adopted
     duration=
     "progress=$(clean "$prog")"
-    claims=
     "cadence=$(clean "$cad")"
     absent=
     "waiver=$(clean "$waiver")"
-    ${INSTRUMENT_FIELDS[@]+"${INSTRUMENT_FIELDS[@]}"}
+    ${LIST_FIELDS_ARGS[@]+"${LIST_FIELDS_ARGS[@]}"}
     ${dmark:+"done=$(clean "$dmark")"}
     "teammate_id=$(clean "$addr")"
     "adopted_from=$(clean "$osid")"
     tool_use_id=
     "plan=$(clean "$plan")"
-    ${lon:+"lands_on=$(clean "$lon" lands_on)"}
     ${lred:+"lands_red=$(clean "$lred")"}
     ${revid:+"red_evidence=$(clean "$revid")"}
     ${lrow:+"row=$(clean "$lrow")"}
   )
-  # THE DECLARED RUNS, CARRIED BY NAME (REQ-1 AC-1.1's adopt half). `re_executes=` is a
-  # trailing optional field of the row, and the row's SHAPE is `roster_row`'s — so it is
-  # passed there first and appended here only if that writer does not know the key yet.
-  # `roster_row` returns 2 on an unknown key rather than emitting a row, and dropping the
-  # field on that answer would hand a resumed writer an empty budget: the exact failure the
-  # three instrument fields are carried forward to prevent. The fallback is a TRAILING
-  # append, which is where the field lives either way, and every reader in the fleet reads a
-  # row BY KEY — so the two spellings differ in position and in nothing a reader sees.
-  #
-  # THE FIELD NAME IS PASSED (T4, REQ-7/D4) so `clean` decodes the stored form and skips
-  # the 400-character cut — see its own comment. The value below is therefore the command
-  # as the brief spelled it, and `roster_row` encodes it again on the way out. The fallback
-  # branch bypasses that writer, so it encodes the value itself rather than appending a raw
-  # pipe that would forge a segment on the line it is appending to.
-  if [ -n "$rex" ]; then
-    local _rex_plain; _rex_plain="$(clean "$rex" re_executes)"
-    ROW="$(roster_row "${RR_ARGS[@]}" "re_executes=$_rex_plain")" || ROW=""
-    if [ -z "$ROW" ]; then
-      ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
-      ROW="${ROW}|re_executes=$(roster_pipe_escape "$_rex_plain")"
-    fi
-  else
-    ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
-  fi
+  # THE DECLARED RUNS RIDE THE SAME LOOP (REQ-1 AC-1.1's adopt half; wave-37 T7, D11).
+  # `re_executes=` is one of the list fields, so the loop above passes it with its name and
+  # `clean` decodes the stored form: the value reaches `roster_row` as the brief spelled it,
+  # and `roster_row` encodes it again on the way out, so the row this writer appends holds the
+  # predecessor's bytes. There is one call to the builder and no fallback append: a key the
+  # builder did not know would refuse the whole row here, and `roster_row` has taken every key
+  # of the set (tests/session-poker-4.test.sh §LIST pins it).
+  ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
   [ -n "$ROW" ] || return 1
   printf '%s\n' "$ROW" >> "$f" 2>/dev/null || return 1
   return 0
@@ -3916,7 +3920,7 @@ PFC_OUT=""; PFC_ART=""
 poker_files_cell() {
   local id="$1" kind="$2" agent="$3" files="$4" repo="$5" plan="$6" fact cell_facts=""
   PFC_OUT="$files"; PFC_ART=""
-  if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact)" ]; then
+  if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact "$id")" ]; then
     PFC_ART="$(docs_root "$repo")/record/$(basename "$plan" .plan.md)/$id.md"
     case "$PFC_ART" in "$repo"/*) PFC_ART="${PFC_ART#"$repo"/}" ;; esac
     case "$files" in ''|'—'|'-') PFC_OUT="$PFC_ART" ;; *) PFC_OUT="$files, $PFC_ART" ;; esac
@@ -4058,18 +4062,24 @@ poker_brief_suites() {
     print out }'
 }
 
-# poker_brief_record_entry <Files cell> <artifact|progress> -> the first entry under record/ that is the row's
-# artifact (not a progress file, not assumptions.md) or its progress file (ends .progress.md); nothing when none.
+# poker_brief_record_entry <Files cell> <artifact|progress|named> <row id> -> an entry under record/ for the row; nothing
+# when none. THE ONE RULE FOR A ROW'S RECORD (wave-37 T6; REQ-7 AC-7.1, AC-7.2; D10), read by `brief` and judged by
+# `task-set files=`: `named` is the entry whose basename is <row>.md or starts <row>- (never a progress file);
+# `artifact` is the named entry, else the first entry that is neither a progress file nor assumptions.md; `progress`
+# is the first entry ending .progress.md.
 poker_brief_record_entry() {
-  printf '%s' "$1" | awk -F',' -v kind="$2" '{
+  printf '%s' "$1" | awk -F',' -v kind="$2" -v row="$3" '{
     for (i = 1; i <= NF; i++) {
       e = $i; gsub(/`/, "", e); sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e)
       if (e == "" || e ~ /[ \t]/ || index(e, "record/") == 0 || substr(e, length(e) - 2) != ".md") continue
       n = split(e, p, "/"); b = p[n]
       isprog = (length(b) > 12 && substr(b, length(b) - 11) == ".progress.md")
-      if (kind == "progress" ? isprog : (!isprog && b != "assumptions.md")) { print e; exit }
+      if (kind == "progress") { if (isprog) { print e; exit } continue }
+      if (isprog || b == "assumptions.md") continue
+      if (row != "" && (b == row ".md" || index(b, row "-") == 1)) { print e; hit = 1; exit }
+      if (fb == "") fb = e
     }
-  }'
+  } END { if (!hit && kind == "artifact" && fb != "") print fb }'
 }
 
 # poker_brief_task_record <task text> -> the first record path the text names (a token holding record/ and ending .md); nothing when none.
@@ -4080,19 +4090,16 @@ poker_brief_task_record() {
   }'
 }
 
-# poker_brief_index_suites <root> <at> <Files cell> -> the suites lib/anchors.sh `reads_index` names, at <at> (a commit,
-# or - for the files under <root>), for any file an entry of the cell covers (lib/units.sh `cell_covers`, the scheduler's
-# matcher): by file name, sorted, once each, comma-joined. Nothing when no suite reads such a file, or the library
-# cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE FILE-TO-SUITE FACT (wave-36 T27; REQ-6 AC-6.1; D12):
-# a suite reads a file its text names, a library of a hook it names, or a file its anchor names (T5's contract), and
-# the dispatch wall's Lands-on arm and the floor's cover rule ask the same index.
+# poker_brief_index_suites <root> <at> <Files cell> -> lib/anchors.sh `reads_suites`, comma-joined: the suites the reads
+# index names, at <at> (a commit, or - for the files under <root>), for any file an entry of the cell covers. Nothing
+# when no suite reads such a file, or the library cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE
+# READER (wave-37 T3; D4): the dispatch wall's Lands-on arm calls the same `reads_suites`, and the floor's cover rule
+# reads the same index.
 poker_brief_index_suites() {
-  declare -F reads_index >/dev/null 2>&1 \
+  declare -F reads_suites >/dev/null 2>&1 \
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
-  declare -F reads_index >/dev/null 2>&1 || return 0
-  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" "$(_units_files_awk)"'
-    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
-    | LC_ALL=C sort -u | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
+  declare -F reads_suites >/dev/null 2>&1 || return 0
+  reads_suites "$1" "$2" "$3" | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
 }
 
 # poker_reader_kind <kind> -> 0 for a reader row's kind (verify, test, review): its artifact is a record it writes.
@@ -6641,8 +6648,11 @@ ADOPT_READERS
       ADOPT_VERDICTS=""; ADOPT_VERDICTS_READ=no
 
       while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
-                            RFILES RSALLOW RSSRC RREX RDONE RLON RLRED RREVID RLROW; do
+                            RSSRC RDONE RLRED RREVID RLROW RSRC; do
         [ -n "$RNAME" ] || continue
+        # THE LIST FIELDS ARE READ OFF THE SOURCE ROW, the last column, by key (wave-37 T7, D11).
+        RSALLOW="$(line_field "$RSRC" suites_allowed)"
+        RREX="$(line_field "$RSRC" re_executes)"
 
         # ---- IS THIS ROW STILL SOMEBODY'S WORK? (REQ-9 AC-9.1/9.2; D10)
         #
@@ -6991,7 +7001,7 @@ ADOPT_READERS
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
-                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX" "$RDONE" "$RLON" "$RLRED" "$RREVID" "$RLROW"; then
+                   "$RSRC" "$RSSRC" "$RDONE" "$RLRED" "$RREVID" "$RLROW"; then
                 ROW_JOURNALLED=yes
                 # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
                 # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
@@ -8839,7 +8849,11 @@ EOF
     if [ "$VERB" = task-set ]; then
       PV_BAD=""
       for _pv_l in ${PV_COLS:-}; do
-        units_has_column "$PV_PLAN" "$_pv_l" || PV_BAD="${PV_BAD:+$PV_BAD, }$_pv_l"
+        # `artifact` is the row's record cell (wave-37 T6; D10): the refusal below names `artifact=<path>` as the remedy, so the
+        # header's own cell takes it, though the units control line lists only the contract columns.
+        units_has_column "$PV_PLAN" "$_pv_l" \
+          || { [ "$_pv_l" = artifact ] && pv_header_cells "$PV_PLAN" tasks | /usr/bin/grep -ix artifact >/dev/null; } \
+          || PV_BAD="${PV_BAD:+$PV_BAD, }$_pv_l"
       done
       if [ -n "$PV_BAD" ]; then
         die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $PV_BAD; the plan is unchanged."
@@ -8875,6 +8889,18 @@ EOF
             fi
             poker_files_cell "$PV_SET_ID" "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $3 }')" \
               "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $5 }')" "${_pv_a#*=}" "$PV_REPO" "$PV_PLAN" || exit $?
+            # A RECORD ROW KEEPS ITS ARTIFACT (wave-37 T6; REQ-7 AC-7.3; D10; A-T6-1): a row whose cell names an entry for
+            # it, or which carries an `artifact` cell, is not left with neither, by the one rule `brief` reads.
+            _pv_art="$(poker_brief_cell "$PV_PLAN" Tasks "$PV_SET_ID" artifact)" || _pv_art=""
+            _pv_had="$_pv_art"
+            for _pv_b in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+              case "$(printf '%s' "${_pv_b%%=*}" | tr '[:upper:]' '[:lower:]')" in artifact) _pv_art="${_pv_b#*=}" ;; esac
+            done
+            if { ! poker_brief_none "$_pv_had" || [ -n "$(poker_brief_record_entry "$(units_field "$_pv_row" Files)" named "$PV_SET_ID")" ]; } \
+               && poker_brief_none "$_pv_art" && [ -z "$(poker_brief_record_entry "$PFC_OUT" named "$PV_SET_ID")" ]; then
+              die "task-set refused — Files leaves $PV_SET_ID with no artifact: name a record $PV_SET_ID-<name>.md in Files or set artifact=<path>"
+              exit 1
+            fi
             _pv_a="${_pv_a%%=*}=$PFC_OUT"
           fi
           _pv_new="$_pv_new"$'\037'"$_pv_a"
@@ -9897,13 +9923,18 @@ $HO_AGENTS"; fi
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
     BRF_OUT="$BRF_RECDIR/briefs/$BRF_ID.md"
 
-    # THE ARTIFACT: the ledger's cell for the row, then Files, then the record the task names. One path or nothing.
+    # THE ARTIFACT (wave-37 T6; REQ-7 AC-7.1; D10): the row's own `artifact` Tasks cell, the ledger's cell for the
+    # row, the Files entry named for the row, the first record entry, then the record the task names. One path or nothing.
     BRF_ART=""
+    BRF_ACELL="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" artifact)" || BRF_ACELL=""
+    if ! poker_brief_none "$BRF_ACELL"; then
+      case "$BRF_ACELL" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_ACELL" ;; esac
+    fi
     BRF_LEDGER="$(poker_brief_cell "$PV_PLAN" "Dispatch ledger" "$BRF_ID" artifact)" || BRF_LEDGER=""
-    if ! poker_brief_none "$BRF_LEDGER"; then
+    if [ -z "$BRF_ART" ] && ! poker_brief_none "$BRF_LEDGER"; then
       case "$BRF_LEDGER" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_LEDGER" ;; esac
     fi
-    [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_record_entry "$BRF_FILES" artifact)"
+    [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_record_entry "$BRF_FILES" artifact "$BRF_ID")"
     [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_task_record "$BRF_TASK")"
     # A READER ROW'S ARTIFACT IS ITS RECORD (wave-35 T8; REQ-6 AC-6.1; D15): a verify, test or review row that
     # names none writes <record dir>/<row>.md, the progress artifact's convention, and its Files line carries it.
@@ -9952,7 +9983,7 @@ $HO_AGENTS"; fi
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
     BRF_LEFT=""
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
-    BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress)"
+    BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
     [ -n "$BRF_PROG" ] || BRF_PROG="$BRF_RECREL/$BRF_ID.progress.md"
     while IFS= read -r BRF_L; do
       case "$BRF_L" in

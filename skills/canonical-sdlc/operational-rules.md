@@ -31,10 +31,10 @@ The detail SKILL.md and `steps/*.md` compress, each section cited from the step 
 
 ### The `## Tasks` table
 
-A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch works from: ten required columns, the optional `worktree` and `base`, and an optional `reads` (below):
+A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch works from: ten required columns and the optional `worktree`, `base`, `reads`, `suites`, `lands-on` and `artifact` (below):
 
 ```
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads | suites | lands-on | artifact |
 ```
 
 - **`id`** — `T<n>`, matching `^T[0-9]+$`, the row's own key.
@@ -51,6 +51,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
   | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor, proof:review, head`, and `approval:release` when the plan carries a release row · close the integrate row's merge |
   | read row | a `review` row reading `live:head:<q>[+<q>]`, each `<q>` one of `evidence` · `adversarial` · `structure`, holds, ranges (the tick's `RANGE` line) and returns to pending per question; a bare `live:head` keeps one range. Under one review disposition the read row is `reads: approval:plan, head`, ready once the last build row lands (`steps/6.md`) |
 
+- **`suites`**, **`lands-on`**, **`artifact`** (optional) — the suites the row runs and lands on (each defaults to `Files`' `*.test.sh` entries) and its record: this cell, else the ledger's, else the `Files` entry named `<row>.md` or `<row>-*`, else the first record entry. `task-set files=` refuses a record row left with none.
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
 - **`Files`** — every path the row may create or edit (the dispatch budget's source). Two rows that write one file run side by side and reconcile on landing; an entry ending in `!` is unmergeable, and a second row that writes it waits for the first to land.
@@ -94,7 +95,7 @@ A design is several *views* of one change, and a design goes wrong less by a wro
 - **integration surfaces** — the contracts crossed: APIs, hooks, CLIs, file formats, events;
 - **deployment / runtime architecture** — where it runs, in what process, under what lifecycle.
 
-**The design names which views the change touches, and includes those.** A view excluded costs one clause — "no persistence: nothing is stored" — and that clause is the difference between a decision and an oversight. **Silent omission is the failure the menu exists to prevent**: a view in neither list is itself the finding. Padding with empty headings is its own failure; most work here touches application/component design and integration surfaces and excludes the rest in a clause apiece.
+**The design names which views the change touches, and includes those.** A view excluded costs one clause — "no persistence: nothing is stored" — and that clause is the difference between a decision and an oversight. **Silent omission is the failure the menu exists to prevent**: a view in neither list is itself the finding. Padding with empty headings is its own failure: exclude the rest in a clause apiece.
 
 ### The form menu
 
@@ -133,18 +134,18 @@ The load-bearing row of the section, and the only part later steps consume mecha
 - **One row per concept rendered at more than one surface.** A concept in one place has nothing to disagree with; the table is a duplication ledger, not an inventory.
 - **The owner is a place, not a layer or a role.** "the governing-skill hook" is an owner; "the backend" is not. With no file, function or named constant to name, the concept has no owner yet — write that down as the finding.
 - **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has three surfaces, and the doc is the one that drifts, because nothing runs it.
-- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the `SUPPORTED_SDLC_VERSION` pin in `tests/cross-gate-agreement.test.sh` §V: one constant, its renderings held against the gate as origin, with a mutation arm. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format (SVG made the diagrams' version greppable) or by naming it in the same test as the origin. `none — <why>` is a legitimate cell — prose against prose has no seam to test — but the reviewer will stop on it, so give the reason.
+- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the `SUPPORTED_SDLC_VERSION` pin in `tests/cross-gate-agreement.test.sh` §V: one constant, its renderings held against the gate as origin, with a mutation arm. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
 
 ### The Eval design table
 
 `## Eval design` sits beside `## Design` in a wave-or-epic spec, one row per acceptance criterion; SKILL.md carries its contract. How to fill one in:
 
 - **Approach is one line, and it is a design decision.** "Grep the rendered file for the six column headers" is an approach; "test it" is not. It names the seam the eval reaches through, which is why the table is authored at Step 2, once the architecture has decided what is observable.
-- **Eval type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on. The tier code travels into the plan's matrix.
+- **Eval type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on.
 - **Eval is `command → expected observation`,** both halves: a command alone is a thing you ran, an observation alone is a hope. The observation is what the terminal shows — `rc=2, stderr names AC-K2.3`, never `the wall works`.
 - **Fails when names a PLANTED DEFECT, singular and specific.** "the code is broken" fails the column; "the `fails-when:` line is deleted from one AC block" passes it, because a writer can make that mutation and watch the eval turn red, first, before the code.
 - **A criterion that admits no "Fails when" goes back to Step 1.** The defect is in the criterion's wording, and an eval rewritten around an unfalsifiable criterion buys a green that means nothing.
-- **One row per criterion, and the plan renders them.** Step 3 adds sequencing and the matrix's bookkeeping columns and authors no eval of its own.
+- **One row per criterion, and the plan renders them.** Step 3 adds sequencing and bookkeeping and authors no eval.
 - **The gate reads the rendered column.** From `current: 4` on, an AC block whose `fails-when:` is missing or empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN an eval, never the obligation to have designed one.
 
 ## Close-out report (Step 9)
@@ -170,13 +171,13 @@ SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-s
 
 **The debt the continuation carries.** Close-out carries every unburned item of the run's debt ledger into the continuation's `## Deferrals`, after the `deferred:` lines, one line each: `debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>`, merged once into a continuation that exists. A burned item is not carried. The next run's Step 1 runs `session-poker.sh debt adopt <newest continuation>` right after its card.
 
-**Archiving.** `archive-root:` (default `$HOME/bionic-archive`) and `archive-on-close:` (default `true`) in `.bionic/config.yaml` set where Step 9's `archive_run` moves a closed run, never `record:`, and whether it moves anything; the move is documented at its definition in `payload/scripts/lib/archive.sh`.
+**Archiving.** `archive-root:` (default `$HOME/bionic-archive`) and `archive-on-close:` (default `true`) in `.bionic/config.yaml` set where Step 9's `archive_run` moves a closed run, never `record:`, and whether it moves anything; see `payload/scripts/lib/archive.sh`.
 
-**The released version.** An optional plan frontmatter field, `release: <version>`, names what the run released: `close-out.sh` writes it into the `delivered:` line, the epic row's version cell and the continuation header; with none, no version is written and the epic cell reads `—`. The installed tool's version is never the release: it stays on `attested-by: close-out.sh <version>`.
+**The released version.** An optional plan frontmatter field, `release: <version>`, names what the run released: `close-out.sh` writes it into the `delivered:` line, the epic row's version cell and the continuation header; with none, no version is written and the epic cell reads `—`. The installed tool's version stays on `attested-by:`.
 
 ## Debt ledger
 
-Debt is paid by the next change that touches it, not by a user, so it is kept as a ledger and burned when touched. Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `severity.md`, rated by its kind and concept on the debt table of `payload/context/severity.md`, never by severity; it is flag-class in the derived result and writes no plan line.
+Debt is paid by the next change that touches it, not by a user, so it is kept as a ledger and burned when touched. Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
 
 **The file.** `<docs-root>/record/<run>/debt.md`, under the header:
 
@@ -200,9 +201,9 @@ one line per item, its last cell `—` while open and `burned <row>` once a row 
 
 ## The start join (`hooks/execution-recorder.sh`)
 
-An agent start carries its type and id, never its launch, so the start is joined to the one launch of its type the window leaves it (several are left to the launch call's return), and a hook is told nothing when a dispatch ends without spawning: a start whose own dispatch wrote no launch row, beside one launch that was denied or abandoned at its prompt, is joined to that dead launch (wave-27 T68, named and left for the next wave).
+An agent start carries its type and id, never its launch, so it is joined to the one launch of its type the window leaves it (several are left to the launch call's return). A hook is told nothing when a dispatch ends without spawning, so a start whose own dispatch wrote no launch row, beside one launch denied or abandoned at its prompt, is joined to that dead launch.
 
-## SDLC rulings (moved from the repo CLAUDE.md, wave-31)
+## SDLC rulings
 
 - **Deletion is not a task.** Deleting dead code the user has ruled on is a few-line commit by the
   orchestrator, not a dispatched task. Size the work before you pick the ceremony.
