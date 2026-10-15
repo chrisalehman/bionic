@@ -34,6 +34,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
@@ -494,6 +495,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
+  die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
@@ -1117,6 +1119,22 @@ $1"; shift ;;
         *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
+    ;;
+  # THE BASIS VERB (wave-37 T8; D8, REQ-4 AC-4.2). Two operands: the question the judge holds a range by, and
+  # the range `<a>..<b>` its `review <q> … uncovered <a>..<b>` line names. Read-only; the lines are
+  # `cover_basis`'s, the ones `cur7_judge` prints under that line. The shape of the range is the usage error (2);
+  # whether both ends are commits here is the verb's refusal (1).
+  cover)
+    { [ $# -eq 2 ] && [ -n "$1" ] && [ -n "$2" ]; } || usage "cover takes a question and a range: cover <evidence|adversarial|structure> <a>..<b>."
+    case "$1" in evidence|adversarial|structure) : ;; *) usage "cover: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a question; it is evidence, adversarial or structure." ;; esac
+    COV_Q="$1"; COV_A="${2%%..*}"; COV_B="${2#*..}"
+    case "$2" in
+      *..*) : ;;
+      *) usage "cover takes its range as <a>..<b>, two commits and nothing else." ;;
+    esac
+    case "$COV_A:$COV_B" in
+      :*|*:|-*|*:-*|*..*|*[[:space:]]*|*[[:cntrl:]]*) usage "cover takes its range as <a>..<b>, two commits and nothing else." ;;
+    esac
     ;;
   # THE RUN VERBS (wave-30 T12; D6, D7d). `wait` and `stop-run` take ONE operand: a roster row's name,
   # a run id (`run=` as the shim printed it), or a run's log path. `wait` takes `--for <seconds>`, a
@@ -4641,6 +4659,19 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
 # uncovered.
+# cover_basis <plan> <question> <a> <b> -> lib/proof.sh `facts_cover`'s lines for that range and question, with its rc
+# (wave-37 T8; D8, AC-4.1, AC-4.2). THE ONE CALL OF THE LIBRARY'S BASIS in this file, shared by what prints it under
+# a refused line (`cur7_judge`) and what prints it on ask (the `cover` verb), so the two cannot say different
+# things of one range. Never called from the tick, `sched_facts_state`, `live_judge` or any wall: a person asks.
+cover_basis() {
+  if ! { declare -F facts_cover >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F facts_cover >/dev/null 2>&1; then
+    printf 'cover: the proof record (lib/proof.sh) cannot be loaded from %s\n' "$BIONIC_LIB" >&2
+    return 2
+  fi
+  facts_cover "$1" "$3" "$4" "$2"
+}
+
 cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judges Step 8 too)
   local step="$1" wb out rc err
   if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -4671,7 +4702,24 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
     exit 1
   fi
   die "REFUSED — current: $step is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
-  printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
+  # THE BASIS UNDER THE LINE (wave-37 T8; D8, AC-4.1): a `review <q> … uncovered <a>..<b>` line is a judge's "no"
+  # with no why; under it go the `cover <sha> <basis>` lines for that range and question, and the line ends with
+  # the ask that reproduces them (the `cover` verb). The text above is the refusal's own and does not change.
+  local cv_line cv_k cv_q cv_rest cv_st cv_rng
+  while IFS= read -r cv_line; do
+    [ -n "$cv_line" ] || continue
+    IFS='	' read -r cv_k cv_q cv_rest cv_rest cv_st cv_rng <<COVER_LINE
+$cv_line
+COVER_LINE
+    case "$cv_k:$cv_st:$cv_rng" in
+      review:uncovered:?*..?*)
+        printf '%s · ask: session-poker.sh cover %s %s\n' "$cv_line" "$cv_q" "$cv_rng" >&2
+        cover_basis "$PV_PLAN" "$cv_q" "${cv_rng%%..*}" "${cv_rng##*..}" >&2 || : ;;
+      *) printf '%s\n' "$cv_line" >&2 ;;
+    esac
+  done <<COVER_JUDGED
+$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')
+COVER_JUDGED
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
 }
@@ -11420,6 +11468,22 @@ RC_TAGS
       say "floor-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add floor refuses this log; commit and run floor-run again."
     else
       say "floor-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add floor $FR_REL"
+    fi
+    exit 0
+    ;;
+
+  # THE BASIS, ON ASK (wave-37 T8; D8, REQ-4 AC-4.2). `cover <question> <a>..<b>` prints, on stdout, the
+  # `cover <sha> <basis>` lines `cover_basis` builds for that range and question, the ones `cur7_judge` prints under
+  # its `review <question> … uncovered <a>..<b>` line, and ends that line by asking for. It writes nothing and asks
+  # the judge nothing more: a range every commit of which holds prints no line, exit 0. A head that is no commit
+  # here, or a plan the library cannot read, is the library's sentence on stderr and exit 1. Never called from the
+  # tick or any wall.
+  cover)
+    plan_verb_open cover
+    COV_VERB_LINES="$(cover_basis "$PV_PLAN" "$COV_Q" "$COV_A" "$COV_B")"; COV_RC=$?
+    [ "$COV_RC" -ne 2 ] || exit 1
+    if [ -n "${COV_VERB_LINES}" ]; then
+      printf '%s\n' "$COV_VERB_LINES"
     fi
     exit 0
     ;;

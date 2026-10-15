@@ -3996,6 +3996,7 @@ expect_eq "SCV-9b …and that place is inside cover_basis" "cover_basis" \
 # The print is one line of the verb's arm; the mutant prints an empty line there and nothing else changes.
 SCV_MROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-cover-mut.XXXXXX")"; mkdir -p "$SCV_MROOT/hooks" "$SCV_MROOT/scripts"
 ln -s "$(cd "$SCV_LIB" && pwd -P)" "$SCV_MROOT/scripts/lib"
+for scv_h in "${BIONIC_HOOKS_DIR}"/*; do [ "${scv_h##*/}" = session-poker.sh ] || ln -s "$scv_h" "$SCV_MROOT/hooks/${scv_h##*/}"; done
 anchor file hooks/session-poker.sh '"$COV_VERB_LINES"' '""' "$SCV_MROOT/hooks/session-poker.sh"
 scv_verb_reads() {  # <poker> -> ok when the verb prints the refusal's cover line, else red
   scv_run "$1" cover "$SCV_Q" "$SCV_RANGE"
@@ -4004,9 +4005,10 @@ scv_verb_reads() {  # <poker> -> ok when the verb prints the refusal's cover lin
 expect_eq "SCV-10 the shipped verb reads green on the row the mutant is judged by" "ok" "$(scv_verb_reads "$POKER")"
 scv_run "$SCV_MROOT/hooks/session-poker.sh" current 7
 expect_contains "SCV-10b the mutant still runs, and its refusal still carries the cover line (facts_cover stands)" "cover ${SCV_C} owes" "$SCV_ERR"
-SCV_MV="$(scv_verb_reads "$SCV_MROOT/hooks/session-poker.sh")"
+scv_run "$SCV_MROOT/hooks/session-poker.sh" cover "$SCV_Q" "$SCV_RANGE"
 expect_eq "SCV-10c …its verb still exits 0" "0" "$SCV_RC"
-expect_eq "SCV-10d …and prints no cover line, so the row SCV-6 holds goes red" "red" "$SCV_MV"
+expect_absent "SCV-10d …and prints no cover line (beside SCV-6b, which reads the shipped verb's)" "cover ${SCV_C}" "$SCV_OUT"
+expect_eq "SCV-10e …so the row SCV-6 holds goes red" "red" "$(scv_verb_reads "$SCV_MROOT/hooks/session-poker.sh")"
 rm -rf "$SCV_MROOT"
 
 finish
