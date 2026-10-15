@@ -13363,7 +13363,35 @@ EOF
       # again for an answer already given.
       # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
       # prints the decline while it stands and the ready set below leaves its rows out.
-      SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
+      #
+      # A DECLINE ENDS WHEN ROOM APPEARS (wave-37 T18; REQ-11 AC-11.4; D13). The reader is told the
+      # gate's `room=` answer (gate_report, above) and the writer slots free to ALL the ready writer rows,
+      # the declined ones too, sized by the same `fill_gate_width` the offer below uses. It holds the decline
+      # only while room is no or no slot is free (`fill_decline_holds`, lib/fill.sh); with room and a slot
+      # the tick records the lapse once, says so, and the rows are offered below like any ready row.
+      SCHED_CAP="$(fill_cap "$SCHED_PLAN")"
+      SCHED_FREE_PRE=0
+      if [ "${SCHED_GATE_ROOM:-}" = yes ]; then
+        SCHED_FREE_PRE="$(fill_gate_width "$TICK_OCCUPIED" "$SCHED_OWED" \
+          "$(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$2 == "w" { n++ } END { print n + 0 }')" "$SCHED_CAP")"
+        case "$SCHED_FREE_PRE" in ''|*[!0-9]*) SCHED_FREE_PRE="$TICK_OCCUPIED" ;; esac
+        SCHED_FREE_PRE=$(( SCHED_FREE_PRE - TICK_OCCUPIED ))
+        [ "$SCHED_FREE_PRE" -lt 0 ] && SCHED_FREE_PRE=0
+      fi
+      SCHED_LED="$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)"
+      SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"
+      if [ -n "$SCHED_LAPSE" ]; then
+        IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_LAPSE"
+        SCHED_LAPSE_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=$(_fill_current_field "$SCHED_PLAN" | tr '|' ' ')|state=lapsed"
+        SCHED_LAPSE_LINE="${SCHED_LAPSE_LINE}|ceiling=${SCHED_WRITERS:-}|width=|open=|free=${SCHED_FREE_PRE}|ready=|launched=|declined=|missed=0|idle=|room=${SCHED_GATE_ROOM}"
+        SCHED_LAPSE_LINE="${SCHED_LAPSE_LINE}|lapsed-at=${SCHED_SD_AT}|lapsed=${SCHED_SD_IDS// /,}|lapsed-why=${SCHED_SD_WHY//|/ }"
+        if [ -n "$SCHED_LED" ] && [ ! -L "$SCHED_LED" ] && printf '%s\n' "$SCHED_LAPSE_LINE" >> "$SCHED_LED" 2>/dev/null; then
+          say "fill-declined lapsed — room=${SCHED_GATE_ROOM}, ${SCHED_FREE_PRE} writer slot(s) free; ${SCHED_SD_IDS// /,} asked again (declined since ${SCHED_SD_AT}: $(clean "$SCHED_SD_WHY"))"
+        else
+          say "fill-declined lapsed — room=${SCHED_GATE_ROOM}, ${SCHED_FREE_PRE} writer slot(s) free; ${SCHED_SD_IDS// /,} asked again, but the ledger ${SCHED_LED:-has no path} could not be written, so the lapse is not recorded"
+        fi
+      fi
+      SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"
       SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
       if [ -n "$SCHED_SD" ]; then
         IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"
@@ -13374,7 +13402,6 @@ EOF
       # `gate_room` once per row, with the open writers not yet showing plus the rows already
       # offered on this reading counted as owed, and stops at the first no or at a person's cap.
       # A gate line that read no room offers none, so the line and the fill never disagree.
-      SCHED_CAP="$(fill_cap "$SCHED_PLAN")"
       SCHED_READY_W="$(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null \
         | awk -F'\t' -v sd=" $SCHED_SD_IDS " '$2 == "w" && index(sd, " " $1 " ") == 0 { n++ } END { print n + 0 }')"
       SCHED_WIDTH="$TICK_OCCUPIED"
