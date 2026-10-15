@@ -4086,19 +4086,16 @@ poker_brief_task_record() {
   }'
 }
 
-# poker_brief_index_suites <root> <at> <Files cell> -> the suites lib/anchors.sh `reads_index` names, at <at> (a commit,
-# or - for the files under <root>), for any file an entry of the cell covers (lib/units.sh `cell_covers`, the scheduler's
-# matcher): by file name, sorted, once each, comma-joined. Nothing when no suite reads such a file, or the library
-# cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE FILE-TO-SUITE FACT (wave-36 T27; REQ-6 AC-6.1; D12):
-# a suite reads a file its text names, a library of a hook it names, or a file its anchor names (T5's contract), and
-# the dispatch wall's Lands-on arm and the floor's cover rule ask the same index.
+# poker_brief_index_suites <root> <at> <Files cell> -> lib/anchors.sh `reads_suites`, comma-joined: the suites the reads
+# index names, at <at> (a commit, or - for the files under <root>), for any file an entry of the cell covers. Nothing
+# when no suite reads such a file, or the library cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE
+# READER (wave-37 T3; D4): the dispatch wall's Lands-on arm calls the same `reads_suites`, and the floor's cover rule
+# reads the same index.
 poker_brief_index_suites() {
-  declare -F reads_index >/dev/null 2>&1 \
+  declare -F reads_suites >/dev/null 2>&1 \
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
-  declare -F reads_index >/dev/null 2>&1 || return 0
-  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" "$(_units_files_awk)"'
-    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
-    | LC_ALL=C sort -u | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
+  declare -F reads_suites >/dev/null 2>&1 || return 0
+  reads_suites "$1" "$2" "$3" | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
 }
 
 # poker_reader_kind <kind> -> 0 for a reader row's kind (verify, test, review): its artifact is a record it writes.
