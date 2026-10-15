@@ -3897,4 +3897,120 @@ SBF_MARKS="$(bash -c '. "$1" && units_born_marks "$2"' _ "${BIONIC_HOOKS_DIR}/..
 expect_contains "BFV-10 the judge's reader still reads the floor marker that carries of=floor" "$(printf 'T6\tfloor\ta.test.sh')" "$SBF_MARKS"
 expect_contains "BFV-10b …and the one that carries of=standing@" "$(printf 'T7\tfloor\ts.test.sh')" "$SBF_MARKS"
 POKE_BOUND="$SBF_BOUND_WAS"
+
+# ============================================================
+section "§COVER: the refusal prints the basis, and a read-only verb prints the same (wave-37 T8; REQ-4 AC-4.1, AC-4.2; D8)"
+# ============================================================
+# `current 7` refuses a plan whose reading no longer reaches the head with `review <q> … uncovered <a>..<b>`. It
+# now prints, under that line, the `cover <sha> <basis>` lines lib/proof.sh `facts_cover` builds for that range and
+# question, and ends the line with ` · ask: session-poker.sh cover <q> <a>..<b>`. The verb `cover <q> <a>..<b>` is
+# that ask: read-only, it prints the same lines on stdout and exits 0. The tick never calls it. The text above the
+# lines is the refusal's own and does not change (every `current 7` and `current 8` pin holds).
+# FIXTURE FIDELITY: §CUR7's repository shape (session-poker-4 C7): a real repository on wave/01-fixture, a double
+# wave plan the real gate admits at Step 6, every fact in the production writer's shape (`proof_line`,
+# `proof_floor_line`); one code commit C past the commit B every fact reads. Every move is the real verb, and the
+# assertions read the verb's own stderr and stdout, never `facts_cover`.
+# fails-when: the refusal prints no basis, the line carries no ask, or the verb prints other lines than the refusal.
+SCV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+SCV_R="$(make_repo cover-basis)"
+git -C "$SCV_R" config user.email t@example.com; git -C "$SCV_R" config user.name "Dana Fixture"
+printf '.bionic\n' > "$SCV_R/.gitignore"
+mkdir -p "$SCV_R/tests" "$SCV_R/lib" "$SCV_R/.bionic/docs/plans" "$SCV_R/.bionic/docs/record/w35"
+printf '#!/bin/bash\nexit 0\n' > "$SCV_R/tests/a.test.sh"; printf 'one\n' > "$SCV_R/lib/x.sh"
+( cd "$SCV_R" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
+printf 'generic fixture proof\n' > "$SCV_R/.bionic/docs/record/generic-evidence.md"
+SCV_B="$(git -C "$SCV_R" rev-parse HEAD)"
+SCV_C="$(s57_commit "$SCV_R" lib/x.sh 'C: a code change past every reading')"
+SCV_P="$SCV_R/.bionic/docs/plans/wave-x.plan.md"
+scv_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$SCV_LIB" "$@"; }
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+  printf 'current: 6\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+  printf -- '- Step 4: dispatched, record/w35/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$SCV_B"
+  printf -- '- Step 5: floor, record/w35/floor.log\n- Step 6: review at record/w35/review.md\n'
+  printf -- '- Step 7: documented at record/w35/docs.md\n  n/a: no decision this run\n'
+  bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w35/floor.log ""' _ "$SCV_LIB" "$SCV_B"
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/evidence.md evidence w-read pass piece
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/adversarial.md adversarial w-read pass piece
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/structure.md structure w-read pass piece
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/adversarial-whole.md adversarial w-read pass whole
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/structure-whole.md structure w-read pass whole
+  printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+  printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+  printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
+} > "$SCV_P"
+bind_marker "$SCV_R" "$SCV_P"
+cp "$SCV_P" "$TMPROOT/scv-before"
+scv_run() {  # <poker> <args...> -> SCV_RC, SCV_OUT (stdout alone), SCV_ERR (stderr alone), in the fixture repo
+  local k="$1"; shift
+  ( cd "$SCV_R" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$k" "$@" > "$TMPROOT/scv.out" 2> "$TMPROOT/scv.err" ); SCV_RC=$?
+  SCV_OUT="$(cat "$TMPROOT/scv.out")"; SCV_ERR="$(cat "$TMPROOT/scv.err")"
+}
+SCV_Q=adversarial; SCV_RANGE="${SCV_B}..${SCV_C}"
+SCV_ASK="session-poker.sh cover ${SCV_Q} ${SCV_RANGE}"
+SCV_UNC="$(printf 'review\t%s\tbionic:critic\tpiece\tuncovered\t%s' "$SCV_Q" "$SCV_RANGE")"
+SCV_FS="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$SCV_LIB" "$SCV_P" "$SCV_C" 2>/dev/null | awk -F'\t' '$1 == "review" && $2 == "adversarial" && $4 == "piece"')"
+expect_eq "SCV-0 precondition: the judge reads the adversarial piece line uncovered from B to C" "$SCV_UNC" "$SCV_FS"
+
+# ---------- the refusal prints the basis under the uncovered line ----------
+scv_run "$POKER" current 7
+expect_eq "SCV-1 AC-4.1 current 7 with code past every reading is refused (exit 1)" "1" "$SCV_RC"
+expect_true "SCV-1b …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/scv-before" "$SCV_P"
+expect_contains "SCV-2 …the refusal's own text above the lines is as it was" \
+  "current: 7 is admitted only when every fact the run owes holds at the working head $SCV_C, and these do not (facts_state):" "$SCV_ERR"
+expect_contains "SCV-3 …the uncovered line ends with the ask that reproduces the basis" "${SCV_UNC} · ask: ${SCV_ASK}" "$SCV_ERR"
+expect_contains "SCV-4 …and a cover line names the commit that owes, with its basis" "cover ${SCV_C} owes" "$SCV_ERR"
+SCV_UNDER="$(printf '%s\n' "$SCV_ERR" | awk -v u="${SCV_UNC} · ask: ${SCV_ASK}" '$0 == u { f = 1; next } f && /^cover / { print; next } { f = 0 }')"
+expect_eq "SCV-5 …the cover line sits directly under the uncovered line it answers" "cover ${SCV_C} owes" "$SCV_UNDER"
+SCV_UNDER_Q2="$(printf '%s\n' "$SCV_ERR" | awk -v u="$(printf 'review\tstructure\tbionic:critic\tpiece\tuncovered\t%s' "$SCV_RANGE") · ask: session-poker.sh cover structure ${SCV_RANGE}" '$0 == u { f = 1; next } f && /^cover / { print; next } { f = 0 }')"
+expect_eq "SCV-5b …and so does the next question's line, with its own ask" "cover ${SCV_C} owes" "$SCV_UNDER_Q2"
+
+# ---------- the verb prints the same lines, and writes nothing ----------
+scv_run "$POKER" cover "$SCV_Q" "$SCV_RANGE"
+expect_eq "SCV-6 AC-4.2 cover <q> <a>..<b> exits 0" "0" "$SCV_RC"
+expect_eq "SCV-6b …prints the cover line on stdout" "cover ${SCV_C} owes" "$SCV_OUT"
+expect_eq "SCV-6c …and nothing on stderr" "" "$SCV_ERR"
+expect_eq "SCV-6d …the lines are the ones the refusal printed under the uncovered line" "$SCV_UNDER" "$SCV_OUT"
+expect_true "SCV-6e …and the plan is byte-identical (cmp): the verb writes nothing" cmp -s "$TMPROOT/scv-before" "$SCV_P"
+expect_eq "SCV-6f …and the working tree is clean" "" "$(git -C "$SCV_R" status --porcelain)"
+scv_run "$POKER" cover evidence "$SCV_B..$SCV_B"
+expect_eq "SCV-7 a range every commit of which holds prints no cover line and exits 0 (beside SCV-6)" "0|" "$SCV_RC|$SCV_OUT"
+scv_run "$POKER" cover adversarial
+expect_eq "SCV-8 cover with no range is the usage error (exit 2)" "2" "$SCV_RC"
+expect_contains "SCV-8b …and the usage line names the verb" "session-poker.sh cover <question> <a>..<b>" "$SCV_ERR"
+scv_run "$POKER" cover adversarial "$SCV_B"
+expect_eq "SCV-8c a range that is no <a>..<b> is the usage error (exit 2)" "2" "$SCV_RC"
+scv_run "$POKER" cover fine "$SCV_RANGE"
+expect_eq "SCV-8d a question outside evidence, adversarial, structure is the usage error (exit 2)" "2" "$SCV_RC"
+scv_run "$POKER" cover adversarial "${SCV_B}..0000000000000000000000000000000000000000"
+expect_eq "SCV-8e a head that is no commit here is refused (exit 1)" "1" "$SCV_RC"
+expect_contains "SCV-8f …in the library's words" "is no commit here" "$SCV_ERR"
+
+# ---------- the tick never asks: facts_cover has the one call site, the verb's and the refusal's helper ----------
+SCV_CALLS="$(awk '/^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { n++ } END { print n + 0 }' "${BIONIC_HOOKS_DIR}/session-poker.sh")"
+expect_eq "SCV-9 the hook calls facts_cover from exactly one place, the helper both the refusal and the verb print through" "1" "$SCV_CALLS"
+expect_eq "SCV-9b …and that place is inside cover_basis" "cover_basis" \
+  "$(awk '/^[a-z_0-9]+\(\)/ { fn = $1; sub(/\(\).*/, "", fn) } /^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { print fn }' "${BIONIC_HOOKS_DIR}/session-poker.sh")"
+
+# ---------- a mutant that empties the verb's print while the refusal's basis stands goes red ----------
+# The print is one line of the verb's arm; the mutant prints an empty line there and nothing else changes.
+SCV_MROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-cover-mut.XXXXXX")"; mkdir -p "$SCV_MROOT/hooks" "$SCV_MROOT/scripts"
+ln -s "$(cd "$SCV_LIB" && pwd -P)" "$SCV_MROOT/scripts/lib"
+for scv_h in "${BIONIC_HOOKS_DIR}"/*; do [ "${scv_h##*/}" = session-poker.sh ] || ln -s "$scv_h" "$SCV_MROOT/hooks/${scv_h##*/}"; done
+anchor file hooks/session-poker.sh '"$COV_VERB_LINES"' '""' "$SCV_MROOT/hooks/session-poker.sh"
+scv_verb_reads() {  # <poker> -> ok when the verb prints the refusal's cover line, else red
+  scv_run "$1" cover "$SCV_Q" "$SCV_RANGE"
+  [ "$SCV_RC" = 0 ] && [ "$SCV_OUT" = "cover ${SCV_C} owes" ] && printf ok || printf red
+}
+expect_eq "SCV-10 the shipped verb reads green on the row the mutant is judged by" "ok" "$(scv_verb_reads "$POKER")"
+scv_run "$SCV_MROOT/hooks/session-poker.sh" current 7
+expect_contains "SCV-10b the mutant still runs, and its refusal still carries the cover line (facts_cover stands)" "cover ${SCV_C} owes" "$SCV_ERR"
+scv_run "$SCV_MROOT/hooks/session-poker.sh" cover "$SCV_Q" "$SCV_RANGE"
+expect_eq "SCV-10c …its verb still exits 0" "0" "$SCV_RC"
+expect_absent "SCV-10d …and prints no cover line (beside SCV-6b, which reads the shipped verb's)" "cover ${SCV_C}" "$SCV_OUT"
+expect_eq "SCV-10e …so the row SCV-6 holds goes red" "red" "$(scv_verb_reads "$SCV_MROOT/hooks/session-poker.sh")"
+rm -rf "$SCV_MROOT"
+
 finish
