@@ -14510,4 +14510,50 @@ expect_eq "§SLUG 6b the prefix mutant differs from the library in one line" "1"
 expect_eq "§SLUG 6c …and accepts bionic2's transcript as bionic's (rc 0), so §SLUG 6 goes red under it" "0|$SG_SID" "$(sg_said "$SG_PFX" "$SG_W")"
 rm -rf "$SG_D"
 
+# ---------------------------------------------------------------------------
+section "§WIDTH — one width rule: the landing drain's J is the runner's JOBS on one fixture rung (wave-37 T1; D3, REQ-3 AC-3.2; ownership row 'the width rule J')"
+#
+# The floor (tests/run.sh `_runner_width`) and the landing's drain (lib/line.sh `_line_width`) each read
+# the width by calling the same two functions, `pressure_level` over `gate_width`; neither keeps a number
+# of its own. One fixture rung: share 100 on the suite's 8 pinned cores (gate_width 8), the ring holding
+# one sample by the real writer, clear or critical. No ceiling is set, so the runner's JOBS is the rule
+# alone. A drain with a literal J agrees with the runner on no more than one rung.
+WD_DIR="$SANDBOX/wd"; WD_HOME="$WD_DIR/cfg"; WD_RING="$WD_DIR/pressure.ring"; WD_NOW=1757030000
+mkdir -p "$WD_HOME/bionic"; printf '100\n' > "$WD_HOME/bionic/share"
+WD_LIB="$REPO_ROOT/payload/scripts/lib"
+WD_CLEAR="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+WD_CRIT="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+wd_seed() {  # <probe env> — the ring, reset to one sample by pressure_sample
+  rm -f "$WD_RING"
+  ( eval "export $1"; export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW"
+    . "$WD_LIB/resources.sh" >/dev/null 2>&1; pressure_sample 8 ) >/dev/null 2>&1
+}
+wd_runner() {  # <probe env> -> tests/run.sh's JOBS under --dry-run, no ceiling
+  ( eval "export $1"; unset BIONIC_TEST_JOBS_CEILING
+    export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW" CLAUDE_CONFIG_DIR="$WD_HOME"
+    bash "$REPO_ROOT/tests/run.sh" --dry-run 2>/dev/null ) | sed -n 's/^JOBS=//p' | head -1
+}
+wd_drain() {  # <probe env> [<sed over _line_width>] -> the drain's J
+  ( eval "export $1"; unset BIONIC_TEST_JOBS_CEILING
+    export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW" CLAUDE_CONFIG_DIR="$WD_HOME"
+    bash -c '. "$1/line.sh" >/dev/null 2>&1 || exit 99
+      [ -z "$2" ] || eval "$(declare -f _line_width | sed "$2")"
+      _line_width' _ "$WD_LIB" "${2:-}" 2>/dev/null )
+}
+wd_seed "$WD_CLEAR"; WD_RUN_CLEAR="$(wd_runner "$WD_CLEAR")"; WD_DRAIN_CLEAR="$(wd_drain "$WD_CLEAR")"
+wd_seed "$WD_CRIT"; WD_RUN_CRIT="$(wd_runner "$WD_CRIT")"; WD_DRAIN_CRIT="$(wd_drain "$WD_CRIT")"
+expect_eq "WIDTH 1 a clear rung: the runner's JOBS is the whole width (not vacuous)" "8" "$WD_RUN_CLEAR"
+expect_eq "WIDTH 1b …and the drain's J is the runner's JOBS" "$WD_RUN_CLEAR" "$WD_DRAIN_CLEAR"
+expect_eq "WIDTH 2 a critical rung: the runner's JOBS is a quarter" "2" "$WD_RUN_CRIT"
+expect_eq "WIDTH 2b …and the drain's J is the runner's JOBS" "$WD_RUN_CRIT" "$WD_DRAIN_CRIT"
+expect_true "WIDTH 3 line.sh calls gate_width" test "$(/usr/bin/grep -c 'gate_width' "$WD_LIB/line.sh")" -ge 1
+expect_true "WIDTH 3b …and so does tests/run.sh" test "$(/usr/bin/grep -c 'gate_width' "$REPO_ROOT/tests/run.sh")" -ge 1
+# MUTANT: a literal J. The drain then keeps a number of its own and parts from the runner on a rung.
+anchor fn payload/scripts/lib/line.sh 'pressure_level "$(gate_width)"' _line_width 'echo 4'
+wd_seed "$WD_CLEAR"; WD_MUT_CLEAR="$(wd_drain "$WD_CLEAR" "$ANCHOR_SED")"
+wd_seed "$WD_CRIT"; WD_MUT_CRIT="$(wd_drain "$WD_CRIT" "$ANCHOR_SED")"
+expect_eq "WIDTH 4m-pre the mutant ran: its J is the literal on both rungs" "4 4" "$WD_MUT_CLEAR $WD_MUT_CRIT"
+expect_eq "WIDTH 4m MUTANT a literal J: the drain parts from the runner on both rungs (the rows can fail)" "no no" \
+  "$([ "$WD_MUT_CLEAR" = "$WD_RUN_CLEAR" ] && echo yes || echo no) $([ "$WD_MUT_CRIT" = "$WD_RUN_CRIT" ] && echo yes || echo no)"
+
 finish
