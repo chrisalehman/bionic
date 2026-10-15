@@ -503,7 +503,7 @@ plan_deferred() { sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p' "$1
 
 # corr_check <file> <plugin.json> <plan> — one `corr:` line per broken rule; no output when all hold
 corr_check() {
-  local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual ver
+  local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual ver t13 t13hit
   blk="$(cl_block "$f" 1.19.0)"
   [ -n "$blk" ] || { echo "corr: no 1.19.0 block"; return 0; }
   ver="$(grep -m 1 '^## ' "$f" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
@@ -519,6 +519,12 @@ corr_check() {
   for s in $MIG_ROWS; do
     printf '%s\n' "$mig" | grep -q -w -- "$s" || echo "corr: Migration does not name $s"
   done
+  # T13's bullet names the refusal of the two verbs that apply the debt grammar to a carried line (D14; AC-9.2)
+  t13="$(printf '%s\n' "$mig" | awk '/^- T13:/ { p = 1; print; next } p && /^- / { p = 0 } p')"
+  t13hit="$(printf '%s\n' "$t13" | flat | awk '{ n = split($0, a, /\. /); for (i = 1; i <= n; i++) print a[i] }' \
+    | grep -F -- 'debt adopt' | grep -F -- 'Step-1 card' | grep -F -- 'refuse' | grep -F -- 'prose site' \
+    | grep -F -- 'unlisted kind' | grep -F -- '1.18.0' || true)"
+  [ -n "$t13hit" ] || echo "corr: the T13 Migration bullet does not say debt adopt and the Step-1 card refuse a prose site or an unlisted kind"
   cor="$(cl_part "$f" 1.19.0 'Corrections to 1.18.0')"
   [ -n "$cor" ] || echo "corr: no Corrections to 1.18.0 section"
   has "$cor" '`T31-verify-gate.md`' && has "$cor" 'no floor proof line' || echo "corr: Corrections does not name T31's floor-proof refusal"
@@ -618,6 +624,8 @@ doctor c_klnone sed 's/The count of Known limits in this block is/The Known limi
 expect_contains "(c2m) no stated count: red" "corr: the count of Known limits is not stated" "$(cor_check "$TMP/doctored.c_klnone")"
 doctor c_mig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T35/, "Tnn") } { print }'
 expect_contains "(c2n) a Migration paragraph that does not name T35: red" "corr: Migration does not name T35" "$(cor_check "$TMP/doctored.c_mig")"
+doctor c_t13 sed 's/`debt adopt` and the Step-1 card now refuse/the card now refuses/'
+expect_contains "(c2n2) a T13 bullet that does not name debt adopt and the Step-1 card refusal: red" "corr: the T13 Migration bullet does not say debt adopt and the Step-1 card refuse" "$(cor_check "$TMP/doctored.c_t13")"
 doctor c_rec sed 's/`T27-consumers\.md`/the record/g'
 expect_contains "(c2o) a build row with no record named: red" "corr: the entry names no record for T27" "$(cor_check "$TMP/doctored.c_rec")"
 doctor c_born sed 's/T33, T36, T37, T38, T39 and T40/the six rows/'
