@@ -77,17 +77,20 @@ proof_line() {
   fi
 }
 
-# proof_floor_line <head> <at> <evidence> [<owed>] -> the floor's proof line, newline-terminated: proof_line's,
+# proof_floor_line <head> <at> <evidence> [<owed>] [<run>] -> the floor's proof line, newline-terminated: proof_line's,
 # and ` owed=<suite>[,<suite>]` after the evidence when the whole run it cites left suites red (wave-35 T9; D8,
 # AC-1.3). THE REDS RIDE ON THE LINE: `proof-add floor` writes what `proof_floor_owed` read from the log it
 # judged, and the judge (`_proof_floor_judge`) reads the field, never the log again, so a floor line with no
-# `owed=` is a green whole run's, as every line written before 1.18.0 is.
+# `owed=` is a green whole run's, as every line written before 1.18.0 is. THE LINE NAMES THE RUN IT READ (wave-37 T4;
+# AC-6.2): <run>, `run=<at> head=<sha> rc=<n>` from `proof_floor_run`, ends it.
 proof_floor_line() {
+  local l
   if [ -n "${4:-}" ]; then
-    printf 'proved: kind=floor head=%s at=%s evidence=%s owed=%s\n' "$1" "$2" "$3" "$4"
+    l="$(printf 'proved: kind=floor head=%s at=%s evidence=%s owed=%s' "$1" "$2" "$3" "$4")"
   else
-    proof_line floor "$1" "$2" "$3"
+    l="$(proof_line floor "$1" "$2" "$3")"
   fi
+  printf '%s%s\n' "$l" "${5:+ $5}"
 }
 
 # proof_floor_owed <whole-run log> -> the suites the log's LAST run left red, comma-joined on one line, each
@@ -1145,8 +1148,8 @@ _proof_anchors_load() {
 # ADR-054). No tests/*.test.sh roster is counted, no `Gating:` verdict is asked for and no config key is needed,
 # so tests/run.sh's log, floor-run's log and the log of a project's own runner are each one such log.
 _proof_floor_log() {
-  local ev="$1" head="$2" co="$3" plan="${4:-}" root="${5:-}" hdr sha dirty rc owed nred m
-  hdr="$(awk '/^head=/ { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+$/) { split($0, w, /[ =]/); print w[2] " " w[4] } else print "bad " $0; exit }' "$ev" 2>/dev/null)"
+  local ev="$1" head="$2" co="$3" plan="${4:-}" root="${5:-}" ends hdr sha dirty rc owed nred m run
+  ends="$(_proof_floor_ends "$ev")"; hdr="${ends%%$'\n'*}"; rc="${ends#*$'\n'}"; [ "$ends" != "$hdr" ] || rc=""
   case "$hdr" in
     '') printf 'the evidence %s carries no head=<sha> dirty=<n> line; a regression proof cites the log of a run, which opens with it' "$ev"; return 1 ;;
     'bad head=none dirty=none') printf 'the run in %s read no repository (head=none); run it in the working branch checkout and cite that log' "$ev"; return 1 ;;
@@ -1155,7 +1158,6 @@ _proof_floor_log() {
   sha="${hdr%% *}"; dirty="${hdr#* }"
   [ "${#sha}" -eq 40 ] || { printf 'the run header in %s names head %s, which is not 40 hex; cite the log of a run that opens with head=<40-hex> dirty=<n>' "$ev" "$sha"; return 1; }
   [ "$dirty" = 0 ] || { _proof_read_dirty "$ev" "$dirty"; return 1; }
-  rc="$(awk 'NF { l = $0 } END { sub(/[ \t\r]+$/, "", l); print l }' "$ev" 2>/dev/null)"
   case "$rc" in rc=[0-9]*) rc="${rc#rc=}" ;; *) rc=x ;; esac
   case "$rc" in *[!0-9]*) printf 'the log %s does not end with an rc=<n> line, so it does not say how its run ended; end it with the run'"'"'s exit code (rc=$?) and cite it' "$ev"; return 1 ;; esac
   owed=""
@@ -1166,10 +1168,111 @@ _proof_floor_log() {
     m="$(awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { m = $4 } END { print m + 0 }' "$ev" 2>/dev/null)"
     [ "$nred" = "$m" ] || { printf 'the run in %s counts %s failed but its Failed: block names %s; cite the whole log of a full run, as tests/run.sh wrote it' "$ev" "$m" "$nred"; return 1; }
   fi
+  # THE LOG IS A RUN THE MACHINE RECORDED (wave-37 T4; D7, AC-6.1; ADR-057): the grammar above is read first, then
+  # one `ev=run` line of the plan's landing record must match the log on head, exit and hash (`_proof_floor_match`).
+  run="$(_proof_floor_match "$ev" "$plan" "$root" "$sha" "$rc")" || { printf '%s' "$run"; return 1; }
   # THE RUN IS GOOD; NOW THE COMMITS SINCE IT (wave-31 T25; D3): a run at an ancestor stands for the working head
   # when every commit after it is proved by its recorded runs; a red candidate's reds stay owed.
   [ "$sha" = "$head" ] || _proof_floor_walk "$ev" "$sha" "$head" "$co" "$plan" "$root" "$owed" || return 1
   printf '%s' "$sha"
+}
+
+# _proof_floor_ends <log> -> two lines, the two the floor's one grammar reads (`_proof_floor_log`): the header, the
+# first line that opens `head=`, as `<sha> <dirty>` when it reads `head=<hex> dirty=<n>`, else `bad <the line>`, else
+# empty; then the log's last non-blank line, its trailing blanks cut. Nothing for a log that cannot be read.
+_proof_floor_ends() {
+  awk 'h == "" && /^head=/ { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+$/) { split($0, w, /[ =]/); h = w[2] " " w[4] } else h = "bad " $0 }
+    NF { l = $0 }
+    END { sub(/[ \t\r]+$/, "", l); print h; print l }' "$1" 2>/dev/null
+}
+
+# _proof_sha256 <file> -> its sha256, hex, through lib/detect.sh `_detect_sha256`, the one hash helper (loaded from
+# beside this file when the caller has not); rc 1 when no tool can answer.
+_proof_sha256() {
+  local d
+  if ! declare -F _detect_sha256 >/dev/null 2>&1; then
+    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+    # shellcheck source=/dev/null
+    [ -n "$d" ] && [ -r "$d/detect.sh" ] && . "$d/detect.sh" >/dev/null 2>&1
+  fi
+  declare -F _detect_sha256 >/dev/null 2>&1 || return 1
+  _detect_sha256 "$1"
+}
+
+# _proof_run_key <log> <root> -> the log as a run line's `log=` names it (wave-37 T4; A-T4-1): its real path under the
+# docs root of <root> (`record/…`, as floor-run writes it and proof-add cites it), else under <root> itself (a
+# detached booked.sh run's `.bionic/tmp/runs/<id>.log`), else the real path whole.
+_proof_run_key() {
+  local real docs top
+  real="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)/${1##*/}"
+  [ -n "${2:-}" ] || { printf '%s' "$real"; return 0; }
+  _proof_roots_load
+  docs="$(docs_root "$2" 2>/dev/null)"; docs="$(cd "${docs:-/nonexistent}" 2>/dev/null && pwd -P)"
+  top="$(cd "$2" 2>/dev/null && pwd -P)"
+  if [ -n "$docs" ] && [ "${real#"$docs"/}" != "$real" ]; then printf '%s' "${real#"$docs"/}"
+  elif [ -n "$top" ] && [ "${real#"$top"/}" != "$real" ]; then printf '%s' "${real#"$top"/}"
+  else printf '%s' "$real"; fi
+}
+
+# THE RUN LINE (wave-37 T4; D7, REQ-6 AC-6.1, AC-6.2; ADR-057). `floor-run` (hooks/session-poker.sh), right after it
+# writes its log, and booked.sh's run close each append one line per run to the plan's landing record (lib/line.sh
+# `line_event <plan> run`, through `_wt_proofs_put`):
+#
+#     line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+#
+# _proof_floor_match <log> <plan> <root> <head the log read> <rc it ended> -> `<at> <head> <rc>` of the run the log is,
+# exit 0; or exit 1 with the refusal's sentence. The record is the plan's (`proof_debt_record`). A line is the log's
+# when its `log=` names it (`_proof_run_key`) or its `sha256=` is the log's hash (a byte copy under record/, the only
+# place proof-add cites from; A-T4-2). One whose sha256=, head= and rc= all equal the log's as it is now is its run.
+# Else a line naming the log by path that differs is refused "the log changed since its run", naming the first fact
+# that differs (sha256, then head, then rc); else "no run recorded for this log". THE HASH BINDS THE LOG, not the line:
+# the record can be written by hand, but a log edited after its run no longer matches the run that wrote it.
+_proof_floor_match() {
+  local log="$1" plan="${2:-}" root="${3:-}" sha="${4:-}" rc="${5:-}" rec="" key hash got f a b
+  hash="$(_proof_sha256 "$log")" || hash=""
+  if [ -z "$hash" ]; then
+    printf 'the log %s cannot be hashed (no shasum or sha256sum answers), so the run that wrote it cannot be matched; install one and run proof-add floor again' "$log"
+    return 1
+  fi
+  [ -z "$plan" ] || rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" || rec=""
+  key="$(_proof_run_key "$log" "$root")"
+  [ -n "$rec" ] && [ -f "$rec" ] && got="$(awk -F'|' -v key="$key" -v h="$hash" -v hd="$sha" -v rc="$rc" '
+    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    $1 != "line/v1" || $2 != "ev=run" { next }
+    { l = fv("log"); s = fv("sha256") }
+    l != key && s != h { next }
+    s == h && fv("head") == hd && fv("rc") == rc { ok = fv("at") " " hd " " rc; next }
+    l == key {
+      if (s != h) bad = fv("at") "\tsha256\t" h "\t" s
+      else if (fv("head") != hd) bad = fv("at") "\thead\t" hd "\t" fv("head")
+      else bad = fv("at") "\trc\t" rc "\t" fv("rc")
+    }
+    END { if (ok != "") print "ok\t" ok; else if (bad != "") print "changed\t" bad }' "$rec" 2>/dev/null)"
+  case "${got:-}" in
+    ok"	"*) printf '%s' "${got#ok	}"; return 0 ;;
+    changed"	"*)
+      got="${got#changed	}"
+      IFS='	' read -r a f b got <<PROOF_RUN_BAD
+$got
+PROOF_RUN_BAD
+      [ "$f" = rc ] || { b="$(printf '%s' "$b" | cut -c1-12)"; got="$(printf '%s' "$got" | cut -c1-12)"; }
+      printf 'the log changed since its run: %s reads %s %s, but its run at %s recorded %s %s (%s); cite the log as its run left it, or run floor-run again and cite that log' \
+        "$log" "$f" "$b" "$a" "$f" "$got" "$rec"
+      return 1 ;;
+  esac
+  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a floor proof cites a run the machine recorded, so run the regression with floor-run, or detached through booked.sh, and cite the log it writes' \
+    "$log" "$sha" "$rc" "$hash" "${rec:-the landing record of a plan (none was named)}"
+  return 1
+}
+
+# proof_floor_run <log> <plan> <root> -> `<at> <head> <rc>` of the recorded run the log is, exit 0; or exit 1 with the
+# refusal's sentence (`_proof_floor_match`, the log's header and close read as the floor's grammar reads them). proof-add
+# floor asks it for each log it accepted, so the proof line names the run it read (AC-6.2).
+proof_floor_run() {
+  local ends hdr rc
+  ends="$(_proof_floor_ends "${1:-}")"; hdr="${ends%%$'\n'*}"; rc="${ends#*$'\n'}"
+  [ "$ends" != "$hdr" ] || rc=""
+  _proof_floor_match "${1:-}" "${2:-}" "${3:-}" "${hdr%% *}" "${rc#rc=}"
 }
 
 # proof_floor_retired <root> -> exit 0 with the refusal's sentence when <root>'s `.bionic/config.yaml` carries
