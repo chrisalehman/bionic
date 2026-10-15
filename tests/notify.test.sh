@@ -629,13 +629,22 @@ expect_eq "AK-7e AC-4.1 that ask opens waive-row:AC-2" "waive-row:AC-1,waive-row
 
 # THE ANSWER CLOSES IT. `waive-row` writes the row's waiver on the person's words and closes `waive-row:<AC>`; the
 # transcript is the CLI's typed-prompt shape (tests/fixtures/transcript-move), under a config dir of the verb's own, so
-# the section's transcript (its planted ListAgents answer) is not the one said.sh reads.
+# the section's transcript (its planted ListAgents answer) is not the one said.sh reads. The transcript sits under the
+# repository's own name (lib/detect.sh `project_slug`) and the session's load record under the repository: the two
+# witnesses the words reader asks for (wave-37 T5; D9, session-poker-4 §WITNESS).
 CW_CFG="$(fake_config_dir nt-asks)"
-jq -cn --arg c "I waive row AC-1, the live check moved to the next wave" --arg s "$SID" \
-  '{type:"user",isSidechain:false,origin:{kind:"human"},promptSource:"typed",message:{role:"user",content:$c},sessionId:$s}' \
-  >> "$CW_CFG/projects/-fixture-project/$SID.jsonl"
+cw_witness() {  # <repo> -> this session's typed words under the repo's own name, and its load record there
+  local d
+  d="$CW_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$1")"
+  mkdir -p "$d" "$1/.bionic/tmp"
+  jq -cn --arg c "I waive row AC-1, the live check moved to the next wave" --arg s "$SID" \
+    '{type:"user",isSidechain:false,origin:{kind:"human"},promptSource:"typed",message:{role:"user",content:$c},sessionId:$s}' \
+    > "$d/$SID.jsonl"
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_SCRIPTS_DIR}/payload" "$1" > "$1/.bionic/tmp/loaded-$SID.state"
+}
 cw_waive_row() {  # <repo> -> RC, OUT: `waive-row AC-1` on the person's words, under the verb's config dir
   local keep="$CLAUDE_CONFIG_DIR" bound="$POKE_BOUND"
+  cw_witness "$1"
   export CLAUDE_CONFIG_DIR="$CW_CFG"; POKE_BOUND=180
   poke "$1" waive-row AC-1 'I waive row AC-1' 'the live check moved to the next wave'
   export CLAUDE_CONFIG_DIR="$keep"; POKE_BOUND="$bound"
