@@ -46,7 +46,9 @@ behaviours around them changed too.
 - T13: `debt add` reads any record with grammar-true `debt:` lines and no longer needs a `reviewed:` line. It refuses
   a line that does not parse and writes nothing. Any `debt` verb that names no plan, in a session bound to none,
   refuses and names `bind`. close-out `run` refuses a `debt.md` line that fails the grammar before its first act,
-  naming the line (`T13-debt-grammar.md`).
+  naming the line. `debt adopt` and the Step-1 card now refuse a carried `debt:` line with a prose site or an unlisted
+  kind, which 1.18.0 accepted, and `debt adopt` then adopts none of the continuation; the refusal names the line, and
+  the remedy is the T13 grammar, one concept, one kind and one `<path>:<line>` site per line (`T13-debt-grammar.md`).
 - T14: close-out lands the plan's open integrate and close rows itself, and refuses before its first act when it has
   such rows to land and no session is bound to the plan. `task-set --reason '<why>'` is accepted on a delivered plan
   and refuses a reason that carries `|`, a tab or a line break (`T14-close-out-state.md`).
