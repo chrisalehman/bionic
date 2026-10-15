@@ -347,15 +347,19 @@ done
 # has no hook payload to carry one, so the file is found the way hooks/stop-check.sh finds
 # it: `<projects>/<slug>/<session-id>.jsonl`, with a keyed walk of the project directories
 # behind the slug — a worktree cwd files its session under a different slug from the repo it
-# is reading. Empty when nothing answers, which simply leaves the annotation off.
+# is reading. Empty when nothing answers, which simply leaves the annotation off. The slug is
+# lib/detect.sh `project_slug`'s, the one encoder (wave-37 T5; D9), loaded here when first
+# asked; a library without it (an older install) skips the two names and the walk answers.
 own_transcript() {  # -> the transcript file of THIS session, or nothing
   local projects slug d
   projects="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
-  for slug in "$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')" \
-              "$(printf '%s' "$REPO_REAL" | sed 's/[^a-zA-Z0-9]/-/g')"; do
-    [ -f "$projects/$slug/$SESSION_ID.jsonl" ] || continue
-    printf '%s\n' "$projects/$slug/$SESSION_ID.jsonl"; return 0
-  done
+  declare -F project_slug >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/detect.sh" ] && . "$BIONIC_LIB/detect.sh"; } >/dev/null 2>&1
+  if declare -F project_slug >/dev/null 2>&1; then
+    for slug in "$(project_slug "$PWD")" "$(project_slug "$REPO_REAL")"; do
+      [ -n "$slug" ] && [ -f "$projects/$slug/$SESSION_ID.jsonl" ] || continue
+      printf '%s\n' "$projects/$slug/$SESSION_ID.jsonl"; return 0
+    done
+  fi
   for d in "$projects"/*/"$SESSION_ID.jsonl"; do
     [ -f "$d" ] && { printf '%s\n' "$d"; return 0; }
   done

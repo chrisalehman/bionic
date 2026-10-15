@@ -1731,7 +1731,9 @@ remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 c
 # The transcript is resolved EXACTLY as hooks/dispatch-preflight.sh resolves it for its own
 # liveness question (`roster_session_live`): a session's transcript is `<sid>.jsonl` under
 # some project directory of CLAUDE_CONFIG_DIR/projects. Not resolvable means SILENT — a
-# detector that cannot read cannot report.
+# detector that cannot read cannot report. lib/said.sh no longer mirrors this scan, on purpose
+# (wave-37 T5; D9, A-T5-7): the words reader decides trust and opens only this project's own
+# directory names, while this one finds an address and decides nothing.
 
 session_transcript() {  # <session-id> -> path on stdout, nonzero if none
   local sid="$1" cfg d f
@@ -4601,12 +4603,24 @@ pv_file_swap() {
 # THE RUN'S SESSIONS (wave-36 T9; D10): `user_said` reads every session the plan records, then this one,
 # and says which it read (SAID_SESSIONS) and asked for (SAID_TRIED); a refusal names them, so a reader can
 # tell "not typed" from "typed in a session the run never recorded".
+#
+# THE SESSIONS THE PROJECT DOES NOT WITNESS (wave-37 T5; D9, AC-5.3): a session with no load record under
+# this root, or no transcript under this project's own directory, is not read (lib/said.sh SAID_REFUSED);
+# after the sentence, the refusal lists `read: <sids>` and one `refused: <sid> (<reason>)` per such session.
 said_refuse() {  # <user_said rc> <the words, folded> <act> -> the refusal on stderr
+  local sr_l
   case "$1" in
     2) die "REFUSED — the transcript cannot be found or read for any session read (${SAID_TRIED:-${CLAUDE_CODE_SESSION_ID:-none}} under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects), so the words cannot be held to what the user typed; the plan is unchanged." ;;
     3) die "REFUSED — the words \"$(clean "$2")\" are too short to be the user's decision; quote at least $SAID_MIN_WORDS of their words, or their whole prompt. The plan is unchanged." ;;
     *) die "REFUSED — the words \"$(clean "$2")\" stand in no prompt the user typed in this session or another session the run recorded (read: ${SAID_SESSIONS:-none}); $3 is the user's own word, quoted from a prompt they typed. The plan is unchanged." ;;
   esac
+  [ -n "${SAID_REFUSED:-}" ] || return 0
+  die "read: ${SAID_SESSIONS:-none}"
+  while IFS= read -r sr_l; do
+    [ -z "$sr_l" ] || die "refused: $(clean "$sr_l")"
+  done <<SAID_REFUSE
+$SAID_REFUSED
+SAID_REFUSE
 }
 
 # A FAILING QUESTION IS THE PERSON'S TO WAIVE (wave-33 T35; AC-2.2, D2). A reading whose newest fact is
