@@ -21,6 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -1088,12 +1089,18 @@ section "§MOVE: a finding crosses the line only on words the user typed in this
 # FIXTURE FIDELITY. The transcript is assembled from tests/fixtures/transcript-move/, one file per kind
 # of entry, its key sets measured on CLI 2.1.291 transcripts and every word invented (that directory's
 # README). It sits where the CLI writes one, `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session id>.jsonl`,
-# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts. Every
+# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts; the slug
+# is §SEV's repository's own name (lib/detect.sh `project_slug`), and the session's load record sits
+# under that root, the two witnesses the words reader asks for (wave-37 T5; D9, §WITNESS). Every
 # decoy carries the words the typed prompt carries (MOVE-<kind>-pre), so a reader that counted it would
 # find them. The findings are registered by the real verb on §SEV's repository and plan.
 MV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 MV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
-MV_CFG="$TMPROOT/mv-cfg"; MV_PROJ="$MV_CFG/projects/-work-project"; mkdir -p "$MV_PROJ"
+MV_CFG="$TMPROOT/mv-cfg"
+MV_PROJ="$MV_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RSEV")"
+mkdir -p "$MV_PROJ"
+mv_loaded() { printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RSEV" > "$RSEV/.bionic/tmp/loaded-$1.state"; }  # <sid>
+mv_loaded "$SID"
 export CLAUDE_CONFIG_DIR="$MV_CFG"
 MV_TX="$MV_PROJ/$SID.jsonl"
 MV_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
@@ -1102,10 +1109,11 @@ MV_P='defer the flag wording until the next wave, it can wait'
 MV_Q='and move the third one to fix now'
 MV_F='start the review of the parser'
 mv_tx() { local f; cat "$MV_FX/frame.jsonl" > "$MV_TX"; for f in "$@"; do cat "$MV_FX/$f.jsonl" >> "$MV_TX"; done; }
-mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config
-  # the library finds session.sh beside itself; a mutant copy in another directory has none, so it is
-  # given the session function first (the library itself is run as the verb meets it, alone)
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || . "$3"; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}/session.sh}" 2>/dev/null
+mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config, in §SEV's root
+  # the library finds session.sh, root.sh and detect.sh beside itself; a mutant copy in another directory
+  # has none, so it is given their functions first (the library itself is run as the verb meets it, alone)
+  ( cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || { . "$3/session.sh"; . "$3/root.sh"; . "$3/detect.sh"; } >/dev/null 2>&1; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' \
+    _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}}" 2>/dev/null )
 }
 mv_id() { printf 'record/wave-01-fixture/%s.md#%s' "$1" "${2:-1}"; }
 mv_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(mv_id "$1") "; }
@@ -1461,11 +1469,12 @@ said_bind() {  # <sid> <act> -> bind_plan's rc and BIND_SESSION, as the binding 
   bash -c '. "$1/run.sh" && . "$1/binding.sh" || exit 9; bind_plan "$2" "$3" "$4" "$5"; st=$?; printf "%s|%s" "$st" "${BIND_SESSION:-}"' \
     _ "$SAID_LIBDIR" "$RSEV" "$1" "$PSEV" "$2" 2>/dev/null
 }
-said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
-    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null
+said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config, in §SEV's root
+  ( cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$4/root.sh"; . "$4/detect.sh" >/dev/null 2>&1; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
+    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null )
 }
 jq -c --arg p "Thanks. $SAID_WA, it is not urgent." '.message.content = $p' "$MV_FX/typed.jsonl" | cat "$MV_FX/frame.jsonl" - > "$MV_PROJ/$SAID_A.jsonl"
+mv_loaded "$SAID_A"
 mv_tx typed
 expect_eq "SAID-0 precondition: the predecessor binds by engage, this session by bind; each line is recorded" "0|recorded 0|recorded" \
   "$(said_bind "$SAID_A" engage) $(said_bind "$SID" bind)"
@@ -1540,7 +1549,7 @@ rp_ready() {  # <row> <name> <at hh:mm:ss> [<commit>, default RP_C1]
   rp_ev "ev=ready|row=$1|name=$2|commit=${4:-$RP_C1}|branch=wt/01-$1|tree=$RP_ROOT/.worktrees/01-$1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T$3Z"
 }
 rp_cand() { rp_ev "ev=candidate|row=$1|base=${3:-$RP_C1}|commit=${4:-$RP_C2}|tree=$RP_ROOT/.bionic/tmp/landing/1|at=2026-10-06T$2Z"; }   # <row> <at> [<base>, default RP_C1] [<candidate>, default RP_C2]
-rp_verdict() { rp_ev "ev=verdict|row=$1|commit=${5:-$RP_C2}|suite=$2|result=$3|log=/rec/$1-$2.log|at=2026-10-06T$4Z"; }   # <row> <suite> <result> <at> [<commit>, default RP_C2]
+rp_verdict() { rp_ev "ev=verdict|row=$1|commit=${5:-$RP_C2}|suite=$2|result=$3|log=/rec/$1-$2.log${6:+|width=$6}|at=2026-10-06T$4Z"; }   # <row> <suite> <result> <at> [<commit>, default RP_C2] [<width>: the drain writes `width=` after `log=`]
 rp_pub() { rp_ev "ev=published|row=$1|commit=$RP_C2|kind=$2|by=-|why=-|at=2026-10-06T$3Z"; }
 rp_req() {  # <id> <who agent> <tree> <asked> <admitted|-> [<extra line>...] -> one request file
   local id="$1" who="$2" tree="$3" asked="$4" adm="$5"; shift 5
@@ -1577,27 +1586,27 @@ rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "e
 rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
 rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
 rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
-RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=30s · killed=0"
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=30s · killed=0"
 rp_report
 expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, waits over the project's requests" \
   "0|$RP_RTL_LINE" "$RC|$(rp_line)"
 rp_report --rows
 expect_eq "RTL2 --rows prints the same line first" "$RP_RTL_LINE" "$(printf '%s\n' "$OUT" | head -1)"
 expect_eq "RTL3 …then a line per landed row in the record's order: T1's minutes run from its FIRST ready (30.0, not 10.0), a hand and a git landing print -" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s wait=- prove=- line=- width=-|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s wait=- prove=- line=- width=-|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(rp_rows)"
 # A-orch-12: a request may carry `peak=` and a line no reader knows; the fold reads only its own keys.
 printf 'peak=62\ncolour=blue\n' >> "$RP_GATE/requests/4"; printf 'peak=71\n' >> "$RP_GATE/requests/1"
 rp_report --rows
 expect_eq "RTL4 a request carrying peak= and an unknown line folds to the same report" \
-  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-" \
   "$(rp_line)|$(rp_rows | cut -d'|' -f1)"
 # THE PLAN OPERAND (A-orch-145): a named plan first, else the session's bound run (RTL1 to RTL4 read the
 # bound run), else the verb's no-run refusal. The named plan is read from another project, unbound.
 RP_NORUN="$(make_repo rp-norun)"; ( cd "$RP_NORUN" && git commit -q --allow-empty -m init )
 BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report "$P59W" --rows
 expect_eq "RTL10 a named plan, from an unbound session in another project: exit 0, that plan's line and rows, its waits scoped to its own project" \
-  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s" \
+  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-" \
   "$RC|$(rp_line)|$(rp_rows | cut -d'|' -f1)"
 BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report
 expect_eq "RTL11 no plan named and no run bound: the verb's no-run refusal (2), and no line" \
@@ -1612,18 +1621,18 @@ rp_world rp-even
 rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
 rp_report
 expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
-  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$(rp_line)"
 rp_world rp-one
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
 rp_report
 expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
-  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$(rp_line)"
 # Empty and absent records: the line with zeros, exit 0.
 rp_world rp-empty
 rp_report
-RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
 expect_eq "RTL7 an empty record prints the line with zeros and exits 0" "0|$RP_ZERO" "$RC|$(rp_line)"
 rm -f "$S60_REC"
 rp_report --rows
@@ -1641,10 +1650,10 @@ RP_REAL_POKER="$POKER"; POKER="$RD_MUT/lastready/hooks/session-poker.sh"
 rp_report --rows
 POKER="$RP_REAL_POKER"
 expect_eq "RTL-mut1 the last-ready mutant still runs (exit 0) and reads T1's minutes from its LAST ready, 10.0, where RTL3 reads 30.0" \
-  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s" "$RC|$(rp_rows)"
+  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s wait=- prove=- line=- width=-" "$RC|$(rp_rows)"
 rp_report --rows
 expect_eq "RTL-mut1b …control: the real poker over the same record reads 30.0" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s wait=- prove=- line=- width=-" "$(rp_rows)"
 rm -rf "$RD_MUT"
 
 # ---------- §REPORT-KINDS: landings by kind, runs by outcome, killed runs ----------
@@ -1669,11 +1678,11 @@ sed "s/^holder=.*/holder=$RP_LIVE:$RP_LIVE_START/" "$RP_GATE/requests/4" > "$RP_
 expect_contains "RK0 precondition: request 4's holder is the live sleeper, by pid and start" "holder=$RP_LIVE:" "$(cat "$RP_GATE/requests/4")"
 rp_report --rows
 expect_eq "RK1 a queue, a hand and a git landing each count under their own kind; green, red, none, discarded and red-then-green each as planted; two runs killed" \
-  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2" \
+  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2" \
   "$(rp_line)"
 expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
-  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
-expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s" \
+  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
+expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T3 ')"
 expect_eq "RK4 …and rows that never landed print no row" "T1|T2|T3" "$(rp_rows | tr '|' '\n' | awk '{ print $1 }' | tr '\n' '|' | sed 's/|$//')"
 # A malformed line is skipped and counted, never fatal.
@@ -1682,7 +1691,7 @@ rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
 rp_ev "ev=ready|row=T9|at=not-a-time"
 rp_report
 expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
-  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
   "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
 
 # ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
@@ -1696,7 +1705,7 @@ expect_eq "RP1 a record with no published event: the tick prints no landings lin
 rp_pub T1 queue 10:30:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
-  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
 rp_tick
 expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
 expect_eq "RP3b …and prints no landings line: an unchanged tick is the one line the Patrol ends on, \"printed only unchanged: end it\" (wave-28 T62; T68 folded RK-T3 into this row)" "" "$(rp_tl)"
@@ -1721,7 +1730,7 @@ printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/confi
 BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
 expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
 expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
-  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s wait=- prove=- line=- width=-|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
@@ -1758,14 +1767,14 @@ expect_eq "RK-K1 a row's red, then the accepted head's green run under the row i
 rp_ready T1 w-T1 11:00:00; rp_verdict T1 a.test.sh green 11:05:00 "$RP_C2"; rp_pub T1 queue 11:06:00
 rp_report --rows
 expect_eq "RK-K2 …fixed, re-readied, green, landed: the row's runs=2 (its red and its green, not the head's), and the line reads green=1 red=1 red-then-green=0" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=0s wait=0.5 prove=64.5 line=1.0 width=-" "$(rk_runs)|$(rp_rows)"
 # a true flake: two verdicts for one commit, red first, no ready between; the head's run sits between them
 rp_world rk-key2
 rp_ready T2 w-T2 10:00:00; rp_cand T2 10:00:30 "$RK_H" "$RK_C3"
 rp_verdict T2 a.test.sh red 10:05:00 "$RK_C3"; rp_verdict T2 a.test.sh green 10:08:00 "$RK_H"; rp_verdict T2 a.test.sh green 10:12:00 "$RK_C3"; rp_pub T2 queue 10:13:00
 rp_report --rows
 expect_eq "RK-K3 a flake (a PLANTED shape: lib/line.sh never writes it, A-T68.4): red, the head's run between, green at the same commit and no ready between: red-then-green=1, green=1 red=1, runs=2" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=0s wait=0.5 prove=11.5 line=1.0 width=-" "$(rk_runs)|$(rp_rows)"
 # a red, then a green at ANOTHER candidate of the same ready (the head moved): two commits, so not a flake
 rp_world rk-key3
 rp_ready T3 w-T3 10:00:00; rp_cand T3 10:00:30 "$RK_H" "$RK_C3"; rp_verdict T3 a.test.sh red 10:05:00 "$RK_C3"
@@ -1777,13 +1786,13 @@ expect_eq "RK-K4 a red at one candidate and a green at the next (no ready betwee
 # ---------- (2) the landings line prints on a tick that is not unchanged ----------
 rp_world rk-tick
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
-RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0"
+RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T1 a tick that prints in full (no digest yet) carries the landings line" "$RK_LINE" "$(rp_tl)"
 rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T6 the next tick that prints in full carries the line with the new landing's figures" \
-  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
 
 # ---------- (3) a record with no line/v1 event is unmeasured, never zeros ----------
 RK_UNM="landings: unmeasured — the landing record holds no line/v1 events"
@@ -1852,7 +1861,7 @@ POKER="$RK_REAL_POKER"
 rp_world rk-mut4
 printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
 POKER="$RD_MUT/nounm/hooks/session-poker.sh"; rp_report --rows
-expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$RC|$OUT"
 POKER="$RK_REAL_POKER"
 rm -rf "$RD_MUT"
@@ -2119,7 +2128,7 @@ expect_nonempty "RI-P1 precondition: …and the row extractor reads both rows" "
 expect_eq "RI-P1a T2 behind T1, red, the head's run under T2's id at H, fixed and landed: green=2 red=1 (T1's green, T2's red and T2's green; the head's run counted nowhere)" \
   "0|runs: green=2 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
 expect_eq "RI-P1b …T1 runs=1 and T2 runs=2" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s|T2 queue ready=2026-10-06T10:01:00Z landed=2026-10-06T10:26:00Z minutes=25.0 runs=2 waited=0s" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s wait=0.2 prove=3.8 line=5.0 width=-|T2 queue ready=2026-10-06T10:01:00Z landed=2026-10-06T10:26:00Z minutes=25.0 runs=2 waited=0s wait=0.2 prove=23.8 line=1.0 width=-" "$(rp_rows)"
 
 # ---------- P2 (the control): the head run after the row ahead landed is excluded by either rule ----------
 rp_world ri-p2
@@ -2129,7 +2138,7 @@ rp_verdict T2 a.test.sh green 10:14:00 "$RK_C3"
 rp_ev "ev=returned|row=T2|why=red|detail=/rec/T2.log|at=2026-10-06T10:14:01Z"
 rp_report --rows
 expect_eq "RI-P2 the writer's case: T2's red at its own candidate and the head's green at T1's landed commit: green=1 red=1, and T1's row runs=1" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s wait=0.2 prove=3.8 line=5.0 width=-" "$(rk_runs)|$(rp_rows)"
 
 # ---------- P3: a row landing twice; its first candidate is not its second landing's own ----------
 ri_p3() {  # <label> -> the record of pass 43's probe P3
@@ -2144,14 +2153,14 @@ rp_report --rows
 expect_eq "RI-P3a a row landing twice: the line reads green=2 red=1 (its two landings' own runs; the head's run at its first candidate is not counted)" \
   "0|runs: green=2 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
 expect_eq "RI-P3b …the first landing runs=1 and the second runs=2" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:05:00Z minutes=5.0 runs=1 waited=0s|T1 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:23:00Z minutes=13.0 runs=2 waited=0s" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:05:00Z minutes=5.0 runs=1 waited=0s wait=0.2 prove=3.8 line=1.0 width=-|T1 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:23:00Z minutes=13.0 runs=2 waited=0s wait=0.2 prove=11.8 line=1.0 width=-" "$(rp_rows)"
 
 # ---------- a row with no candidate since its last landing keeps T14's count: every verdict under its id ----------
 rp_world ri-nocand
 rp_ready T4 w-T4 10:00:00 "$RI_A1"; rp_verdict T4 a.test.sh red 10:05:00 "$RP_C2"; rp_verdict T4 a.test.sh green 10:06:00 "$RK_H"; rp_pub T4 queue 10:10:00
 rp_report --rows
 expect_eq "RI-N a row with a ready and verdicts but no candidate counts both its verdicts (there is no commit of its own to include by)" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s wait=- prove=- line=4.0 width=-" "$(rk_runs)|$(rp_rows)"
 
 # ---------- ruling (3): killed is decided once, through the gate's rule, and an exit over 128 is a kill (D18) ----------
 # (A-orch-233, T72: "137 only" of A-orch-179/198 is withdrawn; the spec's figure is "admitted, no end, holder gone,
@@ -2493,13 +2502,16 @@ expect_regex "MP-f1 §MOVE-FOLD a no-break space, a line separator and a next-li
   "^0\|moved: .* words=\"$MV_P\" session=$SID why=\"the docs pass here\"\$" "$RC|$(mv_moved mv-fix | tail -1)"
 
 # ---------- §MOVE-SELF (ruling 2d): session.sh is found beside the library at source time ----------
+# The working directory moves to §SEV's root, not to `/`: since wave-37 T5 (D9) the words are held to the root of the
+# working directory, whose load record and transcript directory witness the session, and `/` is no root. The rows
+# still prove what they did: a call-time `./` would now name the root, where no library is.
 MP_LIBDIR="${SAID_LIB%/*}"
 expect_eq "MP-d1 §MOVE-SELF the library sourced by a relative path, the working directory then moved: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd "$2"; user_said "$1"; echo "$?"' _ "$MV_P" "$RSEV" 2>/dev/null)"
 expect_eq "MP-d2 …sourced by a bare name, the working directory then moved: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
-expect_eq "MP-d3 …positive, the working directory kept: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd "$2"; user_said "$1"; echo "$?"' _ "$MV_P" "$RSEV" 2>/dev/null)"
+expect_eq "MP-d3 …positive, sourced by its absolute path, the working directory kept at the root: found (rc 0)" "0" \
+  "$(cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$2/said.sh"; user_said "$1"; echo "$?"' _ "$MV_P" "$MP_LIBDIR" 2>/dev/null)"
 
 # ---------- §MOVE-MIN (ruling 2e): "three" is one constant ----------
 MP_MIN="$(bash -c '. "$1" 2>/dev/null; printf "%s" "$SAID_MIN_WORDS"' _ "$SAID_LIB")"
@@ -2741,11 +2753,13 @@ FD_EOF
 fd_runs() { [ -f "$FD_SEEN" ] && awk 'END { print NR + 0 }' "$FD_SEEN" || echo 0; }
 fd_config() { printf '%s\n' "$@" > "$RFD/.bionic/config.yaml"; }  # <line>... -> the project's config, exactly these lines
 fd_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFD" | tail -n 1; }
-# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library sourced first,
-# the checkout the working tree and the project root RFD: the judge itself, for the mutants below.
+# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library and the hash helper
+# (lib/detect.sh, which a doctored copy outside lib/ cannot load from beside itself) sourced first, the checkout the
+# working tree, the plan PFD (its landing record holds the runs) and the project root RFD: the judge itself, for the
+# mutants below.
 fd_attest() {
-  bash -c '. "$1" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
-    _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" 2>/dev/null
+  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
+    _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" "${FD_ROOTS%/*}/detect.sh" "$PFD" 2>/dev/null
 }
 expect_regex "FD-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$FD_W"
 expect_eq "FD-0b precondition: …and holds no tests/*.test.sh roster" "0" \
@@ -2789,14 +2803,14 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-a6 proof-add floor accepts the declared floor's log (exit 0)" "0" "$RC"
 expect_regex "FD-a7 …and writes the proof line at the working head, naming that log" \
-  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
+  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 expect_eq "FD-a8 …which proof_last reads back as the floor at the working head, with no roster counted" "$FD_W" "$(s46_last "$PFD" floor)"
 
 # ---------- AC-17.1: the same log at another head, dirty, red, or with no closing rc= line is refused ----------
 FD_OTHER="0123456789abcdef0123456789abcdef01234567"
-{ printf 'head=%s dirty=0\n' "$FD_OTHER"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-other.log"
+sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
 { printf 'head=%s dirty=2\n' "$FD_W"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-dirty.log"
-{ printf 'head=%s dirty=0\n' "$FD_W"; sed '1d;$d' "$FD_LOG"; printf 'rc=1\n'; } > "$FD_REC/fd-red.log"
+sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD_REC/fd-runner.log"
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
@@ -2898,7 +2912,7 @@ s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
 expect_eq "FD-c1 AC-7.10 with neither key the floor-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
 expect_regex "FD-c1b …the proof line naming it at the working head" \
-  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log$" "$(fd_proved)"
+  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 s42_snap "$RFD" "$PFD"
 poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, with no closing rc= line, is refused" 1 "$PFD"
@@ -2948,8 +2962,10 @@ section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirt
 # FIXTURE FIDELITY. The project the filing came from: NO tests/ directory at the working head and NO floor key in
 # .bionic/config.yaml. s42_plan's bound plan, its working branch in a linked worktree: A, a code commit past the base,
 # then H, an empty commit (the working head; A is its ancestor with no change since, so a log at A stands for H). Every
-# other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written by hand,
-# as a project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp.
+# other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written as a
+# project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp. Each log
+# that is to be accepted is written by tests/lib/floor-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
+# the machine recorded no run of is refused (§RUNLINE); the grammar's refusals below are read before any run line.
 FA_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 FA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 FA_ROOTS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/roots.sh"
@@ -2982,14 +2998,15 @@ fa_keys() {  # -> "<floor:>|<floor-attestation:>", read by the product's config 
 }
 fa_fact evidence piece; fa_fact structure piece; fa_fact structure whole; fa_fact adversarial piece; fa_fact adversarial whole
 # The logs, as a project's own runner leaves them: `{ echo "head=… dirty=…"; pnpm ci:local; echo "rc=$?"; } > <log>`.
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci.log"
-printf 'head=%s dirty=0\n$ npx playwright test\n38 passed (2.1m)\nrc=0\n' "$FA_H" > "$FA_REC/e2e.log"
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
+printf '$ npx playwright test\n38 passed (2.1m)\n' | floor_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
 printf 'head=%s dirty=0\n$ npx playwright test\n36 passed, 2 failed (2.3m)\nrc=1\n' "$FA_H" > "$FA_REC/e2e-red.log"
 printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\n' "$FA_H" > "$FA_REC/ci-open.log"
 printf 'head=%s dirty=3\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci-dirty.log"
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_A" > "$FA_REC/ci-at-a.log"
-printf 'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin\nhead=%s dirty=0\nRoots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\nrc=0\n' \
-  "$FA_H" > "$FA_REC/run-sh.log"
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
+printf 'Roots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\n' \
+  | floor_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
+    "$PFA" "$FA_REC/run-sh.log" "$FA_H" 0 0
 
 expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H one commit past A that changes no file" \
   '^[0-9a-f]{40} [0-9a-f]{40} 1 0$' \
@@ -3041,21 +3058,21 @@ if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -
 fa_add record/wave-01-fixture/run-sh.log
 expect_eq "FA-a1 AC-7.10 a tests/run.sh log (its preamble before the stamp, its Gating: verdict between) is still accepted, no roster counted (exit 0)" "0" "$RC"
 expect_regex "FA-a1b …the proof line naming it at H" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci-at-a.log
 expect_eq "FA-a2 a hand-run log at A, an ancestor with no change since, is accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a2b …the proof naming A, the head the run read" \
-  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci.log record/wave-01-fixture/e2e.log
 expect_eq "FA-a3 AC-7.10 two logs on one line, both green at H: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a3b …one proof line naming the head they share and both logs" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
 expect_contains "FA-a3c …and the verb says so" \
   "proof-add — kind=floor head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
 fa_add record/wave-01-fixture/ci.log
 expect_eq "FA-a4 AC-7.10 the hand-run log alone, no roster and no key: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a4b …the proof line naming it at H, nothing owed" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log$" "$(fa_proved)"
+  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-c1 AC-7.10 current 8 passes on that proof (exit 0, the plan at 8)" "0|8" "$RC|$(fa_now)"
@@ -3419,9 +3436,13 @@ section "§REPLAY §NEXT-CALL §FILL-VERBS: every hand edit wave-32 made to its 
 PV7_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 PV7_HOOK="$(cd "$(dirname "$POKER")" && pwd)/session-poker.sh"
 PV7_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
-PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects/-pv7-project"
+PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects"
 export CLAUDE_CONFIG_DIR="$PV7_CFG"
-PV7_TX="$PV7_CFG/projects/-pv7-project/$SID.jsonl"
+PV7_TX=""
+pv7_at() {  # <repo> -> this session's transcript under the repo's own name, and its load record there: the two witnesses (wave-37 T5; D9)
+  PV7_TX="$PV7_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$1")/$SID.jsonl"; mkdir -p "${PV7_TX%/*}"
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$1" > "$1/.bionic/tmp/loaded-$SID.state"
+}
 PV7_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 pv7_prompts() {  # <prompt>... -> this session's transcript: the frame, then one typed prompt each
   local p; cat "$PV7_FX/frame.jsonl" > "$PV7_TX"
@@ -3488,7 +3509,7 @@ pv7_refused "RP-2g an evidence value outside record/" 1 "record/" "$R7" "$P7" ma
 pv7_refused "RP-2h one invalid key refuses the whole call: the valid status beside it is not written" 1 "" "$R7" "$P7" matrix-set AC-1.2 status=blocked tier=T1
 
 # ---------- §REPLAY waive-row: the row waiver on the user's words (wave-32 plan:256, 311, 324, 337; A-orch-49) ----------
-pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
+pv7_at "$R7"; pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
 poke "$R7" waive-row AC-1.1 'I waive all 4' 'the requirement is amended next wave'
 expect_eq "RP-3 §REPLAY waive-row exits 0" "0" "$RC"
 expect_eq "RP-3b …the row's status reads waived, its other cells as they were" "| AC-1.1 | T2 | waived | — | — |" "$(/usr/bin/grep '^| AC-1\.1 ' "$P7")"
@@ -3691,7 +3712,7 @@ poke "$RMH" matrix-set AC-2.11 task=T5
 expect_eq "MH-2d …and matrix-set AC-2.11 writes the AC-2.11 block alone" "0|  task: T5|  task: T5" \
   "$RC|$(mr_block "$PMH" AC-2.11 | /usr/bin/grep '^  task:')|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
 
-pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
+pv7_at "$RMH"; pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
 poke "$RMH" waive-row AC-2.1 'I waive AC-2.1' 'the requirement is amended next wave'
 expect_eq "MH-3 waive-row finds the block under a heading with text (exit 0)" "0" "$RC"
 expect_regex "MH-3b …the waiver line is in AC-2.1's block" '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive AC-2.1" — the requirement is amended next wave$' \
@@ -4204,7 +4225,8 @@ expect_absent "BR-5f …and none of those labels is written into the file as pro
 # scratch HOME and a fixture attestation, patrol stamp and engagement, as dispatch-preflight.test.sh's own
 # fixtures do; an allowed dispatch journals a roster row, which is the positive that the wall really lifted
 # the brief's fields.
-BR_HOME="$TMPROOT/brief-home"; mkdir -p "$BR_HOME/.claude/projects/-brief"; : > "$BR_HOME/.claude/projects/-brief/$SID.jsonl"
+BR_HOME="$TMPROOT/brief-home"; BR_PROJ="$BR_HOME/.claude/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RBR")"  # the repo's own name (wave-37 T5)
+mkdir -p "$BR_PROJ"; : > "$BR_PROJ/$SID.jsonl"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBR/.bionic/tmp/patrol-$SID.state"
 printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBR" > "$RBR/.bionic/tmp/preflight-$SID.state"
 BR_GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
@@ -4836,13 +4858,20 @@ PLF="$(s47_plan "$RLF" 4 \
 lf_led() { cat "$RLF/$LF_REC/fill-ledger.log" 2>/dev/null; }
 lf_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'; }
 lf_tick() { forget_digest "$RLF"; poke_pressure "$RLF" 8192 1.0 tick; }
+# THE DECLINE STANDS WHILE THE GATE GIVES NO ROOM (wave-37 T18; AC-11.4): at room=yes with a writer slot free a
+# decline lapses by itself (§REOPEN), so the pins of what a decline and its lift do read the tick at room=no, where
+# the row's WAIT line says whose answer holds it.
+lf_tick_noroom() { forget_digest "$RLF"; BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$RLF" 8192 1.0 tick; }
 lf_fill() { printf '%s %s' "$(s48_fill_has T4)" "$(s48_fill_has T5)"; }
+lf_wait() { printf '%s\n' "$OUT" | sed -n "s/^poker: WAIT $1 — ready; //p" | head -1; }
+LF_STANDING="answered by the standing fill-declined"; LF_NOSLOT="no writer slot free (gap 0)"
 lf_tick
 expect_eq "LF-0 precondition: the tick fills both ready rows" "yes yes" "$(lf_fill)"
 poke "$RLF" decline T4,T5 'held by hand until the user says build on Opus'
 expect_eq "LF-1 the decline is recorded (exit 0)" "0" "$RC"
-lf_tick
-expect_eq "LF-2 the decline stands: the tick fills neither row (LF-0 is the extractor's positive)" "no no" "$(lf_fill)"
+lf_tick_noroom
+expect_eq "LF-2 the decline stands: with no room the tick answers both rows by it (LF-0 is the extractor's positive)" \
+  "$LF_STANDING|$LF_STANDING" "$(lf_wait T4)|$(lf_wait T5)"
 cp "$RLF/$LF_REC/fill-ledger.log" "$TMPROOT/lf-before"
 poke "$RLF" decline lift T9
 expect_eq "LF-3 a lift naming a row no standing decline answers is refused (exit 1)" "1" "$RC"
@@ -4854,12 +4883,15 @@ LF_LINE="$(lf_led | tail -1)"
 expect_eq "LF-4b its ledger line is its own: state=lift, lifted=T4, this session, no declined= reason" "lift|T4|$SID|" \
   "$(lf_field "$LF_LINE" state)|$(lf_field "$LF_LINE" lifted)|$(lf_field "$LF_LINE" session)|$(lf_field "$LF_LINE" declined)"
 expect_contains "LF-4c …and the verb says what it ended and what still stands" "decline lift — T4: ended; the decline still stands for T5" "$OUT"
-lf_tick
-expect_eq "LF-5 AC-6.2 the next tick prints the FILL the decline held: T4, and T5 still declined" "yes no" "$(lf_fill)"
+lf_tick_noroom
+expect_eq "LF-5 AC-6.2 the next tick no longer answers T4 by the decline (it waits for room as any ready row), and T5 still is" \
+  "$LF_NOSLOT|$LF_STANDING" "$(lf_wait T4)|$(lf_wait T5)"
 poke "$RLF" decline lift
 expect_eq "LF-6 decline lift with no ids ends what still stands (exit 0), lifted=T5" "0|T5" "$RC|$(lf_field "$(lf_led | tail -1)" lifted)"
+lf_tick_noroom
+expect_eq "LF-6b …and the next tick answers neither row by it" "$LF_NOSLOT|$LF_NOSLOT" "$(lf_wait T4)|$(lf_wait T5)"
 lf_tick
-expect_eq "LF-6b …and the next tick fills both" "yes yes" "$(lf_fill)"
+expect_eq "LF-6c …and with room it fills both" "yes yes" "$(lf_fill)"
 cp "$RLF/$LF_REC/fill-ledger.log" "$TMPROOT/lf-before"
 poke "$RLF" decline lift
 expect_eq "LF-7 with no decline standing, a lift is refused (exit 1) and records nothing" "1|yes" \
@@ -5236,7 +5268,7 @@ expect_true "FN-1f …and the plan is byte-identical: the verb runs and logs, an
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W.log"
 expect_eq "FN-2 AC-1.8 proof-add floor accepts floor-run's log of a red whole run (exit 0)" "0" "$RC"
 expect_regex "FN-2b …and writes the floor proof at the working head, b.test.sh owed" \
-  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh$" "$(fn_proved)"
+  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
 
 # ---------- a second whole run: refused, naming the owed suite and the approval ----------
 s42_snap "$RFN" "$PFN"
@@ -5257,7 +5289,7 @@ expect_eq "FN-4b …its log the second at the head, opening head= dirty=0 and cl
 poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W-2.log"
 expect_eq "FN-4c AC-1.8 proof-add floor accepts the green run's log, nothing owed" "0|0" \
   "$RC|$(fn_proved | /usr/bin/grep -c ' owed=' | tr -d ' ')"
-expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log$" "$(fn_proved)"
+expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
 
 # ---------- a proved head: refused, nothing run ----------
 s42_snap "$RFN" "$PFN"
@@ -5576,11 +5608,15 @@ printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=/fi
   > "$RFX/.bionic/docs/$FX_REC/landing-proofs.log"
 ( cd "$RFX" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
 bound_marker "$RFX" "$SID" "$PFX" >/dev/null 2>&1
-FX_CFG="$TMPROOT/fx-cfg"; mkdir -p "$FX_CFG/projects/fixture"
+FX_CFG="$TMPROOT/fx-cfg"
+# The transcript under the repository's own name and the session's load record under it: the two witnesses
+# the words reader asks for (wave-37 T5; D9, §WITNESS).
+FX_PROJ="$FX_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RFX")"; mkdir -p "$FX_PROJ"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFX" > "$RFX/.bionic/tmp/loaded-$SID.state"
 export CLAUDE_CONFIG_DIR="$FX_CFG"
 fx_typed() {  # <prompt> -> one typed prompt appended to this session's transcript
   jq -cn --arg c "$1" --arg s "$SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
-    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_CFG/projects/fixture/$SID.jsonl"
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_PROJ/$SID.jsonl"
 }
 fx_typed "defer the side path finding to the next wave please"
 fx_typed "defer the message wording as well please"
@@ -5694,6 +5730,632 @@ expect_eq "FIXED-8b …and units_born reads the same two" "T7 T8" "$(fx_born)"
 
 POKE_BOUND="$FX_BOUND_WAS"
 if [ "$FX_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$FX_CCD_WAS"; fi
+
+# ============================================================
+section "§BRIEF (the row artifact) §ARTIFACT: brief and task-set read one rule for a row's artifact — the Tasks artifact cell, the ledger cell, the Files entry named for the row, then the first record entry; a review row's suites cell renders; task-set files= may not strand a record row without its artifact (wave-37 T6; REQ-7 AC-7.1, AC-7.2, AC-7.3; D10)"
+# ============================================================
+#
+# fails-when: brief renders the FIRST record entry of Files when an entry named for the row (<row>.md or <row>-*)
+# stands later in the cell; an `artifact` Tasks cell loses to Files or to a ledger cell; a review row's `suites`
+# cell is not the Suites line, or a second brief after a ## Judgment edit moves it; task-set files= strips a record
+# row of the entry the brief reads as its artifact while the row has no `artifact` cell, or refuses when the cell
+# stands, or changes a byte of the plan when it refuses.
+#
+# THE EXPECTED VALUES ARE THIS FIXTURE'S OWN TEXT. The fixture's Tasks header carries suites, lands-on and artifact.
+# The rule: the row's `artifact` cell (non-empty), else the ledger's cell, else the Files entry whose basename is
+# <row>.md or starts <row>-, else the first record entry, else the task's own record, else the reader default.
+RAR="$(make_repo row-artifact)"; ( cd "$RAR" && git commit -q --allow-empty -m init )
+git -C "$RAR" branch wave/01-fixture
+PAR="$(s42_plan "$RAR" 4)"
+AR_REC=".bionic/docs/record/wave-01-fixture"
+AR_TABLE="$TMPROOT/ar-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | — | — | — |\n'
+  printf '| T9 | 4 | build | the ninth piece | implementor | — | 30 | REQ-1 | %s/other.md, %s/T9-report.md | — | — | pending | — | — | — |\n' "$AR_REC" "$AR_REC"
+  printf '| T10 | 4 | build | the tenth piece | implementor | — | 30 | REQ-1 | hooks/t.sh, %s/T10-files.md | — | — | pending | — | — | %s/T10-chosen.md |\n' "$AR_REC" "$AR_REC"
+  printf '| T11 | 6 | review | the eleventh reading | critic | — | 20 | REQ-1 | — | — | — | pending | a.test.sh, b.test.sh | — | — |\n'
+  printf '| T12 | 4 | build | the twelfth piece | implementor | — | 20 | REQ-1 | hooks/t.sh, %s/T12-x.md | — | — | pending | — | — | — |\n' "$AR_REC"
+  printf '| T13 | 4 | build | the thirteenth piece | implementor | — | 20 | REQ-1 | hooks/t.sh, %s/T13-x.md | — | — | pending | — | — | %s/T13-kept.md |\n' "$AR_REC" "$AR_REC"
+  printf '| T14 | 4 | build | the fourteenth piece, no record at all | implementor | — | 20 | REQ-1 | hooks/t.sh | — | — | pending | — | — | — |\n'
+  printf '| T15 | 4 | build | the fifteenth piece, a first entry and a progress file | implementor | — | 20 | REQ-1 | %s/other.md, %s/T15.progress.md, %s/T15-body.md | — | — | pending | — | — | — |\n' "$AR_REC" "$AR_REC" "$AR_REC"
+  printf '\n'
+} > "$AR_TABLE"
+awk -v t="$AR_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PAR" > "$PAR.new"
+awk '{ print } /^\| T1 \| implementor \(w-T1\)/ { print "| T10 | implementor (w-T10) | 2026-10-11T00:00Z | 30 min | '"$AR_REC"'/T10-ledgered.md | — | batch 1 |" }' "$PAR.new" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PAR" && rm -f "$PAR.new"
+new_roster "$RAR"
+( cd "$RAR" && git add -f "$PAR" && git commit -qm "row-artifact fixture" ) >/dev/null 2>&1
+AR_BR="$RAR/$AR_REC/briefs"
+ar_field() { awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"; }
+ar_cell() {  # <row> <column number> -> that cell of the fixture plan's own text, trimmed
+  awk -F'|' -v id="$1" -v c="$2" '/^\| T[0-9]+ \|/ { i = $2; gsub(/[ \t]/, "", i); if (i == id) { v = $c; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit } }' "$PAR"
+}
+expect_eq "AR-0 precondition: the extractor reads T9's Files and T10's artifact cell from the fixture plan's own text" \
+  "$AR_REC/other.md, $AR_REC/T9-report.md|$AR_REC/T10-chosen.md" "$(ar_cell T9 10)|$(ar_cell T10 16)"
+
+poke "$RAR" brief T9
+expect_eq "AR-1 brief T9 exits 0" "0" "$RC"
+expect_eq "AR-1b the artifact is the Files entry named for the row, not the first record entry (Files lists other.md first)" \
+  "$AR_REC/T9-report.md" "$(ar_field "$AR_BR/T9.md" 'Expected artifact')"
+poke "$RAR" brief T10
+expect_eq "AR-2 an artifact cell wins over the ledger's cell and over a Files entry named for the row (positive: Row reads)" \
+  "T10|$AR_REC/T10-chosen.md" "$(ar_field "$AR_BR/T10.md" Row)|$(ar_field "$AR_BR/T10.md" 'Expected artifact')"
+poke "$RAR" brief T15
+expect_eq "AR-3 control: the Files entry named for the row skips a progress file that also begins with the row id" \
+  "$AR_REC/T15-body.md" "$(ar_field "$AR_BR/T15.md" 'Expected artifact')"
+poke "$RAR" brief T11
+expect_eq "AR-4 a review row's suites cell is its Suites line (positive: Row reads)" "T11|a.test.sh, b.test.sh" \
+  "$(ar_field "$AR_BR/T11.md" Row)|$(ar_field "$AR_BR/T11.md" Suites)"
+{ awk '/^## Judgment/ { exit } { print }' "$AR_BR/T11.md"; printf '## Judgment\n\nResearch to read: none\nRulings: none\n'; } > "$TMPROOT/ar-t11-judged.md"
+cp "$TMPROOT/ar-t11-judged.md" "$AR_BR/T11.md"
+poke "$RAR" brief T11
+expect_eq "AR-4b …and a second brief after a ## Judgment edit leaves that line, and the Lands-on, unchanged" \
+  "a.test.sh, b.test.sh|a.test.sh, b.test.sh" "$(ar_field "$AR_BR/T11.md" Suites)|$(ar_field "$AR_BR/T11.md" Lands-on)"
+expect_contains "AR-4c …and keeps the orchestrator's ## Judgment" "Rulings: none" "$(cat "$AR_BR/T11.md")"
+
+# ---------- task-set files= may not strand a record row without its artifact ----------
+ar_files() { awk -F'|' -v id="$1" '{ c = $2; gsub(/[ \t]/, "", c) } c == id { v = $10; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit }' "$PAR"; }
+( cd "$RAR" && git add -f "$PAR" && git commit -qm "ar snap" ) >/dev/null 2>&1
+s42_snap "$RAR" "$PAR"
+AR_WANT="task-set refused — Files leaves T9 with no artifact: name a record T9-<name>.md in Files or set artifact=<path>"
+poke "$RAR" task-set T9 files="$AR_REC/other.md"
+s42_unchanged "AR-5 task-set T9 files= naming no entry for T9, T9 having no artifact cell" 1 "$PAR"
+expect_contains "AR-5b …prints the refusal line, verbatim" "$AR_WANT" "$OUT"
+poke "$RAR" task-set T12 files="hooks/t.sh"
+s42_unchanged "AR-6 a build row whose record entry the new list drops, with no artifact cell" 1 "$PAR"
+expect_contains "AR-6b …names the row in the same line" "task-set refused — Files leaves T12 with no artifact: name a record T12-<name>.md in Files or set artifact=<path>" "$OUT"
+poke "$RAR" task-set T13 files="$AR_REC/other.md"
+expect_eq "AR-7 the same list on a row that carries an artifact cell is accepted (exit 0)" "0" "$RC"
+expect_eq "AR-7b …and the cell is the list" "$AR_REC/other.md" "$(ar_files T13)"
+poke "$RAR" task-set T12 files="hooks/t.sh, $AR_REC/T12-y.md"
+expect_eq "AR-8 control: a list that still names an entry for the row is accepted (exit 0)" "0" "$RC"
+expect_eq "AR-8b …and the cell is the list" "hooks/t.sh, $AR_REC/T12-y.md" "$(ar_files T12)"
+poke "$RAR" task-set T14 files="hooks/u.sh"
+expect_eq "AR-9 control: a build row that never named a record is not held to one (exit 0)" "0|hooks/u.sh" "$RC|$(ar_files T14)"
+poke "$RAR" task-set T12 files="hooks/t.sh" artifact="$AR_REC/T12-set.md"
+expect_eq "AR-10 an artifact= set in the same call keeps the row's artifact (exit 0)" "0" "$RC"
+expect_eq "AR-10b …and the row's artifact cell is what the call set" "$AR_REC/T12-set.md" "$(ar_cell T12 16)"
+
+
+
+section "§LIST: the list fields are a set named once, and adopt carries every one of them byte for byte (wave-37 T7; REQ-8 AC-8.1, AC-8.2; D11)"
+# ============================================================
+#
+# THE DEFECT (research-false-tellers §E). `clean()` cut every field at 400 characters but the
+# three it named (`suites_allowed|files|lands_on`) and the decoded `re_executes`, and
+# `adopt_write_row` took its list fields as positional operands: `questions=` had no operand at all
+# (an adopted reader lost the very field that made it a reader of a question) and `claims=` was
+# written empty. Each of those is the same slip, a list field the name list did not know. The cure
+# is a shape: `ROSTER_LIST_FIELDS` in payload/scripts/lib/roster.sh, named once, and the census arm
+# below that goes red when a `roster_row` key is classified in neither that set nor
+# `ROSTER_SCALAR_FIELDS`.
+#
+# THE SET IS READ, NEVER RETYPED. tests/lib/roster-row.sh sources roster.sh, so the shell already
+# holds the constants; an empty read is itself a red row (LIST-0), not a loop over nothing.
+LS_LIST="${ROSTER_LIST_FIELDS:-}"
+LS_SCALAR="${ROSTER_SCALAR_FIELDS:-}"
+expect_nonempty "LIST-0 the list-field set is defined in roster.sh (read, not retyped)" "$LS_LIST"
+expect_nonempty "LIST-0b …and so is the scalar set" "$LS_SCALAR"
+expect_eq "LIST-0c …and the list set names questions and claims beside the four it always held" \
+  "claims files lands_on questions re_executes suites_allowed" \
+  "$(printf '%s\n' $LS_LIST | sort | tr '\n' ' ' | sed 's/ $//')"
+
+# One value per list field, over 400 characters, made of real tokens of that field's own shape.
+ls_value() {  # <field> -> a value of that field's shape, over 400 characters
+  local f="$1" tok sep=","
+  case "$f" in
+    files)          tok="hooks/session-poker.sh" ;;
+    suites_allowed) tok="session-poker-4.test.sh"; sep=" " ;;
+    lands_on)       tok="cross-gate-agreement.test.sh" ;;
+    re_executes)    tok="grep -E 'alpha|beta|gamma' tests/run.sh"; sep="; " ;;
+    questions)      tok="evidence,adversarial,structure" ;;
+    claims)         tok="bash tests/run.sh --only session-poker-4.test.sh"; sep="; " ;;
+    *)              tok="${f}-token" ;;
+  esac
+  local out="$tok"
+  while [ "${#out}" -le 450 ]; do out="${out}${sep}${tok}"; done
+  printf '%s' "$out"
+}
+
+RLS="$(make_repo list-fields)"; new_roster "$RLS"
+LS_PRED="77777777-aaaa-4bbb-8ccc-000000000037"
+LS_SRC_ROSTER="$(roster_of "$RLS" "$LS_PRED")"
+[ -f "$LS_SRC_ROSTER" ] || roster_header > "$LS_SRC_ROSTER"
+LS_ARGS=()
+for _f in $LS_LIST; do LS_ARGS+=("$_f=$(ls_value "$_f")"); done
+roster_row_fixture session="$LS_PRED" status=identified name=ls-wide agent_id=als-wide-3700000000000001 \
+  subagent_type=bionic:critic launched_at="$(iso_ago 60)" deliverable="$RLS/.bionic/docs/record/ls-wide.md" \
+  duration="45 minutes" cadence="10 minutes" suites_source=declared ${LS_ARGS[@]+"${LS_ARGS[@]}"} >> "$LS_SRC_ROSTER"
+LS_SRC_ROW="$(/usr/bin/grep -F '|name=ls-wide|' "$LS_SRC_ROSTER" | tail -1)"
+poke "$RLS" adopt
+LS_ADOPTED="$(/usr/bin/grep -F '|name=ls-wide|' "$(roster_of "$RLS")" | tail -1)"
+expect_contains "LIST-1 precondition: the predecessor's row is adopted (not vacuous)" "|adopted_from=$LS_PRED|" "$LS_ADOPTED"
+for _f in $LS_LIST; do
+  _src="$(s30_field "$LS_SRC_ROW" "$_f")"
+  expect_eq "LIST-1a precondition: the source row's $_f= is over 400 characters" "yes" \
+    "$([ "${#_src}" -gt 400 ] && echo yes || echo no)"
+  expect_eq "LIST-1b the adopted row's $_f= is the source's, byte for byte (AC-8.1)" \
+    "${#_src}|$_src" "$(s30_field "$LS_ADOPTED" "$_f" | awk '{ printf "%d|%s", length($0), $0 }')"
+done
+
+# ---------- the census arm (AC-8.2): every roster_row key is a list field or a scalar one ----------
+ls_keys() {  # <roster.sh> -> the keys of roster_row's key-to-variable `case`, one per line
+  awk '/^roster_row\(\) \{/ { f = 1 }
+       f && /^    case "\$key" in$/ { n++; next }
+       f && n == 2 && /^    esac$/ { exit }
+       f && n == 2 && match($0, /^      [a-z_]+\)/) { print substr($0, 7, RLENGTH - 7) }' "$1"
+}
+ls_unclassified() {  # <roster.sh> -> the keys that sit in neither set
+  local k
+  while IFS= read -r k; do
+    case " $LS_LIST $LS_SCALAR " in *" $k "*) ;; *) printf '%s\n' "$k" ;; esac
+  done < <(ls_keys "$1")
+}
+LS_ROSTER_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
+LS_KEYS="$(ls_keys "$LS_ROSTER_SH")"
+expect_eq "LIST-2 the census extractor reads roster_row's keys: both ends of the case and the six list fields are in it" \
+  "status questions claims re_executes files suites_allowed lands_on" \
+  "$(for _k in status questions claims re_executes files suites_allowed lands_on; do printf '%s\n' "$LS_KEYS" | /usr/bin/grep -qx "$_k" && printf '%s ' "$_k"; done | sed 's/ $//')"
+expect_eq "LIST-2a every roster_row key is classified as a list field or a scalar one" "" \
+  "$(ls_unclassified "$LS_ROSTER_SH" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "LIST-2b …and the two sets together hold exactly the keys of the case: no stale name, none twice" \
+  "$(printf '%s\n' "$LS_KEYS" | sort | tr '\n' ' ')" \
+  "$(printf '%s\n' $LS_LIST $LS_SCALAR | sort | tr '\n' ' ')"
+LS_PLANT="$TMPROOT/ls-planted-roster.sh"
+awk '{ print } /^      status\)        status="\$val" ;;$/ { print "      zzplanted)     zzplanted=\"$val\" ;;" }' "$LS_ROSTER_SH" > "$LS_PLANT"
+expect_eq "LIST-2c the planted copy differs from roster.sh by exactly the one planted arm" "1" \
+  "$(diff "$LS_ROSTER_SH" "$LS_PLANT" | /usr/bin/grep -c '^>')"
+expect_eq "LIST-2d a planted key in neither set goes red: it is the one the census reports" "zzplanted" \
+  "$(ls_unclassified "$LS_PLANT" | tr '\n' ' ' | sed 's/ $//')"
+rm -f "$LS_PLANT"
+
+# ============================================================
+section "§RUNLINE: a floor proof cites a run the machine recorded: floor-run writes one ev=run line beside its log, and proof-add floor accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
+# ============================================================
+#
+# THE RUN LINE (ADR-057): `floor-run`, right after it writes its log, appends to the plan's landing record
+#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+# and lib/proof.sh `_proof_floor_log` keeps the floor's grammar as its first check, then requires one `ev=run` line
+# naming the log whose head=, rc= and sha256= match the file as it is now. A log no run line names is refused "no run
+# recorded for this log"; a log edited after its run is refused "the log changed since its run"; the accepted proof
+# line ends `run=<at> head=<sha> rc=<n>`, naming the run it read (AC-6.2). booked.test.sh §RUNLINE proves the other
+# writer, booked.sh's run close, parses by the same reader, and carries the mutant (a hash mismatch accepted).
+# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add floor.
+#
+# FIXTURE FIDELITY. §FLOOR-DECLARED's shape: s42_plan's bound plan, its working branch in a linked worktree one empty
+# commit past the main checkout, NO tests/ directory, and a declared `floor:` command (a script this section writes)
+# that floor-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
+RL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRL="$(make_repo runline)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
+PRL="$(s42_plan "$RRL" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PRL" > "$PRL.tmp" && mv "$PRL.tmp" "$PRL"
+( cd "$RRL" && git add -f "$PRL" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RRL/.worktrees/01-fixture" \
+  && git -C "$RRL/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+RL_WT="$RRL/.worktrees/01-fixture"
+RL_W="$(git -C "$RL_WT" rev-parse HEAD 2>/dev/null)"
+RL_REC="$RRL/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RL_REC"
+RL_RECORD="$RL_REC/landing-proofs.log"
+RL_STUB="$TMPROOT/rl-floor.sh"
+printf '#!/bin/bash\necho "floor: 2 passed, 0 failed"\nexit 0\n' > "$RL_STUB"
+printf 'floor: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+rl_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PRL" | tail -n 1; }
+rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
+rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
+expect_regex "RL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$RL_W"
+expect_eq "RL-0b precondition: …its checkout is clean, and the record holds no run line yet" "|0" \
+  "$(git -C "$RL_WT" status --porcelain 2>/dev/null)|$(rl_runs | awk 'END { print NR + 0 }')"
+
+# ---------- AC-6.1: a hand-written log at the real head, rc=0, no run line: refused ----------
+printf 'head=%s dirty=0\n$ make check\nall green\nrc=0\n' "$RL_W" > "$RL_REC/hand.log"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor record/wave-01-fixture/hand.log
+s42_unchanged "RL-1 AC-6.1 a hand-written log opening head=<the real working head> dirty=0 and ending rc=0, no run recorded" 1 "$PRL"
+expect_contains "RL-1b …refused naming the missing fact" "no run recorded for this log" "$OUT"
+expect_contains "RL-1c …and the log it read" "hand.log" "$OUT"
+
+# ---------- AC-6.1: floor-run writes the log and its run line; proof-add floor accepts it, naming the run ----------
+poke "$RRL" floor-run
+RL_LOG="$RL_REC/floor-run-$RL_W.log"
+expect_eq "RL-2 floor-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
+RL_SHA="$(rl_sha "$RL_LOG")"
+expect_regex "RL-2b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
+expect_eq "RL-3 …and appends exactly one run line to the plan's landing record" "1" "$(rl_runs | awk 'END { print NR + 0 }')"
+expect_regex "RL-3b …in the grammar: the log by its record path, the head, dirty, rc, the log's sha256 and when" \
+  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/floor-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "$(rl_runs | tail -n 1)"
+RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
+expect_eq "RL-4 AC-6.1 proof-add floor accepts the log its run line matches (exit 0)" "0" "$RC"
+expect_regex "RL-4b AC-6.2 …and the proof line names the run it read: run=<its at> head=<sha> rc=<n>" \
+  "^proved: kind=floor head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
+  "$(rl_proved)"
+
+# ---------- AC-6.1: the same log edited after its run: refused on the hash ----------
+sed 's/2 passed/3 passed/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.tmp" "$RL_LOG"
+expect_false "RL-5-pre precondition: the edit changed the log's hash" test "$(rl_sha "$RL_LOG")" = "$RL_SHA"
+s42_snap "$RRL" "$PRL"
+poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
+s42_unchanged "RL-5 AC-6.1 the floor-run log edited after its run" 1 "$PRL"
+expect_contains "RL-5b …refused naming the fact" "the log changed since its run" "$OUT"
+expect_contains "RL-5c …the log, and the hash its run recorded" "floor-run-$RL_W.log" "$OUT"
+expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
+
+# ---------- AC-6.2: landing-report lists the floor run among the run's runs ----------
+mkdir -p "$TMPROOT/rl-gate"
+BIONIC_GATE_DIR="$TMPROOT/rl-gate" poke "$RRL" landing-report "$PRL"
+expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run line under runs: as run=1 (§REPORT-RTL pins run=0 on records with none)" \
+  "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 · ' | tr -d ' ')"
+
+POKE_BOUND="$RL_BOUND_WAS"
+
+
+# ============================================================
+section "§WITNESS: a session's words count only when the project witnesses the session — its transcript under this root's own directory, its load record under this root (wave-37 T5; REQ-5 AC-5.1, AC-5.2, AC-5.3; D9, ADR-058)"
+# ============================================================
+#
+# The three verbs that act on what the user typed — finding-move, waive-row and rule --words — read the
+# transcripts of the sessions the plan's `- session:` lines name, then this session's (lib/said.sh
+# `user_said`). A `- session:` line is plan text, and one appended by hand reads exactly as one a binding act
+# wrote; before D9 the transcript was then found under ANY project's directory. Now a session counts only
+# when the project witnesses it: its transcript is `<config>/projects/<project_slug root>/<sid>.jsonl` (or
+# under the slug of the start cwd its load record names), by exact name, and `.bionic/tmp/loaded-<sid>.state`
+# exists under this root. A session failing either is refused, and the refusal names it with the missing
+# witness, `refused: <sid> (<reason>)`, beside `read: <sids>`. The threat is a hand or an agent appending a
+# plan line, not a forger editing the config directory (spec §5).
+#
+# FIXTURE FIDELITY. §FX's shape: a real repository on its working branch, the plan and its registered reading
+# in their writers' shapes (proof.sh `proof_line`), a matrix row with its block, the session bound by the real
+# `bound_marker`, a writer row from the production row writer for `rule`. The other session's `- session:` line
+# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`). Every transcript is the
+# CLI's typed-prompt shape (tests/fixtures/transcript-move/typed.jsonl) under a config dir of this section's;
+# the load record is session-start's shape (`root=`, `started=`, `cwd=`).
+WT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+WT_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+WT_REC="record/wave-01-fixture"
+WT_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+WT_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+RWT="$TMPROOT/witness"; mkdir -p "$RWT"
+( cd "$RWT" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+  && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+RWT="$(cd "$RWT" && pwd -P)"
+mkdir -p "$RWT/.bionic/tmp" "$RWT/.bionic/docs/$WT_REC" "$RWT/.bionic/docs/plans/epic-99-fixture" "$RWT/.bionic/docs/specs/epic-99-fixture" "$RWT/sub"
+: > "$RWT/.bionic/tmp/engaged-$SID.state"
+WT_B="$(git -C "$RWT" rev-parse HEAD)"
+printf 'one\n' > "$RWT/a.sh"; ( cd "$RWT" && git add a.sh && git commit -qm a ) >/dev/null 2>&1
+WT_C1="$(git -C "$RWT" rev-parse HEAD)"
+PWT="$RWT/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+printf '# requirements\n' > "$RWT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# spec\n' > "$RWT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+{ printf 'question: adversarial\nresult: flag\nscope: piece\nreviewed: %s..%s\nfindings: 2\n' "${WT_B:0:10}" "${WT_C1:0:10}"
+  printf '%s\n' 'finding: 1 S3 off - a message could be clearer' 'finding: 2 S3 off - a second message could be clearer'
+  printf '\nwhat the reader found\n'; } > "$RWT/.bionic/docs/$WT_REC/adv.md"
+WT_PROVED="$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" adversarial w-read flag piece' _ "$WT_LIB" "$WT_C1" "$WT_REC/adv.md")"
+# The other session, and the line a hand appends for it.
+WT_X="5a1d0000-0000-4000-8000-0000000000b7"
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+  printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+  printf 'walk: exempt\ndeploy_target: n/a\n'
+  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+  printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+  printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n'
+  printf -- '- session: %s bound 2026-10-14T00:00:00Z by bind\n\n' "$WT_X"
+  printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+  printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+  printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+  printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${WT_B:0:10}"
+  printf -- '- T1: landed at record/T1.md\n'
+  printf '%s\n' "$WT_PROVED"
+  printf '\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+} > "$PWT"
+( cd "$RWT" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RWT" "$SID" "$PWT" >/dev/null 2>&1
+new_roster "$RWT"
+roster_row_fixture session="$SID" name=wt-crit agent_id=a-wt-crit subagent_type=bionic:critic >> "$(roster_of "$RWT")"
+WT_CFG="$TMPROOT/wt-cfg"; mkdir -p "$WT_CFG/projects"
+export CLAUDE_CONFIG_DIR="$WT_CFG"
+wt_slug() { bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$WT_LIB" "$1" 2>/dev/null; }  # <path> -> the library's name for it
+WT_SLUG="$(wt_slug "$RWT")"; WT_SUBSLUG="$(wt_slug "$RWT/sub")"
+wt_prompts() {  # <transcript> <prompt>... -> the frame, then one typed prompt each
+  local f="$1" p; shift; mkdir -p "${f%/*}"; cat "$WT_FX/frame.jsonl" > "$f"
+  for p in "$@"; do jq -c --arg p "$p" '.message.content = $p' "$WT_FX/typed.jsonl" >> "$f"; done
+}
+wt_loaded() {  # <sid> [<cwd>] -> the session's load record under the root, in session-start's shape
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "${2:-$RWT}" > "$RWT/.bionic/tmp/loaded-$1.state"
+}
+WT_WM='defer the message wording to the next wave please'
+WT_WW='I waive row AC-1.1 because the live check moves on'
+WT_WR='leave the parser alone until the review lands'
+# This session is witnessed throughout and typed none of the words; the other session typed them all.
+wt_prompts "$WT_CFG/projects/$WT_SLUG/$SID.jsonl" 'start the review of the parser'
+wt_loaded "$SID"
+wt_x_at() {  # <slug> -> the other session's transcript, holding the three prompts, under that slug alone
+  rm -rf "$WT_CFG/projects"/*/"$WT_X.jsonl"
+  wt_prompts "$WT_CFG/projects/$1/$WT_X.jsonl" "$WT_WM" "$WT_WW" "$WT_WR"
+}
+wt_try() {  # <label> <want rc> -> the three verbs on the other session's words; WT_OUT_<verb> their output
+  local label="$1" rc="$2"
+  s42_snap "$RWT" "$PWT"
+  poke "$RWT" finding-move "$WT_REC/adv.md#1" defer "$WT_WM" 'the person deferred it'
+  WT_RC_M="$RC"; WT_OUT_M="$OUT"
+  [ "$rc" = 0 ] || expect_true "$label finding-move — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PWT"
+  s42_snap "$RWT" "$PWT"
+  poke "$RWT" waive-row AC-1.1 "$WT_WW" 'the live check moves to the next wave'
+  WT_RC_W="$RC"; WT_OUT_W="$OUT"
+  [ "$rc" = 0 ] || expect_true "$label waive-row — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PWT"
+  poke "$RWT" rule wt-crit 'leave the parser for now' --words "$WT_WR"
+  WT_RC_R="$RC"; WT_OUT_R="$OUT"
+}
+
+expect_eq "WITNESS-0 precondition: the fixture root's transcript directory name is project_slug's, the CLI's rule over the physical path" \
+  "$(printf '%s' "$RWT" | sed 's/[^a-zA-Z0-9]/-/g')" "$WT_SLUG"
+expect_eq "WITNESS-0b precondition: the plan records the other session (bind_sessions reads the hand-added line)" "$WT_X" \
+  "$(bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2"' _ "$WT_LIB" "$PWT" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- AC-5.1: the words under another project's directory, the session bound and loaded here ----------
+wt_x_at -other-project; wt_loaded "$WT_X"
+expect_contains "WITNESS-1-pre precondition: the other project's transcript carries the move's words, as a raw read finds them" \
+  "$WT_WM" "$(cat "$WT_CFG/projects/-other-project/$WT_X.jsonl")"
+wt_try "WITNESS-1" 1
+expect_eq "WITNESS-1 §WITNESS AC-5.1 finding-move on words typed only under another project's directory is refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-1b …naming the session and the witness it lacks: no transcript under this root's directory" \
+  "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_M"
+expect_contains "WITNESS-1c AC-5.3 …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-1d waive-row on them is refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-1e …naming the session and the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_W"
+expect_eq "WITNESS-1f rule --words on them is refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-1g …naming the session and the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_R"
+
+# ---------- prefix is not equality: the root's name with a character more is another project ----------
+wt_x_at "${WT_SLUG}2"
+wt_try "WITNESS-2" 1
+expect_eq "WITNESS-2 the words under <this root's name>2 (bionic beside bionic2): finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-2b …naming the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_M"
+
+# ---------- AC-5.2: the transcript in place, no load record under this root ----------
+wt_x_at "$WT_SLUG"; rm -f "$RWT/.bionic/tmp/loaded-$WT_X.state"
+wt_try "WITNESS-3" 1
+expect_eq "WITNESS-3 §WITNESS AC-5.2 the transcript under this root's directory but no loaded-<sid>.state: finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-3b …naming the session and the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_M"
+expect_contains "WITNESS-3c AC-5.3 …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-3d waive-row refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-3e …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_W"
+expect_eq "WITNESS-3f rule --words refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-3g …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_R"
+
+# ---------- both witnesses: accepted, by all three ----------
+wt_loaded "$WT_X"
+wt_try "WITNESS-4" 0
+expect_eq "WITNESS-4 §WITNESS the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
+expect_regex "WITNESS-4b …quoting the words with the session they came from" \
+  "^moved: $WT_REC/adv\\.md#1 to=defer by=Dana Fixture at=[0-9T:Z-]+ words=\"$WT_WM\" session=$WT_X why=" \
+  "$(/usr/bin/grep -F "moved: $WT_REC/adv.md#1 " "$PWT")"
+expect_eq "WITNESS-4c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
+expect_contains "WITNESS-4d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
+expect_eq "WITNESS-4e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
+poke "$RWT" rulings wt-crit
+expect_contains "WITNESS-4f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
+
+# ---------- the start cwd: a session started in a subdirectory files its transcript under that name ----------
+wt_x_at "$WT_SUBSLUG"; wt_loaded "$WT_X" "$RWT/sub"
+expect_ne "WITNESS-5-pre precondition: the subdirectory's name is not the root's" "$WT_SLUG" "$WT_SUBSLUG"
+poke "$RWT" finding-move "$WT_REC/adv.md#2" defer "$WT_WM" 'the person deferred it'
+expect_eq "WITNESS-5 the transcript under the slug of the start cwd its load record names: finding-move moves it (exit 0)" "0" "$RC"
+wt_loaded "$WT_X" "$RWT"
+poke "$RWT" rule wt-crit 'leave it again' --words "$WT_WR"
+expect_eq "WITNESS-5b …and with the load record naming the root instead, the same transcript is refused (exit 2)" "2" "$RC"
+expect_contains "WITNESS-5c …naming the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$OUT"
+
+# ---------- the mutation arm (the ownership row's falsifier): the state check dropped ----------
+# A copy of the library whose _said_sessions has no load-record check reads the transcript of a session that
+# never loaded here; the shipped library refuses it. WITNESS-3 goes red under it.
+wt_said() {  # <lib dir> <text> -> "<rc>|<SAID_SESSION>|<SAID_REFUSED>", user_said over the plan, in the root
+  ( cd "$RWT" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/said.sh" 2>/dev/null; user_said "$2" "$3"; printf "%s|%s|%s" "$?" "${SAID_SESSION:-}" "${SAID_REFUSED:-}"' \
+    _ "$1" "$2" "$PWT" 2>/dev/null )
+}
+WT_MUT="$TMPROOT/wt-mut"; mkdir -p "$WT_MUT"; cp "$WT_LIB"/*.sh "$WT_MUT/"
+anchor file payload/scripts/lib/said.sh 'printf '"'"'%s (no loaded-%s.state)\n'"'"
+/usr/bin/grep -vF 'printf '"'"'%s (no loaded-%s.state)\n'"'" "$WT_LIB/said.sh" > "$WT_MUT/said.sh"
+wt_x_at "$WT_SLUG"; rm -f "$RWT/.bionic/tmp/loaded-$WT_X.state"
+expect_eq "WITNESS-mut0 the mutant differs from the library by the one state check" "1" "$(diff "$WT_LIB/said.sh" "$WT_MUT/said.sh" | /usr/bin/grep -c '^<')"
+expect_eq "WITNESS-mut1 the shipped library refuses the session with no load record" "1||$WT_X (no loaded-$WT_X.state)" "$(wt_said "$WT_LIB" "$WT_WM")"
+expect_eq "WITNESS-mut2 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-3 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUT" "$WT_WM")"
+wt_loaded "$WT_X"
+
+POKE_BOUND="$WT_BOUND_WAS"
+if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi
+
+# ============================================================
+section "§REOPEN: a declined row is asked again when room appears — the standing decline answers its rows only while the gate shows no room or no writer slot is free, and the fill ledger records the lapse (wave-37 T18; REQ-11 AC-11.4; D13)"
+# ============================================================
+#
+# fails-when: a tick with room and a free writer slot prints no FILL for a declined ready row. Wave 37's own
+# T8 was declined at 04:54 "no writer slot free (gap 6)", the tick answered "ready; answered by the standing
+# fill-declined" at every tick after it, and the row waited seven hours through room=yes until it was
+# dispatched by hand (A-orch-14). `fill_standing_decline` (lib/fill.sh), the ONE reader the tick and the stop
+# wall ask, takes the gate's `room=` answer and the free writer slots as two more operands; a decline stands only
+# while room is no or no slot is free. The tick that finds it lapsed appends one `state=lapsed` line naming the
+# decline's `at=` and its rows, says so, and names the rows in its FILL; a lapsed decline never stands again, for
+# the wall too, which reads the ledger alone (it passes no operands: the line is what it reads).
+#
+# The gate is the suite's own: 8 cores, 30% used, one busy core, so room=yes; BIONIC_PROBE_BUSY_CORES_5M=7.0 on
+# the call is room=no (session-poker.test.sh 11a). One ready writer row, writers=4, no roster row open.
+RO_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RO_REC=".bionic/docs/record/wave-01-fixture"
+RRO="$(make_repo reopen)"; new_roster "$RRO"
+PRO="$(s47_plan "$RRO" 4 \
+  "| T4 | 4 | build | declined for want of a slot | implementor | — | 20 | REQ-x | payload/d.sh | pending | |")"
+ro_led() { cat "$RRO/$RO_REC/fill-ledger.log" 2>/dev/null; }
+ro_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'; }
+ro_room_yes() { forget_digest "$RRO"; poke_pressure "$RRO" 8192 1.0 tick; }
+ro_room_no() { forget_digest "$RRO"; BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$RRO" 8192 1.0 tick; }
+RO_WHY='no writer slot free (gap 6)'
+
+ro_room_yes
+expect_eq "REOPEN-0 precondition: the tick at room=yes fills the row (the extractor's positive)" "yes" "$(s48_fill_has T4)"
+poke "$RRO" decline T4 "$RO_WHY"
+expect_eq "REOPEN-1 the decline is recorded (exit 0)" "0" "$RC"
+RO_DECLINE_AT="$(ro_field "$(ro_led | tail -1)" at)"
+expect_eq "REOPEN-1b …its ledger line is the decline" "decline|T4" "$(ro_field "$(ro_led | tail -1)" state)|$(ro_field "$(ro_led | tail -1)" named)"
+
+ro_room_no
+expect_contains "REOPEN-2 AC-11.4 at room=no the decline still answers the row: WAIT, answered by the standing fill-declined" \
+  "poker: WAIT T4 — ready; answered by the standing fill-declined" "$OUT"
+expect_eq "REOPEN-2b …and the tick names no FILL" "no" "$(s48_fill_has T4)"
+expect_contains "REOPEN-2c …and the decline is printed as standing (the positive for the absence below)" \
+  "poker: fill-declined standing since $RO_DECLINE_AT" "$OUT"
+expect_eq "REOPEN-2d …and writes no lapse: the ledger still ends on the decline" "decline" "$(ro_field "$(ro_led | tail -1)" state)"
+
+ro_room_yes
+expect_contains "REOPEN-3 AC-11.4 at room=yes with a free writer slot the tick prints the FILL" "poker: FILL T4" "$OUT"
+expect_contains "REOPEN-3b …and says the decline lapsed and what the gate gave (one ready row, so one slot)" "poker: fill-declined lapsed — room=yes, 1 writer slot(s) free" "$OUT"
+expect_absent "REOPEN-3c …and no longer prints the decline as standing" "fill-declined standing" "$OUT"
+RO_LAPSED="$(ro_led | tail -1)"
+expect_eq "REOPEN-3d the fill ledger's last line is state=lapsed" "lapsed" "$(ro_field "$RO_LAPSED" state)"
+expect_eq "REOPEN-3e …naming the decline's at= and its rows, in this session" "$RO_DECLINE_AT|T4|$SID" \
+  "$(ro_field "$RO_LAPSED" lapsed-at)|$(ro_field "$RO_LAPSED" lapsed)|$(ro_field "$RO_LAPSED" session)"
+expect_eq "REOPEN-3f …carrying the decline's reason, and no declined= of its own (it is no decline)" "$RO_WHY|" \
+  "$(ro_field "$RO_LAPSED" lapsed-why)|$(ro_field "$RO_LAPSED" declined)"
+expect_eq "REOPEN-3g …and the room it saw" "yes" "$(ro_field "$RO_LAPSED" room)"
+RO_LINES="$(ro_led | wc -l | tr -d ' ')"
+
+ro_room_yes
+expect_eq "REOPEN-4 a second tick at room=yes names the row again (it is a FILL, not a one-off)" "yes" "$(s48_fill_has T4)"
+expect_eq "REOPEN-4b …and writes no second lapse: the ledger is as long as it was" "$RO_LINES" "$(ro_led | wc -l | tr -d ' ')"
+ro_room_no
+expect_absent "REOPEN-5 a lapsed decline never stands again: at room=no the row is not answered by it" \
+  "answered by the standing fill-declined" "$OUT"
+expect_contains "REOPEN-5b …it waits for the want of room, as an undeclined row does" "poker: WAIT T4 — ready; no writer slot free" "$OUT"
+expect_absent "REOPEN-5c …and no decline is printed as standing" "fill-declined standing" "$OUT"
+
+# ---------- the one reader, driven as the stop wall drives it (no operands) and as the tick does ----------
+RO_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/fill.sh"
+ro_sd() {  # <lib file> <ledger> <room> <free> -> the reader's answer, US shown as /
+  bash -c '. "$1"; fill_standing_decline "$2" "$3" "" ${4:+"$4"} ${5:+"$5"}' _ "$1" "$2" "$SID" "${3:-}" "${4:-}" 2>/dev/null | tr '\037' '/'
+}
+RO_L="$TMPROOT/ro-ledger.log"; : > "$RO_L"
+printf 'fill-ledger/v1|at=2026-10-15T04:54:47Z|session=%s|turn=|current=4|state=decline|ceiling=8|width=|open=|free=|ready=T4,T5|launched=|declined=%s|missed=0|idle=|room=|named=T4,T5|declined-on=-\n' "$SID" "$RO_WHY" >> "$RO_L"
+expect_eq "REOPEN-6 the reader with no operands (the stop wall's call) reads the ledger alone: the decline stands" \
+  "2026-10-15T04:54:47Z/$RO_WHY/T4 T5" "$(ro_sd "$RO_LIB" "$RO_L")"
+expect_eq "REOPEN-6b room=no with slots free: it stands" "2026-10-15T04:54:47Z/$RO_WHY/T4 T5" "$(ro_sd "$RO_LIB" "$RO_L" no 3)"
+expect_eq "REOPEN-6c room=yes with no slot free: it stands" "2026-10-15T04:54:47Z/$RO_WHY/T4 T5" "$(ro_sd "$RO_LIB" "$RO_L" yes 0)"
+expect_eq "REOPEN-6d room=yes with a slot free: it stands for nothing" "" "$(ro_sd "$RO_LIB" "$RO_L" yes 1)"
+printf 'fill-ledger/v1|at=2026-10-15T11:56:10Z|session=%s|turn=|current=4|state=lapsed|ceiling=8|width=|open=|free=3|ready=|launched=|declined=|missed=0|idle=|room=yes|lapsed-at=2026-10-15T04:54:47Z|lapsed=T4,T5|lapsed-why=x\n' "$SID" >> "$RO_L"
+expect_eq "REOPEN-7 a lapsed line ends the decline for a reader with no operands (the wall reads what the tick wrote)" "" "$(ro_sd "$RO_LIB" "$RO_L")"
+expect_eq "REOPEN-7b …and at room=no" "" "$(ro_sd "$RO_LIB" "$RO_L" no 0)"
+printf 'fill-ledger/v1|at=2026-10-15T12:10:00Z|session=%s|turn=|current=4|state=decline|ceiling=8|width=|open=|free=|ready=T4|launched=|declined=waits on T9|missed=0|idle=|room=|named=T4|declined-on=T9\n' "$SID" >> "$RO_L"
+expect_eq "REOPEN-7c a decline written after the lapse stands afresh" "2026-10-15T12:10:00Z/waits on T9/T4" "$(ro_sd "$RO_LIB" "$RO_L")"
+
+# ---------- the mutant: the tick's call drops the room operands ----------
+# A copy of the poker whose two reader calls (the lapsing one and the standing one) pass no room
+# and no free slots reads the ledger alone: the decline stands at room=yes and the row is never asked again. The
+# copy sits beside a copy of the libraries, so it loads its own; REOPEN-3 goes red under it.
+RO_MUT="$TMPROOT/ro-mut"; mkdir -p "$RO_MUT/hooks" "$RO_MUT/payload/scripts"
+cp "${BIONIC_HOOKS_DIR}"/*.sh "$RO_MUT/hooks/"
+cp -R "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RO_MUT/payload/scripts/lib"
+RO_POKER_WAS="$POKER"
+anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
+anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"'
+RO_MUT_SRC="$RO_MUT/hooks/session-poker.sh"
+awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
+expect_eq "REOPEN-mut0 the mutant differs from the poker by the two calls" "2" "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$RO_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
+poke "$RRO" decline T4 'declined again, after the lapse'
+expect_eq "REOPEN-mut-pre a fresh decline of the row is recorded (it stands afresh after the lapse)" "0" "$RC"
+POKER="$RO_MUT/hooks/session-poker.sh"
+ro_room_yes
+RO_MUT_OUT="$OUT"
+POKER="$RO_POKER_WAS"
+expect_contains "REOPEN-mut1 the mutant runs (it prints the gate line at room=yes)" "room=yes" "$RO_MUT_OUT"
+expect_absent "REOPEN-mut2 …and under it the tick names no FILL for the declined row, so REOPEN-3 goes red under it" "poker: FILL T4" "$RO_MUT_OUT"
+ro_room_yes
+expect_contains "REOPEN-mut3 …while the shipped poker, over the same fresh decline, asks the row again" "poker: FILL T4" "$OUT"
+POKE_BOUND="$RO_BOUND_WAS"
+
+# ============================================================
+section "§REPORT: the report splits wait from run and prints the width, from the landing record alone (wave-37 T9; D8, AC-1.3, AC-3.2)"
+# ============================================================
+#
+# `landing-report --rows` prints, after each row's present prefix, `wait= prove= line= width=`: wait is the row's
+# first `ready` to its first `candidate`, prove that candidate to the row's last `verdict`, line that verdict to
+# `published`, in minutes, and width the `width=` the drain (lib/line.sh, 1.20.0) writes on the row's verdicts after
+# `log=`. They are read from the landing record ALONE: the gate's requests are pruned after BIONIC_GATE_KEEP, so a
+# close-of-wave report built on them would have lost the early rows. FIXTURE FIDELITY: the events are planted in the
+# shape lib/line.sh writes them (rp_verdict's sixth operand is the drain's `width=`); the gate store is EMPTY.
+RR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+rp_world rr-split
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:02:00
+rp_verdict T1 a.test.sh green 10:05:00 "$RP_C2" 2; rp_verdict T1 b.test.sh green 10:09:00 "$RP_C2" 2; rp_verdict T1 c.test.sh green 10:14:00 "$RP_C2" 2
+rp_pub T1 queue 10:20:00
+# a row written before 1.20.0 (or by the serial line): its verdicts carry no width=
+rp_ready T2 w-T2 10:30:00; rp_cand T2 10:31:00; rp_verdict T2 a.test.sh green 10:35:00; rp_pub T2 queue 10:40:00
+# a hand landing: nothing to split
+rp_ready T3 - 10:50:00; rp_cand T3 10:50:10; rp_pub T3 hand 10:50:30
+RR_T1_PRE="T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:20:00Z minutes=20.0 runs=3 waited=0s"
+RR_T2_PRE="T2 queue ready=2026-10-06T10:30:00Z landed=2026-10-06T10:40:00Z minutes=10.0 runs=1 waited=0s"
+RR_T3_PRE="T3 hand ready=- landed=2026-10-06T10:50:30Z minutes=- runs=0 waited=0s"
+rr_row() { rp_rows | tr '|' '\n' | /usr/bin/grep "^$1 "; }
+rp_report --rows
+expect_eq "RR0 precondition: the gate store is empty (nothing in it can be what the split reads)" "0" "$(ls "$RP_GATE/requests" | wc -l | tr -d ' ')"
+expect_nonempty "RR0b precondition: the row extractor reads the report's rows" "$(rr_row T1)"
+expect_eq "RR1 ready at t0, candidate at +2, verdicts at +5 +9 +14 each width=2, published at +20: the row prints its present prefix, then wait=2.0 prove=12.0 line=6.0 width=2" \
+  "$RR_T1_PRE wait=2.0 prove=12.0 line=6.0 width=2" "$(rr_row T1)"
+expect_eq "RR2 a row whose verdicts carry no width= prints width=- (absent, never 0), its split still read from the record" \
+  "$RR_T2_PRE wait=1.0 prove=4.0 line=5.0 width=-" "$(rr_row T2)"
+expect_eq "RR3 a hand landing prints all four as - , as it prints ready=- and minutes=-" \
+  "$RR_T3_PRE wait=- prove=- line=- width=-" "$(rr_row T3)"
+expect_eq "RR4 the first line is unchanged by the split (close-out's parse and the tick's print depend on it)" \
+  "landings: queue=2 hand=1 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=4 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+  "$(rp_line)"
+expect_eq "RR5 the row's present prefix is byte for byte what it was: cut at the new fields, T1 is the old line" \
+  "$RR_T1_PRE" "$(rr_row T1 | sed 's/ wait=.*$//')"
+# the width is the drain's: a line a reader sees with a bad width is absent too
+rp_world rr-bad
+rp_ready T4 w-T4 10:00:00; rp_cand T4 10:01:00; rp_verdict T4 a.test.sh green 10:03:00 "$RP_C2" x; rp_pub T4 queue 10:04:00
+rp_report --rows
+expect_eq "RR6 a non-numeric width= is absent: width=-" "T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=0s wait=1.0 prove=2.0 line=1.0 width=-" "$(rr_row T4)"
+# the split restarts at each landing: a row landing twice reads each of its own
+rp_world rr-twice
+rp_ready T5 w-T5 10:00:00; rp_cand T5 10:01:00; rp_verdict T5 a.test.sh green 10:03:00 "$RP_C2" 2; rp_pub T5 queue 10:04:00
+rp_ready T5 w-T5 10:10:00; rp_cand T5 10:15:00; rp_verdict T5 a.test.sh green 10:16:00 "$RP_C2" 4; rp_pub T5 queue 10:20:00
+rp_report --rows
+expect_eq "RR7 a row landing twice: each landing's split starts from its own ready, candidate and verdicts" \
+  "T5 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=0s wait=1.0 prove=2.0 line=1.0 width=2|T5 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:20:00Z minutes=10.0 runs=1 waited=0s wait=5.0 prove=1.0 line=4.0 width=4" \
+  "$(rp_rows)"
+
+# ---------- the mutation arms: a split read from the gate store; the fields written before waited= ----------
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rr-mut.XXXXXX")"
+rd_mutant fromgate 's#pw\[n\] = seg(pfrom\[n\], fcn);#pw[n] = "-"; for (i = 1; i <= nq; i++) if (qw[i] == pname[n] \&\& num(qd[i])) { pw[n] = sprintf("%.1f", (qd[i] - qa[i]) / 60); break };#'
+rd_mutant beforewaited 's#^        print pre1 wt tl$#        print pre1 tl wt#'
+expect_eq "RR-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
+  "$(diff "$POKER" "$RD_MUT/fromgate/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/beforewaited/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+rp_world rr-mut
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:02:00
+rp_verdict T1 a.test.sh green 10:05:00 "$RP_C2" 2; rp_verdict T1 b.test.sh green 10:09:00 "$RP_C2" 2; rp_verdict T1 c.test.sh green 10:14:00 "$RP_C2" 2
+rp_pub T1 queue 10:20:00
+RR_REAL_POKER="$POKER"
+POKER="$RD_MUT/fromgate/hooks/session-poker.sh"; rp_report --rows; RR_M1_RC="$RC"; RR_M1="$(rr_row T1)"
+POKER="$RD_MUT/beforewaited/hooks/session-poker.sh"; rp_report --rows; RR_M2_RC="$RC"; RR_M2="$(rr_row T1)"
+POKER="$RR_REAL_POKER"
+expect_eq "RR-mut1 the gate-store mutant runs (exit 0) and, the store being empty, reads wait=- where RR1 reads 2.0 (RR1 goes red on it)" \
+  "0|$RR_T1_PRE wait=- prove=12.0 line=6.0 width=2" "$RR_M1_RC|$RR_M1"
+expect_eq "RR-mut2 the fields-before-waited= mutant runs (exit 0) and writes wait= ahead of waited=, so RR1 and RR5 go red on it" \
+  "0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:20:00Z minutes=20.0 runs=3 wait=2.0 prove=12.0 line=6.0 width=2 waited=0s" "$RR_M2_RC|$RR_M2"
+rp_report --rows
+expect_eq "RR-mut3 …control: the real poker over the same record reads RR1's row" "$RR_T1_PRE wait=2.0 prove=12.0 line=6.0 width=2" "$(rr_row T1)"
+rm -rf "$RD_MUT"
+POKE_BOUND="$RR_BOUND_WAS"
 
 
 finish

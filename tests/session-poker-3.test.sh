@@ -17,6 +17,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -791,13 +792,13 @@ expect_contains "58g10 …from the absolute deliverable's reader, as a pass" \
 POKER="$S58_POKER_REAL"
 
 # ---------- controls: a floor, a task and a plain review proof are written as before ----------
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$S58_C4" > "$S58_REC/floor.txt"
+printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P58" "$S58_REC/floor.txt" "$S58_C4" 0 0  # with its run line (wave-37 T4; D7)
 printf '# review\n\nreviewed: %s..%s\n' "$S58_C1" "$S58_C4" > "$S58_REC/plain.md"
 s42_snap "$R58" "$P58"
 poke "$R58" proof-add floor record/wave-01-fixture/floor.txt
 expect_eq "58h control: a floor proof registers (exit 0)" "0" "$RC"
 expect_regex "58h2 …in its four-field shape" \
-  "^proved: kind=floor head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor.txt$" \
+  "^proved: kind=floor head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${S58_C4} rc=0$" \
   "$(s46_proved "$P58" | tail -1)"
 poke "$R58" proof-add task record/wave-01-fixture/floor.txt
 expect_eq "58h3 control: a task proof registers (exit 0)" "0" "$RC"
@@ -2223,20 +2224,23 @@ expect_eq "65b2 §DECLINE-LOG AC-15.5 the run's fill ledger gains one line namin
 expect_eq "65b3 …its reason" "the machine is saturated" "$(s65_field "$S65_LINE" declined)"
 S65_AT="$(s65_field "$S65_LINE" at)"
 expect_regex "65b4 …and its time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$S65_AT"
-poke_pressure "$R65" 8192 1.0 tick
+# A DECLINE STANDS WHILE THE GATE GIVES NO ROOM (wave-37 T18; REQ-11 AC-11.4; D13): the ticks that read what a
+# decline answers run at room=no (BIONIC_PROBE_BUSY_CORES_5M=7.0); at room=yes with a writer slot free it lapses.
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$R65" 8192 1.0 tick
 expect_contains "65c AC-15.1 the next tick prints the standing decline, its time and its reason, in the reply form's words" \
   "poker: fill-declined standing since ${S65_AT} — the machine is saturated" "$OUT"
 expect_absent "65c2 …and no FILL for the rows it named" "poker: FILL" "$OUT"
 awk '{ print } /^\| T3 \| 4 \| build \|/ { print "| T4 | 4 | build | a unit nobody declined | implementor | — | — | 30 | REQ-1 | d.sh | — | — | pending |" }' \
   "$P65" > "$P65.tmp" && mv "$P65.tmp" "$P65"
-poke_pressure "$R65" 8192 1.0 tick
-expect_eq "65d a row the decline did not name is ready: the tick fills it alone" "poker: FILL T4" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
 S65_TR="$(s31_transcript "$R65" "carry on")"
 s31_stop "$R65" "$S65_TR"
-expect_eq "65e …and the wall refuses the silent turn" "block" "$(s31_decision)"
-expect_contains "65e2 …naming T4 in the verb it prints" "session-poker.sh decline T4 'why they wait'" "$(s31_reason)"
+expect_eq "65e a row the decline did not name is ready: the wall refuses the silent turn" "block" "$(s31_decision)"
+expect_contains "65e2 …naming T4 alone in the verb it prints" "session-poker.sh decline T4 'why they wait'" "$(s31_reason)"
 expect_absent "65e3 …and asking for no line in the reply" 'write "fill-declined:' "$(s31_reason)"
+poke_pressure "$R65" 8192 1.0 tick
+expect_contains "65d AC-11.4 the tick at room=yes with a free slot lapses the decline and asks every ready row again" "poker: fill-declined lapsed — room=yes" "$OUT"
+expect_eq "65d2 …the FILL names T2 and T3 with the row the decline never named" "poker: FILL T2 T3 T4" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
 S65_N="$(s65_count "$R65")"
 poke "$R65" decline T9 'no such row'
 expect_eq "65f an id that is no plan row is refused (exit 1)" "1" "$RC"
@@ -2252,8 +2256,8 @@ expect_eq "65j …and no refusal wrote a ledger line" "$S65_N" "$(s65_count "$R6
 expect_ne "65j2 precondition: the count is of real lines" "0" "$S65_N"
 poke "$R65" decline T4 'T4 waits for the same machine'
 expect_eq "65k §DECLINE-LOG each decline is one more line" "$((S65_N + 1))" "$(s65_count "$R65")"
-poke_pressure "$R65" 8192 1.0 tick
-expect_absent "65k2 …and the rows the first decline named stay answered beside the second's" "poker: FILL" "$OUT"
+BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$R65" 8192 1.0 tick
+expect_absent "65k2 …and with no room the tick offers nothing beside it" "poker: FILL" "$OUT"
 expect_contains "65k3 …the newer reason standing" "— T4 waits for the same machine" "$OUT"
 
 # ---------- §BUDGET-USER (AC-15.4): the user's cap is written into the header ----------
@@ -3136,8 +3140,8 @@ expect_eq "69e0 control: at current: 6 with the debt open a real commit is refus
 poke "$R69" step-line T9 'landed red on widget.test.sh, owed'
 expect_eq "69e00 a writer verb at current: 6 with the debt open (step-line): admitted, its copy judged at current: 4" "0" "$RC"
 expect_contains "69e00b …and its line is written" "- T9: landed red on widget.test.sh, owed" "$(cat "$P69")"
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\nrc=0\n' "$S69_H" \
-  > "$R69/.bionic/docs/record/w27/floor-late.log"
+printf 'all suites passed\nGating: 1 passed, 0 failed\n' | floor_fixture --pre $'floor log\nenv: os=fixture' \
+  "$P69" "$R69/.bionic/docs/record/w27/floor-late.log" "$S69_H" 0 0  # with its run line (wave-37 T4; D7)
 poke "$R69" proof-add floor record/w27/floor-late.log
 expect_eq "69e proof-add floor of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
 expect_regex "69e2 …and the floor proof line is written at the fixture's head" "^proved: kind=floor head=${S69_H} " \
@@ -3421,8 +3425,9 @@ s72_add() {  # <evidence relative to the record> -> poke proof-add floor, the pl
   s42_snap "$S72R" "$S72P"
   poke "$S72R" proof-add floor "record/wave-01-fixture/$1"
 }
-s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35)
-  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\nrc=0\n' "$2" > "$S72REC/$1"
+s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35), with
+  # the run line the machine records for it (wave-37 T4; D7: tests/lib/floor-fixture.sh)
+  printf 'Gating: 4 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/$1" "$2" 0 0
 }
 s72_state() {  # -> proof_state's one line for the plan
   bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null
@@ -3462,11 +3467,11 @@ expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'cove
 # Through wave-35 the judge counted the suites at the head, and a run of one suite of four was refused as not whole.
 # The floor reads no roster now: the plan's regression row names what ran, and a log that opens head=<F> dirty=0 and
 # ends rc=0, every later commit proved, is accepted whatever it ran.
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$S72F" > "$S72REC/floor-part.txt"
+printf 'Gating: 1 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part.txt" "$S72F" 0 0
 s72_add floor-part.txt
 expect_eq "72b a run of one suite at F, every later commit proved: accepted, no roster counted (exit 0)" "0" "$RC"
 expect_eq "72b2 AC-7.10 …the proof naming F" "$S72F" "$(s46_last "$S72P" floor)"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nrc=0\n' "$S72C2" > "$S72REC/floor-part-H.txt"
+printf 'Gating: 2 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part-H.txt" "$S72C2" 0 0
 s72_add floor-part-H.txt
 expect_eq "72b3 a run of two suites at the working head itself: accepted (exit 0)" "0" "$RC"
 expect_eq "72b4 …the proof naming the working head" "$S72C2" "$(s46_last "$S72P" floor)"
@@ -3537,7 +3542,7 @@ s42_unchanged "72g a whole run at a commit off the working branch" 1 "$S72P"
 expect_contains "72g2 …says it is not in the working branch's history" \
   "floor-X.txt read head ${S72X:0:12}, which is not in the history of the working branch (at ${S72C6:0:12})" "$OUT"
 s72_config "floor: true"
-printf 'head=%s dirty=0\ncommand: true\nrc=0\n' "$S72F" > "$S72REC/floor-run-F.log"
+printf 'command: true\n' | floor_fixture "$S72P" "$S72REC/floor-run-F.log" "$S72F" 0 0
 s72_add floor-run-F.log
 expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
 S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
@@ -3895,4 +3900,208 @@ SBF_MARKS="$(bash -c '. "$1" && units_born_marks "$2"' _ "${BIONIC_HOOKS_DIR}/..
 expect_contains "BFV-10 the judge's reader still reads the floor marker that carries of=floor" "$(printf 'T6\tfloor\ta.test.sh')" "$SBF_MARKS"
 expect_contains "BFV-10b …and the one that carries of=standing@" "$(printf 'T7\tfloor\ts.test.sh')" "$SBF_MARKS"
 POKE_BOUND="$SBF_BOUND_WAS"
+
+# ============================================================
+section "§COVER: the refusal prints the basis, and a read-only verb prints the same (wave-37 T8; REQ-4 AC-4.1, AC-4.2; D8)"
+# ============================================================
+# `current 7` refuses a plan whose reading no longer reaches the head with `review <q> … uncovered <a>..<b>`. It
+# now prints, under that line, the `cover <sha> <basis>` lines lib/proof.sh `facts_cover` builds for that range and
+# question, and ends the line with ` · ask: session-poker.sh cover <q> <a>..<b>`. The verb `cover <q> <a>..<b>` is
+# that ask: read-only, it prints the same lines on stdout and exits 0. The tick never calls it. The text above the
+# lines is the refusal's own and does not change (every `current 7` and `current 8` pin holds).
+# FIXTURE FIDELITY: §CUR7's repository shape (session-poker-4 C7): a real repository on wave/01-fixture, a double
+# wave plan the real gate admits at Step 6, every fact in the production writer's shape (`proof_line`,
+# `proof_floor_line`); one code commit C past the commit B every fact reads. Every move is the real verb, and the
+# assertions read the verb's own stderr and stdout, never `facts_cover`.
+# fails-when: the refusal prints no basis, the line carries no ask, or the verb prints other lines than the refusal.
+SCV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+SCV_R="$(make_repo cover-basis)"
+git -C "$SCV_R" config user.email t@example.com; git -C "$SCV_R" config user.name "Dana Fixture"
+printf '.bionic\n' > "$SCV_R/.gitignore"
+mkdir -p "$SCV_R/tests" "$SCV_R/lib" "$SCV_R/.bionic/docs/plans" "$SCV_R/.bionic/docs/record/w35"
+printf '#!/bin/bash\nexit 0\n' > "$SCV_R/tests/a.test.sh"; printf 'one\n' > "$SCV_R/lib/x.sh"
+( cd "$SCV_R" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
+printf 'generic fixture proof\n' > "$SCV_R/.bionic/docs/record/generic-evidence.md"
+SCV_B="$(git -C "$SCV_R" rev-parse HEAD)"
+SCV_C="$(s57_commit "$SCV_R" lib/x.sh 'C: a code change past every reading')"
+SCV_P="$SCV_R/.bionic/docs/plans/wave-x.plan.md"
+scv_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$SCV_LIB" "$@"; }
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+  printf 'current: 6\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+  printf -- '- Step 4: dispatched, record/w35/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$SCV_B"
+  printf -- '- Step 5: floor, record/w35/floor.log\n- Step 6: review at record/w35/review.md\n'
+  printf -- '- Step 7: documented at record/w35/docs.md\n  n/a: no decision this run\n'
+  bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w35/floor.log ""' _ "$SCV_LIB" "$SCV_B"
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/evidence.md evidence w-read pass piece
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/adversarial.md adversarial w-read pass piece
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/structure.md structure w-read pass piece
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/adversarial-whole.md adversarial w-read pass whole
+  scv_line review "$SCV_B" 2026-10-12T12:00:00Z record/w35/structure-whole.md structure w-read pass whole
+  printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+  printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+  printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
+} > "$SCV_P"
+bind_marker "$SCV_R" "$SCV_P"
+cp "$SCV_P" "$TMPROOT/scv-before"
+scv_run() {  # <poker> <args...> -> SCV_RC, SCV_OUT (stdout alone), SCV_ERR (stderr alone), in the fixture repo
+  local k="$1"; shift
+  ( cd "$SCV_R" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$k" "$@" > "$TMPROOT/scv.out" 2> "$TMPROOT/scv.err" ); SCV_RC=$?
+  SCV_OUT="$(cat "$TMPROOT/scv.out")"; SCV_ERR="$(cat "$TMPROOT/scv.err")"
+}
+SCV_Q=adversarial; SCV_RANGE="${SCV_B}..${SCV_C}"
+SCV_ASK="session-poker.sh cover ${SCV_Q} ${SCV_RANGE}"
+SCV_UNC="$(printf 'review\t%s\tbionic:critic\tpiece\tuncovered\t%s' "$SCV_Q" "$SCV_RANGE")"
+SCV_FS="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$SCV_LIB" "$SCV_P" "$SCV_C" 2>/dev/null | awk -F'\t' '$1 == "review" && $2 == "adversarial" && $4 == "piece"')"
+expect_eq "SCV-0 precondition: the judge reads the adversarial piece line uncovered from B to C" "$SCV_UNC" "$SCV_FS"
+
+# ---------- the refusal prints the basis under the uncovered line ----------
+scv_run "$POKER" current 7
+expect_eq "SCV-1 AC-4.1 current 7 with code past every reading is refused (exit 1)" "1" "$SCV_RC"
+expect_true "SCV-1b …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/scv-before" "$SCV_P"
+expect_contains "SCV-2 …the refusal's own text above the lines is as it was" \
+  "current: 7 is admitted only when every fact the run owes holds at the working head $SCV_C, and these do not (facts_state):" "$SCV_ERR"
+expect_contains "SCV-3 …the uncovered line ends with the ask that reproduces the basis" "${SCV_UNC} · ask: ${SCV_ASK}" "$SCV_ERR"
+expect_contains "SCV-4 …and a cover line names the commit that owes, with its basis" "cover ${SCV_C} owes" "$SCV_ERR"
+SCV_UNDER="$(printf '%s\n' "$SCV_ERR" | awk -v u="${SCV_UNC} · ask: ${SCV_ASK}" '$0 == u { f = 1; next } f && /^cover / { print; next } { f = 0 }')"
+expect_eq "SCV-5 …the cover line sits directly under the uncovered line it answers" "cover ${SCV_C} owes" "$SCV_UNDER"
+SCV_UNDER_Q2="$(printf '%s\n' "$SCV_ERR" | awk -v u="$(printf 'review\tstructure\tbionic:critic\tpiece\tuncovered\t%s' "$SCV_RANGE") · ask: session-poker.sh cover structure ${SCV_RANGE}" '$0 == u { f = 1; next } f && /^cover / { print; next } { f = 0 }')"
+expect_eq "SCV-5b …and so does the next question's line, with its own ask" "cover ${SCV_C} owes" "$SCV_UNDER_Q2"
+
+# ---------- the verb prints the same lines, and writes nothing ----------
+scv_run "$POKER" cover "$SCV_Q" "$SCV_RANGE"
+expect_eq "SCV-6 AC-4.2 cover <q> <a>..<b> exits 0" "0" "$SCV_RC"
+expect_eq "SCV-6b …prints the cover line on stdout" "cover ${SCV_C} owes" "$SCV_OUT"
+expect_eq "SCV-6c …and nothing on stderr" "" "$SCV_ERR"
+expect_eq "SCV-6d …the lines are the ones the refusal printed under the uncovered line" "$SCV_UNDER" "$SCV_OUT"
+expect_true "SCV-6e …and the plan is byte-identical (cmp): the verb writes nothing" cmp -s "$TMPROOT/scv-before" "$SCV_P"
+expect_eq "SCV-6f …and the working tree is clean" "" "$(git -C "$SCV_R" status --porcelain)"
+scv_run "$POKER" cover evidence "$SCV_B..$SCV_B"
+expect_eq "SCV-7 a range every commit of which holds prints no cover line and exits 0 (beside SCV-6)" "0|" "$SCV_RC|$SCV_OUT"
+scv_run "$POKER" cover adversarial
+expect_eq "SCV-8 cover with no range is the usage error (exit 2)" "2" "$SCV_RC"
+expect_contains "SCV-8b …and the usage line names the verb" "session-poker.sh cover <question> <a>..<b>" "$SCV_ERR"
+scv_run "$POKER" cover adversarial "$SCV_B"
+expect_eq "SCV-8c a range that is no <a>..<b> is the usage error (exit 2)" "2" "$SCV_RC"
+scv_run "$POKER" cover fine "$SCV_RANGE"
+expect_eq "SCV-8d a question outside evidence, adversarial, structure is the usage error (exit 2)" "2" "$SCV_RC"
+scv_run "$POKER" cover adversarial "${SCV_B}..0000000000000000000000000000000000000000"
+expect_eq "SCV-8e a head that is no commit here is refused (exit 1)" "1" "$SCV_RC"
+expect_contains "SCV-8f …in the library's words" "is no commit here" "$SCV_ERR"
+
+# ---------- the tick never asks: facts_cover has the one call site, the verb's and the refusal's helper ----------
+SCV_CALLS="$(awk '/^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { n++ } END { print n + 0 }' "${BIONIC_HOOKS_DIR}/session-poker.sh")"
+expect_eq "SCV-9 the hook calls facts_cover from exactly one place, the helper both the refusal and the verb print through" "1" "$SCV_CALLS"
+expect_eq "SCV-9b …and that place is inside cover_basis" "cover_basis" \
+  "$(awk '/^[a-z_0-9]+\(\)/ { fn = $1; sub(/\(\).*/, "", fn) } /^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { print fn }' "${BIONIC_HOOKS_DIR}/session-poker.sh")"
+
+# ---------- a mutant that empties the verb's print while the refusal's basis stands goes red ----------
+# The print is one line of the verb's arm; the mutant prints an empty line there and nothing else changes.
+SCV_MROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-cover-mut.XXXXXX")"; mkdir -p "$SCV_MROOT/hooks" "$SCV_MROOT/scripts"
+ln -s "$(cd "$SCV_LIB" && pwd -P)" "$SCV_MROOT/scripts/lib"
+for scv_h in "${BIONIC_HOOKS_DIR}"/*; do [ "${scv_h##*/}" = session-poker.sh ] || ln -s "$scv_h" "$SCV_MROOT/hooks/${scv_h##*/}"; done
+anchor file hooks/session-poker.sh '"$COV_VERB_LINES"' '""' "$SCV_MROOT/hooks/session-poker.sh"
+scv_verb_reads() {  # <poker> -> ok when the verb prints the refusal's cover line, else red
+  scv_run "$1" cover "$SCV_Q" "$SCV_RANGE"
+  [ "$SCV_RC" = 0 ] && [ "$SCV_OUT" = "cover ${SCV_C} owes" ] && printf ok || printf red
+}
+expect_eq "SCV-10 the shipped verb reads green on the row the mutant is judged by" "ok" "$(scv_verb_reads "$POKER")"
+scv_run "$SCV_MROOT/hooks/session-poker.sh" current 7
+expect_contains "SCV-10b the mutant still runs, and its refusal still carries the cover line (facts_cover stands)" "cover ${SCV_C} owes" "$SCV_ERR"
+scv_run "$SCV_MROOT/hooks/session-poker.sh" cover "$SCV_Q" "$SCV_RANGE"
+expect_eq "SCV-10c …its verb still exits 0" "0" "$SCV_RC"
+expect_absent "SCV-10d …and prints no cover line (beside SCV-6b, which reads the shipped verb's)" "cover ${SCV_C}" "$SCV_OUT"
+expect_eq "SCV-10e …so the row SCV-6 holds goes red" "red" "$(scv_verb_reads "$SCV_MROOT/hooks/session-poker.sh")"
+rm -rf "$SCV_MROOT"
+
+# ============================================================
+section "§DRY: the step verb's dry copy reads the origin plan's landing record, so a finding fixed by a landed row is fixed on the copy (wave-37 T2; REQ-9 AC-9.1; D12)"
+# ============================================================
+# `current <n>` proves its move by a dry commit of a COPY of the plan, `<plan>.current-dry.<pid>`, under the session
+# `planverb-<pid>`, whose marker says `dry_of=<plan>` (`plan_verb_dry`). From Step 6 the commit wall derives each
+# reading's result (lib/proof.sh `proof_readings_derived`), and a finding a landed row fixed (`moved: <record>#<n>
+# to=fixed row=<T>`) is found through the run's landing record. Until wave-37 the wall asked for that record by the
+# copy's name, `record/wave-x.plan.md.current-dry.<pid>/landing-proofs.log`, which no landing writes: the fix was
+# invisible, the reading kept its written `fail`, and `current 6` refused a plan the judge reads as fixed. The wall
+# now maps the copy to its origin (`proof_debt_origin`) BEFORE the derivation and hands the origin over as the
+# record's plan; the copy's text stays the text read.
+#
+# FIXTURE FIDELITY. A real repository on a feature branch: a base commit, the reading's head (a code commit), the
+# fix's landing (a code commit, the one T9's green verdict names). A double wave plan at `current: 5` bound to this
+# session, every reading in the production writer's shape (`proof_line`), the adversarial reading `fail` with one
+# S2 finding and one S3 note in its record, T9 `landed` in `## Tasks`, the move in `finding-move`'s shape, and the landing record
+# at `record/wave-x/landing-proofs.log` holding T9's verdict in T1's grammar (`width=` after `log=`). The move is the
+# real verb, so the libraries load as the hook loads them (wave-36 A-orch-16 blamed a `declare -F` guard by running
+# a sourced function with no library loaded; this row runs nothing but the hook).
+# fails-when: `current 6` refuses the moved-and-landed reading on the copy while the judge reads it fixed.
+SDR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+SDR_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+SDR_R="$(make_repo dry-fixed)"
+git -C "$SDR_R" config user.email t@example.com; git -C "$SDR_R" config user.name "Dana Fixture"
+printf '.bionic\n' > "$SDR_R/.gitignore"; printf 'seed\n' > "$SDR_R/README.md"
+mkdir -p "$SDR_R/tests" "$SDR_R/lib" "$SDR_R/.bionic/docs/plans" "$SDR_R/.bionic/docs/record/w37" "$SDR_R/.bionic/docs/record/wave-x"
+printf '#!/bin/bash\nexit 0\n' > "$SDR_R/tests/x.test.sh"
+( cd "$SDR_R" && git add README.md .gitignore tests && git commit -qm seed && git checkout -q -b feature/t2 ) >/dev/null 2>&1
+SDR_B="$(git -C "$SDR_R" rev-parse HEAD)"
+sdr_commit() {  # <text> -> lib/x.sh holds <text>, committed; the new commit's sha
+  printf '%s\n' "$1" > "$SDR_R/lib/x.sh"
+  ( cd "$SDR_R" && git add lib/x.sh && git commit -qm "lib/x.sh: $1" ) >/dev/null 2>&1
+  git -C "$SDR_R" rev-parse HEAD
+}
+SDR_H="$(sdr_commit 'the reading head')"
+SDR_F="$(sdr_commit 'the fix T9 landed')"
+printf 'generic fixture proof\n' > "$SDR_R/.bionic/docs/record/generic-evidence.md"
+{ printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 2\n' "${SDR_B:0:10}" "${SDR_H:0:10}"
+  printf 'finding: 1 S2 on lib/x.sh:1 the value is lost on a second run\nshown: 1 bash lib/x.sh; bash lib/x.sh\nfinding: 2 S3 off lib/x.sh:1 a message could be clearer\n\nwhat the reader found\n'
+} > "$SDR_R/.bionic/docs/record/w37/adversarial.md"
+SDR_P="$SDR_R/.bionic/docs/plans/wave-x.plan.md"
+SDR_REC="$SDR_R/.bionic/docs/record/wave-x/landing-proofs.log"
+printf 'line/v1|ev=verdict|row=T9|commit=%s|suite=x.test.sh|result=green|log=%s/.bionic/docs/record/wave-x/line/T9-x.log|width=1|at=2026-10-04T13:00:00Z\n' \
+  "$SDR_F" "$SDR_R" > "$SDR_REC"
+sdr_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$SDR_LIB" "$@"; }
+SDR_MOVED="moved: record/w37/adversarial.md#1 to=fixed row=T9 by=Dana Fixture at=2026-10-04T14:00:00Z"
+sdr_plan() {  # <extra SDLC line> -> SDR_P at current: 5, bound to this session
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nworking-branch: feature/t2\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: 5\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+    printf -- '- Step 4: dispatched, record/w37/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t2\n' "$SDR_B"
+    printf -- '- T9: landed %s 2026-10-04T13:00:00Z\n' "$SDR_F"
+    printf -- '- Step 5: floor green, record/w37/floor.log\n'
+    sdr_line review "$SDR_H" 2026-10-04T12:00:00Z record/w37/evidence.md evidence w-read pass piece
+    sdr_line review "$SDR_H" 2026-10-04T12:00:00Z record/w37/adversarial.md adversarial w-read fail piece
+    sdr_line review "$SDR_H" 2026-10-04T12:00:00Z record/w37/structure.md structure w-read pass piece
+    [ -z "$1" ] || printf '%s\n' "$1"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T9 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed |\n'
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+    printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
+  } > "$SDR_P"
+  bind_marker "$SDR_R" "$SDR_P"
+}
+
+# ---------- the control: with no move, the copy is refused on the reading, and the plan is unchanged ----------
+sdr_plan ""
+cp "$SDR_P" "$TMPROOT/sdr-before"
+poke "$SDR_R" current 6
+expect_eq "SDR-0 control: the fail reading with no move names no fixed finding, so current 6 is refused (exit 1)" "1" "$RC"
+expect_contains "SDR-0b …on the adversarial reading's record" "record/w37/adversarial.md" "$OUT"
+expect_true "SDR-0c …and the plan is byte-identical, current: 5 kept (cmp)" cmp -s "$TMPROOT/sdr-before" "$SDR_P"
+
+# ---------- the row: the move names T9, T9 landed green, and the copy's commit finds it ----------
+sdr_plan "$SDR_MOVED"
+expect_eq "SDR-1 precondition: on the plan itself the wall's deriver reads the written fail as flag (the S2 fixed, the S3 note left)" \
+  "record/w37/adversarial.md	fail	flag" \
+  "$(bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_readings_derived "$2" "$3"' _ "$SDR_LIB" "$SDR_P" "$SDR_R" 2>/dev/null | awk -F'\t' '$1 == "record/w37/adversarial.md"')"
+poke "$SDR_R" current 6
+expect_eq "SDR-2 AC-9.1 current 6 over a fail reading whose one finding is moved to=fixed by a landed row: admitted (exit 0)" "0" "$RC"
+expect_eq "SDR-2b …and the plan moved to current: 6" "current: 6" "$(/usr/bin/grep -m1 '^current:' "$SDR_P")"
+POKE_BOUND="$SDR_BOUND_WAS"
+
 finish

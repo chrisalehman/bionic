@@ -1511,4 +1511,25 @@ else
   ok "22.1-22.5: skip: no bash >= 4 on this machine (looked for /opt/homebrew/bin/bash, /usr/local/bin/bash, bash on PATH)"
 fi
 
+# THE START CWD (wave-37 T5; D9, ADR-058). The record carries `cwd=`, the physical directory the session started
+# in: the CLI files a session's transcript under that directory's name, and a session started in a subdirectory
+# or a worktree files it under a name other than the root's, so the words reader (lib/said.sh) looks there too.
+# The record still lives under the project root, and `cwd=` follows `started=`, so the header readers that stop
+# at a key they do not know (close-out.sh co_governed_rows) still read root=, commit= and started=.
+P23=$(make_env 3600s); mkdir -p "$P23/sub"
+L23_REC="$P23/.bionic/tmp/loaded-$CUR_SID.state"
+OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P23/sub" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq   "23.1 a session started in a subdirectory: exit 0" "0" "$(rc)"
+eq   "23.2 the record under the project root carries cwd=, the start directory, physical" \
+  "cwd=$(cd "$P23/sub" && pwd -P)" "$(grep '^cwd=' "$L23_REC" 2>/dev/null)"
+eq   "23.3 …and root= is still CLAUDE_PLUGIN_ROOT" "root=$L_ROOT" "$(grep '^root=' "$L23_REC" 2>/dev/null)"
+eq   "23.4 …the header keys in order, cwd= after started=" "root commit started cwd" \
+  "$(sed -n 's/^\([a-z]*\)=.*/\1/p' "$L23_REC" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+eq   "23.5 …and one sha256 line per loaded file, as before" \
+  "$(printf '%s\n' "$L_WANT" | wc -l | tr -d ' ')" "$(l_hashes "$L23_REC" | wc -l | tr -d ' ')"
+P23b=$(make_env 3600s)
+OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P23b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq   "23.6 a session started at the root records the root as its cwd" \
+  "cwd=$(cd "$P23b" && pwd -P)" "$(grep '^cwd=' "$P23b/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+
 finish

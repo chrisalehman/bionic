@@ -36,6 +36,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -2015,7 +2016,8 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # record and the gate's requests and only printed. The plan is NAMED to the report, never resolved
 # through the session: act 3 has wiped the session's binding before the continuation is written.
 # FIXTURE FIDELITY: the events are PLANTED in the Interfaces table's `line/v1` shape, which
-# lib/line.sh writes; the gate store is the sandbox's own, empty.
+# lib/line.sh writes; the gate store is the sandbox's own, empty. Each row line carries the wait/run split
+# and the width (wave-37 T9; AC-11.3): the report reads them from this record alone, and the block fences the rows whole.
 LAND_GATE="$SANDBOX/land-gate"; mkdir -p "$LAND_GATE/requests"
 LAND_C="$(printf 'c%.0s' $(seq 40))"
 # land_section <continuation> -> what stands under `## Landings`, up to the next `## `, fences and blank
@@ -2026,7 +2028,8 @@ land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing
   case "$1" in "$SANDBOX"/*) : ;; *) echo "land_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   mkdir -p "${rec%/*}"
   printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
+  printf 'line/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
   printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
   printf 'line/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
 }
@@ -2038,9 +2041,9 @@ expect_eq "LAND-2 the continuation carries the heading ## Landings exactly once"
   "$(/usr/bin/grep -c '^## Landings$' "$PLD/$CONT_REL" | tr -d ' ')"
 expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-4 …the report's line, then a line per landed row, as landing-report --rows prints them" \
-"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0
-T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=0s
-T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s" \
+"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0
+T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=0s wait=2.0 prove=18.0 line=10.0 width=2
+T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
   "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-5 …and the heading sits after ## Deferrals and before the Resume instruction" "yes" \
   "$(awk '/^## Deferrals$/ { a = NR } /^## Landings$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PLD/$CONT_REL")"
@@ -2050,7 +2053,7 @@ expect_eq "LAND-6 …and the Deferrals section above it still ends at its own he
 PLZ="$(mk_fixture landings2)"; advance_to "$PLZ" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLZ" run
 expect_eq "LAND-7 a run with no landing record exits 0 and its continuation carries the line with zeros, and no row" \
-  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 · waited median=0s · killed=0" \
+  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
   "$CO_RC|$(land_section "$PLZ/$CONT_REL")"
 # an existing continuation is never overwritten: no section is added to it
 PLE="$(mk_fixture landings3)"; advance_to "$PLE" 8
@@ -2329,11 +2332,12 @@ expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), i
   "0|head=$FL_H dirty=0|rc=0" \
   "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
-# with the project root, as proof-add calls it, attests the declared log, and proof_add_line places the line.
+# with the plan and the project root, as proof-add calls it, attests the declared log by the run line floor-run
+# wrote beside it (wave-37 T4; D7), and proof_add_line places the line.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
 # Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
 FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
-  h="$(proof_attested floor "$2/record/wave-01-fixture/floor-run-$3.log" "$4" "" "" "$5")" || { printf "%s" "$h"; exit 1; }
+  h="$(proof_attested floor "$2/record/wave-01-fixture/floor-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
   proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/floor-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
 expect_eq "FL2 the judge attests the declared floor's log at the working head, and the floor fact is written from it" "$FL_H|1" \
@@ -2353,11 +2357,12 @@ sed '/^proved: kind=floor /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/
 ( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
 FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
 mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
-printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FN_H" > "$PFN/.bionic/docs/record/wave-01-fixture/ci.log"
+# THE RUN IS RECORDED (wave-37 T4; D7, ADR-057): the log and its run line, as tests/lib/floor-fixture.sh writes them.
+printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFN/$PLAN_REL" "$PFN/.bionic/docs/record/wave-01-fixture/ci.log" "$FN_H" 0 0
 expect_eq "FL5 precondition: no floor fact, no tests/ at the working head, and no floor: or floor-attestation: in the config" "0|0|0" \
   "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
 FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
-  h="$(proof_attested floor "$2/record/wave-01-fixture/ci.log" "$3" "" "" "$4")" || { printf "%s" "$h"; exit 1; }
+  h="$(proof_attested floor "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
   proof_add_line "$5" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
 expect_eq "FL6 AC-7.10 the judge attests the project's own runner's log, no key and no roster, and the floor fact is written from it" \

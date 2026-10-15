@@ -13,6 +13,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/canonical-sdlc-evidence-gate.prelude.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 
@@ -3849,10 +3850,14 @@ DP_B="$(git -C "$RDP" rev-parse HEAD)"
 DP_C1="$(fp_commit "$RDP" a.sh one)"
 DP_C2="$(fp_commit "$RDP" a.sh two)"
 DP_PLAN="$(fp_plan_path "$RDP")"
-DP_CFG="$FP_ROOT/dp-config"; mkdir -p "$DP_CFG/projects/fixture" "$DP_CFG/bionic" "$FP_ROOT/dp-home" "$FP_ROOT/dp-gate"
+DP_CFG="$FP_ROOT/dp-config"; mkdir -p "$DP_CFG/bionic" "$FP_ROOT/dp-home" "$FP_ROOT/dp-gate"
+# The transcript under the repository's own name (lib/detect.sh `project_slug`) and the session's load record
+# under it: the two witnesses the words reader asks for (wave-37 T5; D9, session-poker-4 §WITNESS).
+DP_PROJ="$DP_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$FP_LIB" "$RDP")"; mkdir -p "$DP_PROJ"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RDP" > "$RDP/.bionic/tmp/loaded-$FP_SID.state"
 dp_typed() {  # <prompt> -> one typed prompt appended to the session's transcript
   jq -cn --arg c "$1" --arg s "$FP_SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
-    message: {role: "user", content: $c}, sessionId: $s}' >> "$DP_CFG/projects/fixture/$FP_SID.jsonl"
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$DP_PROJ/$FP_SID.jsonl"
 }
 dp_typed "defer the side path finding to the next wave please"
 dp_typed "defer the parser crash finding as well"
@@ -3999,7 +4004,7 @@ printf 'floor: bash floor.sh\n' > "$ANR/.bionic/config.yaml"
 printf 'two\n' > "$ANR/x.txt"; an_git commit -qam "F: T1 landed"
 AN_F="$(an_git rev-parse HEAD)"
 AN_LOG="$ANREC/floor-${AN_F:0:12}.log"
-printf 'head=%s dirty=0\ncommand: bash floor.sh\nfloor: 3 passed, 0 failed\nrc=0\n' "$AN_F" > "$AN_LOG"
+printf 'command: bash floor.sh\nfloor: 3 passed, 0 failed\n' | floor_fixture "$ANP" "$AN_LOG" "$AN_F" 0 0  # with its run line (wave-37 T4; D7)
 printf 'three\n' > "$ANR/x.txt"; an_git commit -qam "F+1: T2 landed"; AN_F1="$(an_git rev-parse HEAD)"
 printf 'four\n' > "$ANR/x.txt"; an_git commit -qam "F+2: T3 landed"; AN_F2="$(an_git rev-parse HEAD)"
 an_verdict() {  # <row> <commit> — the row's green verdict at <commit>, in the landing record
@@ -4070,15 +4075,16 @@ fo_commit() {  # <path> <text> -> the new commit on wave/a (a path under .bionic
   fo_git add -f "$1" && fo_git commit -qm "$1: $2" && fo_git rev-parse HEAD
 }
 FO_F="$(fo_commit lib/x.sh 'x two')"
-fo_log() {  # <file> <head> <passed> <failed> <listed suite>... -> a whole-run log in tests/run.sh's shape
-  local f="$FOREC/$1" h="$2" p="$3" m="$4" s; shift 4
-  { printf 'env: os=darwin bash=3.2.57 locale=C path=/pin\nhead=%s dirty=0\nRoots: hooks=/h skills=/s scripts=/x\n\n' "$h"
+fo_log() {  # <file> <head> <passed> <failed> <listed suite>... -> a whole-run log in tests/run.sh's shape, and its run line
+  local f="$FOREC/$1" h="$2" p="$3" m="$4" s rc=0; shift 4
+  # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it.
+  [ "$m" -gt 0 ] && rc=1
+  # THE RUN IS RECORDED (wave-37 T4; D7): tests/lib/floor-fixture.sh writes the log and its run line together.
+  { printf 'Roots: hooks=/h skills=/s scripts=/x\n\n'
     for s in "$@"; do printf '%s ✗ FAIL\n───── %s: captured output ─────\nFAIL: (1) it broke\n───── end %s ─────\n' "$s" "$s" "$s"; done
     printf '──────────────\nGating: %s passed, %s failed\nenv: os=darwin\n' "$p" "$m"
     if [ "$m" -gt 0 ]; then printf 'Failed:\n'; for s in "$@"; do printf '    - %s\n' "$s"; done; fi
-    # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it.
-    if [ "$m" -gt 0 ]; then printf 'rc=1\n'; else printf 'rc=0\n'; fi
-  } > "$f"
+  } | floor_fixture --pre 'env: os=darwin bash=3.2.57 locale=C path=/pin' "$FOP" "$f" "$h" 0 "$rc"
 }
 fo_run() {  # <script> -> bash with the proof library (and what it reads) from FO_LIB
   env FOR="$FOR" FOP="$FOP" FOREC="$FOREC" bash -c '. "$1/worktree.sh" && . "$1/session.sh" && . "$1/roots.sh" && . "$1/proof.sh" || exit 99
@@ -4198,5 +4204,56 @@ FO_D3="$(fo_commit lib/x.sh 'x five')"
 FO_ST="$(fo_state)"
 expect_eq "FD-3 control: a code commit with no run recorded at it is uncovered" "uncovered" "${FO_ST%%	*}"
 expect_contains "FD-3b …naming it" "commit ${FO_D3:0:12} (no landing row) is not proved: no suite run is recorded at it" "$FO_ST"
+
+# ============================================================
+section "§SLUG: one reader names a plan's slug, and maps a plan verb's dry copy to its origin only under the origin's guard (wave-37 T2; REQ-9 AC-9.2; D12)"
+# ============================================================
+# lib/proof.sh `proof_plan_slug <plan> [<sid> <marker>]` is the plan's name less `.plan.md`. Given a session and its
+# marker, a plan verb's copy `<plan>.<verb>-dry.<pid>` reads as its origin's slug when all three of
+# `proof_debt_origin`'s conditions hold (the session is `planverb-<pid>`, the marker says `dry_of=<plan>`, the bound
+# name is `<dry_of>.<verb>-dry.<pid>` with the same pid); otherwise the copy's literal name is its slug. Never a
+# name-only strip: a session bound to a file named `X.plan.md.anything` reads its own name, not X's record (review
+# pass 60 P0-1). Every reader of a slug in the hooks and the scripts calls it, so the strip has one site.
+# FIXTURE FIDELITY: the marker is `plan_verb_dry`'s three lines (plan=, dry_of=, engaged_at=); the files are real.
+# fails-when: a dry-named copy under its planverb marker reads other than X, or a copy without the marker, under
+# another session, or of another shape reads X; or any other site in the hooks or scripts strips `.plan.md` itself.
+SLG_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+SLG_D="$(mktemp -d)"; cleanup_dirs+=("$SLG_D"); SLG_D="$(cd "$SLG_D" && pwd -P)"
+SLG_PLAN="$SLG_D/wave-x.plan.md"; SLG_COPY="$SLG_PLAN.current-dry.4242"; SLG_ODD="$SLG_PLAN.anything"
+: > "$SLG_PLAN"; : > "$SLG_COPY"; : > "$SLG_ODD"
+printf 'plan=%s\ndry_of=%s\nengaged_at=2026-10-15T00:00:00Z\n' "$SLG_COPY" "$SLG_PLAN" > "$SLG_D/engaged-planverb-4242.state"
+printf 'plan=%s\ndry_of=%s\nengaged_at=2026-10-15T00:00:00Z\n' "$SLG_ODD" "$SLG_PLAN" > "$SLG_D/engaged-odd.state"
+slg() {  # <args...> -> proof_plan_slug's line and rc, as `<slug>|<rc>`
+  local o rc=0
+  o="$(bash -c '. "$1/proof.sh" && shift && proof_plan_slug "$@"' _ "$SLG_LIB" "$@" 2>/dev/null)" || rc=$?
+  printf '%s|%s' "$o" "$rc"
+}
+expect_eq "SLG-1 the plan's slug is its name less .plan.md" "wave-x|0" "$(slg "$SLG_PLAN")"
+expect_eq "SLG-2 AC-9.2 a dry-named copy under its planverb session and marker reads as its origin" \
+  "wave-x|0" "$(slg "$SLG_COPY" planverb-4242 "$SLG_D/engaged-planverb-4242.state")"
+expect_eq "SLG-3 …the same copy with no session or marker reads its literal name (beside SLG-2)" \
+  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY")"
+expect_eq "SLG-3b …and with the session but a marker that is not there, its literal name" \
+  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY" planverb-4242 "$SLG_D/engaged-none.state")"
+expect_eq "SLG-4 …under another session with the same marker, its literal name" \
+  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY" 5d6e7f80-1a2b-4c3d-8e9f-0a1b2c3d4e5f "$SLG_D/engaged-planverb-4242.state")"
+expect_eq "SLG-4b …under a planverb session of another pid, its literal name" \
+  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY" planverb-4343 "$SLG_D/engaged-planverb-4242.state")"
+expect_eq "SLG-5 a file named <plan>.anything under a planverb session whose marker says dry_of=<plan> reads its own name: no name-only strip" \
+  "wave-x.plan.md.anything|0" "$(slg "$SLG_ODD" planverb-4242 "$SLG_D/engaged-odd.state")"
+expect_eq "SLG-6 a name that is nothing but .plan.md names no slug (rc 1)" "|1" "$(slg "$SLG_D/.plan.md")"
+
+# THE CENSUS: the one strip site. The research's grep (record/wave-37-landing-pace/research-false-tellers.md §F) over
+# the hooks, the scripts and the libraries finds a `.plan.md` strip only in proof_plan_slug's body.
+slg_census() {  # -> `<file>:<function>` for each line the census grep matches, outside comments
+  local f
+  for f in "${BIONIC_HOOKS_DIR}"/*.sh "${BIONIC_HOOKS_DIR}/../payload/scripts"/*.sh "$SLG_LIB"/*.sh; do
+    awk -v f="${f##*/}" '/^[a-zA-Z_][a-zA-Z_0-9]*\(\)/ { fn = $1; sub(/\(\).*/, "", fn) }
+      /^[[:space:]]*#/ { next }
+      /%\.plan\.md/ || /basename "[^"]*" \.plan\.md/ { print f ":" fn }' "$f"
+  done
+}
+expect_eq "SLG-7 AC-9.2 the census grep finds one strip, and it is inside lib/proof.sh proof_plan_slug" \
+  "proof.sh:proof_plan_slug" "$(slg_census)"
 
 finish

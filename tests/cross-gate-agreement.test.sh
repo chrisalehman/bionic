@@ -9689,8 +9689,12 @@ expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
 # LIST-valued fields it exempts from the 400-char cut (`suites_allowed=`, `files=`) survive
 # whole; the call site's literal text changed, the property this pin checks (one group,
 # one call) did not.
-expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
-  "$(grep -c 'suites_allowed=\$(clean "\$sallow" suites_allowed)' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+# SPELLING UPDATED AGAIN (wave-37 T7, D11): the list fields are the set `ROSTER_LIST_FIELDS` names
+# once, and `adopt_write_row` passes each one the source row carries by name through the same
+# `clean` in one loop; the group rule (a stated group lacking `files=` or `suites_allowed=` gets the
+# empty member, and `suites_source=` goes with them) is two lines beside it. Both are counted.
+expect_eq "S13.4 …and session-poker builds its three as one group: every list field through clean by name, the group's missing members empty" "1 1 1" \
+  "$(grep -c 'LIST_FIELDS_ARGS+=("\$lf=\$(clean "\$(line_field "\$src" "\$lf")" "\$lf")")' "$BIONIC_HOOKS_DIR/session-poker.sh") $(grep -c 'row_has_key "\$src" suites_allowed || LIST_FIELDS_ARGS+=("suites_allowed=")' "$BIONIC_HOOKS_DIR/session-poker.sh") $(grep -c 'LIST_FIELDS_ARGS+=("suites_source=\$(clean "\$ssrc")")' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 
 # MUTATION (§N-shaped, :3572-3588) — the shape-aware grep must actually REJECT a planted
 # assembler, not merely fail to see one that was never there. TWO copies of
@@ -13515,12 +13519,21 @@ sd_world() {  # <label> <ready ids the ledger line answered, comma-joined> -> re
     > "$r/sd-turn.jsonl"
   printf '%s' "$r"
 }
-sd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/sd-no-config" "${CGC_ENV[@]}" "$@"; }
+# THE GATE'S ROOM IS THE FIXTURE'S (wave-37 T18; REQ-11 AC-11.4; D13). A decline stands only while the gate gives
+# no room or no writer slot is free, so the worlds read the tick at room=no (SD_BUSY5=8.0: the five-minute busy
+# cores over the share (the fixture shares 92%), session-poker.test.sh 11a) to see what a decline answers, and at room=yes to see it lapse.
+# The wall passes the reader no room: it reads the lapse line the tick wrote, so after a tick the two agree.
+sd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/sd-no-config" BIONIC_PROBE_BUSY_CORES_5M="${SD_BUSY5:-1.0}" "${CGC_ENV[@]}" "$@"; }
 sd_tick() {  # <repo> <poker> -> the ids the tick's FILL line names, sorted, space-joined
   cgc_ring
   ( cd "$1" && sd_env bash "$2" tick 2>&1 ) > "$1/sd-tick.out"
   sed -n 's/^poker: FILL \([A-Za-z0-9_. -]*\)$/\1/p' "$1/sd-tick.out" | head -1 | tr ' ' '\n' \
     | LC_ALL=C sort | tr '\n' ' '
+}
+sd_owed_noroom() {  # <repo> <poker> -> the ids the tick at room=no does NOT answer by the standing decline, sorted
+  rm -f "$1/.bionic/tmp/tick-digest-$SID_A.state"   # a quiet tick prints only what changed since the last
+  SD_BUSY5=8.0 sd_tick "$1" "$2" >/dev/null
+  sed -n 's/^poker: WAIT \([A-Za-z0-9_.-]*\) — ready; no writer slot free.*$/\1/p' "$1/sd-tick.out" | LC_ALL=C sort | tr '\n' ' '
 }
 sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, space-joined
   cgc_ring
@@ -13530,18 +13543,27 @@ sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, spa
     | sed 's/.* decline //' | tr ',' '\n' | LC_ALL=C sort | tr '\n' ' '
 }
 SD_R=$(sd_world some R1)
-SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
-expect_contains "SD precondition: the tick prints the standing decline" \
+SD_OWED=$(sd_owed_noroom "$SD_R" "$CGSD_POKER")
+expect_contains "SD precondition: the tick at room=no prints the standing decline" \
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — R1 waits on the base merge" "$(cat "$SD_R/sd-tick.out")"
-expect_eq "SD1 the tick fills the row the decline did not answer" "R2 " "$SD_TICK"
-expect_eq "SD2 …and the stop wall refuses the silent turn for exactly that row" "$SD_TICK" "$(sd_wall "$SD_R")"
+expect_eq "SD0 …and answers R1 by it, leaving R2, the row the decline did not see, to wait for a slot" "R2 " "$SD_OWED"
+expect_eq "SD0b …and the stop wall refuses the silent turn for exactly that row" "$SD_OWED" "$(sd_wall "$SD_R")"
+SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
+expect_contains "SD1a AC-11.4 the tick at room=yes with a free slot records the lapse" \
+  "poker: fill-declined lapsed — room=yes" "$(cat "$SD_R/sd-tick.out")"
+expect_eq "SD1 …and fills both rows, the declined one asked again" "R1 R2 " "$SD_TICK"
+expect_eq "SD2 …and the stop wall, reading the lapse the tick wrote, owes the same rows" "$SD_TICK" "$(sd_wall "$SD_R")"
 SD_RA=$(sd_world all R1,R2)
-expect_eq "SD3 a decline that answered both: the tick fills nothing" "" "$(sd_tick "$SD_RA" "$CGSD_POKER")"
+expect_eq "SD3 a decline that answered both: the tick at room=no waits on neither for a slot" "" "$(sd_owed_noroom "$SD_RA" "$CGSD_POKER")"
 expect_contains "SD3b …while it prints the decline as standing" "poker: fill-declined standing since " \
   "$(cat "$SD_RA/sd-tick.out")"
 expect_eq "SD4 …and the stop wall owes nothing either" "" "$(sd_wall "$SD_RA")"
-# THE MUTATION ARM. A planted poker whose standing read is gone: it prints `FILL R1 R2` over the
-# same fixture while the wall still refuses for R2 alone, and the pin must go red.
+SD_TICK_A=$(sd_tick "$SD_RA" "$CGSD_POKER")
+expect_eq "SD4b AC-11.4 …and at room=yes with a free slot the tick asks both again" "R1 R2 " "$SD_TICK_A"
+expect_eq "SD4c …and the wall, reading the lapse, owes both" "$SD_TICK_A" "$(sd_wall "$SD_RA")"
+# THE MUTATION ARM. A planted poker whose standing read and lapse are gone: it prints `FILL R1 R2` over the
+# same fixture and records no lapse, so the wall still reads the decline standing and owes nothing, and the pin
+# must go red.
 SD_MUT="$SANDBOX/fx/sd-mut"
 mkdir -p "$SD_MUT/hooks" "$SD_MUT/scripts"
 ln -s "$CGC_LIBDIR" "$SD_MUT/scripts/lib"
@@ -13549,7 +13571,9 @@ for _sd_sib in "$BIONIC_HOOKS_DIR"/*; do
   [ "$(basename "$_sd_sib")" = session-poker.sh ] || ln -s "$_sd_sib" "$SD_MUT/hooks/$(basename "$_sd_sib")"
 done
 anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline '
-sed 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
+anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing '
+sed -e 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' \
+    -e 's/^\( *\)SCHED_LAPSE="\$(fill_decline_lapsing .*$/\1SCHED_LAPSE=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
 SD_RM=$(sd_world mut R1,R2)
 SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
 expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
@@ -13572,26 +13596,27 @@ sd_world_verb() {  # <label> <ids to decline, comma-joined> -> repo
 }
 SDV_R=$(sd_world_verb some R1)
 expect_contains "SDV precondition: the verb recorded the decline" "decline — " "$(cat "$SDV_R/sd-decline.out")"
-SDV_TICK=$(sd_tick "$SDV_R" "$CGSD_POKER")
-expect_contains "SDV0 the tick prints the verb's decline as standing, in the reply form's words" \
+SDV_OWED=$(sd_owed_noroom "$SDV_R" "$CGSD_POKER")
+expect_contains "SDV0 the tick at room=no prints the verb's decline as standing, in the reply form's words" \
   "— R1 waits on the base merge" "$(/usr/bin/grep '^poker: fill-declined standing since ' "$SDV_R/sd-tick.out")"
-expect_eq "SDV1 the tick fills the row the verb did not name" "R2 " "$SDV_TICK"
-expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that row" "$SDV_TICK" "$(sd_wall "$SDV_R")"
+expect_eq "SDV1 …and leaves R2, the row the verb did not name, to wait for a slot" "R2 " "$SDV_OWED"
+expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that row" "$SDV_OWED" "$(sd_wall "$SDV_R")"
 SDV_RA=$(sd_world_verb all R1,R2)
-expect_eq "SDV3 a verb decline naming both: the tick fills nothing" "" "$(sd_tick "$SDV_RA" "$CGSD_POKER")"
+expect_eq "SDV3 a verb decline naming both: the tick at room=no waits on neither for a slot" "" "$(sd_owed_noroom "$SDV_RA" "$CGSD_POKER")"
 expect_eq "SDV4 …and the stop wall owes nothing either" "" "$(sd_wall "$SDV_RA")"
 # THE LIFT (wave-35 T8; REQ-6 AC-6.2; D15). `decline lift [<ids>]` writes a ledger line of its own that ends
 # the standing decline for the rows it names, every row it answered when it names none. The one reader stops
-# at it, so the tick prints the FILL the decline held and the wall owes the same rows.
+# at it, so the tick offers the rows the decline held and the wall owes the same rows. Read at room=no (a decline
+# that finds room lapses by itself); the lift is the way a hold ends while the gate gives none.
 ( cd "$SDV_RA" && sd_env bash "$CGSD_POKER" decline lift R1 ) > "$SDV_RA/sd-lift.out" 2>&1
 expect_contains "SDL precondition: the verb recorded the lift" "decline lift — R1" "$(cat "$SDV_RA/sd-lift.out")"
-SDL_TICK=$(sd_tick "$SDV_RA" "$CGSD_POKER")
-expect_eq "SDL1 after lifting R1 the tick fills R1, the row the decline held" "R1 " "$SDL_TICK"
-expect_eq "SDL2 …and the stop wall refuses the silent turn for exactly that row" "$SDL_TICK" "$(sd_wall "$SDV_RA")"
+SDL_OWED=$(sd_owed_noroom "$SDV_RA" "$CGSD_POKER")
+expect_eq "SDL1 after lifting R1 the tick no longer answers R1 by the decline, the row it held" "R1 " "$SDL_OWED"
+expect_eq "SDL2 …and the stop wall refuses the silent turn for exactly that row" "$SDL_OWED" "$(sd_wall "$SDV_RA")"
 ( cd "$SDV_RA" && sd_env bash "$CGSD_POKER" decline lift ) > "$SDV_RA/sd-lift2.out" 2>&1
-SDL_TICK2=$(sd_tick "$SDV_RA" "$CGSD_POKER")
-expect_eq "SDL3 a lift naming no row ends the rest: the tick fills both" "R1 R2 " "$SDL_TICK2"
-expect_eq "SDL4 …and the stop wall owes both" "$SDL_TICK2" "$(sd_wall "$SDV_RA")"
+SDL_OWED2=$(sd_owed_noroom "$SDV_RA" "$CGSD_POKER")
+expect_eq "SDL3 a lift naming no row ends the rest: the tick answers neither by it" "R1 R2 " "$SDL_OWED2"
+expect_eq "SDL4 …and the stop wall owes both" "$SDL_OWED2" "$(sd_wall "$SDV_RA")"
 
 # ============================================================
 section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"
@@ -14419,5 +14444,137 @@ expect_eq "DEBT-LINE 5b …and the mutant's names the ledger line it cannot carr
 expect_nonempty "DEBT-LINE 5c close-out's co_debts reads the carry through debt_carry_lines" \
   "$(awk '/^co_debts\(\) *\{/ { f = 1 } f && /debt_carry_lines/ { print; exit } f && /^}/ { f = 0 }' "$BIONIC_SCRIPTS_DIR/payload/scripts/close-out.sh")"
 rm -rf "$DL_D"
+
+# ============================================================
+section "§SLUG — the project transcript directory name: one function, lib/detect.sh project_slug, three callers that move with it, and a name with a character more is another project (wave-37 T5; D9, ADR-058; ownership row 'the project transcript directory name')"
+# ============================================================
+#
+# The CLI files a session's transcript under `<config>/projects/<name>/`, the name being the session's
+# directory with every character outside [a-zA-Z0-9] turned to `-` (measured: /Users/admin/workspace/personal/bionic
+# is `-Users-admin-workspace-personal-bionic`). Before wave-37 the rule was written twice (detect.sh's auto-memory
+# reader and stop-orders.sh's own_transcript); D9 makes it a trust input, so it is one function now, over the
+# PHYSICAL path, and its callers are detect.sh `detect_auto_memory`, hooks/stop-orders.sh `own_transcript` and
+# lib/said.sh `_said_transcript`. Pinned here: the rule on known paths; the encoder spelled once across the three
+# files; each caller names the function; a doctored library whose project_slug answers one fixed name moves the
+# auto-memory reader and the words reader together (a caller that kept a copy would not move); and the name is
+# matched by equality, so a transcript under `<name>2` (bionic beside bionic2) is not this project's, which a
+# prefix-matching mutant of the words reader would accept.
+#
+# stop-orders' caller is pinned by its text only: own_transcript keeps a walk of every project directory behind
+# the two names (it finds this session's ListAgents answers, it is no trust reader), so no fixture can tell from
+# its output which name it asked first.
+SG_D="$SANDBOX/fx/slug"; SG_SID="sgslug00-0000-4000-8000-00000000005a"
+SG_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -r "$SG_LIB/said.sh" ] || SG_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
+SG_SO="$BIONIC_HOOKS_DIR/stop-orders.sh"
+mkdir -p "$SG_D/bionic/.bionic/tmp" "$SG_D/bionic2" "$SG_D/cfg/projects"
+SG_R="$(cd "$SG_D/bionic" && pwd -P)"
+ln -s "$SG_R" "$SG_D/link"
+sg_slug() { bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${2:-$SG_LIB}" "$1" 2>/dev/null; }  # <path> [<lib>]
+expect_eq "§SLUG 1 the measured name: /Users/admin/workspace/personal/bionic" "-Users-admin-workspace-personal-bionic" \
+  "$(sg_slug /Users/admin/workspace/personal/bionic)"
+expect_eq "§SLUG 1b …a worktree path: '/.' is '--'" "-x-repo--worktrees-37-T5" "$(sg_slug /x/repo/.worktrees/37-T5)"
+expect_eq "§SLUG 1c …a symbolic link is named by the path it resolves to" "$(sg_slug "$SG_R")" "$(sg_slug "$SG_D/link")"
+expect_eq "§SLUG 1d …which is the CLI's rule over the physical path" "$(printf '%s' "$SG_R" | sed 's/[^a-zA-Z0-9]/-/g')" "$(sg_slug "$SG_D/link")"
+
+# ---------- one encoder, three callers (text) ----------
+sg_body() { awk -v fn="$2" '$0 ~ "^[ \t]*" fn "\\(\\)[ \t]*\\{" { f = 1 } f { print } f && /^[ \t]*}[ \t]*$/ { exit }' "$1"; }  # <file> <function>
+SG_ENC='s/[^a-zA-Z0-9]/-/g'
+expect_eq "§SLUG 2 the encoder is spelled once across detect.sh, stop-orders.sh and said.sh" "1 0 0" \
+  "$(/usr/bin/grep -cF "$SG_ENC" "$SG_LIB/detect.sh") $(/usr/bin/grep -cF "$SG_ENC" "$SG_SO") $(/usr/bin/grep -cF "$SG_ENC" "$SG_LIB/said.sh")"
+expect_contains "§SLUG 2b …inside project_slug" "$SG_ENC" "$(sg_body "$SG_LIB/detect.sh" project_slug)"
+expect_contains "§SLUG 3 detect_auto_memory names project_slug" "project_slug" "$(sg_body "$SG_LIB/detect.sh" detect_auto_memory)"
+expect_contains "§SLUG 3b stop-orders.sh own_transcript names project_slug" "project_slug" "$(sg_body "$SG_SO" own_transcript)"
+expect_contains "§SLUG 3c said.sh _said_transcript names project_slug" "project_slug" "$(sg_body "$SG_LIB/said.sh" _said_transcript)"
+
+# ---------- one function: a doctored project_slug moves two callers at once (behaviour) ----------
+SG_MUT="$SG_D/mut"; mkdir -p "$SG_MUT"; cp "$SG_LIB"/*.sh "$SG_MUT/" 2>/dev/null
+anchor file payload/scripts/lib/detect.sh 'project_slug() {'
+printf "\nproject_slug() { printf '%%s' '-mutant-name'; }\n" >> "$SG_MUT/detect.sh"
+expect_eq "§SLUG mutation: the doctored detect.sh parses and its project_slug answers one name for any path" \
+  "0 -mutant-name" "$(bash -n "$SG_MUT/detect.sh"; printf '%s ' "$?"; sg_slug "$SG_R" "$SG_MUT")"
+sg_memory() {  # <lib> -> detect_auto_memory's dir= and files=, for the root
+  ( cd "$SG_R" && env BIONIC_CLAUDE_HOME="$SG_D/cfg" BIONIC_ROOT="$SG_R" bash -c '. "$1/detect.sh" >/dev/null 2>&1; detect_auto_memory' _ "$1" 2>/dev/null ) \
+    | sed -n 's/^env:auto-memory override=[^ ]* //p'
+}
+mkdir -p "$SG_D/cfg/projects/$(sg_slug "$SG_R")/memory" "$SG_D/cfg/projects/-mutant-name/memory"
+: > "$SG_D/cfg/projects/$(sg_slug "$SG_R")/memory/a.md"
+: > "$SG_D/cfg/projects/-mutant-name/memory/b.md"; : > "$SG_D/cfg/projects/-mutant-name/memory/c.md"
+expect_eq "§SLUG 4 detect_auto_memory reads the root's own directory" "dir=$SG_D/cfg/projects/$(sg_slug "$SG_R")/memory files=1" "$(sg_memory "$SG_LIB")"
+expect_eq "§SLUG 4b …and moves with the doctored project_slug" "dir=$SG_D/cfg/projects/-mutant-name/memory files=2" "$(sg_memory "$SG_MUT")"
+sg_said() {  # <lib> <text> -> "<rc>|<SAID_SESSION>", user_said in the root, this session alone
+  ( cd "$SG_R" && env CLAUDE_CONFIG_DIR="$SG_D/cfg" CLAUDE_CODE_SESSION_ID="$SG_SID" bash -c '. "$1/said.sh" 2>/dev/null; user_said "$2"; printf "%s|%s" "$?" "${SAID_SESSION:-}"' _ "$1" "$2" 2>/dev/null )
+}
+SG_W='keep the slug reader in one place please'
+sg_tx() {  # <name> -> this session's transcript, holding the words, under that name alone
+  rm -f "$SG_D/cfg/projects"/*/"$SG_SID.jsonl"; mkdir -p "$SG_D/cfg/projects/$1"
+  jq -cn --arg c "$SG_W" --arg s "$SG_SID" '{type:"user",isSidechain:false,origin:{kind:"human"},promptSource:"typed",message:{role:"user",content:$c},sessionId:$s}' \
+    > "$SG_D/cfg/projects/$1/$SG_SID.jsonl"
+}
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "$SG_LIB" "$SG_R" > "$SG_R/.bionic/tmp/loaded-$SG_SID.state"
+sg_tx "$(sg_slug "$SG_R")"
+expect_eq "§SLUG 5 the words reader finds this session under the root's own name (rc 0)" "0|$SG_SID" "$(sg_said "$SG_LIB" "$SG_W")"
+expect_eq "§SLUG 5b …and under the doctored project_slug it no longer does: the session is refused (rc 2)" "2|" "$(sg_said "$SG_MUT" "$SG_W")"
+sg_tx -mutant-name
+expect_eq "§SLUG 5c …while the doctored library reads the transcript under the name its project_slug gives (rc 0)" "0|$SG_SID" "$(sg_said "$SG_MUT" "$SG_W")"
+expect_eq "§SLUG 5d …which the shipped library refuses (rc 2)" "2|" "$(sg_said "$SG_LIB" "$SG_W")"
+
+# ---------- equality, never a prefix: bionic is not bionic2 ----------
+expect_eq "§SLUG 6-pre precondition: bionic2's name is bionic's with a character more" "$(sg_slug "$SG_R")2" "$(sg_slug "$SG_D/bionic2")"
+sg_tx "$(sg_slug "$SG_D/bionic2")"
+expect_eq "§SLUG 6 a transcript under bionic2's directory is not bionic's session: refused (rc 2)" "2|" "$(sg_said "$SG_LIB" "$SG_W")"
+SG_PFX="$SG_D/pfx"; mkdir -p "$SG_PFX"; cp "$SG_LIB"/*.sh "$SG_PFX/" 2>/dev/null
+anchor file payload/scripts/lib/said.sh 'f="$dir/$s/$sid.jsonl"'
+SG_N='f="$dir/$s/$sid.jsonl"' awk 'BEGIN { n = ENVIRON["SG_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "f=\"$(ls -d \"$dir/$s\"*/\"$sid.jsonl\" 2>/dev/null | head -1)\"" substr($0, i + length(n)); print }' \
+  "$SG_LIB/said.sh" > "$SG_PFX/said.sh"
+expect_eq "§SLUG 6b the prefix mutant differs from the library in one line" "1" "$(diff "$SG_LIB/said.sh" "$SG_PFX/said.sh" | /usr/bin/grep -c '^>')"
+expect_eq "§SLUG 6c …and accepts bionic2's transcript as bionic's (rc 0), so §SLUG 6 goes red under it" "0|$SG_SID" "$(sg_said "$SG_PFX" "$SG_W")"
+rm -rf "$SG_D"
+
+# ---------------------------------------------------------------------------
+section "§WIDTH — one width rule: the landing drain's J is the runner's JOBS on one fixture rung (wave-37 T1; D3, REQ-3 AC-3.2; ownership row 'the width rule J')"
+#
+# The floor (tests/run.sh `_runner_width`) and the landing's drain (lib/line.sh `_line_width`) each read
+# the width by calling the same two functions, `pressure_level` over `gate_width`; neither keeps a number
+# of its own. One fixture rung: share 100 on the suite's 8 pinned cores (gate_width 8), the ring holding
+# one sample by the real writer, clear or critical. No ceiling is set, so the runner's JOBS is the rule
+# alone. A drain with a literal J agrees with the runner on no more than one rung.
+WD_DIR="$SANDBOX/wd"; WD_HOME="$WD_DIR/cfg"; WD_RING="$WD_DIR/pressure.ring"; WD_NOW=1757030000
+mkdir -p "$WD_HOME/bionic"; printf '100\n' > "$WD_HOME/bionic/share"
+WD_LIB="$REPO_ROOT/payload/scripts/lib"
+WD_CLEAR="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+WD_CRIT="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+wd_seed() {  # <probe env> — the ring, reset to one sample by pressure_sample
+  rm -f "$WD_RING"
+  ( eval "export $1"; export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW"
+    . "$WD_LIB/resources.sh" >/dev/null 2>&1; pressure_sample 8 ) >/dev/null 2>&1
+}
+wd_runner() {  # <probe env> -> tests/run.sh's JOBS under --dry-run, no ceiling
+  ( eval "export $1"; unset BIONIC_TEST_JOBS_CEILING
+    export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW" CLAUDE_CONFIG_DIR="$WD_HOME"
+    bash "$REPO_ROOT/tests/run.sh" --dry-run 2>/dev/null ) | sed -n 's/^JOBS=//p' | head -1
+}
+wd_drain() {  # <probe env> [<sed over _line_width>] -> the drain's J
+  ( eval "export $1"; unset BIONIC_TEST_JOBS_CEILING
+    export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW" CLAUDE_CONFIG_DIR="$WD_HOME"
+    bash -c '. "$1/line.sh" >/dev/null 2>&1 || exit 99
+      [ -z "$2" ] || eval "$(declare -f _line_width | sed "$2")"
+      _line_width' _ "$WD_LIB" "${2:-}" 2>/dev/null )
+}
+wd_seed "$WD_CLEAR"; WD_RUN_CLEAR="$(wd_runner "$WD_CLEAR")"; WD_DRAIN_CLEAR="$(wd_drain "$WD_CLEAR")"
+wd_seed "$WD_CRIT"; WD_RUN_CRIT="$(wd_runner "$WD_CRIT")"; WD_DRAIN_CRIT="$(wd_drain "$WD_CRIT")"
+expect_eq "WIDTH 1 a clear rung: the runner's JOBS is the whole width (not vacuous)" "8" "$WD_RUN_CLEAR"
+expect_eq "WIDTH 1b …and the drain's J is the runner's JOBS" "$WD_RUN_CLEAR" "$WD_DRAIN_CLEAR"
+expect_eq "WIDTH 2 a critical rung: the runner's JOBS is a quarter" "2" "$WD_RUN_CRIT"
+expect_eq "WIDTH 2b …and the drain's J is the runner's JOBS" "$WD_RUN_CRIT" "$WD_DRAIN_CRIT"
+expect_true "WIDTH 3 line.sh calls gate_width" test "$(/usr/bin/grep -c 'gate_width' "$WD_LIB/line.sh")" -ge 1
+expect_true "WIDTH 3b …and so does tests/run.sh" test "$(/usr/bin/grep -c 'gate_width' "$REPO_ROOT/tests/run.sh")" -ge 1
+# MUTANT: a literal J. The drain then keeps a number of its own and parts from the runner on a rung.
+anchor fn payload/scripts/lib/line.sh 'pressure_level "$(gate_width)"' _line_width 'echo 4'
+wd_seed "$WD_CLEAR"; WD_MUT_CLEAR="$(wd_drain "$WD_CLEAR" "$ANCHOR_SED")"
+wd_seed "$WD_CRIT"; WD_MUT_CRIT="$(wd_drain "$WD_CRIT" "$ANCHOR_SED")"
+expect_eq "WIDTH 4m-pre the mutant ran: its J is the literal on both rungs" "4 4" "$WD_MUT_CLEAR $WD_MUT_CRIT"
+expect_eq "WIDTH 4m MUTANT a literal J: the drain parts from the runner on both rungs (the rows can fail)" "no no" \
+  "$([ "$WD_MUT_CLEAR" = "$WD_RUN_CLEAR" ] && echo yes || echo no) $([ "$WD_MUT_CRIT" = "$WD_RUN_CRIT" ] && echo yes || echo no)"
 
 finish

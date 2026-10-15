@@ -539,10 +539,33 @@ fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the nam
 # user ended stops standing and the next tick prints the FILL it held. A later declined line starts
 # afresh: the lifts before it are history.
 #
+# A DECLINE ENDS WHEN ROOM APPEARS (wave-37 T18; REQ-11 AC-11.4; D13). A decline stands for its rows only
+# while the gate shows no room or no writer slot is free: wave 37's own T8 was declined "no writer slot free
+# (gap 6)" at 04:54, and every tick after it answered "ready; answered by the standing fill-declined" through
+# room=yes until the row was dispatched by hand at 11:57 (A-orch-14). The caller that knows the gate's `room=`
+# answer and the free writer slots passes them as the fourth and fifth operands; with room=yes and a slot
+# free the decline stands for nothing (`fill_decline_holds`, the ONE rule), and `fill_decline_lapsing` prints
+# what lapses so the tick can record it: one `state=lapsed` line of this session, `lapsed-at=` the decline's
+# `at=`, `lapsed=` its rows. A lapsed line after the latest declined line ends that decline for EVERY reader,
+# operands or none, so the stop wall (which passes none) reads the lapse the tick wrote. A later declined
+# line starts afresh. Operands absent, the decline stands on the ledger alone.
+#
 # Prints `<at>US<reason>US<ids, space-joined>` (US = \037), or nothing when no decline stands.
 FILL_STANDING_WINDOW=2000
-fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
-  local led="${1:-}" sid="${2:-}" cur="${3:-}" line at st_cur ready launched reason lifted id ids=""
+
+# fill_decline_holds <room> <free writer slots> -> 0 when a decline still stands, 1 when room has appeared
+# Room is `yes` and at least one slot is free: the only lapse. Anything unknown (no operand, a word that is
+# no count) is no evidence of room, so the decline stands.
+fill_decline_holds() {
+  case "${2:-}" in ''|*[!0-9]*) return 0 ;; esac
+  [ "${1:-}" = yes ] && [ "$2" -ge 1 ] && return 1
+  return 0
+}
+
+# _fill_decline_ledger <ledger path> <session id> -> the decline the ledger alone leaves standing (the
+# reader's body; the two callers below add the room rule)
+_fill_decline_ledger() {
+  local led="${1:-}" sid="${2:-}" line at st_cur ready launched reason lifted id ids=""
   [ -n "$led" ] && [ -n "$sid" ] && [ -f "$led" ] && [ ! -L "$led" ] || return 0
   line="$(tail -n "$FILL_STANDING_WINDOW" "$led" 2>/dev/null | awk -v sid="$sid" '
     function kv(line, key,   i, n, parts) {
@@ -552,11 +575,13 @@ fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
     }
     index($0, "fill-ledger/v1|") != 1 || kv($0, "session") != sid { next }
     kv($0, "declined") ~ /[[:alnum:]]/ {
+      lastat = kv($0, "at")
       last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
       lifted = ""
       next
     }
     kv($0, "state") == "lift" && last != "" { lifted = lifted (lifted == "" ? "" : ",") kv($0, "lifted") }
+    kv($0, "state") == "lapsed" && last != "" && kv($0, "lapsed-at") == lastat { last = ""; lifted = "" }
     END { if (last != "") print last "\037" lifted }')"
   [ -n "$line" ] || return 0
   IFS=$'\037' read -r at st_cur ready launched reason lifted <<< "$line"
@@ -567,6 +592,24 @@ fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
   done
   [ -n "$ids" ] || return 0
   printf '%s\037%s\037%s\n' "$at" "$reason" "$ids"
+}
+
+fill_standing_decline() {  # <ledger path> <session id> <current: as read now> [<room: yes|no> <free writer slots>]
+  local out
+  out="$(_fill_decline_ledger "${1:-}" "${2:-}")"
+  [ -n "$out" ] || return 0
+  fill_decline_holds "${4:-}" "${5:-}" || return 0
+  printf '%s\n' "$out"
+}
+
+# fill_decline_lapsing <ledger path> <session id> <current> <room> <free writer slots>
+#   -> the decline room has just ended, in the reader's own shape (`<at>US<reason>US<ids>`), or nothing
+fill_decline_lapsing() {
+  local out
+  out="$(_fill_decline_ledger "${1:-}" "${2:-}")"
+  [ -n "$out" ] || return 0
+  fill_decline_holds "${4:-}" "${5:-}" && return 0
+  printf '%s\n' "$out"
 }
 
 # ── THE ROSTERS' HOLD (wave-35 T28; REQ-5 AC-5.5, D14; A-orch-27) ────────────
