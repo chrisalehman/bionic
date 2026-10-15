@@ -260,9 +260,20 @@ anchors_index() {  # <root> <at>
 #     3. it is the file.
 #     4. the anchor index names it for the file (folded in whole, so a declaring suite outside tests/
 #        is named by its anchors alone).
+#     5. THE PRELUDE HOP (wave-37 T3; D4, AC-3.1): a tests/*.prelude.sh or tests/lib/*.sh the suite names
+#        (rule 1) is scanned as the suite's own text, one hop: what that file names, walks or sets, the
+#        suite reads, and rule 2 follows from there. What a second such file names is not followed.
+#     6. THE DIRECTORY RULE (wave-37 T3; D4, AC-3.1): a line outside a comment holding `find <dir>...` or
+#        `<dir>/*glob` reads every file under each directory it names, the glob (`-name`/`-iname`, or what
+#        follows the `/`) filtering by basename. A leading `$VAR`/`${VAR}` is resolved once against the
+#        VAR= lines of the same text (the suite and the preludes it names); what the value or word still
+#        spells after its last expansion is the directory, matched as rule 1 matches a path (it or a path
+#        ending in `/<it>`). A word that is all expansion (`"$REPO"`, `.`) names no directory: the root
+#        is never one.
 #   MISSED, the floor's whole run stays the catch-all (spec assumption 3): a path built from variables
-#   (`"$d/$f"`), a glob, a whole directory copied or walked, a library sourced by a library or by a
-#   script without a BIONIC_LIB_WANT line, and anything a run opens that its text does not name.
+#   past the first (`"$d/$f"`), a copy of a whole directory not walked by find or a glob, a library
+#   sourced by a library or by a script without a BIONIC_LIB_WANT line, and anything a run opens that
+#   its text does not name.
 # `bash anchors.sh reads_index [<root>] [--at <commit>]` prints it from a shell.
 
 # Every file under <root>, root-relative, one per line: the commit's tree; git's tracked and untracked,
@@ -321,9 +332,7 @@ function uncomment(s,   i, c, L, q, pc) {
   }
   return s
 }
-function scan(line, s,   t, n, w, i, x, b, j, p, hit) {
-  if (line ~ /^[ \t]*#/) return
-  if (index(line, "#")) line = uncomment(line)
+function scan(line, s, arr,   t, n, w, i, x, b, j, p, hit) {
   t = line; gsub(/[^A-Za-z0-9_.\/-]+/, " ", t)
   n = split(t, w, " ")
   for (i = 1; i <= n; i++) {
@@ -337,16 +346,119 @@ function scan(line, s,   t, n, w, i, x, b, j, p, hit) {
       hit = 0
       for (j = 1; j <= nb[b]; j++) {
         p = byb[b, j]
-        if (p == x || (length(p) > length(x) && substr(p, length(p) - length(x)) == "/" x)) { pair[p "\t" s] = 1; hit = 1 }
+        if (p == x || (length(p) > length(x) && substr(p, length(p) - length(x)) == "/" x)) { arr[p "\t" s] = 1; hit = 1 }
       }
       if (hit) continue
     }
     if (index(b, ".") == 0) continue
-    for (j = 1; j <= nb[b]; j++) pair[byb[b, j] "\t" s] = 1
+    for (j = 1; j <= nb[b]; j++) arr[byb[b, j] "\t" s] = 1
+  }
+}
+# text(line, o, arr): one line of owner o (a suite, or a prelude/helper the hop reads), outside comments:
+# the name scan into arr, each VAR= value kept for the directory rule, and each line that may walk kept
+# (quotes dropped) for END, where the VAR= lines of every text the suite reads are known.
+function text(line, o, arr,   lq) {
+  if (line ~ /^[ \t]*#/) return
+  if (index(line, "#")) line = uncomment(line)
+  scan(line, o, arr)
+  if (index(line, "=")) assigns(line, o)
+  if (index(line, "find") || index(line, "*")) {
+    lq = line; gsub(/["\047]/, "", lq)
+    if (lq ~ /(^|[^A-Za-z0-9_.\/-])find[ \t]/ || index(lq, "/*")) dl[o, ++nd[o]] = lq
+  }
+}
+function assigns(line, o,   r, nm, v, c, e, L) {
+  r = line
+  while (match(r, /(^|[ \t;&|(])[A-Za-z_][A-Za-z0-9_]*=/)) {
+    nm = substr(r, RSTART, RLENGTH - 1); sub(/^[ \t;&|(]/, "", nm)
+    r = substr(r, RSTART + RLENGTH); c = substr(r, 1, 1); L = length(r)
+    if (c == "\"" || c == "\047") {
+      for (e = 2; e <= L && substr(r, e, 1) != c; e++) if (c == "\"" && substr(r, e, 1) == "\\") e++
+      v = substr(r, 2, e - 2); r = substr(r, e + 1)
+    } else { v = r; sub(/[ \t;|&)].*$/, "", v); r = substr(r, length(v) + 1) }
+    if (dtail(v) != "") asg[o, nm] = asg[o, nm] "\034" v
+  }
+}
+# dtail(w): what a word still spells after its last expansion, from the root: `${R}/a/b` and `$1/a/b` are
+# a/b; `$R`, `.` and `/` are nothing.
+function dtail(w,   t, pre, i) {
+  gsub(/["\047]/, "", w)
+  if (!match(w, /[A-Za-z0-9_.\/-]*$/)) return ""
+  t = substr(w, RSTART); pre = substr(w, 1, RSTART - 1)
+  if (pre ~ /\$\{?$/) { i = index(t, "/"); t = i ? substr(t, i) : "" }
+  while (substr(t, 1, 1) == "/" || substr(t, 1, 2) == "./" || substr(t, 1, 3) == "../") t = substr(t, index(t, "/") + 1)
+  sub(/\/+$/, "", t)
+  return (t == "." || t == "..") ? "" : t
+}
+# walk(word, g, s, ctx): the files under the directories <word> names, filtered by the globs in g (a list
+# led by \034, or empty for every file), as pairs for suite s; ctx is the texts whose VAR= lines resolve
+# a leading $VAR (\034-led).
+function walk(word, g, s, ctx,   nm, rest, nc, cc, k, nv, vv, m, cand, ncand, x, t, b, j, d, q, f, fb, ng, gg, ok) {
+  ncand = 0
+  if (match(word, /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) {
+    nm = substr(word, RSTART, RLENGTH); rest = substr(word, RSTART + RLENGTH); gsub(/[${}]/, "", nm)
+    nc = split(ctx, cc, "\034")
+    for (k = 2; k <= nc; k++) if ((cc[k], nm) in asg) {
+      nv = split(asg[cc[k], nm], vv, "\034")
+      for (m = 2; m <= nv; m++) cand[++ncand] = vv[m] rest
+    }
+  }
+  if (ncand == 0) cand[++ncand] = word
+  ng = split(g, gg, "\034")
+  for (x = 1; x <= ncand; x++) {
+    t = dtail(cand[x]); if (t == "") continue
+    b = t; sub(/.*\//, "", b)
+    for (j = 1; j <= ndb[b]; j++) {
+      d = dbyb[b, j]
+      if (!(d == t || (length(d) > length(t) && substr(d, length(d) - length(t)) == "/" t))) continue
+      for (q = 1; q <= nf[d]; q++) {
+        f = df[d, q]; fb = f; sub(/.*\//, "", fb); ok = (ng < 2)
+        for (k = 2; k <= ng && !ok; k++) if (fb ~ globre(gg[k])) ok = 1
+        if (ok) out[f "\t" s] = 1
+      }
+    }
+  }
+}
+function globre(g,   o) {
+  if (g in gre) return gre[g]
+  o = g
+  gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\[/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
+  gre[o] = "^" g "$"; return gre[o]
+}
+# walks(lq, s, ctx): every `find <dir>...` and `<dir>/*glob` on a kept line, walked for suite s.
+function walks(lq, s, ctx,   r, a, cut, n, tk, i, w, g, gr, L, j, k, pos, base) {
+  r = lq
+  while (match(r, /(^|[^A-Za-z0-9_.\/-])find[ \t]+/)) {
+    a = substr(r, RSTART + RLENGTH); r = a
+    cut = match(a, /[|;)]/) ? substr(a, 1, RSTART - 1) : a
+    g = ""; gr = cut
+    while (match(gr, /-i?name[ \t]+[^ \t]+/)) { w = substr(gr, RSTART, RLENGTH); sub(/^-i?name[ \t]+/, "", w); g = g "\034" w; gr = substr(gr, RSTART + RLENGTH) }
+    n = split(cut, tk, /[ \t]+/)
+    for (i = 1; i <= n; i++) {
+      if (tk[i] == "") continue
+      if (tk[i] ~ /^[-!(\\]/ || tk[i] ~ /^(&&|\|\||>|<|2>)/) break
+      walk(tk[i], g, s, ctx)
+    }
+  }
+  base = 0; L = length(lq)
+  while ((pos = index(substr(lq, base + 1), "/*")) > 0) {
+    pos += base; base = pos + 1
+    for (j = pos - 1; j >= 1 && index(" \t;|&(<>=`", substr(lq, j, 1)) == 0; j--) ;
+    for (k = pos + 1; k <= L && index(" \t;|&)<>`", substr(lq, k, 1)) == 0; k++) ;
+    w = substr(lq, j + 1, pos - j - 1); g = substr(lq, pos + 1, k - pos - 1); sub(/.*\//, "", g)
+    if (w != "") walk(w, "\034" g, s, ctx)
   }
 }
 BEGIN { FS = "\t" }
-$1 == "F" { p = $2; if (p in files) next; files[p] = 1; b = p; sub(/.*\//, "", b); nb[b]++; byb[b, nb[b]] = p; next }
+$1 == "F" {
+  p = $2; if (p in files) next; files[p] = 1; b = p; sub(/.*\//, "", b); nb[b]++; byb[b, nb[b]] = p
+  d = p
+  while (sub(/\/[^\/]*$/, "", d)) {
+    if (!(d in nf)) { b = d; sub(/.*\//, "", b); ndb[b]++; dbyb[b, ndb[b]] = d }
+    df[d, ++nf[d]] = p
+  }
+  next
+}
 $1 == "W" {
   if ($2 in want) next
   v = substr($0, length($2) + 4); sub(/^[ \t]*BIONIC_LIB_WANT=/, "", v)
@@ -358,17 +470,37 @@ $1 == "P" { pair[$2 "\t" $3] = 1; next }
 $1 == "S" {
   s = $2
   if (s !~ /^tests\/[^\/]*\.test\.sh$/) next
-  pair[s "\t" s] = 1
-  scan(substr($0, length(s) + 4), s); next
+  pair[s "\t" s] = 1; suite[s] = 1
+  text(substr($0, length(s) + 4), s, pair); next
+}
+$1 == "H" {
+  h = $2
+  if (h !~ /^tests\/[^\/]*\.prelude\.sh$/ && h !~ /^tests\/lib\/[^\/]*\.sh$/) next
+  hfile[h] = 1
+  text(substr($0, length(h) + 4), h, hp); next
 }
 END {
   for (k in pair) {
     out[k] = 1; split(k, kk, "\t")
-    if (kk[1] in want) {
-      n = split(want[kk[1]], L, /[ \t]+/)
-      for (i = 1; i <= n; i++) if (L[i] ~ /^[A-Za-z0-9_.-]+$/) out["payload/scripts/lib/" L[i] "\t" kk[2]] = 1
+    if ((kk[1] in hfile) && (kk[2] in suite)) hn[kk[2]] = hn[kk[2]] "\034" kk[1]
+  }
+  for (k in hp) { split(k, kk, "\t"); hr[kk[2]] = hr[kk[2]] "\034" kk[1] }
+  for (s in suite) {
+    ctx = "\034" s hn[s]; nc = split(ctx, cc, "\034")
+    for (c = 2; c <= nc; c++) {
+      o = cc[c]
+      if (c > 2) { n = split(hr[o], L, "\034"); for (i = 2; i <= n; i++) out[L[i] "\t" s] = 1 }
+      for (i = 1; i <= nd[o]; i++) walks(dl[o, i], s, ctx)
     }
   }
+  for (k in out) {
+    split(k, kk, "\t")
+    if (kk[1] in want) {
+      n = split(want[kk[1]], L, /[ \t]+/)
+      for (i = 1; i <= n; i++) if (L[i] ~ /^[A-Za-z0-9_.-]+$/) fan["payload/scripts/lib/" L[i] "\t" kk[2]] = 1
+    }
+  }
+  for (k in fan) out[k] = 1
   for (k in out) print k
 }'
 
@@ -381,7 +513,26 @@ reads_index() {  # <root> <at>
     _rd_grep "$root" "$at" W '^[[:space:]]*BIONIC_LIB_WANT=' '*.sh' . '*.sh'
     anchors_extract "$root" "$at" | awk -F'\t' '$7 == "literal" { print "P\t" $4 "\t" $1 }'
     _rd_grep "$root" "$at" S '' 'tests/*.test.sh' tests '*.test.sh' 1
+    _rd_grep "$root" "$at" H '' 'tests/*.prelude.sh' tests '*.prelude.sh' 1
+    _rd_grep "$root" "$at" H '' 'tests/lib/*.sh' tests/lib '*.sh' 1
   } | awk "$_RD_AWK" | _anc_group
+}
+
+# reads_suites <root> <at> <cell> -> the suites reads_index names, at <at>, for any file an entry of the Files cell
+# covers (lib/units.sh `cell_covers`, the scheduler's matcher; an entry spelled from <root>/ is read from the
+# root): by file name, sorted, once each, one per line. Nothing when no suite reads such a file, or units.sh
+# cannot be loaded. THE ONE READER of the index by Files (wave-37 T3; D4; burns index-to-suites and
+# reads-index-consumers): session-poker.sh `poker_brief_index_suites` (the brief's Lands-on) and
+# dispatch-preflight.sh `dp_lands_index_suites` (the wall) are thin calls to it; proof.sh `_proof_walk`
+# reads `reads_index` itself, file to suites, joined with the commit's changed code files.
+reads_suites() {  # <root> <at> <cell>
+  declare -F _units_files_awk >/dev/null 2>&1 \
+    || . "$(dirname "${BASH_SOURCE[0]}")/units.sh" 2>/dev/null
+  declare -F _units_files_awk >/dev/null 2>&1 || return 0
+  reads_index "${1:-}" "${2:--}" 2>/dev/null | awk -F'\t' -v cell="${3:-}" -v root="${1:-}" "$(_units_files_awk)"'
+    BEGIN { m = split(cell, e, ","); cell = ""; for (k = 1; k <= m; k++) { t = e[k]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (root != "" && index(t, root "/") == 1) t = substr(t, length(root) + 2); cell = cell (k > 1 ? "," : "") t } }
+    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
+    | LC_ALL=C sort -u
 }
 
 # Run as a command: `bash anchors.sh reads_index [<root>] [--at <commit>]`. Sourced, it defines and does

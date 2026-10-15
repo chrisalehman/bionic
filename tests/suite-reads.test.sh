@@ -241,6 +241,11 @@ expect_eq "PRELUDE: …and what y.prelude.sh names (tools/far.sh) is not: no lin
   "" "$(row_of tools/far.sh "$G_IDX")"
 expect_absent "PRELUDE: a prelude is not a suite: no line names x.prelude.sh as a reader" \
   "tests/x.prelude.sh" "$(printf '%s\n' "$G_IDX" | cut -f2)"
+expect_eq "PRELUDE: the hop reads the tree as it stands too (git grep --untracked)" \
+  "tests/s-pre.test.sh" "$(row_of hooks/hp.sh "$(bash "$ANCHORS" reads_index "$G" 2>&1)")"
+GNG="$SB/pre-nogit"; mkdir -p "$GNG"; ( cd "$G" && tar cf - --exclude .git . ) | ( cd "$GNG" && tar xf - )
+expect_eq "PRELUDE: …and a root outside git (find over tests/ and tests/lib/)" \
+  "tests/s-pre.test.sh" "$(row_of tools/near.sh "$(bash "$ANCHORS" reads_index "$GNG" 2>&1)")"
 
 # ------------------------------------------------------------
 section "DIR: find <dir> or <dir>/*glob reads every tracked file under the directory, the glob filtering (wave-37 T3; D4, AC-3.1)"
