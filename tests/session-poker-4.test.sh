@@ -1088,12 +1088,18 @@ section "§MOVE: a finding crosses the line only on words the user typed in this
 # FIXTURE FIDELITY. The transcript is assembled from tests/fixtures/transcript-move/, one file per kind
 # of entry, its key sets measured on CLI 2.1.291 transcripts and every word invented (that directory's
 # README). It sits where the CLI writes one, `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session id>.jsonl`,
-# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts. Every
+# under a CLAUDE_CONFIG_DIR of this section's own, so no row reads this machine's transcripts; the slug
+# is §SEV's repository's own name (lib/detect.sh `project_slug`), and the session's load record sits
+# under that root, the two witnesses the words reader asks for (wave-37 T5; D9, §WITNESS). Every
 # decoy carries the words the typed prompt carries (MOVE-<kind>-pre), so a reader that counted it would
 # find them. The findings are registered by the real verb on §SEV's repository and plan.
 MV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 MV_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
-MV_CFG="$TMPROOT/mv-cfg"; MV_PROJ="$MV_CFG/projects/-work-project"; mkdir -p "$MV_PROJ"
+MV_CFG="$TMPROOT/mv-cfg"
+MV_PROJ="$MV_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RSEV")"
+mkdir -p "$MV_PROJ"
+mv_loaded() { printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RSEV" > "$RSEV/.bionic/tmp/loaded-$1.state"; }  # <sid>
+mv_loaded "$SID"
 export CLAUDE_CONFIG_DIR="$MV_CFG"
 MV_TX="$MV_PROJ/$SID.jsonl"
 MV_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
@@ -1102,10 +1108,11 @@ MV_P='defer the flag wording until the next wave, it can wait'
 MV_Q='and move the third one to fix now'
 MV_F='start the review of the parser'
 mv_tx() { local f; cat "$MV_FX/frame.jsonl" > "$MV_TX"; for f in "$@"; do cat "$MV_FX/$f.jsonl" >> "$MV_TX"; done; }
-mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config
-  # the library finds session.sh beside itself; a mutant copy in another directory has none, so it is
-  # given the session function first (the library itself is run as the verb meets it, alone)
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || . "$3"; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}/session.sh}" 2>/dev/null
+mv_said() {  # <text> [<said.sh>] -> user_said's rc, in this session under this section's config, in §SEV's root
+  # the library finds session.sh, root.sh and detect.sh beside itself; a mutant copy in another directory
+  # has none, so it is given their functions first (the library itself is run as the verb meets it, alone)
+  ( cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '[ -z "$3" ] || { . "$3/session.sh"; . "$3/root.sh"; . "$3/detect.sh"; } >/dev/null 2>&1; . "$1" 2>/dev/null; user_said "$2"; echo "$?"' \
+    _ "${2:-$SAID_LIB}" "$1" "${2:+${SAID_LIB%/*}}" 2>/dev/null )
 }
 mv_id() { printf 'record/wave-01-fixture/%s.md#%s' "$1" "${2:-1}"; }
 mv_owed() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null | /usr/bin/grep -F "$(mv_id "$1") "; }
@@ -1461,11 +1468,12 @@ said_bind() {  # <sid> <act> -> bind_plan's rc and BIND_SESSION, as the binding 
   bash -c '. "$1/run.sh" && . "$1/binding.sh" || exit 9; bind_plan "$2" "$3" "$4" "$5"; st=$?; printf "%s|%s" "$st" "${BIND_SESSION:-}"' \
     _ "$SAID_LIBDIR" "$RSEV" "$1" "$PSEV" "$2" 2>/dev/null
 }
-said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config
-  env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
-    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null
+said_run() {  # <text> [<plan>] [<said.sh>] -> "<rc>|<SAID_SESSION>", in this session under this section's config, in §SEV's root
+  ( cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$4/session.sh"; . "$4/run.sh"; . "$4/binding.sh"; . "$4/root.sh"; . "$4/detect.sh" >/dev/null 2>&1; . "$1" 2>/dev/null; user_said "$2" "$3"; echo "$?|${SAID_SESSION:-}"' \
+    _ "${3:-$SAID_LIB}" "$1" "${2:-}" "$SAID_LIBDIR" 2>/dev/null )
 }
 jq -c --arg p "Thanks. $SAID_WA, it is not urgent." '.message.content = $p' "$MV_FX/typed.jsonl" | cat "$MV_FX/frame.jsonl" - > "$MV_PROJ/$SAID_A.jsonl"
+mv_loaded "$SAID_A"
 mv_tx typed
 expect_eq "SAID-0 precondition: the predecessor binds by engage, this session by bind; each line is recorded" "0|recorded 0|recorded" \
   "$(said_bind "$SAID_A" engage) $(said_bind "$SID" bind)"
@@ -2493,13 +2501,16 @@ expect_regex "MP-f1 §MOVE-FOLD a no-break space, a line separator and a next-li
   "^0\|moved: .* words=\"$MV_P\" session=$SID why=\"the docs pass here\"\$" "$RC|$(mv_moved mv-fix | tail -1)"
 
 # ---------- §MOVE-SELF (ruling 2d): session.sh is found beside the library at source time ----------
+# The working directory moves to §SEV's root, not to `/`: since wave-37 T5 (D9) the words are held to the root of the
+# working directory, whose load record and transcript directory witness the session, and `/` is no root. The rows
+# still prove what they did: a call-time `./` would now name the root, where no library is.
 MP_LIBDIR="${SAID_LIB%/*}"
 expect_eq "MP-d1 §MOVE-SELF the library sourced by a relative path, the working directory then moved: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; cd "$2"; user_said "$1"; echo "$?"' _ "$MV_P" "$RSEV" 2>/dev/null)"
 expect_eq "MP-d2 …sourced by a bare name, the working directory then moved: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd /; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
-expect_eq "MP-d3 …positive, the working directory kept: found (rc 0)" "0" \
-  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. ./said.sh; user_said "$1"; echo "$?"' _ "$MV_P" 2>/dev/null)"
+  "$(cd "$MP_LIBDIR" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. said.sh; cd "$2"; user_said "$1"; echo "$?"' _ "$MV_P" "$RSEV" 2>/dev/null)"
+expect_eq "MP-d3 …positive, sourced by its absolute path, the working directory kept at the root: found (rc 0)" "0" \
+  "$(cd "$RSEV" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$2/said.sh"; user_said "$1"; echo "$?"' _ "$MV_P" "$MP_LIBDIR" 2>/dev/null)"
 
 # ---------- §MOVE-MIN (ruling 2e): "three" is one constant ----------
 MP_MIN="$(bash -c '. "$1" 2>/dev/null; printf "%s" "$SAID_MIN_WORDS"' _ "$SAID_LIB")"
@@ -3419,9 +3430,13 @@ section "§REPLAY §NEXT-CALL §FILL-VERBS: every hand edit wave-32 made to its 
 PV7_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 PV7_HOOK="$(cd "$(dirname "$POKER")" && pwd)/session-poker.sh"
 PV7_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
-PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects/-pv7-project"
+PV7_CFG="$TMPROOT/pv7-cfg"; mkdir -p "$PV7_CFG/projects"
 export CLAUDE_CONFIG_DIR="$PV7_CFG"
-PV7_TX="$PV7_CFG/projects/-pv7-project/$SID.jsonl"
+PV7_TX=""
+pv7_at() {  # <repo> -> this session's transcript under the repo's own name, and its load record there: the two witnesses (wave-37 T5; D9)
+  PV7_TX="$PV7_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$1")/$SID.jsonl"; mkdir -p "${PV7_TX%/*}"
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$1" > "$1/.bionic/tmp/loaded-$SID.state"
+}
 PV7_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 pv7_prompts() {  # <prompt>... -> this session's transcript: the frame, then one typed prompt each
   local p; cat "$PV7_FX/frame.jsonl" > "$PV7_TX"
@@ -3488,7 +3503,7 @@ pv7_refused "RP-2g an evidence value outside record/" 1 "record/" "$R7" "$P7" ma
 pv7_refused "RP-2h one invalid key refuses the whole call: the valid status beside it is not written" 1 "" "$R7" "$P7" matrix-set AC-1.2 status=blocked tier=T1
 
 # ---------- §REPLAY waive-row: the row waiver on the user's words (wave-32 plan:256, 311, 324, 337; A-orch-49) ----------
-pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
+pv7_at "$R7"; pv7_prompts 'I waive all 4 of the rows the auditor named' 'carry on'
 poke "$R7" waive-row AC-1.1 'I waive all 4' 'the requirement is amended next wave'
 expect_eq "RP-3 §REPLAY waive-row exits 0" "0" "$RC"
 expect_eq "RP-3b …the row's status reads waived, its other cells as they were" "| AC-1.1 | T2 | waived | — | — |" "$(/usr/bin/grep '^| AC-1\.1 ' "$P7")"
@@ -3691,7 +3706,7 @@ poke "$RMH" matrix-set AC-2.11 task=T5
 expect_eq "MH-2d …and matrix-set AC-2.11 writes the AC-2.11 block alone" "0|  task: T5|  task: T5" \
   "$RC|$(mr_block "$PMH" AC-2.11 | /usr/bin/grep '^  task:')|$(mr_block "$PMH" AC-2.2 | /usr/bin/grep '^  task:')"
 
-pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
+pv7_at "$RMH"; pv7_prompts 'I waive AC-2.1 and AC-2.2 for this wave' 'carry on'
 poke "$RMH" waive-row AC-2.1 'I waive AC-2.1' 'the requirement is amended next wave'
 expect_eq "MH-3 waive-row finds the block under a heading with text (exit 0)" "0" "$RC"
 expect_regex "MH-3b …the waiver line is in AC-2.1's block" '^  waiver: Fixture User [0-9]{4}-[0-9]{2}-[0-9]{2} "I waive AC-2.1" — the requirement is amended next wave$' \
@@ -4204,7 +4219,8 @@ expect_absent "BR-5f …and none of those labels is written into the file as pro
 # scratch HOME and a fixture attestation, patrol stamp and engagement, as dispatch-preflight.test.sh's own
 # fixtures do; an allowed dispatch journals a roster row, which is the positive that the wall really lifted
 # the brief's fields.
-BR_HOME="$TMPROOT/brief-home"; mkdir -p "$BR_HOME/.claude/projects/-brief"; : > "$BR_HOME/.claude/projects/-brief/$SID.jsonl"
+BR_HOME="$TMPROOT/brief-home"; BR_PROJ="$BR_HOME/.claude/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RBR")"  # the repo's own name (wave-37 T5)
+mkdir -p "$BR_PROJ"; : > "$BR_PROJ/$SID.jsonl"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBR/.bionic/tmp/patrol-$SID.state"
 printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBR" > "$RBR/.bionic/tmp/preflight-$SID.state"
 BR_GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
@@ -5576,11 +5592,15 @@ printf 'line/v1|ev=verdict|row=T3|commit=%s|suite=a.test.sh|result=green|log=/fi
   > "$RFX/.bionic/docs/$FX_REC/landing-proofs.log"
 ( cd "$RFX" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
 bound_marker "$RFX" "$SID" "$PFX" >/dev/null 2>&1
-FX_CFG="$TMPROOT/fx-cfg"; mkdir -p "$FX_CFG/projects/fixture"
+FX_CFG="$TMPROOT/fx-cfg"
+# The transcript under the repository's own name and the session's load record under it: the two witnesses
+# the words reader asks for (wave-37 T5; D9, §WITNESS).
+FX_PROJ="$FX_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RFX")"; mkdir -p "$FX_PROJ"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFX" > "$RFX/.bionic/tmp/loaded-$SID.state"
 export CLAUDE_CONFIG_DIR="$FX_CFG"
 fx_typed() {  # <prompt> -> one typed prompt appended to this session's transcript
   jq -cn --arg c "$1" --arg s "$SID" '{type: "user", isSidechain: false, origin: {kind: "human"}, promptSource: "typed",
-    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_CFG/projects/fixture/$SID.jsonl"
+    message: {role: "user", content: $c}, sessionId: $s}' >> "$FX_PROJ/$SID.jsonl"
 }
 fx_typed "defer the side path finding to the next wave please"
 fx_typed "defer the message wording as well please"
