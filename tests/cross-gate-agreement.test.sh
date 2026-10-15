@@ -14420,4 +14420,90 @@ expect_nonempty "DEBT-LINE 5c close-out's co_debts reads the carry through debt_
   "$(awk '/^co_debts\(\) *\{/ { f = 1 } f && /debt_carry_lines/ { print; exit } f && /^}/ { f = 0 }' "$BIONIC_SCRIPTS_DIR/payload/scripts/close-out.sh")"
 rm -rf "$DL_D"
 
+# ============================================================
+section "§SLUG — the project transcript directory name: one function, lib/detect.sh project_slug, three callers that move with it, and a name with a character more is another project (wave-37 T5; D9, ADR-058; ownership row 'the project transcript directory name')"
+# ============================================================
+#
+# The CLI files a session's transcript under `<config>/projects/<name>/`, the name being the session's
+# directory with every character outside [a-zA-Z0-9] turned to `-` (measured: /Users/admin/workspace/personal/bionic
+# is `-Users-admin-workspace-personal-bionic`). Before wave-37 the rule was written twice (detect.sh's auto-memory
+# reader and stop-orders.sh's own_transcript); D9 makes it a trust input, so it is one function now, over the
+# PHYSICAL path, and its callers are detect.sh `detect_auto_memory`, hooks/stop-orders.sh `own_transcript` and
+# lib/said.sh `_said_transcript`. Pinned here: the rule on known paths; the encoder spelled once across the three
+# files; each caller names the function; a doctored library whose project_slug answers one fixed name moves the
+# auto-memory reader and the words reader together (a caller that kept a copy would not move); and the name is
+# matched by equality, so a transcript under `<name>2` (bionic beside bionic2) is not this project's, which a
+# prefix-matching mutant of the words reader would accept.
+#
+# stop-orders' caller is pinned by its text only: own_transcript keeps a walk of every project directory behind
+# the two names (it finds this session's ListAgents answers, it is no trust reader), so no fixture can tell from
+# its output which name it asked first.
+SG_D="$SANDBOX/fx/slug"; SG_SID="sgslug00-0000-4000-8000-00000000005a"
+SG_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -r "$SG_LIB/said.sh" ] || SG_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
+SG_SO="$BIONIC_HOOKS_DIR/stop-orders.sh"
+mkdir -p "$SG_D/bionic/.bionic/tmp" "$SG_D/bionic2" "$SG_D/cfg/projects"
+SG_R="$(cd "$SG_D/bionic" && pwd -P)"
+ln -s "$SG_R" "$SG_D/link"
+sg_slug() { bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${2:-$SG_LIB}" "$1" 2>/dev/null; }  # <path> [<lib>]
+expect_eq "§SLUG 1 the measured name: /Users/admin/workspace/personal/bionic" "-Users-admin-workspace-personal-bionic" \
+  "$(sg_slug /Users/admin/workspace/personal/bionic)"
+expect_eq "§SLUG 1b …a worktree path: '/.' is '--'" "-x-repo--worktrees-37-T5" "$(sg_slug /x/repo/.worktrees/37-T5)"
+expect_eq "§SLUG 1c …a symbolic link is named by the path it resolves to" "$(sg_slug "$SG_R")" "$(sg_slug "$SG_D/link")"
+expect_eq "§SLUG 1d …which is the CLI's rule over the physical path" "$(printf '%s' "$SG_R" | sed 's/[^a-zA-Z0-9]/-/g')" "$(sg_slug "$SG_D/link")"
+
+# ---------- one encoder, three callers (text) ----------
+sg_body() { awk -v fn="$2" '$0 ~ "^[ \t]*" fn "\\(\\)[ \t]*\\{" { f = 1 } f { print } f && /^[ \t]*}[ \t]*$/ { exit }' "$1"; }  # <file> <function>
+SG_ENC='s/[^a-zA-Z0-9]/-/g'
+expect_eq "§SLUG 2 the encoder is spelled once across detect.sh, stop-orders.sh and said.sh" "1 0 0" \
+  "$(/usr/bin/grep -cF "$SG_ENC" "$SG_LIB/detect.sh") $(/usr/bin/grep -cF "$SG_ENC" "$SG_SO") $(/usr/bin/grep -cF "$SG_ENC" "$SG_LIB/said.sh")"
+expect_contains "§SLUG 2b …inside project_slug" "$SG_ENC" "$(sg_body "$SG_LIB/detect.sh" project_slug)"
+expect_contains "§SLUG 3 detect_auto_memory names project_slug" "project_slug" "$(sg_body "$SG_LIB/detect.sh" detect_auto_memory)"
+expect_contains "§SLUG 3b stop-orders.sh own_transcript names project_slug" "project_slug" "$(sg_body "$SG_SO" own_transcript)"
+expect_contains "§SLUG 3c said.sh _said_transcript names project_slug" "project_slug" "$(sg_body "$SG_LIB/said.sh" _said_transcript)"
+
+# ---------- one function: a doctored project_slug moves two callers at once (behaviour) ----------
+SG_MUT="$SG_D/mut"; mkdir -p "$SG_MUT"; cp "$SG_LIB"/*.sh "$SG_MUT/" 2>/dev/null
+anchor file payload/scripts/lib/detect.sh 'project_slug() {'
+printf "\nproject_slug() { printf '%%s' '-mutant-name'; }\n" >> "$SG_MUT/detect.sh"
+expect_eq "§SLUG mutation: the doctored detect.sh parses and its project_slug answers one name for any path" \
+  "0 -mutant-name" "$(bash -n "$SG_MUT/detect.sh"; printf '%s ' "$?"; sg_slug "$SG_R" "$SG_MUT")"
+sg_memory() {  # <lib> -> detect_auto_memory's dir= and files=, for the root
+  ( cd "$SG_R" && env BIONIC_CLAUDE_HOME="$SG_D/cfg" BIONIC_ROOT="$SG_R" bash -c '. "$1/detect.sh" >/dev/null 2>&1; detect_auto_memory' _ "$1" 2>/dev/null ) \
+    | sed -n 's/^env:auto-memory override=[^ ]* //p'
+}
+mkdir -p "$SG_D/cfg/projects/$(sg_slug "$SG_R")/memory" "$SG_D/cfg/projects/-mutant-name/memory"
+: > "$SG_D/cfg/projects/$(sg_slug "$SG_R")/memory/a.md"
+: > "$SG_D/cfg/projects/-mutant-name/memory/b.md"; : > "$SG_D/cfg/projects/-mutant-name/memory/c.md"
+expect_eq "§SLUG 4 detect_auto_memory reads the root's own directory" "dir=$SG_D/cfg/projects/$(sg_slug "$SG_R")/memory files=1" "$(sg_memory "$SG_LIB")"
+expect_eq "§SLUG 4b …and moves with the doctored project_slug" "dir=$SG_D/cfg/projects/-mutant-name/memory files=2" "$(sg_memory "$SG_MUT")"
+sg_said() {  # <lib> <text> -> "<rc>|<SAID_SESSION>", user_said in the root, this session alone
+  ( cd "$SG_R" && env CLAUDE_CONFIG_DIR="$SG_D/cfg" CLAUDE_CODE_SESSION_ID="$SG_SID" bash -c '. "$1/said.sh" 2>/dev/null; user_said "$2"; printf "%s|%s" "$?" "${SAID_SESSION:-}"' _ "$1" "$2" 2>/dev/null )
+}
+SG_W='keep the slug reader in one place please'
+sg_tx() {  # <name> -> this session's transcript, holding the words, under that name alone
+  rm -f "$SG_D/cfg/projects"/*/"$SG_SID.jsonl"; mkdir -p "$SG_D/cfg/projects/$1"
+  jq -cn --arg c "$SG_W" --arg s "$SG_SID" '{type:"user",isSidechain:false,origin:{kind:"human"},promptSource:"typed",message:{role:"user",content:$c},sessionId:$s}' \
+    > "$SG_D/cfg/projects/$1/$SG_SID.jsonl"
+}
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "$SG_LIB" "$SG_R" > "$SG_R/.bionic/tmp/loaded-$SG_SID.state"
+sg_tx "$(sg_slug "$SG_R")"
+expect_eq "§SLUG 5 the words reader finds this session under the root's own name (rc 0)" "0|$SG_SID" "$(sg_said "$SG_LIB" "$SG_W")"
+expect_eq "§SLUG 5b …and under the doctored project_slug it no longer does: the session is refused (rc 2)" "2|" "$(sg_said "$SG_MUT" "$SG_W")"
+sg_tx -mutant-name
+expect_eq "§SLUG 5c …while the doctored library reads the transcript under the name its project_slug gives (rc 0)" "0|$SG_SID" "$(sg_said "$SG_MUT" "$SG_W")"
+expect_eq "§SLUG 5d …which the shipped library refuses (rc 2)" "2|" "$(sg_said "$SG_LIB" "$SG_W")"
+
+# ---------- equality, never a prefix: bionic is not bionic2 ----------
+expect_eq "§SLUG 6-pre precondition: bionic2's name is bionic's with a character more" "$(sg_slug "$SG_R")2" "$(sg_slug "$SG_D/bionic2")"
+sg_tx "$(sg_slug "$SG_D/bionic2")"
+expect_eq "§SLUG 6 a transcript under bionic2's directory is not bionic's session: refused (rc 2)" "2|" "$(sg_said "$SG_LIB" "$SG_W")"
+SG_PFX="$SG_D/pfx"; mkdir -p "$SG_PFX"; cp "$SG_LIB"/*.sh "$SG_PFX/" 2>/dev/null
+anchor file payload/scripts/lib/said.sh 'f="$dir/$s/$sid.jsonl"'
+SG_N='f="$dir/$s/$sid.jsonl"' awk 'BEGIN { n = ENVIRON["SG_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "f=\"$(ls -d \"$dir/$s\"*/\"$sid.jsonl\" 2>/dev/null | head -1)\"" substr($0, i + length(n)); print }' \
+  "$SG_LIB/said.sh" > "$SG_PFX/said.sh"
+expect_eq "§SLUG 6b the prefix mutant differs from the library in one line" "1" "$(diff "$SG_LIB/said.sh" "$SG_PFX/said.sh" | /usr/bin/grep -c '^>')"
+expect_eq "§SLUG 6c …and accepts bionic2's transcript as bionic's (rc 0), so §SLUG 6 goes red under it" "0|$SG_SID" "$(sg_said "$SG_PFX" "$SG_W")"
+rm -rf "$SG_D"
+
 finish

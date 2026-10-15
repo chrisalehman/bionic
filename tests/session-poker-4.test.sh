@@ -5696,4 +5696,187 @@ POKE_BOUND="$FX_BOUND_WAS"
 if [ "$FX_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$FX_CCD_WAS"; fi
 
 
+# ============================================================
+section "§WITNESS: a session's words count only when the project witnesses the session — its transcript under this root's own directory, its load record under this root (wave-37 T5; REQ-5 AC-5.1, AC-5.2, AC-5.3; D9, ADR-058)"
+# ============================================================
+#
+# The three verbs that act on what the user typed — finding-move, waive-row and rule --words — read the
+# transcripts of the sessions the plan's `- session:` lines name, then this session's (lib/said.sh
+# `user_said`). A `- session:` line is plan text, and one appended by hand reads exactly as one a binding act
+# wrote; before D9 the transcript was then found under ANY project's directory. Now a session counts only
+# when the project witnesses it: its transcript is `<config>/projects/<project_slug root>/<sid>.jsonl` (or
+# under the slug of the start cwd its load record names), by exact name, and `.bionic/tmp/loaded-<sid>.state`
+# exists under this root. A session failing either is refused, and the refusal names it with the missing
+# witness, `refused: <sid> (<reason>)`, beside `read: <sids>`. The threat is a hand or an agent appending a
+# plan line, not a forger editing the config directory (spec §5).
+#
+# FIXTURE FIDELITY. §FX's shape: a real repository on its working branch, the plan and its registered reading
+# in their writers' shapes (proof.sh `proof_line`), a matrix row with its block, the session bound by the real
+# `bound_marker`, a writer row from the production row writer for `rule`. The other session's `- session:` line
+# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`). Every transcript is the
+# CLI's typed-prompt shape (tests/fixtures/transcript-move/typed.jsonl) under a config dir of this section's;
+# the load record is session-start's shape (`root=`, `started=`, `cwd=`).
+WT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+WT_CCD_WAS="${CLAUDE_CONFIG_DIR-__unset__}"
+WT_REC="record/wave-01-fixture"
+WT_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+WT_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+RWT="$TMPROOT/witness"; mkdir -p "$RWT"
+( cd "$RWT" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+  && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+RWT="$(cd "$RWT" && pwd -P)"
+mkdir -p "$RWT/.bionic/tmp" "$RWT/.bionic/docs/$WT_REC" "$RWT/.bionic/docs/plans/epic-99-fixture" "$RWT/.bionic/docs/specs/epic-99-fixture" "$RWT/sub"
+: > "$RWT/.bionic/tmp/engaged-$SID.state"
+WT_B="$(git -C "$RWT" rev-parse HEAD)"
+printf 'one\n' > "$RWT/a.sh"; ( cd "$RWT" && git add a.sh && git commit -qm a ) >/dev/null 2>&1
+WT_C1="$(git -C "$RWT" rev-parse HEAD)"
+PWT="$RWT/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+printf '# requirements\n' > "$RWT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# spec\n' > "$RWT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+{ printf 'question: adversarial\nresult: flag\nscope: piece\nreviewed: %s..%s\nfindings: 2\n' "${WT_B:0:10}" "${WT_C1:0:10}"
+  printf '%s\n' 'finding: 1 S3 off - a message could be clearer' 'finding: 2 S3 off - a second message could be clearer'
+  printf '\nwhat the reader found\n'; } > "$RWT/.bionic/docs/$WT_REC/adv.md"
+WT_PROVED="$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" adversarial w-read flag piece' _ "$WT_LIB" "$WT_C1" "$WT_REC/adv.md")"
+# The other session, and the line a hand appends for it.
+WT_X="5a1d0000-0000-4000-8000-0000000000b7"
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+  printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+  printf 'walk: exempt\ndeploy_target: n/a\n'
+  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+  printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+  printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n'
+  printf -- '- session: %s bound 2026-10-14T00:00:00Z by bind\n\n' "$WT_X"
+  printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+  printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+  printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+  printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${WT_B:0:10}"
+  printf -- '- T1: landed at record/T1.md\n'
+  printf '%s\n' "$WT_PROVED"
+  printf '\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+} > "$PWT"
+( cd "$RWT" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
+bound_marker "$RWT" "$SID" "$PWT" >/dev/null 2>&1
+new_roster "$RWT"
+roster_row_fixture session="$SID" name=wt-crit agent_id=a-wt-crit subagent_type=bionic:critic >> "$(roster_of "$RWT")"
+WT_CFG="$TMPROOT/wt-cfg"; mkdir -p "$WT_CFG/projects"
+export CLAUDE_CONFIG_DIR="$WT_CFG"
+wt_slug() { bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$WT_LIB" "$1" 2>/dev/null; }  # <path> -> the library's name for it
+WT_SLUG="$(wt_slug "$RWT")"; WT_SUBSLUG="$(wt_slug "$RWT/sub")"
+wt_prompts() {  # <transcript> <prompt>... -> the frame, then one typed prompt each
+  local f="$1" p; shift; mkdir -p "${f%/*}"; cat "$WT_FX/frame.jsonl" > "$f"
+  for p in "$@"; do jq -c --arg p "$p" '.message.content = $p' "$WT_FX/typed.jsonl" >> "$f"; done
+}
+wt_loaded() {  # <sid> [<cwd>] -> the session's load record under the root, in session-start's shape
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "${2:-$RWT}" > "$RWT/.bionic/tmp/loaded-$1.state"
+}
+WT_WM='defer the message wording to the next wave please'
+WT_WW='I waive row AC-1.1 because the live check moves on'
+WT_WR='leave the parser alone until the review lands'
+# This session is witnessed throughout and typed none of the words; the other session typed them all.
+wt_prompts "$WT_CFG/projects/$WT_SLUG/$SID.jsonl" 'start the review of the parser'
+wt_loaded "$SID"
+wt_x_at() {  # <slug> -> the other session's transcript, holding the three prompts, under that slug alone
+  rm -rf "$WT_CFG/projects"/*/"$WT_X.jsonl"
+  wt_prompts "$WT_CFG/projects/$1/$WT_X.jsonl" "$WT_WM" "$WT_WW" "$WT_WR"
+}
+wt_try() {  # <label> <want rc> -> the three verbs on the other session's words; WT_OUT_<verb> their output
+  local label="$1" rc="$2"
+  s42_snap "$RWT" "$PWT"
+  poke "$RWT" finding-move "$WT_REC/adv.md#1" defer "$WT_WM" 'the person deferred it'
+  WT_RC_M="$RC"; WT_OUT_M="$OUT"
+  [ "$rc" = 0 ] || expect_true "$label finding-move — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PWT"
+  s42_snap "$RWT" "$PWT"
+  poke "$RWT" waive-row AC-1.1 "$WT_WW" 'the live check moves to the next wave'
+  WT_RC_W="$RC"; WT_OUT_W="$OUT"
+  [ "$rc" = 0 ] || expect_true "$label waive-row — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$PWT"
+  poke "$RWT" rule wt-crit 'leave the parser for now' --words "$WT_WR"
+  WT_RC_R="$RC"; WT_OUT_R="$OUT"
+}
+
+expect_eq "WITNESS-0 precondition: the fixture root's transcript directory name is project_slug's, the CLI's rule over the physical path" \
+  "$(printf '%s' "$RWT" | sed 's/[^a-zA-Z0-9]/-/g')" "$WT_SLUG"
+expect_eq "WITNESS-0b precondition: the plan records the other session (bind_sessions reads the hand-added line)" "$WT_X" \
+  "$(bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2"' _ "$WT_LIB" "$PWT" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- AC-5.1: the words under another project's directory, the session bound and loaded here ----------
+wt_x_at -other-project; wt_loaded "$WT_X"
+expect_contains "WITNESS-1-pre precondition: the other project's transcript carries the move's words, as a raw read finds them" \
+  "$WT_WM" "$(cat "$WT_CFG/projects/-other-project/$WT_X.jsonl")"
+wt_try "WITNESS-1" 1
+expect_eq "WITNESS-1 §WITNESS AC-5.1 finding-move on words typed only under another project's directory is refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-1b …naming the session and the witness it lacks: no transcript under this root's directory" \
+  "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_M"
+expect_contains "WITNESS-1c AC-5.3 …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-1d waive-row on them is refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-1e …naming the session and the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_W"
+expect_eq "WITNESS-1f rule --words on them is refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-1g …naming the session and the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_R"
+
+# ---------- prefix is not equality: the root's name with a character more is another project ----------
+wt_x_at "${WT_SLUG}2"
+wt_try "WITNESS-2" 1
+expect_eq "WITNESS-2 the words under <this root's name>2 (bionic beside bionic2): finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-2b …naming the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$WT_OUT_M"
+
+# ---------- AC-5.2: the transcript in place, no load record under this root ----------
+wt_x_at "$WT_SLUG"; rm -f "$RWT/.bionic/tmp/loaded-$WT_X.state"
+wt_try "WITNESS-3" 1
+expect_eq "WITNESS-3 §WITNESS AC-5.2 the transcript under this root's directory but no loaded-<sid>.state: finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-3b …naming the session and the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_M"
+expect_contains "WITNESS-3c AC-5.3 …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-3d waive-row refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-3e …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_W"
+expect_eq "WITNESS-3f rule --words refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-3g …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_R"
+
+# ---------- both witnesses: accepted, by all three ----------
+wt_loaded "$WT_X"
+wt_try "WITNESS-4" 0
+expect_eq "WITNESS-4 §WITNESS the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
+expect_regex "WITNESS-4b …quoting the words with the session they came from" \
+  "^moved: $WT_REC/adv\\.md#1 to=defer by=Dana Fixture at=[0-9T:Z-]+ words=\"$WT_WM\" session=$WT_X why=" \
+  "$(/usr/bin/grep -F "moved: $WT_REC/adv.md#1 " "$PWT")"
+expect_eq "WITNESS-4c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
+expect_contains "WITNESS-4d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
+expect_eq "WITNESS-4e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
+poke "$RWT" rulings wt-crit
+expect_contains "WITNESS-4f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
+
+# ---------- the start cwd: a session started in a subdirectory files its transcript under that name ----------
+wt_x_at "$WT_SUBSLUG"; wt_loaded "$WT_X" "$RWT/sub"
+expect_ne "WITNESS-5-pre precondition: the subdirectory's name is not the root's" "$WT_SLUG" "$WT_SUBSLUG"
+poke "$RWT" finding-move "$WT_REC/adv.md#2" defer "$WT_WM" 'the person deferred it'
+expect_eq "WITNESS-5 the transcript under the slug of the start cwd its load record names: finding-move moves it (exit 0)" "0" "$RC"
+wt_loaded "$WT_X" "$RWT"
+poke "$RWT" rule wt-crit 'leave it again' --words "$WT_WR"
+expect_eq "WITNESS-5b …and with the load record naming the root instead, the same transcript is refused (exit 2)" "2" "$RC"
+expect_contains "WITNESS-5c …naming the missing transcript" "refused: $WT_X (no transcript under $WT_SLUG)" "$OUT"
+
+# ---------- the mutation arm (the ownership row's falsifier): the state check dropped ----------
+# A copy of the library whose _said_sessions has no load-record check reads the transcript of a session that
+# never loaded here; the shipped library refuses it. WITNESS-3 goes red under it.
+wt_said() {  # <lib dir> <text> -> "<rc>|<SAID_SESSION>|<SAID_REFUSED>", user_said over the plan, in the root
+  ( cd "$RWT" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/said.sh" 2>/dev/null; user_said "$2" "$3"; printf "%s|%s|%s" "$?" "${SAID_SESSION:-}" "${SAID_REFUSED:-}"' \
+    _ "$1" "$2" "$PWT" 2>/dev/null )
+}
+WT_MUT="$TMPROOT/wt-mut"; mkdir -p "$WT_MUT"; cp "$WT_LIB"/*.sh "$WT_MUT/"
+anchor file payload/scripts/lib/said.sh 'printf '"'"'%s (no loaded-%s.state)\n'"'"
+/usr/bin/grep -vF 'printf '"'"'%s (no loaded-%s.state)\n'"'" "$WT_LIB/said.sh" > "$WT_MUT/said.sh"
+wt_x_at "$WT_SLUG"; rm -f "$RWT/.bionic/tmp/loaded-$WT_X.state"
+expect_eq "WITNESS-mut0 the mutant differs from the library by the one state check" "1" "$(diff "$WT_LIB/said.sh" "$WT_MUT/said.sh" | /usr/bin/grep -c '^<')"
+expect_eq "WITNESS-mut1 the shipped library refuses the session with no load record" "1||$WT_X (no loaded-$WT_X.state)" "$(wt_said "$WT_LIB" "$WT_WM")"
+expect_eq "WITNESS-mut2 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-3 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUT" "$WT_WM")"
+wt_loaded "$WT_X"
+
+POKE_BOUND="$WT_BOUND_WAS"
+if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi
+
 finish
