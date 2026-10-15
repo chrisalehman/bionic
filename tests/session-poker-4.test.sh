@@ -6220,7 +6220,7 @@ expect_eq "RR7 a row landing twice: each landing's split starts from its own rea
 
 # ---------- the mutation arms: a split read from the gate store; the fields written before waited= ----------
 RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rr-mut.XXXXXX")"
-rd_mutant fromgate 's#pw\[n\] = mins(pfrom\[n\], fcn);#pw[n] = "-"; for (i = 1; i <= nq; i++) if (qw[i] == pname[n] \&\& num(qd[i])) { pw[n] = sprintf("%.1f", (qd[i] - qa[i]) / 60); break };#'
+rd_mutant fromgate 's#pw\[n\] = seg(pfrom\[n\], fcn);#pw[n] = "-"; for (i = 1; i <= nq; i++) if (qw[i] == pname[n] \&\& num(qd[i])) { pw[n] = sprintf("%.1f", (qd[i] - qa[i]) / 60); break };#'
 rd_mutant beforewaited 's#^        print pre1 wt tl$#        print pre1 tl wt#'
 expect_eq "RR-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
   "$(diff "$POKER" "$RD_MUT/fromgate/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/beforewaited/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
