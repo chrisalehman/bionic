@@ -2901,23 +2901,24 @@ else
     "expected the Step-5 refusal and no row note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25g(j): two directories named before the commit is an ambiguity, not a first one -----
+# --- 25g(j): the LAST cd the reader can follow is where the commit runs --------------------
 #
 # The critic's issue 1, and the one the reconcile alone does NOT close: wt-T3 is a REAL
 # linked worktree of this repo, so git confirms it — and the commit still lands in main.
-# The text names two trees and the arm cannot know which one obeys, so it refuses and names
-# both rather than trusting the one that happens to come first.
+# Until wave-36 the gate read the text itself, could not tell which of two named trees obeyed,
+# and refused naming both. Since T25 (D11, AC-5.3) it asks the one placement reader
+# (`cmd_place … git`, lib/placement.sh), which follows the cd chain as the shell does: the
+# commit runs in main, so it is judged at main, by the run's `current: 5`, never at wt-T3's row.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "cd $s25r_tmp/wt-T3 && cd $s25r_main && git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
-   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
-   && grep -qF "$s25r_main" <<<"$HOOK_VSTDERR"; then
-  ok "25g(j) 'cd <tree> && cd <main> && git commit' is refused as ambiguous, naming both directories"
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
+   && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
+  ok "25g(j) 'cd <tree> && cd <main> && git commit' is placed in main and judged at current: 5, not at the tree's row"
 else
-  no "25g(j) 'cd <tree> && cd <main> && git commit' is refused as ambiguous, naming both directories" \
-    "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(j) 'cd <tree> && cd <main> && git commit' is placed in main and judged at current: 5, not at the tree's row" \
+    "expected the Step-5 refusal and no row note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25g(j2) / AC-3.1: the ambiguity is the COMMAND's, not the first directory's ----------
+# --- 25g(j2) / AC-3.1: the place is the COMMAND's, not the first directory's --------------
 #
 # THE FAIL-OPEN HALF OF 25g(j) (wave-17 REQ-3, D4; bug 6). The arm above lived inside the
 # `_EG_WT` guard, so it only ever saw a command whose FIRST directory git had confirmed as a
@@ -2927,27 +2928,23 @@ fi
 # the shape a consumer actually wrote (`cd <records-dir>; …; cd <tree> && git commit`) and
 # the shape that produced an unrelated wave-level refusal instead of an answer.
 #
-# NOTHING IN THE TEXT SAYS WHICH DIRECTORY OBEYS, and that is true whatever the first one is:
-# a `;` runs the rest wherever the shell is standing, a failed `cd` leaves it in the old
-# place, and a `&&` only looks decisive. So the refusal is a property of the COMMAND and the
-# arm is asked before any directory is resolved. Driven from the same `current: 5` fixture,
-# with an ordinary directory (the main checkout's own record/ tree) in first position — the
-# one position that used to buy silence.
+# THE COMMAND'S CD CHAIN DECIDES, whatever the first directory is (wave-36 T25; D11). Until T25
+# nothing in the gate's own reading said which directory obeyed, so a second `cd` was refused as
+# an ambiguity; the placement reader follows the chain (`;` and `&&` alike, a literal cd each), so
+# the commit runs in the LAST tree, wt-T3, and is judged at row T3's step. Driven from the same
+# `current: 5` fixture, with an ordinary directory (the main checkout's own record/ tree) in first
+# position — the one position that used to buy silence.
 s25r_amb="cd $s25r_main/.bionic/docs/record/w25g; printf 'x\\n' > y.md; cd $s25r_tmp/wt-T3 && git commit -m \"x\""
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "$s25r_amb"
-if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
-   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
-   && grep -qF "$s25r_main/.bionic/docs/record/w25g" <<<"$HOOK_VSTDERR" \
-   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
-   && grep -qF "git -C <dir> commit" <<<"$HOOK_VSTDERR"; then
-  ok "25g(j2) AC-3.1 two directories before the commit are refused when the FIRST is an ordinary directory too"
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(j2) AC-3.1 a cd chain whose FIRST directory is an ordinary one is placed at its last tree, row T3's step 4"
 else
-  no "25g(j2) AC-3.1 two directories before the commit are refused when the FIRST is an ordinary directory too" \
-    "expected exit 2 'two directories are named before the commit' naming both dirs and git -C; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(j2) AC-3.1 a cd chain whose FIRST directory is an ordinary one is placed at its last tree, row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# …and the control that keeps it from becoming "any cd is a refusal": the SAME first
-# directory, one `cd`, is judged at `current:` exactly as 25g(i) and 25g(d) are.
+# …and the control on the same extractor: the SAME first directory, one `cd`, is judged at
+# `current:` exactly as 25g(i) and 25g(d) are, so the allow above is the second cd's doing.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
   "cd $s25r_main/.bionic/docs/record/w25g || exit 1; git commit -m \"x\""
 if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" \
@@ -2994,17 +2991,17 @@ else
 fi
 
 # …and the one-cell-away control, in the SAME fixture: two tree paths that really are two
-# directories are still the refusal REQ-3 exists for, with its text unchanged.
+# directories. Since wave-36 T25 (D11) the placement reader follows them, so the commit is placed
+# in the second, wt-T5, and judged by row T5's task arms — never at wt-T3's row, never refused
+# for naming two.
+s25r_note_T5="evidence-gate: judged by row T5's task arms (run at current: 5)"
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
   "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
-   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
-   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
-   && grep -qF "$s25r_tmp/wt-T5" <<<"$HOOK_VSTDERR"; then
-  ok "25g(s) …while two DISTINCT resolved directories are still refused, naming both"
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T5" ]; then
+  ok "25g(s) …while two DISTINCT directories place the commit in the second, judged by row T5"
 else
-  no "25g(s) …while two DISTINCT resolved directories are still refused, naming both" \
-    "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(s) …while two DISTINCT directories place the commit in the second, judged by row T5" \
+    "expected allow + '$s25r_note_T5'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(t) / W6: EVERY `cd` before the commit is a directory the arm has to fold ---------
@@ -3016,33 +3013,43 @@ fi
 # through the arm and was judged at X's row, while the shell commits in Y, which another row
 # owns at another step. Fail-open, and one `&&` away from the shape 25g(j) refuses.
 #
-# SO THE ARM FOLDS THE WHOLE LIST, not its first two entries. Every `cd` target before the
-# commit is resolved in order — each relative to the directory the previous one left the shell
-# standing in — and the command names ONE directory only when they all fold alike. The first
-# target that does not is the one the refusal names, so the detail always reads as a real
-# disagreement and never as a sentence answering its own complaint (C3).
+# SO EVERY cd IS READ, IN ORDER, not the first two. Since wave-36 T25 (D11) the reading is the
+# one placement reader's: each cd before the commit is followed — each relative to the directory
+# the previous one left the shell standing in — and the commit runs where the last one leads. A
+# third cd into wt-T5 places it at row T5; a cd away and back places it at row T3. Neither is
+# judged at the first directory's row, which was W6's fail-open.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
   "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
-   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
-   && grep -qF "changes into '$s25r_tmp/wt-T3' and then into '$s25r_tmp/wt-T5'" <<<"$HOOK_VSTDERR"; then
-  ok "25g(t) W6 a THIRD cd into another directory is refused, and the detail names the pair that differs"
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T5" ]; then
+  ok "25g(t) W6 a THIRD cd into another directory places the commit there, judged by row T5"
 else
-  no "25g(t) W6 a THIRD cd into another directory is refused, and the detail names the pair that differs" \
-    "expected exit 2 naming wt-T3 then wt-T5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(t) W6 a THIRD cd into another directory places the commit there, judged by row T5" \
+    "expected allow + '$s25r_note_T5'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# …and the difference is caught wherever it sits in the list: here the SECOND target is the
-# odd one and the third returns to the first. A commit is still not placed by this text.
+# …and wherever the move sits in the list: here the SECOND target is the odd one and the third
+# returns to the first, so the commit runs in wt-T3 and is judged at row T3's step.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
   "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
-   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
-   && grep -qF "changes into '$s25r_tmp/wt-T3' and then into '$s25r_tmp/wt-T5'" <<<"$HOOK_VSTDERR"; then
-  ok "25g(t) …and a cd AWAY and BACK is refused too, naming the target that differs"
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …and a cd AWAY and BACK places the commit back in wt-T3, judged at row T3's step 4"
 else
-  no "25g(t) …and a cd AWAY and BACK is refused too, naming the target that differs" \
-    "expected exit 2 naming wt-T3 then wt-T5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(t) …and a cd AWAY and BACK places the commit back in wt-T3, judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and a move the reader cannot follow is refused naming it, through `place_moving_line`, never
+# judged on the plan at the first directory's row or at `current:` (AC-5.3): T is set nowhere in
+# the command, so nothing says which tree the commit lands in.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd \"\$T\" && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF 'moving-form: `cd "$T"`' <<<"$HOOK_STDERR$HOOK_VSTDERR" \
+   && ! grep -q "$S25_JUDGED" <<<"$HOOK_VSTDERR" && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
+  ok "25g(t) AC-5.3 a cd the reader cannot follow is refused as a moving form naming it, judged on no row"
+else
+  no "25g(t) AC-5.3 a cd the reader cannot follow is refused as a moving form naming it, judged on no row" \
+    "expected exit 2 naming moving-form cd \"\$T\"; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # …the control that keeps this from becoming "three cds are a refusal": three spellings of the
@@ -4432,7 +4439,7 @@ expect_allow "FL-4 …a regression: no plan at current: 7 owes no floor line →
 # none and four shapes the reader does not count are the negatives, read through the same two extractors. Both call sites are anchored, so
 # a landing that drops either call names this suite.
 anchor file payload/scripts/lib/walls.sh 'why="$(proof_floor_absent "$PLAN")" || return 0'
-anchor file payload/scripts/lib/proof.sh 'why="$(proof_floor_absent "$plan")" && {'
+anchor file payload/scripts/lib/proof.sh 'st="$(proof_floor_absent "$plan")" && {'
 fl_wall() {  # <home> -> absent | present | other:<the refusal line>, the real wall's answer to a commit
   run_hook "$1" 'git commit -m "x"'
   if [ "$HOOK_EXIT" = 0 ]; then printf present
@@ -4463,6 +4470,16 @@ fl5_row elsewhere "$(eg_readings "$FL5_PLAN")
 ## Notes
 
 $FL_FLOOR" absent
+# FL-5-cr ONE PLAN LINE READER (wave-36 T12; D13, AC-7.5; C34). The same plan with its floor line, every line ending
+# a lone CR (classic-Mac). The wall's Step-7 arm and the judge read the floor line through lib/run.sh `plan_lines`,
+# which translates the CR, so both answer present; a raw read saw one line and answered absent, wall and judge alike.
+FL5_CR="$(fl_with "$FL5_PLAN" "$FL_FLOOR" | tr '\n' '\r')"
+expect_eq "FL-5-cr precondition: the plan text carries no LF, only CRs" "0" "$(printf '%s' "$FL5_CR" | tr -cd '\n' | wc -c | tr -d ' ')"
+fl5_row cr "$FL5_CR" present
+expect_eq "FL-5-cr2 …and proof_floor_absent itself says present on that file (exit 1, nothing printed)" "1|" \
+  "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && o="$(proof_floor_absent "$2")"; printf "%s|%s" "$?" "$o"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_CR")" 2>/dev/null)"
+expect_eq "FL-5-cr3 positive twin: on the LF plan with no floor line it says absent (exit 0, its words)" "0|$FL_WHY" \
+  "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && o="$(proof_floor_absent "$2")"; printf "%s|%s" "$?" "$o"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_PLAN")" 2>/dev/null)"
 expect_eq "FL-5b the judge's answer for a plan with no floor line is its words for absent, the ones the wall refuses in" \
   "uncovered	$FL_WHY" \
   "$(bash -c '. "$1/payload/scripts/lib/proof.sh" && proof_state "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$(write_plan "$hFL5" "$FL5_PLAN")" "$hFL5" 2>/dev/null)"

@@ -11486,8 +11486,8 @@ cgc_stopwall() {  # <repo> -> open | closed | other:<reason>
   out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
   case "$out" in
-    *"Fillable gap"*"R1"*) printf 'closed' ;;
-    *"Fillable gap"*|*"Fill budget unreadable"*) printf 'other:%s' "$out" ;;
+    *"ready with room:"*"R1"*) printf 'closed' ;;
+    *"ready with room:"*|*"Fill budget unreadable"*) printf 'other:%s' "$out" ;;
     *) printf 'open' ;;
   esac
 }
@@ -11549,7 +11549,7 @@ cgc_ring
 _cgc_mut=$(s4_stop_payload "$_cgc_r" "$SID_A" "$_cgc_r/cgc-transcript.jsonl" \
   | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_MUT_HOOK/stop.sh" 2>/dev/null)
 expect_contains "CG-close MUTANT a name-only stop wall frees the re-dispatched name's slot (the row discriminates)" \
-  "Fillable gap" "$_cgc_mut"
+  "ready with room:" "$_cgc_mut"
 
 # ============================================================
 section "CG-close-all — the three remaining readers ask the one close predicate (epic-23 wave-20 T17, REQ-10 AC-10.1; D10)"
@@ -11962,7 +11962,9 @@ section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave
 #   tick         how many of the ten ready rows its FILL names: the gate has room for all
 #                ten, so the cap is the width (wave-28 T13: the rung line it used to read is gone)
 #   preflight    the budget refusal's `writers: budget=<n>` (ten open rows, so any n refuses)
-#   stop wall    the width of the ready set it names, over ten ready rows and an empty roster
+#   stop wall    the free slots its fill-ledger line records, over ten ready rows and an empty
+#                roster (wave-36 T32: its refusal names every ready row while a slot is free,
+#                so its width is read where it records it, never off the names)
 #   gov hook     presence only (its one use is "does a writers= exist"): the Write is
 #                refused on the budget arm iff it reads none
 # and the governing-skill hook is driven over TEXT (the Write's content), the other three over
@@ -12013,9 +12015,13 @@ cgb_stopwall() {  # <repo> -> writers
   case "$out" in
     '') printf -- '-'; return 0 ;;
   esac
-  ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
-  if [ -z "$ids" ]; then printf '?'; return 0; fi
-  printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
+  case "$out" in *"ready with room:"*) ;; *) printf '?'; return 0 ;; esac
+  cgb_wall_free "$1"
+}
+cgb_wall_free() {  # <repo> -> the free= of the stop wall's last fill-ledger line, or ?
+  local free
+  free=$(cat "$1"/.bionic/docs/record/*/fill-ledger.log 2>/dev/null | tail -1 | sed -n 's/.*|free=\([0-9]*\)|.*/\1/p')
+  printf '%s' "${free:-?}"
 }
 cgb_govskill() {  # <budget line verbatim> -> present | absent (sets CGB_GS_OUT)
   local r plan content
@@ -12085,7 +12091,7 @@ while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
   _cgb_w="$_cgb_want"; [ "$_cgb_want" = "-" ] && _cgb_w=10
   expect_eq "CG-budget ${_cgb_label}: the tick fills ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_tk"
   expect_eq "CG-budget ${_cgb_label}: dispatch preflight reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_pf"
-  expect_eq "CG-budget ${_cgb_label}: the stop wall names ${_cgb_w} (cap ${_cgb_want})" "$_cgb_w" "$_cgb_st"
+  expect_eq "CG-budget ${_cgb_label}: the stop wall refuses with ${_cgb_w} free (cap ${_cgb_want})" "$_cgb_w" "$_cgb_st"
   expect_eq "CG-budget ${_cgb_label}: the governing-skill hook admits the Write (no plan owes the line)" \
     "admitted" "$_cgb_gs"
   if [ "$_cgb_want" = "-" ]; then
@@ -12124,13 +12130,14 @@ section "§ROOM — the tick and the stop wall give one answer on width (wave-28
 room_world() {  # <label> -> repo path, with ten ready rows under a cap of eight
   cgb_world "room-$1" 'parallel-budget: writers=8 suites=2 source=user'
 }
-room_stop() {  # <repo> -> how many writer rows the stop wall owes, 0 when it refuses nothing
-  local out ids
+room_stop() {  # <repo> -> the writer slots the stop wall finds free, 0 when it refuses nothing
+  local out
   out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
-  ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
-  if [ -z "$ids" ]; then printf '0'; return 0; fi
-  printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
+  # Its width is its ledger line's free= (wave-36 T32: the refusal names every ready row while a
+  # slot is free, so the count of names is no longer the width).
+  case "$out" in *"ready with room:"*) ;; *) printf '0'; return 0 ;; esac
+  cgb_wall_free "$1"
 }
 room_tick() {  # <repo> — sets ROOM_TICK_OUT (the tick's channel) and ROOM_TK (rows its FILL names)
   local ids
@@ -12418,7 +12425,7 @@ cgt_stop() {  # <stop_hook_active true|false>
 jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$CGT_TR"
 cgt_agent toolu_01CGTA1 W-R1
 CGT_OUT="$(cgt_stop false)"
-expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
+expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "ready with room:" "$CGT_OUT"
 # THE LAUNCHED SET IS THE RECORDER'S (wave-28 T38; REQ-13, D30). The task-entry duty that also read it
 # went at wave-31 T32 (D6, AC-6.5): the Stop the recorder's line names is refused for the fill alone.
 expect_contains "CG-entry the recorder's line for turn A's first Stop records the launch W-R1" "|launched=W-R1|" \
@@ -12670,9 +12677,14 @@ section "CG-ledger — ONE ledger reader: the gate's refusal ids ARE the tick's 
 # the first tick of every run). With no roster both readers take the no-roster rule, so T3's
 # agent-named active row is an `evidence` finding there rather than a `launch` one, and the
 # gate folds the two evidence rows into one refusal.
-# cgl_case <label> <five-minute load> <roster: yes|no> <want kinds> <want refusals>
+#
+# AND OVER THE RUN'S ROSTERS (wave-36 T29; REQ-4 AC-4.1; D10). Both readers take one list,
+# `units_run_rosters`: this session's roster, then every roster of the plan. `-run` keeps every launch
+# row on session B's roster, dispatched under this plan, and this session's roster empty, so a reader
+# that reads `roster-<sid>` alone names T4 too and the repaired plan never commits or ticks clean.
+# cgl_case <label> <five-minute load> <roster: yes|no> <want kinds> <want refusals> [<launch rows: own|run>]
 cgl_case() {
-  local lbl="$1" load5="$2" roster="$3" want_kinds="$4" want_n="$5"
+  local lbl="$1" load5="$2" roster="$3" want_kinds="$4" want_n="$5" home="${6:-own}"
   CGL_R=$(new_repo "cgl${lbl}")
   CGL_P="$CGL_R/.bionic/docs/plans/epic-99/cgl.plan.md"
   CGL_RO="$CGL_R/.bionic/tmp/roster-$SID_A.state"
@@ -12717,12 +12729,21 @@ Step 4:
 | T4 | 4 | build | active, launched | w-T4 | — | 30m | REQ-x | d.sh | active |
 | T5 | 4 | build | active, self-owned | — | — | 30m | REQ-x | e.sh | active |
 CGLEOF
+  s4_bind "$CGL_R" "$SID_A" "$CGL_P"
+  # WHERE THE LAUNCH ROWS GO: this session's roster, or session B's under this plan's binding.
+  CGL_RL="$CGL_RO"; CGL_RSID="$SID_A"; CGL_RPLAN=none
+  if [ "$home" = run ]; then
+    CGL_RL="$CGL_R/.bionic/tmp/roster-$SID_B.state"; CGL_RSID="$SID_B"
+    CGL_RPLAN="$(sed -n 's/^plan=//p' "$CGL_R/.bionic/tmp/engaged-$SID_A.state")"
+    roster_header > "$CGL_RL"
+  fi
   if [ "$roster" = yes ]; then
     roster_header > "$CGL_RO"
-    roster_row_fixture status=identified session="$SID_A" name=w-T4 agent_id=a-w-T4 \
-      tool_use_id=toolu_01CGLT4 deliverable= >> "$CGL_RO"
+    roster_row_fixture status=identified session="$CGL_RSID" name=w-T4 agent_id=a-w-T4 \
+      tool_use_id=toolu_01CGLT4 deliverable= plan="$CGL_RPLAN" >> "$CGL_RL"
   fi
-  s4_bind "$CGL_R" "$SID_A" "$CGL_P"
+  [ "$home" = own ] || expect_eq "CG-ledger${lbl} precondition: w-T4 is on session B's roster under this plan, none on this one" \
+    "1 0" "$(/usr/bin/grep -cF "|plan=$CGL_RPLAN" "$CGL_RL") $(/usr/bin/grep -c '^roster-state/' "$CGL_RO")"
   s4_attest "$CGL_R" "$SID_A"
   # THE FIRST TICK OF A RUN IS AN ARMED ONE: with no roster file the tick answers QUIET only
   # for a session that armed here (session-poker.sh's AC-38 split), and refuses otherwise.
@@ -12756,8 +12777,8 @@ CGLEOF
         evidence) awk -v id="$_cgl_id" '{ print } $0 == "- T4: dispatched to w-T4" { print "- " id ": bash suite 9/9 green" }' \
                     "$CGL_P" > "$CGL_P.new" && mv "$CGL_P.new" "$CGL_P" ;;
         launch)   sed -i.bak "s/| bionic:implementor |/| w-${_cgl_id} |/" "$CGL_P"
-                  roster_row_fixture status=identified session="$SID_A" name="w-${_cgl_id}" \
-                    agent_id="a-w-${_cgl_id}" tool_use_id="toolu_01CGL${_cgl_id}" deliverable= >> "$CGL_RO" ;;
+                  roster_row_fixture status=identified session="$CGL_RSID" name="w-${_cgl_id}" \
+                    agent_id="a-w-${_cgl_id}" tool_use_id="toolu_01CGL${_cgl_id}" deliverable= plan="$CGL_RPLAN" >> "$CGL_RL" ;;
         *) no "CG-ledger${lbl} the gate refused $_cgl_id, which the tick never named" "$CGL_OUT" ;;
       esac
     done
@@ -12786,6 +12807,7 @@ cgl_gate() {
 cgl_case ""          1.0 yes "evidence launch status " 3
 cgl_case "-hold"     7.0 yes "evidence launch status " 3
 cgl_case "-noroster" 1.0 no  "evidence status " 2
+cgl_case "-run"      1.0 yes "evidence launch status " 3 run
 
 
 # ============================================================
@@ -13118,7 +13140,7 @@ section "UB — UNBOUND MEANS NO RUN: every acting arm announces the fallback an
 #   context-spend     no spend state written                         state names <p>
 #   landing guard     no row lookup: "session unbound", checkout     the row's declared base, silent
 #   duties gate       a write naming <p> discharges nothing          that write discharges the refresh
-#   fill gate         no refusal for <p>'s ready row                 refused: not launched: T5
+#   fill gate         no refusal for <p>'s ready row                 refused: ready with room: T5
 #   patrol-revive     a stale stamp revives nothing                  the stale stamp blocks
 #   dispatch wall     judged with no plan: writer refused to bind    refused by <p>'s writers=1 budget
 #   commit gate       the commit is not judged against <p>           refused: <p>'s step has no evidence
@@ -13154,7 +13176,7 @@ ub_stop() {
 }
 ub_decision() { printf '%s' "$UB_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 # ub_names_id <text> <id> -> the lines that name <id> as a word of its own: a row id a hook
-# printed (`FILL T5`, `not launched: T5`, `T4→T5`, `fill=T5`), or an agent's name that ends in it
+# printed (`FILL T5`, `ready with room: T5`, `T4→T5`, `fill=T5`), or an agent's name that ends in it
 # (`w-T5`, `(w26-T5)`), never the same letters inside a path or a longer name
 # (`.worktrees/26-T5/`, `/tmp/T47-T5`, `T50`). A row id is judged by what the hook SAYS about the
 # row; the paths it prints are wherever this suite and its sandbox happen to sit, and a tree or
@@ -13171,14 +13193,14 @@ require_helpers ub_mode ub_adv ub_stop ub_decision ub_iso ub_names_id
 # The extractor on a planted text: an id inside a path or a longer name is not a mention, an id
 # the hook printed as a row is, on each line kind that names one.
 expect_eq "UB ub_names_id keeps the lines that name T5 as a row or an agent, and only those" \
-  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|not launched: T5.|poker: dispatch w-T5 now|poker: LAUNCHED (w26-T5)" \
+  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|ready with room: T5 (dispatch them or decline them)|poker: dispatch w-T5 now|poker: LAUNCHED (w26-T5)" \
   "$(ub_names_id "poker: note: run \`bash /x/.worktrees/26-T5/hooks/session-poker.sh arm\`
 run resolved by newest-plan fallback (session unbound) — /tmp/T47-T5/w1r/run.md; bind
 poker: FILL T5
 poker-tick/v1|decision=FILL|fill=T5
 poker: CHAIN T4→T5 (30 min)
 poker: WAIT T50 — needs T4
-not launched: T5.
+ready with room: T5 (dispatch them or decline them)
 poker: dispatch w-T5 now
 poker: tree at /x/.worktrees/26-T5
 poker: tmp /tmp/T47-T5
@@ -13297,7 +13319,7 @@ ub_collect fill-gate "$UB_ERR" "$UB4_P"
 ub_mode "$UB4" "$SID_A" "$UB4_P" bound
 ub_stop "$UB4" "$SID_A" "$UB4/turn.jsonl"
 expect_eq "UB.4 fill gate, bound-open (control): the same turn is refused" "block" "$(ub_decision)"
-expect_contains "UB.4 …naming T5 as not launched" "not launched: T5" "$(ub_names_id "$UB_ERR" T5)"
+expect_contains "UB.4 …naming T5 as ready with room" "ready with room: T5" "$(ub_names_id "$UB_ERR" T5)"
 
 # ---- UB.5 patrol-revive ------------------------------------------------------
 UB5=$(new_repo "ub-revive"); UB5_P="$UB5/.bionic/docs/plans/epic-99/run.md"
@@ -13461,11 +13483,11 @@ expect_eq "UB.9 …and A's binding is untouched" "plan=$UB9_P" \
   "$(grep -m1 '^plan=' "$UB9/.bionic/tmp/engaged-$SID_A.state" 2>/dev/null)"
 ub_stop "$UB9" "$SID_C" "$UB9/turn.jsonl"
 expect_eq "UB.9 C's turn end: no refusal" "" "$(ub_decision)"
-expect_absent "UB.9 …and A's ready row is named nowhere" "not launched: T5" "$UB_OUT$UB_ERR"
+expect_absent "UB.9 …and A's ready row is named nowhere" "ready with room: T5" "$UB_OUT$UB_ERR"
 expect_eq "UB.9 …nor T5 at all" "" "$(ub_names_id "$UB_OUT$UB_ERR" T5)"
 ub_stop "$UB9" "$SID_A" "$UB9/turn.jsonl"
 expect_eq "UB.9 A's turn end on the same tree (control): refused" "block" "$(ub_decision)"
-expect_contains "UB.9 …naming T5 as not launched" "not launched: T5" "$(ub_names_id "$UB_ERR$UB_OUT" T5)"
+expect_contains "UB.9 …naming T5 as ready with room" "ready with room: T5" "$(ub_names_id "$UB_ERR$UB_OUT" T5)"
 
 # ============================================================
 section "SD — a standing fill decline: the tick's FILL and the stop wall's refusal name the same rows (wave-24 T27; REQ-4 AC-4.7; D2; Step-6 review C2/U1)"
@@ -13504,8 +13526,8 @@ sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, spa
   cgc_ring
   s4_stop_payload "$1" "$SID_A" "$1/sd-turn.jsonl" | sd_env bash "$CGSD_STOP" 2>/dev/null \
     | jq -r '.reason // ""' 2>/dev/null \
-    | sed -n 's/.*these rows are ready to dispatch — \(.*\) — and this turn.*/\1/p' | tr ' ' '\n' \
-    | LC_ALL=C sort | tr '\n' ' '
+    | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' '\n' | LC_ALL=C sort | tr '\n' ' '
 }
 SD_R=$(sd_world some R1)
 SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
@@ -13869,8 +13891,8 @@ expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extra
 expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
 expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
   "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
-expect_eq "FACT-FINAL current 8's code asks the judge (the extractor reads the verb's file)…" "1" \
-  "$(/usr/bin/grep -c '^cur8_judge() {' "$PRF_POKER")"
+expect_eq "FACT-FINAL current 7 and 8 ask the judge, cur7_judge, named for the first step it judges (the extractor reads the verb's file)…" "1" \
+  "$(/usr/bin/grep -c '^cur7_judge() {' "$PRF_POKER")"
 expect_eq "FACT-FINAL …and no reader of checks, by name" "0" \
   "$(/usr/bin/grep -c 'proof_checks_open\|cur8_checks' "$PRF_POKER")"
 
@@ -14183,5 +14205,219 @@ expect_eq "RIGOR mutation: the doctored copy tests 'low' in exactly one arm, and
 expect_eq "RIGOR mutation: …and still runs, relaxing the auditor at 'low'" "relaxed" "$(rv_site "$RV_MUT" low auditor)"
 expect_ne "RIGOR mutation: …so it reads an old word as a level, and the low row goes red" \
   "$(rv_site "$RV_WALLS" low auditor)" "$(rv_site "$RV_MUT" low auditor)"
+
+# ============================================================
+section "§PLACE — one placement reader, four callers: a mutant cmd_place moves the stamp, the gate's tree, the commit's cwd and the jurisdiction arm at once (wave-36 T25; D11, AC-5.6)"
+# ============================================================
+#
+# ONE SOURCE, FOUR READERS. Where a command runs is `cmd_place` (payload/scripts/lib/placement.sh)
+# and nothing else: the shim's stamp (walls.sh `_bsg_cd_walk`, the wrap's --stamp-dir), the gate's
+# tree (booked.sh `booked_cd_dir`, the request's tree=), the evidence gate's commit cwd (walls.sh
+# `_eg_commit_cwd`, its boundary line) and the read-only role's jurisdiction arm (walls.sh ARM C,
+# `_bsg_commit_outside`). Before wave-36 T25 the first three read the command text with grammars
+# of their own. Pinned here: a doctored copy of the plugin whose `cmd_place` answers tree U for every
+# question is driven through the real hook and the real shim, and every one of the four readers
+# reads U, where the shipped reader gives each its own true place. A caller that kept a grammar of
+# its own would not move with the mutant, and its row goes red.
+#
+# FIXTURE FIDELITY: an engaged git repository R with a suite, and U, a git repository outside it.
+# Nothing in a command below names U, so U can reach a reader only through `cmd_place`.
+PL_D="$SANDBOX/fx/place"; PL_R="$PL_D/repo"; PL_U="$PL_D/u"; PL_SID="plcplace-0000-0000-0000-000000000000"
+mkdir -p "$PL_R/.bionic/tmp" "$PL_R/tests" "$PL_U" "$PL_D/home"
+git -C "$PL_R" init -q 2>/dev/null; git -C "$PL_U" init -q 2>/dev/null
+PL_R="$(cd "$PL_R" && pwd -P)"; PL_U="$(cd "$PL_U" && pwd -P)"
+: > "$PL_R/.bionic/tmp/engaged-${PL_SID}.state"
+printf '#!/bin/bash\necho "PASS: a"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$PL_R/tests/a.test.sh"
+PL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -r "$PL_LIB/placement.sh" ] || PL_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
+# THE DOCTORED SITE: a copy of the plugin whose placement.sh ends by defining `cmd_place` again, to
+# answer U, at rc 0, whatever it is asked.
+PL_MUT="$PL_D/mut"
+mkdir -p "$PL_MUT/hooks" "$PL_MUT/scripts/lib"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$PL_MUT/hooks/" 2>/dev/null
+cp "$PL_LIB"/*.sh "$PL_MUT/scripts/lib/" 2>/dev/null
+cp "$PL_LIB/../booked.sh" "$PL_MUT/scripts/booked.sh" 2>/dev/null
+anchor file payload/scripts/lib/placement.sh 'cmd_place() {'
+printf "\ncmd_place() { printf '%%s\\\\n' '%s'; return 0; }\n" "$PL_U" >> "$PL_MUT/scripts/lib/placement.sh"
+expect_eq "§PLACE mutation: the doctored placement.sh parses, and its cmd_place answers U for any question" \
+  "0 $PL_U" "$(bash -n "$PL_MUT/scripts/lib/placement.sh"; printf '%s ' "$?"; bash -c '. "$1" && cmd_place "bash tests/a.test.sh" /x suite' _ "$PL_MUT/scripts/lib/placement.sh" 2>/dev/null)"
+expect_eq "§PLACE mutation: …while the shipped one answers the cwd for a command that moves nothing" \
+  "$PL_R" "$(bash -c '. "$1" && cmd_place "bash tests/a.test.sh" "$2" suite' _ "$PL_LIB/placement.sh" "$PL_R" 2>/dev/null)"
+
+pl_hook() {  # <hooks dir> <command> [agent_type] -> PL_ST, PL_ERR, PL_WRAP from the bash walls on that payload
+  local p out
+  if [ -n "${3:-}" ]; then
+    p="$(jq -nc --arg s "$PL_SID" --arg c "$PL_R" --arg cmd "$2" --arg t "$3" \
+      '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+        hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+        tool_use_id:"toolu_pl", agent_id:"aplplace-0123456789abcdef", agent_type:$t}')"
+  else
+    p="$(jq -nc --arg s "$PL_SID" --arg c "$PL_R" --arg cmd "$2" \
+      '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+        hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+        tool_use_id:"toolu_pl"}')"
+  fi
+  PL_ERR="$(printf '%s' "$p" | env HOME="$PL_D/home" CLAUDE_CONFIG_DIR="$PL_D/home/.claude" CLAUDE_CODE_SESSION_ID="$PL_SID" \
+      CLAUDE_PROJECT_DIR= BIONIC_PLUGINS_DIR="$PL_D/no-plugins" SHELL=/bin/bash CLAUDE_CODE_SHELL= \
+      bash "$1/bash-walls.sh" 2>&1 >"$PL_D/hook.out")"; PL_ST=$?
+  PL_WRAP="$(jq -r '.hookSpecificOutput.updatedInput.command // ""' "$PL_D/hook.out" 2>/dev/null)"
+}
+pl_stamp() {  # <hooks dir> -> the --stamp-dir the wall hands the shim for a suite that moves nothing; "none" when it hands none
+  local w
+  pl_hook "$1" 'bash tests/a.test.sh' test-runner
+  case "$PL_WRAP" in *booked.sh*) : ;; *) printf 'unwrapped'; return 0 ;; esac
+  case "$PL_WRAP" in *' --stamp-dir '*) w="${PL_WRAP#* --stamp-dir }"; printf '%s' "${w%% *}" ;; *) printf 'none' ;; esac
+}
+pl_tree() {  # <shim> -> the tree= the gate recorded for the shim's run of a suite that moves nothing, from R
+  local before after f
+  before="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null)"
+  ( cd "$PL_R" && env CLAUDE_CODE_SESSION_ID="$PL_SID" bash "$1" --suites a.test.sh -- 'bash tests/a.test.sh' >/dev/null 2>&1 )
+  after="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null)"
+  f="$(comm -13 <(printf '%s\n' "$before" | sort) <(printf '%s\n' "$after" | sort) | grep . | head -n 1)"
+  [ -n "$f" ] && sed -n 's/^tree=//p' "$BIONIC_GATE_DIR/requests/$f" | tail -n 1
+}
+pl_gate() {  # <hooks dir> -> the repository the evidence gate's boundary line names for `git commit` from R; "none" when it names none
+  local l
+  pl_hook "$1" 'git commit -q --allow-empty -m x'
+  l="$(printf '%s\n' "$PL_ERR" | grep -F 'is outside the engaged repository' | head -n 1)"
+  [ -n "$l" ] || { printf 'none'; return 0; }
+  l="${l#evidence-gate: }"; printf '%s' "${l%% is outside the engaged repository*}"
+}
+pl_role() {  # <hooks dir> [command] -> `refused` when the read-only role arm refuses a test-runner's commit from R (default `git commit`), else `exempt`
+  # The role arm is armed by the session's roster file; an empty one names no row, so the agent type
+  # judges. It stands for this probe alone: a roster with no row would refuse the suite pl_stamp drives.
+  : > "$PL_R/.bionic/tmp/roster-${PL_SID}.state"
+  pl_hook "$1" "${2:-git commit -q --allow-empty -m x}" bionic:test-runner
+  rm -f "$PL_R/.bionic/tmp/roster-${PL_SID}.state"
+  case "$PL_ERR" in *'a read-only role never commits'*) printf 'refused' ;; *) printf 'exempt' ;; esac
+}
+
+# The shipped reader: each caller reads R, where the command runs.
+expect_eq "§PLACE stamp [shipped] a suite that moves nothing is stamped where it stands: no --stamp-dir" "none" "$(pl_stamp "$BIONIC_HOOKS_DIR")"
+expect_eq "§PLACE gate tree [shipped] …and the shim asks the gate from R" "$PL_R" "$(pl_tree "$PL_LIB/../booked.sh")"
+expect_eq "§PLACE commit cwd [shipped] 'git commit' from R is inside: the gate names no outside repository" "none" "$(pl_gate "$BIONIC_HOOKS_DIR")"
+pl_hook "$BIONIC_HOOKS_DIR" "cd $PL_U && git commit -q --allow-empty -m x"
+expect_contains "§PLACE commit cwd [shipped, positive] …while 'cd U && git commit' is named outside, on the same extractor" \
+  "$PL_U is outside the engaged repository" "$PL_ERR"
+expect_eq "§PLACE jurisdiction [shipped] a read-only role's 'git commit' in R is refused by the role arm" "refused" "$(pl_role "$BIONIC_HOOKS_DIR")"
+# The mutant: every caller reads U, from the one reader, with nothing in the command naming it.
+expect_eq "§PLACE stamp [mutant] the wrap's --stamp-dir is U" "$PL_U" "$(pl_stamp "$PL_MUT/hooks")"
+expect_eq "§PLACE gate tree [mutant] the shim asks the gate from U" "$PL_U" "$(pl_tree "$PL_MUT/scripts/booked.sh")"
+expect_eq "§PLACE commit cwd [mutant] the evidence gate places 'git commit' in U and names it outside" "$PL_U" "$(pl_gate "$PL_MUT/hooks")"
+expect_eq "§PLACE jurisdiction [mutant] the role arm places the commit in U, outside the project: exempt" "exempt" "$(pl_role "$PL_MUT/hooks")"
+
+# TWO CALLERS, ONE CHAIN (wave-36 T43; D11, AC-5.6; walk.md shape six). The one-tree mutant above
+# answers U whatever it is asked, so it cannot see a caller that asks a different question than its
+# siblings: the auditor refuted AC-5.6 on `cd A && cd B && git commit`, which the evidence gate (it
+# asks for the git) placed at B and the role arm (it asks for the git and for the end of the command,
+# and needs the two equal) refused as moving-form `cd B`. Pinned twice. On the shipped reader, both
+# commit callers place that chain at U, so a read-only role's commit there is exempt and the gate
+# names U. And a second doctored copy whose `cmd_place` answers a DIFFERENT tree per target, Us for
+# suite, U for git and Ue for the end of the command, reads every caller's question off its answer:
+# the stamp and the gate's tree ask suite, the commit's cwd asks git, the role arm asks git and the
+# end and so sees them differ. A caller that asks another target than these reads another tree, and
+# its row goes red.
+PL_CHAIN="cd $PL_D && cd $PL_U && git commit -q --allow-empty -m x"
+expect_eq "§PLACE chain [shipped] a read-only role's 'cd A && cd U && git commit', both absolute, is exempt: the role arm places it at U" \
+  "exempt" "$(pl_role "$BIONIC_HOOKS_DIR" "$PL_CHAIN")"
+pl_hook "$BIONIC_HOOKS_DIR" "$PL_CHAIN"
+expect_contains "§PLACE chain [shipped] …and the evidence gate names U outside, the same place" \
+  "$PL_U is outside the engaged repository" "$PL_ERR"
+PL_US="$PL_D/us"; PL_UE="$PL_D/ue"; mkdir -p "$PL_US" "$PL_UE"
+PL_US="$(cd "$PL_US" && pwd -P)"; PL_UE="$(cd "$PL_UE" && pwd -P)"
+PL_MUT3="$PL_D/mut3"
+mkdir -p "$PL_MUT3/hooks" "$PL_MUT3/scripts/lib"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$PL_MUT3/hooks/" 2>/dev/null
+cp "$PL_LIB"/*.sh "$PL_MUT3/scripts/lib/" 2>/dev/null
+cp "$PL_LIB/../booked.sh" "$PL_MUT3/scripts/booked.sh" 2>/dev/null
+printf "\ncmd_place() { case \"\${3-}\" in suite) printf '%%s\\\\n' '%s' ;; git) printf '%%s\\\\n' '%s' ;; *) printf '%%s\\\\n' '%s' ;; esac; return 0; }\n" \
+  "$PL_US" "$PL_U" "$PL_UE" >> "$PL_MUT3/scripts/lib/placement.sh"
+expect_eq "§PLACE per-target mutation: the doctored placement.sh parses, and answers Us, U and Ue for suite, git and the end" \
+  "0 $PL_US $PL_U $PL_UE" "$(bash -n "$PL_MUT3/scripts/lib/placement.sh"; printf '%s ' "$?"
+    bash -c '. "$1" && printf "%s " "$(cmd_place x /x suite)" "$(cmd_place x /x git)" && cmd_place x /x' _ "$PL_MUT3/scripts/lib/placement.sh" 2>/dev/null)"
+expect_eq "§PLACE stamp [per-target] the stamp asks suite: --stamp-dir Us" "$PL_US" "$(pl_stamp "$PL_MUT3/hooks")"
+expect_eq "§PLACE gate tree [per-target] the gate's tree asks suite: Us" "$PL_US" "$(pl_tree "$PL_MUT3/scripts/booked.sh")"
+expect_eq "§PLACE commit cwd [per-target] the commit's cwd asks git: U" "$PL_U" "$(pl_gate "$PL_MUT3/hooks")"
+pl_role "$PL_MUT3/hooks" > "$PL_D/role3.out"   # not in a substitution: the next row reads its PL_ERR
+expect_eq "§PLACE jurisdiction [per-target] the role arm asks git and the end, sees U and Ue differ: refused" \
+  "refused" "$(cat "$PL_D/role3.out")"
+expect_contains "§PLACE jurisdiction [per-target] …naming the git's place and the end's, so it asked exactly those two" \
+  "the first git runs in $PL_U but the shell ends in $PL_UE" "$PL_ERR"
+
+# ============================================================
+section "DEBT-LINE — one debt-line grammar, owned once in lib/debt.sh and sourced by its three consumers (wave-36 T13; D13; REQ-7 AC-7.8; ownership row 'the debt line')"
+# ============================================================
+#
+# Three regexes read one carried debt before this row: card.sh's inherited reader, the debt verb's adopt
+# arm, and close-out's co_debts, which wrote the line and checked nothing (A-orch-1: two hand-written
+# lines whose `raised-by=` held a space reached a continuation and refused the next Step-1 card). Now
+# `DEBT_LINE_ERE` is assigned once, in payload/scripts/lib/debt.sh, with `debt_line_ok` and
+# `debt_carry_lines` beside it, and `debt add`, close-out and card.sh source it. fails-when: a consumer
+# holds a debt-line regex of its own, or a mutant of the one regex leaves any consumer's verdict unchanged.
+DL_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/debt.sh"
+DL_CONSUMERS="payload/scripts/card.sh payload/scripts/close-out.sh hooks/session-poker.sh"
+dl_defs() {  # <pattern> -> path:line of each flush-left match in hooks/ and payload/scripts/
+  ( cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rnE "$1" hooks payload/scripts --include='*.sh' 2>/dev/null )
+}
+expect_eq "DEBT-LINE 1 the grammar is assigned once in the tree, in lib/debt.sh" "payload/scripts/lib/debt.sh" \
+  "$(dl_defs '^DEBT_LINE_ERE=' | cut -d: -f1 | sort -u | paste -sd' ' -)"
+expect_eq "DEBT-LINE 1b …assigned exactly once" "1" "$(dl_defs '^DEBT_LINE_ERE=' | wc -l | tr -d ' ')"
+expect_eq "DEBT-LINE 1c debt_line_ok is defined once, in lib/debt.sh" "payload/scripts/lib/debt.sh" \
+  "$(dl_defs '^debt_line_ok\(\)' | cut -d: -f1 | paste -sd' ' -)"
+for dl_c in $DL_CONSUMERS; do
+  expect_nonempty "DEBT-LINE 2 $dl_c sources lib/debt.sh" "$(/usr/bin/grep -nE '/debt\.sh"' "$BIONIC_SCRIPTS_DIR/$dl_c")"
+  expect_eq "DEBT-LINE 2b $dl_c holds no debt-line regex of its own (no raised-by=[ or touches=[ pattern)" "0" \
+    "$(/usr/bin/grep -cE 'raised-by=\[|touches=\[0-9\]' "$BIONIC_SCRIPTS_DIR/$dl_c")"
+done
+expect_nonempty "DEBT-LINE 2c precondition: the census pattern finds the one regex in lib/debt.sh" \
+  "$(/usr/bin/grep -nE 'raised-by=\[' "$DL_LIB")"
+
+# THE MUTANT: a copy of the payload and hooks whose one regex spells the field `raised_by=`. Each consumer
+# is asked the same question against the real tree and the mutant: the card's inherited reader, `debt add`
+# (the verb, run), and close-out's carry (`debt_carry_lines`, the reader co_debts calls).
+DL_D="$SANDBOX/debt-line"; mkdir -p "$DL_D/real" "$DL_D/mut/payload"
+cp -R "$BIONIC_SCRIPTS_DIR/hooks" "$DL_D/mut/hooks"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$DL_D/mut/payload/scripts"
+sed '/^DEBT_LINE_ERE=/s/raised-by=/raised_by=/' "$DL_LIB" > "$DL_D/mut/payload/scripts/lib/debt.sh"
+expect_eq "DEBT-LINE mut0 the mutant differs from lib/debt.sh in exactly one line" "1" \
+  "$(diff "$DL_LIB" "$DL_D/mut/payload/scripts/lib/debt.sh" | /usr/bin/grep -c '^>')"
+DL_P="$DL_D/proj"; mkdir -p "$DL_P/.bionic/docs/plans/epic-9" "$DL_P/.bionic/docs/record/wave-09-dl" "$DL_P/.bionic/docs/specs/epic-9" "$DL_P/.bionic/tmp"
+( cd "$DL_P" && git init -q . ) >/dev/null 2>&1
+printf '# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$DL_P/.bionic/docs/plans/epic-9/wave-09-dl.plan.md"
+DL_LINE='debt: tree_count duplicate "lib/a.sh:1, lib/b.sh:2" touches=4 raised-by=record/wave-08-x/critic-structure.md from=wave-08-x'
+printf '%s\n' "# continuation — wave-09-dl" "" "## Deferrals" "" "$DL_LINE" > "$DL_P/.bionic/docs/record/wave-09-dl/continuation.md"
+printf '# requirements\n' > "$DL_P/.bionic/docs/specs/epic-9/wave-10-next.requirements.md"
+printf '%s\n' "# assumptions" "" 'debt: hole adopt-orphans hooks/a.sh:1' > "$DL_P/.bionic/docs/record/wave-09-dl/assumptions.md"
+printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
+  'tree_count | duplicate | lib/a.sh:1 | raised-by record/wave-08-x/critic-structure.md | touches 4 | —' > "$DL_D/ledger.md"
+dl_card() {  # <payload scripts dir> -> card.sh inherited-debt over the fixture
+  bash "$1/card.sh" inherited-debt "$DL_P/.bionic/docs/specs/epic-9/wave-10-next.requirements.md" 2>/dev/null 0<&-
+}
+dl_add() {  # <hooks dir> -> "<rc>|<output>" of debt add over the fixture's hole line, the plan named
+  local o r
+  rm -f "$DL_P/.bionic/docs/record/wave-09-dl/debt.md"
+  o="$(cd "$DL_P" && CLAUDE_CODE_SESSION_ID=dl-sid bash "$1/session-poker.sh" debt add record/wave-09-dl/assumptions.md \
+    .bionic/docs/plans/epic-9/wave-09-dl.plan.md 2>&1)"; r=$?
+  printf '%s|%s' "$r" "$o"
+}
+dl_carry() {  # <debt.sh> -> debt_carry_lines over the fixture ledger
+  bash -c '. "$1"; debt_carry_lines "$2" wave-09-dl' _ "$1" "$DL_D/ledger.md" 2>/dev/null
+}
+expect_eq "DEBT-LINE 3 card: the real reader lists the carried line" "$DL_LINE" "$(dl_card "$BIONIC_SCRIPTS_DIR/payload/scripts")"
+expect_eq "DEBT-LINE 3b …and the mutant's lists nothing (the line reads as unknown)" "" "$(dl_card "$DL_D/mut/payload/scripts")"
+DL_ADD_REAL="$(dl_add "$BIONIC_HOOKS_DIR")"
+expect_eq "DEBT-LINE 4 debt add: the real verb adds the hole line (exit 0)" \
+  "0|poker: debt add — adopt-orphans hole hooks/a.sh:1" "$(printf '%s\n' "$DL_ADD_REAL" | head -1)"
+DL_ADD_MUT="$(dl_add "$DL_D/mut/hooks")"
+expect_eq "DEBT-LINE 4b …and the mutant's refuses it (exit 1), the line not parsing" "1" "${DL_ADD_MUT%%|*}"
+expect_contains "DEBT-LINE 4c …saying so" "does not parse as a debt line" "$DL_ADD_MUT"
+expect_eq "DEBT-LINE 5 close-out's carry: the real reader carries the item" \
+  "$(printf 'ok\tdebt: tree_count duplicate "lib/a.sh:1" touches=4 raised-by=record/wave-08-x/critic-structure.md from=wave-09-dl')" \
+  "$(dl_carry "$DL_LIB")"
+expect_eq "DEBT-LINE 5b …and the mutant's names the ledger line it cannot carry" \
+  "$(printf 'bad\ttree_count | duplicate | lib/a.sh:1 | raised-by record/wave-08-x/critic-structure.md | touches 4 | —')" \
+  "$(dl_carry "$DL_D/mut/payload/scripts/lib/debt.sh")"
+expect_nonempty "DEBT-LINE 5c close-out's co_debts reads the carry through debt_carry_lines" \
+  "$(awk '/^co_debts\(\) *\{/ { f = 1 } f && /debt_carry_lines/ { print; exit } f && /^}/ { f = 0 }' "$BIONIC_SCRIPTS_DIR/payload/scripts/close-out.sh")"
+rm -rf "$DL_D"
 
 finish

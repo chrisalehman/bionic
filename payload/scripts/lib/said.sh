@@ -1,13 +1,27 @@
 #!/bin/bash
 # payload/scripts/lib/said.sh — what the user typed (epic-23 wave-28 T42; REQ-8 AC-8.9, D34).
 #
-# WHAT IT OWNS. One question: do these words stand in a prompt the user typed in this session?
+# WHAT IT OWNS. One question: do these words stand in a prompt the user typed in this run?
 #
-#     user_said <text>   0  the text, folded, stands in a typed prompt as WHOLE WORDS, and is enough of them
+#     user_said <text> [<plan>]
+#                        0  the text, folded, stands in a typed prompt as WHOLE WORDS, and is enough of them
 #                        1  it stands in none as whole words (white space alone says nothing)
-#                        2  this session's transcript cannot be found or read; every caller refuses
+#                        2  no transcript of the sessions read can be found or read; every caller refuses
 #                        3  it stands in one as whole words, but is under SAID_MIN_WORDS words and is no
 #                           whole prompt
+#                        and, beside the status, three variables (it prints nothing):
+#                        SAID_SESSION   on 0, the session whose transcript holds the words; else empty
+#                        SAID_SESSIONS  the sessions whose transcripts were read, space-separated, in order
+#                        SAID_TRIED     the sessions asked for, space-separated, in order (read or not)
+#
+# EVERY RECORDED SESSION OF THE RUN (wave-36 T9; spec D10, design ledger Δ3 "D5 1"; AC-4.2). A `/clear`
+# re-keys the session, and the words typed before it stand in the predecessor's transcript. With a <plan>,
+# the sessions read are the plan's `- session:` lines (lib/binding.sh `bind_sessions`, the one reader of
+# what the binding acts write), in the order they bound, then this session when the plan does not record
+# it; with none, this session alone, as before. The first session, in that order, whose transcript holds
+# the words as enough whole words answers 0 and is named in SAID_SESSION; else a quote that is short in
+# any of them is 3; else 1. A recorded session whose transcript is gone is skipped; 2 only when none of
+# them can be read. The verbs quote the session beside the words: `words="<words>" session=<sid>`.
 #     said_fold <text>   the one fold, on stdout: runs of white space and control characters become one
 #                        space, the ends trimmed (the verb writes the words it proved, its why and its
 #                        author through it, and the deferral's sentence the changelog is read through)
@@ -28,7 +42,7 @@
 # three of them (`defer it at all`) passes; whether the quote keeps the sentence's meaning is the
 # reader's to judge, from the words= the `moved:` line keeps. The doctrine is to quote the whole sentence.
 #
-# THE TRANSCRIPT is the CLI's own record of the session, `<config>/projects/<slug>/<session id>.jsonl`
+# THE TRANSCRIPT is the CLI's own record of a session, `<config>/projects/<slug>/<session id>.jsonl`
 # (`<config>` is CLAUDE_CONFIG_DIR, else ~/.claude; the session id is CLAUDE_CODE_SESSION_ID). It is
 # found as hooks/session-poker.sh `session_transcript` finds it: scanned across the project
 # directories, never derived from a slugged cwd, and a symbolic link at that name is not the
@@ -73,6 +87,12 @@ if ! declare -F session_id >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$
   # shellcheck source=/dev/null
   . "$_SAID_LIB_DIR/session.sh"
 fi
+# The run's sessions are read by binding.sh's one reader; it is sourced from here when the caller has not
+# (functions only, nothing runs at source time).
+if ! declare -F bind_sessions >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/binding.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_SAID_LIB_DIR/binding.sh"
+fi
 
 # The fold, ONE rule for both sides of the match and for every line a caller writes: runs of white space
 # and control characters become one space, the ends trimmed.
@@ -85,12 +105,23 @@ said_fold() {
   printf '%s' "${1:-}" | jq -Rrs "$_SAID_FOLD_JQ"' fold'
 }
 
-# _said_transcript -> this session's transcript path on stdout; exit 1 when there is none.
+# _said_sessions [<plan>] -> the sessions to read, one id per line: the plan's recorded sessions in the
+# order they bound, then this session when the plan does not record it. No plan, or no reader: this
+# session alone.
+_said_sessions() {
+  local plan="${1:-}" rec="" me=""
+  if [ -n "$plan" ] && declare -F bind_sessions >/dev/null 2>&1; then
+    rec="$(bind_sessions "$plan" 2>/dev/null)" || rec=""
+  fi
+  declare -F session_id >/dev/null 2>&1 && me="$(session_id 2>/dev/null)" || me=""
+  [ -z "$rec" ] || printf '%s\n' "$rec"
+  if [ -n "$me" ] && ! grep -qxF -- "$me" <<<"$rec"; then printf '%s\n' "$me"; fi
+}
+
+# _said_transcript <sid> -> that session's transcript path on stdout; exit 1 when there is none.
 _said_transcript() {
-  local sid d f
-  declare -F session_id >/dev/null 2>&1 || return 1
-  sid="$(session_id 2>/dev/null)" || return 1
-  [ -n "$sid" ] || return 1
+  local sid="${1:-}" d f
+  case "$sid" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
   for d in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/; do
     f="${d}${sid}.jsonl"
     if [ -f "$f" ] && [ ! -L "$f" ]; then
@@ -101,13 +132,10 @@ _said_transcript() {
   return 1
 }
 
-# user_said <text> -> 0, 1, 2 or 3, as above. One streaming pass: each typed prompt is folded, tried
-# whole-word, and the first that is enough ends it.
-user_said() {
-  local tx out
-  tx="$(_said_transcript)" || return 2
-  [ -r "$tx" ] && command -v jq >/dev/null 2>&1 || return 2
-  out="$(jq -nrR --arg n "${1:-}" --argjson min "$SAID_MIN_WORDS" "$_SAID_FOLD_JQ"'
+# _said_in <text> <transcript> -> said, short or none on stdout; exit non-zero when it cannot be read.
+# One streaming pass: each typed prompt is folded, tried whole-word, and the first that is enough ends it.
+_said_in() {
+  jq -nrR --arg n "${1:-}" --argjson min "$SAID_MIN_WORDS" "$_SAID_FOLD_JQ"'
     def wc: "[\\w\\x27’-]";
     def esc: gsub("(?<c>[\\\\^$.|?*+()\\[\\]{}])"; "\\\(.c)");
     def bounded($w; $p): $p | test("(?<!" + wc + ")" + ($w | esc) + "(?!" + wc + ")");
@@ -126,11 +154,31 @@ user_said() {
           | select(bounded($w; .)) as $p
           | if enough($w; $p) then ("said", break $out) else "short" end]
         | if index("said") then "said" elif length > 0 then "short" else "none" end
-      end' "$tx" 2>/dev/null)" || return 2
-  case "$out" in
-    said) return 0 ;;
-    none) return 1 ;;
-    short) return 3 ;;
-    *) return 2 ;;
-  esac
+      end' "$2" 2>/dev/null
+}
+
+# user_said <text> [<plan>] -> 0, 1, 2 or 3, and SAID_SESSION, SAID_SESSIONS, SAID_TRIED, as above.
+user_said() {
+  local sid tx out short=0
+  SAID_SESSION=""; SAID_SESSIONS=""; SAID_TRIED=""
+  command -v jq >/dev/null 2>&1 || return 2
+  _SAID_SIDS="$(_said_sessions "${2:-}")"
+  while IFS= read -r sid; do
+    [ -n "$sid" ] || continue
+    SAID_TRIED="${SAID_TRIED:+$SAID_TRIED }$sid"
+    tx="$(_said_transcript "$sid")" && [ -r "$tx" ] || continue
+    out="$(_said_in "${1:-}" "$tx")" || continue
+    SAID_SESSIONS="${SAID_SESSIONS:+$SAID_SESSIONS }$sid"
+    case "$out" in
+      said) SAID_SESSION="$sid"; return 0 ;;
+      short) short=1 ;;
+      none) : ;;
+      *) return 2 ;;
+    esac
+  done <<SAID_SIDS
+$_SAID_SIDS
+SAID_SIDS
+  [ -n "$SAID_SESSIONS" ] || return 2
+  [ "$short" -eq 0 ] || return 3
+  return 1
 }

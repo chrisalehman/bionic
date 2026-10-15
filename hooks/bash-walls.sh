@@ -285,12 +285,13 @@ fi
 # JURISDICTION FIRST (T80; wave-19 AC-9.2). A commit that lands in another repository has no plan
 # here, so the collector asks the gate's own predicate (lib/walls.sh `eg_commit_outside_root`)
 # before it resolves anything, and for such a commit reads neither the binding nor any record.
-# Nor for one placed outside that the gate refuses for the split (`_EG_JUR_UNPLACED`, wave-35 T4):
-# that refusal reads no plan either.
+# Nor for one placed outside that the gate refuses for the split (`_EG_JUR_UNPLACED`, wave-35 T4),
+# nor for one whose move the placement reader cannot follow (`_EG_CWD_SRC` moving, wave-36 T25):
+# those refusals read no plan either.
 BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""
 case "$COMMAND" in
   *commit*)
-    if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ]; then
+    if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
       BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
       # THE READINGS' RESULTS AS THE JUDGE DERIVES THEM (wave-28 T60; D33, AC-8.6; A-orch-161). A
       # reading re-rated by a `check:`, `deferred:` or `moved:` line is judged on its derived result,

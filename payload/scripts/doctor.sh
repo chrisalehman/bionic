@@ -378,20 +378,40 @@ EOF
 # ─── Restart staleness: one reader, two surfaces ─────────────────────────────
 #
 # THE CLI HOLDS WHAT IT LOADED AT ITS START (AC-37; wave-35 T5, REQ-4 AC-4.5, D13).
-# hooks.json is snapshotted at process start, and so are the skills and the role
-# files: a reinstall that rewrites any of them registers nothing in a process
-# already running (research-walls item 8, A-orch-36). Through wave-34 this page
-# compared hooks.json alone, so a newer skill file left the row silent. The reader
-# takes the newest file of the three sets in the plugin tree the CLI loads —
-# hooks/hooks.json, every *.md under skills/, every *.md under agents/ — and names
-# it. ONE READER: the RESTART NEEDED row below prints its lines, and the Patrol
-# tick runs `doctor.sh --restart-lines` and prints one line from the same output
-# (hooks/session-poker.sh), never a second comparison.
+# hooks.json is snapshotted at process start, and so are the skills, the role files and
+# the commands: a change that rewrites any of them registers nothing in a process already
+# running (research-walls item 8, A-orch-36). ONE READER: the RESTART NEEDED row below
+# prints its lines, and the Patrol tick runs `doctor.sh --restart-lines` and prints its own
+# session's line from the same output (hooks/session-poker.sh), never a second comparison.
 #
-# THE TREE is DOCTOR_INSTALL_PATH (the version row's, DOCTOR/5): the registry's
-# installPath, or the plugin root, whichever is a git repository.
+# RESTART NEEDED IS A CONTENT FACT (wave-36 T2; spec D7, AC-1.3, ADR-055). Through
+# wave-35 this reader compared the newest mtime in the registry's tree against each
+# session's start, which told two falsehoods: an identical-content copy (rsync -a, git
+# archive | tar -x, the CLI's own reinstall) moved the mtimes and asked for a restart that
+# changed nothing, and a session started with `--plugin-dir` was compared against a tree it
+# never loaded. hooks/session-start.sh now writes what each session loaded,
+# `.bionic/tmp/loaded-<sid>.state` (root=, commit= for a checkout, started=, one
+# `<sha256> <path>` per loaded file; wave-36 T1, A-T1-2). This reader re-hashes the
+# recorded paths in the tree a restart of that session would load and names each CLASS
+# whose hash moved — hooks, skills, agents, commands, always in that order. A file whose
+# content is unchanged says nothing, whatever its mtime; a recorded file gone is a move. A
+# live session with no record (started before 1.19.0, or with no plugin root) says
+# nothing: content cannot be compared with nothing, and its next start writes one.
+#
+# THE TREE A RESTART LOADS. A session running a checkout in place (`commit=`) restarts
+# into the same checkout, so its recorded root is the tree. A session that loaded a
+# version directory of the installed plugin (no commit, the root a sibling of the
+# registry's installPath) restarts into whatever version directory the registry names
+# now, so that is the tree: a release installed beside the one it runs is a restart owed.
+#
+# OR RELOADED SINCE (the spec's Worth-your-eye default, "The restart line after a
+# reload"). The record is written at session start; whether /reload-plugins fires the
+# start hook is unverified. So when the registry's install (`lastUpdated`, else
+# `installedAt`) is newer than the record, the line carries that instant: a session
+# reloaded after it already holds what is on disk, and the line says so rather than
+# going silent on a guess.
 _doctor_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
-_doctor_resolve_install_path() {  # -> sets DOCTOR_INSTALL_PATH
+_doctor_resolve_install_path() {  # -> sets DOCTOR_INSTALL_PATH (the version row's tree, DOCTOR/5)
   DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
   if [ -z "$DOCTOR_INSTALL_PATH" ] || ! _doctor_is_repo "$DOCTOR_INSTALL_PATH"; then
     _doctor_root_alt="$(plugin_root)"
@@ -400,43 +420,85 @@ _doctor_resolve_install_path() {  # -> sets DOCTOR_INSTALL_PATH
   fi
 }
 
-# _doctor_loaded_newest <tree> -> "<mtime>\t<path under the tree>" for the newest of
-# hooks/hooks.json, skills/**/*.md and agents/**/*.md; nothing when none is readable.
-# `find -L`: in a source checkout the payload's agents/ and hooks/ are symlinks.
-_doctor_loaded_newest() {
-  local t="${1:-}" f m best="" bestm=-1
-  [ -n "$t" ] && [ -d "$t" ] || return 0
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    m="$(_patrol_mtime "$f" 2>/dev/null)"
-    case "$m" in ''|*[!0-9]*) continue ;; esac
-    if [ "$m" -gt "$bestm" ]; then bestm="$m"; best="$f"; fi
-  done <<EOF
-$( [ -f "$t/hooks/hooks.json" ] && printf '%s\n' "$t/hooks/hooks.json"
-   for d in skills agents; do [ -d "$t/$d" ] && find -L "$t/$d" -type f -name '*.md' 2>/dev/null; done )
-EOF
-  [ -n "$best" ] || return 0
-  printf '%s\t%s\n' "$bestm" "${best#"$t"/}"
+# _doctor_restart_tree <record> -> the tree a restart of that session loads (see above).
+_doctor_restart_tree() {
+  local root commit reg
+  root="$(detect_loaded_field "$1" root)"
+  commit="$(detect_loaded_field "$1" commit)"
+  if [ -z "$commit" ] && [ -n "$root" ]; then
+    reg="$(detect_plugin_install_path bionic 2>/dev/null)" || reg=""
+    [ -z "$reg" ] || reg="$(cd "$reg" 2>/dev/null && pwd -P)" || reg=""
+    if [ -n "$reg" ] && [ "${reg%/*}" = "${root%/*}" ]; then root="$reg"; fi
+  fi
+  printf '%s' "$root"
 }
 
-# _doctor_restart_stale -> one line per live CLI session in this project that started
-# before the newest loaded file changed:
-#   <pid>\t<session id>\t<started epoch-s>\t<file mtime epoch-s>\t<path under the tree>
-# Reads DOCTOR_INSTALL_PATH and DOCTOR_ROOT; silent when the tree has no such file.
+# _doctor_loaded_classes <record> <tree> -> the classes whose recorded content moved in the
+# tree, ", "-joined in the order hooks, skills, agents, commands; nothing when none moved.
+# One hashing call over the recorded paths that still exist, the writer's tool order.
+_doctor_loaded_classes() {
+  local rec="${1:-}" tree="${2:-}" p
+  local -a paths=()
+  [ -f "$rec" ] && [ -n "$tree" ] && [ -d "$tree" ] || return 0
+  while IFS= read -r p; do
+    [ -n "$p" ] && [ -f "$tree/$p" ] && paths[${#paths[@]}]="$p"
+  done <<EOF
+$(sed -nE 's/^[0-9a-f]{64} (.+)$/\1/p' "$rec")
+EOF
+  {
+    sed -nE 's/^([0-9a-f]{64}) (.+)$/W \1 \2/p' "$rec"
+    if [ "${#paths[@]}" -gt 0 ]; then
+      ( cd "$tree" && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -- "${paths[@]}"; else sha256sum -- "${paths[@]}"; fi ) 2>/dev/null \
+        | sed -nE 's/^([0-9a-f]{64}) [ *](.+)$/G \1 \2/p'
+    fi
+  } | awk '
+    { p = substr($0, length($1) + length($2) + 3) }
+    $1 == "W" { want[p] = $2; order[++n] = p; next }
+    $1 == "G" { got[p] = $2 }
+    END {
+      for (i = 1; i <= n; i++) if (got[order[i]] != want[order[i]]) { split(order[i], c, "/"); moved[c[1]] = 1 }
+      k = split("hooks skills agents commands", cls, " ")
+      for (i = 1; i <= k; i++) if (cls[i] in moved) { printf "%s%s", (out++ ? ", " : ""), cls[i] }
+      if (out) print ""
+    }'
+}
+
+# _doctor_registry_installed_at -> the registry's install instant for bionic as
+# YYYY-MM-DDTHH:MM:SSZ (the record's own `started=` shape, so the two compare as strings);
+# nothing when the registry names none. The file is detect.sh's one expression for it.
+_doctor_registry_installed_at() {
+  local reg at
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] && command -v jq >/dev/null 2>&1 || return 0
+  at="$(jq -r '.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic")
+               | .value[0] | (.lastUpdated // .installedAt // empty)' "$reg" 2>/dev/null | head -1)"
+  case "$at" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*) printf '%sZ' "${at:0:19}" ;;
+  esac
+}
+
+# _doctor_restart_stale -> one line per live CLI session in this project whose loaded
+# content moved:
+#   <pid>\t<session id>\t<record started ISO>\t<classes, ", "-joined>\t<reloaded-since ISO, or ->
+# Reads DOCTOR_ROOT; silent for a session with no record or nothing moved.
 _doctor_restart_stale() {
-  local newest nm np line cwd pid sid ms
-  newest="$(_doctor_loaded_newest "$DOCTOR_INSTALL_PATH")"
-  [ -n "$newest" ] || return 0
-  nm="${newest%%$'\t'*}"; np="${newest#*$'\t'}"
+  local line cwd pid sid rec tree moved started at reload
+  at="$(_doctor_registry_installed_at)"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     cwd="$(_doctor_pfield "$line" cwd)"
     _doctor_session_here "$cwd" || continue
     pid="$(_doctor_pfield "$line" pid)"; sid="$(_doctor_pfield "$line" session)"
-    ms="$(command -v jq >/dev/null 2>&1 && jq -r '.startedAt // empty' "$(claude_home)/sessions/${pid}.json" 2>/dev/null)"
-    case "$ms" in ''|*[!0-9]*) continue ;; esac
-    [ "$nm" -gt $(( ms / 1000 )) ] || continue
-    printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "$(( ms / 1000 ))" "$nm" "$np"
+    [ -n "$sid" ] || continue
+    rec="$DOCTOR_ROOT/.bionic/tmp/loaded-${sid}.state"
+    [ -f "$rec" ] && [ ! -L "$rec" ] || continue
+    tree="$(_doctor_restart_tree "$rec")"
+    moved="$(_doctor_loaded_classes "$rec" "$tree")"
+    [ -n "$moved" ] || continue
+    started="$(detect_loaded_field "$rec" started)"
+    reload=-
+    if [ -n "$at" ] && [ -n "$started" ] && [[ "$at" > "$started" ]]; then reload="$at"; fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$sid" "${started:--}" "$moved" "$reload"
   done <<EOF
 $(patrol_live_sessions 2>/dev/null)
 EOF
@@ -444,7 +506,6 @@ EOF
 
 # `--restart-lines`: the reader's lines and nothing else, before any other fact is gathered.
 if [ "$DOCTOR_RESTART_LINES" = yes ]; then
-  _doctor_resolve_install_path
   _doctor_restart_stale
   exit 0
 fi
@@ -1894,47 +1955,38 @@ fi
 # until it exits and a new one starts. This is the one residual way a wall can
 # be silently dead after this wave, and nothing else on this page detects it.
 #
-# THE SAME TREE THE VERSION ROW ALREADY RESOLVED (DOCTOR_INSTALL_PATH,
-# DOCTOR/5), never re-derived: the registry's recorded installPath, or the
-# plugin root, whichever is a git repository — that is the plugin tree the CLI
-# actually loads. A live CLI session in THIS project whose startedAt precedes
-# the newest loaded file there (hooks.json, a skill or a role file; wave-35 T5)
-# loaded it as it stood before the file changed. `_doctor_restart_stale` above is
-# the comparison; this row only prints its lines.
+# THE READER, NOT THE TREE (wave-36 T2; D7, AC-1.3). Through wave-35 this row compared the
+# version row's tree (DOCTOR_INSTALL_PATH) by mtime; it now prints `_doctor_restart_stale`'s
+# lines, which compare what each session LOADED (its load record) with what a restart would
+# load, by content. The row names the classes that moved; the fix line names when the session
+# loaded them, or, when the registry installed after that, `or reloaded since` the install.
 
-# UTC, SHORT. Everywhere else on this page an absolute time renders as a
-# relative age (`_doctor_file_age`) — this is the one row where which SIDE of
-# the restart a moment falls on is the fact, so the actual clock reads print
-# rather than an elapsed duration.
-_doctor_utc_short() {  # <epoch-seconds> -> "2026-09-03 02:06Z", or empty
-  local s="${1:-}"
-  case "$s" in ''|*[!0-9]*) return 1 ;; esac
-  date -u -r "$s" +'%Y-%m-%d %H:%MZ' 2>/dev/null || date -u -d "@${s}" +'%Y-%m-%d %H:%MZ' 2>/dev/null
+# ISO, SHORT. Everywhere else on this page an absolute time renders as a relative age
+# (`_doctor_file_age`) — this is the one row where which SIDE of a load a moment falls on is
+# the fact, so the clock reads print rather than an elapsed duration.
+_doctor_iso_short() {  # <YYYY-MM-DDTHH:MM:SSZ> -> "2026-09-03 02:06Z", or the input as it came
+  case "${1:-}" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*) printf '%s %sZ' "${1:0:10}" "${1:11:5}" ;;
+    *) printf '%s' "${1:-?}" ;;
+  esac
 }
 
 # RESOLVED, NOT COMPARED (FIX-DOCTOR/2): the reader passes each session's cwd
 # through `_doctor_session_here`, so a session standing one directory inside this
 # project is reported, not skipped by a literal equality.
-while IFS=$'\t' read -r _rs_pid _rs_sid _rs_started_sec _rs_file_mtime _rs_file; do
+while IFS=$'\t' read -r _rs_pid _rs_sid _rs_started _rs_classes _rs_reload; do
   [ -n "$_rs_pid" ] || continue
-  _rs_started_fmt="$(_doctor_utc_short "$_rs_started_sec")"
-  _rs_file_fmt="$(_doctor_utc_short "$_rs_file_mtime")"
-  # THE FILE BEFORE THE CLOCK (wave-35 T5): a skill path is long and the cell is bounded, so the row
-  # carries the pid, the file and when it changed; the session's start rides the fix line below.
-  _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" \
-    "pid ${_rs_pid} — ${_rs_file} changed ${_rs_file_fmt:-?}")"
+  # THE CLASSES ON THE ROW, THE MOMENT ON THE FIX LINE (wave-35 T5's split): the row's cell and
+  # the fix line's problem half are each bounded, so neither carries both.
+  _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" "pid ${_rs_pid} — ${_rs_classes} changed since load")"
   # THE FACT GOES IN FRONT OF THE ARROW AND THE COMMAND IS THE WHOLE TAIL
-  # (wave-01 S4, AC-6's precondition). This line used to carry a second clause
-  # AFTER its command — `… start it again — the running process registered
-  # hooks.json as it was at <time>` — which put the fact a reader compares
-  # against on the far side of the instruction and ran the line to 148
-  # columns. `fix` splits on the FIRST arrow, so everything past it is the
-  # command, and the render loop protects exactly that: a tail that is half
-  # instruction and half evidence cannot be protected, and the 1.4.4 fixit
-  # reverted a loop-wide bound (dd07b33) rather than move the evidence. It
-  # moves here. The timestamp is the problem's own — which file this process
-  # is holding — and the row above pairs it with the file's mtime.
-  fix "pid ${_rs_pid} registered ${_rs_file} as it was at ${_rs_started_fmt:-$_rs_started_sec} → exit claude and start it again"
+  # (wave-01 S4, AC-6's precondition): `fix` splits on the FIRST arrow, so
+  # everything past it is the command, and the render loop protects exactly that.
+  if [ "${_rs_reload:--}" != - ]; then
+    fix "pid ${_rs_pid} loaded ${_rs_classes}, or reloaded since $(_doctor_iso_short "$_rs_reload") → exit claude and start it again"
+  else
+    fix "pid ${_rs_pid} loaded ${_rs_classes} at $(_doctor_iso_short "$_rs_started") → exit claude and start it again"
+  fi
 done <<EOF
 $(_doctor_restart_stale)
 EOF
@@ -2361,7 +2413,21 @@ fi
 # know without being told is WHICH payload just answered them, and on a machine
 # carrying a plugin install, a checkout and a marketplace copy of the same thing,
 # that is the fact every other line below is relative to.
-echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
+#
+# AND WHAT RUNS COMES BEFORE WHAT IS INSTALLED (wave-36 T1, D7, ADR-055). A session started
+# in a checkout through bionic's rc line runs that checkout while the registry names the
+# release; detect.sh's verdict reads a live session's load record first, and when it says
+# `in place` the header is the very line `/bionic:version` prints.
+if [ "$(detect_checkout_verdict "$DOCTOR_REPO_ROOT" "$DOCTOR_ROOT")" = "in place" ]; then
+  DOCTOR_IN_PLACE="$(detect_loaded_line "$DOCTOR_ROOT")"
+else
+  DOCTOR_IN_PLACE=""
+fi
+if [ -n "$DOCTOR_IN_PLACE" ]; then
+  echo "Bionic Doctor — ${DOCTOR_IN_PLACE}"
+else
+  echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
+fi
 
 # WHICH CHECKOUT THE CLI ACTUALLY LOADS THE PLUGIN FROM (W4 4/4) — the other half
 # of the header's provenance claim, on a machine that can carry more than one
@@ -2391,7 +2457,12 @@ echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
 # not) and never re-derives the worktree fact itself.
 if [ "$MP_SOURCE_STATE" -eq 0 ] && [ -n "$MP_SOURCE_PATH" ]; then
   _doctor_checkout_verdict="$(detect_checkout_verdict "$DOCTOR_REPO_ROOT")"
-  if [ "$_doctor_checkout_verdict" = "this checkout" ]; then
+  # IN PLACE, THE REGISTRATION IS STILL A FACT, BUT NOT THE ONE THAT RUNS: the header above
+  # names the checkout, and this row names the install without claiming the CLI loads it.
+  if [ -n "$DOCTOR_IN_PLACE" ]; then
+    printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" \
+      " [${_doctor_checkout_verdict}, installed — not what this session runs]")")"
+  elif [ "$_doctor_checkout_verdict" = "this checkout" ]; then
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [this checkout]")")"
   elif [ "$_doctor_checkout_verdict" = "github feed" ]; then
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [github feed]")")"

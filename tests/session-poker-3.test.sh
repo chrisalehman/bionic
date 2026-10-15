@@ -395,7 +395,8 @@ expect_eq "57b §JUDGE AC-2.3 code landed past the last adversarial head: uncove
   "uncovered	${S57_C1}..${S57_C4}" "$(s57_of "$S57_AD")"
 expect_eq "57b2 …the run does not hold (rc 1)" "1" "$S57_RC"
 expect_eq "57b3 …while the questions read at the head stay covered" "covered" "$(s57_of "$S57_ST")"
-expect_eq "57b4 …and the whole read, taken once, is not owed again for the later code" "covered" "$(s57_of "$S57_ADW")"
+expect_eq "57b4 …and the whole read taken at C1 holds only as far as its question's chain: uncovered over the same range (wave-36 T7; D9: the whole-scope rule is gone)" \
+  "uncovered	${S57_C1}..${S57_C4}" "$(s57_of "$S57_ADW")"
 s57_reset; s57_floor "$S57_C4"
 for s57q in evidence adversarial structure; do s57_fact "$s57q" "$S57_C2" pass piece; done
 s57_fact adversarial "$S57_C2" pass whole; s57_fact structure "$S57_C2" pass whole
@@ -790,7 +791,7 @@ expect_contains "58g10 …from the absolute deliverable's reader, as a pass" \
 POKER="$S58_POKER_REAL"
 
 # ---------- controls: a floor, a task and a plain review proof are written as before ----------
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$S58_C4" > "$S58_REC/floor.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$S58_C4" > "$S58_REC/floor.txt"
 printf '# review\n\nreviewed: %s..%s\n' "$S58_C1" "$S58_C4" > "$S58_REC/plain.md"
 s42_snap "$R58" "$P58"
 poke "$R58" proof-add floor record/wave-01-fixture/floor.txt
@@ -841,9 +842,16 @@ for s59st in intended confirmed; do
   s59_row w-crit bionic:critic "$s59st" adversarial,structure "$S59_REL/adv.md" "$S59_REL/adv-2.md,$S59_REL/str-2.md"
   s59_row w-rev bionic:critic "$s59st" structure "$S59_REL/str-rev.md" ""
 done
-P59="$(s42_plan "$R59" 4)"
+# A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
+# is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
+P59="$(s42_plan "$R59" 4 "  worktree: .worktrees/01-fixture
+  base-sha: $(git -C "$R59" rev-parse --short=8 HEAD)
+  branch: wave/01-fixture")"
+# EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a review
+# row is ready again only past a commit that owes, so A, B and C each change a.sh.
 ( cd "$R59" && git worktree add -q -b wave/01-fixture "$R59/.worktrees/01-fixture" \
-  && for c in A B C; do git -C "$R59/.worktrees/01-fixture" commit -q --allow-empty -m "landing $c"; done ) >/dev/null 2>&1
+  && for c in A B C; do printf '%s\n' "$c" >> "$R59/.worktrees/01-fixture/a.sh" \
+       && git -C "$R59/.worktrees/01-fixture" add a.sh && git -C "$R59/.worktrees/01-fixture" commit -q -m "landing $c"; done ) >/dev/null 2>&1
 S59_A="$(git -C "$R59/.worktrees/01-fixture" rev-parse HEAD~2 2>/dev/null)"
 S59_B="$(git -C "$R59/.worktrees/01-fixture" rev-parse HEAD~1 2>/dev/null)"
 S59_C="$(git -C "$R59/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
@@ -1017,15 +1025,28 @@ s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S60_INIT"
 s60_tick
 expect_eq "60b one fix after the whole read, the other landed before it: C is a commit no header names, so one MOVED unknown line (re-pinned, wave-27 T34)" \
   "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
-# A docs-only tail: the whole reading at C, every row landed by C, and one commit past C no row landed.
+# A tail made by hand: the whole reading at C, every row landed by C, and one commit past C no row landed. RE-PINNED
+# BY wave-36 T28 (D9): the tail changes code, so the judge reads the structure question uncovered and the row is
+# offered; through T28 it was an empty commit, which the judge reads as prose (60c3 below).
 s60_world s60-tail @C whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
-git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "a docs-only tail" >/dev/null 2>&1
-S60_D="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+S60_D="$(s57_commit "$R59W/.worktrees/01-fixture" a.sh "a tail made by hand")"
 s60_tick
 expect_eq "60c a tail made straight on the working branch: RANGE C..D, and MOVED unknown, never none (re-pinned, wave-27 T34)" \
   "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s60_moved)"
+# THE TICK ASKS THE JUDGE (wave-36 T28; D9, AC-3.6): the same world with a docs-only tail. The judge reads the record
+# commit as prose, the structure question stays covered at D, and the tick offers no range and says why.
+s60_world s60-tail-doc @C whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+S60_DD="$(s57_commit "$R59W/.worktrees/01-fixture" .bionic/docs/record/wave-01-fixture/notes.md "a docs-only tail")"
+expect_eq "60c2 precondition: the docs-only tail is one commit past C touching only the record" \
+  "$S59W_C .bionic/docs/record/wave-01-fixture/notes.md" \
+  "$(git -C "$R59W" rev-parse "$S60_DD~1") $(git -C "$R59W" diff --name-only "$S59W_C" "$S60_DD")"
+s60_tick
+expect_eq "60c3 a docs-only tail past the structure reading: no RANGE line, and T3 waits on what the judge reads" \
+  "|poker: WAIT T3 — live:head:structure: the judge (facts_state) reads structure covered at ${S60_DD:0:12}; only an uncovered question is read again" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
 # No whole fact yet: the structure reading at A is a piece read. The range prints, and no MOVED line.
 s60_world s60-nowhole @A piece
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
@@ -1518,7 +1539,7 @@ expect_eq "62t2 BIONIC_CHECK_TREE is the working checkout's absolute path" "$(cd
 POKE_BOUND="$S62_BOUND_WAS"
 
 # ============================================================
-section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge holds where a chain starts and which head it was asked about (wave-27 T45; review pass 13 F1 to F4, F6, F10; REQ-1 AC-1.2, REQ-2 AC-2.3 AC-2.4; D2, D10)"
+section "Section 63 §BASE §HEAD §FLOOR-HEAD §REGISTER §EDGES: the judge holds where a chain starts and which head it was asked about (wave-27 T45; review pass 13 F1 to F4, F6, F10; REQ-1 AC-1.2, REQ-2 AC-2.3 AC-2.4; D2, D10)"
 # ============================================================
 #
 # A run's base is the plan's `base-sha:`, and nothing is derived in its place. With none,
@@ -1527,9 +1548,9 @@ section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge h
 # cross-gate-agreement holds one role per question at every rigor). `<head>` must resolve to a
 # commit or the judge exits 2, and a line's head is compared after resolution. The floor line
 # answers for `<head>` only when it is the working checkout's head, which `proof_state` judged;
-# any other head is uncovered from the floor proof's head. A `scope: whole` record is refused while
-# a `## Tasks` row of kind `build` is pending or active (D10: the whole read is taken once the
-# last build piece has landed). The git edges of the chain (a merge, a rename across the docs root
+# any other head is uncovered from the floor proof's head. A `scope: whole` record registers at
+# the head the reading names while build rows are still open (§REGISTER; wave-36 T28, D9: the judge
+# limits a whole reading's reach, so the verb no longer holds its time). The git edges of the chain (a merge, a rename across the docs root
 # each way, a last head off the history of the head asked about) are pinned, each with a doctored
 # copy of proof.sh that turns its row red. A waiver's question and head survive a reply and a git
 # user name that spell ` by question=… head=…` (F6).
@@ -1540,7 +1561,7 @@ section "Section 63 §BASE §HEAD §FLOOR-HEAD §WHOLE-TIME §EDGES: the judge h
 # the base goes in its frontmatter, where A-orch-56 puts it, the place the judge reads after the
 # Step-4 block. Readings register through the
 # verb under the 57t roster row shape (s56_row, `questions=` SYNTHESIZED until T15). The judge's
-# planted copies are written by the production writers (`proof_line`, `proof_add_line`). §WHOLE-TIME
+# planted copies are written by the production writers (`proof_line`, `proof_add_line`). §REGISTER
 # is §42's wave plan, admitted by the real commit gate, with its own `## Tasks` rows. §EDGES is
 # exp3.sh's repository: real merges and real `git mv` renames. Each mutant is a copy of the whole
 # lib directory with one line of proof.sh changed, run beside the shipped one.
@@ -1675,7 +1696,12 @@ s57_state "$P63" task/01-fixture
 expect_eq "63f7 a head asked by its branch name is judged as the commit it names: the range ends at that commit" \
   "uncovered	${S63_H}..${S63_X}" "$(s57_of "$S63_TAD")"
 
-# ---------- §WHOLE-TIME (F2; D10): a whole read waits for the last build piece ----------
+# ---------- §REGISTER (wave-36 T28; D9, AC-3.1): a whole read registers while build rows are open, at the reading's head ----------
+# Through wave-35 (D10) a `scope: whole` record was refused while a build row was pending or active, because the
+# judge covered a whole line with any whole reading whatever its head. The judge now reaches only as far as the
+# question's chain (wave-36 T7; A-T7-5), so the verb registers the reading at the head it names, and the cover rule
+# decides what lands after it. The branch moves one commit past the reading first, so the line's head is the
+# reading's, not the branch's.
 R63W="$(make_repo s63-whole-time)"; ( cd "$R63W" && git commit -q --allow-empty -m init )
 S63W_B="$(git -C "$R63W" rev-parse HEAD)"
 P63W="$(s42_plan "$R63W" 4 "  worktree: .worktrees/01-fixture
@@ -1685,46 +1711,32 @@ awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d =
 ( cd "$R63W" && git add -f "$P63W" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$R63W/.worktrees/01-fixture" "$S63W_B" ) >/dev/null 2>&1
 S63W_C1="$(s57_commit "$R63W/.worktrees/01-fixture" lib/a.sh C1)"
+S63W_C2="$(s57_commit "$R63W/.worktrees/01-fixture" lib/b.sh C2)"
 S63W_REC="$R63W/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S63W_REC"
 printf 'reviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n\nthe whole wave\n' "$S63W_B" "$S63W_C1" > "$S63W_REC/whole.md"
 new_roster "$R63W"; S63W_RS="$(roster_of "$R63W")"
 s56_row "$S63W_RS" implementor implementor
 s56_row "$S63W_RS" w-crit bionic:critic adversarial ".bionic/docs/record/wave-01-fixture/whole.md"
-s63_status() {  # <id> <status> -> that row of P63W's ## Tasks given the status, its other cells kept
-  I="$1" S="$2" awk -F'|' 'BEGIN { OFS = "|" } $2 == " " ENVIRON["I"] " " { $(NF - 1) = " " ENVIRON["S"] " " } { print }' \
-    "$P63W" > "$P63W.tmp" && mv "$P63W.tmp" "$P63W"
-}
 expect_eq "63w0 precondition: the build rows T1 landed and T2 active, the verify row T5 pending" "T1 landed;T2 active;T5 pending;" \
   "$(bash -c '. "$1" && units_rows "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh" "$P63W" 2>/dev/null \
      | awk -F'\t' '{ printf "%s %s;", $1, $10 }')"
 s34_gate "$R63W"
 expect_eq "63w0b precondition: the plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "63w0c precondition: the working branch is at C2, one commit past C1, the head the reading names" \
+  "$S63W_C2 $S63W_C1 $S63W_C1" \
+  "$(git -C "$R63W" rev-parse wave/01-fixture) $(git -C "$R63W" rev-parse wave/01-fixture~1) $(sed -n 's/^reviewed: [0-9a-f]*\.\.//p' "$S63W_REC/whole.md")"
 s42_snap "$R63W" "$P63W"
 poke "$R63W" proof-add review record/wave-01-fixture/whole.md --question adversarial --reader w-crit
-s42_unchanged "63w F2 a scope: whole record while build row T2 is active" 1 "$P63W"
-expect_contains "63w2 …naming the open build row" "build rows are still open: T2 (active);" "$OUT"
-s63_status T2 pending; s42_snap "$R63W" "$P63W"
-poke "$R63W" proof-add review record/wave-01-fixture/whole.md --question adversarial --reader w-crit
-s42_unchanged "63w3 …while T2 is pending" 1 "$P63W"
-expect_contains "63w4 …naming it" "build rows are still open: T2 (pending);" "$OUT"
-s63_status T1 pending; s63_status T2 active; s42_snap "$R63W" "$P63W"
-poke "$R63W" proof-add review record/wave-01-fixture/whole.md --question adversarial --reader w-crit
-s42_unchanged "63w5 …while two build rows are open" 1 "$P63W"
-expect_contains "63w6 …naming both" "build rows are still open: T1 (pending), T2 (active);" "$OUT"
-s63_status T1 landed; s63_status T2 dropped
-S63W_DOC='| T6 | 4 | doc | the notes | implementor | — | 15 | REQ-1 | notes.md | — | — | pending |'
-S63W_REV='| T7 | 4 | review | a read | — | — | 15 | REQ-1 | — | — | — | pending |'
-D="$S63W_DOC" V="$S63W_REV" awk '{ print } /^\| T5 \| 5 \| verify \|/ { print ENVIRON["D"]; print ENVIRON["V"] }' "$P63W" > "$P63W.tmp" && mv "$P63W.tmp" "$P63W"
-expect_eq "63w7 precondition: every build row landed or dropped, a verify, a doc and a review row pending" \
-  "T1 build landed;T2 build dropped;T5 verify pending;T6 doc pending;T7 review pending;" \
-  "$(bash -c '. "$1" && units_rows "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh" "$P63W" 2>/dev/null \
-     | awk -F'\t' '{ printf "%s %s %s;", $1, $3, $10 }')"
-s42_snap "$R63W" "$P63W"
-poke "$R63W" proof-add review record/wave-01-fixture/whole.md --question adversarial --reader w-crit
-expect_eq "63w8 with every build row landed or dropped, the whole read registers (a verify, a doc and a review row pending hold nothing)" "0" "$RC"
-expect_contains "63w9 …as a whole reading" "evidence=record/wave-01-fixture/whole.md question=adversarial reader=w-crit result=pass scope=whole" \
+expect_eq "63w AC-3.1 a scope: whole record while build row T2 is active registers (exit 0)" "0" "$RC"
+expect_contains "63w2 …as a whole reading" "evidence=record/wave-01-fixture/whole.md question=adversarial reader=w-crit result=pass scope=whole" \
   "$(s46_proved "$P63W" | tail -1)"
-# A plan with no ## Tasks table is not held to it: §BASE's task plan, its table removed.
+expect_contains "63w3 …at the head the reading names, C1" "proved: kind=review head=$S63W_C1 " "$(s46_proved "$P63W" | tail -1)"
+expect_absent "63w4 …not at the branch's head, C2" "head=$S63W_C2" "$(s46_proved "$P63W" | tail -1)"
+expect_absent "63w5 …and no open-build refusal is said" "build rows are still open" "$OUT"
+expect_eq "63w6 …while T2 is still active" "T2 active" \
+  "$(bash -c '. "$1" && units_rows "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh" "$P63W" 2>/dev/null \
+     | awk -F'\t' '$1 == "T2" { print $1, $10 }')"
+# A plan with no ## Tasks table registers one too: §BASE's task plan, its table removed.
 awk '/^## Tasks/ { skip = 1; next } skip && /^## / { skip = 0 } !skip' "$P63" > "$P63.tmp" && mv "$P63.tmp" "$P63"
 printf 'reviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n\nthe whole task\n' "$S63_I" "$S63_X" > "$S63_REC/whole.md"
 s56_row "$(roster_of "$R63")" w-tcrit bionic:critic evidence,adversarial,structure "$S63_RREL/whole.md"
@@ -1776,14 +1788,14 @@ expect_eq "63e0b precondition: gone is not on the history of the working head" "
 S63_NEEDLE_ANC='git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1'
 S63_NEEDLE_REN="--no-renames --name-only --format='%x01%H' \"\$lh..\$hh\""
 S63_NEEDLE_MRG='--first-parent -m --no-renames'
-S63_NEEDLE_ALL='[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1'
+S63_NEEDLE_ALL='[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || prose=0'
 for s63n in "$S63_NEEDLE_ANC" "$S63_NEEDLE_REN" "$S63_NEEDLE_MRG" "$S63_NEEDLE_ALL"; do
   expect_eq "63e0c precondition: the mutation site is one line of the shipped proof.sh: $s63n" "1" "$(/usr/bin/grep -cF -- "$s63n" "$S57_LIB")"
 done
 S63_M_ANC="$(s63_mut anc "$S63_NEEDLE_ANC" ':')"
 S63_M_REN="$(s63_mut ren "$S63_NEEDLE_REN" "--name-only --format='%x01%H' \"\$lh..\$hh\"")"
 S63_M_MRG="$(s63_mut mrg "$S63_NEEDLE_MRG" '--first-parent --diff-merges=off --no-renames')"
-S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" '[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || return 1; return 0')"
+S63_M_ALL="$(s63_mut all "$S63_NEEDLE_ALL" '[ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || prose=0; [ "$prose" = 0 ] || prose=2')"
 # A merge, counted as what it brought in.
 s63_edge_plan "$S63E_H0"
 expect_eq "63e control: asked at the readings' own head, covered" "covered" "$(s63_adv_with "$S57_LIB" "$S63E_H0")"
@@ -3124,7 +3136,7 @@ expect_eq "69e0 control: at current: 6 with the debt open a real commit is refus
 poke "$R69" step-line T9 'landed red on widget.test.sh, owed'
 expect_eq "69e00 a writer verb at current: 6 with the debt open (step-line): admitted, its copy judged at current: 4" "0" "$RC"
 expect_contains "69e00b …and its line is written" "- T9: landed red on widget.test.sh, owed" "$(cat "$P69")"
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\n' "$S69_H" \
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\nrc=0\n' "$S69_H" \
   > "$R69/.bionic/docs/record/w27/floor-late.log"
 poke "$R69" proof-add floor record/w27/floor-late.log
 expect_eq "69e proof-add floor of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
@@ -3338,7 +3350,8 @@ POKE_BOUND="$S71_BOUND_WAS"
 section "Section 72 §FLOOR-RECORD: the floor is one whole run at a commit on the branch, and every later commit proved by the runs recorded at it (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.3, AC-13.4; D3; A-T25-1 to A-T25-4)"
 # ============================================================
 #
-# `proof-add floor` takes ONE log of one whole green run on a clean tree, at a commit F. When F is
+# `proof-add floor` takes the log of a green run on a clean tree, at a commit F: since wave-36 T35 (AC-7.10) any
+# log that opens head=<F> dirty=0 and ends rc=0, no roster counted (§72 (b)). When F is
 # not the working head H, F must be an ancestor of H and the walk must hold: each commit on the
 # working branch's first-parent line after F owes its row's Lands-on suites (the `ready` event
 # before the `published` one naming it) and every suite a run recorded at its tree names; a hand
@@ -3408,8 +3421,8 @@ s72_add() {  # <evidence relative to the record> -> poke proof-add floor, the pl
   s42_snap "$S72R" "$S72P"
   poke "$S72R" proof-add floor "record/wave-01-fixture/$1"
 }
-s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>
-  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\n' "$2" > "$S72REC/$1"
+s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35)
+  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\nrc=0\n' "$2" > "$S72REC/$1"
 }
 s72_state() {  # -> proof_state's one line for the plan
   bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null
@@ -3445,15 +3458,18 @@ expect_eq "72a5 AC-13.4 a whole run at an ancestor F, every later commit proved 
 expect_eq "72a6 …and the proof names F, the head the run read" "$S72F" "$(s46_last "$S72P" floor)"
 expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'covered\t%s' "$S72C2")" "$(s72_state)"
 
-# ---------- (b) the stamps alone, with no whole run, are no floor ----------
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$S72F" > "$S72REC/floor-part.txt"
+# ---------- (b) what the run ran is the plan's word: no roster is counted (inverted by wave-36 T35; AC-7.10) ----------
+# Through wave-35 the judge counted the suites at the head, and a run of one suite of four was refused as not whole.
+# The floor reads no roster now: the plan's regression row names what ran, and a log that opens head=<F> dirty=0 and
+# ends rc=0, every later commit proved, is accepted whatever it ran.
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$S72F" > "$S72REC/floor-part.txt"
 s72_add floor-part.txt
-s42_unchanged "72b a run of one suite at F, every later commit proved" 1 "$S72P"
-expect_contains "72b2 AC-4.1 …is not a whole run" "is not a whole run (1 passed of 4 suites at its head)" "$OUT"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\n' "$S72C2" > "$S72REC/floor-part-H.txt"
+expect_eq "72b a run of one suite at F, every later commit proved: accepted, no roster counted (exit 0)" "0" "$RC"
+expect_eq "72b2 AC-7.10 …the proof naming F" "$S72F" "$(s46_last "$S72P" floor)"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nrc=0\n' "$S72C2" > "$S72REC/floor-part-H.txt"
 s72_add floor-part-H.txt
-s42_unchanged "72b3 a run of two suites at the working head itself" 1 "$S72P"
-expect_contains "72b4 …is not a whole run either" "is not a whole run (2 passed of 4 suites at its head)" "$OUT"
+expect_eq "72b3 a run of two suites at the working head itself: accepted (exit 0)" "0" "$RC"
+expect_eq "72b4 …the proof naming the working head" "$S72C2" "$(s46_last "$S72P" floor)"
 
 # ---------- (c) a fix row after the full run: its red suite and its own, each run green ----------
 S72C3="$(s72_land T8 lib/one.sh d.test.sh,a.test.sh)"
@@ -3521,7 +3537,7 @@ s42_unchanged "72g a whole run at a commit off the working branch" 1 "$S72P"
 expect_contains "72g2 …says it is not in the working branch's history" \
   "floor-X.txt read head ${S72X:0:12}, which is not in the history of the working branch (at ${S72C6:0:12})" "$OUT"
 s72_config "floor: true"
-printf 'head=%s dirty=0 rc=0\ncommand: true\n' "$S72F" > "$S72REC/floor-run-F.log"
+printf 'head=%s dirty=0\ncommand: true\nrc=0\n' "$S72F" > "$S72REC/floor-run-F.log"
 s72_add floor-run-F.log
 expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
 S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
@@ -3563,13 +3579,13 @@ expect_contains "72i4 …naming the oldest commit owing a suite, and the whole r
 s57_state "$S72P" "$S72H"
 S72FL="$(s57_of floor)"
 expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	*}"
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\n' "$S72H" > "$S72REC/floor-red-H.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\nrc=1\n' "$S72H" > "$S72REC/floor-red-H.txt"
 s72_add floor-red-H.txt
 s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
 # A RED WHOLE RUN IS A CANDIDATE NOW (wave-35 T9; D8, AC-1.3) only when its Failed: block names its reds; this
-# log counts one failed and names none, so it says nothing of what is owed and stays refused.
-expect_contains "72i7 …refused: its Failed: block names none of the reds its verdict counts" \
-  "counts 1 failed but its Failed: block names 0" "$OUT"
+# log ends rc=1 and names none, so it says nothing of what is owed and stays refused, by its rc (wave-36 T35).
+expect_contains "72i7 …refused: it ended rc=1 and its Failed: block names none of its reds" \
+  "floor-red-H.txt ended rc=1, so the regression did not pass" "$OUT"
 s72_add floor-F.txt
 s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
 expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
@@ -3751,4 +3767,132 @@ expect_eq "BS-5 a build row naming no artifact anywhere keeps the artifact slot 
   "$(bs_field "$BS_FILE/T11.md" 'Expected artifact' | /usr/bin/grep -c '^<ORCHESTRATOR:')"
 POKE_BOUND="$BS_BOUND_WAS"
 
+
+# ============================================================
+section "§BRIEF: brief derives Suites and Lands-on from the reads index for the row's Files (wave-36 T27; REQ-6 AC-6.1; D12)"
+# ============================================================
+#
+# fails-when: the grep-reading suite or the hook-running suite is missing from a code row's derived Suites: or
+# Lands-on:. lib/anchors.sh `reads_index`, read at the working branch's head, routes a file to every suite whose
+# text names it outside a comment, every suite that names a hook whose BIONIC_LIB_WANT lists it, and every suite
+# whose anchor names it (T5's contract). `brief` takes the suites it names for any file the row's Files cover
+# (by file name, sorted, once each), after the Files' own *.test.sh entries (A-T5-5: a suite in Files names
+# itself, and a suite the row adds is in no tree yet). A suite that reads none of the files is not named. A
+# second `brief` call keeps what the orchestrator wrote under ## Judgment and derives the same sets again.
+# FIXTURE FIDELITY: three suites read payload/scripts/lib/walls.sh by the three routes the spec names, committed on
+# the working branch; the index is the real one, read by the real verb.
+SB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RSB="$(make_repo brief-reads)"; ( cd "$RSB" && git commit -q --allow-empty -m init )
+mkdir -p "$RSB/payload/scripts/lib" "$RSB/hooks" "$RSB/tests"
+printf 'the wall line\n' > "$RSB/payload/scripts/lib/walls.sh"
+printf '#!/bin/bash\nBIONIC_LIB_WANT="walls.sh"\n' > "$RSB/hooks/h.sh"
+printf '#!/bin/bash\ngrep -c wall "$REPO/payload/scripts/lib/walls.sh"\n' > "$RSB/tests/s-grep.test.sh"
+printf "#!/bin/bash\nanchor file payload/scripts/lib/walls.sh 'the wall line'\n" > "$RSB/tests/s-anchor.test.sh"
+printf '#!/bin/bash\nbash "$REPO/hooks/h.sh"\n' > "$RSB/tests/s-hook.test.sh"
+printf '#!/bin/bash\n# payload/scripts/lib/walls.sh is named only in this comment\necho none\n' > "$RSB/tests/s-none.test.sh"
+( cd "$RSB" && git add payload hooks tests && git commit -qm "three suites read walls.sh" )
+PSB="$(s42_plan "$RSB" 4)"
+SB_TABLE="$TMPROOT/sb-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T31 | 4 | build | the wall library | senior-implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, .bionic/docs/record/wave-01-fixture/T31.md | — | — | pending |\n'
+  printf '| T32 | 4 | build | the wall and a new suite | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, tests/zz-new.test.sh, .bionic/docs/record/wave-01-fixture/T32.md | — | — | pending |\n'
+  printf '\n'
+} > "$SB_TABLE"
+awk -v t="$SB_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PSB" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PSB.new" && mv "$PSB.new" "$PSB"
+( cd "$RSB" && git add -f "$PSB" && git commit -qm "brief-reads fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
+SB_FILE="$RSB/.bionic/docs/record/wave-01-fixture/briefs"
+expect_eq "SB-0 precondition: the reads index at the working head names the three reading suites for walls.sh, and not s-none" \
+  "payload/scripts/lib/walls.sh	tests/s-anchor.test.sh,tests/s-grep.test.sh,tests/s-hook.test.sh" \
+  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$RSB" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh"')"
+expect_eq "SB-0b …while the anchor index names the anchoring suite alone (the reads index is the wider fact)" \
+  "payload/scripts/lib/walls.sh	tests/s-anchor.test.sh" \
+  "$(bash "$POKER" anchors index "$RSB" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh"')"
+poke "$RSB" brief T31
+expect_eq "SB-1 AC-6.1 brief T31: Suites names the grep-reading, anchoring and hook-running suites, sorted" \
+  "0|s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bs_field "$SB_FILE/T31.md" Suites)"
+expect_eq "SB-1b …and Lands-on the same set" "s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bs_field "$SB_FILE/T31.md" Lands-on)"
+expect_absent "SB-1c …a suite naming the file only in a comment is not named (positive: SB-1 read three from the same line)" \
+  "s-none.test.sh" "$(bs_field "$SB_FILE/T31.md" Suites)"
+poke "$RSB" brief T32
+expect_eq "SB-2 a row whose Files name a suite no tree holds yet: that suite first, then the index's, once each" \
+  "0|zz-new.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bs_field "$SB_FILE/T32.md" Suites)"
+expect_eq "SB-2b …and Lands-on the same set" "zz-new.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" \
+  "$(bs_field "$SB_FILE/T32.md" Lands-on)"
+awk '/^Research to read:/ { print "Research to read: the T5 record, whole"; next } { print }' "$SB_FILE/T31.md" > "$SB_FILE/T31.md.new" \
+  && mv "$SB_FILE/T31.md.new" "$SB_FILE/T31.md"
+poke "$RSB" brief T31
+expect_eq "SB-3 a second brief T31 keeps what the orchestrator wrote under ## Judgment" \
+  "0|the T5 record, whole" "$RC|$(bs_field "$SB_FILE/T31.md" 'Research to read')"
+expect_eq "SB-3b …and derives the same Suites again" "s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bs_field "$SB_FILE/T31.md" Suites)"
+POKE_BOUND="$SB_BOUND_WAS"
+
+
+# ============================================================
+section "§BORN-FLOOR: task-add --born floor:<suite> writes the floor-born marker the judge holds a landing by (wave-36 T7; REQ-3 AC-3.2; D9, D2)"
+# ============================================================
+# A row born of the floor's red carries ` born: floor <suite>` on its `- <id>:` line; lib/proof.sh's judge holds
+# the commit the landing record names as its landing (evidence-gate-2 §COVER). `--born floor:<suite>` takes one
+# suite by its file name (`<name>.test.sh`, the key the floor's records use); a floor-born row is no review-born
+# row, so fix-policy: and fix-cap: do not hold it, and its task cell says ` · born: floor`. FIXTURE FIDELITY: §74's
+# gate-admitted plan without reads; the verb is the real one.
+SBF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBF="$(make_repo s-born-floor)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
+SBF_C1="$(git -C "$RBF" rev-parse HEAD)"
+git -C "$RBF" branch wave/01-fixture
+PBF="$(s42_plan "$RBF" 4 "  worktree: .worktrees/01-fixture
+  base-sha: abc1234
+  branch: wave/01-fixture
+  working-branch: wave/01-fixture")"
+SBF_OFF="$(git -C "$RBF" rev-parse HEAD)"
+SBF_SUM="$(cksum < "$PBF")"
+poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:lib/a.sh
+expect_eq "BFV-1 --born floor: with a path that is no suite file name is the usage error, exit 2" "2" "$RC"
+expect_contains "BFV-1b …naming the shape" "floor:<suite>" "$OUT"
+expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+
+# THE MARKER NAMES ITS RED (wave-36 T42; D9, Δ8; born of critic-adversarial #1). The verb checks the shape, and the
+# judge holds a floor-born landing on every question chain, so a marker typed with no red behind it is an exemption
+# nothing earned. It is admitted when (a) the plan's floor proof owes the suite (`owed=`), or (b) the landing record
+# holds an `ev=standing` event for it whose head is a commit on the working branch; the marker then says which
+# (`of=floor` or `of=standing@<12-hex>`). With neither it is refused naming the two facts that would admit it.
+poke "$RBF" task-add T10 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
+expect_eq "BFV-6 no floor proof and no record: --born floor:a.test.sh is refused, exit 1" "1" "$RC"
+expect_contains "BFV-6b …naming the first fact that would admit it: the floor proof owes the suite" "floor proof owes a.test.sh" "$OUT"
+expect_contains "BFV-6c …and the second: a standing event for the suite at a commit on the working branch" "standing event for a.test.sh" "$OUT"
+expect_eq "BFV-6d …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S46_LIB" "$PBF" \
+  "proved: kind=floor head=${SBF_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh" > "$PBF.new" && mv "$PBF.new" "$PBF"
+( cd "$RBF" && git add -f "$PBF" && git commit -qm floor ) >/dev/null 2>&1
+SBF_SUM="$(cksum < "$PBF")"
+poke "$RBF" task-add T11 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:x.test.sh
+expect_eq "BFV-7 a floor proof that owes a.test.sh does not back x.test.sh: refused, exit 1" "1" "$RC"
+expect_contains "BFV-7b …the refusal says what the floor proof owes" "owes a.test.sh" "$OUT"
+expect_eq "BFV-7c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+SBF_REC="$RBF/.bionic/docs/record/wave-01-fixture/landing-proofs.log"; mkdir -p "${SBF_REC%/*}"
+{ printf 'line/v1|ev=standing|head=%s|suite=o.test.sh|lines=1|log=x.log|cause=code|against=-|at=2026-10-14T00:01:00Z\n' "$SBF_OFF"
+  printf 'line/v1|ev=standing|head=%s|suite=s.test.sh|lines=2|log=x.log|cause=code|against=-|at=2026-10-14T00:02:00Z\n' "$SBF_C1"; } > "$SBF_REC"
+poke "$RBF" task-add T12 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:o.test.sh
+expect_eq "BFV-8 a standing event whose head is no commit on the working branch does not back o.test.sh: refused, exit 1" "1" "$RC"
+expect_eq "BFV-8b …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
+
+poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
+expect_eq "BFV-2 task-add --born floor:a.test.sh, which the floor proof owes, exits 0" "0" "$RC"
+expect_regex "BFV-3 …the row's line ends born: floor a.test.sh of=floor" \
+  '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh of=floor$' "$(/usr/bin/grep '^- T6:' "$PBF")"
+expect_contains "BFV-4 …the task cell says born: floor" "| T6 | 4 | build | fix the floor red · born: floor |" "$(cat "$PBF")"
+expect_contains "BFV-5 …and the verb says it is floor-born" "T6 is floor-born (a.test.sh)" "$OUT"
+expect_absent "BFV-5b …and counts it against no fix-cap" "review-born rows:" "$OUT"
+
+poke "$RBF" task-add T7 4 build 'fix the standing red' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:s.test.sh
+expect_eq "BFV-9 a standing event for s.test.sh at a commit on the working branch admits it, exit 0" "0" "$RC"
+expect_regex "BFV-9b …the line ends born: floor s.test.sh of=standing@ and the first 12 hex of the head" \
+  "^- T7: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor s\\.test\\.sh of=standing@${SBF_C1:0:12}\$" "$(/usr/bin/grep '^- T7:' "$PBF")"
+SBF_MARKS="$(bash -c '. "$1" && units_born_marks "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh" "$PBF" 2>/dev/null)"
+expect_contains "BFV-10 the judge's reader still reads the floor marker that carries of=floor" "$(printf 'T6\tfloor\ta.test.sh')" "$SBF_MARKS"
+expect_contains "BFV-10b …and the one that carries of=standing@" "$(printf 'T7\tfloor\ts.test.sh')" "$SBF_MARKS"
+POKE_BOUND="$SBF_BOUND_WAS"
 finish

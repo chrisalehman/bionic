@@ -1625,8 +1625,8 @@ done
 expect_eq "5.4: only B's 5 spared files remain under .bionic/tmp/" "5" "$(tmp_entries "$P5")"
 expect_eq "5.5: tmp-wiped: names the total scanned" "yes" \
   "$(contains "$CO_OUT" "tmp-wiped: 13 entries under")"
-expect_eq "5.6: …and the removed/spared counts (8 removed: A's 5 + the 3 baseline; 5 spared: B's)" \
-  "yes" "$(contains "$CO_OUT" "8 removed, 5 spared")"
+expect_eq "5.6: …and the removed/spared/kept counts (7 removed: A's 4 + the 3 baseline; 5 spared: B's; 1 kept: A's engaged marker, removed as the last act, wave-36 T14)" \
+  "yes" "$(contains "$CO_OUT" "7 removed, 5 spared for a live neighbour session, 1 kept")"
 
 # ---------- AC-1.3: a same-shaped neighbour whose session is DEAD is not spared — the
 # ---------- sweeper's verdict (patrol_dead_sessions), not mere sparing-by-default, decides.
@@ -1960,8 +1960,9 @@ carry_req "$PZ" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $C
 mkdir -p "$PZ/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nNothing.\n' > "$PZ/$CONT_REL"
 run_close "$PZ" run
-expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side)" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0|"'```'"||## Resume instruction||Nothing.|" \
+CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
+expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
   "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
@@ -2118,6 +2119,7 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # THE SOURCES, each in the shape its writer prints (the fixture plants the shape, the roster through the one
 # production row writer, the plan's proof lines through lib/proof.sh's own line builders):
 #   by-hand        landing record      line/v1|ev=published|…|kind=hand|…            (lib/line.sh)
+#   stop-runs      landing record      line/v1|ev=stop-run|…                         (session-poker.sh stop-run; wave-36 T11, D8)
 #   declines/lifts fill ledger         fill-ledger/v1|…|state=decline| and |state=lift|   (the verbs; the Stop hook writes ok and hold)
 #   amends         roster              distinct (name, amended=<value>) of the run's plan
 #   holds          roster              distinct (name, held=<value>)
@@ -2128,7 +2130,7 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
 HH_C="$(printf 'd%.0s' $(seq 40))"
-HH_WANT="hand-holds: total=11 · by-hand=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1"
+HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1 · adoptions=0 · fixed=0"
 # hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
 hh_report() {
   local proj="$1"; shift
@@ -2146,6 +2148,7 @@ hh_plant() {
     printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$HH_C" "$p"
     printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
     printf 'line/v1|ev=published|row=T2|commit=%s|kind=hand|by=Chris|why=the line was down|at=2026-10-06T10:40:00Z\n' "$HH_C"
+    printf 'line/v1|ev=stop-run|request=2156|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked behind a dead holder|at=2026-10-06T10:50:00Z\n'
     printf 'note: T3 was landed by-hand outside the line (kind=hand), says this prose line\n'
   } > "$rec/landing-proofs.log"
   # the fill ledger: a decline and its lift (the verbs' shapes), the Stop hook's hold and ok lines, and prose
@@ -2199,13 +2202,13 @@ expect_eq "HH-3 the default landing-report prints no hand-holds line (its output
 # the same fixture with the verbs' lines removed and the prose kept: nothing is counted
 PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
 mkdir -p "$PHP/.bionic/docs/record/wave-01-fixture"
-printf 'note: T3 was landed by-hand (kind=hand); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+printf 'note: T3 was landed by-hand (kind=hand); its run was stopped (ev=stop-run); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
 awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print; next } { print }' \
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
-expect_eq "HH-4 a run whose only by-hand, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0" \
+expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
@@ -2218,6 +2221,21 @@ expect_eq "HH-7 the continuation carries ## Hand-holds once, with the line (read
   "$(/usr/bin/grep -c '^## Hand-holds$' "$PH/$CONT_REL" | tr -d ' ')/$(hh_section "$PH/$CONT_REL")"
 expect_eq "HH-7b …and the section sits after ## Landings and before the Resume instruction" "yes" \
   "$(awk '/^## Landings$/ { a = NR } /^## Hand-holds$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PH/$CONT_REL")"
+# wave-36 T11 (D8; REQ-2 AC-2.3): a stop-run is a verb act, counted under its own kind and never as by-hand. A run
+# whose only escape hatch is one `ev=stop-run` (stop-run's own line) reads stop-runs=1 · by-hand=0 on close-out's card,
+# through close-out.sh's existing landing-report call.
+PHS="$(mk_fixture handholds-stoprun)"; advance_to "$PHS" 8
+mkdir -p "$PHS/.bionic/docs/record/wave-01-fixture"
+{
+  printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$HH_C" "$PHS"
+  printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
+  printf 'line/v1|ev=stop-run|request=2156|who=fixture:w-T1|kind=whole|key=tests/run.sh|by=fixture|why=parked behind a dead holder|at=2026-10-06T10:50:00Z\n'
+} > "$PHS/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+expect_eq "HH-13a precondition: the record holds one ev=stop-run line and one published line of kind queue" "1/1" \
+  "$(/usr/bin/grep -c '^line/v1|ev=stop-run|' "$PHS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" | tr -d ' ')/$(/usr/bin/grep -c '^line/v1|ev=published|.*|kind=queue|' "$PHS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" | tr -d ' ')"
+run_close "$PHS" check
+expect_contains "HH-13 AC-2.3 one ev=stop-run reads stop-runs=1 · by-hand=0 on the card, counted in the total" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=1 · declines=0 " "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 # T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
 # hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
 # there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
@@ -2261,10 +2279,10 @@ expect_eq "HH-11a …and the Resume instruction after it is as it was" "## Resum
 # the heading and the line are both there (as a person typed it, unfenced): nothing is added
 PHE4="$(mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
 mkdir -p "$PHE4/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Governed by\n\ngoverned-by: installed 0.0.0, typed by a person\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
 HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
 run_close "$PHE4" run
-expect_eq "HH-12 the heading and the line already there: run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
+expect_eq "HH-12 the heading and the line already there (and a governed-by line, wave-36 T2): run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
   "$CO_RC/$(cksum < "$PHE4/$CONT_REL")/$(hh_count "$PHE4/$CONT_REL")"
 
 # the mutation arms: a continuation template without the section, and a fold that counts a line it should not
@@ -2307,8 +2325,9 @@ FL_H="$(fixture_git "$PFL" rev-parse wave/01-fixture)"
 expect_eq "FL0 precondition: the plan carries no floor fact, and the working head no tests/ directory" "0|0" \
   "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
 fl_poke floor-run
-expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 rc=0" \
-  "0|head=$FL_H dirty=0 rc=0" "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
+expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 and closing rc=0 (wave-36 T35)" \
+  "0|head=$FL_H dirty=0|rc=0" \
+  "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
 # with the project root, as proof-add calls it, attests the declared log, and proof_add_line places the line.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
@@ -2324,6 +2343,32 @@ expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed 
 run_close "$PFL" run
 expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc 0), the plan closed" "0|1" \
   "$CO_RC|$(run_open_rc "$PFL/$PLAN_REL")"
+
+# A PROJECT WITH NO tests/*.test.sh AND NO floor: CLOSES ITS RUN ON ITS OWN RUNNER'S LOG (wave-36 T35; REQ-7 AC-7.10; D13).
+# The floor is a fact: the log the project's own runner left, opening head=<the working head> dirty=0 and ending rc=0,
+# is the evidence as it stands, with no config key and no floor-run. The judge and writer are driven as FL2 drives them.
+PFN="$(mk_fixture floor-any)"
+FN_SID="closeout-floor-2"
+sed '/^proved: kind=floor /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
+( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
+FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
+mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
+printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FN_H" > "$PFN/.bionic/docs/record/wave-01-fixture/ci.log"
+expect_eq "FL5 precondition: no floor fact, no tests/ at the working head, and no floor: or floor-attestation: in the config" "0|0|0" \
+  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
+FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
+  h="$(proof_attested floor "$2/record/wave-01-fixture/ci.log" "$3" "" "" "$4")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$5" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
+expect_eq "FL6 AC-7.10 the judge attests the project's own runner's log, no key and no roster, and the floor fact is written from it" \
+  "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"
+FN_RC="$( ( in_fixture "$PFN" || exit 9
+  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    CLAUDE_CODE_SESSION_ID="$FN_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/fn-poker" 2>&1; echo $?)"
+expect_eq "FL7 AC-7.10 current 8 is admitted on that floor (exit 0)" "0|8" "$FN_RC|$(sed -n 's/^current: //p' "$PFN/$PLAN_REL")"
+run_close "$PFN" run
+expect_eq "FL8 AC-7.10 close-out.sh run delivers on the project's own runner's log (rc 0), the plan closed" "0|1" \
+  "$CO_RC|$(run_open_rc "$PFN/$PLAN_REL")"
 
 section "DEBT-CARD — wave-30 T22 (AC-11.4, AC-11.2; D2, P2): the release card says the run's touches and burns; the continuation carries each unburned item"
 # ============================================================
@@ -2430,6 +2475,56 @@ run_close "$PRN" run
 expect_eq "DEBT-RECARRY-5 a run with no ledger exits 0 and carries both inherited debt lines, as written" \
   "0|$RC_HELD
 $RC_LOOSE" "$CO_RC|$(carry_section "$PRN/$CONT_REL" | /usr/bin/grep '^debt: ')"
+
+# ============================================================
+section "DEBT-LINES — wave-36 T13 (D13; REQ-7 AC-7.8; A-orch-1): close-out carries only debt lines that parse, refusing a debt.md line that does not, naming it"
+# ============================================================
+# The one debt-line grammar is lib/debt.sh `debt_line_ok`, read by `debt add`, by close-out's `co_debts`
+# and by card.sh's inherited reader. A debt.md item whose carried line would not parse (A-orch-1: a
+# `raised-by` cell holding a space, `assumptions.md A-orch-46`) refuses `run` before its first act and is
+# named; `check` says it would refuse. Corrected, the line is carried, and the next run's `card.sh step1`
+# over the continuation renders it instead of refusing. fails-when: the continuation carries the
+# unparseable line, or the next run's Step-1 card is refused on it.
+# FIXTURE FIDELITY: the ledger is debt_plant's, in the shape `session-poker.sh debt` writes, with one
+# item's source cell written by hand as wave-35's two hole lines were.
+DL_BAD='hole_x | hole | lib/e.sh:5 | raised-by record/wave-01-fixture/assumptions.md A-orch-46 | touches 0 | —'
+DL_GOOD='hole_x | hole | lib/e.sh:5 | raised-by record/wave-01-fixture/assumptions.md#A-orch-46 | touches 0 | —'
+PDL="$(mk_fixture debtlines1)"; advance_to "$PDL" 8
+debt_plant "$PDL"
+DL_LED="$PDL/.bionic/docs/record/wave-01-fixture/debt.md"
+printf '%s\n' "$DL_BAD" >> "$DL_LED"
+run_close "$PDL" check
+expect_eq "DEBT-LINES-1 check exits 0 over a ledger with an unparseable line" "0" "$CO_RC"
+expect_contains "DEBT-LINES-1b …and says run would refuse it, naming the line" \
+  "debt-lines: WOULD REFUSE — record/wave-01-fixture/debt.md carries a line that does not parse as a debt line: $DL_BAD" "$CO_OUT"
+cp "$PDL/$PLAN_REL" "$SANDBOX/dl-plan-before"
+run_close "$PDL" run
+expect_eq "DEBT-LINES-2 AC-7.8 run refuses a debt.md line with a space in its source cell (exit 2)" "2" "$CO_RC"
+expect_contains "DEBT-LINES-2b …naming the line" \
+  "bionic: close-out refused — record/wave-01-fixture/debt.md carries a line that does not parse as a debt line: $DL_BAD" "$CO_OUT"
+expect_false "DEBT-LINES-2c …and no continuation was written" test -e "$PDL/$CONT_REL"
+expect_true "DEBT-LINES-2d …the plan byte-identical, nothing done" cmp -s "$SANDBOX/dl-plan-before" "$PDL/$PLAN_REL"
+awk -v bad="$DL_BAD" -v good="$DL_GOOD" '$0 == bad { $0 = good } { print }' "$DL_LED" > "$DL_LED.new" && mv "$DL_LED.new" "$DL_LED"
+expect_eq "DEBT-LINES-3 precondition: the corrected ledger holds the line with its anchor and not the spaced one" "1|0" \
+  "$(/usr/bin/grep -cxF "$DL_GOOD" "$DL_LED")|$(/usr/bin/grep -cxF "$DL_BAD" "$DL_LED")"
+run_close "$PDL" run
+expect_eq "DEBT-LINES-3b the corrected ledger closes (exit 0)" "0" "$CO_RC"
+DL_CARRY="debt: hole_x hole \"lib/e.sh:5\" touches=0 raised-by=record/wave-01-fixture/assumptions.md#A-orch-46 from=$CARRY_W"
+expect_eq "DEBT-LINES-3c …and the continuation carries the unburned items, the corrected one last" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W
+$DL_CARRY" "$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep '^debt: ')"
+# The next run's Step 1: its requirements beside this run's, the continuation the newest other one.
+DL_REQ="$PDL/.bionic/docs/specs/epic-fx/wave-02-next.requirements.md"; mkdir -p "${DL_REQ%/*}"
+printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
+  '# next wave · requirements' '' '## Goal' '' 'Read the debt the predecessor carried.' '' \
+  '## Not Doing' '' '- Nothing excluded.' '' '## Requirements and acceptance criteria' '' \
+  '### REQ-1 — the one requirement' '' 'provenance: user 2026-10-13 "carry it"' \
+  '- AC-1.1 the criterion. Fails when: it does not hold.' > "$DL_REQ"
+DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
+expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \
+  "$DL_CRC|$(cat "$SANDBOX/dl-card.err")"
+expect_contains "DEBT-LINES-4b …listing the corrected debt line among the inherited ones" "hole_x hole" "$DL_CARD"
 
 # ============================================================
 section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
@@ -2805,5 +2900,329 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 run_close "$PIE4" run
 expect_eq "INH-8 no inherited: line in the plan: run over an existing continuation adds no Inherited debt heading (and its Hand-holds)" "0|0|1" \
   "$CO_RC|$(/usr/bin/grep -c '^## Inherited debt' "$PIE4/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^## Hand-holds$' "$PIE4/$CONT_REL" | tr -d ' ')"
+
+
+# ============================================================
+section "§GOVERNED — wave-36 T2 (REQ-1 AC-1.4, D7; ADR-055): the continuation names the root and commit that governed the run"
+# ============================================================
+# hooks/session-start.sh writes `.bionic/tmp/loaded-<sid>.state` at every session start (wave-36 T1): `root=`,
+# `commit=` when the root is a checkout of the plugin, `started=`, then one `<sha256> <path>` per loaded file. close-out
+# reads the records of the sessions in the run's Step-4..9 window (the Step-4 line's instant, else the plan's
+# `approved-by:` instant, to now), BEFORE the tmp wipe takes them, and writes one `governed-by: <root> <commit> from
+# <ISO>` per root and commit, in order of the first session that ran it, under `## Governed by` of the continuation
+# and on the card. A record with no commit ran an installed copy: `governed-by: <root> installed <version> from <ISO>`.
+# No record in the window: `governed-by: installed <version>`. The records below are in the writer's shape; the first is
+# this run's own record (wave-36, session 1cee5232, at T1's land), copied, never read live.
+GOV_ROOT="/Users/admin/workspace/personal/bionic/payload"
+GOV_C1="7cb98434e04d97d1a32495806d1f14c54efb8171"
+GOV_C2="1d7930259c3a5e0f2b4d6e8a0c1f3e5d7b9a2c4e"
+GOV_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
+expect_nonempty "GOV-00 precondition: the payload under test names its version (the none line's)" "$GOV_VER"
+# gov_record <project> <sid> <root> <commit|-> <started> -> a load record in the writer's shape
+gov_record() {
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_record: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  {
+    printf 'root=%s\n' "$3"
+    [ "$4" = - ] || printf 'commit=%s\n' "$4"
+    printf 'started=%s\n' "$5"
+    printf '612909030be5dc2a241a1afdb61732d28b567a830e7c905752826d69a5ba2acd agents/auditor.md\n'
+    printf '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a hooks/hooks.json\n'
+  } > "$1/.bionic/tmp/loaded-$2.state"
+}
+# gov_step4 <project> <text> -> the plan's `- Step 4:` line, written in front of the Step-7 line
+gov_step4() {
+  local plan="$1/$PLAN_REL"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_step4: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  GOV_TEXT="$2" awk '/^- Step 7:/ && !d { print "- Step 4: " ENVIRON["GOV_TEXT"]; print "  worktree: ."; d = 1 } { print }' \
+    "$plan" > "$plan.g" && mv "$plan.g" "$plan"
+}
+gov_section() { awk '/^## / { s = ($0 == "## Governed by"); next } s && NF && !/^```/ { print }' "$1"; }
+gov_card() { printf '%s\n' "$CO_OUT" | /usr/bin/grep '^governed-by: '; }
+
+PG="$(mk_fixture governed)"; advance_to "$PG" 8
+gov_step4 "$PG" "implement: opened 2026-10-13T20:39Z, writers in .worktrees/36-T<n>"
+GOV_CACHE="$SANDBOX/governed-cache/bionic/1.18.0"
+mkdir -p "$GOV_CACHE/.claude-plugin"; printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$GOV_CACHE/.claude-plugin/plugin.json"
+gov_record "$PG" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-10-13T19:00:00Z   # before Step 4
+gov_record "$PG" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
+gov_record "$PG" s2 "$GOV_ROOT" "$GOV_C1" 2026-10-14T01:00:00Z
+gov_record "$PG" s3 "$GOV_ROOT" "$GOV_C2" 2026-10-14T03:00:00Z
+gov_record "$PG" s4 "$GOV_CACHE" - 2026-10-13T21:00:00Z
+ln -s "$PG/.bionic/tmp/loaded-s0.state" "$PG/.bionic/tmp/loaded-s5.state"   # a link is never a record
+GOV_WANT="governed-by: $GOV_CACHE installed 1.18.0 from 2026-10-13T21:00:00Z
+governed-by: $GOV_ROOT $GOV_C1 from 2026-10-13T23:55:11Z
+governed-by: $GOV_ROOT $GOV_C2 from 2026-10-14T03:00:00Z"
+expect_eq "GOV-0 precondition: five records and a link planted, and the plan's Step-4 line carries its instant" "5/1/1" \
+  "$(find "$PG/.bionic/tmp" -name 'loaded-*.state' -type f | wc -l | tr -d ' ')/$(find "$PG/.bionic/tmp" -name 'loaded-*.state' -type l | wc -l | tr -d ' ')/$(/usr/bin/grep -c '^- Step 4: implement: opened 2026-10-13T20:39Z' "$PG/$PLAN_REL" | tr -d ' ')"
+GOV_CK0="$(find "$PG/.bionic/tmp" -name 'loaded-*' | wc -l | tr -d ' ')"
+run_close "$PG" check
+expect_eq "GOV-1 AC-1.4 check prints one governed-by line per root and commit in the window, in order of first start" "$GOV_WANT" "$(gov_card)"
+expect_absent "GOV-1b …not the session that started before Step 4" "/elsewhere/old/payload" "$CO_OUT"
+expect_eq "GOV-1c …and check removes no record" "$GOV_CK0" "$(find "$PG/.bionic/tmp" -name 'loaded-*' | wc -l | tr -d ' ')"
+run_close "$PG" run
+expect_eq "GOV-2 AC-1.4 run exits 0 and prints the same lines on the card" "0|$GOV_WANT" "$CO_RC|$(gov_card)"
+expect_eq "GOV-2b …the wipe took the records it read" "0" "$(find "$PG/.bionic/tmp" -name 'loaded-*' 2>/dev/null | wc -l | tr -d ' ')"
+expect_eq "GOV-3 AC-1.4 the continuation carries ## Governed by once, with the lines read before the wipe" "1|$GOV_WANT" \
+  "$(/usr/bin/grep -c '^## Governed by$' "$PG/$CONT_REL" | tr -d ' ')|$(gov_section "$PG/$CONT_REL")"
+expect_eq "GOV-3b …after ## Hand-holds and before the Resume instruction" "yes" \
+  "$(awk '/^## Hand-holds$/ { a = NR } /^## Governed by$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PG/$CONT_REL")"
+
+# none in the window: the installed version, on the card and in the continuation
+PGN="$(mk_fixture governed-none)"; advance_to "$PGN" 8
+gov_step4 "$PGN" "implement: opened 2026-10-13T20:39Z"
+gov_record "$PGN" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-10-13T19:00:00Z
+run_close "$PGN" run
+expect_eq "GOV-4 AC-1.4 no record in the window: governed-by: installed <version>, on the card and in the continuation" \
+  "0|governed-by: installed $GOV_VER|governed-by: installed $GOV_VER" "$CO_RC|$(gov_card)|$(gov_section "$PGN/$CONT_REL")"
+
+# no instant on the Step-4 line (or no Step-4 line): the window opens at the plan's approved-by
+PGA="$(mk_fixture governed-approved)"; advance_to "$PGA" 8
+gov_record "$PGA" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-09-13T23:00:00Z
+gov_record "$PGA" s1 "$GOV_ROOT" "$GOV_C1" 2026-09-14T00:30:00Z
+expect_eq "GOV-5 precondition: the fixture plan has no Step-4 line and is approved at 2026-09-14T00:00Z" "0/1" \
+  "$(/usr/bin/grep -c '^- Step 4:' "$PGA/$PLAN_REL" | tr -d ' ')/$(/usr/bin/grep -c '^approved-by: fixture 2026-09-14T00:00Z' "$PGA/$PLAN_REL" | tr -d ' ')"
+run_close "$PGA" check
+expect_eq "GOV-5a the window opens at approved-by: the later record governs, the earlier does not" \
+  "governed-by: $GOV_ROOT $GOV_C1 from 2026-09-14T00:30:00Z" "$(gov_card)"
+
+# an existing continuation: the section is merged in, the person's text kept, and a second close adds nothing
+PGE="$(mk_fixture governed-existing)"; advance_to "$PGE" 8
+gov_step4 "$PGE" "implement: opened 2026-10-13T20:39Z"
+gov_record "$PGE" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
+mkdir -p "$PGE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PGE/$CONT_REL"
+run_close "$PGE" check
+expect_contains "GOV-6 check over an existing continuation without the section names the add run will make" \
+  "the ## Governed by section" "$CO_OUT"
+run_close "$PGE" run
+expect_eq "GOV-6a run adds ## Governed by once with the line, keeps the person's text, and says so" \
+  "0|1|governed-by: $GOV_ROOT $GOV_C1 from 2026-10-13T23:55:11Z|1|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Governed by$' "$PGE/$CONT_REL" | tr -d ' ')|$(gov_section "$PGE/$CONT_REL")|$(/usr/bin/grep -c '^my own note on the close$' "$PGE/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^edited by a person$' "$PGE/$CONT_REL" | tr -d ' ')"
+expect_contains "GOV-6b …and run says what it added" "added the ## Hand-holds section and the ## Governed by section" "$CO_OUT"
+PGE2="$(mk_fixture governed-existing2)"; advance_to "$PGE2" 8
+mkdir -p "$PGE2/${CONT_REL%/*}"; cp "$PGE/$CONT_REL" "$PGE2/$CONT_REL"
+GOV_CK1="$(cksum < "$PGE2/$CONT_REL")"
+run_close "$PGE2" run
+expect_eq "GOV-6c a second close over it (no record left, so its own reading is the installed line) adds nothing: byte for byte" \
+  "0|$GOV_CK1|governed-by: installed $GOV_VER" "$CO_RC|$(cksum < "$PGE2/$CONT_REL")|$(gov_card)"
+
+# the mutation arm: a doctored copy that finds no record — it still closes, and names the installed version while the
+# records name the checkout, so GOV-3 goes red on it
+GOV_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-gov-mut.XXXXXX")"
+mkdir -p "$GOV_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$GOV_MUT/scripts/lib"
+ln -s "$REPO_ROOT/payload/scripts/card.sh" "$GOV_MUT/scripts/card.sh"
+sed 's#/loaded-\*\.state#/no-such-record-*.state#' "$SCRIPT" > "$GOV_MUT/scripts/close-out.sh"
+expect_eq "GOV-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
+  "$(diff "$SCRIPT" "$GOV_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
+PGM="$(mk_fixture governed-mut)"; advance_to "$PGM" 8
+gov_step4 "$PGM" "implement: opened 2026-10-13T20:39Z"
+gov_record "$PGM" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
+( cd "$PGM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    bash "$GOV_MUT/scripts/close-out.sh" "$PGM/$PLAN_REL" run ) > "$SANDBOX/gov-mut.out" 2>&1
+GOV_MRC=$?
+expect_eq "GOV-mut1 the doctored run still closes and writes its continuation (the mutant runs)" "0|1" \
+  "$GOV_MRC|$(/usr/bin/grep -c '^## Governed by$' "$PGM/$CONT_REL" | tr -d ' ')"
+expect_eq "GOV-mut2 …and its continuation names the installed version while a record named the checkout" \
+  "governed-by: installed $GOV_VER" "$(gov_section "$PGM/$CONT_REL")"
+rm -rf "$GOV_MUT"
+
+# ============================================================
+section "§HAND-HOLDS-KINDS — wave-36 T14 (D13; REQ-7 AC-7.6): adopt's adoptions and the fixed disposals are folded under their own kinds, never as by-hand"
+# ============================================================
+# AC-7.6: the fold counts every act a verb of this release writes. Two more kinds join `stop-runs` (T11):
+#   adoptions   the roster row `adopt` files for each adopted agent (`source=adopted|…|adopted_from=<sid>`, written by
+#               session-poker.sh adopt_write_row; its printed `poker-adopt/v1|…` report is stdout and kept nowhere), counted
+#               DISTINCT (agent_id, adopted_from) over the rosters whose `plan=` is this run's, as amends are;
+#   fixed       the plan's `moved: <record>#<n> to=fixed row=<T> …` line under ## SDLC State (`finding-move … fixed`),
+#               one per line, fenced text skipped.
+# by-hand stays the number of `--by-hand` landings. fails-when: by-hand>0 for these acts, or a kind omitted.
+# FIXTURE FIDELITY: the roster rows through the one production row builder (roster_row_fixture), in adopt_write_row's
+# field set; the moved line in finding-move's shape, placed under ## SDLC State.
+HK_P="$(mk_fixture handholds-kinds)"; advance_to "$HK_P" 8
+HK_PLAN="$HK_P/$PLAN_REL"
+{
+  roster_row_fixture status=identified name=w-ad agent_id=ad source=adopted adopted_from=old-sid-1 plan="$HK_PLAN"
+  roster_row_fixture status=confirmed name=w-ad agent_id=ad source=adopted adopted_from=old-sid-1 plan="$HK_PLAN"
+  roster_row_fixture status=identified name=w-oz agent_id=oz source=adopted adopted_from=old-sid-1 plan="/elsewhere/wave-99-other.plan.md"
+  roster_row_fixture status=identified name=w-ln agent_id=ln source=launched plan="$HK_PLAN"
+} >> "$HK_P/.bionic/tmp/roster-fixture.state"
+HK_MOVED="moved: record/wave-01-fixture/rev.md#1 to=fixed row=T1 by=Chris Lehman at=2026-10-06T14:00:00Z"
+awk -v m="$HK_MOVED" '
+  /^approved-by: / { print; print m; next }
+  /^## Tasks/ { print "```"; print "moved: record/wave-01-fixture/rev.md#2 to=fixed row=T2 by=Someone at=2026-10-06T14:10:00Z"; print "```"; print ""; print; next }
+  /^- Step 8:/ { print "- T1: the reviewer said rev.md#3 was moved: to=fixed by hand, says this prose"; print; next }
+  { print }' "$HK_PLAN" > "$HK_PLAN.k" && mv "$HK_PLAN.k" "$HK_PLAN"
+expect_eq "HK-0 precondition: the roster carries adopted_from= rows of this run and another, the plan one unfenced and one fenced to=fixed line" \
+  "2/1/1/1" \
+  "$(awk -v p="plan=$HK_PLAN|" '{ l = $0 "|" } index(l, "|adopted_from=old-sid-1|") && index(l, "|" p) { n++ } END { print n + 0 }' "$HK_P/.bionic/tmp/roster-fixture.state")/$(/usr/bin/grep -c 'plan=/elsewhere/wave-99-other.plan.md' "$HK_P/.bionic/tmp/roster-fixture.state" | tr -d ' ')/$(awk '/^```/ { f = !f; next } !f && /^moved: [^ ]+ to=fixed / { n++ } END { print n + 0 }' "$HK_PLAN")/$(awk '/^```/ { f = !f; next } f && /^moved: [^ ]+ to=fixed / { n++ } END { print n + 0 }' "$HK_PLAN")"
+HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=1 · fixed=1"
+expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · by-hand=0, in the total" \
+  "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
+run_close "$HK_P" check
+expect_eq "HK-2 …and close-out's card prints the same line" "$HK_WANT" "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
+
+# ============================================================
+section "§FENCE — wave-36 T14 (D13; C38): a line merged into a section that is one fenced list goes inside the fence"
+# ============================================================
+# `co_cont_merge` added the owed lines after the section's last non-blank line, and a closing fence is such a line, so
+# a line merged into close-out's own fenced sections (## Inherited debt, ## Governed by, ## Hand-holds) landed under
+# the fence, outside the list it belongs to (research-plan-and-readings.md §C38, probe-c38-c21.log). The rule now:
+# when the section is one fenced list (its first and last content lines are the fence of its one fenced block), the
+# lines go before the closing fence; a section with anything else in it gets them after its last content, as before.
+# ## Deferrals is read unfenced by every reader (card.sh's inherited reader, debt adopt), so its lines always go
+# after: a carried line inside a fence there would be a line the next run never reads.
+# fails-when: a merged line lands outside the one fenced list it was owed to, or inside a ## Deferrals fence.
+fence_lines() {  # <continuation> <heading> <in|out> -> the section's lines inside (in) or outside (out) a fence, blanks dropped
+  awk -v h="$2" -v w="$3" '
+    /^## / && !f { s = ($0 == h); next }
+    !s { next }
+    /^```/ { f = !f; next }
+    NF && ((w == "in") == (f == 1)) { print }' "$1"
+}
+PF1="$(mk_fixture fence-one)"; advance_to "$PF1" 8
+PF_H="$(fixture_git "$PF1" rev-parse --verify -q wave/01-fixture)"
+PF_A="$(inh_line a.test.sh "$PF_H")"; PF_B="$(inh_line b.test.sh "$PF_H")"
+inh_place "$PF1" "$PF_A"; inh_place "$PF1" "$PF_B"
+mkdir -p "$PF1/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Inherited debt\n\n```\n%s\n```\n\n## Resume instruction\n\nedited by a person\n' "$PF_A" > "$PF1/$CONT_REL"
+expect_eq "FENCE-0 precondition: the section is one fenced list holding the first line (the extractor reads it)" "$PF_A|" \
+  "$(fence_lines "$PF1/$CONT_REL" "## Inherited debt" in)|$(fence_lines "$PF1/$CONT_REL" "## Inherited debt" out)"
+run_close "$PF1" run
+expect_eq "FENCE-1 C38 run exits 0 and the owed line goes inside the fence, after the line there; nothing lands outside it" \
+  "0|$PF_A $PF_B|" \
+  "$CO_RC|$(fence_lines "$PF1/$CONT_REL" "## Inherited debt" in | paste -sd' ' -)|$(fence_lines "$PF1/$CONT_REL" "## Inherited debt" out)"
+expect_eq "FENCE-1b …the fence still opens and closes once in the section, and the Resume instruction follows it" "2|yes" \
+  "$(awk '/^## / { s = ($0 == "## Inherited debt"); next } s && /^```/ { n++ } END { print n + 0 }' "$PF1/$CONT_REL")|$(awk '/^## Inherited debt$/ { a = NR } /^## Resume instruction$/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PF1/$CONT_REL")"
+PF1B_CK="$(cksum < "$PF1/$CONT_REL")"
+PF1B="$(mk_fixture fence-one-again)"; advance_to "$PF1B" 8
+inh_place "$PF1B" "$PF_A"; inh_place "$PF1B" "$PF_B"
+mkdir -p "$PF1B/${CONT_REL%/*}"; cp "$PF1/$CONT_REL" "$PF1B/$CONT_REL"
+run_close "$PF1B" run
+expect_eq "FENCE-2 a second close over it adds nothing: byte for byte" "0|$PF1B_CK" "$CO_RC|$(cksum < "$PF1B/$CONT_REL")"
+# the otherwise arm: a section holding a note and then a fenced block keeps the old placement, after the block
+PF3="$(mk_fixture fence-mixed)"; advance_to "$PF3" 8
+inh_place "$PF3" "$PF_A"; inh_place "$PF3" "$PF_B"
+mkdir -p "$PF3/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Inherited debt\n\nthe person looked at these\n\n```\n%s\n```\n\n## Resume instruction\n\nedited by a person\n' "$PF_A" > "$PF3/$CONT_REL"
+run_close "$PF3" run
+expect_eq "FENCE-3 a section that is a note and a fenced block: the owed line goes after the block, unfenced" \
+  "0|$PF_A|the person looked at these $PF_B" \
+  "$CO_RC|$(fence_lines "$PF3/$CONT_REL" "## Inherited debt" in | paste -sd' ' -)|$(fence_lines "$PF3/$CONT_REL" "## Inherited debt" out | paste -sd' ' -)"
+# ## Deferrals: one fenced list there is an example a person pasted; the carried line goes after it, where it is read
+PF4="$(mk_fixture fence-deferrals)"; advance_to "$PF4" 8
+carry_plant "$PF4" "deferred: $CARRY_REC#1 S2 off \"carried past a fence\" stated=\"A sentence.\""
+mkdir -p "$PF4/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n```\ndeferred: <record>#<n> <S> <reach> "<title>" — the form, pasted\n```\n\n## Resume instruction\n\nedited by a person\n' > "$PF4/$CONT_REL"
+run_close "$PF4" run
+expect_eq "FENCE-4 ## Deferrals that is one fenced list: the carried line goes after the fence, where card.sh reads it" \
+  "0|deferred: $CARRY_REC#1 S2 off \"carried past a fence\" stated=\"A sentence.\" from=$CARRY_W" \
+  "$CO_RC|$(fence_lines "$PF4/$CONT_REL" "## Deferrals" out)"
+
+# ============================================================
+section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the rows its merge lands, keeps the session engaged until its last act, and task-set --reason amends a delivered plan"
+# ============================================================
+# The rows close-out's merge lands are the plan's open (pending or active) rows of kind `integrate` (the merge
+# itself) and `close` (the row the merge is read by, `merge` in units.sh's reads). Each is landed through the one
+# landing writer, `session-poker.sh row-landed <id> <integration head> <now>`, in this session (the plan verb needs
+# its engagement and its binding), after act 1 and before act 2, so the plan close-out delivers reads them landed.
+# A run with such rows and no session bound to this plan is refused before the first act, nothing done. Act 3 keeps
+# this session's engaged marker, which is also its binding; it is wiped as close-out's last act, so a close-out
+# that refuses midway leaves the session engaged and its plan verbs working. On the delivered plan, a session that
+# re-engaged and bound it (bound-closed) may set cells with `task-set … --reason '<why>'`, which records the reason
+# on the row's step line; without --reason the delivered refusal stands. A session not engaged is refused at the
+# consent boundary (ruling r1791954201-85499).
+# fails-when: a delivered plan reads a row its merge landed as pending; task-set --reason on it is refused; the
+# marker is gone after a refusal midway.
+lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, each with its step line,
+  # and the `- Step 4:` line every plan past Step 4 carries (row-landed's dry commit judges a writer's copy at current: 4)
+  local plan="$1/$PLAN_REL"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "lands_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  awk '
+    /^\| T2 \|/ { print
+                  print "| T3 | 8 | integrate | merge the wave into main | — | — | 10 | AC-1 | none | pending | — |"
+                  print "| T4 | 9 | close | close-out, continuation.md | — | — | 10 | AC-1 | none | pending | — |"; next }
+    /^- Step 7:/ { print "- Step 4: implement: opened 2026-09-14T00:10Z"; print; next }
+    /^- Step 8:/ { print "- T3: pending dispatch — —"; print "- T4: pending dispatch — —"; print; next }
+    { print }' "$plan" > "$plan.l" && mv "$plan.l" "$plan"
+}
+LP_OUT=""; LP_RC=0
+lands_poker() {  # <project> <sid> <verb> [<operand>…] -> LP_OUT (stdout and stderr), LP_RC
+  local proj="$1" sid="$2"; shift 2
+  LP_OUT="$( ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      CLAUDE_CODE_SESSION_ID="$sid" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) 2>&1 )"
+  LP_RC=$?
+}
+lands_bind() {  # <project> <sid> -> the session engaged (the marker engage.sh writes) and bound to the plan by the verb
+  : > "$1/.bionic/tmp/engaged-$2.state"
+  lands_poker "$1" "$2" bind "$1/$PLAN_REL"
+}
+lands_cell() {  # <project> <id> <field> -> the ## Tasks cell, trimmed (field 11 is status, 6 is agent)
+  awk -F'|' -v id="$2" -v c="$3" '{ x = $2; gsub(/ /, "", x) } x == id { v = $c; gsub(/^ +| +$/, "", v); print v; exit }' "$1/$PLAN_REL"
+}
+lands_step() {  # <project> <id> -> the row's `- T<n>:` line under ## SDLC State
+  /usr/bin/grep -m1 "^- $2: " "$1/$PLAN_REL"
+}
+LA_SID="closeout-lands-sid"
+PLA="$(mk_fixture lands)"; advance_to "$PLA" 8; lands_rows "$PLA"
+LA_MAIN="$(fixture_git "$PLA" rev-parse --verify -q main)"
+lands_bind "$PLA" "$LA_SID"
+expect_eq "LANDS-0 precondition: the session is bound (the verb said so), and T3 and T4 read pending, their step lines pending dispatch" \
+  "0|pending|pending|- T3: pending dispatch — —" \
+  "$LP_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T4 11)|$(lands_step "$PLA" T3)"
+LA_CK0="$(cksum < "$PLA/$PLAN_REL")"
+run_close_as "$LA_SID" "$PLA" check
+expect_contains "LANDS-1 check names the rows run will land, at the integration head" \
+  "rows-landed: run would land T3 T4 at main @ ${LA_MAIN:0:7}" "$CO_OUT"
+expect_eq "LANDS-1b …and writes nothing" "$LA_CK0" "$(cksum < "$PLA/$PLAN_REL")"
+run_close_as "$LA_SID" "$PLA" run
+expect_eq "LANDS-2 AC-7.7 run exits 0 and the delivered plan reads both rows landed (run_open says closed)" "0|landed|landed|1" \
+  "$CO_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T4 11)|$(run_open_rc "$PLA/$PLAN_REL")"
+expect_contains "LANDS-3 …each row's step line reads landed at the integration head, by row-landed's write" \
+  "- T3: landed $LA_MAIN " "$(lands_step "$PLA" T3)"
+expect_contains "LANDS-3b …T4's too" "- T4: landed $LA_MAIN " "$(lands_step "$PLA" T4)"
+expect_contains "LANDS-4 …and the card says which rows it landed" "rows-landed: T3 T4 at main @ ${LA_MAIN:0:7}" "$CO_OUT"
+expect_eq "LANDS-5 the engaged marker is gone after run, and its removal is the card's last line" "no|yes" \
+  "$(tmp_file_exists "$PLA" engaged "$LA_SID")|$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: ' && echo yes || echo no)"
+# task-set on the delivered plan: the session re-engages and binds it (bound-closed)
+lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge --reason 'named the agent after delivery'
+expect_eq "LANDS-6 an unengaged session is refused at the consent boundary: rc 0, the plan unchanged" \
+  "0|landed|—" "$LP_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T3 6)"
+expect_contains "LANDS-6b …saying NOT-ENGAGED" "NOT-ENGAGED" "$LP_OUT"
+# the session re-engages and binds its delivered plan by the verb (ruling r1791955629-34788): bound-closed
+lands_bind "$PLA" "$LA_SID"
+expect_eq "LANDS-7a the bind verb binds the delivered plan (rc 0)" "0" "$LP_RC"
+expect_contains "LANDS-7a2 precondition: the session reads its delivered plan as bound-closed (lib/run.sh session_run)" "bound-closed $PLA/$PLAN_REL" \
+  "$(bash -c '. "$1/roots.sh" && . "$1/run.sh" || exit 9; session_run "$2" "$3"' _ "$REPO_ROOT/payload/scripts/lib" "$PLA" "$LA_SID")"
+LA_CK1="$(cksum < "$PLA/$PLAN_REL")"
+lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge
+expect_eq "LANDS-7 bound to the delivered plan, task-set without --reason keeps the delivered refusal (rc 1), the plan unchanged" \
+  "1|$LA_CK1" "$LP_RC|$(cksum < "$PLA/$PLAN_REL")"
+expect_contains "LANDS-7b …the refusal naming the closed binding" "no bound open run (bound-closed" "$LP_OUT"
+lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge --reason 'named the agent after delivery'
+expect_eq "LANDS-8 AC-7.7 with --reason it is accepted: rc 0, the cell set, never NOT-ENGAGED" "0|w-merge|no" \
+  "$LP_RC|$(lands_cell "$PLA" T3 6)|$(contains "$LP_OUT" "NOT-ENGAGED")"
+expect_contains "LANDS-8b …and the reason is recorded on the row's step line, after its landing" \
+  "- T3: landed $LA_MAIN " "$(lands_step "$PLA" T3)"
+expect_eq "LANDS-8c …ending ' reason: <why>'" "yes" \
+  "$(lands_step "$PLA" T3 | /usr/bin/grep -q ' reason: named the agent after delivery$' && echo yes || echo no)"
+# no session bound: the rows cannot be landed, so nothing is done
+PLB="$(mk_fixture lands-unbound)"; advance_to "$PLB" 8; lands_rows "$PLB"
+LB_CK="$(cksum < "$PLB/$PLAN_REL")"
+run_close "$PLB" run
+expect_eq "LANDS-9 open integrate and close rows with no session bound to the plan: run refuses before the first act, the plan unchanged" \
+  "2|$LB_CK" "$CO_RC|$(cksum < "$PLB/$PLAN_REL")"
+expect_contains "LANDS-9b …naming the rows and that nothing was done" "rows T3 T4 cannot be landed" "$CO_OUT"
+expect_contains "LANDS-9c …nothing was done" "nothing was done" "$CO_OUT"
+# a close-out that refuses midway (after act 3) leaves the session engaged: here the continuation cannot be appended to
+PLC="$(mk_fixture lands-midway)"; advance_to "$PLC" 8
+lands_bind "$PLC" "$LA_SID"
+mkdir -p "$PLC/${CONT_REL%/*}"
+printf '# continuation — hand written, read-only\n' > "$PLC/$CONT_REL"; chmod 444 "$PLC/$CONT_REL"
+run_close_as "$LA_SID" "$PLC" run
+expect_eq "LANDS-10 a close-out refused after act 3 (the continuation could not take its deferrals) leaves the session engaged" \
+  "2|yes|yes" \
+  "$CO_RC|$(contains "$CO_OUT" "could not append the deferrals")|$(tmp_file_exists "$PLC" engaged "$LA_SID")"
+chmod 644 "$PLC/$CONT_REL"
 
 finish

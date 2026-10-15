@@ -22,7 +22,9 @@
 # inversion tests/patrol-revive.test.sh was written to prevent one file over. The
 # `snap` helper fingerprints the whole `.bionic` subtree (paths and mtimes) before
 # and after every drive, so a write of any kind — including a poker subprocess
-# that stamped on the way past — fails the group that caused it.
+# that stamped on the way past — fails the group that caused it. The one write a
+# start makes for itself, the load record (§21, wave-36 T1), needs a CLAUDE_PLUGIN_ROOT,
+# and `drive` hands the hook an empty one unless a row names a root.
 #
 # ACCELERATED CLOCK, NEVER A WAIT. Staleness is manufactured by backdating the
 # stamp's mtime against a tiny `poker-interval:` in the fixture's own config —
@@ -49,8 +51,13 @@ set -uo pipefail
 HOOK="${BIONIC_SESSION_START_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-start.sh}"
 
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-has() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing '$2' in: $3"; fi; }
-hasnt() { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpected '$2' in: $3"; else ok "$1"; fi; }
+# has/hasnt READ THE HAYSTACK WITHOUT A PIPE (wave-36 T48; §16.4a/b). They were
+# `printf '%s' "$3" | grep -qF`, which under `pipefail` fails a present needle once the report
+# outgrows the pipe buffer (grep leaves at its first match, printf takes EPIPE) and, in hasnt,
+# reads that same present needle as absent. tests/lib/assert.sh's quoted-`case` helpers are the
+# same containment with no pipe; the 400-character message cut is theirs.
+has()   { expect_contains "$@"; }
+hasnt() { expect_absent "$@"; }
 
 command -v jq >/dev/null 2>&1 || { echo "session-start: jq absent — suite cannot run"; exit 1; }
 
@@ -201,7 +208,7 @@ if [ "$2" != "-" ]; then
   mkdir -p "$1/sessions"
   printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$2" "$PWD" > "$1/sessions/$$.json"
 fi
-bash "$3"
+"${DRIVE_HOOK_BASH:-bash}" "$3"
 WRAP_EOF
 
 # One drive. Prints stdout, and leaves stdout/stderr/rc in three files.
@@ -219,6 +226,9 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
   OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
+  # DRIVE_PLUGIN_ROOT=<dir>: the CLAUDE_PLUGIN_ROOT the CLI hands the hook (§21, wave-36 T1). Empty by
+  # default, and set empty rather than inherited, so no section reads the root of whatever ran the suite.
+  # DRIVE_HOOK_BASH=<path>: the bash that runs the hook (§22); `bash` on the PATH by default.
   # DRIVE_LIVE=<sid>: one more LIVE session in the fixture home (T15), at this suite's own pid,
   # which is alive for the whole run — the CLI's pid-file shape the wrapper writes for the hook.
   if [ -n "${DRIVE_LIVE:-}" ]; then
@@ -229,8 +239,8 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
     cd "$proj" || exit 1
     printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"%s"}' \
       "$psid" "$home/t.jsonl" "$proj" "$src" \
-    | CLAUDE_CODE_SESSION_ID="$esid" BIONIC_CLAUDE_HOME="$home" \
-      bash "$WRAP" "$home" "$fsid" "$HOOK" > "$WORK/last.out" 2>"$WORK/last.err"
+    | CLAUDE_CODE_SESSION_ID="$esid" BIONIC_CLAUDE_HOME="$home" CLAUDE_PLUGIN_ROOT="${DRIVE_PLUGIN_ROOT:-}" \
+      DRIVE_HOOK_BASH="${DRIVE_HOOK_BASH:-bash}" bash "$WRAP" "$home" "$fsid" "$HOOK" > "$WORK/last.out" 2>"$WORK/last.err"
   )
   printf '%s' "$?" > "$WORK/last.rc"
   # The STANDING decision line (T27, AC-11.2) is printed in every session and is not part of the
@@ -967,6 +977,26 @@ hasnt "16.6 THIS session's own roster is never listed as a predecessor" \
 hasnt "16.7 THIS session's own stamp is never listed as a predecessor" \
   "  ${CUR_SID:0:8} " "$OUT"
 
+# 16.4 WAS RED AT THE FLOOR FOR A REASON THAT IS NOT THE HOOK'S (wave-36 T48; D10; AC-4.1, AC-6.1).
+# The hook printed `predecessor stamps:` — the floor's own quoted block carries it — and `has`
+# said it was missing, because `has` piped the 61 KB report into `grep -qF` under `pipefail`:
+# grep leaves at its first match, the printf still writing takes EPIPE, and the pipeline fails
+# on a needle that is present (`printf: write error: Broken pipe`, session-start.test.sh:54,
+# in the floor log). That race needs load to lose, so it is forced here: a haystack past any
+# pipe buffer with the needle on its first line and SIGPIPE ignored, which makes the write error
+# certain. `hasnt` had the same pipeline and failed the other way — a present needle read as
+# absent, so the row PASSED. Each helper's verdict is captured from a subshell so the forced
+# case is judged by these rows and not counted twice.
+SS_BIG="$(printf 'needle-first-line\n'; head -c 300000 /dev/zero | tr '\0' 'x')"
+SS_HAS_V="$(trap '' PIPE; has "probe" "needle-first-line" "$SS_BIG" 2>&1 | head -1)"
+SS_HASNT_V="$(trap '' PIPE; hasnt "probe" "needle-first-line" "$SS_BIG" 2>&1 | head -1)"
+eq    "16.4a has finds a needle on the first line of a haystack past the pipe buffer, with SIGPIPE ignored" \
+  "PASS: probe" "$SS_HAS_V"
+eq    "16.4b hasnt reports that same present needle as present: a broken pipe cannot read it as absent" \
+  "FAIL: probe" "$SS_HASNT_V"
+has   "16.4c …and a needle truly absent from the same haystack still passes hasnt" \
+  "PASS: probe" "$(trap '' PIPE; hasnt "probe" "needle-not-there" "$SS_BIG" 2>&1 | head -1)"
+
 # AND THE SECOND DRIVE IS THE WHOLE HOOK, sweep included. The sweep is bounded
 # (`BIONIC_SWEEP_BOUND_SECONDS`, default 10, hooks/session-start.sh), and the bound is the one
 # clock this section cannot remove: it is the hook's, and §17 proves what it does when it fires.
@@ -1360,5 +1390,125 @@ drive "$P20d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
 has   "20.9 no .bionic anywhere above the cwd: the line is there" "$STANDING_MARK" "$(raw)"
 eq    "20.10 …and the hook still created nothing" "" "$(ls -A "$P20d")"
 eq    "20.11 …and drive's returned report is empty (the line is not part of it)" "" "$(drive "$P20d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")"
+
+section "21 — the load record: what this session loaded, keyed by its id (wave-36 T1, D7; AC-1.1)"
+# THE RECORD (spec D7, ADR-055). A session started with `--plugin-dir <checkout>/payload` runs the
+# checkout; the start hook is the one bionic code that runs at load, so it writes what was loaded:
+# `.bionic/tmp/loaded-<sid>.state` holding `root=` (CLAUDE_PLUGIN_ROOT), `commit=` when that root is a
+# checkout, `started=`, and one `<sha256> <path>` line per file of hooks/hooks.json, skills/**/*.md,
+# agents/**/*.md and commands/*.md. The fixture is shaped like this repository: payload/hooks and
+# payload/agents are links to the repo's own directories, so a reader that does not follow links
+# misses them. The expected set is spelled here file by file, never by the hook's own glob.
+L_REPO=$(mktemp -d "$WORK/plugin.XXXXXX")
+mkdir -p "$L_REPO/hooks" "$L_REPO/agents/sub" "$L_REPO/payload/.claude-plugin" \
+  "$L_REPO/payload/skills/x/steps" "$L_REPO/payload/commands/sub"
+printf '{"name":"bionic","version":"9.9.9"}\n' > "$L_REPO/payload/.claude-plugin/plugin.json"
+printf '{"hooks":{}}\n'   > "$L_REPO/hooks/hooks.json"
+printf 'echo\n'           > "$L_REPO/hooks/other.sh"
+printf 'agent a\n'        > "$L_REPO/agents/a.md"
+printf 'agent deep\n'     > "$L_REPO/agents/sub/b.md"
+printf 'skill\n'          > "$L_REPO/payload/skills/x/SKILL.md"
+printf 'step one\n'       > "$L_REPO/payload/skills/x/steps/1.md"
+printf 'echo\n'           > "$L_REPO/payload/skills/x/run.sh"
+printf 'command\n'        > "$L_REPO/payload/commands/c.md"
+printf 'nested command\n' > "$L_REPO/payload/commands/sub/deep.md"
+ln -s ../hooks  "$L_REPO/payload/hooks"
+ln -s ../agents "$L_REPO/payload/agents"
+git -C "$L_REPO" init -q && git -C "$L_REPO" add -A \
+  && git -C "$L_REPO" -c user.email=t@t -c user.name=t commit -qm fixture
+L_HEAD=$(git -C "$L_REPO" rev-parse HEAD)
+L_ROOT=$(cd "$L_REPO/payload" && pwd -P)
+l_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'; }
+L_WANT=$(for f in agents/a.md agents/sub/b.md commands/c.md hooks/hooks.json skills/x/SKILL.md skills/x/steps/1.md; do
+  printf '%s %s\n' "$(l_sha "$L_ROOT/$f")" "$f"; done)
+l_hashes() { grep -E '^[0-9a-f]{64} ' "$1" 2>/dev/null | LC_ALL=C sort -k2; }
+
+P21=$(make_env 3600s)
+L_REC="$P21/.bionic/tmp/loaded-$CUR_SID.state"
+OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq   "21.1 exit 0" "0" "$(rc)"
+eq   "21.2 the record is a regular file under the session's id" "file" "$([ -f "$L_REC" ] && [ ! -L "$L_REC" ] && echo file)"
+eq   "21.3 root= is CLAUDE_PLUGIN_ROOT" "root=$L_ROOT" "$(grep '^root=' "$L_REC" 2>/dev/null)"
+eq   "21.4 commit= is the checkout's HEAD" "commit=$L_HEAD" "$(grep '^commit=' "$L_REC" 2>/dev/null)"
+eq   "21.5 started= is an ISO-8601 UTC instant" "1" "$(grep -cE '^started=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$L_REC" 2>/dev/null)"
+eq   "21.6 one sha256 line per loaded file: hooks.json, skills/**, agents/** through the links, commands/*" \
+  "$L_WANT" "$(l_hashes "$L_REC")"
+hasnt "21.7 …a script beside a skill is not a loaded file" "skills/x/run.sh" "$(cat "$L_REC" 2>/dev/null)"
+hasnt "21.8 …nor a command one directory down (commands/*.md only)" "commands/sub/deep.md" "$(cat "$L_REC" 2>/dev/null)"
+hasnt "21.9 …nor a hook script (hooks.json names them; they are read per call)" "hooks/other.sh" "$(cat "$L_REC" 2>/dev/null)"
+eq   "21.10 the record adds nothing to what the hook prints" "" "$OUT"
+
+# Each start writes its own: a /clear re-keys the session, and a resume or a compaction of the same
+# id rewrites the one record with what is on disk now.
+OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21" clear "$OLD_SID" "$OLD_SID" "$OLD_SID")
+eq   "21.11 a /clear's new id gets its own record" "root=$L_ROOT" "$(grep '^root=' "$P21/.bionic/tmp/loaded-$OLD_SID.state" 2>/dev/null)"
+eq   "21.12 …and the first id's record stays" "root=$L_ROOT" "$(grep '^root=' "$L_REC" 2>/dev/null)"
+printf 'command, edited\n' > "$L_REPO/payload/commands/c.md"
+for L_SRC in resume compact; do
+  DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21" "$L_SRC" "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+  eq "21.13 $L_SRC rewrites the record with the file as it is now" \
+    "$(l_sha "$L_ROOT/commands/c.md") commands/c.md" "$(grep ' commands/c.md$' "$L_REC" 2>/dev/null)"
+done
+
+# A root that is no checkout (the plugin cache) has no commit, and says so by the key's absence.
+L_CACHE=$(mktemp -d "$WORK/cache.XXXXXX")
+mkdir -p "$L_CACHE/skills/y" && printf 'skill\n' > "$L_CACHE/skills/y/SKILL.md"
+L_CACHE=$(cd "$L_CACHE" && pwd -P)
+P21b=$(make_env 3600s)
+DRIVE_PLUGIN_ROOT="$L_CACHE" drive "$P21b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.14 a cache root: root= names it" "root=$L_CACHE" "$(grep '^root=' "$P21b/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+eq   "21.15 …and carries no commit=" "0" "$(grep -c '^commit=' "$P21b/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+# A directory inside some other repository is not a checkout of the plugin: ~/.claude kept in git
+# must not lend the cache its commit.
+L_OUTER=$(mktemp -d "$WORK/outer.XXXXXX")
+mkdir -p "$L_OUTER/plugins/cache/v/skills/z" && printf 'skill\n' > "$L_OUTER/plugins/cache/v/skills/z/SKILL.md"
+git -C "$L_OUTER" init -q && git -C "$L_OUTER" add -A && git -C "$L_OUTER" -c user.email=t@t -c user.name=t commit -qm outer
+P21c=$(make_env 3600s)
+DRIVE_PLUGIN_ROOT="$(cd "$L_OUTER/plugins/cache/v" && pwd -P)" drive "$P21c" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.16 a root inside another repository: the record is written" "1" "$(grep -c '^root=' "$P21c/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+eq   "21.17 …and carries no commit=" "0" "$(grep -c '^commit=' "$P21c/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
+
+# No CLAUDE_PLUGIN_ROOT: the CLI did not launch this hook, there is no load to record (positive: 21.2).
+P21d=$(make_env 3600s)
+S21D_BEFORE=$(snap "$P21d")
+drive "$P21d" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.18 no CLAUDE_PLUGIN_ROOT: no record, nothing written" "$S21D_BEFORE" "$(snap "$P21d")"
+# A link planted at the record's path is replaced, never written through.
+P21e=$(make_env 3600s)
+printf 'victim\n' > "$WORK/victim"
+ln -s "$WORK/victim" "$P21e/.bionic/tmp/loaded-$CUR_SID.state"
+DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P21e" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+eq   "21.19 a link at the record path: its target is untouched" "victim" "$(cat "$WORK/victim")"
+eq   "21.20 …and the record is a regular file in its place" "root=$L_ROOT" "$([ -L "$P21e/.bionic/tmp/loaded-$CUR_SID.state" ] || grep '^root=' "$P21e/.bionic/tmp/loaded-$CUR_SID.state")"
+
+section "22 — the start hook under bash 4 and 5 (wave-36 T30, D7; AC-1.1)"
+# `ss_load_record` once declared `local -a files` and indexed `files[${#files[@]}]` on the unset array,
+# which `set -u` refuses under bash 4.0+ ("files: unbound variable"): no load record was written and the
+# rest of the hook never ran. /bin/bash 3.2, the shebang, was the only bash it worked under. The hook runs
+# here under a bash of major version 4 or more found on this machine, with the §21 fixture: the record is
+# written, and a line from the far end of the hook (the standing decision line, printed in every session)
+# is on stdout. With no such bash the rows are recorded `ok` with the reason in the label (no skip idiom
+# in this harness, as canonical-sdlc-governing-skill 8.1h).
+B5_BASH=""
+for b5_c in /opt/homebrew/bin/bash /usr/local/bin/bash "$(command -v bash 2>/dev/null)"; do
+  [ -n "$b5_c" ] && [ -x "$b5_c" ] || continue
+  b5_v="$("$b5_c" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null)"
+  case "$b5_v" in ''|*[!0-9]*) continue ;; esac
+  if [ "$b5_v" -ge 4 ]; then B5_BASH="$b5_c"; break; fi
+done
+if [ -n "$B5_BASH" ]; then
+  P22=$(make_env 3600s)
+  B5_REC="$P22/.bionic/tmp/loaded-$CUR_SID.state"
+  DRIVE_HOOK_BASH="$B5_BASH" DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P22" startup "$CUR_SID" "$CUR_SID" "$CUR_SID" >/dev/null
+  eq    "22.1 the hook under $B5_BASH exits 0" "0" "$(rc)"
+  hasnt "22.2 …with no unbound variable on stderr" "unbound variable" "$(errtext)"
+  eq    "22.3 …the load record is written" "root=$L_ROOT" "$(grep '^root=' "$B5_REC" 2>/dev/null)"
+  eq    "22.4 …with one sha256 line per loaded file, as under bash 3.2" \
+    "$(printf '%s\n' "$L_WANT" | wc -l | tr -d ' ')" "$(l_hashes "$B5_REC" | wc -l | tr -d ' ')"
+  has   "22.5 …and the hook's later lines ran: the standing decision line is on stdout" \
+    "$STANDING_MARK" "$(cat "$WORK/last.out" 2>/dev/null)"
+else
+  ok "22.1-22.5: skip: no bash >= 4 on this machine (looked for /opt/homebrew/bin/bash, /usr/local/bin/bash, bash on PATH)"
+fi
 
 finish

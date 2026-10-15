@@ -1103,8 +1103,10 @@ expect_eq "R7 …and quotes a plain word too" "'w-1'" "$(fixpiece "" refuse_quot
 section "§INV — every refusal site prints its fix or says why it cannot (wave-24 T13, D10, AC-6.6)"
 # fails-when: a site in the four files has no bullet in the inventory carrying `— fix:` or
 # `— none:`. A SITE is a `fold_block`, `refuse`, `dp_finding`, `budget_deny` or `deny` call at
-# the start of a statement (or after `&&`, `||`, `;` or a case label), and its key is its first
-# source line, trimmed. A key shared by n sites needs n bullets.
+# the start of a statement (or after `&&`, `||`, `;` or a case label). Its KEY is where it is,
+# `<file>:<function>` — the innermost shell function whose body holds it, `(main)` for the
+# file's top level (wave-36 T6; D12, AC-6.2; C48) — never its first source line, which a
+# reworded fact changed and a moved call kept. A key shared by n sites needs n bullets.
 INV_FILE="$REPO_ROOT/tests/fixtures/refusal-inventory.md"
 inv_sites() {  # <source file> -> each site's first line, trimmed, one per line
   awk '
@@ -1112,6 +1114,31 @@ inv_sites() {  # <source file> -> each site's first line, trimmed, one per line
     match($0, /(^|[[:space:];&|)])(fold_block|refuse|dp_finding|budget_deny|deny)[[:space:]]+(exit2|deny|block|"|\\|\$)/) {
       t = $0; sub(/^[[:space:]]+/, "", t); sub(/[[:space:]]+$/, "", t); print t
     }' "$1"
+}
+# THE FUNCTION IS READ BY ITS INDENT. A header `name() {` opens a body that its own `}` closes:
+# the first later line that is nothing but `}` (a comment allowed) at the header's own indent.
+# Bodies nest, so a site after an inner function closes is the outer one's. A body opened and
+# closed on its header's line holds only that line. Checked against bash's own parser over the
+# four files (record T6-pinned-text.md): every site's function is the one bash reads.
+inv_keys() {  # <section label> <source file> -> each site's key, `<label>:<function>`, in inv_sites's order
+  awk -v lab="$1" '
+    /^[[:space:]]*#/ { next }
+    {
+      one = ""
+      if (match($0, /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/)) {
+        ind = $0; sub(/[^[:space:]].*$/, "", ind)
+        nm = substr($0, length(ind) + 1); sub(/[[:space:]]*\(.*$/, "", nm)
+        rest = $0; sub(/^[^{]*\{/, "", rest); sub(/[[:space:]]+#.*$/, "", rest)
+        if (rest ~ /\}[[:space:]]*;?[[:space:]]*$/) one = nm
+        else { n++; si[n] = ind; sn[n] = nm }
+      } else if (n > 0 && $0 ~ /^[[:space:]]*\}[[:space:]]*(#.*)?$/) {
+        ind = $0; sub(/\}.*$/, "", ind)
+        if (ind == si[n]) { n--; next }
+      }
+    }
+    match($0, /(^|[[:space:];&|)])(fold_block|refuse|dp_finding|budget_deny|deny)[[:space:]]+(exit2|deny|block|"|\\|\$)/) {
+      print lab ":" (one != "" ? one : (n > 0 ? sn[n] : "(main)"))
+    }' "$2"
 }
 inv_missing() {  # <inventory> <section label> <source file> -> each site key short of a fix/none bullet
   # `FILENAME == ARGV[1]`, NEVER `FNR == NR`: an EMPTY inventory leaves NR at zero into the
@@ -1129,52 +1156,78 @@ inv_missing() {  # <inventory> <section label> <source file> -> each site key sh
         for (i = 1; i <= nb; i++) if (index(b[i], "`" t "`")) c++
         if (c < want[t]) print t
       }
-    }' "$1" <(inv_sites "$3")
+    }' "$1" <(inv_keys "$2" "$3")
 }
-require_helpers inv_sites inv_missing
+require_helpers inv_sites inv_keys inv_missing
 
 # THE CHECKER CAN FAIL — a synthetic source and inventory, beside the real run. A site with no
 # bullet, a bullet that carries neither marker, and a key shared by two sites with one bullet
-# are each reported; the covered site is not. An EMPTY inventory reports every site.
+# are each reported; the covered site is not. An EMPTY inventory reports every key.
 INV_SYN="$(mktemp -d)"
 cat > "$INV_SYN/src.sh" <<'SYN'
 # fold_block exit2 x "a comment is no site" "x" \
+covered() {
   fold_block exit2 x "covered" "fix it" \
+    "d"
+}
+uncovered() {
   refuse exit2 x "uncovered" "fix it" "d"
+}
+unmarked() {
   dp_finding "unmarked" "fix it" "d"
+}
+outer() {
+  inner() {
+    [ -n "$a" ] || deny "twice" "fix it" "d"
+  }
   [ -n "$a" ] || deny "twice" "fix it" "d"
   [ -n "$a" ] || deny "twice" "fix it" "d"
-  echo "would otherwise refuse the next commit"
+}
+oneline() { deny "one line" "fix it" "d"; }
+echo "would otherwise refuse the next commit"
+deny "top" "fix it" "d"
 SYN
 cat > "$INV_SYN/inv.md" <<'SYN'
 ## src.sh
 
-- `fold_block exit2 x "covered" "fix it" \` — covered — fix: `x`
-- `dp_finding "unmarked" "fix it" "d"` — a bullet with no marker
-- `[ -n "$a" ] || deny "twice" "fix it" "d"` — none: one of two
+- `src.sh:covered` — covered — fix: `x`
+- `src.sh:unmarked` — a bullet with no marker
+- `src.sh:inner` — none: the inner one
+- `src.sh:outer` — none: one of two
+- `src.sh:oneline` — none: a one-line body
+- `src.sh:(main)` — none: the top level
 SYN
 INV_SYN_SITES="$(inv_sites "$INV_SYN/src.sh")"
-expect_eq "INV-c1 the extractor reads five sites, never a comment or prose" "5" \
+expect_eq "INV-c1 the extractor reads eight sites, never a comment or prose" "8" \
   "$(printf '%s\n' "$INV_SYN_SITES" | awk 'NF { c++ } END { print c + 0 }')"
+INV_SYN_KEYS="$(inv_keys src.sh "$INV_SYN/src.sh" | tr '\n' ' ')"
+expect_eq "INV-c1k each site is keyed by its function: nested, after the nest, one-line, top level" \
+  "src.sh:covered src.sh:uncovered src.sh:unmarked src.sh:inner src.sh:outer src.sh:outer src.sh:oneline src.sh:(main) " \
+  "$INV_SYN_KEYS"
 INV_SYN_MISS="$(inv_missing "$INV_SYN/inv.md" src.sh "$INV_SYN/src.sh")"
-expect_contains "INV-c2 a site with no bullet is reported" 'refuse exit2 x "uncovered"' "$INV_SYN_MISS"
-expect_contains "INV-c3 a bullet with neither marker does not cover its site" 'dp_finding "unmarked"' "$INV_SYN_MISS"
-expect_contains "INV-c4 one bullet does not cover two sites that share its key" '[ -n "$a" ] || deny "twice"' "$INV_SYN_MISS"
-expect_absent "INV-c5 …and the covered site is not reported" '"covered"' "$INV_SYN_MISS"
+expect_contains "INV-c2 a site with no bullet is reported" 'src.sh:uncovered' "$INV_SYN_MISS"
+expect_contains "INV-c3 a bullet with neither marker does not cover its site" 'src.sh:unmarked' "$INV_SYN_MISS"
+expect_contains "INV-c4 one bullet does not cover two sites that share its key" 'src.sh:outer' "$INV_SYN_MISS"
+expect_absent "INV-c5 …and the covered sites are not reported" 'src.sh:covered' "$INV_SYN_MISS"
+expect_absent "INV-c5 …nor the nested one" 'src.sh:inner' "$INV_SYN_MISS"
+expect_absent "INV-c5 …nor the one-line one" 'src.sh:oneline' "$INV_SYN_MISS"
+expect_absent "INV-c5 …nor the top-level one" 'src.sh:(main)' "$INV_SYN_MISS"
+expect_eq "INV-c5 …so exactly three keys are reported" "3" \
+  "$(printf '%s\n' "$INV_SYN_MISS" | awk 'NF { c++ } END { print c + 0 }')"
 : > "$INV_SYN/empty.md"
-expect_eq "INV-c6 an empty inventory reports every key (five sites, four distinct keys)" "4" \
+expect_eq "INV-c6 an empty inventory reports every key (eight sites, seven distinct keys)" "7" \
   "$(inv_missing "$INV_SYN/empty.md" src.sh "$INV_SYN/src.sh" | awk 'NF { c++ } END { print c + 0 }')"
 rm -rf "$INV_SYN"
 
 # THE INVENTORY IS TRACKED (A-orch-40, A-T13.10): `tests/fixtures/refusal-inventory.md`, read from
 # this suite's own repo root. An ABSENT inventory is a failure, never an advisory: a clone that
 # lost the file has lost the check, and a green suite would say otherwise.
-inv_check() {  # <inventory> -> one line per problem: the file absent, or a site short of a bullet
-  local inv="$1" src
+inv_check() {  # <inventory> [<root>] -> one line per problem: the file absent, or a site short of a bullet
+  local inv="$1" root="${2:-$REPO_ROOT}" src
   [ -f "$inv" ] || { printf 'absent: %s\n' "$inv"; return 0; }
   for src in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh \
              hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
-    inv_missing "$inv" "$src" "$REPO_ROOT/$src" | sed "s|^|$src: |"
+    inv_missing "$inv" "$src" "$root/$src" | sed "s|^|$src: |"
   done
 }
 expect_contains "INV-c7 an absent inventory is reported, so the check goes red" \
@@ -1187,6 +1240,46 @@ for _inv_src in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh \
 done
 expect_eq "INV the tracked inventory exists and every site has a fix line or a reason" "" \
   "$(inv_check "$INV_FILE")"
+
+# A SITE IS KEYED BY WHERE IT IS, NOT BY WHAT IT SAYS (wave-36 T6; D12, AC-6.2; C48). A copy of the four
+# wall files whose one refusal is reworded is still covered by the tracked inventory, so rewording a fact
+# never turns this suite red; a copy whose one call is moved into another function is not, so a moved
+# call does. fails-when: a reworded fact is reported, or a moved call is not.
+INV_LOC="$(mktemp -d)"
+inv_loc_copy() {  # <dir> -> the four wall files copied under <dir>, at their repo paths
+  local f
+  for f in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+    mkdir -p "$1/${f%/*}"; cp "$REPO_ROOT/$f" "$1/$f"
+  done
+}
+inv_loc_copy "$INV_LOC/reword"
+sed 's/"a Patrol marker turn ran no tick"/"a Patrol marker turn did not tick"/' \
+  "$REPO_ROOT/payload/scripts/lib/stop.sh" > "$INV_LOC/reword/payload/scripts/lib/stop.sh"
+INV_LOC_RW="$(inv_sites "$INV_LOC/reword/payload/scripts/lib/stop.sh")"
+expect_contains "INV-L1 precondition: the copy's reworded site is read by the extractor" \
+  "a Patrol marker turn did not tick" "$INV_LOC_RW"
+expect_absent "INV-L1 precondition …and its old wording is gone from the copy" \
+  "a Patrol marker turn ran no tick" "$INV_LOC_RW"
+expect_eq "INV-L1 a reworded refusal is still covered: the inventory reports nothing for the copy" "" \
+  "$(inv_check "$INV_FILE" "$INV_LOC/reword")"
+inv_loc_copy "$INV_LOC/move"
+# The no-target refusal is one line of the stop guard's top level; the move puts that same line, unchanged,
+# first in sg_deadline_hit.
+INV_LOC_MV="$(grep -m1 'deny "this stop names no target"' "$REPO_ROOT/hooks/stop-guard.sh")"
+awk -v mv="$INV_LOC_MV" '
+  $0 == mv && !gone { gone = 1; next }
+  { print }
+  /^sg_deadline_hit\(\) \{/ { print "  " mv }
+' "$REPO_ROOT/hooks/stop-guard.sh" > "$INV_LOC/move/hooks/stop-guard.sh"
+expect_eq "INV-L2 precondition: the copy holds as many stop-guard sites as the tree" \
+  "$(inv_sites "$REPO_ROOT/hooks/stop-guard.sh" | awk 'NF { c++ } END { print c + 0 }')" \
+  "$(inv_sites "$INV_LOC/move/hooks/stop-guard.sh" | awk 'NF { c++ } END { print c + 0 }')"
+expect_contains "INV-L2 precondition …and the moved line sits first in sg_deadline_hit in the copy" \
+  'deny "this stop names no target"' "$(grep -A1 '^sg_deadline_hit() {' "$INV_LOC/move/hooks/stop-guard.sh")"
+expect_nonempty "INV-L2 precondition …and the line moved is the tree's own" "$INV_LOC_MV"
+expect_contains "INV-L2 a call moved into another function is reported, naming the function it moved into" \
+  "hooks/stop-guard.sh:sg_deadline_hit" "$(inv_check "$INV_FILE" "$INV_LOC/move")"
+rm -rf "$INV_LOC"
 
 # THE WAVE ADDS NO WALL (wave-28 T3; REQ-5 AC-5.4, D9). The landing line is a verb's work, never a
 # wall's: no shipped hook gains an arm that enforces the queue. Read as a CEILING on the four wall

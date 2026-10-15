@@ -1763,6 +1763,50 @@ C_DONE=$(sanitize "$(field_of done)" 300)   # the Done marker (wave-24 T9, D3); 
 C_FILES=$(brief_field "$LIFTED" files)
 C_SUITES=$(brief_field "$LIFTED" suites)
 C_RE_EXECUTES=$(brief_field "$LIFTED" re_executes)
+# THE RENDERED TWINS (wave-36 T6; D12, AC-6.3; C68). A template under agents-src/ is never edited alone:
+# render.sh rewrites its output and the checksum manifest from it, so a row whose Files named the template and
+# not those was refused at its stop for the files its own render wrote. The relation is render.sh's, so it is
+# read there and nowhere else: the unit table `RENDER_UNITS` (`<templates dir>|<output dir>`, split on white
+# space as render.sh's own loop splits it) and `MANIFEST_REL`. A Files entry `<templates dir>/<name>.md.tmpl`
+# whose directory IS a unit's (never a parent of it, as render.sh globs one level deep) adds
+# `<output dir>/<name>.md`, and any such entry adds the manifest. What is added is printed on the model's
+# channel with the advisories below, and recorded on the roster as the row's Files. A project with no
+# agents-src/render.sh has no units, and its Files are what the brief declared.
+dp_rendered_twins() {  # <render.sh> <files, comma-joined> <root> -> one `<template>|<output>` per twin not in files, then `|<manifest>`
+  # The unit table is read by lib/units.sh `units_render_units` (wave-36 T38; D12, AC-6.3): `unit<TAB><templates dir><TAB><output dir>`
+  # per unit, and `manifest<TAB><path>`. This function only matches the Files against it.
+  units_render_units "$1" 2>/dev/null | awk -F'\t' -v files="$2" -v root="$3" '
+    function norm(t) { sub(/^[[:space:]]+/, "", t); sub(/[[:space:]]+$/, "", t); if (root != "" && index(t, root "/") == 1) t = substr(t, length(root) + 2); sub(/^\.\//, "", t); return t }
+    BEGIN { n = split(files, f, ","); for (i = 1; i <= n; i++) { f[i] = norm(f[i]); have[f[i]] = 1 } }
+    $1 == "unit" { src[++nu] = $2; dst[nu] = $3; next }
+    $1 == "manifest" { manifest = $2; next }
+    END {
+      for (i = 1; i <= n; i++) {
+        t = f[i]
+        if (t !~ /\.md\.tmpl$/ || index(t, "/") == 0) continue
+        d = t; sub(/\/[^\/]*$/, "", d); nm = substr(t, length(d) + 2); sub(/\.md\.tmpl$/, "", nm)
+        for (k = 1; k <= nu; k++) if (src[k] == d) {
+          any = 1; o = dst[k] "/" nm ".md"
+          if (!(o in have)) { print t "|" o; have[o] = 1 }
+        }
+      }
+      if (any && manifest != "" && !(manifest in have)) print "|" manifest
+    }'
+}
+DP_TWINS_SAID=""
+if [ -n "$C_FILES" ] && [ -f "$BIONIC_ROOT/agents-src/render.sh" ]; then
+  while IFS='|' read -r _tw_tmpl _tw_out; do
+    [ -n "$_tw_out" ] || continue
+    C_FILES="${C_FILES},${_tw_out}"
+    if [ -n "$_tw_tmpl" ]; then _tw_line="rendered: ${_tw_tmpl} renders ${_tw_out}, added to this row's Files"
+    else _tw_line="rendered: agents-src/render.sh rewrites ${_tw_out} with any template, added to this row's Files"
+    fi
+    DP_TWINS_SAID="${DP_TWINS_SAID:+$DP_TWINS_SAID
+}${_tw_line}"
+  done <<DP_TWINS_EOF
+$(dp_rendered_twins "$BIONIC_ROOT/agents-src/render.sh" "$C_FILES" "$BIONIC_ROOT")
+DP_TWINS_EOF
+fi
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -2771,6 +2815,63 @@ the suite to the brief's Suites: or Files: line so the row runs it.
 Then retry the dispatch."
 fi
 
+# A ROW LANDS ON EVERY SUITE THAT READS ITS FILES (wave-36 T27; REQ-6 AC-6.1; D12, ADR-056). The one file-to-suite
+# fact is lib/anchors.sh `reads_index`: a suite reads a file its text names outside a comment, a library of a hook
+# it names, or a file its anchor names. `brief` derives Lands-on: from it (session-poker.sh
+# `poker_brief_index_suites`), and this arm asks the same question of the brief's declared Files: (before the
+# rendered twins above), at the plan's working-branch tip, else the tree: a writer binding a row whose Lands-on:
+# omits a suite the index names for those files is refused, the missing suites printed with a whole line to
+# paste. `none <reason>` is refused the same way, since a reason does not unread a file. One index read per
+# dispatch, and only for a writer whose Files write the head. What the index misses (paths built from variables,
+# globs, a library a library loads) it does not claim, and neither does this arm: the floor is their catch-all.
+dp_lands_index_suites() {  # <root> <at> <Files, comma-joined> -> the suites reading them, by file name, sorted, one per line
+  declare -F reads_index >/dev/null 2>&1 \
+    || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
+  declare -F reads_index >/dev/null 2>&1 || return 0
+  reads_index "$1" "$2" 2>/dev/null | awk -F'\t' -v cell="$3" -v root="$1" "$(_units_files_awk)"'
+    BEGIN { m = split(cell, e, ","); cell = ""; for (k = 1; k <= m; k++) { t = e[k]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (index(t, root "/") == 1) t = substr(t, length(root) + 2); cell = cell (k > 1 ? "," : "") t } }
+    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
+    | LC_ALL=C sort -u
+}
+_li_files="$(brief_field "$LIFTED" files)"
+if [ -n "$_lo_binds" ] && [ -n "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_li_files" ] \
+   && ! role_is_readonly "$DP_SUBAGENT" && units_writes_head "$_li_files"; then
+  _li_at=""; _li_wb=""
+  [ -z "$PLAN" ] || _li_wb="$(plan_working_branch "$PLAN" 2>/dev/null)"
+  [ -z "$_li_wb" ] || _li_at="$(git -C "$BIONIC_ROOT" rev-parse --verify -q "refs/heads/${_li_wb}^{commit}" 2>/dev/null)"
+  _li_given=" "
+  if [ "$DP_LANDS_ON" != none ]; then
+    for _lo_s in ${DP_LANDS_ON//,/ }; do _li_given="${_li_given}${_lo_s##*/} "; done
+  fi
+  _li_miss=""; _li_n=0
+  while IFS= read -r _lo_s; do
+    [ -n "$_lo_s" ] || continue
+    case "$_li_given" in *" $_lo_s "*) continue ;; esac
+    _li_miss="${_li_miss:+$_li_miss, }$_lo_s"; _li_n=$((_li_n + 1))
+  done <<DP_LANDS_INDEX_EOF
+$(dp_lands_index_suites "$BIONIC_ROOT" "${_li_at:--}" "$_li_files")
+DP_LANDS_INDEX_EOF
+  if [ "$_li_n" -gt 0 ]; then
+    _li_line="$_li_miss"
+    [ "$DP_LANDS_ON" = none ] || _li_line="${DP_LANDS_ON//,/, }, $_li_miss"
+    _li_more=""; [ "$_li_n" -lt 2 ] || _li_more=" and $((_li_n - 1)) more"
+    dp_finding "Lands-on: omits $(bionic_trunc "${_li_miss%%,*}" 20)${_li_more} reading Files" "add them" \
+      "A row lands on every suite that reads its Files, and the reads index names suites this Lands-on: omits:
+    Given:    Lands-on: ${DP_LANDS_ON}${_lo_reason:+ ${_lo_reason}}
+    Missing:  ${_li_miss}
+    Files:    ${_li_files}
+    Read at:  ${_li_at:-the tree} (lib/anchors.sh reads_index)
+
+A suite reads a file its text names, a library of a hook it names, or a file its anchor names; a change to
+the file can turn it red, so ready runs it. A reason after none does not unread a file.
+
+Fix: paste this line in place of the brief's Lands-on: line, and name the same suites on its Suites: line —
+    Lands-on: ${_li_line}
+
+Then retry the dispatch."
+  fi
+fi
+
 # ===================================================== THE FULL-RUN WALL (wave-31 REQ-13, D3, D4)
 # (replaces the map-bounded wall of wave-26 REQ-3 D6, which replaced 1.10's one-regression wall.)
 #
@@ -2998,6 +3099,12 @@ esac
 # plan. A name holding the row is a live writer unless it is this dispatch's own name in this session
 # (the in-flight arm's case), and the refusal names it and its session. The tick reads the same set, so
 # a row the wall refuses is a row the tick never offered.
+#
+# ONE CLOSURE RULE WITH ADOPT (wave-36 T10; REQ-4 AC-4.4, D10). The set is closed by lib/fill.sh
+# `roster_row_open`, the rule `adopt` asks too: besides acks, a row whose session is dead and whose files
+# are sweepable is closed, so a row adopt will never offer no longer holds the dispatch. A dead session
+# whose files are still inside the poker interval holds it, and the remedy names both ways out: adopt,
+# then ack; or wait out the interval and `sweep`.
 # [WALL: tests/dispatch-preflight-4.test.sh §REMARK, §HOLD]
 dp_tree_of() {  # <cell or path> -> the linked tree it names, absolute, or nothing
   local t="${1:-}"
@@ -3058,7 +3165,8 @@ dispatching ${AGENT_NAME} onto it would put two writers on one row, the second a
 
 Fix: if ${DP_LIVE_WRITER} is finished, land it and let the Patrol's ack close it, or stop it (stop-orders.sh
 stopped writes the ack, in the session that launched it); then dispatch again. If it is still working, let it
-finish. A writer of another session that is gone is taken over with session-poker.sh adopt, then acked."
+finish. A writer of a session that is gone is taken over with session-poker.sh adopt, then acked; once that
+session's files are older than the poker interval, session-poker.sh sweep removes them, and the row is free."
 fi
 
 # ================================================ THE ONE REFUSAL, FOR EVERY FAULT
@@ -3139,6 +3247,8 @@ DP_DEBT_EOF
 fi
 [ -z "$_dp_debt" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
 }$_dp_debt"
+[ -z "$DP_TWINS_SAID" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
+}$DP_TWINS_SAID"
 if [ -n "$_dp_adv_all" ]; then
   _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
 $_dp_adv_all"

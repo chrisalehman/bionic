@@ -2017,6 +2017,81 @@ expect_eq "17d.16 a CR-only plan reads the same" \
   "$(printf 'status T1 done\nstatus T2 done\nevidence T3')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
 # ============================================================
+section "17L — wave-36 T29: the launch finding reads the run — this session's roster, every roster of the plan, and the Dispatch ledger (D10; AC-4.1)"
+# ============================================================
+#
+# THE DEFECT (research C16; wave-35 A-orch-46). The reader took ONE roster, `roster-<sid>`. A `/clear`
+# re-keys the session, so a reader (auditor, critic) launched by the predecessor and still at work on
+# an `active` row was a `launch` finding the moment the successor committed: its name is on the
+# predecessor's roster and on the plan's `## Dispatch ledger`, never on the new roster. Now
+# `units_run_rosters <state dir> <plan> [<own roster>]` lists the set, this session's roster first and
+# then every roster under the state dir that carries a `plan=<plan>` row, and `units_findings` takes
+# that list: the first path is read whole (today's rule), every later one for its rows of this plan
+# only, and the names the ledger's `agent` column carries join the set.
+# fails-when: a reader on a predecessor roster of this plan is a launch finding; a roster of another
+# plan admits a name; the lister lists a roster of another plan or misses one of this plan.
+S17L="$SANDBOX/17L"; mkdir -p "$S17L/tmp"
+S17L_PLAN="$S17L/plans/run.plan.md"; mkdir -p "$S17L/plans"
+cat > "$S17L_PLAN" <<'L17_EOF'
+## SDLC State
+
+current: 4
+
+- T1: bash suite 9/9 green
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed with its line | w-T1 | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | review | a predecessor's reader, still reading | w-R1 | — | 30m | REQ-x | — | active |
+| T3 | 4 | review | a reader the ledger names | w-R2 | — | 30m | REQ-x | — | active |
+
+## Dispatch ledger
+
+| id | agent | dispatched | expected | artifact | landed | notes |
+|---|---|---|---|---|---|---|
+| R2 | auditor (w-R2) | 2026-10-13T14:08Z | 30 min | r2.md | — | a reader |
+L17_EOF
+S17L_OWN="$S17L/tmp/roster-own.state"
+roster_header > "$S17L_OWN"
+{
+  roster_header
+  roster_row_fixture status=identified session=pred name=w-R1 agent_id=a-R1 subagent_type=bionic:auditor plan="$S17L_PLAN"
+} > "$S17L/tmp/roster-pred.state"
+{
+  roster_header
+  roster_row_fixture status=identified session=other name=w-R1 agent_id=a-oR1 subagent_type=bionic:auditor plan="$S17L/plans/other.plan.md"
+} > "$S17L/tmp/roster-other.state"
+# The lister.
+expect_eq "17L.1 the lister: this session's roster first, then the roster of this plan, never the other plan's" \
+  "$(printf '%s\n%s' "$S17L_OWN" "$S17L/tmp/roster-pred.state")" \
+  "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "$S17L_OWN")"
+expect_eq "17L.1b …with no roster of its own the first line is empty and the run's rosters follow" \
+  "$(printf '\n%s' "$S17L/tmp/roster-pred.state")" \
+  "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "")"
+expect_eq "17L.1c …asked for the other plan, it lists the other plan's roster alone (positive: 17L.1)" \
+  "$(printf '%s\n%s' "$S17L_OWN" "$S17L/tmp/roster-other.state")" \
+  "$(call units_run_rosters "$S17L/tmp" "$S17L/plans/other.plan.md" "$S17L_OWN")"
+# The reader, over the list.
+expect_eq "17L.2 AC-4.1 this roster empty, the predecessor's roster of this plan holds w-R1, the ledger names w-R2: no finding" \
+  "" "$(call units_findings "$S17L_PLAN" "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "$S17L_OWN")")"
+expect_eq "17L.2b …and the verb exits 0" "0" \
+  "$(call_rc units_findings "$S17L_PLAN" "$(call units_run_rosters "$S17L/tmp" "$S17L_PLAN" "$S17L_OWN")")"
+expect_eq "17L.3 the mutant: this session's roster alone names neither reader (positive: 17L.2 reads the same plan clean)" \
+  "$(printf 'launch T2 w-R1')" "$(call units_findings "$S17L_PLAN" "$S17L_OWN")"
+expect_eq "17L.4 a later roster's row of ANOTHER plan admits no name: only the ledger's w-R2 is known" \
+  "launch T2 w-R1" \
+  "$(call units_findings "$S17L_PLAN" "$(printf '%s\n%s' "$S17L_OWN" "$S17L/tmp/roster-other.state")")"
+# The first path is this session's roster, read whole as before: a row there with no plan= of this
+# plan still launches (17d's fixtures carry plan=none).
+expect_eq "17L.5 the first path is read whole: the other plan's roster in first place admits w-R1" \
+  "" "$(call units_findings "$S17L_PLAN" "$S17L/tmp/roster-other.state")"
+# The ledger's names count only beside a roster read: with none, today's no-roster rule (17d.4).
+expect_eq "17L.6 no roster at all: the agent-named active rows owe their lines, the ledger notwithstanding" \
+  "$(printf 'evidence T2\nevidence T3')" "$(call units_findings "$S17L_PLAN" "")"
+
+# ============================================================
 section "READS — wave-26 T2: a row declares what it reads; an empty cell takes its kind default (REQ-5, AC-5.1; D1)"
 # ============================================================
 #
@@ -2484,8 +2559,14 @@ lv_plan() {  # <file> <state lines> <rows...> -> an approved reads table
     for r in "$@"; do printf '%s\n' "$r"; done; } > "$f"
 }
 lv_proof() { printf 'proved: kind=review head=%s at=2026-10-04T0%s:00:00Z evidence=record/w/review.md' "$1" "${2:-1}"; }
-# live_call <head> <fn> <args...> -> `call` with UNITS_LIVE_HEAD in the child's environment.
-live_call() { local h="$1"; shift; UNITS_LIVE_HEAD="$h" call "$@"; }
+# live_call <head> <fn> <args...> -> `call` with UNITS_LIVE_HEAD in the child's environment, and the
+# judge's answer beside it as the tick hands it (wave-36 T28; D9): UNITS_READINGS_STATE, unless the
+# caller sets its own, reads every question uncovered past its reading, the answer at a head past a
+# code landing. The heads here are fixed hex or empty commits the judge cannot walk, and these
+# sections pin the live read's mechanics (ranges, order, idleness at the reading's head); §LIVE-HEAD
+# pins the judge itself, on a real repository.
+LIVE_OWES="review evidence bionic:auditor piece uncovered a..b; review adversarial bionic:critic piece uncovered a..b; review structure bionic:critic piece uncovered a..b"
+live_call() { local h="$1"; shift; UNITS_LIVE_HEAD="$h" UNITS_READINGS_STATE="${UNITS_READINGS_STATE-$LIVE_OWES}" call "$@"; }
 LV_BUILD_LANDED="| T1 | 4 | build | landed work | implementor | — | 30 | REQ-x | lib/a.sh |  | landed |"
 LV_BUILD_OPEN="| T2 | 4 | build | still building | implementor | — | 30 | REQ-x | lib/b.sh |  | active |"
 LV_REVIEW="| T3 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md |  | pending |"
@@ -4350,6 +4431,82 @@ expect_eq "BR-2 the same plan with the markers taken off has no review-born row 
   "$(call units_born "$SANDBOX/born-none.md")|$(call_rc units_born "$SANDBOX/born-none.md")"
 
 # ============================================================
+section "§BORN-FLOOR — wave-36 T7: a row born of the floor's red carries \` born: floor <suite>\`, and units_born_marks reads both born markers for the judge (REQ-3 AC-3.2; D9, D2)"
+# ============================================================
+# `task-add --born floor:<suite>` hands units_add_row the born value `floor <suite>`, so the row's `- <id>:` line
+# ends ` born: floor <suite>`. units_born_marks prints `<id>\t<review|floor>\t<rating or suite>` per `- <id>:` line
+# carrying either marker, read where units_born reads (the first line per id, fences skipped): what lib/proof.sh's
+# judge joins with the landing record to hold a born row's landing. units_born, the fix-cap's count, reads the
+# review marker alone, so a floor-born row counts nothing against the cap.
+call units_add_row "$SANDBOX/born.md" T5 4 build 'fix the floor red' w-T5 '—' 30 REQ-x payload/d.sh '' 'floor a.test.sh' > "$SANDBOX/born-floor.md"
+expect_regex "BF-1 units_add_row with the born value floor a.test.sh: the row's line ends born: floor a.test.sh" \
+  '^- T5: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh$' "$(/usr/bin/grep '^- T5:' "$SANDBOX/born-floor.md")"
+expect_eq "BF-2 units_born_marks reads both markers, each with its rating or suite; the fenced example is not one" \
+  "T2${TAB}review${TAB}S2 on
+T4${TAB}review${TAB}S1 off
+T5${TAB}floor${TAB}a.test.sh" "$(call units_born_marks "$SANDBOX/born-floor.md")"
+expect_eq "BF-2b …exit 0" "0" "$(call_rc units_born_marks "$SANDBOX/born-floor.md")"
+expect_eq "BF-3 the fix-cap's count reads the review marker alone: T5 is not a review-born row" \
+  "T2 T4" "$(call units_born "$SANDBOX/born-floor.md" | awk -F'\t' '{ printf "%s%s", (NR > 1 ? " " : ""), $1 }')"
+expect_eq "BF-4 a plan with no marker: units_born_marks prints nothing, exit 0 (positive: BF-2 read three from the same reader)" "|0" \
+  "$(call units_born_marks "$SANDBOX/born-none.md")|$(call_rc units_born_marks "$SANDBOX/born-none.md")"
+expect_eq "BF-5 an unreadable plan: exit 1" "1" "$(call_rc units_born_marks "$SANDBOX/no-such-plan.md")"
+
+# ============================================================
+section "§STEP-LINE — wave-36 T10: units_step_line rewrites a \`- T<n>:\` line's text and keeps every \` <key>: \` marker after it (REQ-4 AC-4.3; D10)"
+# ============================================================
+# task-add writes ` born: review S<n> <reach> of=<record>#<n>` (or ` born: floor <suite>`) at the end of the row's
+# `- T<n>:` line, and a later verb may add its own ` <key>: <value>`. step-line's replace mode used to overwrite the
+# whole text, so the landing summary lost the born marker the judge and the fix-cap read (debt step-line-drops-born,
+# wave-35 A-orch-52). The line is now `- T<n>: <text>[ <key>: <value>]…`: the text is what precedes the first
+# ` <key>: `, a rewrite replaces (or, with append, extends) the text alone, and each marker follows it in its order,
+# once — a marker whose key the new text already carries is the new text's. A `Step N:` line is not a task line and
+# is rewritten whole, as before.
+cat > "$SANDBOX/sl.md" <<'SL_EOF'
+## SDLC State
+
+current: 4
+
+- Step 4: in progress; current: T5
+- T5: pending dispatch — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2
+- T6: pending dispatch — added by task-add at 2026-10-13T20:45:00Z born: floor a.test.sh fixed: T9 at 2026-10-14T00:00:00Z
+- T7: pending dispatch — .worktrees/36-T7
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T5 | 4 | build | fix it · born: review | w-T5 | — | 30 | REQ-x | payload/a.sh | pending |
+| T6 | 4 | build | fix the floor | w-T6 | — | 30 | REQ-x | payload/b.sh | pending |
+| T7 | 4 | build | other | w-T7 | — | 30 | REQ-x | payload/c.sh | pending |
+SL_EOF
+{ call units_step_line "$SANDBOX/sl.md" T5 'landed abc1234 2026-10-14T01:00:00Z'; echo; } > "$SANDBOX/sl-1.md"
+expect_eq "SL-1 AC-4.3 step-line T5 over a born row: the text is replaced and the born marker task-add wrote follows it" \
+  "- T5: landed abc1234 2026-10-14T01:00:00Z born: review S3 on of=record/w/r.md#2" "$(/usr/bin/grep '^- T5:' "$SANDBOX/sl-1.md")"
+expect_eq "SL-1b …and the marker's reader still reads the finding off the rewritten line" \
+  "T5${TAB}pending${TAB}record/w/r.md#2" "$(call units_born_findings "$SANDBOX/sl-1.md")"
+{ call units_step_line "$SANDBOX/sl.md" T6 'landed def5678 2026-10-14T01:10:00Z'; echo; } > "$SANDBOX/sl-2.md"
+expect_eq "SL-2 two markers, task-add's and a later verb's: both kept, in their order" \
+  "- T6: landed def5678 2026-10-14T01:10:00Z born: floor a.test.sh fixed: T9 at 2026-10-14T00:00:00Z" \
+  "$(/usr/bin/grep '^- T6:' "$SANDBOX/sl-2.md")"
+{ call units_step_line "$SANDBOX/sl.md" T5 'merge 9abc' append; echo; } > "$SANDBOX/sl-3.md"
+expect_eq "SL-3 append extends the text, before the markers" \
+  "- T5: pending dispatch — added by task-add at 2026-10-13T20:44:06Z; merge 9abc born: review S3 on of=record/w/r.md#2" \
+  "$(/usr/bin/grep '^- T5:' "$SANDBOX/sl-3.md")"
+{ call units_step_line "$SANDBOX/sl.md" T5 'landed abc1234 2026-10-14T01:00:00Z — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2'; echo; } > "$SANDBOX/sl-4.md"
+expect_eq "SL-4 a new text that carries the marker itself (row-landed folds the old text in): written once, as given" \
+  "- T5: landed abc1234 2026-10-14T01:00:00Z — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2" \
+  "$(/usr/bin/grep '^- T5:' "$SANDBOX/sl-4.md")"
+{ call units_step_line "$SANDBOX/sl.md" T7 'landed ghi9012 2026-10-14T01:20:00Z'; echo; } > "$SANDBOX/sl-5.md"
+expect_eq "SL-5 a task line with no marker is replaced whole" \
+  "- T7: landed ghi9012 2026-10-14T01:20:00Z" "$(/usr/bin/grep '^- T7:' "$SANDBOX/sl-5.md")"
+{ call units_step_line "$SANDBOX/sl.md" 4 'done'; echo; } > "$SANDBOX/sl-6.md"
+expect_eq "SL-6 a Step line is not a task line: its text is replaced whole, \` current: \` included" \
+  "- Step 4: done" "$(/usr/bin/grep '^- Step 4:' "$SANDBOX/sl-6.md")"
+expect_eq "SL-7 …and every other line of the plan is unchanged (one line differs in each of SL-1, SL-2, SL-3, SL-5, SL-6)" \
+  "1 1 1 1 1" "$(for n in 1 2 3 5 6; do diff "$SANDBOX/sl.md" "$SANDBOX/sl-$n.md" | /usr/bin/grep -c '^>'; done | tr '\n' ' ' | sed 's/ $//')"
+
+# ============================================================
 section "§ONE-SHAPE — wave-31 T5: a plan in the retired task-scale shape is refused aloud; the one table validates at task scale (REQ-1 AC-1.2, AC-1.3; D2)"
 # ============================================================
 #
@@ -4801,5 +4958,113 @@ expect_eq "FR-5b AC-1.3 the floor at the head owes a.test.sh: integrate is not r
 expect_contains "FR-5c …and its proof:floor wait names the red suite and the way out" \
   "proof:floor: the whole run at ${FR_H:0:12} left a.test.sh red, each owed until a later landing runs it green" \
   "$(UNITS_FACTS_STATE=covered call units_waiting "$FR_PLAN" 8 | awk -F'\t' '$1 == "T21" && index($2, "proof:floor") == 1 { print $2 }')"
+
+
+# ============================================================
+section "§LIVE-HEAD — wave-36 T28: a review row is ready again only when the judge reads its question uncovered (REQ-3 AC-3.6; D9)"
+# ============================================================
+# `live:head` asks lib/proof.sh `facts_state`, the judge, and nothing else: past its last reading a review row is
+# ready again only when its question reads `uncovered` at the working branch's head, never because the head moved.
+# A docs-only landing is prose to the judge, so the question stays covered and the row waits, saying the judge's
+# answer; a code landing no born row made owes, so the row is ready for the range past its reading. The readings'
+# state is the tick's to hand in (UNITS_READINGS_STATE, set by session-poker.sh `sched_live_head`), and the
+# program asks it itself when it is not handed (`_units_readings_state`). When the judge cannot answer, the row
+# waits, saying why. An idle row, covered past its reading, writes no newer proof, so integrate's proof:review
+# does not wait on it (K2-F4).
+# FIXTURE FIDELITY: a real repository on its working branch; the reading written by the product's writer
+# (`proof_line`); the docs-only commit under the default docs root. The branch's ref is the head the judge reads,
+# so each step commits and then asks.
+# fails-when: a review row is ready after a docs-only landing, or not ready after a code landing that owes.
+LH="$SANDBOX/live-head"; LH_PLAN="$LH/.bionic/docs/plans/epic-99/wave-99-lh.plan.md"
+mkdir -p "$LH/lib" "${LH_PLAN%/*}" "$LH/.bionic/docs/record/lh"
+lh_git() { git -C "$LH" -c user.name=fixture -c user.email=fixture@example.invalid "$@"; }
+lh_git init -q 2>/dev/null; lh_git checkout -q -b main 2>/dev/null
+printf '.bionic/tmp/\n.bionic/docs/plans/\n' > "$LH/.gitignore"; printf 'one\n' > "$LH/lib/one.sh"
+lh_git add .gitignore lib && lh_git commit -qm base
+LH_B="$(lh_git rev-parse HEAD)"
+lh_git checkout -q -b wave/99-lh 2>/dev/null
+printf 'two\n' > "$LH/lib/one.sh"; lh_git commit -qam 'T1 landed'
+LH_R="$(lh_git rev-parse HEAD)"
+LH_READ="$(call proof_line review "$LH_R" 2026-10-13T03:00:00Z record/lh/adv.md adversarial w-crit pass piece)"
+LH_T3Q="| T3 | 6 | review | the adversarial read | critic | — | 30 | REQ-x | .bionic/docs/record/lh/adv.md | approval:plan, live:head:adversarial | pending |"
+LH_T3B="| T3 | 6 | review | the bare read | critic | — | 30 | REQ-x | .bionic/docs/record/lh/adv.md |  | pending |"
+lh_plan() {  # <file> <branch> <T3 row> [<readings>] -> the plan at Step 6: the build landed, the readings at R, integrate pending
+  { printf -- '---\nrigor: double\nscale: task\nbase-sha: %s\n---\n\n## SDLC State\n\ncurrent: 6\nworking-branch: %s\n' "$LH_B" "$2"
+    printf 'approved-by: fixture 2026-10-13T00:00:00Z "approved"\n%s\n\n' "${4:-$LH_READ}"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/one.sh |  | landed |\n'
+    printf '%s\n' "$3"
+    printf '| T9 | 8 | integrate | merge | — | — | 10 | REQ-x | — |  | pending |\n'
+  } > "$1"
+}
+LH_BARE="${LH_PLAN%.plan.md}-bare.plan.md"; LH_GONE="${LH_PLAN%.plan.md}-gone.plan.md"
+# A bare row reads every question: its plan holds a reading of each at R, so a question nobody read is not what readies it.
+LH_READ3="$LH_READ
+$(call proof_line review "$LH_R" 2026-10-13T03:01:00Z record/lh/ev.md evidence w-aud pass piece)
+$(call proof_line review "$LH_R" 2026-10-13T03:02:00Z record/lh/str.md structure w-crit pass piece)"
+lh_plan "$LH_PLAN" wave/99-lh "$LH_T3Q"; lh_plan "$LH_BARE" wave/99-lh "$LH_T3B" "$LH_READ3"; lh_plan "$LH_GONE" wave/99-gone "$LH_T3Q"
+lh_ready() { UNITS_LIVE_HEAD="$1" call units_ready "$2" 6; }                  # <head> <plan> -> the ready ids
+lh_wait() { UNITS_LIVE_HEAD="$1" call units_waiting "$2" 6 | awk -F'\t' '$1 == "T3" { print $2 }'; }  # T3's wait
+lh_edge() { has_line "$(UNITS_LIVE_HEAD="$1" call units_edges "$2")" "T3${TAB}T9${TAB}proof:review"; }
+lh_judge() {  # <plan> <head> -> the adversarial piece line's state from facts_state, the judge itself
+  bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_state "$2" "$3"' _ "${LIB%/*}" "$1" "$2" 2>/dev/null \
+    | awk -F'\t' '$1 == "review" && $2 == "adversarial" && $4 == "piece" { print $5 }'
+}
+lh_cover() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; facts_cover "$2" "$3" "$4"' _ "${LIB%/*}" "$@" 2>/dev/null | tr '\n' '|'; }
+
+expect_eq "LH-0 precondition: the judge reads the adversarial question covered at the reading's head R" "covered" "$(lh_judge "$LH_PLAN" "$LH_R")"
+expect_eq "LH-1 control: at R the review row is not ready" "no" "$(has_line "$(lh_ready "$LH_R" "$LH_PLAN")" T3)"
+expect_eq "LH-1b …and waits on nothing landed past its reading, as before" \
+  "live:head:adversarial: nothing landed past the adversarial review proof at ${LH_R:0:12}" "$(lh_wait "$LH_R" "$LH_PLAN")"
+
+# A DOCS-ONLY LANDING: prose to the judge, so the question stays covered and the row stays idle.
+printf 'notes\n' > "$LH/.bionic/docs/record/lh/notes.md"; lh_git add -f .bionic/docs/record/lh/notes.md; lh_git commit -qm 'notes landed'
+LH_D="$(lh_git rev-parse HEAD)"
+expect_eq "LH-2 precondition: the judge reads the docs-only commit as prose" "cover ${LH_D} prose|" "$(lh_cover "$LH_PLAN" "$LH_R" "$LH_D")"
+expect_eq "LH-2a precondition: …and the adversarial question covered at D" "covered" "$(lh_judge "$LH_PLAN" "$LH_D")"
+expect_eq "LH-2b AC-3.6 a docs-only landing past the reading: the review row is not ready" "no" "$(has_line "$(lh_ready "$LH_D" "$LH_PLAN")" T3)"
+expect_eq "LH-2c …and its wait names the judge's answer at D" \
+  "live:head:adversarial: the judge (facts_state) reads adversarial covered at ${LH_D:0:12}; only an uncovered question is read again" \
+  "$(lh_wait "$LH_D" "$LH_PLAN")"
+expect_eq "LH-2d K2-F4 …and, idle, it writes no newer proof: integrate's proof:review does not wait on it" "no" "$(lh_edge "$LH_D" "$LH_PLAN")"
+expect_eq "LH-2e a bare live:head row, every question read at R, past the same docs-only landing: not ready either" "no" \
+  "$(has_line "$(lh_ready "$LH_D" "$LH_BARE")" T3)"
+expect_eq "LH-2f …and its wait names the judge's answer for every question" \
+  "live:head: the judge (facts_state) reads evidence covered, adversarial covered, structure covered at ${LH_D:0:12}; only an uncovered question is read again" \
+  "$(lh_wait "$LH_D" "$LH_BARE")"
+
+# A CODE LANDING NO BORN ROW MADE: it owes, the question reads uncovered, the row is ready for R..C.
+printf 'three\n' > "$LH/lib/one.sh"; lh_git commit -qam 'T5 landed'
+LH_C="$(lh_git rev-parse HEAD)"
+expect_eq "LH-3 precondition: the judge reads the code commit as owing" "cover ${LH_D} prose|cover ${LH_C} owes|" "$(lh_cover "$LH_PLAN" "$LH_R" "$LH_C")"
+expect_eq "LH-3a precondition: …and the adversarial question uncovered from R to C" "uncovered" "$(lh_judge "$LH_PLAN" "$LH_C")"
+expect_eq "LH-3b AC-3.6 a code landing not born past the reading: the review row is ready" "yes" "$(has_line "$(lh_ready "$LH_C" "$LH_PLAN")" T3)"
+expect_eq "LH-3c …and, no longer idle, integrate's proof:review waits on it" "yes" "$(lh_edge "$LH_C" "$LH_PLAN")"
+expect_eq "LH-3d …and the range it reads is R..C" "${LH_R}..${LH_C}" "$(UNITS_LIVE_HEAD="$LH_C" call units_live_range "$LH_PLAN" T3)"
+expect_eq "LH-3e the bare row past the same landing is ready" "yes" "$(has_line "$(lh_ready "$LH_C" "$LH_BARE")" T3)"
+
+# THE HANDED ANSWER IS THE ONE READ: the tick hands the readings' state in, and the program asks no second judge.
+expect_eq "LH-4 handed covered at C: the review row is not ready" "no" \
+  "$(has_line "$(UNITS_READINGS_STATE=covered lh_ready "$LH_C" "$LH_PLAN")" T3)"
+expect_eq "LH-4b handed adversarial uncovered at D: the review row is ready" "yes" \
+  "$(has_line "$(UNITS_READINGS_STATE="review adversarial bionic:critic piece uncovered ${LH_R}..${LH_D}" lh_ready "$LH_D" "$LH_PLAN")" T3)"
+
+# NO FACTS STATE: the judge cannot answer (the working branch names no commit), so the row waits, saying so.
+expect_eq "LH-5 the judge cannot be asked: the review row is not ready, though the head moved past its reading" "no" \
+  "$(has_line "$(lh_ready "$LH_C" "$LH_GONE")" T3)"
+expect_eq "LH-5b …and its wait says the readings are not known here, and why" \
+  "live:head:adversarial: the readings are not known here: the working branch names no commit, so there is no head to judge the readings at" \
+  "$(lh_wait "$LH_C" "$LH_GONE")"
+
+# BOTH STATES IN ONE ANSWER: a regression proof the integrate row reads, beside the live row past its reading. The
+# program asks the readings first, then the floor, and answers once it holds both: never the floor's exit status.
+LH_FLOOR="${LH_PLAN%.plan.md}-floor.plan.md"
+lh_plan "$LH_FLOOR" wave/99-lh "$LH_T3Q" "$LH_READ
+$(call proof_floor_line "$LH_R" 2026-10-13T04:00:00Z record/lh/floor.log)"
+expect_eq "LH-6 precondition: the plan carries the regression proof the integrate row reads" "1" \
+  "$(grep -c '^proved: kind=floor ' "$LH_FLOOR")"
+expect_eq "LH-6b at Step 8, a live row past its reading and a floor to judge: the review row is ready, and the answer exits 0" "yes 0" \
+  "$(has_line "$(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8)" T3) $(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8 >/dev/null; printf '%s' "$CALL_RC")"
 
 finish

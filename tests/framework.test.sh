@@ -28,6 +28,8 @@
 #       building its mutant; §20 a suite's extracted anchors are the ones it ran;
 #       §21 `anchors check` names a moved anchor, the three wave-34 mutants among
 #       them; §22 `anchors index` maps file -> declaring suites (wave-35 T3; AC-7.1, AC-7.3)
+#   §READS `reads_index` over the shipped tree: the new suite registered against anchors.sh,
+#       the wave-35 misses routed, the anchor index a subset of it (wave-36 T5; D12, AC-6.1)
 #
 # HERMETIC. Every planted suite is written into a mktemp'd sandbox holding a COPY
 # of the real tests/lib/assert.sh and is run as a child process; nothing here
@@ -2014,5 +2016,29 @@ expect_regex "22: …and tests/run.sh names runner-roster" \
   "^tests/run\\.sh	([^,]+,)*tests/runner-roster\\.test\\.sh(,|$)" "$AN_IDX"
 expect_eq "22: …and the shipped tree checks green" "0" \
   "$(bash "$POKER" anchors check "$REPO" >/dev/null 2>&1; echo $?)"
+
+# ------------------------------------------------------------
+section "READS: the reads index over the shipped tree routes what anchors missed (wave-36 T5; D12, AC-6.1)"
+# ------------------------------------------------------------
+# lib/anchors.sh `reads_index` is the one file-to-suite fact (tests/suite-reads.test.sh owns its rules on
+# a synthesized tree). Here it reads the shipped tree: the new suite is registered against the library
+# it reads, the two wave-35 misses are routed, and the anchor index is a subset of it.
+RD_IDX="$(bash "$REPO/payload/scripts/lib/anchors.sh" reads_index "$REPO" 2>&1)"; RD_RC=$?
+expect_eq "READS: reads_index over the shipped tree exits 0" "0" "$RD_RC"
+expect_nonempty "READS: …and prints an index" "$RD_IDX"
+expect_eq "READS: every line is <file> TAB <suite>[,<suite>]" "" \
+  "$(printf '%s\n' "$RD_IDX" | awk -F'\t' 'NF != 2 || $1 == "" || $2 !~ /^[^,]+(,[^,]+)*$/' | head -3)"
+expect_regex "READS: anchors.sh is read by suite-reads, the suite this row registers" \
+  "^payload/scripts/lib/anchors\\.sh	([^,]+,)*tests/suite-reads\\.test\\.sh(,|$)" "$RD_IDX"
+expect_regex "READS: walls.sh is read by refuse (the wave-35 T23 miss, a read by awk over the file)" \
+  "^payload/scripts/lib/walls\\.sh	([^,]+,)*tests/refuse\\.test\\.sh(,|$)" "$RD_IDX"
+expect_regex "READS: proof.sh is read by landing-line (the wave-35 floor miss)" \
+  "^payload/scripts/lib/proof\\.sh	([^,]+,)*tests/landing-line\\.test\\.sh(,|$)" "$RD_IDX"
+expect_regex "READS: the anchor index the fold is checked against is §22's, and it is not empty" \
+  "^payload/scripts/lib/line\\.sh	" "$AN_IDX"
+expect_eq "READS: every pair of the anchor index is a pair of the reads index (the fold)" "" \
+  "$( { printf '%s\n' "$RD_IDX" | sed 's/^/R	/'; printf '%s\n' "$AN_IDX" | sed 's/^/A	/'; } \
+      | awk -F'\t' '{ n = split($3, s, ","); for (i = 1; i <= n; i++) if ($1 == "R") r[$2 "\t" s[i]] = 1; else a[$2 "\t" s[i]] = 1 }
+                    END { for (k in a) if (!(k in r)) print k }' | head -3)"
 
 finish

@@ -114,6 +114,8 @@
 #                                targets and the files of tee, sed -i, touch, mkdir, ln, and
 #                                the cp/mv destination (wave-24 T12, D16). The memory wall's
 #                                collector, hooks/bash-walls.sh, reads it.
+#   (mode=place)              -> no export here: payload/scripts/lib/placement.sh `cmd_place` is
+#                                its one door, and states its contract (wave-36 T3, D11).
 #   cmd_effects        <cmd> [<cwd>] [reads]
 #                             -> what the command writes (`W<TAB>path`) and deletes
 #                                (`D<TAB>path`), absolute, or `?<TAB>reason<TAB>segment` for
@@ -332,12 +334,13 @@ _cmd_class_awk() {  # <mode> ; command on stdin
   # every call, and the effects reader is a fifth of this file: pasted into every mode it cost
   # each classifier call 1.7 ms (7.3 -> 9.0 ms, measured). The other modes get one-line stubs
   # of the seven names the shared code calls, so each program defines every function once.
-  local _fx="$_CMD_EFFECTS_STUBS" _cb=0
+  local _fx="$_CMD_EFFECTS_STUBS" _pl="$_CMD_PLACE_STUB" _cb=0
   [ "$1" = effects ] && _fx="$_CMD_EFFECTS_AWK"
+  [ "$1" = place ] && _pl="$_CMD_PLACE_AWK"
   # THE FILESYSTEM'S FOLD, asked of the tree the reading is about (the root, else the cwd it was
   # handed, else this process's), with no fork (`cmd_case_blind`).
   ! cmd_case_blind "${_CMD_SCRIPT_ROOT:-${_CMD_SCRIPT_CWD:-$PWD}}" || _cb=1
-  _CMD_CASE_BLIND="$_cb" awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx"'
+  _CMD_CASE_BLIND="$_cb" awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx$_pl"'
     BEGIN { FOLD = (ENVIRON["_CMD_CASE_BLIND"] == "1") }
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
@@ -1591,6 +1594,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # mode=looplines: cmd_suite_loop_lines (wave-24 T13) — section 7, ahead of expand_all.
       if (mode == "looplines") { loop_lines(k, seg); exit }
       expand_all(k, seg, out)
+      # mode=place: cmd_place (wave-36 T3), _CMD_PLACE_AWK, on the expanded segments.
+      if (mode == "place") pl_walk(k, seg)
       CD_SEEN = 0; CD_DIR = ""
       for (i = 1; i <= k; i++) {
         t0 = trim(seg[i])
@@ -2572,6 +2577,159 @@ _CMD_EFFECTS_STUBS='
     function fx_text(s, depth, k) { return 0 }
     function fx_step(depth, i, k, g, before) { return before }
     function fx_flush() { }
+'
+
+# ---------- 8. placement: where a command runs (wave-36 T3; D11, REQ-5) ----------
+#
+# The reading behind payload/scripts/lib/placement.sh `cmd_place`, which states the contract.
+# PASTED INTO mode=place ALONE, as _CMD_EFFECTS_AWK is into mode=effects: awk compiles the whole
+# program on every call, so every other mode gets the one-line stub below instead.
+#
+# NO APOSTROPHE MAY APPEAR IN THIS TEXT, for the reason CMD_RUN_NORM_AWK gives.
+_CMD_PLACE_AWK='
+    # ONE PASS. THE TARGET is the segment asked about
+    # (_CMD_PLACE_TARGET): the word suite names the first segment class_seg calls suite, any
+    # other word the first segment whose command word, unwrapped by strip_leading and folded
+    # by cmd_word_fold, is that word, and no word the end of the command. Every top-level
+    # segment ahead of the target either moves nothing or is a MOVE. A move this reads sets
+    # the place; one it cannot read, or one whose reach it cannot be sure of, LOSES the place
+    # and is named, until a cd to an absolute literal anchors it again.
+    # QUOTED TEXT AND HEREDOC BODIES NEVER REACH THIS WALK AS SEGMENTS: segments() cuts only
+    # outside quotes, and the heredoc pass deleted every body before segments() ran. So a
+    # parenthesis or a pipe in a note, a heredoc, a `$(...)` in a segment that moves nothing
+    # and a redirect to a variable are all invisible here, which is what the raw-text walk
+    # this replaces got wrong (research-landing-and-walls.md section Q5).
+    # THE SEGMENTATION GLOBALS ARE COPIED FIRST (PL_SK, PL_SG, PL_GP): class_seg and
+    # pl_wrapped re-enter segments(), which overwrites SEPKIND, SEGGRP and GPAR.
+    function pl_ganc(a, b) { for (;;) { if (b == a) return 1; if (b == 0) return 0; b = PL_GP[b] } }
+    function pl_word(t,   u, A, n) {
+      u = strip_leading(t); n = argv_tok(u, A)
+      return (n > 0 ? cmd_word_fold(base(A[1])) : "")
+    }
+    # 1 for a cd typed as the command word (behind a brace opener at most), 2 for pushd or
+    # popd, which move to a directory stack the text cannot name, 0 for anything else.
+    function pl_direct(t,   h) {
+      h = t
+      while (match(h, /^[{][ \t]+/)) h = substr(h, RLENGTH + 1)
+      if (h ~ /^cd([ \t]|$)/) return 1
+      if (h ~ /^(pushd|popd)([ \t]|$)/) return 2
+      return 0
+    }
+    # 1 when the segment moves through something in front of the command word or inside a
+    # string it runs: an assignment prefix, an opener (if, then, do, !), command, builtin,
+    # exec, eval or an sh -c string. Never read; always a lost place.
+    function pl_wrapped(t,   u0, u, m, S, x) {
+      u0 = strip_leading(t)
+      if (u0 ~ /^(builtin[ \t]+)?(cd|pushd|popd)([ \t]|$)/) return 1
+      u = unwrap_runner(u0)
+      if (u == u0) return 0
+      m = segments(u, S)
+      for (x = 1; x <= m; x++) if (strip_leading(S[x]) ~ /^(builtin[ \t]+)?(cd|pushd|popd)([ \t]|$)/) return 1
+      return 0
+    }
+    # Is the reach of the direct cd at j sure, for the target at ti (group tg, instance tc)?
+    # It must sit in the target group or an enclosing one, in the target branch or an
+    # enclosing one; not behind || or in a pipeline; not piped on or backgrounded; behind &&
+    # only when && carries on to the target; and the target not on its own failure branch.
+    # THE END OF THE COMMAND (ti past the last segment) IS REACHED WHETHER OR NOT A STEP
+    # FAILS, so for it the && rule asks the other way (wave-36 T43): a cd behind && moves
+    # the end only when every link ahead of it on its && run is a cd pl_ran can read, which
+    # the reader takes as done, as it takes every readable cd. `cd A && cd B` ends in B;
+    # `true && cd B` may end where it began, and stays unsure.
+    function pl_sure(j, ti, tg, tc, k,   pv, nx, x, br) {
+      if (!pl_ganc(PL_SG[j], tg) || !inst_anc(CI[j], tc)) return 0
+      pv = (j > 1 ? PL_SK[j - 1] : ""); nx = PL_SK[j]
+      if (pv == "||" || pv == "|" || pv == "|&") return 0
+      if (nx == "|" || nx == "|&" || nx == "&") return 0
+      if (pv == "&&" && ti > k) return pl_ran(j)
+      if (pv == "&&") for (x = j; x < ti; x++) if (PL_SK[x] != "&&" && PL_SK[x] != "(") return 0
+      if (nx == "||" && ti <= k) {
+        br = 0
+        for (x = j + 1; x < ti; x++) if (PL_SK[x] == ";" || PL_SK[x] == "\n" || PL_SK[x] == "&") br = 1
+        if (!br) return 0
+      }
+      return 1
+    }
+    # 1 when the cd at j, opened by &&, has run whenever the shell reaches the end: walking back
+    # along its && run, every segment ahead of it is a direct cd with a literal operand in the
+    # same group and branch instance, and the run opens the command or follows a ; or a
+    # newline. Anything else ahead (a command that may fail, an unreadable cd, a ||, a pipe, a
+    # group boundary) leaves the end unsure.
+    function pl_ran(j,   x) {
+      for (x = j - 1; x >= 1; x--) {
+        if (PL_SG[x] != PL_SG[j] || CI[x] != CI[j] || NX[x] != 1) return 0
+        if (pl_direct(trim(XT[x, 1])) != 1 || pl_cd_dir(trim(XT[x, 1]), "/") == "") return 0
+        if (x == 1 || PL_SK[x - 1] == ";" || PL_SK[x - 1] == "\n") return 1
+        if (PL_SK[x - 1] != "&&") return 0
+      }
+      return 0
+    }
+    # The directory a direct cd names, folded, or "" when it is not a literal: bare, quoted
+    # with nothing to expand, ~ or ~/ from HOME, bare cd for HOME, -- allowed; never an
+    # option, a second operand, an expansion, a backslash or a glob. PL_REL says it was relative.
+    function pl_cd_dir(t, cwd,   W, K, n, j, m, A, d, h) {
+      PL_REL = 0
+      if (index(t, "$") || index(t, "`") || index(t, "\\")) return ""
+      n = wt_tok(t, W, K); m = 0
+      for (j = 1; j <= n; j++) {
+        if (K[j] == "R" || K[j] == "I") { j++; continue }
+        if (K[j] == "W") A[++m] = W[j]
+      }
+      j = 1
+      while (j <= m && A[j] == "{") j++
+      if (A[j] != "cd") return ""
+      j++
+      if (j <= m && A[j] == "--") j++
+      if (j < m) return ""
+      d = (j <= m ? A[j] : "~")
+      if (d == "" || substr(d, 1, 1) == "-" || index(d, "*") || index(d, "?") || index(d, "[")) return ""
+      if (substr(d, 1, 1) == "~") {
+        if (index(t, "\"~") || index(t, "\047~")) return ""
+        if (d != "~" && substr(d, 1, 2) != "~/") return ""
+        h = ENVIRON["HOME"]
+        if (substr(h, 1, 1) != "/") return ""
+        d = h substr(d, 2)
+      }
+      if (substr(d, 1, 1) != "/") { PL_REL = 1; d = cwd "/" d }
+      return wt_norm(d)
+    }
+    function pl_flat(s) { gsub(/[\t\r\n]+/, " ", s); return s }
+    function pl_walk(k, sg,   tgt, cur, i, j, x, ti, tg, tc, lost, d, mv, s, t) {
+      tgt = ENVIRON["_CMD_PLACE_TARGET"]; cur = wt_norm(ENVIRON["_CMD_PLACE_CWD"])
+      for (i = 1; i <= k; i++) { PL_SK[i] = SEPKIND[i]; PL_SG[i] = SEGGRP[i] }
+      for (i = 1; i <= GID_N; i++) PL_GP[i] = GPAR[i]
+      ti = k + 1
+      if (tgt != "") {
+        ti = 0
+        for (i = 1; i <= k && !ti; i++) {
+          if (trim(sg[i]) == "") continue
+          for (x = 1; x <= NX[i]; x++) {
+            t = trim(XT[i, x])
+            if (tgt == "suite" ? (class_seg(t, 0) == "suite") : (pl_word(t) == tgt)) { ti = i; break }
+          }
+        }
+        if (!ti) exit 3
+      }
+      tg = (ti <= k ? PL_SG[ti] : 0); tc = (ti <= k ? CI[ti] : 1); lost = ""
+      for (j = 1; j < ti; j++) {
+        s = trim(sg[j])
+        if (s == "") continue
+        mv = pl_direct(s)
+        if (mv == 0) { if (lost == "" && pl_wrapped(s)) lost = s; continue }
+        d = ""
+        if (mv == 1 && NX[j] == 1 && pl_sure(j, ti, tg, tc, k)) d = pl_cd_dir(trim(XT[j, 1]), cur)
+        if (d == "") { if (lost == "") lost = s; continue }
+        if (lost != "" && PL_REL) continue
+        cur = d; lost = ""
+      }
+      if (lost == "" && ti <= k && pl_wrapped(trim(XT[ti, 1]))) lost = trim(sg[ti])
+      if (lost != "") { printf "moving %s\n", pl_flat(lost); exit 1 }
+      printf "%s\n", cur
+      exit 0
+    }
+'
+_CMD_PLACE_STUB='
+    function pl_walk(k, sg) { }
 '
 
 cmd_effects() {  # <command> [<cwd>] [reads] -> W/D<TAB><absolute path> or ?<TAB><reason><TAB><segment> per line (D5, REQ-2); with `reads`, R/RR<TAB><absolute path> too (T16)

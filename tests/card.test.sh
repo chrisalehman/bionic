@@ -2134,6 +2134,20 @@ expect_contains "INHERIT-18d …and quoting it" "$INH_DBAD" "$WC_ERR"
 expect_eq "INHERIT-18e …while card.sh inherited still prints the deferred lines, the bad one withheld" \
   "open	$INH_L1
 open	$INH_L2" "$(bash "$CARD_SH" inherited "$INH_R0" 2>/dev/null 0<&-)"
+# ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): the card reads the carried line through lib/debt.sh
+# `DEBT_LINE_ERE`, the grammar `debt add` and close-out hold it to, so a site is `<path>:<line>` there too.
+# A carried line whose site is prose (wave-35's hand-written hole lines) is no line any verb writes now.
+INH_DPROSE="debt: step-line-born hole \"hooks/session-poker.sh step-line (the born marker is lost)\" touches=0 raised-by=record/wave-1-a/assumptions.md#A-orch-52 from=wave-1-a"
+INH_DHOLE="debt: adopt-orphans hole \"hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112\" touches=0 raised-by=record/wave-1-a/assumptions.md#A-orch-46 from=wave-1-a"
+inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_DHOLE"
+whole_card step1 "$INH_R0"
+expect_eq "INHERIT-18f a carried hole line, its sites <path>:<line> and its raised-by an anchor, is listed (exit 0)" \
+  "0|$INH_L1
+$INH_DHOLE" "$WC_RC|$(inh_block "$WC_OUT")"
+inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_DPROSE"
+whole_card step1 "$INH_R0"
+expect_eq "INHERIT-18g …one whose site is prose does not parse and refuses the card (exit 2, nothing on stdout)" "2|" "$WC_RC|$WC_OUT"
+expect_contains "INHERIT-18h …quoting it" "$INH_DPROSE" "$WC_ERR"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
 
 # the mutation arm: a doctored copy of card.sh whose disposal filter lets every line through

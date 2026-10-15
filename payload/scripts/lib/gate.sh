@@ -17,7 +17,9 @@
 #                    key=<command key>  kind=<landing|work|whole>  who=<session id>:<agent>
 #                    tree=<abs path>  asked=<epoch>  holder=<pid>:<start>
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
-#                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed).
+#                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed;
+#                  rc=gone when its holder died before it was admitted, written at its who's next
+#                  ask for the key), and by=<sid> why=<reason> when stop-run ended it (D8).
 #                  A request returned 75 holds holder=-, nobody's. A line the gate does not know
 #                  (a 1.15.0 request's peak=, anything newer) is ignored, so a later bionic may
 #                  add one.
@@ -38,11 +40,15 @@
 #                  rc 75 at once, nothing filed: the asking agent's budget refuses the key (THE
 #                  BUDGET; its line on stderr). rc 75: the time ran out; the request is kept with its turn, nothing ran, and
 #                  its holder is cleared (holder=-), so it is nobody's and passed over until the
-#                  next ask by the same who for the same key resumes it. rc 2: a
+#                  next ask by the same who for the same key and kind resumes it. rc 2: a
 #                  usage error or a store that cannot be written. It polls every
 #                  ${BIONIC_GATE_POLL:-2} seconds and gives up before --within runs out;
 #                  without --within it waits until admitted.
-#   gate_end <id> <rc>       the run is over: writes ended= and rc=, and records its seconds
+#   gate_end <id> <rc>       the run is over: writes ended= and rc=, and records its seconds.
+#                  rc 2 on a request never admitted: a caller that never asked cannot end it.
+#   gate_end <id> <rc> --by <sid> [--why <reason>]
+#                  (wave-36 T11; D8) stop-run's end, accepted whether or not the request was
+#                  admitted: writes ended= rc= by= why= and records no seconds
 #   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
@@ -210,22 +216,25 @@ _gate_lock() {  # rc 0 holding $_GD/lock; rc 1 when it cannot be had in about te
   done
 }
 
-# _gate_steal <lock> — drop a dead holder's lock, one stealer at a time: the token is made
-# inside the lock, so it goes with it, and the lock is dropped only while it is still dead
-# under the pid this stealer saw. A token older than a minute was left by a killed stealer.
+# _gate_steal <lock> — drop a stale lock (a dead holder's, or one with no pid left by a claimer
+# killed after its mkdir), one stealer at a time. The token sits BESIDE the lock (<lock>.steal, as
+# lib/slots.sh's _slots_steal keeps its own): inside it, the token's mkdir would reset the lock's
+# age and a lock with no pid would read `taking` to the stealer itself, so the gate never stole
+# one (wave-36 T34). The lock is dropped only while it is still stale under the pid this stealer
+# saw. A token older than the bound was left by a killed stealer; _slots_old clears it.
 _gate_steal() {
-  local p
+  local p tok="$1.steal"
   p="$(_slots_pid_of "$1")"
-  if ! mkdir "$1/steal" 2>/dev/null; then
-    _slots_old "$1/steal" && rmdir "$1/steal" 2>/dev/null
+  if ! mkdir "$tok" 2>/dev/null; then
+    _slots_old "$tok" && rmdir "$tok" 2>/dev/null
     return 1
   fi
   if [ "$(_slots_pid_of "$1")" = "$p" ]; then
     case "$(_slots_state "$1")" in
-      dead|orphan) _slots_drop "$_GD" "$1"; return 0 ;;
+      dead|orphan) _slots_drop "$_GD" "$1"; rmdir "$tok" 2>/dev/null; return 0 ;;
     esac
   fi
-  rmdir "$1/steal" 2>/dev/null
+  rmdir "$tok" 2>/dev/null
   return 1
 }
 
@@ -513,9 +522,16 @@ _gate_decide() {
 }
 
 # _gate_enter <kind> <key> <who> — under the lock: sets _GATE_ID to the request this ask
-# holds. One by the same who for the same key with no admitted line and no live holder is
-# resumed, its holder rewritten; otherwise a new one takes the next number, so a live waiter's
-# number is never taken over.
+# holds. One by the same who for the same key AND kind, with no admitted line, whose holder was
+# cleared (holder=-, a 75 handed it back) is resumed, its holder rewritten; otherwise a new one
+# takes the next number, so a live waiter's number is never taken over.
+#
+# WHAT IT CANNOT RESUME IT ENDS (wave-36 T11; D8, AC-2.1). A never-admitted request by the same
+# who for the same key whose holder is neither alive nor cleared was held by a process that died
+# in its wait (a shim killed, a Bash call timed out): nothing will ask for it under its kind again,
+# and resuming it under another kind ran a work ask as `kind=whole` (wave-35 request 2156). It is
+# written `ended=<now> rc=gone`, whatever the kind asked now, and the ask takes a fresh number.
+# A cleared request of another kind is left as it is: its who may still ask for it.
 #
 # THE LINEAGE (wave-32 T1; D5, design ledger Δ9). Before either, the same read of the store
 # looks for the admission this process already runs under: an admitted, unfinished request
@@ -525,7 +541,7 @@ _gate_decide() {
 # (a scratch store's), is the holder's own work, and a request of its own could never be
 # admitted while the ancestor's admission lives.
 _gate_enter() {
-  local f id max=0 holder tree now hps='' pairs='' i
+  local f id max=0 holder tree now hps='' pairs='' i gone=''
   holder="$$:$(_slots_since "$$")"
   _GATE_ID='' _GATE_LINEAGE=0
   for f in "$_GD"/requests/*; do
@@ -539,11 +555,19 @@ _gate_enter() {
       fi
       continue
     fi
-    if [ -z "$_GATE_ID" ] && [ -z "$_R_ended" ] \
+    if [ -z "$_R_ended" ] \
         && [ "$_R_who" = "$3" ] && [ "$_R_key" = "$2" ] && ! _gate_alive; then
-      _GATE_ID="$id"
+      if [ "$_R_holder" != - ]; then
+        gone="$gone $id"
+      elif [ -z "$_GATE_ID" ] && [ "$_R_kind" = "$1" ]; then
+        _GATE_ID="$id"
+      fi
     fi
   done
+  if [ -n "$gone" ]; then
+    now="$(_res_now)"
+    for i in $gone; do printf 'ended=%s\nrc=gone\n' "$now" >> "$_GD/requests/$i"; done
+  fi
   # shellcheck disable=SC2086  # the holder pids, one word each
   if [ -n "$hps" ] && _gate_ancestor $hps; then
     for i in $pairs; do   # one holder with two live admissions runs under the newer
@@ -817,9 +841,21 @@ gate_ask() {
 }
 
 gate_end() {
-  local id="${1:-}" rc="${2:-}" f now secs reading cf i=0
-  case "$id" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc>" >&2; return 2 ;; esac
-  case "$rc" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc>" >&2; return 2 ;; esac
+  local id="${1:-}" rc="${2:-}" f now secs reading cf i=0 by='' why='-'
+  case "$id" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
+  case "$rc" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --by) by="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --why) why="${2:-}"; shift 2 2>/dev/null || shift ;;
+      *) echo "gate: gate_end: unknown option $1" >&2; return 2 ;;
+    esac
+  done
+  case "$by$why" in *$'\n'*|*$'\r'*) echo "gate: gate_end: --by and --why take one line each" >&2; return 2 ;; esac
+  if [ -z "$by" ] && [ "$why" != - ]; then
+    echo "gate: gate_end: --why is said with --by (who stopped it)" >&2; return 2
+  fi
   _gate_store || return 2
   f="$_GD/requests/$id"
   [ -f "$f" ] || { echo "gate: no request $id" >&2; return 2; }
@@ -827,14 +863,21 @@ gate_end() {
     i=$((i + 1)); [ "$i" -lt 6 ] || { echo "gate: the lock could not be had; request $id not ended" >&2; return 1; }
   done
   _gate_read "$f"
-  if [ -z "$_R_admitted" ]; then
+  if [ -z "$_R_admitted" ] && [ -z "$by" ]; then
     _gate_unlock; echo "gate: request $id was never admitted" >&2; return 2
   fi
   if [ -n "$_R_ended" ]; then _gate_unlock; return 0; fi
-  cf="$(_gate_cost_file "$_R_key" "$(_gate_project "$_R_tree")")"
   now="$(_res_now)"
-  secs=$((now - _R_admitted)); [ "$secs" -ge 0 ] || secs=0
-  printf 'ended=%s\nrc=%s\n' "$now" "$rc" >> "$f"
+  if [ -n "$by" ]; then
+    # STOPPED, NOT FINISHED (wave-36 T11; D8, AC-2.2): stop-run's end, admitted or not. It names who
+    # stopped it and why, and a stopped run's seconds measure the stop, so none are recorded.
+    printf 'ended=%s\nrc=%s\nby=%s\nwhy=%s\n' "$now" "$rc" "$by" "$why" >> "$f"
+    secs=0
+  else
+    cf="$(_gate_cost_file "$_R_key" "$(_gate_project "$_R_tree")")"
+    secs=$((now - _R_admitted)); [ "$secs" -ge 0 ] || secs=0
+    printf 'ended=%s\nrc=%s\n' "$now" "$rc" >> "$f"
+  fi
   # THE ONE THING LEARNED (wave-33 T1; D4 as amended, Δ10; AC-8.6): the run's seconds, in the
   # key's keyed file, newest last, three kept, for the landing's time limit. A run of zero
   # seconds (wave-32 T1; D5) has no measured time and writes none.
@@ -963,8 +1006,9 @@ $nm
 #   <id> <waiting|admitted|ended|killed|gone> kind=<k> asked=<e> admitted=<e|-> ended=<e|-> rc=<n|-> key=<key>
 # killed: admitted and either ended with rc over 128 (the gate's _gate_reap writes 137; a run
 # killed by a signal ends 128+n) or never ended with its holder dead. gone: never admitted, no
-# live holder (its number is kept for the next ask by the same who for the same key, until
-# BIONIC_GATE_KEEP).
+# live holder (a cleared one's number is kept for the next ask by the same who for the same key
+# and kind, until BIONIC_GATE_KEEP; a dead holder's is ended, rc=gone, at that who's next ask
+# for the key, and then lists ended).
 # The state is `_gate_open`'s; gate_list takes the lock and reads, and prunes and reaps nothing.
 gate_list() {
   local f id st
