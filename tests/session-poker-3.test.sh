@@ -17,6 +17,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/floor-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -791,13 +792,13 @@ expect_contains "58g10 …from the absolute deliverable's reader, as a pass" \
 POKER="$S58_POKER_REAL"
 
 # ---------- controls: a floor, a task and a plain review proof are written as before ----------
-printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\nrc=0\n' "$S58_C4" > "$S58_REC/floor.txt"
+printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P58" "$S58_REC/floor.txt" "$S58_C4" 0 0  # with its run line (wave-37 T4; D7)
 printf '# review\n\nreviewed: %s..%s\n' "$S58_C1" "$S58_C4" > "$S58_REC/plain.md"
 s42_snap "$R58" "$P58"
 poke "$R58" proof-add floor record/wave-01-fixture/floor.txt
 expect_eq "58h control: a floor proof registers (exit 0)" "0" "$RC"
 expect_regex "58h2 …in its four-field shape" \
-  "^proved: kind=floor head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor.txt$" \
+  "^proved: kind=floor head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${S58_C4} rc=0$" \
   "$(s46_proved "$P58" | tail -1)"
 poke "$R58" proof-add task record/wave-01-fixture/floor.txt
 expect_eq "58h3 control: a task proof registers (exit 0)" "0" "$RC"
@@ -3136,8 +3137,8 @@ expect_eq "69e0 control: at current: 6 with the debt open a real commit is refus
 poke "$R69" step-line T9 'landed red on widget.test.sh, owed'
 expect_eq "69e00 a writer verb at current: 6 with the debt open (step-line): admitted, its copy judged at current: 4" "0" "$RC"
 expect_contains "69e00b …and its line is written" "- T9: landed red on widget.test.sh, owed" "$(cat "$P69")"
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\nrc=0\n' "$S69_H" \
-  > "$R69/.bionic/docs/record/w27/floor-late.log"
+printf 'all suites passed\nGating: 1 passed, 0 failed\n' | floor_fixture --pre $'floor log\nenv: os=fixture' \
+  "$P69" "$R69/.bionic/docs/record/w27/floor-late.log" "$S69_H" 0 0  # with its run line (wave-37 T4; D7)
 poke "$R69" proof-add floor record/w27/floor-late.log
 expect_eq "69e proof-add floor of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
 expect_regex "69e2 …and the floor proof line is written at the fixture's head" "^proved: kind=floor head=${S69_H} " \
@@ -3421,8 +3422,9 @@ s72_add() {  # <evidence relative to the record> -> poke proof-add floor, the pl
   s42_snap "$S72R" "$S72P"
   poke "$S72R" proof-add floor "record/wave-01-fixture/$1"
 }
-s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35)
-  printf 'floor log\nhead=%s dirty=0\nGating: 4 passed, 0 failed\nrc=0\n' "$2" > "$S72REC/$1"
+s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35), with
+  # the run line the machine records for it (wave-37 T4; D7: tests/lib/floor-fixture.sh)
+  printf 'Gating: 4 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/$1" "$2" 0 0
 }
 s72_state() {  # -> proof_state's one line for the plan
   bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null
@@ -3462,11 +3464,11 @@ expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'cove
 # Through wave-35 the judge counted the suites at the head, and a run of one suite of four was refused as not whole.
 # The floor reads no roster now: the plan's regression row names what ran, and a log that opens head=<F> dirty=0 and
 # ends rc=0, every later commit proved, is accepted whatever it ran.
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\nrc=0\n' "$S72F" > "$S72REC/floor-part.txt"
+printf 'Gating: 1 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part.txt" "$S72F" 0 0
 s72_add floor-part.txt
 expect_eq "72b a run of one suite at F, every later commit proved: accepted, no roster counted (exit 0)" "0" "$RC"
 expect_eq "72b2 AC-7.10 …the proof naming F" "$S72F" "$(s46_last "$S72P" floor)"
-printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nrc=0\n' "$S72C2" > "$S72REC/floor-part-H.txt"
+printf 'Gating: 2 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part-H.txt" "$S72C2" 0 0
 s72_add floor-part-H.txt
 expect_eq "72b3 a run of two suites at the working head itself: accepted (exit 0)" "0" "$RC"
 expect_eq "72b4 …the proof naming the working head" "$S72C2" "$(s46_last "$S72P" floor)"
@@ -3537,7 +3539,7 @@ s42_unchanged "72g a whole run at a commit off the working branch" 1 "$S72P"
 expect_contains "72g2 …says it is not in the working branch's history" \
   "floor-X.txt read head ${S72X:0:12}, which is not in the history of the working branch (at ${S72C6:0:12})" "$OUT"
 s72_config "floor: true"
-printf 'head=%s dirty=0\ncommand: true\nrc=0\n' "$S72F" > "$S72REC/floor-run-F.log"
+printf 'command: true\n' | floor_fixture "$S72P" "$S72REC/floor-run-F.log" "$S72F" 0 0
 s72_add floor-run-F.log
 expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
 S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
