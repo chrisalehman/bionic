@@ -1675,7 +1675,7 @@ poke "$R46" proof-add regression record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
 expect_eq "46b6c …and proof_last floor reads the new head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
 expect_eq "46b7 …and the review head is its own, resolved from the review's reviewed: line" "$W46_HEAD2" "$(s46_last "$P46" review)"
-expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor floor" \
+expect_eq "46b8 …the proof lines sit together, newest last" "regression review regression regression" \
   "$(s46_proved "$P46" | sed -E 's/^proved: kind=([a-z]+) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------- F1: what the evidence must attest, each refusal naming its fix ----------
@@ -1793,7 +1793,7 @@ expect_contains "46g7 …naming both forms" "neither a head=<sha> dirty=<n> run 
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add bogus record/wave-01-fixture/floor.txt
 s42_unchanged "46c a kind outside floor|review|task" 1 "$P46"
-expect_contains "46c2 …naming the three kinds" "floor, review or task" "$OUT"
+expect_contains "46c2 …naming the three kinds" "regression, review or task" "$OUT"
 poke "$R46" proof-add regression plans/elsewhere/notes.md
 s42_unchanged "46c3 an evidence path outside record/" 1 "$P46"
 expect_contains "46c4 …naming record/" "under record/" "$OUT"
