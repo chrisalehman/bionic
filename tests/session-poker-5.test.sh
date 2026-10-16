@@ -16,7 +16,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -139,7 +139,7 @@ expect_contains "CK-6r-b …refused by the dry commit, in the gate's words" "the
 ck_case "CK-7g current 7 from 6, the floor and every reading at the head" 7 6 0 "$CK_GOOD"
 ck_case "CK-7r current 7 from 6, a.test.sh owed by the floor's whole run" 7 6 1 "$(ck_floor "$CK_C" a.test.sh)
 $(ck_reads "$CK_C")"
-expect_contains "CK-7r-b …refused by the judge, naming the owed suite" "$(printf 'floor\towed\ta.test.sh')" "$CK_OUT"
+expect_contains "CK-7r-b …refused by the judge, naming the owed suite" "$(printf 'regression\towed\ta.test.sh')" "$CK_OUT"
 CK_7R_PROOFS="$(ck_floor "$CK_C" a.test.sh)
 $(ck_reads "$CK_C")"
 
