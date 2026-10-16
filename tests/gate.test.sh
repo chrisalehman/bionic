@@ -19,6 +19,14 @@
 #   §RESUME-KIND D8, AC-2.1 (wave-36 T11) a request is resumed only by its who, key and kind once
 #                      its holder cleared it; a dead holder's is ended (rc=gone) and the ask takes a
 #                      fresh number; gate_end on a never-admitted id is accepted only with --by
+#   §WIDTH-ASK AC-6.1  (wave-38 T5; D21, D22) gate_width_ask <landing> on 8 cores at share 92:
+#                      load 2.0, nothing admitted, 4; load 6.0, 1 (the oldest landing progresses);
+#                      a younger landing 0 until the older finishes; a landing with its own run
+#                      open is answered by the rule alone. The promise is resources.sh's suite
+#                      cost, lifted. Mutation: resources.sh's cost set to 1.00 answers 7
+#   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
+#                      next ask resumes its number and asked=. Mutation: the trap removed ends it
+#                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
 #   §FIRST     AC-2.7  a writer's number waits, a landing's arrives, and the landing is admitted
 #                      first. Mutation: landing-before-work removed admits the writer
 #   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
@@ -32,7 +40,7 @@
 #   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once;
 #                      it holds no peak and writes no duration
 #   §COST      D12     (wave-33 T1; Δ10: durations only) gate_end's duration line,
-#                      <seconds>:<epoch>, three kept; the promise is one core, no memory and the
+#                      <seconds>:<epoch>, three kept; the promise is the suite cost, no memory and the
 #                      key's longest kept duration; an unknown command's is one core and no
 #                      seconds; an overlapped run records its own seconds; a run's processor
 #                      work and memory are not recorded; an overlong run held until it ages out
@@ -44,10 +52,10 @@
 #                      children's processor time is impossible writes its seconds all the same,
 #                      and no cores
 #   §WHOLE-COST D1, D5, Δ10 a whole request is promised its width, gate_width; its gate_end
-#                      records its seconds unmarked; a never-seen key is promised one core and
+#                      records its seconds unmarked; a never-seen key is promised the suite cost and
 #                      an owed writer charged one, before and after a whole run; its next ask
 #                      waits while another is held and is admitted once nothing is
-#   §ONE-CORE  AC-8.1  (wave-33 T1) a command is promised one core whatever is on record (the
+#   §ONE-CORE  AC-8.1  (wave-33 T1) a command is promised the suite cost whatever is on record (the
 #                      research store's 4.4- and 3.94-core lines); two writers admitted on it;
 #                      an empty store promises one core; a whole run its width
 #   §SIDE-BY-SIDE AC-8.2 two writers' single suites on an idle 8-core probe at share 92 are
@@ -58,11 +66,12 @@
 #                      its seconds only and never changed
 #   §SHARE-ROOM AC-9.1 share × cores ÷ 100 at one site and the one core at one site: a mutant
 #                      at each moves every reader. Mutations: the room doubled; the core set to 3
-#   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, a waiting
-#                      request, promised work not yet showing and memory over the share each
-#                      give no room; a quiet machine gives room; two asks on one reading give
-#                      room once; gate_state prints the loads where clears= stood. Mutations:
-#                      the waiting clause, the owed count, the five-minute reading
+#   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, promised work
+#                      not yet showing and memory over the share each give no room; a waiting
+#                      request alone gives room (wave-38 T5, D21); a quiet machine gives room;
+#                      two asks on one reading give room once; gate_state prints the loads where
+#                      clears= stood. Mutations: the waiting clause put back, the owed count, the
+#                      five-minute reading
 #   §OPEN      T71     one rule says which requests are open (no ended= line, holder alive): the
 #                      scan, gate_list, gate_asked and the prune read it; a holder-gone request is
 #                      not showing and is pruned after BIONIC_GATE_KEEP; gate_asked answers over
@@ -159,6 +168,13 @@ export CLAUDE_CONFIG_DIR="$WORLD_ROOT/home"
 export CLAUDE_CODE_SESSION_ID="$WORLD_SID"
 export BIONIC_GATE_POLL=0.05
 export GATE_LIB="$GATE"
+
+# THE PROMISE, LIFTED (wave-38 T5; D21, AC-6.1; ADR-060). The cores the gate promises one work or
+# landing run is resources.sh's measured suite cost, read through its reader here and never
+# written as a literal in this suite: a remeasured cost moves every row below with it. `pr <n>`
+# prints n promises as the gate prints a sum of them (awk %g).
+PROMISE="$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores 2>/dev/null )"
+pr() { awk -v p="${PROMISE:-0}" -v n="$1" 'BEGIN { printf "%g", p * n }'; }
 mkdir -p "$CLAUDE_CONFIG_DIR/bionic"
 
 if [ -r "$GATE" ] && bash -n "$GATE" 2>/dev/null; then
@@ -166,6 +182,10 @@ if [ -r "$GATE" ] && bash -n "$GATE" 2>/dev/null; then
 else
   no "subject present and parses: payload/scripts/lib/gate.sh" "missing or unparseable"
 fi
+# The lift is proved before any row reads through it: an empty PROMISE would make every promise
+# row below compare against nothing.
+expect_regex "PR.0 resources.sh's reader names one suite's cost in cores, a positive decimal" \
+  '^[0-9]+(\.[0-9]+)?$' "$PROMISE"
 
 # ── fixture helpers ──────────────────────────────────────────────────────────
 
@@ -354,6 +374,71 @@ expect_eq "WD.4 share 1 on 8 cores: floored at 1, never 0" "1" "$(gw_of 1 8)"
 expect_eq "WD.5 the cores are read, not assumed: share 92 on 64 cores is 58" "58" "$(gw_of 92 64)"
 expect_eq "WD.6 an unreadable share is the default's room: 92 on 8 cores, 7" "7" "$(gw_of bogus 8)"
 
+# ── §WIDTH-ASK ───────────────────────────────────────────────────────────────
+# THE GATE ANSWERS A LANDING'S WIDTH (wave-38 T5; D21, D22; AC-6.1; ADR-060). `gate_width_ask
+# <landing>` prints how many runners that landing may start now, one integer: the gate's own
+# admission rule applied in sequence from the machine as it stands. b = max(load_1m, the promises
+# of admitted runs and of waiting landing requests); a run counts while b + PROMISE ≤ share ×
+# cores ÷ 100, each counted run adding PROMISE. PROMISE is resources.sh's measured suite cost,
+# lifted at the top of this suite. D22: the oldest active landing (the earliest asked among its
+# open requests, which carry `landing=<key>` from BIONIC_GATE_LANDING) is the one answered; any
+# other is answered 0 until it finishes; the oldest is answered at least 1 while nothing of its
+# own is open, so a landing always progresses. Planted: 8 cores at share 92, 7.36 cores of room.
+section "§WIDTH-ASK — the gate answers how many runners a landing may start (D21, D22; AC-6.1)"
+wask() { ( . "$GATE_LIB" 2>/dev/null; o="$(gate_width_ask "$@" 2>/dev/null)"; r=$?; printf '%s|%s' "$o" "$r" ); }
+share92w() { printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"; }
+# wa_seq <load> <n> — the sums b + PROMISE the rule tests for runs 1..n from an empty store
+wa_seq() {
+  awk -v p="${PROMISE:-0}" -v l="$1" -v n="$2" 'BEGIN {
+    for (k = 1; k <= n; k++) { b = l; if (s > b) b = s; printf "%s%.2f", (k > 1 ? " " : ""), b + p; s += p } }'
+}
+fresh width-ask
+share92w
+world_machine 8 8192 30 2.0
+expect_eq "WA.1 the gate promises a run resources.sh's suite cost: gate_promise's cores are the lifted PROMISE" \
+  "$PROMISE" "$( . "$GATE_LIB" 2>/dev/null; gate_promise k 2>/dev/null | cut -d: -f2 )"
+expect_eq "WA.2 load 2.0, nothing admitted ($(wa_seq 2.0 5) against 7.36): answered 4 (answer|rc)" \
+  "4|0" "$(wask LA)"
+world_machine 8 8192 30 6.0
+expect_eq "WA.3 load 6.0, nothing admitted ($(wa_seq 6.0 1) > 7.36: 0 by the rule): the oldest landing is answered 1" \
+  "1|0" "$(wask LA)"
+fresh width-ask-two
+share92w
+world_machine 8 8192 30 2.0
+BIONIC_GATE_LANDING=LA HOLD=1 ask_bg la1 landing a.test.sh 0; wait_for 20 has la1.rc
+la1_id="$(id_of la1)"
+expect_eq "WA.4 precondition: landing LA's run is admitted, tagged landing=LA, promised PROMISE (rc|landing|cores)" \
+  "0|LA|$PROMISE" "$(rc_of la1)|$(field "$la1_id" landing)|$(field "$la1_id" promise | cut -d: -f2)"
+expect_eq "WA.5 LA, the oldest active landing, one run admitted: answered 3 (its run counts in b)" "3|0" "$(wask LA)"
+expect_eq "WA.6 LB, younger, is answered 0 while LA is active" "0|0" "$(wask LB)"
+world_tick 5
+BIONIC_GATE_LANDING=LB HOLD=1 ask_bg lb1 landing b.test.sh 0; wait_for 20 has lb1.rc
+expect_eq "WA.7 precondition: a run of LB is admitted beside LA's, asked later (rc|asked LA|asked LB)" \
+  "0|1000|1005" "$(rc_of lb1)|$(field "$la1_id" asked)|$(field "$(id_of lb1)" asked)"
+expect_eq "WA.8 both active: LA, asked first, is answered by the rule over both runs (2)" "2|0" "$(wask LA)"
+expect_eq "WA.9 …and LB, active but younger, is answered 0" "0|0" "$(wask LB)"
+release la1
+expect_eq "WA.10 once LA has finished, LB is the oldest active landing and is answered by the rule (3)" "3|0" "$(wask LB)"
+expect_eq "WA.11 …and LA, now asking after LB, is answered 0" "0|0" "$(wask LA)"
+world_machine 8 8192 30 6.0
+expect_eq "WA.12 load 6.0 with LB's own run admitted: LB is answered 0 — it is progressing, so no runner joins the queue" \
+  "0|0" "$(wask LB)"
+release lb1
+expect_eq "WA.13 …and with nothing of its own open, load 6.0, it is answered 1 again" "1|0" "$(wask LB)"
+reap
+fresh width-ask-usage
+expect_eq "WA.14 no landing key is a usage error (rc 2)" "|2" "$(wask)"
+expect_eq "WA.15 a key with a space in it is a usage error (rc 2)" "|2" "$(wask 'a b')"
+MWA="$(mutant width-ask)"
+anchor file payload/scripts/lib/resources.sh 'CORES_PER_SUITE='
+sed -i.bak 's/^CORES_PER_SUITE=[0-9.]*/CORES_PER_SUITE=1.00/' "${MWA%/gate.sh}/resources.sh"
+fresh width-ask-mut
+share92w
+world_machine 8 8192 30 2.0
+expect_eq "WA.16 the mutant whose resources.sh says one core a suite runs and promises 1 (positive)" "1" \
+  "$( . "$MWA" 2>/dev/null; gate_promise k 2>/dev/null | cut -d: -f2 )"
+expect_eq "WA.17 …and answers 7 at load 2.0, not 4: the answer reads resources.sh's cost" "7|0" "$(GATE_LIB="$MWA" wask LA)"
+
 # ── §HARD ────────────────────────────────────────────────────────────────────
 section "§HARD — memory is the hard limit, the processor the soft one (AC-2.2)"
 fresh hard
@@ -375,7 +460,7 @@ world_machine 8 8192 30 1.0
 HOLD=1 ask_bg u1 work never-seen 0
 wait_for 20 has u1.rc
 expect_eq "H.6 a command with no cost file anywhere, nothing admitted: admitted" "0" "$(rc_of u1)"
-expect_eq "H.7 another unknown command while that one runs is promised one core (wave-33 T1, AC-8.1) and admitted beside it: rc 0" "0" "$(ask_fg u2 work never-seen-2 0)"
+expect_eq "H.7 another unknown command while that one runs is promised the suite cost (wave-33 T1, AC-8.1) and admitted beside it: rc 0" "0" "$(ask_fg u2 work never-seen-2 0)"
 release u1
 fresh hard4
 world_machine 8 8192 30 1.0
@@ -407,11 +492,12 @@ reap
 # admissions <cores> <total_mb> — four asks on one machine, every reading a share of the
 # machine; sets ADM to the four rcs. (Rows that start background askers never run inside
 # `$( )`: a poller started in a subshell would outlive the row unreaped.) Each command is
-# promised one core and no memory (wave-33 T1; Δ10), so the readings decide: w2 asks while the
+# promised the suite cost and no memory (wave-33 T1; Δ10), so the readings decide: w2 asks while the
 # memory reads 85%, over the share of 80; w4 while the processor reads the share's whole room.
 # Expected: 0 75 0 75 (the second over memory, the fourth over the processor while two are
-# admitted) on any machine whose share holds two commands (share × cores ÷ 100 ≥ 2: 3 cores
-# and up at 80); on a smaller one the third is refused too, the cost of a fixed core a command.
+# admitted) on any machine whose share holds two promises (share × cores ÷ 100 ≥ twice resources.sh's
+# suite cost, wave-38 T5: 5 cores and up at 80); on a smaller one the third is refused too, the cost
+# of a fixed promise a command.
 admissions() {
   local c="$1" q f
   q="$(awk -v c="$c" 'BEGIN { printf "%g", c * 0.25 }')"
@@ -441,11 +527,11 @@ hard_rows() {
 
 # ── §NOCONST ─────────────────────────────────────────────────────────────────
 section "§NOCONST — no machine constant decides (AC-2.3)"
-admissions 4 4096; small="$ADM"
+admissions 6 6144; small="$ADM"
 admissions 32 65536; large="$ADM"
 hard_rows 4 4096; hsmall="$HRD"
 hard_rows 32 65536; hlarge="$HRD"
-expect_eq "C.1 a 4-core 4 GB machine decides 0 75 0 75" "0 75 0 75" "$small"
+expect_eq "C.1 a 6-core 6 GB machine decides 0 75 0 75 (4 cores at 80 hold one promise of the suite cost, wave-38 T5)" "0 75 0 75" "$small"
 expect_eq "C.2 a 32-core 64 GB machine at the same percentages decides alike" "0 75 0 75" "$large"
 expect_eq "C.3 the memory rule on the small machine: 75, then 0 on a busy processor" "75 0" "$hsmall"
 expect_eq "C.4 and alike on the large one" "75 0" "$hlarge"
@@ -453,9 +539,9 @@ expect_eq "C.4 and alike on the large one" "75 0" "$hlarge"
 # ── §TWO ─────────────────────────────────────────────────────────────────────
 section "§TWO — several commands never start on one reading (AC-2.4)"
 fresh two
-# THE ROOM FOR ONE (wave-33 T1; Δ10): every command is promised one core and no memory, so the
+# THE ROOM FOR ONE (wave-33 T1; Δ10): every command is promised the suite cost and no memory, so the
 # room is the live processor reading's: 6.0 busy cores of the 6.4 the share of 80 allows on 8.
-# The first ask, nothing admitted, is admitted; a second (6.0 + 1 > 6.4) waits.
+# The first ask, nothing admitted, is admitted; a second (6.0 + the suite cost > 6.4) waits.
 world_machine 8 8192 60 6.0
 world_cost k 30
 HOLD=1 ask_bg t1 work k 0
@@ -615,6 +701,77 @@ sed -i.bak 's/ \&\& \[ "\$_R_kind" = "\$1" \]; then$/; then/' "$MK"
 cleared_kind_rows "$MK" resume-cleared-mut
 expect_eq "N.12r the mutant (no kind test on resume) still files the whole ask's request" "whole" "$(field "$CK_ID" kind)"
 expect_eq "N.12s the mutant hands the work ask the cleared whole request — the kind test is the rule" "2" "$CK_N1"
+
+# ── §TERM ────────────────────────────────────────────────────────────────────
+# A WAITER KILLED WITH TERM KEEPS ITS NUMBER (wave-38 T5; AC-6.2; ADR-060). The drain stops a
+# runner with TERM to it and to every descendant, the tree read first (line.sh `_line_kill_tree`).
+# A runner still in gate_ask's wait used to die with its holder line naming its dead pid, so its
+# who's next ask ended it rc=gone and took a fresh number, the youngest. gate_ask now traps TERM
+# while it waits: it hands the request back (holder=-, as a 75 does) and then dies of the TERM as
+# before, so the row's next ask under the same key and kind resumes the number and its asked=.
+# SIGKILL runs no trap: §RESUME-KIND's N.12 rows pin, unchanged, that such a request is ended
+# rc=gone. The mutant with the trap's line removed shows the old harm on the same fixture.
+section "§TERM — a waiter killed with TERM keeps its number for the row's next ask (AC-6.2)"
+term_tree() {  # <pid> — TERM to the pid, then to every descendant, the tree read before the first kill
+  local all="$1" front="$1" next p
+  while [ -n "$front" ]; do
+    next=""
+    for p in $front; do next="$next $(pgrep -P "$p" 2>/dev/null | tr '\n' ' ')"; done
+    front="$(echo $next)"; all="$all $front"
+  done
+  for p in $all; do kill -TERM "$p" 2>/dev/null; done
+}
+handed_back() { [ "$(field "$1" holder)" = - ]; }
+holder_as() {  # <id> <pid> — `asker` when the request's holder is that pid, else its holder as written
+  case "$(field "$1" holder)" in "$2:"*) echo asker ;; *) field "$1" holder ;; esac
+}
+# term_rows <gate lib> <name> — a holder admitted; landing ask tl1 (who tl, key k) parked; its tree
+# TERMed; five seconds on, the same who asks again (tl2). Sets TR_ID, TR_PRE (holder rc|kind|admitted|
+# whose holder), TR_BACK (holder|ended|admitted after the TERM), TR_NEXT (requests|asked|rc of TR_ID
+# after the next ask) and TR_ADM (tl2's rc|id once the holder ends).
+term_rows() {
+  local pid
+  fresh "$2"
+  world_machine 8 8192 60 6.0
+  world_cost h 30
+  world_cost k 30
+  GATE_LIB="$1" HOLD=1 ask_bg th work h 0; wait_for 20 has th.rc
+  GATE_LIB="$1" AGENT=tl HOLD=1 ask_bg tl1 landing k 600
+  wait_for 20 asked_by tl; wait_for 20 parked tl1
+  TR_ID="$(req_of tl)"; pid="$(cat "$D/tl1.pid" 2>/dev/null)"
+  TR_PRE="$(rc_of th)|$(field "$TR_ID" kind)|$(field "$TR_ID" admitted)|$(holder_as "$TR_ID" "$pid")"
+  term_tree "$pid"; wait "$pid" 2>/dev/null; wait_for 20 dead "$pid"
+  wait_for 5 handed_back "$TR_ID"
+  TR_BACK="$(holder_as "$TR_ID" "$pid")|$(field "$TR_ID" ended)|$(field "$TR_ID" admitted)"
+  world_tick 5
+  GATE_LIB="$1" AGENT=tl HOLD=1 ask_bg tl2 landing k 600
+  wait_for 20 has tl2.pid
+  wait_for 20 tl2_placed
+  TR_NEXT="$(nreq)|$(field "$TR_ID" asked)|$(field "$TR_ID" rc)"
+  release th
+  wait_for 20 has tl2.rc
+  TR_ADM="$(rc_of tl2)|$(id_of tl2)"
+  touch "$D/tl2.go"; wait_for 20 has tl2.endrc
+}
+tl2_placed() { resumed "$TR_ID" tl2 || nreq_is 3; }
+term_rows "$GATE" term
+expect_eq "TM.1 precondition: a holder is admitted and the landing's run waits, held by its asker (rc|kind|admitted|holder)" \
+  "0|landing||asker" "$TR_PRE"
+expect_eq "TM.2 killed with TERM, the waiter hands its request back cleanly: holder -, no ended line, nothing admitted" \
+  "-||" "$TR_BACK"
+expect_eq "TM.3 the row's next ask under the same key and kind resumes it: no new request, asked kept (requests|asked|rc)" \
+  "2|1000|" "$TR_NEXT"
+expect_eq "TM.4 when room appears it is admitted under its first number" "0|${TR_ID:-none}" "$TR_ADM"
+MTM="$(mutant term)"
+anchor file payload/scripts/lib/gate.sh "trap '_GATE_TERMED=1' TERM"
+sed -i.bak "/trap '_GATE_TERMED=1' TERM/d" "$MTM"
+term_rows "$MTM" term-mut
+expect_eq "TM.5 the mutant without the trap runs: its holder is admitted and its landing waits (positive)" \
+  "0|landing||asker" "$TR_PRE"
+expect_eq "TM.6 …killed with TERM its request still names the dead asker" "asker||" "$TR_BACK"
+expect_eq "TM.7 …so the next ask ends it rc=gone and takes a fresh number — the trap is the rule" \
+  "3|1000|gone" "$TR_NEXT"
+reap
 
 # ── §FIRST ───────────────────────────────────────────────────────────────────
 # first_rows <gate lib> <prefix> — a writer waits, a landing arrives, room appears; sets FIRST
@@ -797,7 +954,7 @@ dur_run() {
 }
 dur_run "$GATE" cost
 c1_id="$PK_ID"
-expect_eq "D.1 the promise is one core, no memory, and the key's longest kept duration" "0:1:90" "$(field "$c1_id" promise)"
+expect_eq "D.1 the promise is the suite cost, no memory, and the key's longest kept duration" "0:$PROMISE:90" "$(field "$c1_id" promise)"
 expect_contains "D.2 a reading taken during the run (gate_state at 55) sees it admitted" "admitted=1 " "$PK_STATE"
 expect_eq "D.3 the request was admitted and holds no peak= line: no memory is sampled for it" "1000|" \
   "$(field "$c1_id" admitted)|$(field "$c1_id" peak)"
@@ -812,7 +969,7 @@ expect_eq "D.8 the newest is this run: 30 s, at 1030" "30:1030" "$PK_LINE"
 expect_eq "D.9 the oldest planted line is gone" "0" "$(grep -c '^20:' "$(costf k)")"
 world_machine 8 8192 40 1.0
 HOLD=1 ask_bg c2 work never-seen 0; wait_for 20 has c2.rc
-expect_eq "D.10 a command never seen is promised one core and no seconds" "0:1:0" \
+expect_eq "D.10 a command never seen is promised the suite cost and no seconds" "0:$PROMISE:0" \
   "$(field "$(id_of c2)" promise)"
 release c2
 fresh cost-over
@@ -874,10 +1031,10 @@ expect_eq "D.15b AC-3.1 gate_ask pass is refused as an unknown kind (rc 2, the t
 fresh promise-public
 world_cost k 30
 world_cost k 45
-expect_eq "D.21 gate_promise prints one core and the key's longest duration, loading the store itself" \
-  "0:1:45" "$( . "$GATE_LIB" 2>/dev/null; gate_promise k 2>/dev/null )"
-expect_eq "D.22 a key never seen is promised one core and no seconds" \
-  "0:1:0" "$( . "$GATE_LIB" 2>/dev/null; gate_promise never 2>/dev/null )"
+expect_eq "D.21 gate_promise prints the suite cost and the key's longest duration, loading the store itself" \
+  "0:$PROMISE:45" "$( . "$GATE_LIB" 2>/dev/null; gate_promise k 2>/dev/null )"
+expect_eq "D.22 a key never seen is promised the suite cost and no seconds" \
+  "0:$PROMISE:0" "$( . "$GATE_LIB" 2>/dev/null; gate_promise never 2>/dev/null )"
 expect_eq "D.23 no key is a usage error (rc 2)" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_promise 2>/dev/null; echo $? )"
 
@@ -933,7 +1090,7 @@ expect_eq "CO.3 …and its duration, 2 s at 1002, after the planted line: no cor
 # A WHOLE RUN IS PROMISED ITS WIDTH, AND NOTHING IT RECORDS MOVES ANOTHER'S PROMISE (wave-32 T26;
 # D1, D5; wave-33 T1, Δ10). A whole admission holds the machine alone and takes gate_width
 # workers, so it is promised gate_width cores (6 at share 80 on 8). Its gate_end records its
-# seconds like any run's, unmarked: a never-seen key is promised one core before and after it,
+# seconds like any run's, unmarked: a never-seen key is promised the suite cost before and after it,
 # and gate_room charges an owed writer one core. The arms are the wave-32 critic's probe: a work
 # request for a.test.sh held, then a never-seen key asks, without and with a whole run on record.
 # The whole run's own next ask is pinned both ways: it waits while a.test.sh is held and is
@@ -946,9 +1103,9 @@ world_machine 8 8192 40 1.0
 world_cost a.test.sh 120
 HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
 expect_eq "WC.1 without a whole run: the work request for a.test.sh is admitted and held (rc)" "0" "$(rc_of wa)"
-expect_eq "WC.2 …a never-seen key is promised one core" "0:1:0" "$(wc_promise new.test.sh)"
+expect_eq "WC.2 …a never-seen key is promised the suite cost" "0:$PROMISE:0" "$(wc_promise new.test.sh)"
 expect_eq "WC.3 …gate_room --owed 1 charges one core for the owed writer beside the held one and gives room" \
-  "room=yes load=1.0/1.0 cores=8 promised=2 waiting=0 rc=0" "$(wc_room)"
+  "room=yes load=1.0/1.0 cores=8 promised=$(pr 2) waiting=0 rc=0" "$(wc_room)"
 expect_eq "WC.4 …and the never-seen key is admitted beside the held one (rc 0)" "0" \
   "$(ask_fg wn work new.test.sh 0)"
 fresh whole-cost-with
@@ -967,9 +1124,9 @@ expect_eq "WC.7 its gate_end wrote one line, 2 s at 1002, unmarked" "2:1002" \
 HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
 expect_eq "WC.8 with the whole run on record, the work request for a.test.sh is admitted and held (rc)" "0" \
   "$(rc_of wa)"
-expect_eq "WC.9 …a never-seen key is still promised one core" "0:1:0" "$(wc_promise new.test.sh)"
+expect_eq "WC.9 …a never-seen key is still promised the suite cost" "0:$PROMISE:0" "$(wc_promise new.test.sh)"
 expect_eq "WC.10 …gate_room --owed 1 still charges one core, and gives room" \
-  "room=yes load=1.0/1.0 cores=8 promised=2 waiting=0 rc=0" "$(wc_room)"
+  "room=yes load=1.0/1.0 cores=8 promised=$(pr 2) waiting=0 rc=0" "$(wc_room)"
 expect_eq "WC.11 …and the never-seen key is admitted beside the held one (rc 0)" "0" \
   "$(ask_fg wn work new.test.sh 0)"
 expect_eq "WC.12 the whole run's next ask, a.test.sh still held, waits (rc 75)" "75" \
@@ -1048,12 +1205,12 @@ touch "$WH_MARKS/go"; wait_for 60 wh_has rc
 
 # ── §ONE-CORE ────────────────────────────────────────────────────────────────
 # THE GATE DOES NOT FORECAST FROM HISTORY (wave-33 T1; D4 as amended, Δ10; AC-8.1). A command
-# that declares no width is promised one core and no memory; a whole run, the width it takes
+# that declares no width is promised the suite cost and no memory; a whole run, the width it takes
 # (gate_width); no cores or memory are read from recorded runs, and live load is the backstop.
 # The store planted here is the research's (research-wall-landing-gate.md §4): a 4.4-core line
 # from a 1-second run and a 3.94-core line from a 2,923-second one, in the 1.15.0 unkeyed shape.
 # Planted 8 cores, share 92 (7.36), 1.2 cores busy, 30% memory used.
-section "§ONE-CORE — a command is promised one core, whatever is on record (AC-8.1)"
+section "§ONE-CORE — a command is promised the suite cost, whatever is on record (AC-8.1)"
 legacy_cost() {  # <file name> <line>... — an unkeyed cost file, as 1.15.0 and before wrote them
   local f="$BIONIC_GATE_DIR/cost/$1"; shift
   mkdir -p "$BIONIC_GATE_DIR/cost"; printf '%s\n' "$@" >> "$f"
@@ -1064,25 +1221,27 @@ oc_room() { ( . "$GATE_LIB" 2>/dev/null; o="$(gate_room "$@" 2>&1)"; r=$?; print
 fresh one-core-empty
 share92
 world_machine 8 8192 30 1.2
-expect_eq "OC.1 an empty store promises a command one core, no memory, no seconds" "0:1:0" \
+expect_eq "OC.1 an empty store promises a command the suite cost, no memory, no seconds" "0:$PROMISE:0" \
   "$(promise_in "$REPO_ROOT" never.test.sh)"
 fresh one-core
 share92
 world_machine 8 8192 30 1.2
 legacy_cost version-compare.test.sh "33:4.4:1:900"
 legacy_cost seen.test.sh "33:3.94:2923:900"
-expect_eq "OC.2 with a 4.4-core line on record, an unseen command is promised one core" "0:1:0" \
+expect_eq "OC.2 with a 4.4-core line on record, an unseen command is promised the suite cost" "0:$PROMISE:0" \
   "$(promise_in "$REPO_ROOT" never.test.sh)"
-expect_eq "OC.3 …and the seen one, 3.94 cores on record, one core too: only its seconds are read" "0:1:2923" \
+expect_eq "OC.3 …and the seen one, 3.94 cores on record, the suite cost too: only its seconds are read" "0:$PROMISE:2923" \
   "$(promise_in "$REPO_ROOT" seen.test.sh)"
 HOLD=1 ask_bg oa work seen.test.sh 0; wait_for 20 has oa.rc
 HOLD=1 ask_bg ob work never.test.sh 0; wait_for 20 has ob.rc
 expect_eq "OC.4 two writers on that store are admitted side by side (A held, B beside it)" "0 0 ended=" \
   "$(rc_of oa) $(rc_of ob) ended=$(field "$(id_of oa)" ended)"
-expect_eq "OC.5 …each promised one core: A's seconds its own, B's none" "0:1:2923 0:1:0" \
+expect_eq "OC.5 …each promised the suite cost: A's seconds its own, B's none" "0:$PROMISE:2923 0:$PROMISE:0" \
   "$(field "$(id_of oa)" promise) $(field "$(id_of ob)" promise)"
-expect_eq "OC.6 gate_room charges two owed writers one core each beside the two admitted (1.2 + 4 ≤ 7.36)" \
-  "room=yes load=1.2/1.2 cores=8 promised=4 waiting=0 rc=0" "$(oc_room --owed 2)"
+expect_eq "OC.6 gate_room charges an owed writer the suite cost beside the two admitted (1.2 + 3 promises ≤ 7.36)" \
+  "room=yes load=1.2/1.2 cores=8 promised=$(pr 3) waiting=0 rc=0" "$(oc_room --owed 1)"
+expect_eq "OC.6b …and two owed writers the suite cost each, which is over the room (1.2 + 4 promises > 7.36)" \
+  "room=no load=1.2/1.2 cores=8 promised=$(pr 4) waiting=0 rc=1" "$(oc_room --owed 2)"
 reap
 fresh one-core-whole
 share92
@@ -1110,10 +1269,10 @@ side_by_side() {  # <name> <busy cores> <file=line>... — SB: A's rc, B's rc, A
 }
 side_by_side side-fresh 0
 expect_eq "SB.1 a fresh store, an idle machine: A is admitted, then B beside it while A holds" "0 0 ended=" "$SB"
-expect_eq "SB.2 …B was promised one core" "0:1:0" "$(field "$(id_of sb)" promise)"
+expect_eq "SB.2 …B was promised the suite cost" "0:$PROMISE:0" "$(field "$(id_of sb)" promise)"
 side_by_side side-stray 3.5 "a.test.sh=0:1.1:30:1" "x.test.sh=0:4.4:1:1"
 expect_eq "SB.3 the probe's row: a stray 4.4-core 1-second line, 3.5 cores busy: B is admitted beside A" "0 0 ended=" "$SB"
-expect_eq "SB.4 …promised one core, not the stray 4.4" "0:1:0" "$(field "$(id_of sb)" promise)"
+expect_eq "SB.4 …promised the suite cost, not the stray 4.4" "0:$PROMISE:0" "$(field "$(id_of sb)" promise)"
 reap
 
 # ── §DURATIONS ───────────────────────────────────────────────────────────────
@@ -1159,7 +1318,7 @@ expect_eq "DU.8 no unkeyed tests%run.sh was written" "absent" \
   "$([ -e "$BIONIC_GATE_DIR/cost/tests%run.sh" ] && echo present || echo absent)"
 pushd "$PB" >/dev/null || exit 1; HOLD=1 ask_bg pb3 work tests/run.sh 0; popd >/dev/null || exit 1
 wait_for 20 has pb3.rc
-expect_eq "DU.9 an admission asked from B is promised one core and B's seconds" "0|0:1:2" \
+expect_eq "DU.9 an admission asked from B is promised the suite cost and B's seconds" "0|0:$PROMISE:2" \
   "$(rc_of pb3)|$(field "$(id_of pb3)" promise)"
 reap
 git -C "$PA" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init 2>/dev/null
@@ -1173,11 +1332,11 @@ world_machine 8 8192 30 0
 PC="$D/projC"; mkdir -p "$PC"; git init -q "$PC"
 legacy_cost "tests%run.sh" "5:7:30:900"
 DUL_BEFORE="$(cat "$BIONIC_GATE_DIR/cost/tests%run.sh")"
-expect_eq "DU.12 an unkeyed tests%run.sh is read for its seconds only: one core, 30 s" "0:1:30" \
+expect_eq "DU.12 an unkeyed tests%run.sh is read for its seconds only: the suite cost, 30 s" "0:$PROMISE:30" \
   "$(promise_in "$PC" tests/run.sh)"
 run_in "$PC" pc 2
 expect_eq "DU.13 C's run writes C's own file" "2:1002" "$(cat "$(costf tests/run.sh "$PC")" 2>/dev/null)"
-expect_eq "DU.14 …which C's promise now reads, not the unkeyed 30 s" "0:1:2" "$(promise_in "$PC" tests/run.sh)"
+expect_eq "DU.14 …which C's promise now reads, not the unkeyed 30 s" "0:$PROMISE:2" "$(promise_in "$PC" tests/run.sh)"
 expect_eq "DU.15 …and the unkeyed file is neither moved nor changed" "$DUL_BEFORE" \
   "$(cat "$BIONIC_GATE_DIR/cost/tests%run.sh" 2>/dev/null)"
 
@@ -1186,10 +1345,10 @@ expect_eq "DU.15 …and the unkeyed file is neither moved nor changed" "$DUL_BEF
 # share × cores ÷ 100 is the processor room the share allows: gate_width floors it, the
 # admission test and gate_room compare against it unfloored, and it used to be computed at each
 # of the three. Now `_gate_share_cores` computes it and all three read it: a mutant that doubles
-# the room there moves the width, the admission and the room together. Likewise the one core a
-# command is promised and the room charges an owed writer comes from `_gate_cores_for`: a
-# mutant there moves both. Planted 8 cores, share 92 (7.36), 6.5 cores busy: a held run, a
-# second ask, and one owed writer.
+# the room there moves the width, the admission and the room together. Likewise the cores a
+# command is promised and the room charges an owed writer (resources.sh's suite cost, wave-38 T5)
+# come from `_gate_cores_for`: a mutant there moves both. Planted 8 cores, share 92 (7.36),
+# 6.5 cores busy: a held run, a second ask, and one owed writer.
 section "§SHARE-ROOM — the share's room and the one core are each computed at one site (AC-9.1)"
 share_room_rows() {  # <gate lib> <name> — SR: width, held rc, second rc, room line with rc
   fresh "$2"; share92
@@ -1200,17 +1359,17 @@ share_room_rows() {  # <gate lib> <name> — SR: width, held rc, second rc, room
   SR="$SR_W $(rc_of s1) $(rc_of s2) $(GATE_LIB="$1" oc_room --owed 1)"
 }
 share_room_rows "$GATE" share-room
-expect_eq "SR.1 shipped: width 7; the held run admitted; the second (6.5 + 1 > 7.36) waits; an owed writer finds no room" \
-  "7 0 75 room=no load=6.5/6.5 cores=8 promised=2 waiting=0 rc=1" "$SR"
+expect_eq "SR.1 shipped: width 7; the held run admitted; the second (6.5 + the suite cost > 7.36) waits; an owed writer finds no room" \
+  "7 0 75 room=no load=6.5/6.5 cores=8 promised=$(pr 2) waiting=0 rc=1" "$SR"
 MSR="$(mutant share-room)"
 anchor file payload/scripts/lib/gate.sh 'printf "%.10g", s * c / 100'
 sed -i.bak 's#printf "%.10g", s \* c / 100#printf "%.10g", s * c / 50#' "$MSR"
 share_room_rows "$MSR" share-room-mut
 expect_eq "SR.2 the room's one site doubled (14.72): width 14, the second ask admitted, room for the owed writer" \
-  "14 0 0 room=yes load=6.5/6.5 cores=8 promised=3 waiting=0 rc=0" "$SR"
+  "14 0 0 room=yes load=6.5/6.5 cores=8 promised=$(pr 3) waiting=0 rc=0" "$SR"
 MCO="$(mutant one-core)"
-anchor file payload/scripts/lib/gate.sh '    *)     echo 1 ;;'
-sed -i.bak 's#^    \*)     echo 1 ;;#    *)     echo 3 ;;#' "$MCO"
+anchor file payload/scripts/lib/gate.sh '    *)     _res_suite_cores ;;'
+sed -i.bak 's#^    \*)     _res_suite_cores ;;#    *)     echo 3 ;;#' "$MCO"
 fresh one-core-mut
 share92
 world_machine 8 8192 30 1.2
@@ -1253,24 +1412,26 @@ HOLD=1 ask_bg rw1 work k 0; wait_for 20 has rw1.rc
 ask_bg rw2 whole k 600; wait_for 20 asked_by rw2
 expect_eq "RM.5 one is admitted and a whole request waits behind it (rc|asked|admitted)" "0|1000|" \
   "$(rc_of rw1)|$(field "$(req_of rw2)" asked)|$(field "$(req_of rw2)" admitted)"
-expect_eq "RM.6 a waiting request gives no room, though the load and the promises fit" \
-  "room=no load=1.0/1.0 cores=8 promised=1 waiting=1 rc=1" "$(room)"
+# D21 (wave-38 T5; ADR-060): the room reads admitted runs and the owed count, never the queue, so
+# a waiting request alone no longer closes FILL for writers. The mutant puts the old clause back.
+expect_eq "RM.6 a waiting request alone gives room while the load and the promises fit (D21)" \
+  "room=yes load=1.0/1.0 cores=8 promised=$(pr 1) waiting=1 rc=0" "$(room)"
 MW="$(mutant room-wait)"
-anchor file payload/scripts/lib/gate.sh 'if (wait > 0) room = 0'
-sed -i.bak 's/if (wait > 0) room = 0/if (0) room = 0/' "$MW"
-expect_eq "RM.7 the mutant without the waiting clause runs and gives room — the clause is the rule" \
-  "room=yes load=1.0/1.0 cores=8 promised=1 waiting=1 rc=0" "$(GATE_LIB="$MW" room)"
+anchor file payload/scripts/lib/gate.sh 'if (r >= 0 && !fits(used, share)) room = 0'
+sed -i.bak 's/if (r >= 0 && !fits(used, share)) room = 0/&; if (wait > 0) room = 0/' "$MW"
+expect_eq "RM.7 the mutant with the waiting clause put back runs and gives no room on the same reading — the row discriminates" \
+  "room=no load=1.0/1.0 cores=8 promised=$(pr 1) waiting=1 rc=1" "$(GATE_LIB="$MW" room)"
 release rw1
-# Every command is promised one core and every owed writer charged one (wave-33 T1; Δ10), so
+# Every command is promised the suite cost and every owed writer charged one (wave-33 T1; Δ10), so
 # these rows set the room with the live load: 5.5, 4.5 and 5.5 busy cores of the 6.4 allowed.
 fresh room-prom
 world_machine 8 8192 30 5.5
 world_cost k 30
 HOLD=1 ask_bg rp1 work k 0; wait_for 20 has rp1.rc
-expect_eq "RM.8 a run is admitted promising one core (rc|promise)" "0|0:1:30" \
+expect_eq "RM.8 a run is admitted promising the suite cost (rc|promise)" "0|0:$PROMISE:30" \
   "$(rc_of rp1)|$(field "$(req_of rp1)" promise)"
 expect_eq "RM.9 a load of 5.5 plus the one core promised and not yet showing is over 6.4: no room" \
-  "room=no load=5.5/5.5 cores=8 promised=1 waiting=0 rc=1" "$(room)"
+  "room=no load=5.5/5.5 cores=8 promised=$(pr 1) waiting=0 rc=1" "$(room)"
 release rp1
 expect_eq "RM.10 once it has ended its promise no longer counts" \
   "room=yes load=5.5/5.5 cores=8 promised=0 waiting=0 rc=0" "$(room)"
@@ -1278,9 +1439,9 @@ fresh room-owed
 world_machine 8 8192 30 4.5
 world_cost k 30
 expect_eq "RM.11 one writer owed at one core: 4.5 + 1 fits" \
-  "room=yes load=4.5/4.5 cores=8 promised=1 waiting=0 rc=0" "$(room --owed 1)"
+  "room=yes load=4.5/4.5 cores=8 promised=$(pr 1) waiting=0 rc=0" "$(room --owed 1)"
 expect_eq "RM.12 two writers owed: 4.5 + 2 is over 6.4, no room" \
-  "room=no load=4.5/4.5 cores=8 promised=2 waiting=0 rc=1" "$(room --owed 2)"
+  "room=no load=4.5/4.5 cores=8 promised=$(pr 2) waiting=0 rc=1" "$(room --owed 2)"
 MO="$(mutant room-owed)"
 anchor file payload/scripts/lib/gate.sh 'prom = pc + owed * most'
 sed -i.bak 's/prom = pc + owed \* most/prom = pc + 0 * most/' "$MO"
@@ -1292,13 +1453,13 @@ world_cost k 30
 expect_eq "RM.14 the first ask on one reading, nothing offered yet: room" \
   "room=yes load=5.5/5.5 cores=8 promised=0 waiting=0 rc=0" "$(room --owed 0)"
 expect_eq "RM.15 the second ask on the same reading counts the first: 5.5 + 1 is over 6.4" \
-  "room=no load=5.5/5.5 cores=8 promised=1 waiting=0 rc=1" "$(room --owed 1)"
+  "room=no load=5.5/5.5 cores=8 promised=$(pr 1) waiting=0 rc=1" "$(room --owed 1)"
 fresh room-nocost
 world_machine 8 8192 30 1.0
 expect_eq "RM.16 no cost on record and nothing owed: room" \
   "room=yes load=1.0/1.0 cores=8 promised=0 waiting=0 rc=0" "$(room)"
 expect_eq "RM.17 no cost on record: one writer not yet showing is charged one core (wave-33 T1, AC-8.1): room" \
-  "room=yes load=1.0/1.0 cores=8 promised=1 waiting=0 rc=0" "$(room --owed 1)"
+  "room=yes load=1.0/1.0 cores=8 promised=$(pr 1) waiting=0 rc=0" "$(room --owed 1)"
 fresh room-mem
 world_machine 8 8192 85 1.0
 world_cost k 30
@@ -1312,9 +1473,9 @@ world_cost k 30
 expect_eq "RM.20 an unreadable five-minute load with nothing admitted, waiting or owed: room" \
   "room=yes load=1.0/-1 cores=8 promised=0 waiting=0 rc=0" "$(BIONIC_PROBE_BUSY_CORES_5M=-1 room)"
 expect_eq "RM.21 …and with one writer owed: no room" \
-  "room=no load=1.0/-1 cores=8 promised=1 waiting=0 rc=1" "$(BIONIC_PROBE_BUSY_CORES_5M=-1 room --owed 1)"
+  "room=no load=1.0/-1 cores=8 promised=$(pr 1) waiting=0 rc=1" "$(BIONIC_PROBE_BUSY_CORES_5M=-1 room --owed 1)"
 expect_eq "RM.22 an unreadable memory reading with one writer owed: no room" \
-  "room=no load=1.0/1.0 cores=8 promised=1 waiting=0 rc=1" "$(BIONIC_PROBE_USED_PCT=-1 room --owed 1)"
+  "room=no load=1.0/1.0 cores=8 promised=$(pr 1) waiting=0 rc=1" "$(BIONIC_PROBE_USED_PCT=-1 room --owed 1)"
 expect_eq "RM.23 an owed count that is not a whole number is a usage error (rc 2)" "2" \
   "$( . "$GATE_LIB" 2>/dev/null; gate_room --owed x >/dev/null 2>&1; echo $? )"
 fresh room-state
@@ -1322,7 +1483,7 @@ world_machine 8 8192 30 1.0 2.5
 world_cost k 30
 HOLD=1 ask_bg rs1 work k 0; wait_for 20 has rs1.rc
 expect_eq "RM.24 gate_state prints the loads and the promised cores where clears= stood" \
-  "share=80 used=30 admitted=1 waiting=0 landing-waiting=0 load=1.0/2.5 promised=1" "$(state)"
+  "share=80 used=30 admitted=1 waiting=0 landing-waiting=0 load=1.0/2.5 promised=$(pr 1)" "$(state)"
 expect_absent "RM.25 …and no clears= field" "clears=" "$(state)"
 release rs1
 # ── §OWED ────────────────────────────────────────────────────────────────────
@@ -1460,7 +1621,7 @@ printf '90\n' > "$BIONIC_GATE_DIR/idle"
 expect_eq "OW.20 the run is admitted (positive), idle 90 over the reading 50: used=90" \
   "0|share=80 used=90" "$(rc_of ou1)|$(state | cut -d' ' -f1,2)"
 expect_eq "OW.21 used=90 over a share of 80, the raw reading 50: no room" \
-  "room=no load=1.0/1.0 cores=8 promised=1 waiting=0 rc=1" "$(room)"
+  "room=no load=1.0/1.0 cores=8 promised=$(pr 1) waiting=0 rc=1" "$(room)"
 release ou1
 
 # ── §OPEN ────────────────────────────────────────────────────────────────────
@@ -1873,7 +2034,7 @@ world_machine 8 8192 40 1.0
 world_cost big 60
 expect_eq "I.5 a never-seen key on an idle gate: admitted" "0" \
   "$(ask_fg in1 work never-seen 0)"
-expect_eq "I.6 its promise is one core, no memory, no seconds" "0:1:0" "$(field "$(req_of in1)" promise)"
+expect_eq "I.6 its promise is the suite cost, no memory, no seconds" "0:$PROMISE:0" "$(field "$(req_of in1)" promise)"
 for rd in 80:0 81:75 85:75; do
   fresh "alone-${rd%%:*}"
   world_machine 8 8192 "${rd%%:*}" 1.0
@@ -1985,8 +2146,8 @@ touch "$D/ep.go"
 
 # ── §MACHINES ────────────────────────────────────────────────────────────────
 section "§MACHINES — the gate is proved on other machines (AC-7.3)"
-# The 2-core machine's share of 80 is 1.6 cores, less than two commands of one core each
-# (wave-33 T1; Δ10): its third ask is refused too, so its row reads 0 75 75 75.
+# The 2-core machine's share of 80 is 1.6 cores, less than one command of the suite cost
+# beside another (wave-33 T1; Δ10; wave-38 T5): its third ask is refused too, so its row reads 0 75 75 75.
 for m in "2 2048 0_75_75_75" "8 16384 0_75_0_75" "64 262144 0_75_0_75"; do
   set -- $m
   admissions "$1" "$2"
