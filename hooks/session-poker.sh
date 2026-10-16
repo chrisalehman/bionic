@@ -6579,17 +6579,20 @@ SITREP_SIT
 # each, all at one instant, to record/<wave>/sitrep.log; rc 1 (nothing written) when an item is empty, holds a
 # `|` or a line break, or is neither cited `(line <n>)` nor labelled `hypothesis:`, `diagnosis:` or `projection:`.
 sitrep_bottom_line() {
-  local plan="$1" root="$2" it at out="" dir log
+  local plan="$1" root="$2" it at out="" dir log cited='\(line [0-9]+\)'
   shift 2
   for it in "$@"; do
     case "$it" in
       *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — the item '$(clean "$it")' holds a | or a line break, which the record cannot carry; nothing is recorded."; return 1 ;;
     esac
     [ -n "${it//[[:space:]]/}" ] || { die "REFUSED — an empty item; nothing is recorded."; return 1; }
-    if ! printf '%s' "$it" | /usr/bin/grep -qE '\(line [0-9]+\)|^(hypothesis|diagnosis|projection):'; then
-      die "REFUSED — the item '$(clean "$it")' cites no rendered line (line <n>) and carries no label (hypothesis:, diagnosis:, projection:); nothing is recorded."
-      return 1
-    fi
+    case "$it" in
+      hypothesis:*|diagnosis:*|projection:*) : ;;
+      *) if ! [[ "$it" =~ $cited ]]; then
+           die "REFUSED — the item '$(clean "$it")' cites no rendered line (line <n>) and carries no label (hypothesis:, diagnosis:, projection:); nothing is recorded."
+           return 1
+         fi ;;
+    esac
   done
   at="$(sitrep_now)"
   at="$(date -u -r "$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
