@@ -4389,6 +4389,7 @@ PA_B="$(git -C "$RPA" rev-parse HEAD)"
 PA_R="$(fp_commit "$RPA" a.sh one)"
 PA_P="$(fp_commit "$RPA" CHANGELOG.md 'a wording fix')"
 ( cd "$RPA" && git checkout -q -B main "$PA_B" ) >/dev/null 2>&1
+mkdir -p "$RPA/lib"
 PA_M1="$(fp_commit "$RPA" lib/m.sh 'main code one')"
 ( cd "$RPA" && git checkout -q wave/01-fixture && git merge -q -s ours main -m 'merge main, ours' ) >/dev/null 2>&1
 PA_O="$(git -C "$RPA" rev-parse HEAD)"
