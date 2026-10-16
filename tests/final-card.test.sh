@@ -316,8 +316,8 @@ expect_eq "REPLY-2 reply '$FC_W5' (option 5, fix the finding instead) exits 0" "
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_regex "REPLY-2b …the finding is moved to fix on the user's words" \
   "^moved: record/wave-x/adversarial\\.md#1 to=fix by=Dana Fixture at=[0-9T:Z-]+ words=\"$FC_W5\"( session=[^ ]+)? why=\"" "$(/usr/bin/grep -F "moved: $FC_FID " "$PFC")"
-expect_regex "REPLY-2c …and both approvals are stamped with the same words" \
-  "^2$" "$(/usr/bin/grep -cF "\"$FC_W5\"" "$PFC")"
+expect_eq "REPLY-2c …and both approvals are stamped with the same words" \
+  "2" "$(/usr/bin/grep '^approved: ' "$PFC" | /usr/bin/grep -cF "\"$FC_W5\"")"
 fc_plan "$FC_GOOD"
 fc_card final
 fc_typed 1 "$FC_W2" "$FC_W5" 9 'ship it all now'
