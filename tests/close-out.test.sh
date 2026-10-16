@@ -291,7 +291,7 @@ base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan"
     facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
       | while IFS="	" read -r k q role scope; do
           case "$k" in
-            floor)  l="$(proof_line floor "$3" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log)" ;;
+            regression)  l="$(proof_line regression "$3" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log)" ;;
             review) l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$scope.md" "$q" w-read pass "$scope")" ;;
             *) continue ;;
           esac
@@ -2176,7 +2176,7 @@ hh_plant() {
   expect_nonempty "HH-0a precondition: the fixture plan already holds one floor proof, whose head the second reuses" "$h"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
     plan="$2"; h="$3"
-    proof_add_line "$plan" "$(proof_line floor "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
+    proof_add_line "$plan" "$(proof_line regression "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
     proof_add_line "$plan" "$(proof_waiver_line evidence "$h" "Chris Lehman" 2026-10-06T13:10:00Z "waive it")" > "$plan.pf" && mv "$plan.pf" "$plan"' \
     _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
   w="$(mktemp "$SANDBOX/hh-plan.XXXXXX")"
@@ -2338,7 +2338,7 @@ expect_eq "FL1 regression-run runs the declared floor at the working head (exit 
 # Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
 FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
   h="$(proof_attested regression "$2/record/wave-01-fixture/regression-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/regression-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
+  proof_add_line "$6" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/regression-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
 expect_eq "FL2 the judge attests the declared floor's log at the working head, and the floor fact is written from it" "$FL_H|1" \
   "$FL_AT|$(/usr/bin/grep -c "^proved: kind=regression head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
@@ -2363,7 +2363,7 @@ expect_eq "FL5 precondition: no floor fact, no tests/ at the working head, and n
   "$(/usr/bin/grep -c '^proved: kind=regression ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
 FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
   h="$(proof_attested regression "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$5" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
+  proof_add_line "$5" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
 expect_eq "FL6 AC-7.10 the judge attests the project's own runner's log, no key and no roster, and the floor fact is written from it" \
   "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=regression head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"

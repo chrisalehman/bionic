@@ -3906,7 +3906,7 @@ FS_OUT="; run suites its row named, proof-add regression; a second run: approve 
 # state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.
 export UNITS_FACTS_STATE=covered
 : > "$FS_COUNT"
-fs_plan 8 pending; fs_prove floor; fs_prove review
+fs_plan 8 pending; fs_prove regression; fs_prove review
 FS_H0="$(fs_git rev-parse HEAD)"
 expect_eq "FS.0 precondition: the product wrote a floor proof at the working head" "$FS_H0" "$(call proof_last "$FS_PLAN" floor)"
 expect_eq "FS.0b precondition: proof_state reads the plan's own tree: covered" "covered" \
@@ -3937,7 +3937,7 @@ expect_eq "FS.3d units_held names no hold for it either: it waits on a read, not
   "$(call units_held "$FS_PLAN" 8)"
 expect_eq "FS.3e a live:proof:regression read is a read of what exists, and is not judged by the state" "yes" \
   "$(sed 's/^| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — |  |/| T3 | 6 | review | r | critic | — | 10 | REQ-x | .bionic\/docs\/record\/fs\/r2.md | live:proof:regression |/' "$FS_PLAN" > "$FS_REPO/.bionic/live.md"; has_line "$(call units_ready "$FS_REPO/.bionic/live.md" 8)" T3)"
-fs_prove floor
+fs_prove regression
 FS_H1="$(fs_git rev-parse HEAD)"
 expect_eq "FS.4 the way out: a floor proof at the new head and integrate is ready again" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
@@ -3959,7 +3959,7 @@ FS_M="$(fs_git rev-parse HEAD)"
 expect_eq "FS.6 a merge from outside the run: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
 expect_contains "FS.6b …naming the merge, at which no run is recorded" \
   "commit ${FS_M:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(fs_why)"
-fs_prove floor
+fs_prove regression
 expect_eq "FS.6c …and a floor proof at the merge releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # THE COST. One proof_state per answer that turns on it, once per memoised command, and none when
@@ -3984,18 +3984,18 @@ printf '. "%s" >/dev/null 2>&1\nfsin() { units_ready "$1" 8 >/dev/null; ls "$TMP
 expect_contains "FS.7d inside the memoised command the state is kept in one file" "bionic-units-floor-" \
   "$(TMPDIR="$SANDBOX/fs-tmp" bash "$SANDBOX/fs-inside.sh" "$FS_PLAN")"
 expect_eq "FS.7e …which the command removes when it returns" "" "$(ls "$SANDBOX/fs-tmp")"
-fs_plan 7 pending; fs_prove floor; fs_prove review
+fs_plan 7 pending; fs_prove regression; fs_prove review
 fs_commit newdir/y.sh 'held'
 : > "$FS_COUNT"
 FS_W7="$(PATH="$FS_SHIM:$PATH" call units_waiting "$FS_PLAN" 7)"
 expect_eq "FS.8 integrate held for its step (current: 7): the wait is the step" "yes" "$(has_line "$FS_W7" "T3${TAB}step:8${TAB}-${TAB}-")"
 expect_eq "FS.8b …the state is not asked for a row held for its step" "0" "$(fs_count)"
-fs_plan 8 landed; fs_prove floor; fs_prove review
+fs_plan 8 landed; fs_prove regression; fs_prove review
 fs_commit newdir/z.sh 'after the merge'
 : > "$FS_COUNT"
 expect_eq "FS.9 integrate landed: nothing is ready" "" "$(PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.9b …and with no open row reading proof:regression the state is not asked" "0" "$(fs_count)"
-fs_plan 8 pending; fs_prove floor; fs_prove review
+fs_plan 8 pending; fs_prove regression; fs_prove review
 FS_H4="$(fs_git rev-parse HEAD)"
 fs_commit newdir/w.sh 'pending again'
 FS_X4="$(fs_git rev-parse HEAD)"
@@ -4017,7 +4017,7 @@ expect_eq "FS.10 proof_state's first field over an unproved commit is uncovered"
 expect_eq "FS.11 …and integrate's wait carries the reason: the commit, and that no run is recorded at it" \
   "${FS_LEAD} ${FS_H4:0:12}, commit ${FS_X4:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
   "$(fs_why)"
-fs_prove floor
+fs_prove regression
 expect_eq "FS.11b …and a floor proof at the head walks nothing: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
 # PLAN SHAPES THAT WERE READY BEFORE: each now says what to do.
@@ -4051,7 +4051,7 @@ section "§INTEGRATE-JUDGE — integrate's proof:review is met only by the judge
 # not handed in (the stop wall, the card, the dispatch wall) is a wait saying so.
 # The plan is §FLOOR-STANDS's, at a head the floor proof names (covered), with one reading of the
 # product's writer whose result is fail.
-fs_plan 8 pending; fs_prove floor
+fs_plan 8 pending; fs_prove regression
 IJ_H="$(fs_git rev-parse HEAD)"
 out="$(call proof_add_line "$FS_PLAN" "$(call proof_line review "$IJ_H" 2026-10-04T12:00:00Z record/fs/structure.md structure w-read fail piece)")" \
   && printf '%s\n' "$out" > "$FS_PLAN"
@@ -4433,13 +4433,13 @@ expect_eq "BR-2 the same plan with the markers taken off has no review-born row 
 # ============================================================
 section "§BORN-FLOOR — wave-36 T7: a row born of the floor's red carries \` born: regression <suite>\`, and units_born_marks reads both born markers for the judge (REQ-3 AC-3.2; D9, D2)"
 # ============================================================
-# `task-add --born regression:<suite>` hands units_add_row the born value `floor <suite>`, so the row's `- <id>:` line
+# `task-add --born regression:<suite>` hands units_add_row the born value `regression <suite>`, so the row's `- <id>:` line
 # ends ` born: regression <suite>`. units_born_marks prints `<id>\t<review|floor>\t<rating or suite>` per `- <id>:` line
 # carrying either marker, read where units_born reads (the first line per id, fences skipped): what lib/proof.sh's
 # judge joins with the landing record to hold a born row's landing. units_born, the fix-cap's count, reads the
 # review marker alone, so a floor-born row counts nothing against the cap.
-call units_add_row "$SANDBOX/born.md" T5 4 build 'fix the floor red' w-T5 '—' 30 REQ-x payload/d.sh '' 'floor a.test.sh' > "$SANDBOX/born-regression.md"
-expect_regex "BF-1 units_add_row with the born value floor a.test.sh: the row's line ends born: regression a.test.sh" \
+call units_add_row "$SANDBOX/born.md" T5 4 build 'fix the floor red' w-T5 '—' 30 REQ-x payload/d.sh '' 'regression a.test.sh' > "$SANDBOX/born-regression.md"
+expect_regex "BF-1 units_add_row with the born value regression a.test.sh: the row's line ends born: regression a.test.sh" \
   '^- T5: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression a\.test\.sh$' "$(/usr/bin/grep '^- T5:' "$SANDBOX/born-regression.md")"
 expect_eq "BF-2 units_born_marks reads both markers, each with its rating or suite; the fenced example is not one" \
   "T2${TAB}review${TAB}S2 on

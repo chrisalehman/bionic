@@ -341,7 +341,7 @@ sev_fact() {  # <kind> <question> <scope>
     _ "$SEV_LIB" "$1" "$SEV_C1" "record/wave-01-fixture/planted-$2-$3.md" "$2" "$3")"
 }
 sev_cur() { sed "s/^current: .*/current: $1/" "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"; }
-sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-06T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_put "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-06T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
 sev_rec c-fix fail "findings: 2" "finding: 1 S2 on lib/a.sh:9 the core path gives a wrong answer" "shown: 1 bash lib/a.sh --core" \
   "finding: 2 S4 off - a comment misstates it"
@@ -1062,7 +1062,7 @@ printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
 chk_id() { printf 'record/wave-01-fixture/%s.md#1' "$1"; }
 chk_cur() { sed -n 's/^current: //p' "$PSEV"; }
 SEV_C1="$(git -C "$SEV_WT" rev-parse HEAD)"
-sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_put "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
 sev_rec k-base flag "findings: 1" "finding: 1 S4 off - a word the reader rated"
 sev_cur 4; sev_add k-base chk-crit; sev_cur 7
@@ -2994,7 +2994,7 @@ fa_now() { sed -n 's/^current: //p' "$PFA"; }
 fa_add() { s42_snap "$RFA" "$PFA"; poke "$RFA" proof-add regression "$@"; }  # <log>... -> proof-add regression, the plan snapshotted first
 fa_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFA" | tail -n 1; }
 fa_keys() {  # -> "<floor:>|<floor-attestation:>", read by the product's config reader
-  bash -c '. "$1"; printf "%s|%s" "$(config_value "$2" floor "")" "$(config_value "$2" floor-attestation "")"' _ "$FA_ROOTS" "$RFA" 2>/dev/null
+  bash -c '. "$1"; printf "%s|%s" "$(config_value "$2" regression-command "")" "$(config_value "$2" floor-attestation "")"' _ "$FA_ROOTS" "$RFA" 2>/dev/null
 }
 fa_fact evidence piece; fa_fact structure piece; fa_fact structure whole; fa_fact adversarial piece; fa_fact adversarial whole
 # The logs, as a project's own runner leaves them: `{ echo "head=… dirty=…"; pnpm ci:local; echo "rc=$?"; } > <log>`.
@@ -4457,7 +4457,7 @@ expect_contains "FR-1c control: a verb that stays answers its own usage, not unk
   "2|poker: finding-move takes" "$RC|$OUT"
 expect_absent "FR-1d …and that answer does not call it unknown" "unknown verb" "$OUT"
 FR_H="$(git -C "$SEV_WT" rev-parse HEAD)"
-sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-08T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$FR_H")"
+sev_put "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-08T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$FR_H")"
 SEV_C1="$FR_H"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
 sev_rec k-final flag "findings: 1" "finding: 1 S3 off - a message the reader rated" "unsure: 1 which shells print it"
@@ -5086,7 +5086,7 @@ c7_plan 6 wave/01-fixture "$(c7_floor "$C7_B")
 $(c7_reads "$C7_C")"
 C7_UNC="$(c7_judge)"
 expect_regex "C7-2 precondition: the judge reads the floor uncovered from B to C, naming commit C (its line, from the library)" \
-  "^floor	uncovered	${C7_B}\\.\\.${C7_C}	.*${C7_C:0:12}" "$C7_UNC"
+  "^regression	uncovered	${C7_B}\\.\\.${C7_C}	.*${C7_C:0:12}" "$C7_UNC"
 poke "$R7" current 7
 c7_unchanged "C7-3 AC-1.2 current 7 with the floor proof at B and the head at C"
 expect_contains "C7-3b …in the judge's words, naming the range and the commit no run proves" "$C7_UNC" "$OUT"
@@ -5157,7 +5157,7 @@ bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
   facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
     | while IFS="	" read -r k q role scope; do
         case "$k" in
-          floor)  l="$(proof_line floor "$3" 2026-10-12T11:00:00Z record/floor.log)" ;;
+          regression)  l="$(proof_line regression "$3" 2026-10-12T11:00:00Z record/floor.log)" ;;
           review) l="$(proof_line review "$3" 2026-10-12T12:00:00Z "record/$q-$scope.md" "$q" w-read pass "$scope")" ;;
           *) continue ;;
         esac

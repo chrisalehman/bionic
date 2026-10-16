@@ -13767,7 +13767,7 @@ prf_at() {
   for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
             "$(proof_line review "$PRF_E" 2026-10-04T10:30:00Z record/w/adv.md adversarial w-crit flag whole)" \
             "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md evidence w-aud pass piece)" \
-            "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
+            "$(proof_line regression "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
     proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
   done
 )

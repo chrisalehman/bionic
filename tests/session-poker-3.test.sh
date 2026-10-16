@@ -353,7 +353,7 @@ s57_fact() {  # <question> <head> <result> <scope> [<plan>] -> a reading line, i
     _ "$S57_LIB" "$2" "record/wave-01-fixture/$1-$3-$4.md" "$1" "$3" "$4")"
 }
 s57_floor() {  # <head> [<plan>]
-  s57_add "${2:-$P57}" "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log' _ "$S57_LIB" "$1")"
+  s57_add "${2:-$P57}" "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log' _ "$S57_LIB" "$1")"
 }
 s57_waiver() {  # <question> <head>
   s57_add "$P57" "$(bash -c '. "$1" && proof_waiver_line "$2" "$3" "Dana Fixture" 2026-10-04T12:00:00Z "ship it"' _ "$S57_LIB" "$1" "$2")"
@@ -1157,7 +1157,7 @@ s61_fact() {  # <question> <head> <result> <scope>
   s61_add "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" "$6"' \
     _ "$S61_LIB" "$2" "record/wave-01-fixture/$1-$3-$4.md" "$1" "$3" "$4")"
 }
-s61_floor() { s61_add "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log' _ "$S61_LIB" "$1")"; }
+s61_floor() { s61_add "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log' _ "$S61_LIB" "$1")"; }
 s61_waiver() { s61_add "$(bash -c '. "$1" && proof_waiver_line "$2" "$3" "Dana Fixture" 2026-10-04T12:00:00Z "ship it"' _ "$S61_LIB" "$1" "$2")"; }
 s61_owed() {  # <head> [<question> to leave out] -> the floor and every reading the plan owes, at <head>
   local q
@@ -3856,7 +3856,7 @@ SBF_OFF="$(git -C "$RBF" rev-parse HEAD)"
 SBF_SUM="$(cksum < "$PBF")"
 poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:lib/a.sh
 expect_eq "BFV-1 --born regression: with a path that is no suite file name is the usage error, exit 2" "2" "$RC"
-expect_contains "BFV-1b …naming the shape" "floor:<suite>" "$OUT"
+expect_contains "BFV-1b …naming the shape" "regression:<suite>" "$OUT"
 expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 
 # THE MARKER NAMES ITS RED (wave-36 T42; D9, Δ8; born of critic-adversarial #1). The verb checks the shape, and the

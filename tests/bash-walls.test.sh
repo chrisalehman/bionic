@@ -2713,7 +2713,7 @@ expect_status "EG6j …and admitted once the section holds a reading of each que
 # FIDELITY: each debt is written by `land`'s own writer (lib/worktree.sh `_wt_debt_write`), into the
 # record `land` names for this plan; the proof and approval lines in their production writers' shape.
 eg6_floor_at() {  # <at> -> one floor proof line at that time
-  bash -c '. "$1" && proof_line floor "$2" "$3" record/w27/floor-late.log' _ "$EG6_LIB" "$H_EG6" "$1"
+  bash -c '. "$1" && proof_line regression "$2" "$3" record/w27/floor-late.log' _ "$EG6_LIB" "$H_EG6" "$1"
 }
 EG6_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
 EG6_REC="$R_EG6/.bionic/docs/record/active.md/landing-proofs.log"
