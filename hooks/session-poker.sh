@@ -475,7 +475,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh current <N>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
@@ -945,13 +945,22 @@ case "$VERB" in
     [ -n "${2#*=}" ] || usage "step-field: the value of '$(printf '%s' "${2%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is empty."
     PV_KEY="$1"; PV_FKEY="${2%%=*}"; PV_FVAL="${2#*=}"
     ;;
+  # `current <N> --check` (wave-38 T1; D20, AC-1.3): the flag after the step, for 5 to 8, asks the advance without writing.
   current)
-    [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) to move to."
+    { [ $# -eq 1 ] || [ $# -eq 2 ]; } && [ -n "$1" ] \
+      || usage "current takes the step number (0-8) to move to, and --check after a step from 5 to 8 to ask without writing."
     case "$1" in
       9|9a|9b|[0-8]|[0-8][ab]) : ;;
       *) usage "current: '$1' is not a step number (0-8); current: is a step number at every scale." ;;
     esac
-    PV_KEY="$1"
+    PV_KEY="$1"; PV_CHECK=""
+    if [ $# -eq 2 ]; then
+      [ "$2" = --check ] || usage "current: '$(printf '%s' "${2:0:24}" | tr -d '[:cntrl:]')' is not --check, the one word current takes after the step."
+      case "$1" in
+        [5-8]|[5-8][ab]) PV_CHECK=1 ;;
+        *) usage "current $1 --check: the check-only advance is for steps 5 to 8." ;;
+      esac
+    fi
     ;;
   # THE APPROVAL VERB (wave-26 T13; D3, AC-6.2). Two operands, both required: the name a row
   # reads as `approval:<name>`, in the grammar `units_validate` admits there, and the user's
@@ -4707,7 +4716,8 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   esac
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
-  [ "$rc" -eq 2 ] || cur8_owed_waivers "$out"
+  # The check-only advance (`current <N> --check`; wave-38 T1, D20) takes this judgment and not its ledger write.
+  [ "$rc" -eq 2 ] || [ -n "${PV_CHECK:-}" ] || cur8_owed_waivers "$out"
   [ "$rc" -eq 0 ] && return 0
   if [ "$rc" -eq 2 ]; then
     die "REFUSED — current: $step is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
@@ -4736,6 +4746,87 @@ $(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')
 COVER_JUDGED
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
+}
+
+# current_admit -> everything `current <N>` asks before it writes, on the copy plan_verb_open made: the projection
+# of `current:` (and the Step-4 fill), the dry commit through the real gate, and the facts judge at 7 and 8. Sets
+# PV_NEW, PV_FILLED, PV_DRYMODE (`judged` once the copy has been asked; `as-is` when the copy is the plan), PV_HOW;
+# exits on every refusal in the advance's own words and code. THE ONE PATH (wave-38 T1; D20, AC-1.3): the advance
+# calls it and then swaps; `current <N> --check` calls it and stops, so the two cannot answer differently.
+current_admit() {
+  if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
+    die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
+    if /usr/bin/grep -q '^##[[:space:]][[:space:]]*SDLC State' "$PV_PLAN" 2>/dev/null; then
+      die "missing: the line 'current: $PV_KEY' under ## SDLC State"
+    else
+      die "missing: a ## SDLC State section carrying 'current: $PV_KEY', above the plan's ## Tasks"
+    fi
+    exit 1
+  fi
+  PV_FILLED=""
+  if [ "$PV_KEY" = 4 ]; then
+    # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
+    PV_WB="$(plan_working_branch "$PV_PLAN")"
+    if [ -n "$PV_WB" ]; then
+      PV_FIELDS=()
+      PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
+        | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
+      if [ -n "$PV_WT" ]; then
+        PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
+        case "$PV_WT" in
+          "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
+          "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
+          ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
+        esac
+      fi
+      PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
+      [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
+      PV_FIELDS+=("branch=$PV_WB")
+      # D16's PLAN FACT (wave-28 T8; A-orch-140): at wave scale the block also records the machine share the
+      # run started under, `gate_share`'s value, through the same writer; a block already carrying the line
+      # keeps it (the fill never rewrites), and a plan of another scale gets none.
+      if [ "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" = wave ] && declare -F gate_share >/dev/null 2>&1; then
+        PV_SHARE="$(gate_share 2>/dev/null)"
+        [ -z "$PV_SHARE" ] || PV_FIELDS+=("share=$PV_SHARE")
+      fi
+      if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
+        cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
+        mv -f "$PV_NEW.2" "$PV_NEW"
+      fi
+    fi
+  fi
+  # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
+  # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
+  # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
+  # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
+  # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
+  # working head: the regression, and each reading its rigor and scale deal. Each line that does not
+  # hold is printed as the judge gave it.
+  # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
+  # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-12). The copy is dry-committed at Step 7 first, as
+  # every other step's is, so the gate refuses what a real commit at Step 7 would refuse in its own words (a
+  # declared red still owed, a missing line); then the judge holds the facts the run owes at the working head;
+  # then the swap, which does not commit the copy a second time. A plan already at 7 is the swap's to say.
+  PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
+  case "$PV_KEY" in
+    7)
+      if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
+        plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
+        cur7_judge 7
+        PV_DRYMODE=judged
+        PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
+      fi ;;
+    8|8a|8b)
+      cur7_judge 8
+      PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
+  esac
+  # THE DRY COMMIT AT 5 AND 6 IS RUN HERE, NOT IN THE SWAP (wave-38 T1; D20): the swap would run it for an
+  # `as-is` copy that differs from the plan, so this runs it on the same condition and hands the swap `judged`.
+  # Whatever the advance asks before it writes is asked in this function, so `current <N> --check` asks it all.
+  if [ "$PV_DRYMODE" = as-is ] && ! cmp -s "$PV_NEW" "$PV_PLAN"; then
+    plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
+    PV_DRYMODE=judged
+  fi
 }
 
 # mr_tier_keys -> one `<tier><TAB><keys>` line for each of T0..T4, the keys walls.sh `keys_for_tier` names (wave-30
@@ -10204,72 +10295,22 @@ BRF_EOF
         exit 1 ;;
     esac
     plan_verb_open current
-    if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
-      if /usr/bin/grep -q '^##[[:space:]][[:space:]]*SDLC State' "$PV_PLAN" 2>/dev/null; then
-        die "missing: the line 'current: $PV_KEY' under ## SDLC State"
+    # THE CHECK-ONLY ADVANCE (wave-38 T1; D20, AC-1.3): `current <N> --check` runs current_admit, the advance's own
+    # path up to its swap, in a subshell, and prints its verdict above whatever that path printed; it exits as the
+    # advance would and writes nothing (the copies go with the trap, the judge's ledger write is not taken).
+    if [ -n "$PV_CHECK" ]; then
+      PV_CK_OUT="$(current_admit 2>&1)"; PV_CK_RC=$?
+      if [ "$PV_CK_RC" -eq 0 ]; then
+        say "current $PV_KEY --check: would advance"
+        [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT"
+        cmp -s "$PV_NEW" "$PV_PLAN" && say "current — current: $PV_KEY: the plan already reads so; the advance would write nothing."
       else
-        die "missing: a ## SDLC State section carrying 'current: $PV_KEY', above the plan's ## Tasks"
+        die "current $PV_KEY --check: would refuse"
+        [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT" >&2
       fi
-      exit 1
+      exit "$PV_CK_RC"
     fi
-    PV_FILLED=""
-    if [ "$PV_KEY" = 4 ]; then
-      # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
-      PV_WB="$(plan_working_branch "$PV_PLAN")"
-      if [ -n "$PV_WB" ]; then
-        PV_FIELDS=()
-        PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
-          | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
-        if [ -n "$PV_WT" ]; then
-          PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
-          case "$PV_WT" in
-            "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
-            "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
-            ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
-          esac
-        fi
-        PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
-        [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
-        PV_FIELDS+=("branch=$PV_WB")
-        # D16's PLAN FACT (wave-28 T8; A-orch-140): at wave scale the block also records the machine share the
-        # run started under, `gate_share`'s value, through the same writer; a block already carrying the line
-        # keeps it (the fill never rewrites), and a plan of another scale gets none.
-        if [ "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" = wave ] && declare -F gate_share >/dev/null 2>&1; then
-          PV_SHARE="$(gate_share 2>/dev/null)"
-          [ -z "$PV_SHARE" ] || PV_FIELDS+=("share=$PV_SHARE")
-        fi
-        if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
-          cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
-          mv -f "$PV_NEW.2" "$PV_NEW"
-        fi
-      fi
-    fi
-    # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
-    # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
-    # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
-    # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
-    # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
-    # working head: the regression, and each reading its rigor and scale deal. Each line that does not
-    # hold is printed as the judge gave it.
-    # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
-    # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-12). The copy is dry-committed at Step 7 first, as
-    # every other step's is, so the gate refuses what a real commit at Step 7 would refuse in its own words (a
-    # declared red still owed, a missing line); then the judge holds the facts the run owes at the working head;
-    # then the swap, which does not commit the copy a second time. A plan already at 7 is the swap's to say.
-    PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
-    case "$PV_KEY" in
-      7)
-        if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
-          plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
-          cur7_judge 7
-          PV_DRYMODE=judged
-          PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
-        fi ;;
-      8|8a|8b)
-        cur7_judge 8
-        PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
-    esac
+    current_admit
     plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
     say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; $PV_HOW."
     exit 0
