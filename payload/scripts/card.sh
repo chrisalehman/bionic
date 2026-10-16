@@ -2193,7 +2193,7 @@ $(OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_list 2>/dev/null)
 CF_OWED
   # ROWS: every matrix row not discharged; a waived one is settled by its waiver: line.
   rows="$(_card_final_rows)"
-  while IFS='	' read -r ac st aud; do
+  while IFS='	' read -r ac st _; do
     [ -n "$ac" ] || continue
     wl="$(_card_final_block_key "$ac" waiver)"
     if [ "$st" = waived ] && [ -n "$wl" ]; then
