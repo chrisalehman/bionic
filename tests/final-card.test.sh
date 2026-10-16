@@ -120,7 +120,8 @@ $(fc_reads "$FC_C")"
 # THE USER'S WORDS: every reply this suite replays is typed in this session's transcript, whole.
 FC_CFG="$TMPROOT/fc-cfg"
 FC_PROJ="$FC_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$FC_LIB" "$RFC")"
-mkdir -p "$FC_PROJ"
+mkdir -p "$FC_PROJ" "$FC_CFG/bionic"
+printf '80\n' > "$FC_CFG/bionic/share"   # the prelude's pinned share, kept under this suite's own config dir
 printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFC" > "$RFC/.bionic/tmp/loaded-$SID.state"
 export CLAUDE_CONFIG_DIR="$FC_CFG"
 FC_TX="$FC_PROJ/$SID.jsonl"
@@ -244,13 +245,13 @@ fc_card final
 expect_eq "EARLY-4b card.sh final exits 1" "1" "$FC_RC"
 expect_eq "EARLY-4c …CARD-EARLY with the check's own verdict line as the reason" "CARD-EARLY — current 7 --check: would refuse" "$FC_ERR"
 expect_eq "EARLY-4d …nothing rendered, no card written" "|" "$FC_OUT|$(fc_cards)"
-forget_digest "$RFC"
+new_roster "$RFC"; forget_digest "$RFC"
 poke "$RFC" tick
 expect_contains "EARLY-5 the tick, an integrate row open, says the same line as advice" \
   "poker: CARD-EARLY — current 7 --check: would refuse" "$OUT"
 expect_contains "EARLY-5b …beside its WAIT line for the integrate row" "poker: WAIT T3" "$OUT"
 fc_plan "$FC_GOOD"
-forget_digest "$RFC"
+new_roster "$RFC"; forget_digest "$RFC"
 poke "$RFC" tick
 expect_contains "EARLY-5c on the settled run the tick still says its WAIT line (the reader is not vacuous)" "poker: WAIT T3" "$OUT"
 expect_absent "EARLY-5d …and no CARD-EARLY" "CARD-EARLY" "$OUT"
@@ -314,7 +315,7 @@ poke "$RFC" reply "$FC_W5"
 expect_eq "REPLY-2 reply '$FC_W5' (option 5, fix the finding instead) exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_regex "REPLY-2b …the finding is moved to fix on the user's words" \
-  "^moved: record/wave-x/adversarial\\.md#1 to=fix by=Dana Fixture at=[0-9T:Z-]+ words=\"$FC_W5\" why=\"" "$(/usr/bin/grep -F "moved: $FC_FID " "$PFC")"
+  "^moved: record/wave-x/adversarial\\.md#1 to=fix by=Dana Fixture at=[0-9T:Z-]+ words=\"$FC_W5\"( session=[^ ]+)? why=\"" "$(/usr/bin/grep -F "moved: $FC_FID " "$PFC")"
 expect_regex "REPLY-2c …and both approvals are stamped with the same words" \
   "^2$" "$(/usr/bin/grep -cF "\"$FC_W5\"" "$PFC")"
 fc_plan "$FC_GOOD"

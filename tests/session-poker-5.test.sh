@@ -223,7 +223,7 @@ section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines 
 # integrate row; its line is not the card's own.
 ET_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 et_plan() {  # <proof lines> <integrate status> -> PCK at current: 8 with a reads table, bound to this session
-  ck_plan 8 "$1"
+  ck_plan 8 "$1"; new_roster "$RCK"
   { printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
