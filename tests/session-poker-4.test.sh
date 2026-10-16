@@ -3759,27 +3759,27 @@ if [ "$PV7_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLA
 POKE_BOUND="$PV7_BOUND_WAS"
 
 # ============================================================
-section "§HANDOFF: handoff rewrites ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof and date -u; the human lines are carried (wave-30 T15; REQ-7 AC-7.2; D11)"
+section "§HANDOFF: handoff writes record/<wave>/handoff.md from the plan and the machine — heads, open rows, live writers, last proof, written: — and the plan's ## Handoff is one pointer line; the human lines are carried in the file (wave-30 T15; REQ-7 AC-7.2; D11; restated wave-38 T12, D23)"
 # ============================================================
 #
-#   handoff      the bound plan's `## Handoff` section is rewritten in place (created before `## Not Doing` when the
-#                plan has none). `written: <date -u>` is its first line; then the five machine facts: the heads of the
-#                working and integration branches; the open `## Tasks` rows (active, or pending with a worktree) and
-#                the last landed row; the roster's open rows with the run state the tick prints; the newest proof line;
-#                then five human lines carried verbatim from the old section, or a stub when it had none.
+#   handoff      writes the handoff file (record/<wave>/handoff.md by default) and rewrites the bound plan's `## Handoff`
+#                to the heading and one line `handoff: <path> written <local time>` (created before `## Not Doing` when
+#                the plan has none). The file carries `written: <date -u>`, the heads of the working and integration
+#                branches, the open `## Tasks` rows (active, or pending with a worktree), the last landed row, the live
+#                writers with the run state the tick prints, the newest proof line, and five human lines carried
+#                verbatim from the previous file, or a stub when it had none. tests/handoff-file.test.sh owns the
+#                file's grammar; this section keeps the facts §HANDOFF has always pinned, read from the file.
 #
 # It takes the plan transaction every plan verb takes (copy, dry commit through the real gate, checksum, swap). REFUSED
-# (1), the plan byte-identical: a plan with no ## Tasks or no ## SDLC State. An operand is the usage error (2).
+# (1), the plan byte-identical: a plan with no ## Tasks or no ## SDLC State. An operand that is no path under the docs
+# root is refused (2).
 # FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits) at current: 4, given the frontmatter
 # branch keys over real branches with real commits, a landed line and a proof line in ## SDLC State in the shapes
 # their writers use, a second active row and a pending row with a worktree, and roster rows from the production writer
-# (`roster_row_fixture`); the real verb; the evidence is the plan's own bytes read back by section.
+# (`roster_row_fixture`); the real verb; the evidence is the file's own bytes and the plan's section read back.
 HO_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 ho_body() {  # <plan> -> the lines of ## Handoff, the heading excluded
   awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next } h { print }' "$1"
-}
-ho_written() {  # <plan> -> the first non-blank line of ## Handoff
-  ho_body "$1" | awk 'NF { print; exit }'
 }
 ho_epoch() {  # <ISO-UTC> -> epoch seconds
   date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null || date -u -d "$1" +%s
@@ -3792,6 +3792,7 @@ git -C "$RHO" branch -f wave/01-fixture HEAD
 HO_INT="$(git -C "$RHO" rev-parse trunk)"
 HO_WORK="$(git -C "$RHO" rev-parse wave/01-fixture)"
 PHO="$(s42_plan "$RHO" 4)"
+HO_FILE="$RHO/.bionic/docs/record/wave-01-fixture/handoff.md"
 HO_LANDED="1111111111111111111111111111111111111111"
 HO_LANDED2="2222222222222222222222222222222222222222"
 awk -v l1="$HO_LANDED" -v l2="$HO_LANDED2" -v w="$HO_WORK" '
@@ -3810,21 +3811,24 @@ s42_snap "$RHO" "$PHO"
 s34_gate "$RHO"
 expect_eq "HO-0 precondition: the fixture plan (branch keys, landed, proof, active and pending rows, no Handoff, a Not Doing) is admitted by the real gate" "0" "$GATE_RC"
 expect_eq "HO-0b …the section extractor is empty before the first run (positive control: HO-1b reads it non-empty)" "" "$(ho_body "$PHO")"
-expect_eq "HO-0c …both branch heads resolve and differ (the heads the section must carry)" "1" "$([ -n "$HO_INT" ] && [ -n "$HO_WORK" ] && [ "$HO_INT" != "$HO_WORK" ] && echo 1 || echo 0)"
+expect_eq "HO-0c …both branch heads resolve and differ (the heads the file must carry)" "1" "$([ -n "$HO_INT" ] && [ -n "$HO_WORK" ] && [ "$HO_INT" != "$HO_WORK" ] && echo 1 || echo 0)"
 
 HO_T0="$(date -u +%s)"
 poke "$RHO" handoff
 HO_T1="$(date -u +%s)"
 expect_eq "HO-1 handoff exits 0" "0" "$RC"
-HO_BODY="$(ho_body "$PHO")"
-expect_true "HO-1b …a plan with no ## Handoff gains one (the extractor now reads it non-empty)" test -n "$HO_BODY"
+HO_PTR="$(ho_body "$PHO" | grep .)"
+expect_true "HO-1b …a plan with no ## Handoff gains one (the extractor now reads it non-empty)" test -n "$HO_PTR"
 expect_eq "HO-1c …placed immediately before ## Not Doing" "## Not Doing" "$(awk '/^## Handoff[ \t]*$/ { f = 1; next } f && /^## / { print; exit }' "$PHO")"
-HO_FIRST="$(ho_written "$PHO")"
+expect_contains "HO-1d …and the section is the one pointer line to the file" "handoff: .bionic/docs/record/wave-01-fixture/handoff.md written " "$HO_PTR"
+expect_eq "HO-1e …nothing else in it" "1" "$(printf '%s\n' "$HO_PTR" | grep -c .)"
+HO_BODY="$(cat "$HO_FILE" 2>/dev/null)"
+HO_FIRST="$(awk 'index($0, "written: ") == 1 { print; exit }' "$HO_FILE" 2>/dev/null)"
 case "$HO_FIRST" in
   'written: '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) HO_AT="${HO_FIRST#written: }" ;;
   *) HO_AT="" ;;
 esac
-expect_true "HO-2 the section's first line is written: <ISO-UTC> ($HO_FIRST)" test -n "$HO_AT"
+expect_true "HO-2 the file's written: line is <ISO-UTC> ($HO_FIRST)" test -n "$HO_AT"
 HO_E="$([ -n "$HO_AT" ] && ho_epoch "$HO_AT" || echo 0)"
 expect_eq "HO-2b …and it is within 60 s of the clock around the run" "1" "$([ "$HO_E" -ge $((HO_T0 - 60)) ] && [ "$HO_E" -le $((HO_T1 + 60)) ] && echo 1 || echo 0)"
 expect_contains "HO-3 the working branch and its head" "wave/01-fixture @ $HO_WORK" "$HO_BODY"
@@ -3835,31 +3839,31 @@ expect_contains "HO-4c …a pending row that has a worktree" "T6 · — · .work
 expect_absent "HO-4d …but not a pending row with none (T5)" "T5 ·" "$HO_BODY"
 expect_absent "HO-4e …nor a landed row (T1)" "T1 ·" "$HO_BODY"
 expect_contains "HO-5 the last landed row and its commit (by its time, not its place)" "T4 $HO_LANDED2 2026-10-08T10:30:00Z" "$HO_BODY"
-expect_contains "HO-6 the one live agent and the state the tick prints" "w-T2 · FINISHED rc=0 run=w-T2-x.test.sh" "$HO_BODY"
+expect_contains "HO-6 the one live writer, its tree and the state the tick prints" "w-T2 · 01-T2 · FINISHED rc=0 run=w-T2-x.test.sh" "$HO_BODY"
 expect_contains "HO-7 the last proof line (the newest, any kind)" "kind=review head=$HO_WORK at=2026-10-08T12:30:00Z" "$HO_BODY"
 expect_absent "HO-7b …and not the older one" "old-floor" "$HO_BODY"
-expect_contains "HO-8 a stub for each human line the old section did not have" "- resume instruction: (to fill)" "$HO_BODY"
-expect_eq "HO-8b …five of them" "5" "$(printf '%s\n' "$HO_BODY" | /usr/bin/grep -c -E '^- (decisions approved this session|tried and rejected|surprises|open blockers|resume instruction):')"
-expect_contains "HO-9 it says what it did" "handoff — ## Handoff rewritten at $HO_AT (3 open rows, 1 live agents); written to $(cd "${PHO%/*}" && pwd -P)/${PHO##*/}, dry-committed first." "$OUT"
+expect_contains "HO-8 a stub for each human line the previous file did not have" "risks: (to fill)" "$HO_BODY"
+expect_eq "HO-8b …five of them" "5" "$(printf '%s\n' "$HO_BODY" | /usr/bin/grep -c -E '^(mid-flight|order|rulings|lessons|risks): \(to fill\)$')"
+expect_contains "HO-9 it says what it did" "handoff — written to $(cd "${HO_FILE%/*}" 2>/dev/null && pwd -P)/handoff.md at $HO_AT (3 open rows, 1 live writers; safe to clear); the plan's ## Handoff points to it, dry-committed first." "$OUT"
 s34_gate "$RHO"
-expect_eq "HO-9b the plan with the section is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "HO-9b the plan with the pointer is admitted by the real gate" "0" "$GATE_RC"
 
-# A second run carries a human line edited by hand, refreshes written:, and does not grow the section.
-sed 's/^- surprises: .*/- surprises: the fixture was edited by hand\n  and it runs over two lines/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
-sed 's/^- resume instruction: .*/- resume instruction: run T6 next/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+# A second run carries a human line edited by hand in the file, refreshes written:, and does not grow the section.
+sed 's/^lessons: .*/lessons: the fixture was edited by hand\n  and it runs over two lines/' "$HO_FILE" > "$HO_FILE.ed" && mv "$HO_FILE.ed" "$HO_FILE"
+sed 's/^order: .*/order: run T6 next/' "$HO_FILE" > "$HO_FILE.ed" && mv "$HO_FILE.ed" "$HO_FILE"
 s42_snap "$RHO" "$PHO"
 HO_N1="$(ho_body "$PHO" | wc -l | tr -d ' ')"
 sleep 2
 poke "$RHO" handoff
 expect_eq "HO-10 a second handoff exits 0" "0" "$RC"
-HO_BODY2="$(ho_body "$PHO")"
-expect_contains "HO-10b …keeps the hand-edited line" "- surprises: the fixture was edited by hand" "$HO_BODY2"
+HO_BODY2="$(cat "$HO_FILE" 2>/dev/null)"
+expect_contains "HO-10b …keeps the hand-edited line" "lessons: the fixture was edited by hand" "$HO_BODY2"
 expect_contains "HO-10c …and its continuation line" "  and it runs over two lines" "$HO_BODY2"
-expect_contains "HO-10d …and the other edited line" "- resume instruction: run T6 next" "$HO_BODY2"
-expect_absent "HO-10e …the stub it replaced is gone" "- resume instruction: (to fill)" "$HO_BODY2"
-HO_AT2="$(ho_written "$PHO")"; HO_AT2="${HO_AT2#written: }"
+expect_contains "HO-10d …and the other edited line" "order: run T6 next" "$HO_BODY2"
+expect_absent "HO-10e …the stub it replaced is gone" "order: (to fill)" "$HO_BODY2"
+HO_AT2="$(awk 'index($0, "written: ") == 1 { sub(/^written: /, ""); print; exit }' "$HO_FILE" 2>/dev/null)"
 expect_eq "HO-10f …written: is refreshed (it differs from the first run's)" "1" "$([ -n "$HO_AT2" ] && [ "$HO_AT2" != "$HO_AT" ] && echo 1 || echo 0)"
-expect_eq "HO-10g …the section is the size it was, continuation line included (rewritten, never appended)" "$HO_N1" "$(ho_body "$PHO" | wc -l | tr -d ' ')"
+expect_eq "HO-10g …the plan's section is the size it was (rewritten, never appended)" "$HO_N1" "$(ho_body "$PHO" | wc -l | tr -d ' ')"
 expect_eq "HO-10h …one ## Handoff heading in the plan" "1" "$(/usr/bin/grep -c '^## Handoff' "$PHO")"
 expect_eq "HO-10i …and the rest of the plan is as it was (outside ## Handoff, cmp of the two reads)" \
   "$(awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/) } !h { print }' "$TMPROOT/s42-before")" \
@@ -3871,11 +3875,11 @@ roster_row_fixture session="$SID" name=w-T3 agent_id=a-w-T3 subagent_type=implem
   run_log="$HO_RD/w-T3-y.test.sh.log" run_pid=999999 run_cmd='tests/run.sh --only y.test.sh' >> "$(roster_of "$RHO")"
 roster_row_fixture session="$SID" name=w-T6 agent_id=a-w-T6 subagent_type=implementor >> "$(roster_of "$RHO")"
 poke "$RHO" handoff
-HO_BODY3="$(ho_body "$PHO")"
-expect_eq "HO-11 three live agents: handoff exits 0" "0" "$RC"
-expect_contains "HO-11b …a run whose pid is gone and wrote no end reads LOST" "w-T3 · LOST last-written=" "$HO_BODY3"
-expect_contains "HO-11c …a row with no run record reads no run" "w-T6 · no run" "$HO_BODY3"
-expect_contains "HO-11d …and the verb counts them" "3 live agents" "$OUT"
+HO_BODY3="$(cat "$HO_FILE" 2>/dev/null)"
+expect_eq "HO-11 three live writers: handoff exits 0" "0" "$RC"
+expect_contains "HO-11b …a run whose pid is gone and wrote no end reads LOST" "w-T3 · — · LOST last-written=" "$HO_BODY3"
+expect_contains "HO-11c …a row with no run record reads no run" "w-T6 · — · no run" "$HO_BODY3"
+expect_contains "HO-11d …and the verb counts them" "3 live writers" "$OUT"
 
 # Refusals: the plan stays byte-identical.
 sed 's/^## Tasks$/## Rows/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
@@ -3891,7 +3895,7 @@ expect_contains "HO-12d …saying so" "no ## SDLC State" "$OUT"
 sed 's/^## State$/## SDLC State/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
 s42_snap "$RHO" "$PHO"
 poke "$RHO" handoff now
-expect_eq "HO-13 an operand is the usage error" "2" "$RC"
+expect_eq "HO-13 an operand that is no path under the docs root is refused" "2" "$RC"
 expect_true "HO-13b …and the plan is untouched (cmp)" cmp -s "$TMPROOT/s42-before" "$PHO"
 POKE_BOUND="$HO_BOUND_WAS"
 

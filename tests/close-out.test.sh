@@ -920,9 +920,14 @@ expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
   "$(contains "$CO_OUT" "patrol: CronDelete")"
 expect_eq "1q: …and the disarm command" "yes" \
   "$(contains "$CO_OUT" "session-poker.sh disarm")"
-expect_eq "1r: act 9 — the handoff is rewritten to the closed form" "yes" \
-  "$(contains "$(cat "$P1/$PLAN_REL")" "resume point: NONE — DELIVERED at ")"
-expect_eq "1s: …and the open-run resume point is gone" "no" \
+HO_REL=".bionic/docs/record/wave-01-fixture/handoff.md"
+expect_eq "1r: act 9 — the closed form is line 2 of the handoff file (D23: the file is the store)" "yes" \
+  "$(case "$(sed -n 2p "$P1/$HO_REL" 2>/dev/null)" in "resume point: NONE — DELIVERED at "*) echo yes ;; *) echo no ;; esac)"
+expect_eq "1r2: …under the file's kind line" "bionic-handoff/v1" "$(sed -n 1p "$P1/$HO_REL" 2>/dev/null)"
+expect_eq "1r3: …whose last line is the one door, naming the file" "/bionic:canonical-sdlc $HO_REL" "$(tail -1 "$P1/$HO_REL" 2>/dev/null)"
+expect_eq "1r4: …and the plan's ## Handoff is the pointer to it" "yes" \
+  "$(contains "$(cat "$P1/$PLAN_REL")" "handoff: $HO_REL written ")"
+expect_eq "1s: …and the open-run resume point is gone from the plan" "no" \
   "$(contains "$(cat "$P1/$PLAN_REL")" "the tail has not run")"
 
 PLAN1="$(cat "$P1/$PLAN_REL")"
