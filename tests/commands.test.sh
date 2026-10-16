@@ -247,4 +247,34 @@ expect_nonempty "D8a: the payload search reaches the skill (bionic:decision is f
 expect_empty "D8b: …and no shipped file names bionic:reframe" \
   "$(/usr/bin/grep -Rn 'bionic:reframe' "$PAYLOAD" 2>/dev/null)"
 
+section "§SITREP: /bionic:sitrep is the sitrep skill, by the same symlink, name and invocability as decision (wave-38 T11; AC-2.1)"
+
+# The §DECISION reasoning holds here word for word: a plugin skill named `sitrep` is /bionic:sitrep, and a
+# same-named command file would be shadowed by it and never run.
+SR_LINK="${PAYLOAD}/skills/sitrep"
+SR_SKILL="${SR_LINK}/SKILL.md"
+expect_eq "SR1: payload/skills/sitrep is the symlink the other shipped skills use" \
+  "../../skills/sitrep" "$(readlink "$SR_LINK" 2>/dev/null)"
+expect_true "SR2: …and resolves to the skill file" test -f "$SR_SKILL"
+SR_FM="$(awk 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f { print }' "$SR_SKILL" 2>/dev/null)"
+expect_nonempty "SR3: the skill's frontmatter reads (the extractor found it)" "$SR_FM"
+expect_regex "SR4: the skill is named sitrep, so it answers /bionic:sitrep" '^name: sitrep$' "$SR_FM"
+expect_no_regex "SR5: …and the model may invoke it (asked \"where are we\", it runs)" 'disable-model-invocation' "$SR_FM"
+SR_DESC="$(printf '%s\n' "$SR_FM" | /usr/bin/grep '^description:')"
+expect_nonempty "SR6a: the description reads (the extractor found it)" "$SR_DESC"
+expect_true "SR6b: …and makes /bionic:sitrep, \"sitrep\", \"status\" and \"where are we\" its triggers" \
+  bash -c 'for t in /bionic:sitrep "\"sitrep\"" "\"status\"" "\"where are we\""; do printf "%s\n" "$1" | grep -qF -- "$t" || exit 1; done' _ "$SR_DESC"
+expect_regex "SR6c: …in the decision skill's shape: technique layer, no needs, deferred loading" \
+  '^layer: technique$' "$SR_FM"
+expect_true "SR6d: …needs: [] and loading: deferred" bash -c 'grep -qx "needs: \[\]" <<<"$1" && grep -qx "loading: deferred" <<<"$1"' _ "$SR_FM"
+expect_true "SR7: typed with no argument, it reports on the session's bound run" \
+  grep -qiE 'no argument.*bound run' "$SR_SKILL"
+expect_true "SR8a: the help page names /bionic:sitrep" \
+  grep -q '`/bionic:sitrep`' "${PAYLOAD}/commands/help.md"
+expect_false "SR8b: no command file shadows the skill's name" test -e "${PAYLOAD}/commands/sitrep.md"
+expect_nonempty "SR9: the payload search reaches the skill (bionic:sitrep is found through the symlink)" \
+  "$(/usr/bin/grep -Rn 'bionic:sitrep' "${PAYLOAD}/skills" 2>/dev/null)"
+expect_eq "SR10: the skill's directory holds its one Markdown file and nothing else" "SKILL.md" \
+  "$(ls "$SR_LINK/" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
 finish
