@@ -12754,7 +12754,8 @@ CGLEOF
   [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
   CGL_TICK="$(cgl_tick)"
   case "$lbl" in
-    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=1 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
+    # The owed writer is promised resources.sh's suite cost (wave-38 T5; D21), lifted, never a literal.
+    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores ) admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
     -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
                  "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
   esac

@@ -435,9 +435,13 @@ sed -i.bak 's/^CORES_PER_SUITE=[0-9.]*/CORES_PER_SUITE=1.00/' "${MWA%/gate.sh}/r
 fresh width-ask-mut
 share92w
 world_machine 8 8192 30 2.0
-expect_eq "WA.16 the mutant whose resources.sh says one core a suite runs and promises 1 (positive)" "1" \
-  "$( . "$MWA" 2>/dev/null; gate_promise k 2>/dev/null | cut -d: -f2 )"
-expect_eq "WA.17 …and answers 7 at load 2.0, not 4: the answer reads resources.sh's cost" "7|0" "$(GATE_LIB="$MWA" wask LA)"
+# A fresh bash, so the mutant gate.sh sources the mutant resources.sh beside it: this suite's own
+# shell already holds the shipped readers (world.sh), which gate.sh would otherwise keep.
+wask_fresh() { bash -c '. "$1" 2>/dev/null; o="$(gate_width_ask LA 2>/dev/null)"; printf "%s|%s" "$o" "$?"' _ "$1"; }
+expect_eq "WA.16 the mutant whose resources.sh says one core a suite runs and promises 1.00, as planted (positive)" "1.00" \
+  "$(bash -c '. "$1" 2>/dev/null; gate_promise k 2>/dev/null | cut -d: -f2' _ "$MWA")"
+expect_eq "WA.17 …and answers 7 at load 2.0, not 4: the answer reads resources.sh's cost" "7|0" "$(wask_fresh "$MWA")"
+expect_eq "WA.17b the same fresh shell on the shipped gate answers 4 (the control)" "4|0" "$(wask_fresh "$GATE")"
 
 # ── §HARD ────────────────────────────────────────────────────────────────────
 section "§HARD — memory is the hard limit, the processor the soft one (AC-2.2)"
