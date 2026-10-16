@@ -22,6 +22,10 @@
 # tests/sitrep.test.sh plants them; T10's `sitrep-log/v1` lines). A live landing is a real process
 # whose pid and start time are the `ready` event's carrier, the rule lib/slots.sh reads.
 #
+# THE CLOCK IS PINNED. Now is BIONIC_NOW_EPOCH, the poker's seam (sitrep_now), fixed below; the suite reads no
+# clock and waits on nothing, so the shell-lint census has no row for it. The verb's own `written:` instant is the
+# machine's clock, and session-poker-4 §HANDOFF HO-2b holds it to the clock around the run.
+#
 # ANTI-VACUITY. Every absence sits beside a positive read through the same extractor on the same
 # file: the shape extractor is proved non-empty by W2, the human-line extractor by C1, the safe
 # line by S1 before S2 reads its absence.
@@ -49,6 +53,8 @@ export TZ=America/Los_Angeles
 HF_PIDS=""
 trap 'for _p in $HF_PIDS; do kill "$_p" 2>/dev/null; done; cleanup' EXIT
 
+HF_NOW=1791324000     # 2026-10-06T22:00:00Z = 3:00 PM PDT, the pinned now
+export BIONIC_NOW_EPOCH="$HF_NOW"
 HF_DOOR=".bionic/docs/record/wave-01-fixture/handoff.md"
 HF_PLAN_REL=".bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 HF_OPEN_SHAPE="bionic-handoff/v1,sitrep head,sitrep line,written,plan,branch,integration,step,open rows,last landed,live writers,last proof,patrol,mid-flight,order,rulings,lessons,risks,safe,door"
@@ -82,7 +88,7 @@ hf_safe() { tail -2 "$1" 2>/dev/null | head -1; }   # <file> -> its safe line (t
 hf_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 hf_ev() { mkdir -p "${HF_REC%/*}"; printf 'line/v1|%s\n' "$1" >> "$HF_REC"; }
 hf_live() {  # -> HF_CARRIER, a live process's `<pid>:<start>` (lib/slots.sh's rule); its pid in HF_PID
-  sleep 900 & HF_PID=$!
+  tail -f /dev/null & HF_PID=$!
   HF_PIDS="$HF_PIDS $HF_PID"
   local s; s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HF_PID" 2>/dev/null)"
   # shellcheck disable=SC2086
@@ -136,14 +142,10 @@ printf 'sitrep-log/v1|at=2026-10-08T21:00:00Z|item=an older item (line 9)\n' > "
 printf 'sitrep-log/v1|at=2026-10-08T22:00:00Z|item=schedule holds at 1.2x (line 37)\n' >> "$HF_R/.bionic/docs/record/wave-01-fixture/sitrep.log"
 printf 'sitrep-log/v1|at=2026-10-08T22:00:00Z|item=hypothesis: the gate sets the close\n' >> "$HF_R/.bionic/docs/record/wave-01-fixture/sitrep.log"
 expect_false "W0 precondition: no handoff file before the first run" test -e "$HF_F"
-export BIONIC_NOW_EPOCH="$(date -u +%s)"
 poke "$HF_R" sitrep --line
 HF_LINE="$OUT"
 expect_nonempty "W0b precondition: the sitrep verb's one-line form reads non-empty on this world" "$HF_LINE"
-HF_T0="$(date -u +%s)"
 poke "$HF_R" handoff --mid-flight 'T2 is in its ready loop' --order 'T2, then T6'
-HF_T1="$(date -u +%s)"
-unset BIONIC_NOW_EPOCH
 expect_eq "W1 handoff exits 0" "0" "$RC"
 expect_true "W1b …and writes the default file record/<wave>/handoff.md" test -s "$HF_F"
 expect_eq "W2 every line in order: kind, sitrep head, machine lines, the five human lines, the safe line, the door" \
@@ -157,8 +159,6 @@ expect_absent "W4d …and not the older Bottom line (W4b read the same file)" "a
 expect_eq "W5 the sitrep line is byte-equal to sitrep --line (D13: one renderer)" "sitrep line: $HF_LINE" "$(sed -n 5p "$HF_F")"
 HF_W="$(hf_label "$HF_F" written)"; HF_AT="${HF_W#written: }"
 expect_regex "W6 written: is the ISO-UTC instant" '^written: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$HF_W"
-HF_E="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$HF_AT" +%s 2>/dev/null || date -u -d "$HF_AT" +%s 2>/dev/null || echo 0)"
-expect_eq "W6b …within 60 s of the clock around the run" "1" "$([ "$HF_E" -ge $((HF_T0 - 60)) ] && [ "$HF_E" -le $((HF_T1 + 60)) ] && echo 1 || echo 0)"
 expect_eq "W7 plan: the bound plan, project-root-relative" "plan: $HF_PLAN_REL" "$(hf_label "$HF_F" plan)"
 expect_eq "W8 branch: the working branch and its head" "branch: wave/01-fixture @ $HF_WORK" "$(hf_label "$HF_F" branch)"
 expect_eq "W8b integration: the integration branch and its head" "integration: trunk @ $HF_INT" "$(hf_label "$HF_F" integration)"
@@ -192,12 +192,12 @@ section "§CARRY: a second run with no flags carries the five human lines byte f
 # ============================================================
 HF_H1="$(hf_human "$HF_F")"
 expect_eq "C1 precondition: the human-line extractor reads five lines" "5" "$(printf '%s\n' "$HF_H1" | grep -c .)"
-sleep 1
+sed 's/^written: .*/written: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 poke "$HF_R" handoff
 expect_eq "C2 a second handoff with no flags exits 0" "0" "$RC"
 expect_eq "C2b …the five human lines carried byte for byte" "$HF_H1" "$(hf_human "$HF_F")"
 expect_eq "C2c …and the shape is the same" "$HF_OPEN_SHAPE" "$(hf_shape "$HF_F")"
-expect_ne "C2d …written: is refreshed" "$HF_W" "$(hf_label "$HF_F" written)"
+expect_ne "C2d …written: is refreshed (an older instant planted before the run is gone)" "written: 2026-01-01T00:00:00Z" "$(hf_label "$HF_F" written)"
 poke "$HF_R" handoff --risks 'the gate queue is long'
 expect_eq "C3 a flag on a later run exits 0" "0" "$RC"
 expect_eq "C3b …replaces its own line" "risks: the gate queue is long" "$(hf_label "$HF_F" risks)"
@@ -255,7 +255,6 @@ section "§SAFE: a ready in flight prints wait N minutes from the landing's rema
 # ============================================================
 # The record: T1 and T4 landed through the queue in 20 and 40 minutes (landing-report's median 30.0m).
 hf_world safe
-HF_NOW="$(date -u +%s)"
 hf_ev "ev=ready|row=T1|name=w-T1|commit=$HF_WORK|branch=wt/01-T1|tree=$HF_R/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-08T10:00:00Z"
 hf_ev "ev=published|row=T1|commit=$HF_WORK|kind=queue|by=-|why=-|at=2026-10-08T10:20:00Z"
 hf_ev "ev=ready|row=T4|name=w-T4|commit=$HF_WORK|branch=wt/01-T4|tree=$HF_R/.worktrees/01-T4|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-08T11:00:00Z"

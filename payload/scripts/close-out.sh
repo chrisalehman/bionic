@@ -1396,17 +1396,69 @@ step9_block() {
 STEP9
 }
 
+# THE HANDOFF FILE IS THE STORE (wave-38 T12; D23). The closed form is written into the run's handoff file — the
+# one the plan's `## Handoff` pointer names, else record/<wave>/handoff.md — as its line 2, under the kind line, with
+# the five human lines the file already holds kept; the plan's section becomes the one pointer line
+# `handoff: <path> written <local time>`. The file's grammar is session-poker.sh `handoff`'s closed form, line for
+# line, the door last.
+CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
+co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
+  local rel
+  [ -z "$CO_HO_FILE" ] || return 0
+  rel="$(awk '/^[[:space:]]*```/ { f = !f; next } f { next }
+    /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next }
+    h && index($0, "handoff: ") == 1 && / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$PLAN" 2>/dev/null)"
+  case "$rel" in
+    '') CO_HO_FILE="$DROOT/record/$WAVE_SLUG/handoff.md" ;;
+    /*) CO_HO_FILE="$rel" ;;
+    *) CO_HO_FILE="$ROOT/$rel" ;;
+  esac
+  CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
+  CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"
+}
 handoff_block() {
-  local main_sha
-  main_sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  co_handoff_where
   cat <<HANDOFF
 ## Handoff
 
-- resume point: NONE — DELIVERED at $NOW; $INTEGRATION @ ${main_sha:-?}.
-- branch: $WORKING merged into $INTEGRATION.
-- patrol: $PATROL_LINE
-- continuation: $CONT_REL
+handoff: $CO_HO_REL written $CO_HO_LOCAL
 HANDOFF
+}
+co_handoff_closed() {  # -> 0 when the handoff file's line 2 is the closed form
+  co_handoff_where
+  [ -f "$CO_HO_FILE" ] || return 1
+  case "$(sed -n 2p "$CO_HO_FILE" 2>/dev/null)" in 'resume point: NONE — DELIVERED at '*) return 0 ;; esac
+  return 1
+}
+co_handoff_write() {  # -> writes the closed form to the handoff file, the five human lines kept; rc 1 not written
+  local main_sha k got human="" tmp
+  co_handoff_where
+  main_sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  for k in mid-flight order rulings lessons risks; do
+    got=""
+    [ -f "$CO_HO_FILE" ] && got="$(awk -v k="$k: " 'f { if ($0 ~ /^[ \t]/) { print; next } exit } index($0, k) == 1 { f = 1; print }' "$CO_HO_FILE" 2>/dev/null)"
+    [ -n "$got" ] || got="$k: (to fill)"
+    human="${human:+$human
+}$got"
+  done
+  mkdir -p "${CO_HO_FILE%/*}" 2>/dev/null || return 1
+  [ ! -L "$CO_HO_FILE" ] || return 1
+  tmp="$CO_HO_FILE.close-out.$$"
+  {
+    printf 'bionic-handoff/v1\n'
+    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.\n' "$NOW" "$INTEGRATION" "${main_sha:-?}"
+    printf 'written: %s\n' "$CO_HO_WRITTEN"
+    printf 'plan: %s\n' "${PLAN#"$ROOT"/}"
+    printf 'branch: %s merged into %s.\n' "$WORKING" "$INTEGRATION"
+    printf 'patrol: %s\n' "$PATROL_LINE"
+    printf 'continuation: %s\n' "$CONT_REL"
+    printf '%s\n' "$human"
+    printf 'safe to clear\n'
+    printf '/bionic:canonical-sdlc %s\n' "$CO_HO_REL"
+  } > "$tmp" 2>/dev/null && mv -f "$tmp" "$CO_HO_FILE" 2>/dev/null && return 0
+  rm -f "$tmp" 2>/dev/null
+  return 1
 }
 
 # step8_present <file> -> 0 when `## SDLC State` carries a `Step 8:` line.
@@ -1568,17 +1620,19 @@ write_plan_blocks() {
   fi
 
   # A plan that carried no `## Handoff` section gets one rather than silently losing the
-  # act: the section is the run's own resume point, and its absence is not consent.
-  if ! grep -q 'resume point: NONE — DELIVERED at ' "$PLAN"; then
+  # act: the section is the run's resume pointer, and its absence is not consent.
+  if ! grep -qF "handoff: $CO_HO_REL written " "$PLAN"; then
     printf '\n%s\n' "$(handoff_block)" >> "$PLAN"
   fi
+  co_handoff_write || _co_refuse "the closed handoff could not be written to $CO_HO_FILE"
 
   # The readback, act by act: every phase-9 line this function claims to have written,
   # asked for back out of the file (phase 8 read its own back above).
   grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' "$PLAN" \
     || _co_refuse "the Step-9 delivered: line did not land in $PLAN"
   grep -qE '^current: 9$' "$PLAN" || _co_refuse "current: did not advance to 9 in $PLAN"
-  grep -q 'resume point: NONE — DELIVERED at ' "$PLAN" || _co_refuse "the handoff was not rewritten in $PLAN"
+  co_handoff_closed || _co_refuse "the closed form did not land in the handoff file $CO_HO_FILE"
+  grep -qF "handoff: $CO_HO_REL written " "$PLAN" || _co_refuse "the plan's ## Handoff does not point to $CO_HO_REL in $PLAN"
 }
 
 # ─── The gate ────────────────────────────────────────────────────────────────
@@ -1929,7 +1983,8 @@ do_check() {
     say "epic-row: $(epic_row)"
   fi
   say "patrol: $PATROL_LINE"
-  say "handoff: would be rewritten to the closed form (resume point NONE)"
+  co_handoff_where
+  say "handoff: would write the closed form (resume point NONE) to $CO_HO_REL; the plan's ## Handoff would point to it"
   # THE ARCHIVE IS NAMED, NEVER ASKED. `archive_run` has no dry mode and this verb has no
   # licence to move anything, so `check` reports the destination the binding fixed and
   # leaves the verdict to `run`, which asks once the plan reads closed.
@@ -2023,7 +2078,7 @@ do_run() {
                     say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
   gate_dry_run
   write_plan_blocks 9
-                    say "handoff: rewritten to the closed form (resume point NONE)"
+                    say "handoff: the closed form (resume point NONE) written to $CO_HO_REL; the plan's ## Handoff points to it"
                     say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
   act_archive
   insert_archived
