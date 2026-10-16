@@ -5230,7 +5230,8 @@ return 0
 # `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
 # `rule` (a ruling pushed to a writer), `matrix-set`, `waive-row`, `tasks-prose`, `epic-row` and
-# `continuation-fill` (T7's plan verbs) and `disposition` (T13's finding ledger) — `ruling-ack` and `rulings`
+# `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
+# replay into approve, waive, waive-row and finding-move) — `ruling-ack` and `rulings`
 # are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
@@ -5302,7 +5303,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition|reply)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"

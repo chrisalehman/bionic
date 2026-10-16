@@ -2027,15 +2027,67 @@ CF_OPEN
       *) CARD_EARLY_WHY="the readings cannot be judged at $head8: $st"; return 1 ;;
     esac
   fi
-  # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE ITSELF (`current <N> --check`, wave-38 T1): its exit decides.
+  # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE ITSELF (`current <N> --check`, wave-38 T1). A red check is
+  # early unless every refusal it prints is one of the card's own defaults settles (A-orch-11): its lines are read as
+  # the check captured them, never judged again here (`_card_settles`).
+  CF_SETTLE=""
   for n in 6 7 8; do
     out="$(_card_poke current "$n" --check)"; rc=$?
     [ "$rc" -eq 0 ] && continue
+    _card_settles "$out" && continue
     line="$(printf '%s\n' "$out" | awk 'NF { print; exit }')"; line="${line#poker: }"
     CARD_EARLY_WHY="${line:-current $n --check exited $rc}"
     return 1
   done
   return 0
+}
+
+# _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a default the card offers, the
+# items appended to CF_SETTLE (`waive:<q>`, `waive:regression`, `row:<AC>`); 1 at the first refusal none settles.
+# THE CARD'S OWN DEFAULTS (D17, D19; A-orch-11): a matrix row the auditor has not confirmed (waived with the user's
+# words, `waive-row`), a question whose newest reading fails (`waive <q>`), and the regression's word (`waive
+# regression`, only where the waive verb admits the question). Anything else the check prints is CARD-EARLY: a missing
+# proof, another refused dry commit, an uncovered or absent reading, a declared check or debt not held, a judge that
+# could not deal the plan. The dry commit stops at its first refusal, so a check names one wall at a time; the judge
+# at 8 runs no dry commit and names every fact it finds, and the rows are read from the matrix, so the card offers
+# each of them whichever refusal the dry commit stopped on.
+_card_settles() {
+  local l q judge=0 reading=0 any=0
+  local -a _cs_f=()
+  while IFS= read -r l; do
+    case "$l" in
+      "bionic: commit refused — the auditor has not confirmed "*)
+        q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
+        CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
+      "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
+      "bionic: commit refused — no regression proof on this plan yet "*)
+        proof_question_ok regression 2>/dev/null || return 1
+        CF_SETTLE="${CF_SETTLE}waive:regression"$'\n'; any=1 ;;
+      "bionic: "*) return 1 ;;
+      "- "*": the newest reading is result=fail "*)
+        [ "$reading" = 1 ] || continue
+        q="${l#- }"; q="${q%%:*}"; CF_SETTLE="${CF_SETTLE}waive:$q"$'\n' ;;
+      "- "*) [ "$reading" = 1 ] && return 1 ;;
+      "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
+      "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
+      "poker: REFUSED"*) return 1 ;;
+      *"	"*)
+        [ "$judge" = 1 ] || continue
+        IFS='	' read -r -a _cs_f <<< "$l"
+        case "${_cs_f[0]}" in
+          review)
+            [ "${_cs_f[4]:-}" = failing ] || return 1
+            CF_SETTLE="${CF_SETTLE}waive:${_cs_f[1]}"$'\n' ;;
+          floor|regression)
+            proof_question_ok regression 2>/dev/null || return 1
+            CF_SETTLE="${CF_SETTLE}waive:regression"$'\n' ;;
+          *) return 1 ;;
+        esac ;;
+    esac
+  done <<CF_CHECKED
+$1
+CF_CHECKED
+  [ "$any" = 1 ]
 }
 
 # THE ITEMS. One array entry per item, in the card's order; a settled item carries what settled it and is shown, never
@@ -2055,15 +2107,15 @@ _card_final_approved() {  # <name> -> the plan's approved: line for it, or nothi
     insdlc && /^approved:[ \t]/ { split($0, w, /[ \t]+/); if (w[2] == ENVIRON["CF_NM"] && w[3] == "by") { print; exit } }' "$CF_PLAN"
 }
 
-_card_final_rows() {  # -> `<AC><TAB><status>` per matrix row not discharged, table order
+_card_final_rows() {  # -> `<AC><TAB><status><TAB><auditor>` per matrix row not discharged or not CONFIRMED, table order
   awk -F'|' '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
     inm && /^[ \t]*\|/ {
-      a = $2; s = $4; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s)
-      if (a == "" || a == "AC" || a ~ /^-+$/ || s == "discharged") next
-      printf "%s\t%s\n", a, s
+      a = $2; s = $4; u = $6; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", u)
+      if (a == "" || a == "AC" || a ~ /^-+$/ || (s == "discharged" && u == "CONFIRMED")) next
+      printf "%s\t%s\t%s\n", a, s, (u == "" ? "-" : u)
     }' "$CF_PLAN"
 }
 
@@ -2118,6 +2170,16 @@ _card_final_items() {  # -> fills the CF_* item arrays, CF_FIXED (the policy's l
     _card_final_add "approve:$nm" "approve $nm" "-" "-" "approve $nm" \
       "Withhold $nm: every other default applies; $nm stays owed and the card renders again when you give it." "$line"
   done
+  # THE WAIVERS A RED CHECK OWES (A-orch-11): `_card_settles` named them; each is opened on the person's ledger, as the
+  # judge's refusal opens it on an advance, so the ledger and the card agree.
+  while IFS= read -r key; do
+    case "$key" in
+      waive:?*) OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_open "$key" "waiver: ${key#waive:}" \
+        "poker: ${key#waive:} is not held at $CF_HEAD8; waiving it is an option on the final card (card.sh final)" >/dev/null 2>&1 ;;
+    esac
+  done <<CF_SETTLED
+${CF_SETTLE:-}
+CF_SETTLED
   # WAIVERS AND THE ITEMS WITH NO DEFAULT, from the owed ledger, in its order.
   while IFS='	' read -r key _ _ reply; do
     case "$key" in
@@ -2131,14 +2193,19 @@ $(OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_list 2>/dev/null)
 CF_OWED
   # ROWS: every matrix row not discharged; a waived one is settled by its waiver: line.
   rows="$(_card_final_rows)"
-  while IFS='	' read -r ac st; do
+  while IFS='	' read -r ac st aud; do
     [ -n "$ac" ] || continue
     wl="$(_card_final_block_key "$ac" waiver)"
     if [ "$st" = waived ] && [ -n "$wl" ]; then
       _card_final_add "row:$ac" "-" "-" "-" "" "" "waived: $ac — $wl"
       continue
     fi
-    why="$(_card_final_block_key "$ac" reason)"; why="${why:-not run on this release}"
+    # A ROW CONFIRMED AS DISCHARGED IS NOT THE CARD'S; a discharged row the auditor did not confirm is (A-orch-11):
+    # the gate past Verify refuses it, and its default is the user's waiver.
+    why="$(_card_final_block_key "$ac" reason)"
+    if [ -z "$why" ]; then
+      if [ "$st" = discharged ]; then why="not confirmed by the auditor on this release"; else why="not run on this release"; fi
+    fi
     _card_final_add "row:$ac" "waive-row $ac" "-" "$why" "waive $ac — $why" \
       "Run $ac instead of waiving: every other default applies; the row's run is recorded and the card renders again." ""
   done <<CF_ROWS
@@ -2196,7 +2263,7 @@ _card_final_render() {  # -> the card on stdout, CF_OPTS already counted
     return 0
   fi
   printf '**Final card · %s at %s**\n\n' "$CF_SLUG" "$CF_HEAD8"
-  printf '**Goal:** Decide whether this run merges with every default below applied, or with one of them overridden: every reader has reported and every advance checks green at %s.\n\n' "$CF_HEAD8"
+  printf '**Goal:** Decide whether this run merges with every default below applied, or with one of them overridden: every reader has reported, and every advance checks green at %s once the defaults below are recorded.\n\n' "$CF_HEAD8"
   if [ -n "$CF_FIXED" ]; then printf 'Fixed by policy, not options:\n%s\n' "$CF_FIXED"; fi
   if [ -n "$CF_ASIDE" ]; then printf 'Yours to do outside the run, not options:\n%s\n' "$CF_ASIDE"; fi
   printf '**Options:**\n\n1. Accept every default:\n'
@@ -2209,7 +2276,7 @@ _card_final_render() {  # -> the card on stdout, CF_OPTS already counted
     k=$((k + 1)); printf '%s. %s\n' "$k" "${CF_LABEL[$i]}"
   done
   if [ "$CF_OPTS" -eq 2 ]; then last="Not 2"; else last="Not 2 to $CF_OPTS"; fi
-  printf '\n**Recommendation:** Option 1, because each default is what the run'"'"'s policy and record already say, and every check holds at %s. %s: each holds one item back and costs a second card.\n\n' "$CF_HEAD8" "$last"
+  printf '\n**Recommendation:** Option 1, because each default is what the run'"'"'s policy and record already say, and every check holds at %s once they are recorded. %s: each holds one item back and costs a second card.\n\n' "$CF_HEAD8" "$last"
   printf '**Significance:** The merge is the run'"'"'s last act and reaches the integration branch; every approval and waiver is recorded in your words, and an item held back renders a new card once it is settled.\n\n'
   _card_final_reply_line "$CF_OPTS"; printf '\n'
 }
