@@ -25,7 +25,7 @@
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
-#     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh waive <question|regression|all> '<reply>'   the user's waiver of a reading question, the regression, or all four, at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
@@ -484,7 +484,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add floor <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the floor's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
-  die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|regression|all> '<reply>'   record the user's waiver of that question, of the regression, or of all four, at the working head, one waived: line each under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run the regression in the working branch's checkout, .bionic/config.yaml's floor: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add floor to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
@@ -495,7 +495,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
-  die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
@@ -1016,7 +1016,7 @@ $1"; shift ;;
   # refusals (1), as proof-add's question is; a missing or blank operand is the usage error.
   waive)
     if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "waive takes exactly two arguments: the question (evidence, adversarial or structure) and the user's reply, verbatim."
+      usage "waive takes exactly two arguments: the question (evidence, adversarial, structure, regression or all) and the user's reply, verbatim."
     fi
     WV_Q="$1"; WV_REPLY="$2"
     ;;
@@ -10888,16 +10888,21 @@ $PF_PLANL"
   # covering that question up to the head the plan's working branch's ref names, the head the judge
   # (lib/proof.sh `facts_state`) is asked about. It goes in through the plan transaction, placed
   # with the proof lines by `proof_add_line`, so a fact written after it is newer than it.
+  # THE REGRESSION AND ALL (wave-38 T2; REQ-4 AC-4.2): `waive regression` writes the line with question=regression,
+  # the user's word that the head needs no whole run (lib/proof.sh `proof_regression_waiver`, which the regression
+  # judge and the Step-7 wall read); `waive all` writes four, evidence, adversarial, structure and regression, in that
+  # order, in one transaction.
   waive)
     if ! { declare -F proof_waiver_line >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_waiver_line >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
-    if ! proof_question_ok "$WV_Q"; then
-      die "REFUSED — '$(clean "$WV_Q")' is not a reading question: name evidence, adversarial or structure. The plan is unchanged."
+    if ! proof_question_ok "$WV_Q" waive; then
+      die "REFUSED — '$(clean "$WV_Q")' is not a question to waive: name evidence, adversarial, structure, regression or all. The plan is unchanged."
       exit 1
     fi
+    WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS regression"
     case "$WV_REPLY" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — a waiver line is one line, and the reply carries a line break; the plan is unchanged."
@@ -10919,15 +10924,20 @@ $PF_PLANL"
         die "REFUSED — the plan's working-branch ${WV_WB:-(none named)} names no commit in $PV_REPO, so there is no head to waive at; the plan is unchanged."
         exit 1 ;;
     esac
-    WV_LINE="$(proof_waiver_line "$WV_Q" "$WV_HEAD" "$WV_WHO" "$(iso_now)" "$WV_REPLY")"
+    WV_AT="$(iso_now)"; WV_LINE=""
+    for _wv_q in $WV_QS; do
+      WV_LINE="${WV_LINE}${WV_LINE:+$'\n'}$(proof_waiver_line "$_wv_q" "$WV_HEAD" "$WV_WHO" "$WV_AT" "$WV_REPLY")"
+    done
     if ! proof_add_line "$PV_PLAN" "$WV_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the waiver; the plan is unchanged."
       exit 1
     fi
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
-    poker_owed_close "$PV_REPO" "waive:$WV_Q" "waive"
-    waive_owed_findings "$PV_PLAN" "$PV_REPO" "$WV_Q"
-    say "waive — question=$WV_Q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
+    for _wv_q in $WV_QS; do
+      poker_owed_close "$PV_REPO" "waive:$_wv_q" "waive"
+      [ "$_wv_q" = regression ] || waive_owed_findings "$PV_PLAN" "$PV_REPO" "$_wv_q"
+      say "waive — question=$_wv_q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
+    done
     exit 0
     ;;
 
@@ -11466,7 +11476,12 @@ RC_TAGS
           FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
         done
       fi
-      if [ -n "$FR_FIRST" ] && ! proof_approved "$PV_PLAN" regression-2; then
+      # THE APPROVAL BUYS ONE RUN (wave-38 T2; AC-4.5): it covers no head, and a regression proof after it spends it.
+      if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN" && proof_approved "$PV_PLAN" regression-2; then
+        die "REFUSED — a further whole run on this plan: the user's approved: regression-2 admitted one run, and the regression proof recorded after it spent it ($(clean "$(proof_last_line "$PV_PLAN" floor)")); the regression reads $(clean "${FR_STATE//	/ }"). An approval is recorded once: the user's word that this head needs no whole run is bash ${HOOK_DIR}/session-poker.sh waive regression '<the user's reply>'. Nothing was run."
+        exit 1
+      fi
+      if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN"; then
         FR_OWED=""; case "$FR_STATE" in owed"	"*) FR_OWED="${FR_STATE#owed	}" ;; esac
         if [ -n "$FR_OWED" ]; then
           die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and it left $FR_OWED red, each owed until a later landing runs it green. Dispatch a fix row that runs $FR_OWED; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'. Nothing was run."
