@@ -5280,7 +5280,9 @@ expect_contains "FN-3d …and the approval that admits one" "approve regression-
 expect_eq "FN-3e …and nothing ran, no second log written" "1|no" "$(fn_runs)|$([ -e "$FN_REC/floor-run-$FN_W-2.log" ] && echo yes || echo no)"
 
 # ---------- the user's approve regression-2: the second whole run, green, recorded ----------
-fn_set '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana 2026-10-12T00:00:00Z \"yes, run it again\""; d = 1 }'
+# MOVED BY WAVE-38 T2 (AC-4.5): the approval admits the one run after it, so it is stamped at the instant, after the first
+# run's proof, as the approve verb stamps it (an approval older than the newest regression proof is spent; §FN-5).
+fn_set '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana '"$(date -u +%Y-%m-%dT%H:%M:%SZ)"' \"yes, run it again\""; d = 1 }'
 echo green > "$FN_MODE"
 poke "$RFN" floor-run
 expect_eq "FN-4 with approved: regression-2 the second whole run runs, green (exit 0)" "0|2" "$RC|$(fn_runs)"
@@ -6357,5 +6359,87 @@ expect_eq "RR-mut3 …control: the real poker over the same record reads RR1's r
 rm -rf "$RD_MUT"
 POKE_BOUND="$RR_BOUND_WAS"
 
+
+
+# ============================================================
+section "§FN-5: approve regression-2 is the user's word for ONE second whole run: the head it is given at is not read as covered before that run, the run is admitted, and a later head owes again (wave-38 T2; REQ-4 AC-4.5; wave-35 critic-adversarial.md#1)"
+# ============================================================
+# The approval used to waive the regression's reads arm plan-wide (lib/proof.sh `_proof_floor_judge`,
+# `_proof_floor_walk`: `proof_approved … regression-2 || waive=1`), so the head it was given at read covered and
+# floor-run's RULE 3 refused the very run it bought. Now it covers no head: the judge reads the head as the walk
+# finds it, floor-run admits the second whole run while the approval is unspent (no regression proof is newer than
+# it, lib/proof.sh `proof_regression2_open`), and once that run's proof is written the approval is spent, so a later
+# head whose change no suite reads owes again and a third whole run is refused, naming the user's word for the
+# regression (`waive regression`).
+# FIXTURE FIDELITY: §FLOOR-RUN's shape: a stub tests/run.sh in the runner's output shape, one suite (a.test.sh, which
+# reads no file), s42_plan's plan bound to this session with its build rows landed, its working branch a linked
+# worktree. Each later change is a row's landing in the landing record's lib/line.sh shape (ready, published, a green
+# verdict of a.test.sh), so the walk reaches the reads arm: the file it changed is read by no suite it ran. The
+# approval line is the approve verb's shape, planted at the instant (no row here reads approval:regression-2).
+# fails-when: the approved head reads covered; the second run is refused; the later head reads covered or a third
+# whole run runs.
+F5_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RF5="$(make_repo fn5-one-head)"; ( cd "$RF5" && git commit -q --allow-empty -m init )
+F5_SEEN="$TMPROOT/f5-seen"; : > "$F5_SEEN"
+mkdir -p "$RF5/tests"
+cat > "$RF5/tests/run.sh" <<F5_EOF
+#!/bin/bash
+# a stub of the runner's report shape
+cd "\$(dirname "\$0")/.." || exit 1
+printf 'cwd=%s\n' "\$(pwd -P)" >> "$F5_SEEN"
+printf 'head=%s dirty=%s\n' "\$(git rev-parse HEAD)" "\$(git status --porcelain | awk 'END { print NR + 0 }')"
+printf 'Gating: 1 passed, 0 failed\n'
+exit 0
+F5_EOF
+printf '#!/bin/bash\nexit 0\n' > "$RF5/tests/a.test.sh"
+( cd "$RF5" && git add tests && git commit -qm suites ) >/dev/null 2>&1
+PF5="$(s42_plan "$RF5" 4)"; s42_builds_landed "$PF5"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF5" > "$PF5.tmp" && mv "$PF5.tmp" "$PF5"
+( cd "$RF5" && git add -f "$PF5" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RF5/.worktrees/01-fixture" \
+  && git -C "$RF5/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+F5_WT="$RF5/.worktrees/01-fixture"
+F5_W="$(git -C "$F5_WT" rev-parse HEAD 2>/dev/null)"
+F5_REC="$RF5/.bionic/docs/record/wave-01-fixture"; mkdir -p "$F5_REC"
+f5_runs() { awk 'END { print NR + 0 }' "$F5_SEEN"; }
+f5_state() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_state "$2" "$3"' _ "$C7_LIB" "$PF5" "$RF5" 2>/dev/null; }
+f5_land() {  # <row> <path> -> the row's landing commit on the working branch, its ready, published and green verdict events
+  local c at; at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$(dirname "$F5_WT/$2")"; printf '%s\n' "$1" >> "$F5_WT/$2"
+  ( cd "$F5_WT" && git add "$2" && git commit -qm "$1: $2" ) >/dev/null 2>&1
+  c="$(git -C "$F5_WT" rev-parse HEAD)"
+  { printf 'line/v1|ev=ready|row=%s|suites=tests/a.test.sh|at=%s\n' "$1" "$at"
+    printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=%s\n' "$1" "$c" "$1" "$at"
+    printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=tests/a.test.sh|result=green|log=-|at=%s\n' "$1" "$c" "$at"; } >> "$F5_REC/landing-proofs.log"
+  printf '%s' "$c"
+}
+poke "$RF5" floor-run
+poke "$RF5" proof-add floor "record/wave-01-fixture/floor-run-$F5_W.log"
+expect_eq "FN5-0 precondition: the first whole run ran once and its proof covers the working head" "1|covered	$F5_W" "$(f5_runs)|$(f5_state)"
+F5_C="$(f5_land T9 lib/y.sh)"
+F5_ST="$(f5_state)"
+expect_eq "FN5-0b precondition: a landing that changed lib/y.sh, which no suite it ran reads: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-0c …naming the reads arm and the approval" "lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$F5_ST"
+poke "$RF5" floor-run
+expect_eq "FN5-1 with no approval a second whole run is refused, and nothing ran (exit 1)" "1|1" "$RC|$(f5_runs)"
+awk -v at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana " at " \"yes, run it again\""; d = 1 }' \
+  "$PF5" > "$PF5.tmp" && mv "$PF5.tmp" "$PF5"
+F5_ST="$(f5_state)"
+expect_eq "FN5-2 AC-4.5 after approve regression-2 the head it was given at is not read as covered" "uncovered" "${F5_ST%%	*}"
+poke "$RF5" floor-run
+expect_eq "FN5-3 AC-4.5 …and the second whole run it bought is admitted: it runs, green (exit 0)" "0|2" "$RC|$(f5_runs)"
+poke "$RF5" proof-add floor "record/wave-01-fixture/floor-run-$F5_C.log"
+expect_eq "FN5-3b …and its proof covers that head" "0|covered	$F5_C" "$RC|$(f5_state)"
+F5_D="$(f5_land T10 lib/z.sh)"
+F5_ST="$(f5_state)"
+expect_eq "FN5-4 AC-4.5 a later head whose change no suite reads owes again: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-4b …naming the commit and the file" "commit ${F5_D:0:12} (row T10) is not proved: lib/z.sh is read by no suite it ran" "$F5_ST"
+s42_snap "$RF5" "$PF5"
+poke "$RF5" floor-run
+s42_unchanged "FN5-5 AC-4.5 a third whole run, the approval spent by the second's proof" 1 "$PF5"
+expect_eq "FN5-5b …and nothing ran" "2" "$(f5_runs)"
+expect_contains "FN5-5c …saying the approval is spent" "spent" "$OUT"
+expect_contains "FN5-5d …and naming the user's word for the regression" "waive regression" "$OUT"
+POKE_BOUND="$F5_BOUND_WAS"
 
 finish
