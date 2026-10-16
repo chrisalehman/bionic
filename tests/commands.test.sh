@@ -272,8 +272,9 @@ expect_true "SR7: typed with no argument, it reports on the session's bound run"
 expect_true "SR8a: the help page names /bionic:sitrep" \
   grep -q '`/bionic:sitrep`' "${PAYLOAD}/commands/help.md"
 expect_false "SR8b: no command file shadows the skill's name" test -e "${PAYLOAD}/commands/sitrep.md"
-expect_nonempty "SR9: the payload search reaches the skill (bionic:sitrep is found through the symlink)" \
-  "$(/usr/bin/grep -Rn 'bionic:sitrep' "${PAYLOAD}/skills" 2>/dev/null)"
+# Through the link path itself: macOS /usr/bin/grep -R does not follow a symlink below its start directory.
+expect_nonempty "SR9: the payload path reaches the skill (bionic:sitrep is read through the symlink)" \
+  "$(/usr/bin/grep -n 'bionic:sitrep' "$SR_LINK/SKILL.md" 2>/dev/null)"
 expect_eq "SR10: the skill's directory holds its one Markdown file and nothing else" "SKILL.md" \
   "$(ls "$SR_LINK/" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 
