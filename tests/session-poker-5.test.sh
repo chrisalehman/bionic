@@ -86,9 +86,9 @@ wd_plan() {  # <current> <proof lines> -> PWD8, bound to this session (step line
   } > "$PWD8"
   bind_marker "$RWD" "$PWD8"
 }
-wd_judge() {  # -> facts_state's lines for PWD8 at the working branch's ref, `<fact>[-<question>-<scope>] <state>`
+wd_judge() {  # -> facts_state's lines for PWD8 at the working branch's ref, `regression <state>` or `<question>-<scope> <state>` (the regression fact under either name, wave-38 T8 renames it)
   bash -c '. "$1/run.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$WD_LIB" "$PWD8" "$(git -C "$RWD" rev-parse --verify -q wave/01-fixture)" 2>/dev/null \
-    | awk -F'\t' '$1 == "floor" { print "floor " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
+    | awk -F'\t' '$1 == "floor" || $1 == "regression" { print "regression " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
 }
 wd_current() { sed -n 's/^current: //p' "$PWD8"; }
 WD_ISO='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
@@ -97,7 +97,7 @@ WD_ISO='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
 wd_plan 6 "$(wd_floor "$WD_B")
 $(wd_reads "$WD_C")"
 expect_eq "WD-0 precondition: the regression proof at B, the head at C: the judge reads it uncovered, the readings covered" \
-  "floor uncovered|evidence-piece covered" "$(wd_judge | awk 'NR <= 2' | paste -sd'|' -)"
+  "regression uncovered|evidence-piece covered" "$(wd_judge | awk 'NR <= 2' | paste -sd'|' -)"
 poke "$RWD" current 7
 expect_eq "WD-0b precondition: …so current 7 is refused at C (exit 1), the plan at current: 6" "1|6" "$RC|$(wd_current)"
 expect_contains "WD-0c …in the judge's words" "uncovered" "$OUT"
@@ -106,7 +106,7 @@ expect_eq "WD-1 AC-4.2 waive regression '1' is admitted (exit 0)" "0" "$RC"
 expect_regex "WD-1b …and writes one line in the three questions' grammar: the question, the working head, who, when, the reply" \
   "^waived: question=regression head=${WD_C} by Dana Fixture ${WD_ISO} \"1\"$" "$(/usr/bin/grep -E '^waived: ' "$PWD8")"
 expect_contains "WD-1c …and the success line names it" "question=regression head=${WD_C}" "$OUT"
-expect_eq "WD-2 AC-4.2 …which the judge reads: the regression covered at C" "floor covered" "$(wd_judge | awk 'NR == 1')"
+expect_eq "WD-2 AC-4.2 …which the judge reads: the regression covered at C" "regression covered" "$(wd_judge | awk 'NR == 1')"
 poke "$RWD" current 7
 expect_eq "WD-3 AC-4.2 current 7 passes at the waived head (exit 0), the plan at current: 7" "0|7" "$RC|$(wd_current)"
 

@@ -4326,10 +4326,10 @@ $(rl_check "$RL_X")
 $(rl_check "$RL_F")
 $(rl_check "$RL_F" fail)
 $(rl_check "$RL_N")" ""
-rl_lines() {  # -> each owed line facts_state printed, `<fact>[-<question>-<scope>] <state>`, one per line
-  printf '%s\n' "$FP_OUT" | awk -F'\t' '$1 == "floor" { print "floor " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
+rl_lines() {  # -> each owed line facts_state printed, `regression <state>` or `<question>-<scope> <state>` (the regression fact under either name, wave-38 T8 renames it), one per line
+  printf '%s\n' "$FP_OUT" | awk -F'\t' '$1 == "floor" || $1 == "regression" { print "regression " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
 }
-RL_ALL_COVERED="floor covered
+RL_ALL_COVERED="regression covered
 evidence-piece covered
 adversarial-piece covered
 structure-piece covered
@@ -4358,13 +4358,13 @@ cv_cover "$RL_R" "$RL_X" adversarial "$RRL"
 expect_eq "RL-3 D18 the set plus one code file, its check passing: owes (positive: RL-1 read release through the same walk)" \
   "cover $RL_X owes|1" "$CV_OUT|$CV_RC"
 fp_state "$RRL" "$RL_X"
-expect_eq "RL-3b …and the regression is uncovered at it, as today" "floor uncovered" "$(rl_lines | awk 'NR == 1')"
+expect_eq "RL-3b …and the regression is uncovered at it, as today" "regression uncovered" "$(rl_lines | awk 'NR == 1')"
 cv_cover "$RL_R" "$RL_F" structure "$RRL"
 expect_eq "RL-4 the set with its last check at the head result=fail: owes" "cover $RL_F owes|1" "$CV_OUT|$CV_RC"
 cv_cover "$RL_R" "$RL_U" structure "$RRL"
 expect_eq "RL-5 the set with no check line at its head: owes" "cover $RL_U owes|1" "$CV_OUT|$CV_RC"
 fp_state "$RRL" "$RL_U"
-expect_eq "RL-5b …and the regression is uncovered at it" "floor uncovered" "$(rl_lines | awk 'NR == 1')"
+expect_eq "RL-5b …and the regression is uncovered at it" "regression uncovered" "$(rl_lines | awk 'NR == 1')"
 cv_cover "$RL_R" "$RL_N" evidence "$RRL"
 expect_eq "RL-6 the set plus a page under payload/commands/deep/: owes (the set is one level of pages)" "cover $RL_N owes|1" "$CV_OUT|$CV_RC"
 RL_D="$(rl_side "$RRL" rel-prose 'the changelog alone' CHANGELOG.md)"
@@ -4388,7 +4388,7 @@ RPA="$(fp_repo parent)"
 PA_B="$(git -C "$RPA" rev-parse HEAD)"
 PA_R="$(fp_commit "$RPA" a.sh one)"
 PA_P="$(fp_commit "$RPA" CHANGELOG.md 'a wording fix')"
-( cd "$RPA" && git checkout -q -b main "$PA_B" ) >/dev/null 2>&1
+( cd "$RPA" && git checkout -q -B main "$PA_B" ) >/dev/null 2>&1
 PA_M1="$(fp_commit "$RPA" lib/m.sh 'main code one')"
 ( cd "$RPA" && git checkout -q wave/01-fixture && git merge -q -s ours main -m 'merge main, ours' ) >/dev/null 2>&1
 PA_O="$(git -C "$RPA" rev-parse HEAD)"
@@ -4419,7 +4419,7 @@ pa_mut() {  # -> a copy of the lib directory whose proof.sh has the regression w
 }
 pa_state() {  # <lib dir> <head> -> facts_state's lines over RPA's plan under that library, as rl_lines prints them
   bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && facts_state "$2" "$3"' _ "$1" "$(fp_plan_path "$RPA")" "$2" 2>/dev/null \
-    | awk -F'\t' '$1 == "floor" { print "floor " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
+    | awk -F'\t' '$1 == "floor" || $1 == "regression" { print "regression " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
 }
 expect_eq "PA-0 precondition: O's second parent is main's head, its tree is P's; K's second parent is main's next head, its tree is not P's" \
   "$PA_M1|yes|$PA_M2|no" \
@@ -4438,12 +4438,12 @@ cv_cover "$PA_R" "$PA_K" adversarial "$RPA"
 expect_eq "PA-3 control: the merge that brings lib/n.sh in owes, through the same walk" "cover $PA_P prose
 cover $PA_O prose
 cover $PA_K owes|1" "$CV_OUT|$CV_RC"
-expect_eq "PA-3b …and at K the readings and the regression are uncovered" "floor uncovered|adversarial-piece uncovered" \
-  "$(pa_state "$FP_LIB" "$PA_K" | awk '$1 == "floor" || $1 == "adversarial-piece" { print $1 " " $2 }' | paste -sd'|' -)"
+expect_eq "PA-3b …and at K the readings and the regression are uncovered" "regression uncovered|adversarial-piece uncovered" \
+  "$(pa_state "$FP_LIB" "$PA_K" | awk '$1 == "regression" || $1 == "adversarial-piece" { print $1 " " $2 }' | paste -sd'|' -)"
 PA_MUT="$(pa_mut)"
 expect_eq "PA-4 mutation: a copy with the regression walk's tree test dropped still runs and reads the docs commit P covered" \
-  "floor covered" "$(pa_state "$PA_MUT" "$PA_P" | awk 'NR == 1')"
-expect_eq "PA-4b …and reads O uncovered, so PA-2 can fail" "floor uncovered" "$(pa_state "$PA_MUT" "$PA_O" | awk 'NR == 1')"
+  "regression covered" "$(pa_state "$PA_MUT" "$PA_P" | awk 'NR == 1')"
+expect_eq "PA-4b …and reads O uncovered, so PA-2 can fail" "regression uncovered" "$(pa_state "$PA_MUT" "$PA_O" | awk 'NR == 1')"
 rm -rf "$PA_MUT"
 
 finish
