@@ -34,6 +34,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>] | sitrep bottom-line '<item>'… [<plan>]   the situation report's facts, or its one line (read-only); record the Bottom line's items (writes record/<wave>/sitrep.log)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
@@ -475,7 +476,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh current <N>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
@@ -495,6 +496,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's facts: the last recorded Bottom line with its time, every row with its glyph, the schedule, correctness and waste indicators by their printed thresholds, the person's open items, and the forecast from measured pace; --line prints the one-line form (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep bottom-line '<item>'… [<plan>]   record one to four Bottom line items, each cited (line <n>) or labelled hypothesis:, diagnosis: or projection:, with the time, to record/<wave>/sitrep.log"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
@@ -945,13 +948,22 @@ case "$VERB" in
     [ -n "${2#*=}" ] || usage "step-field: the value of '$(printf '%s' "${2%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is empty."
     PV_KEY="$1"; PV_FKEY="${2%%=*}"; PV_FVAL="${2#*=}"
     ;;
+  # `current <N> --check` (wave-38 T1; D20, AC-1.3): the flag after the step, for 5 to 8, asks the advance without writing.
   current)
-    [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) to move to."
+    { [ $# -eq 1 ] || [ $# -eq 2 ]; } && [ -n "$1" ] \
+      || usage "current takes the step number (0-8) to move to, and --check after a step from 5 to 8 to ask without writing."
     case "$1" in
       9|9a|9b|[0-8]|[0-8][ab]) : ;;
       *) usage "current: '$1' is not a step number (0-8); current: is a step number at every scale." ;;
     esac
-    PV_KEY="$1"
+    PV_KEY="$1"; PV_CHECK=""
+    if [ $# -eq 2 ]; then
+      [ "$2" = --check ] || usage "current: '$(printf '%s' "${2:0:24}" | tr -d '[:cntrl:]')' is not --check, the one word current takes after the step."
+      case "$1" in
+        [5-8]|[5-8][ab]) PV_CHECK=1 ;;
+        *) usage "current $1 --check: the check-only advance is for steps 5 to 8." ;;
+      esac
+    fi
     ;;
   # THE APPROVAL VERB (wave-26 T13; D3, AC-6.2). Two operands, both required: the name a row
   # reads as `approval:<name>`, in the grammar `units_validate` admits there, and the user's
@@ -1119,6 +1131,30 @@ $1"; shift ;;
         *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
+    ;;
+  # THE SITUATION REPORT (wave-38 T10; D9–D14, REQ-2). `sitrep [--line] [<plan>]` renders, read-only but for the
+  # gate's own scan; `sitrep bottom-line '<item>'… [<plan>]` records one to four judgment items. The plan, when
+  # named, is the last operand and ends in `.plan.md`; without it, the session's bound run, as landing-report's.
+  # An item's own rules (cited or labelled, no `|`) are the verb's refusal (1); the count is the usage error (2).
+  sitrep)
+    SR_LINE=no; SR_BL=no; SR_ARG=""; SR_ITEMS=()
+    if [ "${1:-}" = bottom-line ]; then
+      SR_BL=yes; shift
+      if [ $# -gt 0 ]; then
+        case "${!#}" in *.plan.md) SR_ARG="${!#}"; set -- "${@:1:$(($# - 1))}" ;; esac
+      fi
+      [ $# -ge 1 ] || usage "sitrep bottom-line takes one to four items, each cited (line <n>) or labelled hypothesis:, diagnosis: or projection:, then optionally the plan."
+      [ $# -le 4 ] || usage "sitrep bottom-line takes at most four items; the Bottom line carries two to four claims (D11)."
+      SR_ITEMS=("$@")
+    else
+      for _sr_a in "$@"; do
+        case "$_sr_a" in
+          --line) [ "$SR_LINE" = no ] || usage "sitrep takes --line once."; SR_LINE=yes ;;
+          -*) usage "sitrep takes the flag --line and at most one plan, or bottom-line '<item>'… [<plan>]." ;;
+          *) [ -z "$SR_ARG" ] || usage "sitrep takes at most one plan."; SR_ARG="$_sr_a" ;;
+        esac
+      done
+    fi
     ;;
   # THE BASIS VERB (wave-37 T8; D8, REQ-4 AC-4.2). Two operands: the question the judge holds a range by, and
   # the range `<a>..<b>` its `review <q> … uncovered <a>..<b>` line names. Read-only; the lines are
@@ -4707,7 +4743,8 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   esac
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
-  [ "$rc" -eq 2 ] || cur8_owed_waivers "$out"
+  # The check-only advance (`current <N> --check`; wave-38 T1, D20) takes this judgment and not its ledger write.
+  [ "$rc" -eq 2 ] || [ -n "${PV_CHECK:-}" ] || cur8_owed_waivers "$out"
   [ "$rc" -eq 0 ] && return 0
   if [ "$rc" -eq 2 ]; then
     die "REFUSED — current: $step is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
@@ -4736,6 +4773,87 @@ $(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')
 COVER_JUDGED
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
   exit 1
+}
+
+# current_admit -> everything `current <N>` asks before it writes, on the copy plan_verb_open made: the projection
+# of `current:` (and the Step-4 fill), the dry commit through the real gate, and the facts judge at 7 and 8. Sets
+# PV_NEW, PV_FILLED, PV_DRYMODE (`judged` once the copy has been asked; `as-is` when the copy is the plan), PV_HOW;
+# exits on every refusal in the advance's own words and code. THE ONE PATH (wave-38 T1; D20, AC-1.3): the advance
+# calls it and then swaps; `current <N> --check` calls it and stops, so the two cannot answer differently.
+current_admit() {
+  if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
+    die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
+    if /usr/bin/grep -q '^##[[:space:]][[:space:]]*SDLC State' "$PV_PLAN" 2>/dev/null; then
+      die "missing: the line 'current: $PV_KEY' under ## SDLC State"
+    else
+      die "missing: a ## SDLC State section carrying 'current: $PV_KEY', above the plan's ## Tasks"
+    fi
+    exit 1
+  fi
+  PV_FILLED=""
+  if [ "$PV_KEY" = 4 ]; then
+    # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
+    PV_WB="$(plan_working_branch "$PV_PLAN")"
+    if [ -n "$PV_WB" ]; then
+      PV_FIELDS=()
+      PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
+        | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
+      if [ -n "$PV_WT" ]; then
+        PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
+        case "$PV_WT" in
+          "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
+          "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
+          ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
+        esac
+      fi
+      PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
+      [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
+      PV_FIELDS+=("branch=$PV_WB")
+      # D16's PLAN FACT (wave-28 T8; A-orch-140): at wave scale the block also records the machine share the
+      # run started under, `gate_share`'s value, through the same writer; a block already carrying the line
+      # keeps it (the fill never rewrites), and a plan of another scale gets none.
+      if [ "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" = wave ] && declare -F gate_share >/dev/null 2>&1; then
+        PV_SHARE="$(gate_share 2>/dev/null)"
+        [ -z "$PV_SHARE" ] || PV_FIELDS+=("share=$PV_SHARE")
+      fi
+      if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
+        cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
+        mv -f "$PV_NEW.2" "$PV_NEW"
+      fi
+    fi
+  fi
+  # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
+  # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
+  # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
+  # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
+  # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
+  # working head: the regression, and each reading its rigor and scale deal. Each line that does not
+  # hold is printed as the judge gave it.
+  # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
+  # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-12). The copy is dry-committed at Step 7 first, as
+  # every other step's is, so the gate refuses what a real commit at Step 7 would refuse in its own words (a
+  # declared red still owed, a missing line); then the judge holds the facts the run owes at the working head;
+  # then the swap, which does not commit the copy a second time. A plan already at 7 is the swap's to say.
+  PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
+  case "$PV_KEY" in
+    7)
+      if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
+        plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
+        cur7_judge 7
+        PV_DRYMODE=judged
+        PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
+      fi ;;
+    8|8a|8b)
+      cur7_judge 8
+      PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
+  esac
+  # THE DRY COMMIT AT 5 AND 6 IS RUN HERE, NOT IN THE SWAP (wave-38 T1; D20): the swap would run it for an
+  # `as-is` copy that differs from the plan, so this runs it on the same condition and hands the swap `judged`.
+  # Whatever the advance asks before it writes is asked in this function, so `current <N> --check` asks it all.
+  if [ "$PV_DRYMODE" = as-is ] && ! cmp -s "$PV_NEW" "$PV_PLAN"; then
+    plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
+    PV_DRYMODE=judged
+  fi
 }
 
 # mr_tier_keys -> one `<tier><TAB><keys>` line for each of T0..T4, the keys walls.sh `keys_for_tier` names (wave-30
@@ -6210,6 +6328,371 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
   [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
   printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d · adoptions=%d · fixed=%d\n' \
     $(( hand + stp + dec + lif + amd + hld + ext + wv + r2 + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl" "$ado" "$fix"
+  return 0
+}
+
+# ---------------------------------------------------------------- the situation report
+#
+# THE SITUATION REPORT'S RENDERER (wave-38 T10; REQ-2 AC-2.2–AC-2.8; design-ledger Δ0–Δ8, D9–D14). One verb
+# prints every fact of the report; the judgment slots (the Bottom line's items, the Diagnosis) are the
+# /bionic:sitrep skill's, and the verb only carries the LAST RECORDED Bottom line back, with its time (a hook
+# never judges, D13). The page, in order, title case, no rule line, a blank line between sections:
+#
+#   Sitrep · <wave> · <release> · <local date and time> · step <n>
+#   Bottom line (since <H:MM AM/PM>)            then `- <item>` per recorded item; or the one line
+#   Bottom line — none recorded yet
+#   Situation
+#   <l> landed · <a> in flight · <p> not started · <r> red/blocked of <total>
+#   <glyph> <step>/<id>: <short description>[ — <H:MM AM/PM>[ <local date>]]    one per row, table order
+#   Assessment
+#   schedule <mark> <ratio>× — median ready→landed <m>m over median declared <d>m (🟢 ≤ 1.25 · 🟡 ≤ 2.0 · 🔴 above)
+#   correctness <mark> — <reds>, <findings> (🟡 red runs all returned and fixed · 🔴 an open S1/S2 or a red at head)
+#   waste <mark> <d>% discarded · <i>% idle-width — (🟢 < 5% and < 10% · 🟡 < 15% either · 🔴 above)
+#   Blockers
+#   <owed key> — <the line the run printed>     one per open approve:, waive:, finding: or gate: item; or
+#   none — no decision or action is owed by you
+#   Forecast
+#   <l>/<total> rows landed (<n>%)
+#   closes ~<H:MM AM/PM>[ <local date>]
+#   basis: <whose ratio> · admitted width <w> · remaining chain <id>→<id>… <c>m
+#   assuming open blockers are answered now; each hour they wait moves it an hour
+#
+# and `--line` prints only `<schedule><correctness><waste glyphs> · owed: <n> · closes ~<H:MM AM/PM>`.
+#
+# EVERY FACT IS ANOTHER READER'S, CALLED (the brief's reuse rule): the rows and sizes are `units_rows`', the
+# remaining chain `units_chain`'s over `units_edges` (the tick's CHAIN, its nodes the open rows), the landings,
+# runs and the ready→landed median `landing_report`'s, the idle minutes `fill-report`'s own line, the open items
+# `owed_list`'s, the admitted width `gate_state`'s, the findings `proof_findings` at `proof_finding_rating` less
+# `proof_fixed` (disposition's open state). What no reader computes is computed here, once: the declared median
+# of the landed rows, the ratio, the marks, a red not yet answered by a green, the closing time.
+#
+# A VALUE THE RECORD CANNOT COMPUTE PRINTS `unverified` (D9), and its glyph in the one-line form is ⚪.
+# Local times are 12-hour on this machine's clock (`sitrep_clock`, the 12-hour sibling of `handoff_local_time`);
+# a time on another local day than now's carries its date. Now is BIONIC_NOW_EPOCH when set, fill-report's seam.
+SITREP_TH_SCHED='(🟢 ≤ 1.25 · 🟡 ≤ 2.0 · 🔴 above)'
+SITREP_TH_CORR='(🟡 red runs all returned and fixed · 🔴 an open S1/S2 or a red at head)'
+SITREP_TH_WASTE='(🟢 < 5% and < 10% · 🟡 < 15% either · 🔴 above)'
+
+sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
+  case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
+}
+sitrep_date() {  # <epoch> <strftime format> -> the local rendering, BSD date then GNU
+  date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
+}
+sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when its local day is not now's
+  local t
+  t="$(sitrep_date "$1" '%-I:%M %p')"
+  [ "$(sitrep_date "$1" '%Y-%m-%d')" = "$(sitrep_date "$2" '%Y-%m-%d')" ] || t="$t $(sitrep_date "$1" '%Y-%m-%d')"
+  printf '%s\n' "$t"
+}
+sitrep_ratio_fmt() {  # <ratio> -> two places, trailing zeros dropped: 1.2, 1.37, 2
+  awk -v r="$1" 'BEGIN { s = sprintf("%.2f", r); sub(/0+$/, "", s); sub(/\.$/, "", s); print s }'
+}
+
+# sitrep_pace <plan> <root> -> `<median ready→landed, as landing_report prints it><TAB><median declared><TAB><ratio>`
+# for the plan's queue landings, or nothing when it has none (or no row of them declares a size). The median is
+# landing_report's own figure; the declared median is the same rule over the sizes of the rows it measured.
+sitrep_pace() {
+  local rep med
+  rep="$(landing_report "$(_wt_proofs_path "$2" "$1")" "$2" yes 2>/dev/null)"
+  case "$rep" in 'landings: queue='*) : ;; *) return 0 ;; esac
+  med="${rep%%$'\n'*}"; med="${med#*ready-to-landed median=}"; med="${med%%m *}"
+  { printf '%s\n' "$rep" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") print "L\t" $1 }'
+    units_rows "$1" 2>/dev/null | awk -F'\t' '{ print "R\t" $1 "\t" $7 }'
+  } | awk -F'\t' -v med="$med" '
+    $1 == "R" { m = ""; if (match($3, /^[0-9]+/)) m = substr($3, RSTART, RLENGTH); size[$2] = m; next }
+    $1 == "L" { want[++n] = $2 }
+    END {
+      for (i = 1; i <= n; i++) if (size[want[i]] != "") s[++k] = size[want[i]] + 0
+      if (k == 0) exit
+      for (i = 2; i <= k; i++) { t = s[i]; for (j = i - 1; j >= 1 && s[j] > t; j--) s[j + 1] = s[j]; s[j + 1] = t }
+      d = (k % 2) ? s[(k + 1) / 2] : (s[k / 2] + s[k / 2 + 1]) / 2
+      if (d <= 0) exit
+      printf "%s\t%g\t%.6f\n", med, d, med / d
+    }'
+}
+
+# sitrep_prev <root> <plan> -> `<slug><TAB><ratio>` of the newest delivered run under the docs root other than
+# <plan> (its Step 9 line's `delivered:` instant, newest; `bind_delivered`'s test), measured by `sitrep_pace`
+# over its own landing record; nothing when there is none or it measured no landing.
+sitrep_prev() {
+  local root="$1" self f c at best="" bestat="" pace
+  declare -F _run_candidates >/dev/null 2>&1 && declare -F bind_delivered >/dev/null 2>&1 || return 0
+  self="$(_bind_resolve "$2" 2>/dev/null)" || self="$2"
+  while IFS= read -r -d '' f; do
+    c="$(_bind_resolve "$f" 2>/dev/null)" || continue
+    [ "$c" != "$self" ] || continue
+    at="$(awk '/^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:/ && match($0, /delivered:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z?/) {
+                 s = substr($0, RSTART, RLENGTH); sub(/^delivered:[ \t]*/, "", s); print s; exit }' "$f" 2>/dev/null)"
+    [ -n "$at" ] || continue
+    bind_delivered "$root" "$c" || continue
+    if [ -z "$bestat" ] || [[ "$at" > "$bestat" ]]; then best="$f"; bestat="$at"; fi
+  done < <(_run_candidates "$(docs_root "$root")" 2>/dev/null)
+  [ -n "$best" ] || return 0
+  pace="$(sitrep_pace "$best" "$root")"
+  [ -n "$pace" ] || return 0
+  printf '%s\t%s\n' "$(proof_plan_slug "$best")" "${pace##*$'\t'}"
+}
+
+# sitrep_open_s12 <plan> <root> -> the number of open S1 and S2 findings of the plan's registered readings: a
+# finding `disposition` would print state=open (its effective priority fix, and no fix of it landed).
+sitrep_open_s12() {
+  local plan="$1" root="$2" docs fixed reads ev q h got num s r n=0
+  declare -F proof_findings >/dev/null 2>&1 || { echo 0; return 0; }
+  docs="$(docs_root "$root")"
+  fixed="$(proof_fixed "$plan" "$root" 2>/dev/null)"
+  reads="$(awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" {
+      if (!(PROOF_EVIDENCE in q)) ord[++n] = PROOF_EVIDENCE
+      q[PROOF_EVIDENCE] = PROOF_QUESTION; h[PROOF_EVIDENCE] = PROOF_HEAD
+    }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], q[ord[i]], h[ord[i]] }' "$plan" 2>/dev/null)"
+  while IFS='	' read -r ev q h; do
+    [ -n "$ev" ] || continue
+    got="$(proof_findings "$docs/$ev" 2>/dev/null)" || continue
+    _proof_fixed_var "$fixed" "$ev" "$h" "$root"
+    while IFS='	' read -r num s r _ _ _ _; do
+      case "$num:$s" in debt:*|:*) continue ;; *:S1|*:S2) : ;; *) continue ;; esac
+      case "$_PROOF_FIXED_IDS" in *$'\n'"$ev#$num"$'\n'*) continue ;; esac
+      set -- $(proof_finding_rating "$plan" "$ev#$num" "$s" "$r")
+      [ "${3:-}" != fix ] || n=$((n + 1))
+    done <<SITREP_FINDINGS
+$got
+SITREP_FINDINGS
+  done <<SITREP_READINGS
+$reads
+SITREP_READINGS
+  echo "$n"
+}
+
+# sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`), then `N<TAB><count>`
+# of red runs at head. A red is at head while it is its row and suite's newest verdict and the row has not been
+# published since; a later green on that row and suite, or the row's landing, answers it.
+sitrep_reds() {
+  [ -f "$1" ] && [ ! -L "$1" ] || { printf 'N\t0\n'; return 0; }
+  awk -F'|' '
+    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    index($0, "line/v1|") != 1 { next }
+    { ev = fv("ev"); rk = fv("row") }
+    ev == "verdict" && rk != "" { k = rk SUBSEP fv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = fv("result"); next }
+    ev == "published" && rk != "" { for (i = 1; i <= n; i++) { split(ord[i], p, SUBSEP); if (p[1] == rk) last[ord[i]] = "landed" } }
+    END {
+      for (i = 1; i <= n; i++) if (last[ord[i]] == "red") { split(ord[i], p, SUBSEP); c++; if (!(p[1] in said)) { said[p[1]] = 1; printf "R\t%s\n", p[1] } }
+      printf "N\t%d\n", c + 0
+    }' "$1"
+}
+
+# sitrep_render <plan> <root> <line yes|no> -> the page, or with `yes` the one line; rc 0
+sitrep_render() {
+  local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
+  local title_wave title_rel cur bl_at bl_items glyphs s_mark s_text c_mark c_text w_mark w_text
+  local gl stp rid desc lat idle_min elapsed i_pct d_pct prev ratio s_med s_decl basis_who width chain cids cmins closes ctext ltext
+  local landed=0 active=0 pending=0 redn=0 total=0 blockers nown approvals
+  now="$(sitrep_now)"
+  slug="$(proof_plan_slug "$plan")"
+  recdir="$(docs_root "$root")/record/$slug"
+  rec="$(_wt_proofs_path "$root" "$plan")"
+  rows="$(units_rows "$plan" 2>/dev/null)"
+  # The person's open items, the four kinds that are theirs; and the approvals they hold rows on.
+  owed="$( { OWED_ROOT="$root" owed_list 2>/dev/null || :; } | awk -F'\t' '$1 ~ /^(approve|waive|finding|gate):/')"
+  approvals="$(printf '%s\n' "$owed" | awk -F'\t' 'index($1, "approve:") == 1 { print substr($1, 9) }')"
+  reds="$(sitrep_reds "$rec")"
+  red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
+  nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
+  lr="$(landing_report "$rec" "$root" no 2>/dev/null)"; lr1="${lr%%$'\n'*}"
+
+  # ---- Situation: the rows, their glyphs, their landing times (the reds, approvals and landings first, so
+  # each row is judged with them in hand)
+  local sit
+  sit="$( { printf '%s\n' "$red_rows" | awk 'NF { print "X\t" $1 }'
+            printf '%s\n' "$approvals" | awk 'NF { print "A\t" $1 }'
+            awk '/^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+                 s && /^- T[0-9A-Za-z._-]*: landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { id = $2; sub(/:$/, "", id); print "L\t" id "\t" $5 }' "$plan"
+            printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
+          } | awk -F'\t' '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function short(t,   c, i, j) {
+      c = length(t) + 1
+      i = index(t, "("); if (i && i < c) c = i
+      i = index(t, ". "); if (i && i < c) c = i
+      i = index(t, " · "); if (i && i < c) c = i
+      t = trim(substr(t, 1, c - 1)); sub(/\.$/, "", t); return t
+    }
+    $1 == "X" { red[$2] = 1; next }
+    $1 == "A" { appr[$2] = 1; next }
+    $1 == "L" { land[$2] = $3; next }
+    $1 == "U" {
+      st = tolower(trim($11)); if (st == "dropped") next
+      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = short($5); rd[n] = $14
+      b = 0
+      if (st != "landed") {
+        if (id[n] in red) b = 1
+        m = split(rd[n], a, ",")
+        for (k = 1; k <= m; k++) { x = trim(a[k]); sub(/^live:/, "", x); if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) b = 1 }
+      }
+      g[n] = (st == "landed") ? "L" : (b ? "X" : (st == "active" ? "A" : "P"))
+    }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\t%s\t%s\n", g[i], stp[i], id[i], tk[i], (g[i] == "L" && (id[i] in land)) ? land[id[i]] : "" }')"
+  while IFS='	' read -r gl stp rid desc lat; do
+    [ -n "$gl" ] || continue
+    total=$((total + 1))
+    case "$gl" in L) landed=$((landed + 1)) ;; A) active=$((active + 1)) ;; X) redn=$((redn + 1)) ;; *) pending=$((pending + 1)) ;; esac
+  done <<SITREP_SIT
+$sit
+SITREP_SIT
+
+  # ---- Assessment
+  pace="$(sitrep_pace "$plan" "$root")"
+  if [ -n "$pace" ]; then
+    IFS='	' read -r s_med s_decl ratio <<< "$pace"
+    s_mark="$(awk -v r="$ratio" 'BEGIN { print (r <= 1.25) ? "🟢" : ((r <= 2.0) ? "🟡" : "🔴") }')"
+    s_text="schedule $s_mark $(sitrep_ratio_fmt "$ratio")× — median ready→landed ${s_med}m over median declared ${s_decl}m $SITREP_TH_SCHED"
+  else
+    s_mark="⚪"; s_text="schedule unverified — no landing yet on this run $SITREP_TH_SCHED"
+  fi
+  local lred="${lr1#*· runs: green=}" s12 c_reds c_find
+  case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
+  case "$lred" in ''|*[!0-9]*) lred=0 ;; esac
+  s12="$(sitrep_open_s12 "$plan" "$root")"
+  if [ "${nred:-0}" -gt 0 ]; then c_reds="$nred red at head"
+  elif [ "$lred" -gt 0 ]; then c_reds="$lred red, all returned"
+  else c_reds="no red run at head"; fi
+  if [ "${s12:-0}" -gt 0 ]; then c_find="$s12 open S1/S2"; else c_find="no open S1/S2"; fi
+  if [ "${nred:-0}" -gt 0 ] || [ "${s12:-0}" -gt 0 ]; then c_mark="🔴"
+  elif [ "$lred" -gt 0 ]; then c_mark="🟡"
+  else c_mark="🟢"; fi
+  c_text="correctness $c_mark — $c_reds, $c_find $SITREP_TH_CORR"
+  # Waste: discarded runs over runs (landing_report's counts), idle-width minutes (fill-report's) over the
+  # minutes the fill ledger spans (its first line to now while the run is open, else to its last line).
+  local rg rr rn rd
+  case "$lr1" in
+    *'· runs: green='*)
+      rg="${lr1#*runs: green=}"; rg="${rg%% *}"; rr="${lr1#* red=}"; rr="${rr%% *}"
+      rn="${lr1#* none=}"; rn="${rn%% *}"; rd="${lr1#* discarded=}"; rd="${rd%% *}" ;;
+    *) rg=0 rr=0 rn=0 rd=0 ;;
+  esac
+  d_pct="$(awk -v g="$rg" -v r="$rr" -v n="$rn" -v d="$rd" 'BEGIN { t = g + r + n + d; printf "%.4f\n", (t > 0) ? d * 100 / t : 0 }')"
+  idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
+  elapsed="$(awk -v now="$now" -v open="$(run_open "$plan" && echo yes)" "$_PATROL_ISO_AWK"'
+    index($0, "fill-ledger/v1|") == 1 {
+      n = split($0, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) { e = iso2epoch(substr(p[i], 4)); if (e >= 0) { if (f == "" || e < f) f = e; if (l == "" || e > l) l = e } }
+    }
+    END { if (f == "") exit; end = (open == "yes") ? now : l; if (end > f) printf "%d\n", (end - f + 30) / 60 }' "$(fill_ledger_path "$root" "$plan" 2>/dev/null)" 2>/dev/null)"
+  i_pct=""
+  case "$idle_min:$elapsed" in *[!0-9:]*|:*|*:) : ;; *) [ "$elapsed" -gt 0 ] && i_pct="$(awk -v i="$idle_min" -v e="$elapsed" 'BEGIN { printf "%.4f\n", i * 100 / e }')" ;; esac
+  w_mark="$(awk -v d="$d_pct" -v i="${i_pct:--1}" 'BEGIN {
+    if (d < 5 && i < 10) print "🟢"; else if (d < 15 && i < 15) print "🟡"; else print "🔴" }')"
+  w_text="waste $w_mark $(awk -v d="$d_pct" 'BEGIN { printf "%d", d + 0.5 }')% discarded · $( [ -n "$i_pct" ] && awk -v i="$i_pct" 'BEGIN { printf "%d%%", i + 0.5 }' || printf 'unverified' ) idle-width — $SITREP_TH_WASTE"
+
+  # ---- Forecast: the remaining chain (the tick's CHAIN), the ratio, the admitted width
+  chain="$( { printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
+                m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH); printf "N\t%s\t%d\n", $1, m }'
+              units_edges "$plan" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
+            } | units_chain "$(printf '%s\n' "$rows" | grep -c . | awk '{ print ($1 > 0) ? $1 : 1 }')" 2>/dev/null \
+            | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }')"
+  cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
+  width="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
+  case "$width" in ''|*[!0-9]*|0) width=1 ;; esac
+  if [ -n "$pace" ]; then
+    basis_who="median ready→landed ${s_med}m over median declared ${s_decl}m = $(sitrep_ratio_fmt "$ratio")×"
+  else
+    prev="$(sitrep_prev "$root" "$plan")"
+    if [ -n "$prev" ]; then
+      ratio="${prev##*$'\t'}"
+      basis_who="$(printf '%s' "${prev%%$'\t'*}" | awk -F- '$1 == "wave" && NF >= 2 { print $1 "-" $2; next } { print }')'s measured ratio $(sitrep_ratio_fmt "$ratio")× — no landing yet on this run"
+    else
+      ratio=""; basis_who="no measured pace on this run or a delivered one"
+    fi
+  fi
+  if [ -z "$cids" ]; then
+    ctext="closes — no row remains open"; ltext="closes — no row open"
+  elif [ -z "$ratio" ]; then
+    ctext="closes unverified — no measured pace on this run or a delivered one"; ltext="closes unverified"
+  else
+    closes="$(awk -v now="$now" -v c="$cmins" -v r="$ratio" -v w="$width" 'BEGIN { s = now + c * r / w * 60; printf "%d\n", int(s / 60 + 0.5) * 60 }')"
+    ctext="closes ~$(sitrep_clock "$closes" "$now")"; ltext="$ctext"
+  fi
+
+  # ---- Blockers
+  blockers="$(printf '%s\n' "$owed" | awk -F'\t' 'NF >= 1 && $1 != "" { r = $4; sub(/^poker: /, "", r); if (r == "") r = $3; print $1 " — " r }')"
+  nown="$(printf '%s\n' "$blockers" | grep -c .)"
+
+  if [ "$line" = yes ]; then
+    printf '%s%s%s · owed: %s · %s\n' "$s_mark" "$c_mark" "$w_mark" "$nown" "$ltext"
+    return 0
+  fi
+
+  # ---- the page
+  title_wave="$(plan_frontmatter_get "$plan" wave 2>/dev/null)"; [ -n "$title_wave" ] || title_wave="$slug"
+  title_rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"; [ -n "$title_rel" ] || title_rel="-"
+  cur="$(awk '/^[[:space:]]*```/ { f = !f; next } !f && /^[[:space:]]*current[[:space:]]*:/ { s = $0; sub(/^[^:]*:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); print s; exit }' "$plan")"
+  printf 'Sitrep · %s · %s · %s · step %s\n' "$title_wave" "$title_rel" "$(sitrep_date "$now" '%Y-%m-%d %-I:%M %p %Z')" "${cur:--}"
+  # The last recorded Bottom line: every item sharing the newest `at=` of the record.
+  bl_at=""; bl_items=""
+  if [ -f "$recdir/sitrep.log" ] && [ ! -L "$recdir/sitrep.log" ]; then
+    bl_at="$(awk -F'|' 'index($0, "sitrep-log/v1|") == 1 && index($2, "at=") == 1 { a = substr($2, 4) } END { print a }' "$recdir/sitrep.log")"
+    [ -z "$bl_at" ] || bl_items="$(awk -F'|' -v at="at=$bl_at" 'index($0, "sitrep-log/v1|") == 1 && $2 == at && index($3, "item=") == 1 { s = $0; sub(/^[^|]*\|[^|]*\|item=/, "", s); print "- " s }' "$recdir/sitrep.log")"
+  fi
+  if [ -n "$bl_items" ] && [ -n "$(iso_epoch "$bl_at")" ]; then
+    printf 'Bottom line (since %s)\n%s\n' "$(sitrep_clock "$(iso_epoch "$bl_at")" "$now")" "$bl_items"
+  else
+    printf 'Bottom line — none recorded yet\n'
+  fi
+  printf '\nSituation\n%d landed · %d in flight · %d not started · %d red/blocked of %d\n' "$landed" "$active" "$pending" "$redn" "$total"
+  while IFS='	' read -r gl stp rid desc lat; do
+    [ -n "$gl" ] || continue
+    case "$gl" in L) glyphs="✅" ;; A) glyphs="🔄" ;; X) glyphs="⛔" ;; *) glyphs="⬜" ;; esac
+    if [ -n "$lat" ] && [ -n "$(iso_epoch "$lat")" ]; then
+      printf '%s %s/%s: %s — %s\n' "$glyphs" "$stp" "$rid" "$desc" "$(sitrep_clock "$(iso_epoch "$lat")" "$now")"
+    else
+      printf '%s %s/%s: %s\n' "$glyphs" "$stp" "$rid" "$desc"
+    fi
+  done <<SITREP_SIT
+$sit
+SITREP_SIT
+  printf '\nAssessment\n%s\n%s\n%s\n' "$s_text" "$c_text" "$w_text"
+  printf '\nBlockers\n'
+  if [ -n "$blockers" ]; then printf '%s\n' "$blockers"; else printf 'none — no decision or action is owed by you\n'; fi
+  printf '\nForecast\n%d/%d rows landed (%d%%)\n%s\n' "$landed" "$total" "$( [ "$total" -gt 0 ] && echo $(( (landed * 200 + total) / (total * 2) )) || echo 0 )" "$ctext"
+  if [ -n "$cids" ]; then
+    printf 'basis: %s · admitted width %d · remaining chain %s %sm\n' "$basis_who" "$width" "$(printf '%s' "$cids" | sed 's/,/→/g')" "$cmins"
+  else
+    printf 'basis: %s · admitted width %d · no remaining chain\n' "$basis_who" "$width"
+  fi
+  printf 'assuming open blockers are answered now; each hour they wait moves it an hour\n'
+  return 0
+}
+
+# sitrep_bottom_line <plan> <root> <item>… -> records the items, one `sitrep-log/v1|at=<ISO-UTC>|item=<text>` line
+# each, all at one instant, to record/<wave>/sitrep.log; rc 1 (nothing written) when an item is empty, holds a
+# `|` or a line break, or is neither cited `(line <n>)` nor labelled `hypothesis:`, `diagnosis:` or `projection:`.
+sitrep_bottom_line() {
+  local plan="$1" root="$2" it at out="" dir log cited='\(line [0-9]+\)'
+  shift 2
+  for it in "$@"; do
+    case "$it" in
+      *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — the item '$(clean "$it")' holds a | or a line break, which the record cannot carry; nothing is recorded."; return 1 ;;
+    esac
+    [ -n "${it//[[:space:]]/}" ] || { die "REFUSED — an empty item; nothing is recorded."; return 1; }
+    case "$it" in
+      hypothesis:*|diagnosis:*|projection:*) : ;;
+      *) if ! [[ "$it" =~ $cited ]]; then
+           die "REFUSED — the item '$(clean "$it")' cites no rendered line (line <n>) and carries no label (hypothesis:, diagnosis:, projection:); nothing is recorded."
+           return 1
+         fi ;;
+    esac
+  done
+  at="$(sitrep_now)"
+  at="$(date -u -r "$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  [ -n "$at" ] || { die "REFUSED — no clock to stamp the items with; nothing is recorded."; return 1; }
+  for it in "$@"; do out="${out}sitrep-log/v1|at=${at}|item=${it}"$'\n'; done
+  dir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"; log="$dir/sitrep.log"
+  { mkdir -p "$dir" && [ ! -L "$log" ] && printf '%s' "$out" >> "$log"; } 2>/dev/null \
+    || { die "REFUSED — the record $log cannot be written; nothing is recorded."; return 1; }
+  say "sitrep bottom-line — $# item(s) recorded at $(sitrep_clock "$(iso_epoch "$at")" "$(sitrep_now)") in $log; the next sitrep opens on them"
   return 0
 }
 
@@ -10204,72 +10687,22 @@ BRF_EOF
         exit 1 ;;
     esac
     plan_verb_open current
-    if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
-      if /usr/bin/grep -q '^##[[:space:]][[:space:]]*SDLC State' "$PV_PLAN" 2>/dev/null; then
-        die "missing: the line 'current: $PV_KEY' under ## SDLC State"
+    # THE CHECK-ONLY ADVANCE (wave-38 T1; D20, AC-1.3): `current <N> --check` runs current_admit, the advance's own
+    # path up to its swap, in a subshell, and prints its verdict above whatever that path printed; it exits as the
+    # advance would and writes nothing (the copies go with the trap, the judge's ledger write is not taken).
+    if [ -n "$PV_CHECK" ]; then
+      PV_CK_OUT="$(current_admit 2>&1)"; PV_CK_RC=$?
+      if [ "$PV_CK_RC" -eq 0 ]; then
+        say "current $PV_KEY --check: would advance"
+        [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT"
+        cmp -s "$PV_NEW" "$PV_PLAN" && say "current — current: $PV_KEY: the plan already reads so; the advance would write nothing."
       else
-        die "missing: a ## SDLC State section carrying 'current: $PV_KEY', above the plan's ## Tasks"
+        die "current $PV_KEY --check: would refuse"
+        [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT" >&2
       fi
-      exit 1
+      exit "$PV_CK_RC"
     fi
-    PV_FILLED=""
-    if [ "$PV_KEY" = 4 ]; then
-      # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
-      PV_WB="$(plan_working_branch "$PV_PLAN")"
-      if [ -n "$PV_WB" ]; then
-        PV_FIELDS=()
-        PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
-          | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
-        if [ -n "$PV_WT" ]; then
-          PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
-          case "$PV_WT" in
-            "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
-            "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
-            ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
-          esac
-        fi
-        PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
-        [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
-        PV_FIELDS+=("branch=$PV_WB")
-        # D16's PLAN FACT (wave-28 T8; A-orch-140): at wave scale the block also records the machine share the
-        # run started under, `gate_share`'s value, through the same writer; a block already carrying the line
-        # keeps it (the fill never rewrites), and a plan of another scale gets none.
-        if [ "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" = wave ] && declare -F gate_share >/dev/null 2>&1; then
-          PV_SHARE="$(gate_share 2>/dev/null)"
-          [ -z "$PV_SHARE" ] || PV_FIELDS+=("share=$PV_SHARE")
-        fi
-        if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
-          cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
-          mv -f "$PV_NEW.2" "$PV_NEW"
-        fi
-      fi
-    fi
-    # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
-    # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
-    # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
-    # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
-    # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
-    # working head: the regression, and each reading its rigor and scale deal. Each line that does not
-    # hold is printed as the judge gave it.
-    # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
-    # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-12). The copy is dry-committed at Step 7 first, as
-    # every other step's is, so the gate refuses what a real commit at Step 7 would refuse in its own words (a
-    # declared red still owed, a missing line); then the judge holds the facts the run owes at the working head;
-    # then the swap, which does not commit the copy a second time. A plan already at 7 is the swap's to say.
-    PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
-    case "$PV_KEY" in
-      7)
-        if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
-          plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
-          cur7_judge 7
-          PV_DRYMODE=judged
-          PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
-        fi ;;
-      8|8a|8b)
-        cur7_judge 8
-        PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
-    esac
+    current_admit
     plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
     say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; $PV_HOW."
     exit 0
@@ -11802,6 +12235,53 @@ RC_TAGS
     exit 0
     ;;
 
+  # THE SITUATION REPORT (wave-38 T10). Its reasoning is above the verbs, beside `sitrep_render`. The plan is
+  # resolved as landing-report resolves its own: a named one first, else the session's bound run.
+  sitrep)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    SR_PLAN=""
+    if [ -n "$SR_ARG" ]; then
+      case "$SR_ARG" in
+        /*) SR_PLAN="$SR_ARG" ;;
+        *)  SR_PLAN="$REPO_REAL/$SR_ARG"
+            [ -f "$SR_PLAN" ] || SR_PLAN="$(docs_root "$REPO_REAL")/$SR_ARG" ;;
+      esac
+      if [ ! -f "$SR_PLAN" ] || [ -L "$SR_PLAN" ]; then
+        die "REFUSED — no plan file at $SR_ARG; name the plan whose situation to report."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a report without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      SR_PLAN="$POKER_RUN_PLAN"
+      if [ -z "$SR_PLAN" ] || [ ! -f "$SR_PLAN" ]; then
+        die "REFUSED — this session has no run to report on; bind its plan first, or name it: sitrep <plan>."
+        exit 2
+      fi
+    fi
+    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
+      exit 2
+    fi
+    SR_ROOT="$(cd "$(project_root "${SR_PLAN%/*}")" 2>/dev/null && pwd -P)"
+    [ -n "$SR_ROOT" ] || SR_ROOT="$REPO_REAL"
+    if [ "$SR_BL" = yes ]; then
+      sitrep_bottom_line "$SR_PLAN" "$SR_ROOT" ${SR_ITEMS[@]+"${SR_ITEMS[@]}"}
+      exit $?
+    fi
+    sitrep_render "$SR_PLAN" "$SR_ROOT" "$SR_LINE"
+    exit 0
+    ;;
 
   # THE LAUNCH SYNC (wave-26 T32; D4). Its reasoning is above the verbs, beside the functions it
   # runs. Silent, exit 0, wherever there is nothing it may write: no engagement, no bound open run,
