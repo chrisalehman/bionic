@@ -234,13 +234,14 @@ fc_card final
 expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 1" "1" "$FC_RC"
 expect_eq "EARLY-3b …CARD-EARLY naming the question and the head" "CARD-EARLY — structure unregistered at $FC_H8" "$FC_ERR"
 expect_eq "EARLY-3c …nothing rendered, no card written" "|" "$FC_OUT|$(fc_cards)"
-FC_RED7="$(fc_floor "$FC_C" a.test.sh)
-$(fc_reads "$FC_C")"
-fc_plan "$FC_RED7"
+# A REFUSAL NO DEFAULT OF THE CARD SETTLES (A-orch-11): the Step-7 line names no adr, rca or n/a, so the dry commit at
+# 7 refuses on a document no waiver can stand in for.
+FC_NODOC='/n\/a: no decision/d'
+fc_plan "$FC_GOOD" "$FC_NODOC"
 poke "$RFC" current 6 --check; FC_C6="$RC"
-poke "$RFC" current 7 --check; FC_C7="$RC|$(printf '%s\n' "$OUT" | head -1)"
-expect_eq "EARLY-4 precondition: the regression's run owes a.test.sh, so current 6 --check holds and current 7 --check refuses" \
-  "0 1|poker: current 7 --check: would refuse" "$FC_C6 $FC_C7"
+poke "$RFC" current 7 --check; FC_C7="$RC|$(printf '%s\n' "$OUT" | head -1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'names no adr, rca or n/a')"
+expect_eq "EARLY-4 precondition: the Step-7 line names no adr, rca or n/a, so current 6 --check holds and current 7 --check refuses on it" \
+  "0 1|poker: current 7 --check: would refuse|1" "$FC_C6 $FC_C7"
 fc_card final
 expect_eq "EARLY-4b card.sh final exits 1" "1" "$FC_RC"
 expect_eq "EARLY-4c …CARD-EARLY with the check's own verdict line as the reason" "CARD-EARLY — current 7 --check: would refuse" "$FC_ERR"
@@ -256,6 +257,60 @@ poke "$RFC" tick
 expect_contains "EARLY-5c on the settled run the tick still says its WAIT line (the reader is not vacuous)" "poker: WAIT T3" "$OUT"
 expect_absent "EARLY-5d …and no CARD-EARLY" "CARD-EARLY" "$OUT"
 
+# A RED CHECK THE CARD'S OWN DEFAULTS SETTLE IS NOT EARLY (A-orch-11; D17, D19): a question whose newest reading fails
+# is waived with the user's words, an undischarged row the auditor did not confirm is waived by waive-row, and the
+# card offers each. The whole adversarial reading here carries an S2-on finding and reads fail.
+{ printf 'question: adversarial\nresult: fail\nscope: whole\nreviewed: %s..%s\nfindings: 1\n' "${FC_B:0:10}" "${FC_C:0:10}"
+  printf 'finding: 1 S2 on lib/x.sh:1 the value is lost on a second run\nshown: 1 bash lib/x.sh; bash lib/x.sh\n\nwhat the reader found\n'
+} > "$FC_REC/adversarial-fail.md"
+FC_FAILR="$(fc_floor "$FC_C")
+$(fc_reads "$FC_C" | sed '/adversarial-whole\.md/{s/adversarial-whole\.md/adversarial-fail.md/;s/result=pass/result=fail/;}')"
+fc_plan "$FC_FAILR"
+poke "$RFC" current 6 --check; FC_C6="$RC"; poke "$RFC" current 8 --check
+expect_eq "EARLY-6 precondition: the failing adversarial reading makes current 6 and current 8 --check refuse" \
+  "1 1|yes" "$FC_C6 $RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q '^review	adversarial	.*failing' && echo yes || echo no)"
+fc_card final
+expect_eq "EARLY-6b …and yet the card renders: the waiver settles it (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "EARLY-6c …offering the waiver as a default" "waive adversarial with your words" "$FC_OUT"
+expect_contains "EARLY-6d …and its override" "Withhold the adversarial waiver:" "$FC_OUT"
+expect_contains "EARLY-6e …the person's waiver item opened on the ledger" "waive:adversarial" "$(fc_owed)"
+poke "$RFC" reply 1
+expect_regex "EARLY-6f reply '1' writes the waiver with the reply's words" \
+  "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"1\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
+poke "$RFC" current 8 --check
+expect_eq "EARLY-6g …after which current 8 --check is green" "0" "$RC"
+# THE OTHER DIRECTION: the same failing reading beside one fact no default settles (a declared release check with no
+# proof at the head) is CARD-EARLY, on the check that names it.
+fc_plan "$FC_FAILR"
+printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
+poke "$RFC" current 8 --check
+expect_contains "EARLY-7 precondition: current 8 --check names the unheld release check beside the failing reading" "$(printf 'check\tabsent')" "$OUT"
+fc_card final
+expect_eq "EARLY-7b …CARD-EARLY on the check that names it, nothing rendered (exit 1)" \
+  "1|CARD-EARLY — current 8 --check: would refuse|" "$FC_RC|$FC_ERR|$FC_OUT"
+rm -f "$RFC/.bionic/config.yaml"
+# WAVE-37'S LIVE CASE: three rows carry no auditor cell. The Step-6 gate refuses the first; the card offers all three as
+# waivers, the reply writes them, and every advance then checks green.
+fc_plan "$FC_GOOD"
+awk '/^\| AC-1\.1 \|/ { print "| AC-1.1 | T1 | discharged | see AC-1.1 | |"; print "| AC-1.3 | T1 | discharged | see AC-1.3 | |"; print "| AC-1.4 | T1 | discharged | see AC-1.4 | |"; next }
+  /^\| AC-1\.2 \|/ { print "| AC-1.2 | T1 | discharged | see AC-1.2 | CONFIRMED |"; next }
+  { print }
+  END { for (i = 3; i <= 4; i++) printf "AC-1.%d:\n  fails-when: planted defect %d\n  evidence: record/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n", i, i }' \
+  "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+poke "$RFC" current 6 --check
+expect_contains "EARLY-8 precondition: current 6 --check refuses on a row the auditor has not confirmed" \
+  "the auditor has not confirmed AC-1.1" "$OUT"
+fc_card final
+expect_eq "EARLY-8b …and the card renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
+for fc_ac in AC-1.1 AC-1.3 AC-1.4; do
+  expect_contains "EARLY-8c …offering $fc_ac waived as a default" "waive $fc_ac — not confirmed by the auditor on this release" "$FC_OUT"
+done
+expect_absent "EARLY-8d …and not the confirmed, discharged AC-1.2" "waive AC-1.2" "$FC_OUT"
+poke "$RFC" reply 1
+expect_eq "EARLY-8e reply '1' waives the three rows" "waived waived waived" "$(fc_row AC-1.1) $(fc_row AC-1.3) $(fc_row AC-1.4)"
+FC_CK=""; for fc_n in 6 7 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+expect_eq "EARLY-8f …and current 6, 7 and 8 --check are then green" "000" "$FC_CK"
+
 # ============================================================
 section "§AGREE: the card's options are the owed items, the undischarged rows and the carried findings, nothing else (ownership row; D19)"
 # ============================================================
@@ -267,7 +322,8 @@ fc_owe approve:release; fc_owe approve:merge; fc_owe waive:structure
 fc_expected() {  # -> the item keys the three sources owe, sorted
   { fc_owed | /usr/bin/grep -E '^(approve|waive):'
     awk -F'|' '/^## /{ m = ($0 ~ /^## Verification Matrix/) } m && /^\| AC-/ { s = $4; gsub(/^[ \t]+|[ \t]+$/, "", s); a = $2; gsub(/^[ \t]+|[ \t]+$/, "", a)
-      if (s != "discharged" && s != "waived") print "row:" a }' "$PFC"
+      u = $6; gsub(/^[ \t]+|[ \t]+$/, "", u)
+      if (s != "waived" && !(s == "discharged" && u == "CONFIRMED")) print "row:" a }' "$PFC"
     poke "$RFC" disposition
     printf '%s\n' "$OUT" | awk '$2 == "finding" { s = $4; r = $5; sub(/^user-facing=/, "", r)
       if (s == "S1" || (s == "S2" && r == "on")) next; print "finding:" $3 }'
