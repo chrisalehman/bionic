@@ -506,6 +506,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
+  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the final card (card.sh final) into approve, waive, waive-row and finding-move with their words: option 1 every default, option <k> its override in place of that default"
   die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
   die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
@@ -964,6 +965,13 @@ case "$VERB" in
         *) usage "current $1 --check: the check-only advance is for steps 5 to 8." ;;
       esac
     fi
+    ;;
+  # THE FINAL CARD'S REPLY (wave-38 T3; D19, AC-1.1). One operand: the user's reply to the card `card.sh final`
+  # rendered, verbatim. Its option, its words and whether the user typed it are the verb's own refusals (1).
+  reply)
+    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } \
+      || usage "reply takes exactly one argument: the user's reply to the final card (card.sh final), verbatim."
+    RP_TEXT="$1"
     ;;
   # THE APPROVAL VERB (wave-26 T13; D3, AC-6.2). Two operands, both required: the name a row
   # reads as `approval:<name>`, in the grammar `units_validate` admits there, and the user's
@@ -2504,6 +2512,21 @@ TOA
   return 0
 }
 
+# THE FINAL CARD'S EARLY FACTS, AS ADVICE (wave-38 T3; D20, AC-1.2). While the plan carries an open integrate row,
+# the tick asks payload/scripts/card.sh `early`, the one owner of the three facts the final card is refused on (an
+# open reader, a reading unregistered at the head, a red check of the advance to 6, 7 or 8), and says its line,
+# `CARD-EARLY — <reason>`, beside the WAIT lines. Advice only: the tick refuses nothing and writes nothing for it.
+tick_card_early() {  # <units_rows output> -> always 0; says the card's CARD-EARLY line when one fact fails
+  local card why
+  printf '%s\n' "$1" | awk -F'\t' '$3 == "integrate" && ($10 == "pending" || $10 == "active") { f = 1 } END { exit !f }' || return 0
+  card="$(cd "$BIONIC_LIB" 2>/dev/null && pwd -P)/../card.sh"
+  [ -f "$card" ] || return 0
+  why="$( cd "$REPO_REAL" 2>/dev/null && env CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$card" early "$SCHED_PLAN" 2>&1 >/dev/null )" && return 0
+  why="$(printf '%s\n' "$why" | head -1)"
+  case "$why" in "CARD-EARLY — "*) say "$why" ;; esac
+  return 0
+}
+
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
   local rows waiting all offered held line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
@@ -2581,6 +2604,7 @@ $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n' "$rows" "$wa
     }
   }')
 TICK_WAIT
+  tick_card_early "$rows"
   edges="$(units_edges "$SCHED_PLAN" 2>/dev/null)"
   chain="$( { printf '%s\n' "$rows" | awk -F'\t' '$10 == "pending" || $10 == "active" {
                 m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH)
@@ -10705,6 +10729,112 @@ BRF_EOF
     current_admit
     plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
     say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; $PV_HOW."
+    exit 0
+    ;;
+
+  # THE FINAL CARD'S REPLY, REPLAYED (wave-38 T3; D19, AC-1.1; ADR-059). `card.sh final` renders one card and
+  # writes it, with its replay table, to `record/<wave>/final-card-<head8>.md`; the user answers it once, and this
+  # verb replays that answer into the record with the user's words. The table holds one line per item,
+  #
+  #   final-card/v1|opt=<k>|key=<key>|default=<verb args…|->|override=<verb args…|->|why=<why|->
+  #
+  # so the verbs are strings: option 1 replays every item's default, option <k> replays item k's override in its
+  # place; a verb is run as `<verb> <args…> '<the reply>' ['<why>']`, a `-` default is applied as carried (a
+  # deferral needs no verb) and a `-` override is withheld. Each item applied is written to the card's record
+  # (`applied: <key> …`), a re-run skipping those, and the reply last (`replied: …`), so a card is answered once.
+  # REFUSED (1), the plan unchanged: no card for the bound run, a card rendered at another head than the working
+  # one (render it again), a card already answered, a reply naming no option of the card, and words the user did
+  # not type (lib/said.sh, asked once before any verb runs, so a reply that is not the user's writes nothing).
+  reply)
+    case "$RP_TEXT" in
+      *$'\n'*|*$'\r'*) die "REFUSED — a reply is one line, and this one carries a line break; the plan is unchanged."; exit 1 ;;
+    esac
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — the reply is read through lib/said.sh and lib/proof.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    plan_verb_open reply
+    RP_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
+    # The newest card by its time of writing: a re-render at a head writes over that head's card, a later head's card is newer.
+    # shellcheck disable=SC2012  # card names are final-card-<hex>[-<n>].md, no blank or line break in any
+    RP_CARD="$(ls -t "$RP_DIR"/final-card-*.md 2>/dev/null | head -1)"
+    if [ -z "$RP_CARD" ] || [ ! -f "$RP_CARD" ] || [ -L "$RP_CARD" ]; then
+      die "REFUSED — no final card is recorded for $PV_PLAN: render it with card.sh final <plan>, put it to the user, and replay their reply; the plan is unchanged."
+      exit 1
+    fi
+    RP_HDR="$(/usr/bin/grep -m1 '^final-card/v1|plan=' "$RP_CARD" 2>/dev/null)"
+    RP_RHEAD="${RP_HDR#*|head=}"; RP_RHEAD="${RP_RHEAD%%|*}"
+    RP_N="${RP_HDR#*|options=}"; RP_N="${RP_N%%|*}"
+    case "$RP_N" in ''|*[!0-9]*) RP_N=0 ;; esac
+    RP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || RP_HEAD=""
+    if [ -z "$RP_HDR" ] || [ "$RP_RHEAD" != "$RP_HEAD" ]; then
+      die "REFUSED — the final card $RP_CARD was rendered at $(printf '%.8s' "${RP_RHEAD:-(no head)}") and the working head is $(printf '%.8s' "${RP_HEAD:-(none)}") now: render it again with card.sh final <plan> and put that card to the user; the plan is unchanged."
+      exit 1
+    fi
+    if /usr/bin/grep -q '^replied: ' "$RP_CARD" 2>/dev/null; then
+      die "REFUSED — the final card $RP_CARD is already answered ($(clean "$(/usr/bin/grep -m1 '^replied: ' "$RP_CARD")")); render the card again for what is still open; the plan is unchanged."
+      exit 1
+    fi
+    RP_K=""
+    [[ "$RP_TEXT" =~ ^[[:space:]]*([Oo]ption[[:space:]]+)?([0-9]+)([^0-9]|$) ]] && RP_K="${BASH_REMATCH[2]}"
+    if [ -z "$RP_K" ]; then
+      die "REFUSED — the reply \"$(clean "$RP_TEXT")\" names no option of the final card $RP_CARD: it offers 1 to $RP_N, the number first; the plan is unchanged."
+      exit 1
+    fi
+    RP_K=$((10#$RP_K))
+    if [ "$RP_K" -lt 1 ] || [ "$RP_K" -gt "$RP_N" ]; then
+      die "REFUSED — option $RP_K is not on the final card $RP_CARD: it offers 1 to $RP_N; the plan is unchanged."
+      exit 1
+    fi
+    user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
+    if [ "$RP_SAID" -ne 0 ]; then
+      said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the final card"
+      exit 1
+    fi
+    RP_DONE=0; RP_HELD=0
+    while IFS= read -r RP_L; do
+      [ -n "$RP_L" ] || continue
+      RP_OPT=""; RP_KEY=""; RP_DO=""; RP_ELSE=""; RP_WHY=""
+      IFS='|' read -r -a RP_F <<< "$RP_L"
+      for RP_X in "${RP_F[@]}"; do
+        case "$RP_X" in
+          opt=*) RP_OPT="${RP_X#opt=}" ;; key=*) RP_KEY="${RP_X#key=}" ;; default=*) RP_DO="${RP_X#default=}" ;;
+          override=*) RP_ELSE="${RP_X#override=}" ;; why=*) RP_WHY="${RP_X#why=}" ;;
+        esac
+      done
+      [ -n "$RP_KEY" ] || continue
+      # AN ITEM ALREADY REPLAYED FROM THIS CARD is skipped: a reply that stopped on a refusal is finished by the same reply.
+      RP_KEY="$RP_KEY" awk 'index($0, "applied: " ENVIRON["RP_KEY"] " ") == 1 || $0 == "withheld: " ENVIRON["RP_KEY"] { f = 1 }
+        END { exit !f }' "$RP_CARD" 2>/dev/null && continue
+      if [ "$RP_OPT" = "$RP_K" ]; then RP_CMD="$RP_ELSE"; RP_SIDE=override; else RP_CMD="$RP_DO"; RP_SIDE=default; fi
+      if [ "$RP_CMD" = - ]; then
+        if [ "$RP_SIDE" = default ]; then RP_REC="applied: $RP_KEY carried"; RP_DONE=$((RP_DONE + 1))
+        else RP_REC="withheld: $RP_KEY"; RP_HELD=$((RP_HELD + 1)); fi
+        printf '%s\n' "$RP_REC" >> "$RP_CARD"; say "reply — $RP_REC"
+        continue
+      fi
+      read -r -a RP_ARGV <<< "$RP_CMD"
+      RP_ARGV+=("$RP_TEXT")
+      [ "$RP_WHY" = - ] || RP_ARGV+=("$RP_WHY")
+      RP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "${RP_ARGV[@]}" 2>&1 )"; RP_RC=$?
+      [ -z "$RP_OUT" ] || printf '%s\n' "$RP_OUT"
+      if [ "$RP_RC" -ne 0 ]; then
+        die "reply — $(clean "$RP_KEY"): ${RP_ARGV[0]} refused (exit $RP_RC), and the reply stops there; $RP_DONE item(s) applied before it are kept in $RP_CARD, and the same reply again replays the rest."
+        exit "$RP_RC"
+      fi
+      printf 'applied: %s %s rc=0\n' "$RP_KEY" "${RP_ARGV[0]}" >> "$RP_CARD"
+      RP_DONE=$((RP_DONE + 1))
+    done <<RP_TABLE
+$(/usr/bin/grep '^final-card/v1|opt=' "$RP_CARD" 2>/dev/null)
+RP_TABLE
+    printf 'replied: at=%s option=%s words="%s"\n' "$(iso_now)" "$RP_K" "$(clean "$RP_TEXT")" >> "$RP_CARD"
+    if [ "$RP_HELD" -gt 0 ] || [ "$RP_K" -gt 1 ]; then
+      say "reply — option $RP_K of $RP_CARD replayed on the user's words: $RP_DONE item(s) recorded, $RP_HELD held back; what the override holds renders a new card (card.sh final) once it is settled."
+    else
+      say "reply — option 1 of $RP_CARD replayed on the user's words: $RP_DONE item(s) recorded; nothing on the card is left open."
+    fi
     exit 0
     ;;
 
