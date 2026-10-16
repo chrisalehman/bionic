@@ -2092,6 +2092,10 @@ done
 # a dispatched writer running `regression no` would switch its own run's floor off.
 expect_contains "19x0i …and the plan verb wave-31 added, regression" " regression " " $AM_VERBS "
 am_refused "19x0j: bash session-poker.sh regression no" "bash $AM_POKER regression no 'CI runs it'"
+# THE VERB WAVE-38 ADDED (T3 reply; D19, A-orch-11): it replays the user's reply to the final card into approve, waive,
+# waive-row and finding-move through calls the wall never reads, so it is the main thread's as those four are.
+expect_contains "19x0l …and the verb wave-38 T3 added, reply" " reply " " $AM_VERBS "
+am_refused "19x0m: bash session-poker.sh reply '1'" "bash $AM_POKER reply '1'"
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done
