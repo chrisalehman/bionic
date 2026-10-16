@@ -3072,7 +3072,7 @@ s69_debt() {  # <id> <suite> <token> <at>
   bash -c '. "$1/worktree.sh" && _wt_debt_write "$2" "$3" T9 wt/27-T9 "$4" "$5" "$6" "$7"' _ "$S69_LIB" "$S69_REC" "$1" "$S69_H" "$2" "$3" "$4"
 }
 s69_void() { bash -c '. "$1/worktree.sh" && _wt_debt_void "$2" "$3" wt/27-T9 merge-failed' _ "$S69_LIB" "$S69_REC" "$1"; }
-s69_floor() { s69_line floor "$S69_H" "$1" record/w27/floor-late.log; }
+s69_floor() { s69_line regression "$S69_H" "$1" record/w27/floor-late.log; }
 s69_state() {  # <none|open|covered|voided|two> -> the record, and the plan's extra lines in S69_X
   rm -f "$S69_REC"; S69_X=""
   case "$1" in
@@ -3098,7 +3098,7 @@ s69_real() {  # <step> <state> -> the gate's answer to a real bound commit of th
 # writes, so it covers none of them, and the two whole-scope readings a double wave plan is dealt. They go ahead of the
 # state's own lines, so a covering floor proof (`covered`, `two`) is still the plan's last. The rows then test what
 # they were written for: the debt arm, and the dry commit answering as the real commit.
-S69_FACTS7="$(s69_line floor "$S69_H" 2026-10-04T10:00:00Z record/w27/floor.log)
+S69_FACTS7="$(s69_line regression "$S69_H" 2026-10-04T10:00:00Z record/w27/floor.log)
 $(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/adversarial-whole.md adversarial w-read pass whole)
 $(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure-whole.md structure w-read pass whole)"
 # ONE TEXT FOR BOTH COMMITS (wave-35 T38; A-T38-2): the real commit and the dry commit judge the same plan
