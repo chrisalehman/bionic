@@ -2099,7 +2099,7 @@ section "READS — wave-26 T2: a row declares what it reads; an empty cell takes
 # carries it schedules each row by what the row reads, a table without it keeps reading `deps`
 # ids as "wait for that task to land". An empty `reads` cell is never "nothing" — it is the
 # row's kind default: build `approval:plan`, verify `approval:plan, head`, review
-# `approval:plan, live:head`, doc `approval:plan, head`, integrate `proof:floor, proof:review`,
+# `approval:plan, live:head`, doc `approval:plan, head`, integrate `proof:regression, proof:review`,
 # close the integrate row's merge. A settled read waits for every open writer of what it names;
 # `head` is written by every open row with a path outside `.bionic/`.
 TAB="$(printf '\t')"
@@ -2107,7 +2107,7 @@ TAB="$(printf '\t')"
 has_line() { if printf '%s\n' "$1" | grep -qxF -- "$2"; then printf yes; else printf no; fi; }
 
 # A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A settled
-# `proof:floor` read with no open writer is satisfied when lib/proof.sh `proof_state` answers
+# `proof:regression` read with no open writer is satisfied when lib/proof.sh `proof_state` answers
 # `covered` for the plan's working branch (wave-31 T25), so a row that means "the floor is proved"
 # needs a floor proof naming a REAL head the working branch is at: a fake hex is no commit, and
 # the read now waits. FLOOR_REPO is that repository, on `wave/99-fixture` with one commit, and
@@ -2120,7 +2120,7 @@ git -C "$FLOOR_REPO" -c user.name=fixture -c user.email=fixture@example.invalid 
 FLOOR_H="$(git -C "$FLOOR_REPO" rev-parse HEAD 2>/dev/null)"
 floor_at_head() {  # <plan> <copy under FLOOR_REPO>
   awk -v h="$FLOOR_H" '
-    /^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=" h) }
+    /^proved: kind=regression / { sub(/head=[0-9a-f]+/, "head=" h) }
     { print }
     /^## SDLC State/ && !w { print ""; print "working-branch: wave/99-fixture"; w = 1 }' "$1" > "$2"
 }
@@ -2503,20 +2503,20 @@ approved-by: fixture 2026-10-03T00:00Z "approved"
 | T0 | 4 | build | already landed | implementor | — | 30 | REQ-x | lib/z.sh |  | landed |
 | T1 | 4 | build | still building | implementor | — | 30 | REQ-x | lib/a.sh |  | active |
 | T2 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md | approval:plan, live:head | pending |
-| T3 | 6 | review | reads the floor proof live | critic | — | 30 | REQ-x | .bionic/docs/record/w/r2.md | live:proof:floor | pending |
+| T3 | 6 | review | reads the floor proof live | critic | — | 30 | REQ-x | .bionic/docs/record/w/r2.md | live:proof:regression | pending |
 | T4 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor.txt | approval:plan | pending |
-| T5 | 7 | doc | the release, on its approval | implementor | — | 30 | REQ-x | .bionic/docs/record/w/release.md | approval:release, proof:floor | pending |
+| T5 | 7 | doc | the release, on its approval | implementor | — | 30 | REQ-x | .bionic/docs/record/w/release.md | approval:release, proof:regression | pending |
 LIVE_EOF
 READY_LIVE="$(call units_ready "$SANDBOX/live-reads.md" 7)"
 WAIT_LIVE="$(call units_waiting "$SANDBOX/live-reads.md" 7)"
 expect_eq "LIVE.1 a live:head read is satisfied while a build is still open, once one has landed (T0)" "yes" "$(has_line "$READY_LIVE" T2)"
-expect_eq "LIVE.2 live:proof:floor is not satisfied before a proved: kind=floor line exists" "no" \
+expect_eq "LIVE.2 live:proof:regression is not satisfied before a proved: kind=regression line exists" "no" \
   "$(has_line "$READY_LIVE" T3)"
-expect_eq "LIVE.3 approval:release and proof:floor wait, each named; the floor's writer is the open verify row" "yes yes" \
+expect_eq "LIVE.3 approval:release and proof:regression wait, each named; the floor's writer is the open verify row" "yes yes" \
   "$(printf '%s %s' "$(has_line "$WAIT_LIVE" "T5${TAB}approval:release${TAB}-${TAB}-")" \
-     "$(has_line "$WAIT_LIVE" "T5${TAB}proof:floor${TAB}T4${TAB}pending")")"
+     "$(has_line "$WAIT_LIVE" "T5${TAB}proof:regression${TAB}T4${TAB}pending")")"
 awk '{ print } /^approved-by:/ {
-  print "proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T01:00:00Z evidence=record/w/floor.txt"
+  print "proved: kind=regression head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T01:00:00Z evidence=record/w/floor.txt"
   print "approved: release by fixture 2026-10-03T02:00:00Z \"ship it\"" }' \
   "$SANDBOX/live-reads.md" > "$SANDBOX/live-reads-proved.md"
 READY_PROVED="$(call units_ready "$SANDBOX/live-reads-proved.md" 7)"
@@ -2525,17 +2525,17 @@ expect_eq "LIVE.4 with the proof line, the live floor read is satisfied" "yes" "
 # F2): the floor row T4 is still pending, so the line is stale until it lands.
 expect_eq "LIVE.5 with the proof and the approval lines but the floor row still open, the release waits on it" "no yes" \
   "$(printf '%s %s' "$(has_line "$READY_PROVED" T5)" \
-     "$(has_line "$(call units_waiting "$SANDBOX/live-reads-proved.md" 7)" "T5${TAB}proof:floor${TAB}T4${TAB}pending")")"
+     "$(has_line "$(call units_waiting "$SANDBOX/live-reads-proved.md" 7)" "T5${TAB}proof:regression${TAB}T4${TAB}pending")")"
 sed 's/| approval:plan | pending |$/| approval:plan | landed |/' "$SANDBOX/live-reads-proved.md" > "$SANDBOX/live-reads-floored.md"
 floor_at_head "$SANDBOX/live-reads-floored.md" "$FLOOR_REPO/live-reads-floored.md"
 expect_eq "LIVE.5b …and once the floor row lands, the release's settled reads are satisfied (the proof at the head)" "yes" \
   "$(has_line "$(call units_ready "$FLOOR_REPO/live-reads-floored.md" 7)" T5)"
 expect_eq "LIVE.6 a live read is never an edge: nothing enters T2 or T3" "" \
   "$(call units_edges "$SANDBOX/live-reads.md" | awk -F'\t' '$2 == "T2" || $2 == "T3"')"
-expect_eq "LIVE.6b …while the settled proof:floor read is one, from the verify row" "yes" \
-  "$(has_line "$(call units_edges "$SANDBOX/live-reads.md")" "T4${TAB}T5${TAB}proof:floor")"
+expect_eq "LIVE.6b …while the settled proof:regression read is one, from the verify row" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/live-reads.md")" "T4${TAB}T5${TAB}proof:regression")"
 # A FENCED LINE IS DOCUMENTATION, not a proof: the plan text is read fence-aware.
-awk '{ print } /^approved-by:/ { print "```"; print "proved: kind=floor head=x at=y evidence=z"; print "```" }' \
+awk '{ print } /^approved-by:/ { print "```"; print "proved: kind=regression head=x at=y evidence=z"; print "```" }' \
   "$SANDBOX/live-reads.md" > "$SANDBOX/live-reads-fenced.md"
 expect_eq "LIVE.7 a proved: line inside a fence proves nothing" "no" \
   "$(has_line "$(call units_ready "$SANDBOX/live-reads-fenced.md" 7)" T3)"
@@ -3256,7 +3256,7 @@ expect_eq "HARDEN.F1d a record reader at an earlier step still writes the record
 
 # F2 — A proof: READ WAITS FOR EVERY OPEN WRITER, EVEN WHEN A PROOF LINE EXISTS. A re-floor
 # verify row added after the floor was proved makes that proof stale: integrate must wait.
-PROVED="proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/f.txt
+PROVED="proved: kind=regression head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/f.txt
 proved: kind=review head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/r.txt"
 hard_plan "$SANDBOX/f2.md" "$PROVED" \
   '| T1 | 5 | verify | re-floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor2.txt |  | pending |' \
@@ -3264,8 +3264,8 @@ hard_plan "$SANDBOX/f2.md" "$PROVED" \
 R="$(call units_ready "$SANDBOX/f2.md" 8)"
 expect_eq "HARDEN.F2 a proved floor with an open re-floor row: the re-floor is ready, integrate is not" "yes no" \
   "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
-expect_eq "HARDEN.F2b …and integrate waits on proof:floor, naming the open verify row" "yes" \
-  "$(has_line "$(call units_waiting "$SANDBOX/f2.md" 8)" "T2${TAB}proof:floor${TAB}T1${TAB}pending")"
+expect_eq "HARDEN.F2b …and integrate waits on proof:regression, naming the open verify row" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/f2.md" 8)" "T2${TAB}proof:regression${TAB}T1${TAB}pending")"
 sed 's/record\/w\/floor2.txt |  | pending |/record\/w\/floor2.txt |  | landed |/' \
   "$SANDBOX/f2.md" > "$SANDBOX/f2-landed.md"
 floor_at_head "$SANDBOX/f2-landed.md" "$FLOOR_REPO/f2-landed.md"
@@ -3607,7 +3607,7 @@ expect_eq "FLOOR-HOLDS.1c …never by the release, which reads head at a later s
 expect_eq "FLOOR-HOLDS.1d …nor by a row whose only Files are record/… (writes_head says no)" "no" \
   "$(has_line "$FH" "T4${TAB}4${TAB}active")"
 expect_eq "FLOOR-HOLDS.1e …and the call succeeds" "0" "$(call_rc units_floor_holds "$SANDBOX/fh-reads.md" T2)"
-# NO ROW NAMED: the floor is every open verify or test row, the rows proof:floor names as its
+# NO ROW NAMED: the floor is every open verify or test row, the rows proof:regression names as its
 # writers, so the answer is what they wait on together.
 FH0="$(call units_floor_holds "$SANDBOX/fh-reads.md")"
 expect_eq "FLOOR-HOLDS.2 with no row named, the open verify row stands for the floor: T1 holds it" "yes" \
@@ -3676,7 +3676,7 @@ E_LEG='| id | step | kind | task | agent | deps | size | serves | Files | worktr
 E_RDS='| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |'
 E_H=8d7216ce2835456ae38b03d6a7d30a50400cf30f
 E_H2=1111111111111111111111111111111111111111
-E_PROOFS="proved: kind=floor head=$E_H at=2026-10-04T11:00:00Z evidence=record/x/floor.log
+E_PROOFS="proved: kind=regression head=$E_H at=2026-10-04T11:00:00Z evidence=record/x/floor.log
 proved: kind=review head=$E_H at=2026-10-04T11:05:00Z evidence=record/x/review-1.md"
 
 # K2-F1 — A TABLE WITHOUT reads KEEPS 1.10 THREADING. Every plan written before 1.11 has no reads
@@ -3765,7 +3765,7 @@ expect_eq "RELEASE-READ.4b …it waits for approval:release" "yes" \
 awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T12:00:00Z \"ship it\"" }' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-appr.md"
 expect_eq "RELEASE-READ.4c …and once approved: release is written, it is ready" "T3" \
   "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e6-appr.md" 8)"
-sed '/^| T3 /s/| pending | — |$/| pending | proof:floor, proof:review, head, approval:merge |/' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-cell.md"
+sed '/^| T3 /s/| pending | — |$/| pending | proof:regression, proof:review, head, approval:merge |/' "$FLOOR_REPO/e6.md" > "$FLOOR_REPO/e6-cell.md"
 expect_eq "RELEASE-READ.4d an integrate cell written by hand without approval:release waits for it all the same" "yes" \
   "$(has_line "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_waiting "$FLOOR_REPO/e6-cell.md" 8)" "T3${TAB}approval:release${TAB}-${TAB}-")"
 expect_eq "RELEASE-READ.4e …and approve can record it: the approval names an open row reads include release" "yes" \
@@ -3810,7 +3810,7 @@ expect_eq "RUN-EDGES.F4c past the proof (something landed), the review is ready 
 expect_eq "RUN-EDGES.F4d with the head unknown, the review may still write: integrate waits on it" \
   "yes" "$(has_line "$(live_call "" units_waiting "$SANDBOX/e4.md" 8)" "T3${TAB}proof:review${TAB}T2${TAB}pending")"
 
-# K2-F5 — INTEGRATE WAITS FOR AN OPEN BUILD. Its default reads head (proof:floor, proof:review,
+# K2-F5 — INTEGRATE WAITS FOR AN OPEN BUILD. Its default reads head (proof:regression, proof:review,
 # head), so a late fix still active holds the merge, and the WAIT line names it.
 edges_plan "$SANDBOX/e5.md" 8 "$E_PROOFS" "$E_RDS" \
   '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
@@ -3831,14 +3831,14 @@ expect_eq "RUN-EDGES.F5c the build landed and both proofs at the head: integrate
 section "§FLOOR-STANDS — integrate waits while the floor is not proved: one whole run, and every commit after it proved by the runs recorded at it (wave-26 T64; REQ-3 AC-3.3, AC-3.4; wave-31 T25: REQ-4 AC-4.1, REQ-13 AC-13.4; D3)"
 # ============================================================
 #
-# Through T63 a `proof:floor` read was satisfied by ANY `proved: kind=floor` line, whatever its
+# Through T63 a `proof:regression` read was satisfied by ANY `proved: kind=regression` line, whatever its
 # head: a new file under a directory no suite names landed with no suite run (a tree with no stamp
 # lands, by design), integrate read ready, and the release went out on a change no suite had read.
 # The read now stands only while lib/proof.sh `proof_state` answers `covered`: the floor proof
 # names the head, or every commit since it is proved by the runs recorded at it (wave-31 T25, D3).
 # On `uncovered`, or a state that cannot be computed, the row waits, and `units_waiting` says what
 # is lacking and names the way out (the lacking suites run, or a whole run recorded with
-# `proof-add floor`).
+# `proof-add regression`).
 #
 # THE FIXTURE IS A REAL REPOSITORY on `wave/99-fs` with five suites. Every floor proof line is
 # written by the product: `proof_line` and `proof_add_line` (lib/proof.sh, the pair `proof-add`
@@ -3847,7 +3847,7 @@ section "§FLOOR-STANDS — integrate waits while the floor is not proved: one w
 # (`stamp/v1|head=|dirty=|rc=|at=|suites=|cmd=`), appended to the checkout's git dir where the shim
 # writes them; session-poker §54 and §72 write them with the real shim. A `git` shim on PATH counts
 # the walk's one call (`git log --first-parent --reverse`): the cost rows read the count. The plan
-# reads integrate's kind default (`proof:floor, proof:review, head`).
+# reads integrate's kind default (`proof:regression, proof:review, head`).
 FS_REPO="$SANDBOX/fs-repo"
 FS_COUNT="$SANDBOX/fs-walk.count"
 FS_SHIM="$SANDBOX/fs-git-shim"
@@ -3896,11 +3896,11 @@ fs_prove() {
     && printf '%s\n' "$out" > "$FS_PLAN"
 }
 fs_count() { awk 'END { print NR + 0 }' "$FS_COUNT" 2>/dev/null; }
-fs_why() {  # -> integrate's proof:floor wait reason, or nothing
-  call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:floor") == 1 { print $2 }'
+fs_why() {  # -> integrate's proof:regression wait reason, or nothing
+  call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:regression") == 1 { print $2 }'
 }
-FS_LEAD="proof:floor: the floor is one whole run plus each later commit proved; past the proof at"
-FS_OUT="; run suites its row named, proof-add floor; a second run: approve regression-2"
+FS_LEAD="proof:regression: the floor is one whole run plus each later commit proved; past the proof at"
+FS_OUT="; run suites its row named, proof-add regression; a second run: approve regression-2"
 # THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
 # the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
 # state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.
@@ -3935,8 +3935,8 @@ expect_eq "FS.3c …while the extractor reads a real line: the review proof is n
   "$(call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1')"
 expect_eq "FS.3d units_held names no hold for it either: it waits on a read, not on the world" "" \
   "$(call units_held "$FS_PLAN" 8)"
-expect_eq "FS.3e a live:proof:floor read is a read of what exists, and is not judged by the state" "yes" \
-  "$(sed 's/^| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — |  |/| T3 | 6 | review | r | critic | — | 10 | REQ-x | .bionic\/docs\/record\/fs\/r2.md | live:proof:floor |/' "$FS_PLAN" > "$FS_REPO/.bionic/live.md"; has_line "$(call units_ready "$FS_REPO/.bionic/live.md" 8)" T3)"
+expect_eq "FS.3e a live:proof:regression read is a read of what exists, and is not judged by the state" "yes" \
+  "$(sed 's/^| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — |  |/| T3 | 6 | review | r | critic | — | 10 | REQ-x | .bionic\/docs\/record\/fs\/r2.md | live:proof:regression |/' "$FS_PLAN" > "$FS_REPO/.bionic/live.md"; has_line "$(call units_ready "$FS_REPO/.bionic/live.md" 8)" T3)"
 fs_prove floor
 FS_H1="$(fs_git rev-parse HEAD)"
 expect_eq "FS.4 the way out: a floor proof at the new head and integrate is ready again" "T3" "$(call units_ready "$FS_PLAN" 8)"
@@ -3994,7 +3994,7 @@ fs_plan 8 landed; fs_prove floor; fs_prove review
 fs_commit newdir/z.sh 'after the merge'
 : > "$FS_COUNT"
 expect_eq "FS.9 integrate landed: nothing is ready" "" "$(PATH="$FS_SHIM:$PATH" call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.9b …and with no open row reading proof:floor the state is not asked" "0" "$(fs_count)"
+expect_eq "FS.9b …and with no open row reading proof:regression the state is not asked" "0" "$(fs_count)"
 fs_plan 8 pending; fs_prove floor; fs_prove review
 FS_H4="$(fs_git rev-parse HEAD)"
 fs_commit newdir/w.sh 'pending again'
@@ -4024,7 +4024,7 @@ expect_eq "FS.11b …and a floor proof at the head walks nothing: covered, ready
 sed 's/^working-branch: wave\/99-fs$//' "$FS_PLAN" > "$FS_REPO/.bionic/nobranch.md"
 expect_contains "FS.12 a plan naming no working branch: the wait says so" ", the plan names no working-branch;" \
   "$(call units_waiting "$FS_REPO/.bionic/nobranch.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
-awk '/^proved: kind=floor / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef0123456789abcdef01234567") } { print }' \
+awk '/^proved: kind=regression / { sub(/head=[0-9a-f]+/, "head=0123456789abcdef0123456789abcdef01234567") } { print }' \
   "$FS_PLAN" > "$FS_REPO/.bionic/foreign.md"
 expect_contains "FS.13 a floor proof whose head is no commit here: the wait says so" ", the proved head is not a commit here;" \
   "$(call units_waiting "$FS_REPO/.bionic/foreign.md" 8 | awk -F'\t' '$1 == "T3" { print $2 }')"
@@ -4431,23 +4431,23 @@ expect_eq "BR-2 the same plan with the markers taken off has no review-born row 
   "$(call units_born "$SANDBOX/born-none.md")|$(call_rc units_born "$SANDBOX/born-none.md")"
 
 # ============================================================
-section "§BORN-FLOOR — wave-36 T7: a row born of the floor's red carries \` born: floor <suite>\`, and units_born_marks reads both born markers for the judge (REQ-3 AC-3.2; D9, D2)"
+section "§BORN-FLOOR — wave-36 T7: a row born of the floor's red carries \` born: regression <suite>\`, and units_born_marks reads both born markers for the judge (REQ-3 AC-3.2; D9, D2)"
 # ============================================================
-# `task-add --born floor:<suite>` hands units_add_row the born value `floor <suite>`, so the row's `- <id>:` line
-# ends ` born: floor <suite>`. units_born_marks prints `<id>\t<review|floor>\t<rating or suite>` per `- <id>:` line
+# `task-add --born regression:<suite>` hands units_add_row the born value `floor <suite>`, so the row's `- <id>:` line
+# ends ` born: regression <suite>`. units_born_marks prints `<id>\t<review|floor>\t<rating or suite>` per `- <id>:` line
 # carrying either marker, read where units_born reads (the first line per id, fences skipped): what lib/proof.sh's
 # judge joins with the landing record to hold a born row's landing. units_born, the fix-cap's count, reads the
 # review marker alone, so a floor-born row counts nothing against the cap.
-call units_add_row "$SANDBOX/born.md" T5 4 build 'fix the floor red' w-T5 '—' 30 REQ-x payload/d.sh '' 'floor a.test.sh' > "$SANDBOX/born-floor.md"
-expect_regex "BF-1 units_add_row with the born value floor a.test.sh: the row's line ends born: floor a.test.sh" \
-  '^- T5: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh$' "$(/usr/bin/grep '^- T5:' "$SANDBOX/born-floor.md")"
+call units_add_row "$SANDBOX/born.md" T5 4 build 'fix the floor red' w-T5 '—' 30 REQ-x payload/d.sh '' 'floor a.test.sh' > "$SANDBOX/born-regression.md"
+expect_regex "BF-1 units_add_row with the born value floor a.test.sh: the row's line ends born: regression a.test.sh" \
+  '^- T5: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression a\.test\.sh$' "$(/usr/bin/grep '^- T5:' "$SANDBOX/born-regression.md")"
 expect_eq "BF-2 units_born_marks reads both markers, each with its rating or suite; the fenced example is not one" \
   "T2${TAB}review${TAB}S2 on
 T4${TAB}review${TAB}S1 off
-T5${TAB}floor${TAB}a.test.sh" "$(call units_born_marks "$SANDBOX/born-floor.md")"
-expect_eq "BF-2b …exit 0" "0" "$(call_rc units_born_marks "$SANDBOX/born-floor.md")"
+T5${TAB}regression${TAB}a.test.sh" "$(call units_born_marks "$SANDBOX/born-regression.md")"
+expect_eq "BF-2b …exit 0" "0" "$(call_rc units_born_marks "$SANDBOX/born-regression.md")"
 expect_eq "BF-3 the fix-cap's count reads the review marker alone: T5 is not a review-born row" \
-  "T2 T4" "$(call units_born "$SANDBOX/born-floor.md" | awk -F'\t' '{ printf "%s%s", (NR > 1 ? " " : ""), $1 }')"
+  "T2 T4" "$(call units_born "$SANDBOX/born-regression.md" | awk -F'\t' '{ printf "%s%s", (NR > 1 ? " " : ""), $1 }')"
 expect_eq "BF-4 a plan with no marker: units_born_marks prints nothing, exit 0 (positive: BF-2 read three from the same reader)" "|0" \
   "$(call units_born_marks "$SANDBOX/born-none.md")|$(call_rc units_born_marks "$SANDBOX/born-none.md")"
 expect_eq "BF-5 an unreadable plan: exit 1" "1" "$(call_rc units_born_marks "$SANDBOX/no-such-plan.md")"
@@ -4455,7 +4455,7 @@ expect_eq "BF-5 an unreadable plan: exit 1" "1" "$(call_rc units_born_marks "$SA
 # ============================================================
 section "§STEP-LINE — wave-36 T10: units_step_line rewrites a \`- T<n>:\` line's text and keeps every \` <key>: \` marker after it (REQ-4 AC-4.3; D10)"
 # ============================================================
-# task-add writes ` born: review S<n> <reach> of=<record>#<n>` (or ` born: floor <suite>`) at the end of the row's
+# task-add writes ` born: review S<n> <reach> of=<record>#<n>` (or ` born: regression <suite>`) at the end of the row's
 # `- T<n>:` line, and a later verb may add its own ` <key>: <value>`. step-line's replace mode used to overwrite the
 # whole text, so the landing summary lost the born marker the judge and the fix-cap read (debt step-line-drops-born,
 # wave-35 A-orch-52). The line is now `- T<n>: <text>[ <key>: <value>]…`: the text is what precedes the first
@@ -4469,7 +4469,7 @@ current: 4
 
 - Step 4: in progress; current: T5
 - T5: pending dispatch — added by task-add at 2026-10-13T20:44:06Z born: review S3 on of=record/w/r.md#2
-- T6: pending dispatch — added by task-add at 2026-10-13T20:45:00Z born: floor a.test.sh fixed: T9 at 2026-10-14T00:00:00Z
+- T6: pending dispatch — added by task-add at 2026-10-13T20:45:00Z born: regression a.test.sh fixed: T9 at 2026-10-14T00:00:00Z
 - T7: pending dispatch — .worktrees/36-T7
 
 ## Tasks
@@ -4487,7 +4487,7 @@ expect_eq "SL-1b …and the marker's reader still reads the finding off the rewr
   "T5${TAB}pending${TAB}record/w/r.md#2" "$(call units_born_findings "$SANDBOX/sl-1.md")"
 { call units_step_line "$SANDBOX/sl.md" T6 'landed def5678 2026-10-14T01:10:00Z'; echo; } > "$SANDBOX/sl-2.md"
 expect_eq "SL-2 two markers, task-add's and a later verb's: both kept, in their order" \
-  "- T6: landed def5678 2026-10-14T01:10:00Z born: floor a.test.sh fixed: T9 at 2026-10-14T00:00:00Z" \
+  "- T6: landed def5678 2026-10-14T01:10:00Z born: regression a.test.sh fixed: T9 at 2026-10-14T00:00:00Z" \
   "$(/usr/bin/grep '^- T6:' "$SANDBOX/sl-2.md")"
 { call units_step_line "$SANDBOX/sl.md" T5 'merge 9abc' append; echo; } > "$SANDBOX/sl-3.md"
 expect_eq "SL-3 append extends the text, before the markers" \
@@ -4814,7 +4814,7 @@ br_plan() {  # <out> <front: branch or -> <sdlc: branch or -> [fenced] — a pla
     printf -- 'integration-branch: main\n---\n\n# fixture · plan\n\n## Goal\n\nLand the fixture on its branch.\n\n## SDLC State\n\ncurrent: 4\n'
     [ -z "${4:-}" ] || printf '```\nworking-branch: wave/35-fenced\n```\n'
     [ "$3" = - ] || printf 'working-branch: %s\n' "$3"
-    printf 'proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n\n' "$BR_HEAD"
+    printf 'proved: kind=regression head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n\n' "$BR_HEAD"
     printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | REQ-1: the fixture row | implementor | — | 30 | REQ-1 | a.sh | — | pending |\n\n'
     printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1.1 | T0 | pending | — | — |\n'
@@ -4942,7 +4942,7 @@ expect_eq "FR-4 the same reads written in the cell (the plan's own T14): ready, 
 fr_plan "$FR_TWO" "approval:plan, proof:review, head"
 expect_eq "FR-4b …and not ready with the evidence fact absent" "" "$(call units_ready "$FR_PLAN" 6)"
 # THE INTEGRATE ROW WAITS ON AN OWED RED (wave-35 T9; AC-1.3): the floor at the head names a red of its whole run
-# (`owed=`, as proof-add floor writes it), so proof_state says owed and the wait says which suite and the way out.
+# (`owed=`, as proof-add regression writes it), so proof_state says owed and the wait says which suite and the way out.
 fr_integrate() {  # <floor line> -> the plan with the floor row landed, the integrate row pending, the facts handed covered
   fr_plan "$FR_TWO
 $(fr_reading evidence)
@@ -4955,9 +4955,9 @@ expect_eq "FR-5 control: a green floor at the head, the readings covered: integr
 fr_integrate "$(call proof_floor_line "$FR_H" 2026-10-12T04:00:00Z record/fr/floor.log a.test.sh)"
 expect_eq "FR-5b AC-1.3 the floor at the head owes a.test.sh: integrate is not ready" "" \
   "$(UNITS_FACTS_STATE=covered call units_ready "$FR_PLAN" 8)"
-expect_contains "FR-5c …and its proof:floor wait names the red suite and the way out" \
-  "proof:floor: the whole run at ${FR_H:0:12} left a.test.sh red, each owed until a later landing runs it green" \
-  "$(UNITS_FACTS_STATE=covered call units_waiting "$FR_PLAN" 8 | awk -F'\t' '$1 == "T21" && index($2, "proof:floor") == 1 { print $2 }')"
+expect_contains "FR-5c …and its proof:regression wait names the red suite and the way out" \
+  "proof:regression: the whole run at ${FR_H:0:12} left a.test.sh red, each owed until a later landing runs it green" \
+  "$(UNITS_FACTS_STATE=covered call units_waiting "$FR_PLAN" 8 | awk -F'\t' '$1 == "T21" && index($2, "proof:regression") == 1 { print $2 }')"
 
 
 # ============================================================
@@ -5063,7 +5063,7 @@ LH_FLOOR="${LH_PLAN%.plan.md}-floor.plan.md"
 lh_plan "$LH_FLOOR" wave/99-lh "$LH_T3Q" "$LH_READ
 $(call proof_floor_line "$LH_R" 2026-10-13T04:00:00Z record/lh/floor.log)"
 expect_eq "LH-6 precondition: the plan carries the regression proof the integrate row reads" "1" \
-  "$(grep -c '^proved: kind=floor ' "$LH_FLOOR")"
+  "$(grep -c '^proved: kind=regression ' "$LH_FLOOR")"
 expect_eq "LH-6b at Step 8, a live row past its reading and a floor to judge: the review row is ready, and the answer exits 0" "yes 0" \
   "$(has_line "$(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8)" T3) $(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8 >/dev/null; printf '%s' "$CALL_RC")"
 

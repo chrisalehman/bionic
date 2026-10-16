@@ -26,7 +26,23 @@
 # Sourced, never executed. Defines functions and one constant; reads nothing at load time.
 # bash 3.2: no associative arrays, no `${var,,}`.
 
-PROOF_KINDS="floor review task check"
+# THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
+# proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
+PROOF_KINDS="regression review task check"
+# THE MAP IS SOURCED FROM BESIDE THIS FILE, softly: a copy of this file read where alias.sh is not beside it (a suite's
+# doctored copy) reads only the new spellings, and _proof_alias_norm and _proof_alias_born say so by writing no arm.
+if ! declare -F alias_read >/dev/null 2>&1; then
+  _proof_alias_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  # shellcheck source=/dev/null
+  [ -n "$_proof_alias_dir" ] && [ -r "$_proof_alias_dir/alias.sh" ] && . "$_proof_alias_dir/alias.sh"
+  unset _proof_alias_dir
+fi
+# _proof_alias_norm <kind> <awk variable> -> lib/alias.sh `alias_awk_norm`'s statements, or a blank when the map is
+# not loaded. _proof_alias_born -> the born marker's spellings as an ERE alternation, the new one alone without it.
+_proof_alias_norm() { if declare -F alias_awk_norm >/dev/null 2>&1; then alias_awk_norm "$@"; else printf ' '; fi; }
+_proof_alias_born() { if declare -F alias_alt >/dev/null 2>&1; then alias_alt born; else printf 'regression'; fi; }
+# THE KIND'S STATEMENTS ARE WRITTEN ONCE, AT LOAD: proof_awk is pasted into every proof reader, so it costs no process.
+_PROOF_KIND_NORM="$(_proof_alias_norm kind PROOF_KIND)"
 # The questions a reading answers, the values its result and scope take, and the answers a
 # structure check takes (the Interfaces table of wave-27).
 PROOF_QUESTIONS="evidence adversarial structure"
@@ -86,9 +102,9 @@ proof_line() {
 proof_floor_line() {
   local l
   if [ -n "${4:-}" ]; then
-    l="$(printf 'proved: kind=floor head=%s at=%s evidence=%s owed=%s' "$1" "$2" "$3" "$4")"
+    l="$(printf 'proved: kind=regression head=%s at=%s evidence=%s owed=%s' "$1" "$2" "$3" "$4")"
   else
-    l="$(proof_line floor "$1" "$2" "$3")"
+    l="$(proof_line regression "$1" "$2" "$3")"
   fi
   printf '%s%s\n' "$l" "${5:+ $5}"
 }
@@ -750,9 +766,11 @@ proof_checkout() {
 #          at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict
+  # THE KIND OPERAND IS READ THROUGH THE MAP (wave-38 T8), silently: a caller passing the old kind is the new one.
+  declare -F alias_read >/dev/null 2>&1 && { alias_read kind "$kind" 2>/dev/null; kind="$ALIAS_TOKEN"; }
   head="$(git -C "$co" rev-parse --verify -q "${7:-HEAD}^{commit}" 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
-  if [ "$kind" = floor ]; then
+  if [ "$kind" = regression ]; then
     proof_floor_retired "$root" && return 1
     _proof_floor_log "$ev" "$head" "$co" "$plan" "$root"; return $?
   fi
@@ -907,7 +925,7 @@ _proof_floor_walk() {
   # proof is written; only a commit the walk cannot prove refuses the log (exit 1).
   why="$(_proof_walk "$co" "$sha" "$head" "$rec" "$owed" "$waive")"; rc=$?
   [ "$rc" -ne 1 ] && return 0
-  printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s. Run the suites it lacks on %.12s, or the whole suite, then proof-add floor again' \
+  printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s. Run the suites it lacks on %.12s, or the whole suite, then proof-add regression again' \
     "$ev" "$sha" "$head" "${why:-the commits since it cannot be walked}" "$head"
   return 1
 }
@@ -1233,7 +1251,7 @@ _proof_floor_match() {
   local log="$1" plan="${2:-}" root="${3:-}" sha="${4:-}" rc="${5:-}" rec="" key hash got f a b
   hash="$(_proof_sha256 "$log")" || hash=""
   if [ -z "$hash" ]; then
-    printf 'the log %s cannot be hashed (no shasum or sha256sum answers), so the run that wrote it cannot be matched; install one and run proof-add floor again' "$log"
+    printf 'the log %s cannot be hashed (no shasum or sha256sum answers), so the run that wrote it cannot be matched; install one and run proof-add regression again' "$log"
     return 1
   fi
   [ -z "$plan" ] || rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" || rec=""
@@ -1258,11 +1276,11 @@ _proof_floor_match() {
 $got
 PROOF_RUN_BAD
       [ "$f" = rc ] || { b="$(printf '%s' "$b" | cut -c1-12)"; got="$(printf '%s' "$got" | cut -c1-12)"; }
-      printf 'the log changed since its run: %s reads %s %s, but its run at %s recorded %s %s (%s); cite the log as its run left it, or run floor-run again and cite that log' \
+      printf 'the log changed since its run: %s reads %s %s, but its run at %s recorded %s %s (%s); cite the log as its run left it, or run regression-run again and cite that log' \
         "$log" "$f" "$b" "$a" "$f" "$got" "$rec"
       return 1 ;;
   esac
-  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a floor proof cites a run the machine recorded, so run the regression with floor-run, or detached through booked.sh, and cite the log it writes' \
+  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a floor proof cites a run the machine recorded, so run the regression with regression-run, or detached through booked.sh, and cite the log it writes' \
     "$log" "$sha" "$rc" "$hash" "${rec:-the landing record of a plan (none was named)}"
   return 1
 }
@@ -1288,7 +1306,7 @@ proof_floor_retired() {
   _proof_roots_load
   v="$(config_value "$1" floor-attestation "" 2>/dev/null)"
   [ -n "$v" ] || return 1
-  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the floor is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add floor <log> [<log>...]' "$v"
+  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the floor is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add regression <log> [<log>...]' "$v"
 }
 
 # proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
@@ -1361,6 +1379,7 @@ proof_awk() {
         else if (f[i] ~ /^evidence=/) PROOF_EVIDENCE = substr(f[i], 10)
         else if (f[i] ~ /^owed=/) PROOF_OWED = substr(f[i], 6)
       }
+      '"$_PROOF_KIND_NORM"'
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
     }
   '
@@ -1430,7 +1449,7 @@ proof_last_line() {
 # never asks it again (wave-36 T12; C35). It reads text, through lib/run.sh `plan_lines`, and runs no git.
 # Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
 proof_floor_absent() {
-  [ -n "$(proof_last "${1:-}" floor)" ] && return 1
+  [ -n "$(proof_last "${1:-}" regression)" ] && return 1
   printf '%s' 'no regression proof on this plan yet'
 }
 
@@ -1440,6 +1459,9 @@ proof_floor_absent() {
 # one line, so its floor line was absent to the wall and the judge alike (C34).
 _proof_last_read() {
   local plan="$1" kind="$2" what="$3" q="${4:-}"
+  # THE KIND ASKED FOR IS READ THROUGH THE MAP TOO (wave-38 T8): a caller asking for the old kind is answered as one
+  # asking for the new, silently: the operand is code's, never a person's.
+  declare -F alias_read >/dev/null 2>&1 && { alias_read kind "$kind" 2>/dev/null; kind="$ALIAS_TOKEN"; }
   [ -f "$plan" ] || return 0
   _proof_run_load
   plan_lines "$plan" | awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
@@ -1635,12 +1657,12 @@ proof_branch_head() {
 # and the answer is uncovered, the safe direction.
 _proof_floor_judge() {
   local plan="$1" tree="$2" c="$3" h owed inh files rec why rc waive=0
-  h="$(proof_last "$plan" floor)"
+  h="$(proof_last "$plan" regression)"
   h="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
   c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
-  owed="$(_proof_last_read "$plan" floor owed)"
+  owed="$(_proof_last_read "$plan" regression owed)"
   inh="$(proof_inherited "$plan")"
   [ -z "$owed" ] || [ -z "$inh" ] || owed="$(PROOF_I=",$inh," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_I"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_OWED_IN
 $owed
@@ -1730,7 +1752,7 @@ facts_owed() {
       for (i = 1; i <= n; i++) if (r != "" && index(d[i], r "=") == 1) roles = substr(d[i], length(r) + 2)
       if (roles == "") exit 1
       m = split(ENVIRON["PROOF_Q"], q, " "); split(roles, role, ",")
-      if (floor == 1) print "floor"
+      if (floor == 1) print "regression"
       for (i = 1; i <= m; i++) print "review\t" q[i] "\t" role[i] "\tpiece"
       if (s == "wave")
         for (i = 1; i <= m; i++) if (index(" " ENVIRON["PROOF_C"] " ", " " q[i] " ")) print "review\t" q[i] "\t" role[i] "\twhole"
@@ -1863,7 +1885,8 @@ proof_debts_open() {
     /^proved:[ \t]/ {
       m = split($0, w, /[ \t]+/); k = ""; at = ""
       for (i = 2; i <= m; i++) { if (w[i] ~ /^kind=/) k = substr(w[i], 6); else if (w[i] ~ /^at=/) at = substr(w[i], 4) }
-      if ((k == "floor" || k == "task") && at ~ iso && at > latest) latest = at
+      '"$(_proof_alias_norm kind k)"'
+      if ((k == "regression" || k == "task") && at ~ iso && at > latest) latest = at
     }
     END {
       for (i = 1; i <= nd; i++) {
@@ -2006,13 +2029,13 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings 
   while IFS= read -r fact; do
     [ -n "$fact" ] || continue
     case "$fact" in
-      floor)
+      regression)
         # THE FLOOR AT <head> (wave-35 T9; D8, AC-1.3; A-orch-45): the judge itself, at the head handed in, never
         # a checkout's: owed while a red of the whole run is open, uncovered F..<head> with the reason only for
         # a commit it cannot prove.
         if proof_floor_absent "$plan" >/dev/null; then st=absent
         else
-          x="$(proof_last "$plan" floor)"
+          x="$(proof_last "$plan" regression)"
           st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
           case "$st" in
             covered|owed"	"?*) : ;;
@@ -2147,7 +2170,7 @@ _facts_debt() {
   droot=""; [ -z "$tree" ] || ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
   while IFS='	' read -r x ev; do
     case "$x" in
-      floor) printf 'covered'; return 0 ;;
+      regression) printf 'covered'; return 0 ;;
       task)
         case "$ev" in /*) : ;; *) [ -n "$droot" ] || continue; ev="$droot/$ev" ;; esac
         [ -f "$ev" ] || continue
@@ -2163,7 +2186,7 @@ $(awk -v t="$clear" "$(proof_awk)"'
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
   /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && proof_fields($0) && (PROOF_KIND == "floor" || PROOF_KIND == "task") {
+  insdlc && proof_fields($0) && (PROOF_KIND == "regression" || PROOF_KIND == "task") {
     m = split($0, f, /[ \t]+/); at = ""
     for (i = 2; i <= m; i++) if (f[i] ~ /^at=/) at = substr(f[i], 4)
     if (at > t) print PROOF_KIND "\t" PROOF_EVIDENCE
@@ -2223,7 +2246,7 @@ _facts_docs_prefix() {
 # registered reading names, gives no question, so that landing owes on every chain.
 _facts_born_landings() {
   local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec="" want
-  if /usr/bin/grep -qE ' born: (review|floor) ' "$plan" 2>/dev/null && _proof_units_load \
+  if /usr/bin/grep -qE " born: (review|$(_proof_alias_born)) " "$plan" 2>/dev/null && _proof_units_load \
     && declare -F units_born_marks >/dev/null 2>&1; then
     marks="$(units_born_marks "$plan" 2>/dev/null)"
     if [ -n "$marks" ]; then
@@ -2284,7 +2307,7 @@ _facts_basis() {
     while IFS='	' read -r k w qs; do
       [ "${#k}" -ge 7 ] && [ "${c#"$k"}" != "$c" ] || continue
       case "$w" in
-        floor) b=born-floor; break ;;
+        regression) b=born-regression; break ;;
         review) [ -n "${4:-}" ] || continue
                 case " $qs " in *" $4 "*) b=born-review; break ;; esac ;;
       esac

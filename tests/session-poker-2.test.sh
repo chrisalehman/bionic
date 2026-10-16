@@ -16,7 +16,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -1585,7 +1585,7 @@ expect_contains "47w2 …and with nothing ready and a row running, WAITING print
 section "Section 46 §PROOF-ADD: a proof names the head it read (wave-26 T4; REQ-3 AC-3.2; D5)"
 # ============================================================
 #
-# `proof-add <floor|review|task> <evidence>` writes one line inside `## SDLC State`:
+# `proof-add <regression|review|task> <evidence>` writes one line inside `## SDLC State`:
 # `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`. The head
 # is never an operand: it is the one the evidence names (a run log's `head=` header, a
 # review's `reviewed: a..b` end; T14), held against the checkout holding the plan's
@@ -1614,8 +1614,8 @@ mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/els
 # header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line. Since wave-36 T35 (AC-7.10) a floor log
 # also closes with its run's code, `rc=<n>`, its last line: the floor's one grammar is that header and that close.
 # Since wave-37 T4 (D7, ADR-057) a floor log is accepted only beside the run line the machine recorded for it, so each
-# log below that is to be accepted is written by tests/lib/floor-fixture.sh, the log and its run line together.
-printf 'all suites passed\nGating: 3 passed, 0 failed\n' | floor_fixture --pre $'floor log\nenv: os=fixture' \
+# log below that is to be accepted is written by tests/lib/regression-fixture.sh, the log and its run line together.
+printf 'all suites passed\nGating: 3 passed, 0 failed\n' | regression_fixture --pre $'floor log\nenv: os=fixture' \
   "$P46" "$R46/.bionic/docs/record/wave-01-fixture/floor.txt" "$W46_HEAD" 0 0
 printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
@@ -1629,12 +1629,12 @@ expect_true "46a0e precondition: proof.sh is in the tree under test" test -r "$S
 
 # ---------- the write ----------
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
-expect_eq "46a proof-add floor exits 0" "0" "$RC"
-expect_contains "46a2 …and says what it wrote" "proof-add — kind=floor head=$W46_HEAD" "$OUT"
+poke "$R46" proof-add regression record/wave-01-fixture/floor.txt
+expect_eq "46a proof-add regression exits 0" "0" "$RC"
+expect_contains "46a2 …and says what it wrote" "proof-add — kind=regression head=$W46_HEAD" "$OUT"
 expect_eq "46a3 …git diff --numstat shows one line added" "1 0;" "$(s42_numstat "$R46")"
 expect_regex "46a4 …in the proof line's shape, with the working branch's head" \
-  "^proved: kind=floor head=${W46_HEAD} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${W46_HEAD} rc=0$" \
+  "^proved: kind=regression head=${W46_HEAD} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${W46_HEAD} rc=0$" \
   "$(s46_proved "$P46")"
 expect_eq "46a5 …inside ## SDLC State" "SDLC" \
   "$(awk '/^##[[:space:]]/ { s = $2 } /^proved: / { print s; exit }' "$P46")"
@@ -1664,14 +1664,14 @@ expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/re
 # recorded at it (wave-31 T25, D3; session-poker-3 Section 72). A log of a run at W46_HEAD2 proves
 # W46_HEAD2.
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor.txt
 expect_eq "46b5 the floor log of an ancestor head, after a landing that changed no file, is accepted (exit 0)" "0" "$RC"
 expect_eq "46b5 …and one line is added" "1 0;" "$(s42_numstat "$R46")"
-expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=floor head=${W46_HEAD} " "$OUT"
+expect_contains "46b5b …naming the head the run read, not the working head" "proof-add — kind=regression head=${W46_HEAD} " "$OUT"
 expect_eq "46b6 proof_last floor reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
-printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P46" "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt" "$W46_HEAD2" 0 0
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$P46" "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt" "$W46_HEAD2" 0 0
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
 expect_eq "46b6c …and proof_last floor reads the new head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
 expect_eq "46b7 …and the review head is its own, resolved from the review's reviewed: line" "$W46_HEAD2" "$(s46_last "$P46" review)"
@@ -1690,12 +1690,12 @@ printf '# review\n\nreviewed: %s..%s\n' "${W46_HEAD:0:8}" "$S46_SIDE" > "$S46_RE
 printf '# review\n\nreviewed: %s..%s\n' "${W46_HEAD:0:8}" "$W46_HEAD" > "$S46_REC/review-older.md"
 expect_regex "46f0 precondition: the side commit exists" '^[0-9a-f]{40}$' "$S46_SIDE"
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-dirty.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-dirty.txt
 s42_unchanged "46f F1 a run at the head on a dirty tree" 1 "$P46"
 expect_contains "46f2 …naming the dirt and the fix" "dirty tree (dirty=3); commit, run it again" "$OUT"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-norepo.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-norepo.txt
 s42_unchanged "46f3 F1 a run that read no repository (head=none)" 1 "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-bare.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-bare.txt
 s42_unchanged "46f4 F1 a floor evidence with no run header" 1 "$P46"
 expect_contains "46f5 …naming the line it needs" "carries no head=<sha> dirty=<n> line" "$OUT"
 poke "$R46" proof-add review record/wave-01-fixture/review-bare.md
@@ -1706,7 +1706,7 @@ s42_unchanged "46f8 F1 a review that read a commit this repository lacks" 1 "$P4
 poke "$R46" proof-add review record/wave-01-fixture/review-side.md
 s42_unchanged "46f9 F1 a review of a commit off the working branch" 1 "$P46"
 expect_contains "46f10 …naming it" "which is not on the working branch" "$OUT"
-poke "$R46" proof-add floor record/wave-01-fixture/review-older.md
+poke "$R46" proof-add regression record/wave-01-fixture/review-older.md
 s42_unchanged "46f11 a floor proof never reads a review's range" 1 "$P46"
 # REVIEW 10 F1 (wave-26 T5): A RUN AT THE HEAD MUST ALSO HAVE PASSED. The header says which head
 # the run read, the runner's last `Gating:` line how it ended; a red run, a note quoting the
@@ -1720,18 +1720,18 @@ printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 0 failed\nVoid: 1 — not
 printf 'floor log\nhead=%s dirty=0\n───── x: captured output ─────\nGating: 5 passed, 0 failed\n───── end x ─────\nGating: 40 passed, 2 failed\n' \
   "$W46_HEAD2" > "$S46_REC/floor-inner.txt"
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-red.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-red.txt
 s42_unchanged "46f12 F1 a red run at the head, on a clean tree" 1 "$P46"
 # A RED WHOLE RUN IS A CANDIDATE (wave-35 T9; D8) only when its Failed: block names its reds; this one names none, so it
 # is refused by the rc it ended with (wave-36 T35; was: not a whole run, 43 suites counted at a head that has 3).
 expect_contains "46f12b …naming the rc it ended with" "floor-red.txt ended rc=1, so the regression did not pass" "$OUT"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-quote.txt
 s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
 expect_contains "46f13b …naming the close it lacks (wave-36 T35; was: the Gating: verdict)" "floor-quote.txt does not end with an rc=<n> line" "$OUT"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-void.txt
 s42_unchanged "46f14 F1 a run log with a Void: line and no closing rc= line" 1 "$P46"
 expect_contains "46f14b …naming the close it lacks (wave-36 T35; was: the tally against the roster)" "floor-void.txt does not end with an rc=<n> line" "$OUT"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-inner.txt
 s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
 poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
 s42_unchanged "46f16 F1 a task proof citing a red run" 1 "$P46"
@@ -1744,34 +1744,34 @@ printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: capture
   "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
   "$W46_HEAD2" > "$S46_REC/floor-appended.txt"
-printf 'Gating: 1 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P46" "$S46_REC/floor-part.txt" "$W46_HEAD2" 0 0
+printf 'Gating: 1 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$P46" "$S46_REC/floor-part.txt" "$W46_HEAD2" 0 0
 printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nVoid: 1 — not timed, each for the reason given; advisory, not a failure:\n    - c.test.sh (the machine was busy)\nNo gating suite failed; 1 void\n' \
   "$W46_HEAD2" > "$S46_REC/floor-whole-void.txt"
 printf 'Gating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" \
-  | floor_fixture --pre 'floor log' "$P46" "$S46_REC/floor-rerun.txt" "$W46_HEAD2" 0 0
+  | regression_fixture --pre 'floor log' "$P46" "$S46_REC/floor-rerun.txt" "$W46_HEAD2" 0 0
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-cut.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-cut.txt
 s42_unchanged "46f17 S3 a log cut off after a nested green verdict inside a capture" 1 "$P46"
 expect_contains "46f17b …saying the log does not close with its run's code (wave-36 T35; was: inside a captured output)" \
   "floor-cut.txt does not end with an rc=<n> line" "$OUT"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-appended.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-appended.txt
 s42_unchanged "46f18 S3 a red run for this head with another head's green run appended" 1 "$P46"
 expect_contains "46f18b …refused: the log does not close with its run's code (wave-36 T35; was: the last run's other head)" \
   "floor-appended.txt does not end with an rc=<n> line" "$OUT"
 # 46f19 INVERTED BY WAVE-36 T35 (AC-7.10): the floor counts no roster; what the regression ran is the plan's word, so a
 # log at the head that opens head=<h> dirty=0 and ends rc=0 is a floor whatever it ran (until wave-36 it was refused).
-poke "$R46" proof-add floor record/wave-01-fixture/floor-part.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-part.txt
 expect_eq "46f19 N1 a green log over one suite of the three at the head, closed rc=0: accepted (exit 0)" "0" "$RC"
 expect_eq "46f19b …the proof naming the head, no roster counted" "$W46_HEAD2" "$(s46_last "$P46" floor)"
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-whole-void.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-whole-void.txt
 # 46f20 INVERTED BY WAVE-35 T2 (D11, AC-2.1): the floor judge has no void term, so two passed and a
 # `Void:` line naming the third is two of three suites, not a whole run (until wave-35 it was a floor).
 # MOVED BY WAVE-36 T35: no roster is counted; the log is refused because it does not close with its run's code.
 s42_unchanged "46f20 N2 a run of two passed with a Void: line naming the third, no closing rc= line, is not a floor" 1 "$P46"
 expect_contains "46f20b …naming the close it lacks: the Void: line counts for nothing" "floor-whole-void.txt does not end with an rc=<n> line" "$OUT"
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-rerun.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-rerun.txt
 expect_eq "46f21 S3 a red run then a green rerun on the same head: the last run is judged, and it passed" "0" "$RC"
 # A REVIEW OF AN OLDER HEAD IS A TRUE PROOF OF THAT HEAD: what landed since stays unread.
 poke "$R46" proof-add review record/wave-01-fixture/review-older.md
@@ -1794,34 +1794,34 @@ s42_snap "$R46" "$P46"
 poke "$R46" proof-add bogus record/wave-01-fixture/floor.txt
 s42_unchanged "46c a kind outside floor|review|task" 1 "$P46"
 expect_contains "46c2 …naming the three kinds" "floor, review or task" "$OUT"
-poke "$R46" proof-add floor plans/elsewhere/notes.md
+poke "$R46" proof-add regression plans/elsewhere/notes.md
 s42_unchanged "46c3 an evidence path outside record/" 1 "$P46"
 expect_contains "46c4 …naming record/" "under record/" "$OUT"
-poke "$R46" proof-add floor record/../plans/elsewhere/notes.md
+poke "$R46" proof-add regression record/../plans/elsewhere/notes.md
 s42_unchanged "46c5 a path that climbs out of record/" 1 "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/absent.txt
+poke "$R46" proof-add regression record/wave-01-fixture/absent.txt
 s42_unchanged "46c6 a missing evidence file" 1 "$P46"
 expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
 # REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
 # directory, not the file, so a link to a log elsewhere was admitted and the evidence could
 # change after the proof. The same bytes as a regular file under record/ are admitted.
-printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P46" "$R46/.bionic/docs/plans/elsewhere/run.log" "$W46_HEAD2" 0 0
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$P46" "$R46/.bionic/docs/plans/elsewhere/run.log" "$W46_HEAD2" 0 0
 ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
 expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-link.txt
 s42_unchanged "46c7c F7 evidence that is a symlink" 1 "$P46"
 expect_contains "46c7d …naming the fix: copy the log into the record" "copy the log into the record" "$OUT"
 cp "$R46/.bionic/docs/plans/elsewhere/run.log" "$S46_REC/floor-copy.txt"
-poke "$R46" proof-add floor record/wave-01-fixture/floor-copy.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor-copy.txt
 expect_eq "46c7e …and the same log copied into the record is admitted" "0" "$RC"
 s42_snap "$R46" "$P46"
 printf 'x\n' > "$R46/.bionic/docs/record/wave-01-fixture/two words.txt"
-poke "$R46" proof-add floor "record/wave-01-fixture/two words.txt"
+poke "$R46" proof-add regression "record/wave-01-fixture/two words.txt"
 s42_unchanged "46c8 an evidence path with a space (the line is space-separated)" 1 "$P46"
-poke "$R46" proof-add floor
+poke "$R46" proof-add regression
 s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
-# Since wave-36 T35 (AC-7.10) proof-add floor takes several logs, each a path under record/; a bare hex word is a head,
+poke "$R46" proof-add regression record/wave-01-fixture/floor.txt "$W46_HEAD"
+# Since wave-36 T35 (AC-7.10) proof-add regression takes several logs, each a path under record/; a bare hex word is a head,
 # never a log, so it stays the usage error.
 s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
 
@@ -1829,12 +1829,12 @@ s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
 # holds, or that names none, is refused before any evidence head is read.
 sed 's#^working-branch: wave/01-fixture$#working-branch: wave/99-gone#' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor.txt
 s42_unchanged "46d a working-branch: no checkout holds" 1 "$P46"
 expect_contains "46d2 …naming the branch" "wave/99-gone" "$OUT"
 sed '/^working-branch: /d' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
 s42_snap "$R46" "$P46"
-poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+poke "$R46" proof-add regression record/wave-01-fixture/floor.txt
 s42_unchanged "46d3 a plan naming no working-branch:" 1 "$P46"
 expect_contains "46d4 …naming the key to add" "working-branch:" "$OUT"
 expect_eq "46e no projection copy is left beside the plan" "" \
@@ -2292,7 +2292,7 @@ section "Section 52 §RUN-END: integrate waits for an open build, and the WAIT l
 # ============================================================
 #
 # A reads table at current: 8, the floor and the review both proved, the review row landed, and
-# a late fix from the review still active. Integrate reads its default, now `proof:floor,
+# a late fix from the review still active. Integrate reads its default, now `proof:regression,
 # proof:review, head`, so the open build holds the merge and the tick says so. Through T61 the
 # tick offered the merge beside the build (FILL T3) and the turn-end wall demanded it.
 # THE PROOFS NAME THE HEAD THE WORKING BRANCH IS AT (wave-26 T64): from T64 a floor proof stands
@@ -2312,7 +2312,7 @@ s52_plan() {  # <repo> <T6 status> -> the plan path
     /^governing-skill: / && !fm { print; print "rigor: single"; print "scale: wave"; fm = 1; next }
     /^current: / { print "current: 8"; print "working-branch: " b; print "base-sha: " h; next }
     { print }
-    /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
+    /^approved-by: / { print "proved: kind=regression head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
                        print "proved: kind=review head=" h " at=2026-10-04T11:05:00Z evidence=record/review.md" }' \
     "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   printf '%s' "$f"
@@ -2412,7 +2412,7 @@ section "Section 54 §FULL-RUN-REQUIRED: integrate waits while no floor is prove
 # ============================================================
 #
 # AC-3.4: "Fails when a planted new file under a directory no suite names lands with no suite run at
-# all." Through T63 integrate's `proof:floor` read took any floor proof line, whatever its head, so
+# all." Through T63 integrate's `proof:regression` read took any floor proof line, whatever its head, so
 # the tick offered the merge on a change no suite had read. From wave-31 T25 (D3) the floor is ONE
 # whole green run at a commit on the branch plus every later commit proved by the runs recorded at
 # it: a landing that ran no suite leaves integrate waiting, naming the commit; the runs of its
@@ -2485,8 +2485,8 @@ s54_full() {
   local rc=$?
   # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it,
   # so the floor's one grammar (its first head= line, its last rc= line) reads the run. THE RUN IS RECORDED (wave-37 T4;
-  # D7): tests/lib/floor-fixture.sh writes the log, the runner's own output as its body, and the run line beside it.
-  floor_fixture "$P54" "$S54_REC/$1" "$(git -C "$S54_WT" rev-parse HEAD)" 0 "$rc" < "$TMPROOT/s54-run.out"
+  # D7): tests/lib/regression-fixture.sh writes the log, the runner's own output as its body, and the run line beside it.
+  regression_fixture "$P54" "$S54_REC/$1" "$(git -C "$S54_WT" rev-parse HEAD)" 0 "$rc" < "$TMPROOT/s54-run.out"
 }
 # s54_land <id> <path> <content> -> a task tree on wt/01-<id> commits one file and NO suite runs
 # in it (no stamp); the real land merges it. Leaves S54_LAND.
@@ -2497,8 +2497,8 @@ s54_land() {
   ( cd "$t" && git add "$2" && git commit -qm "$1: $2" ) >/dev/null 2>&1
   S54_LAND="$( . "$S54_WTLIB" >/dev/null 2>&1; worktree_land "$t" wave/01-fixture 2>&1 )"
 }
-# s54_floor <log> -> a full run on the working head, recorded by proof-add floor
-s54_floor() { s54_full "$1"; poke "$R54" proof-add floor "record/wave-01-fixture/$1"; }
+# s54_floor <log> -> a full run on the working head, recorded by proof-add regression
+s54_floor() { s54_full "$1"; poke "$R54" proof-add regression "record/wave-01-fixture/$1"; }
 # s54_tick -> the tick at current: 8 (proof-add runs at current: 4, where the fixture plan's gate
 # admits it; the tick reads current: 8, where integrate is no longer held for its step). The
 # digest is cleared first, so each tick prints its whole reading rather than "unchanged" (as 48).
@@ -2517,7 +2517,7 @@ s54_run() {  # <suite> -> the real shim runs it in the working checkout
       bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$1" -- "bash tests/$1" ) >/dev/null 2>&1
 }
 S54_WHY="the floor is one whole run plus each later commit proved; past the proof at"
-S54_OUT="; run suites its row named, proof-add floor; a second run: approve regression-2"
+S54_OUT="; run suites its row named, proof-add regression; a second run: approve regression-2"
 
 S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_floor floor-1.log
@@ -2525,7 +2525,7 @@ expect_contains "54a0 precondition: the copied runner's log names the working he
   "head=${S54_W0} dirty=0" "$(cat "$S54_REC/floor-1.log")"
 expect_contains "54a0b precondition: …and its verdict, every suite passed" "Gating: 3 passed, 0 failed" \
   "$(cat "$S54_REC/floor-1.log")"
-expect_eq "54a0c precondition: proof-add floor recorded it (exit 0)" "0" "$RC"
+expect_eq "54a0c precondition: proof-add regression recorded it (exit 0)" "0" "$RC"
 printf '# final review\n\nreviewed: %s..%s\n' "$S54_BASE" "$S54_W0" > "$S54_REC/review.md"
 poke "$R54" proof-add review record/wave-01-fixture/review.md
 expect_eq "54a0d precondition: proof-add review recorded the review (exit 0)" "0" "$RC"
@@ -2543,7 +2543,7 @@ S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
 expect_contains "54b AC-3.4 AC-13.4 integrate WAITS: the commit past the floor has no run recorded at it, and the line names it and the way out" \
-  "poker: WAIT T3 — proof:floor: ${S54_WHY} ${S54_W0:0:12}, commit ${S54_W1:0:12} (" "$(s54_wait)"
+  "poker: WAIT T3 — proof:regression: ${S54_WHY} ${S54_W0:0:12}, commit ${S54_W1:0:12} (" "$(s54_wait)"
 expect_contains "54b1b …saying what it lacks" \
   ") is not proved: no suite run is recorded at it${S54_OUT}; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
   "$(s54_wait)"
@@ -2565,7 +2565,7 @@ expect_true "54b2c2 precondition: …and so does one facts_state (the counter re
 expect_eq "54b2d …and one tick walks each state once: the sum of one proof_state and one facts_state" \
   "$((S54_PS_WALKS + S54_FS_WALKS))" "$S54_TICK_WALKS"
 s54_floor floor-2.log
-expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add floor (exit 0)" "0" "$RC"
+expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add regression (exit 0)" "0" "$RC"
 expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
 s54_tick
 expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
@@ -2576,7 +2576,7 @@ expect_contains "54c0 precondition: the change LANDED" "spawn-worktree: LANDED b
 S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_contains "54c a landing with no suite run at it: integrate WAITS naming the commit" \
-  "proof:floor: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_W2:0:12} (" "$(s54_wait)"
+  "proof:regression: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_W2:0:12} (" "$(s54_wait)"
 s54_run a.test.sh; s54_run b.test.sh
 s54_tick
 expect_contains "54c2 AC-13.3 …with a and b run green at the head (the real shim's stamps), the floor stands: the merge is offered" "poker: FILL T3" "$OUT"
@@ -2591,7 +2591,7 @@ expect_true "54e0 precondition: the outside commit is on the working branch" \
   git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
 s54_tick
 expect_contains "54e a merge from outside the run with nothing run at it: integrate WAITS, naming the merge" \
-  "proof:floor: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_M:0:12} (no landing row) is not proved: no suite run is recorded at it" \
+  "proof:regression: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_M:0:12} (no landing row) is not proved: no suite run is recorded at it" \
   "$(s54_wait)"
 expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 s54_floor floor-4.log

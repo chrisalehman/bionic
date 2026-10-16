@@ -24,13 +24,13 @@ set -euo pipefail
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 # THE FLOOR A RUN PAST STEP 6 CARRIES (wave-35 T31; D20, A-orch-50). From `current: 7` the gate refuses a
-# `regression: yes` plan whose section holds no `proved: kind=floor` line. A fixture at Step 7..9 that is
+# `regression: yes` plan whose section holds no `proved: kind=regression` line. A fixture at Step 7..9 that is
 # about something else is written through eg_floor: the prelude's readings (eg_readings) and one floor
-# line in proof-add floor's shape after `current:`. Rows about the floor arm itself write plans as given.
+# line in proof-add regression's shape after `current:`. Rows about the floor arm itself write plans as given.
 eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
   eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
     !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
-      printf "proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
+      printf "proved: kind=regression head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
 }
 
 # ============================================================
@@ -4343,7 +4343,7 @@ $RN_AUD")" > /dev/null
 expect_allow "RN-6f …and a well-formed line with a two-word user and a long place → admitted" "$hRN6f" 'git commit -m "x"'
 
 # (v) THE FLOOR AT `no`, BEYOND STEP 5 (research-T4-T26-sites §3): `current 8` asks lib/proof.sh
-# `facts_state`, which asks `facts_owed`; and the integrate row's kind default reads `proof:floor`
+# `facts_state`, which asks `facts_owed`; and the integrate row's kind default reads `proof:regression`
 # (lib/units.sh `kdef`). At `no` neither deals the floor, or the plan clears Step 5 and is refused
 # at Step 8. Read through the libraries themselves, as KX-4 reads keys_for_tier.
 RN_DIR="$(mktemp -d)"; cleanup_dirs+=("$RN_DIR")
@@ -4361,12 +4361,12 @@ expect_eq "RN-7 facts_owed deals the floor at regression: yes (positive, before 
 expect_eq "RN-7b …and with the key absent" "floor review" "$(rn_owed "$RN_DIR/absent.md")"
 expect_eq "RN-7c …and not at regression: no: the readings are still owed, the floor is not" "review" "$(rn_owed "$RN_DIR/no.md")"
 rn_waits() { rn_lib units_waiting "$1" 8 | awk -F'\t' '$1 == "T3" { sub(/: .*/, "", $2); print $2 }' | sort -u | tr '\n' ' ' | sed 's/ $//'; }
-expect_eq "RN-8 the integrate row's default reads wait on proof:floor at regression: yes (positive)" "proof:floor proof:review" "$(rn_waits "$RN_DIR/yes.md")"
-expect_eq "RN-8b …and with the key absent" "proof:floor proof:review" "$(rn_waits "$RN_DIR/absent.md")"
-expect_eq "RN-8c …and at regression: no the default drops proof:floor, still waiting on proof:review" "proof:review" "$(rn_waits "$RN_DIR/no.md")"
+expect_eq "RN-8 the integrate row's default reads wait on proof:regression at regression: yes (positive)" "proof:regression proof:review" "$(rn_waits "$RN_DIR/yes.md")"
+expect_eq "RN-8b …and with the key absent" "proof:regression proof:review" "$(rn_waits "$RN_DIR/absent.md")"
+expect_eq "RN-8c …and at regression: no the default drops proof:regression, still waiting on proof:review" "proof:review" "$(rn_waits "$RN_DIR/no.md")"
 expect_eq "RN-8d the decline line's read-back of the default drops it too at no" "reads='proof:review, head, lib/a.sh'" \
   "$(rn_lib units_hold_read "$RN_DIR/no.md" T3 T1)"
-expect_eq "RN-8e …and keeps it at yes" "reads='proof:floor, proof:review, head, lib/a.sh'" \
+expect_eq "RN-8e …and keeps it at yes" "reads='proof:regression, proof:review, head, lib/a.sh'" \
   "$(rn_lib units_hold_read "$RN_DIR/yes.md" T3 T1)"
 
 # ============================================================
@@ -4398,7 +4398,7 @@ expect_allow "SF-2 D20 the keys written with counters that are no integers and a
 # ============================================================
 # §FLOOR-LINE: from Step 7 a regression: yes plan owes a floor proof line; its state is the judge's (wave-35 T31; D20, A-orch-50)
 # ============================================================
-section "§FLOOR-LINE: from current: 7 the wall refuses a regression: yes plan with no 'proved: kind=floor' line, in the judge's words for absent; a floor line passes whatever its owed=, which the judge reads at current 7 and 8 (wave-35 T31; REQ-1; D20, A-orch-50)"
+section "§FLOOR-LINE: from current: 7 the wall refuses a regression: yes plan with no 'proved: kind=regression' line, in the judge's words for absent; a floor line passes whatever its owed=, which the judge reads at current 7 and 8 (wave-35 T31; REQ-1; D20, A-orch-50)"
 # fails-when: a plan at Step 7, 8 or 9 commits with no floor proof at all, or the wall judges a floor line's
 # owed= (git's question, the judge's), or a regression: no plan is asked for a floor.
 # FIXTURE FIDELITY: the prelude's `plan` (double wave, `walk: exempt`, the complete matrix) through
@@ -4407,14 +4407,14 @@ section "§FLOOR-LINE: from current: 7 the wall refuses a regression: yes plan w
 fl_with() {  # <plan content> <floor line> -> the content with the readings and that line after current:
   eg_readings "$1" | FL_L="$2" awk '{ print } !done && /^current: / { print ENVIRON["FL_L"]; done = 1 }'
 }
-FL_FLOOR="proved: kind=floor head=${EG_HEAD} at=2026-10-12T00:00:00Z evidence=record/floor.log"
+FL_FLOOR="proved: kind=regression head=${EG_HEAD} at=2026-10-12T00:00:00Z evidence=record/floor.log"
 FL_WHY="no regression proof on this plan yet"
 hFL1=$(make_home)
 write_plan "$hFL1" "$(plan 7 "$v9_step7_body" "$matrix_complete")" > /dev/null
 expect_block "FL-1 D20 current: 7, regression: yes (key absent), the readings and no floor proof line → refused in the judge's words" \
   "$hFL1" 'git commit -m "x"' "$FL_WHY"
 expect_eq "FL-1b …in one line that names the fix" \
-  "bionic: commit refused — no regression proof on this plan yet (record it with proof-add floor)" \
+  "bionic: commit refused — no regression proof on this plan yet (record it with proof-add regression)" \
   "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
 write_plan "$hFL1" "$(fl_with "$(plan 7 "$v9_step7_body" "$matrix_complete")" "$FL_FLOOR")" > /dev/null
 expect_allow "FL-2 …the same plan with a floor proof line → admitted" "$hFL1" 'git commit -m "x"'
@@ -4462,10 +4462,10 @@ fl5_row() {  # <name> <plan content> <expected: absent | present>
 FL5_PLAN="$(plan 7 "$v9_step7_body" "$matrix_complete")"
 fl5_row none "$FL5_PLAN" absent
 fl5_row line "$(fl_with "$FL5_PLAN" "$FL_FLOOR")" present
-fl5_row gone "$(fl_with "$FL5_PLAN" "proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-12T00:00:00Z evidence=record/floor.log")" present
+fl5_row gone "$(fl_with "$FL5_PLAN" "proved: kind=regression head=0123456789abcdef0123456789abcdef01234567 at=2026-10-12T00:00:00Z evidence=record/floor.log")" present
 fl5_row fenced "$(fl_with "$FL5_PLAN" "$(printf '```\n%s\n```' "$FL_FLOOR")")" absent
 fl5_row bulleted "$(fl_with "$FL5_PLAN" "- $FL_FLOOR")" absent
-fl5_row headless "$(fl_with "$FL5_PLAN" "proved: kind=floor head=none at=2026-10-12T00:00:00Z evidence=record/floor.log")" absent
+fl5_row headless "$(fl_with "$FL5_PLAN" "proved: kind=regression head=none at=2026-10-12T00:00:00Z evidence=record/floor.log")" absent
 fl5_row elsewhere "$(eg_readings "$FL5_PLAN")
 ## Notes
 

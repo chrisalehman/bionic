@@ -1093,7 +1093,7 @@ co_regression_text() {
     printf 'the regression was not owed (regression: no)'
     return 0
   fi
-  line="$(proof_last_line "$PLAN" floor)"
+  line="$(proof_last_line "$PLAN" regression)"
   if [ -z "$line" ]; then
     printf 'the regression: no floor proof is recorded in the plan'
     return 0

@@ -631,8 +631,8 @@ assert_eq "cr_only_enum exit 2" 2 "$HOOK_EXIT"
 # project tree (incident 0001) — AND echoes it to stderr, then exits 0 —
 # findings NEVER block (R3/D14).
 # Floors: incident-response floors at double; spike is capped at single;
-# `rigor-floor:` in .bionic/config.yaml (invalid value = its own finding);
-# `rigor-floor:` in the epic plan's frontmatter (fail-open on missing plan).
+# `rigor-minimum:` in .bionic/config.yaml (invalid value = its own finding);
+# `rigor-minimum:` in the epic plan's frontmatter (fail-open on missing plan).
 # Fixtures build temp project roots; the hook derives PROJECT_ROOT from the
 # file path's .bionic walk-up and keys the audit file on it, so each fixture
 # gets its own slug directory under the sandboxed HOME and the real repo —
@@ -645,12 +645,12 @@ read_audit() {
   if [ -f "$f" ]; then cat "$f"; else echo ""; fi
 }
 
-echo "intent-floor: incident-response + rigor single → log intent-floor, exit 0"
+echo "intent-minimum: incident-response + rigor single → log intent-minimum, exit 0"
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/incident-floor.plan.md" "$(build_plan intent=incident-response rigor=single)"
 assert_eq "floor_incident_below_double_logs exit 0" 0 "$HOOK_EXIT"
-assert_contains "floor_incident stderr names intent-floor" "intent-floor" "$HOOK_STDERR"
-assert_contains "floor_incident audit line names intent-floor" "intent-floor" "$(read_audit "$project")"
+assert_contains "floor_incident stderr names intent-minimum" "intent-minimum" "$HOOK_STDERR"
+assert_contains "floor_incident audit line names intent-minimum" "intent-minimum" "$(read_audit "$project")"
 assert_contains "floor_incident audit line carries artifact path" "incident-floor.plan.md" "$(read_audit "$project")"
 
 echo "spike-cap: spike + rigor double → log spike-cap, exit 0"
@@ -660,45 +660,45 @@ assert_eq "floor_spike_above_single_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_spike stderr names spike-cap" "spike-cap" "$HOOK_STDERR"
 assert_contains "floor_spike audit names spike-cap" "spike-cap" "$(read_audit "$project")"
 
-echo "project-floor: config rigor-floor double + plan rigor single → log project-floor"
+echo "project-minimum: config rigor-minimum double + plan rigor single → log project-minimum"
 project=$(make_project)
-printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+printf 'rigor-minimum: double\n' > "$project/.bionic/config.yaml"
 run_write "$project/.bionic/docs/plans/epic-01-demo/proj-floor.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_project_violation_logs exit 0" 0 "$HOOK_EXIT"
-assert_contains "floor_project stderr names project-floor" "project-floor" "$HOOK_STDERR"
-assert_contains "floor_project audit names project-floor" "project-floor" "$(read_audit "$project")"
+assert_contains "floor_project stderr names project-minimum" "project-minimum" "$HOOK_STDERR"
+assert_contains "floor_project audit names project-minimum" "project-minimum" "$(read_audit "$project")"
 
-echo "project-floor satisfied: rigor double meets floor → silent (no audit, no stderr)"
+echo "project-minimum satisfied: rigor double meets floor → silent (no audit, no stderr)"
 project=$(make_project)
-printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+printf 'rigor-minimum: double\n' > "$project/.bionic/config.yaml"
 run_write "$project/.bionic/docs/plans/epic-01-demo/proj-ok.plan.md" "$(build_plan intent=build rigor=double)"
 assert_eq "floor_project_satisfied_silent exit 0" 0 "$HOOK_EXIT"
 
-echo "project-floor invalid value: rigor-floor: extreme → invalid-value finding, exit 0"
+echo "project-minimum invalid value: rigor-minimum: extreme → invalid-value finding, exit 0"
 project=$(make_project)
-printf 'rigor-floor: extreme\n' > "$project/.bionic/config.yaml"
+printf 'rigor-minimum: extreme\n' > "$project/.bionic/config.yaml"
 run_write "$project/.bionic/docs/plans/epic-01-demo/proj-invalid.plan.md" "$(build_plan intent=build rigor=double)"
 assert_eq "floor_project_invalid_value_logs exit 0" 0 "$HOOK_EXIT"
-assert_contains "floor_project_invalid stderr names project-floor" "project-floor" "$HOOK_STDERR"
-assert_contains "floor_project_invalid audit says invalid" "invalid rigor-floor" "$(read_audit "$project")"
+assert_contains "floor_project_invalid stderr names project-minimum" "project-minimum" "$HOOK_STDERR"
+assert_contains "floor_project_invalid audit says invalid" "invalid rigor-minimum" "$(read_audit "$project")"
 
-echo "epic-floor: epic.plan.md rigor-floor double + plan rigor single → log epic-floor"
+echo "epic-minimum: epic.plan.md rigor-minimum double + plan rigor single → log epic-minimum"
 project=$(make_project)
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
-rigor-floor: double
+rigor-minimum: double
 ---
 
 # Epic
 EOF
-run_write "$project/.bionic/docs/plans/epic-01-demo/epic-floor.plan.md" "$(build_plan intent=build rigor=single)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/epic-minimum.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_epic_violation_logs exit 0" 0 "$HOOK_EXIT"
-assert_contains "floor_epic stderr names epic-floor" "epic-floor" "$HOOK_STDERR"
-assert_contains "floor_epic audit names epic-floor" "epic-floor" "$(read_audit "$project")"
+assert_contains "floor_epic stderr names epic-minimum" "epic-minimum" "$HOOK_STDERR"
+assert_contains "floor_epic audit names epic-minimum" "epic-minimum" "$(read_audit "$project")"
 
-echo "epic-floor: epic names a plan that doesn't exist → silent (fail-open)"
+echo "epic-minimum: epic names a plan that doesn't exist → silent (fail-open)"
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/epic-missing.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_epic_plan_missing_silent exit 0" 0 "$HOOK_EXIT"
@@ -719,21 +719,21 @@ fi
 
 echo "all-violations fixture (intent + project + epic floors) → still exit 0, all three logged"
 project=$(make_project)
-printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+printf 'rigor-minimum: double\n' > "$project/.bionic/config.yaml"
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
-rigor-floor: double
+rigor-minimum: double
 ---
 
 # Epic
 EOF
 run_write "$project/.bionic/docs/plans/epic-01-demo/all-violations.plan.md" "$(build_plan intent=incident-response rigor=single)"
 assert_eq "floor_never_blocks exit 0" 0 "$HOOK_EXIT"
-assert_contains "floor_never_blocks logs intent-floor" "intent-floor" "$(read_audit "$project")"
-assert_contains "floor_never_blocks logs project-floor" "project-floor" "$(read_audit "$project")"
-assert_contains "floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit "$project")"
+assert_contains "floor_never_blocks logs intent-minimum" "intent-minimum" "$(read_audit "$project")"
+assert_contains "floor_never_blocks logs project-minimum" "project-minimum" "$(read_audit "$project")"
+assert_contains "floor_never_blocks logs epic-minimum" "epic-minimum" "$(read_audit "$project")"
 
 # ============================================================
 # rigor-override: marker (epic-14 AC-10, AC-11)
@@ -751,9 +751,9 @@ section "rigor-override: marker (epic-14 AC-10, AC-11)"
 
 RIGOR_OVERRIDE_LINE='rigor-override: chris 2026-08-01 derived=double chosen=single'
 
-echo "project-floor violated + rigor-override marker → writes cleanly, logs user-overridden, not the violation"
+echo "project-minimum violated + rigor-override marker → writes cleanly, logs user-overridden, not the violation"
 project=$(make_project)
-printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+printf 'rigor-minimum: double\n' > "$project/.bionic/config.yaml"
 run_write "$project/.bionic/docs/plans/epic-01-demo/override-present.plan.md" \
   "$(build_plan intent=build rigor=single override="$RIGOR_OVERRIDE_LINE")"
 assert_eq "rigor_override_present exit 0" 0 "$HOOK_EXIT"
@@ -762,9 +762,9 @@ assert_contains "rigor_override_present audit says user-overridden" "user-overri
 expect_absent "rigor_override_present stderr does not name the violation text" "project floor" "$HOOK_STDERR"
 expect_absent "rigor_override_present audit does not name the violation text" "project floor" "$(read_audit "$project")"
 
-echo "project-floor violated, NO marker → existing violation log unchanged"
+echo "project-minimum violated, NO marker → existing violation log unchanged"
 project2=$(make_project)
-printf 'rigor-floor: double\n' > "$project2/.bionic/config.yaml"
+printf 'rigor-minimum: double\n' > "$project2/.bionic/config.yaml"
 run_write "$project2/.bionic/docs/plans/epic-01-demo/override-absent.plan.md" \
   "$(build_plan intent=build rigor=single)"
 assert_eq "rigor_override_absent exit 0" 0 "$HOOK_EXIT"
@@ -3728,7 +3728,7 @@ section "§RIGOR — a plan is single or double, every other word is refused nam
 # high/audited) are no level: a plan carrying one is refused as any other bad value is, and every
 # refusal that lists the set lists the two in the printed form,
 # `review rigor: <level> (<one|two> independent mind[s])`. The floors rank the two levels, and a
-# `rigor-floor:` carrying another word is the floor's own invalid-value finding, naming the two.
+# `rigor-minimum:` carrying another word is the floor's own invalid-value finding, naming the two.
 for gs_rv_w in single double; do
   project=$(make_project)
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-$gs_rv_w.plan.md" "$(build_plan rigor="$gs_rv_w")"
@@ -3770,50 +3770,96 @@ expect_absent "§RIGOR.4 …only" "medium" "$HOOK_VSTDERR"
 # level, with or without a project floor beside them.
 for gs_rv_pf in none single; do
   project=$(make_project)
-  [ "$gs_rv_pf" = none ] || printf 'rigor-floor: %s\n' "$gs_rv_pf" > "$project/.bionic/config.yaml"
+  [ "$gs_rv_pf" = none ] || printf 'rigor-minimum: %s\n' "$gs_rv_pf" > "$project/.bionic/config.yaml"
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-spike-$gs_rv_pf.plan.md" "$(build_plan intent=spike rigor=double)"
   assert_eq "§RIGOR.5 spike at double (project floor $gs_rv_pf) is admitted" 0 "$HOOK_EXIT"
   assert_contains "§RIGOR.5 …and logs spike-cap, naming the cap by its word" "spike is capped at single, declared double" "$HOOK_STDERR"
 done
 for gs_rv_pf in none single; do
   project=$(make_project)
-  [ "$gs_rv_pf" = none ] || printf 'rigor-floor: %s\n' "$gs_rv_pf" > "$project/.bionic/config.yaml"
+  [ "$gs_rv_pf" = none ] || printf 'rigor-minimum: %s\n' "$gs_rv_pf" > "$project/.bionic/config.yaml"
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ir-$gs_rv_pf.plan.md" "$(build_plan intent=incident-response rigor=single)"
   assert_eq "§RIGOR.6 incident-response at single (project floor $gs_rv_pf) is admitted" 0 "$HOOK_EXIT"
-  assert_contains "§RIGOR.6 …and logs intent-floor" "intent-floor" "$HOOK_STDERR"
+  assert_contains "§RIGOR.6 …and logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
   assert_contains "§RIGOR.6 …naming the floor by its word" "floors at double, declared single" "$HOOK_STDERR"
 done
 # A floor above the plan logs; a floor written in a word before 1.14.0 is the invalid-value finding.
 for gs_rv_pair in double:single:"project floor double, declared single" \
-                  high:single:"invalid rigor-floor value 'high' in config.yaml — allowed: single or double" \
-                  tested:double:"invalid rigor-floor value 'tested' in config.yaml — allowed: single or double"; do
+                  high:single:"invalid rigor-minimum value 'high' in config.yaml — allowed: single or double" \
+                  tested:double:"invalid rigor-minimum value 'tested' in config.yaml — allowed: single or double"; do
   gs_rv_f="${gs_rv_pair%%:*}"; gs_rv_rest="${gs_rv_pair#*:}"; gs_rv_p="${gs_rv_rest%%:*}"; gs_rv_want="${gs_rv_rest#*:}"
   project=$(make_project)
-  printf 'rigor-floor: %s\n' "$gs_rv_f" > "$project/.bionic/config.yaml"
+  printf 'rigor-minimum: %s\n' "$gs_rv_f" > "$project/.bionic/config.yaml"
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=build rigor="$gs_rv_p")"
   assert_eq "§RIGOR.7 project floor $gs_rv_f, plan $gs_rv_p: admitted" 0 "$HOOK_EXIT"
-  assert_contains "§RIGOR.7 …and logs the project-floor finding: $gs_rv_want" "$gs_rv_want" "$(read_audit "$project")"
+  assert_contains "§RIGOR.7 …and logs the project-minimum finding: $gs_rv_want" "$gs_rv_want" "$(read_audit "$project")"
 done
 # A floor the plan meets is silent, on both levels and on the epic's floor as on the project's.
 for gs_rv_pair in double:double single:single single:double; do  # <project floor>:<epic floor>
   project=$(make_project)
-  printf 'rigor-floor: %s\n' "${gs_rv_pair%%:*}" > "$project/.bionic/config.yaml"
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-floor: %s\n---\n\n# Epic\n' \
+  printf 'rigor-minimum: %s\n' "${gs_rv_pair%%:*}" > "$project/.bionic/config.yaml"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-minimum: %s\n---\n\n# Epic\n' \
     "${gs_rv_pair#*:}" > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-pf.plan.md" "$(build_plan intent=spike rigor=double)"
   assert_eq "§RIGOR.8 project floor ${gs_rv_pair%%:*}, epic floor ${gs_rv_pair#*:}, spike plan double: admitted" 0 "$HOOK_EXIT"
   assert_contains "§RIGOR.8 …logging the spike cap, so the findings were read" "spike-cap" "$HOOK_STDERR"
-  expect_absent "§RIGOR.8 …with no project-floor finding (the floor is met)" "project-floor" "$HOOK_STDERR"
-  expect_absent "§RIGOR.8 …nor an epic-floor one" "epic-floor" "$HOOK_STDERR"
+  expect_absent "§RIGOR.8 …with no project-minimum finding (the floor is met)" "project-minimum" "$HOOK_STDERR"
+  expect_absent "§RIGOR.8 …nor an epic-minimum one" "epic-minimum" "$HOOK_STDERR"
 done
 # §RIGOR: an epic floor written in a word before 1.14.0 is the epic's invalid-value finding.
 project=$(make_project)
-printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-floor: audited\n---\n\n# Epic\n' \
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-minimum: audited\n---\n\n# Epic\n' \
   > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
 run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ef.plan.md" "$(build_plan intent=build rigor=double)"
 assert_eq "§RIGOR.9 epic floor audited, plan double: admitted" 0 "$HOOK_EXIT"
-assert_contains "§RIGOR.9 …and logs the epic-floor invalid-value finding, naming the two" \
-  "invalid rigor-floor value 'audited' in epic-01-demo's epic plan — allowed: single or double" "$(read_audit "$project")"
+assert_contains "§RIGOR.9 …and logs the epic-minimum invalid-value finding, naming the two" \
+  "invalid rigor-minimum value 'audited' in epic-01-demo's epic plan — allowed: single or double" "$(read_audit "$project")"
+
+
+section "§MINIMUM — rigor-minimum: is the rigor minimum's key; rigor-floor: still reads, with one deprecated: line (wave-38 T8; REQ-9 AC-9.2, D6)"
+# ============================================================
+# The key was `rigor-floor:` until 1.21.0. lib/alias.sh `alias_keyed rigor-key` reads it at the hook's two readers,
+# the project's .bionic/config.yaml and the epic plan's frontmatter: `rigor-minimum:` first, then `rigor-floor:`,
+# which prints `deprecated: rigor-floor: is rigor-minimum:; the old spelling works until 1.22.0` on stderr. The
+# finding ids are intent-minimum, project-minimum and epic-minimum, and the old ids are never printed again.
+GS_MIN_DEP="deprecated: rigor-floor: is rigor-minimum:; the old spelling works until 1.22.0"
+gs_min_deps() { printf '%s\n' "$1" | /usr/bin/grep -c '^deprecated: ' | tr -d ' '; }
+for gs_min_key in rigor-minimum rigor-floor; do
+  project=$(make_project)
+  printf '%s: double\n' "$gs_min_key" > "$project/.bionic/config.yaml"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/min-$gs_min_key.plan.md" "$(build_plan intent=build rigor=single)"
+  assert_eq "§MINIMUM.1 $gs_min_key: double, plan single: admitted (the finding never blocks)" 0 "$HOOK_EXIT"
+  assert_contains "§MINIMUM.1 …and the project-minimum finding is logged, read from $gs_min_key:" \
+    "project-minimum" "$(read_audit "$project")"
+  expect_absent "§MINIMUM.1 …under its new id only, never project-floor" "project-floor" "$(read_audit "$project")$HOOK_STDERR"
+  gs_min_audit_line="$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep -F 'canonical-sdlc [project-minimum]' | head -1)"
+  expect_nonempty "§MINIMUM.1 …the finding's stderr line is read (the extractor's positive)" "$gs_min_audit_line"
+  if [ "$gs_min_key" = rigor-minimum ]; then
+    GS_MIN_NEW_LINE="$gs_min_audit_line"
+    expect_eq "§MINIMUM.2 the new key prints no deprecated: line" "0" "$(gs_min_deps "$HOOK_STDERR")"
+  else
+    expect_eq "§MINIMUM.3 the old key prints exactly one deprecated: line" "1" "$(gs_min_deps "$HOOK_STDERR")"
+    assert_contains "§MINIMUM.3 …the map's line" "$GS_MIN_DEP" "$HOOK_STDERR"
+    expect_eq "§MINIMUM.4 …and the finding it logs is the new key's, word for word" "$GS_MIN_NEW_LINE" "$gs_min_audit_line"
+  fi
+done
+project=$(make_project)
+printf 'rigor-floor: single\nrigor-minimum: double\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-both.plan.md" "$(build_plan intent=build rigor=single)"
+assert_contains "§MINIMUM.5 with both keys the new one is read (double: the plan at single logs)" "project-minimum" "$(read_audit "$project")"
+expect_eq "§MINIMUM.5 …silently" "0" "$(gs_min_deps "$HOOK_STDERR")"
+project=$(make_project)
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-floor: double\n---\n\n# Epic\n' \
+  > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-epic.plan.md" "$(build_plan intent=build rigor=single)"
+assert_contains "§MINIMUM.6 an epic plan's rigor-floor: still reads, as epic-minimum" "epic-minimum" "$(read_audit "$project")"
+expect_absent "§MINIMUM.6 …never epic-floor" "epic-floor" "$(read_audit "$project")$HOOK_STDERR"
+expect_eq "§MINIMUM.6 …with the one deprecated: line" "1" "$(gs_min_deps "$HOOK_STDERR")"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-ir.plan.md" "$(build_plan intent=incident-response rigor=single)"
+assert_contains "§MINIMUM.7 the intent minimum logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
+expect_absent "§MINIMUM.7 …never intent-floor" "intent-floor" "$HOOK_STDERR$(read_audit "$project")"
+
 
 
 section "§FIX-POLICY — review-cadence:, fix-policy: and fix-cap: are read with their vocabulary and the level's defaults (wave-30 T21: REQ-10 AC-10.1, REQ-1, D4, Δ3)"

@@ -36,7 +36,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -1963,7 +1963,7 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 run_close "$PZ" run
 CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=0 · fixed=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
   "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
@@ -2129,11 +2129,11 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 #   extensions     roster              distinct (name, extended=<value>)
 #   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
 #   regression-2   plan                `approved: regression-2` under ## SDLC State
-#   second-floors  plan                `proved: kind=floor` lines past the first
+#   second-floors  plan                `proved: kind=regression` lines past the first
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
 HH_C="$(printf 'd%.0s' $(seq 40))"
-HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1 · adoptions=0 · fixed=0"
+HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-regressions=1 · adoptions=0 · fixed=0"
 # hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
 hh_report() {
   local proj="$1"; shift
@@ -2184,7 +2184,7 @@ hh_plant() {
     /^approved-by:/ { print; print "approved: regression-2 by Chris Lehman 2026-10-06T12:00:00Z \"yes\""; next }
     /^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed"
                    print; next }
-    /^## Tasks/ { print "```"; print "proved: kind=floor head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
+    /^## Tasks/ { print "```"; print "proved: kind=regression head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
                   print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
                   print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "\140\140\140"; print ""; print; next }
     /^  readback:/ && !wr { print; print "  waiver: Chris Lehman 2026-10-06 \"waive the row\" — fixture"
@@ -2194,7 +2194,7 @@ hh_plant() {
 PH="$(mk_fixture handholds)"; advance_to "$PH" 8
 hh_plant "$PH"
 expect_eq "HH-0 precondition: the plan carries both waiver forms, the approval and two floor proofs as flush-left lines (the extractors find them)" "1/1/1/2" \
-  "$(grep -c '^waived: question=evidence ' "$PH/$PLAN_REL")/$(grep -c '^  waiver: Chris Lehman 2026-10-06 ' "$PH/$PLAN_REL")/$(grep -c '^approved: regression-2 by Chris Lehman' "$PH/$PLAN_REL")/$(awk '/^```/ { f = !f; next } !f && /^proved: kind=floor / { n++ } END { print n + 0 }' "$PH/$PLAN_REL")"
+  "$(grep -c '^waived: question=evidence ' "$PH/$PLAN_REL")/$(grep -c '^  waiver: Chris Lehman 2026-10-06 ' "$PH/$PLAN_REL")/$(grep -c '^approved: regression-2 by Chris Lehman' "$PH/$PLAN_REL")/$(awk '/^```/ { f = !f; next } !f && /^proved: kind=regression / { n++ } END { print n + 0 }' "$PH/$PLAN_REL")"
 HH_OUT="$(hh_report "$PH" --hand-holds)"
 expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
   "$(printf '%s\n' "$HH_OUT" | grep '^hand-holds: ')"
@@ -2211,7 +2211,7 @@ awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: eviden
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=0 · fixed=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
@@ -2311,12 +2311,12 @@ section "§FLOOR-DECLARED (wave-28 T75; REQ-17 AC-17.1, D36): close-out proceeds
 # ============================================================
 # A project with no tests/*.test.sh roster declares its floor (`floor: true`, a command that passes). The
 # floor fact plant_facts wrote is taken out, and the real verbs write it again from the declared floor's own
-# run: `floor-run` logs it, `proof-add floor` cites the log, `current 8` moves the plan on the facts, and
+# run: `regression-run` logs it, `proof-add regression` cites the log, `current 8` moves the plan on the facts, and
 # `close-out.sh run` delivers. The fixture's working head holds no tests/ directory (mk_fixture's shape).
 PFL="$(mk_fixture floor-declared)"
 FL_SID="closeout-floor-1"
-sed '/^proved: kind=floor /d' "$PFL/$PLAN_REL" > "$PFL/$PLAN_REL.n" && mv "$PFL/$PLAN_REL.n" "$PFL/$PLAN_REL"
-printf 'floor: true\n' >> "$PFL/.bionic/config.yaml"
+sed '/^proved: kind=regression /d' "$PFL/$PLAN_REL" > "$PFL/$PLAN_REL.n" && mv "$PFL/$PLAN_REL.n" "$PFL/$PLAN_REL"
+printf 'regression-command: true\n' >> "$PFL/.bionic/config.yaml"
 ( in_fixture "$PFL" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFL" "$FL_SID" "$PFL/$PLAN_REL" )
 fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the fixture, as this session
   ( in_fixture "$PFL" || exit 9
@@ -2326,22 +2326,22 @@ fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the f
 }
 FL_H="$(fixture_git "$PFL" rev-parse wave/01-fixture)"
 expect_eq "FL0 precondition: the plan carries no floor fact, and the working head no tests/ directory" "0|0" \
-  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
-fl_poke floor-run
-expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 and closing rc=0 (wave-36 T35)" \
+  "$(/usr/bin/grep -c '^proved: kind=regression ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
+fl_poke regression-run
+expect_eq "FL1 regression-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 and closing rc=0 (wave-36 T35)" \
   "0|head=$FL_H dirty=0|rc=0" \
-  "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
+  "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
-# with the plan and the project root, as proof-add calls it, attests the declared log by the run line floor-run
+# with the plan and the project root, as proof-add calls it, attests the declared log by the run line regression-run
 # wrote beside it (wave-37 T4; D7), and proof_add_line places the line.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
 # Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
 FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
-  h="$(proof_attested floor "$2/record/wave-01-fixture/floor-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/floor-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
+  h="$(proof_attested regression "$2/record/wave-01-fixture/regression-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/regression-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
 expect_eq "FL2 the judge attests the declared floor's log at the working head, and the floor fact is written from it" "$FL_H|1" \
-  "$FL_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
+  "$FL_AT|$(/usr/bin/grep -c "^proved: kind=regression head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
 fl_poke current 8
 expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed -n 's/^current: //p' "$PFL/$PLAN_REL")"
 run_close "$PFL" run
@@ -2350,23 +2350,23 @@ expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc
 
 # A PROJECT WITH NO tests/*.test.sh AND NO floor: CLOSES ITS RUN ON ITS OWN RUNNER'S LOG (wave-36 T35; REQ-7 AC-7.10; D13).
 # The floor is a fact: the log the project's own runner left, opening head=<the working head> dirty=0 and ending rc=0,
-# is the evidence as it stands, with no config key and no floor-run. The judge and writer are driven as FL2 drives them.
+# is the evidence as it stands, with no config key and no regression-run. The judge and writer are driven as FL2 drives them.
 PFN="$(mk_fixture floor-any)"
 FN_SID="closeout-floor-2"
-sed '/^proved: kind=floor /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
+sed '/^proved: kind=regression /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
 ( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
 FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
 mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
-# THE RUN IS RECORDED (wave-37 T4; D7, ADR-057): the log and its run line, as tests/lib/floor-fixture.sh writes them.
-printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFN/$PLAN_REL" "$PFN/.bionic/docs/record/wave-01-fixture/ci.log" "$FN_H" 0 0
+# THE RUN IS RECORDED (wave-37 T4; D7, ADR-057): the log and its run line, as tests/lib/regression-fixture.sh writes them.
+printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFN/$PLAN_REL" "$PFN/.bionic/docs/record/wave-01-fixture/ci.log" "$FN_H" 0 0
 expect_eq "FL5 precondition: no floor fact, no tests/ at the working head, and no floor: or floor-attestation: in the config" "0|0|0" \
-  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
+  "$(/usr/bin/grep -c '^proved: kind=regression ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
 FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
-  h="$(proof_attested floor "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
+  h="$(proof_attested regression "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
   proof_add_line "$5" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
 expect_eq "FL6 AC-7.10 the judge attests the project's own runner's log, no key and no roster, and the floor fact is written from it" \
-  "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"
+  "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=regression head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"
 FN_RC="$( ( in_fixture "$PFN" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     CLAUDE_CODE_SESSION_ID="$FN_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/fn-poker" 2>&1; echo $?)"
@@ -3060,7 +3060,7 @@ awk -v m="$HK_MOVED" '
 expect_eq "HK-0 precondition: the roster carries adopted_from= rows of this run and another, the plan one unfenced and one fenced to=fixed line" \
   "2/1/1/1" \
   "$(awk -v p="plan=$HK_PLAN|" '{ l = $0 "|" } index(l, "|adopted_from=old-sid-1|") && index(l, "|" p) { n++ } END { print n + 0 }' "$HK_P/.bionic/tmp/roster-fixture.state")/$(/usr/bin/grep -c 'plan=/elsewhere/wave-99-other.plan.md' "$HK_P/.bionic/tmp/roster-fixture.state" | tr -d ' ')/$(awk '/^```/ { f = !f; next } !f && /^moved: [^ ]+ to=fixed / { n++ } END { print n + 0 }' "$HK_PLAN")/$(awk '/^```/ { f = !f; next } f && /^moved: [^ ]+ to=fixed / { n++ } END { print n + 0 }' "$HK_PLAN")"
-HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=1 · fixed=1"
+HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=1 · fixed=1"
 expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · by-hand=0, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check

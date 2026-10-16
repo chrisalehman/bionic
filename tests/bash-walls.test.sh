@@ -1989,7 +1989,7 @@ am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2
 # §ARM-A (proof-add) — wave-26 T5, REQ-3 D5/D6: a proof line decides whether the full run is
 # admitted, so an agent that could write one could prove its own head.
 am_refused "19u: bash session-poker.sh proof-add" \
-  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt"
+  "bash $AM_POKER proof-add regression record/wave-26-never-idle/floor.txt"
 # §ARM-A (approve) — wave-26 T5 after T13: an approval line is what releases a gate act, so an
 # agent that could write one would approve its own step.
 am_refused "19v: bash session-poker.sh approve" "bash $AM_POKER approve release 'approved'"
@@ -2051,7 +2051,7 @@ am_admitted "19j2: hold from the main thread" "bash $AM_POKER hold w20-sub 'idle
 am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
 am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
 am_admitted "19j5: proof-add from the main thread" \
-  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt" ""
+  "bash $AM_POKER proof-add regression record/wave-26-never-idle/floor.txt" ""
 am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19j7: waive from the main thread" "bash $AM_POKER waive adversarial 'ship it'" ""
 am_admitted "19j8: release-check from the main thread" "bash $AM_POKER release-check" ""
@@ -2707,7 +2707,7 @@ expect_status "EG6j …and admitted once the section holds a reading of each que
 
 # THE DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121), the Step-5 row. A debt
 # `land` wrote to the run's landing record holds every commit from Step 6 until a `proved:
-# kind=floor` or `kind=task` line carries an `at=` later than its threshold: the red landing, and for
+# kind=regression` or `kind=task` line carries an `at=` later than its threshold: the red landing, and for
 # an `approval:` token also its `approved:` line. The hook's collector reads the record into one fact
 # the gate judges beside the section; a `landed red:` line in the plan changes nothing. FIXTURE
 # FIDELITY: each debt is written by `land`'s own writer (lib/worktree.sh `_wt_debt_write`), into the
@@ -3209,7 +3209,7 @@ sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate
   eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
 }
 # From Step 7 the gate owes a floor proof line (wave-35 T31; D20, A-orch-50): the Step 7 and 8 plans carry one.
-SFE_FLOOR="proved: kind=floor head=$H_EG6 at=2026-10-12T00:00:00Z evidence=record/w27/floor.log"
+SFE_FLOOR="proved: kind=regression head=$H_EG6 at=2026-10-12T00:00:00Z evidence=record/w27/floor.log"
 sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
 
 # Step 5: cmd, pass, total, output, head — written by the verb, read by no gate (wave-35 T31; D20, A-orch-32). Step 5

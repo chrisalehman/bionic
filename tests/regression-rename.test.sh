@@ -209,12 +209,12 @@ ap_plan() {  # <proof kind> <reads token> <born word> <of word> -> a plan on std
   printf '| T3 | 6 | build | the fix | implementor | — | 30 | REQ-1 | a.sh | landed | — |\n'
   printf '| T4 | 7 | doc | the release | implementor | — | 30 | REQ-1 | b.md | pending | %s, approval:release |\n' "$2"
   printf '| T5 | 7 | review | the live read | critic | — | 30 | REQ-1 | .bionic/docs/record/w/r2.md | pending | live:%s |\n' "$2"
-  printf '| T6 | 8 | integrate | the merge | implementor | T4 | 30 | REQ-1 | — | pending | — |\n'
+  printf '| T6 | 8 | integrate | the merge | implementor | — | 30 | REQ-1 | — | pending | — |\n'
 }
 ap_plan floor proof:floor floor floor > "$AP_DIR/old.plan.md"
 ap_plan regression proof:regression regression regression > "$AP_DIR/new.plan.md"
 ap() {  # <plan> <function> [args] -> the library's answer, roots, run, units (and through it proof, alias) sourced
-  bash -c '. "$1/roots.sh"; . "$1/run.sh"; . "$1/units.sh"; p="$2"; shift 2; "$@" "$p"' _ "$LIB" "$1" "${@:2}" 2>> "$TMPROOT/ap.err"
+  bash -c '. "$1/roots.sh"; . "$1/run.sh"; . "$1/units.sh"; p="$2"; fn="$3"; shift 3; "$fn" "$p" "$@"' _ "$LIB" "$1" "${@:2}" 2>> "$TMPROOT/ap.err"
 }
 ap_both() {  # <label> <function...> -> the old plan's answer equals the new plan's, and both are non-empty
   local o n; o="$(ap "$AP_DIR/old.plan.md" "${@:2}")"; n="$(ap "$AP_DIR/new.plan.md" "${@:2}")"
@@ -260,12 +260,12 @@ expect_eq "AG-5 the regression's command is read once, through alias_config" "1"
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_config "\$FR_ROOT" config' | tr -d ' ')"
 expect_eq "AG-6 the second-run glob walks every spelling of the log name" "1" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_spellings log' | tr -d ' ')"
-expect_eq "AG-7 proof_fields normalises the kind through the map, once" "1" \
-  "$(code_lines "$PROOF_SH" | /usr/bin/grep -c 'alias_awk_norm kind PROOF_KIND' | tr -d ' ')"
+expect_eq "AG-7 proof_fields normalises the kind through the map, written once at load and pasted once" "1|1" \
+  "$(code_lines "$PROOF_SH" | /usr/bin/grep -c '_PROOF_KIND_NORM="$(_proof_alias_norm kind PROOF_KIND)"' | tr -d ' ')|$(code_lines "$PROOF_SH" | /usr/bin/grep -c -F '"$_PROOF_KIND_NORM"' | tr -d ' ')"
 expect_eq "AG-8 the reads token is normalised through the map at the tokenizer and at the validator" "2" \
-  "$(code_lines "$UNITS_SH" | /usr/bin/grep -c 'alias_awk_norm reads' | tr -d ' ')"
+  "$(code_lines "$UNITS_SH" | /usr/bin/grep -c -F '"$_UNITS_READS_NORM"' | tr -d ' ')"
 expect_eq "AG-9 both born-marker readers take their spellings from the map" "1|1" \
-  "$(code_lines "$UNITS_SH" | /usr/bin/grep -c 'alias_alt born' | tr -d ' ')|$(code_lines "$PROOF_SH" | /usr/bin/grep -c 'alias_alt born' | tr -d ' ')"
+  "$(code_lines "$UNITS_SH" | /usr/bin/grep -c -F '$(_proof_alias_born)' | tr -d ' ')|$(code_lines "$PROOF_SH" | /usr/bin/grep -c -F '$(_proof_alias_born)' | tr -d ' ')"
 expect_eq "AG-10 the governing-skill hook reads the rigor minimum through the map, at its two readers" "2" \
   "$(code_lines "$GOV_HOOK" | /usr/bin/grep -c 'alias_keyed rigor-key' | tr -d ' ')"
 
@@ -285,7 +285,7 @@ ag_same() {  # <label> <new args> -- <old args>
   expect_eq "$label — …which it printed once" "1" "$(deps_in "$OUT")"
 }
 ag_same "AO-1 regression-run x / floor-run x (the usage error)" regression-run x -- floor-run x
-ag_same "AO-2 proof-add regression / proof-add floor with no evidence (the usage error)" proof-add regression -- proof-add floor
+ag_same "AO-2 proof-add regression / proof-add floor with a flag that takes no value (the usage error)" proof-add regression record/x.log --reader -- proof-add floor record/x.log --reader
 # THE PROOF LINE: proof_fields, lifted from proof_awk, reads the old and new line as one kind.
 ag_kind() { printf '%s\n' "$1" | awk "$(bash -c '. "$1"; proof_awk' _ "$PROOF_SH")"'{ if (proof_fields($0)) print PROOF_KIND }'; }
 expect_eq "AO-3 proof_fields reads kind=regression as regression" "regression" "$(ag_kind "proved: kind=regression head=$AP_H at=x evidence=e")"

@@ -17,7 +17,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -171,7 +171,7 @@ poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence
 s42_unchanged "56b16 --question with no --reader is the usage error" 2 "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev1.md --reader w-aud
 s42_unchanged "56b17 --reader with no --question is the usage error" 2 "$P56"
-poke "$R56" proof-add floor record/wave-01-fixture/ev1.md --question evidence --reader w-aud
+poke "$R56" proof-add regression record/wave-01-fixture/ev1.md --question evidence --reader w-aud
 s42_unchanged "56b18 the reading flags on a floor proof are the usage error" 2 "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud --scope whole
 s42_unchanged "56b19 …and so is a flag the verb does not take" 2 "$P56"
@@ -370,14 +370,14 @@ S57_ST="$(printf 'review\tstructure\tbionic:critic\tpiece')"
 S57_ADW="$(printf 'review\tadversarial\tbionic:critic\twhole')"
 S57_STW="$(printf 'review\tstructure\tbionic:critic\twhole')"
 s57_all() {  # <state>... -> the six owed lines of this plan, each with the next state
-  printf 'floor\t%s\n%s\t%s\n%s\t%s\n%s\t%s\n%s\t%s\n%s\t%s' "$1" "$S57_EV" "$2" "$S57_AD" "$3" "$S57_ST" "$4" "$S57_ADW" "$5" "$S57_STW" "$6"
+  printf 'regression\t%s\n%s\t%s\n%s\t%s\n%s\t%s\n%s\t%s\n%s\t%s' "$1" "$S57_EV" "$2" "$S57_AD" "$3" "$S57_ST" "$4" "$S57_ADW" "$5" "$S57_STW" "$6"
 }
 expect_regex "57a0 precondition: the working branch's head is C4, a 40-hex commit" '^[0-9a-f]{40}$' "$S57_C4"
 expect_eq "57a0b precondition: C3 touches the docs root alone" ".bionic/docs/record/wave-01-fixture/note.md" \
   "$(git -C "$S57_WT" show --name-only --format= "$S57_C3")"
 expect_eq "57a0c precondition: …and C4 a tracked path outside it" "lib/b.sh" "$(git -C "$S57_WT" show --name-only --format= "$S57_C4")"
 expect_eq "57a0d precondition: the dealing for this plan (double, wave): the floor, three piece reads, two whole reads" \
-  "$(printf 'floor\n%s\n%s\n%s\n%s\n%s' "$S57_EV" "$S57_AD" "$S57_ST" "$S57_ADW" "$S57_STW")" \
+  "$(printf 'regression\n%s\n%s\n%s\n%s\n%s' "$S57_EV" "$S57_AD" "$S57_ST" "$S57_ADW" "$S57_STW")" \
   "$(bash -c '. "$1" && facts_owed double wave' _ "$S57_LIB")"
 
 # ---------- §JUDGE (AC-2.3): covered, uncovered naming its range, a docs-only tail ----------
@@ -451,10 +451,10 @@ s57_state "$P57" "$S57_C4"
 expect_eq "57f §JUDGE a question with no fact and no waiver is absent" "absent" "$(s57_of "$S57_ST")"
 expect_eq "57f2 …a review line carrying no question (1.11.0's) answers no question" "absent" "$(s57_of "$S57_AD")"
 expect_eq "57f3 …while the question that has a fact is judged" "covered" "$(s57_of "$S57_EV")"
-expect_eq "57f4 …and the floor is proof_state's answer: the floor proof names the working head, covered" "covered" "$(s57_of floor)"
+expect_eq "57f4 …and the floor is proof_state's answer: the floor proof names the working head, covered" "covered" "$(s57_of regression)"
 s57_reset; s57_fact evidence "$S57_C4" pass piece
 s57_state "$P57" "$S57_C4"
-expect_eq "57f5 …with no floor proof the floor is absent" "absent" "$(s57_of floor)"
+expect_eq "57f5 …with no floor proof the floor is absent" "absent" "$(s57_of regression)"
 sed '/^rigor: /d' "$P57" > "$TMPROOT/s57-norigor.plan.md"
 s57_state "$TMPROOT/s57-norigor.plan.md" "$S57_C4"
 expect_eq "57f6 a plan whose rigor cannot be read is judged nothing: rc 2" "2" "$S57_RC"
@@ -569,7 +569,7 @@ expect_eq "57t2 …three reading lines, at the task branch's head" "3" \
 s57_floor "$S57T_C1" "$P57T"
 s57_state "$P57T" "$S57T_C1"
 expect_eq "57t3 …and facts_state judges it by facts_owed single task: the floor and one critic's three questions, covered" \
-  "$(printf 'floor\tcovered\nreview\tevidence\tbionic:critic\tpiece\tcovered\nreview\tadversarial\tbionic:critic\tpiece\tcovered\nreview\tstructure\tbionic:critic\tpiece\tcovered')" \
+  "$(printf 'regression\tcovered\nreview\tevidence\tbionic:critic\tpiece\tcovered\nreview\tadversarial\tbionic:critic\tpiece\tcovered\nreview\tstructure\tbionic:critic\tpiece\tcovered')" \
   "$S57_OUT"
 expect_eq "57t4 …rc 0" "0" "$S57_RC"
 S57T_C2="$(s57_commit "$R57T/.worktrees/01-task" lib/fix.sh C2)"
@@ -792,13 +792,13 @@ expect_contains "58g10 …from the absolute deliverable's reader, as a pass" \
 POKER="$S58_POKER_REAL"
 
 # ---------- controls: a floor, a task and a plain review proof are written as before ----------
-printf 'Gating: 3 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$P58" "$S58_REC/floor.txt" "$S58_C4" 0 0  # with its run line (wave-37 T4; D7)
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$P58" "$S58_REC/floor.txt" "$S58_C4" 0 0  # with its run line (wave-37 T4; D7)
 printf '# review\n\nreviewed: %s..%s\n' "$S58_C1" "$S58_C4" > "$S58_REC/plain.md"
 s42_snap "$R58" "$P58"
-poke "$R58" proof-add floor record/wave-01-fixture/floor.txt
+poke "$R58" proof-add regression record/wave-01-fixture/floor.txt
 expect_eq "58h control: a floor proof registers (exit 0)" "0" "$RC"
 expect_regex "58h2 …in its four-field shape" \
-  "^proved: kind=floor head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${S58_C4} rc=0$" \
+  "^proved: kind=regression head=${S58_C4} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor\\.txt run=[^ ]+ head=${S58_C4} rc=0$" \
   "$(s46_proved "$P58" | tail -1)"
 poke "$R58" proof-add task record/wave-01-fixture/floor.txt
 expect_eq "58h3 control: a task proof registers (exit 0)" "0" "$RC"
@@ -1338,11 +1338,11 @@ expect_eq "62a0c precondition: v9-wip sits on the working branch alone" "no" \
   "$(git -C "$R62" merge-base --is-ancestor "$S62_W1" main 2>/dev/null && echo yes || echo no)"
 
 # ---------- with no key: nothing owed, run or printed (the controls) ----------
-expect_eq "62n0 no key: the dealing still starts with the floor" "floor" "$(s62_owed "$R62" | head -1)"
+expect_eq "62n0 no key: the dealing still starts with the regression" "regression" "$(s62_owed "$R62" | head -1)"
 expect_eq "62n …and owes no check" "" "$(s62_owed "$R62" | /usr/bin/grep -x check)"
 s62_covered_but_check "$S62_W2"
 s57_state "$P62" "$S62_W2"
-expect_eq "62n1 no key: the judge answers the floor" "covered" "$(s57_of floor)"
+expect_eq "62n1 no key: the judge answers the floor" "covered" "$(s57_of regression)"
 expect_eq "62n1b …and prints no check line" "" "$(printf '%s\n' "$S57_OUT" | /usr/bin/grep '^check')"
 expect_eq "62n1c …so the run holds (rc 0)" "0" "$S57_RC"
 s42_snap "$R62" "$P62"
@@ -1576,7 +1576,7 @@ s63_base() {  # <plan> <sha> -> the plan with `base-sha: <sha>` in its frontmatt
 }
 S63_TAD="$(printf 'review\tadversarial\tbionic:critic\tpiece')"
 s63_task_all() {  # <floor state> <review state> -> the four owed lines of a single task plan
-  printf 'floor\t%s\nreview\tevidence\tbionic:critic\tpiece\t%s\nreview\tadversarial\tbionic:critic\tpiece\t%s\nreview\tstructure\tbionic:critic\tpiece\t%s' \
+  printf 'regression\t%s\nreview\tevidence\tbionic:critic\tpiece\t%s\nreview\tadversarial\tbionic:critic\tpiece\t%s\nreview\tstructure\tbionic:critic\tpiece\t%s' \
     "$1" "$2" "$2" "$2"
 }
 
@@ -1675,7 +1675,7 @@ expect_eq "63f0 precondition: the commit one past the checkout's head is not che
 # the proof's tree is covered; one past it that adds a code file with no run recorded is uncovered, naming it.
 s57_state "$P63" "$S63_N"
 expect_eq "63f F3 asked about a commit one past the checkout's head with the proof's tree: the floor is covered at it" \
-  "covered" "$(s57_of floor)"
+  "covered" "$(s57_of regression)"
 expect_eq "63f2 …the review lines, which changed no file, covered" "covered" "$(s57_of "$S63_TAD")"
 expect_eq "63f3 …and the exit 0" "0" "$S57_RC"
 S63_N2="$(cd "$R63" && export GIT_INDEX_FILE="$TMPROOT/s63-n2.index" && git read-tree "$S63_H" \
@@ -1683,13 +1683,13 @@ S63_N2="$(cd "$R63" && export GIT_INDEX_FILE="$TMPROOT/s63-n2.index" && git read
   && git commit-tree "$(git write-tree)" -p "$S63_H" -m 'one past the checkout, adding code' )"
 s57_state "$P63" "$S63_N2"
 expect_eq "63f3b …one past it that adds lib/n2.sh with no run at it: uncovered from the proof's head, naming the commit" \
-  "uncovered	${S63_H}..${S63_N2}	commit ${S63_N2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(s57_of floor)"
+  "uncovered	${S63_H}..${S63_N2}	commit ${S63_N2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(s57_of regression)"
 s57_state "$P63" "$S63_U"
 expect_eq "63f4 asked about an older head: the floor is uncovered too, never covered" \
-  "uncovered	${S63_H}..${S63_U}	the proved head ${S63_H:0:7} is not in the history of ${S63_U:0:12}" "$(s57_of floor)"
-sed '/^proved: kind=floor /d' "$P63" > "$R63/.bionic/tmp/nofloor.plan.md"
+  "uncovered	${S63_H}..${S63_U}	the proved head ${S63_H:0:7} is not in the history of ${S63_U:0:12}" "$(s57_of regression)"
+sed '/^proved: kind=regression /d' "$P63" > "$R63/.bionic/tmp/nofloor.plan.md"
 s57_state "$R63/.bionic/tmp/nofloor.plan.md" "$S63_N"
-expect_eq "63f5 with no floor proof the floor line is absent, at any head" "absent" "$(s57_of floor)"
+expect_eq "63f5 with no floor proof the floor line is absent, at any head" "absent" "$(s57_of regression)"
 expect_eq "63f6 …the review lines judged beside it" "covered" "$(s57_of "$S63_TAD")"
 # Asked by name: the head is resolved, so the range names the commit.
 S63_X="$(s57_commit "$S63_WT" lib/fix.sh 'past the readings')"
@@ -2106,7 +2106,7 @@ expect_eq "64a2 …and the dealing of a rigor alone carries none (the positive a
 s57_state "$P64" "$S64_H"
 expect_eq "64b AC-14.3 the judge says the debt absent while its token has not cleared" "absent" "$(s57_of "$S64_DEBT")"
 expect_eq "64b2 …so the run does not hold (rc 1)" "1" "$S57_RC"
-expect_eq "64b3 …while the floor at the head is covered" "covered" "$(s57_of floor)"
+expect_eq "64b3 …while the floor at the head is covered" "covered" "$(s57_of regression)"
 s42_snap "$R64" "$P64"
 poke "$R64" current 8
 s42_unchanged "64c AC-14.3 current 8 with the debt open" 1 "$P64"
@@ -3140,12 +3140,12 @@ expect_eq "69e0 control: at current: 6 with the debt open a real commit is refus
 poke "$R69" step-line T9 'landed red on widget.test.sh, owed'
 expect_eq "69e00 a writer verb at current: 6 with the debt open (step-line): admitted, its copy judged at current: 4" "0" "$RC"
 expect_contains "69e00b …and its line is written" "- T9: landed red on widget.test.sh, owed" "$(cat "$P69")"
-printf 'all suites passed\nGating: 1 passed, 0 failed\n' | floor_fixture --pre $'floor log\nenv: os=fixture' \
+printf 'all suites passed\nGating: 1 passed, 0 failed\n' | regression_fixture --pre $'floor log\nenv: os=fixture' \
   "$P69" "$R69/.bionic/docs/record/w27/floor-late.log" "$S69_H" 0 0  # with its run line (wave-37 T4; D7)
-poke "$R69" proof-add floor record/w27/floor-late.log
-expect_eq "69e proof-add floor of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
-expect_regex "69e2 …and the floor proof line is written at the fixture's head" "^proved: kind=floor head=${S69_H} " \
-  "$(/usr/bin/grep '^proved: kind=floor' "$P69" | tail -1)"
+poke "$R69" proof-add regression record/w27/floor-late.log
+expect_eq "69e proof-add regression of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
+expect_regex "69e2 …and the floor proof line is written at the fixture's head" "^proved: kind=regression head=${S69_H} " \
+  "$(/usr/bin/grep '^proved: kind=regression' "$P69" | tail -1)"
 s34_gate "$R69"
 expect_eq "69e3 …after which the real commit is admitted: the line covers the debt" "admitted" "$(s69_verdict "$GATE_RC" "$GATE_ERR")"
 # Each writer verb hands plan_verb_swap the `writer` mode, so its copy is judged at `current: 4`;
@@ -3174,9 +3174,9 @@ expect_eq "69f2 …and the table holds both answers (two debts, one covered, at 
 # anchored: the wall's arm (69f3) and facts_state's floor branch, which `current 7` asks in 69f-7-*.
 anchor file payload/scripts/lib/walls.sh 'why="$(proof_floor_absent "$PLAN")" || return 0'
 anchor file payload/scripts/lib/proof.sh 'if proof_floor_absent "$plan" >/dev/null; then st=absent'
-S69_WHOLE7="$(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -v '^proved: kind=floor ')"
+S69_WHOLE7="$(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -v '^proved: kind=regression ')"
 expect_eq "69f3-pre the facts without their floor line keep the two whole readings and lose the one floor line" "2 0 1" \
-  "$(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=review ') $(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=floor ') $(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -c '^proved: kind=floor ')"
+  "$(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=review ') $(printf '%s\n' "$S69_WHOLE7" | /usr/bin/grep -c '^proved: kind=regression ') $(printf '%s\n' "$S69_FACTS7" | /usr/bin/grep -c '^proved: kind=regression ')"
 s69_words() { case "$1" in *'no regression proof on this plan yet'*) printf 'floor-absent' ;; *) printf 'other-words' ;; esac; }
 s69_state none; s69_plan 7 "$S69_WHOLE7"; s34_gate "$R69"
 S69_FR="$(s69_verdict "$GATE_RC" "$GATE_ERR") $(s69_words "$GATE_ERR")"
@@ -3354,7 +3354,7 @@ POKE_BOUND="$S71_BOUND_WAS"
 section "Section 72 §FLOOR-RECORD: the floor is one whole run at a commit on the branch, and every later commit proved by the runs recorded at it (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.3, AC-13.4; D3; A-T25-1 to A-T25-4)"
 # ============================================================
 #
-# `proof-add floor` takes the log of a green run on a clean tree, at a commit F: since wave-36 T35 (AC-7.10) any
+# `proof-add regression` takes the log of a green run on a clean tree, at a commit F: since wave-36 T35 (AC-7.10) any
 # log that opens head=<F> dirty=0 and ends rc=0, no roster counted (§72 (b)). When F is
 # not the working head H, F must be an ancestor of H and the walk must hold: each commit on the
 # working branch's first-parent line after F owes its row's Lands-on suites (the `ready` event
@@ -3369,7 +3369,7 @@ section "Section 72 §FLOOR-RECORD: the floor is one whole run at a commit on th
 # checkout. The landing events are written by the product's writer (`lib/line.sh` `line_event`,
 # the one `land` uses) in its own shapes; the landing commits themselves are SYNTHESIZED as plain
 # commits on the working branch, which is what a queue landing publishes (its candidate, fast-
-# forwarded). The floor logs are hand-written in the runner's and `floor-run`'s shapes, as §46 and
+# forwarded). The floor logs are hand-written in the runner's and `regression-run`'s shapes, as §46 and
 # §FLOOR-DECLARED write them.
 S72_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 S72_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
@@ -3421,13 +3421,13 @@ s72_land() {  # <row> <path> <suites, comma-joined> -> the landing commit on the
 s72_verdict() {  # <row> <commit> <suite> <green|red> -> the landing's verdict event
   s72_event verdict "row=$1" "commit=$2" "suite=$3" "result=$4" "log=$S72REC/line-$1-$3.log"
 }
-s72_add() {  # <evidence relative to the record> -> poke proof-add floor, the plan snapshotted first
+s72_add() {  # <evidence relative to the record> -> poke proof-add regression, the plan snapshotted first
   s42_snap "$S72R" "$S72P"
-  poke "$S72R" proof-add floor "record/wave-01-fixture/$1"
+  poke "$S72R" proof-add regression "record/wave-01-fixture/$1"
 }
 s72_whole() {  # <file> <head> -> a whole green runner log of the four suites at <head>, closed rc=0 (wave-36 T35), with
-  # the run line the machine records for it (wave-37 T4; D7: tests/lib/floor-fixture.sh)
-  printf 'Gating: 4 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/$1" "$2" 0 0
+  # the run line the machine records for it (wave-37 T4; D7: tests/lib/regression-fixture.sh)
+  printf 'Gating: 4 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$S72P" "$S72REC/$1" "$2" 0 0
 }
 s72_state() {  # -> proof_state's one line for the plan
   bash -c '. "$1" && proof_state "$2" "$3"' _ "$S72_LIB" "$S72P" "$S72R" 2>/dev/null
@@ -3459,7 +3459,7 @@ s72_run c.test.sh "bash tests/c.test.sh"
 expect_match "72a4 precondition: the real shim stamped a green, clean run of c at the hand commit" \
   "stamp/v1|head=${S72C2}|dirty=0|rc=0|at=*|suites=c.test.sh|cmd=bash tests/c.test.sh" "$(s72_stamp)"
 s72_add floor-F.txt
-expect_eq "72a5 AC-13.4 a whole run at an ancestor F, every later commit proved by its runs: proof-add floor exits 0" "0" "$RC"
+expect_eq "72a5 AC-13.4 a whole run at an ancestor F, every later commit proved by its runs: proof-add regression exits 0" "0" "$RC"
 expect_eq "72a6 …and the proof names F, the head the run read" "$S72F" "$(s46_last "$S72P" floor)"
 expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'covered\t%s' "$S72C2")" "$(s72_state)"
 
@@ -3467,11 +3467,11 @@ expect_eq "72a7 …and proof_state reads the floor covered at H" "$(printf 'cove
 # Through wave-35 the judge counted the suites at the head, and a run of one suite of four was refused as not whole.
 # The floor reads no roster now: the plan's regression row names what ran, and a log that opens head=<F> dirty=0 and
 # ends rc=0, every later commit proved, is accepted whatever it ran.
-printf 'Gating: 1 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part.txt" "$S72F" 0 0
+printf 'Gating: 1 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part.txt" "$S72F" 0 0
 s72_add floor-part.txt
 expect_eq "72b a run of one suite at F, every later commit proved: accepted, no roster counted (exit 0)" "0" "$RC"
 expect_eq "72b2 AC-7.10 …the proof naming F" "$S72F" "$(s46_last "$S72P" floor)"
-printf 'Gating: 2 passed, 0 failed\n' | floor_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part-H.txt" "$S72C2" 0 0
+printf 'Gating: 2 passed, 0 failed\n' | regression_fixture --pre 'floor log' "$S72P" "$S72REC/floor-part-H.txt" "$S72C2" 0 0
 s72_add floor-part-H.txt
 expect_eq "72b3 a run of two suites at the working head itself: accepted (exit 0)" "0" "$RC"
 expect_eq "72b4 …the proof naming the working head" "$S72C2" "$(s46_last "$S72P" floor)"
@@ -3541,12 +3541,12 @@ s72_add floor-X.txt
 s42_unchanged "72g a whole run at a commit off the working branch" 1 "$S72P"
 expect_contains "72g2 …says it is not in the working branch's history" \
   "floor-X.txt read head ${S72X:0:12}, which is not in the history of the working branch (at ${S72C6:0:12})" "$OUT"
-s72_config "floor: true"
-printf 'command: true\n' | floor_fixture "$S72P" "$S72REC/floor-run-F.log" "$S72F" 0 0
-s72_add floor-run-F.log
+s72_config "regression-command: true"
+printf 'command: true\n' | regression_fixture "$S72P" "$S72REC/regression-run-F.log" "$S72F" 0 0
+s72_add regression-run-F.log
 expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
 S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
-s72_add floor-run-F.log
+s72_add regression-run-F.log
 s42_unchanged "72g4 …and with a hand commit after it unproved" 1 "$S72P"
 expect_contains "72g5 …refused, naming the commit" "commit ${S72C7:0:12} (no landing row) is not proved" "$OUT"
 s72_config ""
@@ -3559,11 +3559,11 @@ expect_contains "72h2 …its reason names the commit (proof_state answers covere
   "commit ${S72C7:0:12} (no landing row) is not proved" "$S72STATE"
 s57_state "$S72P" "$S72C7"
 expect_eq "72h3 facts_state's floor line is uncovered from the proof's head to the head asked, then that reason (wave-35 T9)" \
-  "$(printf 'uncovered\t%s..%s\t%s' "$S72F" "$S72C7" "${S72STATE#*	}")" "$(s57_of floor)"
+  "$(printf 'uncovered\t%s..%s\t%s' "$S72F" "$S72C7" "${S72STATE#*	}")" "$(s57_of regression)"
 s72_run a.test.sh "bash tests/a.test.sh"
 expect_eq "72h4 …and a run at it makes proof_state covered" "$(printf 'covered\t%s' "$S72C7")" "$(s72_state)"
 s57_state "$S72P" "$S72C7"
-expect_eq "72h5 …and the judge's floor line covered" "covered" "$(s57_of floor)"
+expect_eq "72h5 …and the judge's floor line covered" "covered" "$(s57_of regression)"
 
 # ---------- (i) a red whole run at a later commit supersedes the green floor (wave-31 T41; critic-evidence #1, critic-adversarial #1) ----------
 # A whole run's stamp names `run.sh`. Green, every suite is green at its tree; red, every suite is
@@ -3582,17 +3582,17 @@ expect_eq "72i3 AC-13.3 a red whole run at H after the green floor at F: proof_s
 expect_contains "72i4 …naming the oldest commit owing a suite, and the whole run at H red" \
   "commit ${S72C1:0:12} (row T7) is not proved: the whole run at ${S72H:0:12} is red" "$S72STATE"
 s57_state "$S72P" "$S72H"
-S72FL="$(s57_of floor)"
+S72FL="$(s57_of regression)"
 expect_eq "72i5 …and the judge's floor line uncovered" "uncovered" "${S72FL%%	*}"
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 1 failed\nrc=1\n' "$S72H" > "$S72REC/floor-red-H.txt"
 s72_add floor-red-H.txt
-s42_unchanged "72i6 proof-add floor of the red whole run's log at H" 1 "$S72P"
+s42_unchanged "72i6 proof-add regression of the red whole run's log at H" 1 "$S72P"
 # A RED WHOLE RUN IS A CANDIDATE NOW (wave-35 T9; D8, AC-1.3) only when its Failed: block names its reds; this
 # log ends rc=1 and names none, so it says nothing of what is owed and stays refused, by its rc (wave-36 T35).
 expect_contains "72i7 …refused: it ended rc=1 and its Failed: block names none of its reds" \
   "floor-red-H.txt ended rc=1, so the regression did not pass" "$OUT"
 s72_add floor-F.txt
-s42_unchanged "72i8 proof-add floor at F with the red whole run at H after it" 1 "$S72P"
+s42_unchanged "72i8 proof-add regression at F with the red whole run at H after it" 1 "$S72P"
 expect_contains "72i9 …refused, naming the whole run at H red" "the whole run at ${S72H:0:12} is red" "$OUT"
 sleep 1
 s72_run run.sh "true"
@@ -3837,15 +3837,15 @@ POKE_BOUND="$SB_BOUND_WAS"
 
 
 # ============================================================
-section "§BORN-FLOOR: task-add --born floor:<suite> writes the floor-born marker the judge holds a landing by (wave-36 T7; REQ-3 AC-3.2; D9, D2)"
+section "§BORN-FLOOR: task-add --born regression:<suite> writes the floor-born marker the judge holds a landing by (wave-36 T7; REQ-3 AC-3.2; D9, D2)"
 # ============================================================
-# A row born of the floor's red carries ` born: floor <suite>` on its `- <id>:` line; lib/proof.sh's judge holds
-# the commit the landing record names as its landing (evidence-gate-2 §COVER). `--born floor:<suite>` takes one
+# A row born of the floor's red carries ` born: regression <suite>` on its `- <id>:` line; lib/proof.sh's judge holds
+# the commit the landing record names as its landing (evidence-gate-2 §COVER). `--born regression:<suite>` takes one
 # suite by its file name (`<name>.test.sh`, the key the floor's records use); a floor-born row is no review-born
-# row, so fix-policy: and fix-cap: do not hold it, and its task cell says ` · born: floor`. FIXTURE FIDELITY: §74's
+# row, so fix-policy: and fix-cap: do not hold it, and its task cell says ` · born: regression`. FIXTURE FIDELITY: §74's
 # gate-admitted plan without reads; the verb is the real one.
 SBF_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RBF="$(make_repo s-born-floor)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
+RBF="$(make_repo s-born-regression)"; ( cd "$RBF" && git commit -q --allow-empty -m init )
 SBF_C1="$(git -C "$RBF" rev-parse HEAD)"
 git -C "$RBF" branch wave/01-fixture
 PBF="$(s42_plan "$RBF" 4 "  worktree: .worktrees/01-fixture
@@ -3854,8 +3854,8 @@ PBF="$(s42_plan "$RBF" 4 "  worktree: .worktrees/01-fixture
   working-branch: wave/01-fixture")"
 SBF_OFF="$(git -C "$RBF" rev-parse HEAD)"
 SBF_SUM="$(cksum < "$PBF")"
-poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:lib/a.sh
-expect_eq "BFV-1 --born floor: with a path that is no suite file name is the usage error, exit 2" "2" "$RC"
+poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:lib/a.sh
+expect_eq "BFV-1 --born regression: with a path that is no suite file name is the usage error, exit 2" "2" "$RC"
 expect_contains "BFV-1b …naming the shape" "floor:<suite>" "$OUT"
 expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 
@@ -3863,42 +3863,42 @@ expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 # judge holds a floor-born landing on every question chain, so a marker typed with no red behind it is an exemption
 # nothing earned. It is admitted when (a) the plan's floor proof owes the suite (`owed=`), or (b) the landing record
 # holds an `ev=standing` event for it whose head is a commit on the working branch; the marker then says which
-# (`of=floor` or `of=standing@<12-hex>`). With neither it is refused naming the two facts that would admit it.
-poke "$RBF" task-add T10 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
-expect_eq "BFV-6 no floor proof and no record: --born floor:a.test.sh is refused, exit 1" "1" "$RC"
+# (`of=regression` or `of=standing@<12-hex>`). With neither it is refused naming the two facts that would admit it.
+poke "$RBF" task-add T10 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
+expect_eq "BFV-6 no floor proof and no record: --born regression:a.test.sh is refused, exit 1" "1" "$RC"
 expect_contains "BFV-6b …naming the first fact that would admit it: the floor proof owes the suite" "floor proof owes a.test.sh" "$OUT"
 expect_contains "BFV-6c …and the second: a standing event for the suite at a commit on the working branch" "standing event for a.test.sh" "$OUT"
 expect_eq "BFV-6d …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S46_LIB" "$PBF" \
-  "proved: kind=floor head=${SBF_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh" > "$PBF.new" && mv "$PBF.new" "$PBF"
+  "proved: kind=regression head=${SBF_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh" > "$PBF.new" && mv "$PBF.new" "$PBF"
 ( cd "$RBF" && git add -f "$PBF" && git commit -qm floor ) >/dev/null 2>&1
 SBF_SUM="$(cksum < "$PBF")"
-poke "$RBF" task-add T11 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:x.test.sh
+poke "$RBF" task-add T11 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:x.test.sh
 expect_eq "BFV-7 a floor proof that owes a.test.sh does not back x.test.sh: refused, exit 1" "1" "$RC"
 expect_contains "BFV-7b …the refusal says what the floor proof owes" "owes a.test.sh" "$OUT"
 expect_eq "BFV-7c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 SBF_REC="$RBF/.bionic/docs/record/wave-01-fixture/landing-proofs.log"; mkdir -p "${SBF_REC%/*}"
 { printf 'line/v1|ev=standing|head=%s|suite=o.test.sh|lines=1|log=x.log|cause=code|against=-|at=2026-10-14T00:01:00Z\n' "$SBF_OFF"
   printf 'line/v1|ev=standing|head=%s|suite=s.test.sh|lines=2|log=x.log|cause=code|against=-|at=2026-10-14T00:02:00Z\n' "$SBF_C1"; } > "$SBF_REC"
-poke "$RBF" task-add T12 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:o.test.sh
+poke "$RBF" task-add T12 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:o.test.sh
 expect_eq "BFV-8 a standing event whose head is no commit on the working branch does not back o.test.sh: refused, exit 1" "1" "$RC"
 expect_eq "BFV-8b …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 
-poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born floor:a.test.sh
-expect_eq "BFV-2 task-add --born floor:a.test.sh, which the floor proof owes, exits 0" "0" "$RC"
-expect_regex "BFV-3 …the row's line ends born: floor a.test.sh of=floor" \
-  '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor a\.test\.sh of=floor$' "$(/usr/bin/grep '^- T6:' "$PBF")"
-expect_contains "BFV-4 …the task cell says born: floor" "| T6 | 4 | build | fix the floor red · born: floor |" "$(cat "$PBF")"
+poke "$RBF" task-add T6 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
+expect_eq "BFV-2 task-add --born regression:a.test.sh, which the floor proof owes, exits 0" "0" "$RC"
+expect_regex "BFV-3 …the row's line ends born: regression a.test.sh of=regression" \
+  '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression a\.test\.sh of=regression$' "$(/usr/bin/grep '^- T6:' "$PBF")"
+expect_contains "BFV-4 …the task cell says born: regression" "| T6 | 4 | build | fix the floor red · born: regression |" "$(cat "$PBF")"
 expect_contains "BFV-5 …and the verb says it is floor-born" "T6 is floor-born (a.test.sh)" "$OUT"
 expect_absent "BFV-5b …and counts it against no fix-cap" "review-born rows:" "$OUT"
 
-poke "$RBF" task-add T7 4 build 'fix the standing red' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:s.test.sh
+poke "$RBF" task-add T7 4 build 'fix the standing red' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born regression:s.test.sh
 expect_eq "BFV-9 a standing event for s.test.sh at a commit on the working branch admits it, exit 0" "0" "$RC"
-expect_regex "BFV-9b …the line ends born: floor s.test.sh of=standing@ and the first 12 hex of the head" \
-  "^- T7: pending dispatch — added by task-add at [0-9T:Z-]+ born: floor s\\.test\\.sh of=standing@${SBF_C1:0:12}\$" "$(/usr/bin/grep '^- T7:' "$PBF")"
+expect_regex "BFV-9b …the line ends born: regression s.test.sh of=standing@ and the first 12 hex of the head" \
+  "^- T7: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression s\\.test\\.sh of=standing@${SBF_C1:0:12}\$" "$(/usr/bin/grep '^- T7:' "$PBF")"
 SBF_MARKS="$(bash -c '. "$1" && units_born_marks "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh" "$PBF" 2>/dev/null)"
-expect_contains "BFV-10 the judge's reader still reads the floor marker that carries of=floor" "$(printf 'T6\tfloor\ta.test.sh')" "$SBF_MARKS"
-expect_contains "BFV-10b …and the one that carries of=standing@" "$(printf 'T7\tfloor\ts.test.sh')" "$SBF_MARKS"
+expect_contains "BFV-10 the judge's reader still reads the floor marker that carries of=regression" "$(printf 'T6\tregression\ta.test.sh')" "$SBF_MARKS"
+expect_contains "BFV-10b …and the one that carries of=standing@" "$(printf 'T7\tregression\ts.test.sh')" "$SBF_MARKS"
 POKE_BOUND="$SBF_BOUND_WAS"
 
 # ============================================================

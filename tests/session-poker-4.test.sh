@@ -21,7 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -691,7 +691,7 @@ RD_ID5="record/wave-01-fixture/c-later.md#1"
 RD_CHK="record/wave-01-fixture/sh-unsure.md#1"
 RD_SA="The install record now lists what setup placed"
 RD_SQ='Said "go" \ now | here'
-RD_HAZ='done; delivered: now - Step 9: delivered: x current: 9 approved-by: me proved: kind=floor head=abc'
+RD_HAZ='done; delivered: now - Step 9: delivered: x current: 9 approved-by: me proved: kind=regression head=abc'
 rd_line() { /usr/bin/grep -F "deferred: $1 " "$PSEV"; }  # the plan's deferred: line for a finding
 rd_state() {  # <id> -> stated|unstated, from the last release-check's output; nothing when it printed no line
   local l
@@ -2712,15 +2712,15 @@ if [ "$SH_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAU
 POKE_BOUND="$SF_BOUND_WAS"
 
 # ============================================================
-section "§FLOOR-DECLARED: floor-run runs a declared floor: <command> and logs it in the floor's one grammar; floor-attestation: is a removed key (wave-28 T75; REQ-17 AC-17.1; D36; wave-36 T35: REQ-7 AC-7.10, D13)"
+section "§FLOOR-DECLARED: regression-run runs a declared floor: <command> and logs it in the floor's one grammar; floor-attestation: is a removed key (wave-28 T75; REQ-17 AC-17.1; D36; wave-36 T35: REQ-7 AC-7.10, D13)"
 # ============================================================
 #
 # A project whose regression is not tests/run.sh may name it in `.bionic/config.yaml` as `floor: <command>`, a
-# convenience `floor-run` runs in the working checkout and logs in the floor's one grammar (wave-36 T35; AC-7.10): a
+# convenience `regression-run` runs in the working checkout and logs in the floor's one grammar (wave-36 T35; AC-7.10): a
 # first line `head=<40-hex> dirty=<n>`, then `command: <cmd>`, the command's output, and a last line `rc=<n>`.
-# `proof-add floor` judges that log as it judges any other (§FLOOR-ANY, below): the key gives it no privilege, and with
+# `proof-add regression` judges that log as it judges any other (§FLOOR-ANY, below): the key gives it no privilege, and with
 # no key it is still a log the floor reads (FD-c1). `floor-attestation:`, wave-28 T75's second shape (a person's record
-# that a run passed), is removed: `floor-run` and `proof-add floor` refuse a config carrying it, naming the key and
+# that a run passed), is removed: `regression-run` and `proof-add regression` refuse a config carrying it, naming the key and
 # what to do, before any record is read. The FD-t and FD-b rows moved from what the key admitted to that refusal.
 #
 # FIXTURE FIDELITY. The repository holds NO tests/ directory at its working head, the shape of the project
@@ -2752,13 +2752,13 @@ esac
 FD_EOF
 fd_runs() { [ -f "$FD_SEEN" ] && awk 'END { print NR + 0 }' "$FD_SEEN" || echo 0; }
 fd_config() { printf '%s\n' "$@" > "$RFD/.bionic/config.yaml"; }  # <line>... -> the project's config, exactly these lines
-fd_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFD" | tail -n 1; }
-# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library and the hash helper
+fd_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFD" | tail -n 1; }
+# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested regression printed>", the roots library and the hash helper
 # (lib/detect.sh, which a doctored copy outside lib/ cannot load from beside itself) sourced first, the checkout the
 # working tree, the plan PFD (its landing record holds the runs) and the project root RFD: the judge itself, for the
 # mutants below.
 fd_attest() {
-  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
+  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested regression "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
     _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" "${FD_ROOTS%/*}/detect.sh" "$PFD" 2>/dev/null
 }
 expect_regex "FD-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$FD_W"
@@ -2768,12 +2768,12 @@ expect_eq "FD-0c precondition: …and its checkout is clean" "" "$(git -C "$FD_W
 
 
 # ---------- AC-17.1: no floor: key, nothing run ----------
-# Wave-35 T10 (AC-1.8): with no floor: key the regression is the project's tests/run.sh, which floor-run runs
+# Wave-35 T10 (AC-1.8): with no floor: key the regression is the project's tests/run.sh, which regression-run runs
 # (§FLOOR-RUN). This fixture's working head holds no tests/ directory, so there is nothing to run, and the verb
 # says which file it looked for, where.
 s42_snap "$RFD" "$PFD"
-poke "$RFD" floor-run
-s42_unchanged "FD-n1 §FLOOR-DECLARED floor-run with no floor: key and no tests/run.sh at the working head" 1 "$PFD"
+poke "$RFD" regression-run
+s42_unchanged "FD-n1 §FLOOR-DECLARED regression-run with no floor: key and no tests/run.sh at the working head" 1 "$PFD"
 expect_contains "FD-n2 …naming the runner it looked for in the working checkout" \
   "$(cd "$FD_WT" && pwd -P) holds no tests/run.sh" "$OUT"
 expect_contains "FD-n2b …and saying nothing was run" "Nothing was run." "$OUT"
@@ -2781,15 +2781,15 @@ expect_contains "FD-n2c …and that the project may run its regression itself an
   "or run the regression yourself and cite its log" "$OUT"
 expect_eq "FD-n3 …and the declared command never ran (the stub's log is empty)" "0" "$(fd_runs)"
 fd_config "floor-attestation: user"
-poke "$RFD" floor-run
+poke "$RFD" regression-run
 expect_eq "FD-n4 …nor with floor-attestation: user alone, refused (exit 1, nothing run)" "1|0" "$RC|$(fd_runs)"
 expect_contains "FD-n4b …naming the removed key first (wave-36 T35; AC-7.10)" "carries floor-attestation: user, a key bionic removed" "$OUT"
 
-# ---------- AC-17.1: floor-run runs and logs; proof-add floor writes the line ----------
-fd_config "floor: bash $FD_STUB --all"
-poke "$RFD" floor-run
-FD_LOG="$FD_REC/floor-run-$FD_W.log"
-expect_eq "FD-a1 floor-run runs the declared command (exit 0, the command's own)" "0" "$RC"
+# ---------- AC-17.1: regression-run runs and logs; proof-add regression writes the line ----------
+fd_config "regression-command: bash $FD_STUB --all"
+poke "$RFD" regression-run
+FD_LOG="$FD_REC/regression-run-$FD_W.log"
+expect_eq "FD-a1 regression-run runs the declared command (exit 0, the command's own)" "0" "$RC"
 expect_eq "FD-a2 …once, in the working branch's checkout, its words split on blanks" \
   "1|cwd=$(cd "$FD_WT" && pwd -P) args=--all" "$(fd_runs)|$(tail -n 1 "$FD_SEEN" 2>/dev/null)"
 expect_eq "FD-a3 …its log opens head=<working head> dirty=0, then command: <cmd> (wave-36 T35: the one grammar's header)" \
@@ -2797,65 +2797,65 @@ expect_eq "FD-a3 …its log opens head=<working head> dirty=0, then command: <cm
 expect_eq "FD-a3b …and closes with the command's code, rc=0, on its last line (wave-36 T35; AC-7.10)" "rc=0" \
   "$(tail -n 1 "$FD_LOG" 2>/dev/null)"
 expect_contains "FD-a4 …and carries the command's output" "floor: 4 passed, 0 failed" "$(cat "$FD_LOG" 2>/dev/null)"
-expect_contains "FD-a5 …and the verb prints the proof-add floor line to run" \
-  "proof-add floor record/wave-01-fixture/floor-run-$FD_W.log" "$OUT"
+expect_contains "FD-a5 …and the verb prints the proof-add regression line to run" \
+  "proof-add regression record/wave-01-fixture/regression-run-$FD_W.log" "$OUT"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
-expect_eq "FD-a6 proof-add floor accepts the declared floor's log (exit 0)" "0" "$RC"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
+expect_eq "FD-a6 proof-add regression accepts the declared floor's log (exit 0)" "0" "$RC"
 expect_regex "FD-a7 …and writes the proof line at the working head, naming that log" \
-  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
+  "^proved: kind=regression head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/regression-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 expect_eq "FD-a8 …which proof_last reads back as the floor at the working head, with no roster counted" "$FD_W" "$(s46_last "$PFD" floor)"
 
 # ---------- AC-17.1: the same log at another head, dirty, red, or with no closing rc= line is refused ----------
 FD_OTHER="0123456789abcdef0123456789abcdef01234567"
-sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
+sed '1d;$d' "$FD_LOG" | regression_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
 { printf 'head=%s dirty=2\n' "$FD_W"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-dirty.log"
-sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
+sed '1d;$d' "$FD_LOG" | regression_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD_REC/fd-runner.log"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-other.log
 s42_unchanged "FD-r1 a declared floor's log that read another head" 1 "$PFD"
 expect_contains "FD-r1b …naming the head it read and the working head (wave-31 T25: F is no commit here)" \
   "read head ${FD_OTHER:0:12}, which is no commit here; run the whole suite on the working branch (at ${FD_W:0:12})" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-dirty.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-dirty.log
 s42_unchanged "FD-r2 …that read a dirty tree" 1 "$PFD"
 expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirty=2); commit, run it again and cite that log" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-red.log
 s42_unchanged "FD-r3 …whose command exited 1" 1 "$PFD"
 expect_regex "FD-r3b …saying the run ended rc=1, so the regression did not pass (wave-36 T35: the one grammar's sentence)" \
   'the run in [^ ]*fd-red\.log ended rc=1, so the regression did not pass; fix what it names, run it again and cite that log' "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-r4 …and a log in the old tests/run.sh shape, green at the head, with no closing rc= line" 1 "$PFD"
 expect_contains "FD-r4b …saying what its last line must be (wave-36 T35)" \
   "fd-runner.log does not end with an rc=<n> line" "$OUT"
 
 # ---------- AC-17.1: a failing run, a stray file, a dirty tree ----------
 echo fail > "$FD_MODE"
-poke "$RFD" floor-run
-expect_eq "FD-f1 a failing declared command: floor-run exits with its code (1)" "1" "$RC"
+poke "$RFD" regression-run
+expect_eq "FD-f1 a failing declared command: regression-run exits with its code (1)" "1" "$RC"
 expect_contains "FD-f2 …prints its output" "floor: 3 passed, 1 failed" "$OUT"
 expect_eq "FD-f3 …and writes a second log at the head, opening head= dirty=0 and closing rc=1" "head=$FD_W dirty=0|rc=1" \
-  "$(head -n 1 "$FD_REC/floor-run-$FD_W-2.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/floor-run-$FD_W-2.log" 2>/dev/null)"
+  "$(head -n 1 "$FD_REC/regression-run-$FD_W-2.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/regression-run-$FD_W-2.log" 2>/dev/null)"
 expect_true "FD-f3b …the first log standing" test -f "$FD_LOG"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W-2.log"
-s42_unchanged "FD-f4 …whose log proof-add floor refuses" 1 "$PFD"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W-2.log"
+s42_unchanged "FD-f4 …whose log proof-add regression refuses" 1 "$PFD"
 echo stray > "$FD_MODE"
-poke "$RFD" floor-run
+poke "$RFD" regression-run
 expect_eq "FD-s1 a command that leaves the tree dirtier than it found it is refused (exit 1)" "1" "$RC"
 expect_regex "FD-s2 …naming the regression, the move and that no log was written (wave-30 T23: the word)" \
   'REFUSED — the regression \(.*\) moved the working checkout .* while it ran \(dirty=0 to dirty=1\); no log was written' "$OUT"
-expect_false "FD-s3 …and no third log exists" test -e "$FD_REC/floor-run-$FD_W-3.log"
+expect_false "FD-s3 …and no third log exists" test -e "$FD_REC/regression-run-$FD_W-3.log"
 echo pass > "$FD_MODE"
-poke "$RFD" floor-run
+poke "$RFD" regression-run
 expect_eq "FD-d1 on a dirty tree the floor still runs (exit 0) and its log says so" "0|head=$FD_W dirty=1|rc=0" \
-  "$RC|$(head -n 1 "$FD_REC/floor-run-$FD_W-3.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/floor-run-$FD_W-3.log" 2>/dev/null)"
-expect_contains "FD-d2 …and the verb says proof-add floor refuses it" "the tree was dirty (dirty=1), so proof-add floor refuses this log" "$OUT"
+  "$RC|$(head -n 1 "$FD_REC/regression-run-$FD_W-3.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/regression-run-$FD_W-3.log" 2>/dev/null)"
+expect_contains "FD-d2 …and the verb says proof-add regression refuses it" "the tree was dirty (dirty=1), so proof-add regression refuses this log" "$OUT"
 rm -f "$FD_WT/stray.txt"
 
 # ---------- AC-7.10: floor-attestation: is a removed key, refused by name whatever the record (wave-36 T35) ----------
 # Wave-28 T75 read a person's record (a head=<40-hex> dirty=0 line and a floor-attested-by: line) as the floor under
-# floor-attestation: user. Nothing reads the key now: proof-add floor refuses a config carrying it, naming the key and
+# floor-attestation: user. Nothing reads the key now: proof-add regression refuses a config carrying it, naming the key and
 # what to do, before any record is read, so each record below is refused by that one sentence. FD-t6 is the record
 # the key used to admit; with the key deleted it is still no run log (no rc= line), and is refused as one (FD-t9).
 fd_config "floor-attestation: user"
@@ -2866,61 +2866,61 @@ printf '# floor\nhead=%s dirty=0\nall good\n' "$FD_W" > "$FD_REC/fd-att-noby.md"
 printf '# floor\nhead=%s dirty=0\nfloor-attested-by: Dana yesterday\n' "$FD_W" > "$FD_REC/fd-att-short.md"
 FD_KEY="carries floor-attestation: user, a key bionic removed"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-nohead.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-nohead.md
 s42_unchanged "FD-t1 AC-7.10 an attestation lacking the head line, under the removed key" 1 "$PFD"
 expect_contains "FD-t1b …refused naming the key" "$FD_KEY" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-other.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-other.md
 s42_unchanged "FD-t2 …one naming another head" 1 "$PFD"
 expect_contains "FD-t2b …refused naming the key, before the head is read" "$FD_KEY" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-noby.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-noby.md
 s42_unchanged "FD-t3 …one lacking floor-attested-by:" 1 "$PFD"
 expect_contains "FD-t3b …refused naming the key" "$FD_KEY" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-short.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-short.md
 s42_unchanged "FD-t4 …and one whose floor-attested-by: says fewer than three words" 1 "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
-s42_unchanged "FD-t5 …and while the key stands a green floor-run log is refused too" 1 "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
+s42_unchanged "FD-t5 …and while the key stands a green regression-run log is refused too" 1 "$PFD"
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-t6 AC-7.10 the record the key admitted until wave-36 T35 (both lines, the working head)" 1 "$PFD"
 expect_contains "FD-t7 …refused by the key's sentence, saying what to do" \
-  "Delete the line, then cite the regression's log with proof-add floor" "$OUT"
+  "Delete the line, then cite the regression's log with proof-add regression" "$OUT"
 fd_config "floor-attestation: yes"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-t8 floor-attestation: yes is refused, any value" 1 "$PFD"
 expect_contains "FD-t8b …naming the key and its value" "carries floor-attestation: yes, a key bionic removed" "$OUT"
 fd_config "release-check: true"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-t9 …and with the key deleted the record is no run log: refused" 1 "$PFD"
 expect_contains "FD-t9b …as a log that does not say how its run ended" "fd-att.md does not end with an rc=<n> line" "$OUT"
 
-# ---------- both keys: the removed one is refused first; neither key: the floor-run log keeps no privilege ----------
-fd_config "floor: bash $FD_STUB --all" "floor-attestation: user"
+# ---------- both keys: the removed one is refused first; neither key: the regression-run log keeps no privilege ----------
+fd_config "regression-command: bash $FD_STUB --all" "floor-attestation: user"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
 s42_unchanged "FD-b1 with both keys the declared floor's green log is refused (inverted by wave-36 T35)" 1 "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-b2 …and so is the attestation" 1 "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-red.log
 expect_eq "FD-b3 …and a red declared log" "1" "$RC"
 expect_contains "FD-b3b …each by the key's sentence, before any log is read" "$FD_KEY" "$OUT"
 FD_RUNS_WAS="$(fd_runs)"
-poke "$RFD" floor-run
-expect_eq "FD-b4 …and floor-run refuses with both keys, the declared command not run (exit 1)" "1|$FD_RUNS_WAS" "$RC|$(fd_runs)"
+poke "$RFD" regression-run
+expect_eq "FD-b4 …and regression-run refuses with both keys, the declared command not run (exit 1)" "1|$FD_RUNS_WAS" "$RC|$(fd_runs)"
 expect_contains "FD-b4b …naming the key" "$FD_KEY" "$OUT"
 fd_config "release-check: true"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
-expect_eq "FD-c1 AC-7.10 with neither key the floor-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
+expect_eq "FD-c1 AC-7.10 with neither key the regression-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
 expect_regex "FD-c1b …the proof line naming it at the working head" \
-  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
+  "^proved: kind=regression head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/regression-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, with no closing rc= line, is refused" 1 "$PFD"
 expect_contains "FD-c2b …by its close, no roster counted (was '3 passed of 0 suites')" "fd-runner.log does not end with an rc=<n> line" "$OUT"
 
 # ---------- the mutants: doctored copies of the judge, never the tracked file ----------
 FD_MUT="$(mktemp -d "$TMPROOT/fd-mut.XXXXXX")"
-fd_config "floor: bash $FD_STUB --all"
+fd_config "regression-command: bash $FD_STUB --all"
 expect_eq "FD-m0 the judge itself, positive: the green declared log attests the working head" "0|$FD_W" "$(fd_attest "$S46_LIB" "$FD_LOG")"
 expect_eq "FD-m0b …a red one is refused" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-red.log" | cut -d'|' -f1)"
 expect_eq "FD-m0c …and an attestation record is refused (no rc= line)" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-att.md" | cut -d'|' -f1)"
@@ -2938,7 +2938,7 @@ for _fdm in no-key no-rc; do
 done
 expect_eq "FD-m1 the removed key's refusal dropped: the mutant admits the green log under floor-attestation:, so FD-t5 goes red under it" \
   "0|$FD_W" "$(fd_attest "$FD_MUT/no-key.sh" "$FD_LOG")"
-fd_config "floor: bash $FD_STUB --all"
+fd_config "regression-command: bash $FD_STUB --all"
 expect_eq "FD-m2 the rc test dropped: the mutant admits the rc=1 log, so FD-r3 goes red under it" "0|$FD_W" "$(fd_attest "$FD_MUT/no-rc.sh" "$FD_REC/fd-red.log")"
 rm -rf "$FD_MUT"
 POKE_BOUND="$FD_BOUND_WAS"
@@ -2948,14 +2948,14 @@ POKE_BOUND="$FD_BOUND_WAS"
 section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirty=0 and ends rc=0, one or several on a line, with no roster and no key (wave-36 T35; REQ-7 AC-7.10; D13; the synth-vision filing)"
 # ============================================================
 #
-# THE ONE GRAMMAR (lib/proof.sh `_proof_floor_log`, what `proof-add floor` runs on each log it is handed):
+# THE ONE GRAMMAR (lib/proof.sh `_proof_floor_log`, what `proof-add regression` runs on each log it is handed):
 #   header  the log's first line that opens `head=`, read as `head=<40-hex> dirty=<n>`, <n> 0; lines before it (a
 #           runner's preamble) are not read. Its head is the working head, or an ancestor `_proof_floor_walk` proves
 #           every later commit from.
 #   close   the log's last non-blank line, `rc=<n>`; rc=0 is a pass. A red run is refused naming its rc, unless the
 #           runner's own Failed: block names its reds: then it is ADR-054's red candidate (§FLOOR-OWED, evidence gate).
 # Nothing between the two lines is read: no tests/*.test.sh roster is counted, no Gating: verdict is asked for, and no
-# .bionic/config.yaml key is needed. `proof-add floor <log> <log>…` reads every log, each held to the grammar, and the
+# .bionic/config.yaml key is needed. `proof-add regression <log> <log>…` reads every log, each held to the grammar, and the
 # proof names the head they share, its evidence= the logs comma-joined. `floor-attestation:` is a removed key, refused
 # by name. Fails when: the hand-run log is refused as not a tests/run.sh log, or `current 8` says the floor is absent.
 #
@@ -2964,7 +2964,7 @@ section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirt
 # then H, an empty commit (the working head; A is its ancestor with no change since, so a log at A stands for H). Every
 # other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written as a
 # project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp. Each log
-# that is to be accepted is written by tests/lib/floor-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
+# that is to be accepted is written by tests/lib/regression-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
 # the machine recorded no run of is refused (§RUNLINE); the grammar's refusals below are read before any run line.
 FA_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 FA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
@@ -2991,21 +2991,21 @@ fa_fact() {  # <question> <scope> -> a passing reading of <question> planted at 
 }
 fa_cur() { sed "s/^current: .*/current: $1/" "$PFA" > "$PFA.tmp" && mv "$PFA.tmp" "$PFA"; }
 fa_now() { sed -n 's/^current: //p' "$PFA"; }
-fa_add() { s42_snap "$RFA" "$PFA"; poke "$RFA" proof-add floor "$@"; }  # <log>... -> proof-add floor, the plan snapshotted first
-fa_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFA" | tail -n 1; }
+fa_add() { s42_snap "$RFA" "$PFA"; poke "$RFA" proof-add regression "$@"; }  # <log>... -> proof-add regression, the plan snapshotted first
+fa_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFA" | tail -n 1; }
 fa_keys() {  # -> "<floor:>|<floor-attestation:>", read by the product's config reader
   bash -c '. "$1"; printf "%s|%s" "$(config_value "$2" floor "")" "$(config_value "$2" floor-attestation "")"' _ "$FA_ROOTS" "$RFA" 2>/dev/null
 }
 fa_fact evidence piece; fa_fact structure piece; fa_fact structure whole; fa_fact adversarial piece; fa_fact adversarial whole
 # The logs, as a project's own runner leaves them: `{ echo "head=… dirty=…"; pnpm ci:local; echo "rc=$?"; } > <log>`.
-printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
-printf '$ npx playwright test\n38 passed (2.1m)\n' | floor_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
+printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
+printf '$ npx playwright test\n38 passed (2.1m)\n' | regression_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
 printf 'head=%s dirty=0\n$ npx playwright test\n36 passed, 2 failed (2.3m)\nrc=1\n' "$FA_H" > "$FA_REC/e2e-red.log"
 printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\n' "$FA_H" > "$FA_REC/ci-open.log"
 printf 'head=%s dirty=3\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci-dirty.log"
-printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
+printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
 printf 'Roots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\n' \
-  | floor_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
+  | regression_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
     "$PFA" "$FA_REC/run-sh.log" "$FA_H" 0 0
 
 expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H one commit past A that changes no file" \
@@ -3014,16 +3014,16 @@ expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H 
 expect_eq "FA-0b precondition: the working head holds no tests/ directory at all" "0" \
   "$(git -C "$FA_WT" ls-tree --name-only "$FA_H" tests 2>/dev/null | wc -l | tr -d ' ')"
 FA_CFG_WAS="$(cat "$FA_CFG" 2>/dev/null)"
-printf 'floor: x\nfloor-attestation: y\n' >> "$FA_CFG"
+printf 'regression-command: x\nfloor-attestation: y\n' >> "$FA_CFG"
 expect_eq "FA-0c precondition: the config reader reads both keys when a config carries them (positive)" "x|y" "$(fa_keys)"
 if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -f "$FA_CFG"; fi
 expect_eq "FA-0d precondition: …and this project's config carries neither" "|" "$(fa_keys)"
 expect_eq "FA-0e precondition: the plan carries the five readings at H and no floor proof" "5|0" \
-  "$(/usr/bin/grep -c "^proved: kind=review head=$FA_H " "$PFA" | tr -d ' ')|$(/usr/bin/grep -c '^proved: kind=floor ' "$PFA" | tr -d ' ')"
+  "$(/usr/bin/grep -c "^proved: kind=review head=$FA_H " "$PFA" | tr -d ' ')|$(/usr/bin/grep -c '^proved: kind=regression ' "$PFA" | tr -d ' ')"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-0f control: every other fact planted at H and no floor proof: current 8 is refused (exit 1), the plan at 7" "1|7" "$RC|$(fa_now)"
-expect_contains "FA-0g …naming the absent floor, and nothing else, as the fact it lacks" "$(printf '(facts_state):\nfloor\tabsent\npoker: ')" "$OUT"
+expect_contains "FA-0g …naming the absent floor, and nothing else, as the fact it lacks" "$(printf '(facts_state):\nregression\tabsent\npoker: ')" "$OUT"
 fa_cur 4
 
 # ---------- refused: each log by the line it lacks ----------
@@ -3045,11 +3045,11 @@ expect_contains "FA-r5b …refused naming each log and the head it read" \
   "the logs read different heads: record/wave-01-fixture/ci.log read ${FA_H:0:12}, record/wave-01-fixture/ci-at-a.log read ${FA_A:0:12}" "$OUT"
 printf 'floor-attestation: user\n' >> "$FA_CFG"
 fa_add record/wave-01-fixture/ci.log
-s42_unchanged "FA-r6 AC-7.10 floor-attestation: user in the config: proof-add floor of a green log" 1 "$PFA"
+s42_unchanged "FA-r6 AC-7.10 floor-attestation: user in the config: proof-add regression of a green log" 1 "$PFA"
 expect_contains "FA-r6b …refused naming the removed key" "carries floor-attestation: user, a key bionic removed" "$OUT"
-expect_contains "FA-r6c …and what to do" "Delete the line, then cite the regression's log with proof-add floor" "$OUT"
-poke "$RFA" floor-run
-expect_eq "FA-r7 …and floor-run refuses it too (exit 1)" "1" "$RC"
+expect_contains "FA-r6c …and what to do" "Delete the line, then cite the regression's log with proof-add regression" "$OUT"
+poke "$RFA" regression-run
+expect_eq "FA-r7 …and regression-run refuses it too (exit 1)" "1" "$RC"
 expect_contains "FA-r7b …naming the key before it looks for a command" "carries floor-attestation: user, a key bionic removed" "$OUT"
 expect_contains "FA-r7c …and saying nothing was run" "Nothing was run." "$OUT"
 if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -f "$FA_CFG"; fi
@@ -3058,21 +3058,21 @@ if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -
 fa_add record/wave-01-fixture/run-sh.log
 expect_eq "FA-a1 AC-7.10 a tests/run.sh log (its preamble before the stamp, its Gating: verdict between) is still accepted, no roster counted (exit 0)" "0" "$RC"
 expect_regex "FA-a1b …the proof line naming it at H" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci-at-a.log
 expect_eq "FA-a2 a hand-run log at A, an ancestor with no change since, is accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a2b …the proof naming A, the head the run read" \
-  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci.log record/wave-01-fixture/e2e.log
 expect_eq "FA-a3 AC-7.10 two logs on one line, both green at H: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a3b …one proof line naming the head they share and both logs" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
 expect_contains "FA-a3c …and the verb says so" \
-  "proof-add — kind=floor head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
+  "proof-add — kind=regression head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
 fa_add record/wave-01-fixture/ci.log
 expect_eq "FA-a4 AC-7.10 the hand-run log alone, no roster and no key: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a4b …the proof line naming it at H, nothing owed" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-c1 AC-7.10 current 8 passes on that proof (exit 0, the plan at 8)" "0|8" "$RC|$(fa_now)"
@@ -3796,7 +3796,7 @@ HO_LANDED="1111111111111111111111111111111111111111"
 HO_LANDED2="2222222222222222222222222222222222222222"
 awk -v l1="$HO_LANDED" -v l2="$HO_LANDED2" -v w="$HO_WORK" '
   NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next }
-  /^approved-by:/ { print; print "proved: kind=floor head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"
+  /^approved-by:/ { print; print "proved: kind=regression head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"
                     print "proved: kind=review head=" w " at=2026-10-08T12:30:00Z evidence=record/last-review.md"; next }
   /^- T5: pending dispatch/ { print "- T4: landed " l2 " 2026-10-08T10:30:00Z"; print "- T3: landed " l1 " 2026-10-08T09:00:00Z"; print; next }
   /^\| T2 \| 4 \| build \|/ { sub(/\| implementor \|/, "| w-T2 |"); print; print "| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | abc1234 | active |"
@@ -4969,7 +4969,7 @@ ih_log() {  # <file> <passed> <failed> <red suite>... -> a whole-run log at F in
   { printf 'head=%s dirty=0\n' "$IH_F"; printf 'Gating: %s passed, %s failed\nFailed:\n' "$p" "$m"
     for x in "$@"; do printf '    - %s\n' "$x"; done; } > "$f"
 }
-ih_prove() {  # <log file> -> a floor proof at F as proof-add floor writes it (its reds from the log), committed
+ih_prove() {  # <log file> -> a floor proof at F as proof-add regression writes it (its reds from the log), committed
   bash -c '. "$1" && proof_add_line "$2" "$(proof_floor_line "$3" 2026-10-12T04:00:00Z "record/wave-01-fixture/$4" "$(proof_floor_owed "$5/$4")")"' \
     _ "$S46_LIB" "$PIH" "$IH_F" "$1" "$IH_REC" > "$PIH.n" && mv "$PIH.n" "$PIH"
   s42_snap "$RIH" "$PIH"
@@ -5033,7 +5033,7 @@ C7_B="$(git -C "$R7" rev-parse HEAD)"
 C7_C="$(s57_commit "$R7" lib/x.sh 'C: a code change after the floor')"
 P7="$R7/.bionic/docs/plans/wave-x.plan.md"
 c7_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$C7_LIB" "$@"; }
-c7_floor() {  # <head> [<owed>] -> a floor proof at <head>, as proof-add floor writes it
+c7_floor() {  # <head> [<owed>] -> a floor proof at <head>, as proof-add regression writes it
   bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w35/floor.log "${3:-}"' _ "$C7_LIB" "$1" "${2:-}"
 }
 c7_reads() {  # <head> -> the five readings a double wave plan is dealt, each passing, at <head>
@@ -5063,7 +5063,7 @@ c7_plan() {  # <current> <working-branch> <proof lines> -> P7, bound to this ses
 }
 c7_judge() {  # -> the floor line facts_state prints for P7 at the head the working branch names
   bash -c '. "$1/run.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$C7_LIB" "$P7" "$(git -C "$R7" rev-parse --verify -q wave/01-fixture)" 2>/dev/null \
-    | awk -F'\t' '$1 == "floor"'
+    | awk -F'\t' '$1 == "regression"'
 }
 c7_unchanged() {  # <label> -> refused (exit 1) and the plan byte for byte as it was
   expect_eq "$1 — refused (exit 1)" "1" "$RC"
@@ -5075,7 +5075,7 @@ c7_plan 6 wave/01-fixture "$(c7_floor "$C7_C" a.test.sh)
 $(c7_reads "$C7_C")"
 C7_OWED="$(c7_judge)"
 expect_eq "C7-0 precondition: the judge reads the floor owed, naming a.test.sh (its line, from the library)" \
-  "$(printf 'floor\towed\ta.test.sh')" "$C7_OWED"
+  "$(printf 'regression\towed\ta.test.sh')" "$C7_OWED"
 poke "$R7" current 7
 c7_unchanged "C7-1 AC-1.2 current 7 with a.test.sh owed by the floor's whole run"
 expect_contains "C7-1b …in the judge's words, naming the owed suite" "$C7_OWED" "$OUT"
@@ -5094,7 +5094,7 @@ expect_contains "C7-3b …in the judge's words, naming the range and the commit 
 # ---------- the floor at the head: current 7 advances ----------
 c7_plan 6 wave/01-fixture "$(c7_floor "$C7_C")
 $(c7_reads "$C7_C")"
-expect_eq "C7-4 precondition: the floor at the head reads covered" "$(printf 'floor\tcovered')" "$(c7_judge)"
+expect_eq "C7-4 precondition: the floor at the head reads covered" "$(printf 'regression\tcovered')" "$(c7_judge)"
 poke "$R7" current 7
 expect_eq "C7-5 AC-1.2 the floor and every reading at the head: current 7 is admitted (exit 0), the plan at current: 7" \
   "0|7" "$RC|$(sed -n 's/^current: //p' "$P7")"
@@ -5174,12 +5174,12 @@ expect_absent "TR-2b …and never waits on a checkout of the branch" "no checkou
 POKE_BOUND="$TR_BOUND_WAS"
 
 # ============================================================
-section "§FLOOR-RUN: floor-run with no floor: runs the project's tests/run.sh at the working head, held to the full-run rules, and logs a run proof-add floor accepts, red or green (wave-35 T10; REQ-1 AC-1.8; D10)"
+section "§FLOOR-RUN: regression-run with no floor: runs the project's tests/run.sh at the working head, held to the full-run rules, and logs a run proof-add regression accepts, red or green (wave-35 T10; REQ-1 AC-1.8; D10)"
 # ============================================================
-# A project whose regression is tests/run.sh had no verb to run it: `floor-run` refused with no `floor:` key and the
+# A project whose regression is tests/run.sh had no verb to run it: `regression-run` refused with no `floor:` key and the
 # whole run was a dispatch only. It now runs `tests/run.sh` in the working branch's checkout, through the gate the
-# runner asks as kind whole, and writes `record/<wave>/floor-run-<head>.log` opening `head= dirty= rc=`, whose
-# runner output `proof-add floor` judges: a red whole run is the floor's candidate, its reds owed (T9). It is the
+# runner asks as kind whole, and writes `record/<wave>/regression-run-<head>.log` opening `head= dirty= rc=`, whose
+# runner output `proof-add regression` judges: a red whole run is the floor's candidate, its reds owed (T9). It is the
 # one path a live runner is given the whole run by, so it is held to the full-run rules the dispatch wall applies:
 # `regression: no` refuses it, an open build row that writes the head refuses it, a proved head refuses it, and a
 # second whole run needs the user's `approve regression-2`.
@@ -5187,10 +5187,10 @@ section "§FLOOR-RUN: floor-run with no floor: runs the project's tests/run.sh a
 # (`head=<sha> dirty=<n>`, `Gating: <p> passed, <m> failed`, a `Failed:` block) that records where it ran, two
 # suites at the head, one of them red while a mode file says so; s42_plan's plan bound to this session, its build
 # rows landed, its working branch a linked worktree one commit ahead. No .bionic/config.yaml key names a floor.
-# fails-when: floor-run refuses a project whose regression is tests/run.sh; its log is refused by proof-add floor;
+# fails-when: regression-run refuses a project whose regression is tests/run.sh; its log is refused by proof-add regression;
 # a second whole run, a proved head, an open writer or regression: no runs the suite.
 FN_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RFN="$(make_repo floor-run-tests)"; ( cd "$RFN" && git commit -q --allow-empty -m init )
+RFN="$(make_repo regression-run-tests)"; ( cd "$RFN" && git commit -q --allow-empty -m init )
 FN_SEEN="$TMPROOT/fn-seen"; FN_MODE="$TMPROOT/fn-mode"; echo red > "$FN_MODE"
 mkdir -p "$RFN/tests"
 cat > "$RFN/tests/run.sh" <<FN_EOF
@@ -5220,7 +5220,7 @@ FN_WT="$RFN/.worktrees/01-fixture"
 FN_W="$(git -C "$FN_WT" rev-parse HEAD 2>/dev/null)"
 FN_REC="$RFN/.bionic/docs/record/wave-01-fixture"
 fn_runs() { [ -f "$FN_SEEN" ] && awk 'END { print NR + 0 }' "$FN_SEEN" || echo 0; }
-fn_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFN" | tail -n 1; }
+fn_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFN" | tail -n 1; }
 fn_set() {  # <awk program> -> the plan rewritten by it in place, then committed
   awk "$1" "$PFN" > "$PFN.tmp" && mv "$PFN.tmp" "$PFN"; s42_snap "$RFN" "$PFN"
 }
@@ -5232,17 +5232,17 @@ expect_eq "FN-0c precondition: the plan's build rows are landed (nothing the reg
   "$(bash -c '. "$1/run.sh" && . "$1/units.sh" && units_floor_holds "$2" ""' _ "$C7_LIB" "$PFN" 2>/dev/null)"
 
 # ---------- a dirty checkout: refused before anything runs, naming the paths; no log, no proof, no spent run (wave-35 T32; D20) ----------
-# The log a dirty run wrote counted as the first whole run (rule 4) and proof-add floor refuses it, so the re-run its
+# The log a dirty run wrote counted as the first whole run (rule 4) and proof-add regression refuses it, so the re-run its
 # own message asked for was refused as a second whole run. The dirty tree is now read before the run starts.
-# fails-when: a dirty checkout runs the suite, writes a floor-run log, or moves the plan; the refusal omits the paths,
+# fails-when: a dirty checkout runs the suite, writes a regression-run log, or moves the plan; the refusal omits the paths,
 # the count or the remedy; a clean checkout is refused (FN-1 is the positive on the same checkout).
 for FN_I in 1 2 3 4 5 6 7; do printf 'x\n' > "$FN_WT/stray$FN_I.txt"; done
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-expect_eq "FN-D1 a dirty checkout: floor-run is refused (exit 1)" "1" "$RC"
+poke "$RFN" regression-run
+expect_eq "FN-D1 a dirty checkout: regression-run is refused (exit 1)" "1" "$RC"
 s42_unchanged "FN-D1b …and the plan's proof ledger is unchanged" 1 "$PFN"
-expect_eq "FN-D1c …nothing ran, and no floor-run log of any name was written" "0|0" \
-  "$(fn_runs)|$(ls "$FN_REC"/floor-run-*.log 2>/dev/null | awk 'END { print NR + 0 }')"
+expect_eq "FN-D1c …nothing ran, and no regression-run log of any name was written" "0|0" \
+  "$(fn_runs)|$(ls "$FN_REC"/regression-run-*.log 2>/dev/null | awk 'END { print NR + 0 }')"
 expect_contains "FN-D1d …the refusal names the dirty checkout" "is dirty" "$OUT"
 expect_contains "FN-D1e …names the first five paths" "stray1.txt, ?? stray2.txt, ?? stray3.txt, ?? stray4.txt, ?? stray5.txt" "$OUT"
 expect_absent "FN-D1f …and not the sixth (FN-D1e is the positive, same output)" "stray6.txt" "$OUT"
@@ -5254,62 +5254,62 @@ expect_eq "FN-D0 the checkout is clean again (the first whole run below is spent
 
 # ---------- the first whole run, red: run, logged, recorded with its red owed ----------
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-FN_LOG="$FN_REC/floor-run-$FN_W.log"
-expect_eq "FN-1 AC-1.8 floor-run with no floor: runs tests/run.sh once, in the working branch's checkout" \
+poke "$RFN" regression-run
+FN_LOG="$FN_REC/regression-run-$FN_W.log"
+expect_eq "FN-1 AC-1.8 regression-run with no floor: runs tests/run.sh once, in the working branch's checkout" \
   "1|cwd=$(cd "$FN_WT" && pwd -P) args=" "$(fn_runs)|$(tail -n 1 "$FN_SEEN" 2>/dev/null)"
 expect_eq "FN-1b …and exits with the run's own code (1: b.test.sh red)" "1" "$RC"
 expect_eq "FN-1c …its log opens head=<working head> dirty=0, then command: tests/run.sh, and closes rc=1 (wave-36 T35: the one grammar)" \
   "head=$FN_W dirty=0|command: tests/run.sh|rc=1" "$(head -n 2 "$FN_LOG" 2>/dev/null | paste -sd'|' -)|$(tail -n 1 "$FN_LOG" 2>/dev/null)"
 expect_contains "FN-1d …and carries the runner's own report" "Gating: 1 passed, 1 failed" "$(cat "$FN_LOG" 2>/dev/null)"
-expect_contains "FN-1e …and the verb prints the proof-add floor line to run, red as it is" \
-  "proof-add floor record/wave-01-fixture/floor-run-$FN_W.log" "$OUT"
+expect_contains "FN-1e …and the verb prints the proof-add regression line to run, red as it is" \
+  "proof-add regression record/wave-01-fixture/regression-run-$FN_W.log" "$OUT"
 expect_true "FN-1f …and the plan is byte-identical: the verb runs and logs, and writes no proof (cmp)" cmp -s "$TMPROOT/s42-before" "$PFN"
-poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W.log"
-expect_eq "FN-2 AC-1.8 proof-add floor accepts floor-run's log of a red whole run (exit 0)" "0" "$RC"
+poke "$RFN" proof-add regression "record/wave-01-fixture/regression-run-$FN_W.log"
+expect_eq "FN-2 AC-1.8 proof-add regression accepts regression-run's log of a red whole run (exit 0)" "0" "$RC"
 expect_regex "FN-2b …and writes the floor proof at the working head, b.test.sh owed" \
-  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
+  "^proved: kind=regression head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/regression-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
 
 # ---------- a second whole run: refused, naming the owed suite and the approval ----------
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-s42_unchanged "FN-3 a second floor-run on the plan, its reds owed" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-3 a second regression-run on the plan, its reds owed" 1 "$PFN"
 expect_contains "FN-3b …refused as a second whole run" "a second whole run" "$OUT"
 expect_contains "FN-3c …naming the suite the first left owed" "b.test.sh" "$OUT"
 expect_contains "FN-3d …and the approval that admits one" "approve regression-2" "$OUT"
-expect_eq "FN-3e …and nothing ran, no second log written" "1|no" "$(fn_runs)|$([ -e "$FN_REC/floor-run-$FN_W-2.log" ] && echo yes || echo no)"
+expect_eq "FN-3e …and nothing ran, no second log written" "1|no" "$(fn_runs)|$([ -e "$FN_REC/regression-run-$FN_W-2.log" ] && echo yes || echo no)"
 
 # ---------- the user's approve regression-2: the second whole run, green, recorded ----------
 fn_set '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana 2026-10-12T00:00:00Z \"yes, run it again\""; d = 1 }'
 echo green > "$FN_MODE"
-poke "$RFN" floor-run
+poke "$RFN" regression-run
 expect_eq "FN-4 with approved: regression-2 the second whole run runs, green (exit 0)" "0|2" "$RC|$(fn_runs)"
 expect_eq "FN-4b …its log the second at the head, opening head= dirty=0 and closing rc=0 (wave-36 T35)" "head=$FN_W dirty=0|rc=0" \
-  "$(head -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)|$(tail -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)"
-poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W-2.log"
-expect_eq "FN-4c AC-1.8 proof-add floor accepts the green run's log, nothing owed" "0|0" \
+  "$(head -n 1 "$FN_REC/regression-run-$FN_W-2.log" 2>/dev/null)|$(tail -n 1 "$FN_REC/regression-run-$FN_W-2.log" 2>/dev/null)"
+poke "$RFN" proof-add regression "record/wave-01-fixture/regression-run-$FN_W-2.log"
+expect_eq "FN-4c AC-1.8 proof-add regression accepts the green run's log, nothing owed" "0|0" \
   "$RC|$(fn_proved | /usr/bin/grep -c ' owed=' | tr -d ' ')"
-expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
+expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/regression-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
 
 # ---------- a proved head: refused, nothing run ----------
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-s42_unchanged "FN-5 floor-run once the floor covers the working head" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-5 regression-run once the floor covers the working head" 1 "$PFN"
 expect_contains "FN-5b …saying the head is already proved" "is already proved" "$OUT"
 expect_eq "FN-5c …and nothing ran" "2" "$(fn_runs)"
 
 # ---------- an open build row that writes the head: refused, naming it ----------
 fn_set '/^\| T2 \| 4 \| build \|/ { $0 = "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | active |" } { print }'
-poke "$RFN" floor-run
-s42_unchanged "FN-6 floor-run while a build row the regression waits on is open" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-6 regression-run while a build row the regression waits on is open" 1 "$PFN"
 expect_contains "FN-6b …naming the row" "T2" "$OUT"
 expect_eq "FN-6c …and nothing ran" "2" "$(fn_runs)"
 fn_set '/^\| T2 \| 4 \| build \|/ { $0 = "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |" } { print }'
 
 # ---------- regression: no: refused, naming the setting ----------
 fn_set 'NR == 1 { print; print "regression: no"; next } { print }'
-poke "$RFN" floor-run
-s42_unchanged "FN-7 floor-run on a plan that declares regression: no" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-7 regression-run on a plan that declares regression: no" 1 "$PFN"
 expect_contains "FN-7b …naming the setting" "regression: no" "$OUT"
 expect_eq "FN-7c …and nothing ran" "2" "$(fn_runs)"
 
@@ -5913,21 +5913,21 @@ expect_eq "LIST-2d a planted key in neither set goes red: it is the one the cens
 rm -f "$LS_PLANT"
 
 # ============================================================
-section "§RUNLINE: a floor proof cites a run the machine recorded: floor-run writes one ev=run line beside its log, and proof-add floor accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
+section "§RUNLINE: a floor proof cites a run the machine recorded: regression-run writes one ev=run line beside its log, and proof-add regression accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
 # ============================================================
 #
-# THE RUN LINE (ADR-057): `floor-run`, right after it writes its log, appends to the plan's landing record
+# THE RUN LINE (ADR-057): `regression-run`, right after it writes its log, appends to the plan's landing record
 #   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
 # and lib/proof.sh `_proof_floor_log` keeps the floor's grammar as its first check, then requires one `ev=run` line
 # naming the log whose head=, rc= and sha256= match the file as it is now. A log no run line names is refused "no run
 # recorded for this log"; a log edited after its run is refused "the log changed since its run"; the accepted proof
 # line ends `run=<at> head=<sha> rc=<n>`, naming the run it read (AC-6.2). booked.test.sh §RUNLINE proves the other
 # writer, booked.sh's run close, parses by the same reader, and carries the mutant (a hash mismatch accepted).
-# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add floor.
+# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add regression.
 #
 # FIXTURE FIDELITY. §FLOOR-DECLARED's shape: s42_plan's bound plan, its working branch in a linked worktree one empty
 # commit past the main checkout, NO tests/ directory, and a declared `floor:` command (a script this section writes)
-# that floor-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
+# that regression-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
 RL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RRL="$(make_repo runline)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
 PRL="$(s42_plan "$RRL" 4)"
@@ -5941,8 +5941,8 @@ RL_REC="$RRL/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RL_REC"
 RL_RECORD="$RL_REC/landing-proofs.log"
 RL_STUB="$TMPROOT/rl-floor.sh"
 printf '#!/bin/bash\necho "floor: 2 passed, 0 failed"\nexit 0\n' > "$RL_STUB"
-printf 'floor: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
-rl_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PRL" | tail -n 1; }
+printf 'regression-command: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+rl_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PRL" | tail -n 1; }
 rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
 rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
 expect_regex "RL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$RL_W"
@@ -5952,37 +5952,37 @@ expect_eq "RL-0b precondition: …its checkout is clean, and the record holds no
 # ---------- AC-6.1: a hand-written log at the real head, rc=0, no run line: refused ----------
 printf 'head=%s dirty=0\n$ make check\nall green\nrc=0\n' "$RL_W" > "$RL_REC/hand.log"
 s42_snap "$RRL" "$PRL"
-poke "$RRL" proof-add floor record/wave-01-fixture/hand.log
+poke "$RRL" proof-add regression record/wave-01-fixture/hand.log
 s42_unchanged "RL-1 AC-6.1 a hand-written log opening head=<the real working head> dirty=0 and ending rc=0, no run recorded" 1 "$PRL"
 expect_contains "RL-1b …refused naming the missing fact" "no run recorded for this log" "$OUT"
 expect_contains "RL-1c …and the log it read" "hand.log" "$OUT"
 
-# ---------- AC-6.1: floor-run writes the log and its run line; proof-add floor accepts it, naming the run ----------
-poke "$RRL" floor-run
-RL_LOG="$RL_REC/floor-run-$RL_W.log"
-expect_eq "RL-2 floor-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
+# ---------- AC-6.1: regression-run writes the log and its run line; proof-add regression accepts it, naming the run ----------
+poke "$RRL" regression-run
+RL_LOG="$RL_REC/regression-run-$RL_W.log"
+expect_eq "RL-2 regression-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
 RL_SHA="$(rl_sha "$RL_LOG")"
 expect_regex "RL-2b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
 expect_eq "RL-3 …and appends exactly one run line to the plan's landing record" "1" "$(rl_runs | awk 'END { print NR + 0 }')"
 expect_regex "RL-3b …in the grammar: the log by its record path, the head, dirty, rc, the log's sha256 and when" \
-  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/floor-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/regression-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
   "$(rl_runs | tail -n 1)"
 RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
 s42_snap "$RRL" "$PRL"
-poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
-expect_eq "RL-4 AC-6.1 proof-add floor accepts the log its run line matches (exit 0)" "0" "$RC"
+poke "$RRL" proof-add regression "record/wave-01-fixture/regression-run-$RL_W.log"
+expect_eq "RL-4 AC-6.1 proof-add regression accepts the log its run line matches (exit 0)" "0" "$RC"
 expect_regex "RL-4b AC-6.2 …and the proof line names the run it read: run=<its at> head=<sha> rc=<n>" \
-  "^proved: kind=floor head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
+  "^proved: kind=regression head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/regression-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
   "$(rl_proved)"
 
 # ---------- AC-6.1: the same log edited after its run: refused on the hash ----------
 sed 's/2 passed/3 passed/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.tmp" "$RL_LOG"
 expect_false "RL-5-pre precondition: the edit changed the log's hash" test "$(rl_sha "$RL_LOG")" = "$RL_SHA"
 s42_snap "$RRL" "$PRL"
-poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
-s42_unchanged "RL-5 AC-6.1 the floor-run log edited after its run" 1 "$PRL"
+poke "$RRL" proof-add regression "record/wave-01-fixture/regression-run-$RL_W.log"
+s42_unchanged "RL-5 AC-6.1 the regression-run log edited after its run" 1 "$PRL"
 expect_contains "RL-5b …refused naming the fact" "the log changed since its run" "$OUT"
-expect_contains "RL-5c …the log, and the hash its run recorded" "floor-run-$RL_W.log" "$OUT"
+expect_contains "RL-5c …the log, and the hash its run recorded" "regression-run-$RL_W.log" "$OUT"
 expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
 
 # ---------- AC-6.2: landing-report lists the floor run among the run's runs ----------
