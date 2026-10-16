@@ -174,21 +174,24 @@ expect_eq "CK-u6 …control: current 7 --check on that plan is admitted (exit 0)
 
 # ---------- the mutant: the judge dropped from the path --check takes ----------
 # A doctored copy of the poker (hooks/ beside scripts/lib, the tree's own library linked in, so the copy's
-# loader finds this tree's library) with every `cur7_judge <N>` call line deleted. It runs, and says
-# "would advance" on the two judge-refused fixtures, so the agreement rows CK-7r and CK-8r go red on it.
+# loader finds this tree's library) with every `cur7_judge <N>` call line replaced by one that only binds the head
+# the judge would have set (`PV_HEAD8`, read by the advance's summary under `set -u`), so the judge is gone and
+# nothing else is. It runs, and says "would advance" on the two judge-refused fixtures, so the agreement rows
+# CK-7r and CK-8r go red on it.
 CK_MUT="$TMPROOT/ck-mutant"; mkdir -p "$CK_MUT/hooks" "$CK_MUT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$CK_MUT/scripts/lib"
 for ck_sib in "$(dirname "$POKER")"/*; do
   [ "$(basename "$ck_sib")" = session-poker.sh ] && continue
   ln -s "$ck_sib" "$CK_MUT/hooks/$(basename "$ck_sib")"
 done
-awk '/^[[:space:]]*cur7_judge [0-9]+[[:space:]]*$/ { n++; next } { print } END { print n + 0 > "/dev/stderr" }' \
+awk '/^[[:space:]]*cur7_judge [0-9]+[[:space:]]*$/ { sub(/cur7_judge [0-9]+/, ": \"${PV_HEAD8:=}\""); n++ } { print } END { print n + 0 > "/dev/stderr" }' \
   "$POKER" > "$CK_MUT/hooks/session-poker.sh" 2> "$TMPROOT/ck-mutant.n"
-expect_eq "CK-mut0 the mutant drops the judge's two call lines, parses, and differs from the poker" "2 0 differs" \
+expect_eq "CK-mut0 the mutant replaces the judge's two call lines, parses, and differs from the poker" "2 0 differs" \
   "$(cat "$TMPROOT/ck-mutant.n") $(bash -n "$CK_MUT/hooks/session-poker.sh" >/dev/null 2>&1; echo "$?") $(cmp -s "$CK_MUT/hooks/session-poker.sh" "$POKER" && echo same || echo differs)"
 CK_REAL_POKER="$POKER"
 ck_plan 6 "$CK_GOOD"
 POKER="$CK_MUT/hooks/session-poker.sh"; poke "$RCK" current 7 --check; POKER="$CK_REAL_POKER"
+[ "$RC" = 0 ] || printf '      the mutant said: %s\n' "$OUT"
 expect_eq "CK-mut1 the mutant runs: current 7 --check on the good fixture still says would advance (exit 0)" \
   "0|poker: current 7 --check: would advance" "$RC|$(printf '%s\n' "$OUT" | head -1)"
 ck_plan 6 "$CK_7R_PROOFS"
