@@ -13977,7 +13977,7 @@ EOF
         [ "$SCHED_FREE_PRE" -lt 0 ] && SCHED_FREE_PRE=0
       fi
       SCHED_LED="$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)"
-      SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"
+      SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"
       if [ -n "$SCHED_LAPSE" ]; then
         IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_LAPSE"
         SCHED_LAPSE_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=$(_fill_current_field "$SCHED_PLAN" | tr '|' ' ')|state=lapsed"
@@ -13989,7 +13989,7 @@ EOF
           say "fill-declined lapsed — room=${SCHED_GATE_ROOM}, ${SCHED_FREE_PRE} writer slot(s) free; ${SCHED_SD_IDS// /,} asked again, but the ledger ${SCHED_LED:-has no path} could not be written, so the lapse is not recorded"
         fi
       fi
-      SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"
+      SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"
       SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
       if [ -n "$SCHED_SD" ]; then
         IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"

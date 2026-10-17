@@ -118,6 +118,11 @@
 # scheduled, which is a fault, while a table missing `worktree` is a table nobody dispatched
 # into trees.
 #
+# `suites` AND `lands-on` ARE TWO MORE OPTIONAL COLUMNS (wave-38 T19; REQ-11 AC-11.3; L7), known to the contract
+# and not carried in the record: `units_has_column` answers yes for a header that has one, `task-set` writes it,
+# and `brief` renders a review row's `Suites:` and `Lands-on:` from the cell, the role's defaults standing when
+# the cell is `—` or the column absent. A table without them is valid and `units_validate` names nothing missing.
+#
 # THE RECORD IS ALWAYS THIRTEEN FIELDS WIDE (`worktree`, `base` and, since wave-26 T2, `reads`
 # are the three optional slots) even when a column is absent, because a record
 # whose width depended on the table's shape would put every caller back to counting cells.
@@ -165,7 +170,11 @@ _units_read() {
       disp[5] = "agent"; disp[6] = "deps";   disp[7] = "size";   disp[8] = "serves"
       disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"; disp[12] = "base"
       disp[13] = "reads"
-      for (k = 1; k <= 13; k++) want[k] = tolower(disp[k])
+      # SLOTS 14 AND 15 ARE KNOWN, NOT CARRIED (wave-38 T19; REQ-11 AC-11.3; L7): `suites` and `lands-on` are optional
+      # columns the control line names when the header has them, so `units_has_column` and `task-set` know them, and
+      # `brief` reads their cells by header name (`poker_brief_cell`). The record stays thirteen fields wide.
+      disp[14] = "suites"; disp[15] = "lands-on"
+      for (k = 1; k <= 15; k++) want[k] = tolower(disp[k])
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
 
@@ -191,7 +200,7 @@ _units_read() {
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
-        for (k = 1; k <= 13; k++) if (t == want[k] && col[k] == 0) col[k] = i
+        for (k = 1; k <= 15; k++) if (t == want[k] && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -238,7 +247,7 @@ _units_read() {
       # from "no row names this tree" to `units_rows` alone (wave-16 REQ-3, AC-3.2).
       # NO APOSTROPHE ON ANY LINE INSIDE THIS awk PROGRAM: it is single-quoted, and one
       # would close the quote and hand the rest of the parser to bash.
-      for (k = 1; k <= 13; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
+      for (k = 1; k <= 15; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
       # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …>
       # · <columns present>. `units_rows` drops this line whole, so no caller outside this
       # file sees it; `units_validate` reads fields 2-3 and `units_has_column` field 4.

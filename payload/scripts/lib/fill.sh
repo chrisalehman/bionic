@@ -553,19 +553,39 @@ fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the nam
 # Prints `<at>US<reason>US<ids, space-joined>` (US = \037), or nothing when no decline stands.
 FILL_STANDING_WINDOW=2000
 
-# fill_decline_holds <room> <free writer slots> -> 0 when a decline still stands, 1 when room has appeared
-# Room is `yes` and at least one slot is free: the only lapse. Anything unknown (no operand, a word that is
-# no count) is no evidence of room, so the decline stands.
+# fill_decline_holds <room> <free writer slots> [<declined-on row> <plan>] -> 0 when a decline still stands, 1 when
+# room has appeared. Room is `yes` and at least one slot is free: the only lapse. Anything unknown (no operand, a
+# word that is no count) is no evidence of room, so the decline stands.
+#
+# A DECLINE `--on <row>` HOLDS UNTIL THAT ROW LANDS (wave-38 T19; REQ-11 AC-11.1; L5). Room is no reason to ask
+# for a row that waits on another row: wave 37 declined T14-T21 `--on T4`, and the tick kept the decline standing
+# only by hand-hold, because a decline lapses when room appears. With a <declined-on row> (the standing line's
+# `declined-on=`, `-` when it names none) and the <plan> to read it in, the decline holds while that row's
+# `## Tasks` status is not `landed`, whatever room shows. A row the table does not carry waits on nothing the
+# tick can judge, so it holds nothing. No <plan>, or a table that cannot be read, is no evidence either way: the
+# decline lapses on room alone, as it did.
 fill_decline_holds() {
   case "${2:-}" in ''|*[!0-9]*) return 0 ;; esac
-  [ "${1:-}" = yes ] && [ "$2" -ge 1 ] && return 1
+  [ "${1:-}" = yes ] && [ "$2" -ge 1 ] || return 0
+  _fill_decline_row_open "${4:-}" "${3:-}" && return 0
+  return 1
+}
+
+# _fill_decline_row_open <plan> <row> -> 0 when <row> is a row of the plan's table whose status is not `landed`
+_fill_decline_row_open() {
+  local plan="${1:-}" row="${2:-}" st
+  case "$row" in ''|-) return 1 ;; esac
+  [ -n "$plan" ] && [ -f "$plan" ] || return 1
+  st="$(units_rows "$plan" 2>/dev/null | awk -F'\t' -v id="$row" '$1 == id { print $10; f = 1; exit } END { if (!f) print "\037absent" }')"
+  case "$st" in ''|landed|$'\037'absent) return 1 ;; esac
   return 0
 }
 
-# _fill_decline_ledger <ledger path> <session id> -> the decline the ledger alone leaves standing (the
-# reader's body; the two callers below add the room rule)
+# _fill_decline_ledger <ledger path> <session id> [on] -> the decline the ledger alone leaves standing (the
+# reader's body; the two callers below add the room rule). With `on` it prints that decline's `declined-on=`
+# (`-` or nothing when it names no row) instead, from the same read of the same line.
 _fill_decline_ledger() {
-  local led="${1:-}" sid="${2:-}" line at st_cur ready launched reason lifted id ids=""
+  local led="${1:-}" sid="${2:-}" line at st_cur ready launched reason on lifted id ids=""
   [ -n "$led" ] && [ -n "$sid" ] && [ -f "$led" ] && [ ! -L "$led" ] || return 0
   line="$(tail -n "$FILL_STANDING_WINDOW" "$led" 2>/dev/null | awk -v sid="$sid" '
     function kv(line, key,   i, n, parts) {
@@ -576,7 +596,7 @@ _fill_decline_ledger() {
     index($0, "fill-ledger/v1|") != 1 || kv($0, "session") != sid { next }
     kv($0, "declined") ~ /[[:alnum:]]/ {
       lastat = kv($0, "at")
-      last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
+      last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined") "\037" kv($0, "declined-on")
       lifted = ""
       next
     }
@@ -584,7 +604,8 @@ _fill_decline_ledger() {
     kv($0, "state") == "lapsed" && last != "" && kv($0, "lapsed-at") == lastat { last = ""; lifted = "" }
     END { if (last != "") print last "\037" lifted }')"
   [ -n "$line" ] || return 0
-  IFS=$'\037' read -r at st_cur ready launched reason lifted <<< "$line"
+  IFS=$'\037' read -r at st_cur ready launched reason on lifted <<< "$line"
+  if [ "${3:-}" = on ]; then printf '%s\n' "$on"; return 0; fi
   for id in ${ready//,/ }; do
     fill_row_launched "$id" "$launched" && continue
     case ",$lifted," in *",$id,"*) continue ;; esac
@@ -594,21 +615,28 @@ _fill_decline_ledger() {
   printf '%s\037%s\037%s\n' "$at" "$reason" "$ids"
 }
 
-fill_standing_decline() {  # <ledger path> <session id> <current: as read now> [<room: yes|no> <free writer slots>]
+# _fill_decline_on_if_room <ledger> <sid> <current> <room> <free> -> the standing decline's `declined-on=` when room
+# is shown (the only reading that asks it), else nothing: the stop wall, which passes no room, reads nothing more.
+_fill_decline_on_if_room() {
+  [ "${4:-}" = yes ] || return 0
+  _fill_decline_ledger "${1:-}" "${2:-}" on
+}
+
+fill_standing_decline() {  # <ledger path> <session id> <current: as read now> [<room: yes|no> <free writer slots> [<plan>]]
   local out
   out="$(_fill_decline_ledger "${1:-}" "${2:-}")"
   [ -n "$out" ] || return 0
-  fill_decline_holds "${4:-}" "${5:-}" || return 0
+  fill_decline_holds "${4:-}" "${5:-}" "$(_fill_decline_on_if_room "$@")" "${6:-}" || return 0
   printf '%s\n' "$out"
 }
 
-# fill_decline_lapsing <ledger path> <session id> <current> <room> <free writer slots>
+# fill_decline_lapsing <ledger path> <session id> <current> <room> <free writer slots> [<plan>]
 #   -> the decline room has just ended, in the reader's own shape (`<at>US<reason>US<ids>`), or nothing
 fill_decline_lapsing() {
   local out
   out="$(_fill_decline_ledger "${1:-}" "${2:-}")"
   [ -n "$out" ] || return 0
-  fill_decline_holds "${4:-}" "${5:-}" && return 0
+  fill_decline_holds "${4:-}" "${5:-}" "$(_fill_decline_on_if_room "$@")" "${6:-}" && return 0
   printf '%s\n' "$out"
 }
 
