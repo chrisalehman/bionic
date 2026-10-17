@@ -437,7 +437,8 @@ poke "$RCK" tick
 expect_contains "ET-3 with no open integrate row the tick still answers" "poker:" "$OUT"
 expect_absent "ET-3b …and says no CARD-EARLY, the red check notwithstanding" "CARD-EARLY" "$OUT"
 POKE_BOUND="$ET_BOUND_WAS"
-=======
+
+# ============================================================
 section "§ORDER: the tick orders dispatch — FILL offers the longest remaining chain first, the gate line prints the width the gate answers each open landing, and SPLIT is a decision line only while width idles (wave-38 T7; REQ-6 AC-6.5; D22)"
 # ============================================================
 # D22: "the tick offers ready rows longest remaining chain first, and offers a `task-split` as a decision with its
