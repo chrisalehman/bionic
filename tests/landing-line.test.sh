@@ -508,8 +508,8 @@ if [ -n "${LL_MUTANT:-}" ]; then eval "$(declare -f "$LL_MUTANT_FN" | sed "$LL_M
 tree="$(git rev-parse --show-toplevel)"
 line_ready "$tree" "$(worktree_root "$tree")" "$(session_id)" "${2:-}" "again"
 RD
-ll_drive() {  # <root> <row> <out file> [within] — the driver, in the background; rc in <out>.rc
-  ( cd "$1/.worktrees/$2" && bash "$LL_RD" "$REPO/payload/scripts/lib" "${4:-}" > "$3" 2>&1; echo $? > "$3.rc" ) &
+ll_drive() {  # <root> <row> <out file> [within] — the driver, in the background; rc in <out>.rc. LL_LIB names another library copy
+  ( cd "$1/.worktrees/$2" && bash "$LL_RD" "${LL_LIB:-$REPO/payload/scripts/lib}" "${4:-}" > "$3" 2>&1; echo $? > "$3.rc" ) &
 }
 ll_lines() { if [ -f "$1" ]; then awk 'END { print NR }' "$1"; else echo 0; fi; }   # <file>
 ll_wait_lines() {  # <file> <n> [tenths] -> 0 once the file has at least <n> lines

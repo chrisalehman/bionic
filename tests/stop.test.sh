@@ -733,15 +733,17 @@ expect_eq "GAP3d one decline answered the three rows: the turn passes" "" \
 # admitted runs and the owed count, never its queue: a landing run waiting at the gate used to answer
 # room=no and close FILL for every writer. Planted: a store holding one landing request that waits,
 # held by a live process, on the quiet reading (1.0 busy of 7.36). The tick counts it waiting and
-# still offers FILL.
+# still offers FILL. The holder is this suite's own shell, live for the whole case and never a sleep
+# (shell-lint's clock census), as gate.test.sh's held requests are.
 GAP4_GATE="$(cd "$(mktemp -d)" && pwd -P)/gate"; mkdir -p "$GAP4_GATE/requests" "$GAP4_GATE/cost"
-sleep 120 & GAP4_HOLDER=$!
+GAP4_HOLDER=$$
 GAP4_START="$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$GAP4_HOLDER")"
 printf 'key=a.test.sh\nkind=landing\nwho=%s:wx-T1\ntree=/\nasked=1000\nholder=%s:%s\n' \
   "$SID" "$GAP4_HOLDER" "$GAP4_START" > "$GAP4_GATE/requests/1"
 GAP_D4="$(gap_fixture)"
 GAP_T4="$(BIONIC_GATE_DIR="$GAP4_GATE" gap_tick "$GAP_D4" 1.0)"
-kill "$GAP4_HOLDER" 2>/dev/null; wait "$GAP4_HOLDER" 2>/dev/null
+expect_eq "GAP4-pre the request is still open after the tick: its holder lives, nothing ended it" "open" \
+  "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
 GAP4_LINE="$(printf '%s\n' "$GAP_T4" | grep -F 'poker: gate ' | head -n 1)"
 expect_nonempty "GAP4a precondition: the tick printed its gate line" "$GAP4_LINE"
 expect_contains "GAP4b …which counts the one waiting request and gives room: the room reads admitted runs, not waiters" \
