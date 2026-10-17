@@ -512,7 +512,8 @@ expect_contains "57v7c …byte for byte" '"keep C:\new\t as written"' "$(/usr/bi
 s42_snap "$R57" "$P57"
 poke "$R57" waive verdict 'Ship it.'
 s42_unchanged "57v8 a question outside the set" 1 "$P57"
-expect_contains "57v9 …naming the three questions" "evidence, adversarial or structure" "$OUT"
+# MOVED BY WAVE-38 T2 (AC-4.2): the waiver also takes the regression and all four at once (session-poker-5 §WORD).
+expect_contains "57v9 …naming the questions it waives: the three, the regression, or all" "evidence, adversarial, structure, regression or all" "$OUT"
 poke "$R57" waive adversarial $'two\nlines'
 s42_unchanged "57v10 a reply with a line break" 1 "$P57"
 poke "$R57" waive adversarial

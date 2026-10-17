@@ -2448,6 +2448,10 @@ for s54s in a b c; do
   printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\nsection "%s"\nexpect_eq "%s ran" x x\nfinish\n' \
     "$s54s" "$s54s" > "$R54/tests/$s54s.test.sh"
 done
+# THE COVER HOLDS BY A READ (wave-38 T2; AC-4.5): a.test.sh reads lib/one.sh, the one code file the landings below
+# change, so the reads index names a suite for it; `approve regression-2` covers no head since T2.
+printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\nsection "a"\nexpect_eq "a ran" x x\nexpect_eq "a reads lib/one.sh" x "$([ -s "$(dirname "$0")/../lib/one.sh" ] && echo x)"\nfinish\n' \
+  > "$R54/tests/a.test.sh"
 printf 'one\n' > "$R54/lib/one.sh"
 printf '.bionic/\n.worktrees/\n' > "$R54/.gitignore"
 ( cd "$R54" && git add .gitignore tests payload lib && git commit -qm base ) >/dev/null 2>&1
@@ -2459,9 +2463,9 @@ P54="$(s42_plan "$R54" 4 "  worktree: .worktrees/01-fixture
   branch: wave/01-fixture")"
 awk '
   /^current: / && !wb { print; print "working-branch: wave/01-fixture"
-    # §54 PROVES INTEGRATE WAITS ON THE WALK, not the cover (wave-35 T9; D9): its suites declare no anchor, so the
-    # plan carries the approval that waives the cover; the evidence gate §FLOOR-COVER proves the cover itself.
-    print "approved: regression-2 by Dana Fixture 2026-10-04T00:00:00Z \"the cover is proved elsewhere\""; wb = 1; next }
+    # §54 PROVES INTEGRATE WAITS ON THE WALK, not the cover (wave-35 T9; D9): a.test.sh reads lib/one.sh, so the cover
+    # holds without an approval (wave-38 T2; AC-4.5); the evidence gate §FLOOR-COVER proves the cover itself.
+    wb = 1; next }
   /^- T5: / { print; print "- T3: integrate at Step 8"; next }
   /^\| id \| step \|/ { intab = 1
     print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
