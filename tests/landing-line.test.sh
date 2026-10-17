@@ -841,8 +841,10 @@ section "§AHEAD-RED: a refused row holds nothing behind it (AC-1.6)"
 #
 # T1 lands on a.test.sh, which its commit makes red once released; T2 lands on b.test.sh, which
 # records each run's head and waits. T2's candidate is built ahead, on T1's; under D22 the gate holds
-# T2's run (answer 0) while T1's runs, so nothing of T2 runs on T1's candidate. T1 turns red and is
-# returned; T2 is rebuilt on the accepted head, proved once and published without T1.
+# T2's run (answer 0) while T1's run is open. T1 turns red and is returned; T2 is rebuilt on the
+# accepted head, proved and published without T1. T2's go file is planted before T1's: a landing is
+# active only while it holds an open request, so a run of T2 may start in the gap between T1's run and
+# its red judge's (A-T6-10), and it must not hold T1 up.
 ll_nth_cand() { ll_field "$(ll_ev "$1" candidate | awk -F'|' -v r="row=$2" '$3 == r' | sed -n "${3:-1}p")" commit; }   # <root> <row> [n | $]
 ll_wait_cand() {  # <root> <row> [n] -> 0 once <row> has at least <n> candidates on the record (30 s at most)
   local i=0
@@ -875,17 +877,15 @@ sleep 2
 KA1="$(ll_nth_cand "$RA" T1)"
 expect_eq "(a0) T2's first candidate is built on T1's" "$KA1" "$(git -C "$RA" rev-parse "$(ll_nth_cand "$RA" T2)^1")"
 expect_eq "(a0) …T1's run the open landing run, and none of T2's on it" "T1 0" "$(ll_open_landing | sed 's/.*://') $(ll_lines "$LL_SIG/a-T2.runs")"
-touch "$LL_SIG/a-T1.go"
+touch "$LL_SIG/a-T2.go" "$LL_SIG/a-T1.go"
 ll_wait_file "$WORLD_ROOT/a-T1.out.rc" 300
 expect_eq "(a1) T1 is red: exit 1" "1" "$(cat "$WORLD_ROOT/a-T1.out.rc" 2>/dev/null)"
-expect_true "(a2-pre) T2's run starts" ll_wait_lines "$LL_SIG/a-T2.runs" 1
-expect_eq "(a2) T2 is proved on a candidate rebuilt on the accepted head" "$HA" "$(git -C "$RA" rev-parse "$(sed -n 1p "$LL_SIG/a-T2.runs")^1")"
-expect_eq "(a2) …which is T2's latest candidate, with nothing discarded (no run of it on T1's)" "$(sed -n 1p "$LL_SIG/a-T2.runs") " \
-  "$(ll_nth_cand "$RA" T2 '$') $(ll_ev "$RA" verdict | grep 'result=discarded')"
-touch "$LL_SIG/a-T2.go"
 ll_wait_file "$WORLD_ROOT/a-T2.out.rc" 300
-expect_eq "(a3) T2 publishes: exit 0" "0" "$(cat "$WORLD_ROOT/a-T2.out.rc" 2>/dev/null)"
-expect_eq "(a3) …the branch is T2's candidate on the accepted head, its one run" "$(sed -n 1p "$LL_SIG/a-T2.runs") 1" "$(ll_head "$RA") $(ll_lines "$LL_SIG/a-T2.runs")"
+KA2="$(ll_nth_cand "$RA" T2 '$')"
+expect_nonempty "(a2-pre) T2 was rebuilt" "$KA2"
+expect_eq "(a2) T2 publishes: exit 0, the branch at its latest candidate, which is built on the accepted head" "0 $KA2 $HA" \
+  "$(cat "$WORLD_ROOT/a-T2.out.rc" 2>/dev/null) $(ll_head "$RA") $(git -C "$RA" rev-parse "${KA2}^1" 2>/dev/null)"
+expect_eq "(a3) …proved by its last run, on that candidate" "$KA2" "$(tail -1 "$LL_SIG/a-T2.runs" 2>/dev/null)"
 expect_false "(a3) …which does not contain T1's commit" git -C "$RA" merge-base --is-ancestor "$T1A" wave/x
 expect_regex "(a3) T1 stays returned, red" "^line/v1\\|ev=returned\\|row=T1\\|why=red\\|" "$(ll_ev "$RA" returned)"
 expect_eq "(a3) …and only T2 is published" "T2" "$(ll_ev "$RA" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
