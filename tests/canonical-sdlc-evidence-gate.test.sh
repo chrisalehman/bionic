@@ -4357,8 +4357,8 @@ rn_units_plan 'regression: yes' "$RN_DIR/yes.md"
 rn_units_plan '' "$RN_DIR/absent.md"
 rn_lib() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" >/dev/null 2>&1; "$@" ) 2>/dev/null; }
 rn_owed() { rn_lib facts_owed single wave "" "$1" | cut -f1 | sort -u | tr '\n' ' ' | sed 's/ $//'; }
-expect_eq "RN-7 facts_owed deals the floor at regression: yes (positive, before the absence row)" "floor review" "$(rn_owed "$RN_DIR/yes.md")"
-expect_eq "RN-7b …and with the key absent" "floor review" "$(rn_owed "$RN_DIR/absent.md")"
+expect_eq "RN-7 facts_owed deals the floor at regression: yes (positive, before the absence row)" "regression review" "$(rn_owed "$RN_DIR/yes.md")"
+expect_eq "RN-7b …and with the key absent" "regression review" "$(rn_owed "$RN_DIR/absent.md")"
 expect_eq "RN-7c …and not at regression: no: the readings are still owed, the floor is not" "review" "$(rn_owed "$RN_DIR/no.md")"
 rn_waits() { rn_lib units_waiting "$1" 8 | awk -F'\t' '$1 == "T3" { sub(/: .*/, "", $2); print $2 }' | sort -u | tr '\n' ' ' | sed 's/ $//'; }
 expect_eq "RN-8 the integrate row's default reads wait on proof:regression at regression: yes (positive)" "proof:regression proof:review" "$(rn_waits "$RN_DIR/yes.md")"
