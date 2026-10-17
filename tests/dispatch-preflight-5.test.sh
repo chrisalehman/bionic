@@ -53,8 +53,11 @@ section "§AGREE — every dispatch a step file promises before approval is one 
 #
 # THE STEPS' SIDE IS A GRAMMAR (pinned here, recorded in record/wave-38-one-stop/T21-prototype.md).
 # The steps before approval are 0, 1 and 2 (Step 3 ends on the approval). A SENTENCE is a run of a
-# paragraph line ended by `.`, `!` or `?` and a blank, or by the line end. A sentence PROMISES a
-# dispatch when it holds a form of the word `dispatch`; what it promises is every token in it of
+# paragraph line ended by `.`, `!` or `?` and a blank, by `;`, or by the line end (a clause, then).
+# A clause PROMISES a dispatch when it holds `dispatch`, `dispatches`, `dispatched` or `dispatching`
+# as a whole word (so `dispatch-preflight` and `dispatched-task` are not it) and no form of `refuse`
+# (a clause saying the wall refuses a role states a refusal, not a promise); what it promises is
+# every token in it of
 #   - `bionic:<role>`, or a bare bionic role name (a basename of agents/*.md) as a whole word,
 #     read as `bionic:<role>`;
 #   - the harness roles `Explore` and `Plan`, spelled as a code span;
@@ -77,8 +80,17 @@ ap_promised() {  # <step file>... -> each promised token, one a line, sorted, un
       b = substr(s, p + l, 1)
       return (a !~ /[A-Za-z0-9:_-]/ && b !~ /[A-Za-z0-9_-]/)
     }
-    function scan(s,   t, m, i, p, rest, off) {
-      if (tolower(s) !~ /dispatch/) return
+    function hasword(s, re,   rest, off) {
+      rest = s; off = 0
+      while (match(rest, re)) {
+        if (wordat(s, off + RSTART, RLENGTH)) return 1
+        off += RSTART; rest = substr(rest, RSTART + 1)
+      }
+      return 0
+    }
+    function scan(s,   t, i, p, rest, off) {
+      if (!hasword(tolower(s), "dispatch(es|ed|ing)?")) return
+      if (hasword(tolower(s), "refus(e|es|ed|ing)")) return
       rest = s
       while (match(rest, /bionic:[a-z][a-z-]*/)) {
         print substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
@@ -100,7 +112,10 @@ ap_promised() {  # <step file>... -> each promised token, one a line, sorted, un
     }
     {
       line = $0
-      while (match(line, /[.!?][ \t]/)) { scan(substr(line, 1, RSTART)); line = substr(line, RSTART + 2) }
+      # scan() calls match(), which resets RSTART and RLENGTH, so both are kept before the call.
+      while (match(line, /([.!?][ \t]|;)/)) {
+        cs = RSTART; cl = RLENGTH; scan(substr(line, 1, cs)); line = substr(line, cs + cl)
+      }
       scan(line)
     }' "$@" | sort -u
 }
@@ -145,6 +160,17 @@ expect_eq "AGREE.4d a role named in a sentence with no dispatch in it promises n
   "$(ap_outside "$(ap_promised "$AP_SCRATCH/2c.md")" "$AP_ADMITTED")"
 expect_contains "AGREE.4d …while the same file's prototype promise is still read" "kind:prototype" \
   "$(ap_promised "$AP_SCRATCH/2c.md")"
+cp "$STEPS_DIR/2.md" "$AP_SCRATCH/2d.md"
+printf '\nBefore approval dispatch-preflight refuses every writer-class dispatch (implementor, senior-implementor).\n' >> "$AP_SCRATCH/2d.md"
+printf 'The model of every tier (implementor, critic) is read from the dispatched-task ledger.\n' >> "$AP_SCRATCH/2d.md"
+expect_eq "AGREE.4e a refusal clause, and a compound of the word, promise nothing" "" \
+  "$(ap_outside "$(ap_promised "$AP_SCRATCH/2d.md")" "$AP_ADMITTED")"
+expect_contains "AGREE.4e …while the same file's prototype promise is still read" "kind:prototype" \
+  "$(ap_promised "$AP_SCRATCH/2d.md")"
+cp "$STEPS_DIR/2.md" "$AP_SCRATCH/2e.md"
+printf '\nThe walk is ruled; then a senior-implementor is dispatched to try it.\n' >> "$AP_SCRATCH/2e.md"
+expect_eq "AGREE.4f …while a promise in the next clause of the same sentence is still read" \
+  "bionic:senior-implementor" "$(ap_outside "$(ap_promised "$AP_SCRATCH/2e.md")" "$AP_ADMITTED")"
 
 section "§PROTOTYPE — a confined prototype is admitted before approval and owns no row (REQ-13 AC-13.2)"
 # ============================================================================
