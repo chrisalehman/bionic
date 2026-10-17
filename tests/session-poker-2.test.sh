@@ -738,10 +738,13 @@ expect_contains "41f2 the first tick prints its decision" "decision=QUIET" "$S41
 expect_contains "41f3 …and, QUIET with a row open, prints WAITING (wave-26 T15; D16)" "poker: WAITING" "$S41D_T1"
 expect_contains "41f3b …and owes no task-list duty" "duty=none" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
 poke "$R41D" tick
-expect_eq "41f4 AC-4.9 the second tick's stdout is exactly one line" "1" \
+# From wave-38 T11 (D13, A-T11-7, A-T11-8) a tick on a plan also prints the run's one-line sitrep above the
+# unchanged line, which asks nothing (sitrep.test.sh S6 pins that two-line tick). This world binds no plan, so
+# its unchanged tick is still the one line; the unchanged line is byte-identical and last either way.
+expect_eq "41f4 AC-4.9 with no plan to report on, the second tick's stdout is exactly one line" "1" \
   "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-expect_regex "41f5 …and that line is the unchanged line" \
-  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$OUT"
+expect_regex "41f5 …and the last line is the unchanged line" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$(printf '%s\n' "$OUT" | tail -1)"
 expect_contains "41f6 …and the duty is none" "duty=none" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
 add_row "$R41D" name=busy2 deliverable="$R41D/never-written-2.md" duration="4 hours" \
   launched_at="$(iso_ago 60)"
@@ -1234,8 +1237,8 @@ expect_eq "45a precondition: no gate file, the band read off the decision line i
 expect_eq "45a2 …and the line carries no gate= field" "" "$(s45_field "$OUT" gate)"
 : > "$(gate_of "$R45")"
 poke "$R45" tick
-expect_regex "45a3 an empty gate file adds nothing to the digest: the next tick is the unchanged line" \
-  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$OUT"
+expect_regex "45a3 an empty gate file adds nothing to the digest: the next tick ends on the unchanged line" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$(printf '%s\n' "$OUT" | tail -1)"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$R45")"
 poke "$R45" tick
 expect_eq "45b AC-4.3 a gate line makes the tick decide NOTIFY (exit 1)" "NOTIFY|1" \
@@ -3025,8 +3028,8 @@ poke "$R56R" tick
 expect_contains "56z3 a new full run is news: the next tick prints in full, with the new count" "poker: regression-runs=3" "$OUT"
 expect_eq "56z4 …and the header follows it" "3" "$(sed -n 's/^regression-runs: *//p' "$S56_RR_PLAN" | head -n 1)"
 poke "$R56R" tick
-expect_regex "56z5 nothing new: the tick is the one unchanged line (wave-24 AC-4.9 kept)" \
-  "^poker: unchanged since [0-9TZ:-]+ — decision=[A-Z]+\$" "$OUT"
+expect_regex "56z5 nothing new: the tick ends on the unchanged line (wave-24 AC-4.9 kept)" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=[A-Z]+\$" "$(printf '%s\n' "$OUT" | tail -1)"
 
 
 # ============================================================

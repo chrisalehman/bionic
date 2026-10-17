@@ -6941,6 +6941,20 @@ SITREP_SIT
   return 0
 }
 
+# sitrep_tick_line <plan> -> `poker: sitrep <the --line output>`, the tick's one-line form (wave-38 T11; D13, AC-2.8):
+# the same `sitrep_render` the `--line` arm calls, at the plan's own root, so the two are byte-equal by construction.
+# Silent when there is no plan to report on or the proof record cannot load; the tick is unaffected either way.
+sitrep_tick_line() {
+  local plan="${1:-}" root l
+  { [ -n "$plan" ] && [ -f "$plan" ] && [ ! -L "$plan" ]; } || return 0
+  declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
+  declare -F proof_plan_slug >/dev/null 2>&1 || return 0
+  root="$(cd "$(project_root "${plan%/*}")" 2>/dev/null && pwd -P)"
+  [ -n "$root" ] || return 0
+  l="$(sitrep_render "$plan" "$root" yes 2>/dev/null)"
+  [ -z "$l" ] || say "sitrep $l"
+}
+
 # sitrep_bottom_line <plan> <root> <item>… -> records the items, one `sitrep-log/v1|at=<ISO-UTC>|item=<text>` line
 # each, all at one instant, to record/<wave>/sitrep.log; rc 1 (nothing written) when an item is empty, holds a
 # `|` or a line break, or is neither cited `(line <n>)` nor labelled `hypothesis:`, `diagnosis:` or `projection:`.
@@ -13323,6 +13337,7 @@ $(run_groups "$RUN_PID")"
       if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
         printf '%s\n' "$TICK_REARM"
       fi
+      [ -z "${TICK_DECIDED:-}" ] || sitrep_tick_line "${SCHED_PLAN:-}"  # THE TICK'S ONE-LINE SITREP, EVERY TICK (wave-38 T11; D13)
       if [ "$TICK_UNCHANGED" = yes ]; then
         # EVERY STANDING HOLD RIDES THE UNCHANGED TICK (wave-35 T5; REQ-4 AC-4.4; D13). The backstop runs
         # on every tick and says its NOT-LANDED lines into the buffer; an equal digest means the world
