@@ -556,7 +556,7 @@ world_machine 8 8192 30 2.0
 wask_m() { bash -c '. "$1" 2>/dev/null; o="$(gate_width_ask "$2" 2>/dev/null)"; printf "%s|%s" "$o" "$?"' _ "$1" "$2"; }   # <gate.sh> <landing>
 lopen LA "$LME" 600 >/dev/null
 expect_eq "LE.25 the mutant read no lease line: its width ask feeds the awk no lease (positive: the shipped one does)" "0 1" \
-  "$(grep -c '"$_G_LEASE"; } | awk' "$MLE") $(grep -c '"$_G_LEASE"; } | awk' "$GATE")"
+  "$(grep -cF '"$_G_LEASE"; } | awk' "$MLE") $(grep -cF '"$_G_LEASE"; } | awk' "$GATE")"
 expect_eq "LE.26 the mutant still runs and answers: LA, alone, 4" "4|0" "$(wask_m "$MLE" LA)"
 expect_eq "LE.27 MUTANT the lease unread: LB is answered 4 in LA's gap, where the shipped gate answers 0 (the rows can fail)" \
   "4|0 0|0" "$(wask_m "$MLE" LB) $(wask_m "$GATE" LB)"

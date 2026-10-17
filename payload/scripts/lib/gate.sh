@@ -33,6 +33,13 @@
 #                  keep separate durations. A file with no project key, which 1.15.0 and before
 #                  wrote (<mem>:<cores>:<seconds>:<epoch>[:whole]), is read for its seconds only,
 #                  for a key that has no keyed file, and is never written, moved or removed
+#   leases/<landing>.lease
+#                  one file per landing whose carrier holds its place in line (wave-38 T30; D22;
+#                  THE LEASE, below), a `/` in the landing written `%`. Lines:
+#                    landing=<landing>  carrier=<pid>:<start>, or - once its carrier left it WAITING
+#                    first=<epoch>  the first-ask instant, kept across the landing's re-entries
+#                    seq=<n>  the order leases were opened in, ties of first broken by it
+#                    span=<seconds>  how long a lease nobody carries is kept   left=<epoch>  when it was left
 #   idle           the memory reading taken the last time nothing admitted was unfinished
 #   lock/          the directory lock every decision is taken under (pid and start inside)
 #
@@ -59,6 +66,16 @@
 #                            (waiting is printed, and decides nothing: wave-38 T5, D21)
 #   gate_width_ask <landing> how many runners <landing> may start now, one whole number on stdout,
 #                            rc 0 (rc 2 usage or store; rc 1 the lock). See THE WIDTH ASK.
+#   gate_landing_open <landing> <carrier> [<span>]
+#                            the landing's carrier holds its place in line from now (THE LEASE); a
+#                            lease already on file for <landing> and not spent is taken over, its
+#                            first-ask instant kept. rc 0; rc 2 usage or store; rc 1 the lock
+#   gate_landing_leave <landing> <carrier>
+#                            the carrier ended WAITING: the lease is kept, nobody's, for <span>
+#                            seconds. rc 0; rc 1 when <carrier> does not hold it
+#   gate_landing_close <landing> [<carrier>]
+#                            the landing published, was returned or stalled: the lease is removed.
+#                            rc 0 (nothing on file is rc 0 too); rc 1 when <carrier> does not hold it
 #   gate_asked               names (a who each) on stdin; prints those with an OPEN request (see
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
@@ -73,7 +90,8 @@
 #                            it does not. gate_ask asks it first (THE BUDGET, below).
 #
 # WHICH VERBS WALK THE STORE. gate_ask, gate_end, gate_state, gate_room and gate_width_ask take the
-# lock and run the scan (`_gate_scan`), which tallies the open requests, writes the end of a killed
+# lock and run the scan (`_gate_scan`), which tallies the open requests and the held leases, prunes a
+# spent lease (THE LEASE), writes the end of a killed
 # one and prunes (below); so gate_state, gate_room and gate_width_ask, which read, also remove. gate_list takes the lock
 # and only reads. gate_asked takes no lock and only reads. Neither of those two reaps or prunes.
 #
@@ -143,6 +161,9 @@
 #             be read (-1 or empty) gives no room unless nothing is admitted or owed.
 #   width     (wave-38 T5; D21, D22) THE WIDTH ASK, above `gate_width_ask`: the admission rule
 #             applied in sequence, answered to the oldest active landing and 0 to any other.
+#   lease     (wave-38 T30; D22; A-T6-10) THE LEASE, above `gate_landing_open`: a landing whose
+#             carrier holds a lease is active from its first ask until it publishes, is returned
+#             or stalls, its run gaps included; a dead carrier's lease is pruned by the scan.
 #   term      (wave-38 T5; AC-6.2) THE TERM TRAP, above `gate_ask`: a waiter sent TERM hands its
 #             request back, so its number and asked= are the next ask's.
 #   time      only `_res_now`, never SECONDS or date: a planted clock moves every wait.
@@ -411,6 +432,7 @@ _gate_promise() {
 #   _G_WAIT     waiting (holder alive, not admitted)   _G_LWAIT  of them, landings
 #   _G_QUEUE    their "<kind> <asked> <id> <key>" lines
 #   _G_LAND     the open (waiting or admitted) requests that name a landing: "L <landing> <asked> <id>"
+#   _G_LEASE    the held leases (THE LEASE): "S <landing> <first> <seq>"; a spent lease is removed
 # writes the end of every admitted request whose holder is dead (_gate_reap), and removes, in one batch,
 # every request that is not open and is older than BIONIC_GATE_KEEP seconds (ended: by its ended=;
 # gone, never admitted and nobody's: by its asked=). A number it cannot read as decimal is never
@@ -427,7 +449,21 @@ _gate_scan() {
     fi
     keep="$_GATE_KEEP_DEFAULT"
   fi
-  _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE='' _G_LAND=''
+  _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE='' _G_LAND='' _G_LEASE=''
+  # THE LEASE (below): a held one is tallied, one nobody carries is kept within its span, a spent one
+  # (its carrier dead, or left longer than its span) is removed here.
+  if [ -d "$_GD/leases" ]; then
+    for f in "$_GD"/leases/*.lease; do
+      _gate_lease_read "$f" || continue
+      _gate_lease_state
+      case "$_L_state" in
+        held) _G_LEASE="${_G_LEASE}S ${_L_landing} ${_L_first} ${_L_seq}
+" ;;
+        away) : ;;
+        *) rm -f "$f" ;;
+      esac
+    done
+  fi
   for f in "$_GD"/requests/*; do
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
@@ -1045,6 +1081,165 @@ gate_room() {
   _gate_room_line "$reading" "$((10#$owed))"
 }
 
+# ── THE LEASE (wave-38 T30; D22; A-T6-10, A-orch-29) ─────────────────────────────────────────
+#
+# WHY. D22 answers width to the oldest active landing "until it finishes". T5 read a landing as
+# active only while one of its requests was open, so between one of its runs ending and its next ask
+# (a pass restart, its red judge's run) a younger landing was answered at least 1, started a run, and
+# the older then waited for it: landings interleaved at the gaps (A-T6-10). A lease is the landing's
+# place in line, held by the process that carries it (line.sh `_line_carry`) from its first ask until
+# it publishes, is returned or stalls, so a landing stays the oldest across its gaps.
+#
+#   held   its carrier lives (`_slots_live`, the pid-and-start rule the requests' holders use): the
+#          landing is active, ordered by its first-ask instant, ties by seq (THE WIDTH ASK).
+#   away   its carrier ended WAITING (`gate_landing_leave`; line.sh's rc 75, "its place kept"): the
+#          lease is nobody's (carrier=-), orders no one, and keeps its first-ask instant for the next
+#          `gate_landing_open` of its landing for <span> seconds from when it was left, as a request
+#          handed back keeps its number for its who (THE TERM TRAP). The line passes over an entry whose
+#          carrier is gone; the gate does the same, so no landing waits on a writer who never returns.
+#   spent  its carrier died (a killed ready), or it was left longer than its span, or it cannot be read:
+#          the next scan removes it, so nothing waits forever.
+#
+# The lease is a second record beside the requests, never a replacement: a landing's runs still ask
+# and are admitted as before, and a request handed back on TERM keeps its number (AC-6.2).
+
+_gate_lease_file() {  # <landing> -> its lease file under the loaded store
+  printf '%s/leases/%s.lease\n' "$_GD" "${1//\//%}"
+}
+
+_gate_lease_read() {  # <file> — sets _L_<field> from its lines (a later line wins); rc 1 unreadable
+  local l
+  _L_landing='' _L_carrier='' _L_first='' _L_seq='' _L_span='' _L_left=''
+  [ -f "$1" ] && [ -r "$1" ] || return 1
+  while IFS= read -r l || [ -n "$l" ]; do
+    case "$l" in
+      landing=*) _L_landing="${l#landing=}" ;;
+      carrier=*) _L_carrier="${l#carrier=}" ;;
+      first=*) _L_first="${l#first=}" ;;
+      seq=*) _L_seq="${l#seq=}" ;;
+      span=*) _L_span="${l#span=}" ;;
+      left=*) _L_left="${l#left=}" ;;
+    esac
+  done < "$1"
+}
+
+# _gate_lease_state — after _gate_lease_read: _L_state is held, away or spent (above).
+_gate_lease_state() {
+  local now left span
+  _L_state=spent
+  _gate_landing_ok "$_L_landing" && _gate_num "$_L_first" && _gate_num "$_L_seq" || return 0
+  case "$_L_carrier" in
+    -) _gate_num "$_L_left" || return 0; left="$_G_NUM"
+       _gate_num "$_L_span" || return 0; span="$_G_NUM"
+       _gate_num "$(_res_now)" || return 0; now="$_G_NUM"
+       [ "$((now - left))" -le "$span" ] || return 0
+       _L_state=away ;;
+    *:*) _slots_live "${_L_carrier%%:*}" "${_L_carrier#*:}" && _L_state=held ;;
+  esac
+  return 0
+}
+
+# _gate_lease_carrier <carrier> — rc 0 and _G_CARRIER `<pid>:<start>` for `<pid>` or `<pid>:<start>`,
+# the start as `_slots_since` prints it (a date, spaces and colons in it), a bare pid taking its start
+# now; rc 1 for anything else (no pid, or a line break).
+_gate_lease_carrier() {
+  local p="${1%%:*}"
+  _G_CARRIER=''
+  case "${1:-}" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  case "$1" in
+    *:*) _G_CARRIER="$1" ;;
+    *) _G_CARRIER="$1:$(_slots_since "$1")" ;;
+  esac
+}
+
+# _gate_lease_put <landing> <carrier> <first> <seq> <span> [<left>] — under the lock: the lease, by
+# one rename.
+_gate_lease_put() {
+  local f
+  f="$(_gate_lease_file "$1")"
+  { printf 'landing=%s\ncarrier=%s\nfirst=%s\nseq=%s\nspan=%s\n' "$1" "$2" "$3" "$4" "$5"
+    [ -z "${6:-}" ] || printf 'left=%s\n' "$6"
+  } > "$f.tmp.$$" && mv "$f.tmp.$$" "$f"
+}
+
+# _gate_lease_args <verb> <landing> <carrier> — the shared checks: rc 0 with the store loaded,
+# _G_CARRIER set (or empty when <carrier> is), and the lease directory made; rc 2 with a usage line.
+_gate_lease_args() {
+  if ! _gate_landing_ok "${2:-}"; then
+    echo "gate: usage: $1 <landing key> <carrier pid[:start]>" >&2; return 2
+  fi
+  _G_CARRIER=''
+  if [ -n "${3:-}" ] && ! _gate_lease_carrier "$3"; then
+    echo "gate: $1: '${3:0:40}' is not a carrier (<pid> or <pid>:<start>)" >&2; return 2
+  fi
+  _gate_store || return 2
+  mkdir -p "$_GD/leases" 2>/dev/null && [ -w "$_GD/leases" ] || {
+    echo "gate: the store $_GD/leases cannot be written" >&2; return 2; }
+}
+
+# gate_landing_open <landing> <carrier> [<span>] — the carrier holds <landing>'s place in line from
+# now. A lease already on file that is not spent (held by another carrier of the same landing, or
+# left WAITING within its span) is taken over: its first-ask instant and seq are kept, so a landing
+# that said ready again does not lose its age. Otherwise the first-ask instant is now and seq one
+# past the highest on file. <span> (whole seconds, default BIONIC_GATE_KEEP's default) is how long the
+# lease is kept once its carrier leaves it WAITING; line.sh gives the ready's --within.
+gate_landing_open() {
+  local span="${3:-$_GATE_KEEP_DEFAULT}" f now first seq max=0
+  [ "$#" -ge 2 ] && [ -n "${2:-}" ] || { echo "gate: usage: gate_landing_open <landing key> <carrier pid[:start]> [<span seconds>]" >&2; return 2; }
+  _gate_num "$span" || { echo "gate: gate_landing_open: the span is whole seconds, not '${span:0:20}'" >&2; return 2; }
+  span="$_G_NUM"
+  _gate_lease_args gate_landing_open "$1" "$2" || return 2
+  _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
+  now="$(_res_now)"
+  f="$(_gate_lease_file "$1")"
+  if _gate_lease_read "$f" && _gate_lease_state && [ "$_L_state" != spent ]; then
+    first="$_L_first" seq="$_L_seq"
+  else
+    for f in "$_GD"/leases/*.lease; do
+      _gate_lease_read "$f" && _gate_num "$_L_seq" || continue
+      [ "$_G_NUM" -le "$max" ] || max="$_G_NUM"
+    done
+    first="$now" seq=$((max + 1))
+  fi
+  _gate_lease_put "$1" "$_G_CARRIER" "$first" "$seq" "$span"; f=$?
+  _gate_unlock
+  return "$f"
+}
+
+# gate_landing_leave <landing> <carrier> — the carrier ended WAITING: its lease is kept, nobody's
+# (carrier=-, left=<now>), until its span has passed. rc 1 when <carrier> does not hold it.
+gate_landing_leave() {
+  local rc=1
+  [ "$#" -eq 2 ] && [ -n "${2:-}" ] || { echo "gate: usage: gate_landing_leave <landing key> <carrier pid[:start]>" >&2; return 2; }
+  _gate_lease_args gate_landing_leave "$1" "$2" || return 2
+  _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
+  if _gate_lease_read "$(_gate_lease_file "$1")" && [ "$_L_carrier" = "$_G_CARRIER" ]; then
+    _gate_lease_put "$1" - "$_L_first" "$_L_seq" "$_L_span" "$(_res_now)"; rc=$?
+  fi
+  _gate_unlock
+  return "$rc"
+}
+
+# gate_landing_close <landing> [<carrier>] — the landing published, was returned or stalled: its lease
+# is removed. With <carrier>, only while that carrier holds it (rc 1 otherwise, nothing changed), so a
+# carrier that was taken over cannot close its successor's lease. Nothing on file is rc 0.
+gate_landing_close() {
+  local f rc=0
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { echo "gate: usage: gate_landing_close <landing key> [<carrier pid[:start]>]" >&2; return 2; }
+  _gate_lease_args gate_landing_close "$1" "${2:-}" || return 2
+  _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
+  f="$(_gate_lease_file "$1")"
+  if _gate_lease_read "$f"; then
+    if [ -z "$_G_CARRIER" ] || [ "$_L_carrier" = "$_G_CARRIER" ]; then rm -f "$f" || rc=2
+    else rc=1
+    fi
+  fi
+  _gate_unlock
+  return "$rc"
+}
+
+
 # ── THE WIDTH ASK (wave-38 T5; D21, D22; AC-6.1; ADR-060) ────────────────────────────────────
 #
 # WHY. The drain used to size itself (`pressure_level(gate_width)`, 7 at share 92 on 8 cores) and
@@ -1055,10 +1250,14 @@ gate_room() {
 # gate_width_ask <landing> — one whole number on stdout, rc 0: how many runners <landing> may start
 # now. <landing> is the key its runners' asks carry in BIONIC_GATE_LANDING (each such request's
 # `landing=` line). Under the lock, after the scan:
-#   order  a landing is ACTIVE while an open request (waiting or admitted) names it; the oldest is
-#          the one whose earliest open request was asked first, ties by id. A landing that is not
-#          the oldest active one, active itself or not, is answered 0 until the older finishes
-#          (D22: landings one at a time at full width; work fills what is left).
+#   order  a landing is ACTIVE while its carrier holds its lease (THE LEASE, below: from its first
+#          ask until it publishes, is returned or stalls, the gaps between its runs included), and
+#          a landing with no lease while an open request (waiting or admitted) names it. The oldest
+#          is the one asked first: a leased landing by its first-ask instant, ties by the order the
+#          leases were opened; one with no lease by its earliest open request, ties by id; at one
+#          instant a lease goes first. A landing that is not the oldest active one, active itself
+#          or not, is answered 0 until the older finishes (D22: landings one at a time at full
+#          width; work fills what is left; wave-38 T30: "until it finishes" now spans its gaps).
 #   count  the admission rule (`_gate_decide`'s) applied in sequence, no arithmetic of its own:
 #          s starts at the processor promises of the admitted runs plus PROMISE for each waiting
 #          landing request (the order serves those before any new landing ask); a run counts
@@ -1085,10 +1284,16 @@ gate_width_ask() {
   _gate_scan
   _gate_idle "$reading"
   _gate_unlock
-  { printf '%s' "$_G_PROM"; printf '%s' "$_G_LAND"; } | awk -v land="$land" \
+  { printf '%s' "$_G_PROM"; printf '%s' "$_G_LAND"; printf '%s' "$_G_LEASE"; } | awk -v land="$land" \
       -v p="$(_gate_cores_for landing)" -v r="$reading" -v u="$(gate_usage "$reading")" \
       -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores 2>/dev/null)" \
       -v whole="$_G_WHOLE" -v lwait="$_G_LWAIT" "$_GATE_FITS_AWK"'
+    function older(a, b) {
+      if (T[a] != T[b]) return T[a] < T[b]
+      if (C[a] != C[b]) return C[a] < C[b]
+      return Q[a] < Q[b]
+    }
+    $1 == "S" { S[$2] = 1; SF[$2] = $3 + 0; SQ[$2] = $4 + 0; next }
     $1 == "L" {
       k = $2; a = $3 + 0; i = $4 + 0
       if (!(k in A) || a < A[k] || (a == A[k] && i < I[k])) { A[k] = a; I[k] = i }
@@ -1097,9 +1302,14 @@ gate_width_ask() {
     NF == 1 { split($1, f, ":"); sc += f[2] }
     END {
       own = (land in A)
-      for (k in A) {
+      # The active landings and their age: a held lease by (first, 0, seq); one with no lease by
+      # (its earliest open request, 1, its id).
+      for (k in A) { act[k] = 1; T[k] = A[k]; C[k] = 1; Q[k] = I[k] }
+      for (k in S) { act[k] = 1; T[k] = SF[k]; C[k] = 0; Q[k] = SQ[k] }
+      me = (land in act)
+      for (k in act) {
         if (k == land) continue
-        if (!own || A[k] < A[land] || (A[k] == A[land] && I[k] < I[land])) { print 0; exit }
+        if (!me || older(k, land)) { print 0; exit }
       }
       n = 0; p += 0
       if (!whole && r >= 0 && fits(u, share) && p > 0) {

@@ -814,8 +814,34 @@ _line_review_born() {  # <plan>
 _line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
+# THE LANDING'S PLACE IN THE GATE'S LINE (wave-38 T30; D22; A-T6-10; gate.sh THE LEASE). Right after its
+# `ready` event the carrier opens the landing's lease, so the gate reads the landing as active from its
+# first ask until it publishes, is returned or stalls, the gaps between its runs included (a pass restart,
+# the red judge's run), and answers a younger landing 0 throughout. The carrier's EXIT trap ends it: on
+# WAITING (rc 75, "its place kept") it is left, nobody's, its first-ask instant kept for the next ready of
+# the row for as long as this ready's --within; on every other exit it is closed. A ready again takes the
+# lease over at its first instant. A carrier killed outright leaves a dead carrier, which the gate prunes.
+# The lease is a convenience of order, never a condition of landing: when it cannot be opened, the landing
+# goes on as a landing with no lease (ordered by its open requests).
+_line_lease_open() {  # <deadline | empty>
+  local span="" now
+  if [ -n "${1:-}" ]; then
+    now="$(_res_now)"; span=$(( $1 - now )); [ "$span" -ge 0 ] || span=0
+  fi
+  # shellcheck disable=SC2086  # an empty span is no argument: the gate's default
+  gate_landing_open "$_LINE_KEY" "$LINE_ME" $span >/dev/null 2>&1 && _LINE_LEASED=1
+  return 0
+}
+_line_lease_end() {  # <the carrier's exit status>
+  [ -n "${_LINE_LEASED:-}" ] || return 0
+  if [ "${1:-}" = 75 ]; then gate_landing_leave "$_LINE_KEY" "$LINE_ME" >/dev/null 2>&1
+  else gate_landing_close "$_LINE_KEY" "$LINE_ME" >/dev/null 2>&1
+  fi
+  return 0
+}
+
 # THE CARRIER'S LOOP, in its own subshell, whose pid is the `ready` event's carrier: the entry is
-# present exactly while this runs, and its landing tree is freed when it ends.
+# present exactly while this runs, its landing tree is freed and its lease ended when it ends.
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
@@ -823,11 +849,13 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
-  trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
+  _LINE_LEASED=""   # set once this carrier holds the landing's lease (`_line_lease_open`)
+  trap '_line_lease_end "$?"; [ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
   _line_me
   line_event "$plan" ready "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
     "suites=${suites}" "debt=${debt}" "carrier=${LINE_ME}" >/dev/null \
     || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
+  _line_lease_open "$deadline"
   while :; do
     head="$(line_head "$plan")"
     _line_count_git "$plan" "$rec" "$root" "$head"
