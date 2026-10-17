@@ -2428,7 +2428,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-after")"
 expect_eq "PC.2 after an outside merge the plan's FIRST whole run is ADMITTED" "allow" "$GATE_VERDICT"
 expect_absent "PC.2 …and the plan carries no regression-cause: line" "regression-cause" \
   "$(cat "$(pf_plan_path "$REPO")")"
-expect_contains "PC.2 …(the plan read is the one with the floor proof)" "proved: kind=regression" \
+expect_contains "PC.2 …(the plan read is the one with the floor proof)" "proved: kind=floor" \
   "$(cat "$(pf_plan_path "$REPO")")"
 expect_status "PC.2 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-again")"
