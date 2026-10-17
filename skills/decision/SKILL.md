@@ -155,7 +155,7 @@ A reply that names a form gets that form directly, with no form in between. The 
 
 - Any decision put to the user, at any step and with no run open. The requirements interview and the design interview are its heaviest users.
 - Small decisions may share a turn, at your discretion, when they make sense together: each in the full shape, with its own number and reply line. A momentous decision always goes alone.
-- Approvals and reversible calls stay out. An approval keeps its own card. A call you can reverse is yours: make it and say so.
+- Approvals and reversible calls stay out. Approvals wait for the final card. A reversible call is yours: make it and say so.
 - A settled decision, one the run's design ledger records, is put again only as `reopening D<n>: <one sentence of new evidence>`; with no new evidence, the ruling stands.
 
 Nothing is run or written when a decision is put, and no hook checks it; once ruled, it is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` delta in `record/<wave>/design-ledger.md`, the run's register. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.

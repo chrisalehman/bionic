@@ -396,4 +396,47 @@ expect_true "DC-5 precondition: the decision skill reads (its When it applies se
 expect_true "DC-5b the decision skill requires the reopening form under When it applies" \
   bash -c 'awk "/^## When it applies/ { f = 1; next } f && /^## / { exit } f" "$1" | grep -qF "reopening D<n>: <one sentence of new evidence>"' _ "$DC_SKILL"
 
+# ============================================================
+section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines while an integrate row is open (wave-38 T3; REQ-1 AC-1.2; D20)"
+# ============================================================
+# The final card refuses to render while a reader is open, a reading is unregistered at the head, or the advance to
+# 6, 7 or 8 checks red (payload/scripts/card.sh `early`, the one owner of the three facts). The tick asks the same
+# function whenever the plan carries an open integrate row and prints its line as advice, `poker: CARD-EARLY —
+# <reason>`, beside the WAIT lines; it refuses nothing and writes nothing for it.
+# FIXTURE FIDELITY: §CHECK's world and plan at current: 8, with a reads table after the matrix: T1 landed, the
+# integrate row T3 pending on the two approvals and head. The red fact is the Step-7 line naming no adr, rca or n/a,
+# a refusal no default of the card settles, so `current 7 --check` refuses while `current 6 --check` holds.
+# fails-when: the tick stays silent while a fact fails; it says CARD-EARLY on a settled run, or with no open
+# integrate row; its line is not the card's own.
+ET_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+et_plan() {  # <proof lines> <integrate status> [<sed edit>] -> PCK at current: 8 with a reads table, bound to this session
+  ck_plan 8 "$1" "${3:-}"; new_roster "$RCK"
+  { printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
+    printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | %s | approval:release, approval:merge, head |\n' "$2"
+  } >> "$PCK"
+}
+ET_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
+et_plan "$CK_GOOD" pending '/n\/a: no decision/d'
+ET_EARLY="$( ( cd "$RCK" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$ET_CARD" early "$PCK" ) 2>&1 )"
+expect_eq "ET-0 precondition: card.sh early names the red check on this plan" "CARD-EARLY — current 7 --check: would refuse" "$ET_EARLY"
+forget_digest "$RCK"
+poke "$RCK" tick
+expect_contains "ET-1 the tick says the card's line as advice, an integrate row open and current 7 --check red" \
+  "poker: CARD-EARLY — current 7 --check: would refuse" "$OUT"
+expect_contains "ET-1b …beside the integrate row's WAIT line" "poker: WAIT T3" "$OUT"
+expect_eq "ET-1c …once" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'CARD-EARLY')"
+et_plan "$CK_GOOD" pending
+forget_digest "$RCK"
+poke "$RCK" tick
+expect_contains "ET-2 on a settled run the tick still says the integrate row's WAIT line" "poker: WAIT T3" "$OUT"
+expect_absent "ET-2b …and no CARD-EARLY" "CARD-EARLY" "$OUT"
+et_plan "$CK_GOOD" landed '/n\/a: no decision/d'
+forget_digest "$RCK"
+poke "$RCK" tick
+expect_contains "ET-3 with no open integrate row the tick still answers" "poker:" "$OUT"
+expect_absent "ET-3b …and says no CARD-EARLY, the red check notwithstanding" "CARD-EARLY" "$OUT"
+POKE_BOUND="$ET_BOUND_WAS"
+
 finish

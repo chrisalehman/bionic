@@ -563,6 +563,16 @@ expect_contains "15e: the release text waits on the plan alone" 'approval:plan' 
 expect_contains "15f: approvals sit on the integrate row" "integrate" "$_or_rl"
 expect_contains "15g: …the release approval among them" 'approval:release' "$_or_rl"
 expect_contains "15h: …and the merge approval" 'approval:merge' "$_or_rl"
+# THE ONE-STOP RULE (wave-38 T3; D18, D19, AC-1.6): the release row lands after the readers, covered by its own
+# check, and its approvals are options on the final card; no rendered skill keeps a card per approval.
+expect_contains "15k: the release row lands after the readers" "the release row lands after them, covered by its own check" "$_or_rl"
+expect_contains "15l: …and each approval is an option on the final card" "each an option on the final card" "$_or_rl"
+_or_gone='keeps its own card\|keeps its card\|never wait on the release text'
+expect_eq "15m: AC-1.6 no skill keeps a card per approval, nor holds the readers off the release text" "" \
+  "$(cd "$REPO" && /usr/bin/grep -rn "$_or_gone" skills/ payload/skills/decision 2>/dev/null)"
+printf 'An approval keeps its own card.\n' > "$TMPROOT/or-gone.md"
+expect_contains "15n: …the same grep finds the retired sentence in a fixture (not vacuous)" "keeps its own card" \
+  "$(/usr/bin/grep -rn "$_or_gone" "$TMPROOT/or-gone.md")"
 # THE PAIRED NEGATIVE, on a fixture: the reader finds a last paragraph that is not the floor.
 _or_fix="$TMPROOT/step6-fixture.md"
 printf 'first\n\n**The floor.** a one whole run, last act.\n\n**Then.** something else.\n' > "$_or_fix"
