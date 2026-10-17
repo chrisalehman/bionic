@@ -6010,10 +6010,17 @@ section "§WITNESS: a session's words count only when the project witnesses the 
 # witness, `refused: <sid> (<reason>)`, beside `read: <sids>`. The threat is a hand or an agent appending a
 # plan line, not a forger editing the config directory (spec §5).
 #
+# A WITNESS IS A BINDING ACT (wave-38 T20; REQ-11 AC-11.2, L6; A-orch-59). Before either of those, the line itself
+# must be one a binding act wrote: lib/binding.sh `bind_sessions <plan> <root>` admits a `- session:` line only
+# when `<root>/.bionic/tmp/engaged-<sid>.state` names this plan; any other line is refused `(no binding act)`.
+# WITNESS-4 is the hand-added line with both D9 witnesses in place, refused; WITNESS-6 is the same session's line
+# written by the real `bind` (lib/binding.sh `bind_plan ... bind`), its marker present, admitted by all three verbs.
+#
 # FIXTURE FIDELITY. §FX's shape: a real repository on its working branch, the plan and its registered reading
 # in their writers' shapes (proof.sh `proof_line`), a matrix row with its block, the session bound by the real
 # `bound_marker`, a writer row from the production row writer for `rule`. The other session's `- session:` line
-# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`). Every transcript is the
+# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`); WITNESS-B replaces it with
+# the line the real `bind` writes, beside the marker it writes. Every transcript is the
 # CLI's typed-prompt shape (tests/fixtures/transcript-move/typed.jsonl) under a config dir of this section's;
 # the load record is session-start's shape (`root=`, `started=`, `cwd=`).
 WT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
@@ -6105,8 +6112,38 @@ expect_eq "WITNESS-0 precondition: the fixture root's transcript directory name 
   "$(printf '%s' "$RWT" | sed 's/[^a-zA-Z0-9]/-/g')" "$WT_SLUG"
 expect_eq "WITNESS-0b precondition: the plan records the other session (bind_sessions reads the hand-added line)" "$WT_X" \
   "$(bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2"' _ "$WT_LIB" "$PWT" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+wt_witnesses() {  # [<lib dir>] -> bind_sessions <plan> <root>: the lines admitted bare, the refused with their reason
+  bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2" "$3"' _ "${1:-$WT_LIB}" "$PWT" "$RWT" 2>/dev/null | tr '\n' '|' | sed 's/|$//'
+}
+expect_eq "WITNESS-0c §WITNESS AC-11.2 …and, asked under this root, refuses it: no binding act wrote it (no marker of the session's names the plan)" \
+  "$WT_X (no binding act)" "$(wt_witnesses)"
+expect_false "WITNESS-0d precondition: the other session has no marker under this root" test -e "$RWT/.bionic/tmp/engaged-$WT_X.state"
 
-# ---------- AC-5.1: the words under another project's directory, the session bound and loaded here ----------
+# ---------- AC-11.2: the hand-added line, both of D9's witnesses in place: refused, no binding act ----------
+wt_x_at "$WT_SLUG"; wt_loaded "$WT_X"
+wt_try "WITNESS-4" 1
+expect_eq "WITNESS-4 §WITNESS AC-11.2 a hand-added line naming a session with its transcript and load record here: finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-4b …naming the session and the witness it lacks: no binding act" "refused: $WT_X (no binding act)" "$WT_OUT_M"
+expect_contains "WITNESS-4c …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-4d waive-row refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-4e …naming no binding act" "refused: $WT_X (no binding act)" "$WT_OUT_W"
+expect_eq "WITNESS-4f rule --words refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-4g …naming no binding act" "refused: $WT_X (no binding act)" "$WT_OUT_R"
+
+# ---------- the line a binding act writes: the hand-added line removed, the real `bind` writes it and its marker ----------
+wt_bind() {  # -> "<rc>|<BIND_SESSION>": lib/binding.sh bind_plan <root> <other sid> <plan> bind, as `session-poker.sh bind` calls it
+  bash -c '. "$1/run.sh" && . "$1/binding.sh" || exit 9; bind_plan "$2" "$3" "$4" bind; st=$?; printf "%s|%s" "$st" "${BIND_SESSION:-}"' \
+    _ "$WT_LIB" "$RWT" "$WT_X" "$PWT" 2>/dev/null
+}
+WT_PLAN_TXT="$(/usr/bin/grep -v "^- session: $WT_X " "$PWT")"; printf '%s\n' "$WT_PLAN_TXT" > "$PWT"
+expect_eq "WITNESS-B0 precondition: the hand-added line is gone from the plan" "0" "$(/usr/bin/grep -c "^- session: $WT_X " "$PWT")"
+expect_eq "WITNESS-B1 the real bind binds the other session (exit 0) and records its line" "0|recorded" "$(wt_bind)"
+expect_regex "WITNESS-B2 …the line is the binding act's, by bind" "^- session: $WT_X bound [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z by bind\$" \
+  "$(/usr/bin/grep "^- session: $WT_X " "$PWT")"
+expect_eq "WITNESS-B3 …and its marker names this plan" "plan=$PWT" "$(/usr/bin/grep -m1 '^plan=' "$RWT/.bionic/tmp/engaged-$WT_X.state" 2>/dev/null)"
+expect_eq "WITNESS-B4 §WITNESS AC-11.2 bind_sessions under this root admits the line a bind wrote" "$WT_X" "$(wt_witnesses)"
+
+# ---------- AC-5.1: the words under another project's directory, the session bound (WITNESS-B) and loaded here ----------
 wt_x_at -other-project; wt_loaded "$WT_X"
 expect_contains "WITNESS-1-pre precondition: the other project's transcript carries the move's words, as a raw read finds them" \
   "$WT_WM" "$(cat "$WT_CFG/projects/-other-project/$WT_X.jsonl")"
@@ -6137,18 +6174,18 @@ expect_contains "WITNESS-3e …naming the missing state" "refused: $WT_X (no loa
 expect_eq "WITNESS-3f rule --words refused (exit 2)" "2" "$WT_RC_R"
 expect_contains "WITNESS-3g …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_R"
 
-# ---------- both witnesses: accepted, by all three ----------
+# ---------- the binding act and both witnesses: accepted, by all three ----------
 wt_loaded "$WT_X"
-wt_try "WITNESS-4" 0
-expect_eq "WITNESS-4 §WITNESS the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
-expect_regex "WITNESS-4b …quoting the words with the session they came from" \
+wt_try "WITNESS-6" 0
+expect_eq "WITNESS-6 §WITNESS AC-11.2 the line a bind wrote, its marker, the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
+expect_regex "WITNESS-6b …quoting the words with the session they came from" \
   "^moved: $WT_REC/adv\\.md#1 to=defer by=Dana Fixture at=[0-9T:Z-]+ words=\"$WT_WM\" session=$WT_X why=" \
   "$(/usr/bin/grep -F "moved: $WT_REC/adv.md#1 " "$PWT")"
-expect_eq "WITNESS-4c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
-expect_contains "WITNESS-4d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
-expect_eq "WITNESS-4e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
+expect_eq "WITNESS-6c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
+expect_contains "WITNESS-6d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
+expect_eq "WITNESS-6e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
 poke "$RWT" rulings wt-crit
-expect_contains "WITNESS-4f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
+expect_contains "WITNESS-6f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
 
 # ---------- the start cwd: a session started in a subdirectory files its transcript under that name ----------
 wt_x_at "$WT_SUBSLUG"; wt_loaded "$WT_X" "$RWT/sub"
@@ -6175,6 +6212,15 @@ expect_eq "WITNESS-mut0 the mutant differs from the library by the one state che
 expect_eq "WITNESS-mut1 the shipped library refuses the session with no load record" "1||$WT_X (no loaded-$WT_X.state)" "$(wt_said "$WT_LIB" "$WT_WM")"
 expect_eq "WITNESS-mut2 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-3 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUT" "$WT_WM")"
 wt_loaded "$WT_X"
+# The binding act's falsifier: a copy of binding.sh whose refusal admits the line instead. With the marker gone the
+# line reads as the hand-added one; the shipped library refuses it, the mutant reads it. WITNESS-4 goes red under it.
+WT_MUTB="$TMPROOT/wt-mutb"; mkdir -p "$WT_MUTB"; cp "$WT_LIB"/*.sh "$WT_MUTB/"
+anchor file payload/scripts/lib/binding.sh 'printf '"'"'%s (no binding act)\n'"'"
+/usr/bin/sed 's/printf '"'"'%s (no binding act)\\n'"'"'/printf '"'"'%s\\n'"'"'/' "$WT_LIB/binding.sh" > "$WT_MUTB/binding.sh"
+rm -f "$RWT/.bionic/tmp/engaged-$WT_X.state"; wt_x_at "$WT_SLUG"
+expect_eq "WITNESS-mut3 the binding mutant differs from the library by the one refusal" "1" "$(diff "$WT_LIB/binding.sh" "$WT_MUTB/binding.sh" | /usr/bin/grep -c '^<')"
+expect_eq "WITNESS-mut4 the shipped library refuses the line no marker backs" "1||$WT_X (no binding act)" "$(wt_said "$WT_LIB" "$WT_WM")"
+expect_eq "WITNESS-mut5 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-4 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUTB" "$WT_WM")"
 
 POKE_BOUND="$WT_BOUND_WAS"
 if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi

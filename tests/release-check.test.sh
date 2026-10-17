@@ -13,6 +13,12 @@
 #   §REFUSE         no list path, and a pair that cannot be read, are one-line refusals.
 #   §SCAN           the name scan still runs under it: a listed entry planted in a committed
 #                   file fails the check, beside the clean run on the same repository.
+#   §LIMITS         the Known limits of the release being shipped (wave-38 T20; REQ-11 AC-11.4, L8): for the
+#                   newest heading, the plan whose `release:` names it is read, and every open deferral's
+#                   `stated=` sentence must stand under that entry's `### Known limits`. One omitted sentence
+#                   exits 1 in one line naming it; all present is green; a sentence elsewhere in the entry or
+#                   only under an older entry is an omission; no stated deferral, and no plan naming the
+#                   release, each pass with one `known-limits:` line saying so.
 #   §STRIKE         the 1.17.0 block against the strike list of ten (wave-34 REQ-6, AC-6.1, AC-6.2,
 #                   AC-1.5): each of the ten 1.16.0 Known limits is struck with a record or carried
 #                   with a sentence that says why, no other 1.16.0 bullet vanishes, the count of
@@ -170,6 +176,84 @@ run_check "$R"
 expect_status "(e) a listed entry planted in a committed file: the check fails" 1 "$RC"
 expect_contains "(e) …and the scan's hit line is in the output" "HIT entry=1" "$OUT"
 expect_absent "(e) …and the entry itself is never printed" "$ENTRY" "$OUT"
+
+section "§LIMITS — the shipped release's Known limits carry every deferred sentence of its plan (wave-38 T20; REQ-11 AC-11.4)"
+
+# FIXTURE FIDELITY: a real repository whose committed CHANGELOG's newest entry has a `### Known limits` part, and
+# the run's plan on disk under the project's docs root (never committed, as `.bionic/` is ignored in a real
+# project), in the shapes the writers write: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
+# `## SDLC State` with the ` stated="…"` field `finding-stated` appends (a `"` written `\"`, a `\` written `\\`).
+# Four deferrals: #1 and #2 stated and deferred by the policy, #3 deferred and unstated, #4 stated but rated fix
+# (S2 on under S1,S2-on), so only #1 and #2 are held. SYNTHESIZED: the sentences, the versions, the records.
+LIM_A='The first limit says "quoted" words and a back\slash.'
+LIM_B='The second limit is long enough that a changelog wraps it across two lines.'
+lim_plan() {  # <repo> <release> [<deferred lines>] -> the run's plan under the repository's docs root
+  local d="$1/.bionic/docs/plans/epic-01"
+  mkdir -p "$d"
+  { printf -- '---\nfix-policy: S1,S2-on\nrelease: %s\n---\n\n# fixture run\n\n## SDLC State\n\ncurrent: 7\n' "$2"
+    printf '%s\n' "${3-}"
+    printf '\n## Tasks\n'; } > "$d/wave-01.plan.md"
+}
+LIM_DEFERRED='deferred: record/w/critic.md#1 S3 on "a first title" stated="The first limit says \"quoted\" words and a back\\slash."
+deferred: record/w/critic.md#2 S3 on "a second title" stated="The second limit is long enough that a changelog wraps it across two lines."
+deferred: record/w/critic.md#3 S3 on "an unstated one"
+deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
+lim_changelog() {  # <repo> <Known limits body of 2.3.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.3.4
+  { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
+    printf '## 0.0.1 — 2026-01-01\n\n- first\n%s\n' "${3-}"; } > "$1/CHANGELOG.md"
+  git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the changelog"
+}
+LIM_BOTH="- Known limit: $LIM_A
+- Known limit: The second limit is long enough that a changelog
+  wraps it across two lines."
+
+R="$TMP/lim-ok"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"; lim_changelog "$R" "$LIM_BOTH"
+expect_contains "(l0) setup: the committed entry carries the first sentence as the plan states it, unescaped" "$LIM_A" "$(git -C "$R" show HEAD:CHANGELOG.md)"
+expect_false "(l0) setup: the plan is not committed (it is read from the docs root, as a real project's is)" git -C "$R" cat-file -e "HEAD:.bionic/docs/plans/epic-01/wave-01.plan.md"
+run_check "$R"
+expect_status "(l1) every stated deferral under the newest entry's Known limits, one of them wrapped: the check passes" 0 "$RC"
+expect_contains "(l1) …saying how many sentences of which plan it held" "known-limits: 2.3.4 carries the 2 deferred sentences of $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md" "$OUT"
+expect_eq "(l1) …and no release-check line" "0" "$(lines_of "$OUT")"
+
+R="$TMP/lim-omit"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: $LIM_A"
+run_check "$R"
+expect_status "(l2) §LIMITS AC-11.4 Known limits omitting one stated sentence: the check fails" 1 "$RC"
+expect_contains "(l2) …in a line naming the release, the finding and the sentence" \
+  "release-check: Known limits of 2.3.4 omit the deferred sentence of record/w/critic.md#2: $LIM_B" "$OUT"
+expect_eq "(l2) …in one line" "1" "$(lines_of "$OUT")"
+expect_absent "(l2) …and the sentence it holds is not named" "$LIM_A" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check:')"
+
+R="$TMP/lim-elsewhere"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+{ printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change: %s\n\n### Known limits\n\n- Known limit: %s\n\n' "$LIM_B" "$LIM_A"
+  printf '## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "the sentence outside Known limits"
+run_check "$R"
+expect_status "(l3) the sentence in the entry but outside its Known limits: the check fails" 1 "$RC"
+expect_contains "(l3) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
+
+R="$TMP/lim-older"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+lim_changelog "$R" "- Known limit: $LIM_A" "
+### Known limits
+
+- Known limit: $LIM_B"
+run_check "$R"
+expect_status "(l4) the sentence only under an older entry's Known limits: the check fails" 1 "$RC"
+expect_contains "(l4) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
+
+R="$TMP/lim-none"; fx_repo "$R" 2.3.4 2.3.4
+lim_plan "$R" 2.3.4 'deferred: record/w/critic.md#3 S3 on "an unstated one"'; lim_changelog "$R" "- Known limit: none of note."
+run_check "$R"
+expect_status "(l5) a plan with no stated deferral: the check passes" 0 "$RC"
+expect_contains "(l5) …in one line saying so" "known-limits: 2.3.4 — $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md states no deferred sentence" "$OUT"
+expect_eq "(l5) …one such line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits:')"
+
+R="$TMP/lim-noplan"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.3 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: none of note."
+run_check "$R"
+expect_status "(l6) no plan names the release (the plan names 2.3.3): the check passes" 0 "$RC"
+expect_contains "(l6) …in one line saying so" "known-limits: 2.3.4 — no plan under $(cd "$R" && pwd -P)/.bionic/docs names release: 2.3.4, so no deferred sentence is held" "$OUT"
+lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+run_check "$R"
+expect_status "(l6) …positive, the same repository once the plan names 2.3.4: the omissions fail it" 1 "$RC"
+expect_eq "(l6) …one line for each of the two sentences" "2" "$(lines_of "$OUT")"
 
 section "§STRIKE — the 1.17.0 block against the strike list of ten (AC-6.1, AC-6.2, AC-1.5)"
 
