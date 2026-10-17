@@ -2563,7 +2563,14 @@ printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-b
 DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
 expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \
   "$DL_CRC|$(cat "$SANDBOX/dl-card.err")"
-expect_contains "DEBT-LINES-4b …listing the corrected debt line among the inherited ones" "hole_x hole" "$DL_CARD"
+# ONE LINE OF COUNTS (wave-38 T17; D5, AC-10.1): the card counts the continuation's deferred and debt lines and
+# prints none of them; DEBT-LINES-4's exit 0 is the proof the corrected line parses.
+DL_N="$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c -e '^deferred: ' -e '^debt: ' | tr -d ' ')"
+expect_eq "DEBT-LINES-4a precondition: the continuation carries the three debt lines among its inherited ones" "3" \
+  "$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c '^debt: ' | tr -d ' ')"
+expect_contains "DEBT-LINES-4b …and the card counts every one of its lines in one Inherited line" \
+  "Inherited  ${DL_N} inherited · 0 adopted · 0 carried · 0 closed · listed in" "$DL_CARD"
+expect_absent "DEBT-LINES-4c …printing none of them, the corrected debt line included" "hole_x hole" "$DL_CARD"
 
 # ============================================================
 section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
