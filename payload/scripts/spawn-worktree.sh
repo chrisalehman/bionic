@@ -190,7 +190,8 @@ ready   the writer's landing, run from the row's own tree. Refuses a tree
         (exit 0). A red suite returns the row, printing RED and its log; a
         conflict with the accepted head prints CONFLICT (exit 1). With
         --within, a suite whose promised seconds exceed the time left is
-        not started: WAITING and the same command to run again (exit 75).
+        not started: WAITING and the same command to run again (exit 75),
+        then "waiting: <reason>", what held the row when its time ran out.
 USAGE
 }
 
@@ -546,8 +547,9 @@ cmd_land() {
 # once, enters the row in the line and carries it: the candidate built, each suite the row lands on
 # run through the gate, published when green and first in line (lib/line.sh `line_ready`). Exit 0
 # `LANDED <row> <commit>` and the owed line; 1 `RED`, `CONFLICT` or `GUARD`; 75 `WAITING` with the
-# same command to run again; 2 a refusal. `--within <seconds>` bounds it: no suite starts whose
-# promised seconds exceed the time left.
+# same command to run again, then `waiting: <reason>` (wave-38 T31; A-orch-43: a landing never waits in
+# silence), both passed through as line.sh prints them; 2 a refusal. `--within <seconds>` bounds it: no
+# suite starts whose promised seconds exceed the time left.
 cmd_ready() {
   local within="" has_within=0 lib sid root tree self again
   while [ "$#" -gt 0 ]; do

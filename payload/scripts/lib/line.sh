@@ -772,6 +772,7 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   }
   [ -z "$within" ] || deadline=$(( $(_res_now) + 10#$within ))   # decimal: `08` is eight seconds
   LINE_SID="$sid"   # the session the publish's plan write and roster mark run under (T6)
+  _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
 }
 
@@ -812,7 +813,26 @@ _line_review_born() {  # <plan>
   n="$(units_born "$1" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
   printf 'review-born rows: %s of cap %s\n' "$n" "$cap"
 }
-_line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
+# A LANDING NEVER WAITS IN SILENCE (wave-38 T31; D21, D22; A-orch-43): every WAITING line is followed by
+# `waiting: <reason>`, what held the row when its time ran out. The WAITING line itself is unchanged.
+_line_waiting() {  # <row> <the same command> [<reason>]
+  printf 'WAITING %s — run again: %s\n' "$1" "$2"
+  printf 'waiting: %s\n' "${3:-the time in --within ${_LINE_WITHIN:-} ran out}"
+}
+# The reasons the line's own checks and the gate give (A-T31-6), one sentence each.
+_line_time_why() {  # <suite> <deadline> [<landing tree>] -> a suite's promise against the time left
+  local p s
+  _gate_store >/dev/null 2>&1
+  p="$(_gate_promise "$1" "${3:-}" 2>/dev/null)"; s="${p##*:}"
+  printf 'suite %s promises %ss and %ss are left in --within %s' "$1" "${s:-0}" "$(( $2 - $(_res_now) ))" "${_LINE_WITHIN:-}"
+}
+_line_width_why() {  # -> the gate's answer of 0 to this landing, naming the older landing it serves
+  local o
+  o="$(gate_width_older "${_LINE_KEY:-}" 2>/dev/null)"
+  if [ -n "$o" ]; then printf 'gate answered 0 for this landing (%s is older)' "$o"
+  else printf 'gate answered 0 for this landing'
+  fi
+}
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
 # THE LANDING'S PLACE IN THE GATE'S LINE (wave-38 T30; D22; A-T6-10, A-orch-49; gate.sh THE LEASE). The
@@ -908,7 +928,16 @@ EOF
       waitbase=""
     fi
     if [ "$base" = - ] || [ "$base" = "$waitbase" ]; then
-      _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
+      if _line_late "$deadline"; then
+        if [ "$base" = - ]; then
+          c="$(printf '%s\n' "$all" | awk -F'\t' -v r="$row" '$1 == r { print a; exit } $4 == "yes" && $7 != "stalled" { a = $1 }')"
+          c="${c:-the row} ahead has no candidate"
+        else
+          c="$(printf '%s\n' "$all" | awk -F'\t' -v b="$waitbase" '$6 == b { print $1; exit }')"
+          c="conflicts with ${c:-the candidate} ahead"
+        fi
+        _line_waiting "$row" "$again" "$c"; return 75
+      fi
       sleep "$LINE_POLL"; continue
     fi
     waitbase=""
@@ -976,8 +1005,8 @@ EOF
       case "$LINE_RESULT" in
         green) _line_verdict_put "$plan" "$row" "$cand" "$s" green "$LINE_LOG" "$LINE_AT" >/dev/null
           continue ;;
-        waiting) _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
-          _line_waiting "$row" "$again"; return 75 ;;
+        waiting) c="$LINE_WHY"; _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
+          _line_waiting "$row" "$again" "$c"; return 75 ;;
         # THE BASE REPLACED: every sibling is stopped with its suite (a run the gate had begun is discarded).
         replaced) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
           continue 2 ;;
@@ -997,8 +1026,8 @@ EOF
       _line_red_owner "$plan" "$rec" "$row" "$cbase" "$s" "$c" "$debt" "$deadline" "$cand"
       case "$LINE_RED" in
         declared|standing) [ -z "$_LINE_REPASS" ] || continue 2 ;;
-        waiting) _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
-          _line_waiting "$row" "$again"; return 75 ;;
+        waiting) c="$LINE_WHY"; _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
+          _line_waiting "$row" "$again" "$c"; return 75 ;;
         replaced) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
           continue 2 ;;
         gate) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
@@ -1010,7 +1039,12 @@ EOF
     done
     # 4. THE PUBLISH, once first in line on the accepted head (line_publish asks both again, locked).
     if [ "$first" != "$row" ] || [ "$cbase" != "$head" ]; then
-      _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
+      if _line_late "$deadline"; then
+        if [ "$first" != "$row" ]; then c="not first in line (${first:-none} first)"
+        else c="candidate base ${cbase:0:12} is not the head ${head:0:12}"
+        fi
+        _line_waiting "$row" "$again" "$c"; return 75
+      fi
       sleep "$LINE_POLL"; continue
     fi
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
@@ -1025,7 +1059,10 @@ EOF
       5) printf '%s\n' "$said"; return 1 ;;
       *) printf '%s\n' "$said"; return 2 ;;
     esac
-    _line_late "$deadline" && { _line_waiting "$row" "$again"; return 75; }
+    if _line_late "$deadline"; then
+      c="$(printf '%s\n' "$said" | awk 'NF { print; exit }')"
+      _line_waiting "$row" "$again" "publish: ${c:-rc ${rc}}"; return 75
+    fi
     sleep "$LINE_POLL"
   done
 }
@@ -1285,33 +1322,39 @@ _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite>
     sleep "$LINE_POLL"
   done
   wait "$rp" 2>/dev/null
-  _line_prove_end "$res"
+  _line_prove_end "$res" "${7##*/}"
 }
 # ONE RUNNER STARTED on <tree> (wave-37 T1): sets LINE_LOG, LINE_RES (the runner's result file) and LINE_RP
 # (its pid); LINE_RESULT=waiting, and nothing started, when the suite's promised seconds are not left
 # (`_line_time_for`, D3), which is checked before each runner is asked.
 _line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
   local within=""
-  LINE_RESULT=""; LINE_RP=""; LINE_RES=""; LINE_AT=-; LINE_LOG="$(_line_suite_log "$1" "$2" "$5" "$3")"
-  if [ -n "$6" ]; then within="$(_line_time_for "${5##*/}" "$6" "$4")" || { LINE_RESULT=waiting; return 0; }; fi
+  LINE_RESULT=""; LINE_WHY=""; LINE_RP=""; LINE_RES=""; LINE_AT=-; LINE_LOG="$(_line_suite_log "$1" "$2" "$5" "$3")"
+  if [ -n "$6" ]; then
+    within="$(_line_time_for "${5##*/}" "$6" "$4")" \
+      || { LINE_RESULT=waiting; LINE_WHY="$(_line_time_why "${5##*/}" "$6" "$4")"; return 0; }
+  fi
   # THE LOG CLAIMED BEFORE THE RUNNER STARTS: a sibling started next (the same suite named twice, by path
   # and by name) is then given the next free path, never this one.
   : > "$LINE_LOG"; LINE_RES="${LINE_LOG%.log}.run"; : > "$LINE_RES"
   # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
   # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).
   bionic_job bash -c '. "$1/line.sh" && _line_load_gate && shift && _line_runner "$@"' _ \
-    "$_LINE_LIB_DIR" "$5" "$within" "$4" "$LINE_LOG" "$LINE_RES" "${LINE_ME%%:*}" "${_LINE_KEY:-}"
+    "$_LINE_LIB_DIR" "$5" "$within" "$4" "$LINE_LOG" "$LINE_RES" "${LINE_ME%%:*}" "${_LINE_KEY:-}" "$1"
   LINE_RP="$BIONIC_JOB_PID"
 }
 # An ended runner's result, LINE_LOG its log: LINE_RESULT green | red | none by `_line_verdict`, or waiting |
 # gate when the gate did not admit it (LINE_LOG then says why); LINE_AT its admission's epoch, `-` when it
 # was not admitted. Its result file is removed.
-_line_prove_end() {  # <result file>
-  local r
+_line_prove_end() {  # <result file> [<suite>]
+  local r p
   LINE_AT="$(_line_run_at "$1")"
   r="$(sed -n 's/^gate=//p' "$1" 2>/dev/null)"
   if [ -n "$r" ]; then
-    if [ "$r" = 75 ]; then LINE_RESULT=waiting; else LINE_RESULT=gate; LINE_LOG="gate_ask rc ${r}"; fi
+    if [ "$r" = 75 ]; then
+      LINE_RESULT=waiting; _gate_store >/dev/null 2>&1; p="$(_gate_promise "${2:-}" 2>/dev/null)"
+      LINE_WHY="gate did not admit ${2:-the suite} before its promised ${p##*:}s stopped fitting in --within ${_LINE_WITHIN:-}"
+    else LINE_RESULT=gate; LINE_LOG="gate_ask rc ${r}"; fi
   else
     LINE_RESULT="$(_line_verdict "$(sed -n 's/^rc=//p' "$1" 2>/dev/null)" "$LINE_LOG")"
   fi
@@ -1385,7 +1428,7 @@ _line_room_one() {  # <plan> <rec> <row> <cbase> <deadline>
     _line_ask; rc=$?
     [ "$rc" -ne 0 ] || [ "$_LINE_GRANT" -lt 1 ] || return 0
     [ "$rc" -le 1 ] || { LINE_RESULT=gate; LINE_LOG="gate_width_ask rc ${rc}"; return 1; }
-    _line_late "$5" && { LINE_RESULT=waiting; return 1; }
+    _line_late "$5" && { LINE_RESULT=waiting; LINE_WHY="$(_line_width_why)"; return 1; }
     _line_replaced "$2" "$1" "$3" "$4" && { LINE_RESULT=replaced; return 1; }
     sleep "$LINE_POLL"
   done
@@ -1468,7 +1511,7 @@ _line_drain_next() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <d
     if [ "$_LINE_DH" -ge "$_LINE_DK" ]; then
       [ "$_LINE_DK" -lt "$_LINE_DN" ] || return 1
       # NOTHING RUNS AND THE GATE GAVE NOTHING (an older landing holds it): wait a poll and ask again.
-      if _line_late "$7"; then LINE_SUITE="${_LINE_DS[$_LINE_DK]}"; LINE_RESULT=waiting; return 0; fi
+      if _line_late "$7"; then LINE_SUITE="${_LINE_DS[$_LINE_DK]}"; LINE_RESULT=waiting; LINE_WHY="$(_line_width_why)"; return 0; fi
       if _line_replaced "$2" "$1" "$3" "$5"; then LINE_RESULT=replaced; return 0; fi
       sleep "$LINE_POLL"; continue
     fi
@@ -1477,7 +1520,7 @@ _line_drain_next() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <d
     if [ "$p" = - ]; then _LINE_DH=$((i + 1)); LINE_RESULT=judge; return 0; fi
     if _line_drain_ended "$i"; then
       wait "$p" 2>/dev/null; _LINE_DH=$((i + 1)); _LINE_ASK=1; LINE_WIDTH="${_LINE_DW[$i]}"
-      _line_prove_end "${_LINE_DR[$i]}"; return 0
+      _line_prove_end "${_LINE_DR[$i]}" "${LINE_SUITE##*/}"; return 0
     fi
     # A RUN ENDED OUT OF ORDER frees its width too: ask again before the next start.
     live="$(_line_drain_live)"
@@ -1537,11 +1580,13 @@ LINE_LS
 # The runner's body, in its own `bash -c`: ask, run, sample the gate while the suite runs (a locked
 # read raises the run's peak), end the request with the suite's code. It stops its suite if the
 # carrier is gone.
-# Its ask names the landing it belongs to (BIONIC_GATE_LANDING, wave-38 T6), and once admitted it files
+# Its ask names the landing it belongs to (BIONIC_GATE_LANDING, wave-38 T6) and the landing record
+# (BIONIC_GATE_RECORD, wave-38 T31: the gate ends a handed-back request once that record shows the row
+# finished), and once admitted it files
 # the gate's own admission instant for the run (`at=`), which the verdict carries as admitted= (AC-6.4).
-_line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid> [<landing key>]
+_line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid> [<landing key>] [<record>]
   local id rc p
-  id="$(BIONIC_GATE_LANDING="${7:-}" gate_ask landing "${1##*/}" ${2:+--within "$2"})"; rc=$?
+  id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "${1##*/}" ${2:+--within "$2"})"; rc=$?
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\nat=%s\n' "$id" "$(_line_admitted_at "$id")" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended
