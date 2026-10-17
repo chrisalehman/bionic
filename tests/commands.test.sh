@@ -247,4 +247,39 @@ expect_nonempty "D8a: the payload search reaches the skill (bionic:decision is f
 expect_empty "D8b: …and no shipped file names bionic:reframe" \
   "$(/usr/bin/grep -Rn 'bionic:reframe' "$PAYLOAD" 2>/dev/null)"
 
+section "§HANDOFF: /bionic:handoff is the handoff skill, by the same symlink, name and invocability as decision; it runs the verb and never writes the file by hand (wave-38 T13; AC-3.1, AC-3.3)"
+
+# The §DECISION reasoning holds here word for word: a plugin skill named `handoff` is /bionic:handoff, and a
+# same-named command file would be shadowed by it and never run. The resume side has no skill or command of its
+# own (D4): the file's last line is /bionic:canonical-sdlc <path>, the one door.
+HO_LINK="${PAYLOAD}/skills/handoff"
+HO_SKILL="${HO_LINK}/SKILL.md"
+expect_eq "HO1: payload/skills/handoff is the symlink the other shipped skills use" \
+  "../../skills/handoff" "$(readlink "$HO_LINK" 2>/dev/null)"
+expect_true "HO2: …and resolves to the skill file" test -f "$HO_SKILL"
+HO_FM="$(awk 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f { print }' "$HO_SKILL" 2>/dev/null)"
+expect_nonempty "HO3: the skill's frontmatter reads (the extractor found it)" "$HO_FM"
+expect_regex "HO4: the skill is named handoff, so it answers /bionic:handoff" '^name: handoff$' "$HO_FM"
+expect_no_regex "HO5: …and the model may invoke it (told \"I'm stepping away\", it runs)" 'disable-model-invocation' "$HO_FM"
+HO_DESC="$(printf '%s\n' "$HO_FM" | /usr/bin/grep '^description:')"
+expect_nonempty "HO6a: the description reads (the extractor found it)" "$HO_DESC"
+expect_true "HO6b: …and makes /bionic:handoff, \"handoff\", \"hand off\" and \"I'm stepping away\" its triggers" \
+  bash -c 'for t in /bionic:handoff "\"handoff\"" "\"hand off\"" "stepping away"; do printf "%s\n" "$1" | grep -qF -- "$t" || exit 1; done' _ "$HO_DESC"
+expect_regex "HO6c: …in the decision skill's shape: technique layer" '^layer: technique$' "$HO_FM"
+expect_true "HO6d: …needs: [] and loading: deferred" bash -c 'grep -qx "needs: \[\]" <<<"$1" && grep -qx "loading: deferred" <<<"$1"' _ "$HO_FM"
+expect_true "HO7: typed with no argument, it writes the run's default file" \
+  grep -qiE 'no argument.*record/<wave>/handoff\.md' "$HO_SKILL"
+expect_true "HO8: it runs the verb with the five human lines by flag" \
+  bash -c 'grep -qF "session-poker.sh handoff" "$1" && for f in --mid-flight --order --rulings --lessons --risks; do grep -qF -- "$f" "$1" || exit 1; done' _ "$HO_SKILL"
+expect_true "HO9: it never writes the file by hand" grep -qiE 'never (write|edit)s? (the|a) (handoff )?file by hand' "$HO_SKILL"
+expect_true "HO10: it ends on the file's last line, the one command to paste after /clear" \
+  grep -qF '/bionic:canonical-sdlc <path>' "$HO_SKILL"
+expect_true "HO11a: the help page names /bionic:handoff" \
+  grep -q '`/bionic:handoff`' "${PAYLOAD}/commands/help.md"
+expect_false "HO11b: no command file shadows the skill's name" test -e "${PAYLOAD}/commands/handoff.md"
+expect_nonempty "HO12: the payload path reaches the skill (bionic:handoff is read through the symlink)" \
+  "$(/usr/bin/grep -n 'bionic:handoff' "$HO_LINK/SKILL.md" 2>/dev/null)"
+expect_eq "HO13: the skill's directory holds its one Markdown file and nothing else" "SKILL.md" \
+  "$(ls "$HO_LINK/" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
 finish

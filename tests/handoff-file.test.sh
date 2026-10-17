@@ -14,7 +14,8 @@
 # plan gets the closed form `resume point: NONE — DELIVERED at …` instead of a refusal. adopt's
 # STALE note and launch-sync's HANDOFF-STALE judge the file's own written instant.
 #
-# Sections: §WRITE §CARRY §POINTER §SAFE §CLOSED §READERS. §RESUME (AC-3.3) is T13's and joins later.
+# Sections: §WRITE §CARRY §POINTER §SAFE §CLOSED §READERS, and §RESUME (AC-3.3, wave-38 T13): the one door,
+# `session-poker.sh resume <handoff.md>`, which /bionic:canonical-sdlc <handoff.md> runs first.
 #
 # FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`, as
 # session-poker-4 §HANDOFF builds it), one repository per world. The landing record and the sitrep
@@ -365,5 +366,165 @@ expect_contains "R6 a wave-37 in-place section: adopt still reads its written:" 
 poke "$HF_R" launch-sync
 expect_contains "R6b …and launch-sync marks the plan's safety line as before" \
   "- safe to exit: no — STALE: dispatched after this handoff was written: w-after at " "$(hf_section "$HF_P")"
+
+# ============================================================
+section "§RESUME: /bionic:canonical-sdlc <handoff.md> runs session-poker.sh resume <handoff.md>: bind, arm, adopt, the task list, the recap, the step file, the patrol, the tick; no resume command ships (wave-38 T13; AC-3.3; D4, D24, D13)"
+# ============================================================
+# The door is a verb the governing skill runs first when it is invoked with a handoff file's path; a /clear
+# leaves a new session that is engaged (the skill's invocation engages it) but unbound and unarmed. The verb
+# does every ritual step a script can do, in order, through the one implementation of each (bind, arm, adopt,
+# prompt, interval, tick are its own sub-verbs, run as the same session), and prints the two the model must:
+# the task list to create and the CronCreate. FIXTURE FIDELITY: §WRITE's world; the handoff written by the real
+# verb while bound; then the session made new — its marker emptied (engaged, unbound), its stamp, armed marker
+# and digest removed — beside a predecessor session's roster holding a planted open row of this plan and an open
+# owed item, the predecessor recorded on the plan as bind records it; the run's design ledger in the register's
+# grammar (D24). fails-when: a ritual step is skipped, out of order, or a resume command ships.
+hf_resume_new_session() {  # -> this session engaged and unbound, with no stamp, armed marker or digest
+  engage "$HF_R"
+  rm -f "$(stamp_of "$HF_R")" "$(armed_of "$HF_R")" "$(digest_of "$HF_R")"
+}
+hf_marker_plans() { grep -c '^plan=' "$(marker_of "$HF_R")" 2>/dev/null; }  # -> how many plan= lines the marker holds
+hf_first() {  # <text> <prefix>... -> the first line number of each prefix in <text>, space-joined ('-' when absent)
+  local text="$1" p n out=""; shift
+  for p in "$@"; do
+    n="$(printf '%s\n' "$text" | awk -v p="$p" 'index($0, p) == 1 { print NR; exit }')"
+    out="${out:+$out }${n:--}"
+  done
+  printf '%s' "$out"
+}
+hf_world resume no
+HF_PRED="5f0e2d1c-7a6b-4c3d-9e8f-0a1b2c3d4e5f"
+HF_LEDGER="$HF_R/.bionic/docs/record/wave-01-fixture/design-ledger.md"
+mkdir -p "${HF_LEDGER%/*}"
+cat > "$HF_LEDGER" <<'LEDGER'
+# design ledger — wave-01-fixture
+
+## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds
+
+## Δ1 — D2 ruled "Option 2" (Dana Fixture 2026-10-06): one door
+LEDGER
+poke "$HF_R" handoff --mid-flight 'T2 is in its ready loop'
+expect_eq "RS0 precondition: the handoff is written by the real verb while bound" "0" "$RC"
+expect_eq "RS0b precondition: …its last line is the door" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
+# The predecessor: it bound the plan, left an open writer row of this plan and an open owed item.
+awk -v s="$HF_PRED" '/^approved-by:/ { print; print "- session: " s " bound 2026-10-08T09:00:00Z by bind"; next } { print }' \
+  "$HF_P" > "$HF_P.p" && mv "$HF_P.p" "$HF_P"
+HF_PRED_ROSTER="$(roster_of "$HF_R" "$HF_PRED")"
+roster_header > "$HF_PRED_ROSTER"
+roster_row_fixture session="$HF_PRED" status=identified name=w-pred agent_id=a-w-pred-3800000000000001 \
+  subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$HF_R/.bionic/docs/record/w-pred.md" \
+  duration="45 minutes" cadence="10 minutes" plan="$HF_P" >> "$HF_PRED_ROSTER"
+printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-08T12:00:00Z|title=Approve release|reply=poker: approve release — reply with your words\n' \
+  > "$HF_R/.bionic/tmp/owed-$HF_PRED.state"
+hf_resume_new_session
+expect_eq "RS0c precondition: the new session is engaged and unbound (its marker names no plan)" "0" "$(hf_marker_plans)"
+expect_false "RS0d precondition: …and unarmed (no stamp)" test -e "$(stamp_of "$HF_R")"
+poke "$HF_R" prompt; HF_PROMPT="$OUT"
+expect_nonempty "RS0e precondition: the prompt verb prints this session's Patrol prompt" "$HF_PROMPT"
+poke "$HF_R" resume "$HF_DOOR"
+HF_RS="$OUT"
+expect_eq "RS1 resume <handoff.md> exits 0" "0" "$RC"
+expect_eq "RS2 it binds: the marker's plan= line names the plan the file names" "1" \
+  "$(grep -c '^plan=.*/\.bionic/docs/plans/epic-99-fixture/wave-01-fixture\.plan\.md$' "$(marker_of "$HF_R")" 2>/dev/null)"
+expect_contains "RS2b …saying so (bind's own line)" "poker: bound " "$HF_RS"
+expect_true "RS3 it arms: the Patrol stamp exists" test -f "$(stamp_of "$HF_R")"
+expect_contains "RS3b …saying so (arm's own line)" "poker: armed — " "$HF_RS"
+expect_contains "RS4 it adopts: the predecessor's planted row is listed" "|name=w-pred|" "$HF_RS"
+expect_contains "RS4b …and written onto this session's roster as an adoption" "|adopted_from=$HF_PRED|" \
+  "$(grep -F '|name=w-pred|' "$(roster_of "$HF_R")" 2>/dev/null | tail -1)"
+expect_eq "RS5 the task list to rebuild: one line per step with its status from current:, then one per row with its table status" \
+  "task-list: 0: Configure · completed
+task-list: 1: Scope · completed
+task-list: 2: Design · completed
+task-list: 3: Plan · completed
+task-list: 4: Implement · in_progress
+task-list: 5: Verify · pending
+task-list: 6: Review · pending
+task-list: 7: Document · pending
+task-list: 8: Integrate · pending
+task-list: 9: Close-out · pending
+task-list: 4/T1: the first build · completed
+task-list: 4/T2: the second build · in_progress
+task-list: 4/T3: the third build · in_progress
+task-list: 4/T6: the sixth build · pending
+task-list: 5/T5: the floor · pending" "$(printf '%s\n' "$HF_RS" | grep '^task-list: ')"
+expect_eq "RS6 the recap's settled set: every ruling of this run's design ledger, through the decisions parser (D24)" \
+  'settled: D1 · "1" · Dana Fixture 2026-10-05 · the frame holds
+settled: D2 · "Option 2" · Dana Fixture 2026-10-06 · one door' "$(printf '%s\n' "$HF_RS" | grep '^settled: ')"
+expect_eq "RS7 open: the open decisions, read from every session the plan recorded" \
+  "open: approve:release — approve release — reply with your words" "$(printf '%s\n' "$HF_RS" | grep '^open: ')"
+expect_eq "RS7b owned-by-user: what only the user can give" \
+  "owned-by-user: approve:release — approve release — reply with your words" "$(printf '%s\n' "$HF_RS" | grep '^owned-by-user: ')"
+expect_eq "RS8 branch: the file's branch line, verbatim" "branch: wave/01-fixture @ $HF_WORK" "$(printf '%s\n' "$HF_RS" | grep '^branch: ')"
+expect_eq "RS8b plan: the file's plan line" "plan: $HF_PLAN_REL" "$(printf '%s\n' "$HF_RS" | grep '^plan: ')"
+expect_eq "RS8c tree: the checkout's physical path and the branch it has out" \
+  "tree: $(cd "$HF_R" && pwd -P) (checked out: $(git -C "$HF_R" symbolic-ref --short HEAD))" "$(printf '%s\n' "$HF_RS" | grep '^tree: ')"
+HF_STEP_FILE="$(cd "$(dirname "$POKER")/.." && pwd -P)/skills/canonical-sdlc/steps/4.md"
+expect_eq "RS9 step-file: the current step's file, in the plugin that runs" "step-file: $HF_STEP_FILE" \
+  "$(printf '%s\n' "$HF_RS" | grep '^step-file: ')"
+expect_true "RS9b …a file that exists" test -f "$HF_STEP_FILE"
+expect_eq "RS10 patrol: the CronCreate prompt, byte-equal to the prompt verb's" "patrol: $HF_PROMPT" \
+  "$(printf '%s\n' "$HF_RS" | grep '^patrol: ')"
+expect_regex "RS10b patrol-interval: the interval, and the ritual's order (CronList, the stray jobs deleted, CronCreate)" \
+  '^patrol-interval: every [0-9]+s.*CronList.*bionic-patrol session=.*CronCreate' "$(printf '%s\n' "$HF_RS" | grep '^patrol-interval: ')"
+expect_regex "RS11 it ticks: the tick's decision line, for this session" \
+  "^poker-tick/v1\|at=[^|]*\|session=$SID\|decision=" "$(printf '%s\n' "$HF_RS" | grep '^poker-tick/v1|')"
+HF_ORDER="$(hf_first "$HF_RS" "poker: bound " "poker: armed" "poker: w-pred (" "task-list: " "settled: " "open: " "owned-by-user: " \
+  "branch: " "plan: " "tree: " "step-file: " "patrol-interval: " "patrol: " "poker-tick/v1|")"
+expect_eq "RS12 every step is present and in the ritual's order" "yes" \
+  "$(printf '%s\n' "$HF_ORDER" | awk '{ ok = "yes"; for (i = 1; i <= NF; i++) { if ($i == "-" || (i > 1 && $i + 0 <= p)) ok = "no: field " i " of " $0; p = $i + 0 } print ok }')"
+expect_absent "RS13 a file that is not STALE prints no stale: line" "stale: " "$(printf '%s\n' "$HF_RS" | grep '^stale: ')"
+# The STALE reading: launch-sync's mark on the safe line is said, and the resume still runs (adopt is the truth).
+awk '{ l[NR] = $0 } END { for (i = 1; i <= NR; i++) print (i == NR - 1) ? "STALE — dispatched after this handoff was written: w-x at 2026-10-08 05:00 PDT (2026-10-08T12:00:00Z); rewrite it: session-poker.sh handoff" : l[i] }' \
+  "$HF_F" > "$HF_F.s" && mv "$HF_F.s" "$HF_F"
+hf_resume_new_session
+poke "$HF_R" resume "$HF_DOOR"
+expect_eq "RS14 a STALE file resumes, exit 0" "0" "$RC"
+expect_contains "RS14b …saying the file is stale, with its safe line verbatim (the RS13 extractor reads it here)" \
+  "stale: STALE — dispatched after this handoff was written: w-x" "$(printf '%s\n' "$OUT" | grep '^stale: ')"
+expect_contains "RS14c …and binding all the same" "poker: bound " "$OUT"
+
+# The closed form: a delivered run resumes nothing.
+hf_world resume-closed no
+poke "$HF_R" handoff --rulings 'D1 ruled "1"'
+awk '
+  /^current: 4$/ { print "current: 9"; next }
+  /^- T1: landed at record\/T1.md$/ { print "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"; print; next }
+  { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
+poke "$HF_R" handoff
+expect_contains "RC0 precondition: the file is the closed form" "resume point: NONE — DELIVERED at " "$(sed -n 2p "$HF_F")"
+hf_resume_new_session
+poke "$HF_R" resume "$HF_DOOR"
+expect_eq "RC1 resume on the closed form exits 0" "0" "$RC"
+expect_contains "RC2 …and prints the closed recap: line 2 verbatim" "$(sed -n 2p "$HF_F")" "$OUT"
+expect_contains "RC2b …saying nothing is resumed" "nothing to resume" "$OUT"
+expect_eq "RC3 …nothing is bound (the RS2 extractor reads 0 here)" "0" "$(hf_marker_plans)"
+expect_false "RC3b …nothing is armed" test -e "$(stamp_of "$HF_R")"
+expect_absent "RC3c …and no task list is offered (RS5 read the task-list lines through the same output)" "task-list: " "$OUT"
+
+# Refusals, each naming the fix.
+printf 'not a handoff\n/bionic:canonical-sdlc x.md\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/plain.md"
+poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/plain.md
+expect_eq "RX1 a file whose first line is not the kind line is refused, exit 2" "2" "$RC"
+expect_contains "RX1b …naming the kind line it lacks and the verb that writes one" "bionic-handoff/v1" "$OUT"
+expect_contains "RX1c …and the writer" "session-poker.sh handoff" "$OUT"
+expect_eq "RX1d …nothing is bound" "0" "$(hf_marker_plans)"
+printf 'bionic-handoff/v1\nsitrep head: (none recorded)\nplan: .bionic/docs/plans/epic-99-fixture/gone.plan.md\nbranch: wave/01-fixture @ x\nstep: 4\nsafe to clear\n/bionic:canonical-sdlc .bionic/docs/record/wave-01-fixture/gone.md\n' \
+  > "$HF_R/.bionic/docs/record/wave-01-fixture/gone.md"
+poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/gone.md
+expect_eq "RX2 a file naming a plan that is missing is refused, exit 1" "1" "$RC"
+expect_contains "RX2b …naming the missing plan" "gone.plan.md" "$OUT"
+expect_eq "RX2c …nothing is bound" "0" "$(hf_marker_plans)"
+poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/nowhere.md
+expect_eq "RX3 no file at the path is refused, exit 2" "2" "$RC"
+poke "$HF_R" resume
+expect_eq "RX4 no path is the usage error" "2" "$RC"
+
+# No resume command or skill ships: one door (D4).
+HF_PAYLOAD="${BIONIC_SCRIPTS_DIR}/payload"
+expect_eq "RN0 precondition: the listing reads the shipped commands and skills (the decision skill is found)" "1" \
+  "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c '^decision$')"
+expect_eq "RN1 ls payload/commands payload/skills has no resume" "0" \
+  "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
 
 finish
