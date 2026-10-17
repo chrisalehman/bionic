@@ -344,6 +344,7 @@ or_plan() {  # <writers> -> the fixture plan, bound by s47_plan's approval line
     "| T6 | 4 | build | alone, tying T1's chain | implementor | — | 20 | REQ-x | payload/e.sh | pending | |" >/dev/null
 }
 or_gate() { s47_lines gate | sed -n 's/^.* widths: //p'; }   # -> the gate line's widths field
+or_fill() { printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T'; }   # -> the FILL line, never its "FILL —" sentence
 or_lease() {  # <landing key> <first>:<seq> -> a lease the gate's writer opens, carried by this test's process
   bash -c '. "$1/gate.sh" && gate_landing_open "$2" "$3" 3600 "$4"' _ "$OR_LIB" "$1" "$$" "$2" >/dev/null
 }
@@ -353,9 +354,9 @@ or_ask() { bash -c '. "$1/gate.sh" && gate_width_ask "$2"' _ "$OR_LIB" "$1"; }  
 or_plan 8
 poke_pressure "$ROR" 8192 1.0 tick
 expect_eq "OR-0 the tick over the two-chain table exits 0" "0" "$RC"
-expect_nonempty "OR-0b precondition: the extractor reads the FILL line" "$(s47_lines FILL)"
+expect_nonempty "OR-0b precondition: the extractor reads the FILL line" "$(or_fill)"
 expect_eq "OR-1 AC-6.5 FILL names the longest-chain row first: T3 (120 min), then T1 and T6 (20 each, by id), where table order is T1 T3 T6" \
-  "poker: FILL T3 T1 T6" "$(s47_lines FILL)"
+  "poker: FILL T3 T1 T6" "$(or_fill)"
 expect_eq "OR-2 the CHAIN line is the long chain by hand, 30 + 40 + 50, and carries no SPLIT? (it moved to its own decision line)" \
   "poker: CHAIN T3→T4→T5 (120 min)" "$(s47_lines CHAIN)"
 expect_eq "OR-3 AC-6.5 three ready writers, a cap of 8 and room past them: width idles, and the split candidate of the chain is a decision line with its reason (T4: 1 row waits × 40 min × 1 file outscores T3's 30)" \
@@ -364,7 +365,7 @@ expect_eq "OR-3 AC-6.5 three ready writers, a cap of 8 and room past them: width
 # ---------- the trim keeps the longest chain: a gap of one offers T3, and nothing idles ----------
 or_plan 1
 poke_pressure "$ROR" 8192 1.0 tick
-expect_eq "OR-4 AC-6.5 a writer gap of one (cap 1) offers T3, never table-first T1" "poker: FILL T3" "$(s47_lines FILL)"
+expect_eq "OR-4 AC-6.5 a writer gap of one (cap 1) offers T3, never table-first T1" "poker: FILL T3" "$(or_fill)"
 expect_contains "OR-4b …T1 waits for a slot, its reason the gap" "poker: WAIT T1 — ready; no writer slot free (gap 1)" "$OUT"
 expect_absent "OR-5 …and the fill is full, so no SPLIT decision is printed (OR-4 read this same output)" "poker: SPLIT " "$OUT"
 expect_eq "OR-5b …and the CHAIN line is the same chain, no SPLIT? on it" "poker: CHAIN T3→T4→T5 (120 min)" "$(s47_lines CHAIN)"
@@ -377,17 +378,18 @@ expect_nonempty "OR-6 precondition: the gate line is printed" "$(s47_lines gate)
 expect_eq "OR-6b no lease open: the gate line ends widths: none" "none" "$(or_gate)"
 # Three leases, opened in name order with their ages reversed, so file order is not age order: LC is the oldest.
 or_lease or:w01:LA 1020:3; or_lease or:w01:LB 1010:2; or_lease or:w01:LC 1000:1
+# The widths are a gate reading, as the load is: they move no digest, so each tick below forgets it to print in full.
 expect_eq "OR-7 precondition: the gate's writer opened three lease files" "3" "$(ls "$BIONIC_GATE_DIR/leases/" | /usr/bin/grep -c '\.lease$' | tr -d ' ')"
 OR_N="$(or_ask or:w01:LC)"
 expect_eq "OR-7b precondition: the gate answers the oldest, LC, 3 by hand (8 cores at share 80 is 6.4; a load of 1.0 and 1.61 a run: 2.61, 3.22 and 4.83 fit, 6.44 does not) and the younger LB 0" \
   "3|0" "$OR_N|$(or_ask or:w01:LB)"
-poke_pressure "$ROR" 8192 1.0 tick
+forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
 expect_eq "OR-8 AC-6.5 the gate line prints each open landing in age order with the gate's answer: the oldest its width, the others 0" \
   "or:w01:LC=3,or:w01:LB=0,or:w01:LA=0" "$(or_gate)"
 expect_regex "OR-8b …on the one gate line, after room=" '^poker: gate share=.* room=(yes|no) widths: or:w01:LC=3,' "$(s47_lines gate)"
 # LC's carrier leaves it WAITING: the lease is kept but orders no one, so LB is the oldest the gate answers.
 bash -c '. "$1/gate.sh" && gate_landing_leave "$2" "$3"' _ "$OR_LIB" or:w01:LC "$$"
-poke_pressure "$ROR" 8192 1.0 tick
+forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
 expect_eq "OR-9 a lease left WAITING drops off the line, and the next oldest, LB, is answered its width" \
   "or:w01:LB=3,or:w01:LA=0" "$(or_gate)"
 rm -rf "$BIONIC_GATE_DIR/leases"

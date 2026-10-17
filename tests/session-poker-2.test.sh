@@ -1450,7 +1450,7 @@ s47_early() {  # <repo> -> the plan; writers=1
 }
 R47E="$(make_repo s46-early)"; new_roster "$R47E"; s47_early "$R47E"
 poke_pressure "$R47E" 8192 1.0 tick
-expect_contains "47k AC-6.1 at current: 4 the tick offers the doc row and the review row" "poker: FILL T2 T3" "$OUT"
+expect_contains "47k AC-6.1 at current: 4 the tick offers the doc row and the review row, the longer remaining chain first (T3 30 against T2 20; wave-38 T7, AC-6.5)" "poker: FILL T3 T2" "$OUT"
 # THE WRITER GAP CLOSED: one writer open, writers=1. The doc row is a writer and waits for a
 # slot; the review is read-only and is still offered.
 R47F="$(make_repo s46-early-full)"; new_roster "$R47F"; s47_early "$R47F"

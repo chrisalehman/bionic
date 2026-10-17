@@ -2179,7 +2179,12 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 # the stop wall's reader too) still caps. It prints ONE gate line on every tick, in place of the
 # rung, the HOLD and the EMERGENCY that came before it:
 #
-#   gate share=<n> used=<n>% load=<1m>/<5m> of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>
+#   gate share=<n> used=<n>% load=<1m>/<5m> of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no> widths: <key>=<n>[,<key>=<n>…]|none
+#
+# THE WIDTH EACH LANDING IS ANSWERED (wave-38 T7; D22, REQ-6 AC-6.5). `widths:` names every landing whose lease
+# is held (lib/gate.sh THE LEASE: from its first ask until it publishes, is returned or stalls), oldest first,
+# with what `gate_width_ask` answers it now: the oldest its width, every younger one 0 until it finishes. A
+# lease its carrier left WAITING orders no one and is not named; with none held the field is `none`.
 #
 # and, while memory is over the share, `over share — used=<n>% admitted: <keys>`. The gate
 # admits no run past memory's share, so nothing is left for a tick to stop: the line names what
@@ -2376,12 +2381,38 @@ gate_report() {  # <project root> <session id> -> sets SCHED_GATE_ROOM/SCHED_OWE
   rm="$(gate_room --owed "$SCHED_OWED" 2>/dev/null)"
   share="$(space_field "$st" share)"; used="$(space_field "$st" used)"
   SCHED_GATE_ROOM="$(space_field "$rm" room)"
-  say "gate share=${share:--} used=${used:--}% load=$(space_field "$rm" load) of $(space_field "$rm" cores) promised=$(space_field "$rm" promised) admitted=$(space_field "$st" admitted) waiting=$(space_field "$st" waiting) room=${SCHED_GATE_ROOM:-no}"
+  say "gate share=${share:--} used=${used:--}% load=$(space_field "$rm" load) of $(space_field "$rm" cores) promised=$(space_field "$rm" promised) admitted=$(space_field "$st" admitted) waiting=$(space_field "$st" waiting) room=${SCHED_GATE_ROOM:-no} widths: $(gate_widths)"
   case "$used$share" in *[!0-9]*|'') return 0 ;; esac
   [ "$used" -gt "$share" ] || return 0
   SCHED_OVER=yes
   keys="$(gate_list 2>/dev/null | awk '$2 == "admitted" && match($0, / key=/) { printf "%s%s", (n++ ? ", " : ""), substr($0, RSTART + 5) }')"
   say "over share — used=${used}% admitted: ${keys:-none}"
+}
+
+# gate_widths -> `<key>=<n>[,<key>=<n>…]` for the held landing leases, oldest first, or `none` (the gate line's
+# `widths:` field, above). The leases are read lock-free with the gate's own reader and rule (`_gate_lease_read`,
+# `_gate_lease_state`: held, away or spent), ordered as `gate_width_ask` orders them (the first-ask instant, then
+# the seq), and each is answered by `gate_width_ask` itself, so the line prints the gate's answer and never its own.
+gate_widths() {
+  local d f k n out="" held
+  declare -F gate_width_ask >/dev/null 2>&1 && declare -F _gate_lease_read >/dev/null 2>&1 \
+    && declare -F _gate_lease_state >/dev/null 2>&1 || { printf 'none'; return 0; }
+  d="$(gate_dir 2>/dev/null)"
+  [ -n "$d" ] && [ -d "$d/leases" ] || { printf 'none'; return 0; }
+  held="$(for f in "$d"/leases/*.lease; do
+      _gate_lease_read "$f" || continue
+      _gate_lease_state
+      [ "$_L_state" = held ] && printf '%s\t%s\t%s\n' "$_L_first" "$_L_seq" "$_L_landing"
+    done | sort -t "$(printf '\t')" -k1,1n -k2,2n | cut -f3)"
+  [ -n "$held" ] || { printf 'none'; return 0; }
+  while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    n="$(gate_width_ask "$k" 2>/dev/null)" || n='-'
+    out="${out}${out:+,}$(clean "$k")=${n:--}"
+  done <<GATE_WIDTHS
+$held
+GATE_WIDTHS
+  printf '%s' "${out:-none}"
 }
 
 # THE WRITERS NOT YET SHOWING (D14): the open writer rows of this tick whose agent has not asked
@@ -2482,9 +2513,17 @@ EOF
 # ` · suspect: <id> reads <holder>, shares no file — loosen it: bash <hook> task-set <id> reads=…`,
 # the loosening printed and never run. The reason keeps `clean`'s 400-character cut; the clause is
 # cleaned on its own and kept whole, because a cut `task-set` line is no command.
-# THE CHAIN NAMES ITS SPLIT CANDIDATE (wave-30 T16; REQ-12 AC-12.4, D14d): ` · SPLIT? <id> — <size> min,
-# <n> files, <k> rows wait on it`, the pending row of the chain `units_split_candidate` scores
-# highest by fan-in × size × files; absent when every pending row on it scores 0. Nothing is split.
+# THE SPLIT CANDIDATE IS A DECISION WHILE WIDTH IDLES (wave-30 T16, REQ-12 AC-12.4, D14d; wave-38 T7, D22, REQ-6
+# AC-6.5). The pending row of the chain `units_split_candidate` scores highest by fan-in × size × files is printed
+# on its own line, after the CHAIN line,
+#
+#   poker: SPLIT <id> — <size> min, <n> files, <k> rows wait on it; width idles at <w>
+#
+# only when width idles: the gate gives room, every ready writer row was offered under the cap, and the gate
+# still has room for one writer more (one `gate_room` asked past the rows offered, as `fill_gate_width` asks
+# each). <w> is the writer width this tick fills to. A full fill, or no candidate (every pending row on the
+# chain scores 0), prints no line. Through 1.20.0 it rode the CHAIN line as ` · SPLIT? …` on every tick, as
+# advice whatever the width. Nothing is split: `task-split` is the orchestrator's act.
 suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen it: bash <hook> task-set …>`, one per suspect; the one wording the WAIT line, task-add and task-set print
   units_suspect "$@" 2>/dev/null | awk -F'\t' -v hook="${HOOK_DIR}/session-poker.sh" \
     'NF >= 4 { printf "%s\t%s\t%s — loosen it: bash %s %s\n", $1, $2, $3, hook, $4 }'
@@ -2604,10 +2643,13 @@ TICK_WAIT
   line="$(printf '%s\n' "$chain" | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }')"
   ids="${line%%$'\t'*}"; mins="${line##*$'\t'}"
   [ -n "$ids" ] || return 0
+  say "CHAIN ${ids//,/→} (${mins} min)"
+  case "${SCHED_IDLE_AT:-}" in ''|*[!0-9]*) return 0 ;; esac
   split="$(units_split_candidate "$SCHED_PLAN" "$ids" "$edges" 2>/dev/null)"
-  sp_id=""
-  [ -z "$split" ] || IFS=$'\t' read -r sp_id sp_sz sp_nf sp_k <<< "$split"
-  say "CHAIN ${ids//,/→} (${mins} min)${sp_id:+ · SPLIT? $(clean "$sp_id") — ${sp_sz} min, ${sp_nf} files, ${sp_k} rows wait on it}"
+  [ -n "$split" ] || return 0
+  IFS=$'\t' read -r sp_id sp_sz sp_nf sp_k <<< "$split"
+  gate_room --owed "$SCHED_IDLE_OWED" >/dev/null 2>&1 || return 0
+  say "SPLIT $(clean "$sp_id") — ${sp_sz} min, ${sp_nf} files, ${sp_k} rows wait on it; width idles at ${SCHED_IDLE_AT}"
 }
 
 # THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19, AC-8.3). A rated reading writes the plan's
@@ -6078,14 +6120,23 @@ SWEEP_SCHEMA="poker-sweep/v1"
 #
 # and with rows, one line per landed row in the record's order:
 #
-#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s wait=<m|-> prove=<m|-> line=<m|-> width=<J|->
+#   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s|- wait=<m|-> prove=<m|-> rework=<m|-> width=<J|->
 #
-# THE SPLIT (wave-37 T9; AC-1.3, AC-3.2). The last four fields are read from the landing record alone, never from the
-# gate's requests, which are pruned after BIONIC_GATE_KEEP: wait is the row's first `ready` to its first `candidate`,
-# prove is that first `candidate` to the row's last `verdict`, line is that last `verdict` to the `published` event, all
-# since the row last landed and in minutes (%.1f). width is the `width=` on the row's verdict lines (lib/line.sh's drain
-# writes it after `log=`; the last one numeric), `-` for a row whose verdicts carry none (written before 1.20.0, or by the
-# serial line): absent, never 0. A segment missing either end prints `-`. A hand or a git landing prints all four `-`.
+# THE REPORT READS ADMISSION (wave-38 T7; D22, REQ-6 AC-6.4; it replaces wave-37 T9's ready/candidate/verdict split,
+# whose prove carried the queue time between a candidate and its runs' admission). Over a queue landing's window, the
+# row's first `ready` since it last landed to its `published`, in minutes (%.1f):
+#   prove   the union of the row's counted runs' admitted time: each verdict's `admitted=` (the gate's own admission,
+#           which lib/line.sh writes after `log=`, wave-38 T6) to the verdict's `at=`, overlapping runs counted once;
+#   rework  each `returned` (red, conflict, guard) to the row's next `ready`, less any admitted time inside it (a run
+#           discarded after the return is still proving until it ends);
+#   wait    the rest: the window less prove and rework, the time no run of the row was admitted. So wait + prove + rework
+#           is minutes, and waited (wait in seconds) never exceeds it.
+# They are read from the landing record ALONE, never from the gate's requests (A-orch-43, A-orch-51): the store's
+# asked-to-admitted tallies, summed over a landing's parallel runs, printed waited above the row's wall time, and they are
+# pruned after BIONIC_GATE_KEEP. A counted verdict with no `admitted=` (written before 1.21.0) leaves the row's wait and
+# prove uncomputable, `-` and waited=-, its rework still read from its events; `admitted=-` (no admission on record: a
+# judged red) adds no admitted time. width is the `width=` on the row's verdict lines (the drain's, the last one
+# numeric), `-` for none: absent, never 0. A hand or a git landing, or a queue landing with no ready, prints `-` for all.
 #
 # NOTHING READS THESE NUMBERS TO DECIDE (D18). The tick prints the first line outside its digest, so a
 # landing moves no decision; no hook or wall library names the report (tests/docs-pins.test.sh §W28-46).
@@ -6102,19 +6153,19 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # (T14's count). Red-then-green is a red then a green for one row,
 # one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Run
 # counts the record's `ev=run` lines, one per regression run floor-run or a detached booked.sh run recorded (wave-37
-# T4; D7, AC-6.2). Waited is a request's `admitted` less its
-# `asked`; killed is a request admitted that ended with an exit over 128 (a signal: 137 from the reaper, 143
+# T4; D7, AC-6.2). The waited median is the median of the rows' waits (THE REPORT READS ADMISSION, above), over the
+# rows that compute one, 0 when none does. Killed is the one figure read from the gate: a request admitted that ended
+# with an exit over 128 (a signal: 137 from the reaper, 143
 # from a TERMed suite) or whose holder is dead with no `ended` line, as D18 says (lib/gate.sh `_gate_open`'s
 # state, read through `_gate_read`, not retyped here; wave-28 T68, T72).
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
-# first `line/v1` event; a row's own wait is its requests by the roster name its `ready` carries, asked
-# from its first ready to its landing. Times are the events' own `at=`, never a message's.
+# first `line/v1` event. Times are the events' own `at=`, never a message's.
 #
 # UNMEASURED (wave-28 T62). A record that holds `landed:` lines and no `line/v1` event (a run open across the
 # upgrade) prints the one line `landings: unmeasured — the landing record holds no line/v1 events`, and no row.
 #
 # FAIL-SOFT. An absent or empty record is the line with zeros. A `line/v1` line this fold reads (`ready`,
-# `verdict`, `published`) that lacks a field it needs is skipped and counted, and the count is one line
+# `verdict`, `returned`, `published`) that lacks a field it needs is skipped and counted, and the count is one line
 # on stderr; an event of another kind, and every line that is not `line/v1`, is not this fold's. A
 # request line the fold does not know (`peak=`, anything newer) is ignored. The gate's lock is not
 # taken: this is a read, and a request the gate is writing reads as it stands.
@@ -6139,14 +6190,38 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       killed|dying) dead=1 ;;
       ended) case "${_R_rc:-}" in ''|*[!0-9]*) ;; *) [ "$_R_rc" -le 128 ] || dead=1 ;; esac ;;
     esac
-    reqs="${reqs}${_R_asked}	${_R_admitted}	${_R_who#*:}	${_R_tree}	${dead}
+    reqs="${reqs}${_R_asked}	${_R_admitted}	${_R_tree}	${dead}
 "
   done
   if landing_unmeasured "$rec"; then printf 'landings: unmeasured — the landing record holds no line/v1 events\n'; return 0; fi
   [ -f "$rec" ] && [ ! -L "$rec" ] || rec=/dev/null
   out="$(printf '%s' "$reqs" | awk -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK"'
     function num(s) { return s ~ /^[0-9]+$/ }
-    function seg(a, b) { return (a == "" || b == "" || b < a) ? "-" : sprintf("%.1f", (b - a) / 60) }
+    # adm <row> <lo> <hi> -> how many intervals MS/ME now hold: the admitted runs of the row clipped to [lo, hi], merged.
+    function adm(rk, lo, hi,   i, j, m, s, t) {
+      m = 0
+      for (i = 1; i <= nad[rk]; i++) {
+        s = as[rk, i]; t = ae[rk, i]; if (s < lo) s = lo; if (t > hi) t = hi
+        if (t > s) { m++; MS[m] = s; ME[m] = t }
+      }
+      for (i = 2; i <= m; i++) {
+        s = MS[i]; t = ME[i]
+        for (j = i - 1; j >= 1 && MS[j] > s; j--) { MS[j + 1] = MS[j]; ME[j + 1] = ME[j] }
+        MS[j + 1] = s; ME[j + 1] = t
+      }
+      j = 0
+      for (i = 1; i <= m; i++) {
+        if (j && MS[i] <= ME[j]) { if (ME[i] > ME[j]) ME[j] = ME[i] }
+        else { j++; MS[j] = MS[i]; ME[j] = ME[i] }
+      }
+      return j
+    }
+    # cov <a> <b> <m> -> the seconds of [a, b] the m merged admitted intervals cover.
+    function cov(a, b, m,   i, s, t, c) {
+      c = 0
+      for (i = 1; i <= m; i++) { s = (MS[i] > a) ? MS[i] : a; t = (ME[i] < b) ? ME[i] : b; if (t > s) c += t - s }
+      return c
+    }
     function sortn(a, n,   i, j, t) { for (i = 2; i <= n; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t } }
     function pct(a, n, p,   pos, lo, fr) {
       if (n == 0) return 0
@@ -6154,7 +6229,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       return (lo + 1 < n) ? a[lo + 1] + (a[lo + 2] - a[lo + 1]) * fr : a[lo + 1]
     }
     phase == 0 { split($0, q, "\t"); nq++
-      qa[nq] = q[1]; qd[nq] = q[2]; qw[nq] = q[3]; qt[nq] = q[4]; qx[nq] = q[5]; next }
+      qa[nq] = q[1]; qd[nq] = q[2]; qt[nq] = q[3]; qx[nq] = q[4]; next }
     index($0, "line/v1|") != 1 { next }
     {
       split("", kv); nf = split($0, p, "|")
@@ -6165,21 +6240,28 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
       if (ev == "candidate") hasc[g] = 1
       if (ev == "candidate" && e >= 0 && !(rk in fc)) fc[rk] = e
-      if (ev != "ready" && ev != "verdict" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
+      if (ev != "ready" && ev != "verdict" && ev != "returned" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
       if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
       if (ev == "published" && kv["kind"] !~ /^(queue|hand|git)$/) { mal++; next }
       if (t0 == "") t0 = e
       iso[e] = kv["at"]
-      if (ev == "verdict") { lv[rk] = e; if (kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"] }
+      if (ev == "verdict" && kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"]
     }
+    ev == "returned" { if (e >= 0) { nrw[rk]++; rs[rk, nrw[rk]] = e; re[rk, nrw[rk]] = "" }; next }
     ev == "ready" {
       if (!(rk in rdy)) rdy[rk] = e
-      span[rk]++; nm[rk] = (kv["name"] == "" ? "-" : kv["name"]); next
+      for (i = nrw[rk]; i >= 1 && re[rk, i] == ""; i--) re[rk, i] = e
+      span[rk]++; next
     }
     ev == "verdict" {
       if ((g in hasc) && !((g SUBSEP kv["commit"]) in ownc)) next
       res = kv["result"]; cnt[res]++; nrun[rk]++
+      # THE ADMISSION (wave-38 T7): the run was admitted from admitted= to this verdict; no field at all makes the row uncomputable.
+      if (!("admitted" in kv)) noad[rk] = 1
+      else if (num(kv["admitted"])) {
+        nad[rk]++; as[rk, nad[rk]] = kv["admitted"] + 0; ae[rk, nad[rk]] = e
+      }
       vk = rk SUBSEP span[rk] SUBSEP kv["commit"] SUBSEP kv["suite"]
       if (res == "red") red[vk] = 1
       else if (res == "green" && (vk in red)) { rtg++; delete red[vk] }
@@ -6187,40 +6269,43 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     }
     ev == "published" {
       k = kv["kind"]; kinds[k]++; n++
-      prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pe[n] = e; pruns[n] = nrun[rk] + 0
-      pfrom[n] = ((rk in rdy) ? rdy[rk] : ""); pname[n] = ((rk in nm) ? nm[rk] : "-")
+      prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pruns[n] = nrun[rk] + 0
+      pfrom[n] = ((rk in rdy) ? rdy[rk] : "")
       if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
-      # THE SPLIT, from this record alone (wave-37 T9; AC-1.3, AC-3.2): each segment needs both its ends, else `-`.
-      pw[n] = pp[n] = pl[n] = pwd[n] = "-"
-      if (k == "queue") {
-        fcn = ((rk in fc) ? fc[rk] : ""); lvn = ((rk in lv) ? lv[rk] : "")
-        pw[n] = seg(pfrom[n], fcn); pp[n] = seg(fcn, lvn); pl[n] = seg(lvn, e)
+      # THE REPORT READS ADMISSION (wave-38 T7; AC-6.4), over the window [first ready, published].
+      pws[n] = pw[n] = pp[n] = prw[n] = pwd[n] = "-"
+      if (k == "queue" && pfrom[n] != "") {
+        m = adm(rk, pfrom[n], e); pv = cov(pfrom[n], e, m); rw = 0; lt = pfrom[n]
+        for (i = 1; i <= nrw[rk]; i++) {
+          s = rs[rk, i]; t = (re[rk, i] == "") ? e : re[rk, i]
+          if (s < lt) s = lt; if (t > e) t = e
+          if (t > s) { rw += (t - s) - cov(s, t, m); lt = t }
+        }
+        prw[n] = sprintf("%.1f", rw / 60)
+        if (!(rk in noad)) {
+          ws = (e - pfrom[n]) - pv - rw; if (ws < 0) ws = 0
+          pws[n] = sprintf("%ds", ws); pw[n] = sprintf("%.1f", ws / 60); pp[n] = sprintf("%.1f", pv / 60)
+          wts[++nw] = ws
+        }
         if (rk in wd) pwd[n] = wd[rk]
       }
-      delete rdy[rk]; nrun[rk] = 0; delete nm[rk]; delete fc[rk]; delete lv[rk]; delete wd[rk]
+      delete rdy[rk]; nrun[rk] = 0; delete fc[rk]; delete wd[rk]; delete noad[rk]; nad[rk] = 0; nrw[rk] = 0
       gen[rk]++
     }
     END {
       for (i = 1; i <= nq; i++) {
         inq[i] = (t0 != "" && num(qa[i]) && qa[i] >= t0 && (qt[i] == root || index(qt[i], root "/") == 1))
-        if (!inq[i]) continue
-        if (num(qd[i])) wts[++nw] = qd[i] - qa[i]
-        if (num(qd[i]) && qx[i] == 1) killed++
+        if (inq[i] && num(qd[i]) && qx[i] == 1) killed++
       }
       wm = pct(wts, nw, 0.5)
       printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d run=%d · waited median=%ds · killed=%d\n",
         kinds["queue"], kinds["hand"], kinds["git"], pct(mins, nm2, 0.5), pct(mins, nm2, 0.75), pct(mins, nm2, 1),
         cnt["green"], cnt["red"], cnt["none"], cnt["discarded"], rtg, nrl, int(wm + 0.5), killed
       if (rows == "yes") for (r = 1; r <= n; r++) {
-        w = 0
-        if (pname[r] != "-" && pfrom[r] != "") for (i = 1; i <= nq; i++)
-          if (inq[i] && num(qd[i]) && qw[i] == pname[r] && qa[i] >= pfrom[r] && qa[i] <= pe[r]) w += qd[i] - qa[i]
         rd = "-"; mn = "-"
         if (r in pmin) { rd = iso[pfrom[r]]; mn = sprintf("%.1f", pmin[r]) }
-        pre1 = sprintf("%s %s ready=%s landed=%s minutes=%s runs=%d", prow[r], pk[r], rd, pat[r], mn, pruns[r])
-        wt = sprintf(" waited=%ds", w)
-        tl = sprintf(" wait=%s prove=%s line=%s width=%s", pw[r], pp[r], pl[r], pwd[r])
-        print pre1 wt tl
+        printf "%s %s ready=%s landed=%s minutes=%s runs=%d waited=%s wait=%s prove=%s rework=%s width=%s\n",
+          prow[r], pk[r], rd, pat[r], mn, pruns[r], pws[r], pw[r], pp[r], prw[r], pwd[r]
       }
       if (mal) printf "#malformed %d\n", mal
     }' phase=0 - phase=1 "$rec")"
@@ -12806,7 +12891,7 @@ $(run_groups "$RUN_PID")"
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
             $2 == "NOTIFY" && index($0, " started without its checks: ") > 0 { print; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY|SPLIT)$/ { print $2, $3, $4 }
             # An open check is told once (wave-28 T41; D33): a new one, or one settled, moves the hash.
             $2 == "FINDING" && $6 == "check" { print $2, $3, $6 }
           ' "$TICK_BUF" | LC_ALL=C sort
@@ -13893,7 +13978,7 @@ EOF
     # lines read it, and so does the WAITING line below the decision: "nothing ready" is said
     # only when this is empty. A row that is ready and not offered — a full writer budget, a
     # standing decline, a machine HOLD — is not "nothing ready".
-    SCHED_READY_ALL=""
+    SCHED_READY_ALL=""; SCHED_IDLE_AT=""; SCHED_IDLE_OWED=""
     if [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
       SCHED_READY_ALL="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     fi
@@ -14008,6 +14093,13 @@ EOF
       case "$SCHED_WIDTH" in ''|*[!0-9]*) SCHED_WIDTH="$TICK_OCCUPIED" ;; esac
       SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
       [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
+      # WIDTH MAY IDLE (wave-38 T7; D22, AC-6.5): the gate gave room, every ready writer row was offered, and the
+      # cap is not reached. `tick_wait_report` then asks the gate once past the rows offered (SCHED_IDLE_OWED) and
+      # prints the SPLIT decision only on its yes.
+      if [ "${SCHED_GATE_ROOM:-}" = yes ] && [ "$SCHED_GAP" -ge "$SCHED_READY_W" ] \
+         && { [ -z "$SCHED_CAP" ] || [ "$SCHED_WIDTH" -lt "$SCHED_CAP" ]; }; then
+        case "$SCHED_OWED" in ''|*[!0-9]*) ;; *) SCHED_IDLE_AT="$SCHED_WIDTH"; SCHED_IDLE_OWED=$(( SCHED_OWED + SCHED_GAP )) ;; esac
+      fi
       # A FULL WRITER BUDGET STILL OFFERS THE READ-ONLY ROWS (wave-26 T13; D9): a verify or
       # review row takes no writer slot, and `fill_ready_set` offers it whatever the gap. So
       # the set is asked at a closed gap too, and "the budget is full" is said only when it

@@ -2417,8 +2417,8 @@ expect_eq "MP-fill3 …and the FILL sentence names them: one decline of T3 answe
   "$(s74_fill)"
 R74C="$(make_repo s74-none)"; new_roster "$R74C"; s74_plan "$R74C"
 poke_pressure "$R74C" 8192 1.0 tick
-expect_eq "MP-fill4 positive, the same extractor: with nothing parked the sentence is what it was, and says nothing of a gap" \
-  "poker: FILL — T2 T3 named for dispatch; the decision line carries them." "$(s74_fill)"
+expect_eq "MP-fill4 positive, the same extractor: with nothing parked the sentence is what it was, and says nothing of a gap (its rows in chain order, T3 30 ahead of T2 20: wave-38 T7)" \
+  "poker: FILL — T3 T2 named for dispatch; the decision line carries them." "$(s74_fill)"
 # THE MUTANT: the parked ids dropped from the sentence (a doctored copy of the hook, its siblings and library linked in).
 MP_HROOT="$(mktemp -d "$TMPROOT/mp-hook.XXXXXX")"; mkdir -p "$MP_HROOT/hooks" "$MP_HROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/scripts/lib"
