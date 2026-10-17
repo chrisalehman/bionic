@@ -40,6 +40,7 @@
 #                    first=<epoch>  the first-ask instant, kept across the landing's re-entries
 #                    seq=<n>  the order leases were opened in, ties of first broken by it
 #                    span=<seconds>  how long a lease nobody carries is kept   left=<epoch>  when it was left
+#                  and leases/seq, the last seq given: a counter, so no seq is given twice
 #   idle           the memory reading taken the last time nothing admitted was unfinished
 #   lock/          the directory lock every decision is taken under (pid and start inside)
 #
@@ -66,10 +67,11 @@
 #                            (waiting is printed, and decides nothing: wave-38 T5, D21)
 #   gate_width_ask <landing> how many runners <landing> may start now, one whole number on stdout,
 #                            rc 0 (rc 2 usage or store; rc 1 the lock). See THE WIDTH ASK.
-#   gate_landing_open <landing> <carrier> [<span>]
-#                            the landing's carrier holds its place in line from now (THE LEASE); a
-#                            lease already on file for <landing> and not spent is taken over, its
-#                            first-ask instant kept. rc 0; rc 2 usage or store; rc 1 the lock
+#   gate_landing_open <landing> <carrier> [<span>] [<first>:<seq> | new]
+#                            the landing's carrier holds its place in line from now (THE LEASE),
+#                            with the age given, a fresh one (new), or, with none, the age of a lease
+#                            on file that is not spent; the age is printed, <first>:<seq>. rc 0;
+#                            rc 2 usage or store; rc 1 the lock
 #   gate_landing_leave <landing> <carrier>
 #                            the carrier ended WAITING: the lease is kept, nobody's, for <span>
 #                            seconds. rc 0; rc 1 when <carrier> does not hold it
@@ -1178,33 +1180,50 @@ _gate_lease_args() {
     echo "gate: the store $_GD/leases cannot be written" >&2; return 2; }
 }
 
-# gate_landing_open <landing> <carrier> [<span>] — the carrier holds <landing>'s place in line from
-# now. A lease already on file that is not spent (held by another carrier of the same landing, or
-# left WAITING within its span) is taken over: its first-ask instant and seq are kept, so a landing
-# that said ready again does not lose its age. Otherwise the first-ask instant is now and seq one
-# past the highest on file. <span> (whole seconds, default BIONIC_GATE_KEEP's default) is how long the
-# lease is kept once its carrier leaves it WAITING; line.sh gives the ready's --within.
+# gate_landing_open <landing> <carrier> [<span>] [<age>] — the carrier holds <landing>'s place in line
+# from now, and the lease's age, `<first>:<seq>`, is printed. <age> says which age:
+#   <first>:<seq>  exactly that one: the age the line gave the landing's entry when it opened, which a
+#                  ready of the same entry hands back, so the gate's order stays the line's (A-orch-49)
+#   new            a fresh one, however a lease of <landing> is kept: a new line entry is the last in
+#                  line, and a lease kept from an entry already closed must not put it ahead
+#   (absent)       a lease on file that is not spent (held, or away within its span) is taken over with
+#                  its age; otherwise a fresh one
+# A fresh age is now and the next number of the store's counter (leases/seq), which never gives a
+# number twice, so two leases opened at one instant are never tied. <span> (whole seconds; absent or
+# empty, BIONIC_GATE_KEEP's default) is how long the lease is kept once its carrier leaves it WAITING;
+# line.sh gives the ready's --within.
 gate_landing_open() {
-  local span="${3:-$_GATE_KEEP_DEFAULT}" f now first seq max=0
-  [ "$#" -ge 2 ] && [ -n "${2:-}" ] || { echo "gate: usage: gate_landing_open <landing key> <carrier pid[:start]> [<span seconds>]" >&2; return 2; }
+  local span="${3:-$_GATE_KEEP_DEFAULT}" age="${4:-}" f now first='' seq='' n rc
+  [ "$#" -ge 2 ] && [ "$#" -le 4 ] && [ -n "${2:-}" ] || { echo "gate: usage: gate_landing_open <landing key> <carrier pid[:start]> [<span seconds>] [<first>:<seq> | new]" >&2; return 2; }
   _gate_num "$span" || { echo "gate: gate_landing_open: the span is whole seconds, not '${span:0:20}'" >&2; return 2; }
   span="$_G_NUM"
+  case "$age" in
+    ''|new) : ;;
+    *:*) _gate_num "${age%%:*}" && first="$_G_NUM" && _gate_num "${age#*:}" && seq="$_G_NUM" \
+           || { echo "gate: gate_landing_open: the age is <first>:<seq> or new, not '${age:0:40}'" >&2; return 2; } ;;
+    *) echo "gate: gate_landing_open: the age is <first>:<seq> or new, not '${age:0:40}'" >&2; return 2 ;;
+  esac
   _gate_lease_args gate_landing_open "$1" "$2" || return 2
   _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
-  now="$(_res_now)"
-  f="$(_gate_lease_file "$1")"
-  if _gate_lease_read "$f" && _gate_lease_state && [ "$_L_state" != spent ]; then
+  if [ -z "$age" ] && _gate_lease_read "$(_gate_lease_file "$1")" && _gate_lease_state && [ "$_L_state" != spent ]; then
     first="$_L_first" seq="$_L_seq"
-  else
-    for f in "$_GD"/leases/*.lease; do
-      _gate_lease_read "$f" && _gate_num "$_L_seq" || continue
-      [ "$_G_NUM" -le "$max" ] || max="$_G_NUM"
-    done
-    first="$now" seq=$((max + 1))
   fi
-  _gate_lease_put "$1" "$_G_CARRIER" "$first" "$seq" "$span"; f=$?
+  if [ -z "$seq" ]; then
+    now="$(_res_now)"; _gate_num "$now" || now=0
+    n=0
+    { read -r n < "$_GD/leases/seq"; } 2>/dev/null
+    _gate_num "$n" && n="$_G_NUM" || n=0
+    for f in "$_GD"/leases/*.lease; do   # a store written before the counter: past every seq on file
+      _gate_lease_read "$f" && _gate_num "$_L_seq" || continue
+      [ "$_G_NUM" -le "$n" ] || n="$_G_NUM"
+    done
+    first="$now" seq=$((n + 1))
+    printf '%s\n' "$seq" > "$_GD/leases/seq.tmp.$$" && mv "$_GD/leases/seq.tmp.$$" "$_GD/leases/seq"
+  fi
+  _gate_lease_put "$1" "$_G_CARRIER" "$first" "$seq" "$span"; rc=$?
   _gate_unlock
-  return "$f"
+  [ "$rc" -eq 0 ] || return 2
+  printf '%s:%s\n' "$first" "$seq"
 }
 
 # gate_landing_leave <landing> <carrier> — the carrier ended WAITING: its lease is kept, nobody's
