@@ -24,6 +24,12 @@
 #                      a younger landing 0 until the older finishes; a landing with its own run
 #                      open is answered by the rule alone. The promise is resources.sh's suite
 #                      cost, lifted. Mutation: resources.sh's cost set to 1.00 answers 7
+#   §LEASE     D22     (wave-38 T30; A-T6-10) a landing whose carrier holds a lease stays the oldest
+#                      across its run gaps: a younger landing is answered 0 while the older has
+#                      nothing open; closed, the younger is answered by the count; a dead carrier's
+#                      lease is pruned; one left WAITING orders no one, keeps its age for the next
+#                      open, and is pruned after its span; ties by opening order; a landing with no
+#                      lease is ordered as before. Mutation: the lease unread answers 4 in the gap
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
@@ -442,6 +448,118 @@ expect_eq "WA.16 the mutant whose resources.sh says one core a suite runs and pr
   "$(bash -c '. "$1" 2>/dev/null; gate_promise k 2>/dev/null | cut -d: -f2' _ "$MWA")"
 expect_eq "WA.17 …and answers 7 at load 2.0, not 4: the answer reads resources.sh's cost" "7|0" "$(wask_fresh "$MWA")"
 expect_eq "WA.17b the same fresh shell on the shipped gate answers 4 (the control)" "4|0" "$(wask_fresh "$GATE")"
+
+
+# ── §LEASE ───────────────────────────────────────────────────────────────────
+# THE OLDEST LANDING KEEPS ITS PLACE ACROSS ITS RUN GAPS (wave-38 T30; D22; A-T6-10, A-orch-29).
+# A landing whose carrier opened a lease (`gate_landing_open <landing> <carrier> [<span>]`) is active
+# from that open until its carrier closes it (`gate_landing_close`), whether or not a request of its
+# own is open: between its runs, at a pass restart, while its red judge waits, a younger landing is
+# answered 0. Leases are ordered by their first-ask instant, ties by the order they were opened. A
+# lease whose carrier has died is pruned by the next scan. One its carrier left WAITING
+# (`gate_landing_leave`) is nobody's: it orders no one, keeps its first-ask instant for the next open
+# of its key, and is pruned once its declared span has passed. A landing with no lease is ordered by
+# its open requests, as T5 left it. Planted: 8 cores at share 92 and load 2.0, so a landing with the
+# gate to itself is answered 4 (WA.2). The carrier is the suite's own shell, alive for every row.
+section "§LEASE — the oldest landing keeps its place across its run gaps (D22; A-T6-10)"
+lopen() { ( . "$GATE_LIB" 2>/dev/null; gate_landing_open "$@" >/dev/null 2>&1; printf '%s' "$?" ); }
+lleave() { ( . "$GATE_LIB" 2>/dev/null; gate_landing_leave "$@" >/dev/null 2>&1; printf '%s' "$?" ); }
+lclose() { ( . "$GATE_LIB" 2>/dev/null; gate_landing_close "$@" >/dev/null 2>&1; printf '%s' "$?" ); }
+leasef() { printf '%s/leases/%s.lease\n' "$BIONIC_GATE_DIR" "$(printf '%s' "$1" | tr / %)"; }   # <landing> -> its lease file
+lfield() { sed -n "s/^$2=//p" "$(leasef "$1")" 2>/dev/null | tail -n 1; }   # <landing> <field>
+lhas() { if [ -e "$(leasef "$1")" ]; then echo yes; else echo no; fi; }   # <landing>
+lopenreq() { state | sed -n 's/.* admitted=\([0-9]*\) waiting=\([0-9]*\) .*/\1+\2/p'; }   # open requests, admitted+waiting
+LME="$$:$( . "$GATE_LIB" 2>/dev/null; _slots_since "$$" )"
+( exit 0 ) & LGONE="$!"; wait "$LGONE" 2>/dev/null
+expect_true "LE.0 precondition: the suite's shell is a live carrier with a start time" test -n "${LME#*:}"
+expect_true "LE.0b …and the other carrier has exited" dead "$LGONE"
+LGONE="$LGONE:0"
+fresh lease
+share92w
+world_machine 8 8192 30 2.0
+expect_eq "LE.1 LA's carrier opens its lease: rc 0; the lease names LA, its carrier and its first-ask instant (1000)" \
+  "0|LA|$LME|1000" "$(lopen LA "$LME" 600)|$(lfield LA landing)|$(lfield LA carrier)|$(lfield LA first)"
+BIONIC_GATE_LANDING=LA HOLD=1 ask_bg le1 landing a.test.sh 0; wait_for 20 has le1.rc
+expect_eq "LE.2 precondition: LA's run is admitted; LA is answered 3, LB 0 (T5's rule, LA's run open)" "0 3|0 0|0" \
+  "$(rc_of le1) $(wask LA) $(wask LB)"
+world_tick 5
+release le1
+expect_eq "LE.3 precondition: LA's run has ended, so no request is open (admitted+waiting)" "0+0" "$(lopenreq)"
+expect_eq "LE.4 THE GAP: LA, between its runs with nothing of its own open, still holds the gate: LB is answered 0" \
+  "0|0" "$(wask LB)"
+expect_eq "LE.5 …and LA, the oldest, is answered by the count and the floor (4)" "4|0" "$(wask LA)"
+world_tick 5
+expect_eq "LE.6 LB's carrier opens a lease of its own, later (first 1010); LB is still answered 0" "0|1010|0|0" \
+  "$(lopen LB "$LME" 600)|$(lfield LB first)|$(wask LB)"
+expect_eq "LE.7 a close by a carrier that does not hold LA's lease changes nothing (rc 1, the lease kept)" "1|yes" \
+  "$(lclose LA "$LGONE")|$(lhas LA)"
+expect_eq "LE.8 LA's carrier closes its lease (published, returned or stalled): rc 0, the file gone" "0|no" \
+  "$(lclose LA "$LME")|$(lhas LA)"
+expect_eq "LE.9 …LB, now the oldest, is answered by the count" "4|0" "$(wask LB)"
+expect_eq "LE.10 …and LA, asking with no lease and nothing open, is answered 0" "0|0" "$(wask LA)"
+fresh lease-dead
+share92w
+world_machine 8 8192 30 2.0
+lopen LA "$LGONE" 600 >/dev/null
+expect_eq "LE.11 precondition: a lease is on file for LA whose carrier has exited" "yes|$LGONE" "$(lhas LA)|$(lfield LA carrier)"
+expect_eq "LE.12 a dead carrier's lease holds nothing: LB is answered by the count" "4|0" "$(wask LB)"
+expect_eq "LE.13 …and the scan that answered pruned it" "no" "$(lhas LA)"
+fresh lease-wait
+share92w
+world_machine 8 8192 30 2.0
+lopen LA "$LME" 600 >/dev/null
+world_tick 10
+expect_eq "LE.14 LA's carrier leaves its lease WAITING: rc 0; kept, nobody's, left at 1010, first still 1000" "0|-|1010|1000" \
+  "$(lleave LA "$LME")|$(lfield LA carrier)|$(lfield LA left)|$(lfield LA first)"
+expect_eq "LE.15 a lease nobody carries orders no one: LB is answered by the count while LA is away" "4|0" "$(wask LB)"
+expect_eq "LE.16 …and the scan kept it, within its span" "yes" "$(lhas LA)"
+world_tick 10
+lopen LB "$LME" 600 >/dev/null
+world_tick 10
+expect_eq "LE.17 LA's next ready opens it again: rc 0, its carrier the new one, left cleared, first still 1000 (not 1030)" \
+  "0|$LME||1000" "$(lopen LA "$LME" 600)|$(lfield LA carrier)|$(lfield LA left)|$(lfield LA first)"
+expect_eq "LE.18 …so LA is the oldest again: LA 4, LB (first 1020) 0" "4|0 0|0" "$(wask LA) $(wask LB)"
+lleave LA "$LME" >/dev/null
+world_tick 601
+expect_eq "LE.19 a lease left WAITING longer than its declared span (600 s) frees its place: LB 4, LA's lease pruned" \
+  "4|0|no" "$(wask LB)|$(lhas LA)"
+expect_eq "LE.20 …so LA's next open takes a fresh first-ask instant (1631), behind LB, and is answered 0" "1631|0|0" \
+  "$(lopen LA "$LME" 600 >/dev/null; lfield LA first)|$(wask LA)"
+fresh lease-tie
+share92w
+world_machine 8 8192 30 2.0
+lopen LA "$LME" 600 >/dev/null; lopen LB "$LME" 600 >/dev/null
+expect_eq "LE.21 two leases opened at one instant: the first opened is the older (order 1 then 2): LA 4, LB 0" \
+  "1000 1000 1 2|4|0 0|0" "$(lfield LA first) $(lfield LB first) $(lfield LA seq) $(lfield LB seq)|$(wask LA) $(wask LB)"
+fresh lease-mixed
+share92w
+world_machine 8 8192 30 2.0
+BIONIC_GATE_LANDING=LC HOLD=1 ask_bg lc1 landing c.test.sh 0; wait_for 20 has lc1.rc
+world_tick 5
+lopen LA "$LME" 600 >/dev/null
+expect_eq "LE.22 a landing with no lease is ordered by its open requests, as before: LC (asked 1000) answered 3, LA (lease 1005) 0" \
+  "0 3|0 0|0" "$(rc_of lc1) $(wask LC) $(wask LA)"
+release lc1
+expect_eq "LE.23 …and once LC's request has ended, LC is not active: LA answered 4, LC 0" "4|0 0|0" "$(wask LA) $(wask LC)"
+reap
+fresh lease-usage
+expect_eq "LE.24 open with no carrier, open of a key that is not a landing key, close with no key: rc 2 each" "2 2 2" \
+  "$(lopen LA) $(lopen 'a b' "$LME") $(lclose)"
+# MUTANT: the width ask reads no lease. The gap is open again: LB is answered by the count while LA is
+# between its runs, the harm A-T6-10 found.
+MLE="$(mutant lease)"
+anchor file payload/scripts/lib/gate.sh '"$_G_LEASE"; } | awk'
+sed -i.bak 's/printf .%s. "\$_G_LEASE"; }/}/' "$MLE"
+fresh lease-mut
+share92w
+world_machine 8 8192 30 2.0
+wask_m() { bash -c '. "$1" 2>/dev/null; o="$(gate_width_ask "$2" 2>/dev/null)"; printf "%s|%s" "$o" "$?"' _ "$1" "$2"; }   # <gate.sh> <landing>
+lopen LA "$LME" 600 >/dev/null
+expect_eq "LE.25 the mutant read no lease line: its width ask feeds the awk no lease (positive: the shipped one does)" "0 1" \
+  "$(grep -c '"$_G_LEASE"; } | awk' "$MLE") $(grep -c '"$_G_LEASE"; } | awk' "$GATE")"
+expect_eq "LE.26 the mutant still runs and answers: LA, alone, 4" "4|0" "$(wask_m "$MLE" LA)"
+expect_eq "LE.27 MUTANT the lease unread: LB is answered 4 in LA's gap, where the shipped gate answers 0 (the rows can fail)" \
+  "4|0 0|0" "$(wask_m "$MLE" LB) $(wask_m "$GATE" LB)"
 
 # ── §HARD ────────────────────────────────────────────────────────────────────
 section "§HARD — memory is the hard limit, the processor the soft one (AC-2.2)"
