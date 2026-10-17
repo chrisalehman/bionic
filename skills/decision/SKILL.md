@@ -158,4 +158,4 @@ A reply that names a form gets that form directly, with no form in between. The 
 - Approvals and reversible calls stay out. An approval keeps its own card. A call you can reverse is yours: make it and say so.
 - A settled decision, one the run's design ledger records, is put again only as `reopening D<n>: <one sentence of new evidence>`; with no new evidence, the ruling stands.
 
-Nothing is run or written when a decision is made: no hook checks it and no file records it. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.
+Nothing is run or written when a decision is put, and no hook checks it; once ruled, it is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` delta in `record/<wave>/design-ledger.md`, the run's register. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.
