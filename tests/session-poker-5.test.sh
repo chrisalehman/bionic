@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 5: the sections wave-38 adds (§CHECK, §WORD, §DECISIONS).
+# Tests for hooks/session-poker.sh — shard 5: the sections wave-38 adds (§CHECK, §WORD, §EARLY-TICK, §DECISIONS, §ORDER).
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -320,8 +320,7 @@ POKE_BOUND="$WD_BOUND_WAS"
 
 # ============================================================
 section "§DECISIONS: decisions [--all] reads the design ledgers' register entries; the recap prints this run's settled set; doctrine re-puts a settled decision only as reopening D<n> (wave-38 T13; REQ-3 AC-3.4; D24)"
-# ============================================================
-# Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading in record/<wave>/design-ledger.md, or
+# =====================================================# Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading in record/<wave>/design-ledger.md, or
 # a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in, as this wave's Δ21 holds them); `re-ruled` and
 # `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in
 # the ledger's order; `--all` lists every record/*/design-ledger.md under the docs root, each line keyed by its wave,
@@ -438,5 +437,80 @@ poke "$RCK" tick
 expect_contains "ET-3 with no open integrate row the tick still answers" "poker:" "$OUT"
 expect_absent "ET-3b …and says no CARD-EARLY, the red check notwithstanding" "CARD-EARLY" "$OUT"
 POKE_BOUND="$ET_BOUND_WAS"
+=======
+section "§ORDER: the tick orders dispatch — FILL offers the longest remaining chain first, the gate line prints the width the gate answers each open landing, and SPLIT is a decision line only while width idles (wave-38 T7; REQ-6 AC-6.5; D22)"
+# ============================================================
+# D22: "the tick offers ready rows longest remaining chain first, and offers a `task-split` as a decision with its
+# reason when width idles"; the gate answers width to the oldest active landing and 0 to the younger ones. A row's
+# remaining chain is its size plus the heaviest path of open rows waiting on it, transitively (the `f` of
+# lib/units.sh `units_chain`, which the CHAIN line prints for the whole graph); ties go by row id. The ready set's
+# membership is unchanged: only its order, and so which rows the writer gap's trim keeps.
+# FIXTURE FIDELITY: §47's reads table (s47_plan): two chains, T1 (10) → T2 (10) = 20 and T3 (30) → T4 (40) → T5 (50)
+# = 120, and T6 (20) alone, tying T1 at 20. Table order offers T1 first; chain order offers T3. The leases are
+# opened by the gate's own writer (`gate_landing_open`), carried by this test's live process, at planted ages.
+# fails-when: FILL names T1 ahead of T3; the writer gap of one keeps T1; the gate line names no widths, names a
+# younger landing ahead of an older, or answers a younger landing more than 0; SPLIT? stays on the CHAIN line, or the
+# SPLIT line prints while the fill is full.
+OR_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+ROR="$(make_repo order)"; new_roster "$ROR"
+or_plan() {  # <writers> -> the fixture plan, bound by s47_plan's approval line
+  s47_plan "$ROR" "$1" \
+    "| T1 | 4 | build | the short chain's head | implementor | — | 10 | REQ-x | payload/a.sh | pending | |" \
+    "| T2 | 4 | build | the short chain's tail | implementor | — | 10 | REQ-x | payload/a2.sh | pending | payload/a.sh |" \
+    "| T3 | 4 | build | the long chain's head | implementor | — | 30 | REQ-x | payload/b.sh | pending | |" \
+    "| T4 | 4 | build | the long chain's middle | implementor | — | 40 | REQ-x | payload/c.sh | pending | payload/b.sh |" \
+    "| T5 | 4 | build | the long chain's tail | implementor | — | 50 | REQ-x | payload/d.sh | pending | payload/c.sh |" \
+    "| T6 | 4 | build | alone, tying T1's chain | implementor | — | 20 | REQ-x | payload/e.sh | pending | |" >/dev/null
+}
+or_gate() { s47_lines gate | sed -n 's/^.* widths: //p'; }   # -> the gate line's widths field
+or_fill() { printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T'; }   # -> the FILL line, never its "FILL —" sentence
+or_lease() {  # <landing key> <first>:<seq> -> a lease the gate's writer opens, carried by this test's process
+  bash -c '. "$1/gate.sh" && gate_landing_open "$2" "$3" 3600 "$4"' _ "$OR_LIB" "$1" "$$" "$2" >/dev/null
+}
+or_ask() { bash -c '. "$1/gate.sh" && gate_width_ask "$2"' _ "$OR_LIB" "$1"; }   # <landing key> -> the gate's answer
+
+# ---------- the FILL order: the longest remaining chain first, ties by id ----------
+or_plan 8
+poke_pressure "$ROR" 8192 1.0 tick
+expect_eq "OR-0 the tick over the two-chain table exits 0" "0" "$RC"
+expect_nonempty "OR-0b precondition: the extractor reads the FILL line" "$(or_fill)"
+expect_eq "OR-1 AC-6.5 FILL names the longest-chain row first: T3 (120 min), then T1 and T6 (20 each, by id), where table order is T1 T3 T6" \
+  "poker: FILL T3 T1 T6" "$(or_fill)"
+expect_eq "OR-2 the CHAIN line is the long chain by hand, 30 + 40 + 50, and carries no SPLIT? (it moved to its own decision line)" \
+  "poker: CHAIN T3→T4→T5 (120 min)" "$(s47_lines CHAIN)"
+expect_eq "OR-3 AC-6.5 three ready writers, a cap of 8 and room past them: width idles, and the split candidate of the chain is a decision line with its reason (T4: 1 row waits × 40 min × 1 file outscores T3's 30)" \
+  "poker: SPLIT T4 — 40 min, 1 files, 1 rows wait on it; width idles at 3" "$(s47_lines SPLIT)"
+
+# ---------- the trim keeps the longest chain: a gap of one offers T3, and nothing idles ----------
+or_plan 1
+poke_pressure "$ROR" 8192 1.0 tick
+expect_eq "OR-4 AC-6.5 a writer gap of one (cap 1) offers T3, never table-first T1" "poker: FILL T3" "$(or_fill)"
+expect_contains "OR-4b …T1 waits for a slot, its reason the gap" "poker: WAIT T1 — ready; no writer slot free (gap 1)" "$OUT"
+expect_absent "OR-5 …and the fill is full, so no SPLIT decision is printed (OR-4 read this same output)" "poker: SPLIT " "$OUT"
+expect_eq "OR-5b …and the CHAIN line is the same chain, no SPLIT? on it" "poker: CHAIN T3→T4→T5 (120 min)" "$(s47_lines CHAIN)"
+
+# ---------- the gate line: the width the gate answers each open landing, oldest first ----------
+rm -rf "$BIONIC_GATE_DIR/leases"
+or_plan 8
+poke_pressure "$ROR" 8192 1.0 tick
+expect_nonempty "OR-6 precondition: the gate line is printed" "$(s47_lines gate)"
+expect_eq "OR-6b no lease open: the gate line ends widths: none" "none" "$(or_gate)"
+# Three leases, opened in name order with their ages reversed, so file order is not age order: LC is the oldest.
+or_lease or:w01:LA 1020:3; or_lease or:w01:LB 1010:2; or_lease or:w01:LC 1000:1
+# The widths are a gate reading, as the load is: they move no digest, so each tick below forgets it to print in full.
+expect_eq "OR-7 precondition: the gate's writer opened three lease files" "3" "$(ls "$BIONIC_GATE_DIR/leases/" | /usr/bin/grep -c '\.lease$' | tr -d ' ')"
+OR_N="$(or_ask or:w01:LC)"
+expect_eq "OR-7b precondition: the gate answers the oldest, LC, 3 by hand (8 cores at share 80 is 6.4; a load of 1.0 and 1.61 a run: 2.61, 3.22 and 4.83 fit, 6.44 does not) and the younger LB 0" \
+  "3|0" "$OR_N|$(or_ask or:w01:LB)"
+forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
+expect_eq "OR-8 AC-6.5 the gate line prints each open landing in age order with the gate's answer: the oldest its width, the others 0" \
+  "or:w01:LC=3,or:w01:LB=0,or:w01:LA=0" "$(or_gate)"
+expect_regex "OR-8b …on the one gate line, after room=" '^poker: gate share=.* room=(yes|no) widths: or:w01:LC=3,' "$(s47_lines gate)"
+# LC's carrier leaves it WAITING: the lease is kept but orders no one, so LB is the oldest the gate answers.
+bash -c '. "$1/gate.sh" && gate_landing_leave "$2" "$3"' _ "$OR_LIB" or:w01:LC "$$"
+forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
+expect_eq "OR-9 a lease left WAITING drops off the line, and the next oldest, LB, is answered its width" \
+  "or:w01:LB=3,or:w01:LA=0" "$(or_gate)"
+rm -rf "$BIONIC_GATE_DIR/leases"
 
 finish

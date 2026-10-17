@@ -1424,14 +1424,17 @@ for _s47 in T2 T3 T4 T5 T6; do
 done
 expect_absent "47g2 …and the active row is on neither (it is not pending)" "WAIT T1 " "$(s47_lines WAIT)"
 expect_absent "47h the bulk sentence is gone" "none has all its dependencies landed" "$OUT"
-expect_eq "47i AC-6.6 the CHAIN line is the fixture's longest chain, by hand: 30 + 20 + 60; its split candidate T2 (wave-30 T16, AC-12.4: T6 waits on it, 1 × 20 min × 1 file; T6 writes no code)" \
-  "poker: CHAIN T1→T2→T6 (110 min) · SPLIT? T2 — 20 min, 1 files, 1 rows wait on it" "$(s47_lines CHAIN)"
+expect_eq "47i AC-6.6 the CHAIN line is the fixture's longest chain, by hand: 30 + 20 + 60 (its split candidate is no longer on it: wave-38 T7)" \
+  "poker: CHAIN T1→T2→T6 (110 min)" "$(s47_lines CHAIN)"
+expect_eq "47i2 AC-6.5 one ready writer under a cap of 2 leaves width idle, so the split candidate T2 is a decision line with its reason (wave-30 T16, AC-12.4: T6 waits on it, 1 × 20 min × 1 file; T6 writes no code; wave-38 T7)" \
+  "poker: SPLIT T2 — 20 min, 1 files, 1 rows wait on it; width idles at 1" "$(s47_lines SPLIT)"
 # THE DIFFERENTIAL: land T1 and the chain moves to the next heaviest path, so 47i reads the
 # graph and not a constant.
 sed -i.bak 's/| payload\/x.sh | active |/| payload\/x.sh | landed |/' "$R47/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 poke_pressure "$R47" 8192 1.0 tick
-expect_eq "47j with T1 landed the chain is T5 → T6 (40 + 60), its candidate T5" "poker: CHAIN T5→T6 (100 min) · SPLIT? T5 — 40 min, 1 files, 1 rows wait on it" "$(s47_lines CHAIN)"
-expect_contains "47j2 …and T2, its read now landed, is filled beside T5" "poker: FILL T2 T5" "$OUT"
+expect_eq "47j with T1 landed the chain is T5 → T6 (40 + 60)" "poker: CHAIN T5→T6 (100 min)" "$(s47_lines CHAIN)"
+expect_contains "47j2 …and T2, its read now landed, is filled beside T5, the longer remaining chain first (T5 → T6 = 100 against T2 → T6 = 80; wave-38 T7, AC-6.5)" "poker: FILL T5 T2" "$OUT"
+expect_absent "47j3 …and the two writers fill the cap of 2, so width does not idle and no SPLIT decision prints (47j2 read this same output)" "poker: SPLIT " "$OUT"
 
 # ============================================================
 section "Section 47 §READY-EARLY (tick half): a doc row whose reads exist is offered before its step; a read-only row outside the writer gap (wave-26 T13; REQ-6 AC-6.1; D3, D9)"
@@ -1450,7 +1453,7 @@ s47_early() {  # <repo> -> the plan; writers=1
 }
 R47E="$(make_repo s46-early)"; new_roster "$R47E"; s47_early "$R47E"
 poke_pressure "$R47E" 8192 1.0 tick
-expect_contains "47k AC-6.1 at current: 4 the tick offers the doc row and the review row" "poker: FILL T2 T3" "$OUT"
+expect_contains "47k AC-6.1 at current: 4 the tick offers the doc row and the review row, the longer remaining chain first (T3 30 against T2 20; wave-38 T7, AC-6.5)" "poker: FILL T3 T2" "$OUT"
 # THE WRITER GAP CLOSED: one writer open, writers=1. The doc row is a writer and waits for a
 # slot; the review is read-only and is still offered.
 R47F="$(make_repo s46-early-full)"; new_roster "$R47F"; s47_early "$R47F"
@@ -3147,12 +3150,14 @@ expect_contains "16s11b …prints its line" "poker: task-set — T7 reads=lib/c.
 expect_absent "16s11c …and no clause (beside 16s10b, same row)" "suspect:" "$OUT"
 
 # ============================================================
-section "§SPLIT-CANDIDATE: the CHAIN line names the pending row to split, by fan-in × size × files (wave-30 T16; REQ-12 AC-12.4; D14d, Δ11)"
+section "§SPLIT-CANDIDATE: the SPLIT decision line names the pending row to split, by fan-in × size × files, while width idles (wave-30 T16; REQ-12 AC-12.4; D14d, Δ11; wave-38 T7, AC-6.5)"
 # ============================================================
 #
 # The chain T1 (30) → T2 (20) → T3 (60) → T5 (10) = 120 min. Scores of its pending rows, by hand:
 # T2 = 2 rows wait (T3, T4) × 20 min × 2 files = 80; T3 = 1 (T5) × 60 × 1 = 60; T5 = 0. T1 is
 # active, so it is no candidate. T3 is the longest row and still loses to T2: the score, not the size.
+# Every pending row waits on an open one, so no writer row is ready and the gate's width idles at 0: the
+# candidate prints as its own decision line (wave-38 T7; D22), never on the CHAIN line.
 R16P="$(make_repo t16-split)"; new_roster "$R16P"
 t16_split_plan() {  # <repo> <T3's Files cell>
   s47_plan "$1" 4 \
@@ -3166,8 +3171,9 @@ P16P="$(t16_split_plan "$R16P" 'payload/c.sh')"
 T16P_ROWS="$(t16_rows "$P16P")"
 poke_pressure "$R16P" 8192 1.0 tick
 expect_nonempty "16p1 precondition: the tick prints a CHAIN line" "$(s47_lines CHAIN)"
-expect_eq "16p2 AC-12.4 the CHAIN line names the highest-scoring pending row with its three numbers" \
-  "poker: CHAIN T1→T2→T3→T5 (120 min) · SPLIT? T2 — 20 min, 2 files, 2 rows wait on it" "$(s47_lines CHAIN)"
+expect_eq "16p2 AC-12.4 the CHAIN line is the chain alone" "poker: CHAIN T1→T2→T3→T5 (120 min)" "$(s47_lines CHAIN)"
+expect_eq "16p2b AC-12.4 AC-6.5 the SPLIT decision line names the highest-scoring pending row with its three numbers and the idle width" \
+  "poker: SPLIT T2 — 20 min, 2 files, 2 rows wait on it; width idles at 0" "$(s47_lines SPLIT)"
 expect_eq "16p3 AC-12.4 the machine never splits: every row as written" "$T16P_ROWS" "$(t16_rows "$P16P")"
 # THE DIFFERENTIAL: a second file on T3 makes its score 1 × 60 × 2 = 120, above T2's 80. A fresh
 # repository: the same decision on the same repository is the one-line unchanged tick (§DIGEST).
@@ -3175,13 +3181,13 @@ R16P2="$(make_repo t16-split-2)"; new_roster "$R16P2"
 t16_split_plan "$R16P2" 'payload/c.sh, payload/c2.sh' >/dev/null
 poke_pressure "$R16P2" 8192 1.0 tick
 expect_eq "16p4 with T3 at 120 the candidate moves to T3" \
-  "poker: CHAIN T1→T2→T3→T5 (120 min) · SPLIT? T3 — 60 min, 2 files, 1 rows wait on it" "$(s47_lines CHAIN)"
+  "poker: SPLIT T3 — 60 min, 2 files, 1 rows wait on it; width idles at 0" "$(s47_lines SPLIT)"
 # NOBODY WAITS ON THE CHAIN: a lone pending row scores 0, and a split of it frees no row.
 R16Q="$(make_repo t16-split-none)"; new_roster "$R16Q"
 s47_plan "$R16Q" 4 "| T1 | 4 | build | alone | implementor | — | 30 | REQ-x | payload/a.sh | pending | |" >/dev/null
 poke_pressure "$R16Q" 8192 1.0 tick
 expect_eq "16p5 a chain no row waits on prints its CHAIN line" "poker: CHAIN T1 (30 min)" "$(s47_lines CHAIN)"
-expect_absent "16p6 …with no candidate (beside 16p5, same line)" "SPLIT?" "$(s47_lines CHAIN)"
+expect_absent "16p6 …and, its one writer filled with width to spare, no SPLIT decision: there is no candidate (16p5 read this same output)" "poker: SPLIT " "$OUT"
 
 # ============================================================
 section "§LIVE-READY: readiness is derived from the live table on every tick (wave-30 T16; REQ-12 AC-12.5; Δ8)"
