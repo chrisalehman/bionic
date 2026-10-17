@@ -218,7 +218,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 
-**Handoff.** A plan spanning sessions carries a `## Handoff` section — resume point (step, sub-task, branch, last commit), decisions approved this session (reset each time), tried-and-rejected and discovered surprises (persist), open blockers, uncommitted work, and a literal resume instruction. Rewritten in place, never appended, and never by hand: `session-poker.sh handoff` writes it from the plan and the machine (heads, open rows, live agents, last proof, the clock) and carries the human lines. The first run over a hand-written section keeps only its five human lines. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
+**Handoff.** A plan spanning sessions carries one `## Handoff` pointer line to the file `session-poker.sh handoff` writes (`record/<wave>/handoff.md`: the machine's facts, the five human lines carried, safe to clear or wait N minutes, the door last), never by hand. Invoked with that file's path, run `session-poker.sh resume <path>` first and do what it prints: it binds, arms, adopts and ticks, and prints the task list, the recap, the step file and the Patrol job. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
 
 ## Hooks
 

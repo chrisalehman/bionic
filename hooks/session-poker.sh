@@ -43,6 +43,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh handoff [<path>] [--mid-flight|--order|--rulings|--lessons|--risks '<text>']…   write the handoff file (record/<wave>/handoff.md, or <path> under the docs root): the sitrep head, the machine lines, the five human lines carried, safe to clear or wait N minutes, /bionic:canonical-sdlc <path> last; the plan's ## Handoff becomes one pointer line (writes the file and the plan)
+#     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door (D4): bind the plan the file names, arm, adopt, then print the task list, the recap, the step file and the patrol, and tick (writes the marker, the stamp and this session's roster)
+#     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register (D24): this run's rulings from record/<wave>/design-ledger.md, or every run's with the ADRs (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh brief <row>   render the row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold from the row, the head, the orchestrator's sections marked (writes that file, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as two or more children, each <id>:<task>:<size>:<Files>, its waiters re-pointed (writes the plan)
 #
@@ -511,6 +513,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff [<path>] [--mid-flight|--order|--rulings|--lessons|--risks '<text>']…   write the handoff file, record/<wave>/handoff.md or <path> under the docs root: kind line, sitrep head, machine lines, the five human lines (a flag's text, else carried from the previous file), safe to clear or wait N minutes, and /bionic:canonical-sdlc <path> last; the plan's ## Handoff becomes the one line handoff: <path> written <local time>; a delivered plan gets the closed form"
+  die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: bind the plan the handoff file names, arm the stamp, adopt; print task-list: lines, the recap (settled:, open:, owned-by-user:, branch:, plan:, tree:), step-file:, the CronCreate (patrol-interval:, patrol:); then tick. The closed form prints its recap and resumes nothing"
+  die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md; --all: every run's, keyed by wave, with the ADRs (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a reading's, a writer's, an assumptions.md hole line), each concept and kind once"
@@ -1260,6 +1264,18 @@ $1"; shift ;;
            HO_ARG_PATH="$1"; shift ;;
       esac
     done
+    ;;
+  # THE ONE DOOR (wave-38 T13; D4, AC-3.3). One operand: the handoff file, absolute, project-root-relative or
+  # docs-root-relative. Whether it is one, and whether the plan it names is there, are the verb's refusals.
+  resume)
+    { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "resume takes exactly one argument: the handoff file, as in: resume .bionic/docs/record/<wave>/handoff.md."
+    RS_ARG="$1"
+    ;;
+  # THE REGISTER (wave-38 T13; D24, AC-3.4). At most one flag, --all.
+  decisions)
+    DC_ALL=no
+    if [ $# -eq 1 ] && [ "$1" = --all ]; then DC_ALL=yes
+    elif [ $# -ne 0 ]; then usage "decisions takes at most one flag: --all."; fi
     ;;
   # THE BRIEF, RENDERED FROM ITS ROW (wave-33 T9; REQ-4 AC-4.4, D8). The one operand is the plan row's id; the
   # id's own shape, and whether the plan has the row, are the verb's refusal (1).
@@ -3454,6 +3470,95 @@ handoff_human_line() {  # <key> <flag text, or empty> <src file, or empty> -> th
   fi
   if [ -n "$got" ]; then printf '%s\n' "$got"; else printf '%s: (to fill)\n' "$1"; fi
 }
+
+# THE REGISTER (wave-38 T13; D24, AC-3.4). Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading
+# in record/<wave>/design-ledger.md, or a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in); `re-ruled`
+# and `withdrawn` are entries too. A line of any other shape, a body line and a fenced example are not, so a ledger
+# written before D24 reads as having none. ONE PARSER: `decisions` prints it and the resume recap's settled: lines are
+# it, prefixed. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
+# parenthesis is `(untitled)`.
+decisions_list() {  # <ledger> -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
+  awk '
+    function entry(s,   n, verb, rest, q, reply, p, paren, title, who, date, field) {
+      if (!match(s, /^D[0-9]+ /)) return
+      n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1)
+      if (index(rest, "ruled \"") == 1) { verb = "ruled"; rest = substr(rest, 8) }
+      else if (index(rest, "re-ruled \"") == 1) { verb = "re-ruled"; rest = substr(rest, 11) }
+      else if (index(rest, "withdrawn (") == 1) { verb = "withdrawn"; rest = substr(rest, 12) }
+      else return
+      if (verb != "withdrawn") {
+        q = index(rest, "\""); if (q == 0) return
+        reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1)
+        if (index(rest, " (") != 1) return
+        rest = substr(rest, 3)
+      }
+      p = index(rest, "): ")
+      if (p) { paren = substr(rest, 1, p - 1); title = substr(rest, p + 3) }
+      else if (substr(rest, length(rest)) == ")") { paren = substr(rest, 1, length(rest) - 1); title = "" }
+      else return
+      if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return
+      date = substr(paren, RSTART, RLENGTH); who = substr(paren, 1, RSTART - 1)
+      sub(/^[ \t]+/, "", who); sub(/[ \t,]+$/, "", who)
+      if (who == "") return
+      sub(/[ \t]+$/, "", title); if (title == "") title = "(untitled)"
+      if (verb == "ruled") field = "\"" reply "\""
+      else if (verb == "re-ruled") field = "re-ruled \"" reply "\""
+      else field = "withdrawn"
+      print n " · " field " · " who " " date " · " title
+    }
+    { sub(/\r$/, "") }
+    /^[ \t]*```/ { f = !f; next }
+    f { next }
+    index($0, "## Δ") == 1 { s = $0; sub(/^## Δ[0-9]+ — /, "", s); if (s != $0) entry(s); next }
+    /^- D[0-9]+ / { entry(substr($0, 3)) }' "$1" 2>/dev/null
+}
+# decisions_all <docs root> -> every run's entries, each line keyed `<wave> `, waves in slug order; a ledger with no
+# entry in the grammar is named once; every ADR (adrs/*/adr-*.md) follows its wave's entries, keyed by its
+# frontmatter `wave:` (its directory when it has none), as `ADR-<n> · <status> · <title>`.
+decisions_all() {
+  local docs="$1" f slug out tab
+  tab="$(printf '\t')"
+  {
+    for f in "$docs"/record/*/design-ledger.md; do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
+      slug="${f%/design-ledger.md}"; slug="${slug##*/}"
+      out="$(decisions_list "$f")"
+      if [ -n "$out" ]; then
+        printf '%s\n' "$out" | awk -v s="$slug" '{ printf "%s\t1\t%06d\t%s %s\n", s, NR, s, $0 }'
+      else
+        printf '%s\t1\t000000\t%s · no register entries (a ledger written before D24)\n' "$slug" "$slug"
+      fi
+    done
+    find "$docs/adrs" -maxdepth 2 -type f -name 'adr-*.md' 2>/dev/null | while IFS= read -r f; do
+      [ -L "$f" ] && continue
+      awk -v d="$(basename "$(dirname "$f")")" '
+        { sub(/\r$/, "") }
+        NR == 1 && $0 == "---" { fm = 1; next }
+        fm && $0 == "---" { fm = 0; next }
+        fm && index($0, "wave:") == 1 { w = $0; sub(/^wave:[ \t]*/, "", w); next }
+        fm && index($0, "status:") == 1 { st = $0; sub(/^status:[ \t]*/, "", st); next }
+        !fm && h == "" && index($0, "# ") == 1 { h = substr($0, 3) }
+        END {
+          if (h == "") exit
+          num = "ADR-?"; if (match(h, /^ADR-[0-9]+/)) num = substr(h, 1, RLENGTH)
+          t = h; sub(/^ADR-[0-9]+[ \t]*(—|:)[ \t]*/, "", t)
+          if (w == "") w = d; if (st == "") st = "(no status)"
+          printf "%s\t2\t%s\t%s %s · %s · %s\n", w, num, w, num, st, t
+        }' "$f" 2>/dev/null
+    done
+  } | LC_ALL=C sort -t "$tab" -k1,1 -k2,2n -k3,3 | cut -f4-
+}
+
+# ONE SHORT FORM OF A ROW'S TASK (wave-38 T13; D13). The sitrep's Situation lines and the resume verb's task-list:
+# lines both name a row by its task cell cut before the first "(", ". " or " · ", trimmed, a final period dropped.
+_ROW_SHORT_AWK='
+  function row_short(t,   c, i) {
+    c = length(t) + 1
+    i = index(t, "("); if (i && i < c) c = i
+    i = index(t, ". "); if (i && i < c) c = i
+    i = index(t, " · "); if (i && i < c) c = i
+    t = substr(t, 1, c - 1); sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); sub(/\.$/, "", t); return t
+  }'
 
 # THE ADOPTED ROW — the verb's one write, and the second half of the B-1 cure. What it
 # records is an ownership fact, and each field is there because a named reader asks for it:
@@ -6654,21 +6759,14 @@ sitrep_render() {
             awk '/^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
                  s && /^- T[0-9A-Za-z._-]*: landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { id = $2; sub(/:$/, "", id); print "L\t" id "\t" $5 }' "$plan"
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | awk -F'\t' '
+          } | awk -F'\t' "$_ROW_SHORT_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function short(t,   c, i, j) {
-      c = length(t) + 1
-      i = index(t, "("); if (i && i < c) c = i
-      i = index(t, ". "); if (i && i < c) c = i
-      i = index(t, " · "); if (i && i < c) c = i
-      t = trim(substr(t, 1, c - 1)); sub(/\.$/, "", t); return t
-    }
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; next }
     $1 == "U" {
       st = tolower(trim($11)); if (st == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = short($5); rd[n] = $14
+      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = row_short($5); rd[n] = $14
       b = 0
       if (st != "landed") {
         if (id[n] in red) b = 1
@@ -12459,6 +12557,191 @@ RC_TAGS
     printf '%s\n' "${LR_TEXT%%$'\n'*}"
     hand_holds_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_PLAN"
     case "$LR_TEXT" in *$'\n'*) printf '%s\n' "${LR_TEXT#*$'\n'}" ;; esac
+    exit 0
+    ;;
+
+  # THE REGISTER (wave-38 T13; D24, AC-3.4). Read-only. `decisions` is the bound run's ledger through `decisions_list`;
+  # `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1 in one line
+  # naming the path when the run's ledger is absent; 2 when there is no run to read.
+  decisions)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    DC_DOCS="$(docs_root "$REPO_REAL")"
+    if [ "$DC_ALL" = yes ]; then
+      decisions_all "$DC_DOCS"
+      exit 0
+    fi
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key; decisions without --all reads THIS session's run."
+      exit 3
+    fi
+    resolve_run "$REPO_REAL" "$SESSION_ID"
+    DC_PLAN="$POKER_RUN_PLAN"
+    if [ -z "$DC_PLAN" ] || [ ! -f "$DC_PLAN" ]; then
+      die "REFUSED — this session has no run to read; bind its plan first, or read every run's: decisions --all."
+      exit 2
+    fi
+    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
+      exit 2
+    fi
+    DC_LEDGER="$DC_DOCS/record/$(proof_plan_slug "$DC_PLAN")/design-ledger.md"
+    if [ ! -f "$DC_LEDGER" ] || [ -L "$DC_LEDGER" ]; then
+      say "no design ledger at ${DC_LEDGER#"$REPO_REAL"/} — this run has recorded no ruling"
+      exit 1
+    fi
+    decisions_list "$DC_LEDGER"
+    exit 0
+    ;;
+
+  # THE ONE DOOR (wave-38 T13; D4, D24, D13; AC-3.3). /bionic:canonical-sdlc <handoff.md> runs this first and does
+  # what it prints. A /clear leaves a new session the skill's invocation has engaged and nothing else: no binding,
+  # no stamp, no roster, no task list, no memory of the run. This does every step of the resume ritual a script
+  # can do, in the ritual's order, each through its one implementation — `bind`, `arm`, `adopt`, `interval`,
+  # `prompt` and `tick` are this script's own verbs, run as this session — and prints the two only the model can
+  # do: the task list to create (the harness task list is unreadable by script, design ledger line 11) and the
+  # CronCreate. In between, the recap: the run's settled rulings (the register's parser), the decisions still open
+  # in any session the plan recorded (each one's owed ledger), what only the user can give (those of the person's
+  # four kinds, and every approval a waiting row reads), the file's branch and plan lines, the checkout, and the
+  # step file. A file whose line 2 is the closed form resumes nothing and says so; a safe line launch-sync marked
+  # STALE is said before the binding (adopt then lists what runs now). The arm comes before the CronCreate here, as
+  # at engagement (hooks/engage.sh arms at the marker's write): the stamp says the session asked for its Patrol.
+  # Refusals name the fix and change nothing: no file or no kind line (2), a session the skill did not engage or a
+  # plan that is not there (1); a sub-verb's refusal stops the ritual with that verb's code.
+  resume)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    RS_DOCS="$(docs_root "$REPO_REAL")"
+    case "$RS_ARG" in
+      /*) RS_FILE="$RS_ARG" ;;
+      *)  RS_FILE="$REPO_REAL/${RS_ARG#./}"
+          [ -f "$RS_FILE" ] || { [ -f "$RS_DOCS/$RS_ARG" ] && RS_FILE="$RS_DOCS/$RS_ARG"; } ;;
+    esac
+    RS_SHOWN="$(printf '%s' "${RS_ARG:0:160}" | tr -d '[:cntrl:]')"
+    if [ ! -f "$RS_FILE" ] || [ -L "$RS_FILE" ]; then
+      die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound or armed."
+      exit 2
+    fi
+    if [ "$(sed -n 1p "$RS_FILE" 2>/dev/null)" != "bionic-handoff/v1" ]; then
+      die "REFUSED — '$RS_SHOWN' is not a handoff file: its first line is not bionic-handoff/v1. Write one with: bash ${HOOK_DIR}/session-poker.sh handoff. Nothing was bound or armed."
+      exit 2
+    fi
+    RS_L2="$(sed -n 2p "$RS_FILE")"
+    case "$RS_L2" in
+      'resume point: NONE — DELIVERED'*)
+        say "resume — '$RS_SHOWN' is the closed form: the run is delivered, so there is nothing to resume; nothing was bound, armed or adopted."
+        printf '%s\n' "$RS_L2"
+        awk 'index($0, "plan: ") == 1 || index($0, "branch: ") == 1 || index($0, "continuation: ") == 1 { print }' "$RS_FILE"
+        exit 0 ;;
+    esac
+    RS_PLAN_REL="$(awk 'index($0, "plan: ") == 1 { print substr($0, 7); exit }' "$RS_FILE")"
+    if [ -z "$RS_PLAN_REL" ]; then
+      die "REFUSED — '$RS_SHOWN' names no plan (it has no plan: line); rewrite it with: bash ${HOOK_DIR}/session-poker.sh handoff. Nothing was bound or armed."
+      exit 2
+    fi
+    case "$RS_PLAN_REL" in /*) RS_PLAN="$RS_PLAN_REL" ;; *) RS_PLAN="$REPO_REAL/$RS_PLAN_REL" ;; esac
+    if [ ! -f "$RS_PLAN" ] || [ -L "$RS_PLAN" ]; then
+      die "REFUSED — the plan '$RS_SHOWN' names is missing: $RS_PLAN. Check out the branch that holds it, or bind the run by hand (bash ${HOOK_DIR}/session-poker.sh bind <plan>). Nothing was bound or armed."
+      exit 1
+    fi
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty); a resume binds and arms ONE session."
+      exit 3
+    fi
+    if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
+      die "REFUSED — this session has not invoked /bionic:canonical-sdlc; resume through the door, /bionic:canonical-sdlc $RS_SHOWN, which engages the session and runs this verb. Nothing was bound or armed."
+      exit 1
+    fi
+    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was bound or armed."
+      exit 2
+    fi
+    rs_sub() { ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "$@" ); }
+    rs_step() {  # <codes it may exit with, comma-joined> <verb> [args] -> runs it; any other code stops the ritual with it
+      local ok="$1" rc=0; shift
+      rs_sub "$@" || rc=$?
+      case ",$ok," in *",$rc,"*) return 0 ;; esac
+      die "resume stopped at $1 (exit $rc): the lines above say why; the steps after it did not run."
+      exit "$rc"
+    }
+    say "resume — $RS_SHOWN ($(awk 'index($0, "written: ") == 1 { print substr($0, 10); exit }' "$RS_FILE")): bind, arm and adopt, then the task list, the recap, the step file, the patrol and the tick"
+    RS_SAFE="$(tail -2 "$RS_FILE" | head -1)"
+    case "$RS_SAFE" in
+      'STALE — '*) printf 'stale: %s\n' "$RS_SAFE" ;;
+    esac
+    rs_step 0 bind "$RS_PLAN"
+    rs_step 0 arm
+    rs_step 0,1 adopt    # 1 is adopt's "open rows found", its NOTIFY, never a refusal
+    # The task list: every step with its status from current:, then every row of ## Tasks with its table status.
+    RS_CUR="$(_fill_current_field "$RS_PLAN")"; RS_CURN="${RS_CUR%%[!0-9]*}"
+    awk -v cur="$RS_CURN" 'BEGIN {
+      n = split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
+      for (i = 0; i < n; i++)
+        printf "task-list: %d: %s · %s\n", i, nm[i + 1], (cur == "" || i > cur + 0) ? "pending" : ((i < cur + 0) ? "completed" : "in_progress") }'
+    units_rows "$RS_PLAN" 2>/dev/null | awk -F'\t' "$_ROW_SHORT_AWK"'
+      function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      NF >= 10 { st = tolower(trim($10)); if (st == "dropped") next
+                 printf "task-list: %s/%s: %s · %s\n", trim($2), trim($1), row_short($4), (st == "landed") ? "completed" : ((st == "active") ? "in_progress" : "pending") }'
+    # The recap.
+    RS_LEDGER="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/design-ledger.md"
+    RS_SET=""
+    [ ! -f "$RS_LEDGER" ] || [ -L "$RS_LEDGER" ] || RS_SET="$(decisions_list "$RS_LEDGER")"
+    if [ -n "$RS_SET" ]; then printf '%s\n' "$RS_SET" | sed 's/^/settled: /'
+    else printf 'settled: none — no ruling in %s\n' "${RS_LEDGER#"$REPO_REAL"/}"; fi
+    RS_OWED="$( { bind_sessions "$RS_PLAN" 2>/dev/null; printf '%s\n' "$SESSION_ID"; } | awk 'NF && !s[$0]++' \
+      | while IFS= read -r RS_S; do OWED_ROOT="$REPO_REAL" OWED_SID="$RS_S" owed_list 2>/dev/null; done | awk -F'\t' 'NF && !k[$1]++')"
+    RS_OPEN="$(printf '%s\n' "$RS_OWED" | awk -F'\t' 'NF && $1 != "" { r = $4; sub(/^poker: /, "", r); if (r == "") r = $3; print "open: " $1 " — " r }')"
+    if [ -n "$RS_OPEN" ]; then printf '%s\n' "$RS_OPEN"; else printf 'open: none — no decision is open\n'; fi
+    RS_OWN="$(printf '%s\n' "$RS_OPEN" | awk '{ k = $2 } k ~ /^(approve|waive|finding|gate):/ { sub(/^open: /, "owned-by-user: "); print }')"
+    RS_APPR="$(units_waiting "$RS_PLAN" "$(fill_step_token "$RS_PLAN" 2>/dev/null)" 2>/dev/null | awk -F'\t' -v have="$(printf '%s\n' "$RS_OWED" | cut -f1 | tr '\n' ' ')" '
+      { r = $2; sub(/^live:/, "", r); if (r !~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) next
+        nmv = substr(r, 10); if (index(" " have, " approve:" nmv " ")) next
+        if (!(nmv in ids)) { ord[++n] = nmv; ids[nmv] = $1 } else if (index(", " ids[nmv] ", ", ", " $1 ", ") == 0) ids[nmv] = ids[nmv] ", " $1 }
+      END { for (i = 1; i <= n; i++) print "owned-by-user: approval:" ord[i] " — " ids[ord[i]] " wait on it; record it: approve " ord[i] " '"'"'<the user'"'"'s words>'"'"'" }')"
+    RS_OWN="$(printf '%s\n%s\n' "$RS_OWN" "$RS_APPR" | awk 'NF')"
+    if [ -n "$RS_OWN" ]; then printf '%s\n' "$RS_OWN"; else printf 'owned-by-user: none — nothing waits on you\n'; fi
+    RS_BR="$(awk 'index($0, "branch: ") == 1 { print; exit }' "$RS_FILE")"
+    printf '%s\n' "${RS_BR:-branch: (the file names none)}"
+    printf 'plan: %s\n' "$RS_PLAN_REL"
+    RS_HEAD="$(git -C "$REPO_REAL" symbolic-ref --short -q HEAD 2>/dev/null)" || RS_HEAD=""
+    printf 'tree: %s (checked out: %s)\n' "$REPO_REAL" "${RS_HEAD:-a detached HEAD}"
+    RS_PROOT="$(cd "$HOOK_DIR/.." 2>/dev/null && pwd -P)"
+    case "$RS_CURN" in
+      [0-9]|[0-9][0-9]) printf 'step-file: %s/skills/canonical-sdlc/steps/%s.md\n' "$RS_PROOT" "$RS_CURN" ;;
+      *) printf 'step-file: none — the plan'"'"'s current: (%s) names no step\n' "${RS_CUR:-unset}" ;;
+    esac
+    # The patrol: the model's one act left, in the ritual's order, the interval as the arm line prints it.
+    RS_INT="$(rs_sub interval 2>/dev/null)" || RS_INT=""
+    RS_EVERY="every ${RS_INT:-?}s"
+    case "$RS_INT" in
+      ''|*[!0-9]*) ;;
+      *) if [ $((RS_INT % 60)) -eq 0 ]; then
+           RS_M=$((RS_INT / 60))
+           if [ "$RS_M" -ge 1 ] && [ "$RS_M" -le 30 ] && [ $((60 % RS_M)) -eq 0 ]; then RS_EVERY="$RS_EVERY (cron */$RS_M * * * *)"; fi
+         fi ;;
+    esac
+    RS_PROMPT="$(rs_sub prompt 2>/dev/null)" || RS_PROMPT=""
+    printf 'patrol-interval: %s — CronList, CronDelete every job whose prompt begins with bionic-patrol session=, then CronCreate recurring %s with the patrol: line'"'"'s text as its prompt (the stamp is armed)\n' "$RS_EVERY" "${RS_EVERY%% (*}"
+    printf 'patrol: %s\n' "${RS_PROMPT:-(the prompt verb printed nothing: run bash ${HOOK_DIR}/session-poker.sh prompt)}"
+    RS_RC=0
+    rs_sub tick || RS_RC=$?
+    case "$RS_RC" in
+      0|1) : ;;
+      *) die "resume stopped at tick (exit $RS_RC): the lines above say why."; exit "$RS_RC" ;;
+    esac
+    say "resume — done: bound, armed, adopted, ticked. Yours now: rebuild the task list from the task-list: lines (TaskList first), read the step-file:, and create the Patrol job from the patrol: line."
     exit 0
     ;;
 
