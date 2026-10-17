@@ -695,6 +695,25 @@ EOF
     # shellcheck source=/dev/null
     { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
       && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
+    # AN ADOPTED ROW'S MARK IS FOUND ON ANY ROSTER OF THE PROJECT (wave-38 T14; REQ-3 AC-3.6, L12; A-orch-17).
+    # The landing marks the roster of the session whose carrier ran `ready`, which for a row adopted after a
+    # `/clear` is the PREDECESSOR's: this session's roster holds the adopted row (the row lookup above, and the
+    # ack, stay here) and no mark. So this session's roster is asked first, then every other roster that holds a
+    # row of the name — the walk `roster_sessions_with_name` shares with `adopt` and the stop guard, never a
+    # second glob. A mark found elsewhere counts only when its commit is on the working branch (the main
+    # checkout's HEAD: the line lands there), and the newest such mark wins. `_mark_sid` names where it was found.
+    _mark_sid=""
+    if [ -z "$_mark" ] && declare -F roster_sessions_with_name >/dev/null 2>&1; then
+      _best_at=""
+      while IFS='|' read -r _msid _mstat; do
+        [ -n "$_msid" ] && [ "$_msid" != "$SESSION_ID" ] || continue
+        _m="$(roster_landed "$STATE_DIR/roster-${_msid}.state" "$_target" 2>/dev/null)" || continue
+        [ -n "$_m" ] || continue
+        git -C "$REPO_REAL" merge-base --is-ancestor "${_m%%$'\t'*}" HEAD 2>/dev/null || continue
+        _m_at="${_m#*$'\t'}"
+        if [ -z "$_mark" ] || [ "$_m_at" \> "$_best_at" ]; then _mark="$_m"; _best_at="$_m_at"; _mark_sid="$_msid"; fi
+      done <<< "$(roster_sessions_with_name "$STATE_DIR" "$_target")"
+    fi
     _acked=0
     if [ "$(line_field "$_line" acked)" = "yes" ]; then
       if [ -z "$_mark" ]; then
@@ -806,13 +825,16 @@ EOF
       # shellcheck source=/dev/null
       [ -f "$_wt_lib" ] && . "$_wt_lib"
       if declare -f worktree_remove_landed >/dev/null 2>&1; then
+        # The tree is recorded under the session whose carrier made it: this one's, else the mark's (a row
+        # adopted from the session that launched it), else the convention's.
         _tree="$(workspace_for_name "$REPO_REAL" "$SESSION_ID" "$_target" 2>/dev/null)" \
+          || { [ -n "$_mark_sid" ] && _tree="$(workspace_for_name "$REPO_REAL" "$_mark_sid" "$_target" 2>/dev/null)"; } \
           || _tree="$(worktree_for_row "$REPO_REAL" "$_target")"
         _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
         _c="${_mark%%$'\t'*}"
         _kept="$(worktree_remove_landed "$REPO_REAL" "$_tree" "$_c")"
         case $? in
-          0) say "stopped: $_target — its tree is removed: $_tree (branch ${_tbr:-unknown} stays; landed ${_c:0:12})" ;;
+          0) say "stopped: $_target — its tree is removed: $_tree (branch ${_tbr:-unknown} stays; landed ${_c:0:12}${_mark_sid:+; mark on roster ${_mark_sid:0:8}})" ;;
           2) say "stopped: $_target — its tree stands: $_tree; $_kept" ;;
         esac
       fi

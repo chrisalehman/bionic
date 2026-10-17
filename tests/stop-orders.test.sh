@@ -1305,4 +1305,87 @@ expect_eq "AD-6 a transcript that grew across two reads a cadence apart reads RU
 expect_eq "AD-7 a transcript whose mtime moved with no growth since a cadence-old read reads SILENT" "SILENT" "$(ad_verdict killedmid)"
 expect_eq "AD-7b …and the agent the panel lists still reads RUNNING in the same report" "RUNNING" "$(ad_verdict alive)"
 
+# ============================================================
+section "§ADOPTED — stopped finds an adopted row's landed mark on ANY roster of the project and removes the row's tree (wave-38 T14; REQ-3 AC-3.6, L12)"
+# ============================================================
+#
+# THE LIVE CASE (A-orch-17, A-orch-25, A-orch-32). A row launched in session A and adopted by session B
+# is landed by B's carrier, but the mark the landing writes sits on the roster of the session that made
+# the launch (A's), where `roster_landed` over B's own roster never looked: `stopped` acked the row and
+# left its tree registered, and the tree was removed by hand. The row lookup stays on THIS session's
+# roster (the row must be this session's to ack); the MARK is looked for on this one first, then on every
+# other roster of the project, and a mark whose commit is not on the working branch is not a landing.
+#
+# THE TWO-ROSTER SHAPE: roster-A holds the launch and the mark; roster-B holds the adopted row
+# (`source=adopted`, `adopted_from=A`) and nothing else of the name. The writer's workspace record is
+# A's too, and the tree's directory is NOT the convention's spelling of the writer's name, so only a
+# lookup through the mark's own session finds the tree.
+RAD="$(make_repo adopted-mark)"
+RAD_REAL="$(cd "$RAD" && pwd -P)"
+SID_A="a14c0de1-5555-4666-8777-888888888888"
+echo seed > "$RAD/README.md"
+git -C "$RAD" add README.md >/dev/null 2>&1
+git -C "$RAD" commit -qm seed >/dev/null 2>&1
+for t in ad-tree-a ad-tree-b ad-tree-c; do
+  git -C "$RAD" worktree add -q -b "$t" "$RAD/.worktrees/$t" >/dev/null 2>&1
+  echo "$t" > "$RAD/.worktrees/$t/$t.txt"
+  git -C "$RAD/.worktrees/$t" add -A >/dev/null 2>&1
+  git -C "$RAD/.worktrees/$t" commit -qm "$t work" >/dev/null 2>&1
+done
+# ad-tree-a lands as the line lands a row: merged onto the working branch. ad-tree-c never lands.
+for t in ad-tree-a ad-tree-b; do git -C "$RAD" merge -q --no-ff -m "merge $t (land)" "$t" >/dev/null 2>&1; done
+RAD_L="$(git -C "$RAD" rev-parse HEAD)"
+RAD_C="$(git -C "$RAD" rev-parse ad-tree-c)"
+RADSLUG=$(so_slug "$RAD")
+mkdir -p "$R8CFG/projects/$RADSLUG"
+RADTR="$R8CFG/projects/$RADSLUG/$SID.jsonl"
+RAD_RA="$RAD/.bionic/tmp/roster-$SID_A.state"
+RAD_RB="$RAD/.bionic/tmp/roster-$SID.state"
+roster_header > "$RAD_RA"
+roster_header > "$RAD_RB"
+for w in ad-w-a ad-w-b ad-w-c; do
+  echo done > "$RAD/.bionic/docs/record/$w.md"
+  roster_row_fixture status=identified session="$SID_A" name="$w" agent_id="a$w" \
+    launched_at=2026-08-05T00:00:00Z deliverable=".bionic/docs/record/$w.md" teammate_id="$w@session-a14c0de1" >> "$RAD_RA"
+  roster_row_fixture status=identified session="$SID" name="$w" agent_id="a$w" \
+    launched_at=2026-08-05T00:00:00Z deliverable=".bionic/docs/record/$w.md" source=adopted \
+    teammate_id="$w@session-a14c0de1" adopted_from="$SID_A" done="$(so_said "$RAD" "$w")" >> "$RAD_RB"
+done
+# ad-w-a and ad-w-c are marked on A's roster (c's commit is on no branch of the working line); ad-w-b is marked nowhere.
+bash -c '. "$1" && roster_mark_landed "$2" ad-w-a "$3" 2026-10-07T03:30:00Z && roster_mark_landed "$2" ad-w-c "$4" 2026-10-07T03:31:00Z' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" "$RAD_RA" "$RAD_L" "$RAD_C"
+# The trees were made by session A's carrier: the workspace record is A's.
+for pair in "ad-w-a ad-tree-a" "ad-w-b ad-tree-b" "ad-w-c ad-tree-c"; do
+  set -- $pair
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=%s|base=%s|plan=none|at=2026-09-02T00:00:00Z\n' \
+    "$SID_A" "$1" "$RAD_REAL/.worktrees/$2" "$2" "$RAD_L" >> "$RAD/.bionic/tmp/workspaces-$SID_A.state"
+done
+so_bind_plan "$RAD" wave/fixture >/dev/null
+plant_live "$RADTR" fresh
+expect_contains "AD10-pre: roster A carries the mark" "|name=ad-w-a|" "$(grep '|landed='"$RAD_L"'|' "$RAD_RA")"
+expect_absent "AD10-pre: …and roster B (this session's) carries none" "|landed=" "$(cat "$RAD_RB")"
+RAD_REFS0="$(git -C "$RAD" for-each-ref --format='%(refname) %(objectname)')"
+
+run_orders_cfg "$RAD" stopped ad-w-a
+expect_status "AD10a: stopped on a row adopted from A, marked on A's roster, exits 0" 0 "$ST"
+expect_contains "AD10a2: …the row is closed, reason landed (first half of the line unchanged)" \
+  "stopped: ad-w-a — its row is closed (acked by human, reason landed)." "$OUT"
+expect_contains "AD10a3: …its tree is removed, the line naming the roster the mark was found on" \
+  "stopped: ad-w-a — its tree is removed: $RAD_REAL/.worktrees/ad-tree-a (branch ad-tree-a stays; landed ${RAD_L:0:12}; mark on roster ${SID_A:0:8})" "$OUT"
+if [ ! -d "$RAD/.worktrees/ad-tree-a" ]; then ok "AD10a4: …the tree is gone from disk"; else no "AD10a4: …the tree is gone from disk"; fi
+expect_eq "AD10a5: …and no ref moved: the branch survives" "$RAD_REFS0" \
+  "$(git -C "$RAD" for-each-ref --format='%(refname) %(objectname)')"
+
+run_orders_cfg "$RAD" stopped ad-w-b
+expect_status "AD10b: the control — a row marked on no roster exits 0" 0 "$ST"
+expect_contains "AD10b2: …the row is closed" "stopped: ad-w-b — its row is closed" "$OUT"
+if [ -d "$RAD/.worktrees/ad-tree-b" ]; then ok "AD10b3: …and its tree stands: no mark anywhere, no removal"; else no "AD10b3: …and its tree stands: no mark anywhere, no removal"; fi
+expect_absent "AD10b4: …nothing claims a removal or a roster" "its tree is removed" "$OUT"
+expect_absent "AD10b5: …and names no roster" "mark on roster" "$OUT"
+
+run_orders_cfg "$RAD" stopped ad-w-c
+expect_status "AD10c: a mark on A's roster whose commit is not on the working branch exits 0" 0 "$ST"
+if [ -d "$RAD/.worktrees/ad-tree-c" ]; then ok "AD10c2: …and its tree stands: that commit is no landing"; else no "AD10c2: …and its tree stands: that commit is no landing"; fi
+expect_absent "AD10c3: …and the line claims no removal" "its tree is removed" "$OUT"
+
 finish
