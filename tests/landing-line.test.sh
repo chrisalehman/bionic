@@ -32,6 +32,7 @@ ll_cleanup() {  # every carrier and stand-in runner the suite started
 }
 trap ll_cleanup EXIT
 . "$(dirname "$0")/lib/world.sh"
+. "$(dirname "$0")/lib/wait.sh"
 
 LL_LOADED=0
 if [ -r "$LINE" ] && . "$LINE" 2>/dev/null; then LL_LOADED=1; fi
@@ -846,14 +847,9 @@ section "§AHEAD-RED: a refused row holds nothing behind it (AC-1.6)"
 # active only while it holds an open request, so a run of T2 may start in the gap between T1's run and
 # its red judge's (A-T6-10), and it must not hold T1 up.
 ll_nth_cand() { ll_field "$(ll_ev "$1" candidate | awk -F'|' -v r="row=$2" '$3 == r' | sed -n "${3:-1}p")" commit; }   # <root> <row> [n | $]
-ll_wait_cand() {  # <root> <row> [n] -> 0 once <row> has at least <n> candidates on the record (30 s at most)
-  local i=0
-  while [ "$i" -lt 300 ]; do
-    [ "$(ll_ev "$1" candidate | awk -F'|' -v r="row=$2" '$3 == r { n++ } END { print n + 0 }')" -ge "${3:-1}" ] && return 0
-    i=$((i + 1)); sleep 0.1
-  done
-  return 1
-}
+ll_has_cand() { [ "$(ll_ev "$1" candidate | awk -F'|' -v r="row=$2" '$3 == r { n++ } END { print n + 0 }')" -ge "${3:-1}" ]; }   # <root> <row> [n]
+ll_wait_cand() { wait_ticks 300 0.1 ll_has_cand "$@"; }   # <root> <row> [n] -> 0 once <row> has at least <n> candidates (30 s at most)
+ll_has_lines() { [ "$(ll_lines "$1")" -ge "$2" ]; }   # <file> <n>
 ll_width_ask() { ( . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null && gate_width_ask "$1" 2>/dev/null ); }   # <landing key> -> the gate's answer
 ll_open_landing() {  # -> the landing= key of the first open landing request, admitted and not ended
   local f
@@ -873,7 +869,7 @@ ll_verb_bg "$RA" T1 "$WORLD_ROOT/a-T1.out"
 expect_true "(a0-pre) T1's run started" ll_wait_lines "$LL_SIG/a-T1.runs" 1
 ll_verb_bg "$RA" T2 "$WORLD_ROOT/a-T2.out"
 expect_true "(a0-pre) T2's first candidate is built" ll_wait_cand "$RA" T2
-sleep 2
+expect_false "(a0) no run of T2 starts in the 2 s while T1's run is open" wait_for 2 ll_has_lines "$LL_SIG/a-T2.runs" 1
 KA1="$(ll_nth_cand "$RA" T1)"
 expect_eq "(a0) T2's first candidate is built on T1's" "$KA1" "$(git -C "$RA" rev-parse "$(ll_nth_cand "$RA" T2)^1")"
 expect_eq "(a0) …T1's run the open landing run, and none of T2's on it" "T1 0" "$(ll_open_landing | sed 's/.*://') $(ll_lines "$LL_SIG/a-T2.runs")"
@@ -931,7 +927,7 @@ ll_verb_bg "$RW" T1 "$WORLD_ROOT/s-T1.out"
 ll_wait_lines "$LL_SIG/s-T1.runs" 1
 ll_verb_bg "$RW" T2 "$WORLD_ROOT/s-T2.out"
 expect_true "(w1-pre) T2's candidate is built while T1's run holds" ll_wait_cand "$RW" T2
-sleep 2
+expect_false "(w1) no run of T2 starts in the 2 s while T1's run is open" wait_for 2 ll_has_lines "$LL_SIG/s-T2.runs" 1
 SW_KEY="$(ll_open_landing)"
 expect_eq "(w1) T1's run is the one open landing run, tagged with T1's landing key" "a.test.sh|T1" \
   "$(for f in "$BIONIC_GATE_DIR"/requests/*; do
@@ -2159,11 +2155,9 @@ ll_req_tags() {  # -> `<requests naming a landing that ends :T1> <distinct promi
   done | awk '$1 == "T1" { n++ } $2 != "" { c[$2] = 1 } END { for (k in c) s = s (s == "" ? "" : ",") k; print n + 0, s }'
 }
 ll_started() { cat "$LL_SIG/$1"-*.runs 2>/dev/null | awk '$1 == "start" { n++ } END { print n + 0 }'; }   # <tag> -> runs started
-ll_wait_started() {  # <tag> <n> -> 0 once at least <n> runs of <tag> have started (30 s at most)
-  local i=0
-  while [ "$i" -lt 300 ]; do [ "$(ll_started "$1")" -ge "$2" ] && return 0; i=$((i + 1)); sleep 0.1; done
-  return 1
-}
+ll_has_started() { [ "$(ll_started "$1")" -ge "$2" ]; }   # <tag> <n>
+ll_wait_started() { wait_ticks 300 0.1 ll_has_started "$@"; }   # <tag> <n> -> 0 once at least <n> runs of <tag> have started (30 s at most)
+ll_filed_over() { local r; r="$(ll_reqs)"; [ "${r%% *}" -gt "$1" ]; }   # <n> -> 0 once more than <n> landing requests are filed
 ll_req_admitted() {  # <suite> -> the gate's admitted= on that suite's landing request(s), space-separated, in id order
   local f
   for f in $(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | sort -n); do
@@ -2192,7 +2186,7 @@ expect_eq "(k0) …and at load 2 the gate answers a landing with nothing open 4"
 RK="$(ll_ask_world k p1 p2 p3 p4 p5 p6)"
 ll_verb_bg "$RK" T1 "$WORLD_ROOT/k.out"; K_BG=$!
 expect_true "(k1-pre) four runs started" ll_wait_started k 4
-sleep 2
+expect_false "(k1) no fifth ask is filed in the 2 s after" wait_for 2 ll_filed_over 4
 expect_eq "(k1) the drain started exactly the answer: four landing requests, four admitted, none waiting in the gate's queue" "4 4 0" "$(ll_reqs)"
 expect_eq "(k1) …four suites running, p5 and p6 not started" "4 0 0" "$(ll_started k) $(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
 expect_eq "(k1) …each request names the row's landing and is promised the measured cost" "4 $(_res_suite_cores)" "$(ll_req_tags)"
@@ -2201,7 +2195,7 @@ expect_eq "(k1) …and the gate answers the landing 0 more while its four run" "
 world_tick 50
 touch "$LL_SIG/k-p1.go"
 expect_true "(k2-pre) a fifth run started once p1 ended" ll_wait_started k 5
-sleep 2
+expect_false "(k2) no sixth ask is filed in the 2 s after" wait_for 2 ll_filed_over 5
 expect_eq "(k2) asked again as p1 ended, the gate answered 1 and the drain started one: five filed, four admitted, none waiting" "5 4 0" "$(ll_reqs)"
 expect_eq "(k2) …p5 started, p6 not" "1 0" "$(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
 touch "$LL_SIG/k-p2.go" "$LL_SIG/k-p3.go" "$LL_SIG/k-p4.go" "$LL_SIG/k-p5.go" "$LL_SIG/k-p6.go"
@@ -2217,7 +2211,7 @@ expect_eq "(k4-pre) at load 6 the gate answers a landing with nothing open 1 (0 
 RK6="$(ll_ask_world k6 q1 q2)"
 ll_verb_bg "$RK6" T1 "$WORLD_ROOT/k6.out"; K6_BG=$!
 expect_true "(k4-pre) one run started" ll_wait_started k6 1
-sleep 2
+expect_false "(k4) no second ask is filed in the 2 s after" wait_for 2 ll_filed_over 1
 expect_eq "(k4) at load 6 the drain started one: one request, admitted, none waiting; q2 not started" "1 1 0 0" "$(ll_reqs) $(ll_lines "$LL_SIG/k6-q2.runs")"
 expect_eq "(k4) …the gate answers the landing 0 while its run is open" "0" "$(ll_width_ask "$(ll_open_landing)")"
 touch "$LL_SIG/k6-q1.go"
@@ -2234,7 +2228,7 @@ RKM="$(ll_ask_world km m1 m2 m3 m4 m5 m6)"
 anchor fn payload/scripts/lib/line.sh 'gate_width_ask "$1"' _line_width_ask 'echo 9'
 LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_width_ask ll_drive "$RKM" T1 "$WORLD_ROOT/km.out"; KM_BG=$!
 ll_wait_started km 4
-sleep 2
+wait_for 5 ll_filed_over 4
 KM_REQS="$(ll_reqs)"
 expect_eq "(k6m-pre) the mutant ran: the gate admitted four, as on the shipped drain" "4" "$(ll_started km)"
 expect_true "(k6m) MUTANT the drain sizes itself: more asks filed than the gate's answer, the rest waiting in its queue (the rows can fail; got $KM_REQS)" \
