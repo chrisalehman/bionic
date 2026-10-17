@@ -35,6 +35,17 @@
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
+#   §ROBUST    D21     (wave-38 T31; A-orch-43) a suite's promised seconds are robust to one
+#                      contended run: with three kept durations the largest at or below twice
+#                      their median (285, 300, 1775 promises 300, and `_line_time_for` fits it in
+#                      1700); with fewer, the largest (1775 alone promises 1775)
+#   §FINISHED  D22, AC-6.2 (wave-38 T31; A-orch-43) a landing's request records the row's window
+#                      (its lease's span) and its landing record at ask, and when it was handed back;
+#                      the scan ends a handed-back request whose row's record shows published,
+#                      returned or stalled after its ask (why=row-finished), or whose holder has been
+#                      gone longer than its window, 1800 s with none recorded (why=holder-gone), a
+#                      landing request naming no landing by the window alone; a live waiter, one
+#                      gone 10 s (AC-6.2's killed waiter), and a writer's work request are kept
 #   §FIRST     AC-2.7  a writer's number waits, a landing's arrives, and the landing is admitted
 #                      first. Mutation: landing-before-work removed admits the writer
 #   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
@@ -919,6 +930,116 @@ expect_eq "TM.7 …so the next ask ends it rc=gone and takes a fresh number — 
   "3|1000|gone" "$TR_NEXT"
 reap
 
+# ── §ROBUST ──────────────────────────────────────────────────────────────────
+# THE PROMISE IS ROBUST TO ONE CONTENDED RUN (wave-38 T31; D21; A-orch-43). The gate promised a suite
+# the LARGEST of its kept durations, so one run of close-out.test.sh under three-builder contention
+# (1775 s, beside 760 and 669) set its promise past `ready --within 1700`, and no ready could ever
+# start it. With three kept durations the promise is the largest at or below twice their median; with
+# fewer, the largest. The durations are planted in the key's own cost file (`costf`, the project key
+# the gate's own), newest last, as gate_end writes them.
+section "§ROBUST — one contended run does not set a suite's promise (D21; A-orch-43)"
+secs_of() { ( . "$GATE_LIB" 2>/dev/null; gate_promise "$1" 2>/dev/null | awk -F: '{ print $NF }' ); }
+# fit_in <key> <seconds left> — `_line_time_for` as a landing asks it: "<printed> rc=<n>"
+fit_in() {
+  ( . "$GATE_LIB" 2>/dev/null && . "$REPO_ROOT/payload/scripts/lib/line.sh" 2>/dev/null \
+      && o="$(_line_time_for "$1" "$(( $(_res_now) + $2 ))" "$(pwd -P)")"; echo "$o rc=$?" )
+}
+plant_costs() {  # <key> <seconds>... — the key's cost file, one <seconds>:<epoch> line each, newest last
+  local k="$1" f e=900
+  shift
+  f="$(costf "$k")"; mkdir -p "${f%/*}"; : > "$f"
+  for s in "$@"; do printf '%s:%s\n' "$s" "$e" >> "$f"; e=$((e + 10)); done
+}
+fresh robust
+plant_costs rb.test.sh 285 300 1775
+expect_eq "RB.0 precondition: the key's cost file holds the three planted durations, newest last" "285 300 1775" \
+  "$(cut -d: -f1 "$(costf rb.test.sh)" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "RB.1 285, 300 and 1775 kept: the promise is 300 (the largest at or below twice the median 300), not 1775" \
+  "300" "$(secs_of rb.test.sh)"
+expect_eq "RB.2 …so a landing with 1700 s left fits it: _line_time_for gives the gate 1400 s (rc 0)" "1400 rc=0" \
+  "$(fit_in rb.test.sh 1700)"
+plant_costs rb.test.sh 1775
+expect_eq "RB.3 a single 1775 kept is the promise: 1775" "1775" "$(secs_of rb.test.sh)"
+expect_eq "RB.4 …and with 1700 s left it does not fit (rc 1, nothing printed)" " rc=1" "$(fit_in rb.test.sh 1700)"
+plant_costs rb.test.sh 760 1775
+expect_eq "RB.5 two kept (760, 1775): fewer than three, the largest, 1775" "1775" "$(secs_of rb.test.sh)"
+plant_costs rb.test.sh 669 760 1775
+expect_eq "RB.6 the live case, 669, 760 and 1775: the promise is 760" "760" "$(secs_of rb.test.sh)"
+plant_costs rb.test.sh 300 310 500
+expect_eq "RB.7 300, 310 and 500: 500 is within twice the median (620), so the promise is 500, never below a run in range" \
+  "500" "$(secs_of rb.test.sh)"
+
+# ── §FINISHED ────────────────────────────────────────────────────────────────
+# A FINISHED ROW'S KEPT REQUESTS ARE ENDED (wave-38 T31; D22, AC-6.2; A-orch-43). A landing's run hands
+# its request back when its time runs out or it is sent TERM (holder=-), so the row's next ask keeps
+# its turn (AC-6.2). Nothing ended such a request once the row was done: 51 of them, from rows already
+# landed, sat in the store. The ask now records the landing's record (BIONIC_GATE_RECORD) and its window
+# (the span of the landing's lease, the ready's --within) and the hand-back records when (left=). The
+# scan ends a handed-back landing request whose row's record shows published, returned or stalled after
+# its ask (why=row-finished), and one gone longer than its window (1800 s when it recorded none;
+# why=holder-gone). A landing request that names no landing (asked before T6 tagged them, as the 51
+# were) is ended by the window alone; a writer's work request is never this rule's. A live waiter is
+# never ended, nor one handed back 10 s ago. Landing keys are
+# `<project>:<plan>:<row>`; the record is a planted landing-proofs.log, its lines as line.sh writes them.
+section "§FINISHED — a finished row's kept requests are ended; a killed waiter keeps its turn (D22, AC-6.2)"
+fresh finished
+world_machine 8 8192 60 6.0
+world_cost h 30
+REC="$D/landing-proofs.log"
+printf '%s\n' 'line/v1|ev=returned|row=T9|why=red|detail=-|at=1970-01-01T00:16:35Z' \
+  'line/v1|ev=published|row=T8|commit=c8|kind=queue|by=-|why=-|at=1970-01-01T00:16:45Z' > "$REC"
+# A-orch-43's own shape, planted: a landing request handed back at 1000 that names no landing (the 51
+# predate T6's landing= line), and a writer's work request handed back at the same instant.
+mkdir -p "$BIONIC_GATE_DIR/requests"
+printf 'key=close-out.test.sh\nkind=landing\nwho=%s:w38-T5\ntree=/t\nasked=1000\nholder=-\n' "$WORLD_SID" > "$BIONIC_GATE_DIR/requests/90"
+printf 'key=a.test.sh\nkind=work\nwho=%s:wx\ntree=/t\nasked=1000\nholder=-\n' "$WORLD_SID" > "$BIONIC_GATE_DIR/requests/91"
+HOLD=1 ask_bg fh work h 0; wait_for 20 has fh.rc
+lopen "p0:wave-x:T9" "$LME" 600 >/dev/null
+BIONIC_GATE_LANDING=p0:wave-x:T9 BIONIC_GATE_RECORD="$REC" AGENT=f9 ask_fg f9 landing k 0 >/dev/null
+F9="$(req_of f9)"
+expect_eq "FN.1 precondition: a holder is admitted, and T9's run, asked with 0 s, is returned 75 and handed back (rc|holder)" \
+  "0|75|-" "$(rc_of fh)|$(rc_of f9)|$(field "$F9" holder)"
+expect_eq "FN.2 the ask recorded the landing, its record, the row's window (the lease's span, 600) and when it was handed back" \
+  "p0:wave-x:T9|$REC|600|1000" "$(field "$F9" landing)|$(field "$F9" record)|$(field "$F9" within)|$(field "$F9" left)"
+BIONIC_GATE_LANDING=p0:wave-x:T9 BIONIC_GATE_RECORD="$REC" AGENT=f9live ask_bg f9l landing k3 ""
+wait_for 20 asked_by f9live; wait_for 20 parked f9l
+F9L="$(req_of f9live)"
+BIONIC_GATE_LANDING=p0:wave-x:T7 AGENT=f7 ask_bg f7 landing k2 ""
+wait_for 20 asked_by f7; wait_for 20 parked f7
+F7="$(req_of f7)"; F7P="$(cat "$D/f7.pid" 2>/dev/null)"
+term_tree "$F7P"; wait "$F7P" 2>/dev/null; wait_for 20 dead "$F7P"; wait_for 5 handed_back "$F7"
+expect_eq "FN.3 precondition: T9's second run waits, held live; T7's, killed with TERM, is handed back with no window recorded (holder|within|left)" \
+  "asker|-||1000" "$(holder_as "$F9L" "$(cat "$D/f9l.pid" 2>/dev/null)")|$(field "$F7" holder)|$(field "$F7" within)|$(field "$F7" left)"
+world_tick 10
+state >/dev/null
+expect_eq "FN.4 ten seconds on, with T9's return before its ask and only T8 published after: all three kept (asked|ended, each)" \
+  "1000||1000||1000|" "$(field "$F9" asked)|$(field "$F9" ended)|$(field "$F9L" asked)|$(field "$F9L" ended)|$(field "$F7" asked)|$(field "$F7" ended)"
+printf '%s\n' 'line/v1|ev=published|row=T9|commit=c9|kind=queue|by=-|why=-|at=1970-01-01T00:16:48Z' >> "$REC"
+state >/dev/null
+expect_eq "FN.5 T9 published after its ask: the next scan ends its handed-back request (ended|rc|why)" \
+  "1010|gone|row-finished" "$(field "$F9" ended)|$(field "$F9" rc)|$(field "$F9" why)"
+expect_eq "FN.6 …T9's live waiter is untouched (holder|ended)" "asker|" \
+  "$(holder_as "$F9L" "$(cat "$D/f9l.pid" 2>/dev/null)")|$(field "$F9L" ended)"
+expect_eq "FN.7 …and T7's, gone 10 s with no record named, keeps its turn: AC-6.2 (asked|ended)" "1000|" \
+  "$(field "$F7" asked)|$(field "$F7" ended)"
+world_tick 1790
+state >/dev/null
+expect_eq "FN.8 T7's gone exactly 1800 s, the window when none was recorded: kept (asked|ended)" "1000|" \
+  "$(field "$F7" asked)|$(field "$F7" ended)"
+expect_eq "FN.8b …and so are the planted landing request with no landing= and the writer's, both 1800 s old (asked|ended, each)" \
+  "1000||1000|" "$(field 90 asked)|$(field 90 ended)|$(field 91 asked)|$(field 91 ended)"
+world_tick 1
+state >/dev/null
+expect_eq "FN.9 gone 1801 s: the scan ends it (ended|rc|why)" "2801|gone|holder-gone" \
+  "$(field "$F7" ended)|$(field "$F7" rc)|$(field "$F7" why)"
+expect_eq "FN.9b the landing request that names no landing, 1801 s since its ask, is ended too: the 51 of A-orch-43 (ended|rc|why)" \
+  "2801|gone|holder-gone" "$(field 90 ended)|$(field 90 rc)|$(field 90 why)"
+expect_eq "FN.9c …while the writer's work request is not this rule's: kept, as T47 keeps it (asked|ended)" "1000|" \
+  "$(field 91 asked)|$(field 91 ended)"
+expect_eq "FN.10 …and the live waiter, asked 1801 s ago, is still untouched (holder|ended)" "asker|" \
+  "$(holder_as "$F9L" "$(cat "$D/f9l.pid" 2>/dev/null)")|$(field "$F9L" ended)"
+reap
+
 # ── §FIRST ───────────────────────────────────────────────────────────────────
 # first_rows <gate lib> <prefix> — a writer waits, a landing arrives, room appears; sets FIRST
 # to the agent admitted first (w or l), or none.
@@ -1138,8 +1259,10 @@ world_tick 1
 release u1
 expect_eq "D.13 a run that did processor work records its seconds and epoch only: no cores, no memory" \
   "20:1000 1:1001" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
-# age_runs <gate lib> <name> — cost/k holds one overlong run (300 s); four 10 s runs follow. Sets
-# AGE to the four admissions' promised seconds.
+# age_runs <gate lib> <name> — cost/k holds one overlong run (300 s); four 200 s runs follow. Sets
+# AGE to the four admissions' promised seconds. The runs are 200 s, within twice their median, so the
+# 300 is still a run in range (wave-38 T31, §ROBUST: an outlier past twice the median, such as 10 s
+# runs beside it, no longer sets the promise at all) and the rows read how many lines are kept.
 age_runs() {
   local i p
   fresh "$2"
@@ -1149,14 +1272,14 @@ age_runs() {
   for i in 1 2 3 4; do
     GATE_LIB="$1" HOLD=1 ask_bg "a$i" work k 0; wait_for 20 has "a$i.rc"
     p="$(field "$(id_of "a$i")" promise)"; AGE="$AGE ${p##*:}"
-    world_tick 10
+    world_tick 200
     release "a$i"
   done
   AGE="${AGE# }"
 }
 age_runs "$GATE" cost-age
-expect_eq "D.19 three shorter runs do not shorten the promise until the overlong one ages out" \
-  "300 300 300 10" "$AGE"
+expect_eq "D.19 three shorter runs within twice their median do not shorten the promise until the overlong one ages out" \
+  "300 300 300 200" "$AGE"
 MK="$(mutant keep4)"
 anchor file payload/scripts/lib/gate.sh '} | tail -n 3 > "$_GD/cost/.new.$id"'
 sed -i.bak 's/} | tail -n 3 > "\$_GD\/cost\/.new.\$id"/} | tail -n 4 > "$_GD\/cost\/.new.$id"/' "$MK"

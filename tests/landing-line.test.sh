@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -980,7 +980,7 @@ RN="$(ll_world)"; ll_launch "$RN" T1 c
 REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
 expect_eq "(n1) a suite promising 600 s with 60 s left: exit 75" "75" "$LL_RC"
-expect_eq "(n1) …printing WAITING and the same command" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$LL_OUT"
+expect_eq "(n1) …printing WAITING and the same command (its first line; §WHY reads the reason after it)" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$LL_OUT" | head -n 1)"
 expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN" \
   "$(ll_ev "$RN" verdict | awk 'END { print NR }') $(ls "$RN/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" | wc -l | tr -d ' ')"
 expect_eq "(n1) …the entry kept, its carrier gone" "T1 no" "$(line_state "$(ll_plan "$RN")" | cut -f1,4 | tr '\t' ' ')"
@@ -2428,6 +2428,63 @@ touch "$LL_SIG/o2-T1.go" "$LL_SIG/o2-T2.go"
 ll_wait_file "$WORLD_ROOT/o2-T2.out.rc" 450 || ll_kill_bg "$O2B"; ll_wait_file "$WORLD_ROOT/o2-T1.out.rc" 450 || ll_kill_bg "$O2A"
 expect_eq "(o2) both land, T2 then T1" "0 0 T2 T1" \
   "$(cat "$WORLD_ROOT/o2-T2.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/o2-T1.out.rc" 2>/dev/null) $(ll_ev "$RO2" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------------------------------------------------------------------------
+section "§WHY: every WAITING exit says why on the next line; the WAITING line is unchanged (wave-38 T31; D21, D22; A-orch-43)"
+#
+# T8's landing made 26 ready calls, each WAITING with no reason printed: the suite's promise did not fit
+# the time left, and nothing said so (A-orch-43). Each WAITING exit now prints `waiting: <reason>` on the
+# line after its WAITING line, which stays byte for byte what it was. Each case is planted and run with
+# --within 0, so the first wait is the exit and a wrong order fails the row instead of hanging the suite
+# (the clock is planted and never reaches a later deadline).
+export BIONIC_GATE_DIR="$WORLD_ROOT/gate-why"
+ll_wline() { printf '%s\n' "$1" | grep '^WAITING ' | head -n 1; }   # <ready's output> -> its WAITING line
+ll_why() { printf '%s\n' "$1" | awk '/^WAITING / { if ((getline n) > 0) print n; exit }'; }   # <ready's output> -> the line after it
+RY1="$(ll_world)"; ll_launch "$RY1" T1 c
+( cd "$RY1" && world_cost c.test.sh 600 )
+( cd "$RY1" && world_suite c green >/dev/null ) && git -C "$RY1" add tests/c.test.sh && git -C "$RY1" commit -qm "suite c"
+ll_verb "$RY1" T1 --within 0
+expect_eq "(y1) the suite's time: a suite promising 600 s with 0 s left exits 75, its WAITING line unchanged" \
+  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
+expect_eq "(y1) …and the next line names the suite, its promised seconds, the seconds left and the --within" \
+  "waiting: suite c.test.sh promises 600s and 0s are left in --within 0" "$(ll_why "$LL_OUT")"
+RY2="$(ll_rworld)"; YW_CAR="$(ll_carrier)"
+expect_eq "(y2-pre) an older landing's lease is open, carried live" "0" "$(ll_lease_gate gate_landing_open older:wave-y:T9 "$YW_CAR" 3600)"
+ll_verb "$RY2" T1 --within 0
+expect_eq "(y2) the gate's width: answered 0 behind an older landing, T1 exits 75, its WAITING line unchanged" \
+  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
+expect_eq "(y2) …and the next line gives the gate's answer and the older landing" \
+  "waiting: gate answered 0 for this landing (older:wave-y:T9 is older)" "$(ll_why "$LL_OUT")"
+ll_lease_gate gate_landing_close older:wave-y:T9 "$YW_CAR" >/dev/null
+RY3="$(ll_rworld)"
+ll_ready "$RY3" T2 "$(ll_carrier)" >/dev/null
+ll_verb "$RY3" T1 --within 0
+expect_eq "(y3) the base: T2 ahead, present, with no candidate; T1 exits 75, its WAITING line unchanged" \
+  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
+expect_eq "(y3) …and the next line names the row ahead" "waiting: T2 ahead has no candidate" "$(ll_why "$LL_OUT")"
+RY4="$(ll_rworld)"; HY4="$(ll_head "$RY4")"
+printf 'one\n' > "$RY4/.worktrees/T1/shared.txt"; git -C "$RY4/.worktrees/T1" add shared.txt && git -C "$RY4/.worktrees/T1" commit -qm "T1: shared one"
+printf 'two\n' > "$RY4/.worktrees/T2/shared.txt"; git -C "$RY4/.worktrees/T2" add shared.txt && git -C "$RY4/.worktrees/T2" commit -qm "T2: shared two"
+ll_ready "$RY4" T1 "$(ll_carrier)" >/dev/null; ll_cand "$RY4" T1 "$HY4" >/dev/null
+ll_verb "$RY4" T2 --within 0
+expect_eq "(y4) the conflict: T2 conflicts with T1's candidate ahead; it exits 75, its WAITING line unchanged" \
+  "75|WAITING T2 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
+expect_eq "(y4) …and the next line names the row it conflicts with" "waiting: conflicts with T1 ahead" "$(ll_why "$LL_OUT")"
+RY5="$(ll_world)"; HY5="$(ll_head "$RY5")"; ll_launch "$RY5" T1 none; ll_launch "$RY5" T2 b.test.sh
+ll_ready "$RY5" T2 "$(ll_carrier)" >/dev/null; ll_cand "$RY5" T2 "$HY5" >/dev/null
+ll_verb "$RY5" T1 --within 0
+expect_eq "(y5) the line: T1, proved (it lands on none), behind T2's candidate; it exits 75, its WAITING line unchanged" \
+  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
+expect_eq "(y5) …and the next line names the row first in line" "waiting: not first in line (T2 first)" "$(ll_why "$LL_OUT")"
+RY6="$(ll_world)"; ll_launch "$RY6" T1 none
+mkdir -p "$BIONIC_GATE_DIR/requests"
+printf 'key=a.test.sh\nkind=work\nwho=%s:main\ntree=%s\nasked=1\nholder=%s\nadmitted=2\npromise=1:1:1\n' \
+  "$WORLD_SID" "$RY6" "$(ll_carrier)" > "$BIONIC_GATE_DIR/requests/41"
+ll_verb "$RY6" T1 --within 0
+expect_eq "(y6) the publish: first in line, held by a live run in the checkout; T1 exits 75, its WAITING line unchanged" \
+  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
+expect_match "(y6) …and the next line gives what the publish said" "waiting: publish: HELD T1 — *41*a.test.sh*" "$(ll_why "$LL_OUT")"
+rm -f "$BIONIC_GATE_DIR/requests/41"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
 
 finish

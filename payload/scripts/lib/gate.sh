@@ -17,7 +17,10 @@
 #                    key=<command key>  kind=<landing|work|whole>  who=<session id>:<agent>
 #                    tree=<abs path>  asked=<epoch>  holder=<pid>:<start>
 #                  and, on a landing's run asked with BIONIC_GATE_LANDING=<landing> set,
-#                  landing=<landing>, the landing it belongs to (wave-38 T5; D22: THE WIDTH ASK)
+#                  landing=<landing>, the landing it belongs to (wave-38 T5; D22: THE WIDTH ASK),
+#                  and with it within=<seconds>, the row's window (its lease's span, else the ask's
+#                  --within), and record=<path>, its landing record (BIONIC_GATE_RECORD) (wave-38 T31)
+#                  handed back (holder=-), left=<epoch>, when (wave-38 T31)
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
 #                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed;
 #                  rc=gone when its holder died before it was admitted, written at its who's next
@@ -67,6 +70,9 @@
 #                            (waiting is printed, and decides nothing: wave-38 T5, D21)
 #   gate_width_ask <landing> how many runners <landing> may start now, one whole number on stdout,
 #                            rc 0 (rc 2 usage or store; rc 1 the lock). See THE WIDTH ASK.
+#   gate_width_older <landing>
+#                            the older active landing that holds the gate from <landing>, nothing when
+#                            none (wave-38 T31): the landing's waiting: reason names it
 #   gate_landing_open <landing> <carrier> [<span>] [<first>:<seq> | new]
 #                            the landing's carrier holds its place in line from now (THE LEASE),
 #                            with the age given, a fresh one (new), or, with none, the age of a lease
@@ -109,6 +115,9 @@
 # request that is not open is pruned once it is older than BIONIC_GATE_KEEP — an ended one by its
 # ended=, one never admitted that nobody holds (holder=-, or its holder died) by its asked=, one
 # killed unseen after the scan has written its end. Pruned in one batch, `xargs -0 rm -f`.
+# A handed-back landing request is also ENDED by the scan once its row is finished or its holder has
+# been gone past its window (wave-38 T31: A FINISHED ROW'S KEPT REQUESTS, above `_gate_head`), and is
+# then kept BIONIC_GATE_KEEP from that end.
 #
 # WHO ASKS. `who` is `${CLAUDE_CODE_SESSION_ID:-none}:<agent>`, the agent BIONIC_GATE_AGENT, else
 # the marker of the tree the ask is made in, else `main` (THE PLACE, below); the holder is `$$`,
@@ -300,7 +309,7 @@ _gate_ancestor() {
 _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins); rc 1 unreadable
   local l
   _R_key='' _R_kind='' _R_who='' _R_tree='' _R_asked='' _R_holder='' _R_admitted=''
-  _R_promise='' _R_ended='' _R_rc='' _R_landing=''
+  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left=''
   [ -r "$1" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in
@@ -315,6 +324,9 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
       ended=*) _R_ended="${l#ended=}" ;;
       rc=*) _R_rc="${l#rc=}" ;;
       landing=*) _R_landing="${l#landing=}" ;;
+      within=*) _R_within="${l#within=}" ;;
+      record=*) _R_record="${l#record=}" ;;
+      left=*) _R_left="${l#left=}" ;;
     esac
   done < "$1"
 }
@@ -362,10 +374,14 @@ _gate_reap() {
   printf 'ended=%s\nrc=137\n' "$_R_ended" >> "$1"
 }
 
-_gate_holder() {  # <id> <holder> — under the lock: rewrites the request's holder line
+# _gate_holder <id> <holder> — under the lock: rewrites the request's holder line. Handed back
+# (<holder> is -, a 75 or a TERM) it writes when, left=<now> (wave-38 T31; A-T31-4), which the scan
+# reads as the instant its holder went; resumed, the left= line goes.
+_gate_holder() {
   local f="$_GD/requests/$1"
-  { grep -v '^holder=' "$f"; printf 'holder=%s\n' "$2"; } > "$_GD/requests/.$1.tmp" \
-    && mv "$_GD/requests/.$1.tmp" "$f"
+  { grep -v -e '^holder=' -e '^left=' "$f"; printf 'holder=%s\n' "$2"
+    [ "$2" != - ] || printf 'left=%s\n' "$(_res_now)"
+  } > "$_GD/requests/.$1.tmp" && mv "$_GD/requests/.$1.tmp" "$f"
 }
 
 # _gate_project [<dir>] — the project key of the checkout at <dir> (default: here), eight hex
@@ -402,15 +418,28 @@ _gate_cores_for() {
   esac
 }
 
-# _gate_seconds <key> <project> -> the key's recorded duration in whole seconds, the largest of
-# its kept lines: the keyed file's <seconds>:<epoch> lines, else, for a key with no keyed file,
-# an unkeyed 1.15.0 file's third field; 0 with neither. The landing's time limit reads it.
+# _gate_seconds <key> <project> -> the key's promised duration in whole seconds, read from its kept
+# lines: the keyed file's <seconds>:<epoch> lines, else, for a key with no keyed file, an unkeyed
+# 1.15.0 file's third field; 0 with neither. The landing's time limit reads it.
+# ROBUST TO ONE CONTENDED RUN (wave-38 T31; D21; A-orch-43; A-T31-1): with three or more kept, the
+# largest at or below twice their median; with fewer, the largest. The largest alone let one run
+# under three-builder contention (1775 s beside 760 and 669) promise past `ready --within 1700`, so
+# no ready could start the suite; the median alone would promise less than a run still in range.
 _gate_seconds() {
   local f
   f="$(_gate_cost_file "$1" "$2")"
   [ -s "$f" ] || f="$_GD/cost/${1//\//%}"
   [ -s "$f" ] || { echo 0; return 0; }
-  awk -F: '{ v = (NF >= 3 ? $3 : $1) + 0; if (v > m) m = v } END { printf "%d\n", m }' "$f" 2>/dev/null
+  awk -F: '{ v[++n] = (NF >= 3 ? $3 : $1) + 0 }
+    END {
+      for (i = 2; i <= n; i++) { x = v[i]; for (j = i - 1; j >= 1 && v[j] > x; j--) v[j + 1] = v[j]; v[j + 1] = x }
+      m = (n > 0 ? v[n] : 0)
+      if (n >= 3) {
+        med = (n % 2 ? v[(n + 1) / 2] : (v[n / 2] + v[n / 2 + 1]) / 2)
+        for (i = n; i >= 1; i--) if (v[i] <= 2 * med) { m = v[i]; break }
+      }
+      printf "%d\n", m
+    }' "$f" 2>/dev/null
 }
 
 # _gate_promise <key> [<tree>] [<kind>] -> <mem>:<cores>:<seconds>: 0 memory, the cores <kind>
@@ -435,7 +464,8 @@ _gate_promise() {
 #   _G_QUEUE    their "<kind> <asked> <id> <key>" lines
 #   _G_LAND     the open (waiting or admitted) requests that name a landing: "L <landing> <asked> <id>"
 #   _G_LEASE    the held leases (THE LEASE): "S <landing> <first> <seq>"; a spent lease is removed
-# writes the end of every admitted request whose holder is dead (_gate_reap), and removes, in one batch,
+# writes the end of every admitted request whose holder is dead (_gate_reap), ends a handed-back landing
+# request whose row is finished or whose holder is gone past its window (`_gate_landing_end`), and removes, in one batch,
 # every request that is not open and is older than BIONIC_GATE_KEEP seconds (ended: by its ended=;
 # gone, never admitted and nobody's: by its asked=). A number it cannot read as decimal is never
 # aged out; BIONIC_GATE_KEEP that is not a whole number of seconds is refused to 86400, with one
@@ -451,7 +481,7 @@ _gate_scan() {
     fi
     keep="$_GATE_KEEP_DEFAULT"
   fi
-  _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE='' _G_LAND='' _G_LEASE=''
+  _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE='' _G_LAND='' _G_LEASE='' _G_DONE_FOR='' _G_DONE=''
   # THE LEASE (below): a held one is tallied, one nobody carries is kept within its span, a spent one
   # (its carrier dead, or left longer than its span) is removed here.
   if [ -d "$_GD/leases" ]; then
@@ -473,7 +503,10 @@ _gate_scan() {
     if ! _gate_open; then
       case "$_R_state" in
         dying) _gate_reap "$f"; continue ;;
-        gone) born="$_R_asked" ;;
+        gone) born="$_R_asked"
+              # A FINISHED ROW'S KEPT REQUEST (wave-38 T31; D22, AC-6.2; A-orch-43): ended here, then
+              # kept BIONIC_GATE_KEEP from its end like any other.
+              if [ "$_R_kind" = landing ] && _gate_landing_end "$f"; then born="$_R_ended"; fi ;;
         *) born="$_R_ended" ;;
       esac
       _gate_num "$born" || continue
@@ -502,6 +535,71 @@ _gate_scan() {
   done
   # One batch, however many: xargs cuts it to what an exec takes, and printf is a builtin.
   [ "${#old[@]}" -eq 0 ] || printf '%s\0' "${old[@]}" | xargs -0 rm -f
+}
+
+# ── A FINISHED ROW'S KEPT REQUESTS (wave-38 T31; D22, REQ-6 AC-6.2; A-orch-43) ──────────────────
+#
+# A landing's run that is handed back (holder=-, a 75 or a TERM) keeps its number for its row's next
+# ask (AC-6.2), and nothing ended it once the row was done: 51 such requests, from rows already landed,
+# sat in the store. The scan ends a landing request (kind=landing) that is not open when
+#   row-finished  the landing record it named (record=) shows its row published, returned or stalled
+#                 after its asked= (line.sh writes `line/v1|ev=<ev>|row=<row>|…|at=<ISO UTC>`; the row
+#                 is the landing key's last `:` field, spelt in the key's alphabet), or
+#   holder-gone   its holder has been gone longer than its window: since left= (the hand-back), or
+#                 asked= for a holder that died uncleared; the window within= (A-T31-3), 1800 s when the
+#                 request records none. A landing request that names no landing (asked before
+#                 wave-38 T6 tagged them, as the 51 were) is ended by this rule alone (A-T31-8).
+# It writes ended=<now> rc=gone by=gate why=<reason>. A live waiter is open, so never read here; one
+# handed back within its window, its row not finished, is AC-6.2's killed waiter about to ask again,
+# and is kept. A writer's work request is never read here (A-T31-2, A-T31-8).
+_GATE_WINDOW_DEFAULT=1800
+_gate_landing_end() {  # <file>, after _gate_read: rc 0 when it was ended here (_R_ended set)
+  local now since win why='' row
+  _gate_num "$(_res_now)" || return 1
+  now="$_G_NUM"
+  if [ -n "$_R_landing" ] && [ -n "$_R_record" ] && _gate_num "$_R_asked"; then
+    row="${_R_landing##*:}"
+    _gate_row_done "$_R_record" "$row" "$_G_NUM" && why=row-finished
+  fi
+  if [ -z "$why" ]; then
+    since="$_R_left"; [ -n "$since" ] || since="$_R_asked"
+    _gate_num "$since" || return 1
+    since="$_G_NUM"
+    win="$_GATE_WINDOW_DEFAULT"; ! _gate_num "$_R_within" || win="$_G_NUM"
+    [ "$((now - since))" -gt "$win" ] || return 1
+    why=holder-gone
+  fi
+  _R_ended="$now" _R_rc=gone
+  printf 'ended=%s\nrc=gone\nby=gate\nwhy=%s\n' "$now" "$why" >> "$1"
+}
+# _gate_row_done <record> <row> <asked epoch> — rc 0 when <record> shows <row> published, returned or
+# stalled after <asked>. The record's finishing events are read once a scan (_G_DONE_FOR, _G_DONE).
+_gate_row_done() {
+  if [ "$_G_DONE_FOR" != "$1" ]; then
+    _G_DONE_FOR="$1"
+    _G_DONE="$(awk -F'|' '
+      function ep(s,   y, m, d, era, yoe, doy, doe) {
+        y = substr(s, 1, 4) + 0; m = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
+        if (m <= 2) y--
+        era = int(y / 400); yoe = y - era * 400
+        doy = int((153 * ((m + 9) % 12) + 2) / 5) + d - 1
+        doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+        return (era * 146097 + doe - 719468) * 86400 + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2)
+      }
+      substr($0, 1, 8) != "line/v1|" { next }
+      $2 == "ev=published" || $2 == "ev=returned" || $2 == "ev=stalled" {
+        r = ""; a = ""
+        for (i = 3; i <= NF; i++) {
+          if (index($i, "row=") == 1) r = substr($i, 5)
+          else if (index($i, "at=") == 1) a = substr($i, 4)
+        }
+        if (r == "" || a !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) next
+        gsub(/[^A-Za-z0-9._:\/+-]/, "_", r)
+        print r, ep(a)
+      }' "$1" 2>/dev/null)"
+  fi
+  [ -n "$_G_DONE" ] || return 1
+  printf '%s\n' "$_G_DONE" | awk -v r="$2" -v a="$3" '$1 == r && $2 + 0 > a + 0 { f = 1 } END { exit !f }'
 }
 
 # _gate_head — the id the serve order admits next, from the last scan; nothing when none.
@@ -579,7 +677,7 @@ _gate_decide() {
   return 0
 }
 
-# _gate_enter <kind> <key> <who> [<landing>] — under the lock: sets _GATE_ID to the request this
+# _gate_enter <kind> <key> <who> [<landing>] [<within>] [<record>] — under the lock: sets _GATE_ID to the request this
 # ask holds. One by the same who for the same key AND kind, with no admitted line, whose holder was
 # cleared (holder=-, a 75 or a TERM handed it back) and whose landing= is <landing> (none for none:
 # wave-38 T5, so one row's ask never inherits another row's turn) is resumed, its holder
@@ -601,7 +699,7 @@ _gate_decide() {
 # (a scratch store's), is the holder's own work, and a request of its own could never be
 # admitted while the ancestor's admission lives.
 _gate_enter() {
-  local f id max=0 holder tree now hps='' pairs='' i gone=''
+  local f id max=0 holder tree now hps='' pairs='' i gone='' w=''
   holder="$$:$(_slots_since "$$")"
   _GATE_ID='' _GATE_LINEAGE=0
   for f in "$_GD"/requests/*; do
@@ -645,9 +743,22 @@ _gate_enter() {
   _gate_place; tree="$_GATE_TREE"
   [ -n "$tree" ] || tree="$(pwd -P)"
   now="$(_res_now)"
+  # A LANDING'S RUN records its row's window and record (wave-38 T31; A-T31-3, A-T31-5): within= is the
+  # span of the landing's lease when one is on file and not spent (the carrier opened it with its ready's
+  # time left), else this ask's own --within; record= the landing record the runner named. The scan ends
+  # the request by them once it is handed back and its row is finished or its holder gone past the window.
+  if [ -n "${4:-}" ]; then
+    w="${5:-}"
+    if _gate_lease_read "$(_gate_lease_file "$4")" && _gate_lease_state && [ "$_L_state" != spent ] \
+        && _gate_num "$_L_span"; then
+      w="$_G_NUM"
+    fi
+  fi
   { printf 'key=%s\nkind=%s\nwho=%s\ntree=%s\nasked=%s\nholder=%s\n' \
       "$2" "$1" "$3" "$tree" "$now" "$holder"
     [ -z "${4:-}" ] || printf 'landing=%s\n' "$4"
+    [ -z "$w" ] || printf 'within=%s\n' "$w"
+    [ -z "${4:-}" ] || [ -z "${6:-}" ] || printf 'record=%s\n' "$6"
   } > "$_GD/requests/$_GATE_ID"
 }
 
@@ -893,7 +1004,7 @@ _gate_landing_ok() {
 
 gate_ask() {
   local kind="${1:-}" key="${2:-}" within='' poll="${BIONIC_GATE_POLL:-2}" start now
-  local who='' id='' noted=0 rc land=''
+  local who='' id='' noted=0 rc land='' rec=''
   if [ "$#" -lt 2 ]; then
     echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>]" >&2
     return 2
@@ -925,13 +1036,17 @@ gate_ask() {
     else echo "gate: BIONIC_GATE_LANDING='${BIONIC_GATE_LANDING:0:40}' is not a landing key; the request names none" >&2
     fi
   fi
+  # ITS LANDING RECORD (wave-38 T31; A-T31-5): BIONIC_GATE_RECORD, one line, on a landing's run only.
+  if [ -n "$land" ]; then
+    case "${BIONIC_GATE_RECORD:-}" in *$'\n'*|*$'\r'*) ;; *) rec="${BIONIC_GATE_RECORD:-}" ;; esac
+  fi
 
   start="$(_res_now)"
   _gate_term_arm
   while :; do
     if _gate_lock; then
       if [ -z "$id" ]; then
-        _gate_enter "$kind" "$key" "$who" "$land"
+        _gate_enter "$kind" "$key" "$who" "$land" "$within" "$rec"
         if [ "$_GATE_LINEAGE" = 1 ]; then _gate_unlock; _gate_term_disarm; printf '%s\n' "$_GATE_ID"; return 0; fi
         id="$_GATE_ID"
       fi
@@ -1292,11 +1407,33 @@ gate_landing_close() {
 # rc 2: not one argument, a key that is not a landing key (`_gate_landing_ok`), or a store that
 # cannot be written; rc 1: the lock could not be had.
 gate_width_ask() {
-  local land="${1:-}" reading
-  if [ "$#" -ne 1 ] || ! _gate_landing_ok "$land"; then
+  local out
+  if [ "$#" -ne 1 ] || ! _gate_landing_ok "${1:-}"; then
     echo "gate: usage: gate_width_ask <landing key>" >&2
     return 2
   fi
+  out="$(_gate_width "$1")" || return $?
+  printf '%s\n' "${out%% *}"
+}
+
+# gate_width_older <landing> — the older active landing that holds the gate from <landing>, its key on
+# stdout, nothing when none (wave-38 T31; A-T31-6): the same order gate_width_ask answers by, so a
+# landing that waits on an answer of 0 can say whose turn it is. rc as gate_width_ask's.
+gate_width_older() {
+  local out
+  if [ "$#" -ne 1 ] || ! _gate_landing_ok "${1:-}"; then
+    echo "gate: usage: gate_width_older <landing key>" >&2
+    return 2
+  fi
+  out="$(_gate_width "$1")" || return $?
+  out="${out#* }"
+  [ "$out" = - ] || printf '%s\n' "$out"
+}
+
+# _gate_width <landing> — THE WIDTH ASK's one reading: "<answer> <older landing, or ->", rc 0; rc 2 the
+# store, rc 1 the lock.
+_gate_width() {
+  local land="$1" reading
   _gate_store || return 2
   _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
   reading="$(_gate_reading)"
@@ -1326,17 +1463,20 @@ gate_width_ask() {
       for (k in A) { act[k] = 1; T[k] = A[k]; C[k] = 1; Q[k] = I[k] }
       for (k in S) { act[k] = 1; T[k] = SF[k]; C[k] = 0; Q[k] = SQ[k] }
       me = (land in act)
+      # The oldest of those older than <land> is the one named (any older one answers 0).
+      ol = ""
       for (k in act) {
         if (k == land) continue
-        if (!me || older(k, land)) { print 0; exit }
+        if (!me || older(k, land)) { if (ol == "" || older(k, ol)) ol = k }
       }
+      if (ol != "") { print 0, ol; exit }
       n = 0; p += 0
       if (!whole && r >= 0 && fits(u, share) && p > 0) {
         s = sc + lwait * p; b0 = busy + 0
         while (n < 4096) { b = b0; if (s > b) b = s; if (b + p > lim) break; n++; s += p }
       }
       if (n == 0 && !own) n = 1
-      print n
+      print n, "-"
     }'
 }
 
