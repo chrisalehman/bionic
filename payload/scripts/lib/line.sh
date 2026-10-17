@@ -1386,13 +1386,13 @@ _line_prove_kill() {  # <pid> <result file>
 # ---------------------------------------------------------------------------- the drain (wave-37 T1; D3)
 # THE LANDING'S KEY (wave-38 T6; D21, D22): the word every runner of this landing asks the gate under
 # (BIONIC_GATE_LANDING) and the drain asks its width for: `<project>:<plan>:<row>`, the gate's project key of
-# the root, the plan's file name without `.plan.md`, and the row. Stable for one row's landing, distinct
-# between rows and plans; a character outside gate.sh's landing alphabet is written `_`, and it is cut to
-# its 128 (`_gate_landing_ok`).
+# the root, the plan's slug (lib/proof.sh `proof_plan_slug`, the one place a plan's name is stripped), and the
+# row. Stable for one row's landing, distinct between rows and plans; a character outside gate.sh's landing
+# alphabet is written `_`, and it is cut to its 128 (`_gate_landing_ok`).
 _line_landing_key() {  # <root> <plan> <row>
   local p w
-  _line_load_gate || return 0
-  p="$(_gate_project "$1")"; w="${2##*/}"; w="${w%.plan.md}"
+  _line_load_gate && _line_load_proof || return 0
+  p="$(_gate_project "$1")"; w="$(proof_plan_slug "$2")"
   printf '%s:%s:%s' "$p" "$w" "$3" | tr -c 'A-Za-z0-9._:/+-' '_' | cut -c1-128
 }
 # THE DRAIN'S WIDTH (wave-38 T6; D21, AC-6.1; ADR-060): how many more runners this landing may start now,

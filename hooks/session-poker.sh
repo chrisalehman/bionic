@@ -471,7 +471,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decline lift [<ids>]   end the standing decline for those rows (every row it answers with no ids): one ledger line, and the next tick offers the rows it ended"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born floor:<suite> marks a row born of the floor's red in that suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the floor's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
@@ -482,12 +482,12 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
-  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add floor <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the floor's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|regression|all> '<reply>'   record the user's waiver of that question, of the regression, or of all four, at the working head, one waived: line each under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
-  die "  bash ${HOOK_DIR}/session-poker.sh floor-run   run the regression in the working branch's checkout, .bionic/config.yaml's floor: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add floor to cite"
+  die "  bash ${HOOK_DIR}/session-poker.sh regression-run   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the reading or after it, as a moved: to=fixed line under ## SDLC State"
@@ -498,7 +498,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's facts: the last recorded Bottom line with its time, every row with its glyph, the schedule, correctness and waste indicators by their printed thresholds, the person's open items, and the forecast from measured pace; --line prints the one-line form (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep bottom-line '<item>'… [<plan>]   record one to four Bottom line items, each cited (line <n>) or labelled hypothesis:, diagnosis: or projection:, with the time, to record/<wave>/sitrep.log"
-  die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
@@ -523,6 +523,7 @@ usage() {  # [message]
 
 [ $# -ge 1 ] || usage "a verb is required."
 VERB="$1"; shift
+declare -F alias_read >/dev/null 2>&1 && { alias_read verb "$VERB"; VERB="$ALIAS_TOKEN"; }   # THE VERB'S OLD SPELLING (wave-38 T8; REQ-9): lib/alias.sh, once, before both case blocks
 
 # `--report-only` IS THE ONE FLAG MOST VERBS TAKE, and `adopt` and `sweep` are the two that
 # take it — the same word for the same promise on both, so an operator who has learned it
@@ -709,19 +710,20 @@ case "$VERB" in
   # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
     TA_BORN=""; TA_BORN_IDS=""; TA_BORN_FLOOR=""
-    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or floor:<suite>, the suite whose floor red the row fixes." ;; esac
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or regression:<suite>, the suite whose floor red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
+      case "$TA_BORN" in *:*) declare -F alias_read >/dev/null 2>&1 && { alias_read born-operand "${TA_BORN%%:*}:"; TA_BORN="$ALIAS_TOKEN${TA_BORN#*:}"; } ;; esac   # THE OPERAND'S OLD SPELLING (wave-38 T8)
       case "$TA_BORN" in
         'review S'[1-4]' on'|'review S'[1-4]' off') : ;;
-        floor:*)
-          TA_BORN_FLOOR="${TA_BORN#floor:}"; TA_BORN=""
+        regression:*)
+          TA_BORN_FLOOR="${TA_BORN#regression:}"; TA_BORN=""
           case "$TA_BORN_FLOOR" in
             *[!A-Za-z0-9._-]*|.test.sh|'') TA_BORN_FLOOR="" ;;
             *.test.sh) : ;;
             *) TA_BORN_FLOOR="" ;;
           esac
-          [ -n "$TA_BORN_FLOOR" ] || usage "task-add: --born '${*: -1}' names no suite; write floor:<suite>, the suite's file name (<name>.test.sh) whose floor red the row fixes." ;;
+          [ -n "$TA_BORN_FLOOR" ] || usage "task-add: --born '${*: -1}' names no suite; write regression:<suite>, the suite's file name (<name>.test.sh) whose floor red the row fixes." ;;
         *)
           TA_BORN_IDS="$TA_BORN"; TA_BORN=""
           case "$TA_BORN_IDS" in
@@ -738,10 +740,11 @@ case "$VERB" in
       set -- "${@:1:$(($# - 2))}"
     fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born floor:<suite>."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>."
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
+    declare -F alias_cell >/dev/null 2>&1 && { alias_cell reads "$TA_READS"; TA_READS="$ALIAS_TOKEN"; }   # A TYPED OLD READS TOKEN (wave-38 T8)
     ;;
   # THE ONE VERB WITH REPEATABLE FLAGS (wave-20 T9, REQ-4; spec D4). Each `--files+`,
   # `--suites+` and `--reexec+` names ONE addition and may be given again; `--reason` is
@@ -808,6 +811,13 @@ case "$VERB" in
       usage "$VERB takes an id and at least one <column>=<value>."
     fi
     PV_ARGS=("$@")
+    # A TYPED proof:floor IN A reads= CELL (wave-38 T8; REQ-9) is written in the new spelling, with its deprecation line.
+    if [ "$VERB" = task-set ] && declare -F alias_cell >/dev/null 2>&1; then
+      for _pv_i in "${!PV_ARGS[@]}"; do
+        case "${PV_ARGS[$_pv_i]}" in reads=*) alias_cell reads "${PV_ARGS[$_pv_i]#reads=}"; PV_ARGS[$_pv_i]="reads=$ALIAS_TOKEN" ;; esac
+      done
+      set -- "${PV_ARGS[@]}"
+    fi
     # MANY ROWS, ONE TRANSACTION (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-6). `task-set` takes groups,
     # `<id>[,<id>…] <col>=<val>…`, joined by `--`: each group's cells are set on each of its rows, and the
     # table is judged once, after every group, so a restructure that is invalid at every single-row step
@@ -989,18 +999,19 @@ case "$VERB" in
   # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
   # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    PF_USAGE="proof-add takes two arguments, <floor|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add floor takes one log or several, proof-add floor <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
+    PF_USAGE="proof-add takes two arguments, <regression|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
     if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
     # SEVERAL LOGS ON ONE LINE (wave-36 T35; D13, AC-7.10): a floor may be the logs of several runners, each its own
     # operand after the first, newline-joined in PF_EVIDS (a path holding a line break is refused below, by name).
     PF_KIND="$1"; PF_EVID="$2"; PF_EVIDS="$2"; PF_QUESTION=""; PF_READER=""; shift 2
+    declare -F alias_read >/dev/null 2>&1 && { alias_read proof-kind "$PF_KIND"; PF_KIND="$ALIAS_TOKEN"; }   # THE KIND'S OLD SPELLING (wave-38 T8)
     while [ $# -gt 0 ]; do
       case "$1" in
         --question) [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_QUESTION" ] || usage "$PF_USAGE"; PF_QUESTION="$2"; shift 2 ;;
         --reader)   [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_READER" ] || usage "$PF_USAGE"; PF_READER="$2"; shift 2 ;;
         -*|'') usage "$PF_USAGE" ;;
         *$'\n'*) usage "$PF_USAGE" ;;
-        *[!0123456789abcdefABCDEF]*|*/*) [ "$PF_KIND" = floor ] || usage "$PF_USAGE"; PF_EVIDS="$PF_EVIDS
+        *[!0123456789abcdefABCDEF]*|*/*) [ "$PF_KIND" = regression ] || usage "$PF_USAGE"; PF_EVIDS="$PF_EVIDS
 $1"; shift ;;
         *) usage "$PF_USAGE" ;;   # a bare hex word is a head, and a head is never an operand
       esac
@@ -1091,8 +1102,8 @@ $1"; shift ;;
     ;;
   # NO OPERAND (wave-28 T75; D36): the command is the project's `floor:`, else its tests/run.sh (wave-35 T10), and the
   # head is the working one.
-  floor-run)
-    [ $# -eq 0 ] || usage "floor-run takes no arguments: it runs .bionic/config.yaml's floor: command, else tests/run.sh, at the working branch's head."
+  regression-run)
+    [ $# -eq 0 ] || usage "regression-run takes no arguments: it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head."
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -3946,8 +3957,8 @@ poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
 BFB_OF=""; BFB_OWED=""; BFB_BRANCH=""
 born_floor_backing() {
   local plan="$1" repo="$2" suite="$3" rec bh h
-  BFB_OF=""; BFB_OWED="$(_proof_last_read "$plan" floor owed)"; BFB_BRANCH="$(plan_working_branch "$plan" 2>/dev/null)"
-  case ",$BFB_OWED," in *",$suite,"*) BFB_OF=floor; return 0 ;; esac
+  BFB_OF=""; BFB_OWED="$(_proof_last_read "$plan" regression owed)"; BFB_BRANCH="$(plan_working_branch "$plan" 2>/dev/null)"
+  case ",$BFB_OWED," in *",$suite,"*) BFB_OF=regression; return 0 ;; esac
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
   while IFS= read -r h; do
@@ -6308,7 +6319,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
         sec == "sdlc" {
-          if (proof_fields($0) && PROOF_KIND == "floor") f++
+          if (proof_fields($0) && PROOF_KIND == "regression") f++
           else if ($0 ~ /^waived:[ \t]+question=/) w++
           else if ($0 ~ /^approved:[ \t]+regression-2([ \t]|$)/) r++
           else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) x++
@@ -6326,7 +6337,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     fi
   fi
   [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-floors=%d · adoptions=%d · fixed=%d\n' \
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-regressions=%d · adoptions=%d · fixed=%d\n' \
     $(( hand + stp + dec + lif + amd + hld + ext + wv + r2 + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl" "$ado" "$fix"
   return 0
 }
@@ -9272,14 +9283,14 @@ EOF
     TA_BORN_OF=""
     if [ -n "$TA_BORN_FLOOR" ]; then
       if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_FLOOR"; then
-        die "task-add refused — born: floor $TA_BORN_FLOOR names no red the machine recorded; it is admitted when the plan's floor proof owes $TA_BORN_FLOOR (it owes ${BFB_OWED:-nothing}; proof-add floor, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_FLOOR at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+        die "task-add refused — born: regression $TA_BORN_FLOOR names no red the machine recorded; it is admitted when the plan's floor proof owes $TA_BORN_FLOOR (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_FLOOR at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
         exit 1
       fi
-      TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: floor"
+      TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"
     fi
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_FLOOR:+floor $TA_BORN_FLOOR of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_FLOOR:+regression $TA_BORN_FLOOR of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -10818,12 +10829,12 @@ BRF_EOF
     if [ "$PF_KIND" = inherited ]; then
       PF_SUITE="${PF_EVID##*/}"
       plan_verb_open proof-add
-      PF_FHEAD="$(proof_last "$PV_PLAN" floor)"
+      PF_FHEAD="$(proof_last "$PV_PLAN" regression)"
       if [ -z "$PF_FHEAD" ]; then
-        die "REFUSED — $PV_PLAN carries no floor proof, so no whole run says $PF_SUITE is red at the head; run the regression and proof-add floor first. The plan is unchanged."
+        die "REFUSED — $PV_PLAN carries no floor proof, so no whole run says $PF_SUITE is red at the head; run the regression and proof-add regression first. The plan is unchanged."
         exit 1
       fi
-      PF_OWED="$(_proof_last_read "$PV_PLAN" floor owed)"
+      PF_OWED="$(_proof_last_read "$PV_PLAN" regression owed)"
       case ",$PF_OWED," in
         *",$PF_SUITE,"*) : ;;
         *)
@@ -10889,7 +10900,7 @@ command: %s
       exit 0
     fi
     if ! proof_kind_ok "$PF_KIND"; then
-      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task (or proof-add inherited <suite>). The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, review or task (or proof-add inherited <suite>). The plan is unchanged."
       exit 1
     fi
     # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
@@ -10923,7 +10934,7 @@ command: %s
           die "REFUSED — the evidence path '$(clean "$PF_EVID")' carries a space, a tab, a line break or a |, which the space-separated proof line cannot hold; rename the file. The plan is unchanged."
           exit 1 ;;
         *,*)
-          if [ "$PF_KIND" = floor ] && [ "$PF_EVIDS" != "$PF_EVID" ]; then
+          if [ "$PF_KIND" = regression ] && [ "$PF_EVIDS" != "$PF_EVID" ]; then
             die "REFUSED — the evidence path '$(clean "$PF_EVID")' carries a comma, and a floor proof of several logs names them comma-joined on one evidence= field; rename the file. The plan is unchanged."
             exit 1
           fi ;;
@@ -11121,11 +11132,11 @@ PF_OTHER_LIST
     # grammar (lib/proof.sh `_proof_floor_log`), the first refusal is the verb's, and logs that read different heads
     # are refused naming each, for a floor is the runs of one head. The owed reds are the union of each log's.
     PF_OWED=""
-    if [ "$PF_KIND" = floor ]; then
+    if [ "$PF_KIND" = regression ]; then
       PF_FH=""; PF_FHEADS=""; PF_FRELS=""; PF_SPLIT=""; PF_RUNAT=""; PF_RUNRC=""
       while IFS='	' read -r _pf_real _pf_rel; do
         [ -n "$_pf_real" ] || continue
-        if ! _pf_h="$(proof_attested floor "$_pf_real" "$PV_REPO" "$PV_PLAN" "" "$PV_REPO" "$PF_HEAD")"; then
+        if ! _pf_h="$(proof_attested regression "$_pf_real" "$PV_REPO" "$PV_PLAN" "" "$PV_REPO" "$PF_HEAD")"; then
           die "REFUSED — $(clean_whole "$_pf_h"). The plan is unchanged."
           exit 1
         fi
@@ -11198,7 +11209,7 @@ PF_PAIRS_LIST
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
     # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took each log and every red
     # named; the line lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35).
-    if [ "$PF_KIND" = floor ]; then
+    if [ "$PF_KIND" = regression ]; then
       PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED" "run=$PF_RUNAT head=$PF_HEAD rc=$PF_RUNRC")"
     fi
     # A RATED READING WRITES ITS PLAN LINES (wave-28 T15; D19, D21): one `deferred:` line per finding
@@ -11808,9 +11819,11 @@ RC_TAGS
   # refuses it (`units_floor_holds`); a covered head refuses it (`proof_state`); and a second whole run — the plan
   # already carries a floor proof, or a floor-run log of tests/run.sh — needs the user's `approved: regression-2`
   # (`proof_approved`). The bash wall's full-tree refusal names this verb as the whole run's path (lib/walls.sh).
-  floor-run)
+  regression-run)
     FR_ROOT="$(project_root "$PWD")"
-    FR_CMD="$(config_value "$FR_ROOT" floor "" 2>/dev/null)"
+    # THE COMMAND'S KEY IS regression-command: (wave-38 T8; REQ-9): lib/alias.sh `alias_config` reads it, and the old floor: with
+    # its deprecation line.
+    FR_CMD=""; declare -F alias_config >/dev/null 2>&1 && { alias_config "$FR_ROOT" config ""; FR_CMD="$ALIAS_VALUE"; }
     if ! { declare -F proof_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_state >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
@@ -11820,7 +11833,7 @@ RC_TAGS
       die "REFUSED — $(clean "$FR_RETIRED"). Nothing was run."
       exit 1
     fi
-    plan_verb_open floor-run
+    plan_verb_open regression-run
     FR_WB="$(plan_working_branch "$PV_PLAN")"
     FR_CO=""; [ -z "$FR_WB" ] || FR_CO="$(proof_checkout "$PV_REPO" "$FR_WB")" || FR_CO=""
     FR_HEAD=""; [ -z "$FR_CO" ] || FR_HEAD="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
@@ -11835,7 +11848,7 @@ RC_TAGS
     FR_WHOLE=""
     if [ -z "$FR_CMD" ]; then
       if [ ! -f "$FR_CO/tests/run.sh" ]; then
-        die "REFUSED — this project declares no floor: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare floor: <command> there, or run the regression yourself and cite its log (its first head= line head=<40-hex> dirty=0, its last line rc=0) with proof-add floor <log> [<log>…]. Nothing was run."
+        die "REFUSED — this project declares no regression-command: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare regression-command: <command> there, or run the regression yourself and cite its log (its first head= line head=<40-hex> dirty=0, its last line rc=0) with proof-add regression <log> [<log>…]. Nothing was run."
         exit 1
       fi
       FR_WHOLE=yes; FR_CMD="tests/run.sh"
@@ -11854,23 +11867,28 @@ RC_TAGS
       FR_STATE="$(proof_state "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
       case "$FR_STATE" in
         covered*)
-          die "REFUSED — the working head ${FR_HEAD:0:12} is already proved: the plan's floor covers it ($(clean "$(proof_last_line "$PV_PLAN" floor)")); a change landed after it is proved by the suites its row names. Nothing was run."
+          die "REFUSED — the working head ${FR_HEAD:0:12} is already proved: the plan's floor covers it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); a change landed after it is proved by the suites its row names. Nothing was run."
           exit 1 ;;
       esac
       # RULES 4 AND 5. The first whole run runs; a second is the user's word.
       FR_FIRST=""
-      FR_LAST="$(proof_last "$PV_PLAN" floor)"
+      FR_LAST="$(proof_last "$PV_PLAN" regression)"
       [ -z "$FR_LAST" ] || FR_FIRST="the floor proof at ${FR_LAST:0:12}"
       if [ -z "$FR_FIRST" ]; then
-        for _fr_l in "$FR_DOCS/record/$FR_WAVE"/floor-run-*.log; do
-          [ -f "$_fr_l" ] || continue
-          [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
-          FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
+        # THE GLOB MATCHES EVERY SPELLING OF THE LOG'S NAME (wave-38 T8; REQ-9): a run 1.20.0 logged as floor-run-<sha>.log is
+        # still the first whole run (lib/alias.sh `alias_spellings log`).
+        for _fr_p in $(alias_spellings log 2>/dev/null || printf 'regression-run-'); do
+          [ -z "$FR_FIRST" ] || break
+          for _fr_l in "$FR_DOCS/record/$FR_WAVE/$_fr_p"*.log; do
+            [ -f "$_fr_l" ] || continue
+            [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
+            FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
+          done
         done
       fi
       # THE APPROVAL BUYS ONE RUN (wave-38 T2; AC-4.5): it covers no head, and a regression proof after it spends it.
       if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN" && proof_approved "$PV_PLAN" regression-2; then
-        die "REFUSED — a further whole run on this plan: the user's approved: regression-2 admitted one run, and the regression proof recorded after it spent it ($(clean "$(proof_last_line "$PV_PLAN" floor)")); the regression reads $(clean "${FR_STATE//	/ }"). An approval is recorded once: the user's word that this head needs no whole run is bash ${HOOK_DIR}/session-poker.sh waive regression '<the user's reply>'. Nothing was run."
+        die "REFUSED — a further whole run on this plan: the user's approved: regression-2 admitted one run, and the regression proof recorded after it spent it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); the regression reads $(clean "${FR_STATE//	/ }"). An approval is recorded once: the user's word that this head needs no whole run is bash ${HOOK_DIR}/session-poker.sh waive regression '<the user's reply>'. Nothing was run."
         exit 1
       fi
       if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN"; then
@@ -11892,10 +11910,10 @@ RC_TAGS
     if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -ne 0 ]; then
       FR_PATHS="$(printf '%s\n' "$FR_DIRT" | sed -n '1,5p' | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $0 }')"
       FR_MORE=""; [ "$FR_DIRTY" -le 5 ] || FR_MORE=", and $((FR_DIRTY - 5)) more"
-      die "REFUSED — the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) is dirty (dirty=$FR_DIRTY): $(clean "$FR_PATHS")$FR_MORE. The whole run proves a committed head, and a log of a dirty tree is refused by proof-add floor yet would count as the first whole run; nothing was run and no log was written; commit or stash it and run floor-run again."
+      die "REFUSED — the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) is dirty (dirty=$FR_DIRTY): $(clean "$FR_PATHS")$FR_MORE. The whole run proves a committed head, and a log of a dirty tree is refused by proof-add regression yet would count as the first whole run; nothing was run and no log was written; commit or stash it and run regression-run again."
       exit 1
     fi
-    FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-floor-run.XXXXXX")" || {
+    FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-run.XXXXXX")" || {
       die "REFUSED — no scratch file for the regression's output can be made under ${TMPDIR:-/tmp}; nothing was run."
       exit 1
     }
@@ -11913,7 +11931,7 @@ RC_TAGS
     # there is no run of the head to log.
     if [ -n "$FR_WHOLE" ] && [ "$FR_RC" -eq 75 ] && ! /usr/bin/grep -q '^Gating: ' "$FR_TMP" 2>/dev/null; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "floor-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run floor-run again."
+      die "regression-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run regression-run again."
       exit 75
     fi
     FR_NOW="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
@@ -11923,11 +11941,11 @@ RC_TAGS
     [ "$FR_DIRTY2" = "$FR_DIRTY" ] || FR_MOVED="${FR_MOVED:+$FR_MOVED, }dirty=$FR_DIRTY to dirty=$FR_DIRTY2"
     if [ -n "$FR_MOVED" ]; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "REFUSED — the regression ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run floor-run again."
+      die "REFUSED — the regression ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run regression-run again."
       exit 1
     fi
-    FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD.log"; FR_NTH=1
-    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/floor-run-$FR_HEAD-$FR_NTH.log"; done
+    FR_REL="record/$FR_WAVE/regression-run-$FR_HEAD.log"; FR_NTH=1
+    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/regression-run-$FR_HEAD-$FR_NTH.log"; done
     FR_LOG="$FR_DOCS/$FR_REL"
     if ! mkdir -p "${FR_LOG%/*}" 2>/dev/null \
        || ! { printf 'head=%s dirty=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_CMD"; awk '{ print }' "$FR_TMP"; printf 'rc=%s\n' "$FR_RC"; } > "$FR_LOG" 2>/dev/null; then
@@ -11943,31 +11961,31 @@ RC_TAGS
     declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
        || ! line_event "$PV_PLAN" run "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" 2>/dev/null; then
-      die "floor-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add floor will refuse this log as no recorded run."
+      die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
     fi
     if [ -n "$FR_WHOLE" ]; then
       FR_VERDICT="$(/usr/bin/grep '^Gating: ' "$FR_TMP" 2>/dev/null | tail -n 1)"
       rm -f "$FR_TMP"
-      say "floor-run — the whole run (tests/run.sh) at ${FR_HEAD:0:12} exited $FR_RC${FR_VERDICT:+ ($FR_VERDICT)}: head=$FR_HEAD dirty=$FR_DIRTY rc=$FR_RC evidence=$FR_REL"
+      say "regression-run — the whole run (tests/run.sh) at ${FR_HEAD:0:12} exited $FR_RC${FR_VERDICT:+ ($FR_VERDICT)}: head=$FR_HEAD dirty=$FR_DIRTY rc=$FR_RC evidence=$FR_REL"
       if [ "$FR_DIRTY" -ne 0 ]; then
-        say "floor-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add floor refuses this log; commit and run floor-run again."
+        say "regression-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add regression refuses this log; commit and run regression-run again."
       else
-        [ "$FR_RC" -eq 0 ] || say "floor-run — a red whole run is the floor's candidate: proof-add floor records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
-        say "floor-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add floor $FR_REL"
+        [ "$FR_RC" -eq 0 ] || say "regression-run — a red whole run is the floor's candidate: proof-add regression records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
+        say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
       fi
       exit "$FR_RC"
     fi
     if [ "$FR_RC" -ne 0 ]; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "floor-run — the regression ($(clean "$FR_CMD")) exited $FR_RC at ${FR_HEAD:0:12}; its log is $FR_REL. Fix what it names, commit, and run floor-run again."
+      die "regression-run — the regression ($(clean "$FR_CMD")) exited $FR_RC at ${FR_HEAD:0:12}; its log is $FR_REL. Fix what it names, commit, and run regression-run again."
       exit "$FR_RC"
     fi
     rm -f "$FR_TMP"
-    say "floor-run — head=$FR_HEAD dirty=$FR_DIRTY rc=0 evidence=$FR_REL"
+    say "regression-run — head=$FR_HEAD dirty=$FR_DIRTY rc=0 evidence=$FR_REL"
     if [ "$FR_DIRTY" -ne 0 ]; then
-      say "floor-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add floor refuses this log; commit and run floor-run again."
+      say "regression-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add regression refuses this log; commit and run regression-run again."
     else
-      say "floor-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add floor $FR_REL"
+      say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
     fi
     exit 0
     ;;
