@@ -13,7 +13,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/canonical-sdlc-evidence-gate.prelude.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 
@@ -29,7 +29,7 @@ HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
   eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
     !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
-      printf "proved: kind=floor head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
+      printf "proved: kind=regression head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
 }
 
 # ============================================================
@@ -3326,7 +3326,7 @@ section "§HEAD: Step 5 no longer owes head: — absent, no commit, or not conta
 #
 # THE HEAD A FLOOR READ IS THE JUDGE'S QUESTION (wave-35 T31; D20, A-orch-32). From wave-26 T4 the
 # Step-5 block carried `head:` and the gate refused it absent, not a commit here, or not contained in
-# the release head. The floor's proof line (`proved: kind=floor head=…`) names the head now, and
+# the release head. The floor's proof line (`proved: kind=regression head=…`) names the head now, and
 # `facts_state` judges it at `current 7` and from Step 7 on, so each fixture below that was refused is
 # admitted: the key may be written, and no gate reads it.
 eg_commit() {  # <dir> <message> — one empty commit, fixed identity, no hooks
@@ -3658,9 +3658,9 @@ section "§COVER — a reading covers its head; a later commit extends it when i
 # `facts_state` reads every reading, whole or piece, as covered to its head, and extends it over <head>..<asked>
 # commit by commit on the first-parent line: a commit holds when every path it touched is prose
 # (`_proof_docs_path`, with tests/run.sh and tests/lib/ code), or when the landing record names it as the
-# landing of a row whose `- T<n>:` line carries ` born: review …` or ` born: floor …`. Any other commit owes,
+# landing of a row whose `- T<n>:` line carries ` born: review …` or ` born: regression …`. Any other commit owes,
 # whatever kind its row declared. `facts_cover <plan> <from> <to> [<question>]` prints the judge's basis, one
-# `cover <sha> prose|born-review|born-floor|owes` line per commit, oldest first; rc 0 only when none owes.
+# `cover <sha> prose|born-review|born-regression|owes` line per commit, oldest first; rc 0 only when none owes.
 # The whole-scope rule ("any whole reading covers whatever its head") is gone: a whole line needs a whole
 # reading, and holds only as far as its question's chain does.
 #
@@ -3669,7 +3669,7 @@ section "§COVER — a reading covers its head; a later commit extends it when i
 # row born of the adversarial reading's finding (` born: review S2 on of=<adv.md>#1`, with no verdict event, so
 # `proof_fixed` does not name it and only the landing-record path holds it; wave-36 T31: the chain it holds on is
 # adversarial's, §COVER-ASKER), touching b.sh; the landing of T8, a row born of the floor's red
-# (` born: floor a.test.sh`), touching c.sh; the landing of T9, a doc row touching payload/x.sh; a commit
+# (` born: regression a.test.sh`), touching c.sh; the landing of T9, a doc row touching payload/x.sh; a commit
 # touching tests/lib/assert.sh alone. The landing record's `ev=published` events are lib/line.sh's shape.
 RCV="$(fp_repo cover)"
 CV_B="$(git -C "$RCV" rev-parse HEAD)"
@@ -3691,10 +3691,10 @@ fp_record "$RCV" adversarial-whole.md adversarial pass "${CV_B:0:10}..${CV_R:0:1
 fp_plan "$RCV" "${CV_B:0:10}" "$(cv_whole "$CV_R" adversarial)
 $(fp_proved "$CV_R" adv.md adversarial pass)
 - T7: landed $CV_D2 2026-10-04T13:00:00Z born: review S2 on of=$FP_REC/adv.md#1
-- T8: landed $CV_D3 2026-10-04T13:00:00Z born: floor a.test.sh
+- T8: landed $CV_D3 2026-10-04T13:00:00Z born: regression a.test.sh
 - T9: landed $CV_D4 2026-10-04T13:00:00Z" \
   "| T7 | 4 | build | fix the b reader · born: review | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |
-| T8 | 4 | build | fix the floor red · born: floor | implementor | — | 30 | REQ-1 | c.sh | — | — | landed |
+| T8 | 4 | build | fix the floor red · born: regression | implementor | — | 30 | REQ-1 | c.sh | — | — | landed |
 | T9 | 4 | doc | a wording row | implementor | — | 30 | REQ-1 | payload/x.sh | — | — | landed |"
 fp_landing "$RCV" "$(cv_published T7 "$CV_D2")" "$(cv_published T8 "$CV_D3")" "$(cv_published T9 "$CV_D4")"
 CV_ADW="$(printf 'review\tadversarial\tbionic:critic\twhole')"
@@ -3715,7 +3715,7 @@ expect_eq "CV-1 AC-3.2 a docs-only commit past R: covered" "covered" "$(fp_of "$
 fp_state "$RCV" "$CV_D2"
 expect_eq "CV-2 AC-3.2 the landing of a born: review row touching code: covered" "covered" "$(fp_of "$FP_AD")"
 fp_state "$RCV" "$CV_D3"
-expect_eq "CV-3 AC-3.2 the landing of a born: floor row touching code: covered" "covered" "$(fp_of "$FP_AD")"
+expect_eq "CV-3 AC-3.2 the landing of a born: regression row touching code: covered" "covered" "$(fp_of "$FP_AD")"
 expect_eq "CV-3b …and the whole read holds as far as its question's chain does" "covered" "$(fp_of "$CV_ADW")"
 fp_state "$RCV" "$CV_D4"
 expect_eq "CV-4 AC-3.2 a doc-declared row's landing touching payload/x.sh: uncovered from R" \
@@ -3727,7 +3727,7 @@ cv_cover "$CV_R" "$CV_D5" adversarial
 expect_eq "CV-5 AC-3.3 every commit after R prints its basis on the adversarial chain, oldest first" \
   "cover $CV_D1 prose
 cover $CV_D2 born-review
-cover $CV_D3 born-floor
+cover $CV_D3 born-regression
 cover $CV_D4 owes
 cover $CV_D5 owes" "$CV_OUT"
 expect_eq "CV-5b …rc 1, for a commit owes" "1" "$CV_RC"
@@ -3749,7 +3749,7 @@ section "§COVER-ASKER — a fix is seen by its asker: a born row's landing hold
 # marker naming findings of several readings holds on each of their questions. A fix row `proof_fixed` names (its
 # green verdict, or a `moved: … to=fixed row=<T>` line) reaches the walk the same way, by its finding's record.
 # A rating-form marker (` born: review S2 on`, no `of=`) names no reading, so its landing owes on every chain.
-# born-floor and prose are unchanged. `facts_cover <plan> <from> <to> <question>` prints the basis on that
+# born-regression and prose are unchanged. `facts_cover <plan> <from> <to> <question>` prints the basis on that
 # question's chain: the same commit reads `born-review` on its asker's chain and `owes` on the others; with no
 # question it names no asker, so a review-born landing owes there too.
 #
@@ -3981,9 +3981,9 @@ expect_eq "DP-15c …the plan byte-identical across both" "same" "$(cmp -s "$DP_
 
 section "§ANCESTOR: the floor walk stands a proof at an ancestor for the working head, every commit after it proved by its row's runs (wave-35 T1; REQ-3 AC-3.3; D12)"
 # The ancestor case shard 1's §FLOOR drove through the background pass, re-homed when the pass went
-# (wave-35 T1; ADR-054). The proof is a declared regression's log (`floor:`, the shape floor-run writes)
+# (wave-35 T1; ADR-054). The proof is a declared regression's log (`floor:`, the shape regression-run writes)
 # at F; the branch then lands F+1 and F+2, each proved by its row's green verdict in the landing record.
-# The floor judge (lib/proof.sh `proof_attested floor`, what `proof-add floor` runs) takes the log at F for
+# The floor judge (lib/proof.sh `proof_attested floor`, what `proof-add regression` runs) takes the log at F for
 # the working head F+2, and `proof_state` reads covered at F+2: both walk F..F+2 (`_proof_walk`).
 # fails-when: no suite drives the floor walk from an ancestor, or a walk that stops at F still reads
 # covered at F+2.
@@ -4000,11 +4000,11 @@ an_git add .gitignore x.txt tests && an_git commit -qm base && an_git checkout -
 ANP="$ANR/.bionic/docs/plans/epic-a/wave-a.plan.md"; ANREC="$ANR/.bionic/docs/record/wave-a"
 mkdir -p "${ANP%/*}" "$ANREC" "$ANR/.bionic/tmp"
 printf -- '---\nworking-branch: wave/a\n---\n# plan\n\n## SDLC State\n\ncurrent: 5\n' > "$ANP"
-printf 'floor: bash floor.sh\n' > "$ANR/.bionic/config.yaml"
+printf 'regression-command: bash floor.sh\n' > "$ANR/.bionic/config.yaml"
 printf 'two\n' > "$ANR/x.txt"; an_git commit -qam "F: T1 landed"
 AN_F="$(an_git rev-parse HEAD)"
 AN_LOG="$ANREC/floor-${AN_F:0:12}.log"
-printf 'command: bash floor.sh\nfloor: 3 passed, 0 failed\n' | floor_fixture "$ANP" "$AN_LOG" "$AN_F" 0 0  # with its run line (wave-37 T4; D7)
+printf 'command: bash floor.sh\nfloor: 3 passed, 0 failed\n' | regression_fixture "$ANP" "$AN_LOG" "$AN_F" 0 0  # with its run line (wave-37 T4; D7)
 printf 'three\n' > "$ANR/x.txt"; an_git commit -qam "F+1: T2 landed"; AN_F1="$(an_git rev-parse HEAD)"
 printf 'four\n' > "$ANR/x.txt"; an_git commit -qam "F+2: T3 landed"; AN_F2="$(an_git rev-parse HEAD)"
 an_verdict() {  # <row> <commit> — the row's green verdict at <commit>, in the landing record
@@ -4016,7 +4016,7 @@ an_run() {
   env ANR="$ANR" ANP="$ANP" AN_LOG="$AN_LOG" AN_F="$AN_F" bash -c '. "$1/worktree.sh" && . "$1/session.sh" && . "$1/roots.sh" && . "$1/proof.sh" || exit 99
     eval "$2"' _ "$1" "$2" 2>&1
 }
-AN_JUDGE='o="$(proof_attested floor "$AN_LOG" "$ANR" "$ANP" "" "$ANR")"; echo "rc=$? $o"'
+AN_JUDGE='o="$(proof_attested regression "$AN_LOG" "$ANR" "$ANP" "" "$ANR")"; echo "rc=$? $o"'
 an_verdict T2 "$AN_F1"
 expect_eq "AN-1 pre: the proof's head F is an ancestor of the working head F+2, two commits back" "yes ${AN_F}" \
   "$(an_git merge-base --is-ancestor "$AN_F" "$AN_F2" && echo yes) $(an_git rev-parse "$AN_F2~2")"
@@ -4026,8 +4026,8 @@ expect_contains "AN-2 control: with F+2's run unrecorded the judge walks past F+
 an_verdict T3 "$AN_F2"
 expect_eq "AN-3 AC-3.3 F+1 and F+2 proved by their rows: the judge takes the log at F for the head F+2 (exit 0, head F)" \
   "rc=0 ${AN_F}" "$(an_run "$AN_LIB" "$AN_JUDGE")"
-an_run "$AN_LIB" 'proof_add_line "$ANP" "proved: kind=floor head=$AN_F at=2026-10-12T00:00:00Z evidence=record/wave-a/${AN_LOG##*/}" > "$ANP.n" && mv "$ANP.n" "$ANP"' >/dev/null || true
-expect_eq "AN-4 …the proof line names F" "proved: kind=floor head=${AN_F}" "$(grep -o '^proved: kind=floor head=[0-9a-f]*' "$ANP")"
+an_run "$AN_LIB" 'proof_add_line "$ANP" "proved: kind=regression head=$AN_F at=2026-10-12T00:00:00Z evidence=record/wave-a/${AN_LOG##*/}" > "$ANP.n" && mv "$ANP.n" "$ANP"' >/dev/null || true
+expect_eq "AN-4 …the proof line names F" "proved: kind=regression head=${AN_F}" "$(grep -o '^proved: kind=regression head=[0-9a-f]*' "$ANP")"
 expect_eq "AN-5 AC-3.3 …and the floor is covered at the working head F+2" "covered	${AN_F2}" \
   "$(an_run "$AN_LIB" 'proof_state "$ANP" "$ANR"' || true)"
 # THE MUTANT: the walk stops at F. A doctored copy of the library walks F~1..F (the proof commit alone)
@@ -4047,7 +4047,7 @@ expect_eq "AN-7b MUTANT …so F+2 reads uncovered (the pin can fail)" "uncovered
 section "§FLOOR-OWED: a red whole run is the floor's candidate, each red suite owed until a later green landing of it (wave-35 T9; REQ-1 AC-1.3; D8, ADR-054)"
 # The floor is one whole run at a commit F, green or red, plus for each suite red in it one later green
 # run of that suite by a landing, plus every commit after F proved by its row's suites. The judge (lib/proof.sh
-# `proof_attested floor`, what `proof-add floor` runs) takes a red whole run's log as the candidate and reads
+# `proof_attested floor`, what `proof-add regression` runs) takes a red whole run's log as the candidate and reads
 # its red suites from the runner's own `Failed:` block (`proof_floor_owed`); `proof_state` and `facts_state`
 # say `owed <suite>` while one is open, and a landing's green verdict of that suite at a later commit (the
 # record's file-name key, wave-35 T6) closes it. A green stamp is no landing and closes nothing.
@@ -4079,18 +4079,18 @@ fo_log() {  # <file> <head> <passed> <failed> <listed suite>... -> a whole-run l
   local f="$FOREC/$1" h="$2" p="$3" m="$4" s rc=0; shift 4
   # THE CLOSE (wave-36 T35; AC-7.10): the log ends with the run's code, as the door's `echo "rc=$rc" >> "$LOG"` writes it.
   [ "$m" -gt 0 ] && rc=1
-  # THE RUN IS RECORDED (wave-37 T4; D7): tests/lib/floor-fixture.sh writes the log and its run line together.
+  # THE RUN IS RECORDED (wave-37 T4; D7): tests/lib/regression-fixture.sh writes the log and its run line together.
   { printf 'Roots: hooks=/h skills=/s scripts=/x\n\n'
     for s in "$@"; do printf '%s ✗ FAIL\n───── %s: captured output ─────\nFAIL: (1) it broke\n───── end %s ─────\n' "$s" "$s" "$s"; done
     printf '──────────────\nGating: %s passed, %s failed\nenv: os=darwin\n' "$p" "$m"
     if [ "$m" -gt 0 ]; then printf 'Failed:\n'; for s in "$@"; do printf '    - %s\n' "$s"; done; fi
-  } | floor_fixture --pre 'env: os=darwin bash=3.2.57 locale=C path=/pin' "$FOP" "$f" "$h" 0 "$rc"
+  } | regression_fixture --pre 'env: os=darwin bash=3.2.57 locale=C path=/pin' "$FOP" "$f" "$h" 0 "$rc"
 }
 fo_run() {  # <script> -> bash with the proof library (and what it reads) from FO_LIB
   env FOR="$FOR" FOP="$FOP" FOREC="$FOREC" bash -c '. "$1/worktree.sh" && . "$1/session.sh" && . "$1/roots.sh" && . "$1/proof.sh" || exit 99
     eval "$2"' _ "$FO_LIB" "$1" 2>&1
 }
-fo_prove() {  # <head> <log file> -> the floor proof line as proof-add floor writes it: its owed reds read from the log
+fo_prove() {  # <head> <log file> -> the floor proof line as proof-add regression writes it: its owed reds read from the log
   fo_run "proof_add_line \"\$FOP\" \"\$(proof_floor_line $1 2026-10-12T01:00:00Z record/wave-a/$2 \"\$(proof_floor_owed \"\$FOREC/$2\")\")\" > \"\$FOP.n\" && mv \"\$FOP.n\" \"\$FOP\"" >/dev/null
 }
 fo_ev() { printf 'line/v1|%s|at=%s\n' "$1" "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" >> "$FOREC/landing-proofs.log"; }  # <event> [<at>]
@@ -4103,9 +4103,9 @@ fo_land() {  # <row> <path> <text> <suites> -> the landing commit: its ready and
 fo_verdict() { fo_ev "ev=verdict|row=$1|commit=$2|suite=$3|result=$4|log=-" "${5:-}"; }  # <row> <commit> <suite> <green|red> [<at>]
 fo_state() { fo_run 'proof_state "$FOP" "$FOR"' || true; }
 fo_facts() {  # <head> -> facts_state's floor state for the plan at <head>
-  fo_run "facts_state \"\$FOP\" $1" | awk 'index($0, "floor\t") == 1 && !d { print substr($0, 7); d = 1 }' || true
+  fo_run "facts_state \"\$FOP\" $1" | awk 'index($0, "regression\t") == 1 && !d { print substr($0, 12); d = 1 }' || true
 }
-FO_JUDGE='o="$(proof_attested floor "$FOREC/$L" "$FOR" "$FOP" "" "$FOR")"; echo "rc=$? $o"'
+FO_JUDGE='o="$(proof_attested regression "$FOREC/$L" "$FOR" "$FOP" "" "$FOR")"; echo "rc=$? $o"'
 fo_log red-F.log "$FO_F" 2 1 a.test.sh
 expect_eq "FO-0 precondition: the roster at F is three suites, and the log's verdict counts all three" "3 3" \
   "$(fo_git ls-tree --name-only "$FO_F" tests/ | awk '/\.test\.sh$/ { n++ } END { print n }') $(awk '/^Gating:/ { print $2 + $4 }' "$FOREC/red-F.log")"
@@ -4150,7 +4150,7 @@ expect_eq "FO-6 AC-1.3 a later green landing of a.test.sh (file-name key: the re
   "covered	${FO_C1}" "$(fo_state)"
 expect_eq "FO-6b …and facts_state's floor line is covered" "covered" "$(fo_facts "$FO_C1")"
 expect_eq "FO-6c …with no second whole run: the proof line still names F" "1 ${FO_F}" \
-  "$(grep -c '^proved: kind=floor' "$FOP") $(fo_run 'proof_last "$FOP" floor')"
+  "$(grep -c '^proved: kind=regression' "$FOP") $(fo_run 'proof_last "$FOP" floor')"
 
 section "§FLOOR-COVER: a fix row is covered when every code file it changed is read by a suite it ran; an unread one owes a second whole run, or approve regression-2 (wave-35 T9; wave-36 T27; REQ-1 AC-1.4, REQ-6 AC-6.1; D9, D12)"
 # Continues §FLOOR-OWED's repository at covered: T7 changed lib/x.sh and ran a.test.sh, which reads it.

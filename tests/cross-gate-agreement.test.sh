@@ -13780,7 +13780,7 @@ prf_at() {
   for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
             "$(proof_line review "$PRF_E" 2026-10-04T10:30:00Z record/w/adv.md adversarial w-crit flag whole)" \
             "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md evidence w-aud pass piece)" \
-            "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
+            "$(proof_line regression "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
     proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
   done
 )
@@ -13925,7 +13925,7 @@ FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
 FCHK_OUT="$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H" 2>/dev/null)"
 expect_regex "FACT-FINAL precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
 expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extractor reads real output: the floor line)" \
-  "floor" "$FCHK_OUT"
+  "regression" "$FCHK_OUT"
 expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
 expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
   "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
@@ -13963,7 +13963,7 @@ for deal_r in single double; do
       expect_eq "DEAL $deal_r $deal_s: $deal_q is dealt to exactly one role" "1" \
         "$(deal "$deal_r" "$deal_s" | awk -F'\t' -v q="$deal_q" '$1 == "review" && $2 == q && $4 == "piece"' | awk 'END { print NR }')"
     done
-    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx floor)"
+    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx regression)"
     expect_eq "DEAL $deal_r $deal_s: every dealt role is a reader role the fact verb admits" "" \
       "$(deal "$deal_r" "$deal_s" | ROLES="$DEAL_ROLES" awk -F'\t' '$1 == "review" && index(" " ENVIRON["ROLES"] " ", " " $3 " ") == 0 { print $3 }')"
   done

@@ -3033,8 +3033,8 @@ Fix: land or drop those rows, then dispatch the whole run."
             # RULE 3. THE RELEASED HEAD IS NAMED (T52; review 14 N6). proof_state says which working
             # head it judged; an empty change since the proof is covered too (A-T5.5), so that head
             # can differ from the proof's, and the line names the head being released.
-            _fr_proof="$(proof_last_line "$PLAN" floor 2>/dev/null)"
-            _fr_head="$(proof_last "$PLAN" floor 2>/dev/null)"
+            _fr_proof="$(proof_last_line "$PLAN" regression 2>/dev/null)"
+            _fr_head="$(proof_last "$PLAN" regression 2>/dev/null)"
             _fr_short="$(printf '%.7s' "$_fr_head")"
             _fr_cur="${_fr_state#covered}"; _fr_cur="${_fr_cur#$'\t'}"
             _fr_tree=""
