@@ -1726,6 +1726,12 @@ seed_ring() {  # <ring> <free_pct> <swap_pct>
 # of <cores> promised=<n> admitted=<n> waiting=<n> room=<yes|no>`, printed once from every exit
 # path, in place of the rung, the HOLD and the EMERGENCY. The machine is the suite's planted one
 # (8 cores, 30% used, a load of 1.0 over both windows) and the gate a store of its own per case.
+# THE PROMISE, LIFTED (wave-38 T5; D21, ADR-060): the gate promises each run resources.sh's measured
+# suite cost, read through its reader and never a literal here; `pr <n>` prints n of them as the
+# gate line does (awk %g).
+PROMISE="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores 2>/dev/null )"
+pr() { awk -v p="${PROMISE:-0}" -v n="$1" 'BEGIN { printf "%g", p * n }'; }
+expect_regex "11-PR the suite cost is lifted from resources.sh, a positive decimal" '^[0-9]+(\.[0-9]+)?$' "$PROMISE"
 GATE_LINE_QUIET="poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=0 admitted=0 waiting=0 room=yes"
 gate_case() {  # <label> <cores one run takes> — a store of this case's own, one cost line on record
   BIONIC_GATE_DIR="$TMPROOT/gate-$1"; export BIONIC_GATE_DIR
@@ -1739,7 +1745,7 @@ plant_request() {
   n="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | /usr/bin/grep -c '^[0-9][0-9]*$')"
   start="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$$" | awk '{ $1 = $1; print }')"
   { printf 'key=%s\nkind=work\nwho=%s\ntree=/\nasked=1000\nholder=%s:%s\n' "$3" "$1" "$$" "$start"
-    [ "$2" = admitted ] && printf 'admitted=1000\npromise=5:1:30\n'
+    [ "$2" = admitted ] && printf 'admitted=1000\npromise=5:%s:30\n' "$PROMISE"
   } > "$BIONIC_GATE_DIR/requests/$((n + 1))"
 }
 
@@ -1772,8 +1778,8 @@ gate_case s11b 0.1
 poke "$R11B" tick
 expect_eq "11b a QUIET tick exits 0" "0" "$RC"
 expect_contains "11b1 …decides QUIET" "decision=QUIET" "$OUT"
-expect_contains "11b2 …and prints the gate line, its open writer counted as owed at one core (wave-33 T1; Δ10)" \
-  "poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=1 admitted=0 waiting=0 room=yes" "$OUT"
+expect_contains "11b2 …and prints the gate line, its open writer counted as owed at the suite cost (wave-38 T5)" \
+  "poker: gate share=80 used=30% load=1.0/1.0 of 8 promised=$(pr 1) admitted=0 waiting=0 room=yes" "$OUT"
 expect_eq "11b3 …exactly once" "1" "$(count_lines_matching 'poker: gate share=' "$OUT")"
 expect_eq "11b4 …and no rung line (the count extractor reads the gate line above)" "0" \
   "$(count_lines_matching 'poker: rung=' "$OUT")"
@@ -1856,7 +1862,7 @@ gate_case s11d 0.1
 plant_request "$SID:young-suite-runner" admitted heavy.test.sh
 BIONIC_PROBE_USED_PCT=90 poke "$R11D" tick
 expect_contains "11d over the share the gate line reads used=90% and room=no" \
-  "poker: gate share=80 used=90% load=1.0/1.0 of 8 promised=1 admitted=1 waiting=0 room=no" "$OUT"
+  "poker: gate share=80 used=90% load=1.0/1.0 of 8 promised=$(pr 1) admitted=1 waiting=0 room=no" "$OUT"
 expect_contains "11d1 …and the line under it names what holds the memory" \
   "poker: over share — used=90% admitted: heavy.test.sh" "$OUT"
 expect_absent "11d2 …and names no writer to stop" "stop youngest" "$OUT"
@@ -1868,8 +1874,8 @@ expect_absent "11d5 under the share the same store prints no over-share line (11
 
 # ---------- §FILL-GATE: the tick's fill follows the gate (AC-2.5) ----------
 #
-# Four ready writer rows and a cap of eight. One run on record takes 1.0 core, so on a load of
-# 4.0 the gate has room while 4.0 + the owed runs stays within 6.4: three rows, then a no.
+# Four ready writer rows and a cap of eight. Each run is promised the suite cost (wave-38 T5), so on a
+# load of 2.5 the gate has room while 2.5 + the owed runs stays within 6.4: three rows, then a no.
 # HOISTED to tests/session-poker.prelude.sh: mk_rung_repo — Section 41 builds its rung repos with it.
 fill_line() {  # the tick's one `poker: FILL <ids>` line; never the sentence below it (`FILL — …`)
   printf '%s\n' "$OUT" | awk 'index($0, "poker: FILL ") == 1 && index($0, "poker: FILL —") != 1 { print; exit }'
@@ -1882,27 +1888,28 @@ expect_eq "FG.1 a quiet machine offers every ready row" "poker: FILL ONE TWO THR
 
 R11C2="$(mk_rung_repo s11-fill-load)"
 gate_case s11c2 1.0
-BIONIC_PROBE_BUSY_CORES=4.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 poke "$R11C2" tick
-expect_eq "FG.2 a load of 4.0 and 1.0 core a run: three rows, one ask each, then a no" \
+BIONIC_PROBE_BUSY_CORES=2.5 BIONIC_PROBE_BUSY_CORES_5M=2.5 poke "$R11C2" tick
+expect_eq "FG.2 a load of 2.5 and the suite cost a run: three rows, one ask each, then a no" \
   "poker: FILL ONE TWO THREE" "$(fill_line)"
 
 R11C3="$(mk_rung_repo s11-fill-owed)"
 gate_case s11c3 1.0
 add_row "$R11C3" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
-BIONIC_PROBE_BUSY_CORES=4.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 poke "$R11C3" tick
+BIONIC_PROBE_BUSY_CORES=2.5 BIONIC_PROBE_BUSY_CORES_5M=2.5 poke "$R11C3" tick
 expect_eq "FG.3 one open writer not yet showing is owed: two rows" "poker: FILL ONE TWO" "$(fill_line)"
 plant_request "$SID:w1" admitted w1.test.sh
 forget_digest "$R11C3"
-BIONIC_PROBE_BUSY_CORES=4.0 BIONIC_PROBE_BUSY_CORES_5M=4.0 BIONIC_PROBE_USED_PCT=30 poke "$R11C3" tick
-expect_eq "FG.4 once it has asked, its promise counts instead (1.0 core): still two rows" \
+BIONIC_PROBE_BUSY_CORES=2.5 BIONIC_PROBE_BUSY_CORES_5M=2.5 BIONIC_PROBE_USED_PCT=30 poke "$R11C3" tick
+expect_eq "FG.4 once it has asked, its promise counts instead (the suite cost): still two rows" \
   "poker: FILL ONE TWO" "$(fill_line)"
 
 R11C4="$(mk_rung_repo s11-fill-wait)"
 gate_case s11c4 0.1
 plant_request "$SID:other" waiting other.test.sh
 poke "$R11C4" tick
-expect_contains "FG.5 a waiting request gives no room" "waiting=1 room=no" "$OUT"
-expect_eq "FG.6 …and the tick offers nothing" "" "$(fill_line)"
+# D21 (wave-38 T5; ADR-060): the room reads admitted runs and the owed count, never the queue.
+expect_contains "FG.5 a waiting request alone gives room: it is counted, and decides nothing" "waiting=1 room=yes" "$OUT"
+expect_eq "FG.6 …and the tick offers every ready row, as on the quiet machine" "poker: FILL ONE TWO THREE FOUR" "$(fill_line)"
 
 R11C5="$(mk_rung_repo s11-fill-cap)"
 gate_case s11c5 0.1
@@ -1924,7 +1931,7 @@ R11C6="$(mk_rung_repo s11-fill-nocost)"
 gate_case s11c6 0.1
 rm -f "$BIONIC_GATE_DIR/cost/fixture.test.sh"
 poke "$R11C6" tick
-expect_eq "FG.9 with no cost on record each row is promised one core (wave-33 T1; Δ10): all four fit (1.0 + 4 ≤ 6.4)" \
+expect_eq "FG.9 with no cost on record each row is promised the suite cost (wave-38 T5): all four fit (1.0 + 3 owed ≤ 6.4)" \
   "poker: FILL ONE TWO THREE FOUR" "$(fill_line)"
 
 # A plan with no budget line still prints the gate line. §NOBUDGET (wave-28 T9; D15, AC-2.9): no
@@ -3968,8 +3975,8 @@ expect_contains "…and names the pending approval instead" \
 expect_absent "…so none of the eight tasks are named" "FILL S1" "$OUT"
 
 # ---------- 22b: the same plan at current: 4 FILLs exactly as it always has ----------
-# ROOM FOR EIGHT (wave-33 T1; Δ10): each writer is promised one core, and the suite's 8 cores at
-# share 80 with a load of 1.0 hold five; these rows test the approval step and the table order, not
+# ROOM FOR EIGHT (wave-33 T1; Δ10; wave-38 T5): each writer is promised the suite cost, and the
+# suite's 8 cores at share 80 with a load of 1.0 hold four; these rows test the approval step and the table order, not
 # the gate, so their machine is 16 cores (12.8), room for all eight.
 R22B="$(make_repo s22-current-4)"; new_roster "$R22B"
 s22_plan_at_current "$R22B" 4 >/dev/null

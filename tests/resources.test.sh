@@ -1205,6 +1205,9 @@ printf '10.00 10.00 10.00 3/900 4242\n' > "$B_PROC/loadavg"
 printf '92\n' > "$B_DIR/home/bionic/share"
 printf '200000 100000\n' > "$B_CG/cpu.max"
 B_T=1700000300   # the moment every gate read below is taken at
+# The cores one owed writer is charged: resources.sh's measured suite cost (wave-38 T5; D21), lifted
+# through its reader, never a literal. 2 cores at share 92 (1.84) still hold one.
+B_PROMISE="$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores )"
 b_stat() { printf 'usage_usec %s\nuser_usec 1\nsystem_usec 1\n' "$1" > "$B_CG/cpu.stat"; }
 b_run() {  # <ring> <cgroup root> <epoch> <command...> — gate.sh sourced on the planted machine
   local ring="$1" cg="$2" now="$3"; shift 3
@@ -1230,7 +1233,7 @@ expect_eq "BUSY.1 the critic's case: host load 10, the container idle, nothing a
   "room=yes load=0.00/0.00 cores=2 promised=0 waiting=0" \
   "$(b_run "$B_IDLE" "$B_CG" "$B_T" gate_room --owed 0)"
 expect_eq "BUSY.2 …and with one writer owed (the fill's ask): room for it" \
-  "room=yes load=0.00/0.00 cores=2 promised=1 waiting=0" \
+  "room=yes load=0.00/0.00 cores=2 promised=$B_PROMISE waiting=0" \
   "$(b_run "$B_IDLE" "$B_CG" "$B_T" gate_room --owed 1)"
 expect_eq "BUSY.3 pressure_sample under a quota records the cgroup's usage as a sixth field" \
   "5000000000@$HOSTNAME" "$(awk -F'|' 'NR == 1 { print $6 }' "$B_IDLE")"
@@ -1275,7 +1278,7 @@ B_NOSTAT="$B_DIR/cg-nostat"; mkdir -p "$B_NOSTAT"; cp "$B_CG/cpu.max" "$B_NOSTAT
 expect_eq "BUSY.12 a quota with no cpu.stat: busy reads 0, never the host's load" "0.00 0.00" \
   "$(b_run "$B_DIR/ring-nostat" "$B_NOSTAT" "$B_T" _res_busy_cores) $(b_run "$B_DIR/ring-nostat" "$B_NOSTAT" "$B_T" _res_busy_cores_5m)"
 expect_eq "BUSY.13 …so the promises alone decide the room" \
-  "room=yes load=0.00/0.00 cores=2 promised=1 waiting=0" \
+  "room=yes load=0.00/0.00 cores=2 promised=$B_PROMISE waiting=0" \
   "$(b_run "$B_DIR/ring-nostat" "$B_NOSTAT" "$B_T" gate_room --owed 1)"
 
 # A sample another host wrote into a shared ring is another cgroup's counter: not used.

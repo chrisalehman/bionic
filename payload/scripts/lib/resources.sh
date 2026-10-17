@@ -69,6 +69,11 @@ CORES_PER_SUITE=1.61   # measured 2026-09-03 at BIONIC_TEST_JOBS=18, user+sys/wa
                        # tests/run.sh at 97afec9: 784.84 s / 487.38 s
                        # (record/wave-1.4.0/step5-full-suite-report.md)
 
+# _res_suite_cores — CORES_PER_SUITE, the one reader of it outside this file (wave-38 T5; D21,
+# ADR-060): the gate promises every work and landing run this many cores (lib/gate.sh
+# `_gate_cores_for`), so the measurement above is the promise and a remeasure moves both.
+_res_suite_cores() { printf '%s\n' "$CORES_PER_SUITE"; }
+
 # Disk a checked-out worktree costs. Trees are cheap; this term only binds on a full disk.
 DISK_PER_TREE_GB=0.5   # datum: 2026-09-02, this repo — a `git worktree add` checkout of
                        # bionic measures well under 100 MB; 0.5 GB is that rounded up five

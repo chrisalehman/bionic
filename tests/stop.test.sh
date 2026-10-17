@@ -650,8 +650,8 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 #
 # THE READING IS PINNED for the tick and the wall alike: 8 cores at the default share 92 (7.36
 # cores of room; HOME is a fresh directory, so no share file is read). The first row is asked with
-# nothing owed and each row offered owes one core more, so a busy reading of 7.0 leaves room for
-# exactly one writer (7 <= 7.36 < 7 + 1), and 8.0 for none.
+# nothing owed and each row offered owes one promise more, so a busy reading of 7.0 leaves room for
+# exactly one writer (7 <= 7.36 < 7 + the suite cost, wave-38 T5), and 8.0 for none.
 gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15, an empty roster
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
@@ -728,6 +728,28 @@ expect_contains "GAP3b meta: the next turn's ledger line still counts one free s
 expect_contains "GAP3c …and charges the turn to the decline" "|declined=T3 has not landed|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_eq "GAP3d one decline answered the three rows: the turn passes" "" \
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+
+# GAP4: A WAITING REQUEST ALONE LEAVES ROOM (wave-38 T5; D21, ADR-060). The gate's room reads its
+# admitted runs and the owed count, never its queue: a landing run waiting at the gate used to answer
+# room=no and close FILL for every writer. Planted: a store holding one landing request that waits,
+# held by a live process, on the quiet reading (1.0 busy of 7.36). The tick counts it waiting and
+# still offers FILL. The holder is this suite's own shell, live for the whole case and never a sleep
+# (shell-lint's clock census), as gate.test.sh's held requests are.
+GAP4_GATE="$(cd "$(mktemp -d)" && pwd -P)/gate"; mkdir -p "$GAP4_GATE/requests" "$GAP4_GATE/cost"
+GAP4_HOLDER=$$
+GAP4_START="$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$GAP4_HOLDER")"
+printf 'key=a.test.sh\nkind=landing\nwho=%s:wx-T1\ntree=/\nasked=1000\nholder=%s:%s\n' \
+  "$SID" "$GAP4_HOLDER" "$GAP4_START" > "$GAP4_GATE/requests/1"
+GAP_D4="$(gap_fixture)"
+GAP_T4="$(BIONIC_GATE_DIR="$GAP4_GATE" gap_tick "$GAP_D4" 1.0)"
+expect_eq "GAP4-pre the request is still open after the tick: its holder lives, nothing ended it" "open" \
+  "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
+GAP4_LINE="$(printf '%s\n' "$GAP_T4" | grep -F 'poker: gate ' | head -n 1)"
+expect_nonempty "GAP4a precondition: the tick printed its gate line" "$GAP4_LINE"
+expect_contains "GAP4b …which counts the one waiting request and gives room: the room reads admitted runs, not waiters" \
+  "waiting=1 room=yes" "$GAP4_LINE"
+expect_contains "GAP4c the tick offers FILL though a request waits at the gate" "poker: FILL T13" "$GAP_T4"
+expect_absent "GAP4d …and does not say the gate gives no room" "no FILL — the gate gives no room" "$GAP_T4"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "UB: unbound means no run — two plans, two sessions, the real Stop per session (wave-23-fixit-1810, REQ-1, AC-1.1/AC-1.2)"
