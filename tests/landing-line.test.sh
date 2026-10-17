@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -533,8 +533,8 @@ expect_eq "(r1) ready exits 0" "0" "$LL_RC"
 expect_nonempty "(r1-pre) a candidate was built" "$KR"
 expect_eq "(r1) …printing LANDED and the owed line, exactly" \
   "$(printf 'LANDED T1 %s\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$KR" "$KR")" "$LL_OUT"
-expect_regex "(r2) the entry: the ready event, with the row, the roster name, the suites, the debt, the carrier and its time" \
-  "^line/v1\\|ev=ready\\|row=T1\\|name=wx-T1\\|commit=${T1R}\\|branch=wt/T1\\|tree=${RR}/.worktrees/T1\\|suites=a.test.sh\\|debt=-\\|carrier=[0-9]+:[^|]+\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
+expect_regex "(r2) the entry: the ready event, with the row, the roster name, the suites, the debt, the carrier, its lease's age and its time" \
+  "^line/v1\\|ev=ready\\|row=T1\\|name=wx-T1\\|commit=${T1R}\\|branch=wt/T1\\|tree=${RR}/.worktrees/T1\\|suites=a.test.sh\\|debt=-\\|carrier=[0-9]+:[^|]+\\|age=[0-9]+:[0-9]+\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
   "$(ll_ev "$RR" ready)"
 expect_eq "(r2) …and it is the record's first line" "ready" "$(head -1 "$(ll_rec "$RR")" | cut -d'|' -f2 | sed 's/^ev=//')"
 expect_eq "(r3) the verb log holds the one verb, ready" "ready" "$(cat "$(world_verbs)")"
@@ -891,6 +891,8 @@ KA2="$(ll_nth_cand "$RA" T2 '$')"
 expect_nonempty "(a2-pre) T2 was rebuilt" "$KA2"
 expect_eq "(a2) T2 publishes: exit 0, the branch at its latest candidate, which is built on the accepted head" "0 $KA2 $HA" \
   "$(cat "$WORLD_ROOT/a-T2.out.rc" 2>/dev/null) $(ll_head "$RA") $(git -C "$RA" rev-parse "${KA2}^1" 2>/dev/null)"
+[ "$(cat "$WORLD_ROOT/a-T2.out.rc" 2>/dev/null)" = 0 ] || printf 'DIAG (a2) T2 said: %s | its events: %s\n' \
+  "$(tr '\n' ' ' < "$WORLD_ROOT/a-T2.out" 2>/dev/null)" "$(grep '|row=T2|' "$(ll_rec "$RA")" 2>/dev/null | cut -d'|' -f2,4- | tr '\n' ' ')"
 expect_eq "(a3) …proved by its last run, on that candidate" "$KA2" "$(tail -1 "$LL_SIG/a-T2.runs" 2>/dev/null)"
 expect_false "(a3) …which does not contain T1's commit" git -C "$RA" merge-base --is-ancestor "$T1A" wave/x
 expect_regex "(a3) T1 stays returned, red" "^line/v1\\|ev=returned\\|row=T1\\|why=red\\|" "$(ll_ev "$RA" returned)"
@@ -2369,5 +2371,63 @@ expect_eq "(g5) T1 publishes: exit 0, the branch at its candidate" "0 $(ll_last_
 expect_eq "(g5) …and its lease is closed with it" "no" "$(if [ -e "$(ll_lease "$GP_KEY")" ]; then echo yes; else echo no; fi)"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
 touch "$LL_SIG/g-T1.go"
+
+# ---------------------------------------------------------------------------
+section "§ORDER: the line's order is the gate's: a ready opens its lease and records its entry in one act, and both landings land (wave-38 T30; A-orch-49)"
+#
+# A landing waits to publish behind the entries ahead of it in the line, and the gate holds every
+# landing behind the oldest lease. If the two orders disagree, the gate's oldest waits on the line's
+# first while the gate answers that one 0: neither moves (T31 found it in §ALONE). So a ready takes the
+# record's ready lock, opens its lease and appends its ready event, which carries the lease's age, in
+# one act; a new entry takes a fresh age, and a ready of an entry still open takes the age its entry
+# was given. o1: two readies in one planted instant. o2: a lease of T1 kept from an entry already
+# closed would make T1 the gate's oldest though its new entry is behind T2's in the line.
+ll_order_world() {  # <tag> -> root; T1 lands on a, T2 on b, each a suite that waits for its go file
+  local r
+  r="$(ll_rworld)" || return 1
+  ll_commit_suite "$r" T1 a "$(ll_block_body "$1-T1" a green)"
+  ll_commit_suite "$r" T2 b "$(ll_block_body "$1-T2" b green)"
+  printf '%s' "$r"
+}
+ll_line_order() { ll_ev "$1" ready | awk -F'|' '{ r = $3; sub(/^row=/, "", r); if (!(r in s)) { s[r] = 1; o = o (o == "" ? "" : " ") r } } END { print o }'; }   # <root> -> rows in the order their entries opened
+ll_lease_order() {  # <root> -> T1 and T2 in the gate's order: by first, then seq
+  local p k1 k2
+  p="$(ll_plan "$1")"; k1="$(_line_landing_key "$1" "$p" T1)"; k2="$(_line_landing_key "$1" "$p" T2)"
+  printf 'T1 %s %s\nT2 %s %s\n' "$(ll_lease_field "$k1" first)" "$(ll_lease_field "$k1" seq)" "$(ll_lease_field "$k2" first)" "$(ll_lease_field "$k2" seq)" \
+    | sort -k2,2n -k3,3n | awk 'NF == 3 { o = o (o == "" ? "" : " ") $1 } END { print o }'
+}
+ll_has_ready() { ll_ev "$1" ready | grep -q "|row=$2|"; }   # <root> <row> -> 0 once the row's ready event is on the record
+ll_both_carried() { local p; p="$(ll_plan "$1")"; ll_lease_carried "$(_line_landing_key "$1" "$p" T1)" && ll_lease_carried "$(_line_landing_key "$1" "$p" T2)" && ll_has_ready "$1" T1 && ll_has_ready "$1" T2; }   # <root> -> 0 once both hold a lease and both entries are recorded
+export BIONIC_GATE_DIR="$WORLD_ROOT/gate-order"
+RO="$(ll_order_world o1)"
+ll_verb_bg "$RO" T1 "$WORLD_ROOT/o1-T1.out"; O1A=$!; ll_verb_bg "$RO" T2 "$WORLD_ROOT/o1-T2.out"; O1B=$!
+expect_true "(o1-pre) both readies hold their leases and have recorded their entries, in one planted instant" wait_for 20 ll_both_carried "$RO"
+expect_eq "(o1) the line's order and the gate's order are one order, over both entries" "2|$(ll_lease_order "$RO")" \
+  "$(ll_line_order "$RO" | wc -w | tr -d ' ')|$(ll_line_order "$RO")"
+expect_true "(o1) …the ready event carries the lease's age" test -n "$(ll_ev "$RO" ready | grep -E '\|age=[0-9]+:[0-9]+\|' | head -1)"
+touch "$LL_SIG/o1-T1.go" "$LL_SIG/o1-T2.go"
+ll_wait_file "$WORLD_ROOT/o1-T1.out.rc" 450 || ll_kill_bg "$O1A"; ll_wait_file "$WORLD_ROOT/o1-T2.out.rc" 450 || ll_kill_bg "$O1B"
+expect_eq "(o1) both land, in the line's order" "0 0 $(ll_line_order "$RO")" \
+  "$(cat "$WORLD_ROOT/o1-T1.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/o1-T2.out.rc" 2>/dev/null) $(ll_ev "$RO" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+export BIONIC_GATE_DIR="$WORLD_ROOT/gate-order2"
+RO2="$(ll_order_world o2)"
+O2_K1="$(_line_landing_key "$RO2" "$(ll_plan "$RO2")" T1)"
+O2_CAR="$(ll_carrier)"
+expect_eq "(o2-pre) a lease of T1 is kept from an entry already closed: opened, then left, nobody's" "0 0 -" \
+  "$(ll_lease_gate gate_landing_open "$O2_K1" "$O2_CAR" 3600) $(ll_lease_gate gate_landing_leave "$O2_K1" "$O2_CAR") $(ll_lease_field "$O2_K1" carrier)"
+O2_OLD="$(ll_lease_field "$O2_K1" first):$(ll_lease_field "$O2_K1" seq)"
+world_tick 5
+ll_verb_bg "$RO2" T2 "$WORLD_ROOT/o2-T2.out"; O2B=$!
+expect_true "(o2-pre) T2's ready opened the line and holds its lease" wait_for 20 ll_has_ready "$RO2" T2
+world_tick 5
+ll_verb_bg "$RO2" T1 "$WORLD_ROOT/o2-T1.out"; O2A=$!
+expect_true "(o2-pre) T1's ready holds a lease and has recorded its entry" wait_for 20 ll_has_ready "$RO2" T1
+expect_eq "(o2) T1's new entry is behind T2's in the line, and so is its lease: a fresh age, not the kept $O2_OLD" "T2 T1|T2 T1" \
+  "$(ll_line_order "$RO2")|$(ll_lease_order "$RO2")"
+touch "$LL_SIG/o2-T1.go" "$LL_SIG/o2-T2.go"
+ll_wait_file "$WORLD_ROOT/o2-T2.out.rc" 450 || ll_kill_bg "$O2B"; ll_wait_file "$WORLD_ROOT/o2-T1.out.rc" 450 || ll_kill_bg "$O2A"
+expect_eq "(o2) both land, T2 then T1" "0 0 T2 T1" \
+  "$(cat "$WORLD_ROOT/o2-T2.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/o2-T1.out.rc" 2>/dev/null) $(ll_ev "$RO2" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+export BIONIC_GATE_DIR="$LL_GATE_WAS"
 
 finish

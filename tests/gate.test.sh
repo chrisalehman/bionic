@@ -29,7 +29,9 @@
 #                      nothing open; closed, the younger is answered by the count; a dead carrier's
 #                      lease is pruned; one left WAITING orders no one, keeps its age for the next
 #                      open, and is pruned after its span; ties by opening order; a landing with no
-#                      lease is ordered as before. Mutation: the lease unread answers 4 in the gap
+#                      lease is ordered as before. open prints the age it gave; `new` takes a
+#                      fresh one, an age given is set exactly, seq never repeats (A-orch-49).
+#                      Mutation: the lease unread answers 4 in the gap
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
@@ -545,6 +547,28 @@ reap
 fresh lease-usage
 expect_eq "LE.24 open with no carrier, open of a key that is not a landing key, close with no key: rc 2 each" "2 2 2" \
   "$(lopen LA) $(lopen 'a b' "$LME") $(lclose)"
+# THE AGE (wave-38 T30, A-orch-49): the line hands the gate the age of its entry, so the gate's order
+# is the line's. `gate_landing_open` prints the age it gave, `<first>:<seq>`; `new` takes a fresh one
+# however a lease of the landing is kept; an age given is set exactly; seq comes from a counter that
+# never gives a number twice.
+lopen_out() { ( . "$GATE_LIB" 2>/dev/null; gate_landing_open "$@" 2>/dev/null ); }   # <args> -> the age printed
+fresh lease-age
+share92w
+world_machine 8 8192 30 2.0
+expect_eq "LE.28 open prints the lease's age, <first>:<seq>" "1000:1" "$(lopen_out LA "$LME" 600)"
+world_tick 10
+lleave LA "$LME" >/dev/null
+world_tick 10
+expect_eq "LE.29 open with 'new' takes a fresh age though LA's lease is kept, nobody's: 1020:2, not 1000:1; carried, left cleared" \
+  "1020:2|$LME|" "$(lopen_out LA "$LME" 600 new)|$(lfield LA carrier)|$(lfield LA left)"
+expect_eq "LE.30 open with an age given sets exactly that age (a line entry's re-entry)" "1000:1|1000|1" \
+  "$(lopen_out LA "$LME" 600 1000:1)|$(lfield LA first)|$(lfield LA seq)"
+lclose LA "$LME" >/dev/null
+expect_eq "LE.31 with every lease closed, a fresh open takes the next seq (3), never one given before" "1020:3" \
+  "$(lopen_out LB "$LME" 600)"
+expect_eq "LE.32 an age that is not <first>:<seq> or 'new' is a usage error (rc 2), and an empty span is the default" "2 0" \
+  "$(lopen LA "$LME" 600 1000) $(lopen LC "$LME" '' new)"
+
 # MUTANT: the width ask reads no lease. The gap is open again: LB is answered by the count while LA is
 # between its runs, the harm A-T6-10 found.
 MLE="$(mutant lease)"
