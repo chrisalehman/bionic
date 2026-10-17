@@ -4216,4 +4216,40 @@ expect_eq "CKS-cm1 precondition: the mutant still places the start" "a00000000ck
 expect_absent "CKS-cm2 …and without the write its placed row says nothing was pushed: CKS-c2 is what catches it" \
   "|pushed=" "$CKSM_CONF"
 
+# ---------- §RUNNER — the roster row carries the role's effort beside its model (wave-38 T4; REQ-8 AC-8.1) ----------
+#
+# The row's `model=` is written at launch by hooks/dispatch-preflight.sh from the Agent call's `model`
+# alone. A role whose rendered file carries `effort:` now reads `<model>-<effort>` there, so the
+# test-runner on Haiku at high effort reads `model=haiku-high`; a call with no `model` stays empty.
+# fails-when: the test-runner dispatch's row reads plain `model=haiku`, or a call with no model
+# acquires a model it was never given, or the composition is read off the wrong role's file.
+#
+# THE DRIVER IS THE REAL GATE, in a SUBSHELL: the dispatch-preflight prelude installs its own sandbox,
+# EXIT and DEBUG traps and variables, none of which may reach this suite, so it is sourced inside
+# `( … )` and only the roster's rows come back. The fixture is the prelude's own (make_repo,
+# write_attestation, mk_agent_payload), the same one the dispatch-preflight shards drive.
+rr_drive() {  # <subagent_type> <model|-> -> the roster's rows, verdict first
+  (
+    cd "$(dirname "$0")/.." || exit 1
+    . tests/lib/plan-fixture.sh
+    . tests/lib/bound-marker.sh
+    . tests/dispatch-preflight.prelude.sh
+    _r=$(make_repo rr yes); write_attestation "$_r" "$SID_A"
+    run_gate "$(mk_agent_payload "$SID_A" "$_r" "$BRIEF_FULL" w99-rr "$2" "$S5_LIVE_TRANSCRIPT" "$1")"
+    echo "verdict=$GATE_VERDICT"
+    grep -v '^#' "$(roster_path "$_r" "$SID_A")" 2>/dev/null
+  ) 2>/dev/null
+}
+RR_HAIKU=$(rr_drive bionic:test-runner haiku)
+expect_contains "RR1 precondition: the test-runner dispatch is admitted" "verdict=allow" "$RR_HAIKU"
+expect_contains "RR1 …its row names the role (the reader found the row)" "subagent_type=bionic:test-runner" "$RR_HAIKU"
+expect_contains "RR2 a test-runner dispatch on haiku is journalled model=haiku-high" "|model=haiku-high|" "$RR_HAIKU"
+RR_NONE=$(rr_drive bionic:test-runner -)
+expect_contains "RR3 precondition: the same dispatch with no model is admitted, with its row" "subagent_type=bionic:test-runner" "$RR_NONE"
+expect_contains "RR3 …and its model stays empty, as before" "|model=|" "$RR_NONE"
+expect_absent "RR3 …no effort invented for a call that named no model" "model=-high" "$RR_NONE"
+RR_GP=$(rr_drive general-purpose haiku)
+expect_contains "RR4 precondition: a dispatch of a type with no role file is admitted, with its row" "subagent_type=general-purpose" "$RR_GP"
+expect_contains "RR4 …and its model stays plain, since no rendered file names an effort" "|model=haiku|" "$RR_GP"
+
 finish

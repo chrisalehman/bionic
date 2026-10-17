@@ -429,7 +429,7 @@ expect_status "row status is 'intended'" "intended" "$(roster_field "$ROW" statu
 expect_status "row carries this session's id" "$SID_A" "$(roster_field "$ROW" session)"
 expect_status "row carries the agent name from tool_input" "w99-impl" "$(roster_field "$ROW" name)"
 expect_status "row carries subagent_type from tool_input" "implementor" "$(roster_field "$ROW" subagent_type)"
-expect_status "row carries the model from tool_input" "claude-sonnet-5" "$(roster_field "$ROW" model)"
+expect_status "row carries the model from tool_input" "claude-sonnet-5-high" "$(roster_field "$ROW" model)"
 expect_status "row carries the tool_use_id (the recorder's correlation key)" \
   "toolu_018jyjgop7KMxP6yKtoAWWtB" "$(roster_field "$ROW" tool_use_id)"
 expect_status "row's agent_id is empty at launch (task 4/4 fills it)" "" "$(roster_field "$ROW" agent_id)"
