@@ -2377,18 +2377,19 @@ section "§WHY: every WAITING exit says why on the next line; the WAITING line i
 # T8's landing made 26 ready calls, each WAITING with no reason printed: the suite's promise did not fit
 # the time left, and nothing said so (A-orch-43). Each WAITING exit now prints `waiting: <reason>` on the
 # line after its WAITING line, which stays byte for byte what it was. Each case is planted and run with
-# the time it needs (--within 0 for the waits that read no promise, so the first wait is the exit).
+# --within 0, so the first wait is the exit and a wrong order fails the row instead of hanging the suite
+# (the clock is planted and never reaches a later deadline).
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-why"
 ll_wline() { printf '%s\n' "$1" | grep '^WAITING ' | head -n 1; }   # <ready's output> -> its WAITING line
 ll_why() { printf '%s\n' "$1" | awk '/^WAITING / { if ((getline n) > 0) print n; exit }'; }   # <ready's output> -> the line after it
 RY1="$(ll_world)"; ll_launch "$RY1" T1 c
 ( cd "$RY1" && world_cost c.test.sh 600 )
 ( cd "$RY1" && world_suite c green >/dev/null ) && git -C "$RY1" add tests/c.test.sh && git -C "$RY1" commit -qm "suite c"
-ll_verb "$RY1" T1 --within 60
-expect_eq "(y1) the suite's time: a suite promising 600 s with 60 s left exits 75, its WAITING line unchanged" \
-  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$LL_RC|$(ll_wline "$LL_OUT")"
+ll_verb "$RY1" T1 --within 0
+expect_eq "(y1) the suite's time: a suite promising 600 s with 0 s left exits 75, its WAITING line unchanged" \
+  "75|WAITING T1 — run again: bash ${SPAWN} ready --within 0" "$LL_RC|$(ll_wline "$LL_OUT")"
 expect_eq "(y1) …and the next line names the suite, its promised seconds, the seconds left and the --within" \
-  "waiting: suite c.test.sh promises 600s and 60s are left in --within 60" "$(ll_why "$LL_OUT")"
+  "waiting: suite c.test.sh promises 600s and 0s are left in --within 0" "$(ll_why "$LL_OUT")"
 RY2="$(ll_rworld)"; YW_CAR="$(ll_carrier)"
 expect_eq "(y2-pre) an older landing's lease is open, carried live" "0" "$(ll_lease_gate gate_landing_open older:wave-y:T9 "$YW_CAR" 3600)"
 ll_verb "$RY2" T1 --within 0
