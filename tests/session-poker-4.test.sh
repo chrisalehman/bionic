@@ -6397,8 +6397,6 @@ expect_contains "REON-4b …and at room=yes it lapses and the row is offered: no
 POKE_BOUND="$RON_BOUND_WAS"
 
 # ============================================================
-section "§REPORT: the report splits wait from run and prints the width, from the landing record alone (wave-37 T9; D8, AC-1.3, AC-3.2)"
-=======
 section "§REPORT: the report reads admission: wait is the time no run of the row was admitted, prove the admitted run time, rework the return-to-ready time, from the landing record alone (wave-38 T7; REQ-6 AC-6.4; D22; wave-37 T9's split restated)"
 # ============================================================
 #
