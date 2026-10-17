@@ -1298,9 +1298,9 @@ THREE_EOF
 expect_eq "14.1 a Step-5 row threaded to one Step-4 row of four validates clean (rc 0)" "0" \
   "$(call_rc units_validate "$SANDBOX/three-missing.md")"
 expect_eq "14.2 …and it is ready on its own deps: T2 landed, the open T5 is not its prerequisite" "yes" \
-  "$(call units_ready "$SANDBOX/three-missing.md" 5 | grep -qx T9 && echo yes || echo no)"
+  "$(grep -qx T9 <<<"$(call units_ready "$SANDBOX/three-missing.md" 5)" && echo yes || echo no)"
 expect_eq "14.3 …beside T5, the open build row, which is ready too" "yes" \
-  "$(call units_ready "$SANDBOX/three-missing.md" 5 | grep -qx T5 && echo yes || echo no)"
+  "$(grep -qx T5 <<<"$(call units_ready "$SANDBOX/three-missing.md" 5)" && echo yes || echo no)"
 # THE OLD MESSAGE IS GONE FROM THE LIBRARY, and so is the program that computed it: neither the
 # transitive arm's words nor `_units_graph_awk` survive in units.sh (the shipped file is read,
 # and its own `units_validate` definition proves the read found the file).
@@ -1598,8 +1598,8 @@ expect_eq "17.15 …the late row and the floor are both ready; the chain behind 
   "$(printf 'T11\nT90')" "$(call units_ready "$SANDBOX/added11.md" 5)"
 expect_eq "17.16 …and the chain's waits are its own deps, in units_edges" "yes yes" \
   "$(E="$(call units_edges "$SANDBOX/added11.md")"; printf '%s %s' \
-     "$(printf '%s\n' "$E" | grep -qxF "T90$(printf '\t')T91$(printf '\t')T90" && echo yes || echo no)" \
-     "$(printf '%s\n' "$E" | grep -qxF "T91$(printf '\t')T92$(printf '\t')T91" && echo yes || echo no)")"
+     "$(grep -qxF "T90$(printf '\t')T91$(printf '\t')T90" <<<"$E" && echo yes || echo no)" \
+     "$(grep -qxF "T91$(printf '\t')T92$(printf '\t')T91" <<<"$E" && echo yes || echo no)")"
 expect_eq "17.17 …with no edge out of the late row T11" "" \
   "$(call units_edges "$SANDBOX/added11.md" | awk -F'\t' '$1 == "T11"')"
 
@@ -2104,7 +2104,7 @@ section "READS — wave-26 T2: a row declares what it reads; an empty cell takes
 # `head` is written by every open row with a path outside `.bionic/`.
 TAB="$(printf '\t')"
 # has_line <text> <line> -> yes when <line> is one whole line of <text>.
-has_line() { if printf '%s\n' "$1" | grep -qxF -- "$2"; then printf yes; else printf no; fi; }
+has_line() { if grep -qxF -- "$2" <<<"$1"; then printf yes; else printf no; fi; }
 
 # A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A settled
 # `proof:regression` read with no open writer is satisfied when lib/proof.sh `proof_state` answers
@@ -3286,10 +3286,10 @@ CYC="$(printf '%s\n' "$V" | grep -F 'read cycle')"
 expect_eq "HARDEN.F3 a cycle of two path reads is refused" "1" "$VRC"
 expect_nonempty "HARDEN.F3b …by a line that says read cycle" "$CYC"
 expect_eq "HARDEN.F3c …naming both rows on it" "yes yes" \
-  "$(printf '%s %s' "$(printf '%s' "$CYC" | grep -qw T1 && echo yes || echo no)" \
-     "$(printf '%s' "$CYC" | grep -qw T2 && echo yes || echo no)")"
+  "$(printf '%s %s' "$(grep -qw T1 <<<"$CYC" && echo yes || echo no)" \
+     "$(grep -qw T2 <<<"$CYC" && echo yes || echo no)")"
 expect_eq "HARDEN.F3d …and not the row that only waits behind it" "no" \
-  "$(printf '%s' "$CYC" | grep -qw T3 && echo yes || echo no)"
+  "$(grep -qw T3 <<<"$CYC" && echo yes || echo no)"
 hard_plan "$SANDBOX/f3-bang.md" "" \
   '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/x.sh! | approval:plan, lib/y.sh | pending |' \
   '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/y.sh, lib/x.sh |  | pending |'
@@ -3297,8 +3297,8 @@ V="$(call units_validate "$SANDBOX/f3-bang.md")"; VRC="$(call_rc units_validate 
 CYC="$(printf '%s\n' "$V" | grep -F 'read cycle')"
 expect_eq "HARDEN.F3e a cycle closed by an unmergeable hold is refused" "1" "$VRC"
 expect_eq "HARDEN.F3f …naming both rows" "yes yes" \
-  "$(printf '%s %s' "$(printf '%s' "$CYC" | grep -qw T1 && echo yes || echo no)" \
-     "$(printf '%s' "$CYC" | grep -qw T2 && echo yes || echo no)")"
+  "$(printf '%s %s' "$(grep -qw T1 <<<"$CYC" && echo yes || echo no)" \
+     "$(grep -qw T2 <<<"$CYC" && echo yes || echo no)")"
 # No worktree column: an active row owes no tree there (§12), so the status is the one change.
 sed 's/| approval:plan, lib\/b.sh | pending |/| approval:plan, lib\/b.sh | active |/' \
   "$SANDBOX/f3-reads.md" > "$SANDBOX/f3-active.md"
