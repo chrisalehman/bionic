@@ -598,6 +598,11 @@ sha_of() {
   if [ -f "$1" ]; then cksum < "$1" | tr -d ' '; else printf 'absent'; fi
 }
 
+# sc_strip <continuation> -> the file without its `## Scorecard` section (wave-38 T15): close-out adds that section to a
+# continuation that exists, so a row about the rest of the file reads it with the section taken out, and the section is
+# asserted on its own (§SCORECARD)
+sc_strip() { awk '/^## / { s = ($0 == "## Scorecard") } !s' "$1"; }
+
 # branch_exists <project> <branch> -> yes|no
 branch_exists() {
   if fixture_git "$1" rev-parse --verify --quiet "refs/heads/$2" >/dev/null 2>&1; then
@@ -1513,7 +1518,7 @@ expect_eq "78.3a: check no longer refuses for the missing shipped table" "no" \
 run_close "$T78C" run
 expect_eq "78.3b: run closes rc 0" "0" "$CO_RC"
 expect_eq "78.3c: …the epic plan now has a shipped table holding the wave 01 row" "1" "$(rows_with_wave "$T78C/$EPIC_REL" shipped 01)"
-expect_eq "78.3d: …and the planned table still holds its wave 09 row, and no wave 01 row" "1/0" \
+expect_eq "78.3d: …and the planned table keeps its rows as they were (its own wave 09 and wave 01 rows, no second 01)" "1/1" \
   "$(rows_with_wave "$T78C/$EPIC_REL" planned 09)/$(rows_with_wave "$T78C/$EPIC_REL" planned 01)"
 expect_eq "78.3e: …the plan reads closed" "1" "$(run_open_rc "$T78C/$PLAN_REL")"
 
@@ -1968,7 +1973,9 @@ run_close "$PZ" run
 CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
   "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
-  "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
+  "$CO_RC|$(sc_strip "$PZ/$CONT_REL" | tr '\n' '|')"
+expect_eq "CARRY-29b …and the ## Scorecard section is added once, after ## Governed by (wave-38 T15)" "1|yes" \
+  "$(/usr/bin/grep -c '^## Scorecard$' "$PZ/$CONT_REL" | tr -d ' ')|$(awk '/^## Governed by$/ { a = NR } /^## Scorecard$/ { b = NR } /^## Resume instruction$/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-inherit-mut.XXXXXX")"
@@ -1993,7 +2000,7 @@ rm -rf "$CARRY_MUT"
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-merge-mut.XXXXXX")"
 mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
 ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"
-sed 's/^      co_cont_merge "\$missing"$/      :/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
+sed 's/^      co_cont_write "## Deferrals" "\$missing" lines$/      :/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
 expect_eq "CARRY-mut6 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
 PR="$(mk_fixture carry18)"; advance_to "$PR" 8
@@ -2289,8 +2296,8 @@ mkdir -p "$PHE4/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Governed by\n\ngoverned-by: installed 0.0.0, typed by a person\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
 HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
 run_close "$PHE4" run
-expect_eq "HH-12 the heading and the line already there (and a governed-by line, wave-36 T2): run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
-  "$CO_RC/$(cksum < "$PHE4/$CONT_REL")/$(hh_count "$PHE4/$CONT_REL")"
+expect_eq "HH-12 the heading and the line already there (and a governed-by line, wave-36 T2): run exits 0, the file is byte for byte as it was but for the ## Scorecard section (wave-38 T15), the line once" "0/$HHE_CK4/1/1" \
+  "$CO_RC/$(sc_strip "$PHE4/$CONT_REL" | cksum)/$(hh_count "$PHE4/$CONT_REL")/$(/usr/bin/grep -c '^## Scorecard$' "$PHE4/$CONT_REL" | tr -d ' ')"
 
 # the mutation arms: a continuation template without the section, and a fold that counts a line it should not
 HH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-hh-mut.XXXXXX")"
@@ -3073,7 +3080,7 @@ expect_eq "HK-2 …and close-out's card prints the same line" "$HK_WANT" "$(prin
 # ============================================================
 section "§FENCE — wave-36 T14 (D13; C38): a line merged into a section that is one fenced list goes inside the fence"
 # ============================================================
-# `co_cont_merge` added the owed lines after the section's last non-blank line, and a closing fence is such a line, so
+# `co_cont_merge` (co_cont_write's lines mode since wave-38 T15) added the owed lines after the section's last non-blank line, and a closing fence is such a line, so
 # a line merged into close-out's own fenced sections (## Inherited debt, ## Governed by, ## Hand-holds) landed under
 # the fence, outside the list it belongs to (research-plan-and-readings.md §C38, probe-c38-c21.log). The rule now:
 # when the section is one fenced list (its first and last content lines are the fence of its one fenced block), the
@@ -3325,6 +3332,8 @@ done
 # step-line 9: accepted on a parked plan, refused as close-out's on an unparked one
 PK_SID="closeout-park-sid"
 PPS="$(park_fixture parked3 wake)"
+# the `- Step 4:` line every plan past Step 4 carries: step-line's dry commit judges a writer's copy at current: 4 (§LANDS)
+awk '/^- Step 7:/ { print "- Step 4: implement: opened 2026-09-14T00:10Z" } { print }' "$PPS/$PLAN_REL" > "$PPS/pk.tmp" && mv "$PPS/pk.tmp" "$PPS/$PLAN_REL"
 lands_bind "$PPS" "$PK_SID"
 expect_eq "PK-12 precondition: the session is bound to the parked plan" "0" "$LP_RC"
 lands_poker "$PPS" "$PK_SID" step-line 9 "parked on wave/01-fixture — $PK_WHY"

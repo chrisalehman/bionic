@@ -43,9 +43,11 @@ debt_line_ok() {
 # `proof_debt_ledger_path`; header and blank lines skipped), in ledger order:
 #
 #     ok<TAB><the carried line>     an unburned item, rendered in the grammar and parsing
-#     bad<TAB><the ledger line>     a line that is no item (six ` | ` cells, `raised-by `, `touches <N>`, the
+#     bad<TAB><the ledger line>     a table row that is no item (six ` | ` cells, `raised-by `, `touches <N>`, the
 #                                   shape lib/proof.sh `proof_debt_items` reads) or whose carried line would
 #                                   not parse, as written in the ledger so a refusal can name it
+#     skip<TAB><n><TAB><the line>   a line that is no table row at all, carrying no ` | ` (prose), with its
+#                                   line number: never an item, never a refusal (wave-38 T15; AC-4.4)
 #
 # and nothing for a burned item, which is not carried. Exit 0; nothing printed for no ledger.
 debt_carry_lines() {
@@ -54,6 +56,7 @@ debt_carry_lines() {
     BEGIN { re = ENVIRON["DEBT_LINE_ERE"]; w = ENVIRON["DEBT_FROM"] }
     { sub(/\r$/, "") }
     /^#/ || NF == 0 { next }
+    index($0, " | ") == 0 { print "skip\t" NR "\t" $0; next }
     {
       if (split($0, c, / \| /) != 6 || index(c[4], "raised-by ") != 1 || c[5] !~ /^touches [0-9]+$/) { print "bad\t" $0; next }
       if (index(c[6], "burned ") == 1) next

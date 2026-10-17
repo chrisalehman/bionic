@@ -467,6 +467,39 @@ plan_unreadable() {
 
 # run_open <plan-path> -> exit 0 iff THAT ONE FILE reads as an open run. Silent both ways.
 #
+# A PARKED RUN (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit `## Wake Note` (steps/8.md): a plan is
+# parked when it carries a flush-left `## Wake Note` whose first non-blank body line is not `(none)` (with no body,
+# when its heading carries a title), or a flush-left `parked: <why>` under `## SDLC State`. Fenced text is skipped. The
+# empty template section older plans carry (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
+# closes a parked plan without the merge act, and session-poker.sh `step-line 9` is accepted on one.
+# plan_parked_why <plan> -> the reason (the parked: value, else the Wake Note's first body line, else its heading's
+# title), rc 0; rc 1, nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
+plan_parked_why() {
+  [ -f "${1:-}" ] || return 1
+  awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / {
+      sec = ""
+      if ($0 ~ /^## SDLC State[ \t]*$/) sec = "s"
+      else if ($0 ~ /^## Wake Note([ \t].*)?$/) { sec = "w"; if (title == "") { t = $0; sub(/^## Wake Note[ \t—:-]*/, "", t); title = t } }
+      next
+    }
+    sec == "s" && pk == "" && /^parked:[ \t]*[^ \t]/ { v = $0; sub(/^parked:[ \t]*/, "", v); pk = v }
+    sec == "w" && !wseen && NF {
+      wseen = 1; v = $0; sub(/^[ \t]*(- )?/, "", v)
+      if (tolower(v) !~ /^\(?none\)?\.?$/) wk = v; else wnone = 1
+    }
+    END {
+      r = pk
+      if (r == "") r = wk
+      if (r == "" && !wnone) r = title
+      sub(/[ \t]+$/, "", r); gsub(/\|/, "/", r)
+      if (r == "") exit 1
+      print r
+    }' "$1" 2>/dev/null
+}
+
 # THE VERDICT MOVED HERE, UNCHANGED (wave-session-bound-run S1, 2026-09-04). Until this wave
 # the open/closed decision was reachable only through `active_run <root>`, which picks the
 # file for you: the newest plan in the root. Two engaged sessions in one repository therefore

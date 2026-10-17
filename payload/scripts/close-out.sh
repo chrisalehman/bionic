@@ -261,6 +261,17 @@ WORKING="$(plan_working_branch "$PLAN")"
 CURRENT="$(sdlc_header current "$SECTION")"
 STEP_REFUSAL="the plan reads current: ${CURRENT:-<none>} — advance the plan to Step 8 first"
 
+# A PARKED WAVE IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit
+# `## Wake Note` (steps/8.md): a plan carrying a flush-left `## Wake Note` whose body is not empty and not the old
+# template's `(none)`, or a flush-left `parked: <why>` under `## SDLC State`, is parked. `run` then performs the tail
+# without the merge: no merge readback, no rows landed by a merge, no branch census and no tree or branch deleted (the
+# work is kept), no archive move and no delivery notice; the Step-9 line reads `delivered: parked on <branch> @ <sha>`,
+# the continuation, the epic row and the closed handoff say parked, where and why. Everything else stands: the step,
+# the facts, the gate. The rule is lib/run.sh `plan_parked_why`, the one reader session-poker.sh `step-line 9` asks too.
+PARKED_WHY=""
+PARKED=no
+if PARKED_WHY="$(plan_parked_why "$PLAN")"; then PARKED=yes; fi
+
 # ─── Preflight ───────────────────────────────────────────────────────────────
 #
 # AC-4.4 FIRST, before any tool is even looked for: a closed run is not a run this script
@@ -327,6 +338,10 @@ fi
 # ─── Act 1: merge ────────────────────────────────────────────────────────────
 
 MERGE_LINE=""
+# co_parked_merge_line -> the merge key's value on a parked plan: where the work is, and that nothing merged it
+co_parked_merge_line() {
+  printf 'parked on %s @ %s — not merged into %s (%s)' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$INTEGRATION" "$PARKED_WHY"
+}
 act_merge() {
   local ws is
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
@@ -539,6 +554,25 @@ co_hand_holds() {  # -> sets CO_HH_LINE
   out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
+}
+# THE SCORECARD, READ BEFORE THE WIPE (wave-38 T15; D26). `landing-report --scorecard` prints four lines, each against
+# its target (human stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed,
+# human-wait minutes), then the sitrep's three indicator lines (hooks/session-poker.sh `scorecard_report` owns the
+# rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads the lines before the wipe into
+# CO_SC_LINES and the card and the continuation print that one reading. A report that cannot be read is a sentence.
+CO_SC_LINES=""
+co_scorecard() {  # -> sets CO_SC_LINES
+  local out
+  out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --scorecard "$PLAN" 2>/dev/null)" || out=""
+  if [ -n "$out" ]; then CO_SC_LINES="$out"
+  else CO_SC_LINES="scorecard: not read — session-poker.sh landing-report --scorecard $PLAN could not be read"; fi
+}
+co_scorecard_card() {  # -> the reading on the card, one `scorecard: ` line each
+  [ -n "$CO_SC_LINES" ] || co_scorecard
+  case "$CO_SC_LINES" in
+    "scorecard: not read "*) printf '%s\n' "$CO_SC_LINES" ;;
+    *) printf '%s\n' "$CO_SC_LINES" | sed 's/^/scorecard: /' ;;
+  esac
 }
 # WHAT GOVERNED THE RUN, READ BEFORE THE WIPE (wave-36 T2; D7, REQ-1 AC-1.4, ADR-055). hooks/session-start.sh writes
 # one load record per session start under the project's tmp (wave-36 T1): `root=`, `commit=` when the root is a
@@ -807,14 +841,23 @@ co_debts() {
   debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
 }
 
-# co_debt_refusal -> the sentence naming the first debt.md line the continuation could not carry
-# (debt_carry_lines' `bad`), or nothing when every line parses. `run` refuses on it; `check` says it would.
+# co_debt_refusal -> the sentence naming the first debt.md table row the continuation could not carry
+# (debt_carry_lines' `bad`), or nothing when every row parses. `run` refuses on it; `check` says it would. A line
+# that is no table row at all (prose, debt_carry_lines' `skip`) is not refused: co_debt_notes names it (wave-38 T15;
+# AC-4.4), and it is never carried.
 co_debt_refusal() {
   local led bad
   led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
   bad="$(debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
   [ -n "$bad" ] || return 0
   printf '%s carries a line that does not parse as a debt line: %s' "${led#"$(docs_root "$ROOT")"/}" "$bad"
+}
+
+# co_debt_notes -> one `close-out: debt.md:<n> skipped — not a ledger row` line per prose line of the ledger, in order
+co_debt_notes() {
+  local led
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
+  debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' -v f="${led##*/}" '$1 == "skip" { printf "close-out: %s:%s skipped — not a ledger row\n", f, $2 }'
 }
 
 # THE CARD'S DEBT LINE (wave-30 T22; P2, AC-11.4): `debt: touched <N> · burned <M>` for the run, N the
@@ -893,15 +936,11 @@ co_deferrals_section() {
 # deferrals, then what it carries — that is not under the first `## Deferrals` heading outside a fence,
 # byte for byte, is added at the end of that section, each once; what a person wrote there stays. A
 # continuation holding every line is left as it stands.
-co_cont_missing() {  # -> the lines owed that are not under the heading yet, in order
-  CO_WANT="$(co_deferrals)${CO_CARRIED:+
-$CO_CARRIED}" awk '
-    BEGIN { n = split(ENVIRON["CO_WANT"], w, "\n") }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    !fence && !first && $0 == "## Deferrals" { first = insec = 1; next }
-    !fence && /^## / { insec = 0; next }
-    insec && !fence { have[$0] = 1 }
-    END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !seen[w[i]]++) print w[i] }' "$CONT"
+co_cont_missing() {  # -> the lines owed that are not under the heading yet, in order: co_cont_missing_under's reading
+  # of ## Deferrals (wave-38 T15 burns debt continuation-section-reader: one section reader, not two)
+  # ## Deferrals is read unfenced (A-T14-4), so a line inside a fence there is not counted as present.
+  CO_UNFENCED=1 co_cont_missing_under "## Deferrals" "" "$(co_deferrals)${CO_CARRIED:+
+$CO_CARRIED}"
 }
 # A SECTION THAT IS ONE FENCED LIST TAKES THE LINES INSIDE ITS FENCE (wave-36 T14; D13, C38). The lines went after the
 # section's last non-blank line, and a closing fence is one, so a line owed to close-out's own fenced sections
@@ -910,21 +949,32 @@ $CO_CARRIED}" awk '
 # other section takes them after its last non-blank line, as before. ## Deferrals is read unfenced by every reader
 # (card.sh's inherited reader, `debt adopt`, `co_cont_missing` above), so its lines always go after: a carried line in a
 # fence there is one the next run never reads (A-T14-4).
-co_cont_merge() {  # <lines> [<heading>] -> $CONT with the lines added at the end of that section (## Deferrals by default)
-  local tmp="$CONT.close-out.$$" head="${2:-## Deferrals}"
-  CO_ADD="$1" CO_HEAD="$head" awk '
+# ONE WRITER FOR BOTH ADDS (wave-38 T15 burns debt continuation-section-writer). `co_cont_write <heading> <text> lines`
+# adds the text at the end of the heading's section by the rule above; `co_cont_write <heading> <text> section` adds the
+# text as a new section after the end of the heading's section, a blank line before it and the section's own trailing
+# blank lines kept after it. Both walk the file once, holding the section's lines until the next unfenced `## ` heading
+# or the end; a heading the file does not carry is a refusal, nothing written.
+co_cont_write() {  # <heading> <text> <lines|section> -> $CONT with the text added
+  local tmp="$CONT.close-out.$$" why="could not add to $1 in the continuation at $CONT"
+  [ "$3" = lines ] || why="could not add a section to the continuation at $CONT"
+  CO_ADD="$2" CO_HEAD="$1" CO_MODE="$3" awk '
     function isfence(l) { return l ~ /^[[:space:]]*```/ }
-    function fin(more,   i, f, l, nf) {
-      f = 0; l = 0; nf = 0
+    function fin(more,   i, f, l, nf, add) {
+      add = ENVIRON["CO_ADD"]; f = 0; l = 0; nf = 0
       for (i = 1; i <= nb; i++) { if (isfence(buf[i])) nf++; if (buf[i] ~ /^[[:space:]]*$/) continue; if (!f) f = i; l = i }
-      if (!l) { print ""; print ENVIRON["CO_ADD"]; if (more) print "" }
+      if (ENVIRON["CO_MODE"] == "section") {
+        for (i = 1; i <= l; i++) print buf[i]
+        print ""; print add
+        for (i = l + 1; i <= nb; i++) print buf[i]
+        if (more && l == nb) print ""
+      } else if (!l) { print ""; print add; if (more) print "" }
       else if (ENVIRON["CO_HEAD"] != "## Deferrals" && nf == 2 && f < l && isfence(buf[f]) && isfence(buf[l])) {
         for (i = 1; i < l; i++) print buf[i]
-        print ENVIRON["CO_ADD"]
+        print add
         for (i = l; i <= nb; i++) print buf[i]
       } else {
         for (i = 1; i <= l; i++) print buf[i]
-        print ENVIRON["CO_ADD"]
+        print add
         for (i = l + 1; i <= nb; i++) print buf[i]
       }
       insec = 0; done = 1; nb = 0
@@ -934,12 +984,10 @@ co_cont_merge() {  # <lines> [<heading>] -> $CONT with the lines added at the en
     !insec { print; if (!fence && $0 == ENVIRON["CO_HEAD"]) insec = 1; next }
     !fence && /^## / { fin(1); print; next }
     { buf[++nb] = $0 }
-    END { if (!done && insec) fin(0) }' "$CONT" > "$tmp" 2>/dev/null
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    _co_refuse "could not add to $head in the continuation at $CONT"
-  fi
-  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add to $head in the continuation at $CONT"; }
+    END { if (!done && insec) fin(0); if (!done) exit 3 }' "$CONT" > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; _co_refuse "$why"; }
+  [ -s "$tmp" ] || { rm -f "$tmp"; _co_refuse "$why"; }
+  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "$why"; }
 }
 co_added_phrase() {  # <lines> -> "<n> deferred line(s)"
   local n
@@ -957,34 +1005,15 @@ co_added_ids() {  # <lines> -> the ids, space-joined
 # text is not touched. The hand-holds line counts as there when the section holds ANY `hand-holds: ` line: a second
 # close-out reads a different count (the roster is wiped), and a second, contradicting line would be worse than the
 # first reading standing (A-T33-1). The inherited lines match byte for byte, as the deferrals do.
-co_cont_missing_under() {  # <heading> <prefix|""> <wanted lines> -> the wanted lines the section lacks, in order
-  CO_WANT="$3" CO_HEAD="$1" CO_PFX="$2" awk '
-    BEGIN { n = split(ENVIRON["CO_WANT"], w, "\n"); p = ENVIRON["CO_PFX"] }
+co_cont_missing_under() {  # <heading> <prefix|""> <wanted lines> -> the wanted lines the section lacks, in order;
+  # CO_UNFENCED=1 counts only the section's unfenced lines as present
+  CO_WANT="$3" CO_HEAD="$1" CO_PFX="$2" CO_UNF="${CO_UNFENCED:-}" awk '
+    BEGIN { n = split(ENVIRON["CO_WANT"], w, "\n"); p = ENVIRON["CO_PFX"]; unf = (ENVIRON["CO_UNF"] == "1") }
     /^[[:space:]]*```/ { fence = !fence; next }
     !fence && !first && $0 == ENVIRON["CO_HEAD"] { first = insec = 1; next }
     !fence && /^## / { insec = 0; next }
-    insec { have[$0] = 1; if (p != "" && index($0, p) == 1) pfx = 1 }
+    insec && !(unf && fence) { have[$0] = 1; if (p != "" && index($0, p) == 1) pfx = 1 }
     END { for (i = 1; i <= n; i++) if (w[i] != "" && !have[w[i]] && !pfx && !seen[w[i]]++) print w[i] }' "$CONT"
-}
-co_cont_insert() {  # <anchor heading> <section text> -> $CONT with the section after the end of the anchor's section
-  local tmp="$CONT.close-out.$$"
-  CO_TEXT="$2" CO_HEAD="$1" awk '
-    function fin(more,   i) {
-      print ""; print ENVIRON["CO_TEXT"]
-      for (i = 0; i < blanks; i++) print ""
-      if (more && !blanks) print ""
-      insec = 0; done = 1; blanks = 0
-    }
-    /^[[:space:]]*```/ { fence = !fence }
-    done { print; next }
-    !insec { print; if (!fence && $0 == ENVIRON["CO_HEAD"]) insec = 1; next }
-    !fence && /^## / { fin(1); print; next }
-    NF == 0 { blanks++; next }
-    { for (i = 0; i < blanks; i++) print ""; blanks = 0; print }
-    END { if (!done && insec) fin(0); if (!done) exit 3 }' "$CONT" > "$tmp" 2>/dev/null \
-    || { rm -f "$tmp"; _co_refuse "could not add a section to the continuation at $CONT"; }
-  [ -s "$tmp" ] || { rm -f "$tmp"; _co_refuse "could not add a section to the continuation at $CONT"; }
-  mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "could not add a section to the continuation at $CONT"; }
 }
 co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would be (check) added; empty when nothing
   local phr="" lines miss n mode="$1"
@@ -992,25 +1021,25 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
   [ -n "$CO_HH_LINE" ] || co_hand_holds
   if ! co_cont_has_heading "## Hand-holds"; then
     phr="the ## Hand-holds section"
-    [ "$mode" != write ] || co_cont_insert "## Deferrals" "$(co_hand_holds_section)"
+    [ "$mode" != write ] || co_cont_write "## Deferrals" "$(co_hand_holds_section)" section
   else
     miss="$(co_cont_missing_under "## Hand-holds" "hand-holds: " "$CO_HH_LINE")"
     if [ -n "$miss" ]; then
       phr="the hand-holds line under ## Hand-holds"
-      [ "$mode" != write ] || co_cont_merge "$miss" "## Hand-holds"
+      [ "$mode" != write ] || co_cont_write "## Hand-holds" "$miss" lines
     fi
   fi
   lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
   if [ -n "$lines" ]; then
     if ! co_cont_has_heading "## Inherited debt"; then
       phr="${phr:+$phr and }the ## Inherited debt section"
-      [ "$mode" != write ] || co_cont_insert "## Hand-holds" "$(co_inherited_section)"
+      [ "$mode" != write ] || co_cont_write "## Hand-holds" "$(co_inherited_section)" section
     else
       miss="$(co_cont_missing_under "## Inherited debt" "" "$lines")"
       if [ -n "$miss" ]; then
         n="$(printf '%s\n' "$miss" | wc -l | tr -d ' ')"
         phr="${phr:+$phr and }$n inherited line$([ "$n" = 1 ] || echo s) under ## Inherited debt"
-        [ "$mode" != write ] || co_cont_merge "$miss" "## Inherited debt"
+        [ "$mode" != write ] || co_cont_write "## Inherited debt" "$miss" lines
       fi
     fi
   fi
@@ -1020,13 +1049,21 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
   [ -n "$CO_GOV_LINES" ] || co_governed
   if ! co_cont_has_heading "## Governed by"; then
     phr="${phr:+$phr and }the ## Governed by section"
-    [ "$mode" != write ] || co_cont_insert "## Hand-holds" "$(co_governed_section)"
+    [ "$mode" != write ] || co_cont_write "## Hand-holds" "$(co_governed_section)" section
   else
     miss="$(co_cont_missing_under "## Governed by" "governed-by: " "$CO_GOV_LINES")"
     if [ -n "$miss" ]; then
       phr="${phr:+$phr and }the governed-by lines under ## Governed by"
-      [ "$mode" != write ] || co_cont_merge "$miss" "## Governed by"
+      [ "$mode" != write ] || co_cont_write "## Governed by" "$miss" lines
     fi
+  fi
+  # THE SCORECARD (wave-38 T15; D26): the hand-holds' road, after ## Governed by (so last, as the template puts it). It
+  # counts as there when the file holds the heading at all: a
+  # second close reads no roster (the first one's wipe took it), and its line must not contradict the first reading.
+  [ -n "$CO_SC_LINES" ] || co_scorecard
+  if ! co_cont_has_heading "## Scorecard"; then
+    phr="${phr:+$phr and }the ## Scorecard section"
+    [ "$mode" != write ] || co_cont_write "## Governed by" "$(co_scorecard_section)" section
   fi
   CO_SEC_MSG="$phr"
 }
@@ -1058,6 +1095,17 @@ co_hand_holds_section() {
   case "$CO_HH_LINE" in
     "hand-holds: not read "*) printf '%s\n' "$CO_HH_LINE" ;;
     *) printf '```\n%s\n```\n' "$CO_HH_LINE" ;;
+  esac
+}
+
+# co_scorecard_section -> `## Scorecard` and the lines `co_scorecard` read before the wipe, fenced as the hand-holds are;
+# a reading that failed is its sentence, unfenced.
+co_scorecard_section() {
+  [ -n "$CO_SC_LINES" ] || co_scorecard
+  printf '## Scorecard\n\n'
+  case "$CO_SC_LINES" in
+    "scorecard: not read "*) printf '%s\n' "$CO_SC_LINES" ;;
+    *) printf '```\n%s\n```\n' "$CO_SC_LINES" ;;
   esac
 }
 
@@ -1139,18 +1187,28 @@ co_patrol_sentence() {
 }
 
 continuation_template() {
-  local sha tasks regress reviews patrol inherited
+  local sha tasks regress reviews patrol inherited head resume ws
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   inherited="$(co_inherited_section)"
   tasks="$(co_task_count)"
   regress="$(co_regression_text)"
   reviews="$(co_reviews_text)"
   patrol="$(co_patrol_sentence)"
+  # A PARKED RUN SAYS SO IN ITS HEADER (wave-38 T15; AC-4.3): parked, where the work is, and why; nothing was merged.
+  if [ "$PARKED" = yes ]; then
+    ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
+    head="Parked $NOW on \`$WORKING\` @ ${ws:-?}; the merge into \`$INTEGRATION\` ($INTEGRATION at $sha) was not made: $PARKED_WHY
+$tasks tasks, every one RED→GREEN; $regress."
+    resume="Resume from \`$WORKING\` @ ${ws:-?}: the run is parked, and its branch and worktrees are kept. Why: $PARKED_WHY"
+  else
+    head="Closed $NOW. $INTEGRATION at $sha. Wave branch \`$WORKING\` merged into
+\`$INTEGRATION\`: $tasks tasks, every one RED→GREEN; $regress."
+    resume="Nothing to resume: the run is delivered."
+  fi
   cat <<CONT_TEMPLATE
 # continuation — $WAVE_SLUG${RELEASE:+ ($RELEASE)}
 
-Closed $NOW. $INTEGRATION at $sha. Wave branch \`$WORKING\` merged into
-\`$INTEGRATION\`: $tasks tasks, every one RED→GREEN; $regress.
+$head
 $reviews
 
 ## Chris decides (one decision each)
@@ -1175,9 +1233,11 @@ $(co_governed_section)
 ${inherited:+
 $inherited
 }
+$(co_scorecard_section)
+
 ## Resume instruction
 
-Nothing to resume: the run is delivered.${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
+$resume${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
 this file is the wave-local copy.
 CONT_TEMPLATE
 }
@@ -1212,7 +1272,7 @@ act_continuation() {
     fi
     missing="$(co_cont_missing)"
     if [ -n "$missing" ]; then
-      co_cont_merge "$missing"
+      co_cont_write "## Deferrals" "$missing" lines
       CONT_LINE="$CONT_LINE, with $(co_added_phrase "$missing") added under ## Deferrals"
     fi
     co_cont_sections write
@@ -1309,11 +1369,14 @@ epic_row_missing() {
     printf 'the wave %s row of %s cannot be written whole: neither the spec nor the plan carries an adrs: line naming the ADRs this wave shipped (adr-<n> paths joined by " · ") — write "adrs: none" in the plan if it shipped none' "$WAVE_NUM" "${EPIC_PLAN##*/}"
     return 0
   fi
-  if ! git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1; then
-    printf 'the wave %s row of %s cannot be written whole: the integration branch %s has no commit to name as the SHA' "$WAVE_NUM" "${EPIC_PLAN##*/}" "$INTEGRATION"
+  if ! git -C "$ROOT" rev-parse --short "$(co_epic_branch)" >/dev/null 2>&1; then
+    printf 'the wave %s row of %s cannot be written whole: the branch %s has no commit to name as the SHA' "$WAVE_NUM" "${EPIC_PLAN##*/}" "$(co_epic_branch)"
   fi
   return 0
 }
+# co_epic_branch -> the branch the epic row names: the integration branch the merge reached, or on a parked plan the
+# working branch the work is kept on (wave-38 T15; AC-4.3)
+co_epic_branch() { if [ "$PARKED" = yes ]; then printf '%s' "$WORKING"; else printf '%s' "$INTEGRATION"; fi; }
 
 epic_row() {
   local spec sha adrs missing
@@ -1327,10 +1390,23 @@ epic_row() {
   # The version cell is the plan's `release:`, and `—` (the table's own empty cell) when the plan names none.
   missing="$(epic_row_missing)"
   [ -z "$missing" ] || _co_refuse "$missing"
-  sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  sha="$(git -C "$ROOT" rev-parse --short "$(co_epic_branch)" 2>/dev/null)"
   adrs="$(epic_adrs_cell)"
-  printf '| %s | %s | `%s` | `%s`, `.requirements.md` | %s | %s, %s @ %s |\n' \
-    "$WAVE_NUM" "${RELEASE:-—}" "${PLAN##*/}" "$spec" "$adrs" "$TODAY" "$INTEGRATION" "$sha"
+  # The shipped cell of a parked wave reads `parked <date>, <working branch> @ <sha>` (wave-38 T15; AC-4.3).
+  printf '| %s | %s | `%s` | `%s`, `.requirements.md` | %s | %s%s, %s @ %s |\n' \
+    "$WAVE_NUM" "${RELEASE:-—}" "${PLAN##*/}" "$spec" "$adrs" "$([ "$PARKED" = yes ] && printf 'parked ')" "$TODAY" "$(co_epic_branch)" "$sha"
+}
+
+# A MISSING SHIPPED TABLE IS ADDED, NEVER REFUSED (wave-38 T15; AC-4.4). An epic plan with no `| wave |` table carrying a
+# `shipped` cell gets one at its end, under `## Waves — shipped`: the header and its rule line, in this epic's own shape,
+# and the row is then appended to it as to any shipped table. The epic's other text is kept.
+EPIC_SHIPPED_HEADER='| wave | version | plan | spec / requirements | ADRs | shipped |'
+epic_table_add() {  # -> the epic plan with the shipped table's header at its end; rc 1 not written
+  local tmp="$EPIC_PLAN.close-out-table.$$"
+  { awk '{ print }' "$EPIC_PLAN"; printf '\n## Waves — shipped\n\n%s\n|---|---|---|---|---|---|\n' "$EPIC_SHIPPED_HEADER"; } > "$tmp" 2>/dev/null \
+    && [ -s "$tmp" ] && mv "$tmp" "$EPIC_PLAN" 2>/dev/null && return 0
+  rm -f "$tmp" 2>/dev/null
+  return 1
 }
 
 epic_has_row() {
@@ -1347,15 +1423,22 @@ act_epic() {
     EPIC_LINE="wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/} — left as it stands"
     return 0
   fi
-  local tmp="$EPIC_PLAN.close-out.$$"
-  epic_shipped_table "$EPIC_PLAN" "$(epic_row)" > "$tmp"
+  local tmp="$EPIC_PLAN.close-out.$$" row added=""
+  row="$(epic_row)"
+  if [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
+    epic_table_add || _co_refuse "could not add the shipped table to ${EPIC_PLAN##*/}"
+    [ -n "$(epic_shipped_table "$EPIC_PLAN")" ] || _co_refuse "the shipped table did not land in ${EPIC_PLAN##*/}"
+    added="the shipped table added to ${EPIC_PLAN##*/}, then "
+  fi
+  epic_shipped_table "$EPIC_PLAN" "$row" > "$tmp"
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
     _co_refuse "could not rewrite ${EPIC_PLAN##*/} to add the wave $WAVE_NUM row"
   fi
   mv "$tmp" "$EPIC_PLAN"
   epic_has_row || _co_refuse "the wave $WAVE_NUM row did not land in ${EPIC_PLAN##*/}"
-  EPIC_LINE="wave $WAVE_NUM appended to ${EPIC_PLAN##*/}"
+  if [ -n "$added" ]; then EPIC_LINE="${added}wave $WAVE_NUM appended"
+  else EPIC_LINE="wave $WAVE_NUM appended to ${EPIC_PLAN##*/}"; fi
 }
 
 # ─── Act 8: the Patrol ───────────────────────────────────────────────────────
@@ -1378,8 +1461,10 @@ PATROL_LINE="CronDelete the bionic-patrol job, then: bash $(plugin_root)/hooks/s
 # it. A `delivered:` written onto a continuation line satisfies the gate and leaves the
 # run OPEN to every other reader in the fleet, forever.
 step8_block() {
+  local what="$WORKING merged into $INTEGRATION; the tail was performed by close-out.sh $VERSION"
+  [ "$PARKED" = no ] || what="$WORKING parked, not merged into $INTEGRATION; the tail was performed by close-out.sh $VERSION without the merge act"
   cat <<STEP8
-- Step 8: CLOSED $NOW — $WORKING merged into $INTEGRATION; the tail was performed by close-out.sh $VERSION
+- Step 8: CLOSED $NOW — $what
   merge: $MERGE_LINE
   worktree-removed: $WT_LINE
   cleanup: done
@@ -1390,20 +1475,40 @@ STEP8
 }
 
 step9_block() {
+  # A PARKED RUN'S DELIVERED LINE NAMES WHERE THE WORK IS (wave-38 T15; AC-4.3): `delivered: parked on <branch> @ <sha>`.
+  if [ "$PARKED" = yes ]; then
+    cat <<STEP9
+- Step 9: delivered: parked on $WORKING @ $(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?') — $PARKED_WHY ($NOW $WAVE_SLUG); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at $CONT_REL
+  attested-by: close-out.sh $VERSION
+STEP9
+    return 0
+  fi
   cat <<STEP9
 - Step 9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE} — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at $CONT_REL
   attested-by: close-out.sh $VERSION
 STEP9
 }
 
+# THE CLOSED FORM'S RESUME POINT AND BRANCH LINE (wave-38 T15; AC-4.3): a delivered run has nothing to resume; a parked
+# one resumes from its branch, which is kept. One writer for both, so the handoff and its readback agree.
+co_resume_point() {
+  if [ "$PARKED" = yes ]; then
+    printf 'resume point: PARKED on %s @ %s — %s' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$PARKED_WHY"
+  else
+    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$NOW" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
+  fi
+}
+co_branch_line() {
+  if [ "$PARKED" = yes ]; then printf 'branch: %s kept, not merged into %s; its worktrees are kept.' "$WORKING" "$INTEGRATION"
+  else printf 'branch: %s merged into %s.' "$WORKING" "$INTEGRATION"; fi
+}
+
 handoff_block() {
-  local main_sha
-  main_sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   cat <<HANDOFF
 ## Handoff
 
-- resume point: NONE — DELIVERED at $NOW; $INTEGRATION @ ${main_sha:-?}.
-- branch: $WORKING merged into $INTEGRATION.
+- $(co_resume_point)
+- $(co_branch_line)
 - patrol: $PATROL_LINE
 - continuation: $CONT_REL
 HANDOFF
@@ -1569,7 +1674,7 @@ write_plan_blocks() {
 
   # A plan that carried no `## Handoff` section gets one rather than silently losing the
   # act: the section is the run's own resume point, and its absence is not consent.
-  if ! grep -q 'resume point: NONE — DELIVERED at ' "$PLAN"; then
+  if ! grep -qF -- "$(co_resume_point)" "$PLAN"; then
     printf '\n%s\n' "$(handoff_block)" >> "$PLAN"
   fi
 
@@ -1578,7 +1683,7 @@ write_plan_blocks() {
   grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' "$PLAN" \
     || _co_refuse "the Step-9 delivered: line did not land in $PLAN"
   grep -qE '^current: 9$' "$PLAN" || _co_refuse "current: did not advance to 9 in $PLAN"
-  grep -q 'resume point: NONE — DELIVERED at ' "$PLAN" || _co_refuse "the handoff was not rewritten in $PLAN"
+  grep -qF -- "$(co_resume_point)" "$PLAN" || _co_refuse "the handoff was not rewritten in $PLAN"
 }
 
 # ─── The gate ────────────────────────────────────────────────────────────────
@@ -1671,7 +1776,15 @@ preview_block_lines() {
   MERGE_LINE="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
   wt="$(wt_branches | tr '\n' ',' | sed -E 's/,$//; s/,/, /g')"
   WT_LINE="${wt:-none}"
+  if [ "$PARKED" = yes ]; then MERGE_LINE="$(co_parked_merge_line)"; WT_LINE="$(co_parked_wt_line)"; fi
   TMP_LINE="$(tmp_count) entries under $TMP_DIR (not yet wiped)"
+}
+
+# co_parked_wt_line -> the worktree-removed key's value on a parked plan: nothing removed, the registered trees named
+co_parked_wt_line() {
+  local wt
+  wt="$(wt_branches | tr '\n' ',' | sed -E 's/,$//; s/,/, /g')"
+  printf 'none — parked, the work is kept%s' "${wt:+ ($wt)}"
 }
 
 # step9_present <file> -> 0 when `## SDLC State` carries a `Step 9:` line.
@@ -1698,9 +1811,8 @@ presence_missing() {
   case "$RELEASE" in
     *'|'*) printf 'the release: field of the plan holds a | (%s), which would split the version cell of the epic row; write the release without one' "$RELEASE"; return 0 ;;
   esac
-  if [ -f "$EPIC_PLAN" ] && [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
-    printf 'no | wave | table with a shipped column in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
-  elif [ -f "$EPIC_PLAN" ] && ! epic_has_row; then
+  # A MISSING SHIPPED TABLE IS NO LONGER A REFUSAL (wave-38 T15; AC-4.4): act_epic adds it (epic_table_add).
+  if [ -f "$EPIC_PLAN" ] && ! epic_has_row; then
     epic_row_missing
   fi
   return 0
@@ -1844,14 +1956,18 @@ do_check() {
   step9_present "$PLAN" || say 'step9: no Step 9 line in ## SDLC State — run writes `- Step 9: (pending)` with the Step-8 block'
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
+  if [ "$PARKED" = yes ]; then
+    verdict="parked ($PARKED_WHY)"
+  elif git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
     verdict="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
   else
     verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
   fi
   say "merge: $verdict"
   CO_LANDS="$(co_lands_rows)"
-  if [ -z "$CO_LANDS" ]; then
+  if [ "$PARKED" = yes ]; then
+    say "rows-landed: none — parked, no merge lands a row"
+  elif [ -z "$CO_LANDS" ]; then
     say "rows-landed: none — no open integrate or close row"
   elif [ -n "$(co_lands_refusal "$CO_LANDS")" ]; then
     say "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")"
@@ -1874,7 +1990,8 @@ do_check() {
   # `wt_count`, so `check` never goes silent on exactly the plans C4 found silent.
   wt_list="$(wt_branches)"
   wt_count="$(printf '%s\n' "$wt_list" | grep -c '[^[:space:]]')"
-  unreached="$(wt_unreached)"
+  unreached=""
+  [ "$PARKED" = yes ] || unreached="$(wt_unreached)"
   branches="$(printf '%s' "$wt_list" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
   wt_word="tree"; [ "$wt_count" = 1 ] || wt_word="trees"
   if [ "$wt_count" -eq 0 ]; then
@@ -1882,7 +1999,9 @@ do_check() {
   else
     wt_desc="${branches} (${wt_count} registered ${wt_word})"
   fi
-  if [ -n "$unreached" ]; then
+  if [ "$PARKED" = yes ]; then
+    say "worktree-removed: $(co_parked_wt_line)"
+  elif [ -n "$unreached" ]; then
     say "worktree-removed: ${wt_desc} WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
   else
     say "worktree-removed: ${wt_desc}"
@@ -1895,10 +2014,13 @@ do_check() {
   say "$CO_HH_LINE"
   co_governed
   say "$CO_GOV_LINES"
+  co_scorecard
+  co_scorecard_card
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
   say "$(co_debt_card)"
+  co_debt_notes
   CO_DEBT_BAD="$(co_debt_refusal)"
   [ -z "$CO_DEBT_BAD" ] || say "debt-lines: WOULD REFUSE — $CO_DEBT_BAD"
   if [ -f "$CONT" ]; then
@@ -1925,15 +2047,22 @@ do_check() {
     say "epic-row: wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/}"
   elif [ -n "$(epic_row_missing)" ]; then
     say "epic-row: WOULD REFUSE — $(epic_row_missing)"
+  elif [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
+    say "epic-row: $(epic_row) — no | wave | table with a shipped column in ${EPIC_PLAN##*/}: run adds the shipped table's header first"
   else
     say "epic-row: $(epic_row)"
   fi
   say "patrol: $PATROL_LINE"
-  say "handoff: would be rewritten to the closed form (resume point NONE)"
-  # THE ARCHIVE IS NAMED, NEVER ASKED. `archive_run` has no dry mode and this verb has no
-  # licence to move anything, so `check` reports the destination the binding fixed and
-  # leaves the verdict to `run`, which asks once the plan reads closed.
-  say "archived: archive_run would be asked for $PLANS_DIR into $(archive_root "$ROOT") once the plan reads closed"
+  if [ "$PARKED" = yes ]; then
+    say "handoff: would be rewritten to the closed form ($(co_resume_point))"
+    say "archived: not asked — the run is parked, not delivered; its plan stays where it is"
+  else
+    say "handoff: would be rewritten to the closed form (resume point NONE)"
+    # THE ARCHIVE IS NAMED, NEVER ASKED. `archive_run` has no dry mode and this verb has no
+    # licence to move anything, so `check` reports the destination the binding fixed and
+    # leaves the verdict to `run`, which asks once the plan reads closed.
+    say "archived: archive_run would be asked for $PLANS_DIR into $(archive_root "$ROOT") once the plan reads closed"
+  fi
 
   # THE GATE, ASKED TWICE, WRITING NOTHING BUT A SCRATCH COPY AND A SYNTHETIC MARKER, both
   # removed again.
@@ -1984,11 +2113,16 @@ do_run() {
   CO_DEBT_BAD="$(co_debt_refusal)"
   [ -z "$CO_DEBT_BAD" ] || _co_refuse "$CO_DEBT_BAD — nothing was done"
   # THE ROWS THE MERGE LANDS NEED THIS SESSION BOUND TO THIS PLAN (wave-36 T14; AC-7.7), asked before any act.
-  CO_LANDS="$(co_lands_rows)"
-  CO_LANDS_BAD="$(co_lands_refusal "$CO_LANDS")"
-  [ -z "$CO_LANDS_BAD" ] || _co_refuse "$CO_LANDS_BAD — nothing was done"
-  act_merge
-  refuse_unreached
+  # A PARKED PLAN IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; AC-4.3): no rows a merge lands, no merge readback, and
+  # no branch census, because nothing is deleted.
+  CO_LANDS=""
+  if [ "$PARKED" = no ]; then
+    CO_LANDS="$(co_lands_rows)"
+    CO_LANDS_BAD="$(co_lands_refusal "$CO_LANDS")"
+    [ -z "$CO_LANDS_BAD" ] || _co_refuse "$CO_LANDS_BAD — nothing was done"
+    act_merge
+    refuse_unreached
+  fi
   facts_judge
   if [ "$FACTS_RC" -ne 0 ]; then
     [ -n "$FACTS_LINES" ] && printf '%s\n' "$FACTS_LINES"
@@ -2001,16 +2135,24 @@ do_run() {
     _co_refuse "the commit gate would refuse the plan this run would write (rc=$PREFLIGHT_RC) — nothing was done: no branch deleted, no tmp wiped, no continuation or epic row written"
   fi
                     say "preflight: the commit gate allows the plan this run will write"
-  act_merge;        say "merge: $MERGE_LINE"
-  act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
-  act_worktrees;    say "worktree-removed: $WT_LINE"
+  if [ "$PARKED" = yes ]; then
+    MERGE_LINE="$(co_parked_merge_line)"; say "merge: $MERGE_LINE"
+    LANDS_LINE="none — parked, no merge lands a row"; say "rows-landed: $LANDS_LINE"
+    WT_LINE="$(co_parked_wt_line)"; say "worktree-removed: $WT_LINE"
+  else
+    act_merge;      say "merge: $MERGE_LINE"
+    act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
+    act_worktrees;  say "worktree-removed: $WT_LINE"
+  fi
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
   co_hand_holds;    say "$CO_HH_LINE"
   co_governed;      say "$CO_GOV_LINES"
+  co_scorecard;     co_scorecard_card
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
+  co_debt_notes
   act_continuation; say "continuation: $CONT_LINE"
                     say "$(co_owed_line)"
   act_epic;         say "epic-row: $EPIC_LINE"
@@ -2023,12 +2165,19 @@ do_run() {
                     say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
   gate_dry_run
   write_plan_blocks 9
+  if [ "$PARKED" = yes ]; then
+    # A PARKED RUN IS NOT ARCHIVED AND SENDS NO DELIVERY NOTICE: its plan is where the resume reads it (wave-38 T15).
+                    say "handoff: rewritten to the closed form ($(co_resume_point))"
+                    say "step9: delivered: parked on $WORKING @ $(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null) — $PARKED_WHY"
+                    say "archived: not asked — the run is parked, not delivered; its plan stays where it is"
+  else
                     say "handoff: rewritten to the closed form (resume point NONE)"
                     say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
-  act_archive
-  insert_archived
+    act_archive
+    insert_archived
                     say "archived: $ARCHIVED_LINE"
-  co_deliver_notice
+    co_deliver_notice
+  fi
   act_disengage
 }
 

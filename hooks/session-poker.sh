@@ -496,6 +496,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sitrep's three indicators (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's facts: the last recorded Bottom line with its time, every row with its glyph, the schedule, correctness and waste indicators by their printed thresholds, the person's open items, and the forecast from measured pace; --line prints the one-line form (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep bottom-line '<item>'… [<plan>]   record one to four Bottom line items, each cited (line <n>) or labelled hypothesis:, diagnosis: or projection:, with the time, to record/<wave>/sitrep.log"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-floor|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
@@ -1122,15 +1123,17 @@ $1"; shift ;;
   # adds a line per landed row; `<plan>` names the run, as fill-report's does, for a caller with no
   # binding left (close-out writes its continuation after its tmp is wiped).
   landing-report)
-    LR_ROWS=no; LR_HH=no; LR_ARG=""
+    LR_ROWS=no; LR_HH=no; LR_SC=no; LR_ARG=""
     for _lr_a in "$@"; do
       case "$_lr_a" in
         --rows) [ "$LR_ROWS" = no ] || usage "landing-report takes --rows once."; LR_ROWS=yes ;;
         --hand-holds) [ "$LR_HH" = no ] || usage "landing-report takes --hand-holds once."; LR_HH=yes ;;
+        --scorecard) [ "$LR_SC" = no ] || usage "landing-report takes --scorecard once."; LR_SC=yes ;;
         -*) usage "landing-report takes the flags --rows and --hand-holds, and at most one plan." ;;
         *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
+    [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
     ;;
   # THE SITUATION REPORT (wave-38 T10; D9–D14, REQ-2). `sitrep [--line] [<plan>]` renders, read-only but for the
   # gate's own scan; `sitrep bottom-line '<item>'… [<plan>]` records one to four judgment items. The plan, when
@@ -6331,6 +6334,83 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
   return 0
 }
 
+# ---------------------------------------------------------------- the run's scorecard
+#
+# THE SCORECARD (wave-38 T15; D26 "a release's efficiency claim is a printed scorecard; human time is always its own
+# line"). `landing-report --scorecard [<plan>]` prints exactly four lines, each measured value beside its target,
+#
+#   human stops (autonomous half): <n> · target 1
+#   agent minutes after the final reply: <n> · target 0
+#   widest landing ready→landed: <row> <m> min · target < 30
+#   human-wait minutes: <n> · no target (the user's)
+#
+# then the sitrep's three indicator lines at close, schedule, correctness and waste, cut whole from `sitrep_render`'s
+# Assessment (D13: computed there, once). Every number is read from the record, and one the record cannot compute is
+# `unverified` (D9), never a literal:
+#   human stops     the plan's `approved: <name> by <who> <ISO> "<reply>"` lines under ## SDLC State (`approve`, the
+#                   final card's replay) dated after its `approved-by:` instant, where the autonomous half starts; one
+#                   stop per reply: in time order, a new stop when the reply's words differ from the line before or
+#                   SCORECARD_STOP_GAP seconds passed (one replay writes release and merge a second apart).
+#                   unverified when approved-by: names no instant.
+#   agent minutes   the launches of this plan on the rosters after the `approved: merge` line's instant
+#                   (`handoff_dispatches_since`, the dispatch wall's intended rows; AC-1.5's fact): minutes from that
+#                   reply to the last such launch, rounded up, 0 when none. unverified with no `approved: merge` line or
+#                   no launch of this plan on any roster.
+#   widest landing  `landing_report`'s rows: the queue landing with the largest `minutes=`, as printed. unverified when
+#                   no landing is measured.
+#   human-wait      the final-card records (record/<wave>/final-card-*.md, card.sh final): each card's `at=` on its
+#                   `final-card/v1|plan=` line to its `replied: at=`, summed and rounded. unverified with no record, or
+#                   a record with no reply.
+# READ-ONLY. The rosters live in .bionic/tmp, which close-out's act 3 wipes, so close-out reads this before the wipe.
+SCORECARD_STOP_GAP=600
+scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
+  local plan="$1" root="$2" recdir appr stops merge_at agent="unverified" widest wait ind
+  recdir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"
+  # the plan's start instant and approvals, one line each: `S <epoch>` then `A <epoch> <name> <reply>` per approved: line
+  appr="$(awk "$_PATROL_ISO_AWK"'
+    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+    function inst(l,   n, t, i, e) { n = split(l, t, /[ \t]+/); for (i = 1; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) return e } return -1 }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
+    !s { next }
+    /^approved-by:/ && !seen { seen = 1; print "S\t" inst($0); next }
+    /^[ \t]*-?[ \t]*approved:[ \t]/ {
+      e = inst($0); if (e < 0) next
+      l = $0; sub(/^[ \t]*-?[ \t]*approved:[ \t]*/, "", l); split(l, w, /[ \t]+/)
+      q = index($0, "\""); print "A\t" e "\t" w[1] "\t" (q ? substr($0, q) : "")
+    }' "$plan" 2>/dev/null)"
+  stops="$(printf '%s\n' "$appr" | sort -t "$(printf '\t')" -k1,1r -k2,2n | awk -F'\t' -v gap="$SCORECARD_STOP_GAP" '
+    $1 == "S" { start = $2; next }
+    $1 == "A" && start != "" && start >= 0 && $2 > start { if (pe == "" || $4 != pw || $2 - pe > gap) c++; pe = $2; pw = $4 }
+    END { if (start == "" || start < 0) print "unverified"; else print c + 0 }')"
+  merge_at="$(printf '%s\n' "$appr" | awk -F'\t' '$1 == "A" && $3 == "merge" { print $2; exit }')"
+  if [ -n "$merge_at" ] && [ -n "$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "")" ]; then
+    agent="$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "" | awk -F'\t' -v m="$merge_at" "$_PATROL_ISO_AWK"'
+      { e = iso2epoch($2); if (e > m && e - m > d) d = e - m }
+      END { printf "%d\n", (d % 60 ? int(d / 60) + 1 : d / 60) }')"
+  fi
+  widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
+    NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
+    END { if (b != "") print r " " b " min" }')"
+  wait="$(for f in "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk "$_PATROL_ISO_AWK"'
+    { file = $0; a = ""; r = ""
+      while ((getline l < file) > 0) {
+        if (index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
+        else if (index(l, "replied: at=") == 1) { r = substr(l, 13); sub(/ .*/, "", r) }
+      }
+      close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
+      if (ea < 0 || er < 0 || er < ea) bad = 1; else sum += er - ea }
+    END { if (!cards || bad) print "unverified"; else printf "%d\n", int(sum / 60 + 0.5) }')"
+  ind="$(sitrep_render "$plan" "$root" no 2>/dev/null | awk '/^Assessment$/ { f = 1; next } f && NF == 0 { exit } f { print }')"
+  printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
+  printf 'agent minutes after the final reply: %s · target 0\n' "$agent"
+  printf 'widest landing ready→landed: %s · target < 30\n' "${widest:-unverified}"
+  printf "human-wait minutes: %s · no target (the user's)\n" "${wait:-unverified}"
+  printf '%s\n' "${ind:-indicators: unverified — the sitrep could not be rendered for $plan}"
+  return 0
+}
+
 # ---------------------------------------------------------------- the situation report
 #
 # THE SITUATION REPORT'S RENDERER (wave-38 T10; REQ-2 AC-2.2–AC-2.8; design-ledger Δ0–Δ8, D9–D14). One verb
@@ -9648,19 +9728,23 @@ EOF
   # THE STEP-LINE VERB (wave-24 T15; REQ-9 AC-9.6, D14). The `- Step N:` and `- T<n>:` lines
   # under `## SDLC State` are the run's evidence, and the gate reads them; `units_step_line`
   # rewrites one line's text (or adds the line, after its kind's last), and never the block
-  # under it. Step 9 is close-out's, as `current: 9` is (payload/scripts/close-out.sh).
+  # under it. Step 9 is close-out's, as `current: 9` is (payload/scripts/close-out.sh), except on a PARKED plan
+  # (wave-38 T15; AC-4.3), read by lib/run.sh `plan_parked_why`, the reader close-out asks. The plan is read once the
+  # session's binding names it, so the refusal follows the binding's own.
   step-line)
-    case "$PV_KEY" in
-      9|9a|9b)
-        die "REFUSED — the Step 9 line is close-out's to write, with current: 9 (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
-        exit 1 ;;
-    esac
     case "$PV_TEXT" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — a step line is one line, and the text carries a line break; the plan is unchanged."
         exit 1 ;;
     esac
     plan_verb_open step-line
+    case "$PV_KEY" in
+      9|9a|9b)
+        if ! plan_parked_why "$PV_PLAN" >/dev/null; then
+          die "REFUSED — the Step 9 line is close-out's to write, with current: 9 (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
+          exit 1
+        fi ;;
+    esac
     if ! units_step_line "$PV_PLAN" "$PV_KEY" "$PV_TEXT" "$PV_APPEND" > "$PV_NEW" 2>/dev/null; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section; the plan is unchanged."
       exit 1
@@ -12238,6 +12322,17 @@ RC_TAGS
     fi
     LR_ROOT="$(cd "$(project_root "${LR_PLAN%/*}")" 2>/dev/null && pwd -P)"
     [ -n "$LR_ROOT" ] || LR_ROOT="$REPO_REAL"
+    # THE SCORECARD (wave-38 T15; D26): its reasoning is beside `scorecard_report`. It renders the sitrep's indicators,
+    # which read the proof record, loaded as the sitrep verb loads it.
+    if [ "$LR_SC" = yes ]; then
+      if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+         || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+        die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
+        exit 2
+      fi
+      scorecard_report "$LR_PLAN" "$LR_ROOT"
+      exit 0
+    fi
     if [ "$LR_HH" = no ]; then
       landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS"
       exit 0
