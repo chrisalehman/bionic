@@ -336,4 +336,68 @@ sed 's/PROOF_KIND == "regression" || PROOF_KIND == "task"/PROOF_KIND == "floor" 
 expect_true "AS-3 precondition: the planted proof library still parses" bash -n "$AS_MUT/proof.sh"
 expect_eq "AS-3b a planted PROOF_KIND == \"floor\", a second reading of the kind, is found" "1" "$(scan "$AS_MUT/proof.sh" | /usr/bin/grep -c . | tr -d ' ')"
 
+
+# ============================================================
+section "§ALLOWLIST: the AC-9.3 grep over the tree under test prints nothing; a planted prose floor line is printed"
+# ============================================================
+# wave-38 T9 (REQ-9 AC-9.3, D6; spec §Eval design row 223). The grep runs EXACTLY as the eval row spells it, from the
+# root of the tree under test. tests/fixtures/floor-allowlist.txt holds grep -v -f patterns only, of two shapes: a
+# pattern anchored with ^ admits a whole class of line (lib/alias.sh's ALIAS_MAP arms; a shell comment, code-internal
+# under D6), and every other pattern names one code-internal identifier. An empty line there would admit every
+# line, so the file is checked first; each pattern must admit a line the raw grep prints, so none is dead.
+# The eval's grep admits a whole line for one identifier on it, so a prose "floor" beside an identifier would pass it.
+# AL-2c closes that: outside the class lines it deletes each identifier and finds no "floor" left.
+AL_ROOT="$BIONIC_SCRIPTS_DIR"
+AL_FILE="$AL_ROOT/tests/fixtures/floor-allowlist.txt"
+al_grep() {  # <root> -> the AC-9.3 grep's output at that root, verbatim; rc is the pipeline's (1: no line printed)
+  ( cd "$1" || exit 9; /usr/bin/grep -rni floor hooks/ payload/scripts payload/commands skills/ agents/ agents-src/ | grep -v -f tests/fixtures/floor-allowlist.txt )
+}
+al_raw() { ( cd "$1" || exit 9; /usr/bin/grep -rni floor hooks/ payload/scripts payload/commands skills/ agents/ agents-src/ ); }
+al_left() {  # <root> -> each raw line outside the class patterns that still spells floor once every identifier is deleted
+  /usr/bin/grep '^\^' "$AL_FILE" > "$TMPROOT/al-class"
+  /usr/bin/grep -v '^\^' "$AL_FILE" | awk '{ print "s/" $0 "//g" }' > "$TMPROOT/al-strip.sed"
+  al_raw "$1" | /usr/bin/grep -v -f "$TMPROOT/al-class" | sed -f "$TMPROOT/al-strip.sed" \
+    | awk '{ c = $0; sub(/^[^:]*:[0-9]*:/, "", c); if (tolower(c) ~ /floor/) print }'
+}
+expect_true "AL-0 the allowlist exists and is not empty" test -s "$AL_FILE"
+expect_eq "AL-0b …and holds patterns only: no empty line, no comment line" "0" \
+  "$(/usr/bin/grep -c -E '^[[:space:]]*$|^#' "$AL_FILE" 2>/dev/null | tr -d ' ')"
+expect_eq "AL-0c …and no identifier pattern carries a / (the strip's delimiter)" "0" \
+  "$(/usr/bin/grep -v '^\^' "$AL_FILE" | /usr/bin/grep -c / | tr -d ' ')"
+AL_RAW="$(al_raw "$AL_ROOT")"
+expect_nonempty "AL-1 the raw grep reads lines at this tree (the grep's positive)" "$AL_RAW"
+AL_DEAD=""
+while IFS= read -r al_pat; do
+  [ -n "$al_pat" ] || continue
+  [ "$(printf '%s\n' "$AL_RAW" | grep -c -e "$al_pat")" -gt 0 ] || AL_DEAD="$AL_DEAD [$al_pat]"
+done < "$AL_FILE"
+expect_eq "AL-1b every pattern admits a line the raw grep prints (dead:$AL_DEAD)" "" "$AL_DEAD"
+AL_OUT="$(al_grep "$AL_ROOT")"; AL_RC=$?
+expect_eq "AL-2 the AC-9.3 grep prints nothing at this tree (printed: $(printf '%s' "$AL_OUT" | head -c 600))" "0" \
+  "$(printf '%s' "$AL_OUT" | /usr/bin/grep -c . | tr -d ' ')"
+expect_eq "AL-2b …and grep -v read the allowlist (rc 1, no line selected; 2 is an unread file)" "1" "$AL_RC"
+AL_LEFT="$(al_left "$AL_ROOT")"
+expect_eq "AL-2c no prose floor sits beside an identifier (left: $(printf '%s' "$AL_LEFT" | head -c 600))" "0" \
+  "$(printf '%s' "$AL_LEFT" | /usr/bin/grep -c . | tr -d ' ')"
+# The power: a scratch copy of the six trees and the allowlist with four prose lines planted. The eval's grep prints
+# the three that carry no identifier; AL-2c's reading prints all four.
+AL_MUT="$TMPROOT/al-tree"; mkdir -p "$AL_MUT/payload" "$AL_MUT/tests/fixtures"
+cp -R "$AL_ROOT/hooks" "$AL_ROOT/skills" "$AL_ROOT/agents" "$AL_ROOT/agents-src" "$AL_MUT/"
+cp -R "$AL_ROOT/payload/scripts" "$AL_ROOT/payload/commands" "$AL_MUT/payload/"
+cp "$AL_FILE" "$AL_MUT/tests/fixtures/"
+expect_eq "AL-3 precondition: the copy prints what the tree prints" "$AL_OUT" "$(al_grep "$AL_MUT")"
+printf '\nThe floor is one whole run plus the greens after it.\n' >> "$AL_MUT/skills/canonical-sdlc/SKILL.md"
+printf '%s\n' '  die "REFUSED — the floor is owed at the head"' '  say "the floor holds"  # planted beside a comment' \
+  '  log_floor_finding project-minimum "project floor single"' >> "$AL_MUT/hooks/session-poker.sh"
+expect_true "AL-3b precondition: the planted poker still parses" bash -n "$AL_MUT/hooks/session-poker.sh"
+AL_MOUT="$(al_grep "$AL_MUT")"
+AL_MLEFT="$(al_left "$AL_MUT")"
+expect_eq "AL-4 the grep prints the three planted lines with no identifier beyond what the tree prints" "3" \
+  "$(( $(printf '%s' "$AL_MOUT" | /usr/bin/grep -c . | tr -d ' ') - $(printf '%s' "$AL_OUT" | /usr/bin/grep -c . | tr -d ' ') ))"
+expect_contains "AL-4b …the doctrine sentence" "SKILL.md:$(( $(wc -l < "$AL_ROOT/skills/canonical-sdlc/SKILL.md") + 2 )):The floor is one whole run" "$AL_MOUT"
+expect_contains "AL-4c …the refusal" 'die "REFUSED — the floor is owed at the head"' "$AL_MOUT"
+expect_contains "AL-4d …and the printed line a trailing comment does not admit" 'say "the floor holds"' "$AL_MOUT"
+expect_eq "AL-5 AL-2c's reading prints all four planted lines beyond what the tree leaves" "4" \
+  "$(( $(printf '%s' "$AL_MLEFT" | /usr/bin/grep -c . | tr -d ' ') - $(printf '%s' "$AL_LEFT" | /usr/bin/grep -c . | tr -d ' ') ))"
+expect_contains "AL-5b …the prose beside log_floor_finding, which the eval's grep admits" 'project floor single' "$AL_MLEFT"
 finish

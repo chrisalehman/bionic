@@ -3859,6 +3859,21 @@ project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/min-ir.plan.md" "$(build_plan intent=incident-response rigor=single)"
 assert_contains "§MINIMUM.7 the intent minimum logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
 expect_absent "§MINIMUM.7 …never intent-floor" "intent-floor" "$HOOK_STDERR$(read_audit "$project")"
+# §MINIMUM, the doctrine half (wave-38 T9; AC-9.2, D6): SKILL.md and the two diagrams spell the rigor minimum and
+# never the word. Each count of "floor" sits beside a positive read of the same file, so an unreadable file is red.
+gs_min_count() { /usr/bin/grep -ci -- "$1" "$2" 2>/dev/null | tr -d ' '; }   # <pattern> <file> -> matching lines, 0 when none
+GS_MIN_SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+GS_MIN_LIFE="${BIONIC_SKILLS_DIR}/canonical-sdlc/diagrams/lifecycle.svg"
+GS_MIN_CHAIN="${BIONIC_SKILLS_DIR}/canonical-sdlc/diagrams/hook-chain.svg"
+expect_eq "§MINIMUM.8 SKILL.md names the rigor minimums and their key (the reader's positive)" "1|1" \
+  "$([ "$(gs_min_count '\*\*Rigor minimums\.\*\*' "$GS_MIN_SKILL")" -ge 1 ] && echo 1)|$([ "$(gs_min_count 'rigor-minimum:' "$GS_MIN_SKILL")" -ge 1 ] && echo 1)"
+expect_eq "§MINIMUM.8 …and spells floor on no line" "0" "$(gs_min_count floor "$GS_MIN_SKILL")"
+expect_eq "§MINIMUM.9 lifecycle.svg says a rigor minimum is advice (the reader's positive)" "1" \
+  "$([ "$(gs_min_count 'a rigor minimum is advice' "$GS_MIN_LIFE")" -ge 1 ] && echo 1)"
+expect_eq "§MINIMUM.9 …and spells floor on no line" "0" "$(gs_min_count floor "$GS_MIN_LIFE")"
+expect_eq "§MINIMUM.10 hook-chain.svg names the rigor-minimum consistency check (the reader's positive)" "1" \
+  "$([ "$(gs_min_count 'rigor-minimum consistency' "$GS_MIN_CHAIN")" -ge 1 ] && echo 1)"
+expect_eq "§MINIMUM.10 …and spells floor on no line" "0" "$(gs_min_count floor "$GS_MIN_CHAIN")"
 
 
 
