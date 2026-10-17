@@ -1138,7 +1138,9 @@ RDB="$(rd_world)"
 rd_ready "$RDB/.worktrees/T1" --within 60
 expect_eq "a suite promising more seconds than are left: exit 75" "75" "$RD_RC"
 expect_eq "…printing WAITING and the same command, exactly" \
-  "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$RD_OUT"
+  "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$RD_OUT" | sed -n 1p)"
+expect_eq "…then why it waits, on the line after (T31)" \
+  "waiting: suite a.test.sh promises 600s and 60s are left in --within 60" "$(printf '%s\n' "$RD_OUT" | sed -n 2p)"
 expect_contains "…the entry kept on the line" "|ev=ready|row=T1|" "$(cat "$(rd_rec "$RDB")" 2>/dev/null)"
 expect_absent "…and no suite run" "ev=verdict" "$(cat "$(rd_rec "$RDB")" 2>/dev/null)"
 rd_ready "$RDB/.worktrees/T1" --within 900
