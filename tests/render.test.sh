@@ -569,4 +569,26 @@ printf 'first\n\n**The floor.** a one whole run, last act.\n\n**Then.** somethin
 expect_contains "15i: the last-paragraph reader reads the final paragraph (not vacuous)" "something else" "$(rt_last_para "$_or_fix")"
 expect_absent "15j: …and not an earlier one" "last act" "$(rt_last_para "$_or_fix")"
 
+section "Section 16: §RUNNER — the test-runner runs on Haiku at high effort (wave-38 T4; REQ-8 AC-8.1)"
+# fails-when: agents/test-runner.md reads any model or effort but haiku and high; the help roster's
+# test-runner row disagrees with the role file; or the frontmatter reader cannot tell a planted
+# `model: sonnet` from the shipped value.
+# rt_fm <file> <key> -> the frontmatter value of <key>, the first frontmatter block only.
+rt_fm() {
+  /usr/bin/awk -v k="$2" 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+                          fm && index($0, k ":") == 1 { sub(/^[^:]*:[ \t]*/, ""); print; exit }' "$1"
+}
+_ru_f="$REPO/agents/test-runner.md"
+expect_eq "16a: agents/test-runner.md reads model: haiku" "haiku" "$(rt_fm "$_ru_f" model)"
+expect_eq "16b: …and effort: high" "high" "$(rt_fm "$_ru_f" effort)"
+_ru_row=$(/usr/bin/grep -F '| `test-runner` |' "$REPO/payload/commands/help.md" | head -1)
+expect_contains "16c: help.md's roster row names the role (the reader found it)" '`test-runner`' "$_ru_row"
+expect_contains "16d: …and prints haiku · high" '| haiku · high |' "$_ru_row"
+expect_absent "16e: …and no longer prints sonnet" 'sonnet' "$_ru_row"
+# THE PAIRED NEGATIVE, on a scratch copy: a planted sonnet is read as sonnet, so 16a cannot pass blind.
+_ru_neg="$TMPROOT/test-runner-planted.md"
+sed 's/^model: haiku$/model: sonnet/' "$_ru_f" > "$_ru_neg"
+expect_eq "16f: a planted model: sonnet is read back as sonnet (not vacuous)" "sonnet" "$(rt_fm "$_ru_neg" model)"
+expect_true "16g: …and the 16a comparison goes red on it" test "$(rt_fm "$_ru_neg" model)" != "haiku"
+
 finish
