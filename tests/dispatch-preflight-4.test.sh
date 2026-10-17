@@ -1333,6 +1333,28 @@ expect_true "why1 …rooted at the real hooks directory" test -f "$WHY1_ROOT/ses
 expect_absent "why1 …and never the read-only row it did not count" "R-ONE" "$GATE_REASON"
 expect_absent "why1 …and no placeholder root anywhere in the reason" "<plugin-root>" "$GATE_REASON"
 
+# why4 — AT TASK SCALE THE CAP IS THE PROFILE'S (wave-38 T16; D25, AC-5.1). A task-scale plan
+# with no person's `parallel-budget:` line holds three writers, the task row's writers cell
+# (payload/scripts/lib/scale.sh): the fourth is refused by the same wall, which lists the rows it
+# counted and says whose cap it is. Its own Patrol stamp is removed, since a task-scale run arms
+# none; a person's line still overrides the cell.
+REPO=$(make_repo why4 yes)
+write_attestation "$REPO" "$SID_A"
+sed 's/^scale: wave$/scale: task/' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" > "$REPO/.why4.tmp" \
+  && mv "$REPO/.why4.tmp" "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+rm -f "$REPO/.bionic/tmp/patrol-$SID_A.state"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "W-TWO"
+s22_roster_row "$REPO" "$SID_A" "W-THREE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "why4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why4 three writers open on a task-scale plan with no cap line → REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "why4 …at the task row's cap" "writers: budget=3 open=3 with-this-dispatch=4" "$GATE_VERR"
+expect_contains "why4 …naming the profile as the cap's source" "the task scale's writer cap" "$GATE_VERR"
+expect_contains "why4 …and listing a row it counted with its closing command" "session-sweeper.sh ack 'W-THREE'" "$GATE_REASON"
+s22_set_budget "$REPO" "writers=4 source=user"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "why4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why4o …a person's writers=4 line overrides the cell → ADMITTED" "allow" "$GATE_VERDICT"
+
 # why3 — a several-fault refusal whose brief already carries every scaffold line shows no
 # scaffold: it would tell the author to add nothing. Two faults on a complete brief: the writer
 # budget and the name in flight. The control is the same two faults on a brief missing one

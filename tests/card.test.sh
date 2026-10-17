@@ -1963,21 +1963,22 @@ expect_eq "RL7 no scale is a usage error: exit 64" "64" "$WC_RC"
 whole_card regression task "$PLAN_FIX" extra
 expect_eq "RL7b too many operands is a usage error: exit 64" "64" "$WC_RC"
 
-section "INHERIT — wave-28 T43 (AC-8.10, D21): the Step 1 card lists every deferral the newest continuation left open"
+section "INHERIT — wave-28 T43 (AC-8.10, D21); wave-38 T17 (AC-10.1, D5): the Step 1 card counts every deferral the newest continuation left, in one line"
 # A deferral is faced again. Close-out writes each open deferral under `## Deferrals` of the run's
 # continuation (T17's closing note); the next wave's Step 1 card reads the NEWEST continuation under
-# the docs root (`record/<slug>/continuation.md` by mtime, never the run's own; A-orch-64) and
-# prints, under `Inherited deferrals`, every `deferred:` line the requirements file's
-# `## Inherited deferrals` section does not dispose of with exactly one of
+# the docs root (`record/<slug>/continuation.md` by mtime, never the run's own; A-orch-64), and the
+# requirements file's `## Inherited deferrals` section disposes of each `deferred:` line with exactly one of
 #   adopted: <id> as REQ-<n>  ·  again: <id>  ·  closed: <id> <reason>
 # A disposal naming an id the continuation does not carry disposed of nothing and is refused.
+# ONE LINE OF COUNTS (wave-38 T17; D5, AC-10.1): the card used to print every open line, 68 lines on
+# wave-37's card; it prints `Inherited  <n> inherited · <a> adopted · <c> carried · <k> closed · listed in
+# <continuation>#Deferrals` and never a line, so these rows read the counts where they read the list.
 # HERMETIC: a throwaway project under the mktemp sandbox, never this repository's docs.
 INH_P="${CARD_SANDBOX}/inherit-proj"
 INH_D="${INH_P}/.bionic/docs"
 INH_REC="record/wave-1-a/read-adversarial-p1.md"
 INH_L1="deferred: ${INH_REC}#1 S2 off \"the first deferral\" stated=\"-\" from=wave-1-a"
-# A sentence holding an escaped quote and an escaped backslash, as close-out writes it; long
-# enough that the card must fold it to stay inside the budget.
+# A sentence holding an escaped quote and an escaped backslash, as close-out writes it.
 INH_L2='deferred: record/wave-1-a/read-adversarial-p1.md#2 S3 on "the second deferral" stated="Said \"go\" \\ now, and meant it." from=wave-1-a'
 INH_LOLD="deferred: record/wave-0-old/rev.md#1 S3 on \"an older run's deferral\" stated=\"-\" from=wave-0-old"
 INH_LOPEN="deferred: record/wave-2-b/rev.md#1 S3 on \"an open run's line\" stated=\"-\" from=wave-2-b"
@@ -1997,19 +1998,27 @@ inh_req() {
   if [ "$#" -gt 0 ]; then printf '\n## Inherited deferrals\n\n' >> "$f"; printf '%s\n' "$@" >> "$f"; fi
   printf '%s' "$f"
 }
-# inh_block <card> -> each line printed under `  Inherited deferrals`, its folds joined back
-inh_block() {
+# inh_line <card> -> the Inherited line, its folds joined back by one space (a fold continues at the
+# value column, 13 spaces in)
+inh_line() {
   printf '%s\n' "$1" | awk '
-    /^  Inherited deferrals$/ { s = 1; next }
-    s && !/^    / { exit }
-    s { t = substr($0, 5); if (t ~ /^(deferred|debt): /) { if (cur != "") print cur; cur = t } else cur = cur " " t }
+    /^  Inherited  / { s = 1; cur = substr($0, 3); next }
+    s && /^             [^ ]/ { t = $0; sub(/^ +/, "", t); cur = cur " " t; next }
+    s { exit }
     END { if (cur != "") print cur }'
 }
-inh_heads() { printf '%s\n' "$1" | /usr/bin/grep -cx '  Inherited deferrals' | tr -d ' '; }
+inh_heads() { printf '%s\n' "$1" | /usr/bin/grep -c '^  Inherited  ' | tr -d ' '; }
+# inh_want <inherited> <adopted> <carried> <closed> <slug|-> -> the line the card owes
+inh_want() {
+  if [ "$5" = - ]; then
+    printf 'Inherited  %s inherited · %s adopted · %s carried · %s closed · no closed run above this one' "$1" "$2" "$3" "$4"
+  else
+    printf 'Inherited  %s inherited · %s adopted · %s carried · %s closed · listed in .bionic/docs/record/%s/continuation.md#Deferrals' \
+      "$1" "$2" "$3" "$4" "$5"
+  fi
+}
 inh_cont wave-0-old 202601010000 "## Deferrals" "" "$INH_LOLD"
 inh_cont wave-1-a 202602010000 "## Next wave: x" "" "carry-overs" "" "## Deferrals" "" "$INH_L1" "$INH_L2" "" "## Resume instruction" "" "nothing"
-# (The Artifacts path of a requirements file outside the project prints whole, unbound by the budget
-# — rows 67/68 above — so INHERIT-5 reads every other line.)
 # THE RUN'S OWN CONTINUATION IS NEVER ITS PREDECESSOR, however new: wave-2-b is the run the
 # requirements file below is for (its name says so), and its continuation is the newest file.
 inh_cont wave-2-b 203001010000 "## Deferrals" "" "$INH_LOPEN"
@@ -2017,39 +2026,37 @@ inh_cont wave-2-b 203001010000 "## Deferrals" "" "$INH_LOPEN"
 INH_R0="$(inh_req wave-2-b)"
 whole_card step1 "$INH_R0"; INH_C0="$WC_OUT"
 expect_eq "INHERIT-1 step1 over a project whose last closed run left two deferrals exits 0" "0" "$WC_RC"
-expect_eq "INHERIT-1a …prints the Inherited deferrals heading once" "1" "$(inh_heads "$INH_C0")"
-expect_nonempty "INHERIT-1b precondition: the extractor reads lines under the heading" "$(inh_block "$INH_C0")"
-expect_eq "INHERIT-2 …and lists both deferrals, each as written, in the continuation's order" \
-  "$INH_L1
-$INH_L2" "$(inh_block "$INH_C0")"
-expect_contains "INHERIT-3 a stated sentence holding an escaped quote reaches the card verbatim" \
-  'stated="Said \"go\" \\ now, and meant it."' "$(inh_block "$INH_C0")"
-expect_absent "INHERIT-4 the older continuation's deferral is not listed" "an older run's deferral" "$INH_C0"
-expect_absent "INHERIT-4a …nor a line of the run's own continuation, the newest file" "an open run's line" "$INH_C0"
-expect_empty "INHERIT-5 no line of the card is wider than the budget, the folded deferral included" \
+expect_eq "INHERIT-1a …prints one Inherited line" "1" "$(inh_heads "$INH_C0")"
+expect_nonempty "INHERIT-1b precondition: the extractor reads the Inherited line" "$(inh_line "$INH_C0")"
+expect_eq "INHERIT-2 …which counts both deferrals and names the newest other continuation's section" \
+  "$(inh_want 2 0 0 0 wave-1-a)" "$(inh_line "$INH_C0")"
+expect_absent "INHERIT-3 no deferral is reprinted: not the first line" "the first deferral" "$INH_C0"
+expect_absent "INHERIT-3a …nor the second, escaped quote and all" 'Said \"go\"' "$INH_C0"
+expect_absent "INHERIT-4 the run's own continuation, the newest file, is never the one named" \
+  "wave-2-b/continuation.md" "$(inh_line "$INH_C0")"
+expect_empty "INHERIT-5 no line of the card is wider than the budget, the Inherited line included" \
   "$(over_budget "$(printf '%s\n' "$INH_C0" | /usr/bin/grep -v '^    requirements  ')")"
-expect_eq "INHERIT-5a the section sits between Not Doing and Artifacts" "yes" \
-  "$(printf '%s\n' "$INH_C0" | awk '/^  Not Doing$/ { a = NR } /^  Inherited deferrals$/ { b = NR } /^  Artifacts$/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }')"
+expect_eq "INHERIT-5a the line sits between Not Doing and Artifacts" "yes" \
+  "$(printf '%s\n' "$INH_C0" | awk '/^  Not Doing$/ { a = NR } /^  Inherited  / { b = NR } /^  Artifacts$/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }')"
 
 INH_RA="$(inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-2")"
 whole_card step1 "$INH_RA"
-expect_eq "INHERIT-6 adopted as a requirement: exit 0, and the adopted one leaves the list while the other stays" \
-  "0|$INH_L2" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-6 adopted as a requirement: exit 0, and the adopted count is 1" \
+  "0|$(inh_want 2 1 0 0 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
 INH_RG="$(inh_req wave-2-b "again: record/wave-1-a/read-adversarial-p1.md#2")"
 whole_card step1 "$INH_RG"
-expect_eq "INHERIT-7 deferred again: the again one leaves the list" "0|$INH_L1" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-7 deferred again: the carried count is 1" "0|$(inh_want 2 0 1 0 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
 INH_RC="$(inh_req wave-2-b "closed: ${INH_REC}#1 fixed by the wave that found it")"
 whole_card step1 "$INH_RC"
-expect_eq "INHERIT-8 closed with a reason: the closed one leaves the list" "0|$INH_L2" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-8 closed with a reason: the closed count is 1" "0|$(inh_want 2 0 0 1 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
 INH_RB="$(inh_req wave-2-b "closed: ${INH_REC}#1 no longer reachable" "" "again: record/wave-1-a/read-adversarial-p1.md#2")"
 whole_card step1 "$INH_RB"; INH_CB="$WC_OUT"
-expect_eq "INHERIT-9 both disposed of: the heading stays, with nothing under it" "0|1|" \
-  "$WC_RC|$(inh_heads "$INH_CB")|$(inh_block "$INH_CB")"
+expect_eq "INHERIT-9 both disposed of: one line, one carried and one closed" "0|1|$(inh_want 2 0 1 1 wave-1-a)" \
+  "$WC_RC|$(inh_heads "$INH_CB")|$(inh_line "$INH_CB")"
 INH_RM="$(inh_req wave-2-b "closed: ${INH_REC}#1" "- again: record/wave-1-a/read-adversarial-p1.md#2" "adopted: ${INH_REC}#1")"
 whole_card step1 "$INH_RM"
-expect_eq "INHERIT-10 a line in none of the three exact forms disposes of nothing: both stay listed" \
-  "0|$INH_L1
-$INH_L2" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-10 a line in none of the three exact forms disposes of nothing: every count but inherited is 0" \
+  "0|$(inh_want 2 0 0 0 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
 
 INH_RU="$(inh_req wave-2-b "again: ${INH_REC}#1" "closed: record/wave-9-z/rev.md#7 it never existed")"
 whole_card step1 "$INH_RU"
@@ -2062,28 +2069,28 @@ expect_eq "INHERIT-11c …and its second line is the disposal as written" \
 expect_true "INHERIT-11d …the first line fits the 100-column refusal width" \
   test "$(cols "$(printf '%s\n' "$WC_ERR" | head -1)")" -le 100
 
-# no heading, and the heading with nothing under it: the section prints, empty (the requirements file
-# is written afresh, with no disposal: the rows above left theirs in it)
+# no heading, and the heading with nothing under it: the line prints, every count 0 (the requirements
+# file is written afresh, with no disposal: the rows above left theirs in it)
 INH_R0="$(inh_req wave-2-b)"
 inh_cont wave-1-a 202602010000 "## Next wave: x" "" "a continuation written before the heading existed"
 whole_card step1 "$INH_R0"; INH_CN="$WC_OUT"
-expect_eq "INHERIT-12 a continuation without ## Deferrals: exit 0, the section printed with nothing under it" "0|1|" \
-  "$WC_RC|$(inh_heads "$INH_CN")|$(inh_block "$INH_CN")"
+expect_eq "INHERIT-12 a continuation without ## Deferrals: exit 0, one line, every count 0" "0|1|$(inh_want 0 0 0 0 wave-1-a)" \
+  "$WC_RC|$(inh_heads "$INH_CN")|$(inh_line "$INH_CN")"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "## Resume instruction" "" "nothing"
 whole_card step1 "$INH_R0"; INH_CE="$WC_OUT"
-expect_eq "INHERIT-13 the heading with nothing under it: the section printed with nothing under it" "0|1|" \
-  "$WC_RC|$(inh_heads "$INH_CE")|$(inh_block "$INH_CE")"
+expect_eq "INHERIT-13 the heading with nothing under it: one line, every count 0" "0|1|$(inh_want 0 0 0 0 wave-1-a)" \
+  "$WC_RC|$(inh_heads "$INH_CE")|$(inh_line "$INH_CE")"
 # the newest moves: wave-0-old's continuation touched newer than wave-1-a's is the one read
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
 touch -t 202603010000 "$INH_D/record/wave-0-old/continuation.md"
 whole_card step1 "$INH_R0"
-expect_eq "INHERIT-14 with the other continuation now the newer file, it is the one read" \
-  "0|$INH_LOLD" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-14 with the other continuation now the newer file, it is the one counted and named" \
+  "0|$(inh_want 1 0 0 0 wave-0-old)" "$WC_RC|$(inh_line "$WC_OUT")"
 touch -t 202601010000 "$INH_D/record/wave-0-old/continuation.md"
-# a requirements file outside any project: no closed run, the heading with nothing under it
+# a requirements file outside any project: no closed run, and the line says so
 whole_card step1 "$REQ_FIX"
-expect_eq "INHERIT-15 a requirements file with no closed run above it: the section printed with nothing under it" "0|1|" \
-  "$WC_RC|$(inh_heads "$WC_OUT")|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-15 a requirements file with no closed run above it: one line saying so" "0|1|$(inh_want 0 0 0 0 -)" \
+  "$WC_RC|$(inh_heads "$WC_OUT")|$(inh_line "$WC_OUT")"
 
 # the reading close-out carries from: `card.sh inherited <requirements file>`, `<disposal>\t<line>`
 INH_RV="$(inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-1" "closed: record/wave-9-z/rev.md#7 an unknown id is no refusal here")"
@@ -2103,27 +2110,27 @@ open	$INH_L2" "$(bash "$CARD_SH" inherited "$INH_RV" 2>/dev/null 0<&-)"
 INH_R0="$(inh_req wave-2-b)"
 inh_cont wave-1-a 202602010000 "## Notes" "" '```' "## Deferrals" "" "$INH_LOLD" '```'
 whole_card step1 "$INH_R0"; INH_CF="$WC_OUT"
-expect_eq "INHERIT-17 a continuation whose only ## Deferrals is fenced: the section printed with nothing under it" "0|1|" \
-  "$WC_RC|$(inh_heads "$INH_CF")|$(inh_block "$INH_CF")"
+expect_eq "INHERIT-17 a continuation whose only ## Deferrals is fenced: one line, every count 0" "0|1|$(inh_want 0 0 0 0 wave-1-a)" \
+  "$WC_RC|$(inh_heads "$INH_CF")|$(inh_line "$INH_CF")"
 inh_cont wave-1-a 202602010000 "## Notes" "" '```' "## Deferrals" "" "$INH_LOLD" '```' "" "## Deferrals" "" "$INH_L1"
 whole_card step1 "$INH_R0"
-expect_eq "INHERIT-17a …and with the real heading after the fence, only the real line is listed" "0|$INH_L1" \
-  "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-17a …and with the real heading after the fence, only the real line is counted" \
+  "0|$(inh_want 1 0 0 0 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
 
 # THE CARRIED DEBT LINE (wave-30 T32; REQ-11 AC-11.2, A-T22.9). Close-out writes each unburned debt item
 # under `## Deferrals` after the deferred: lines, `debt: <concept> <kind> "<sites>" touches=<N>
-# raised-by=<record> from=<wave>`. The Step 1 card lists it beside the deferred: ones, as open. Nothing
-# disposes of it (it names no id); it is faced by `session-poker.sh debt adopt`, which moves it to the new
-# run's ledger. `card.sh inherited` is close-out's carry-from reading and does not print it: the carry of a
+# raised-by=<record> from=<wave>`. The Step 1 card counts it beside the deferred: ones. Nothing disposes
+# of it (it names no id); it is faced by `session-poker.sh debt adopt`, which moves it to the new run's
+# ledger. `card.sh inherited` is close-out's carry-from reading and does not print it: the carry of a
 # debt is the ledger's, so the same line read from here would be written twice (A-T32.2).
 INH_D1="debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-1-a/critic-structure.md from=wave-1-a"
 INH_DBAD="debt: tree_count duplicate \"lib/a.sh:1\" touches=4 from=wave-1-a"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_D1"
 whole_card step1 "$INH_R0"
-expect_eq "INHERIT-18 §T32 a carried debt: line is listed under Inherited deferrals beside the deferred: one" \
-  "0|$INH_L1
-$INH_D1" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-18 §T32 a carried debt: line is counted beside the deferred: one" \
+  "0|$(inh_want 2 0 0 0 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
+expect_absent "INHERIT-18-0 …and is not reprinted" "tree_count duplicate" "$WC_OUT"
 expect_eq "INHERIT-18a …card.sh inherited prints the deferred line and withholds the debt line (close-out's carry is the ledger's)" \
   "open	$INH_L1" "$(bash "$CARD_SH" inherited "$INH_R0" 2>/dev/null 0<&-)"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_DBAD" "$INH_L2"
@@ -2141,29 +2148,183 @@ INH_DPROSE="debt: step-line-born hole \"hooks/session-poker.sh step-line (the bo
 INH_DHOLE="debt: adopt-orphans hole \"hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112\" touches=0 raised-by=record/wave-1-a/assumptions.md#A-orch-46 from=wave-1-a"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_DHOLE"
 whole_card step1 "$INH_R0"
-expect_eq "INHERIT-18f a carried hole line, its sites <path>:<line> and its raised-by an anchor, is listed (exit 0)" \
-  "0|$INH_L1
-$INH_DHOLE" "$WC_RC|$(inh_block "$WC_OUT")"
+expect_eq "INHERIT-18f a carried hole line, its sites <path>:<line> and its raised-by an anchor, is counted (exit 0)" \
+  "0|$(inh_want 2 0 0 0 wave-1-a)" "$WC_RC|$(inh_line "$WC_OUT")"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_DPROSE"
 whole_card step1 "$INH_R0"
 expect_eq "INHERIT-18g …one whose site is prose does not parse and refuses the card (exit 2, nothing on stdout)" "2|" "$WC_RC|$WC_OUT"
 expect_contains "INHERIT-18h …quoting it" "$INH_DPROSE" "$WC_ERR"
 inh_cont wave-1-a 202602010000 "## Deferrals" "" "$INH_L1" "$INH_L2"
 
-# the mutation arm: a doctored copy of card.sh whose disposal filter lets every line through
+# the mutation arm: a doctored copy of card.sh whose count reads no line as adopted
 INH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/card-inherit-mut.XXXXXX")"
 mkdir -p "$INH_MUT/scripts"; ln -s "${REPO}/payload/scripts/lib" "$INH_MUT/scripts/lib"
-sed 's/\[ "\${l%%"\$CARD_TAB"\*}" = open \] || continue/:/' "$CARD_SH" > "$INH_MUT/scripts/card.sh"
+sed 's/\$1 == "adopted" { a++ }/$1 == "never" { a++ }/' "$CARD_SH" > "$INH_MUT/scripts/card.sh"
 expect_eq "INHERIT-mut0 the doctored copy differs from card.sh in exactly one line (the doctor took)" "1" \
   "$(diff "$CARD_SH" "$INH_MUT/scripts/card.sh" | /usr/bin/grep -c '^>')"
 INH_RA="$(inh_req wave-2-b "adopted: ${INH_REC}#1 as REQ-2")"
 bash "$INH_MUT/scripts/card.sh" step1 "$INH_RA" > "$INH_MUT/out" 2>/dev/null 0<&-; INH_MRC=$?
 INH_MOUT="$(cat "$INH_MUT/out")"
 expect_eq "INHERIT-mut1 the doctored card still renders (the mutant runs)" "0|1" "$INH_MRC|$(inh_heads "$INH_MOUT")"
-expect_eq "INHERIT-mut2 …and lists the adopted deferral again, so INHERIT-6 goes red on it" \
-  "$INH_L1
-$INH_L2" "$(inh_block "$INH_MOUT")"
+expect_eq "INHERIT-mut2 …and counts no adoption, so INHERIT-6 goes red on it" \
+  "$(inh_want 2 0 0 0 wave-1-a)" "$(inh_line "$INH_MOUT")"
 rm -rf "$INH_MUT"
+
+# ============================================================
+section "CONFIG — wave-38 T17 (AC-1.7, AC-5.2, AC-10.1; D17, D5): the requirements card opens on Configuration, and counts its leftovers in one line"
+# ============================================================
+#
+# ONE STOP WHERE THERE WERE TWO (D17). Step 0 used to put its own card, a display the model typed
+# from the plan it had just written; the user approved it, then approved the requirements card a few
+# minutes later. Step 0's acts still run first (plan skeleton, bind, arm, branch), and its settings are
+# now the FIRST section of the Step 1 card, rendered by card.sh from the plan's frontmatter, so the one
+# reply approves both and the settings shown are the settings written. No `step0` verb exists.
+#
+# §CONFIG fails when a Step-0 card is put on its own: the Configuration block below, every line, read
+# from the plan beside the requirements file (its branches differ from the requirements file's own, so
+# a card reading the wrong file goes red). §SCALE fails when the scale line carries no recommendation.
+# §COUNTS fails when a carried line is reprinted.
+CFG_P="${CARD_SANDBOX}/config-proj"
+CFG_D="${CFG_P}/.bionic/docs"
+mkdir -p "$CFG_D/plans/epic-9" "$CFG_D/specs/epic-9"
+CFG_PLAN="$CFG_D/plans/epic-9/wave-3-c.plan.md"
+CFG_REQ="$CFG_D/specs/epic-9/wave-3-c.requirements.md"
+CFG_REC_SHORT="One tree and one session. The ask names one file."
+cfg_plan() {  # <scale-recommendation line, or nothing> -> the fixture plan, written
+  {
+    printf '%s\n' '---' 'sdlc-step: 0' 'scale: task' 'intent: build' 'rigor: single' 'review-cadence: once' \
+      'fix-policy: S1,S2-on,S3' 'fix-cap: 2' 'regression: no' 'surface_type: cli-plugin' 'multi_agent: true' \
+      'deploy_target: n/a' 'cleanup_on_finish: true' 'use_worktree: false' 'walk: exempt' 'design-interview: true' \
+      'model_plan: orchestrator=claude-fable-5-1; implementor=sonnet-high' 'archive-root: /srv/arch' \
+      'working-branch: fix/config-card' 'integration-branch: main' 'base-sha: 1234abc' 'seed: ideas/seed-brief.md'
+    [ -z "${1:-}" ] || printf '%s\n' "$1"
+    printf '%s\n' '---' '' '# wave 3 c · plan' '' '## Goal' '' 'Configure the fixture run.'
+  } > "$CFG_PLAN"
+}
+cfg_plan "scale-recommendation: \"${CFG_REC_SHORT}\""
+cp "$REQ_FIX" "$CFG_REQ"
+# cfg_block <card> -> the Configuration section, the project line and its folds left out (the sandbox
+# path is this machine's; cfg_project reads it)
+cfg_block() {
+  printf '%s\n' "$1" | awk '/^  Configuration$/ { s = 1 } s && /^$/ { exit }
+    s && /^      project  / { p = 1; next } p && /^                    [^ ]/ { next } { p = 0 } s { print }'
+}
+cfg_project() {  # <card> -> the project line's value, its folds joined (a path has no blank to fold at)
+  printf '%s\n' "$1" | awk '/^      project  / { p = 1; v = substr($0, 21); next }
+    p && /^                    [^ ]/ { v = v substr($0, 21); next } p { exit } END { print v }'
+}
+# The Models block's role lines, read from the role files card.sh sits beside: a role model_plan names
+# prints its tier, any other its role file's model and effort, marked so.
+CFG_MODELS="$(printf '      %-20s%s\n' orchestrator claude-fable-5-1)"
+for f in "${REPO}"/agents/*.md; do
+  r="${f##*/}"; r="${r%.md}"
+  if [ "$r" = implementor ]; then t="sonnet-high"
+  else t="$(awk '/^model:/ { m = $2 } /^effort:/ { e = $2 } /^---$/ && ++n == 2 { exit } END { print m "-" e }' "$f")  (role file)"
+  fi
+  CFG_MODELS="${CFG_MODELS}
+$(printf '      %-20s%s' "$r" "$t")"
+done
+CFG_WANT="  Configuration
+    Seed          ideas/seed-brief.md
+    Run
+      intent          build
+      rigor           single (one independent mind)  (scale default)
+      regression      no  (scale default)
+      review-cadence  once  (from rigor)
+      fix-policy      S1,S2-on,S3  (set)
+      fix-cap         2  (from rigor)
+      scale           task — ${CFG_REC_SHORT}
+      name            wave-3-c
+    Branches
+      working       fix/config-card       (from 1234abc)
+      integration   main                  (Step 8 merges here)
+    Paths
+      docs          .bionic/docs  (default)
+      tmp           .bionic/tmp  (default)
+      archive       /srv/arch
+    Shape
+      surface       cli-plugin
+      agents        multi-agent, tiered dispatch
+      deploy        n/a
+      worktree      false
+      cleanup       true
+    Gates
+      walk          exempt
+      interview     required
+      permissions   answered from the run's workspace
+    Models
+${CFG_MODELS}"
+
+whole_card step1 "$CFG_REQ"; CFG_C="$WC_OUT"
+expect_eq "CONFIG-1 §CONFIG step1 over a requirements file with its plan beside it exits 0" "0" "$WC_RC"
+expect_eq "CONFIG-1a …and its first section, under the title, is Configuration" "Step 1 · Requirements||  Configuration" \
+  "$(printf '%s\n' "$CFG_C" | sed -n '1p;2p;3p' | paste -sd'|' -)"
+expect_nonempty "CONFIG-1b precondition: the extractor reads the Configuration block" "$(cfg_block "$CFG_C")"
+expect_eq "CONFIG-2 …every line of it, read from the plan's frontmatter, in the Step 0 layout" "$CFG_WANT" "$(cfg_block "$CFG_C")"
+expect_eq "CONFIG-2a …the project line names the plan's project, whole" "$CFG_P" "$(cfg_project "$CFG_C")"
+expect_eq "CONFIG-3 Configuration comes before Purpose" "yes" \
+  "$(printf '%s\n' "$CFG_C" | awk '/^  Configuration$/ { a = NR } /^  Purpose$/ { b = NR } END { print (a && b > a) ? "yes" : "no" }')"
+expect_eq "CONFIG-3a the branches print once, inside Configuration" "1|0" \
+  "$(printf '%s\n' "$CFG_C" | /usr/bin/grep -c '^    Branches$' | tr -d ' ')|$(printf '%s\n' "$CFG_C" | /usr/bin/grep -c '^  Branches$' | tr -d ' ')"
+expect_empty "CONFIG-4 no line of the card is wider than the budget" \
+  "$(over_budget "$(printf '%s\n' "$CFG_C" | /usr/bin/grep -v '^    requirements  ')")"
+expect_contains "CONFIG-5 the card offers the setting verb beside explain" "explain <requirement> · set <flag>=<value>" "$CFG_C"
+# no Seed when the plan names none: the copy without the line renders no Seed line
+sed '/^seed:/d' "$CFG_PLAN" > "${CFG_PLAN}.noseed" && mv "${CFG_PLAN}.noseed" "$CFG_PLAN"
+whole_card step1 "$CFG_REQ"
+expect_eq "CONFIG-6 a plan naming no seed prints Configuration with no Seed line" "0|1|0" \
+  "$WC_RC|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c '^  Configuration$' | tr -d ' ')|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c '^    Seed ' | tr -d ' ')"
+whole_card step0 "$CFG_PLAN"
+expect_eq "CONFIG-7 no step0 verb exists: card.sh step0 is an unknown row kind, exit 64, nothing on stdout" "64|" "$WC_RC|$WC_OUT"
+expect_contains "CONFIG-7a …saying so" "unknown row kind 'step0'" "$WC_ERR"
+CFG_STEP0="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/0.md"
+expect_contains "CONFIG-8 steps/0.md says Step 0's settings are the first section of Step 1's card" \
+  "the first section of Step 1's card" "$(tr '\n' ' ' < "$CFG_STEP0")"
+expect_absent "CONFIG-8a …and carries no Step 0 card of its own" "Step 0 · Plan Configuration" "$(cat "$CFG_STEP0")"
+
+# §SCALE (AC-5.2): `scale <value> — <two sentences>`, from the plan's `scale-recommendation:` line
+CFG_REC_LONG="A task: one tree, one session, no wave of rows behind it. The ask names one file and one behaviour, and nothing in it needs a second session."
+cfg_flat() { printf '%s\n' "$1" | tr '\n' ' ' | tr -s ' '; }
+cfg_plan "scale-recommendation: \"${CFG_REC_LONG}\""
+whole_card step1 "$CFG_REQ"; CFG_CL="$WC_OUT"
+expect_contains "SCALE-1 §SCALE the scale line reads scale <value> — the two sentences the plan recorded" \
+  "scale task — ${CFG_REC_LONG}" "$(cfg_flat "$(cfg_block "$CFG_CL")")"
+expect_empty "SCALE-1a …folded inside the budget" "$(over_budget "$(cfg_block "$CFG_CL")")"
+cfg_plan ""
+whole_card step1 "$CFG_REQ"
+expect_contains "SCALE-2 with no scale-recommendation: line the scale line says none was recorded" \
+  "scale task — (no recommendation recorded)" "$(cfg_flat "$(cfg_block "$WC_OUT")")"
+cfg_plan "scale-recommendation: \"${CFG_REC_SHORT}\""
+
+# §COUNTS (AC-10.1): 6 deferred and 24 debt lines in the newest continuation, one line of counts, none of the 30
+CNT_D="${CARD_SANDBOX}/counts-proj/.bionic/docs"
+mkdir -p "$CNT_D/record/wave-5-e" "$CNT_D/specs/epic-9"
+{
+  printf '%s\n' "# continuation — wave-5-e" "" "## Deferrals" ""
+  i=1; while [ "$i" -le 6 ]; do
+    printf 'deferred: record/wave-5-e/rev.md#%s S3 on "counted deferral number %s" stated="-" from=wave-5-e\n' "$i" "$i"
+    i=$((i + 1)); done
+  i=1; while [ "$i" -le 24 ]; do
+    printf 'debt: counted_concept_%s duplicate "lib/c%s.sh:1" touches=1 raised-by=record/wave-5-e/critic.md from=wave-5-e\n' "$i" "$i"
+    i=$((i + 1)); done
+} > "$CNT_D/record/wave-5-e/continuation.md"
+CNT_REQ="$CNT_D/specs/epic-9/wave-6-f.requirements.md"
+cp "$REQ_FIX" "$CNT_REQ"
+printf '%s\n' "" "## Inherited deferrals" "" "adopted: record/wave-5-e/rev.md#1 as REQ-1" \
+  "adopted: record/wave-5-e/rev.md#2 as REQ-2" "again: record/wave-5-e/rev.md#3" \
+  "closed: record/wave-5-e/rev.md#4 fixed already" >> "$CNT_REQ"
+expect_eq "COUNTS-0 precondition: the fixture continuation carries 6 deferred and 24 debt lines" "6|24" \
+  "$(/usr/bin/grep -c '^deferred: ' "$CNT_D/record/wave-5-e/continuation.md" | tr -d ' ')|$(/usr/bin/grep -c '^debt: ' "$CNT_D/record/wave-5-e/continuation.md" | tr -d ' ')"
+whole_card step1 "$CNT_REQ"; CNT_C="$WC_OUT"
+expect_eq "COUNTS-1 §COUNTS exit 0 and one Inherited line" "0|1" "$WC_RC|$(inh_heads "$CNT_C")"
+expect_eq "COUNTS-2 …carrying the counts and the section that holds the list" \
+  "Inherited  30 inherited · 2 adopted · 1 carried · 1 closed · listed in .bionic/docs/record/wave-5-e/continuation.md#Deferrals" \
+  "$(inh_line "$CNT_C")"
+expect_eq "COUNTS-3 …and none of the 30 lines: no deferral sentence, no debt concept" "0|0" \
+  "$(printf '%s\n' "$CNT_C" | /usr/bin/grep -c 'counted deferral number' | tr -d ' ')|$(printf '%s\n' "$CNT_C" | /usr/bin/grep -c 'counted_concept_' | tr -d ' ')"
+CNT_STEP1="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/1.md"
+expect_true "COUNTS-4 steps/1.md did not grow (2514 B at T17's base, 67fa9d10)" test "$(wc -c < "$CNT_STEP1" | tr -d ' ')" -le 2514
+expect_contains "COUNTS-4a …and says the card prints one Inherited line of counts" "one \`Inherited\` line" "$(tr '\n' ' ' < "$CNT_STEP1")"
 
 # ============================================================
 section "UNTAGGED — wave-35 T8 (REQ-6 AC-6.6; D15): the Step-2 card refuses an untagged decision bullet and an ADR line without its (D<n>) group, as it refuses a requirement with no provenance"

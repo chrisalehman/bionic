@@ -1825,14 +1825,16 @@ proof_regression() {
 }
 
 # facts_owed <rigor> <scale> [<tree>] [<plan>] -> one line per fact a run owes, exit 0; nothing and
-# exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27
-# T9; D2):
+# exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is no row of the scale profile
+# (wave-27 T9; D2):
 #
 #     floor                                          the full run, proof_state's question; not
 #                                                    dealt when <plan> reads `regression: no`
 #                                                    (proof_regression, wave-31 T27; REQ-12 AC-12.2)
 #     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
-#     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
+#     review<TAB><question><TAB><role><TAB>whole     one more per code question where the scale's
+#                                                    dealing cell reads piece+whole (D10; wave-38
+#                                                    T16, D25: lib/scale.sh, the wave row)
 #     check                                          when <tree>'s .bionic/config.yaml names a
 #                                                    release-check: command (wave-27 T16; D12)
 #     debt<TAB><suite><TAB><token>                   one per suite and token the run's landing
@@ -1844,7 +1846,7 @@ proof_regression() {
 # the rigor's: it is owed only when the caller names the project root whose configuration declares
 # it, as facts_state does, so the dealing of a rigor alone is the same in every project.
 facts_owed() {
-  local owed r="" floor=1
+  local owed r="" floor=1 dealing
   # THE WORD IS READ AS ITS LEVEL (wave-28 T44; wave-30 T11, D1). The dealing is keyed by the level
   # words themselves, so the plan's word is read through lib/run.sh `rigor_level` and a word that is
   # no level deals nothing. A copy of this file read where run.sh is not beside it (a suite's
@@ -1856,16 +1858,27 @@ facts_owed() {
     r="$(rigor_level "${1:-}" 2>/dev/null)" || r=""
   fi
   [ -z "${4:-}" ] || [ "$(proof_regression "$4")" != no ] || floor=0
-  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v s="${2:-}" -v floor="$floor" '
+  # THE SCALE'S READS ARE ITS DEALING CELL (wave-38 T16; D25): `piece`, or `piece+whole` for one more
+  # read of the whole per code question, from lib/scale.sh. WHO reads stays PROOF_DEALING's, per rigor.
+  # A scale the profile does not hold deals nothing. A copy of this file read where scale.sh is not
+  # beside it (a suite's doctored copy, as for run.sh above) has no profile to ask: it deals a piece
+  # read per question for a non-empty scale word, the reading with no row's extra read in it.
+  declare -F scale_cell >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/scale.sh" >/dev/null 2>&1
+  if declare -F scale_cell >/dev/null 2>&1; then
+    dealing="$(scale_cell "${2:-}" dealing 2>/dev/null)" || return 1
+  else
+    [ -n "${2:-}" ] || return 1
+    dealing=piece
+  fi
+  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v dealing="$dealing" -v floor="$floor" '
     BEGIN {
-      if (s != "task" && s != "wave" && s != "epic") exit 1
       n = split(ENVIRON["PROOF_D"], d, " ")
       for (i = 1; i <= n; i++) if (r != "" && index(d[i], r "=") == 1) roles = substr(d[i], length(r) + 2)
       if (roles == "") exit 1
       m = split(ENVIRON["PROOF_Q"], q, " "); split(roles, role, ",")
       if (floor == 1) print "regression"
       for (i = 1; i <= m; i++) print "review\t" q[i] "\t" role[i] "\tpiece"
-      if (s == "wave")
+      if (dealing == "piece+whole")
         for (i = 1; i <= m; i++) if (index(" " ENVIRON["PROOF_C"] " ", " " q[i] " ")) print "review\t" q[i] "\t" role[i] "\twhole"
     }')" || return 1
   printf '%s\n' "$owed"

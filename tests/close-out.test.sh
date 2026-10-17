@@ -832,12 +832,12 @@ P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; adva
 run_close "$P0R" check
 expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
 expect_eq "0r2: …with 1.8.3's own wording" "yes" \
-  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to")"
+  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<NN>-<slug> shaped (the wave scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to")"
 
 run_close "$P0R" run
 expect_eq "0r3: run refuses identically" "2" "$CO_RC"
 expect_eq "0r4: …with the same wording" "yes" \
-  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to")"
+  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<NN>-<slug> shaped (the wave scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to")"
 
 # A table WITH the worktree column never derives a wave number at all — the register
 # names its own trees — so the same non-wave-shaped working-branch is untouched there.
@@ -876,11 +876,45 @@ expect_eq "AB0: the fixture really is task-scale (so a pass here is not the wave
   "$(grep -q '^scale: task$' "$PAB/$PLAN_REL" && echo yes || echo no)"
 run_close "$PAB" check
 expect_eq "AB1: check on fixit/x is not refused" "0" "$CO_RC"
-expect_eq "AB2: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not wave/<digits>-<slug> shaped")"
+expect_eq "AB2: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
 expect_eq "AB3: …and announces no wt/-* census fallback" "no" "$(contains "$CO_OUT" "wt/-*")"
 run_close "$PAB" run
 expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
-expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not wave/<digits>-<slug> shaped")"
+expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
+
+# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). The task row's branch cell is
+# `any` and its integrate cell `pr`: a task-scale plan on `fix/x`, NOT merged, closes; close-out
+# merges nothing, prints the `gh pr create` command for the working branch against the
+# integration branch and records it in the continuation. It never runs it. The wave-scale pair
+# (0r above) still refuses a branch outside its `wave/<NN>-<slug>` cell.
+mk_task_pr_fixture() {
+  local name="$1" working="$2" p
+  p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
+  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"
+  (
+    in_fixture "$p" || exit 1
+    git checkout -q -b "$working"
+    printf 'late fix\n' >> file.txt
+    git commit -q -am "late fix" >/dev/null 2>&1
+    git checkout -q main
+  )
+  plant_facts "$p"
+  printf '%s\n' "$p"
+}
+PPR="$(mk_task_pr_fixture ppr "fix/x")"
+PPR_MAIN="$(git -C "$PPR" rev-parse main)"
+expect_eq "PR0: the fixture's fix/x is not reachable from main (so the PR act is what passes)" "no" \
+  "$(git -C "$PPR" merge-base --is-ancestor fix/x main && echo yes || echo no)"
+run_close "$PPR" check
+expect_eq "PR1: check on an unmerged task-scale fix/x is not refused" "0" "$CO_RC"
+expect_eq "PR2: …its merge line is the PR act, with the command" "yes" \
+  "$(contains "$CO_OUT" "merge: pr — gh pr create --base main --head fix/x")"
+run_close "$PPR" run
+expect_eq "PR3: run closes with rc 0" "0" "$CO_RC"
+expect_eq "PR4: …prints the command" "yes" "$(contains "$CO_OUT" "gh pr create --base main --head fix/x")"
+expect_eq "PR5: …records it in the continuation" "yes" \
+  "$(grep -qF 'gh pr create --base main --head fix/x' "$PPR/$CONT_REL" 2>/dev/null && echo yes || echo no)"
+expect_eq "PR6: …and merges nothing: main is where it was" "$PPR_MAIN" "$(git -C "$PPR" rev-parse main)"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
@@ -2534,7 +2568,14 @@ printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-b
 DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
 expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \
   "$DL_CRC|$(cat "$SANDBOX/dl-card.err")"
-expect_contains "DEBT-LINES-4b …listing the corrected debt line among the inherited ones" "hole_x hole" "$DL_CARD"
+# ONE LINE OF COUNTS (wave-38 T17; D5, AC-10.1): the card counts the continuation's deferred and debt lines and
+# prints none of them; DEBT-LINES-4's exit 0 is the proof the corrected line parses.
+DL_N="$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c -e '^deferred: ' -e '^debt: ' | tr -d ' ')"
+expect_eq "DEBT-LINES-4a precondition: the continuation carries the three debt lines among its inherited ones" "3" \
+  "$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c '^debt: ' | tr -d ' ')"
+expect_contains "DEBT-LINES-4b …and the card counts every one of its lines in one Inherited line" \
+  "Inherited  ${DL_N} inherited · 0 adopted · 0 carried · 0 closed · listed in" "$DL_CARD"
+expect_absent "DEBT-LINES-4c …printing none of them, the corrected debt line included" "hole_x hole" "$DL_CARD"
 
 # ============================================================
 section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"

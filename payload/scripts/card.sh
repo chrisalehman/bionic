@@ -45,8 +45,8 @@
 # USAGE
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
-#     bash card.sh rigor <word>                         (the Step 0 card's rigor line)
-#     bash card.sh regression <scale> [<plan>]          (the Step 0 card's regression line)
+#     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
+#     bash card.sh regression <scale> [<plan>]          (the regression line Configuration prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #
@@ -90,6 +90,9 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # the regex `debt add` holds each line to and close-out carries by, never a third copy of it here.
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/debt.sh"
+# THE SCALE PROFILE (wave-38 T16; D25): the Step 0 regression line's default is the scale's regression cell.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/scale.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The scales
 # differ in their artifacts and never in the `## Tasks` ledger (wave-31 T5, D2): a task-scale
@@ -1101,14 +1104,15 @@ _card_artifact_rel() {  # <path as given by the caller>
 # (a task-scale run, a spec written before the tree existed) and the card's job
 # is to show it as one, not to infer a branch from the checkout the renderer
 # happens to be standing in.
-_card_branches() {
-  local wb="$WCARD_WB" ib="$WCARD_IB" from=""
+_card_branches() {  # [<indent of the heading, 2 by default>]
+  local wb="$WCARD_WB" ib="$WCARD_IB" from="" ind="${1:-2}"
   [ -n "$wb" ] || wb="not declared"
   [ -n "$ib" ] || ib="not declared"
   [ -n "$WCARD_BASE" ] && from="(from ${WCARD_BASE})"
-  printf '  Branches\n'
-  _card_rstrip "    $(_card_pad working 14)$(_card_pad "$wb" 22)${from}"; printf '\n'
-  _card_rstrip "    $(_card_pad integration 14)$(_card_pad "$ib" 22)(Step 8 merges here)"; printf '\n'
+  printf '%sBranches\n' "$(_card_spaces "$ind")"
+  ind="$(_card_spaces $(( ind + 2 )))"
+  _card_rstrip "${ind}$(_card_pad working 14)$(_card_pad "$wb" 22)${from}"; printf '\n'
+  _card_rstrip "${ind}$(_card_pad integration 14)$(_card_pad "$ib" 22)(Step 8 merges here)"; printf '\n'
 }
 
 # ── THE REGRESSION LINE PRINTS THE PLAN'S VALUE (D4, AC-12.1; wave-31 T2, T28) ─────────────
@@ -1139,17 +1143,13 @@ _card_floor() {  # [<plan path>] -> the plan's regression: value, or "not declar
 }
 
 # THE STEP 0 CARD'S REGRESSION LINE (D4, AC-12.1). `card.sh regression <scale> [<plan>]` prints one line:
-# the scale's default, task no, wave yes, epic no, marked `(scale default)`; or, when the plan carries a
+# the scale's default, its regression cell in lib/scale.sh (wave-38 T16, D25), marked `(scale default)`; or, when the plan carries a
 # `regression-override:` line, the plan's own `regression:` value marked `(overridden)`. The override line
 # is presence-only: its fields are never parsed. An absent key, or any value but the exact `no`, reads
 # `yes`, as walls.sh and proof.sh read it (T27, A-T27-2).
 _card_regression_line() {  # <scale> [<plan>] -> the line; returns 1 on a word that is no scale
   local scale="$1" plan="${2:-}" d v
-  case "$scale" in
-    task|epic) d=no ;;
-    wave)      d=yes ;;
-    *)         return 1 ;;
-  esac
+  d="$(scale_cell "$scale" regression 2>/dev/null)" || return 1
   if [ -n "$(plan_frontmatter_get "$plan" regression-override)" ]; then
     v="$(plan_regression "$plan")"
     [ "$v" = "no" ] || v=yes
@@ -1462,7 +1462,7 @@ _card_chain_block() {  # <plan>
 # it is skipped however new it is, because close-out reads through this same function and the
 # run's own continuation may already be written when it does.
 #
-# ONE READER, TWO CALLERS. `step1` prints the `open` lines; close-out calls `card.sh inherited
+# ONE READER, TWO CALLERS. `step1` counts the lines by disposal; close-out calls `card.sh inherited
 # <requirements file>` and carries the `again` and `open` ones into the new continuation. The card
 # and the carry cannot disagree about what was left open, because they are one reading.
 _card_predecessor() {  # <docs root> <own wave slug> -> the newest other continuation, or nothing
@@ -1492,15 +1492,21 @@ _card_disposals() {  # <requirements file> -> `<adopted|again|closed>\t<id>\t<li
 #
 # A CARRIED DEBT LINE (wave-30 T32; REQ-11 AC-11.2) is read beside them: `debt: <concept> <kind> "<sites>"
 # touches=<N> raised-by=<record> from=<wave>`, close-out's co_debts form, prints `open\t<line>`, so the
-# Step 1 card lists it. One that does not parse (lib/debt.sh `DEBT_LINE_ERE`, wave-36 T13) prints
+# Step 1 card counts it. One that does not parse (lib/debt.sh `DEBT_LINE_ERE`, wave-36 T13) prints
 # `unknown\t<line>`. No disposal reaches it: it names
 # no id, and it is faced by `session-poker.sh debt adopt`, which writes it into the run's ledger.
-_card_inherited() {
-  local root cont slug
+_card_inherit_from() {  # <requirements file> -> the continuation its run inherits from, or nothing
+  local root slug
   root="$(_card_plan_root "$1")"
   [ -n "$root" ] || return 0
   slug="${1##*/}"; slug="${slug%.requirements.md}"
-  cont="$(_card_predecessor "$(docs_root "$root")" "$slug")"
+  _card_predecessor "$(docs_root "$root")" "$slug"
+}
+
+_card_inherited() {
+  local cont
+  [ -n "$(_card_plan_root "$1")" ] || return 0
+  cont="$(_card_inherit_from "$1")"
   [ -n "$cont" ] || cont=/dev/null
   CARD_DISPOSALS="$(_card_disposals "$1")" DEBT_LINE_ERE="$DEBT_LINE_ERE" awk '
     BEGIN {
@@ -1537,6 +1543,169 @@ _card_debt_refuse() {  # <the debt line>
   exit 2
 }
 
+# ── THE CONFIGURATION, THE STEP 1 CARD'S FIRST SECTION (wave-38 T17; D17, AC-1.7, AC-5.2) ──────
+#
+# ONE STOP WHERE THERE WERE TWO. Step 0 used to put its own card, a display the model TYPED from the plan it
+# had just written, and the user approved it minutes before approving the requirements. Step 0's acts still
+# run first (plan skeleton, bind, arm, branch); its settings are the first section of this card, RENDERED
+# from the plan's frontmatter, so one reply approves both and what is shown is what was written. No
+# `step0` verb exists. Every row folds through `_card_labelled`, so a long path stays inside the budget, and
+# an absent value prints `unknown` rather than dropping its line (the Step 0 display's rule).
+#
+# THE SOURCE IS THE PLAN BESIDE THE REQUIREMENTS FILE (A-T17-4): `<docs root>/plans/<the requirements
+# file's directory name>/<stem>.plan.md`, the file Step 0 wrote. A plan given as the artifact (task scale)
+# is its own source; with no such plan the artifact's own frontmatter answers.
+_card_config_src() {  # <artifact path as given> -> the file whose frontmatter the Configuration reads
+  local a="$1" root d cand
+  case "$a" in *.plan.md) printf '%s' "$a"; return 0 ;; esac
+  root="$(_card_plan_root "$a")"
+  if [ -n "$root" ]; then
+    d="$(dirname "$a")"; d="${d##*/}"
+    cand="$(docs_root "$root")/plans/${d}/$(_card_stem "$a").plan.md"
+    [ -f "$cand" ] && { printf '%s' "$cand"; return 0; }
+  fi
+  printf '%s' "$a"
+}
+
+# A CONFIGURATION ROW KEEPS ITS TWO-SPACE SEPARATORS while it fits (`value  (scale default)`, the Step 0
+# layout), and folds through `_card_labelled`, which joins words by one space, only when it does not.
+_card_cfg_row() {  # <indent> <label> <text> <label width>
+  _bionic_cols_into "$3"
+  if [ $(( $1 + $4 + BIONIC_COLS )) -le "$BIONIC_LINE_WIDTH" ]; then
+    _card_rstrip "$(_card_spaces "$1")$(_card_pad "$2" "$4")$3"; printf '\n'
+  else
+    _card_labelled "$@"
+  fi
+}
+
+_card_fm() {  # <key> -> the Configuration source's value, or `unknown`
+  local v
+  v="$(plan_frontmatter_get "$CARD_CFG" "$1")"
+  printf '%s' "${v:-unknown}"
+}
+
+# A REVIEW FIELD IS `(from rigor)` WHILE IT HOLDS ITS LEVEL'S DEFAULT (lib/run.sh holds the defaults), and
+# `(set)` once the user set another; an absent field reads as the default, as every reader reads it.
+_card_review_field() {  # <label> <value as written, or empty> <the level's default, or empty>
+  local v="$2"
+  [ -n "$v" ] || v="$3"
+  if [ -z "$v" ]; then _card_cfg_row 6 "$1" unknown 16
+  elif [ "$v" = "$3" ]; then _card_cfg_row 6 "$1" "$v  (from rigor)" 16
+  else _card_cfg_row 6 "$1" "$v  (set)" 16
+  fi
+}
+
+_card_model_of() {  # <model_plan value> <role> -> the tier it names for the role, or nothing
+  printf '%s\n' "$1" | tr ';' '\n' | sed -n "s/^[[:space:]]*$2=//p" | head -1 | sed 's/[[:space:]]*$//'
+}
+
+_card_config() {  # <artifact path as given> — the Configuration section; sets CARD_CFG
+  local root scale rig lvl v t rec docs mp r f m e
+  CARD_CFG="$(_card_config_src "$1")"
+  root="$(_card_plan_root "$CARD_CFG")"
+  scale="$(plan_frontmatter_get "$CARD_CFG" scale)"
+  rig="$(plan_frontmatter_get "$CARD_CFG" rigor)"
+  lvl="$(rigor_level "$rig" 2>/dev/null)"
+  # The branches are the plan's when it names them (`ready` and the walls read the plan).
+  if [ "$CARD_CFG" != "$1" ]; then
+    v="$(plan_working_branch "$CARD_CFG")"; [ -z "$v" ] || WCARD_WB="$v"
+    v="$(plan_frontmatter_get "$CARD_CFG" integration-branch)"; [ -z "$v" ] || WCARD_IB="$v"
+    v="$(plan_frontmatter_get "$CARD_CFG" base-sha)"; [ -z "$v" ] || WCARD_BASE="$v"
+  fi
+  printf '  Configuration\n'
+  v="$(plan_frontmatter_get "$CARD_CFG" seed)"
+  [ -z "$v" ] || _card_cfg_row 4 Seed "$v" 14
+  printf '    Run\n'
+  _card_cfg_row 6 intent "$(_card_fm intent)" 16
+  t="(scale default)"; [ -z "$(plan_frontmatter_get "$CARD_CFG" rigor-override)" ] || t="(overridden)"
+  v="$(_card_rigor_line "$rig")"; v="${v#review rigor: }"
+  [ -n "$lvl" ] || t=""
+  _card_cfg_row 6 rigor "${v}${t:+  $t}" 16
+  v="$(_card_regression_line "$scale" "$CARD_CFG" 2>/dev/null)" || v="unknown"
+  _card_cfg_row 6 regression "${v#regression }" 16
+  _card_review_field review-cadence "$(plan_frontmatter_get "$CARD_CFG" review-cadence)" \
+    "$([ -n "$lvl" ] && printf '%s' "$REVIEW_CADENCE_DEFAULT")"
+  _card_review_field fix-policy "$(plan_frontmatter_get "$CARD_CFG" fix-policy)" \
+    "$([ -n "$lvl" ] && printf '%s' "$FIX_POLICY_DEFAULT")"
+  _card_review_field fix-cap "$(plan_frontmatter_get "$CARD_CFG" fix-cap)" "$(fix_cap_default "$lvl" 2>/dev/null)"
+  # THE SCALE CARRIES ITS RECOMMENDATION (AC-5.2): two sentences Step 0 wrote as `scale-recommendation:`.
+  rec="$(plan_frontmatter_get "$CARD_CFG" scale-recommendation)"
+  _card_cfg_row 6 scale "${scale:-unknown} — ${rec:-(no recommendation recorded)}" 16
+  _card_cfg_row 6 name "$(_card_stem "$CARD_CFG")" 16
+  _card_branches 4
+  printf '    Paths\n'
+  if [ -n "$root" ]; then
+    _card_cfg_row 6 project "$root" 14
+    docs="$(docs_root "$root")"; docs="${docs#"$root"/}"
+    t="(default)"; [ -z "$(config_value "$root" docs-root "")" ] || t="(from config.yaml)"
+    _card_cfg_row 6 docs "$docs  $t" 14
+    _card_cfg_row 6 tmp ".bionic/tmp  (default)" 14
+    v="$(plan_frontmatter_get "$CARD_CFG" archive-root)"
+    if [ -z "$v" ]; then
+      t="(default)"; [ -z "$(config_value "$root" archive-root "")" ] || t="(from config.yaml)"
+      v="$(archive_root "$root")  $t"
+    fi
+    _card_cfg_row 6 archive "$v" 14
+  else
+    for v in project docs tmp archive; do _card_cfg_row 6 "$v" unknown 14; done
+  fi
+  printf '    Shape\n'
+  _card_cfg_row 6 surface "$(_card_fm surface_type)" 14
+  case "$(plan_frontmatter_get "$CARD_CFG" multi_agent)" in
+    true) v="multi-agent, tiered dispatch" ;; false) v="single-thread" ;; *) v=unknown ;;
+  esac
+  _card_cfg_row 6 agents "$v" 14
+  _card_cfg_row 6 deploy "$(_card_fm deploy_target)" 14
+  _card_cfg_row 6 worktree "$(_card_fm use_worktree)" 14
+  _card_cfg_row 6 cleanup "$(_card_fm cleanup_on_finish)" 14
+  printf '    Gates\n'
+  _card_cfg_row 6 walk "$(_card_fm walk)" 14
+  v="$(plan_frontmatter_get "$CARD_CFG" design-interview)"
+  case "$v" in
+    false*) v="${v#false}"; v="${v# }"; v="waived (${v:-the user})" ;;
+    *) v=required ;;
+  esac
+  _card_cfg_row 6 interview "$v" 14
+  v="answered from the run's workspace"
+  [ -z "$root" ] || [ "$(config_value "$root" permission-answers "")" != false ] || v=off
+  _card_cfg_row 6 permissions "$v" 14
+  # THE MODELS ARE model_plan's, AND A ROLE IT DOES NOT NAME RUNS AT ITS ROLE FILE'S MODEL (steps/0.md):
+  # each role file beside this script answers for the role model_plan leaves out, marked so.
+  printf '    Models\n'
+  mp="$(plan_frontmatter_get "$CARD_CFG" model_plan)"
+  v="$(_card_model_of "$mp" orchestrator)"
+  _card_cfg_row 6 orchestrator "${v:-not declared}" 20
+  for f in "${CARD_SELF_DIR}/../agents/"*.md; do
+    [ -f "$f" ] || continue
+    r="${f##*/}"; r="${r%.md}"
+    v="$(_card_model_of "$mp" "$r")"
+    if [ -z "$v" ]; then
+      m="$(awk '/^model:/ { print $2; exit }' "$f")"; e="$(awk '/^effort:/ { print $2; exit }' "$f")"
+      v="${m:-unknown}${e:+-$e}  (role file)"
+    fi
+    _card_cfg_row 6 "$r" "$v" 20
+  done
+}
+
+# ── THE INHERITED LEFTOVERS, ONE LINE OF COUNTS (wave-38 T17; D5, AC-10.1) ─────────────────────────────
+#
+# The card used to print every open line, 68 lines on wave-37's card. It counts them instead: every line
+# the newest continuation carries, then the adopted, carried (`again:`) and closed ones, and names the
+# section that holds the list, the continuation's `## Deferrals` (A-T17-1). No line is printed; close-out's
+# readers (`card.sh inherited`, `inherited-debt`) are unchanged.
+_card_inherited_line() {  # <the _card_inherited reading> <artifact path as given>
+  local root cont counts
+  root="$(_card_plan_root "$2")"
+  cont="$(_card_inherit_from "$2")"
+  counts="$(printf '%s\n' "$1" | awk -F'\t' '$1 != "" { n++ } $1 == "adopted" { a++ } $1 == "again" { c++ }
+    $1 == "closed" { k++ } END { printf "%d inherited · %d adopted · %d carried · %d closed", n, a, c, k }')"
+  if [ -n "$cont" ]; then
+    _card_labelled 2 Inherited "${counts} · listed in ${cont#"$root"/}#Deferrals" 11
+  else
+    _card_labelled 2 Inherited "${counts} · no closed run above this one" 11
+  fi
+}
+
 _card_step1() {  # <citation path> <artifact path as given>
   local inh l
   inh="$(_card_inherited "$2")"
@@ -1546,26 +1715,21 @@ _card_step1() {  # <citation path> <artifact path as given>
     debt:*) _card_debt_refuse "$l" ;;
     *) _card_inherit_refuse "$l" ;;
   esac
-  printf 'Step 1 · Requirements\n\n  Purpose\n'
+  printf 'Step 1 · Requirements\n\n'
+  _card_config "$2"
+  printf '\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
-  printf '\n'
-  _card_branches
   printf '\n'
   CARD_ROWS=( ${WCARD_RROW[@]+"${WCARD_RROW[@]}"} )
   _card_render_batch requirement
   printf '\n  Not Doing\n'
   local b
   for b in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do _card_fold_at 4 "$b"; done
-  # Each open line as written, folded only where the budget makes it (its next line starts at the
-  # same indent, and only a line's first fold starts `deferred:`).
-  printf '\n  Inherited deferrals\n'
-  while IFS= read -r l; do
-    [ "${l%%"$CARD_TAB"*}" = open ] || continue
-    _card_fold_at 4 "${l#*"$CARD_TAB"}"
-  done <<< "$inh"
+  printf '\n'
+  _card_inherited_line "$inh" "$2"
   printf '\n  Artifacts\n    requirements  %s\n\n' "$1"
   printf '%s\n' "$CARD_Q_STEP1"
-  printf 'explain <requirement>\n'
+  printf 'explain <requirement> · set <flag>=<value>\n'
 }
 
 # THE TASK-SCALE STEP-2 CARD IS A PARAGRAPH, BECAUSE THE DESIGN IS ONE (D8). A wave
@@ -1983,8 +2147,8 @@ case "$1" in
     exit 0 ;;
 esac
 
-[ "$#" -le 1 ] || _card_usage "one row kind at a time (got $#)"
 _card_spec "$1" || _card_usage "unknown row kind '$1'"
+[ "$#" -le 1 ] || _card_usage "one row kind at a time (got $#)"
 
 CARD_ROWS=()
 while IFS= read -r _card_row || [ -n "${_card_row:-}" ]; do

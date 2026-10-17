@@ -86,17 +86,17 @@ Rigor follows one principle: the moment of a check is set by its cost model; mac
 | becomes a row unasked (`fix-policy:`) | S1 + S2-on, in-diff | S1 + S2-on, in-diff |
 | cap on review-born rows (`fix-cap:`) | 2 | 10% of the plan |
 
-At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` holds the review findings disposition and turns a reading into a fact.
+`steps/6.md` holds the review findings disposition and turns a reading into a fact.
 
-**scale** — the decomposition unit.
+**scale** — the decomposition unit; rows are `lib/scale.sh`'s. At `pr`, close-out merges nothing and records `gh pr create`; at `piece+whole`, each code question also owes `scope=whole`.
 
-| Scale | Steps | Artifacts | Branch |
-|---|---|---|---|
-| `task` | Full set, compressed. Several per session. | ONE session plan with a `## Tasks` ledger; no per-task plan or spec. | The session's branch. |
-| `wave` | Full set (0–9). Default. | One wave spec + plan; tasks inside Step 4. | Wave branch off the epic integration branch; merges back at Step 8. |
-| `epic` | 0–3 only. | `epic.spec.md` + `epic.plan.md`; carves waves. Does NOT run 4–9. | Owns `epic/NN-<slug>`; merges to mainline once, at close. |
+| Scale | Steps | Artifacts | Patrol | Rigor | Writers | Regression | Branch | Integrate | Dealing |
+|---|---|---|---|---|---|---|---|---|---|
+| `task` | 0–9 | one plan + `## Tasks` | no | single | 3 | no | any | pr | piece |
+| `wave` | 0–9, the default | wave spec + plan | yes | double | uncapped | yes | `wave/<NN>-<slug>` | merge | piece+whole |
+| `epic` | 0–3; carves waves | epic spec + plan | yes | double | uncapped | no | `epic/<NN>-<slug>` | merge | piece |
 
-**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→`single` and `build`/`refactor`/`tune`→`double`; at `wave` and above, `double`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `double`, `spike` is CAPPED at `single`), flag (security-touching or privacy/vulnerable-population work floors at `double`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
+**Rigor floors.** Default is the Rigor cell: at `task`, `single` unless a flag raises it; at `wave` and above, `double`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `double`, `spike` is CAPPED at `single`), flag (security-touching or privacy/vulnerable-population work floors at `double`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
 
 Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. The wave that owns the integration point carries the flag floor.
 
