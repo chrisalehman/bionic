@@ -5067,4 +5067,47 @@ expect_eq "LH-6 precondition: the plan carries the regression proof the integrat
 expect_eq "LH-6b at Step 8, a live row past its reading and a floor to judge: the review row is ready, and the answer exits 0" "yes 0" \
   "$(has_line "$(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8)" T3) $(UNITS_LIVE_HEAD="$LH_C" call units_ready "$LH_FLOOR" 8 >/dev/null; printf '%s' "$CALL_RC")"
 
+# ============================================================
+section "§SLOTS — wave-38 T19: suites and lands-on are columns the units contract knows; task-set takes them and a review row's brief renders its Suites from the cell (REQ-11 AC-11.3; L7)"
+# ============================================================
+#
+# fails-when: `task-set suites=` or `lands-on=` is refused on a header that has the column; or `units_has_column`
+# answers no for a header that carries one; or `brief` of a review row renders its Suites from anything but the cell.
+# OPTIONAL MEANS ABSENT IS NOT A FAULT: a table without the two columns is valid, does not know them, and
+# `units_validate` names no missing column for it. The record stays thirteen fields wide: the two cells are read by
+# header name (`poker_brief_cell`), as `artifact` is.
+# FIXTURE FIDELITY: a bound task-scale world (`os_world`, the plan written by tests/lib/plan-fixture.sh); its table is
+# widened by two columns and a review row T3 added; the verbs are the product's own (task-set, brief).
+SL_R="$(os_world slots 4)"; SL_P="$SL_R/$OS_PLAN_REL"
+awk '/^## / { t = ($0 ~ /^## Tasks/) } t && /^\| id \|/ { $0 = $0 " suites | lands-on |" } t && /^\|---/ { $0 = $0 "---|---|" } t && /^\| T[0-9]+ \|/ { $0 = $0 " — | — |" }
+     { print } ' "$SL_P" > "$SL_P.new"
+awk '{ print } /^\| T2 \|/ { print "| T3 | 6 | review | the reading | critic | — | — | 20 | REQ-1 | — | — | — | pending | — | — |" }' "$SL_P.new" > "$SL_P" && rm -f "$SL_P.new"
+( cd "$SL_R" && git add -f "$SL_P" && git commit -qm "slots fixture" ) >/dev/null 2>&1
+sl_cell() {  # <row> <cell number, 1-based> -> that cell of the plan's own text, trimmed
+  awk -F'|' -v id="$1" -v c="$(( $2 + 1 ))" '/^\| T[0-9]+ \|/ { i = $2; gsub(/[ \t]/, "", i); if (i == id) { v = $c; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit } }' "$SL_P"
+}
+sl_poke() { ( cd "$SL_R" && CLAUDE_CODE_SESSION_ID="$OS_SID" bash "$OS_POKER" "$@" 2>&1 ); SL_RC=$?; }
+expect_eq "SL-0 precondition: the extractor reads T3's status and the header carries both columns" "pending|1" \
+  "$(sl_cell T3 13)|$(/usr/bin/grep -c '^| id .*| suites | lands-on |$' "$SL_P")"
+expect_eq "SL-1 AC-11.3 units_has_column knows suites on a header that has it" "0" "$(call_rc units_has_column "$SL_P" suites)"
+expect_eq "SL-1b …and lands-on" "0" "$(call_rc units_has_column "$SL_P" lands-on)"
+expect_eq "SL-1c control: a header without them does not know them (the plan os_world wrote)" "1|1" \
+  "$(call_rc units_has_column "$OS_R4/$OS_PLAN_REL" suites)|$(call_rc units_has_column "$OS_R4/$OS_PLAN_REL" lands-on)"
+expect_eq "SL-1d …and a name no header carries is no column either" "1" "$(call_rc units_has_column "$SL_P" nonesuch)"
+expect_eq "SL-1e …and the widened table validates clean (an optional column is no fault)" "" "$(call units_validate "$SL_P")"
+
+sl_poke task-set T3 suites=a.test.sh lands-on=a.test.sh
+expect_eq "SL-2 AC-11.3 task-set T3 suites=a.test.sh lands-on=a.test.sh is accepted (exit 0)" "0" "$SL_RC"
+expect_eq "SL-2b …and the cells are what the call set" "a.test.sh|a.test.sh" "$(sl_cell T3 14)|$(sl_cell T3 15)"
+sl_poke task-set T3 suites='a.test.sh, b.test.sh'
+expect_eq "SL-2c a second call sets the one cell and leaves the other (exit 0)" "0|a.test.sh, b.test.sh|a.test.sh" \
+  "$SL_RC|$(sl_cell T3 14)|$(sl_cell T3 15)"
+sl_poke task-set T3 colour=red
+expect_eq "SL-2d control: a name no header carries is still refused (exit 1)" "1" "$SL_RC"
+sl_poke brief T3
+SL_BRIEF="$SL_R/.bionic/docs/record/wave-01-fixture/briefs/T3.md"
+expect_eq "SL-3 AC-11.3 brief of the review row renders Suites from the cell (positive: Row reads)" "T3|a.test.sh, b.test.sh" \
+  "$(awk -F': ' '$1 == "Row" { print $2 }' "$SL_BRIEF" 2>/dev/null)|$(awk -F': ' '$1 == "Suites" { print $2 }' "$SL_BRIEF" 2>/dev/null)"
+expect_eq "SL-3b …and Lands-on from its cell" "a.test.sh" "$(awk -F': ' '$1 == "Lands-on" { print $2 }' "$SL_BRIEF" 2>/dev/null)"
+
 finish
