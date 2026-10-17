@@ -507,8 +507,8 @@ if [ -n "${LL_MUTANT:-}" ]; then eval "$(declare -f "$LL_MUTANT_FN" | sed "$LL_M
 tree="$(git rev-parse --show-toplevel)"
 line_ready "$tree" "$(worktree_root "$tree")" "$(session_id)" "${2:-}" "again"
 RD
-ll_drive() {  # <root> <row> <out file> [within] — the driver, in the background; rc in <out>.rc
-  ( cd "$1/.worktrees/$2" && bash "$LL_RD" "$REPO/payload/scripts/lib" "${4:-}" > "$3" 2>&1; echo $? > "$3.rc" ) &
+ll_drive() {  # <root> <row> <out file> [within] — the driver, in the background; rc in <out>.rc. LL_LIB names another library copy
+  ( cd "$1/.worktrees/$2" && bash "$LL_RD" "${LL_LIB:-$REPO/payload/scripts/lib}" "${4:-}" > "$3" 2>&1; echo $? > "$3.rc" ) &
 }
 ll_lines() { if [ -f "$1" ]; then awk 'END { print NR }' "$1"; else echo 0; fi; }   # <file>
 ll_wait_lines() {  # <file> <n> [tenths] -> 0 once the file has at least <n> lines
@@ -1991,13 +1991,22 @@ ll_widths() {  # <root> <commit> -> `suite:result:width` of each verdict on <com
   done | sed 's/ $//'
 }
 world_machine 3 8192 40 0.5
+# THE PROMISE PLANTED AT 1.00 (wave-38 T5; A-T5-r2-3): the gate now promises each landing run the measured
+# suite cost (resources.sh CORES_PER_SUITE, 1.61), and two such runs do not fit 2.4 cores. This section pins the
+# drain's J against the old one-core promise, so it drives a library copy whose CORES_PER_SUITE is 1.00, as
+# gate.test.sh's width-ask mutant does; T6 restates the section to the gate's own answer.
+DR_LIB="$WORLD_ROOT/lib-drain"
+rm -rf "$DR_LIB"; cp -R "$REPO/payload/scripts/lib" "$DR_LIB"
+sed 's/^CORES_PER_SUITE=[0-9.]*/CORES_PER_SUITE=1.00/' "$DR_LIB/resources.sh" > "$DR_LIB/resources.sh.m" && mv "$DR_LIB/resources.sh.m" "$DR_LIB/resources.sh"
+expect_eq "(dr0-cost) the drain's library copy promises 1.00 a run, the shipped one does not" "1.00 no" \
+  "$(bash -c '. "$1/resources.sh" 2>/dev/null; _res_suite_cores' _ "$DR_LIB") $(bash -c '. "$1/resources.sh" 2>/dev/null; [ "$(_res_suite_cores)" = 1.00 ] && echo yes || echo no' _ "$REPO/payload/scripts/lib")"
 RDR="$(ll_drain_world d)"; HDR="$(ll_head "$RDR")"
 # THE SPY IS NO MUTATION, so it is no shaped anchor: framework §21 checks this suite's anchors on a copy
 # that holds line.sh and not worktree.sh. Its precondition is the row below, and (dr4)'s first row.
 DR_SPY='s/local t="/echo "$1 $2" >> "$LL_SIG\/d.points"; local t="/'
 expect_contains "(dr0-pre) the spy is in landing_tree_point as the driver defines it" 'echo "$1 $2" >> "$LL_SIG/d.points"; local t=' \
   "$(declare -f landing_tree_point | sed "$DR_SPY")"
-LL_MUTANT="$DR_SPY" LL_MUTANT_FN=landing_tree_point ll_drive "$RDR" T1 "$WORLD_ROOT/d.out"; DR_BG=$!
+LL_LIB="$DR_LIB" LL_MUTANT="$DR_SPY" LL_MUTANT_FN=landing_tree_point ll_drive "$RDR" T1 "$WORLD_ROOT/d.out"; DR_BG=$!
 expect_true "(dr1-pre) a ran and was judged, and c started while b waits" ll_wait_lines "$LL_SIG/d-c.runs" 1 300
 expect_eq "(dr1) two runner jobs live at once: b's and c's landings admitted, neither ended" "b.test.sh c.test.sh" "$(ll_live_landings)"
 expect_eq "(dr1) …and no third asked while two run (J=2): b and c started once each, d not at all" "1 1 0" \
@@ -2027,7 +2036,7 @@ expect_eq "(dr5) a ran twice: on the candidate in that tree, then at the head in
 # the candidate.
 RDM="$(ll_drain_world dm)"; HDM="$(ll_head "$RDM")"
 anchor fn payload/scripts/lib/line.sh 'landing_tree_point "$jt" "$head"' _line_red_owner 'landing_tree_point "$_LINE_LT" "$head"'
-LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_red_owner ll_drive "$RDM" T1 "$WORLD_ROOT/dm.out"; DM_BG=$!
+LL_LIB="$DR_LIB" LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_red_owner ll_drive "$RDM" T1 "$WORLD_ROOT/dm.out"; DM_BG=$!
 ll_wait_lines "$LL_SIG/dm-c.runs" 1 300
 touch "$LL_SIG/dm-b.go" "$LL_SIG/dm-c.go" "$LL_SIG/dm-d.go"
 ll_wait_file "$WORLD_ROOT/dm.out.rc" 600 || ll_kill_bg "$DM_BG"
