@@ -1591,4 +1591,29 @@ has   "24.15 two open runs, the newest with a pointer: the door names its file" 
 hasnt "24.16 …in place of the invoke-then-bind header (24.15 read the same output)" "open runs exist here — invoke /bionic:canonical-sdlc, then bind" "$OUT"
 has   "24.17 …and the open runs are still listed" "  ${PLAN24B_OLD#$P24B/.bionic/docs/}" "$OUT"
 
+
+section "25 — the standing orders print in the engaged block, every item, in config order (wave-38 T18; AC-7.1, D17)"
+# A standing order is the user's standing answer (D17), so an engaged start prints each item of
+# `standing-orders:` as `bionic: standing order — <item>` after the bind/door lines and before the arm
+# line, read by lib/roots.sh `config_section`; none when the list is empty. tests/standing-orders.test.sh
+# holds the three surfaces to one list; this restates the block's own rows.
+P25=$(make_env 3600s)
+printf 'standing-orders:\n  - hand test in progress | refuse: suite\n  - "no force-push while the user reviews"\n' >> "$P25/.bionic/config.yaml"
+PLAN25="$(write_open_plan "$P25")"
+plant_bound "$P25" "$CUR_SID" "$PLAN25"
+OUT=$(drive "$P25" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "25.1 an engaged, bound clear with two orders: exit 0" "0" "$(rc)"
+eq    "25.2 …both orders, in config order, quotes stripped, the refuse: tail kept" \
+  "bionic: standing order — hand test in progress | refuse: suite
+bionic: standing order — no force-push while the user reviews" "$(printf '%s\n' "$OUT" | grep -F 'bionic: standing order — ')"
+eq    "25.3 …after the bound line and its step file, before the arm line" "bound step order order arm" \
+  "$(printf '%s\n' "$OUT" | awk 'index($0, "bionic: bound to ") == 1 { o = o " bound" } index($0, "  step file: ") == 1 { o = o " step" }
+     index($0, "bionic: standing order — ") == 1 { o = o " order" } index($0, "re-arm: ") == 1 { o = o " arm" } END { sub(/^ /, "", o); print o }')"
+P25N=$(make_env 3600s)
+PLAN25N="$(write_open_plan "$P25N")"
+plant_bound "$P25N" "$CUR_SID" "$PLAN25N"
+OUT=$(drive "$P25N" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "25.4 a config with no standing-orders: the bound line as before" "bionic: bound to" "$OUT"
+hasnt "25.5 …and no order line (25.2 read the same extractor)" "bionic: standing order — " "$OUT"
+
 finish
