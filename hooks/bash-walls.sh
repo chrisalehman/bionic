@@ -401,7 +401,19 @@ $BIONIC_ACK_WRITER's next tool result carries it, and its commit and ready wait 
   return 2
 }
 
+# THE STANDING ORDERS, gathered for `wall_standing_orders` (wave-38 T18; REQ-7 AC-7.2, D17). The user's
+# `standing-orders:` list in .bionic/config.yaml, read once by its one reader (lib/roots.sh `config_section`,
+# pure bash, no fork) and handed in as the section, one item per line; the wall reads no config itself (the
+# freeze). It runs FIRST in the fold: the composed refusal's headline is then the user's standing word,
+# ahead of a farm-out redirect a hand-test lock forbids as well. The order changes how a refusal reads, not
+# what is refused.
+WALL_STANDING_ORDERS="$(config_section "$BIONIC_ROOT" standing-orders 2>/dev/null)" || WALL_STANDING_ORDERS=""
+_bw_standing_orders() {  # <event> -> the wall over the command and the section gathered above
+  wall_standing_orders "$COMMAND" "$WALL_STANDING_ORDERS"
+}
+
 bionic_fold "$EVENT" \
+  _bw_standing_orders \
   wall_protect_main \
   wall_protect_database \
   wall_evidence_gate \

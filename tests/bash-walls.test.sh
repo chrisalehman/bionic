@@ -3589,7 +3589,7 @@ SO_HEAD="$(deny_reason)"; [ -n "$SO_HEAD" ] || SO_HEAD="$ERR"
 expect_eq "SO.1 a suite run under a refuse: suite order is refused" "yes" \
   "$([ "$ST" = 2 ] || [ "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)" = deny ] && echo yes || echo no)"
 expect_eq "SO.2 …and the order's line is the headline" \
-  "bionic: command refused — standing order: hand test in progress (lift it in config.yaml standing-orders)" \
+  "bionic: command refused — standing order: hand test in progress (lift it in config.yaml)" \
   "$(printf '%s\n' "$SO_HEAD" | head -1)"
 run_hook "$(mk_payload "$R_SO" 'git status')"
 expect_status "SO.3 git status passes under the same order" 0 "$ST"
@@ -3599,7 +3599,7 @@ run_hook "$(mk_payload "$R_SO" 'tests/run.sh --only x.test.sh')"
 expect_absent "SO.5 an order without a refuse: tail refuses nothing (SO.2 read the same streams)" "standing order" "$OUT$ERR"
 SO_BODY="$(awk '/^wall_standing_orders\(\)/ { f = 1 } f { print } f && /^}/ { exit }' "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh")"
 expect_contains "SO.6 precondition: the wall's body is read" "fold_block" "$SO_BODY"
-expect_no_regex "SO.7 the freeze: the wall names no config reader, file or root" 'config_section|config_value|config\.yaml|BIONIC_ROOT' "$SO_BODY"
+expect_no_regex "SO.7 the freeze: the wall names no config reader, no root and reads no file by redirect" 'config_section|config_value|BIONIC_ROOT|BIONIC_CWD|(^|[^<])<[[:space:]]*["$/.]' "$SO_BODY"
 expect_regex "SO.8 …the preamble reads the section and hands it in" \
   'WALL_STANDING_ORDERS="\$\(config_section "\$BIONIC_ROOT" standing-orders' "$(cat "$HOOK")"
 
