@@ -4212,42 +4212,50 @@ expect_eq "FD-3 control: a code commit with no run recorded at it is uncovered" 
 expect_contains "FD-3b …naming it" "commit ${FO_D3:0:12} (no landing row) is not proved: no suite run is recorded at it" "$FO_ST"
 
 # ============================================================
-section "§SLUG: one reader names a plan's slug, and maps a plan verb's dry copy to its origin only under the origin's guard (wave-37 T2; REQ-9 AC-9.2; D12)"
+section "§SLUG: one reader names a plan's slug, and has no dry-copy arm: no production caller names a session, and a name-only strip is never made (wave-37 T2; wave-38 T19 REQ-11 AC-11.5; D12)"
 # ============================================================
-# lib/proof.sh `proof_plan_slug <plan> [<sid> <marker>]` is the plan's name less `.plan.md`. Given a session and its
-# marker, a plan verb's copy `<plan>.<verb>-dry.<pid>` reads as its origin's slug when all three of
-# `proof_debt_origin`'s conditions hold (the session is `planverb-<pid>`, the marker says `dry_of=<plan>`, the bound
-# name is `<dry_of>.<verb>-dry.<pid>` with the same pid); otherwise the copy's literal name is its slug. Never a
-# name-only strip: a session bound to a file named `X.plan.md.anything` reads its own name, not X's record (review
-# pass 60 P0-1). Every reader of a slug in the hooks and the scripts calls it, so the strip has one site.
-# FIXTURE FIDELITY: the marker is `plan_verb_dry`'s three lines (plan=, dry_of=, engaged_at=); the files are real.
-# fails-when: a dry-named copy under its planverb marker reads other than X, or a copy without the marker, under
-# another session, or of another shape reads X; or any other site in the hooks or scripts strips `.plan.md` itself.
+# lib/proof.sh `proof_plan_slug <plan>` is the plan's name less `.plan.md`, and nothing else. It once took a session
+# and its marker and read a plan verb's dry copy `<plan>.<verb>-dry.<pid>` as its origin (`proof_debt_origin`'s
+# three-part guard). AC-11.5 asked whether any production caller reached that arm; the census below answers it: every
+# caller in the hooks, the scripts and the libraries passes the plan path alone (record/wave-38-one-stop/T19-rules.md
+# holds the grep), so the arm was removed with its pins (SLG-2, SLG-3b, SLG-4, SLG-4b). `proof_debt_origin` stays:
+# the dry commit's debt record (`proof_debt_record`) and the bash wall still map a copy to its origin there.
+# Never a name-only strip: a file named `X.plan.md.anything` reads its own name, not X's record (review pass 60 P0-1).
+# Every reader of a slug in the hooks and the scripts calls it, so the strip has one site.
+# FIXTURE FIDELITY: the files are real; the body is read from the shipped lib/proof.sh.
+# fails-when: proof_plan_slug reads `proof_debt_origin` or takes a second operand into its name; a copy named
+# `<plan>.anything` reads as the plan; or any other site in the hooks or scripts strips `.plan.md` itself.
 SLG_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 SLG_D="$(mktemp -d)"; cleanup_dirs+=("$SLG_D"); SLG_D="$(cd "$SLG_D" && pwd -P)"
 SLG_PLAN="$SLG_D/wave-x.plan.md"; SLG_COPY="$SLG_PLAN.current-dry.4242"; SLG_ODD="$SLG_PLAN.anything"
 : > "$SLG_PLAN"; : > "$SLG_COPY"; : > "$SLG_ODD"
-printf 'plan=%s\ndry_of=%s\nengaged_at=2026-10-15T00:00:00Z\n' "$SLG_COPY" "$SLG_PLAN" > "$SLG_D/engaged-planverb-4242.state"
-printf 'plan=%s\ndry_of=%s\nengaged_at=2026-10-15T00:00:00Z\n' "$SLG_ODD" "$SLG_PLAN" > "$SLG_D/engaged-odd.state"
 slg() {  # <args...> -> proof_plan_slug's line and rc, as `<slug>|<rc>`
   local o rc=0
   o="$(bash -c '. "$1/proof.sh" && shift && proof_plan_slug "$@"' _ "$SLG_LIB" "$@" 2>/dev/null)" || rc=$?
   printf '%s|%s' "$o" "$rc"
 }
+slg_body() {  # -> proof_plan_slug's body in the shipped lib/proof.sh, comments dropped
+  awk '/^proof_plan_slug\(\)/ { f = 1 } f && !/^[[:space:]]*#/ { print } f && /^}/ { exit }' "$SLG_LIB/proof.sh"
+}
 expect_eq "SLG-1 the plan's slug is its name less .plan.md" "wave-x|0" "$(slg "$SLG_PLAN")"
-expect_eq "SLG-2 AC-9.2 a dry-named copy under its planverb session and marker reads as its origin" \
-  "wave-x|0" "$(slg "$SLG_COPY" planverb-4242 "$SLG_D/engaged-planverb-4242.state")"
-expect_eq "SLG-3 …the same copy with no session or marker reads its literal name (beside SLG-2)" \
+expect_eq "SLG-3 a plan verb's dry copy reads its literal name: no caller asks it to read as its origin" \
   "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY")"
-expect_eq "SLG-3b …and with the session but a marker that is not there, its literal name" \
-  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY" planverb-4242 "$SLG_D/engaged-none.state")"
-expect_eq "SLG-4 …under another session with the same marker, its literal name" \
-  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY" 5d6e7f80-1a2b-4c3d-8e9f-0a1b2c3d4e5f "$SLG_D/engaged-planverb-4242.state")"
-expect_eq "SLG-4b …under a planverb session of another pid, its literal name" \
-  "wave-x.plan.md.current-dry.4242|0" "$(slg "$SLG_COPY" planverb-4343 "$SLG_D/engaged-planverb-4242.state")"
-expect_eq "SLG-5 a file named <plan>.anything under a planverb session whose marker says dry_of=<plan> reads its own name: no name-only strip" \
-  "wave-x.plan.md.anything|0" "$(slg "$SLG_ODD" planverb-4242 "$SLG_D/engaged-odd.state")"
+expect_eq "SLG-5 a file named <plan>.anything reads its own name: no name-only strip" \
+  "wave-x.plan.md.anything|0" "$(slg "$SLG_ODD")"
 expect_eq "SLG-6 a name that is nothing but .plan.md names no slug (rc 1)" "|1" "$(slg "$SLG_D/.plan.md")"
+expect_contains "SLG-8 precondition: the body extractor reads proof_plan_slug (its one strip is in it)" '%.plan.md' "$(slg_body)"
+expect_eq "SLG-8b AC-11.5 proof_plan_slug's body has no dry-copy arm: it never reads proof_debt_origin" "0" \
+  "$(slg_body | /usr/bin/grep -c 'proof_debt_origin')"
+expect_eq "SLG-8c …and takes no session or marker operand" "0" "$(slg_body | /usr/bin/grep -c '\$#\|\${2\|\${3')"
+slg_callers() {  # -> the calls of proof_plan_slug in the hooks, the scripts and the libraries that pass a second operand
+  local f
+  for f in "${BIONIC_HOOKS_DIR}"/*.sh "${BIONIC_HOOKS_DIR}/../payload/scripts"/*.sh "$SLG_LIB"/*.sh; do
+    awk -v f="${f##*/}" '/^[[:space:]]*#/ { next } /proof_plan_slug "[^"]*" +[^ )}]/ { print f ":" NR }' "$f"
+  done
+}
+expect_eq "SLG-8d no caller in the hooks, the scripts or the libraries passes proof_plan_slug a second operand" "" "$(slg_callers)"
+expect_contains "SLG-8e …and the census finds callers at all (the positive for the absence above)" "proof_plan_slug" \
+  "$(/usr/bin/grep -h 'proof_plan_slug "' "${BIONIC_HOOKS_DIR}"/*.sh "${BIONIC_HOOKS_DIR}/../payload/scripts"/*.sh "$SLG_LIB"/*.sh | head -1)"
 
 # THE CENSUS: the one strip site. The research's grep (record/wave-37-landing-pace/research-false-tellers.md §F) over
 # the hooks, the scripts and the libraries finds a `.plan.md` strip only in proof_plan_slug's body.

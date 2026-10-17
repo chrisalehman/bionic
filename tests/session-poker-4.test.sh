@@ -6318,10 +6318,10 @@ RO_MUT="$TMPROOT/ro-mut"; mkdir -p "$RO_MUT/hooks" "$RO_MUT/payload/scripts"
 cp "${BIONIC_HOOKS_DIR}"/*.sh "$RO_MUT/hooks/"
 cp -R "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RO_MUT/payload/scripts/lib"
 RO_POKER_WAS="$POKER"
-anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
-anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"'
+anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
+anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"'
 RO_MUT_SRC="$RO_MUT/hooks/session-poker.sh"
-awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
+awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}" "\$SCHED_PLAN"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
 expect_eq "REOPEN-mut0 the mutant differs from the poker by the two calls" "2" "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$RO_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
 poke "$RRO" decline T4 'declined again, after the lapse'
 expect_eq "REOPEN-mut-pre a fresh decline of the row is recorded (it stands afresh after the lapse)" "0" "$RC"
@@ -6334,6 +6334,68 @@ expect_absent "REOPEN-mut2 …and under it the tick names no FILL for the declin
 ro_room_yes
 expect_contains "REOPEN-mut3 …while the shipped poker, over the same fresh decline, asks the row again" "poker: FILL T4" "$OUT"
 POKE_BOUND="$RO_BOUND_WAS"
+
+# ============================================================
+section "§REOPEN-ON: a decline --on <row> holds until that row lands, whatever room appears; a decline without --on still lapses on room (wave-38 T19; REQ-11 AC-11.1; L5)"
+# ============================================================
+#
+# fails-when: a decline recorded `--on T9` lapses at room=yes while T9 has not landed (the tick prints the FILL and
+# writes a lapsed line). Wave 37's A-orch-18 declined T14-T21 `--on T4`, the tick kept the decline standing only by
+# hand-hold, and the handoff's lesson was that a decline without --on lapses when room appears. `declined-on=` is
+# the field the verb writes (the fill ledger line); `fill_decline_holds` (lib/fill.sh), the ONE rule, reads it with
+# the standing decline and holds while that row's `## Tasks` status is not `landed`. Once the row has landed the
+# decline is an ordinary one: it lapses at room=yes with a free slot, like REOPEN-3.
+# FIXTURE FIDELITY: the decline is written by the product's own verb; the gate is the suite's (room=yes, one ready
+# writer row, writers=4); T9 is a pending row that waits on an outside input, so it is no writer row of its own.
+RON_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRN="$(make_repo reopen-on)"; new_roster "$RRN"
+PRN="$(s47_plan "$RRN" 4 \
+  "| T3 | 4 | build | waits on T9 by hand | implementor | — | 20 | REQ-x | payload/d.sh | pending | |" \
+  "| T9 | 4 | build | the row T3 waits on | implementor | ext:ci-on | 20 | REQ-x | payload/e.sh | pending | |")"
+ron_led() { cat "$RRN/$RO_REC/fill-ledger.log" 2>/dev/null; }
+ron_room_yes() { forget_digest "$RRN"; poke_pressure "$RRN" 8192 1.0 tick; }
+ron_room_no() { forget_digest "$RRN"; BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$RRN" 8192 1.0 tick; }
+ron_state() { ro_field "$(ron_led | tail -1)" state; }
+
+ron_room_yes
+expect_eq "REON-0 precondition: the tick at room=yes fills T3 and not T9 (the extractor's positive)" "yes|no" "$(s48_fill_has T3)|$(s48_fill_has T9)"
+poke "$RRN" decline T3 'waits on T9' --on T9
+expect_eq "REON-1 the decline --on T9 is recorded (exit 0)" "0" "$RC"
+expect_eq "REON-1b …its ledger line carries declined-on=T9 beside the decline" "decline|T9" \
+  "$(ro_field "$(ron_led | tail -1)" state)|$(ro_field "$(ron_led | tail -1)" declined-on)"
+RON_AT="$(ro_field "$(ron_led | tail -1)" at)"
+RON_LINES="$(ron_led | wc -l | tr -d ' ')"
+
+ron_room_yes
+expect_eq "REON-2 AC-11.1 at room=yes with a free slot, T9 not landed: the tick names no FILL for T3" "no" "$(s48_fill_has T3)"
+expect_contains "REON-2b …the decline is printed as standing (the positive for the absence below)" \
+  "poker: fill-declined standing since $RON_AT" "$OUT"
+expect_absent "REON-2c …and no lapse is announced" "fill-declined lapsed" "$OUT"
+expect_eq "REON-2d …and none is written: the ledger is as long as it was" "$RON_LINES|decline" "$(ron_led | wc -l | tr -d ' ')|$(ron_state)"
+ron_room_yes
+expect_eq "REON-2e a second tick at room=yes holds it too" "no|$RON_LINES" "$(s48_fill_has T3)|$(ron_led | wc -l | tr -d ' ')"
+
+# THE ROW LANDS: the decline is an ordinary one from then on.
+awk '/^\| T9 \|/ { $0 = "| T9 | 4 | build | the row T3 waits on | implementor | ext:ci-on | 20 | REQ-x | payload/e.sh | landed | |" } { print }' \
+  "$PRN" > "$PRN.tmp" && mv "$PRN.tmp" "$PRN"
+expect_eq "REON-3 precondition: T9 reads landed in the plan" "landed" "$(s48_row "$PRN" T9 | awk -F'|' '{ print $(NF-1) }')"
+ron_room_no
+expect_contains "REON-3b T9 landed, room=no: the decline still answers the row (an ordinary decline at no room)" \
+  "poker: WAIT T3 — ready; answered by the standing fill-declined" "$OUT"
+ron_room_yes
+expect_contains "REON-3c AC-11.1 T9 landed, room=yes with a free slot: the decline lapses, the tick prints the FILL" "poker: FILL T3" "$OUT"
+expect_contains "REON-3d …and says the decline lapsed" "poker: fill-declined lapsed — room=yes" "$OUT"
+expect_eq "REON-3e …and the ledger's last line is the lapse, naming the decline's at= and row" "lapsed|$RON_AT|T3" \
+  "$(ron_state)|$(ro_field "$(ron_led | tail -1)" lapsed-at)|$(ro_field "$(ron_led | tail -1)" lapsed)"
+
+# THE CONTROL: a decline without --on is unchanged — it lapses at room=yes with a slot free (REOPEN-3), T9 or no T9.
+poke "$RRN" decline T3 'held by hand'
+expect_eq "REON-4 control: a decline with no --on is recorded (declined-on=-)" "0|-" "$RC|$(ro_field "$(ron_led | tail -1)" declined-on)"
+awk '/^\| T9 \|/ { $0 = "| T9 | 4 | build | the row T3 waits on | implementor | ext:ci-on | 20 | REQ-x | payload/e.sh | pending | |" } { print }' \
+  "$PRN" > "$PRN.tmp" && mv "$PRN.tmp" "$PRN"
+ron_room_yes
+expect_contains "REON-4b …and at room=yes it lapses and the row is offered: no --on, no hold" "poker: FILL T3" "$OUT"
+POKE_BOUND="$RON_BOUND_WAS"
 
 # ============================================================
 section "§REPORT: the report splits wait from run and prints the width, from the landing record alone (wave-37 T9; D8, AC-1.3, AC-3.2)"

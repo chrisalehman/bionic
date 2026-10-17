@@ -1944,17 +1944,18 @@ proof_debt_origin() {
   esac
 }
 
-# proof_plan_slug <plan> [<sid> <marker>] -> the plan's slug, its file name less `.plan.md`, the directory its run's
-# records live in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the
-# hooks and the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it,
-# so a second slug is never derived beside it. Given a session and its marker, a plan verb's dry copy
-# `<plan>.<verb>-dry.<pid>` reads as the plan it was copied from, under `proof_debt_origin`'s three-part guard and
-# only that; with no session, or under any other, a copy reads its own literal name. Never a name-only strip: a
-# session bound to a file named `X.plan.md.anything` reads its own name, not X's record (review pass 60 P0-1). A
-# name reader: the file need not exist. rc 1 when the name leaves no slug.
+# proof_plan_slug <plan> -> the plan's slug, its file name less `.plan.md`, the directory its run's records live
+# in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the hooks and
+# the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it, so a second
+# slug is never derived beside it. It reads the name it is given, and only that: a plan verb's dry copy
+# `<plan>.<verb>-dry.<pid>` reads its own literal name. The reader once took a session and its marker and mapped the
+# copy to its origin (`proof_debt_origin`'s guard); no production caller ever passed them, so the arm was removed
+# with its pins (wave-38 T19; REQ-11 AC-11.5). The dry commit's debts are still read from the origin's record, by
+# `proof_debt_origin` at its two callers. Never a name-only strip: a file named `X.plan.md.anything` reads its own
+# name, not X's record (review pass 60 P0-1). A name reader: the file need not exist. rc 1 when the name leaves no
+# slug.
 proof_plan_slug() {
   local plan="${1:-}" slug
-  [ "$#" -lt 2 ] || plan="$(proof_debt_origin "${2:-}" "${3:-}" "$plan")"
   slug="${plan##*/}"; slug="${slug%.plan.md}"
   [ -n "$slug" ] || return 1
   printf '%s' "$slug"
