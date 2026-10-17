@@ -1170,7 +1170,7 @@ RR=$(rigor_rank "$RIGOR")
 RL=$(rigor_level "$RIGOR")
 # Intent floor / spike cap (derivable from intent + rigor).
 [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 1 ] \
-  && log_floor_finding intent-minimum "incident-response floors at double, declared $RL"
+  && log_floor_finding intent-minimum "incident-response has a minimum of double, declared $RL"
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
   && log_floor_finding spike-cap "spike is capped at single, declared $RL"
 
@@ -1186,7 +1186,7 @@ if [ -n "$PF" ]; then
   if [ "$PR" -lt 0 ]; then
     log_finding project-minimum "invalid rigor-minimum value '$PF' in config.yaml — allowed: single or double"
   elif [ "$RR" -lt "$PR" ]; then
-    log_floor_finding project-minimum "project floor $(rigor_level "$PF"), declared $RL"
+    log_floor_finding project-minimum "project minimum $(rigor_level "$PF"), declared $RL"
   fi
 fi
 
@@ -1204,7 +1204,7 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
     if [ "$ER" -lt 0 ]; then
       log_finding epic-minimum "invalid rigor-minimum value '$EF' in $EPIC's epic plan — allowed: single or double"
     elif [ "$RR" -lt "$ER" ]; then
-      log_floor_finding epic-minimum "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
+      log_floor_finding epic-minimum "epic minimum $(rigor_level "$EF") (from $EPIC), declared $RL"
     fi
   fi
 fi

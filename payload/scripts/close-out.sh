@@ -1095,13 +1095,13 @@ co_regression_text() {
   fi
   line="$(proof_last_line "$PLAN" regression)"
   if [ -z "$line" ]; then
-    printf 'the regression: no floor proof is recorded in the plan'
+    printf 'the regression: no proof is recorded in the plan'
     return 0
   fi
   h="$(printf '%s\n' "$line" | sed -n 's/.* head=\([0-9a-f]*\).*/\1/p')"
   at="$(printf '%s\n' "$line" | sed -n 's/.* at=\([^ ]*\).*/\1/p')"
   ev="$(printf '%s\n' "$line" | sed -n 's/.* evidence=\([^ ]*\).*/\1/p')"
-  printf 'the regression: the floor holds at %s (proved %s, %s)' "${h:0:12}" "${at:-?}" "${ev:-no record}"
+  printf 'the regression: the whole run holds at %s (proved %s, %s)' "${h:0:12}" "${at:-?}" "${ev:-no record}"
 }
 
 # co_reviews_text -> `Reviews: <question> <scope> <result> (<reader>); …. ADRs: <cell>.`, one entry per
@@ -1726,7 +1726,7 @@ facts_judge() {
   # whatever else git resolves the bare name to (a tag of the same name is not the branch).
   FACTS_HEAD="$(proof_branch_head "$PLAN" "$ROOT" 2>/dev/null)" || FACTS_HEAD=""
   if [ -z "$FACTS_HEAD" ]; then
-    FACTS_WHY="the working branch $WORKING names no commit here, so the floor is uncovered and there is no head to judge the facts the run owes at"
+    FACTS_WHY="the working branch $WORKING names no commit here, so the regression is uncovered and there is no head to judge the facts the run owes at"
     return 0
   fi
   out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?

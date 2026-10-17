@@ -759,8 +759,8 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/override-present.plan.md" \
 assert_eq "rigor_override_present exit 0" 0 "$HOOK_EXIT"
 assert_contains "rigor_override_present stderr says user-overridden" "user-overridden" "$HOOK_STDERR"
 assert_contains "rigor_override_present audit says user-overridden" "user-overridden" "$(read_audit "$project")"
-expect_absent "rigor_override_present stderr does not name the violation text" "project floor" "$HOOK_STDERR"
-expect_absent "rigor_override_present audit does not name the violation text" "project floor" "$(read_audit "$project")"
+expect_absent "rigor_override_present stderr does not name the violation text" "project minimum" "$HOOK_STDERR"
+expect_absent "rigor_override_present audit does not name the violation text" "project minimum" "$(read_audit "$project")"
 
 echo "project-minimum violated, NO marker → existing violation log unchanged"
 project2=$(make_project)
@@ -3781,10 +3781,10 @@ for gs_rv_pf in none single; do
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ir-$gs_rv_pf.plan.md" "$(build_plan intent=incident-response rigor=single)"
   assert_eq "§RIGOR.6 incident-response at single (project floor $gs_rv_pf) is admitted" 0 "$HOOK_EXIT"
   assert_contains "§RIGOR.6 …and logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
-  assert_contains "§RIGOR.6 …naming the floor by its word" "floors at double, declared single" "$HOOK_STDERR"
+  assert_contains "§RIGOR.6 …naming the minimum by its word" "has a minimum of double, declared single" "$HOOK_STDERR"
 done
 # A floor above the plan logs; a floor written in a word before 1.14.0 is the invalid-value finding.
-for gs_rv_pair in double:single:"project floor double, declared single" \
+for gs_rv_pair in double:single:"project minimum double, declared single" \
                   high:single:"invalid rigor-minimum value 'high' in config.yaml — allowed: single or double" \
                   tested:double:"invalid rigor-minimum value 'tested' in config.yaml — allowed: single or double"; do
   gs_rv_f="${gs_rv_pair%%:*}"; gs_rv_rest="${gs_rv_pair#*:}"; gs_rv_p="${gs_rv_rest%%:*}"; gs_rv_want="${gs_rv_rest#*:}"

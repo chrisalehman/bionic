@@ -1428,7 +1428,7 @@ export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
 FL_TX="$(mktemp)"
 FL_D="$(fl_fixture)"
 expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
-  "poker: WAIT T3 — proof:floor: the floor is one whole run plus each later commit proved; past the proof at" "$(fo_tick "$FL_D")"
+  "poker: WAIT T3 — proof:regression: the regression is one whole run plus each later commit proved; past the proof at" "$(fo_tick "$FL_D")"
 sd_turn "$FL_TX" u-fl-1
 s7_fire "$FL_D" "$FL_TX"
 expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is uncovered" \

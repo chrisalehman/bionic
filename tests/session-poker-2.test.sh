@@ -2516,7 +2516,7 @@ s54_run() {  # <suite> -> the real shim runs it in the working checkout
   ( cd "$S54_WT" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_GATE_POLL=0.1 \
       bash "$BIONIC_SCRIPTS_DIR/payload/scripts/booked.sh" --suites "$1" -- "bash tests/$1" ) >/dev/null 2>&1
 }
-S54_WHY="the floor is one whole run plus each later commit proved; past the proof at"
+S54_WHY="the regression is one whole run plus each later commit proved; past the proof at"
 S54_OUT="; run suites its row named, proof-add regression; a second run: approve regression-2"
 
 S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
