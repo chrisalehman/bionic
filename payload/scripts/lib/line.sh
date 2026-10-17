@@ -17,7 +17,8 @@
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
 # file copied by one write(2), no lock), so two writers' lines never interleave. Eight events:
-#   ready     row name commit branch tree suites debt carrier   (a carrier is `<pid>:<start>`)
+#   ready     row name commit branch tree suites debt carrier age   (a carrier is `<pid>:<start>`; age
+#             `<first>:<seq>`, the lease the gate orders the entry by, wave-38 T30)
 #   candidate row base commit tree
 #   verdict   row commit suite result log      (green | red | none | discarded)
 #   standing  head suite lines log cause against   (cause: environment | code; against: the run that
@@ -814,8 +815,69 @@ _line_review_born() {  # <plan>
 _line_waiting() { printf 'WAITING %s — run again: %s\n' "$1" "$2"; }   # <row> <the same command>
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 
+# THE LANDING'S PLACE IN THE GATE'S LINE (wave-38 T30; D22; A-T6-10, A-orch-49; gate.sh THE LEASE). The
+# gate holds every landing behind the oldest lease, and the line holds a landing at publish behind every
+# entry ahead of it: the two orders must be one, or the gate's oldest waits on the line's first while the
+# gate answers that one 0, and neither moves. So a ready enters in ONE ACT, under the record's ready lock
+# (`<record dir>/ready.lock`): it opens the landing's lease and appends its `ready` event, which carries
+# the lease's age (`age=<first>:<seq>`). A ready that opens a new entry takes a fresh age, so it is last
+# in both; a ready of an entry still open (after WAITING or STALLED) takes the age that entry was given,
+# so it keeps its place in both, however long it was away. The carrier's EXIT trap ends the lease: on
+# WAITING (rc 75, "its place kept") it is left, nobody's, ordering no one; on every other exit it is
+# closed. A carrier killed outright leaves a dead carrier, which the gate prunes. No lease, no entry: a
+# landing the gate cannot order is refused before its event is written (rc 2, gate-unavailable).
+_line_entry_age() {  # <record> <row> -> the age of the row's open entry, nothing when it has none
+  [ -f "$1" ] || return 0
+  awk -F'|' -v r="$2" '
+    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    substr($0, 1, 8) != "line/v1|" || fv("row") != r { next }
+    { ev = substr($2, 4) }
+    ev == "ready" { if (!open) { open = 1; age = "" } a = fv("age"); if (age == "" && a != "") age = a; next }
+    ev == "published" || ev == "returned" { open = 0; age = "" }
+    END { if (open && age != "") print age }' "$1" 2>/dev/null
+}
+_line_ready_take() {  # <lock dir> -> 0 held by this carrier; 1 when it could not be had in about a minute
+  local i=0
+  while ! _slots_take_one "${1%/*}" "$1" "${LINE_ME%%:*}" ready; do
+    i=$((i + 1)); [ "$i" -lt 600 ] || return 1
+    sleep 0.1
+  done
+}
+_line_enter() {  # <plan> <rec> <row> <deadline | empty> <ready event's key=value>...
+  local plan="$1" rec="$2" row="$3" deadline="$4" lk span="" was age rc i=0
+  shift 4
+  lk="${rec%/*}/ready.lock"
+  _line_ready_take "$lk" || { _wt_refuse "ready-lock-unavailable row=${row} lock=${lk} — another ready of this line holds it; say ready again"; return 2; }
+  was="$(_line_entry_age "$rec" "$row")"
+  [ -z "$deadline" ] || { span=$(( deadline - $(_res_now) )); [ "$span" -ge 0 ] || span=0; }
+  while :; do
+    age="$(gate_landing_open "$_LINE_KEY" "$LINE_ME" "$span" "${was:-new}" 2>/dev/null)"; rc=$?
+    [ "$rc" -eq 1 ] && [ "$i" -lt 3 ] || break   # the gate's lock: asked again, three times
+    i=$((i + 1))
+  done
+  if [ "$rc" -ne 0 ] || [ -z "$age" ]; then
+    _line_lock_drop "$lk"
+    _wt_refuse "gate-unavailable row=${row} — the gate could not open the landing's lease (rc ${rc}), so the line cannot order it; say ready again"
+    return 2
+  fi
+  _LINE_LEASED=1
+  if ! line_event "$plan" ready "$@" "age=${age}" >/dev/null; then
+    _line_lock_drop "$lk"
+    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec}"
+    return 2
+  fi
+  _line_lock_drop "$lk"
+}
+_line_lease_end() {  # <the carrier's exit status>
+  [ -n "${_LINE_LEASED:-}" ] || return 0
+  if [ "${1:-}" = 75 ]; then gate_landing_leave "$_LINE_KEY" "$LINE_ME" >/dev/null 2>&1
+  else gate_landing_close "$_LINE_KEY" "$LINE_ME" >/dev/null 2>&1
+  fi
+  return 0
+}
+
 # THE CARRIER'S LOOP, in its own subshell, whose pid is the `ready` event's carrier: the entry is
-# present exactly while this runs, and its landing tree is freed when it ends.
+# present exactly while this runs, its landing tree is freed and its lease ended when it ends.
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
@@ -823,11 +885,11 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
-  trap '[ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
+  _LINE_LEASED=""   # set once this carrier holds the landing's lease (`_line_enter`)
+  trap '_line_lease_end "$?"; [ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
   _line_me
-  line_event "$plan" ready "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
-    "suites=${suites}" "debt=${debt}" "carrier=${LINE_ME}" >/dev/null \
-    || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
+  _line_enter "$plan" "$rec" "$row" "$deadline" "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
+    "suites=${suites}" "debt=${debt}" "carrier=${LINE_ME}" || return 2
   while :; do
     head="$(line_head "$plan")"
     _line_count_git "$plan" "$rec" "$root" "$head"
@@ -1345,6 +1407,7 @@ _line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log> [<admitted
 _line_drain_init() {
   _LINE_DS=(); _LINE_DP=(); _LINE_DR=(); _LINE_DL=(); _LINE_DW=(); _LINE_DH=0; _LINE_DK=0; _LINE_DN=0
   _LINE_ASK=1; _LINE_GRANT=0; _LINE_LIVE=0
+  LINE_SUITE=""   # a pass whose base is replaced before it takes a suite reads it (wave-38 T30): set, never unbound
 }
 _line_drain_add() {  # <suite>
   _LINE_DS[$_LINE_DN]="$1"; _LINE_DP[$_LINE_DN]=""; _LINE_DR[$_LINE_DN]=""; _LINE_DL[$_LINE_DN]=""; _LINE_DW[$_LINE_DN]=1
