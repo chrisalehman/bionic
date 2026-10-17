@@ -2404,13 +2404,13 @@ _eg_refuse_floor_absent() {
   [ "$(plan_regression "$PLAN")" = no ] && return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
     why="$(proof_floor_absent "$PLAN")" || return 0
-    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's floor absent)"
+    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"
   else
-    why="the floor's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
+    why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
-  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the floor is owed: ${why}.
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the regression is owed: ${why}.
 Plan: $PLAN
-Fix: run the whole run with 'session-poker.sh regression-run' and record its log with 'session-poker.sh proof-add regression <log>'. Whether that floor is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
+Fix: run the whole run with 'session-poker.sh regression-run' and record its log with 'session-poker.sh proof-add regression <log>'. Whether that regression is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
   refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add regression" "$_eg_detail"
 }
 

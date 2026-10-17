@@ -3867,7 +3867,7 @@ expect_eq "BFV-1c …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 # (`of=regression` or `of=standing@<12-hex>`). With neither it is refused naming the two facts that would admit it.
 poke "$RBF" task-add T10 4 build 'fix the floor red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
 expect_eq "BFV-6 no floor proof and no record: --born regression:a.test.sh is refused, exit 1" "1" "$RC"
-expect_contains "BFV-6b …naming the first fact that would admit it: the floor proof owes the suite" "floor proof owes a.test.sh" "$OUT"
+expect_contains "BFV-6b …naming the first fact that would admit it: the floor proof owes the suite" "regression proof owes a.test.sh" "$OUT"
 expect_contains "BFV-6c …and the second: a standing event for the suite at a commit on the working branch" "standing event for a.test.sh" "$OUT"
 expect_eq "BFV-6d …and the plan is unchanged" "$SBF_SUM" "$(cksum < "$PBF")"
 bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S46_LIB" "$PBF" \
@@ -3890,7 +3890,7 @@ expect_eq "BFV-2 task-add --born regression:a.test.sh, which the floor proof owe
 expect_regex "BFV-3 …the row's line ends born: regression a.test.sh of=regression" \
   '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression a\.test\.sh of=regression$' "$(/usr/bin/grep '^- T6:' "$PBF")"
 expect_contains "BFV-4 …the task cell says born: regression" "| T6 | 4 | build | fix the floor red · born: regression |" "$(cat "$PBF")"
-expect_contains "BFV-5 …and the verb says it is floor-born" "T6 is floor-born (a.test.sh)" "$OUT"
+expect_contains "BFV-5 …and the verb says it is regression-born" "T6 is regression-born (a.test.sh)" "$OUT"
 expect_absent "BFV-5b …and counts it against no fix-cap" "review-born rows:" "$OUT"
 
 poke "$RBF" task-add T7 4 build 'fix the standing red' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born regression:s.test.sh

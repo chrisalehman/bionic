@@ -1385,7 +1385,7 @@ PROOF_RUN_BAD
         "$log" "$f" "$b" "$a" "$f" "$got" "$rec"
       return 1 ;;
   esac
-  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a floor proof cites a run the machine recorded, so run the regression with regression-run, or detached through booked.sh, and cite the log it writes' \
+  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a regression proof cites a run the machine recorded, so run the regression with regression-run, or detached through booked.sh, and cite the log it writes' \
     "$log" "$sha" "$rc" "$hash" "${rec:-the landing record of a plan (none was named)}"
   return 1
 }
@@ -1411,7 +1411,7 @@ proof_floor_retired() {
   _proof_roots_load
   v="$(config_value "$1" floor-attestation "" 2>/dev/null)"
   [ -n "$v" ] || return 1
-  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the floor is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add regression <log> [<log>...]' "$v"
+  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the regression is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add regression <log> [<log>...]' "$v"
 }
 
 # proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places

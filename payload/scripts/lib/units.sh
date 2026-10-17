@@ -1597,7 +1597,7 @@ _units_sched_awk() {
           else if (floorst !~ /^covered/) {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
-            lwhy = "the floor is one whole run plus each later commit proved; past the proof at " \
+            lwhy = "the regression is one whole run plus each later commit proved; past the proof at " \
               substr(prvh["regression"], 1, 12) ", " fr "; run suites its row named, proof-add regression; a second run: approve regression-2"
             return 0
           }

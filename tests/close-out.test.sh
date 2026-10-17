@@ -2508,7 +2508,7 @@ expect_absent "DEBT-RECARRY-4 …nor the one the ledger burned" "log_shim" "$(ca
 # THE RECORD TEMPLATE SAYS REGRESSION (wave-30 T23; AC-4.7, D10): the continuation close-out writes asks the
 # orchestrator for the regression's result, in the word the doctrine uses.
 # WAVE-33 T8 (D8): the result is no longer asked for, it is written, from the floor's proof line, in the same word.
-expect_contains "REG-1 AC-4.7 the continuation states the regression result, in the word the doctrine uses" "the regression: the floor holds at " "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+expect_contains "REG-1 AC-4.7 the continuation states the regression result, in the word the doctrine uses" "the regression: the whole run holds at " "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
 expect_absent "REG-1b …and never calls it the floor's result" "floor result" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
 # no ledger at all: every inherited debt line is carried, in its order
 PRN="$(mk_fixture debtrecarry2)"; advance_to "$PRN" 8
@@ -2752,7 +2752,7 @@ expect_eq "FILL.2 AC-3.3 the epic row carries no <fill:, and holds the merge com
   "$(contains "$FA_ROW" "<fill:")/$(contains "$FA_ROW" "main @ $FA_MAIN")"
 expect_eq "FILL.3 …and an ADR cell that says so when the plan says none (adrs: none)" "—" "$(adr_cell "$FA")"
 expect_contains "FILL.4 the continuation states the task count from the plan (the two build rows)" "2 tasks, every one RED→GREEN" "$FA_CONT"
-expect_contains "FILL.5 …the regression result from the floor's proof line, at the head it was proved at" "the regression: the floor holds at ${FA_HEAD:0:12}" "$FA_CONT"
+expect_contains "FILL.5 …the regression result from the floor's proof line, at the head it was proved at" "the regression: the whole run holds at ${FA_HEAD:0:12}" "$FA_CONT"
 expect_contains "FILL.6 …the reviews from the review proof lines, and the ADRs" "Reviews: evidence piece pass (w-read); adversarial piece pass (w-read); structure piece pass (w-read); adversarial whole pass (w-read); structure whole pass (w-read). ADRs: none shipped." "$FA_CONT"
 expect_contains "FILL.7 …and the commit it closed at, written whole" "main at $FA_MAIN." "$FA_CONT"
 expect_absent "FILL.8 no Patrol sentence when no job is known (this session has no transcript) and no mark for it" "Patrol" "$FA_CONT"
@@ -2839,7 +2839,7 @@ expect_eq "REF-3 precondition: the working branch is deleted (no ref names it)" 
 run_close "$PREFD" check
 expect_contains "REF-3b AC-1.7 a deleted branch: check says the facts would be refused" "facts: WOULD REFUSE" "$CO_OUT"
 expect_contains "REF-3c …saying the branch names no commit, the floor uncovered" \
-  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+  "the working branch wave/01-fixture names no commit here, so the regression is uncovered" "$CO_OUT"
 # A TAG OF THE SAME NAME IS NOT THE BRANCH. `git rev-parse <name>` resolves refs/tags/<name> before refs/heads/<name>, so a
 # judge that asks git for the bare name reads a tag where the branch is gone; the branch's ref reader does not.
 fixture_git "$PREFD" tag wave/01-fixture main >/dev/null 2>&1
@@ -2847,7 +2847,7 @@ expect_nonempty "REF-4 precondition: a tag of the branch's name names a commit" 
   "$(fixture_git "$PREFD" rev-parse --verify -q 'refs/tags/wave/01-fixture^{commit}' 2>/dev/null)"
 run_close "$PREFD" check
 expect_contains "REF-4b AC-1.7 …the deleted branch stays uncovered beside the tag: the judge reads refs/heads/ alone" \
-  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+  "the working branch wave/01-fixture names no commit here, so the regression is uncovered" "$CO_OUT"
 expect_absent "REF-4c …and never judges the tag's commit" "facts: every fact the run owes holds" "$CO_OUT"
 
 PREFF="$(mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8

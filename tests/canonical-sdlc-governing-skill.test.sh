@@ -759,8 +759,8 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/override-present.plan.md" \
 assert_eq "rigor_override_present exit 0" 0 "$HOOK_EXIT"
 assert_contains "rigor_override_present stderr says user-overridden" "user-overridden" "$HOOK_STDERR"
 assert_contains "rigor_override_present audit says user-overridden" "user-overridden" "$(read_audit "$project")"
-expect_absent "rigor_override_present stderr does not name the violation text" "project floor" "$HOOK_STDERR"
-expect_absent "rigor_override_present audit does not name the violation text" "project floor" "$(read_audit "$project")"
+expect_absent "rigor_override_present stderr does not name the violation text" "project minimum" "$HOOK_STDERR"
+expect_absent "rigor_override_present audit does not name the violation text" "project minimum" "$(read_audit "$project")"
 
 echo "project-minimum violated, NO marker → existing violation log unchanged"
 project2=$(make_project)
@@ -3781,10 +3781,10 @@ for gs_rv_pf in none single; do
   run_write "$project/.bionic/docs/plans/epic-01-demo/rv-ir-$gs_rv_pf.plan.md" "$(build_plan intent=incident-response rigor=single)"
   assert_eq "§RIGOR.6 incident-response at single (project floor $gs_rv_pf) is admitted" 0 "$HOOK_EXIT"
   assert_contains "§RIGOR.6 …and logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
-  assert_contains "§RIGOR.6 …naming the floor by its word" "floors at double, declared single" "$HOOK_STDERR"
+  assert_contains "§RIGOR.6 …naming the minimum by its word" "has a minimum of double, declared single" "$HOOK_STDERR"
 done
 # A floor above the plan logs; a floor written in a word before 1.14.0 is the invalid-value finding.
-for gs_rv_pair in double:single:"project floor double, declared single" \
+for gs_rv_pair in double:single:"project minimum double, declared single" \
                   high:single:"invalid rigor-minimum value 'high' in config.yaml — allowed: single or double" \
                   tested:double:"invalid rigor-minimum value 'tested' in config.yaml — allowed: single or double"; do
   gs_rv_f="${gs_rv_pair%%:*}"; gs_rv_rest="${gs_rv_pair#*:}"; gs_rv_p="${gs_rv_rest%%:*}"; gs_rv_want="${gs_rv_rest#*:}"
@@ -3859,6 +3859,21 @@ project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/min-ir.plan.md" "$(build_plan intent=incident-response rigor=single)"
 assert_contains "§MINIMUM.7 the intent minimum logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
 expect_absent "§MINIMUM.7 …never intent-floor" "intent-floor" "$HOOK_STDERR$(read_audit "$project")"
+# §MINIMUM, the doctrine half (wave-38 T9; AC-9.2, D6): SKILL.md and the two diagrams spell the rigor minimum and
+# never the word. Each count of "floor" sits beside a positive read of the same file, so an unreadable file is red.
+gs_min_count() { /usr/bin/grep -ci -- "$1" "$2" 2>/dev/null | tr -d ' '; }   # <pattern> <file> -> matching lines, 0 when none
+GS_MIN_SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+GS_MIN_LIFE="${BIONIC_SKILLS_DIR}/canonical-sdlc/diagrams/lifecycle.svg"
+GS_MIN_CHAIN="${BIONIC_SKILLS_DIR}/canonical-sdlc/diagrams/hook-chain.svg"
+expect_eq "§MINIMUM.8 SKILL.md names the rigor minimums and their key (the reader's positive)" "1|1" \
+  "$([ "$(gs_min_count '\*\*Rigor minimums\.\*\*' "$GS_MIN_SKILL")" -ge 1 ] && echo 1)|$([ "$(gs_min_count 'rigor-minimum:' "$GS_MIN_SKILL")" -ge 1 ] && echo 1)"
+expect_eq "§MINIMUM.8 …and spells floor on no line" "0" "$(gs_min_count floor "$GS_MIN_SKILL")"
+expect_eq "§MINIMUM.9 lifecycle.svg says a rigor minimum is advice (the reader's positive)" "1" \
+  "$([ "$(gs_min_count 'a rigor minimum is advice' "$GS_MIN_LIFE")" -ge 1 ] && echo 1)"
+expect_eq "§MINIMUM.9 …and spells floor on no line" "0" "$(gs_min_count floor "$GS_MIN_LIFE")"
+expect_eq "§MINIMUM.10 hook-chain.svg names the rigor-minimum consistency check (the reader's positive)" "1" \
+  "$([ "$(gs_min_count 'rigor-minimum consistency' "$GS_MIN_CHAIN")" -ge 1 ] && echo 1)"
+expect_eq "§MINIMUM.10 …and spells floor on no line" "0" "$(gs_min_count floor "$GS_MIN_CHAIN")"
 
 
 

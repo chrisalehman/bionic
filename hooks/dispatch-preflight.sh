@@ -3103,12 +3103,12 @@ proved by the suites its row names."
               if [ -z "$_fr_reads2" ]; then
                 _fr_owes=""
                 [ -z "$_fr_owed" ] || _fr_owes="
-The floor's whole run left ${_fr_owed} red, each owed until a later landing runs it green."
+The regression's whole run left ${_fr_owed} red, each owed until a later landing runs it green."
                 _dp_detail="A whole run was launched on this plan (${_fr_first%%$'\t'*} at ${_fr_first#*$'\t'}); a second needs the user's word:
 a row that reads approval:regression-2, and session-poker.sh approve regression-2 '<reply>'.
     Plan: ${PLAN}${_fr_owes}
 
-Step 5 owes the matrix, the walk and the auditor. Step 7 is where the floor is demanded,
+Step 5 owes the matrix, the walk and the auditor. Step 7 is where the regression is demanded,
 as the judge closes it: one whole run, green or red, each red owed until a later landing
 runs it green, and every later commit proved by the suites its row named. A change after
 the whole run is proved by a fix row, the red suites plus its own.

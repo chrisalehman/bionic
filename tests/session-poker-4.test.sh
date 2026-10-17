@@ -5007,7 +5007,7 @@ expect_contains "IH-4b …refused as a regression, not debt" "regression, not de
 expect_eq "IH-4c …and b stays owed" "owed	b.test.sh" "$(ih_state)"
 poke "$RIH" proof-add inherited c.test.sh
 s42_unchanged "IH-5 proof-add inherited c.test.sh, not red in the floor's whole run" 1 "$PIH"
-expect_contains "IH-5b …refused, naming the run it is not red in" "c.test.sh is not red in the floor's whole run" "$OUT"
+expect_contains "IH-5b …refused, naming the run it is not red in" "c.test.sh is not red in the regression's whole run" "$OUT"
 POKE_BOUND="$IH_BOUND_WAS"
 
 # ============================================================

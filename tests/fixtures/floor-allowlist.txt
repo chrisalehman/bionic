@@ -1,0 +1,28 @@
+^payload/scripts/lib/alias\.sh:[0-9]*:\(ALIAS_MAP='\)*[a-z-]*|
+^[^:]*\.sh:[0-9]*:[[:space:]]*#
+^[^:]*\.sh:[0-9]*:[^"']*[[:space:]]#[[:space:]]
+proof_floor_
+units_floor_
+_UNITS_MEMO_FLOOR
+_UNITS_FLOOR_ST
+bionic-units-floor-
+TICK_BUF\.floor
+TA_BORN_FLOOR
+born_floor_backing
+log_floor_finding
+_eg_refuse_floor_absent
+_card_floor
+_FO_SHORT_FLOOR_MS
+floorst
+needfloor
+skipfloor
+floorv
+floor\[
+floor=()
+local floor=
+floor="[$](units_field
+"[$]floor"
+floor=[01]
+(floor == 1)
+-v floor=
+floor-attestation

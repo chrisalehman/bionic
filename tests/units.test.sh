@@ -3899,7 +3899,7 @@ fs_count() { awk 'END { print NR + 0 }' "$FS_COUNT" 2>/dev/null; }
 fs_why() {  # -> integrate's proof:regression wait reason, or nothing
   call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:regression") == 1 { print $2 }'
 }
-FS_LEAD="proof:regression: the floor is one whole run plus each later commit proved; past the proof at"
+FS_LEAD="proof:regression: the regression is one whole run plus each later commit proved; past the proof at"
 FS_OUT="; run suites its row named, proof-add regression; a second run: approve regression-2"
 # THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
 # the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
