@@ -245,6 +245,12 @@ if ! declare -F owed_open >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/owed.sh"
 fi
+# THE SCALE PROFILE (wave-38 T16; D25): the arming wall reads the plan's patrol cell, the budget wall
+# its writers cell. Sourced the same way: a library without it leaves both walls as they were.
+if ! declare -F scale_cell >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/scale.sh"
+fi
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -637,6 +643,19 @@ fi
 STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
 PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 
+# THE SCALE'S CELLS (wave-38 T16; D25, AC-5.1), read once from the bound plan's `scale:` through
+# `scale_cell` (payload/scripts/lib/scale.sh). `DP_PATROL` is the patrol cell: `no` (the task row)
+# means no Patrol is armed at engagement, so this wall does not apply. `DP_SCALE_WRITERS` is the
+# writers cell, the budget wall's cap when no person wrote one. No plan, no `scale:`, or no profile:
+# both stay empty and both walls run as they did before the profile.
+DP_SCALE=""; DP_PATROL=""; DP_SCALE_WRITERS=""
+if [ -n "$PLAN" ] && declare -F scale_cell >/dev/null 2>&1; then
+  DP_SCALE="$(plan_frontmatter_get "$PLAN" scale 2>/dev/null)"
+  DP_PATROL="$(scale_cell "$DP_SCALE" patrol 2>/dev/null)" || DP_PATROL=""
+  DP_SCALE_WRITERS="$(scale_cell "$DP_SCALE" writers 2>/dev/null)" || DP_SCALE_WRITERS=""
+  case "$DP_SCALE_WRITERS" in ''|*[!0-9]*) DP_SCALE_WRITERS="" ;; esac
+fi
+
 # The poker beside this gate, so a test drives the real one and an installed gate finds its
 # installed sibling — the same resolution, and the same residual config-dir second lane, the
 # probe above already uses, and for the same reason: the two registration channels serve ONE
@@ -734,7 +753,10 @@ fi
 # UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
 # the Patrol, a question with no threshold in it.
 PATROL_STAMPED=1
-if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
+if [ "$DP_PATROL" = no ]; then
+  # A SCALE WITH NO PATROL OWES NO STAMP (wave-38 T16): neither half of this wall applies.
+  PATROL_STAMPED=not-owed
+elif [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
   PATROL_STAMPED=0
   patrol_deny "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
     "$PATROL_FIX_NEVER" \
@@ -753,7 +775,7 @@ fi
 # so reaching here meant the file was there; it records and carries on now, and a `stat` of
 # a file that is not there would print "the stamp's age could not be read" as though
 # something had gone wrong with a stamp nobody ever wrote. Absent is absent, once.
-if [ "$PATROL_STAMPED" = "0" ]; then
+if [ "$PATROL_STAMPED" = "0" ] || [ "$PATROL_STAMPED" = not-owed ]; then
   :
 elif [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
   echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
@@ -1313,6 +1335,14 @@ PARALLEL_BUDGET=""
 DP_BUDGET_WRITERS=""
 [ -n "$PLAN" ] && DP_BUDGET_WRITERS="$(budget_cap "$PLAN")"
 DP_BUDGET_WRITERS="${DP_BUDGET_WRITERS#writers=}"
+# THE SCALE'S CAP WHEN NO PERSON WROTE ONE (wave-38 T16; D25, AC-5.1). The plan's scale row may carry
+# a writers cell (the task row's is 3): with no person's line it is the cap, and a person's line
+# still overrides it. `uncapped` (wave, epic) caps nothing, as before.
+DP_BUDGET_SOURCE=person
+if [ -z "$DP_BUDGET_WRITERS" ] && [ -n "$DP_SCALE_WRITERS" ]; then
+  DP_BUDGET_WRITERS="$DP_SCALE_WRITERS"
+  DP_BUDGET_SOURCE=scale
+fi
 
 if [ -n "$DP_BUDGET_WRITERS" ]; then
 
@@ -1553,18 +1583,26 @@ WRITERNAMES
     # each with the command that closes it (wave-24 T13, D10, AC-6.7).
     [ -z "$BUDGET_DENIED" ] || return 0
     BUDGET_DENIED=1
+    local whose="budget: ${PARALLEL_BUDGET}
+  declared by ${PLAN}
+
+That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
+someone typed it. Nothing here raises it; raising it is that person's edit of the line." raise="raise the plan's writers= cap"
+    if [ "$DP_BUDGET_SOURCE" = scale ]; then
+      whose="writers=${DP_BUDGET_WRITERS} is the ${DP_SCALE} scale's writer cap (payload/scripts/lib/scale.sh),
+  read for ${PLAN}, which carries no person's parallel-budget: line
+
+A person's line overrides it: the hand cap verb writes one."
+      raise="write a parallel-budget: writers= line for the plan"
+    fi
     dp_finding "$1" "land or stand down a row" \
       "    $2${3:+
 $3}
 
-budget: ${PARALLEL_BUDGET}
-  declared by ${PLAN}
-
-That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
-someone typed it. Nothing here raises it; raising it is that person's edit of the line.
+${whose}
 
 Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
-standdown\` computes the batch), or ask the user to raise the plan's writers= cap."
+standdown\` computes the batch), or ask the user to ${raise}."
   }
 
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same

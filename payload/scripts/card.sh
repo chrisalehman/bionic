@@ -90,6 +90,9 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # the regex `debt add` holds each line to and close-out carries by, never a third copy of it here.
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/debt.sh"
+# THE SCALE PROFILE (wave-38 T16; D25): the Step 0 regression line's default is the scale's regression cell.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/scale.sh"
 
 # THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The scales
 # differ in their artifacts and never in the `## Tasks` ledger (wave-31 T5, D2): a task-scale
@@ -1139,17 +1142,13 @@ _card_floor() {  # [<plan path>] -> the plan's regression: value, or "not declar
 }
 
 # THE STEP 0 CARD'S REGRESSION LINE (D4, AC-12.1). `card.sh regression <scale> [<plan>]` prints one line:
-# the scale's default, task no, wave yes, epic no, marked `(scale default)`; or, when the plan carries a
+# the scale's default, its regression cell in lib/scale.sh (wave-38 T16, D25), marked `(scale default)`; or, when the plan carries a
 # `regression-override:` line, the plan's own `regression:` value marked `(overridden)`. The override line
 # is presence-only: its fields are never parsed. An absent key, or any value but the exact `no`, reads
 # `yes`, as walls.sh and proof.sh read it (T27, A-T27-2).
 _card_regression_line() {  # <scale> [<plan>] -> the line; returns 1 on a word that is no scale
   local scale="$1" plan="${2:-}" d v
-  case "$scale" in
-    task|epic) d=no ;;
-    wave)      d=yes ;;
-    *)         return 1 ;;
-  esac
+  d="$(scale_cell "$scale" regression 2>/dev/null)" || return 1
   if [ -n "$(plan_frontmatter_get "$plan" regression-override)" ]; then
     v="$(plan_regression "$plan")"
     [ "$v" = "no" ] || v=yes

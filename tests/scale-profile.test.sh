@@ -53,15 +53,15 @@ SP_TMPL="$SP_REPO/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"
 SP_ENGAGE="${BIONIC_HOOKS_DIR}/engage.sh"
 SP_CLOSE="$SP_REPO/payload/scripts/close-out.sh"
 
-# sp_cell <scale> <column> -> stdout of scale_cell; SP_RC its exit; SP_ERR its stderr
-SP_RC=0; SP_ERR=""
-sp_cell() {
-  local out
-  out="$(bash -c '. "$1/scale.sh" || exit 9; scale_cell "$2" "$3"' _ "$SP_LIB" "$1" "$2" 2>"$SANDBOX/.sp-err")"
+# sp_ask <scale> <column> -> SP_OUT scale_cell's stdout, SP_RC its exit, SP_ERR its stderr (set in
+# this shell, never through a command substitution, which would lose them); sp_cell prints SP_OUT.
+SP_OUT=""; SP_RC=0; SP_ERR=""
+sp_ask() {
+  SP_OUT="$(bash -c '. "$1/scale.sh" || exit 9; scale_cell "$2" "$3"' _ "$SP_LIB" "$1" "$2" 2>"$SANDBOX/.sp-err")"
   SP_RC=$?
   SP_ERR="$(cat "$SANDBOX/.sp-err" 2>/dev/null)"
-  printf '%s' "$out"
 }
+sp_cell() { sp_ask "$1" "$2"; printf '%s' "$SP_OUT"; }
 
 # ============================================================================
 section "§CELL — one table, three rows, seven columns, one reader (D25)"
@@ -81,15 +81,16 @@ for sp_s in task wave epic; do
   done
 done
 
-sp_got="$(sp_cell task patrol)"
+sp_ask task patrol
 expect_eq "C.rc0 a known cell exits 0" "0" "$SP_RC"
-sp_got="$(sp_cell sprint patrol)"
+expect_eq "C.rc1 …and prints it" "no" "$SP_OUT"
+sp_ask sprint patrol
 expect_eq "C.u1 a scale the table does not hold exits 1" "1" "$SP_RC"
-expect_empty "C.u2 …and prints no cell" "$sp_got"
+expect_empty "C.u2 …and prints no cell" "$SP_OUT"
 expect_contains "C.u3 …and its line names the fix" "use task, wave or epic" "$SP_ERR"
-sp_got="$(sp_cell task colour)"
+sp_ask task colour
 expect_eq "C.u4 a column the table does not hold exits 1" "1" "$SP_RC"
-expect_empty "C.u5 …and prints no cell" "$sp_got"
+expect_empty "C.u5 …and prints no cell" "$SP_OUT"
 expect_contains "C.u6 …and its line names every column" "use patrol, rigor, writers, regression, branch, integrate or dealing" "$SP_ERR"
 
 # ============================================================================

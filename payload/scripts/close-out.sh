@@ -114,6 +114,10 @@ fi
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/proof.sh"
+# THE SCALE PROFILE (wave-38 T16; D25): the branch-shape refusal reads the scale's branch cell and the
+# merge act its integrate cell.
+# shellcheck source=/dev/null
+. "${CO_LIB}/scale.sh"
 # THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): the carry is rendered and checked by lib/debt.sh,
 # which `debt add` and card.sh read too (co_debts, co_debt_refusal).
 # shellcheck source=/dev/null
@@ -302,17 +306,43 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # `worktree` column never reaches this at all: the register names its own trees and needs
 # no wave number to scope anything to (ADR-032's retirement stands, unchanged, for it).
 #
-# A TASK-SCALE PLAN OWNS NO WAVE (T11, AC-9.2): a small late fix closes from a branch like
-# `fixit/x`, so a `scale: task` plan with no `worktree` column gets an empty `WT_NUM` and
-# no refusal — there is no `wt/<NN>-*` for it to census, and `wt_unreached` (below) reports
-# none. The shape refusal stays exactly as it was for every other scale.
+# THE SHAPE IS THE SCALE'S BRANCH CELL (wave-38 T16; D25, AC-5.1; T11, AC-9.2 before it). The cell
+# (lib/scale.sh) is `any` for a task-scale plan: a small late fix closes from a branch like `fix/x`,
+# gets an empty `WT_NUM` and no refusal — there is no `wt/<NN>-*` for it to census, and
+# `wt_unreached` (below) reports none. A wave or epic plan's cell is its pattern, whose `<NN>` is the
+# number the census scopes to. A plan with no `scale:`, or one the profile does not hold, is read at
+# the wave row, the default scale, which is the refusal it met before the profile.
+CO_SCALE="$(plan_frontmatter_get "$PLAN" scale)"
+scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 WT_NUM=""
 if ! units_has_column "$PLAN" worktree; then
-  WT_NUM="$(printf '%s' "$WORKING" | sed -nE 's#^wave/([0-9]+)-.*#\1#p')"
-  if [ -z "$WT_NUM" ] && [ "$(plan_frontmatter_get "$PLAN" scale)" != "task" ]; then
-    _co_refuse "the plan's working-branch '$WORKING' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to"
+  if ! WT_NUM="$(scale_branch_number "$CO_SCALE" "$WORKING")"; then
+    _co_refuse "the plan's working-branch '$WORKING' is not $(scale_cell "$CO_SCALE" branch) shaped (the $CO_SCALE scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to"
   fi
 fi
+
+# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). `merge` (wave, epic): the working
+# branch must be reachable from the integration branch before the tail runs, as before. `pr` (task):
+# close-out merges nothing; an unmerged working branch is not refused, and the act prints the one
+# `gh pr create` command for it against the integration branch and records it in the continuation.
+# It never runs it: opening a pull request is an outward act, the person's.
+CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
+CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
+# co_pr_owed -> 0 when the act is `pr` and the working branch is not yet reachable from the integration branch
+co_pr_owed() {
+  [ "$CO_INTEGRATE" = pr ] || return 1
+  ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
+}
+# co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
+co_pr_line() {
+  printf 'pr — %s (not run; %s @ %s is not merged into %s @ %s)' "$CO_PR_CMD" "$WORKING" "${1:-?}" "$INTEGRATION" "${2:-?}"
+}
+# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed
+co_into() { if co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
+# co_pr_section -> the continuation's record of the act
+co_pr_section() {
+  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Open it with:\n\n    %s\n' "$CO_SCALE" "$CO_PR_CMD"
+}
 
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
@@ -335,6 +365,10 @@ act_merge() {
   [ -n "$is" ] || _co_refuse "the plan's integration-branch '$INTEGRATION' is not a branch in $ROOT"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
     MERGE_LINE="$WORKING @ $ws reachable from $INTEGRATION @ $is"
+    return 0
+  fi
+  if co_pr_owed; then
+    MERGE_LINE="$(co_pr_line "$ws" "$is")"
     return 0
   fi
   _co_refuse "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
@@ -1149,7 +1183,7 @@ continuation_template() {
   cat <<CONT_TEMPLATE
 # continuation — $WAVE_SLUG${RELEASE:+ ($RELEASE)}
 
-Closed $NOW. $INTEGRATION at $sha. Wave branch \`$WORKING\` merged into
+Closed $NOW. $INTEGRATION at $sha. Wave branch \`$WORKING\` $(co_into) into
 \`$INTEGRATION\`: $tasks tasks, every one RED→GREEN; $regress.
 $reviews
 
@@ -1174,7 +1208,7 @@ $(co_hand_holds_section)
 $(co_governed_section)
 ${inherited:+
 $inherited
-}
+}$(! co_pr_owed || { printf '\n'; co_pr_section; })
 ## Resume instruction
 
 Nothing to resume: the run is delivered.${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
@@ -1217,6 +1251,11 @@ act_continuation() {
     fi
     co_cont_sections write
     [ -z "$CO_SEC_MSG" ] || CONT_LINE="$CONT_LINE; added $CO_SEC_MSG"
+    if co_pr_owed && ! co_cont_has_heading "## Pull request"; then
+      { printf '\n'; co_pr_section; } >> "$CONT" 2>/dev/null \
+        || _co_refuse "could not append the pull request command to the continuation at $CONT"
+      CONT_LINE="$CONT_LINE; added the ## Pull request section"
+    fi
     return 0
   fi
   git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1 \
@@ -1379,7 +1418,7 @@ PATROL_LINE="CronDelete the bionic-patrol job, then: bash $(plugin_root)/hooks/s
 # run OPEN to every other reader in the fleet, forever.
 step8_block() {
   cat <<STEP8
-- Step 8: CLOSED $NOW — $WORKING merged into $INTEGRATION; the tail was performed by close-out.sh $VERSION
+- Step 8: CLOSED $NOW — $WORKING $(co_into) into $INTEGRATION; the tail was performed by close-out.sh $VERSION
   merge: $MERGE_LINE
   worktree-removed: $WT_LINE
   cleanup: done
@@ -1403,7 +1442,7 @@ handoff_block() {
 ## Handoff
 
 - resume point: NONE — DELIVERED at $NOW; $INTEGRATION @ ${main_sha:-?}.
-- branch: $WORKING merged into $INTEGRATION.
+- branch: $WORKING $(co_into) into $INTEGRATION.
 - patrol: $PATROL_LINE
 - continuation: $CONT_REL
 HANDOFF
@@ -1669,6 +1708,7 @@ preview_block_lines() {
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   MERGE_LINE="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
+  ! co_pr_owed || MERGE_LINE="$(co_pr_line "$ws" "$is")"
   wt="$(wt_branches | tr '\n' ',' | sed -E 's/,$//; s/,/, /g')"
   WT_LINE="${wt:-none}"
   TMP_LINE="$(tmp_count) entries under $TMP_DIR (not yet wiped)"
@@ -1846,6 +1886,8 @@ do_check() {
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
     verdict="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
+  elif co_pr_owed; then
+    verdict="$(co_pr_line "$ws" "$is")"
   else
     verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
   fi
