@@ -3347,13 +3347,13 @@ section "§OWED-REG2 — the whole-run wall reads an owed floor on the regressio
 # been run: a second is the user's word (`approve regression-2`), as on the uncovered road, and the refusal names
 # the suites still owed, which a fix row runs instead.
 # FIXTURE FIDELITY: S28's pf_repo (a real repository on wave/99-test, five suites), its plan carrying one floor proof
-# at the working head in proof-add floor's shape with `owed=a.test.sh`; every earlier run the wall counts is one this
+# at the working head in proof-add regression's shape with `owed=a.test.sh`; every earlier run the wall counts is one this
 # gate journalled.
 # fails-when: a second whole run is admitted over an owed floor with no approval; the refusal names no owed suite.
 REPO=$(pf_repo rowed)
 write_attestation "$REPO" "$SID_A"
 OW_H="$(git -C "$REPO" rev-parse HEAD)"
-PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
+PF_STATE_EXTRA="proved: kind=regression head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
 pf_plan "$REPO" "" \
   "$(pf_row T1 4 landed lib/one.sh)" \
   "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt verify 'T1')"
@@ -3378,7 +3378,7 @@ Expected duration: ~20 minutes.
 Files: tests/a.test.sh
 Suites: tests/a.test.sh
 Lands-on: a.test.sh'
-PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
+PF_STATE_EXTRA="proved: kind=regression head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh"
 pf_plan "$REPO" "" \
   "$(pf_row T1 4 landed lib/one.sh)" \
   "$(pf_row T12 5 active .bionic/docs/record/w99-floor.txt verify 'T1')" \
@@ -3387,7 +3387,7 @@ expect_eq "OW.2f precondition: the floor is still read owed, naming a.test.sh" "
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$OW_FIX_BRIEF" "w99-T14")"
 expect_eq "OW.2f D20 the fix row the refusal names, the owed suite's, is ADMITTED over the owed floor" "allow" "$GATE_VERDICT"
 expect_status "OW.2f …and journalled" "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-PF_STATE_EXTRA="proved: kind=floor head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh
+PF_STATE_EXTRA="proved: kind=regression head=$OW_H at=2026-10-12T04:00:00Z evidence=record/w99-floor.txt owed=a.test.sh
 approved: regression-2 by dana 2026-10-12T05:00:00Z \"yes, run it again\""
 pf_plan "$REPO" ""
 PF_STATE_EXTRA=""
@@ -3405,10 +3405,10 @@ expect_eq "OW.2g D20 …and a second whole run on the user's word is ADMITTED ov
 expect_status "OW.2g …and journalled" "3" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
 # ============================================================================
-section "§REMEDY — the full-tree refusal names floor-run, and the line, run as printed, is admitted (wave-35 T10; REQ-1 AC-1.8; D10)"
+section "§REMEDY — the full-tree refusal names regression-run, and the line, run as printed, is admitted (wave-35 T10; REQ-1 AC-1.8; D10)"
 # ============================================================================
 # The budget arm refuses `tests/run.sh` to an agent whose row does not carry run.sh. The whole run has one path a
-# runner is given, `session-poker.sh floor-run`, held to the full-run rules; the refusal prints that path as a line of
+# runner is given, `session-poker.sh regression-run`, held to the full-run rules; the refusal prints that path as a line of
 # its own, never `amend --reexec+ '<cmd>'` (an amend would widen a writer's budget to the whole tree, the run the
 # rules hold). A refused suite FILE keeps `--suites+ <suite>`. The printed line, put back through the same wall as
 # the same agent, is admitted as typed.
@@ -3449,8 +3449,8 @@ expect_eq "RM.1 precondition: the agent's budgeted suite through the door is adm
 rm_wall 'tests/run.sh'
 expect_eq "RM.2 the full tree is refused to the writer (rc 2)" "2" "$RM_RC"
 expect_contains "RM.2b …by the full-tree arm" "full tree refused" "$RM_ERR"
-RM_LINE="$(printf '%s\n' "$RM_ERR" | /usr/bin/grep -E '^    bash .*session-poker\.sh.? floor-run$' | head -n 1 | sed 's/^    //')"
-expect_nonempty "RM.3 AC-1.8 the refusal prints the whole run's path as a line of its own: session-poker.sh floor-run" "$RM_LINE"
+RM_LINE="$(printf '%s\n' "$RM_ERR" | /usr/bin/grep -E '^    bash .*session-poker\.sh.? regression-run$' | head -n 1 | sed 's/^    //')"
+expect_nonempty "RM.3 AC-1.8 the refusal prints the whole run's path as a line of its own: session-poker.sh regression-run" "$RM_LINE"
 RM_SCRIPT="$(eval "set -- $RM_LINE"; printf '%s' "${2:-}")"
 expect_true "RM.3b …the plugin's own verb, by a path that is this tree's session-poker.sh" test "$RM_SCRIPT" -ef "${BIONIC_HOOKS_DIR}/session-poker.sh"
 expect_absent "RM.3c …and never the amend flag for a run, --reexec+" "--reexec+" "$RM_ERR"
@@ -3461,7 +3461,7 @@ expect_absent "RM.4c …and says nothing refused" "refused" "$RM_ERR"
 rm_wall 'tests/run.sh --only b.test.sh'
 expect_eq "RM.5 a suite FILE off the budget is still refused (rc 2)" "2" "$RM_RC"
 expect_contains "RM.5b …and its remedy keeps --suites+ <suite>" "--suites+ b.test.sh" "$RM_ERR"
-expect_absent "RM.5c …never the whole run's path" "floor-run" "$RM_ERR"
+expect_absent "RM.5c …never the whole run's path" "regression-run" "$RM_ERR"
 
 
 # ============================================================================

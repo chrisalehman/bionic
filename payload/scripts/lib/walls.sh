@@ -2363,7 +2363,7 @@ _eg_refuse_readings() {
     _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and a suite a row landed red by declaration is still owed a green run taken after its blocker cleared:
 ${lines}
 Plan: $PLAN
-Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add floor <log>'."
+Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add regression <log>'."
     refuse exit2 commit "a declared red is still owed" "record a green run once cleared" "$_eg_detail"
   fi
   _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
@@ -2404,14 +2404,14 @@ _eg_refuse_floor_absent() {
   [ "$(plan_regression "$PLAN")" = no ] && return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
     why="$(proof_floor_absent "$PLAN")" || return 0
-    why="its section holds no 'proved: kind=floor' line: ${why} (the judge's floor absent)"
+    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's floor absent)"
   else
     why="the floor's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
   _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the floor is owed: ${why}.
 Plan: $PLAN
-Fix: run the whole run with 'session-poker.sh floor-run' and record its log with 'session-poker.sh proof-add floor <log>'. Whether that floor is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
-  refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add floor" "$_eg_detail"
+Fix: run the whole run with 'session-poker.sh regression-run' and record its log with 'session-poker.sh proof-add regression <log>'. Whether that floor is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
+  refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add regression" "$_eg_detail"
 }
 
 # ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
@@ -6638,7 +6638,7 @@ $_how"
 # run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
 # the full-tree arm's detail.
 _budget_whole_run_cmd() {
-  printf 'bash %s floor-run' "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")"
+  printf 'bash %s regression-run' "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")"
 }
 _budget_is_whole_run() {  # <the refused suite or run> -> 0 when it is the whole tree's runner, run whole
   case " ${1:-} " in

@@ -990,6 +990,10 @@ _units_proof_lib() {
   return 0
 }
 _units_proof_lib
+# THE READS TOKEN'S OLD SPELLING (wave-38 T8; REQ-9, D6): lib/alias.sh `alias_awk_norm reads`, through proof.sh, written
+# once at load into the two awk readers of a reads token, the readiness tokenizer (`addtok`) and the validator. A plan
+# 1.20.0 wrote reads `proof:floor` as `proof:regression`; with no map loaded the statements are a blank.
+_UNITS_READS_NORM=" "; declare -F _proof_alias_norm >/dev/null 2>&1 && _UNITS_READS_NORM="$(_proof_alias_norm reads t)"
 _units_proof_awk() {
   if declare -F proof_awk >/dev/null 2>&1; then
     proof_awk
@@ -1209,7 +1213,7 @@ _units_cell_awk() {
       if (k == "test" && s ~ /^[0-9]+$/ && s + 0 >= 6) return "approval:plan, proof:review, head"
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
       if (k == "review") return "approval:plan, live:head"
-      if (k == "integrate") return (regno == "1") ? "proof:review, head" : "proof:floor, proof:review, head"
+      if (k == "integrate") return (regno == "1") ? "proof:review, head" : "proof:regression, proof:review, head"
       if (k == "close") return "merge"
       return "approval:plan"
     }
@@ -1366,6 +1370,7 @@ _units_sched_awk() {
     }
     function addtok(i, t) {
       t = trim(t)
+      '"$_UNITS_READS_NORM"'
       if (t == "" || t !~ /[A-Za-z0-9]/) return
       ntk[i]++; tk[i, ntk[i]] = t
       if (t == "head") rhead[i] = 1
@@ -1551,7 +1556,7 @@ _units_sched_awk() {
         a = substr(t, 7)
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
-          if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
+          if ((a == "regression" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
             if (!(st[j] == "pending" && rlive[j] && live_idle(j))) wj[++nw] = j
         }
         # THE REVIEW IS MET BY THE JUDGE, NOT BY A LINE (wave-27 T14; D3, D4). A `proved: kind=review`
@@ -1582,10 +1587,10 @@ _units_sched_awk() {
         # state that could not be computed, is a wait naming what is lacking and the way out.
         # Unknown here (floorst empty) is reported through needfloor, and the shell runs this
         # program again with the state; a row held for its step is judged without it.
-        if (nw == 0 && a == "floor" && (a in proved) && !skipfloor) {
+        if (nw == 0 && a == "regression" && (a in proved) && !skipfloor) {
           if (floorst == "") needfloor = 1
           else if (floorst ~ /^owed\t/) {
-            lwhy = "the whole run at " substr(prvh["floor"], 1, 12) " left " substr(floorst, 6) \
+            lwhy = "the whole run at " substr(prvh["regression"], 1, 12) " left " substr(floorst, 6) \
               " red, each owed until a later landing runs it green; a fix row, or proof-add inherited <suite> when it is red at the base too"
             return 0
           }
@@ -1593,7 +1598,7 @@ _units_sched_awk() {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
             lwhy = "the floor is one whole run plus each later commit proved; past the proof at " \
-              substr(prvh["floor"], 1, 12) ", " fr "; run suites its row named, proof-add floor; a second run: approve regression-2"
+              substr(prvh["regression"], 1, 12) ", " fr "; run suites its row named, proof-add regression; a second run: approve regression-2"
             return 0
           }
         }
@@ -1779,7 +1784,7 @@ _units_sched_awk() {
       if ((mode == "ready" || mode == "held" || mode == "waiting") && floorst == "") {
         for (i = 1; i <= n; i++) {
           if (st[i] != "pending" || rowheld(i) != 0) continue
-          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:floor") { judge(i, tk[i, k]); if (needfloor) exit 3 }
+          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:regression") { judge(i, tk[i, k]); if (needfloor) exit 3 }
         }
       }
       # THE STATE OF THE READINGS, ASKED THE SAME WAY (wave-35 T9; AC-1.1): a pending row this answer judges, not held
@@ -2066,7 +2071,8 @@ units_validate() {
               }
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
               if (t == "head" || t == "record" || t == "merge") continue
-              if (t ~ /^proof:(floor|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
+              '"$_UNITS_READS_NORM"'
+              if (t ~ /^proof:(regression|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
                 if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
                 # A RECORD PATH IS READ ONLY WHEN A ROW WRITES IT (wave-35 T8; REQ-6 AC-6.1; D15). A path no
@@ -3186,8 +3192,9 @@ units_born_findings() {
 units_born_marks() {
   local plan="${1:-}"
   [ -n "$plan" ] && [ -r "$plan" ] || return 1
-  /usr/bin/grep -qE ' born: (review|floor) ' "$plan" 2>/dev/null || return 0
-  awk '
+  local _units_born_alt="regression"; declare -F _proof_alias_born >/dev/null 2>&1 && _units_born_alt="$(_proof_alias_born)"
+  /usr/bin/grep -qE " born: (review|$_units_born_alt) " "$plan" 2>/dev/null || return 0
+  awk -v balt="$_units_born_alt" '
     { sub(/\r$/, "") }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -3202,7 +3209,9 @@ units_born_marks() {
       seen[k] = 1
       if (match(l, / born: review S[0-9]+ (on|off)( |$)/)) {
         r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r); printf "%s\treview\t%s\n", k, r
-      } else if (match(l, / born: floor [^ \t;]+/)) printf "%s\tfloor\t%s\n", k, substr(l, RSTART + 13, RLENGTH - 13)
+      } else if (match(l, " born: (" balt ") [^ \t;]+")) {
+        w = substr(l, RSTART + 7, RLENGTH - 7); sub(/^[^ ]+ /, "", w); printf "%s\tregression\t%s\n", k, w
+      }
     }' "$plan"
 }
 

@@ -1437,7 +1437,7 @@ fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
     printf '| T2 | 6 | review | the review | critic | — | 15m | REQ-x | .bionic/docs/record/fl/review.md | landed |  |\n'
     printf '| T3 | 8 | integrate | merge to main | implementor | — | 15m | REQ-x | — | pending |  |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md"
-  fl_prove "$d" floor; fl_prove "$d" review
+  fl_prove "$d" regression; fl_prove "$d" review
   mkdir -p "$d/newdir"; printf 'new\n' > "$d/newdir/x.sh"; fl_git "$d" add newdir; fl_git "$d" commit -qm 'a new file'
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
@@ -1450,12 +1450,12 @@ export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
 FL_TX="$(mktemp)"
 FL_D="$(fl_fixture)"
 expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
-  "poker: WAIT T3 — proof:floor: the floor is one whole run plus each later commit proved; past the proof at" "$(fo_tick "$FL_D")"
+  "poker: WAIT T3 — proof:regression: the floor is one whole run plus each later commit proved; past the proof at" "$(fo_tick "$FL_D")"
 sd_turn "$FL_TX" u-fl-1
 s7_fire "$FL_D" "$FL_TX"
 expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is uncovered" \
   "ready with room:" "$(reason_of)$STOP_ERR"
-fl_prove "$FL_D" floor
+fl_prove "$FL_D" regression
 fl_read "$FL_D" adversarial piece; fl_read "$FL_D" structure piece
 fl_read "$FL_D" adversarial whole; fl_read "$FL_D" structure whole
 rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"

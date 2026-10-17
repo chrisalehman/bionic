@@ -1170,21 +1170,23 @@ RR=$(rigor_rank "$RIGOR")
 RL=$(rigor_level "$RIGOR")
 # Intent floor / spike cap (derivable from intent + rigor).
 [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 1 ] \
-  && log_floor_finding intent-floor "incident-response floors at double, declared $RL"
+  && log_floor_finding intent-minimum "incident-response floors at double, declared $RL"
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
   && log_floor_finding spike-cap "spike is capped at single, declared $RL"
 
 # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
 # an unparseable/invalid value is its own finding, never a block).
 # [INSTRUMENT]
-PF=$(grep -E '^rigor-floor:' "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null \
-  | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
+# THE KEY IS rigor-minimum: (wave-38 T8; REQ-9, D6): lib/alias.sh `alias_keyed` reads it, and the old rigor-floor: with its
+# deprecation line. With no map loaded nothing is read, the fail-open this reader always had.
+ALIAS_VALUE=""; declare -F alias_keyed >/dev/null 2>&1 && alias_keyed rigor-key "$(cat "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null)"
+PF="$ALIAS_VALUE"
 if [ -n "$PF" ]; then
   PR=$(rigor_rank "$PF")
   if [ "$PR" -lt 0 ]; then
-    log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml — allowed: single or double"
+    log_finding project-minimum "invalid rigor-minimum value '$PF' in config.yaml — allowed: single or double"
   elif [ "$RR" -lt "$PR" ]; then
-    log_floor_finding project-floor "project floor $(rigor_level "$PF"), declared $RL"
+    log_floor_finding project-minimum "project floor $(rigor_level "$PF"), declared $RL"
   fi
 fi
 
@@ -1193,16 +1195,16 @@ fi
 # floors are opt-in).
 EPIC=$(yaml_get epic)
 if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
-  EF=$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md" \
-    | grep -E '^rigor-floor:' | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
+  ALIAS_VALUE=""; declare -F alias_keyed >/dev/null 2>&1 && alias_keyed rigor-key "$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md")"
+  EF="$ALIAS_VALUE"
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
     # A word that is no level is the epic's own data-quality finding, as the project floor's is
     # (wave-30 T11): a floor written before 1.14.0 says so rather than going silent.
     if [ "$ER" -lt 0 ]; then
-      log_finding epic-floor "invalid rigor-floor value '$EF' in $EPIC's epic plan — allowed: single or double"
+      log_finding epic-minimum "invalid rigor-minimum value '$EF' in $EPIC's epic plan — allowed: single or double"
     elif [ "$RR" -lt "$ER" ]; then
-      log_floor_finding epic-floor "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
+      log_floor_finding epic-minimum "epic floor $(rigor_level "$EF") (from $EPIC), declared $RL"
     fi
   fi
 fi
