@@ -16,6 +16,8 @@
 #                  a live request is never pruned, so a number in use is never given twice). Lines:
 #                    key=<command key>  kind=<landing|work|whole>  who=<session id>:<agent>
 #                    tree=<abs path>  asked=<epoch>  holder=<pid>:<start>
+#                  and, on a landing's run asked with BIONIC_GATE_LANDING=<landing> set,
+#                  landing=<landing>, the landing it belongs to (wave-38 T5; D22: THE WIDTH ASK)
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
 #                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed;
 #                  rc=gone when its holder died before it was admitted, written at its who's next
@@ -40,7 +42,9 @@
 #                  rc 75 at once, nothing filed: the asking agent's budget refuses the key (THE
 #                  BUDGET; its line on stderr). rc 75: the time ran out; the request is kept with its turn, nothing ran, and
 #                  its holder is cleared (holder=-), so it is nobody's and passed over until the
-#                  next ask by the same who for the same key and kind resumes it. rc 2: a
+#                  next ask by the same who for the same key and kind (and landing) resumes it.
+#                  rc 143: it was sent TERM while it waited; the request is handed back as a 75
+#                  hands it back, and the asker then dies of the TERM (THE TERM TRAP). rc 2: a
 #                  usage error or a store that cannot be written. It polls every
 #                  ${BIONIC_GATE_POLL:-2} seconds and gives up before --within runs out;
 #                  without --within it waits until admitted.
@@ -52,6 +56,9 @@
 #   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
+#                            (waiting is printed, and decides nothing: wave-38 T5, D21)
+#   gate_width_ask <landing> how many runners <landing> may start now, one whole number on stdout,
+#                            rc 0 (rc 2 usage or store; rc 1 the lock). See THE WIDTH ASK.
 #   gate_asked               names (a who each) on stdin; prints those with an OPEN request (see
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
@@ -65,9 +72,9 @@
 #                            budget to hold it to); rc 75 and the budget's own line on stdout when
 #                            it does not. gate_ask asks it first (THE BUDGET, below).
 #
-# WHICH VERBS WALK THE STORE. gate_ask, gate_end, gate_state and gate_room take the lock and run
-# the scan (`_gate_scan`), which tallies the open requests, writes the end of a killed one and
-# prunes (below); so gate_state and gate_room, which read, also remove. gate_list takes the lock
+# WHICH VERBS WALK THE STORE. gate_ask, gate_end, gate_state, gate_room and gate_width_ask take the
+# lock and run the scan (`_gate_scan`), which tallies the open requests, writes the end of a killed
+# one and prunes (below); so gate_state, gate_room and gate_width_ask, which read, also remove. gate_list takes the lock
 # and only reads. gate_asked takes no lock and only reads. Neither of those two reaps or prunes.
 #
 # THE KNOBS. BIONIC_GATE_POLL (seconds between a waiter's polls, default 2) and BIONIC_GATE_KEEP
@@ -113,8 +120,10 @@
 #             promises alone decide.
 #   promise   (wave-33 T1; D4 as amended, Δ10; AC-8.1) the gate does not forecast from history:
 #             a request promises 0 memory and the cores its kind declares (`_gate_cores_for`):
-#             a command that declares no width, work or landing, one core; a whole run the
-#             width it takes, gate_width. Live load is the backstop: the readings above. The
+#             a command that declares no width, work or landing, the measured cost of one
+#             suite, resources.sh's `_res_suite_cores` (wave-38 T5; D21, ADR-060: 1.61 where
+#             one core was promised before, so the gate stops admitting more suites than the
+#             machine carries); a whole run the width it takes, gate_width. Live load is the backstop: the readings above. The
 #             seconds are the key's recorded duration (`_gate_seconds`), which the landing's
 #             time limit reads (line.sh `_line_time_for`), 0 with none. While the memory
 #             reading is unknown (-1) a command is admitted only when nothing admitted is
@@ -123,13 +132,19 @@
 #             A run of zero seconds has no measured time and writes none.
 #   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
-#             admitted, unfinished requests and <owed> times one core (`_gate_cores_for work`,
-#             what a writer not yet showing will be promised), are at most share × cores ÷ 100;
-#             `_res_used_pct` is at most the share; and nothing waits.
+#             admitted, unfinished requests and <owed> times the suite cost (`_gate_cores_for
+#             work`, what a writer not yet showing will be promised), are at most share × cores
+#             ÷ 100; and `_res_used_pct` is at most the share. It reads admitted runs and the
+#             owed count, never the queue (wave-38 T5; D21, ADR-060): a landing's runner waiting
+#             at the gate used to answer room=no and close FILL for every writer.
 #             <owed> is the caller's count of writers not yet showing: live writers that have
 #             not asked the gate yet, plus the rows it has already offered on
 #             this reading, so two asks on one reading give room once. A reading that cannot
-#             be read (-1 or empty) gives no room unless nothing is admitted, waiting or owed.
+#             be read (-1 or empty) gives no room unless nothing is admitted or owed.
+#   width     (wave-38 T5; D21, D22) THE WIDTH ASK, above `gate_width_ask`: the admission rule
+#             applied in sequence, answered to the oldest active landing and 0 to any other.
+#   term      (wave-38 T5; AC-6.2) THE TERM TRAP, above `gate_ask`: a waiter sent TERM hands its
+#             request back, so its number and asked= are the next ask's.
 #   time      only `_res_now`, never SECONDS or date: a planted clock moves every wait.
 #   belief    BIONIC_GATE_ADMIT=<id> is believed only while that request is admitted,
 #             unfinished, and held by this process or one of its ancestors. With no such id,
@@ -141,7 +156,7 @@
 #             is where an agent's budget holds: see THE BUDGET, above `gate_budget`.
 #
 # No figure sized to a machine appears here: memory is a percentage, processor a share of the
-# cores this process may use (`_res_cores`), and a command is promised one of them.
+# cores this process may use (`_res_cores`), and a command is promised what one suite costs.
 #
 # BASH 3.2. No associative arrays, no `$BASHPID`, no `flock`.
 #
@@ -262,7 +277,7 @@ _gate_ancestor() {
 _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins); rc 1 unreadable
   local l
   _R_key='' _R_kind='' _R_who='' _R_tree='' _R_asked='' _R_holder='' _R_admitted=''
-  _R_promise='' _R_ended='' _R_rc=''
+  _R_promise='' _R_ended='' _R_rc='' _R_landing=''
   [ -r "$1" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in
@@ -276,6 +291,7 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
       promise=*) _R_promise="${l#promise=}" ;;
       ended=*) _R_ended="${l#ended=}" ;;
       rc=*) _R_rc="${l#rc=}" ;;
+      landing=*) _R_landing="${l#landing=}" ;;
     esac
   done < "$1"
 }
@@ -352,13 +368,14 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
 
 # _gate_cores_for <kind> — the cores a request of <kind> is promised (wave-33 T1; D4 as amended,
 # Δ10; AC-8.1). THE ONE SITE of the assumption: a command that declares no width (work, landing)
-# takes one core; a whole run takes the width it runs at, gate_width. Nothing recorded moves it:
+# takes what one suite costs, resources.sh's measured `_res_suite_cores` (wave-38 T5; D21,
+# ADR-060; one core before); a whole run takes the width it runs at, gate_width. Nothing recorded moves it:
 # the gate does not forecast from history, and live load is its backstop. The room's owed writer
 # is charged `_gate_cores_for work`, so the promise and the room cannot disagree.
 _gate_cores_for() {
   case "${1:-work}" in
     whole) gate_width ;;
-    *)     echo 1 ;;
+    *)     _res_suite_cores ;;
   esac
 }
 
@@ -393,6 +410,7 @@ _gate_promise() {
 #   _G_PROM     their "<mem>:<cores>:<seconds>:<admitted>" lines
 #   _G_WAIT     waiting (holder alive, not admitted)   _G_LWAIT  of them, landings
 #   _G_QUEUE    their "<kind> <asked> <id> <key>" lines
+#   _G_LAND     the open (waiting or admitted) requests that name a landing: "L <landing> <asked> <id>"
 # writes the end of every admitted request whose holder is dead (_gate_reap), and removes, in one batch,
 # every request that is not open and is older than BIONIC_GATE_KEEP seconds (ended: by its ended=;
 # gone, never admitted and nobody's: by its asked=). A number it cannot read as decimal is never
@@ -409,7 +427,7 @@ _gate_scan() {
     fi
     keep="$_GATE_KEEP_DEFAULT"
   fi
-  _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE=''
+  _G_UNF=0 _G_WHOLE=0 _G_PROM='' _G_WAIT=0 _G_LWAIT=0 _G_QUEUE='' _G_LAND=''
   for f in "$_GD"/requests/*; do
     id="${f##*/}"
     case "$id" in ''|*[!0-9]*) continue ;; esac
@@ -430,6 +448,8 @@ _gate_scan() {
       [ "$((now - born))" -le "$keep" ] || old[${#old[@]}]="$f"
       continue
     fi
+    [ -z "$_R_landing" ] || _G_LAND="${_G_LAND}L ${_R_landing} ${_R_asked} ${id}
+"
     if [ -n "$_R_admitted" ]; then
       _G_UNF=$((_G_UNF + 1))
       [ "$_R_kind" != whole ] || _G_WHOLE=1
@@ -521,10 +541,12 @@ _gate_decide() {
   return 0
 }
 
-# _gate_enter <kind> <key> <who> — under the lock: sets _GATE_ID to the request this ask
-# holds. One by the same who for the same key AND kind, with no admitted line, whose holder was
-# cleared (holder=-, a 75 handed it back) is resumed, its holder rewritten; otherwise a new one
-# takes the next number, so a live waiter's number is never taken over.
+# _gate_enter <kind> <key> <who> [<landing>] — under the lock: sets _GATE_ID to the request this
+# ask holds. One by the same who for the same key AND kind, with no admitted line, whose holder was
+# cleared (holder=-, a 75 or a TERM handed it back) and whose landing= is <landing> (none for none:
+# wave-38 T5, so one row's ask never inherits another row's turn) is resumed, its holder
+# rewritten; otherwise a new one takes the next number, so a live waiter's number is never taken
+# over. A new request names <landing> on its landing= line when one is given.
 #
 # WHAT IT CANNOT RESUME IT ENDS (wave-36 T11; D8, AC-2.1). A never-admitted request by the same
 # who for the same key whose holder is neither alive nor cleared was held by a process that died
@@ -560,7 +582,7 @@ _gate_enter() {
       if [ "$_R_holder" != - ]; then
         gone="$gone $id"
       elif [ -z "$_GATE_ID" ] && [ "$_R_kind" = "$1" ]; then
-        _GATE_ID="$id"
+        [ "$_R_landing" != "${4:-}" ] || _GATE_ID="$id"
       fi
     fi
   done
@@ -585,8 +607,10 @@ _gate_enter() {
   _gate_place; tree="$_GATE_TREE"
   [ -n "$tree" ] || tree="$(pwd -P)"
   now="$(_res_now)"
-  printf 'key=%s\nkind=%s\nwho=%s\ntree=%s\nasked=%s\nholder=%s\n' \
-    "$2" "$1" "$3" "$tree" "$now" "$holder" > "$_GD/requests/$_GATE_ID"
+  { printf 'key=%s\nkind=%s\nwho=%s\ntree=%s\nasked=%s\nholder=%s\n' \
+      "$2" "$1" "$3" "$tree" "$now" "$holder"
+    [ -z "${4:-}" ] || printf 'landing=%s\n' "$4"
+  } > "$_GD/requests/$_GATE_ID"
 }
 
 # _gate_believe <id> — under the lock: the admission passed down is this process's to use.
@@ -781,11 +805,57 @@ gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's li
   return 75
 }
 
+# ── THE TERM TRAP (wave-38 T5; AC-6.2; ADR-060) ──────────────────────────────────────────────
+#
+# The drain stops a runner with TERM to it and to its descendants (line.sh `_line_kill_tree`). One
+# still waiting here used to die with its holder naming a dead pid, so its who's next ask ended the
+# request rc=gone and took a fresh number, the youngest in the queue. While gate_ask waits it traps
+# TERM, and the trap only notes the signal (`_GATE_TERMED`). Between two of its own steps, never
+# inside the lock, the wait then hands the request back as a 75 does (holder=-), ends rc=143 an
+# admission granted on that same pass (nothing ran), puts back the TERM disposition its caller had
+# and sends TERM to itself: the caller dies of it, or runs its own trap, as it did before. The row's
+# next ask under the same who, key, kind and landing resumes the number and its asked=. SIGKILL
+# runs no trap, so such a waiter's request is still ended rc=gone at its who's next ask. A TERM the
+# caller ignores stays ignored, and no trap is set. Inside a subshell bash shows the parent's trap,
+# which is not in force there, so it is put back as the default.
+_GATE_TERMED=0 _GATE_TERM_ARMED=0 _GATE_TERM_WAS=""
+_gate_term_arm() {  # before gate_ask's wait: TERM noted, the disposition found kept
+  local shown me
+  _GATE_TERMED=0 _GATE_TERM_ARMED=0 _GATE_TERM_WAS=""
+  shown="$(trap -p TERM)"
+  case "$shown" in "trap -- '' SIGTERM"|"trap -- '' TERM") return 0 ;; esac
+  me="$(exec sh -c 'echo "$PPID"')"
+  [ "$me" != "$$" ] || _GATE_TERM_WAS="$shown"
+  _GATE_TERM_ARMED=1
+  trap '_GATE_TERMED=1' TERM
+}
+_gate_term_disarm() {  # the TERM disposition _gate_term_arm found, put back
+  [ "$_GATE_TERM_ARMED" = 1 ] || return 0
+  _GATE_TERM_ARMED=0
+  if [ -n "$_GATE_TERM_WAS" ]; then eval "$_GATE_TERM_WAS"; else trap - TERM; fi
+}
+_gate_term_end() {  # <id> <admitted: 0|1> — TERM came while gate_ask waited: give back, then die of it
+  if [ -n "$1" ]; then
+    if [ "$2" = 1 ]; then gate_end "$1" 143 >/dev/null 2>&1 || :
+    elif _gate_lock; then _gate_holder "$1" -; _gate_unlock
+    fi
+    echo "gate: request $1 handed back on TERM; it keeps its turn, ask again" >&2
+  fi
+  _gate_term_disarm
+  kill -TERM "$(exec sh -c 'echo "$PPID"')" 2>/dev/null
+}
+
+# _gate_landing_ok <key> — rc 0 when <key> is a landing key: 1 to 128 of A-Z a-z 0-9 . _ : / + -
+_gate_landing_ok() {
+  case "${1:-}" in ''|*[!A-Za-z0-9._:/+-]*) return 1 ;; esac
+  [ "${#1}" -le 128 ]
+}
+
 # ── the verbs ────────────────────────────────────────────────────────────────
 
 gate_ask() {
   local kind="${1:-}" key="${2:-}" within='' poll="${BIONIC_GATE_POLL:-2}" start now
-  local who='' id='' noted=0 rc
+  local who='' id='' noted=0 rc land=''
   if [ "$#" -lt 2 ]; then
     echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>]" >&2
     return 2
@@ -811,24 +881,36 @@ gate_ask() {
   # THE BUDGET (above): an off-budget suite or whole run is refused here, before a request is filed.
   _gate_budget "$kind" "$key" || return 75
   who="${CLAUDE_CODE_SESSION_ID:-none}:$_GATE_AGENT"
+  # THE WIDTH ASK's landing (below): a landing's run names the landing it belongs to.
+  if [ "$kind" = landing ] && [ -n "${BIONIC_GATE_LANDING:-}" ]; then
+    if _gate_landing_ok "$BIONIC_GATE_LANDING"; then land="$BIONIC_GATE_LANDING"
+    else echo "gate: BIONIC_GATE_LANDING='${BIONIC_GATE_LANDING:0:40}' is not a landing key; the request names none" >&2
+    fi
+  fi
 
   start="$(_res_now)"
+  _gate_term_arm
   while :; do
     if _gate_lock; then
       if [ -z "$id" ]; then
-        _gate_enter "$kind" "$key" "$who"
-        if [ "$_GATE_LINEAGE" = 1 ]; then _gate_unlock; printf '%s\n' "$_GATE_ID"; return 0; fi
+        _gate_enter "$kind" "$key" "$who" "$land"
+        if [ "$_GATE_LINEAGE" = 1 ]; then _gate_unlock; _gate_term_disarm; printf '%s\n' "$_GATE_ID"; return 0; fi
         id="$_GATE_ID"
       fi
       _gate_decide "$id"; rc=$?
       _gate_unlock
-      if [ "$rc" -eq 0 ]; then printf '%s\n' "$id"; return 0; fi
+      if [ "$rc" -eq 0 ]; then
+        if [ "$_GATE_TERMED" = 1 ]; then _gate_term_end "$id" 1; return 143; fi
+        _gate_term_disarm; printf '%s\n' "$id"; return 0
+      fi
     fi
+    if [ "$_GATE_TERMED" = 1 ]; then _gate_term_end "$id" 0; return 143; fi
     now="$(_res_now)"
     if [ -n "$within" ] && awk -v n="$now" -v p="$poll" -v d="$((start + within))" \
         'BEGIN { exit !(n + p > d) }'; then
       # Nobody polls it now: its holder is cleared, or a caller that lives on keeps the head.
       [ -z "$id" ] || { _gate_lock; _gate_holder "$id" -; _gate_unlock; }
+      _gate_term_disarm
       echo "gate: request ${id:-?} not admitted within ${within}s; it keeps its turn, ask again" >&2
       return 75
     fi
@@ -837,6 +919,7 @@ gate_ask() {
       noted=1
     fi
     sleep "$poll"
+    if [ "$_GATE_TERMED" = 1 ]; then _gate_term_end "$id" 0; return 143; fi
   done
 }
 
@@ -917,7 +1000,8 @@ gate_state() {
 # _gate_room_line <reading> <owed> — after a scan: the room line, rc 0 when there is room.
 # The loads print as read (-1 when empty); `promised` is the admitted runs' processor
 # promises plus <owed> times the cores a writer not yet showing will be promised,
-# `_gate_cores_for work` (wave-33 T1; Δ10: one core, whatever is on record).
+# `_gate_cores_for work` (wave-33 T1; Δ10; wave-38 T5: the suite cost, whatever is on record).
+# `waiting` is printed and decides nothing (wave-38 T5; D21): the room is the admitted runs'.
 _gate_room_line() {
   local b1 b5 most
   b1="$(_res_busy_cores 2>/dev/null)"; b5="$(_res_busy_cores_5m 2>/dev/null)"
@@ -929,13 +1013,12 @@ _gate_room_line() {
     NF >= 3 { pc += $2 }
     END {
       prom = pc + owed * most
-      quiet = (unf == 0 && wait == 0 && owed == 0)
+      quiet = (unf == 0 && owed == 0)
       room = 1
       if (!known(b1) || !known(b5) || r < 0) { if (!quiet) room = 0 }
       if (known(b1)) { if (b1 + prom > lim) room = 0 }
       if (known(b5)) { if (b5 + prom > lim) room = 0 }
       if (r >= 0 && !fits(used, share)) room = 0
-      if (wait > 0) room = 0
       printf "room=%s load=%s/%s cores=%d promised=%g waiting=%d\n", (room ? "yes" : "no"), b1, b5, cores, prom, wait
       exit !room
     }'
@@ -960,6 +1043,72 @@ gate_room() {
   _gate_idle "$reading"
   _gate_unlock
   _gate_room_line "$reading" "$((10#$owed))"
+}
+
+# ── THE WIDTH ASK (wave-38 T5; D21, D22; AC-6.1; ADR-060) ────────────────────────────────────
+#
+# WHY. The drain used to size itself (`pressure_level(gate_width)`, 7 at share 92 on 8 cores) and
+# file that many asks of a gate that admitted on spare capacity, about 3.5 of them: the rest
+# queued, and while they queued the room said no to every writer. Now the drain asks the gate how
+# many runners it may start, and starts that many; the gate answers with its own admission rule.
+#
+# gate_width_ask <landing> — one whole number on stdout, rc 0: how many runners <landing> may start
+# now. <landing> is the key its runners' asks carry in BIONIC_GATE_LANDING (each such request's
+# `landing=` line). Under the lock, after the scan:
+#   order  a landing is ACTIVE while an open request (waiting or admitted) names it; the oldest is
+#          the one whose earliest open request was asked first, ties by id. A landing that is not
+#          the oldest active one, active itself or not, is answered 0 until the older finishes
+#          (D22: landings one at a time at full width; work fills what is left).
+#   count  the admission rule (`_gate_decide`'s) applied in sequence, no arithmetic of its own:
+#          s starts at the processor promises of the admitted runs plus PROMISE for each waiting
+#          landing request (the order serves those before any new landing ask); a run counts
+#          while max(_res_busy_cores, s) + PROMISE ≤ share × cores ÷ 100, and each one counted
+#          adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost. Nothing counts
+#          while a whole run is admitted, or while the memory reading is over the share or unknown.
+#   floor  the oldest landing with nothing of its own open is answered at least 1, so a landing
+#          always progresses (the gate admits a run whatever the load while nothing is admitted).
+#          One with a run of its own open is answered the count alone, so no runner of it is
+#          started only to wait in the queue (A-T5-2).
+# The answer reads the store as it is: a runner started and not yet asking is not in it, so the
+# caller asks again once the runners it started have asked.
+# rc 2: not one argument, a key that is not a landing key (`_gate_landing_ok`), or a store that
+# cannot be written; rc 1: the lock could not be had.
+gate_width_ask() {
+  local land="${1:-}" reading
+  if [ "$#" -ne 1 ] || ! _gate_landing_ok "$land"; then
+    echo "gate: usage: gate_width_ask <landing key>" >&2
+    return 2
+  fi
+  _gate_store || return 2
+  _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
+  reading="$(_gate_reading)"
+  _gate_scan
+  _gate_idle "$reading"
+  _gate_unlock
+  { printf '%s' "$_G_PROM"; printf '%s' "$_G_LAND"; } | awk -v land="$land" \
+      -v p="$(_gate_cores_for landing)" -v r="$reading" -v u="$(gate_usage "$reading")" \
+      -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores 2>/dev/null)" \
+      -v whole="$_G_WHOLE" -v lwait="$_G_LWAIT" "$_GATE_FITS_AWK"'
+    $1 == "L" {
+      k = $2; a = $3 + 0; i = $4 + 0
+      if (!(k in A) || a < A[k] || (a == A[k] && i < I[k])) { A[k] = a; I[k] = i }
+      next
+    }
+    NF == 1 { split($1, f, ":"); sc += f[2] }
+    END {
+      own = (land in A)
+      for (k in A) {
+        if (k == land) continue
+        if (!own || A[k] < A[land] || (A[k] == A[land] && I[k] < I[land])) { print 0; exit }
+      }
+      n = 0; p += 0
+      if (!whole && r >= 0 && fits(u, share) && p > 0) {
+        s = sc + lwait * p; b0 = busy + 0
+        while (n < 4096) { b = b0; if (s > b) b = s; if (b + p > lim) break; n++; s += p }
+      }
+      if (n == 0 && !own) n = 1
+      print n
+    }'
 }
 
 # gate_asked — names on stdin, one who per line: prints, in the order given, each that has an

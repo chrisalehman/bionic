@@ -12128,8 +12128,10 @@ section "§ROOM — the tick and the stop wall give one answer on width (wave-28
 # 1.0 core, ten ready rows and a person's cap of eight; the reading moves, the answer moves, and
 # the two readers move together. The wall owes nothing when the gate gives no room — its HOLD —
 # and that is the count 0, the tick's empty FILL.
-#   quiet   a load of 1.0: 1.0 + k owed runs fits 6.4 cores for k = 0 … 5            -> 6
-#   loaded  a load of 4.0 over both windows                                           -> 3
+# Each owed row is promised resources.sh's suite cost P (wave-38 T5; D21), lifted, never a literal:
+# row k (from 0) is offered while load + k × P <= 6.4 cores. At P = 1.61:
+#   quiet   a load of 1.0: 1.0 + k × 1.61 fits 6.4 cores for k = 0 … 3                -> 4
+#   loaded  a load of 4.0 over both windows: 4.0 + k × 1.61 for k = 0 … 1              -> 2
 #   5m      a quiet minute, a five-minute load of 7.0                                 -> 0
 room_world() {  # <label> -> repo path, with ten ready rows under a cap of eight
   cgb_world "room-$1" 'parallel-budget: writers=8 suites=2 source=user'
@@ -12161,8 +12163,18 @@ ROOM_GATE_SAVED="$BIONIC_GATE_DIR"
 mkdir -p "$ROOM_GATE/requests" "$ROOM_GATE/cost"
 printf '5:1.0:30:1000\n' > "$ROOM_GATE/cost/fixture.test.sh"
 export BIONIC_GATE_DIR="$ROOM_GATE"
-for _rm in quiet:1.0:1.0:6 loaded:4.0:4.0:3 5m:1.0:7.0:0; do
-  IFS=: read -r _rm_case _rm_b1 _rm_b5 _rm_want <<< "$_rm"
+ROOM_P="$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores )"
+room_want() {  # <load 1m> <load 5m> -> the rows offered: k from 0 while max(load) + k × P <= 6.4, under the cap of 8
+  awk -v b1="$1" -v b5="$2" -v p="$ROOM_P" 'BEGIN { b = (b1 > b5 ? b1 : b5); k = 0
+    while (k < 8 && b + k * p <= 80 * 8 / 100 + 1e-9) k++; print k }'
+}
+expect_true "ROOM precondition: the suite cost was lifted from resources.sh (${ROOM_P:-<empty>})" \
+  test -n "$( printf '%s' "$ROOM_P" | grep -E '^[0-9]+(\.[0-9]+)?$' )"
+expect_true "ROOM precondition: quiet offers more rows than loaded, and loaded more than none ($(room_want 1.0 1.0) > $(room_want 4.0 4.0) > 0)" \
+  test "$(room_want 1.0 1.0)" -gt "$(room_want 4.0 4.0)" -a "$(room_want 4.0 4.0)" -gt 0
+for _rm in quiet:1.0:1.0 loaded:4.0:4.0 5m:1.0:7.0; do
+  IFS=: read -r _rm_case _rm_b1 _rm_b5 <<< "$_rm"
+  _rm_want="$(room_want "$_rm_b1" "$_rm_b5")"
   _rm_r=$(room_world "$_rm_case")
   cgc_row "$_rm_r/.bionic/tmp/roster-$SID_A.state" room-tickrow 2026-09-01T00:00:00Z toolu_01ROOMTICK
   cgc_ack "$_rm_r/.bionic/tmp/sweeper-$SID_A.state" 2026-09-01T01:00:00Z room-tickrow
@@ -12754,7 +12766,8 @@ CGLEOF
   [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
   CGL_TICK="$(cgl_tick)"
   case "$lbl" in
-    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=1 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
+    # The owed writer is promised resources.sh's suite cost (wave-38 T5; D21), lifted, never a literal.
+    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores ) admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
     -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
                  "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
   esac

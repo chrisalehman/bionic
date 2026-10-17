@@ -852,33 +852,44 @@ place_cmd() {  # <body bytes> -> a command whose quoted python body ahead of the
   body="$(head -c "$1" /dev/zero | tr '\0' 'x' | sed 's/x\{32\}/x = (1 | 2); cd \/elsewhere`a`   /g')"
   printf 'cd %s || exit 1; python3 -c "%s"; tests/run.sh --only a.test.sh' "$PLACE_T" "$body"
 }
+# THE COUNT NEVER READS A LINE START. The two processes of a pipeline inside the reader share one trace
+# file and write a long line in chunks, so another process's whole `+ ...` line can land in the middle of
+# a 200 KB line and `^\++ ` loses it (PL-d went red 6 of 6 at one head, 2 of 2 at another). Every trace
+# entry therefore carries a marker in its PS4, and the count is the markers found anywhere in the file
+# (`grep -o`, one per entry). The body holds no marker, and the marker sits at the head of an entry, which
+# is written whole before the long operand that gets chunked.
+PLACE_MARK='@TR@ '
+PLACE_PS4="+ ${PLACE_MARK}"
+place_count() {  # <trace file> -> the traced commands in it: markers, wherever on a line they fall
+  grep -oF "$PLACE_MARK" "$1" 2>/dev/null | wc -l | tr -d ' '
+}
 place_trace() {  # <command> <trace-out> -> the reader's answer on stdout, its xtrace in <trace-out>
-  bash -x -c '. "$1" && cmd_place "$2" "$3" suite' _ "$PLACE_LIB" "$1" "$SANDBOX/proj" 2>"$2"
+  PS4="$PLACE_PS4" bash -x -c '. "$1" && cmd_place "$2" "$3" suite' _ "$PLACE_LIB" "$1" "$SANDBOX/proj" 2>"$2"
 }
 PLACE_CMD_SMALL="$(place_cmd 2048)"; PLACE_CMD_LARGE="$(place_cmd 204800)"
 PLACE_SMALL="$(place_trace "$PLACE_CMD_SMALL" "$SANDBOX/trace-place-2k.txt")"
 PLACE_LARGE="$(place_trace "$PLACE_CMD_LARGE" "$SANDBOX/trace-place-200k.txt")"
-PLACE_N_SMALL="$(grep -cE '^\++ ' "$SANDBOX/trace-place-2k.txt" 2>/dev/null || true)"
-PLACE_N_LARGE="$(grep -cE '^\++ ' "$SANDBOX/trace-place-200k.txt" 2>/dev/null || true)"
+PLACE_N_SMALL="$(place_count "$SANDBOX/trace-place-2k.txt")"
+PLACE_N_LARGE="$(place_count "$SANDBOX/trace-place-200k.txt")"
 echo "hook-latency: cmd_place traced commands — 2 KB body = ${PLACE_N_SMALL:-0}, 200 KB body = ${PLACE_N_LARGE:-0}"
 expect_true "PL-0: the two commands are the sizes they claim (over 2 KB, over 200 KB)" \
   test "${#PLACE_CMD_SMALL}" -gt 2048 -a "${#PLACE_CMD_LARGE}" -gt 204800
 expect_eq "PL-a: the 2 KB command is placed at the tree" "$PLACE_T" "$PLACE_SMALL"
 expect_eq "PL-b: the 200 KB command is placed at the tree" "$PLACE_T" "$PLACE_LARGE"
 expect_true "PL-c: the trace saw the reader's own reading (one awk in mode place)" \
-  test "$(grep -cE '^\++ awk -v mode=place( |$)' "$SANDBOX/trace-place-2k.txt" 2>/dev/null || true)" = 1
+  test "$(grep -cE "^\\++ ${PLACE_MARK}awk -v mode=place( |\$)" "$SANDBOX/trace-place-2k.txt" 2>/dev/null || true)" = 1
 expect_eq "PL-d: a 200 KB quoted body costs the commands a 2 KB one does" "${PLACE_N_SMALL:-0}" "${PLACE_N_LARGE:-0}"
 # THE MUTATION CONTROL: the same counter over a reader that steps through its text 1 KB at a time
 # in the shell must see the two sizes differ, or PL-d could pass over a counter that sees nothing.
 place_mutant() {  # <command> <trace-out> -> the mutant's answer; its xtrace in <trace-out>
-  bash -x -c '. "$1" && cmd_place() { local i=0; while [ "$i" -lt "${#1}" ]; do i=$((i + 1024)); done; echo mutant; }
+  PS4="$PLACE_PS4" bash -x -c '. "$1" && cmd_place() { local i=0; while [ "$i" -lt "${#1}" ]; do i=$((i + 1024)); done; echo mutant; }
     cmd_place "$2" "$3" suite' _ "$PLACE_LIB" "$1" "$SANDBOX/proj" 2>"$2"
 }
 PLACE_MUT="$(place_mutant "$PLACE_CMD_LARGE" "$SANDBOX/trace-place-mut-200k.txt")"
 place_mutant "$PLACE_CMD_SMALL" "$SANDBOX/trace-place-mut-2k.txt" >/dev/null
 expect_eq "PL-e-positive: the mutant reader ran" "mutant" "$PLACE_MUT"
 expect_ne "PL-e: the counter tells a reader that walks its text apart: the mutant's two counts differ" \
-  "$(grep -cE '^\++ ' "$SANDBOX/trace-place-mut-2k.txt" 2>/dev/null || true)" \
-  "$(grep -cE '^\++ ' "$SANDBOX/trace-place-mut-200k.txt" 2>/dev/null || true)"
+  "$(place_count "$SANDBOX/trace-place-mut-2k.txt")" \
+  "$(place_count "$SANDBOX/trace-place-mut-200k.txt")"
 
 finish

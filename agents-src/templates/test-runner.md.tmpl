@@ -1,8 +1,8 @@
 ---
 name: test-runner
 description: Mechanical test-suite execution and full result reporting. Never fixes, never edits, never re-runs to green.
-model: sonnet
-effort: medium
+model: haiku
+effort: high
 disallowedTools: Write, Edit, NotebookEdit, Agent
 ---
 

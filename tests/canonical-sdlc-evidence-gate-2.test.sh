@@ -4182,9 +4182,15 @@ expect_eq "FC-2 AC-1.4 a fix row that changed lib/y.sh, which no suite it ran re
 expect_contains "FC-2b …naming the row, the file and the second whole run owed" \
   "commit ${FO_C3:0:12} (row T9) is not proved: lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$FO_ST"
 expect_eq "FC-2c …and facts_state's floor line is uncovered F..head" "uncovered	${FO_F}..${FO_C3}" "$(fo_facts "$FO_C3" | cut -f1,2)"
-printf 'approved: regression-2 by Dana Fixture 2026-10-12T02:00:00Z "no second run, the y change is a message"\n' >> "$FOP"
-expect_eq "FC-3 AC-1.4 approve regression-2: the undeclared file is the user's to waive, covered" "covered	${FO_C3}" "$(fo_state)"
-expect_eq "FC-3b …and facts_state's floor line covered" "covered" "$(fo_facts "$FO_C3")"
+# MOVED BY WAVE-38 T2 (AC-4.5, AC-4.2): `approve regression-2` is the user's word for ONE second whole run and covers no
+# head; the user's word for the regression itself is `waive regression '<reply>'`, a `waived: question=regression` line.
+printf 'approved: regression-2 by Dana Fixture 2026-10-12T02:00:00Z "run it again"\n' >> "$FOP"
+FO_ST="$(fo_state)"
+expect_eq "FC-3 AC-4.5 approve regression-2 admits a second whole run and covers nothing: still uncovered" "uncovered" "${FO_ST%%	*}"
+expect_eq "FC-3b …and facts_state's floor line still uncovered F..head" "uncovered	${FO_F}..${FO_C3}" "$(fo_facts "$FO_C3" | cut -f1,2)"
+printf 'waived: question=regression head=%s by Dana Fixture 2026-10-12T02:05:00Z "no second run, the y change is a message"\n' "$FO_C3" >> "$FOP"
+expect_eq "FC-3c AC-4.2 the user's waiver of the regression at the head: covered" "covered	${FO_C3}" "$(fo_state)"
+expect_eq "FC-3d …and facts_state's floor line covered" "covered" "$(fo_facts "$FO_C3")"
 
 section "§FLOOR-DOCS: a commit that touches only non-code paths inherits its parent's standing (wave-35 T9; REQ-1 AC-1.5; D8)"
 # Continues §FLOOR-COVER's repository at covered. The non-code paths are lib/proof.sh `_proof_docs_path`'s one
@@ -4255,5 +4261,190 @@ slg_census() {  # -> `<file>:<function>` for each line the census grep matches, 
 }
 expect_eq "SLG-7 AC-9.2 the census grep finds one strip, and it is inside lib/proof.sh proof_plan_slug" \
   "proof.sh:proof_plan_slug" "$(slg_census)"
+
+
+# ============================================================
+section "§RELEASE — a release-set commit is covered by a passing release check at its head, for every question and the regression; one path outside the set owes as today (wave-38 T2; REQ-1 AC-1.4; D18)"
+# ============================================================
+# THE RELEASE SET IS EXACTLY CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/*.md (one level, no
+# deeper path) and payload/integrity/rendered.sha256 (D18; spec §Assumptions bullet 2). A commit whose every changed
+# path is in that set, at whose head the plan's `## SDLC State` carries a `proved: kind=check` line that passes (the
+# last check line at that head carries no result=fail), reads `cover <sha> release` on every question's chain
+# (lib/proof.sh `_facts_basis`), and the regression judge (`_proof_walk`) reads the same kind, so it owes no run.
+# Content is asked first: a commit of CHANGELOG.md alone stays prose.
+# FIXTURE FIDELITY. §FIXED-PASSES's repository shape on its working branch: init (the base), one code commit (R,
+# the head of every reading and of the regression proof), then the release commit touching the five release paths
+# the 1.20.0 release touched (26fb5e3a, less its test change). Side branches from R hold the variants, each one
+# commit: the set plus a code file; the set with its check result=fail; the set with no check line; the set plus a
+# page one level deeper. The check lines are proof_line's shape, as release-check writes them.
+# fails-when: the release commit reads owes on any chain, or the regression is uncovered at it; a variant reads
+# release.
+RRL="$(fp_repo release)"
+RL_B="$(git -C "$RRL" rev-parse HEAD)"
+RL_R="$(fp_commit "$RRL" a.sh one)"
+RL_SET="CHANGELOG.md payload/.claude-plugin/plugin.json payload/commands/help.md payload/commands/version.md payload/integrity/rendered.sha256"
+rl_commit() {  # <repo> <message> <path>... -> the new commit's sha, one commit touching every path
+  local r="$1" m="$2" p; shift 2
+  for p in "$@"; do mkdir -p "$r/$(dirname "$p")"; printf '%s\n' "$m" >> "$r/$p"; done
+  ( cd "$r" && git add -f -- "$@" && git commit -qm "$m" ) >/dev/null 2>&1
+  git -C "$r" rev-parse HEAD
+}
+rl_side() {  # <repo> <branch> <message> <path>... -> a commit on a new branch from R; the working branch checked out again
+  local r="$1" b="$2" m="$3" c; shift 3
+  git -C "$r" checkout -q -b "$b" "$RL_R" >/dev/null 2>&1
+  c="$(rl_commit "$r" "$m" "$@")"
+  git -C "$r" checkout -q wave/01-fixture >/dev/null 2>&1
+  printf '%s' "$c"
+}
+# shellcheck disable=SC2086
+RL_C="$(rl_commit "$RRL" 'the release' $RL_SET)"
+# shellcheck disable=SC2086
+RL_X="$(rl_side "$RRL" rel-extra 'the release and a code file' $RL_SET lib/x.sh)"
+# shellcheck disable=SC2086
+RL_F="$(rl_side "$RRL" rel-fail 'the release, its check red' $RL_SET)"
+# shellcheck disable=SC2086
+RL_U="$(rl_side "$RRL" rel-unchecked 'the release, no check' $RL_SET)"
+# shellcheck disable=SC2086
+RL_N="$(rl_side "$RRL" rel-deep 'the release and a deeper page' $RL_SET payload/commands/deep/x.md)"
+rl_check() {  # <head> [fail] -> a release-check proof line at <head>, as release-check writes it
+  bash -c '. "$1/proof.sh" && proof_line check "$2" 2026-10-04T14:00:00Z "$3"' _ "$FP_LIB" "$1" "$FP_REC/release-check-$1.log" \
+    | { if [ "${2:-}" = fail ]; then sed 's/$/ result=fail/'; else cat; fi; }
+}
+for rl_q in evidence adversarial structure; do
+  fp_record "$RRL" "$rl_q.md" "$rl_q" pass "${RL_B:0:10}..${RL_R:0:10}" 'findings: 0'
+done
+fp_record "$RRL" adversarial-whole.md adversarial pass "${RL_B:0:10}..${RL_R:0:10}" 'findings: 0'
+fp_record "$RRL" structure-whole.md structure pass "${RL_B:0:10}..${RL_R:0:10}" 'findings: 0'
+fp_plan "$RRL" "${RL_B:0:10}" "$(fp_proved "$RL_R" evidence.md evidence pass)
+$(fp_proved "$RL_R" adversarial.md adversarial pass)
+$(fp_proved "$RL_R" structure.md structure pass)
+$(cv_whole "$RL_R" adversarial)
+$(cv_whole "$RL_R" structure)
+proved: kind=floor head=$RL_R at=2026-10-04T12:00:00Z evidence=$FP_REC/floor-run-$RL_R.log
+$(rl_check "$RL_C")
+$(rl_check "$RL_X")
+$(rl_check "$RL_F")
+$(rl_check "$RL_F" fail)
+$(rl_check "$RL_N")" ""
+rl_lines() {  # -> each owed line facts_state printed, `regression <state>` or `<question>-<scope> <state>` (the regression fact under either name, wave-38 T8 renames it), one per line
+  printf '%s\n' "$FP_OUT" | awk -F'\t' '$1 == "floor" || $1 == "regression" { print "regression " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
+}
+RL_ALL_COVERED="regression covered
+evidence-piece covered
+adversarial-piece covered
+structure-piece covered
+adversarial-whole covered
+structure-whole covered"
+
+# shellcheck disable=SC2086
+expect_eq "RL-0 precondition: the release commit touches exactly the five release paths" \
+  "$(printf '%s\n' $RL_SET | sort | paste -sd'|' -)" "$(git -C "$RRL" show --name-only --format= "$RL_C" | sort | paste -sd'|' -)"
+expect_eq "RL-0b precondition: each variant touches the set and its one difference" \
+  "lib/x.sh|payload/commands/deep/x.md|5|5" \
+  "$(git -C "$RRL" show --name-only --format= "$RL_X" | /usr/bin/grep -x lib/x.sh)|$(git -C "$RRL" show --name-only --format= "$RL_N" | /usr/bin/grep -x payload/commands/deep/x.md)|$(git -C "$RRL" show --name-only --format= "$RL_F" | awk 'END { print NR }')|$(git -C "$RRL" show --name-only --format= "$RL_U" | awk 'END { print NR }')"
+fp_state "$RRL" "$RL_R"
+expect_eq "RL-0c precondition: at R every reading and the regression hold (the judge reads this fixture)" "$RL_ALL_COVERED" "$(rl_lines)"
+for rl_q in evidence adversarial structure; do
+  cv_cover "$RL_R" "$RL_C" "$rl_q" "$RRL"
+  expect_eq "RL-1 AC-1.4 the release commit with a passing check at its head: cover $rl_q prints release, rc 0" \
+    "cover $RL_C release|0" "$CV_OUT|$CV_RC"
+done
+cv_cover "$RL_R" "$RL_C" "" "$RRL"
+expect_eq "RL-1b …and with no question named, release too: the basis is the commit's, not an asker's" "cover $RL_C release|0" "$CV_OUT|$CV_RC"
+fp_state "$RRL" "$RL_C"
+expect_eq "RL-2 AC-1.4 facts_state at the release commit: every reading holds, and the regression holds with no run recorded at it" \
+  "$RL_ALL_COVERED" "$(rl_lines)"
+cv_cover "$RL_R" "$RL_X" adversarial "$RRL"
+expect_eq "RL-3 D18 the set plus one code file, its check passing: owes (positive: RL-1 read release through the same walk)" \
+  "cover $RL_X owes|1" "$CV_OUT|$CV_RC"
+fp_state "$RRL" "$RL_X"
+expect_eq "RL-3b …and the regression is uncovered at it, as today" "regression uncovered" "$(rl_lines | awk 'NR == 1')"
+cv_cover "$RL_R" "$RL_F" structure "$RRL"
+expect_eq "RL-4 the set with its last check at the head result=fail: owes" "cover $RL_F owes|1" "$CV_OUT|$CV_RC"
+cv_cover "$RL_R" "$RL_U" structure "$RRL"
+expect_eq "RL-5 the set with no check line at its head: owes" "cover $RL_U owes|1" "$CV_OUT|$CV_RC"
+fp_state "$RRL" "$RL_U"
+expect_eq "RL-5b …and the regression is uncovered at it" "regression uncovered" "$(rl_lines | awk 'NR == 1')"
+cv_cover "$RL_R" "$RL_N" evidence "$RRL"
+expect_eq "RL-6 the set plus a page under payload/commands/deep/: owes (the set is one level of pages)" "cover $RL_N owes|1" "$CV_OUT|$CV_RC"
+RL_D="$(rl_side "$RRL" rel-prose 'the changelog alone' CHANGELOG.md)"
+cv_cover "$RL_R" "$RL_D" evidence "$RRL"
+expect_eq "RL-7 a commit of CHANGELOG.md alone, no check: prose, content asked first" "cover $RL_D prose|0" "$CV_OUT|$CV_RC"
+
+# ============================================================
+section "§PARENT — a merge whose tree is its first parent's is proved by its first parent: for every question and the regression (wave-38 T2; REQ-4 AC-4.1; D5)"
+# ============================================================
+# A merge from the integration branch resolved to ours leaves the tree as its first parent left it. The review walk
+# (`_facts_walk`, `--first-parent -m`) lists no path for it, so it touches nothing and reads prose; the regression's
+# walk (`_proof_walk`) owes nothing for a commit whose tree is its first parent's. A merge that brings code in owes on
+# both, as today (§63e in session-poker-3 pins the review half of that).
+# FIXTURE FIDELITY. §FIXED-PASSES's repository shape on its working branch, the plan naming `integration-branch: main`:
+# init (the base, also main's root), R (a code commit, the head of every reading and of the regression proof), P (a
+# CHANGELOG.md commit, so the regression's diff from R is not empty and its walk runs), then O, `git merge -s ours main`
+# with main one code commit ahead; then K, a real merge of a second main commit, which brings lib/n.sh in.
+# fails-when: the tree-equal merge owes on any chain or leaves the regression uncovered; the merge that brings code
+# reads prose; a copy of proof.sh with the regression walk's tree test dropped still reads O covered.
+RPA="$(fp_repo parent)"
+PA_B="$(git -C "$RPA" rev-parse HEAD)"
+PA_R="$(fp_commit "$RPA" a.sh one)"
+PA_P="$(fp_commit "$RPA" CHANGELOG.md 'a wording fix')"
+( cd "$RPA" && git checkout -q -B main "$PA_B" ) >/dev/null 2>&1
+mkdir -p "$RPA/lib"
+PA_M1="$(fp_commit "$RPA" lib/m.sh 'main code one')"
+( cd "$RPA" && git checkout -q wave/01-fixture && git merge -q -s ours main -m 'merge main, ours' ) >/dev/null 2>&1
+PA_O="$(git -C "$RPA" rev-parse HEAD)"
+( cd "$RPA" && git checkout -q main ) >/dev/null 2>&1
+PA_M2="$(fp_commit "$RPA" lib/n.sh 'main code two')"
+( cd "$RPA" && git checkout -q wave/01-fixture && git merge -q --no-ff main -m 'merge main' ) >/dev/null 2>&1
+PA_K="$(git -C "$RPA" rev-parse HEAD)"
+for pa_q in evidence adversarial structure; do
+  fp_record "$RPA" "$pa_q.md" "$pa_q" pass "${PA_B:0:10}..${PA_R:0:10}" 'findings: 0'
+done
+fp_record "$RPA" adversarial-whole.md adversarial pass "${PA_B:0:10}..${PA_R:0:10}" 'findings: 0'
+fp_record "$RPA" structure-whole.md structure pass "${PA_B:0:10}..${PA_R:0:10}" 'findings: 0'
+fp_plan "$RPA" "${PA_B:0:10}" "$(fp_proved "$PA_R" evidence.md evidence pass)
+$(fp_proved "$PA_R" adversarial.md adversarial pass)
+$(fp_proved "$PA_R" structure.md structure pass)
+$(cv_whole "$PA_R" adversarial)
+$(cv_whole "$PA_R" structure)
+proved: kind=floor head=$PA_R at=2026-10-04T12:00:00Z evidence=$FP_REC/floor-run-$PA_R.log" ""
+awk '{ print } /^walk: / && !d { print "integration-branch: main"; d = 1 }' "$(fp_plan_path "$RPA")" > "$RPA/plan.tmp" \
+  && mv "$RPA/plan.tmp" "$(fp_plan_path "$RPA")"
+PA_NEEDLE='if (pt != "" && pt == wt[i]) continue'
+pa_mut() {  # -> a copy of the lib directory whose proof.sh has the regression walk's tree test dropped
+  local d="$FP_ROOT/pa-mut"
+  rm -rf "$d"; cp -R "$FP_LIB" "$d"
+  N="$PA_NEEDLE" awk '{ i = index($0, ENVIRON["N"]); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(ENVIRON["N"])); print }' \
+    "$FP_LIB/proof.sh" > "$d/proof.sh"
+  printf '%s' "$d"
+}
+pa_state() {  # <lib dir> <head> -> facts_state's lines over RPA's plan under that library, as rl_lines prints them
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && facts_state "$2" "$3"' _ "$1" "$(fp_plan_path "$RPA")" "$2" 2>/dev/null \
+    | awk -F'\t' '$1 == "floor" || $1 == "regression" { print "regression " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
+}
+expect_eq "PA-0 precondition: O's second parent is main's head, its tree is P's; K's second parent is main's next head, its tree is not P's" \
+  "$PA_M1|yes|$PA_M2|no" \
+  "$(git -C "$RPA" rev-parse "$PA_O^2")|$([ "$(git -C "$RPA" rev-parse "$PA_O^{tree}")" = "$(git -C "$RPA" rev-parse "$PA_P^{tree}")" ] && echo yes || echo no)|$(git -C "$RPA" rev-parse "$PA_K^2")|$([ "$(git -C "$RPA" rev-parse "$PA_K^{tree}")" = "$(git -C "$RPA" rev-parse "$PA_P^{tree}")" ] && echo yes || echo no)"
+expect_eq "PA-0b precondition: K brought lib/n.sh in against its first parent" "lib/n.sh" "$(git -C "$RPA" diff --name-only "$PA_O" "$PA_K")"
+expect_eq "PA-0c precondition: the mutation site is one line of the shipped proof.sh" "1" "$(/usr/bin/grep -cF -- "$PA_NEEDLE" "$FP_LIB/proof.sh")"
+for pa_q in evidence adversarial structure; do
+  cv_cover "$PA_R" "$PA_O" "$pa_q" "$RPA"
+  expect_eq "PA-1 AC-4.1 the tree-equal merge from main: cover $pa_q prints prose for it (it touches nothing against its first parent), rc 0" \
+    "cover $PA_P prose
+cover $PA_O prose|0" "$CV_OUT|$CV_RC"
+done
+expect_eq "PA-2 AC-4.1 facts_state at O: every reading holds and the regression holds, proved by the first parent" \
+  "$RL_ALL_COVERED" "$(pa_state "$FP_LIB" "$PA_O")"
+cv_cover "$PA_R" "$PA_K" adversarial "$RPA"
+expect_eq "PA-3 control: the merge that brings lib/n.sh in owes, through the same walk" "cover $PA_P prose
+cover $PA_O prose
+cover $PA_K owes|1" "$CV_OUT|$CV_RC"
+expect_eq "PA-3b …and at K the readings and the regression are uncovered" "regression uncovered|adversarial-piece uncovered" \
+  "$(pa_state "$FP_LIB" "$PA_K" | awk '$1 == "regression" || $1 == "adversarial-piece" { print $1 " " $2 }' | paste -sd'|' -)"
+PA_MUT="$(pa_mut)"
+expect_eq "PA-4 mutation: a copy with the regression walk's tree test dropped still runs and reads the docs commit P covered" \
+  "regression covered" "$(pa_state "$PA_MUT" "$PA_P" | awk 'NR == 1')"
+expect_eq "PA-4b …and reads O uncovered, so PA-2 can fail" "regression uncovered" "$(pa_state "$PA_MUT" "$PA_O" | awk 'NR == 1')"
+rm -rf "$PA_MUT"
 
 finish

@@ -1645,6 +1645,23 @@ prune_stale_rosters() {
 AGENT_NAME=$(sanitize "$(_jq '.tool_input.name')" 200)
 SUBAGENT_TYPE=$(sanitize "$(_jq '.tool_input.subagent_type')" 200)
 AGENT_MODEL=$(sanitize "$(_jq '.tool_input.model')" 200)
+# THE ROSTER ROW'S MODEL CARRIES THE ROLE'S EFFORT (wave-38 T4; REQ-8 AC-8.1, A-orch-6): a call that names a
+# `model` for a role whose rendered file (agents/<role>.md, the `bionic:` prefix off) carries `effort:` is
+# journalled `<model>-<effort>`, so the test-runner on Haiku at high reads `model=haiku-high`. A call with
+# no `model` stays empty, and a type with no role file keeps the model plain. Only the first frontmatter
+# block is read, and only a plain word is taken, so a role file cannot put a delimiter on the row.
+if [ -n "$AGENT_MODEL" ]; then
+  _role="${SUBAGENT_TYPE#bionic:}"
+  case "$_role" in
+    ''|*[!A-Za-z0-9_-]*) ;;
+    *) if [ -f "$HOOK_DIR/../agents/${_role}.md" ]; then
+         _effort=$(/usr/bin/awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+                     fm && index($0, "effort:") == 1 { sub(/^effort:[ \t]*/, ""); print; exit }' \
+                     "$HOOK_DIR/../agents/${_role}.md" 2>/dev/null | tr -d '\r')
+         case "$_effort" in ''|*[!A-Za-z0-9]*) ;; *) AGENT_MODEL="${AGENT_MODEL}-${_effort}" ;; esac
+       fi ;;
+  esac
+fi
 TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 
 # ======================================================= THE NAME-IN-FLIGHT ARM
