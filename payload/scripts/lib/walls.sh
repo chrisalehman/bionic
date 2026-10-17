@@ -7006,10 +7006,10 @@ wall_standing_orders() {  # <command> <section> -> 0 nothing · 2 block
     fi
     [ "$_WALL_CLASS" = "$STANDING_ORDER_CLASS" ] || continue
     fold_block exit2 command "standing order: $STANDING_ORDER_TEXT" "lift it in config.yaml" \
-      "This command is a $STANDING_ORDER_CLASS run, and the user's standing order \"$STANDING_ORDER_TEXT\" refuses
-that class (.bionic/config.yaml, standing-orders: \"$_it\"). A standing order is the user's
-standing answer: it holds until the user lifts it by removing the item. Ask the user; do not
-work around it."
+      "This command is a $STANDING_ORDER_CLASS run, and the user's standing order refuses that class:
+    standing-orders: - $_it   (.bionic/config.yaml)
+A standing order is the user's standing answer. It holds until the user lifts it by
+removing the item. Ask the user; do not work around it."
     return 2
   done <<< "$_sec"
   return 0
