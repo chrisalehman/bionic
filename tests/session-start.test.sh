@@ -1532,4 +1532,88 @@ OUT=$(DRIVE_PLUGIN_ROOT="$L_ROOT" drive "$P23b" startup "$CUR_SID" "$CUR_SID" "$
 eq   "23.6 a session started at the root records the root as its cwd" \
   "cwd=$(cd "$P23b" && pwd -P)" "$(grep '^cwd=' "$P23b/.bionic/tmp/loaded-$CUR_SID.state" 2>/dev/null)"
 
+section "24 — after a /clear, a run whose ## Handoff points to a handoff file prints the one door in place of the bind advice (wave-38 T13; AC-3.3, D4)"
+# The plan's ## Handoff is one pointer line, `handoff: <path> written <local time>` (T12, D23), and the file's last
+# line is `/bionic:canonical-sdlc <path>`. At a clear, resume or compact start, the bound plan's pointer (or,
+# unbound, the newest open plan's) to a file whose first line is the kind line prints
+# `bionic: resume with /bionic:canonical-sdlc <path>` where the engage or bind advice stood: the one command that
+# binds, arms, adopts and recaps. A startup prints the advice as before, and so does a pointer to no file.
+ss_handoff_plan() {  # <project> [name] -> plan path; the plan carries a pointer to record/<name>/handoff.md, which exists
+  local p name="${2:-fixture}" door
+  p="$(write_open_plan "$1" "$name")"
+  door=".bionic/docs/record/$name/handoff.md"
+  printf '\n## Handoff\n\nhandoff: %s written 2026-10-16 14:30 PDT\n' "$door" >> "$p"
+  mkdir -p "$1/.bionic/docs/record/$name"
+  printf 'bionic-handoff/v1\nsitrep head: (none recorded)\nplan: %s\nsafe to clear\n/bionic:canonical-sdlc %s\n' "${p#"$1"/}" "$door" \
+    > "$1/$door"
+  printf '%s' "$p"
+}
+P24=$(make_env 3600s)
+PLAN24="$(ss_handoff_plan "$P24")"
+S24_BEFORE=$(snap "$P24")
+OUT=$(drive "$P24" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "24.1 a clear beside one open run with a handoff pointer: exit 0" "0" "$(rc)"
+has   "24.2 …the one door, naming the file the pointer names" \
+  "bionic: resume with /bionic:canonical-sdlc .bionic/docs/record/fixture/handoff.md" "$OUT"
+hasnt "24.3 …in place of the engage advice (24.2 read the same output)" "invoke /bionic:canonical-sdlc to engage it" "$OUT"
+eq    "24.4 …one door line" "1" "$(printf '%s\n' "$OUT" | grep -c 'resume with /bionic:canonical-sdlc')"
+eq    "24.5 wrote nothing" "$S24_BEFORE" "$(snap "$P24")"
+OUT=$(drive "$P24" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "24.6 a startup prints the engage advice as before" "invoke /bionic:canonical-sdlc to engage it" "$OUT"
+hasnt "24.7 …and no door (24.6 read the same output)" "resume with /bionic:canonical-sdlc" "$OUT"
+OUT=$(drive "$P24" resume "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "24.8 a resume start prints the door too" "bionic: resume with /bionic:canonical-sdlc .bionic/docs/record/fixture/handoff.md" "$OUT"
+OUT=$(drive "$P24" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "24.9 …and a compact start" "bionic: resume with /bionic:canonical-sdlc .bionic/docs/record/fixture/handoff.md" "$OUT"
+# A pointer to no file is no door: the advice stands.
+mv "$P24/.bionic/docs/record/fixture/handoff.md" "$WORK/h24"
+OUT=$(drive "$P24" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "24.10 a pointer naming no file: the engage advice as before" "invoke /bionic:canonical-sdlc to engage it" "$OUT"
+hasnt "24.11 …and no door (24.10 read the same output)" "resume with /bionic:canonical-sdlc" "$OUT"
+# A file that is not a handoff file (no kind line) is no door either.
+printf 'not a handoff\n' > "$P24/.bionic/docs/record/fixture/handoff.md"
+OUT=$(drive "$P24" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+hasnt "24.12 a pointer to a file without the kind line: no door" "resume with /bionic:canonical-sdlc" "$OUT"
+has   "24.12b …the advice stands (same output)" "invoke /bionic:canonical-sdlc to engage it" "$OUT"
+mv "$WORK/h24" "$P24/.bionic/docs/record/fixture/handoff.md"
+# Engaged and bound (a compact keeps its id): the bound line and step file stand, and the door follows them.
+plant_bound "$P24" "$CUR_SID" "$PLAN24"
+OUT=$(drive "$P24" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "24.13 bound, a compact: the bound line as before" "bionic: bound to" "$OUT"
+has   "24.14 …and the door for the bound plan's file" "bionic: resume with /bionic:canonical-sdlc .bionic/docs/record/fixture/handoff.md" "$OUT"
+# Two open runs, unengaged: the newest carries the pointer, the door names it, and the listing still prints.
+P24B=$(make_env 3600s)
+PLAN24B_OLD="$(write_open_plan "$P24B" older)"; backdate "$PLAN24B_OLD" 600
+PLAN24B="$(ss_handoff_plan "$P24B" newer)"
+OUT=$(drive "$P24B" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "24.15 two open runs, the newest with a pointer: the door names its file" \
+  "bionic: resume with /bionic:canonical-sdlc .bionic/docs/record/newer/handoff.md" "$OUT"
+hasnt "24.16 …in place of the invoke-then-bind header (24.15 read the same output)" "open runs exist here — invoke /bionic:canonical-sdlc, then bind" "$OUT"
+has   "24.17 …and the open runs are still listed" "  ${PLAN24B_OLD#$P24B/.bionic/docs/}" "$OUT"
+
+
+section "25 — the standing orders print in the engaged block, every item, in config order (wave-38 T18; AC-7.1, D17)"
+# A standing order is the user's standing answer (D17), so an engaged start prints each item of
+# `standing-orders:` as `bionic: standing order — <item>` after the bind/door lines and before the arm
+# line, read by lib/roots.sh `config_section`; none when the list is empty. tests/standing-orders.test.sh
+# holds the three surfaces to one list; this restates the block's own rows.
+P25=$(make_env 3600s)
+printf 'standing-orders:\n  - hand test in progress | refuse: suite\n  - "no force-push while the user reviews"\n' >> "$P25/.bionic/config.yaml"
+PLAN25="$(write_open_plan "$P25")"
+plant_bound "$P25" "$CUR_SID" "$PLAN25"
+OUT=$(drive "$P25" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "25.1 an engaged, bound clear with two orders: exit 0" "0" "$(rc)"
+eq    "25.2 …both orders, in config order, quotes stripped, the refuse: tail kept" \
+  "bionic: standing order — hand test in progress | refuse: suite
+bionic: standing order — no force-push while the user reviews" "$(printf '%s\n' "$OUT" | grep -F 'bionic: standing order — ')"
+eq    "25.3 …after the bound line and its step file, before the arm line" "bound step order order arm" \
+  "$(printf '%s\n' "$OUT" | awk 'index($0, "bionic: bound to ") == 1 { o = o " bound" } index($0, "  step file: ") == 1 { o = o " step" }
+     index($0, "bionic: standing order — ") == 1 { o = o " order" } index($0, "re-arm: ") == 1 { o = o " arm" } END { sub(/^ /, "", o); print o }')"
+P25N=$(make_env 3600s)
+PLAN25N="$(write_open_plan "$P25N")"
+plant_bound "$P25N" "$CUR_SID" "$PLAN25N"
+OUT=$(drive "$P25N" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "25.4 a config with no standing-orders: the bound line as before" "bionic: bound to" "$OUT"
+hasnt "25.5 …and no order line (25.2 read the same extractor)" "bionic: standing order — " "$OUT"
+
 finish

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 5: the sections wave-38 adds (§CHECK, §WORD).
+# Tests for hooks/session-poker.sh — shard 5: the sections wave-38 adds (§CHECK, §WORD, §DECISIONS).
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -317,5 +317,83 @@ expect_eq "WD-8 a word outside the five is refused (exit 1), the plan byte-ident
   "$RC|$(cmp -s "$TMPROOT/wd-before" "$PWD8" && echo same || echo changed)"
 expect_contains "WD-8b …naming the five" "evidence, adversarial, structure, regression or all" "$OUT"
 POKE_BOUND="$WD_BOUND_WAS"
+
+# ============================================================
+section "§DECISIONS: decisions [--all] reads the design ledgers' register entries; the recap prints this run's settled set; doctrine re-puts a settled decision only as reopening D<n> (wave-38 T13; REQ-3 AC-3.4; D24)"
+# ============================================================
+# Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading in record/<wave>/design-ledger.md, or
+# a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in, as this wave's Δ21 holds them); `re-ruled` and
+# `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in
+# the ledger's order; `--all` lists every record/*/design-ledger.md under the docs root, each line keyed by its wave,
+# waves in slug order, a ledger with no entry in the grammar named once, and every ADR keyed by its frontmatter wave.
+# The resume recap's settled: lines come from the same parser (handoff-file §RESUME RS6). FIXTURE FIDELITY: a real
+# repository, §CHECK's plan shape bound to this session; ledgers in the grammar this wave's own ledger is written in,
+# with the lines a register must not read (a heading with no ruling, a body line, a fenced example).
+# fails-when: a ruled decision is absent from the list or the recap; a non-entry is listed.
+RDC="$(make_repo decisions)"
+PDC="$(s34_plan "$RDC" 4)"
+DC_DOCS="$RDC/.bionic/docs"
+mkdir -p "$DC_DOCS/record/wave-01-fixture" "$DC_DOCS/record/wave-00-earlier" "$DC_DOCS/record/wave-02-old" "$DC_DOCS/adrs/epic-99-fixture"
+cat > "$DC_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
+# design ledger — wave-01-fixture
+
+## Frame — the question, not a ruling
+
+## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds
+
+A body line that names D9 ruled "9" (Nobody 2026-01-01): not a heading, never an entry.
+
+## Δ1 — D2 ruled "Option 2" (Dana Fixture 2026-10-06, typed "D2: 2"): one door
+
+## Δ2 — D2 re-ruled "Option 3, first" (Dana Fixture 2026-10-07, "ok, let's try it")
+
+## Δ3 — tactical defaults set by Dana Fixture 2026-10-07
+
+## Δ4 — Step-1 rulings folded in (orchestrator, 2026-10-07)
+
+- D3 ruled "1" (Dana Fixture 2026-10-04): three folded in
+- D4 withdrawn (Dana Fixture 2026-10-04): the old shape
+
+```text
+## Δ9 — D9 ruled "x" (Fake Person 2026-01-01): inside a fence
+```
+LEDGER
+cat > "$DC_DOCS/record/wave-00-earlier/design-ledger.md" <<'LEDGER'
+# design ledger — wave-00-earlier
+
+## Δ0 — D1 ruled "2" (Dana Fixture 2026-09-01): the earlier frame
+LEDGER
+printf '# design ledger — wave-02-old\n\n## D1 — What Step 0 approves (Dana: "Approved!")\n' > "$DC_DOCS/record/wave-02-old/design-ledger.md"
+printf -- '---\nwave: wave-01-fixture\nstatus: Accepted (Step 7, 2026-10-08)\n---\n\n# ADR-001 — One door to resume\n' \
+  > "$DC_DOCS/adrs/epic-99-fixture/adr-001-one-door.md"
+DC_WANT='D1 · "1" · Dana Fixture 2026-10-05 · the frame holds
+D2 · "Option 2" · Dana Fixture 2026-10-06 · one door
+D2 · re-ruled "Option 3, first" · Dana Fixture 2026-10-07 · (untitled)
+D3 · "1" · Dana Fixture 2026-10-04 · three folded in
+D4 · withdrawn · Dana Fixture 2026-10-04 · the old shape'
+poke "$RDC" decisions
+expect_eq "DC-1 decisions exits 0 on the bound run" "0" "$RC"
+expect_eq "DC-1b …every register entry of this run's ledger, number · reply · who and date · title, in the ledger's order" "$DC_WANT" "$OUT"
+expect_absent "DC-1c …never a body line, a heading with no ruling, or a fenced example (DC-1b read the same output)" "D9" "$OUT"
+poke "$RDC" decisions --all
+expect_eq "DC-2 decisions --all exits 0" "0" "$RC"
+expect_eq "DC-2b …every wave's entries keyed by its slug, waves in slug order, the ADRs keyed by their wave, a pre-register ledger named once" \
+  "wave-00-earlier D1 · \"2\" · Dana Fixture 2026-09-01 · the earlier frame
+$(printf '%s\n' "$DC_WANT" | sed 's/^/wave-01-fixture /')
+wave-01-fixture ADR-001 · Accepted (Step 7, 2026-10-08) · One door to resume
+wave-02-old · no register entries (a ledger written before D24)" "$OUT"
+poke "$RDC" decisions --each
+expect_eq "DC-3 an unknown flag is the usage error" "2" "$RC"
+mv "$DC_DOCS/record/wave-01-fixture/design-ledger.md" "$TMPROOT/dc-ledger"
+poke "$RDC" decisions
+expect_eq "DC-4 an absent ledger is exit 1" "1" "$RC"
+expect_contains "DC-4b …in one line naming the path" "record/wave-01-fixture/design-ledger.md" "$OUT"
+expect_eq "DC-4c …one line" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
+mv "$TMPROOT/dc-ledger" "$DC_DOCS/record/wave-01-fixture/design-ledger.md"
+# The doctrine: a proposal that re-puts a settled decision opens with its number and the new evidence.
+DC_SKILL="${BIONIC_SKILLS_DIR}/decision/SKILL.md"
+expect_true "DC-5 precondition: the decision skill reads (its When it applies section is found)" grep -q '^## When it applies' "$DC_SKILL"
+expect_true "DC-5b the decision skill requires the reopening form under When it applies" \
+  bash -c 'awk "/^## When it applies/ { f = 1; next } f && /^## / { exit } f" "$1" | grep -qF "reopening D<n>: <one sentence of new evidence>"' _ "$DC_SKILL"
 
 finish

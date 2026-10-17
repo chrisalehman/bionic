@@ -3575,4 +3575,32 @@ expect_contains "SC.4 control: a bare budgeted suite typed inline is sent to the
 sc_drive 'bash bare.sh'
 expect_eq "SC.4b AC-4.3 …and the same line in a script meets the same refusal (a file claim, as inline)" "2|$SC_BARE_LINE" "$ST|$(sc_line)"
 
+
+section "§STANDING — a standing order's refuse: clause is a wall over the section the preamble hands in (wave-38 T18; REQ-7 AC-7.2, D17)"
+# `- hand test in progress | refuse: suite` in .bionic/config.yaml: the preamble reads the list once
+# (lib/roots.sh `config_section`) into WALL_STANDING_ORDERS, and `wall_standing_orders <command>
+# <section>` (lib/walls.sh) refuses a command of that class naming the order. The wall is a pure
+# predicate (the freeze): it reads no config itself. tests/standing-orders.test.sh carries the mutant
+# that makes it read config.yaml and shows the freeze pin flip; this restates the wall's own rows.
+R_SO="$(mk_repo standing)"
+printf 'standing-orders:\n  - hand test in progress | refuse: suite\n  - no force-push while the user reviews\n' > "$R_SO/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_SO" 'tests/run.sh --only x.test.sh')"
+SO_HEAD="$(deny_reason)"; [ -n "$SO_HEAD" ] || SO_HEAD="$ERR"
+expect_eq "SO.1 a suite run under a refuse: suite order is refused" "yes" \
+  "$([ "$ST" = 2 ] || [ "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)" = deny ] && echo yes || echo no)"
+expect_eq "SO.2 …and the order's line is the headline" \
+  "bionic: command refused — standing order: hand test in progress (lift it in config.yaml)" \
+  "$(printf '%s\n' "$SO_HEAD" | head -1)"
+run_hook "$(mk_payload "$R_SO" 'git status')"
+expect_status "SO.3 git status passes under the same order" 0 "$ST"
+expect_absent "SO.4 …naming no order (SO.2 read the same streams)" "standing order" "$OUT$ERR"
+printf 'standing-orders:\n  - no force-push while the user reviews\n' > "$R_SO/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_SO" 'tests/run.sh --only x.test.sh')"
+expect_absent "SO.5 an order without a refuse: tail refuses nothing (SO.2 read the same streams)" "standing order" "$OUT$ERR"
+SO_BODY="$(awk '/^wall_standing_orders\(\)/ { f = 1 } f { print } f && /^}/ { exit }' "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh")"
+expect_contains "SO.6 precondition: the wall's body is read" "fold_block" "$SO_BODY"
+expect_no_regex "SO.7 the freeze: the wall names no config reader, no root and reads no file by redirect" 'config_section|config_value|BIONIC_ROOT|BIONIC_CWD|(^|[^<])<[[:space:]]*["$/.]' "$SO_BODY"
+expect_regex "SO.8 …the preamble reads the section and hands it in" \
+  'WALL_STANDING_ORDERS="\$\(config_section "\$BIONIC_ROOT" standing-orders' "$(cat "$HOOK")"
+
 finish

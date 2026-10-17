@@ -56,6 +56,7 @@ install it once and every project gets the same working discipline.
 | `/bionic:browser-verify` | verifies UI behavior in a real browser with semantic readback |
 | `/bionic:excalidraw-diagram` | hand-arranged Excalidraw diagrams that make a visual argument, rendered to PNG by a bundled renderer (installed by setup) |
 | `/bionic:decision` | puts a decision to you in one shape — goal, numbered options, recommendation, significance — ending on one reply line; typed bare, it reframes what was last discussed |
+| `/bionic:handoff` | writes the run's handoff file before you step away or `/clear` — the machine's facts, five lines from the session, safe to clear or wait N minutes — ending on the one command that resumes it, `/bionic:canonical-sdlc <path>` |
 
 ## Agents — ship with the plugin
 
