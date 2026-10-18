@@ -1493,6 +1493,9 @@ expect_eq "(se4) a T0 criterion the row serves (a grep, no suite) is untouched" 
 expect_eq "(se5) a criterion no row serves is untouched" "pending" "$(se_ev "$PS" AC-6.1)"
 expect_eq "(se6) a hand-filled value is untouched, though the row serves it and its eval names a.test.sh" \
   "record/hand/filled-by-the-orchestrator.log" "$(se_ev "$PS" AC-5.1)"
+# T2 changes a.test.sh, so its landing runs the suite again rather than reusing T1's verdict (wave-39 T1; D5):
+# a candidate whose suite read the same blobs would reuse it and write no log of its own (§REUSE).
+ll_commit_suite "$RS" T2 a "$(printf 'echo "PASS: a, as T2 changed it"\necho\necho "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\nexit 0')"
 ll_verb "$RS" T2
 SE_LOG2="$(se_log "$RS" T2)"
 expect_eq "(se7) precondition: the second row lands, and its log is another path than the first's" \
