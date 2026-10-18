@@ -2233,7 +2233,7 @@ _card_settles() {
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
       "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
       "bionic: commit refused — no regression proof on this plan yet "*)
-        proof_question_ok regression 2>/dev/null || return 1
+        proof_question_ok regression waive 2>/dev/null || return 1
         CF_SETTLE="${CF_SETTLE}waive:regression"$'\n'; any=1 ;;
       "bionic: "*) return 1 ;;
       "- "*": the newest reading is result=fail "*)
@@ -2251,7 +2251,7 @@ _card_settles() {
             [ "${_cs_f[4]:-}" = failing ] || return 1
             CF_SETTLE="${CF_SETTLE}waive:${_cs_f[1]}"$'\n' ;;
           regression)
-            proof_question_ok regression 2>/dev/null || return 1
+            proof_question_ok regression waive 2>/dev/null || return 1
             CF_SETTLE="${CF_SETTLE}waive:regression"$'\n' ;;
           *) return 1 ;;
         esac ;;
