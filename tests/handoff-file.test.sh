@@ -501,7 +501,6 @@ expect_contains "RC2b …saying nothing is resumed" "nothing to resume" "$OUT"
 expect_eq "RC3 …nothing is bound (the RS2 extractor reads 0 here)" "0" "$(hf_marker_plans)"
 expect_false "RC3b …nothing is armed" test -e "$(stamp_of "$HF_R")"
 expect_absent "RC3c …and no task list is offered (RS5 read the task-list lines through the same output)" "task-list: " "$OUT"
-
 # Refusals, each naming the fix.
 printf 'not a handoff\n/bionic:canonical-sdlc x.md\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/plain.md"
 poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/plain.md
@@ -526,5 +525,64 @@ expect_eq "RN0 precondition: the listing reads the shipped commands and skills (
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c '^decision$')"
 expect_eq "RN1 ls payload/commands payload/skills has no resume" "0" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
+
+
+# THE CLOSED FORM IS ONE WRITER'S (wave-38 T37; critic-adversarial #2, critic-structure #1). A parked run and a
+# pull-request run are closed too, and the verb's closed form says what close-out's says: `resume point: PARKED on
+# <branch> @ <sha> — <why>` and `branch: <b> kept, not merged into <i>; its worktrees are kept.` on a parked plan;
+# `branch: <b> to be pulled into <i>.` while a task-scale plan's pull request is owed, `merged into` once the
+# integration branch holds the work. close-out.test.sh §ONE-WRITER holds the two doors to each other line for line.
+# FIXTURE FIDELITY: §CLOSED's world; the Step-9 lines in the shapes close-out.sh writes them, the Wake Note in the
+# shape steps/8.md asks for. fails-when: the verb reads a parked or pull-request plan's `delivered:` line as a merge.
+HF_WHY="The release waits on a hand test on the user's machine."
+hf_close() {  # <step-9 line> -> the plan at current: 9 with that line, snapped
+  HF_S9="$1" awk '
+    /^current: 4$/ { print "current: 9"; next }
+    /^- T1: landed at record\/T1.md$/ { print ENVIRON["HF_S9"]; print; next }
+    { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
+  s42_snap "$HF_R" "$HF_P"
+}
+hf_world closed-parked no
+poke "$HF_R" handoff --rulings 'D1 ruled "1"'
+HF_WS="$(git -C "$HF_R" rev-parse --short wave/01-fixture)"
+expect_eq "OW0 precondition: the working branch is not merged into trunk (a parked run's branch is kept)" "no" \
+  "$(git -C "$HF_R" merge-base --is-ancestor wave/01-fixture trunk && echo yes || echo no)"
+printf '\n## Wake Note\n\n%s\n' "$HF_WHY" >> "$HF_P"
+hf_close "- Step 9: delivered: parked on wave/01-fixture @ $HF_WS — $HF_WHY (2026-10-08T13:00Z wave-01-fixture); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at record/wave-01-fixture/continuation.md"
+poke "$HF_R" handoff
+expect_eq "OW1 handoff on a parked plan exits 0" "0" "$RC"
+expect_eq "OW1b …line 2 says where the work is parked and why" \
+  "resume point: PARKED on wave/01-fixture @ $HF_WS — $HF_WHY" "$(sed -n 2p "$HF_F")"
+expect_eq "OW1c …the branch line says it was kept, not merged" \
+  "branch: wave/01-fixture kept, not merged into trunk; its worktrees are kept." "$(hf_label "$HF_F" branch)"
+expect_eq "OW1d …in the closed file's order" "$HF_CLOSED_SHAPE" "$(hf_shape "$HF_F")"
+expect_absent "OW1e …never DELIVERED (OW1b read line 2 through the same file)" "NONE — DELIVERED" "$(cat "$HF_F")"
+expect_absent "OW1f …never merged (OW1c read the branch line through the same file)" "merged into trunk." "$(cat "$HF_F")"
+hf_resume_new_session
+poke "$HF_R" resume "$HF_DOOR"
+expect_eq "OW2 resume on the parked closed form exits 0" "0" "$RC"
+expect_contains "OW2b …and prints line 2 verbatim" "$(sed -n 2p "$HF_F")" "$OUT"
+expect_contains "OW2c …saying the run is parked and its work is kept unmerged" "is parked: its work is kept on its branch, not merged" "$OUT"
+expect_absent "OW2d …and never that there is nothing to resume (RC2b read it on the delivered form)" "nothing to resume" "$OUT"
+expect_eq "OW2e …a closed run binds nothing (the RS2 extractor)" "0" "$(hf_marker_plans)"
+expect_false "OW2f …and arms nothing" test -e "$(stamp_of "$HF_R")"
+
+hf_world closed-pr no
+sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+poke "$HF_R" handoff --rulings 'D1 ruled "1"'
+hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
+poke "$HF_R" handoff
+expect_eq "OW3 handoff on a task-scale plan whose pull request is owed exits 0" "0" "$RC"
+expect_eq "OW3b …line 2 is the delivered closed form" \
+  "resume point: NONE — DELIVERED at 2026-10-08T13:00Z; trunk @ $(git -C "$HF_R" rev-parse --short trunk)." "$(sed -n 2p "$HF_F")"
+expect_eq "OW3c …the branch line says it is to be pulled" "branch: wave/01-fixture to be pulled into trunk." "$(hf_label "$HF_F" branch)"
+git -C "$HF_R" branch -f trunk wave/01-fixture
+poke "$HF_R" handoff
+expect_eq "OW3d …and merged into, once trunk holds the work (the same extractor)" "branch: wave/01-fixture merged into trunk." "$(hf_label "$HF_F" branch)"
+poke "$HF_R" closed-form "$HF_P"
+expect_eq "OW4 the closed-form verb prints the two lines the file carries, the one writer both doors print" \
+  "$(sed -n 2p "$HF_F")|$(hf_label "$HF_F" branch)" "$(printf '%s\n' "$OUT" | paste -sd'|' -)"
+
 
 finish
