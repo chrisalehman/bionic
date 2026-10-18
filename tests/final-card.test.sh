@@ -418,6 +418,21 @@ if [ "$FC_REGQ" -gt 0 ]; then
   expect_eq "REPLY-9b …and reply '1' replays it into waive regression (exit 0)" "0" "$RC"
   expect_regex "REPLY-9c …the regression waiver at the working head with the reply's words" \
     "^waived: question=regression head=$FC_R by Dana Fixture [0-9T:Z-]+ \"1\"\$" "$(/usr/bin/grep '^waived: question=regression ' "$PFC")"
+  # THE CHECK PATH (T36; critic-adversarial finding 1): REPLY-9 plants the owed item directly, so it never asked whether
+  # the card itself offers the waiver. Here the plan carries NO regression proof, `current 7 --check` refuses on the
+  # exact line below, and the card must settle that refusal into waive:regression, not call it CARD-EARLY.
+  fc_plan "$(fc_reads "$FC_C")"
+  poke "$RFC" current 7 --check
+  expect_contains "REPLY-10 precondition: a plan with no regression proof makes current 7 --check refuse on the regression" \
+    "bionic: commit refused — no regression proof on this plan yet " "$OUT"
+  fc_card final
+  expect_eq "REPLY-10b …and the card renders: the waiver settles the refusal (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
+  expect_contains "REPLY-10c …offering the regression waiver as a default" "waive regression" "$FC_OUT"
+  expect_contains "REPLY-10d …the person's waiver item opened on the ledger" "waive:regression" "$(fc_owed)"
+  poke "$RFC" reply 1
+  expect_eq "REPLY-10e reply '1' replays it into waive regression (exit 0)" "0" "$RC"
+  expect_regex "REPLY-10f …the regression waiver at the working head with the reply's words" \
+    "^waived: question=regression head=$FC_R by Dana Fixture [0-9T:Z-]+ \"1\"\$" "$(/usr/bin/grep '^waived: question=regression ' "$PFC")"
 else
   printf '  SKIP: REPLY-9 waive regression — proof_question_ok at this head admits no regression question (T2 not landed; A-T3-5)\n'
 fi
