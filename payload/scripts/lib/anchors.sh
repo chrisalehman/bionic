@@ -28,6 +28,24 @@
 # <at> is `-` for the files under <root> as they stand, or a commit read out of git's objects (the
 # landing's candidate, which no checkout holds). Exposed as `session-poker.sh anchors check|index`.
 #
+# THE NARROWING DECLARATION (wave-39 T3; D6, REQ-2 AC-2.1) is read by the same extractor, beside `anchor`:
+#
+#   reads <file> fn <function>        the suite reads only <function>'s body in <file>
+#   reads <file> section <label>      the suite reads only the section of <file> under the banner
+#                                     `# ----- <label>` (a comment line opening on five or more `-` or `=`,
+#                                     the label after them, a trailing rule dropped; it runs to the next
+#                                     labelled banner at its own indentation or less, or the file's end)
+#
+# one per line, literal words (a label with spaces is quoted), in a tests/*.test.sh suite. The finder
+# locates each at <at>: a function by the same head-and-body rule `anchor fn` counts with; exactly one
+# match, or the declaration is refused (rc 1, `anchors: reads_index refused <suite>:<line>: …` on
+# stderr) and the suite reads that whole file. The tool never guesses (D6): no declaration, no narrowing.
+#
+#   reads_declared <root> <at>   one line per declaration:
+#       <suite> TAB <line> TAB fn|section TAB <file> TAB <name> TAB <verdict> TAB <start> TAB <end>
+#       <verdict> is `ok` with the located span's first and last line, or why it is refused
+#       (`nofile`, `nofn`, `nosection`, `ambiguous:<n>`, `nonliteral`) with `-` for both lines
+#
 # A SUITE IS THE FILE THAT DECLARES (D3 "1", design-ledger Δ2): any *.sh under <root> that git tracks,
 # or holds untracked and unignored, and that carries a shaped call, keyed on its path from the root —
 # never on a `.test.sh` suffix, so a suite outside tests/ is indexed by its own path. A call inside a
@@ -40,16 +58,18 @@
 
 ANCHORS_CALL_ERE='^[[:space:]]*anchor[[:space:]]+(file|fn|insert)[[:space:]]'
 
-# The root-relative path of each *.sh under <root> carrying a shaped call, sorted.
-_anc_files() {  # <root> <at>
-  local root="$1" at="$2" p
+READS_DECL_ERE='^[[:space:]]*reads[[:space:]]+[^[:space:]]+[[:space:]]+(fn|section)([[:space:]]|$)'
+
+# The root-relative path of each *.sh under <root> with a line matching <ERE> (a shaped call by default), sorted.
+_anc_files() {  # <root> <at> [<ERE>]
+  local root="$1" at="$2" ere="${3:-$ANCHORS_CALL_ERE}" p
   if [ "$at" != - ]; then
-    git -C "$root" grep -l -E -e "$ANCHORS_CALL_ERE" "$at" -- '*.sh' 2>/dev/null \
+    git -C "$root" grep -l -E -e "$ere" "$at" -- '*.sh' 2>/dev/null \
       | while IFS= read -r p; do printf '%s\n' "${p#"$at":}"; done
   elif git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$root" grep -l -E --untracked -e "$ANCHORS_CALL_ERE" -- '*.sh' 2>/dev/null
+    git -C "$root" grep -l -E --untracked -e "$ere" -- '*.sh' 2>/dev/null
   else
-    ( cd "$root" 2>/dev/null && find . -type f -name '*.sh' -exec grep -lE -e "$ANCHORS_CALL_ERE" {} + 2>/dev/null ) \
+    ( cd "$root" 2>/dev/null && find . -type f -name '*.sh' -exec grep -lE -e "$ere" {} + 2>/dev/null ) \
       | sed 's|^\./||'
   fi | LC_ALL=C sort -u
 }
@@ -162,7 +182,18 @@ hd != "" {
 {
   line = $0; ln = NR
   if (line ~ /^[ \t]*#/) next
-  if (line ~ /^[ \t]*anchor[ \t]+(file|fn|insert)[ \t]/) {
+  if (mode == "reads") {
+    if (line ~ /^[ \t]*reads[ \t]+[^ \t]+[ \t]+(fn|section)([ \t]|$)/) {
+      while (line ~ /\\$/ && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
+      n = tok(line)
+      kind = TW[3]; f = TW[2]; nm = TW[4]
+      ok = (n == 4 && TL[2] && TL[4] && f != "" && nm != "" && substr(f, 1, 1) != "/" \
+            && index(f, "\t") == 0 && index(nm, "\t") == 0 && index(f, "#") == 0)
+      if (kind == "fn") ok = ok && nm !~ /[^A-Za-z0-9_:.-]/
+      if (ok) print suite "\t" ln "\t" kind "\t" f "\t" nm "\tliteral"
+      else print suite "\t" ln "\t" kind "\t-\t-\tnonliteral"
+    }
+  } else if (line ~ /^[ \t]*anchor[ \t]+(file|fn|insert)[ \t]/) {
     while (line ~ /\\$/ && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
     n = tok(line)
     shape = TW[2]; f = TW[3]; t = TW[4]; fn = (shape == "fn" ? TW[5] : "-")
@@ -184,6 +215,21 @@ anchors_extract() {  # <root> <at> [<suite>]
   done
 }
 
+# THE FUNCTION HEAD, the one rule `anchor fn` and a `reads … fn` declaration locate a function by:
+# fnhead(line, fn) is 1 when <line> opens <fn>'s definition (`fn()` or `function fn()`), and then sets
+# FH_IND (the head's indentation, whose `}` closes the body), FH_REST (what follows the `()`) and FH_ONE
+# (1 when the whole definition is on the head line).
+_ANC_FNHEAD='
+function fnhead(l, fn,   h, r) {
+  FH_IND = l; sub(/[^ \t].*$/, "", FH_IND); h = l; sub(/^[ \t]+/, "", h); sub(/^function[ \t]+/, "", h)
+  if (index(h, fn) != 1) return 0
+  r = substr(h, length(fn) + 1); sub(/^[ \t]+/, "", r)
+  if (substr(r, 1, 2) != "()") return 0
+  FH_REST = substr(r, 3); FH_ONE = (FH_REST ~ /\{/ && FH_REST ~ /\}[ \t;]*$/)
+  return 1
+}
+'
+
 # THE ONE COUNTING RULE, run by `anchor` at run time and by the check at a landing. The text comes in
 # through the environment, never `awk -v`, which would read its backslashes as escapes.
 #   file    lines holding <text>
@@ -192,7 +238,7 @@ anchors_extract() {  # <root> <at> [<suite>]
 #           counted unless the whole definition is on it) to the `}` at the head's own indentation
 anchors_found() {  # <root> <at> <shape> <file> <text> <function or ->
   _anc_has "$1" "$2" "$4" || { echo nofile; return 0; }
-  _anc_cat "$1" "$2" "$4" | ANC_SHAPE="$3" ANC_TEXT="$5" ANC_FN="${6:--}" awk '
+  _anc_cat "$1" "$2" "$4" | ANC_SHAPE="$3" ANC_TEXT="$5" ANC_FN="${6:--}" awk "$_ANC_FNHEAD"'
     BEGIN { s = ENVIRON["ANC_SHAPE"]; t = ENVIRON["ANC_TEXT"]; fn = ENVIRON["ANC_FN"]; n = 0; seen = 0; inb = 0 }
     s == "file"   { if (index($0, t)) n++; next }
     s == "insert" { if (index($0, t) == 1) n++; next }
@@ -202,15 +248,91 @@ anchors_found() {  # <root> <at> <shape> <file> <text> <function or ->
       next
     }
     s == "fn" {
-      h = $0; ind = h; sub(/[^ \t].*$/, "", ind); sub(/^[ \t]+/, "", h); sub(/^function[ \t]+/, "", h)
-      if (index(h, fn) != 1) next
-      r = substr(h, length(fn) + 1); sub(/^[ \t]+/, "", r)
-      if (substr(r, 1, 2) != "()") next
-      seen = 1; r = substr(r, 3)
-      if (r ~ /\{/ && r ~ /\}[ \t;]*$/) { if (index(r, t)) n++; next }
+      if (!fnhead($0, fn)) next
+      seen = 1; ind = FH_IND
+      if (FH_ONE) { if (index(FH_REST, t)) n++; next }
       inb = 1
     }
     END { if (s == "fn" && !seen) print "nofn"; else print n }'
+}
+
+# THE SPAN FINDER, one awk over one file's text for every declaration on it. ANC_REQ (environment) holds
+# `fn|section TAB <name>` lines; one line out per request: `<kind> TAB <name> TAB <matches> TAB <start>
+# TAB <end>`, the span being the first match's (a function from its head to the `}` at the head's
+# indentation; a section from its banner to the line before the next labelled banner at its indentation or
+# less; either to the file's end when nothing closes it).
+# NOTE FOR EDITORS: the program is a shell single-quoted string; spell an apostrophe \047.
+_ANC_SPAN_AWK='
+function banner(l,   b) {
+  if (l !~ /^[ \t]*#[ \t]*[-=][-=][-=][-=][-=]/) return ""
+  BN_IND = l; sub(/[^ \t].*$/, "", BN_IND)
+  b = l; sub(/^[ \t]*#[ \t]*[-=]+/, "", b); sub(/[ \t]+[-=][-=][-=][-=][-=]+[ \t]*$/, "", b)
+  sub(/^[ \t]+/, "", b); sub(/[ \t]+$/, "", b)
+  return b
+}
+BEGIN {
+  nq = split(ENVIRON["ANC_REQ"], R, "\n")
+  for (i = 1; i <= nq; i++) { split(R[i], q, "\t"); K[i] = q[1]; N[i] = q[2]; c[i] = 0; op[i] = 0; st[i] = "-"; en[i] = "-" }
+}
+{
+  lb = banner($0); bi = BN_IND
+  for (i = 1; i <= nq; i++) {
+    if (K[i] == "fn") {
+      if (op[i]) { if (substr($0, 1, length(ind[i]) + 1) == ind[i] "}") { op[i] = 0; if (c[i] == 1) en[i] = NR } continue }
+      if (!fnhead($0, N[i])) continue
+      if (++c[i] == 1) st[i] = NR
+      if (FH_ONE) { if (c[i] == 1) en[i] = NR } else { op[i] = 1; ind[i] = FH_IND }
+    } else if (K[i] == "section" && lb != "") {
+      if (op[i] && length(bi) <= length(ind[i])) { op[i] = 0; if (c[i] == 1) en[i] = NR - 1 }
+      if (lb == N[i]) { if (++c[i] == 1) st[i] = NR; op[i] = 1; ind[i] = bi }
+    }
+  }
+}
+END {
+  for (i = 1; i <= nq; i++) {
+    if (K[i] == "") continue
+    if (c[i] >= 1 && en[i] == "-") en[i] = NR
+    print K[i] "\t" N[i] "\t" c[i] "\t" st[i] "\t" en[i]
+  }
+}'
+
+# The narrowing declarations of every tests/*.test.sh suite (top level, as the reads index reads suites),
+# as the extractor prints them: <suite> TAB <line> TAB <kind> TAB <file> TAB <name> TAB literal|nonliteral.
+reads_extract() {  # <root> <at>
+  local root="${1:-}" at="${2:--}" s
+  _anc_files "$root" "$at" "$READS_DECL_ERE" | while IFS= read -r s; do
+    case "$s" in tests/*/*) continue ;; tests/*.test.sh) ;; *) continue ;; esac
+    _anc_cat "$root" "$at" "$s" | awk -v suite="$s" -v mode=reads "$_ANC_AWK"
+  done
+}
+
+# reads_declared <root> <at>: each declaration with the finder's verdict at <at> (the grammar is above).
+# One finder run per declared file.
+reads_declared() {  # <root> <at>
+  local root="${1:-}" at="${2:--}" ext f req spans=""
+  ext="$(reads_extract "$root" "$at")"
+  [ -n "$ext" ] || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if ! _anc_has "$root" "$at" "$f"; then spans="$spans${spans:+$'\n'}X	$f"; continue; fi
+    req="$(printf '%s\n' "$ext" | RD_F="$f" awk -F'\t' '$6 == "literal" && $4 == ENVIRON["RD_F"] { print $3 "\t" $5 }' | LC_ALL=C sort -u)"
+    spans="$spans${spans:+$'\n'}$(_anc_cat "$root" "$at" "$f" | ANC_REQ="$req" awk "$_ANC_FNHEAD$_ANC_SPAN_AWK" \
+      | RD_F="$f" awk '{ print "Y\t" ENVIRON["RD_F"] "\t" $0 }')"
+  done <<READS_DECLARED_FILES
+$(printf '%s\n' "$ext" | awk -F'\t' '$6 == "literal" { print $4 }' | LC_ALL=C sort -u)
+READS_DECLARED_FILES
+  { printf '%s\n' "$spans"; printf '%s\n' "$ext" | sed 's/^/E	/'; } | awk -F'\t' '
+    $1 == "X" { nofile[$2] = 1; next }
+    $1 == "Y" { k = $2 SUBSEP $3 SUBSEP $4; cnt[k] = $5; st[k] = $6; en[k] = $7; next }
+    $1 == "E" {
+      v = "ok"; a = "-"; b = "-"; k = $5 SUBSEP $4 SUBSEP $6
+      if ($7 != "literal") v = "nonliteral"
+      else if ($5 in nofile) v = "nofile"
+      else if (!(k in cnt) || cnt[k] == 0) v = ($4 == "fn" ? "nofn" : "nosection")
+      else if (cnt[k] > 1) v = "ambiguous:" cnt[k]
+      else { a = st[k]; b = en[k] }
+      print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" v "\t" a "\t" b
+    }'
 }
 
 anchors_check() {  # <root> <at>
@@ -270,6 +392,11 @@ anchors_index() {  # <root> <at>
 #        spells after its last expansion is the directory, matched as rule 1 matches a path (it or a path
 #        ending in `/<it>`). A word that is all expansion (`"$REPO"`, `.`) names no directory: the root
 #        is never one.
+#     7. THE NARROWING (wave-39 T3; D6, AC-2.1): a suite declaring `reads <file> fn <function>` or
+#        `reads <file> section <label>` (the grammar at the head of this file) reads that file only there:
+#        its row is `<file>#<name> TAB <suite>`, one per declaration, in place of `<file> TAB <suite>`.
+#        A declaration the finder cannot locate at <at> is refused (stderr, rc 1, the index still printed)
+#        and the suite reads the whole file. A reader routing by file folds `#<name>` away (reads_suites).
 #   MISSED, the floor's whole run stays the catch-all (spec assumption 3): a path built from variables
 #   past the first (`"$d/$f"`), a copy of a whole directory not walked by find or a glob, a library
 #   sourced by a library or by a script without a BIONIC_LIB_WANT line, and anything a run opens that
@@ -583,6 +710,11 @@ $1 == "W" {
   want[$2] = v; next
 }
 $1 == "P" { pair[$2 "\t" $3] = 1; next }
+$1 == "N" {
+  k = $3 "\t" $2
+  if ($5 == "ok") { pair[k] = 1; nar[k] = nar[k] "\034" $4 } else bad[k] = 1
+  next
+}
 $1 == "S" {
   s = $2
   if (s !~ /^tests\/[^\/]*\.test\.sh$/) next
@@ -623,7 +755,16 @@ END {
     }
   }
   for (k in fan) out[k] = 1
-  if (!closed) { for (k in out) print k; exit }
+  # THE PLAIN INDEX (closed=0): every pair, a narrowed one as <file>#<name> (wave-39 T3).
+  if (!closed) {
+    for (k in out) {
+      split(k, kk, "\t")
+      if (!((k in nar) && !(k in bad))) { print k; continue }
+      n = split(nar[k], L, "\034")
+      for (i = 2; i <= n; i++) print kk[1] "#" L[i] "\t" kk[2]
+    }
+    exit
+  }
   # THE CLOSURE (wave-39 T1; A-orch-3): from the files the rules above give a suite (and its prelude, D8),
   # every script reached is read too: what it names (cp; the names of a helper, hp), and its WANT libraries. A
   # script whose load cannot be resolved (unres) marks the suite `!`, which the key reads as the whole tree.
@@ -656,6 +797,22 @@ END {
 # The command form's usage refusal: one line to stderr, exit 2. Defined at file scope so sourcing defines it too.
 _rd_usage() { echo "usage: bash anchors.sh reads_index [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
 
+# reads_declared's lines in -> one refusal per declaration the finder could not locate, to stdout.
+_rd_refusals() {  # <at>
+  RD_AT="$1" awk -F'\t' '
+    BEGIN { at = ENVIRON["RD_AT"]; where = (at == "-" ? "(in the tree)" : "(at " at ")") }
+    NF && $6 != "ok" {
+      what = "reads " $4 " " $3 " " $5 " — "
+      if ($6 == "nonliteral") why = "not a literal `reads <file> fn <function>` or `reads <file> section <label>` line"
+      else if ($6 == "nofile") why = what "no file " $4
+      else if ($6 == "nofn") why = what "no function " $5 " in " $4
+      else if ($6 == "nosection") why = what "no section \047" $5 "\047 in " $4
+      else { n = substr($6, index($6, ":") + 1)
+             why = what n ($3 == "fn" ? " functions " $5 : " sections \047" $5 "\047") " in " $4 ", one is needed" }
+      print "anchors: reads_index refused " $1 ":" $2 ": " why " " where
+    }'
+}
+
 # The scan's input stream at <at>; `closed` adds every line of every script (C), which the closure reads.
 _rd_feed() {  # <root> <at> [closed]
   local root="$1" at="$2"
@@ -669,7 +826,15 @@ _rd_feed() {  # <root> <at> [closed]
 }
 
 reads_index() {  # <root> <at>
-  _rd_feed "${1:-}" "${2:--}" | awk -v closed=0 "$_RD_AWK" | _anc_group
+  local root="${1:-}" at="${2:--}" decl rc=0
+  decl="$(reads_declared "$root" "$at")"
+  if [ -n "$decl" ] && printf '%s\n' "$decl" | awk -F'\t' '$6 != "ok" { bad = 1 } END { exit !bad }'; then
+    printf '%s\n' "$decl" | _rd_refusals "$at" >&2; rc=1
+  fi
+  { _rd_feed "$root" "$at"
+    [ -z "$decl" ] || printf '%s\n' "$decl" | awk -F'\t' '$6 != "nonliteral" { print "N\t" $1 "\t" $4 "\t" $5 "\t" ($6 == "ok" ? "ok" : "bad") }'
+  } | awk -v closed=0 "$_RD_AWK" | _anc_group
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------------------------------
@@ -757,7 +922,7 @@ reads_hash() {  # <root> <at> <suite>
 
 # reads_suites <root> <at> <cell> -> the suites reads_index names, at <at>, for any file an entry of the Files cell
 # covers (lib/units.sh `cell_covers`, the scheduler's matcher; an entry spelled from <root>/ is read from the
-# root): by file name, sorted, once each, one per line. Nothing when no suite reads such a file, or units.sh
+# root; a narrowed row `<file>#<name>` routes as <file>): by file name, sorted, once each, one per line. Nothing when no suite reads such a file, or units.sh
 # cannot be loaded. THE ONE READER of the index by Files (wave-37 T3; D4; burns index-to-suites and
 # reads-index-consumers): session-poker.sh `poker_brief_index_suites` (the brief's Lands-on) and
 # dispatch-preflight.sh `dp_lands_index_suites` (the wall) are thin calls to it; proof.sh `_proof_walk`
@@ -768,7 +933,8 @@ reads_suites() {  # <root> <at> <cell>
   declare -F _units_files_awk >/dev/null 2>&1 || return 0
   reads_index "${1:-}" "${2:--}" 2>/dev/null | awk -F'\t' -v cell="${3:-}" -v root="${1:-}" "$(_units_files_awk)"'
     BEGIN { m = split(cell, e, ","); cell = ""; for (k = 1; k <= m; k++) { t = e[k]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (root != "" && index(t, root "/") == 1) t = substr(t, length(root) + 2); cell = cell (k > 1 ? "," : "") t } }
-    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
+    { f = $1; sub(/#.*$/, "", f) }
+    f != "" && cell_covers(cell, f) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
     | LC_ALL=C sort -u
 }
 
