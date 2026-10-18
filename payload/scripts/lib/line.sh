@@ -25,6 +25,7 @@
 #             the suite's read key at the commit, lib/anchors.sh `reads_hash`, wave-39 T1)
 #   reused    row commit suite reads from      (the suite proved on this candidate by the verdict of `from`, an
 #             earlier candidate whose suite read the same blobs; the fold reads it as green; wave-39 T1, D5)
+#             [head]   (a skip: the key is also the suite's key at the accepted head `head`; wave-39 T4, D6)
 #   standing  head suite lines log cause against   (cause: environment | code; against: the run that
 #             disagrees, `<stamp|verdict>:<commit>@<at>`, or `-`; wave-33 T2, AC-7.2)
 #   returned  row why detail                   (red | conflict | guard)
@@ -913,7 +914,7 @@ _line_lease_end() {  # <the carrier's exit status>
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
-  local c rc s said anchored=""
+  local c rc s said anchored="" counted="" nrun nall
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
@@ -995,13 +996,21 @@ EOF
     # with both logs.
     _LINE_REPASS=""
     _line_drain_init
+    nrun=0; nall=0
     for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
       [ "$s" != none ] || break
+      nall=$((nall + 1))
       # THE REUSE TEST (wave-39 T1; D5): a verdict whose suite read what this candidate's reads proves it, whichever
       # candidate it ran on; one from another candidate is recorded and printed as reused, and nothing starts.
       _line_reads_fill "$root" "$cand" "$s"
       if c="$(_line_proved "$rec" "$s" "reads=$(_line_reads_of "$cand" "$s")")"; then
-        [ "$c" = "$cand" ] || _line_reused "$plan" "$rec" "$row" "$cand" "$s" "reads=$(_line_reads_of "$cand" "$s")" "$c"
+        # THE SKIP (wave-39 T4; D5, D6): the suite's key here equal to its key at the accepted head, where that
+        # green stands, is the head's green carried; ready prints `skip`, not `reused`. One already proved on this
+        # very candidate ran here, and counts as run.
+        if [ "$c" = "$cand" ]; then nrun=$((nrun + 1)); continue; fi
+        _line_reads_fill "$root" "$head" "$s"
+        _line_reused "$plan" "$rec" "$row" "$cand" "$s" "reads=$(_line_reads_of "$cand" "$s")" "$c" \
+          "$head" "reads=$(_line_reads_of "$head" "$s")"
         continue
       fi
       # A SUITE THE ROW REMOVED IS NOT OWED (wave-39 T6; A-orch-5): a row that removes or splits a suite still
@@ -1009,7 +1018,7 @@ EOF
       # entry). Held by the candidate's base and not by the candidate, it is recorded once, `absent` with no log,
       # and counts as proved; nothing runs for it. A name the base lacks too still stalls (wave-34 T27).
       if _line_removed "$root" "$cbase" "$cand" "$s"; then
-        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; continue
+        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; nall=$((nall - 1)); continue
       fi
       said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
@@ -1017,8 +1026,13 @@ EOF
         line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
         printf 'STALLED %s %s\n' "$row" "$said"; return 70
       fi
+      nrun=$((nrun + 1))
       _line_drain_add "$s"
     done
+    # SUITES <N> OF <M> (wave-39 T4; AC-2.4): once per candidate, when it runs fewer than its suites, how many of the
+    # Lands-on suites it holds this candidate runs (now or earlier); the rest were skipped or reused. A landing that
+    # runs them all prints nothing here, so its outcome stays the first line ready prints.
+    if [ "$counted" != "$cand" ] && [ "$nrun" -lt "$nall" ]; then printf 'suites %s of %s\n' "$nrun" "$nall"; counted="$cand"; fi
     if [ "$_LINE_DN" -gt 0 ]; then
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
       # ONE TREE PER CANDIDATE, POINTED ONCE (D3): every run of the pass starts from the candidate, clean, in
@@ -1121,7 +1135,7 @@ _line_reads_fill() {  # <root> <commit> <suite>
   got=""
   if [ -n "$1" ] && _line_load_anchors; then
     # shellcheck disable=SC2086
-    got="$(reads_hashes "$1" "$2" $want 2>/dev/null)"
+    got="$(_line_reads_keys "$1" "$2" $want 2>/dev/null)"
   fi
   for s in $want; do
     _LINE_RH="${_LINE_RH}${2}	${s}	$(printf '%s\n' "$got" | awk -F'\t' -v s="$s" '$1 == s && $2 != "" { k = $2 } END { print (k == "" ? "-" : k) }')
@@ -1134,6 +1148,55 @@ _line_reads_of() {  # <commit> <suite> -> its key as remembered; 1 when none is
 _line_reads() {  # <root> <commit> <suite> -> the key, `-` when it cannot be read (then nothing ever matches it)
   _line_reads_fill "$@"
   _line_reads_of "$2" "$3" || echo -
+}
+
+# THE NARROWED KEY (wave-39 T4; D6, A-orch-8; ADR-061): what the suite reads, narrowed where it declares. A suite
+# declaring `reads <file> fn <name>` or `reads <file> section <label>` (lib/anchors.sh, the grammar) reads that file
+# only there: its key takes `<file>#<kind>:<name> <sha256 of the located span's lines>` in place of `<file> <blob>`,
+# the span as lib/anchors.sh `reads_declared` locates it at <at>, never re-derived here. A (suite, file) pair with any
+# declaration the finder refused reads the whole file (A-T3-1). An undeclared file contributes its blob, so a suite
+# that declares nothing keys exactly as `reads_hashes` keys it, and a tree with no declaration is `reads_hashes`
+# itself. The key's other inputs are reads_hashes' own: the closed read set (`_rd_closed`), the commit's blobs, and
+# the tree key for a set that cannot be derived. Prints `<suite> TAB <key>` per suite.
+_line_reads_keys() {  # <root> <at> <suite>...
+  local root="$1" at="$2" narrow spans="" tree closed blobs s p lines f a b h
+  shift 2
+  narrow="$(reads_declared "$root" "$at" 2>/dev/null | awk -F'\t' '
+    NF >= 8 { k = $1 "\t" $4; if ($6 != "ok") bad[k] = 1; else d[k] = d[k] "\n" $1 "\t" $4 "\t" $3 ":" $5 "\t" $7 "\t" $8 }
+    END { for (k in d) if (!(k in bad)) print substr(d[k], 2) }')"
+  if [ -z "$narrow" ]; then
+    reads_hashes "$root" "$at" "$@"; return
+  fi
+  while IFS=$'\t' read -r f a b; do
+    [ -n "$f" ] || continue
+    h="$(_anc_cat "$root" "$at" "$f" | sed -n "${a},${b}p" | _rd_sha256)"
+    spans="${spans}@H	${f}	${a}	${b}	${h}
+"
+  done <<LINE_SPANS
+$(printf '%s\n' "$narrow" | awk -F'\t' '{ print $2 "\t" $4 "\t" $5 }' | LC_ALL=C sort -u)
+LINE_SPANS
+  tree="$(git -C "$root" rev-parse --verify -q "${at}^{tree}" 2>/dev/null)" || return 1
+  closed="$(_rd_closed "$root" "$at")"
+  blobs="$(git -C "$root" -c core.quotepath=off ls-tree -r "$at" 2>/dev/null)"
+  for s in "$@"; do
+    p="$(_rd_suite_path "$root" "$at" "$s")"
+    lines="$( { printf '%s\n' "$blobs" | sed 's/^/B	/'; printf '%s' "$spans"; printf '%s\n' "$narrow" | sed 's/^/@N	/'; printf '%s\n' "$closed"; } \
+      | awk -F'\t' -v s="$p" '
+      $1 == "B" { split($2, m, " "); blob[$3] = m[3]; next }
+      $1 == "@H" { span[$2 "\t" $3 "\t" $4] = $5; next }
+      $1 == "@N" { if ($2 == s) { nf[$3] = 1; nl[++nn] = $3 "#" $4 " " span[$3 "\t" $5 "\t" $6] } next }
+      $1 == "!" { if ($2 == s) bad = 1; next }
+      $2 == s && ($1 in blob) { f[++n] = $1 }
+      END {
+        if (bad || n == 0) { print "!"; exit }
+        for (i = 1; i <= n; i++) if (!(f[i] in nf)) print f[i] " " blob[f[i]]
+        for (i = 1; i <= nn; i++) print nl[i]
+      }' | LC_ALL=C sort)"
+    case "$lines" in
+      '!'*) printf '%s\ttree:%s\n' "$s" "$tree" ;;
+      *) printf '%s\t%s\n' "$s" "$(printf '%s\n' "$lines" | _rd_sha256)" ;;
+    esac
+  done
 }
 
 # An entry other than <row> still in line, present and not stalled, whose candidate is <candidate>:
@@ -1170,10 +1233,16 @@ _line_proved() {  # <rec> <suite> <key> -> the proving verdict's commit
     END { if (!ok) exit 1; print c }' "$1" 2>/dev/null
 }
 # A suite proved by another candidate's verdict, once per candidate: the record's `reused` line, which the fold
-# reads as green on this one, and the line ready prints.
-_line_reused() {  # <plan> <rec> <row> <candidate> <suite> <reads key> <proving commit>
+# reads as green on this one, and the line ready prints. A SKIP (wave-39 T4; D5, D6) is the case where the key is
+# also the suite's key at the accepted head: the line names that head (`head=`, after from=, so a positional reader
+# reads it as before) and ready prints `skip <suite> reads=<h> (head)`.
+_line_reused() {  # <plan> <rec> <row> <candidate> <suite> <reads key> <proving commit> [<accepted head> <its reads key>]
   awk -F'|' -v r="row=$3" -v c="commit=$4" -v s="suite=$5" '$2 == "ev=reused" && $3 == r && $4 == c && $5 == s { f = 1 } END { exit !f }' "$2" 2>/dev/null \
     && return 0
+  if [ -n "${8:-}" ] && [ "${9:-}" = "$6" ]; then
+    line_event "$1" reused "row=$3" "commit=$4" "suite=$5" "$6" "from=$7" "head=$8" >/dev/null
+    printf 'skip %s %s (head)\n' "$5" "$6"; return 0
+  fi
   line_event "$1" reused "row=$3" "commit=$4" "suite=$5" "$6" "from=$7" >/dev/null
   printf 'reused %s %s\n' "$5" "$6"
 }
