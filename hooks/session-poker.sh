@@ -2606,12 +2606,16 @@ TOA
 # the tick asks payload/scripts/card.sh `early`, the one owner of the three facts the final card is refused on (an
 # open reader, a reading unregistered at the head, a red check of the advance to 6, 7 or 8), and says its line,
 # `CARD-EARLY — <reason>`, beside the WAIT lines. Advice only: the tick refuses nothing and writes nothing for it.
+# THE READINGS ARE THE TICK'S, ASKED ONCE (wave-36 T40; D9, AC-3.6): `sched_live_head` has already asked the judge
+# for this plan at the working head, so the card is handed that answer and the head it was asked at
+# (UNITS_READINGS_STATE, UNITS_LIVE_HEAD) and reads it rather than walking the commits a second time.
 tick_card_early() {  # <units_rows output> -> always 0; says the card's CARD-EARLY line when one fact fails
   local card why
   printf '%s\n' "$1" | awk -F'\t' '$3 == "integrate" && ($10 == "pending" || $10 == "active") { f = 1 } END { exit !f }' || return 0
   card="$(cd "$BIONIC_LIB" 2>/dev/null && pwd -P)/../card.sh"
   [ -f "$card" ] || return 0
-  why="$( cd "$REPO_REAL" 2>/dev/null && env CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$card" early "$SCHED_PLAN" 2>&1 >/dev/null )" && return 0
+  why="$( cd "$REPO_REAL" 2>/dev/null && env CLAUDE_CODE_SESSION_ID="$SESSION_ID" UNITS_LIVE_HEAD="${UNITS_LIVE_HEAD:-}" \
+    UNITS_READINGS_STATE="${UNITS_READINGS_STATE:-}" "${BASH:-bash}" "$card" early "$SCHED_PLAN" 2>&1 >/dev/null )" && return 0
   why="$(printf '%s\n' "$why" | head -1)"
   case "$why" in "CARD-EARLY — "*) say "$why" ;; esac
   return 0

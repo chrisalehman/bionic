@@ -2149,7 +2149,8 @@ _card_final_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ER
 }
 
 _card_poke() {  # <verb> <args...> -> the poker's output, stdout and stderr, run as this session in the run's root; its rc
-  ( cd "$CF_ROOT" && exec env CLAUDE_CODE_SESSION_ID="$CF_SID" "${BASH:-bash}" "$CF_POKER" "$@" ) 2>&1
+  # The readings a tick handed the card (below) are the card's alone: each check judges for itself.
+  ( cd "$CF_ROOT" && exec env -u UNITS_LIVE_HEAD -u UNITS_READINGS_STATE CLAUDE_CODE_SESSION_ID="$CF_SID" "${BASH:-bash}" "$CF_POKER" "$@" ) 2>&1
 }
 
 _card_early() {  # -> 0 when the card may render; 1 and CARD_EARLY_WHY on the first of the three facts that fails
@@ -2180,8 +2181,15 @@ CF_OPEN
   fi
   # (2) A READING UNREGISTERED AT THE HEAD: facts_state's review lines at the branch ref, as the tick reads them.
   # A failing reading is registered; the advance's check below is what refuses it.
+  # ASKED ONCE PER TICK (wave-36 T40; D9, AC-3.6): the tick (session-poker.sh `tick_card_early`) hands the answer
+  # its `sched_live_head` already got, with the head it was asked at; the card reads it when that head is this one,
+  # and asks the judge itself otherwise.
   head8="$CF_HEAD8"
-  st="$(_units_readings_state "$CF_PLAN")"
+  if [ -n "${UNITS_READINGS_STATE:-}" ] && [ "${UNITS_LIVE_HEAD:-}" = "$CF_HEAD" ]; then
+    st="$UNITS_READINGS_STATE"
+  else
+    st="$(_units_readings_state "$CF_PLAN")"
+  fi
   if [ "$st" != covered ]; then
     q="$(printf '%s\n' "$st" | awk '{ n = split($0, a, /; /)
       for (i = 1; i <= n; i++) { split(a[i], f, " "); if (f[1] == "review" && (f[5] == "absent" || f[5] == "uncovered")) { print f[2]; exit } } }')"

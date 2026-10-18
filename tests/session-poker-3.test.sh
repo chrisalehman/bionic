@@ -3154,11 +3154,17 @@ expect_eq "69e3 …after which the real commit is admitted: the line covers the 
 # writes the plan header, not a row, so it hands `judged`. A verb that changes its mode turns this red.
 # The list is the live one (wave-31 T32): `finding-check` is gone (D6), and `regression` (T27) is on it.
 # Wave-33 T7 added `matrix-set`, `waive-row` and `tasks-prose`, each handing the `writer` mode (T29).
-S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
-S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print ($2 == "regression-runs" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
+# Wave-38 T12 (record T12-handoff.md; A-T12-11, A-T12-12) made handoff's swap conditional, `cmp -s … || plan_verb_swap
+# handoff … "$HO_DRY"`, its mode `writer`, or `as-is` on a delivered plan (writer would set current: back to 4): the
+# reader takes a call behind `||` too, and handoff's mode is pinned by the two values the script gives HO_DRY.
+S69_SWAP_LINES="$(/usr/bin/grep -E '^[[:space:]]*([^#[:space:]][^#]*\|\|[[:space:]]*)?plan_verb_swap ' "$POKER" | sed -E 's/^.*plan_verb_swap /plan_verb_swap /')"
+S69_SWAPS="$(printf '%s\n' "$S69_SWAP_LINES" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
+S69_MODES="$(printf '%s\n' "$S69_SWAP_LINES" | awk '$2 != "current" { print ($2 == "regression-runs" || $2 == "handoff" ? $2 "=" $NF : $NF) }' | sort -u | tr '\n' ' ')"
 expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
   '"$VERB" approve budget current discharge finding-move finding-stated handoff launch-sync matrix-render matrix-set proof-add regression regression-runs release-check row-landed step-field step-line task-add task-split tasks-prose waive waive-row ' "$S69_SWAPS"
-expect_eq "69e5 …and every one but current and regression-runs names the writer mode; regression-runs names judged" "regression-runs=judged writer " "$S69_MODES"
+expect_eq "69e5 …and every one but current, handoff and regression-runs names the writer mode; regression-runs names judged, handoff its HO_DRY" 'handoff="$HO_DRY" regression-runs=judged writer ' "$S69_MODES"
+expect_eq "69e5b …and handoff's HO_DRY is writer, or as-is on a delivered plan (read from the script)" "HO_DRY=as-is HO_DRY=writer " \
+  "$(/usr/bin/grep -oE '^[[:space:]]*HO_DRY=[a-z-]+' "$POKER" | sed -E 's/^[[:space:]]*//' | sort -u | tr '\n' ' ')"
 
 # ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
 for s69n in 6 7; do
