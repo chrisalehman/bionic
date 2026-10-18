@@ -8,6 +8,289 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.21.0 — 2026-10-18
+
+This is the one-stop release: on a clean run the user is asked four things, the requirements card, the design card,
+the plan card and one final card before the merge, and everything else reaches them as a default they can override
+(D17, ADR-059). The final card is rendered by the tool from the record and refuses itself while a reader is open
+(D19, D20), and a release commit is covered by its own check (D18). The situation report is one renderer behind
+three surfaces, `/bionic:sitrep`, the handoff head and the tick (D8 to D14, D29 to D31). The handoff file is the store
+and `/bionic:canonical-sdlc <handoff.md>` is the one door back in (D4, D23, D24). The gate is the one owner of
+capacity, and every landing asks it for its width (D21, D22, ADR-060). Scale is a profile row (D25), close-out parks,
+scores and asks nothing (D26), standing orders live in the config (REQ-7), and the test runner runs on Haiku at high
+effort (REQ-8). This release reverses 1.14.0's promise that the regression's verbs and keys keep their spelling until bionic2: T8 renamed them to
+`regression-run`, `proof-add regression`, `regression-command:` and `proof:regression`, and each old spelling,
+`floor-run`, `proof-add floor`, `floor:` and `proof:floor`, is kept as an alias that works until 1.22.0 and prints one
+`deprecated:` line when a person types it (D6, `T8-rename.md`). Twenty-nine build rows landed, eight of them fix rows:
+three born of the red regression, two born of the review and three born of the run's own landings and rulings. The
+regression ran once, at d3c4ed2e, and was red on 12 of 108 suites (`regression-run-d3c4ed2e4cd06db412f1acaa18a800111af36844.log`);
+each of the twelve went green in a later landing, so the settled head is covered by rule (`T27-regression.md`,
+`A-orch-74`). Every landing missed the 30-minute target, and the numbers are below. This is a minor release by the
+policy above: the final card, the sitrep, the handoff file, the scale profile, standing orders and the gate's width are
+new capability, and the renamed tokens keep their old spellings as aliases. `canonical_sdlc_version` stays 14.
+
+**Migration.** No artifact needs migrating. Old plans, config keys and reads cells still read. Rows that changed what a
+script of yours may meet:
+- T8: `floor-run`, `proof-add floor`, `floor:` and `rigor-floor:` in `.bionic/config.yaml`, `proof:floor` in a reads
+  cell, `kind=floor` and `born: floor` each still work and print `deprecated: <old> is <new>; the old spelling works
+  until 1.22.0` once per process when typed or read from config. Rename `floor:` to `regression-command:` and
+  `rigor-floor:` to `rigor-minimum:` in `.bionic/config.yaml` before 1.22.0.
+- T13: there is no `/bionic:resume`; resume with `/bionic:canonical-sdlc <path to handoff.md>`, the last line the
+  handoff file prints.
+- T12: the plan's `## Handoff` section is one pointer line, `handoff: <path> written <local time>`; the handoff itself
+  is `record/<wave>/handoff.md`.
+- T17: no Step-0 card is put. Configuration is the first section of the requirements card.
+- T16: a `scale: task` run arms no Patrol, takes single rigor unless flagged, three writers, no regression, any branch,
+  and integrates by a pull request.
+- T18: an item of `standing-orders:` in `.bionic/config.yaml` that ends `| refuse: <class>` refuses commands of that
+  class on every thread.
+- T20: a `- session:` line under `## SDLC State` counts as a witness only when a binding act wrote it; a hand-added
+  line naming another session is refused, naming the missing binding act.
+- T21: a `Kind: prototype` dispatch is admitted before plan approval when every Files path is under `record/` or the
+  declared throwaway tree, and refused on any tracked path.
+- T1: `current <N> --check` is new for N from 5 to 8; any other step or a misplaced `--check` is a usage error, exit 2.
+
+### The final card is the one stop (D17, D19, D20, ADR-059)
+
+ADR-059 records the four human stops.
+
+- T1 (`T1-check.md`): `session-poker.sh current <N> --check` runs the advance's dry commit and judge, writes nothing
+  and exits as the advance would.
+- T3 (`T3-final-card.md`): `card.sh final <plan>` renders the decision shape from the owed ledger, the matrix and the
+  findings disposition, every default shown and option 1 accepting them all, and refuses `CARD-EARLY — <reason>` on an
+  open reader, an unregistered reading or a red check; `session-poker.sh reply '<text>'` replays one reply into
+  approve, waive, waive-row, waive regression and finding-move with the user's words.
+- T36 (`T36-waiver.md`): the card asks the regression in waive mode where it offers the waiver, so a red check on the
+  regression renders the waiver option instead of `CARD-EARLY` (critic-adversarial #1, S2 on).
+- T17 (`T17-config.md`): the requirements card opens on Configuration with the scale recommendation in two sentences,
+  and its Inherited block is one line of counts (D5).
+
+### A release commit is covered by its own check (D18)
+
+- T2 (`T2-cover.md`): a commit whose every path is in the release set (CHANGELOG.md, plugin.json,
+  `payload/commands/*.md`, `rendered.sha256`) is covered by a passing `kind=check` proof at that head; a merge whose
+  tree equals its first parent's is proved by that parent; `waive regression '<reply>'` and `waive all '<reply>'` write
+  the user's word once.
+- T22 (`T22-release.md`): this entry, plugin.json 1.21.0, the help and version pages rendered by
+  `agents-src/render.sh`, `rendered.sha256` refreshed, and release-check.test.sh §REVERSE pinning the reversal
+  sentence above (AC-9.5).
+
+### The situation report (D8, D9, D10, D11, D12, D13, D14, D29, D30, D31)
+
+- T10 (`T10-sitrep.md`): `session-poker.sh sitrep [--line]` prints Situation (every row, contiguous, with its state
+  mark and local landing time), Assessment (schedule, correctness and waste, each with its number), Blockers and
+  Forecast (percent landed and a closing time from measured pace, the user's waits stated apart); `sitrep bottom-line`
+  records the judgment items to `record/<wave>/sitrep.log`.
+- T11 (`T11-sitrep-skill.md`): `/bionic:sitrep` runs the verb, fills Bottom line and Diagnosis, alters no rendered
+  line and records the items; the tick prints the one-line form.
+- T35 (`T35-marks.md`): each Assessment line opens on a tolerance mark, ✅ within the bar · ➖ near it · ✖️ over it ·
+  ❔ not measurable, and the thresholds print once, under the block (D29, D31).
+
+### The handoff file and the one door (D3, D4, D23, D24)
+
+- T12 (`T12-handoff.md`): `handoff [path]` writes `record/<wave>/handoff.md`, kind line first, the sitrep head, the
+  machine lines, the five human lines carried when absent, and the literal next command; a delivered plan gets the
+  closed form instead of a refusal.
+- T13 (`T13-door.md`): `/bionic:canonical-sdlc <handoff.md>` binds, arms, adopts and prints the recap from the file;
+  the `/bionic:handoff` skill; `decisions [--all]` lists the design ledgers' rulings by run.
+- T14 (`T14-adopted.md`): `stopped` finds an adopted row's landed mark on every roster of the project (L12, D2).
+- T37 (`T37-handoff-closed.md`): the closed handoff form has one writer, close-out, and the verb reads it, so a parked
+  or pull-request run reads PARKED or "to be pulled", never "merged" (critic-adversarial #2, critic-structure #1).
+
+### Close-out parks, tolerates and scores (D3, D26)
+
+- T15 (`T15-closeout.md`): a plan with a Wake Note or a `parked:` line closes without the merge act; prose debt lines
+  are skipped with a note and a missing epic table is added (D3); the continuation carries the four-line scorecard
+  and the three indicators beneath it; close-out asks nothing.
+
+### Scale is a profile row (D25)
+
+- T16 (`T16-scale.md`): `lib/scale.sh` holds one row per scale (patrol, rigor default, writer cap, regression default,
+  branch pattern, integrate act, reader dealing), the five readers take their cell from it, and SKILL.md's scale table
+  is pinned to it.
+
+### The gate owns capacity (D21, D22, D27, ADR-060)
+
+ADR-060 records the one width rule.
+
+- T5 (`T5-gate.md`): `gate_width_ask <landing>` answers how many runners a landing may start now, the oldest active
+  landing first; the per-run promise is the measured suite cost; a killed waiter keeps its number.
+- T6 (`T6-drain.md`): the drain asks the gate before each pass and as each run ends and launches exactly that many.
+- T7 (`T7-orders.md`): the tick offers ready rows longest chain first and prints `SPLIT <id> — <reason>` when width
+  idles; `landing-report` splits wait, prove and rework.
+- T30 (`T30-oldest.md`): the oldest landing keeps its place across the gaps between its runs.
+- T31 (`T31-waits.md`): a suite's promise is robust to one contended run, a dead landing request is ended, and
+  `ready` prints why it waits on every `WAITING` exit.
+- D27 (`A-orch-14`): a finished writer holding for its landing turn stays on the panel.
+
+### Standing orders (REQ-7)
+
+- T18 (`T18-orders.md`): `standing-orders:` in `.bionic/config.yaml` is printed at session start and in the resume
+  recap, and an item ending `| refuse: <class>` is enforced by the bash walls.
+
+### The test runner on Haiku (REQ-8)
+
+- T4 (`T4-runner.md`): the test-runner role reads `model: haiku`, `effort: high`, and its roster row journals the
+  model the call names.
+
+### "Floor" leaves what bionic says (D6)
+
+- T8 (`T8-rename.md`): one alias map, `lib/alias.sh`, renames the regression's machine tokens at one seam each and
+  keeps every old spelling for one release.
+- T9 (`T9-words.md`): every message, usage line, card line and doctrine sentence says regression or rigor minimum; a
+  static pin greps the user-facing trees against `tests/fixtures/floor-allowlist.txt`.
+- T33 (`T33-words.md`): the rename's residue after the gathered merge, the name scan's signal case and two
+  cross-gate pins (born of the regression).
+
+### Inherited leftovers (D1, D2, D5)
+
+- T19 (`T19-rules.md`): a decline `--on <row>` holds until that row lands (L5); `suites` and `lands-on` are optional
+  columns of the units contract (L7); the slug reader's dry-copy arm is removed (L11).
+- T20 (`T20-witness.md`): a witness is a binding act (L6), and `tests/lib/release-check.sh` holds the shipped
+  release's Known limits to every stated deferral of its plan (L8).
+
+### A prototype dispatch the wall admits (D16)
+
+- T21 (`T21-prototype.md`): the dispatch wall admits a confined `Kind: prototype` dispatch before approval, and one
+  agreement test pins the step files' promised dispatches to the wall's admitted set (REQ-13).
+
+### The gathered landing and its fix rows (D28)
+
+D28 option 3 gathered fourteen built rows (T3, T7, T9, T11 to T21) into one candidate, fast-forwarded onto the wave
+branch at d3c4ed2e and proved by one whole regression run there (`A-orch-64`, `A-orch-67`). That run was red on 12
+suites, and three fix rows took them:
+
+- T32 (`T32-reconcile.md`): the merge's stray conflict markers and the session-poker pins two rows moved at once.
+- T33 (`T33-words.md`): the rename residue, above.
+- T34 (`T34-fixes.md`): refusal sites without inventory bullets, the 1.18.0 and 1.19.0 entry rules, and the units,
+  worktree and slots pins; it also removed a private project name from tests/dispatch-preflight-5.test.sh (A-T34-6).
+
+### The frame (D7, D15)
+
+D7, the sitrep taken verbatim from the notes, was withdrawn on the user's word, and the report was designed from first
+principles (D8 onward). D15 set the walk order of the strategic cards. The design ledger, `design-ledger.md`, holds
+every ruling with the user's words.
+
+### The readings
+
+- The walk (`walk.md`, T23): bionic used as a user would on this branch, with six observations, below.
+- The matrix (`T24-matrix-fill.md`, T24): 48 of 52 rows discharged from landed records; AC-1.5 and AC-6.6 wait for
+  close-out, and AC-9.5 and AC-12.1 for this row.
+- The auditor (`auditor-evidence.md`, T25): REFUTED, with 39 confirmed, 10 refuted and 3 unverifiable.
+- The critic (`critic-adversarial.md`, `critic-structure.md`, T26): six adversarial findings, two S2 fixed by T36 and
+  T37, three S3 deferred, one S4 note; one structure finding, fixed by T37. The piece reading of T36 and T37
+  (`critic-adversarial-2.md`, `critic-structure-2.md`) flagged two S3 findings, deferred, and three S4 notes.
+- The regression (`T27-regression.md`, T27): covered by rule at the settled head; the verb refused a second whole run.
+
+### The landing numbers
+
+`landing-report --rows` at the wave's head 74a11248 (`logs/T22-landing-report-rows.log`). T1, T2, T4, T5, T6, T8 and T10
+landed on the drain at width 7, before T30 made the gate's answer the width; T30 onward ran at the width the gate gave.
+T7, T19, T20 and T21 read `git` because they landed in the gathered candidate:
+
+```
+landings: queue=15 hand=0 git=4 · ready-to-landed median=303.9m p75=449.9m max=1763.2m · runs: green=1607 red=35 none=1 discarded=87 red-then-green=0 run=355 · waited median=5888s · killed=46
+T1 queue ready=2026-10-16T05:35:07Z landed=2026-10-16T09:08:37Z minutes=213.5 runs=49 waited=- wait=- prove=- rework=0.0 width=7
+T10 queue ready=2026-10-16T06:04:50Z landed=2026-10-16T13:06:02Z minutes=421.2 runs=90 waited=- wait=- prove=- rework=17.9 width=7
+T2 queue ready=2026-10-16T11:07:31Z landed=2026-10-16T19:06:02Z minutes=478.5 runs=152 waited=- wait=- prove=- rework=2.3 width=7
+T4 queue ready=2026-10-16T04:54:43Z landed=2026-10-17T03:50:19Z minutes=1375.6 runs=270 waited=- wait=- prove=- rework=476.5 width=7
+T5 queue ready=2026-10-16T10:27:40Z landed=2026-10-17T07:36:24Z minutes=1268.7 runs=254 waited=- wait=- prove=- rework=27.6 width=7
+T8 queue ready=2026-10-16T07:28:01Z landed=2026-10-17T12:51:14Z minutes=1763.2 runs=257 waited=- wait=- prove=- rework=1119.2 width=7
+T6 queue ready=2026-10-17T12:52:21Z landed=2026-10-17T14:20:49Z minutes=88.5 runs=47 waited=- wait=- prove=- rework=6.2 width=7
+T30 queue ready=2026-10-17T14:30:17Z landed=2026-10-17T19:34:12Z minutes=303.9 runs=47 waited=12921s wait=215.3 prove=88.6 rework=0.0 width=4
+T31 queue ready=2026-10-17T15:49:55Z landed=2026-10-17T21:21:06Z minutes=331.2 runs=121 waited=8123s wait=135.4 prove=191.8 rework=4.0 width=4
+T20 git ready=- landed=2026-10-17T22:57:22Z minutes=- runs=13 waited=- wait=- prove=- rework=- width=-
+T21 git ready=- landed=2026-10-17T22:57:22Z minutes=- runs=7 waited=- wait=- prove=- rework=- width=-
+T19 git ready=- landed=2026-10-17T22:57:22Z minutes=- runs=11 waited=- wait=- prove=- rework=- width=-
+T7 git ready=- landed=2026-10-17T22:57:22Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T34 queue ready=2026-10-17T22:57:56Z landed=2026-10-18T02:04:55Z minutes=187.0 runs=56 waited=5824s wait=97.1 prove=89.9 rework=0.0 width=4
+T33 queue ready=2026-10-17T23:35:59Z landed=2026-10-18T03:13:15Z minutes=217.3 runs=49 waited=8905s wait=148.4 prove=68.8 rework=0.0 width=4
+T32 queue ready=2026-10-17T22:57:22Z landed=2026-10-18T05:09:19Z minutes=371.9 runs=124 waited=326s wait=5.4 prove=156.2 rework=210.3 width=1
+T35 queue ready=2026-10-18T02:52:28Z landed=2026-10-18T06:19:30Z minutes=207.0 runs=100 waited=5952s wait=99.2 prove=107.2 rework=0.6 width=4
+T36 queue ready=2026-10-18T06:50:09Z landed=2026-10-18T07:33:06Z minutes=43.0 runs=23 waited=59s wait=1.0 prove=42.0 rework=0.0 width=4
+T37 queue ready=2026-10-18T08:18:24Z landed=2026-10-18T09:23:36Z minutes=65.2 runs=60 waited=68s wait=1.1 prove=64.1 rework=0.0 width=4
+```
+
+| | wave 37 | wave 38 |
+|---|---|---|
+| ready-to-landed median | 206.3 m | 303.9 m |
+| p75 | 262.8 m | 449.9 m |
+| max | 490.6 m | 1763.2 m (T8) |
+| min | 86.9 m (T19) | 43.0 m (T36) |
+
+The scorecard (D26) at the same head, `landing-report --scorecard` (`logs/T22-scorecard.log`):
+
+```
+human stops (autonomous half): 0 · target 1
+agent minutes after the final reply: unverified · target 0
+widest landing ready→landed: T8 1763.2 min · target < 30
+human-wait minutes: unverified · no target (the user's)
+✖️ schedule 5.07× — median ready→landed 303.9m over median declared 60m
+➖ correctness — 35 red, all returned, no open S1/S2
+➖ waste 5% discarded · 0% idle-width
+```
+
+The two unverified lines are read at close-out, after the final reply. The stop count reads `approved:` lines only, so
+it does not see the rulings D28 to D31 the user gave mid-run (Known limits below). T8's 1763.2 minutes are 1119.2 of
+rework; the two landings after the readings, T36 and T37, took 43.0 and 65.2 minutes at width 4.
+
+### Standing reds
+
+The release check from 433f7134 to the head is red on two historical blobs of tests/dispatch-preflight-5.test.sh
+that carry a private project name; the current file is clean. Row T38 runs the check again after the user rules on
+the history, and this release is not published until it passes.
+
+### Known limits
+
+- resume arms the Patrol and tells the model to create its cron job whatever the scale, though T13's row says 'arm per
+  the scale profile' (`critic-adversarial.md#3`). Delete the cron job by hand on a task-scale run.
+- a standing order 'refuse: suite' lets spawn-worktree.sh ready and session-poker.sh regression-run through, the two
+  ways the run actually starts suites (`critic-adversarial.md#4`). Tell the orchestrator in words.
+- the forecast divides the remaining critical path by the machine's admitted-run count, so it moves earlier by the
+  number of runs admitted (`critic-adversarial.md#5`). The basis line prints the width it divided by.
+- a regression proof that is merely behind the head now settles into a 'waive regression' default on the final card,
+  where a review reading behind the head stays CARD-EARLY (`critic-adversarial-2.md#1`). Withhold the waiver to have
+  the regression run.
+- the verb's closed form reads co_pr_owed after the close, so a squash-merged or locally deleted task branch is written
+  'to be pulled into' the integration branch for good (`critic-adversarial-2.md#2`).
+- A red-check `CARD-EARLY` names the check's first line, `current 7 --check: would refuse`, not the wall that refused;
+  run the check again to read it (`critic-adversarial.md#6`).
+- Every landing of this wave missed the 30-minute target: the widest, T8, took 1763.2 minutes and the narrowest, T36,
+  43.0 (AC-6.6). A `ready --within` that exits `WAITING` leaves a gap in which a younger landing is admitted and rebuilt
+  for nothing (`A-orch-62`), and the suite promise is under-calibrated against measured load, so builders starve a
+  landing (`A-orch-63`).
+- The gathered landing by hand (D28) skipped the release-name scan that `ready` runs, so a private name reached the
+  branch at d3c4ed2e (`A-orch-71`); `land --by-hand` should run the same check. The name left the current file in T34,
+  but two historical blobs keep it, and this entry's own check is red on them until the user rules on the history
+  (`A-orch-78`, row T38).
+- A whole run launched with HUP, INT and QUIT ignored paints the signal suites red; the runner should reset the three
+  signals before starting its workers (`A-orch-69`).
+- A single suite near a writer's 30-minute Bash ceiling cannot land through `ready`: close-out.test.sh's promise
+  reached 1706 seconds under load (`A-orch-73`). It should be split, or run detached and followed across calls.
+- The walk's six observations (`A-orch-75`, `walk.md`): version.sh prints the commit the session loaded, not the head;
+  `CARD-EARLY` names only the first open reader, and `card.sh early` exits 1 like `final`; Bottom line `(line n)`
+  citations drift when the Bottom line changes length; the tick listed T23 among the writers of `proof:regression` and
+  printed `SPLIT` beside `room=yes`; the header comment of session-poker.sh still says floor-run; a read-only row cannot
+  land through `ready` from the main checkout, and the route, `session-poker.sh deliver <id>`, was named in no brief.
+- T37's three concerns (`A-orch-77`): the handoff verb's open form keeps its own integration-branch reader beside
+  close-out's; a plan closed with `archive-on-close: false` and archived later cannot be bound by the verb, and its
+  closed file names the old path; close-out.test.sh ran three times in T37 where the brief allowed two.
+- The stop count on the scorecard reads `approved:` lines only, so it misses the rulings D28 to D31 the user gave after
+  the plan card, and no defect row counts them (auditor I1).
+- The release row lands after the readers, so AC-9.5 and AC-12.1 were not read in the auditor's one pass (auditor I4).
+- Situation shows the landing time only for a bare `landed <sha> <ISO>` line, so rows whose line carries a `reason:`
+  or `landed-by-hand:` show none: 16 of this run's 27 landed rows at the reading (auditor I6).
+- A test-runner dispatch that names no model journals an empty `model=`, because the role file's default is not read
+  into the roster, and Step 0's `test-runner=haiku-high` is unpinned (auditor I8).
+- Blockers is not pinned for `finding:` and `gate:` items; a renderer that dropped them would stay green (auditor I9).
+- The decisions register reads `ruled`, `re-ruled` and `withdrawn` only, so this run's D30 amendments and every D31
+  line are missing from `decisions` and from the resume recap (auditor I10).
+- `landing-report` reads `hand=0` though fourteen rows landed by hand, and T7, T19, T20 and T21 read as `git` landings
+  (auditor I14).
+- The tolerance marks' colours are the emoji font's and cannot be tinted on the page (D31).
+- Seven new debt lines are on the ledger (`debt.md`), and the advisories' named sites in session-poker.sh, card.sh and
+  the changelog readers were not burned (`A-orch-72`, `A-orch-76`, `A-orch-79`).
+
 ## 1.20.0 — 2026-10-15
 
 This is the landing pace release: the serial landing loop is replaced by a drain that proves a row's suites side by
