@@ -70,7 +70,7 @@
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/close-out.sh <plan> run
 #
-# [WALL: tests/close-out.test.sh]
+# [WALL: tests/close-out-1.test.sh .. tests/close-out-4.test.sh, over tests/close-out.prelude.sh]
 
 set -uo pipefail
 

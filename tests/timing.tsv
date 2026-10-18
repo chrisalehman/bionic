@@ -2,6 +2,7 @@
 # Method (T17, w34): seconds = each suite's first-to-last stamp span in pass-c15a7e40/main-cmd-2.log.progress.tsv (whole-second UTC stamps, so the span is whole; minimum 1),
 # for the 95 suites the pass log reports (nested fixture labels such as a.test.sh are left out). The pass writes no runner timing (A-orch-26). A span starts at a suite's first section, so it is a lower bound on the suite's own time:
 # on the 1aacdc03 run the runner's timing equalled the span for 56 of 95 suites and exceeded it by 0.84 s on average, 21 s at most. Taken at width 2 beside other work. Built by spans.py; rows sorted by label (C).
+# Wave-39 T6 split close-out.test.sh (its 1.17.0 row: 266) into close-out-1..4.test.sh; their rows are the gate's admitted-to-ended seconds for each part run alone (cost files, 2026-10-18), not spans.
 agent-context-guard.test.sh	9
 archive.test.sh	1
 background-suite-guard.test.sh	63
@@ -13,7 +14,10 @@ canonical-sdlc-evidence-gate-2.test.sh	231
 canonical-sdlc-evidence-gate.test.sh	248
 canonical-sdlc-governing-skill.test.sh	82
 card.test.sh	27
-close-out.test.sh	266
+close-out-1.test.sh	324
+close-out-2.test.sh	310
+close-out-3.test.sh	319
+close-out-4.test.sh	321
 cmd-class.test.sh	32
 command-relay.test.sh	1
 commands.test.sh	2
