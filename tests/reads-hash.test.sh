@@ -208,20 +208,20 @@ BIONIC_LIB_WANT="a.sh"
 PLANT
 cat > "$F/tests/s-hook.test.sh" <<'PLANT'
 #!/bin/bash
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 bash "$ROOT/hooks/h.sh"
 PLANT
 # A file name built at run time: no text names what it loads.
 cat > "$F/tests/s-var.test.sh" <<'PLANT'
 #!/bin/bash
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 name="$(ls "$ROOT/payload/scripts/lib" | head -1)"
 . "$ROOT/payload/scripts/lib/$name"
 PLANT
 # A loop over literal names is resolved: each name is spelled.
 cat > "$F/tests/s-loop.test.sh" <<'PLANT'
 #!/bin/bash
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 for f in b.sh; do . "$ROOT/payload/scripts/lib/$f"; done
 PLANT
 # A suite that never names its prelude still reads it (D8).
