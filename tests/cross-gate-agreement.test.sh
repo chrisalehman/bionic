@@ -9759,13 +9759,21 @@ S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 # files (the path list from a helper in one, the key read in the other, review 15's case E), and
 # a key read in a spelling none of the read forms lists (an awk `index($i, "files=")`). Neither
 # file then does both halves. Review is what catches those; the rows below do not pretend to.
+# A TREE LISTING IS NOT A CHANGE LIST (wave-38 T33, A-T33-3). `git ls-tree --name-only` and `git ls-files` list the
+# paths a tree holds, so their words are dropped up to the next | ; & or ) before the forms are read: T21's
+# `ls-tree -r --name-only --full-tree HEAD -- "$rel"` in hooks/dispatch-preflight.sh asks whether a path is tracked,
+# and a `git diff --name-only` later on the same line is still read.
 S18_DIFF_RE='--name-only|--name-status|--numstat|diff --stat|status --porcelain'
 S18_READ_RE='"files="|files=\*\)|_field[^)]*[ "]files([^=_A-Za-z0-9]|$)'
+s18_changed_lines() {  # <file> -> its lines that list changed paths, by any of the forms, tree listings dropped
+  /usr/bin/sed -E 's/ls-(tree|files)[^|;&)]*//g' "$1" | /usr/bin/grep -E -- "$S18_DIFF_RE"
+  return 0
+}
 s18_reconcilers() {  # <dir> -> the .sh files under it that do both halves, one per line
   local _f
   for _f in "$1"/*.sh; do
     [ -f "$_f" ] || continue
-    /usr/bin/grep -qE -- "$S18_DIFF_RE" "$_f" && /usr/bin/grep -qE -- "$S18_READ_RE" "$_f" && printf '%s\n' "$_f"
+    [ -n "$(s18_changed_lines "$_f")" ] && /usr/bin/grep -qE -- "$S18_READ_RE" "$_f" && printf '%s\n' "$_f"
   done
   return 0
 }
@@ -9780,8 +9788,23 @@ expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
 # the planted hook copy below proves.
 expect_ne "S18.1 the hooks are read: at least one hook file is there" "0" \
   "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | grep -c . | tr -d ' ')"
-expect_eq "S18.1 …and no hook file carries --name-only" "" \
-  "$(/usr/bin/grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null)"
+s18_name_only_files() {  # <dir> -> the .sh files under it with a --name-only list of changed paths, one per line
+  local _f
+  for _f in "$1"/*.sh; do
+    [ -f "$_f" ] || continue
+    s18_changed_lines "$_f" | /usr/bin/grep -qF -- '--name-only' && printf '%s\n' "$_f"
+  done
+  return 0
+}
+expect_eq "S18.1 …and no hook file carries a --name-only diff" "" "$(s18_name_only_files "$BIONIC_HOOKS_DIR")"
+# The extractor on one planted copy of hooks/: a --name-only diff is read, and a tree listing beside it is not.
+S18_HK="$SANDBOX/s18-hooks"; rm -rf "$S18_HK"; mkdir -p "$S18_HK"; cp "$BIONIC_HOOKS_DIR"/*.sh "$S18_HK/"
+printf '#!/bin/bash\nchanged="$(git diff --name-only "$1..HEAD")"\n' > "$S18_HK/planted-diff.sh"
+printf '#!/bin/bash\ngit ls-tree -r --name-only --full-tree HEAD -- "$1" | head -1\n' > "$S18_HK/planted-listing.sh"
+expect_eq "S18.1 the --name-only extractor reads a planted diff in a copy of hooks/ (its positive)" \
+  "$S18_HK/planted-diff.sh" "$(s18_name_only_files "$S18_HK")"
+expect_eq "S18.1 …and the planted tree listing in that copy is not read (it lists no change)" "" \
+  "$(s18_name_only_files "$S18_HK" | /usr/bin/grep -F planted-listing)"
 expect_eq "S18.1 …and no hook file reconciles, by any of the library row's diff forms" "" \
   "$(s18_reconcilers "$BIONIC_HOOKS_DIR")"
 
@@ -10338,12 +10361,18 @@ section "B — no backtick pair hides inside a double-quoted assertion name (AC-
 # not nested in further quotes, is real intentional legacy substitution nested in the modern
 # form — a style question, not this defect class. A hit prints as `<file>:<line>`, one per
 # PAIR found.
+# A SINGLE-QUOTED STRING LEFT OPEN AT A LINE'S END IS CARRIED (wave-38 T33, A-T33-4). An awk
+# program opened by `awk '` and closed lines later is one single-quoted word, so its
+# `index(s, "`Plan`")` (T21's tests/dispatch-preflight-5.test.sh) is inert text, not a pair in
+# a double-quoted string: the next line starts inside the quote, whichever context opened it
+# (top level or a $(...) body), and is read from the closing quote on. A `<<` on a line that
+# starts or ends inside a carried quote opens no heredoc.
 
 B_AWK="$SANDBOX/backtick-scan.awk"
 cat > "$B_AWK" <<'AWK_EOF'
 function skip_squote(line, i, n,    c) {
-  while (i <= n) { c = substr(line, i, 1); if (c == "'") return i + 1; i++ }
-  return n + 1
+  while (i <= n) { c = substr(line, i, 1); if (c == "'") { SQ_SHUT = 1; return i + 1 } i++ }
+  SQ_SHUT = 0; IN_SQUOTE = 1; return n + 1
 }
 function scan_subshell(line, i, n,    c, r) {
   while (i <= n) {
@@ -10384,6 +10413,7 @@ function scan_dquote(line, i, n,    c, j) {
 }
 function scan_line(line,    i, n, c, r) {
   HIT = 0; i = 1; n = length(line)
+  if (IN_SQUOTE) { IN_SQUOTE = 0; i = skip_squote(line, 1, n); if (!SQ_SHUT) return 0 }
   while (i <= n) {
     c = substr(line, i, 1)
     if (c == "#") return HIT
@@ -10412,11 +10442,12 @@ function heredoc_start(line,    tmp) {
 function is_delim_line(line,    t) {
   t = line; if (HD_STRIP) sub(/^[ \t]+/, "", t); return (t == HD_DELIM)
 }
-FNR == 1 { IN_HEREDOC = 0 }
+FNR == 1 { IN_HEREDOC = 0; IN_SQUOTE = 0 }
 {
   if (IN_HEREDOC) { if (is_delim_line($0)) IN_HEREDOC = 0; next }
+  SQ_WAS = IN_SQUOTE
   if (scan_line($0)) print FILENAME ":" FNR
-  if (heredoc_start($0)) IN_HEREDOC = 1
+  if (!SQ_WAS && !IN_SQUOTE && heredoc_start($0)) IN_HEREDOC = 1
 }
 AWK_EOF
 
@@ -10469,10 +10500,16 @@ cat <<'HEREDOC_EOF'
 a heredoc body line with a `pair` in it, quoted delimiter
 HEREDOC_EOF
 expect_eq "the neighbour the `.` would have swallowed" "x" "y"
+RES="$(awk '
+  index($0, "`Explore`") { print "x" }
+' "$f")"
+expect_eq "a second `real` pair, after the program closes" "x" "y"
+awk -v r="$(roles)" '
+  index($0, "`Plan`") { print }' "$f"
 FX_EOF
 B_FX_HITS="$(b_scan "$B_FX")"
-expect_eq "…the five exclusions (escaped, \$(...) w/ nested single quotes, comment, single-quoted, heredoc body) stay silent; only the real pair on line 9 is a hit" \
-  "$B_FX:9" "$B_FX_HITS"
+expect_eq "…the seven exclusions (escaped, \$(...) w/ nested single quotes, comment, single-quoted, heredoc body, a program opened in \$(...) and one opened at top level) stay silent; only the real pairs on lines 9 and 13 are hits" \
+  "$(printf '%s:9\n%s:13' "$B_FX" "$B_FX")" "$B_FX_HITS"
 
 
 # ============================================================
