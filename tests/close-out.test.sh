@@ -3473,7 +3473,7 @@ agent minutes after the final reply: 5 · target 0
 widest landing ready→landed: T2 42.0 min · target < 30
 $SC_TAIL" "$(printf '%s\n' "$SC_VERB" | sed -n 1,4p)"
 expect_eq "SC-0b …then the sitrep's three indicator lines, schedule, correctness and waste, and nothing more" "schedule|correctness|waste|7" \
-  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d' ' -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d' ' -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d' ' -f1)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
+  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSC" run
 expect_eq "SC-1 run exits 0 and the continuation carries ## Scorecard once" "0|1" \
   "$CO_RC|$(/usr/bin/grep -c '^## Scorecard$' "$PSC/$CONT_REL" | tr -d ' ')"

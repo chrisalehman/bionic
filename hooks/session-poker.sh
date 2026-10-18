@@ -6715,7 +6715,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
 #   widest landing ready→landed: <row> <m> min · target < 30
 #   human-wait minutes: <n> · no target (the user's)
 #
-# then the sitrep's three indicator lines at close, schedule, correctness and waste, cut whole from `sitrep_render`'s
+# then the sitrep's three indicator lines at close, schedule, correctness and waste (not the legend line under them), cut from `sitrep_render`'s
 # Assessment (D13: computed there, once). Every number is read from the record, and one the record cannot compute is
 # `unverified` (D9), never a literal:
 #   human stops     the plan's `approved: <name> by <who> <ISO> "<reply>"` lines under ## SDLC State (`approve`, the
@@ -6773,7 +6773,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
       close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
       if (ea < 0 || er < 0 || er < ea) bad = 1; else sum += er - ea }
     END { if (!cards || bad) print "unverified"; else printf "%d\n", int(sum / 60 + 0.5) }')"
-  ind="$(sitrep_render "$plan" "$root" no 2>/dev/null | awk '/^Assessment$/ { f = 1; next } f && NF == 0 { exit } f { print }')"
+  ind="$(sitrep_render "$plan" "$root" no 2>/dev/null | awk '/^Assessment$/ { f = 1; next } f && NF == 0 { exit } f && ++n <= 3 { print }')"
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
   printf 'agent minutes after the final reply: %s · target 0\n' "$agent"
   printf 'widest landing ready→landed: %s · target < 30\n' "${widest:-unverified}"
@@ -6796,9 +6796,14 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   <l> landed · <a> in flight · <p> not started · <r> red/blocked of <total>
 #   <glyph> <step>/<id>: <short description>[ — <H:MM AM/PM>[ <local date>]]    one per row, table order
 #   Assessment
-#   schedule <mark> <ratio>× — median ready→landed <m>m over median declared <d>m (🟢 ≤ 1.25 · 🟡 ≤ 2.0 · 🔴 above)
-#   correctness <mark> — <reds>, <findings> (🟡 red runs all returned and fixed · 🔴 an open S1/S2 or a red at head)
-#   waste <mark> <d>% discarded · <i>% idle-width — (🟢 < 5% and < 10% · 🟡 < 15% either · 🔴 above)
+#   <mark> schedule <ratio>× — median ready→landed <m>m over median declared <d>m
+#   <mark> correctness — <reds>, <findings>
+#   <mark> waste <d>% discarded · <i>% idle-width
+#   within / near / over — <the bars, once, SITREP_LEGEND>
+#
+# THE MARKS ENCODE DEVIATION FROM A TOLERANCE, never a work state (D31): a measurement held against its bar is
+# ✅ within it, ➖ near it, ✖️ over it, or ❔ not measurable. Each indicator line opens on its mark, left-justified as
+# Situation's glyphs are (D30); the bars print once, in the one legend line under the three (D29).
 #   Blockers
 #   <owed key> — <the line the run printed>     one per open approve:, waive:, finding: or gate: item; or
 #   none — no decision or action is owed by you
@@ -6817,12 +6822,16 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # `proof_fixed` (disposition's open state). What no reader computes is computed here, once: the declared median
 # of the landed rows, the ratio, the marks, a red not yet answered by a green, the closing time.
 #
-# A VALUE THE RECORD CANNOT COMPUTE PRINTS `unverified` (D9), and its glyph in the one-line form is ⚪.
+# A VALUE THE RECORD CANNOT COMPUTE PRINTS `unverified` (D9), and its mark is ❔ (on its line and in the one-line form).
 # Local times are 12-hour on this machine's clock (`sitrep_clock`, the 12-hour sibling of `handoff_local_time`);
 # a time on another local day than now's carries its date. Now is BIONIC_NOW_EPOCH when set, fill-report's seam.
-SITREP_TH_SCHED='(🟢 ≤ 1.25 · 🟡 ≤ 2.0 · 🔴 above)'
-SITREP_TH_CORR='(🟡 red runs all returned and fixed · 🔴 an open S1/S2 or a red at head)'
-SITREP_TH_WASTE='(🟢 < 5% and < 10% · 🟡 < 15% either · 🔴 above)'
+# The four marks, from one place: the next re-mark is these four lines. ✖️ is U+2716 U+FE0F.
+SITREP_MARK_WITHIN='✅'
+SITREP_MARK_NEAR='➖'
+SITREP_MARK_OVER='✖️'
+SITREP_MARK_NONE='❔'
+# The bars, once, as the one line under the three indicator lines (D29). The thresholds in sitrep_render are these.
+SITREP_LEGEND='within / near / over — schedule ≤ 1.25 / ≤ 2.0 / above · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
 
 sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
   case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
@@ -6992,10 +7001,12 @@ SITREP_SIT
   pace="$(sitrep_pace "$plan" "$root")"
   if [ -n "$pace" ]; then
     IFS='	' read -r s_med s_decl ratio <<< "$pace"
-    s_mark="$(awk -v r="$ratio" 'BEGIN { print (r <= 1.25) ? "🟢" : ((r <= 2.0) ? "🟡" : "🔴") }')"
-    s_text="schedule $s_mark $(sitrep_ratio_fmt "$ratio")× — median ready→landed ${s_med}m over median declared ${s_decl}m $SITREP_TH_SCHED"
+    if awk -v r="$ratio" 'BEGIN { exit !(r <= 1.25) }'; then s_mark="$SITREP_MARK_WITHIN"
+    elif awk -v r="$ratio" 'BEGIN { exit !(r <= 2.0) }'; then s_mark="$SITREP_MARK_NEAR"
+    else s_mark="$SITREP_MARK_OVER"; fi
+    s_text="$s_mark schedule $(sitrep_ratio_fmt "$ratio")× — median ready→landed ${s_med}m over median declared ${s_decl}m"
   else
-    s_mark="⚪"; s_text="schedule unverified — no landing yet on this run $SITREP_TH_SCHED"
+    s_mark="$SITREP_MARK_NONE"; s_text="$s_mark schedule unverified — no landing yet on this run"
   fi
   local lred="${lr1#*· runs: green=}" s12 c_reds c_find
   case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
@@ -7005,10 +7016,10 @@ SITREP_SIT
   elif [ "$lred" -gt 0 ]; then c_reds="$lred red, all returned"
   else c_reds="no red run at head"; fi
   if [ "${s12:-0}" -gt 0 ]; then c_find="$s12 open S1/S2"; else c_find="no open S1/S2"; fi
-  if [ "${nred:-0}" -gt 0 ] || [ "${s12:-0}" -gt 0 ]; then c_mark="🔴"
-  elif [ "$lred" -gt 0 ]; then c_mark="🟡"
-  else c_mark="🟢"; fi
-  c_text="correctness $c_mark — $c_reds, $c_find $SITREP_TH_CORR"
+  if [ "${nred:-0}" -gt 0 ] || [ "${s12:-0}" -gt 0 ]; then c_mark="$SITREP_MARK_OVER"
+  elif [ "$lred" -gt 0 ]; then c_mark="$SITREP_MARK_NEAR"
+  else c_mark="$SITREP_MARK_WITHIN"; fi
+  c_text="$c_mark correctness — $c_reds, $c_find"
   # Waste: discarded runs over runs (landing_report's counts), idle-width minutes (fill-report's) over the
   # minutes the fill ledger spans (its first line to now while the run is open, else to its last line).
   local rg rr rn rd
@@ -7027,9 +7038,9 @@ SITREP_SIT
     END { if (f == "") exit; end = (open == "yes") ? now : l; if (end > f) printf "%d\n", (end - f + 30) / 60 }' "$(fill_ledger_path "$root" "$plan" 2>/dev/null)" 2>/dev/null)"
   i_pct=""
   case "$idle_min:$elapsed" in *[!0-9:]*|:*|*:) : ;; *) [ "$elapsed" -gt 0 ] && i_pct="$(awk -v i="$idle_min" -v e="$elapsed" 'BEGIN { printf "%.4f\n", i * 100 / e }')" ;; esac
-  w_mark="$(awk -v d="$d_pct" -v i="${i_pct:--1}" 'BEGIN {
-    if (d < 5 && i < 10) print "🟢"; else if (d < 15 && i < 15) print "🟡"; else print "🔴" }')"
-  w_text="waste $w_mark $(awk -v d="$d_pct" 'BEGIN { printf "%d", d + 0.5 }')% discarded · $( [ -n "$i_pct" ] && awk -v i="$i_pct" 'BEGIN { printf "%d%%", i + 0.5 }' || printf 'unverified' ) idle-width — $SITREP_TH_WASTE"
+  w_mark="$(awk -v d="$d_pct" -v i="${i_pct:--1}" -v w="$SITREP_MARK_WITHIN" -v n="$SITREP_MARK_NEAR" -v o="$SITREP_MARK_OVER" 'BEGIN {
+    if (d < 5 && i < 10) print w; else if (d < 15 && i < 15) print n; else print o }')"
+  w_text="$w_mark waste $(awk -v d="$d_pct" 'BEGIN { printf "%d", d + 0.5 }')% discarded · $( [ -n "$i_pct" ] && awk -v i="$i_pct" 'BEGIN { printf "%d%%", i + 0.5 }' || printf 'unverified' ) idle-width"
 
   # ---- Forecast: the remaining chain (the tick's CHAIN), the ratio, the admitted width
   chain="$( { printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
@@ -7097,7 +7108,7 @@ SITREP_SIT
   done <<SITREP_SIT
 $sit
 SITREP_SIT
-  printf '\nAssessment\n%s\n%s\n%s\n' "$s_text" "$c_text" "$w_text"
+  printf '\nAssessment\n%s\n%s\n%s\n%s\n' "$s_text" "$c_text" "$w_text" "$SITREP_LEGEND"
   printf '\nBlockers\n'
   if [ -n "$blockers" ]; then printf '%s\n' "$blockers"; else printf 'none — no decision or action is owed by you\n'; fi
   printf '\nForecast\n%d/%d rows landed (%d%%)\n%s\n' "$landed" "$total" "$( [ "$total" -gt 0 ] && echo $(( (landed * 200 + total) / (total * 2) )) || echo 0 )" "$ctext"
