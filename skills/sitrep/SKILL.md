@@ -51,7 +51,7 @@ Situation
 <the verb's Situation lines>
 
 Assessment
-<the verb's three indicator lines>
+<the verb's Assessment lines: three indicators, then the within/near/over line>
 
 Diagnosis
 <one to five lines, each citing (line n)>
