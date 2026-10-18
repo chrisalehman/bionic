@@ -2498,9 +2498,9 @@ section "§REUSE: a candidate whose suite read the same blobs as a proved one re
 #
 # T1 and T2 both land on a.test.sh, whose run writes a line to $LL_SIG/ru-<world>.runs. T1 lands first: one
 # run, one green verdict, its reads= the suite's read key at T1's candidate. T2's candidate is built on T1's and
-# changes only T2.txt, which a.test.sh does not read, so its key is the same: T2's drain prints
-# `reused a.test.sh reads=<h>`, records it, starts no runner, and lands; the record holds one verdict for the
-# suite. MUTANT: the reuse test keyed on commit= again (the pre-1.22.0 rule): T2 runs a.test.sh a second time.
+# changes only T2.txt, which a.test.sh does not read, so its key is the same: T2's drain records the reuse, starts
+# no runner, and lands; the record holds one verdict for the suite. The key is also the accepted head's, so ready
+# prints it as the head's skip, `skip a.test.sh reads=<h> (head)`, and the reused line names the head (§SKIP, T4). MUTANT: the reuse test keyed on commit= again (the pre-1.22.0 rule): T2 runs a.test.sh a second time.
 ll_count_body() {  # <tag> <name> -> a suite that writes one line per run to $LL_SIG/<tag>.runs and ends green
   printf 'echo run >> "$LL_SIG/%s.runs"\necho "PASS: %s"\necho\necho "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\nexit 0' "$1" "$1" "$2"
 }
@@ -2524,11 +2524,11 @@ ll_verb "$RU" T2
 KU2="$(ll_head "$RU")"
 expect_eq "(u2) T2 lands (exit 0), its candidate built on T1's" "0 $KU1" "$LL_RC $(git -C "$RU" rev-parse "$KU2^1" 2>/dev/null)"
 expect_eq "(u2) …its suite reads the same blobs there: the same key" "$HU" "$(ll_ahash "$RU" "$KU2")"
-expect_contains "(u2) T2's drain prints the reuse, naming the suite and its key" "reused a.test.sh reads=${HU}" "$LL_OUT"
+expect_contains "(u2) T2's drain prints the reuse, naming the suite and its key: the key is the head's too, so it prints as the head's skip (wave-39 T4)" "skip a.test.sh reads=${HU} (head)" "$LL_OUT"
 expect_eq "(u2) …starts no runner: a.test.sh ran once in all" "1" "$(ll_lines "$LL_SIG/ru.runs")"
 expect_eq "(u2) …so the record holds one verdict for the suite" "1" "$(ll_ev "$RU" verdict | grep -c '|suite=a.test.sh|')"
 expect_regex "(u2) …and one reused line: T2's candidate, the suite, the key, the candidate that proved it" \
-  "^line/v1\\|ev=reused\\|row=T2\\|commit=${KU2}\\|suite=a\\.test\\.sh\\|reads=${HU}\\|from=${KU1}\\|at=" "$(ll_ev "$RU" reused)"
+  "^line/v1\\|ev=reused\\|row=T2\\|commit=${KU2}\\|suite=a\\.test\\.sh\\|reads=${HU}\\|from=${KU1}\\|head=${KU1}\\|at=" "$(ll_ev "$RU" reused)"
 # A VERDICT WITH NO reads= IS NEVER MATCHED (a line written before 1.22.0), beside the same line carrying it.
 RUN="$(ll_world)"; PUN="$(ll_plan "$RUN")"; KUN="$(ll_head "$RUN")"; HUN="$(ll_ahash "$RUN" "$KUN")"
 line_event "$PUN" verdict row=T1 "commit=$KUN" suite=a.test.sh result=green log=- admitted=- width=1 >/dev/null
@@ -2609,10 +2609,10 @@ $3"
 echo \"FAIL: $2 read $5\"; echo; echo '$2.test.sh: 0/1 passed, 1 failed  sections=1 setup=0'; exit 1"
   printf '%s\n. lib/calc.sh\necho run >> "$LL_SIG/%s-%s.runs"\n%s' "$decl" "$1" "$2" "$end"
 }
-ll_skip_world() {  # <tag> [T1's lands_on] -> a world whose T1 commits lib/calc.sh and a, b, c (above); T2 lands on a, b, c
+ll_skip_world() {  # <tag> [T1's lands_on] [T2's] -> a world whose T1 commits lib/calc.sh and a, b, c (above); each lands on a, b, c by default
   local r t
   r="$(ll_world)" || return 1
-  ll_launch "$r" T1 "${2:-a.test.sh b.test.sh c.test.sh}"; ll_launch "$r" T2 "a.test.sh b.test.sh c.test.sh"
+  ll_launch "$r" T1 "${2:-a.test.sh b.test.sh c.test.sh}"; ll_launch "$r" T2 "${3:-a.test.sh b.test.sh c.test.sh}"
   t="$r/.worktrees/T1"
   mkdir -p "$t/lib" && ll_calc 'echo 2' > "$t/lib/calc.sh" || return 1
   ll_calc_suite "$1" a 'reads lib/calc.sh fn one' 1 '$(one)' > "$t/tests/a.test.sh"
@@ -2639,7 +2639,8 @@ RK="$(ll_skip_world sk)"
 ll_verb "$RK" T1
 KK1="$(ll_head "$RK")"
 expect_eq "(sk1) T1 lands on a, b and c, each run once" "0 1 1 1" "$LL_RC $(ll_runs sk)"
-expect_contains "(sk1) …and ready says how many of its suites it ran: all three" "suites 3 of 3" "$LL_OUT"
+expect_eq "(sk1) …running every suite it names, ready prints no count: its outcome is its first line" "LANDED T1|1|0" \
+  "$(printf '%s\n' "$LL_OUT" | head -n 1 | cut -d' ' -f1-2)|$(printf '%s\n' "$LL_OUT" | grep -c '^LANDED ')|$(printf '%s\n' "$LL_OUT" | grep -c '^suites ')"
 ll_t2_two "$RK" 'printf 2; echo'
 ll_verb "$RK" T2
 KK2="$(ll_head "$RK")"
@@ -2648,6 +2649,7 @@ expect_eq "(sk2-pre) T2 lands (exit 0), its candidate built on T1's" "0 $KK1" "$
 expect_regex "(sk2-pre) …a's key there is a sha256" '^[0-9a-f]{64}$' "$KA"
 expect_eq "(sk2-pre) …a's and b's narrowed keys at T2's candidate equal theirs at the head T1 left" "$KA $KB" \
   "$(ll_key "$RK" "$KK1" a.test.sh) $(ll_key "$RK" "$KK1" b.test.sh)"
+expect_eq "(sk2-pre) …and c, which declares nothing, is keyed as reads_hash keys it" "$(ll_whole "$RK" "$KK2" c.test.sh)" "$(ll_key "$RK" "$KK2" c.test.sh)"
 expect_false "(sk2-pre) …while the whole-file key of a moved: the diff touches a file a reads, outside its narrowed read" \
   test "$(ll_whole "$RK" "$KK1" a.test.sh)" = "$(ll_whole "$RK" "$KK2" a.test.sh)"
 expect_contains "(sk2) T2's ready prints the skip of a, naming its key and the head" "skip a.test.sh reads=${KA} (head)" "$LL_OUT"
@@ -2669,18 +2671,21 @@ ll_t2_two "$RK0" 'printf 2; echo'
 ll_verb "$RK0" T2
 expect_eq "(sk6) a suite with no green at its hash is never skipped: T2 runs all three, prints no skip, lands" \
   "0 1 1 2 0" "$LL_RC $(ll_runs sk0) $(printf '%s\n' "$LL_OUT" | grep -c '^skip ')"
-expect_contains "(sk6) …saying it ran three of three" "suites 3 of 3" "$LL_OUT"
+expect_eq "(sk6) …and, running all three, prints no count" "1 0" "$(printf '%s\n' "$LL_OUT" | grep -c '^LANDED ') $(printf '%s\n' "$LL_OUT" | grep -c '^suites ')"
 # MUTANT: the narrowing ignored, every declared file keyed whole (the pre-T4 key): a and b run on T2.
+# Both landings run under the mutant, so their keys are read one way.
 RKM="$(ll_skip_world skm)"
-ll_verb "$RKM" T1
-expect_eq "(sk7m-pre) the mutant's world: T1 lands, each suite run once" "0 1 1 1" "$LL_RC $(ll_runs skm)"
+anchor fn payload/scripts/lib/line.sh 'if [ -z "$narrow" ]; then' _line_reads_keys 'if true; then'
+LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_reads_keys ll_drive "$RKM" T1 "$WORLD_ROOT/skm-T1.out"
+ll_wait_file "$WORLD_ROOT/skm-T1.out.rc" 600
+expect_eq "(sk7m-pre) the mutant's world: T1 lands under the mutant, each suite run once" "0 1 1 1" \
+  "$(cat "$WORLD_ROOT/skm-T1.out.rc" 2>/dev/null) $(ll_runs skm)"
 ll_t2_two "$RKM" 'printf 2; echo'
-anchor fn payload/scripts/lib/line.sh '_LINE_NARROW_MUTANT_ANCHOR' _line_reads_keys '_LINE_NARROW_MUTANT_OFF'
 LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_reads_keys ll_drive "$RKM" T2 "$WORLD_ROOT/skm-T2.out"
 ll_wait_file "$WORLD_ROOT/skm-T2.out.rc" 600
 expect_eq "(sk7m-pre) the mutant ran: T2 landed (exit 0)" "0" "$(cat "$WORLD_ROOT/skm-T2.out.rc" 2>/dev/null)"
-expect_eq "(sk7m) MUTANT narrowing ignored: a and b run again, nothing is skipped (the rows can fail)" "2 2 2 0" \
-  "$(ll_runs skm) $(grep -c '^skip ' "$WORLD_ROOT/skm-T2.out" 2>/dev/null)"
+expect_eq "(sk7m) MUTANT narrowing ignored: a and b run again, nothing is skipped (the rows can fail)" "2 2 2 1 0" \
+  "$(ll_runs skm) $(grep -c '^LANDED ' "$WORLD_ROOT/skm-T2.out" 2>/dev/null) $(grep -c '^skip ' "$WORLD_ROOT/skm-T2.out" 2>/dev/null)"
 
 # ---------------------------------------------------------------------------
 section "§PLANT: a planted red inside a declared function, and one outside every narrowed read, each lands RED (wave-39 T4; D6, REQ-2 AC-2.3)"
@@ -2698,8 +2703,8 @@ ll_t2_one "$RP1" 'echo 9'
 ll_verb "$RP1" T2
 expect_eq "(pl1) a red inside the declared function lands RED, on a.test.sh (exit 1)" "1 RED T2 a.test.sh" \
   "$LL_RC $(printf '%s\n' "$LL_OUT" | grep '^RED ' | cut -d' ' -f1-3)"
-expect_eq "(pl1) …every suite narrowed to it is in the run: no skip, three of three, a ran again" "0|suites 3 of 3|2" \
-  "$(printf '%s\n' "$LL_OUT" | grep -c '^skip ')|$(printf '%s\n' "$LL_OUT" | grep -o 'suites [0-9]* of [0-9]*' | head -n 1)|$(ll_lines "$LL_SIG/pl1-a.runs")"
+expect_eq "(pl1) …every suite narrowed to it is in the run: one RED, no skip, no count (none left out), a ran again" "1|0|0|2" \
+  "$(printf '%s\n' "$LL_OUT" | grep -c '^RED ')|$(printf '%s\n' "$LL_OUT" | grep -c '^skip ')|$(printf '%s\n' "$LL_OUT" | grep -c '^suites ')|$(ll_lines "$LL_SIG/pl1-a.runs")"
 expect_eq "(pl1) …and nothing is published: the head is T1's" "$KQ1" "$(ll_head "$RP1")"
 RP2="$(ll_skip_world pl2)"
 ll_verb "$RP2" T1
@@ -2712,12 +2717,16 @@ expect_eq "(pl2) a red outside every narrowed read lands RED, on c.test.sh, the 
 expect_eq "(pl2) …a and b skipped on the head's green, c run: one of three" "2|suites 1 of 3|1 1 2" \
   "$(printf '%s\n' "$LL_OUT" | grep -c '^skip .* (head)$')|$(printf '%s\n' "$LL_OUT" | grep -o 'suites [0-9]* of [0-9]*' | head -n 1)|$(ll_runs pl2)"
 expect_eq "(pl2) …and nothing is published" "$KP1" "$(ll_head "$RP2")"
-# MUTANT: a narrowed span keyed by its name alone, not its content: the red inside one() lands green.
-RPM="$(ll_skip_world plm)"
-ll_verb "$RPM" T1
-expect_eq "(pl3m-pre) the mutant's world: T1 lands on a, b and c" "0 1 1 1" "$LL_RC $(ll_runs plm)"
+# MUTANT: a narrowed span keyed by its name alone, not its content: the red inside one() lands green. T2 lands on the
+# two narrowed suites only (c, reading the whole file, would catch it), and both landings run under the mutant.
+RPM="$(ll_skip_world plm "" "a.test.sh b.test.sh")"
+anchor fn payload/scripts/lib/line.sh 'h="$(_anc_cat "$root" "$at" "$f" | sed -n "${a},${b}p" | _rd_sha256)"' _line_reads_keys \
+  'h="$(echo "$f" | _rd_sha256)"'
+LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_reads_keys ll_drive "$RPM" T1 "$WORLD_ROOT/plm-T1.out"
+ll_wait_file "$WORLD_ROOT/plm-T1.out.rc" 600
+expect_eq "(pl3m-pre) the mutant's world: T1 lands on a, b and c under the mutant" "0 1 1 1" \
+  "$(cat "$WORLD_ROOT/plm-T1.out.rc" 2>/dev/null) $(ll_runs plm)"
 ll_t2_one "$RPM" 'echo 9'
-anchor fn payload/scripts/lib/line.sh '_LINE_SPAN_MUTANT_ANCHOR' _line_reads_keys '_LINE_SPAN_MUTANT_OFF'
 LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_reads_keys ll_drive "$RPM" T2 "$WORLD_ROOT/plm-T2.out"
 ll_wait_file "$WORLD_ROOT/plm-T2.out.rc" 600
 expect_eq "(pl3m) MUTANT span keyed by name: a and b skipped, the planted red lands (exit 0, the rows can fail)" "0 2" \
