@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY; a suite the row removed is not owed (wave-39 T6): §ABSENT. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -2486,5 +2486,39 @@ expect_eq "(y6) the publish: first in line, held by a live run in the checkout; 
 expect_match "(y6) …and the next line gives what the publish said" "waiting: publish: HELD T1 — *41*a.test.sh*" "$(ll_why "$LL_OUT")"
 rm -f "$BIONIC_GATE_DIR/requests/41"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
+
+# ---------------------------------------------------------------------------
+section "§ABSENT: a Lands-on suite the candidate does not hold is recorded absent and is not owed (wave-39 T6; A-orch-5)"
+#
+# A row that removes a suite (a split: close-out.test.sh became four parts) still names it on its Lands-on, which
+# the dispatch wall wrote from the brief. The candidate has no such file, so a runner could only fail to start it,
+# and two `none` verdicts stall the entry. Instead the suite is looked up in the candidate's commit, as
+# `_line_suite_path` finds one in a tree, and a suite it does not hold gets one verdict `result=absent log=-`,
+# counted as proved: nothing runs for it, and the row lands on the suites it does hold.
+# fails-when: the entry stalls, or the absent suite is run.
+RA="$(ll_world)"; ll_launch "$RA" T1 "a.test.sh b.test.sh"
+git -C "$RA/.worktrees/T1" rm -q tests/b.test.sh && git -C "$RA/.worktrees/T1" commit -qm "T1: b split away"
+AB_T1="$(git -C "$RA/.worktrees/T1" rev-parse HEAD)"
+expect_eq "(ab0) the absence reader: the row's commit lacks b and holds a, bare or path-qualified; the head holds b" \
+  "absent present absent present present" \
+  "$(for q in "$AB_T1 b.test.sh" "$AB_T1 a.test.sh" "$AB_T1 tests/b.test.sh" "$AB_T1 tests/a.test.sh" "$(ll_head "$RA") b.test.sh"; do
+       set -- $q; if _line_absent "$RA" "$1" "$2"; then printf 'absent '; else printf 'present '; fi; done | sed 's/ $//')"
+ll_verb "$RA" T1 --within 900
+AB_C="$(ll_field "$(ll_ev "$RA" candidate | tail -n 1)" commit)"
+expect_eq "(ab1) a row whose Lands-on names a suite it removed lands: exit 0, LANDED" "0|LANDED T1" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | head -n 1 | cut -d' ' -f1-2)"
+expect_eq "(ab2) …its verdicts on the candidate: a green, run with a log; b absent, with no log" \
+  "a.test.sh green yes|b.test.sh absent -" \
+  "$(ll_ev "$RA" verdict | awk -F'|' -v c="commit=$AB_C" '$4 == c {
+       s = substr($5, 7); r = substr($6, 8); l = substr($7, 5)
+       printf "%s%s %s %s", (n++ ? "|" : ""), s, r, (r == "green" ? (l != "-" ? "yes" : "no") : l) }')"
+expect_eq "(ab3) …one ready, no stall, and no log was ever opened for b" "1 0 0" \
+  "$(ll_ev "$RA" ready | awk 'END { print NR }') $(ll_ev "$RA" stalled | awk 'END { print NR }') $(ls "$RA/.bionic/docs/record/wave-x/line" 2>/dev/null | grep -c -- '-b-')"
+RA2="$(ll_world)"; ll_launch "$RA2" T1 "a.test.sh b.test.sh"
+git -C "$RA2/.worktrees/T1" rm -q tests/b.test.sh && git -C "$RA2/.worktrees/T1" commit -qm "T1: b split away"
+LL_MUTANT='s/_line_absent "\$root"/false \&\& _line_absent "$root"/' LL_MUTANT_FN=_line_carry ll_drive "$RA2" T1 "$WORLD_ROOT/ab-T1.out" 900
+ll_wait_file "$WORLD_ROOT/ab-T1.out.rc" 1200
+expect_eq "(ab4m) MUTANT the absent arm removed: the entry stalls on b (the rows can fail)" "70 1" \
+  "$(cat "$WORLD_ROOT/ab-T1.out.rc" 2>/dev/null) $(ll_ev "$RA2" stalled | awk 'END { print NR }')"
 
 finish
