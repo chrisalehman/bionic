@@ -1694,6 +1694,31 @@ expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one lin
   "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
   "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
 
+# ---------- §PROMISE-ROWS: --rows prints each counted run's promise, its actual and their ratio (wave-39 T8; D11, REQ-4 AC-4.2) ----------
+# Under a landed row's line, one line per counted verdict that carries promised= or actual= (lib/line.sh writes both after
+# reads=, wave-39 T8), in the record's order: `  <suite> <result> promised=<s>s actual=<s>s ratio=<actual/promised>`. A field
+# the verdict holds as `-`, or lacks, prints `-`, and so does the ratio then, or over a promise of 0. A verdict written before
+# wave 39 carries neither and prints no line. The rows readers (`$2 == "queue"`) never read these indented lines.
+rp_world rp-prom
+rp_pv() {  # <row> <suite> <result> <at> <promised|-|none> <actual|-|none> — a verdict as lib/line.sh writes it, `none` omits the field
+  rp_ev "ev=verdict|row=$1|commit=$RP_C2|suite=$2|result=$3|log=/rec/$1-$2.log|admitted=$RP_E0|width=2|reads=h$2$([ "$5" = none ] || printf '|promised=%s' "$5")$([ "$6" = none ] || printf '|actual=%s' "$6")|at=2026-10-06T$4Z"
+}
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00
+rp_pv T1 a.test.sh green 10:06:00 240 300; rp_pv T1 b.test.sh red 10:07:00 100 50; rp_pv T1 b.test.sh green 10:08:00 100 none
+rp_pv T1 c.test.sh none 10:08:00 - -
+rp_pub T1 queue 10:10:00
+rp_ready T2 w-T2 10:20:00; rp_cand T2 10:21:00; rp_verdict T2 a.test.sh green 10:25:00; rp_pub T2 queue 10:30:00
+rp_report --rows
+PR_SUB="$(printf '%s\n' "$OUT" | /usr/bin/grep '^  ' | tr '\n' '|' | sed 's/|$//')"
+expect_eq "PR1 the row lines read as before: T1 and T2, queue" "T1 queue|T2 queue" "$(rp_rows | tr '|' '\n' | awk '{ print $1, $2 }' | tr '\n' '|' | sed 's/|$//')"
+expect_eq "PR2 AC-4.2 under T1, one line per run: promised and actual in seconds and actual over promised; a missing actual and a run never admitted print -" \
+  "  a.test.sh green promised=240s actual=300s ratio=1.25|  b.test.sh red promised=100s actual=50s ratio=0.50|  b.test.sh green promised=100s actual=- ratio=-|  c.test.sh none promised=- actual=- ratio=-" \
+  "$PR_SUB"
+expect_eq "PR3 …placed under T1's row, before T2's; T2's verdict, written before wave 39, prints none" "T1 queue|  a.test.sh|  b.test.sh|  b.test.sh|  c.test.sh|T2 queue" \
+  "$(printf '%s\n' "$OUT" | sed -n '2,$p' | awk '{ print (substr($0, 1, 2) == "  " ? "  " $1 : $1 " " $2) }' | tr '\n' '|' | sed 's/|$//')"
+rp_report
+expect_eq "PR4 without --rows, no run line: the report is its one line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '')"
+
 # ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
 rp_world rp-print
 rp_ready T1 w-T1 10:00:00

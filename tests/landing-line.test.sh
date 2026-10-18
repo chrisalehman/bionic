@@ -982,12 +982,51 @@ RN="$(ll_world)"; ll_launch "$RN" T1 c
 REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
 expect_eq "(n1) a suite promising 600 s with 60 s left: exit 75" "75" "$LL_RC"
-expect_eq "(n1) …printing WAITING and the same command (its first line; §WHY reads the reason after it)" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$LL_OUT" | head -n 1)"
+expect_eq "(n1) …printing WAITING and the same command (§WHY reads the reason after it)" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
+# THE PROMISE, PRINTED (wave-39 T8; D11, AC-4.3): ready says once, at its start, the seconds its suites promise
+# against the --within it was given; it is the first line, ahead of everything the carrier prints.
+expect_eq "(n1p) AC-4.3 ready's first line is the promised total against --within: promised 600s of 60s" "promised 600s of 60s" \
+  "$(printf '%s\n' "$LL_OUT" | head -n 1)"
 expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN" \
   "$(ll_ev "$RN" verdict | awk 'END { print NR }') $(ls "$RN/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" | wc -l | tr -d ' ')"
 expect_eq "(n1) …the entry kept, its carrier gone" "T1 no" "$(line_state "$(ll_plan "$RN")" | cut -f1,4 | tr '\t' ' ')"
 ll_verb "$RN" T1 --within 900
 expect_eq "(n2) with the time, the same command lands it" "0" "$LL_RC"
+expect_eq "(n2p) …its first line the same promise against the new bound: promised 600s of 900s" "promised 600s of 900s" \
+  "$(printf '%s\n' "$LL_OUT" | head -n 1)"
+# THE VERDICT CARRIES ITS PROMISE AND ITS ACTUAL (wave-39 T8; D11, AC-4.2): promised= is the seconds the gate
+# promised the run at its admission (its request's promise=), actual= the gate's own measure, ended less admitted.
+ll_req_last() {  # <suite> <field> -> that field on the newest landing request for the suite, `ended-admitted` for `actual`
+  local f="" i
+  for i in $(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | grep -E '^[0-9]+$' | sort -n); do
+    grep -q "^key=$1\$" "$BIONIC_GATE_DIR/requests/$i" && f="$BIONIC_GATE_DIR/requests/$i"
+  done
+  [ -n "$f" ] || return 0
+  case "$2" in
+    actual) awk -F= '$1 == "admitted" { a = $2 } $1 == "ended" { e = $2 } END { if (a != "" && e != "") print e - a }' "$f" ;;
+    promise) sed -n 's/^promise=//p' "$f" | tail -n 1 | awk -F: '{ print $NF }' ;;
+  esac
+}
+N2V="$(ll_ev "$RN" verdict)"
+expect_regex "(n2f-pre) the gate's request for the run holds its promise and its admission and end" '^600 [0-9]+$' \
+  "$(ll_req_last c.test.sh promise) $(ll_req_last c.test.sh actual)"
+expect_eq "(n2f) AC-4.2 the verdict carries promised=600 and actual= the gate's ended less admitted, after reads=" \
+  "600 $(ll_req_last c.test.sh actual) yes" \
+  "$(ll_field "$N2V" promised) $(ll_field "$N2V" actual) $(printf '%s\n' "$N2V" | grep -qE '\|reads=[^|]+\|promised=600\|actual=[0-9]+\|at=' && echo yes)"
+# AC-4.3 WITH TWO SUITES: a (5 s) fits in 60 s, c (600 s) does not. ready prints the total, runs a, and waits c:
+# WAITING exit 75, a's verdict written, nothing started for c.
+RN5="$(ll_world)"; ll_launch "$RN5" T1 a,c
+( cd "$RN5" && world_cost a.test.sh 5 && world_cost c.test.sh 600 )
+( cd "$RN5" && world_suite a green >/dev/null && world_suite c green >/dev/null ) && git -C "$RN5" add tests/a.test.sh tests/c.test.sh \
+  && git -C "$RN5" commit -qm "suites a and c"
+N5_C="$(grep -l '^key=c.test.sh$' "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | awk 'END { print NR }')"
+ll_verb "$RN5" T1 --within 60
+expect_eq "(n5) AC-4.3 a,c with 60 s: promised 605s of 60s first, then WAITING, exit 75" "75|promised 605s of 60s|WAITING T1 — run again: bash ${SPAWN} ready --within 60" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | head -n 1)|$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
+expect_eq "(n5) …waiting on c, whose promise the time left cannot hold" "waiting: suite c.test.sh promises 600s and" \
+  "$(printf '%s\n' "$LL_OUT" | grep '^waiting: ' | head -n 1 | cut -d' ' -f1-6)"
+expect_eq "(n5) …a ran and is green; c has no verdict and no gate request: it was waited, not started short" "a.test.sh:green $N5_C" \
+  "$(ll_ev "$RN5" verdict | while IFS= read -r v; do printf '%s:%s ' "$(ll_field "$v" suite)" "$(ll_field "$v" result)"; done | sed 's/ $//') $(grep -l '^key=c.test.sh$' "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | awk 'END { print NR }')"
 # THE LOOKUP NAMES THE LANDING TREE (wave-33 T1; Δ10). Durations are keyed by project, so
 # `_line_time_for` reads the landing tree's, wherever the carrier stands: asked from outside every
 # repository (the world's root), it still finds the fixture repository's 600 s.
@@ -2110,7 +2149,7 @@ line_event "$PGR" ready row=T1 name=wx-T1 "commit=$(git -C "$RGR/.worktrees/T1" 
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
 ll_grammar_put() {  # <plan> — three verdicts by the writer, J=2; a and b admitted at 1000, c with no admission given
   LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" a.test.sh green /logs/a.log 1000 \
-    && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" b.test.sh red /logs/b.log 1000 \
+    && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" b.test.sh red /logs/b.log 1000 300 280 \
     && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" c.test.sh none /logs/c.log
 }
 ll_grammar_read() {  # <record> -> every positional reader's answer, one line
@@ -2118,11 +2157,11 @@ ll_grammar_read() {  # <record> -> every positional reader's answer, one line
     "$(_line_none_logs "$1" T1 "$KGR" c.test.sh)" "$(_line_head_verdict "$1" "$KGR" b.test.sh | tr '\t' ' ')" "$(_line_declared "$1" T1 "$KGR")"
 }
 ll_grammar_put "$PGR"
-expect_regex "(g1) the writer puts admitted=, width= then reads= after log=, and at= last" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|reads=[^|]+\\|at=[0-9T:-]+Z$" \
+expect_regex "(g1) the writer puts admitted=, width=, reads=, then promised= and actual= after log=, and at= last (wave-39 T8; AC-4.2)" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|reads=[^|]+\\|promised=300\\|actual=280\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
-expect_regex "(g1b) …and a verdict given no admission carries admitted=-" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|reads=[^|]+\\|at=[0-9T:-]+Z$" \
+expect_regex "(g1b) …and a verdict given no admission carries admitted=-, promised=- and actual=-" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|reads=[^|]+\\|promised=-\\|actual=-\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
 expect_eq "(g2) every positional reader reads it: green proved, the red's log, the none's log, the head's verdict, the declared debt" \
   "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$(ll_grammar_read "$RECGR")"
@@ -2266,7 +2305,7 @@ export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k"
 K_T0="$(ll_req_admitted p1.test.sh)"
 expect_true "(ad0-pre) the gate recorded p1's admission instant" test -n "$K_T0"
 expect_eq "(ad1) every verdict of §ASK's landing carries admitted=<epoch> right after log=" "6 6" \
-  "$(ll_ev "$RK" verdict | awk 'END { print NR }') $(ll_ev "$RK" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|reads=[^|]+\|at=')"
+  "$(ll_ev "$RK" verdict | awk 'END { print NR }') $(ll_ev "$RK" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|reads=[^|]+\|promised=[0-9]+\|actual=[0-9]+\|at=')"
 expect_eq "(ad2) …p1 to p4 carry the instant before the clock moved, p5 the one after" \
   "p1.test.sh:${K_T0} p2.test.sh:${K_T0} p3.test.sh:${K_T0} p4.test.sh:${K_T0} p5.test.sh:$((K_T0 + 50))" \
   "$(ll_admitted "$RK" "$KK" | cut -d' ' -f1-5)"
@@ -2274,9 +2313,31 @@ expect_eq "(ad3) …each the gate's own admitted= for that run" \
   "$(for s in p1 p2 p3 p4 p5 p6; do printf '%s.test.sh:%s ' "$s" "$(ll_req_admitted "$s.test.sh")"; done | sed 's/ $//')" "$(ll_admitted "$RK" "$KK")"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
 expect_eq "(ad4) §DRAIN's verdicts too, the red judge's at the head among them" "5 5" \
-  "$(ll_ev "$RDR" verdict | awk 'END { print NR }') $(ll_ev "$RDR" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|reads=[^|]+\|at=')"
+  "$(ll_ev "$RDR" verdict | awk 'END { print NR }') $(ll_ev "$RDR" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|reads=[^|]+\|promised=[0-9]+\|actual=[0-9]+\|at=')"
 printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 world_machine 8 8192 40 0.5
+
+# ---------------------------------------------------------------------------
+section "§FIELDS: every verdict line carries promised= and actual=, the gate's promise for its run and its measure of it (wave-39 T8; D11, REQ-4 AC-4.2)"
+#
+# From §ASK's landing: p1 to p4 were admitted at one instant and ended after the clock moved 50 s; p5 and p6 were
+# admitted and ended after it. promised= is the seconds of the run's request's promise= (what the gate promised it at
+# admission), actual= the request's ended less admitted (the gate's own measure, the seconds its cost line records).
+export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k"
+ll_pa() {  # <root> <commit> -> `suite:promised/actual` of each verdict on <commit>, in record order
+  ll_ev "$1" verdict | grep -F "|commit=$2|" | while IFS= read -r v; do
+    printf '%s:%s/%s ' "$(ll_field "$v" suite)" "$(ll_field "$v" promised)" "$(ll_field "$v" actual)"
+  done | sed 's/ $//'
+}
+expect_eq "(f0-pre) the gate measured p1's run: ended less admitted is 50 s" "50" "$(ll_req_last p1.test.sh actual)"
+expect_eq "(f1) AC-4.2 every verdict of §ASK's landing carries promised= and actual= after reads=, before at=" "6 6" \
+  "$(ll_ev "$RK" verdict | awk 'END { print NR }') $(ll_ev "$RK" verdict | grep -cE '\|reads=[^|]+\|promised=[0-9]+\|actual=[0-9]+\|at=')"
+expect_eq "(f2) …each the gate's own for that run: its request's promised seconds and its ended less admitted" \
+  "$(for s in p1 p2 p3 p4 p5 p6; do printf '%s.test.sh:%s/%s ' "$s" "$(ll_req_last "$s.test.sh" promise)" "$(ll_req_last "$s.test.sh" actual)"; done | sed 's/ $//')" \
+  "$(ll_pa "$RK" "$KK")"
+expect_eq "(f3) …p1 to p4 ran across the 50 s tick, p5 and p6 after it" "50 50 50 50 0 0" \
+  "$(ll_pa "$RK" "$KK" | tr ' ' '\n' | awk -F/ '{ printf "%s%s", (NR > 1 ? " " : ""), $2 }')"
+export BIONIC_GATE_DIR="$LL_GATE_WAS"
 
 # ---------------------------------------------------------------------------
 section "§STALL: a bounded ready keeps its none count across ev=ready, so the stall fires (wave-38 T6; REQ-6 AC-6.3)"
@@ -2313,7 +2374,7 @@ expect_eq "(st1) …the first started nothing (600 s promised, 500 left); the se
   "$(ll_lines "$LL_SIG/st.runs") $(ll_results "$RS" T1 "$KS")"
 expect_eq "(st1) …three ready events on the record, then one stall" "3 1" \
   "$(ll_ev "$RS" ready | awk 'END { print NR }') $(ll_ev "$RS" stalled | awk 'END { print NR }')"
-expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2}" "$ST3_OUT"
+expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2}" "$(printf '%s\n' "$ST3_OUT" | grep '^STALLED ')"
 # MUTANT: the count reset at every ready, as before. Each call starts from nothing, and the stall never fires.
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-stm"
 RSM="$(ll_stall_world stm)"
@@ -2571,7 +2632,7 @@ expect_eq "(ab0) the removal reader, head to the row's commit: b removed, bare o
 ll_verb "$RA" T1 --within 900
 AB_C="$(ll_field "$(ll_ev "$RA" candidate | tail -n 1)" commit)"
 expect_eq "(ab1) a row whose Lands-on names a suite it removed lands: exit 0, LANDED" "0|LANDED T1" \
-  "$LL_RC|$(printf '%s\n' "$LL_OUT" | head -n 1 | cut -d' ' -f1-2)"
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | grep '^LANDED ' | head -n 1 | cut -d' ' -f1-2)"
 expect_eq "(ab2) …its verdicts on the candidate: a green, run with a log; b absent, with no log" \
   "a.test.sh green yes|b.test.sh absent -" \
   "$(ll_ev "$RA" verdict | awk -F'|' -v c="commit=$AB_C" '$4 == c {

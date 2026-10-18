@@ -969,6 +969,75 @@ plant_costs rb.test.sh 300 310 500
 expect_eq "RB.7 300, 310 and 500: 500 is within twice the median (620), so the promise is 500, never below a run in range" \
   "500" "$(secs_of rb.test.sh)"
 
+# ── §PROMISE ─────────────────────────────────────────────────────────────────
+# THE PROMISE CARRIES ITS LOAD (wave-39 T8; D11, REQ-4 AC-4.1). A cost line gains the load the run was
+# admitted under, `<seconds>:<epoch>:<load>` (the request's load= line, the gate's 1-minute reading at
+# admission). With three kept lines that all carry a load, the promise is the median of the durations, each
+# scaled by the load now over the load it was recorded under (a load below one counts as one; the factor
+# clamped to 0.5..4), bounded above by the largest kept. A line with no load scales by 1: until three loaded
+# lines exist the promise is §ROBUST's, as before. The load now is `_res_busy_cores`, pinned here by
+# BIONIC_PROBE_BUSY_CORES; the surfaces that read the promise (the admission's promise=, `_line_time_for`,
+# `_line_time_why`) read the one figure.
+section "§PROMISE — the median scaled by the load now over the load then, bounded by the largest kept (D11; AC-4.1)"
+plant_loaded() {  # <key> <load> <seconds>... — the key's cost file, one <seconds>:<epoch>:<load> line each
+  local k="$1" l="$2" f e=900 s
+  shift 2
+  f="$(costf "$k")"; mkdir -p "${f%/*}"; : > "$f"
+  for s in "$@"; do printf '%s:%s:%s\n' "$s" "$e" "$l" >> "$f"; e=$((e + 10)); done
+}
+secs_at() {  # <load now> <key> [<gate lib>] — gate_promise's seconds with the load reading pinned
+  ( export BIONIC_PROBE_BUSY_CORES="$1"; . "${3:-$GATE_LIB}" 2>/dev/null; gate_promise "$2" 2>/dev/null | awk -F: '{ print $NF }' )
+}
+fresh promise
+plant_loaded pm.test.sh 1.5 50 60 300
+expect_eq "PM.0 precondition: three kept lines, each recorded at load 1.5, newest last" "50:900:1.5 60:910:1.5 300:920:1.5" \
+  "$(tr '\n' ' ' < "$(costf pm.test.sh)" 2>/dev/null | sed 's/ $//')"
+expect_eq "PM.1 asked at the load they were recorded under (1.5): the median, 60" "60" "$(secs_at 1.5 pm.test.sh)"
+expect_eq "PM.2 AC-4.1 asked at load 6: the median × 4, 240 (under the largest kept, 300), not the 60 of load 1.5" "240" \
+  "$(secs_at 6 pm.test.sh)"
+expect_eq "PM.3 asked at load 3: double, 120 (the spec's ownership row)" "120" "$(secs_at 3 pm.test.sh)"
+plant_loaded pb.test.sh 1.5 100 120 140
+expect_eq "PM.4 AC-4.1 100, 120 and 140 at 1.5 asked at 6: the median × 4 (480) bounded by the largest kept, 140" "140" \
+  "$(secs_at 6 pb.test.sh)"
+expect_eq "PM.5 …and asked at 1.5, the median 120, not the largest" "120" "$(secs_at 1.5 pb.test.sh)"
+expect_eq "PM.6 the factor is clamped above at 4: asked at load 40, 240 as at 6" "240" "$(secs_at 40 pm.test.sh)"
+plant_loaded pd.test.sh 12 100 120 140
+expect_eq "PM.7 …and below at 0.5: recorded at 12, asked at 1, half the median, 60" "60" "$(secs_at 1 pd.test.sh)"
+plant_loaded pz.test.sh 0.2 100 120 140
+expect_eq "PM.8 a load below one counts as one: recorded at 0.2, asked at 0.5, the median, 120" "120" "$(secs_at 0.5 pz.test.sh)"
+PN_F="$(costf pn.test.sh)"; printf '100:900\n120:910:1.5\n140:920:1.5\n' > "$PN_F"
+expect_eq "PM.9 a line with no load scales by 1: one unloaded of three is §ROBUST's promise, 140, at load 6 as at 1.5" "140 140" \
+  "$(secs_at 6 pn.test.sh) $(secs_at 1.5 pn.test.sh)"
+expect_eq "PM.10 a load now that cannot be read is §ROBUST's promise too: 140" "140" \
+  "$( . "$GATE_LIB" 2>/dev/null; _gate_store >/dev/null 2>&1; _gate_seconds pb.test.sh "$(_gate_project)" - 2>/dev/null )"
+# THE SURFACES READ THE ONE FIGURE: the admission's promise=, the request's load= and the cost line it
+# writes, `_line_time_for` and `_line_time_why` (spec §3, the promise row).
+world_machine 8 8192 40 6.0
+HOLD=1 ask_bg pa work pm.test.sh 0; wait_for 20 has pa.rc
+PA_ID="$(id_of pa)"
+expect_eq "PM.11 an admission at load 6.0 is promised 240 s and records the load it was admitted under" "0|0:$PROMISE:240|6.0" \
+  "$(rc_of pa)|$(field "$PA_ID" promise)|$(field "$PA_ID" load)"
+world_tick 30
+release pa
+expect_eq "PM.12 its gate_end writes the cost line with that load: 30 s, at 1030, at load 6.0" "30:1030:6.0" \
+  "$(tail -n 1 "$(costf pm.test.sh)" 2>/dev/null)"
+plant_loaded pm.test.sh 1.5 50 60 300
+expect_eq "PM.13 _line_time_for at load 6 with 250 s left gives the gate 10 s (250 less 240)" "10 rc=0" \
+  "$(BIONIC_PROBE_BUSY_CORES=6 fit_in pm.test.sh 250)"
+expect_eq "PM.14 …and at load 1.5, 190 s (250 less 60)" "190 rc=0" "$(BIONIC_PROBE_BUSY_CORES=1.5 fit_in pm.test.sh 250)"
+expect_eq "PM.15 _line_time_why names the scaled promise" "suite pm.test.sh promises 240s and 250s are left in --within 250" \
+  "$( export BIONIC_PROBE_BUSY_CORES=6; . "$GATE_LIB" 2>/dev/null && . "$REPO_ROOT/payload/scripts/lib/line.sh" 2>/dev/null \
+      && _LINE_WITHIN=250 && _line_time_why pm.test.sh "$(( $(_res_now) + 250 ))" "$(pwd -P)" )"
+# MUTANT: the load dropped, every factor 1. The three then promise the same seconds at load 6 as at 1.5.
+MPL="$(mutant promise-load)"
+anchor file payload/scripts/lib/gate.sh 'f = nw / th'
+sed -i.bak 's#f = nw / th#f = 1#' "$MPL"
+expect_eq "PM.16 the mutant without the load still promises: at load 1.5, the median, 60 (positive)" "60" \
+  "$(secs_at 1.5 pm.test.sh "$MPL")"
+expect_eq "PM.17 the mutant at load 6 promises 60, where PM.2 reads 240 — the load is the rule" "60" \
+  "$(secs_at 6 pm.test.sh "$MPL")"
+world_machine 8 8192 40 1.0
+
 # ── §FINISHED ────────────────────────────────────────────────────────────────
 # A FINISHED ROW'S KEPT REQUESTS ARE ENDED (wave-38 T31; D22, AC-6.2; A-orch-43). A landing's run hands
 # its request back when its time runs out or it is sent TERM (holder=-), so the row's next ask keeps
