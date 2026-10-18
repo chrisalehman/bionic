@@ -159,9 +159,15 @@ sr_line() { printf '%s\n' "$OUT" | /usr/bin/grep -E "^$1" | head -1; }
 sr_rows() {  # -> the Situation's row lines: from the counts header's next line to the first blank
   printf '%s\n' "$OUT" | awk '/^[0-9]+ landed · / { on = 1; next } on && /^$/ { exit } on { print }'
 }
-SR_TH_SCHED='(🟢 ≤ 1.25 · 🟡 ≤ 2.0 · 🔴 above)'
-SR_TH_CORR='(🟡 red runs all returned and fixed · 🔴 an open S1/S2 or a red at head)'
-SR_TH_WASTE='(🟢 < 5% and < 10% · 🟡 < 15% either · 🔴 above)'
+# THE MARKS, from one place: a measurement held against a bar is within it, near it, over it, or not measurable
+# (D31). The next re-mark is these four lines. The legend prints once, under the three indicator lines (D29).
+SR_MARK_WITHIN='✅'
+SR_MARK_NEAR='➖'
+SR_MARK_OVER='✖️'
+SR_MARK_NONE='❔'
+SR_LEGEND='within / near / over — schedule ≤ 1.25 / ≤ 2.0 / above · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
+# sr_ind <name> -> the indicator's line: the mark leads, then the name
+sr_ind() { printf '%s\n' "$OUT" | /usr/bin/grep -E "^[^ ]+ $1 " | head -1; }
 
 # ============================================================
 section "§ROWS: every row of ## Tasks, glyph in column 1, [step]/[task]: desc, landed rows with a local 12-hour time, and the counts header (AC-2.3, D14, Δ5)"
@@ -191,59 +197,67 @@ expect_eq "R9 a landing on another local day than now's: H:MM AM/PM then its loc
   "✅ 4/T1: Row one the thing — 4:12 AM 2026-10-06" "$(sr_rows | head -1)"
 
 # ============================================================
-section "§MARKS: three indicators, each a number and a mark by thresholds printed on the page; a planted defect moves its mark (AC-2.4, D10)"
+section "§MARKS: three indicators, each line opening on its mark (✅ within · ➖ near · ✖️ over · ❔ not measurable) then its number, the thresholds printed once under the three; a planted defect moves its mark (AC-2.4, D10, D29, D31)"
 # ============================================================
 sr_world marks "72 72 144 144"
 sr_run "$SR_PLAN"
-expect_eq "M0 the clean world: schedule 🟢 at 1.2× (median 108.0m from landing-report over median declared 90m), thresholds on the page" \
-  "schedule 🟢 1.2× — median ready→landed 108.0m over median declared 90m $SR_TH_SCHED" "$(sr_line 'schedule ')"
-expect_eq "M1 …correctness 🟢, no red, no open S1/S2" \
-  "correctness 🟢 — no red run at head, no open S1/S2 $SR_TH_CORR" "$(sr_line 'correctness ')"
-expect_eq "M2 …waste 🟢, nothing discarded, nothing idle" \
-  "waste 🟢 0% discarded · 0% idle-width — $SR_TH_WASTE" "$(sr_line 'waste ')"
-# A planted red run, not returned: correctness 🔴, and the row it is on reads ⛔.
+expect_eq "M0 the clean world: schedule ✅ at 1.2× (median 108.0m from landing-report over median declared 90m), the mark first, no legend on the line" \
+  "$SR_MARK_WITHIN schedule 1.2× — median ready→landed 108.0m over median declared 90m" "$(sr_ind schedule)"
+expect_eq "M1 …correctness ✅, no red, no open S1/S2" \
+  "$SR_MARK_WITHIN correctness — no red run at head, no open S1/S2" "$(sr_ind correctness)"
+expect_eq "M2 …waste ✅, nothing discarded, nothing idle" \
+  "$SR_MARK_WITHIN waste 0% discarded · 0% idle-width" "$(sr_ind waste)"
+expect_eq "M2a the legend prints once, as one line directly under the third indicator, inside the Assessment, byte for byte" \
+  "$SR_LEGEND" "$(printf '%s\n' "$OUT" | awk '/^Assessment$/ { f = 1; next } f && /^[^ ]+ waste / { w = 1; next } w { print; exit }')"
+expect_eq "M2b …and nowhere else: one line of the page opens on within / near / over, no indicator line carries a parenthesised bar" "1|0" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^within / near / over')|$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ (schedule|correctness|waste) ' | /usr/bin/grep -c '(')"
+expect_eq "M2c …each indicator line opens on one of the four marks, then its name" "3" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -cE "^($SR_MARK_WITHIN|$SR_MARK_NEAR|$SR_MARK_OVER|$SR_MARK_NONE) (schedule|correctness|waste) ")"
+# A planted red run, not returned: correctness over its bar, and the row it is on reads ⛔.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "M3 a planted red run at head → correctness 🔴" \
-  "correctness 🔴 — 1 red at head, no open S1/S2 $SR_TH_CORR" "$(sr_line 'correctness ')"
+expect_eq "M3 a planted red run at head → correctness ✖️" \
+  "$SR_MARK_OVER correctness — 1 red at head, no open S1/S2" "$(sr_ind correctness)"
 expect_eq "M4 …the row it is on reads ⛔, and the counts move it out of in flight" \
   "⛔ 4/T8: The long one|4 landed · 3 in flight · 9 not started · 1 red/blocked of 17" \
   "$(sr_rows | /usr/bin/grep 'T8:')|$(sr_line '[0-9]+ landed · ')"
 # The red returned: a later green on the same row and suite.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=green|log=/rec/T8b.log|at=2026-10-06T15:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "M5 every red returned by a later green on its row and suite → correctness 🟡, the row back in flight" \
-  "correctness 🟡 — 1 red, all returned, no open S1/S2 $SR_TH_CORR|🔄 4/T8: The long one" \
-  "$(sr_line 'correctness ')|$(sr_rows | /usr/bin/grep 'T8:')"
-# An open S2 finding of a registered reading: correctness 🔴.
+expect_eq "M5 every red returned by a later green on its row and suite → correctness ➖, the row back in flight" \
+  "$SR_MARK_NEAR correctness — 1 red, all returned, no open S1/S2|🔄 4/T8: The long one" \
+  "$(sr_ind correctness)|$(sr_rows | /usr/bin/grep 'T8:')"
+# An open S2 finding of a registered reading: correctness ✖️.
 printf 'reviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
 awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/critic.md question=adversarial reader=crit result=fail scope=piece" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "M6 an open S2 finding of a registered reading → correctness 🔴" \
-  "correctness 🔴 — 1 red, all returned, 1 open S1/S2 $SR_TH_CORR" "$(sr_line 'correctness ')"
-# A landing at 1.6× declared: schedule 🟡.
+expect_eq "M6 an open S2 finding of a registered reading → correctness ✖️" \
+  "$SR_MARK_OVER correctness — 1 red, all returned, 1 open S1/S2" "$(sr_ind correctness)"
+# A landing at 1.6× declared: schedule ➖.
 sr_world marks-slow "96 96 192 192"
 sr_run "$SR_PLAN"
-expect_eq "M7 landings at 1.6× their declared size → schedule 🟡" \
-  "schedule 🟡 1.6× — median ready→landed 144.0m over median declared 90m $SR_TH_SCHED" "$(sr_line 'schedule ')"
-# 20% of runs discarded: waste 🔴.
+expect_eq "M7 landings at 1.6× their declared size → schedule ➖" \
+  "$SR_MARK_NEAR schedule 1.6× — median ready→landed 144.0m over median declared 90m" "$(sr_ind schedule)"
+# 20% of runs discarded: waste ✖️.
 sr_world marks-waste "72 72 144 144"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "M8 one run in five discarded (20%) → waste 🔴" \
-  "waste 🔴 20% discarded · 0% idle-width — $SR_TH_WASTE" "$(sr_line 'waste ')"
-# Idle width: an idle turn from 16:00Z to 17:12Z is 72 of 720 elapsed minutes, 10%: 🟡.
+expect_eq "M8 one run in five discarded (20%) → waste ✖️" \
+  "$SR_MARK_OVER waste 20% discarded · 0% idle-width" "$(sr_ind waste)"
+# Idle width: an idle turn from 16:00Z to 17:12Z is 72 of 720 elapsed minutes, 10%: ➖.
 sr_world marks-idle "72 72 144 144"
 printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
 printf 'fill-ledger/v1|at=2026-10-06T17:12:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
 sr_run "$SR_PLAN"
-expect_eq "M9 72 idle minutes over 720 elapsed (10%) → waste 🟡, the minutes fill-report's" \
-  "waste 🟡 0% discarded · 10% idle-width — $SR_TH_WASTE" "$(sr_line 'waste ')"
+expect_eq "M9 72 idle minutes over 720 elapsed (10%) → waste ➖, the minutes fill-report's" \
+  "$SR_MARK_NEAR waste 0% discarded · 10% idle-width" "$(sr_ind waste)"
 # No landing on this run: schedule cannot be computed and says so.
 sr_world marks-none none
 sr_run "$SR_PLAN"
-expect_eq "M10 no landing yet: schedule prints unverified, its thresholds still on the page" \
-  "schedule unverified — no landing yet on this run $SR_TH_SCHED" "$(sr_line 'schedule ')"
+expect_eq "M10 no landing yet: schedule prints ❔ unverified, and the legend still prints once under the three" \
+  "$SR_MARK_NONE schedule unverified — no landing yet on this run" "$(sr_ind schedule)"
+expect_eq "M11 …the legend is the same one line, under the third indicator" "$SR_LEGEND" \
+  "$(printf '%s\n' "$OUT" | awk '/^Assessment$/ { f = 1; next } f && /^[^ ]+ waste / { w = 1; next } w { print; exit }')"
 
 # ============================================================
 section "§BLOCKERS: every open approve:, waive:, finding: and gate: item the person owes, one line each, or the none line (AC-2.5, D11)"
@@ -343,20 +357,20 @@ section "§LINE: --line is the one-line form, the three indicator glyphs in orde
 # ============================================================
 sr_world line "72 72 144 144"
 sr_run --line "$SR_PLAN"
-expect_eq "L1 the clean world: one line, exit 0" "0|🟢🟢🟢 · owed: 0 · closes ~4:30 PM" "$RC|$OUT"
+expect_eq "L1 the clean world: one line, exit 0" "0|$SR_MARK_WITHIN$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ~4:30 PM" "$RC|$OUT"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 sr_owed "key=gate:abc|state=open|sent=-|at=2026-10-06T20:00:00Z|title=gate act: merge|reply=poker: GATE T28 — merge: approve it"
 sr_run --line "$SR_PLAN"
 expect_eq "L2 a red at head and two owed items: the correctness glyph moves, owed counts them" \
-  "🟢🔴🟢 · owed: 2 · closes ~4:30 PM" "$OUT"
+  "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 2 · closes ~4:30 PM" "$OUT"
 sr_run "$SR_PLAN"
 expect_eq "L3 …the one line's glyphs are the full report's three marks, in order" \
-  "🟢🔴🟢" "$(printf '%s\n' "$OUT" | awk '/^(schedule|correctness|waste) / { split($0, a, " "); printf "%s", a[2] }')"
+  "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN" "$(printf '%s\n' "$OUT" | awk '$2 == "schedule" || $2 == "correctness" || $2 == "waste" { printf "%s", $1 }')"
 sr_world line-none none
 sr_run --line "$SR_PLAN"
-expect_eq "L4 an indicator the record cannot compute prints ⚪ in the one line, and so does an unverified closing time" \
-  "⚪🟢🟢 · owed: 0 · closes unverified" "$OUT"
+expect_eq "L4 an indicator the record cannot compute prints ❔ in the one line, and so does an unverified closing time" \
+  "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes unverified" "$OUT"
 
 # ============================================================
 section "§ARGS: the verb's operands"
@@ -448,8 +462,8 @@ sr_compose() {
     inA && $0 == "" { print; print "Diagnosis"; printf "%s\n", ENVIRON["SR_C_DIAG"]; inA = 0 }
     { print }' "$1"
 }
-SR_ITEMS_OK="- schedule runs at 1.2× declared, inside 🟢 (line 25) — no move
-- the chain T8→T9 sets the close at 4:30 PM (line 34) (line 35) — keep T8 first · costs nothing
+SR_ITEMS_OK="- schedule runs at 1.2× declared, inside ✅ (line 25) — no move
+- the chain T8→T9 sets the close at 4:30 PM (line 35) (line 36) — keep T8 first · costs nothing
 - hypothesis: two admitted runs is the gate keeping to its share — raise the share for a third · 1.6s of tick"
 SR_DIAG_OK="schedule is on pace: four landings at 1.2× their declared size (line 25)
 correctness and waste are clean: no red, nothing discarded, nothing idle (line 26) (line 27)"
@@ -463,10 +477,12 @@ expect_eq "O1 the skill's shape block is found and its first line is the title l
 printf '%s\n' "$SR_SHAPE" > "$TMPROOT/shape.txt"
 expect_eq "O2 …its headings, in order: the verb's five with Diagnosis directly under Assessment" \
   "Bottom line|Situation|Assessment|Diagnosis|Blockers|Forecast" "$(sr_heads "$TMPROOT/shape.txt")"
+expect_true "O3a …and its Assessment placeholder names the Assessment lines: three indicators, then the within/near/over line" \
+  grep -qF "<the verb's Assessment lines: three indicators, then the within/near/over line>" "$SR_SKILL"
 expect_eq "O3 …and no rule line in the shape (the same block O1 read)" "" "$(printf '%s\n' "$SR_SHAPE" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
 sr_world order "72 72 144 144"
 sr_run "$SR_PLAN"; printf '%s\n' "$OUT" > "$TMPROOT/page.txt"
-expect_eq "O4 the verb's page is the fixture: 36 lines, title first" "36|Sitrep · wave-02-fx · 9.9.0 · 2026-10-06 3:00 PM PDT · step 4" \
+expect_eq "O4 the verb's page is the fixture: 37 lines (the legend line under the three indicators), title first" "37|Sitrep · wave-02-fx · 9.9.0 · 2026-10-06 3:00 PM PDT · step 4" \
   "$(/usr/bin/grep -c '' "$TMPROOT/page.txt")|$(head -1 "$TMPROOT/page.txt")"
 sr_compose "$TMPROOT/page.txt" "$SR_ITEMS_OK" "$SR_DIAG_OK" > "$TMPROOT/rep.txt"
 expect_eq "O5 the page with both slots filled meets the contract" "ok" "$(sr_check "$TMPROOT/rep.txt" "$TMPROOT/page.txt")"
@@ -555,28 +571,28 @@ sr_run --line "$SR_PLAN"; SR_L1="$OUT"
 expect_eq "S1 the tick exits 0 and its last line is still its decision line" "0|decision=QUIET" \
   "$RC|$(printf '%s\n' "$SR_T1" | tail -1 | /usr/bin/grep -oE 'decision=[A-Z]+')"
 expect_eq "S2 …it prints exactly one sitrep line" "1" "$(printf '%s\n' "$SR_T1" | /usr/bin/grep -c '^poker: sitrep ')"
-expect_eq "S3 …and that line is the --line output, byte for byte (here the clean world's 🟢🟢🟢)" \
-  "poker: sitrep 🟢🟢🟢 · owed: 0 · closes ~4:30 PM|poker: sitrep $SR_L1" \
+expect_eq "S3 …and that line is the --line output, byte for byte (here the clean world's ✅✅✅)" \
+  "poker: sitrep $SR_MARK_WITHIN$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ~4:30 PM|poker: sitrep $SR_L1" \
   "$(printf '%s\n' "$SR_T1" | /usr/bin/grep '^poker: sitrep ')|poker: sitrep $SR_L1"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 SR_AT=$((SR_NOW + 60)) sr_tick
 SR_AT=$((SR_NOW + 60)) sr_run --line "$SR_PLAN"
 expect_eq "S4 a red at head and an owed item move the tick's line exactly as they move --line" \
-  "poker: sitrep 🟢🔴🟢 · owed: 1 · closes ~4:31 PM|poker: sitrep $OUT" \
+  "poker: sitrep $SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 1 · closes ~4:31 PM|poker: sitrep $OUT" \
   "$(/usr/bin/grep '^poker: sitrep ' "$TMPROOT/tick.out")|poker: sitrep $OUT"
 SR_AT=$((SR_NOW + 120)) sr_tick
 SR_T3="$OUT"
 expect_contains "S5 an unchanged tick (nothing decided moved) still takes the unchanged path" "poker: unchanged since " "$SR_T3"
 expect_eq "S6 …and still prints the sitrep line, above the unchanged line, which stays last" \
-  "poker: sitrep 🟢🔴🟢 · owed: 1 · closes ~4:32 PM|unchanged" \
+  "poker: sitrep $SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 1 · closes ~4:32 PM|unchanged" \
   "$(printf '%s\n' "$SR_T3" | /usr/bin/grep '^poker: sitrep ')|$(printf '%s\n' "$SR_T3" | tail -1 | /usr/bin/grep -q '^poker: unchanged since ' && echo unchanged)"
 sr_tick_world surf-none none
 sr_tick
 SR_T4="$OUT"
 sr_run --line "$SR_PLAN"
-expect_eq "S7 a plan with no landing: the tick prints the ⚪ forms --line prints" \
-  "poker: sitrep ⚪🟢🟢 · owed: 0 · closes unverified|poker: sitrep $OUT" \
+expect_eq "S7 a plan with no landing: the tick prints the ❔ forms --line prints" \
+  "poker: sitrep $SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes unverified|poker: sitrep $OUT" \
   "$(printf '%s\n' "$SR_T4" | /usr/bin/grep '^poker: sitrep ')|poker: sitrep $OUT"
 
 finish
