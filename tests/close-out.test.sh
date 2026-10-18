@@ -3394,6 +3394,54 @@ expect_eq "PK-12c control: on an unparked plan step-line 9 is still refused (rc 
   "$LP_RC|$(contains "$LP_OUT" "the Step 9 line is close-out's to write")|$(cksum < "$PPN/$PLAN_REL")"
 
 # ============================================================
+section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #1; D23): the handoff verb's closed form on a parked or pull-request plan is close-out's, line for line"
+# ============================================================
+# The closed form has one writer of its two state lines, `resume point:` and `branch:`, and both doors print it:
+# close-out.sh's tail and session-poker.sh `handoff` on the closed plan. Every line but the two each door reads for
+# itself (`written:`, its own instant; `patrol:`, the disarm instruction close-out prints and the state the verb
+# reads, T12's closed form) is the same. resume on close-out's parked file says the run is parked, never that it
+# has nothing to resume. FIXTURE FIDELITY: §PARKED's closed parked plan (PPK), and §ANY-BRANCH's task-scale plan
+# whose pull request is owed (mk_task_pr_fixture), closed with `archive-on-close: false` so the plan stays where the
+# verb can bind it (an archived plan leaves the project root); each as close-out left it, the session bound by the verb.
+# fails-when: the verb writes `NONE — DELIVERED` or `merged into` on a parked or pull-request run.
+OW_HO=".bionic/docs/record/wave-01-fixture/handoff.md"
+ow_lines() { awk 'index($0, "written: ") != 1 && index($0, "patrol: ") != 1' "$1" 2>/dev/null; }  # <file> -> all but the two own lines
+ow_doors() {  # <label> <project> <sid> -> close-out's file kept at $SANDBOX/ow-copy-<label>, then the verb's written over it; OW_RC
+  cp "$2/$OW_HO" "$SANDBOX/ow-copy-$1" 2>/dev/null
+  lands_bind "$2" "$3"
+  lands_poker "$2" "$3" handoff
+  OW_RC="$LP_RC"; OW_OUT="$LP_OUT"
+}
+OW_SID="closeout-onewriter-sid"
+expect_eq "OW-0 precondition: close-out wrote PPK's closed form, parked" \
+  "resume point: PARKED on wave/01-fixture @ $PK_WS — $PK_WHY" "$(sed -n 2p "$PPK/$OW_HO" 2>/dev/null)"
+: > "$PPK/.bionic/tmp/engaged-$OW_SID.state"
+lands_poker "$PPK" "$OW_SID" resume "$OW_HO"
+expect_eq "OW-1 resume on close-out's parked file exits 0" "0" "$LP_RC"
+expect_contains "OW-1b …saying the run is parked and its work kept unmerged" "is parked: its work is kept on its branch, not merged" "$LP_OUT"
+expect_absent "OW-1c …and never that there is nothing to resume (OW-1b read the same output)" "nothing to resume" "$LP_OUT"
+ow_doors parked "$PPK" "$OW_SID"
+expect_eq "OW-2 the handoff verb on the parked plan exits 0" "0" "$OW_RC"
+expect_eq "OW-2b …line 2 is still PARKED (the OW-0 extractor)" \
+  "resume point: PARKED on wave/01-fixture @ $PK_WS — $PK_WHY" "$(sed -n 2p "$PPK/$OW_HO" 2>/dev/null)"
+expect_nonempty "OW-2c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-parked")"
+expect_eq "OW-2d the verb's closed form is close-out's, line for line" "$(ow_lines "$SANDBOX/ow-copy-parked")" "$(ow_lines "$PPK/$OW_HO")"
+
+OWR="$(mk_task_pr_fixture ow-pr "fix/x")"
+printf 'archive-on-close: false\n' >> "$OWR/.bionic/config.yaml"
+run_close "$OWR" run
+expect_eq "OW-3 precondition: close-out closed the task-scale plan rc 0, unmerged and in place" "0|no|yes" \
+  "$CO_RC|$(git -C "$OWR" merge-base --is-ancestor fix/x main && echo yes || echo no)|$([ -f "$OWR/$PLAN_REL" ] && echo yes || echo no)"
+expect_eq "OW-3b …and wrote its branch line, to be pulled" "branch: fix/x to be pulled into main." \
+  "$(/usr/bin/grep -m1 '^branch: ' "$OWR/$OW_HO" 2>/dev/null)"
+ow_doors pr "$OWR" "$OW_SID"
+expect_eq "OW-4 the handoff verb on the pull-request plan exits 0" "0" "$OW_RC"
+expect_eq "OW-4b …the branch line is still to be pulled (the OW-3b extractor)" "branch: fix/x to be pulled into main." \
+  "$(/usr/bin/grep -m1 '^branch: ' "$OWR/$OW_HO" 2>/dev/null)"
+expect_nonempty "OW-4c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-pr")"
+expect_eq "OW-4d the verb's closed form is close-out's, line for line" "$(ow_lines "$SANDBOX/ow-copy-pr")" "$(ow_lines "$OWR/$OW_HO")"
+
+# ============================================================
 section "§TOLERANT — wave-38 T15 (REQ-4 AC-4.4): a prose line in the debt ledger is skipped with a note; a missing epic table is added"
 # ============================================================
 # A line of debt.md that is no table row at all (it carries no ` | ` cell separator: prose a person or an agent wrote)

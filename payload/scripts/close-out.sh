@@ -162,9 +162,10 @@ _co_refuse() {
 }
 
 usage() {
-  echo "usage: close-out.sh <plan-path> run|check" >&2
-  echo "       run    perform the Step 8/9 tail and write both lifecycle blocks" >&2
-  echo "       check  report what run would do, and change nothing" >&2
+  echo "usage: close-out.sh <plan-path> run|check|closed-form [<instant>]" >&2
+  echo "       run          perform the Step 8/9 tail and write both lifecycle blocks" >&2
+  echo "       check        report what run would do, and change nothing" >&2
+  echo "       closed-form  print the closed handoff's resume point: and branch: lines, and change nothing" >&2
 }
 
 # ─── Arguments ───────────────────────────────────────────────────────────────
@@ -175,11 +176,17 @@ if [ -z "$PLAN" ] || [ -z "$VERB" ]; then
   usage
   _co_refuse "this call names no plan, or no verb — the verbs are run and check"
 fi
+CO_AT=""
 case "$VERB" in
   run|check) : ;;
+  closed-form)
+    [ $# -le 3 ] || { usage; _co_refuse "closed-form takes the plan and at most one instant"; }
+    CO_AT="${3:-}"
+    case "$CO_AT" in *[[:cntrl:]]*|*[[:space:]]*) usage; _co_refuse "closed-form's instant is one word" ;; esac
+    ;;
   *)
     usage
-    _co_refuse "unknown verb '$VERB' — the verbs are run and check"
+    _co_refuse "unknown verb '$VERB' — the verbs are run, check and closed-form"
     ;;
 esac
 [ -f "$PLAN" ] || _co_refuse "no plan file at $PLAN"
@@ -276,6 +283,66 @@ PARKED_WHY=""
 PARKED=no
 if PARKED_WHY="$(plan_parked_why "$PLAN")"; then PARKED=yes; fi
 
+# THE SCALE (wave-38 T16; D25, AC-5.1): the plan's `scale:`, read at the wave row when it names none or one the profile
+# does not hold. Its branch cell shapes the worktree census below; its integrate cell is the act.
+CO_SCALE="$(plan_frontmatter_get "$PLAN" scale)"
+scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
+
+# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). `merge` (wave, epic): the working
+# branch must be reachable from the integration branch before the tail runs, as before. `pr` (task):
+# close-out merges nothing; an unmerged working branch is not refused, and the act prints the one
+# `gh pr create` command for it against the integration branch and records it in the continuation.
+# It never runs it: opening a pull request is an outward act, the person's.
+CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
+CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
+# co_pr_owed -> 0 when the act is `pr` and the working branch is not yet reachable from the integration branch
+co_pr_owed() {
+  [ "$CO_INTEGRATE" = pr ] || return 1
+  ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
+}
+# co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
+co_pr_line() {
+  printf 'pr — %s (not run; %s @ %s is not merged into %s @ %s)' "$CO_PR_CMD" "$WORKING" "${1:-?}" "$INTEGRATION" "${2:-?}"
+}
+# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed
+co_into() { if co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
+# co_pr_section -> the continuation's record of the act
+co_pr_section() {
+  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Open it with:\n\n    %s\n' "$CO_SCALE" "$CO_PR_CMD"
+}
+
+# THE CLOSED FORM'S RESUME POINT AND BRANCH LINE (wave-38 T15, AC-4.3; the one writer since wave-38 T37, D23): a
+# delivered run has nothing to resume; a parked one resumes from its branch, which is kept; a pull request owed is "to be
+# pulled". close-out writes both into the closed handoff, and session-poker.sh `handoff` on a closed plan prints what
+# `closed-form` (below) prints, so the two doors cannot say different things.
+co_resume_point() {
+  if [ "$PARKED" = yes ]; then
+    printf 'resume point: PARKED on %s @ %s — %s' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$PARKED_WHY"
+  else
+    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$NOW" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
+  fi
+}
+co_branch_line() {
+  if [ "$PARKED" = yes ]; then printf 'branch: %s kept, not merged into %s; its worktrees are kept.' "$WORKING" "$INTEGRATION"
+  else printf 'branch: %s %s into %s.' "$WORKING" "$(co_into)" "$INTEGRATION"; fi
+}
+
+# `closed-form [<instant>]` (wave-38 T37): the two lines, one each, for a plan close-out closed or one it would close;
+# read-only, and asked before the closed run's `already closed`. The instant is the argument, else the first word after
+# the Step-9 line's `delivered:` when it is ISO-shaped (close-out writes its NOW there), else `?`. A plan whose
+# ## SDLC State names no integration-branch: is read at its frontmatter's, the verb's own fallback.
+if [ "$VERB" = closed-form ]; then
+  [ -n "$INTEGRATION" ] || INTEGRATION="$(plan_frontmatter_get "$PLAN" integration-branch)"
+  INTEGRATION="${INTEGRATION:-(none named)}"; WORKING="${WORKING:-(none named)}"
+  NOW="$CO_AT"
+  if [ -z "$NOW" ]; then
+    NOW="$(normalize_newlines "$PLAN" | awk '/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:.*delivered:/ { s = $0; sub(/^.*delivered:[[:space:]]*/, "", s); sub(/[[:space:]].*$/, "", s); print s; exit }')"
+    case "$NOW" in [0-9][0-9][0-9][0-9]-*) : ;; *) NOW="?" ;; esac
+  fi
+  printf '%s\n%s\n' "$(co_resume_point)" "$(co_branch_line)"
+  exit 0
+fi
+
 # ─── Preflight ───────────────────────────────────────────────────────────────
 #
 # AC-4.4 FIRST, before any tool is even looked for: a closed run is not a run this script
@@ -323,37 +390,12 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # `wt_unreached` (below) reports none. A wave or epic plan's cell is its pattern, whose `<NN>` is the
 # number the census scopes to. A plan with no `scale:`, or one the profile does not hold, is read at
 # the wave row, the default scale, which is the refusal it met before the profile.
-CO_SCALE="$(plan_frontmatter_get "$PLAN" scale)"
-scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 WT_NUM=""
 if ! units_has_column "$PLAN" worktree; then
   if ! WT_NUM="$(scale_branch_number "$CO_SCALE" "$WORKING")"; then
     _co_refuse "the plan's working-branch '$WORKING' is not $(scale_cell "$CO_SCALE" branch) shaped (the $CO_SCALE scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to"
   fi
 fi
-
-# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). `merge` (wave, epic): the working
-# branch must be reachable from the integration branch before the tail runs, as before. `pr` (task):
-# close-out merges nothing; an unmerged working branch is not refused, and the act prints the one
-# `gh pr create` command for it against the integration branch and records it in the continuation.
-# It never runs it: opening a pull request is an outward act, the person's.
-CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
-CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
-# co_pr_owed -> 0 when the act is `pr` and the working branch is not yet reachable from the integration branch
-co_pr_owed() {
-  [ "$CO_INTEGRATE" = pr ] || return 1
-  ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
-}
-# co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
-co_pr_line() {
-  printf 'pr — %s (not run; %s @ %s is not merged into %s @ %s)' "$CO_PR_CMD" "$WORKING" "${1:-?}" "$INTEGRATION" "${2:-?}"
-}
-# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed
-co_into() { if co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
-# co_pr_section -> the continuation's record of the act
-co_pr_section() {
-  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Open it with:\n\n    %s\n' "$CO_SCALE" "$CO_PR_CMD"
-}
 
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
@@ -1526,20 +1568,6 @@ STEP9
 - Step 9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE} — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at $CONT_REL
   attested-by: close-out.sh $VERSION
 STEP9
-}
-
-# THE CLOSED FORM'S RESUME POINT AND BRANCH LINE (wave-38 T15; AC-4.3): a delivered run has nothing to resume; a parked
-# one resumes from its branch, which is kept. One writer for both, so the handoff and its readback agree.
-co_resume_point() {
-  if [ "$PARKED" = yes ]; then
-    printf 'resume point: PARKED on %s @ %s — %s' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$PARKED_WHY"
-  else
-    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$NOW" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
-  fi
-}
-co_branch_line() {
-  if [ "$PARKED" = yes ]; then printf 'branch: %s kept, not merged into %s; its worktrees are kept.' "$WORKING" "$INTEGRATION"
-  else printf 'branch: %s %s into %s.' "$WORKING" "$(co_into)" "$INTEGRATION"; fi
 }
 
 # THE HANDOFF FILE IS THE STORE (wave-38 T12; D23). The closed form is written into the run's handoff file — the
