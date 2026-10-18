@@ -532,7 +532,7 @@ expect_eq "RN1 ls payload/commands payload/skills has no resume" "0" \
 # <branch> @ <sha> — <why>` and `branch: <b> kept, not merged into <i>; its worktrees are kept.` on a parked plan;
 # `branch: <b> to be pulled into <i>.` while a task-scale plan's pull request is owed, `merged into` once the
 # integration branch holds the work. The two lines are close-out.sh's: the verb prints what `close-out.sh <plan>
-# closed-form` prints (OW4), and close-out.test.sh §ONE-WRITER holds the two doors' files to each other line for line.
+# closed-form` prints (OW4), and close-out-4.test.sh §ONE-WRITER holds the two doors' files to each other line for line.
 # FIXTURE FIDELITY: §CLOSED's world; the Step-9 lines in the shapes close-out.sh writes them, the Wake Note in the
 # shape steps/8.md asks for. fails-when: the verb reads a parked or pull-request plan's `delivered:` line as a merge.
 HF_WHY="The release waits on a hand test on the user's machine."

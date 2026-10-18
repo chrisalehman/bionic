@@ -20,8 +20,9 @@
 #   ready     row name commit branch tree suites debt carrier age   (a carrier is `<pid>:<start>`; age
 #             `<first>:<seq>`, the lease the gate orders the entry by, wave-38 T30)
 #   candidate row base commit tree
-#   verdict   row commit suite result log admitted width reads   (green | red | none | discarded; reads= the
-#             suite's read key at the commit, lib/anchors.sh `reads_hash`, wave-39 T1)
+#   verdict   row commit suite result log admitted width reads   (green | red | none | discarded | absent: a
+#             suite the candidate's base holds and the candidate does not, log `-`, wave-39 T6, A-orch-5; reads=
+#             the suite's read key at the commit, lib/anchors.sh `reads_hash`, wave-39 T1)
 #   reused    row commit suite reads from      (the suite proved on this candidate by the verdict of `from`, an
 #             earlier candidate whose suite read the same blobs; the fold reads it as green; wave-39 T1, D5)
 #   standing  head suite lines log cause against   (cause: environment | code; against: the run that
@@ -80,6 +81,11 @@ fi
 # landing sets kind=hand, the git user and the reason. Both set the session the publish's plan write
 # and roster mark run under (LINE_SID; wave-28 T6).
 LINE_KIND="queue"; LINE_BY="-"; LINE_WHY="-"; LINE_SID=""; LINE_MARKED=""
+
+# THE SUITE BAR (wave-39 T6; D1; spec §3 "the two bars"): ten minutes of the gate's promise (`_gate_seconds`).
+# Defined here and nowhere else; the landing line's refusal of a Lands-on suite promising more is T7's
+# (A-orch-5), so nothing reads it yet.
+LINE_SUITE_BAR=600
 
 _line_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
@@ -191,7 +197,7 @@ _line_fold() {  # <record>
             m = split(s, names, ",")
             for (j = 1; j <= m; j++) {
               r = v[e, c, names[j]]
-              if (r == "green") continue
+              if (r == "green" || r == "absent") continue
               if (r == "red") {
                 if (names[j] == debt[e]) dec = 1
                 else if ((cbase[e], names[j]) in stand) std = 1
@@ -998,6 +1004,13 @@ EOF
         [ "$c" = "$cand" ] || _line_reused "$plan" "$rec" "$row" "$cand" "$s" "reads=$(_line_reads_of "$cand" "$s")" "$c"
         continue
       fi
+      # A SUITE THE ROW REMOVED IS NOT OWED (wave-39 T6; A-orch-5): a row that removes or splits a suite still
+      # names it on the Lands-on its brief gave, and a runner could only fail to start it (two `none`s stall the
+      # entry). Held by the candidate's base and not by the candidate, it is recorded once, `absent` with no log,
+      # and counts as proved; nothing runs for it. A name the base lacks too still stalls (wave-34 T27).
+      if _line_removed "$root" "$cbase" "$cand" "$s"; then
+        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; continue
+      fi
       said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
         said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
@@ -1146,12 +1159,13 @@ _line_closed() {  # <rec> <row> <name> [<plan>]
 # whose read key is <key> (`reads=<h>`), on any candidate, of any row; it prints that verdict's commit. Never by
 # commit: a rebuilt or re-ordered candidate whose suite read the same blobs keeps the verdict. A verdict with no
 # reads= (one written before this release) and the unreadable key `reads=-` match nothing; a `none` or
-# `discarded` verdict says nothing about the content and is passed over.
+# `discarded` verdict says nothing about the content and is passed over. An `absent` one (the row removed the
+# suite; wave-39 T6) proves it, as a green does.
 _line_proved() {  # <rec> <suite> <key> -> the proving verdict's commit
   case "$3" in ''|*=|*=-) return 1 ;; esac
   awk -F'|' -v s="suite=$2" -v k="$3" '
-    $2 == "ev=verdict" && $5 == s && ($6 == "result=green" || $6 == "result=red") {
-      for (i = 4; i <= NF; i++) if ($i == k) { ok = ($6 == "result=green"); c = substr($4, 8) }
+    $2 == "ev=verdict" && $5 == s && ($6 == "result=green" || $6 == "result=red" || $6 == "result=absent") {
+      for (i = 4; i <= NF; i++) if ($i == k) { ok = ($6 != "result=red"); c = substr($4, 8) }
     }
     END { if (!ok) exit 1; print c }' "$1" 2>/dev/null
 }
@@ -1638,6 +1652,21 @@ LINE_LS
     [ "$n" -ne 1 ] || { printf '%s\n' "$hit"; return 0; }
   fi
   printf 'tests/%s\n' "$name"
+}
+# A SUITE THE ROW REMOVED (wave-39 T6; A-orch-5): 0 when <base> holds the suite and <candidate> does not, each
+# read as git holds it with the lookup above: a path-qualified name at its path; a bare one at `tests/<name>` or
+# as any tracked file of that name. 1 otherwise: a suite neither holds (a name no tree has, the case that stalls,
+# wave-34 T27) is not the row's removal, and neither is a commit that is not one here.
+_line_removed() {  # <root> <base> <candidate> <suite as lands_on= holds it>
+  _line_holds "$1" "${2:-}" "${4:-}" && ! _line_holds "$1" "${3:-}" "${4:-}" \
+    && git -C "$1" cat-file -e "${3:-}^{commit}" 2>/dev/null
+}
+_line_holds() {  # <root> <commit> <suite> -> 0 when <commit> is a commit holding the suite
+  local root="$1" c="${2:-}" name="${3:-}"
+  { [ -n "$c" ] && [ -n "$name" ] && git -C "$root" cat-file -e "${c}^{commit}" 2>/dev/null; } || return 1
+  case "$name" in */*) git -C "$root" cat-file -e "${c}:${name}" 2>/dev/null; return ;; esac
+  git -C "$root" cat-file -e "${c}:tests/${name}" 2>/dev/null && return 0
+  git -C "$root" ls-tree -r --name-only "$c" 2>/dev/null | awk -F/ -v n="$name" '$NF == n { f = 1 } END { exit !f }'
 }
 # The runner's body, in its own `bash -c`: ask, run, sample the gate while the suite runs (a locked
 # read raises the run's peak), end the request with the suite's code. It stops its suite if the
