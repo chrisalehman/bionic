@@ -9759,13 +9759,21 @@ S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 # files (the path list from a helper in one, the key read in the other, review 15's case E), and
 # a key read in a spelling none of the read forms lists (an awk `index($i, "files=")`). Neither
 # file then does both halves. Review is what catches those; the rows below do not pretend to.
+# A TREE LISTING IS NOT A CHANGE LIST (wave-38 T33, A-T33-3). `git ls-tree --name-only` and `git ls-files` list the
+# paths a tree holds, so their words are dropped up to the next | ; & or ) before the forms are read: T21's
+# `ls-tree -r --name-only --full-tree HEAD -- "$rel"` in hooks/dispatch-preflight.sh asks whether a path is tracked,
+# and a `git diff --name-only` later on the same line is still read.
 S18_DIFF_RE='--name-only|--name-status|--numstat|diff --stat|status --porcelain'
 S18_READ_RE='"files="|files=\*\)|_field[^)]*[ "]files([^=_A-Za-z0-9]|$)'
+s18_changed_lines() {  # <file> -> its lines that list changed paths, by any of the forms, tree listings dropped
+  /usr/bin/sed -E 's/ls-(tree|files)[^|;&)]*//g' "$1" | /usr/bin/grep -E -- "$S18_DIFF_RE"
+  return 0
+}
 s18_reconcilers() {  # <dir> -> the .sh files under it that do both halves, one per line
   local _f
   for _f in "$1"/*.sh; do
     [ -f "$_f" ] || continue
-    /usr/bin/grep -qE -- "$S18_DIFF_RE" "$_f" && /usr/bin/grep -qE -- "$S18_READ_RE" "$_f" && printf '%s\n' "$_f"
+    [ -n "$(s18_changed_lines "$_f")" ] && /usr/bin/grep -qE -- "$S18_READ_RE" "$_f" && printf '%s\n' "$_f"
   done
   return 0
 }
@@ -9780,8 +9788,23 @@ expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
 # the planted hook copy below proves.
 expect_ne "S18.1 the hooks are read: at least one hook file is there" "0" \
   "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | grep -c . | tr -d ' ')"
-expect_eq "S18.1 …and no hook file carries --name-only" "" \
-  "$(/usr/bin/grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null)"
+s18_name_only_files() {  # <dir> -> the .sh files under it with a --name-only list of changed paths, one per line
+  local _f
+  for _f in "$1"/*.sh; do
+    [ -f "$_f" ] || continue
+    s18_changed_lines "$_f" | /usr/bin/grep -qF -- '--name-only' && printf '%s\n' "$_f"
+  done
+  return 0
+}
+expect_eq "S18.1 …and no hook file carries a --name-only diff" "" "$(s18_name_only_files "$BIONIC_HOOKS_DIR")"
+# The extractor on one planted copy of hooks/: a --name-only diff is read, and a tree listing beside it is not.
+S18_HK="$SANDBOX/s18-hooks"; rm -rf "$S18_HK"; mkdir -p "$S18_HK"; cp "$BIONIC_HOOKS_DIR"/*.sh "$S18_HK/"
+printf '#!/bin/bash\nchanged="$(git diff --name-only "$1..HEAD")"\n' > "$S18_HK/planted-diff.sh"
+printf '#!/bin/bash\ngit ls-tree -r --name-only --full-tree HEAD -- "$1" | head -1\n' > "$S18_HK/planted-listing.sh"
+expect_eq "S18.1 the --name-only extractor reads a planted diff in a copy of hooks/ (its positive)" \
+  "$S18_HK/planted-diff.sh" "$(s18_name_only_files "$S18_HK")"
+expect_eq "S18.1 …and the planted tree listing in that copy is not read (it lists no change)" "" \
+  "$(s18_name_only_files "$S18_HK" | /usr/bin/grep -F planted-listing)"
 expect_eq "S18.1 …and no hook file reconciles, by any of the library row's diff forms" "" \
   "$(s18_reconcilers "$BIONIC_HOOKS_DIR")"
 
@@ -10338,12 +10361,18 @@ section "B — no backtick pair hides inside a double-quoted assertion name (AC-
 # not nested in further quotes, is real intentional legacy substitution nested in the modern
 # form — a style question, not this defect class. A hit prints as `<file>:<line>`, one per
 # PAIR found.
+# A SINGLE-QUOTED STRING LEFT OPEN AT A LINE'S END IS CARRIED (wave-38 T33, A-T33-4). An awk
+# program opened by `awk '` and closed lines later is one single-quoted word, so its
+# `index(s, "`Plan`")` (T21's tests/dispatch-preflight-5.test.sh) is inert text, not a pair in
+# a double-quoted string: the next line starts inside the quote, whichever context opened it
+# (top level or a $(...) body), and is read from the closing quote on. A `<<` on a line that
+# starts or ends inside a carried quote opens no heredoc.
 
 B_AWK="$SANDBOX/backtick-scan.awk"
 cat > "$B_AWK" <<'AWK_EOF'
 function skip_squote(line, i, n,    c) {
-  while (i <= n) { c = substr(line, i, 1); if (c == "'") return i + 1; i++ }
-  return n + 1
+  while (i <= n) { c = substr(line, i, 1); if (c == "'") { SQ_SHUT = 1; return i + 1 } i++ }
+  SQ_SHUT = 0; IN_SQUOTE = 1; return n + 1
 }
 function scan_subshell(line, i, n,    c, r) {
   while (i <= n) {
@@ -10384,6 +10413,7 @@ function scan_dquote(line, i, n,    c, j) {
 }
 function scan_line(line,    i, n, c, r) {
   HIT = 0; i = 1; n = length(line)
+  if (IN_SQUOTE) { IN_SQUOTE = 0; i = skip_squote(line, 1, n); if (!SQ_SHUT) return 0 }
   while (i <= n) {
     c = substr(line, i, 1)
     if (c == "#") return HIT
@@ -10412,11 +10442,12 @@ function heredoc_start(line,    tmp) {
 function is_delim_line(line,    t) {
   t = line; if (HD_STRIP) sub(/^[ \t]+/, "", t); return (t == HD_DELIM)
 }
-FNR == 1 { IN_HEREDOC = 0 }
+FNR == 1 { IN_HEREDOC = 0; IN_SQUOTE = 0 }
 {
   if (IN_HEREDOC) { if (is_delim_line($0)) IN_HEREDOC = 0; next }
+  SQ_WAS = IN_SQUOTE
   if (scan_line($0)) print FILENAME ":" FNR
-  if (heredoc_start($0)) IN_HEREDOC = 1
+  if (!SQ_WAS && !IN_SQUOTE && heredoc_start($0)) IN_HEREDOC = 1
 }
 AWK_EOF
 
@@ -10469,10 +10500,16 @@ cat <<'HEREDOC_EOF'
 a heredoc body line with a `pair` in it, quoted delimiter
 HEREDOC_EOF
 expect_eq "the neighbour the `.` would have swallowed" "x" "y"
+RES="$(awk '
+  index($0, "`Explore`") { print "x" }
+' "$f")"
+expect_eq "a second `real` pair, after the program closes" "x" "y"
+awk -v r="$(roles)" '
+  index($0, "`Plan`") { print }' "$f"
 FX_EOF
 B_FX_HITS="$(b_scan "$B_FX")"
-expect_eq "…the five exclusions (escaped, \$(...) w/ nested single quotes, comment, single-quoted, heredoc body) stay silent; only the real pair on line 9 is a hit" \
-  "$B_FX:9" "$B_FX_HITS"
+expect_eq "…the seven exclusions (escaped, \$(...) w/ nested single quotes, comment, single-quoted, heredoc body, a program opened in \$(...) and one opened at top level) stay silent; only the real pairs on lines 9 and 13 are hits" \
+  "$(printf '%s:9\n%s:13' "$B_FX" "$B_FX")" "$B_FX_HITS"
 
 
 # ============================================================
@@ -12128,8 +12165,10 @@ section "§ROOM — the tick and the stop wall give one answer on width (wave-28
 # 1.0 core, ten ready rows and a person's cap of eight; the reading moves, the answer moves, and
 # the two readers move together. The wall owes nothing when the gate gives no room — its HOLD —
 # and that is the count 0, the tick's empty FILL.
-#   quiet   a load of 1.0: 1.0 + k owed runs fits 6.4 cores for k = 0 … 5            -> 6
-#   loaded  a load of 4.0 over both windows                                           -> 3
+# Each owed row is promised resources.sh's suite cost P (wave-38 T5; D21), lifted, never a literal:
+# row k (from 0) is offered while load + k × P <= 6.4 cores. At P = 1.61:
+#   quiet   a load of 1.0: 1.0 + k × 1.61 fits 6.4 cores for k = 0 … 3                -> 4
+#   loaded  a load of 4.0 over both windows: 4.0 + k × 1.61 for k = 0 … 1              -> 2
 #   5m      a quiet minute, a five-minute load of 7.0                                 -> 0
 room_world() {  # <label> -> repo path, with ten ready rows under a cap of eight
   cgb_world "room-$1" 'parallel-budget: writers=8 suites=2 source=user'
@@ -12161,8 +12200,18 @@ ROOM_GATE_SAVED="$BIONIC_GATE_DIR"
 mkdir -p "$ROOM_GATE/requests" "$ROOM_GATE/cost"
 printf '5:1.0:30:1000\n' > "$ROOM_GATE/cost/fixture.test.sh"
 export BIONIC_GATE_DIR="$ROOM_GATE"
-for _rm in quiet:1.0:1.0:6 loaded:4.0:4.0:3 5m:1.0:7.0:0; do
-  IFS=: read -r _rm_case _rm_b1 _rm_b5 _rm_want <<< "$_rm"
+ROOM_P="$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores )"
+room_want() {  # <load 1m> <load 5m> -> the rows offered: k from 0 while max(load) + k × P <= 6.4, under the cap of 8
+  awk -v b1="$1" -v b5="$2" -v p="$ROOM_P" 'BEGIN { b = (b1 > b5 ? b1 : b5); k = 0
+    while (k < 8 && b + k * p <= 80 * 8 / 100 + 1e-9) k++; print k }'
+}
+expect_true "ROOM precondition: the suite cost was lifted from resources.sh (${ROOM_P:-<empty>})" \
+  test -n "$( printf '%s' "$ROOM_P" | grep -E '^[0-9]+(\.[0-9]+)?$' )"
+expect_true "ROOM precondition: quiet offers more rows than loaded, and loaded more than none ($(room_want 1.0 1.0) > $(room_want 4.0 4.0) > 0)" \
+  test "$(room_want 1.0 1.0)" -gt "$(room_want 4.0 4.0)" -a "$(room_want 4.0 4.0)" -gt 0
+for _rm in quiet:1.0:1.0 loaded:4.0:4.0 5m:1.0:7.0; do
+  IFS=: read -r _rm_case _rm_b1 _rm_b5 <<< "$_rm"
+  _rm_want="$(room_want "$_rm_b1" "$_rm_b5")"
   _rm_r=$(room_world "$_rm_case")
   cgc_row "$_rm_r/.bionic/tmp/roster-$SID_A.state" room-tickrow 2026-09-01T00:00:00Z toolu_01ROOMTICK
   cgc_ack "$_rm_r/.bionic/tmp/sweeper-$SID_A.state" 2026-09-01T01:00:00Z room-tickrow
@@ -12754,7 +12803,8 @@ CGLEOF
   [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
   CGL_TICK="$(cgl_tick)"
   case "$lbl" in
-    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=1 admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
+    # The owed writer is promised resources.sh's suite cost (wave-38 T5; D21), lifted, never a literal.
+    -hold) expect_contains "CG-ledger${lbl} precondition: the gate gives the tick no room" "load=1.0/${load5} of 8 promised=$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores ) admitted=0 waiting=0 room=no" "$CGL_TICK" ;;
     -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
                  "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
   esac
@@ -13767,7 +13817,7 @@ prf_at() {
   for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
             "$(proof_line review "$PRF_E" 2026-10-04T10:30:00Z record/w/adv.md adversarial w-crit flag whole)" \
             "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md evidence w-aud pass piece)" \
-            "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
+            "$(proof_line regression "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
     proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
   done
 )
@@ -13912,7 +13962,7 @@ FCHK_H="$(git -C "$FCHK_D" rev-parse HEAD 2>/dev/null)"
 FCHK_OUT="$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$PRF_LIB/proof.sh" "$FCHK_D/plan.md" "$FCHK_H" 2>/dev/null)"
 expect_regex "FACT-FINAL precondition: the fixture repository has a head" '^[0-9a-f]{40}$' "$FCHK_H"
 expect_contains "FACT-FINAL the judge answers the facts the plan owes (the extractor reads real output: the floor line)" \
-  "floor" "$FCHK_OUT"
+  "regression" "$FCHK_OUT"
 expect_absent "FACT-FINAL …and holds no check, open or not: no finding-check line" "finding-check" "$FCHK_OUT"
 expect_eq "FACT-FINAL the library defines the judge, and no reader of checks (proof_checks_open, _proof_check_state)" "1|0|0" \
   "$(bash -c '. "$1"; declare -F facts_state >/dev/null && printf 1 || printf 0; printf "|"; declare -F proof_checks_open >/dev/null && printf 1 || printf 0; printf "|"; declare -F _proof_check_state >/dev/null && printf 1 || printf 0' _ "$PRF_LIB/proof.sh" 2>/dev/null)"
@@ -13950,7 +14000,7 @@ for deal_r in single double; do
       expect_eq "DEAL $deal_r $deal_s: $deal_q is dealt to exactly one role" "1" \
         "$(deal "$deal_r" "$deal_s" | awk -F'\t' -v q="$deal_q" '$1 == "review" && $2 == q && $4 == "piece"' | awk 'END { print NR }')"
     done
-    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx floor)"
+    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx regression)"
     expect_eq "DEAL $deal_r $deal_s: every dealt role is a reader role the fact verb admits" "" \
       "$(deal "$deal_r" "$deal_s" | ROLES="$DEAL_ROLES" awk -F'\t' '$1 == "review" && index(" " ENVIRON["ROLES"] " ", " " $3 " ") == 0 { print $3 }')"
   done
@@ -14532,15 +14582,19 @@ expect_eq "§SLUG 6c …and accepts bionic2's transcript as bionic's (rc 0), so 
 rm -rf "$SG_D"
 
 # ---------------------------------------------------------------------------
-section "§WIDTH — one width rule: the landing drain's J is the runner's JOBS on one fixture rung (wave-37 T1; D3, REQ-3 AC-3.2; ownership row 'the width rule J')"
+section "§WIDTH — the gate owns the width: the landing drain's J is the gate's answer, the runner's JOBS the floor's rule (wave-37 T1; wave-38 T6, D21, ADR-060; ownership row 'the width rule J')"
 #
-# The floor (tests/run.sh `_runner_width`) and the landing's drain (lib/line.sh `_line_width`) each read
-# the width by calling the same two functions, `pressure_level` over `gate_width`; neither keeps a number
-# of its own. One fixture rung: share 100 on the suite's 8 pinned cores (gate_width 8), the ring holding
-# one sample by the real writer, clear or critical. No ceiling is set, so the runner's JOBS is the rule
-# alone. A drain with a literal J agrees with the runner on no more than one rung.
+# wave-38 D21: the drain no longer sizes itself. Before each pass it asks the gate (lib/gate.sh
+# `gate_width_ask <landing>`) through one door, lib/line.sh `_line_width_ask`, and starts exactly the
+# answer; `_line_width` is retired. The floor (tests/run.sh `_runner_width`) still reads `pressure_level`
+# over `gate_width`. So the agreement has two halves, neither a copy of the other's arithmetic: on each
+# planted rung the drain's answer IS the gate's, and the runner's JOBS is still the floor's rule. The
+# drain's rungs are T5's worked table (8 cores at share 92: load 2 answers 4, load 6 answers 1, from an
+# empty store); the runner's are one sample in the ring, clear or critical, on the suite's 8 pinned cores
+# at share 100.
 WD_DIR="$SANDBOX/wd"; WD_HOME="$WD_DIR/cfg"; WD_RING="$WD_DIR/pressure.ring"; WD_NOW=1757030000
 mkdir -p "$WD_HOME/bionic"; printf '100\n' > "$WD_HOME/bionic/share"
+WD_GHOME="$WD_DIR/gcfg"; mkdir -p "$WD_GHOME/bionic"; printf '92\n' > "$WD_GHOME/bionic/share"
 WD_LIB="$REPO_ROOT/payload/scripts/lib"
 WD_CLEAR="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
 WD_CRIT="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
@@ -14554,27 +14608,35 @@ wd_runner() {  # <probe env> -> tests/run.sh's JOBS under --dry-run, no ceiling
     export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW" CLAUDE_CONFIG_DIR="$WD_HOME"
     bash "$REPO_ROOT/tests/run.sh" --dry-run 2>/dev/null ) | sed -n 's/^JOBS=//p' | head -1
 }
-wd_drain() {  # <probe env> [<sed over _line_width>] -> the drain's J
-  ( eval "export $1"; unset BIONIC_TEST_JOBS_CEILING
-    export BIONIC_PRESSURE_RING="$WD_RING" BIONIC_NOW_EPOCH="$WD_NOW" CLAUDE_CONFIG_DIR="$WD_HOME"
-    bash -c '. "$1/line.sh" >/dev/null 2>&1 || exit 99
-      [ -z "$2" ] || eval "$(declare -f _line_width | sed "$2")"
-      _line_width' _ "$WD_LIB" "${2:-}" 2>/dev/null )
+wd_rung() {  # <load> -> the probe env of the drain's planted machine: 8 cores, 30% of memory used, <load> busy
+  printf 'BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_FREE_PCT=70 BIONIC_PROBE_FREE_MB=5734 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_BUSY_CORES=%s BIONIC_PROBE_BUSY_CORES_5M=%s BIONIC_PROBE_LOAD_1M=%s' "$1" "$1" "$1"
 }
-wd_seed "$WD_CLEAR"; WD_RUN_CLEAR="$(wd_runner "$WD_CLEAR")"; WD_DRAIN_CLEAR="$(wd_drain "$WD_CLEAR")"
-wd_seed "$WD_CRIT"; WD_RUN_CRIT="$(wd_runner "$WD_CRIT")"; WD_DRAIN_CRIT="$(wd_drain "$WD_CRIT")"
-expect_eq "WIDTH 1 a clear rung: the runner's JOBS is the whole width (not vacuous)" "8" "$WD_RUN_CLEAR"
-expect_eq "WIDTH 1b …and the drain's J is the runner's JOBS" "$WD_RUN_CLEAR" "$WD_DRAIN_CLEAR"
-expect_eq "WIDTH 2 a critical rung: the runner's JOBS is a quarter" "2" "$WD_RUN_CRIT"
-expect_eq "WIDTH 2b …and the drain's J is the runner's JOBS" "$WD_RUN_CRIT" "$WD_DRAIN_CRIT"
-expect_true "WIDTH 3 line.sh calls gate_width" test "$(/usr/bin/grep -c 'gate_width' "$WD_LIB/line.sh")" -ge 1
-expect_true "WIDTH 3b …and so does tests/run.sh" test "$(/usr/bin/grep -c 'gate_width' "$REPO_ROOT/tests/run.sh")" -ge 1
-# MUTANT: a literal J. The drain then keeps a number of its own and parts from the runner on a rung.
-anchor fn payload/scripts/lib/line.sh 'pressure_level "$(gate_width)"' _line_width 'echo 4'
-wd_seed "$WD_CLEAR"; WD_MUT_CLEAR="$(wd_drain "$WD_CLEAR" "$ANCHOR_SED")"
-wd_seed "$WD_CRIT"; WD_MUT_CRIT="$(wd_drain "$WD_CRIT" "$ANCHOR_SED")"
-expect_eq "WIDTH 4m-pre the mutant ran: its J is the literal on both rungs" "4 4" "$WD_MUT_CLEAR $WD_MUT_CRIT"
-expect_eq "WIDTH 4m MUTANT a literal J: the drain parts from the runner on both rungs (the rows can fail)" "no no" \
-  "$([ "$WD_MUT_CLEAR" = "$WD_RUN_CLEAR" ] && echo yes || echo no) $([ "$WD_MUT_CRIT" = "$WD_RUN_CRIT" ] && echo yes || echo no)"
+wd_ask() {  # <probe env> <gate|drain> [<sed over _line_width_ask>] -> the answer for landing wd:T1, from an empty store of its own
+  ( eval "export $1"; unset BIONIC_TEST_JOBS_CEILING
+    export CLAUDE_CONFIG_DIR="$WD_GHOME" BIONIC_GATE_DIR="$WD_DIR/gate-$2" BIONIC_PRESSURE_RING="$WD_DIR/ask.ring" BIONIC_NOW_EPOCH="$WD_NOW"
+    rm -rf "$BIONIC_GATE_DIR" "$BIONIC_PRESSURE_RING"
+    bash -c '. "$1/line.sh" >/dev/null 2>&1 && . "$1/gate.sh" >/dev/null 2>&1 || exit 99
+      [ -z "$3" ] || eval "$(declare -f _line_width_ask | sed "$3")"
+      if [ "$2" = gate ]; then gate_width_ask wd:T1; else _line_width_ask wd:T1; fi' _ "$WD_LIB" "$2" "${3:-}" 2>/dev/null )
+}
+wd_seed "$WD_CLEAR"; WD_RUN_CLEAR="$(wd_runner "$WD_CLEAR")"
+wd_seed "$WD_CRIT"; WD_RUN_CRIT="$(wd_runner "$WD_CRIT")"
+expect_eq "WIDTH 1 the floor, a clear rung: the runner's JOBS is the whole width, pressure_level over gate_width (not vacuous)" "8" "$WD_RUN_CLEAR"
+expect_eq "WIDTH 2 the floor, a critical rung: the runner's JOBS is a quarter" "2" "$WD_RUN_CRIT"
+WD_GATE_2="$(wd_ask "$(wd_rung 2.0)" gate)"; WD_DRAIN_2="$(wd_ask "$(wd_rung 2.0)" drain)"
+WD_GATE_6="$(wd_ask "$(wd_rung 6.0)" gate)"; WD_DRAIN_6="$(wd_ask "$(wd_rung 6.0)" drain)"
+expect_eq "WIDTH 1b the drain, load 2 on 8 cores at share 92: the gate answers 4 (not vacuous)" "4" "$WD_GATE_2"
+expect_eq "WIDTH 1c …and the drain's J is the gate's answer" "$WD_GATE_2" "$WD_DRAIN_2"
+expect_eq "WIDTH 2b the drain, load 6: the gate answers 1 (0 by the rule, 1 by the floor)" "1" "$WD_GATE_6"
+expect_eq "WIDTH 2c …and the drain's J is the gate's answer" "$WD_GATE_6" "$WD_DRAIN_6"
+expect_true "WIDTH 3 line.sh asks the gate for the width (gate_width_ask)" test "$(/usr/bin/grep -c 'gate_width_ask' "$WD_LIB/line.sh")" -ge 1
+expect_true "WIDTH 3b …and tests/run.sh still reads gate_width" test "$(/usr/bin/grep -c 'gate_width' "$REPO_ROOT/tests/run.sh")" -ge 1
+expect_eq "WIDTH 3c the drain's door is defined and _line_width is retired" "yes no" \
+  "$(bash -c '. "$1/line.sh" >/dev/null 2>&1; declare -F _line_width_ask >/dev/null && echo yes || echo no; declare -F _line_width >/dev/null && echo yes || echo no' _ "$WD_LIB" | tr '\n' ' ' | sed 's/ $//')"
+# MUTANT: the drain sizes itself again by the floor's rule. It then parts from the gate's answer.
+anchor fn payload/scripts/lib/line.sh 'gate_width_ask "$1"' _line_width_ask 'pressure_level "$(gate_width)"'
+WD_MUT_2="$(wd_ask "$(wd_rung 2.0)" drain "$ANCHOR_SED")"
+expect_true "WIDTH 4m-pre the mutant ran: its J is a whole number ($WD_MUT_2)" test -n "$WD_MUT_2" -a -z "${WD_MUT_2//[0-9]/}"
+expect_true "WIDTH 4m MUTANT the drain sizes itself: its J parts from the gate's answer at load 2 (the rows can fail)" test "$WD_MUT_2" != "$WD_GATE_2"
 
 finish

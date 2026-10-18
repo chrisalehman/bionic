@@ -429,14 +429,45 @@ print_bound_line() {  # <verdict "bound-open <plan>">
   esac
 }
 
+# THE ONE DOOR (wave-38 T13; D4, AC-3.3). The plan's ## Handoff is one pointer line, `handoff: <path> written <local
+# time>` (T12, D23), to a file whose last line is `/bionic:canonical-sdlc <path>`: the command that binds, arms,
+# adopts and recaps (`session-poker.sh resume`). After a clear, resume or compact, the bound plan's pointer, or
+# unbound the newest open plan's, to a file whose first line is the kind line is printed where the engage or bind
+# advice stood (and after the bound line). A startup has nothing to resume; a pointer to no file, or to a file
+# without the kind line, is no door. The pointer is read the way the poker's `handoff_file_of` reads it (the section
+# by its heading, fences skipped); this hook sources no poker code, so the awk is a second copy of that one reader.
+SS_DOOR=""
+case "${SOURCE:-}" in
+  clear|resume|compact)
+    if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ]; then SS_DOOR_PLAN="$BIONIC_RUN_PLAN"
+    else SS_DOOR_PLAN="$(printf '%s\n' "$RUNS" | head -n 1)"; fi
+    if [ -n "$SS_DOOR_PLAN" ] && [ -f "$SS_DOOR_PLAN" ]; then
+      SS_DOOR_REL="$(awk '
+        /^[ \t]*```/ { f = !f; next }
+        f { next }
+        /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next }
+        h && index($0, "handoff: ") == 1 && / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$SS_DOOR_PLAN" 2>/dev/null)"
+      case "$SS_DOOR_REL" in
+        '') SS_DOOR_FILE="" ;;
+        /*) SS_DOOR_FILE="$SS_DOOR_REL" ;;
+        *)  SS_DOOR_FILE="$BIONIC_ROOT/$SS_DOOR_REL" ;;
+      esac
+      if [ -n "$SS_DOOR_FILE" ] && [ -f "$SS_DOOR_FILE" ] && [ ! -L "$SS_DOOR_FILE" ] \
+         && [ "$(head -n 1 "$SS_DOOR_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+        SS_DOOR="bionic: resume with /bionic:canonical-sdlc $SS_DOOR_REL"
+      fi
+    fi ;;
+esac
+
 if [ "$N" -eq 1 ]; then
   PLAN="$RUNS"
   if [ "$BIONIC_ENGAGED" != 1 ]; then
-    printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
+    if [ -n "$SS_DOOR" ]; then printf '%s\n' "$SS_DOOR"
+    else printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"; fi
     exit 0
   else
     case "$BIONIC_RUN_WORD" in
-      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
+      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN"; [ -z "$SS_DOOR" ] || printf '%s\n' "$SS_DOOR" ;;
       # THE BIND LINE FOR ONE RUN TOO (wave-23-fixit-1810 T13, critic C-4). This arm printed
       # nothing, on the S7 reasoning that "a lone open run is unambiguous, bound or not". D1
       # ended that: an unbound session's gates are inert, and engagement now leaves a session
@@ -473,7 +504,9 @@ $_h
             esac
           done <<< "$BIND_HOLDERS"
         fi
-        if [ -n "$SS_HELD_BY" ]; then
+        if [ -n "$SS_DOOR" ]; then
+          printf '%s\n' "$SS_DOOR"
+        elif [ -n "$SS_HELD_BY" ]; then
           printf 'bionic: 1 open run exists here and live session %s holds it; this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan> only if this session is resuming that run\n' \
             "${SS_HELD_BY:0:8}" "$HOOK_ROOT"
         else
@@ -486,22 +519,45 @@ $_h
   fi
 elif [ "$N" -ge 2 ]; then
   if [ "$BIONIC_ENGAGED" != 1 ]; then
-    printf 'bionic: %s open runs exist here — invoke /bionic:canonical-sdlc, then bind the one you mean with: bash %s/hooks/session-poker.sh bind <plan>\n' \
-      "$N" "$HOOK_ROOT"
+    if [ -n "$SS_DOOR" ]; then printf '%s\n' "$SS_DOOR"
+    else printf 'bionic: %s open runs exist here — invoke /bionic:canonical-sdlc, then bind the one you mean with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+      "$N" "$HOOK_ROOT"; fi
     print_runs "$LIVE"
     print_quiet_line
     exit 0
   else
     case "$BIONIC_RUN_WORD" in
-      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
+      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN"; [ -z "$SS_DOOR" ] || printf '%s\n' "$SS_DOOR" ;;
       *)
-        printf 'bionic: %s open runs exist here and this session is not bound to one — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
-          "$N" "$HOOK_ROOT"
+        if [ -n "$SS_DOOR" ]; then printf '%s\n' "$SS_DOOR"
+        else printf 'bionic: %s open runs exist here and this session is not bound to one — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+          "$N" "$HOOK_ROOT"; fi
         print_runs "$LIVE"
         print_quiet_line
         ;;
     esac
   fi
+fi
+
+# THE STANDING ORDERS (wave-38 T18; REQ-7 AC-7.1; design ledger Δ10, D17). Each item of `standing-orders:` in
+# .bionic/config.yaml is the user's standing answer, so an engaged start prints every one, in config order, as
+# `bionic: standing order — <item>`, after the bind/door lines and before the arm line: the model reads what has
+# already been decided before it asks. Read by its one reader (lib/roots.sh `config_section`, pure bash, no fork,
+# soft-sourced by run.sh); nothing when there are none. An item whose `refuse:` names no command class is a config
+# error said here, once per start, beside the order: the Bash wall enforces it never (A-T18-3). An unengaged
+# session prints none, as the walls do not arm for it.
+if [ "$BIONIC_ENGAGED" = 1 ] && declare -F config_section >/dev/null 2>&1; then
+  while IFS= read -r SS_ORDER; do
+    [ -n "$SS_ORDER" ] || continue
+    printf 'bionic: standing order — %s\n' "$SS_ORDER"
+    standing_order_split "$SS_ORDER"
+    if [ "$STANDING_ORDER_REFUSES" = 1 ] && ! standing_order_class_known "$STANDING_ORDER_CLASS"; then
+      printf 'bionic: standing order config error — refuse: %s is not a command class (%s); it is not enforced\n' \
+        "${STANDING_ORDER_CLASS:-(empty)}" "${STANDING_ORDER_CLASSES// /, }"
+    fi
+  done <<SS_ORDERS
+$(config_section "$BIONIC_ROOT" standing-orders 2>/dev/null)
+SS_ORDERS
 fi
 
 AGREE="agree"

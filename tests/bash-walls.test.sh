@@ -1989,7 +1989,7 @@ am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2
 # §ARM-A (proof-add) — wave-26 T5, REQ-3 D5/D6: a proof line decides whether the full run is
 # admitted, so an agent that could write one could prove its own head.
 am_refused "19u: bash session-poker.sh proof-add" \
-  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt"
+  "bash $AM_POKER proof-add regression record/wave-26-never-idle/floor.txt"
 # §ARM-A (approve) — wave-26 T5 after T13: an approval line is what releases a gate act, so an
 # agent that could write one would approve its own step.
 am_refused "19v: bash session-poker.sh approve" "bash $AM_POKER approve release 'approved'"
@@ -2051,7 +2051,7 @@ am_admitted "19j2: hold from the main thread" "bash $AM_POKER hold w20-sub 'idle
 am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
 am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
 am_admitted "19j5: proof-add from the main thread" \
-  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt" ""
+  "bash $AM_POKER proof-add regression record/wave-26-never-idle/floor.txt" ""
 am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19j7: waive from the main thread" "bash $AM_POKER waive adversarial 'ship it'" ""
 am_admitted "19j8: release-check from the main thread" "bash $AM_POKER release-check" ""
@@ -2092,6 +2092,10 @@ done
 # a dispatched writer running `regression no` would switch its own run's floor off.
 expect_contains "19x0i …and the plan verb wave-31 added, regression" " regression " " $AM_VERBS "
 am_refused "19x0j: bash session-poker.sh regression no" "bash $AM_POKER regression no 'CI runs it'"
+# THE VERB WAVE-38 ADDED (T3 reply; D19, A-orch-11): it replays the user's reply to the final card into approve, waive,
+# waive-row and finding-move through calls the wall never reads, so it is the main thread's as those four are.
+expect_contains "19x0l …and the verb wave-38 T3 added, reply" " reply " " $AM_VERBS "
+am_refused "19x0m: bash session-poker.sh reply '1'" "bash $AM_POKER reply '1'"
 for _am_v in $AM_VERBS; do
   am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
 done
@@ -2707,13 +2711,13 @@ expect_status "EG6j …and admitted once the section holds a reading of each que
 
 # THE DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121), the Step-5 row. A debt
 # `land` wrote to the run's landing record holds every commit from Step 6 until a `proved:
-# kind=floor` or `kind=task` line carries an `at=` later than its threshold: the red landing, and for
+# kind=regression` or `kind=task` line carries an `at=` later than its threshold: the red landing, and for
 # an `approval:` token also its `approved:` line. The hook's collector reads the record into one fact
 # the gate judges beside the section; a `landed red:` line in the plan changes nothing. FIXTURE
 # FIDELITY: each debt is written by `land`'s own writer (lib/worktree.sh `_wt_debt_write`), into the
 # record `land` names for this plan; the proof and approval lines in their production writers' shape.
 eg6_floor_at() {  # <at> -> one floor proof line at that time
-  bash -c '. "$1" && proof_line floor "$2" "$3" record/w27/floor-late.log' _ "$EG6_LIB" "$H_EG6" "$1"
+  bash -c '. "$1" && proof_line regression "$2" "$3" record/w27/floor-late.log' _ "$EG6_LIB" "$H_EG6" "$1"
 }
 EG6_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
 EG6_REC="$R_EG6/.bionic/docs/record/active.md/landing-proofs.log"
@@ -3209,7 +3213,7 @@ sfe_plan() {  # <current> <scale> <body lines for steps 5.. > -> a plan the gate
   eg6_plan "$1" "$2" "$3" "${4:-}" | awk '/^- Step 5: floor green/ { print "- Step 5: floor run"; print "  auditor: record/generic-evidence.md"; next } { print }'
 }
 # From Step 7 the gate owes a floor proof line (wave-35 T31; D20, A-orch-50): the Step 7 and 8 plans carry one.
-SFE_FLOOR="proved: kind=floor head=$H_EG6 at=2026-10-12T00:00:00Z evidence=record/w27/floor.log"
+SFE_FLOOR="proved: kind=regression head=$H_EG6 at=2026-10-12T00:00:00Z evidence=record/w27/floor.log"
 sfe_set() { printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"; bw_bind "$R_EG6"; }
 
 # Step 5: cmd, pass, total, output, head — written by the verb, read by no gate (wave-35 T31; D20, A-orch-32). Step 5
@@ -3574,5 +3578,33 @@ SC_BARE_LINE="$(sc_line)"
 expect_contains "SC.4 control: a bare budgeted suite typed inline is sent to the door" "use tests/run.sh --only alpha.test.sh" "$SC_BARE_LINE"
 sc_drive 'bash bare.sh'
 expect_eq "SC.4b AC-4.3 …and the same line in a script meets the same refusal (a file claim, as inline)" "2|$SC_BARE_LINE" "$ST|$(sc_line)"
+
+
+section "§STANDING — a standing order's refuse: clause is a wall over the section the preamble hands in (wave-38 T18; REQ-7 AC-7.2, D17)"
+# `- hand test in progress | refuse: suite` in .bionic/config.yaml: the preamble reads the list once
+# (lib/roots.sh `config_section`) into WALL_STANDING_ORDERS, and `wall_standing_orders <command>
+# <section>` (lib/walls.sh) refuses a command of that class naming the order. The wall is a pure
+# predicate (the freeze): it reads no config itself. tests/standing-orders.test.sh carries the mutant
+# that makes it read config.yaml and shows the freeze pin flip; this restates the wall's own rows.
+R_SO="$(mk_repo standing)"
+printf 'standing-orders:\n  - hand test in progress | refuse: suite\n  - no force-push while the user reviews\n' > "$R_SO/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_SO" 'tests/run.sh --only x.test.sh')"
+SO_HEAD="$(deny_reason)"; [ -n "$SO_HEAD" ] || SO_HEAD="$ERR"
+expect_eq "SO.1 a suite run under a refuse: suite order is refused" "yes" \
+  "$([ "$ST" = 2 ] || [ "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)" = deny ] && echo yes || echo no)"
+expect_eq "SO.2 …and the order's line is the headline" \
+  "bionic: command refused — standing order: hand test in progress (lift it in config.yaml)" \
+  "$(printf '%s\n' "$SO_HEAD" | head -1)"
+run_hook "$(mk_payload "$R_SO" 'git status')"
+expect_status "SO.3 git status passes under the same order" 0 "$ST"
+expect_absent "SO.4 …naming no order (SO.2 read the same streams)" "standing order" "$OUT$ERR"
+printf 'standing-orders:\n  - no force-push while the user reviews\n' > "$R_SO/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_SO" 'tests/run.sh --only x.test.sh')"
+expect_absent "SO.5 an order without a refuse: tail refuses nothing (SO.2 read the same streams)" "standing order" "$OUT$ERR"
+SO_BODY="$(awk '/^wall_standing_orders\(\)/ { f = 1 } f { print } f && /^}/ { exit }' "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh")"
+expect_contains "SO.6 precondition: the wall's body is read" "fold_block" "$SO_BODY"
+expect_no_regex "SO.7 the freeze: the wall names no config reader, no root and reads no file by redirect" 'config_section|config_value|BIONIC_ROOT|BIONIC_CWD|(^|[^<])<[[:space:]]*["$/.]' "$SO_BODY"
+expect_regex "SO.8 …the preamble reads the section and hands it in" \
+  'WALL_STANDING_ORDERS="\$\(config_section "\$BIONIC_ROOT" standing-orders' "$(cat "$HOOK")"
 
 finish

@@ -36,7 +36,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -291,7 +291,7 @@ base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan"
     facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
       | while IFS="	" read -r k q role scope; do
           case "$k" in
-            floor)  l="$(proof_line floor "$3" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log)" ;;
+            regression)  l="$(proof_line regression "$3" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log)" ;;
             review) l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$scope.md" "$q" w-read pass "$scope")" ;;
             *) continue ;;
           esac
@@ -598,6 +598,11 @@ sha_of() {
   if [ -f "$1" ]; then cksum < "$1" | tr -d ' '; else printf 'absent'; fi
 }
 
+# sc_strip <continuation> -> the file without its `## Scorecard` section (wave-38 T15): close-out adds that section to a
+# continuation that exists, so a row about the rest of the file reads it with the section taken out, and the section is
+# asserted on its own (§SCORECARD)
+sc_strip() { awk '/^## / { s = ($0 == "## Scorecard") } !s' "$1"; }
+
 # branch_exists <project> <branch> -> yes|no
 branch_exists() {
   if fixture_git "$1" rev-parse --verify --quiet "refs/heads/$2" >/dev/null 2>&1; then
@@ -832,12 +837,12 @@ P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; adva
 run_close "$P0R" check
 expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
 expect_eq "0r2: …with 1.8.3's own wording" "yes" \
-  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to")"
+  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<NN>-<slug> shaped (the wave scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to")"
 
 run_close "$P0R" run
 expect_eq "0r3: run refuses identically" "2" "$CO_RC"
 expect_eq "0r4: …with the same wording" "yes" \
-  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to")"
+  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<NN>-<slug> shaped (the wave scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to")"
 
 # A table WITH the worktree column never derives a wave number at all — the register
 # names its own trees — so the same non-wave-shaped working-branch is untouched there.
@@ -876,11 +881,45 @@ expect_eq "AB0: the fixture really is task-scale (so a pass here is not the wave
   "$(grep -q '^scale: task$' "$PAB/$PLAN_REL" && echo yes || echo no)"
 run_close "$PAB" check
 expect_eq "AB1: check on fixit/x is not refused" "0" "$CO_RC"
-expect_eq "AB2: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not wave/<digits>-<slug> shaped")"
+expect_eq "AB2: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
 expect_eq "AB3: …and announces no wt/-* census fallback" "no" "$(contains "$CO_OUT" "wt/-*")"
 run_close "$PAB" run
 expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
-expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not wave/<digits>-<slug> shaped")"
+expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
+
+# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). The task row's branch cell is
+# `any` and its integrate cell `pr`: a task-scale plan on `fix/x`, NOT merged, closes; close-out
+# merges nothing, prints the `gh pr create` command for the working branch against the
+# integration branch and records it in the continuation. It never runs it. The wave-scale pair
+# (0r above) still refuses a branch outside its `wave/<NN>-<slug>` cell.
+mk_task_pr_fixture() {
+  local name="$1" working="$2" p
+  p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
+  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"
+  (
+    in_fixture "$p" || exit 1
+    git checkout -q -b "$working"
+    printf 'late fix\n' >> file.txt
+    git commit -q -am "late fix" >/dev/null 2>&1
+    git checkout -q main
+  )
+  plant_facts "$p"
+  printf '%s\n' "$p"
+}
+PPR="$(mk_task_pr_fixture ppr "fix/x")"
+PPR_MAIN="$(git -C "$PPR" rev-parse main)"
+expect_eq "PR0: the fixture's fix/x is not reachable from main (so the PR act is what passes)" "no" \
+  "$(git -C "$PPR" merge-base --is-ancestor fix/x main && echo yes || echo no)"
+run_close "$PPR" check
+expect_eq "PR1: check on an unmerged task-scale fix/x is not refused" "0" "$CO_RC"
+expect_eq "PR2: …its merge line is the PR act, with the command" "yes" \
+  "$(contains "$CO_OUT" "merge: pr — gh pr create --base main --head fix/x")"
+run_close "$PPR" run
+expect_eq "PR3: run closes with rc 0" "0" "$CO_RC"
+expect_eq "PR4: …prints the command" "yes" "$(contains "$CO_OUT" "gh pr create --base main --head fix/x")"
+expect_eq "PR5: …records it in the continuation" "yes" \
+  "$(grep -qF 'gh pr create --base main --head fix/x' "$PPR/$CONT_REL" 2>/dev/null && echo yes || echo no)"
+expect_eq "PR6: …and merges nothing: main is where it was" "$PPR_MAIN" "$(git -C "$PPR" rev-parse main)"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
@@ -920,9 +959,14 @@ expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
   "$(contains "$CO_OUT" "patrol: CronDelete")"
 expect_eq "1q: …and the disarm command" "yes" \
   "$(contains "$CO_OUT" "session-poker.sh disarm")"
-expect_eq "1r: act 9 — the handoff is rewritten to the closed form" "yes" \
-  "$(contains "$(cat "$P1/$PLAN_REL")" "resume point: NONE — DELIVERED at ")"
-expect_eq "1s: …and the open-run resume point is gone" "no" \
+HO_REL=".bionic/docs/record/wave-01-fixture/handoff.md"
+expect_eq "1r: act 9 — the closed form is line 2 of the handoff file (D23: the file is the store)" "1" \
+  "$(sed -n 2p "$P1/$HO_REL" 2>/dev/null | /usr/bin/grep -c '^resume point: NONE — DELIVERED at ')"
+expect_eq "1r2: …under the file's kind line" "bionic-handoff/v1" "$(sed -n 1p "$P1/$HO_REL" 2>/dev/null)"
+expect_eq "1r3: …whose last line is the one door, naming the file" "/bionic:canonical-sdlc $HO_REL" "$(tail -1 "$P1/$HO_REL" 2>/dev/null)"
+expect_eq "1r4: …and the plan's ## Handoff is the pointer to it" "yes" \
+  "$(contains "$(cat "$P1/$PLAN_REL")" "handoff: $HO_REL written ")"
+expect_eq "1s: …and the open-run resume point is gone from the plan" "no" \
   "$(contains "$(cat "$P1/$PLAN_REL")" "the tail has not run")"
 
 PLAN1="$(cat "$P1/$PLAN_REL")"
@@ -1224,14 +1268,18 @@ expect_eq "q1.6f: …with exactly one Step 9 line, the delivered one" "1/yes" \
 TB="$(mk_fixture t19b)"; advance_to "$TB" 8
 printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
 PRE_B="$(presence_state "$TB")"; PLAN_B_SHA="$(sha_of "$TB/$PLAN_REL")"; EPIC_B_SHA="$(sha_of "$TB/$EPIC_REL")"
+# wave-38 T15 (AC-4.4; D17): a missing shipped table is added, header first, never refused.
 run_close "$TB" check
-expect_eq "q1.7: check names the missing wave table" "yes" "$(contains "$CO_OUT" "no | wave | table")"
+expect_eq "q1.7: check no longer refuses the missing wave table" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no | wave | table")"
+expect_contains "q1.7b: …it says run adds the shipped table's header before the row" "run adds the shipped table's header" "$CO_OUT"
 run_close "$TB" run
-expect_eq "q1.8: run on an epic plan with no wave table refuses rc 2" "2" "$CO_RC"
-expect_eq "q1.9: …naming the missing table" "yes" "$(contains "$CO_OUT" "no | wave | table")"
-expect_eq "q1.10: …before any act" "no" "$(contains "$CO_OUT" "worktree-removed:")"
-expect_eq "q1.11: …branch, tmp, continuation, current: and epic row untouched" "$PRE_B" "$(presence_state "$TB")"
-expect_eq "q1.12: …plan and epic plan byte-identical" "$PLAN_B_SHA/$EPIC_B_SHA" "$(sha_of "$TB/$PLAN_REL")/$(sha_of "$TB/$EPIC_REL")"
+expect_eq "q1.8: run on an epic plan with no wave table closes rc 0" "0" "$CO_RC"
+expect_eq "q1.9: …the epic plan now carries the shipped table's header exactly once" "1" \
+  "$(/usr/bin/grep -c '^| wave | version | plan | spec / requirements | ADRs | shipped |$' "$TB/$EPIC_REL" | tr -d ' ')"
+expect_eq "q1.10: …and the wave 01 row under it" "1" "$(/usr/bin/grep -c '^| 01 |' "$TB/$EPIC_REL" | tr -d ' ')"
+expect_eq "q1.11: …the row after the header and its rule line" "yes" \
+  "$(awk '/^\| wave \| version /{h=NR} /^\|---\|/{if(h&&!r)r=NR} /^\| 01 \|/{w=NR} END{print (h && r == h + 1 && w > r) ? "yes" : "no"}' "$TB/$EPIC_REL")"
+expect_contains "q1.12: …and the card says the table was added" "epic-row: the shipped table added to epic.plan.md, then wave 01 appended" "$CO_OUT"
 
 TC="$(mk_fixture t19c)"; advance_to "$TC" 8
 run_close "$TC" check
@@ -1502,16 +1550,16 @@ epic_planned_first | awk '
 expect_eq "78.3.0: the fixture has a planned table and no shipped one" "1/0" \
   "$(rows_with_wave "$T78C/$EPIC_REL" planned 09)/$(table_rows "$T78C/$EPIC_REL" shipped | wc -l | tr -d ' ')"
 PRE_C="$(presence_state "$T78C")"; PLAN_C_SHA="$(sha_of "$T78C/$PLAN_REL")"; EPIC_C_SHA="$(sha_of "$T78C/$EPIC_REL")"
+# wave-38 T15 (AC-4.4): the shipped table is added beside the planned one, never refused, and the planned one keeps its rows.
 run_close "$T78C" check
-expect_eq "78.3a: check says it would refuse, naming the shipped table" "yes" \
+expect_eq "78.3a: check no longer refuses for the missing shipped table" "no" \
   "$(contains "$CO_OUT" "presence: WOULD REFUSE — no | wave | table with a shipped column")"
 run_close "$T78C" run
-expect_eq "78.3b: run refuses rc 2" "2" "$CO_RC"
-expect_eq "78.3c: …naming the missing shipped table" "yes" "$(contains "$CO_OUT" "table with a shipped column")"
-expect_eq "78.3d: …before any act" "no" "$(contains "$CO_OUT" "worktree-removed:")"
-expect_eq "78.3e: …branch, tmp, continuation and plans untouched" \
-  "$PRE_C/$PLAN_C_SHA/$EPIC_C_SHA" \
-  "$(presence_state "$T78C")/$(sha_of "$T78C/$PLAN_REL")/$(sha_of "$T78C/$EPIC_REL")"
+expect_eq "78.3b: run closes rc 0" "0" "$CO_RC"
+expect_eq "78.3c: …the epic plan now has a shipped table holding the wave 01 row" "1" "$(rows_with_wave "$T78C/$EPIC_REL" shipped 01)"
+expect_eq "78.3d: …and the planned table keeps its rows as they were (its own wave 09 and wave 01 rows, no second 01)" "1/1" \
+  "$(rows_with_wave "$T78C/$EPIC_REL" planned 09)/$(rows_with_wave "$T78C/$EPIC_REL" planned 01)"
+expect_eq "78.3e: …the plan reads closed" "1" "$(run_open_rc "$T78C/$PLAN_REL")"
 
 # ---------- §86: the ADR cell reads the spec's `adrs:` line ----------
 
@@ -1963,8 +2011,10 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 run_close "$PZ" run
 CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
-  "$CO_RC|$(tr '\n' '|' < "$PZ/$CONT_REL")"
+  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=0 · fixed=0|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
+  "$CO_RC|$(sc_strip "$PZ/$CONT_REL" | tr '\n' '|')"
+expect_eq "CARRY-29b …and the ## Scorecard section is added once, after ## Governed by (wave-38 T15)" "1|yes" \
+  "$(/usr/bin/grep -c '^## Scorecard$' "$PZ/$CONT_REL" | tr -d ' ')|$(awk '/^## Governed by$/ { a = NR } /^## Scorecard$/ { b = NR } /^## Resume instruction$/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PZ/$CONT_REL")"
 
 # the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-inherit-mut.XXXXXX")"
@@ -1989,7 +2039,7 @@ rm -rf "$CARRY_MUT"
 CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-merge-mut.XXXXXX")"
 mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
 ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"
-sed 's/^      co_cont_merge "\$missing"$/      :/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
+sed 's/^      co_cont_write "## Deferrals" "\$missing" lines$/      :/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
 expect_eq "CARRY-mut6 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
 PR="$(mk_fixture carry18)"; advance_to "$PR" 8
@@ -2016,8 +2066,9 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # record and the gate's requests and only printed. The plan is NAMED to the report, never resolved
 # through the session: act 3 has wiped the session's binding before the continuation is written.
 # FIXTURE FIDELITY: the events are PLANTED in the Interfaces table's `line/v1` shape, which
-# lib/line.sh writes; the gate store is the sandbox's own, empty. Each row line carries the wait/run split
-# and the width (wave-37 T9; AC-11.3): the report reads them from this record alone, and the block fences the rows whole.
+# lib/line.sh writes; the gate store is the sandbox's own, empty. Each row line carries the admission split, wait,
+# prove and rework, and the width (wave-38 T7, AC-6.4; wave-37 T9, AC-11.3): the report reads them from this record
+# alone, the verdict's `admitted=` (lib/line.sh, 1.21.0) the start of its admitted run, and the block fences the rows whole.
 LAND_GATE="$SANDBOX/land-gate"; mkdir -p "$LAND_GATE/requests"
 LAND_C="$(printf 'c%.0s' $(seq 40))"
 # land_section <continuation> -> what stands under `## Landings`, up to the next `## `, fences and blank
@@ -2029,7 +2080,7 @@ land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing
   mkdir -p "${rec%/*}"
   printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
   printf 'line/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|admitted=1791281100|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
   printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
   printf 'line/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
 }
@@ -2041,9 +2092,9 @@ expect_eq "LAND-2 the continuation carries the heading ## Landings exactly once"
   "$(/usr/bin/grep -c '^## Landings$' "$PLD/$CONT_REL" | tr -d ' ')"
 expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-4 …the report's line, then a line per landed row, as landing-report --rows prints them" \
-"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0
-T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=0s wait=2.0 prove=18.0 line=10.0 width=2
-T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
+"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=900s · killed=0
+T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=900s wait=15.0 prove=15.0 rework=0.0 width=2
+T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
   "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-5 …and the heading sits after ## Deferrals and before the Resume instruction" "yes" \
   "$(awk '/^## Deferrals$/ { a = NR } /^## Landings$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PLD/$CONT_REL")"
@@ -2129,11 +2180,11 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 #   extensions     roster              distinct (name, extended=<value>)
 #   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
 #   regression-2   plan                `approved: regression-2` under ## SDLC State
-#   second-floors  plan                `proved: kind=floor` lines past the first
+#   second-floors  plan                `proved: kind=regression` lines past the first
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
 HH_C="$(printf 'd%.0s' $(seq 40))"
-HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-floors=1 · adoptions=0 · fixed=0"
+HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-regressions=1 · adoptions=0 · fixed=0"
 # hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
 hh_report() {
   local proj="$1"; shift
@@ -2176,7 +2227,7 @@ hh_plant() {
   expect_nonempty "HH-0a precondition: the fixture plan already holds one floor proof, whose head the second reuses" "$h"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
     plan="$2"; h="$3"
-    proof_add_line "$plan" "$(proof_line floor "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
+    proof_add_line "$plan" "$(proof_line regression "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
     proof_add_line "$plan" "$(proof_waiver_line evidence "$h" "Chris Lehman" 2026-10-06T13:10:00Z "waive it")" > "$plan.pf" && mv "$plan.pf" "$plan"' \
     _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
   w="$(mktemp "$SANDBOX/hh-plan.XXXXXX")"
@@ -2184,7 +2235,7 @@ hh_plant() {
     /^approved-by:/ { print; print "approved: regression-2 by Chris Lehman 2026-10-06T12:00:00Z \"yes\""; next }
     /^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed"
                    print; next }
-    /^## Tasks/ { print "```"; print "proved: kind=floor head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
+    /^## Tasks/ { print "```"; print "proved: kind=regression head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
                   print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
                   print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "\140\140\140"; print ""; print; next }
     /^  readback:/ && !wr { print; print "  waiver: Chris Lehman 2026-10-06 \"waive the row\" — fixture"
@@ -2194,7 +2245,7 @@ hh_plant() {
 PH="$(mk_fixture handholds)"; advance_to "$PH" 8
 hh_plant "$PH"
 expect_eq "HH-0 precondition: the plan carries both waiver forms, the approval and two floor proofs as flush-left lines (the extractors find them)" "1/1/1/2" \
-  "$(grep -c '^waived: question=evidence ' "$PH/$PLAN_REL")/$(grep -c '^  waiver: Chris Lehman 2026-10-06 ' "$PH/$PLAN_REL")/$(grep -c '^approved: regression-2 by Chris Lehman' "$PH/$PLAN_REL")/$(awk '/^```/ { f = !f; next } !f && /^proved: kind=floor / { n++ } END { print n + 0 }' "$PH/$PLAN_REL")"
+  "$(grep -c '^waived: question=evidence ' "$PH/$PLAN_REL")/$(grep -c '^  waiver: Chris Lehman 2026-10-06 ' "$PH/$PLAN_REL")/$(grep -c '^approved: regression-2 by Chris Lehman' "$PH/$PLAN_REL")/$(awk '/^```/ { f = !f; next } !f && /^proved: kind=regression / { n++ } END { print n + 0 }' "$PH/$PLAN_REL")"
 HH_OUT="$(hh_report "$PH" --hand-holds)"
 expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
   "$(printf '%s\n' "$HH_OUT" | grep '^hand-holds: ')"
@@ -2211,7 +2262,7 @@ awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: eviden
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=0 · fixed=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
@@ -2285,8 +2336,8 @@ mkdir -p "$PHE4/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Governed by\n\ngoverned-by: installed 0.0.0, typed by a person\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
 HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
 run_close "$PHE4" run
-expect_eq "HH-12 the heading and the line already there (and a governed-by line, wave-36 T2): run exits 0, the file is byte for byte as it was, the line once" "0/$HHE_CK4/1" \
-  "$CO_RC/$(cksum < "$PHE4/$CONT_REL")/$(hh_count "$PHE4/$CONT_REL")"
+expect_eq "HH-12 the heading and the line already there (and a governed-by line, wave-36 T2): run exits 0, the file is byte for byte as it was but for the ## Scorecard section (wave-38 T15), the line once" "0/$HHE_CK4/1/1" \
+  "$CO_RC/$(sc_strip "$PHE4/$CONT_REL" | cksum)/$(hh_count "$PHE4/$CONT_REL")/$(/usr/bin/grep -c '^## Scorecard$' "$PHE4/$CONT_REL" | tr -d ' ')"
 
 # the mutation arms: a continuation template without the section, and a fold that counts a line it should not
 HH_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-hh-mut.XXXXXX")"
@@ -2311,12 +2362,12 @@ section "§FLOOR-DECLARED (wave-28 T75; REQ-17 AC-17.1, D36): close-out proceeds
 # ============================================================
 # A project with no tests/*.test.sh roster declares its floor (`floor: true`, a command that passes). The
 # floor fact plant_facts wrote is taken out, and the real verbs write it again from the declared floor's own
-# run: `floor-run` logs it, `proof-add floor` cites the log, `current 8` moves the plan on the facts, and
+# run: `regression-run` logs it, `proof-add regression` cites the log, `current 8` moves the plan on the facts, and
 # `close-out.sh run` delivers. The fixture's working head holds no tests/ directory (mk_fixture's shape).
 PFL="$(mk_fixture floor-declared)"
 FL_SID="closeout-floor-1"
-sed '/^proved: kind=floor /d' "$PFL/$PLAN_REL" > "$PFL/$PLAN_REL.n" && mv "$PFL/$PLAN_REL.n" "$PFL/$PLAN_REL"
-printf 'floor: true\n' >> "$PFL/.bionic/config.yaml"
+sed '/^proved: kind=regression /d' "$PFL/$PLAN_REL" > "$PFL/$PLAN_REL.n" && mv "$PFL/$PLAN_REL.n" "$PFL/$PLAN_REL"
+printf 'regression-command: true\n' >> "$PFL/.bionic/config.yaml"
 ( in_fixture "$PFL" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFL" "$FL_SID" "$PFL/$PLAN_REL" )
 fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the fixture, as this session
   ( in_fixture "$PFL" || exit 9
@@ -2326,22 +2377,22 @@ fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the f
 }
 FL_H="$(fixture_git "$PFL" rev-parse wave/01-fixture)"
 expect_eq "FL0 precondition: the plan carries no floor fact, and the working head no tests/ directory" "0|0" \
-  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
-fl_poke floor-run
-expect_eq "FL1 floor-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 and closing rc=0 (wave-36 T35)" \
+  "$(/usr/bin/grep -c '^proved: kind=regression ' "$PFL/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFL" ls-tree --name-only "$FL_H" tests/ | wc -l | tr -d ' ')"
+fl_poke regression-run
+expect_eq "FL1 regression-run runs the declared floor at the working head (exit 0), its log opening head= dirty=0 and closing rc=0 (wave-36 T35)" \
   "0|head=$FL_H dirty=0|rc=0" \
-  "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/floor-run-$FL_H.log" 2>/dev/null)"
+  "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
-# with the plan and the project root, as proof-add calls it, attests the declared log by the run line floor-run
+# with the plan and the project root, as proof-add calls it, attests the declared log by the run line regression-run
 # wrote beside it (wave-37 T4; D7), and proof_add_line places the line.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
 # Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
 FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
-  h="$(proof_attested floor "$2/record/wave-01-fixture/floor-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$6" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/floor-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
+  h="$(proof_attested regression "$2/record/wave-01-fixture/regression-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$6" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/regression-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
 expect_eq "FL2 the judge attests the declared floor's log at the working head, and the floor fact is written from it" "$FL_H|1" \
-  "$FL_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
+  "$FL_AT|$(/usr/bin/grep -c "^proved: kind=regression head=$FL_H " "$PFL/$PLAN_REL" | tr -d ' ')"
 fl_poke current 8
 expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed -n 's/^current: //p' "$PFL/$PLAN_REL")"
 run_close "$PFL" run
@@ -2350,23 +2401,23 @@ expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc
 
 # A PROJECT WITH NO tests/*.test.sh AND NO floor: CLOSES ITS RUN ON ITS OWN RUNNER'S LOG (wave-36 T35; REQ-7 AC-7.10; D13).
 # The floor is a fact: the log the project's own runner left, opening head=<the working head> dirty=0 and ending rc=0,
-# is the evidence as it stands, with no config key and no floor-run. The judge and writer are driven as FL2 drives them.
+# is the evidence as it stands, with no config key and no regression-run. The judge and writer are driven as FL2 drives them.
 PFN="$(mk_fixture floor-any)"
 FN_SID="closeout-floor-2"
-sed '/^proved: kind=floor /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
+sed '/^proved: kind=regression /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
 ( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
 FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
 mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
-# THE RUN IS RECORDED (wave-37 T4; D7, ADR-057): the log and its run line, as tests/lib/floor-fixture.sh writes them.
-printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFN/$PLAN_REL" "$PFN/.bionic/docs/record/wave-01-fixture/ci.log" "$FN_H" 0 0
+# THE RUN IS RECORDED (wave-37 T4; D7, ADR-057): the log and its run line, as tests/lib/regression-fixture.sh writes them.
+printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFN/$PLAN_REL" "$PFN/.bionic/docs/record/wave-01-fixture/ci.log" "$FN_H" 0 0
 expect_eq "FL5 precondition: no floor fact, no tests/ at the working head, and no floor: or floor-attestation: in the config" "0|0|0" \
-  "$(/usr/bin/grep -c '^proved: kind=floor ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
+  "$(/usr/bin/grep -c '^proved: kind=regression ' "$PFN/$PLAN_REL" | tr -d ' ')|$(fixture_git "$PFN" ls-tree --name-only "$FN_H" tests/ | wc -l | tr -d ' ')|$(/usr/bin/grep -c '^floor' "$PFN/.bionic/config.yaml" 2>/dev/null | tr -d ' ')"
 FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
-  h="$(proof_attested floor "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$5" "$(proof_line floor "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
+  h="$(proof_attested regression "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
+  proof_add_line "$5" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
 expect_eq "FL6 AC-7.10 the judge attests the project's own runner's log, no key and no roster, and the floor fact is written from it" \
-  "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=floor head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"
+  "$FN_H|1" "$FN_AT|$(/usr/bin/grep -c "^proved: kind=regression head=$FN_H " "$PFN/$PLAN_REL" | tr -d ' ')"
 FN_RC="$( ( in_fixture "$PFN" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     CLAUDE_CODE_SESSION_ID="$FN_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/fn-poker" 2>&1; echo $?)"
@@ -2469,7 +2520,7 @@ expect_absent "DEBT-RECARRY-4 …nor the one the ledger burned" "log_shim" "$(ca
 # THE RECORD TEMPLATE SAYS REGRESSION (wave-30 T23; AC-4.7, D10): the continuation close-out writes asks the
 # orchestrator for the regression's result, in the word the doctrine uses.
 # WAVE-33 T8 (D8): the result is no longer asked for, it is written, from the floor's proof line, in the same word.
-expect_contains "REG-1 AC-4.7 the continuation states the regression result, in the word the doctrine uses" "the regression: the floor holds at " "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
+expect_contains "REG-1 AC-4.7 the continuation states the regression result, in the word the doctrine uses" "the regression: the whole run holds at " "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
 expect_absent "REG-1b …and never calls it the floor's result" "floor result" "$(cat "$PRC/$CONT_REL" 2>/dev/null)"
 # no ledger at all: every inherited debt line is carried, in its order
 PRN="$(mk_fixture debtrecarry2)"; advance_to "$PRN" 8
@@ -2529,7 +2580,14 @@ printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-b
 DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
 expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \
   "$DL_CRC|$(cat "$SANDBOX/dl-card.err")"
-expect_contains "DEBT-LINES-4b …listing the corrected debt line among the inherited ones" "hole_x hole" "$DL_CARD"
+# ONE LINE OF COUNTS (wave-38 T17; D5, AC-10.1): the card counts the continuation's deferred and debt lines and
+# prints none of them; DEBT-LINES-4's exit 0 is the proof the corrected line parses.
+DL_N="$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c -e '^deferred: ' -e '^debt: ' | tr -d ' ')"
+expect_eq "DEBT-LINES-4a precondition: the continuation carries the three debt lines among its inherited ones" "3" \
+  "$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c '^debt: ' | tr -d ' ')"
+expect_contains "DEBT-LINES-4b …and the card counts every one of its lines in one Inherited line" \
+  "Inherited  ${DL_N} inherited · 0 adopted · 0 carried · 0 closed · listed in" "$DL_CARD"
+expect_absent "DEBT-LINES-4c …printing none of them, the corrected debt line included" "hole_x hole" "$DL_CARD"
 
 # ============================================================
 section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
@@ -2706,7 +2764,7 @@ expect_eq "FILL.2 AC-3.3 the epic row carries no <fill:, and holds the merge com
   "$(contains "$FA_ROW" "<fill:")/$(contains "$FA_ROW" "main @ $FA_MAIN")"
 expect_eq "FILL.3 …and an ADR cell that says so when the plan says none (adrs: none)" "—" "$(adr_cell "$FA")"
 expect_contains "FILL.4 the continuation states the task count from the plan (the two build rows)" "2 tasks, every one RED→GREEN" "$FA_CONT"
-expect_contains "FILL.5 …the regression result from the floor's proof line, at the head it was proved at" "the regression: the floor holds at ${FA_HEAD:0:12}" "$FA_CONT"
+expect_contains "FILL.5 …the regression result from the floor's proof line, at the head it was proved at" "the regression: the whole run holds at ${FA_HEAD:0:12}" "$FA_CONT"
 expect_contains "FILL.6 …the reviews from the review proof lines, and the ADRs" "Reviews: evidence piece pass (w-read); adversarial piece pass (w-read); structure piece pass (w-read); adversarial whole pass (w-read); structure whole pass (w-read). ADRs: none shipped." "$FA_CONT"
 expect_contains "FILL.7 …and the commit it closed at, written whole" "main at $FA_MAIN." "$FA_CONT"
 expect_absent "FILL.8 no Patrol sentence when no job is known (this session has no transcript) and no mark for it" "Patrol" "$FA_CONT"
@@ -2793,7 +2851,7 @@ expect_eq "REF-3 precondition: the working branch is deleted (no ref names it)" 
 run_close "$PREFD" check
 expect_contains "REF-3b AC-1.7 a deleted branch: check says the facts would be refused" "facts: WOULD REFUSE" "$CO_OUT"
 expect_contains "REF-3c …saying the branch names no commit, the floor uncovered" \
-  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+  "the working branch wave/01-fixture names no commit here, so the regression is uncovered" "$CO_OUT"
 # A TAG OF THE SAME NAME IS NOT THE BRANCH. `git rev-parse <name>` resolves refs/tags/<name> before refs/heads/<name>, so a
 # judge that asks git for the bare name reads a tag where the branch is gone; the branch's ref reader does not.
 fixture_git "$PREFD" tag wave/01-fixture main >/dev/null 2>&1
@@ -2801,7 +2859,7 @@ expect_nonempty "REF-4 precondition: a tag of the branch's name names a commit" 
   "$(fixture_git "$PREFD" rev-parse --verify -q 'refs/tags/wave/01-fixture^{commit}' 2>/dev/null)"
 run_close "$PREFD" check
 expect_contains "REF-4b AC-1.7 …the deleted branch stays uncovered beside the tag: the judge reads refs/heads/ alone" \
-  "the working branch wave/01-fixture names no commit here, so the floor is uncovered" "$CO_OUT"
+  "the working branch wave/01-fixture names no commit here, so the regression is uncovered" "$CO_OUT"
 expect_absent "REF-4c …and never judges the tag's commit" "facts: every fact the run owes holds" "$CO_OUT"
 
 PREFF="$(mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8
@@ -3060,7 +3118,7 @@ awk -v m="$HK_MOVED" '
 expect_eq "HK-0 precondition: the roster carries adopted_from= rows of this run and another, the plan one unfenced and one fenced to=fixed line" \
   "2/1/1/1" \
   "$(awk -v p="plan=$HK_PLAN|" '{ l = $0 "|" } index(l, "|adopted_from=old-sid-1|") && index(l, "|" p) { n++ } END { print n + 0 }' "$HK_P/.bionic/tmp/roster-fixture.state")/$(/usr/bin/grep -c 'plan=/elsewhere/wave-99-other.plan.md' "$HK_P/.bionic/tmp/roster-fixture.state" | tr -d ' ')/$(awk '/^```/ { f = !f; next } !f && /^moved: [^ ]+ to=fixed / { n++ } END { print n + 0 }' "$HK_PLAN")/$(awk '/^```/ { f = !f; next } f && /^moved: [^ ]+ to=fixed / { n++ } END { print n + 0 }' "$HK_PLAN")"
-HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-floors=0 · adoptions=1 · fixed=1"
+HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=1 · fixed=1"
 expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · by-hand=0, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check
@@ -3069,7 +3127,7 @@ expect_eq "HK-2 …and close-out's card prints the same line" "$HK_WANT" "$(prin
 # ============================================================
 section "§FENCE — wave-36 T14 (D13; C38): a line merged into a section that is one fenced list goes inside the fence"
 # ============================================================
-# `co_cont_merge` added the owed lines after the section's last non-blank line, and a closing fence is such a line, so
+# `co_cont_merge` (co_cont_write's lines mode since wave-38 T15) added the owed lines after the section's last non-blank line, and a closing fence is such a line, so
 # a line merged into close-out's own fenced sections (## Inherited debt, ## Governed by, ## Hand-holds) landed under
 # the fence, outside the list it belongs to (research-plan-and-readings.md §C38, probe-c38-c21.log). The rule now:
 # when the section is one fenced list (its first and last content lines are the fence of its one fenced block), the
@@ -3229,5 +3287,282 @@ expect_eq "LANDS-10 a close-out refused after act 3 (the continuation could not 
   "2|yes|yes" \
   "$CO_RC|$(contains "$CO_OUT" "could not append the deferrals")|$(tmp_file_exists "$PLC" engaged "$LA_SID")"
 chmod 644 "$PLC/$CONT_REL"
+
+# ============================================================
+section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked wave without the merge act"
+# ============================================================
+# A plan carrying a non-empty flush-left `## Wake Note`, or a `parked:` line under `## SDLC State`, is parked
+# (steps/8.md: "parking requires an explicit ## Wake Note"). `check` prints `merge: parked (<why>)` where it
+# printed `merge: WOULD REFUSE`; `run` performs the tail without the merge act: the Step-9 line reads
+# `delivered: parked on <working branch> @ <sha>`, the continuation's header says parked, where and why, the epic
+# row is written `parked`, the patrol is disarmed, and the handoff's closed form says `resume point: PARKED on
+# <branch> @ <sha> — <why>`. Nothing of the work is deleted: the trees and branches stay. `step-line 9` is accepted
+# on such a plan. A Wake Note whose body is empty or `(none)` (the old plans' template section) parks nothing.
+# fails-when: `check` prints `merge: WOULD REFUSE` on a parked plan; a parked run deletes a branch.
+PK_WHY="The release waits on a hand test on the user's machine."
+# park_fixture <name> <wake|line|none|unparked> -> a fixture at Step 8 whose working branch carries one commit main
+# never took (the facts re-planted at that head), with a ## Wake Note, a parked: line, an empty Wake Note, or neither
+park_fixture() {
+  local p
+  p="$(mk_fixture "$1")"
+  advance_to "$p" 8
+  ( in_fixture "$p-wave" || exit 1
+    printf 'parked work\n' >> file.txt
+    git commit -q -am "work main never took" >/dev/null 2>&1 ) || return 1
+  plant_facts "$p"
+  case "$2" in
+    wake) printf '\n## Wake Note\n\n%s\n' "$PK_WHY" >> "$p/$PLAN_REL" ;;
+    line) awk -v w="parked: $PK_WHY" '{ print } /^current: / && !d { print w; d = 1 }' "$p/$PLAN_REL" > "$p/pk.tmp" && mv "$p/pk.tmp" "$p/$PLAN_REL" ;;
+    none) printf '\n## Wake Note\n\n(none)\n' >> "$p/$PLAN_REL" ;;
+  esac
+  printf '%s\n' "$p"
+}
+# pk_handoff <project> -> the plan and the run's handoff file, wherever the closed form went (the plan's
+# ## Handoff before wave-38 T12 lands, the file record/<wave>/handoff.md after it)
+pk_handoff() { cat "$1/$PLAN_REL" "$1/.bionic/docs/record/wave-01-fixture/handoff.md" 2>/dev/null; }
+
+PPK="$(park_fixture parked1 wake)"
+PK_WS="$(fixture_git "$PPK" rev-parse --short wave/01-fixture)"
+PK_MAIN0="$(fixture_git "$PPK" rev-parse main)"
+expect_nonempty "PK-0 precondition: the working branch names a commit" "$PK_WS"
+expect_eq "PK-0b precondition: the working branch is NOT reachable from main (the merge act would refuse)" "1" \
+  "$(fixture_git "$PPK" merge-base --is-ancestor wave/01-fixture main; echo $?)"
+expect_eq "PK-0c precondition: the plan carries the Wake Note and wt/01-x exists" "1|yes" \
+  "$(/usr/bin/grep -c '^## Wake Note$' "$PPK/$PLAN_REL" | tr -d ' ')|$(branch_exists "$PPK" wt/01-x)"
+PK_CK0="$(cksum < "$PPK/$PLAN_REL")"
+run_close "$PPK" check
+expect_eq "PK-1 AC-4.3 check exits 0 and prints merge: parked (<why>)" "0|yes" \
+  "$CO_RC|$(contains "$CO_OUT" "merge: parked ($PK_WHY)")"
+expect_eq "PK-1b …and never merge: WOULD REFUSE" "no" "$(contains "$CO_OUT" "merge: WOULD REFUSE")"
+expect_eq "PK-1c …and check writes nothing" "$PK_CK0" "$(cksum < "$PPK/$PLAN_REL")"
+run_close "$PPK" run
+expect_eq "PK-2 AC-4.3 run closes the parked plan rc 0, and the plan reads closed" "0|1" "$CO_RC|$(run_open_rc "$PPK/$PLAN_REL")"
+expect_contains "PK-3 …the Step-9 line reads delivered: parked on <branch> @ <sha>" \
+  "- Step 9: delivered: parked on wave/01-fixture @ $PK_WS" "$(/usr/bin/grep -m1 '^- Step 9: ' "$PPK/$PLAN_REL")"
+expect_eq "PK-4 …the continuation is written and its header says parked, where and why" "1|yes|yes" \
+  "$([ -f "$PPK/$CONT_REL" ] && echo 1 || echo 0)|$(contains "$(sed -n 3p "$PPK/$CONT_REL" 2>/dev/null)" "Parked ")|$(contains "$(sed -n 3,4p "$PPK/$CONT_REL" 2>/dev/null)" "\`wave/01-fixture\` @ $PK_WS")"
+expect_contains "PK-4b …naming why" "$PK_WHY" "$(sed -n 3,4p "$PPK/$CONT_REL" 2>/dev/null)"
+expect_absent "PK-4c …and never says the branch was merged" "merged into" "$(sed -n 1,6p "$PPK/$CONT_REL" 2>/dev/null)"
+expect_contains "PK-5 …the epic row is written parked" "parked" "$(/usr/bin/grep '^| 01 |' "$PPK/$EPIC_REL")"
+expect_contains "PK-6 …the patrol is disarmed (CronDelete and the disarm verb)" "patrol: CronDelete the bionic-patrol job, then: " "$CO_OUT"
+expect_contains "PK-7 …the handoff's closed form says where the work is parked and why" \
+  "resume point: PARKED on wave/01-fixture @ $PK_WS — $PK_WHY" "$(pk_handoff "$PPK")"
+expect_absent "PK-7b …and never DELIVERED" "resume point: NONE — DELIVERED" "$(pk_handoff "$PPK")"
+expect_eq "PK-8 the work is kept: wt/01-x and the working branch stand, main never moved" "yes|yes|$PK_MAIN0" \
+  "$(branch_exists "$PPK" wt/01-x)|$(branch_exists "$PPK" wave/01-fixture)|$(fixture_git "$PPK" rev-parse main)"
+expect_contains "PK-8b …and the card says nothing was removed" "worktree-removed: none — parked" "$CO_OUT"
+run_close "$PPK" run
+expect_eq "PK-9 a second run says already closed" "0|already closed" "$CO_RC|$CO_OUT"
+
+# a parked: line under ## SDLC State parks too; an unreached wt/* branch does not refuse a parked plan (nothing is deleted)
+PPL="$(park_fixture parked2 line)"
+add_unreached_branch "$PPL"
+run_close "$PPL" check
+expect_eq "PK-10 a parked: line parks: check prints merge: parked (<why>), and the unreached branch is not a refusal" "yes|no" \
+  "$(contains "$CO_OUT" "merge: parked ($PK_WHY)")|$(contains "$CO_OUT" "WOULD REFUSE — wt/01-y")"
+run_close "$PPL" run
+expect_eq "PK-10b …run closes rc 0, keeping both wt/01-x and the unreached wt/01-y" "0|yes|yes" \
+  "$CO_RC|$(branch_exists "$PPL" wt/01-x)|$(branch_exists "$PPL" wt/01-y)"
+
+# controls: the merge act's refusal stands on an unparked plan, and on one whose Wake Note is the empty template
+for _pk in unparked none; do
+  PPU="$(park_fixture "parked-$_pk" "$_pk")"
+  PPU_CK="$(cksum < "$PPU/$PLAN_REL")"
+  run_close "$PPU" check
+  expect_contains "PK-11.$_pk control: an $_pk plan whose branch main never took still reads merge: WOULD REFUSE" \
+    "merge: WOULD REFUSE — wave/01-fixture @ " "$CO_OUT"
+  run_close "$PPU" run
+  expect_eq "PK-11b.$_pk …and run refuses it, naming the merge, the plan unchanged" "2|yes|$PPU_CK" \
+    "$CO_RC|$(contains "$CO_OUT" "is not reachable from main")|$(cksum < "$PPU/$PLAN_REL")"
+done
+
+# step-line 9: accepted on a parked plan, refused as close-out's on an unparked one
+PK_SID="closeout-park-sid"
+PPS="$(park_fixture parked3 wake)"
+# the `- Step 4:` line every plan past Step 4 carries: step-line's dry commit judges a writer's copy at current: 4 (§LANDS)
+awk '/^- Step 7:/ { print "- Step 4: implement: opened 2026-09-14T00:10Z" } { print }' "$PPS/$PLAN_REL" > "$PPS/pk.tmp" && mv "$PPS/pk.tmp" "$PPS/$PLAN_REL"
+lands_bind "$PPS" "$PK_SID"
+expect_eq "PK-12 precondition: the session is bound to the parked plan" "0" "$LP_RC"
+lands_poker "$PPS" "$PK_SID" step-line 9 "parked on wave/01-fixture — $PK_WHY"
+expect_eq "PK-12b AC-4.3 step-line 9 is accepted on a parked plan (rc 0) and the line is written" "0|1" \
+  "$LP_RC|$(/usr/bin/grep -c "^- Step 9: parked on wave/01-fixture — " "$PPS/$PLAN_REL" | tr -d ' ')"
+PPN="$(park_fixture parked4 unparked)"
+lands_bind "$PPN" "$PK_SID"
+PPN_CK="$(cksum < "$PPN/$PLAN_REL")"
+lands_poker "$PPN" "$PK_SID" step-line 9 "delivered by hand"
+expect_eq "PK-12c control: on an unparked plan step-line 9 is still refused (rc 1) as close-out's, the plan unchanged" "1|yes|$PPN_CK" \
+  "$LP_RC|$(contains "$LP_OUT" "the Step 9 line is close-out's to write")|$(cksum < "$PPN/$PLAN_REL")"
+
+# ============================================================
+section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #1; D23): the handoff verb's closed form on a parked or pull-request plan is close-out's, line for line"
+# ============================================================
+# The closed form has one writer of its two state lines, `resume point:` and `branch:`, and both doors print it:
+# close-out.sh's tail and session-poker.sh `handoff` on the closed plan. Every line but the two each door reads for
+# itself (`written:`, its own instant; `patrol:`, the disarm instruction close-out prints and the state the verb
+# reads, T12's closed form) is the same. resume on close-out's parked file says the run is parked, never that it
+# has nothing to resume. FIXTURE FIDELITY: §PARKED's closed parked plan (PPK), and §ANY-BRANCH's task-scale plan
+# whose pull request is owed (mk_task_pr_fixture), closed with `archive-on-close: false` so the plan stays where the
+# verb can bind it (an archived plan leaves the project root); each as close-out left it, the session bound by the verb.
+# fails-when: the verb writes `NONE — DELIVERED` or `merged into` on a parked or pull-request run.
+OW_HO=".bionic/docs/record/wave-01-fixture/handoff.md"
+ow_lines() { awk 'index($0, "written: ") != 1 && index($0, "patrol: ") != 1' "$1" 2>/dev/null; }  # <file> -> all but the two own lines
+ow_doors() {  # <label> <project> <sid> -> close-out's file kept at $SANDBOX/ow-copy-<label>, then the verb's written over it; OW_RC
+  cp "$2/$OW_HO" "$SANDBOX/ow-copy-$1" 2>/dev/null
+  lands_bind "$2" "$3"
+  lands_poker "$2" "$3" handoff
+  OW_RC="$LP_RC"; OW_OUT="$LP_OUT"
+}
+OW_SID="closeout-onewriter-sid"
+expect_eq "OW-0 precondition: close-out wrote PPK's closed form, parked" \
+  "resume point: PARKED on wave/01-fixture @ $PK_WS — $PK_WHY" "$(sed -n 2p "$PPK/$OW_HO" 2>/dev/null)"
+: > "$PPK/.bionic/tmp/engaged-$OW_SID.state"
+lands_poker "$PPK" "$OW_SID" resume "$OW_HO"
+expect_eq "OW-1 resume on close-out's parked file exits 0" "0" "$LP_RC"
+expect_contains "OW-1b …saying the run is parked and its work kept unmerged" "is parked: its work is kept on its branch, not merged" "$LP_OUT"
+expect_absent "OW-1c …and never that there is nothing to resume (OW-1b read the same output)" "nothing to resume" "$LP_OUT"
+ow_doors parked "$PPK" "$OW_SID"
+expect_eq "OW-2 the handoff verb on the parked plan exits 0" "0" "$OW_RC"
+expect_eq "OW-2b …line 2 is still PARKED (the OW-0 extractor)" \
+  "resume point: PARKED on wave/01-fixture @ $PK_WS — $PK_WHY" "$(sed -n 2p "$PPK/$OW_HO" 2>/dev/null)"
+expect_nonempty "OW-2c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-parked")"
+expect_eq "OW-2d the verb's closed form is close-out's, line for line" "$(ow_lines "$SANDBOX/ow-copy-parked")" "$(ow_lines "$PPK/$OW_HO")"
+
+OWR="$(mk_task_pr_fixture ow-pr "fix/x")"
+printf 'archive-on-close: false\n' >> "$OWR/.bionic/config.yaml"
+run_close "$OWR" run
+expect_eq "OW-3 precondition: close-out closed the task-scale plan rc 0, unmerged and in place" "0|no|yes" \
+  "$CO_RC|$(git -C "$OWR" merge-base --is-ancestor fix/x main && echo yes || echo no)|$([ -f "$OWR/$PLAN_REL" ] && echo yes || echo no)"
+expect_eq "OW-3b …and wrote its branch line, to be pulled" "branch: fix/x to be pulled into main." \
+  "$(/usr/bin/grep -m1 '^branch: ' "$OWR/$OW_HO" 2>/dev/null)"
+ow_doors pr "$OWR" "$OW_SID"
+expect_eq "OW-4 the handoff verb on the pull-request plan exits 0" "0" "$OW_RC"
+expect_eq "OW-4b …the branch line is still to be pulled (the OW-3b extractor)" "branch: fix/x to be pulled into main." \
+  "$(/usr/bin/grep -m1 '^branch: ' "$OWR/$OW_HO" 2>/dev/null)"
+expect_nonempty "OW-4c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-pr")"
+expect_eq "OW-4d the verb's closed form is close-out's, line for line" "$(ow_lines "$SANDBOX/ow-copy-pr")" "$(ow_lines "$OWR/$OW_HO")"
+
+# ============================================================
+section "§TOLERANT — wave-38 T15 (REQ-4 AC-4.4): a prose line in the debt ledger is skipped with a note; a missing epic table is added"
+# ============================================================
+# A line of debt.md that is no table row at all (it carries no ` | ` cell separator: prose a person or an agent wrote)
+# is skipped with one note line, `close-out: debt.md:<n> skipped — not a ledger row`, and never refuses; a table row
+# that does not parse still refuses (DEBT-LINES, AC-7.8). An epic plan with no shipped table gets the table's header
+# written before the row (4e q1.7–q1.12 and §78.3, restated).
+# fails-when: either refusal fires.
+TL_PROSE='The tree_count item above was raised in a review, and the record holds the reasoning.'
+PTL="$(mk_fixture tolerant1)"; advance_to "$PTL" 8
+debt_plant "$PTL"
+printf '%s\n' "$TL_PROSE" >> "$PTL/.bionic/docs/record/wave-01-fixture/debt.md"
+expect_eq "TL-0 precondition: the prose line is line 5 of the ledger" "$TL_PROSE" "$(sed -n 5p "$PTL/.bionic/docs/record/wave-01-fixture/debt.md")"
+run_close "$PTL" check
+expect_eq "TL-1 AC-4.4 check over a ledger with a prose line exits 0 and does not say it would refuse" "0|no" \
+  "$CO_RC|$(contains "$CO_OUT" "debt-lines: WOULD REFUSE")"
+expect_contains "TL-1b …it notes the line skipped, by its number" "close-out: debt.md:5 skipped — not a ledger row" "$CO_OUT"
+run_close "$PTL" run
+expect_eq "TL-2 AC-4.4 run completes (rc 0) and notes the skip once" "0|1" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^close-out: debt.md:5 skipped — not a ledger row$' | tr -d ' ')"
+expect_nonempty "TL-3 precondition: the carry extractor reads the continuation's debt lines" "$(carry_section "$PTL/$CONT_REL" | /usr/bin/grep '^debt: ')"
+expect_eq "TL-3b …the two unburned items are carried and the prose is not" \
+"debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W
+debt: pair_x unpinned-pair \"lib/d.sh:9\" touches=0 raised-by=record/wave-01-fixture/critic-adversarial.md from=$CARRY_W|0" \
+  "$(carry_section "$PTL/$CONT_REL" | /usr/bin/grep '^debt: ')|$(/usr/bin/grep -cF "$TL_PROSE" "$PTL/$CONT_REL" | tr -d ' ')"
+
+# an epic plan with no shipped table, beside a prose debt line: both tolerated in one run
+PTE="$(mk_fixture tolerant2)"; advance_to "$PTE" 8
+printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$PTE/$EPIC_REL"
+debt_plant "$PTE"; printf '%s\n' "$TL_PROSE" >> "$PTE/.bionic/docs/record/wave-01-fixture/debt.md"
+run_close "$PTE" run
+expect_eq "TL-4 AC-4.4 run over both closes rc 0: the table is added and the row written in it" "0|1|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^| wave | version | plan | spec / requirements | ADRs | shipped |$' "$PTE/$EPIC_REL" | tr -d ' ')|$(rows_with_wave "$PTE/$EPIC_REL" shipped 01)"
+expect_eq "TL-4b …the epic's own text is kept" "1" "$(/usr/bin/grep -c '^No waves table yet\.$' "$PTE/$EPIC_REL" | tr -d ' ')"
+
+# ============================================================
+section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, each against its target, and the sitrep's three indicators"
+# ============================================================
+# Under `## Scorecard`, fenced, exactly:
+#   human stops (autonomous half): <n> · target 1           approved: lines after the plan's approved-by:, one per reply
+#   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the approved: merge line
+#   widest landing ready→landed: <row> <m> min · target < 30   landing-report --rows, the largest minutes=
+#   human-wait minutes: <n> · no target (the user's)        the final-card records, render to reply
+# then the sitrep's schedule, correctness and waste lines at close. A number the record cannot compute is `unverified`.
+# `landing-report --scorecard <plan>` prints the same lines; close-out reads them before the tmp wipe (the roster).
+# fails-when: a line is missing, carries a number the record does not hold, or prints a literal where it is unverified.
+sc_section() { awk '/^## / { s = ($0 == "## Scorecard"); next } s && NF && !/^```/ { print }' "$1"; }
+sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals in two replies, two launches, one final card
+  local p="$1" plan="$1/$PLAN_REL" rec="$1/.bionic/docs/record/wave-01-fixture"
+  case "$p" in "$SANDBOX"/*) : ;; *) echo "sc_plant: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
+  mkdir -p "$rec"
+  {
+    printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$p"
+    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C"
+    printf 'line/v1|ev=ready|row=T2|name=w-T2|commit=%s|branch=wt/01-T2|tree=%s/.worktrees/01-T2|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T11:00:00Z\n' "$LAND_C" "$p"
+    printf 'line/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T11:42:00Z\n' "$LAND_C"
+  } > "$rec/landing-proofs.log"
+  awk '{ print } /^approved-by: / && !d {
+         print "approved: doc by fixture 2026-10-05T09:00:00Z \"go ahead\""
+         print "approved: release by fixture 2026-10-06T12:00:00Z \"1\""
+         print "approved: merge by fixture 2026-10-06T12:00:01Z \"1\""; d = 1 }' "$plan" > "$plan.sc" && mv "$plan.sc" "$plan"
+  {
+    roster_row_fixture status=intended name=w-early agent_id= launched_at=2026-10-06T09:00:00Z plan="$plan"
+    roster_row_fixture status=intended name=w-late agent_id= launched_at=2026-10-06T12:05:01Z plan="$plan"
+    roster_row_fixture status=intended name=w-other agent_id= launched_at=2026-10-06T13:00:00Z plan="/elsewhere/wave-99-other.plan.md"
+  } >> "$p/.bionic/tmp/roster-fixture.state"
+  printf '%s\n' '**Final card · wave-01-fixture at abcdef12**' '' '## Replay' '' \
+    "final-card/v1|plan=$plan|head=$LAND_C|at=2026-10-06T11:48:01Z|options=1" \
+    'replied: at=2026-10-06T12:00:01Z option=1 words="1"' > "$rec/final-card-abcdef12.md"
+}
+SC_TAIL='human-wait minutes: 12 · no target (the user'"'"'s)'
+PSC="$(mk_fixture scorecard1)"; advance_to "$PSC" 8
+sc_plant "$PSC"
+SC_VERB="$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSC" --scorecard)"
+expect_eq "SC-0 landing-report --scorecard prints the four lines with the planted numbers and targets" \
+"human stops (autonomous half): 2 · target 1
+agent minutes after the final reply: 5 · target 0
+widest landing ready→landed: T2 42.0 min · target < 30
+$SC_TAIL" "$(printf '%s\n' "$SC_VERB" | sed -n 1,4p)"
+expect_eq "SC-0b …then the sitrep's three indicator lines, schedule, correctness and waste, and nothing more" "schedule|correctness|waste|7" \
+  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSC" run
+expect_eq "SC-1 run exits 0 and the continuation carries ## Scorecard once" "0|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Scorecard$' "$PSC/$CONT_REL" | tr -d ' ')"
+expect_nonempty "SC-1b precondition: the extractor finds lines under the heading" "$(sc_section "$PSC/$CONT_REL")"
+expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe (the roster's launch counted)" \
+  "$SC_VERB" "$(sc_section "$PSC/$CONT_REL")"
+expect_contains "SC-3 …and the card prints each line" "scorecard: agent minutes after the final reply: 5 · target 0" "$CO_OUT"
+expect_eq "SC-4 …the heading sits before the Resume instruction" "yes" \
+  "$(awk '/^## Scorecard$/ { a = NR } /^## Resume instruction/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PSC/$CONT_REL")"
+# a record that cannot compute a number prints unverified on that line, never a literal
+PSU="$(mk_fixture scorecard2)"; advance_to "$PSU" 8
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSU" run
+expect_eq "SC-5 no approval, no landing, no final card: three lines unverified, the stop count computed (0)" \
+"0|human stops (autonomous half): 0 · target 1
+agent minutes after the final reply: unverified · target 0
+widest landing ready→landed: unverified · target < 30
+human-wait minutes: unverified · no target (the user's)" \
+  "$CO_RC|$(sc_section "$PSU/$CONT_REL" | sed -n 1,4p)"
+# an existing continuation gets the section added, once
+PSE="$(mk_fixture scorecard3)"; advance_to "$PSE" 8
+mkdir -p "$PSE/${CONT_REL%/*}"
+printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PSE/$CONT_REL"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSE" run
+expect_eq "SC-6 a continuation written before close-out gains ## Scorecard once and keeps its own line" "0|1|1" \
+  "$CO_RC|$(/usr/bin/grep -c '^## Scorecard$' "$PSE/$CONT_REL" | tr -d ' ')|$(/usr/bin/grep -c '^edited by a person$' "$PSE/$CONT_REL" | tr -d ' ')"
+
+# ============================================================
+section "§ASKS-NOTHING — wave-38 T15 (D17; AC-1.6, AC-1.7): close-out puts no question to the user"
+# ============================================================
+# Close-out asks nothing: no `read` in close-out.sh reaches a terminal (every one is a loop fed by a here-string, a
+# pipe or a file), nothing prompts, and the Step-9 doctrine no longer asks the user's materiality ruling at close.
+# fails-when: a prompt or a terminal read is added, or steps/9.md asks a ruling.
+AN_READS="$(/usr/bin/grep -nE '(^|[^A-Za-z_])read[[:space:]]+-r' "$SCRIPT")"
+expect_nonempty "AN-0 precondition: the extractor finds close-out.sh's read loops" "$AN_READS"
+expect_empty "AN-1 every read in close-out.sh is a while-loop fed by a redirect or a pipe" \
+  "$(printf '%s\n' "$AN_READS" | /usr/bin/grep -v 'while')"
+expect_empty "AN-2 nothing reads the terminal or prompts (/dev/tty, read -p, select)" \
+  "$(/usr/bin/grep -nE '/dev/tty|read[[:space:]]+-[a-z]*p|^[[:space:]]*select[[:space:]]' "$SCRIPT")"
+AN_STEP9="$REPO_ROOT/skills/canonical-sdlc/steps/9.md"
+expect_nonempty "AN-3 precondition: steps/9.md reads" "$(cat "$AN_STEP9" 2>/dev/null)"
+expect_contains "AN-4 D26 steps/9.md says the scorecard is printed and close-out asks no ruling" "Close-out asks no ruling" "$(cat "$AN_STEP9")"
+expect_absent "AN-4b …and no longer asks the user's materiality ruling" "materiality ruling" "$(cat "$AN_STEP9")"
 
 finish

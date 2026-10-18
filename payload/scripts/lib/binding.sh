@@ -82,7 +82,7 @@
 # session — a later binding by the same session leaves it — never for `none` and never when
 # no act is named, so a library caller of the three-operand form changes no plan. It is
 # placed after the section's last `- session:` line, else after the section's last non-blank
-# line, fences skipped. `bind_sessions <plan>` is its one reader. Neither the marker's
+# line, fences skipped. `bind_sessions <plan> [<root>]` is its one reader. Neither the marker's
 # status contract nor its shape changes: the record reports beside it, in `BIND_SESSION`:
 #
 #     recorded  the line was written     present  the plan already had this session's line
@@ -252,14 +252,43 @@ bind_plan() {
 # BIND_SESSION_ACTS — the acts that bind, and so the only words a session line's `by` carries.
 BIND_SESSION_ACTS="engage bind write"
 
-# bind_sessions <plan> -> the sessions the run recorded, one id per line, in the order they
+# bind_sessions <plan> [<root>] -> the sessions the run recorded, one per line, in the order they
 # bound (each once); exit 1 when the plan is not a readable file. The lines are read under the
 # FIRST flush-left `## SDLC State`, fences skipped, as every reader of that section reads it,
 # and an id outside the marker's own shape rule ([A-Za-z0-9_-], not `unknown`) is skipped: a
 # reader turns an id into a transcript path, so a hand-typed `../x` must never reach one.
-bind_sessions() {  # <plan>
-  local plan="${1:-}"
+#
+# A WITNESS IS A BINDING ACT (wave-38 T20; REQ-11 AC-11.2, L6; A-orch-59). A `- session:` line is
+# plan text, and one a hand or an agent appends reads exactly as one `bind_plan` wrote. What only
+# the binding act leaves is the marker: `bind_plan` writes `<root>/.bionic/tmp/engaged-<sid>.state`
+# naming the plan BEFORE it writes the line. So with a <root> (the root the reader acts in), a line
+# is admitted only when that session's marker under <root> names this plan, read through
+# `session_plan` (lib/run.sh: the sid shape, a symlink refused, CRLF, the four no-binding shapes)
+# and compared through `_bind_resolve` on both sides, as `bind_holders` compares; it prints bare.
+# Every other line prints `<sid> (no binding act)`, the refusal lib/said.sh files in SAID_REFUSED
+# unchanged, and a reader with no `session_plan` refuses every line. THE LIMIT, accepted at
+# A-orch-59: the marker is a sweep class (lib/patrol.sh), so once a `/clear` predecessor is dead
+# and swept its line is refused, and the words it typed count only while its marker stands.
+# Without a <root> it is the record as written, every line bare: `bind_record_session` asks it
+# whether a line is already there, which is a question about the text, not about a witness.
+bind_sessions() {  # <plan> [<root>]
+  local plan="${1:-}" root="${2:-}" want sid op
   [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || return 1
+  if [ -z "$root" ]; then _bind_session_ids "$plan"; return 0; fi
+  case "$plan" in /*) ;; *) plan="$PWD/$plan" ;; esac
+  want=$(_bind_resolve "$plan") || want=""
+  _bind_session_ids "$plan" | while IFS= read -r sid; do
+    if [ -n "$want" ] && declare -F session_plan >/dev/null 2>&1 \
+       && op=$(session_plan "$root" "$sid") && op=$(_bind_resolve "$op") && [ "$op" = "$want" ]; then
+      printf '%s\n' "$sid"
+      continue
+    fi
+    printf '%s (no binding act)\n' "$sid"
+  done
+}
+
+# _bind_session_ids <plan> -> the ids the plan's `- session:` lines carry, each once, in order (above).
+_bind_session_ids() {
   awk '
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
@@ -267,7 +296,7 @@ bind_sessions() {  # <plan>
     sdlc == 1 && /^- session:[ \t]/ {
       sub(/\r$/, ""); split($0, f, /[ \t]+/); s = f[3]
       if (s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got)) { got[s] = 1; print s }
-    }' "$plan"
+    }' "$1"
 }
 
 # bind_record_session <plan> <sid> <act> -> the session's line written into <plan>, once.

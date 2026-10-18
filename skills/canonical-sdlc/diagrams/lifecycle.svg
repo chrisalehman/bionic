@@ -80,7 +80,7 @@
   <text x="946" y="184" font-size="11" font-style="italic" fill="#b42318">the wave shape locks here, and the run goes quiet</text>
   <text x="946" y="212" font-size="10.5" fill="#3a424c">· one checkpoint — not a series of small confirmations</text>
   <text x="946" y="230" font-size="10.5" fill="#3a424c">· the user approves the plan, the tasks, the locked matrix</text>
-  <text x="946" y="248" font-size="10.5" fill="#3a424c">· a rigor floor is advice: an override is recorded, never refused</text>
+  <text x="946" y="248" font-size="10.5" fill="#3a424c">· a rigor minimum is advice: an override is recorded, never refused</text>
   <text x="946" y="266" font-size="10.5" fill="#3a424c">· below this line the run is unattended, within stop-and-wake</text>
 
   <!-- ============================ walk-away boundary ============================ -->
@@ -192,7 +192,7 @@
   <text x="505" y="744" font-size="13" font-weight="700" fill="#16191d">RIGOR — how much proof (cumulative)</text>
   <text x="505" y="766" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">tested &#8834; peer-reviewed &#8834; audited</text>
   <text x="505" y="790" font-size="10.5" fill="#3a424c">Each tier contains the one before it. Step 6 reads three questions</text>
-  <text x="505" y="805" font-size="10.5" fill="#3a424c">at every tier, dealt to 1, 2 or 3 readers by rigor. Floors advise;</text>
+  <text x="505" y="805" font-size="10.5" fill="#3a424c">at every tier, dealt to 1, 2 or 3 readers by rigor. Minimums advise;</text>
   <text x="505" y="820" font-size="10.5" fill="#3a424c">they never refuse — the user's lower value is taken, and recorded.</text>
 
   <rect x="934" y="720" width="426" height="118" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>

@@ -13,6 +13,12 @@
 #   §REFUSE         no list path, and a pair that cannot be read, are one-line refusals.
 #   §SCAN           the name scan still runs under it: a listed entry planted in a committed
 #                   file fails the check, beside the clean run on the same repository.
+#   §LIMITS         the Known limits of the release being shipped (wave-38 T20; REQ-11 AC-11.4, L8): for the
+#                   newest heading, the plan whose `release:` names it is read, and every open deferral's
+#                   `stated=` sentence must stand under that entry's `### Known limits`. One omitted sentence
+#                   exits 1 in one line naming it; all present is green; a sentence elsewhere in the entry or
+#                   only under an older entry is an omission; no stated deferral, and no plan naming the
+#                   release, each pass with one `known-limits:` line saying so.
 #   §STRIKE         the 1.17.0 block against the strike list of ten (wave-34 REQ-6, AC-6.1, AC-6.2,
 #                   AC-1.5): each of the ten 1.16.0 Known limits is struck with a record or carried
 #                   with a sentence that says why, no other 1.16.0 bullet vanishes, the count of
@@ -38,6 +44,8 @@
 #                   (wave-35 AC-3.2) and names ADR-056 as its amendment, ADR-055 and ADR-056 are Accepted
 #                   (wave-36 D14), read from the docs tree when its files exist. With none of them the
 #                   section prints one skipped line and passes. A doctored copy of each goes red.
+#   §REVERSE        the 1.21.0 summary says in one sentence that it reverses 1.14.0's "until bionic2" promise and names
+#                   the four old spellings T8 kept as aliases (wave-38 AC-9.5; D6). Each rule has a doctored copy.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -171,6 +179,84 @@ expect_status "(e) a listed entry planted in a committed file: the check fails" 
 expect_contains "(e) …and the scan's hit line is in the output" "HIT entry=1" "$OUT"
 expect_absent "(e) …and the entry itself is never printed" "$ENTRY" "$OUT"
 
+section "§LIMITS — the shipped release's Known limits carry every deferred sentence of its plan (wave-38 T20; REQ-11 AC-11.4)"
+
+# FIXTURE FIDELITY: a real repository whose committed CHANGELOG's newest entry has a `### Known limits` part, and
+# the run's plan on disk under the project's docs root (never committed, as `.bionic/` is ignored in a real
+# project), in the shapes the writers write: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
+# `## SDLC State` with the ` stated="…"` field `finding-stated` appends (a `"` written `\"`, a `\` written `\\`).
+# Four deferrals: #1 and #2 stated and deferred by the policy, #3 deferred and unstated, #4 stated but rated fix
+# (S2 on under S1,S2-on), so only #1 and #2 are held. SYNTHESIZED: the sentences, the versions, the records.
+LIM_A='The first limit says "quoted" words and a back\slash.'
+LIM_B='The second limit is long enough that a changelog wraps it across two lines.'
+lim_plan() {  # <repo> <release> [<deferred lines>] -> the run's plan under the repository's docs root
+  local d="$1/.bionic/docs/plans/epic-01"
+  mkdir -p "$d"
+  { printf -- '---\nfix-policy: S1,S2-on\nrelease: %s\n---\n\n# fixture run\n\n## SDLC State\n\ncurrent: 7\n' "$2"
+    printf '%s\n' "${3-}"
+    printf '\n## Tasks\n'; } > "$d/wave-01.plan.md"
+}
+LIM_DEFERRED='deferred: record/w/critic.md#1 S3 on "a first title" stated="The first limit says \"quoted\" words and a back\\slash."
+deferred: record/w/critic.md#2 S3 on "a second title" stated="The second limit is long enough that a changelog wraps it across two lines."
+deferred: record/w/critic.md#3 S3 on "an unstated one"
+deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
+lim_changelog() {  # <repo> <Known limits body of 2.3.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.3.4
+  { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
+    printf '## 0.0.1 — 2026-01-01\n\n- first\n%s\n' "${3-}"; } > "$1/CHANGELOG.md"
+  git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the changelog"
+}
+LIM_BOTH="- Known limit: $LIM_A
+- Known limit: The second limit is long enough that a changelog
+  wraps it across two lines."
+
+R="$TMP/lim-ok"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"; lim_changelog "$R" "$LIM_BOTH"
+expect_contains "(l0) setup: the committed entry carries the first sentence as the plan states it, unescaped" "$LIM_A" "$(git -C "$R" show HEAD:CHANGELOG.md)"
+expect_false "(l0) setup: the plan is not committed (it is read from the docs root, as a real project's is)" git -C "$R" cat-file -e "HEAD:.bionic/docs/plans/epic-01/wave-01.plan.md"
+run_check "$R"
+expect_status "(l1) every stated deferral under the newest entry's Known limits, one of them wrapped: the check passes" 0 "$RC"
+expect_contains "(l1) …saying how many sentences of which plan it held" "known-limits: 2.3.4 carries the 2 deferred sentences of $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md" "$OUT"
+expect_eq "(l1) …and no release-check line" "0" "$(lines_of "$OUT")"
+
+R="$TMP/lim-omit"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: $LIM_A"
+run_check "$R"
+expect_status "(l2) §LIMITS AC-11.4 Known limits omitting one stated sentence: the check fails" 1 "$RC"
+expect_contains "(l2) …in a line naming the release, the finding and the sentence" \
+  "release-check: Known limits of 2.3.4 omit the deferred sentence of record/w/critic.md#2: $LIM_B" "$OUT"
+expect_eq "(l2) …in one line" "1" "$(lines_of "$OUT")"
+expect_absent "(l2) …and the sentence it holds is not named" "$LIM_A" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check:')"
+
+R="$TMP/lim-elsewhere"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+{ printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change: %s\n\n### Known limits\n\n- Known limit: %s\n\n' "$LIM_B" "$LIM_A"
+  printf '## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "the sentence outside Known limits"
+run_check "$R"
+expect_status "(l3) the sentence in the entry but outside its Known limits: the check fails" 1 "$RC"
+expect_contains "(l3) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
+
+R="$TMP/lim-older"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+lim_changelog "$R" "- Known limit: $LIM_A" "
+### Known limits
+
+- Known limit: $LIM_B"
+run_check "$R"
+expect_status "(l4) the sentence only under an older entry's Known limits: the check fails" 1 "$RC"
+expect_contains "(l4) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
+
+R="$TMP/lim-none"; fx_repo "$R" 2.3.4 2.3.4
+lim_plan "$R" 2.3.4 'deferred: record/w/critic.md#3 S3 on "an unstated one"'; lim_changelog "$R" "- Known limit: none of note."
+run_check "$R"
+expect_status "(l5) a plan with no stated deferral: the check passes" 0 "$RC"
+expect_contains "(l5) …in one line saying so" "known-limits: 2.3.4 — $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md states no deferred sentence" "$OUT"
+expect_eq "(l5) …one such line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits:')"
+
+R="$TMP/lim-noplan"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.3 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: none of note."
+run_check "$R"
+expect_status "(l6) no plan names the release (the plan names 2.3.3): the check passes" 0 "$RC"
+expect_contains "(l6) …in one line saying so" "known-limits: 2.3.4 — no plan under $(cd "$R" && pwd -P)/.bionic/docs names release: 2.3.4, so no deferred sentence is held" "$OUT"
+lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+run_check "$R"
+expect_status "(l6) …positive, the same repository once the plan names 2.3.4: the omissions fail it" 1 "$RC"
+expect_eq "(l6) …one line for each of the two sentences" "2" "$(lines_of "$OUT")"
+
 section "§STRIKE — the 1.17.0 block against the strike list of ten (AC-6.1, AC-6.2, AC-1.5)"
 
 # THE GRAMMAR. A Known limit is a bullet that begins `- Known limit` (a 1.16.0 bullet carried as it
@@ -226,10 +312,10 @@ strike_check() {
     else
       case "$item" in
         "- ($i) Known limit, struck:"*)
-          printf '%s' "$item" | grep -q -E '`[^`]*\.(md|log|tsv)(:[0-9]+)?`' ||
+          grep -q -E '`[^`]*\.(md|log|tsv)(:[0-9]+)?`' <<<"$item" ||
             echo "strike: ($i) is struck and cites no record" ;;
         "- ($i) Known limit, carried:"*)
-          printf '%s' "$item" | grep -q -F 'because' ||
+          grep -q -F 'because' <<<"$item" ||
             echo "strike: ($i) is carried and says no reason (because)" ;;
         *) echo "strike: ($i) is neither struck nor carried" ;;
       esac
@@ -246,7 +332,7 @@ strike_check() {
       i=$((i + 1))
     done
     [ "$hit" = 1 ] && continue
-    printf '%s\n' "$b17" | grep -q -F -x -- "$line" ||
+    grep -q -F -x -- "$line" <<<"$b17" ||
       echo "strike: a 1.16.0 bullet vanished: ${line:0:70}"
   done < <(printf '%s\n' "$u16")
   # the count is stated beside 1.16.0's, and both are the bullets counted
@@ -263,9 +349,9 @@ strike_check() {
   fi
   # AC-1.5: the narrowed limit names the residual and no launcher
   item="$(printf '%s\n' "$b17" | grep -E '^- \(1\) Known limit' || true)"
-  printf '%s' "$item" | grep -q -F "outside the writer's own tree asks as main" ||
+  grep -q -F "outside the writer's own tree asks as main" <<<"$item" ||
     echo "strike: (1) does not say a suite started outside the writer's own tree asks as main"
-  if printf '%s' "$item" | grep -q -i -E 'python|node|awk'; then
+  if grep -q -i -E 'python|node|awk' <<<"$item"; then
     echo "strike: (1) still names a launcher"
   fi
   return 0
@@ -372,20 +458,20 @@ entry_check() {
     if [ "$n" != 1 ]; then
       echo "entry: catalogue item $row is on $n rows, not one"
     else
-      printf '%s\n' "$blk" | grep -E "^\| $row \|" | grep -q -E '`[A-Za-z0-9._-]+\.(md|log)(:[0-9]+)?`' ||
+      grep -E "^\| $row \|" <<<"$blk" | grep -q -E '`[A-Za-z0-9._-]+\.(md|log)(:[0-9]+)?`' ||
         echo "entry: catalogue item $row cites no record"
     fi
   done
   for row in 'proof-add inherited' 'approve regression-2' 'current 7' 'floor-run'; do
-    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the floor rule does not name $row"
+    grep -q -F -- "$row" <<<"$blk" || echo "entry: the floor rule does not name $row"
   done
   for row in 'ADR-053' 'ADR-054' 'Superseded' 'T16-pass-measure.md'; do
-    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the pass removal does not name $row"
+    grep -q -F -- "$row" <<<"$blk" || echo "entry: the pass removal does not name $row"
   done
   for row in 'hook-timeout a1, a2, b, c and g' 'session-start 16.8 and 16.2'; do
-    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the deleted timed cases do not name $row"
+    grep -q -F -- "$row" <<<"$blk" || echo "entry: the deleted timed cases do not name $row"
   done
-  printf '%s\n' "$blk" | grep -q -F 'the 1.17.0 block'"'"'s `background-pass` default line' ||
+  grep -q -F 'the 1.17.0 block'"'"'s `background-pass` default line' <<<"$blk" ||
     echo "entry: the 1.17.0 background-pass default line is not corrected"
   stated="$(printf '%s\n' "$blk" | tr '\n' ' ' | sed -n 's/.*The count of Known limits in this block is \([0-9][0-9]*\)\..*/\1/p')"
   actual="$(printf '%s\n' "$blk" | grep -c -E '^- Known limit' || true)"
@@ -399,7 +485,7 @@ entry_check() {
   for n in T28 T29; do
     case "$row" in *"$n"*) ;; *) echo "entry: catalogue item also-3 does not name its fix $n" ;; esac
   done
-  printf '%s\n' "$blk" | grep -q -E 'pending T[0-9]' && echo "entry: the 1.18.0 block still carries a pending T marker"
+  grep -q -E 'pending T[0-9]' <<<"$blk" && echo "entry: the 1.18.0 block still carries a pending T marker"
   for n in T31 T32 T33 T34; do
     # the bullet "- <n> (…" runs to the next bullet or heading; its record is a `<n>-….md` name
     printf '%s\n' "$blk" | awk -v n="$n" '
@@ -506,7 +592,7 @@ corr_check() {
   local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual t13 t13hit
   blk="$(cl_block "$f" 1.19.0)"
   [ -n "$blk" ] || { echo "corr: no 1.19.0 block"; return 0; }
-  printf '%s\n' "$blk" | grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "corr: the 1.19.0 heading carries no date"
+  grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "corr: the 1.19.0 heading carries no date"
   lead="$(cl_lead "$f" 1.19.0)"
   for s in 'zero machine errors' 'D7' 'D14'; do
     has "$lead" "$s" || echo "corr: the lead does not name $s"
@@ -514,7 +600,7 @@ corr_check() {
   mig="$(printf '%s\n' "$lead" | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
   [ -n "$mig" ] || echo "corr: no Migration paragraph"
   for s in $MIG_ROWS; do
-    printf '%s\n' "$mig" | grep -q -w -- "$s" || echo "corr: Migration does not name $s"
+    grep -q -w -- "$s" <<<"$mig" || echo "corr: Migration does not name $s"
   done
   # T13's bullet names the refusal of the two verbs that apply the debt grammar to a carried line (D14; AC-9.2)
   t13="$(printf '%s\n' "$mig" | awk '/^- T13:/ { p = 1; print; next } p && /^- / { p = 0 } p')"
@@ -551,7 +637,7 @@ EOT
   elif [ "$stated" != "$actual" ]; then echo "corr: the count says $stated and Known limits holds $actual"; fi
   for pair in $ROWS_1190; do
     row="${pair%%:*}"; rec="${pair#*:}"
-    printf '%s\n' "$blk" | grep -q -F -- '`'"$rec"'`' || echo "corr: the entry names no record for $row ($rec)"
+    grep -q -F -- '`'"$rec"'`' <<<"$blk" || echo "corr: the entry names no record for $row ($rec)"
   done
   has "$blk" 'T33, T36, T37, T38, T39 and T40' && has "$blk" '`born: floor`' || echo "corr: the entry does not name the six rows born: floor"
   [ "$(cl_block "$f" 1.18.0 | cl_cksum)" = "$BLOCK_1180_CKSUM" ] || echo "corr: the 1.18.0 block is not as released"
@@ -752,13 +838,13 @@ rel_check() {
   local f="$1" blk lim land pair row rec s
   blk="$(cl_block "$f" 1.20.0)"
   [ -n "$blk" ] || { echo "rel: no 1.20.0 block"; return 0; }
-  printf '%s\n' "$blk" | grep -q -E '^## 1\.20\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "rel: the 1.20.0 heading carries no date"
+  grep -q -E '^## 1\.20\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rel: the 1.20.0 heading carries no date"
   for pair in $ROWS_1200; do
     row="${pair%%:*}"; rec="${pair#*:}"
-    printf '%s\n' "$blk" | grep -q -F -- '`'"$rec"'`' || echo "rel: the entry names no record for $row ($rec)"
+    grep -q -F -- '`'"$rec"'`' <<<"$blk" || echo "rel: the entry names no record for $row ($rec)"
   done
   for s in D3 D4 D5 D6 D7 D8 D9 D10 D11 D12 D13; do
-    printf '%s\n' "$blk" | grep -q -E "^### .*\($s[,)]" || echo "rel: no section for $s"
+    grep -q -E "^### .*\($s[,)]" <<<"$blk" || echo "rel: no section for $s"
   done
   has "$blk" 'timing.tsv' && has "$blk" 'no suite was split' || echo "rel: the entry does not cite timing.tsv with no suite split (AC-1.4)"
   land="$(cl_part "$f" 1.20.0 'The landing numbers')"
@@ -785,5 +871,49 @@ doctor r_nod7 sed 's/^### The landing record holds the run (D7, ADR-057)$/### Th
 expect_contains "(r2e) no D7 section: red" "rel: no section for D7" "$(rel_check "$TMP/doctored.r_nod7")"
 doctor r_nodate sed 's/^## 1\.20\.0 — .*/## 1.20.0 —/'
 expect_contains "(r2f) a 1.20.0 heading with no date: red" "rel: the 1.20.0 heading carries no date" "$(rel_check "$TMP/doctored.r_nodate")"
+
+section "§REVERSE — the 1.21.0 entry says it reverses 1.14.0's 'until bionic2' promise and names the aliases kept (wave-38 AC-9.5; D6)"
+
+# The 1.14.0 rename bullet promised the regression's verbs and keys "keep their spelling until bionic2". Wave 38's
+# T8 renamed them, with one alias arm per old spelling (payload/scripts/lib/alias.sh). The 1.21.0 summary carries
+# ONE sentence that says the release reverses that promise and names the four old spellings a user typed, each kept
+# as an alias. Read from the repository's own CHANGELOG.md; each rule has a doctored copy that goes red.
+
+# rev_sentences <file> — the sentences of the 1.21.0 summary (the lead, before its first `### `), one per line
+rev_sentences() { cl_lead "$1" 1.21.0 | flat | awk '{ n = split($0, a, /\. /); for (i = 1; i <= n; i++) print a[i] }'; }
+# rev_check <file> — one `rev:` line per broken rule; no output when all hold
+rev_check() {
+  local f="$1" blk hit a
+  blk="$(cl_block "$f" 1.21.0)"
+  [ -n "$blk" ] || { echo "rev: no 1.21.0 block"; return 0; }
+  grep -q -E '^## 1\.21\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rev: the 1.21.0 heading carries no date"
+  hit="$(rev_sentences "$f" | grep -F -- 'reverses' | grep -F -- '1.14.0' | grep -F -- 'until bionic2' || true)"
+  if [ -z "$hit" ]; then
+    echo "rev: the 1.21.0 summary has no sentence saying it reverses 1.14.0's until bionic2 promise"
+    return 0
+  fi
+  for a in 'floor-run' 'proof-add floor' 'floor:' 'proof:floor'; do
+    has "$hit" '`'"$a"'`' || echo "rev: the reversal sentence does not name the alias $a"
+  done
+  has "$hit" 'alias' || echo "rev: the reversal sentence does not say the old spellings are kept as aliases"
+}
+# --- the extractors are not vacuous
+expect_nonempty "(v0) the 1.21.0 block is found" "$(cl_block "$CL" 1.21.0)"
+expect_nonempty "(v0) …and its summary splits into sentences" "$(rev_sentences "$CL")"
+expect_nonempty "(v0) …and the 1.14.0 promise it reverses still stands in the 1.14.0 block" \
+  "$(cl_block "$CL" 1.14.0 | grep -F -- 'keep their spelling until bionic2' || true)"
+# --- the repository's own entry keeps every rule
+expect_eq "(v1) the repository's 1.21.0 entry says it reverses the promise and names the aliases" "" "$(rev_check "$CL")"
+# --- each rule has a doctored copy that goes red
+doctor v_silent sed '/^## 1\.21\.0 — /,/^### /s/reverses/keeps/'
+expect_contains "(v2a) a summary silent on the reversal: red" "rev: the 1.21.0 summary has no sentence saying it reverses" "$(rev_check "$TMP/doctored.v_silent")"
+doctor v_nobionic2 sed '/^## 1\.21\.0 — /,/^### /s/until bionic2/for now/'
+expect_contains "(v2b) a reversal that does not name the promise: red" "rev: the 1.21.0 summary has no sentence saying it reverses" "$(rev_check "$TMP/doctored.v_nobionic2")"
+doctor v_noalias sed '/^## 1\.21\.0 — /,/^### /s/`proof:floor`/the reads token/'
+expect_contains "(v2c) a reversal that drops one alias: red" "rev: the reversal sentence does not name the alias proof:floor" "$(rev_check "$TMP/doctored.v_noalias")"
+doctor v_no121 sed 's/^## 1\.21\.0 — /## 1.20.9 — /'
+expect_contains "(v2d) no 1.21.0 block: red" "rev: no 1.21.0 block" "$(rev_check "$TMP/doctored.v_no121")"
+doctor v_nodate sed 's/^## 1\.21\.0 — .*/## 1.21.0 —/'
+expect_contains "(v2e) a 1.21.0 heading with no date: red" "rev: the 1.21.0 heading carries no date" "$(rev_check "$TMP/doctored.v_nodate")"
 
 finish

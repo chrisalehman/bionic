@@ -87,7 +87,7 @@ expect_eq "roots.sh is on disk" "yes" "$([ -r "$LIB" ] && echo yes || echo no)"
 expect_eq "roots.sh parses" "yes" "$(bash -n "$LIB" 2>/dev/null && echo yes || echo no)"
 
 for _fn in project_root bionic_root docs_root tmp_root archive_root plugin_root \
-           claude_home worktree_root transcripts_dir config_value; do
+           claude_home worktree_root transcripts_dir config_value config_section; do
   expect_eq "sourcing roots.sh defines $_fn" "yes" \
     "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; declare -F "$2" >/dev/null 2>&1 && echo yes || echo no' _ "$LIB" "$_fn")"
 done
@@ -281,6 +281,42 @@ expect_eq "config_value reads docs-root: itself" "dd" "$(call config_value "$C" 
 expect_eq "…and docs_root returns exactly that, joined" "$C/dd" "$(call docs_root "$C")"
 expect_eq "…and another key from the same file" "30d" "$(call config_value "$C" live-window 7d)"
 expect_eq "config_value: a missing key is the default" "7d" "$(call config_value "$C" nope 7d)"
+
+# ============================================================
+section "1d — config_section is the one list reader (wave-38 T18; REQ-7 AC-7.1)"
+# ============================================================
+#
+# config_value's sibling for a YAML list: the `- ` items under `<key>:`, one per line, in order,
+# until the next flush-left key; comments and blank lines skipped; one layer of quotes stripped
+# around an item; a `| refuse: <class>` tail kept verbatim (the Bash wall reads it). Nothing when the
+# key is absent or holds no items. tests/standing-orders.test.sh drives the three surfaces it feeds.
+
+CS="$SANDBOX/cslist"; mkdir -p "$CS/.bionic"
+cat > "$CS/.bionic/config.yaml" <<'CS_YAML'
+docs-root: dd
+standing-orders:
+  - hand test in progress | refuse: suite
+
+  # a comment is not an order
+  - "a quoted order"
+  - 'single-quoted'
+- flush-left item
+empty-list:
+next-list:
+  - not ours
+CS_YAML
+expect_eq "config_section returns the items under the key, in order, quotes stripped, the tail kept" \
+  "hand test in progress | refuse: suite
+a quoted order
+single-quoted
+flush-left item" "$(call config_section "$CS" standing-orders)"
+expect_eq "…stopping at the next flush-left key (the next list is its own section)" "not ours" \
+  "$(call config_section "$CS" next-list)"
+expect_eq "…a key with no items: nothing (the rows above read the same file)" "" "$(call config_section "$CS" empty-list)"
+expect_eq "…a key the file lacks: nothing" "" "$(call config_section "$CS" nope)"
+expect_eq "…a flat key is not a list: nothing" "" "$(call config_section "$CS" docs-root)"
+expect_eq "…no config file: nothing" "" "$(call config_section "$SANDBOX/no-such-root" standing-orders)"
+expect_eq "config_section ends with one newline" "yes" "$(trailing_nl config_section "$CS" standing-orders)"
 
 # ============================================================
 setup_section "2 — one config change moves EVERY consumer (AC-N1.3)"

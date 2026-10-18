@@ -26,7 +26,23 @@
 # Sourced, never executed. Defines functions and one constant; reads nothing at load time.
 # bash 3.2: no associative arrays, no `${var,,}`.
 
-PROOF_KINDS="floor review task check"
+# THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
+# proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
+PROOF_KINDS="regression review task check"
+# THE MAP IS SOURCED FROM BESIDE THIS FILE, softly: a copy of this file read where alias.sh is not beside it (a suite's
+# doctored copy) reads only the new spellings, and _proof_alias_norm and _proof_alias_born say so by writing no arm.
+if ! declare -F alias_read >/dev/null 2>&1; then
+  _proof_alias_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  # shellcheck source=/dev/null
+  [ -n "$_proof_alias_dir" ] && [ -r "$_proof_alias_dir/alias.sh" ] && . "$_proof_alias_dir/alias.sh"
+  unset _proof_alias_dir
+fi
+# _proof_alias_norm <kind> <awk variable> -> lib/alias.sh `alias_awk_norm`'s statements, or a blank when the map is
+# not loaded. _proof_alias_born -> the born marker's spellings as an ERE alternation, the new one alone without it.
+_proof_alias_norm() { if declare -F alias_awk_norm >/dev/null 2>&1; then alias_awk_norm "$@"; else printf ' '; fi; }
+_proof_alias_born() { if declare -F alias_alt >/dev/null 2>&1; then alias_alt born; else printf 'regression'; fi; }
+# THE KIND'S STATEMENTS ARE WRITTEN ONCE, AT LOAD: proof_awk is pasted into every proof reader, so it costs no process.
+_PROOF_KIND_NORM="$(_proof_alias_norm kind PROOF_KIND)"
 # The questions a reading answers, the values its result and scope take, and the answers a
 # structure check takes (the Interfaces table of wave-27).
 PROOF_QUESTIONS="evidence adversarial structure"
@@ -61,9 +77,13 @@ proof_kind_ok() {
   case " $PROOF_KINDS " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
 }
 
-# proof_question_ok <question> -> 0 when <question> is one of PROOF_QUESTIONS.
+# proof_question_ok <question> [waive] -> 0 when <question> is one of PROOF_QUESTIONS. In the waive mode it also takes
+# `regression` and `all`, the words `session-poker.sh waive` records the user's word for (wave-38 T2; REQ-4 AC-4.2):
+# a reading is registered for the three questions only, so proof-add asks without the mode.
 proof_question_ok() {
-  case " $PROOF_QUESTIONS " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
+  local qs="$PROOF_QUESTIONS"
+  [ "${2:-}" != waive ] || qs="$qs regression all"
+  case " $qs " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
 }
 
 # proof_line <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> the one proof
@@ -86,9 +106,9 @@ proof_line() {
 proof_floor_line() {
   local l
   if [ -n "${4:-}" ]; then
-    l="$(printf 'proved: kind=floor head=%s at=%s evidence=%s owed=%s' "$1" "$2" "$3" "$4")"
+    l="$(printf 'proved: kind=regression head=%s at=%s evidence=%s owed=%s' "$1" "$2" "$3" "$4")"
   else
-    l="$(proof_line floor "$1" "$2" "$3")"
+    l="$(proof_line regression "$1" "$2" "$3")"
   fi
   printf '%s%s\n' "$l" "${5:+ $5}"
 }
@@ -149,6 +169,99 @@ proof_approved() {
 # the user's act, covering <question> up to <head> (wave-27 T9; written by `session-poker.sh waive`).
 proof_waiver_line() {
   printf 'waived: question=%s head=%s by %s %s "%s"\n' "$1" "$2" "$3" "$4" "$5"
+}
+
+# ---------- THE USER'S WORD FOR THE REGRESSION, AND THE RELEASE'S COVER (wave-38 T2; REQ-1 AC-1.4, REQ-4 AC-4.2, AC-4.5; D18) ----------
+#
+# A regression waiver is `waived: question=regression head=<sha> by <who> <ISO-UTC> "<reply>"`, the three questions'
+# grammar (`proof_waiver_line`, written by `session-poker.sh waive regression|all`). `approve regression-2` is the
+# user's word for ONE further whole run and covers no head. A release-set commit (`_proof_release_path`) is covered by a
+# passing release check at its head (`proof_check_passes`), for every question and the regression.
+
+# proof_regression_waiver <plan> [line] -> the head of the plan's newest `waived: question=regression` line (or that
+# line, whole), exit 0, when no regression proof (`proved: kind=floor`) follows it in `## SDLC State`: facts and waivers
+# share one block, so a line's place is its age (`proof_add_line`), and the newer of the two is the regression's newest
+# link. Nothing, exit 1, otherwise. The question and head are read before the line's first `by`, as every waiver reader
+# reads them, so the reply and the name cannot move them. Readers: `proof_floor_absent` (so the Step-7 wall and the
+# judge read it alike), `_proof_floor_judge` (the regression covered to its head) and facts_state's range.
+proof_regression_waiver() {
+  [ -f "${1:-}" ] || return 1
+  _proof_run_load
+  plan_lines "$1" | awk -v what="${2:-head}" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) { if (PROOF_KIND == "regression") { wh = ""; wl = "" }; next }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      if (q == "regression" && h ~ /^[0-9a-f]+$/ && length(h) >= 7 && length(h) <= 40) { wh = h; wl = $0 }
+    }
+    END { if (wh == "") exit 1; print (what == "line" ? wl : wh) }'
+}
+
+# proof_regression2_open <plan> -> 0 while the plan's `approved: regression-2 by <who> <ISO-UTC> …` line still admits its
+# one whole run: no regression proof (`proved: kind=floor`) carries an `at=` later than the approval's instant; 1 when
+# there is no such line, its instant cannot be read, or a proof after it spent it (AC-4.5; wave-35 critic-adversarial.md#1).
+# The approval line carries no head and sits above the proof block (the approve verb places it by the approvals), so
+# the instant is the order the two lines share; an approval is recorded once, so a plan buys one second run by it. The
+# reader: floor-run's RULE 4 (hooks/session-poker.sh).
+proof_regression2_open() {
+  [ -f "${1:-}" ] || return 1
+  awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    /^approved:[ \t]/ {
+      m = split($0, w, /[ \t]+/)
+      if (w[2] == "regression-2" && w[3] == "by" && !seen) {
+        seen = 1
+        for (i = 4; i <= m && a == ""; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) a = w[i]
+      }
+      next
+    }
+    proof_fields($0) && (PROOF_KIND == "regression") {
+      m = split($0, f, /[ \t]+/)
+      for (i = 2; i <= m; i++) if (f[i] ~ /^at=/) { t = substr(f[i], 4); if (t > last) last = t; break }
+    }
+    END { if (a == "") exit 1; exit !(last <= a) }' "$1"
+}
+
+# _proof_release_path <path> -> 0 when <path> (relative to the repository root) is in THE RELEASE SET, exactly
+# CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/*.md (one level: a deeper page is not in it) and
+# payload/integrity/rendered.sha256 (D18; spec §Assumptions bullet 2). THIS CASE IS THE ONE LIST. A commit whose every
+# path is in it is covered by a passing release check at its head (`proof_check_passes`): the review walk's `release`
+# basis (`_facts_basis`) and the regression walk (`_proof_walk`) read it alike. One path outside it and the commit owes.
+_proof_release_path() {
+  case "$1" in
+    CHANGELOG.md|payload/.claude-plugin/plugin.json|payload/integrity/rendered.sha256) return 0 ;;
+    payload/commands/*/*) return 1 ;;
+    payload/commands/?*.md) return 0 ;;
+  esac
+  return 1
+}
+
+# proof_check_passes <plan> <tree> -> the 40-hex commit of each head at which the plan's last `proved: kind=check` line
+# passes (carries no `result=fail`), one per line, in the order first named; nothing when there is none. A head that is
+# no commit in <tree> is not printed. The last check line at a head decides it, as facts_state's check arm reads it.
+proof_check_passes() {
+  local plan="${1:-}" tree="${2:-}" h r c
+  [ -f "$plan" ] && [ -n "$tree" ] || return 0
+  awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "check" { print PROOF_HEAD "\t" (PROOF_RESULT == "fail" ? "fail" : "pass") }' "$plan" \
+    | while IFS='	' read -r h r; do
+        c="$(git -C "$tree" rev-parse --verify -q "$h^{commit}" 2>/dev/null)" || continue
+        printf '%s\t%s\n' "$c" "$r"
+      done \
+    | awk -F'\t' '{ if (!($1 in r)) k[++n] = $1; r[$1] = $2 } END { for (i = 1; i <= n; i++) if (r[k[i]] == "pass") print k[i] }'
 }
 
 # proof_reading <record> <question> [<checks file>] -> `<result> <scope> <from>` read from a reading
@@ -750,9 +863,11 @@ proof_checkout() {
 #          at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict
+  # THE KIND OPERAND IS READ THROUGH THE MAP (wave-38 T8), silently: a caller passing the old kind is the new one.
+  declare -F alias_read >/dev/null 2>&1 && { alias_read kind "$kind" 2>/dev/null; kind="$ALIAS_TOKEN"; }
   head="$(git -C "$co" rev-parse --verify -q "${7:-HEAD}^{commit}" 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
-  if [ "$kind" = floor ]; then
+  if [ "$kind" = regression ]; then
     proof_floor_retired "$root" && return 1
     _proof_floor_log "$ev" "$head" "$co" "$plan" "$root"; return $?
   fi
@@ -889,7 +1004,7 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 # otherwise `_proof_walk` must prove every commit after it, reading the plan's landing record beside
 # the stamps. The refusal names the first commit it cannot prove and what that commit lacks.
 _proof_floor_walk() {
-  local ev="$1" sha="$2" head="$3" co="$4" plan="${5:-}" root="${6:-}" owed="${7:-}" files rec="" why rc waive=0
+  local ev="$1" sha="$2" head="$3" co="$4" plan="${5:-}" root="${6:-}" owed="${7:-}" files rec="" why rc chk=""
   if ! git -C "$co" rev-parse --verify -q "$sha^{commit}" >/dev/null 2>&1; then
     printf 'the run in %s read head %.12s, which is no commit here; run the whole suite on the working branch (at %.12s) and cite that log' "$ev" "$sha" "$head"
     return 1
@@ -902,12 +1017,12 @@ _proof_floor_walk() {
     || { printf 'the run in %s read head %.12s, and git cannot list the change since it to the working head %.12s' "$ev" "$sha" "$head"; return 1; }
   [ -n "$files" ] || return 0
   [ -z "$plan" ] || rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" || rec=""
-  [ -z "$plan" ] || ! proof_approved "$plan" regression-2 || waive=1
+  [ -z "$plan" ] || chk="$(proof_check_passes "$plan" "$co")"
   # THE CANDIDATE'S OWN REDS ARE NO REFUSAL (wave-35 T9; D8): they are owed, and the judge says so after the
   # proof is written; only a commit the walk cannot prove refuses the log (exit 1).
-  why="$(_proof_walk "$co" "$sha" "$head" "$rec" "$owed" "$waive")"; rc=$?
+  why="$(_proof_walk "$co" "$sha" "$head" "$rec" "$owed" "$chk")"; rc=$?
   [ "$rc" -ne 1 ] && return 0
-  printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s. Run the suites it lacks on %.12s, or the whole suite, then proof-add floor again' \
+  printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s. Run the suites it lacks on %.12s, or the whole suite, then proof-add regression again' \
     "$ev" "$sha" "$head" "${why:-the commits since it cannot be walked}" "$head"
   return 1
 }
@@ -981,7 +1096,7 @@ _proof_records() {
     }'
 }
 
-# _proof_walk <checkout> <F> <H> [<landing record>] [<owed>] [<waive cover>] -> exit 0, printing nothing, when
+# _proof_walk <checkout> <F> <H> [<landing record>] [<owed>] [<release heads>] -> exit 0, printing nothing, when
 # every commit on the working branch's first-parent line after F, up to and including H, is proved by the runs
 # recorded at it and every suite F's whole run left red (<owed>, comma-joined file names) is closed; exit 1
 # printing one sentence that names the first commit that is not proved, and what it lacks; exit 2 printing the
@@ -1001,7 +1116,9 @@ _proof_records() {
 #
 # WHAT A COMMIT OWES: nothing when its tree is its first parent's, or when every path it changed is a
 # non-code path (`_proof_docs_path`'s one list, or under the docs root): A DOCS-ONLY COMMIT INHERITS ITS
-# PARENT'S STANDING (wave-35 T9; AC-1.5). Otherwise its row's Lands-on set (the `suites=` of the row's last
+# PARENT'S STANDING (wave-35 T9; AC-1.5). Nothing, too, when every path it changed is in the release set
+# (`_proof_release_path`) and it is one of <release heads> (`proof_check_passes`: a passing release check at it), the
+# review walk's `release` basis (wave-38 T2; D18, AC-1.4). Otherwise its row's Lands-on set (the `suites=` of the row's last
 # `ready` before the `published` event naming the commit) and every suite a record at its tree names. A
 # commit owing nothing that changed its tree is not proved. NOTHING PREDICTS A SUITE SET: every member of an
 # owed set is a record.
@@ -1016,14 +1133,15 @@ _proof_records() {
 # A SUITE COVERS WHAT IT READS (wave-35 T9; D9, AC-1.4; design-ledger Δ2; wave-36 T27, D12, ADR-056): a commit
 # whose owed suites are all green is still not proved when it changed a code file that none of them reads, by
 # the reads index at H (lib/anchors.sh `reads_index`, the one file-to-suite fact `brief` and the dispatch wall's
-# Lands-on arm read, keyed by file name); a code file is a path outside tests/ and the non-code paths above. That commit owes a second whole run, unless <waive cover> is 1, the plan's
-# `approved: regression-2` (the caller's to read).
+# Lands-on arm read, keyed by file name); a code file is a path outside tests/ and the non-code paths above. That commit owes a second whole run, which
+# `approve regression-2` admits once (`proof_regression2_open`), or the user's `waive regression` (wave-38 T2; AC-4.5:
+# the approval covers no head).
 #
 # AN OWED RED IS CLOSED BY A LANDING (wave-35 T9; D8, AC-1.3): a suite of <owed> is closed when the last walked
 # commit whose tree holds a landing's verdict of it (never a stamp, never a whole run) has its newest such
 # verdict green, keyed by file name (wave-35 T6).
 _proof_walk() {
-  local co="$1" from="$2" to="$3" rec="${4:-}" owed="${5:-}" waive="${6:-0}" walk recs need trees pairs changed="" idx="" pfx="" droot top f c cls
+  local co="$1" from="$2" to="$3" rec="${4:-}" owed="${5:-}" chk="${6:-}" walk recs need trees pairs changed="" idx="" pfx="" droot top f c cls rel
   walk="$(git -C "$co" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" \
     || { printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   if [ -z "$walk" ]; then
@@ -1041,7 +1159,8 @@ _proof_walk() {
     !s { n[++k] = $0; next }
     { i++; if ($0 ~ /^[0-9a-f]+$/ && n[i] != "") print "T\t" n[i] "\t" $0 }')"
   # WHAT EACH COMMIT CHANGED, in one git call, each path classed `doc` (non-code: inherits), `test` (under
-  # tests/: owes its runs, declares nothing) or `code` (owes a declaring suite).
+  # tests/: owes its runs, declares nothing) or `code` (owes a declaring suite), and marked `rel` when it is in the
+  # release set.
   _proof_roots_load
   top="$(git -C "$co" rev-parse --show-toplevel 2>/dev/null)"
   ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$co" 2>/dev/null)"
@@ -1053,15 +1172,18 @@ _proof_walk() {
     esac
     if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then cls=doc
     else case "$f" in tests/*) cls=test ;; *) cls=code ;; esac; fi
-    changed="$changed${changed:+$'\n'}C	$c	$cls	$f"
+    rel=-; ! _proof_release_path "$f" || rel=rel
+    changed="$changed${changed:+$'\n'}C	$c	$cls	$f	$rel"
   done <<PROOF_WALK_FILES
 $(git -C "$co" log --no-renames --first-parent -m --name-only --format='%x01%H' "${from}..${to}" 2>/dev/null)
 PROOF_WALK_FILES
   case "$changed" in
-    *"	code	"*) [ "$waive" = 1 ] || { _proof_anchors_load && idx="$(reads_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')"; } ;;
+    *"	code	"*) _proof_anchors_load && idx="$(reads_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')" ;;
   esac
-  printf '%s\n%s\n%s\n%s\n%s\n' "$pairs" "$walk" "$recs" "$changed" "$idx" | PROOF_OWED_SET="$owed" awk -F'\t' -v waive="$waive" '
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$pairs" "$walk" "$recs" "$changed" "$idx" "$(printf '%s\n' "$chk" | sed '/^$/d; s/^/K	/')" \
+    | PROOF_OWED_SET="$owed" awk -F'\t' '
     $1 == "T" { tr[$2] = $3; next }
+    $1 == "K" { chk[$2] = 1; next }
     $1 == "W" { n++; wc[n] = $2; wt[n] = $3; split($4, p, " "); wp[n] = p[1]; next }
     $1 == "O" { if ($3 != "" && index($3, "—") != 1) orow[$2] = $3; if ($4 != "" && $4 != "-") osu[$2] = $4; next }
     $1 == "R" {
@@ -1072,13 +1194,14 @@ PROOF_WALK_FILES
       if ($4 != "*") nm[t] = nm[t] " " $4
       next
     }
-    $1 == "C" { touched[$2] = 1; if ($3 != "doc") nondoc[$2] = 1; if ($3 == "code") codes[$2] = codes[$2] "\t" $4; next }
+    $1 == "C" { touched[$2] = 1; if ($3 != "doc") nondoc[$2] = 1; if ($5 != "rel") notrel[$2] = 1; if ($3 == "code") codes[$2] = codes[$2] "\t" $4; next }
     $1 == "I" { k = split($3, a, ","); for (x = 1; x <= k; x++) { s = a[x]; sub(/.*\//, "", s); decl[$2] = decl[$2] "," s }; decl[$2] = decl[$2] ","; next }
     END {
       for (i = 1; i <= n; i++) {
         pt = (i > 1 && wp[i] == wc[i - 1]) ? wt[i - 1] : tr[wp[i]]
         if (pt != "" && pt == wt[i]) continue
         if ((wc[i] in touched) && !(wc[i] in nondoc)) continue
+        if ((wc[i] in touched) && !(wc[i] in notrel) && (wc[i] in chk)) continue
         split("", seen); m = 0
         if (wc[i] in osu) {
           k = split(osu[wc[i]], a, ",")
@@ -1105,7 +1228,7 @@ PROOF_WALK_FILES
           if (index("; " lack "; ", "; " why "; ") == 0) lack = lack (lack == "" ? "" : "; ") why
         }
         if (lack != "") { print lead lack; exit 1 }
-        if (waive == 1 || !(wc[i] in codes)) continue
+        if (!(wc[i] in codes)) continue
         k = split(substr(codes[wc[i]], 2), a, "\t"); un = ""; nu = 0; ran = ""
         for (x = 1; x <= m; x++) ran = ran (x > 1 ? ", " : "") ow[x]
         for (x = 1; x <= k; x++) {
@@ -1233,7 +1356,7 @@ _proof_floor_match() {
   local log="$1" plan="${2:-}" root="${3:-}" sha="${4:-}" rc="${5:-}" rec="" key hash got f a b
   hash="$(_proof_sha256 "$log")" || hash=""
   if [ -z "$hash" ]; then
-    printf 'the log %s cannot be hashed (no shasum or sha256sum answers), so the run that wrote it cannot be matched; install one and run proof-add floor again' "$log"
+    printf 'the log %s cannot be hashed (no shasum or sha256sum answers), so the run that wrote it cannot be matched; install one and run proof-add regression again' "$log"
     return 1
   fi
   [ -z "$plan" ] || rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" || rec=""
@@ -1258,11 +1381,11 @@ _proof_floor_match() {
 $got
 PROOF_RUN_BAD
       [ "$f" = rc ] || { b="$(printf '%s' "$b" | cut -c1-12)"; got="$(printf '%s' "$got" | cut -c1-12)"; }
-      printf 'the log changed since its run: %s reads %s %s, but its run at %s recorded %s %s (%s); cite the log as its run left it, or run floor-run again and cite that log' \
+      printf 'the log changed since its run: %s reads %s %s, but its run at %s recorded %s %s (%s); cite the log as its run left it, or run regression-run again and cite that log' \
         "$log" "$f" "$b" "$a" "$f" "$got" "$rec"
       return 1 ;;
   esac
-  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a floor proof cites a run the machine recorded, so run the regression with floor-run, or detached through booked.sh, and cite the log it writes' \
+  printf 'no run recorded for this log: %s (head %.12s, rc=%s, sha256 %.12s) is named by no ev=run line in %s; a regression proof cites a run the machine recorded, so run the regression with regression-run, or detached through booked.sh, and cite the log it writes' \
     "$log" "$sha" "$rc" "$hash" "${rec:-the landing record of a plan (none was named)}"
   return 1
 }
@@ -1288,7 +1411,7 @@ proof_floor_retired() {
   _proof_roots_load
   v="$(config_value "$1" floor-attestation "" 2>/dev/null)"
   [ -n "$v" ] || return 1
-  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the floor is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add floor <log> [<log>...]' "$v"
+  printf '.bionic/config.yaml carries floor-attestation: %s, a key bionic removed (wave-36): the regression is the log of a run, never a person'"'"'s word. Delete the line, then cite the regression'"'"'s log with proof-add regression <log> [<log>...]' "$v"
 }
 
 # proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
@@ -1361,6 +1484,7 @@ proof_awk() {
         else if (f[i] ~ /^evidence=/) PROOF_EVIDENCE = substr(f[i], 10)
         else if (f[i] ~ /^owed=/) PROOF_OWED = substr(f[i], 6)
       }
+      '"$_PROOF_KIND_NORM"'
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
     }
   '
@@ -1430,7 +1554,10 @@ proof_last_line() {
 # never asks it again (wave-36 T12; C35). It reads text, through lib/run.sh `plan_lines`, and runs no git.
 # Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
 proof_floor_absent() {
-  [ -n "$(proof_last "${1:-}" floor)" ] && return 1
+  [ -n "$(proof_last "${1:-}" regression)" ] && return 1
+  # THE USER'S WORD IS A LINE OF THE REGRESSION (wave-38 T2; AC-4.2): a regression waiver answers it, as a question's
+  # waiver answers a reading (`proof_regression_waiver`).
+  proof_regression_waiver "${1:-}" >/dev/null && return 1
   printf '%s' 'no regression proof on this plan yet'
 }
 
@@ -1440,6 +1567,9 @@ proof_floor_absent() {
 # one line, so its floor line was absent to the wall and the judge alike (C34).
 _proof_last_read() {
   local plan="$1" kind="$2" what="$3" q="${4:-}"
+  # THE KIND ASKED FOR IS READ THROUGH THE MAP TOO (wave-38 T8): a caller asking for the old kind is answered as one
+  # asking for the new, silently: the operand is code's, never a person's.
+  declare -F alias_read >/dev/null 2>&1 && { alias_read kind "$kind" 2>/dev/null; kind="$ALIAS_TOKEN"; }
   [ -f "$plan" ] || return 0
   _proof_run_load
   plan_lines "$plan" | awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
@@ -1629,19 +1759,23 @@ proof_branch_head() {
 # or `uncovered<TAB><reason>` (wave-35 T9; D8, D9, AC-1.3 to AC-1.6). THE JUDGE, which proof_state and facts_state
 # both ask. The plan's last `kind=floor` proof names F and the suites its whole run left red (`owed=`); a suite
 # the plan carries as inherited debt (`proof_inherited`) is not owed. At F itself the reds decide; past it,
-# `_proof_walk` walks F..<head> with the reds and the cover's waiver (`approved: regression-2`). BOTH CALLERS ASK
+# `_proof_walk` walks F..<head> with the reds and the release heads (`proof_check_passes`). A REGRESSION WAIVER newer
+# than that proof (`proof_regression_waiver`; wave-38 T2, AC-4.2) is the newest link instead: F is its head, nothing
+# owed. `approved: regression-2` covers no head (AC-4.5). BOTH CALLERS ASK
 # `proof_floor_absent` FIRST and answer an absent floor themselves, so the judge never sees a plan with no floor
 # line; the call it made here never decided (wave-36 T12; C35). Should one reach it, the empty head is no commit
 # and the answer is uncovered, the safe direction.
 _proof_floor_judge() {
-  local plan="$1" tree="$2" c="$3" h owed inh files rec why rc waive=0
-  h="$(proof_last "$plan" floor)"
+  local plan="$1" tree="$2" c="$3" h owed inh files rec why rc w=""
+  h="$(proof_last "$plan" regression)"
+  w="$(proof_regression_waiver "$plan")" && h="$w"
   h="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
   c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
-  owed="$(_proof_last_read "$plan" floor owed)"
+  owed="$(_proof_last_read "$plan" regression owed)"
   inh="$(proof_inherited "$plan")"
+  [ -z "$w" ] || owed=""
   [ -z "$owed" ] || [ -z "$inh" ] || owed="$(PROOF_I=",$inh," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_I"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_OWED_IN
 $owed
 PROOF_OWED_IN
@@ -1658,8 +1792,7 @@ PROOF_OWED_IN
   [ -n "$files" ] || [ -n "$owed" ] || { printf 'covered\n'; return 0; }
   _proof_roots_load
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
-  ! proof_approved "$plan" regression-2 || waive=1
-  why="$(_proof_walk "$tree" "$h" "$c" "$rec" "$owed" "$waive")"; rc=$?
+  why="$(_proof_walk "$tree" "$h" "$c" "$rec" "$owed" "$(proof_check_passes "$plan" "$tree")")"; rc=$?
   case "$rc" in
     0) printf 'covered\n' ;;
     2) printf 'owed\t%s\n' "$why" ;;
@@ -1692,14 +1825,16 @@ proof_regression() {
 }
 
 # facts_owed <rigor> <scale> [<tree>] [<plan>] -> one line per fact a run owes, exit 0; nothing and
-# exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27
-# T9; D2):
+# exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is no row of the scale profile
+# (wave-27 T9; D2):
 #
 #     floor                                          the full run, proof_state's question; not
 #                                                    dealt when <plan> reads `regression: no`
 #                                                    (proof_regression, wave-31 T27; REQ-12 AC-12.2)
 #     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
-#     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
+#     review<TAB><question><TAB><role><TAB>whole     one more per code question where the scale's
+#                                                    dealing cell reads piece+whole (D10; wave-38
+#                                                    T16, D25: lib/scale.sh, the wave row)
 #     check                                          when <tree>'s .bionic/config.yaml names a
 #                                                    release-check: command (wave-27 T16; D12)
 #     debt<TAB><suite><TAB><token>                   one per suite and token the run's landing
@@ -1711,7 +1846,7 @@ proof_regression() {
 # the rigor's: it is owed only when the caller names the project root whose configuration declares
 # it, as facts_state does, so the dealing of a rigor alone is the same in every project.
 facts_owed() {
-  local owed r="" floor=1
+  local owed r="" floor=1 dealing
   # THE WORD IS READ AS ITS LEVEL (wave-28 T44; wave-30 T11, D1). The dealing is keyed by the level
   # words themselves, so the plan's word is read through lib/run.sh `rigor_level` and a word that is
   # no level deals nothing. A copy of this file read where run.sh is not beside it (a suite's
@@ -1723,16 +1858,27 @@ facts_owed() {
     r="$(rigor_level "${1:-}" 2>/dev/null)" || r=""
   fi
   [ -z "${4:-}" ] || [ "$(proof_regression "$4")" != no ] || floor=0
-  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v s="${2:-}" -v floor="$floor" '
+  # THE SCALE'S READS ARE ITS DEALING CELL (wave-38 T16; D25): `piece`, or `piece+whole` for one more
+  # read of the whole per code question, from lib/scale.sh. WHO reads stays PROOF_DEALING's, per rigor.
+  # A scale the profile does not hold deals nothing. A copy of this file read where scale.sh is not
+  # beside it (a suite's doctored copy, as for run.sh above) has no profile to ask: it deals a piece
+  # read per question for a non-empty scale word, the reading with no row's extra read in it.
+  declare -F scale_cell >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/scale.sh" >/dev/null 2>&1
+  if declare -F scale_cell >/dev/null 2>&1; then
+    dealing="$(scale_cell "${2:-}" dealing 2>/dev/null)" || return 1
+  else
+    [ -n "${2:-}" ] || return 1
+    dealing=piece
+  fi
+  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="$r" -v dealing="$dealing" -v floor="$floor" '
     BEGIN {
-      if (s != "task" && s != "wave" && s != "epic") exit 1
       n = split(ENVIRON["PROOF_D"], d, " ")
       for (i = 1; i <= n; i++) if (r != "" && index(d[i], r "=") == 1) roles = substr(d[i], length(r) + 2)
       if (roles == "") exit 1
       m = split(ENVIRON["PROOF_Q"], q, " "); split(roles, role, ",")
-      if (floor == 1) print "floor"
+      if (floor == 1) print "regression"
       for (i = 1; i <= m; i++) print "review\t" q[i] "\t" role[i] "\tpiece"
-      if (s == "wave")
+      if (dealing == "piece+whole")
         for (i = 1; i <= m; i++) if (index(" " ENVIRON["PROOF_C"] " ", " " q[i] " ")) print "review\t" q[i] "\t" role[i] "\twhole"
     }')" || return 1
   printf '%s\n' "$owed"
@@ -1798,17 +1944,18 @@ proof_debt_origin() {
   esac
 }
 
-# proof_plan_slug <plan> [<sid> <marker>] -> the plan's slug, its file name less `.plan.md`, the directory its run's
-# records live in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the
-# hooks and the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it,
-# so a second slug is never derived beside it. Given a session and its marker, a plan verb's dry copy
-# `<plan>.<verb>-dry.<pid>` reads as the plan it was copied from, under `proof_debt_origin`'s three-part guard and
-# only that; with no session, or under any other, a copy reads its own literal name. Never a name-only strip: a
-# session bound to a file named `X.plan.md.anything` reads its own name, not X's record (review pass 60 P0-1). A
-# name reader: the file need not exist. rc 1 when the name leaves no slug.
+# proof_plan_slug <plan> -> the plan's slug, its file name less `.plan.md`, the directory its run's records live
+# in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the hooks and
+# the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it, so a second
+# slug is never derived beside it. It reads the name it is given, and only that: a plan verb's dry copy
+# `<plan>.<verb>-dry.<pid>` reads its own literal name. The reader once took a session and its marker and mapped the
+# copy to its origin (`proof_debt_origin`'s guard); no production caller ever passed them, so the arm was removed
+# with its pins (wave-38 T19; REQ-11 AC-11.5). The dry commit's debts are still read from the origin's record, by
+# `proof_debt_origin` at its two callers. Never a name-only strip: a file named `X.plan.md.anything` reads its own
+# name, not X's record (review pass 60 P0-1). A name reader: the file need not exist. rc 1 when the name leaves no
+# slug.
 proof_plan_slug() {
   local plan="${1:-}" slug
-  [ "$#" -lt 2 ] || plan="$(proof_debt_origin "${2:-}" "${3:-}" "$plan")"
   slug="${plan##*/}"; slug="${slug%.plan.md}"
   [ -n "$slug" ] || return 1
   printf '%s' "$slug"
@@ -1863,7 +2010,8 @@ proof_debts_open() {
     /^proved:[ \t]/ {
       m = split($0, w, /[ \t]+/); k = ""; at = ""
       for (i = 2; i <= m; i++) { if (w[i] ~ /^kind=/) k = substr(w[i], 6); else if (w[i] ~ /^at=/) at = substr(w[i], 4) }
-      if ((k == "floor" || k == "task") && at ~ iso && at > latest) latest = at
+      '"$(_proof_alias_norm kind k)"'
+      if ((k == "regression" || k == "task") && at ~ iso && at > latest) latest = at
     }
     END {
       for (i = 1; i <= nd; i++) {
@@ -1914,8 +2062,8 @@ proof_debts_open() {
 # chain holds at <head> when its newest link is no failing reading and that link's head is
 # <head>, or every commit past it holds by the one cover rule (wave-36 T7; D9, D2; the COVER block below
 # `_proof_docs_path`): its paths are all prose (the docs root, or the files `_proof_docs_path` lists; wave-30
-# T6, D12), or it is the landing of a row born of this question's reading (wave-36 T31; D16) or of the floor's
-# red. Any other commit owes, whatever its row was declared to be; `facts_cover` prints each commit's basis. A waiver covers its
+# T6, D12), or every path is in the release set and a release check passes at it (wave-38 T2; D18), or it is the
+# landing of a row born of this question's reading (wave-36 T31; D16) or of the floor's red. Any other commit owes, whatever its row was declared to be; `facts_cover` prints each commit's basis. A waiver covers its
 # question up to its own head.
 # Every line of the question counts, failing ones included: a later reading may start at a failing
 # reading's head, so the chain is not rebuilt by skipping them, and only the newest decides failing.
@@ -1940,7 +2088,7 @@ proof_debts_open() {
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
-  local x pt pr ph pe wt wr we wh fixed="" born="" walked="|"
+  local x pt pr ph pe wt wr we wh fixed="" born="" chk="" walked="|"
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
@@ -2002,17 +2150,18 @@ review	"*)
   # THE BORN LANDINGS, read once (wave-36 T7; D9): the commits the walk holds as a born row's landing, the fixed
   # findings' green landings among them.
   case "$owed" in review"	"*|*"
-review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings "$plan" "$tree" "$fixed")" ;; esac
+review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings "$plan" "$tree" "$fixed")"
+                   chk="$(proof_check_passes "$plan" "$tree")" ;; esac
   while IFS= read -r fact; do
     [ -n "$fact" ] || continue
     case "$fact" in
-      floor)
+      regression)
         # THE FLOOR AT <head> (wave-35 T9; D8, AC-1.3; A-orch-45): the judge itself, at the head handed in, never
         # a checkout's: owed while a red of the whole run is open, uncovered F..<head> with the reason only for
         # a commit it cannot prove.
         if proof_floor_absent "$plan" >/dev/null; then st=absent
         else
-          x="$(proof_last "$plan" floor)"
+          x="$(proof_regression_waiver "$plan")" || x="$(proof_last "$plan" regression)"
           st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
           case "$st" in
             covered|owed"	"?*) : ;;
@@ -2044,7 +2193,7 @@ PROOF_CHAIN
           case "$walked" in
             *"|$q@$ph=0|"*) st=covered ;;
             *"|$q@$ph=1|"*) st="uncovered	$ph..$head" ;;
-            *) if _facts_holds "$tree" "$pfx" "$ph" "$head" "$born" "$q"; then st=covered; walked="$walked$q@$ph=0|"
+            *) if _facts_holds "$tree" "$pfx" "$ph" "$head" "$born" "$q" "$chk"; then st=covered; walked="$walked$q@$ph=0|"
                else st="uncovered	$ph..$head"; walked="$walked$q@$ph=1|"; fi ;;
           esac
         fi
@@ -2147,7 +2296,7 @@ _facts_debt() {
   droot=""; [ -z "$tree" ] || ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
   while IFS='	' read -r x ev; do
     case "$x" in
-      floor) printf 'covered'; return 0 ;;
+      regression) printf 'covered'; return 0 ;;
       task)
         case "$ev" in /*) : ;; *) [ -n "$droot" ] || continue; ev="$droot/$ev" ;; esac
         [ -f "$ev" ] || continue
@@ -2163,7 +2312,7 @@ $(awk -v t="$clear" "$(proof_awk)"'
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
   /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && proof_fields($0) && (PROOF_KIND == "floor" || PROOF_KIND == "task") {
+  insdlc && proof_fields($0) && (PROOF_KIND == "regression" || PROOF_KIND == "task") {
     m = split($0, f, /[ \t]+/); at = ""
     for (i = 2; i <= m; i++) if (f[i] ~ /^at=/) at = substr(f[i], 4)
     if (at > t) print PROOF_KIND "\t" PROOF_EVIDENCE
@@ -2189,16 +2338,19 @@ _proof_docs_path() {
 # ---------- COVER: HOW FAR A READING REACHES PAST ITS HEAD (wave-36 T7; REQ-3 AC-3.2, AC-3.3, AC-3.5; D9, D2, D3) ----------
 #
 # A reading is covered to its head. A later commit on the head's first-parent line extends it when it holds, and
-# each commit's basis is one of four words:
+# each commit's basis is one of five words:
 #   prose        every path it touched (a merge as what it brought in, a rename as both its paths) is under the docs
-#                root or on `_proof_docs_path`'s list; a commit that touches nothing is prose too
+#                root or on `_proof_docs_path`'s list; a commit that touches nothing is prose too, so a merge whose tree
+#                is its first parent's (one from the integration branch resolved to ours) is prose (wave-38 T2; AC-4.1)
+#   release      every path it touched is in the release set (`_proof_release_path`) and the plan's release check passes
+#                at it (`proof_check_passes`), on every chain; the regression walk reads the same kind (wave-38 T2; D18)
 #   born-review  the landing record names it as the landing of a row whose `- T<n>:` line carries ` born: review …
 #                of=<record>#<n>`, or `proof_fixed` names it as a fix row's green landing, AND the asked question's
 #                reading bore the row: one of those records is the evidence of a registered reading of that question
 #                (wave-36 T31; D16). On every other question's chain the same commit reads `owes`.
 #   born-floor   the landing record names it as the landing of a row whose `- T<n>:` line carries ` born: floor …`
 #   owes         anything else, whatever kind its row declared (a doc row that touched payload/ owes)
-# Content is asked first, so a born row's docs-only landing reads prose. `facts_cover` prints the basis, the walk
+# Content is asked first, so a born row's docs-only landing reads prose, and a CHANGELOG.md commit alone prose, not release. `facts_cover` prints the basis, the walk
 # below decides it, and `facts_state` asks the same walk, so the line and the verdict never disagree.
 
 # _facts_docs_prefix <tree> -> the docs root as a path relative to <tree> with a trailing `/`, or nothing when it is
@@ -2223,7 +2375,7 @@ _facts_docs_prefix() {
 # registered reading names, gives no question, so that landing owes on every chain.
 _facts_born_landings() {
   local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec="" want
-  if /usr/bin/grep -qE ' born: (review|floor) ' "$plan" 2>/dev/null && _proof_units_load \
+  if /usr/bin/grep -qE " born: (review|$(_proof_alias_born)) " "$plan" 2>/dev/null && _proof_units_load \
     && declare -F units_born_marks >/dev/null 2>&1; then
     marks="$(units_born_marks "$plan" 2>/dev/null)"
     if [ -n "$marks" ]; then
@@ -2273,18 +2425,20 @@ _facts_born_landings() {
     }'
 }
 
-# _facts_basis <commit> <prose: 0 or not> <born landings> [<question>] -> prints `cover <commit> <basis>`; 1 when it
-# owes. A born landing names its commit in full or by a prefix of at least seven hex digits. A floor-born landing holds
+# _facts_basis <commit> <prose: 0 or not> <born landings> [<question>] [<release: 1 when every path is in the set>]
+# [<release heads>] -> prints `cover <commit> <basis>`; 1 when it owes. A release-set commit is `release` when it is one
+# of the heads a release check passes at (`proof_check_passes`, full commits). A born landing names its commit in full or by a prefix of at least seven hex digits. A floor-born landing holds
 # on every chain; a review-born one only on the chain of a question it names (wave-36 T31; D16), so with no question
 # asked it owes.
 _facts_basis() {
   local c="$1" b=owes k w qs
   if [ "$2" != 0 ]; then b=prose
+  elif [ "${5:-0}" = 1 ] && case $'\n'"${6:-}"$'\n' in *$'\n'"$c"$'\n'*) true ;; *) false ;; esac; then b=release
   elif [ -n "${3:-}" ]; then
     while IFS='	' read -r k w qs; do
       [ "${#k}" -ge 7 ] && [ "${c#"$k"}" != "$c" ] || continue
       case "$w" in
-        floor) b=born-floor; break ;;
+        regression) b=born-regression; break ;;
         review) [ -n "${4:-}" ] || continue
                 case " $qs " in *" $4 "*) b=born-review; break ;; esac ;;
       esac
@@ -2296,12 +2450,12 @@ PROOF_BORN
   [ "$b" != owes ]
 }
 
-# _facts_walk <tree> <docs prefix> <last head> <head> [<born landings>] [<question>] -> one `_facts_basis` line per
+# _facts_walk <tree> <docs prefix> <last head> <head> [<born landings>] [<question>] [<release heads>] -> one `_facts_basis` line per
 # commit past <last head> on <head>'s first-parent line, oldest first, on <question>'s chain; 0 when none owes. Nothing printed and 0 when <head> is
 # <last head>; nothing printed and 1 when <last head> is not on <head>'s history, or git cannot answer: uncovered is
 # the safe direction. Both heads are compared as the commits they resolve to, never as strings (T45; review pass 13 F10).
 _facts_walk() {
-  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" lh hh files f c="" prose=1 rc=0
+  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0
   [ -n "$tree" ] || return 1
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
@@ -2311,14 +2465,15 @@ _facts_walk() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$f" in
-      $'\001'*) [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" || rc=1; c="${f#?}"; prose=1; continue ;;
+      $'\001'*) [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1; c="${f#?}"; prose=1; rel=1; continue ;;
     esac
+    [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
     [ "$prose" = 1 ] || continue
     [ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || prose=0
   done <<PROOF_DOCS_FILES
 $files
 PROOF_DOCS_FILES
-  [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" || rc=1
+  [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1
   return "$rc"
 }
 
@@ -2328,7 +2483,7 @@ _facts_holds() {
   _facts_walk "$@" >/dev/null
 }
 
-# facts_cover <plan> <from> <to> [<question>] -> THE JUDGE'S BASIS (AC-3.3): one `cover <sha> prose|born-review|
+# facts_cover <plan> <from> <to> [<question>] -> THE JUDGE'S BASIS (AC-3.3): one `cover <sha> prose|release|born-review|
 # born-floor|owes` line per commit on <to>'s first-parent line past <from>, oldest first, the walk `facts_state` holds
 # <question>'s reading by. A landing born of a reading of another question owes on this chain (wave-36 T31; D16), and
 # with no question named it owes on every chain. rc 0 when no commit owes; 1 when one does, or when <from> is not on
@@ -2345,7 +2500,8 @@ facts_cover() {
   done
   _proof_roots_load
   fixed="$(proof_fixed "$plan" "$tree")"
-  _facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" "$(_facts_born_landings "$plan" "$tree" "$fixed")" "${4:-}"
+  _facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" "$(_facts_born_landings "$plan" "$tree" "$fixed")" "${4:-}" \
+    "$(proof_check_passes "$plan" "$tree")"
 }
 
 

@@ -78,14 +78,21 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # — which is what the installed-path spelling used to buy, now bought without the literal.
 PREFLIGHT_CMD="bash ${HOOK_DIR}/preflight-probe.sh"
 
-BIONIC_INPUT=$(cat)
+# THE ADMITTED PRE-APPROVAL SET IS DATA (wave-38 T21; REQ-13 AC-13.1, D16). Run with
+# `--admitted-before-approval`, this hook reads no payload and prints, one token a line, what its
+# approval arm admits before `approved-by:`: the read-only roles (`ROLE_READONLY_SET`) and each
+# brief kind (`kind:<k>`, DP_PREAPPROVAL_KINDS below). tests/dispatch-preflight-5.test.sh §AGREE
+# holds the step files' promised dispatches to this list.
+DP_ADMITTED_ONLY=""; [ "${1:-}" = "--admitted-before-approval" ] && DP_ADMITTED_ONLY=1
+DP_PREAPPROVAL_KINDS="prototype"
+if [ -n "$DP_ADMITTED_ONLY" ]; then BIONIC_INPUT=""; else BIONIC_INPUT=$(cat); fi
 _jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- relevance first (checklist A7): the cheapest possible check,
 # before any git resolution or plan-directory walk. Anything that isn't a
 # subagent dispatch is none of this gate's business. ----------
 TOOL_NAME=$(_jq '.tool_name')
-[ "$TOOL_NAME" = "Agent" ] || exit 0
+[ "$TOOL_NAME" = "Agent" ] || [ -n "$DP_ADMITTED_ONLY" ] || exit 0
 
 # A GIT TOPLEVEL IS NO LONGER THE PRECONDITION (bionic 1.4.0, spec AC-12, Decision A2).
 # It used to be: `git rev-parse --show-toplevel` had to succeed or the wall exited
@@ -244,6 +251,18 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 if ! declare -F owed_open >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/owed.sh"
+fi
+# THE SCALE PROFILE (wave-38 T16; D25): the arming wall reads the plan's patrol cell, the budget wall
+# its writers cell. Sourced the same way: a library without it leaves both walls as they were.
+if ! declare -F scale_cell >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/scale.sh"
+fi
+
+if [ -n "$DP_ADMITTED_ONLY" ]; then
+  for _dp_a in $ROLE_READONLY_SET; do printf '%s\n' "$_dp_a"; done
+  for _dp_a in $DP_PREAPPROVAL_KINDS; do printf 'kind:%s\n' "$_dp_a"; done
+  exit 0
 fi
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
@@ -637,6 +656,19 @@ fi
 STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
 PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 
+# THE SCALE'S CELLS (wave-38 T16; D25, AC-5.1), read once from the bound plan's `scale:` through
+# `scale_cell` (payload/scripts/lib/scale.sh). `DP_PATROL` is the patrol cell: `no` (the task row)
+# means no Patrol is armed at engagement, so this wall does not apply. `DP_SCALE_WRITERS` is the
+# writers cell, the budget wall's cap when no person wrote one. No plan, no `scale:`, or no profile:
+# both stay empty and both walls run as they did before the profile.
+DP_SCALE=""; DP_PATROL=""; DP_SCALE_WRITERS=""
+if [ -n "$PLAN" ] && declare -F scale_cell >/dev/null 2>&1; then
+  DP_SCALE="$(plan_frontmatter_get "$PLAN" scale 2>/dev/null)"
+  DP_PATROL="$(scale_cell "$DP_SCALE" patrol 2>/dev/null)" || DP_PATROL=""
+  DP_SCALE_WRITERS="$(scale_cell "$DP_SCALE" writers 2>/dev/null)" || DP_SCALE_WRITERS=""
+  case "$DP_SCALE_WRITERS" in ''|*[!0-9]*) DP_SCALE_WRITERS="" ;; esac
+fi
+
 # The poker beside this gate, so a test drives the real one and an installed gate finds its
 # installed sibling — the same resolution, and the same residual config-dir second lane, the
 # probe above already uses, and for the same reason: the two registration channels serve ONE
@@ -734,7 +766,10 @@ fi
 # UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
 # the Patrol, a question with no threshold in it.
 PATROL_STAMPED=1
-if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
+if [ "$DP_PATROL" = no ]; then
+  # A SCALE WITH NO PATROL OWES NO STAMP (wave-38 T16): neither half of this wall applies.
+  PATROL_STAMPED=not-owed
+elif [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
   PATROL_STAMPED=0
   patrol_deny "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
     "$PATROL_FIX_NEVER" \
@@ -753,7 +788,7 @@ fi
 # so reaching here meant the file was there; it records and carries on now, and a `stat` of
 # a file that is not there would print "the stamp's age could not be read" as though
 # something had gone wrong with a stamp nobody ever wrote. Absent is absent, once.
-if [ "$PATROL_STAMPED" = "0" ]; then
+if [ "$PATROL_STAMPED" = "0" ] || [ "$PATROL_STAMPED" = not-owed ]; then
   :
 elif [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
   echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
@@ -911,7 +946,31 @@ pushed to it at start.
 
 Then retry the dispatch." ;;
 esac
-if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
+# A PROTOTYPE IS ADMITTED BEFORE APPROVAL, CONFINED (wave-38 T21; REQ-13 AC-13.2, D16). A brief whose
+# `Kind:` line is `prototype` answers a design question with a throwaway: it writes only under the docs
+# root's record/ and inside the tree its `Throwaway tree:` line names, and owns no plan row. What the wall
+# admits is decided by what the dispatch may write, not by when it runs: this arm does not ask such a
+# brief for an approval, and THE PROTOTYPE'S CONFINEMENT (below the containment wall) judges its Files:,
+# its tree and its row whether the plan is approved or not. Its kind is one of DP_PREAPPROVAL_KINDS, the
+# set `--admitted-before-approval` prints.
+# dp_brief_label <label> -> the value of the brief's first `<label>:` line outside a code fence, its
+# blanks and one pair of backticks taken off; the label is matched without regard to case.
+dp_brief_label() {
+  printf '%s\n' "$(_jq '.tool_input.prompt')" | awk -v lab="$1" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    {
+      l = $0; sub(/^[[:space:]]*/, "", l)
+      if (tolower(substr(l, 1, length(lab) + 1)) != tolower(lab) ":") next
+      v = substr(l, length(lab) + 2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+      if (v ~ /^`[^`]*`$/) v = substr(v, 2, length(v) - 2)
+      print v; exit
+    }'
+}
+DP_PROTOTYPE=""
+_dp_kind="$(dp_brief_label Kind | tr '[:upper:]' '[:lower:]')"
+case " $DP_PREAPPROVAL_KINDS " in *" ${_dp_kind:-none} "*) DP_PROTOTYPE=1 ;; esac
+if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]; then
   # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
   # (lib/fill.sh), fence-aware and taking a bulleted `- approved-by:`, so the tick that FILLs a
   # row and this wall that admits its writer can never disagree about whether the plan is
@@ -1022,9 +1081,12 @@ DP_MINE_AWK='
 # A name that matches more than one row, with no `Row:` to say which, binds NOTHING and is refused
 # (wave-28 T58): the launch record records no row for such a name either (session-poker NOT-RECORDED),
 # and binding the first would let the approval arm pass a second match that waits for approval.
+# A PROTOTYPE OWNS NO ROW (wave-38 T21; D16): its `Row:` is read, for THE PROTOTYPE'S CONFINEMENT to refuse,
+# and nothing binds it, neither the line nor the name.
 dp_row_reader() {
   local rows=""
   DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""; DP_NAME_AMBIG=""; DP_BOUND_REC=""
+  if [ -n "$DP_PROTOTYPE" ]; then DP_BOUND_ROW=""; return 0; fi
   if [ -n "$PLAN" ] && { [ -n "$DP_ROW_NAME" ] || [ -n "$DP_ROW" ]; }; then
     rows="$(units_rows "$PLAN" 2>/dev/null)"
   fi
@@ -1313,6 +1375,14 @@ PARALLEL_BUDGET=""
 DP_BUDGET_WRITERS=""
 [ -n "$PLAN" ] && DP_BUDGET_WRITERS="$(budget_cap "$PLAN")"
 DP_BUDGET_WRITERS="${DP_BUDGET_WRITERS#writers=}"
+# THE SCALE'S CAP WHEN NO PERSON WROTE ONE (wave-38 T16; D25, AC-5.1). The plan's scale row may carry
+# a writers cell (the task row's is 3): with no person's line it is the cap, and a person's line
+# still overrides it. `uncapped` (wave, epic) caps nothing, as before.
+DP_BUDGET_SOURCE=person
+if [ -z "$DP_BUDGET_WRITERS" ] && [ -n "$DP_SCALE_WRITERS" ]; then
+  DP_BUDGET_WRITERS="$DP_SCALE_WRITERS"
+  DP_BUDGET_SOURCE=scale
+fi
 
 if [ -n "$DP_BUDGET_WRITERS" ]; then
 
@@ -1553,18 +1623,26 @@ WRITERNAMES
     # each with the command that closes it (wave-24 T13, D10, AC-6.7).
     [ -z "$BUDGET_DENIED" ] || return 0
     BUDGET_DENIED=1
+    local whose="budget: ${PARALLEL_BUDGET}
+  declared by ${PLAN}
+
+That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
+someone typed it. Nothing here raises it; raising it is that person's edit of the line." raise="raise the plan's writers= cap"
+    if [ "$DP_BUDGET_SOURCE" = scale ]; then
+      whose="writers=${DP_BUDGET_WRITERS} is the ${DP_SCALE} scale's writer cap (payload/scripts/lib/scale.sh),
+  read for ${PLAN}, which carries no person's parallel-budget: line
+
+A person's line overrides it: the hand cap verb writes one."
+      raise="write a parallel-budget: writers= line for the plan"
+    fi
     dp_finding "$1" "land or stand down a row" \
       "    $2${3:+
 $3}
 
-budget: ${PARALLEL_BUDGET}
-  declared by ${PLAN}
-
-That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
-someone typed it. Nothing here raises it; raising it is that person's edit of the line.
+${whose}
 
 Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
-standdown\` computes the batch), or ask the user to raise the plan's writers= cap."
+standdown\` computes the batch), or ask the user to ${raise}."
   }
 
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
@@ -1645,6 +1723,23 @@ prune_stale_rosters() {
 AGENT_NAME=$(sanitize "$(_jq '.tool_input.name')" 200)
 SUBAGENT_TYPE=$(sanitize "$(_jq '.tool_input.subagent_type')" 200)
 AGENT_MODEL=$(sanitize "$(_jq '.tool_input.model')" 200)
+# THE ROSTER ROW'S MODEL CARRIES THE ROLE'S EFFORT (wave-38 T4; REQ-8 AC-8.1, A-orch-6): a call that names a
+# `model` for a role whose rendered file (agents/<role>.md, the `bionic:` prefix off) carries `effort:` is
+# journalled `<model>-<effort>`, so the test-runner on Haiku at high reads `model=haiku-high`. A call with
+# no `model` stays empty, and a type with no role file keeps the model plain. Only the first frontmatter
+# block is read, and only a plain word is taken, so a role file cannot put a delimiter on the row.
+if [ -n "$AGENT_MODEL" ]; then
+  _role="${SUBAGENT_TYPE#bionic:}"
+  case "$_role" in
+    ''|*[!A-Za-z0-9_-]*) ;;
+    *) if [ -f "$HOOK_DIR/../agents/${_role}.md" ]; then
+         _effort=$(/usr/bin/awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+                     fm && index($0, "effort:") == 1 { sub(/^effort:[ \t]*/, ""); print; exit }' \
+                     "$HOOK_DIR/../agents/${_role}.md" 2>/dev/null | tr -d '\r')
+         case "$_effort" in ''|*[!A-Za-z0-9]*) ;; *) AGENT_MODEL="${AGENT_MODEL}-${_effort}" ;; esac
+       fi ;;
+  esac
+fi
 TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 
 # ======================================================= THE NAME-IN-FLIGHT ARM
@@ -2175,6 +2270,105 @@ Then retry the dispatch."
       ;;
   esac
 fi
+
+# ===================================== THE PROTOTYPE'S CONFINEMENT (wave-38 T21; REQ-13 AC-13.2, D16)
+#
+# A `Kind: prototype` brief passed the approval arm unasked (THE APPROVAL CHECKPOINT, above), because a
+# prototype ships nothing: it answers a design question with a throwaway. That holds only while it
+# writes where nothing ships, so this arm judges, approved plan or not, three facts of its brief:
+#   - its `Row:`: a prototype owns no plan row (the row reader binds it to none), so a `Row:` is refused;
+#   - its `Throwaway tree:`, when it names one: a linked worktree `spawn-worktree.sh create --for <name>`
+#     made for THIS dispatch, the tree's marker (lib/worktree.sh `worktree_marker`) holding the agent's
+#     name. Any other directory, or a tree made for another agent, is refused;
+#   - each `Files:` path, placed as the containment wall places a deliverable (`resolve_in_repo`): a path
+#     git tracks at the head is refused, and so is one under neither the docs root's record/ nor the tree.
+# A relative path is read from the project root, so a path in the tree is written with the tree's own
+# path in front (`.worktrees/<tree>/lib/try.sh`). The faults are pooled like every other arm's.
+# [WALL: tests/dispatch-preflight-5.test.sh §PROTOTYPE]
+dp_prototype_confine() {
+  local rec_root="$BIONIC_ROOT/.bionic/docs/record" dr tree_line tree="" mark="" files p abs rel why
+  local first="" first_why="" refused="" n=0
+  if [ -n "$DP_ROW" ]; then
+    dp_finding "a prototype owns no plan row; it names Row: $(bionic_trunc "$DP_ROW" 11)" "drop Row:" \
+      "    Row: ${DP_ROW}
+
+A Kind: prototype dispatch answers a design question with a throwaway and owns no row of the plan:
+nothing it writes ships, so no row waits on it and no matrix row is discharged by it.
+
+Fix: take the Row: line off the brief. Work a row owns is dispatched without Kind: prototype, after
+the plan is approved.
+
+Then retry the dispatch."
+  fi
+  tree_line="$(dp_brief_label 'Throwaway tree')"
+  if [ -n "$tree_line" ]; then
+    tree="$(resolve_in_repo "$tree_line")"
+    { declare -F worktree_marker >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/worktree.sh" ] && . "$BIONIC_LIB/worktree.sh"; }; } >/dev/null 2>&1
+    [ -f "$tree/.git" ] && declare -F worktree_marker >/dev/null 2>&1 && mark="$(worktree_marker "$tree")" || mark=""
+    if [ -z "$AGENT_NAME" ] || [ "$mark" != "$AGENT_NAME" ]; then
+      dp_finding "throwaway tree not made for $(bionic_trunc "${AGENT_NAME:-this agent}" 16)" \
+        "spawn it for this agent" \
+        "    Throwaway tree: ${tree_line}
+  resolves to ${tree}
+  $( if [ ! -f "$tree/.git" ]; then printf 'which is no linked worktree.'
+     elif [ -n "$mark" ]; then printf "a linked worktree whose marker holds the name %s." "$mark"
+     else printf 'a linked worktree carrying no marker.'; fi )
+
+A prototype writes code only inside a throwaway tree the dispatcher spawned for it, so that nothing
+it writes reaches a tree that lands. The tree is verified by its marker: the name of the agent it
+was made for${AGENT_NAME:+ (${AGENT_NAME})}.
+
+Fix: spawn the tree for this agent and name it on its own line:
+    bash $(refuse_shell_word "$BIONIC_LIB/../spawn-worktree.sh") create <base-sha> <branch> --for ${AGENT_NAME:-<name>}
+    Throwaway tree: <the tree it printed>
+
+Then retry the dispatch."
+    fi
+  fi
+  if declare -F docs_root >/dev/null 2>&1; then
+    dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$dr" ] && rec_root="$dr/record"
+  fi
+  rec_root="$(resolve_in_repo "$rec_root")"
+  files="$(brief_field "$LIFTED" files)"
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    abs="$(resolve_in_repo "$p")"; why=""
+    case "$abs" in "$BIONIC_ROOT"/*) rel="${abs#"$BIONIC_ROOT"/}" ;; *) rel="" ;; esac
+    if [ -n "$rel" ] && [ -n "$(git -C "$BIONIC_ROOT" ls-tree -r --name-only --full-tree HEAD -- "$rel" 2>/dev/null | head -1)" ]; then
+      why="is tracked"
+    else
+      case "$abs" in
+        "$rec_root"/*) : ;;
+        *) case "$abs" in "${tree:-/nonexistent-tree}"/*) : ;; *) why="is outside both" ;; esac ;;
+      esac
+    fi
+    [ -n "$why" ] || continue
+    n=$((n + 1)); refused="${refused}    ${p} ${why}
+"
+    [ -n "$first" ] || { first="$p"; first_why="$why"; }
+  done <<DP_PF
+$(printf '%s' "$files" | tr ',' '\n')
+DP_PF
+  [ -n "$first" ] || return 0
+  dp_finding "prototype path $(bionic_trunc "$first" 20) ${first_why}" "drop it from Files:" \
+    "    a prototype writes only under record/ or its throwaway tree; ${first} ${first_why}
+
+Files:          $(printf '%s' "$files" | sed 's/,/, /g')
+Record root:    ${rec_root}
+Throwaway tree: ${tree:-(none named)}
+Refused (${n}):
+${refused}
+A prototype ships nothing, so it may write only where nothing ships: a record under the docs root's
+record/, and code inside the throwaway tree spawned for it. A path git tracks at the head is the
+project own file, whichever of the two it sits under.
+
+Fix: take each refused path off Files:. Name a record under record/, and code the prototype tries
+under its throwaway tree (its own line, Throwaway tree: <path>), each path written from the project
+root.
+
+Then retry the dispatch."
+}
+[ -z "$DP_PROTOTYPE" ] || dp_prototype_confine
 
 # ======================================================= THE ABSENT-DELIVERABLE WALL
 # (user-directed, epic-15 post-wave-04: "A wall. It should be a wall.")
@@ -3016,8 +3210,8 @@ Fix: land or drop those rows, then dispatch the whole run."
             # RULE 3. THE RELEASED HEAD IS NAMED (T52; review 14 N6). proof_state says which working
             # head it judged; an empty change since the proof is covered too (A-T5.5), so that head
             # can differ from the proof's, and the line names the head being released.
-            _fr_proof="$(proof_last_line "$PLAN" floor 2>/dev/null)"
-            _fr_head="$(proof_last "$PLAN" floor 2>/dev/null)"
+            _fr_proof="$(proof_last_line "$PLAN" regression 2>/dev/null)"
+            _fr_head="$(proof_last "$PLAN" regression 2>/dev/null)"
             _fr_short="$(printf '%.7s' "$_fr_head")"
             _fr_cur="${_fr_state#covered}"; _fr_cur="${_fr_cur#$'\t'}"
             _fr_tree=""
@@ -3048,12 +3242,12 @@ proved by the suites its row names."
               if [ -z "$_fr_reads2" ]; then
                 _fr_owes=""
                 [ -z "$_fr_owed" ] || _fr_owes="
-The floor's whole run left ${_fr_owed} red, each owed until a later landing runs it green."
+The regression's whole run left ${_fr_owed} red, each owed until a later landing runs it green."
                 _dp_detail="A whole run was launched on this plan (${_fr_first%%$'\t'*} at ${_fr_first#*$'\t'}); a second needs the user's word:
 a row that reads approval:regression-2, and session-poker.sh approve regression-2 '<reply>'.
     Plan: ${PLAN}${_fr_owes}
 
-Step 5 owes the matrix, the walk and the auditor. Step 7 is where the floor is demanded,
+Step 5 owes the matrix, the walk and the auditor. Step 7 is where the regression is demanded,
 as the judge closes it: one whole run, green or red, each red owed until a later landing
 runs it green, and every later commit proved by the suites its row named. A change after
 the whole run is proved by a fix row, the red suites plus its own.

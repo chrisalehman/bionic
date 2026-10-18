@@ -37,6 +37,13 @@
 # or `<sid> (no transcript under <slug>[ or <slug>])`; the verb's refusal prints them beside the sessions
 # read. THIS ROOT is `project_root` of the working directory, physical, the root the three verbs act in.
 # The threat is a plan line appended by hand, not a forger editing the config directory (spec §5).
+#
+# FIRST, A BINDING ACT WROTE THE LINE (wave-38 T20; REQ-11 AC-11.2, L6). Both witnesses above prove a session
+# is real and of this project, and a hand-added line naming such a session passed them both. So the plan's
+# sessions are read through `bind_sessions <plan> <this root>`, which admits a line only when the session's
+# marker under this root names the plan, and refuses every other as `<sid> (no binding act)`; the refusal
+# lands in SAID_REFUSED as it comes, before either witness is asked. This session is not the plan's to vouch
+# for: it is read as itself (its own two witnesses still asked), and a refused line of its own is dropped.
 #     said_fold <text>   the one fold, on stdout: runs of white space and control characters become one
 #                        space, the ends trimmed (the verb writes the words it proved, its why and its
 #                        author through it, and the deferral's sentence the changelog is read through)
@@ -105,8 +112,12 @@ if ! declare -F session_id >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$
   # shellcheck source=/dev/null
   . "$_SAID_LIB_DIR/session.sh"
 fi
-# The run's sessions are read by binding.sh's one reader; it is sourced from here when the caller has not
-# (functions only, nothing runs at source time).
+# The run's sessions are read by binding.sh's one reader, and its admission reads the marker through run.sh's
+# `session_plan`; each is sourced from here when the caller has not (functions only, nothing runs at source time).
+if ! declare -F session_plan >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/run.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_SAID_LIB_DIR/run.sh"
+fi
 if ! declare -F bind_sessions >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/binding.sh" ]; then
   # shellcheck source=/dev/null
   . "$_SAID_LIB_DIR/binding.sh"
@@ -158,17 +169,21 @@ said_fold() {
 # _said_sessions [<plan>] -> the sessions asked for, one per line: the plan's recorded sessions in the
 # order they bound, then this session when the plan does not record it (no plan, or no reader: this
 # session alone). Each the project witnesses is printed bare; each it does not, as `<sid> (<reason>)`,
-# which user_said files in SAID_REFUSED and never reads. The root is user_said's (_SAID_ROOT).
+# which user_said files in SAID_REFUSED and never reads. The root is user_said's (_SAID_ROOT); a line no
+# binding act wrote comes from bind_sessions already refused, and this session's own refused line becomes
+# this session, read as itself.
 _said_sessions() {
   local plan="${1:-}" rec="" me="" sid root="${_SAID_ROOT:-}" names
-  if [ -n "$plan" ] && declare -F bind_sessions >/dev/null 2>&1; then
-    rec="$(bind_sessions "$plan" 2>/dev/null)" || rec=""
-  fi
   declare -F session_id >/dev/null 2>&1 && me="$(session_id 2>/dev/null)" || me=""
+  if [ -n "$plan" ] && declare -F bind_sessions >/dev/null 2>&1; then
+    rec="$(bind_sessions "$plan" "$root" 2>/dev/null)" || rec=""
+    [ -z "$me" ] || rec="$(printf '%s\n' "$rec" | awk -v me="$me" '$0 == me " (no binding act)" { $0 = me } { print }')"
+  fi
   { [ -z "$rec" ] || printf '%s\n' "$rec"
     if [ -n "$me" ] && ! grep -qxF -- "$me" <<<"$rec"; then printf '%s\n' "$me"; fi
   } | while IFS= read -r sid; do
     [ -n "$sid" ] || continue
+    case "$sid" in *" (no binding act)") printf '%s\n' "$sid"; continue ;; esac
     case "$sid" in *[!A-Za-z0-9_-]*) printf '%s (not a session id)\n' "${sid//[!A-Za-z0-9_-]/?}"; continue ;; esac
     if ! _said_loaded "$sid" "$root" >/dev/null; then printf '%s (no loaded-%s.state)\n' "$sid" "$sid"; continue; fi
     if ! _said_transcript "$sid" "$root" >/dev/null; then

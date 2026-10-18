@@ -29,7 +29,7 @@ Presentation contract — what the user sees from this command:
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
 
-bionic 1.20.0 (installed)
+bionic 1.21.0 (installed)
 
 # bionic
 
@@ -56,6 +56,8 @@ install it once and every project gets the same working discipline.
 | `/bionic:browser-verify` | verifies UI behavior in a real browser with semantic readback |
 | `/bionic:excalidraw-diagram` | hand-arranged Excalidraw diagrams that make a visual argument, rendered to PNG by a bundled renderer (installed by setup) |
 | `/bionic:decision` | puts a decision to you in one shape — goal, numbered options, recommendation, significance — ending on one reply line; typed bare, it reframes what was last discussed |
+| `/bionic:handoff` | writes the run's handoff file before you step away or `/clear` — the machine's facts, five lines from the session, safe to clear or wait N minutes — ending on the one command that resumes it, `/bionic:canonical-sdlc <path>` |
+| `/bionic:sitrep` | where the run stands — every row with its mark, schedule · correctness · waste, what you owe, when it closes — with a Bottom line and a Diagnosis on top; the Patrol prints its one-line form every tick |
 
 ## Agents — ship with the plugin
 
@@ -68,7 +70,7 @@ The roles canonical-sdlc dispatches by step. The model and effort each one runs 
 | `implementor` | sonnet · high | MECHANICAL task execution under TDD discipline — the plan is literal, tests define done, ambiguity means stop and surface |
 | `researcher` | opus · high | Read-only codebase/docs exploration returning structured summaries with file:line citations |
 | `senior-implementor` | opus · high | DISCRETIONARY task execution under TDD discipline — judgment and taste licensed within task scope, every resolution logged to the wave's `record/<wave>/assumptions.md` before commit |
-| `test-runner` | sonnet · medium | Mechanical test-suite execution and full result reporting |
+| `test-runner` | haiku · high | Mechanical test-suite execution and full result reporting |
 
 ## Installed by setup (third party)
 

@@ -251,7 +251,7 @@ fill_step_token() {  # <plan> -> a numeric step, or ""
 # ── THE READY SET ─────────────────────────────────────────────────────────────
 #
 # fill_ready_set <plan> <rung> <open> -> the ids that may be dispatched RIGHT NOW, one per
-# line, in table order, at most <rung> - <open> of them.
+# line, longest remaining chain first (`fill_chain_order`, below), at most <rung> - <open> of them.
 #
 # THREE GATES, CHEAPEST FIRST, and each of them prints nothing when it holds:
 #
@@ -261,9 +261,10 @@ fill_step_token() {  # <plan> -> a numeric step, or ""
 #      AGAINST (a plan with no readable width has no ceiling to fill to), and a gap of zero or
 #      less is a full budget;
 #   3. the table — the step token (empty when `current:` and the table's shape disagree),
-#      then `units_ready` at that token, trimmed to the gap in TABLE order, which is the
-#      orchestrator's own dependency ordering and never re-sorted. Only this gate reads the
-#      table, and it reads it once (`_fill_ready_rows`, below).
+#      then `units_ready` at that token, ordered longest remaining chain first and trimmed to
+#      the gap in that order (wave-38 T7; D22, REQ-6 AC-6.5: through 1.20.0 the trim kept table
+#      order, so a short chain written first took the slot a long one waited for). Only this
+#      gate reads the table, and it reads it once (`_fill_ready_rows`, below).
 #
 # THE TRIM IS HERE, NOT IN THE CALLER. Two callers trimming their own way is how the tick and
 # the wall would come to name different rows on one turn, which is the disagreement this
@@ -275,13 +276,13 @@ fill_step_token() {  # <plan> -> a numeric step, or ""
 #
 # A ROW ALREADY ANSWERED IS LEFT OUT BEFORE THE TRIM (wave-24 T27; D2, AC-4.7). The optional
 # fourth operand is the standing decline's ids (`fill_standing_decline`, below): those rows are
-# skipped and do not take a slot, so the gap goes to the next ready row in table order — the
+# skipped and do not take a slot, so the gap goes to the next ready row in chain order — the
 # rows the stop wall names when it refuses a turn for the rows the decline did not answer.
 #
 # A ROW THAT TAKES NO WRITER SLOT IS OFFERED OUTSIDE THE GAP (wave-26 T13; D9). The gap is the
 # writer budget; a verify or review row runs a read-only role (`fill_readonly_ids`, below), so a
 # full budget is no reason to hold it. Those rows are printed whenever they are ready, in their
-# table place, and only the writers are trimmed, in table order — so a closed gap still prints
+# chain place, and only the writers are trimmed, in chain order — so a closed gap still prints
 # the read-only rows, and the gate on the gap is the writers' alone.
 fill_ready_set() {  # <plan> <rung> <open> [<answered ids, space-joined>] -> ready ids, one per line
   local plan="${1:-}" rung="${2:-}" open="${3:-}" gap
@@ -304,6 +305,7 @@ _fill_ready_rows() {  # <plan> <gap> [<answered ids> [tagged]]
   [ -n "$step" ] || return 0
   ready="$(units_ready "$plan" "$step")" || return 0
   [ -n "$ready" ] || return 0
+  ready="$(fill_chain_order "$plan" "$ready")"
   # A ROW A ROSTER HOLDS OPEN IS NOT READY (wave-35 T28; AC-5.5, D14): any roster under the plan's
   # .bionic/tmp, this session's included (`fill_held_ids`, below). It is left out before the trim, so
   # it takes no slot. `units_ready`'s own roster operand reads one roster with one ledger, so the set of
@@ -322,6 +324,57 @@ _fill_ready_rows() {  # <plan> <gap> [<answered ids> [tagged]]
 $ready
 FILL_READY_ROWS
   return 0
+}
+
+# ── THE ORDER: THE LONGEST REMAINING CHAIN FIRST (wave-38 T7; D22, REQ-6 AC-6.5) ─────────
+#
+# fill_chain_order <plan> <ids, one per line> -> the same ids, one per line, the longest remaining
+# chain first, ties by row id: two ids of one prefix and a number by the number (T2 before T10), any
+# other pair (a fixture's word ids) in the order given, which is table order. A row's remaining
+# chain is its `size` (the cell's leading digits, minutes) plus the heaviest path of open rows
+# waiting on it, transitively: the graph the tick's CHAIN line is drawn from (`units_edges`, its
+# nodes the pending and active rows), so the row that heads the CHAIN line is the row offered
+# first. D22: "the tick offers ready rows longest remaining chain first". The membership is the
+# caller's; only the order changes. One id, or a table that does not parse, is handed back as given.
+fill_chain_order() {  # <plan> <ids>
+  local plan="${1:-}" ids="${2:-}" rows
+  case "$ids" in *$'\n'*) ;; *) printf '%s\n' "$ids"; return 0 ;; esac
+  rows="$(units_rows "$plan" 2>/dev/null)" && [ -n "$rows" ] || { printf '%s\n' "$ids"; return 0; }
+  printf '\034rows\n%s\n\034edges\n%s\n\034ids\n%s\n' "$rows" "$(units_edges "$plan" 2>/dev/null)" "$ids" | awk -F'\t' '
+    function chain(i,   k, c, best) {   # the heaviest path from i; a cycle adds nothing past itself
+      if (i in f) return f[i]
+      if (i in on) return 0
+      on[i] = 1; best = 0
+      for (k = 1; k <= no[i]; k++) { c = chain(out[i, k]); if (c > best) best = c }
+      delete on[i]
+      f[i] = sz[i] + best
+      return f[i]
+    }
+    function before(a, b,   pa, pb, na, nb) {   # a ahead of b: the longer chain, then the lower id
+      if (fa[a] != fa[b]) return fa[a] > fa[b]
+      pa = a; sub(/[0-9]+$/, "", pa); pb = b; sub(/[0-9]+$/, "", pb)
+      na = substr(a, length(pa) + 1); nb = substr(b, length(pb) + 1)
+      if (pa == pb && na != "" && nb != "" && na + 0 != nb + 0) return na + 0 < nb + 0
+      return at[a] < at[b]
+    }
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "edges" { part = 2; next }
+    $0 == SUBSEP "ids" { part = 3; next }
+    part == 1 && $1 != "" && ($10 == "pending" || $10 == "active") {
+      sz[$1] = 0; if (match($7, /^[0-9]+/)) sz[$1] = substr($7, RSTART, RLENGTH) + 0
+      next
+    }
+    part == 2 && NF >= 2 && ($1 in sz) && ($2 in sz) && !(($1, $2) in seen) { seen[$1, $2] = 1; out[$1, ++no[$1]] = $2; next }
+    part == 3 && $1 != "" { n++; id[n] = $1; at[$1] = n }
+    END {
+      for (k = 1; k <= n; k++) fa[id[k]] = chain(id[k])
+      for (k = 2; k <= n; k++) {
+        t = id[k]
+        for (j = k - 1; j >= 1 && before(t, id[j]); j--) id[j + 1] = id[j]
+        id[j + 1] = t
+      }
+      for (k = 1; k <= n; k++) print id[k]
+    }'
 }
 
 # ── THE WIDTH, FROM THE GATE (wave-28 T13; D14, AC-2.5, AC-2.8) ──────────────
@@ -553,19 +606,39 @@ fill_launched_rows() {  # <roster> <session id> <names, comma-joined> -> the nam
 # Prints `<at>US<reason>US<ids, space-joined>` (US = \037), or nothing when no decline stands.
 FILL_STANDING_WINDOW=2000
 
-# fill_decline_holds <room> <free writer slots> -> 0 when a decline still stands, 1 when room has appeared
-# Room is `yes` and at least one slot is free: the only lapse. Anything unknown (no operand, a word that is
-# no count) is no evidence of room, so the decline stands.
+# fill_decline_holds <room> <free writer slots> [<declined-on row> <plan>] -> 0 when a decline still stands, 1 when
+# room has appeared. Room is `yes` and at least one slot is free: the only lapse. Anything unknown (no operand, a
+# word that is no count) is no evidence of room, so the decline stands.
+#
+# A DECLINE `--on <row>` HOLDS UNTIL THAT ROW LANDS (wave-38 T19; REQ-11 AC-11.1; L5). Room is no reason to ask
+# for a row that waits on another row: wave 37 declined T14-T21 `--on T4`, and the tick kept the decline standing
+# only by hand-hold, because a decline lapses when room appears. With a <declined-on row> (the standing line's
+# `declined-on=`, `-` when it names none) and the <plan> to read it in, the decline holds while that row's
+# `## Tasks` status is not `landed`, whatever room shows. A row the table does not carry waits on nothing the
+# tick can judge, so it holds nothing. No <plan>, or a table that cannot be read, is no evidence either way: the
+# decline lapses on room alone, as it did.
 fill_decline_holds() {
   case "${2:-}" in ''|*[!0-9]*) return 0 ;; esac
-  [ "${1:-}" = yes ] && [ "$2" -ge 1 ] && return 1
+  [ "${1:-}" = yes ] && [ "$2" -ge 1 ] || return 0
+  _fill_decline_row_open "${4:-}" "${3:-}" && return 0
+  return 1
+}
+
+# _fill_decline_row_open <plan> <row> -> 0 when <row> is a row of the plan's table whose status is not `landed`
+_fill_decline_row_open() {
+  local plan="${1:-}" row="${2:-}" st
+  case "$row" in ''|-) return 1 ;; esac
+  [ -n "$plan" ] && [ -f "$plan" ] || return 1
+  st="$(units_rows "$plan" 2>/dev/null | awk -F'\t' -v id="$row" '$1 == id { print $10; f = 1; exit } END { if (!f) print "\037absent" }')"
+  case "$st" in ''|landed|$'\037'absent) return 1 ;; esac
   return 0
 }
 
-# _fill_decline_ledger <ledger path> <session id> -> the decline the ledger alone leaves standing (the
-# reader's body; the two callers below add the room rule)
+# _fill_decline_ledger <ledger path> <session id> [on] -> the decline the ledger alone leaves standing (the
+# reader's body; the two callers below add the room rule). With `on` it prints that decline's `declined-on=`
+# (`-` or nothing when it names no row) instead, from the same read of the same line.
 _fill_decline_ledger() {
-  local led="${1:-}" sid="${2:-}" line at st_cur ready launched reason lifted id ids=""
+  local led="${1:-}" sid="${2:-}" line at st_cur ready launched reason on lifted id ids=""
   [ -n "$led" ] && [ -n "$sid" ] && [ -f "$led" ] && [ ! -L "$led" ] || return 0
   line="$(tail -n "$FILL_STANDING_WINDOW" "$led" 2>/dev/null | awk -v sid="$sid" '
     function kv(line, key,   i, n, parts) {
@@ -576,7 +649,7 @@ _fill_decline_ledger() {
     index($0, "fill-ledger/v1|") != 1 || kv($0, "session") != sid { next }
     kv($0, "declined") ~ /[[:alnum:]]/ {
       lastat = kv($0, "at")
-      last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
+      last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined") "\037" kv($0, "declined-on")
       lifted = ""
       next
     }
@@ -584,7 +657,8 @@ _fill_decline_ledger() {
     kv($0, "state") == "lapsed" && last != "" && kv($0, "lapsed-at") == lastat { last = ""; lifted = "" }
     END { if (last != "") print last "\037" lifted }')"
   [ -n "$line" ] || return 0
-  IFS=$'\037' read -r at st_cur ready launched reason lifted <<< "$line"
+  IFS=$'\037' read -r at st_cur ready launched reason on lifted <<< "$line"
+  if [ "${3:-}" = on ]; then printf '%s\n' "$on"; return 0; fi
   for id in ${ready//,/ }; do
     fill_row_launched "$id" "$launched" && continue
     case ",$lifted," in *",$id,"*) continue ;; esac
@@ -594,21 +668,28 @@ _fill_decline_ledger() {
   printf '%s\037%s\037%s\n' "$at" "$reason" "$ids"
 }
 
-fill_standing_decline() {  # <ledger path> <session id> <current: as read now> [<room: yes|no> <free writer slots>]
+# _fill_decline_on_if_room <ledger> <sid> <current> <room> <free> -> the standing decline's `declined-on=` when room
+# is shown (the only reading that asks it), else nothing: the stop wall, which passes no room, reads nothing more.
+_fill_decline_on_if_room() {
+  [ "${4:-}" = yes ] || return 0
+  _fill_decline_ledger "${1:-}" "${2:-}" on
+}
+
+fill_standing_decline() {  # <ledger path> <session id> <current: as read now> [<room: yes|no> <free writer slots> [<plan>]]
   local out
   out="$(_fill_decline_ledger "${1:-}" "${2:-}")"
   [ -n "$out" ] || return 0
-  fill_decline_holds "${4:-}" "${5:-}" || return 0
+  fill_decline_holds "${4:-}" "${5:-}" "$(_fill_decline_on_if_room "$@")" "${6:-}" || return 0
   printf '%s\n' "$out"
 }
 
-# fill_decline_lapsing <ledger path> <session id> <current> <room> <free writer slots>
+# fill_decline_lapsing <ledger path> <session id> <current> <room> <free writer slots> [<plan>]
 #   -> the decline room has just ended, in the reader's own shape (`<at>US<reason>US<ids>`), or nothing
 fill_decline_lapsing() {
   local out
   out="$(_fill_decline_ledger "${1:-}" "${2:-}")"
   [ -n "$out" ] || return 0
-  fill_decline_holds "${4:-}" "${5:-}" && return 0
+  fill_decline_holds "${4:-}" "${5:-}" "$(_fill_decline_on_if_room "$@")" "${6:-}" && return 0
   printf '%s\n' "$out"
 }
 

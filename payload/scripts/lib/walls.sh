@@ -2363,7 +2363,7 @@ _eg_refuse_readings() {
     _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and a suite a row landed red by declaration is still owed a green run taken after its blocker cleared:
 ${lines}
 Plan: $PLAN
-Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add floor <log>'."
+Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add regression <log>'."
     refuse exit2 commit "a declared red is still owed" "record a green run once cleared" "$_eg_detail"
   fi
   _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
@@ -2404,14 +2404,14 @@ _eg_refuse_floor_absent() {
   [ "$(plan_regression "$PLAN")" = no ] && return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
     why="$(proof_floor_absent "$PLAN")" || return 0
-    why="its section holds no 'proved: kind=floor' line: ${why} (the judge's floor absent)"
+    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"
   else
-    why="the floor's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
+    why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
-  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the floor is owed: ${why}.
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the regression is owed: ${why}.
 Plan: $PLAN
-Fix: run the whole run with 'session-poker.sh floor-run' and record its log with 'session-poker.sh proof-add floor <log>'. Whether that floor is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
-  refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add floor" "$_eg_detail"
+Fix: run the whole run with 'session-poker.sh regression-run' and record its log with 'session-poker.sh proof-add regression <log>'. Whether that regression is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
+  refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add regression" "$_eg_detail"
 }
 
 # ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
@@ -5230,7 +5230,8 @@ return 0
 # `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
 # `rule` (a ruling pushed to a writer), `matrix-set`, `waive-row`, `tasks-prose`, `epic-row` and
-# `continuation-fill` (T7's plan verbs) and `disposition` (T13's finding ledger) — `ruling-ack` and `rulings`
+# `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
+# replay into approve, waive, waive-row and finding-move) — `ruling-ack` and `rulings`
 # are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
@@ -5302,7 +5303,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|decline|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|tasks-prose|epic-row|continuation-fill|disposition|reply)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -6638,7 +6639,7 @@ $_how"
 # run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
 # the full-tree arm's detail.
 _budget_whole_run_cmd() {
-  printf 'bash %s floor-run' "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")"
+  printf 'bash %s regression-run' "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")"
 }
 _budget_is_whole_run() {  # <the refused suite or run> -> 0 when it is the whole tree's runner, run whole
   case " ${1:-} " in
@@ -6971,4 +6972,46 @@ record/<wave>/assumptions.md, and a correction that should outlive the run goes 
 as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
 Nothing that gates or reviews this run reads the store. Reading it stays open."
   return 2
+}
+
+# ─── wall_standing_orders — the user's standing order refuses a command class (wave-38 T18) ──
+#
+# A STANDING ORDER IS THE USER'S STANDING ANSWER (REQ-7 AC-7.2; design ledger Δ10, D17): an item of
+# `standing-orders:` in .bionic/config.yaml, printed at session start and in the resume recap. An item
+# `<text> | refuse: <class>` — `hand test in progress | refuse: suite`, a hand-test lock — refuses
+# every command `cmd_class` reads as that class, naming the order, until the user lifts it by removing
+# the item. An item without the tail refuses nothing; a class `cmd_class` never answers (or `none`) is
+# a config error session-start reports, and this wall enforces it never.
+#
+# A PURE PREDICATE OVER WHAT IT IS HANDED (the freeze, .claude/rules/hook-authoring.md): the command
+# and the section, one item per line, which hooks/bash-walls.sh's preamble reads once through
+# lib/roots.sh `config_section` and hands in as WALL_STANDING_ORDERS. It is given no root and opens no
+# file; tests/standing-orders.test.sh §REFUSE builds the mutant that reads config.yaml itself and shows
+# the freeze pin flip. The class is read off the command text by the walls' shared reading
+# (`_wall_class_read`, cached for the process), and cmd-class.sh is loaded through `wall_libs` only when
+# an item names a known class, so a project with no lock pays nothing.
+#
+# THE ITEM GRAMMAR IS lib/roots.sh's (`standing_order_split`, `standing_order_class_known`), the one
+# parser session-start reads too, so the wall and the line that warns of a bad class cannot disagree.
+wall_standing_orders() {  # <command> <section> -> 0 nothing · 2 block
+  local _cmd="${1-}" _sec="${2-}" _it _classed=0
+  [ -n "$_sec" ] || return 0
+  declare -F standing_order_split >/dev/null 2>&1 || return 0
+  while IFS= read -r _it; do
+    [ -n "$_it" ] || continue
+    standing_order_split "$_it"
+    [ "$STANDING_ORDER_REFUSES" = 1 ] && standing_order_class_known "$STANDING_ORDER_CLASS" || continue
+    if [ "$_classed" = 0 ]; then
+      wall_libs standing-orders cmd-class.sh || return 0
+      _wall_class_read "$_cmd"; _classed=1
+    fi
+    [ "$_WALL_CLASS" = "$STANDING_ORDER_CLASS" ] || continue
+    fold_block exit2 command "standing order: $STANDING_ORDER_TEXT" "lift it in config.yaml" \
+      "This command is a $STANDING_ORDER_CLASS run, and the user's standing order refuses that class:
+    standing-orders: - $_it   (.bionic/config.yaml)
+A standing order is the user's standing answer. It holds until the user lifts it by
+removing the item. Ask the user; do not work around it."
+    return 2
+  done <<< "$_sec"
+  return 0
 }

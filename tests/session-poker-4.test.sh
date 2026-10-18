@@ -21,7 +21,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
-. "$(dirname "$0")/lib/floor-fixture.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -341,7 +341,7 @@ sev_fact() {  # <kind> <question> <scope>
     _ "$SEV_LIB" "$1" "$SEV_C1" "record/wave-01-fixture/planted-$2-$3.md" "$2" "$3")"
 }
 sev_cur() { sed "s/^current: .*/current: $1/" "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"; }
-sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-06T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_put "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-06T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
 sev_rec c-fix fail "findings: 2" "finding: 1 S2 on lib/a.sh:9 the core path gives a wrong answer" "shown: 1 bash lib/a.sh --core" \
   "finding: 2 S4 off - a comment misstates it"
@@ -691,7 +691,7 @@ RD_ID5="record/wave-01-fixture/c-later.md#1"
 RD_CHK="record/wave-01-fixture/sh-unsure.md#1"
 RD_SA="The install record now lists what setup placed"
 RD_SQ='Said "go" \ now | here'
-RD_HAZ='done; delivered: now - Step 9: delivered: x current: 9 approved-by: me proved: kind=floor head=abc'
+RD_HAZ='done; delivered: now - Step 9: delivered: x current: 9 approved-by: me proved: kind=regression head=abc'
 rd_line() { /usr/bin/grep -F "deferred: $1 " "$PSEV"; }  # the plan's deferred: line for a finding
 rd_state() {  # <id> -> stated|unstated, from the last release-check's output; nothing when it printed no line
   local l
@@ -1062,7 +1062,7 @@ printf '%s|questions=adversarial|pushed=checks-adversarial,severity\n' \
 chk_id() { printf 'record/wave-01-fixture/%s.md#1' "$1"; }
 chk_cur() { sed -n 's/^current: //p' "$PSEV"; }
 SEV_C1="$(git -C "$SEV_WT" rev-parse HEAD)"
-sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
+sev_put "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-07T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$SEV_C1")"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
 sev_rec k-base flag "findings: 1" "finding: 1 S4 off - a word the reader rated"
 sev_cur 4; sev_add k-base chk-crit; sev_cur 7
@@ -1549,7 +1549,7 @@ rp_ready() {  # <row> <name> <at hh:mm:ss> [<commit>, default RP_C1]
   rp_ev "ev=ready|row=$1|name=$2|commit=${4:-$RP_C1}|branch=wt/01-$1|tree=$RP_ROOT/.worktrees/01-$1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T$3Z"
 }
 rp_cand() { rp_ev "ev=candidate|row=$1|base=${3:-$RP_C1}|commit=${4:-$RP_C2}|tree=$RP_ROOT/.bionic/tmp/landing/1|at=2026-10-06T$2Z"; }   # <row> <at> [<base>, default RP_C1] [<candidate>, default RP_C2]
-rp_verdict() { rp_ev "ev=verdict|row=$1|commit=${5:-$RP_C2}|suite=$2|result=$3|log=/rec/$1-$2.log${6:+|width=$6}|at=2026-10-06T$4Z"; }   # <row> <suite> <result> <at> [<commit>, default RP_C2] [<width>: the drain writes `width=` after `log=`]
+rp_verdict() { rp_ev "ev=verdict|row=$1|commit=${5:-$RP_C2}|suite=$2|result=$3|log=/rec/$1-$2.log${7:+|admitted=$7}${6:+|width=$6}|at=2026-10-06T$4Z"; }   # <row> <suite> <result> <at> [<commit>, default RP_C2] [<width>: the drain writes `width=` after `log=`] [<admitted epoch or ->: wave-38 T6 writes it after `log=`, ahead of `width=`]
 rp_pub() { rp_ev "ev=published|row=$1|commit=$RP_C2|kind=$2|by=-|why=-|at=2026-10-06T$3Z"; }
 rp_req() {  # <id> <who agent> <tree> <asked> <admitted|-> [<extra line>...] -> one request file
   local id="$1" who="$2" tree="$3" asked="$4" adm="$5"; shift 5
@@ -1586,27 +1586,27 @@ rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "e
 rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
 rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
 rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
-RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=30s · killed=0"
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=2250s · killed=0"
 rp_report
-expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, waits over the project's requests" \
+expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, the waited median over the rows' waits from the record (wave-38 T7: 900s and 3600s; T1's verdict carries no admitted=)" \
   "0|$RP_RTL_LINE" "$RC|$(rp_line)"
 rp_report --rows
 expect_eq "RTL2 --rows prints the same line first" "$RP_RTL_LINE" "$(printf '%s\n' "$OUT" | head -1)"
 expect_eq "RTL3 …then a line per landed row in the record's order: T1's minutes run from its FIRST ready (30.0, not 10.0), a hand and a git landing print -" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=30s wait=- prove=- line=- width=-|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=0s wait=- prove=- line=- width=-|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-|T2 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:15:00Z minutes=15.0 runs=0 waited=900s wait=15.0 prove=0.0 rework=0.0 width=-|T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T12:00:00Z minutes=60.0 runs=0 waited=3600s wait=60.0 prove=0.0 rework=0.0 width=-|T4 hand ready=- landed=2026-10-06T12:10:30Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-|T5 git ready=- landed=2026-10-06T12:20:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
   "$(rp_rows)"
 # A-orch-12: a request may carry `peak=` and a line no reader knows; the fold reads only its own keys.
 printf 'peak=62\ncolour=blue\n' >> "$RP_GATE/requests/4"; printf 'peak=71\n' >> "$RP_GATE/requests/1"
 rp_report --rows
 expect_eq "RTL4 a request carrying peak= and an unknown line folds to the same report" \
-  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-" \
+  "$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-" \
   "$(rp_line)|$(rp_rows | cut -d'|' -f1)"
 # THE PLAN OPERAND (A-orch-145): a named plan first, else the session's bound run (RTL1 to RTL4 read the
 # bound run), else the verb's no-run refusal. The named plan is read from another project, unbound.
 RP_NORUN="$(make_repo rp-norun)"; ( cd "$RP_NORUN" && git commit -q --allow-empty -m init )
 BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report "$P59W" --rows
 expect_eq "RTL10 a named plan, from an unbound session in another project: exit 0, that plan's line and rows, its waits scoped to its own project" \
-  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=90s wait=1.0 prove=4.0 line=25.0 width=-" \
+  "0|$RP_RTL_LINE|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-" \
   "$RC|$(rp_line)|$(rp_rows | cut -d'|' -f1)"
 BIONIC_GATE_DIR="$RP_GATE" poke "$RP_NORUN" landing-report
 expect_eq "RTL11 no plan named and no run bound: the verb's no-run refusal (2), and no line" \
@@ -1621,13 +1621,13 @@ rp_world rp-even
 rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
 rp_report
 expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
-  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=900s · killed=0" \
   "$(rp_line)"
 rp_world rp-one
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
 rp_report
 expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
-  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=450s · killed=0" \
   "$(rp_line)"
 # Empty and absent records: the line with zeros, exit 0.
 rp_world rp-empty
@@ -1650,10 +1650,10 @@ RP_REAL_POKER="$POKER"; POKER="$RD_MUT/lastready/hooks/session-poker.sh"
 rp_report --rows
 POKER="$RP_REAL_POKER"
 expect_eq "RTL-mut1 the last-ready mutant still runs (exit 0) and reads T1's minutes from its LAST ready, 10.0, where RTL3 reads 30.0" \
-  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=0s wait=- prove=- line=- width=-" "$RC|$(rp_rows)"
+  "0|T1 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=600s wait=10.0 prove=0.0 rework=0.0 width=-" "$RC|$(rp_rows)"
 rp_report --rows
 expect_eq "RTL-mut1b …control: the real poker over the same record reads 30.0" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s wait=- prove=- line=- width=-" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=1800s wait=30.0 prove=0.0 rework=0.0 width=-" "$(rp_rows)"
 rm -rf "$RD_MUT"
 
 # ---------- §REPORT-KINDS: landings by kind, runs by outcome, killed runs ----------
@@ -1681,8 +1681,8 @@ expect_eq "RK1 a queue, a hand and a git landing each count under their own kind
   "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2" \
   "$(rp_line)"
 expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
-  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
-expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
+  "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
+expect_eq "RK3 …the git landing likewise" "T3 git ready=- landed=2026-10-06T10:30:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
   "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T3 ')"
 expect_eq "RK4 …and rows that never landed print no row" "T1|T2|T3" "$(rp_rows | tr '|' '\n' | awk '{ print $1 }' | tr '\n' '|' | sed 's/|$//')"
 # A malformed line is skipped and counted, never fatal.
@@ -1705,7 +1705,7 @@ expect_eq "RP1 a record with no published event: the tick prints no landings lin
 rp_pub T1 queue 10:30:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
-  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1800s · killed=0" "$(rp_tl)"
 rp_tick
 expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
 expect_eq "RP3b …and prints no landings line: an unchanged tick is the one line the Patrol ends on, \"printed only unchanged: end it\" (wave-28 T62; T68 folded RK-T3 into this row)" "" "$(rp_tl)"
@@ -1730,7 +1730,7 @@ printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/confi
 BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
 expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
 expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
-  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=0s wait=- prove=- line=- width=-|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=0s wait=- prove=- line=- width=-" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1800s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=1800s wait=30.0 prove=0.0 rework=0.0 width=-|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
   "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
@@ -1767,14 +1767,14 @@ expect_eq "RK-K1 a row's red, then the accepted head's green run under the row i
 rp_ready T1 w-T1 11:00:00; rp_verdict T1 a.test.sh green 11:05:00 "$RP_C2"; rp_pub T1 queue 11:06:00
 rp_report --rows
 expect_eq "RK-K2 …fixed, re-readied, green, landed: the row's runs=2 (its red and its green, not the head's), and the line reads green=1 red=1 red-then-green=0" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=0s wait=0.5 prove=64.5 line=1.0 width=-" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T11:06:00Z minutes=66.0 runs=2 waited=- wait=- prove=- rework=51.0 width=-" "$(rk_runs)|$(rp_rows)"
 # a true flake: two verdicts for one commit, red first, no ready between; the head's run sits between them
 rp_world rk-key2
 rp_ready T2 w-T2 10:00:00; rp_cand T2 10:00:30 "$RK_H" "$RK_C3"
 rp_verdict T2 a.test.sh red 10:05:00 "$RK_C3"; rp_verdict T2 a.test.sh green 10:08:00 "$RK_H"; rp_verdict T2 a.test.sh green 10:12:00 "$RK_C3"; rp_pub T2 queue 10:13:00
 rp_report --rows
 expect_eq "RK-K3 a flake (a PLANTED shape: lib/line.sh never writes it, A-T68.4): red, the head's run between, green at the same commit and no ready between: red-then-green=1, green=1 red=1, runs=2" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=0s wait=0.5 prove=11.5 line=1.0 width=-" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=1|T2 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:13:00Z minutes=13.0 runs=2 waited=- wait=- prove=- rework=0.0 width=-" "$(rk_runs)|$(rp_rows)"
 # a red, then a green at ANOTHER candidate of the same ready (the head moved): two commits, so not a flake
 rp_world rk-key3
 rp_ready T3 w-T3 10:00:00; rp_cand T3 10:00:30 "$RK_H" "$RK_C3"; rp_verdict T3 a.test.sh red 10:05:00 "$RK_C3"
@@ -1786,13 +1786,13 @@ expect_eq "RK-K4 a red at one candidate and a green at the next (no ready betwee
 # ---------- (2) the landings line prints on a tick that is not unchanged ----------
 rp_world rk-tick
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
-RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
+RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1800s · killed=0"
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T1 a tick that prints in full (no digest yet) carries the landings line" "$RK_LINE" "$(rp_tl)"
 rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T6 the next tick that prints in full carries the line with the new landing's figures" \
-  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1200s · killed=0" "$(rp_tl)"
 
 # ---------- (3) a record with no line/v1 event is unmeasured, never zeros ----------
 RK_UNM="landings: unmeasured — the landing record holds no line/v1 events"
@@ -2128,7 +2128,7 @@ expect_nonempty "RI-P1 precondition: …and the row extractor reads both rows" "
 expect_eq "RI-P1a T2 behind T1, red, the head's run under T2's id at H, fixed and landed: green=2 red=1 (T1's green, T2's red and T2's green; the head's run counted nowhere)" \
   "0|runs: green=2 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
 expect_eq "RI-P1b …T1 runs=1 and T2 runs=2" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s wait=0.2 prove=3.8 line=5.0 width=-|T2 queue ready=2026-10-06T10:01:00Z landed=2026-10-06T10:26:00Z minutes=25.0 runs=2 waited=0s wait=0.2 prove=23.8 line=1.0 width=-" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-|T2 queue ready=2026-10-06T10:01:00Z landed=2026-10-06T10:26:00Z minutes=25.0 runs=2 waited=- wait=- prove=- rework=12.0 width=-" "$(rp_rows)"
 
 # ---------- P2 (the control): the head run after the row ahead landed is excluded by either rule ----------
 rp_world ri-p2
@@ -2138,7 +2138,7 @@ rp_verdict T2 a.test.sh green 10:14:00 "$RK_C3"
 rp_ev "ev=returned|row=T2|why=red|detail=/rec/T2.log|at=2026-10-06T10:14:01Z"
 rp_report --rows
 expect_eq "RI-P2 the writer's case: T2's red at its own candidate and the head's green at T1's landed commit: green=1 red=1, and T1's row runs=1" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=0s wait=0.2 prove=3.8 line=5.0 width=-" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:09:00Z minutes=9.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-" "$(rk_runs)|$(rp_rows)"
 
 # ---------- P3: a row landing twice; its first candidate is not its second landing's own ----------
 ri_p3() {  # <label> -> the record of pass 43's probe P3
@@ -2153,14 +2153,14 @@ rp_report --rows
 expect_eq "RI-P3a a row landing twice: the line reads green=2 red=1 (its two landings' own runs; the head's run at its first candidate is not counted)" \
   "0|runs: green=2 red=1 none=0 discarded=0 red-then-green=0" "$RC|$(rk_runs)"
 expect_eq "RI-P3b …the first landing runs=1 and the second runs=2" \
-  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:05:00Z minutes=5.0 runs=1 waited=0s wait=0.2 prove=3.8 line=1.0 width=-|T1 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:23:00Z minutes=13.0 runs=2 waited=0s wait=0.2 prove=11.8 line=1.0 width=-" "$(rp_rows)"
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:05:00Z minutes=5.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-|T1 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:23:00Z minutes=13.0 runs=2 waited=- wait=- prove=- rework=6.0 width=-" "$(rp_rows)"
 
 # ---------- a row with no candidate since its last landing keeps T14's count: every verdict under its id ----------
 rp_world ri-nocand
 rp_ready T4 w-T4 10:00:00 "$RI_A1"; rp_verdict T4 a.test.sh red 10:05:00 "$RP_C2"; rp_verdict T4 a.test.sh green 10:06:00 "$RK_H"; rp_pub T4 queue 10:10:00
 rp_report --rows
 expect_eq "RI-N a row with a ready and verdicts but no candidate counts both its verdicts (there is no commit of its own to include by)" \
-  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=0s wait=- prove=- line=4.0 width=-" "$(rk_runs)|$(rp_rows)"
+  "runs: green=1 red=1 none=0 discarded=0 red-then-green=0|T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:10:00Z minutes=10.0 runs=2 waited=- wait=- prove=- rework=0.0 width=-" "$(rk_runs)|$(rp_rows)"
 
 # ---------- ruling (3): killed is decided once, through the gate's rule, and an exit over 128 is a kill (D18) ----------
 # (A-orch-233, T72: "137 only" of A-orch-179/198 is withdrawn; the spec's figure is "admitted, no end, holder gone,
@@ -2417,8 +2417,8 @@ expect_eq "MP-fill3 …and the FILL sentence names them: one decline of T3 answe
   "$(s74_fill)"
 R74C="$(make_repo s74-none)"; new_roster "$R74C"; s74_plan "$R74C"
 poke_pressure "$R74C" 8192 1.0 tick
-expect_eq "MP-fill4 positive, the same extractor: with nothing parked the sentence is what it was, and says nothing of a gap" \
-  "poker: FILL — T2 T3 named for dispatch; the decision line carries them." "$(s74_fill)"
+expect_eq "MP-fill4 positive, the same extractor: with nothing parked the sentence is what it was, and says nothing of a gap (its rows in chain order, T3 30 ahead of T2 20: wave-38 T7)" \
+  "poker: FILL — T3 T2 named for dispatch; the decision line carries them." "$(s74_fill)"
 # THE MUTANT: the parked ids dropped from the sentence (a doctored copy of the hook, its siblings and library linked in).
 MP_HROOT="$(mktemp -d "$TMPROOT/mp-hook.XXXXXX")"; mkdir -p "$MP_HROOT/hooks" "$MP_HROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/scripts/lib"
@@ -2712,15 +2712,15 @@ if [ "$SH_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLAU
 POKE_BOUND="$SF_BOUND_WAS"
 
 # ============================================================
-section "§FLOOR-DECLARED: floor-run runs a declared floor: <command> and logs it in the floor's one grammar; floor-attestation: is a removed key (wave-28 T75; REQ-17 AC-17.1; D36; wave-36 T35: REQ-7 AC-7.10, D13)"
+section "§FLOOR-DECLARED: regression-run runs a declared floor: <command> and logs it in the floor's one grammar; floor-attestation: is a removed key (wave-28 T75; REQ-17 AC-17.1; D36; wave-36 T35: REQ-7 AC-7.10, D13)"
 # ============================================================
 #
 # A project whose regression is not tests/run.sh may name it in `.bionic/config.yaml` as `floor: <command>`, a
-# convenience `floor-run` runs in the working checkout and logs in the floor's one grammar (wave-36 T35; AC-7.10): a
+# convenience `regression-run` runs in the working checkout and logs in the floor's one grammar (wave-36 T35; AC-7.10): a
 # first line `head=<40-hex> dirty=<n>`, then `command: <cmd>`, the command's output, and a last line `rc=<n>`.
-# `proof-add floor` judges that log as it judges any other (§FLOOR-ANY, below): the key gives it no privilege, and with
+# `proof-add regression` judges that log as it judges any other (§FLOOR-ANY, below): the key gives it no privilege, and with
 # no key it is still a log the floor reads (FD-c1). `floor-attestation:`, wave-28 T75's second shape (a person's record
-# that a run passed), is removed: `floor-run` and `proof-add floor` refuse a config carrying it, naming the key and
+# that a run passed), is removed: `regression-run` and `proof-add regression` refuse a config carrying it, naming the key and
 # what to do, before any record is read. The FD-t and FD-b rows moved from what the key admitted to that refusal.
 #
 # FIXTURE FIDELITY. The repository holds NO tests/ directory at its working head, the shape of the project
@@ -2752,13 +2752,13 @@ esac
 FD_EOF
 fd_runs() { [ -f "$FD_SEEN" ] && awk 'END { print NR + 0 }' "$FD_SEEN" || echo 0; }
 fd_config() { printf '%s\n' "$@" > "$RFD/.bionic/config.yaml"; }  # <line>... -> the project's config, exactly these lines
-fd_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFD" | tail -n 1; }
-# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested floor printed>", the roots library and the hash helper
+fd_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFD" | tail -n 1; }
+# fd_attest <lib> <evidence> -> "<exit>|<what proof_attested regression printed>", the roots library and the hash helper
 # (lib/detect.sh, which a doctored copy outside lib/ cannot load from beside itself) sourced first, the checkout the
 # working tree, the plan PFD (its landing record holds the runs) and the project root RFD: the judge itself, for the
 # mutants below.
 fd_attest() {
-  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested floor "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
+  bash -c '. "$1" && . "$6" && . "$2" || exit 9; o="$(proof_attested regression "$3" "$4" "$7" "" "$5")"; r=$?; printf "%s|%s" "$r" "$o"' \
     _ "$FD_ROOTS" "$1" "$2" "$FD_WT" "$RFD" "${FD_ROOTS%/*}/detect.sh" "$PFD" 2>/dev/null
 }
 expect_regex "FD-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$FD_W"
@@ -2768,12 +2768,12 @@ expect_eq "FD-0c precondition: …and its checkout is clean" "" "$(git -C "$FD_W
 
 
 # ---------- AC-17.1: no floor: key, nothing run ----------
-# Wave-35 T10 (AC-1.8): with no floor: key the regression is the project's tests/run.sh, which floor-run runs
+# Wave-35 T10 (AC-1.8): with no floor: key the regression is the project's tests/run.sh, which regression-run runs
 # (§FLOOR-RUN). This fixture's working head holds no tests/ directory, so there is nothing to run, and the verb
 # says which file it looked for, where.
 s42_snap "$RFD" "$PFD"
-poke "$RFD" floor-run
-s42_unchanged "FD-n1 §FLOOR-DECLARED floor-run with no floor: key and no tests/run.sh at the working head" 1 "$PFD"
+poke "$RFD" regression-run
+s42_unchanged "FD-n1 §FLOOR-DECLARED regression-run with no floor: key and no tests/run.sh at the working head" 1 "$PFD"
 expect_contains "FD-n2 …naming the runner it looked for in the working checkout" \
   "$(cd "$FD_WT" && pwd -P) holds no tests/run.sh" "$OUT"
 expect_contains "FD-n2b …and saying nothing was run" "Nothing was run." "$OUT"
@@ -2781,15 +2781,15 @@ expect_contains "FD-n2c …and that the project may run its regression itself an
   "or run the regression yourself and cite its log" "$OUT"
 expect_eq "FD-n3 …and the declared command never ran (the stub's log is empty)" "0" "$(fd_runs)"
 fd_config "floor-attestation: user"
-poke "$RFD" floor-run
+poke "$RFD" regression-run
 expect_eq "FD-n4 …nor with floor-attestation: user alone, refused (exit 1, nothing run)" "1|0" "$RC|$(fd_runs)"
 expect_contains "FD-n4b …naming the removed key first (wave-36 T35; AC-7.10)" "carries floor-attestation: user, a key bionic removed" "$OUT"
 
-# ---------- AC-17.1: floor-run runs and logs; proof-add floor writes the line ----------
-fd_config "floor: bash $FD_STUB --all"
-poke "$RFD" floor-run
-FD_LOG="$FD_REC/floor-run-$FD_W.log"
-expect_eq "FD-a1 floor-run runs the declared command (exit 0, the command's own)" "0" "$RC"
+# ---------- AC-17.1: regression-run runs and logs; proof-add regression writes the line ----------
+fd_config "regression-command: bash $FD_STUB --all"
+poke "$RFD" regression-run
+FD_LOG="$FD_REC/regression-run-$FD_W.log"
+expect_eq "FD-a1 regression-run runs the declared command (exit 0, the command's own)" "0" "$RC"
 expect_eq "FD-a2 …once, in the working branch's checkout, its words split on blanks" \
   "1|cwd=$(cd "$FD_WT" && pwd -P) args=--all" "$(fd_runs)|$(tail -n 1 "$FD_SEEN" 2>/dev/null)"
 expect_eq "FD-a3 …its log opens head=<working head> dirty=0, then command: <cmd> (wave-36 T35: the one grammar's header)" \
@@ -2797,65 +2797,65 @@ expect_eq "FD-a3 …its log opens head=<working head> dirty=0, then command: <cm
 expect_eq "FD-a3b …and closes with the command's code, rc=0, on its last line (wave-36 T35; AC-7.10)" "rc=0" \
   "$(tail -n 1 "$FD_LOG" 2>/dev/null)"
 expect_contains "FD-a4 …and carries the command's output" "floor: 4 passed, 0 failed" "$(cat "$FD_LOG" 2>/dev/null)"
-expect_contains "FD-a5 …and the verb prints the proof-add floor line to run" \
-  "proof-add floor record/wave-01-fixture/floor-run-$FD_W.log" "$OUT"
+expect_contains "FD-a5 …and the verb prints the proof-add regression line to run" \
+  "proof-add regression record/wave-01-fixture/regression-run-$FD_W.log" "$OUT"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
-expect_eq "FD-a6 proof-add floor accepts the declared floor's log (exit 0)" "0" "$RC"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
+expect_eq "FD-a6 proof-add regression accepts the declared floor's log (exit 0)" "0" "$RC"
 expect_regex "FD-a7 …and writes the proof line at the working head, naming that log" \
-  "^proved: kind=floor head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
+  "^proved: kind=regression head=${FD_W} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/regression-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 expect_eq "FD-a8 …which proof_last reads back as the floor at the working head, with no roster counted" "$FD_W" "$(s46_last "$PFD" floor)"
 
 # ---------- AC-17.1: the same log at another head, dirty, red, or with no closing rc= line is refused ----------
 FD_OTHER="0123456789abcdef0123456789abcdef01234567"
-sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
+sed '1d;$d' "$FD_LOG" | regression_fixture "$PFD" "$FD_REC/fd-other.log" "$FD_OTHER" 0 0
 { printf 'head=%s dirty=2\n' "$FD_W"; tail -n +2 "$FD_LOG"; } > "$FD_REC/fd-dirty.log"
-sed '1d;$d' "$FD_LOG" | floor_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
+sed '1d;$d' "$FD_LOG" | regression_fixture "$PFD" "$FD_REC/fd-red.log" "$FD_W" 0 1
 printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$FD_W" > "$FD_REC/fd-runner.log"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-other.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-other.log
 s42_unchanged "FD-r1 a declared floor's log that read another head" 1 "$PFD"
 expect_contains "FD-r1b …naming the head it read and the working head (wave-31 T25: F is no commit here)" \
   "read head ${FD_OTHER:0:12}, which is no commit here; run the whole suite on the working branch (at ${FD_W:0:12})" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-dirty.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-dirty.log
 s42_unchanged "FD-r2 …that read a dirty tree" 1 "$PFD"
 expect_contains "FD-r2b …with today's dirty sentence" "read a dirty tree (dirty=2); commit, run it again and cite that log" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-red.log
 s42_unchanged "FD-r3 …whose command exited 1" 1 "$PFD"
 expect_regex "FD-r3b …saying the run ended rc=1, so the regression did not pass (wave-36 T35: the one grammar's sentence)" \
   'the run in [^ ]*fd-red\.log ended rc=1, so the regression did not pass; fix what it names, run it again and cite that log' "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-r4 …and a log in the old tests/run.sh shape, green at the head, with no closing rc= line" 1 "$PFD"
 expect_contains "FD-r4b …saying what its last line must be (wave-36 T35)" \
   "fd-runner.log does not end with an rc=<n> line" "$OUT"
 
 # ---------- AC-17.1: a failing run, a stray file, a dirty tree ----------
 echo fail > "$FD_MODE"
-poke "$RFD" floor-run
-expect_eq "FD-f1 a failing declared command: floor-run exits with its code (1)" "1" "$RC"
+poke "$RFD" regression-run
+expect_eq "FD-f1 a failing declared command: regression-run exits with its code (1)" "1" "$RC"
 expect_contains "FD-f2 …prints its output" "floor: 3 passed, 1 failed" "$OUT"
 expect_eq "FD-f3 …and writes a second log at the head, opening head= dirty=0 and closing rc=1" "head=$FD_W dirty=0|rc=1" \
-  "$(head -n 1 "$FD_REC/floor-run-$FD_W-2.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/floor-run-$FD_W-2.log" 2>/dev/null)"
+  "$(head -n 1 "$FD_REC/regression-run-$FD_W-2.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/regression-run-$FD_W-2.log" 2>/dev/null)"
 expect_true "FD-f3b …the first log standing" test -f "$FD_LOG"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W-2.log"
-s42_unchanged "FD-f4 …whose log proof-add floor refuses" 1 "$PFD"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W-2.log"
+s42_unchanged "FD-f4 …whose log proof-add regression refuses" 1 "$PFD"
 echo stray > "$FD_MODE"
-poke "$RFD" floor-run
+poke "$RFD" regression-run
 expect_eq "FD-s1 a command that leaves the tree dirtier than it found it is refused (exit 1)" "1" "$RC"
 expect_regex "FD-s2 …naming the regression, the move and that no log was written (wave-30 T23: the word)" \
   'REFUSED — the regression \(.*\) moved the working checkout .* while it ran \(dirty=0 to dirty=1\); no log was written' "$OUT"
-expect_false "FD-s3 …and no third log exists" test -e "$FD_REC/floor-run-$FD_W-3.log"
+expect_false "FD-s3 …and no third log exists" test -e "$FD_REC/regression-run-$FD_W-3.log"
 echo pass > "$FD_MODE"
-poke "$RFD" floor-run
+poke "$RFD" regression-run
 expect_eq "FD-d1 on a dirty tree the floor still runs (exit 0) and its log says so" "0|head=$FD_W dirty=1|rc=0" \
-  "$RC|$(head -n 1 "$FD_REC/floor-run-$FD_W-3.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/floor-run-$FD_W-3.log" 2>/dev/null)"
-expect_contains "FD-d2 …and the verb says proof-add floor refuses it" "the tree was dirty (dirty=1), so proof-add floor refuses this log" "$OUT"
+  "$RC|$(head -n 1 "$FD_REC/regression-run-$FD_W-3.log" 2>/dev/null)|$(tail -n 1 "$FD_REC/regression-run-$FD_W-3.log" 2>/dev/null)"
+expect_contains "FD-d2 …and the verb says proof-add regression refuses it" "the tree was dirty (dirty=1), so proof-add regression refuses this log" "$OUT"
 rm -f "$FD_WT/stray.txt"
 
 # ---------- AC-7.10: floor-attestation: is a removed key, refused by name whatever the record (wave-36 T35) ----------
 # Wave-28 T75 read a person's record (a head=<40-hex> dirty=0 line and a floor-attested-by: line) as the floor under
-# floor-attestation: user. Nothing reads the key now: proof-add floor refuses a config carrying it, naming the key and
+# floor-attestation: user. Nothing reads the key now: proof-add regression refuses a config carrying it, naming the key and
 # what to do, before any record is read, so each record below is refused by that one sentence. FD-t6 is the record
 # the key used to admit; with the key deleted it is still no run log (no rc= line), and is refused as one (FD-t9).
 fd_config "floor-attestation: user"
@@ -2866,61 +2866,61 @@ printf '# floor\nhead=%s dirty=0\nall good\n' "$FD_W" > "$FD_REC/fd-att-noby.md"
 printf '# floor\nhead=%s dirty=0\nfloor-attested-by: Dana yesterday\n' "$FD_W" > "$FD_REC/fd-att-short.md"
 FD_KEY="carries floor-attestation: user, a key bionic removed"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-nohead.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-nohead.md
 s42_unchanged "FD-t1 AC-7.10 an attestation lacking the head line, under the removed key" 1 "$PFD"
 expect_contains "FD-t1b …refused naming the key" "$FD_KEY" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-other.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-other.md
 s42_unchanged "FD-t2 …one naming another head" 1 "$PFD"
 expect_contains "FD-t2b …refused naming the key, before the head is read" "$FD_KEY" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-noby.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-noby.md
 s42_unchanged "FD-t3 …one lacking floor-attested-by:" 1 "$PFD"
 expect_contains "FD-t3b …refused naming the key" "$FD_KEY" "$OUT"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att-short.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att-short.md
 s42_unchanged "FD-t4 …and one whose floor-attested-by: says fewer than three words" 1 "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
-s42_unchanged "FD-t5 …and while the key stands a green floor-run log is refused too" 1 "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
+s42_unchanged "FD-t5 …and while the key stands a green regression-run log is refused too" 1 "$PFD"
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-t6 AC-7.10 the record the key admitted until wave-36 T35 (both lines, the working head)" 1 "$PFD"
 expect_contains "FD-t7 …refused by the key's sentence, saying what to do" \
-  "Delete the line, then cite the regression's log with proof-add floor" "$OUT"
+  "Delete the line, then cite the regression's log with proof-add regression" "$OUT"
 fd_config "floor-attestation: yes"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-t8 floor-attestation: yes is refused, any value" 1 "$PFD"
 expect_contains "FD-t8b …naming the key and its value" "carries floor-attestation: yes, a key bionic removed" "$OUT"
 fd_config "release-check: true"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-t9 …and with the key deleted the record is no run log: refused" 1 "$PFD"
 expect_contains "FD-t9b …as a log that does not say how its run ended" "fd-att.md does not end with an rc=<n> line" "$OUT"
 
-# ---------- both keys: the removed one is refused first; neither key: the floor-run log keeps no privilege ----------
-fd_config "floor: bash $FD_STUB --all" "floor-attestation: user"
+# ---------- both keys: the removed one is refused first; neither key: the regression-run log keeps no privilege ----------
+fd_config "regression-command: bash $FD_STUB --all" "floor-attestation: user"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
 s42_unchanged "FD-b1 with both keys the declared floor's green log is refused (inverted by wave-36 T35)" 1 "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-att.md
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-att.md
 s42_unchanged "FD-b2 …and so is the attestation" 1 "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-red.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-red.log
 expect_eq "FD-b3 …and a red declared log" "1" "$RC"
 expect_contains "FD-b3b …each by the key's sentence, before any log is read" "$FD_KEY" "$OUT"
 FD_RUNS_WAS="$(fd_runs)"
-poke "$RFD" floor-run
-expect_eq "FD-b4 …and floor-run refuses with both keys, the declared command not run (exit 1)" "1|$FD_RUNS_WAS" "$RC|$(fd_runs)"
+poke "$RFD" regression-run
+expect_eq "FD-b4 …and regression-run refuses with both keys, the declared command not run (exit 1)" "1|$FD_RUNS_WAS" "$RC|$(fd_runs)"
 expect_contains "FD-b4b …naming the key" "$FD_KEY" "$OUT"
 fd_config "release-check: true"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor "record/wave-01-fixture/floor-run-$FD_W.log"
-expect_eq "FD-c1 AC-7.10 with neither key the floor-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
+poke "$RFD" proof-add regression "record/wave-01-fixture/regression-run-$FD_W.log"
+expect_eq "FD-c1 AC-7.10 with neither key the regression-run log is accepted all the same: the key gives it no privilege (exit 0)" "0" "$RC"
 expect_regex "FD-c1b …the proof line naming it at the working head" \
-  "^proved: kind=floor head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
+  "^proved: kind=regression head=${FD_W} at=[^ ]+ evidence=record/wave-01-fixture/regression-run-${FD_W}\.log run=[0-9TZ:-]+ head=${FD_W} rc=0$" "$(fd_proved)"
 s42_snap "$RFD" "$PFD"
-poke "$RFD" proof-add floor record/wave-01-fixture/fd-runner.log
+poke "$RFD" proof-add regression record/wave-01-fixture/fd-runner.log
 s42_unchanged "FD-c2 …and the old runner's log, green at the head, with no closing rc= line, is refused" 1 "$PFD"
 expect_contains "FD-c2b …by its close, no roster counted (was '3 passed of 0 suites')" "fd-runner.log does not end with an rc=<n> line" "$OUT"
 
 # ---------- the mutants: doctored copies of the judge, never the tracked file ----------
 FD_MUT="$(mktemp -d "$TMPROOT/fd-mut.XXXXXX")"
-fd_config "floor: bash $FD_STUB --all"
+fd_config "regression-command: bash $FD_STUB --all"
 expect_eq "FD-m0 the judge itself, positive: the green declared log attests the working head" "0|$FD_W" "$(fd_attest "$S46_LIB" "$FD_LOG")"
 expect_eq "FD-m0b …a red one is refused" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-red.log" | cut -d'|' -f1)"
 expect_eq "FD-m0c …and an attestation record is refused (no rc= line)" "1" "$(fd_attest "$S46_LIB" "$FD_REC/fd-att.md" | cut -d'|' -f1)"
@@ -2938,7 +2938,7 @@ for _fdm in no-key no-rc; do
 done
 expect_eq "FD-m1 the removed key's refusal dropped: the mutant admits the green log under floor-attestation:, so FD-t5 goes red under it" \
   "0|$FD_W" "$(fd_attest "$FD_MUT/no-key.sh" "$FD_LOG")"
-fd_config "floor: bash $FD_STUB --all"
+fd_config "regression-command: bash $FD_STUB --all"
 expect_eq "FD-m2 the rc test dropped: the mutant admits the rc=1 log, so FD-r3 goes red under it" "0|$FD_W" "$(fd_attest "$FD_MUT/no-rc.sh" "$FD_REC/fd-red.log")"
 rm -rf "$FD_MUT"
 POKE_BOUND="$FD_BOUND_WAS"
@@ -2948,14 +2948,14 @@ POKE_BOUND="$FD_BOUND_WAS"
 section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirty=0 and ends rc=0, one or several on a line, with no roster and no key (wave-36 T35; REQ-7 AC-7.10; D13; the synth-vision filing)"
 # ============================================================
 #
-# THE ONE GRAMMAR (lib/proof.sh `_proof_floor_log`, what `proof-add floor` runs on each log it is handed):
+# THE ONE GRAMMAR (lib/proof.sh `_proof_floor_log`, what `proof-add regression` runs on each log it is handed):
 #   header  the log's first line that opens `head=`, read as `head=<40-hex> dirty=<n>`, <n> 0; lines before it (a
 #           runner's preamble) are not read. Its head is the working head, or an ancestor `_proof_floor_walk` proves
 #           every later commit from.
 #   close   the log's last non-blank line, `rc=<n>`; rc=0 is a pass. A red run is refused naming its rc, unless the
 #           runner's own Failed: block names its reds: then it is ADR-054's red candidate (§FLOOR-OWED, evidence gate).
 # Nothing between the two lines is read: no tests/*.test.sh roster is counted, no Gating: verdict is asked for, and no
-# .bionic/config.yaml key is needed. `proof-add floor <log> <log>…` reads every log, each held to the grammar, and the
+# .bionic/config.yaml key is needed. `proof-add regression <log> <log>…` reads every log, each held to the grammar, and the
 # proof names the head they share, its evidence= the logs comma-joined. `floor-attestation:` is a removed key, refused
 # by name. Fails when: the hand-run log is refused as not a tests/run.sh log, or `current 8` says the floor is absent.
 #
@@ -2964,7 +2964,7 @@ section "§FLOOR-ANY: the floor is a fact: any log that opens head=<40-hex> dirt
 # then H, an empty commit (the working head; A is its ancestor with no change since, so a log at A stands for H). Every
 # other fact `current 8` owes is planted at H by the product's writer (§CUR8-sev's way). The logs are written as a
 # project's own runner leaves them; the tests/run.sh one copies that runner's real preamble before its stamp. Each log
-# that is to be accepted is written by tests/lib/floor-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
+# that is to be accepted is written by tests/lib/regression-fixture.sh with its run line (wave-37 T4; D7, ADR-057): a log
 # the machine recorded no run of is refused (§RUNLINE); the grammar's refusals below are read before any run line.
 FA_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 FA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
@@ -2991,21 +2991,21 @@ fa_fact() {  # <question> <scope> -> a passing reading of <question> planted at 
 }
 fa_cur() { sed "s/^current: .*/current: $1/" "$PFA" > "$PFA.tmp" && mv "$PFA.tmp" "$PFA"; }
 fa_now() { sed -n 's/^current: //p' "$PFA"; }
-fa_add() { s42_snap "$RFA" "$PFA"; poke "$RFA" proof-add floor "$@"; }  # <log>... -> proof-add floor, the plan snapshotted first
-fa_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFA" | tail -n 1; }
+fa_add() { s42_snap "$RFA" "$PFA"; poke "$RFA" proof-add regression "$@"; }  # <log>... -> proof-add regression, the plan snapshotted first
+fa_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFA" | tail -n 1; }
 fa_keys() {  # -> "<floor:>|<floor-attestation:>", read by the product's config reader
-  bash -c '. "$1"; printf "%s|%s" "$(config_value "$2" floor "")" "$(config_value "$2" floor-attestation "")"' _ "$FA_ROOTS" "$RFA" 2>/dev/null
+  bash -c '. "$1"; printf "%s|%s" "$(config_value "$2" regression-command "")" "$(config_value "$2" floor-attestation "")"' _ "$FA_ROOTS" "$RFA" 2>/dev/null
 }
 fa_fact evidence piece; fa_fact structure piece; fa_fact structure whole; fa_fact adversarial piece; fa_fact adversarial whole
 # The logs, as a project's own runner leaves them: `{ echo "head=… dirty=…"; pnpm ci:local; echo "rc=$?"; } > <log>`.
-printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
-printf '$ npx playwright test\n38 passed (2.1m)\n' | floor_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
+printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFA" "$FA_REC/ci.log" "$FA_H" 0 0
+printf '$ npx playwright test\n38 passed (2.1m)\n' | regression_fixture "$PFA" "$FA_REC/e2e.log" "$FA_H" 0 0
 printf 'head=%s dirty=0\n$ npx playwright test\n36 passed, 2 failed (2.3m)\nrc=1\n' "$FA_H" > "$FA_REC/e2e-red.log"
 printf 'head=%s dirty=0\n$ pnpm ci:local\n412 passed\n' "$FA_H" > "$FA_REC/ci-open.log"
 printf 'head=%s dirty=3\n$ pnpm ci:local\n412 passed\nrc=0\n' "$FA_H" > "$FA_REC/ci-dirty.log"
-printf '$ pnpm ci:local\n412 passed\n' | floor_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
+printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFA" "$FA_REC/ci-at-a.log" "$FA_A" 0 0
 printf 'Roots: hooks=/h skills=/s scripts=/x\n\nx.test.sh ✓ PASS\n──────────────\nGating: 40 passed, 0 failed\nenv: os=darwin\nNo gating suite failed\n' \
-  | floor_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
+  | regression_fixture --pre $'rung=7/7 band=clear samples=4\nenv: os=darwin bash=3.2.57(1)-release locale=en_US.UTF-8 path=/pin' \
     "$PFA" "$FA_REC/run-sh.log" "$FA_H" 0 0
 
 expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H one commit past A that changes no file" \
@@ -3014,16 +3014,16 @@ expect_regex "FA-0 precondition: A and the working head H are 40-hex commits, H 
 expect_eq "FA-0b precondition: the working head holds no tests/ directory at all" "0" \
   "$(git -C "$FA_WT" ls-tree --name-only "$FA_H" tests 2>/dev/null | wc -l | tr -d ' ')"
 FA_CFG_WAS="$(cat "$FA_CFG" 2>/dev/null)"
-printf 'floor: x\nfloor-attestation: y\n' >> "$FA_CFG"
+printf 'regression-command: x\nfloor-attestation: y\n' >> "$FA_CFG"
 expect_eq "FA-0c precondition: the config reader reads both keys when a config carries them (positive)" "x|y" "$(fa_keys)"
 if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -f "$FA_CFG"; fi
 expect_eq "FA-0d precondition: …and this project's config carries neither" "|" "$(fa_keys)"
 expect_eq "FA-0e precondition: the plan carries the five readings at H and no floor proof" "5|0" \
-  "$(/usr/bin/grep -c "^proved: kind=review head=$FA_H " "$PFA" | tr -d ' ')|$(/usr/bin/grep -c '^proved: kind=floor ' "$PFA" | tr -d ' ')"
+  "$(/usr/bin/grep -c "^proved: kind=review head=$FA_H " "$PFA" | tr -d ' ')|$(/usr/bin/grep -c '^proved: kind=regression ' "$PFA" | tr -d ' ')"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-0f control: every other fact planted at H and no floor proof: current 8 is refused (exit 1), the plan at 7" "1|7" "$RC|$(fa_now)"
-expect_contains "FA-0g …naming the absent floor, and nothing else, as the fact it lacks" "$(printf '(facts_state):\nfloor\tabsent\npoker: ')" "$OUT"
+expect_contains "FA-0g …naming the absent floor, and nothing else, as the fact it lacks" "$(printf '(facts_state):\nregression\tabsent\npoker: ')" "$OUT"
 fa_cur 4
 
 # ---------- refused: each log by the line it lacks ----------
@@ -3045,11 +3045,11 @@ expect_contains "FA-r5b …refused naming each log and the head it read" \
   "the logs read different heads: record/wave-01-fixture/ci.log read ${FA_H:0:12}, record/wave-01-fixture/ci-at-a.log read ${FA_A:0:12}" "$OUT"
 printf 'floor-attestation: user\n' >> "$FA_CFG"
 fa_add record/wave-01-fixture/ci.log
-s42_unchanged "FA-r6 AC-7.10 floor-attestation: user in the config: proof-add floor of a green log" 1 "$PFA"
+s42_unchanged "FA-r6 AC-7.10 floor-attestation: user in the config: proof-add regression of a green log" 1 "$PFA"
 expect_contains "FA-r6b …refused naming the removed key" "carries floor-attestation: user, a key bionic removed" "$OUT"
-expect_contains "FA-r6c …and what to do" "Delete the line, then cite the regression's log with proof-add floor" "$OUT"
-poke "$RFA" floor-run
-expect_eq "FA-r7 …and floor-run refuses it too (exit 1)" "1" "$RC"
+expect_contains "FA-r6c …and what to do" "Delete the line, then cite the regression's log with proof-add regression" "$OUT"
+poke "$RFA" regression-run
+expect_eq "FA-r7 …and regression-run refuses it too (exit 1)" "1" "$RC"
 expect_contains "FA-r7b …naming the key before it looks for a command" "carries floor-attestation: user, a key bionic removed" "$OUT"
 expect_contains "FA-r7c …and saying nothing was run" "Nothing was run." "$OUT"
 if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -f "$FA_CFG"; fi
@@ -3058,21 +3058,21 @@ if [ -n "$FA_CFG_WAS" ]; then printf '%s\n' "$FA_CFG_WAS" > "$FA_CFG"; else rm -
 fa_add record/wave-01-fixture/run-sh.log
 expect_eq "FA-a1 AC-7.10 a tests/run.sh log (its preamble before the stamp, its Gating: verdict between) is still accepted, no roster counted (exit 0)" "0" "$RC"
 expect_regex "FA-a1b …the proof line naming it at H" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/run-sh\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci-at-a.log
 expect_eq "FA-a2 a hand-run log at A, an ancestor with no change since, is accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a2b …the proof naming A, the head the run read" \
-  "^proved: kind=floor head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_A} at=[^ ]+ evidence=record/wave-01-fixture/ci-at-a\.log run=[^ ]+ head=${FA_A} rc=0$" "$(fa_proved)"
 fa_add record/wave-01-fixture/ci.log record/wave-01-fixture/e2e.log
 expect_eq "FA-a3 AC-7.10 two logs on one line, both green at H: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a3b …one proof line naming the head they share and both logs" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log,record/wave-01-fixture/e2e\.log run=[^ ,]+,[^ ,]+ head=${FA_H} rc=0,0$" "$(fa_proved)"
 expect_contains "FA-a3c …and the verb says so" \
-  "proof-add — kind=floor head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
+  "proof-add — kind=regression head=$FA_H evidence=record/wave-01-fixture/ci.log,record/wave-01-fixture/e2e.log" "$OUT"
 fa_add record/wave-01-fixture/ci.log
 expect_eq "FA-a4 AC-7.10 the hand-run log alone, no roster and no key: accepted (exit 0)" "0" "$RC"
 expect_regex "FA-a4b …the proof line naming it at H, nothing owed" \
-  "^proved: kind=floor head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
+  "^proved: kind=regression head=${FA_H} at=[^ ]+ evidence=record/wave-01-fixture/ci\.log run=[^ ]+ head=${FA_H} rc=0$" "$(fa_proved)"
 fa_cur 7
 poke "$RFA" current 8
 expect_eq "FA-c1 AC-7.10 current 8 passes on that proof (exit 0, the plan at 8)" "0|8" "$RC|$(fa_now)"
@@ -3759,27 +3759,27 @@ if [ "$PV7_CCD_WAS" = __unset__ ]; then unset CLAUDE_CONFIG_DIR; else export CLA
 POKE_BOUND="$PV7_BOUND_WAS"
 
 # ============================================================
-section "§HANDOFF: handoff rewrites ## Handoff in place from the plan and the machine: heads, open rows, live agents, last proof and date -u; the human lines are carried (wave-30 T15; REQ-7 AC-7.2; D11)"
+section "§HANDOFF: handoff writes record/<wave>/handoff.md from the plan and the machine — heads, open rows, live writers, last proof, written: — and the plan's ## Handoff is one pointer line; the human lines are carried in the file (wave-30 T15; REQ-7 AC-7.2; D11; restated wave-38 T12, D23)"
 # ============================================================
 #
-#   handoff      the bound plan's `## Handoff` section is rewritten in place (created before `## Not Doing` when the
-#                plan has none). `written: <date -u>` is its first line; then the five machine facts: the heads of the
-#                working and integration branches; the open `## Tasks` rows (active, or pending with a worktree) and
-#                the last landed row; the roster's open rows with the run state the tick prints; the newest proof line;
-#                then five human lines carried verbatim from the old section, or a stub when it had none.
+#   handoff      writes the handoff file (record/<wave>/handoff.md by default) and rewrites the bound plan's `## Handoff`
+#                to the heading and one line `handoff: <path> written <local time>` (created before `## Not Doing` when
+#                the plan has none). The file carries `written: <date -u>`, the heads of the working and integration
+#                branches, the open `## Tasks` rows (active, or pending with a worktree), the last landed row, the live
+#                writers with the run state the tick prints, the newest proof line, and five human lines carried
+#                verbatim from the previous file, or a stub when it had none. tests/handoff-file.test.sh owns the
+#                file's grammar; this section keeps the facts §HANDOFF has always pinned, read from the file.
 #
 # It takes the plan transaction every plan verb takes (copy, dry commit through the real gate, checksum, swap). REFUSED
-# (1), the plan byte-identical: a plan with no ## Tasks or no ## SDLC State. An operand is the usage error (2).
+# (1), the plan byte-identical: a plan with no ## Tasks or no ## SDLC State. An operand that is no path under the docs
+# root is refused (2).
 # FIXTURE FIDELITY: §42's repository and plan writer (a plan the real gate admits) at current: 4, given the frontmatter
 # branch keys over real branches with real commits, a landed line and a proof line in ## SDLC State in the shapes
 # their writers use, a second active row and a pending row with a worktree, and roster rows from the production writer
-# (`roster_row_fixture`); the real verb; the evidence is the plan's own bytes read back by section.
+# (`roster_row_fixture`); the real verb; the evidence is the file's own bytes and the plan's section read back.
 HO_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 ho_body() {  # <plan> -> the lines of ## Handoff, the heading excluded
   awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next } h { print }' "$1"
-}
-ho_written() {  # <plan> -> the first non-blank line of ## Handoff
-  ho_body "$1" | awk 'NF { print; exit }'
 }
 ho_epoch() {  # <ISO-UTC> -> epoch seconds
   date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null || date -u -d "$1" +%s
@@ -3792,11 +3792,12 @@ git -C "$RHO" branch -f wave/01-fixture HEAD
 HO_INT="$(git -C "$RHO" rev-parse trunk)"
 HO_WORK="$(git -C "$RHO" rev-parse wave/01-fixture)"
 PHO="$(s42_plan "$RHO" 4)"
+HO_FILE="$RHO/.bionic/docs/record/wave-01-fixture/handoff.md"
 HO_LANDED="1111111111111111111111111111111111111111"
 HO_LANDED2="2222222222222222222222222222222222222222"
 awk -v l1="$HO_LANDED" -v l2="$HO_LANDED2" -v w="$HO_WORK" '
   NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next }
-  /^approved-by:/ { print; print "proved: kind=floor head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"
+  /^approved-by:/ { print; print "proved: kind=regression head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"
                     print "proved: kind=review head=" w " at=2026-10-08T12:30:00Z evidence=record/last-review.md"; next }
   /^- T5: pending dispatch/ { print "- T4: landed " l2 " 2026-10-08T10:30:00Z"; print "- T3: landed " l1 " 2026-10-08T09:00:00Z"; print; next }
   /^\| T2 \| 4 \| build \|/ { sub(/\| implementor \|/, "| w-T2 |"); print; print "| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | abc1234 | active |"
@@ -3810,21 +3811,24 @@ s42_snap "$RHO" "$PHO"
 s34_gate "$RHO"
 expect_eq "HO-0 precondition: the fixture plan (branch keys, landed, proof, active and pending rows, no Handoff, a Not Doing) is admitted by the real gate" "0" "$GATE_RC"
 expect_eq "HO-0b …the section extractor is empty before the first run (positive control: HO-1b reads it non-empty)" "" "$(ho_body "$PHO")"
-expect_eq "HO-0c …both branch heads resolve and differ (the heads the section must carry)" "1" "$([ -n "$HO_INT" ] && [ -n "$HO_WORK" ] && [ "$HO_INT" != "$HO_WORK" ] && echo 1 || echo 0)"
+expect_eq "HO-0c …both branch heads resolve and differ (the heads the file must carry)" "1" "$([ -n "$HO_INT" ] && [ -n "$HO_WORK" ] && [ "$HO_INT" != "$HO_WORK" ] && echo 1 || echo 0)"
 
 HO_T0="$(date -u +%s)"
 poke "$RHO" handoff
 HO_T1="$(date -u +%s)"
 expect_eq "HO-1 handoff exits 0" "0" "$RC"
-HO_BODY="$(ho_body "$PHO")"
-expect_true "HO-1b …a plan with no ## Handoff gains one (the extractor now reads it non-empty)" test -n "$HO_BODY"
+HO_PTR="$(ho_body "$PHO" | grep .)"
+expect_true "HO-1b …a plan with no ## Handoff gains one (the extractor now reads it non-empty)" test -n "$HO_PTR"
 expect_eq "HO-1c …placed immediately before ## Not Doing" "## Not Doing" "$(awk '/^## Handoff[ \t]*$/ { f = 1; next } f && /^## / { print; exit }' "$PHO")"
-HO_FIRST="$(ho_written "$PHO")"
+expect_contains "HO-1d …and the section is the one pointer line to the file" "handoff: .bionic/docs/record/wave-01-fixture/handoff.md written " "$HO_PTR"
+expect_eq "HO-1e …nothing else in it" "1" "$(printf '%s\n' "$HO_PTR" | grep -c .)"
+HO_BODY="$(cat "$HO_FILE" 2>/dev/null)"
+HO_FIRST="$(awk 'index($0, "written: ") == 1 { print; exit }' "$HO_FILE" 2>/dev/null)"
 case "$HO_FIRST" in
   'written: '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) HO_AT="${HO_FIRST#written: }" ;;
   *) HO_AT="" ;;
 esac
-expect_true "HO-2 the section's first line is written: <ISO-UTC> ($HO_FIRST)" test -n "$HO_AT"
+expect_true "HO-2 the file's written: line is <ISO-UTC> ($HO_FIRST)" test -n "$HO_AT"
 HO_E="$([ -n "$HO_AT" ] && ho_epoch "$HO_AT" || echo 0)"
 expect_eq "HO-2b …and it is within 60 s of the clock around the run" "1" "$([ "$HO_E" -ge $((HO_T0 - 60)) ] && [ "$HO_E" -le $((HO_T1 + 60)) ] && echo 1 || echo 0)"
 expect_contains "HO-3 the working branch and its head" "wave/01-fixture @ $HO_WORK" "$HO_BODY"
@@ -3835,31 +3839,31 @@ expect_contains "HO-4c …a pending row that has a worktree" "T6 · — · .work
 expect_absent "HO-4d …but not a pending row with none (T5)" "T5 ·" "$HO_BODY"
 expect_absent "HO-4e …nor a landed row (T1)" "T1 ·" "$HO_BODY"
 expect_contains "HO-5 the last landed row and its commit (by its time, not its place)" "T4 $HO_LANDED2 2026-10-08T10:30:00Z" "$HO_BODY"
-expect_contains "HO-6 the one live agent and the state the tick prints" "w-T2 · FINISHED rc=0 run=w-T2-x.test.sh" "$HO_BODY"
+expect_contains "HO-6 the one live writer, its tree and the state the tick prints" "w-T2 · 01-T2 · FINISHED rc=0 run=w-T2-x.test.sh" "$HO_BODY"
 expect_contains "HO-7 the last proof line (the newest, any kind)" "kind=review head=$HO_WORK at=2026-10-08T12:30:00Z" "$HO_BODY"
 expect_absent "HO-7b …and not the older one" "old-floor" "$HO_BODY"
-expect_contains "HO-8 a stub for each human line the old section did not have" "- resume instruction: (to fill)" "$HO_BODY"
-expect_eq "HO-8b …five of them" "5" "$(printf '%s\n' "$HO_BODY" | /usr/bin/grep -c -E '^- (decisions approved this session|tried and rejected|surprises|open blockers|resume instruction):')"
-expect_contains "HO-9 it says what it did" "handoff — ## Handoff rewritten at $HO_AT (3 open rows, 1 live agents); written to $(cd "${PHO%/*}" && pwd -P)/${PHO##*/}, dry-committed first." "$OUT"
+expect_contains "HO-8 a stub for each human line the previous file did not have" "risks: (to fill)" "$HO_BODY"
+expect_eq "HO-8b …five of them" "5" "$(printf '%s\n' "$HO_BODY" | /usr/bin/grep -c -E '^(mid-flight|order|rulings|lessons|risks): \(to fill\)$')"
+expect_contains "HO-9 it says what it did" "handoff — written to $(cd "${HO_FILE%/*}" 2>/dev/null && pwd -P)/handoff.md at $HO_AT (3 open rows, 1 live writers; safe to clear); the plan's ## Handoff points to it, dry-committed first." "$OUT"
 s34_gate "$RHO"
-expect_eq "HO-9b the plan with the section is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "HO-9b the plan with the pointer is admitted by the real gate" "0" "$GATE_RC"
 
-# A second run carries a human line edited by hand, refreshes written:, and does not grow the section.
-sed 's/^- surprises: .*/- surprises: the fixture was edited by hand\n  and it runs over two lines/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
-sed 's/^- resume instruction: .*/- resume instruction: run T6 next/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
+# A second run carries a human line edited by hand in the file, refreshes written:, and does not grow the section.
+sed 's/^lessons: .*/lessons: the fixture was edited by hand\n  and it runs over two lines/' "$HO_FILE" > "$HO_FILE.ed" && mv "$HO_FILE.ed" "$HO_FILE"
+sed 's/^order: .*/order: run T6 next/' "$HO_FILE" > "$HO_FILE.ed" && mv "$HO_FILE.ed" "$HO_FILE"
 s42_snap "$RHO" "$PHO"
 HO_N1="$(ho_body "$PHO" | wc -l | tr -d ' ')"
 sleep 2
 poke "$RHO" handoff
 expect_eq "HO-10 a second handoff exits 0" "0" "$RC"
-HO_BODY2="$(ho_body "$PHO")"
-expect_contains "HO-10b …keeps the hand-edited line" "- surprises: the fixture was edited by hand" "$HO_BODY2"
+HO_BODY2="$(cat "$HO_FILE" 2>/dev/null)"
+expect_contains "HO-10b …keeps the hand-edited line" "lessons: the fixture was edited by hand" "$HO_BODY2"
 expect_contains "HO-10c …and its continuation line" "  and it runs over two lines" "$HO_BODY2"
-expect_contains "HO-10d …and the other edited line" "- resume instruction: run T6 next" "$HO_BODY2"
-expect_absent "HO-10e …the stub it replaced is gone" "- resume instruction: (to fill)" "$HO_BODY2"
-HO_AT2="$(ho_written "$PHO")"; HO_AT2="${HO_AT2#written: }"
+expect_contains "HO-10d …and the other edited line" "order: run T6 next" "$HO_BODY2"
+expect_absent "HO-10e …the stub it replaced is gone" "order: (to fill)" "$HO_BODY2"
+HO_AT2="$(awk 'index($0, "written: ") == 1 { sub(/^written: /, ""); print; exit }' "$HO_FILE" 2>/dev/null)"
 expect_eq "HO-10f …written: is refreshed (it differs from the first run's)" "1" "$([ -n "$HO_AT2" ] && [ "$HO_AT2" != "$HO_AT" ] && echo 1 || echo 0)"
-expect_eq "HO-10g …the section is the size it was, continuation line included (rewritten, never appended)" "$HO_N1" "$(ho_body "$PHO" | wc -l | tr -d ' ')"
+expect_eq "HO-10g …the plan's section is the size it was (rewritten, never appended)" "$HO_N1" "$(ho_body "$PHO" | wc -l | tr -d ' ')"
 expect_eq "HO-10h …one ## Handoff heading in the plan" "1" "$(/usr/bin/grep -c '^## Handoff' "$PHO")"
 expect_eq "HO-10i …and the rest of the plan is as it was (outside ## Handoff, cmp of the two reads)" \
   "$(awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/) } !h { print }' "$TMPROOT/s42-before")" \
@@ -3871,11 +3875,11 @@ roster_row_fixture session="$SID" name=w-T3 agent_id=a-w-T3 subagent_type=implem
   run_log="$HO_RD/w-T3-y.test.sh.log" run_pid=999999 run_cmd='tests/run.sh --only y.test.sh' >> "$(roster_of "$RHO")"
 roster_row_fixture session="$SID" name=w-T6 agent_id=a-w-T6 subagent_type=implementor >> "$(roster_of "$RHO")"
 poke "$RHO" handoff
-HO_BODY3="$(ho_body "$PHO")"
-expect_eq "HO-11 three live agents: handoff exits 0" "0" "$RC"
-expect_contains "HO-11b …a run whose pid is gone and wrote no end reads LOST" "w-T3 · LOST last-written=" "$HO_BODY3"
-expect_contains "HO-11c …a row with no run record reads no run" "w-T6 · no run" "$HO_BODY3"
-expect_contains "HO-11d …and the verb counts them" "3 live agents" "$OUT"
+HO_BODY3="$(cat "$HO_FILE" 2>/dev/null)"
+expect_eq "HO-11 three live writers: handoff exits 0" "0" "$RC"
+expect_contains "HO-11b …a run whose pid is gone and wrote no end reads LOST" "w-T3 · — · LOST last-written=" "$HO_BODY3"
+expect_contains "HO-11c …a row with no run record reads no run" "w-T6 · — · no run" "$HO_BODY3"
+expect_contains "HO-11d …and the verb counts them" "3 live writers" "$OUT"
 
 # Refusals: the plan stays byte-identical.
 sed 's/^## Tasks$/## Rows/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
@@ -3891,7 +3895,7 @@ expect_contains "HO-12d …saying so" "no ## SDLC State" "$OUT"
 sed 's/^## State$/## SDLC State/' "$PHO" > "$PHO.ed" && mv "$PHO.ed" "$PHO"
 s42_snap "$RHO" "$PHO"
 poke "$RHO" handoff now
-expect_eq "HO-13 an operand is the usage error" "2" "$RC"
+expect_eq "HO-13 an operand that is no path under the docs root is refused" "2" "$RC"
 expect_true "HO-13b …and the plan is untouched (cmp)" cmp -s "$TMPROOT/s42-before" "$PHO"
 POKE_BOUND="$HO_BOUND_WAS"
 
@@ -4457,7 +4461,7 @@ expect_contains "FR-1c control: a verb that stays answers its own usage, not unk
   "2|poker: finding-move takes" "$RC|$OUT"
 expect_absent "FR-1d …and that answer does not call it unknown" "unknown verb" "$OUT"
 FR_H="$(git -C "$SEV_WT" rev-parse HEAD)"
-sev_put "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-08T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$FR_H")"
+sev_put "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-08T12:00:00Z record/wave-01-fixture/floor.log' _ "$SEV_LIB" "$FR_H")"
 SEV_C1="$FR_H"
 sev_fact review evidence piece; sev_fact review structure piece; sev_fact review structure whole; sev_fact review adversarial whole
 sev_rec k-final flag "findings: 1" "finding: 1 S3 off - a message the reader rated" "unsure: 1 which shells print it"
@@ -4969,7 +4973,7 @@ ih_log() {  # <file> <passed> <failed> <red suite>... -> a whole-run log at F in
   { printf 'head=%s dirty=0\n' "$IH_F"; printf 'Gating: %s passed, %s failed\nFailed:\n' "$p" "$m"
     for x in "$@"; do printf '    - %s\n' "$x"; done; } > "$f"
 }
-ih_prove() {  # <log file> -> a floor proof at F as proof-add floor writes it (its reds from the log), committed
+ih_prove() {  # <log file> -> a floor proof at F as proof-add regression writes it (its reds from the log), committed
   bash -c '. "$1" && proof_add_line "$2" "$(proof_floor_line "$3" 2026-10-12T04:00:00Z "record/wave-01-fixture/$4" "$(proof_floor_owed "$5/$4")")"' \
     _ "$S46_LIB" "$PIH" "$IH_F" "$1" "$IH_REC" > "$PIH.n" && mv "$PIH.n" "$PIH"
   s42_snap "$RIH" "$PIH"
@@ -5003,7 +5007,7 @@ expect_contains "IH-4b …refused as a regression, not debt" "regression, not de
 expect_eq "IH-4c …and b stays owed" "owed	b.test.sh" "$(ih_state)"
 poke "$RIH" proof-add inherited c.test.sh
 s42_unchanged "IH-5 proof-add inherited c.test.sh, not red in the floor's whole run" 1 "$PIH"
-expect_contains "IH-5b …refused, naming the run it is not red in" "c.test.sh is not red in the floor's whole run" "$OUT"
+expect_contains "IH-5b …refused, naming the run it is not red in" "c.test.sh is not red in the regression's whole run" "$OUT"
 POKE_BOUND="$IH_BOUND_WAS"
 
 # ============================================================
@@ -5033,7 +5037,7 @@ C7_B="$(git -C "$R7" rev-parse HEAD)"
 C7_C="$(s57_commit "$R7" lib/x.sh 'C: a code change after the floor')"
 P7="$R7/.bionic/docs/plans/wave-x.plan.md"
 c7_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$C7_LIB" "$@"; }
-c7_floor() {  # <head> [<owed>] -> a floor proof at <head>, as proof-add floor writes it
+c7_floor() {  # <head> [<owed>] -> a floor proof at <head>, as proof-add regression writes it
   bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w35/floor.log "${3:-}"' _ "$C7_LIB" "$1" "${2:-}"
 }
 c7_reads() {  # <head> -> the five readings a double wave plan is dealt, each passing, at <head>
@@ -5063,7 +5067,7 @@ c7_plan() {  # <current> <working-branch> <proof lines> -> P7, bound to this ses
 }
 c7_judge() {  # -> the floor line facts_state prints for P7 at the head the working branch names
   bash -c '. "$1/run.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$C7_LIB" "$P7" "$(git -C "$R7" rev-parse --verify -q wave/01-fixture)" 2>/dev/null \
-    | awk -F'\t' '$1 == "floor"'
+    | awk -F'\t' '$1 == "regression"'
 }
 c7_unchanged() {  # <label> -> refused (exit 1) and the plan byte for byte as it was
   expect_eq "$1 — refused (exit 1)" "1" "$RC"
@@ -5075,7 +5079,7 @@ c7_plan 6 wave/01-fixture "$(c7_floor "$C7_C" a.test.sh)
 $(c7_reads "$C7_C")"
 C7_OWED="$(c7_judge)"
 expect_eq "C7-0 precondition: the judge reads the floor owed, naming a.test.sh (its line, from the library)" \
-  "$(printf 'floor\towed\ta.test.sh')" "$C7_OWED"
+  "$(printf 'regression\towed\ta.test.sh')" "$C7_OWED"
 poke "$R7" current 7
 c7_unchanged "C7-1 AC-1.2 current 7 with a.test.sh owed by the floor's whole run"
 expect_contains "C7-1b …in the judge's words, naming the owed suite" "$C7_OWED" "$OUT"
@@ -5086,7 +5090,7 @@ c7_plan 6 wave/01-fixture "$(c7_floor "$C7_B")
 $(c7_reads "$C7_C")"
 C7_UNC="$(c7_judge)"
 expect_regex "C7-2 precondition: the judge reads the floor uncovered from B to C, naming commit C (its line, from the library)" \
-  "^floor	uncovered	${C7_B}\\.\\.${C7_C}	.*${C7_C:0:12}" "$C7_UNC"
+  "^regression	uncovered	${C7_B}\\.\\.${C7_C}	.*${C7_C:0:12}" "$C7_UNC"
 poke "$R7" current 7
 c7_unchanged "C7-3 AC-1.2 current 7 with the floor proof at B and the head at C"
 expect_contains "C7-3b …in the judge's words, naming the range and the commit no run proves" "$C7_UNC" "$OUT"
@@ -5094,7 +5098,7 @@ expect_contains "C7-3b …in the judge's words, naming the range and the commit 
 # ---------- the floor at the head: current 7 advances ----------
 c7_plan 6 wave/01-fixture "$(c7_floor "$C7_C")
 $(c7_reads "$C7_C")"
-expect_eq "C7-4 precondition: the floor at the head reads covered" "$(printf 'floor\tcovered')" "$(c7_judge)"
+expect_eq "C7-4 precondition: the floor at the head reads covered" "$(printf 'regression\tcovered')" "$(c7_judge)"
 poke "$R7" current 7
 expect_eq "C7-5 AC-1.2 the floor and every reading at the head: current 7 is admitted (exit 0), the plan at current: 7" \
   "0|7" "$RC|$(sed -n 's/^current: //p' "$P7")"
@@ -5157,7 +5161,7 @@ bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
   facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
     | while IFS="	" read -r k q role scope; do
         case "$k" in
-          floor)  l="$(proof_line floor "$3" 2026-10-12T11:00:00Z record/floor.log)" ;;
+          regression)  l="$(proof_line regression "$3" 2026-10-12T11:00:00Z record/floor.log)" ;;
           review) l="$(proof_line review "$3" 2026-10-12T12:00:00Z "record/$q-$scope.md" "$q" w-read pass "$scope")" ;;
           *) continue ;;
         esac
@@ -5174,12 +5178,12 @@ expect_absent "TR-2b …and never waits on a checkout of the branch" "no checkou
 POKE_BOUND="$TR_BOUND_WAS"
 
 # ============================================================
-section "§FLOOR-RUN: floor-run with no floor: runs the project's tests/run.sh at the working head, held to the full-run rules, and logs a run proof-add floor accepts, red or green (wave-35 T10; REQ-1 AC-1.8; D10)"
+section "§FLOOR-RUN: regression-run with no floor: runs the project's tests/run.sh at the working head, held to the full-run rules, and logs a run proof-add regression accepts, red or green (wave-35 T10; REQ-1 AC-1.8; D10)"
 # ============================================================
-# A project whose regression is tests/run.sh had no verb to run it: `floor-run` refused with no `floor:` key and the
+# A project whose regression is tests/run.sh had no verb to run it: `regression-run` refused with no `floor:` key and the
 # whole run was a dispatch only. It now runs `tests/run.sh` in the working branch's checkout, through the gate the
-# runner asks as kind whole, and writes `record/<wave>/floor-run-<head>.log` opening `head= dirty= rc=`, whose
-# runner output `proof-add floor` judges: a red whole run is the floor's candidate, its reds owed (T9). It is the
+# runner asks as kind whole, and writes `record/<wave>/regression-run-<head>.log` opening `head= dirty= rc=`, whose
+# runner output `proof-add regression` judges: a red whole run is the floor's candidate, its reds owed (T9). It is the
 # one path a live runner is given the whole run by, so it is held to the full-run rules the dispatch wall applies:
 # `regression: no` refuses it, an open build row that writes the head refuses it, a proved head refuses it, and a
 # second whole run needs the user's `approve regression-2`.
@@ -5187,10 +5191,10 @@ section "§FLOOR-RUN: floor-run with no floor: runs the project's tests/run.sh a
 # (`head=<sha> dirty=<n>`, `Gating: <p> passed, <m> failed`, a `Failed:` block) that records where it ran, two
 # suites at the head, one of them red while a mode file says so; s42_plan's plan bound to this session, its build
 # rows landed, its working branch a linked worktree one commit ahead. No .bionic/config.yaml key names a floor.
-# fails-when: floor-run refuses a project whose regression is tests/run.sh; its log is refused by proof-add floor;
+# fails-when: regression-run refuses a project whose regression is tests/run.sh; its log is refused by proof-add regression;
 # a second whole run, a proved head, an open writer or regression: no runs the suite.
 FN_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RFN="$(make_repo floor-run-tests)"; ( cd "$RFN" && git commit -q --allow-empty -m init )
+RFN="$(make_repo regression-run-tests)"; ( cd "$RFN" && git commit -q --allow-empty -m init )
 FN_SEEN="$TMPROOT/fn-seen"; FN_MODE="$TMPROOT/fn-mode"; echo red > "$FN_MODE"
 mkdir -p "$RFN/tests"
 cat > "$RFN/tests/run.sh" <<FN_EOF
@@ -5220,7 +5224,7 @@ FN_WT="$RFN/.worktrees/01-fixture"
 FN_W="$(git -C "$FN_WT" rev-parse HEAD 2>/dev/null)"
 FN_REC="$RFN/.bionic/docs/record/wave-01-fixture"
 fn_runs() { [ -f "$FN_SEEN" ] && awk 'END { print NR + 0 }' "$FN_SEEN" || echo 0; }
-fn_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PFN" | tail -n 1; }
+fn_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PFN" | tail -n 1; }
 fn_set() {  # <awk program> -> the plan rewritten by it in place, then committed
   awk "$1" "$PFN" > "$PFN.tmp" && mv "$PFN.tmp" "$PFN"; s42_snap "$RFN" "$PFN"
 }
@@ -5232,17 +5236,17 @@ expect_eq "FN-0c precondition: the plan's build rows are landed (nothing the reg
   "$(bash -c '. "$1/run.sh" && . "$1/units.sh" && units_floor_holds "$2" ""' _ "$C7_LIB" "$PFN" 2>/dev/null)"
 
 # ---------- a dirty checkout: refused before anything runs, naming the paths; no log, no proof, no spent run (wave-35 T32; D20) ----------
-# The log a dirty run wrote counted as the first whole run (rule 4) and proof-add floor refuses it, so the re-run its
+# The log a dirty run wrote counted as the first whole run (rule 4) and proof-add regression refuses it, so the re-run its
 # own message asked for was refused as a second whole run. The dirty tree is now read before the run starts.
-# fails-when: a dirty checkout runs the suite, writes a floor-run log, or moves the plan; the refusal omits the paths,
+# fails-when: a dirty checkout runs the suite, writes a regression-run log, or moves the plan; the refusal omits the paths,
 # the count or the remedy; a clean checkout is refused (FN-1 is the positive on the same checkout).
 for FN_I in 1 2 3 4 5 6 7; do printf 'x\n' > "$FN_WT/stray$FN_I.txt"; done
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-expect_eq "FN-D1 a dirty checkout: floor-run is refused (exit 1)" "1" "$RC"
+poke "$RFN" regression-run
+expect_eq "FN-D1 a dirty checkout: regression-run is refused (exit 1)" "1" "$RC"
 s42_unchanged "FN-D1b …and the plan's proof ledger is unchanged" 1 "$PFN"
-expect_eq "FN-D1c …nothing ran, and no floor-run log of any name was written" "0|0" \
-  "$(fn_runs)|$(ls "$FN_REC"/floor-run-*.log 2>/dev/null | awk 'END { print NR + 0 }')"
+expect_eq "FN-D1c …nothing ran, and no regression-run log of any name was written" "0|0" \
+  "$(fn_runs)|$(ls "$FN_REC"/regression-run-*.log 2>/dev/null | awk 'END { print NR + 0 }')"
 expect_contains "FN-D1d …the refusal names the dirty checkout" "is dirty" "$OUT"
 expect_contains "FN-D1e …names the first five paths" "stray1.txt, ?? stray2.txt, ?? stray3.txt, ?? stray4.txt, ?? stray5.txt" "$OUT"
 expect_absent "FN-D1f …and not the sixth (FN-D1e is the positive, same output)" "stray6.txt" "$OUT"
@@ -5254,62 +5258,64 @@ expect_eq "FN-D0 the checkout is clean again (the first whole run below is spent
 
 # ---------- the first whole run, red: run, logged, recorded with its red owed ----------
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-FN_LOG="$FN_REC/floor-run-$FN_W.log"
-expect_eq "FN-1 AC-1.8 floor-run with no floor: runs tests/run.sh once, in the working branch's checkout" \
+poke "$RFN" regression-run
+FN_LOG="$FN_REC/regression-run-$FN_W.log"
+expect_eq "FN-1 AC-1.8 regression-run with no floor: runs tests/run.sh once, in the working branch's checkout" \
   "1|cwd=$(cd "$FN_WT" && pwd -P) args=" "$(fn_runs)|$(tail -n 1 "$FN_SEEN" 2>/dev/null)"
 expect_eq "FN-1b …and exits with the run's own code (1: b.test.sh red)" "1" "$RC"
 expect_eq "FN-1c …its log opens head=<working head> dirty=0, then command: tests/run.sh, and closes rc=1 (wave-36 T35: the one grammar)" \
   "head=$FN_W dirty=0|command: tests/run.sh|rc=1" "$(head -n 2 "$FN_LOG" 2>/dev/null | paste -sd'|' -)|$(tail -n 1 "$FN_LOG" 2>/dev/null)"
 expect_contains "FN-1d …and carries the runner's own report" "Gating: 1 passed, 1 failed" "$(cat "$FN_LOG" 2>/dev/null)"
-expect_contains "FN-1e …and the verb prints the proof-add floor line to run, red as it is" \
-  "proof-add floor record/wave-01-fixture/floor-run-$FN_W.log" "$OUT"
+expect_contains "FN-1e …and the verb prints the proof-add regression line to run, red as it is" \
+  "proof-add regression record/wave-01-fixture/regression-run-$FN_W.log" "$OUT"
 expect_true "FN-1f …and the plan is byte-identical: the verb runs and logs, and writes no proof (cmp)" cmp -s "$TMPROOT/s42-before" "$PFN"
-poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W.log"
-expect_eq "FN-2 AC-1.8 proof-add floor accepts floor-run's log of a red whole run (exit 0)" "0" "$RC"
+poke "$RFN" proof-add regression "record/wave-01-fixture/regression-run-$FN_W.log"
+expect_eq "FN-2 AC-1.8 proof-add regression accepts regression-run's log of a red whole run (exit 0)" "0" "$RC"
 expect_regex "FN-2b …and writes the floor proof at the working head, b.test.sh owed" \
-  "^proved: kind=floor head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/floor-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
+  "^proved: kind=regression head=${FN_W} at=[0-9TZ:-]+ evidence=record/wave-01-fixture/regression-run-${FN_W}\\.log owed=b\\.test\\.sh run=[0-9TZ:-]+ head=${FN_W} rc=1$" "$(fn_proved)"
 
 # ---------- a second whole run: refused, naming the owed suite and the approval ----------
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-s42_unchanged "FN-3 a second floor-run on the plan, its reds owed" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-3 a second regression-run on the plan, its reds owed" 1 "$PFN"
 expect_contains "FN-3b …refused as a second whole run" "a second whole run" "$OUT"
 expect_contains "FN-3c …naming the suite the first left owed" "b.test.sh" "$OUT"
 expect_contains "FN-3d …and the approval that admits one" "approve regression-2" "$OUT"
-expect_eq "FN-3e …and nothing ran, no second log written" "1|no" "$(fn_runs)|$([ -e "$FN_REC/floor-run-$FN_W-2.log" ] && echo yes || echo no)"
+expect_eq "FN-3e …and nothing ran, no second log written" "1|no" "$(fn_runs)|$([ -e "$FN_REC/regression-run-$FN_W-2.log" ] && echo yes || echo no)"
 
 # ---------- the user's approve regression-2: the second whole run, green, recorded ----------
-fn_set '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana 2026-10-12T00:00:00Z \"yes, run it again\""; d = 1 }'
+# MOVED BY WAVE-38 T2 (AC-4.5): the approval admits the one run after it, so it is stamped at the instant, after the first
+# run's proof, as the approve verb stamps it (an approval older than the newest regression proof is spent; §FN-5).
+fn_set '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana '"$(date -u +%Y-%m-%dT%H:%M:%SZ)"' \"yes, run it again\""; d = 1 }'
 echo green > "$FN_MODE"
-poke "$RFN" floor-run
+poke "$RFN" regression-run
 expect_eq "FN-4 with approved: regression-2 the second whole run runs, green (exit 0)" "0|2" "$RC|$(fn_runs)"
 expect_eq "FN-4b …its log the second at the head, opening head= dirty=0 and closing rc=0 (wave-36 T35)" "head=$FN_W dirty=0|rc=0" \
-  "$(head -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)|$(tail -n 1 "$FN_REC/floor-run-$FN_W-2.log" 2>/dev/null)"
-poke "$RFN" proof-add floor "record/wave-01-fixture/floor-run-$FN_W-2.log"
-expect_eq "FN-4c AC-1.8 proof-add floor accepts the green run's log, nothing owed" "0|0" \
+  "$(head -n 1 "$FN_REC/regression-run-$FN_W-2.log" 2>/dev/null)|$(tail -n 1 "$FN_REC/regression-run-$FN_W-2.log" 2>/dev/null)"
+poke "$RFN" proof-add regression "record/wave-01-fixture/regression-run-$FN_W-2.log"
+expect_eq "FN-4c AC-1.8 proof-add regression accepts the green run's log, nothing owed" "0|0" \
   "$RC|$(fn_proved | /usr/bin/grep -c ' owed=' | tr -d ' ')"
-expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/floor-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
+expect_regex "FN-4d …the proof line names that log" "evidence=record/wave-01-fixture/regression-run-${FN_W}-2\\.log run=[0-9TZ:-]+ head=${FN_W} rc=0$" "$(fn_proved)"
 
 # ---------- a proved head: refused, nothing run ----------
 s42_snap "$RFN" "$PFN"
-poke "$RFN" floor-run
-s42_unchanged "FN-5 floor-run once the floor covers the working head" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-5 regression-run once the floor covers the working head" 1 "$PFN"
 expect_contains "FN-5b …saying the head is already proved" "is already proved" "$OUT"
 expect_eq "FN-5c …and nothing ran" "2" "$(fn_runs)"
 
 # ---------- an open build row that writes the head: refused, naming it ----------
 fn_set '/^\| T2 \| 4 \| build \|/ { $0 = "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | active |" } { print }'
-poke "$RFN" floor-run
-s42_unchanged "FN-6 floor-run while a build row the regression waits on is open" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-6 regression-run while a build row the regression waits on is open" 1 "$PFN"
 expect_contains "FN-6b …naming the row" "T2" "$OUT"
 expect_eq "FN-6c …and nothing ran" "2" "$(fn_runs)"
 fn_set '/^\| T2 \| 4 \| build \|/ { $0 = "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |" } { print }'
 
 # ---------- regression: no: refused, naming the setting ----------
 fn_set 'NR == 1 { print; print "regression: no"; next } { print }'
-poke "$RFN" floor-run
-s42_unchanged "FN-7 floor-run on a plan that declares regression: no" 1 "$PFN"
+poke "$RFN" regression-run
+s42_unchanged "FN-7 regression-run on a plan that declares regression: no" 1 "$PFN"
 expect_contains "FN-7b …naming the setting" "regression: no" "$OUT"
 expect_eq "FN-7c …and nothing ran" "2" "$(fn_runs)"
 
@@ -5913,21 +5919,21 @@ expect_eq "LIST-2d a planted key in neither set goes red: it is the one the cens
 rm -f "$LS_PLANT"
 
 # ============================================================
-section "§RUNLINE: a floor proof cites a run the machine recorded: floor-run writes one ev=run line beside its log, and proof-add floor accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
+section "§RUNLINE: a floor proof cites a run the machine recorded: regression-run writes one ev=run line beside its log, and proof-add regression accepts a log only when a run line matches it on head, exit and hash (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
 # ============================================================
 #
-# THE RUN LINE (ADR-057): `floor-run`, right after it writes its log, appends to the plan's landing record
+# THE RUN LINE (ADR-057): `regression-run`, right after it writes its log, appends to the plan's landing record
 #   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
 # and lib/proof.sh `_proof_floor_log` keeps the floor's grammar as its first check, then requires one `ev=run` line
 # naming the log whose head=, rc= and sha256= match the file as it is now. A log no run line names is refused "no run
 # recorded for this log"; a log edited after its run is refused "the log changed since its run"; the accepted proof
 # line ends `run=<at> head=<sha> rc=<n>`, naming the run it read (AC-6.2). booked.test.sh §RUNLINE proves the other
 # writer, booked.sh's run close, parses by the same reader, and carries the mutant (a hash mismatch accepted).
-# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add floor.
+# Fails when: a hand-written log opening head=<real 40-hex> dirty=0 and ending rc=0 is accepted by proof-add regression.
 #
 # FIXTURE FIDELITY. §FLOOR-DECLARED's shape: s42_plan's bound plan, its working branch in a linked worktree one empty
 # commit past the main checkout, NO tests/ directory, and a declared `floor:` command (a script this section writes)
-# that floor-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
+# that regression-run runs for real. The hand-written log is the 59-byte forgery's shape at the REAL working head.
 RL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RRL="$(make_repo runline)"; ( cd "$RRL" && git commit -q --allow-empty -m init )
 PRL="$(s42_plan "$RRL" 4)"
@@ -5941,8 +5947,8 @@ RL_REC="$RRL/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RL_REC"
 RL_RECORD="$RL_REC/landing-proofs.log"
 RL_STUB="$TMPROOT/rl-floor.sh"
 printf '#!/bin/bash\necho "floor: 2 passed, 0 failed"\nexit 0\n' > "$RL_STUB"
-printf 'floor: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
-rl_proved() { /usr/bin/grep -E '^proved: kind=floor ' "$PRL" | tail -n 1; }
+printf 'regression-command: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+rl_proved() { /usr/bin/grep -E '^proved: kind=regression ' "$PRL" | tail -n 1; }
 rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
 rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
 expect_regex "RL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$RL_W"
@@ -5952,37 +5958,37 @@ expect_eq "RL-0b precondition: …its checkout is clean, and the record holds no
 # ---------- AC-6.1: a hand-written log at the real head, rc=0, no run line: refused ----------
 printf 'head=%s dirty=0\n$ make check\nall green\nrc=0\n' "$RL_W" > "$RL_REC/hand.log"
 s42_snap "$RRL" "$PRL"
-poke "$RRL" proof-add floor record/wave-01-fixture/hand.log
+poke "$RRL" proof-add regression record/wave-01-fixture/hand.log
 s42_unchanged "RL-1 AC-6.1 a hand-written log opening head=<the real working head> dirty=0 and ending rc=0, no run recorded" 1 "$PRL"
 expect_contains "RL-1b …refused naming the missing fact" "no run recorded for this log" "$OUT"
 expect_contains "RL-1c …and the log it read" "hand.log" "$OUT"
 
-# ---------- AC-6.1: floor-run writes the log and its run line; proof-add floor accepts it, naming the run ----------
-poke "$RRL" floor-run
-RL_LOG="$RL_REC/floor-run-$RL_W.log"
-expect_eq "RL-2 floor-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
+# ---------- AC-6.1: regression-run writes the log and its run line; proof-add regression accepts it, naming the run ----------
+poke "$RRL" regression-run
+RL_LOG="$RL_REC/regression-run-$RL_W.log"
+expect_eq "RL-2 regression-run runs the declared command and writes its log (exit 0)" "0|yes" "$RC|$([ -f "$RL_LOG" ] && echo yes)"
 RL_SHA="$(rl_sha "$RL_LOG")"
 expect_regex "RL-2b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
 expect_eq "RL-3 …and appends exactly one run line to the plan's landing record" "1" "$(rl_runs | awk 'END { print NR + 0 }')"
 expect_regex "RL-3b …in the grammar: the log by its record path, the head, dirty, rc, the log's sha256 and when" \
-  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/floor-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "^line/v1[|]ev=run[|]log=record/wave-01-fixture/regression-run-${RL_W}\\.log[|]head=${RL_W}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
   "$(rl_runs | tail -n 1)"
 RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
 s42_snap "$RRL" "$PRL"
-poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
-expect_eq "RL-4 AC-6.1 proof-add floor accepts the log its run line matches (exit 0)" "0" "$RC"
+poke "$RRL" proof-add regression "record/wave-01-fixture/regression-run-$RL_W.log"
+expect_eq "RL-4 AC-6.1 proof-add regression accepts the log its run line matches (exit 0)" "0" "$RC"
 expect_regex "RL-4b AC-6.2 …and the proof line names the run it read: run=<its at> head=<sha> rc=<n>" \
-  "^proved: kind=floor head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/floor-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
+  "^proved: kind=regression head=${RL_W} at=[^ ]+ evidence=record/wave-01-fixture/regression-run-${RL_W}\\.log run=${RL_AT} head=${RL_W} rc=0\$" \
   "$(rl_proved)"
 
 # ---------- AC-6.1: the same log edited after its run: refused on the hash ----------
 sed 's/2 passed/3 passed/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.tmp" "$RL_LOG"
 expect_false "RL-5-pre precondition: the edit changed the log's hash" test "$(rl_sha "$RL_LOG")" = "$RL_SHA"
 s42_snap "$RRL" "$PRL"
-poke "$RRL" proof-add floor "record/wave-01-fixture/floor-run-$RL_W.log"
-s42_unchanged "RL-5 AC-6.1 the floor-run log edited after its run" 1 "$PRL"
+poke "$RRL" proof-add regression "record/wave-01-fixture/regression-run-$RL_W.log"
+s42_unchanged "RL-5 AC-6.1 the regression-run log edited after its run" 1 "$PRL"
 expect_contains "RL-5b …refused naming the fact" "the log changed since its run" "$OUT"
-expect_contains "RL-5c …the log, and the hash its run recorded" "floor-run-$RL_W.log" "$OUT"
+expect_contains "RL-5c …the log, and the hash its run recorded" "regression-run-$RL_W.log" "$OUT"
 expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
 
 # ---------- AC-6.2: landing-report lists the floor run among the run's runs ----------
@@ -6008,10 +6014,17 @@ section "§WITNESS: a session's words count only when the project witnesses the 
 # witness, `refused: <sid> (<reason>)`, beside `read: <sids>`. The threat is a hand or an agent appending a
 # plan line, not a forger editing the config directory (spec §5).
 #
+# A WITNESS IS A BINDING ACT (wave-38 T20; REQ-11 AC-11.2, L6; A-orch-59). Before either of those, the line itself
+# must be one a binding act wrote: lib/binding.sh `bind_sessions <plan> <root>` admits a `- session:` line only
+# when `<root>/.bionic/tmp/engaged-<sid>.state` names this plan; any other line is refused `(no binding act)`.
+# WITNESS-4 is the hand-added line with both D9 witnesses in place, refused; WITNESS-6 is the same session's line
+# written by the real `bind` (lib/binding.sh `bind_plan ... bind`), its marker present, admitted by all three verbs.
+#
 # FIXTURE FIDELITY. §FX's shape: a real repository on its working branch, the plan and its registered reading
 # in their writers' shapes (proof.sh `proof_line`), a matrix row with its block, the session bound by the real
 # `bound_marker`, a writer row from the production row writer for `rule`. The other session's `- session:` line
-# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`). Every transcript is the
+# is appended by hand, in binding.sh's shape (`- session: <sid> bound <ISO> by bind`); WITNESS-B replaces it with
+# the line the real `bind` writes, beside the marker it writes. Every transcript is the
 # CLI's typed-prompt shape (tests/fixtures/transcript-move/typed.jsonl) under a config dir of this section's;
 # the load record is session-start's shape (`root=`, `started=`, `cwd=`).
 WT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
@@ -6103,8 +6116,38 @@ expect_eq "WITNESS-0 precondition: the fixture root's transcript directory name 
   "$(printf '%s' "$RWT" | sed 's/[^a-zA-Z0-9]/-/g')" "$WT_SLUG"
 expect_eq "WITNESS-0b precondition: the plan records the other session (bind_sessions reads the hand-added line)" "$WT_X" \
   "$(bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2"' _ "$WT_LIB" "$PWT" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+wt_witnesses() {  # [<lib dir>] -> bind_sessions <plan> <root>: the lines admitted bare, the refused with their reason
+  bash -c '. "$1/run.sh" && . "$1/binding.sh"; bind_sessions "$2" "$3"' _ "${1:-$WT_LIB}" "$PWT" "$RWT" 2>/dev/null | tr '\n' '|' | sed 's/|$//'
+}
+expect_eq "WITNESS-0c §WITNESS AC-11.2 …and, asked under this root, refuses it: no binding act wrote it (no marker of the session's names the plan)" \
+  "$WT_X (no binding act)" "$(wt_witnesses)"
+expect_false "WITNESS-0d precondition: the other session has no marker under this root" test -e "$RWT/.bionic/tmp/engaged-$WT_X.state"
 
-# ---------- AC-5.1: the words under another project's directory, the session bound and loaded here ----------
+# ---------- AC-11.2: the hand-added line, both of D9's witnesses in place: refused, no binding act ----------
+wt_x_at "$WT_SLUG"; wt_loaded "$WT_X"
+wt_try "WITNESS-4" 1
+expect_eq "WITNESS-4 §WITNESS AC-11.2 a hand-added line naming a session with its transcript and load record here: finding-move refused (exit 1)" "1" "$WT_RC_M"
+expect_contains "WITNESS-4b …naming the session and the witness it lacks: no binding act" "refused: $WT_X (no binding act)" "$WT_OUT_M"
+expect_contains "WITNESS-4c …beside the sessions it did read" "read: $SID" "$WT_OUT_M"
+expect_eq "WITNESS-4d waive-row refused (exit 1)" "1" "$WT_RC_W"
+expect_contains "WITNESS-4e …naming no binding act" "refused: $WT_X (no binding act)" "$WT_OUT_W"
+expect_eq "WITNESS-4f rule --words refused (exit 2)" "2" "$WT_RC_R"
+expect_contains "WITNESS-4g …naming no binding act" "refused: $WT_X (no binding act)" "$WT_OUT_R"
+
+# ---------- the line a binding act writes: the hand-added line removed, the real `bind` writes it and its marker ----------
+wt_bind() {  # -> "<rc>|<BIND_SESSION>": lib/binding.sh bind_plan <root> <other sid> <plan> bind, as `session-poker.sh bind` calls it
+  bash -c '. "$1/run.sh" && . "$1/binding.sh" || exit 9; bind_plan "$2" "$3" "$4" bind; st=$?; printf "%s|%s" "$st" "${BIND_SESSION:-}"' \
+    _ "$WT_LIB" "$RWT" "$WT_X" "$PWT" 2>/dev/null
+}
+WT_PLAN_TXT="$(/usr/bin/grep -v "^- session: $WT_X " "$PWT")"; printf '%s\n' "$WT_PLAN_TXT" > "$PWT"
+expect_eq "WITNESS-B0 precondition: the hand-added line is gone from the plan" "0" "$(/usr/bin/grep -c "^- session: $WT_X " "$PWT")"
+expect_eq "WITNESS-B1 the real bind binds the other session (exit 0) and records its line" "0|recorded" "$(wt_bind)"
+expect_regex "WITNESS-B2 …the line is the binding act's, by bind" "^- session: $WT_X bound [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z by bind\$" \
+  "$(/usr/bin/grep "^- session: $WT_X " "$PWT")"
+expect_eq "WITNESS-B3 …and its marker names this plan" "plan=$PWT" "$(/usr/bin/grep -m1 '^plan=' "$RWT/.bionic/tmp/engaged-$WT_X.state" 2>/dev/null)"
+expect_eq "WITNESS-B4 §WITNESS AC-11.2 bind_sessions under this root admits the line a bind wrote" "$WT_X" "$(wt_witnesses)"
+
+# ---------- AC-5.1: the words under another project's directory, the session bound (WITNESS-B) and loaded here ----------
 wt_x_at -other-project; wt_loaded "$WT_X"
 expect_contains "WITNESS-1-pre precondition: the other project's transcript carries the move's words, as a raw read finds them" \
   "$WT_WM" "$(cat "$WT_CFG/projects/-other-project/$WT_X.jsonl")"
@@ -6135,18 +6178,18 @@ expect_contains "WITNESS-3e …naming the missing state" "refused: $WT_X (no loa
 expect_eq "WITNESS-3f rule --words refused (exit 2)" "2" "$WT_RC_R"
 expect_contains "WITNESS-3g …naming the missing state" "refused: $WT_X (no loaded-$WT_X.state)" "$WT_OUT_R"
 
-# ---------- both witnesses: accepted, by all three ----------
+# ---------- the binding act and both witnesses: accepted, by all three ----------
 wt_loaded "$WT_X"
-wt_try "WITNESS-4" 0
-expect_eq "WITNESS-4 §WITNESS the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
-expect_regex "WITNESS-4b …quoting the words with the session they came from" \
+wt_try "WITNESS-6" 0
+expect_eq "WITNESS-6 §WITNESS AC-11.2 the line a bind wrote, its marker, the transcript under this root's directory and the load record under this root: finding-move moves it (exit 0)" "0" "$WT_RC_M"
+expect_regex "WITNESS-6b …quoting the words with the session they came from" \
   "^moved: $WT_REC/adv\\.md#1 to=defer by=Dana Fixture at=[0-9T:Z-]+ words=\"$WT_WM\" session=$WT_X why=" \
   "$(/usr/bin/grep -F "moved: $WT_REC/adv.md#1 " "$PWT")"
-expect_eq "WITNESS-4c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
-expect_contains "WITNESS-4d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
-expect_eq "WITNESS-4e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
+expect_eq "WITNESS-6c waive-row waives the row (exit 0)" "0" "$WT_RC_W"
+expect_contains "WITNESS-6d …its waiver: line quoting the words" "$WT_WW" "$(/usr/bin/grep -F 'waiver:' "$PWT")"
+expect_eq "WITNESS-6e rule --words records the ruling (exit 0)" "0" "$WT_RC_R"
 poke "$RWT" rulings wt-crit
-expect_contains "WITNESS-4f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
+expect_contains "WITNESS-6f …quoting the words with the session they came from" "words=\"$WT_WR\" session=$WT_X" "$OUT"
 
 # ---------- the start cwd: a session started in a subdirectory files its transcript under that name ----------
 wt_x_at "$WT_SUBSLUG"; wt_loaded "$WT_X" "$RWT/sub"
@@ -6173,6 +6216,15 @@ expect_eq "WITNESS-mut0 the mutant differs from the library by the one state che
 expect_eq "WITNESS-mut1 the shipped library refuses the session with no load record" "1||$WT_X (no loaded-$WT_X.state)" "$(wt_said "$WT_LIB" "$WT_WM")"
 expect_eq "WITNESS-mut2 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-3 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUT" "$WT_WM")"
 wt_loaded "$WT_X"
+# The binding act's falsifier: a copy of binding.sh whose refusal admits the line instead. With the marker gone the
+# line reads as the hand-added one; the shipped library refuses it, the mutant reads it. WITNESS-4 goes red under it.
+WT_MUTB="$TMPROOT/wt-mutb"; mkdir -p "$WT_MUTB"; cp "$WT_LIB"/*.sh "$WT_MUTB/"
+anchor file payload/scripts/lib/binding.sh 'printf '"'"'%s (no binding act)\n'"'"
+/usr/bin/sed 's/printf '"'"'%s (no binding act)\\n'"'"'/printf '"'"'%s\\n'"'"'/' "$WT_LIB/binding.sh" > "$WT_MUTB/binding.sh"
+rm -f "$RWT/.bionic/tmp/engaged-$WT_X.state"; wt_x_at "$WT_SLUG"
+expect_eq "WITNESS-mut3 the binding mutant differs from the library by the one refusal" "1" "$(diff "$WT_LIB/binding.sh" "$WT_MUTB/binding.sh" | /usr/bin/grep -c '^<')"
+expect_eq "WITNESS-mut4 the shipped library refuses the line no marker backs" "1||$WT_X (no binding act)" "$(wt_said "$WT_LIB" "$WT_WM")"
+expect_eq "WITNESS-mut5 …the mutant runs and reads it (rc 0, from the other session), so WITNESS-4 goes red under it" "0|$WT_X|" "$(wt_said "$WT_MUTB" "$WT_WM")"
 
 POKE_BOUND="$WT_BOUND_WAS"
 if [ "$WT_CCD_WAS" = "__unset__" ]; then unset CLAUDE_CONFIG_DIR; else export CLAUDE_CONFIG_DIR="$WT_CCD_WAS"; fi
@@ -6266,10 +6318,10 @@ RO_MUT="$TMPROOT/ro-mut"; mkdir -p "$RO_MUT/hooks" "$RO_MUT/payload/scripts"
 cp "${BIONIC_HOOKS_DIR}"/*.sh "$RO_MUT/hooks/"
 cp -R "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RO_MUT/payload/scripts/lib"
 RO_POKER_WAS="$POKER"
-anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
-anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}")"'
+anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
+anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"'
 RO_MUT_SRC="$RO_MUT/hooks/session-poker.sh"
-awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
+awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}" "\$SCHED_PLAN"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
 expect_eq "REOPEN-mut0 the mutant differs from the poker by the two calls" "2" "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$RO_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
 poke "$RRO" decline T4 'declined again, after the lapse'
 expect_eq "REOPEN-mut-pre a fresh decline of the row is recorded (it stands afresh after the lapse)" "0" "$RC"
@@ -6284,78 +6336,259 @@ expect_contains "REOPEN-mut3 …while the shipped poker, over the same fresh dec
 POKE_BOUND="$RO_BOUND_WAS"
 
 # ============================================================
-section "§REPORT: the report splits wait from run and prints the width, from the landing record alone (wave-37 T9; D8, AC-1.3, AC-3.2)"
+section "§REOPEN-ON: a decline --on <row> holds until that row lands, whatever room appears; a decline without --on still lapses on room (wave-38 T19; REQ-11 AC-11.1; L5)"
+# =====================================================#
+# fails-when: a decline recorded `--on T9` lapses at room=yes while T9 has not landed (the tick prints the FILL and
+# writes a lapsed line). Wave 37's A-orch-18 declined T14-T21 `--on T4`, the tick kept the decline standing only by
+# hand-hold, and the handoff's lesson was that a decline without --on lapses when room appears. `declined-on=` is
+# the field the verb writes (the fill ledger line); `fill_decline_holds` (lib/fill.sh), the ONE rule, reads it with
+# the standing decline and holds while that row's `## Tasks` status is not `landed`. Once the row has landed the
+# decline is an ordinary one: it lapses at room=yes with a free slot, like REOPEN-3.
+# FIXTURE FIDELITY: the decline is written by the product's own verb; the gate is the suite's (room=yes, one ready
+# writer row, writers=4); T9 is a pending row that waits on an outside input, so it is no writer row of its own.
+RON_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRN="$(make_repo reopen-on)"; new_roster "$RRN"
+PRN="$(s47_plan "$RRN" 4 \
+  "| T3 | 4 | build | waits on T9 by hand | implementor | — | 20 | REQ-x | payload/d.sh | pending | |" \
+  "| T9 | 4 | build | the row T3 waits on | implementor | ext:ci-on | 20 | REQ-x | payload/e.sh | pending | |")"
+ron_led() { cat "$RRN/$RO_REC/fill-ledger.log" 2>/dev/null; }
+ron_room_yes() { forget_digest "$RRN"; poke_pressure "$RRN" 8192 1.0 tick; }
+ron_room_no() { forget_digest "$RRN"; BIONIC_PROBE_BUSY_CORES_5M=7.0 poke_pressure "$RRN" 8192 1.0 tick; }
+ron_state() { ro_field "$(ron_led | tail -1)" state; }
+
+ron_room_yes
+expect_eq "REON-0 precondition: the tick at room=yes fills T3 and not T9 (the extractor's positive)" "yes|no" "$(s48_fill_has T3)|$(s48_fill_has T9)"
+poke "$RRN" decline T3 'waits on T9' --on T9
+expect_eq "REON-1 the decline --on T9 is recorded (exit 0)" "0" "$RC"
+expect_eq "REON-1b …its ledger line carries declined-on=T9 beside the decline" "decline|T9" \
+  "$(ro_field "$(ron_led | tail -1)" state)|$(ro_field "$(ron_led | tail -1)" declined-on)"
+RON_AT="$(ro_field "$(ron_led | tail -1)" at)"
+RON_LINES="$(ron_led | wc -l | tr -d ' ')"
+
+ron_room_yes
+expect_eq "REON-2 AC-11.1 at room=yes with a free slot, T9 not landed: the tick names no FILL for T3" "no" "$(s48_fill_has T3)"
+expect_contains "REON-2b …the decline is printed as standing (the positive for the absence below)" \
+  "poker: fill-declined standing since $RON_AT" "$OUT"
+expect_absent "REON-2c …and no lapse is announced" "fill-declined lapsed" "$OUT"
+expect_eq "REON-2d …and none is written: the ledger is as long as it was" "$RON_LINES|decline" "$(ron_led | wc -l | tr -d ' ')|$(ron_state)"
+ron_room_yes
+expect_eq "REON-2e a second tick at room=yes holds it too" "no|$RON_LINES" "$(s48_fill_has T3)|$(ron_led | wc -l | tr -d ' ')"
+
+# THE ROW LANDS: the decline is an ordinary one from then on.
+awk '/^\| T9 \|/ { $0 = "| T9 | 4 | build | the row T3 waits on | implementor | ext:ci-on | 20 | REQ-x | payload/e.sh | landed | |" } { print }' \
+  "$PRN" > "$PRN.tmp" && mv "$PRN.tmp" "$PRN"
+expect_eq "REON-3 precondition: T9 reads landed in the plan" "landed" "$(s48_row "$PRN" T9 | awk -F'|' '{ print $(NF-1) }')"
+ron_room_no
+expect_contains "REON-3b T9 landed, room=no: the decline still answers the row (an ordinary decline at no room)" \
+  "poker: WAIT T3 — ready; answered by the standing fill-declined" "$OUT"
+ron_room_yes
+expect_contains "REON-3c AC-11.1 T9 landed, room=yes with a free slot: the decline lapses, the tick prints the FILL" "poker: FILL T3" "$OUT"
+expect_contains "REON-3d …and says the decline lapsed" "poker: fill-declined lapsed — room=yes" "$OUT"
+expect_eq "REON-3e …and the ledger's last line is the lapse, naming the decline's at= and row" "lapsed|$RON_AT|T3" \
+  "$(ron_state)|$(ro_field "$(ron_led | tail -1)" lapsed-at)|$(ro_field "$(ron_led | tail -1)" lapsed)"
+
+# THE CONTROL: a decline without --on is unchanged — it lapses at room=yes with a slot free (REOPEN-3), T9 or no T9.
+poke "$RRN" decline T3 'held by hand'
+expect_eq "REON-4 control: a decline with no --on is recorded (declined-on=-)" "0|-" "$RC|$(ro_field "$(ron_led | tail -1)" declined-on)"
+awk '/^\| T9 \|/ { $0 = "| T9 | 4 | build | the row T3 waits on | implementor | ext:ci-on | 20 | REQ-x | payload/e.sh | pending | |" } { print }' \
+  "$PRN" > "$PRN.tmp" && mv "$PRN.tmp" "$PRN"
+ron_room_yes
+expect_contains "REON-4b …and at room=yes it lapses and the row is offered: no --on, no hold" "poker: FILL T3" "$OUT"
+POKE_BOUND="$RON_BOUND_WAS"
+
+# ============================================================
+section "§REPORT: the report reads admission: wait is the time no run of the row was admitted, prove the admitted run time, rework the return-to-ready time, from the landing record alone (wave-38 T7; REQ-6 AC-6.4; D22; wave-37 T9's split restated)"
 # ============================================================
 #
-# `landing-report --rows` prints, after each row's present prefix, `wait= prove= line= width=`: wait is the row's
-# first `ready` to its first `candidate`, prove that candidate to the row's last `verdict`, line that verdict to
-# `published`, in minutes, and width the `width=` the drain (lib/line.sh, 1.20.0) writes on the row's verdicts after
-# `log=`. They are read from the landing record ALONE: the gate's requests are pruned after BIONIC_GATE_KEEP, so a
-# close-of-wave report built on them would have lost the early rows. FIXTURE FIDELITY: the events are planted in the
-# shape lib/line.sh writes them (rp_verdict's sixth operand is the drain's `width=`); the gate store is EMPTY.
+# `landing-report --rows` prints, after each row's prefix, `wait= prove= rework= width=`, each in minutes (%.1f) over the
+# row's window, its first `ready` since it last landed to its `published`:
+#   prove   the union of its runs' admitted time: each counted verdict's `admitted=` (lib/line.sh writes the gate's own
+#           admission after `log=`, wave-38 T6) to the verdict's `at=`, overlaps counted once;
+#   rework  each `returned` (red, conflict, guard) to the row's next `ready`, less any admitted time inside it;
+#   wait    the rest: the window less prove and rework, so wait + prove + rework = minutes and waited never exceeds it.
+# `waited=<s>s` is wait in seconds, and the first line's `waited median` is the median of the rows' waits. A verdict with
+# no `admitted=` (written before 1.21.0) leaves the row's wait and prove uncomputable: `-`, and waited=-; `admitted=-`
+# (no admission on record, a judged red) adds no admitted time. A hand or a git landing prints every field `-`.
+# THE STORE IS NOT READ FOR IT (A-orch-43, A-orch-51): the gate's request tallies (asked to admitted, summed over a
+# landing's parallel runs) are what printed waited above the row's wall time; a request planted here says 23 minutes
+# and the row reads its record's 14. FIXTURE FIDELITY: the events are planted in the shape lib/line.sh writes them
+# (rp_verdict's seventh operand is the drain's `admitted=`, written ahead of `width=`).
+# fails-when: prove includes queue time (first candidate to last verdict, the 1.20.0 split); waited exceeds the row's
+# minutes; rework is folded into wait; a verdict without admission is read as zero.
 RR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-rp_world rr-split
-rp_ready T1 w-T1 10:00:00; rp_cand T1 10:02:00
-rp_verdict T1 a.test.sh green 10:05:00 "$RP_C2" 2; rp_verdict T1 b.test.sh green 10:09:00 "$RP_C2" 2; rp_verdict T1 c.test.sh green 10:14:00 "$RP_C2" 2
-rp_pub T1 queue 10:20:00
-# a row written before 1.20.0 (or by the serial line): its verdicts carry no width=
-rp_ready T2 w-T2 10:30:00; rp_cand T2 10:31:00; rp_verdict T2 a.test.sh green 10:35:00; rp_pub T2 queue 10:40:00
-# a hand landing: nothing to split
-rp_ready T3 - 10:50:00; rp_cand T3 10:50:10; rp_pub T3 hand 10:50:30
-RR_T1_PRE="T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:20:00Z minutes=20.0 runs=3 waited=0s"
-RR_T2_PRE="T2 queue ready=2026-10-06T10:30:00Z landed=2026-10-06T10:40:00Z minutes=10.0 runs=1 waited=0s"
-RR_T3_PRE="T3 hand ready=- landed=2026-10-06T10:50:30Z minutes=- runs=0 waited=0s"
+RR_C3="$(printf '7%.0s' $(seq 40))"; RR_C4="$(printf '8%.0s' $(seq 40))"
+rr_at() { printf '%s' $((RP_E0 + $1)); }   # <seconds after 10:00:00Z> -> its epoch
+rr_world() {  # <label> -> rows T1..T5 planted (the definitions above, worked by hand in each row's assertion)
+  rp_world "$1"
+  # T1: two overlapping runs, a red, its return, eight minutes of rework, a second candidate's green.
+  rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00
+  rp_verdict T1 a.test.sh green 10:06:00 "$RP_C2" 2 "$(rr_at 120)"
+  rp_verdict T1 b.test.sh green 10:08:00 "$RP_C2" 2 "$(rr_at 240)"
+  rp_verdict T1 c.test.sh red 10:12:00 "$RP_C2" 2 "$(rr_at 600)"
+  rp_ev "ev=returned|row=T1|why=red|detail=/rec/T1-c.log|at=2026-10-06T10:12:00Z"
+  rp_ready T1 w-T1 10:20:00 "$RR_C3"; rp_cand T1 10:21:00 "$RP_C1" "$RR_C4"
+  rp_verdict T1 c.test.sh green 10:30:00 "$RR_C4" 3 "$(rr_at 1500)"
+  rp_pub T1 queue 10:35:00
+  # T2: a verdict written before 1.21.0, no admitted=: its wait and prove cannot be computed.
+  rp_ready T2 w-T2 10:40:00; rp_cand T2 10:41:00; rp_verdict T2 a.test.sh green 10:45:00; rp_pub T2 queue 10:50:00
+  # T3: one admitted run and one verdict with admitted=- (no admission on record): the dash adds no time.
+  rp_ready T3 w-T3 11:00:00; rp_cand T3 11:01:00
+  rp_verdict T3 a.test.sh green 11:05:00 "$RP_C2" "" "$(rr_at 3720)"
+  rp_verdict T3 b.test.sh discarded 11:05:00 "$RP_C2" "" -
+  rp_pub T3 queue 11:10:00
+  # T4: a hand landing.
+  rp_ready T4 - 11:20:00; rp_cand T4 11:20:10; rp_pub T4 hand 11:20:30
+  # T5: a run that ends after the return (discarded): admitted time inside the rework window is prove, once.
+  rp_ready T5 w-T5 12:00:00; rp_cand T5 12:01:00
+  rp_verdict T5 a.test.sh red 12:04:00 "$RP_C2" "" "$(rr_at 7320)"
+  rp_ev "ev=returned|row=T5|why=red|detail=/rec/T5-a.log|at=2026-10-06T12:04:00Z"
+  rp_verdict T5 b.test.sh discarded 12:06:00 "$RP_C2" "" "$(rr_at 7320)"
+  rp_ready T5 w-T5 12:10:00 "$RR_C3"; rp_cand T5 12:11:00 "$RP_C1" "$RR_C4"
+  rp_verdict T5 a.test.sh green 12:15:00 "$RR_C4" "" "$(rr_at 7920)"
+  rp_pub T5 queue 12:20:00
+  # The gate store's tally for T1: asked 10:02, admitted 10:25, 23 minutes the old waited summed.
+  rp_req 1 w-T1 "$RP_ROOT" "$(rr_at 120)" "$(rr_at 1500)" "ended=$(rr_at 1800)" rc=0
+}
 rr_row() { rp_rows | tr '|' '\n' | /usr/bin/grep "^$1 "; }
+rr_world rr-adm
 rp_report --rows
-expect_eq "RR0 precondition: the gate store is empty (nothing in it can be what the split reads)" "0" "$(ls "$RP_GATE/requests" | wc -l | tr -d ' ')"
-expect_nonempty "RR0b precondition: the row extractor reads the report's rows" "$(rr_row T1)"
-expect_eq "RR1 ready at t0, candidate at +2, verdicts at +5 +9 +14 each width=2, published at +20: the row prints its present prefix, then wait=2.0 prove=12.0 line=6.0 width=2" \
-  "$RR_T1_PRE wait=2.0 prove=12.0 line=6.0 width=2" "$(rr_row T1)"
-expect_eq "RR2 a row whose verdicts carry no width= prints width=- (absent, never 0), its split still read from the record" \
-  "$RR_T2_PRE wait=1.0 prove=4.0 line=5.0 width=-" "$(rr_row T2)"
-expect_eq "RR3 a hand landing prints all four as - , as it prints ready=- and minutes=-" \
-  "$RR_T3_PRE wait=- prove=- line=- width=-" "$(rr_row T3)"
-expect_eq "RR4 the first line is unchanged by the split (close-out's parse and the tick's print depend on it)" \
-  "landings: queue=2 hand=1 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=4 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+expect_nonempty "RR0 precondition: the row extractor reads the report's rows" "$(rr_row T1)"
+expect_eq "RR0b precondition: the gate store holds the one planted request" "1" "$(ls "$RP_GATE/requests" | wc -l | tr -d ' ')"
+expect_eq "RR1 AC-6.4 T1 over 35 minutes: prove = 10:02-10:08 (two overlapping runs, once) + 10:10-10:12 + 10:25-10:30 = 13.0; rework = 10:12-10:20 = 8.0; wait = the rest = 14.0, waited=840s (not the store's 1380s)" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:35:00Z minutes=35.0 runs=4 waited=840s wait=14.0 prove=13.0 rework=8.0 width=3" "$(rr_row T1)"
+expect_eq "RR2 AC-6.4 a verdict with no admitted= leaves wait and prove uncomputable: -, waited=-; rework is read from its events" \
+  "T2 queue ready=2026-10-06T10:40:00Z landed=2026-10-06T10:50:00Z minutes=10.0 runs=1 waited=- wait=- prove=- rework=0.0 width=-" "$(rr_row T2)"
+expect_eq "RR3 admitted=- adds no admitted time: prove = 11:02-11:05 = 3.0, wait 7.0" \
+  "T3 queue ready=2026-10-06T11:00:00Z landed=2026-10-06T11:10:00Z minutes=10.0 runs=2 waited=420s wait=7.0 prove=3.0 rework=0.0 width=-" "$(rr_row T3)"
+expect_eq "RR4 a hand landing prints every field -" \
+  "T4 hand ready=- landed=2026-10-06T11:20:30Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" "$(rr_row T4)"
+expect_eq "RR5 AC-6.4 a run ending after the return is prove, not rework: prove = 12:02-12:06 + 12:12-12:15 = 7.0; rework = 12:06-12:10 = 4.0; wait 9.0" \
+  "T5 queue ready=2026-10-06T12:00:00Z landed=2026-10-06T12:20:00Z minutes=20.0 runs=3 waited=540s wait=9.0 prove=7.0 rework=4.0 width=-" "$(rr_row T5)"
+expect_eq "RR6 AC-6.4 on every row the record computes, wait + prove + rework is its minutes and waited never exceeds them" "T1 ok|T3 ok|T5 ok" \
+  "$(rp_rows | tr '|' '\n' | awk '{ for (i = 1; i <= NF; i++) { split($i, kv, "="); f[kv[1]] = kv[2] } }
+     f["wait"] != "-" && f["minutes"] != "-" { w = f["waited"]; sub(/s$/, "", w)
+       d = f["wait"] + f["prove"] + f["rework"] - f["minutes"]; if (d < 0) d = -d
+       print $1 " " ((d <= 0.15 && w + 0 <= f["minutes"] * 60) ? "ok" : "off") }' | paste -sd'|' -)"
+expect_eq "RR7 the first line's waited median is the median of the rows' waits (420, 540, 840: 540s), not the store's" \
+  "landings: queue=4 hand=1 git=0 · ready-to-landed median=15.0m p75=23.8m max=35.0m · runs: green=6 red=2 none=0 discarded=2 red-then-green=0 run=0 · waited median=540s · killed=0" \
   "$(rp_line)"
-expect_eq "RR5 the row's present prefix is byte for byte what it was: cut at the new fields, T1 is the old line" \
-  "$RR_T1_PRE" "$(rr_row T1 | sed 's/ wait=.*$//')"
 # the width is the drain's: a line a reader sees with a bad width is absent too
 rp_world rr-bad
-rp_ready T4 w-T4 10:00:00; rp_cand T4 10:01:00; rp_verdict T4 a.test.sh green 10:03:00 "$RP_C2" x; rp_pub T4 queue 10:04:00
+rp_ready T4 w-T4 10:00:00; rp_cand T4 10:01:00; rp_verdict T4 a.test.sh green 10:03:00 "$RP_C2" x "$(rr_at 90)"; rp_pub T4 queue 10:04:00
 rp_report --rows
-expect_eq "RR6 a non-numeric width= is absent: width=-" "T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=0s wait=1.0 prove=2.0 line=1.0 width=-" "$(rr_row T4)"
+expect_eq "RR8 a non-numeric width= is absent: width=-" \
+  "T4 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=150s wait=2.5 prove=1.5 rework=0.0 width=-" "$(rr_row T4)"
 # the split restarts at each landing: a row landing twice reads each of its own
 rp_world rr-twice
-rp_ready T5 w-T5 10:00:00; rp_cand T5 10:01:00; rp_verdict T5 a.test.sh green 10:03:00 "$RP_C2" 2; rp_pub T5 queue 10:04:00
-rp_ready T5 w-T5 10:10:00; rp_cand T5 10:15:00; rp_verdict T5 a.test.sh green 10:16:00 "$RP_C2" 4; rp_pub T5 queue 10:20:00
+rp_ready T5 w-T5 10:00:00; rp_cand T5 10:01:00; rp_verdict T5 a.test.sh green 10:03:00 "$RP_C2" 2 "$(rr_at 60)"; rp_pub T5 queue 10:04:00
+rp_ready T5 w-T5 10:10:00; rp_cand T5 10:15:00; rp_verdict T5 a.test.sh green 10:16:00 "$RP_C2" 4 "$(rr_at 900)"; rp_pub T5 queue 10:20:00
 rp_report --rows
-expect_eq "RR7 a row landing twice: each landing's split starts from its own ready, candidate and verdicts" \
-  "T5 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=0s wait=1.0 prove=2.0 line=1.0 width=2|T5 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:20:00Z minutes=10.0 runs=1 waited=0s wait=5.0 prove=1.0 line=4.0 width=4" \
+expect_eq "RR9 a row landing twice: each landing's split reads its own window and runs" \
+  "T5 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:04:00Z minutes=4.0 runs=1 waited=120s wait=2.0 prove=2.0 rework=0.0 width=2|T5 queue ready=2026-10-06T10:10:00Z landed=2026-10-06T10:20:00Z minutes=10.0 runs=1 waited=540s wait=9.0 prove=1.0 rework=0.0 width=4" \
   "$(rp_rows)"
 
-# ---------- the mutation arms: a split read from the gate store; the fields written before waited= ----------
+# ---------- the mutation arms: prove from the first candidate (queue time in it); rework folded into wait ----------
 RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rr-mut.XXXXXX")"
-rd_mutant fromgate 's#pw\[n\] = seg(pfrom\[n\], fcn);#pw[n] = "-"; for (i = 1; i <= nq; i++) if (qw[i] == pname[n] \&\& num(qd[i])) { pw[n] = sprintf("%.1f", (qd[i] - qa[i]) / 60); break };#'
-rd_mutant beforewaited 's#^        print pre1 wt tl$#        print pre1 tl wt#'
+rd_mutant queue 's#^        nad\[rk\]++; as\[rk, nad\[rk\]\] = kv\["admitted"\] + 0; ae\[rk, nad\[rk\]\] = e$#        nad[rk]++; as[rk, nad[rk]] = fc[rk]; ae[rk, nad[rk]] = e#'
+rd_mutant norework 's#^    ev == "returned" { if (e >= 0) { nrw\[rk\]++; rs\[rk, nrw\[rk\]\] = e; re\[rk, nrw\[rk\]\] = "" }; next }$#    ev == "returned" { next }#'
 expect_eq "RR-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
-  "$(diff "$POKER" "$RD_MUT/fromgate/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/beforewaited/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
-rp_world rr-mut
-rp_ready T1 w-T1 10:00:00; rp_cand T1 10:02:00
-rp_verdict T1 a.test.sh green 10:05:00 "$RP_C2" 2; rp_verdict T1 b.test.sh green 10:09:00 "$RP_C2" 2; rp_verdict T1 c.test.sh green 10:14:00 "$RP_C2" 2
-rp_pub T1 queue 10:20:00
+  "$(diff "$POKER" "$RD_MUT/queue/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/norework/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+rr_world rr-mut
 RR_REAL_POKER="$POKER"
-POKER="$RD_MUT/fromgate/hooks/session-poker.sh"; rp_report --rows; RR_M1_RC="$RC"; RR_M1="$(rr_row T1)"
-POKER="$RD_MUT/beforewaited/hooks/session-poker.sh"; rp_report --rows; RR_M2_RC="$RC"; RR_M2="$(rr_row T1)"
+POKER="$RD_MUT/queue/hooks/session-poker.sh"; rp_report --rows; RR_M1_RC="$RC"; RR_M1="$(rr_row T1)"
+POKER="$RD_MUT/norework/hooks/session-poker.sh"; rp_report --rows; RR_M2_RC="$RC"; RR_M2="$(rr_row T1)"
 POKER="$RR_REAL_POKER"
-expect_eq "RR-mut1 the gate-store mutant runs (exit 0) and, the store being empty, reads wait=- where RR1 reads 2.0 (RR1 goes red on it)" \
-  "0|$RR_T1_PRE wait=- prove=12.0 line=6.0 width=2" "$RR_M1_RC|$RR_M1"
-expect_eq "RR-mut2 the fields-before-waited= mutant runs (exit 0) and writes wait= ahead of waited=, so RR1 and RR5 go red on it" \
-  "0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:20:00Z minutes=20.0 runs=3 wait=2.0 prove=12.0 line=6.0 width=2 waited=0s" "$RR_M2_RC|$RR_M2"
+expect_eq "RR-mut1 the queue-time mutant runs (exit 0) and, each run read from the first candidate, prints prove=29.0 over 10:01-10:30 where RR1 reads 13.0 (RR1 goes red on it)" \
+  "0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:35:00Z minutes=35.0 runs=4 waited=360s wait=6.0 prove=29.0 rework=0.0 width=3" "$RR_M1_RC|$RR_M1"
+expect_eq "RR-mut2 the no-rework mutant runs (exit 0) and folds the eight minutes of rework into wait=22.0 (RR1 goes red on it)" \
+  "0|T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:35:00Z minutes=35.0 runs=4 waited=1320s wait=22.0 prove=13.0 rework=0.0 width=3" "$RR_M2_RC|$RR_M2"
 rp_report --rows
-expect_eq "RR-mut3 …control: the real poker over the same record reads RR1's row" "$RR_T1_PRE wait=2.0 prove=12.0 line=6.0 width=2" "$(rr_row T1)"
+expect_eq "RR-mut3 …control: the real poker over the same record reads RR1's row" \
+  "T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:35:00Z minutes=35.0 runs=4 waited=840s wait=14.0 prove=13.0 rework=8.0 width=3" "$(rr_row T1)"
 rm -rf "$RD_MUT"
 POKE_BOUND="$RR_BOUND_WAS"
 
+
+
+# ============================================================
+section "§FN-5: approve regression-2 is the user's word for ONE second whole run: the head it is given at is not read as covered before that run, the run is admitted, and a later head owes again (wave-38 T2; REQ-4 AC-4.5; wave-35 critic-adversarial.md#1)"
+# ============================================================
+# The approval used to waive the regression's reads arm plan-wide (lib/proof.sh `_proof_floor_judge`,
+# `_proof_floor_walk`: `proof_approved … regression-2 || waive=1`), so the head it was given at read covered and
+# floor-run's RULE 3 refused the very run it bought. Now it covers no head: the judge reads the head as the walk
+# finds it, floor-run admits the second whole run while the approval is unspent (no regression proof is newer than
+# it, lib/proof.sh `proof_regression2_open`), and once that run's proof is written the approval is spent, so a later
+# head whose change no suite reads owes again and a third whole run is refused, naming the user's word for the
+# regression (`waive regression`).
+# FIXTURE FIDELITY: §FLOOR-RUN's shape: a stub tests/run.sh in the runner's output shape, one suite (a.test.sh, which
+# reads no file), s42_plan's plan bound to this session with its build rows landed, its working branch a linked
+# worktree. Each later change is a row's landing in the landing record's lib/line.sh shape (ready, published, a green
+# verdict of a.test.sh), so the walk reaches the reads arm: the file it changed is read by no suite it ran. The
+# approval line is the approve verb's shape, planted at the instant (no row here reads approval:regression-2).
+# fails-when: the approved head reads covered; the second run is refused; the later head reads covered or a third
+# whole run runs.
+F5_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RF5="$(make_repo fn5-one-head)"; ( cd "$RF5" && git commit -q --allow-empty -m init )
+F5_SEEN="$TMPROOT/f5-seen"; : > "$F5_SEEN"
+mkdir -p "$RF5/tests"
+cat > "$RF5/tests/run.sh" <<F5_EOF
+#!/bin/bash
+# a stub of the runner's report shape
+cd "\$(dirname "\$0")/.." || exit 1
+printf 'cwd=%s\n' "\$(pwd -P)" >> "$F5_SEEN"
+printf 'head=%s dirty=%s\n' "\$(git rev-parse HEAD)" "\$(git status --porcelain | awk 'END { print NR + 0 }')"
+printf 'Gating: 1 passed, 0 failed\n'
+exit 0
+F5_EOF
+printf '#!/bin/bash\nexit 0\n' > "$RF5/tests/a.test.sh"
+( cd "$RF5" && git add tests && git commit -qm suites ) >/dev/null 2>&1
+PF5="$(s42_plan "$RF5" 4)"; s42_builds_landed "$PF5"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF5" > "$PF5.tmp" && mv "$PF5.tmp" "$PF5"
+( cd "$RF5" && git add -f "$PF5" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RF5/.worktrees/01-fixture" \
+  && git -C "$RF5/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+F5_WT="$RF5/.worktrees/01-fixture"
+F5_W="$(git -C "$F5_WT" rev-parse HEAD 2>/dev/null)"
+F5_REC="$RF5/.bionic/docs/record/wave-01-fixture"; mkdir -p "$F5_REC"
+f5_runs() { awk 'END { print NR + 0 }' "$F5_SEEN"; }
+f5_state() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_state "$2" "$3"' _ "$C7_LIB" "$PF5" "$RF5" 2>/dev/null; }
+f5_land() {  # <row> <path> -> the row's landing commit on the working branch, its ready, published and green verdict events
+  local c at; at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$(dirname "$F5_WT/$2")"; printf '%s\n' "$1" >> "$F5_WT/$2"
+  ( cd "$F5_WT" && git add "$2" && git commit -qm "$1: $2" ) >/dev/null 2>&1
+  c="$(git -C "$F5_WT" rev-parse HEAD)"
+  { printf 'line/v1|ev=ready|row=%s|suites=tests/a.test.sh|at=%s\n' "$1" "$at"
+    printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=%s\n' "$1" "$c" "$1" "$at"
+    printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=tests/a.test.sh|result=green|log=-|at=%s\n' "$1" "$c" "$at"; } >> "$F5_REC/landing-proofs.log"
+  printf '%s' "$c"
+}
+poke "$RF5" regression-run
+poke "$RF5" proof-add regression "record/wave-01-fixture/regression-run-$F5_W.log"
+expect_eq "FN5-0 precondition: the first whole run ran once and its proof covers the working head" "1|covered	$F5_W" "$(f5_runs)|$(f5_state)"
+F5_C="$(f5_land T9 lib/y.sh)"
+F5_ST="$(f5_state)"
+expect_eq "FN5-0b precondition: a landing that changed lib/y.sh, which no suite it ran reads: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-0c …naming the reads arm and the approval" "lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$F5_ST"
+poke "$RF5" regression-run
+expect_eq "FN5-1 with no approval a second whole run is refused, and nothing ran (exit 1)" "1|1" "$RC|$(f5_runs)"
+awk -v at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana " at " \"yes, run it again\""; d = 1 }' \
+  "$PF5" > "$PF5.tmp" && mv "$PF5.tmp" "$PF5"
+F5_ST="$(f5_state)"
+expect_eq "FN5-2 AC-4.5 after approve regression-2 the head it was given at is not read as covered" "uncovered" "${F5_ST%%	*}"
+poke "$RF5" regression-run
+expect_eq "FN5-3 AC-4.5 …and the second whole run it bought is admitted: it runs, green (exit 0)" "0|2" "$RC|$(f5_runs)"
+poke "$RF5" proof-add regression "record/wave-01-fixture/regression-run-$F5_C.log"
+expect_eq "FN5-3b …and its proof covers that head" "0|covered	$F5_C" "$RC|$(f5_state)"
+F5_D="$(f5_land T10 lib/z.sh)"
+F5_ST="$(f5_state)"
+expect_eq "FN5-4 AC-4.5 a later head whose change no suite reads owes again: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-4b …naming the commit and the file" "commit ${F5_D:0:12} (row T10) is not proved: lib/z.sh is read by no suite it ran" "$F5_ST"
+s42_snap "$RF5" "$PF5"
+poke "$RF5" regression-run
+s42_unchanged "FN5-5 AC-4.5 a third whole run, the approval spent by the second's proof" 1 "$PF5"
+expect_eq "FN5-5b …and nothing ran" "2" "$(f5_runs)"
+expect_contains "FN5-5c …saying the approval is spent" "spent" "$OUT"
+expect_contains "FN5-5d …and naming the user's word for the regression" "waive regression" "$OUT"
+POKE_BOUND="$F5_BOUND_WAS"
 
 finish

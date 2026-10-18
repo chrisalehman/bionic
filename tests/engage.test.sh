@@ -1120,6 +1120,34 @@ fi
 # (c) tests/patrol-stale.test.sh is UNCHANGED by this task (AC-3.3): this suite does not
 # edit it, and CI/the wave floor re-runs it verbatim alongside this one.
 
+# (d) AT TASK SCALE NOTHING ARMS (wave-38 T16; D25, AC-5.1). The arm reads the bound plan's
+# patrol cell in the scale profile (payload/scripts/lib/scale.sh): a task-scale run has no
+# Patrol, so engagement binds it and writes no stamp. The pair is the same root at wave scale,
+# which still arms, so the absence is the cell's and not the fixture's.
+R32="$(make_repo_planless)"
+SID32="d4med032-1111-2222-3333-444444444444"
+P32="$(mk_open_plan "$R32" "task-run.plan.md")"
+awk -v s='scale: task' '{ print } NR == 2 { print s }' "$P32" > "$P32.tmp" && mv "$P32.tmp" "$P32"
+expect_eq "…task-scale fixture: the plan carries scale: task" "yes" "$(grep -q '^scale: task$' "$P32" && echo yes || echo no)"
+fire "$SID32" "$(skill_payload "$SID32" "$R32" "bionic:canonical-sdlc")"
+expect_eq "…engagement at scale: task binds the run" "$P32" "$(plan_of "$(marker_path "$R32" "$SID32")")"
+if [ -e "$(patrol_path "$R32" "$SID32")" ]; then
+  no "…and writes no patrol stamp (the task row's patrol cell is no)" "a stamp exists at $(patrol_path "$R32" "$SID32")"
+else
+  ok "…and writes no patrol stamp (the task row's patrol cell is no)"
+fi
+R33="$(make_repo_planless)"
+SID33="d4med033-1111-2222-3333-444444444444"
+P33="$(mk_open_plan "$R33" "wave-run.plan.md")"
+awk -v s='scale: wave' '{ print } NR == 2 { print s }' "$P33" > "$P33.tmp" && mv "$P33.tmp" "$P33"
+fire "$SID33" "$(skill_payload "$SID33" "$R33" "bionic:canonical-sdlc")"
+expect_eq "…paired: engagement at scale: wave binds its run" "$P33" "$(plan_of "$(marker_path "$R33" "$SID33")")"
+if [ -f "$(patrol_path "$R33" "$SID33")" ]; then
+  ok "…and arms the stamp, as before"
+else
+  no "…and arms the stamp, as before" "no stamp at $(patrol_path "$R33" "$SID33")"
+fi
+
 # ============================================================
 section "E12 (wave-23-fixit-1810 T13, critic C-3; D1 Δ4) — never auto-bind to a run another LIVE session holds"
 # ============================================================
