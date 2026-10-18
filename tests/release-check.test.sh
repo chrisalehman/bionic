@@ -44,6 +44,8 @@
 #                   (wave-35 AC-3.2) and names ADR-056 as its amendment, ADR-055 and ADR-056 are Accepted
 #                   (wave-36 D14), read from the docs tree when its files exist. With none of them the
 #                   section prints one skipped line and passes. A doctored copy of each goes red.
+#   §REVERSE        the 1.21.0 summary says in one sentence that it reverses 1.14.0's "until bionic2" promise and names
+#                   the four old spellings T8 kept as aliases (wave-38 AC-9.5; D6). Each rule has a doctored copy.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -869,5 +871,49 @@ doctor r_nod7 sed 's/^### The landing record holds the run (D7, ADR-057)$/### Th
 expect_contains "(r2e) no D7 section: red" "rel: no section for D7" "$(rel_check "$TMP/doctored.r_nod7")"
 doctor r_nodate sed 's/^## 1\.20\.0 — .*/## 1.20.0 —/'
 expect_contains "(r2f) a 1.20.0 heading with no date: red" "rel: the 1.20.0 heading carries no date" "$(rel_check "$TMP/doctored.r_nodate")"
+
+section "§REVERSE — the 1.21.0 entry says it reverses 1.14.0's 'until bionic2' promise and names the aliases kept (wave-38 AC-9.5; D6)"
+
+# The 1.14.0 rename bullet promised the regression's verbs and keys "keep their spelling until bionic2". Wave 38's
+# T8 renamed them, with one alias arm per old spelling (payload/scripts/lib/alias.sh). The 1.21.0 summary carries
+# ONE sentence that says the release reverses that promise and names the four old spellings a user typed, each kept
+# as an alias. Read from the repository's own CHANGELOG.md; each rule has a doctored copy that goes red.
+
+# rev_sentences <file> — the sentences of the 1.21.0 summary (the lead, before its first `### `), one per line
+rev_sentences() { cl_lead "$1" 1.21.0 | flat | awk '{ n = split($0, a, /\. /); for (i = 1; i <= n; i++) print a[i] }'; }
+# rev_check <file> — one `rev:` line per broken rule; no output when all hold
+rev_check() {
+  local f="$1" blk hit a
+  blk="$(cl_block "$f" 1.21.0)"
+  [ -n "$blk" ] || { echo "rev: no 1.21.0 block"; return 0; }
+  grep -q -E '^## 1\.21\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rev: the 1.21.0 heading carries no date"
+  hit="$(rev_sentences "$f" | grep -F -- 'reverses' | grep -F -- '1.14.0' | grep -F -- 'until bionic2' || true)"
+  if [ -z "$hit" ]; then
+    echo "rev: the 1.21.0 summary has no sentence saying it reverses 1.14.0's until bionic2 promise"
+    return 0
+  fi
+  for a in 'floor-run' 'proof-add floor' 'floor:' 'proof:floor'; do
+    has "$hit" '`'"$a"'`' || echo "rev: the reversal sentence does not name the alias $a"
+  done
+  has "$hit" 'alias' || echo "rev: the reversal sentence does not say the old spellings are kept as aliases"
+}
+# --- the extractors are not vacuous
+expect_nonempty "(v0) the 1.21.0 block is found" "$(cl_block "$CL" 1.21.0)"
+expect_nonempty "(v0) …and its summary splits into sentences" "$(rev_sentences "$CL")"
+expect_nonempty "(v0) …and the 1.14.0 promise it reverses still stands in the 1.14.0 block" \
+  "$(cl_block "$CL" 1.14.0 | grep -F -- 'keep their spelling until bionic2' || true)"
+# --- the repository's own entry keeps every rule
+expect_eq "(v1) the repository's 1.21.0 entry says it reverses the promise and names the aliases" "" "$(rev_check "$CL")"
+# --- each rule has a doctored copy that goes red
+doctor v_silent sed '/^## 1\.21\.0 — /,/^### /s/reverses/keeps/'
+expect_contains "(v2a) a summary silent on the reversal: red" "rev: the 1.21.0 summary has no sentence saying it reverses" "$(rev_check "$TMP/doctored.v_silent")"
+doctor v_nobionic2 sed '/^## 1\.21\.0 — /,/^### /s/until bionic2/for now/'
+expect_contains "(v2b) a reversal that does not name the promise: red" "rev: the 1.21.0 summary has no sentence saying it reverses" "$(rev_check "$TMP/doctored.v_nobionic2")"
+doctor v_noalias sed '/^## 1\.21\.0 — /,/^### /s/`proof:floor`/the reads token/'
+expect_contains "(v2c) a reversal that drops one alias: red" "rev: the reversal sentence does not name the alias proof:floor" "$(rev_check "$TMP/doctored.v_noalias")"
+doctor v_no121 sed 's/^## 1\.21\.0 — /## 1.20.9 — /'
+expect_contains "(v2d) no 1.21.0 block: red" "rev: no 1.21.0 block" "$(rev_check "$TMP/doctored.v_no121")"
+doctor v_nodate sed 's/^## 1\.21\.0 — .*/## 1.21.0 —/'
+expect_contains "(v2e) a 1.21.0 heading with no date: red" "rev: the 1.21.0 heading carries no date" "$(rev_check "$TMP/doctored.v_nodate")"
 
 finish
