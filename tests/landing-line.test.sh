@@ -10,6 +10,8 @@
 # a sleeping process whose `<pid>:<start>` the `ready` event names, so "present" is a live process.
 # A publisher is its own process (`ll_pub`), so the lock's holder is never the suite's shell.
 #
+# The proof fact (wave-39 T1; D5, ADR-061): a verdict carries reads=, its suite's read key at the commit, and
+# the reuse test matches on it, never on the commit: §REUSE.
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
 # §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
@@ -2095,8 +2097,9 @@ section "§GRAMMAR: a verdict's admitted= and width= go after log=, so every pos
 # `line/v1|ev=verdict|row=<row>|commit=<candidate>|suite=<suite>|result=<result>|log=<log>|admitted=<epoch|->|width=<J>|at=<UTC>`.
 # admitted= is the gate's admission instant for the run the verdict judges, `-` when no admission is on
 # record for it (wave-38 T6; AC-6.4).
-# The readers that read by position (`_line_proved`, `_line_red_log`, `_line_none_logs`,
-# `_line_head_verdict`, `_line_declared`) read $2..$7; `_line_fold` and the landing report read by key.
+# The readers that read by position (`_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`)
+# read $2..$7; `_line_proved` reads suite= by position and reads= by key (wave-39 T1); `_line_fold` and the
+# landing report read by key.
 # One writer, `_line_verdict_put`, writes every verdict line a landing writes.
 RGR="$(ll_world)"; PGR="$(ll_plan "$RGR")"; RECGR="$(ll_rec "$RGR")"; KGR="$(ll_head "$RGR")"
 # The ready names the row's own commit: a commit the head already holds would be counted published by git.
@@ -2108,15 +2111,15 @@ ll_grammar_put() {  # <plan> — three verdicts by the writer, J=2; a and b admi
     && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" c.test.sh none /logs/c.log
 }
 ll_grammar_read() {  # <record> -> every positional reader's answer, one line
-  printf '%s|%s|%s|%s|%s' "$(_line_proved "$1" T1 "$KGR" a.test.sh && echo proved)" "$(_line_red_log "$1" T1 "$KGR" b.test.sh)" \
+  printf '%s|%s|%s|%s|%s' "$(_line_proved "$1" a.test.sh "reads=$(_line_reads "$RGR" "$KGR" a.test.sh)" >/dev/null && echo proved)" "$(_line_red_log "$1" T1 "$KGR" b.test.sh)" \
     "$(_line_none_logs "$1" T1 "$KGR" c.test.sh)" "$(_line_head_verdict "$1" "$KGR" b.test.sh | tr '\t' ' ')" "$(_line_declared "$1" T1 "$KGR")"
 }
 ll_grammar_put "$PGR"
-expect_regex "(g1) the writer puts admitted= then width= after log=, and at= last" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|at=[0-9T:-]+Z$" \
+expect_regex "(g1) the writer puts admitted=, width= then reads= after log=, and at= last" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|reads=[^|]+\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
 expect_regex "(g1b) …and a verdict given no admission carries admitted=-" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|at=[0-9T:-]+Z$" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|reads=[^|]+\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
 expect_eq "(g2) every positional reader reads it: green proved, the red's log, the none's log, the head's verdict, the declared debt" \
   "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$(ll_grammar_read "$RECGR")"
@@ -2260,7 +2263,7 @@ export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k"
 K_T0="$(ll_req_admitted p1.test.sh)"
 expect_true "(ad0-pre) the gate recorded p1's admission instant" test -n "$K_T0"
 expect_eq "(ad1) every verdict of §ASK's landing carries admitted=<epoch> right after log=" "6 6" \
-  "$(ll_ev "$RK" verdict | awk 'END { print NR }') $(ll_ev "$RK" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|at=')"
+  "$(ll_ev "$RK" verdict | awk 'END { print NR }') $(ll_ev "$RK" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|reads=[^|]+\|at=')"
 expect_eq "(ad2) …p1 to p4 carry the instant before the clock moved, p5 the one after" \
   "p1.test.sh:${K_T0} p2.test.sh:${K_T0} p3.test.sh:${K_T0} p4.test.sh:${K_T0} p5.test.sh:$((K_T0 + 50))" \
   "$(ll_admitted "$RK" "$KK" | cut -d' ' -f1-5)"
@@ -2268,7 +2271,7 @@ expect_eq "(ad3) …each the gate's own admitted= for that run" \
   "$(for s in p1 p2 p3 p4 p5 p6; do printf '%s.test.sh:%s ' "$s" "$(ll_req_admitted "$s.test.sh")"; done | sed 's/ $//')" "$(ll_admitted "$RK" "$KK")"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
 expect_eq "(ad4) §DRAIN's verdicts too, the red judge's at the head among them" "5 5" \
-  "$(ll_ev "$RDR" verdict | awk 'END { print NR }') $(ll_ev "$RDR" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|at=')"
+  "$(ll_ev "$RDR" verdict | awk 'END { print NR }') $(ll_ev "$RDR" verdict | grep -cE '\|log=[^|]+\|admitted=[0-9]+\|width=[0-9]+\|reads=[^|]+\|at=')"
 printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 world_machine 8 8192 40 0.5
 
@@ -2486,5 +2489,62 @@ expect_eq "(y6) the publish: first in line, held by a live run in the checkout; 
 expect_match "(y6) …and the next line gives what the publish said" "waiting: publish: HELD T1 — *41*a.test.sh*" "$(ll_why "$LL_OUT")"
 rm -f "$BIONIC_GATE_DIR/requests/41"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
+
+# ---------------------------------------------------------------------------
+section "§REUSE: a candidate whose suite read the same blobs as a proved one reuses its verdict; no runner starts (wave-39 T1; D5, D8, REQ-1 AC-1.1; ADR-061)"
+#
+# T1 and T2 both land on a.test.sh, whose run writes a line to $LL_SIG/ru-<world>.runs. T1 lands first: one
+# run, one green verdict, its reads= the suite's read key at T1's candidate. T2's candidate is built on T1's and
+# changes only T2.txt, which a.test.sh does not read, so its key is the same: T2's drain prints
+# `reused a.test.sh reads=<h>`, records it, starts no runner, and lands; the record holds one verdict for the
+# suite. MUTANT: the reuse test keyed on commit= again (the pre-1.22.0 rule): T2 runs a.test.sh a second time.
+ll_count_body() {  # <tag> <name> -> a suite that writes one line per run to $LL_SIG/<tag>.runs and ends green
+  printf 'echo run >> "$LL_SIG/%s.runs"\necho "PASS: %s"\necho\necho "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\nexit 0' "$1" "$1" "$2"
+}
+ll_reuse_world() {  # <tag> -> a world whose T1 and T2 land on a.test.sh, which counts its runs in <tag>.runs
+  local r
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T1 a.test.sh; ll_launch "$r" T2 a.test.sh
+  ll_commit_suite "$r" T1 a "$(ll_count_body "$1" a)" || return 1
+  printf '%s' "$r"
+}
+ll_ahash() { ( . "$REPO/payload/scripts/lib/anchors.sh" && reads_hash "$1" "$2" a.test.sh ) 2>/dev/null; }   # <root> <commit>
+RU="$(ll_reuse_world ru)"
+ll_verb "$RU" T1
+KU1="$(ll_head "$RU")"
+expect_eq "(u1-pre) T1 lands on a.test.sh, run once" "0 1" "$LL_RC $(ll_lines "$LL_SIG/ru.runs")"
+HU="$(ll_ahash "$RU" "$KU1")"
+expect_regex "(u1-pre) a.test.sh's read key at T1's candidate is a sha256" '^[0-9a-f]{64}$' "$HU"
+expect_regex "(u1) T1's verdict carries reads=, the read key at its candidate, after width=" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KU1}\\|suite=a\\.test\\.sh\\|result=green\\|log=[^|]+\\|admitted=[^|]+\\|width=[0-9]+\\|reads=${HU}\\|at=" "$(ll_ev "$RU" verdict)"
+ll_verb "$RU" T2
+KU2="$(ll_head "$RU")"
+expect_eq "(u2) T2 lands (exit 0), its candidate built on T1's" "0 $KU1" "$LL_RC $(git -C "$RU" rev-parse "$KU2^1" 2>/dev/null)"
+expect_eq "(u2) …its suite reads the same blobs there: the same key" "$HU" "$(ll_ahash "$RU" "$KU2")"
+expect_contains "(u2) T2's drain prints the reuse, naming the suite and its key" "reused a.test.sh reads=${HU}" "$LL_OUT"
+expect_eq "(u2) …starts no runner: a.test.sh ran once in all" "1" "$(ll_lines "$LL_SIG/ru.runs")"
+expect_eq "(u2) …so the record holds one verdict for the suite" "1" "$(ll_ev "$RU" verdict | grep -c '|suite=a.test.sh|')"
+expect_regex "(u2) …and one reused line: T2's candidate, the suite, the key, the candidate that proved it" \
+  "^line/v1\\|ev=reused\\|row=T2\\|commit=${KU2}\\|suite=a\\.test\\.sh\\|reads=${HU}\\|from=${KU1}\\|at=" "$(ll_ev "$RU" reused)"
+# A VERDICT WITH NO reads= IS NEVER MATCHED (a line written before 1.22.0), beside the same line carrying it.
+RUN="$(ll_world)"; PUN="$(ll_plan "$RUN")"; KUN="$(ll_head "$RUN")"; HUN="$(ll_ahash "$RUN" "$KUN")"
+line_event "$PUN" verdict row=T1 "commit=$KUN" suite=a.test.sh result=green log=- admitted=- width=1 >/dev/null
+expect_false "(u3) a green verdict with no reads= proves nothing" _line_proved "$(ll_rec "$RUN")" a.test.sh "reads=$HUN"
+line_event "$PUN" verdict row=T2 "commit=$KUN" suite=a.test.sh result=green log=- admitted=- width=1 "reads=$HUN" >/dev/null
+expect_eq "(u3) …while the same line carrying reads=<the key> proves it, of any row, naming its commit" "$KUN" \
+  "$(_line_proved "$(ll_rec "$RUN")" a.test.sh "reads=$HUN")"
+expect_false "(u3) …and the unreadable key reads=- matches nothing" _line_proved "$(ll_rec "$RUN")" a.test.sh "reads=-"
+# MUTANT: the reuse test keyed on commit= again. T2's candidate is a new commit, so a.test.sh runs again.
+RUM="$(ll_reuse_world rum)"
+ll_verb "$RUM" T1
+expect_eq "(u4m-pre) the mutant's world: T1 lands, a.test.sh run once" "0 1" "$LL_RC $(ll_lines "$LL_SIG/rum.runs")"
+anchor fn payload/scripts/lib/line.sh 'if c="$(_line_proved "$rec" "$s" "reads=$(_line_reads_of "$cand" "$s")")"; then' _line_carry \
+  'if c="$(_line_proved "$rec" "$s" "commit=$cand")"; then'
+LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_carry ll_drive "$RUM" T2 "$WORLD_ROOT/rum-T2.out"
+ll_wait_file "$WORLD_ROOT/rum-T2.out.rc" 600
+expect_eq "(u4m-pre) the mutant ran: T2 landed (exit 0)" "0" "$(cat "$WORLD_ROOT/rum-T2.out.rc" 2>/dev/null)"
+expect_eq "(u4m) MUTANT reuse keyed on commit=: a.test.sh runs again and a second verdict appears (the rows can fail)" "2 2" \
+  "$(ll_lines "$LL_SIG/rum.runs") $(ll_ev "$RUM" verdict | grep -c '|suite=a.test.sh|')"
+expect_eq "(u4m) …and nothing is reused" "" "$(ll_ev "$RUM" reused)"
 
 finish
