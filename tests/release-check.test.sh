@@ -310,10 +310,10 @@ strike_check() {
     else
       case "$item" in
         "- ($i) Known limit, struck:"*)
-          printf '%s' "$item" | grep -q -E '`[^`]*\.(md|log|tsv)(:[0-9]+)?`' ||
+          grep -q -E '`[^`]*\.(md|log|tsv)(:[0-9]+)?`' <<<"$item" ||
             echo "strike: ($i) is struck and cites no record" ;;
         "- ($i) Known limit, carried:"*)
-          printf '%s' "$item" | grep -q -F 'because' ||
+          grep -q -F 'because' <<<"$item" ||
             echo "strike: ($i) is carried and says no reason (because)" ;;
         *) echo "strike: ($i) is neither struck nor carried" ;;
       esac
@@ -330,7 +330,7 @@ strike_check() {
       i=$((i + 1))
     done
     [ "$hit" = 1 ] && continue
-    printf '%s\n' "$b17" | grep -q -F -x -- "$line" ||
+    grep -q -F -x -- "$line" <<<"$b17" ||
       echo "strike: a 1.16.0 bullet vanished: ${line:0:70}"
   done < <(printf '%s\n' "$u16")
   # the count is stated beside 1.16.0's, and both are the bullets counted
@@ -347,9 +347,9 @@ strike_check() {
   fi
   # AC-1.5: the narrowed limit names the residual and no launcher
   item="$(printf '%s\n' "$b17" | grep -E '^- \(1\) Known limit' || true)"
-  printf '%s' "$item" | grep -q -F "outside the writer's own tree asks as main" ||
+  grep -q -F "outside the writer's own tree asks as main" <<<"$item" ||
     echo "strike: (1) does not say a suite started outside the writer's own tree asks as main"
-  if printf '%s' "$item" | grep -q -i -E 'python|node|awk'; then
+  if grep -q -i -E 'python|node|awk' <<<"$item"; then
     echo "strike: (1) still names a launcher"
   fi
   return 0
@@ -456,20 +456,20 @@ entry_check() {
     if [ "$n" != 1 ]; then
       echo "entry: catalogue item $row is on $n rows, not one"
     else
-      printf '%s\n' "$blk" | grep -E "^\| $row \|" | grep -q -E '`[A-Za-z0-9._-]+\.(md|log)(:[0-9]+)?`' ||
+      grep -E "^\| $row \|" <<<"$blk" | grep -q -E '`[A-Za-z0-9._-]+\.(md|log)(:[0-9]+)?`' ||
         echo "entry: catalogue item $row cites no record"
     fi
   done
   for row in 'proof-add inherited' 'approve regression-2' 'current 7' 'floor-run'; do
-    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the floor rule does not name $row"
+    grep -q -F -- "$row" <<<"$blk" || echo "entry: the floor rule does not name $row"
   done
   for row in 'ADR-053' 'ADR-054' 'Superseded' 'T16-pass-measure.md'; do
-    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the pass removal does not name $row"
+    grep -q -F -- "$row" <<<"$blk" || echo "entry: the pass removal does not name $row"
   done
   for row in 'hook-timeout a1, a2, b, c and g' 'session-start 16.8 and 16.2'; do
-    printf '%s\n' "$blk" | grep -q -F -- "$row" || echo "entry: the deleted timed cases do not name $row"
+    grep -q -F -- "$row" <<<"$blk" || echo "entry: the deleted timed cases do not name $row"
   done
-  printf '%s\n' "$blk" | grep -q -F 'the 1.17.0 block'"'"'s `background-pass` default line' ||
+  grep -q -F 'the 1.17.0 block'"'"'s `background-pass` default line' <<<"$blk" ||
     echo "entry: the 1.17.0 background-pass default line is not corrected"
   stated="$(printf '%s\n' "$blk" | tr '\n' ' ' | sed -n 's/.*The count of Known limits in this block is \([0-9][0-9]*\)\..*/\1/p')"
   actual="$(printf '%s\n' "$blk" | grep -c -E '^- Known limit' || true)"
@@ -483,7 +483,7 @@ entry_check() {
   for n in T28 T29; do
     case "$row" in *"$n"*) ;; *) echo "entry: catalogue item also-3 does not name its fix $n" ;; esac
   done
-  printf '%s\n' "$blk" | grep -q -E 'pending T[0-9]' && echo "entry: the 1.18.0 block still carries a pending T marker"
+  grep -q -E 'pending T[0-9]' <<<"$blk" && echo "entry: the 1.18.0 block still carries a pending T marker"
   for n in T31 T32 T33 T34; do
     # the bullet "- <n> (…" runs to the next bullet or heading; its record is a `<n>-….md` name
     printf '%s\n' "$blk" | awk -v n="$n" '
@@ -590,7 +590,7 @@ corr_check() {
   local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual t13 t13hit
   blk="$(cl_block "$f" 1.19.0)"
   [ -n "$blk" ] || { echo "corr: no 1.19.0 block"; return 0; }
-  printf '%s\n' "$blk" | grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "corr: the 1.19.0 heading carries no date"
+  grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "corr: the 1.19.0 heading carries no date"
   lead="$(cl_lead "$f" 1.19.0)"
   for s in 'zero machine errors' 'D7' 'D14'; do
     has "$lead" "$s" || echo "corr: the lead does not name $s"
@@ -598,7 +598,7 @@ corr_check() {
   mig="$(printf '%s\n' "$lead" | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
   [ -n "$mig" ] || echo "corr: no Migration paragraph"
   for s in $MIG_ROWS; do
-    printf '%s\n' "$mig" | grep -q -w -- "$s" || echo "corr: Migration does not name $s"
+    grep -q -w -- "$s" <<<"$mig" || echo "corr: Migration does not name $s"
   done
   # T13's bullet names the refusal of the two verbs that apply the debt grammar to a carried line (D14; AC-9.2)
   t13="$(printf '%s\n' "$mig" | awk '/^- T13:/ { p = 1; print; next } p && /^- / { p = 0 } p')"
@@ -635,7 +635,7 @@ EOT
   elif [ "$stated" != "$actual" ]; then echo "corr: the count says $stated and Known limits holds $actual"; fi
   for pair in $ROWS_1190; do
     row="${pair%%:*}"; rec="${pair#*:}"
-    printf '%s\n' "$blk" | grep -q -F -- '`'"$rec"'`' || echo "corr: the entry names no record for $row ($rec)"
+    grep -q -F -- '`'"$rec"'`' <<<"$blk" || echo "corr: the entry names no record for $row ($rec)"
   done
   has "$blk" 'T33, T36, T37, T38, T39 and T40' && has "$blk" '`born: floor`' || echo "corr: the entry does not name the six rows born: floor"
   [ "$(cl_block "$f" 1.18.0 | cl_cksum)" = "$BLOCK_1180_CKSUM" ] || echo "corr: the 1.18.0 block is not as released"
@@ -836,13 +836,13 @@ rel_check() {
   local f="$1" blk lim land pair row rec s
   blk="$(cl_block "$f" 1.20.0)"
   [ -n "$blk" ] || { echo "rel: no 1.20.0 block"; return 0; }
-  printf '%s\n' "$blk" | grep -q -E '^## 1\.20\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' || echo "rel: the 1.20.0 heading carries no date"
+  grep -q -E '^## 1\.20\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rel: the 1.20.0 heading carries no date"
   for pair in $ROWS_1200; do
     row="${pair%%:*}"; rec="${pair#*:}"
-    printf '%s\n' "$blk" | grep -q -F -- '`'"$rec"'`' || echo "rel: the entry names no record for $row ($rec)"
+    grep -q -F -- '`'"$rec"'`' <<<"$blk" || echo "rel: the entry names no record for $row ($rec)"
   done
   for s in D3 D4 D5 D6 D7 D8 D9 D10 D11 D12 D13; do
-    printf '%s\n' "$blk" | grep -q -E "^### .*\($s[,)]" || echo "rel: no section for $s"
+    grep -q -E "^### .*\($s[,)]" <<<"$blk" || echo "rel: no section for $s"
   done
   has "$blk" 'timing.tsv' && has "$blk" 'no suite was split' || echo "rel: the entry does not cite timing.tsv with no suite split (AC-1.4)"
   land="$(cl_part "$f" 1.20.0 'The landing numbers')"

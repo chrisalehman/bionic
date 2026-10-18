@@ -1729,7 +1729,7 @@ land_raced() {  # <tree> <arrival text> [action: none|touch|ontop|stage|misread|
 lost_commits() {  # <repo> <list>
   local all; all="$(git -C "$1" rev-list --branches)"
   printf '%s\n' "$2" | while read -r c; do
-    [ -n "$c" ] && ! printf '%s\n' "$all" | grep -qx "$c" && printf '%s\n' "$c"
+    [ -n "$c" ] && ! grep -qx "$c" <<<"$all" && printf '%s\n' "$c"
   done
   return 0
 }
