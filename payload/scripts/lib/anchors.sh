@@ -488,6 +488,7 @@ function text(line, o, arr,   lq) {
   if (line ~ /^[ \t]*#/) return
   if (index(line, "#")) line = uncomment(line)
   scan(line, o, arr)
+  if (closed) { vals(line, o); if (index(line, ".") || index(line, "source")) loads(line, o) }
   if (index(line, "=")) assigns(line, o)
   if (index(line, "find") || index(line, "*")) {
     lq = line; gsub(/["\047]/, "", lq)
@@ -545,6 +546,121 @@ function walk(word, g, s, ctx,   nm, rest, nc, cc, k, nv, vv, m, cand, ncand, x,
       }
     }
   }
+}
+# THE PIECES OF THE CLOSURE (wave-39 T1; closed mode only). word(r): the shell word r begins with, raw: quotes, $( )
+# and ${ } kept whole. unq(w): w with its quote marks dropped. lastseg(w): what follows the last `/` outside
+# $( ) and ${ }, the file name it spells. onevar(g): the name of the one variable g is (`$x`, `${x}`, `${x%…}`;
+# `@` for a positional), else "".
+function word(r,   i, c, n2, L, q, d) {
+  L = length(r); q = ""; d = 0
+  for (i = 1; i <= L; i++) {
+    c = substr(r, i, 1)
+    if (d == 0 && q == "\047") { if (c == "\047") q = ""; continue }
+    if (c == "\\") { i++; continue }
+    n2 = substr(r, i + 1, 1)
+    if (c == "$" && (n2 == "(" || n2 == "{")) { d++; i++; continue }
+    if (d > 0) { if (c == "(" || c == "{") d++; else if (c == ")" || c == "}") d--; continue }
+    if (q == "\"") { if (c == "\"") q = ""; continue }
+    if (c == "\"" || c == "\047") { q = c; continue }
+    if (c ~ /[ \t;|&<>)]/) break
+  }
+  return substr(r, 1, i - 1)
+}
+function unq(w) { gsub(/["\047]/, "", w); return w }
+function lastseg(w,   i, c, n2, L, d, p) {
+  L = length(w); d = 0; p = 0
+  for (i = 1; i <= L; i++) {
+    c = substr(w, i, 1); n2 = substr(w, i + 1, 1)
+    if (c == "\\") { i++; continue }
+    if (c == "$" && (n2 == "(" || n2 == "{")) { d++; i++; continue }
+    if (d > 0) { if (c == "(" || c == "{") d++; else if (c == ")" || c == "}") d--; continue }
+    if (c == "/") p = i
+  }
+  return substr(w, p + 1)
+}
+function onevar(g,   n, i, c, L, d) {
+  if (g ~ /^\$[0-9@*#]$/) return "@"
+  if (g ~ /^\$[A-Za-z_][A-Za-z0-9_]*$/) return substr(g, 2)
+  if (substr(g, 1, 2) != "${") return ""
+  L = length(g); d = 0
+  for (i = 2; i <= L; i++) { c = substr(g, i, 1); if (c == "{") d++; else if (c == "}") { d--; if (d == 0 && i < L) return "" } }
+  if (d != 0) return ""
+  n = substr(g, 3)
+  if (n ~ /^[0-9@*#]/) return "@"
+  if (n !~ /^[A-Za-z_]/) return ""
+  sub(/[^A-Za-z0-9_].*$/, "", n); return n
+}
+# vals(line, o): each `NAME=<word>` and `for NAME in <words>` of owner o, kept as the values of NAME: all of them
+# (av[o, NAME], read in END for a suite whose helper sets NAME) and the latest (last[o, NAME], what a load on a
+# later line of the same text reads: a text reuses a name, so the nearest setting before the load is its value).
+function vals(line, o,   r, nm, v, m, n, w, i) {
+  r = line
+  while (match(r, /(^|[ \t;&|(])[A-Za-z_][A-Za-z0-9_]*=/)) {
+    nm = substr(r, RSTART, RLENGTH - 1); sub(/^[ \t;&|(]/, "", nm)
+    r = substr(r, RSTART + RLENGTH); v = word(r); r = substr(r, length(v) + 1)
+    av[o, nm] = av[o, nm] "\034" unq(v); last[o, nm] = "\034" unq(v)
+  }
+  if (match(line, /(^|[ \t;&|(])for[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]/)) {
+    m = substr(line, RSTART, RLENGTH); sub(/^[ \t;&|(]*for[ \t]+/, "", m); sub(/[ \t]+in[ \t]$/, "", m)
+    r = substr(line, RSTART + RLENGTH); sub(/;.*$/, "", r)
+    n = split(r, w, /[ \t]+/)
+    last[o, m] = ""
+    for (i = 1; i <= n; i++) if (w[i] != "") { av[o, m] = av[o, m] "\034" unq(w[i]); last[o, m] = last[o, m] "\034" unq(w[i]) }
+  }
+}
+# loads(line, o): each `. <word>` / `source <word>` of owner o whose file name holds an expansion. A computed
+# name (`${n}.sh`, `$a$b`, `$(…)`) is unresolvable at once (un[o]); a name that is one variable is judged in
+# END against the values of that variable: the file name alone (lv: `. "$d/$f"`) or the whole word (lw: `. "$lib"`).
+function loads(line, o,   r, w, g, v) {
+  r = line
+  while (match(r, /(^|[;&|({!]|then[ \t]|do[ \t]|else[ \t])[ \t]*(\.|source)[ \t]+/)) {
+    r = substr(r, RSTART + RLENGTH); w = word(r); r = substr(r, length(w) + 1); w = unq(w)
+    if (w == "" || w ~ /^-/) continue
+    g = lastseg(w)
+    if (g !~ /[$`]/) continue
+    v = onevar(g)
+    if (v == "") { un[o] = un[o] "\034" w; continue }
+    if (v != "@" && (o, v) in last) { v = judge(last[o, v], v, g == w); if (v != "") un[o] = un[o] "\034" v; continue }
+    if (g == w) lw[o, ++nlw[o]] = v; else lv[o, ++nlv[o]] = v
+  }
+}
+# ctext(line, c): one line of a script the closure may reach (not a suite, prelude or helper): its names into
+# cp, its values and loads.
+function ctext(line, c) {
+  if (line ~ /^[ \t]*#/) return
+  if (index(line, "#")) line = uncomment(line)
+  scan(line, c, cp)
+  vals(line, c)
+  if (index(line, ".") || index(line, "source")) loads(line, c)
+}
+# segok(v, ctx, whole): "" when the load naming variable v resolves against the values the texts in ctx
+# (\034-led) give it, else why it does not. A value is spelled (its file name has no expansion), one variable
+# (one hop, not followed: it names a path spelled where it is set), a positional (spelled at the call site, which
+# the name scan reads), or computed (unresolvable). A file name that is one variable needs a spelled value; a
+# whole word that is one variable needs only no computed one.
+function segok(v, ctx, whole,   nc, cc, k, vl) {
+  if (v == "@") return ""
+  nc = split(ctx, cc, "\034"); vl = ""
+  for (k = 2; k <= nc; k++) if ((cc[k], v) in av) vl = vl av[cc[k], v]
+  return judge(vl, v, whole)
+}
+# judge(vl, v, whole): the verdict on the values vl (\034-led) of variable v, as segok states it.
+function judge(vl, v, whole,   nv, vv, m, any, g) {
+  nv = split(vl, vv, "\034"); any = 0
+  for (m = 2; m <= nv; m++) {
+    g = lastseg(vv[m])
+    if (g !~ /[$`]/) { any = 1; continue }
+    if (onevar(g) == "@") { any = 1; continue }
+    if (onevar(g) != "" && g == vv[m]) continue
+    return "$" v "=" vv[m]
+  }
+  return (whole || any) ? "" : "$" v " has no spelled value"
+}
+function unres(o, ctx,   i, why) {
+  if (un[o] != "") return substr(un[o], 2)
+  for (i = 1; i <= nlv[o]; i++) if ((why = segok(lv[o, i], ctx, 0)) != "") return why
+  for (i = 1; i <= nlw[o]; i++) if ((why = segok(lw[o, i], ctx, 1)) != "") return why
+  return ""
 }
 function globre(g,   o) {
   if (g in gre) return gre[g]
@@ -608,8 +724,14 @@ $1 == "S" {
 $1 == "H" {
   h = $2
   if (h !~ /^tests\/[^\/]*\.prelude\.sh$/ && h !~ /^tests\/lib\/[^\/]*\.sh$/) next
-  hfile[h] = 1
+  hfile[h] = 1; if (closed) isc[h] = 1
   text(substr($0, length(h) + 4), h, hp); next
+}
+$1 == "C" {
+  c = $2
+  if (!closed || c ~ /^tests\/[^\/]*\.(test|prelude)\.sh$/ || c ~ /^tests\/lib\/[^\/]*\.sh$/) next
+  isc[c] = 1
+  ctext(substr($0, length(c) + 4), c); next
 }
 END {
   for (k in pair) {
@@ -633,11 +755,42 @@ END {
     }
   }
   for (k in fan) out[k] = 1
-  for (k in out) {
-    split(k, kk, "\t")
-    if (!((k in nar) && !(k in bad))) { print k; continue }
-    n = split(nar[k], L, "\034")
-    for (i = 2; i <= n; i++) print kk[1] "#" L[i] "\t" kk[2]
+  # THE PLAIN INDEX (closed=0): every pair, a narrowed one as <file>#<name> (wave-39 T3).
+  if (!closed) {
+    for (k in out) {
+      split(k, kk, "\t")
+      if (!((k in nar) && !(k in bad))) { print k; continue }
+      n = split(nar[k], L, "\034")
+      for (i = 2; i <= n; i++) print kk[1] "#" L[i] "\t" kk[2]
+    }
+    exit
+  }
+  # THE CLOSURE (wave-39 T1; A-orch-3): from the files the rules above give a suite (and its prelude, D8),
+  # every script reached is read too: what it names (cp; the names of a helper, hp), and its WANT libraries. A
+  # script whose load cannot be resolved (unres) marks the suite `!`, which the key reads as the whole tree.
+  for (k in cp) { split(k, kk, "\t"); if (kk[1] != kk[2] && kk[1] ~ /\.sh$/) adj[kk[2]] = adj[kk[2]] "\034" kk[1] }
+  for (k in hp) { split(k, kk, "\t"); if (kk[1] != kk[2] && kk[1] ~ /\.sh$/) adj[kk[2]] = adj[kk[2]] "\034" kk[1] }
+  for (c in want) if (c in isc) {
+    n = split(want[c], L, /[ \t]+/)
+    for (i = 1; i <= n; i++) if (L[i] ~ /^[A-Za-z0-9_.-]+$/ && (("payload/scripts/lib/" L[i]) in files)) adj[c] = adj[c] "\034payload/scripts/lib/" L[i]
+  }
+  for (k in out) { split(k, kk, "\t"); if (kk[2] in suite) seed[kk[2]] = seed[kk[2]] "\034" kk[1] }
+  for (s in suite) {
+    p = s; sub(/\.test\.sh$/, ".prelude.sh", p)
+    if (p in files) seed[s] = seed[s] "\034" p
+    why = unres(s, "\034" s hn[s]); if (why != "") why = s ": " why
+    qn = 0; n = split(seed[s], L, "\034")
+    for (i = 2; i <= n; i++) if (!((s, L[i]) in vis)) { vis[s, L[i]] = 1; Q[++qn] = L[i] }
+    for (qi = 1; qi <= qn; qi++) {
+      f = Q[qi]
+      if (!(f in isc)) continue
+      if (!(f in uw)) uw[f] = unres(f, "\034" f)
+      if (why == "" && uw[f] != "") why = f ": " uw[f]
+      n = split(adj[f], L, "\034")
+      for (i = 2; i <= n; i++) if (!((s, L[i]) in vis)) { vis[s, L[i]] = 1; Q[++qn] = L[i] }
+    }
+    for (qi = 1; qi <= qn; qi++) print Q[qi] "\t" s
+    if (why != "") print "!\t" s "\t" why
   }
 }'
 
@@ -660,21 +813,111 @@ _rd_refusals() {  # <at>
     }'
 }
 
+# The scan's input stream at <at>; `closed` adds every line of every script (C), which the closure reads.
+_rd_feed() {  # <root> <at> [closed]
+  local root="$1" at="$2"
+  _rd_files "$root" "$at" | sed 's/^/F	/'
+  _rd_grep "$root" "$at" W '^[[:space:]]*BIONIC_LIB_WANT=' '*.sh' . '*.sh'
+  anchors_extract "$root" "$at" | awk -F'\t' '$7 == "literal" { print "P\t" $4 "\t" $1 }'
+  _rd_grep "$root" "$at" S '' 'tests/*.test.sh' tests '*.test.sh' 1
+  _rd_grep "$root" "$at" H '' 'tests/*.prelude.sh' tests '*.prelude.sh' 1
+  _rd_grep "$root" "$at" H '' 'tests/lib/*.sh' tests/lib '*.sh' 1
+  [ "${3:-}" != closed ] || _rd_grep "$root" "$at" C '' '*.sh' . '*.sh'
+}
+
 reads_index() {  # <root> <at>
   local root="${1:-}" at="${2:--}" decl rc=0
   decl="$(reads_declared "$root" "$at")"
   if [ -n "$decl" ] && printf '%s\n' "$decl" | awk -F'\t' '$6 != "ok" { bad = 1 } END { exit !bad }'; then
     printf '%s\n' "$decl" | _rd_refusals "$at" >&2; rc=1
   fi
-  { _rd_files "$root" "$at" | sed 's/^/F	/'
-    _rd_grep "$root" "$at" W '^[[:space:]]*BIONIC_LIB_WANT=' '*.sh' . '*.sh'
-    anchors_extract "$root" "$at" | awk -F'\t' '$7 == "literal" { print "P\t" $4 "\t" $1 }'
-    _rd_grep "$root" "$at" S '' 'tests/*.test.sh' tests '*.test.sh' 1
-    _rd_grep "$root" "$at" H '' 'tests/*.prelude.sh' tests '*.prelude.sh' 1
-    _rd_grep "$root" "$at" H '' 'tests/lib/*.sh' tests/lib '*.sh' 1
+  { _rd_feed "$root" "$at"
     [ -z "$decl" ] || printf '%s\n' "$decl" | awk -F'\t' '$6 != "nonliteral" { print "N\t" $1 "\t" $4 "\t" $5 "\t" ($6 == "ok" ? "ok" : "bad") }'
-  } | awk "$_RD_AWK" | _anc_group
+  } | awk -v closed=0 "$_RD_AWK" | _anc_group
   return "$rc"
+}
+
+# ---------------------------------------------------------------------------------------------------
+# THE READ SET AND THE PROOF FACT'S KEY (wave-39 T1; D5, D8, A-orch-3; ADR-061). A landing's verdict is keyed
+# by what its suite read, never by the commit it ran on (lib/line.sh `_line_verdict_put`, `_line_proved`).
+#
+#   reads_set <root> <at> <suite>    the suite's read set at <at>, sorted, one path per line; or the one line
+#       `tree <why>` when the key is the whole tree. The set is what reads_index derives for the suite (rules
+#       1 to 6), plus its prelude (`tests/<name>.prelude.sh`, named or not, D8), CLOSED over every script in it
+#       (A-orch-3): a script reached reads what its text names outside comments (the name scan, rule 1: the
+#       scripts it runs, the libraries it loads, `. "$lib"` included, where lib's path is spelled) and its
+#       BIONIC_LIB_WANT libraries, transitively. So a library loaded by a library — lib/worktree.sh loading
+#       lib/line.sh — is read, which reads_index's rule 2 misses. reads_index itself is unchanged: brief, the
+#       dispatch wall and the floor judge read the same index as before.
+#   reads_hash <root> <at> <suite>   the key: sha256 of the set's sorted `<path> <blob id>` lines at <at>, or
+#       `tree:<tree id of <at>>` when the set cannot be derived soundly: a load (`.`/`source`) in the suite, its
+#       helpers or a reached script whose FILE NAME is computed (`. "$d/$name"` with name set by `$(…)`, a
+#       `${n}.sh`), or a suite the scan does not read (outside tests/, absent at <at>). A load whose file name
+#       is one variable resolves when that variable's values (its `NAME=` and `for NAME in` lines in the same
+#       text) spell a name; a whole word that is one variable (`. "$LIB"`) resolves unless a value of it is
+#       computed; a positional is spelled at its call site.
+#   reads_hashes <root> <at> <suite>...  `<suite> TAB <key>` for each, the index read once.
+# <suite> is as lands_on= names it: a path, or a file name found as `_line_suite_path` finds it (tests/<name>,
+# else the one file of that name). <at> is a commit, read out of git's objects, never the working tree.
+# STILL MISSED, as in reads_index: what a run opens that no text names (a data file a script builds a path
+# to), and what the closure does not follow: a test file run by another test file, the directory rule
+# inside a reached script.
+
+_rd_closed() {  # <root> <at> -> `<file> TAB <suite>` per file of each suite's set; `! TAB <suite> TAB <why>`
+  _rd_feed "$1" "$2" closed | LC_ALL=C awk -v closed=1 "$_RD_AWK"   # bytes: a script may hold a byte no locale decodes
+}
+_rd_suite_path() {  # <root> <at> <suite as lands_on= holds it> -> its path at <at>
+  local f hit="" n=0
+  case "$3" in */*) printf '%s\n' "$3"; return 0 ;; esac
+  if ! git -C "$1" cat-file -e "$2:tests/$3" 2>/dev/null; then
+    while IFS= read -r f; do
+      case "$f" in "$3"|*/"$3") hit="$f"; n=$((n + 1)) ;; esac
+    done <<RD_LS
+$(git -C "$1" -c core.quotepath=off ls-tree -r --name-only "$2" 2>/dev/null)
+RD_LS
+    [ "$n" -ne 1 ] || { printf '%s\n' "$hit"; return 0; }
+  fi
+  printf 'tests/%s\n' "$3"
+}
+_rd_sha256() {  # stdin -> its sha256, hex
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{ print $1 }'
+}
+
+reads_set() {  # <root> <at> <suite>
+  local p
+  p="$(_rd_suite_path "$1" "$2" "$3")"
+  _rd_closed "$1" "$2" | awk -F'\t' -v s="$p" '
+    $1 == "!" { if ($2 == s) why = $3; next }
+    $2 == s { f[++n] = $1 }
+    END {
+      if (why != "") { print "tree " why; exit }
+      if (n == 0) { print "tree " s ": not a suite the scan reads at this commit"; exit }
+      for (i = 1; i <= n; i++) print f[i]
+    }' | LC_ALL=C sort
+}
+
+reads_hashes() {  # <root> <at> <suite>...
+  local root="$1" at="$2" tree closed blobs s p lines
+  shift 2
+  tree="$(git -C "$root" rev-parse --verify -q "${at}^{tree}" 2>/dev/null)" || return 1
+  closed="$(_rd_closed "$root" "$at")"
+  blobs="$(git -C "$root" -c core.quotepath=off ls-tree -r "$at" 2>/dev/null)"
+  for s in "$@"; do
+    p="$(_rd_suite_path "$root" "$at" "$s")"
+    lines="$( { printf '%s\n' "$blobs" | sed 's/^/B	/'; printf '%s\n' "$closed"; } | awk -F'\t' -v s="$p" '
+      $1 == "B" { split($2, m, " "); blob[$3] = m[3]; next }
+      $1 == "!" { if ($2 == s) bad = 1; next }
+      $2 == s && ($1 in blob) { print $1 " " blob[$1]; n++ }
+      END { if (bad || n == 0) print "!" }' | LC_ALL=C sort)"
+    case "$lines" in
+      '!'*) printf '%s\ttree:%s\n' "$s" "$tree" ;;
+      *) printf '%s\t%s\n' "$s" "$(printf '%s\n' "$lines" | _rd_sha256)" ;;
+    esac
+  done
+}
+
+reads_hash() {  # <root> <at> <suite>
+  reads_hashes "$1" "$2" "$3" | awk -F'\t' 'NR == 1 { print $2 }'
 }
 
 # reads_suites <root> <at> <cell> -> the suites reads_index names, at <at>, for any file an entry of the Files cell
