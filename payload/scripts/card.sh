@@ -2250,7 +2250,7 @@ _card_settles() {
           review)
             [ "${_cs_f[4]:-}" = failing ] || return 1
             CF_SETTLE="${CF_SETTLE}waive:${_cs_f[1]}"$'\n' ;;
-          floor|regression)
+          regression)
             proof_question_ok regression 2>/dev/null || return 1
             CF_SETTLE="${CF_SETTLE}waive:regression"$'\n' ;;
           *) return 1 ;;

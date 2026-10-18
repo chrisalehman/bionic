@@ -410,6 +410,11 @@ expect_contains "AL-5b …the prose beside log_floor_finding, which the eval's g
 # a small quote and heredoc state machine and prints each admitted line that sits in either place. A single-quoted
 # string left open is not reported: in this tree those are awk programs (lib/units.sh's scheduler, printed by
 # printf '%s' and run by awk), whose comments are code.
+# THE STATE IS A STACK (wave-38 T33, A-T33-2): s single-quoted, d double-quoted, c a $( … ) body, p a ( … ) inside
+# one. A $( inside a double-quoted string opens code again, so its quotes nest and do not close the outer string:
+# `v="$(K="$key" \` leaves one string open, not two closed and one open. Read flat, lib/gate.sh's budget verdict
+# (`verdict="$(GATE_BUDGET_KEY="$key" … awk '…')"`) turned the walk inside out from there on, and the comment
+# block above gate_width_ask read as a printed string. A case arm's `x)` inside a $( … ) closes it early.
 AL_GUARD_AWK=''
 read -r -d '' AL_GUARD_AWK <<'AWK' || true
 FNR == NR { if ($1 == f) W[$2] = 1; next }
@@ -420,15 +425,26 @@ term != "" {
   next
 }
 {
-  if (q == "\"" && (FNR in W)) print f ":" FNR ": in an open double-quoted string"
+  if (substr(S, length(S)) == "d" && (FNR in W)) print f ":" FNR ": in an open double-quoted string"
   line = $0; n = length(line); opener = ""
   for (i = 1; i <= n; i++) {
-    c = substr(line, i, 1)
-    if (q == "\047") { if (c == "\047") q = ""; continue }
-    if (q == "\"") { if (c == "\\") { i++; continue } if (c == "\"") q = ""; continue }
+    c = substr(line, i, 1); q = substr(S, length(S))
+    if (q == "s") { if (c == "\047") S = substr(S, 1, length(S) - 1); continue }
+    if (q == "d") {
+      if (c == "\\") { i++; continue }
+      if (c == "\"") { S = substr(S, 1, length(S) - 1); continue }
+      if (substr(line, i, 2) == "$(") { S = S "c"; i++ }
+      continue
+    }
     if (c == "\\") { i++; continue }
     if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t;(|&]/)) break
-    if (c == "\047" || c == "\"") { q = c; continue }
+    if (c == "\047") { S = S "s"; continue }
+    if (c == "\"") { S = S "d"; continue }
+    if (substr(line, i, 2) == "$(") { S = S "c"; i++; continue }
+    if (q == "c" || q == "p") {
+      if (c == "(") { S = S "p"; continue }
+      if (c == ")") { S = substr(S, 1, length(S) - 1); continue }
+    }
     if (substr(line, i, 2) == "<<" && substr(line, i, 3) != "<<<") {
       h = substr(line, i + 2); st = (h ~ /^-/); sub(/^-/, "", h); sub(/^[ ]*/, "", h); gsub(/["\047\\]/, "", h)
       if (match(h, /^[A-Za-z_][A-Za-z_0-9]*/)) { opener = substr(h, 1, RLENGTH); ostrip = st }
@@ -450,12 +466,22 @@ AL_GUARD="$(al_guard "$AL_ROOT")"
 expect_nonempty "AL-6 the guard walks the comment lines the class admits (the reader's positive)" "$(cat "$TMPROOT/al-adm.tsv" 2>/dev/null)"
 expect_eq "AL-6b no admitted comment line sits in a heredoc body or an open double-quoted string (found: $(printf '%s' "$AL_GUARD" | head -c 400))" \
   "0" "$(printf '%s' "$AL_GUARD" | /usr/bin/grep -c . | tr -d ' ')"
-printf '%s\n' 'cat <<EOF' '# the floor, printed by a heredoc' 'EOF' '  say "a printed message' '# the floor, inside the printed string"' \
+# The third plant is gate.sh's shape, quotes nested in a $( … ) in a string, and a comment after it: a flat walk
+# reads that comment as inside a printed string, the stack does not (AL-6g beside the two it does find).
+printf '%s\n' '  v="$(K="$k" \' "    awk 'BEGIN { gsub(/[\`\"]/, \"\", s) }')\"" "  msg=\"the \${who}'s line\"" \
+  '# the floor, after quotes nested in a substitution' \
+  'cat <<EOF' '# the floor, printed by a heredoc' 'EOF' '  say "a printed message' '# the floor, inside the printed string"' \
   >> "$AL_MUT/hooks/session-poker.sh"
 expect_true "AL-6c precondition: the guard's plants still parse" bash -n "$AL_MUT/hooks/session-poker.sh"
 AL_MGUARD="$(al_guard "$AL_MUT")"
 expect_eq "AL-6d the guard finds both planted lines in the copy" "2" "$(printf '%s' "$AL_MGUARD" | /usr/bin/grep -c . | tr -d ' ')"
 expect_contains "AL-6e …the heredoc's" "in a heredoc body (EOF)" "$AL_MGUARD"
 expect_contains "AL-6f …and the open string's" "in an open double-quoted string" "$AL_MGUARD"
+AL_NESTED_LN="$(/usr/bin/grep -n '^# the floor, after quotes nested' "$AL_MUT/hooks/session-poker.sh" | cut -d: -f1)"
+expect_nonempty "AL-6g precondition: the nested plant's line is found" "$AL_NESTED_LN"
+expect_contains "AL-6g …and the class admits it: the guard walks it" "$(printf 'hooks/session-poker.sh\t%s' "$AL_NESTED_LN")" \
+  "$(cat "$TMPROOT/al-adm.tsv" 2>/dev/null)"
+expect_absent "AL-6g …and the comment after quotes nested in a substitution is not reported" \
+  "hooks/session-poker.sh:$AL_NESTED_LN:" "$AL_MGUARD"
 
 finish
