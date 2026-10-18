@@ -20,7 +20,8 @@
 #   ready     row name commit branch tree suites debt carrier age   (a carrier is `<pid>:<start>`; age
 #             `<first>:<seq>`, the lease the gate orders the entry by, wave-38 T30)
 #   candidate row base commit tree
-#   verdict   row commit suite result log      (green | red | none | discarded)
+#   verdict   row commit suite result log      (green | red | none | discarded | absent: a suite the
+#             candidate's base holds and the candidate does not, log `-`; wave-39 T6, A-orch-5)
 #   standing  head suite lines log cause against   (cause: environment | code; against: the run that
 #             disagrees, `<stamp|verdict>:<commit>@<at>`, or `-`; wave-33 T2, AC-7.2)
 #   returned  row why detail                   (red | conflict | guard)
@@ -77,6 +78,11 @@ fi
 # landing sets kind=hand, the git user and the reason. Both set the session the publish's plan write
 # and roster mark run under (LINE_SID; wave-28 T6).
 LINE_KIND="queue"; LINE_BY="-"; LINE_WHY="-"; LINE_SID=""; LINE_MARKED=""
+
+# THE SUITE BAR (wave-39 T6; D1; spec §3 "the two bars"): ten minutes of the gate's promise (`_gate_seconds`).
+# Defined here and nowhere else; the landing line's refusal of a Lands-on suite promising more is T7's
+# (A-orch-5), so nothing reads it yet.
+LINE_SUITE_BAR=600
 
 _line_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
@@ -185,7 +191,7 @@ _line_fold() {  # <record>
             m = split(s, names, ",")
             for (j = 1; j <= m; j++) {
               r = v[e, c, names[j]]
-              if (r == "green") continue
+              if (r == "green" || r == "absent") continue
               if (r == "red") {
                 if (names[j] == debt[e]) dec = 1
                 else if ((cbase[e], names[j]) in stand) std = 1
@@ -985,6 +991,13 @@ EOF
     for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
       [ "$s" != none ] || break
       _line_proved "$rec" "$row" "$cand" "$s" && continue
+      # A SUITE THE ROW REMOVED IS NOT OWED (wave-39 T6; A-orch-5): a row that removes or splits a suite still
+      # names it on the Lands-on its brief gave, and a runner could only fail to start it (two `none`s stall the
+      # entry). Held by the candidate's base and not by the candidate, it is recorded once, `absent` with no log,
+      # and counts as proved; nothing runs for it. A name the base lacks too still stalls (wave-34 T27).
+      if _line_removed "$root" "$cbase" "$cand" "$s"; then
+        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; continue
+      fi
       said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
         said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
@@ -1097,11 +1110,12 @@ _line_closed() {  # <rec> <row> <name> [<plan>]
   printf '%s\n' "${last:-RETURNED ${2}}"; return 1
 }
 
-# A green verdict for <suite> on <candidate> since the entry opened.
+# A green verdict for <suite> on <candidate> since the entry opened, or an absent one (the row removed the
+# suite; wave-39 T6).
 _line_proved() {  # <rec> <row> <candidate> <suite>
   awk -F'|' -v r="row=$2" -v c="commit=$3" -v s="suite=$4" '
     $3 == r && ($2 == "ev=published" || $2 == "ev=returned") { ok = 0 }
-    $2 == "ev=verdict" && $3 == r && $4 == c && $5 == s { ok = ($6 == "result=green") }
+    $2 == "ev=verdict" && $3 == r && $4 == c && $5 == s { ok = ($6 == "result=green" || $6 == "result=absent") }
     END { exit !ok }' "$1" 2>/dev/null
 }
 
@@ -1576,6 +1590,21 @@ LINE_LS
     [ "$n" -ne 1 ] || { printf '%s\n' "$hit"; return 0; }
   fi
   printf 'tests/%s\n' "$name"
+}
+# A SUITE THE ROW REMOVED (wave-39 T6; A-orch-5): 0 when <base> holds the suite and <candidate> does not, each
+# read as git holds it with the lookup above: a path-qualified name at its path; a bare one at `tests/<name>` or
+# as any tracked file of that name. 1 otherwise: a suite neither holds (a name no tree has, the case that stalls,
+# wave-34 T27) is not the row's removal, and neither is a commit that is not one here.
+_line_removed() {  # <root> <base> <candidate> <suite as lands_on= holds it>
+  _line_holds "$1" "${2:-}" "${4:-}" && ! _line_holds "$1" "${3:-}" "${4:-}" \
+    && git -C "$1" cat-file -e "${3:-}^{commit}" 2>/dev/null
+}
+_line_holds() {  # <root> <commit> <suite> -> 0 when <commit> is a commit holding the suite
+  local root="$1" c="${2:-}" name="${3:-}"
+  { [ -n "$c" ] && [ -n "$name" ] && git -C "$root" cat-file -e "${c}^{commit}" 2>/dev/null; } || return 1
+  case "$name" in */*) git -C "$root" cat-file -e "${c}:${name}" 2>/dev/null; return ;; esac
+  git -C "$root" cat-file -e "${c}:tests/${name}" 2>/dev/null && return 0
+  git -C "$root" ls-tree -r --name-only "$c" 2>/dev/null | awk -F/ -v n="$name" '$NF == n { f = 1 } END { exit !f }'
 }
 # The runner's body, in its own `bash -c`: ask, run, sample the gate while the suite runs (a locked
 # read raises the run's peak), end the request with the suite's code. It stops its suite if the

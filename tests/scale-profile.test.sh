@@ -185,7 +185,7 @@ expect_contains "T.w8 …for the Patrol" "no Patrol stamp exists" "$GATE_VERR"
 # (4) CLOSE-OUT: a task-scale plan on `fix/x`, not yet merged. `check` refuses no branch shape,
 # and its integrate act is the PR: the merge line carries the `gh pr create` command for the
 # working branch against the integration branch, and nothing is merged. The wave-scale pair on
-# the same branch is refused for its shape. `run` recording the command is close-out.test.sh's
+# the same branch is refused for its shape. `run` recording the command is close-out-1.test.sh's
 # ANY-BRANCH section (its fixtures carry the facts a close needs).
 sp_co_root() {  # <name> <scale> -> a repository with main and an unmerged fix/x, and a plan at Step 8
   local d="$SANDBOX/co-$1" p
