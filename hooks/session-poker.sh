@@ -514,7 +514,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
-  die "  bash ${HOOK_DIR}/session-poker.sh handoff [<path>] [--mid-flight|--order|--rulings|--lessons|--risks '<text>']…   write the handoff file, record/<wave>/handoff.md or <path> under the docs root: kind line, sitrep head, machine lines, the five human lines (a flag's text, else carried from the previous file), safe to clear or wait N minutes, and /bionic:canonical-sdlc <path> last; the plan's ## Handoff becomes the one line handoff: <path> written <local time>; a delivered plan gets the closed form"
+  die "  bash ${HOOK_DIR}/session-poker.sh handoff [<path>] [--mid-flight|--order|--rulings|--lessons|--risks '<text>']…   write the handoff file, record/<wave>/handoff.md or <path> under the docs root: kind line, sitrep head, machine lines, the five human lines (a flag's text, else carried from the previous file), safe to clear or wait N minutes, and /bionic:canonical-sdlc <path> last; the plan's ## Handoff becomes the one line handoff: <path> written <local time>; a closed plan, delivered or parked, gets the closed form"
   die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: bind the plan the handoff file names, arm the stamp, adopt; print task-list: lines, the recap (settled:, open:, owned-by-user:, standing-order:, branch:, plan:, tree:), step-file:, the CronCreate (patrol-interval:, patrol:); then tick. The closed form prints its recap and resumes nothing"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md; --all: every run's, keyed by wave, with the ADRs (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
@@ -10747,17 +10747,17 @@ EOF
   # ListAgents answer names (the roster's open rows, marked unverified, when no fresh answer can say) with the run
   # state the tick prints. The plan's `## Handoff` becomes the heading and one line `handoff: <path> written <local
   # time>`, through the plan transaction every plan verb takes (copy, dry commit through the real gate, checksum,
-  # swap), placed before `## Not Doing` when the plan has none. A delivered plan (a `delivered:` Step-9 line) gets the
-  # closed form instead: `resume point: NONE — DELIVERED at <its time>; <integration> @ <sha>.` as line 2, the human
-  # lines kept, the door last. REFUSED (1), nothing written: no `## Tasks`, no `## SDLC State`, a closed run that
+  # swap), placed before `## Not Doing` when the plan has none. A closed plan (a `delivered:` Step-9 line) gets the
+  # closed form instead, its `resume point:` line 2 and its `branch:` line printed by close-out.sh closed-form, the one
+  # writer of both (PARKED on a parked run, NONE — DELIVERED otherwise), the human lines kept, the door last. REFUSED (1), nothing written: no `## Tasks`, no `## SDLC State`, a closed run that
   # records no delivery; (2): a path that is no .md under the docs root, lib/proof.sh or lib/line.sh unreadable.
   handoff)
     plan_verb_open handoff closed-ok
-    HO_DELIVERED=no
+    HO_CLOSED=no
     case "$(session_run "$PV_REPO" "$(session_id)")" in
       'bound-closed '*)
         if /usr/bin/grep -qE '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:.*delivered:' "$PV_PLAN"; then
-          HO_DELIVERED=yes
+          HO_CLOSED=yes
         else
           die "REFUSED — handoff writes the plan this session is bound to, and it has no bound open run (bound-closed $PV_PLAN), nor a delivered one."
           exit 1
@@ -10894,16 +10894,24 @@ EOF
     HO_SAFE="$(handoff_safe_line "$PV_PLAN" "$PV_REPO")"
     mkdir -p "${HO_FILE%/*}" 2>/dev/null
     HO_TMP="$PV_NEW.2"
-    if [ "$HO_DELIVERED" = yes ]; then
-      HO_DLV="$(awk '/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:.*delivered:/ { s = $0; sub(/^.*delivered:[[:space:]]*/, "", s); sub(/[[:space:]].*$/, "", s); print s; exit }' "$PV_PLAN")"
-      case "$HO_DLV" in [0-9][0-9][0-9][0-9]-*) : ;; *) HO_DLV="?" ;; esac
-      HO_ISHA=""; [ -z "$HO_IB" ] || HO_ISHA="$(git -C "$PV_REPO" rev-parse --short "refs/heads/$HO_IB" 2>/dev/null)"
+    if [ "$HO_CLOSED" = yes ]; then
+      # THE CLOSED FORM'S TWO STATE LINES ARE CLOSE-OUT'S (wave-38 T37; D23): close-out.sh decides parked, delivered and
+      # a pull request owed, and its read-only `closed-form` prints the `resume point:` and `branch:` lines it writes.
+      HO_CO="$(cd "$BIONIC_LIB" 2>/dev/null && pwd -P)/../close-out.sh"
+      HO_STATE="$(bash "$HO_CO" "$PV_PLAN" closed-form 2>/dev/null)" || HO_STATE=""
+      case "$HO_STATE" in
+        'resume point: '*$'\n''branch: '*) : ;;
+        *) die "REFUSED — the closed form's two lines are close-out.sh's to say, and its closed-form did not print them ($HO_CO); nothing was written."
+           exit 2 ;;
+      esac
+      HO_RESUME="${HO_STATE%%$'\n'*}"
+      case "$HO_RESUME" in 'resume point: PARKED on '*) HO_KIND=parked ;; *) HO_KIND=delivered ;; esac
       {
         printf 'bionic-handoff/v1\n'
-        printf 'resume point: NONE — DELIVERED at %s; %s @ %s.\n' "$HO_DLV" "$(clean "${HO_IB:-(none named)}")" "${HO_ISHA:-?}"
+        printf '%s\n' "$HO_RESUME"
         printf 'written: %s\n' "$HO_NOW"
         printf 'plan: %s\n' "$HO_PLAN_REL"
-        printf 'branch: %s merged into %s.\n' "$(clean "${HO_WB:-(none named)}")" "$(clean "${HO_IB:-(none named)}")"
+        printf '%s\n' "${HO_STATE#*$'\n'}"
         printf 'patrol: %s\n' "$HO_PATROL"
         printf 'continuation: record/%s/continuation.md\n' "$(proof_plan_slug "$PV_PLAN")"
         printf '%s\n' "$HO_HUMAN"
@@ -10967,8 +10975,8 @@ EOF
       exit 2
     fi
     HO_ABS="$(cd "${HO_FILE%/*}" 2>/dev/null && pwd -P)/${HO_FILE##*/}"
-    if [ "$HO_DELIVERED" = yes ]; then
-      HO_SAY="handoff — the closed form written to $HO_ABS at $HO_NOW (the plan is delivered); the plan's ## Handoff points to it, dry-committed first."
+    if [ "$HO_CLOSED" = yes ]; then
+      HO_SAY="handoff — the closed form written to $HO_ABS at $HO_NOW (the plan is $HO_KIND); the plan's ## Handoff points to it, dry-committed first."
       HO_DRY=as-is
     else
       HO_SAY="handoff — written to $HO_ABS at $HO_NOW ($HO_N_ROWS open rows, $HO_N_AG live writers; ${HO_SAFE%% — *}); the plan's ## Handoff points to it, dry-committed first."
@@ -12997,6 +13005,13 @@ RC_TAGS
     case "$RS_L2" in
       'resume point: NONE — DELIVERED'*)
         say "resume — '$RS_SHOWN' is the closed form: the run is delivered, so there is nothing to resume; nothing was bound, armed or adopted."
+        printf '%s\n' "$RS_L2"
+        awk 'index($0, "plan: ") == 1 || index($0, "branch: ") == 1 || index($0, "continuation: ") == 1 { print }' "$RS_FILE"
+        exit 0 ;;
+      # A PARKED RUN IS CLOSED, AND ITS WORK IS LEFT (wave-38 T37; T15's note to T13). close-out performed its tail
+      # without the merge and disarmed its Patrol, so nothing is bound or armed; the recap says where the work waits.
+      'resume point: PARKED on '*)
+        say "resume — '$RS_SHOWN' is the closed form, and the run is parked: its work is kept on its branch, not merged; the plan's Wake Note says what it waits on. Nothing was bound, armed or adopted."
         printf '%s\n' "$RS_L2"
         awk 'index($0, "plan: ") == 1 || index($0, "branch: ") == 1 || index($0, "continuation: ") == 1 { print }' "$RS_FILE"
         exit 0 ;;

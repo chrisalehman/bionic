@@ -531,7 +531,8 @@ expect_eq "RN1 ls payload/commands payload/skills has no resume" "0" \
 # pull-request run are closed too, and the verb's closed form says what close-out's says: `resume point: PARKED on
 # <branch> @ <sha> — <why>` and `branch: <b> kept, not merged into <i>; its worktrees are kept.` on a parked plan;
 # `branch: <b> to be pulled into <i>.` while a task-scale plan's pull request is owed, `merged into` once the
-# integration branch holds the work. close-out.test.sh §ONE-WRITER holds the two doors to each other line for line.
+# integration branch holds the work. The two lines are close-out.sh's: the verb prints what `close-out.sh <plan>
+# closed-form` prints (OW4), and close-out.test.sh §ONE-WRITER holds the two doors' files to each other line for line.
 # FIXTURE FIDELITY: §CLOSED's world; the Step-9 lines in the shapes close-out.sh writes them, the Wake Note in the
 # shape steps/8.md asks for. fails-when: the verb reads a parked or pull-request plan's `delivered:` line as a merge.
 HF_WHY="The release waits on a hand test on the user's machine."
@@ -580,9 +581,9 @@ expect_eq "OW3c …the branch line says it is to be pulled" "branch: wave/01-fix
 git -C "$HF_R" branch -f trunk wave/01-fixture
 poke "$HF_R" handoff
 expect_eq "OW3d …and merged into, once trunk holds the work (the same extractor)" "branch: wave/01-fixture merged into trunk." "$(hf_label "$HF_F" branch)"
-poke "$HF_R" closed-form "$HF_P"
-expect_eq "OW4 the closed-form verb prints the two lines the file carries, the one writer both doors print" \
-  "$(sed -n 2p "$HF_F")|$(hf_label "$HF_F" branch)" "$(printf '%s\n' "$OUT" | paste -sd'|' -)"
+HF_CO_OUT="$(cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" closed-form 2>&1)"
+expect_eq "OW4 close-out.sh closed-form prints the two lines the verb's file carries: one writer, both doors" \
+  "$(sed -n 2p "$HF_F")|$(hf_label "$HF_F" branch)" "$(printf '%s\n' "$HF_CO_OUT" | paste -sd'|' -)"
 
 
 finish
