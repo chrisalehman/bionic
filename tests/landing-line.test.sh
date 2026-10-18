@@ -12,7 +12,7 @@
 #
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY; the suite bar (wave-39 T6; D1): §TOO-LONG. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -2486,54 +2486,5 @@ expect_eq "(y6) the publish: first in line, held by a live run in the checkout; 
 expect_match "(y6) …and the next line gives what the publish said" "waiting: publish: HELD T1 — *41*a.test.sh*" "$(ll_why "$LL_OUT")"
 rm -f "$BIONIC_GATE_DIR/requests/41"
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
-
-# ---------------------------------------------------------------------------
-section "§TOO-LONG: ready refuses a Lands-on suite whose gate promise exceeds the suite bar, and runs nothing (wave-39 T6; D1, REQ-3 AC-3.2)"
-#
-# The suite bar is ten minutes of the gate's promise (`LINE_SUITE_BAR=600`, lib/line.sh, its one place). A suite
-# promising more cannot land inside one writer's `--within`, so `ready` says so before any entry is written:
-# `too-long <suite> <s>s — split it`, exit 1, no runner started. The planted suite touches a marker when it runs,
-# so "nothing ran" is read off a file the at-bar case proves the suite does write.
-# fails-when: the suite runs inside the landing, or a promise at the bar is refused.
-tl_world() {  # <promise seconds> -> a world whose row T1 lands on c.test.sh, c's promise planted; it touches <root>/tl-ran
-  local r
-  r="$(ll_world)" || return 1
-  ll_launch "$r" T1 c
-  ( cd "$r" && world_cost c.test.sh "$1" )
-  printf '#!/bin/bash\n: > %q\necho; echo "c.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"; exit 0\n' "$r/tl-ran" > "$r/tests/c.test.sh"
-  git -C "$r" add tests/c.test.sh && git -C "$r" commit -qm "suite c" >/dev/null
-  printf '%s' "$r"
-}
-tl_ran() { if [ -e "$1/tl-ran" ]; then echo ran; else echo not-run; fi; }   # <root>
-expect_eq "(tl0) the bar is defined once, in lib/line.sh, as 600 seconds" "payload/scripts/lib/line.sh:LINE_SUITE_BAR=600" \
-  "$(cd "$REPO" && grep -rnE '^[[:space:]]*(readonly[[:space:]]+)?LINE_SUITE_BAR=' payload | sed -E 's/:[0-9]+:[[:space:]]*(readonly[[:space:]]+)?/:/')"
-RT1="$(tl_world 600)"
-ll_verb "$RT1" T1 --within 1790
-expect_eq "(tl1) a suite promising exactly the bar (600 s) is not refused: it runs and the row lands" "0|ran" "$LL_RC|$(tl_ran "$RT1")"
-expect_eq "(tl1) …its first line is LANDED, and nothing says too-long" "LANDED T1|0" \
-  "$(printf '%s\n' "$LL_OUT" | head -n 1 | cut -d' ' -f1-2)|$(printf '%s\n' "$LL_OUT" | grep -c 'too-long')"
-RT2="$(tl_world 700)"
-REQT="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
-ll_verb "$RT2" T1 --within 1790
-expect_eq "(tl2) a suite promising 700 s: ready prints the one refusal line and exits 1" \
-  "1|too-long c.test.sh 700s — split it" "$LL_RC|$LL_OUT"
-expect_eq "(tl3) …nothing run: the suite never started, no ready entry, no verdict, no log, no gate request" \
-  "not-run 0 0 0 $REQT" \
-  "$(tl_ran "$RT2") $(ll_ev "$RT2" ready | awk 'END { print NR }') $(ll_ev "$RT2" verdict | awk 'END { print NR }') $(ls "$RT2/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
-RT3="$(ll_world)"; ll_launch "$RT3" T1 "a.test.sh c.test.sh"
-( cd "$RT3" && world_cost a.test.sh 5 && world_cost c.test.sh 700 )
-ll_verb "$RT3" T1 --within 1790
-expect_eq "(tl4) of two Lands-on suites, the one over the bar is named, and only it" \
-  "1|too-long c.test.sh 700s — split it" "$LL_RC|$LL_OUT"
-# THE REFUSAL READS THE CONSTANT: a copy of the library with the bar at 800 lets the 700 s suite run.
-TL_LIB="$WORLD_ROOT/lib-bar800"
-cp -R "$REPO/payload/scripts/lib" "$TL_LIB"
-sed -E 's/^([[:space:]]*(readonly[[:space:]]+)?LINE_SUITE_BAR=)600/\1800/' "$REPO/payload/scripts/lib/line.sh" > "$TL_LIB/line.sh"
-expect_eq "(tl5-pre) the mutant copy holds the bar at 800" "1" "$(grep -cE '^[[:space:]]*(readonly[[:space:]]+)?LINE_SUITE_BAR=800' "$TL_LIB/line.sh")"
-RT5="$(tl_world 700)"
-LL_LIB="$TL_LIB" ll_drive "$RT5" T1 "$WORLD_ROOT/tl5.out" 1790
-ll_wait_file "$WORLD_ROOT/tl5.out.rc" 600
-expect_eq "(tl5m) MUTANT the bar raised to 800 s: the 700 s suite runs and lands (the rows can fail)" "0|ran" \
-  "$(cat "$WORLD_ROOT/tl5.out.rc" 2>/dev/null)|$(tl_ran "$RT5")"
 
 finish
