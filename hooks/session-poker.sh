@@ -5440,7 +5440,10 @@ END {
 # the docs-root-relative path of the row's green log for the suite the block's `eval:` names (`<suite>.test.sh` in
 # backticks). The rules, as the pass below keeps them:
 #   · the log is the one the landing's own verdict names: the landing record's last `ev=verdict` line for this row,
-#     this commit, this suite, `result=green` (LE_LOGS, built by landing_evidence);
+#     this commit, this suite, `result=green` (LE_LOGS, built by landing_evidence); for a suite the landing REUSED
+#     (an `ev=reused` line for this row and commit, lib/line.sh, wave-39 T1; a skip is one, T4), the log of the green
+#     verdict its `from=` names for that suite at its `reads=` key, whichever row ran it: the row's green for that
+#     suite, so a criterion only such a row serves does not stay pending (wave-39 T2; D5, A-orch-11);
 #   · an eval naming a suite the landing did not run, or no suite (a T0 grep), writes nothing;
 #   · the cell is written when it reads `pending` or is already a path under `record/<plan>/line/` (which only a
 #     landing writes: the newer landing replaces it, AC-15.2); any other value is a hand fill and stays;
@@ -5508,9 +5511,15 @@ END {
 landing_evidence() {
   local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
   logs="$( [ -f "$rec" ] && awk -F'|' -v row="row=$row" -v c="commit=$commit" -v root="$droot/" '
-    $2 == "ev=verdict" && $3 == row && $4 == c && $6 == "result=green" {
+    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    $2 == "ev=verdict" && $6 == "result=green" {
       s = $5; sub(/^suite=/, "", s); l = $7; sub(/^log=/, "", l)
-      if (s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
+      gl[substr($4, 8) SUBSEP s SUBSEP fv("reads")] = l   # any row: a reuse line after it may name it as its proof
+      if ($3 == row && $4 == c && s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
+    }
+    $2 == "ev=reused" && $3 == row && $4 == c {
+      s = fv("suite"); k = fv("from") SUBSEP s SUBSEP fv("reads")
+      if (s != "" && fv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
     }
     END { for (s in last) printf "%s\t%s\n", s, last[s] }' "$rec" 2>/dev/null )"
   if [ -z "$logs" ]; then printf '0'; return 0; fi
@@ -6394,7 +6403,7 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # THE RUN'S NUMBERS ARE FOLDED FROM THE TWO RECORDS, AND ONLY PRINTED (wave-28 T14; D18, REQ-4).
 # `landing_report` reads the landing record's `line/v1` events and the gate's request files, and prints
 #
-#   landings: queue=<n> hand=<n> git=<n> · ready-to-landed median=<m>m p75=<m>m max=<m>m · runs: green=<n> red=<n> none=<n> discarded=<n> red-then-green=<n> run=<n> · waited median=<s>s · killed=<n>
+#   landings: queue=<n> hand=<n> git=<n> · ready-to-landed median=<m>m p75=<m>m max=<m>m · runs: green=<n> red=<n> none=<n> discarded=<n> red-then-green=<n> run=<n> reused=<n> absent=<n> · waited median=<s>s · killed=<n>
 #
 # and with rows, one line per landed row in the record's order:
 #
@@ -6438,7 +6447,11 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # (T14's count). Red-then-green is a red then a green for one row,
 # one commit and one suite with no `ready` for that row between (an unchanged tree), counted once per such pair. Run
 # counts the record's `ev=run` lines, one per regression run floor-run or a detached booked.sh run recorded (wave-37
-# T4; D7, AC-6.2). The waited median is the median of the rows' waits (THE REPORT READS ADMISSION, above), over the
+# T4; D7, AC-6.2). Reused counts the record's `ev=reused` lines, each a suite a candidate did not run because another
+# candidate's verdict at the same read key proved it (lib/line.sh, wave-39 T1; a skip is one naming the head, T4): the
+# saving, beside the runs (wave-39 T2; D5, AC-1.4). Absent counts the verdicts `result=absent` by the inclusion rule, a
+# Lands-on suite the row removed (wave-39 T6): no run, so it adds nothing to a row's runs=, width= or promise lines, and
+# it is never malformed (A-orch-20). A reuse line lacking its suite= is malformed, as a verdict lacking one is. The waited median is the median of the rows' waits (THE REPORT READS ADMISSION, above), over the
 # rows that compute one, 0 when none does. Killed is the one figure read from the gate: a request admitted that ended
 # with an exit over 128 (a signal: 137 from the reaper, 143
 # from a TERMed suite) or whose holder is dead with no `ended` line, as D18 says (lib/gate.sh `_gate_open`'s
@@ -6526,14 +6539,17 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
       if (ev == "candidate") hasc[g] = 1
       if (ev == "candidate" && e >= 0 && !(rk in fc)) fc[rk] = e
-      if (ev != "ready" && ev != "verdict" && ev != "returned" && ev != "published") { if (e >= 0 && t0 == "") t0 = e; next }
+      if (ev != "ready" && ev != "verdict" && ev != "returned" && ev != "published" && ev != "reused") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
-      if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded)$/)) { mal++; next }
+      if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded|absent)$/)) { mal++; next }
+      if (ev == "reused" && kv["suite"] == "") { mal++; next }
       if (ev == "published" && kv["kind"] !~ /^(queue|hand|git)$/) { mal++; next }
       if (t0 == "") t0 = e
       iso[e] = kv["at"]
-      if (ev == "verdict" && kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"]
+      if (ev == "verdict" && kv["result"] != "absent" && kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"]
     }
+    # THE SAVING (wave-39 T2; D5, AC-1.4): a suite proved by the verdict of another candidate, no run of its own.
+    ev == "reused" { nru++; next }
     ev == "returned" { if (e >= 0) { nrw[rk]++; rs[rk, nrw[rk]] = e; re[rk, nrw[rk]] = "" }; next }
     ev == "ready" {
       if (!(rk in rdy)) rdy[rk] = e
@@ -6542,7 +6558,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     }
     ev == "verdict" {
       if ((g in hasc) && !((g SUBSEP kv["commit"]) in ownc)) next
-      res = kv["result"]; cnt[res]++; nrun[rk]++
+      res = kv["result"]; cnt[res]++
+      if (res == "absent") next   # a suite the row removed: no run, counted beside the runs only (A-orch-20)
+      nrun[rk]++
       # THE PROMISE AND THE ACTUAL (wave-39 T8; D11, AC-4.2): one line per counted run that carries either field.
       if (("promised" in kv) || ("actual" in kv)) {
         vp = (num(kv["promised"]) ? kv["promised"] : "-"); va = (num(kv["actual"]) ? kv["actual"] : "-")
@@ -6592,9 +6610,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         if (inq[i] && num(qd[i]) && qx[i] == 1) killed++
       }
       wm = pct(wts, nw, 0.5)
-      printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d run=%d · waited median=%ds · killed=%d\n",
+      printf "landings: queue=%d hand=%d git=%d · ready-to-landed median=%.1fm p75=%.1fm max=%.1fm · runs: green=%d red=%d none=%d discarded=%d red-then-green=%d run=%d reused=%d absent=%d · waited median=%ds · killed=%d\n",
         kinds["queue"], kinds["hand"], kinds["git"], pct(mins, nm2, 0.5), pct(mins, nm2, 0.75), pct(mins, nm2, 1),
-        cnt["green"], cnt["red"], cnt["none"], cnt["discarded"], rtg, nrl, int(wm + 0.5), killed
+        cnt["green"], cnt["red"], cnt["none"], cnt["discarded"], rtg, nrl, nru, cnt["absent"], int(wm + 0.5), killed
       if (rows == "yes") for (r = 1; r <= n; r++) {
         rd = "-"; mn = "-"
         if (r in pmin) { rd = iso[pfrom[r]]; mn = sprintf("%.1f", pmin[r]) }

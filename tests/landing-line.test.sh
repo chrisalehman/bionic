@@ -14,7 +14,7 @@
 # the reuse test matches on it, never on the commit: §REUSE.
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY; a suite the row removed is not owed (wave-39 T6): §ABSENT; a suite whose narrowed reads miss the diff is skipped on the head's green, and planted reds inside and outside a narrowed read land RED (wave-39 T4): §SKIP, §PLANT. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY; a suite the row removed is not owed (wave-39 T6): §ABSENT; a suite whose narrowed reads miss the diff is skipped on the head's green, and planted reds inside and outside a narrowed read land RED (wave-39 T4): §SKIP, §PLANT; a line re-ordered under an entry keeps its verdicts across both rebuilds (wave-39 T2): §REORDER. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -1548,6 +1548,23 @@ expect_eq "(se8) AC-15.2 two rows serving AC-8.1 (T1 by its id, T2 by its REQ) l
 expect_eq "(se8b) …one evidence line in the block, not two" "1" "$(awk '{ h = $0; sub(/^[-*+][ \t]+/, "", h) } index(h, "AC-8.1:") == 1 { f = 1; next } /^[^ \t]/ { f = 0 } f && /^[ \t]+evidence:/ { n++ } END { print n + 0 }' "$PS")"
 expect_eq "(se9) T2 serves AC-8.2 by REQ-8, but its eval names b.test.sh, which T2 did not run: untouched" "pending" "$(se_ev "$PS" AC-8.2)"
 expect_eq "(se10) the hand fill is untouched by the second landing too" "record/hand/filled-by-the-orchestrator.log" "$(se_ev "$PS" AC-5.1)"
+# A REUSED SUITE IS THE ROW'S GREEN FOR ITS CRITERIA (wave-39 T2; D5, A-orch-11): a row whose candidate reads what a
+# proved one read runs nothing and writes no verdict of its own (§REUSE), so its criteria read the log of the verdict
+# its reuse line names. Here T1 no longer serves AC-8.1, which T2 serves by REQ-8 alone; T2 leaves a.test.sh as T1
+# landed it, so its landing skips a on the head's green, and AC-8.1 reads T1's log.
+RS2="$(se_world)"; PS2="$(ll_plan "$RS2")"
+awk '/^\| T1 \|/ { sub(/\| AC-8\.1 AC-7\.1 AC-5\.1 \|/, "| AC-7.1 AC-5.1 |") } { print }' "$PS2" > "$PS2.n" && mv "$PS2.n" "$PS2"
+ll_verb "$RS2" T1
+SE2_LOG1="$(se_log "$RS2" T1)"
+expect_eq "(se11-pre) T1 lands its own run of a.test.sh, and AC-8.1, which it no longer serves, still reads pending" \
+  "0 1 pending" "$LL_RC $(printf '%s\n' "$SE2_LOG1" | grep -cE '^record/wave-x/line/T1-.*\.log$') $(se_ev "$PS2" AC-8.1)"
+ll_verb "$RS2" T2
+SE2_K1="$(ll_field "$(ll_ev "$RS2" published | grep '|row=T1|' | tail -1)" commit)"
+expect_eq "(se11-pre) T2 lands with no run of its own: its landing skipped a.test.sh, whose reuse line names T1's candidate" \
+  "0 1 0 1" "$LL_RC $(printf '%s\n' "$LL_OUT" | grep -c '^skip a\.test\.sh reads=') $(ll_ev "$RS2" verdict | grep -c '|row=T2|') $(ll_ev "$RS2" reused | grep '|row=T2|' | grep -c "|from=${SE2_K1}|")"
+expect_eq "(se11) A-orch-11: the criterion only T2 serves reads the log of the verdict T2's reuse line names" \
+  "$SE2_LOG1" "$(se_ev "$PS2" AC-8.1)"
+expect_eq "(se12) …and the criterion whose suite T2 neither ran nor reused (b.test.sh) is untouched" "pending" "$(se_ev "$PS2" AC-8.2)"
 
 # ---------------------------------------------------------------------------
 section "§OWED: what is still owed prints as one line, after the write and the mark, naming no verb (AC-3.3)"
@@ -2565,7 +2582,7 @@ section "§REUSE: a candidate whose suite read the same blobs as a proved one re
 # run, one green verdict, its reads= the suite's read key at T1's candidate. T2's candidate is built on T1's and
 # changes only T2.txt, which a.test.sh does not read, so its key is the same: T2's drain records the reuse, starts
 # no runner, and lands; the record holds one verdict for the suite. The key is also the accepted head's, so ready
-# prints it as the head's skip, `skip a.test.sh reads=<h> (head)`, and the reused line names the head (§SKIP, T4). MUTANT: the reuse test keyed on commit= again (the pre-1.22.0 rule): T2 runs a.test.sh a second time.
+# prints it as the head's skip, `skip a.test.sh reads=<h> (head)`, and the reused line names the head (§SKIP, T4); a key equal to another candidate's and not the head's prints `reused` (§REORDER, T2). MUTANT: the reuse test keyed on commit= again (the pre-1.22.0 rule): T2 runs a.test.sh a second time.
 ll_count_body() {  # <tag> <name> -> a suite that writes one line per run to $LL_SIG/<tag>.runs and ends green
   printf 'echo run >> "$LL_SIG/%s.runs"\necho "PASS: %s"\necho\necho "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\nexit 0' "$1" "$1" "$2"
 }
@@ -2614,6 +2631,91 @@ expect_eq "(u4m-pre) the mutant ran: T2 landed (exit 0)" "0" "$(cat "$WORLD_ROOT
 expect_eq "(u4m) MUTANT reuse keyed on commit=: a.test.sh runs again and a second verdict appears (the rows can fail)" "2 2" \
   "$(ll_lines "$LL_SIG/rum.runs") $(ll_ev "$RUM" verdict | grep -c '|suite=a.test.sh|')"
 expect_eq "(u4m) …and nothing is reused" "" "$(ll_ev "$RUM" reused)"
+
+# ---------------------------------------------------------------------------
+section "§REORDER: a re-ordered line keeps the younger candidate's verdicts: the carrier ahead leaves and returns, the entry behind is rebuilt twice, and each suite runs once (wave-39 T2; D5, REQ-1 AC-1.2; ADR-061)"
+#
+# T1 is ahead with a candidate on the head, carried by a stand-in process (a carrier that ends WAITING writes no
+# event: its process ends, its entry stays). T2 lands on a and b, two suites its own commit writes, each counting its
+# runs; its ready builds T2's first candidate on T1's and runs both, green. Then T1's carrier ends: T2's base becomes
+# the accepted head and T2 is rebuilt on it (a busy run in the checkout holds T2's publish there, as a busy run
+# would). Then T1 says ready again and keeps its place: T2 is rebuilt on T1's candidate again. Neither rebuild changes
+# what a or b reads, so each is proved by its first run: `reused <suite> reads=<h>` (T2's change is in the suites
+# themselves, so the key is not the head's and no skip prints), no runner starts, nothing is discarded. T1 lands,
+# then T2 on its third candidate. MUTANT: the reuse test keyed on commit= again: the first rebuild runs a again.
+ll_reorder_world() {  # <tag> -> a world whose T2 lands on a and b, two counting suites T2 commits; T1 changes T1.txt only
+  local r
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T2 'a.test.sh b.test.sh'
+  ll_commit_suite "$r" T2 a "$(ll_count_body "$1-a" a)" || return 1
+  ll_commit_suite "$r" T2 b "$(ll_count_body "$1-b" b)" || return 1
+  printf '%s' "$r"
+}
+ll_reused_on() { ll_ev "$1" reused | awk -F'|' -v c="commit=$2" '$4 == c { n++ } END { print n + 0 }'; }   # <root> <candidate> -> its reuse lines
+ll_has_reused_on() { [ "$(ll_reused_on "$1" "$2")" -ge "$3" ]; }   # <root> <candidate> <n>
+ll_t2_verdicts() { ll_ev "$1" verdict | awk -F'|' -v s="suite=$2" '$3 == "row=T2" && $5 == s { n++ } END { print n + 0 }'; }   # <root> <suite>
+RO="$(ll_reorder_world ro)"; HO="$(ll_head "$RO")"; PO="$(ll_plan "$RO")"
+CO1="$(ll_carrier)"; ll_ready "$RO" T1 "$CO1" none >/dev/null; KO1="$(ll_cand "$RO" T1 "$HO")"
+expect_nonempty "(ro0-pre) T1 is ahead, its candidate on the head" "$KO1"
+ll_verb_bg "$RO" T2 "$WORLD_ROOT/ro-T2.out"
+expect_true "(ro0-pre) T2's first candidate ran both suites" wait_ticks 300 0.1 ll_has_lines "$LL_SIG/ro-b.runs" 1
+KO2A="$(ll_nth_cand "$RO" T2 1)"
+expect_true "(ro0-pre) …and both verdicts are on the record" wait_ticks 300 0.1 eval '[ "$(ll_results "$RO" T2 "$KO2A" | wc -w)" -ge 2 ]'
+expect_eq "(ro0) T2's first candidate is built on T1's, and both suites ran on it, green" "$KO1 green green 1 1" \
+  "$(git -C "$RO" rev-parse "$KO2A^1" 2>/dev/null) $(ll_results "$RO" T2 "$KO2A") $(ll_lines "$LL_SIG/ro-a.runs") $(ll_lines "$LL_SIG/ro-b.runs")"
+# T1's carrier ends (WAITING): T2 is rebuilt on the head, its publish held by a busy run in the checkout
+expect_true "(ro1-pre) a stand-in runner holds the checkout that holds the branch" ll_runner "$RO"
+RO_RUNNER="$LL_RUNNER_PID"
+kill "${CO1%%:*}" 2>/dev/null
+expect_true "(ro1-pre) T2 is rebuilt once T1's carrier is gone" ll_wait_cand "$RO" T2 2
+KO2B="$(ll_nth_cand "$RO" T2 2)"
+expect_true "(ro1-pre) …and both suites are recorded reused on that candidate" wait_ticks 300 0.1 ll_has_reused_on "$RO" "$KO2B" 2
+expect_eq "(ro1) the second candidate is built on the accepted head, and neither suite ran again" "$HO 1 1" \
+  "$(git -C "$RO" rev-parse "$KO2B^1" 2>/dev/null) $(ll_lines "$LL_SIG/ro-a.runs") $(ll_lines "$LL_SIG/ro-b.runs")"
+# T1 says ready again: it keeps its place, and T2 is rebuilt on T1's candidate again
+ll_ready "$RO" T1 "$(ll_carrier)" none >/dev/null
+expect_true "(ro2-pre) T2 is rebuilt a second time once T1 is back" ll_wait_cand "$RO" T2 3
+KO2C="$(ll_nth_cand "$RO" T2 3)"
+expect_true "(ro2-pre) …and both suites are recorded reused on that candidate" wait_ticks 300 0.1 ll_has_reused_on "$RO" "$KO2C" 2
+expect_eq "(ro2) the third candidate is built on T1's again, and neither suite ran again" "$KO1 1 1" \
+  "$(git -C "$RO" rev-parse "$KO2C^1" 2>/dev/null) $(ll_lines "$LL_SIG/ro-a.runs") $(ll_lines "$LL_SIG/ro-b.runs")"
+kill "$RO_RUNNER" 2>/dev/null; wait "$RO_RUNNER" 2>/dev/null
+ll_pub "$RO" T1
+expect_eq "(ro3-pre) T1 lands" "0 $KO1" "$LL_RC $(ll_head "$RO")"
+ll_wait_file "$WORLD_ROOT/ro-T2.out.rc" 300
+expect_eq "(ro3) T2 lands its third candidate: exit 0, the branch at it" "0 $KO2C" "$(cat "$WORLD_ROOT/ro-T2.out.rc" 2>/dev/null) $(ll_head "$RO")"
+[ "$(cat "$WORLD_ROOT/ro-T2.out.rc" 2>/dev/null)" = 0 ] || printf 'DIAG (ro3) T2 said: %s | its events: %s\n' \
+  "$(tr '\n' ' ' < "$WORLD_ROOT/ro-T2.out" 2>/dev/null)" "$(grep '|row=T2|' "$(ll_rec "$RO")" 2>/dev/null | cut -d'|' -f2,4- | tr '\n' ' ')"
+expect_eq "(ro4) AC-1.2 the entry behind was rebuilt twice: three candidates, on T1's, the head, T1's" "$KO1 $HO $KO1" \
+  "$(for _n in 1 2 3; do git -C "$RO" rev-parse "$(ll_nth_cand "$RO" T2 "$_n")^1" 2>/dev/null; done | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "(ro4) AC-1.2 …each suite ran once in all" "1 1" "$(ll_lines "$LL_SIG/ro-a.runs") $(ll_lines "$LL_SIG/ro-b.runs")"
+expect_eq "(ro4) AC-1.2 …each suite carries one ev=verdict" "1 1" "$(ll_t2_verdicts "$RO" a.test.sh) $(ll_t2_verdicts "$RO" b.test.sh)"
+expect_eq "(ro4) AC-1.2 …and no result=discarded among T2's verdicts" "2 0" \
+  "$(ll_ev "$RO" verdict | grep -c '|row=T2|') $(ll_ev "$RO" verdict | grep '|row=T2|' | grep -c '|result=discarded|')"
+KHO="$(ll_ahash "$RO" "$KO2A")"
+expect_regex "(ro5-pre) a's read key at T2's first candidate is a sha256" '^[0-9a-f]{64}$' "$KHO"
+expect_eq "(ro5) two reuse lines on each rebuilt candidate, all four naming the first candidate as the proof, a's two at its key, none naming the head (no skip)" \
+  "2 2 4 2 0" "$(ll_reused_on "$RO" "$KO2B") $(ll_reused_on "$RO" "$KO2C") $(ll_ev "$RO" reused | grep -c "|from=${KO2A}|") \
+$(ll_ev "$RO" reused | grep -c "|suite=a.test.sh|reads=${KHO}|") $(ll_ev "$RO" reused | grep -c '|head=')"
+expect_eq "(ro5) …and ready printed each of a's as reused, never as skip" "2 0" \
+  "$(grep -c "^reused a.test.sh reads=${KHO}\$" "$WORLD_ROOT/ro-T2.out") $(grep -c '^skip ' "$WORLD_ROOT/ro-T2.out")"
+# MUTANT: the reuse test keyed on commit= again. T1's carrier ends; T2's rebuild on the head runs a and b a second time.
+RM="$(ll_reorder_world rom)"; HM="$(ll_head "$RM")"
+CM1="$(ll_carrier)"; ll_ready "$RM" T1 "$CM1" none >/dev/null; KM1="$(ll_cand "$RM" T1 "$HM")"
+anchor fn payload/scripts/lib/line.sh 'if c="$(_line_proved "$rec" "$s" "reads=$(_line_reads_of "$cand" "$s")")"; then' _line_carry \
+  'if c="$(_line_proved "$rec" "$s" "commit=$cand")"; then'
+LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_carry ll_drive "$RM" T2 "$WORLD_ROOT/rom-T2.out"
+expect_true "(ro6m-pre) the mutant ran: T2's first candidate ran both suites" wait_ticks 300 0.1 ll_has_lines "$LL_SIG/rom-b.runs" 1
+KM2A="$(ll_nth_cand "$RM" T2 1)"
+expect_true "(ro6m-pre) …and both verdicts are on the record" wait_ticks 300 0.1 eval '[ "$(ll_results "$RM" T2 "$KM2A" | wc -w)" -ge 2 ]'
+expect_true "(ro6m-pre) …a busy run holds the checkout" ll_runner "$RM"
+RM_RUNNER="$LL_RUNNER_PID"
+kill "${CM1%%:*}" 2>/dev/null
+expect_true "(ro6m-pre) the rebuild on the head runs a again" wait_ticks 300 0.1 ll_has_lines "$LL_SIG/rom-a.runs" 2
+kill "$RM_RUNNER" 2>/dev/null; wait "$RM_RUNNER" 2>/dev/null
+ll_wait_file "$WORLD_ROOT/rom-T2.out.rc" 300
+expect_eq "(ro6m) MUTANT reuse keyed on commit=: T2 lands (exit 0), a ran twice, a carries two verdicts, and no reuse line is written (the rows can fail)" \
+  "0 2 2 0" "$(cat "$WORLD_ROOT/rom-T2.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/rom-a.runs") $(ll_ev "$RM" verdict | grep '|row=T2|' | grep -c '|suite=a.test.sh|') $(ll_ev "$RM" reused | grep -c .)"
 
 # ---------------------------------------------------------------------------
 section "§ABSENT: a Lands-on suite the row removed is recorded absent and is not owed (wave-39 T6; A-orch-5)"
