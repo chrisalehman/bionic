@@ -226,7 +226,13 @@ human-wait minutes: unverified · no target (the user's)
 
 ### Standing reds
 
-The whole regression (T31) at 44666977 had not finished when this entry was written; the orchestrator states its result here.
+The whole regression (T31) ran at 44666977 on 2026-10-19 from 5:59 to 7:45 AM PDT: 115 of 117 suites green, two red,
+both left by hand landings. `regression-rename.test.sh` (§AS-1, §AL-2: the retired token `floor` at
+hooks/session-poker.sh:5199, written by T25 after T18 removed the alias) is fixed by T47, landed through the line at
+39288958. `refuse.test.sh` (§INV: the file-scope refusal T20 added at hooks/dispatch-preflight.sh:3027 had no bullet in
+tests/fixtures/refusal-inventory.md) is fixed by T48, landed through the line at 3d9b9b77. Each fix row ran its red
+suite red, then green, and the line ran the suites that read the changed file (62 of 63 for T47, 5 of 5 for T48). No
+red stands at the release head.
 
 ### Known limits
 
