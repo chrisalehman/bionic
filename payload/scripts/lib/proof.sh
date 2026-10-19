@@ -1318,7 +1318,7 @@ _proof_owed_keys() {
   every="$(printf '%s\n' "$6" | awk -F'\t' '$1 == "I" { n = split($3, a, ","); for (i = 1; i <= n; i++) { s = a[i]; sub(/.*\//, "", s); if (s != "") print s } }' | LC_ALL=C sort -u)"
   [ -n "$every" ] || return 0
   # shellcheck disable=SC2086  # suite file names, one word each
-  kh="$(reads_hashes "$co" "$to" $every 2>/dev/null)" || kh=""
+  kh="$(_proof_keys_at "$co" "$to" $every)" || kh=""
   all="$(printf '%s\n' "$kh" | awk -F'\t' 'index($2, "tree:") == 1 { print $1 }')"
   cands="$( { printf '%s\n%s\n' "$5" "$6" | awk -F'\t' '
     $1 == "C" { p[$4] = 1; next }
@@ -1333,7 +1333,7 @@ _proof_owed_keys() {
     END { for (s in k) print s "\t" k[s] }' "$rec" 2>/dev/null)"
   miss="$(printf '%s\n' "$cands" | awk -F'\t' 'NR == FNR { if ($1 != "") h[$1] = 1; next } $0 != "" && !($0 in h)' <(printf '%s\n' "$kf") -)"
   # shellcheck disable=SC2086
-  [ -z "$miss" ] || kf="$kf${kf:+$'\n'}$(reads_hashes "$co" "$from" $miss 2>/dev/null)"
+  [ -z "$miss" ] || kf="$kf${kf:+$'\n'}$(_proof_keys_at "$co" "$from" $miss)"
   declare -F _line_proved >/dev/null 2>&1 || _proof_line_load
   for s in $cands; do
     k="$(printf '%s\n' "$kh" | awk -F'\t' -v s="$s" '$1 == s { print $2; exit }')"
@@ -1344,6 +1344,33 @@ _proof_owed_keys() {
   done
 }
 
+# _proof_keys_at <checkout> <commit> <suite>... -> `<suite><TAB><key>` for each, as lib/anchors.sh `reads_hashes` gives it
+# (the one derivation, A-orch-13), kept per commit in the repository's git dir (`bionic-reads/<commit>.<anchors.sh blob>`):
+# a key at a commit never changes while the derivation does not, so the judge, asked twice a tick and once by each
+# advance, derives a commit's keys once. A file named by another anchors.sh is never read; a cache that cannot be
+# written is skipped. Exit 1 when the keys cannot be derived.
+_proof_keys_at() {
+  local co="$1" at="$2" gd dir="" f="" have="" miss out s tmp
+  shift 2
+  at="$(git -C "$co" rev-parse --verify -q "${at}^{commit}" 2>/dev/null)" || return 1
+  gd="$(git -C "$co" rev-parse --git-common-dir 2>/dev/null)" && gd="$(cd "$co" 2>/dev/null && cd "$gd" 2>/dev/null && pwd -P)" || gd=""
+  if [ -n "$gd" ]; then
+    s="$(git hash-object "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/anchors.sh" 2>/dev/null)"
+    [ -z "$s" ] || { dir="$gd/bionic-reads"; f="$dir/$at.$s"; }
+  fi
+  # A KEPT LINE IS READ ONLY IN A KEY'S SHAPE: a sha256, or `tree:` and a tree id.
+  [ -z "$f" ] || [ ! -f "$f" ] || have="$(awk -F'\t' 'NF == 2 && $1 != "" && ((length($2) == 64 && $2 !~ /[^0-9a-f]/) || (index($2, "tree:") == 1 && length($2) == 45 && substr($2, 6) !~ /[^0-9a-f]/))' "$f" 2>/dev/null)"
+  miss="$(printf '%s\n' "$@" | awk -F'\t' 'NR == FNR { h[$1] = 1; next } $1 != "" && !($1 in h)' <(printf '%s\n' "$have") -)"
+  if [ -n "$miss" ]; then
+    # shellcheck disable=SC2086  # suite file names, one word each
+    out="$(reads_hashes "$co" "$at" $miss 2>/dev/null)" || return 1
+    have="$have${have:+$'\n'}$out"
+    if [ -n "$f" ] && mkdir -p "$dir" 2>/dev/null && tmp="$(mktemp "$dir/.keys.XXXXXX" 2>/dev/null)"; then
+      { printf '%s\n' "$have" > "$tmp" && mv -f "$tmp" "$f"; } 2>/dev/null || rm -f "$tmp"
+    fi
+  fi
+  printf '%s\n' "$@" | awk -F'\t' 'NR == FNR { if ($1 != "" && !($1 in k)) k[$1] = $0; next } $1 in k { print k[$1] }' <(printf '%s\n' "$have") -
+}
 # _proof_line_load -> lib/line.sh sourced from beside this file, for `_line_proved`, the one reuse test the owed set asks.
 _proof_line_load() {
   local d

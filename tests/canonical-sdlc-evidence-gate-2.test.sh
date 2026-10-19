@@ -4612,6 +4612,15 @@ expect_eq "OW-7 a green landing verdict of a.test.sh at its new read key: b.test
 ow_keyed T4 "$OW_E" b.test.sh green
 expect_eq "OW-8 …and b.test.sh's: nothing owed" "rc=0" "$(ow_owed "$OW_E")"
 expect_eq "OW-8b …the judge reads covered" "covered	$OW_E" "$(ow_state)"
+# THE KEYS AT A COMMIT ARE KEPT (lib/proof.sh `_proof_keys_at`): in the git dir, named by the commit and the derivation's
+# blob, so the judge derives a commit's keys once; a kept line not in a key's shape is never read.
+OW_KF="$(ls "$(cd "$ROW" && cd "$(git rev-parse --git-common-dir)" && pwd -P)/bionic-reads/$OW_E".* 2>/dev/null | head -1)"
+expect_eq "OW-K1 the keys at E are kept in the git dir, a.test.sh's the key reads_hash derives" "$(ow_key "$OW_E" a.test.sh)" \
+  "$(awk -F'\t' '$1 == "a.test.sh" { print $2 }' "$OW_KF" 2>/dev/null)"
+printf 'a.test.sh\tdead\n' > "$OW_KF"
+expect_eq "OW-K2 a torn kept line is not read: the owed set is derived again, unchanged (read as a key, it would owe a.test.sh)" "rc=0" "$(ow_owed "$OW_E")"
+expect_eq "OW-K2b …and the kept file holds the derived key again" "$(ow_key "$OW_E" a.test.sh)" \
+  "$(awk -F'\t' '$1 == "a.test.sh" { print $2 }' "$OW_KF" 2>/dev/null)"
 # THE KEY, NOT THE CHANGE: lib/w.sh changed and changed back reads, for c.test.sh, the blobs the whole run read.
 OW_W1="$(fp_commit "$ROW" lib/w.sh 'one more')"
 expect_eq "OW-9 precondition: lib/w.sh changed past the whole run owes c.test.sh, which reads it" "c.test.sh|rc=0" "$(ow_owed "$OW_W1")"
