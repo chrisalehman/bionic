@@ -3781,7 +3781,12 @@ SPO="$BIONIC_HOOKS_DIR/session-poker.sh"
 # header called the family "the six" — one short of the file — from S11's measurement until
 # the F2 fold-in (item 12) corrected it to "the seven" at session-poker.sh:426. The comment
 # and this measurement agree now; the discrepancy this parenthetical used to report is gone.)
-SPO_DUPES="now_epoch iso_now file_mtime iso_epoch line_field clean parse_seconds"
+#
+# SIX SINCE wave-39 T17 (D18, AC-12.1; A-orch-66): iso_epoch left the family. The poker's copy is now the one-line call
+# to lib/time.sh `_time_epoch`, the one reader of an instant (strict `…Z`; tests/time.test.sh §AGREE holds it to its
+# former callers), and the sweeper keeps its `date` copy because it sources no library. Comparing the two would pin
+# the poker back to the reader the fold retired.
+SPO_DUPES="now_epoch iso_now file_mtime line_field clean parse_seconds"
 
 for _fn in $SPO_DUPES; do
   _poke_code="$(fn_code "$SPO" "$_fn")"
@@ -3796,7 +3801,7 @@ done
 
 # The discriminating half: parse_seconds is NOT byte-identical (the comments legitimately
 # differ), which is the whole reason this loop compares code rather than bytes. Without this
-# the seven expect_eq's above could be silently vacuous by fn_code stripping everything.
+# the six expect_eq's above could be silently vacuous by fn_code stripping everything.
 expect_ne "§O parse_seconds is NOT byte-identical — the comments legitimately differ" \
   "$(fn_body "$SWEEPER" parse_seconds)" "$(fn_body "$SPO" parse_seconds)"
 expect_eq "§O …and it IS code-identical, which is what the loop above compares" \

@@ -89,6 +89,12 @@ if ! declare -F roster_open_names >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roster.sh"
 fi
+# time.sh, THE SAME SOFT SOURCE, for `_TIME_ISO_AWK` (wave-39 T17; D18): an instant has one reader, and this file's
+# date arithmetic below is that reader's.
+if [ -z "${_TIME_ISO_AWK:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/time.sh"
+fi
 
 # Values ride on `|`-delimited lines read BY KEY, so a value carrying a pipe or
 # a newline would forge a field. Same normalisation the roster writer applies to
@@ -669,49 +675,31 @@ _patrol_verdict_jq='
 '
 
 # THE DATES ARE CONVERTED IN awk, NOT BY `date`. A 2000-line window can hold hundreds of
-# records and a fork per record is a per-turn cost nobody would accept; the civil-days
-# arithmetic below is Howard Hinnant's, exact for every date this will ever see, and needs
-# no interpreter beyond POSIX awk. NO INTERVAL EXPRESSIONS IN A REGEX either (`[0-9]{4}`),
-# because the awk macOS ships does not carry them — the shape is checked position by
-# position instead.
+# records and a fork per record is a per-turn cost nobody would accept. The arithmetic is lib/time.sh's
+# `_TIME_ISO_AWK` (wave-39 T17; D18, burns debt iso-to-epoch): it was this file's own until the gate and the poker
+# were found carrying two more readers of an instant with two more grammars. The name stays, because
+# hooks/session-poker.sh's readers and this file's own prefix their programs with it; the text is time.sh's.
+# `iso2epoch` reads the strict instant alone, `…:SSZ`.
 #
 # AN UNDATABLE RECORD POISONS THE WHOLE ANSWER, on purpose: a verdict computed over a
 # window it could only partly read is a guess wearing an observation's clothes, and this
 # file's whole subject is not doing that. It is also the fail-open direction — `unreadable`
 # never blocks — and the advisory names it, so the degradation is visible rather than
 # silent.
-_PATROL_ISO_AWK='
-function alldig(s,   i, c) {
-  if (length(s) == 0) return 0
-  for (i = 1; i <= length(s); i++) { c = substr(s, i, 1); if (c < "0" || c > "9") return 0 }
-  return 1
-}
-function days_from_civil(y, m, d,   era, yoe, doy, doe) {
-  if (m <= 2) y = y - 1
-  era = int((y >= 0 ? y : y - 399) / 400)
-  yoe = y - era * 400
-  doy = int((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1
-  doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
-  return era * 146097 + doe - 719468
-}
-function iso2epoch(s,   y, mo, d, h, mi, se, tail) {
-  if (length(s) < 19) return -1
-  if (substr(s, 5, 1) != "-" || substr(s, 8, 1) != "-") return -1
-  if (substr(s, 11, 1) != "T" || substr(s, 14, 1) != ":" || substr(s, 17, 1) != ":") return -1
-  if (!alldig(substr(s, 1, 4)) || !alldig(substr(s, 6, 2)) || !alldig(substr(s, 9, 2))) return -1
-  if (!alldig(substr(s, 12, 2)) || !alldig(substr(s, 15, 2)) || !alldig(substr(s, 18, 2))) return -1
-  tail = substr(s, 20, 1)
-  if (tail != "" && tail != "Z" && tail != ".") return -1
-  y = substr(s, 1, 4) + 0; mo = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
-  h = substr(s, 12, 2) + 0; mi = substr(s, 15, 2) + 0; se = substr(s, 18, 2) + 0
-  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60) return -1
-  return days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + se
-}
-'
+_PATROL_ISO_AWK="$_TIME_ISO_AWK"
 # THE VERDICT'S OWN PROGRAM, after the date functions it shares with `fill_ledger_report`.
+# THE TRANSCRIPT'S INSTANTS CARRY MILLISECONDS (`…:33.724Z`, as Claude Code writes them), which is the
+# transcript's grammar and not an instant's (wave-39 T17; D18). They are cut to the whole second at this edge, the
+# second the patrol always read off them, and anything else goes to `iso2epoch` as it stands.
 _patrol_verdict_awk="$_PATROL_ISO_AWK"'
+function transcript_second(s,   z) {
+  if (substr(s, 20, 1) != ".") return s
+  z = index(s, "Z")
+  if (z <= 21 || z != length(s) || !alldig(substr(s, 21, z - 21))) return s
+  return substr(s, 1, 19) "Z"
+}
 {
-  e = iso2epoch($2)
+  e = iso2epoch(transcript_second($2))
   if (e < 0) { bad = 1; next }
   n++; kind[n] = $1; ep[n] = e
   if ($1 == "U" || $1 == "T") users++

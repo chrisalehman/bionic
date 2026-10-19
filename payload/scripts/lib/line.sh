@@ -144,6 +144,17 @@ line_head() {  # <plan> -> the accepted head
   proof_branch_head "$1" "$root"
 }
 
+# THE RECORD'S READER (wave-39 T17; D18, AC-12.1; burns debt landing-record-grammar): the one reading of a line
+# `line_event` writes, as awk functions a program prefixes and runs with -F'|'. Every field is read by its name,
+# never by its place, so a field the writer adds or moves is still read; the first `<key>=` of a line is its value.
+#   line_ev()     the line's event (`ev=`), or nothing on a line that is not `line/v1|`
+#   line_kv(k)    the value of the line's field <k>, or nothing
+# The fold and the entry's age below read through it, and so does lib/gate.sh's finished-row read (`_gate_row_done`);
+# tests/gate.test.sh §RECORD writes its records with `line_event` and moves a field under the gate.
+_LINE_FIELDS_AWK='
+function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+function line_ev() { return (substr($0, 1, 8) == "line/v1|") ? line_kv("ev") : "" }
+'
 line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
   local plan="${1:-}" ev="${2:-}" rec line f
   [ -n "$plan" ] && [ -n "$ev" ] || return 1
@@ -164,32 +175,32 @@ line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
 # sitrep's `in its landing, <greens> of <suites> suites green`.
 _line_fold() {  # <record>
   [ -f "$1" ] || return 0
-  awk -F'|' '
-    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    substr($0, 1, 8) != "line/v1|" { next }
+  awk -F'|' "$_LINE_FIELDS_AWK"'
+    { ev = line_ev() }
+    ev == "" { next }
     {
-      ev = substr($2, 4); row = fv("row")
+      row = line_kv("row")
       if (ev == "ready") {
         e = cur[row]
         if (e == "" || !open[e]) { e = ++n; cur[row] = e; open[e] = 1; rowof[e] = row; cand[e] = "" }
         stl[e] = 0
-        name[e] = fv("name"); com[e] = fv("commit"); car[e] = fv("carrier"); sui[e] = fv("suites")
-        debt[e] = fv("debt"); br[e] = fv("branch"); tr[e] = fv("tree")
+        name[e] = line_kv("name"); com[e] = line_kv("commit"); car[e] = line_kv("carrier"); sui[e] = line_kv("suites")
+        debt[e] = line_kv("debt"); br[e] = line_kv("branch"); tr[e] = line_kv("tree")
       } else if (ev == "candidate") {
         e = cur[row]; if (e == "" || !open[e]) next
-        cand[e] = fv("commit"); cbase[e] = fv("base"); cat[e] = fv("at"); stl[e] = 0
+        cand[e] = line_kv("commit"); cbase[e] = line_kv("base"); cat[e] = line_kv("at"); stl[e] = 0
       } else if (ev == "verdict") {
         e = cur[row]; if (e == "" || !open[e]) next
-        v[e, fv("commit"), fv("suite")] = fv("result")
+        v[e, line_kv("commit"), line_kv("suite")] = line_kv("result")
       } else if (ev == "reused") {
         e = cur[row]; if (e == "" || !open[e]) next
-        v[e, fv("commit"), fv("suite")] = "green"
+        v[e, line_kv("commit"), line_kv("suite")] = "green"
       } else if (ev == "stalled") {
         e = cur[row]; if (e != "" && open[e]) stl[e] = 1
       } else if (ev == "published" || ev == "returned") {
         e = cur[row]; if (e != "" && open[e]) open[e] = 0
       } else if (ev == "standing") {
-        stand[fv("head"), fv("suite")] = 1
+        stand[line_kv("head"), line_kv("suite")] = 1
       }
     }
     END {
@@ -885,11 +896,10 @@ _line_promise_total() {  # <suites, comma-joined | none> <tree>
 # landing the gate cannot order is refused before its event is written (rc 2, gate-unavailable).
 _line_entry_age() {  # <record> <row> -> the age of the row's open entry, nothing when it has none
   [ -f "$1" ] || return 0
-  awk -F'|' -v r="$2" '
-    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    substr($0, 1, 8) != "line/v1|" || fv("row") != r { next }
-    { ev = substr($2, 4) }
-    ev == "ready" { if (!open) { open = 1; age = "" } a = fv("age"); if (age == "" && a != "") age = a; next }
+  awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
+    { ev = line_ev() }
+    ev == "" || line_kv("row") != r { next }
+    ev == "ready" { if (!open) { open = 1; age = "" } a = line_kv("age"); if (age == "" && a != "") age = a; next }
     ev == "published" || ev == "returned" { open = 0; age = "" }
     END { if (open && age != "") print age }' "$1" 2>/dev/null
 }
@@ -1523,13 +1533,36 @@ _line_prove_kill() {  # <pid> <result file>
 # THE LANDING'S KEY (wave-38 T6; D21, D22): the word every runner of this landing asks the gate under
 # (BIONIC_GATE_LANDING) and the drain asks its width for: `<project>:<plan>:<row>`, the gate's project key of
 # the root, the plan's slug (lib/proof.sh `proof_plan_slug`, the one place a plan's name is stripped), and the
-# row. Stable for one row's landing, distinct between rows and plans; a character outside gate.sh's landing
-# alphabet is written `_`, and it is cut to its 128 (`_gate_landing_ok`).
+# row. Stable for one row's landing, distinct between rows and plans; written in the landing key's alphabet
+# (`landing_key`, below).
 _line_landing_key() {  # <root> <plan> <row>
   local p w
   _line_load_gate && _line_load_proof || return 0
   p="$(_gate_project "$1")"; w="$(proof_plan_slug "$2")"
-  printf '%s:%s:%s' "$p" "$w" "$3" | tr -c 'A-Za-z0-9._:/+-' '_' | cut -c1-128
+  landing_key "$p:$w:$3"
+}
+# THE LANDING KEY'S ALPHABET (wave-39 T17; D18, AC-12.1; burns debt landing-key-alphabet): A-Z a-z 0-9 . _ : / + -,
+# at most 128. It stood three times, in this key's `tr`, in lib/gate.sh's validator (a bash pattern) and in its
+# finished-row read (an awk gsub); tr and awk read a multibyte character as one under a UTF-8 locale and as its bytes
+# under C, so a row keyed under one and finished under the other never matched. One function now, BYTE-WISE UNDER
+# EVERY LOCALE: a byte outside the alphabet is written `_` (é is `__`), then the key is cut to 128. The alphabet is
+# spelled letter by letter, so no locale's collation can widen a range. Pure bash, so the gate's scan forks nothing.
+#   landing_key <text> [<var>]   the text as a landing key; set into <var> when one is named, else printed
+#   landing_key_ok <key>         rc 0 when <key> is one: not empty, and landing_key leaves it as it is
+# lib/gate.sh `_gate_landing_ok` is landing_key_ok, and its finished-row read writes each record's row= through
+# landing_key; tests/gate.test.sh §KEY holds the three to one answer on a multibyte row across locales.
+LANDING_KEY_ALPHABET='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:/+-'
+landing_key() {  # <text> [<var>]
+  local LC_ALL=C _lk_s="${1:-}"
+  _lk_s="${_lk_s//[!$LANDING_KEY_ALPHABET]/_}"
+  _lk_s="${_lk_s:0:128}"
+  if [ -n "${2:-}" ]; then printf -v "$2" '%s' "$_lk_s"; else printf '%s\n' "$_lk_s"; fi
+}
+landing_key_ok() {  # <key>
+  local _lk_k
+  [ -n "${1:-}" ] || return 1
+  landing_key "$1" _lk_k
+  [ "$_lk_k" = "$1" ]
 }
 # THE DRAIN'S WIDTH (wave-38 T6; D21, AC-6.1; ADR-060): how many more runners this landing may start now,
 # the gate's own answer (gate.sh `gate_width_ask`), never a number the drain works out. The one door the
