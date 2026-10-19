@@ -1400,4 +1400,73 @@ expect_ne "(rh2m) MUTANT the check deleted from line_publish: the hand landing i
 expect_eq "(rh2m) …the branch now holds the planted blob" "$RR_BLOB" \
   "$(git -C "$RRM" rev-parse refs/heads/wave/x:planted.txt 2>/dev/null | cut -c1-12)"
 
+
+# ---------------------------------------------------------------------------
+section "§EXIT-VERDICT: a Lands-on command its Re-executes: declares is run by ready and judged by its exit code (wave-39 T20; D20, REQ-14 AC-14.3)"
+#
+# A row whose tests are jest or Playwright names its command in backticks on Lands-on:, and the dispatch wall
+# admits it when Re-executes: declares it (dispatch-preflight-5 §LANDS-CMD). The lift writes it as one encoded
+# entry (lib/suite.sh `lands_cmd`); ready runs it through the gate in the landing tree, as `bash -c <command>` in
+# the suite's environment (lib/suite.sh `bionic_command_start`), and writes result=green on rc 0 and result=red on
+# any other, never none: a command prints no harness end line. Its red is the row's (no failing lines to hold
+# against the head's), so the landing returns. Its read key is the candidate's tree, `tree:<id>`, unless the
+# command names a suite file, whose key it then takes.
+# FIXTURES: ll_world; T1 commits check.sh (exit 0, or exit 1) and lands on a.test.sh and `bash check.sh`, the
+# lands_on= value the real lift writes. The mutant drops the exit-code arm from `_line_verdict` in the driver.
+# fails-when: the command's verdict is none, a red publishes, a green does not, or the key is not the tree's.
+XV_ON="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
+  brief_field "$(lift_contract_fields 'Lands-on: a, `bash check.sh`')" lands_on)"
+XV_TOK='`bash%20check.sh`'
+expect_eq "(xv0) the lift writes the command as one encoded entry beside the suite, which _line_suites reads as itself" \
+  "a.test.sh,${XV_TOK}|a.test.sh,${XV_TOK}" "${XV_ON}|$(_line_suites "$XV_ON")"
+xv_world() {  # <rc of check.sh> -> a world whose T1 commits check.sh and lands on a.test.sh and the command
+  local r
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T1 "$XV_ON"
+  printf '#!/bin/bash\necho "check ran in $(pwd -P)"\nexit %s\n' "$1" > "$r/.worktrees/T1/check.sh"
+  git -C "$r/.worktrees/T1" add check.sh && git -C "$r/.worktrees/T1" commit -qm "T1: check.sh exits $1" || return 1
+  printf '%s' "$r"
+}
+xv_verdict() {  # <root> <commit> <suite> -> `<result> <log>` of each verdict for <suite> on <commit>, one per line
+  ll_ev "$1" verdict | awk -F'|' -v c="commit=$2" -v s="suite=$3" '$4 == c && $5 == s { print substr($6, 8) " " substr($7, 5) }'
+}
+
+RXG="$(xv_world 0)"
+XV_T1="$(git -C "$RXG/.worktrees/T1" rev-parse HEAD)"
+expect_eq "(xv1) the command's key is the commit's tree; a command naming a suite file takes that suite's key" \
+  "tree:$(git -C "$RXG" rev-parse "${XV_T1}^{tree}")|yes" \
+  "$(_line_reads "$RXG" "$XV_T1" "$XV_TOK")|$(k="$(_line_reads "$RXG" "$XV_T1" a.test.sh)"; [ -n "$k" ] && [ "$k" != - ] \
+      && [ "$(_line_reads "$RXG" "$XV_T1" '`bash%20tests%2Fa.test.sh%20-v`')" = "$k" ] && echo yes || echo no)"
+ll_verb "$RXG" T1 --within 900
+XV_CG="$(ll_last_cand "$RXG" T1)"
+expect_eq "(xv2) AC-14.3 a row whose Lands-on names a command that exits 0 lands: exit 0, LANDED" "0|LANDED T1" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | grep '^LANDED ' | head -n 1 | cut -d' ' -f1-2)"
+XV_VG="$(xv_verdict "$RXG" "$XV_CG" "$XV_TOK")"
+expect_eq "(xv3) …the command's verdict on the candidate is one green, never none" "green" "$(printf '%s\n' "$XV_VG" | awk '{ print $1 }' | paste -sd' ' -)"
+expect_contains "(xv4) …its log holds the command's own output, run in the landing tree" "check ran in " \
+  "$(cat "$(printf '%s\n' "$XV_VG" | awk 'NR == 1 { print $2 }')" 2>/dev/null)"
+expect_eq "(xv5) …the verdict is keyed by the candidate's tree" "reads=tree:$(git -C "$RXG" rev-parse "${XV_CG}^{tree}")" \
+  "$(ll_ev "$RXG" verdict | awk -F'|' -v c="commit=$XV_CG" -v s="suite=$XV_TOK" '$4 == c && $5 == s' | tr '|' '\n' | grep '^reads=')"
+expect_eq "(xv6) …and the gate admitted it under the command's own text as its key" "yes" \
+  "$(grep -lx 'key=bash check.sh' "$BIONIC_GATE_DIR"/requests/* >/dev/null 2>&1 && echo yes || echo no)"
+expect_eq "(xv7) …the working branch now holds check.sh" "yes" \
+  "$(git -C "$RXG" cat-file -e "$(ll_head "$RXG"):check.sh" 2>/dev/null && echo yes || echo no)"
+
+RXR="$(xv_world 1)"
+XV_HR="$(ll_head "$RXR")"
+ll_verb "$RXR" T1 --within 900
+XV_CR="$(ll_last_cand "$RXR" T1)"
+expect_eq "(xv8) AC-14.3 the same row with a command that exits 1 returns: exit 1, RED naming the command" "1|RED T1 ${XV_TOK}" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | grep '^RED ' | head -n 1 | cut -d' ' -f1-3)"
+expect_eq "(xv9) …the command's verdict is one red, never none" "red" \
+  "$(xv_verdict "$RXR" "$XV_CR" "$XV_TOK" | awk '{ print $1 }' | paste -sd' ' -)"
+expect_eq "(xv10) …the entry is returned for red, the head unmoved, and no run was made at the head" "1|$XV_HR|0" \
+  "$(ll_ev "$RXR" returned | grep -c 'why=red')|$(ll_head "$RXR")|$(xv_verdict "$RXR" "$XV_HR" "$XV_TOK" | awk 'END { print NR }')"
+
+RXM="$(xv_world 0)"
+LL_MUTANT='/_line_lands_cmd "\${3:-}"/d' LL_MUTANT_FN=_line_verdict ll_drive "$RXM" T1 "$WORLD_ROOT/xv-T1.out" 900
+ll_wait_file "$WORLD_ROOT/xv-T1.out.rc" 1200
+expect_eq "(xv11m) MUTANT the exit-code arm dropped: the command, which prints no end line, is none and the entry stalls" "70|none" \
+  "$(cat "$WORLD_ROOT/xv-T1.out.rc" 2>/dev/null)|$(xv_verdict "$RXM" "$(ll_last_cand "$RXM" T1)" "$XV_TOK" | awk 'NR == 1 { print $1 }')"
+
 finish
