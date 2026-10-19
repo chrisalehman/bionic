@@ -85,8 +85,7 @@ LINE_KIND="queue"; LINE_BY="-"; LINE_WHY="-"; LINE_SID=""; LINE_MARKED=""
 LINE_PROMISED=-; LINE_ACTUAL=-   # the last run's promised and actual seconds (wave-39 T8), set as LINE_AT is
 
 # THE SUITE BAR (wave-39 T6; D1; spec §3 "the two bars"): ten minutes of the gate's promise (`_gate_seconds`).
-# Defined here and nowhere else; the landing line's refusal of a Lands-on suite promising more is T7's
-# (A-orch-5), so nothing reads it yet.
+# Defined here and nowhere else; `ready` refuses a Lands-on suite promising more (`_line_too_long`, wave-39 T39).
 LINE_SUITE_BAR=600
 # THE LANDING BAR (wave-39 T9; D12, D25; AC-5.1, AC-5.2): fifteen minutes ready→landed. The sitrep's schedule
 # line prints the run's median ready→landed against it, and the scorecard's widest landing names it as its
@@ -781,6 +780,10 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
     3) _wt_refuse "no-lands-on row=${row} name=${name:-<none>} ${key}=${lands} — no suite to run; land ${wt} --by-hand --reason '<why>'"; return 2 ;;
     1) _wt_refuse "lands-on-unreadable row=${row} ${key}=${lands} — name suites bare, or land ${wt} --by-hand --reason '<why>'"; return 2 ;;
   esac
+  # THE SUITE BAR (wave-39 T39; D1, AC-3.2): a Lands-on suite promising more than LINE_SUITE_BAR is refused
+  # here, before any record, lease or runner: the writer splits it and says ready again. Exit 1, the row's to fix.
+  c="$(_line_too_long "$suites" "$wt" "$root" "$acc" "$head")"
+  [ -z "$c" ] || { printf '%s\n' "$c"; return 1; }
   # The debt is a suite's file name; the full-suite runner, or anything else, is never one (B4). Its
   # token (`lands_red=<suite> until <token>`) rides to the debt write in LINE_DEBT_TOKEN.
   debt="$(_wt_field "$launch" lands_red)"; LINE_DEBT_TOKEN=-
@@ -870,6 +873,35 @@ _line_promise_total() {  # <suites, comma-joined | none> <tree>
     t=$((t + p))
   done
   printf '%s\n' "$t"
+}
+
+# THE SUITE BAR, HELD (wave-39 T39; D1, AC-3.2): each Lands-on suite the row's candidate will hold whose
+# `_gate_promise` is over LINE_SUITE_BAR, one `too-long <suite> <s>s — split it` line; nothing when none is. The
+# candidate is not built yet, so whether it holds a suite is read as its merge will (`_line_merge_holds`). A suite it
+# will not hold is not judged: one the row removed is recorded absent by the carrier (T6), so a split row naming its
+# old whole still lands, and a name no tree holds stalls there (wave-34 T27). A store that cannot be read judges
+# nothing, as `_line_promise_total` sums nothing: the runner's own ask refuses a gate that is not there.
+_line_too_long() {  # <suites, comma-joined | none> <tree> <root> <accepted head> <row head>
+  local s p mb
+  _gate_store >/dev/null 2>&1 || return 0
+  mb="$(git -C "$3" merge-base "${4:-}" "${5:-}" 2>/dev/null)"
+  for s in $(printf '%s\n' "$1" | tr ',' ' '); do
+    [ "$s" != none ] || continue
+    _line_merge_holds "$3" "$mb" "${4:-}" "${5:-}" "$s" || continue
+    p="$(_gate_promise "${s##*/}" "${2:-}" 2>/dev/null)"; p="${p##*:}"
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    [ "$p" -gt "$LINE_SUITE_BAR" ] && printf 'too-long %s %ss — split it\n' "$s" "$p"
+  done
+  return 0
+}
+# 0 when the merge of <ours> and <theirs> holds <suite>, as a three-way merge decides a file's presence: the side
+# that changed it from <merge base> wins, and both sides agreeing is the answer. A conflicted edit still holds it.
+_line_merge_holds() {  # <root> <merge base> <ours> <theirs> <suite>
+  local m=0 o=0 t=0
+  _line_holds "$1" "$2" "$5" && m=1
+  _line_holds "$1" "$3" "$5" && o=1
+  _line_holds "$1" "$4" "$5" && t=1
+  if [ "$o" = "$t" ] || [ "$m" != "$t" ]; then [ "$t" = 1 ]; else [ "$o" = 1 ]; fi
 }
 
 # THE LANDING'S PLACE IN THE GATE'S LINE (wave-38 T30; D22; A-T6-10, A-orch-49; gate.sh THE LEASE). The

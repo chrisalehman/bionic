@@ -1362,4 +1362,45 @@ expect_absent "(o2b) …nor the poker script" "session-poker" "$LL_OUT_W1"
 expect_contains "(o3) by the time it prints, the mark and the plan row are written (read back from the mutant-free run)" \
   "landed=${KW}" "$(ll_mark "$RW" wx-T1)"
 
+
+# ---------------------------------------------------------------------------
+section "§TOO-LONG: ready refuses a Lands-on suite whose gate promise is over the suite bar; nothing runs (wave-39 T39; D1, AC-3.2)"
+#
+# THE SUITE BAR (line.sh LINE_SUITE_BAR, 600): ten minutes of the gate's promise. A Lands-on suite promising more is
+# refused before the row enters the line, one `too-long <suite> <s>s — split it` line each, exit 1: no ready event,
+# no lease, no runner, no gate request. A suite at or under the bar runs. A suite the row removed is not judged
+# (the carrier records it absent, §ABSENT), or a split row naming its old whole could never land.
+# fails-when: a suite over the bar is run, or one under it is refused.
+RT="$(ll_world)"; ll_launch "$RT" T1 a,c
+( cd "$RT" && world_cost c.test.sh 700 )
+( cd "$RT" && world_suite c green >/dev/null ) && git -C "$RT" add tests/c.test.sh && git -C "$RT" commit -qm "suite c"
+REQT="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
+ll_verb "$RT" T1 --within 900
+expect_eq "(tl1) AC-3.2 a Lands-on suite promising 700 s: exit 1, the first line too-long c.test.sh 700s — split it" \
+  "1|too-long c.test.sh 700s — split it" "$LL_RC|$(printf '%s\n' "$LL_OUT" | head -n 1)"
+expect_eq "(tl1b) …one too-long line, for c alone (a promises nothing recorded)" "1" \
+  "$(printf '%s\n' "$LL_OUT" | grep -c '^too-long ')"
+expect_eq "(tl2) …nothing run: no ready event, no verdict, no log, no gate request, no lease" "0 0 0 $REQT no" \
+  "$(ll_ev "$RT" ready | awk 'END { print NR }') $(ll_ev "$RT" verdict | awk 'END { print NR }') $(ls "$RT/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ') $(ll_lease_has "$(_line_landing_key "$RT" "$(ll_plan "$RT")" T1)")"
+( cd "$RT" && world_cost c.test.sh 599 && world_cost c.test.sh 599 && world_cost c.test.sh 599 )
+ll_verb "$RT" T1 --within 900
+expect_eq "(tl3) AC-3.2 the same suite promising 599 s runs: exit 0, LANDED, c green" "0|LANDED T1|green" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | grep '^LANDED ' | head -n 1 | cut -d' ' -f1-2)|$(ll_ev "$RT" verdict | while IFS= read -r v; do [ "$(ll_field "$v" suite)" = c.test.sh ] && ll_field "$v" result; done | tail -n 1)"
+expect_eq "(tl3b) …and prints no too-long line" "0" "$(printf '%s\n' "$LL_OUT" | grep -c '^too-long ')"
+# A row that removes a suite over the bar (the split itself) still names it on its Lands-on: not refused, it lands.
+RT2="$(ll_world)"; ll_launch "$RT2" T1 "a.test.sh b.test.sh"
+( cd "$RT2" && world_cost b.test.sh 700 )
+git -C "$RT2/.worktrees/T1" rm -q tests/b.test.sh && git -C "$RT2/.worktrees/T1" commit -qm "T1: b split away"
+ll_verb "$RT2" T1 --within 900
+expect_eq "(tl4) a row that removed b (700 s) lands on what it holds: exit 0, LANDED, b absent, no too-long" "0|LANDED T1|absent|0" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | grep '^LANDED ' | head -n 1 | cut -d' ' -f1-2)|$(ll_ev "$RT2" verdict | while IFS= read -r v; do [ "$(ll_field "$v" suite)" = b.test.sh ] && ll_field "$v" result; done | tail -n 1)|$(printf '%s\n' "$LL_OUT" | grep -c '^too-long ')"
+# MUTANT: the bar check removed, the 700 s suite runs to a green verdict (the rows above can fail).
+RT3="$(ll_world)"; ll_launch "$RT3" T1 c
+( cd "$RT3" && world_cost c.test.sh 700 )
+( cd "$RT3" && world_suite c green >/dev/null ) && git -C "$RT3" add tests/c.test.sh && git -C "$RT3" commit -qm "suite c"
+LL_MUTANT='s/-gt "\$LINE_SUITE_BAR"/-gt 99999/' LL_MUTANT_FN=_line_too_long ll_drive "$RT3" T1 "$WORLD_ROOT/tl-T1.out" 900
+ll_wait_file "$WORLD_ROOT/tl-T1.out.rc" 1200
+expect_eq "(tl5m) MUTANT the bar check removed: the 700 s suite runs and is green (the rows can fail)" "0 green 0" \
+  "$(cat "$WORLD_ROOT/tl-T1.out.rc" 2>/dev/null) $(ll_field "$(ll_ev "$RT3" verdict | tail -n 1)" result) $(grep -c '^too-long ' "$WORLD_ROOT/tl-T1.out" 2>/dev/null)"
+
 finish
