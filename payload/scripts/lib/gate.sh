@@ -215,6 +215,20 @@ if ! type -t _slots_live >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/slots.sh" ]; th
   # shellcheck disable=SC1091
   . "$_GATE_LIB_DIR/slots.sh"
 fi
+# An instant has one reader, lib/time.sh's (wave-39 T17; D18): the finished-row read below dates the record by it.
+if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$_GATE_LIB_DIR/time.sh"
+fi
+# THE LANDING KEY AND THE LANDING RECORD ARE lib/line.sh's (wave-39 T17; D18, AC-12.1): its alphabet (`landing_key`,
+# `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`). Loaded when first needed, never at source: line.sh
+# sources the worktree library, and most of the gate's callers ask about no landing.
+_gate_load_line() {  # -> 0 once lib/line.sh's key and reader are loaded
+  declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ] && return 0
+  # shellcheck disable=SC1091
+  [ -r "$_GATE_LIB_DIR/line.sh" ] && . "$_GATE_LIB_DIR/line.sh" 2>/dev/null
+  declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ]
+}
 
 _GATE_KEEP_DEFAULT=86400   # seconds a request that is no longer open is kept (BIONIC_GATE_KEEP's default)
 _GD=""        # the store, set by each verb
@@ -579,8 +593,8 @@ _gate_scan() {
 # ask (AC-6.2), and nothing ended it once the row was done: 51 such requests, from rows already landed,
 # sat in the store. The scan ends a landing request (kind=landing) that is not open when
 #   row-finished  the landing record it named (record=) shows its row published, returned or stalled
-#                 after its asked= (line.sh writes `line/v1|ev=<ev>|row=<row>|…|at=<ISO UTC>`; the row
-#                 is the landing key's last `:` field, spelt in the key's alphabet), or
+#                 after its asked= (the record as line.sh's reader reads it, by name; the row is the landing
+#                 key's last `:` field, spelt in the key's alphabet by line.sh `landing_key`), or
 #   holder-gone   its holder has been gone longer than its window: since left= (the hand-back), or
 #                 asked= for a holder that died uncleared; the window within= (A-T31-3), 1800 s when the
 #                 request records none. A landing request that names no landing (asked before
@@ -609,30 +623,31 @@ _gate_landing_end() {  # <file>, after _gate_read: rc 0 when it was ended here (
   printf 'ended=%s\nrc=gone\nby=gate\nwhy=%s\n' "$now" "$why" >> "$1"
 }
 # _gate_row_done <record> <row> <asked epoch> — rc 0 when <record> shows <row> published, returned or
-# stalled after <asked>. The record's finishing events are read once a scan (_G_DONE_FOR, _G_DONE).
+# stalled after <asked>. The record's finishing events are read once a scan (_G_DONE_FOR, _G_DONE): line.sh's
+# reader reads each line by name (`_LINE_FIELDS_AWK`, never `$2 == "ev=…"`), lib/time.sh dates its at= (an
+# instant that is not one finishes nothing), and each row's latest finish is kept. Each row= is then written in
+# the landing key's alphabet by line.sh `landing_key`, the function the key itself was written by, so a row
+# keyed under one locale is matched under any other (wave-39 T17; D18, AC-12.1). No record reader of its own.
 _gate_row_done() {
+  local l ep
   if [ "$_G_DONE_FOR" != "$1" ]; then
-    _G_DONE_FOR="$1"
-    _G_DONE="$(awk -F'|' '
-      function ep(s,   y, m, d, era, yoe, doy, doe) {
-        y = substr(s, 1, 4) + 0; m = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
-        if (m <= 2) y--
-        era = int(y / 400); yoe = y - era * 400
-        doy = int((153 * ((m + 9) % 12) + 2) / 5) + d - 1
-        doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
-        return (era * 146097 + doe - 719468) * 86400 + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2)
+    _G_DONE_FOR="$1"; _G_DONE=''
+    _gate_load_line && [ -n "${_TIME_ISO_AWK:-}" ] || return 1
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      ep="${l%%$'\t'*}"
+      landing_key "${l#*$'\t'}" l
+      _G_DONE="${_G_DONE}${l} ${ep}
+"
+    done <<EOF
+$(awk -F'|' "$_TIME_ISO_AWK$_LINE_FIELDS_AWK"'
+      { ev = line_ev() }
+      ev == "published" || ev == "returned" || ev == "stalled" {
+        r = line_kv("row"); e = iso2epoch(line_kv("at"))
+        if (r != "" && e >= 0 && (!(r in last) || e > last[r])) last[r] = e
       }
-      substr($0, 1, 8) != "line/v1|" { next }
-      $2 == "ev=published" || $2 == "ev=returned" || $2 == "ev=stalled" {
-        r = ""; a = ""
-        for (i = 3; i <= NF; i++) {
-          if (index($i, "row=") == 1) r = substr($i, 5)
-          else if (index($i, "at=") == 1) a = substr($i, 4)
-        }
-        if (r == "" || a !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) next
-        gsub(/[^A-Za-z0-9._:\/+-]/, "_", r)
-        print r, ep(a)
-      }' "$1" 2>/dev/null)"
+      END { for (r in last) printf "%d\t%s\n", last[r], r }' "$1" 2>/dev/null)
+EOF
   fi
   [ -n "$_G_DONE" ] || return 1
   printf '%s\n' "$_G_DONE" | awk -v r="$2" -v a="$3" '$1 == r && $2 + 0 > a + 0 { f = 1 } END { exit !f }'
@@ -1034,10 +1049,10 @@ _gate_term_end() {  # <id> <admitted: 0|1> — TERM came while gate_ask waited: 
   kill -TERM "$(exec sh -c 'echo "$PPID"')" 2>/dev/null
 }
 
-# _gate_landing_ok <key> — rc 0 when <key> is a landing key: 1 to 128 of A-Z a-z 0-9 . _ : / + -
+# _gate_landing_ok <key> — rc 0 when <key> is a landing key: lib/line.sh `landing_key_ok`, the one alphabet
+# (wave-39 T17; D18, AC-12.1). This spelt the alphabet itself as a bash pattern, whose ranges a UTF-8 locale widened.
 _gate_landing_ok() {
-  case "${1:-}" in ''|*[!A-Za-z0-9._:/+-]*) return 1 ;; esac
-  [ "${#1}" -le 128 ]
+  _gate_load_line && landing_key_ok "${1:-}"
 }
 
 # ── the verbs ────────────────────────────────────────────────────────────────

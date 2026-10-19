@@ -50,7 +50,15 @@
 #                      returned or stalled after its ask (why=row-finished), or whose holder has been
 #                      gone longer than its window, 1800 s with none recorded (why=holder-gone), a
 #                      landing request naming no landing by the window alone; a live waiter, one
-#                      gone 10 s (AC-6.2's killed waiter), and a writer's work request are kept
+#                      gone 10 s (AC-6.2's killed waiter), and a writer's work request are kept. Its
+#                      landing record is written by line.sh's own `line_event` (wave-39 T17; AC-12.1)
+#   §KEY       D18, AC-12.1 (wave-39 T17) one landing-key alphabet, line.sh `landing_key`: a multibyte row is
+#                      written `_` a byte under every locale; the gate's row sanitiser and line.sh's key agree
+#                      on it across locales; the gate's validator accepts exactly what landing_key leaves alone
+#   §RECORD    D18, AC-12.1 (wave-39 T17) the gate reads the landing record through line.sh's reader, by
+#                      name: published, returned and stalled finish a row, ready and verdict do not, each line
+#                      written by `line_event`. Mutation: the writer moves ev= to the end of its fields, and the
+#                      gate still reads the row finished
 #   §FIRST     AC-2.7  a writer's number waits, a landing's arrives, and the landing is admitted
 #                      first. Mutation: landing-before-work removed admits the writer
 #   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
@@ -1075,14 +1083,29 @@ world_machine 8 8192 40 1.0
 # why=holder-gone). A landing request that names no landing (asked before T6 tagged them, as the 51
 # were) is ended by the window alone; a writer's work request is never this rule's. A live waiter is
 # never ended, nor one handed back 10 s ago. Landing keys are
-# `<project>:<plan>:<row>`; the record is a planted landing-proofs.log, its lines as line.sh writes them.
+# `<project>:<plan>:<row>`. THE RECORD IS WRITTEN BY ITS WRITER (wave-39 T17; D18, AC-12.1): every landing record
+# line in this suite is appended by line.sh's own `line_event` (`rec_event`), its clock (`_line_now`) alone pinned
+# to the instant the row names, so the gate reads what the writer writes (critic-structure: these were literals).
+LN_PROJ="$WORLD_ROOT/lnproj"
+git init -q "$LN_PROJ" 2>/dev/null
+LN_PLAN="$LN_PROJ/.bionic/docs/plans/epic-x/wave-x.plan.md"
+mkdir -p "${LN_PLAN%/*}" && printf '# plan\n' > "$LN_PLAN"
+LINE_SH="$REPO_ROOT/payload/scripts/lib/line.sh"
+rec_event() {  # <at ISO> <ev> <key=value>... — one line appended to $LN_PLAN's record by line.sh (LINE_LIB=<line.sh>)
+  bash -c 'at="$2"; . "$1" 2>/dev/null; _line_now() { printf "%s\n" "$at"; }; shift 2; line_event "$@"' \
+    _ "${LINE_LIB:-$LINE_SH}" "$1" "$LN_PLAN" "${@:2}" >/dev/null 2>&1
+}
+LN_REC="$(bash -c '. "$1" 2>/dev/null; line_record "$2"' _ "$LINE_SH" "$LN_PLAN" 2>/dev/null)"
 section "§FINISHED — a finished row's kept requests are ended; a killed waiter keeps its turn (D22, AC-6.2)"
 fresh finished
 world_machine 8 8192 60 6.0
 world_cost h 30
-REC="$D/landing-proofs.log"
-printf '%s\n' 'line/v1|ev=returned|row=T9|why=red|detail=-|at=1970-01-01T00:16:35Z' \
-  'line/v1|ev=published|row=T8|commit=c8|kind=queue|by=-|why=-|at=1970-01-01T00:16:45Z' > "$REC"
+REC="$LN_REC"; rm -f "$REC"
+rec_event 1970-01-01T00:16:35Z returned row=T9 why=red detail=-
+rec_event 1970-01-01T00:16:45Z published row=T8 commit=c8 kind=queue by=- why=-
+expect_eq "FN.0 precondition: line_event wrote both record lines, each stamped with its pinned instant" \
+  "line/v1|ev=returned|row=T9|why=red|detail=-|at=1970-01-01T00:16:35Z
+line/v1|ev=published|row=T8|commit=c8|kind=queue|by=-|why=-|at=1970-01-01T00:16:45Z" "$(cat "$REC" 2>/dev/null)"
 # A-orch-43's own shape, planted: a landing request handed back at 1000 that names no landing (the 51
 # predate T6's landing= line), and a writer's work request handed back at the same instant.
 mkdir -p "$BIONIC_GATE_DIR/requests"
@@ -1109,7 +1132,7 @@ world_tick 10
 state >/dev/null
 expect_eq "FN.4 ten seconds on, with T9's return before its ask and only T8 published after: all three kept (asked|ended, each)" \
   "1000||1000||1000|" "$(field "$F9" asked)|$(field "$F9" ended)|$(field "$F9L" asked)|$(field "$F9L" ended)|$(field "$F7" asked)|$(field "$F7" ended)"
-printf '%s\n' 'line/v1|ev=published|row=T9|commit=c9|kind=queue|by=-|why=-|at=1970-01-01T00:16:48Z' >> "$REC"
+rec_event 1970-01-01T00:16:48Z published row=T9 commit=c9 kind=queue by=- why=-
 state >/dev/null
 expect_eq "FN.5 T9 published after its ask: the next scan ends its handed-back request (ended|rc|why)" \
   "1010|gone|row-finished" "$(field "$F9" ended)|$(field "$F9" rc)|$(field "$F9" why)"
@@ -1133,6 +1156,69 @@ expect_eq "FN.9c …while the writer's work request is not this rule's: kept, as
   "$(field 91 asked)|$(field 91 ended)"
 expect_eq "FN.10 …and the live waiter, asked 1801 s ago, is still untouched (holder|ended)" "asker|" \
   "$(holder_as "$F9L" "$(cat "$D/f9l.pid" 2>/dev/null)")|$(field "$F9L" ended)"
+reap
+
+# ── §KEY ─────────────────────────────────────────────────────────────────────
+# ONE LANDING-KEY ALPHABET (wave-39 T17; D18, AC-12.1; burns debt landing-key-alphabet). The alphabet stood three
+# times: gate.sh `_gate_landing_ok` (a bash pattern), gate.sh's row sanitiser in `_gate_row_done` (an awk gsub) and
+# line.sh `_line_landing_key` (`tr -c … | cut`). tr and awk read a multibyte character as one under a UTF-8 locale
+# and as its bytes under C, so a row named under one locale and finished under the other never matched, and the
+# request waited out its window. line.sh `landing_key` is the one function now: byte-wise under every locale.
+section "§KEY — one landing-key alphabet: line.sh landing_key, read by the gate's validator and row sanitiser (D18; AC-12.1)"
+fresh key
+UTF8="$(locale -a 2>/dev/null | grep -i -m1 -E '^(en_US|C)\.utf-?8$')"
+expect_nonempty "KY.0 precondition: this machine has a UTF-8 locale to name rows under" "$UTF8"
+lkey() { ( . "$LINE_SH" 2>/dev/null; landing_key "$1" 2>/dev/null ) ; }   # <text> -> line.sh's landing key of it
+expect_eq "KY.1 landing_key writes a two-byte é as two _ under UTF-8 and under C alike (utf8|C)" "T1__|T1__" \
+  "$(LC_ALL="$UTF8" lkey 'T1é')|$(LC_ALL=C lkey 'T1é')"
+LONG="$(printf 'a%.0s' $(seq 1 200))"
+expect_eq "KY.2 a character outside the alphabet is _, and the key is cut to 128" "p0:w_x:T1_b|128" \
+  "$(lkey 'p0:w x:T1|b')|$(printf '%s' "$(lkey "$LONG")" | wc -c | tr -d ' ')"
+KY_KEY="$(LC_ALL="$UTF8" bash -c '. "$1" 2>/dev/null; _line_landing_key "$2" "$3" "T1é"' _ "$LINE_SH" "$LN_PROJ" "$LN_PLAN" 2>/dev/null)"
+expect_regex "KY.3 precondition: line.sh names the multibyte row's landing under UTF-8, its row field byte-wise" ':wave-x:T1__$' "$KY_KEY"
+rm -f "$LN_REC"
+rec_event 1970-01-01T00:16:48Z published "row=T1é" commit=c1 kind=queue by=- why=-
+row_done() {  # <gate.sh> <record> <row> <asked> -> the rc of the gate's finished-row read (0: finished after <asked>)
+  ( . "$1" 2>/dev/null; _G_DONE_FOR=''; _gate_row_done "$2" "$3" "$4" ); printf '%s' "$?"
+}
+expect_eq "KY.4 the gate, scanning under C, finds the row line.sh keyed under UTF-8 finished after its ask, and not a row it never wrote (T1é|T2)" \
+  "0|1" "$(LC_ALL=C row_done "$GATE" "$LN_REC" "${KY_KEY##*:}" 1000)|$(LC_ALL=C row_done "$GATE" "$LN_REC" T2 1000)"
+expect_eq "KY.5 …and under UTF-8 alike" "0" "$(LC_ALL="$UTF8" row_done "$GATE" "$LN_REC" "${KY_KEY##*:}" 1000)"
+key_ok() { ( . "$GATE" 2>/dev/null; _gate_landing_ok "$1" ); printf '%s' "$?"; }   # <key> -> the validator's rc
+KY_ROWS=""
+for t in 'p0:wave-x:T9' 'p0:w x:T9' 'T1é' "$LONG" "${LONG:0:128}"; do
+  k="$(LC_ALL="$UTF8" lkey "$t")"
+  KY_ROWS="${KY_ROWS}$(LC_ALL="$UTF8" key_ok "$k")$(LC_ALL="$UTF8" key_ok "$t") "
+done
+expect_eq "KY.6 the validator accepts what landing_key prints and refuses what landing_key would change (key|text: plain, blank, é, 200, 128)" \
+  "00 01 01 01 00 " "$KY_ROWS"
+expect_eq "KY.7 …and refuses the empty key" "1" "$(key_ok '')"
+
+# ── §RECORD ──────────────────────────────────────────────────────────────────
+# ONE RECORD READER (wave-39 T17; D18, AC-12.1; burns debt landing-record-grammar). The gate read the landing
+# record's event by position (`$2 == "ev=published"`) while line.sh's readers read every field by name, and its one
+# test planted literals, so a writer that moved a field passed both suites. The gate now reads through line.sh's
+# reader (`_LINE_FIELDS_AWK`), and every line here is written by `line_event`.
+section "§RECORD — the gate reads the landing record through line.sh's reader, by name (D18; AC-12.1)"
+fresh record
+RC_ROWS=""
+for ev in published returned stalled ready verdict; do
+  rm -f "$LN_REC"
+  rec_event 1970-01-01T00:16:48Z "$ev" row=T5 commit=c5 why=red detail=- logs=- suite=a.test.sh result=green
+  RC_ROWS="${RC_ROWS}$(row_done "$GATE" "$LN_REC" T5 1000)"
+done
+expect_eq "RC.1 written by line_event: published, returned and stalled finish the row after its ask; ready and verdict do not" \
+  "00011" "$RC_ROWS"
+expect_eq "RC.2 a finishing line at or before the ask does not finish it (asked 1008, the line's own instant)" "1" \
+  "$(rm -f "$LN_REC"; rec_event 1970-01-01T00:16:48Z published row=T5 commit=c5; row_done "$GATE" "$LN_REC" T5 1008)"
+MR="$(mutant record)"
+anchor file payload/scripts/lib/line.sh 'line="line/v1|ev=${ev}"' 'line="line/v1"; set -- "$@" "ev=${ev}"' "${MR%/gate.sh}/line.sh"
+rm -f "$LN_REC"
+LINE_LIB="${MR%/gate.sh}/line.sh" rec_event 1970-01-01T00:16:48Z published row=T5 commit=c5 kind=queue by=- why=-
+expect_eq "RC.3 the mutant writer runs and moves ev= behind its fields" \
+  "line/v1|row=T5|commit=c5|kind=queue|by=-|why=-|ev=published|at=1970-01-01T00:16:48Z" "$(cat "$LN_REC" 2>/dev/null)"
+expect_eq "RC.4 …and the gate, reading through that tree's line.sh, still reads the row finished" "0" \
+  "$(row_done "$MR" "$LN_REC" T5 1000)"
 reap
 
 # ── §FIRST ───────────────────────────────────────────────────────────────────

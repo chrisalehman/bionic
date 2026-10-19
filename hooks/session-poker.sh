@@ -1383,7 +1383,7 @@ esac
 # the SAME question its sibling answers so the two cannot quietly drift into different
 # readings of one fact. `parse_seconds` is duplicated post-fix (epic-16 w2 S2, same commit
 # that fixed the original); `file_mtime` joined them for `adopt`, which reads a predecessor
-# agent's progress file the way the sweeper reads a live one. The seven are held together by
+# agent's progress file the way the sweeper reads a live one. The six are held together by
 # tests/cross-gate-agreement.test.sh
 # §O, which compares executable text with every pure-comment line stripped from both sides —
 # epic-16 w2 Step-6 remediation R3, closing rd review D-1 (this claim used to name no test,
@@ -1393,10 +1393,10 @@ now_epoch() { date -u +%s; }
 iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 
-iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
-  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
-    || date -u -d "$1" +%s 2>/dev/null
-}
+# iso_epoch LEFT THE FAMILY (wave-39 T17; D18, AC-12.1; burns debt iso-to-epoch): an instant has one reader,
+# lib/time.sh's (strict `…Z`, which `date -j -f` was not: it read `…Zx` with a warning), and this is the one-line call
+# to it. The sweeper keeps its own `date` copy, because it sources no library; §O no longer compares the two.
+iso_epoch() { _time_epoch "${1:-}"; }   # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 
 # One field out of a versioned pipe-delimited line, BY KEY, never by position — same
 # rationale as hooks/session-sweeper.sh's copy: field order is not a contract.
