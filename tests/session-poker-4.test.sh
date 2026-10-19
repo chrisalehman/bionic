@@ -6028,7 +6028,8 @@ expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run li
 # A shell that starts with a signal ignored cannot trap it, and the ignored state is inherited (wave-38 T33, T34; A-orch-69).
 # regression-run's command is `exec`ed through a perl that resets the three first (D17), in both arms: the declared
 # regression-command: and tests/run.sh whole. The command traps HUP, INT and QUIT and writes what it saw; the verb is
-# started as `bash -c 'trap "" HUP INT QUIT; …'`, as a nohup'd background job starts it. The control is the same
+# started as `bash -c 'trap "" HUP INT QUIT; …'`, as a nohup'd background job starts it. The command waits on a timed
+# read of a fifo nobody writes, which a trapped signal interrupts (no poll or sleep stands in for it). The control is the same
 # command under the same ignored start with no reset: it sees none, so the row can fail.
 [ "$(type -t wait_for)" = function ] || . "$(dirname "$0")/lib/wait.sh"
 RS_D="$TMPROOT/rs-sig"; mkdir -p "$RS_D"
@@ -6037,10 +6038,12 @@ rs_script() {  # <name> -> writes the command's script, prints its path
   cat > "$RS_D/$n.sh" <<RSEOF
 #!/bin/bash
 for s in HUP INT QUIT; do trap "echo trapped-\$s >> '$RS_D/$n.saw'" \$s; done
+mkfifo '$RS_D/$n.fifo' 2>/dev/null
+exec 3<> '$RS_D/$n.fifo'
 echo \$\$ > '$RS_D/$n.pid'
 : > '$RS_D/$n.up'
 i=0
-while [ \$i -lt 80 ] && [ "\$(wc -l < '$RS_D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ]; do i=\$((i+1)); sleep 0.1; done
+while [ "\$(wc -l < '$RS_D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ] && [ \$i -lt 10 ]; do i=\$((i+1)); read -t 1 -u 3 _; done
 exit 0
 RSEOF
   chmod +x "$RS_D/$n.sh"
@@ -6070,7 +6073,7 @@ rs_script ctl
 ( exec bash -c 'trap "" HUP INT QUIT; exec bash "$1"' _ "$RS_D/ctl.sh" ) > /dev/null 2>&1 < /dev/null &
 RS_CTL=$!
 wait_for 30 test -e "$RS_D/ctl.up"
-for _s in HUP INT QUIT; do kill -"$_s" "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; sleep 0.2; done
+for _s in HUP INT QUIT; do kill -"$_s" "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait_for 1 grep -q "trapped-$_s" "$RS_D/ctl.saw"; done
 kill -KILL "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait "$RS_CTL" 2>/dev/null
 expect_eq "RL-7-ctl control: a command started with the three ignored and no reset sees none of them (the row can fail)" "" "$(rs_saw ctl)"
 

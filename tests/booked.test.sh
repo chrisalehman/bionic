@@ -467,7 +467,8 @@ section "§SIGNALS — a launcher started with HUP, INT and QUIT ignored hands w
 # THE DRIVE. `bash -c 'trap "" HUP INT QUIT; <launcher>'` starts the launcher with all three ignored,
 # as a nohup'd background job does. The command it launches traps HUP, INT and QUIT, writes its pid,
 # marks itself up, and waits; this suite sends it each signal and reads what it saw. A command that
-# never saw a signal ends by itself after 8 s, so a regression fails in seconds and never hangs.
+# never saw a signal ends by itself after 10 s (it waits on a timed read of a fifo nobody writes, which a trapped
+# signal interrupts, so no poll or sleep stands in for the signal), so a regression fails in seconds and never hangs.
 # THE CONTROL. The same command under the same ignored start with NO launcher between (a bash started
 # with the three ignored, run by a bash that ignores them) sees none: the fixture can fail. The same
 # command through a perl reset sees all three: the signals are really delivered.
@@ -480,10 +481,12 @@ sg_cmd() {  # <name> — writes the command's script and prints the line that ru
   local n="$1"
   cat > "$D/$n.cmd.sh" <<SGEOF
 for s in HUP INT QUIT; do trap "echo trapped-\$s >> '$D/$n.saw'" \$s; done
+mkfifo '$D/$n.fifo' 2>/dev/null
+exec 3<> '$D/$n.fifo'
 echo \$\$ > '$D/$n.pid'
 : > '$D/$n.up'
 i=0
-while [ \$i -lt 80 ] && [ "\$(wc -l < '$D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ]; do i=\$((i+1)); sleep 0.1; done
+while [ "\$(wc -l < '$D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ] && [ \$i -lt 10 ]; do i=\$((i+1)); read -t 1 -u 3 _; done
 exit 0
 SGEOF
   printf "bash '%s/%s.cmd.sh'" "$D" "$n"
