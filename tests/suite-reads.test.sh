@@ -36,6 +36,10 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
+# WHAT THIS SUITE READS OF THE POKER (wave-39 T42; D6): §AGREE lifts poker_brief_index_suites' text out
+# of the hook and runs it beside the library; it runs no verb of the poker.
+reads hooks/session-poker.sh fn poker_brief_index_suites
+
 REPO="${BIONIC_SCRIPTS_DIR}"
 ANCHORS="$REPO/payload/scripts/lib/anchors.sh"
 
