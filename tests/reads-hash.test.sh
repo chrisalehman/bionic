@@ -411,8 +411,8 @@ expect_eq "(one6) …and derives no key of its own: no narrowing, no closure rea
 # drifted (ignored): s-c still agrees, so the mutant ran; s-a's two keys part.
 anchor fn payload/scripts/lib/anchors.sh 'narrow="$(_rd_narrowed "$root" "$at")"' reads_hashes 'narrow=""'
 ONE_DRIFT="$ANCHOR_SED"
-anchor fn payload/scripts/lib/line.sh 'got="$(reads_hashes "$1" "$2" $want 2>/dev/null)"' _line_reads_fill \
-  'got="$(_line_own_keys "$1" "$2" $want 2>/dev/null)"'
+anchor fn payload/scripts/lib/line.sh 'got="$(reads_hashes "$1" "$2" $ask 2>/dev/null)"' _line_reads_fill \
+  'got="$(_line_own_keys "$1" "$2" $ask 2>/dev/null)"'
 ONE_TWICE="$ANCHOR_SED"
 one_twice() {  # <root> <at> <suite> -> the landing's key under the mutant
   ( . "$LINE" && _line_load_anchors \
