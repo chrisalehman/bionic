@@ -31,10 +31,24 @@
 #             (AC-1.3); a literal suite's key is a sha256 and survives a change outside its read set
 #   §CLOSURE  a hook's WANT library loading another library by a variable: the second library is read, and a
 #             change to it changes the key; `reads_index` itself does not close
+#   §CLOSED-INDEX  `reads_index_closed` (`bash anchors.sh reads_index --closed`, wave-39 T40 for T24's judge) is
+#             the file-to-suites index over the closed sets the key reads, in reads_index's shape, a narrowed pair
+#             as `<file>#<name>`, each tree-keyed suite on a trailing `! TAB <suite>` line; at HEAD it names
+#             session-poker.test.sh for lib/line.sh, which the plain index does not
 #   §KEY      the key is sha256 over the sorted `<path> <blob>` lines, the suite file and its prelude among them
 #   §AT       the commit is read, never the working tree
 #   §LIVE     this repository at HEAD: the closure reaches payload/scripts/lib/line.sh from
 #             tests/session-poker.test.sh, which runs hooks/session-poker.sh, and keys it by content
+#
+# ONE KEY SPACE (wave-39 T40; D5, D6, A-orch-13; REQ-2 AC-2.1, AC-2.2). `reads_hashes` is the one derivation: a
+# declared `reads <file> fn|section <name>` whose every declaration on that file `reads_declared` locates contributes
+# `<file>#<kind>:<name> <sha256 of the span's lines>` in place of `<file> <blob>`. The landing (lib/line.sh), the owed
+# set and the regression facts all key through it; line.sh derives no key of its own.
+#
+#   §ONE      line.sh's key and anchors.sh's are one key on one fixture, a declaring suite among it (a mutant keying
+#             line.sh through a second copy of the derivation flips it); a declared suite's key moves with its span
+#             and not with another function in the file; an undeclared suite's, or one with a refused declaration
+#             on the file, moves either way; line.sh holds no derivation
 #
 # FIXTURE FIDELITY: the trees under $N and $F are SYNTHESIZED, each file placed for one arm. Nothing here is run:
 # the index reads text.
@@ -186,6 +200,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYST
 rh_set() { ( . "$ANCHORS" && reads_set "$@" ) 2>/dev/null; }      # <root> <at> <suite>
 rh_hash() { ( . "$ANCHORS" && reads_hash "$@" ) 2>/dev/null; }    # <root> <at> <suite>
 rh_index() { ( . "$ANCHORS" && reads_index "$@" ) 2>/dev/null; }  # <root> <at>
+rh_closed() { ( . "$ANCHORS" && reads_index_closed "$@" ) 2>/dev/null; }  # <root> <at>
 rh_commit() { git -C "$F" add -A && git -C "$F" commit -qm "$1" && git -C "$F" rev-parse HEAD; }   # <message> -> the commit
 rh_sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{ print $1 }'; }
 
@@ -263,6 +278,23 @@ expect_contains "CLOSURE: reads_index itself still names s-hook for a.sh (rule 2
 expect_no_match "CLOSURE: …and is unchanged by the closure: nothing names s-hook for b.sh there" "payload/scripts/lib/b\\.sh.*s-hook" "$IX"
 
 # ------------------------------------------------------------
+section "§CLOSED-INDEX: the file-to-suites index over the closed sets, the one the owed set's judge joins on (wave-39 T40; D5, A-orch-3)"
+# ------------------------------------------------------------
+# fails-when: a suite reaching a file only through the closure is missing from the file's row (ci1, ci4), a tree-keyed
+# suite is not marked (ci2), or the shape is not reads_index's (ci3).
+CX="$(rh_closed "$F" "$C1")"
+expect_eq "(ci1) the closed index names s-hook for b.sh, the library a.sh loads (closure only), beside s-loop, which names it" \
+  "tests/s-hook.test.sh,tests/s-loop.test.sh" "$(row_of payload/scripts/lib/b.sh "$CX")"
+expect_eq "(ci1) …and for a.sh, as the plain index does" "$(row_of payload/scripts/lib/a.sh "$IX")" "$(row_of payload/scripts/lib/a.sh "$CX")"
+expect_eq "(ci2) s-var, keyed by the tree, is marked on a trailing ! line, as reads_hashes keys it" \
+  "$(printf '!\ttests/s-var.test.sh')" "$(printf '%s\n' "$CX" | grep '^!')"
+expect_eq "(ci2) …the ! lines come last" "!" "$(printf '%s\n' "$CX" | tail -n 1 | cut -c1)"
+expect_eq "(ci3) every other line is reads_index's shape: <file> TAB <suite>[,<suite>]" "0" \
+  "$(printf '%s\n' "$CX" | grep -v '^!' | grep -cv "^[^$TAB]*${TAB}tests/[^$TAB]*\$")"
+expect_eq "(ci3) …from the command line too: bash anchors.sh reads_index --closed <root> --at <commit>" "$CX" \
+  "$(bash "$ANCHORS" reads_index --closed "$F" --at "$C1" 2>/dev/null)"
+
+# ------------------------------------------------------------
 section "§KEY: sha256 over the sorted <path> <blob> lines, the suite file and its prelude among them (D8)"
 # ------------------------------------------------------------
 PS="$(rh_set "$F" "$C1" tests/s-pre.test.sh)"
@@ -290,6 +322,99 @@ LS="$(rh_set "$REPO" "$LH" tests/session-poker.test.sh)"
 expect_contains "LIVE: session-poker.test.sh reads hooks/session-poker.sh" "hooks/session-poker.sh" "$LS"
 expect_contains "LIVE: …and, through the closure, payload/scripts/lib/line.sh" "payload/scripts/lib/line.sh" "$LS"
 expect_regex "LIVE: …and its key is a sha256 of its reads, not the tree" '^[0-9a-f]{64}$' "$(rh_hash "$REPO" "$LH" tests/session-poker.test.sh)"
+LIX="$(rh_index "$REPO" "$LH")"; LCX="$(rh_closed "$REPO" "$LH")"
+expect_contains "(ci4-pre) the plain index has a row for lib/line.sh: landing-line.test.sh names it" "tests/landing-line.test.sh" "$(row_of payload/scripts/lib/line.sh "$LIX")"
+expect_no_match "(ci4) …which does not name session-poker.test.sh: it reaches line.sh only through hooks/session-poker.sh's loads" \
+  'tests/session-poker\.test\.sh' "$(row_of payload/scripts/lib/line.sh "$LIX")"
+expect_contains "(ci4) the closed index's row for lib/line.sh names session-poker.test.sh" "tests/session-poker.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
+expect_contains "(ci4) …and landing-line.test.sh, as the plain one does" "tests/landing-line.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
+
+# ------------------------------------------------------------
+setup_section "plant the one-key fixture: calc.sh's one() and two(), a suite declaring one(), one declaring nothing, one refused"
+# ------------------------------------------------------------
+O="$SB/one"
+mkdir -p "$O/payload/scripts/lib" "$O/tests"
+git -C "$O" init -q && git -C "$O" config user.email t@t && git -C "$O" config user.name t && git -C "$O" config commit.gpgsign false
+one_calc() { printf '#!/bin/bash\none() {\n  echo %s\n}\ntwo() {\n  echo %s\n}\n' "$1" "$2" > "$O/payload/scripts/lib/calc.sh"; }   # <one's word> <two's word>
+one_commit() { git -C "$O" add -A && git -C "$O" commit -qm "$1" && git -C "$O" rev-parse HEAD; }   # <message> -> the commit
+one_calc 1 2
+cat > "$O/tests/s-a.test.sh" <<'PLANT'
+#!/bin/bash
+reads payload/scripts/lib/calc.sh fn one
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$ROOT/payload/scripts/lib/calc.sh"; one
+PLANT
+cat > "$O/tests/s-c.test.sh" <<'PLANT'
+#!/bin/bash
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$ROOT/payload/scripts/lib/calc.sh"; one; two
+PLANT
+cat > "$O/tests/s-r.test.sh" <<'PLANT'
+#!/bin/bash
+reads payload/scripts/lib/calc.sh fn one
+reads payload/scripts/lib/calc.sh fn nope
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$ROOT/payload/scripts/lib/calc.sh"; one
+PLANT
+O1="$(one_commit one)"
+expect_nonempty "(one) the fixture's first commit" "$O1"
+LINE="$REPO/payload/scripts/lib/line.sh"
+one_line() { ( . "$LINE" && _LINE_RH="" && _LINE_RH_SUITES="" && _line_reads "$@" ) 2>/dev/null; }   # <root> <at> <suite> -> the landing's key
+
+# ------------------------------------------------------------
+section "§ONE: line.sh and anchors.sh give one key; a declared suite's key moves with its span only (wave-39 T40; D5, D6, AC-2.1, AC-2.2)"
+# ------------------------------------------------------------
+# fails-when: line.sh keys a suite another way than anchors.sh (one1, one6m), the narrowing lives anywhere but
+# reads_hashes (one2, one5), or a declared suite's key moves on a change outside its span (one3).
+A1="$(rh_hash "$O" "$O1" tests/s-a.test.sh)"
+expect_regex "(one1-pre) s-a's key at the first commit is a sha256" '^[0-9a-f]{64}$' "$A1"
+expect_eq "(one1) the landing (line.sh _line_reads) and anchors.sh reads_hash give s-a, which declares one(), one key" \
+  "$A1" "$(one_line "$O" "$O1" s-a.test.sh)"
+expect_eq "(one1) …and s-c, which declares nothing" "$(rh_hash "$O" "$O1" tests/s-c.test.sh)" "$(one_line "$O" "$O1" s-c.test.sh)"
+expect_eq "(one1) …and s-r, whose second declaration is refused" "$(rh_hash "$O" "$O1" tests/s-r.test.sh)" "$(one_line "$O" "$O1" s-r.test.sh)"
+SPAN="$(git -C "$O" show "$O1:payload/scripts/lib/calc.sh" | sed -n 2,4p | rh_sha)"
+SUITE_BLOB="$(git -C "$O" rev-parse "$O1:tests/s-a.test.sh")"
+expect_eq "(one2) s-a's key is sha256 of its sorted lines, the declared function's span sha256 in place of calc.sh's blob" \
+  "$(printf '%s\n' "payload/scripts/lib/calc.sh#fn:one $SPAN" "tests/s-a.test.sh $SUITE_BLOB" | LC_ALL=C sort | rh_sha)" "$A1"
+C1K="$(rh_hash "$O" "$O1" tests/s-c.test.sh)"; R1K="$(rh_hash "$O" "$O1" tests/s-r.test.sh)"
+one_calc 1 22
+O2="$(one_commit "two() changes")"
+expect_ne "(one3-pre) the second commit changes calc.sh's blob: a file s-a reads, outside its span" \
+  "$(git -C "$O" rev-parse "$O1:payload/scripts/lib/calc.sh")" "$(git -C "$O" rev-parse "$O2:payload/scripts/lib/calc.sh")"
+expect_eq "(one3) a change to two() leaves s-a's key alone: it declares one()" "$A1" "$(rh_hash "$O" "$O2" tests/s-a.test.sh)"
+expect_eq "(one3) …and the landing reads the same key there" "$A1" "$(one_line "$O" "$O2" s-a.test.sh)"
+expect_ne "(one4) …while s-c's moves: it declares nothing, so it reads the whole file" "$C1K" "$(rh_hash "$O" "$O2" tests/s-c.test.sh)"
+expect_ne "(one4) …and s-r's: a refused declaration on the file keys the pair whole" "$R1K" "$(rh_hash "$O" "$O2" tests/s-r.test.sh)"
+C2K="$(rh_hash "$O" "$O2" tests/s-c.test.sh)"
+one_calc 11 22
+O3="$(one_commit "one() changes")"
+A3="$(rh_hash "$O" "$O3" tests/s-a.test.sh)"
+expect_regex "(one5-pre) s-a's key at the third commit is a sha256" '^[0-9a-f]{64}$' "$A3"
+expect_ne "(one5) a change to one() moves s-a's key: its span changed" "$A1" "$A3"
+expect_ne "(one5) …and s-c's, either way" "$C2K" "$(rh_hash "$O" "$O3" tests/s-c.test.sh)"
+expect_eq "(one5) …the landing reads s-a's new key" "$A3" "$(one_line "$O" "$O3" s-a.test.sh)"
+expect_eq "(ci5) the closed index narrows as reads_index does: s-a on calc.sh#one, s-c and s-r on calc.sh" \
+  "tests/s-a.test.sh|tests/s-c.test.sh,tests/s-r.test.sh" \
+  "$(CO="$(rh_closed "$O" "$O3")"; printf '%s|%s' "$(row_of 'payload/scripts/lib/calc.sh#one' "$CO")" "$(row_of payload/scripts/lib/calc.sh "$CO")")"
+expect_eq "(one6) line.sh keys through anchors.sh reads_hashes" "1" "$(grep -c 'got="$(reads_hashes ' "$LINE")"
+expect_eq "(one6) …and derives no key of its own: no narrowing, no closure read, no sha256 there" "0" \
+  "$(grep -c -e '_line_reads_keys' -e '_rd_closed' -e '_rd_sha256' -e 'reads_declared' "$LINE")"
+# MUTANT: the key computed twice. line.sh keys through a second copy of the derivation, one whose narrowing has
+# drifted (ignored): s-c still agrees, so the mutant ran; s-a's two keys part.
+anchor fn payload/scripts/lib/anchors.sh 'narrow="$(_rd_narrowed "$root" "$at")"' reads_hashes 'narrow=""'
+ONE_DRIFT="$ANCHOR_SED"
+anchor fn payload/scripts/lib/line.sh 'got="$(reads_hashes "$1" "$2" $want 2>/dev/null)"' _line_reads_fill \
+  'got="$(_line_own_keys "$1" "$2" $want 2>/dev/null)"'
+ONE_TWICE="$ANCHOR_SED"
+one_twice() {  # <root> <at> <suite> -> the landing's key under the mutant
+  ( . "$LINE" && _line_load_anchors \
+      && eval "$(declare -f reads_hashes | sed "1s/^reads_hashes/_line_own_keys/; $ONE_DRIFT")" \
+      && eval "$(declare -f _line_reads_fill | sed "$ONE_TWICE")" \
+      && _LINE_RH="" && _LINE_RH_SUITES="" && _line_reads "$@" ) 2>/dev/null
+}
+expect_eq "(one6m-pre) the mutant runs: s-c, which declares nothing, keys as before under it" \
+  "$(rh_hash "$O" "$O3" tests/s-c.test.sh)" "$(one_twice "$O" "$O3" s-c.test.sh)"
+expect_ne "(one6m) MUTANT key computed twice: s-a's landing key parts from anchors.sh's" "$A3" "$(one_twice "$O" "$O3" s-a.test.sh)"
 
 
 finish
