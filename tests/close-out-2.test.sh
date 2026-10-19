@@ -625,7 +625,7 @@ expect_eq "LAND-2 the continuation carries the heading ## Landings exactly once"
   "$(/usr/bin/grep -c '^## Landings$' "$PLD/$CONT_REL" | tr -d ' ')"
 expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-4 …the report's line, then a line per landed row, as landing-report --rows prints them" \
-"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=900s · killed=0
+"landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=900s · killed=0
 T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=1 waited=900s wait=15.0 prove=15.0 rework=0.0 width=2
 T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
   "$(land_section "$PLD/$CONT_REL")"
@@ -637,7 +637,7 @@ expect_eq "LAND-6 …and the Deferrals section above it still ends at its own he
 PLZ="$(mk_fixture landings2)"; advance_to "$PLZ" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLZ" run
 expect_eq "LAND-7 a run with no landing record exits 0 and its continuation carries the line with zeros, and no row" \
-  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=0s · killed=0" \
   "$CO_RC|$(land_section "$PLZ/$CONT_REL")"
 # an existing continuation is never overwritten: no section is added to it
 PLE="$(mk_fixture landings3)"; advance_to "$PLE" 8
