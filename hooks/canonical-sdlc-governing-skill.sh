@@ -1165,6 +1165,14 @@ log_floor_finding() {  # $1=check-id $2=violation-detail
   fi
 }
 
+# rigor_minimum_of <text> -> the value on the first `rigor-minimum:` line of <text> (a config file's or a frontmatter's lines),
+# its trailing blanks and CR dropped; nothing when the key is not written.
+rigor_minimum_of() {
+  printf '%s\n' "$1" | awk '
+    { sub(/\r$/, "") }
+    index($0, "rigor-minimum:") == 1 { v = substr($0, 15); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }'
+}
+
 RR=$(rigor_rank "$RIGOR")
 # A finding names a level by its word (AC-16.2).
 RL=$(rigor_level "$RIGOR")
@@ -1174,13 +1182,17 @@ RL=$(rigor_level "$RIGOR")
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
   && log_floor_finding spike-cap "spike is capped at single, declared $RL"
 
-# Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
+# Project minimum: rigor-minimum: in <project>/.bionic/config.yaml (fail-open;
 # an unparseable/invalid value is its own finding, never a block).
 # [INSTRUMENT]
-# THE KEY IS rigor-minimum: (wave-38 T8; REQ-9, D6): lib/alias.sh `alias_keyed` reads it, and the old rigor-floor: with its
-# deprecation line. With no map loaded nothing is read, the fail-open this reader always had.
-ALIAS_VALUE=""; declare -F alias_keyed >/dev/null 2>&1 && alias_keyed rigor-key "$(cat "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null)"
-PF="$ALIAS_VALUE"
+# THE KEY IS rigor-minimum: AND NO OTHER (wave-38 T8; wave-39 T18, REQ-13 AC-13.1, D2): the old rigor-floor: is refused, naming
+# the new key (lib/alias.sh `alias_gone_text rigor-key`), never read and never passed over. With no map loaded nothing is
+# refused, the fail-open this reader always had.
+PF_TEXT="$(cat "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null)"
+declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$PF_TEXT" \
+  && block "$ALIAS_GONE_SAID" "rename the key" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml still carries the old key; its value is not read"
+PF="$(rigor_minimum_of "$PF_TEXT")"
 if [ -n "$PF" ]; then
   PR=$(rigor_rank "$PF")
   if [ "$PR" -lt 0 ]; then
@@ -1190,13 +1202,16 @@ if [ -n "$PF" ]; then
   fi
 fi
 
-# Epic floor: rigor-floor: in the epic plan's frontmatter (read-only,
+# Epic minimum: rigor-minimum: in the epic plan's frontmatter (read-only,
 # fail-open; missing/unreadable epic plan or missing key → no finding,
 # floors are opt-in).
 EPIC=$(yaml_get epic)
 if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
-  ALIAS_VALUE=""; declare -F alias_keyed >/dev/null 2>&1 && alias_keyed rigor-key "$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md")"
-  EF="$ALIAS_VALUE"
+  EF_TEXT="$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md")"
+  declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$EF_TEXT" \
+    && block "$ALIAS_GONE_SAID" "rename the key" \
+      "the frontmatter of $DOCS_ROOT/plans/$EPIC/epic.plan.md still carries the old key; its value is not read"
+  EF="$(rigor_minimum_of "$EF_TEXT")"
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
     # A word that is no level is the epic's own data-quality finding, as the project floor's is
