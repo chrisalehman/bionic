@@ -704,7 +704,13 @@ _proof_reading_result_var() {
 # finding both answer is printed once, as `moved`. Either way the row's `## Tasks` status is `landed`, and the
 # run's landing record (`proof_debt_record`, lib/line.sh's events) holds a verdict for it whose commit is the
 # row's newest verdict commit and whose every suite there reads `result=green`, the last word per suite.
-# <commit> is that commit, the landing the green verdicts name. Nothing when no born marker names a finding and
+# <commit> is that commit, the landing the green verdicts name. AN ABSENT SUITE IS NOT OWED (wave-39 T19; A-orch-9):
+# a `result=absent` verdict (lib/line.sh, a Lands-on suite the row removed) is neither green nor red, so a landing
+# green on the rest is fixed. A LANDING PROOF MAY BE THE REGRESSION (wave-39 T19; REQ-14 AC-14.1, D9): a row whose
+# landing owes no verdict (none recorded, a hand landing; or every one absent) is fixed at its landing commit, the
+# `merge=` of its last `landed:` header (`_proof_regression_landing`), once a green regression stands at a head that
+# commit is an ancestor of (`_proof_regression_heads`); <commit> is then that landing. A red landing verdict is never
+# overridden by a regression. Nothing when no born marker names a finding and
 # no move names a row, so a plan without either pays one grep. Whether <commit> must be at or after a reading's
 # head is the reader's to ask (`_proof_fixed_var`): a born row's must, a moved row's need not, since the move
 # says the row fixed the finding whatever its ancestry (ADR-056: "a finding fixed before or beside the reading
@@ -712,7 +718,7 @@ _proof_reading_result_var() {
 # <record plan> is the plan whose landing record is read, <plan> when not given: a plan verb's dry copy is read for
 # its text (its rows, its moves) and its origin for the record (wave-37 T2; REQ-9 AC-9.1, D12; hooks/bash-walls.sh).
 proof_fixed() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" born moved rec
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" born moved rec out gt="" heads="" lands="" byrow="" k id row c how l
   [ -f "$plan" ] || return 0
   /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=|^moved:[[:space:]]+[^[:space:]]+[[:space:]]+to=fixed[[:space:]]' "$plan" 2>/dev/null || return 0
   _proof_units_load || return 0
@@ -726,7 +732,10 @@ proof_fixed() {
   [ -n "$born" ] || [ -n "$moved" ] || return 0
   rec="$(proof_debt_record "$rplan" "$tree")" || return 0
   [ -f "$rec" ] || return 0
-  { printf '\034born\n'; [ -z "$moved" ] || printf '%s\n' "$moved"; [ -z "$born" ] || printf '%s\n' "$born"
+  # Each finding comes out `F` (its row's newest verdict commit owes a suite and every owed suite reads green there:
+  # fixed at that commit) or `R` (the row's landing owes no verdict: none recorded, or every one `result=absent`, so
+  # the regression arm asks below); a row with a red, or any word but green or absent, is neither.
+  out="$({ printf '\034born\n'; [ -z "$moved" ] || printf '%s\n' "$moved"; [ -z "$born" ] || printf '%s\n' "$born"
     printf '\034rec\n'; cat "$rec" 2>/dev/null; } | awk -F'|' '
     function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
     $0 == SUBSEP "born" { part = 1; next }
@@ -741,8 +750,93 @@ proof_fixed() {
       res[r, s] = v
     }
     END {
-      for (r in lc) { ok[r] = (ns[r] > 0); for (i = 1; i <= ns[r]; i++) if (res[r, sl[r, i]] != "green") ok[r] = 0 }
-      for (i = 1; i <= nb; i++) if ((brow[i] in ok) && ok[brow[i]]) printf "%s\t%s\t%s\t%s\n", bid[i], brow[i], lc[brow[i]], bhow[i]
+      for (r in lc) {
+        g = 0; bad = 0
+        for (i = 1; i <= ns[r]; i++) { v = res[r, sl[r, i]]; if (v == "green") g++; else if (v != "absent") bad = 1 }
+        ok[r] = (g > 0 && !bad); owes[r] = (g > 0 || bad)
+      }
+      for (i = 1; i <= nb; i++) {
+        r = brow[i]
+        if ((r in ok) && ok[r]) printf "F\t%s\t%s\t%s\t%s\n", bid[i], r, lc[r], bhow[i]
+        else if (!((r in owes) && owes[r])) printf "R\t%s\t%s\t%s\n", bid[i], r, bhow[i]
+      }
+    }')"
+  case $'\n'"$out" in
+    *$'\n'R$'\t'*)
+      gt="$tree"; [ -n "$gt" ] || gt="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
+      heads="$(_proof_regression_heads "$plan" "$rec")"
+      [ -z "$heads" ] || ! declare -F units_landings >/dev/null 2>&1 || lands="$(units_landings "$plan" "$rec" 2>/dev/null)" ;;
+  esac
+  while IFS='	' read -r k id row c how; do
+    case "$k" in
+      F) printf '%s\t%s\t%s\t%s\n' "$id" "$row" "$c" "$how" ;;
+      R) [ -n "$lands" ] || continue
+         case "$byrow" in *" $row="*) l="${byrow#*" $row="}"; l="${l%% *}" ;; *) l="$(_proof_regression_landing "$gt" "$row" "$lands" "$heads")"; byrow="$byrow $row=${l:--}" ;; esac
+         [ -n "$l" ] && [ "$l" != - ] || continue
+         printf '%s\t%s\t%s\t%s\n' "$id" "$row" "$l" "$c" ;;
+    esac
+  done <<PROOF_FIXED_OUT
+$out
+PROOF_FIXED_OUT
+}
+
+# _proof_regression_landing <git tree> <row> <units_landings lines> <green regression heads> -> the row's landing commit,
+# 40-hex, when one of the heads has it as an ancestor (wave-39 T19; D9): the `merge=` of the last `landed:` header that
+# names the row (lib/units.sh `units_landings`). Nothing, rc 1, when the row has no landing or no head descends from it.
+_proof_regression_landing() {
+  local gt="$1" l h
+  l="$(printf '%s\n' "$3" | awk -F'\t' -v r="$2" '$1 == r && $2 != "-" { print $2; exit }')"
+  [ -n "$l" ] && [ -n "$4" ] && [ -n "$gt" ] || return 1
+  l="$(git -C "$gt" rev-parse --verify -q "${l}^{commit}" 2>/dev/null)" || return 1
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    git -C "$gt" merge-base --is-ancestor "$l" "$h" 2>/dev/null || continue
+    printf '%s' "$l"; return 0
+  done <<PROOF_REG_HEADS
+$4
+PROOF_REG_HEADS
+  return 1
+}
+
+# _proof_regression_heads <plan> <landing record> -> the head of each GREEN regression, once each, one per line (wave-39 T19;
+# D9): a head whose `kind=regression` facts in the record (`proof_regression_fold`) read, by each suite's last word, one
+# green at least and nothing but green or absent; or a `proved: kind=regression` line of the plan's unfenced `## SDLC State`
+# whose run left no suite red (`owed=`). A red suite the plan carries as inherited debt (`proof_inherited`) is not counted,
+# as the regression's judge does not count it (`_proof_floor_base`). A waiver is the person's word, not a green run: not read.
+_proof_regression_heads() {
+  local inh
+  inh="$(proof_inherited "$1")"
+  { printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$1" 2>/dev/null
+    printf '\034rec\n'; [ -z "${2:-}" ] || [ ! -f "$2" ] || cat "$2" 2>/dev/null; } \
+    | PROOF_I=",$inh," awk "$(proof_awk)"'
+    function inh(s) { return index(ENVIRON["PROOF_I"], "," s ",") > 0 }
+    function clean(o,   n, a, i) { n = split(o, a, ","); for (i = 1; i <= n; i++) if (a[i] != "" && !inh(a[i])) return 0; return 1 }
+    function put(h) { if (!(h in out)) { out[h] = 1; print h } }
+    $0 == SUBSEP "plan" { part = 1; next }
+    $0 == SUBSEP "rec" { part = 2; next }
+    part == 1 && /^[[:space:]]*```/ { fence = !fence; next }
+    part == 1 && fence { next }
+    part == 1 && /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    part == 1 && insdlc && proof_fields($0) && PROOF_KIND == "regression" && clean(PROOF_OWED) { put(PROOF_HEAD); next }
+    part == 2 && substr($0, 1, 8) == "line/v1|" && index($0, "|kind=regression|") {
+      n = split($0, f, "|"); ev = ""; c = ""; s = ""; v = ""
+      for (i = 2; i <= n; i++) {
+        if (index(f[i], "ev=") == 1) ev = substr(f[i], 4)
+        else if (index(f[i], "commit=") == 1) c = substr(f[i], 8)
+        else if (index(f[i], "suite=") == 1) s = substr(f[i], 7)
+        else if (index(f[i], "result=") == 1) v = substr(f[i], 8)
+      }
+      if (ev != "verdict" || c == "" || s == "") next
+      if (!(c in nc)) { nc[c] = 0; co[++nh] = c }
+      if (!((c SUBSEP s) in w)) { nc[c]++; su[c, nc[c]] = s }
+      w[c, s] = v
+    }
+    END {
+      for (k = 1; k <= nh; k++) {
+        c = co[k]; g = 0; bad = 0
+        for (i = 1; i <= nc[c]; i++) { s = su[c, i]; v = w[c, s]; if (v == "green") g++; else if (v != "absent" && !inh(s)) bad = 1 }
+        if (g > 0 && !bad) put(c)
+      }
     }'
 }
 
