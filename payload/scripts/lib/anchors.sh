@@ -35,16 +35,28 @@
 #                                     `# ----- <label>` (a comment line opening on five or more `-` or `=`,
 #                                     the label after them, a trailing rule dropped; it runs to the next
 #                                     labelled banner at its own indentation or less, or the file's end)
+#   reads <file> verb <name>          the suite reads only the case arms of <file> labelled <name> (wave-39
+#                                     T43; A-orch-22): in each top-level case block (`case … in` to `esac`,
+#                                     both at column 0), an arm is a line at the block's arm indentation (that
+#                                     of the first line after `case` that is neither blank nor a comment)
+#                                     whose trimmed text is a label list ending `)`, `<name>)` or `a|<name>)`;
+#                                     it runs to the first `;;` (or `;&`, `;;&`) no deeper than the arm's body
+#                                     (its first line neither blank nor a comment; a nested case's `;;` is
+#                                     deeper), else to the line before the next arm or the block's `esac`. Every such arm, in
+#                                     every top-level block, is the declaration's span: a dispatcher's parse
+#                                     arm and its exec arm both. A nested case's arms sit deeper and are not
+#                                     arms of the block; a one-line arm (`<name>) cmd ;;`) is not an arm here
 #
 # one per line, literal words (a label with spaces is quoted), in a tests/*.test.sh suite. The finder
 # locates each at <at>: a function by the same head-and-body rule `anchor fn` counts with; exactly one
-# match, or the declaration is refused (rc 1, `anchors: reads_index refused <suite>:<line>: …` on
+# match (for a verb, one or more arms; none is `noverb`), or the declaration is refused (rc 1, `anchors: reads_index refused <suite>:<line>: …` on
 # stderr) and the suite reads that whole file. The tool never guesses (D6): no declaration, no narrowing.
 #
 #   reads_declared <root> <at>   one line per declaration:
-#       <suite> TAB <line> TAB fn|section TAB <file> TAB <name> TAB <verdict> TAB <start> TAB <end>
+#       <suite> TAB <line> TAB fn|section|verb TAB <file> TAB <name> TAB <verdict> TAB <start> TAB <end>
 #       <verdict> is `ok` with the located span's first and last line, or why it is refused
-#       (`nofile`, `nofn`, `nosection`, `ambiguous:<n>`, `nonliteral`) with `-` for both lines
+#       (`nofile`, `nofn`, `nosection`, `noverb`, `ambiguous:<n>`, `nonliteral`) with `-` for both lines;
+#       a verb prints one `ok` line per arm, in file order
 #
 # A SUITE IS THE FILE THAT DECLARES (D3 "1", design-ledger Δ2): any *.sh under <root> that git tracks,
 # or holds untracked and unignored, and that carries a shaped call, keyed on its path from the root —
@@ -58,7 +70,7 @@
 
 ANCHORS_CALL_ERE='^[[:space:]]*anchor[[:space:]]+(file|fn|insert)[[:space:]]'
 
-READS_DECL_ERE='^[[:space:]]*reads[[:space:]]+[^[:space:]]+[[:space:]]+(fn|section)([[:space:]]|$)'
+READS_DECL_ERE='^[[:space:]]*reads[[:space:]]+[^[:space:]]+[[:space:]]+(fn|section|verb)([[:space:]]|$)'
 
 # The root-relative path of each *.sh under <root> with a line matching <ERE> (a shaped call by default), sorted.
 _anc_files() {  # <root> <at> [<ERE>]
@@ -183,13 +195,13 @@ hd != "" {
   line = $0; ln = NR
   if (line ~ /^[ \t]*#/) next
   if (mode == "reads") {
-    if (line ~ /^[ \t]*reads[ \t]+[^ \t]+[ \t]+(fn|section)([ \t]|$)/) {
+    if (line ~ /^[ \t]*reads[ \t]+[^ \t]+[ \t]+(fn|section|verb)([ \t]|$)/) {
       while (line ~ /\\$/ && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
       n = tok(line)
       kind = TW[3]; f = TW[2]; nm = TW[4]
       ok = (n == 4 && TL[2] && TL[4] && f != "" && nm != "" && substr(f, 1, 1) != "/" \
             && index(f, "\t") == 0 && index(nm, "\t") == 0 && index(f, "#") == 0)
-      if (kind == "fn") ok = ok && nm !~ /[^A-Za-z0-9_:.-]/
+      if (kind == "fn" || kind == "verb") ok = ok && nm !~ /[^A-Za-z0-9_:.-]/
       if (ok) print suite "\t" ln "\t" kind "\t" f "\t" nm "\tliteral"
       else print suite "\t" ln "\t" kind "\t-\t-\tnonliteral"
     }
@@ -257,10 +269,11 @@ anchors_found() {  # <root> <at> <shape> <file> <text> <function or ->
 }
 
 # THE SPAN FINDER, one awk over one file's text for every declaration on it. ANC_REQ (environment) holds
-# `fn|section TAB <name>` lines; one line out per request: `<kind> TAB <name> TAB <matches> TAB <start>
+# `fn|section|verb TAB <name>` lines; one line out per request: `<kind> TAB <name> TAB <matches> TAB <start>
 # TAB <end>`, the span being the first match's (a function from its head to the `}` at the head's
 # indentation; a section from its banner to the line before the next labelled banner at its indentation or
-# less; either to the file's end when nothing closes it).
+# less; either to the file's end when nothing closes it). A verb prints one line per arm instead, each with
+# its own span (the arm rule is in the grammar at the head of this file), or one line of 0 matches.
 # NOTE FOR EDITORS: the program is a shell single-quoted string; spell an apostrophe \047.
 _ANC_SPAN_AWK='
 function banner(l,   b) {
@@ -270,12 +283,29 @@ function banner(l,   b) {
   sub(/^[ \t]+/, "", b); sub(/[ \t]+$/, "", b)
   return b
 }
+function armlist(l,   t, i, a) {
+  t = l; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+  if (t !~ /^\(?[^ \t()]+\)$/) return 0
+  sub(/^\(/, "", t); t = substr(t, 1, length(t) - 1)
+  AL_N = split(t, AL, "|")
+  for (i = 1; i <= AL_N; i++) { a = AL[i]; if (a ~ /^".*"$/ || a ~ /^\047.*\047$/) AL[i] = substr(a, 2, length(a) - 2) }
+  return 1
+}
+function bears(nm,   i) { for (i = 1; i <= AL_N; i++) if (AL[i] == nm) return 1; return 0 }
 BEGIN {
-  nq = split(ENVIRON["ANC_REQ"], R, "\n")
-  for (i = 1; i <= nq; i++) { split(R[i], q, "\t"); K[i] = q[1]; N[i] = q[2]; c[i] = 0; op[i] = 0; st[i] = "-"; en[i] = "-" }
+  nq = split(ENVIRON["ANC_REQ"], R, "\n"); hv = 0
+  for (i = 1; i <= nq; i++) { split(R[i], q, "\t"); K[i] = q[1]; N[i] = q[2]; c[i] = 0; op[i] = 0; st[i] = "-"; en[i] = "-"; if (K[i] == "verb") hv = 1 }
 }
 {
   lb = banner($0); bi = BN_IND
+  # The top-level case blocks, read only when a verb is asked for: inc inside one, aind its arms indentation.
+  if (hv) {
+    li = $0; sub(/[^ \t].*$/, "", li); cbo = 0; cbc = 0; isarm = 0
+    if (!inc && $0 ~ /^case[ \t].*[ \t]in[ \t]*$/) { inc = 1; hasind = 0; cbo = 1 }
+    else if (inc && $0 ~ /^esac([ \t;]|$)/) { inc = 0; cbc = 1 }
+    else if (inc && !hasind && $0 !~ /^[ \t]*(#|$)/) { aind = li; hasind = 1 }
+    if (inc && !cbo && hasind && li == aind) isarm = armlist($0)
+  }
   for (i = 1; i <= nq; i++) {
     if (K[i] == "fn") {
       if (op[i]) { if (substr($0, 1, length(ind[i]) + 1) == ind[i] "}") { op[i] = 0; if (c[i] == 1) en[i] = NR } continue }
@@ -285,12 +315,26 @@ BEGIN {
     } else if (K[i] == "section" && lb != "") {
       if (op[i] && length(bi) <= length(ind[i])) { op[i] = 0; if (c[i] == 1) en[i] = NR - 1 }
       if (lb == N[i]) { if (++c[i] == 1) st[i] = NR; op[i] = 1; ind[i] = bi }
+    } else if (K[i] == "verb") {
+      if (op[i]) {
+        t = $0; sub(/^[ \t]+/, "", t)
+        if (!hb[i] && t != "" && t !~ /^#/) { bind[i] = li; hb[i] = 1 }
+        if (cbc || isarm) { op[i] = 0; AE[i, c[i]] = NR - 1 }
+        else if (t ~ /^;[;&]/ && length(li) <= length(bind[i])) { op[i] = 0; AE[i, c[i]] = NR }
+      }
+      if (isarm && bears(N[i])) { c[i]++; AS[i, c[i]] = NR; op[i] = 1; hb[i] = 0 }
     }
   }
 }
 END {
   for (i = 1; i <= nq; i++) {
     if (K[i] == "") continue
+    if (K[i] == "verb") {
+      if (op[i]) AE[i, c[i]] = NR
+      if (c[i] == 0) print K[i] "\t" N[i] "\t0\t-\t-"
+      for (j = 1; j <= c[i]; j++) print K[i] "\t" N[i] "\t" c[i] "\t" AS[i, j] "\t" AE[i, j]
+      continue
+    }
     if (c[i] >= 1 && en[i] == "-") en[i] = NR
     print K[i] "\t" N[i] "\t" c[i] "\t" st[i] "\t" en[i]
   }
@@ -323,12 +367,17 @@ $(printf '%s\n' "$ext" | awk -F'\t' '$6 == "literal" { print $4 }' | LC_ALL=C so
 READS_DECLARED_FILES
   { printf '%s\n' "$spans"; printf '%s\n' "$ext" | sed 's/^/E	/'; } | awk -F'\t' '
     $1 == "X" { nofile[$2] = 1; next }
-    $1 == "Y" { k = $2 SUBSEP $3 SUBSEP $4; cnt[k] = $5; st[k] = $6; en[k] = $7; next }
+    $1 == "Y" { k = $2 SUBSEP $3 SUBSEP $4; cnt[k] = $5; st[k] = $6; en[k] = $7; if ($3 == "verb" && $5 > 0) arm[k] = arm[k] "\n" $6 "\t" $7; next }
     $1 == "E" {
       v = "ok"; a = "-"; b = "-"; k = $5 SUBSEP $4 SUBSEP $6
       if ($7 != "literal") v = "nonliteral"
       else if ($5 in nofile) v = "nofile"
-      else if (!(k in cnt) || cnt[k] == 0) v = ($4 == "fn" ? "nofn" : "nosection")
+      else if (!(k in cnt) || cnt[k] == 0) v = ($4 == "fn" ? "nofn" : ($4 == "verb" ? "noverb" : "nosection"))
+      else if ($4 == "verb") {
+        n = split(substr(arm[k], 2), A, "\n")
+        for (j = 1; j <= n; j++) print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\tok\t" A[j]
+        next
+      }
       else if (cnt[k] > 1) v = "ambiguous:" cnt[k]
       else { a = st[k]; b = en[k] }
       print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" v "\t" a "\t" b
@@ -392,8 +441,9 @@ anchors_index() {  # <root> <at>
 #        spells after its last expansion is the directory, matched as rule 1 matches a path (it or a path
 #        ending in `/<it>`). A word that is all expansion (`"$REPO"`, `.`) names no directory: the root
 #        is never one.
-#     7. THE NARROWING (wave-39 T3; D6, AC-2.1): a suite declaring `reads <file> fn <function>` or
-#        `reads <file> section <label>` (the grammar at the head of this file) reads that file only there:
+#     7. THE NARROWING (wave-39 T3; D6, AC-2.1): a suite declaring `reads <file> fn <function>`,
+#        `reads <file> section <label>` or `reads <file> verb <name>` (T43; the grammar at the head of this
+#        file) reads that file only there (a verb's several arms are one row):
 #        its row is `<file>#<name> TAB <suite>`, one per declaration, in place of `<file> TAB <suite>`.
 #        A declaration the finder cannot locate at <at> is refused (stderr, rc 1, the index still printed)
 #        and the suite reads the whole file. A reader routing by file folds `#<name>` away (reads_suites).
@@ -803,8 +853,10 @@ _rd_refusals() {  # <at>
     BEGIN { at = ENVIRON["RD_AT"]; where = (at == "-" ? "(in the tree)" : "(at " at ")") }
     NF && $6 != "ok" {
       what = "reads " $4 " " $3 " " $5 " — "
-      if ($6 == "nonliteral") why = "not a literal `reads <file> fn <function>` or `reads <file> section <label>` line"
+      if ($6 == "nonliteral" && $3 == "verb") why = "not a literal `reads <file> verb <name>` line"
+      else if ($6 == "nonliteral") why = "not a literal `reads <file> fn <function>` or `reads <file> section <label>` line"
       else if ($6 == "nofile") why = what "no file " $4
+      else if ($6 == "noverb") why = what "no case arm " $5 " in " $4
       else if ($6 == "nofn") why = what "no function " $5 " in " $4
       else if ($6 == "nosection") why = what "no section \047" $5 "\047 in " $4
       else { n = substr($6, index($6, ":") + 1)
@@ -858,9 +910,10 @@ reads_index() {  # <root> <at>
 #       computed; a positional is spelled at its call site.
 #   reads_hashes <root> <at> <suite>...  `<suite> TAB <key>` for each, the index read once.
 #   THE NARROWING IN THE KEY (wave-39 T40, moved from T4's lib/line.sh; D5, D6, A-orch-8, A-orch-13): a suite
-#       declaring `reads <file> fn <name>` or `reads <file> section <label>` (the grammar at the head of this file)
-#       reads that file only there: its key takes `<file>#<kind>:<name> <sha256 of the span's lines>` in place of
-#       `<file> <blob>`, the span as `reads_declared` locates it at <at>. Only content is hashed, so a span that
+#       declaring `reads <file> fn <name>`, `reads <file> section <label>` or `reads <file> verb <name>` (the grammar
+#       at the head of this file) reads that file only there: its key takes `<file>#<kind>:<name> <sha256 of the
+#       span's lines>` in place of `<file> <blob>`, the span as `reads_declared` locates it at <at>; a verb takes one
+#       such line per arm, so the key's input is the union of its arms. Only content is hashed, so a span that
 #       moves down the file keeps its key. A (suite, file) pair with any declaration the finder refused reads the
 #       whole file (A-T3-1). An undeclared file contributes its blob, so a tree with no declaration keys as T1 did.
 #       This is the ONE derivation: the landing (lib/line.sh `_line_reads_fill`), the owed set and the regression

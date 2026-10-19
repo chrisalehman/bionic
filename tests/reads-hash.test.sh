@@ -432,7 +432,8 @@ V="$SB/verb"
 mkdir -p "$V/payload/scripts/lib" "$V/tests"
 git -C "$V" init -q && git -C "$V" config user.email t@t && git -C "$V" config user.name t && git -C "$V" config commit.gpgsign false
 # The four words are go's parse arm, go's exec arm (inside its nested case), stay's parse arm, stay's exec arm.
-# Lines: go's arms run 5-7 (the alias list go|went) and 16-26; stay's 8-10 and 28-35; a nested `go)` at 30 sits
+# Lines: go's arms run 5-7 (the alias list go|went, closed by a `;;` at the label's indentation) and 16-26 (closed
+# by the `;;` at its body's, line 20's nested `;;` being deeper); stay's 8-10 and 28-35; a nested `go)` at 30 sits
 # inside stay's exec arm, deeper than the case's own arms, so it is no arm of go.
 verb_plant() {  # <go parse> <go exec> <stay parse> <stay exec>
   sed -e "s/@GP@/$1/" -e "s/@GX@/$2/" -e "s/@SP@/$3/" -e "s/@SX@/$4/" > "$V/payload/scripts/lib/v.sh" <<'PLANT_V'
@@ -442,7 +443,7 @@ VERB="${1:-}"; shift
 case "$VERB" in
   go|went)
     GO_ARG="${1:-@GP@}"
-    ;;
+  ;;
   stay)
     STAY_ARG="${1:-@SP@}"
     ;;
