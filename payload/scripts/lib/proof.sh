@@ -2013,6 +2013,24 @@ proof_owed_suites() {
   return 0
 }
 
+# proof_owed_say <owed set> [<verb prefix>] -> THE WORDS FOR THE OWED SET (wave-39 T25; REQ-18 AC-18.3; D5): one clause, no
+# newline, every surface that demands a further whole run ends on it, so each names the user's word for the regression
+# beside the run and none invents an approval. <owed set> is `proof_owed_suites`'s output (one suite per line, `*` for a
+# whole run); <verb prefix> goes before the verb, e.g. `bash <hooks>/session-poker.sh `. Exit 0; 1, printing nothing,
+# when the set is empty: a head that owes no run is offered no waiver.
+#   the head owes a.test.sh, b.test.sh: their runs green at the head, a second whole run, or the user's word: waive regression '<reply>'
+#   the head owes a whole run: regression-run, or the user's word: waive regression '<reply>'
+proof_owed_say() {
+  local names
+  # `*` anywhere is a whole run; else the suites, comma-joined; else nothing.
+  names="$(printf '%s\n' "${1:-}" | awk '$0 == "*" { w = 1 } NF && $0 != "*" { o = o (o == "" ? "" : ", ") $0 } END { print (w ? "*" : o) }')"
+  case "$names" in
+    '') return 1 ;;
+    '*') printf "the head owes a whole run: regression-run, or the user's word: %swaive regression '<reply>'" "${2:-}" ;;
+    *) printf "the head owes %s: their runs green at the head, a second whole run, or the user's word: %swaive regression '<reply>'" "$names" "${2:-}" ;;
+  esac
+}
+
 # _proof_run_load -> lib/run.sh sourced beside this file unless its working-branch reader is loaded.
 _proof_run_load() {
   declare -F plan_working_branch >/dev/null 2>&1 && return 0

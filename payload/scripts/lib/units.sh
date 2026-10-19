@@ -1287,6 +1287,17 @@ _units_sched_awk() {
       } else if (l ~ /^approved[ \t]*:/) {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
+      } else if (l ~ /^waived:[ \t]/) {
+        # THE USER WORD FOR THE REGRESSION IS ITS LINE (wave-39 T25; REQ-18 AC-18.4; D5): a `waived: question=regression`
+        # line is the regression newest link where it is newer than its proof, as proof.sh `proof_regression_waiver`
+        # reads it (question and head before the first `by`), so a run whose regression is waived meets its
+        # proof:regression read on the judge answer, as one with a proof line does. Plan order is age: the last wins.
+        wvm = split(l, wvw, /[ \t]+/); wvq = ""; wvh = ""
+        for (wvk = 2; wvk <= wvm && wvw[wvk] != "by"; wvk++) {
+          if (wvw[wvk] ~ /^question=/) wvq = substr(wvw[wvk], 10)
+          else if (wvw[wvk] ~ /^head=/) wvh = substr(wvw[wvk], 6)
+        }
+        if (wvq == "regression" && wvh ~ /^[0-9a-f]+$/ && length(wvh) >= 7 && length(wvh) <= 40) { proved["regression"] = 1; prvh["regression"] = wvh }
       } else if (proof_fields($0)) {
         # ONE READING OF A PROOF LINE, proof.sh `proof_fields` (wave-26 T14; review 7 F6), the one
         # `proof_last` reads through. THE HEAD IS KEPT (review 5 F8): the last line of a kind is
@@ -1606,8 +1617,11 @@ _units_sched_awk() {
           else if (floorst !~ /^covered/) {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
+            # THE WAIT ENDS ON THE USER\047S WORD FOR THE REGRESSION (wave-39 T25; REQ-18 AC-18.3; D5), beside the second run, so
+            # an orchestrator reading it never invents an approval the record cannot hold.
             lwhy = "the regression is one whole run plus each later commit proved; past the proof at " \
-              substr(prvh["regression"], 1, 12) ", " fr "; run suites its row named, proof-add regression; a second run: approve regression-2"
+              substr(prvh["regression"], 1, 12) ", " fr "; run suites its row named, proof-add regression; a second run: approve regression-2" \
+              ", or the user\047s word: waive regression \047<reply>\047"
             return 0
           }
         }

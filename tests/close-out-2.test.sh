@@ -1,5 +1,6 @@
 #!/bin/bash
-# tests/close-out-2.test.sh — payload/scripts/close-out.sh, part 2 of 4: sections 4f through LANDINGS.
+# tests/close-out-2.test.sh — payload/scripts/close-out.sh, part 2 of 4: sections 4f through LANDINGS, and
+# WAIVED-REGRESSION (wave-39 T25), which drives a waived regression through every reader to close.
 #
 # THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1). One close-out.test.sh promised more than the
 # suite bar, ten minutes of the gate's promise, so it runs as four suites cut at section boundaries. Its
@@ -694,5 +695,84 @@ LAND_UMRC=$?
 expect_eq "LAND-mut4 the doctored run still closes and fences the line (two fence lines), which LAND-9b forbids" "0|2" \
   "$LAND_UMRC|$(awk '/^## / { s = ($0 == "## Landings"); next } s && /^```/' "$PLV/$CONT_REL" | wc -l | tr -d ' ')"
 rm -rf "$LAND_UMUT"
+
+# ============================================================
+section "WAIVED-REGRESSION — wave-39 T25 (REQ-18 AC-18.4; D5): a run whose regression is waived closes by verb end to end"
+# ============================================================
+# A `waived: question=regression` line is the user's word for the regression (wave-38 T2): the judge (lib/proof.sh
+# `facts_state`), the Step 7 to 9 commit wall (lib/walls.sh `_eg_refuse_floor_absent`, through `proof_floor_absent`)
+# and the advance each honoured it alone, and nothing drove one run through all of them to close. Here one is: a run at
+# Step 7 whose regression was never run is refused by the wall and by `current 8`; the real `waive regression '1'`
+# writes the line; then the wall admits the commit, the real `current 8` moves the plan, close-out's `check` reads the
+# facts holding, and `close-out.sh run` delivers, its own dry run through the gate at Step 9 admitted, and writes the
+# continuation. No hand edit between the verbs.
+# FIXTURE FIDELITY: `mk_fixture`'s run with its five readings planted by the product's writers (`plant_facts`), and
+# three edits at construction, before any verb runs, each to the shape a real run at Step 7 has: the regression proof
+# plant_facts writes is left out, so the regression's one line is the waiver the verb writes; the Step-4 block a
+# dispatch writes is added, which the waive verb's dry commit, judged as a writer at Step 4 (`plan_verb_dry`), reads;
+# and the Step-7 line carries its `n/a:` as a field, the shape the wall's Step-7 arm reads. The session is bound the
+# way engagement binds it (tests/lib/bound-marker.sh). THE WALL IS ASKED AS A BOUND SESSION (`wr_gate`): an unbound
+# one resolves the plan by the newest-plan fallback and is not judged against it, so it admits whatever the plan says.
+# fails-when: any reader refuses after the waiver; the continuation is not written; the plan is moved by anything but
+# the verbs.
+WR_SID="closeout-waived-1"
+WR_GATE_SID="closeout-waived-gate"
+PWR="$(mk_fixture waived)"
+fixture_git "$PWR" config user.name "Dana Fixture"; fixture_git "$PWR" config user.email t@example.com
+WR_BASE="$(sed -n 's/^base-sha: //p' "$PWR/$PLAN_REL")"
+awk -v b="$WR_BASE" '
+  /^proved: kind=regression / { next }
+  /^- Step 7: CLOSED/ {
+    printf "- Step 4: dispatched, record/wave-01-fixture/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n", b
+    print "- Step 7: documented at record/wave-01-fixture/docs.md"; print "  n/a: no decision this run"; next
+  }
+  { print }' "$PWR/$PLAN_REL" > "$PWR/$PLAN_REL.n" && mv "$PWR/$PLAN_REL.n" "$PWR/$PLAN_REL"
+( in_fixture "$PWR" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PWR" "$WR_SID" "$PWR/$PLAN_REL" )
+wr_poke() {  # <verb> <args...> -> WR_RC, WR_OUT: the real session-poker.sh in the fixture, as the bound session
+  ( in_fixture "$PWR" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      CLAUDE_CODE_SESSION_ID="$WR_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) > "$SANDBOX/wr-poker" 2>&1
+  WR_RC=$?; WR_OUT="$(cat "$SANDBOX/wr-poker")"
+}
+wr_gate() {  # -> WR_GRC, WR_GOUT: the real hooks/bash-walls.sh on a `git commit` payload, as a session bound to the plan
+  local input
+  ( in_fixture "$PWR" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PWR" "$WR_GATE_SID" "$PWR/$PLAN_REL" )
+  input=$(jq -n --arg c "git commit -m x" --arg cwd "$PWR" --arg s "$WR_GATE_SID" \
+            '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+              tool_input: {command: $c}, tool_use_id: "toolu_suite"}')
+  ( in_fixture "$PWR" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$WR_GATE_SID" bash "$HOOK" <<< "$input" ) > "$SANDBOX/wr-gate" 2>&1
+  WR_GRC=$?; WR_GOUT="$(cat "$SANDBOX/wr-gate")"
+}
+WR_HEAD="$(fixture_git "$PWR" rev-parse wave/01-fixture)"
+expect_eq "WR-0 precondition: the run is at current: 7 with five readings and no regression line" "7|5|0" \
+  "$(sed -n 's/^current: //p' "$PWR/$PLAN_REL")|$(/usr/bin/grep -c '^proved: kind=review ' "$PWR/$PLAN_REL" | tr -d ' ')|$(/usr/bin/grep -cE '^(proved: kind=regression|waived: question=regression) ' "$PWR/$PLAN_REL" | tr -d ' ')"
+wr_gate
+expect_eq "WR-0b precondition: …so the Step 7 to 9 wall refuses a commit (exit 2)" "2" "$WR_GRC"
+expect_contains "WR-0c …on the regression, and on nothing before it" "bionic: commit refused — no regression proof on this plan yet" "$WR_GOUT"
+wr_poke current 8
+expect_eq "WR-0d precondition: …and the real current 8 is refused (exit 1), the plan at current: 7" "1|7" \
+  "$WR_RC|$(sed -n 's/^current: //p' "$PWR/$PLAN_REL")"
+expect_contains "WR-0e …by the judge, on the regression" "$(printf 'regression\tabsent')" "$WR_OUT"
+wr_poke waive regression '1'
+expect_eq "WR-1 AC-18.4 the real waive regression '1' is admitted (exit 0)" "0" "$WR_RC"
+expect_regex "WR-1b …writing the one waived: question=regression line at the working head" \
+  "^waived: question=regression head=${WR_HEAD} by Dana Fixture [0-9T:Z-]+ \"1\"\$" "$(/usr/bin/grep '^waived: question=regression ' "$PWR/$PLAN_REL")"
+wr_gate
+expect_eq "WR-2 AC-18.4 the Step 7 to 9 wall admits the commit at Step 7 (exit 0)" "0" "$WR_GRC"
+wr_poke current 8
+expect_eq "WR-3 AC-18.4 the real current 8 is admitted (exit 0), the plan at current: 8" "0|8" \
+  "$WR_RC|$(sed -n 's/^current: //p' "$PWR/$PLAN_REL")"
+run_close "$PWR" check
+expect_eq "WR-4 AC-18.4 close-out's judge reads every fact holding at the head" "yes" \
+  "$(contains "$CO_OUT" "facts: every fact the run owes holds at ${WR_HEAD}")"
+expect_eq "WR-4b …and check names no refusal (WR-0b and WR-0d are the refusals, on this run)" "no" "$(contains "$CO_OUT" "WOULD REFUSE")"
+run_close "$PWR" run
+expect_eq "WR-5 AC-18.4 close-out.sh run delivers (rc 0)" "0" "$CO_RC"
+expect_eq "WR-5b …its own dry run through the wall at Step 9 admitted" "yes|yes" \
+  "$(contains "$CO_OUT" "preflight: the commit gate allows the plan this run will write")|$(contains "$CO_OUT" "gate: ok")"
+expect_eq "WR-5c …writing the continuation" "yes" "$( [ -s "$PWR/$CONT_REL" ] && echo yes || echo no)"
+expect_eq "WR-5d …and the plan closed at current: 9 by its delivered line" "9|1|1" \
+  "$(sed -n 's/^current: //p' "$PWR/$PLAN_REL")|$(/usr/bin/grep -c '^- Step 9: delivered: ' "$PWR/$PLAN_REL" | tr -d ' ')|$(run_open_rc "$PWR/$PLAN_REL")"
 
 finish
