@@ -1964,7 +1964,7 @@ expect_eq "21: a subcommand other than check or index is a usage error (exit 2)"
 # its one anchored text doctored.
 AR="$SB/real-three"
 mkdir -p "$AR/tests" "$AR/payload/scripts/lib"
-for an_f in tests/landing-line.test.sh tests/runner-roster.test.sh tests/spawn-worktree.test.sh tests/run.sh \
+for an_f in tests/landing-line-1.test.sh tests/runner-roster.test.sh tests/spawn-worktree.test.sh tests/run.sh \
     payload/scripts/lib/line.sh payload/scripts/lib/anchors.sh; do
   cp "$REPO/$an_f" "$AR/$an_f"
 done
@@ -1982,14 +1982,14 @@ an_doctor() {  # <file> <from> <to> — a literal rewrite of the copy, then the 
   bash "$POKER" anchors check "$AR" 2>&1
   mv "$f.orig" "$f"
 }
-AN_L1="$(an_line tests/landing-line.test.sh "anchor fn payload/scripts/lib/line.sh '_line_current_row '")"
+AN_L1="$(an_line tests/landing-line-1.test.sh "anchor fn payload/scripts/lib/line.sh '_line_current_row '")"
 AN_L2="$(an_line tests/runner-roster.test.sh "anchor file tests/run.sh 'if ! _gate_ask_for whole tests/run.sh; then'")"
 AN_L3="$(an_line tests/spawn-worktree.test.sh "anchor insert payload/scripts/lib/line.sh \"  # THE ROSTER'S LAUNCH LINE")"
 expect_nonempty "21: r6em goes through anchor (its call is in the suite)" "$AN_L1"
 expect_nonempty "21: OA.12 goes through anchor" "$AN_L2"
 expect_nonempty "21: up3 goes through anchor" "$AN_L3"
 expect_contains "21: r6em: the call it anchors renamed in line.sh is MOVED" \
-  "MOVED tests/landing-line.test.sh:${AN_L1:-?} fn payload/scripts/lib/line.sh found=0" \
+  "MOVED tests/landing-line-1.test.sh:${AN_L1:-?} fn payload/scripts/lib/line.sh found=0" \
   "$(an_doctor payload/scripts/lib/line.sh 'LINE_NOW="$(_line_current_row ' 'LINE_NOW="$(_line_current_row_x ')"
 expect_contains "21: OA.12: the whole run's one ask re-spelled in run.sh is MOVED" \
   "MOVED tests/runner-roster.test.sh:${AN_L2:-?} file tests/run.sh found=0" \
@@ -2012,8 +2012,8 @@ expect_contains "22: a .sh suite outside tests/ is indexed by its own path" \
 expect_absent "22: a call in a heredoc body, or in a file that is not .sh, is no declaration" "lib/nowhere.sh" "$AK_IDX"
 expect_absent "22: …nor is one in a markdown file" "lib/zzz.sh" "$AK_IDX"
 AN_IDX="$(bash "$POKER" anchors index "$REPO" 2>&1)"
-expect_regex "22: over the shipped tree, line.sh names landing-line" \
-  "^payload/scripts/lib/line\\.sh	([^,]+,)*tests/landing-line\\.test\\.sh(,|$)" "$AN_IDX"
+expect_regex "22: over the shipped tree, line.sh names landing-line-1" \
+  "^payload/scripts/lib/line\\.sh	([^,]+,)*tests/landing-line-1\\.test\\.sh(,|$)" "$AN_IDX"
 expect_regex "22: …and spawn-worktree" \
   "^payload/scripts/lib/line\\.sh	([^,]+,)*tests/spawn-worktree\\.test\\.sh(,|$)" "$AN_IDX"
 expect_regex "22: …and tests/run.sh names runner-roster" \
@@ -2036,8 +2036,8 @@ expect_regex "READS: anchors.sh is read by suite-reads, the suite this row regis
   "^payload/scripts/lib/anchors\\.sh	([^,]+,)*tests/suite-reads\\.test\\.sh(,|$)" "$RD_IDX"
 expect_regex "READS: walls.sh is read by refuse (the wave-35 T23 miss, a read by awk over the file)" \
   "^payload/scripts/lib/walls\\.sh	([^,]+,)*tests/refuse\\.test\\.sh(,|$)" "$RD_IDX"
-expect_regex "READS: proof.sh is read by landing-line (the wave-35 floor miss)" \
-  "^payload/scripts/lib/proof\\.sh	([^,]+,)*tests/landing-line\\.test\\.sh(,|$)" "$RD_IDX"
+expect_regex "READS: proof.sh is read by landing-line-1 (the wave-35 floor miss)" \
+  "^payload/scripts/lib/proof\\.sh	([^,]+,)*tests/landing-line-1\\.test\\.sh(,|$)" "$RD_IDX"
 # The readers D4 adds (wave-37 T3; AC-3.1): shell-lint walks the libraries with `find "$LIB_DIR" -name '*.sh'`,
 # cross-gate-agreement with `find hooks payload/scripts/lib -name '*.sh'`, and dispatch-preflight-3 reaches its hook
 # only through tests/dispatch-preflight.prelude.sh's `GATE=` line. fails-when: any of the three is off its row.
