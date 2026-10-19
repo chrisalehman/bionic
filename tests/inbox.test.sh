@@ -42,6 +42,20 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
+# WHAT THIS SUITE READS OF THE POKER (wave-39 T42; D6). It runs the verbs rule, rulings and ruling-ack,
+# and through spawn-worktree.sh ready (line.sh _line_plan_write) row-landed: their parse arms in
+# `the library`, their execution arms in `bind`, the top-level awk and state those arms read in the two
+# sections after, and the helpers outside those sections that the arms call.
+reads hooks/session-poker.sh section 'the library'
+reads hooks/session-poker.sh section bind
+reads hooks/session-poker.sh section 'the plan transaction'
+reads hooks/session-poker.sh section 'the call a refusal names'
+reads hooks/session-poker.sh fn clean
+reads hooks/session-poker.sh fn deliver_check
+reads hooks/session-poker.sh fn iso_now
+reads hooks/session-poker.sh fn launch_sync_ledger
+reads hooks/session-poker.sh fn row_writer
+
 command -v jq >/dev/null 2>&1 || { echo "inbox: jq absent — suite cannot run"; exit 1; }
 
 POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
