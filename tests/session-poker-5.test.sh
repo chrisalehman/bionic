@@ -48,7 +48,9 @@ RCK="$(make_repo check)"
 git -C "$RCK" config user.email t@example.com; git -C "$RCK" config user.name "Dana Fixture"
 printf '.bionic\n' > "$RCK/.gitignore"
 mkdir -p "$RCK/tests" "$RCK/lib" "$RCK/.bionic/docs/plans" "$RCK/.bionic/docs/record/w35"
-printf '#!/bin/bash\nexit 0\n' > "$RCK/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$RCK/tests/b.test.sh"
+# a.test.sh READS lib/x.sh (wave-39 T24; D5, AC-18.1): a commit past the floor owes the suites that read what it changed,
+# so C, a change to lib/x.sh, is unproved until a.test.sh runs at it; a file no suite reads would owe nothing.
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$RCK/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$RCK/tests/b.test.sh"
 printf 'one\n' > "$RCK/lib/x.sh"
 ( cd "$RCK" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
 printf 'generic fixture proof\n' > "$RCK/.bionic/docs/record/generic-evidence.md"
@@ -232,7 +234,9 @@ RWD="$(make_repo word)"
 git -C "$RWD" config user.email t@example.com; git -C "$RWD" config user.name "Dana Fixture"
 printf '.bionic\n' > "$RWD/.gitignore"
 mkdir -p "$RWD/tests" "$RWD/lib" "$RWD/.bionic/docs/plans" "$RWD/.bionic/docs/record/w38"
-printf '#!/bin/bash\nexit 0\n' > "$RWD/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$RWD/tests/b.test.sh"
+# a.test.sh READS lib/x.sh (wave-39 T24; D5, AC-18.1): a commit past the floor owes the suites that read what it changed,
+# so C, a change to lib/x.sh, is unproved until a.test.sh runs at it; a file no suite reads would owe nothing.
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$RWD/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$RWD/tests/b.test.sh"
 printf 'one\n' > "$RWD/lib/x.sh"
 ( cd "$RWD" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
 printf 'generic fixture proof\n' > "$RWD/.bionic/docs/record/generic-evidence.md"
