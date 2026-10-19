@@ -50,6 +50,14 @@
 #             and not with another function in the file; an undeclared suite's, or one with a refused declaration
 #             on the file, moves either way; line.sh holds no derivation
 #
+# THE VERB KIND (wave-39 T43; D6, A-orch-22; AC-2.1, AC-2.4). `reads <file> verb <name>` declares a case arm: every
+# arm of the file's top-level case blocks whose label (alone or in a `a|b` list) is <name>, each from its label line
+# to the `;;` at the label's indentation; the key reads the union of those spans.
+#
+#   §VERB     a verb with a parse arm and an exec arm (a nested case inside it) is keyed by both spans and by
+#             neither of another verb's arms; a name no arm bears is refused `noverb`; a mutant taking the first
+#             arm only flips
+#
 # FIXTURE FIDELITY: the trees under $N and $F are SYNTHESIZED, each file placed for one arm. Nothing here is run:
 # the index reads text.
 #
@@ -415,6 +423,130 @@ one_twice() {  # <root> <at> <suite> -> the landing's key under the mutant
 expect_eq "(one6m-pre) the mutant runs: s-c, which declares nothing, keys as before under it" \
   "$(rh_hash "$O" "$O3" tests/s-c.test.sh)" "$(one_twice "$O" "$O3" s-c.test.sh)"
 expect_ne "(one6m) MUTANT key computed twice: s-a's landing key parts from anchors.sh's" "$A3" "$(one_twice "$O" "$O3" s-a.test.sh)"
+
+
+# ------------------------------------------------------------
+setup_section "plant the verb fixture: v.sh's parse case and exec case, go's arm in each (a nested case in the exec arm), stay's arm in each"
+# ------------------------------------------------------------
+V="$SB/verb"
+mkdir -p "$V/payload/scripts/lib" "$V/tests"
+git -C "$V" init -q && git -C "$V" config user.email t@t && git -C "$V" config user.name t && git -C "$V" config commit.gpgsign false
+# The four words are go's parse arm, go's exec arm (inside its nested case), stay's parse arm, stay's exec arm.
+# Lines: go's arms run 5-7 (the alias list go|went, closed by a `;;` at the label's indentation) and 16-26 (closed
+# by the `;;` at its body's, line 20's nested `;;` being deeper); stay's 8-10 and 28-35; a nested `go)` at 30 sits
+# inside stay's exec arm, deeper than the case's own arms, so it is no arm of go.
+verb_plant() {  # <go parse> <go exec> <stay parse> <stay exec>
+  sed -e "s/@GP@/$1/" -e "s/@GX@/$2/" -e "s/@SP@/$3/" -e "s/@SX@/$4/" > "$V/payload/scripts/lib/v.sh" <<'PLANT_V'
+#!/bin/bash
+VERB="${1:-}"; shift
+# ---------------------------------------------------------------- parse
+case "$VERB" in
+  go|went)
+    GO_ARG="${1:-@GP@}"
+  ;;
+  stay)
+    STAY_ARG="${1:-@SP@}"
+    ;;
+  *) echo "unknown verb" >&2; exit 2 ;;
+esac
+# ---------------------------------------------------------------- exec
+case "$VERB" in
+
+  go)
+    case "$GO_ARG" in
+      fast)
+        echo go-fast
+        ;;
+      *)
+        echo @GX@
+        ;;
+    esac
+    exit 0
+    ;;
+
+  stay)
+    case "$STAY_ARG" in
+      go)
+        echo @SX@
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+PLANT_V
+}
+verb_commit() { git -C "$V" add -A && git -C "$V" commit -qm "$1" && git -C "$V" rev-parse HEAD; }   # <message> -> the commit
+verb_plant p1 x1 sp1 sx1
+cat > "$V/tests/s-verb.test.sh" <<'PLANT'
+#!/bin/bash
+reads payload/scripts/lib/v.sh verb go
+bash "$ROOT/payload/scripts/lib/v.sh" go fast
+PLANT
+cat > "$V/tests/s-plain.test.sh" <<'PLANT'
+#!/bin/bash
+bash "$ROOT/payload/scripts/lib/v.sh" stay
+PLANT
+cat > "$V/tests/s-none.test.sh" <<'PLANT'
+#!/bin/bash
+reads payload/scripts/lib/v.sh verb nothere
+bash "$ROOT/payload/scripts/lib/v.sh" go
+PLANT
+V1="$(verb_commit one)"
+expect_nonempty "(verb) the fixture's first commit" "$V1"
+expect_eq "(verb) the plant took: go's exec arm holds its word at line 22" "        echo x1" \
+  "$(git -C "$V" show "$V1:payload/scripts/lib/v.sh" | sed -n 22p)"
+
+# ------------------------------------------------------------
+section "§VERB: reads <file> verb <name> locates every case arm bearing the name; the key moves with either arm only (wave-39 T43; D6, AC-2.1, AC-2.4, A-orch-22)"
+# ------------------------------------------------------------
+# fails-when: a verb declaration is not read (v1), an arm is missed or a nested case's arm is taken (v1, v4), a
+# name no arm bears is not refused (v1, v2), or the key does not move with either arm (v5, v6) or moves with
+# another verb's (v4); the mutant taking the first arm only flips v6.
+VD="$(bash -c '. "$1"; reads_declared "$2" "$3"' _ "$ANCHORS" "$V" "$V1" 2>&1)"
+expect_eq "(v1) reads_declared prints one ok line per arm of go, parse then exec, and noverb for a name no arm bears" \
+  "tests/s-none.test.sh${TAB}2${TAB}verb${TAB}payload/scripts/lib/v.sh${TAB}nothere${TAB}noverb${TAB}-${TAB}-
+tests/s-verb.test.sh${TAB}2${TAB}verb${TAB}payload/scripts/lib/v.sh${TAB}go${TAB}ok${TAB}5${TAB}7
+tests/s-verb.test.sh${TAB}2${TAB}verb${TAB}payload/scripts/lib/v.sh${TAB}go${TAB}ok${TAB}16${TAB}26" "$VD"
+VI="$(bash "$ANCHORS" reads_index "$V" --at "$V1" 2>"$SB/v.err")"; VI_RC=$?
+expect_eq "(v2) reads_index exits 1: the noverb declaration is refused" "1" "$VI_RC"
+expect_eq "(v2) …naming the suite, the line and why" \
+  "anchors: reads_index refused tests/s-none.test.sh:2: reads payload/scripts/lib/v.sh verb nothere — no case arm nothere in payload/scripts/lib/v.sh (at $V1)" \
+  "$(cat "$SB/v.err")"
+expect_eq "(v2) the declaring suite is indexed as v.sh#go" "tests/s-verb.test.sh" "$(row_of 'payload/scripts/lib/v.sh#go' "$VI")"
+expect_eq "(v2) …and the refused one reads the whole v.sh, beside the undeclared one" \
+  "tests/s-none.test.sh,tests/s-plain.test.sh" "$(row_of payload/scripts/lib/v.sh "$VI")"
+expect_eq "(v3) the closed index narrows the verb as reads_index does" "tests/s-verb.test.sh" \
+  "$(row_of 'payload/scripts/lib/v.sh#go' "$(rh_closed "$V" "$V1")")"
+K1="$(rh_hash "$V" "$V1" tests/s-verb.test.sh)"
+expect_regex "(v3-pre) s-verb's key at the first commit is a sha256" '^[0-9a-f]{64}$' "$K1"
+VA="$(git -C "$V" show "$V1:payload/scripts/lib/v.sh" | sed -n 5,7p | rh_sha)"
+VB="$(git -C "$V" show "$V1:payload/scripts/lib/v.sh" | sed -n 16,26p | rh_sha)"
+expect_eq "(v3) s-verb's key is sha256 of its sorted lines, each arm's span sha256 under v.sh#verb:go, in place of v.sh's blob" \
+  "$(printf '%s\n' "payload/scripts/lib/v.sh#verb:go $VA" "payload/scripts/lib/v.sh#verb:go $VB" \
+       "tests/s-verb.test.sh $(git -C "$V" rev-parse "$V1:tests/s-verb.test.sh")" | LC_ALL=C sort | rh_sha)" "$K1"
+P1="$(rh_hash "$V" "$V1" tests/s-plain.test.sh)"
+verb_plant p1 x1 sp2 sx2
+V2="$(verb_commit "stay's arms change")"
+expect_ne "(v4-pre) the change to stay's arms reaches a file s-plain reads whole: its key moves" "$P1" "$(rh_hash "$V" "$V2" tests/s-plain.test.sh)"
+expect_eq "(v4) a change to stay's two arms, the nested go) among them, leaves s-verb's key alone" "$K1" "$(rh_hash "$V" "$V2" tests/s-verb.test.sh)"
+verb_plant p2 x1 sp2 sx2
+V3="$(verb_commit "go's parse arm changes")"
+K3="$(rh_hash "$V" "$V3" tests/s-verb.test.sh)"
+expect_regex "(v5-pre) s-verb's key at the third commit is a sha256" '^[0-9a-f]{64}$' "$K3"
+expect_ne "(v5) a change to go's parse arm moves s-verb's key" "$K1" "$K3"
+verb_plant p2 x2 sp2 sx2
+V4="$(verb_commit "go's exec arm changes, inside its nested case")"
+expect_ne "(v6) a change to go's exec arm, inside its nested case, moves s-verb's key" "$K3" "$(rh_hash "$V" "$V4" tests/s-verb.test.sh)"
+# MUTANT: the finder takes the first arm only. It still runs (the parse arm alone is declared); the exec arm's
+# change then leaves the key alone.
+anchor file payload/scripts/lib/anchors.sh 'j <= c[i]; j++' 'j <= 1 && j <= c[i]; j++' "$SB/anchors-first.sh"
+vm_hash() { ( . "$SB/anchors-first.sh" && reads_hash "$@" ) 2>/dev/null; }   # <root> <at> <suite> under the mutant
+expect_eq "(v6m-pre) the mutant runs: reads_declared under it prints go's parse arm alone" \
+  "tests/s-verb.test.sh${TAB}2${TAB}verb${TAB}payload/scripts/lib/v.sh${TAB}go${TAB}ok${TAB}5${TAB}7" \
+  "$(bash -c '. "$1"; reads_declared "$2" "$3"' _ "$SB/anchors-first.sh" "$V" "$V3" 2>&1 | awk -F'\t' '$1 == "tests/s-verb.test.sh"')"
+expect_regex "(v6m-pre) …and keys s-verb by a sha256 at the exec arm's change" '^[0-9a-f]{64}$' "$(vm_hash "$V" "$V4" tests/s-verb.test.sh)"
+expect_eq "(v6m) MUTANT first arm only: go's exec arm changes and the key does not move" \
+  "$(vm_hash "$V" "$V3" tests/s-verb.test.sh)" "$(vm_hash "$V" "$V4" tests/s-verb.test.sh)"
 
 
 finish
