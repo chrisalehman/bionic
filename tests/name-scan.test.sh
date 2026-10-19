@@ -1187,11 +1187,10 @@ settle_until() {
   return 0
 }
 st_empty() { [ -z "$(ls -A "$ST")" ]; }
-# AT THEIR DEFAULTS (wave-38 T33, A-T33-5). A shell that starts with a signal ignored can neither trap it nor be
-# ended by it, and the ignored state is inherited: the whole run at d3c4ed2e started with HUP, INT and QUIT ignored,
-# so 0 of 50 scans ended by HUP while TERM ended 45. Each scan below starts with INT, TERM and HUP at their defaults,
-# whatever the runner handed down, so a signal it is sent is one it can be ended by.
-SIG_DEFAULTS='$SIG{$_} = "DEFAULT" for qw(INT TERM HUP);'
+# AT THEIR DEFAULTS. A shell that starts with a signal ignored can neither trap it nor be ended by it, and the ignored
+# state is inherited: the whole run at d3c4ed2e started with HUP, INT and QUIT ignored, so 0 of 50 scans ended by HUP
+# while TERM ended 45. The launcher resets them (tests/run.sh execs itself through a perl SIG_DFL reset at entry; wave-39
+# T14, D17, AC-10.1; booked.test.sh §SIGNALS proves it), so the scans below carry no reset of their own.
 T0="$(now)"; scan "$R" "$L" TMPDIR="$ST"; T1="$(now)"
 expect_status "SIGNAL: an unkilled run is a hit run (control)" 1 "$RC"
 expect_empty "SIGNAL: and leaves nothing under its TMPDIR (control)" "$(ls -A "$ST")"
@@ -1199,7 +1198,7 @@ for sig in TERM HUP; do
   killed=0; left=0
   for k in $(seq 1 50); do
     d="$(perl -e 'printf "%.3f", rand($ARGV[0] - $ARGV[1])' "$T1" "$T0")"
-    ( cd "$R" && TMPDIR="$ST" exec perl -e "$SIG_DEFAULTS"' exec @ARGV or exit 127' bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
+    ( cd "$R" && TMPDIR="$ST" exec bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
     sleep "$d"; kill -"$sig" "$p" 2>/dev/null; wait "$p"; rc=$?
     [ "$rc" -gt 128 ] && killed=$((killed + 1))
     settle_until 20 st_empty
@@ -1214,10 +1213,14 @@ done
 # job of a script ignores INT, and a shell that starts with a signal ignored cannot trap it) and
 # signals the group; a tree left behind names the entries in its paths, so it is a leak
 # pg_scan <TMPDIR> [VAR=val ...] — the scan of $R with $L in the background, in its own group; sets p
+# JOB CONTROL, NOT A RESET: a background job of a script without job control starts with INT and QUIT ignored, whatever
+# the runner handed down, so the group's job is started under `set -m`, which is what a harness spawn does.
 pg_scan() {
   local st="$1"; shift
-  ( cd "$R" && exec perl -e "$SIG_DEFAULTS"' setpgrp(0, 0); exec @ARGV or exit 127' \
+  set -m
+  ( cd "$R" && exec perl -e 'setpgrp(0, 0); exec @ARGV or exit 127' \
       env TMPDIR="$st" "$@" bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
+  set +m
 }
 left_trees() { ls -A "$1" | grep -c '^name-scan\.' || true; }
 no_left_trees() { [ "$(left_trees "$1")" -eq 0 ]; }

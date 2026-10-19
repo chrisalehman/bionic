@@ -6024,6 +6024,78 @@ BIONIC_GATE_DIR="$TMPROOT/rl-gate" poke "$RRL" landing-report "$PRL"
 expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run line under runs: as run=1 (§REPORT-RTL pins run=0 on records with none)" \
   "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 · ' | tr -d ' ')"
 
+# ---------- AC-10.1: a regression-run started with HUP, INT and QUIT ignored hands its command all three at their defaults ----------
+# A shell that starts with a signal ignored cannot trap it, and the ignored state is inherited (wave-38 T33, T34; A-orch-69).
+# regression-run's command is `exec`ed through a perl that resets the three first (D17), in both arms: the declared
+# regression-command: and tests/run.sh whole. The command traps HUP, INT and QUIT and writes what it saw; the verb is
+# started as `bash -c 'trap "" HUP INT QUIT; …'`, as a nohup'd background job starts it. The control is the same
+# command under the same ignored start with no reset: it sees none, so the row can fail.
+[ "$(type -t wait_for)" = function ] || . "$(dirname "$0")/lib/wait.sh"
+RS_D="$TMPROOT/rs-sig"; mkdir -p "$RS_D"
+rs_script() {  # <name> -> writes the command's script, prints its path
+  local n="$1"
+  cat > "$RS_D/$n.sh" <<RSEOF
+#!/bin/bash
+for s in HUP INT QUIT; do trap "echo trapped-\$s >> '$RS_D/$n.saw'" \$s; done
+echo \$\$ > '$RS_D/$n.pid'
+: > '$RS_D/$n.up'
+i=0
+while [ \$i -lt 80 ] && [ "\$(wc -l < '$RS_D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ]; do i=\$((i+1)); sleep 0.1; done
+exit 0
+RSEOF
+  chmod +x "$RS_D/$n.sh"
+}
+rs_saw() { cat "$RS_D/$1.saw" 2>/dev/null | tr '\n' ' '; }
+rs_drive() {  # <name> <repo> <verb args…> — the verb with the three ignored; sends each signal once the command is up
+  local n="$1" repo="$2" pid sig grp
+  shift 2
+  rm -f "$RS_D/$n".saw "$RS_D/$n".pid "$RS_D/$n".up
+  ( cd "$repo" && exec bash -c 'trap "" HUP INT QUIT; exec env CLAUDE_CODE_SESSION_ID="$1" bash "$2" "${@:3}"' _ "$SID" "$POKER" "$@" ) \
+    > "$RS_D/$n.out" 2>&1 < /dev/null &
+  grp=$!
+  wait_for 30 test -e "$RS_D/$n.up"
+  pid="$(cat "$RS_D/$n.pid" 2>/dev/null)"
+  if [ -n "$pid" ]; then
+    for sig in HUP INT QUIT; do
+      kill -"$sig" "$pid" 2>/dev/null
+      wait_for 2 grep -q "trapped-$sig" "$RS_D/$n.saw"
+    done
+    kill -KILL "$pid" 2>/dev/null
+  fi
+  wait_for 20 bash -c '! kill -0 "$1" 2>/dev/null' _ "$grp" || kill -KILL "$grp" 2>/dev/null
+  wait "$grp" 2>/dev/null
+}
+# the control: no launcher, the three ignored — a bash the command is started under sees none of them
+rs_script ctl
+( exec bash -c 'trap "" HUP INT QUIT; exec bash "$1"' _ "$RS_D/ctl.sh" ) > /dev/null 2>&1 < /dev/null &
+RS_CTL=$!
+wait_for 30 test -e "$RS_D/ctl.up"
+for _s in HUP INT QUIT; do kill -"$_s" "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; sleep 0.2; done
+kill -KILL "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait "$RS_CTL" 2>/dev/null
+expect_eq "RL-7-ctl control: a command started with the three ignored and no reset sees none of them (the row can fail)" "" "$(rs_saw ctl)"
+
+# the declared regression-command: arm
+rs_script cfg
+printf 'regression-command: bash %s\n' "$RS_D/cfg.sh" > "$RRL/.bionic/config.yaml"
+rs_drive cfg "$RRL" regression-run
+expect_eq "RL-7 AC-10.1 regression-run started with HUP, INT and QUIT ignored: the declared command sees all three" \
+  "trapped-HUP trapped-INT trapped-QUIT " "$(rs_saw cfg)"
+printf 'regression-command: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+
+# the tests/run.sh whole arm: a fresh repository, no declared command, a tests/run.sh that is the command
+rs_script whole
+RRW="$(make_repo runwhole)"; ( cd "$RRW" && git commit -q --allow-empty -m init )
+PRW="$(s42_plan "$RRW" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PRW" | sed 's/| active |/| landed |/' > "$PRW.tmp" && mv "$PRW.tmp" "$PRW"
+( cd "$RRW" && git add -f "$PRW" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RRW/.worktrees/01-fixture" \
+  && mkdir -p "$RRW/.worktrees/01-fixture/tests" ) >/dev/null 2>&1
+cp "$RS_D/whole.sh" "$RRW/.worktrees/01-fixture/tests/run.sh"
+( cd "$RRW/.worktrees/01-fixture" && git add tests/run.sh && git commit -q -m "wave work" ) >/dev/null 2>&1
+rs_drive whole "$RRW" regression-run
+expect_eq "RL-8 AC-10.1 …and the whole arm (tests/run.sh, no declared command): it sees all three" \
+  "trapped-HUP trapped-INT trapped-QUIT " "$(rs_saw whole)"
+
 POKE_BOUND="$RL_BOUND_WAS"
 
 

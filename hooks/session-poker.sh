@@ -12640,14 +12640,21 @@ RC_TAGS
       die "REFUSED — no scratch file for the regression's output can be made under ${TMPDIR:-/tmp}; nothing was run."
       exit 1
     }
+    # THE LAUNCH RESETS HUP, INT AND QUIT (wave-39 T14; D17, AC-10.1; A-orch-69). A verb started with a signal ignored (a nohup'd or
+    # backgrounded session) hands the ignored state to the whole run below it, where no bash can trap or be ended by it; a bash cannot
+    # un-ignore a signal, perl can. Both arms exec through one perl that sets the three to their defaults and execs the command
+    # unchanged: no argument, no environment variable and no exit code differs (a command it cannot exec ends 127, or 126, as bash's
+    # own exec ends). No perl on PATH: the command is launched as it was.
+    FR_SIGDFL=()
+    command -v perl >/dev/null 2>&1 && FR_SIGDFL=(perl -e '$SIG{$_} = "DEFAULT" for qw(HUP INT QUIT); exec { $ARGV[0] } @ARGV; exit($!{ENOENT} ? 127 : 126)' --)
     if [ -n "$FR_WHOLE" ]; then
       ( cd "$FR_CO" 2>/dev/null || exit 1
-        exec bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
+        exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
     else
       ( cd "$FR_CO" 2>/dev/null || exit 1
         set -f
         # shellcheck disable=SC2086  # the configured command splits on blanks, as release-check's does
-        exec $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
+        exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
     fi
     FR_RC=$?
     # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: exit 75 before any suite, no verdict), so

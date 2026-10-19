@@ -453,4 +453,90 @@ expect_eq "BR-mut1 …and still runs: it accepts the unedited copy as the reader
 expect_eq "BR-mut2 MUTANT: a hash mismatch accepted — the edited log passes the mutant, which BR-5 refuses" \
   "0|$RL_H" "$(rl_judge "$RL_MUT/proof.sh" "$RL_LOG" | cut -d'|' -f1-2)"
 
+# =====================================================================================
+section "§SIGNALS — a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their defaults (wave-39 T14; D17; AC-10.1)"
+# =====================================================================================
+#
+# A shell that starts with a signal ignored cannot trap it and cannot be ended by it, and the ignored
+# state is inherited by everything below: the whole run at d3c4ed2e started with HUP, INT and QUIT
+# ignored (a background job of a script, a nohup'd one), so 0 of 50 name-scan runs ended by HUP and K8
+# [HUP] hung (wave-38 T33, T34; A-orch-69). Each suite carried its own perl reset for it. The reset
+# belongs to the launcher: --detach starts the detached side through a perl that resets the three
+# before it execs, and tests/run.sh re-execs itself through the same reset at entry (D17).
+#
+# THE DRIVE. `bash -c 'trap "" HUP INT QUIT; <launcher>'` starts the launcher with all three ignored,
+# as a nohup'd background job does. The command it launches traps HUP, INT and QUIT, writes its pid,
+# marks itself up, and waits; this suite sends it each signal and reads what it saw. A command that
+# never saw a signal ends by itself after 8 s, so a regression fails in seconds and never hangs.
+# THE CONTROL. The same command under the same ignored start with NO launcher between (a bash started
+# with the three ignored, run by a bash that ignores them) sees none: the fixture can fail. The same
+# command through a perl reset sees all three: the signals are really delivered.
+#
+# FIXTURE FIDELITY. The shim is the real booked.sh under the real perl; the runner is a byte copy of
+# tests/run.sh in a scratch tree with one suite, as tests/runner-roster.test.sh drives it. SYNTHESIZED:
+# the command and the one suite, whose body is that command.
+
+sg_cmd() {  # <name> — writes the command's script and prints the line that runs it
+  local n="$1"
+  cat > "$D/$n.cmd.sh" <<SGEOF
+for s in HUP INT QUIT; do trap "echo trapped-\$s >> '$D/$n.saw'" \$s; done
+echo \$\$ > '$D/$n.pid'
+: > '$D/$n.up'
+i=0
+while [ \$i -lt 80 ] && [ "\$(wc -l < '$D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ]; do i=\$((i+1)); sleep 0.1; done
+exit 0
+SGEOF
+  printf "bash '%s/%s.cmd.sh'" "$D" "$n"
+}
+SG_SAW=""
+sg_drive() {
+  local n="$1" i pid
+  shift
+  rm -f "$D/$n".saw "$D/$n".pid "$D/$n".up
+  set -m
+  bash -c 'trap "" HUP INT QUIT; exec "$@"' _ "$@" > "$D/$n.out" 2>&1 < /dev/null &
+  local grp=$!
+  set +m
+  bk_wait 15 test -e "$D/$n.up" || true
+  pid="$(cat "$D/$n.pid" 2>/dev/null)"
+  if [ -n "$pid" ]; then
+    for sig in HUP INT QUIT; do
+      kill -"$sig" "$pid" 2>/dev/null
+      bk_wait 2 grep -q "trapped-$sig" "$D/$n.saw" || true
+    done
+    kill -KILL "$pid" 2>/dev/null
+  fi
+  kill -KILL -- "-$grp" 2>/dev/null
+  bk_wait 5 bk_dead "$grp" || true
+  wait "$grp" 2>/dev/null
+  SG_SAW="$(cat "$D/$n.saw" 2>/dev/null | tr '\n' ' ')"
+}
+SG_ALL="trapped-HUP trapped-INT trapped-QUIT "
+
+# the control, both ways
+SG_C="$(sg_cmd ctl0)"
+sg_drive ctl0 bash -c "$SG_C"
+expect_eq "SG-C0 control: a command started with the three ignored and no launcher between sees none of them (the fixture can fail)" "" "$SG_SAW"
+SG_C="$(sg_cmd ctl1)"
+sg_drive ctl1 perl -e '$SIG{$_} = "DEFAULT" for qw(HUP INT QUIT); exec @ARGV or exit 126' bash -c "$SG_C"
+expect_eq "SG-C1 control: …and through a perl reset it sees HUP, INT and QUIT (the signals are delivered)" "$SG_ALL" "$SG_SAW"
+
+# booked.sh --detach
+SG_C="$(sg_cmd det)"
+sg_drive det bash -c "cd '$T1' && exec bash '$BOOKED' --detach --agent wx-T1 --suites sg.test.sh -- \"\$1\"" _ "$SG_C"
+expect_eq "SG-1 AC-10.1 booked.sh --detach started with the three ignored: its command sees HUP, INT and QUIT" "$SG_ALL" "$SG_SAW"
+
+# tests/run.sh, a byte copy in a scratch tree with one suite whose body is the command
+SGR="$D/sg-run"; rm -rf "$SGR"; mkdir -p "$SGR/tests/lib" "$SGR/payload/scripts/lib"
+cp "$REPO/tests/run.sh" "$SGR/tests/run.sh"
+cp "$REPO/tests/lib/resolve-roots.sh" "$REPO/tests/lib/assert.sh" "$SGR/tests/lib/"
+cp "$REPO"/payload/scripts/lib/*.sh "$SGR/payload/scripts/lib/" 2>/dev/null
+{ printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\nsection "sg"\n'
+  printf '%s\n' "$(sg_cmd run)"
+  printf 'expect_eq "sg ran" "x" "x"\nfinish\n'; } > "$SGR/tests/sg.test.sh"
+expect_true "(fixture) the scratch runner is a byte copy of the shipped one and the one suite parses" \
+  bash -c 'cmp -s "$1" "$2" && bash -n "$3"' _ "$REPO/tests/run.sh" "$SGR/tests/run.sh" "$SGR/tests/sg.test.sh"
+sg_drive run bash -c "cd '$SGR' && exec env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT BIONIC_GATE_DIR='$D/sg-gate' BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PRESSURE_RING='$D/sg-ring' BIONIC_TEST_JOBS_CEILING=2 bash tests/run.sh"
+expect_eq "SG-2 AC-10.1 tests/run.sh started with the three ignored: the suite it runs sees HUP, INT and QUIT" "$SG_ALL" "$SG_SAW"
+
 finish
