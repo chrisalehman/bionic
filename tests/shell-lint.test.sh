@@ -899,7 +899,7 @@ tests/bash-walls.test.sh               1      2
 tests/booked.test.sh                   0      15
 tests/close-out-2.test.sh              0      1
 tests/close-out-3.test.sh              0      2
-tests/cross-gate-agreement.test.sh     1      0
+tests/cross-gate-agreement-1.test.sh   1      0
 tests/detect-probes.test.sh            9      10
 tests/dispatch-preflight-4b.test.sh    2      1
 tests/doctor-fleet.test.sh             0      1
