@@ -5196,7 +5196,7 @@ COVER_JUDGED
   # `proof_owed_suites`, `proof_owed_say`), never on an approval the record cannot hold. The reds of the whole run (`owed`)
   # are a fix row's and keep the sentence above.
   local cv_owe=""
-  case "$(printf '%s\n' "$out" | awk -F'\t' '$1 == "regression" || $1 == "floor" { print $2; exit }')" in
+  case "$(printf '%s\n' "$out" | awk -F'\t' '$1 == "regression" { print $2; exit }')" in
     uncovered|absent) cv_owe="$(proof_owed_say "$(proof_owed_suites "$PV_PLAN" "$PV_REPO" "$PV_HEAD8" 2>/dev/null)")" || cv_owe="" ;;
   esac
   die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged.${cv_owe:+ The regression: $cv_owe}"
