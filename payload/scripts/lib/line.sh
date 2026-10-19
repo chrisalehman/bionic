@@ -655,9 +655,28 @@ EOF
 _line_suites() {  # <lands_on value> -> `a.test.sh,d/b.test.sh` | none; 1 when a name is not a suite
   case "$1" in none|none[[:space:]]*) printf 'none\n'; return 0 ;; esac
   printf '%s\n' "$1" | tr ', \t' '\n\n\n' | awk "$BIONIC_SUITE_NAME_AWK"'
-    NF { t = suite_name($0); if (t == "") { bad = 1; exit }
+    NF { t = suite_name($0); if (t == "" && lands_cmd_entry($0)) t = $0; if (t == "") { bad = 1; exit }
          if (index("," o ",", "," t ",") == 0) o = o (o == "" ? "" : ",") t }
     END { if (bad || o == "") exit 1; print o }'
+}
+# A LANDS-ON COMMAND (wave-39 T20; D20, AC-14.3): an entry the lift wrote as suite.sh `lands_cmd` spells it, a
+# command the brief declared under Re-executes: (the dispatch wall held it to them). `_line_suites` keeps it as it
+# is; ready runs it in the landing tree (`_line_runner`, suite.sh `bionic_command_start`) and judges it by its exit
+# code (`_line_verdict`); its red is the row's (`_line_red_owner`). Where a suite is named by its file name, it is
+# named so (`_line_gate_key`, `_line_suite_log`, `_line_reads_fill`).
+# The key the gate keeps an entry's cost under: a suite's file name; a command's text as booked.sh keys a command
+# run (`booked_one_line`, its first 60 characters), so a landing and the writer's own run share one history.
+_line_gate_key() {  # <lands_on entry> -> its gate key
+  local c
+  c="$(bionic_lands_cmd "${1:-}")" || { printf '%s' "${1##*/}"; return 0; }
+  c="${c//|/ }"; c="${c//$'\t'/ }"
+  printf '%s' "${c:0:60}"
+}
+# The suite file a command names, the first word that is one (quotes off), as `suite_name` spells it; nothing when it
+# names none (wave-39 T20: the command is then keyed by the tree).
+_line_cmd_suite() {  # <command>
+  printf '%s\n' "$1" | tr ' \t' '\n\n' | tr -d "\"'" | awk "$BIONIC_SUITE_NAME_AWK"'
+    /\.test\.sh$/ { t = suite_name($0); if (t != "") { print t; exit } }'
 }
 
 # THE ROW THE WALL READS (wave-28 T64; D26, REQ-7 AC-7.2, REQ-2 AC-2.11). The launch line is the row `row=` or
@@ -868,7 +887,7 @@ _line_promise_total() {  # <suites, comma-joined | none> <tree>
   _gate_store >/dev/null 2>&1 || { echo 0; return 0; }
   for s in $(printf '%s\n' "$1" | tr ',' ' '); do
     [ "$s" != none ] || continue
-    p="$(_gate_promise "${s##*/}" "${2:-}" 2>/dev/null)"; p="${p##*:}"
+    p="$(_gate_promise "$(_line_gate_key "$s")" "${2:-}" 2>/dev/null)"; p="${p##*:}"
     case "$p" in ''|*[!0-9]*) p=0 ;; esac
     t=$((t + p))
   done
@@ -1183,20 +1202,34 @@ _line_load_anchors() {
 # (the entry's), so a commit's read set is derived once. Fill it in the carrier's own shell, never inside
 # `$( )`, where what it remembers would be lost; read it anywhere.
 _LINE_RH=""; _LINE_RH_SUITES=""
+# A LANDS-ON COMMAND'S KEY (wave-39 T20; D20): a command reads what its row's suites do, and no index says which; it
+# is keyed by the commit's tree, `tree:<id>` (anchors.sh's key for a set it cannot derive), unless it names a suite
+# file, whose key it then takes.
 _line_reads_fill() {  # <root> <commit> <suite>
-  local want s got
+  local want s got ask="" q c k tree=""
   _line_reads_of "$2" "$3" >/dev/null && return 0
   want="$3"
   for s in $(printf '%s\n' "$_LINE_RH_SUITES" | tr ',' ' '); do
     [ "$s" = none ] || [ "$s" = "$3" ] || _line_reads_of "$2" "$s" >/dev/null || want="$want $s"
   done
+  for s in $want; do
+    q="$s"; ! c="$(bionic_lands_cmd "$s")" || q="$(_line_cmd_suite "$c")"
+    [ -z "$q" ] || ask="$ask $q"
+  done
   got=""
-  if [ -n "$1" ] && _line_load_anchors; then
+  if [ -n "$1" ] && [ -n "$ask" ] && _line_load_anchors; then
     # shellcheck disable=SC2086
-    got="$(reads_hashes "$1" "$2" $want 2>/dev/null)"
+    got="$(reads_hashes "$1" "$2" $ask 2>/dev/null)"
   fi
   for s in $want; do
-    _LINE_RH="${_LINE_RH}${2}	${s}	$(printf '%s\n' "$got" | awk -F'\t' -v s="$s" '$1 == s && $2 != "" { k = $2 } END { print (k == "" ? "-" : k) }')
+    q="$s"; ! c="$(bionic_lands_cmd "$s")" || q="$(_line_cmd_suite "$c")"
+    if [ -z "$q" ]; then
+      [ -n "$tree" ] || [ -z "$1" ] || tree="$(git -C "$1" rev-parse --verify -q "${2}^{tree}" 2>/dev/null)"
+      k=-; [ -z "$tree" ] || k="tree:${tree}"
+    else
+      k="$(printf '%s\n' "$got" | awk -F'\t' -v s="$q" '$1 == s && $2 != "" { k = $2 } END { print (k == "" ? "-" : k) }')"
+    fi
+    _LINE_RH="${_LINE_RH}${2}	${s}	${k}
 "
   done
 }
@@ -1292,6 +1325,9 @@ _line_red_owner() {  # <plan> <rec> <row> <cbase> <suite> <candidate's log> <deb
   local plan="$1" rec="$2" row="$3" s="$5" head hr="" hl="" cause against jt
   if [ "${s##*/}" = "$7" ]; then LINE_RED=declared; return 0; fi
   LINE_RED=row
+  # A LANDS-ON COMMAND'S RED IS THE ROW'S (wave-39 T20; D20): it is judged by its exit code alone, and its log has no
+  # failing lines to hold against a run at the head, so no run is made there.
+  ! bionic_lands_cmd "$s" >/dev/null || return 0
   head="$(line_head "$plan")" || return 0
   IFS=$'\t' read -r hr hl <<EOT
 $(_line_head_verdict "$rec" "$head" "$s")
@@ -1406,9 +1442,11 @@ _line_debt_write() {  # <rec> <row> <row commit> <candidate> <row branch> <at>
 
 # A suite's log, under the record directory: `line/<row>-<suite>-<candidate's 12 hex>[-<n>].log`.
 _line_suite_log() {  # <rec> <row> <suite> <candidate> -> a path no run has written
-  local d="${1%/*}/line" b p n=1
+  local d="${1%/*}/line" b p c n=1
   mkdir -p "$d" 2>/dev/null
-  b="${3##*/}"; b="${d}/${2//\//-}-${b%.test.sh}-$(printf '%.12s' "$4")"
+  b="${3##*/}"
+  ! c="$(bionic_lands_cmd "$3")" || b="cmd-$(printf '%s' "$c" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40)"   # wave-39 T20
+  b="${d}/${2//\//-}-${b%.test.sh}-$(printf '%.12s' "$4")"
   p="${b}.log"
   while [ -e "$p" ]; do n=$((n + 1)); p="${b}-${n}.log"; done
   printf '%s' "$p"
@@ -1429,9 +1467,11 @@ _line_time_for() {  # <suite> <deadline> <landing tree> -> seconds
 
 # The run's verdict (D8): `none` when it ended by a signal (128 + n), could not start (126, 127, or
 # no rc at all), or its log holds no end line, the harness's `<file>: <p>/<t> passed, <f> failed`;
-# otherwise green on rc 0 and red on any other.
-_line_verdict() {  # <rc> <log>
+# otherwise green on rc 0 and red on any other. A LANDS-ON COMMAND (wave-39 T20; D20) prints no end line and is
+# judged by its exit code alone: green on rc 0, red on any other; `none` only when it has no rc.
+_line_verdict() {  # <rc> <log> [<lands_on entry>]
   case "${1:-}" in ''|*[!0-9]*) echo none; return 0 ;; esac
+  if bionic_lands_cmd "${3:-}" >/dev/null; then if [ "$1" = 0 ]; then echo green; else echo red; fi; return 0; fi
   if [ "$1" -ge 126 ] || ! grep -Eq '^[^ ]+: [0-9]+/[0-9]+ passed, [0-9]+ failed( |$)' "$2" 2>/dev/null; then echo none
   elif [ "$1" = 0 ]; then echo green; else echo red; fi
 }
@@ -1483,8 +1523,8 @@ _line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
   LINE_RESULT=""; LINE_WHY=""; LINE_RP=""; LINE_RES=""; LINE_AT=-; LINE_PROMISED=-; LINE_ACTUAL=-
   LINE_LOG="$(_line_suite_log "$1" "$2" "$5" "$3")"
   if [ -n "$6" ]; then
-    within="$(_line_time_for "${5##*/}" "$6" "$4")" \
-      || { LINE_RESULT=waiting; LINE_WHY="$(_line_time_why "${5##*/}" "$6" "$4")"; return 0; }
+    within="$(_line_time_for "$(_line_gate_key "$5")" "$6" "$4")" \
+      || { LINE_RESULT=waiting; LINE_WHY="$(_line_time_why "$(_line_gate_key "$5")" "$6" "$4")"; return 0; }
   fi
   # THE LOG CLAIMED BEFORE THE RUNNER STARTS: a sibling started next (the same suite named twice, by path
   # and by name) is then given the next free path, never this one.
@@ -1495,7 +1535,8 @@ _line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
     "$_LINE_LIB_DIR" "$5" "$within" "$4" "$LINE_LOG" "$LINE_RES" "${LINE_ME%%:*}" "${_LINE_KEY:-}" "$1"
   LINE_RP="$BIONIC_JOB_PID"
 }
-# An ended runner's result, LINE_LOG its log: LINE_RESULT green | red | none by `_line_verdict`, or waiting |
+# An ended runner's result, LINE_LOG its log, <suite> its Lands-on entry as a file name: LINE_RESULT green | red | none
+# by `_line_verdict`, or waiting |
 # gate when the gate did not admit it (LINE_LOG then says why); LINE_AT its admission's epoch, `-` when it
 # was not admitted. Its result file is removed.
 _line_prove_end() {  # <result file> [<suite>]
@@ -1505,11 +1546,13 @@ _line_prove_end() {  # <result file> [<suite>]
   r="$(sed -n 's/^gate=//p' "$1" 2>/dev/null)"
   if [ -n "$r" ]; then
     if [ "$r" = 75 ]; then
-      LINE_RESULT=waiting; _gate_store >/dev/null 2>&1; p="$(_gate_promise "${2:-}" 2>/dev/null)"
+      LINE_RESULT=waiting; _gate_store >/dev/null 2>&1; p="$(_gate_promise "$(_line_gate_key "${2:-}")" 2>/dev/null)"
       LINE_WHY="gate did not admit ${2:-the suite} before its promised ${p##*:}s stopped fitting in --within ${_LINE_WITHIN:-}"
     else LINE_RESULT=gate; LINE_LOG="gate_ask rc ${r}"; fi
+  elif grep -q '^unstarted=' "$1" 2>/dev/null; then
+    LINE_RESULT=none   # nothing started (wave-39 T20): a command's rc 1 there is no exit code of its own
   else
-    LINE_RESULT="$(_line_verdict "$(sed -n 's/^rc=//p' "$1" 2>/dev/null)" "$LINE_LOG")"
+    LINE_RESULT="$(_line_verdict "$(sed -n 's/^rc=//p' "$1" 2>/dev/null)" "$LINE_LOG" "${2:-}")"
   fi
   rm -f "$1"
 }
@@ -1720,7 +1763,7 @@ _line_drain_stop() {  # kill|await <plan> <rec> <row> <candidate> <cbase>
     done
     LINE_LOG="${_LINE_DL[$i]}"; LINE_WIDTH="${_LINE_DW[$i]}"
     if _line_drain_ended "$i"; then
-      wait "$p" 2>/dev/null; _line_prove_end "${_LINE_DR[$i]}"
+      wait "$p" 2>/dev/null; _line_prove_end "${_LINE_DR[$i]}" "${_LINE_DS[$i]##*/}"
     else
       _line_prove_kill "$p" "${_LINE_DR[$i]}"
     fi
@@ -1774,8 +1817,8 @@ _line_holds() {  # <root> <commit> <suite> -> 0 when <commit> is a commit holdin
 # finished), and once admitted it files
 # the gate's own admission instant for the run (`at=`), which the verdict carries as admitted= (AC-6.4).
 _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid> [<landing key>] [<record>]
-  local id rc p
-  id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "${1##*/}" ${2:+--within "$2"})"; rc=$?
+  local id rc p c
+  id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"})"; rc=$?
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\nat=%s\npromised=%s\n' "$id" "$(_line_admitted_at "$id")" "$(_line_req_seconds "$id" promised)" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended
@@ -1783,10 +1826,18 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
   # The suite starts through the plugin's primitive (lib/suite.sh; wave-33 T2, D3): a job of its own, so
   # its INT and QUIT are the runner's defaults; the gate's store unset in it; this admission its
   # BIONIC_GATE_ADMIT; stdin /dev/null. A tree that is no checkout runs nothing: rc 1, no end line.
+  # A LANDS-ON COMMAND (wave-39 T20; D20) starts as `bash -c <command>` in the same environment (suite.sh
+  # `bionic_command_start`). A run that could not start says so (`unstarted=`), so its rc 1 is no command's exit code.
   {
     p=""
-    [ -e "$3/.git" ] && bionic_suite_start ${id:+--admit "$id"} "$3" "$(_line_suite_path "$3" "$1")" > "$4" 2>&1 && p="$BIONIC_SUITE_PID"
-    [ -n "$p" ] || { ( exit 1 ) & p=$!; }
+    if [ -e "$3/.git" ]; then
+      if c="$(bionic_lands_cmd "$1")"; then
+        bionic_command_start ${id:+--admit "$id"} "$3" "$c" > "$4" 2>&1 && p="$BIONIC_SUITE_PID"
+      else
+        bionic_suite_start ${id:+--admit "$id"} "$3" "$(_line_suite_path "$3" "$1")" > "$4" 2>&1 && p="$BIONIC_SUITE_PID"
+      fi
+    fi
+    [ -n "$p" ] || { printf 'unstarted=1\n' >> "$5"; ( exit 1 ) & p=$!; }
     while kill -0 "$p" 2>/dev/null; do
       kill -0 "$6" 2>/dev/null || { _line_kill_tree "$p"; return 0; }
       sleep "$LINE_POLL"; gate_state >/dev/null 2>&1
