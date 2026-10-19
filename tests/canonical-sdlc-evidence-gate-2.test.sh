@@ -4765,4 +4765,137 @@ rm -f "$ROD/.bionic/config.yaml"
 OD_ST="$(od_state)"
 expect_eq "OD-4 AC-18.2 undeclared: the code commit owes too (an empty index excuses nothing)" "uncovered" "${OD_ST%%	*}"
 
+# ============================================================
+section "§FIXED-REGRESSION — a landing proof may be the regression: a born row landed with no verdict events has its finding fixed once a green regression stands at a head its landing is an ancestor of; an absent suite is not owed, never red (wave-39 T19; REQ-14 AC-14.1; D9)"
+# ============================================================
+# `proof_fixed` named a finding fixed only when its row's newest verdict commit held one or more suites, all green.
+# A row landed by hand (`land --by-hand`, a `landed: row=<T> … merge=<c>` header in the landing record and no
+# `ev=verdict` event) never counted, so its reading stayed `failing` while its cover held (research-review-cover.md
+# Q5, PLANT B). Now a row whose landing owes no verdict (none recorded, or every one `result=absent`) has its
+# findings fixed at its landing commit (the header's merge=) once a green regression stands at a head that commit is
+# an ancestor of: the regression's per-suite facts at that head (`proof_regression_fold`, `kind=regression`), every
+# suite's last word green or absent with one green at least, or a `proved: kind=regression` line at it whose run left
+# no suite red; a red the plan inherited (`inherited:`) is not counted, as the judge does not count it. The printed
+# commit is the landing, so the reading-head check (`_proof_fixed_var`: the reading's head is an ancestor of it) holds
+# as for a verdict landing. In the verdict arm a `result=absent` verdict (T6: a Lands-on suite the row removed) is not
+# owed: a landing green on the rest is fixed. A red landing verdict stays red; a regression does not override it.
+#
+# FIXTURE FIDELITY. §FIXED-PASSES's repository and writers: on the working branch an init commit (B), the reading's
+# head (R), T5's landing (L, a by-hand landing: the header worktree.sh writes, no verdict), a later code commit (D);
+# and a side branch off R holding one commit (S), which L is no ancestor of. The regression facts are lines in
+# `proof_regression_fold`'s shape, the proof line in `proof_floor_line`'s; the judge reads text whatever wrote it.
+# fails-when: PLANT B stays failing; a regression at a head that does not descend from the landing, or one with a red
+# suite, names the finding; an absent verdict reads red.
+RFR="$(fp_repo fixed-regression)"
+FR_B="$(git -C "$RFR" rev-parse HEAD)"
+FR_R="$(fp_commit "$RFR" a.sh one)"
+FR_L="$(fp_commit "$RFR" a.sh two)"
+FR_D="$(fp_commit "$RFR" b.sh three)"
+( cd "$RFR" && git checkout -q -b side "$FR_R" && printf 'side\n' > c.sh && git add c.sh && git commit -qm side && git checkout -q wave/01-fixture ) >/dev/null 2>&1
+FR_S="$(git -C "$RFR" rev-parse side)"
+fp_record "$RFR" advr.md adversarial fail "${FR_B:0:10}..${FR_R:0:10}" 'findings: 1' \
+  'finding: 1 S2 on a.sh:1 data lost on a second run' 'shown: 1 bash a.sh; bash a.sh'
+FR_ID="$FP_REC/advr.md#1"
+FR_T5='| T5 | 4 | build | fix the a reader · born: review | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |'
+fr_world() {  # <reading head> [<extra SDLC line>] -> the plan: the reading at <head>, T5 landed at L, born of finding 1
+  fp_plan "$RFR" "${FR_B:0:10}" "$(fp_proved "$1" advr.md adversarial fail)
+- T5: landed $FR_L 2026-10-04T13:00:00Z born: review S2 on of=$FR_ID${2:+
+$2}" "$FR_T5"
+}
+fr_landed() { printf 'landed: row=T5 branch=wt/01-T5 head=%s merge=%s at=2026-10-04T13:00:00Z' "$FR_L" "$FR_L"; }
+fr_reg() {  # <head> <suite> <result> -> one regression fact, proof_regression_fold's shape
+  printf 'line/v1|ev=verdict|row=regression|commit=%s|suite=%s|result=%s|log=%s/regression-run-%s.log|admitted=-|width=-|reads=-|kind=regression|at=2026-10-04T14:00:00Z' \
+    "$1" "$2" "$3" "$FP_REC" "${1:0:12}"
+}
+fr_verdict() {  # <commit> <suite> <result> -> one landing verdict of T5, lib/line.sh's shape
+  printf 'line/v1|ev=verdict|row=T5|commit=%s|suite=%s|result=%s|log=/fixture/T5.log|at=2026-10-04T13:00:00Z' "$1" "$2" "$3"
+}
+fr_fixed() {  # -> proof_fixed's lines over the plan, '|'-joined columns, ' '-joined lines
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_fixed "$2" "$3"' _ "$FP_LIB" "$(fp_plan_path "$RFR")" "$RFR" 2>/dev/null \
+    | awk -F'\t' '{ printf "%s%s|%s|%s|%s", (NR > 1 ? " " : ""), $1, $2, $3, $4 }'
+}
+
+fr_world "$FR_R"
+fp_landing "$RFR" "$(fr_landed)"
+expect_eq "FR-0 precondition: the landing record names L as T5's landing (the units reader) and holds no verdict of T5" \
+  "T5	$FR_L|0" \
+  "$(bash -c '. "$1/units.sh" && units_landings "$2" "$3"' _ "$FP_LIB" "$(fp_plan_path "$RFR")" "$RFR/.bionic/docs/$FP_REC/landing-proofs.log" 2>/dev/null | awk -F'\t' '$1 == "T5" { print $1 "\t" $2 }')|$(/usr/bin/grep -c 'ev=verdict|row=T5|' "$RFR/.bionic/docs/$FP_REC/landing-proofs.log" | tr -d ' ')"
+expect_eq "FR-0b precondition: L descends from R, D from L, and S does not descend from L" "yes" \
+  "$(git -C "$RFR" merge-base --is-ancestor "$FR_R" "$FR_L" && git -C "$RFR" merge-base --is-ancestor "$FR_L" "$FR_D" \
+     && ! git -C "$RFR" merge-base --is-ancestor "$FR_L" "$FR_S" && echo yes)"
+fp_state "$RFR" "$FR_L"
+expect_eq "FR-1 PLANT B before its regression: a born row landed by hand, no verdict, no regression: failing" \
+  "failing	$FP_REC/advr.md" "$(fp_of "$FP_AD")"
+
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" a.test.sh green)" "$(fr_reg "$FR_D" b.test.sh green)"
+expect_eq "FR-2 AC-14.1 PLANT B: a green regression at D, which L is an ancestor of: proof_fixed names the finding, fixed at L" \
+  "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_state "$RFR" "$FR_L"
+expect_eq "FR-2b AC-14.1 …and the reading derives to passing: covered at L" "covered" "$(fp_of "$FP_AD")"
+expect_eq "FR-2c …and the wall is handed the same answer: the written fail derives to pass" \
+  "$FP_REC/advr.md	fail	pass" "$(fp_derived "$RFR")"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_L" a.test.sh green)"
+expect_eq "FR-2d …a green regression at L itself holds too (a commit is its own ancestor)" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_R" a.test.sh green)" "$(fr_reg "$FR_R" b.test.sh green)"
+expect_eq "FR-3 a green regression at R, before the landing, proves nothing (positive: FR-2 read the same extractor)" "" "$(fr_fixed)"
+fp_state "$RFR" "$FR_L"
+expect_eq "FR-3b …failing" "failing	$FP_REC/advr.md" "$(fp_of "$FP_AD")"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_S" a.test.sh green)"
+expect_eq "FR-3c a green regression on a side branch L is no ancestor of proves nothing" "" "$(fr_fixed)"
+
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" a.test.sh green)" "$(fr_reg "$FR_D" b.test.sh red)"
+expect_eq "FR-4 a regression at D that left a suite red proves nothing" "" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" b.test.sh red)" "$(fr_reg "$FR_D" a.test.sh green)" "$(fr_reg "$FR_D" b.test.sh green)"
+expect_eq "FR-4b …the suite's last word counts: red then green at D is green" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" a.test.sh green)" "$(fr_reg "$FR_D" b.test.sh red)"
+fr_world "$FR_R" "inherited: b.test.sh base=${FR_B:0:10} head=${FR_B:0:10} red before the wave"
+expect_eq "FR-4c …a red the plan inherited is not counted, as the regression judge does not count it" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fr_world "$FR_R"
+
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" a.test.sh green)" "$(fr_reg "$FR_D" gone.test.sh absent)"
+expect_eq "FR-5 an absent suite in the regression is not owed: green with it" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" gone.test.sh absent)"
+expect_eq "FR-5b …but a regression where no suite ran green proves nothing" "" "$(fr_fixed)"
+
+fp_landing "$RFR" "$(fr_landed)"
+fr_world "$FR_R" "proved: kind=regression head=$FR_D at=2026-10-04T14:00:00Z evidence=$FP_REC/regression-run.log"
+expect_eq "FR-6 a green proved: kind=regression line at D, with no per-suite facts, fixes it too" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fr_world "$FR_R" "proved: kind=regression head=$FR_D at=2026-10-04T14:00:00Z evidence=$FP_REC/regression-run.log owed=a.test.sh"
+expect_eq "FR-6b …and one whose run left a suite red (owed=) does not" "" "$(fr_fixed)"
+fr_world "$FR_R" "proved: kind=regression head=$FR_R at=2026-10-04T14:00:00Z evidence=$FP_REC/regression-run.log"
+expect_eq "FR-6c …nor a green one at R, before the landing" "" "$(fr_fixed)"
+
+# THE READING-HEAD CHECK HOLDS: the reading at D, past the landing. The regression at D fixes the finding at L, so
+# proof_fixed names it; the readers drop it, since the reading's head is not an ancestor of L.
+fr_world "$FR_D"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" a.test.sh green)"
+expect_eq "FR-7 a reading at D, after the landing: proof_fixed still names the finding at L" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_state "$RFR" "$FR_D"
+expect_eq "FR-7b …and the reading-head check drops it: failing at D" "failing	$FP_REC/advr.md" "$(fp_of "$FP_AD")"
+fr_world "$FR_R"
+
+# THE ABSENT ARM OF A LANDING (A-orch-9): T6's shape, a Lands-on suite the row removed, recorded result=absent.
+fp_landing "$RFR" "$(fr_landed)" "$(fr_verdict "$FR_L" a.test.sh green)" "$(fr_verdict "$FR_L" gone.test.sh absent)"
+expect_eq "FR-8 A-orch-9 a landing green on a.test.sh with gone.test.sh absent: fixed at the verdict commit, no regression needed" \
+  "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_verdict "$FR_L" gone.test.sh absent)"
+expect_eq "FR-8b …a landing whose only verdict is absent owes none, so with no regression it is not fixed" "" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_verdict "$FR_L" gone.test.sh absent)" "$(fr_reg "$FR_D" a.test.sh green)"
+expect_eq "FR-8c …and the next green regression past it fixes it" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_verdict "$FR_L" a.test.sh red)" "$(fr_reg "$FR_D" a.test.sh green)"
+expect_eq "FR-9 a red landing verdict is not overridden by a green regression" "" "$(fr_fixed)"
+
+# THE MUTATION CONTROL: the descendant check dropped. The copy is the shipped lib/ beside one doctored proof.sh.
+FR_MLIB="$(mktemp -d "${TMPDIR:-/tmp}/fr-desc-mut.XXXXXX")"; cleanup_dirs+=("$FR_MLIB")
+for fr_f in "$FP_LIB"/*; do [ "${fr_f##*/}" = proof.sh ] || ln -s "$(cd "${fr_f%/*}" && pwd -P)/${fr_f##*/}" "$FR_MLIB/${fr_f##*/}"; done
+anchor file payload/scripts/lib/proof.sh 'git -C "$gt" merge-base --is-ancestor "$l" "$h" 2>/dev/null || continue' \
+  ': || continue' "$FR_MLIB/proof.sh"
+FR_SHIPPED_LIB="$FP_LIB"; FP_LIB="$FR_MLIB"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_D" a.test.sh green)"
+expect_eq "FR-10 the mutant runs and still names the finding for a regression at D" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_R" a.test.sh green)"
+expect_eq "FR-10b …and the row FR-3 holds goes red on it: a regression at R names the finding" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
+FP_LIB="$FR_SHIPPED_LIB"
+
 finish
