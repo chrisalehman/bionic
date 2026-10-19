@@ -88,6 +88,10 @@ LINE_PROMISED=-; LINE_ACTUAL=-   # the last run's promised and actual seconds (w
 # Defined here and nowhere else; the landing line's refusal of a Lands-on suite promising more is T7's
 # (A-orch-5), so nothing reads it yet.
 LINE_SUITE_BAR=600
+# THE LANDING BAR (wave-39 T9; D12, D25; AC-5.1, AC-5.2): fifteen minutes ready→landed. The sitrep's schedule
+# line prints the run's median ready→landed against it, and the scorecard's widest landing names it as its
+# target; both read it through session-poker.sh `sitrep_bar`, and nothing else defines it.
+LINE_LANDING_BAR=15
 
 _line_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not

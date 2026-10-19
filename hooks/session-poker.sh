@@ -6729,7 +6729,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
 #
 #   human stops (autonomous half): <n> · target 1
 #   agent minutes after the final reply: <n> · target 0
-#   widest landing ready→landed: <row> <m> min · target < 30
+#   widest landing ready→landed: <row> <m> min · target < <LINE_LANDING_BAR, the landing bar: 15>
 #   human-wait minutes: <n> · no target (the user's)
 #
 # then the sitrep's three indicator lines at close, schedule, correctness and waste (not the legend line under them), cut from `sitrep_render`'s
@@ -6793,7 +6793,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   ind="$(sitrep_render "$plan" "$root" no 2>/dev/null | awk '/^Assessment$/ { f = 1; next } f && NF == 0 { exit } f && ++n <= 3 { print }')"
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
   printf 'agent minutes after the final reply: %s · target 0\n' "$agent"
-  printf 'widest landing ready→landed: %s · target < 30\n' "${widest:-unverified}"
+  printf 'widest landing ready→landed: %s · target < %s\n' "${widest:-unverified}" "$(b="$(sitrep_bar)"; printf '%s' "${b:-unverified}")"
   printf "human-wait minutes: %s · no target (the user's)\n" "${wait:-unverified}"
   printf '%s\n' "${ind:-indicators: unverified — the sitrep could not be rendered for $plan}"
   return 0
@@ -6813,7 +6813,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   <l> landed · <a> in flight · <p> not started · <r> red/blocked of <total>
 #   <glyph> <step>/<id>: <short description>[ — <H:MM AM/PM>[ <local date>]]    one per row, table order
 #   Assessment
-#   <mark> schedule <ratio>× — median ready→landed <m>m over median declared <d>m
+#   <mark> schedule — <l> of <n> landed in <h>h, pace needs <k> · median ready→landed <m>m over the <bar>m bar
 #   <mark> correctness — <reds>, <findings>
 #   <mark> waste <d>% discarded · <i>% idle-width
 #   within / near / over — <the bars, once, SITREP_LEGEND>
@@ -6839,6 +6839,11 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # `proof_fixed` (disposition's open state). What no reader computes is computed here, once: the declared median
 # of the landed rows, the ratio, the marks, a red not yet answered by a green, the closing time.
 #
+# THE SCHEDULE MARK READS THE CLOCK AND THE BAR (wave-39 T9; D25, Δ9; D12): rows landed since the Step-3 approval
+# against the pace the plan's `forecast:` needs, and the median ready→landed against LINE_LANDING_BAR, each half
+# graded at or within / within 1.25× / further, the line taking the worse. The declared sizes feed only the
+# Forecast's closing time, never the mark (`sitrep_schedule`).
+#
 # A VALUE THE RECORD CANNOT COMPUTE PRINTS `unverified` (D9), and its mark is ❔ (on its line and in the one-line form).
 # Local times are 12-hour on this machine's clock (`sitrep_clock`, the 12-hour sibling of `handoff_local_time`);
 # a time on another local day than now's carries its date. Now is BIONIC_NOW_EPOCH when set, fill-report's seam.
@@ -6848,7 +6853,7 @@ SITREP_MARK_NEAR='➖'
 SITREP_MARK_OVER='✖️'
 SITREP_MARK_NONE='❔'
 # The bars, once, as the one line under the three indicator lines (D29). The thresholds in sitrep_render are these.
-SITREP_LEGEND='within / near / over — schedule ≤ 1.25 / ≤ 2.0 / above · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
+SITREP_LEGEND='within / near / over — schedule at or ahead of the pace its forecast needs and the median landing at or under the bar / either within 1.25× / further · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
 
 sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
   case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
@@ -6887,6 +6892,61 @@ sitrep_pace() {
       if (d <= 0) exit
       printf "%s\t%g\t%.6f\n", med, d, med / d
     }'
+}
+
+# sitrep_bar -> the landing bar in minutes, lib/line.sh's LINE_LANDING_BAR (wave-39 T9; D12), the one constant the
+# schedule line and the scorecard's target read; loaded as the stop-run record loads line.sh; nothing when unread.
+sitrep_bar() {
+  [ -n "${LINE_LANDING_BAR:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  case "${LINE_LANDING_BAR:-}" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s\n' "$LINE_LANDING_BAR"
+}
+
+# sitrep_schedule <plan> <landed> <total> <now epoch> <median ready→landed | empty> -> `<mark><TAB><text>`, the
+# schedule line after its mark (wave-39 T9; D25, Δ9; AC-5.1, AC-5.2). Two halves, each against a bar the run cannot
+# set for itself:
+#   the clock  rows landed in the hours since the plan's `approved-by:` instant (the Step-3 approval, under
+#              ## SDLC State) against the rows its frontmatter `forecast: <n>h|<n>m` needs by now,
+#              total × elapsed/forecast rounded, never above total: landed ≥ needed within, needed ≤ 1.25 ×
+#              landed near, else over; unverified with no approval instant or no forecast.
+#   the bar    the median ready→landed against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else over;
+#              unmeasured before the first landing.
+# The mark is the worse half, ranked over ✖️ > ➖ > ❔ > ✅, so an unmeasured half never reads within.
+sitrep_schedule() {
+  local plan="$1" landed="$2" total="$3" now="$4" med="$5" appr fc bar clock cg bg bt
+  appr="$(awk "$_PATROL_ISO_AWK"'
+    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
+    s && /^approved-by:/ { n = split($0, t, /[ \t]+/); for (i = 2; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) { print e; exit } } exit }' "$plan" 2>/dev/null)"
+  fc="$(plan_frontmatter_get "$plan" forecast 2>/dev/null | awk '
+    match($0, /^[0-9]+(\.[0-9]+)?[hm]?$/) { v = $0 + 0; if (v > 0) { if ($0 ~ /m$/) print v; else print v * 60 } }')"
+  if [ -z "$appr" ]; then cg=n; clock="clock unverified, no Step-3 approval instant (approved-by:)"
+  elif [ -z "$fc" ]; then cg=n; clock="clock unverified, the plan declares no forecast:"
+  else
+    IFS='	' read -r cg clock <<< "$(awk -v now="$now" -v a="$appr" -v f="$fc" -v l="$landed" -v t="$total" 'BEGIN {
+      e = now - a; if (e < 0) e = 0
+      r = e / (f * 60); if (r > 1) r = 1
+      k = int(t * r + 0.5)
+      h = sprintf("%.1f", e / 3600); sub(/\.0$/, "", h)
+      g = (l >= k) ? "w" : ((k <= 1.25 * l) ? "a" : "o")
+      printf "%s\t%d of %d landed in %sh, pace needs %d\n", g, l, t, h, k }')"
+  fi
+  bar="$(sitrep_bar)"
+  if [ -z "$med" ]; then bg=n; bt="no landing yet against the ${bar:-unverified}m bar"
+  elif [ -z "$bar" ]; then bg=n; bt="median ready→landed $(sitrep_ratio_fmt "$med")m, the landing bar unverified"
+  else
+    bg="$(awk -v m="$med" -v b="$bar" 'BEGIN { print (m <= b) ? "w" : ((m <= 1.25 * b) ? "a" : "o") }')"
+    bt="median ready→landed $(sitrep_ratio_fmt "$med")m over the ${bar}m bar"
+  fi
+  case "$cg$bg" in
+    *o*) printf '%s' "$SITREP_MARK_OVER" ;;
+    *a*) printf '%s' "$SITREP_MARK_NEAR" ;;
+    *n*) printf '%s' "$SITREP_MARK_NONE" ;;
+    *)   printf '%s' "$SITREP_MARK_WITHIN" ;;
+  esac
+  printf '\tschedule — %s · %s\n' "$clock" "$bt"
 }
 
 # sitrep_prev <root> <plan> -> `<slug><TAB><ratio>` of the newest delivered run under the docs root other than
@@ -6968,7 +7028,7 @@ sitrep_render() {
   local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
   local title_wave title_rel cur bl_at bl_items glyphs s_mark s_text c_mark c_text w_mark w_text
   local gl stp rid desc lat idle_min elapsed i_pct d_pct prev ratio s_med s_decl basis_who width chain cids cmins closes ctext ltext
-  local landed=0 active=0 pending=0 redn=0 total=0 blockers nown approvals
+  local landed=0 active=0 pending=0 redn=0 total=0 blockers nown approvals lmed=""
   now="$(sitrep_now)"
   slug="$(proof_plan_slug "$plan")"
   recdir="$(docs_root "$root")/record/$slug"
@@ -6980,7 +7040,11 @@ sitrep_render() {
   reds="$(sitrep_reds "$rec")"
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
   nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
-  lr="$(landing_report "$rec" "$root" no 2>/dev/null)"; lr1="${lr%%$'\n'*}"
+  lr="$(landing_report "$rec" "$root" yes 2>/dev/null)"; lr1="${lr%%$'\n'*}"
+  # the median ready→landed, landing_report's own figure, once a queue landing is measured (its rows say so)
+  if printf '%s\n' "$lr" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") f = 1 } END { exit !f }'; then
+    lmed="${lr1#*ready-to-landed median=}"; lmed="${lmed%%m *}"
+  fi
 
   # ---- Situation: the rows, their glyphs, their landing times (the reds, approvals and landings first, so
   # each row is judged with them in hand)
@@ -7016,16 +7080,11 @@ $sit
 SITREP_SIT
 
   # ---- Assessment
+  # the schedule mark: the clock and the bar (sitrep_schedule); the declared-size pace feeds the Forecast only
   pace="$(sitrep_pace "$plan" "$root")"
-  if [ -n "$pace" ]; then
-    IFS='	' read -r s_med s_decl ratio <<< "$pace"
-    if awk -v r="$ratio" 'BEGIN { exit !(r <= 1.25) }'; then s_mark="$SITREP_MARK_WITHIN"
-    elif awk -v r="$ratio" 'BEGIN { exit !(r <= 2.0) }'; then s_mark="$SITREP_MARK_NEAR"
-    else s_mark="$SITREP_MARK_OVER"; fi
-    s_text="$s_mark schedule $(sitrep_ratio_fmt "$ratio")× — median ready→landed ${s_med}m over median declared ${s_decl}m"
-  else
-    s_mark="$SITREP_MARK_NONE"; s_text="$s_mark schedule unverified — no landing yet on this run"
-  fi
+  [ -z "$pace" ] || IFS='	' read -r s_med s_decl ratio <<< "$pace"
+  IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$landed" "$total" "$now" "$lmed")"
+  s_text="$s_mark $s_text"
   local lred="${lr1#*· runs: green=}" s12 c_reds c_find
   case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
   case "$lred" in ''|*[!0-9]*) lred=0 ;; esac
