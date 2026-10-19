@@ -3395,11 +3395,13 @@ s72_world() {
   branch: wave/72-fixture")"
   awk '{ print } /^current: / && !d { print "working-branch: wave/72-fixture"; d = 1 }' "$S72P" > "$S72P.tmp" && mv "$S72P.tmp" "$S72P"
   mkdir -p "$S72R/tests" "$S72R/lib"
-  # EVERY SUITE DECLARES BOTH LIB FILES (wave-35 T9; D9): §72 proves the walk, so the cover a commit owes (a suite it
-  # ran that declares each code file it changed) is met by every suite; the calls follow `exit 0`, where the shim's
-  # runs never reach them and lib/anchors.sh still reads them. §FLOOR-COVER (evidence gate) proves the cover itself.
-  for s in a b c d; do printf '#!/bin/bash\nexit 0\n%s file lib/one.sh %s\n%s file lib/two.sh %s\n' anchor "'one'" anchor "'two'" > "$S72R/tests/$s.test.sh"; done
-  printf 'one\n' > "$S72R/lib/one.sh"; printf 'two\n' > "$S72R/lib/two.sh"
+  # EACH COMMIT CHANGES A FILE ITS PROVING SUITES READ (wave-39 T24; D5, AC-18.1): a commit past the floor owes the
+  # suites that read what it changed, so each suite reads exactly the files of the commits §72 proves by its runs:
+  # a reads lib/one.sh and lib/a.sh, b lib/one.sh and lib/b.sh, c lib/c.sh, d lib/d.sh. The reads follow `exit 0`,
+  # where the shim's runs never reach them and lib/anchors.sh still reads them. Evidence-gate §OWED proves the owed set.
+  s72_suite() { { printf '#!/bin/bash\nexit 0\n'; for f in "${@:2}"; do printf '[ -s "$(dirname "$0")/../%s" ]\n' "$f"; done; } > "$S72R/tests/$1.test.sh"; }
+  s72_suite a lib/one.sh lib/a.sh; s72_suite b lib/one.sh lib/b.sh; s72_suite c lib/c.sh; s72_suite d lib/d.sh
+  for s in one two a b c d; do printf '%s\n' "$s" > "$S72R/lib/$s.sh"; done
   ( cd "$S72R" && git add -f "$S72P" tests lib && git commit -qm wb \
     && git worktree add -q -b wave/72-fixture "$S72R/.worktrees/72-fixture" ) >/dev/null 2>&1
   s72_config ""
@@ -3446,7 +3448,7 @@ S72C1="$(s72_land T7 lib/one.sh a.test.sh,b.test.sh)"
 s72_verdict T7 "$S72C1" a.test.sh green; s72_verdict T7 "$S72C1" b.test.sh green
 ( cd "$S72WT" && git commit -q --allow-empty -m 'an empty commit' ) >/dev/null 2>&1
 S72E="$(git -C "$S72WT" rev-parse HEAD)"
-S72C2="$(s57_commit "$S72WT" lib/two.sh 'a hand commit')"
+S72C2="$(s57_commit "$S72WT" lib/c.sh 'a hand commit')"
 expect_regex "72a0 precondition: F, the landing, the empty commit and the hand commit are 40-hex commits" \
   '^[0-9a-f]{40} [0-9a-f]{40} [0-9a-f]{40} [0-9a-f]{40}$' "$S72F $S72C1 $S72E $S72C2"
 expect_eq "72a0b precondition: the walk F..H is the landing, the empty commit and the hand commit, oldest first" \
@@ -3458,8 +3460,8 @@ expect_contains "72a0c precondition: the product's writer recorded T7's Lands-on
 # ---------- (a) a hand commit with no run recorded at it is refused, naming it; a run there proves it ----------
 s72_add floor-F.txt
 s42_unchanged "72a a whole run at F, T7 landed green, a hand commit with nothing run at it" 1 "$S72P"
-expect_contains "72a2 …naming the hand commit, and that no run is recorded at it" \
-  "commit ${S72C2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$OUT"
+expect_contains "72a2 …naming the hand commit, and that c.test.sh, which reads what it changed, has no run" \
+  "commit ${S72C2:0:12} (no landing row) is not proved: c.test.sh has no run recorded at it or after it" "$OUT"
 expect_absent "72a3 …and the landing and the empty commit are not named (beside 72a2 on the same output)" \
   "commit ${S72C1:0:12}" "$OUT"
 s72_run c.test.sh "bash tests/c.test.sh"
@@ -3484,7 +3486,7 @@ expect_eq "72b3 a run of two suites at the working head itself: accepted (exit 0
 expect_eq "72b4 …the proof naming the working head" "$S72C2" "$(s46_last "$S72P" floor)"
 
 # ---------- (c) a fix row after the full run: its red suite and its own, each run green ----------
-S72C3="$(s72_land T8 lib/one.sh d.test.sh,a.test.sh)"
+S72C3="$(s72_land T8 lib/d.sh d.test.sh,a.test.sh)"
 s72_verdict T8 "$S72C3" a.test.sh green
 s72_add floor-F.txt
 s42_unchanged "72c a fix commit whose red suite d has no run recorded" 1 "$S72P"
@@ -3501,9 +3503,9 @@ s72_add floor-F.txt
 expect_eq "72c5 AC-13.3 …d run green at the fix commit, newer than the red: accepted (exit 0)" "0" "$RC"
 
 # ---------- (d) two fix commits: each proved, or the unproved one is named ----------
-S72C4="$(s72_land T9 lib/two.sh b.test.sh)"
+S72C4="$(s72_land T9 lib/b.sh b.test.sh)"
 s72_run b.test.sh "bash tests/b.test.sh"
-S72C5="$(s72_land T10 lib/one.sh c.test.sh)"
+S72C5="$(s72_land T10 lib/c.sh c.test.sh)"
 s72_add floor-F.txt
 s42_unchanged "72d T9 proved by a stamp at its commit, T10 with nothing run" 1 "$S72P"
 expect_contains "72d2 …naming T10's commit" "commit ${S72C5:0:12} (row T10) is not proved: c.test.sh has no run recorded at it or after it" "$OUT"
@@ -3525,7 +3527,7 @@ s72_add floor-F.txt
 expect_eq "72d8 …and b green again at the head proves it (exit 0)" "0" "$RC"
 
 # ---------- (e) the degenerate case: a whole run at the working head ----------
-S72C6="$(s57_commit "$S72WT" lib/two.sh 'a second hand commit')"
+S72C6="$(s57_commit "$S72WT" lib/a.sh 'a second hand commit')"
 s72_whole floor-H.txt "$S72C6"
 s72_add floor-H.txt
 expect_eq "72e AC-4.1 a whole run at the working head is accepted with nothing walked (exit 0)" "0" "$RC"
@@ -3552,7 +3554,7 @@ s72_config "regression-command: true"
 printf 'command: true\n' | regression_fixture "$S72P" "$S72REC/regression-run-F.log" "$S72F" 0 0
 s72_add regression-run-F.log
 expect_eq "72g3 a declared floor's log at F, every later commit proved: accepted (exit 0)" "0" "$RC"
-S72C7="$(s57_commit "$S72WT" lib/one.sh 'a third hand commit')"
+S72C7="$(s57_commit "$S72WT" lib/a.sh 'a third hand commit')"
 s72_add regression-run-F.log
 s42_unchanged "72g4 …and with a hand commit after it unproved" 1 "$S72P"
 expect_contains "72g5 …refused, naming the commit" "commit ${S72C7:0:12} (no landing row) is not proved" "$OUT"
@@ -3576,7 +3578,7 @@ expect_eq "72h5 …and the judge's floor line covered" "covered" "$(s57_of regre
 # A whole run's stamp names `run.sh`. Green, every suite is green at its tree; red, every suite is
 # red there, so each commit owing one, at H or before it, is unproved, unless a newer run of that
 # suite at H is green. The newest record decides: a green whole run after the red proves them again.
-S72H="$(s57_commit "$S72WT" lib/two.sh 'a fourth hand commit')"
+S72H="$(s57_commit "$S72WT" lib/c.sh 'a fourth hand commit')"
 s72_run c.test.sh "bash tests/c.test.sh"
 expect_eq "72i precondition: the floor proof at F, c run green at the new head H: proof_state covered at H" \
   "$(printf 'covered\t%s' "$S72H")" "$(s72_state)"

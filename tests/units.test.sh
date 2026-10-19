@@ -3918,19 +3918,23 @@ expect_eq "FS.1b …and a proof at the head walks no commit" "0" "$(fs_count)"
 fs_commit lib/one.sh 'one, changed'
 FS_X1="$(fs_git rev-parse HEAD)"
 expect_eq "FS.2 a commit past the floor proof with no run recorded at it: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
+# WORDED BY WAVE-39 T24 (D5, AC-18.1): the commit owes the suites that read what it changed, a and b, each named.
 expect_eq "FS.2b …and its wait names the commit, what it lacks and the way out" \
-  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X1:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" "$(fs_why)"
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X1:0:12} (no landing row) is not proved: a.test.sh has no run recorded at it or after it; b.test.sh has no run recorded at it or after it${FS_OUT}" "$(fs_why)"
 fs_stamp a.test.sh 0 2026-10-04T12:01:00Z
-expect_eq "FS.2c AC-3.3 AC-13.4 a green run recorded at it: the floor stands, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.2b2 …a green run of a alone leaves b, which reads lib/one.sh too, owed" \
+  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X1:0:12} (no landing row) is not proved: b.test.sh has no run recorded at it or after it${FS_OUT}" "$(fs_why)"
+fs_stamp b.test.sh 0 2026-10-04T12:01:30Z
+expect_eq "FS.2c AC-3.3 AC-13.4 green runs of both readers recorded at it: the floor stands, integrate is ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
 expect_eq "FS.2d …and no wait is told for it" "" "$(fs_why)"
 
 # AC-3.4, THE CRITERION'S OWN PLANT: a new file under a directory no suite names, no suite run.
+# INVERTED BY WAVE-39 T24 (D5, AC-18.1): a file no suite reads changes no suite's read set, so the commit is proved by
+# the runs before it; wave-26 AC-3.4 owed it a whole run. The release entry records the reversal.
 fs_commit newdir/x.sh 'new'
 FS_X2="$(fs_git rev-parse HEAD)"
-expect_eq "FS.3 AC-3.4 a new file under a directory no suite names: integrate is NOT ready" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_eq "FS.3b …and its wait names that commit, not the proved one before it" \
-  "${FS_LEAD} ${FS_H0:0:12}, commit ${FS_X2:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
-  "$(fs_why)"
+expect_eq "FS.3 D5 AC-18.1 a new file under a directory no suite names: integrate is ready (inverted from AC-3.4)" "T3" "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "FS.3b …and no wait is told for it" "" "$(fs_why)"
 expect_eq "FS.3c …while the extractor reads a real line: the review proof is no wait (paired positive)" "" \
   "$(call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1')"
 expect_eq "FS.3d units_held names no hold for it either: it waits on a read, not on the world" "" \
@@ -3944,6 +3948,7 @@ expect_eq "FS.4 the way out: a floor proof at the new head and integrate is read
 # A RED RUN RECORDED AT A COMMIT: the newest run at it decides.
 fs_commit lib/one.sh 'one, changed again'
 FS_X3="$(fs_git rev-parse HEAD)"
+fs_stamp a.test.sh 0 2026-10-04T12:01:50Z
 fs_stamp b.test.sh 1 2026-10-04T12:02:00Z
 expect_eq "FS.5 a commit whose only recorded run is red: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
 expect_contains "FS.5b …saying which suite is red where, from the newest floor proof" \
@@ -3957,8 +3962,8 @@ fs_git checkout -q -b other-work 2>/dev/null; fs_commit lib/one.sh 'one, from ou
 fs_git checkout -q wave/99-fs 2>/dev/null; fs_git merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
 FS_M="$(fs_git rev-parse HEAD)"
 expect_eq "FS.6 a merge from outside the run: integrate waits" "" "$(call units_ready "$FS_PLAN" 8)"
-expect_contains "FS.6b …naming the merge, at which no run is recorded" \
-  "commit ${FS_M:0:12} (no landing row) is not proved: no suite run is recorded at it" "$(fs_why)"
+expect_contains "FS.6b …naming the merge, at which no run of a suite that reads lib/one.sh is recorded" \
+  "commit ${FS_M:0:12} (no landing row) is not proved: a.test.sh has no run recorded at it or after it" "$(fs_why)"
 fs_prove regression
 expect_eq "FS.6c …and a floor proof at the merge releases it" "T3" "$(call units_ready "$FS_PLAN" 8)"
 
@@ -3997,7 +4002,7 @@ expect_eq "FS.9 integrate landed: nothing is ready" "" "$(PATH="$FS_SHIM:$PATH" 
 expect_eq "FS.9b …and with no open row reading proof:regression the state is not asked" "0" "$(fs_count)"
 fs_plan 8 pending; fs_prove regression; fs_prove review
 FS_H4="$(fs_git rev-parse HEAD)"
-fs_commit newdir/w.sh 'pending again'
+fs_commit lib/one.sh 'pending again'
 FS_X4="$(fs_git rev-parse HEAD)"
 : > "$FS_COUNT"
 PATH="$FS_SHIM:$PATH" call units_edges "$FS_PLAN" >/dev/null
@@ -4014,8 +4019,8 @@ expect_eq "FS.9e …and the ready set over the same plan asks the state once: as
 # THE STATE'S WORDS: covered or uncovered, and the reason names what is lacking (A-orch-23).
 expect_eq "FS.10 proof_state's first field over an unproved commit is uncovered" "uncovered" \
   "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
-expect_eq "FS.11 …and integrate's wait carries the reason: the commit, and that no run is recorded at it" \
-  "${FS_LEAD} ${FS_H4:0:12}, commit ${FS_X4:0:12} (no landing row) is not proved: no suite run is recorded at it${FS_OUT}" \
+expect_eq "FS.11 …and integrate's wait carries the reason: the commit, and each suite reading what it changed with no run" \
+  "${FS_LEAD} ${FS_H4:0:12}, commit ${FS_X4:0:12} (no landing row) is not proved: a.test.sh has no run recorded at it or after it; b.test.sh has no run recorded at it or after it${FS_OUT}" \
   "$(fs_why)"
 fs_prove regression
 expect_eq "FS.11b …and a floor proof at the head walks nothing: covered, ready" "T3" "$(call units_ready "$FS_PLAN" 8)"
