@@ -528,8 +528,10 @@ usage() {  # [message]
 }
 
 [ $# -ge 1 ] || usage "a verb is required."
+# THE VERB'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1, D2): the line after VERB is read, before both case blocks,
+# lib/alias.sh names the new one.
 VERB="$1"; shift
-declare -F alias_read >/dev/null 2>&1 && { alias_read verb "$VERB"; VERB="$ALIAS_TOKEN"; }   # THE VERB'S OLD SPELLING (wave-38 T8; REQ-9): lib/alias.sh, once, before both case blocks
+if declare -F alias_gone >/dev/null 2>&1 && alias_gone verb "$VERB"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing was run."; exit 1; fi
 
 # `--report-only` IS THE ONE FLAG MOST VERBS TAKE, and `adopt` and `sweep` are the two that
 # take it — the same word for the same promise on both, so an operator who has learned it
@@ -715,21 +717,22 @@ case "$VERB" in
   # event for it at a commit on the working branch (`born_floor_backing`), and writes ` born: floor <suite> of=floor`
   # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
-    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_FLOOR=""
+    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
     case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
-      case "$TA_BORN" in *:*) declare -F alias_read >/dev/null 2>&1 && { alias_read born-operand "${TA_BORN%%:*}:"; TA_BORN="$ALIAS_TOKEN${TA_BORN#*:}"; } ;; esac   # THE OPERAND'S OLD SPELLING (wave-38 T8)
+      # THE OPERAND'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the row is not written.
+      case "$TA_BORN" in *:*) if declare -F alias_gone >/dev/null 2>&1 && alias_gone born-operand "${TA_BORN%%:*}:"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi ;; esac
       case "$TA_BORN" in
         'review S'[1-4]' on'|'review S'[1-4]' off') : ;;
         regression:*)
-          TA_BORN_FLOOR="${TA_BORN#regression:}"; TA_BORN=""
-          case "$TA_BORN_FLOOR" in
-            *[!A-Za-z0-9._-]*|.test.sh|'') TA_BORN_FLOOR="" ;;
+          TA_BORN_SUITE="${TA_BORN#regression:}"; TA_BORN=""
+          case "$TA_BORN_SUITE" in
+            *[!A-Za-z0-9._-]*|.test.sh|'') TA_BORN_SUITE="" ;;
             *.test.sh) : ;;
-            *) TA_BORN_FLOOR="" ;;
+            *) TA_BORN_SUITE="" ;;
           esac
-          [ -n "$TA_BORN_FLOOR" ] || usage "task-add: --born '${*: -1}' names no suite; write regression:<suite>, the suite's file name (<name>.test.sh) whose regression red the row fixes." ;;
+          [ -n "$TA_BORN_SUITE" ] || usage "task-add: --born '${*: -1}' names no suite; write regression:<suite>, the suite's file name (<name>.test.sh) whose regression red the row fixes." ;;
         *)
           TA_BORN_IDS="$TA_BORN"; TA_BORN=""
           case "$TA_BORN_IDS" in
@@ -750,7 +753,8 @@ case "$VERB" in
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
-    declare -F alias_cell >/dev/null 2>&1 && { alias_cell reads "$TA_READS"; TA_READS="$ALIAS_TOKEN"; }   # A TYPED OLD READS TOKEN (wave-38 T8)
+    # A TYPED OLD READS TOKEN IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the row is not written.
+    if declare -F alias_gone_cell >/dev/null 2>&1 && alias_gone_cell reads "$TA_READS"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi
     ;;
   # THE ONE VERB WITH REPEATABLE FLAGS (wave-20 T9, REQ-4; spec D4). Each `--files+`,
   # `--suites+` and `--reexec+` names ONE addition and may be given again; `--reason` is
@@ -817,12 +821,13 @@ case "$VERB" in
       usage "$VERB takes an id and at least one <column>=<value>."
     fi
     PV_ARGS=("$@")
-    # A TYPED proof:floor IN A reads= CELL (wave-38 T8; REQ-9) is written in the new spelling, with its deprecation line.
-    if [ "$VERB" = task-set ] && declare -F alias_cell >/dev/null 2>&1; then
+    # A TYPED OLD READS TOKEN IN A reads= CELL IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the plan is unchanged.
+    if [ "$VERB" = task-set ] && declare -F alias_gone_cell >/dev/null 2>&1; then
       for _pv_i in "${!PV_ARGS[@]}"; do
-        case "${PV_ARGS[$_pv_i]}" in reads=*) alias_cell reads "${PV_ARGS[$_pv_i]#reads=}"; PV_ARGS[$_pv_i]="reads=$ALIAS_TOKEN" ;; esac
+        case "${PV_ARGS[$_pv_i]}" in
+          reads=*) if alias_gone_cell reads "${PV_ARGS[$_pv_i]#reads=}"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi ;;
+        esac
       done
-      set -- "${PV_ARGS[@]}"
     fi
     # MANY ROWS, ONE TRANSACTION (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-6). `task-set` takes groups,
     # `<id>[,<id>…] <col>=<val>…`, joined by `--`: each group's cells are set on each of its rows, and the
@@ -1017,7 +1022,8 @@ case "$VERB" in
     # SEVERAL LOGS ON ONE LINE (wave-36 T35; D13, AC-7.10): a floor may be the logs of several runners, each its own
     # operand after the first, newline-joined in PF_EVIDS (a path holding a line break is refused below, by name).
     PF_KIND="$1"; PF_EVID="$2"; PF_EVIDS="$2"; PF_QUESTION=""; PF_READER=""; shift 2
-    declare -F alias_read >/dev/null 2>&1 && { alias_read proof-kind "$PF_KIND"; PF_KIND="$ALIAS_TOKEN"; }   # THE KIND'S OLD SPELLING (wave-38 T8)
+    # THE KIND'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1): no proof line is written.
+    if declare -F alias_gone >/dev/null 2>&1 && alias_gone proof-kind "$PF_KIND"; then die "REFUSED — $ALIAS_GONE_SAID. No proof was written."; exit 1; fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --question) [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_QUESTION" ] || usage "$PF_USAGE"; PF_QUESTION="$2"; shift 2 ;;
@@ -9972,16 +9978,16 @@ EOF
     # A FLOOR-BORN MARKER NAMES ITS RED (wave-36 T42; D9, Δ8): the marker is admitted only with a red the machine
     # recorded behind it (`born_floor_backing`), and it records which, ` of=floor` or ` of=standing@<12-hex>`.
     TA_BORN_OF=""
-    if [ -n "$TA_BORN_FLOOR" ]; then
-      if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_FLOOR"; then
-        die "task-add refused — born: regression $TA_BORN_FLOOR names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_FLOOR (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_FLOOR at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+    if [ -n "$TA_BORN_SUITE" ]; then
+      if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_SUITE"; then
+        die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
         exit 1
       fi
       TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"
     fi
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_FLOOR:+regression $TA_BORN_FLOOR of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_SUITE:+regression $TA_BORN_SUITE of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -9999,7 +10005,7 @@ EOF
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
-    [ -z "$TA_BORN_FLOOR" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_FLOOR), backed by of=$TA_BORN_OF: its landing holds every reading's cover (D9), and it counts against no fix-cap."
+    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every reading's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
@@ -12718,9 +12724,13 @@ RC_TAGS
   # (`proof_approved`). The bash wall's full-tree refusal names this verb as the whole run's path (lib/walls.sh).
   regression-run)
     FR_ROOT="$(project_root "$PWD")"
-    # THE COMMAND'S KEY IS regression-command: (wave-38 T8; REQ-9): lib/alias.sh `alias_config` reads it, and the old floor: with
-    # its deprecation line.
-    FR_CMD=""; declare -F alias_config >/dev/null 2>&1 && { alias_config "$FR_ROOT" config ""; FR_CMD="$ALIAS_VALUE"; }
+    # THE COMMAND'S KEY IS regression-command: and no other (wave-39 T18; REQ-13 AC-13.1, D2): the old key is refused, naming it
+    # (lib/alias.sh `alias_gone_text config`), even beside the new one, never read past.
+    if declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text config "$(cat "$FR_ROOT/.bionic/config.yaml" 2>/dev/null)"; then
+      die "REFUSED — $ALIAS_GONE_SAID. Nothing was run."
+      exit 1
+    fi
+    FR_CMD="$(config_value "$FR_ROOT" regression-command "" 2>/dev/null)"
     if ! { declare -F proof_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_state >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
@@ -12772,14 +12782,21 @@ RC_TAGS
       FR_LAST="$(proof_last "$PV_PLAN" regression)"
       [ -z "$FR_LAST" ] || FR_FIRST="the regression proof at ${FR_LAST:0:12}"
       if [ -z "$FR_FIRST" ]; then
-        # THE GLOB MATCHES EVERY SPELLING OF THE LOG'S NAME (wave-38 T8; REQ-9): a run 1.20.0 logged as floor-run-<sha>.log is
-        # still the first whole run (lib/alias.sh `alias_spellings log`).
-        for _fr_p in $(alias_spellings log 2>/dev/null || printf 'regression-run-'); do
+        # THE GLOB READS THE LOG'S NEW NAME ONLY (wave-39 T18; REQ-13 AC-13.1, D2): with no whole-run log under the new name, one
+        # under the 1.20.0 name is refused, naming the new one (lib/alias.sh `alias_gone_names log`), never counted, never passed over.
+        for _fr_l in "$FR_DOCS/record/$FR_WAVE/regression-run-"*.log; do
+          [ -f "$_fr_l" ] || continue
+          [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
+          FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
+        done
+        for _fr_p in $(alias_gone_names log 2>/dev/null); do
           [ -z "$FR_FIRST" ] || break
           for _fr_l in "$FR_DOCS/record/$FR_WAVE/$_fr_p"*.log; do
             [ -f "$_fr_l" ] || continue
             [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
-            FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
+            alias_gone_say log
+            die "REFUSED — ${_fr_l#"$FR_DOCS"/}: $ALIAS_GONE_SAID, the one name the second-run glob reads; copy the log to that name, and the run it holds counts as the first whole run. Nothing was run."
+            exit 1
           done
         done
       fi

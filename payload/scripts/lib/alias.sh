@@ -1,64 +1,62 @@
 #!/bin/bash
-# payload/scripts/lib/alias.sh — THE REGRESSION'S OLD SPELLINGS, MAPPED ONCE (epic-23 wave-38 T8; REQ-9, D6).
+# payload/scripts/lib/alias.sh — THE REGRESSION'S OLD SPELLINGS: WHAT IS STILL READ, AND WHAT IS REFUSED
+# (epic-23 wave-38 T8, REQ-9, D6; wave-39 T18, REQ-13 AC-13.1, D2).
 #
 # WHAT IT OWNS. Until 1.21.0 the full regression's verbs, keys and record tokens spelled "floor". They spell
-# "regression" now, and each old spelling is an alias for one release: it still works, and a person or a config
-# that types it is told once, on stderr,
+# "regression" now. Wave-38 kept each old spelling working for one release; 1.22.0 keeps only the half a plan carries.
+# A rename never invalidates a record already written (D2): writers drop the old word, readers keep it, and a spelling
+# that is no longer read is REFUSED, naming the new one, never accepted silently.
 #
-#     deprecated: <old> is <new>; the old spelling works until 1.22.0
+# TWO TABLES, ONE FOR EACH HALF. A spelling is either a token a 1.20.0 TOOL wrote into a plan, or one a PERSON types or
+# a config file carries (A-T8-1). Telling them apart is the whole design:
 #
-# ALIAS_MAP below is the one table of pairs. Every reader asks it through a function of this file at the one seam
-# its token has, so the old and the new spelling reach one implementation (tests/regression-rename.test.sh §AGREE):
+#   ALIAS_MAP   the plan-read rows, still read, silently: a plan is a record, so the plan still judges and nobody is
+#               told to edit it. They are read inside an awk program through `alias_awk_norm`/`alias_alt`, or by
+#               `alias_read`/`alias_token`, and never print a word.
+#                 kind      floor     -> regression       a proof line's kind=, lib/proof.sh proof_fields (alias_awk_norm)
+#                 reads     proof:floor -> proof:regression  a reads cell the plan carries, lib/units.sh (alias_awk_norm)
+#                 born      floor     -> regression       a born marker, lib/units.sh and lib/proof.sh (alias_alt)
+#                 born-of   floor     -> regression       the marker's backing, written only
+#   ALIAS_GONE  the typed and config rows, refused: each is asked of a function below at the one seam its token has, and
+#               answers with a sentence naming the new spelling, `<old as written> is gone; write <new as written>`.
+#                 verb          floor-run      -> regression-run      hooks/session-poker.sh, after `VERB="$1"`
+#                 proof-kind    floor          -> regression          hooks/session-poker.sh, after `PF_KIND="$1"`
+#                 born-operand  floor:         -> regression:         hooks/session-poker.sh task-add --born
+#                 reads         proof:floor    -> proof:regression    a reads cell TYPED to task-add or task-set reads=
+#                 config        floor          -> regression-command  .bionic/config.yaml, read by regression-run
+#                 log           floor-run-     -> regression-run-     the whole-run log's name, the second-run glob
+#                 rigor-key     rigor-floor    -> rigor-minimum       hooks/canonical-sdlc-governing-skill.sh, twice
 #
-#     verb          floor-run           regression-run       hooks/session-poker.sh, after `VERB="$1"`
-#     proof-kind    floor               regression           hooks/session-poker.sh, after `PF_KIND="$1"`
-#     config        floor               regression-command   hooks/session-poker.sh regression-run (alias_config)
-#     kind          floor               regression           lib/proof.sh proof_fields (alias_awk_norm)
-#     reads         proof:floor         proof:regression     lib/units.sh's tokenizer and validator (alias_awk_norm)
-#     born          floor               regression           lib/units.sh units_born_marks and lib/proof.sh (alias_alt)
-#     born-operand  floor:              regression:          hooks/session-poker.sh task-add --born
-#     born-of       floor               regression           the marker's backing, written only
-#     log           floor-run-          regression-run-      hooks/session-poker.sh's second-run glob (alias_spellings)
-#     rigor-key     rigor-floor         rigor-minimum        hooks/canonical-sdlc-governing-skill.sh (alias_keyed)
-#
-# TYPED AND WRITTEN ARE TOLD APART (A-T8-1). A spelling a person types (a verb, an operand, a reads cell given to a
-# verb) or a config file carries is read with `alias_read`/`alias_cell`/`alias_config`/`alias_keyed`, which print the
-# deprecation line. A token a 1.20.0 tool wrote into a plan (a proof line, a reads cell, a born marker) is read inside
-# an awk program through `alias_awk_norm`/`alias_alt`, silently: the plan still judges, and every hook that reads
-# the plan would otherwise print the line on every call. What is written from now on carries the new spelling.
-#
-# ONCE PER PROCESS, PER SPELLING. `_ALIAS_SAID` remembers the old spellings already reported. A reader run inside
-# `$( … )` reports in that subshell, so the seams call `alias_read` in the shell that runs the verb.
+# `reads` is in both tables: the same token is silent in a plan and refused in a person's typing.
+# Every seam asks the one table (tests/regression-rename.test.sh §AGREE), and no line of production code outside this
+# file spells an old token.
 #
 # Sourced, never executed. bash 3.2: no associative arrays.
 
-ALIAS_UNTIL="1.22.0"
 # <kind>|<old>|<new>|<old as written>|<new as written>
-ALIAS_MAP='verb|floor-run|regression-run|floor-run|regression-run
-proof-kind|floor|regression|proof-add floor|proof-add regression
-config|floor|regression-command|floor:|regression-command:
-kind|floor|regression|kind=floor|kind=regression
+ALIAS_MAP='kind|floor|regression|kind=floor|kind=regression
 reads|proof:floor|proof:regression|proof:floor|proof:regression
 born|floor|regression|born: floor|born: regression
+born-of|floor|regression|of=floor|of=regression'
+
+ALIAS_GONE='verb|floor-run|regression-run|floor-run|regression-run
+proof-kind|floor|regression|proof-add floor|proof-add regression
 born-operand|floor:|regression:|--born floor:|--born regression:
-born-of|floor|regression|of=floor|of=regression
+reads|proof:floor|proof:regression|proof:floor|proof:regression
+config|floor|regression-command|floor:|regression-command:
 log|floor-run-|regression-run-|floor-run-<sha>.log|regression-run-<sha>.log
 rigor-key|rigor-floor|rigor-minimum|rigor-floor:|rigor-minimum:'
-_ALIAS_SAID="${_ALIAS_SAID:-}"
 
-# alias_read <kind> <value> -> ALIAS_TOKEN, the value's canonical spelling: the new one for an old spelling of
-# <kind>, the value itself otherwise. An old spelling prints its deprecation line to stderr, once per process.
+# --------------------------------------------------------------------- the plan-read rows: silent
+
+# alias_read <kind> <value> -> ALIAS_TOKEN, the value's canonical spelling: the new one for an old spelling of <kind> in
+# ALIAS_MAP, the value itself otherwise. Silent.
 alias_read() {
   local k="${1:-}" v="${2:-}" mk mo mn mos mns
   ALIAS_TOKEN="$v"
   while IFS='|' read -r mk mo mn mos mns; do
     [ "$mk" = "$k" ] && [ "$mo" = "$v" ] || continue
     ALIAS_TOKEN="$mn"
-    case " $_ALIAS_SAID " in
-      *" $k:$mo "*) : ;;
-      *) _ALIAS_SAID="${_ALIAS_SAID:+$_ALIAS_SAID }$k:$mo"
-         printf 'deprecated: %s is %s; the old spelling works until %s\n' "$mos" "$mns" "$ALIAS_UNTIL" >&2 ;;
-    esac
     return 0
   done <<ALIAS_MAP_EOF
 $ALIAS_MAP
@@ -72,7 +70,8 @@ alias_token() {
   printf '%s\n' "$ALIAS_TOKEN"
 }
 
-# alias_spellings <kind> -> the new spelling, then each old one, one per line: what a glob or a key reader walks.
+# alias_spellings <kind> -> the new spelling, then each old one, one per line, of a plan-read row: what a reader's
+# pattern walks. Nothing for a kind that has no plan-read row.
 alias_spellings() {
   local k="${1:-}" mk mo mn mos mns first=""
   while IFS='|' read -r mk mo mn mos mns; do
@@ -89,63 +88,6 @@ alias_alt() {
   alias_spellings "${1:-}" | paste -sd'|' -
 }
 
-# alias_cell <kind> <cell> -> ALIAS_TOKEN, a comma-separated cell with each token read through alias_read (a `live:`
-# prefix kept); a cell that carries no old token comes back byte for byte, one that does is joined with `, `.
-alias_cell() {
-  local k="${1:-}" cell="${2:-}" out="" t p changed="" rest
-  rest="$cell"
-  while :; do
-    t="${rest%%,*}"
-    t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
-    p=""; case "$t" in live:*) p="live:"; t="${t#live:}" ;; esac
-    alias_read "$k" "$t"
-    [ "$ALIAS_TOKEN" = "$t" ] || changed=1
-    [ -z "$p$ALIAS_TOKEN" ] || out="${out:+$out, }$p$ALIAS_TOKEN"
-    case "$rest" in *,*) rest="${rest#*,}" ;; *) break ;; esac
-  done
-  if [ -n "$changed" ]; then ALIAS_TOKEN="$out"; else ALIAS_TOKEN="$cell"; fi
-}
-
-# alias_config <root> <kind> [<default>] -> ALIAS_VALUE, the value of the key <kind> names in <root>'s
-# .bionic/config.yaml, read by lib/roots.sh `config_value`: the new key first, then each old key, whose value is read
-# with its deprecation line; <default> when no spelling is written.
-alias_config() {
-  local root="${1:-}" k="${2:-}" key v
-  ALIAS_VALUE="${3:-}"
-  if ! declare -F config_value >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/roots.sh" >/dev/null 2>&1 || return 0
-  fi
-  while IFS= read -r key; do
-    [ -n "$key" ] || continue
-    v="$(config_value "$root" "$key" "" 2>/dev/null)"
-    [ -n "$v" ] || continue
-    alias_read "$k" "$key"; ALIAS_VALUE="$v"; return 0
-  done <<ALIAS_KEYS_EOF
-$(alias_spellings "$k")
-ALIAS_KEYS_EOF
-  return 0
-}
-
-# alias_keyed <kind> <text> -> ALIAS_VALUE, the value on the first `<key>:` line of <text> (a file's or a
-# frontmatter's lines), its trailing blanks and CR dropped: the new key first, then each old key, read with its
-# deprecation line; empty when no spelling is written.
-alias_keyed() {
-  local k="${1:-}" text="${2:-}" key v
-  ALIAS_VALUE=""
-  while IFS= read -r key; do
-    [ -n "$key" ] || continue
-    v="$(printf '%s\n' "$text" | awk -v k="$key" '
-      { sub(/\r$/, "") }
-      index($0, k ":") == 1 { v = substr($0, length(k) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }')"
-    [ -n "$v" ] || continue
-    alias_read "$k" "$key"; ALIAS_VALUE="$v"; return 0
-  done <<ALIAS_KEYS_EOF
-$(alias_spellings "$k")
-ALIAS_KEYS_EOF
-  return 0
-}
-
 # alias_awk_norm <kind> <awk variable> -> awk statements, for an awk program's text, that set the variable to its
 # canonical spelling when it holds an old one of <kind>: the map's rows written out, no function, so a program may
 # paste them anywhere and as often as it likes. For `reads`, the `live:` form of each token too. Silent: the awk
@@ -160,4 +102,92 @@ alias_awk_norm() {
 $ALIAS_MAP
 ALIAS_MAP_EOF
   printf ' '
+}
+
+# --------------------------------------------------------------------- the typed and config rows: refused
+
+ALIAS_GONE_SAID=""
+
+# _alias_gone_row <kind> <old> -> exit 0 and ALIAS_GONE_SAID set to the row's sentence when <old> is a gone spelling of
+# <kind>; exit 1 and ALIAS_GONE_SAID empty otherwise. The one place a sentence is made.
+_alias_gone_row() {
+  local k="${1:-}" v="${2:-}" mk mo mn mos mns
+  ALIAS_GONE_SAID=""
+  [ -n "$v" ] || return 1
+  while IFS='|' read -r mk mo mn mos mns; do
+    [ "$mk" = "$k" ] && [ "$mo" = "$v" ] || continue
+    ALIAS_GONE_SAID="$mos is gone; write $mns"
+    return 0
+  done <<ALIAS_GONE_EOF
+$ALIAS_GONE
+ALIAS_GONE_EOF
+  return 1
+}
+
+# alias_gone <kind> <value> -> exit 0 and ALIAS_GONE_SAID, the refusal's sentence naming the new spelling, when <value>
+# is the old spelling of <kind> (a verb, a proof kind, a born operand); exit 1, nothing set, otherwise.
+alias_gone() {
+  _alias_gone_row "${1:-}" "${2:-}"
+}
+
+# alias_gone_say <kind> -> exit 0 and ALIAS_GONE_SAID, the sentence of <kind>'s first row, for a caller that found the
+# old spelling by its own means (a log's name found by a glob).
+alias_gone_say() {
+  local k="${1:-}" mk mo mn mos mns
+  ALIAS_GONE_SAID=""
+  while IFS='|' read -r mk mo mn mos mns; do
+    [ "$mk" = "$k" ] || continue
+    ALIAS_GONE_SAID="$mos is gone; write $mns"
+    return 0
+  done <<ALIAS_GONE_EOF
+$ALIAS_GONE
+ALIAS_GONE_EOF
+  return 1
+}
+
+# alias_gone_names <kind> -> the old spellings of <kind>, one per line: what a glob walks to find what is refused.
+alias_gone_names() {
+  local k="${1:-}" mk mo mn mos mns
+  while IFS='|' read -r mk mo mn mos mns; do
+    [ "$mk" = "$k" ] && printf '%s\n' "$mo"
+  done <<ALIAS_GONE_EOF
+$ALIAS_GONE
+ALIAS_GONE_EOF
+  return 0
+}
+
+# alias_gone_cell <kind> <cell> -> as alias_gone, for a comma-separated cell a person typed: each token trimmed, a
+# `live:` prefix dropped. Exit 0 and the sentence at the first token that is gone.
+alias_gone_cell() {
+  local k="${1:-}" rest="${2:-}" t
+  ALIAS_GONE_SAID=""
+  while :; do
+    t="${rest%%,*}"
+    t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
+    t="${t#live:}"
+    _alias_gone_row "$k" "$t" && return 0
+    case "$rest" in *,*) rest="${rest#*,}" ;; *) break ;; esac
+  done
+  return 1
+}
+
+# alias_gone_text <kind> <text> -> exit 0 and the sentence when a line of <text> (a config file's, a frontmatter's)
+# opens with the old key of <kind>, `<key>:`; exit 1, nothing set, otherwise. The key is matched whole, so a longer key
+# that begins with the same word is another key. The value is never read.
+alias_gone_text() {
+  local k="${1:-}" text="${2:-}" mk mo mn mos mns
+  ALIAS_GONE_SAID=""
+  while IFS='|' read -r mk mo mn mos mns; do
+    [ "$mk" = "$k" ] || continue
+    if printf '%s\n' "$text" | awk -v k="$mo" '
+        { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
+        index(t, k) == 1 { r = substr(t, length(k) + 1); sub(/^[ \t]+/, "", r); if (substr(r, 1, 1) == ":") { found = 1; exit } }
+        END { exit found ? 0 : 1 }'; then
+      ALIAS_GONE_SAID="$mos is gone; write $mns"
+      return 0
+    fi
+  done <<ALIAS_GONE_EOF
+$ALIAS_GONE
+ALIAS_GONE_EOF
+  return 1
 }

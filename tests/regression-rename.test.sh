@@ -141,7 +141,7 @@ AV_W="$(git -C "$RAV/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 AV_REC="$RAV/.bionic/docs/record/wave-01-fixture"; mkdir -p "$AV_REC"
 AV_STUB="$TMPROOT/av-regression.sh"
 printf '#!/bin/bash\necho "Gating: 4 passed, 0 failed"\nexit 0\n' > "$AV_STUB"
-av_logs() { ls "$AV_REC"/*.log 2>/dev/null | awk 'END { print NR + 0 }'; }   # -> the logs the record holds
+av_logs() { ls "$AV_REC"/regression-run-*.log "$AV_REC"/floor-run-*.log 2>/dev/null | awk 'END { print NR + 0 }'; }   # -> the run logs the record holds, by either name
 av_proofs() { /usr/bin/grep -c '^proved: ' "$PAV" | tr -d ' '; }              # -> the proof lines the plan holds
 expect_regex "GV-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$AV_W"
 
@@ -209,13 +209,13 @@ poke "$RAB" task-add T7 4 build 'fix the other red' bionic:implementor '—' 30 
 expect_eq "GB-2 task-add --born floor:b.test.sh is refused (exit 1)" "1" "$RC"
 expect_contains "GB-2b …the refusal names the new operand" "--born floor: is gone; write --born regression:" "$OUT"
 expect_eq "GB-2c …and wrote no row: T6's is the one line, T7 has none" "1|0" "$(ab_row T6)|$(ab_row T7)"
-poke "$RAB" task-add T8 4 build 'reads the regression' bionic:implementor '—' 30 REQ-5 'lib/e.sh' 'proof:regression, head'
+poke "$RAB" task-add T8 4 test 'reads the regression' bionic:implementor '—' 30 REQ-5 '—' 'proof:regression, head'
 expect_eq "GB-3 task-add with the reads cell 'proof:regression, head' exits 0" "0" "$RC"
 expect_contains "GB-3b …and the row's cell carries it as typed" "| proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
-poke "$RAB" task-add T9 4 build 'reads the old word' bionic:implementor '—' 30 REQ-5 'lib/f.sh' 'proof:floor, head'
+poke "$RAB" task-add T9 4 test 'reads the old word' bionic:implementor '—' 30 REQ-5 '—' 'proof:floor, head'
 expect_eq "GB-4 task-add with the reads cell 'proof:floor, head' is refused (exit 1)" "1" "$RC"
 expect_contains "GB-4b …naming the new token" "proof:floor is gone; write proof:regression" "$OUT"
-poke "$RAB" task-add T9 4 build 'reads the old word live' bionic:implementor '—' 30 REQ-5 'lib/f.sh' 'live:proof:floor'
+poke "$RAB" task-add T9 4 test 'reads the old word live' bionic:implementor '—' 30 REQ-5 '—' 'live:proof:floor'
 expect_eq "GB-4c …the live: form too (exit 1), naming the new token" "1|1" \
   "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
 expect_eq "GB-4d …and no T9 row was written, beside T8's, which was" "0|1" "$(/usr/bin/grep -c '^| T9 |' "$PAB" | tr -d ' ')|$(/usr/bin/grep -c '^| T8 |' "$PAB" | tr -d ' ')"
@@ -223,9 +223,9 @@ poke "$RAB" task-set T8 reads=proof:floor
 expect_eq "GB-5 task-set T8 reads=proof:floor is refused (exit 1), naming the new token" "1|1" \
   "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
 expect_contains "GB-5b …and T8's cell is as it was" "| proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
-poke "$RAB" task-set T8 reads=proof:regression
-expect_eq "GB-5c task-set T8 reads=proof:regression works (exit 0)" "0" "$RC"
-expect_contains "GB-5d …and writes the cell" "| proof:regression |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
+poke "$RAB" task-set T8 'reads=approval:plan, proof:regression, head'
+expect_eq "GB-5c task-set T8 reads='approval:plan, proof:regression, head' works (exit 0)" "0" "$RC"
+expect_contains "GB-5d …and writes the cell" "| approval:plan, proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
 POKE_BOUND="$AB_BOUND_WAS"
 
 # ============================================================
@@ -336,7 +336,7 @@ expect_eq "AG-4 the born operand is refused once, in task-add's --born parse" "1
 expect_eq "AG-5 the config's old key is refused once, and the regression's command is read once, by its one key" "1|1" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_text config' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c 'config_value "\$FR_ROOT" regression-command' | tr -d ' ')"
 expect_eq "AG-6 the second-run glob walks the new log name only, and the old one is refused from the map's names" "1|1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_names log' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c -F 'record/$FR_WAVE/regression-run-' | tr -d ' ')"
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_names log' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c -F 'regression-run-"*.log; do' | tr -d ' ')"
 expect_eq "AG-6b a typed reads cell is refused at its two sites, task-add and task-set reads=" "2" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_cell reads' | tr -d ' ')"
 expect_eq "AG-7 proof_fields normalises the kind through the map, written once at load and pasted once" "1|1" \
