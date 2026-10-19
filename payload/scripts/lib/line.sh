@@ -1120,7 +1120,9 @@ _line_load_anchors() {
 }
 
 # THE PROOF FACT'S KEY (wave-39 T1; D5, D8; ADR-061): a verdict is keyed by what its suite read at the commit
-# judged, `reads=<lib/anchors.sh reads_hash>`, never by the commit. _LINE_RH remembers the keys this carrier has
+# judged, `reads=<lib/anchors.sh reads_hash>`, never by the commit. The key is anchors.sh's, narrowed where the
+# suite declares (wave-39 T40): line.sh derives none of its own, so the landing, the owed set and the regression
+# facts read one key space. _LINE_RH remembers the keys this carrier has
 # read, `<commit> TAB <suite> TAB <key>` per line; _LINE_RH_SUITES names the suites to read with any one asked
 # (the entry's), so a commit's read set is derived once. Fill it in the carrier's own shell, never inside
 # `$( )`, where what it remembers would be lost; read it anywhere.
@@ -1135,7 +1137,7 @@ _line_reads_fill() {  # <root> <commit> <suite>
   got=""
   if [ -n "$1" ] && _line_load_anchors; then
     # shellcheck disable=SC2086
-    got="$(_line_reads_keys "$1" "$2" $want 2>/dev/null)"
+    got="$(reads_hashes "$1" "$2" $want 2>/dev/null)"
   fi
   for s in $want; do
     _LINE_RH="${_LINE_RH}${2}	${s}	$(printf '%s\n' "$got" | awk -F'\t' -v s="$s" '$1 == s && $2 != "" { k = $2 } END { print (k == "" ? "-" : k) }')
@@ -1148,55 +1150,6 @@ _line_reads_of() {  # <commit> <suite> -> its key as remembered; 1 when none is
 _line_reads() {  # <root> <commit> <suite> -> the key, `-` when it cannot be read (then nothing ever matches it)
   _line_reads_fill "$@"
   _line_reads_of "$2" "$3" || echo -
-}
-
-# THE NARROWED KEY (wave-39 T4; D6, A-orch-8; ADR-061): what the suite reads, narrowed where it declares. A suite
-# declaring `reads <file> fn <name>` or `reads <file> section <label>` (lib/anchors.sh, the grammar) reads that file
-# only there: its key takes `<file>#<kind>:<name> <sha256 of the located span's lines>` in place of `<file> <blob>`,
-# the span as lib/anchors.sh `reads_declared` locates it at <at>, never re-derived here. A (suite, file) pair with any
-# declaration the finder refused reads the whole file (A-T3-1). An undeclared file contributes its blob, so a suite
-# that declares nothing keys exactly as `reads_hashes` keys it, and a tree with no declaration is `reads_hashes`
-# itself. The key's other inputs are reads_hashes' own: the closed read set (`_rd_closed`), the commit's blobs, and
-# the tree key for a set that cannot be derived. Prints `<suite> TAB <key>` per suite.
-_line_reads_keys() {  # <root> <at> <suite>...
-  local root="$1" at="$2" narrow spans="" tree closed blobs s p lines f a b h
-  shift 2
-  narrow="$(reads_declared "$root" "$at" 2>/dev/null | awk -F'\t' '
-    NF >= 8 { k = $1 "\t" $4; if ($6 != "ok") bad[k] = 1; else d[k] = d[k] "\n" $1 "\t" $4 "\t" $3 ":" $5 "\t" $7 "\t" $8 }
-    END { for (k in d) if (!(k in bad)) print substr(d[k], 2) }')"
-  if [ -z "$narrow" ]; then
-    reads_hashes "$root" "$at" "$@"; return
-  fi
-  while IFS=$'\t' read -r f a b; do
-    [ -n "$f" ] || continue
-    h="$(_anc_cat "$root" "$at" "$f" | sed -n "${a},${b}p" | _rd_sha256)"
-    spans="${spans}@H	${f}	${a}	${b}	${h}
-"
-  done <<LINE_SPANS
-$(printf '%s\n' "$narrow" | awk -F'\t' '{ print $2 "\t" $4 "\t" $5 }' | LC_ALL=C sort -u)
-LINE_SPANS
-  tree="$(git -C "$root" rev-parse --verify -q "${at}^{tree}" 2>/dev/null)" || return 1
-  closed="$(_rd_closed "$root" "$at")"
-  blobs="$(git -C "$root" -c core.quotepath=off ls-tree -r "$at" 2>/dev/null)"
-  for s in "$@"; do
-    p="$(_rd_suite_path "$root" "$at" "$s")"
-    lines="$( { printf '%s\n' "$blobs" | sed 's/^/B	/'; printf '%s' "$spans"; printf '%s\n' "$narrow" | sed 's/^/@N	/'; printf '%s\n' "$closed"; } \
-      | awk -F'\t' -v s="$p" '
-      $1 == "B" { split($2, m, " "); blob[$3] = m[3]; next }
-      $1 == "@H" { span[$2 "\t" $3 "\t" $4] = $5; next }
-      $1 == "@N" { if ($2 == s) { nf[$3] = 1; nl[++nn] = $3 "#" $4 " " span[$3 "\t" $5 "\t" $6] } next }
-      $1 == "!" { if ($2 == s) bad = 1; next }
-      $2 == s && ($1 in blob) { f[++n] = $1 }
-      END {
-        if (bad || n == 0) { print "!"; exit }
-        for (i = 1; i <= n; i++) if (!(f[i] in nf)) print f[i] " " blob[f[i]]
-        for (i = 1; i <= nn; i++) print nl[i]
-      }' | LC_ALL=C sort)"
-    case "$lines" in
-      '!'*) printf '%s\ttree:%s\n' "$s" "$tree" ;;
-      *) printf '%s\t%s\n' "$s" "$(printf '%s\n' "$lines" | _rd_sha256)" ;;
-    esac
-  done
 }
 
 # An entry other than <row> still in line, present and not stalled, whose candidate is <candidate>:

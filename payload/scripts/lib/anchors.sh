@@ -857,6 +857,14 @@ reads_index() {  # <root> <at>
 #       text) spell a name; a whole word that is one variable (`. "$LIB"`) resolves unless a value of it is
 #       computed; a positional is spelled at its call site.
 #   reads_hashes <root> <at> <suite>...  `<suite> TAB <key>` for each, the index read once.
+#   THE NARROWING IN THE KEY (wave-39 T40, moved from T4's lib/line.sh; D5, D6, A-orch-8, A-orch-13): a suite
+#       declaring `reads <file> fn <name>` or `reads <file> section <label>` (the grammar at the head of this file)
+#       reads that file only there: its key takes `<file>#<kind>:<name> <sha256 of the span's lines>` in place of
+#       `<file> <blob>`, the span as `reads_declared` locates it at <at>. Only content is hashed, so a span that
+#       moves down the file keeps its key. A (suite, file) pair with any declaration the finder refused reads the
+#       whole file (A-T3-1). An undeclared file contributes its blob, so a tree with no declaration keys as T1 did.
+#       This is the ONE derivation: the landing (lib/line.sh `_line_reads_fill`), the owed set and the regression
+#       facts key through it, and no reader keeps a key of its own (tests/reads-hash.test.sh §ONE).
 # <suite> is as lands_on= names it: a path, or a file name found as `_line_suite_path` finds it (tests/<name>,
 # else the one file of that name). <at> is a commit, read out of git's objects, never the working tree.
 # STILL MISSED, as in reads_index: what a run opens that no text names (a data file a script builds a path
@@ -896,19 +904,43 @@ reads_set() {  # <root> <at> <suite>
     }' | LC_ALL=C sort
 }
 
+# The declarations the key narrows by: `<suite> TAB <file> TAB <kind>:<name> TAB <start> TAB <end>`, one per
+# declaration, only for (suite, file) pairs whose every declaration reads_declared located (`ok`).
+_rd_narrowed() {  # <root> <at>
+  reads_declared "$1" "$2" 2>/dev/null | awk -F'\t' '
+    NF >= 8 { k = $1 "\t" $4; if ($6 != "ok") bad[k] = 1; else d[k] = d[k] "\n" $1 "\t" $4 "\t" $3 ":" $5 "\t" $7 "\t" $8 }
+    END { for (k in d) if (!(k in bad)) print substr(d[k], 2) }'
+}
+
 reads_hashes() {  # <root> <at> <suite>...
-  local root="$1" at="$2" tree closed blobs s p lines
+  local root="$1" at="$2" tree closed blobs narrow spans="" s p lines f a b h
   shift 2
   tree="$(git -C "$root" rev-parse --verify -q "${at}^{tree}" 2>/dev/null)" || return 1
   closed="$(_rd_closed "$root" "$at")"
   blobs="$(git -C "$root" -c core.quotepath=off ls-tree -r "$at" 2>/dev/null)"
+  narrow="$(_rd_narrowed "$root" "$at")"
+  while IFS="$(printf '\t')" read -r f a b; do
+    [ -n "$f" ] || continue
+    h="$(_anc_cat "$root" "$at" "$f" | sed -n "${a},${b}p" | _rd_sha256)"
+    spans="${spans}@H	${f}	${a}	${b}	${h}
+"
+  done <<RD_SPANS
+$(printf '%s\n' "$narrow" | awk -F'\t' 'NF >= 5 { print $2 "\t" $4 "\t" $5 }' | LC_ALL=C sort -u)
+RD_SPANS
   for s in "$@"; do
     p="$(_rd_suite_path "$root" "$at" "$s")"
-    lines="$( { printf '%s\n' "$blobs" | sed 's/^/B	/'; printf '%s\n' "$closed"; } | awk -F'\t' -v s="$p" '
+    lines="$( { printf '%s\n' "$blobs" | sed 's/^/B	/'; printf '%s' "$spans"; printf '%s\n' "$narrow" | sed 's/^/@N	/'; printf '%s\n' "$closed"; } \
+      | awk -F'\t' -v s="$p" '
       $1 == "B" { split($2, m, " "); blob[$3] = m[3]; next }
+      $1 == "@H" { span[$2 "\t" $3 "\t" $4] = $5; next }
+      $1 == "@N" { if ($2 == s) { nf[$3] = 1; nl[++nn] = $3 "#" $4 " " span[$3 "\t" $5 "\t" $6] } next }
       $1 == "!" { if ($2 == s) bad = 1; next }
-      $2 == s && ($1 in blob) { print $1 " " blob[$1]; n++ }
-      END { if (bad || n == 0) print "!" }' | LC_ALL=C sort)"
+      $2 == s && ($1 in blob) { f[++n] = $1 }
+      END {
+        if (bad || n == 0) { print "!"; exit }
+        for (i = 1; i <= n; i++) if (!(f[i] in nf)) print f[i] " " blob[f[i]]
+        for (i = 1; i <= nn; i++) print nl[i]
+      }' | LC_ALL=C sort)"
     case "$lines" in
       '!'*) printf '%s\ttree:%s\n' "$s" "$tree" ;;
       *) printf '%s\t%s\n' "$s" "$(printf '%s\n' "$lines" | _rd_sha256)" ;;
