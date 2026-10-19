@@ -728,6 +728,10 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
     exit 1 unless defined $pid;
     exit 0 if $pid;
     POSIX::setsid() or POSIX::_exit(3);
+    # HUP, INT and QUIT AT THEIR DEFAULTS (wave-39 T14; D17, AC-10.1): a caller started with them ignored (a nohup, a
+    # background job) hands the ignored state to the detached side and the command below it, where no bash can trap
+    # or be ended by it; a bash cannot un-ignore a signal, this perl can, once, before it execs the shim.
+    $SIG{$_} = "DEFAULT" for qw(HUP INT QUIT);
     open(STDIN, "<", "/dev/null") or POSIX::_exit(4);
     open(STDOUT, ">>", $log) or POSIX::_exit(4);
     open(STDERR, ">&", \*STDOUT) or POSIX::_exit(4);

@@ -52,6 +52,45 @@ HOOK="${BIONIC_BASH_WALLS_UNDER_TEST:-${BIONIC_HOOKS_DIR}/bash-walls.sh}"
 # THE PRELUDE IS SOURCED BEFORE THE FRAMEWORK, on purpose — see its header.
 . "$(dirname "$0")/bash-walls.prelude.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
+# directly or through the hooks and scripts it runs: amend, interval, interval-default, launch-sync, row-
+# landed, window. Each line below is that closure: the library (every run executes it), the arm of each verb,
+# the sections defining the globals they read, and each helper outside those.
+reads hooks/session-poker.sh section "the library"
+reads hooks/session-poker.sh section "the runs (wave-30 T12; D6, D7d)"
+reads hooks/session-poker.sh section "a successor row"
+reads hooks/session-poker.sh section "the hold's fingerprint"
+reads hooks/session-poker.sh section "the contract grammar"
+reads hooks/session-poker.sh section "the plan transaction"
+reads hooks/session-poker.sh section "the call a refusal names"
+reads hooks/session-poker.sh section "the launch sync"
+reads hooks/session-poker.sh verb amend
+reads hooks/session-poker.sh verb interval
+reads hooks/session-poker.sh verb interval-default
+reads hooks/session-poker.sh verb launch-sync
+reads hooks/session-poker.sh verb row-landed
+reads hooks/session-poker.sh verb window
+reads hooks/session-poker.sh fn clean
+reads hooks/session-poker.sh fn count_main_thread_dispatches
+reads hooks/session-poker.sh fn count_refused_dispatches
+reads hooks/session-poker.sh fn deliver_check
+reads hooks/session-poker.sh fn epoch_iso
+reads hooks/session-poker.sh fn file_birth
+reads hooks/session-poker.sh fn file_mtime
+reads hooks/session-poker.sh fn iso_epoch
+reads hooks/session-poker.sh fn iso_now
+reads hooks/session-poker.sh fn line_field
+reads hooks/session-poker.sh fn note
+reads hooks/session-poker.sh fn now_epoch
+reads hooks/session-poker.sh fn pair
+reads hooks/session-poker.sh fn parse_seconds
+reads hooks/session-poker.sh fn patrol_stamp_file
+reads hooks/session-poker.sh fn poker_interval_seconds
+reads hooks/session-poker.sh fn roster_window
+reads hooks/session-poker.sh fn row_has_key
+reads hooks/session-poker.sh fn row_writer
+reads hooks/session-poker.sh fn session_transcript
+reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/roster-row.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1), for bw_bind below.
 . "$(dirname "$0")/lib/bound-marker.sh"
@@ -3318,10 +3357,11 @@ section "§SCRIPT-BUDGET — the budget reads the script a dispatched agent's sh
 # FIXTURE FIDELITY: a dispatched row of the recorder's own join (bw_dispatched), real scripts in the
 # agent's tree. fails-when: a script that starts no suite is refused; `bash red.sh` passes the arm.
 R_SB="$(mk_repo scriptbudget)"
-bw_dispatched "$R_SB" t11writer "suites_allowed=alpha.test.sh" suites_source=declared files= 're_executes=`bash ok.sh`'
+bw_dispatched "$R_SB" t11writer "suites_allowed=alpha.test.sh" suites_source=declared files= 're_executes=`pytest`'
 printf '#!/bin/bash\nset -e\njest\n' > "$R_SB/red.sh"
 printf '#!/bin/bash\nRUNNER=jest\n"$RUNNER" --ci\n' > "$R_SB/var.sh"
-printf '#!/bin/bash\njest\n' > "$R_SB/ok.sh"
+printf '#!/bin/bash\npytest\n' > "$R_SB/ok.sh"
+printf '#!/bin/bash\npytest -x\n' > "$R_SB/und.sh"
 printf '#!/bin/bash\necho plain\n' > "$R_SB/plain.sh"
 sb_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
 sb_cmd() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null; }
@@ -3344,15 +3384,21 @@ run_hook "$(mk_payload "$R_SB" 'bash missing.sh' "$ACTOR" omit Bash test-runner 
 expect_status "SB.3 AC-6.1 a script that is not there is admitted (was: refused unverified)" 0 "$ST"
 expect_eq "SB.3b …as typed (SB.0 is the positive)" "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash ok.sh' "$ACTOR" omit Bash test-runner 1800000)"
-expect_ne "SB.4 a script whose run the brief declared under Re-executes passes" "2" "$ST"
+expect_status "SB.4 AC-15.1 a wrapper whose inner run the brief declared under Re-executes is admitted (D19)" 0 "$ST"
 expect_absent "SB.4b …with no refusal line" "refused" "$ERR"
+expect_contains "SB.4c …and it is booked as a suite run is (the wrap carries the command as typed, SB.0's shape)" "-- 'bash ok.sh'" "$(sb_cmd)"
+run_hook "$(mk_payload "$R_SB" 'bash und.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "SB.5 AC-15.1 a wrapper whose inner run is not declared is refused (pairs SB.4: the same wrapper shape, one run off the declaration)" 2 "$ST"
+expect_contains "SB.5b …naming the inner run" "pytest -x" "$ERR"
+expect_contains "SB.5c …and the wrapper" "und.sh" "$ERR"
+expect_contains "SB.5d …in the budget's words" "run only the budgeted suites" "$(sb_line)"
 run_hook "$(mk_payload "$R_SB" 'bash plain.sh' "$ACTOR" omit Bash test-runner 1800000)"
-expect_status "SB.5 a script that runs no suite passes" 0 "$ST"
-expect_absent "SB.5b …with no refusal line" "refused" "$ERR"
-expect_eq "SB.5c …as typed: what it starts asks the gate as the agent its tree names (SB.0 is the positive)" \
+expect_status "SB.5e a script that runs no suite passes" 0 "$ST"
+expect_absent "SB.5f …with no refusal line" "refused" "$ERR"
+expect_eq "SB.5g …as typed: what it starts asks the gate as the agent its tree names (SB.0 is the positive)" \
   "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'git status --short' "$ACTOR" omit Bash test-runner 1800000)"
-expect_eq "SB.5d a call that starts no script carries nothing (SB.0 is the positive)" "" "$(sb_cmd)"
+expect_eq "SB.5h a call that starts no script carries nothing (SB.0 is the positive)" "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash red.sh' "" omit Bash)"
 expect_absent "SB.6 the main thread's bash red.sh meets no budget arm" "run only the budgeted suites" "$ERR"
 expect_absent "SB.6b …and no unverified refusal" "unverified" "$ERR"

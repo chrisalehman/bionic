@@ -70,7 +70,7 @@
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/close-out.sh <plan> run
 #
-# [WALL: tests/close-out.test.sh]
+# [WALL: tests/close-out-1.test.sh .. tests/close-out-4.test.sh, over tests/close-out.prelude.sh]
 
 set -uo pipefail
 
@@ -88,7 +88,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
+for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -106,6 +106,12 @@ fi
 . "${CO_LIB}/roots.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/run.sh"
+# THE ONE READER OF THE INTEGRATION BRANCH (lib/plan.sh `plan_integration_branch`) AND OF THE HANDOFF POINTER
+# (lib/handoff.sh `handoff_file_of`), wave-39 T16 (D18, AC-12.1): session-poker.sh `handoff` reads both through them.
+# shellcheck source=/dev/null
+. "${CO_LIB}/plan.sh"
+# shellcheck source=/dev/null
+. "${CO_LIB}/handoff.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/archive.sh"
 # shellcheck source=/dev/null
@@ -262,7 +268,9 @@ sdlc_header() {
 
 SECTION="$(sdlc_section)"
 [ -n "$SECTION" ] || _co_refuse "$PLAN carries no ## SDLC State section"
-INTEGRATION="$(sdlc_header integration-branch "$SECTION")"
+# THE ONE READER OF THE INTEGRATION BRANCH (wave-39 T16; D18, AC-12.1): lib/plan.sh `plan_integration_branch`,
+# `## SDLC State` first, then the frontmatter, as session-poker.sh `handoff` and `release-check` read it.
+INTEGRATION="$(plan_integration_branch "$PLAN")"
 # THE ONE READER OF THE WORKING BRANCH (wave-35 T10; A-orch-16, wave-35 T7): lib/run.sh `plan_working_branch`,
 # `## SDLC State` first, then the frontmatter, as `ready`, the stop wall, the card and the proof judge read it.
 WORKING="$(plan_working_branch "$PLAN")"
@@ -329,10 +337,9 @@ co_branch_line() {
 
 # `closed-form [<instant>]` (wave-38 T37): the two lines, one each, for a plan close-out closed or one it would close;
 # read-only, and asked before the closed run's `already closed`. The instant is the argument, else the first word after
-# the Step-9 line's `delivered:` when it is ISO-shaped (close-out writes its NOW there), else `?`. A plan whose
-# ## SDLC State names no integration-branch: is read at its frontmatter's, the verb's own fallback.
+# the Step-9 line's `delivered:` when it is ISO-shaped (close-out writes its NOW there), else `?`. The integration
+# branch is `plan_integration_branch`'s, as every verb here reads it (wave-39 T16).
 if [ "$VERB" = closed-form ]; then
-  [ -n "$INTEGRATION" ] || INTEGRATION="$(plan_frontmatter_get "$PLAN" integration-branch)"
   INTEGRATION="${INTEGRATION:-(none named)}"; WORKING="${WORKING:-(none named)}"
   NOW="$CO_AT"
   if [ -z "$NOW" ]; then
@@ -355,7 +362,7 @@ fi
 
 command -v git >/dev/null 2>&1 || _co_refuse "git is not on PATH"
 command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry-run cannot be built without it"
-[ -n "$INTEGRATION" ] || _co_refuse "the plan's ## SDLC State names no integration-branch:"
+[ -n "$INTEGRATION" ] || _co_refuse "the plan names no integration-branch: (## SDLC State or its frontmatter)"
 [ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch: (## SDLC State or its frontmatter)"
 
 # THE WORKTREE CENSUS IS THE REGISTER, NEVER A NAME (D5, REQ-6; ADR-032). A tree is
@@ -1574,19 +1581,12 @@ STEP9
 # one the plan's `## Handoff` pointer names, else record/<wave>/handoff.md — as its line 2, under the kind line, with
 # the five human lines the file already holds kept; the plan's section becomes the one pointer line
 # `handoff: <path> written <local time>`. The file's grammar is session-poker.sh `handoff`'s closed form, line for
-# line, the door last.
+# line, the door last. Which file is lib/handoff.sh `handoff_file_of`'s answer (wave-39 T16; D18, AC-12.1): the
+# poker's heading test, the path relative to this project's root, the same reader the poker's handoff readers ask.
 CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
-  local rel
   [ -z "$CO_HO_FILE" ] || return 0
-  rel="$(awk '/^[[:space:]]*```/ { f = !f; next } f { next }
-    /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next }
-    h && index($0, "handoff: ") == 1 && / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$PLAN" 2>/dev/null)"
-  case "$rel" in
-    '') CO_HO_FILE="$DROOT/record/$WAVE_SLUG/handoff.md" ;;
-    /*) CO_HO_FILE="$rel" ;;
-    *) CO_HO_FILE="$ROOT/$rel" ;;
-  esac
+  CO_HO_FILE="$(handoff_file_of "$PLAN" "$ROOT")"
   CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
   CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"

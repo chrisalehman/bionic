@@ -1586,7 +1586,7 @@ rp_req 3 w-T2 "$RP_ROOT/.worktrees/01-T2" $((RP_E0 + 3900)) $((RP_E0 + 3930)) "e
 rp_req 4 main "$RP_ROOT" $((RP_E0 + 4000)) $((RP_E0 + 4000)) "ended=$((RP_E0 + 4060))" rc=0
 rp_req 5 w-T3 /elsewhere/project $((RP_E0 + 4000)) $((RP_E0 + 4500)) "ended=$((RP_E0 + 4600))" rc=0
 rp_req 6 w-T3 "$RP_ROOT" $((RP_E0 + 4100)) -
-RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=2250s · killed=0"
+RP_RTL_LINE="landings: queue=3 hand=1 git=1 · ready-to-landed median=30.0m p75=45.0m max=60.0m · runs: green=1 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=2250s · killed=0"
 rp_report
 expect_eq "RTL1 landing-report exits 0 and prints the one line: the queue landings' minutes from first ready, the waited median over the rows' waits from the record (wave-38 T7: 900s and 3600s; T1's verdict carries no admitted=)" \
   "0|$RP_RTL_LINE" "$RC|$(rp_line)"
@@ -1621,18 +1621,18 @@ rp_world rp-even
 rp_ready T1 w-T1 10:00:00; rp_ready T2 w-T2 10:00:00; rp_pub T1 queue 10:10:00; rp_pub T2 queue 10:20:00
 rp_report
 expect_eq "RTL5 two landings of 10 and 20 minutes: median 15.0 (the middle two's mean), p75 17.5 (interpolated), max 20.0" \
-  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=900s · killed=0" \
+  "landings: queue=2 hand=0 git=0 · ready-to-landed median=15.0m p75=17.5m max=20.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=900s · killed=0" \
   "$(rp_line)"
 rp_world rp-one
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:07:30
 rp_report
 expect_eq "RTL6 one landing of 7.5 minutes: its median, p75 and max are 7.5" \
-  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=450s · killed=0" \
+  "landings: queue=1 hand=0 git=0 · ready-to-landed median=7.5m p75=7.5m max=7.5m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=450s · killed=0" \
   "$(rp_line)"
 # Empty and absent records: the line with zeros, exit 0.
 rp_world rp-empty
 rp_report
-RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0"
+RP_ZERO="landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=0s · killed=0"
 expect_eq "RTL7 an empty record prints the line with zeros and exits 0" "0|$RP_ZERO" "$RC|$(rp_line)"
 rm -f "$S60_REC"
 rp_report --rows
@@ -1678,7 +1678,7 @@ sed "s/^holder=.*/holder=$RP_LIVE:$RP_LIVE_START/" "$RP_GATE/requests/4" > "$RP_
 expect_contains "RK0 precondition: request 4's holder is the live sleeper, by pid and start" "holder=$RP_LIVE:" "$(cat "$RP_GATE/requests/4")"
 rp_report --rows
 expect_eq "RK1 a queue, a hand and a git landing each count under their own kind; green, red, none, discarded and red-then-green each as planted; two runs killed" \
-  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2" \
+  "landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 reused=0 absent=0 · waited median=0s · killed=2" \
   "$(rp_line)"
 expect_eq "RK2 …the hand landing is not a queue landing: its row reads hand, ready - and minutes -" \
   "T2 hand ready=- landed=2026-10-06T10:20:30Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')"
@@ -1691,8 +1691,33 @@ rp_ev "ev=verdict|row=T9|commit=$RP_C2|suite=a.test.sh|at=2026-10-06T12:00:00Z"
 rp_ev "ev=ready|row=T9|at=not-a-time"
 rp_report
 expect_eq "RK5 three malformed line/v1 lines: exit 0, the same line, and one line on stderr counting them" \
-  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "0|landings: queue=1 hand=1 git=1 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=3 red=2 none=1 discarded=1 red-then-green=1 run=0 reused=0 absent=0 · waited median=0s · killed=2|poker: landing-report — 3 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
   "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
+
+# ---------- §PROMISE-ROWS: --rows prints each counted run's promise, its actual and their ratio (wave-39 T8; D11, REQ-4 AC-4.2) ----------
+# Under a landed row's line, one line per counted verdict that carries promised= or actual= (lib/line.sh writes both after
+# reads=, wave-39 T8), in the record's order: `  <suite> <result> promised=<s>s actual=<s>s ratio=<actual/promised>`. A field
+# the verdict holds as `-`, or lacks, prints `-`, and so does the ratio then, or over a promise of 0. A verdict written before
+# wave 39 carries neither and prints no line. The rows readers (`$2 == "queue"`) never read these indented lines.
+rp_world rp-prom
+rp_pv() {  # <row> <suite> <result> <at> <promised|-|none> <actual|-|none> — a verdict as lib/line.sh writes it, `none` omits the field
+  rp_ev "ev=verdict|row=$1|commit=$RP_C2|suite=$2|result=$3|log=/rec/$1-$2.log|admitted=$RP_E0|width=2|reads=h$2$([ "$5" = none ] || printf '|promised=%s' "$5")$([ "$6" = none ] || printf '|actual=%s' "$6")|at=2026-10-06T$4Z"
+}
+rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00
+rp_pv T1 a.test.sh green 10:06:00 240 300; rp_pv T1 b.test.sh red 10:07:00 100 50; rp_pv T1 b.test.sh green 10:08:00 100 none
+rp_pv T1 c.test.sh none 10:08:00 - -
+rp_pub T1 queue 10:10:00
+rp_ready T2 w-T2 10:20:00; rp_cand T2 10:21:00; rp_verdict T2 a.test.sh green 10:25:00; rp_pub T2 queue 10:30:00
+rp_report --rows
+PR_SUB="$(printf '%s\n' "$OUT" | /usr/bin/grep '^  ' | tr '\n' '|' | sed 's/|$//')"
+expect_eq "PR1 the row lines read as before: T1 and T2, queue" "T1 queue|T2 queue" "$(rp_rows | tr '|' '\n' | awk '{ print $1, $2 }' | tr '\n' '|' | sed 's/|$//')"
+expect_eq "PR2 AC-4.2 under T1, one line per run: promised and actual in seconds and actual over promised; a missing actual and a run never admitted print -" \
+  "  a.test.sh green promised=240s actual=300s ratio=1.25|  b.test.sh red promised=100s actual=50s ratio=0.50|  b.test.sh green promised=100s actual=- ratio=-|  c.test.sh none promised=- actual=- ratio=-" \
+  "$PR_SUB"
+expect_eq "PR3 …placed under T1's row, before T2's; T2's verdict, written before wave 39, prints none" "T1 queue|  a.test.sh|  b.test.sh|  b.test.sh|  c.test.sh|T2 queue" \
+  "$(printf '%s\n' "$OUT" | sed -n '2,$p' | awk '{ print (substr($0, 1, 2) == "  " ? "  " $1 : $1 " " $2) }' | tr '\n' '|' | sed 's/|$//')"
+rp_report
+expect_eq "PR4 without --rows, no run line: the report is its one line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '')"
 
 # ---------- §REPORT-PRINT: the tick and release-check print it; a row that never lands moves no figure ----------
 rp_world rp-print
@@ -1705,7 +1730,7 @@ expect_eq "RP1 a record with no published event: the tick prints no landings lin
 rp_pub T1 queue 10:30:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RP2 a record with a published event: the tick prints the report's first line" \
-  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1800s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=1800s · killed=0" "$(rp_tl)"
 rp_tick
 expect_contains "RP3 precondition: a second tick over the same facts says unchanged" "poker: unchanged since " "$OUT"
 expect_eq "RP3b …and prints no landings line: an unchanged tick is the one line the Patrol ends on, \"printed only unchanged: end it\" (wave-28 T62; T68 folded RK-T3 into this row)" "" "$(rp_tl)"
@@ -1730,7 +1755,7 @@ printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/confi
 BIONIC_GATE_DIR="$RP_GATE" poke "$RSEV" release-check
 expect_eq "RP6 release-check, its check passing, exits 0" "0" "$RC"
 expect_eq "RP6b …and prints the report's line and each landed row, after its other lines" \
-  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1800s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=1800s wait=30.0 prove=0.0 rework=0.0 width=-|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
+  "poker: release-check — landings: queue=1 hand=0 git=1 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=1800s · killed=0|poker: release-check — T1 queue ready=2026-10-06T10:00:00Z landed=2026-10-06T10:30:00Z minutes=30.0 runs=0 waited=1800s wait=30.0 prove=0.0 rework=0.0 width=-|poker: release-check — T2 git ready=- landed=2026-10-06T10:40:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-" \
   "$(printf '%s\n' "$OUT" | tail -3 | tr '\n' '|' | sed 's/|$//')"
 cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 if [ -f "$TMPROOT/rp-sev-rec" ]; then cp "$TMPROOT/rp-sev-rec" "$RP_SEV_REC"; else rm -f "$RP_SEV_REC"; fi
@@ -1786,13 +1811,13 @@ expect_eq "RK-K4 a red at one candidate and a green at the next (no ready betwee
 # ---------- (2) the landings line prints on a tick that is not unchanged ----------
 rp_world rk-tick
 rp_ready T1 w-T1 10:00:00; rp_pub T1 queue 10:30:00
-RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1800s · killed=0"
+RK_LINE="poker: landings: queue=1 hand=0 git=0 · ready-to-landed median=30.0m p75=30.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=1800s · killed=0"
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T1 a tick that prints in full (no digest yet) carries the landings line" "$RK_LINE" "$(rp_tl)"
 rp_ready T2 w-T2 10:40:00; rp_pub T2 queue 10:50:00
 rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"; rp_tick
 expect_eq "RK-T6 the next tick that prints in full carries the line with the new landing's figures" \
-  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=1200s · killed=0" "$(rp_tl)"
+  "poker: landings: queue=2 hand=0 git=0 · ready-to-landed median=20.0m p75=25.0m max=30.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=1200s · killed=0" "$(rp_tl)"
 
 # ---------- (3) a record with no line/v1 event is unmeasured, never zeros ----------
 RK_UNM="landings: unmeasured — the landing record holds no line/v1 events"
@@ -1861,7 +1886,7 @@ POKER="$RK_REAL_POKER"
 rp_world rk-mut4
 printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\n' "$RP_C1" "$RP_C2" >> "$S60_REC"
 POKER="$RD_MUT/nounm/hooks/session-poker.sh"; rp_report --rows
-expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 · waited median=0s · killed=0" \
+expect_eq "RK-mut4 the no-arm mutant still runs and prints the zeros RK-U1 forbids" "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=0s · killed=0" \
   "$RC|$OUT"
 POKER="$RK_REAL_POKER"
 rm -rf "$RD_MUT"
@@ -2208,7 +2233,7 @@ add_row_to "$RIA" "$RIA_PRED" name=ri-plain status=identified agent_id=ari-plain
   duration="45 minutes" cadence="10 minutes" deliverable="$RIA/.bionic/docs/record/ri-plain.md" \
   files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared
 # T47 (D10; AC-4.1): a landing set past 400 characters, as the dispatch wall writes it (real suite names joined by commas)
-RIA_LONG="session-poker-4.test.sh,background-suite-guard.test.sh,bash-walls.test.sh,canonical-sdlc-evidence-gate-2.test.sh,canonical-sdlc-evidence-gate.test.sh,card.test.sh,close-out.test.sh,cmd-class.test.sh,context-spend.test.sh,cross-gate-agreement.test.sh,dispatch-preflight-2.test.sh,dispatch-preflight-3.test.sh,dispatch-preflight-4.test.sh,dispatch-preflight.test.sh,doctor-fleet.test.sh,doctor-patrol.test.sh,doctor-reads.test.sh,doctor-restart.test.sh,doctor-version.test.sh,execution-recorder.test.sh,framework.test.sh,gate.test.sh,hook-adoption.test.sh,hook-timeout.test.sh,inbox.test.sh,interpreter-pin.test.sh,landing-gate.test.sh,landing-line.test.sh,notify.test.sh,patrol-duties-gate.test.sh,patrol-marker.test.sh,patrol-revive.test.sh,patrol-stale.test.sh,roster.test.sh,session-poker-2.test.sh,session-poker-3.test.sh,session-poker.test.sh,session-start.test.sh,session-sweep.test.sh,shell-lint.test.sh,stop-guard.test.sh,stop-orders.test.sh,stop.test.sh,units.test.sh"
+RIA_LONG="session-poker-4.test.sh,background-suite-guard.test.sh,bash-walls.test.sh,canonical-sdlc-evidence-gate-2.test.sh,canonical-sdlc-evidence-gate.test.sh,card.test.sh,close-out.test.sh,cmd-class.test.sh,context-spend.test.sh,cross-gate-agreement.test.sh,dispatch-preflight-2.test.sh,dispatch-preflight-3.test.sh,dispatch-preflight-4.test.sh,dispatch-preflight.test.sh,doctor-fleet.test.sh,doctor-patrol.test.sh,doctor-reads.test.sh,doctor-restart.test.sh,doctor-version.test.sh,execution-recorder.test.sh,framework.test.sh,gate.test.sh,hook-adoption.test.sh,hook-timeout.test.sh,inbox.test.sh,interpreter-pin.test.sh,landing-gate.test.sh,landing-line-1.test.sh,landing-line-2.test.sh,notify.test.sh,patrol-duties-gate.test.sh,patrol-marker.test.sh,patrol-revive.test.sh,patrol-stale.test.sh,roster.test.sh,session-poker-2.test.sh,session-poker-3.test.sh,session-poker.test.sh,session-start.test.sh,session-sweep.test.sh,shell-lint.test.sh,stop-guard.test.sh,stop-orders.test.sh,stop.test.sh,units.test.sh"
 add_row_to "$RIA" "$RIA_PRED" name=ri-long status=identified agent_id=ari-long-6800000000000003 subagent_type=bionic:implementor \
   duration="45 minutes" cadence="10 minutes" deliverable="$RIA/.bionic/docs/record/ri-long.md" \
   files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared row=T47 lands_on="$RIA_LONG"
@@ -5029,7 +5054,9 @@ R7="$(make_repo cur7)"
 git -C "$R7" config user.email t@example.com; git -C "$R7" config user.name "Dana Fixture"
 printf '.bionic\n' > "$R7/.gitignore"
 mkdir -p "$R7/tests" "$R7/lib" "$R7/.bionic/docs/plans" "$R7/.bionic/docs/record/w35"
-printf '#!/bin/bash\nexit 0\n' > "$R7/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$R7/tests/b.test.sh"
+# a.test.sh READS lib/x.sh (wave-39 T24; D5, AC-18.1): a commit past the floor owes the suites that read what it changed,
+# so C below, a change to lib/x.sh, is unproved until a.test.sh runs at it; a file no suite reads would owe nothing.
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$R7/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$R7/tests/b.test.sh"
 printf 'one\n' > "$R7/lib/x.sh"
 ( cd "$R7" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
 printf 'generic fixture proof\n' > "$R7/.bionic/docs/record/generic-evidence.md"
@@ -5995,7 +6022,82 @@ expect_contains "RL-5d …and the hash its run recorded" "${RL_SHA:0:12}" "$OUT"
 mkdir -p "$TMPROOT/rl-gate"
 BIONIC_GATE_DIR="$TMPROOT/rl-gate" poke "$RRL" landing-report "$PRL"
 expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run line under runs: as run=1 (§REPORT-RTL pins run=0 on records with none)" \
-  "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 · ' | tr -d ' ')"
+  "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 reused=0 absent=0 · ' | tr -d ' ')"
+
+# ---------- AC-10.1: a regression-run started with HUP, INT and QUIT ignored hands its command all three at their defaults ----------
+# A shell that starts with a signal ignored cannot trap it, and the ignored state is inherited (wave-38 T33, T34; A-orch-69).
+# regression-run's command is `exec`ed through a perl that resets the three first (D17), in both arms: the declared
+# regression-command: and tests/run.sh whole. The command traps HUP, INT and QUIT and writes what it saw; the verb is
+# started as `bash -c 'trap "" HUP INT QUIT; …'`, as a nohup'd background job starts it. The command waits on a timed
+# read of a fifo nobody writes, which a trapped signal interrupts (no poll or sleep stands in for it). The control is the same
+# command under the same ignored start with no reset: it sees none, so the row can fail.
+[ "$(type -t wait_for)" = function ] || . "$(dirname "$0")/lib/wait.sh"
+RS_D="$TMPROOT/rs-sig"; mkdir -p "$RS_D"
+rs_script() {  # <name> -> writes the command's script, prints its path
+  local n="$1"
+  cat > "$RS_D/$n.sh" <<RSEOF
+#!/bin/bash
+for s in HUP INT QUIT; do trap "echo trapped-\$s >> '$RS_D/$n.saw'" \$s; done
+mkfifo '$RS_D/$n.fifo' 2>/dev/null
+exec 3<> '$RS_D/$n.fifo'
+echo \$\$ > '$RS_D/$n.pid'
+: > '$RS_D/$n.up'
+i=0
+while [ "\$(wc -l < '$RS_D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ] && [ \$i -lt 10 ]; do i=\$((i+1)); read -t 1 -u 3 _; done
+exit 0
+RSEOF
+  chmod +x "$RS_D/$n.sh"
+}
+rs_saw() { cat "$RS_D/$1.saw" 2>/dev/null | tr '\n' ' '; }
+rs_drive() {  # <name> <repo> <verb args…> — the verb with the three ignored; sends each signal once the command is up
+  local n="$1" repo="$2" pid sig grp
+  shift 2
+  rm -f "$RS_D/$n".saw "$RS_D/$n".pid "$RS_D/$n".up
+  ( cd "$repo" && exec bash -c 'trap "" HUP INT QUIT; exec env CLAUDE_CODE_SESSION_ID="$1" bash "$2" "${@:3}"' _ "$SID" "$POKER" "$@" ) \
+    > "$RS_D/$n.out" 2>&1 < /dev/null &
+  grp=$!
+  wait_for 30 test -e "$RS_D/$n.up"
+  pid="$(cat "$RS_D/$n.pid" 2>/dev/null)"
+  if [ -n "$pid" ]; then
+    for sig in HUP INT QUIT; do
+      kill -"$sig" "$pid" 2>/dev/null
+      wait_for 2 grep -q "trapped-$sig" "$RS_D/$n.saw"
+    done
+    kill -KILL "$pid" 2>/dev/null
+  fi
+  wait_for 20 bash -c '! kill -0 "$1" 2>/dev/null' _ "$grp" || kill -KILL "$grp" 2>/dev/null
+  wait "$grp" 2>/dev/null
+}
+# the control: no launcher, the three ignored — a bash the command is started under sees none of them
+rs_script ctl
+( exec bash -c 'trap "" HUP INT QUIT; exec bash "$1"' _ "$RS_D/ctl.sh" ) > /dev/null 2>&1 < /dev/null &
+RS_CTL=$!
+wait_for 30 test -e "$RS_D/ctl.up"
+for _s in HUP INT QUIT; do kill -"$_s" "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait_for 1 grep -q "trapped-$_s" "$RS_D/ctl.saw"; done
+kill -KILL "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait "$RS_CTL" 2>/dev/null
+expect_eq "RL-7-ctl control: a command started with the three ignored and no reset sees none of them (the row can fail)" "" "$(rs_saw ctl)"
+
+# the declared regression-command: arm
+rs_script cfg
+printf 'regression-command: bash %s\n' "$RS_D/cfg.sh" > "$RRL/.bionic/config.yaml"
+rs_drive cfg "$RRL" regression-run
+expect_eq "RL-7 AC-10.1 regression-run started with HUP, INT and QUIT ignored: the declared command sees all three" \
+  "trapped-HUP trapped-INT trapped-QUIT " "$(rs_saw cfg)"
+printf 'regression-command: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+
+# the tests/run.sh whole arm: a fresh repository, no declared command, a tests/run.sh that is the command
+rs_script whole
+RRW="$(make_repo runwhole)"; ( cd "$RRW" && git commit -q --allow-empty -m init )
+PRW="$(s42_plan "$RRW" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PRW" | sed 's/| active |/| landed |/' > "$PRW.tmp" && mv "$PRW.tmp" "$PRW"
+( cd "$RRW" && git add -f "$PRW" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RRW/.worktrees/01-fixture" \
+  && mkdir -p "$RRW/.worktrees/01-fixture/tests" ) >/dev/null 2>&1
+cp "$RS_D/whole.sh" "$RRW/.worktrees/01-fixture/tests/run.sh"
+( cd "$RRW/.worktrees/01-fixture" && git add tests/run.sh && git commit -q -m "wave work" ) >/dev/null 2>&1
+rs_drive whole "$RRW" regression-run
+expect_eq "RL-8 AC-10.1 …and the whole arm (tests/run.sh, no declared command): it sees all three" \
+  "trapped-HUP trapped-INT trapped-QUIT " "$(rs_saw whole)"
 
 POKE_BOUND="$RL_BOUND_WAS"
 
@@ -6470,7 +6572,7 @@ expect_eq "RR6 AC-6.4 on every row the record computes, wait + prove + rework is
        d = f["wait"] + f["prove"] + f["rework"] - f["minutes"]; if (d < 0) d = -d
        print $1 " " ((d <= 0.15 && w + 0 <= f["minutes"] * 60) ? "ok" : "off") }' | paste -sd'|' -)"
 expect_eq "RR7 the first line's waited median is the median of the rows' waits (420, 540, 840: 540s), not the store's" \
-  "landings: queue=4 hand=1 git=0 · ready-to-landed median=15.0m p75=23.8m max=35.0m · runs: green=6 red=2 none=0 discarded=2 red-then-green=0 run=0 · waited median=540s · killed=0" \
+  "landings: queue=4 hand=1 git=0 · ready-to-landed median=15.0m p75=23.8m max=35.0m · runs: green=6 red=2 none=0 discarded=2 red-then-green=0 run=0 reused=0 absent=0 · waited median=540s · killed=0" \
   "$(rp_line)"
 # the width is the drain's: a line a reader sees with a bad width is absent too
 rp_world rr-bad
@@ -6511,6 +6613,71 @@ POKE_BOUND="$RR_BOUND_WAS"
 
 
 # ============================================================
+section "§REUSED: landing-report counts the reused suites beside the run ones, reused=<n> equal to the record's reuse lines, and an absent suite as absent=<n>, never malformed (wave-39 T2; D5, REQ-1 AC-1.4; A-orch-20)"
+# ============================================================
+#
+# lib/line.sh writes `ev=reused|row|commit|suite|reads|from[|head]` when a candidate's suite is proved by another
+# candidate's verdict at the same read key (wave-39 T1), and a skip is the same line naming the head (T4). No runner
+# starts for it, so it is no verdict: the first line's `runs:` group counts it on its own, `reused=<n>`, after `run=`,
+# one per reuse line, landed row or not, so the saving is on the page. A verdict `result=absent` (a Lands-on suite the
+# row removed, wave-39 T6) is no run and no malformed line: it counts as `absent=<n>` beside it, and adds nothing to
+# the row's `runs=` or its promise lines. A reuse line with no suite= is malformed, as a verdict without one is.
+# FIXTURE FIDELITY: the events are planted in the shape lib/line.sh writes them (reads= after width=, promised= and
+# actual= after reads=; reused's from= and head=).
+# fails-when: the report omits reused= or counts it other than the reuse lines; an absent verdict is counted malformed.
+RU_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RU_K="$(printf 'a%.0s' $(seq 64))"; RU_KB="$(printf 'b%.0s' $(seq 64))"
+RU_C3="$(printf '3%.0s' $(seq 40))"; RU_C4="$(printf '4%.0s' $(seq 40))"
+ru_world() {  # <label> -> T1 runs a and b and lands; T2 reuses both (a as the head's skip), drops c and lands; T3 reuses a, unlanded
+  rp_world "$1"
+  rp_ready T1 w-T1 10:00:00; rp_cand T1 10:01:00
+  rp_ev "ev=verdict|row=T1|commit=$RP_C2|suite=a.test.sh|result=green|log=/rec/T1-a.log|admitted=$((RP_E0 + 120))|width=2|reads=$RU_K|promised=60|actual=50|at=2026-10-06T10:03:00Z"
+  rp_ev "ev=verdict|row=T1|commit=$RP_C2|suite=b.test.sh|result=green|log=/rec/T1-b.log|admitted=$((RP_E0 + 120))|width=2|reads=$RU_KB|promised=60|actual=70|at=2026-10-06T10:04:00Z"
+  rp_pub T1 queue 10:10:00
+  rp_ready T2 w-T2 10:20:00 "$RU_C3"; rp_cand T2 10:21:00 "$RP_C2" "$RU_C4"
+  rp_ev "ev=reused|row=T2|commit=$RU_C4|suite=a.test.sh|reads=$RU_K|from=$RP_C2|head=$RP_C2|at=2026-10-06T10:22:00Z"
+  rp_ev "ev=reused|row=T2|commit=$RU_C4|suite=b.test.sh|reads=$RU_KB|from=$RP_C2|at=2026-10-06T10:22:00Z"
+  rp_ev "ev=verdict|row=T2|commit=$RU_C4|suite=c.test.sh|result=absent|log=-|admitted=-|width=1|reads=-|promised=-|actual=-|at=2026-10-06T10:22:00Z"
+  rp_ev "ev=published|row=T2|commit=$RU_C4|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z"
+  rp_ready T3 w-T3 10:40:00 "$RU_C3"; rp_cand T3 10:41:00 "$RU_C4" "$RU_C3"
+  rp_ev "ev=reused|row=T3|commit=$RU_C3|suite=a.test.sh|reads=$RU_K|from=$RP_C2|at=2026-10-06T10:42:00Z"
+}
+ru_n() { /usr/bin/grep -c '^line/v1|ev=reused|' "$S60_REC" | tr -d ' '; }   # -> the record's reuse lines
+ru_world ru-rep
+RU_LINE="landings: queue=2 hand=0 git=0 · ready-to-landed median=10.0m p75=10.0m max=10.0m · runs: green=2 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=3 absent=1 · waited median=540s · killed=0"
+expect_eq "RU0 precondition: the record holds three reuse lines, one of them a skip naming the head" "3 1" \
+  "$(ru_n) $(/usr/bin/grep -c '^line/v1|ev=reused|.*|head=' "$S60_REC" | tr -d ' ')"
+rp_report --rows
+expect_eq "RU1 AC-1.4 landing-report exits 0 and prints reused=3 beside the runs, and absent=1, with no malformed line" \
+  "0|$RU_LINE|0" "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'malformed' | tr -d ' ')"
+expect_eq "RU2 …reused= equals the record's reuse lines" "$(ru_n)" "$(rp_line | sed -n 's/.* reused=\([0-9]*\) .*/\1/p')"
+expect_eq "RU3 the row that reused its suites and dropped one ran nothing: runs=0, and no promise line for the absent suite, while T1's runs print theirs" \
+  "T2 queue ready=2026-10-06T10:20:00Z landed=2026-10-06T10:30:00Z minutes=10.0 runs=0 waited=600s wait=10.0 prove=0.0 rework=0.0 width=-|2|0" \
+  "$(rp_rows | tr '|' '\n' | /usr/bin/grep '^T2 ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^  [ab]\.test\.sh green promised=' | tr -d ' ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^  c\.test\.sh ' | tr -d ' ')"
+# a reuse line with no suite= is malformed, as a verdict with none is
+rp_ev "ev=reused|row=T3|commit=$RU_C3|reads=$RU_K|from=$RP_C2|at=2026-10-06T10:43:00Z"
+rp_report
+expect_eq "RU4 a reuse line with no suite is skipped and counted malformed: reused= stays 3" \
+  "0|$RU_LINE|poker: landing-report — 1 malformed line/v1 line(s) skipped in $RP_ROOT/${S60_REC#"$R59W"/}" \
+  "$RC|$(rp_line)|$(printf '%s\n' "$OUT" | /usr/bin/grep 'malformed')"
+# the mutation arm: the reuse count removed
+RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-ru-mut.XXXXXX")"
+rd_mutant noreuse 's/^    ev == "reused" { nru++; next }$/    ev == "reused" { next }/'
+expect_eq "RU-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff "$POKER" "$RD_MUT/noreuse/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+ru_world ru-mut
+RU_REAL_POKER="$POKER"
+POKER="$RD_MUT/noreuse/hooks/session-poker.sh"; rp_report
+expect_eq "RU-mut1 the no-count mutant runs (exit 0) and prints reused=0 where RU1 reads 3 (RU1 goes red on it)" \
+  "0|0" "$RC|$(rp_line | sed -n 's/.* reused=\([0-9]*\) .*/\1/p')"
+POKER="$RU_REAL_POKER"; rp_report
+expect_eq "RU-mut2 …control: the real poker over the same record reads reused=3" "3" "$(rp_line | sed -n 's/.* reused=\([0-9]*\) .*/\1/p')"
+rm -rf "$RD_MUT"
+POKE_BOUND="$RU_BOUND_WAS"
+
+
+
+# ============================================================
 section "§FN-5: approve regression-2 is the user's word for ONE second whole run: the head it is given at is not read as covered before that run, the run is admitted, and a later head owes again (wave-38 T2; REQ-4 AC-4.5; wave-35 critic-adversarial.md#1)"
 # ============================================================
 # The approval used to waive the regression's reads arm plan-wide (lib/proof.sh `_proof_floor_judge`,
@@ -6520,10 +6687,11 @@ section "§FN-5: approve regression-2 is the user's word for ONE second whole ru
 # it, lib/proof.sh `proof_regression2_open`), and once that run's proof is written the approval is spent, so a later
 # head whose change no suite reads owes again and a third whole run is refused, naming the user's word for the
 # regression (`waive regression`).
-# FIXTURE FIDELITY: §FLOOR-RUN's shape: a stub tests/run.sh in the runner's output shape, one suite (a.test.sh, which
-# reads no file), s42_plan's plan bound to this session with its build rows landed, its working branch a linked
-# worktree. Each later change is a row's landing in the landing record's lib/line.sh shape (ready, published, a green
-# verdict of a.test.sh), so the walk reaches the reads arm: the file it changed is read by no suite it ran. The
+# FIXTURE FIDELITY: §FLOOR-RUN's shape: a stub tests/run.sh in the runner's output shape, two suites (a.test.sh, which
+# reads no file, and b.test.sh, which reads lib/y.sh and lib/z.sh), s42_plan's plan bound to this session with its build
+# rows landed, its working branch a linked worktree. Each later change is a row's landing in the landing record's
+# lib/line.sh shape (ready, published, a green verdict of a.test.sh), so the walk owes b.test.sh, which reads the file it
+# changed and which no row ran (wave-39 T24; D5: a file no suite reads would owe nothing). The
 # approval line is the approve verb's shape, planted at the instant (no row here reads approval:regression-2).
 # fails-when: the approved head reads covered; the second run is refused; the later head reads covered or a third
 # whole run runs.
@@ -6541,6 +6709,7 @@ printf 'Gating: 1 passed, 0 failed\n'
 exit 0
 F5_EOF
 printf '#!/bin/bash\nexit 0\n' > "$RF5/tests/a.test.sh"
+printf '#!/bin/bash\ncat "$(dirname "$0")/../lib/y.sh" "$(dirname "$0")/../lib/z.sh" >/dev/null\n' > "$RF5/tests/b.test.sh"
 ( cd "$RF5" && git add tests && git commit -qm suites ) >/dev/null 2>&1
 PF5="$(s42_plan "$RF5" 4)"; s42_builds_landed "$PF5"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF5" > "$PF5.tmp" && mv "$PF5.tmp" "$PF5"
@@ -6567,8 +6736,8 @@ poke "$RF5" proof-add regression "record/wave-01-fixture/regression-run-$F5_W.lo
 expect_eq "FN5-0 precondition: the first whole run ran once and its proof covers the working head" "1|covered	$F5_W" "$(f5_runs)|$(f5_state)"
 F5_C="$(f5_land T9 lib/y.sh)"
 F5_ST="$(f5_state)"
-expect_eq "FN5-0b precondition: a landing that changed lib/y.sh, which no suite it ran reads: uncovered" "uncovered" "${F5_ST%%	*}"
-expect_contains "FN5-0c …naming the reads arm and the approval" "lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$F5_ST"
+expect_eq "FN5-0b precondition: a landing that changed lib/y.sh, which b.test.sh reads and the row did not run: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-0c …naming the suite that reads it" "commit ${F5_C:0:12} (row T9) is not proved: b.test.sh has no run recorded at it or after it" "$F5_ST"
 poke "$RF5" regression-run
 expect_eq "FN5-1 with no approval a second whole run is refused, and nothing ran (exit 1)" "1|1" "$RC|$(f5_runs)"
 awk -v at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana " at " \"yes, run it again\""; d = 1 }' \
@@ -6581,8 +6750,8 @@ poke "$RF5" proof-add regression "record/wave-01-fixture/regression-run-$F5_C.lo
 expect_eq "FN5-3b …and its proof covers that head" "0|covered	$F5_C" "$RC|$(f5_state)"
 F5_D="$(f5_land T10 lib/z.sh)"
 F5_ST="$(f5_state)"
-expect_eq "FN5-4 AC-4.5 a later head whose change no suite reads owes again: uncovered" "uncovered" "${F5_ST%%	*}"
-expect_contains "FN5-4b …naming the commit and the file" "commit ${F5_D:0:12} (row T10) is not proved: lib/z.sh is read by no suite it ran" "$F5_ST"
+expect_eq "FN5-4 AC-4.5 a later head whose change a suite reads, unrun, owes again: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-4b …naming the commit and the suite" "commit ${F5_D:0:12} (row T10) is not proved: b.test.sh has no run recorded at it or after it" "$F5_ST"
 s42_snap "$RF5" "$PF5"
 poke "$RF5" regression-run
 s42_unchanged "FN5-5 AC-4.5 a third whole run, the approval spent by the second's proof" 1 "$PF5"
@@ -6590,5 +6759,171 @@ expect_eq "FN5-5b …and nothing ran" "2" "$(f5_runs)"
 expect_contains "FN5-5c …saying the approval is spent" "spent" "$OUT"
 expect_contains "FN5-5d …and naming the user's word for the regression" "waive regression" "$OUT"
 POKE_BOUND="$F5_BOUND_WAS"
+
+# ============================================================
+section "§HAND-SCAN: row-landed --by-hand runs the release check over the accepted range unless a passing kind=check proof stands at or past the commit (wave-39 T13; REQ-9 AC-9.1, AC-9.3; D14, D32)"
+# ============================================================
+#
+# Wave 38 gathered fourteen rows into one candidate, fast-forwarded the working branch by hand and
+# marked each row `row-landed --by-hand`, a route that ran no scan, so a private name reached history
+# (A-orch-71, A-orch-78; D32 rewrote 99 commits to purge it). With `release-check:` declared, the hand
+# verb now writes only when a passing `kind=check` proof stands at the commit or at a commit that
+# holds it; else it runs the declared check over the release range (the release-check verb's base, the
+# commit as the head, the working branch named for the rewrite) and refuses a failing one, printing
+# what the check printed: the hit, the commit and path that brought it, and the rewrite D32 ran.
+#
+# FIXTURE FIDELITY. §DELIVER's shape: a plan bound to this session, its working branch in a linked
+# worktree. The declared check is the real name scan (tests/lib/name-scan.sh) over a list kept outside
+# every checkout; the passing proof is written by the release-check verb itself, run with a list that
+# holds no planted name and then pointed back at the planted one. SYNTHESIZED: the planted string.
+HS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=240
+HS_NAME="zq-handscan-6620"
+HS_LISTS="$TMPROOT/hs-lists"; mkdir -p "$HS_LISTS"
+printf '%s\n' "$HS_NAME" > "$HS_LISTS/planted"; printf 'zq-nowhere-0000\n' > "$HS_LISTS/clean"
+HS_SCAN="${BIONIC_SCRIPTS_DIR}/tests/lib/name-scan.sh"
+RHS="$(make_repo hs-hand)"; ( cd "$RHS" && git commit -q --allow-empty -m init )
+git -C "$RHS" config user.name "Dana Fixture"
+HS_B="$(git -C "$RHS" rev-parse HEAD)"
+hs_plan() {  # <repo> -> the plan path: bound, committed; two build rows a hand landing marks
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")" "$1/.bionic/docs/specs/epic-99-fixture"
+  printf '# requirements\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${HS_B:0:8}"
+    printf -- '- T1: pending dispatch — .worktrees/01-T1\n- T2: pending dispatch — .worktrees/01-T2\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a gathered build | w-T1 | — | 30 | REQ-1 | lib/h.txt | 01-T1 | abc1234 | active |  |\n'
+    printf '| T2 | 4 | build | a later build | w-T2 | — | 30 | REQ-1 | lib/k.txt | 01-T2 | abc1234 | active |  |\n\n'
+    printf '## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n'
+    printf '| T1 | implementor (w-T1) | — | 30 min | — | — | batch 1 |\n'
+    printf '| T2 | implementor (w-T2) | — | 30 min | — | — | batch 1 |\n'
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  } > "$f"
+  bind_marker "$1" "$f"
+  ( cd "$1" && git add -f "$f" && git commit -qm plan ) >/dev/null 2>&1
+  printf '%s' "$f"
+}
+PHS="$(hs_plan "$RHS")"
+( cd "$RHS" && git worktree add -q -b wave/01-fixture "$RHS/.worktrees/01-fixture" "$(git rev-parse HEAD)" ) >/dev/null 2>&1
+HS_WT="$RHS/.worktrees/01-fixture"
+# the gathered landing: C1 brings the planted name, C2 takes it out again, so only history holds it
+HS_C1="$(s57_commit "$HS_WT" lib/h.txt "see $HS_NAME here")"
+HS_BLOB="$(git -C "$HS_WT" rev-parse HEAD:lib/h.txt | cut -c1-12)"
+printf 'clean\n' > "$HS_WT/lib/h.txt"; ( cd "$HS_WT" && git commit -qam "take it out" ) >/dev/null 2>&1
+HS_C2="$(git -C "$HS_WT" rev-parse HEAD)"
+hs_config() { printf 'release-check: bash %s %s\n' "$HS_SCAN" "$HS_LISTS/$1" > "$RHS/.bionic/config.yaml"; }
+hs_status() { s48_row "$PHS" "$1" | awk -F'|' '{ print $12 }'; }
+hs_snap() { cp "$PHS" "$TMPROOT/hs-before"; }
+hs_same() { cmp -s "$TMPROOT/hs-before" "$PHS" && echo same || echo changed; }
+expect_eq "HS-0 precondition: the planted name is in C1's blob and not in the head's tree" "1|0" \
+  "$(git -C "$HS_WT" show "$HS_C1:lib/h.txt" | grep -c -F "$HS_NAME")|$(git -C "$HS_WT" show "$HS_C2:lib/h.txt" | grep -c -F "$HS_NAME")"
+expect_eq "HS-0b precondition: the status extractor reads T1 active" "active" "$(hs_status T1)"
+expect_false "HS-0c precondition: the list directory is outside every checkout" git -C "$HS_LISTS" rev-parse --git-dir
+
+# ---------- the hit refuses the hand landing, naming it, and the plan is unchanged ----------
+hs_config planted
+hs_snap
+poke "$RHS" row-landed T1 "$HS_C2" 2026-10-04T04:00:00Z --by-hand "Dana Fixture" "gathered by hand"
+expect_eq "HS-1 §HAND-SCAN AC-9.1 a hand landing whose release range holds a planted name is refused (exit 1)" "1" "$RC"
+expect_eq "HS-1b …the plan byte-identical, T1 still active" "same active" "$(hs_same) $(hs_status T1)"
+expect_contains "HS-1c …naming the hit, by its blob" "HIT entry=1 at blob $HS_BLOB line 1" "$OUT"
+expect_contains "HS-1d AC-9.3 …and the commit and path that brought it" "  in commit ${HS_C1:0:12} path lib/h.txt" "$OUT"
+expect_contains "HS-1e AC-9.3 …and the rewrite D32 ran, over the working branch" \
+  "git filter-branch --tree-filter '<take the hit out of lib/h.txt>' -- ${HS_C1:0:12}^..wave/01-fixture &&" "$OUT"
+expect_contains "HS-1f …and the refusal says what refused" "REFUSED — row-landed --by-hand: the declared release-check" "$OUT"
+expect_contains "HS-1g …over the release range, from the base to the commit" "over ${HS_B:0:12}..${HS_C2:0:12}" "$OUT"
+expect_eq "HS-1h …and nothing it printed holds the planted name" "0" "$(printf '%s\n' "$OUT" | grep -c -i -F "$HS_NAME")"
+poke "$RHS" release-check
+expect_eq "HS-2 precondition: the release-check verb over the planted list fails (exit 1), writing a failing check fact" "1" "$RC"
+expect_contains "HS-2b …at the working head" "kind=check head=$HS_C2" "$(grep -F 'kind=check' "$PHS")"
+hs_snap
+poke "$RHS" row-landed T1 "$HS_C2" 2026-10-04T04:00:00Z --by-hand "Dana Fixture" "gathered by hand"
+expect_eq "HS-3 a failing check fact at the commit is no pass: still refused, the plan unchanged" "1 same active" "$RC $(hs_same) $(hs_status T1)"
+
+# ---------- a passing kind=check proof at or past the commit stands for the scan ----------
+HS_C3="$(s57_commit "$HS_WT" lib/k.txt "a later clean change")"
+hs_config clean
+poke "$RHS" release-check
+expect_eq "HS-4 precondition: the release-check verb over a clean list passes at C3, which holds C2 (exit 0)" "0" "$RC"
+expect_contains "HS-4b …writing its passing proof at C3" "kind=check head=$HS_C3" "$OUT"
+hs_config planted
+poke "$RHS" row-landed T1 "$HS_C2" 2026-10-04T04:00:00Z --by-hand "Dana Fixture" "gathered by hand"
+expect_eq "HS-5 §HAND-SCAN AC-9.1 with a passing kind=check proof past the commit the hand landing writes (exit 0, landed)" \
+  "0 landed" "$RC $(hs_status T1)"
+expect_contains "HS-5b …saying which proof it stood on" "${HS_C2:0:12} is held by the passing release check at ${HS_C3:0:12}" "$OUT"
+expect_absent "HS-5c …and it ran no scan" "HIT entry=" "$OUT"
+poke "$RHS" row-landed T2 "$HS_C3" 2026-10-04T04:10:00Z --by-hand "Dana Fixture" "landed by hand"
+expect_eq "HS-6 AC-9.1 a passing proof AT the commit stands too (exit 0, landed)" "0 landed" "$RC $(hs_status T2)"
+expect_contains "HS-6b …saying so" "${HS_C3:0:12} is held by the passing release check at ${HS_C3:0:12}" "$OUT"
+POKE_BOUND="$HS_BOUND_WAS"
+
+# ============================================================
+section "§HAND: row-landed --by-hand records the hand landing on the landing record, ev=published kind=hand, once, so landing-report lists the row and its hand-holds count it (wave-39 T10; D14; REQ-6 AC-6.2)"
+# ============================================================
+#
+# A landing the orchestrator makes by hand is marked on the plan with `row-landed <row> <commit> <at> --by-hand
+# <who> <why>`. Before wave 39 that wrote the plan's three lines and nothing to the landing record, so the run's
+# Landings and its hand-holds count missed every one (record/wave-39-landing-proof/landing-proofs.log: six kind=hand
+# lines tonight came only from the line's own hand landing). The verb now appends the line the line's hand landing
+# writes, `line/v1|ev=published|row=|commit=|kind=hand|by=|why=|at=`, at the landing's own instant, unless the record
+# already holds a published line for that row and commit: the line's `land --by-hand` writes its event, then runs
+# this verb, and one landing is one line.
+#
+# FIXTURE FIDELITY. §DELIVER's plan builder (`dv_plan`) in a repository of its own; the record line the line writes
+# is copied from lib/line.sh `line_publish`'s `_wt_proofs_put` call, field for field.
+HD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RHD="$(make_repo hd-hand)"; ( cd "$RHD" && git commit -q --allow-empty -m init )
+git -C "$RHD" config user.name "Dana Fixture"
+HD_DVB_WAS="$DV_B"; DV_B="$(git -C "$RHD" rev-parse HEAD)"
+PHD="$(dv_plan "$RHD")"
+DV_B="$HD_DVB_WAS"
+HD_C="$(git -C "$RHD" rev-parse HEAD)"
+HD_C2="$(printf 'e%.0s' $(seq 40))"
+HD_REC="$RHD/$DV_REL/landing-proofs.log"; mkdir -p "${HD_REC%/*}"
+hd_pub()   { [ -f "$HD_REC" ] || { echo 0; return 0; }; /usr/bin/grep -c '^line/v1|ev=published|' "$HD_REC" | tr -d ' '; }   # -> published lines in the record
+hd_step()  { /usr/bin/grep -E "^- $1: " "$PHD" | head -1; }
+hd_holds() { poke "$RHD" landing-report --hand-holds "$PHD"; printf '%s\n' "$OUT" | /usr/bin/grep -oE 'by-hand=[0-9]+' | head -1; }
+
+expect_eq "HD-0 precondition: the record holds no published line, and the hand-holds line reads by-hand=0 (its extractor proved on the verb's own line)" \
+  "0|by-hand=0" "$(hd_pub)|$(hd_holds)"
+poke "$RHD" row-landed T8 "$HD_C" 2026-10-04T05:00:00Z --by-hand "Dana Fixture" "merged by hand on its in-tree greens"
+expect_eq "HD-1 row-landed --by-hand exits 0 and writes the plan's hand-landing line" \
+  "0|- T8: landed-by-hand: Dana Fixture 2026-10-04T05:00:00Z \"merged by hand on its in-tree greens\"" "$RC|$(hd_step T8)"
+expect_eq "HD-2 AC-6.2 …and the landing record gains one ev=published line, kind=hand, at the landing's own instant, in the line's field order" \
+  "line/v1|ev=published|row=T8|commit=$HD_C|kind=hand|by=Dana Fixture|why=merged by hand on its in-tree greens|at=2026-10-04T05:00:00Z" \
+  "$(/usr/bin/grep '^line/v1|ev=published|' "$HD_REC" 2>/dev/null)"
+expect_eq "HD-3 AC-6.2 landing-report --hand-holds counts it: by-hand=1" "by-hand=1" "$(hd_holds)"
+poke "$RHD" landing-report --rows "$PHD"
+expect_eq "HD-4 …and landing-report's landings line and its rows list the row as a hand landing" \
+  "hand=1|T8 hand ready=- landed=2026-10-04T05:00:00Z" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'hand=[0-9]+' | head -1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^T8 ' | cut -d' ' -f1-4)"
+dv_snap_hd() { cp "$PHD" "$TMPROOT/hd-before"; }
+dv_snap_hd
+poke "$RHD" row-landed T8 "$HD_C" 2026-10-04T05:00:00Z --by-hand "Dana Fixture" "merged by hand on its in-tree greens"
+expect_eq "HD-5 the same hand landing again: exit 0, the plan byte-identical, still one published line" \
+  "0|same|1" "$RC|$(cmp -s "$TMPROOT/hd-before" "$PHD" && echo same || echo changed)|$(hd_pub)"
+# The line's own hand landing writes its published line first, then runs this verb: one landing, one line.
+printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=Dana Fixture|why=the line landed it|at=2026-10-04T06:00:00Z\n' "$HD_C2" >> "$HD_REC"
+poke "$RHD" row-landed T9 "$HD_C2" 2026-10-04T06:00:00Z --by-hand "Dana Fixture" "the line landed it"
+expect_eq "HD-6 a hand landing the line already recorded (its published line for that row and commit) is not recorded twice" \
+  "0|1|2|by-hand=2" \
+  "$RC|$(/usr/bin/grep -c '^line/v1|ev=published|row=T9|' "$HD_REC" | tr -d ' ')|$(hd_pub)|$(hd_holds)"
+poke "$RHD" row-landed T12 "$HD_C" 2026-10-04T07:00:00Z
+expect_eq "HD-7 a landing not by hand (the queue's, whose publish writes its own line) adds no line here" \
+  "0|2" "$RC|$(hd_pub)"
+POKE_BOUND="$HD_BOUND_WAS"
 
 finish

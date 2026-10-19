@@ -34,7 +34,7 @@ shell_rc_file() {
 # BIONIC_SHELL_RC override) goes by $SHELL exactly as the resolver above does. It
 # is the shell asked, with `-n` on a staged copy, whether the rc still parses when
 # bionic takes a line out (markers.sh `bionic_rc_alone`). remove.sh carries it
-# under the same name, pinned by tests/rc-item.test.sh §T66.
+# under the same name, pinned by tests/rc-item-1.test.sh §T66.
 bionic_rc_shell() {  # <rc> — zsh or bash
   local shell_name="${SHELL:-/bin/bash}"
   case "${1##*/}" in

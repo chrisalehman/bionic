@@ -42,6 +42,34 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
+# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
+# directly or through the hooks and scripts it runs: row-landed, rule, ruling-ack, rulings. Each line below is
+# that closure: the library (every run executes it), the arm of each verb, the sections defining the globals
+# they read, and each helper outside those.
+reads hooks/session-poker.sh section "the library"
+reads hooks/session-poker.sh section "the contract grammar"
+reads hooks/session-poker.sh section "the plan transaction"
+reads hooks/session-poker.sh section "the call a refusal names"
+reads hooks/session-poker.sh verb row-landed
+reads hooks/session-poker.sh verb rule
+reads hooks/session-poker.sh verb ruling-ack
+reads hooks/session-poker.sh verb rulings
+reads hooks/session-poker.sh fn adopt_copy_marker
+reads hooks/session-poker.sh fn adopt_fold
+reads hooks/session-poker.sh fn adopt_write_row
+reads hooks/session-poker.sh fn clean
+reads hooks/session-poker.sh fn deliver_check
+reads hooks/session-poker.sh fn file_mtime
+reads hooks/session-poker.sh fn iso_now
+reads hooks/session-poker.sh fn launch_sync_ledger
+reads hooks/session-poker.sh fn line_field
+reads hooks/session-poker.sh fn note
+reads hooks/session-poker.sh fn pair
+reads hooks/session-poker.sh fn parse_seconds
+reads hooks/session-poker.sh fn row_has_key
+reads hooks/session-poker.sh fn row_writer
+reads hooks/session-poker.sh fn tmp_dir_ok
+
 command -v jq >/dev/null 2>&1 || { echo "inbox: jq absent — suite cannot run"; exit 1; }
 
 POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
@@ -68,7 +96,7 @@ world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
 # ---------------------------------------------------------------------------- helpers
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# A world whose plan the commit gate admits (the shape tests/landing-line.test.sh's `ll_world` plants),
+# A world whose plan the commit gate admits (the shape tests/landing-line.prelude.sh's `ll_world` plants),
 # its two rows' launch lines on the roster with ids and the suite they land on, and a third writer,
 # wx-T3, whose row is closed: acked in the sweeper ledger after its launch.
 in_world() {  # -> the world root

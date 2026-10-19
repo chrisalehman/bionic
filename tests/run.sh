@@ -106,6 +106,18 @@
 # what changed is that the report is true.
 #
 set -uo pipefail
+# THE LAUNCHER RESETS HUP, INT AND QUIT (wave-39 T14; D17, AC-10.1; A-orch-69). A shell that starts with a signal
+# ignored can neither trap it nor be ended by it, and the ignored state is inherited by every process below: the
+# whole run at d3c4ed2e started with HUP, INT and QUIT ignored (a nohup'd or backgrounded start), so no suite could
+# trap them and each carried its own perl reset. A bash cannot un-ignore a signal it inherited ignored; perl can.
+# So this runner, at entry and before it reads anything, execs itself ONCE through a perl that sets the three to
+# their defaults. The sentinel marks the second pass and is unset at once, so no argument, no environment variable
+# and no exit code of the run differs from a run started with the three at their defaults (the workers xargs forks
+# below start this file again and pass through it again). No perl on PATH: the run goes on as it was started.
+if [ -z "${_BIONIC_RUN_SIGDFL:-}" ] && command -v perl >/dev/null 2>&1; then
+  _BIONIC_RUN_SIGDFL=1 exec perl -e '$SIG{$_} = "DEFAULT" for qw(HUP INT QUIT); exec { $ARGV[0] } @ARGV; exit($!{ENOENT} ? 127 : 126)' -- "$BASH" "${BASH_SOURCE[0]}" "$@"
+fi
+unset _BIONIC_RUN_SIGDFL
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"

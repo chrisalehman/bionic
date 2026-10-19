@@ -1027,3 +1027,9 @@ case "${0##*/}" in
     }
     unset _tf_wall_line ;;
 esac
+
+# THE NARROWING DECLARATION IS A NO-OP AT RUN TIME (wave-39 T3's concern for T5; D6, REQ-2 AC-2.1).
+# `reads <file> fn <name>` and `reads <file> section <label>` are read off the suite's text by the
+# anchor extractor (lib/anchors.sh `reads_declared`), never executed for effect; without this
+# definition the runner's lost-command scan fails a declaring suite on `reads: command not found`.
+reads() { :; }

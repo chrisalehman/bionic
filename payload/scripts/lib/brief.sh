@@ -56,7 +56,7 @@
 # BASH 3.2. SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME.
 #
 # [WALL: tests/dispatch-preflight.test.sh]
-# [WALL: tests/cross-gate-agreement.test.sh]
+# [WALL: tests/cross-gate-agreement-2.test.sh]
 
 _brief_self_dir() {
   local self="${BASH_SOURCE[0]}"
@@ -1313,7 +1313,8 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17): `Row: <id>` and
       # `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>`, each on a line of its own, read
       # as Questions: is: a fenced line is an example, a trailing ` # ...` comment comes off, and an
-      # unfilled slot declares nothing. `row=` is the first word. `lands_on=` is written in ONE
+      # unfilled slot declares nothing. `row=` is the first word. A backticked command (wave-39 T20) is one entry,
+      # encoded by suite.sh `lands_cmd`; the wall holds it to the Re-executes: runs. `lands_on=` is written in ONE
       # spelling, the one the line decodes (`_line_suites`): a bare suite as `<name>.test.sh`, a
       # path-qualified one at its declared path, `<dir>/<name>.test.sh` (wave-34 T27: ready runs
       # exactly that file, never a same-named tests/<name>), comma-joined. A word that is no suite name
@@ -1342,10 +1343,25 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
             print "lands_on=none"
             if (v ~ /[A-Za-z0-9]/) print "lands_on_reason=" v
           } else {
-            nlw = split(v, LW, /[ \t,]+/); lo = ""; lbad = ""
+            # A BACKTICKED COMMAND IS ONE ENTRY, IN ITS PLACE (wave-39 T20; D20, AC-14.3): the text between two marks,
+            # stored through the one run rule as a Re-executes: run is (`collapse(t, 1)`), so the wall can find it
+            # among the runs, and written as suite.sh `lands_cmd` spells it. An unclosed mark leaves the rest as
+            # words, read as they were before (trimtok takes the mark off a word).
+            nlw = 0; split("", LW); lorest = v
+            while ((lok = index(lorest, BT)) > 0) {
+              lonw = split(substr(lorest, 1, lok - 1), LOX, /[ \t,]+/)
+              for (i = 1; i <= lonw; i++) LW[++nlw] = LOX[i]
+              lorest = substr(lorest, lok + 1); lok = index(lorest, BT)
+              if (lok == 0) { lorest = BT lorest; break }
+              t = collapse(substr(lorest, 1, lok - 1), 1); lorest = substr(lorest, lok + 1)
+              if (t != "") LW[++nlw] = lands_cmd(t)
+            }
+            lonw = split(lorest, LOX, /[ \t,]+/)
+            for (i = 1; i <= lonw; i++) LW[++nlw] = LOX[i]
+            lo = ""; lbad = ""
             for (i = 1; i <= nlw; i++) {
-              t = trimtok(LW[i]); if (t == "") continue
-              t = suite_name(t)
+              if (lands_cmd_entry(LW[i])) t = LW[i]
+              else { t = trimtok(LW[i]); if (t == "") continue; t = suite_name(t) }
               if (t != "") {
                 if (index("," lo ",", "," t ",") == 0) lo = (lo == "" ? t : lo "," t)
               } else if (index(" " lbad " ", " " LW[i] " ") == 0) lbad = (lbad == "" ? LW[i] : lbad " " LW[i])

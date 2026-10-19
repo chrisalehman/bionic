@@ -21,7 +21,8 @@
 #                  and with it within=<seconds>, the row's window (its lease's span, else the ask's
 #                  --within), and record=<path>, its landing record (BIONIC_GATE_RECORD) (wave-38 T31)
 #                  handed back (holder=-), left=<epoch>, when (wave-38 T31)
-#                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>,
+#                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>
+#                  and load=<busy cores>, the 1-minute reading it was admitted on (wave-39 T8; D11),
 #                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed;
 #                  rc=gone when its holder died before it was admitted, written at its who's next
 #                  ask for the key), and by=<sid> why=<reason> when stop-run ended it (D8).
@@ -30,7 +31,9 @@
 #                  add one.
 #   cost/<project>%<key>
 #                  the key's recent DURATIONS, the only history the gate keeps (wave-33 T1; D4 as
-#                  amended, Δ10; AC-8.6): at most three lines, newest last, <seconds>:<epoch>. A
+#                  amended, Δ10; AC-8.6): at most three lines, newest last, <seconds>:<epoch>, and
+#                  since wave-39 T8 (D11) <seconds>:<epoch>:<load>, the load its run was admitted under,
+#                  which `_gate_seconds` scales the promise by (a line with no load scales by 1). A
 #                  `/` in the key is written `%` in the file's name. <project> is the asking
 #                  checkout's project key (`_gate_project`), so two projects' runs of one command
 #                  keep separate durations. A file with no project key, which 1.15.0 and before
@@ -153,11 +156,13 @@
 #             suite, resources.sh's `_res_suite_cores` (wave-38 T5; D21, ADR-060: 1.61 where
 #             one core was promised before, so the gate stops admitting more suites than the
 #             machine carries); a whole run the width it takes, gate_width. Live load is the backstop: the readings above. The
-#             seconds are the key's recorded duration (`_gate_seconds`), which the landing's
+#             seconds are the key's recorded duration (`_gate_seconds`), scaled by the load now over the
+#             load each run was admitted under (wave-39 T8; D11), which the landing's
 #             time limit reads (line.sh `_line_time_for`), 0 with none. While the memory
 #             reading is unknown (-1) a command is admitted only when nothing admitted is
 #             unfinished. A whole request admitted is admitted alone.
-#   duration  at gate_end: the seconds from admitted to ended, one line in the key's keyed file.
+#   duration  at gate_end: the seconds from admitted to ended, one line in the key's keyed file,
+#             with the request's load= after them (wave-39 T8; D11).
 #             A run of zero seconds has no measured time and writes none.
 #   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
@@ -210,6 +215,20 @@ if ! type -t _slots_live >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/slots.sh" ]; th
   # shellcheck disable=SC1091
   . "$_GATE_LIB_DIR/slots.sh"
 fi
+# An instant has one reader, lib/time.sh's (wave-39 T17; D18): the finished-row read below dates the record by it.
+if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$_GATE_LIB_DIR/time.sh"
+fi
+# THE LANDING KEY AND THE LANDING RECORD ARE lib/line.sh's (wave-39 T17; D18, AC-12.1): its alphabet (`landing_key`,
+# `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`). Loaded when first needed, never at source: line.sh
+# sources the worktree library, and most of the gate's callers ask about no landing.
+_gate_load_line() {  # -> 0 once lib/line.sh's key and reader are loaded
+  declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ] && return 0
+  # shellcheck disable=SC1091
+  [ -r "$_GATE_LIB_DIR/line.sh" ] && . "$_GATE_LIB_DIR/line.sh" 2>/dev/null
+  declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ]
+}
 
 _GATE_KEEP_DEFAULT=86400   # seconds a request that is no longer open is kept (BIONIC_GATE_KEEP's default)
 _GD=""        # the store, set by each verb
@@ -309,7 +328,7 @@ _gate_ancestor() {
 _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins); rc 1 unreadable
   local l
   _R_key='' _R_kind='' _R_who='' _R_tree='' _R_asked='' _R_holder='' _R_admitted=''
-  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left=''
+  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left='' _R_load=''
   [ -r "$1" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in
@@ -327,6 +346,7 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
       within=*) _R_within="${l#within=}" ;;
       record=*) _R_record="${l#record=}" ;;
       left=*) _R_left="${l#left=}" ;;
+      load=*) _R_load="${l#load=}" ;;
     esac
   done < "$1"
 }
@@ -425,17 +445,43 @@ _gate_cores_for() {
 # largest at or below twice their median; with fewer, the largest. The largest alone let one run
 # under three-builder contention (1775 s beside 760 and 669) promise past `ready --within 1700`, so
 # no ready could start the suite; the median alone would promise less than a run still in range.
-_gate_seconds() {
-  local f
+# THE PROMISE CARRIES ITS LOAD (wave-39 T8; D11, REQ-4 AC-4.1). A keyed line may carry a third field, the load
+# its run was admitted under (`<seconds>:<epoch>:<load>`, gate_end). With three or more kept and EVERY one
+# loaded, the promise is the median of the durations each scaled by <load now> over its own load (a load
+# below one counts as one; the factor clamped to 0.5..4), bounded above by the largest kept, rounded up. A
+# line with no load scales by 1: until three loaded lines are kept, or when the load now cannot be read
+# (empty, `-`), the promise is the rule above, as before. The unkeyed 1.15.0 file is never loaded.
+# <load now> defaults to `_res_busy_cores`, the gate's own 1-minute reading.
+_gate_seconds() {  # <key> <project> [<load now>]
+  local f keyed=1 now
   f="$(_gate_cost_file "$1" "$2")"
-  [ -s "$f" ] || f="$_GD/cost/${1//\//%}"
+  [ -s "$f" ] || { f="$_GD/cost/${1//\//%}"; keyed=0; }
   [ -s "$f" ] || { echo 0; return 0; }
-  awk -F: '{ v[++n] = (NF >= 3 ? $3 : $1) + 0 }
+  if [ "$#" -ge 3 ]; then now="$3"; else now="$(_res_busy_cores 2>/dev/null)"; fi
+  awk -F: -v keyed="$keyed" -v now="$now" '
+    function num(s) { return s ~ /^[0-9]+(\.[0-9]+)?$/ }
+    function sortv(a, n,   i, j, x) { for (i = 2; i <= n; i++) { x = a[i]; for (j = i - 1; j >= 1 && a[j] > x; j--) a[j + 1] = a[j]; a[j + 1] = x } }
+    function median(a, n) { return (n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2) }
+    { n++
+      if (keyed) { v[n] = $1 + 0; if (NF >= 3 && num($3)) { ld[n] = $3 + 0; nl++ } }
+      else v[n] = (NF >= 3 ? $3 : $1) + 0 }
     END {
-      for (i = 2; i <= n; i++) { x = v[i]; for (j = i - 1; j >= 1 && v[j] > x; j--) v[j + 1] = v[j]; v[j + 1] = x }
+      if (n >= 3 && nl == n && num(now)) {
+        nw = (now + 0 < 1 ? 1 : now + 0); mx = 0
+        for (i = 1; i <= n; i++) {
+          th = (ld[i] < 1 ? 1 : ld[i])
+          f = nw / th
+          if (f < 0.5) f = 0.5; if (f > 4) f = 4
+          s[i] = v[i] * f; if (v[i] > mx) mx = v[i]
+        }
+        sortv(s, n); m = median(s, n); if (m > mx) m = mx
+        c = int(m); if (c < m) c++
+        printf "%d\n", c; exit
+      }
+      sortv(v, n)
       m = (n > 0 ? v[n] : 0)
       if (n >= 3) {
-        med = (n % 2 ? v[(n + 1) / 2] : (v[n / 2] + v[n / 2 + 1]) / 2)
+        med = median(v, n)
         for (i = n; i >= 1; i--) if (v[i] <= 2 * med) { m = v[i]; break }
       }
       printf "%d\n", m
@@ -453,8 +499,12 @@ gate_promise() {
   _gate_promise "$1"
 }
 
-_gate_promise() {
-  printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}")" "$(_gate_seconds "$1" "$(_gate_project "${2:-}")")"
+_gate_promise() {  # <key> [<tree>] [<kind>] [<load now>] — the load now as `_gate_seconds` reads it when not given
+  if [ "$#" -ge 4 ]; then
+    printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}")" "$(_gate_seconds "$1" "$(_gate_project "${2:-}")" "$4")"
+  else
+    printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}")" "$(_gate_seconds "$1" "$(_gate_project "${2:-}")")"
+  fi
 }
 
 # _gate_scan — under the lock: tallies the open requests (`_gate_open`). Sets
@@ -543,8 +593,8 @@ _gate_scan() {
 # ask (AC-6.2), and nothing ended it once the row was done: 51 such requests, from rows already landed,
 # sat in the store. The scan ends a landing request (kind=landing) that is not open when
 #   row-finished  the landing record it named (record=) shows its row published, returned or stalled
-#                 after its asked= (line.sh writes `line/v1|ev=<ev>|row=<row>|…|at=<ISO UTC>`; the row
-#                 is the landing key's last `:` field, spelt in the key's alphabet), or
+#                 after its asked= (the record as line.sh's reader reads it, by name; the row is the landing
+#                 key's last `:` field, spelt in the key's alphabet by line.sh `landing_key`), or
 #   holder-gone   its holder has been gone longer than its window: since left= (the hand-back), or
 #                 asked= for a holder that died uncleared; the window within= (A-T31-3), 1800 s when the
 #                 request records none. A landing request that names no landing (asked before
@@ -573,30 +623,31 @@ _gate_landing_end() {  # <file>, after _gate_read: rc 0 when it was ended here (
   printf 'ended=%s\nrc=gone\nby=gate\nwhy=%s\n' "$now" "$why" >> "$1"
 }
 # _gate_row_done <record> <row> <asked epoch> — rc 0 when <record> shows <row> published, returned or
-# stalled after <asked>. The record's finishing events are read once a scan (_G_DONE_FOR, _G_DONE).
+# stalled after <asked>. The record's finishing events are read once a scan (_G_DONE_FOR, _G_DONE): line.sh's
+# reader reads each line by name (`_LINE_FIELDS_AWK`, never `$2 == "ev=…"`), lib/time.sh dates its at= (an
+# instant that is not one finishes nothing), and each row's latest finish is kept. Each row= is then written in
+# the landing key's alphabet by line.sh `landing_key`, the function the key itself was written by, so a row
+# keyed under one locale is matched under any other (wave-39 T17; D18, AC-12.1). No record reader of its own.
 _gate_row_done() {
+  local l ep
   if [ "$_G_DONE_FOR" != "$1" ]; then
-    _G_DONE_FOR="$1"
-    _G_DONE="$(awk -F'|' '
-      function ep(s,   y, m, d, era, yoe, doy, doe) {
-        y = substr(s, 1, 4) + 0; m = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
-        if (m <= 2) y--
-        era = int(y / 400); yoe = y - era * 400
-        doy = int((153 * ((m + 9) % 12) + 2) / 5) + d - 1
-        doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
-        return (era * 146097 + doe - 719468) * 86400 + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2)
+    _G_DONE_FOR="$1"; _G_DONE=''
+    _gate_load_line && [ -n "${_TIME_ISO_AWK:-}" ] || return 1
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      ep="${l%%$'\t'*}"
+      landing_key "${l#*$'\t'}" l
+      _G_DONE="${_G_DONE}${l} ${ep}
+"
+    done <<EOF
+$(awk -F'|' "$_TIME_ISO_AWK$_LINE_FIELDS_AWK"'
+      { ev = line_ev() }
+      ev == "published" || ev == "returned" || ev == "stalled" {
+        r = line_kv("row"); e = iso2epoch(line_kv("at"))
+        if (r != "" && e >= 0 && (!(r in last) || e > last[r])) last[r] = e
       }
-      substr($0, 1, 8) != "line/v1|" { next }
-      $2 == "ev=published" || $2 == "ev=returned" || $2 == "ev=stalled" {
-        r = ""; a = ""
-        for (i = 3; i <= NF; i++) {
-          if (index($i, "row=") == 1) r = substr($i, 5)
-          else if (index($i, "at=") == 1) a = substr($i, 4)
-        }
-        if (r == "" || a !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) next
-        gsub(/[^A-Za-z0-9._:\/+-]/, "_", r)
-        print r, ep(a)
-      }' "$1" 2>/dev/null)"
+      END { for (r in last) printf "%d\t%s\n", last[r], r }' "$1" 2>/dev/null)
+EOF
   fi
   [ -n "$_G_DONE" ] || return 1
   printf '%s\n' "$_G_DONE" | awk -v r="$2" -v a="$3" '$1 == r && $2 + 0 > a + 0 { f = 1 } END { exit !f }'
@@ -651,19 +702,22 @@ gate_usage() {
 
 # _gate_decide <id> — under the lock: rc 0 when this call admitted <id>.
 _gate_decide() {
-  local f="$_GD/requests/$1" reading p now
+  local f="$_GD/requests/$1" reading p now busy
   reading="$(_gate_reading)"
   _gate_scan
   _gate_idle "$reading"
   [ "$(_gate_head)" = "$1" ] || return 1
   [ "$_G_WHOLE" -eq 0 ] || return 1
   _gate_read "$f" || return 1
-  p="$(_gate_promise "$_R_key" "$_R_tree" "$_R_kind")"
+  # ONE READING OF THE LOAD (wave-39 T8; D11): the processor's busy cores decide the admission, scale the
+  # promise's seconds, and are recorded as the run's load= for its cost line.
+  busy="$(_res_busy_cores 2>/dev/null)"
+  p="$(_gate_promise "$_R_key" "$_R_tree" "$_R_kind" "$busy")"
   if [ "$_G_UNF" -gt 0 ]; then
     [ "$reading" -ge 0 ] || return 1
   fi
   printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" \
-      -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores)" -v unf="$_G_UNF" -v p="$p" "$_GATE_FITS_AWK"'
+      -v lim="$(_gate_share_cores)" -v busy="$busy" -v unf="$_G_UNF" -v p="$p" "$_GATE_FITS_AWK"'
     NF >= 2 { sc += $2 }
     END {
       split(p, n, ":")
@@ -674,6 +728,7 @@ _gate_decide() {
     }' || return 1
   now="$(_res_now)"
   printf 'admitted=%s\npromise=%s\n' "$now" "$p" >> "$f"
+  case "$busy" in ''|.|*.*.*|*[!0-9.]*) : ;; *) printf 'load=%s\n' "$busy" >> "$f" ;; esac
   return 0
 }
 
@@ -994,10 +1049,10 @@ _gate_term_end() {  # <id> <admitted: 0|1> — TERM came while gate_ask waited: 
   kill -TERM "$(exec sh -c 'echo "$PPID"')" 2>/dev/null
 }
 
-# _gate_landing_ok <key> — rc 0 when <key> is a landing key: 1 to 128 of A-Z a-z 0-9 . _ : / + -
+# _gate_landing_ok <key> — rc 0 when <key> is a landing key: lib/line.sh `landing_key_ok`, the one alphabet
+# (wave-39 T17; D18, AC-12.1). This spelt the alphabet itself as a bash pattern, whose ranges a UTF-8 locale widened.
 _gate_landing_ok() {
-  case "${1:-}" in ''|*[!A-Za-z0-9._:/+-]*) return 1 ;; esac
-  [ "${#1}" -le 128 ]
+  _gate_load_line && landing_key_ok "${1:-}"
 }
 
 # ── the verbs ────────────────────────────────────────────────────────────────
@@ -1077,7 +1132,7 @@ gate_ask() {
 }
 
 gate_end() {
-  local id="${1:-}" rc="${2:-}" f now secs reading cf i=0 by='' why='-'
+  local id="${1:-}" rc="${2:-}" f now secs reading cf ld i=0 by='' why='-'
   case "$id" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
   case "$rc" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
   shift 2
@@ -1116,10 +1171,12 @@ gate_end() {
   fi
   # THE ONE THING LEARNED (wave-33 T1; D4 as amended, Δ10; AC-8.6): the run's seconds, in the
   # key's keyed file, newest last, three kept, for the landing's time limit. A run of zero
-  # seconds (wave-32 T1; D5) has no measured time and writes none.
+  # seconds (wave-32 T1; D5) has no measured time and writes none. The line carries the load the run was
+  # admitted under (wave-39 T8; D11), `:<load>`, when its request recorded one (`_gate_decide`'s load=).
   if [ "$secs" -gt 0 ]; then
+    case "$_R_load" in ''|.|*.*.*|*[!0-9.]*) ld='' ;; *) ld=":$_R_load" ;; esac
     { cat "$cf" 2>/dev/null
-      printf '%s:%s\n' "$secs" "$now"
+      printf '%s:%s%s\n' "$secs" "$now" "$ld"
     } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$cf"
   fi
   reading="$(_gate_reading)"

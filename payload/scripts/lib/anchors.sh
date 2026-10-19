@@ -28,6 +28,36 @@
 # <at> is `-` for the files under <root> as they stand, or a commit read out of git's objects (the
 # landing's candidate, which no checkout holds). Exposed as `session-poker.sh anchors check|index`.
 #
+# THE NARROWING DECLARATION (wave-39 T3; D6, REQ-2 AC-2.1) is read by the same extractor, beside `anchor`:
+#
+#   reads <file> fn <function>        the suite reads only <function>'s body in <file>
+#   reads <file> section <label>      the suite reads only the section of <file> under the banner
+#                                     `# ----- <label>` (a comment line opening on five or more `-` or `=`,
+#                                     the label after them, a trailing rule dropped; it runs to the next
+#                                     labelled banner at its own indentation or less, or the file's end)
+#   reads <file> verb <name>          the suite reads only the case arms of <file> labelled <name> (wave-39
+#                                     T43; A-orch-22): in each top-level case block (`case … in` to `esac`,
+#                                     both at column 0), an arm is a line at the block's arm indentation (that
+#                                     of the first line after `case` that is neither blank nor a comment)
+#                                     whose trimmed text is a label list ending `)`, `<name>)` or `a|<name>)`;
+#                                     it runs to the first `;;` (or `;&`, `;;&`) no deeper than the arm's body
+#                                     (its first line neither blank nor a comment; a nested case's `;;` is
+#                                     deeper), else to the line before the next arm or the block's `esac`. Every such arm, in
+#                                     every top-level block, is the declaration's span: a dispatcher's parse
+#                                     arm and its exec arm both. A nested case's arms sit deeper and are not
+#                                     arms of the block; a one-line arm (`<name>) cmd ;;`) is not an arm here
+#
+# one per line, literal words (a label with spaces is quoted), in a tests/*.test.sh suite. The finder
+# locates each at <at>: a function by the same head-and-body rule `anchor fn` counts with; exactly one
+# match (for a verb, one or more arms; none is `noverb`), or the declaration is refused (rc 1, `anchors: reads_index refused <suite>:<line>: …` on
+# stderr) and the suite reads that whole file. The tool never guesses (D6): no declaration, no narrowing.
+#
+#   reads_declared <root> <at>   one line per declaration:
+#       <suite> TAB <line> TAB fn|section|verb TAB <file> TAB <name> TAB <verdict> TAB <start> TAB <end>
+#       <verdict> is `ok` with the located span's first and last line, or why it is refused
+#       (`nofile`, `nofn`, `nosection`, `noverb`, `ambiguous:<n>`, `nonliteral`) with `-` for both lines;
+#       a verb prints one `ok` line per arm, in file order
+#
 # A SUITE IS THE FILE THAT DECLARES (D3 "1", design-ledger Δ2): any *.sh under <root> that git tracks,
 # or holds untracked and unignored, and that carries a shaped call, keyed on its path from the root —
 # never on a `.test.sh` suffix, so a suite outside tests/ is indexed by its own path. A call inside a
@@ -40,16 +70,18 @@
 
 ANCHORS_CALL_ERE='^[[:space:]]*anchor[[:space:]]+(file|fn|insert)[[:space:]]'
 
-# The root-relative path of each *.sh under <root> carrying a shaped call, sorted.
-_anc_files() {  # <root> <at>
-  local root="$1" at="$2" p
+READS_DECL_ERE='^[[:space:]]*reads[[:space:]]+[^[:space:]]+[[:space:]]+(fn|section|verb)([[:space:]]|$)'
+
+# The root-relative path of each *.sh under <root> with a line matching <ERE> (a shaped call by default), sorted.
+_anc_files() {  # <root> <at> [<ERE>]
+  local root="$1" at="$2" ere="${3:-$ANCHORS_CALL_ERE}" p
   if [ "$at" != - ]; then
-    git -C "$root" grep -l -E -e "$ANCHORS_CALL_ERE" "$at" -- '*.sh' 2>/dev/null \
+    git -C "$root" grep -l -E -e "$ere" "$at" -- '*.sh' 2>/dev/null \
       | while IFS= read -r p; do printf '%s\n' "${p#"$at":}"; done
   elif git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$root" grep -l -E --untracked -e "$ANCHORS_CALL_ERE" -- '*.sh' 2>/dev/null
+    git -C "$root" grep -l -E --untracked -e "$ere" -- '*.sh' 2>/dev/null
   else
-    ( cd "$root" 2>/dev/null && find . -type f -name '*.sh' -exec grep -lE -e "$ANCHORS_CALL_ERE" {} + 2>/dev/null ) \
+    ( cd "$root" 2>/dev/null && find . -type f -name '*.sh' -exec grep -lE -e "$ere" {} + 2>/dev/null ) \
       | sed 's|^\./||'
   fi | LC_ALL=C sort -u
 }
@@ -162,7 +194,18 @@ hd != "" {
 {
   line = $0; ln = NR
   if (line ~ /^[ \t]*#/) next
-  if (line ~ /^[ \t]*anchor[ \t]+(file|fn|insert)[ \t]/) {
+  if (mode == "reads") {
+    if (line ~ /^[ \t]*reads[ \t]+[^ \t]+[ \t]+(fn|section|verb)([ \t]|$)/) {
+      while (line ~ /\\$/ && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
+      n = tok(line)
+      kind = TW[3]; f = TW[2]; nm = TW[4]
+      ok = (n == 4 && TL[2] && TL[4] && f != "" && nm != "" && substr(f, 1, 1) != "/" \
+            && index(f, "\t") == 0 && index(nm, "\t") == 0 && index(f, "#") == 0)
+      if (kind == "fn" || kind == "verb") ok = ok && nm !~ /[^A-Za-z0-9_:.-]/
+      if (ok) print suite "\t" ln "\t" kind "\t" f "\t" nm "\tliteral"
+      else print suite "\t" ln "\t" kind "\t-\t-\tnonliteral"
+    }
+  } else if (line ~ /^[ \t]*anchor[ \t]+(file|fn|insert)[ \t]/) {
     while (line ~ /\\$/ && (getline nx) > 0) line = substr(line, 1, length(line) - 1) nx
     n = tok(line)
     shape = TW[2]; f = TW[3]; t = TW[4]; fn = (shape == "fn" ? TW[5] : "-")
@@ -184,6 +227,21 @@ anchors_extract() {  # <root> <at> [<suite>]
   done
 }
 
+# THE FUNCTION HEAD, the one rule `anchor fn` and a `reads … fn` declaration locate a function by:
+# fnhead(line, fn) is 1 when <line> opens <fn>'s definition (`fn()` or `function fn()`), and then sets
+# FH_IND (the head's indentation, whose `}` closes the body), FH_REST (what follows the `()`) and FH_ONE
+# (1 when the whole definition is on the head line).
+_ANC_FNHEAD='
+function fnhead(l, fn,   h, r) {
+  FH_IND = l; sub(/[^ \t].*$/, "", FH_IND); h = l; sub(/^[ \t]+/, "", h); sub(/^function[ \t]+/, "", h)
+  if (index(h, fn) != 1) return 0
+  r = substr(h, length(fn) + 1); sub(/^[ \t]+/, "", r)
+  if (substr(r, 1, 2) != "()") return 0
+  FH_REST = substr(r, 3); FH_ONE = (FH_REST ~ /\{/ && FH_REST ~ /\}[ \t;]*$/)
+  return 1
+}
+'
+
 # THE ONE COUNTING RULE, run by `anchor` at run time and by the check at a landing. The text comes in
 # through the environment, never `awk -v`, which would read its backslashes as escapes.
 #   file    lines holding <text>
@@ -192,7 +250,7 @@ anchors_extract() {  # <root> <at> [<suite>]
 #           counted unless the whole definition is on it) to the `}` at the head's own indentation
 anchors_found() {  # <root> <at> <shape> <file> <text> <function or ->
   _anc_has "$1" "$2" "$4" || { echo nofile; return 0; }
-  _anc_cat "$1" "$2" "$4" | ANC_SHAPE="$3" ANC_TEXT="$5" ANC_FN="${6:--}" awk '
+  _anc_cat "$1" "$2" "$4" | ANC_SHAPE="$3" ANC_TEXT="$5" ANC_FN="${6:--}" awk "$_ANC_FNHEAD"'
     BEGIN { s = ENVIRON["ANC_SHAPE"]; t = ENVIRON["ANC_TEXT"]; fn = ENVIRON["ANC_FN"]; n = 0; seen = 0; inb = 0 }
     s == "file"   { if (index($0, t)) n++; next }
     s == "insert" { if (index($0, t) == 1) n++; next }
@@ -202,15 +260,128 @@ anchors_found() {  # <root> <at> <shape> <file> <text> <function or ->
       next
     }
     s == "fn" {
-      h = $0; ind = h; sub(/[^ \t].*$/, "", ind); sub(/^[ \t]+/, "", h); sub(/^function[ \t]+/, "", h)
-      if (index(h, fn) != 1) next
-      r = substr(h, length(fn) + 1); sub(/^[ \t]+/, "", r)
-      if (substr(r, 1, 2) != "()") next
-      seen = 1; r = substr(r, 3)
-      if (r ~ /\{/ && r ~ /\}[ \t;]*$/) { if (index(r, t)) n++; next }
+      if (!fnhead($0, fn)) next
+      seen = 1; ind = FH_IND
+      if (FH_ONE) { if (index(FH_REST, t)) n++; next }
       inb = 1
     }
     END { if (s == "fn" && !seen) print "nofn"; else print n }'
+}
+
+# THE SPAN FINDER, one awk over one file's text for every declaration on it. ANC_REQ (environment) holds
+# `fn|section|verb TAB <name>` lines; one line out per request: `<kind> TAB <name> TAB <matches> TAB <start>
+# TAB <end>`, the span being the first match's (a function from its head to the `}` at the head's
+# indentation; a section from its banner to the line before the next labelled banner at its indentation or
+# less; either to the file's end when nothing closes it). A verb prints one line per arm instead, each with
+# its own span (the arm rule is in the grammar at the head of this file), or one line of 0 matches.
+# NOTE FOR EDITORS: the program is a shell single-quoted string; spell an apostrophe \047.
+_ANC_SPAN_AWK='
+function banner(l,   b) {
+  if (l !~ /^[ \t]*#[ \t]*[-=][-=][-=][-=][-=]/) return ""
+  BN_IND = l; sub(/[^ \t].*$/, "", BN_IND)
+  b = l; sub(/^[ \t]*#[ \t]*[-=]+/, "", b); sub(/[ \t]+[-=][-=][-=][-=][-=]+[ \t]*$/, "", b)
+  sub(/^[ \t]+/, "", b); sub(/[ \t]+$/, "", b)
+  return b
+}
+function armlist(l,   t, i, a) {
+  t = l; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+  if (t !~ /^\(?[^ \t()]+\)$/) return 0
+  sub(/^\(/, "", t); t = substr(t, 1, length(t) - 1)
+  AL_N = split(t, AL, "|")
+  for (i = 1; i <= AL_N; i++) { a = AL[i]; if (a ~ /^".*"$/ || a ~ /^\047.*\047$/) AL[i] = substr(a, 2, length(a) - 2) }
+  return 1
+}
+function bears(nm,   i) { for (i = 1; i <= AL_N; i++) if (AL[i] == nm) return 1; return 0 }
+BEGIN {
+  nq = split(ENVIRON["ANC_REQ"], R, "\n"); hv = 0
+  for (i = 1; i <= nq; i++) { split(R[i], q, "\t"); K[i] = q[1]; N[i] = q[2]; c[i] = 0; op[i] = 0; st[i] = "-"; en[i] = "-"; if (K[i] == "verb") hv = 1 }
+}
+{
+  lb = banner($0); bi = BN_IND
+  # The top-level case blocks, read only when a verb is asked for: inc inside one, aind its arms indentation.
+  if (hv) {
+    li = $0; sub(/[^ \t].*$/, "", li); cbo = 0; cbc = 0; isarm = 0
+    if (!inc && $0 ~ /^case[ \t].*[ \t]in[ \t]*$/) { inc = 1; hasind = 0; cbo = 1 }
+    else if (inc && $0 ~ /^esac([ \t;]|$)/) { inc = 0; cbc = 1 }
+    else if (inc && !hasind && $0 !~ /^[ \t]*(#|$)/) { aind = li; hasind = 1 }
+    if (inc && !cbo && hasind && li == aind) isarm = armlist($0)
+  }
+  for (i = 1; i <= nq; i++) {
+    if (K[i] == "fn") {
+      if (op[i]) { if (substr($0, 1, length(ind[i]) + 1) == ind[i] "}") { op[i] = 0; if (c[i] == 1) en[i] = NR } continue }
+      if (!fnhead($0, N[i])) continue
+      if (++c[i] == 1) st[i] = NR
+      if (FH_ONE) { if (c[i] == 1) en[i] = NR } else { op[i] = 1; ind[i] = FH_IND }
+    } else if (K[i] == "section" && lb != "") {
+      if (op[i] && length(bi) <= length(ind[i])) { op[i] = 0; if (c[i] == 1) en[i] = NR - 1 }
+      if (lb == N[i]) { if (++c[i] == 1) st[i] = NR; op[i] = 1; ind[i] = bi }
+    } else if (K[i] == "verb") {
+      if (op[i]) {
+        t = $0; sub(/^[ \t]+/, "", t)
+        if (!hb[i] && t != "" && t !~ /^#/) { bind[i] = li; hb[i] = 1 }
+        if (cbc || isarm) { op[i] = 0; AE[i, c[i]] = NR - 1 }
+        else if (t ~ /^;[;&]/ && length(li) <= length(bind[i])) { op[i] = 0; AE[i, c[i]] = NR }
+      }
+      if (isarm && bears(N[i])) { c[i]++; AS[i, c[i]] = NR; op[i] = 1; hb[i] = 0 }
+    }
+  }
+}
+END {
+  for (i = 1; i <= nq; i++) {
+    if (K[i] == "") continue
+    if (K[i] == "verb") {
+      if (op[i]) AE[i, c[i]] = NR
+      if (c[i] == 0) print K[i] "\t" N[i] "\t0\t-\t-"
+      for (j = 1; j <= c[i]; j++) print K[i] "\t" N[i] "\t" c[i] "\t" AS[i, j] "\t" AE[i, j]
+      continue
+    }
+    if (c[i] >= 1 && en[i] == "-") en[i] = NR
+    print K[i] "\t" N[i] "\t" c[i] "\t" st[i] "\t" en[i]
+  }
+}'
+
+# The narrowing declarations of every tests/*.test.sh suite (top level, as the reads index reads suites),
+# as the extractor prints them: <suite> TAB <line> TAB <kind> TAB <file> TAB <name> TAB literal|nonliteral.
+reads_extract() {  # <root> <at>
+  local root="${1:-}" at="${2:--}" s
+  _anc_files "$root" "$at" "$READS_DECL_ERE" | while IFS= read -r s; do
+    case "$s" in tests/*/*) continue ;; tests/*.test.sh) ;; *) continue ;; esac
+    _anc_cat "$root" "$at" "$s" | awk -v suite="$s" -v mode=reads "$_ANC_AWK"
+  done
+}
+
+# reads_declared <root> <at>: each declaration with the finder's verdict at <at> (the grammar is above).
+# One finder run per declared file.
+reads_declared() {  # <root> <at>
+  local root="${1:-}" at="${2:--}" ext f req spans=""
+  ext="$(reads_extract "$root" "$at")"
+  [ -n "$ext" ] || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if ! _anc_has "$root" "$at" "$f"; then spans="$spans${spans:+$'\n'}X	$f"; continue; fi
+    req="$(printf '%s\n' "$ext" | RD_F="$f" awk -F'\t' '$6 == "literal" && $4 == ENVIRON["RD_F"] { print $3 "\t" $5 }' | LC_ALL=C sort -u)"
+    spans="$spans${spans:+$'\n'}$(_anc_cat "$root" "$at" "$f" | ANC_REQ="$req" awk "$_ANC_FNHEAD$_ANC_SPAN_AWK" \
+      | RD_F="$f" awk '{ print "Y\t" ENVIRON["RD_F"] "\t" $0 }')"
+  done <<READS_DECLARED_FILES
+$(printf '%s\n' "$ext" | awk -F'\t' '$6 == "literal" { print $4 }' | LC_ALL=C sort -u)
+READS_DECLARED_FILES
+  { printf '%s\n' "$spans"; printf '%s\n' "$ext" | sed 's/^/E	/'; } | awk -F'\t' '
+    $1 == "X" { nofile[$2] = 1; next }
+    $1 == "Y" { k = $2 SUBSEP $3 SUBSEP $4; cnt[k] = $5; st[k] = $6; en[k] = $7; if ($3 == "verb" && $5 > 0) arm[k] = arm[k] "\n" $6 "\t" $7; next }
+    $1 == "E" {
+      v = "ok"; a = "-"; b = "-"; k = $5 SUBSEP $4 SUBSEP $6
+      if ($7 != "literal") v = "nonliteral"
+      else if ($5 in nofile) v = "nofile"
+      else if (!(k in cnt) || cnt[k] == 0) v = ($4 == "fn" ? "nofn" : ($4 == "verb" ? "noverb" : "nosection"))
+      else if ($4 == "verb") {
+        n = split(substr(arm[k], 2), A, "\n")
+        for (j = 1; j <= n; j++) print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\tok\t" A[j]
+        next
+      }
+      else if (cnt[k] > 1) v = "ambiguous:" cnt[k]
+      else { a = st[k]; b = en[k] }
+      print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" v "\t" a "\t" b
+    }'
 }
 
 anchors_check() {  # <root> <at>
@@ -270,6 +441,12 @@ anchors_index() {  # <root> <at>
 #        spells after its last expansion is the directory, matched as rule 1 matches a path (it or a path
 #        ending in `/<it>`). A word that is all expansion (`"$REPO"`, `.`) names no directory: the root
 #        is never one.
+#     7. THE NARROWING (wave-39 T3; D6, AC-2.1): a suite declaring `reads <file> fn <function>`,
+#        `reads <file> section <label>` or `reads <file> verb <name>` (T43; the grammar at the head of this
+#        file) reads that file only there (a verb's several arms are one row):
+#        its row is `<file>#<name> TAB <suite>`, one per declaration, in place of `<file> TAB <suite>`.
+#        A declaration the finder cannot locate at <at> is refused (stderr, rc 1, the index still printed)
+#        and the suite reads the whole file. A reader routing by file folds `#<name>` away (reads_suites).
 #   MISSED, the floor's whole run stays the catch-all (spec assumption 3): a path built from variables
 #   past the first (`"$d/$f"`), a copy of a whole directory not walked by find or a glob, a library
 #   sourced by a library or by a script without a BIONIC_LIB_WANT line, and anything a run opens that
@@ -361,6 +538,7 @@ function text(line, o, arr,   lq) {
   if (line ~ /^[ \t]*#/) return
   if (index(line, "#")) line = uncomment(line)
   scan(line, o, arr)
+  if (closed) { vals(line, o); if (index(line, ".") || index(line, "source")) loads(line, o) }
   if (index(line, "=")) assigns(line, o)
   if (index(line, "find") || index(line, "*")) {
     lq = line; gsub(/["\047]/, "", lq)
@@ -419,6 +597,121 @@ function walk(word, g, s, ctx,   nm, rest, nc, cc, k, nv, vv, m, cand, ncand, x,
     }
   }
 }
+# THE PIECES OF THE CLOSURE (wave-39 T1; closed mode only). word(r): the shell word r begins with, raw: quotes, $( )
+# and ${ } kept whole. unq(w): w with its quote marks dropped. lastseg(w): what follows the last `/` outside
+# $( ) and ${ }, the file name it spells. onevar(g): the name of the one variable g is (`$x`, `${x}`, `${x%…}`;
+# `@` for a positional), else "".
+function word(r,   i, c, n2, L, q, d) {
+  L = length(r); q = ""; d = 0
+  for (i = 1; i <= L; i++) {
+    c = substr(r, i, 1)
+    if (d == 0 && q == "\047") { if (c == "\047") q = ""; continue }
+    if (c == "\\") { i++; continue }
+    n2 = substr(r, i + 1, 1)
+    if (c == "$" && (n2 == "(" || n2 == "{")) { d++; i++; continue }
+    if (d > 0) { if (c == "(" || c == "{") d++; else if (c == ")" || c == "}") d--; continue }
+    if (q == "\"") { if (c == "\"") q = ""; continue }
+    if (c == "\"" || c == "\047") { q = c; continue }
+    if (c ~ /[ \t;|&<>)]/) break
+  }
+  return substr(r, 1, i - 1)
+}
+function unq(w) { gsub(/["\047]/, "", w); return w }
+function lastseg(w,   i, c, n2, L, d, p) {
+  L = length(w); d = 0; p = 0
+  for (i = 1; i <= L; i++) {
+    c = substr(w, i, 1); n2 = substr(w, i + 1, 1)
+    if (c == "\\") { i++; continue }
+    if (c == "$" && (n2 == "(" || n2 == "{")) { d++; i++; continue }
+    if (d > 0) { if (c == "(" || c == "{") d++; else if (c == ")" || c == "}") d--; continue }
+    if (c == "/") p = i
+  }
+  return substr(w, p + 1)
+}
+function onevar(g,   n, i, c, L, d) {
+  if (g ~ /^\$[0-9@*#]$/) return "@"
+  if (g ~ /^\$[A-Za-z_][A-Za-z0-9_]*$/) return substr(g, 2)
+  if (substr(g, 1, 2) != "${") return ""
+  L = length(g); d = 0
+  for (i = 2; i <= L; i++) { c = substr(g, i, 1); if (c == "{") d++; else if (c == "}") { d--; if (d == 0 && i < L) return "" } }
+  if (d != 0) return ""
+  n = substr(g, 3)
+  if (n ~ /^[0-9@*#]/) return "@"
+  if (n !~ /^[A-Za-z_]/) return ""
+  sub(/[^A-Za-z0-9_].*$/, "", n); return n
+}
+# vals(line, o): each `NAME=<word>` and `for NAME in <words>` of owner o, kept as the values of NAME: all of them
+# (av[o, NAME], read in END for a suite whose helper sets NAME) and the latest (last[o, NAME], what a load on a
+# later line of the same text reads: a text reuses a name, so the nearest setting before the load is its value).
+function vals(line, o,   r, nm, v, m, n, w, i) {
+  r = line
+  while (match(r, /(^|[ \t;&|(])[A-Za-z_][A-Za-z0-9_]*=/)) {
+    nm = substr(r, RSTART, RLENGTH - 1); sub(/^[ \t;&|(]/, "", nm)
+    r = substr(r, RSTART + RLENGTH); v = word(r); r = substr(r, length(v) + 1)
+    av[o, nm] = av[o, nm] "\034" unq(v); last[o, nm] = "\034" unq(v)
+  }
+  if (match(line, /(^|[ \t;&|(])for[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]/)) {
+    m = substr(line, RSTART, RLENGTH); sub(/^[ \t;&|(]*for[ \t]+/, "", m); sub(/[ \t]+in[ \t]$/, "", m)
+    r = substr(line, RSTART + RLENGTH); sub(/;.*$/, "", r)
+    n = split(r, w, /[ \t]+/)
+    last[o, m] = ""
+    for (i = 1; i <= n; i++) if (w[i] != "") { av[o, m] = av[o, m] "\034" unq(w[i]); last[o, m] = last[o, m] "\034" unq(w[i]) }
+  }
+}
+# loads(line, o): each `. <word>` / `source <word>` of owner o whose file name holds an expansion. A computed
+# name (`${n}.sh`, `$a$b`, `$(…)`) is unresolvable at once (un[o]); a name that is one variable is judged in
+# END against the values of that variable: the file name alone (lv: `. "$d/$f"`) or the whole word (lw: `. "$lib"`).
+function loads(line, o,   r, w, g, v) {
+  r = line
+  while (match(r, /(^|[;&|({!]|then[ \t]|do[ \t]|else[ \t])[ \t]*(\.|source)[ \t]+/)) {
+    r = substr(r, RSTART + RLENGTH); w = word(r); r = substr(r, length(w) + 1); w = unq(w)
+    if (w == "" || w ~ /^-/) continue
+    g = lastseg(w)
+    if (g !~ /[$`]/) continue
+    v = onevar(g)
+    if (v == "") { un[o] = un[o] "\034" w; continue }
+    if (v != "@" && (o, v) in last) { v = judge(last[o, v], v, g == w); if (v != "") un[o] = un[o] "\034" v; continue }
+    if (g == w) lw[o, ++nlw[o]] = v; else lv[o, ++nlv[o]] = v
+  }
+}
+# ctext(line, c): one line of a script the closure may reach (not a suite, prelude or helper): its names into
+# cp, its values and loads.
+function ctext(line, c) {
+  if (line ~ /^[ \t]*#/) return
+  if (index(line, "#")) line = uncomment(line)
+  scan(line, c, cp)
+  vals(line, c)
+  if (index(line, ".") || index(line, "source")) loads(line, c)
+}
+# segok(v, ctx, whole): "" when the load naming variable v resolves against the values the texts in ctx
+# (\034-led) give it, else why it does not. A value is spelled (its file name has no expansion), one variable
+# (one hop, not followed: it names a path spelled where it is set), a positional (spelled at the call site, which
+# the name scan reads), or computed (unresolvable). A file name that is one variable needs a spelled value; a
+# whole word that is one variable needs only no computed one.
+function segok(v, ctx, whole,   nc, cc, k, vl) {
+  if (v == "@") return ""
+  nc = split(ctx, cc, "\034"); vl = ""
+  for (k = 2; k <= nc; k++) if ((cc[k], v) in av) vl = vl av[cc[k], v]
+  return judge(vl, v, whole)
+}
+# judge(vl, v, whole): the verdict on the values vl (\034-led) of variable v, as segok states it.
+function judge(vl, v, whole,   nv, vv, m, any, g) {
+  nv = split(vl, vv, "\034"); any = 0
+  for (m = 2; m <= nv; m++) {
+    g = lastseg(vv[m])
+    if (g !~ /[$`]/) { any = 1; continue }
+    if (onevar(g) == "@") { any = 1; continue }
+    if (onevar(g) != "" && g == vv[m]) continue
+    return "$" v "=" vv[m]
+  }
+  return (whole || any) ? "" : "$" v " has no spelled value"
+}
+function unres(o, ctx,   i, why) {
+  if (un[o] != "") return substr(un[o], 2)
+  for (i = 1; i <= nlv[o]; i++) if ((why = segok(lv[o, i], ctx, 0)) != "") return why
+  for (i = 1; i <= nlw[o]; i++) if ((why = segok(lw[o, i], ctx, 1)) != "") return why
+  return ""
+}
 function globre(g,   o) {
   if (g in gre) return gre[g]
   o = g
@@ -467,6 +760,11 @@ $1 == "W" {
   want[$2] = v; next
 }
 $1 == "P" { pair[$2 "\t" $3] = 1; next }
+$1 == "N" {
+  k = $3 "\t" $2
+  if ($5 == "ok") { pair[k] = 1; nar[k] = nar[k] "\034" $4 } else bad[k] = 1
+  next
+}
 $1 == "S" {
   s = $2
   if (s !~ /^tests\/[^\/]*\.test\.sh$/) next
@@ -476,8 +774,14 @@ $1 == "S" {
 $1 == "H" {
   h = $2
   if (h !~ /^tests\/[^\/]*\.prelude\.sh$/ && h !~ /^tests\/lib\/[^\/]*\.sh$/) next
-  hfile[h] = 1
+  hfile[h] = 1; if (closed) isc[h] = 1
   text(substr($0, length(h) + 4), h, hp); next
+}
+$1 == "C" {
+  c = $2
+  if (!closed || c ~ /^tests\/[^\/]*\.(test|prelude)\.sh$/ || c ~ /^tests\/lib\/[^\/]*\.sh$/) next
+  isc[c] = 1
+  ctext(substr($0, length(c) + 4), c); next
 }
 END {
   for (k in pair) {
@@ -501,26 +805,227 @@ END {
     }
   }
   for (k in fan) out[k] = 1
-  for (k in out) print k
+  # THE PLAIN INDEX (closed=0): every pair, a narrowed one as <file>#<name> (wave-39 T3).
+  if (!closed) {
+    for (k in out) {
+      split(k, kk, "\t")
+      if (!((k in nar) && !(k in bad))) { print k; continue }
+      n = split(nar[k], L, "\034")
+      for (i = 2; i <= n; i++) print kk[1] "#" L[i] "\t" kk[2]
+    }
+    exit
+  }
+  # THE CLOSURE (wave-39 T1; A-orch-3): from the files the rules above give a suite (and its prelude, D8),
+  # every script reached is read too: what it names (cp; the names of a helper, hp), and its WANT libraries. A
+  # script whose load cannot be resolved (unres) marks the suite `!`, which the key reads as the whole tree.
+  for (k in cp) { split(k, kk, "\t"); if (kk[1] != kk[2] && kk[1] ~ /\.sh$/) adj[kk[2]] = adj[kk[2]] "\034" kk[1] }
+  for (k in hp) { split(k, kk, "\t"); if (kk[1] != kk[2] && kk[1] ~ /\.sh$/) adj[kk[2]] = adj[kk[2]] "\034" kk[1] }
+  for (c in want) if (c in isc) {
+    n = split(want[c], L, /[ \t]+/)
+    for (i = 1; i <= n; i++) if (L[i] ~ /^[A-Za-z0-9_.-]+$/ && (("payload/scripts/lib/" L[i]) in files)) adj[c] = adj[c] "\034payload/scripts/lib/" L[i]
+  }
+  for (k in out) { split(k, kk, "\t"); if (kk[2] in suite) seed[kk[2]] = seed[kk[2]] "\034" kk[1] }
+  for (s in suite) {
+    p = s; sub(/\.test\.sh$/, ".prelude.sh", p)
+    if (p in files) seed[s] = seed[s] "\034" p
+    why = unres(s, "\034" s hn[s]); if (why != "") why = s ": " why
+    qn = 0; n = split(seed[s], L, "\034")
+    for (i = 2; i <= n; i++) if (!((s, L[i]) in vis)) { vis[s, L[i]] = 1; Q[++qn] = L[i] }
+    for (qi = 1; qi <= qn; qi++) {
+      f = Q[qi]
+      if (!(f in isc)) continue
+      if (!(f in uw)) uw[f] = unres(f, "\034" f)
+      if (why == "" && uw[f] != "") why = f ": " uw[f]
+      n = split(adj[f], L, "\034")
+      for (i = 2; i <= n; i++) if (!((s, L[i]) in vis)) { vis[s, L[i]] = 1; Q[++qn] = L[i] }
+    }
+    for (qi = 1; qi <= qn; qi++) print Q[qi] "\t" s
+    if (why != "") print "!\t" s "\t" why
+  }
 }'
 
 # The command form's usage refusal: one line to stderr, exit 2. Defined at file scope so sourcing defines it too.
-_rd_usage() { echo "usage: bash anchors.sh reads_index [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
+_rd_usage() { echo "usage: bash anchors.sh reads_index [--closed] [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
+
+# reads_declared's lines in -> one refusal per declaration the finder could not locate, to stdout.
+_rd_refusals() {  # <at>
+  RD_AT="$1" awk -F'\t' '
+    BEGIN { at = ENVIRON["RD_AT"]; where = (at == "-" ? "(in the tree)" : "(at " at ")") }
+    NF && $6 != "ok" {
+      what = "reads " $4 " " $3 " " $5 " — "
+      if ($6 == "nonliteral" && $3 == "verb") why = "not a literal `reads <file> verb <name>` line"
+      else if ($6 == "nonliteral") why = "not a literal `reads <file> fn <function>` or `reads <file> section <label>` line"
+      else if ($6 == "nofile") why = what "no file " $4
+      else if ($6 == "noverb") why = what "no case arm " $5 " in " $4
+      else if ($6 == "nofn") why = what "no function " $5 " in " $4
+      else if ($6 == "nosection") why = what "no section \047" $5 "\047 in " $4
+      else { n = substr($6, index($6, ":") + 1)
+             why = what n ($3 == "fn" ? " functions " $5 : " sections \047" $5 "\047") " in " $4 ", one is needed" }
+      print "anchors: reads_index refused " $1 ":" $2 ": " why " " where
+    }'
+}
+
+# The scan's input stream at <at>; `closed` adds every line of every script (C), which the closure reads.
+_rd_feed() {  # <root> <at> [closed]
+  local root="$1" at="$2"
+  _rd_files "$root" "$at" | sed 's/^/F	/'
+  _rd_grep "$root" "$at" W '^[[:space:]]*BIONIC_LIB_WANT=' '*.sh' . '*.sh'
+  anchors_extract "$root" "$at" | awk -F'\t' '$7 == "literal" { print "P\t" $4 "\t" $1 }'
+  _rd_grep "$root" "$at" S '' 'tests/*.test.sh' tests '*.test.sh' 1
+  _rd_grep "$root" "$at" H '' 'tests/*.prelude.sh' tests '*.prelude.sh' 1
+  _rd_grep "$root" "$at" H '' 'tests/lib/*.sh' tests/lib '*.sh' 1
+  [ "${3:-}" != closed ] || _rd_grep "$root" "$at" C '' '*.sh' . '*.sh'
+}
 
 reads_index() {  # <root> <at>
-  local root="${1:-}" at="${2:--}"
-  { _rd_files "$root" "$at" | sed 's/^/F	/'
-    _rd_grep "$root" "$at" W '^[[:space:]]*BIONIC_LIB_WANT=' '*.sh' . '*.sh'
-    anchors_extract "$root" "$at" | awk -F'\t' '$7 == "literal" { print "P\t" $4 "\t" $1 }'
-    _rd_grep "$root" "$at" S '' 'tests/*.test.sh' tests '*.test.sh' 1
-    _rd_grep "$root" "$at" H '' 'tests/*.prelude.sh' tests '*.prelude.sh' 1
-    _rd_grep "$root" "$at" H '' 'tests/lib/*.sh' tests/lib '*.sh' 1
-  } | awk "$_RD_AWK" | _anc_group
+  local root="${1:-}" at="${2:--}" decl rc=0
+  decl="$(reads_declared "$root" "$at")"
+  if [ -n "$decl" ] && printf '%s\n' "$decl" | awk -F'\t' '$6 != "ok" { bad = 1 } END { exit !bad }'; then
+    printf '%s\n' "$decl" | _rd_refusals "$at" >&2; rc=1
+  fi
+  { _rd_feed "$root" "$at"
+    [ -z "$decl" ] || printf '%s\n' "$decl" | awk -F'\t' '$6 != "nonliteral" { print "N\t" $1 "\t" $4 "\t" $5 "\t" ($6 == "ok" ? "ok" : "bad") }'
+  } | awk -v closed=0 "$_RD_AWK" | _anc_group
+  return "$rc"
+}
+
+# ---------------------------------------------------------------------------------------------------
+# THE READ SET AND THE PROOF FACT'S KEY (wave-39 T1; D5, D8, A-orch-3; ADR-061). A landing's verdict is keyed
+# by what its suite read, never by the commit it ran on (lib/line.sh `_line_verdict_put`, `_line_proved`).
+#
+#   reads_set <root> <at> <suite>    the suite's read set at <at>, sorted, one path per line; or the one line
+#       `tree <why>` when the key is the whole tree. The set is what reads_index derives for the suite (rules
+#       1 to 6), plus its prelude (`tests/<name>.prelude.sh`, named or not, D8), CLOSED over every script in it
+#       (A-orch-3): a script reached reads what its text names outside comments (the name scan, rule 1: the
+#       scripts it runs, the libraries it loads, `. "$lib"` included, where lib's path is spelled) and its
+#       BIONIC_LIB_WANT libraries, transitively. So a library loaded by a library — lib/worktree.sh loading
+#       lib/line.sh — is read, which reads_index's rule 2 misses. reads_index itself is unchanged: brief, the
+#       dispatch wall and the floor judge read the same index as before.
+#   reads_hash <root> <at> <suite>   the key: sha256 of the set's sorted `<path> <blob id>` lines at <at>, or
+#       `tree:<tree id of <at>>` when the set cannot be derived soundly: a load (`.`/`source`) in the suite, its
+#       helpers or a reached script whose FILE NAME is computed (`. "$d/$name"` with name set by `$(…)`, a
+#       `${n}.sh`), or a suite the scan does not read (outside tests/, absent at <at>). A load whose file name
+#       is one variable resolves when that variable's values (its `NAME=` and `for NAME in` lines in the same
+#       text) spell a name; a whole word that is one variable (`. "$LIB"`) resolves unless a value of it is
+#       computed; a positional is spelled at its call site.
+#   reads_hashes <root> <at> <suite>...  `<suite> TAB <key>` for each, the index read once.
+#   THE NARROWING IN THE KEY (wave-39 T40, moved from T4's lib/line.sh; D5, D6, A-orch-8, A-orch-13): a suite
+#       declaring `reads <file> fn <name>`, `reads <file> section <label>` or `reads <file> verb <name>` (the grammar
+#       at the head of this file) reads that file only there: its key takes `<file>#<kind>:<name> <sha256 of the
+#       span's lines>` in place of `<file> <blob>`, the span as `reads_declared` locates it at <at>; a verb takes one
+#       such line per arm, so the key's input is the union of its arms. Only content is hashed, so a span that
+#       moves down the file keeps its key. A (suite, file) pair with any declaration the finder refused reads the
+#       whole file (A-T3-1). An undeclared file contributes its blob, so a tree with no declaration keys as T1 did.
+#       This is the ONE derivation: the landing (lib/line.sh `_line_reads_fill`), the owed set and the regression
+#       facts key through it, and no reader keeps a key of its own (tests/reads-hash.test.sh §ONE).
+# <suite> is as lands_on= names it: a path, or a file name found as `_line_suite_path` finds it (tests/<name>,
+# else the one file of that name). <at> is a commit, read out of git's objects, never the working tree.
+# STILL MISSED, as in reads_index: what a run opens that no text names (a data file a script builds a path
+# to), and what the closure does not follow: a test file run by another test file, the directory rule
+# inside a reached script.
+
+_rd_closed() {  # <root> <at> -> `<file> TAB <suite>` per file of each suite's set; `! TAB <suite> TAB <why>`
+  _rd_feed "$1" "$2" closed | LC_ALL=C awk -v closed=1 "$_RD_AWK"   # bytes: a script may hold a byte no locale decodes
+}
+_rd_suite_path() {  # <root> <at> <suite as lands_on= holds it> -> its path at <at>
+  local f hit="" n=0
+  case "$3" in */*) printf '%s\n' "$3"; return 0 ;; esac
+  if ! git -C "$1" cat-file -e "$2:tests/$3" 2>/dev/null; then
+    while IFS= read -r f; do
+      case "$f" in "$3"|*/"$3") hit="$f"; n=$((n + 1)) ;; esac
+    done <<RD_LS
+$(git -C "$1" -c core.quotepath=off ls-tree -r --name-only "$2" 2>/dev/null)
+RD_LS
+    [ "$n" -ne 1 ] || { printf '%s\n' "$hit"; return 0; }
+  fi
+  printf 'tests/%s\n' "$3"
+}
+_rd_sha256() {  # stdin -> its sha256, hex
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{ print $1 }'
+}
+
+reads_set() {  # <root> <at> <suite>
+  local p
+  p="$(_rd_suite_path "$1" "$2" "$3")"
+  _rd_closed "$1" "$2" | awk -F'\t' -v s="$p" '
+    $1 == "!" { if ($2 == s) why = $3; next }
+    $2 == s { f[++n] = $1 }
+    END {
+      if (why != "") { print "tree " why; exit }
+      if (n == 0) { print "tree " s ": not a suite the scan reads at this commit"; exit }
+      for (i = 1; i <= n; i++) print f[i]
+    }' | LC_ALL=C sort
+}
+
+# The declarations the key narrows by: `<suite> TAB <file> TAB <kind>:<name> TAB <start> TAB <end>`, one per
+# declaration, only for (suite, file) pairs whose every declaration reads_declared located (`ok`).
+_rd_narrowed() {  # <root> <at>
+  reads_declared "$1" "$2" 2>/dev/null | awk -F'\t' '
+    NF >= 8 { k = $1 "\t" $4; if ($6 != "ok") bad[k] = 1; else d[k] = d[k] "\n" $1 "\t" $4 "\t" $3 ":" $5 "\t" $7 "\t" $8 }
+    END { for (k in d) if (!(k in bad)) print substr(d[k], 2) }'
+}
+
+reads_hashes() {  # <root> <at> <suite>...
+  local root="$1" at="$2" tree closed blobs narrow spans="" s p lines f a b h
+  shift 2
+  tree="$(git -C "$root" rev-parse --verify -q "${at}^{tree}" 2>/dev/null)" || return 1
+  closed="$(_rd_closed "$root" "$at")"
+  blobs="$(git -C "$root" -c core.quotepath=off ls-tree -r "$at" 2>/dev/null)"
+  narrow="$(_rd_narrowed "$root" "$at")"
+  while IFS="$(printf '\t')" read -r f a b; do
+    [ -n "$f" ] || continue
+    h="$(_anc_cat "$root" "$at" "$f" | sed -n "${a},${b}p" | _rd_sha256)"
+    spans="${spans}@H	${f}	${a}	${b}	${h}
+"
+  done <<RD_SPANS
+$(printf '%s\n' "$narrow" | awk -F'\t' 'NF >= 5 { print $2 "\t" $4 "\t" $5 }' | LC_ALL=C sort -u)
+RD_SPANS
+  for s in "$@"; do
+    p="$(_rd_suite_path "$root" "$at" "$s")"
+    lines="$( { printf '%s\n' "$blobs" | sed 's/^/B	/'; printf '%s' "$spans"; printf '%s\n' "$narrow" | sed 's/^/@N	/'; printf '%s\n' "$closed"; } \
+      | awk -F'\t' -v s="$p" '
+      $1 == "B" { split($2, m, " "); blob[$3] = m[3]; next }
+      $1 == "@H" { span[$2 "\t" $3 "\t" $4] = $5; next }
+      $1 == "@N" { if ($2 == s) { nf[$3] = 1; nl[++nn] = $3 "#" $4 " " span[$3 "\t" $5 "\t" $6] } next }
+      $1 == "!" { if ($2 == s) bad = 1; next }
+      $2 == s && ($1 in blob) { f[++n] = $1 }
+      END {
+        if (bad || n == 0) { print "!"; exit }
+        for (i = 1; i <= n; i++) if (!(f[i] in nf)) print f[i] " " blob[f[i]]
+        for (i = 1; i <= nn; i++) print nl[i]
+      }' | LC_ALL=C sort)"
+    case "$lines" in
+      '!'*) printf '%s\ttree:%s\n' "$s" "$tree" ;;
+      *) printf '%s\t%s\n' "$s" "$(printf '%s\n' "$lines" | _rd_sha256)" ;;
+    esac
+  done
+}
+
+reads_hash() {  # <root> <at> <suite>
+  reads_hashes "$1" "$2" "$3" | awk -F'\t' 'NR == 1 { print $2 }'
+}
+
+# THE CLOSED INDEX (wave-39 T40; D5, A-orch-3; for T24's judge, proof.sh `_proof_walk`): file to suites over the
+# closed read sets the key reads, so a suite that reaches a file only through a script's loads (session-poker.test.sh
+# reaching lib/line.sh through hooks/session-poker.sh) is on the file's row, which plain reads_index leaves off.
+#   reads_index_closed <root> <at>   `<file> TAB <suite>[,<suite>]`, reads_index's grammar and order, a narrowed
+#       pair (every declaration on the file located, `_rd_narrowed`) as `<file>#<name>`, as reads_index prints it;
+#       then one `! TAB <suite>` line per suite reads_hashes keys by the tree, sorted, last.
+# `bash anchors.sh reads_index --closed [<root>] [--at <commit>]` prints it from a shell.
+reads_index_closed() {  # <root> <at>
+  local root="${1:-}" at="${2:--}" closed narrow
+  closed="$(_rd_closed "$root" "$at")"
+  narrow="$(_rd_narrowed "$root" "$at")"
+  { printf '%s\n' "$narrow" | sed 's/^/@N	/'; printf '%s\n' "$closed"; } | awk -F'\t' '
+    $1 == "@N" { if (NF >= 6) { nf[$3 "\t" $2] = 1; print $3 "#" substr($4, index($4, ":") + 1) "\t" $2 } next }
+    $1 == "!" || NF < 2 { next }
+    !(($1 "\t" $2) in nf) { print }' | _anc_group
+  printf '%s\n' "$closed" | awk -F'\t' '$1 == "!" { print "!\t" $2 }' | LC_ALL=C sort -u
 }
 
 # reads_suites <root> <at> <cell> -> the suites reads_index names, at <at>, for any file an entry of the Files cell
 # covers (lib/units.sh `cell_covers`, the scheduler's matcher; an entry spelled from <root>/ is read from the
-# root): by file name, sorted, once each, one per line. Nothing when no suite reads such a file, or units.sh
+# root; a narrowed row `<file>#<name>` routes as <file>): by file name, sorted, once each, one per line. Nothing when no suite reads such a file, or units.sh
 # cannot be loaded. THE ONE READER of the index by Files (wave-37 T3; D4; burns index-to-suites and
 # reads-index-consumers): session-poker.sh `poker_brief_index_suites` (the brief's Lands-on) and
 # dispatch-preflight.sh `dp_lands_index_suites` (the wall) are thin calls to it; proof.sh `_proof_walk`
@@ -531,17 +1036,19 @@ reads_suites() {  # <root> <at> <cell>
   declare -F _units_files_awk >/dev/null 2>&1 || return 0
   reads_index "${1:-}" "${2:--}" 2>/dev/null | awk -F'\t' -v cell="${3:-}" -v root="${1:-}" "$(_units_files_awk)"'
     BEGIN { m = split(cell, e, ","); cell = ""; for (k = 1; k <= m; k++) { t = e[k]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); if (root != "" && index(t, root "/") == 1) t = substr(t, length(root) + 2); cell = cell (k > 1 ? "," : "") t } }
-    $1 != "" && cell_covers(cell, $1) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
+    { f = $1; sub(/#.*$/, "", f) }
+    f != "" && cell_covers(cell, f) { m = split($2, s, ","); for (k = 1; k <= m; k++) { b = s[k]; sub(/^.*\//, "", b); print b } }' \
     | LC_ALL=C sort -u
 }
 
-# Run as a command: `bash anchors.sh reads_index [<root>] [--at <commit>]`. Sourced, it defines and does
+# Run as a command: `bash anchors.sh reads_index [--closed] [<root>] [--at <commit>]`. Sourced, it defines and does
 # nothing.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   [ "${1:-}" = reads_index ] || _rd_usage "the one verb is reads_index"
-  shift; RD_ROOT=""; RD_AT=-
+  shift; RD_ROOT=""; RD_AT=-; RD_CLOSED=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      --closed) RD_CLOSED=1; shift ;;
       --at) [ -n "${2:-}" ] || _rd_usage "--at takes a commit"; RD_AT="$2"; shift 2 ;;
       -*) _rd_usage "unknown flag $1" ;;
       *) [ -z "$RD_ROOT" ] || _rd_usage "at most one root"; RD_ROOT="$1"; shift ;;
@@ -554,5 +1061,5 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     git -C "$RD_ROOT" rev-parse --verify -q "${RD_AT}^{commit}" >/dev/null 2>&1 \
       || { echo "anchors: reads_index: no commit $RD_AT in $RD_ROOT" >&2; exit 2; }
   fi
-  reads_index "$RD_ROOT" "$RD_AT"
+  if [ -n "$RD_CLOSED" ]; then reads_index_closed "$RD_ROOT" "$RD_AT"; else reads_index "$RD_ROOT" "$RD_AT"; fi
 fi

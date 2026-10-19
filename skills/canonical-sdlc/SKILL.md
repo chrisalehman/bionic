@@ -77,7 +77,7 @@ Every run that ships code answers four questions, at every rigor. The first, doe
 
 Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.
 
-Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole.
+Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole. A fix row born of a registered review finding covers every question once it lands.
 
 | | `single` | `double` |
 |---|---|---|
@@ -191,7 +191,7 @@ Deliverable-waiver: <reason>  # only for a report returned by message
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
 
-**Engagement:** Step 3 ends at one approval checkpoint. Steps 4–9 are unattended within the stop-and-wake rules.
+**Engagement:** a clean run has five human stops: the configuration, requirements, design and plan cards, then the final card. Steps 4–9 are unattended within the stop-and-wake rules.
 
 **Per-intent deltas.** `bugfix`: Step 4's failing test is the repro. `refactor`: the Step-2 spec is "behavior preserved"; a new acceptance criterion means reclassify as `build`. `tune`: Step 1 routes to the domain skill (`impeccable` for UX, `security-and-hardening`, `performance-optimization`) and Step 5 is the baseline→target→re-measure loop. `spike`: no plan file at all. `incident-response`: Step 1 compresses to triage, and triage asks first whether service can be restored NOW — if a revert restores it, revert and verify before debugging anything; Step 7 is an RCA (summary, timeline, root cause, contributing factors, the fix, prevention with commit links, monitoring-gap analysis); Step 9 is deploy with rollback → monitor ≥1 cycle → close the monitoring gap or prove there is none.
 

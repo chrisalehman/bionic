@@ -165,7 +165,7 @@
 # width.sh below, which defines functions and prints nothing.
 #
 # [WALL: tests/refuse.test.sh]
-# [WALL: tests/cross-gate-agreement.test.sh]
+# [WALL: tests/cross-gate-agreement-2.test.sh]
 
 # width.sh, THE SOFT SOURCE — the idiom lib/run.sh uses for lib/roots.sh and
 # lib/detect.sh for lib/deps.sh. The 100-column budget and the column counter that

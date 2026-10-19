@@ -897,10 +897,11 @@ CLOCK_LEDGER="$(cat <<'LEDGER'
 # file                                clock  sleep
 tests/bash-walls.test.sh               1      2
 tests/booked.test.sh                   0      15
-tests/close-out.test.sh                0      3
-tests/cross-gate-agreement.test.sh     1      0
+tests/close-out-2.test.sh              0      1
+tests/close-out-3.test.sh              0      2
+tests/cross-gate-agreement-1.test.sh   1      0
 tests/detect-probes.test.sh            9      10
-tests/dispatch-preflight-4.test.sh     2      1
+tests/dispatch-preflight-4b.test.sh    2      1
 tests/doctor-fleet.test.sh             0      1
 tests/doctor-patrol.test.sh            0      2
 tests/doctor-reads.test.sh             0      1
@@ -914,11 +915,13 @@ tests/fresh-home.test.sh               2      1
 tests/gate.test.sh                     2      12
 tests/hook-latency.test.sh             2      0
 tests/landing-gate.test.sh             0      2
-tests/landing-line.test.sh             0      21
+tests/landing-line-1.test.sh           0      12
+tests/landing-line-2.test.sh           0      2
 tests/name-scan.test.sh                10     2
 tests/notify.test.sh                   0      2
 tests/permission-answer.test.sh        0      1
-tests/rc-item.test.sh                  4      4
+tests/rc-item-1.test.sh                2      1
+tests/rc-item-2.test.sh                2      3
 tests/refuse.test.sh                   6      0
 tests/resources.test.sh                7      0
 tests/runner-roster.test.sh            2      13
@@ -926,6 +929,7 @@ tests/runner-width.test.sh             0      1
 tests/session-poker-2.test.sh          0      9
 tests/session-poker-3.test.sh          0      5
 tests/session-poker-4.test.sh          2      2
+tests/session-poker-5.test.sh          0      3
 tests/session-poker.test.sh            1      3
 tests/session-start.test.sh            0      7
 tests/session-sweep.test.sh            3      2
@@ -940,6 +944,7 @@ tests/units.test.sh                    3      3
 tests/width.test.sh                    1      0
 tests/worktree.test.sh                 4      16
 tests/dispatch-preflight.prelude.sh    4      0
+tests/landing-line.prelude.sh          0      7
 tests/session-poker.prelude.sh         0      1
 tests/lib/wait.sh                      0      2
 LEDGER

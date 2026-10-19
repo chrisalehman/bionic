@@ -399,11 +399,12 @@ expect_eq "C4 the same request raised again after it cleared is a new need, and 
 expect_eq "C4a …on the ledger again" "1" "$(nt_owed "$RG" owed_list | cut -f1 | /usr/bin/grep -c '^gate:')"
 
 # ---- T12: CLOSE-OUT'S DELIVERY (AC-2.3, the close half). A run delivered at close sends one
-# notification, once. The fixture is close-out.test.sh's own (a git project at Step 8 that `run`
-# takes to delivered): its builders are read out of that file by name, so this suite holds no
-# second copy of the fixture and a builder that changes there changes here.
-CO_TESTS="$(dirname "$0")/close-out.test.sh"
-nt_import_fn() {  # <name> [<file>] -> the function, defined here, read out of <file> (close-out.test.sh)
+# notification, once. The fixture is close-out's own (a git project at Step 8 that `run`
+# takes to delivered): its builders are read by name out of tests/close-out.prelude.sh, which every
+# close-out part sources, so this suite holds no second copy of the fixture and a builder that
+# changes there changes here.
+CO_TESTS="$(dirname "$0")/close-out.prelude.sh"
+nt_import_fn() {  # <name> [<file>] -> the function, defined here, read out of <file> (close-out.prelude.sh)
   local body from="${2:-$CO_TESTS}"
   body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$from")"
   if [ -z "$body" ]; then echo "nt_import_fn: no $1 in $from" >&2; return 1; fi
@@ -421,7 +422,7 @@ NT_IMPORT_MISSING=""
 for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture advance_to run_close_as plant_tmp_session; do
   nt_import_fn "$_f" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
 done
-expect_eq "D0 close-out.test.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"
+expect_eq "D0 close-out.prelude.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"
 CO_SIDA="nt-closeout-session-a1a1a1a1"
 NT_PLUGIN_ROOT_SAVED="${BIONIC_PLUGIN_ROOT:-}"
 channel_on "$SB_HOME/.claude"

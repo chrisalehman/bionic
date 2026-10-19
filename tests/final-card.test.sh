@@ -14,6 +14,7 @@
 # §EARLY  each of the three facts refuses the render in its own words; the tick says the same line as advice
 # §AGREE  the card's options are exactly the owed items, the undischarged rows and the carried findings
 # §REPLY  an override replays into its own verb; an option not on the card, or words not typed, write nothing
+# §BORN   the planted wave-38 shape, two fix rows born of different questions, renders with no re-read (wave-39 T15)
 #
 # FIXTURE FIDELITY. The world is session-poker-5 §CHECK's (a real repository on `wave/01-fixture`, base B, a code
 # commit C, then the release text's commit R touching CHANGELOG.md alone), a double wave plan the real gate admits
@@ -36,6 +37,71 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# THE NARROWING (wave-39 T41; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
+# directly or through the hooks and scripts it runs: current, debt, deliver, disposition, fill-report,
+# finding-move, finding-stated, launch-sync, regression-runs, reply, tick. Each line below is that closure:
+# the library (every run executes it), the section of each verb's arm, the sections defining the globals they
+# read, and each helper outside those.
+reads hooks/session-poker.sh section "the library"
+reads hooks/session-poker.sh section "whose run is this?"
+reads hooks/session-poker.sh section "the plan report"
+reads hooks/session-poker.sh section "the runs (wave-30 T12; D6, D7d)"
+reads hooks/session-poker.sh section "is this row too quiet?"
+reads hooks/session-poker.sh section "the contract grammar"
+reads hooks/session-poker.sh section "the plan transaction"
+reads hooks/session-poker.sh section "the call a refusal names"
+reads hooks/session-poker.sh section "the launch sync"
+reads hooks/session-poker.sh section "the situation report"
+reads hooks/session-poker.sh section verbs
+reads hooks/session-poker.sh fn _sched_plan_current_field
+reads hooks/session-poker.sh fn clean
+reads hooks/session-poker.sh fn clean_whole
+reads hooks/session-poker.sh fn deferral_escape
+reads hooks/session-poker.sh fn deferral_fold
+reads hooks/session-poker.sh fn deferral_line
+reads hooks/session-poker.sh fn deferral_sentence
+reads hooks/session-poker.sh fn deliver_check
+reads hooks/session-poker.sh fn epoch_iso
+reads hooks/session-poker.sh fn file_mtime
+reads hooks/session-poker.sh fn finding_owed_key
+reads hooks/session-poker.sh fn finding_read
+reads hooks/session-poker.sh fn gate_report
+reads hooks/session-poker.sh fn gate_requests
+reads hooks/session-poker.sh fn gate_widths
+reads hooks/session-poker.sh fn hold_fingerprint
+reads hooks/session-poker.sh fn hold_reply_count
+reads hooks/session-poker.sh fn iso_epoch
+reads hooks/session-poker.sh fn iso_now
+reads hooks/session-poker.sh fn landing_report
+reads hooks/session-poker.sh fn landing_unmeasured
+reads hooks/session-poker.sh fn line_field
+reads hooks/session-poker.sh fn note
+reads hooks/session-poker.sh fn now_epoch
+reads hooks/session-poker.sh fn parse_seconds
+reads hooks/session-poker.sh fn patrol_armed_file
+reads hooks/session-poker.sh fn patrol_stamp_file
+reads hooks/session-poker.sh fn remove_patrol_stamp
+reads hooks/session-poker.sh fn row_has_key
+reads hooks/session-poker.sh fn row_writer
+reads hooks/session-poker.sh fn sched_budget_read
+reads hooks/session-poker.sh fn sched_facts_state
+reads hooks/session-poker.sh fn sched_live_head
+reads hooks/session-poker.sh fn sched_owed
+reads hooks/session-poker.sh fn sched_plan_current
+reads hooks/session-poker.sh fn session_transcript
+reads hooks/session-poker.sh fn space_field
+reads hooks/session-poker.sh fn suspect_lines
+reads hooks/session-poker.sh fn tick_card_early
+reads hooks/session-poker.sh fn tick_decision_line
+reads hooks/session-poker.sh fn tick_digest_file
+reads hooks/session-poker.sh fn tick_finding_report
+reads hooks/session-poker.sh fn tick_launch_sync_failed
+reads hooks/session-poker.sh fn tick_owed_approval
+reads hooks/session-poker.sh fn tick_plan_memoised
+reads hooks/session-poker.sh fn tick_wait_report
+reads hooks/session-poker.sh fn tmp_dir_ok
+reads hooks/session-poker.sh fn write_patrol_stamp
+reads hooks/session-poker.sh fn write_tick_digest
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -410,7 +476,10 @@ expect_regex "REPLY-8b …writing the waiver at the working head with the reply'
   "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"1\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
 FC_REGQ="$(bash -c '. "$1/proof.sh" >/dev/null 2>&1; declare -f proof_question_ok' _ "$FC_LIB" | /usr/bin/grep -c 'regression')"
 if [ "$FC_REGQ" -gt 0 ]; then
-  fc_plan "$FC_GOOD"
+  # REWORKED BY wave-39 T25 (REQ-18 AC-18.3; D5): the card offers the regression's waiver only while the head owes a run
+  # (`proof_owed_suites`, §OWED-WORDS), and FC_GOOD's head owes none (no suite here reads lib/x.sh, so C past a proof at
+  # B would owe none either; D5). The plant sits on a plan with no regression proof instead, whose head owes a whole run.
+  fc_plan "$(fc_reads "$FC_R")"
   fc_owe waive:regression
   fc_card final
   expect_contains "REPLY-9 an open waive:regression item is a default on the card" "waive regression" "$FC_OUT"
@@ -428,6 +497,8 @@ if [ "$FC_REGQ" -gt 0 ]; then
   fc_card final
   expect_eq "REPLY-10b …and the card renders: the waiver settles the refusal (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
   expect_contains "REPLY-10c …offering the regression waiver as a default" "waive regression" "$FC_OUT"
+  expect_contains "REPLY-10c2 …naming what the head owes with no regression proof: a whole run (wave-39 T25; AC-18.3)" \
+    "waive regression with your words — the head owes a whole run" "$FC_OUT"
   expect_contains "REPLY-10d …the person's waiver item opened on the ledger" "waive:regression" "$(fc_owed)"
   poke "$RFC" reply 1
   expect_eq "REPLY-10e reply '1' replays it into waive regression (exit 0)" "0" "$RC"
@@ -436,5 +507,149 @@ if [ "$FC_REGQ" -gt 0 ]; then
 else
   printf '  SKIP: REPLY-9 waive regression — proof_question_ok at this head admits no regression question (T2 not landed; A-T3-5)\n'
 fi
+
+# ============================================================
+section "§BORN: the planted wave-38 shape, two fix rows born of different questions' findings, renders the card with no re-read (wave-39 T15; REQ-11 AC-11.1; D7, ADR-062)"
+# ============================================================
+# fails-when: the card prints `CARD-EARLY — <q> unregistered` after born rows alone.
+# FIXTURE FIDELITY. Wave 38's shape (record/wave-38-one-stop/continuation.md): the five readings registered at C, the
+# adversarial and structure pieces each carrying one S3 finding, then two fix rows landed past them: T4 born of the
+# adversarial finding, T5 of the structure finding, each touching lib/x.sh, each named by its landing's published
+# event (lib/line.sh's shape) and by the born marker on its `- T<n>:` line. No reading is registered past C, and
+# evidence asked for neither fix. The control is one code commit past the same fixes that no review bore: the same
+# verb on the same plan refuses CARD-EARLY at its head. The world is put back at the end (head R, no landing record).
+fc_record structure structure piece 'finding: 1 S3 off lib/x.sh:1 the x writer repeats the y writer'
+FC_F1="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
+FC_F2="$(s57_commit "$RFC" lib/x.sh 'T5: the fix the structure reading asked for')"
+fc_published() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-12T14:00:00Z\n' "$1" "$2" "$1"; }
+{ fc_published T4 "$FC_F1"; fc_published T5 "$FC_F2"; } > "$FC_REC/landing-proofs.log"
+fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding
+  fc_plan "$FC_GOOD
+- T4: landed $FC_F1 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/adversarial.md#1
+- T5: landed $FC_F2 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/structure.md#1"
+  awk '{ print } /^\| T2 \|/ {
+    print "| T4 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |"
+    print "| T5 | 4 | build | fix the x writer · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+    "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+}
+fc_born_plan
+expect_eq "BORN-0 precondition: the working head is T5's landing, two code commits past every reading" \
+  "$FC_F2|lib/x.sh|lib/x.sh" \
+  "$(git -C "$RFC" rev-parse wave/01-fixture)|$(git -C "$RFC" show --name-only --format= "$FC_F1")|$(git -C "$RFC" show --name-only --format= "$FC_F2")"
+fc_card final
+expect_eq "BORN-1 AC-11.1 card.sh final renders past the two born rows with no re-read: exit 0, nothing on stderr" "0|" "$FC_RC|$FC_ERR"
+expect_eq "BORN-1b …and writes the card at T5's landing" "final-card-${FC_F2:0:8}.md" "$(fc_cards)"
+new_roster "$RFC"; forget_digest "$RFC"
+poke "$RFC" tick
+expect_contains "BORN-1c the tick, an integrate row open, says its WAIT line (the reader is not vacuous)" "poker: WAIT T3" "$OUT"
+expect_absent "BORN-1d …and no CARD-EARLY" "CARD-EARLY" "$OUT"
+FC_F3="$(s57_commit "$RFC" lib/x.sh 'a code change no review bore')"
+fc_born_plan
+fc_card final
+expect_regex "BORN-2 the control: one code commit past the fixes that no row was born for is CARD-EARLY, a question unregistered at its head" \
+  "^CARD-EARLY — (evidence|adversarial|structure) unregistered at ${FC_F3:0:8}\$" "$FC_ERR"
+expect_eq "BORN-2b …exit 1, nothing rendered, no card written" "1||" "$FC_RC|$FC_OUT|$(fc_cards)"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/final-card-*.md
+fc_record structure structure piece
+
+# ============================================================
+section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
+# ============================================================
+#
+# FIVE STOPS, THE CONFIGURATION CARD FIRST (wave-39 D3, reopening wave-38 D17 on the user's words). The card is
+# rendered by the tool from the plan Step 0 wrote, never typed by the model (D23): Purpose, Seed, Run, Branches,
+# Paths, Shape, Gates, Models, then the question, and rendering it for the session's own run opens the person's
+# approve:step0 item. card.test.sh §CONFIG holds every line of the settings; this section holds the shape, the
+# question, the owed reply and the doctrine that names the stop.
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'scale-recommendation: "Several rows in one session. The ask names five files."\nregression: yes\n'
+  printf 'surface_type: cli-plugin\nmulti_agent: true\ndeploy_target: n/a\ncleanup_on_finish: true\nuse_worktree: false\n'
+  printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
+  printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
+} > "$PFC"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state"
+bind_marker "$RFC" "$PFC"
+fc_card step0
+expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \
+  "0||Step 0 · Plan Configuration" "$FC_RC|$FC_ERR|$(printf '%s\n' "$FC_OUT" | head -1)"
+expect_eq "STEP0-2 …its sections in the 1.20.0 order" "Purpose|Seed|Run|Branches|Paths|Shape|Gates|Models" \
+  "$(printf '%s\n' "$FC_OUT" | sed -n 's/^  \([A-Z][A-Za-z]*\)$/\1/p' | paste -sd'|' -)"
+expect_eq "STEP0-3 …Purpose is the plan's Goal" "    Configure the fixture run, and nothing else." \
+  "$(printf '%s\n' "$FC_OUT" | sed -n '/^  Purpose$/{n;p;}')"
+expect_contains "STEP0-4 …the scale row carries the recommendation the plan recorded" \
+  "scale           wave — Several rows in one session. The ask names five files." "$FC_OUT"
+expect_eq "STEP0-5 …and the card ends on the configuration question" \
+  'Do you approve this configuration? Reply "approved" to approve it.' "$(printf '%s\n' "$FC_OUT" | tail -1)"
+expect_eq "STEP0-6 rendered for the session's own run, it opens the person's approve:step0 item" "approve:step0" "$(fc_owed)"
+# AC-20.2, the doctrine: a clean run has five human stops, the configuration card first; nothing still says four.
+# Each count beside a positive count of the same grep over the same file.
+FC_SK="${BIONIC_SKILLS_DIR}/canonical-sdlc"
+fc_count() { /usr/bin/grep -c -- "$1" "$2" 2>/dev/null | tr -d ' '; }  # <fixed text> <file> -> lines carrying it
+expect_eq "STEP0-7 SKILL.md names five human stops and never four" "1|0" \
+  "$(fc_count 'five human stops' "$FC_SK/SKILL.md")|$(fc_count 'four human stops' "$FC_SK/SKILL.md")"
+expect_eq "STEP0-8 steps/0.md puts card.sh step0 and never says four human stops" "1|0" \
+  "$(fc_count 'card.sh step0' "$FC_SK/steps/0.md")|$(fc_count 'four human stops' "$FC_SK/steps/0.md")"
+expect_eq "STEP0-9 steps/1.md puts card.sh step1, never says four human stops, and pictures no Configuration" "1|0|0" \
+  "$(fc_count 'card.sh step1' "$FC_SK/steps/1.md")|$(fc_count 'four human stops' "$FC_SK/steps/1.md")|$(fc_count 'Configuration' "$FC_SK/steps/1.md")"
+
+# ============================================================
+section "§OWED-WORDS: card.sh final shows the waive regression default only with a non-empty owed set, and names the set beside it (wave-39 T25; REQ-18 AC-18.3; D5)"
+# ============================================================
+# The card's regression default is the user's waiver. It stood for any regression refusal its check printed and for any
+# open waive:regression item on the ledger, so it was offered for a head that owed no run: an item the judge had opened
+# before a fix landed stayed a default after it. Now the card asks THE OWED SET (lib/proof.sh `proof_owed_suites`, the
+# reader the judge's refusal, the tick and regression-run share): the default stands, naming the set, only while the
+# set is non-empty; on an empty set the ledger's item is closed and not offered, and a regression refusal the waiver
+# cannot settle (the reds of the whole run, which a fix row closes; AC-18.3: no commit past the head) is CARD-EARLY.
+# FIXTURE FIDELITY: this suite's world, continued: a.test.sh is made to read lib/x.sh (A), then a code change it reads
+# (X) and a glossary line no suite reads (G) land on the working branch, each a real commit; the plan is fc_plan's,
+# its facts in the production writers' shapes (`proof_floor_line`, `proof_line`); the card is the real card.sh, its
+# checks the real `current <N> --check`.
+# fails-when: the default is missing or does not name the owed set at a head that owes a.test.sh; it is offered at a
+# head whose owed set is empty, from the check or from the ledger; the reds of the whole run read as a waiver default.
+fo_set() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_owed_suites "$2" "$3"' _ "$FC_LIB" "$PFC" "$RFC" 2>/dev/null; }
+fo_line() { printf '%s\n' "$FC_OUT" | /usr/bin/grep -F -- '- waive regression' | head -1; }   # the card's regression default, the one line
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$RFC/tests/a.test.sh"
+( cd "$RFC" && git add tests/a.test.sh && git commit -qm 'A: a.test.sh reads lib/x.sh' ) >/dev/null 2>&1
+FO_A="$(git -C "$RFC" rev-parse HEAD)"
+FO_X="$(s57_commit "$RFC" lib/x.sh 'X: a code change a.test.sh reads')"
+FO_H8="${FO_X:0:8}"
+
+# ---------- a head that owes a.test.sh: the default, naming the set ----------
+fc_plan "$(fc_floor "$FO_A")
+$(fc_reads "$FO_X")"
+expect_eq "FO-0 precondition: the owed set at X is a.test.sh (proof_owed_suites, the one reader)" "a.test.sh" "$(fo_set)"
+fc_card final
+expect_eq "FO-1 card.sh final renders at X (exit 0, no refusal): the waiver settles the regression's refusal" "0|" "$FC_RC|$FC_ERR"
+expect_nonempty "FO-1b precondition: the card prints a regression default (the extractor reads real output)" "$(fo_line)"
+expect_eq "FO-2 AC-18.3 …naming the owed set beside the user's waiver" \
+  "   - waive regression with your words — the head owes a.test.sh" "$(fo_line)"
+expect_contains "FO-2b …and the person's waiver item is open on the ledger" "waive:regression" "$(fc_owed)"
+
+# ---------- AC-18.1: a glossary commit past the regression's head owes nothing, and the card offers no waiver ----------
+mkdir -p "$RFC/notes"
+FO_G="$(s57_commit "$RFC" notes/glossary.md 'G: a glossary line, read by no suite')"
+fc_plan "$(fc_floor "$FO_X")
+$(fc_reads "$FO_G")"
+fc_owe waive:regression
+expect_eq "FO-3 precondition: past the regression's head at X the glossary commit G owes nothing (FO-0 read a.test.sh)" "" "$(fo_set)"
+expect_contains "FO-3b precondition: …while the ledger holds an open waive:regression item from before" "waive:regression" "$(fc_owed)"
+fc_card final
+expect_eq "FO-4 card.sh final renders at G (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "FO-4b …a card of options (the extractor's source is a real card)" "1. Accept every default:" "$FC_OUT"
+expect_absent "FO-5 AC-18.3 …with no regression default on an empty owed set (FO-2 is the positive)" "waive regression" "$FC_OUT"
+expect_absent "FO-5b …and the ledger's waive:regression item closed, not left owed (FO-2b is the positive)" "waive:regression" "$(fc_owed)"
+
+# ---------- the reds of the whole run are a fix row's, not the card's waiver ----------
+fc_plan "$(fc_floor "$FO_G" a.test.sh)
+$(fc_reads "$FO_G")"
+expect_eq "FO-6 precondition: the whole run at G left a.test.sh red; the owed set, past G, is empty" "" "$(fo_set)"
+fc_card final
+expect_eq "FO-6b card.sh final at G is CARD-EARLY (exit 1): the regression's reds are no default of the card" "1" "$FC_RC"
+expect_contains "FO-6c …naming the advance whose check refuses" "CARD-EARLY — " "$FC_ERR"
+expect_absent "FO-6d …and offering no waiver (FO-2 is the positive)" "waive regression" "$FC_OUT"
+git -C "$RFC" reset -q --hard "$FC_R"
 
 finish

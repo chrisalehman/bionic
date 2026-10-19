@@ -14,7 +14,8 @@
 #   dispatch-preflight.test.sh     §CAP … §role-class, then §no-listagents
 #   dispatch-preflight-2.test.sh   S1 … S22
 #   dispatch-preflight-3.test.sh   §combined … §two-deliverables
-#   dispatch-preflight-4.test.sh   §Q … §RECORDER, and S10h, which §RECORDER reads
+#   dispatch-preflight-4a.test.sh  S10h … §LR       (two parts since wave-39 T37; the helpers they share
+#   dispatch-preflight-4b.test.sh  §T72 … §FILES     are in tests/dispatch-preflight-4.prelude.sh)
 #
 # What every shard needs and no section owns is in tests/dispatch-preflight.prelude.sh: the
 # fixtures, the sandbox and its traps, run_gate and the payload builders, and the helpers and
@@ -32,6 +33,48 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
+# directly or through the hooks and scripts it runs: arm, debt, interval, interval-default, window. Each line
+# below is that closure: the library (every run executes it), the arm of each verb, the sections defining the
+# globals they read, and each helper outside those.
+reads hooks/session-poker.sh section "the library"
+reads hooks/session-poker.sh section "whose run is this?"
+reads hooks/session-poker.sh section "the contract grammar"
+reads hooks/session-poker.sh section "the launch sync"
+reads hooks/session-poker.sh verb arm
+reads hooks/session-poker.sh verb debt
+reads hooks/session-poker.sh verb interval
+reads hooks/session-poker.sh verb interval-default
+reads hooks/session-poker.sh verb window
+reads hooks/session-poker.sh fn adopt_copy_marker
+reads hooks/session-poker.sh fn adopt_fold
+reads hooks/session-poker.sh fn adopt_write_row
+reads hooks/session-poker.sh fn clean
+reads hooks/session-poker.sh fn count_main_thread_dispatches
+reads hooks/session-poker.sh fn count_refused_dispatches
+reads hooks/session-poker.sh fn cover_basis
+reads hooks/session-poker.sh fn cur7_judge
+reads hooks/session-poker.sh fn cur8_owed_waivers
+reads hooks/session-poker.sh fn epoch_iso
+reads hooks/session-poker.sh fn file_birth
+reads hooks/session-poker.sh fn file_mtime
+reads hooks/session-poker.sh fn iso_now
+reads hooks/session-poker.sh fn line_field
+reads hooks/session-poker.sh fn note
+reads hooks/session-poker.sh fn now_epoch
+reads hooks/session-poker.sh fn pair
+reads hooks/session-poker.sh fn parse_seconds
+reads hooks/session-poker.sh fn patrol_armed_file
+reads hooks/session-poker.sh fn patrol_stamp_file
+reads hooks/session-poker.sh fn poker_interval_seconds
+reads hooks/session-poker.sh fn roster_window
+reads hooks/session-poker.sh fn row_has_key
+reads hooks/session-poker.sh fn sched_facts_state
+reads hooks/session-poker.sh fn tick_digest_file
+reads hooks/session-poker.sh fn tmp_dir_ok
+reads hooks/session-poker.sh fn write_patrol_armed_marker
+reads hooks/session-poker.sh fn write_patrol_stamp
+reads hooks/session-poker.sh fn write_tick_digest
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
@@ -516,9 +559,9 @@ expect_contains "the row records the progress absence" "progress" "$ABSENT"
 expect_contains "the row records the missing agent name" "name" "$ABSENT"
 expect_absent "the deliverable it DID name is not recorded absent" "deliverable" "$ABSENT"
 expect_status "the absent contract field is empty in the row, not fabricated" "" "$(roster_field "$ROW" duration)"
-# An OMITTED model is not an absence finding — the Agent tool inherits the
-# orchestrator's model when none is given, so a warning here would fire on the
-# ordinary case and train the operator to read past the real ones.
+# An OMITTED model is not an absence finding — the role file names the model (agents/<role>.md,
+# §ROLE-MODEL below) and the roster row journals it, so a warning here would fire on the ordinary
+# case and train the operator to read past the real ones.
 expect_absent "an omitted model is NOT recorded as an absence" "model" "$ABSENT"
 
 section "S10W — a brief naming NO deliverable is REFUSED; the in-brief waiver is the only way through"
@@ -2537,6 +2580,55 @@ expect_absent "…and says nothing about a budget on the pass path" "parallel bu
 # probe-written `writers=1` refused the second writer. Now each of those dispatches with no
 # ceiling and nothing said. fails-when: `source=probe writers=1` refuses anything, or a plan
 # with no line is named.
+
+
+# §ROLE-MODEL — THE JOURNALED MODEL COMES FROM THE ROLE FILE (wave-39 T12; D16, REQ-8 AC-8.1, AC-8.2).
+# A dispatch whose tool input carries no `model` journals `model=<model>-<effort>` read from the
+# role's own file (agents/<role>.md), so the test-runner reads `haiku-high`, equal to that file's
+# lines. A dispatch that DOES carry a model journals the override exactly as before. A role-named
+# dispatch never writes an empty model=. fails-when: the omitted-model row reads empty, or reads
+# anything other than the role file's own model and effort, or the override stops winning.
+section "§ROLE-MODEL — the roster row's model comes from agents/<role>.md when the call names none"
+
+_rm_fm() {  # <role> <key> — the first frontmatter block's value for <key>, from the rendered role file
+  /usr/bin/awk -v k="$2:" 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+    fm && index($0, k) == 1 { sub(/^[a-z]+:[ \t]*/, ""); print; exit }' "${BIONIC_HOOKS_DIR}/../agents/$1.md" | tr -d '\r'
+}
+RM_FILE_MODEL=$(_rm_fm test-runner model); RM_FILE_EFFORT=$(_rm_fm test-runner effort)
+expect_eq "the test-runner role file names a model (the extractor reads non-empty)" "haiku" "$RM_FILE_MODEL"
+expect_eq "the test-runner role file names an effort (the extractor reads non-empty)" "high" "$RM_FILE_EFFORT"
+
+REPO=$(make_repo rm1 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-rm1 - "$S5_LIVE_TRANSCRIPT" bionic:test-runner)"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the omitted-model dispatch passes" "0" "$GATE_ST"
+expect_eq "the omitted model journals <model>-<effort> read from the role file" \
+  "haiku-high" "$(roster_field "$ROW" model)"
+expect_eq "…which is the role file's own two lines joined" \
+  "${RM_FILE_MODEL}-${RM_FILE_EFFORT}" "$(roster_field "$ROW" model)"
+
+REPO=$(make_repo rm2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-rm2 - "$S5_LIVE_TRANSCRIPT" implementor)"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "a bare role name (no bionic: prefix) reads its file too" \
+  "$(_rm_fm implementor model)-$(_rm_fm implementor effort)" "$(roster_field "$ROW" model)"
+
+REPO=$(make_repo rm3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-rm3 claude-opus-5 "$S5_LIVE_TRANSCRIPT" bionic:test-runner)"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "a dispatch that names a model journals the override, with the role's effort as today" \
+  "claude-opus-5-high" "$(roster_field "$ROW" model)"
+expect_absent "…and the role file's model does not leak into an override row" "haiku" "$(roster_field "$ROW" model)"
+
+REPO=$(make_repo rm4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-rm4 - "$S5_LIVE_TRANSCRIPT" general-purpose)"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a type with no role file and no model journals an empty model" "" "$(roster_field "$ROW" model)"
+expect_status "…and the dispatch still passes" "0" "$GATE_ST"
 
 
 finish

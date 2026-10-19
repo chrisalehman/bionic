@@ -24,7 +24,8 @@
 #   dispatch-preflight.test.sh     §CAP … §role-class, then §no-listagents
 #   dispatch-preflight-2.test.sh   S1 … S22
 #   dispatch-preflight-3.test.sh   §combined … §two-deliverables
-#   dispatch-preflight-4.test.sh   §Q … §RECORDER, and S10h, which §RECORDER reads
+#   dispatch-preflight-4a.test.sh  S10h … §LR       (two parts since wave-39 T37; the helpers they share
+#   dispatch-preflight-4b.test.sh  §T72 … §FILES     are in tests/dispatch-preflight-4.prelude.sh)
 #
 # What every shard needs and no section owns is in tests/dispatch-preflight.prelude.sh: the
 # fixtures, the sandbox and its traps, run_gate and the payload builders, and the helpers and
@@ -41,6 +42,54 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
+# directly or through the hooks and scripts it runs: arm, debt, fill-report, interval, interval-default,
+# landing-report, window. Each line below is that closure: the library (every run executes it), the arm of
+# each verb, the sections defining the globals they read, and each helper outside those.
+reads hooks/session-poker.sh section "the library"
+reads hooks/session-poker.sh section "whose run is this?"
+reads hooks/session-poker.sh section "the runs (wave-30 T12; D6, D7d)"
+reads hooks/session-poker.sh section "the contract grammar"
+reads hooks/session-poker.sh section "the launch sync"
+reads hooks/session-poker.sh section "the run's scorecard"
+reads hooks/session-poker.sh section "the situation report"
+reads hooks/session-poker.sh verb arm
+reads hooks/session-poker.sh verb debt
+reads hooks/session-poker.sh verb fill-report
+reads hooks/session-poker.sh verb interval
+reads hooks/session-poker.sh verb interval-default
+reads hooks/session-poker.sh verb landing-report
+reads hooks/session-poker.sh verb window
+reads hooks/session-poker.sh fn clean
+reads hooks/session-poker.sh fn count_main_thread_dispatches
+reads hooks/session-poker.sh fn count_refused_dispatches
+reads hooks/session-poker.sh fn cover_basis
+reads hooks/session-poker.sh fn cur7_judge
+reads hooks/session-poker.sh fn cur8_owed_waivers
+reads hooks/session-poker.sh fn epoch_iso
+reads hooks/session-poker.sh fn file_birth
+reads hooks/session-poker.sh fn file_mtime
+reads hooks/session-poker.sh fn hand_holds_report
+reads hooks/session-poker.sh fn iso_epoch
+reads hooks/session-poker.sh fn iso_now
+reads hooks/session-poker.sh fn landing_report
+reads hooks/session-poker.sh fn landing_unmeasured
+reads hooks/session-poker.sh fn line_field
+reads hooks/session-poker.sh fn note
+reads hooks/session-poker.sh fn now_epoch
+reads hooks/session-poker.sh fn pair
+reads hooks/session-poker.sh fn parse_seconds
+reads hooks/session-poker.sh fn patrol_armed_file
+reads hooks/session-poker.sh fn patrol_stamp_file
+reads hooks/session-poker.sh fn poker_interval_seconds
+reads hooks/session-poker.sh fn roster_window
+reads hooks/session-poker.sh fn row_has_key
+reads hooks/session-poker.sh fn sched_facts_state
+reads hooks/session-poker.sh fn tick_digest_file
+reads hooks/session-poker.sh fn tmp_dir_ok
+reads hooks/session-poker.sh fn write_patrol_armed_marker
+reads hooks/session-poker.sh fn write_patrol_stamp
+reads hooks/session-poker.sh fn write_tick_digest
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
@@ -2403,6 +2452,10 @@ expect_absent "PU.6 …with nothing from this arm on the wire" "write tracked fi
 
 # RULE 3: THE PROVED HEAD REFUSES — run nothing.
 REPO=$(pf_repo rpc)
+# a.test.sh DECLARES lib/one.sh (as units §FLOOR-STANDS does): the outside merge below changes a file a suite reads
+# (wave-39 T45; D5, AC-18.1). The fixture's suites are otherwise empty, and a file no suite reads owes nothing.
+# The declaration is built by printf, as units does: written whole here it would be extracted as THIS file's own.
+pf_commit "$REPO" tests/a.test.sh "$(printf '#!/bin/bash\n%s file lib/one.sh %s' anchor "'one'")"
 write_attestation "$REPO" "$SID_A"
 PF_H=$(git -C "$REPO" rev-parse HEAD)
 pf_plan "$REPO" "$PF_H"
@@ -2414,8 +2467,10 @@ expect_eq "PC.1 a whole run on the proved head is REFUSED (rule 3)" "deny" "$GAT
 expect_contains "PC.1 …the one line says the head is proved" "already proved" "$(pf_line)"
 expect_contains "PC.1 …the detail names the head and the evidence" "record/w99-floor.txt" "$GATE_VERR"
 expect_contains "PC.1 …and the head" "${PF_H:0:7}" "$GATE_VERR"
-# AN OUTSIDE MERGE IS `uncovered` NOW (T25), and the wall treats it as any other uncovered head:
-# admitted as the plan's FIRST whole run (the refused PC.1 journalled none), refused as a SECOND.
+# AN OUTSIDE MERGE THAT A SUITE READS DIFFERENTLY IS `uncovered` (D5, AC-18.1; wave-39 T24 inverted wave-26 AC-3.4,
+# T45 reworks this pin to match): the merge changes lib/one.sh, which a.test.sh reads, so a.test.sh owes its run
+# and the wall treats the head as any other uncovered head: admitted as the plan's FIRST whole run (the refused PC.1
+# journalled none), refused as a SECOND. A merge no suite reads is covered by its parent and owes nothing.
 git -C "$REPO" checkout -q -b other-work 2>/dev/null
 pf_commit "$REPO" lib/one.sh 'one, from outside'
 git -C "$REPO" checkout -q wave/99-test 2>/dev/null
