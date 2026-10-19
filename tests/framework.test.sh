@@ -1965,7 +1965,7 @@ expect_eq "21: a subcommand other than check or index is a usage error (exit 2)"
 AR="$SB/real-three"
 mkdir -p "$AR/tests" "$AR/payload/scripts/lib"
 for an_f in tests/landing-line.test.sh tests/runner-roster.test.sh tests/spawn-worktree.test.sh tests/run.sh \
-    payload/scripts/lib/line.sh; do
+    payload/scripts/lib/line.sh payload/scripts/lib/anchors.sh; do
   cp "$REPO/$an_f" "$AR/$an_f"
 done
 git -C "$AR" init -q
