@@ -4,7 +4,7 @@
 #
 # THE VERB PRINTS THE FACT HALF OF THE REPORT. Bottom line (the last recorded judgment, with its time),
 # Situation (every row of ## Tasks, a glyph in column 1), Assessment (three indicators by thresholds
-# printed on the page), Blockers (the person's open owed items), Forecast (percent, closing time from
+# printed on the page; the schedule one against the clock and the 15-minute bar, wave-39 T9), Blockers (the person's open owed items), Forecast (percent, closing time from
 # measured pace, basis, the waits assumption). `--line` is the patrol's one-line form, and
 # `sitrep bottom-line '<item>'…` records the judgment items to record/<wave>/sitrep.log. The skill
 # that fills the judgment slots is T11's (skills/sitrep/SKILL.md); its sections, §ORDER, §FACTS and §SURFACES,
@@ -61,12 +61,17 @@ SR_H="$(printf 'a%.0s' $(seq 40))"
 # ---------- the world ----------
 #
 # sr_world <label> <landing minutes for T1..T4, space-separated | none> -> SR_REPO, SR_PLAN, SR_REC,
-# SR_DIR, SR_GATE. Seventeen rows, all Step 4 builds: T1–T4 landed (sizes 60 60 120 120, so the median
-# declared is 90), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
+# SR_DIR, SR_GATE. Seventeen rows, all Step 4 builds: T1–T4 landed (sizes 5 5 10 10, so the median
+# declared is 7.5), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
 # chain is T8→T9 (90 + 60 = 150 min); every other open row is 30 min and reads nothing of another's.
 # T12 reads approval:release and T17 approval:merge. With `none`, T1–T4 are pending too and the
 # landing record holds no landing. Two gate requests are admitted and held by this shell, so the
 # gate's admitted count is 2.
+# THE CLOCK (wave-39 T9; D25): the plan is approved at 10:00Z (its `approved-by:` instant, 12 hours before
+# NOW; SR_APPROVED=none leaves the line out, an unapproved plan) and declares `forecast: $SR_FORECAST` (48h when
+# unset; an empty SR_FORECAST declares none). SR_EXTRA
+# appends that many more pending 30-minute rows (T18…), reading nothing, so the plan's total grows and the
+# chain does not.
 sr_world() {
   local label="$1" mins="$2" r d p
   r="$TMPROOT/$label"; mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-01-fx"
@@ -77,8 +82,12 @@ sr_world() {
   local st1=landed land=yes
   [ "$mins" = none ] && { st1=pending; land=no; }
   {
-    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n---\n'
-    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n'
+    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
+    [ -z "${SR_FORECAST-48h}" ] || printf 'forecast: %s\n' "${SR_FORECAST-48h}"
+    printf -- '---\n'
+    printf '# fixture plan\n\n## SDLC State\n\n'
+    [ "${SR_APPROVED-}" = none ] || printf 'approved-by: fixture 2026-10-06T10:00:00Z "approved"\n'
+    printf 'current: 4\n\n'
     printf -- '- Step 4: implementation opened\n'
   } > "$p"
   local i at
@@ -101,16 +110,17 @@ sr_world() {
     printf '\n## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    sr_row T1 "Row one the thing (D1; AC-1.1). More words · complexity: standard" — 60 "$st1"
-    sr_row T2 "Haiku 5.5 at high (REQ-8; AC-8.1) · complexity: standard" — 60 "$st1"
-    sr_row T3 "Third row. A second sentence · complexity: standard" — 120 "$st1"
-    sr_row T4 "Fourth · complexity: complex" — 120 "$st1"
+    sr_row T1 "Row one the thing (D1; AC-1.1). More words · complexity: standard" — 5 "$st1"
+    sr_row T2 "Haiku 5.5 at high (REQ-8; AC-8.1) · complexity: standard" — 5 "$st1"
+    sr_row T3 "Third row. A second sentence · complexity: standard" — 10 "$st1"
+    sr_row T4 "Fourth · complexity: complex" — 10 "$st1"
     for i in 5 6 7; do sr_row "T$i" "Row $i body · complexity: standard" — 30 active; done
     sr_row T8 "The long one (D8) · complexity: complex" — 90 active
     sr_row T9 "Waits on the long one · complexity: standard" lib/t8.sh 60 pending
     for i in 10 11 13 14 15 16; do sr_row "T$i" "Row $i body · complexity: standard" — 30 pending; done
     sr_row T12 "Release-gated row · complexity: standard" approval:release 30 pending
     sr_row T17 "Merge-gated row · complexity: standard" approval:merge 30 pending
+    i=18; while [ "$i" -le $((17 + ${SR_EXTRA:-0})) ]; do sr_row "T$i" "Row $i body · complexity: standard" — 30 pending; i=$((i + 1)); done
     printf '\n## Not Doing\n\n- nothing\n'
   } >> "$p"
   # The fill ledger: two turns, nothing idle, the first at 10:00Z (elapsed 720 min at NOW).
@@ -155,6 +165,11 @@ sr_run() {  # <args after the verb…> -> OUT (stdout), ERR (stderr), RC; the wo
   RC=$?
   OUT="$(cat "$TMPROOT/sr.out")"; ERR="$(cat "$TMPROOT/sr.err")"
 }
+sr_poke() { sr_poke_with "$POKER" "$@"; }
+sr_poke_with() {  # <poker> <verb args…> -> the verb run in the world, as sr_run runs it
+  local pk="$1"; shift
+  ( cd "$SR_REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH="${SR_AT:-$SR_NOW}" BIONIC_GATE_DIR="$SR_GATE" bash "$pk" "$@" )
+}
 sr_line() { printf '%s\n' "$OUT" | /usr/bin/grep -E "^$1" | head -1; }
 sr_rows() {  # -> the Situation's row lines: from the counts header's next line to the first blank
   printf '%s\n' "$OUT" | awk '/^[0-9]+ landed · / { on = 1; next } on && /^$/ { exit } on { print }'
@@ -165,14 +180,14 @@ SR_MARK_WITHIN='✅'
 SR_MARK_NEAR='➖'
 SR_MARK_OVER='✖️'
 SR_MARK_NONE='❔'
-SR_LEGEND='within / near / over — schedule ≤ 1.25 / ≤ 2.0 / above · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
+SR_LEGEND='within / near / over — schedule at or ahead of the pace its forecast needs and the median landing at or under the bar / either within 1.25× / further · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
 # sr_ind <name> -> the indicator's line: the mark leads, then the name
 sr_ind() { printf '%s\n' "$OUT" | /usr/bin/grep -E "^[^ ]+ $1 " | head -1; }
 
 # ============================================================
 section "§ROWS: every row of ## Tasks, glyph in column 1, [step]/[task]: desc, landed rows with a local 12-hour time, and the counts header (AC-2.3, D14, Δ5)"
 # ============================================================
-sr_world rows "72 72 144 144"
+sr_world rows "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "R0 sitrep <plan> exits 0 with nothing on stderr" "0|" "$RC|$ERR"
 expect_eq "R1 the title line: Sitrep · wave · release · local date and time · step" \
@@ -183,7 +198,7 @@ expect_eq "R3 seventeen row lines, contiguous under the header" "17" "$(printf '
 expect_eq "R4 every row line opens with one of the four glyphs in column 1, then [step]/[task]:" "17" \
   "$(printf '%s\n' "$SR_ROWS" | /usr/bin/grep -cE '^(✅|🔄|⬜|⛔) 4/T[0-9]+: ')"
 expect_eq "R5 the rows in table order, each glyph by status, the description cut at its first ( . or · and landed rows carry their local landing time" \
-  "✅ 4/T1: Row one the thing — 4:12 AM|✅ 4/T2: Haiku 5.5 at high — 4:42 AM|✅ 4/T3: Third row — 6:24 AM|✅ 4/T4: Fourth — 7:24 AM|🔄 4/T5: Row 5 body|🔄 4/T6: Row 6 body|🔄 4/T7: Row 7 body|🔄 4/T8: The long one|⬜ 4/T9: Waits on the long one|⬜ 4/T10: Row 10 body|⬜ 4/T11: Row 11 body|⬜ 4/T13: Row 13 body|⬜ 4/T14: Row 14 body|⬜ 4/T15: Row 15 body|⬜ 4/T16: Row 16 body|⬜ 4/T12: Release-gated row|⬜ 4/T17: Merge-gated row" \
+  "✅ 4/T1: Row one the thing — 3:06 AM|✅ 4/T2: Haiku 5.5 at high — 3:36 AM|✅ 4/T3: Third row — 4:12 AM|✅ 4/T4: Fourth — 5:12 AM|🔄 4/T5: Row 5 body|🔄 4/T6: Row 6 body|🔄 4/T7: Row 7 body|🔄 4/T8: The long one|⬜ 4/T9: Waits on the long one|⬜ 4/T10: Row 10 body|⬜ 4/T11: Row 11 body|⬜ 4/T13: Row 13 body|⬜ 4/T14: Row 14 body|⬜ 4/T15: Row 15 body|⬜ 4/T16: Row 16 body|⬜ 4/T12: Release-gated row|⬜ 4/T17: Merge-gated row" \
   "$(printf '%s\n' "$SR_ROWS" | tr '\n' '|' | sed 's/|$//')"
 expect_eq "R6 no UTC instant anywhere on the page (no ISO Z time, no UTC word)" "" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z|UTC')"
@@ -194,15 +209,15 @@ expect_eq "R8 …and no line of rule characters" "" "$(printf '%s\n' "$OUT" | /u
 # A landing on another day than now's carries its local date after the time.
 SR_AT=$((SR_NOW + 86400)) sr_run "$SR_PLAN"
 expect_eq "R9 a landing on another local day than now's: H:MM AM/PM then its local date" \
-  "✅ 4/T1: Row one the thing — 4:12 AM 2026-10-06" "$(sr_rows | head -1)"
+  "✅ 4/T1: Row one the thing — 3:06 AM 2026-10-06" "$(sr_rows | head -1)"
 
 # ============================================================
 section "§MARKS: three indicators, each line opening on its mark (✅ within · ➖ near · ✖️ over · ❔ not measurable) then its number, the thresholds printed once under the three; a planted defect moves its mark (AC-2.4, D10, D29, D31)"
 # ============================================================
-sr_world marks "72 72 144 144"
+sr_world marks "6 6 12 12"
 sr_run "$SR_PLAN"
-expect_eq "M0 the clean world: schedule ✅ at 1.2× (median 108.0m from landing-report over median declared 90m), the mark first, no legend on the line" \
-  "$SR_MARK_WITHIN schedule 1.2× — median ready→landed 108.0m over median declared 90m" "$(sr_ind schedule)"
+expect_eq "M0 the clean world: schedule ✅, 4 of 17 landed in the 12 hours since approval where a 48-hour forecast needs 4, and the median ready→landed 9m (landing-report's) under the 15m bar, the mark first, no legend on the line" \
+  "$SR_MARK_WITHIN schedule — 4 of 17 landed in 12h, pace needs 4 · median ready→landed 9m over the 15m bar" "$(sr_ind schedule)"
 expect_eq "M1 …correctness ✅, no red, no open S1/S2" \
   "$SR_MARK_WITHIN correctness — no red run at head, no open S1/S2" "$(sr_ind correctness)"
 expect_eq "M2 …waste ✅, nothing discarded, nothing idle" \
@@ -233,36 +248,108 @@ awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=review head=" h
 sr_run "$SR_PLAN"
 expect_eq "M6 an open S2 finding of a registered reading → correctness ✖️" \
   "$SR_MARK_OVER correctness — 1 red, all returned, 1 open S1/S2" "$(sr_ind correctness)"
-# A landing at 1.6× declared: schedule ➖.
-sr_world marks-slow "96 96 192 192"
+# The clock 1.25× behind: a 40-hour forecast needs 17 × 12/40 = 5.1, so 5, and 4 landed: schedule ➖.
+SR_FORECAST=40h sr_world marks-slow "6 6 12 12"
 sr_run "$SR_PLAN"
-expect_eq "M7 landings at 1.6× their declared size → schedule ➖" \
-  "$SR_MARK_NEAR schedule 1.6× — median ready→landed 144.0m over median declared 90m" "$(sr_ind schedule)"
+expect_eq "M7 4 landed where the forecast's pace needs 5 (within 1.25× behind) → schedule ➖" \
+  "$SR_MARK_NEAR schedule — 4 of 17 landed in 12h, pace needs 5 · median ready→landed 9m over the 15m bar" "$(sr_ind schedule)"
+# …further behind: a 24-hour forecast needs 17 × 12/24 = 8.5, so 9.
+SR_FORECAST=24h sr_world marks-late "6 6 12 12"
+sr_run "$SR_PLAN"
+expect_eq "M7b 4 landed where the pace needs 9 (over 1.25× behind) → schedule ✖️, the bar half still within" \
+  "$SR_MARK_OVER schedule — 4 of 17 landed in 12h, pace needs 9 · median ready→landed 9m over the 15m bar" "$(sr_ind schedule)"
 # 20% of runs discarded: waste ✖️.
-sr_world marks-waste "72 72 144 144"
+sr_world marks-waste "6 6 12 12"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "M8 one run in five discarded (20%) → waste ✖️" \
   "$SR_MARK_OVER waste 20% discarded · 0% idle-width" "$(sr_ind waste)"
 # Idle width: an idle turn from 16:00Z to 17:12Z is 72 of 720 elapsed minutes, 10%: ➖.
-sr_world marks-idle "72 72 144 144"
+sr_world marks-idle "6 6 12 12"
 printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
 printf 'fill-ledger/v1|at=2026-10-06T17:12:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
 sr_run "$SR_PLAN"
 expect_eq "M9 72 idle minutes over 720 elapsed (10%) → waste ➖, the minutes fill-report's" \
   "$SR_MARK_NEAR waste 0% discarded · 10% idle-width" "$(sr_ind waste)"
-# No landing on this run: schedule cannot be computed and says so.
+# No landing on this run, 12 hours in: the clock still reads, and is behind; the bar still prints.
 sr_world marks-none none
 sr_run "$SR_PLAN"
-expect_eq "M10 no landing yet: schedule prints ❔ unverified, and the legend still prints once under the three" \
-  "$SR_MARK_NONE schedule unverified — no landing yet on this run" "$(sr_ind schedule)"
+expect_eq "M10 no landing yet: the clock half is behind (0 where 4 are needed) → ✖️, and the bar still prints with its number" \
+  "$SR_MARK_OVER schedule — 0 of 17 landed in 12h, pace needs 4 · no landing yet against the 15m bar" "$(sr_ind schedule)"
+# …and with no forecast declared, neither half can be graded: ❔, each half saying why.
+SR_FORECAST= sr_world marks-bare none
+sr_run "$SR_PLAN"
+expect_eq "M10b no forecast: declared and no landing: schedule ❔, the bar still on the line" \
+  "$SR_MARK_NONE schedule — clock unverified, the plan declares no forecast: · no landing yet against the 15m bar" "$(sr_ind schedule)"
 expect_eq "M11 …the legend is the same one line, under the third indicator" "$SR_LEGEND" \
   "$(printf '%s\n' "$OUT" | awk '/^Assessment$/ { f = 1; next } f && /^[^ ]+ waste / { w = 1; next } w { print; exit }')"
 
 # ============================================================
+section "§CLOCK — wave-39 T9 (D25, Δ9; AC-5.1): the schedule mark reads the clock, rows landed since the Step-3 approval against the pace the plan's forecast: needs, ✅ at or ahead, ➖ within 1.25× behind, ✖️ further; the median ready→landed against the 15-minute bar beside it; the declared sizes feed nothing"
+# ============================================================
+# The fixture of the finding: 39 rows, 4 landed (10%), 11 hours after approval, against a 24-hour forecast:
+# the pace needs 39 × 11/24 = 17.9, so 18. The four landings take 120 120 134 134 minutes: median 127.
+SR_FORECAST=24h SR_EXTRA=22 sr_world clock "120 120 134 134"
+SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
+expect_eq "CK0 precondition: 39 rows, 4 landed, read by the Situation's counts" \
+  "4 landed · 4 in flight · 31 not started · 0 red/blocked of 39" "$(sr_line '[0-9]+ landed · ')"
+SR_CK1="$(sr_ind schedule)"
+SR_CK1_BASIS="$(sr_line 'basis: ')"
+expect_eq "CK1 10% landed after 11 hours of a 24-hour forecast: ✖️, the counts and the needed pace, the median against the 15m bar beside it" \
+  "$SR_MARK_OVER schedule — 4 of 39 landed in 11h, pace needs 18 · median ready→landed 127m over the 15m bar" "$SR_CK1"
+# The declared sizes change and nothing else: the mark and its line do not move. The Forecast's basis, which
+# still reads the sizes, is the proof the rewrite reached the renderer.
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 500 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
+expect_eq "CK2a precondition: the sizes rewrite reached the page (the Forecast's basis moved: median declared 500m)" \
+  "yes|yes" "$(sr_line 'basis: ' | /usr/bin/grep -q 'over median declared 500m' && echo yes)|$([ "$(sr_line 'basis: ')" != "$SR_CK1_BASIS" ] && echo yes)"
+expect_eq "CK2 …and the schedule line is byte for byte what it was: the declared sizes feed nothing of the mark" \
+  "$SR_CK1" "$(sr_ind schedule)"
+# Ahead of pace: a 120-hour forecast needs 39 × 11/120 = 3.6, so 4, and 4 landed in a 9-minute median.
+SR_FORECAST=120h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
+SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
+expect_eq "CK3 a fixture at the forecast's pace, its median under the bar: ✅" \
+  "$SR_MARK_WITHIN schedule — 4 of 39 landed in 11h, pace needs 4 · median ready→landed 9m over the 15m bar" "$(sr_ind schedule)"
+# The scorecard's target is the same bar.
+SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null)"
+expect_eq "CK4 the scorecard's widest landing prints against target < 15, the landing bar" \
+  "widest landing ready→landed: T3 12.0 min · target < 15" "$(printf '%s\n' "$SR_SC" | /usr/bin/grep '^widest landing ')"
+expect_eq "CK5 …and its schedule line is the sitrep's, byte for byte" \
+  "$(sr_ind schedule)" "$(printf '%s\n' "$SR_SC" | /usr/bin/grep -E '^[^ ]+ schedule ')"
+
+# ============================================================
+section "§BAR-PLANT — wave-39 T9 (D12; AC-5.2): planted 20-minute landings turn the indicator ✖️ with the clock at pace; the bar is LINE_LANDING_BAR in lib/line.sh, read by the sitrep and the scorecard alike"
+# ============================================================
+sr_world bar-plant "20 20 20 20"
+sr_run "$SR_PLAN"
+expect_eq "BP1 four landings of 20 minutes, the clock at pace (4 of 17, needs 4): the median over the 15m bar turns the indicator ✖️" \
+  "$SR_MARK_OVER schedule — 4 of 17 landed in 12h, pace needs 4 · median ready→landed 20m over the 15m bar" "$(sr_ind schedule)"
+sr_run --line "$SR_PLAN"
+expect_eq "BP2 …and the one-line form opens on it (the line: $OUT)" "yes" "$([ "${OUT#"$SR_MARK_OVER$SR_MARK_WITHIN$SR_MARK_WITHIN · "}" != "$OUT" ] && echo yes)"
+sr_world bar-near "17 17 17 17"
+sr_run "$SR_PLAN"
+expect_eq "BP3 a 17-minute median, within 1.25× of the bar: ➖" \
+  "$SR_MARK_NEAR schedule — 4 of 17 landed in 12h, pace needs 4 · median ready→landed 17m over the 15m bar" "$(sr_ind schedule)"
+# One constant: a mutant tree whose lib/line.sh sets the bar to 25 moves both surfaces that read it.
+SR_MUT="$TMPROOT/mut"; mkdir -p "$SR_MUT/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$SR_MUT/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_MUT/payload/scripts"
+sed 's/^LINE_LANDING_BAR=15$/LINE_LANDING_BAR=25/' "$BIONIC_HOOKS_DIR/../payload/scripts/lib/line.sh" > "$SR_MUT/payload/scripts/lib/line.sh"
+expect_eq "BP4 precondition: the shipped line.sh defines the bar once, at 15, and the mutant at 25" "1|1" \
+  "$(/usr/bin/grep -c '^LINE_LANDING_BAR=15$' "$BIONIC_HOOKS_DIR/../payload/scripts/lib/line.sh" | tr -d ' ')|$(/usr/bin/grep -c '^LINE_LANDING_BAR=25$' "$SR_MUT/payload/scripts/lib/line.sh" | tr -d ' ')"
+sr_world bar-plant-mut "20 20 20 20"
+SR_KEEP_POKER="$POKER"; POKER="$SR_MUT/hooks/session-poker.sh"
+sr_run "$SR_PLAN"
+SR_MUT_SC="$(sr_poke_with "$POKER" landing-report --scorecard "$SR_PLAN")"
+POKER="$SR_KEEP_POKER"
+expect_eq "BP5 under the mutant bar of 25 the same 20-minute landings render (rc 0) and read ✅ over the 25m bar" \
+  "0|$SR_MARK_WITHIN schedule — 4 of 17 landed in 12h, pace needs 4 · median ready→landed 20m over the 25m bar" "$RC|$(sr_ind schedule)"
+expect_eq "BP6 …and the scorecard's target reads it too" \
+  "widest landing ready→landed: T1 20.0 min · target < 25" "$(printf '%s\n' "$SR_MUT_SC" | /usr/bin/grep '^widest landing ')"
+
+# ============================================================
 section "§BLOCKERS: every open approve:, waive:, finding: and gate: item the person owes, one line each, or the none line (AC-2.5, D11)"
 # ============================================================
-sr_world blockers "72 72 144 144"
+sr_world blockers "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "B1 an empty ledger prints the one none line under Blockers" \
   "none — no decision or action is owed by you" \
@@ -283,11 +370,11 @@ expect_eq "B3 …a row whose reads wait on an open approval reads ⛔ (blocked),
 # ============================================================
 section "§FORECAST: percent landed over all rows; closes at now + remaining chain × pace ratio ÷ admitted width, local 12-hour; the basis line; the waits line; before any landing the previous wave's ratio, said (AC-2.6, D12)"
 # ============================================================
-sr_world forecast "72 72 144 144"
+sr_world forecast "6 6 12 12"
 sr_run "$SR_PLAN"
 SR_FC="$(printf '%s\n' "$OUT" | awk '/^Forecast$/ { on = 1; next } on && /^$/ { exit } on { print }')"
 expect_eq "F1 the Forecast section is four lines: percent, closing time, basis, waits" \
-  "4/17 rows landed (24%)|closes ~4:30 PM|basis: median ready→landed 108.0m over median declared 90m = 1.2× · admitted width 2 · remaining chain T8→T9 150m|assuming open blockers are answered now; each hour they wait moves it an hour" \
+  "4/17 rows landed (24%)|closes ~4:30 PM|basis: median ready→landed 9.0m over median declared 7.5m = 1.2× · admitted width 2 · remaining chain T8→T9 150m|assuming open blockers are answered now; each hour they wait moves it an hour" \
   "$(printf '%s\n' "$SR_FC" | tr '\n' '|' | sed 's/|$//')"
 # The width moves the time: one admitted request, not two → 150 × 1.2 ÷ 1 = 180 min → 6:00 PM.
 rm -f "$SR_GATE/requests/2"
@@ -313,7 +400,7 @@ sr_run "$SR_PLAN"
 expect_eq "F5 no landing and no delivered wave: the closing time is unverified, and says why" \
   "closes unverified — no measured pace on this run or a delivered one" "$(sr_line 'closes ')"
 # A closing time past midnight carries its local date.
-sr_world forecast-late "72 72 144 144"
+sr_world forecast-late "6 6 12 12"
 SR_AT=$((SR_NOW + 6 * 3600)) sr_run "$SR_PLAN"
 expect_eq "F6 at 9:00 PM, 90 minutes on is the same local day: no date" \
   "closes ~10:30 PM" "$(sr_line 'closes ')"
@@ -325,7 +412,7 @@ expect_eq "F8 …at 11:30 PM, 90 minutes on is past midnight: the date follows" 
 # ============================================================
 section "§BOTTOM: sitrep bottom-line records up to four items with the time; a fifth and an uncited unlabelled item are refused; the next render prints them since that time (AC-2.7, D9, Δ7)"
 # ============================================================
-sr_world bottom "72 72 144 144"
+sr_world bottom "6 6 12 12"
 SR_LOG="$SR_DIR/sitrep.log"
 sr_run bottom-line 'T8 is the chain, 150m of it (line 30)' 'hypothesis: two admitted runs is the gate keeping to its share' 'diagnosis: the pace is under declared (line 24)' 'projection: closes before 5 PM if T12 is approved now' "$SR_PLAN"
 expect_eq "BL1 four items, each cited (line n) or labelled: exit 0, nothing on stderr" "0|" "$RC|$ERR"
@@ -355,7 +442,7 @@ expect_eq "BL7 a later recording replaces the Bottom line shown: only its items,
 # ============================================================
 section "§LINE: --line is the one-line form, the three indicator glyphs in order · owed: <n> · closes ~<time> (AC-2.8, D13)"
 # ============================================================
-sr_world line "72 72 144 144"
+sr_world line "6 6 12 12"
 sr_run --line "$SR_PLAN"
 expect_eq "L1 the clean world: one line, exit 0" "0|$SR_MARK_WITHIN$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ~4:30 PM" "$RC|$OUT"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
@@ -367,15 +454,15 @@ expect_eq "L2 a red at head and two owed items: the correctness glyph moves, owe
 sr_run "$SR_PLAN"
 expect_eq "L3 …the one line's glyphs are the full report's three marks, in order" \
   "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN" "$(printf '%s\n' "$OUT" | awk '$2 == "schedule" || $2 == "correctness" || $2 == "waste" { printf "%s", $1 }')"
-sr_world line-none none
+SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
-expect_eq "L4 an indicator the record cannot compute prints ❔ in the one line, and so does an unverified closing time" \
+expect_eq "L4 an indicator the record cannot compute (no forecast:, no landing) prints ❔ in the one line, and so does an unverified closing time" \
   "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes unverified" "$OUT"
 
 # ============================================================
 section "§ARGS: the verb's operands"
 # ============================================================
-sr_world args "72 72 144 144"
+sr_world args "6 6 12 12"
 sr_run --line --line "$SR_PLAN"
 expect_eq "A1 --line twice is the usage error (2)" "2" "$RC"
 sr_run "$SR_REPO/no/such.plan.md"
@@ -480,7 +567,7 @@ expect_eq "O2 …its headings, in order: the verb's five with Diagnosis directly
 expect_true "O3a …and its Assessment placeholder names the Assessment lines: three indicators, then the within/near/over line" \
   grep -qF "<the verb's Assessment lines: three indicators, then the within/near/over line>" "$SR_SKILL"
 expect_eq "O3 …and no rule line in the shape (the same block O1 read)" "" "$(printf '%s\n' "$SR_SHAPE" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
-sr_world order "72 72 144 144"
+sr_world order "6 6 12 12"
 sr_run "$SR_PLAN"; printf '%s\n' "$OUT" > "$TMPROOT/page.txt"
 expect_eq "O4 the verb's page is the fixture: 37 lines (the legend line under the three indicators), title first" "37|Sitrep · wave-02-fx · 9.9.0 · 2026-10-06 3:00 PM PDT · step 4" \
   "$(/usr/bin/grep -c '' "$TMPROOT/page.txt")|$(head -1 "$TMPROOT/page.txt")"
@@ -562,32 +649,32 @@ sr_tick_world() {
   ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1 )
   sr_poke bind "$SR_PLAN" >/dev/null 2>&1; sr_poke arm >/dev/null 2>&1
 }
-sr_poke() { ( cd "$SR_REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH="${SR_AT:-$SR_NOW}" BIONIC_GATE_DIR="$SR_GATE" bash "$POKER" "$@" ); }
 sr_tick() { sr_poke tick > "$TMPROOT/tick.out" 2> "$TMPROOT/tick.err"; RC=$?; OUT="$(cat "$TMPROOT/tick.out")"; }
-sr_tick_world surf "72 72 144 144"
+# The tick's worlds are unapproved plans (an approved one FILLs, and S1 pins QUIET), so the clock half reads ❔.
+SR_APPROVED=none sr_tick_world surf "6 6 12 12"
 sr_tick
 SR_T1="$OUT"
 sr_run --line "$SR_PLAN"; SR_L1="$OUT"
 expect_eq "S1 the tick exits 0 and its last line is still its decision line" "0|decision=QUIET" \
   "$RC|$(printf '%s\n' "$SR_T1" | tail -1 | /usr/bin/grep -oE 'decision=[A-Z]+')"
 expect_eq "S2 …it prints exactly one sitrep line" "1" "$(printf '%s\n' "$SR_T1" | /usr/bin/grep -c '^poker: sitrep ')"
-expect_eq "S3 …and that line is the --line output, byte for byte (here the clean world's ✅✅✅)" \
-  "poker: sitrep $SR_MARK_WITHIN$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ~4:30 PM|poker: sitrep $SR_L1" \
+expect_eq "S3 …and that line is the --line output, byte for byte (here an unapproved clean world's ❔✅✅)" \
+  "poker: sitrep $SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ~4:30 PM|poker: sitrep $SR_L1" \
   "$(printf '%s\n' "$SR_T1" | /usr/bin/grep '^poker: sitrep ')|poker: sitrep $SR_L1"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 SR_AT=$((SR_NOW + 60)) sr_tick
 SR_AT=$((SR_NOW + 60)) sr_run --line "$SR_PLAN"
 expect_eq "S4 a red at head and an owed item move the tick's line exactly as they move --line" \
-  "poker: sitrep $SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 1 · closes ~4:31 PM|poker: sitrep $OUT" \
+  "poker: sitrep $SR_MARK_NONE$SR_MARK_OVER$SR_MARK_WITHIN · owed: 1 · closes ~4:31 PM|poker: sitrep $OUT" \
   "$(/usr/bin/grep '^poker: sitrep ' "$TMPROOT/tick.out")|poker: sitrep $OUT"
 SR_AT=$((SR_NOW + 120)) sr_tick
 SR_T3="$OUT"
 expect_contains "S5 an unchanged tick (nothing decided moved) still takes the unchanged path" "poker: unchanged since " "$SR_T3"
 expect_eq "S6 …and still prints the sitrep line, above the unchanged line, which stays last" \
-  "poker: sitrep $SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 1 · closes ~4:32 PM|unchanged" \
+  "poker: sitrep $SR_MARK_NONE$SR_MARK_OVER$SR_MARK_WITHIN · owed: 1 · closes ~4:32 PM|unchanged" \
   "$(printf '%s\n' "$SR_T3" | /usr/bin/grep '^poker: sitrep ')|$(printf '%s\n' "$SR_T3" | tail -1 | /usr/bin/grep -q '^poker: unchanged since ' && echo unchanged)"
-sr_tick_world surf-none none
+SR_APPROVED=none sr_tick_world surf-none none
 sr_tick
 SR_T4="$OUT"
 sr_run --line "$SR_PLAN"
