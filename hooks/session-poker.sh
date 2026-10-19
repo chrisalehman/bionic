@@ -4006,6 +4006,47 @@ agent_project_dir_for() {  # <session-id> -> project directory on stdout, nonzer
 # `row_quiet` (the tick's own liveness read) and `adopt`'s report (the ADOPT_SCHEMA block
 # below) — call it through this project-directory resolution.
 
+# A LIVE RUN IS NOT A QUIET ONE (wave-39 T22; REQ-16 AC-16.1; D21). A writer blocked in a foreground `ready --within`
+# touches neither its progress file nor its transcript for up to thirty minutes, so the two mtimes alone named every
+# such row on every tick. Before either NOTIFY arm reads an mtime the tick asks `row_live_run` whether the row has a
+# run that lives, by the two facts that say so and that no mtime can:
+#   - its LANDING CARRIER: an open entry of lib/line.sh's fold (an `ev=ready` of the plan's landing record with no later
+#     `published` or `returned`) whose name is the row's and whose `carrier=` process lives, by `_line_entries`'s
+#     presence rule (the pid-and-start rule of lib/slots.sh). `landing_carrier_names` is the one read of it;
+#   - the GATE's open request for the row's agent: a request of lib/gate.sh waiting or admitted whose `who=` is
+#     `<session>:<agent>` (`gate_asked`), the session being the one that launched the agent, the one that adopted it
+#     and this one. A suite or a landing's run in flight is a live run too.
+# Either one, and the row is ACTIVE: neither arm names it. Neither one, and the mtimes decide as they did, so a dead
+# silent row still NOTIFYs.
+TICK_CARRIERS=""; TICK_CARRIERS_READ=no
+landing_carrier_names() {  # <plan> -> the names of the entries whose landing carrier lives, one a line (read once a tick)
+  local rec
+  [ "$TICK_CARRIERS_READ" = yes ] && { printf '%s' "$TICK_CARRIERS"; return 0; }
+  TICK_CARRIERS_READ=yes
+  declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  declare -F _line_entries >/dev/null 2>&1 || return 0
+  rec="$(_wt_proofs_path "$REPO_REAL" "$1" 2>/dev/null)" || rec=""
+  [ -n "$rec" ] && [ -f "$rec" ] && [ ! -L "$rec" ] || return 0
+  TICK_CARRIERS="$(_line_entries "$rec" "" 2>/dev/null | awk -F'\t' '$4 == "yes" && $2 != "" { print $2 }')"
+  printf '%s' "$TICK_CARRIERS"
+}
+row_live_run() {  # <roster-state row> -> 0 when the row's agent has a live landing carrier or an open gate request
+  local row="$1" name who s names=""
+  name="$(line_field "$row" name)"
+  [ -n "$name" ] || return 1
+  if [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
+    landing_carrier_names "$POKER_RUN_PLAN" | /usr/bin/grep -qxF -- "$name" && return 0
+  fi
+  declare -F gate_asked >/dev/null 2>&1 || return 1
+  # The gate spells the agent as booked.sh does (lib/gate.sh `_gate_marker`).
+  who="${name//[!A-Za-z0-9._+-]/_}"
+  for s in "$SESSION_ID" "$(line_field "$row" session)" "$(line_field "$row" adopted_from)"; do
+    [ -n "$s" ] && names="${names}${s}:${who}
+"
+  done
+  [ -n "$names" ] && printf '%s' "$names" | gate_asked >/dev/null 2>&1
+}
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
   local row="$1" now="$2" cad cad_s prog pm=0 id proj tx lm=0
@@ -14380,6 +14421,10 @@ EOF
       ROW_LINE="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
         | grep -F "|name=${RNAME}|" | tail -1)"
       [ -n "$ROW_LINE" ] || continue
+
+      # ---- A LIVE RUN COMES FIRST (wave-39 T22; REQ-16 AC-16.1; D21): a row whose landing carrier lives or for whose
+      # agent the gate holds an open request is ACTIVE, and neither arm below reads its mtimes. Its row stays open above.
+      row_live_run "$ROW_LINE" && continue
 
       # ---- ARM 1: past its declared DURATION. Unchanged arithmetic, restructured off
       # `continue` so that an unreadable duration no longer skips the row entirely — the

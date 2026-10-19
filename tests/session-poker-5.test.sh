@@ -594,4 +594,105 @@ expect_eq "OR-9 a lease left WAITING drops off the line, and the next oldest, LB
   "or:w01:LB=3,or:w01:LA=0" "$(or_gate)"
 rm -rf "$BIONIC_GATE_DIR/leases"
 
+# ============================================================
+section "§QUIET-LANDING: the quiet check reads the row's live landing carrier and the gate's open request for its agent before the mtimes (wave-39 T22; REQ-16 AC-16.1; D21)"
+# ============================================================
+# A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript
+# for up to 30 minutes, so the tick's two NOTIFY arms (past the declared duration; quieter than the cadence)
+# named a working row every tick (three nights of it). Both arms now ask first whether the row's landing carrier
+# lives (an entry of lib/line.sh's fold, present while the `carrier=` pid of its `ev=ready` lives, whose name is
+# the row's) or whether the gate holds an open request for the row's agent; either makes the row ACTIVE, never
+# NOTIFY. Only then the mtimes. A row with no carrier, no request and nothing written past its cadence is quiet,
+# and a dead silent row still NOTIFYs.
+# FIXTURE FIDELITY: a real repository with a wave plan the tick reads, the roster row in the writer's shape (name,
+# progress and cadence), the carrier a sleeping process whose pid and start time the record's `ev=ready` names as
+# lib/line.sh writes them (`line_event`, `_line_me`), the request one the gate's own `gate_ask` files and whose
+# holder stays alive. The progress file is older than the row's cadence in every case.
+# fails-when: a row with a live carrier or an open request NOTIFYs; a dead silent row does not; a carrier or a
+# request of ANOTHER agent masks this row.
+QL_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+QL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+QL_PIDS=""
+RQL="$(make_repo quiet-landing)"; new_roster "$RQL"
+QL_PLAN="$(wave_plan_at "$RQL" 'epic-99-fixture/wave-01-fixture.plan.md' "-" \
+  "| T1 | 4 | build | the writer's row | implementor | — | 60 | REQ-x | a.sh | active |")"
+QL_REC="$(bash -c '. "$1/line.sh" && line_record "$2"' _ "$QL_LIB" "$QL_PLAN")"
+QL_PROG="$RQL/progress-w1.md"
+printf 'working\n' > "$QL_PROG"; backdate "$QL_PROG" 3000   # 10 cadences old
+add_row "$RQL" name=w1 agent_id=aquiet-one-bbbbbbbbbbbbbbbb deliverable="$RQL/absent-w1.md" \
+  duration="4 hours" launched_at="$(iso_ago 3600)" progress="$QL_PROG" cadence="5 minutes"
+ql_sleeper() {  # -> a live process's carrier, `<pid>:<start>`, in QL_CAR (its pid is kept for the cleanup)
+  sleep 600 & local p=$!
+  QL_PIDS="$QL_PIDS $p"
+  QL_CAR="${p}:$(bash -c '. "$1/slots.sh" && _slots_since "$2"' _ "$QL_LIB" "$p")"
+}
+ql_ready() {  # <name> <carrier> -> the record's ev=ready of row T1, as `line_ready` writes it
+  bash -c '. "$1/line.sh" && line_event "$2" ready row=T1 "name=$3" "commit=$(printf "c%.0s" $(seq 40))" branch=wt/T1 tree=/x/T1 suites=none debt=none "carrier=$4"' \
+    _ "$QL_LIB" "$QL_PLAN" "$1" "$2"
+}
+ql_clear() { rm -f "$QL_REC"; rm -rf "$BIONIC_GATE_DIR/requests"; mkdir -p "$BIONIC_GATE_DIR/requests"; }
+ql_tick() { forget_digest "$RQL"; poke_pressure "$RQL" 8192 1.0 tick; }
+ql_decision() { printf '%s\n' "$OUT" | sed -n 's/^.*|decision=\([A-Z]*\)|.*$/\1/p' | head -1; }
+ql_rows() { printf '%s\n' "$OUT" | sed -n 's/^.*|rows=\([^|]*\).*$/\1/p' | head -1; }
+
+# ---------- a dead silent row still NOTIFYs (the paired positive for every row below) ----------
+ql_clear
+ql_tick
+expect_eq "QL-1 precondition: a row with no carrier, no request and a progress file ten cadences old is NOTIFY, naming w1" \
+  "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+expect_contains "QL-1b …and the quiet line prints the mtime it rests on" "w1: no line for " "$OUT"
+
+# ---------- a live carrier: the row is active ----------
+ql_clear; ql_sleeper; ql_ready w1 "$QL_CAR"
+expect_nonempty "QL-2 precondition: the record holds the row's ready event" "$(/usr/bin/grep -c 'ev=ready' "$QL_REC")"
+ql_tick
+expect_eq "QL-2b a live ready carrier of the row's name, files quiet past cadence: the tick prints QUIET and names no row" \
+  "QUIET|" "$(ql_decision)|$(ql_rows)"
+expect_absent "QL-2c …and no quiet line is printed for it" "w1: no line for " "$OUT"
+# the same record, the carrier dead and nothing written
+kill "${QL_PID_LAST:-${QL_CAR%%:*}}" 2>/dev/null; wait "${QL_CAR%%:*}" 2>/dev/null
+ql_tick
+expect_eq "QL-3 the same row with the carrier dead and nothing written: NOTIFY, naming w1" \
+  "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+
+# ---------- a carrier of ANOTHER name masks nothing ----------
+ql_clear; ql_sleeper; ql_ready w2 "$QL_CAR"
+ql_tick
+expect_eq "QL-4 a live carrier whose name is w2, not w1, leaves w1 NOTIFY" "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+
+# ---------- past the declared duration: the overdue arm reads the carrier too ----------
+add_row "$RQL" name=w1 agent_id=aquiet-one-bbbbbbbbbbbbbbbb deliverable="$RQL/absent-w1.md" \
+  duration="1 minute" launched_at="$(iso_ago 3600)" progress="$QL_PROG" cadence="5 minutes"
+ql_clear; ql_tick
+expect_eq "QL-5 precondition: a row past its declared duration with no carrier is NOTIFY (the overdue arm)" \
+  "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+expect_contains "QL-5b …by the overdue arm's own detail" "past declared duration" "$OUT"
+ql_sleeper; ql_ready w1 "$QL_CAR"
+ql_tick
+expect_eq "QL-5c the same overdue row with a live carrier: QUIET, no row named" "QUIET|" "$(ql_decision)|$(ql_rows)"
+expect_absent "QL-5d …and no overdue detail is printed" "past declared duration" "$OUT"
+
+# ---------- an open gate request for the row's agent, no carrier ----------
+ql_clear
+ql_ask() {  # <agent> -> a request the gate's own ask files for <agent>, its holder alive until the cleanup
+  ( BIONIC_GATE_AGENT="$1" CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/gate.sh" && gate_ask work ql-fixture.test.sh --within 5 >/dev/null 2>&1; sleep 600' _ "$QL_LIB" ) &
+  QL_PIDS="$QL_PIDS $!"
+  local i=0
+  while [ "$i" -lt 100 ] && ! /usr/bin/grep -qs "^who=${SID}:$1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+}
+ql_ask w1
+expect_nonempty "QL-6 precondition: the gate holds a request whose who is this session's w1" \
+  "$(/usr/bin/grep -ls "^who=${SID}:w1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | head -1)"
+expect_eq "QL-6b precondition: the record holds no carrier (no file)" "no" "$([ -f "$QL_REC" ] && echo yes || echo no)"
+ql_tick
+expect_eq "QL-6c an open gate request for w1 and no carrier: the tick prints QUIET and names no row" "QUIET|" "$(ql_decision)|$(ql_rows)"
+ql_clear; ql_ask w2
+ql_tick
+expect_eq "QL-7 an open request for another agent, w2, masks nothing: w1 is NOTIFY" "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+
+# the sleepers and the held requests end here, however the cases above went
+for QL_P in $QL_PIDS; do kill "$QL_P" 2>/dev/null; wait "$QL_P" 2>/dev/null; done
+ql_clear
+POKE_BOUND="$QL_BOUND_WAS"
+
 finish
