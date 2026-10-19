@@ -1433,10 +1433,12 @@ xv_verdict() {  # <root> <commit> <suite> -> `<result> <log>` of each verdict fo
 
 RXG="$(xv_world 0)"
 XV_T1="$(git -C "$RXG/.worktrees/T1" rev-parse HEAD)"
-expect_eq "(xv1) the command's key is the commit's tree; a command naming a suite file takes that suite's key" \
-  "tree:$(git -C "$RXG" rev-parse "${XV_T1}^{tree}")|yes" \
-  "$(_line_reads "$RXG" "$XV_T1" "$XV_TOK")|$(k="$(_line_reads "$RXG" "$XV_T1" a.test.sh)"; [ -n "$k" ] && [ "$k" != - ] \
-      && [ "$(_line_reads "$RXG" "$XV_T1" '`bash%20tests%2Fa.test.sh%20-v`')" = "$k" ] && echo yes || echo no)"
+XV_TOKA='`bash%20tests%2Fa.test.sh%20-v`'   # a command naming a suite file (outside "$( )": bash 3.2 misreads a quoted mark there)
+XV_KA="$(_line_reads "$RXG" "$XV_T1" a.test.sh)"
+expect_ne "(xv1) precondition: a.test.sh has a read key at T1's commit" "-" "${XV_KA:--}"
+expect_eq "(xv1b) the command's key is the commit's tree; a command naming a suite file takes that suite's key" \
+  "tree:$(git -C "$RXG" rev-parse "${XV_T1}^{tree}")|${XV_KA}" \
+  "$(_line_reads "$RXG" "$XV_T1" "$XV_TOK")|$(_line_reads "$RXG" "$XV_T1" "$XV_TOKA")"
 ll_verb "$RXG" T1 --within 900
 XV_CG="$(ll_last_cand "$RXG" T1)"
 expect_eq "(xv2) AC-14.3 a row whose Lands-on names a command that exits 0 lands: exit 0, LANDED" "0|LANDED T1" \
@@ -1464,7 +1466,7 @@ expect_eq "(xv10) …the entry is returned for red, the head unmoved, and no run
   "$(ll_ev "$RXR" returned | grep -c 'why=red')|$(ll_head "$RXR")|$(xv_verdict "$RXR" "$XV_HR" "$XV_TOK" | awk 'END { print NR }')"
 
 RXM="$(xv_world 0)"
-LL_MUTANT='/_line_lands_cmd "\${3:-}"/d' LL_MUTANT_FN=_line_verdict ll_drive "$RXM" T1 "$WORLD_ROOT/xv-T1.out" 900
+LL_MUTANT='s/bionic_lands_cmd "\${3:-}"/false/' LL_MUTANT_FN=_line_verdict ll_drive "$RXM" T1 "$WORLD_ROOT/xv-T1.out" 900
 ll_wait_file "$WORLD_ROOT/xv-T1.out.rc" 1200
 expect_eq "(xv11m) MUTANT the exit-code arm dropped: the command, which prints no end line, is none and the entry stalls" "70|none" \
   "$(cat "$WORLD_ROOT/xv-T1.out.rc" 2>/dev/null)|$(xv_verdict "$RXM" "$(ll_last_cand "$RXM" T1)" "$XV_TOK" | awk 'NR == 1 { print $1 }')"

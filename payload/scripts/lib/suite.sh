@@ -8,6 +8,8 @@
 #   bionic_suite_exec  [--admit <id>] <tree> <suite> [args...]  runs the suite to its end; its rc
 #   bionic_suite_start [--admit <id>] <tree> <suite> [args...]  starts it as a job of its own and
 #                                                               sets BIONIC_SUITE_PID; the caller waits
+#   bionic_command_start [--admit <id>] <tree> <command>        starts a Lands-on command (`bash -c`)
+#                                                               the same way; sets BIONIC_SUITE_PID
 #   bionic_job <command> [args...]                              starts any command as a job of its
 #                                                               own; sets BIONIC_JOB_PID
 #
@@ -53,7 +55,46 @@ function suite_name(t,   n, P, i) {
   sub(/\.test\.sh$/, "", t)
   return t ".test.sh"
 }
+# A COMMAND ON LANDS-ON (wave-39 T20; D20, AC-14.3). `Lands-on:` may name, in backticks, a command its brief declares
+# under `Re-executes:` (the runs of a jest or Playwright row), and ready runs it and judges it by its exit code. Every
+# reader of a lands_on= value splits it on commas and blanks, the roster folds a `|` to a blank, and several cut a
+# suite to its file name with `${s##*/}`; so the command is written as ONE entry those readers keep whole: backticks
+# around its text with `%`, a blank, a tab, `,`, `|`, `/`, `*`, `?` and `[` percent-encoded (`%` first, so the pair
+# is a bijection, as roster.sh `roster_pipe_escape` holds it; no glob character is left for an unquoted expansion).
+# `lands_cmd(c)` writes it; `lands_cmd_entry(t)` is 1 for a token that is one. `bionic_lands_cmd` below reads it back.
+function lands_cmd(c,   o, i, ch) {
+  o = ""
+  for (i = 1; i <= length(c); i++) {
+    ch = substr(c, i, 1)
+    if (ch == "%") ch = "%25"; else if (ch == " ") ch = "%20"; else if (ch == "\t") ch = "%09"
+    else if (ch == ",") ch = "%2C"; else if (ch == "|") ch = "%7C"; else if (ch == "/") ch = "%2F"
+    else if (ch == "*") ch = "%2A"; else if (ch == "?") ch = "%3F"; else if (ch == "[") ch = "%5B"
+    o = o ch
+  }
+  return "`" o "`"
+}
+function lands_cmd_entry(t) { return (t ~ /^`[^` \t,|\/*?[]+`$/) }
 '
+
+# bionic_lands_cmd <lands_on entry> -> the command it names, as its brief declared it; 1 when the entry is no command.
+bionic_lands_cmd() {
+  local v="${1:-}"
+  case "$v" in '`'?*'`') ;; *) return 1 ;; esac
+  v="${v#\`}"; v="${v%\`}"
+  case "$v" in *'`'*|*[[:space:],\|/*?[]*) return 1 ;; esac
+  v="${v//\%20/ }"; v="${v//\%09/	}"; v="${v//\%2C/,}"; v="${v//\%7C/|}"; v="${v//\%2F/\/}"
+  v="${v//\%2A/*}"; v="${v//\%3F/?}"; v="${v//\%5B/[}"
+  printf '%s' "${v//\%25/%}"
+}
+# bionic_lands_show <lands_on value> -> the value as a brief writes it: each command decoded in backticks, `, `-joined.
+bionic_lands_show() {
+  local e c out=""
+  for e in $(printf '%s' "${1:-}" | tr ',' ' '); do
+    if c="$(bionic_lands_cmd "$e")"; then e="\`${c}\`"; fi
+    out="${out:+${out}, }${e}"
+  done
+  printf '%s' "$out"
+}
 
 # THE FORK SPEAKS ON NOTHING (booked.sh, wave-26 T63): under `set -m` the parent and the child each
 # put the child in its own group, and under load one call can fail with `child setpgid … Operation not
@@ -72,13 +113,22 @@ bionic_job() {  # <command> [args...] -> BIONIC_JOB_PID
 }
 
 # The suite's own process: the environment above, then the suite in place of this shell.
-_bionic_suite_run() {  # <admission | empty> <tree> <suite> [args...]
-  local admit="$1" tree="$2" suite="$3"
-  shift 3
-  cd -- "$tree" || exit 126
+_bionic_suite_env() {  # <admission | empty> <tree>
+  cd -- "$2" || exit 126
   unset BIONIC_GATE_DIR
-  [ -z "$admit" ] || export BIONIC_GATE_ADMIT="$admit"
+  [ -z "$1" ] || export BIONIC_GATE_ADMIT="$1"
+}
+_bionic_suite_run() {  # <admission | empty> <tree> <suite> [args...]
+  local suite="$3"
+  _bionic_suite_env "$1" "$2"
+  shift 3
   exec bash "$suite" "$@" < /dev/null
+}
+# A LANDS-ON COMMAND'S OWN PROCESS (wave-39 T20; D20): the same environment, then the command as a shell line in place
+# of this shell, `bash -c <command>`, as the writer typed it under Re-executes:.
+_bionic_command_run() {  # <admission | empty> <tree> <command>
+  _bionic_suite_env "$1" "$2"
+  exec bash -c "$3" < /dev/null
 }
 
 # The arguments, read once for both entry points: sets _BIONIC_SUITE_ADMIT and _BIONIC_SUITE_SHIFT
@@ -101,6 +151,14 @@ bionic_suite_start() {  # [--admit <id>] <tree> <suite> [args...] -> BIONIC_SUIT
   _bionic_suite_args bionic_suite_start "$@" || return 2
   shift "$_BIONIC_SUITE_SHIFT"
   bionic_job _bionic_suite_run "$_BIONIC_SUITE_ADMIT" "$@"
+  BIONIC_SUITE_PID="$BIONIC_JOB_PID"
+}
+
+bionic_command_start() {  # [--admit <id>] <tree> <command> -> BIONIC_SUITE_PID
+  BIONIC_SUITE_PID=""
+  _bionic_suite_args bionic_command_start "$@" || return 2
+  shift "$_BIONIC_SUITE_SHIFT"
+  bionic_job _bionic_command_run "$_BIONIC_SUITE_ADMIT" "$1" "$2"
   BIONIC_SUITE_PID="$BIONIC_JOB_PID"
 }
 

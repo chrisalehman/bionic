@@ -464,9 +464,9 @@ expect_contains "LC.2b …its line names the omitted suite" "Lands-on: omits wid
 expect_contains "LC.2c …and the line to paste spells the command in backticks, decoded" \
   "    Lands-on: \`$LC_CMD\`, widget.test.sh" "$GATE_VERR"
 
-lc_gate lc3 'Lands-on: widget, `npx jest --testPathPatterns other`'
+lc_gate lc3 'Lands-on: widget, `npx jest other`'
 expect_eq "LC.3 AC-14.3 a Lands-on: naming a command Re-executes: does not declare is refused" "deny" "$GATE_VERDICT"
-expect_contains "LC.3b …its line names the command" 'Lands-on: `npx jest --testPathPatterns' "$(lc_first)"
+expect_contains "LC.3b …its line names the command" 'Lands-on: `npx jest other`' "$(lc_first)"
 expect_contains "LC.3c …as not declared under Re-executes:" "is not under Re-executes:" "$(lc_first)"
 expect_eq "LC.3d …its first line at most 100 columns" "ok" \
   "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
@@ -476,5 +476,8 @@ expect_eq "LC.3f …and no row is written" "" "$LC_ROW"
 lc_gate lc4 "Lands-on: widget, \`$LC_CMD\`" 'Scope constraint: no runs declared.'
 expect_eq "LC.4 a backticked command with no Re-executes: line at all is refused the same way" "deny" "$GATE_VERDICT"
 expect_contains "LC.4b …naming it" "is not under Re-executes:" "$(lc_first)"
+expect_eq "LC.4c …its first line at most 100 columns with a 39-character command" "ok" \
+  "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
+expect_contains "LC.4d …the command cut in the line, its start kept" 'Lands-on: `npx jest --testPath' "$(lc_first)"
 
 finish
