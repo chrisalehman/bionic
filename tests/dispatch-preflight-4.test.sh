@@ -32,10 +32,10 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T41; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
+# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
 # directly or through the hooks and scripts it runs: adopt, debt, interval, interval-default, proof-add, row-
-# landed, window. Each line below is that closure: the library (every run executes it), the section of each
-# verb's arm, the sections defining the globals they read, and each helper outside those.
+# landed, window. Each line below is that closure: the library (every run executes it), the arm of each verb,
+# the sections defining the globals they read, and each helper outside those.
 reads hooks/session-poker.sh section "the library"
 reads hooks/session-poker.sh section "whose run is this?"
 reads hooks/session-poker.sh section "the runs (wave-30 T12; D6, D7d)"
@@ -44,7 +44,13 @@ reads hooks/session-poker.sh section "the contract grammar"
 reads hooks/session-poker.sh section "the plan transaction"
 reads hooks/session-poker.sh section "the call a refusal names"
 reads hooks/session-poker.sh section "the launch sync"
-reads hooks/session-poker.sh section verbs
+reads hooks/session-poker.sh verb adopt
+reads hooks/session-poker.sh verb debt
+reads hooks/session-poker.sh verb interval
+reads hooks/session-poker.sh verb interval-default
+reads hooks/session-poker.sh verb proof-add
+reads hooks/session-poker.sh verb row-landed
+reads hooks/session-poker.sh verb window
 reads hooks/session-poker.sh fn clean
 reads hooks/session-poker.sh fn clean_whole
 reads hooks/session-poker.sh fn count_main_thread_dispatches
@@ -58,6 +64,7 @@ reads hooks/session-poker.sh fn iso_now
 reads hooks/session-poker.sh fn line_field
 reads hooks/session-poker.sh fn note
 reads hooks/session-poker.sh fn now_epoch
+reads hooks/session-poker.sh fn pair
 reads hooks/session-poker.sh fn parse_seconds
 reads hooks/session-poker.sh fn patrol_stamp_file
 reads hooks/session-poker.sh fn poker_interval_seconds
