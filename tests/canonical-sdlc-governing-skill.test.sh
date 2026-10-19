@@ -3857,7 +3857,8 @@ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrig
 run_write "$project/.bionic/docs/plans/epic-01-demo/min-epic.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "§MINIMUM.6 an epic plan's rigor-floor: is refused (exit 2)" 2 "$HOOK_EXIT"
 assert_contains "§MINIMUM.6 …naming the new key" "$GS_MIN_SAY" "$HOOK_STDERR"
-expect_absent "§MINIMUM.6 …and never an epic-floor or epic-minimum finding" "epic-" "$(read_audit "$project")$HOOK_STDERR"
+expect_absent "§MINIMUM.6 …and never an epic-minimum finding: the old key is not read" "epic-minimum" "$(read_audit "$project")$HOOK_STDERR"
+expect_absent "§MINIMUM.6 …nor an epic-floor one" "epic-floor" "$(read_audit "$project")$HOOK_STDERR"
 project=$(make_project)
 printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-minimum: double\n---\n\n# Epic\n' \
   > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
