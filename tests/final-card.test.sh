@@ -476,7 +476,10 @@ expect_regex "REPLY-8b …writing the waiver at the working head with the reply'
   "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"1\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
 FC_REGQ="$(bash -c '. "$1/proof.sh" >/dev/null 2>&1; declare -f proof_question_ok' _ "$FC_LIB" | /usr/bin/grep -c 'regression')"
 if [ "$FC_REGQ" -gt 0 ]; then
-  fc_plan "$FC_GOOD"
+  # REWORKED BY wave-39 T25 (REQ-18 AC-18.3; D5): the card offers the regression's waiver only while the head owes a run
+  # (`proof_owed_suites`, §OWED-WORDS), and FC_GOOD's head owes none (no suite here reads lib/x.sh, so C past a proof at
+  # B would owe none either; D5). The plant sits on a plan with no regression proof instead, whose head owes a whole run.
+  fc_plan "$(fc_reads "$FC_R")"
   fc_owe waive:regression
   fc_card final
   expect_contains "REPLY-9 an open waive:regression item is a default on the card" "waive regression" "$FC_OUT"
@@ -494,6 +497,8 @@ if [ "$FC_REGQ" -gt 0 ]; then
   fc_card final
   expect_eq "REPLY-10b …and the card renders: the waiver settles the refusal (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
   expect_contains "REPLY-10c …offering the regression waiver as a default" "waive regression" "$FC_OUT"
+  expect_contains "REPLY-10c2 …naming what the head owes with no regression proof: a whole run (wave-39 T25; AC-18.3)" \
+    "waive regression with your words — the head owes a whole run" "$FC_OUT"
   expect_contains "REPLY-10d …the person's waiver item opened on the ledger" "waive:regression" "$(fc_owed)"
   poke "$RFC" reply 1
   expect_eq "REPLY-10e reply '1' replays it into waive regression (exit 0)" "0" "$RC"
@@ -588,5 +593,63 @@ expect_eq "STEP0-8 steps/0.md puts card.sh step0 and never says four human stops
   "$(fc_count 'card.sh step0' "$FC_SK/steps/0.md")|$(fc_count 'four human stops' "$FC_SK/steps/0.md")"
 expect_eq "STEP0-9 steps/1.md puts card.sh step1, never says four human stops, and pictures no Configuration" "1|0|0" \
   "$(fc_count 'card.sh step1' "$FC_SK/steps/1.md")|$(fc_count 'four human stops' "$FC_SK/steps/1.md")|$(fc_count 'Configuration' "$FC_SK/steps/1.md")"
+
+# ============================================================
+section "§OWED-WORDS: card.sh final shows the waive regression default only with a non-empty owed set, and names the set beside it (wave-39 T25; REQ-18 AC-18.3; D5)"
+# ============================================================
+# The card's regression default is the user's waiver. It stood for any regression refusal its check printed and for any
+# open waive:regression item on the ledger, so it was offered for a head that owed no run: an item the judge had opened
+# before a fix landed stayed a default after it. Now the card asks THE OWED SET (lib/proof.sh `proof_owed_suites`, the
+# reader the judge's refusal, the tick and regression-run share): the default stands, naming the set, only while the
+# set is non-empty; on an empty set the ledger's item is closed and not offered, and a regression refusal the waiver
+# cannot settle (the reds of the whole run, which a fix row closes; AC-18.3: no commit past the head) is CARD-EARLY.
+# FIXTURE FIDELITY: this suite's world, continued: a.test.sh is made to read lib/x.sh (A), then a code change it reads
+# (X) and a glossary line no suite reads (G) land on the working branch, each a real commit; the plan is fc_plan's,
+# its facts in the production writers' shapes (`proof_floor_line`, `proof_line`); the card is the real card.sh, its
+# checks the real `current <N> --check`.
+# fails-when: the default is missing or does not name the owed set at a head that owes a.test.sh; it is offered at a
+# head whose owed set is empty, from the check or from the ledger; the reds of the whole run read as a waiver default.
+fo_set() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_owed_suites "$2" "$3"' _ "$FC_LIB" "$PFC" "$RFC" 2>/dev/null; }
+fo_line() { printf '%s\n' "$FC_OUT" | /usr/bin/grep -F -- '- waive regression' | head -1; }   # the card's regression default, the one line
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$RFC/tests/a.test.sh"
+( cd "$RFC" && git add tests/a.test.sh && git commit -qm 'A: a.test.sh reads lib/x.sh' ) >/dev/null 2>&1
+FO_A="$(git -C "$RFC" rev-parse HEAD)"
+FO_X="$(s57_commit "$RFC" lib/x.sh 'X: a code change a.test.sh reads')"
+FO_H8="${FO_X:0:8}"
+
+# ---------- a head that owes a.test.sh: the default, naming the set ----------
+fc_plan "$(fc_floor "$FO_A")
+$(fc_reads "$FO_X")"
+expect_eq "FO-0 precondition: the owed set at X is a.test.sh (proof_owed_suites, the one reader)" "a.test.sh" "$(fo_set)"
+fc_card final
+expect_eq "FO-1 card.sh final renders at X (exit 0, no refusal): the waiver settles the regression's refusal" "0|" "$FC_RC|$FC_ERR"
+expect_nonempty "FO-1b precondition: the card prints a regression default (the extractor reads real output)" "$(fo_line)"
+expect_eq "FO-2 AC-18.3 …naming the owed set beside the user's waiver" \
+  "   - waive regression with your words — the head owes a.test.sh" "$(fo_line)"
+expect_contains "FO-2b …and the person's waiver item is open on the ledger" "waive:regression" "$(fc_owed)"
+
+# ---------- AC-18.1: a glossary commit past the regression's head owes nothing, and the card offers no waiver ----------
+mkdir -p "$RFC/notes"
+FO_G="$(s57_commit "$RFC" notes/glossary.md 'G: a glossary line, read by no suite')"
+fc_plan "$(fc_floor "$FO_X")
+$(fc_reads "$FO_G")"
+fc_owe waive:regression
+expect_eq "FO-3 precondition: past the regression's head at X the glossary commit G owes nothing (FO-0 read a.test.sh)" "" "$(fo_set)"
+expect_contains "FO-3b precondition: …while the ledger holds an open waive:regression item from before" "waive:regression" "$(fc_owed)"
+fc_card final
+expect_eq "FO-4 card.sh final renders at G (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "FO-4b …a card of options (the extractor's source is a real card)" "1. Accept every default:" "$FC_OUT"
+expect_absent "FO-5 AC-18.3 …with no regression default on an empty owed set (FO-2 is the positive)" "waive regression" "$FC_OUT"
+expect_absent "FO-5b …and the ledger's waive:regression item closed, not left owed (FO-2b is the positive)" "waive:regression" "$(fc_owed)"
+
+# ---------- the reds of the whole run are a fix row's, not the card's waiver ----------
+fc_plan "$(fc_floor "$FO_G" a.test.sh)
+$(fc_reads "$FO_G")"
+expect_eq "FO-6 precondition: the whole run at G left a.test.sh red; the owed set, past G, is empty" "" "$(fo_set)"
+fc_card final
+expect_eq "FO-6b card.sh final at G is CARD-EARLY (exit 1): the regression's reds are no default of the card" "1" "$FC_RC"
+expect_contains "FO-6c …naming the advance whose check refuses" "CARD-EARLY — " "$FC_ERR"
+expect_absent "FO-6d …and offering no waiver (FO-2 is the positive)" "waive regression" "$FC_OUT"
+git -C "$RFC" reset -q --hard "$FC_R"
 
 finish

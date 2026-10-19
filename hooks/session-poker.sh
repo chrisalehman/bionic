@@ -5191,7 +5191,15 @@ COVER_LINE
   done <<COVER_JUDGED
 $(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')
 COVER_JUDGED
-  die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
+  # THE REGRESSION'S WAY OUT IS THE LAST WORD (wave-39 T25; REQ-18 AC-18.3; D5): a regression line the judge reads uncovered
+  # or absent demands a further whole run, so the refusal ends on THE OWED SET and the user's word for it (lib/proof.sh
+  # `proof_owed_suites`, `proof_owed_say`), never on an approval the record cannot hold. The reds of the whole run (`owed`)
+  # are a fix row's and keep the sentence above.
+  local cv_owe=""
+  case "$(printf '%s\n' "$out" | awk -F'\t' '$1 == "regression" || $1 == "floor" { print $2; exit }')" in
+    uncovered|absent) cv_owe="$(proof_owed_say "$(proof_owed_suites "$PV_PLAN" "$PV_REPO" "$PV_HEAD8" 2>/dev/null)")" || cv_owe="" ;;
+  esac
+  die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged.${cv_owe:+ The regression: $cv_owe}"
   exit 1
 }
 
@@ -12930,17 +12938,26 @@ DSP_READINGS
           done
         done
       fi
+      # EACH REFUSAL OF A FURTHER WHOLE RUN ENDS ON THE USER'S WORD FOR THE REGRESSION (wave-39 T25; REQ-18 AC-18.3; D5):
+      # THE OWED SET and `waive regression '<reply>'` beside the second whole run (lib/proof.sh `proof_owed_suites`,
+      # `proof_owed_say`, the words the judge's refusal ends on); a head that owes no suite past the regression's head
+      # (the reds of the whole run alone) is still offered the waiver, which closes those too.
+      FR_SAY=""
+      if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN"; then
+        FR_SAY="$(proof_owed_say "$(proof_owed_suites "$PV_PLAN" "$PV_REPO" 2>/dev/null)" "bash ${HOOK_DIR}/session-poker.sh ")" \
+          || FR_SAY="or the user's word that the head needs none: bash ${HOOK_DIR}/session-poker.sh waive regression '<reply>'"
+      fi
       # THE APPROVAL BUYS ONE RUN (wave-38 T2; AC-4.5): it covers no head, and a regression proof after it spends it.
       if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN" && proof_approved "$PV_PLAN" regression-2; then
-        die "REFUSED — a further whole run on this plan: the user's approved: regression-2 admitted one run, and the regression proof recorded after it spent it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); the regression reads $(clean "${FR_STATE//	/ }"). An approval is recorded once: the user's word that this head needs no whole run is bash ${HOOK_DIR}/session-poker.sh waive regression '<the user's reply>'. Nothing was run."
+        die "REFUSED — a further whole run on this plan: the user's approved: regression-2 admitted one run, and the regression proof recorded after it spent it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); the regression reads $(clean "${FR_STATE//	/ }"). Nothing was run. An approval is recorded once, so a second one buys no run; $FR_SAY"
         exit 1
       fi
       if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN"; then
         FR_OWED=""; case "$FR_STATE" in owed"	"*) FR_OWED="${FR_STATE#owed	}" ;; esac
         if [ -n "$FR_OWED" ]; then
-          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and it left $FR_OWED red, each owed until a later landing runs it green. Dispatch a fix row that runs $FR_OWED; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'. Nothing was run."
+          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and it left $FR_OWED red, each owed until a later landing runs it green. Nothing was run. Dispatch a fix row that runs $FR_OWED; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'; $FR_SAY"
         else
-          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and the regression reads $(clean "${FR_STATE//	/ }"). A change after the whole run is proved by a fix row's suites; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'. Nothing was run."
+          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and the regression reads $(clean "${FR_STATE//	/ }"). Nothing was run. A change after the whole run is proved by a fix row's suites; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'; $FR_SAY"
         fi
         exit 1
       fi

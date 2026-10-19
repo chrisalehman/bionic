@@ -929,6 +929,7 @@ tests/runner-width.test.sh             0      1
 tests/session-poker-2.test.sh          0      9
 tests/session-poker-3.test.sh          0      5
 tests/session-poker-4.test.sh          2      2
+tests/session-poker-5.test.sh          0      3
 tests/session-poker.test.sh            1      3
 tests/session-start.test.sh            0      7
 tests/session-sweep.test.sh            3      2
