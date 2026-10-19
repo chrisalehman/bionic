@@ -91,7 +91,9 @@ if ! declare -F roster_open_names >/dev/null 2>&1; then
 fi
 # time.sh, THE SAME SOFT SOURCE, for `_TIME_ISO_AWK` (wave-39 T17; D18): an instant has one reader, and this file's
 # date arithmetic below is that reader's.
-if [ -z "${_TIME_ISO_AWK:-}" ]; then
+# A copy of this file read away from its directory (a suite's mutant) finds no time.sh: it still loads, and only
+# its date readers come up empty, the fail-open direction every reader below already takes.
+if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/time.sh" ]; then
   # shellcheck source=/dev/null
   . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/time.sh"
 fi
@@ -686,7 +688,7 @@ _patrol_verdict_jq='
 # file's whole subject is not doing that. It is also the fail-open direction — `unreadable`
 # never blocks — and the advisory names it, so the degradation is visible rather than
 # silent.
-_PATROL_ISO_AWK="$_TIME_ISO_AWK"
+_PATROL_ISO_AWK="${_TIME_ISO_AWK:-}"
 # THE VERDICT'S OWN PROGRAM, after the date functions it shares with `fill_ledger_report`.
 # THE TRANSCRIPT'S INSTANTS CARRY MILLISECONDS (`…:33.724Z`, as Claude Code writes them), which is the
 # transcript's grammar and not an instant's (wave-39 T17; D18). They are cut to the whole second at this edge, the
