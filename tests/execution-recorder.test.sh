@@ -4282,11 +4282,13 @@ expect_absent "CKS-cm2 …and without the write its placed row says nothing was 
 
 # ---------- §RUNNER — the roster row carries the role's effort beside its model (wave-38 T4; REQ-8 AC-8.1) ----------
 #
-# The row's `model=` is written at launch by hooks/dispatch-preflight.sh from the Agent call's `model`
-# alone. A role whose rendered file carries `effort:` now reads `<model>-<effort>` there, so the
-# test-runner on Haiku at high effort reads `model=haiku-high`; a call with no `model` stays empty.
-# fails-when: the test-runner dispatch's row reads plain `model=haiku`, or a call with no model
-# acquires a model it was never given, or the composition is read off the wrong role's file.
+# The row's `model=` is written at launch by hooks/dispatch-preflight.sh. A role whose rendered file carries
+# `effort:` reads `<model>-<effort>` there, so the test-runner on Haiku at high effort reads
+# `model=haiku-high`. A call with no `model` reads the role file's own `model:` and `effort:` lines
+# (wave-39 T12, D16), so the same dispatch reads `model=haiku-high` too; a type with no role file keeps
+# whatever the call named.
+# fails-when: the test-runner dispatch's row reads plain `model=haiku`, or a call with no model reads
+# empty or anything but its role file's lines, or the composition is read off the wrong role's file.
 #
 # THE DRIVER IS THE REAL GATE, in a SUBSHELL: the dispatch-preflight prelude installs its own sandbox,
 # EXIT and DEBUG traps and variables, none of which may reach this suite, so it is sourced inside
@@ -4310,8 +4312,8 @@ expect_contains "RR1 …its row names the role (the reader found the row)" "suba
 expect_contains "RR2 a test-runner dispatch on haiku is journalled model=haiku-high" "|model=haiku-high|" "$RR_HAIKU"
 RR_NONE=$(rr_drive bionic:test-runner -)
 expect_contains "RR3 precondition: the same dispatch with no model is admitted, with its row" "subagent_type=bionic:test-runner" "$RR_NONE"
-expect_contains "RR3 …and its model stays empty, as before" "|model=|" "$RR_NONE"
-expect_absent "RR3 …no effort invented for a call that named no model" "model=-high" "$RR_NONE"
+expect_contains "RR3 …and its model is the role file's own, though the call named none (D16)" "|model=haiku-high|" "$RR_NONE"
+expect_absent "RR3 …no effort invented ahead of a missing model" "model=-high" "$RR_NONE"
 RR_GP=$(rr_drive general-purpose haiku)
 expect_contains "RR4 precondition: a dispatch of a type with no role file is admitted, with its row" "subagent_type=general-purpose" "$RR_GP"
 expect_contains "RR4 …and its model stays plain, since no rendered file names an effort" "|model=haiku|" "$RR_GP"
