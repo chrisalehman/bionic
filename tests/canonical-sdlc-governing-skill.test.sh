@@ -3816,45 +3816,54 @@ assert_contains "§RIGOR.9 …and logs the epic-minimum invalid-value finding, n
   "invalid rigor-minimum value 'audited' in epic-01-demo's epic plan — allowed: single or double" "$(read_audit "$project")"
 
 
-section "§MINIMUM — rigor-minimum: is the rigor minimum's key; rigor-floor: still reads, with one deprecated: line (wave-38 T8; REQ-9 AC-9.2, D6)"
+section "§MINIMUM — rigor-minimum: is the rigor minimum's key; rigor-floor: is refused, naming it (wave-38 T8, wave-39 T18; REQ-13 AC-13.1, D2)"
 # ============================================================
-# The key was `rigor-floor:` until 1.21.0. lib/alias.sh `alias_keyed rigor-key` reads it at the hook's two readers,
-# the project's .bionic/config.yaml and the epic plan's frontmatter: `rigor-minimum:` first, then `rigor-floor:`,
-# which prints `deprecated: rigor-floor: is rigor-minimum:; the old spelling works until 1.22.0` on stderr. The
-# finding ids are intent-minimum, project-minimum and epic-minimum, and the old ids are never printed again.
-GS_MIN_DEP="deprecated: rigor-floor: is rigor-minimum:; the old spelling works until 1.22.0"
-gs_min_deps() { printf '%s\n' "$1" | /usr/bin/grep -c '^deprecated: ' | tr -d ' '; }
-for gs_min_key in rigor-minimum rigor-floor; do
-  project=$(make_project)
-  printf '%s: double\n' "$gs_min_key" > "$project/.bionic/config.yaml"
-  run_write "$project/.bionic/docs/plans/epic-01-demo/min-$gs_min_key.plan.md" "$(build_plan intent=build rigor=single)"
-  assert_eq "§MINIMUM.1 $gs_min_key: double, plan single: admitted (the finding never blocks)" 0 "$HOOK_EXIT"
-  assert_contains "§MINIMUM.1 …and the project-minimum finding is logged, read from $gs_min_key:" \
-    "project-minimum" "$(read_audit "$project")"
-  expect_absent "§MINIMUM.1 …under its new id only, never project-floor" "project-floor" "$(read_audit "$project")$HOOK_STDERR"
-  gs_min_audit_line="$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep -F 'canonical-sdlc [project-minimum]' | head -1)"
-  expect_nonempty "§MINIMUM.1 …the finding's stderr line is read (the extractor's positive)" "$gs_min_audit_line"
-  if [ "$gs_min_key" = rigor-minimum ]; then
-    GS_MIN_NEW_LINE="$gs_min_audit_line"
-    expect_eq "§MINIMUM.2 the new key prints no deprecated: line" "0" "$(gs_min_deps "$HOOK_STDERR")"
-  else
-    expect_eq "§MINIMUM.3 the old key prints exactly one deprecated: line" "1" "$(gs_min_deps "$HOOK_STDERR")"
-    assert_contains "§MINIMUM.3 …the map's line" "$GS_MIN_DEP" "$HOOK_STDERR"
-    expect_eq "§MINIMUM.4 …and the finding it logs is the new key's, word for word" "$GS_MIN_NEW_LINE" "$gs_min_audit_line"
-  fi
-done
+# The key was `rigor-floor:` until 1.21.0, and 1.21.0 read it with a deprecation line. It is gone: a config or an epic
+# plan's frontmatter that still carries it is REFUSED at the write, naming `rigor-minimum:` (lib/alias.sh
+# `alias_gone_text rigor-key`, at the hook's two readers), never read and never passed over. The finding ids are
+# intent-minimum, project-minimum and epic-minimum, and the old ids are never printed. Each refusal sits beside the
+# new key's success on the same plan.
+GS_MIN_SAY="rigor-floor: is gone; write rigor-minimum:"
+project=$(make_project)
+printf 'rigor-minimum: double\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-rigor-minimum.plan.md" "$(build_plan intent=build rigor=single)"
+assert_eq "§MINIMUM.1 rigor-minimum: double, plan single: admitted (the finding never blocks)" 0 "$HOOK_EXIT"
+assert_contains "§MINIMUM.1 …and the project-minimum finding is logged, read from rigor-minimum:" \
+  "project-minimum" "$(read_audit "$project")"
+expect_absent "§MINIMUM.1 …under its new id only, never project-floor" "project-floor" "$(read_audit "$project")$HOOK_STDERR"
+gs_min_audit_line="$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep -F 'canonical-sdlc [project-minimum]' | head -1)"
+expect_nonempty "§MINIMUM.1 …the finding's stderr line is read (the extractor's positive)" "$gs_min_audit_line"
+expect_absent "§MINIMUM.2 the new key prints no refusal and no deprecated: line" "gone" "$HOOK_STDERR"
+expect_absent "§MINIMUM.2b …nor a deprecated: one" "deprecated:" "$HOOK_STDERR"
+project=$(make_project)
+printf 'rigor-floor: double\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-rigor-floor.plan.md" "$(build_plan intent=build rigor=single)"
+assert_eq "§MINIMUM.3 rigor-floor: double in the config, the same plan: refused (exit 2)" 2 "$HOOK_EXIT"
+assert_contains "§MINIMUM.3 …the refusal names the new key" "$GS_MIN_SAY" "$HOOK_STDERR"
+expect_absent "§MINIMUM.3 …and the old key is not read: no project-minimum finding is logged" "project-minimum" "$(read_audit "$project")"
+project=$(make_project)
+printf 'rigor-floor: single\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-rigor-floor-met.plan.md" "$(build_plan intent=build rigor=double)"
+assert_eq "§MINIMUM.4 …a minimum the plan meets is refused all the same (the key is, not the level): exit 2" 2 "$HOOK_EXIT"
+assert_contains "§MINIMUM.4 …naming the new key" "$GS_MIN_SAY" "$HOOK_STDERR"
 project=$(make_project)
 printf 'rigor-floor: single\nrigor-minimum: double\n' > "$project/.bionic/config.yaml"
 run_write "$project/.bionic/docs/plans/epic-01-demo/min-both.plan.md" "$(build_plan intent=build rigor=single)"
-assert_contains "§MINIMUM.5 with both keys the new one is read (double: the plan at single logs)" "project-minimum" "$(read_audit "$project")"
-expect_eq "§MINIMUM.5 …silently" "0" "$(gs_min_deps "$HOOK_STDERR")"
+assert_eq "§MINIMUM.5 with both keys written the old one is still refused, never read past (exit 2)" 2 "$HOOK_EXIT"
+assert_contains "§MINIMUM.5 …naming the new key" "$GS_MIN_SAY" "$HOOK_STDERR"
 project=$(make_project)
 printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-floor: double\n---\n\n# Epic\n' \
   > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
 run_write "$project/.bionic/docs/plans/epic-01-demo/min-epic.plan.md" "$(build_plan intent=build rigor=single)"
-assert_contains "§MINIMUM.6 an epic plan's rigor-floor: still reads, as epic-minimum" "epic-minimum" "$(read_audit "$project")"
-expect_absent "§MINIMUM.6 …never epic-floor" "epic-floor" "$(read_audit "$project")$HOOK_STDERR"
-expect_eq "§MINIMUM.6 …with the one deprecated: line" "1" "$(gs_min_deps "$HOOK_STDERR")"
+assert_eq "§MINIMUM.6 an epic plan's rigor-floor: is refused (exit 2)" 2 "$HOOK_EXIT"
+assert_contains "§MINIMUM.6 …naming the new key" "$GS_MIN_SAY" "$HOOK_STDERR"
+expect_absent "§MINIMUM.6 …and never an epic-floor or epic-minimum finding" "epic-" "$(read_audit "$project")$HOOK_STDERR"
+project=$(make_project)
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor-minimum: double\n---\n\n# Epic\n' \
+  > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md"
+run_write "$project/.bionic/docs/plans/epic-01-demo/min-epic-new.plan.md" "$(build_plan intent=build rigor=single)"
+assert_eq "§MINIMUM.6b the same epic plan with rigor-minimum: is admitted (the refusal above was the key's)" 0 "$HOOK_EXIT"
+assert_contains "§MINIMUM.6b …and logs epic-minimum" "epic-minimum" "$(read_audit "$project")"
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/min-ir.plan.md" "$(build_plan intent=incident-response rigor=single)"
 assert_contains "§MINIMUM.7 the intent minimum logs intent-minimum" "intent-minimum" "$HOOK_STDERR"
