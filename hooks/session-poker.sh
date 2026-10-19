@@ -7077,7 +7077,7 @@ sitrep_reds() {
 sitrep_render() {
   local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
   local title_wave title_rel cur bl_at bl_items glyphs s_mark s_text c_mark c_text w_mark w_text
-  local gl stp rid desc lat idle_min elapsed i_pct d_pct prev ratio s_med s_decl basis_who width chain cids cmins closes ctext ltext
+  local gl stp rid desc lat ty lab kind note idle_min elapsed i_pct d_pct prev ratio s_med s_decl basis_who width chain cids cmins closes ctext ltext
   local landed=0 active=0 pending=0 redn=0 total=0 blockers nown approvals lmed=""
   now="$(sitrep_now)"
   slug="$(proof_plan_slug "$plan")"
@@ -7096,33 +7096,138 @@ sitrep_render() {
     lmed="${lr1#*ready-to-landed median=}"; lmed="${lmed%%m *}"
   fi
 
-  # ---- Situation: the rows, their glyphs, their landing times (the reds, approvals and landings first, so
-  # each row is judged with them in hand)
-  local sit
+  # ---- Situation (wave-38 T10; wave-39 T10, D14, A-orch-19, AC-6.1, AC-6.3): the attended steps 0 to 3, each with
+  # its approval time, then every row in EXECUTION ORDER, one line each, `<glyph> <step>/<row>: <short> (<time or
+  # state>)`:
+  #   landed     by landing time, with it; the time is read from the row's `- T<n>:` line wherever it sits on it,
+  #              `landed <sha> <ISO>` or `landed-by-hand: <who> <ISO> "<why>"` (` by hand` said), the earlier of the
+  #              two when both appear, after any text (a `reason:`, a placeholder's tail); a landed row whose line
+  #              names no landing instant follows them, so said;
+  #   in flight  by their place on the line, lib/line.sh's fold read as it stands (read-only: no git counting, no
+  #              liveness), saying what each does: `in its landing, <n> of <m> suites green` (a candidate built),
+  #              `queued on the line behind <row>` or `next on the line` (none built yet), or `building` (no entry);
+  #   pending    in dependency order over `units_edges` (a row after every pending row it waits on, else table
+  #              order), each saying what it `waits on` (`units_waiting`: the writer row, else the read; five named,
+  #              the rest counted), or `not started`; a row of another status (split, …) says that status.
+  # The reds, approvals and landings are read first, so each row is judged with them in hand.
+  local sit lq="" lwait ledges
+  if [ -f "$rec" ] && [ ! -L "$rec" ] \
+     && { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+     && declare -F _line_fold >/dev/null 2>&1; then
+    lq="$(_line_fold "$rec" | awk -F'\t' 'NF >= 9 { m = 0; if ($9 != "none" && $9 != "") m = split($9, s, ","); printf "Q\t%s\t%s\t%s\t%d\t%d\n", $1, $5, $8, $12 + 0, m }')"
+  fi
+  lwait="$(units_waiting "$plan" "$(fill_step_token "$plan" 2>/dev/null)" 2>/dev/null | awk -F'\t' 'NF >= 3 { print "W\t" $1 "\t" $2 "\t" $3 }')"
+  ledges="$(units_edges "$plan" 2>/dev/null | awk -F'\t' 'NF >= 2 { print "E\t" $1 "\t" $2 }')"
   sit="$( { printf '%s\n' "$red_rows" | awk 'NF { print "X\t" $1 }'
             printf '%s\n' "$approvals" | awk 'NF { print "A\t" $1 }'
-            awk '/^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-                 s && /^- T[0-9A-Za-z._-]*: landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { id = $2; sub(/:$/, "", id); print "L\t" id "\t" $5 }' "$plan"
+            awk "$_PATROL_ISO_AWK"'
+              function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+              function iso_in(s) {
+                if (match(s, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z/)) return norm(substr(s, RSTART, RLENGTH))
+                return ""
+              }
+              /^[ \t]*```/ { fence = !fence; next }
+              fence { next }
+              /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
+              !s { next }
+              /^current:/ { c = $0; sub(/^current:[ \t]*/, "", c); sub(/[^0-9].*$/, "", c); if (c != "") print "C\t" c; next }
+              /^approved-by:/ { a = iso_in($0); if (a != "" && iso2epoch(a) >= 0) print "AB\t" iso2epoch(a); next }
+              /^- Step [0-3]:/ {
+                k = substr($0, 8, 1); if (k in sseen) next; sseen[k] = 1
+                t = ""; i = index($0, "approved by "); if (i) t = iso_in(substr($0, i + 12))
+                e = (t == "") ? -1 : iso2epoch(t)
+                print "S\t" k "\t" ((e >= 0) ? e : "-"); next
+              }
+              /^- T[0-9A-Za-z._-]*:/ {
+                id = $2; sub(/:$/, "", id); if (id in seen) next; seen[id] = 1
+                l = " " substr($0, index($0, ":") + 1)
+                pb = match(l, /[ \t]landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z/); bs = RSTART; bl = RLENGTH
+                ph = match(l, /[ \t]landed-by-hand: /); hs = RSTART; hl = RLENGTH
+                t = ""; h = 0
+                if (pb && (!ph || bs < hs)) t = iso_in(substr(l, bs, bl))
+                else if (ph) { t = iso_in(substr(l, hs + hl)); h = 1 }
+                if (t != "") { e = iso2epoch(t); if (e >= 0) print "L\t" id "\t" e "\t" h }
+              }' "$plan"
+            printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
           } | awk -F'\t' "$_ROW_SHORT_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function row(i, kind, note,   d) { d = tk[i]; if (d == "") d = "—"; printf "R\t%s\t%s/%s\t%s\t%s\t%s\n", g[i], stp[i], id[i], d, kind, note }
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
-    $1 == "L" { land[$2] = $3; next }
+    $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
+    $1 == "C" { cur = $2; next }
+    $1 == "AB" { ab = $2; next }
+    $1 == "S" { sap[$2] = $3; sline[$2] = 1; next }
+    $1 == "Q" { nq++; qr[nq] = $2; qc[nq] = $3; qo[nq] = $4; qg[nq] = $5; qm[nq] = $6; next }
+    $1 == "W" { w = ($4 != "" && $4 != "-") ? $4 : $3; if (!(($2, w) in wseen)) { wseen[$2, w] = 1; wait[$2] = wait[$2] (wait[$2] == "" ? "" : ", ") w }; next }
+    $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     $1 == "U" {
-      st = tolower(trim($11)); if (st == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = row_short($5); rd[n] = $14
+      s = tolower(trim($11)); if (s == "dropped") next
+      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = row_short($5); rd[n] = $14; st[n] = s; at[id[n]] = n
       b = 0
-      if (st != "landed") {
+      if (s != "landed") {
         if (id[n] in red) b = 1
         m = split(rd[n], a, ",")
         for (k = 1; k <= m; k++) { x = trim(a[k]); sub(/^live:/, "", x); if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) b = 1 }
       }
-      g[n] = (st == "landed") ? "L" : (b ? "X" : (st == "active" ? "A" : "P"))
+      g[n] = (s == "landed") ? "L" : (b ? "X" : (s == "active" ? "A" : "P"))
     }
-    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\t%s\t%s\n", g[i], stp[i], id[i], tk[i], (g[i] == "L" && (id[i] in land)) ? land[id[i]] : "" }')"
-  while IFS='	' read -r gl stp rid desc lat; do
-    [ -n "$gl" ] || continue
+    END {
+      split("Configure Scope Design Plan", nm, " ")
+      for (k = 0; k <= 3; k++) {
+        e = ((k in sap) && sap[k] != "-") ? sap[k] : ""
+        if (e == "" && k == 3 && ab != "") e = ab
+        if (e != "") printf "S\tL\t%d\t%s\tta\t%s\n", k, nm[k + 1], e
+        else if (cur != "" && k < cur + 0) printf "S\tL\t%d\t%s\ts\t%s\n", k, nm[k + 1], (k in sline) ? "done, no approval time on its line" : "done, no step line"
+        else if (cur != "" && k == cur + 0) printf "S\tA\t%d\t%s\ts\tin progress\n", k, nm[k + 1]
+        else printf "S\tP\t%d\t%s\ts\tnot started\n", k, nm[k + 1]
+      }
+      # landed: by landing time (a tie in table order), then those whose line names no instant
+      nl = 0
+      for (i = 1; i <= n; i++) if (st[i] == "landed" && (id[i] in land)) {
+        for (j = nl; j >= 1 && (land[id[lo[j]]] + 0 > land[id[i]] + 0); j--) lo[j + 1] = lo[j]
+        lo[j + 1] = i; nl++
+      }
+      for (j = 1; j <= nl; j++) { i = lo[j]; row(i, hand[id[i]] ? "th" : "t", land[id[i]]) }
+      for (i = 1; i <= n; i++) if (st[i] == "landed" && !(id[i] in land)) row(i, "s", "landed, no time on its line")
+      # in flight: by place on the line, then building
+      prev = ""
+      for (q = 1; q <= nq; q++) {
+        i = at[qr[q]]; if (i == "" || st[i] != "active" || (i in placed)) continue
+        placed[i] = 1
+        if (qc[q] != "-" && qc[q] != "") note = ((qo[q] == "stalled") ? "stalled in its landing, " : "in its landing, ") ((qm[q] + 0 > 0) ? qg[q] " of " qm[q] " suites green" : "no suite to run")
+        else note = (prev == "") ? "next on the line" : "queued on the line behind " prev
+        row(i, "s", note); prev = qr[q]
+      }
+      for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) row(i, "s", "building")
+      # pending (and any other status): dependency order, the lowest table position first among the free
+      for (k = 1; k <= ne; k++) {
+        a1 = at[ef[k]]; b1 = at[et[k]]
+        if (a1 == "" || b1 == "" || a1 == b1) continue
+        if (st[a1] == "landed" || st[a1] == "active" || st[b1] == "landed" || st[b1] == "active") continue
+        if ((a1, b1) in dep) continue
+        dep[a1, b1] = 1; indeg[b1]++
+      }
+      np = 0; for (i = 1; i <= n; i++) if (st[i] != "landed" && st[i] != "active") np++
+      for (done = 0; done < np; ) {
+        pick = 0
+        for (i = 1; i <= n; i++) if (st[i] != "landed" && st[i] != "active" && !(i in out) && indeg[i] + 0 == 0) { pick = i; break }
+        if (!pick) for (i = 1; i <= n; i++) if (st[i] != "landed" && st[i] != "active" && !(i in out)) { pick = i; break }   # a cycle: table order
+        out[pick] = 1; done++
+        for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
+        if (st[pick] != "pending") note = st[pick]
+        else if (!(id[pick] in wait)) note = "not started"
+        else {   # five named, the rest counted: a close row waits on every open row
+          m = split(wait[id[pick]], wl, ", "); note = "waits on " wl[1]
+          for (k = 2; k <= m && k <= 5; k++) note = note ", " wl[k]
+          if (m > 5) note = note " and " (m - 5) " more"
+        }
+        row(pick, "s", note)
+      }
+    }')"
+  while IFS='	' read -r ty gl lab desc kind note; do
+    [ "$ty" = R ] || continue
     total=$((total + 1))
     case "$gl" in L) landed=$((landed + 1)) ;; A) active=$((active + 1)) ;; X) redn=$((redn + 1)) ;; *) pending=$((pending + 1)) ;; esac
   done <<SITREP_SIT
@@ -7224,14 +7329,15 @@ SITREP_SIT
     printf 'Bottom line — none recorded yet\n'
   fi
   printf '\nSituation\n%d landed · %d in flight · %d not started · %d red/blocked of %d\n' "$landed" "$active" "$pending" "$redn" "$total"
-  while IFS='	' read -r gl stp rid desc lat; do
-    [ -n "$gl" ] || continue
+  while IFS='	' read -r ty gl lab desc kind note; do
+    [ -n "$ty" ] || continue
     case "$gl" in L) glyphs="✅" ;; A) glyphs="🔄" ;; X) glyphs="⛔" ;; *) glyphs="⬜" ;; esac
-    if [ -n "$lat" ] && [ -n "$(iso_epoch "$lat")" ]; then
-      printf '%s %s/%s: %s — %s\n' "$glyphs" "$stp" "$rid" "$desc" "$(sitrep_clock "$(iso_epoch "$lat")" "$now")"
-    else
-      printf '%s %s/%s: %s\n' "$glyphs" "$stp" "$rid" "$desc"
-    fi
+    case "$kind" in
+      ta) note="approved $(sitrep_clock "$note" "$now")" ;;
+      t)  note="$(sitrep_clock "$note" "$now")" ;;
+      th) note="$(sitrep_clock "$note" "$now"), by hand" ;;
+    esac
+    printf '%s %s: %s (%s)\n' "$glyphs" "$lab" "$desc" "$note"
   done <<SITREP_SIT
 $sit
 SITREP_SIT
@@ -10236,6 +10342,24 @@ EOF
     [ ! -f "$PV_NEW.2" ] || mv -f "$PV_NEW.2" "$PV_NEW"
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    # A HAND LANDING IS RECORDED (wave-39 T10; D14, AC-6.2). The landing record gains the line the line's own hand
+    # landing writes (lib/line.sh `line_publish`, field for field), at the landing's instant, so landing-report's
+    # Landings list the row and `--hand-holds` counts it; a hand-marked landing used to reach the plan alone. Once:
+    # the line's `land --by-hand` writes its published line before it runs this verb, and a run again of the same
+    # landing finds it, so a published line for this row and commit already in the record is the landing recorded.
+    # The plan is written first; a record that cannot be written refuses (1) after it, and the same call again
+    # writes the record line alone.
+    if [ "$RL_HAND" -eq 1 ]; then
+      RL_REC="$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")"
+      if ! awk -F'|' -v r="row=$PV_ID" -v c="commit=$RL_COMMIT" '$1 == "line/v1" && $2 == "ev=published" && $3 == r && $4 == c { f = 1 } END { exit !f }' "$RL_REC" 2>/dev/null; then
+        mkdir -p "${RL_REC%/*}" 2>/dev/null
+        if ! _wt_proofs_put "$RL_REC" "line/v1|ev=published|row=${PV_ID}|commit=${RL_COMMIT}|kind=hand|by=${RL_BY}|why=${RL_WHY}|at=${RL_AT}"; then
+          die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take its published line; make it writable and run the same row-landed again."
+          exit 1
+        fi
+        say "row-landed — $PV_ID landed by hand: ev=published kind=hand written to $RL_REC"
+      fi
+    fi
     say "evidence: $RL_N cell(s) written by landing"
     [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
     exit 0

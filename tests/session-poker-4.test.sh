@@ -6685,4 +6685,61 @@ expect_contains "FN5-5c …saying the approval is spent" "spent" "$OUT"
 expect_contains "FN5-5d …and naming the user's word for the regression" "waive regression" "$OUT"
 POKE_BOUND="$F5_BOUND_WAS"
 
+
+# ============================================================
+section "§HAND: row-landed --by-hand records the hand landing on the landing record, ev=published kind=hand, once, so landing-report lists the row and its hand-holds count it (wave-39 T10; D14; REQ-6 AC-6.2)"
+# ============================================================
+#
+# A landing the orchestrator makes by hand is marked on the plan with `row-landed <row> <commit> <at> --by-hand
+# <who> <why>`. Before wave 39 that wrote the plan's three lines and nothing to the landing record, so the run's
+# Landings and its hand-holds count missed every one (record/wave-39-landing-proof/landing-proofs.log: six kind=hand
+# lines tonight came only from the line's own hand landing). The verb now appends the line the line's hand landing
+# writes, `line/v1|ev=published|row=|commit=|kind=hand|by=|why=|at=`, at the landing's own instant, unless the record
+# already holds a published line for that row and commit: the line's `land --by-hand` writes its event, then runs
+# this verb, and one landing is one line.
+#
+# FIXTURE FIDELITY. §DELIVER's plan builder (`dv_plan`) in a repository of its own; the record line the line writes
+# is copied from lib/line.sh `line_publish`'s `_wt_proofs_put` call, field for field.
+HD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RHD="$(make_repo hd-hand)"; ( cd "$RHD" && git commit -q --allow-empty -m init )
+git -C "$RHD" config user.name "Dana Fixture"
+HD_DVB_WAS="$DV_B"; DV_B="$(git -C "$RHD" rev-parse HEAD)"
+PHD="$(dv_plan "$RHD")"
+DV_B="$HD_DVB_WAS"
+HD_C="$(git -C "$RHD" rev-parse HEAD)"
+HD_C2="$(printf 'e%.0s' $(seq 40))"
+HD_REC="$RHD/$DV_REL/landing-proofs.log"; mkdir -p "${HD_REC%/*}"
+hd_pub()   { [ -f "$HD_REC" ] || { echo 0; return 0; }; /usr/bin/grep -c '^line/v1|ev=published|' "$HD_REC" | tr -d ' '; }   # -> published lines in the record
+hd_step()  { /usr/bin/grep -E "^- $1: " "$PHD" | head -1; }
+hd_holds() { poke "$RHD" landing-report --hand-holds "$PHD"; printf '%s\n' "$OUT" | /usr/bin/grep -oE 'by-hand=[0-9]+' | head -1; }
+
+expect_eq "HD-0 precondition: the record holds no published line, and the hand-holds line reads by-hand=0 (its extractor proved on the verb's own line)" \
+  "0|by-hand=0" "$(hd_pub)|$(hd_holds)"
+poke "$RHD" row-landed T8 "$HD_C" 2026-10-04T05:00:00Z --by-hand "Dana Fixture" "merged by hand on its in-tree greens"
+expect_eq "HD-1 row-landed --by-hand exits 0 and writes the plan's hand-landing line" \
+  "0|- T8: landed-by-hand: Dana Fixture 2026-10-04T05:00:00Z \"merged by hand on its in-tree greens\"" "$RC|$(hd_step T8)"
+expect_eq "HD-2 AC-6.2 …and the landing record gains one ev=published line, kind=hand, at the landing's own instant, in the line's field order" \
+  "line/v1|ev=published|row=T8|commit=$HD_C|kind=hand|by=Dana Fixture|why=merged by hand on its in-tree greens|at=2026-10-04T05:00:00Z" \
+  "$(/usr/bin/grep '^line/v1|ev=published|' "$HD_REC" 2>/dev/null)"
+expect_eq "HD-3 AC-6.2 landing-report --hand-holds counts it: by-hand=1" "by-hand=1" "$(hd_holds)"
+poke "$RHD" landing-report --rows "$PHD"
+expect_eq "HD-4 …and landing-report's landings line and its rows list the row as a hand landing" \
+  "hand=1|T8 hand ready=- landed=2026-10-04T05:00:00Z" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'hand=[0-9]+' | head -1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^T8 ' | cut -d' ' -f1-4)"
+dv_snap_hd() { cp "$PHD" "$TMPROOT/hd-before"; }
+dv_snap_hd
+poke "$RHD" row-landed T8 "$HD_C" 2026-10-04T05:00:00Z --by-hand "Dana Fixture" "merged by hand on its in-tree greens"
+expect_eq "HD-5 the same hand landing again: exit 0, the plan byte-identical, still one published line" \
+  "0|same|1" "$RC|$(cmp -s "$TMPROOT/hd-before" "$PHD" && echo same || echo changed)|$(hd_pub)"
+# The line's own hand landing writes its published line first, then runs this verb: one landing, one line.
+printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=Dana Fixture|why=the line landed it|at=2026-10-04T06:00:00Z\n' "$HD_C2" >> "$HD_REC"
+poke "$RHD" row-landed T9 "$HD_C2" 2026-10-04T06:00:00Z --by-hand "Dana Fixture" "the line landed it"
+expect_eq "HD-6 a hand landing the line already recorded (its published line for that row and commit) is not recorded twice" \
+  "0|1|2|by-hand=2" \
+  "$RC|$(/usr/bin/grep -c '^line/v1|ev=published|row=T9|' "$HD_REC" | tr -d ' ')|$(hd_pub)|$(hd_holds)"
+poke "$RHD" row-landed T12 "$HD_C" 2026-10-04T07:00:00Z
+expect_eq "HD-7 a landing not by hand (the queue's, whose publish writes its own line) adds no line here" \
+  "0|2" "$RC|$(hd_pub)"
+POKE_BOUND="$HD_BOUND_WAS"
+
 finish
