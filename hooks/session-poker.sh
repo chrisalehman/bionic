@@ -3555,39 +3555,71 @@ handoff_human_line() {  # <key> <flag text, or empty> <src file, or empty> -> th
   if [ -n "$got" ]; then printf '%s\n' "$got"; else printf '%s: (to fill)\n' "$1"; fi
 }
 
-# THE REGISTER (wave-38 T13; D24, AC-3.4). Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading
-# in record/<wave>/design-ledger.md, or a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in); `re-ruled`
-# and `withdrawn` are entries too. A line of any other shape, a body line and a fenced example are not, so a ledger
-# written before D24 reads as having none. ONE PARSER: `decisions` prints it and the resume recap's settled: lines are
+# THE REGISTER (wave-38 T13; D24, AC-3.4; wave-39 T11, D15, AC-7.1). Every ruling is a `## Δn — D<n> [qualifier] <verb>
+# ["<reply>"] (<who> <date>)[: <title>]` heading in record/<wave>/design-ledger.md, or a `- D<n> …` bullet of that shape
+# under a Δ (the Step-1 rulings folded in). The verbs are ruled, re-ruled, amended, amended again, ratified, final and
+# withdrawn; the qualifier is one word between the number and the verb; the heading form `D<n> ruled: <title> (<who>
+# <date>)` has no reply; a tail after the parenthesis that is not `: <title>` is the title. A `put (…)` proposal, a
+# line of any other shape, a body line and a fenced example are not entries, so a ledger written before D24 reads as
+# having none. ONE PARSER: `decisions` prints it and the resume recap's settled: lines are
 # it, prefixed. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
 # parenthesis is `(untitled)`.
 decisions_list() {  # <ledger> -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
   awk '
-    function entry(s,   n, verb, rest, q, reply, p, paren, title, who, date, field) {
+    function lead_verb(s,   i, n, vs, c) {  # the verb s opens with, followed by a space or a colon; "" when none
+      n = split("amended again|amended|re-ruled|ruled|ratified|final|withdrawn", vs, "|")
+      for (i = 1; i <= n; i++) {
+        if (index(s, vs[i]) != 1) continue
+        c = substr(s, length(vs[i]) + 1, 1)
+        if (c == " " || c == ":") return vs[i]
+      }
+      return ""
+    }
+    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field) {
       if (!match(s, /^D[0-9]+ /)) return
       n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1)
-      if (index(rest, "ruled \"") == 1) { verb = "ruled"; rest = substr(rest, 8) }
-      else if (index(rest, "re-ruled \"") == 1) { verb = "re-ruled"; rest = substr(rest, 11) }
-      else if (index(rest, "withdrawn (") == 1) { verb = "withdrawn"; rest = substr(rest, 12) }
-      else return
-      if (verb != "withdrawn") {
-        q = index(rest, "\""); if (q == 0) return
-        reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1)
-        if (index(rest, " (") != 1) return
-        rest = substr(rest, 3)
+      verb = lead_verb(rest); qual = ""
+      if (verb == "") {
+        if (!match(rest, /^[A-Za-z][A-Za-z0-9_-]* /)) return
+        qual = substr(rest, 1, RLENGTH - 1); rest = substr(rest, RLENGTH + 1)
+        verb = lead_verb(rest); if (verb == "") return
       }
-      p = index(rest, "): ")
-      if (p) { paren = substr(rest, 1, p - 1); title = substr(rest, p + 3) }
-      else if (substr(rest, length(rest)) == ")") { paren = substr(rest, 1, length(rest) - 1); title = "" }
-      else return
+      rest = substr(rest, length(verb) + 1); hasreply = 0; reply = ""; paren = ""
+      if (substr(rest, 1, 1) == ":") {
+        rest = substr(rest, 2); sub(/^[ \t]+/, "", rest)
+        if (substr(rest, length(rest)) != ")") return
+        for (i = length(rest) - 1; i >= 1; i--) {
+          if (substr(rest, i, 2) != " (") continue
+          c = substr(rest, i + 2, length(rest) - i - 2)
+          if (match(c, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) { paren = c; title = substr(rest, 1, i - 1); break }
+        }
+        if (paren == "") return
+      } else {
+        if (index(rest, " \"") == 1) {
+          rest = substr(rest, 3); q = index(rest, "\""); if (q == 0) return
+          reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1); hasreply = 1
+        }
+        if (index(rest, " (") != 1) return
+        rest = substr(rest, 3); depth = 1; inq = 0; fin = 0
+        for (i = 1; i <= length(rest); i++) {
+          ch = substr(rest, i, 1)
+          if (ch == "\"") inq = !inq
+          else if (!inq && ch == "(") depth++
+          else if (!inq && ch == ")" && --depth == 0) { fin = i; break }
+        }
+        if (!fin) fin = index(rest, ")")
+        if (!fin) return
+        paren = substr(rest, 1, fin - 1); tail = substr(rest, fin + 1)
+        if (index(tail, ": ") == 1) title = substr(tail, 3)
+        else { title = tail; sub(/^[ \t:,;]+/, "", title) }
+      }
       if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return
       date = substr(paren, RSTART, RLENGTH); who = substr(paren, 1, RSTART - 1)
       sub(/^[ \t]+/, "", who); sub(/[ \t,]+$/, "", who)
       if (who == "") return
       sub(/[ \t]+$/, "", title); if (title == "") title = "(untitled)"
-      if (verb == "ruled") field = "\"" reply "\""
-      else if (verb == "re-ruled") field = "re-ruled \"" reply "\""
-      else field = "withdrawn"
+      field = verb; if (qual != "") field = qual " " verb
+      if (hasreply) field = (field == "ruled") ? "\"" reply "\"" : field " \"" reply "\""
       print n " · " field " · " who " " date " · " title
     }
     { sub(/\r$/, "") }

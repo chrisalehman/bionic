@@ -399,6 +399,82 @@ expect_true "DC-5 precondition: the decision skill reads (its When it applies se
 expect_true "DC-5b the decision skill requires the reopening form under When it applies" \
   bash -c 'awk "/^## When it applies/ { f = 1; next } f && /^## / { exit } f" "$1" | grep -qF "reopening D<n>: <one sentence of new evidence>"' _ "$DC_SKILL"
 
+# ---- wave-39 T11 (REQ-7; D15, D24; AC-7.1, AC-7.2): the decision line grammar, over wave 38's own ledger ----
+# D15: `D<n> [qualifier] <verb> ["<reply>"] (<who> <date>)[: <title>]`, the seven verbs ruled, re-ruled, amended,
+# amended again, ratified, final and withdrawn, and the heading form `D<n> ruled: <title> (<who> <date>)`. A
+# `put (…)` proposal is never an entry. FIXTURE FIDELITY: the ledger below is wave 38's design ledger from the
+# heading of its Δ23 to the end of its Δ24, byte for byte (D30's three lines, D31's five and its put line), under
+# the slug the bound plan names, so `decisions`, `decisions --all` and the resume recap read it as they read the
+# real one. fails-when: a line of D30 or D31 is absent or listed twice, out of the ledger's order, or the put line
+# has an entry.
+RD6="$(make_repo decisions-w38)"
+PD6="$(s34_plan "$RD6" 4)"
+D6_DOCS="$RD6/.bionic/docs"
+mkdir -p "$D6_DOCS/record/wave-01-fixture"
+cat > "$D6_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
+# design ledger — wave-01-fixture (wave 38's Δ23 and Δ24, verbatim)
+
+## Δ23 — D28, D29 and D30 ruled (Chris Lehman 2026-10-17)
+
+- D28 ruled "option 3" (Chris Lehman 2026-10-17 8:35 AM, recorded from the handoff): gathered landing; fourteen landed-by-hand marks accepted on the scorecard.
+- D29 ruled "1" (Chris Lehman 2026-10-17 3:52 PM): the indicator thresholds print once, in one line under the three Assessment lines, never on the lines themselves.
+- D30 ruled "No, I think the icon should be left-justified, as with the Situation section. However, make them more nuanced, not so loud. Perhaps a check mark is equivalent to green, some kind of neutral and bad icon..." (Chris Lehman 2026-10-17 3:52 PM): the mark opens the line, as Situation's does; the set is ✅ fine · ➖ watch · ⚫ off, ⚪ unverified unchanged (the orchestrator's choice of glyphs, reversible). The one-line form on the tick and the handoff head carries the same three marks. Fix row T35.
+- D30 amended "Maybe not a red X?" (Chris Lehman 2026-10-17 5:40 PM): the off mark is ✖ (U+2716, text style, never the red ❌ emoji); the set is ✅ fine · ➖ watch · ⚫ off, ⚪ unverified unchanged.
+- D30 amended again "Green, grey, something else that's more calm, in keeping with that theme." (Chris Lehman 2026-10-17 5:42 PM): the off mark is ⚫ (black circle), pairing with ⚪ unverified; the set is ✅ fine · ➖ watch · ⚫ off. No cross, no red.
+
+## Δ24 — D31 ruled: an Assessment mark encodes deviation from a tolerance (Chris Lehman 2026-10-17)
+
+- D31 put (orchestrator, 5:55 PM): the Assessment marks borrowed Situation's state vocabulary (✅ landed = ✅ within), one glyph with two meanings on one page. The user: "Shouldn't the iconography communicate something more fundamental … Reason from first principles re: the information architecture of /sitrep." Ruled "Neither. I like option 2, except I don't like the icons. Something more noticable, like ✅. But it has to be elegant, and following the conceptual tolerance model": the four states are within the bar, near it, over it, not measurable.
+- D31 glyphs ruled "✅ for within the bar" (Chris Lehman 2026-10-17 6:02 PM), the rest from the diamond gauge: ✅ within · 🔸 near · 🔶 over · ◇ not measurable. Noticeability grows with the deviation. The marks of Situation (✅ 🔄 ⬜ ⛔) encode work state; ✅ is shared by the user's choice. D29 stands: the thresholds print once, under the three lines, headed within/near/over. D30's ✅ ➖ ⚫ set is superseded.
+- D31 glyphs re-ruled "do the arrow up for over" (Chris Lehman 2026-10-17 6:20 PM), after "✅ ➖ ⚫ is still better, except the circle doesn't work. Horizontal line is 'near it' … question mark for not measurable … more bold, stylized in a cool, calm way" and "not yellow": the final set is ✅ within the bar · ➖ near it · 🔼 over it · ❔ not measurable. One register, grey and white but the check's green; ➖ is the bar and 🔼 the measurement above it. The diamond gauge (🔹 🔸 🔶 ◇), ⚫, 👎 and the arrow triple were considered and dropped.
+- D31 glyphs final "Changed my mind. That's too confusing. Let's go back to an X shape. But let's make it grey X like the horizontal bar." (Chris Lehman 2026-10-17 6:24 PM): ✅ within the bar · ➖ near it · ✖️ over it (U+2716 U+FE0F, the heavy grey X; no grey-boxed X exists in the emoji set) · ❔ not measurable. 🔼 dropped.
+- D31 ratified "Yes" (Chris Lehman 2026-10-17 6:41 PM) on the presented table: ✅ within the bar · ➖ near it · ✖️ over it · ❔ not measurable; the mark leads the line; the thresholds print once under the block, headed within / near / over. The glyph colours are the emoji font's and cannot be tinted on the page's path; recorded as a known limit of the choice.
+LEDGER
+# d6_pick: the register's output -> the id, the first 48 bytes of the verb-and-reply field, and the who-and-date field
+# of each D30 and D31 line, in the order printed (any `<wave> ` key and any `settled: ` prefix stripped first).
+d6_pick() { sed -e 's/^wave-01-fixture //' -e 's/^settled: //' | awk -F' · ' '$1 ~ /^D3[01]$/ { print $1 " | " substr($2, 1, 48) " | " $3 }'; }
+D6_WANT='D30 | "No, I think the icon should be left-justified,  | Chris Lehman 2026-10-17
+D30 | amended "Maybe not a red X?" | Chris Lehman 2026-10-17
+D30 | amended again "Green, grey, something else that'"'"' | Chris Lehman 2026-10-17
+D31 | ruled | Chris Lehman 2026-10-17
+D31 | glyphs ruled "✅ for within the bar" | Chris Lehman 2026-10-17
+D31 | glyphs re-ruled "do the arrow up for over" | Chris Lehman 2026-10-17
+D31 | glyphs final "Changed my mind. That'"'"'s too confus | Chris Lehman 2026-10-17
+D31 | ratified "Yes" | Chris Lehman 2026-10-17'
+poke "$RD6" decisions
+expect_eq "DG-1 precondition: decisions exits 0 on the bound run" "0" "$RC"
+D6_OUT="$OUT"
+expect_nonempty "DG-1b precondition: …and prints something, so the counts below read a real list" "$D6_OUT"
+expect_eq "DG-2 AC-7.1 over wave 38's ledger decisions lists D30 three times and D31 five times, in the ledger's order, with the verb, the qualifier and the who and date each line carries" \
+  "$D6_WANT" "$(printf '%s\n' "$D6_OUT" | d6_pick)"
+expect_eq "DG-2b …and those are the only entries (D28 and D29 are bullets of the same Δ, the Δ23 heading names three numbers and is none: 3 + 5 + 2)" \
+  "10" "$(printf '%s\n' "$D6_OUT" | grep -c .)"
+expect_contains "DG-2c …the heading form's title is the words after its colon, its who and date the parenthesis that ends the line" \
+  "D31 · ruled · Chris Lehman 2026-10-17 · an Assessment mark encodes deviation from a tolerance" "$D6_OUT"
+expect_contains "DG-2d …a tail after the parenthesis that is not ': <title>' is the title (D31 ratified: ' on the presented table: …')" \
+  'D31 · ratified "Yes" · Chris Lehman 2026-10-17 · on the presented table: ' "$D6_OUT"
+expect_absent "DG-3 AC-7.2 the put line has no entry (DG-2 read the same output): its words are in no line" "5:55 PM" "$D6_OUT"
+expect_eq "DG-3b …and no line is the put line's: no entry whose verb is put" "0" "$(printf '%s\n' "$D6_OUT" | grep -c ' put')"
+poke "$RD6" decisions --all
+expect_eq "DG-4 decisions --all exits 0" "0" "$RC"
+expect_eq "DG-4b AC-7.1 …and lists the same eight, keyed by the wave, in the same order" "$D6_WANT" "$(printf '%s\n' "$OUT" | d6_pick)"
+# The resume recap reads the same list. The world is handoff-file §RESUME's, reduced: the plan on its branches, the
+# handoff written by the real verb while bound, then the session made new (engaged, unbound, unstamped).
+git -C "$RD6" config user.name "Dana Fixture"; git -C "$RD6" config user.email t@example.com
+( cd "$RD6" && git commit -q --allow-empty -m init && git branch -f trunk HEAD && git commit -q --allow-empty -m work && git branch -f wave/01-fixture HEAD )
+awk 'NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next } { print }' "$PD6" > "$PD6.d6" && mv "$PD6.d6" "$PD6"
+s42_snap "$RD6" "$PD6"
+poke "$RD6" handoff --mid-flight 'T2 is in its ready loop'
+expect_eq "DG-5 precondition: the handoff is written by the real verb while bound" "0" "$RC"
+D6_DOOR=".bionic/docs/record/wave-01-fixture/handoff.md"
+expect_true "DG-5b precondition: …and the file is there" test -s "$RD6/$D6_DOOR"
+engage "$RD6"
+rm -f "$(stamp_of "$RD6")" "$(armed_of "$RD6")" "$(digest_of "$RD6")"
+poke "$RD6" resume "$D6_DOOR"
+expect_eq "DG-6 precondition: resume exits 0" "0" "$RC"
+expect_eq "DG-6b AC-7.1 the recap's settled: lines are the same eight, in the same order" "$D6_WANT" "$(printf '%s\n' "$OUT" | grep '^settled: ' | d6_pick)"
+expect_eq "DG-6c …and the recap lists every entry of the ledger as settled: (3 + 5 + 2)" "10" "$(printf '%s\n' "$OUT" | grep -c '^settled: D')"
+
 # ============================================================
 section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines while an integrate row is open (wave-38 T3; REQ-1 AC-1.2; D20)"
 # ============================================================
