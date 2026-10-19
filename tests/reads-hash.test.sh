@@ -31,6 +31,10 @@
 #             (AC-1.3); a literal suite's key is a sha256 and survives a change outside its read set
 #   §CLOSURE  a hook's WANT library loading another library by a variable: the second library is read, and a
 #             change to it changes the key; `reads_index` itself does not close
+#   §CLOSED-INDEX  `reads_index_closed` (`bash anchors.sh reads_index --closed`, wave-39 T40 for T24's judge) is
+#             the file-to-suites index over the closed sets the key reads, in reads_index's shape, a narrowed pair
+#             as `<file>#<name>`, each tree-keyed suite on a trailing `! TAB <suite>` line; at HEAD it names
+#             session-poker.test.sh for lib/line.sh, which the plain index does not
 #   §KEY      the key is sha256 over the sorted `<path> <blob>` lines, the suite file and its prelude among them
 #   §AT       the commit is read, never the working tree
 #   §LIVE     this repository at HEAD: the closure reaches payload/scripts/lib/line.sh from
@@ -196,6 +200,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYST
 rh_set() { ( . "$ANCHORS" && reads_set "$@" ) 2>/dev/null; }      # <root> <at> <suite>
 rh_hash() { ( . "$ANCHORS" && reads_hash "$@" ) 2>/dev/null; }    # <root> <at> <suite>
 rh_index() { ( . "$ANCHORS" && reads_index "$@" ) 2>/dev/null; }  # <root> <at>
+rh_closed() { ( . "$ANCHORS" && reads_index_closed "$@" ) 2>/dev/null; }  # <root> <at>
 rh_commit() { git -C "$F" add -A && git -C "$F" commit -qm "$1" && git -C "$F" rev-parse HEAD; }   # <message> -> the commit
 rh_sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{ print $1 }'; }
 
@@ -273,6 +278,22 @@ expect_contains "CLOSURE: reads_index itself still names s-hook for a.sh (rule 2
 expect_no_match "CLOSURE: …and is unchanged by the closure: nothing names s-hook for b.sh there" "payload/scripts/lib/b\\.sh.*s-hook" "$IX"
 
 # ------------------------------------------------------------
+section "§CLOSED-INDEX: the file-to-suites index over the closed sets, the one the owed set's judge joins on (wave-39 T40; D5, A-orch-3)"
+# ------------------------------------------------------------
+# fails-when: a suite reaching a file only through the closure is missing from the file's row (ci1, ci4), a tree-keyed
+# suite is not marked (ci2), or the shape is not reads_index's (ci3).
+CX="$(rh_closed "$F" "$C1")"
+expect_eq "(ci1) the closed index names s-hook, and s-hook alone, for b.sh, the library a.sh loads" "tests/s-hook.test.sh" "$(row_of payload/scripts/lib/b.sh "$CX")"
+expect_eq "(ci1) …and for a.sh, as the plain index does" "$(row_of payload/scripts/lib/a.sh "$IX")" "$(row_of payload/scripts/lib/a.sh "$CX")"
+expect_eq "(ci2) s-var, keyed by the tree, is marked on a trailing ! line, as reads_hashes keys it" \
+  "$(printf '!\ttests/s-var.test.sh')" "$(printf '%s\n' "$CX" | grep '^!')"
+expect_eq "(ci2) …the ! lines come last" "!" "$(printf '%s\n' "$CX" | tail -n 1 | cut -c1)"
+expect_eq "(ci3) every other line is reads_index's shape: <file> TAB <suite>[,<suite>]" "0" \
+  "$(printf '%s\n' "$CX" | grep -v '^!' | grep -cv "^[^$TAB]*${TAB}tests/[^$TAB]*\$")"
+expect_eq "(ci3) …from the command line too: bash anchors.sh reads_index --closed <root> --at <commit>" "$CX" \
+  "$(bash "$ANCHORS" reads_index --closed "$F" --at "$C1" 2>/dev/null)"
+
+# ------------------------------------------------------------
 section "§KEY: sha256 over the sorted <path> <blob> lines, the suite file and its prelude among them (D8)"
 # ------------------------------------------------------------
 PS="$(rh_set "$F" "$C1" tests/s-pre.test.sh)"
@@ -300,6 +321,12 @@ LS="$(rh_set "$REPO" "$LH" tests/session-poker.test.sh)"
 expect_contains "LIVE: session-poker.test.sh reads hooks/session-poker.sh" "hooks/session-poker.sh" "$LS"
 expect_contains "LIVE: …and, through the closure, payload/scripts/lib/line.sh" "payload/scripts/lib/line.sh" "$LS"
 expect_regex "LIVE: …and its key is a sha256 of its reads, not the tree" '^[0-9a-f]{64}$' "$(rh_hash "$REPO" "$LH" tests/session-poker.test.sh)"
+LIX="$(rh_index "$REPO" "$LH")"; LCX="$(rh_closed "$REPO" "$LH")"
+expect_contains "(ci4-pre) the plain index has a row for lib/line.sh: landing-line.test.sh names it" "tests/landing-line.test.sh" "$(row_of payload/scripts/lib/line.sh "$LIX")"
+expect_no_match "(ci4) …which does not name session-poker.test.sh: it reaches line.sh only through hooks/session-poker.sh's loads" \
+  'tests/session-poker\.test\.sh' "$(row_of payload/scripts/lib/line.sh "$LIX")"
+expect_contains "(ci4) the closed index's row for lib/line.sh names session-poker.test.sh" "tests/session-poker.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
+expect_contains "(ci4) …and landing-line.test.sh, as the plain one does" "tests/landing-line.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
 
 # ------------------------------------------------------------
 setup_section "plant the one-key fixture: calc.sh's one() and two(), a suite declaring one(), one declaring nothing, one refused"
@@ -365,6 +392,9 @@ expect_regex "(one5-pre) s-a's key at the third commit is a sha256" '^[0-9a-f]{6
 expect_ne "(one5) a change to one() moves s-a's key: its span changed" "$A1" "$A3"
 expect_ne "(one5) …and s-c's, either way" "$C2K" "$(rh_hash "$O" "$O3" tests/s-c.test.sh)"
 expect_eq "(one5) …the landing reads s-a's new key" "$A3" "$(one_line "$O" "$O3" s-a.test.sh)"
+expect_eq "(ci5) the closed index narrows as reads_index does: s-a on calc.sh#one, s-c and s-r on calc.sh" \
+  "tests/s-a.test.sh|tests/s-c.test.sh,tests/s-r.test.sh" \
+  "$(CO="$(rh_closed "$O" "$O3")"; printf '%s|%s' "$(row_of 'payload/scripts/lib/calc.sh#one' "$CO")" "$(row_of payload/scripts/lib/calc.sh "$CO")")"
 expect_eq "(one6) line.sh keys through anchors.sh reads_hashes" "1" "$(grep -c 'got="$(reads_hashes ' "$LINE")"
 expect_eq "(one6) …and derives no key of its own: no narrowing, no closure read, no sha256 there" "0" \
   "$(grep -c -e '_line_reads_keys' -e '_rd_closed' -e '_rd_sha256' -e 'reads_declared' "$LINE")"
