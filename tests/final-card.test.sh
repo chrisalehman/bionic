@@ -502,4 +502,45 @@ else
   printf '  SKIP: REPLY-9 waive regression — proof_question_ok at this head admits no regression question (T2 not landed; A-T3-5)\n'
 fi
 
+# ============================================================
+section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
+# ============================================================
+#
+# FIVE STOPS, THE CONFIGURATION CARD FIRST (wave-39 D3, reopening wave-38 D17 on the user's words). The card is
+# rendered by the tool from the plan Step 0 wrote, never typed by the model (D23): Purpose, Seed, Run, Branches,
+# Paths, Shape, Gates, Models, then the question, and rendering it for the session's own run opens the person's
+# approve:step0 item. card.test.sh §CONFIG holds every line of the settings; this section holds the shape, the
+# question, the owed reply and the doctrine that names the stop.
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'scale-recommendation: "Several rows in one session. The ask names five files."\nregression: yes\n'
+  printf 'surface_type: cli-plugin\nmulti_agent: true\ndeploy_target: n/a\ncleanup_on_finish: true\nuse_worktree: false\n'
+  printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
+  printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
+} > "$PFC"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state"
+bind_marker "$RFC" "$PFC"
+fc_card step0
+expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \
+  "0||Step 0 · Plan Configuration" "$FC_RC|$FC_ERR|$(printf '%s\n' "$FC_OUT" | head -1)"
+expect_eq "STEP0-2 …its sections in the 1.20.0 order" "Purpose|Seed|Run|Branches|Paths|Shape|Gates|Models" \
+  "$(printf '%s\n' "$FC_OUT" | sed -n 's/^  \([A-Z][A-Za-z]*\)$/\1/p' | paste -sd'|' -)"
+expect_eq "STEP0-3 …Purpose is the plan's Goal" "    Configure the fixture run, and nothing else." \
+  "$(printf '%s\n' "$FC_OUT" | sed -n '/^  Purpose$/{n;p;}')"
+expect_contains "STEP0-4 …the scale row carries the recommendation the plan recorded" \
+  "scale           wave — Several rows in one session. The ask names five files." "$FC_OUT"
+expect_eq "STEP0-5 …and the card ends on the configuration question" \
+  'Do you approve this configuration? Reply "approved" to approve it.' "$(printf '%s\n' "$FC_OUT" | tail -1)"
+expect_eq "STEP0-6 rendered for the session's own run, it opens the person's approve:step0 item" "approve:step0" "$(fc_owed)"
+# AC-20.2, the doctrine: a clean run has five human stops, the configuration card first; nothing still says four.
+# Each count beside a positive count of the same grep over the same file.
+FC_SK="${BIONIC_SKILLS_DIR}/canonical-sdlc"
+fc_count() { /usr/bin/grep -c -- "$1" "$2" 2>/dev/null | tr -d ' '; }  # <fixed text> <file> -> lines carrying it
+expect_eq "STEP0-7 SKILL.md names five human stops and never four" "1|0" \
+  "$(fc_count 'five human stops' "$FC_SK/SKILL.md")|$(fc_count 'four human stops' "$FC_SK/SKILL.md")"
+expect_eq "STEP0-8 steps/0.md puts card.sh step0 and never says four human stops" "1|0" \
+  "$(fc_count 'card.sh step0' "$FC_SK/steps/0.md")|$(fc_count 'four human stops' "$FC_SK/steps/0.md")"
+expect_eq "STEP0-9 steps/1.md puts card.sh step1, never says four human stops, and pictures no Configuration" "1|0|0" \
+  "$(fc_count 'card.sh step1' "$FC_SK/steps/1.md")|$(fc_count 'four human stops' "$FC_SK/steps/1.md")|$(fc_count 'Configuration' "$FC_SK/steps/1.md")"
+
 finish
