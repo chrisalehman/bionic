@@ -14,7 +14,7 @@
 # the reuse test matches on it, never on the commit: §REUSE.
 # SECTIONS: §EVENTS, §FOLD, §TREES (the pieces); §SAME, §PAIR, §BUSY, §MOVED, §GIT, §GUARD (the
 # criteria). The carrier (wave-28 T4; AC-1.1, AC-1.2, AC-1.5 to AC-1.7, AC-3.1, AC-14.1 ready half):
-# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY; a suite the row removed is not owed (wave-39 T6): §ABSENT; a suite whose narrowed reads miss the diff is skipped on the head's green, and planted reds inside and outside a narrowed read land RED (wave-39 T4): §SKIP, §PLANT; a line re-ordered under an entry keeps its verdicts across both rebuilds (wave-39 T2): §REORDER. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
+# §READY, §PROOF, §RED, §AHEAD-RED, §SIDE, §ALONE, §WITHIN, §GUARD (ready half); the anchor check at every landing (wave-35 T3): §ANCHORS. The drain (wave-37 T1; D3): §DRAIN, §GRAMMAR; the drain asks the gate (wave-38 T6; D21, D22): §ADMITTED, §ASK, §STALL; the oldest landing keeps its place (wave-38 T30; D22): §GAP, §ORDER; every WAITING says why (wave-38 T31; D21, D22): §WHY; a suite the row removed is not owed (wave-39 T6): §ABSENT; a suite whose narrowed reads miss the diff is skipped on the head's green, and planted reds inside and outside a narrowed read land RED (wave-39 T4): §SKIP, §PLANT; a line re-ordered under an entry keeps its verdicts across both rebuilds (wave-39 T2): §REORDER; land --by-hand meets the declared release check in line_publish, pinned by a mutant (wave-39 T13): §LAND-RC-HAND. Mutants run in the publisher's own process (`LL_MUTANT`, a sed over `declare -f
 # line_publish`), never on the tracked file, and stay as permanent guards that the rows can fail.
 set -uo pipefail
 
@@ -2899,5 +2899,67 @@ LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=reads_hashes ll_drive "$RPM" T2 "$WORLD_ROO
 ll_wait_file "$WORLD_ROOT/plm-T2.out.rc" 600
 expect_eq "(pl3m) MUTANT span keyed by name: a and b skipped, the planted red lands (exit 0, the rows can fail)" "0 2" \
   "$(cat "$WORLD_ROOT/plm-T2.out.rc" 2>/dev/null) $(grep -c '^skip ' "$WORLD_ROOT/plm-T2.out" 2>/dev/null)"
+
+section "§LAND-RC-HAND: land --by-hand meets the declared release check in line_publish: a planted name refuses it, and a mutant without the check publishes it (wave-39 T13; REQ-9 AC-9.2, AC-9.3; D14)"
+#
+# The hand landing's one publish is `line_publish`, the queue's own; its step 5 runs the project's declared
+# `release-check:` over the accepted head..candidate before the fast-forward (research-record-debt.md §4: the
+# check has stood there since 7c70873f, and nothing pinned it on this route). The check here is the real
+# name scan (tests/lib/name-scan.sh) over a list kept outside every checkout; T2's tree commits the planted
+# name. The verb itself is refused; the same landing through a driver that runs `line_land_by_hand` as
+# cmd_land does is refused too (the control), and with LL_MUTANT deleting the check from line_publish in
+# the driver's own process it publishes the planted blob, so these rows can fail. SYNTHESIZED: the string.
+LLR_NAME="zq-landhand-7741"
+LLR_LISTS="$WORLD_ROOT/rc-lists"; mkdir -p "$LLR_LISTS"; printf '%s\n' "$LLR_NAME" > "$LLR_LISTS/planted"
+ll_rcworld() {  # -> a world that declares the real name scan as its release-check and whose T2 commits the planted name
+  local r
+  r="$(ll_world)" || return 1
+  printf 'release-check: bash %s %s\n' "$REPO/tests/lib/name-scan.sh" "$LLR_LISTS/planted" >> "$r/.bionic/config.yaml"
+  printf 'see %s\n' "$LLR_NAME" > "$r/.worktrees/T2/planted.txt"
+  git -C "$r/.worktrees/T2" add planted.txt && git -C "$r/.worktrees/T2" commit -qm "T2: planted" || return 1
+  printf '%s' "$r"
+}
+LL_HD="$WORLD_ROOT/hand-driver.sh"
+cat > "$LL_HD" <<'HD'
+#!/bin/bash
+# <lib dir> <tree> <why>: `land <tree> --by-hand` as spawn-worktree.sh's cmd_land calls it, in a process of
+# its own; LL_MUTANT is a sed over line_publish, which the hand landing's subshell inherits.
+. "$1/worktree.sh" && . "$1/session.sh" && . "$1/line.sh" || exit 99
+if [ -n "${LL_MUTANT:-}" ]; then eval "$(declare -f line_publish | sed "$LL_MUTANT")"; fi
+line_land_by_hand "$2" "$(worktree_root "$2")" "$(session_id)" "$3"
+HD
+ll_hand() {  # <root> [driver] -> LL_OUT, LL_RC: T2 landed by hand, by the verb or through the driver
+  if [ -n "${2:-}" ]; then
+    LL_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$LL_HD" "$REPO/payload/scripts/lib" "$1/.worktrees/T2" gathered 2>&1 )"; LL_RC=$?
+  else
+    LL_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$1/.worktrees/T2" --by-hand --reason gathered 2>&1 )"; LL_RC=$?
+  fi
+}
+expect_false "(rh0) precondition: the list directory is outside every checkout" git -C "$LLR_LISTS" rev-parse --git-dir
+
+RR="$(ll_rcworld)"; HR="$(ll_head "$RR")"
+RR_C="$(git -C "$RR/.worktrees/T2" rev-parse HEAD)"; RR_BLOB="$(git -C "$RR/.worktrees/T2" rev-parse HEAD:planted.txt | cut -c1-12)"
+expect_regex "(rh0b) precondition: the world is built, its branch a 40-hex head" '^[0-9a-f]{40}$' "$HR"
+ll_hand "$RR"
+expect_eq "(rh1) AC-9.2 land --by-hand with a planted name in its range is refused (exit 2) and the branch does not move" \
+  "2 $HR" "$LL_RC $(ll_head "$RR")"
+expect_contains "(rh1b) …the refusal is the declared check's" "REFUSED reason=check-failed why=release-check" "$LL_OUT"
+expect_contains "(rh1c) …naming the hit by its blob" "HIT entry=1 at blob $RR_BLOB line 1" "$LL_OUT"
+expect_contains "(rh1d) AC-9.3 …and the commit and path that brought it" "  in commit ${RR_C:0:12} path planted.txt" "$LL_OUT"
+expect_eq "(rh1e) …and no published event for T2" "0" "$(ll_ev "$RR" published | grep -c '|row=T2|')"
+expect_eq "(rh1f) …and nothing it printed holds the planted name" "0" "$(printf '%s\n' "$LL_OUT" | grep -c -i -F "$LLR_NAME")"
+
+RRD="$(ll_rcworld)"; HRD="$(ll_head "$RRD")"
+ll_hand "$RRD" driver
+expect_eq "(rh2) the driver, unmutated, is refused as the verb is (control): exit 2, the branch unmoved" "2 $HRD" "$LL_RC $(ll_head "$RRD")"
+expect_contains "(rh2b) …by the declared check" "REFUSED reason=check-failed why=release-check" "$LL_OUT"
+RRM="$(ll_rcworld)"; HRM="$(ll_head "$RRM")"
+export LL_MUTANT='/_wt_release_check /d'
+ll_hand "$RRM" driver
+unset LL_MUTANT
+expect_ne "(rh2m) MUTANT the check deleted from line_publish: the hand landing is not refused (the row can fail)" \
+  "2 $HRM" "$LL_RC $(ll_head "$RRM")"
+expect_eq "(rh2m) …the branch now holds the planted blob" "$RR_BLOB" \
+  "$(git -C "$RRM" rev-parse refs/heads/wave/x:planted.txt 2>/dev/null | cut -c1-12)"
 
 finish

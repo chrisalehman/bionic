@@ -5931,6 +5931,96 @@ FINDING_READ
   return 0
 }
 
+# THE LAST RELEASE (wave-27 T31; review pass 22 S2; one function since wave-39 T13, read by the release-check verb and
+# by the hand landing's scan): release_base <plan> <checkout> <head> sets RB_BASE, the 40-hex start of the release range,
+# and RB_FROM saying where it came from (`tag <t> on <branch>` | `base-sha <s>`), and RB_IB and RB_BS for a refusal to
+# name; 1 when there is none. The nearest tag reachable from the plan's `integration-branch:` that is a PROPER ancestor
+# of <head> (the fewest commits from it to <head>): a tag on <head>, or on a commit not on its history, is no base, for
+# the range it opens would hold nothing or the wrong thing. With none, the plan's `base-sha:` (lib/proof.sh
+# `proof_plan_base`, which the caller has loaded).
+release_base() {  # <plan> <checkout> <head>
+  local plan="$1" co="$2" head="$3" t tc tn best=""
+  RB_BASE=""; RB_FROM=""; RB_BS=""
+  RB_IB="$(plan_frontmatter_get "$plan" integration-branch 2>/dev/null)"
+  if [ -n "$RB_IB" ]; then
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      tc="$(git -C "$co" rev-parse --verify -q "refs/tags/$t^{commit}" 2>/dev/null)" || continue
+      [ "$tc" != "$head" ] || continue
+      git -C "$co" merge-base --is-ancestor "$tc" "$head" 2>/dev/null || continue
+      tn="$(git -C "$co" rev-list --count "$tc..$head" 2>/dev/null)" || continue
+      if [ -z "$best" ] || [ "$tn" -lt "$best" ]; then
+        best="$tn"; RB_BASE="$tc"; RB_FROM="tag $t on $RB_IB"
+      fi
+    done <<RB_TAGS
+$(git -C "$co" tag --merged "refs/heads/$RB_IB" 2>/dev/null)
+RB_TAGS
+  fi
+  if [ -z "$RB_BASE" ]; then
+    RB_BS="$(proof_plan_base "$plan" "$co")"
+    [ -z "$RB_BS" ] || RB_BASE="$(git -C "$co" rev-parse --verify -q "$RB_BS^{commit}" 2>/dev/null)"
+    RB_FROM="base-sha $RB_BS"
+  fi
+  [ -n "$RB_BASE" ]
+}
+
+# THE HAND LANDING'S SCAN (wave-39 T13; REQ-9 AC-9.1, AC-9.3; D14). `row-landed --by-hand` marks a landing no line
+# made: wave 38 fast-forwarded fourteen rows by hand and marked each so, a route that ran no check, and the private
+# name that reached history through it cost a rewrite of 99 commits (A-orch-71, A-orch-78; D32). With `release-check:`
+# declared in `.bionic/config.yaml`, the mark is written only when the commit is held: by a passing `kind=check` proof
+# at it or at a commit that holds it (lib/proof.sh `proof_check_passes`, the last check line at each head deciding
+# it), else by the declared check itself, run as the release-check verb runs it (its words split on blanks, globbing
+# off) over the release range, `release_base` to the commit, in the checkout of the plan's working branch (the
+# project root when none holds it), with BIONIC_CHECK_BRANCH naming that branch for the rewrite a hit prints
+# (tests/lib/name-scan.sh). A check that exits non-zero refuses: its output is printed, each hit with the commit and
+# path that brought it and its fix, and the plan is unchanged. A commit the base already holds is in a release and
+# is not scanned again. With no key nothing runs. The `line_publish` route ran the check over its own range before
+# its fast-forward and then calls this verb, so a hand landing through `land --by-hand` meets it twice; the second
+# run sees the whole release range, which the first did not. Exits on a refusal; returns when the mark may be written.
+row_landed_scan() {
+  local cmd wb co p out rc
+  cmd="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
+  [ -n "$cmd" ] || return 0
+  if ! { declare -F proof_check_passes >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_check_passes >/dev/null 2>&1; then
+    die "REFUSED — row-landed --by-hand: the declared release-check cannot be judged, for the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
+  wb="$(plan_working_branch "$PV_PLAN")"
+  co=""; [ -z "$wb" ] || co="$(proof_checkout "$PV_REPO" "$wb")" || co=""
+  [ -n "$co" ] || co="$PV_REPO"
+  if ! git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" >/dev/null 2>&1; then
+    die "REFUSED — row-landed --by-hand: $RL_COMMIT is no commit in $co, so the declared release-check has nothing to run over; the plan is unchanged."
+    exit 1
+  fi
+  for p in $(proof_check_passes "$PV_PLAN" "$co"); do
+    if git -C "$co" merge-base --is-ancestor "$RL_COMMIT" "$p" 2>/dev/null; then
+      say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
+      return 0
+    fi
+  done
+  if ! release_base "$PV_PLAN" "$co" "$RL_COMMIT"; then
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) has no range to run over: no tag reachable from the plan's integration-branch (${RB_IB:-none named}) is a proper ancestor of $RL_COMMIT and its base-sha (${RB_BS:-none}) is no commit here; name the last release as the plan's base-sha, or tag it. The plan is unchanged."
+    exit 1
+  fi
+  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$RL_COMMIT" 2>/dev/null)" = 0 ]; then
+    say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
+    return 0
+  fi
+  out="$(cd "$co" 2>/dev/null || exit 1
+    set -f
+    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$RL_COMMIT" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
+    # shellcheck disable=SC2086  # the configured command is meant to split on blanks
+    exec $cmd </dev/null 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ -z "$out" ] || printf '%s\n' "$out"
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) exited $rc over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${RL_COMMIT:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
+    exit 1
+  fi
+  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM)."
+  return 0
+}
+
 deferral_sentence() {  # <plan> <record>#<n> -> the stated sentence, unescaped (nothing when none); exit 1: no deferred: line
   local l
   l="$(deferral_line "$1" "$2")" || return 1
@@ -10341,6 +10431,7 @@ EOF
     fi
     plan_verb_open row-landed
     [ "$VERB" != deliver ] || deliver_check
+    [ "$RL_HAND" -eq 0 ] || row_landed_scan
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
@@ -12648,27 +12739,8 @@ DSP_READINGS
       die "REFUSED — the working checkout $RC_CO has uncommitted changes, so the check would not read the head $RC_HEAD alone; commit them and run release-check again. Nothing was run and the plan is unchanged."
       exit 1
     fi
-    RC_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch 2>/dev/null)"
-    RC_BASE=""; RC_FROM=""; RC_BEST=""
-    if [ -n "$RC_IB" ]; then
-      while IFS= read -r RC_TAG; do
-        [ -n "$RC_TAG" ] || continue
-        RC_TC="$(git -C "$RC_CO" rev-parse --verify -q "refs/tags/$RC_TAG^{commit}" 2>/dev/null)" || continue
-        [ "$RC_TC" != "$RC_HEAD" ] || continue
-        git -C "$RC_CO" merge-base --is-ancestor "$RC_TC" "$RC_HEAD" 2>/dev/null || continue
-        RC_TN="$(git -C "$RC_CO" rev-list --count "$RC_TC..$RC_HEAD" 2>/dev/null)" || continue
-        if [ -z "$RC_BEST" ] || [ "$RC_TN" -lt "$RC_BEST" ]; then
-          RC_BEST="$RC_TN"; RC_BASE="$RC_TC"; RC_FROM="tag $RC_TAG on $RC_IB"
-        fi
-      done <<RC_TAGS
-$(git -C "$RC_CO" tag --merged "refs/heads/$RC_IB" 2>/dev/null)
-RC_TAGS
-    fi
-    if [ -z "$RC_BASE" ]; then
-      RC_BS="$(proof_plan_base "$PV_PLAN" "$RC_CO")"
-      [ -z "$RC_BS" ] || RC_BASE="$(git -C "$RC_CO" rev-parse --verify -q "$RC_BS^{commit}" 2>/dev/null)"
-      RC_FROM="base-sha $RC_BS"
-    fi
+    release_base "$PV_PLAN" "$RC_CO" "$RC_HEAD"
+    RC_IB="$RB_IB"; RC_BASE="$RB_BASE"; RC_FROM="$RB_FROM"; RC_BS="$RB_BS"
     if [ -z "$RC_BASE" ]; then
       die "REFUSED — no tag reachable from the plan's integration-branch (${RC_IB:-none named}) is a proper ancestor of the working head and its base-sha (${RC_BS:-none}) is no commit here, so the release range has no start; nothing was run and the plan is unchanged."
       exit 1

@@ -76,7 +76,8 @@ set +x +v
 # NO ENTRY IS EVER PRINTED OR WRITTEN, and none is a word of any command line or a variable
 # of any child's environment: entries reach the matcher and git by file descriptor or stdin,
 # written by the builtin printf. A hit is `HIT entry=<line number> at <where>`, and <where> is
-# numbers and object ids alone, never text from the repository:
+# numbers and object ids alone, never text from the repository (the lines under a blob's hits,
+# below, print a path or a branch only when the batch pattern finds no entry in it):
 #   blob <sha12> line <n>     <n> is the count of newlines before the match plus one (the line
 #                             the match starts on), in a binary blob as in a text one
 #   path #<n>                 the path's 1-based position in `git ls-tree -r --name-only` order
@@ -84,6 +85,18 @@ set +x +v
 #   path in commit <sha12>    a path only the range holds, at the first commit that names it
 #   commit <sha12> message | author | committer
 #   tag <sha12>               the tag object, or the commit a lightweight tag names
+# UNDER A BLOB'S HITS, WHERE IT CAME FROM AND ITS FIX (wave-39 T13; AC-9.3, D32): one line
+#   `  in commit <sha12> path <p>`, the range commit that first brought the blob at <p> (`git log
+#   --raw`, oldest first), else the head, whose tree holds it; then, when the head's tree holds
+#   the blob, `  fix: take the hit out of <p>, …`, and when it does not, the blob lives in history
+#   alone and no commit removes it: `  rewrite (D32): git filter-branch --tree-filter '<take the
+#   hit out of <p>>' -- <sha12>^..<branch> && …`, the rewrite and cleanup D32 ran (assumptions
+#   A-orch-81), over the whole branch when <sha12> is a root commit. <branch> is
+#   BIONIC_CHECK_BRANCH, else the head's own branch when the head names one, else the slot
+#   `<branch>`. <p> is printed bare, or quoted with octal escapes when it holds a byte outside
+#   printable ASCII, and never when it may hold an entry (the batch pattern finds one in it): then
+#   `#<n>`, its position at the head, or `withheld (it holds an entry)`. A branch name that may hold
+#   an entry is the slot too.
 # Records are split on NUL or by length, never on a byte a path or a message can hold. The
 # first command turns tracing off; BASH_ENV and ENV are unset so nothing this starts reads
 # them, every git trace variable is unset as a second line of defence, and so are the perl
@@ -115,9 +128,11 @@ refuse() { checkpoint; echo "name-scan: $*" >&2; exit 2; }
 
 # ---- the matcher ------------------------------------------------------------------------------
 #
-# perl -e "$MATCHER" <list fd> <head paths> <range log> <tags> <object count>, objects on stdin
-# from `git cat-file --batch`. The list fd holds `<line number>\0<entry>\0` pairs. Prints one
-# HIT line per entry per place; exit 0 none, 1 found, 2 something could not be read whole.
+# perl -e "$MATCHER" <list fd> <head paths> <range log> <tags> <object count> <head tree> <context>,
+# objects on stdin from `git cat-file --batch`. The list fd holds `<line number>\0<entry>\0` pairs;
+# <head tree> is `git ls-tree -r -z` at the head; <context> holds `head <sha>`, `branch <name>` and
+# `root <sha>` lines. Prints one HIT line per entry per place, and under a blob's hits where it came
+# from; exit 0 none, 1 found, 2 something could not be read whole.
 MATCHER='
 use strict; use feature "fc"; use Encode ();
 $SIG{__WARN__} = sub { print STDERR "name-scan: the matcher warned\n" };
@@ -129,7 +144,7 @@ sub slurp {
   defined $d ? $d : "";
 }
 sub fold { fc(Encode::decode("UTF-8", $_[0])) }
-my ($listf, $pathsf, $logf, $tagsf, $want) = @ARGV;
+my ($listf, $pathsf, $logf, $tagsf, $want, $treef, $ctxf) = @ARGV;
 my @kv = split /\0/, slurp($listf, "the list");
 # an entry is its words, each literal. Between two of them lies a GAP, matched by THE RULE (plan
 # T65): EITHER horizontal white space on one line, OR a side, exactly one line break (anything \R
@@ -206,6 +221,55 @@ my $any = join "|", @fp;
 $any = qr/(?:$any)(?(DEFINE)(?<ws>$gap))/;
 my ($hits, %seen) = (0);
 sub hit { return if $seen{"$_[0] $_[1]"}++; print "HIT entry=$_[0] at $_[1]\n"; $hits++ }
+# WHERE A BLOB CAME FROM (wave-39 T13; AC-9.3): %intro, the first range commit and path that bring a
+# blob (the range log, below); %athead, its position and path in the tree at the head; %root, the root
+# commits. A path or a branch is printed only when the batch pattern finds no entry in it.
+my (%intro, %athead, %root);
+my ($headc, $branch) = ("?", "<branch>");
+for my $l (split /\n/, slurp($ctxf, "the context")) {
+  my ($k, $v) = split / /, $l, 2;
+  next unless defined $v;
+  if ($k eq "head") { $headc = substr($v, 0, 12) }
+  elsif ($k eq "root") { $root{substr($v, 0, 12)} = 1 }
+  elsif ($k eq "branch") { $branch = $v unless fold($v) =~ $any }
+}
+my $k = 0;
+for my $r (split /\0/, slurp($treef, "the head tree")) {
+  $k++;
+  my ($meta, $p) = split /\t/, $r, 2;
+  my (undef, $ty, $id) = split / /, $meta;
+  $athead{substr($id, 0, 12)} //= [$k, $p] if defined $p && $ty eq "blob";
+}
+sub shown {  # <path> -> as printed; undef when it may hold an entry
+  my ($p) = @_;
+  return undef if fold($p) =~ $any;
+  return $p if $p =~ m{^[A-Za-z0-9._/+@,=~-]+\z};
+  (my $q = $p) =~ s/([\\"])/\\$1/g;
+  $q =~ s/([^\x20-\x7e])/sprintf("\\%03o", ord $1)/ge;
+  return "\"$q\"";
+}
+sub place {  # <blob sha12>: under its hits, the commit and path that brought it, and its fix
+  my ($o) = @_;
+  my ($c, $p) = $intro{$o} ? @{$intro{$o}} : ();
+  my $h = $athead{$o};
+  ($c, $p) = ($headc, $h->[1]) if !defined $c && $h;
+  if (!defined $c) { print "  in no commit the range log names (git log --all --find-object=$o)\n"; return }
+  my $s = shown($p);
+  my $held = $h && $h->[1] eq $p;
+  my $at = defined $s ? $s : $held ? "#$h->[0]" : "withheld (it holds an entry)";
+  my $what = defined $s ? $s : $held ? "the path at #$h->[0]" : "the withheld path";
+  print "  in commit $c path $at\n";
+  if ($h) {  # the head holds it: a commit takes it out of the path at the head; a copy in history is named by the next scan
+    my $hs = shown($h->[1]);
+    print "  fix: take the hit out of ", (defined $hs ? $hs : "the path at #$h->[0]"), ", commit, and scan again\n";
+    return;
+  }
+  my $range = $root{$c} ? $branch : "$c^..$branch";
+  print "  rewrite (D32): git filter-branch --tree-filter \x27<take the hit out of $what>\x27 -- $range"
+    . " && git for-each-ref --format=\x27delete %(refname)\x27 refs/original | git update-ref --stdin"
+    . " && git reflog expire --expire=now --all && git gc --prune=now;"
+    . " the same for every other branch that holds $c (git branch -a --contains $c), then scan again\n";
+}
 # look <bytes> <where> <lines>: all entries at once first; the entry and line only after a find.
 # Each place the superset finds is tried by the exact patterns, anchored; a place they refuse is
 # stepped over by one character. A line is counted on from the previous place, over the text
@@ -249,6 +313,7 @@ while ($i < @t) {
   bail("the range path list cannot be parsed")
     unless $c ne "" && $i < @t && $tok =~ /^:[0-7]+ [0-7]+ [0-9a-f]+ [0-9a-f]+ [ADMTUX]$/;
   my $p = $t[$i++];
+  if ($tok =~ / ([0-9a-f]+) [ADMTUX]$/) { my $o = substr($1, 0, 12); $intro{$o} //= [$c, $p] if $o =~ /[1-9a-f]/ }
   next if $path{$p}++;
   look($p, "path in commit $c", 0);
 }
@@ -274,6 +339,7 @@ while (defined(my $h = <STDIN>)) {
   my $nl = "";
   bail("object $sha cannot be read whole") unless read(STDIN, $nl, 1) == 1 && $nl eq "\n";
   $got++;
+  my $had = $hits;
   if ($type eq "blob") { look($d, "blob $sha", 1); }
   elsif ($type eq "commit") {
     my ($hd, $msg) = parts($d);
@@ -300,6 +366,7 @@ while (defined(my $h = <STDIN>)) {
       }
     }
   }
+  place($sha) if $type eq "blob" && $hits > $had;
 }
 bail("read $got of $want objects") unless $got == $want;
 exit($hits ? 1 : 0);
@@ -313,13 +380,20 @@ entries_stream() {
 
 # ---- the one scan: everything a push of <base>..<head> publishes, in one matcher pass --------
 #
-# scan_repo <repo> <base sha or ""> <head sha> <work dir> — prints the HIT lines; exit 0 none,
+# scan_repo <repo> <base sha or ""> <head sha> <work dir> [<branch>] — prints the HIT lines, and under
+# a blob's hits where it came from and its fix, a rewrite naming <branch> (wave-39 T13); exit 0 none,
 # 1 found, 2 a refusal (the matcher says what it could not read). The work dir holds only what
 # git printed (ids, paths, ref names), never an entry.
 scan_repo() {
-  local repo="$1" base="$2" head="$3" w="$4" n
+  local repo="$1" base="$2" head="$3" w="$4" branch="${5:-}" n
   mkdir -p "$w" || return 2
   git -C "$repo" ls-tree -r -z --name-only "$head" 2>/dev/null > "$w/paths" || return 2
+  # where a hit came from (wave-39 T13): the head's tree with its ids, and the head, the branch a
+  # rewrite runs over and the root commits, below which a rewrite cannot start
+  git -C "$repo" ls-tree -r -z "$head" 2>/dev/null > "$w/tree" || return 2
+  { printf 'head %s\n' "$head"
+    [ -z "$branch" ] || printf 'branch %s\n' "$branch"
+    git -C "$repo" rev-list --max-parents=0 "$head" 2>/dev/null | sed 's/^/root /'; } > "$w/context" || return 2
   # every path a range commit adds, changes or deletes, oldest commit first, merges against
   # each parent; `-z --raw` gives `<sha>\0` then `:<modes ids status>\0<path>\0` pairs
   git -C "$repo" -c log.showSignature=false log -z --raw --no-abbrev --no-color --format=%H \
@@ -346,7 +420,7 @@ scan_repo() {
     | sort -u > "$w/objects" || return 2
   n="$(wc -l < "$w/objects" | tr -d ' ')"
   git -C "$repo" cat-file --batch --buffer < "$w/objects" 2>/dev/null \
-    | perl -e "$MATCHER" <(entries_stream) "$w/paths" "$w/log" "$w/tags" "$n"
+    | perl -e "$MATCHER" <(entries_stream) "$w/paths" "$w/log" "$w/tags" "$n" "$w/tree" "$w/context"
   set -- "${PIPESTATUS[@]}"
   [ "$1" -eq 0 ] || return 2
   return "$2"
@@ -555,6 +629,14 @@ else
   [ -z "$BASE_TAG" ] || BASE_SHA="$(git -C "$REPO" rev-parse --verify -q "refs/tags/$BASE_TAG^{commit}")"
 fi
 
+# THE BRANCH A REWRITE RUNS OVER (wave-39 T13): BIONIC_CHECK_BRANCH, else the head's own branch when
+# the head names one (HEAD on a branch, or a branch name); a head given as a commit names none
+BRANCH="${BIONIC_CHECK_BRANCH:-}"
+if [ -z "$BRANCH" ]; then
+  BRANCH="$(git -C "$REPO" rev-parse --symbolic-full-name "${BIONIC_CHECK_HEAD:-HEAD}" 2>/dev/null)" || BRANCH=""
+  case "$BRANCH" in refs/heads/?*) BRANCH="${BRANCH#refs/heads/}" ;; *) BRANCH="" ;; esac
+fi
+
 # a signal never ends the run while a child can still write into the temp tree: an exit straight
 # from the signal let the EXIT trap remove the tree while a `git hash-object -w` inside a command
 # substitution was still running, and git made the object's directories again (T61: 5 runs in 50
@@ -571,7 +653,7 @@ checkpoint
 prove_power "$TMP_SCAN/power"
 checkpoint
 
-scan_repo "$REPO" "$BASE_SHA" "$HEAD_SHA" "$TMP_SCAN/scan" > "$TMP_SCAN/hits"; rc=$?
+scan_repo "$REPO" "$BASE_SHA" "$HEAD_SHA" "$TMP_SCAN/scan" "$BRANCH" > "$TMP_SCAN/hits"; rc=$?
 checkpoint
 [ "$rc" -le 1 ] || refuse "the scan could not read everything the push would publish"
 cat "$TMP_SCAN/hits"
