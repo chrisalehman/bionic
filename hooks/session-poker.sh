@@ -6400,6 +6400,13 @@ SWEEP_SCHEMA="poker-sweep/v1"
 #
 #   <row> <kind> ready=<ISO|-> landed=<ISO> minutes=<m|-> runs=<n> waited=<s>s|- wait=<m|-> prove=<m|-> rework=<m|-> width=<J|->
 #
+#   and under a row, one line per counted run whose verdict carries promised= or actual= (wave-39 T8; D11, AC-4.2):
+#
+#     <suite> <result> promised=<s>s|- actual=<s>s|- ratio=<actual over promised, %.2f>|-
+#
+#   indented two spaces, in the record's order, `-` for a field the verdict holds as `-` or lacks, and the ratio `-`
+#   then or over a promise of 0. A verdict written before wave 39 carries neither field and prints no line.
+#
 # THE REPORT READS ADMISSION (wave-38 T7; D22, REQ-6 AC-6.4; it replaces wave-37 T9's ready/candidate/verdict split,
 # whose prove carried the queue time between a candidate and its runs' admission). Over a queue landing's window, the
 # row's first `ready` since it last landed to its `published`, in minutes (%.1f):
@@ -6535,6 +6542,12 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     ev == "verdict" {
       if ((g in hasc) && !((g SUBSEP kv["commit"]) in ownc)) next
       res = kv["result"]; cnt[res]++; nrun[rk]++
+      # THE PROMISE AND THE ACTUAL (wave-39 T8; D11, AC-4.2): one line per counted run that carries either field.
+      if (("promised" in kv) || ("actual" in kv)) {
+        vp = (num(kv["promised"]) ? kv["promised"] : "-"); va = (num(kv["actual"]) ? kv["actual"] : "-")
+        vr = ((vp != "-" && va != "-" && vp + 0 > 0) ? sprintf("%.2f", va / vp) : "-")
+        sv[rk] = sv[rk] sprintf("  %s %s promised=%s actual=%s ratio=%s\n", kv["suite"], res, (vp == "-" ? "-" : vp "s"), (va == "-" ? "-" : va "s"), vr)
+      }
       # THE ADMISSION (wave-38 T7): the run was admitted from admitted= to this verdict; no field at all makes the row uncomputable.
       if (!("admitted" in kv)) noad[rk] = 1
       else if (num(kv["admitted"])) {
@@ -6548,6 +6561,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     ev == "published" {
       k = kv["kind"]; kinds[k]++; n++
       prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pruns[n] = nrun[rk] + 0
+      psv[n] = sv[rk]
       pfrom[n] = ((rk in rdy) ? rdy[rk] : "")
       if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
       # THE REPORT READS ADMISSION (wave-38 T7; AC-6.4), over the window [first ready, published].
@@ -6568,6 +6582,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         if (rk in wd) pwd[n] = wd[rk]
       }
       delete rdy[rk]; nrun[rk] = 0; delete fc[rk]; delete wd[rk]; delete noad[rk]; nad[rk] = 0; nrw[rk] = 0
+      delete sv[rk]
       gen[rk]++
     }
     END {
@@ -6584,6 +6599,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
         if (r in pmin) { rd = iso[pfrom[r]]; mn = sprintf("%.1f", pmin[r]) }
         printf "%s %s ready=%s landed=%s minutes=%s runs=%d waited=%s wait=%s prove=%s rework=%s width=%s\n",
           prow[r], pk[r], rd, pat[r], mn, pruns[r], pws[r], pw[r], pp[r], prw[r], pwd[r]
+        if (psv[r] != "") printf "%s", psv[r]
       }
       if (mal) printf "#malformed %d\n", mal
     }' phase=0 - phase=1 "$rec")"

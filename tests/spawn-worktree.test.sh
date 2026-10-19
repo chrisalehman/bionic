@@ -1137,17 +1137,22 @@ RDB="$(rd_world)"
 ( cd "$RDB" && world_cost a.test.sh 600 )
 rd_ready "$RDB/.worktrees/T1" --within 60
 expect_eq "a suite promising more seconds than are left: exit 75" "75" "$RD_RC"
+# THE PROMISE, PRINTED (wave-39 T8; D11, AC-4.3; A-orch-14): under --within, ready's first line is the seconds its
+# suites promise against the bound; the verdict lines are read by what they say, never by position.
+expect_eq "…its first line the promise against the bound: promised 600s of 60s (wave-39 T8)" \
+  "promised 600s of 60s" "$(printf '%s\n' "$RD_OUT" | sed -n 1p)"
 expect_eq "…printing WAITING and the same command, exactly" \
-  "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$RD_OUT" | sed -n 1p)"
+  "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$RD_OUT" | grep '^WAITING ' | head -n 1)"
 expect_eq "…then why it waits, on the line after (T31)" \
-  "waiting: suite a.test.sh promises 600s and 60s are left in --within 60" "$(printf '%s\n' "$RD_OUT" | sed -n 2p)"
+  "waiting: suite a.test.sh promises 600s and 60s are left in --within 60" \
+  "$(printf '%s\n' "$RD_OUT" | awk '/^WAITING / { if ((getline n) > 0) print n; exit }')"
 expect_contains "…the entry kept on the line" "|ev=ready|row=T1|" "$(cat "$(rd_rec "$RDB")" 2>/dev/null)"
 expect_absent "…and no suite run" "ev=verdict" "$(cat "$(rd_rec "$RDB")" 2>/dev/null)"
 rd_ready "$RDB/.worktrees/T1" --within 900
 expect_eq "the same command with the time: LANDED (exit 0)" "0" "$RD_RC"
 expect_match "…printing LANDED, then the owed line" \
   "LANDED T1 *
-landed T1 * — owed: complete task T1, then stop wx-T1" "$RD_OUT"
+landed T1 * — owed: complete task T1, then stop wx-T1" "$(printf '%s\n' "$RD_OUT" | grep -v '^promised ')"
 expect_eq "…and the working branch moved to the landed commit" \
   "$(git -C "$RDB" rev-parse wave/x)" "$(printf '%s\n' "$RD_OUT" | sed -n 's/^LANDED T1 //p')"
 
@@ -1192,7 +1197,7 @@ expect_eq "SD.4 the stamp reader (_wt_stale_proof) judges it proof (rc 1), print
   "$(printf '%s\nrc=1' "$SDA_STAMP")" "$SDA_PROOF"
 rd_ready "$SDA_T1" --within 900
 expect_eq "SD.5 ready accepts it: LANDED (exit 0)" "0" "$RD_RC"
-expect_match "SD.6 …printing LANDED" "LANDED T1 *" "$RD_OUT"
+expect_match "SD.6 …printing LANDED" "LANDED T1 *" "$(printf '%s\n' "$RD_OUT" | grep -v '^promised ')"
 
 SDB="$(rd_world)"
 expect_nonempty "(fixture) the red world was made" "$SDB"

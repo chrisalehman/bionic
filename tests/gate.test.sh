@@ -39,6 +39,11 @@
 #                      contended run: with three kept durations the largest at or below twice
 #                      their median (285, 300, 1775 promises 300, and `_line_time_for` fits it in
 #                      1700); with fewer, the largest (1775 alone promises 1775)
+#   §PROMISE   D11, AC-4.1 (wave-39 T8) the promise carries its load: three cost lines at load 1.5 asked at
+#                      load 6 promise the median × 4 bounded by the largest kept; at 1.5 the median; the factor
+#                      clamped to 0.5..4, a load below one counted as one; a line with no load, or a load now that
+#                      cannot be read, is §ROBUST's promise; the admission's promise= and load=, the cost line it
+#                      writes, `_line_time_for` and `_line_time_why` read the one figure. Mutation: every factor 1
 #   §FINISHED  D22, AC-6.2 (wave-38 T31; A-orch-43) a landing's request records the row's window
 #                      (its lease's span) and its landing record at ask, and when it was handed back;
 #                      the scan ends a handed-back request whose row's record shows published,
@@ -59,7 +64,7 @@
 #   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once;
 #                      it holds no peak and writes no duration
 #   §COST      D12     (wave-33 T1; Δ10: durations only) gate_end's duration line,
-#                      <seconds>:<epoch>, three kept; the promise is the suite cost, no memory and the
+#                      <seconds>:<epoch>:<load> (wave-39 T8), three kept; the promise is the suite cost, no memory and the
 #                      key's longest kept duration; an unknown command's is one core and no
 #                      seconds; an overlapped run records its own seconds; a run's processor
 #                      work and memory are not recorded; an overlong run held until it ages out
@@ -969,6 +974,75 @@ plant_costs rb.test.sh 300 310 500
 expect_eq "RB.7 300, 310 and 500: 500 is within twice the median (620), so the promise is 500, never below a run in range" \
   "500" "$(secs_of rb.test.sh)"
 
+# ── §PROMISE ─────────────────────────────────────────────────────────────────
+# THE PROMISE CARRIES ITS LOAD (wave-39 T8; D11, REQ-4 AC-4.1). A cost line gains the load the run was
+# admitted under, `<seconds>:<epoch>:<load>` (the request's load= line, the gate's 1-minute reading at
+# admission). With three kept lines that all carry a load, the promise is the median of the durations, each
+# scaled by the load now over the load it was recorded under (a load below one counts as one; the factor
+# clamped to 0.5..4), bounded above by the largest kept. A line with no load scales by 1: until three loaded
+# lines exist the promise is §ROBUST's, as before. The load now is `_res_busy_cores`, pinned here by
+# BIONIC_PROBE_BUSY_CORES; the surfaces that read the promise (the admission's promise=, `_line_time_for`,
+# `_line_time_why`) read the one figure.
+section "§PROMISE — the median scaled by the load now over the load then, bounded by the largest kept (D11; AC-4.1)"
+plant_loaded() {  # <key> <load> <seconds>... — the key's cost file, one <seconds>:<epoch>:<load> line each
+  local k="$1" l="$2" f e=900 s
+  shift 2
+  f="$(costf "$k")"; mkdir -p "${f%/*}"; : > "$f"
+  for s in "$@"; do printf '%s:%s:%s\n' "$s" "$e" "$l" >> "$f"; e=$((e + 10)); done
+}
+secs_at() {  # <load now> <key> [<gate lib>] — gate_promise's seconds with the load reading pinned
+  ( export BIONIC_PROBE_BUSY_CORES="$1"; . "${3:-$GATE_LIB}" 2>/dev/null; gate_promise "$2" 2>/dev/null | awk -F: '{ print $NF }' )
+}
+fresh promise
+plant_loaded pm.test.sh 1.5 50 60 300
+expect_eq "PM.0 precondition: three kept lines, each recorded at load 1.5, newest last" "50:900:1.5 60:910:1.5 300:920:1.5" \
+  "$(tr '\n' ' ' < "$(costf pm.test.sh)" 2>/dev/null | sed 's/ $//')"
+expect_eq "PM.1 asked at the load they were recorded under (1.5): the median, 60" "60" "$(secs_at 1.5 pm.test.sh)"
+expect_eq "PM.2 AC-4.1 asked at load 6: the median × 4, 240 (under the largest kept, 300), not the 60 of load 1.5" "240" \
+  "$(secs_at 6 pm.test.sh)"
+expect_eq "PM.3 asked at load 3: double, 120 (the spec's ownership row)" "120" "$(secs_at 3 pm.test.sh)"
+plant_loaded pb.test.sh 1.5 100 120 140
+expect_eq "PM.4 AC-4.1 100, 120 and 140 at 1.5 asked at 6: the median × 4 (480) bounded by the largest kept, 140" "140" \
+  "$(secs_at 6 pb.test.sh)"
+expect_eq "PM.5 …and asked at 1.5, the median 120, not the largest" "120" "$(secs_at 1.5 pb.test.sh)"
+expect_eq "PM.6 the factor is clamped above at 4: asked at load 40, 240 as at 6" "240" "$(secs_at 40 pm.test.sh)"
+plant_loaded pd.test.sh 12 100 120 140
+expect_eq "PM.7 …and below at 0.5: recorded at 12, asked at 1, half the median, 60" "60" "$(secs_at 1 pd.test.sh)"
+plant_loaded pz.test.sh 0.2 100 120 140
+expect_eq "PM.8 a load below one counts as one: recorded at 0.2, asked at 0.5, the median, 120" "120" "$(secs_at 0.5 pz.test.sh)"
+PN_F="$(costf pn.test.sh)"; printf '100:900\n120:910:1.5\n140:920:1.5\n' > "$PN_F"
+expect_eq "PM.9 a line with no load scales by 1: one unloaded of three is §ROBUST's promise, 140, at load 6 as at 1.5" "140 140" \
+  "$(secs_at 6 pn.test.sh) $(secs_at 1.5 pn.test.sh)"
+expect_eq "PM.10 a load now that cannot be read is §ROBUST's promise too: 140" "140" \
+  "$( . "$GATE_LIB" 2>/dev/null; _gate_store >/dev/null 2>&1; _gate_seconds pb.test.sh "$(_gate_project)" - 2>/dev/null )"
+# THE SURFACES READ THE ONE FIGURE: the admission's promise=, the request's load= and the cost line it
+# writes, `_line_time_for` and `_line_time_why` (spec §3, the promise row).
+world_machine 8 8192 40 6.0
+HOLD=1 ask_bg pa work pm.test.sh 0; wait_for 20 has pa.rc
+PA_ID="$(id_of pa)"
+expect_eq "PM.11 an admission at load 6.0 is promised 240 s and records the load it was admitted under" "0|0:$PROMISE:240|6.0" \
+  "$(rc_of pa)|$(field "$PA_ID" promise)|$(field "$PA_ID" load)"
+world_tick 30
+release pa
+expect_eq "PM.12 its gate_end writes the cost line with that load: 30 s, at 1030, at load 6.0" "30:1030:6.0" \
+  "$(tail -n 1 "$(costf pm.test.sh)" 2>/dev/null)"
+plant_loaded pm.test.sh 1.5 50 60 300
+expect_eq "PM.13 _line_time_for at load 6 with 250 s left gives the gate 10 s (250 less 240)" "10 rc=0" \
+  "$(BIONIC_PROBE_BUSY_CORES=6 fit_in pm.test.sh 250)"
+expect_eq "PM.14 …and at load 1.5, 190 s (250 less 60)" "190 rc=0" "$(BIONIC_PROBE_BUSY_CORES=1.5 fit_in pm.test.sh 250)"
+expect_eq "PM.15 _line_time_why names the scaled promise" "suite pm.test.sh promises 240s and 250s are left in --within 250" \
+  "$( export BIONIC_PROBE_BUSY_CORES=6; . "$GATE_LIB" 2>/dev/null && . "$REPO_ROOT/payload/scripts/lib/line.sh" 2>/dev/null \
+      && _LINE_WITHIN=250 && _line_time_why pm.test.sh "$(( $(_res_now) + 250 ))" "$(pwd -P)" )"
+# MUTANT: the load dropped, every factor 1. The three then promise the same seconds at load 6 as at 1.5.
+MPL="$(mutant promise-load)"
+anchor file payload/scripts/lib/gate.sh 'f = nw / th'
+sed -i.bak 's#f = nw / th#f = 1#' "$MPL"
+expect_eq "PM.16 the mutant without the load still promises: at load 1.5, the median, 60 (positive)" "60" \
+  "$(secs_at 1.5 pm.test.sh "$MPL")"
+expect_eq "PM.17 the mutant at load 6 promises 60, where PM.2 reads 240 — the load is the rule" "60" \
+  "$(secs_at 6 pm.test.sh "$MPL")"
+world_machine 8 8192 40 1.0
+
 # ── §FINISHED ────────────────────────────────────────────────────────────────
 # A FINISHED ROW'S KEPT REQUESTS ARE ENDED (wave-38 T31; D22, AC-6.2; A-orch-43). A landing's run hands
 # its request back when its time runs out or it is sent TERM (holder=-), so the row's next ask keeps
@@ -1232,7 +1306,7 @@ expect_eq "D.5 it writes ended at 1030" "1030" "$(field "$c1_id" ended)"
 expect_eq "D.6 and the rc" "0" "$(field "$c1_id" rc)"
 expect_eq "D.7 cost/k keeps three lines: the oldest planted is now the second" "3 50:1000" \
   "$(wc -l < "$(costf k)" | tr -d ' ') $(head -n 1 "$(costf k)")"
-expect_eq "D.8 the newest is this run: 30 s, at 1030" "30:1030" "$PK_LINE"
+expect_eq "D.8 the newest is this run: 30 s, at 1030, at the load it was admitted under (1.0; wave-39 T8)" "30:1030:1.0" "$PK_LINE"
 expect_eq "D.9 the oldest planted line is gone" "0" "$(grep -c '^20:' "$(costf k)")"
 world_machine 8 8192 40 1.0
 HOLD=1 ask_bg c2 work never-seen 0; wait_for 20 has c2.rc
@@ -1249,7 +1323,7 @@ expect_eq "D.11 two runs are admitted side by side" "0 0" "$(rc_of o1) $(rc_of o
 BIONIC_PROBE_USED_PCT=70 state >/dev/null
 world_tick 10
 release o1; release o2
-expect_eq "D.12 an overlapped run records its own seconds, as any run does" "10:1010" "$(tail -n 1 "$(costf k)")"
+expect_eq "D.12 an overlapped run records its own seconds, as any run does" "10:1010:1.0" "$(tail -n 1 "$(costf k)")"
 fresh cost-cpu
 world_machine 8 8192 40 1.0
 world_cost k 20
@@ -1257,8 +1331,8 @@ WORK="awk 'BEGIN { for (i = 0; i < 3000000; i++) s += i }'" HOLD=1 ask_bg u1 wor
 wait_for 20 has u1.rc
 world_tick 1
 release u1
-expect_eq "D.13 a run that did processor work records its seconds and epoch only: no cores, no memory" \
-  "20:1000 1:1001" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
+expect_eq "D.13 a run that did processor work records its seconds, epoch and admission load only: no cores, no memory" \
+  "20:1000 1:1001:1.0" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
 # age_runs <gate lib> <name> — cost/k holds one overlong run (300 s); four 200 s runs follow. Sets
 # AGE to the four admissions' promised seconds. The runs are 200 s, within twice their median, so the
 # 300 is still a run in range (wave-38 T31, §ROBUST: an outlier past twice the median, such as 10 s
@@ -1330,8 +1404,8 @@ world_tick 2
 release z2
 expect_eq "Z.4 a run ended 2 s after its admission writes its end" "1000|1002" \
   "$(field "$z2_id" admitted)|$(field "$z2_id" ended)"
-expect_eq "Z.5 …and a duration line: 2 s, at 1002, after the planted one" \
-  "20:1000 2:1002" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
+expect_eq "Z.5 …and a duration line: 2 s, at 1002, at load 1.0, after the planted one" \
+  "20:1000 2:1002:1.0" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
 
 # ── §CORES-OVER ──────────────────────────────────────────────────────────────
 # A RUN'S PROCESSOR TIME IS NOT MEASURED (wave-33 T1; Δ10, which retires wave-32 T19's core-count
@@ -1352,8 +1426,8 @@ co1_id="$(id_of co1)"
 expect_eq "CO.1 a run whose children took 40 s over 2 s writes its end and rc" "1002|0" \
   "$(field "$co1_id" ended)|$(field "$co1_id" rc)"
 expect_eq "CO.2 gate_end exits 0" "0" "$(cat "$D/co1.endrc" 2>/dev/null)"
-expect_eq "CO.3 …and its duration, 2 s at 1002, after the planted line: no cores field" \
-  "20:1000 2:1002" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
+expect_eq "CO.3 …and its duration, 2 s at 1002 at load 1.0, after the planted line: no cores field" \
+  "20:1000 2:1002:1.0" "$(tr '\n' ' ' < "$(costf k)" | sed 's/ $//')"
 
 # ── §WHOLE-COST ──────────────────────────────────────────────────────────────
 # A WHOLE RUN IS PROMISED ITS WIDTH, AND NOTHING IT RECORDS MOVES ANOTHER'S PROMISE (wave-32 T26;
@@ -1388,7 +1462,7 @@ expect_eq "WC.5 the whole request was admitted at 1000 and ended at 1002 with rc
   "$(field "$wr_id" admitted)|$(field "$wr_id" ended)|$(field "$wr_id" rc)"
 expect_eq "WC.6 …promised its width, gate_width (6 at share 80 on 8), no memory, no seconds yet" "0:6:0" \
   "$(field "$wr_id" promise)"
-expect_eq "WC.7 its gate_end wrote one line, 2 s at 1002, unmarked" "2:1002" \
+expect_eq "WC.7 its gate_end wrote one line, 2 s at 1002 at load 1.0, unmarked" "2:1002:1.0" \
   "$(cat "$(costf tests/run.sh)" 2>/dev/null)"
 HOLD=1 ask_bg wa work a.test.sh 0; wait_for 20 has wa.rc
 expect_eq "WC.8 with the whole run on record, the work request for a.test.sh is admitted and held (rc)" "0" \
@@ -1575,12 +1649,12 @@ expect_regex "DU.1 each project has a key of its own: 8 hex digits, A's not B's"
   "$(pk_here "$PA") $(pk_here "$PB") $([ "$(pk_here "$PA")" != "$(pk_here "$PB")" ] && echo differ)"
 run_in "$PB" pb 2
 DU_B0="$(limit_in "$PB")"
-expect_eq "DU.2 project B's 2 s run of tests/run.sh wrote B's own file, seconds and epoch only" "2:1002" \
+expect_eq "DU.2 project B's 2 s run of tests/run.sh wrote B's own file, seconds, epoch and load (0) only" "2:1002:0" \
   "$(cat "$PKB_FILE" 2>/dev/null)"
 expect_eq "DU.3 …and B's time limit for tests/run.sh is 100 s less its 2 recorded" "98" "$DU_B0"
 run_in "$PA" pa 5
-expect_eq "DU.4 project A's 5 s run of tests/run.sh wrote A's own file" "5:1007" "$(cat "$PKA_FILE" 2>/dev/null)"
-expect_eq "DU.5 …B's file still holds B's one line" "2:1002" "$(cat "$PKB_FILE" 2>/dev/null)"
+expect_eq "DU.4 project A's 5 s run of tests/run.sh wrote A's own file" "5:1007:0" "$(cat "$PKA_FILE" 2>/dev/null)"
+expect_eq "DU.5 …B's file still holds B's one line" "2:1002:0" "$(cat "$PKB_FILE" 2>/dev/null)"
 expect_eq "DU.6 …and B's time limit is unchanged by A's run" "$DU_B0" "$(limit_in "$PB")"
 expect_eq "DU.7 A's time limit reads A's 5 s" "95" "$(limit_in "$PA")"
 expect_eq "DU.8 no unkeyed tests%run.sh was written" "absent" \
@@ -1604,7 +1678,7 @@ DUL_BEFORE="$(cat "$BIONIC_GATE_DIR/cost/tests%run.sh")"
 expect_eq "DU.12 an unkeyed tests%run.sh is read for its seconds only: the suite cost, 30 s" "0:$PROMISE:30" \
   "$(promise_in "$PC" tests/run.sh)"
 run_in "$PC" pc 2
-expect_eq "DU.13 C's run writes C's own file" "2:1002" "$(cat "$(costf tests/run.sh "$PC")" 2>/dev/null)"
+expect_eq "DU.13 C's run writes C's own file" "2:1002:0" "$(cat "$(costf tests/run.sh "$PC")" 2>/dev/null)"
 expect_eq "DU.14 …which C's promise now reads, not the unkeyed 30 s" "0:$PROMISE:2" "$(promise_in "$PC" tests/run.sh)"
 expect_eq "DU.15 …and the unkeyed file is neither moved nor changed" "$DUL_BEFORE" \
   "$(cat "$BIONIC_GATE_DIR/cost/tests%run.sh" 2>/dev/null)"
@@ -2232,11 +2306,11 @@ learn_run() {
   LR_LIST="$(GATE_LIB="$1" glist)"
 }
 learn_run "$GATE" reaped-control 0
-expect_eq "R.1 control, nothing killed: the run learns its 30 s" "30:1030" "$LR_LINE"
+expect_eq "R.1 control, nothing killed: the run learns its 30 s" "30:1030:1.0" "$LR_LINE"
 learn_run "$GATE" reaped 1
 expect_eq "R.2 the killed run was admitted, and gate_list lists it killed" "0 1" \
   "$(rc_of rx) $(printf '%s\n' "$LR_LIST" | grep -c "^${LR_KID:-none} killed ")"
-expect_eq "R.3 a run after it learns its own 30 s" "30:1090" "$LR_LINE"
+expect_eq "R.3 a run after it learns its own 30 s" "30:1090:1.0" "$LR_LINE"
 expect_eq "R.4 the next locked act (that run's admission at 1060) wrote it ended, rc 137" "1060|137" \
   "$(field "$LR_KID" ended)|$(field "$LR_KID" rc)"
 expect_eq "R.5 and it wrote no duration: cost/x holds its one planted line" "1" \
@@ -2255,7 +2329,7 @@ world_tick 25
 release r1
 expect_eq "R.6 two runs admitted, the second five seconds into the first" "0 0" "$(rc_of r1) $(rc_of rx)"
 expect_eq "R.7 one killed while the other ran: the survivor records its own 30 s" \
-  "30:1030" "$(tail -n 1 "$(costf L)")"
+  "30:1030:1.0" "$(tail -n 1 "$(costf L)")"
 expect_eq "R.8 the survivor's gate_end wrote the killed one ended at 1030, rc 137" "1030|137" \
   "$(field "$rx_id" ended)|$(field "$rx_id" rc)"
 expect_eq "R.9 gate_list still counts it killed, once" "1" "$(glist | grep -c "^${rx_id:-none} killed ")"
@@ -2264,7 +2338,7 @@ anchor file payload/scripts/lib/gate.sh "rc=137\\n'"
 sed -i.bak "/rc=137\\\\n'/d" "$MR"
 learn_run "$MR" reaped-mut 1
 expect_eq "R.10 the mutant (no killed-write) still admits both runs and ends the second" \
-  "0 30:1090" "$(rc_of rx) $LR_LINE"
+  "0 30:1090:1.0" "$(rc_of rx) $LR_LINE"
 expect_eq "R.11 the mutant leaves the killed request admitted and never ended (admitted|ended|rc): the written end is the rule" \
   "1000||" "$(field "$LR_KID" admitted)|$(field "$LR_KID" ended)|$(field "$LR_KID" rc)"
 
@@ -2644,7 +2718,7 @@ touch "$D/pk.go"; wait_for 20 has pk.brc
 expect_eq "B.43 the run ended 0" "0" "$(brc pk)"
 expect_eq "B.44 the wrapper's mid-run reading of 70 leaves no peak= on the admitted request: the gate records no memory (Δ10)" \
   "1000|" "$(field "$pk_id" admitted)|$(field "$pk_id" peak)"
-expect_eq "B.45 …and the run's duration line, in the fixture repository's project where the shim ran, is its 2 s" "2:1002" \
+expect_eq "B.45 …and the run's duration line, in the fixture repository's project where the shim ran, is its 2 s, at load 1.0" "2:1002:1.0" \
   "$(tail -n 1 "$(costf k.test.sh "$WR")" 2>/dev/null)"
 
 # §NUMBER, THE TREE A REQUEST NAMES (wave-28 T36; ruling A-orch-55/56). These rows belong to
