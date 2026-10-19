@@ -1190,8 +1190,8 @@ RL=$(rigor_level "$RIGOR")
 # refused, the fail-open this reader always had.
 PF_TEXT="$(cat "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null)"
 declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$PF_TEXT" \
-  && block "$ALIAS_GONE_SAID" "rename the key in $PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" \
-    "the project's config.yaml still carries the old key; its value is not read"
+  && block "$ALIAS_GONE_SAID" "rename the key" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml still carries the old key; its value is not read"
 PF="$(rigor_minimum_of "$PF_TEXT")"
 if [ -n "$PF" ]; then
   PR=$(rigor_rank "$PF")
@@ -1209,8 +1209,8 @@ EPIC=$(yaml_get epic)
 if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
   EF_TEXT="$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md")"
   declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$EF_TEXT" \
-    && block "$ALIAS_GONE_SAID" "rename the key in $DOCS_ROOT/plans/$EPIC/epic.plan.md" \
-      "the epic plan's frontmatter still carries the old key; its value is not read"
+    && block "$ALIAS_GONE_SAID" "rename the key" \
+      "the frontmatter of $DOCS_ROOT/plans/$EPIC/epic.plan.md still carries the old key; its value is not read"
   EF="$(rigor_minimum_of "$EF_TEXT")"
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
