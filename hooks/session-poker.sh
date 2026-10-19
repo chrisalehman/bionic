@@ -6515,6 +6515,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       ev = kv["ev"]; rk = kv["row"]; e = iso2epoch(kv["at"])
       g = rk SUBSEP (gen[rk] + 0)
       if (ev == "run") nrl++
+      if (ev == "verdict" && kv["kind"] == "regression") next   # facts of the whole run (wave-39 T24; D9), no row ran them
       if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
       if (ev == "candidate") hasc[g] = 1
       if (ev == "candidate" && e >= 0 && !(rk in fc)) fc[rk] = e
@@ -6937,6 +6938,7 @@ sitrep_reds() {
     function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
     index($0, "line/v1|") != 1 { next }
     { ev = fv("ev"); rk = fv("row") }
+    ev == "verdict" && fv("kind") == "regression" { next }   # facts of the whole run (wave-39 T24; D9): no row holds them
     ev == "verdict" && rk != "" { k = rk SUBSEP fv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = fv("result"); next }
     ev == "published" && rk != "" { for (i = 1; i <= n; i++) { split(ord[i], p, SUBSEP); if (p[1] == rk) last[ord[i]] = "landed" } }
     END {
@@ -12608,6 +12610,12 @@ RC_TAGS
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
        || ! line_event "$PV_PLAN" run "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" 2>/dev/null; then
       die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
+    fi
+    # THE REGRESSION'S FACTS (wave-39 T24; D9; ADR-061): a clean whole run folds into one verdict per suite at its head,
+    # each keyed by what it read (lib/proof.sh `proof_regression_fold`), so the owed set and a later landing read it as
+    # any verdict. A run the gate never admitted returned above; a dirty run proves no commit and folds nothing.
+    if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -eq 0 ] && ! proof_regression_fold "$PV_PLAN" "$FR_CO" "$FR_HEAD" "$FR_LOG" "$FR_REL" 2>/dev/null; then
+      say "regression-run — this run's per-suite facts could not be written to the plan's landing record; the owed set derives each suite's key at ${FR_HEAD:0:12} instead."
     fi
     if [ -n "$FR_WHOLE" ]; then
       FR_VERDICT="$(/usr/bin/grep '^Gating: ' "$FR_TMP" 2>/dev/null | tail -n 1)"

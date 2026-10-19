@@ -4021,8 +4021,9 @@ an_verdict T2 "$AN_F1"
 expect_eq "AN-1 pre: the proof's head F is an ancestor of the working head F+2, two commits back" "yes ${AN_F}" \
   "$(an_git merge-base --is-ancestor "$AN_F" "$AN_F2" && echo yes) $(an_git rev-parse "$AN_F2~2")"
 AN_J0="$(an_run "$AN_LIB" "$AN_JUDGE")" || true
+# WORDED BY WAVE-39 T24 (REQ-18; D5): the commit owes the suite that reads what it changed (x.test.sh declares x.txt).
 expect_contains "AN-2 control: with F+2's run unrecorded the judge walks past F+1 and refuses the log at F, naming F+2" \
-  "commit ${AN_F2:0:12} (no landing row) is not proved: no suite run is recorded at it" "$AN_J0"
+  "commit ${AN_F2:0:12} (no landing row) is not proved: x.test.sh has no run recorded at it or after it" "$AN_J0"
 an_verdict T3 "$AN_F2"
 expect_eq "AN-3 AC-3.3 F+1 and F+2 proved by their rows: the judge takes the log at F for the head F+2 (exit 0, head F)" \
   "rc=0 ${AN_F}" "$(an_run "$AN_LIB" "$AN_JUDGE")"
@@ -4152,11 +4153,12 @@ expect_eq "FO-6b …and facts_state's floor line is covered" "covered" "$(fo_fac
 expect_eq "FO-6c …with no second whole run: the proof line still names F" "1 ${FO_F}" \
   "$(grep -c '^proved: kind=regression' "$FOP") $(fo_run 'proof_last "$FOP" floor')"
 
-section "§FLOOR-COVER: a fix row is covered when every code file it changed is read by a suite it ran; an unread one owes a second whole run, or approve regression-2 (wave-35 T9; wave-36 T27; REQ-1 AC-1.4, REQ-6 AC-6.1; D9, D12)"
+section "§FLOOR-COVER: a fix row is covered when every suite that reads what it changed ran green after it; a file no suite reads owes nothing (wave-35 T9; wave-36 T27; wave-39 T24; REQ-1 AC-1.4, REQ-6 AC-6.1, REQ-18 AC-18.1; D9, D12, D5)"
 # Continues §FLOOR-OWED's repository at covered: T7 changed lib/x.sh and ran a.test.sh, which reads it.
-# The cover is the reads index at the judged head (lib/anchors.sh `reads_index`, wave-36 T27), keyed by file name; a
-# code file is a path outside tests/, the docs and the timing table.
-# fails-when: an unread file passes, or a read one owes a second run.
+# The cover is the reads index at the judged head (lib/anchors.sh `reads_index`, wave-36 T27), keyed by file name. Since
+# wave-39 T24 the commit owes the suites that read a path it changed (the owed set, `proof_owed_suites`), not the suites
+# its row ran: a file no suite reads owes nothing, and a read one owes its readers.
+# fails-when: a read file passes with its reader unrun, or an unread one owes.
 expect_eq "FC-0 precondition: the anchor index says a.test.sh declares lib/x.sh, and nothing declares lib/y.sh" \
   "lib/x.sh	tests/a.test.sh" "$(fo_run '. "$1/anchors.sh" && anchors_index "$FOR" HEAD')"
 FO_C2="$(fo_land T8 tests/b.test.sh 'echo more' tests/b.test.sh)"
@@ -4177,20 +4179,28 @@ expect_eq "FC-R1 AC-6.1 a fix row that changed lib/z.sh, which a suite it ran re
   "covered	${FO_C5}" "$(fo_state)"
 FO_C3="$(fo_land T9 lib/y.sh 'y two' tests/a.test.sh)"
 fo_verdict T9 "$FO_C3" tests/a.test.sh green
+# INVERTED BY WAVE-39 T24 (REQ-18 AC-18.1; D5, ADR-061): a code file no suite reads changes no suite's read set, so the
+# commit is proved by the runs before it; the arm it replaced owed a second whole run here.
+expect_eq "FC-2 AC-18.1 a fix row that changed lib/y.sh, which no suite reads: covered" "covered	${FO_C3}" "$(fo_state)"
+expect_eq "FC-2b …and the owed set is empty" "" "$(fo_run 'proof_owed_suites "$FOP" "$FOR"')"
+FO_C6="$(fo_land T12 lib/x.sh 'x six' tests/b.test.sh)"
+fo_verdict T12 "$FO_C6" tests/b.test.sh green
 FO_ST="$(fo_state)"
-expect_eq "FC-2 AC-1.4 a fix row that changed lib/y.sh, which no suite it ran reads: uncovered" "uncovered" "${FO_ST%%	*}"
-expect_contains "FC-2b …naming the row, the file and the second whole run owed" \
-  "commit ${FO_C3:0:12} (row T9) is not proved: lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$FO_ST"
-expect_eq "FC-2c …and facts_state's floor line is uncovered F..head" "uncovered	${FO_F}..${FO_C3}" "$(fo_facts "$FO_C3" | cut -f1,2)"
+expect_eq "FC-2c a fix row that changed lib/x.sh and ran only b.test.sh, which does not read it: uncovered" "uncovered" "${FO_ST%%	*}"
+expect_contains "FC-2d …naming the row and the suite that reads lib/x.sh" \
+  "commit ${FO_C6:0:12} (row T12) is not proved: a.test.sh has no run recorded at it or after it" "$FO_ST"
+expect_eq "FC-2e …facts_state's floor line uncovered F..head, and the owed set a.test.sh" "uncovered	${FO_F}..${FO_C6}|a.test.sh" \
+  "$(fo_facts "$FO_C6" | cut -f1,2)|$(fo_run 'proof_owed_suites "$FOP" "$FOR"')"
 # MOVED BY WAVE-38 T2 (AC-4.5, AC-4.2): `approve regression-2` is the user's word for ONE second whole run and covers no
 # head; the user's word for the regression itself is `waive regression '<reply>'`, a `waived: question=regression` line.
 printf 'approved: regression-2 by Dana Fixture 2026-10-12T02:00:00Z "run it again"\n' >> "$FOP"
 FO_ST="$(fo_state)"
 expect_eq "FC-3 AC-4.5 approve regression-2 admits a second whole run and covers nothing: still uncovered" "uncovered" "${FO_ST%%	*}"
-expect_eq "FC-3b …and facts_state's floor line still uncovered F..head" "uncovered	${FO_F}..${FO_C3}" "$(fo_facts "$FO_C3" | cut -f1,2)"
-printf 'waived: question=regression head=%s by Dana Fixture 2026-10-12T02:05:00Z "no second run, the y change is a message"\n' "$FO_C3" >> "$FOP"
-expect_eq "FC-3c AC-4.2 the user's waiver of the regression at the head: covered" "covered	${FO_C3}" "$(fo_state)"
-expect_eq "FC-3d …and facts_state's floor line covered" "covered" "$(fo_facts "$FO_C3")"
+expect_eq "FC-3b …and facts_state's floor line still uncovered F..head" "uncovered	${FO_F}..${FO_C6}" "$(fo_facts "$FO_C6" | cut -f1,2)"
+printf 'waived: question=regression head=%s by Dana Fixture 2026-10-12T02:05:00Z "no second run, the x change is a message"\n' "$FO_C6" >> "$FOP"
+expect_eq "FC-3c AC-4.2 the user's waiver of the regression at the head: covered" "covered	${FO_C6}" "$(fo_state)"
+expect_eq "FC-3d …and facts_state's floor line covered" "covered" "$(fo_facts "$FO_C6")"
+expect_eq "FC-3e …and the waiver empties the owed set to its head" "" "$(fo_run 'proof_owed_suites "$FOP" "$FOR"')"
 
 section "§FLOOR-DOCS: a commit that touches only non-code paths inherits its parent's standing (wave-35 T9; REQ-1 AC-1.5; D8)"
 # Continues §FLOOR-COVER's repository at covered. The non-code paths are lib/proof.sh `_proof_docs_path`'s one
@@ -4209,7 +4219,8 @@ expect_eq "FD-2 the timing table alone: covered" "covered	${FO_D2}" "$(fo_state)
 FO_D3="$(fo_commit lib/x.sh 'x five')"
 FO_ST="$(fo_state)"
 expect_eq "FD-3 control: a code commit with no run recorded at it is uncovered" "uncovered" "${FO_ST%%	*}"
-expect_contains "FD-3b …naming it" "commit ${FO_D3:0:12} (no landing row) is not proved: no suite run is recorded at it" "$FO_ST"
+# WORDED BY WAVE-39 T24 (REQ-18; D5): the commit owes a.test.sh, which reads lib/x.sh.
+expect_contains "FD-3b …naming it and the suite that reads what it changed" "commit ${FO_D3:0:12} (no landing row) is not proved: a.test.sh has no run recorded at it or after it" "$FO_ST"
 
 # ============================================================
 section "§SLUG: one reader names a plan's slug, and has no dry-copy arm: no production caller names a session, and a name-only strip is never made (wave-37 T2; wave-38 T19 REQ-11 AC-11.5; D12)"
@@ -4454,5 +4465,215 @@ expect_eq "PA-4 mutation: a copy with the regression walk's tree test dropped st
   "regression covered" "$(pa_state "$PA_MUT" "$PA_P" | awk 'NR == 1')"
 expect_eq "PA-4b …and reads O uncovered, so PA-2 can fail" "regression uncovered" "$(pa_state "$PA_MUT" "$PA_O" | awk 'NR == 1')"
 rm -rf "$PA_MUT"
+
+
+# ============================================================
+section "§OWED — the owed set: past the whole run's head a commit owes the suites that read what it changed, each until a green run at its new read key; a commit no suite reads owes nothing (wave-39 T24; REQ-18 AC-18.1; D5, D9; ADR-061)"
+# ============================================================
+# lib/proof.sh `proof_owed_suites <plan> <tree> [<head>]` prints, one per line, the suites the head owes: a suite is owed
+# when a commit past the regression's newest link (its proof, or a regression waiver) changed a file the suite reads (the
+# reads index at the head, file grain, a narrowed `<file>#<name>` row read as its file), its read key at the head
+# (lib/anchors.sh `reads_hashes`) differs from its key at the whole run's head, and no green fact holds at the new key: a
+# landing's verdict carrying `reads=<key>`, or the regression's own facts, which `regression-run` folds from the whole
+# run, one `ev=verdict` per suite at its head (`proof_regression_fold`). `*` alone means a whole run is owed and no suite
+# set can be named. `_proof_walk` owes the same set, so the judge, `current 8 --check` and close-out read it.
+# FIXTURE FIDELITY. A real repository on its working branch: three suites (a.test.sh and b.test.sh name lib/x.sh, c.test.sh
+# names lib/w.sh), a CONTEXT.md at the root (outside the fixed docs list), the base B and the code commit F; the whole run
+# at F logged in tests/run.sh's shape with its run line (tests/lib/regression-fixture.sh) and folded by the product; the
+# proof lines by their writers; a double wave plan at current: 8 in final-card's shape, its five readings at the judged
+# head (so only the regression differs between heads), bound to this session; `current 8 --check` and `close-out.sh check`
+# are the real verbs.
+# fails-when: the docs-only commit owes a run or reads uncovered on any surface; the code commit owes anything but the two
+# suites that read lib/x.sh; a suite whose read key came back to the whole run's owes.
+ROW="$(fp_repo owed)"
+OWP="$(fp_plan_path "$ROW")"; OWREC="$ROW/.bionic/docs/$FP_REC"
+printf '.bionic\n' > "$ROW/.gitignore"
+mkdir -p "$ROW/tests" "$ROW/lib"
+printf '#!/bin/bash\ngrep -c one "$(dirname "$0")/../lib/x.sh"\n' > "$ROW/tests/a.test.sh"
+printf '#!/bin/bash\ngrep -c two "$(dirname "$0")/../lib/x.sh"\n' > "$ROW/tests/b.test.sh"
+printf '#!/bin/bash\ngrep -c one "$(dirname "$0")/../lib/w.sh"\n' > "$ROW/tests/c.test.sh"
+printf 'one\n' > "$ROW/lib/x.sh"; printf 'one\n' > "$ROW/lib/w.sh"
+printf '# Context\n\n## Glossary\n\n- **run**: one pass of the SDLC.\n' > "$ROW/CONTEXT.md"
+( cd "$ROW" && git add .gitignore tests lib CONTEXT.md && git commit -qm base ) >/dev/null 2>&1
+OW_B="$(git -C "$ROW" rev-parse HEAD)"; git -C "$ROW" branch -q main "$OW_B"
+OW_F="$(fp_commit "$ROW" lib/x.sh 'one two')"
+ow_run() {  # <script> -> bash with the proof library (and what it reads) from FP_LIB; ROW, OWP, OWREC in its environment
+  env ROW="$ROW" OWP="$OWP" OWREC="$OWREC" bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/line.sh" >/dev/null 2>&1; . "$1/proof.sh" || exit 99
+    eval "$2"' _ "$FP_LIB" "$1" 2>&1
+}
+ow_owed() { ow_run "proof_owed_suites \"\$OWP\" \"\$ROW\" $1; echo \"rc=\$?\"" | paste -sd'|' -; }  # <head> -> the owed set, |-joined, then rc=
+ow_key() { ow_run ". \"\$1/anchors.sh\" 2>/dev/null; reads_hash \"\$ROW\" $1 $2"; }  # <commit> <suite> -> its read key there
+ow_keyed() {  # <row> <commit> <suite> <result> -> one landing verdict at <commit>, lib/line.sh's shape, reads= its key there
+  printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=%s|result=%s|log=/fixture/%s.log|admitted=-|width=1|reads=%s|at=%s\n' \
+    "$1" "$2" "$3" "$4" "$1" "$(ow_key "$2" "$3")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OWREC/landing-proofs.log"
+}
+ow_state() { ow_run 'proof_state "$OWP" "$ROW"' || true; }
+ow_facts() {  # <head> -> facts_state's regression line for the plan at <head>: its state
+  ow_run "facts_state \"\$OWP\" $1" | awk -F'\t' '$1 == "regression" { print $2; exit }' || true
+}
+ow_poke() {  # <args...> -> OW_OUT, OW_RC: session-poker.sh as this session, in the repository
+  OW_RC=0
+  OW_OUT="$(cd "$ROW" && env CLAUDE_CODE_SESSION_ID="$FP_SID" CLAUDE_CONFIG_DIR="$FP_ROOT/ow-config" HOME="$FP_ROOT/ow-home" \
+    BIONIC_GATE_DIR="$FP_ROOT/ow-gate" bash "$FP_POKER" "$@" 2>&1)" || OW_RC=$?
+}
+ow_close() { ( cd "$ROW" && env CLAUDE_CODE_SESSION_ID="$FP_SID" HOME="$FP_ROOT/ow-home" bash "${BIONIC_HOOKS_DIR}/../payload/scripts/close-out.sh" "$OWP" check 2>&1 ) || true; }
+mkdir -p "$FP_ROOT/ow-config/bionic" "$FP_ROOT/ow-home" "$FP_ROOT/ow-gate"
+for ow_f in dispatch audit review docs generic-evidence; do printf 'fixture evidence\n' > "$OWREC/$ow_f.md"; done
+for ow_q in evidence adversarial structure; do
+  fp_record "$ROW" "$ow_q.md" "$ow_q" pass "${OW_B:0:10}..${OW_F:0:10}" 'findings: 0'
+done
+fp_record "$ROW" adversarial-whole.md adversarial pass "${OW_B:0:10}..${OW_F:0:10}" 'findings: 0'
+fp_record "$ROW" structure-whole.md structure pass "${OW_B:0:10}..${OW_F:0:10}" 'findings: 0'
+ow_reads() {  # <head> -> the five readings a double wave plan is dealt, at <head>
+  local q
+  for q in evidence adversarial structure; do
+    bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-12T12:00:00Z "$3" "$4" w-read pass piece' _ "$FP_LIB" "$1" "$FP_REC/$q.md" "$q"
+  done
+  for q in adversarial structure; do
+    bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-12T12:00:00Z "$3" "$4" w-read pass whole' _ "$FP_LIB" "$1" "$FP_REC/$q-whole.md" "$q"
+  done
+}
+ow_plan() {  # <judged head> -> OWP at current: 8 in final-card's shape, the readings at <judged head>, bound to this session
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: 8\nworking-branch: wave/01-fixture\nintegration-branch: main\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+    printf -- '- Step 4: dispatched, %s/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$FP_REC" "$OW_B"
+    printf -- '- T1: landed %s 2026-10-12T10:00:00Z\n- T2: landed %s 2026-10-12T13:00:00Z\n' "$OW_F" "$1"
+    printf -- '- Step 5: regression, %s/regression-run-%s.log\n  auditor: CONFIRMED, %s/audit.md\n' "$FP_REC" "$OW_F" "$FP_REC"
+    printf -- '- Step 6: review at %s/review.md\n' "$FP_REC"
+    printf -- '- Step 7: documented at %s/docs.md\n  n/a: no decision this run\n' "$FP_REC"
+    bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z "$3"' _ "$FP_LIB" "$OW_F" "$FP_REC/regression-run-$OW_F.log"
+    ow_reads "$1"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
+    printf '| T2 | 7 | doc | the glossary | implementor | — | 30 | REQ-1 | CONTEXT.md | — | — | landed | approval:plan, head |\n'
+    printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | pending | approval:release, approval:merge, head |\n'
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |\n\n'
+    printf 'AC-1.1:\n  fails-when: the planted defect this eval must go red on\n  evidence: %s/generic-evidence.md\n' "$FP_REC"
+    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
+  } > "$OWP"
+  bound_marker "$ROW" "$FP_SID" "$OWP" >/dev/null 2>&1
+}
+# THE WHOLE RUN AT F, in tests/run.sh's shape, and its facts folded by the product.
+{ printf 'Gating suites:\n'
+  for ow_s in a b c; do printf '  %-30s ✓ PASS\n' "$ow_s.test.sh"; done
+  printf '──────────────\nGating: 3 passed, 0 failed\nenv: os=darwin\nAll gating suites green ✓\n'
+} | regression_fixture --pre 'env: os=darwin bash=3.2.57 locale=C path=/pin' "$OWP" "$OWREC/regression-run-$OW_F.log" "$OW_F" 0 0
+expect_eq "OW-0 precondition: the reads index at F routes lib/x.sh to a and b, lib/w.sh to c, and names no suite for CONTEXT.md (positive and negative on one extractor)" \
+  "CONTEXT.md>|lib/w.sh>tests/c.test.sh|lib/x.sh>tests/a.test.sh,tests/b.test.sh" \
+  "$(ow_run ". \"\$1/anchors.sh\" && reads_index \"\$ROW\" $OW_F" | awk -F'\t' '$1 ~ /^lib\// { print $1 ">" $2 } { r[$1] = $2 } END { print "CONTEXT.md>" r["CONTEXT.md"] }' | LC_ALL=C sort | paste -sd'|' -)"
+expect_eq "OW-F1 D9 the runner's per-suite lines are read from the whole run's log: three suites, each green" \
+  "a.test.sh	green|b.test.sh	green|c.test.sh	green" \
+  "$(ow_run "proof_regression_results \"\$OWREC/regression-run-$OW_F.log\"" | paste -sd'|' -)"
+ow_run "proof_regression_fold \"\$OWP\" \"\$ROW\" $OW_F \"\$OWREC/regression-run-$OW_F.log\" $FP_REC/regression-run-$OW_F.log" >/dev/null || true
+expect_eq "OW-F2 D9 the fold writes one ev=verdict fact per suite at F, kind=regression, each reads= the suite's key at F (lib/anchors.sh reads_hash)" \
+  "a.test.sh green $(ow_key "$OW_F" a.test.sh)|b.test.sh green $(ow_key "$OW_F" b.test.sh)|c.test.sh green $(ow_key "$OW_F" c.test.sh)" \
+  "$(awk -F'|' -v c="commit=$OW_F" '$2 == "ev=verdict" && $4 == c && index($0, "|kind=regression|") { r = ""; for (i = 2; i <= NF; i++) if (index($i, "reads=") == 1) r = substr($i, 7); print substr($5, 7) " " substr($6, 8) " " r }' "$OWREC/landing-proofs.log" | LC_ALL=C sort | paste -sd'|' -)"
+ow_run "proof_regression_fold \"\$OWP\" \"\$ROW\" $OW_F \"\$OWREC/regression-run-$OW_F.log\" $FP_REC/regression-run-$OW_F.log" >/dev/null || true
+expect_eq "OW-F3 …once: folding the same run again adds no fact" "3" \
+  "$(awk -F'|' -v c="commit=$OW_F" '$2 == "ev=verdict" && $4 == c && index($0, "|kind=regression|") { n++ } END { print n + 0 }' "$OWREC/landing-proofs.log")"
+OW_MIX="$FP_ROOT/ow-mixed.log"
+{ printf 'head=%s dirty=0\ncommand: tests/run.sh\nGating suites:\n' "$OW_F"
+  printf '  a.test.sh                      ✓ PASS\n  b.test.sh                      ✗ FAIL\n───── b.test.sh: captured output ─────\n  c.test.sh  ✓ PASS\n───── end b.test.sh ─────\n'
+  printf '  c.test.sh                      ✗ KILLED (SIGKILL)\n  d.test.sh                      ✗ REFUSED (the budget, at the gate%ss ask; never run)\n' "'"
+  printf '──────────────\nGating: 1 passed, 3 failed\nrc=1\n'; } > "$OW_MIX"
+expect_eq "OW-F4 a red and a killed suite read red, a budget refusal (never run) reads nothing, and a captured output's line is no verdict" \
+  "a.test.sh	green|b.test.sh	red|c.test.sh	red" "$(ow_run "proof_regression_results \"$OW_MIX\"" | paste -sd'|' -)"
+
+# THE DOCS-ONLY COMMIT PAST THE WHOLE RUN: a glossary line in CONTEXT.md, which no suite reads.
+OW_D="$(fp_commit "$ROW" CONTEXT.md "$(printf '# Context\n\n## Glossary\n\n- **run**: one pass of the SDLC.\n- **owed set**: the suites a head owes.')")"
+ow_plan "$OW_D"
+expect_eq "OW-1 AC-18.1 a docs-only commit past the regression head (a glossary line outside the fixed docs list): proof_owed_suites prints nothing, rc 0" \
+  "rc=0" "$(ow_owed "$OW_D")"
+expect_eq "OW-2 AC-18.1 …the judge reads the regression covered at it" "covered	$OW_D" "$(ow_state)"
+expect_eq "OW-2b …and facts_state's regression line says covered" "covered" "$(ow_facts "$OW_D")"
+ow_poke current 8 --check
+expect_eq "OW-3 AC-18.1 …current 8 --check passes (exit 0)" "0" "$OW_RC"
+expect_contains "OW-4 AC-18.1 …and close-out's judge passes" "facts: every fact the run owes holds at $OW_D" "$(ow_close)"
+
+# THE CODE COMMIT: lib/x.sh, which a.test.sh and b.test.sh read.
+OW_E="$(fp_commit "$ROW" lib/x.sh "$(printf 'one two\nthree')")"
+ow_plan "$OW_E"
+expect_eq "OW-5 AC-18.1 a code commit touching a file two suites read owes exactly those two" "a.test.sh|b.test.sh|rc=0" "$(ow_owed "$OW_E")"
+OW_ST="$(ow_state)"
+expect_eq "OW-5b …the judge reads it uncovered (the same fixture and extractor that read OW-2 covered)" "uncovered" "${OW_ST%%	*}"
+expect_contains "OW-5c …naming the commit and an owed suite" "commit ${OW_E:0:12} (no landing row) is not proved: a.test.sh has no run recorded at it or after it" "$OW_ST"
+ow_poke current 8 --check
+expect_eq "OW-6 …current 8 --check refuses (exit 1) on the regression line" "1|yes" \
+  "$OW_RC|$(printf '%s\n' "$OW_OUT" | /usr/bin/grep -q "regression	uncovered" && echo yes || echo no)"
+expect_contains "OW-6b …and close-out's judge would refuse" "facts: WOULD REFUSE" "$(ow_close)"
+ow_keyed T4 "$OW_E" a.test.sh green
+expect_eq "OW-7 a green landing verdict of a.test.sh at its new read key: b.test.sh alone is owed" "b.test.sh|rc=0" "$(ow_owed "$OW_E")"
+ow_keyed T4 "$OW_E" b.test.sh green
+expect_eq "OW-8 …and b.test.sh's: nothing owed" "rc=0" "$(ow_owed "$OW_E")"
+expect_eq "OW-8b …the judge reads covered" "covered	$OW_E" "$(ow_state)"
+# THE KEY, NOT THE CHANGE: lib/w.sh changed and changed back reads, for c.test.sh, the blobs the whole run read.
+OW_W1="$(fp_commit "$ROW" lib/w.sh 'one more')"
+expect_eq "OW-9 precondition: lib/w.sh changed past the whole run owes c.test.sh, which reads it" "c.test.sh|rc=0" "$(ow_owed "$OW_W1")"
+OW_W2="$(fp_commit "$ROW" lib/w.sh one)"
+expect_eq "OW-9b D5 …changed back, c.test.sh's read key is the whole run's again: nothing owed" "rc=0" "$(ow_owed "$OW_W2")"
+expect_eq "OW-9c …and the judge reads covered" "covered	$OW_W2" "$(ow_state)"
+# A SUITE THE SCAN CANNOT CLOSE (a load whose file name is computed) is keyed by the whole tree: it may read any path, so it
+# owes on every commit the walk does not excuse, a docs commit outside the fixed list among them.
+mkdir -p "$ROW/tests"; printf '#!/bin/bash\n. "$(dirname "$0")/../lib/$(printf w).sh"\n' > "$ROW/tests/d.test.sh"
+( cd "$ROW" && git add tests/d.test.sh && git commit -qm 'd: a computed load' ) >/dev/null 2>&1
+OW_T1="$(git -C "$ROW" rev-parse HEAD)"
+expect_eq "OW-10 precondition: d.test.sh's key is the tree's (the extractor read sha256 keys for a, b and c above)" "tree:" \
+  "$(ow_key "$OW_T1" d.test.sh | cut -c1-5)"
+ow_keyed T5 "$OW_T1" d.test.sh green
+expect_eq "OW-10b …green at its new key, nothing owed" "rc=0" "$(ow_owed "$OW_T1")"
+OW_T2="$(fp_commit "$ROW" CONTEXT.md "$(printf '# Context\n\n- **tree key**: a suite the scan cannot close.')")"
+expect_eq "OW-10c the docs commit outside the fixed list owes the tree-keyed suite, and only it" "d.test.sh|rc=0" "$(ow_owed "$OW_T2")"
+OW_ST="$(ow_state)"
+expect_contains "OW-10d …and the judge names it" "commit ${OW_T2:0:12} (no landing row) is not proved: d.test.sh has no run recorded at it or after it" "$OW_ST"
+
+# ============================================================
+section "§OWED-DECLARED — a project whose reads index names no suite declares its regression's reads in config; with no index and no declaration today's rule stands (wave-39 T24; REQ-18 AC-18.2; D10)"
+# ============================================================
+# `regression-reads: <glob>[, <glob>]` in .bionic/config.yaml (lib/roots.sh `config_value`) stands in for an empty index:
+# a commit no path of which a glob matches owes nothing; one that a glob matches owes as today (its row's runs and the
+# records at it). With neither an index nor the key, today's rule stands for every commit, so an empty index never
+# excuses one, and `proof_owed_suites` prints `*`: a whole run, no suite set to name.
+# FIXTURE FIDELITY. A jest-shaped repository on its working branch: src/app.js, test/app.test.js, CONTEXT.md, no
+# tests/*.test.sh; the whole run at F proved by its writers' lines; the judge is lib/proof.sh's.
+# fails-when: the empty index excuses a code commit, or the declared project's docs commit still owes.
+ROD="$(fp_repo declared)"
+ODP="$(fp_plan_path "$ROD")"
+printf '.bionic\n' > "$ROD/.gitignore"; mkdir -p "$ROD/src" "$ROD/test"
+printf 'module.exports = 1;\n' > "$ROD/src/app.js"; printf 'test("one", () => {});\n' > "$ROD/test/app.test.js"
+printf '# Context\n' > "$ROD/CONTEXT.md"
+( cd "$ROD" && git add .gitignore src test CONTEXT.md && git commit -qm base ) >/dev/null 2>&1
+OD_B="$(git -C "$ROD" rev-parse HEAD)"
+OD_F="$(fp_commit "$ROD" src/app.js 'module.exports = 2;')"
+fp_plan "$ROD" "${OD_B:0:10}" "proved: kind=regression head=$OD_F at=2026-10-04T12:00:00Z evidence=$FP_REC/regression-run-$OD_F.log" ""
+od_run() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" || exit 99; eval "$2"' _ "$FP_LIB" "$1" 2>&1; }
+od_state() { od_run "proof_state \"$ODP\" \"$ROD\"" || true; }
+od_owed() { od_run "proof_owed_suites \"$ODP\" \"$ROD\" $1; echo \"rc=\$?\"" | paste -sd'|' -; }  # <head>
+od_declare() { printf 'regression-reads: src/*, test/*\n' > "$ROD/.bionic/config.yaml"; }
+OD_D="$(fp_commit "$ROD" CONTEXT.md "$(printf '# Context\n\n- **app**: the one module.')")"
+expect_eq "OD-0 precondition: the reads index names no suite here (the same extractor printed §OWED's rows)" "" \
+  "$(od_run ". \"\$1/anchors.sh\" && reads_index \"$ROD\" $OD_D")"
+od_declare
+expect_eq "OD-1 AC-18.2 declared: a docs commit outside the globs owes nothing" "covered	$OD_D" "$(od_state)"
+expect_eq "OD-1b …and proof_owed_suites prints nothing" "rc=0" "$(od_owed "$OD_D")"
+rm -f "$ROD/.bionic/config.yaml"
+OD_ST="$(od_state)"
+expect_eq "OD-2 AC-18.2 undeclared, the same commit: today's rule stands, uncovered" "uncovered" "${OD_ST%%	*}"
+expect_contains "OD-2b …in today's words" "commit ${OD_D:0:12} (no landing row) is not proved: no suite run is recorded at it" "$OD_ST"
+expect_eq "OD-2c …and the owed set is a whole run" "*|rc=0" "$(od_owed "$OD_D")"
+OD_E="$(fp_commit "$ROD" src/app.js 'module.exports = 3;')"
+od_declare
+OD_ST="$(od_state)"
+expect_eq "OD-3 AC-18.2 declared: a code commit under the globs owes" "uncovered" "${OD_ST%%	*}"
+expect_contains "OD-3b …naming that commit" "commit ${OD_E:0:12} (no landing row) is not proved: no suite run is recorded at it" "$OD_ST"
+expect_eq "OD-3c …and the owed set is a whole run" "*|rc=0" "$(od_owed "$OD_E")"
+rm -f "$ROD/.bionic/config.yaml"
+OD_ST="$(od_state)"
+expect_eq "OD-4 AC-18.2 undeclared: the code commit owes too (an empty index excuses nothing)" "uncovered" "${OD_ST%%	*}"
 
 finish
