@@ -78,11 +78,11 @@ function lands_cmd_entry(t) { return (t ~ /^`[^` \t,|\/*?[]+`$/) }
 
 # bionic_lands_cmd <lands_on entry> -> the command it names, as its brief declared it; 1 when the entry is no command.
 bionic_lands_cmd() {
-  local v="${1:-}"
+  local v="${1:-}" sl=/   # `/` through a variable: bash 3.2 keeps the backslash of a `\/` replacement
   case "$v" in '`'?*'`') ;; *) return 1 ;; esac
   v="${v#\`}"; v="${v%\`}"
   case "$v" in *'`'*|*[[:space:],\|/*?[]*) return 1 ;; esac
-  v="${v//\%20/ }"; v="${v//\%09/	}"; v="${v//\%2C/,}"; v="${v//\%7C/|}"; v="${v//\%2F/\/}"
+  v="${v//\%20/ }"; v="${v//\%09/	}"; v="${v//\%2C/,}"; v="${v//\%7C/|}"; v="${v//\%2F/$sl}"
   v="${v//\%2A/*}"; v="${v//\%3F/?}"; v="${v//\%5B/[}"
   printf '%s' "${v//\%25/%}"
 }
