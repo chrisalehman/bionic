@@ -4766,6 +4766,89 @@ OD_ST="$(od_state)"
 expect_eq "OD-4 AC-18.2 undeclared: the code commit owes too (an empty index excuses nothing)" "uncovered" "${OD_ST%%	*}"
 
 # ============================================================
+section "§OWED-CLOSED — the judge joins a changed path to the suites whose read key it moves: the closed index, so a suite that reaches a library only through another's load is owed for it, and a load the scan cannot close owes its suite as tree-keyed (wave-39 T46; REQ-18 AC-18.1; D5, A-orch-3; critic-adversarial #1)"
+# ============================================================
+# lib/proof.sh `_proof_walk` joins each changed path to the suites lib/anchors.sh `reads_index_closed` names for it: the
+# closed read sets `reads_hashes` keys (T40), so every suite whose key a commit moves is a candidate for the owed set. The
+# plain `reads_index` names a file only for the suites that name it themselves, so a suite reaching lib/two.sh through
+# lib/one.sh's load had its key moved and was never asked. A `!` line (a load the closure cannot resolve) keys its suite
+# by the whole tree: it owes on every commit the walk does not excuse.
+# FIXTURE FIDELITY. A real repository on its working branch: a.test.sh greps lib/x.sh, b.test.sh sources lib/one.sh, which
+# sources lib/two.sh; the whole run's proof at F (a code commit to lib/x.sh) by the plan's floor line; landing verdicts in
+# lib/line.sh's shape carrying the suite's key; the judge and the owed set are lib/proof.sh's; the mutant is the shipped
+# lib/ beside one proof.sh whose join reads the plain index.
+# fails-when: a commit to lib/two.sh owes nothing, or owes a.test.sh; the judge reads it covered; a mutant joining the plain
+# index still owes b.test.sh.
+ROC="$(fp_repo closed)"
+OCP="$(fp_plan_path "$ROC")"; OCREC="$ROC/.bionic/docs/$FP_REC"
+printf '.bionic\n' > "$ROC/.gitignore"; mkdir -p "$ROC/tests" "$ROC/lib"
+printf '#!/bin/bash\ngrep -c one "$(dirname "$0")/../lib/x.sh"\n' > "$ROC/tests/a.test.sh"
+printf '#!/bin/bash\n. "$(dirname "$0")/../lib/one.sh"\n' > "$ROC/tests/b.test.sh"
+printf '#!/bin/bash\n. "$(dirname "${BASH_SOURCE[0]}")/two.sh"\n' > "$ROC/lib/one.sh"
+printf 'two\n' > "$ROC/lib/two.sh"; printf 'one\n' > "$ROC/lib/x.sh"
+( cd "$ROC" && git add .gitignore tests lib && git commit -qm base ) >/dev/null 2>&1
+OC_B="$(git -C "$ROC" rev-parse HEAD)"
+OC_F="$(fp_commit "$ROC" lib/x.sh 'one two')"
+fp_plan "$ROC" "${OC_B:0:10}" "proved: kind=regression head=$OC_F at=2026-10-04T12:00:00Z evidence=$FP_REC/regression-run-$OC_F.log" ""
+oc_run() { env ROC="$ROC" OCP="$OCP" bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/line.sh" >/dev/null 2>&1; . "$1/proof.sh" || exit 99; eval "$2"' _ "$FP_LIB" "$1" 2>&1; }
+oc_owed() { oc_run "proof_owed_suites \"\$OCP\" \"\$ROC\" $1; echo \"rc=\$?\"" | paste -sd'|' -; }  # <head> -> the owed set, |-joined, then rc=
+oc_state() { oc_run 'proof_state "$OCP" "$ROC"' || true; }
+oc_key() { oc_run ". \"\$1/anchors.sh\" 2>/dev/null; reads_hash \"\$ROC\" $1 $2"; }  # <commit> <suite> -> its read key there
+oc_keyed() {  # <row> <commit> <suite> -> one green landing verdict at <commit>, lib/line.sh's shape, reads= its key there
+  printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=%s|result=green|log=/fixture/%s.log|admitted=-|width=1|reads=%s|at=%s\n' \
+    "$1" "$2" "$3" "$1" "$(oc_key "$2" "$3")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OCREC/landing-proofs.log"
+}
+oc_rows() {  # <flag, empty or --closed> <commit> -> the index's rows for lib/one.sh and lib/two.sh, `<file>><suites>`, |-joined
+  oc_run "bash \"\$1/anchors.sh\" reads_index $1 \"\$ROC\" --at $2" \
+    | awk -F'\t' '{ r[$1] = $2 } END { print "lib/one.sh>" r["lib/one.sh"] "|lib/two.sh>" r["lib/two.sh"] }'
+}
+oc_moved() {  # <suite> <from> <to> -> moved or kept: its read key at <to> against <from>; unread when either is empty
+  local f t; f="$(oc_key "$2" "$1")"; t="$(oc_key "$3" "$1")"
+  if [ -z "$f" ] || [ -z "$t" ]; then printf unread; elif [ "$f" = "$t" ]; then printf kept; else printf moved; fi
+}
+OC_E="$(fp_commit "$ROC" lib/two.sh 'two three')"
+expect_eq "OC-0 precondition: the plain index names b.test.sh for lib/one.sh and no suite for lib/two.sh (positive and negative on one extractor)" \
+  "lib/one.sh>tests/b.test.sh|lib/two.sh>" "$(oc_rows '' "$OC_E")"
+expect_eq "OC-0b precondition: the closed index names b.test.sh for both, through lib/one.sh's load" \
+  "lib/one.sh>tests/b.test.sh|lib/two.sh>tests/b.test.sh" "$(oc_rows --closed "$OC_E")"
+expect_eq "OC-0c precondition: the commit to lib/two.sh moves b.test.sh's read key and keeps a.test.sh's" "b:moved a:kept" \
+  "b:$(oc_moved b.test.sh "$OC_F" "$OC_E") a:$(oc_moved a.test.sh "$OC_F" "$OC_E")"
+expect_eq "OC-1 AC-18.1 a commit to a library b.test.sh reaches only through the closure owes b.test.sh, and only it" \
+  "b.test.sh|rc=0" "$(oc_owed "$OC_E")"
+OC_ST="$(oc_state)"
+expect_eq "OC-2 AC-18.1 …the judge reads it uncovered" "uncovered" "${OC_ST%%	*}"
+expect_contains "OC-2b …naming the commit and b.test.sh" "commit ${OC_E:0:12} (no landing row) is not proved: b.test.sh has no run recorded at it or after it" "$OC_ST"
+oc_keyed T4 "$OC_E" b.test.sh
+expect_eq "OC-3 …a green landing verdict of b.test.sh at its new key: nothing owed" "rc=0" "$(oc_owed "$OC_E")"
+expect_eq "OC-3b …and the judge reads covered (the same fixture and extractor that read OC-2 uncovered)" "covered	$OC_E" "$(oc_state)"
+
+# A `!` LINE: d.test.sh's load is computed, so the closed index marks it `!` and its key is the tree's. A code file no suite
+# reads, changed past it, owes d.test.sh alone.
+printf '#!/bin/bash\n. "$(dirname "$0")/../lib/$(printf w).sh"\n' > "$ROC/tests/d.test.sh"
+( cd "$ROC" && git add tests/d.test.sh && git commit -qm 'd: a computed load' ) >/dev/null 2>&1
+OC_T1="$(git -C "$ROC" rev-parse HEAD)"
+expect_eq "OC-4 precondition: the closed index marks d.test.sh with a ! line, and only it (the extractor that read OC-0b's rows)" \
+  "tests/d.test.sh" "$(oc_run "bash \"\$1/anchors.sh\" reads_index --closed \"\$ROC\" --at $OC_T1" | awk -F'\t' '$1 == "!" { print $2 }' | paste -sd'|' -)"
+oc_keyed T5 "$OC_T1" d.test.sh
+expect_eq "OC-4b …green at its new key, nothing owed" "rc=0" "$(oc_owed "$OC_T1")"
+OC_Z="$(fp_commit "$ROC" lib/z.sh 'unread')"
+expect_eq "OC-5 AC-18.1 a code file no suite reads, changed past the whole run, owes the ! line's suite as tree-keyed, and only it" \
+  "d.test.sh|rc=0" "$(oc_owed "$OC_Z")"
+expect_contains "OC-5b …and the judge names it" "commit ${OC_Z:0:12} (no landing row) is not proved: d.test.sh has no run recorded at it or after it" "$(oc_state)"
+
+# THE MUTATION CONTROL: the join reads the plain index. The copy is the shipped lib/ beside one doctored proof.sh.
+OC_MLIB="$(mktemp -d "${TMPDIR:-/tmp}/oc-closed-mut.XXXXXX")"; cleanup_dirs+=("$OC_MLIB")
+for oc_f in "$FP_LIB"/*; do [ "${oc_f##*/}" = proof.sh ] || ln -s "$(cd "${oc_f%/*}" && pwd -P)/${oc_f##*/}" "$OC_MLIB/${oc_f##*/}"; done
+anchor file payload/scripts/lib/proof.sh 'idx="$(reads_index_closed "$co" "$to"' 'idx="$(reads_index "$co" "$to"' "$OC_MLIB/proof.sh"
+OC_E2="$(fp_commit "$ROC" lib/two.sh 'two three four')"
+OC_SHIPPED_LIB="$FP_LIB"; FP_LIB="$OC_MLIB"
+expect_eq "OC-6 the mutant runs and still owes d.test.sh, the tree-keyed suite, at a second commit to lib/two.sh" \
+  "d.test.sh|rc=0" "$(oc_owed "$OC_E2")"
+FP_LIB="$OC_SHIPPED_LIB"
+expect_eq "OC-6b …while the shipped join owes b.test.sh beside it there: the row OC-1 holds is red on the mutant" \
+  "b.test.sh|d.test.sh|rc=0" "$(oc_owed "$OC_E2")"
+
+# ============================================================
 section "§FIXED-REGRESSION — a landing proof may be the regression: a born row landed with no verdict events has its finding fixed once a green regression stands at a head its landing is an ancestor of; an absent suite is not owed, never red (wave-39 T19; REQ-14 AC-14.1; D9)"
 # ============================================================
 # `proof_fixed` named a finding fixed only when its row's newest verdict commit held one or more suites, all green.
