@@ -795,7 +795,7 @@ END {
 }'
 
 # The command form's usage refusal: one line to stderr, exit 2. Defined at file scope so sourcing defines it too.
-_rd_usage() { echo "usage: bash anchors.sh reads_index [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
+_rd_usage() { echo "usage: bash anchors.sh reads_index [--closed] [<root>] [--at <commit>]${1:+ — $1}" >&2; exit 2; }
 
 # reads_declared's lines in -> one refusal per declaration the finder could not locate, to stdout.
 _rd_refusals() {  # <at>
@@ -952,6 +952,24 @@ reads_hash() {  # <root> <at> <suite>
   reads_hashes "$1" "$2" "$3" | awk -F'\t' 'NR == 1 { print $2 }'
 }
 
+# THE CLOSED INDEX (wave-39 T40; D5, A-orch-3; for T24's judge, proof.sh `_proof_walk`): file to suites over the
+# closed read sets the key reads, so a suite that reaches a file only through a script's loads (session-poker.test.sh
+# reaching lib/line.sh through hooks/session-poker.sh) is on the file's row, which plain reads_index leaves off.
+#   reads_index_closed <root> <at>   `<file> TAB <suite>[,<suite>]`, reads_index's grammar and order, a narrowed
+#       pair (every declaration on the file located, `_rd_narrowed`) as `<file>#<name>`, as reads_index prints it;
+#       then one `! TAB <suite>` line per suite reads_hashes keys by the tree, sorted, last.
+# `bash anchors.sh reads_index --closed [<root>] [--at <commit>]` prints it from a shell.
+reads_index_closed() {  # <root> <at>
+  local root="${1:-}" at="${2:--}" closed narrow
+  closed="$(_rd_closed "$root" "$at")"
+  narrow="$(_rd_narrowed "$root" "$at")"
+  { printf '%s\n' "$narrow" | sed 's/^/@N	/'; printf '%s\n' "$closed"; } | awk -F'\t' '
+    $1 == "@N" { if (NF >= 6) { nf[$3 "\t" $2] = 1; print $3 "#" substr($4, index($4, ":") + 1) "\t" $2 } next }
+    $1 == "!" || NF < 2 { next }
+    !(($1 "\t" $2) in nf) { print }' | _anc_group
+  printf '%s\n' "$closed" | awk -F'\t' '$1 == "!" { print "!\t" $2 }' | LC_ALL=C sort -u
+}
+
 # reads_suites <root> <at> <cell> -> the suites reads_index names, at <at>, for any file an entry of the Files cell
 # covers (lib/units.sh `cell_covers`, the scheduler's matcher; an entry spelled from <root>/ is read from the
 # root; a narrowed row `<file>#<name>` routes as <file>): by file name, sorted, once each, one per line. Nothing when no suite reads such a file, or units.sh
@@ -970,13 +988,14 @@ reads_suites() {  # <root> <at> <cell>
     | LC_ALL=C sort -u
 }
 
-# Run as a command: `bash anchors.sh reads_index [<root>] [--at <commit>]`. Sourced, it defines and does
+# Run as a command: `bash anchors.sh reads_index [--closed] [<root>] [--at <commit>]`. Sourced, it defines and does
 # nothing.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   [ "${1:-}" = reads_index ] || _rd_usage "the one verb is reads_index"
-  shift; RD_ROOT=""; RD_AT=-
+  shift; RD_ROOT=""; RD_AT=-; RD_CLOSED=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      --closed) RD_CLOSED=1; shift ;;
       --at) [ -n "${2:-}" ] || _rd_usage "--at takes a commit"; RD_AT="$2"; shift 2 ;;
       -*) _rd_usage "unknown flag $1" ;;
       *) [ -z "$RD_ROOT" ] || _rd_usage "at most one root"; RD_ROOT="$1"; shift ;;
@@ -989,5 +1008,5 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     git -C "$RD_ROOT" rev-parse --verify -q "${RD_AT}^{commit}" >/dev/null 2>&1 \
       || { echo "anchors: reads_index: no commit $RD_AT in $RD_ROOT" >&2; exit 2; }
   fi
-  reads_index "$RD_ROOT" "$RD_AT"
+  if [ -n "$RD_CLOSED" ]; then reads_index_closed "$RD_ROOT" "$RD_AT"; else reads_index "$RD_ROOT" "$RD_AT"; fi
 fi

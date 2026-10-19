@@ -283,7 +283,8 @@ section "§CLOSED-INDEX: the file-to-suites index over the closed sets, the one 
 # fails-when: a suite reaching a file only through the closure is missing from the file's row (ci1, ci4), a tree-keyed
 # suite is not marked (ci2), or the shape is not reads_index's (ci3).
 CX="$(rh_closed "$F" "$C1")"
-expect_eq "(ci1) the closed index names s-hook, and s-hook alone, for b.sh, the library a.sh loads" "tests/s-hook.test.sh" "$(row_of payload/scripts/lib/b.sh "$CX")"
+expect_eq "(ci1) the closed index names s-hook for b.sh, the library a.sh loads (closure only), beside s-loop, which names it" \
+  "tests/s-hook.test.sh,tests/s-loop.test.sh" "$(row_of payload/scripts/lib/b.sh "$CX")"
 expect_eq "(ci1) …and for a.sh, as the plain index does" "$(row_of payload/scripts/lib/a.sh "$IX")" "$(row_of payload/scripts/lib/a.sh "$CX")"
 expect_eq "(ci2) s-var, keyed by the tree, is marked on a trailing ! line, as reads_hashes keys it" \
   "$(printf '!\ttests/s-var.test.sh')" "$(printf '%s\n' "$CX" | grep '^!')"
