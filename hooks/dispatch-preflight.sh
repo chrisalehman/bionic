@@ -3007,19 +3007,42 @@ Fix: say why no suite proves this row, on the same line —
 
 Then retry the dispatch."
 fi
-_lo_out=""
+# A COMMAND ON LANDS-ON (wave-39 T20; D20, AC-14.3) is one entry the lift encoded (lib/suite.sh `lands_cmd`): it is
+# held to the brief's Re-executes: runs, each a backticked command as the lift stored it, never to Suites:. One
+# the brief does not declare is refused, named; ready runs a declared one and judges it by its exit code.
+_lo_out=""; _lo_cmd=""
 if [ -n "$_lo_bad" ]; then
   _lo_out="${_lo_bad%% *}"
 elif [ -n "$DP_LANDS_ON" ] && [ "$DP_LANDS_ON" != none ]; then
   for _lo_s in ${DP_LANDS_ON//,/ }; do
+    if _lo_c="$(bionic_lands_cmd "$_lo_s")"; then
+      case " $C_RE_EXECUTES " in *" \`${_lo_c}\` "*) continue ;; esac
+      _lo_cmd="$_lo_c"; break
+    fi
     case " $SUITES_ALLOWED " in *" ${_lo_s##*/} "*) : ;; *) _lo_out="$_lo_s"; break ;; esac
   done
+fi
+if [ -n "$_lo_cmd" ]; then
+  # The command rides in the fact, cut to 20 columns: the fixed words and the fix take 79.
+  dp_finding "Lands-on: \`$(bionic_trunc "$_lo_cmd" 20)\` is not under Re-executes:" "declare it" \
+    "A row lands on a command only when its brief declares that command as one of its runs:
+    Given:       Lands-on: $(bionic_lands_show "$DP_LANDS_ON")
+    Re-executes: ${C_RE_EXECUTES:-(none)}
+
+ready runs a Lands-on: command in the landing tree and judges it by its exit code, so it is one of the
+runs the row may make.
+
+Fix: declare the command on the brief's Re-executes: line, spelled as on Lands-on: —
+    Re-executes: \`${_lo_cmd}\`
+  or name only suites of the row's own set on Lands-on:.
+
+Then retry the dispatch."
 fi
 if [ -n "$_lo_out" ]; then
   # The name rides in the fact, cut as the declared red's is: the fixed words and the fix take 84.
   dp_finding "Lands-on: $(bionic_trunc "$_lo_out" 15) is outside Suites:" "name a suite the row runs" \
     "A row lands only on suites it runs, and this one's suite set does not hold this one:
-    Given:  Lands-on: ${DP_LANDS_ON:+${DP_LANDS_ON} }${_lo_bad}
+    Given:  Lands-on: ${DP_LANDS_ON:+$(bionic_lands_show "$DP_LANDS_ON") }${_lo_bad}
     Suites: ${SUITES_ALLOWED:-(none)}
 
 Fix: name only suites of the row's own set, each as <name>.test.sh or tests/<name>.test.sh, or add
@@ -3064,11 +3087,11 @@ $(dp_lands_index_suites "$BIONIC_ROOT" "${_li_at:--}" "$_li_files")
 DP_LANDS_INDEX_EOF
   if [ "$_li_n" -gt 0 ]; then
     _li_line="$_li_miss"
-    [ "$DP_LANDS_ON" = none ] || _li_line="${DP_LANDS_ON//,/, }, $_li_miss"
+    [ "$DP_LANDS_ON" = none ] || _li_line="$(bionic_lands_show "$DP_LANDS_ON"), $_li_miss"
     _li_more=""; [ "$_li_n" -lt 2 ] || _li_more=" and $((_li_n - 1)) more"
     dp_finding "Lands-on: omits $(bionic_trunc "${_li_miss%%,*}" 20)${_li_more} reading Files" "add them" \
       "A row lands on every suite that reads its Files, and the reads index names suites this Lands-on: omits:
-    Given:    Lands-on: ${DP_LANDS_ON}${_lo_reason:+ ${_lo_reason}}
+    Given:    Lands-on: $(bionic_lands_show "$DP_LANDS_ON")${_lo_reason:+ ${_lo_reason}}
     Missing:  ${_li_miss}
     Files:    ${_li_files}
     Read at:  ${_li_at:-the tree} (lib/anchors.sh reads_index)

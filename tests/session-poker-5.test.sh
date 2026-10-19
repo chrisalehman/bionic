@@ -810,6 +810,133 @@ expect_contains "BU-7b …by the omission arm" "omits" "$BU_OUT$BU_ERR"
 POKE_BOUND="$BU_BOUND_WAS"
 
 # ============================================================
+section "§OWED-WORDS: the judge's refusal, the tick's wait reason and regression-run's refusal each end waive regression '<reply>' beside the second whole run, and name the owed set (wave-39 T25; REQ-18 AC-18.3; D5)"
+# ============================================================
+# A run whose head owes suites past the regression's head was told the way out in three places, and none of them named
+# the user's word for the regression: `current 8` closed on "waive a question", the tick's wait on `approve regression-2`,
+# and regression-run's second-run refusal on the approval. An orchestrator reading them invented `approve regression-2`
+# where the record could only say `waive regression`. Now each ends on `waive regression '<reply>'` beside the second
+# whole run, and the judge and regression-run name THE OWED SET (lib/proof.sh `proof_owed_suites`, the one reader) in
+# one clause (`proof_owed_say`). A head whose owed set is empty owes no run, so no surface offers the waiver for it.
+# FIXTURE FIDELITY: §CHECK's world shape, built afresh: a real repository on `wave/01-fixture`, a.test.sh reading
+# lib/x.sh and b.test.sh reading nothing, a stub tests/run.sh that only counts its runs; base B, a code commit C that
+# a.test.sh reads, and later a glossary commit D in a Markdown file outside the fixed docs list, which no suite reads
+# (AC-18.1). A double wave plan bound to this session, its integrate row pending, every fact in the production
+# writer's shape (`proof_line`, `proof_floor_line`). Every move is the real verb.
+# fails-when: a surface names the run and not the waiver, or ends on anything else; the judge or regression-run names
+# another set than proof_owed_suites prints; a surface offers the waiver at a head whose owed set is empty.
+OW_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+ROW="$(make_repo owed-words)"
+git -C "$ROW" config user.email t@example.com; git -C "$ROW" config user.name "Dana Fixture"
+printf '.bionic\n' > "$ROW/.gitignore"
+mkdir -p "$ROW/tests" "$ROW/lib" "$ROW/notes" "$ROW/.bionic/docs/plans" "$ROW/.bionic/docs/record/w35"
+OW_SEEN="$TMPROOT/ow-seen"; : > "$OW_SEEN"
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$ROW/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$ROW/tests/b.test.sh"
+printf '#!/bin/bash\nprintf ran >> "%s"\nexit 0\n' "$OW_SEEN" > "$ROW/tests/run.sh"
+printf 'one\n' > "$ROW/lib/x.sh"; printf '# Glossary\n' > "$ROW/notes/glossary.md"
+( cd "$ROW" && git add .gitignore tests lib notes && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
+printf 'generic fixture proof\n' > "$ROW/.bionic/docs/record/generic-evidence.md"
+OW_B="$(git -C "$ROW" rev-parse HEAD)"
+OW_C="$(s57_commit "$ROW" lib/x.sh 'C: a code change a.test.sh reads')"
+POW="$ROW/.bionic/docs/plans/wave-x.plan.md"
+ow_plan() {  # <current> <proof lines> -> POW with a pending integrate row, bound to this session
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: %s\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
+    printf -- '- Step 4: dispatched, record/w35/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$OW_B"
+    printf -- '- Step 5: floor, record/w35/floor.log\n  auditor: CONFIRMED, record/w35/audit.md\n'
+    printf -- '- Step 6: review at record/w35/review.md\n'
+    printf -- '- Step 7: documented at record/w35/docs.md\n  n/a: no decision this run\n'
+    printf '%s\n' "$2"
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
+    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
+    printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | pending | approval:release, approval:merge, proof:regression, head |\n'
+  } > "$POW"
+  bind_marker "$ROW" "$POW"; new_roster "$ROW"
+}
+ow_set() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_owed_suites "$2" "$3"' _ "$CK_LIB" "$POW" "$ROW" 2>/dev/null; }
+ow_last() { printf '%s\n' "$1" | awk 'NF { l = $0 } END { print l }'; }   # <text> -> its last non-blank line
+ow_wait() { printf '%s\n' "$OUT" | awk 'index($0, "poker: WAIT T3 ") == 1 { print; exit }'; }   # the tick's WAIT line for T3
+ow_runs() { wc -c < "$OW_SEEN" | tr -d ' '; }
+OW_TAIL="waive regression '<reply>'"
+
+# ---------- a head that owes a.test.sh: the three surfaces ----------
+ow_plan 7 "$(ck_floor "$OW_B")
+$(ck_reads "$OW_C")"
+OW_SET="$(ow_set)"
+expect_eq "OW-0 precondition: the owed set at C is a.test.sh, the suite that reads what C changed (proof_owed_suites, the one reader)" \
+  "a.test.sh" "$OW_SET"
+poke "$ROW" current 8
+expect_eq "OW-1 precondition: current 8 is refused at C (exit 1), the plan at current: 7" "1|7" "$RC|$(sed -n 's/^current: //p' "$POW")"
+expect_contains "OW-1b …by the judge, on the regression" "regression	uncovered	" "$OUT"
+expect_regex "OW-2 AC-18.3 the judge's refusal ends on the user's word for the regression" "waive regression '<reply>'\$" "$(ow_last "$OUT")"
+expect_contains "OW-2b …beside the second whole run" "a second whole run, or the user's word: ${OW_TAIL}" "$(ow_last "$OUT")"
+expect_contains "OW-2c …and names the owed set proof_owed_suites prints" "the head owes ${OW_SET}:" "$(ow_last "$OUT")"
+# The integrate row waits for its step first, so the tick is asked of the run at current: 8, C landed after the advance.
+ow_plan 8 "$(ck_floor "$OW_B")
+$(ck_reads "$OW_C")"
+forget_digest "$ROW"
+poke "$ROW" tick
+expect_contains "OW-3 precondition: the tick holds the integrate row on the regression (the extractor reads real output)" \
+  "proof:regression: the regression is one whole run plus each later commit proved" "$(ow_wait)"
+expect_regex "OW-3b AC-18.3 the tick's wait reason ends on the user's word for the regression" "waive regression '<reply>'\$" "$(ow_wait)"
+expect_contains "OW-3c …beside the second whole run" "a second run: approve regression-2, or the user's word: ${OW_TAIL}" "$(ow_wait)"
+ow_plan 7 "$(ck_floor "$OW_B")
+$(ck_reads "$OW_C")"
+poke "$ROW" regression-run
+expect_eq "OW-4 precondition: regression-run refuses a second whole run at C (exit 1), and nothing ran" "1|0" "$RC|$(ow_runs)"
+expect_contains "OW-4b …as a second whole run" "a second whole run on this plan" "$OUT"
+expect_regex "OW-4c AC-18.3 regression-run's refusal ends on the user's word for the regression" "waive regression '<reply>'\$" "$(ow_last "$OUT")"
+expect_contains "OW-4d …and names the owed set proof_owed_suites prints" "the head owes ${OW_SET}:" "$OUT"
+
+# ---------- the user's word closes it: every surface goes quiet ----------
+poke "$ROW" waive regression '1'
+expect_eq "OW-5 the user's waive regression '1' is admitted (exit 0)" "0" "$RC"
+expect_eq "OW-5b …and the owed set is empty to the waiver's head" "" "$(ow_set)"
+poke "$ROW" current 8
+expect_eq "OW-5c …so current 8 is admitted (exit 0), the plan at current: 8" "0|8" "$RC|$(sed -n 's/^current: //p' "$POW")"
+
+# ---------- AC-18.1: a glossary commit past the regression's head owes nothing, and no surface offers the waiver ----------
+OW_D="$(s57_commit "$ROW" notes/glossary.md 'D: a glossary line, read by no suite')"
+ow_plan 7 "$(ck_floor "$OW_C")
+$(ck_reads "$OW_D")"
+expect_eq "OW-6 precondition: past the regression's head at C, the glossary commit D owes nothing (the extractor read a.test.sh at OW-0)" \
+  "" "$(ow_set)"
+poke "$ROW" current 8
+expect_eq "OW-6b current 8 is admitted at D (exit 0)" "0" "$RC"
+expect_absent "OW-6c …and says nothing of the regression's waiver (OW-2 is the positive)" "waive regression" "$OUT"
+ow_plan 8 "$(ck_floor "$OW_C")
+$(ck_reads "$OW_D")"
+forget_digest "$ROW"
+poke "$ROW" tick
+expect_contains "OW-7 precondition: the tick still holds the integrate row (the extractor reads real output)" "poker: WAIT T3 " "$(ow_wait)"
+expect_absent "OW-7b …but not on the regression, and with no waiver (OW-3 is the positive)" "proof:regression" "$(ow_wait)"
+poke "$ROW" regression-run
+expect_eq "OW-8 regression-run refuses a run at D, which the regression covers (exit 1), and nothing ran" "1|0" "$RC|$(ow_runs)"
+expect_contains "OW-8b …saying the head is already proved" "is already proved" "$OUT"
+expect_absent "OW-8c …and offering no waiver (OW-4c is the positive)" "waive regression" "$OUT"
+
+# ---------- the waiver alone: the tick's plan reader (lib/units.sh) takes it as the regression's line (AC-18.4) ----------
+# A run whose regression was never run and is waived: the judge reads it covered, so the tick must not hold the
+# integrate row on a `proof:regression` read only a `proved: kind=regression` line could meet.
+ow_plan 7 "$(ck_reads "$OW_D")"
+poke "$ROW" waive regression '1'
+expect_eq "OW-9 precondition: with no regression proof, the user's waive regression '1' is admitted (exit 0)" "0" "$RC"
+poke "$ROW" current 8
+expect_eq "OW-9b …and the real current 8 is admitted on it (exit 0), the plan at current: 8" "0|8" "$RC|$(sed -n 's/^current: //p' "$POW")"
+forget_digest "$ROW"
+poke "$ROW" tick
+expect_contains "OW-9c precondition: the tick holds the integrate row on its approvals (the extractor reads real output)" "poker: WAIT T3 " "$(ow_wait)"
+expect_absent "OW-9d AC-18.4 …and not on the regression, which the waiver answers (OW-3 is the positive)" "proof:regression" "$(ow_wait)"
+POKE_BOUND="$OW_BOUND_WAS"
+
+# ============================================================
 section "§BORN-NONE: task-add --born <record>#<n> on a row whose lands-on cell is none or absent says the finding counts on the next green regression (wave-39 T19; REQ-14 AC-14.2; D9)"
 # ============================================================
 # A row that lands with no verdict events (no Lands-on suite, a hand landing) has its findings fixed only once a
