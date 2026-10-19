@@ -14,7 +14,8 @@
 #   dispatch-preflight.test.sh     §CAP … §role-class, then §no-listagents
 #   dispatch-preflight-2.test.sh   S1 … S22
 #   dispatch-preflight-3.test.sh   §combined … §two-deliverables
-#   dispatch-preflight-4.test.sh   §Q … §RECORDER, and S10h, which §RECORDER reads
+#   dispatch-preflight-4a.test.sh  S10h … §LR       (two parts since wave-39 T37; the helpers they share
+#   dispatch-preflight-4b.test.sh  §T72 … §FILES     are in tests/dispatch-preflight-4.prelude.sh)
 #
 # What every shard needs and no section owns is in tests/dispatch-preflight.prelude.sh: the
 # fixtures, the sandbox and its traps, run_gate and the payload builders, and the helpers and
