@@ -2451,6 +2451,10 @@ expect_absent "PU.6 …with nothing from this arm on the wire" "write tracked fi
 
 # RULE 3: THE PROVED HEAD REFUSES — run nothing.
 REPO=$(pf_repo rpc)
+# a.test.sh DECLARES lib/one.sh (as units §FLOOR-STANDS does): the outside merge below changes a file a suite reads
+# (wave-39 T45; D5, AC-18.1). The fixture's suites are otherwise empty, and a file no suite reads owes nothing.
+# The declaration is built by printf, as units does: written whole here it would be extracted as THIS file's own.
+pf_commit "$REPO" tests/a.test.sh "$(printf '#!/bin/bash\n%s file lib/one.sh %s' anchor "'one'")"
 write_attestation "$REPO" "$SID_A"
 PF_H=$(git -C "$REPO" rev-parse HEAD)
 pf_plan "$REPO" "$PF_H"
@@ -2462,8 +2466,10 @@ expect_eq "PC.1 a whole run on the proved head is REFUSED (rule 3)" "deny" "$GAT
 expect_contains "PC.1 …the one line says the head is proved" "already proved" "$(pf_line)"
 expect_contains "PC.1 …the detail names the head and the evidence" "record/w99-floor.txt" "$GATE_VERR"
 expect_contains "PC.1 …and the head" "${PF_H:0:7}" "$GATE_VERR"
-# AN OUTSIDE MERGE IS `uncovered` NOW (T25), and the wall treats it as any other uncovered head:
-# admitted as the plan's FIRST whole run (the refused PC.1 journalled none), refused as a SECOND.
+# AN OUTSIDE MERGE THAT A SUITE READS DIFFERENTLY IS `uncovered` (D5, AC-18.1; wave-39 T24 inverted wave-26 AC-3.4,
+# T45 reworks this pin to match): the merge changes lib/one.sh, which a.test.sh reads, so a.test.sh owes its run
+# and the wall treats the head as any other uncovered head: admitted as the plan's FIRST whole run (the refused PC.1
+# journalled none), refused as a SECOND. A merge no suite reads is covered by its parent and owes nothing.
 git -C "$REPO" checkout -q -b other-work 2>/dev/null
 pf_commit "$REPO" lib/one.sh 'one, from outside'
 git -C "$REPO" checkout -q wave/99-test 2>/dev/null
