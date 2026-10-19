@@ -137,15 +137,14 @@ bk() {  # booked.sh with this row's store, readings and detached-ask ceiling; cw
   ( cd "$ROW" || exit 1
     env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_GATE_POLL="$POLL" BIONIC_PROBE_USED_PCT="$USED" \
         BIONIC_PROBE_BUSY_CORES="$BUSY" BIONIC_SETTLE_MAX_WAIT="$MW" BIONIC_LOAD_NOW_FILE="$LOADF" \
-        ${BK_CARRIER[@]+"${BK_CARRIER[@]}"} bash "$BK_SCRIPT" "$@" )
+        bash "$BK_SCRIPT" "$@" )
 }
-BK_CARRIER=()
-# SIG_DFL — the carrier the signal rows (K6, K8) start from: INT, QUIT, TERM and HUP at their
-# defaults, as a harness spawn starts a call. This suite may itself start with them ignored (a
-# background job without job control ignores INT and QUIT, a nohup'd one HUP; the whole run at
-# d3c4ed2e started it with all three, wave-38 T34), and a signal ignored on entry can be neither
-# trapped nor received by any bash below, so only an exec through perl resets them.
-SIG_DFL=(perl -e '$SIG{$_} = "DEFAULT" for qw(INT QUIT TERM HUP); exec @ARGV or exit 126')
+# THE SIGNAL ROWS (K6, K8) START FROM THE DEFAULTS THE LAUNCHER GIVES THEM. This suite may be started with INT,
+# QUIT and HUP ignored (a nohup'd or backgrounded run; the whole run at d3c4ed2e started it with all three, wave-38
+# T34), and a signal ignored on entry can be neither trapped nor received by any bash below. The launchers reset
+# them (tests/run.sh execs itself through a perl SIG_DFL reset at entry; wave-39 T14, D17, AC-10.1; booked.test.sh
+# §SIGNALS proves it), so no row carries a reset of its own. The one thing left to a row is a background job of
+# this script, which starts with INT and QUIT ignored whatever it inherited: K8 starts its shim under `set -m`.
 
 gate() {  # <name> — a command that marks itself started, then holds until <name>.go
   printf 'touch %q; n=0; while [ ! -f %q ] && [ $n -lt 600 ]; do n=$((n+1)); sleep 0.05; done' \
@@ -905,25 +904,23 @@ expect_eq "K5.4 …before it could finish: no line of its own output reads finis
 # started in the background without job control starts with SIGINT and SIGQUIT ignored, and
 # every process below inherits that. Each command runs unwrapped first; the booked run, in
 # bash and under --shell as the wall writes it, must print the same. Both arms start from the
-# SIG_DFL carrier, so the control reads the defaults its pin names and the booked arm cannot
+# launcher's defaults, so the control reads the defaults its pin names and the booked arm cannot
 # pass by inheriting the suite's own ignored INT.
 newrow k6
-BK_CARRIER=("${SIG_DFL[@]}")
 K6_INT='trap "echo got-int" INT; kill -INT $$; sleep 0.2; echo after'
 K6_QUIT='trap "echo got-quit" QUIT; kill -QUIT $$; sleep 0.2; echo after'
 K6_KID="sh -c 'kill -INT \$\$; echo survived'; echo \"rc=\$?\""
-K6_PLAIN="$("${SIG_DFL[@]}" bash -c "$K6_INT" 2>&1)"
+K6_PLAIN="$(bash -c "$K6_INT" 2>&1)"
 expect_eq "K6.1 control: unwrapped, the command's own INT trap runs" "got-int"$'\n'"after" "$K6_PLAIN"
 expect_eq "K6.2 booked, it runs the same" "$K6_PLAIN" "$(bk -- "$K6_INT" 2>&1)"
-K6_PLAIN="$("${SIG_DFL[@]}" bash -c "$K6_QUIT" 2>&1)"
+K6_PLAIN="$(bash -c "$K6_QUIT" 2>&1)"
 expect_eq "K6.3 control: unwrapped, the QUIT trap runs" "got-quit"$'\n'"after" "$K6_PLAIN"
 expect_eq "K6.4 booked, it runs the same" "$K6_PLAIN" "$(bk -- "$K6_QUIT" 2>&1)"
-K6_PLAIN="$("${SIG_DFL[@]}" bash -c "$K6_KID" 2>&1)"
+K6_PLAIN="$(bash -c "$K6_KID" 2>&1)"
 expect_eq "K6.5 control: unwrapped, a process below the command dies of INT" "rc=130" "$K6_PLAIN"
 expect_eq "K6.6 booked, it dies the same way: INT is not ignored below the shim" "$K6_PLAIN" "$(bk -- "$K6_KID" 2>&1)"
 expect_eq "K6.7 …under --shell as well" "$K6_PLAIN" "$(bk --shell "$H_SH" -- "$K6_KID" 2>&1)"
 expect_eq "K6.8 …and under --kill-after, which always had job control" "$K6_PLAIN" "$(bk --kill-after 9 -- "$K6_KID" 2>&1)"
-BK_CARRIER=()
 
 # K7. EVERY COMMAND LEADS ITS OWN PROCESS GROUP NOW, so a shim stopped by a signal kills the
 # group with the tree: a child whose parent already exited dies too, as under --kill-after (K1).
@@ -944,11 +941,10 @@ expect_eq "K7.4 …and its request was ended" "" "$(places)"
 
 # K8. A SIGNAL SENT TO THE SHIM REACHES THE COMMAND AS ITSELF, AND QUIT IS TAKEN TOO (review 12
 # F3, A-T50.2). K6 has the command signal itself; here the signal comes from outside, as an
-# interrupt or a stop from the harness would. The shim is started from the SIG_DFL carrier, each
-# signal sent here at its default, as a harness spawn starts a call: perl resets them before it
-# execs the shim (HUP too since wave-38 T34: the whole run at d3c4ed2e hung K8 [HUP]), because
-# this suite may itself have been started with them ignored (a background job without job
-# control is), and a signal ignored on entry can be neither trapped nor received. The command
+# interrupt or a stop from the harness would. The shim is started with each signal at its default,
+# as a harness spawn starts a call: the launcher resets them for the whole run (the whole run at
+# d3c4ed2e hung K8 [HUP], wave-38 T34), and the shim's background job is started under `set -m`,
+# because a background job without job control ignores INT and QUIT. The command
 # traps each signal and writes the one it saw; an orphan it left behind (outside its tree,
 # inside its group) must die too, and the place must be free afterwards.
 # EVERY WAIT HERE IS BOUNDED: a shim that does not end within 8 s of the signal is a failed row,
@@ -965,12 +961,13 @@ k8_drive() {  # <signal> [<shim option>...] -> K8_RC (or "hung"), K8_SAW, K8_PID
   shift
   rm -f "$ROW"/k8.*
   # `exec` all the way down, so the job's pid IS the shim's.
+  set -m
   ( cd "$ROW" || exit 1
     exec env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
       BIONIC_LOAD_NOW_FILE="$LOADF" \
-      "${SIG_DFL[@]}" \
       bash "$BK_SCRIPT" "$@" -- "$K8_CMD" ) > "$ROW/k8.out" 2>&1 &
   _job=$!
+  set +m
   BG="$BG $_job"
   wait_file "$ROW/k8.started" 10
   _shim="$(held_pids)"; _shim="${_shim% }"
