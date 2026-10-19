@@ -20,9 +20,11 @@ requirements card, on the user's word at D3: "I didn't want to eliminate step 0 
 than requirements. It doesn't make sense to combine them." A clean run again has five human stops: the configuration
 card, the requirements card, the design card, the plan card and the final card (D3, D4, D23). The typed and config
 spellings of `floor` that 1.21.0 kept as aliases are removed, as 1.21.0 promised, and the spellings a delivered plan
-already holds still read (D2). Thirty-six build rows landed: six through the line and thirty by hand, one before the
+already holds still read (D2). Thirty-eight build rows landed: eight through the line and thirty by hand, one before the
 run's operating rules and twenty-nine under them (D26, D27). The one-file median that was this release's headline
-number was never measured, because no one-file fix row landed through the line; the numbers are below. This is a minor
+number was measured after this entry was first written: the two one-file fix rows, T47 and T48, landed through the
+line and took 58.4 minutes median against the 15-minute bar, a miss carried to the next charter; the numbers are
+below. This is a minor
 release by the policy above: the proof fact, the narrowing, the skip, the suite bar, the promise with load, the
 `Re-executes:` landing and the restored Step-0 card are new capability, and the aliases go as 1.21.0 said they would.
 `canonical_sdlc_version` stays 14.
@@ -177,7 +179,8 @@ orchestrator (A-orch-36).
   and AC-11.3 for ADR-062 at close-out.
 - The auditor (`auditor-evidence.md`, T29): REFUTED, with 37 confirmed, 5 refuted and 7 unverifiable, on three gaps of
   substance: the owed set proven only for direct readers (REQ-18, fixed by T46), the regression fix only for the
-  `landed:` header (REQ-14) and the one-file median never measured (REQ-5). Three refuted cells were given their
+  `landed:` header (REQ-14) and the one-file median unmeasured then (REQ-5); T47 and T48 measured it afterwards, at
+  58.4 minutes against the 15-minute bar, a miss carried to the next charter. Three refuted cells were given their
   replacement evidence (A-orch-77).
 - The critic (`critic-adversarial.md`, `critic-structure.md`, T30): four adversarial findings, one S2 fixed by T46, two
   S3 deferred and one S4 note; one structure finding, the same defect, fixed by T46, and one debt line.
@@ -209,8 +212,9 @@ T2 queue ready=2026-10-19T06:23:24Z landed=2026-10-19T07:58:31Z minutes=95.1 run
 Wave 39's numbers are over its six line landings only; its thirty hand landings carry no ready time. `reused=8` is
 T2's landing: eight suites skipped on T9's greens, `suites 62 of 70`, the first narrowed landing (A-orch-34,
 A-orch-38). T9 before it ran 70 of 70 with nothing reused, because the night's hand landings had moved every key
-(A-orch-33). The one-file median was never measured: no one-file fix row landed through the line, so AC-5.3 is a miss
-by about eight times against the 15-minute bar, carried to the next charter (`T28-matrix-fill.md`).
+(A-orch-33). The one-file median was measured afterwards: the two one-file fix rows, T47 and T48, landed through the line
+at 58.2 and 58.5 minutes, a median of 58.4 against the 15-minute bar, so AC-5.3 is a miss by measurement, about four
+times the bar, carried to the next charter (`T28-matrix-fill.md`).
 
 The scorecard at the same head, `landing-report --scorecard`:
 
@@ -226,13 +230,14 @@ human-wait minutes: unverified · no target (the user's)
 
 ### Standing reds
 
-The whole regression (T31) ran at 44666977 on 2026-10-19 from 5:59 to 7:45 AM PDT: 115 of 117 suites green, two red,
+The whole regression (T31) ran at 44666977 on 2026-10-19 from 5:59 to 6:45 AM PDT: 115 of 117 suites green, two red,
 both left by hand landings. `regression-rename.test.sh` (§AS-1, §AL-2: the retired token `floor` at
 hooks/session-poker.sh:5199, written by T25 after T18 removed the alias) is fixed by T47, landed through the line at
 39288958. `refuse.test.sh` (§INV: the file-scope refusal T20 added at hooks/dispatch-preflight.sh:3027 had no bullet in
 tests/fixtures/refusal-inventory.md) is fixed by T48, landed through the line at 3d9b9b77. Each fix row ran its red
 suite red, then green, and the line ran the suites that read the changed file (62 of 63 for T47, 5 of 5 for T48). No
-red stands at the release head.
+red stands at the release head. A second whole run at 4dfc59df, approved by the user, was 117 of 117 green (11:46 AM to
+12:33 PM PDT).
 
 ### Known limits
 
@@ -248,8 +253,8 @@ red stands at the release head.
 - AC-5.3's number, the one-file fix rows' median, was not measured; the cell's median is over six multi-file build rows
   (`auditor-evidence.md`, finding 3; REQ-5). The 15-minute bar for a one-file fix row is unproven, and the six line
   landings took 95.1 to 278.1 minutes.
-- AC-2.4's T3 observation, ready printing n under 55 for a one-line poker change, was replaced by an index count
-  (`auditor-evidence.md`, finding 8). The live `ready` line is T2's `suites 62 of 70` on a multi-file row (A-orch-78).
+- AC-2.4 was observed live on T47: ready printed `suites 62 of 63` for a one-line session-poker.sh change, against the
+  criterion's 55, a miss carried to the next charter (`auditor-evidence.md`, finding 8).
 - AC-8.1's cell has no head or dirty line and no clean dispatch-preflight-2 log holds T12's change; T31's whole run is
   the first that can (`auditor-evidence.md`, finding 6).
 - A hand landing behind a line entry rebuilds its candidate on every 0.2-second poll while the entry ahead has not

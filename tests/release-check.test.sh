@@ -50,7 +50,9 @@
 #                   1.21.0's fold of the Step-0 card (T17) and the summary quotes D3; the Migration paragraph says the
 #                   typed and config `floor` spellings are removed and names `rigor-minimum:`; every landed build row
 #                   names its record; D1 to D24 each head a section and D25 to D27 are named; the landing numbers carry
-#                   reused=8, the median and the one-file sentence; Standing reds and Known limits stand, the latter
+#                   reused=8, the median and the one-file sentence, which states the 58.4 minutes T47 and T48
+#                   measured; Known limits state AC-2.4's measured 62 of 63 and the entry says nothing "never
+#                   measured" or "replaced by an index count"; Standing reds and Known limits stand, the latter
 #                   with the critic's two deferred sentences. Each rule has a doctored copy that goes red.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
@@ -977,7 +979,7 @@ r22_check() {
   for s in D25 D26 D27; do
     grep -q -E "[( ]$s[,) ]" <<<"$blk" || echo "r22: the entry does not name $s"
   done
-  # the measured outcome of REQ-5: the reuse count and the median, and the one-file median said unmeasured
+  # the measured outcome of REQ-5: the reuse count and the median, and the one-file median as measured (T47 and T48)
   land="$(cl_part "$f" 1.22.0 'The landing numbers')"
   [ -n "$land" ] || echo "r22: no landing numbers section"
   has "$land" 'reused=8' && has "$land" '119.6' && has "$land" 'one-file' || echo "r22: the landing numbers carry no reused=, median and one-file sentence"
@@ -986,6 +988,13 @@ r22_check() {
   [ -n "$lim" ] || { echo "r22: no Known limits section"; return 0; }
   has "$lim" "$DEF_1220_A" || echo "r22: Known limits omit critic-adversarial.md#2"
   has "$lim" "$DEF_1220_B" || echo "r22: Known limits omit critic-adversarial.md#3"
+  # the two measurements the wave made after the entry was first written (A-orch-97): the one-file median, 58.4 minutes
+  # for T47 and T48 against the 15-minute bar, and AC-2.4's live ready line, 62 of 63 against the criterion's 55.
+  # Each positive is read from the same extractor as the absence beside it.
+  has "$land" '58.4' || echo "r22: the landing numbers do not state the one-file median of 58.4 minutes"
+  has "$lim" '62 of 63' || echo "r22: Known limits do not state AC-2.4's measured 62 of 63"
+  ! has "$blk" 'never measured' || echo "r22: the entry still says something was never measured"
+  ! has "$blk" 'replaced by an index count' || echo "r22: the entry still says AC-2.4 was replaced by an index count"
 }
 # --- the extractors are not vacuous
 expect_nonempty "(w0) the 1.22.0 block is found" "$(cl_block "$CL" 1.22.0)"
