@@ -81,6 +81,7 @@ fi
 # landing sets kind=hand, the git user and the reason. Both set the session the publish's plan write
 # and roster mark run under (LINE_SID; wave-28 T6).
 LINE_KIND="queue"; LINE_BY="-"; LINE_WHY="-"; LINE_SID=""; LINE_MARKED=""
+LINE_PROMISED=-; LINE_ACTUAL=-   # the last run's promised and actual seconds (wave-39 T8), set as LINE_AT is
 
 # THE SUITE BAR (wave-39 T6; D1; spec §3 "the two bars"): ten minutes of the gate's promise (`_gate_seconds`).
 # Defined here and nowhere else; the landing line's refusal of a Lands-on suite promising more is T7's
@@ -783,6 +784,10 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
     _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:-<none>} branch=${branch} — the landing record cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
   [ -z "$within" ] || deadline=$(( $(_res_now) + 10#$within ))   # decimal: `08` is eight seconds
+  # THE PROMISE, PRINTED (wave-39 T8; D11, AC-4.3): once, before the carrier starts, the seconds the row's suites
+  # promise now against the --within it was given. A suite whose promise the time left cannot hold is waited,
+  # never started short (`_line_time_for`, D3); this line says the sum up front. No --within, no line.
+  [ -z "$within" ] || printf 'promised %ss of %ss\n' "$(_line_promise_total "$suites" "$wt")" "$((10#$within))"
   LINE_SID="$sid"   # the session the publish's plan write and roster mark run under (T6)
   _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
@@ -846,6 +851,19 @@ _line_width_why() {  # -> the gate's answer of 0 to this landing, naming the old
   fi
 }
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
+# The seconds <suites> promise now, summed: each one's `_gate_promise` from <tree>'s project, as `_line_time_for`
+# reads it (wave-39 T8; D11, AC-4.3). 0 for a suite with no recorded duration, and when the store cannot be read.
+_line_promise_total() {  # <suites, comma-joined | none> <tree>
+  local s p t=0
+  _gate_store >/dev/null 2>&1 || { echo 0; return 0; }
+  for s in $(printf '%s\n' "$1" | tr ',' ' '); do
+    [ "$s" != none ] || continue
+    p="$(_gate_promise "${s##*/}" "${2:-}" 2>/dev/null)"; p="${p##*:}"
+    case "$p" in ''|*[!0-9]*) p=0 ;; esac
+    t=$((t + p))
+  done
+  printf '%s\n' "$t"
+}
 
 # THE LANDING'S PLACE IN THE GATE'S LINE (wave-38 T30; D22; A-T6-10, A-orch-49; gate.sh THE LEASE). The
 # gate holds every landing behind the oldest lease, and the line holds a landing at publish behind every
@@ -1029,7 +1047,7 @@ EOF
     while _line_drain_next "$plan" "$rec" "$row" "$cand" "$cbase" "$_LINE_LT" "$deadline"; do
       s="$LINE_SUITE"
       case "$LINE_RESULT" in
-        green) _line_verdict_put "$plan" "$row" "$cand" "$s" green "$LINE_LOG" "$LINE_AT" >/dev/null
+        green) _line_verdict_put "$plan" "$row" "$cand" "$s" green "$LINE_LOG" "$LINE_AT" "$LINE_PROMISED" "$LINE_ACTUAL" >/dev/null
           continue ;;
         waiting) c="$LINE_WHY"; _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
           _line_waiting "$row" "$again" "$c"; return 75 ;;
@@ -1038,10 +1056,10 @@ EOF
           continue 2 ;;
         # NO VERDICT (D8, AC-9.1): the entry keeps its place, every sibling ends with its verdict written, and
         # the pass starts again, where the suite is asked again or the entry stalls.
-        none) _line_verdict_put "$plan" "$row" "$cand" "$s" none "$LINE_LOG" "$LINE_AT" >/dev/null
+        none) _line_verdict_put "$plan" "$row" "$cand" "$s" none "$LINE_LOG" "$LINE_AT" "$LINE_PROMISED" "$LINE_ACTUAL" >/dev/null
           _line_drain_stop await "$plan" "$rec" "$row" "$cand" "$cbase"
           continue 2 ;;
-        red) _line_verdict_put "$plan" "$row" "$cand" "$s" red "$LINE_LOG" "$LINE_AT" >/dev/null ;;
+        red) _line_verdict_put "$plan" "$row" "$cand" "$s" red "$LINE_LOG" "$LINE_AT" "$LINE_PROMISED" "$LINE_ACTUAL" >/dev/null ;;
         judge) : ;;
         *) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
           _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
@@ -1235,9 +1253,9 @@ EOT
     _line_prove "$plan" "$rec" "$row" "$head" "$4" "$jt" "$s" "$8"
     _LINE_GRANT=0; _LINE_ASK=1   # the drain asks again: the judge's answer is spent
     case "$LINE_RESULT" in
-      green|red|none) _line_verdict_put "$plan" "$row" "$head" "$s" "$LINE_RESULT" "$LINE_LOG" "$LINE_AT" >/dev/null
+      green|red|none) _line_verdict_put "$plan" "$row" "$head" "$s" "$LINE_RESULT" "$LINE_LOG" "$LINE_AT" "$LINE_PROMISED" "$LINE_ACTUAL" >/dev/null
         hr="$LINE_RESULT"; hl="$LINE_LOG" ;;
-      discarded) _line_verdict_put "$plan" "$row" "$head" "$s" discarded "$LINE_LOG" "$LINE_AT" >/dev/null
+      discarded) _line_verdict_put "$plan" "$row" "$head" "$s" discarded "$LINE_LOG" "$LINE_AT" "$LINE_PROMISED" "$LINE_ACTUAL" >/dev/null
         LINE_RED=replaced; return 0 ;;
       *) LINE_RED="$LINE_RESULT"; return 0 ;;
     esac
@@ -1402,7 +1420,8 @@ _line_prove() {  # <plan> <rec> <row> <candidate> <cbase> <landing tree> <suite>
 # (`_line_time_for`, D3), which is checked before each runner is asked.
 _line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
   local within=""
-  LINE_RESULT=""; LINE_WHY=""; LINE_RP=""; LINE_RES=""; LINE_AT=-; LINE_LOG="$(_line_suite_log "$1" "$2" "$5" "$3")"
+  LINE_RESULT=""; LINE_WHY=""; LINE_RP=""; LINE_RES=""; LINE_AT=-; LINE_PROMISED=-; LINE_ACTUAL=-
+  LINE_LOG="$(_line_suite_log "$1" "$2" "$5" "$3")"
   if [ -n "$6" ]; then
     within="$(_line_time_for "${5##*/}" "$6" "$4")" \
       || { LINE_RESULT=waiting; LINE_WHY="$(_line_time_why "${5##*/}" "$6" "$4")"; return 0; }
@@ -1422,6 +1441,7 @@ _line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
 _line_prove_end() {  # <result file> [<suite>]
   local r p
   LINE_AT="$(_line_run_at "$1")"
+  LINE_PROMISED="$(_line_run_at "$1" promised)"; LINE_ACTUAL="$(_line_run_at "$1" actual)"
   r="$(sed -n 's/^gate=//p' "$1" 2>/dev/null)"
   if [ -n "$r" ]; then
     if [ "$r" = 75 ]; then
@@ -1433,11 +1453,25 @@ _line_prove_end() {  # <result file> [<suite>]
   fi
   rm -f "$1"
 }
-# The admission epoch a runner filed in its result file (`at=`), `-` when it filed none.
-_line_run_at() {  # <result file>
+# The admission epoch a runner filed in its result file (`at=`), `-` when it filed none; with <field>, that
+# field instead (`promised`, `actual`: wave-39 T8).
+_line_run_at() {  # <result file> [<field>]
   local t
-  t="$(sed -n 's/^at=//p' "$1" 2>/dev/null | head -1)"
+  t="$(sed -n "s/^${2:-at}=//p" "$1" 2>/dev/null | head -1)"
   printf '%s\n' "${t:--}"
+}
+# THE RUN'S PROMISE AND ITS ACTUAL (wave-39 T8; D11, AC-4.2), read off the gate's request <id> by the runner:
+# `promised` the seconds of its promise= (what the gate promised it at admission), `actual` its ended less
+# admitted (the seconds gate_end records); `-` when the request does not say.
+_line_req_seconds() {  # <request id> promised|actual
+  local d t=""
+  d="$(gate_dir 2>/dev/null)" && _gate_read "$d/requests/$1" 2>/dev/null || { echo -; return 0; }
+  case "$2" in
+    promised) t="${_R_promise##*:}"; [ -n "$_R_promise" ] || t="" ;;
+    actual) case "$_R_admitted$_R_ended" in ''|*[!0-9]*) t="" ;; *) [ -n "$_R_admitted" ] && [ -n "$_R_ended" ] && t=$((_R_ended - _R_admitted)) ;; esac ;;
+  esac
+  case "$t" in ''|*[!0-9]*) t=- ;; esac
+  printf '%s\n' "$t"
 }
 # The gate's admission instant for request <id> (its admitted= line), read in the runner right after
 # admission; the clock's reading when the request cannot be read.
@@ -1452,6 +1486,7 @@ _line_admitted_at() {  # <request id>
 _line_prove_kill() {  # <pid> <result file>
   _line_kill_tree "$1"; wait "$1" 2>/dev/null
   LINE_AT="$(_line_run_at "$2")"
+  LINE_PROMISED="$(_line_run_at "$2" promised)"; LINE_ACTUAL=-   # a run stopped is no measure of the suite
   if grep -q '^admitted=' "$2" 2>/dev/null; then LINE_RESULT=discarded; else LINE_RESULT=replaced; fi
   rm -f "$2"
 }
@@ -1507,16 +1542,19 @@ _line_room_one() {  # <plan> <rec> <row> <cbase> <deadline>
   done
 }
 # THE VERDICT LINE, the one writer of every verdict a landing writes (on the candidate and at the head):
-# `line/v1|ev=verdict|row=|commit=|suite=|result=|log=|admitted=<epoch|->|width=<J>|at=`. The readers that
+# `line/v1|ev=verdict|row=|commit=|suite=|result=|log=|admitted=<epoch|->|width=<J>|reads=|promised=|actual=|at=`. The readers that
 # read by position (`_line_proved`, `_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`)
 # read $2..$7, so a field added to it goes after `log=`. admitted= is the gate's admission instant for the run
 # the verdict judges (wave-38 T6; AC-6.4), `-` when none is on record; width= the width the gate gave the
 # landing when that run started (`_line_ask`).
 # reads= (wave-39 T1; D5, D8) is the suite's read key at <commit>, `_line_reads`; the reuse test matches on it.
-_line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log> [<admitted epoch>]
+# promised= and actual= (wave-39 T8; D11, AC-4.2) go after reads=: the seconds the gate promised the run at its
+# admission (its request's promise=) and the gate's own measure of it (ended less admitted), `-` for a run never
+# admitted, a run stopped before it ended, and a verdict no run wrote (absent).
+_line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log> [<admitted epoch>] [<promised s>] [<actual s>]
   _line_reads_fill "$(_line_root "$1")" "$3" "$4"
   line_event "$1" verdict "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:-1}" \
-    "reads=$(_line_reads_of "$3" "$4" || echo -)"
+    "reads=$(_line_reads_of "$3" "$4" || echo -)" "promised=${8:--}" "actual=${9:--}"
 }
 # THE PASS'S SUITES, in the order named. For each: its suite (_LINE_DS), its runner's pid (_LINE_DP: empty
 # until started, `-` for a red judged from its log), result file (_LINE_DR), log (_LINE_DL) and the width it
@@ -1627,7 +1665,7 @@ _line_drain_stop() {  # kill|await <plan> <rec> <row> <candidate> <cbase>
       _line_prove_kill "$p" "${_LINE_DR[$i]}"
     fi
     case "$LINE_RESULT" in
-      green|red|none|discarded) _line_verdict_put "$2" "$4" "$5" "${_LINE_DS[$i]}" "$LINE_RESULT" "$LINE_LOG" "$LINE_AT" >/dev/null ;;
+      green|red|none|discarded) _line_verdict_put "$2" "$4" "$5" "${_LINE_DS[$i]}" "$LINE_RESULT" "$LINE_LOG" "$LINE_AT" "$LINE_PROMISED" "$LINE_ACTUAL" >/dev/null ;;
     esac
     i=$((i + 1))
   done
@@ -1679,7 +1717,7 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
   local id rc p
   id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "${1##*/}" ${2:+--within "$2"})"; rc=$?
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
-  printf 'admitted=%s\nat=%s\n' "$id" "$(_line_admitted_at "$id")" > "$5"
+  printf 'admitted=%s\nat=%s\npromised=%s\n' "$id" "$(_line_admitted_at "$id")" "$(_line_req_seconds "$id" promised)" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended
   # by a signal is a `none` verdict, and the shell's notice of the kill is no line of ready's output.
   # The suite starts through the plugin's primitive (lib/suite.sh; wave-33 T2, D3): a job of its own, so
@@ -1696,5 +1734,6 @@ _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> 
     wait "$p"; rc=$?
     gate_end "$id" "$rc" >/dev/null 2>&1
   } 2>/dev/null
-  printf 'rc=%s\n' "$rc" >> "$5"
+  # actual= before rc=: a reader that sees rc= (the run ended) sees its actual too.
+  printf 'actual=%s\nrc=%s\n' "$(_line_req_seconds "$id" actual)" "$rc" >> "$5"
 }

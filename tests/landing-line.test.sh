@@ -2580,7 +2580,7 @@ expect_eq "(u1-pre) T1 lands on a.test.sh, run once" "0 1" "$LL_RC $(ll_lines "$
 HU="$(ll_ahash "$RU" "$KU1")"
 expect_regex "(u1-pre) a.test.sh's read key at T1's candidate is a sha256" '^[0-9a-f]{64}$' "$HU"
 expect_regex "(u1) T1's verdict carries reads=, the read key at its candidate, after width=" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KU1}\\|suite=a\\.test\\.sh\\|result=green\\|log=[^|]+\\|admitted=[^|]+\\|width=[0-9]+\\|reads=${HU}\\|at=" "$(ll_ev "$RU" verdict)"
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KU1}\\|suite=a\\.test\\.sh\\|result=green\\|log=[^|]+\\|admitted=[^|]+\\|width=[0-9]+\\|reads=${HU}\\|promised=[^|]+\\|actual=[^|]+\\|at=" "$(ll_ev "$RU" verdict)"
 ll_verb "$RU" T2
 KU2="$(ll_head "$RU")"
 expect_eq "(u2) T2 lands (exit 0), its candidate built on T1's" "0 $KU1" "$LL_RC $(git -C "$RU" rev-parse "$KU2^1" 2>/dev/null)"
