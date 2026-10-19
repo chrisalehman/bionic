@@ -250,9 +250,9 @@ red stands at the release head. A second whole run at 4dfc59df, approved by the 
   command's promise by the suite-name reader and reads 0; `_line_gate_key` is the right call (A-orch-69).
 - ready's promised total (T8) still adds the promise of a suite the row removed, which the carrier records absent and
   never runs (T6) (`critic-adversarial.md#4`, A-orch-67). No suite starts short, because waits are per suite.
-- AC-5.3's number, the one-file fix rows' median, was not measured; the cell's median is over six multi-file build rows
-  (`auditor-evidence.md`, finding 3; REQ-5). The 15-minute bar for a one-file fix row is unproven, and the six line
-  landings took 95.1 to 278.1 minutes.
+- AC-5.3's number, the one-file fix rows' median, was measured on T47 and T48, the two one-file fix rows that landed
+  through the line: 58.4 minutes against the 15-minute bar, a miss carried to the next charter (`auditor-evidence-2.md`,
+  finding 3; REQ-5). The six multi-file build rows before them took 95.1 to 278.1 minutes.
 - AC-2.4 was observed live on T47: ready printed `suites 62 of 63` for a one-line session-poker.sh change, against the
   criterion's 55, a miss carried to the next charter (`auditor-evidence.md`, finding 8).
 - AC-8.1's cell has no head or dirty line and no clean dispatch-preflight-2 log holds T12's change; T31's whole run is
