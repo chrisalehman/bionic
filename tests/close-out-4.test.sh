@@ -621,7 +621,7 @@ section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, 
 # Under `## Scorecard`, fenced, exactly:
 #   human stops (autonomous half): <n> · target 1           approved: lines after the plan's approved-by:, one per reply
 #   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the approved: merge line
-#   widest landing ready→landed: <row> <m> min · target < 30   landing-report --rows, the largest minutes=
+#   widest landing ready→landed: <row> <m> min · target < 15   landing-report --rows, the largest minutes=; 15 is LINE_LANDING_BAR (wave-39 T9)
 #   human-wait minutes: <n> · no target (the user's)        the final-card records, render to reply
 # then the sitrep's schedule, correctness and waste lines at close. A number the record cannot compute is `unverified`.
 # `landing-report --scorecard <plan>` prints the same lines; close-out reads them before the tmp wipe (the roster).
@@ -657,7 +657,7 @@ SC_VERB="$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSC" --scorecard)"
 expect_eq "SC-0 landing-report --scorecard prints the four lines with the planted numbers and targets" \
 "human stops (autonomous half): 2 · target 1
 agent minutes after the final reply: 5 · target 0
-widest landing ready→landed: T2 42.0 min · target < 30
+widest landing ready→landed: T2 42.0 min · target < 15
 $SC_TAIL" "$(printf '%s\n' "$SC_VERB" | sed -n 1,4p)"
 expect_eq "SC-0b …then the sitrep's three indicator lines, schedule, correctness and waste, and nothing more" "schedule|correctness|waste|7" \
   "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
@@ -676,7 +676,7 @@ BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSU" run
 expect_eq "SC-5 no approval, no landing, no final card: three lines unverified, the stop count computed (0)" \
 "0|human stops (autonomous half): 0 · target 1
 agent minutes after the final reply: unverified · target 0
-widest landing ready→landed: unverified · target < 30
+widest landing ready→landed: unverified · target < 15
 human-wait minutes: unverified · no target (the user's)" \
   "$CO_RC|$(sc_section "$PSU/$CONT_REL" | sed -n 1,4p)"
 # an existing continuation gets the section added, once
