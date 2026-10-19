@@ -56,7 +56,7 @@
 # BASH 3.2. SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME.
 #
 # [WALL: tests/dispatch-preflight.test.sh]
-# [WALL: tests/cross-gate-agreement.test.sh]
+# [WALL: tests/cross-gate-agreement-2.test.sh]
 
 _brief_self_dir() {
   local self="${BASH_SOURCE[0]}"
