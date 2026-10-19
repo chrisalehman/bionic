@@ -6794,6 +6794,14 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # arm ran above it, for the reason written there.
   if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
 
+  # A WRAPPER'S INNER RUN, DECLARED, IS ADMITTED (wave-39 T21; D19, REQ-15 AC-15.1). A `run` claim read
+  # inside a script carries the run the script holds as its target, beside the command as typed. When
+  # the brief declared THAT run under `Re-executes:`, the spend is one the orchestrator already priced,
+  # and the wrapper that launches it is no different from the run typed bare. Nothing else changes: an
+  # undeclared inner run falls through to the refusal below, which names the script and the run, and
+  # the full tree was judged above.
+  if [ "$_kind" = "run" ] && _run_is_declared "$_target" "$RE_EXECUTES"; then continue; fi
+
   # A RUN READ INSIDE A SCRIPT names the script and the run (wave-31 T11): the claim's run is the
   # command as typed, its target the run the script holds.
   [ "$_kind" != "run" ] || [ "$_target" = "$_run" ] || _run="$_run — the script runs: $_target"

@@ -3357,10 +3357,11 @@ section "§SCRIPT-BUDGET — the budget reads the script a dispatched agent's sh
 # FIXTURE FIDELITY: a dispatched row of the recorder's own join (bw_dispatched), real scripts in the
 # agent's tree. fails-when: a script that starts no suite is refused; `bash red.sh` passes the arm.
 R_SB="$(mk_repo scriptbudget)"
-bw_dispatched "$R_SB" t11writer "suites_allowed=alpha.test.sh" suites_source=declared files= 're_executes=`bash ok.sh`'
+bw_dispatched "$R_SB" t11writer "suites_allowed=alpha.test.sh" suites_source=declared files= 're_executes=`pytest`'
 printf '#!/bin/bash\nset -e\njest\n' > "$R_SB/red.sh"
 printf '#!/bin/bash\nRUNNER=jest\n"$RUNNER" --ci\n' > "$R_SB/var.sh"
-printf '#!/bin/bash\njest\n' > "$R_SB/ok.sh"
+printf '#!/bin/bash\npytest\n' > "$R_SB/ok.sh"
+printf '#!/bin/bash\npytest -x\n' > "$R_SB/und.sh"
 printf '#!/bin/bash\necho plain\n' > "$R_SB/plain.sh"
 sb_line() { printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: '; }
 sb_cmd() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null; }
@@ -3383,15 +3384,21 @@ run_hook "$(mk_payload "$R_SB" 'bash missing.sh' "$ACTOR" omit Bash test-runner 
 expect_status "SB.3 AC-6.1 a script that is not there is admitted (was: refused unverified)" 0 "$ST"
 expect_eq "SB.3b …as typed (SB.0 is the positive)" "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash ok.sh' "$ACTOR" omit Bash test-runner 1800000)"
-expect_ne "SB.4 a script whose run the brief declared under Re-executes passes" "2" "$ST"
+expect_status "SB.4 AC-15.1 a wrapper whose inner run the brief declared under Re-executes is admitted (D19)" 0 "$ST"
 expect_absent "SB.4b …with no refusal line" "refused" "$ERR"
+expect_eq "SB.4c …and the call comes back as typed (SB.0 is the positive)" "" "$(sb_cmd)"
+run_hook "$(mk_payload "$R_SB" 'bash und.sh' "$ACTOR" omit Bash test-runner 1800000)"
+expect_status "SB.5 AC-15.1 a wrapper whose inner run is not declared is refused (pairs SB.4: the same wrapper shape, one run off the declaration)" 2 "$ST"
+expect_contains "SB.5b …naming the inner run" "pytest -x" "$ERR"
+expect_contains "SB.5c …and the wrapper" "und.sh" "$ERR"
+expect_contains "SB.5d …in the budget's words" "run only the budgeted suites" "$(sb_line)"
 run_hook "$(mk_payload "$R_SB" 'bash plain.sh' "$ACTOR" omit Bash test-runner 1800000)"
-expect_status "SB.5 a script that runs no suite passes" 0 "$ST"
-expect_absent "SB.5b …with no refusal line" "refused" "$ERR"
-expect_eq "SB.5c …as typed: what it starts asks the gate as the agent its tree names (SB.0 is the positive)" \
+expect_status "SB.5e a script that runs no suite passes" 0 "$ST"
+expect_absent "SB.5f …with no refusal line" "refused" "$ERR"
+expect_eq "SB.5g …as typed: what it starts asks the gate as the agent its tree names (SB.0 is the positive)" \
   "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'git status --short' "$ACTOR" omit Bash test-runner 1800000)"
-expect_eq "SB.5d a call that starts no script carries nothing (SB.0 is the positive)" "" "$(sb_cmd)"
+expect_eq "SB.5h a call that starts no script carries nothing (SB.0 is the positive)" "" "$(sb_cmd)"
 run_hook "$(mk_payload "$R_SB" 'bash red.sh' "" omit Bash)"
 expect_absent "SB.6 the main thread's bash red.sh meets no budget arm" "run only the budgeted suites" "$ERR"
 expect_absent "SB.6b …and no unverified refusal" "unverified" "$ERR"
