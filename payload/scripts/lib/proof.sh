@@ -2276,7 +2276,7 @@ proof_debts_open() {
 # <head>, or every commit past it holds by the one cover rule (wave-36 T7; D9, D2; the COVER block below
 # `_proof_docs_path`): its paths are all prose (the docs root, or the files `_proof_docs_path` lists; wave-30
 # T6, D12), or every path is in the release set and a release check passes at it (wave-38 T2; D18), or it is the
-# landing of a row born of this question's reading (wave-36 T31; D16) or of the floor's red. Any other commit owes, whatever its row was declared to be; `facts_cover` prints each commit's basis. A waiver covers its
+# landing of a row born of a registered reading's finding (wave-39 D7: any question's) or of the floor's red. Any other commit owes, whatever its row was declared to be; `facts_cover` prints each commit's basis. A waiver covers its
 # question up to its own head.
 # Every line of the question counts, failing ones included: a later reading may start at a failing
 # reading's head, so the chain is not rebuilt by skipping them, and only the newest decides failing.
@@ -2398,8 +2398,8 @@ PROOF_CHAIN
         if [ "$wt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$we" "$wr" "$wh" "$tree" "$fixed"; wr="$PROOF_DERIVED"; fi
         if [ "$pt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$pe" "$pr" "$ph" "$tree" "$fixed"; pr="$PROOF_DERIVED"; fi
         # THE QUESTION'S CHAIN: its newest link, whole or piece, covered to its head and extended by the walk
-        # (wave-36 T7; D9), on which a review-born landing holds only when this question's reading bore it (wave-36
-        # T31; D16). One walk per question and head, however many lines of the question ask it.
+        # (wave-36 T7; D9), on which a review-born landing holds whichever registered reading bore it (wave-39 D7,
+        # ADR-062). One walk per question and head, however many lines of the question ask it.
         if [ -z "$pt" ]; then st=absent
         elif [ "$pt" = fact ] && [ "$pr" = fail ]; then st="failing	$pe"
         else
@@ -2558,9 +2558,9 @@ _proof_docs_path() {
 #   release      every path it touched is in the release set (`_proof_release_path`) and the plan's release check passes
 #                at it (`proof_check_passes`), on every chain; the regression walk reads the same kind (wave-38 T2; D18)
 #   born-review  the landing record names it as the landing of a row whose `- T<n>:` line carries ` born: review …
-#                of=<record>#<n>`, or `proof_fixed` names it as a fix row's green landing, AND the asked question's
-#                reading bore the row: one of those records is the evidence of a registered reading of that question
-#                (wave-36 T31; D16). On every other question's chain the same commit reads `owes`.
+#                of=<record>#<n>`, or `proof_fixed` names it as a fix row's green landing, AND one of those records is
+#                the evidence of a registered reading: a review's fixes are inside the review, so it holds on every
+#                question's chain (wave-39 D7, ADR-062; reverses wave-36 D16). A marker naming no registered reading owes.
 #   born-floor   the landing record names it as the landing of a row whose `- T<n>:` line carries ` born: floor …`
 #   owes         anything else, whatever kind its row declared (a doc row that touched payload/ owes)
 # Content is asked first, so a born row's docs-only landing reads prose, and a CHANGELOG.md commit alone prose, not release. `facts_cover` prints the basis, the walk
@@ -2580,11 +2580,11 @@ _facts_docs_prefix() {
 # `landed: row=<T> … merge=<c>` line (lib/worktree.sh) of the run's landing record (`proof_debt_record`) whose row's
 # `- <T>:` line carries a born marker (lib/units.sh `units_born_marks`), and each commit `proof_fixed` names,
 # review-born. A plan with no marker and no fixed finding pays one grep.
-# THE ASKERS (wave-36 T31; D16, ADR-056 "a row born of that reading"): <questions> names, space-separated, the
-# questions whose chains a review-born landing holds on, and is empty for a floor-born one, which holds on every
-# chain. A marker's `of=<record>#<n>` (lib/units.sh `units_born_findings`) and a fixed finding's `<record>#<n>` name
-# a record; the registered review readings of `## SDLC State` whose evidence is that record name its question. A
-# marker naming findings of several readings holds on each of their questions; a rating-form marker, or a record no
+# THE ASKERS (wave-36 T31; THE PROVENANCE GUARD since wave-39 D7, ADR-062): <questions> names, space-separated, the
+# questions whose registered readings bore the row, and is empty for a floor-born one. A review-born landing whose
+# list is non-empty holds on every chain (`_facts_basis`); an empty list is the guard. A marker's `of=<record>#<n>`
+# (lib/units.sh `units_born_findings`) and a fixed finding's `<record>#<n>` name a record; the registered review
+# readings of `## SDLC State` whose evidence is that record name its question. A rating-form marker, or a record no
 # registered reading names, gives no question, so that landing owes on every chain.
 _facts_born_landings() {
   local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec="" want
@@ -2641,8 +2641,8 @@ _facts_born_landings() {
 # _facts_basis <commit> <prose: 0 or not> <born landings> [<question>] [<release: 1 when every path is in the set>]
 # [<release heads>] -> prints `cover <commit> <basis>`; 1 when it owes. A release-set commit is `release` when it is one
 # of the heads a release check passes at (`proof_check_passes`, full commits). A born landing names its commit in full or by a prefix of at least seven hex digits. A floor-born landing holds
-# on every chain; a review-born one only on the chain of a question it names (wave-36 T31; D16), so with no question
-# asked it owes.
+# on every chain, and so does a review-born one whose asker list is non-empty, whatever <question> asks (wave-39 D7,
+# ADR-062: a review's fixes are inside the review); one with an empty list owes everywhere (the provenance guard).
 _facts_basis() {
   local c="$1" b=owes k w qs
   if [ "$2" != 0 ]; then b=prose
@@ -2652,8 +2652,7 @@ _facts_basis() {
       [ "${#k}" -ge 7 ] && [ "${c#"$k"}" != "$c" ] || continue
       case "$w" in
         regression) b=born-regression; break ;;
-        review) [ -n "${4:-}" ] || continue
-                case " $qs " in *" $4 "*) b=born-review; break ;; esac ;;
+        review) [ -n "$qs" ] || continue; b=born-review; break ;;
       esac
     done <<PROOF_BORN
 $3
@@ -2698,9 +2697,9 @@ _facts_holds() {
 
 # facts_cover <plan> <from> <to> [<question>] -> THE JUDGE'S BASIS (AC-3.3): one `cover <sha> prose|release|born-review|
 # born-floor|owes` line per commit on <to>'s first-parent line past <from>, oldest first, the walk `facts_state` holds
-# <question>'s reading by. A landing born of a reading of another question owes on this chain (wave-36 T31; D16), and
-# with no question named it owes on every chain. rc 0 when no commit owes; 1 when one does, or when <from> is not on
-# <to>'s history (nothing printed); 2, one sentence on stderr, when the plan or either head cannot be read. A reader
+# <question>'s reading by. A landing born of a registered reading's finding holds on every chain, with or without
+# <question> (wave-39 D7); a born marker naming no registered reading owes on every chain. rc 0 when no commit owes;
+# 1 when one does, or when <from> is not on <to>'s history (nothing printed); 2, one sentence on stderr, when the plan or either head cannot be read. A reader
 # that prints `review <question> … uncovered <a>..<b>` from facts_state asks `facts_cover <plan> <a> <b> <question>`
 # for the commit that owes.
 facts_cover() {

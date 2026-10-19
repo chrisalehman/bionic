@@ -14,6 +14,7 @@
 # §EARLY  each of the three facts refuses the render in its own words; the tick says the same line as advice
 # §AGREE  the card's options are exactly the owed items, the undischarged rows and the carried findings
 # §REPLY  an override replays into its own verb; an option not on the card, or words not typed, write nothing
+# §BORN   the planted wave-38 shape, two fix rows born of different questions, renders with no re-read (wave-39 T15)
 #
 # FIXTURE FIDELITY. The world is session-poker-5 §CHECK's (a real repository on `wave/01-fixture`, base B, a code
 # commit C, then the release text's commit R touching CHANGELOG.md alone), a double wave plan the real gate admits
@@ -501,6 +502,51 @@ if [ "$FC_REGQ" -gt 0 ]; then
 else
   printf '  SKIP: REPLY-9 waive regression — proof_question_ok at this head admits no regression question (T2 not landed; A-T3-5)\n'
 fi
+
+# ============================================================
+section "§BORN: the planted wave-38 shape, two fix rows born of different questions' findings, renders the card with no re-read (wave-39 T15; REQ-11 AC-11.1; D7, ADR-062)"
+# ============================================================
+# fails-when: the card prints `CARD-EARLY — <q> unregistered` after born rows alone.
+# FIXTURE FIDELITY. Wave 38's shape (record/wave-38-one-stop/continuation.md): the five readings registered at C, the
+# adversarial and structure pieces each carrying one S3 finding, then two fix rows landed past them: T4 born of the
+# adversarial finding, T5 of the structure finding, each touching lib/x.sh, each named by its landing's published
+# event (lib/line.sh's shape) and by the born marker on its `- T<n>:` line. No reading is registered past C, and
+# evidence asked for neither fix. The control is one code commit past the same fixes that no review bore: the same
+# verb on the same plan refuses CARD-EARLY at its head. The world is put back at the end (head R, no landing record).
+fc_record structure structure piece 'finding: 1 S3 off lib/x.sh:1 the x writer repeats the y writer'
+FC_F1="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
+FC_F2="$(s57_commit "$RFC" lib/x.sh 'T5: the fix the structure reading asked for')"
+fc_published() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-12T14:00:00Z\n' "$1" "$2" "$1"; }
+{ fc_published T4 "$FC_F1"; fc_published T5 "$FC_F2"; } > "$FC_REC/landing-proofs.log"
+fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding
+  fc_plan "$FC_GOOD
+- T4: landed $FC_F1 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/adversarial.md#1
+- T5: landed $FC_F2 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/structure.md#1"
+  awk '{ print } /^\| T2 \|/ {
+    print "| T4 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |"
+    print "| T5 | 4 | build | fix the x writer · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+    "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+}
+fc_born_plan
+expect_eq "BORN-0 precondition: the working head is T5's landing, two code commits past every reading" \
+  "$FC_F2|lib/x.sh|lib/x.sh" \
+  "$(git -C "$RFC" rev-parse wave/01-fixture)|$(git -C "$RFC" show --name-only --format= "$FC_F1")|$(git -C "$RFC" show --name-only --format= "$FC_F2")"
+fc_card final
+expect_eq "BORN-1 AC-11.1 card.sh final renders past the two born rows with no re-read: exit 0, nothing on stderr" "0|" "$FC_RC|$FC_ERR"
+expect_eq "BORN-1b …and writes the card at T5's landing" "final-card-${FC_F2:0:8}.md" "$(fc_cards)"
+new_roster "$RFC"; forget_digest "$RFC"
+poke "$RFC" tick
+expect_contains "BORN-1c the tick, an integrate row open, says its WAIT line (the reader is not vacuous)" "poker: WAIT T3" "$OUT"
+expect_absent "BORN-1d …and no CARD-EARLY" "CARD-EARLY" "$OUT"
+FC_F3="$(s57_commit "$RFC" lib/x.sh 'a code change no review bore')"
+fc_born_plan
+fc_card final
+expect_regex "BORN-2 the control: one code commit past the fixes that no row was born for is CARD-EARLY, a question unregistered at its head" \
+  "^CARD-EARLY — (evidence|adversarial|structure) unregistered at ${FC_F3:0:8}\$" "$FC_ERR"
+expect_eq "BORN-2b …exit 1, nothing rendered, no card written" "1||" "$FC_RC|$FC_OUT|$(fc_cards)"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/final-card-*.md
+fc_record structure structure piece
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"

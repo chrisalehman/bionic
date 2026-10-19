@@ -4025,6 +4025,33 @@ expect_absent "SCV-10d …and prints no cover line (beside SCV-6b, which reads t
 expect_eq "SCV-10e …so the row SCV-6 holds goes red" "red" "$(scv_verb_reads "$SCV_MROOT/hooks/session-poker.sh")"
 rm -rf "$SCV_MROOT"
 
+# ---------- a review-born fix is covered on every chain, its asker's and the others' (wave-39 T15; REQ-11 AC-11.1; D7) ----------
+# The same world with one fact moved: C is now the landing of T4, a row born of the adversarial reading's finding. Its
+# marker names record/w35/adversarial.md#1, the evidence of a registered reading, and the run's landing record names C
+# as T4's landing (lib/line.sh's published event). Under D7 the landing holds on every question's chain, so the verb
+# prints born-review on evidence's chain, which asked for nothing, as on adversarial's, and the check-only advance
+# names no question uncovered. fails-when: a chain whose reader did not ask still reads C as owing (wave-36 D16).
+scv_run "$POKER" current 7 --check
+expect_contains "SCV-11 precondition: with C unborn, current 7 --check names the adversarial piece uncovered (the extractor below reads)" \
+  "$SCV_UNC" "$SCV_ERR$SCV_OUT"
+mkdir -p "$SCV_R/.bionic/docs/record/wave-x"
+printf 'line/v1|ev=published|row=T4|commit=%s|kind=land|by=w-T4|why=landed|at=2026-10-12T13:00:00Z\n' "$SCV_C" \
+  > "$SCV_R/.bionic/docs/record/wave-x/landing-proofs.log"
+awk -v c="$SCV_C" '{ print } $0 == "  n/a: no decision this run" {
+  printf "- T4: landed %s 2026-10-12T13:00:00Z born: review S3 off of=record/w35/adversarial.md#1\n", c }' \
+  "$TMPROOT/scv-before" > "$SCV_P"
+expect_eq "SCV-11b precondition: the plan carries T4's born marker, once" "1" "$(/usr/bin/grep -c ' born: review S3 off of=record/w35/adversarial.md#1$' "$SCV_P")"
+scv_run "$POKER" cover adversarial "$SCV_RANGE"
+expect_eq "SCV-12 AC-11.1 cover on the asker's chain: C is born-review, exit 0" "0|cover ${SCV_C} born-review" "$SCV_RC|$SCV_OUT"
+scv_run "$POKER" cover evidence "$SCV_RANGE"
+expect_eq "SCV-12b …and on evidence's chain, which asked for nothing: born-review, exit 0" "0|cover ${SCV_C} born-review" "$SCV_RC|$SCV_OUT"
+scv_run "$POKER" cover structure "$SCV_RANGE"
+expect_eq "SCV-12c …and on structure's" "0|cover ${SCV_C} born-review" "$SCV_RC|$SCV_OUT"
+scv_run "$POKER" current 7 --check
+expect_absent "SCV-12d …so current 7 --check names no question uncovered (beside SCV-11, the same check one fact earlier)" \
+  "uncovered" "$SCV_ERR$SCV_OUT"
+cp "$TMPROOT/scv-before" "$SCV_P"; rm -f "$SCV_R/.bionic/docs/record/wave-x/landing-proofs.log"
+
 # ============================================================
 section "§DRY: the step verb's dry copy reads the origin plan's landing record, so a finding fixed by a landed row is fixed on the copy (wave-37 T2; REQ-9 AC-9.1; D12)"
 # ============================================================

@@ -77,7 +77,7 @@ Every run that ships code answers four questions, at every rigor. The first, doe
 
 Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.
 
-Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole.
+Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole. A fix row born of a registered review finding covers every question once it lands.
 
 | | `single` | `double` |
 |---|---|---|
