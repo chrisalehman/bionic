@@ -354,34 +354,34 @@ expect_true "canonical-sdlc steps/0.md: model_plan derivation names the rendered
 # for no defect. A relation now, naming no count (.claude/rules/test-harness.md): every role
 # render.sh renders has its rendered file and its line in the card's Models section.
 #
-# RE-POINTED (wave-38 T17; D17, AC-1.7): Step 0 puts no card. Its settings are the Configuration
-# section of the Step 1 card, rendered by `card.sh step1` from the plan's frontmatter, so the Models
-# block is read from that rendering, over a plan whose model_plan names the orchestrator alone: each
-# role then has its line from its role file, and a role render.sh renders without a line is named.
-# models_missing <roles> <card> -> each role with no line of its own in the Configuration's Models block.
+# RE-POINTED (wave-39 T26; D3, AC-20.1): the Step-0 card is its own stop again, rendered by `card.sh
+# step0` from the plan's frontmatter (wave 38 had folded it into the Step 1 card), so the Models block is
+# read from that rendering, over a plan whose model_plan names the orchestrator alone: each role then has
+# its line from its role file, and a role render.sh renders without a line is named.
+# models_missing <roles> <card> -> each role with no line of its own in the Step-0 card's Models block.
 models_missing() {
   local role block
-  block="$(printf '%s\n' "$2" | sed -n '/^    Models$/,/^$/p')"
+  block="$(printf '%s\n' "$2" | sed -n '/^  Models$/,/^$/p')"
   for role in $1; do
-    printf '%s\n' "$block" | grep -qE "^      ${role}([[:space:]]|\$)" || printf '%s\n' "$role"
+    printf '%s\n' "$block" | grep -qE "^    ${role}([[:space:]]|\$)" || printf '%s\n' "$role"
   done
   return 0
 }
 JIT_PLAN="$TMP/wave-1-models.plan.md"
 printf '%s\n' '---' 'scale: wave' 'rigor: double' 'model_plan: orchestrator=claude-fable-5-1' '---' '' \
   '## Goal' '' 'Render the Models block.' > "$JIT_PLAN"
-JIT_CARD="$(bash "${REPO}/payload/scripts/card.sh" step1 "$JIT_PLAN" 2>/dev/null 0<&-)"
+JIT_CARD="$(bash "${REPO}/payload/scripts/card.sh" step0 "$JIT_PLAN" 2>/dev/null 0<&-)"
 JIT_ROLES="$(sed -n 's/^ROLES="\(.*\)"$/\1/p' "${REPO}/agents-src/render.sh")"
 expect_nonempty "canonical-sdlc: render.sh declares its ROLES (the relation below reads a set)" "$JIT_ROLES"
-expect_true "card.sh step1: the card carries a Models block (the extractor reads something)" \
-  grep -qx '    Models' <<< "$JIT_CARD"
+expect_true "card.sh step0: the card carries a Models block (the extractor reads something)" \
+  grep -qx '  Models' <<< "$JIT_CARD"
 for role in $JIT_ROLES; do
   expect_true "canonical-sdlc: role \`${role}\` has its rendered file agents/${role}.md" \
     test -f "${REPO}/agents/${role}.md"
 done
-expect_eq "card.sh step1: every role render.sh renders has its line in the Configuration's Models block" \
+expect_eq "card.sh step0: every role render.sh renders has its line in the Step-0 card's Models block" \
   "" "$(models_missing "$JIT_ROLES" "$JIT_CARD")"
-expect_eq "card.sh step1: a planted role with no Models line is named (the relation discriminates)" \
+expect_eq "card.sh step0: a planted role with no Models line is named (the relation discriminates)" \
   "planted" "$(models_missing "planted" "$JIT_CARD")"
 
 section "Group 13: README roster table agrees with agents/*.md frontmatter (epic-19 F9)"

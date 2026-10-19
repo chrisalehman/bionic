@@ -669,10 +669,15 @@ expect_contains "42a: …and opens with the card's own title" "Step 1 · Require
 expect_contains "43: Purpose carries the artifact's first ## Goal paragraph" \
   "Ship the fixture wave so the whole-card renderer has an artifact to read" "$S1"
 expect_contains "43a: …and the Purpose section is labelled" "  Purpose" "$S1"
+# THE BRANCHES ARE CONFIGURATION (wave-39 T26; D3): they print on the Step-0 card, rendered here over the same
+# artifact (no plan beside it, so its own frontmatter answers), and the requirements card carries none.
+whole_card step0 "$REQ_FIX"; S0="$WC_OUT"
 expect_contains "44: Branches names the working branch from the frontmatter" \
-  "working       wave/99-fixture" "$S1"
-expect_contains "44a: …and the integration branch" "integration   main" "$S1"
-expect_contains "44b: …and the base sha the working branch came from" "abc1234" "$S1"
+  "working       wave/99-fixture" "$S0"
+expect_contains "44a: …and the integration branch" "integration   main" "$S0"
+expect_contains "44b: …and the base sha the working branch came from" "abc1234" "$S0"
+expect_eq "44c: the Step-1 card carries a Purpose block and no Branches block" "1|0" \
+  "$(printf '%s\n' "$S1" | /usr/bin/grep -c '^  Purpose$' | tr -d ' ')|$(printf '%s\n' "$S1" | /usr/bin/grep -c 'Branches' | tr -d ' ')"
 
 # Every REQ row, whole: id, text, provenance and AC COUNT, each read from the
 # artifact. The count is the row most likely to drift in a transcription and the
@@ -702,7 +707,7 @@ expect_eq "50: the card is complete with stdin CLOSED, not merely empty" "0" "$W
 expect_empty "50a: …and nothing is written to stderr on a good artifact" "$WC_ERR"
 
 # Branches absent from the frontmatter say so rather than inventing one.
-whole_card step1 "$REQ_NOBRANCH"; S1_NB="$WC_OUT"
+whole_card step0 "$REQ_NOBRANCH"; S1_NB="$WC_OUT"
 expect_eq "51: an artifact with no branch keys still renders" "0" "$WC_RC"
 expect_contains "51a: …and the working branch reads 'not declared'" \
   "working       not declared" "$S1_NB"
@@ -2209,19 +2214,19 @@ expect_eq "INHERIT-mut2 …and counts no adoption, so INHERIT-6 goes red on it" 
 rm -rf "$INH_MUT"
 
 # ============================================================
-section "CONFIG — wave-38 T17 (AC-1.7, AC-5.2, AC-10.1; D17, D5): the requirements card opens on Configuration, and counts its leftovers in one line"
+section "CONFIG — wave-39 T26 (AC-20.1, AC-20.2; D3, D23), was wave-38 T17 (AC-1.7, AC-5.2): the Step-0 card is its own stop again, and the requirements card carries no Configuration"
 # ============================================================
 #
-# ONE STOP WHERE THERE WERE TWO (D17). Step 0 used to put its own card, a display the model typed
-# from the plan it had just written; the user approved it, then approved the requirements card a few
-# minutes later. Step 0's acts still run first (plan skeleton, bind, arm, branch), and its settings are
-# now the FIRST section of the Step 1 card, rendered by card.sh from the plan's frontmatter, so the one
-# reply approves both and the settings shown are the settings written. No `step0` verb exists.
+# TWO STOPS, NOT ONE (wave-39 D3, reopening wave-38 D17 on the user's words: "That's different than
+# requirements. It doesn't make sense to combine them."). Wave 38 folded Step 0's settings into the
+# requirements card as its first section; `card.sh step0 <plan>` renders them again as their own card, in
+# the 1.20.0 shape (Purpose, Seed, Run, Branches, Paths, Shape, Gates, Models), rendered by the tool from the
+# plan's frontmatter rather than typed by the model, ending on the configuration question. `step1` prints
+# no Configuration and no Branches.
 #
-# §CONFIG fails when a Step-0 card is put on its own: the Configuration block below, every line, read
-# from the plan beside the requirements file (its branches differ from the requirements file's own, so
-# a card reading the wrong file goes red). §SCALE fails when the scale line carries no recommendation.
-# §COUNTS fails when a carried line is reprinted.
+# §CONFIG fails when the Step-0 card is absent or a setting is read from anywhere but the plan, or when the
+# requirements card still carries a Configuration section. §SCALE fails when the scale line carries no
+# recommendation. §COUNTS fails when a carried line is reprinted.
 CFG_P="${CARD_SANDBOX}/config-proj"
 CFG_D="${CFG_P}/.bionic/docs"
 mkdir -p "$CFG_D/plans/epic-9" "$CFG_D/specs/epic-9"
@@ -2241,95 +2246,107 @@ cfg_plan() {  # <scale-recommendation line, or nothing> -> the fixture plan, wri
 }
 cfg_plan "scale-recommendation: \"${CFG_REC_SHORT}\""
 cp "$REQ_FIX" "$CFG_REQ"
-# cfg_block <card> -> the Configuration section, the project line and its folds left out (the sandbox
-# path is this machine's; cfg_project reads it)
+# cfg_block <card> -> the Step-0 card from Seed (or Run) to the end of Models, the project line and its folds
+# left out (the sandbox path is this machine's; cfg_project reads it), and no trailing blank line
 cfg_block() {
-  printf '%s\n' "$1" | awk '/^  Configuration$/ { s = 1 } s && /^$/ { exit }
-    s && /^      project  / { p = 1; next } p && /^                    [^ ]/ { next } { p = 0 } s { print }'
+  printf '%s\n' "$1" | awk '/^  (Seed|Run)$/ { s = 1 } /^Do you approve/ { exit } !s { next }
+    /^    project  / { p = 1; next } p && /^                  [^ ]/ { next } { p = 0 }
+    /^$/ { nb++; next } { while (nb > 0) { print ""; nb-- } print }'
 }
 cfg_project() {  # <card> -> the project line's value, its folds joined (a path has no blank to fold at)
-  printf '%s\n' "$1" | awk '/^      project  / { p = 1; v = substr($0, 21); next }
-    p && /^                    [^ ]/ { v = v substr($0, 21); next } p { exit } END { print v }'
+  printf '%s\n' "$1" | awk '/^    project  / { p = 1; v = substr($0, 19); next }
+    p && /^                  [^ ]/ { v = v substr($0, 19); next } p { exit } END { print v }'
 }
+cfg_heads() { printf '%s\n' "$1" | sed -n 's/^  \([A-Z][A-Za-z ]*\)$/\1/p' | paste -sd'|' -; }  # <card> -> its section heads
 # The Models block's role lines, read from the role files card.sh sits beside: a role model_plan names
 # prints its tier, any other its role file's model and effort, marked so.
-CFG_MODELS="$(printf '      %-20s%s\n' orchestrator claude-fable-5-1)"
+CFG_MODELS="$(printf '    %-20s%s\n' orchestrator claude-fable-5-1)"
 for f in "${REPO}"/agents/*.md; do
   r="${f##*/}"; r="${r%.md}"
   if [ "$r" = implementor ]; then t="sonnet-high"
   else t="$(awk '/^model:/ { m = $2 } /^effort:/ { e = $2 } /^---$/ && ++n == 2 { exit } END { print m "-" e }' "$f")  (role file)"
   fi
   CFG_MODELS="${CFG_MODELS}
-$(printf '      %-20s%s' "$r" "$t")"
+$(printf '    %-20s%s' "$r" "$t")"
 done
-CFG_WANT="  Configuration
-    Seed          ideas/seed-brief.md
-    Run
-      intent          build
-      rigor           single (one independent mind)  (scale default)
-      regression      no  (scale default)
-      review-cadence  once  (from rigor)
-      fix-policy      S1,S2-on,S3  (set)
-      fix-cap         2  (from rigor)
-      scale           task — ${CFG_REC_SHORT}
-      name            wave-3-c
-    Branches
-      working       fix/config-card       (from 1234abc)
-      integration   main                  (Step 8 merges here)
-    Paths
-      docs          .bionic/docs  (default)
-      tmp           .bionic/tmp  (default)
-      archive       /srv/arch
-    Shape
-      surface       cli-plugin
-      agents        multi-agent, tiered dispatch
-      deploy        n/a
-      worktree      false
-      cleanup       true
-    Gates
-      walk          exempt
-      interview     required
-      permissions   answered from the run's workspace
-    Models
+CFG_WANT="  Seed
+    brief         ideas/seed-brief.md
+
+  Run
+    intent          build
+    rigor           single (one independent mind)  (scale default)
+    regression      no  (scale default)
+    review-cadence  once  (from rigor)
+    fix-policy      S1,S2-on,S3  (set)
+    fix-cap         2  (from rigor)
+    scale           task — ${CFG_REC_SHORT}
+    name            wave-3-c
+
+  Branches
+    working       fix/config-card       (from 1234abc)
+    integration   main                  (Step 8 merges here)
+
+  Paths
+    docs          .bionic/docs  (default)
+    tmp           .bionic/tmp  (default)
+    archive       /srv/arch
+
+  Shape
+    surface       cli-plugin
+    agents        multi-agent, tiered dispatch
+    deploy        n/a
+    worktree      false
+    cleanup       true
+
+  Gates
+    walk          exempt
+    interview     required
+    permissions   answered from the run's workspace
+
+  Models
 ${CFG_MODELS}"
 
-whole_card step1 "$CFG_REQ"; CFG_C="$WC_OUT"
-expect_eq "CONFIG-1 §CONFIG step1 over a requirements file with its plan beside it exits 0" "0" "$WC_RC"
-expect_eq "CONFIG-1a …and its first section, under the title, is Configuration" "Step 1 · Requirements||  Configuration" \
-  "$(printf '%s\n' "$CFG_C" | sed -n '1p;2p;3p' | paste -sd'|' -)"
-expect_nonempty "CONFIG-1b precondition: the extractor reads the Configuration block" "$(cfg_block "$CFG_C")"
-expect_eq "CONFIG-2 …every line of it, read from the plan's frontmatter, in the Step 0 layout" "$CFG_WANT" "$(cfg_block "$CFG_C")"
+whole_card step0 "$CFG_PLAN"; CFG_C="$WC_OUT"
+expect_eq "CONFIG-1 §CONFIG step0 over the plan exits 0, nothing on stderr" "0|" "$WC_RC|$WC_ERR"
+expect_eq "CONFIG-1a …under its own title, opening on Purpose, the plan's Goal" \
+  "Step 0 · Plan Configuration||  Purpose|    Configure the fixture run." \
+  "$(printf '%s\n' "$CFG_C" | sed -n '1,4p' | paste -sd'|' -)"
+expect_eq "CONFIG-1b …its sections, in the 1.20.0 order" "Purpose|Seed|Run|Branches|Paths|Shape|Gates|Models" "$(cfg_heads "$CFG_C")"
+expect_nonempty "CONFIG-1c precondition: the extractor reads the settings block" "$(cfg_block "$CFG_C")"
+expect_eq "CONFIG-2 …every line of it, read from the plan's frontmatter, in the 1.20.0 layout" "$CFG_WANT" "$(cfg_block "$CFG_C")"
 expect_eq "CONFIG-2a …the project line names the plan's project, whole" "$CFG_P" "$(cfg_project "$CFG_C")"
-expect_eq "CONFIG-3 Configuration comes before Purpose" "yes" \
-  "$(printf '%s\n' "$CFG_C" | awk '/^  Configuration$/ { a = NR } /^  Purpose$/ { b = NR } END { print (a && b > a) ? "yes" : "no" }')"
-expect_eq "CONFIG-3a the branches print once, inside Configuration" "1|0" \
-  "$(printf '%s\n' "$CFG_C" | /usr/bin/grep -c '^    Branches$' | tr -d ' ')|$(printf '%s\n' "$CFG_C" | /usr/bin/grep -c '^  Branches$' | tr -d ' ')"
-expect_empty "CONFIG-4 no line of the card is wider than the budget" \
-  "$(over_budget "$(printf '%s\n' "$CFG_C" | /usr/bin/grep -v '^    requirements  ')")"
-expect_contains "CONFIG-5 the card offers the setting verb beside explain" "explain <requirement> · set <flag>=<value>" "$CFG_C"
-# no Seed when the plan names none: the copy without the line renders no Seed line
+expect_eq "CONFIG-3 …ending on the configuration question" \
+  'Do you approve this configuration? Reply "approved" to approve it.' "$(printf '%s\n' "$CFG_C" | tail -1)"
+expect_empty "CONFIG-4 no line of the card is wider than the budget" "$(over_budget "$CFG_C")"
+# no Seed when the plan names none: the copy without the line renders no Seed section
 sed '/^seed:/d' "$CFG_PLAN" > "${CFG_PLAN}.noseed" && mv "${CFG_PLAN}.noseed" "$CFG_PLAN"
-whole_card step1 "$CFG_REQ"
-expect_eq "CONFIG-6 a plan naming no seed prints Configuration with no Seed line" "0|1|0" \
-  "$WC_RC|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c '^  Configuration$' | tr -d ' ')|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c '^    Seed ' | tr -d ' ')"
 whole_card step0 "$CFG_PLAN"
-expect_eq "CONFIG-7 no step0 verb exists: card.sh step0 is an unknown row kind, exit 64, nothing on stdout" "64|" "$WC_RC|$WC_OUT"
-expect_contains "CONFIG-7a …saying so" "unknown row kind 'step0'" "$WC_ERR"
+expect_eq "CONFIG-5 a plan naming no seed prints the card with no Seed section" "0|Purpose|Run|Branches|Paths|Shape|Gates|Models" \
+  "$WC_RC|$(cfg_heads "$WC_OUT")"
+# AC-20.2: the requirements card, over the requirements file whose plan is beside it, prints none of it
+whole_card step1 "$CFG_REQ"; CFG_S1="$WC_OUT"
+expect_eq "CONFIG-6 step1 over the requirements file with its plan beside it exits 0, opening on Purpose" \
+  "0|Step 1 · Requirements||  Purpose" "$WC_RC|$(printf '%s\n' "$CFG_S1" | sed -n '1,3p' | paste -sd'|' -)"
+expect_eq "CONFIG-6a …and carries no Configuration, no Branches and none of the plan's settings" "Purpose|0|0|0" \
+  "$(cfg_heads "$CFG_S1" | cut -d'|' -f1)|$(printf '%s\n' "$CFG_S1" | /usr/bin/grep -c 'Configuration' | tr -d ' ')|$(printf '%s\n' "$CFG_S1" | /usr/bin/grep -c 'Branches' | tr -d ' ')|$(printf '%s\n' "$CFG_S1" | /usr/bin/grep -c 'fix/config-card' | tr -d ' ')"
+expect_contains "CONFIG-6b …and still offers the setting verb beside explain" "explain <requirement> · set <flag>=<value>" "$CFG_S1"
+whole_card step0
+expect_eq "CONFIG-7 step0 with no plan is a usage error: exit 64, nothing on stdout" "64|" "$WC_RC|$WC_OUT"
+expect_contains "CONFIG-7a …saying it takes one path" "step0 takes exactly one artifact path" "$WC_ERR"
 CFG_STEP0="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/0.md"
-expect_contains "CONFIG-8 steps/0.md says Step 0's settings are the first section of Step 1's card" \
-  "the first section of Step 1's card" "$(tr '\n' ' ' < "$CFG_STEP0")"
-expect_absent "CONFIG-8a …and carries no Step 0 card of its own" "Step 0 · Plan Configuration" "$(cat "$CFG_STEP0")"
+expect_contains "CONFIG-8 steps/0.md puts the card with card.sh step0" "card.sh step0" "$(tr '\n' ' ' < "$CFG_STEP0")"
+expect_absent "CONFIG-8a …and no longer folds the settings into Step 1's card" "the first section of Step 1's card" "$(tr '\n' ' ' < "$CFG_STEP0")"
 
 # §SCALE (AC-5.2): `scale <value> — <two sentences>`, from the plan's `scale-recommendation:` line
 CFG_REC_LONG="A task: one tree, one session, no wave of rows behind it. The ask names one file and one behaviour, and nothing in it needs a second session."
 cfg_flat() { printf '%s\n' "$1" | tr '\n' ' ' | tr -s ' '; }
 cfg_plan "scale-recommendation: \"${CFG_REC_LONG}\""
-whole_card step1 "$CFG_REQ"; CFG_CL="$WC_OUT"
+whole_card step0 "$CFG_PLAN"; CFG_CL="$WC_OUT"
 expect_contains "SCALE-1 §SCALE the scale line reads scale <value> — the two sentences the plan recorded" \
   "scale task — ${CFG_REC_LONG}" "$(cfg_flat "$(cfg_block "$CFG_CL")")"
 expect_empty "SCALE-1a …folded inside the budget" "$(over_budget "$(cfg_block "$CFG_CL")")"
 cfg_plan ""
-whole_card step1 "$CFG_REQ"
+whole_card step0 "$CFG_PLAN"
 expect_contains "SCALE-2 with no scale-recommendation: line the scale line says none was recorded" \
   "scale task — (no recommendation recorded)" "$(cfg_flat "$(cfg_block "$WC_OUT")")"
 cfg_plan "scale-recommendation: \"${CFG_REC_SHORT}\""
