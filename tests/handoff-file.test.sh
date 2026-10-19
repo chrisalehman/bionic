@@ -16,6 +16,8 @@
 #
 # Sections: §WRITE §CARRY §POINTER §SAFE §CLOSED §READERS, and §RESUME (AC-3.3, wave-38 T13): the one door,
 # `session-poker.sh resume <handoff.md>`, which /bionic:canonical-sdlc <handoff.md> runs first.
+# §BRANCH-AGREE and §POINTER-AGREE (wave-39 T16; D18, AC-12.1): close-out and the verb read one integration branch
+# through lib/plan.sh and one pointer through lib/handoff.sh.
 #
 # FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`, as
 # session-poker-4 §HANDOFF builds it), one repository per world. The landing record and the sitrep
@@ -651,6 +653,67 @@ expect_eq "OW3d …and merged into, once trunk holds the work (the same extracto
 HF_CO_OUT="$(cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" closed-form 2>&1)"
 expect_eq "OW4 close-out.sh closed-form prints the two lines the verb's file carries: one writer, both doors" \
   "$(sed -n 2p "$HF_F")|$(hf_label "$HF_F" branch)" "$(printf '%s\n' "$HF_CO_OUT" | paste -sd'|' -)"
+
+
+# ============================================================
+section "§BRANCH-AGREE: one reader of the integration branch, lib/plan.sh plan_integration_branch; the verb and close-out name one branch, ## SDLC State's before the frontmatter's (wave-39 T16; D18, AC-12.1)"
+# ============================================================
+# Two orders stood: the verb read the frontmatter's `integration-branch:` first, then ## SDLC State's, with its own awk;
+# close-out read ## SDLC State, its closed-form then the frontmatter (critic-structure-2; debt integration-branch-reader).
+# D18 rules ## SDLC State first, the frontmatter as the fallback. Each door is asked on one plan: the verb's open-form
+# `integration:` line, close-out `check`'s merge verdict and its `closed-form` branch line. close-out-1.test.sh
+# §BRANCH-AGREE holds close-out's two doors on its own fixture, the frontmatter-only plan included.
+# FIXTURE FIDELITY: §WRITE's world, whose frontmatter names `integration-branch: trunk` as a Step-0 plan does, with
+# ## SDLC State naming `mainline`, a real branch at trunk's head, so both values name branches and only the order decides.
+# fails-when: a door names the frontmatter's branch while ## SDLC State names another.
+hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
+hf_world branch-agree no
+git -C "$HF_R" branch -f mainline trunk
+awk '/^## SDLC State/ { s = 1 } s && /^current:/ { print "integration-branch: mainline"; s = 0 } { print }' "$HF_P" > "$HF_P.ba" \
+  && mv "$HF_P.ba" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+expect_eq "BR0 precondition: the frontmatter names trunk, ## SDLC State mainline, both branches" "trunk|mainline|yes" \
+  "$(awk 'NR > 1 && /^---$/ { exit } sub(/^integration-branch: /, "")' "$HF_P")|$(sed -n '/^## SDLC State/,/^## Tasks/s/^integration-branch: //p' "$HF_P")|$(git -C "$HF_R" rev-parse -q --verify refs/heads/mainline >/dev/null && echo yes || echo no)"
+poke "$HF_R" handoff
+expect_eq "BR1 the verb exits 0" "0" "$RC"
+expect_eq "BR1b the verb's integration line, close-out check's merge verdict and its closed-form branch line name one branch, ## SDLC State's" \
+  "mainline|mainline|mainline" \
+  "$(sed -n 's/^integration: \([^ ]*\) @ .*$/\1/p' "$HF_F")|$(hf_co check | sed -n 's/^merge: .* from \([^ ]*\) @ .*$/\1/p')|$(hf_co closed-form | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
+
+# ============================================================
+section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh handoff_file_of; a tab-led heading and a project-root-relative path read alike by close-out and the verb (wave-39 T16; D18, AC-12.1)"
+# ============================================================
+# Two readers stood: close-out.sh found the section by `## Handoff` after one space, its own heading test, while the
+# poker's `handoff_file_of` takes `##` and any run of blanks (`_HANDOFF_SEC_AWK`); each resolved the relative path and
+# the default file by its own hand (debt handoff-pointer-reader). D18 rules the poker's heading test, the path
+# project-root relative, the default record/<wave>/handoff.md. Each door is asked on one plan: close-out `check` names
+# the file its closed form would be written to; the verb with no path, whose own default file does not exist yet,
+# carries the human lines from the file the pointer names.
+# FIXTURE FIDELITY: §WRITE's world, the plan's ## SDLC State naming its integration branch as Step 0 writes it, so
+# check reads the plan through; the pointer written by the real verb to a second file (`handoff <path>`), then its
+# heading re-spelled with a tab after `##`, as an editor leaves it.
+# fails-when: a door reads the tab-led heading as no pointer and falls to the default file.
+pa_check_file() {  # -> the file close-out check says its closed form would be written to
+  hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the plan.*$/\1/p'
+}
+HF_ALT=".bionic/docs/record/wave-01-fixture/alt-handoff.md"
+hf_world pointer-agree no
+awk '/^## SDLC State/ { s = 1 } s && /^current:/ { print "integration-branch: trunk"; s = 0 } { print }' "$HF_P" > "$HF_P.pa" \
+  && mv "$HF_P.pa" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+expect_eq "PA0 with no pointer, close-out check names the default file, the one §WRITE's verb writes" "$HF_DOOR" "$(pa_check_file)"
+poke "$HF_R" handoff "$HF_ALT" --mid-flight 'written into the second file'
+expect_eq "PA1 precondition: the verb wrote the second file and the pointer names it; the default file is absent" \
+  "0|1|no" "$RC|$(hf_section "$HF_P" | /usr/bin/grep -c "^handoff: $HF_ALT written " | tr -d ' ')|$([ -e "$HF_F" ] && echo yes || echo no)"
+awk '$0 == "## Handoff" { print "##\tHandoff"; next } { print }' "$HF_P" > "$HF_P.pa" && mv "$HF_P.pa" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+expect_eq "PA2 precondition: the heading is tab-led and still names the relative pointer" "1|1" \
+  "$(/usr/bin/grep -c "$(printf '^##\tHandoff$')" "$HF_P" | tr -d ' ')|$(/usr/bin/grep -c "^handoff: $HF_ALT written " "$HF_P" | tr -d ' ')"
+expect_eq "PA3 close-out check names the file the tab-led pointer names" "$HF_ALT" "$(pa_check_file)"
+poke "$HF_R" handoff
+expect_eq "PA4 the verb with no path exits 0" "0" "$RC"
+expect_eq "PA4b …and carries its human line from that same file, the one close-out named" \
+  "mid-flight: written into the second file" "$(hf_label "$HF_F" mid-flight)"
 
 
 finish

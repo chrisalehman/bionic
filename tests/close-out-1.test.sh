@@ -808,4 +808,48 @@ expect_eq "E2E14: A-orch-28 run refuses a release holding a | (rc 2)" "2" "$CO_R
 expect_eq "E2E15: …saying why, before any act" "yes" "$(contains "$CO_OUT" "the release: field of the plan holds a | (1.2|3), which would split the version cell of the epic row")"
 expect_eq "E2E16: …the plan untouched and wt/01-x still standing" "$PR_SHA/yes" "$(sha_of "$PR/$PLAN_REL")/$(branch_exists "$PR" wt/01-x)"
 
+# ============================================================
+section "BRANCH-AGREE — wave-39 T16 (D18; AC-12.1): one reader of the integration branch; close-out's check and closed-form name one branch"
+# ============================================================
+# Two orders stood: close-out's check and run read ## SDLC State alone and refused a plan whose frontmatter alone named
+# the branch, its closed-form fell back to the frontmatter, and the handoff verb read the frontmatter first
+# (critic-structure-2; debt integration-branch-reader). D18 rules ## SDLC State first, the frontmatter as the fallback,
+# and lib/plan.sh `plan_integration_branch` is that one reader. Here close-out's two doors are asked on one plan: `check`
+# (its merge verdict) and `closed-form` (the branch line). handoff-file.test.sh §BRANCH-AGREE asks the handoff verb and
+# close-out on one plan in the verb's own world: this fixture is close-out's, and the verb's dry commit through the
+# real gate is judged there at a worktree row's Step 4, a plan shape this suite does not build.
+# FIXTURE FIDELITY: mk_fixture's plan at Step 7, as a run that has not closed holds it (check reads it as a diagnosis,
+# its step refusal one line among the rest), naming `integration-branch: main` under ## SDLC State as Step 0 writes
+# it, with the frontmatter key a Step-0 plan also carries; `trunk` is a real branch at the seed, so both values name
+# branches and only the order decides.
+# fails-when: a door names the frontmatter's branch while ## SDLC State names another, or refuses a plan whose
+# frontmatter alone names it.
+ba_fm() {  # <project> <value> -> the plan's frontmatter carries integration-branch: <value>
+  awk -v v="$2" 'NR == 1 && $0 == "---" { print; print "integration-branch: " v; next } { print }' "$1/$PLAN_REL" \
+    > "$1/$PLAN_REL.ba" && mv "$1/$PLAN_REL.ba" "$1/$PLAN_REL"
+}
+ba_doors() {  # <project> -> BA_CHECK, BA_CLOSED: the branch close-out's check and closed-form name
+  run_close "$1" check
+  BA_CHECK="$(printf '%s\n' "$CO_OUT" | sed -n 's/^merge: .* from \([^ ]*\) @ .*$/\1/p')"
+  run_close "$1" closed-form
+  BA_CLOSED="$(printf '%s\n' "$CO_OUT" | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
+}
+PBA="$(mk_fixture branch-agree)"
+fixture_git "$PBA" branch trunk "$(fixture_git "$PBA" rev-list --max-parents=0 main)"
+ba_fm "$PBA" trunk
+expect_eq "BA0 precondition: ## SDLC State names main and the frontmatter trunk, both branches" "main|trunk|yes|yes" \
+  "$(sed -n '/^## SDLC State/,/^## /s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(sed -n '2s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(branch_exists "$PBA" main)|$(branch_exists "$PBA" trunk)"
+ba_doors "$PBA"
+expect_eq "BA1 close-out check and closed-form name one branch, ## SDLC State's" "main|main" "$BA_CHECK|$BA_CLOSED"
+
+PBF="$(mk_fixture branch-agree-fm)"
+awk '/^## SDLC State/ { s = 1 } /^## Tasks/ { s = 0 } !(s && /^integration-branch:/)' "$PBF/$PLAN_REL" > "$PBF/$PLAN_REL.ba" \
+  && mv "$PBF/$PLAN_REL.ba" "$PBF/$PLAN_REL"
+ba_fm "$PBF" main
+expect_eq "BA2 precondition: the frontmatter alone names the integration branch" "1|main" \
+  "$(/usr/bin/grep -c '^integration-branch:' "$PBF/$PLAN_REL" | tr -d ' ')|$(sed -n '2s/^integration-branch: //p' "$PBF/$PLAN_REL")"
+ba_doors "$PBF"
+expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
+  "main|main" "$BA_CHECK|$BA_CLOSED"
+
 finish

@@ -283,6 +283,14 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/root.sh"
 . "$BIONIC_LIB/session.sh"
 . "$BIONIC_LIB/run.sh"
+# THE ONE READER OF THE INTEGRATION BRANCH AND THE ONE READER OF THE HANDOFF POINTER (wave-39 T16; D18, AC-12.1):
+# lib/plan.sh `plan_integration_branch` (## SDLC State, then the frontmatter) for `handoff` and `release-check`, and
+# lib/handoff.sh `handoff_pointer_of`/`handoff_default_of` and `_HANDOFF_SEC_AWK` for every reader of ## Handoff below.
+# close-out.sh calls the same two, so the verb and the closed form cannot read two branches or two files.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/plan.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/handoff.sh"
 . "$BIONIC_LIB/binding.sh"
 . "$BIONIC_LIB/patrol.sh"
 . "$BIONIC_LIB/resources.sh"
@@ -3359,29 +3367,13 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
 #
 # ONE READER OF THE SECTION (burns debt handoff-section-reader): `_HANDOFF_SEC_AWK`'s `ho_track(line)` is 1 for
 # a line inside `## Handoff` (the heading, fences and fenced lines excluded), and every awk here that looks in the
-# section calls it, the in-place rewrite of the safety lines included.
-_HANDOFF_SEC_AWK='
-  function ho_track(l) {
-    if (l ~ /^[ \t]*```/) { _hf = !_hf; return 0 }
-    if (_hf) return 0
-    if (l ~ /^##[ \t]/) { _hs = (l ~ /^##[ \t]+Handoff[ \t]*$/); return 0 }
-    return _hs
-  }'
+# section calls it, the in-place rewrite of the safety lines included. It and the pointer's reader live in
+# lib/handoff.sh since wave-39 T16 (D18; burns debt handoff-pointer-reader): `handoff_pointer_of` is the absolute
+# path the pointer names, project-root relative, empty when the plan has none, and close-out.sh reads it there too.
 _HANDOFF_ISO_RE='^written: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
-handoff_file_of() {  # <plan file> -> the absolute path its ## Handoff pointer names, empty when it has no pointer
-  local rel root
-  rel="$(awk "$_HANDOFF_SEC_AWK"'
-    ho_track($0) && index($0, "handoff: ") == 1 && $0 ~ / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$1" 2>/dev/null)"
-  [ -n "$rel" ] || return 0
-  case "$rel" in
-    /*) printf '%s\n' "$rel" ;;
-    *) root="$(cd "$(project_root "$(dirname "$1")")" 2>/dev/null && pwd -P)" || return 0
-       [ -n "$root" ] && printf '%s/%s\n' "$root" "$rel" ;;
-  esac
-}
 handoff_written_at() {  # <plan file> -> the handoff's `written:` instant (the file's, through the pointer), empty when none
   local f
-  f="$(handoff_file_of "$1")"
+  f="$(handoff_pointer_of "$1")"
   if [ -n "$f" ]; then
     [ -f "$f" ] && [ ! -L "$f" ] || return 0
     awk -v re="$_HANDOFF_ISO_RE" '$0 ~ re { print substr($0, 10); exit }' "$f" 2>/dev/null
@@ -3467,7 +3459,7 @@ EOF
 handoff_mark_stale() {  # <bound plan, raw> <plan file in> <state dir> <out> -> 0 when <out> is <in> marked and differs from it
   local at list
   # A plan whose section is the pointer has no safety line of its own: its file is marked (handoff_file_mark_stale).
-  [ -z "$(handoff_file_of "$2")" ] || return 1
+  [ -z "$(handoff_pointer_of "$2")" ] || return 1
   at="$(handoff_written_at "$2")"
   [ -n "$at" ] || return 1
   list="$(handoff_stale_list "$1" "$at" "$3")"
@@ -5949,7 +5941,7 @@ FINDING_READ
 release_base() {  # <plan> <checkout> <head>
   local plan="$1" co="$2" head="$3" t tc tn best=""
   RB_BASE=""; RB_FROM=""; RB_BS=""
-  RB_IB="$(plan_frontmatter_get "$plan" integration-branch 2>/dev/null)"
+  RB_IB="$(plan_integration_branch "$plan")"
   if [ -n "$RB_IB" ]; then
     while IFS= read -r t; do
       [ -n "$t" ] || continue
@@ -10168,6 +10160,15 @@ EOF
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
       say "task-add — $TA_ID answers $(clean "$TA_BID")"
     done
+    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION (wave-39 T19; REQ-14 AC-14.2, D9): a row whose lands-on cell is
+    # none or absent writes no verdict at its landing, so lib/proof.sh `proof_fixed` counts its findings fixed only once a
+    # green regression stands at a head past its landing. Said at the row's birth, where the author can still name a suite.
+    if [ -n "$TA_BORN_IDS" ]; then
+      TA_LANDS="$(poker_brief_cell "$TA_PLAN" Tasks "$TA_ID" lands-on)" || TA_LANDS=""
+      case "$TA_LANDS" in none|none[[:space:]]*) TA_LANDS="" ;; esac
+      ! poker_brief_none "$TA_LANDS" \
+        || say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
+    fi
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
     suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
@@ -11198,11 +11199,11 @@ EOF
     fi
     # WHERE THE FILE GOES: <path> absolute or project-root-relative, a .md under the docs root; else the default.
     HO_DOCS="$(docs_root "$PV_REPO")"
-    HO_PTR_FILE="$(handoff_file_of "$PV_PLAN")"
+    HO_PTR_FILE="$(handoff_pointer_of "$PV_PLAN")"
     if [ -n "$HO_ARG_PATH" ]; then
       case "$HO_ARG_PATH" in /*) HO_FILE="$HO_ARG_PATH" ;; *) HO_FILE="$PV_REPO/${HO_ARG_PATH#./}" ;; esac
     else
-      HO_FILE="$HO_DOCS/record/$(proof_plan_slug "$PV_PLAN")/handoff.md"
+      HO_FILE="$(handoff_default_of "$PV_PLAN" "$PV_REPO")"
     fi
     HO_OK=yes
     case "$HO_FILE" in *.md) : ;; *) HO_OK=no ;; esac
@@ -11224,12 +11225,7 @@ EOF
     done
     HO_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     HO_WB="$(plan_working_branch "$PV_PLAN")"
-    HO_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch)"
-    [ -n "$HO_IB" ] || HO_IB="$(awk '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && /^[[:space:]]*integration-branch[[:space:]]*:/ { v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v); print v; exit }' "$PV_PLAN")"
+    HO_IB="$(plan_integration_branch "$PV_PLAN")"
     HO_HEADS=""
     for HO_B in "$HO_WB" "$HO_IB"; do
       HO_H=""
@@ -13697,7 +13693,7 @@ DSP_READINGS
     fi
     rm -f "$PV_NEW.2"
     # A plan whose ## Handoff is the pointer (wave-38 T12; D23): its FILE's safe line is marked, the plan untouched.
-    LS_HF="$(handoff_file_of "$PV_PLAN")"; LS_FMARKED=no
+    LS_HF="$(handoff_pointer_of "$PV_PLAN")"; LS_FMARKED=no
     if [ -n "$LS_HF" ] && handoff_file_mark_stale "$PV_PLAN" "$LS_HF" "$PV_REPO/.bionic/tmp"; then
       LS_FMARKED=yes
       say "HANDOFF-STALE — ${LS_HF#"$PV_REPO"/} now reads stale: a dispatch of this plan postdates it; rewrite it: bash ${HOOK_DIR}/session-poker.sh handoff"

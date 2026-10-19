@@ -936,4 +936,68 @@ expect_contains "OW-9c precondition: the tick holds the integrate row on its app
 expect_absent "OW-9d AC-18.4 …and not on the regression, which the waiver answers (OW-3 is the positive)" "proof:regression" "$(ow_wait)"
 POKE_BOUND="$OW_BOUND_WAS"
 
+# ============================================================
+section "§BORN-NONE: task-add --born <record>#<n> on a row whose lands-on cell is none or absent says the finding counts on the next green regression (wave-39 T19; REQ-14 AC-14.2; D9)"
+# ============================================================
+# A row that lands with no verdict events (no Lands-on suite, a hand landing) has its findings fixed only once a
+# green regression stands past its landing (lib/proof.sh `proof_fixed`, T19's regression arm). The author learns it
+# at the row's birth: task-add, after the row is in, reads the row's lands-on cell (`poker_brief_cell`, the brief's
+# reader), and when the table has no such column, or the cell is empty, a dash or `none …`, prints
+#   task-add — <T> lands none — counts on the next green regression: …
+# A row born of a rating (`--born 'review S<n> <on|off>'`) names no finding, so no line; a row with no --born, none.
+# FIXTURE FIDELITY: session-poker-4 §BM's world (s42_plan's bound plan at current: 4 with fix-policy and fix-cap
+# written as Step 0 writes them; a reading record under the docs root in the shape proof_findings reads, registered
+# by the `proved:` line proof_line writes); the second plan carries a lands-on column, as wave-38 T19's tables do.
+# The real verb. fails-when: a findings-born row whose lands-on is none or absent is added silently.
+BNN_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+BNN_SAYS="lands none — counts on the next green regression"
+bnn_world() {  # <label> -> sets BNN_R, BNN_P, BNN_ID: a bound plan at current: 4 with a registered reading of two S2 findings
+  local h
+  BNN_R="$(make_repo "$1")"; ( cd "$BNN_R" && git commit -q --allow-empty -m init )
+  BNN_P="$(s42_plan "$BNN_R" 4)"
+  awk '{ print } /^rigor: / { print "review-cadence: once"; print "fix-policy: S1,S2-on"; print "fix-cap: 4" }' "$BNN_P" > "$BNN_P.bnn" && mv "$BNN_P.bnn" "$BNN_P"
+  h="$(git -C "$BNN_R" rev-parse HEAD)"
+  BNN_ID=record/wave-01-fixture/bnn.md
+  mkdir -p "$BNN_R/.bionic/docs/record/wave-01-fixture"
+  { printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\nfindings: 2\n' "${h:0:10}" "${h:0:10}"
+    printf 'finding: 1 S2 on m.sh:1 data lost on a second run\nshown: 1 bash m.sh; bash m.sh\n'
+    printf 'finding: 2 S2 on m.sh:2 the lock is never taken\nshown: 2 bash m.sh & bash m.sh\n'
+    printf '\nwhat the reader found\n'; } > "$BNN_R/.bionic/docs/$BNN_ID"
+  BNN_PROVED="$(bash -c '. "$1" && proof_line review "$2" 2026-10-12T12:00:00Z "$3" adversarial w-read fail piece' _ "$S46_LIB" "$h" "$BNN_ID")"
+  awk -v p="$BNN_PROVED" '{ print } /^current: / && !d { print p; d = 1 }' "$BNN_P" > "$BNN_P.bnn" && mv "$BNN_P.bnn" "$BNN_P"
+  ( cd "$BNN_R" && git add -f "$BNN_P" .bionic/docs/record && git commit -qm "the reading" ) >/dev/null 2>&1
+}
+bnn_cell() { awk -F'|' -v id="$2" '/^\| id \|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == "lands-on") col = i } }
+  col { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id) { v = $col; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"; }
+
+# ---------- no lands-on column: the cell is absent ----------
+bnn_world born-none-absent
+expect_eq "BNN-0 precondition: the table carries no lands-on column" "0" "$(/usr/bin/grep -c '^| id |.*lands-on' "$BNN_P" | tr -d ' ')"
+poke "$BNN_R" task-add T6 4 build 'take the lock' implementor '—' 30 REQ-1 'm.sh' --born "$BNN_ID#2"
+expect_eq "BNN-1 task-add --born <rec>#2 exits 0 (the row is in)" "0" "$RC"
+expect_contains "BNN-1b AC-14.2 the lands-on cell absent: it says the finding counts on the next green regression" \
+  "task-add — T6 $BNN_SAYS" "$OUT"
+poke "$BNN_R" task-add T7 4 build 'a plain row' implementor '—' 30 REQ-1 'n.sh'
+expect_eq "BNN-2 a row with no --born exits 0 (positive: the same verb's output read)" "0|task-add — T7 added" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -o 'task-add — T7 added' | head -1)"
+expect_absent "BNN-2b …and says no such line: it answers no finding" "$BNN_SAYS" "$OUT"
+poke "$BNN_R" task-add T8 4 build 'a rated fix' implementor '—' 30 REQ-1 'o.sh' --born 'review S2 on'
+expect_eq "BNN-3 a rating-born row exits 0" "0" "$RC"
+expect_contains "BNN-3a …and says it is review-born (positive: the same output read)" "task-add — T8 is review-born (review S2 on)" "$OUT"
+expect_absent "BNN-3b …and no lands-none line: a rating names no finding proof_fixed reads" "$BNN_SAYS" "$OUT"
+
+# ---------- a lands-on column: the new row's cell is empty or a dash ----------
+bnn_world born-none-column
+awk '/^## Tasks/ { t = 1 } /^## / && !/^## Tasks/ { t = 0 }
+  t && /^\| id \|/ { print $0 " lands-on |"; next }
+  t && /^\|---/ { print $0 "---|"; next }
+  t && /^\| T[0-9]/ { print $0 " — |"; next } { print }' "$BNN_P" > "$BNN_P.bnn" && mv "$BNN_P.bnn" "$BNN_P"
+( cd "$BNN_R" && git add -f "$BNN_P" && git commit -qm "a lands-on column" ) >/dev/null 2>&1
+expect_eq "BNN-4 precondition: the table carries a lands-on column, T1's cell a dash (the extractor reads it)" "—" "$(bnn_cell "$BNN_P" T1)"
+poke "$BNN_R" task-add T6 4 build 'take the lock' implementor '—' 30 REQ-1 'm.sh' --born "$BNN_ID#2"
+expect_eq "BNN-5 task-add --born <rec>#2 on the table with the column exits 0" "0" "$RC"
+expect_regex "BNN-5b …the new row's lands-on cell is empty or a dash" '^(—|-)?$' "$(bnn_cell "$BNN_P" T6)"
+expect_contains "BNN-5c AC-14.2 …and it says the finding counts on the next green regression" "task-add — T6 $BNN_SAYS" "$OUT"
+POKE_BOUND="$BNN_BOUND_WAS"
+
 finish

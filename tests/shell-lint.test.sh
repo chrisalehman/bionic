@@ -915,7 +915,8 @@ tests/fresh-home.test.sh               2      1
 tests/gate.test.sh                     2      12
 tests/hook-latency.test.sh             2      0
 tests/landing-gate.test.sh             0      2
-tests/landing-line.test.sh             0      21
+tests/landing-line-1.test.sh           0      12
+tests/landing-line-2.test.sh           0      2
 tests/name-scan.test.sh                10     2
 tests/notify.test.sh                   0      2
 tests/permission-answer.test.sh        0      1
@@ -942,6 +943,7 @@ tests/units.test.sh                    3      3
 tests/width.test.sh                    1      0
 tests/worktree.test.sh                 4      16
 tests/dispatch-preflight.prelude.sh    4      0
+tests/landing-line.prelude.sh          0      7
 tests/session-poker.prelude.sh         0      1
 tests/lib/wait.sh                      0      2
 LEDGER
