@@ -96,7 +96,7 @@ world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
 # ---------------------------------------------------------------------------- helpers
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# A world whose plan the commit gate admits (the shape tests/landing-line.test.sh's `ll_world` plants),
+# A world whose plan the commit gate admits (the shape tests/landing-line.prelude.sh's `ll_world` plants),
 # its two rows' launch lines on the roster with ids and the suite they land on, and a third writer,
 # wx-T3, whose row is closed: acked in the sweeper ledger after its launch.
 in_world() {  # -> the world root

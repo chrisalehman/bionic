@@ -331,11 +331,11 @@ expect_contains "LIVE: session-poker.test.sh reads hooks/session-poker.sh" "hook
 expect_contains "LIVE: …and, through the closure, payload/scripts/lib/line.sh" "payload/scripts/lib/line.sh" "$LS"
 expect_regex "LIVE: …and its key is a sha256 of its reads, not the tree" '^[0-9a-f]{64}$' "$(rh_hash "$REPO" "$LH" tests/session-poker.test.sh)"
 LIX="$(rh_index "$REPO" "$LH")"; LCX="$(rh_closed "$REPO" "$LH")"
-expect_contains "(ci4-pre) the plain index has a row for lib/line.sh: landing-line.test.sh names it" "tests/landing-line.test.sh" "$(row_of payload/scripts/lib/line.sh "$LIX")"
+expect_contains "(ci4-pre) the plain index has a row for lib/line.sh: landing-line-1.test.sh names it" "tests/landing-line-1.test.sh" "$(row_of payload/scripts/lib/line.sh "$LIX")"
 expect_no_match "(ci4) …which does not name session-poker.test.sh: it reaches line.sh only through hooks/session-poker.sh's loads" \
   'tests/session-poker\.test\.sh' "$(row_of payload/scripts/lib/line.sh "$LIX")"
 expect_contains "(ci4) the closed index's row for lib/line.sh names session-poker.test.sh" "tests/session-poker.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
-expect_contains "(ci4) …and landing-line.test.sh, as the plain one does" "tests/landing-line.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
+expect_contains "(ci4) …and landing-line-1.test.sh, as the plain one does" "tests/landing-line-1.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
 
 # ------------------------------------------------------------
 setup_section "plant the one-key fixture: calc.sh's one() and two(), a suite declaring one(), one declaring nothing, one refused"
