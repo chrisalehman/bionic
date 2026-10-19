@@ -919,7 +919,8 @@ tests/landing-line.test.sh             0      21
 tests/name-scan.test.sh                10     2
 tests/notify.test.sh                   0      2
 tests/permission-answer.test.sh        0      1
-tests/rc-item.test.sh                  4      4
+tests/rc-item-1.test.sh                2      1
+tests/rc-item-2.test.sh                2      3
 tests/refuse.test.sh                   6      0
 tests/resources.test.sh                7      0
 tests/runner-roster.test.sh            2      13

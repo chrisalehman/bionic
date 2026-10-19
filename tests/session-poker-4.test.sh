@@ -6760,6 +6760,115 @@ expect_contains "FN5-5c …saying the approval is spent" "spent" "$OUT"
 expect_contains "FN5-5d …and naming the user's word for the regression" "waive regression" "$OUT"
 POKE_BOUND="$F5_BOUND_WAS"
 
+# ============================================================
+section "§HAND-SCAN: row-landed --by-hand runs the release check over the accepted range unless a passing kind=check proof stands at or past the commit (wave-39 T13; REQ-9 AC-9.1, AC-9.3; D14, D32)"
+# ============================================================
+#
+# Wave 38 gathered fourteen rows into one candidate, fast-forwarded the working branch by hand and
+# marked each row `row-landed --by-hand`, a route that ran no scan, so a private name reached history
+# (A-orch-71, A-orch-78; D32 rewrote 99 commits to purge it). With `release-check:` declared, the hand
+# verb now writes only when a passing `kind=check` proof stands at the commit or at a commit that
+# holds it; else it runs the declared check over the release range (the release-check verb's base, the
+# commit as the head, the working branch named for the rewrite) and refuses a failing one, printing
+# what the check printed: the hit, the commit and path that brought it, and the rewrite D32 ran.
+#
+# FIXTURE FIDELITY. §DELIVER's shape: a plan bound to this session, its working branch in a linked
+# worktree. The declared check is the real name scan (tests/lib/name-scan.sh) over a list kept outside
+# every checkout; the passing proof is written by the release-check verb itself, run with a list that
+# holds no planted name and then pointed back at the planted one. SYNTHESIZED: the planted string.
+HS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=240
+HS_NAME="zq-handscan-6620"
+HS_LISTS="$TMPROOT/hs-lists"; mkdir -p "$HS_LISTS"
+printf '%s\n' "$HS_NAME" > "$HS_LISTS/planted"; printf 'zq-nowhere-0000\n' > "$HS_LISTS/clean"
+HS_SCAN="${BIONIC_SCRIPTS_DIR}/tests/lib/name-scan.sh"
+RHS="$(make_repo hs-hand)"; ( cd "$RHS" && git commit -q --allow-empty -m init )
+git -C "$RHS" config user.name "Dana Fixture"
+HS_B="$(git -C "$RHS" rev-parse HEAD)"
+hs_plan() {  # <repo> -> the plan path: bound, committed; two build rows a hand landing marks
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")" "$1/.bionic/docs/specs/epic-99-fixture"
+  printf '# requirements\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "${HS_B:0:8}"
+    printf -- '- T1: pending dispatch — .worktrees/01-T1\n- T2: pending dispatch — .worktrees/01-T2\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a gathered build | w-T1 | — | 30 | REQ-1 | lib/h.txt | 01-T1 | abc1234 | active |  |\n'
+    printf '| T2 | 4 | build | a later build | w-T2 | — | 30 | REQ-1 | lib/k.txt | 01-T2 | abc1234 | active |  |\n\n'
+    printf '## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n'
+    printf '| T1 | implementor (w-T1) | — | 30 min | — | — | batch 1 |\n'
+    printf '| T2 | implementor (w-T2) | — | 30 min | — | — | batch 1 |\n'
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  } > "$f"
+  bind_marker "$1" "$f"
+  ( cd "$1" && git add -f "$f" && git commit -qm plan ) >/dev/null 2>&1
+  printf '%s' "$f"
+}
+PHS="$(hs_plan "$RHS")"
+( cd "$RHS" && git worktree add -q -b wave/01-fixture "$RHS/.worktrees/01-fixture" "$(git rev-parse HEAD)" ) >/dev/null 2>&1
+HS_WT="$RHS/.worktrees/01-fixture"
+# the gathered landing: C1 brings the planted name, C2 takes it out again, so only history holds it
+HS_C1="$(s57_commit "$HS_WT" lib/h.txt "see $HS_NAME here")"
+HS_BLOB="$(git -C "$HS_WT" rev-parse HEAD:lib/h.txt | cut -c1-12)"
+printf 'clean\n' > "$HS_WT/lib/h.txt"; ( cd "$HS_WT" && git commit -qam "take it out" ) >/dev/null 2>&1
+HS_C2="$(git -C "$HS_WT" rev-parse HEAD)"
+hs_config() { printf 'release-check: bash %s %s\n' "$HS_SCAN" "$HS_LISTS/$1" > "$RHS/.bionic/config.yaml"; }
+hs_status() { s48_row "$PHS" "$1" | awk -F'|' '{ print $12 }'; }
+hs_snap() { cp "$PHS" "$TMPROOT/hs-before"; }
+hs_same() { cmp -s "$TMPROOT/hs-before" "$PHS" && echo same || echo changed; }
+expect_eq "HS-0 precondition: the planted name is in C1's blob and not in the head's tree" "1|0" \
+  "$(git -C "$HS_WT" show "$HS_C1:lib/h.txt" | grep -c -F "$HS_NAME")|$(git -C "$HS_WT" show "$HS_C2:lib/h.txt" | grep -c -F "$HS_NAME")"
+expect_eq "HS-0b precondition: the status extractor reads T1 active" "active" "$(hs_status T1)"
+expect_false "HS-0c precondition: the list directory is outside every checkout" git -C "$HS_LISTS" rev-parse --git-dir
+
+# ---------- the hit refuses the hand landing, naming it, and the plan is unchanged ----------
+hs_config planted
+hs_snap
+poke "$RHS" row-landed T1 "$HS_C2" 2026-10-04T04:00:00Z --by-hand "Dana Fixture" "gathered by hand"
+expect_eq "HS-1 §HAND-SCAN AC-9.1 a hand landing whose release range holds a planted name is refused (exit 1)" "1" "$RC"
+expect_eq "HS-1b …the plan byte-identical, T1 still active" "same active" "$(hs_same) $(hs_status T1)"
+expect_contains "HS-1c …naming the hit, by its blob" "HIT entry=1 at blob $HS_BLOB line 1" "$OUT"
+expect_contains "HS-1d AC-9.3 …and the commit and path that brought it" "  in commit ${HS_C1:0:12} path lib/h.txt" "$OUT"
+expect_contains "HS-1e AC-9.3 …and the rewrite D32 ran, over the working branch" \
+  "git filter-branch --tree-filter '<take the hit out of lib/h.txt>' -- ${HS_C1:0:12}^..wave/01-fixture &&" "$OUT"
+expect_contains "HS-1f …and the refusal says what refused" "REFUSED — row-landed --by-hand: the declared release-check" "$OUT"
+expect_contains "HS-1g …over the release range, from the base to the commit" "over ${HS_B:0:12}..${HS_C2:0:12}" "$OUT"
+expect_eq "HS-1h …and nothing it printed holds the planted name" "0" "$(printf '%s\n' "$OUT" | grep -c -i -F "$HS_NAME")"
+poke "$RHS" release-check
+expect_eq "HS-2 precondition: the release-check verb over the planted list fails (exit 1), writing a failing check fact" "1" "$RC"
+expect_contains "HS-2b …at the working head" "kind=check head=$HS_C2" "$(grep -F 'kind=check' "$PHS")"
+hs_snap
+poke "$RHS" row-landed T1 "$HS_C2" 2026-10-04T04:00:00Z --by-hand "Dana Fixture" "gathered by hand"
+expect_eq "HS-3 a failing check fact at the commit is no pass: still refused, the plan unchanged" "1 same active" "$RC $(hs_same) $(hs_status T1)"
+
+# ---------- a passing kind=check proof at or past the commit stands for the scan ----------
+HS_C3="$(s57_commit "$HS_WT" lib/k.txt "a later clean change")"
+hs_config clean
+poke "$RHS" release-check
+expect_eq "HS-4 precondition: the release-check verb over a clean list passes at C3, which holds C2 (exit 0)" "0" "$RC"
+expect_contains "HS-4b …writing its passing proof at C3" "kind=check head=$HS_C3" "$OUT"
+hs_config planted
+poke "$RHS" row-landed T1 "$HS_C2" 2026-10-04T04:00:00Z --by-hand "Dana Fixture" "gathered by hand"
+expect_eq "HS-5 §HAND-SCAN AC-9.1 with a passing kind=check proof past the commit the hand landing writes (exit 0, landed)" \
+  "0 landed" "$RC $(hs_status T1)"
+expect_contains "HS-5b …saying which proof it stood on" "${HS_C2:0:12} is held by the passing release check at ${HS_C3:0:12}" "$OUT"
+expect_absent "HS-5c …and it ran no scan" "HIT entry=" "$OUT"
+poke "$RHS" row-landed T2 "$HS_C3" 2026-10-04T04:10:00Z --by-hand "Dana Fixture" "landed by hand"
+expect_eq "HS-6 AC-9.1 a passing proof AT the commit stands too (exit 0, landed)" "0 landed" "$RC $(hs_status T2)"
+expect_contains "HS-6b …saying so" "${HS_C3:0:12} is held by the passing release check at ${HS_C3:0:12}" "$OUT"
+POKE_BOUND="$HS_BOUND_WAS"
 
 # ============================================================
 section "§HAND: row-landed --by-hand records the hand landing on the landing record, ev=published kind=hand, once, so landing-report lists the row and its hand-holds count it (wave-39 T10; D14; REQ-6 AC-6.2)"

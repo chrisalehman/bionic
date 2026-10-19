@@ -3998,6 +3998,47 @@ agent_project_dir_for() {  # <session-id> -> project directory on stdout, nonzer
 # `row_quiet` (the tick's own liveness read) and `adopt`'s report (the ADOPT_SCHEMA block
 # below) — call it through this project-directory resolution.
 
+# A LIVE RUN IS NOT A QUIET ONE (wave-39 T22; REQ-16 AC-16.1; D21). A writer blocked in a foreground `ready --within`
+# touches neither its progress file nor its transcript for up to thirty minutes, so the two mtimes alone named every
+# such row on every tick. Before either NOTIFY arm reads an mtime the tick asks `row_live_run` whether the row has a
+# run that lives, by the two facts that say so and that no mtime can:
+#   - its LANDING CARRIER: an open entry of lib/line.sh's fold (an `ev=ready` of the plan's landing record with no later
+#     `published` or `returned`) whose name is the row's and whose `carrier=` process lives, by `_line_entries`'s
+#     presence rule (the pid-and-start rule of lib/slots.sh). `landing_carrier_names` is the one read of it;
+#   - the GATE's open request for the row's agent: a request of lib/gate.sh waiting or admitted whose `who=` is
+#     `<session>:<agent>` (`gate_asked`), the session being the one that launched the agent, the one that adopted it
+#     and this one. A suite or a landing's run in flight is a live run too.
+# Either one, and the row is ACTIVE: neither arm names it. Neither one, and the mtimes decide as they did, so a dead
+# silent row still NOTIFYs.
+TICK_CARRIERS=""; TICK_CARRIERS_READ=no
+landing_carrier_names() {  # <plan> -> the names of the entries whose landing carrier lives, one a line (read once a tick)
+  local rec
+  [ "$TICK_CARRIERS_READ" = yes ] && { printf '%s' "$TICK_CARRIERS"; return 0; }
+  TICK_CARRIERS_READ=yes
+  declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  declare -F _line_entries >/dev/null 2>&1 || return 0
+  rec="$(_wt_proofs_path "$REPO_REAL" "$1" 2>/dev/null)" || rec=""
+  [ -n "$rec" ] && [ -f "$rec" ] && [ ! -L "$rec" ] || return 0
+  TICK_CARRIERS="$(_line_entries "$rec" "" 2>/dev/null | awk -F'\t' '$4 == "yes" && $2 != "" { print $2 }')"
+  printf '%s' "$TICK_CARRIERS"
+}
+row_live_run() {  # <roster-state row> -> 0 when the row's agent has a live landing carrier or an open gate request
+  local row="$1" name who s names=""
+  name="$(line_field "$row" name)"
+  [ -n "$name" ] || return 1
+  if [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
+    landing_carrier_names "$POKER_RUN_PLAN" | /usr/bin/grep -qxF -- "$name" && return 0
+  fi
+  declare -F gate_asked >/dev/null 2>&1 || return 1
+  # The gate spells the agent as booked.sh does (lib/gate.sh `_gate_marker`).
+  who="${name//[!A-Za-z0-9._+-]/_}"
+  for s in "$SESSION_ID" "$(line_field "$row" session)" "$(line_field "$row" adopted_from)"; do
+    [ -n "$s" ] && names="${names}${s}:${who}
+"
+  done
+  [ -n "$names" ] && printf '%s' "$names" | gate_asked >/dev/null 2>&1
+}
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
   local row="$1" now="$2" cad cad_s prog pm=0 id proj tx lm=0
@@ -4436,15 +4477,19 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 poker_brief_cell() {
   awk -v sect="$2" -v id="$3" -v want="$4" '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    BEGIN { SEP = sprintf("%c", 1) }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insec = (tolower(trim(substr($0, 3))) == tolower(sect)); hdr = 0; col = 0; next }
     !insec || $0 !~ /^[[:space:]]*\|/ { next }
     {
-      n = split($0, c, "|")
+      # AN ESCAPED PIPE IS TEXT, NOT A CELL EDGE (wave-39 T23; D22): units.sh reads `\|` so, and a task cell carrying
+      # a case label `(a\|b)` shifted every cell after it one to the left here, so the suites cell of a row read as its status.
+      line = $0; gsub(/\\\|/, SEP, line)
+      n = split(line, c, "|")
       if (!hdr) { hdr = 1; for (i = 2; i < n; i++) if (tolower(trim(c[i])) == tolower(want)) col = i; next }
       if (c[2] ~ /^[ \t]*:?-+:?[ \t]*$/) next
-      if (col && trim(c[2]) == id) { print trim(c[col]); found = 1; exit }
+      if (col && trim(c[2]) == id) { v = trim(c[col]); gsub(SEP, "|", v); print v; found = 1; exit }
     }
     END { exit !found }' "$1"
 }
@@ -4517,6 +4562,20 @@ poker_brief_index_suites() {
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
   declare -F reads_suites >/dev/null 2>&1 || return 0
   reads_suites "$1" "$2" "$3" | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
+}
+
+# poker_brief_union <list>... -> the suites of every list (each comma-separated), in the order given, once each by file
+# name (a spelling `tests/x.test.sh` and `x.test.sh` is one suite), comma-joined. The one fold of a row's own cells and
+# the reads index (wave-39 T23; REQ-17 AC-17.1; D22).
+poker_brief_union() {
+  printf '%s\n' "$@" | awk '{
+    n = split($0, s, /[ \t]*,[ \t]*/)
+    for (i = 1; i <= n; i++) {
+      t = s[i]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+      b = t; sub(/^.*\//, "", b)
+      if (b != "" && !(b in seen)) { seen[b] = 1; o = o (o == "" ? "" : ", ") t }
+    } }
+    END { printf "%s", o }'
 }
 
 # poker_reader_kind <kind> -> 0 for a reader row's kind (verify, test, review): its artifact is a record it writes.
@@ -5861,6 +5920,96 @@ $(printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { print; exit }')
 FINDING_READ
   set -- $(proof_finding_rating "$plan" "$id" "$FR_S" "$FR_R")
   FR_P="${3:-}"
+  return 0
+}
+
+# THE LAST RELEASE (wave-27 T31; review pass 22 S2; one function since wave-39 T13, read by the release-check verb and
+# by the hand landing's scan): release_base <plan> <checkout> <head> sets RB_BASE, the 40-hex start of the release range,
+# and RB_FROM saying where it came from (`tag <t> on <branch>` | `base-sha <s>`), and RB_IB and RB_BS for a refusal to
+# name; 1 when there is none. The nearest tag reachable from the plan's `integration-branch:` that is a PROPER ancestor
+# of <head> (the fewest commits from it to <head>): a tag on <head>, or on a commit not on its history, is no base, for
+# the range it opens would hold nothing or the wrong thing. With none, the plan's `base-sha:` (lib/proof.sh
+# `proof_plan_base`, which the caller has loaded).
+release_base() {  # <plan> <checkout> <head>
+  local plan="$1" co="$2" head="$3" t tc tn best=""
+  RB_BASE=""; RB_FROM=""; RB_BS=""
+  RB_IB="$(plan_integration_branch "$plan")"
+  if [ -n "$RB_IB" ]; then
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      tc="$(git -C "$co" rev-parse --verify -q "refs/tags/$t^{commit}" 2>/dev/null)" || continue
+      [ "$tc" != "$head" ] || continue
+      git -C "$co" merge-base --is-ancestor "$tc" "$head" 2>/dev/null || continue
+      tn="$(git -C "$co" rev-list --count "$tc..$head" 2>/dev/null)" || continue
+      if [ -z "$best" ] || [ "$tn" -lt "$best" ]; then
+        best="$tn"; RB_BASE="$tc"; RB_FROM="tag $t on $RB_IB"
+      fi
+    done <<RB_TAGS
+$(git -C "$co" tag --merged "refs/heads/$RB_IB" 2>/dev/null)
+RB_TAGS
+  fi
+  if [ -z "$RB_BASE" ]; then
+    RB_BS="$(proof_plan_base "$plan" "$co")"
+    [ -z "$RB_BS" ] || RB_BASE="$(git -C "$co" rev-parse --verify -q "$RB_BS^{commit}" 2>/dev/null)"
+    RB_FROM="base-sha $RB_BS"
+  fi
+  [ -n "$RB_BASE" ]
+}
+
+# THE HAND LANDING'S SCAN (wave-39 T13; REQ-9 AC-9.1, AC-9.3; D14). `row-landed --by-hand` marks a landing no line
+# made: wave 38 fast-forwarded fourteen rows by hand and marked each so, a route that ran no check, and the private
+# name that reached history through it cost a rewrite of 99 commits (A-orch-71, A-orch-78; D32). With `release-check:`
+# declared in `.bionic/config.yaml`, the mark is written only when the commit is held: by a passing `kind=check` proof
+# at it or at a commit that holds it (lib/proof.sh `proof_check_passes`, the last check line at each head deciding
+# it), else by the declared check itself, run as the release-check verb runs it (its words split on blanks, globbing
+# off) over the release range, `release_base` to the commit, in the checkout of the plan's working branch (the
+# project root when none holds it), with BIONIC_CHECK_BRANCH naming that branch for the rewrite a hit prints
+# (tests/lib/name-scan.sh). A check that exits non-zero refuses: its output is printed, each hit with the commit and
+# path that brought it and its fix, and the plan is unchanged. A commit the base already holds is in a release and
+# is not scanned again. With no key nothing runs. The `line_publish` route ran the check over its own range before
+# its fast-forward and then calls this verb, so a hand landing through `land --by-hand` meets it twice; the second
+# run sees the whole release range, which the first did not. Exits on a refusal; returns when the mark may be written.
+row_landed_scan() {
+  local cmd wb co p out rc
+  cmd="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
+  [ -n "$cmd" ] || return 0
+  if ! { declare -F proof_check_passes >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F proof_check_passes >/dev/null 2>&1; then
+    die "REFUSED — row-landed --by-hand: the declared release-check cannot be judged, for the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
+  wb="$(plan_working_branch "$PV_PLAN")"
+  co=""; [ -z "$wb" ] || co="$(proof_checkout "$PV_REPO" "$wb")" || co=""
+  [ -n "$co" ] || co="$PV_REPO"
+  if ! git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" >/dev/null 2>&1; then
+    die "REFUSED — row-landed --by-hand: $RL_COMMIT is no commit in $co, so the declared release-check has nothing to run over; the plan is unchanged."
+    exit 1
+  fi
+  for p in $(proof_check_passes "$PV_PLAN" "$co"); do
+    if git -C "$co" merge-base --is-ancestor "$RL_COMMIT" "$p" 2>/dev/null; then
+      say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
+      return 0
+    fi
+  done
+  if ! release_base "$PV_PLAN" "$co" "$RL_COMMIT"; then
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) has no range to run over: no tag reachable from the plan's integration-branch (${RB_IB:-none named}) is a proper ancestor of $RL_COMMIT and its base-sha (${RB_BS:-none}) is no commit here; name the last release as the plan's base-sha, or tag it. The plan is unchanged."
+    exit 1
+  fi
+  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$RL_COMMIT" 2>/dev/null)" = 0 ]; then
+    say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
+    return 0
+  fi
+  out="$(cd "$co" 2>/dev/null || exit 1
+    set -f
+    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$RL_COMMIT" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
+    # shellcheck disable=SC2086  # the configured command is meant to split on blanks
+    exec $cmd </dev/null 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ -z "$out" ] || printf '%s\n' "$out"
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) exited $rc over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${RL_COMMIT:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
+    exit 1
+  fi
+  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM)."
   return 0
 }
 
@@ -10274,6 +10423,7 @@ EOF
     fi
     plan_verb_open row-landed
     [ "$VERB" != deliver ] || deliver_check
+    [ "$RL_HAND" -eq 0 ] || row_landed_scan
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
@@ -11323,22 +11473,25 @@ EOF
     # to), sorted, once each; else the slot: `none` is a waiver nobody chose for a row that writes code.
     BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
     BRF_SUITE_SLOT=""
-    if poker_brief_none "$BRF_SUITES"; then
-      BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
-      if units_writes_head "$BRF_FILES"; then
-        BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
-        BRF_SUITES="$(printf '%s\n%s\n' "$BRF_SUITES" "$BRF_IDX" | awk '{
-          n = split($0, s, /[ \t]*,[ \t]*/)
-          for (i = 1; i <= n; i++) if (s[i] != "" && !(s[i] in seen)) { seen[s[i]] = 1; o = o (o == "" ? "" : ", ") s[i] } }
-          END { printf "%s", o }')"
-        [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
-      fi
-    fi
     BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
+    poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
+    BRF_IDX=""
+    if units_writes_head "$BRF_FILES"; then
+      # THE INDEX IS UNIONED WHETHER OR NOT THE ROW HAS CELLS (wave-39 T23; REQ-17 AC-17.1; D22): the dispatch wall
+      # refuses a Lands-on: that omits a suite the index names for the Files, and one outside Suites:, so a row's own
+      # cells end nothing: Suites: is them with the index's suites after, and Lands-on: is its cell (else the Suites)
+      # with the same after. A `none` Lands-on cell is the wall's refusal for a row that writes code, so it is not carried.
+      BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
+      BRF_SUITES="$(poker_brief_union "$BRF_SUITES" "$BRF_IDX")"
+      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
+      case "$BRF_LANDS" in none|none[[:space:]]*) BRF_LANDS="" ;; esac
+    fi
     if poker_brief_none "$BRF_LANDS"; then
       BRF_LANDS="$BRF_SUITES"
       [ -n "$BRF_LANDS" ] || BRF_LANDS="$BRF_SUITE_SLOT"
       [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
+    else
+      BRF_LANDS="$(poker_brief_union "$BRF_LANDS" "$BRF_IDX")"
     fi
     [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
 
@@ -12573,27 +12726,8 @@ DSP_READINGS
       die "REFUSED — the working checkout $RC_CO has uncommitted changes, so the check would not read the head $RC_HEAD alone; commit them and run release-check again. Nothing was run and the plan is unchanged."
       exit 1
     fi
-    RC_IB="$(plan_integration_branch "$PV_PLAN")"
-    RC_BASE=""; RC_FROM=""; RC_BEST=""
-    if [ -n "$RC_IB" ]; then
-      while IFS= read -r RC_TAG; do
-        [ -n "$RC_TAG" ] || continue
-        RC_TC="$(git -C "$RC_CO" rev-parse --verify -q "refs/tags/$RC_TAG^{commit}" 2>/dev/null)" || continue
-        [ "$RC_TC" != "$RC_HEAD" ] || continue
-        git -C "$RC_CO" merge-base --is-ancestor "$RC_TC" "$RC_HEAD" 2>/dev/null || continue
-        RC_TN="$(git -C "$RC_CO" rev-list --count "$RC_TC..$RC_HEAD" 2>/dev/null)" || continue
-        if [ -z "$RC_BEST" ] || [ "$RC_TN" -lt "$RC_BEST" ]; then
-          RC_BEST="$RC_TN"; RC_BASE="$RC_TC"; RC_FROM="tag $RC_TAG on $RC_IB"
-        fi
-      done <<RC_TAGS
-$(git -C "$RC_CO" tag --merged "refs/heads/$RC_IB" 2>/dev/null)
-RC_TAGS
-    fi
-    if [ -z "$RC_BASE" ]; then
-      RC_BS="$(proof_plan_base "$PV_PLAN" "$RC_CO")"
-      [ -z "$RC_BS" ] || RC_BASE="$(git -C "$RC_CO" rev-parse --verify -q "$RC_BS^{commit}" 2>/dev/null)"
-      RC_FROM="base-sha $RC_BS"
-    fi
+    release_base "$PV_PLAN" "$RC_CO" "$RC_HEAD"
+    RC_IB="$RB_IB"; RC_BASE="$RB_BASE"; RC_FROM="$RB_FROM"; RC_BS="$RB_BS"
     if [ -z "$RC_BASE" ]; then
       die "REFUSED — no tag reachable from the plan's integration-branch (${RC_IB:-none named}) is a proper ancestor of the working head and its base-sha (${RC_BS:-none}) is no commit here, so the release range has no start; nothing was run and the plan is unchanged."
       exit 1
@@ -14367,6 +14501,10 @@ EOF
       ROW_LINE="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
         | grep -F "|name=${RNAME}|" | tail -1)"
       [ -n "$ROW_LINE" ] || continue
+
+      # ---- A LIVE RUN COMES FIRST (wave-39 T22; REQ-16 AC-16.1; D21): a row whose landing carrier lives or for whose
+      # agent the gate holds an open request is ACTIVE, and neither arm below reads its mtimes. Its row stays open above.
+      row_live_run "$ROW_LINE" && continue
 
       # ---- ARM 1: past its declared DURATION. Unchanged arithmetic, restructured off
       # `continue` so that an unreadable duration no longer skips the row entirely — the

@@ -594,4 +594,219 @@ expect_eq "OR-9 a lease left WAITING drops off the line, and the next oldest, LB
   "or:w01:LB=3,or:w01:LA=0" "$(or_gate)"
 rm -rf "$BIONIC_GATE_DIR/leases"
 
+# ============================================================
+section "§QUIET-LANDING: the quiet check reads the row's live landing carrier and the gate's open request for its agent before the mtimes (wave-39 T22; REQ-16 AC-16.1; D21)"
+# ============================================================
+# A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript
+# for up to 30 minutes, so the tick's two NOTIFY arms (past the declared duration; quieter than the cadence)
+# named a working row every tick (three nights of it). Both arms now ask first whether the row's landing carrier
+# lives (an entry of lib/line.sh's fold, present while the `carrier=` pid of its `ev=ready` lives, whose name is
+# the row's) or whether the gate holds an open request for the row's agent; either makes the row ACTIVE, never
+# NOTIFY. Only then the mtimes. A row with no carrier, no request and nothing written past its cadence is quiet,
+# and a dead silent row still NOTIFYs.
+# FIXTURE FIDELITY: a real repository with a wave plan the tick reads, the roster row in the writer's shape (name,
+# progress and cadence), the carrier a sleeping process whose pid and start time the record's `ev=ready` names as
+# lib/line.sh writes them (`line_event`, `_line_me`), the request one the gate's own `gate_ask` files and whose
+# holder stays alive. The progress file is older than the row's cadence in every case.
+# fails-when: a row with a live carrier or an open request NOTIFYs; a dead silent row does not; a carrier or a
+# request of ANOTHER agent masks this row.
+QL_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+QL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+QL_PIDS=""
+RQL="$(make_repo quiet-landing)"; new_roster "$RQL"
+QL_PLAN="$(wave_plan_at "$RQL" 'epic-99-fixture/wave-01-fixture.plan.md' "-" \
+  "| T1 | 4 | build | the writer's row | implementor | — | 60 | REQ-x | a.sh | active |")"
+QL_REC="$(bash -c '. "$1/line.sh" && line_record "$2"' _ "$QL_LIB" "$QL_PLAN")"
+QL_PROG="$RQL/progress-w1.md"
+printf 'working\n' > "$QL_PROG"; backdate "$QL_PROG" 3000   # 10 cadences old
+add_row "$RQL" name=w1 agent_id=aquiet-one-bbbbbbbbbbbbbbbb deliverable="$RQL/absent-w1.md" \
+  duration="4 hours" launched_at="$(iso_ago 3600)" progress="$QL_PROG" cadence="5 minutes"
+ql_sleeper() {  # -> a live process's carrier, `<pid>:<start>`, in QL_CAR (its pid is kept for the cleanup)
+  sleep 600 & local p=$!
+  QL_PIDS="$QL_PIDS $p"
+  QL_CAR="${p}:$(bash -c '. "$1/slots.sh" && _slots_since "$2"' _ "$QL_LIB" "$p")"
+}
+ql_ready() {  # <name> <carrier> -> the record's ev=ready of row T1, as `line_ready` writes it
+  bash -c '. "$1/line.sh" && line_event "$2" ready row=T1 "name=$3" "commit=$(printf "c%.0s" $(seq 40))" branch=wt/T1 tree=/x/T1 suites=none debt=none "carrier=$4"' \
+    _ "$QL_LIB" "$QL_PLAN" "$1" "$2"
+}
+ql_clear() { rm -f "$QL_REC"; rm -rf "$BIONIC_GATE_DIR/requests"; mkdir -p "$BIONIC_GATE_DIR/requests"; }
+ql_tick() { forget_digest "$RQL"; poke_pressure "$RQL" 8192 1.0 tick; }
+ql_decision() { printf '%s\n' "$OUT" | sed -n 's/^.*|decision=\([A-Z]*\)|.*$/\1/p' | head -1; }
+ql_rows() { printf '%s\n' "$OUT" | sed -n 's/^.*|rows=\([^|]*\).*$/\1/p' | head -1; }
+
+# ---------- a dead silent row still NOTIFYs (the paired positive for every row below) ----------
+ql_clear
+ql_tick
+expect_eq "QL-1 precondition: a row with no carrier, no request and a progress file ten cadences old is NOTIFY, naming w1" \
+  "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+expect_contains "QL-1b …and the quiet line prints the mtime it rests on" "w1: no line for " "$OUT"
+
+# ---------- a live carrier: the row is active ----------
+ql_clear; ql_sleeper; ql_ready w1 "$QL_CAR"
+expect_nonempty "QL-2 precondition: the record holds the row's ready event" "$(/usr/bin/grep -c 'ev=ready' "$QL_REC")"
+ql_tick
+expect_eq "QL-2b a live ready carrier of the row's name, files quiet past cadence: the tick prints QUIET and names no row" \
+  "QUIET|" "$(ql_decision)|$(ql_rows)"
+expect_absent "QL-2c …and no quiet line is printed for it" "w1: no line for " "$OUT"
+# the same record, the carrier dead and nothing written
+kill "${QL_PID_LAST:-${QL_CAR%%:*}}" 2>/dev/null; wait "${QL_CAR%%:*}" 2>/dev/null
+ql_tick
+expect_eq "QL-3 the same row with the carrier dead and nothing written: NOTIFY, naming w1" \
+  "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+
+# ---------- a carrier of ANOTHER name masks nothing ----------
+ql_clear; ql_sleeper; ql_ready w2 "$QL_CAR"
+ql_tick
+expect_eq "QL-4 a live carrier whose name is w2, not w1, leaves w1 NOTIFY" "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+
+# ---------- past the declared duration: the overdue arm reads the carrier too ----------
+add_row "$RQL" name=w1 agent_id=aquiet-one-bbbbbbbbbbbbbbbb deliverable="$RQL/absent-w1.md" \
+  duration="1 minute" launched_at="$(iso_ago 3600)" progress="$QL_PROG" cadence="5 minutes"
+ql_clear; ql_tick
+expect_eq "QL-5 precondition: a row past its declared duration with no carrier is NOTIFY (the overdue arm)" \
+  "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+expect_contains "QL-5b …by the overdue arm's own detail" "past declared duration" "$OUT"
+ql_sleeper; ql_ready w1 "$QL_CAR"
+ql_tick
+expect_eq "QL-5c the same overdue row with a live carrier: QUIET, no row named" "QUIET|" "$(ql_decision)|$(ql_rows)"
+expect_absent "QL-5d …and no overdue detail is printed" "past declared duration" "$OUT"
+
+# ---------- an open gate request for the row's agent, no carrier ----------
+ql_clear
+ql_ask() {  # <agent> -> a request the gate's own ask files for <agent>, its holder alive until the cleanup
+  ( BIONIC_GATE_AGENT="$1" CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/gate.sh" && gate_ask work ql-fixture.test.sh --within 5 >/dev/null 2>&1; sleep 600' _ "$QL_LIB" ) &
+  QL_PIDS="$QL_PIDS $!"
+  local i=0
+  while [ "$i" -lt 100 ] && ! /usr/bin/grep -qs "^who=${SID}:$1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+}
+ql_ask w1
+expect_nonempty "QL-6 precondition: the gate holds a request whose who is this session's w1" \
+  "$(/usr/bin/grep -ls "^who=${SID}:w1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | head -1)"
+expect_eq "QL-6b precondition: the record holds no carrier (no file)" "no" "$([ -f "$QL_REC" ] && echo yes || echo no)"
+ql_tick
+expect_eq "QL-6c an open gate request for w1 and no carrier: the tick prints QUIET and names no row" "QUIET|" "$(ql_decision)|$(ql_rows)"
+ql_clear; ql_ask w2
+ql_tick
+expect_eq "QL-7 an open request for another agent, w2, masks nothing: w1 is NOTIFY" "NOTIFY|w1" "$(ql_decision)|$(ql_rows)"
+
+# the sleepers and the held requests end here, however the cases above went
+for QL_P in $QL_PIDS; do kill "$QL_P" 2>/dev/null; wait "$QL_P" 2>/dev/null; done
+ql_clear
+POKE_BOUND="$QL_BOUND_WAS"
+
+# ============================================================
+section "§BRIEF-UNION: brief always unions the reads index into Suites: and Lands-on:, whether or not the row has a suites cell, and the wall admits the rendered text (wave-39 T23; REQ-17 AC-17.1; D22)"
+# ============================================================
+# T43's brief rendered Suites: pending and Lands-on: pending from a row with an empty suites cell and the orchestrator
+# filled both by hand from the index. A row's own cells used to END the derivation (a suites cell, a lands-on cell, and
+# the index was never read), so a row that named some of its suites got a Lands-on the wall refused for omitting the
+# rest. Now Suites: is the row's suites cell (else its Files' *.test.sh entries) with the reads index over its Files
+# unioned after it, and Lands-on: is the lands-on cell (else the Suites) with the same index unioned after it, once
+# each, for a row whose Files write the head. A row that writes no code keeps Lands-on: none <reason>.
+# FIXTURE FIDELITY: session-poker-3 §BRIEF's world (three suites read payload/scripts/lib/walls.sh by the three routes
+# the index knows, one names it only in a comment, committed on the working branch; the index is the real one, read by
+# the real verb) and session-poker-4 §BRIEF's gate (the wall run on the rendered text, as an Agent call's prompt, under
+# a scratch HOME, attestation, patrol stamp and engagement).
+# fails-when: a row with a suites cell, or a lands-on cell, or neither, prints a Suites: or Lands-on: that omits a suite
+# the index names for its Files; the rendered brief is refused by the wall for a Lands-on: outside Suites: or one that
+# omits an index suite; a code-free row loses its `none <reason>`.
+BU_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBU="$(make_repo brief-union)"; ( cd "$RBU" && git commit -q --allow-empty -m init )
+mkdir -p "$RBU/payload/scripts/lib" "$RBU/hooks" "$RBU/tests"
+printf 'the wall line\n' > "$RBU/payload/scripts/lib/walls.sh"
+printf '#!/bin/bash\nBIONIC_LIB_WANT="walls.sh"\n' > "$RBU/hooks/h.sh"
+printf '#!/bin/bash\ngrep -c wall "$REPO/payload/scripts/lib/walls.sh"\n' > "$RBU/tests/s-grep.test.sh"
+printf "#!/bin/bash\nanchor file payload/scripts/lib/walls.sh 'the wall line'\n" > "$RBU/tests/s-anchor.test.sh"
+printf '#!/bin/bash\nbash "$REPO/hooks/h.sh"\n' > "$RBU/tests/s-hook.test.sh"
+printf '#!/bin/bash\n# payload/scripts/lib/walls.sh is named only in this comment\necho none\n' > "$RBU/tests/s-none.test.sh"
+printf '#!/bin/bash\necho extra\n' > "$RBU/tests/s-extra.test.sh"
+( cd "$RBU" && git add payload hooks tests && git commit -qm "three suites read walls.sh" )
+PBU="$(s42_plan "$RBU" 4)"
+BU_REC=".bionic/docs/record/wave-01-fixture"
+BU_TABLE="$TMPROOT/bu-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T51 | 4 | build | a row that names some suites and a lands-on | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T51-w.md | — | — | pending | s-grep.test.sh, s-extra.test.sh | s-grep.test.sh |\n' "$BU_REC"
+  printf '| T52 | 4 | build | a row with an empty suites cell | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T52-w.md | — | — | pending | — | — |\n' "$BU_REC"
+  printf '| T53 | 4 | build | a row that names suites and no lands-on | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T53-w.md | — | — | pending | s-extra.test.sh | — |\n' "$BU_REC"
+  printf '| T55 | 4 | build | a row whose task carries an escaped pipe, a case label (a\\|b), as T43'"'"'s did | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T55-w.md | — | — | pending | s-extra.test.sh | — |\n' "$BU_REC"
+  printf '| T54 | 4 | doc | a record and no code | implementor | — | 30 | REQ-1 | %s/T54-text.md | — | — | pending | — | — |\n' "$BU_REC"
+  printf '\n'
+} > "$BU_TABLE"
+awk -v t="$BU_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBU" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBU.new" && mv "$PBU.new" "$PBU"
+( cd "$RBU" && git add -f "$PBU" && git commit -qm "brief-union fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
+BU_DIR="$RBU/$BU_REC/briefs"
+bu_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
+  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+}
+BU_IDX="s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh"
+expect_eq "BU-0 precondition: the reads index at the working head names the three reading suites for walls.sh, and not s-none or s-extra" \
+  "tests/s-anchor.test.sh,tests/s-grep.test.sh,tests/s-hook.test.sh" \
+  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$RBU" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh" { print $2 }')"
+
+poke "$RBU" brief T51
+expect_eq "BU-1 a row with a suites cell and a lands-on cell: exit 0, Suites is the cell then the index's suites it lacks" \
+  "0|s-grep.test.sh, s-extra.test.sh, s-anchor.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T51.md" Suites)"
+expect_eq "BU-1b …and Lands-on is its cell then the index's suites it lacks (the index's union, none omitted)" \
+  "s-grep.test.sh, s-anchor.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T51.md" Lands-on)"
+poke "$RBU" brief T52
+expect_eq "BU-2 a row whose suites cell is empty (T43's row): Suites is the index's union, no slot" \
+  "0|$BU_IDX" "$RC|$(bu_field "$BU_DIR/T52.md" Suites)"
+expect_eq "BU-2b …and Lands-on is the index's union" "$BU_IDX" "$(bu_field "$BU_DIR/T52.md" Lands-on)"
+poke "$RBU" brief T53
+expect_eq "BU-3 a row with a suites cell and no lands-on cell: Suites is the cell then the index's suites" \
+  "0|s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T53.md" Suites)"
+expect_eq "BU-3b …and Lands-on is the same set, so it holds every index suite and stays inside Suites" \
+  "s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T53.md" Lands-on)"
+expect_absent "BU-3c …a suite naming the file only in a comment is named by none of the three (positive: BU-3 read four)" \
+  "s-none.test.sh" "$(bu_field "$BU_DIR/T51.md" Suites)$(bu_field "$BU_DIR/T52.md" Suites)$(bu_field "$BU_DIR/T53.md" Suites)"
+poke "$RBU" brief T54
+expect_eq "BU-4 a row that writes no code keeps Suites: none (positive: Row reads from the same file)" "T54|none" \
+  "$(bu_field "$BU_DIR/T54.md" Row)|$(bu_field "$BU_DIR/T54.md" Suites)"
+expect_regex "BU-4b …and Lands-on: none with a reason" '^none [A-Za-z]' "$(bu_field "$BU_DIR/T54.md" Lands-on)"
+
+# T43's row carried a case label `(name\|other)` in its task cell, and the cell reader split on every `|`, so its
+# suites cell read as the status cell to its left: `pending`. The units reader honours `\|`; the cell reader now does.
+poke "$RBU" brief T55
+expect_eq "BU-8 a row whose task cell carries an escaped pipe reads its own suites cell (not the status beside it): the cell, then the index's suites" \
+  "0|s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T55.md" Suites)"
+expect_eq "BU-8b …and its Lands-on is the same set" "s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T55.md" Lands-on)"
+expect_absent "BU-8c …and neither line says pending (positive: BU-8 read a Suites)" "pending" "$(bu_field "$BU_DIR/T55.md" Suites)$(bu_field "$BU_DIR/T55.md" Lands-on)"
+
+# ---------- the wall, run on the rendered text ----------
+BU_HOME="$TMPROOT/bu-home"; BU_PROJ="$BU_HOME/.claude/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RBU")"
+mkdir -p "$BU_PROJ"; : > "$BU_PROJ/$SID.jsonl"
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBU/.bionic/tmp/patrol-$SID.state"
+printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBU" > "$RBU/.bionic/tmp/preflight-$SID.state"
+bu_gate() {  # <brief text file> <agent name> -> sets BU_OUT, BU_ERR
+  local payload
+  payload="$(jq -n --arg s "$SID" --arg c "$RBU" --arg n "$2" --rawfile p "$1" \
+    '{session_id:$s, transcript_path:"/nonexistent.jsonl", cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a rendered brief", subagent_type:"implementor", prompt:$p, run_in_background:true, name:$n},
+      tool_use_id:"toolu_brief_union"}')"
+  BU_OUT="$( cd "$RBU" && printf '%s' "$payload" | env HOME="$BU_HOME" CLAUDE_CONFIG_DIR="$BU_HOME/.claude" ANTHROPIC_API_KEY=sk-fixture \
+    CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "${BIONIC_HOOKS_DIR}/dispatch-preflight.sh" 2>"$TMPROOT/bu-gate.err" )"
+  BU_ERR="$(cat "$TMPROOT/bu-gate.err")"
+}
+bu_row() { /usr/bin/grep -F "|name=$2|" "$(roster_of "$1")" 2>/dev/null | tail -1; }
+for BU_T in T51 T52 T53 T55; do
+  bu_gate "$BU_DIR/$BU_T.md" "w-$BU_T"
+  expect_absent "BU-5-$BU_T the wall does not refuse the rendered $BU_T brief (outside-Suites and omission arms: zero refusals)" '"permissionDecision":"deny"' "$BU_OUT"
+  expect_contains "BU-5b-$BU_T …and it journalled the launch row for $BU_T (the positive that the wall read the brief)" "|name=w-$BU_T|" "$(bu_row "$RBU" "w-$BU_T")"
+done
+# the wall can refuse each arm on this same text: the two negatives above are tests only beside these two positives
+sed 's/^Lands-on: .*/Lands-on: s-grep.test.sh, s-anchor.test.sh, s-hook.test.sh, s-none.test.sh/' "$BU_DIR/T52.md" > "$TMPROOT/bu-outside.md"
+bu_gate "$TMPROOT/bu-outside.md" w-T52o
+expect_contains "BU-6 the rendered T52 with a Lands-on: suite outside Suites: is denied by the wall" '"permissionDecision":"deny"' "$BU_OUT"
+expect_contains "BU-6b …by the outside-Suites arm" "is outside Suites" "$BU_OUT$BU_ERR"
+sed 's/^Lands-on: .*/Lands-on: s-grep.test.sh/' "$BU_DIR/T52.md" > "$TMPROOT/bu-omits.md"
+bu_gate "$TMPROOT/bu-omits.md" w-T52m
+expect_contains "BU-7 the rendered T52 with a Lands-on: that omits two index suites is denied by the wall" '"permissionDecision":"deny"' "$BU_OUT"
+expect_contains "BU-7b …by the omission arm" "omits" "$BU_OUT$BU_ERR"
+POKE_BOUND="$BU_BOUND_WAS"
+
 finish
