@@ -196,7 +196,7 @@ SETUP_ALL=0
 # each copy exists because the standalone door cannot read those libraries. They
 # used to be pinned to their originals by tests/remove.test.sh; changing one
 # without the other was what that pin caught. The suite was deleted at
-# 8582861 and nothing replaced it — see tests/rc-item.test.sh below for the one
+# 8582861 and nothing replaced it — see tests/rc-item-1.test.sh below for the one
 # pair (RM_RC_START/RM_RC_END) that got a new pin instead of losing one.
 
 # from detect.sh: the RETIRED alias block's markers, and the two rc predicates.
@@ -212,14 +212,14 @@ BIONIC_ALIAS_START="$RM_ALIAS_START"
 BIONIC_ALIAS_END="$RM_ALIAS_END"
 # from env.sh: the LIVE rc item's markers — the block setup writes and this
 # script strips. Copies, like every literal here, because the standalone door
-# cannot source env.sh; tests/rc-item.test.sh pins them byte-equal to
+# cannot source env.sh; tests/rc-item-1.test.sh pins them byte-equal to
 # env.sh's RC_START / RC_END. Verbatim, box-drawing dashes included.
 RM_RC_START='# ─── bionic:rc:start ───'
 RM_RC_END='# ─── bionic:rc:end ───'
 # from env.sh: every body bionic wrote between that pair, the current one and the
 # earlier ones (wave-27 T78). The standalone door takes the block out only when it
 # holds one of them, or nothing (`_rm_rc_block`). Under env.sh's names, so in payload
-# mode the library's definitions, sourced below, replace these; tests/rc-item.test.sh
+# mode the library's definitions, sourced below, replace these; tests/rc-item-2.test.sh
 # §T78 pins both line for line.
 rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
@@ -276,7 +276,7 @@ RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPER
 RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) == 0 then del(.env) else . end) else . end'
 # from detect.sh, under its own name: any line that MENTIONS the retired alias.
 # Which of those lines bionic wrote is `bionic_legacy_alias_ours` below, detect.sh's
-# list copied whole; tests/rc-item.test.sh §T55 pins both (wave-27 T55).
+# list copied whole; tests/rc-item-1.test.sh §T55 pins both (wave-27 T55).
 BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 # from detect.sh, under its own name: any line that MENTIONS the environment export
 # (wave-27 T66); `bionic_todo_export_ours` below says which one bionic wrote.
@@ -564,7 +564,7 @@ _rm_file_has_marker() {  # <file> <start> <end>
 # unit, stands as commands of its own and of its line walk; and of shell.sh's answer to which shell reads an rc. Under
 # the same names and line for line, so the payload door's libraries and this file
 # cannot come to disagree about which line is bionic's or whether it may go:
-# tests/rc-item.test.sh §T55 and §T66 pin every one, and a second definition of any
+# tests/rc-item-1.test.sh §T55 and §T66 pin every one, and a second definition of any
 # of them turns its pin red.
 bionic_rc_line_bare() {  # <line> — sets BIONIC_RC_BARE: blanks at either end and one trailing CR dropped
   local LC_ALL=C l="$1"
@@ -941,7 +941,7 @@ _rm_rc_lines_left() {  # <rc> <scan> <what it mentions>
 # A MARKED BLOCK IS ONE UNIT (wave-27 T66, A-orch-119 (3)): the retired alias block
 # and the retired env block are taken out only when, as a unit, they stand as
 # commands of their own (markers.sh `bionic_rc_block_alone`). The copy of markers.sh
-# `markers_block_alone`, pinned by tests/rc-item.test.sh §T66.
+# `markers_block_alone`, pinned by tests/rc-item-1.test.sh §T66.
 _rm_block_alone() {  # <file> <start> <end>
   local line n=0 first="" last="" body="" want=""
   if declare -F bionic_block_body >/dev/null 2>&1; then want="$(bionic_block_body "$2")"; fi
@@ -1753,8 +1753,8 @@ _rm_item_environment() {
 # TWO DOORS, ONE RESULT. In payload mode the delete goes through `rc_unset`, the
 # owner in env.sh — which also knows to leave the markers standing if a second rc
 # item is still inside them. Standalone there is no owner to call, so the copied
-# marker pair goes to this script's own block strip. tests/rc-item.test.sh drives
-# both and compares the bytes.
+# marker pair goes to this script's own block strip. tests/rc-item-1.test.sh and
+# tests/rc-item-2.test.sh drive both and compare the bytes.
 
 # A BLOCK GOES WHOLE ONLY WHEN IT IS ALL BIONIC'S (wave-27 T78; the rule setup has for
 # the same block, T77). Its body is byte for byte the current body, an earlier one, or

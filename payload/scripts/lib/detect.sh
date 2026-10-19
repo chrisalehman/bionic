@@ -434,7 +434,7 @@ detect_share() {
 # retired footprint that setup removes. The markers are matched verbatim,
 # box-drawing dashes included — they are what makes the block addressable.
 # remove.sh's standalone door carries its own copy of the pair (`RM_ALIAS_*`),
-# pinned equal to these by tests/rc-item.test.sh.
+# pinned equal to these by tests/rc-item-1.test.sh.
 BIONIC_ALIAS_START='# ─── bionic:start ───'
 BIONIC_ALIAS_END='# ─── bionic:end ───'
 
@@ -472,7 +472,7 @@ detect_zshrc_legacy_block() {
 # trailing CR aside, is one of the spellings below, each found in this repository's
 # history with the commit that wrote it. remove.sh carries this function, the scan
 # and the number words under the same names, pinned line for line by
-# tests/rc-item.test.sh §T55 and §T66.
+# tests/rc-item-1.test.sh §T55 and §T66.
 #
 # LINEAR IN THE LINE, UNDER EVERY LOCALE (wave-27 T66, review pass 40 N1). Bash's
 # suffix and prefix trims are quadratic in a line's length under a UTF-8 locale (a

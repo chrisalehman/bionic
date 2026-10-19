@@ -343,7 +343,7 @@ markers_replace() {  # <file> <start> <end> <body file>
 # ending in `&&`, `||`, `|` or a backslash, or inside their own here-document or string,
 # is removed when the result parses, and their surrounding code then reads differently.
 # bionic only ever appended its block at the end of the file. remove.sh carries these
-# functions under the same names, pinned by tests/rc-item.test.sh §T66 and §T75.
+# functions under the same names, pinned by tests/rc-item-1.test.sh §T66 and tests/rc-item-2.test.sh §T75.
 bionic_rc_candidates() {  # <file> <predicate> <ere> [<start> <end>] — `cand=<n>,<n> theirs=<n>,<n>`
   local LC_ALL=C file="$1" pred="$2" ere="$3" start="${4:-}" end="${5:-}" line n=0 cand="" theirs="" inside=0
   if [ -f "$file" ]; then
@@ -407,7 +407,7 @@ bionic_rc_block_staged() {  # <shell> <file> <first> <last> — bionic_rc_block_
 # else `bionic_rc_block_alone`'s. The one function the retired alias block and the
 # retired env block are both decided by (A-orch-119 (3)). `alone=<yes|no> why=<…>
 # first=<n> last=<n>`. remove.sh's `_rm_block_alone` is this body, pinned by
-# tests/rc-item.test.sh §T66.
+# tests/rc-item-1.test.sh §T66.
 markers_block_alone() {  # <file> <start> <end>
   local line n=0 first="" last="" body="" want=""
   if declare -F bionic_block_body >/dev/null 2>&1; then want="$(bionic_block_body "$2")"; fi
