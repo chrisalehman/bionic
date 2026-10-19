@@ -4485,15 +4485,19 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 poker_brief_cell() {
   awk -v sect="$2" -v id="$3" -v want="$4" '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    BEGIN { SEP = sprintf("%c", 1) }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insec = (tolower(trim(substr($0, 3))) == tolower(sect)); hdr = 0; col = 0; next }
     !insec || $0 !~ /^[[:space:]]*\|/ { next }
     {
-      n = split($0, c, "|")
+      # AN ESCAPED PIPE IS TEXT, NOT A CELL EDGE (wave-39 T23; D22): units.sh reads `\|` so, and a task cell carrying
+      # a case label `(a\|b)` shifted every cell after it one to the left here, so the suites cell of a row read as its status.
+      line = $0; gsub(/\\\|/, SEP, line)
+      n = split(line, c, "|")
       if (!hdr) { hdr = 1; for (i = 2; i < n; i++) if (tolower(trim(c[i])) == tolower(want)) col = i; next }
       if (c[2] ~ /^[ \t]*:?-+:?[ \t]*$/) next
-      if (col && trim(c[2]) == id) { print trim(c[col]); found = 1; exit }
+      if (col && trim(c[2]) == id) { v = trim(c[col]); gsub(SEP, "|", v); print v; found = 1; exit }
     }
     END { exit !found }' "$1"
 }
@@ -4566,6 +4570,20 @@ poker_brief_index_suites() {
     || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
   declare -F reads_suites >/dev/null 2>&1 || return 0
   reads_suites "$1" "$2" "$3" | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
+}
+
+# poker_brief_union <list>... -> the suites of every list (each comma-separated), in the order given, once each by file
+# name (a spelling `tests/x.test.sh` and `x.test.sh` is one suite), comma-joined. The one fold of a row's own cells and
+# the reads index (wave-39 T23; REQ-17 AC-17.1; D22).
+poker_brief_union() {
+  printf '%s\n' "$@" | awk '{
+    n = split($0, s, /[ \t]*,[ \t]*/)
+    for (i = 1; i <= n; i++) {
+      t = s[i]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+      b = t; sub(/^.*\//, "", b)
+      if (b != "" && !(b in seen)) { seen[b] = 1; o = o (o == "" ? "" : ", ") t }
+    } }
+    END { printf "%s", o }'
 }
 
 # poker_reader_kind <kind> -> 0 for a reader row's kind (verify, test, review): its artifact is a record it writes.
@@ -11377,22 +11395,25 @@ EOF
     # to), sorted, once each; else the slot: `none` is a waiver nobody chose for a row that writes code.
     BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
     BRF_SUITE_SLOT=""
-    if poker_brief_none "$BRF_SUITES"; then
-      BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
-      if units_writes_head "$BRF_FILES"; then
-        BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
-        BRF_SUITES="$(printf '%s\n%s\n' "$BRF_SUITES" "$BRF_IDX" | awk '{
-          n = split($0, s, /[ \t]*,[ \t]*/)
-          for (i = 1; i <= n; i++) if (s[i] != "" && !(s[i] in seen)) { seen[s[i]] = 1; o = o (o == "" ? "" : ", ") s[i] } }
-          END { printf "%s", o }')"
-        [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
-      fi
-    fi
     BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
+    poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
+    BRF_IDX=""
+    if units_writes_head "$BRF_FILES"; then
+      # THE INDEX IS UNIONED WHETHER OR NOT THE ROW HAS CELLS (wave-39 T23; REQ-17 AC-17.1; D22): the dispatch wall
+      # refuses a Lands-on: that omits a suite the index names for the Files, and one outside Suites:, so a row's own
+      # cells end nothing: Suites: is them with the index's suites after, and Lands-on: is its cell (else the Suites)
+      # with the same after. A `none` Lands-on cell is the wall's refusal for a row that writes code, so it is not carried.
+      BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
+      BRF_SUITES="$(poker_brief_union "$BRF_SUITES" "$BRF_IDX")"
+      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
+      case "$BRF_LANDS" in none|none[[:space:]]*) BRF_LANDS="" ;; esac
+    fi
     if poker_brief_none "$BRF_LANDS"; then
       BRF_LANDS="$BRF_SUITES"
       [ -n "$BRF_LANDS" ] || BRF_LANDS="$BRF_SUITE_SLOT"
       [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
+    else
+      BRF_LANDS="$(poker_brief_union "$BRF_LANDS" "$BRF_IDX")"
     fi
     [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
 
