@@ -4,7 +4,8 @@
 #
 # THE SCAN READS WHAT A PUSH WOULD PUBLISH: every blob and path at the head, every blob and path
 # the range introduces, each range commit's message, author and committer, and every tag that
-# points into the range. A hit is located by numbers and object ids only. Sections:
+# points into the range. A hit is located by numbers and object ids only; under a blob's hits, the
+# commit and path that brought it and its fix, a path that may hold an entry withheld. Sections:
 #
 #   §PUB    a string planted in a committed file, a commit message or an annotated tag is a
 #           hit; one in the dirty working tree only is not read (AC-6.3).
@@ -50,6 +51,10 @@
 #           (T56 N6, N7).
 #   §SIGNAL TERM and HUP to the scan, and TERM, INT and HUP to its process group, at a random
 #           moment or aimed at the removal itself, leave no temporary tree (T61 note, T65 S2).
+#   §HIT-NAMES a blob hit names the commit and path that brought it; a blob the head's tree does
+#           not hold prints the rewrite D32 ran, over <commit>^..<branch> (the whole branch from a
+#           root commit), and one it holds a fix line; a path holding an entry is withheld (wave-39
+#           T13; AC-9.3).
 #   §ORACLE the scan agrees, case by case and in both directions, with a reference matcher
 #           written from the rule (tests/fixtures/name-scan-oracle.pl) over a generated corpus
 #           of at least 5,000 wraps (tests/fixtures/name-scan-gen.pl, seed 65) (T65).
@@ -113,7 +118,7 @@ fx_list() { local f="$TMP/lists/$1"; shift; printf '%s\n' "$@" > "$f"; printf '%
 # scanx <script> <repo> <list> [VAR=val ...] — sets OUT (stdout+stderr) and RC
 scanx() {
   local script="$1" repo="$2" list="$3"; shift 3
-  OUT="$(cd "$repo" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD "$@" bash "$script" "$list" 2>&1)"; RC=$?
+  OUT="$(cd "$repo" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD -u BIONIC_CHECK_BRANCH "$@" bash "$script" "$list" 2>&1)"; RC=$?
 }
 # scan <repo> <list> [VAR=val ...] — the tracked scan
 scan() { scanx "$SCAN" "$@"; }
@@ -1251,6 +1256,92 @@ for sig in TERM INT HUP; do
   expect_eq "SIGNAL: $sig aimed at the group while the tree is removed — no name-scan.* tree is left" "0" "$(left_trees "$ST")"
   rm -rf "${ST:?}"/* 2>/dev/null
 done
+
+section "§HIT-NAMES — a blob hit names the commit and path that brought it, and its fix (wave-39 T13; AC-9.3, D14, D32)"
+
+# A content hit is `HIT entry=<n> at blob <sha12> line <n>`, and under the blob's last HIT line one
+# `  in commit <sha12> path <p>` line names where it came from: the range commit that introduced the
+# blob at <p>, or the head when the blob predates the range. A blob absent from the head's tree is
+# reachable only through history, so a fix commit cannot remove it: the next line is the rewrite D32
+# ran (filter-branch over <commit>^..<branch>, then refs/original, the reflog and gc). A blob at the
+# head is a `fix:` line instead. A path that holds an entry is never printed (named by position).
+EH="zq-history-3317"; EK="zq-kept-4428"
+R="$TMP/hitnames"; fx_repo "$R"
+BR="$(git -C "$R" symbolic-ref --short HEAD)"
+mkdir -p "$R/docs"; printf 'old\n%s\n' "$EH" > "$R/docs/hist.txt"; fx_commit "$R" "add hist"
+HN_ADD="$(s12 "$R" HEAD)"; HN_GONE="$(s12 "$R" HEAD:docs/hist.txt)"
+printf 'old\n' > "$R/docs/hist.txt"; printf 'see %s\n' "$EK" > "$R/kept.txt"; fx_commit "$R" "drop it, add kept"
+HN_KEPT_C="$(s12 "$R" HEAD)"; HN_KEPT="$(s12 "$R" HEAD:kept.txt)"
+L="$(fx_list hitnames "$EH" "$EK")"
+scan "$R" "$L"
+expect_status "HIT-NAMES: a historical and a head hit exit 1" 1 "$RC"
+expect_contains "HIT-NAMES: (positive) the historical blob is a hit" "HIT entry=1 at blob $HN_GONE line 2" "$(hits)"
+HN_AFTER="$(printf '%s\n' "$OUT" | awk -v b="at blob $HN_GONE " 'f && /^HIT / { exit } f { print } index($0, b) { f = 1 }')"
+expect_nonempty "HIT-NAMES: (extractor) the lines under the historical hit are read" "$HN_AFTER"
+expect_contains "HIT-NAMES: the historical hit names the commit and path that introduced it" \
+  "  in commit $HN_ADD path docs/hist.txt" "$HN_AFTER"
+expect_contains "HIT-NAMES: the blob is absent from the head, so the rewrite D32 ran is printed, over <commit>^..<branch>" \
+  "git filter-branch --tree-filter '<take the hit out of docs/hist.txt>' -- $HN_ADD^..$BR" "$HN_AFTER"
+expect_contains "HIT-NAMES: …and the cleanup D32 ran after it" \
+  "git for-each-ref --format='delete %(refname)' refs/original | git update-ref --stdin && git reflog expire --expire=now --all && git gc --prune=now" "$HN_AFTER"
+HN_HEAD="$(printf '%s\n' "$OUT" | awk -v b="at blob $HN_KEPT " 'f && /^HIT / { exit } f { print } index($0, b) { f = 1 }')"
+expect_nonempty "HIT-NAMES: (extractor) the lines under the head hit are read" "$HN_HEAD"
+expect_contains "HIT-NAMES: the head hit names its commit and path" "  in commit $HN_KEPT_C path kept.txt" "$HN_HEAD"
+expect_contains "HIT-NAMES: a blob at the head is fixed by a commit, and says so" "  fix: take the hit out of kept.txt" "$HN_HEAD"
+expect_eq "HIT-NAMES: the rewrite is printed once, for the historical blob alone" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c 'git filter-branch')"
+hn_no_entry() {  # <msg> <text> — neither entry, in any case, occurs in <text>
+  local e bad=""
+  for e in "$EH" "$EK"; do printf "%s" "$2" | grep -q -i -F -- "$e" && bad="$bad|$e"; done
+  expect_empty "$1" "$bad"
+}
+hn_no_entry "HIT-NAMES: no entry is printed" "$OUT"
+
+# a blob that predates the range is named at the head commit
+scan "$R" "$L" BIONIC_CHECK_BASE=HEAD
+expect_contains "HIT-NAMES: (empty range) the head blob is still a hit" "HIT entry=2 at blob $HN_KEPT line 1" "$(hits)"
+expect_contains "HIT-NAMES: (empty range) and is named at the head" "  in commit $(s12 "$R" HEAD) path kept.txt" "$OUT"
+
+# a root commit has no parent: the rewrite runs over the whole branch
+R="$TMP/hitnames-root"; mkdir -p "$R" && git -C "$R" init -q --template= && git -C "$R" config commit.gpgsign false
+printf '%s\n' "$EH" > "$R/first.txt"; fx_commit "$R" "root"
+HN_ROOT="$(s12 "$R" HEAD)"; HN_RB="$(s12 "$R" HEAD:first.txt)"
+git -C "$R" rm -q first.txt; printf 'plain\n' > "$R/other.txt"; fx_commit "$R" "remove"
+BR="$(git -C "$R" symbolic-ref --short HEAD)"
+scan "$R" "$(fx_list hitnames-root "$EH")"
+expect_contains "HIT-NAMES: (positive) the root commit's blob is a hit" "HIT entry=1 at blob $HN_RB line 1" "$(hits)"
+expect_contains "HIT-NAMES: it is named at the root commit" "  in commit $HN_ROOT path first.txt" "$OUT"
+expect_contains "HIT-NAMES: the rewrite of a root commit's blob runs over the whole branch" \
+  "git filter-branch --tree-filter '<take the hit out of first.txt>' -- $BR &&" "$OUT"
+expect_absent "HIT-NAMES: …never from the root commit's parent, which does not exist" "$HN_ROOT^" "$OUT"
+
+# BIONIC_CHECK_BRANCH names the branch to rewrite when the head is a commit, not a branch
+scan "$R" "$TMP/lists/hitnames-root" BIONIC_CHECK_HEAD="$(git -C "$R" rev-parse HEAD)" BIONIC_CHECK_BRANCH=wave/named
+expect_contains "HIT-NAMES: a head given as a commit rewrites the branch BIONIC_CHECK_BRANCH names" \
+  "-- wave/named &&" "$OUT"
+scan "$R" "$TMP/lists/hitnames-root" BIONIC_CHECK_HEAD="$(git -C "$R" rev-parse HEAD)"
+expect_contains "HIT-NAMES: with no branch named and a head given as a commit, the branch is a slot" \
+  "-- <branch> &&" "$OUT"
+
+# a path that holds an entry is withheld, at the head by its position, in history without one
+EP2="zq-pathheld-5539"
+R="$TMP/hitnames-held"; fx_repo "$R"
+printf 'see %s\n' "$EH" > "$R/$EP2.txt"; fx_commit "$R" "named file"
+HN_HB="$(s12 "$R" "HEAD:$EP2.txt")"
+L="$(fx_list hitnames-held "$EH" "$EP2")"
+scan "$R" "$L"
+WANT="$(git -C "$R" ls-tree -r --name-only HEAD | grep -n -F -- "$EP2" | cut -d: -f1)"
+expect_nonempty "HIT-NAMES: (extractor) the named file sits at a position" "$WANT"
+expect_contains "HIT-NAMES: (positive) its contents are a hit" "HIT entry=1 at blob $HN_HB line 1" "$(hits)"
+expect_contains "HIT-NAMES: a path holding an entry is named by its position, never printed" \
+  "  in commit $(s12 "$R" HEAD) path #$WANT" "$OUT"
+expect_eq "HIT-NAMES: the output holds the path's entry zero times" "0" "$(count_in "$OUT" "$EP2")"
+git -C "$R" rm -q "$EP2.txt"; fx_commit "$R" "drop named file"
+scan "$R" "$L"
+expect_contains "HIT-NAMES: (positive) the historical blob under a held path is a hit" "HIT entry=1 at blob $HN_HB line 1" "$(hits)"
+expect_contains "HIT-NAMES: a historical path holding an entry is withheld" "path withheld (it holds an entry)" "$OUT"
+expect_contains "HIT-NAMES: …and its rewrite names no path" "--tree-filter '<take the hit out of the withheld path>'" "$OUT"
+expect_eq "HIT-NAMES: the output still holds the path's entry zero times" "0" "$(count_in "$OUT" "$EP2")"
 
 section "§ORACLE — the scan agrees with a reference matcher written from THE RULE (T65)"
 
