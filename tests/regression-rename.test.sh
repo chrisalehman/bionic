@@ -1,39 +1,40 @@
 #!/bin/bash
-# THE REGRESSION'S MACHINE TOKENS, RENAMED AND ALIASED ONCE (epic-23 wave-38 T8; REQ-9 AC-9.1, AC-9.2 key half,
-# AC-9.4; D6).
+# THE REGRESSION'S OLD SPELLINGS: THE PLAN-READ ROWS STAY, THE TYPED AND CONFIG ROWS ARE GONE (epic-23 wave-38 T8,
+# REQ-9; wave-39 T18, REQ-13 AC-13.1, D2).
 #
-# WHAT THIS SUITE OWNS. payload/scripts/lib/alias.sh, the one map from each old spelling of the full regression's
-# machine tokens to its new one, and the seam each token is read at:
+# WHAT THIS SUITE OWNS. payload/scripts/lib/alias.sh and the seam each old spelling is met at. Until 1.21.0 the full
+# regression's verbs, keys and record tokens spelled "floor"; wave-38 renamed them and kept each old spelling for one
+# release. 1.22.0 removes the half a person types or a config carries (D2: writers drop the old word, readers keep it,
+# and what is no longer read is REFUSED naming the new spelling, never accepted silently):
 #
 #     floor-run                 -> regression-run             the verb, read at `VERB="$1"` in hooks/session-poker.sh
 #     proof-add floor           -> proof-add regression       the proof kind, read at `PF_KIND="$1"`
+#     --born floor:<suite>      -> --born regression:<suite>  task-add's operand
+#     proof:floor (typed)       -> proof:regression           a reads cell given to task-add or task-set reads=
 #     floor: (config.yaml)      -> regression-command:        the regression's command, read by `regression-run`
-#     kind=floor                -> kind=regression            a proof line's kind, read by lib/proof.sh `proof_fields`
-#     proof:floor               -> proof:regression           a reads token, read by lib/units.sh's tokenizer
-#     born: floor               -> born: regression           a born marker, read by lib/units.sh `units_born_marks`
-#     --born floor:             -> --born regression:         task-add's operand
-#     of=floor                  -> of=regression              the marker's backing
-#     floor-run-<sha>.log       -> regression-run-<sha>.log   the log name; the second-run glob matches both
+#     floor-run-<sha>.log       -> regression-run-<sha>.log   the log name the second-run glob reads
 #     rigor-floor:              -> rigor-minimum:             the rigor minimum, read by hooks/canonical-sdlc-governing-skill.sh
 #
-# Everything written from now on carries the new spelling. A spelling a person types or a config file carries is
-# read through `alias_read`, which prints `deprecated: <old> is <new>; the old spelling works until 1.22.0` to stderr
-# once per process for that spelling. A token a 1.20.0 tool wrote into a plan (a proof line, a reads cell, a born
-# marker) is read silently: the plan still judges, and nobody is told to edit a record (A-T8-1).
+# What a 1.20.0 TOOL wrote into a plan is read as it always was, silently (D-w39-2; A-T8-1): a proof line's kind=floor,
+# a reads cell's proof:floor, a born marker's `born: floor … of=floor`. A plan is a record, and a rename never
+# invalidates a record already written.
 #
-# §ALIAS: each pair through the library, and each typed token end to end through the real verb: the new spelling
-#   works and says nothing; the old spelling works and says exactly one deprecated: line; a 1.20.0 plan judges as
-#   its renamed twin does.
-# §AGREE: for each token the alias and the new name reach one implementation: the seam calls the map, the readers
-#   answer the old and the new spelling with one answer, and no production line outside alias.sh spells an old token
-#   (a planted second copy goes red).
+# §ALIAS-MAP: the map's four plan-read rows answer the old and the new spelling with one answer, silently.
+# §GONE: each typed or config spelling is refused with a line naming the new one, through the library and through the
+#   real verb, and the new spelling beside each still works. (The rigor-floor: key is also pinned end to end in
+#   tests/canonical-sdlc-governing-skill.test.sh §MINIMUM.)
+# §ALIAS-PLAN: a 1.20.0 plan (kind=floor, proof:floor, born: floor … of=floor) judges as its renamed twin does.
+# §AGREE: the old and the new spelling of a plan token reach one implementation, each refusal is made at its one seam
+#   through the map, and no production line outside alias.sh spells an old token (a planted second copy goes red).
 #
-# FIXTURE FIDELITY (the rule of that name). The verb fixtures are session-poker-4 §FLOOR-DECLARED's and session-poker-3
-# §BORN-FLOOR's shapes, built with the shards' own prelude; the 1.20.0 plan is SYNTHESIZED, its proof line, reads cells
-# and born marker in the shapes 1.20.0's writers wrote (proof_floor_line, kdef, units_add_row's born operand).
-# ANTI-VACUITY (the rule of that name). Every empty readback sits beside a positive on the same reader: each pair's
-# silent new spelling beside its old spelling's line, each AP equality beside a non-empty answer, the scan beside a
-# proof it read files and two planted copies it finds, each plant after a parse check of the mutant.
+# FIXTURE FIDELITY (the rule of that name). The verb fixtures are session-poker-4 §FLOOR-DECLARED's and §FLOOR-RUN's and
+# session-poker-3 §BORN-FLOOR's shapes, built with the shards' own prelude; the 1.20.0 plan is SYNTHESIZED, its proof
+# line, reads cells and born marker in the shapes 1.20.0's writers wrote (proof_floor_line, kdef, units_add_row's born
+# operand).
+# ANTI-VACUITY (the rule of that name). Every refusal sits beside the new spelling's success on the same fixture and
+# the same reader: each log, proof line and row a refusal must not write is counted beside the one its new spelling
+# wrote; each empty readback sits beside a positive; the scan sits beside a proof it read files and two planted copies
+# it finds, each plant after a parse check of the mutant.
 #
 # HERMETIC: every repository is a scratch git repository under the prelude's TMPROOT; the hook and libraries are this
 # tree's. Usage: bash tests/run.sh --only regression-rename.test.sh
@@ -54,68 +55,83 @@ S46_LIB="$LIB/proof.sh"
 GOV_HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
-DEP_TAIL='; the old spelling works until 1.22.0'
 
 # al <function> <args...> -> stdout of one alias.sh function in a clean shell; stderr to $TMPROOT/al.err
 al() {
   bash -c '. "$1" || exit 9; shift; "$@"' _ "$ALIAS_SH" "$@" 2> "$TMPROOT/al.err"
 }
 al_err() { cat "$TMPROOT/al.err" 2>/dev/null; }
-deps_in() { printf '%s\n' "$1" | /usr/bin/grep -c '^deprecated: ' | tr -d ' '; }   # <text> -> its deprecated: lines
+# gone <function> <args...> -> `gone|<the refusal's sentence>` when the library refuses the spelling, `kept|` when it does not
+gone() {
+  bash -c '. "$1" || exit 9; fn="$2"; shift 2; if "$fn" "$@"; then printf "gone|%s" "$ALIAS_GONE_SAID"; else printf "kept|"; fi' _ "$ALIAS_SH" "$@" 2> "$TMPROOT/al.err"
+}
 
 # ============================================================
-section "§ALIAS-MAP: alias_token answers every pair, the new spelling silently, the old with one deprecated: line"
+section "§ALIAS-MAP: alias_token answers the four plan-read rows, the new spelling and the old one alike, both silently"
 # ============================================================
 expect_true "AM-0 lib/alias.sh exists and passes bash -n" bash -n "$ALIAS_SH"
 for am_pair in \
-  "verb|floor-run|regression-run|floor-run|regression-run" \
-  "proof-kind|floor|regression|proof-add floor|proof-add regression" \
-  "config|floor|regression-command|floor:|regression-command:" \
-  "kind|floor|regression|kind=floor|kind=regression" \
-  "reads|proof:floor|proof:regression|proof:floor|proof:regression" \
-  "born|floor|regression|born: floor|born: regression" \
-  "born-operand|floor:|regression:|--born floor:|--born regression:" \
-  "born-of|floor|regression|of=floor|of=regression" \
-  "log|floor-run-|regression-run-|floor-run-<sha>.log|regression-run-<sha>.log" \
-  "rigor-key|rigor-floor|rigor-minimum|rigor-floor:|rigor-minimum:"; do
-  IFS='|' read -r am_k am_old am_new am_os am_ns <<< "$am_pair"
+  "kind|floor|regression" \
+  "reads|proof:floor|proof:regression" \
+  "born|floor|regression" \
+  "born-of|floor|regression"; do
+  IFS='|' read -r am_k am_old am_new <<< "$am_pair"
   expect_eq "AM-$am_k-1 alias_token $am_k $am_new is $am_new" "$am_new" "$(al alias_token "$am_k" "$am_new")"
   expect_eq "AM-$am_k-1b …and says nothing on stderr" "" "$(al_err)"
   expect_eq "AM-$am_k-2 alias_token $am_k $am_old is $am_new" "$am_new" "$(al alias_token "$am_k" "$am_old")"
-  expect_eq "AM-$am_k-2b …and prints exactly the one deprecated: line" "deprecated: $am_os is $am_ns$DEP_TAIL" "$(al_err)"
+  expect_eq "AM-$am_k-2b …and says nothing on stderr either: a plan's old token is read silently, nobody is told to edit a record" "" "$(al_err)"
 done
-expect_eq "AM-3 a word the map does not carry is answered as itself" "review" "$(al alias_token proof-kind review)"
-expect_eq "AM-3b …silently" "" "$(al_err)"
-expect_eq "AM-4 the same old spelling read twice in one process prints its line once" \
-  "regression-run regression-run|1" \
-  "$(bash -c '. "$1"; alias_read verb floor-run; a="$ALIAS_TOKEN"; alias_read verb floor-run; printf "%s %s" "$a" "$ALIAS_TOKEN"' _ "$ALIAS_SH" 2> "$TMPROOT/al.err")|$(deps_in "$(al_err)")"
-expect_eq "AM-4b two old spellings in one process print one line each" "2" \
-  "$(bash -c '. "$1"; alias_read verb floor-run; alias_read config floor; alias_read verb floor-run' _ "$ALIAS_SH" 2>&1 | /usr/bin/grep -c '^deprecated: ' | tr -d ' ')"
-expect_eq "AM-5 alias_spellings log names the new prefix first, then the old" "regression-run- floor-run-" \
-  "$(al alias_spellings log | paste -sd' ' -)"
-expect_eq "AM-6 alias_cell reads normalises each token of a cell, live: kept, others untouched" \
-  "proof:regression, live:proof:regression, proof:review, head" \
-  "$(bash -c '. "$1"; alias_cell reads "proof:floor, live:proof:floor, proof:review, head"; printf "%s" "$ALIAS_TOKEN"' _ "$ALIAS_SH" 2>/dev/null)"
-expect_eq "AM-6b …and a cell carrying no old token comes back byte for byte" "proof:review,head" \
-  "$(bash -c '. "$1"; alias_cell reads "proof:review,head"; printf "%s" "$ALIAS_TOKEN"' _ "$ALIAS_SH" 2>/dev/null)"
-AM_CFG="$TMPROOT/am-cfg"; mkdir -p "$AM_CFG/.bionic"
-printf 'floor: bash old.sh\n' > "$AM_CFG/.bionic/config.yaml"
-expect_eq "AM-7 alias_config reads the old key's value when only the old key is written" "bash old.sh|1" \
-  "$(bash -c '. "$1/roots.sh"; . "$1/alias.sh"; alias_config "$2" config ""; printf "%s" "$ALIAS_VALUE"' _ "$LIB" "$AM_CFG" 2> "$TMPROOT/al.err")|$(deps_in "$(al_err)")"
-printf 'floor: bash old.sh\nregression-command: bash new.sh\n' > "$AM_CFG/.bionic/config.yaml"
-expect_eq "AM-7b …and the new key's value, silently, when both are written" "bash new.sh|0" \
-  "$(bash -c '. "$1/roots.sh"; . "$1/alias.sh"; alias_config "$2" config ""; printf "%s" "$ALIAS_VALUE"' _ "$LIB" "$AM_CFG" 2> "$TMPROOT/al.err")|$(deps_in "$(al_err)")"
-expect_eq "AM-8 alias_keyed reads a key: value text, the old key with its line" "double|1" \
-  "$(bash -c '. "$1"; alias_keyed rigor-key "$(printf "x: 1\nrigor-floor: double \r\n")"; printf "%s" "$ALIAS_VALUE"' _ "$ALIAS_SH" 2> "$TMPROOT/al.err")|$(deps_in "$(al_err)")"
+expect_eq "AM-3 a word the map does not carry is answered as itself" "review" "$(al alias_token kind review)"
+expect_eq "AM-3b …a typed spelling is not in the map any more: the verb floor-run is answered as itself" "floor-run" "$(al alias_token verb floor-run)"
+expect_eq "AM-3c …silently" "" "$(al_err)"
+expect_eq "AM-5 alias_spellings born names the new spelling first, then the old (the born reader's alternation)" "regression floor" \
+  "$(al alias_spellings born | paste -sd' ' -)"
+expect_eq "AM-5b …and nothing for the verb, whose old spelling is gone" "" "$(al alias_spellings verb)"
+expect_eq "AM-6 the removed readers are not defined: alias_cell, alias_config, alias_keyed, alias_spellings log" "0|0|0" \
+  "$(bash -c '. "$1"; for f in alias_cell alias_config alias_keyed; do declare -F "$f" >/dev/null && c=$((c + 1)); done; printf "%s" "${c:-0}"' _ "$ALIAS_SH")|$(bash -c '. "$1"; alias_spellings log | grep -c .' _ "$ALIAS_SH" | tr -d ' ')|$(bash -c '. "$1"; declare -F alias_gone >/dev/null && echo 0' _ "$ALIAS_SH")"
 
 # ============================================================
-section "§ALIAS-VERB: regression-run, regression-command: and proof-add regression work silently; floor-run, floor: and proof-add floor work with one deprecated: line each"
+section "§GONE: the library refuses each typed and config spelling and names the new one; the new spelling is kept"
+# ============================================================
+# One row per typed spelling. The library answers `gone|<old as written> is gone; write <new as written>` for the old
+# spelling and `kept|` for the new one beside it, so a refusal is never the answer to every word.
+for go_row in \
+  "alias_gone|verb|floor-run|regression-run|floor-run is gone; write regression-run" \
+  "alias_gone|proof-kind|floor|regression|proof-add floor is gone; write proof-add regression" \
+  "alias_gone|born-operand|floor:|regression:|--born floor: is gone; write --born regression:"; do
+  IFS='|' read -r go_fn go_k go_old go_new go_say <<< "$go_row"
+  expect_eq "GO-$go_k-1 $go_fn $go_k $go_old is refused, naming the new spelling" "gone|$go_say" "$(gone "$go_fn" "$go_k" "$go_old")"
+  expect_eq "GO-$go_k-1b …$go_new beside it is kept" "kept|" "$(gone "$go_fn" "$go_k" "$go_new")"
+  expect_eq "GO-$go_k-1c …a word of no row is kept" "kept|" "$(gone "$go_fn" "$go_k" review)"
+done
+expect_eq "GO-reads-1 a typed reads cell carrying proof:floor is refused, naming proof:regression" "gone|proof:floor is gone; write proof:regression" \
+  "$(gone alias_gone_cell reads 'approval:plan, proof:floor, head')"
+expect_eq "GO-reads-1b …the live: form too" "gone|proof:floor is gone; write proof:regression" "$(gone alias_gone_cell reads 'head, live:proof:floor')"
+expect_eq "GO-reads-1c …and the cell of the new spelling is kept" "kept|" "$(gone alias_gone_cell reads 'approval:plan, proof:regression, live:proof:review, head')"
+expect_eq "GO-reads-1d …and so is a cell with no tokens at all" "kept|" "$(gone alias_gone_cell reads '—')"
+expect_eq "GO-config-1 a config text carrying the floor: key is refused, naming regression-command:" "gone|floor: is gone; write regression-command:" \
+  "$(gone alias_gone_text config "$(printf 'poker-interval: 20m\nfloor: bash old.sh\n')")"
+expect_eq "GO-config-1b …with the new key beside it too: the old key is still refused, never read past" "gone|floor: is gone; write regression-command:" \
+  "$(gone alias_gone_text config "$(printf 'floor: bash old.sh\nregression-command: bash new.sh\n')")"
+expect_eq "GO-config-1c …the new key alone is kept" "kept|" "$(gone alias_gone_text config 'regression-command: bash new.sh')"
+expect_eq "GO-config-1d …and floor-attestation:, another key that begins with the word, is not this one" "kept|" "$(gone alias_gone_text config 'floor-attestation: yes')"
+expect_eq "GO-rigor-1 a text carrying rigor-floor: is refused, naming rigor-minimum:" "gone|rigor-floor: is gone; write rigor-minimum:" \
+  "$(gone alias_gone_text rigor-key "$(printf 'x: 1\nrigor-floor: double \r\n')")"
+expect_eq "GO-rigor-1b …rigor-minimum: beside it is kept" "kept|" "$(gone alias_gone_text rigor-key "$(printf 'x: 1\nrigor-minimum: double\n')")"
+expect_eq "GO-log-1 the log's old prefix is floor-run-, one name" "floor-run-" "$(al alias_gone_names log)"
+expect_eq "GO-log-1b …and its refusal names the new log: floor-run-<sha>.log is gone; write regression-run-<sha>.log" \
+  "gone|floor-run-<sha>.log is gone; write regression-run-<sha>.log" \
+  "$(bash -c '. "$1"; alias_gone_say log && printf "gone|%s" "$ALIAS_GONE_SAID"' _ "$ALIAS_SH")"
+expect_eq "GO-silent-1 the refusals say it once, in their sentence: nothing reaches stderr" "" "$(al_err)"
+
+# ============================================================
+section "§GONE-VERB: floor-run, floor: and proof-add floor are refused by the real verb, naming the new spelling; regression-run, regression-command: and proof-add regression beside each work"
 # ============================================================
 # FIXTURE FIDELITY: session-poker-4 §FLOOR-DECLARED's shape. A plan bound to this session, its working branch checked
 # out in a linked worktree one commit ahead, no tests/ directory at the head, and a declared command that is a stub
 # script printing a runner's verdict. Each run is the real verb, each proof the real proof-add.
 AV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RAV="$(make_repo rename-verbs)"; ( cd "$RAV" && git commit -q --allow-empty -m init )
+RAV="$(make_repo gone-verbs)"; ( cd "$RAV" && git commit -q --allow-empty -m init )
 PAV="$(s42_plan "$RAV" 4)"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PAV" > "$PAV.tmp" && mv "$PAV.tmp" "$PAV"
 ( cd "$RAV" && git add -f "$PAV" && git commit -qm wb \
@@ -125,49 +141,50 @@ AV_W="$(git -C "$RAV/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 AV_REC="$RAV/.bionic/docs/record/wave-01-fixture"; mkdir -p "$AV_REC"
 AV_STUB="$TMPROOT/av-regression.sh"
 printf '#!/bin/bash\necho "Gating: 4 passed, 0 failed"\nexit 0\n' > "$AV_STUB"
-expect_regex "AV-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$AV_W"
+av_logs() { ls "$AV_REC"/regression-run-*.log "$AV_REC"/floor-run-*.log 2>/dev/null | awk 'END { print NR + 0 }'; }   # -> the run logs the record holds, by either name
+av_proofs() { /usr/bin/grep -c '^proved: ' "$PAV" | tr -d ' '; }              # -> the proof lines the plan holds
+expect_regex "GV-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$AV_W"
 
 printf 'regression-command: bash %s\n' "$AV_STUB" > "$RAV/.bionic/config.yaml"
 poke "$RAV" regression-run
-expect_eq "AV-1 regression-run runs the declared regression-command: (exit 0)" "0" "$RC"
-expect_true "AV-1b …and writes its log as regression-run-<head>.log" test -f "$AV_REC/regression-run-$AV_W.log"
-expect_contains "AV-1c …which the verb names on its proof-add regression line" \
-  "proof-add regression record/wave-01-fixture/regression-run-$AV_W.log" "$OUT"
-expect_eq "AV-1d …and no deprecated: line is printed" "0" "$(deps_in "$OUT")"
+expect_eq "GV-1 regression-run runs the declared regression-command: (exit 0)" "0" "$RC"
+expect_true "GV-1b …and writes its log as regression-run-<head>.log" test -f "$AV_REC/regression-run-$AV_W.log"
+expect_eq "GV-1c …and prints no word about a spelling" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c -e 'deprecated' -e ' is gone' | tr -d ' ')"
+poke "$RAV" floor-run
+expect_eq "GV-2 floor-run, on the same config, is refused (exit 1)" "1" "$RC"
+expect_contains "GV-2b …the refusal names the new verb" "floor-run is gone; write regression-run" "$OUT"
+expect_eq "GV-2c …and nothing ran: the one log of GV-1 is all the record holds" "1" "$(av_logs)"
+poke "$RAV" proof-add floor "record/wave-01-fixture/regression-run-$AV_W.log"
+expect_eq "GV-3 proof-add floor, citing the log GV-1 wrote, is refused (exit 1)" "1" "$RC"
+expect_contains "GV-3b …the refusal names the new kind" "proof-add floor is gone; write proof-add regression" "$OUT"
+expect_eq "GV-3c …and wrote no proof line" "0" "$(av_proofs)"
 poke "$RAV" proof-add regression "record/wave-01-fixture/regression-run-$AV_W.log"
-expect_eq "AV-2 proof-add regression accepts that log (exit 0)" "0" "$RC"
-expect_regex "AV-2b …and writes a kind=regression line at the working head" \
-  "^proved: kind=regression head=${AV_W} .*evidence=record/wave-01-fixture/regression-run-${AV_W}\.log " \
-  "$(/usr/bin/grep '^proved: ' "$PAV" | tail -n 1)"
-expect_eq "AV-2c …and no deprecated: line is printed" "0" "$(deps_in "$OUT")"
+expect_eq "GV-3d proof-add regression citing the same log works (exit 0)" "0" "$RC"
+expect_eq "GV-3e …and writes the one kind=regression line" "1|1" \
+  "$(av_proofs)|$(/usr/bin/grep -c "^proved: kind=regression head=${AV_W} " "$PAV" | tr -d ' ')"
 
 printf 'floor: bash %s\n' "$AV_STUB" > "$RAV/.bionic/config.yaml"
-poke "$RAV" floor-run
-expect_eq "AV-3 floor-run, with the old floor: key, runs the declared command all the same (exit 0)" "0" "$RC"
-expect_true "AV-3b …and writes the NEW name, regression-run-<head>-2.log" test -f "$AV_REC/regression-run-$AV_W-2.log"
-expect_false "AV-3c …never the old one" test -e "$AV_REC/floor-run-$AV_W.log"
-expect_eq "AV-3d …printing exactly two deprecated: lines, one for the verb and one for the key" "2" "$(deps_in "$OUT")"
-expect_contains "AV-3e …the verb's" "deprecated: floor-run is regression-run$DEP_TAIL" "$OUT"
-expect_contains "AV-3f …and the key's" "deprecated: floor: is regression-command:$DEP_TAIL" "$OUT"
-poke "$RAV" proof-add floor "record/wave-01-fixture/regression-run-$AV_W-2.log"
-expect_eq "AV-4 proof-add floor works (exit 0)" "0" "$RC"
-expect_regex "AV-4b …and writes kind=regression, the new spelling" \
-  "^proved: kind=regression head=${AV_W} .*evidence=record/wave-01-fixture/regression-run-${AV_W}-2\.log " \
-  "$(/usr/bin/grep '^proved: ' "$PAV" | tail -n 1)"
-expect_eq "AV-4c …printing the one deprecated: line, proof-add floor is proof-add regression" \
-  "1|deprecated: proof-add floor is proof-add regression$DEP_TAIL" \
-  "$(deps_in "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^deprecated: ')"
-expect_eq "AV-4d no proof line spells kind=floor after either verb" "0" "$(/usr/bin/grep -c 'kind=floor' "$PAV" | tr -d ' ')"
-expect_eq "AV-4e …beside the two kind=regression lines the verbs wrote" "2" "$(/usr/bin/grep -c '^proved: kind=regression ' "$PAV" | tr -d ' ')"
+poke "$RAV" regression-run
+expect_eq "GV-4 regression-run with only the old floor: key is refused (exit 1)" "1" "$RC"
+expect_contains "GV-4b …the refusal names the new key" "floor: is gone; write regression-command:" "$OUT"
+expect_eq "GV-4c …and nothing ran: still the one log" "1" "$(av_logs)"
+printf 'floor: bash %s\nregression-command: bash %s\n' "$AV_STUB" "$AV_STUB" > "$RAV/.bionic/config.yaml"
+poke "$RAV" regression-run
+expect_eq "GV-4d …and with both keys written the old one is refused all the same (exit 1)" "1|1" "$RC|$(av_logs)"
+expect_contains "GV-4e …naming the new key" "floor: is gone; write regression-command:" "$OUT"
+printf 'regression-command: bash %s\n' "$AV_STUB" > "$RAV/.bionic/config.yaml"
+poke "$RAV" regression-run
+expect_eq "GV-4f the new key alone runs again (the refusals above were the old key's, not the verb's): second log, exit 0" "0|2" "$RC|$(av_logs)"
 POKE_BOUND="$AV_BOUND_WAS"
 
 # ============================================================
-section "§ALIAS-BORN: --born regression:<suite> works silently; --born floor:<suite> works with one deprecated: line; both write born: regression … of=regression"
+section "§GONE-BORN: --born floor:<suite> and a typed proof:floor are refused naming the new spelling; --born regression:<suite> and proof:regression write their rows"
 # ============================================================
 # FIXTURE FIDELITY: session-poker-3 §BORN-FLOOR's shape. The plan carries a 1.20.0 proof line, kind=floor with
-# owed=a.test.sh,b.test.sh, written by the library's own proof_add_line: the on-disk old spelling backs both markers.
+# owed=a.test.sh,b.test.sh, written by the library's own proof_add_line: the on-disk old spelling backs the marker, and
+# is read silently (§ALIAS-PLAN) while a person's typing of it is not.
 AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RAB="$(make_repo rename-born)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
+RAB="$(make_repo gone-born)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
 AB_C1="$(git -C "$RAB" rev-parse HEAD)"
 git -C "$RAB" branch wave/01-fixture
 PAB="$(s42_plan "$RAB" 4 "  worktree: .worktrees/01-fixture
@@ -176,20 +193,79 @@ PAB="$(s42_plan "$RAB" 4 "  worktree: .worktrees/01-fixture
   working-branch: wave/01-fixture")"
 bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S46_LIB" "$PAB" \
   "proved: kind=floor head=${AB_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh,b.test.sh" > "$PAB.new" && mv "$PAB.new" "$PAB"
+# …and a reads column, s51_plan's awk (session-poker-2 §51): the typed reads cells below need somewhere to go.
+awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+     t && /^\| id / { print $0 " reads |"; next }
+     t && /^\|---/ { print $0 "---|"; next }
+     t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+     { print }' "$PAB" > "$PAB.tmp" && mv "$PAB.tmp" "$PAB"
 ( cd "$RAB" && git add -f "$PAB" && git commit -qm floor ) >/dev/null 2>&1
+ab_row() { /usr/bin/grep -c "^- $1:" "$PAB" | tr -d ' '; }   # <id> -> the lines the plan's state block holds for that row
 poke "$RAB" task-add T6 4 build 'fix the red' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
-expect_eq "AB-1 task-add --born regression:a.test.sh, which the 1.20.0 proof line owes, exits 0" "0" "$RC"
-expect_regex "AB-1b …the row's line ends born: regression a.test.sh of=regression" \
+expect_eq "GB-1 task-add --born regression:a.test.sh, which the 1.20.0 proof line owes, exits 0" "0" "$RC"
+expect_regex "GB-1b …the row's line ends born: regression a.test.sh of=regression" \
   '^- T6: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression a\.test\.sh of=regression$' "$(/usr/bin/grep '^- T6:' "$PAB")"
-expect_contains "AB-1c …the task cell says born: regression" "| T6 | 4 | build | fix the red · born: regression |" "$(cat "$PAB")"
-expect_eq "AB-1d …and no deprecated: line is printed" "0" "$(deps_in "$OUT")"
 poke "$RAB" task-add T7 4 build 'fix the other red' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:b.test.sh
-expect_eq "AB-2 task-add --born floor:b.test.sh works (exit 0)" "0" "$RC"
-expect_regex "AB-2b …and writes the new marker, born: regression b.test.sh of=regression" \
-  '^- T7: pending dispatch — added by task-add at [0-9T:Z-]+ born: regression b\.test\.sh of=regression$' "$(/usr/bin/grep '^- T7:' "$PAB")"
-expect_eq "AB-2c …printing the one deprecated: line" "1|deprecated: --born floor: is --born regression:$DEP_TAIL" \
-  "$(deps_in "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^deprecated: ')"
+expect_eq "GB-2 task-add --born floor:b.test.sh is refused (exit 1)" "1" "$RC"
+expect_contains "GB-2b …the refusal names the new operand" "--born floor: is gone; write --born regression:" "$OUT"
+expect_eq "GB-2c …and wrote no row: T6's is the one line, T7 has none" "1|0" "$(ab_row T6)|$(ab_row T7)"
+poke "$RAB" task-add T8 4 test 'reads the regression' bionic:implementor '—' 30 REQ-5 '—' 'proof:regression, head'
+expect_eq "GB-3 task-add with the reads cell 'proof:regression, head' exits 0" "0" "$RC"
+expect_contains "GB-3b …and the row's cell carries it as typed" "| proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
+poke "$RAB" task-add T9 4 test 'reads the old word' bionic:implementor '—' 30 REQ-5 '—' 'proof:floor, head'
+expect_eq "GB-4 task-add with the reads cell 'proof:floor, head' is refused (exit 1)" "1" "$RC"
+expect_contains "GB-4b …naming the new token" "proof:floor is gone; write proof:regression" "$OUT"
+poke "$RAB" task-add T9 4 test 'reads the old word live' bionic:implementor '—' 30 REQ-5 '—' 'live:proof:floor'
+expect_eq "GB-4c …the live: form too (exit 1), naming the new token" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
+expect_eq "GB-4d …and no T9 row was written, beside T8's, which was" "0|1" "$(/usr/bin/grep -c '^| T9 |' "$PAB" | tr -d ' ')|$(/usr/bin/grep -c '^| T8 |' "$PAB" | tr -d ' ')"
+poke "$RAB" task-set T8 reads=proof:floor
+expect_eq "GB-5 task-set T8 reads=proof:floor is refused (exit 1), naming the new token" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
+expect_contains "GB-5b …and T8's cell is as it was" "| proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
+poke "$RAB" task-set T8 'reads=approval:plan, proof:regression, head'
+expect_eq "GB-5c task-set T8 reads='approval:plan, proof:regression, head' works (exit 0)" "0" "$RC"
+expect_contains "GB-5d …and writes the cell" "| approval:plan, proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
 POKE_BOUND="$AB_BOUND_WAS"
+
+# ============================================================
+section "§GONE-LOG: a floor-run-<sha>.log in the record is refused naming regression-run-<sha>.log; the same log under the new name is the first whole run"
+# ============================================================
+# FIXTURE FIDELITY: session-poker-4 §FLOOR-RUN's shape: a stub tests/run.sh at the head, the plan's build rows landed, no
+# config key, no regression proof. The record holds a log opening as the verb's whole-run logs do, `head=` on line one
+# and `command: tests/run.sh` on line two, under the 1.20.0 name; the second-run glob read it as the first whole run.
+GL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RGL="$(make_repo gone-log)"; ( cd "$RGL" && git commit -q --allow-empty -m init )
+GL_SEEN="$TMPROOT/gl-seen"
+mkdir -p "$RGL/tests"
+printf '#!/bin/bash\nprintf "ran\\n" >> "%s"\nprintf "head=x dirty=0\\nGating: 1 passed, 0 failed\\n"\n' "$GL_SEEN" > "$RGL/tests/run.sh"
+printf '#!/bin/bash\nexit 0\n' > "$RGL/tests/a.test.sh"
+( cd "$RGL" && git add tests && git commit -qm suites ) >/dev/null 2>&1
+PGL="$(s42_plan "$RGL" 4)"; s42_builds_landed "$PGL"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PGL" > "$PGL.tmp" && mv "$PGL.tmp" "$PGL"
+( cd "$RGL" && git add -f "$PGL" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RGL/.worktrees/01-fixture" \
+  && git -C "$RGL/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+GL_W="$(git -C "$RGL/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+GL_REC="$RGL/.bionic/docs/record/wave-01-fixture"; mkdir -p "$GL_REC"
+gl_ran() { [ -f "$GL_SEEN" ] && awk 'END { print NR + 0 }' "$GL_SEEN" || echo 0; }
+expect_regex "GL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$GL_W"
+printf 'head=%s dirty=0\ncommand: tests/run.sh\nGating: 1 passed, 0 failed\nrc=0\n' "$GL_W" > "$GL_REC/regression-run-$GL_W.log"
+poke "$RGL" regression-run
+expect_eq "GL-1 a whole-run log under the new name is the first whole run: the second is refused (exit 1)" "1" "$RC"
+expect_contains "GL-1b …as a second whole run, which is the glob reading the new name" "a second whole run" "$OUT"
+rm -f "$GL_REC/regression-run-$GL_W.log"
+printf 'head=%s dirty=0\ncommand: tests/run.sh\nGating: 1 passed, 0 failed\nrc=0\n' "$GL_W" > "$GL_REC/floor-run-$GL_W.log"
+poke "$RGL" regression-run
+expect_eq "GL-2 the same log under the 1.20.0 name is refused (exit 1)" "1" "$RC"
+expect_contains "GL-2b …the refusal names the new log name" "floor-run-<sha>.log is gone; write regression-run-<sha>.log" "$OUT"
+expect_absent "GL-2c …and is not read as a first whole run: the refusal is not the second-run one (GL-1b is the positive)" "a second whole run" "$OUT"
+expect_eq "GL-2d …and nothing ran (the stub never wrote its mark)" "0" "$(gl_ran)"
+rm -f "$GL_REC/floor-run-$GL_W.log"
+poke "$RGL" regression-run
+expect_eq "GL-3 with neither log in the record the whole run goes (the refusals above were the log's): exit 0, the stub ran once" "0|1" "$RC|$(gl_ran)"
+POKE_BOUND="$GL_BOUND_WAS"
+
 
 # ============================================================
 section "§ALIAS-PLAN: a plan 1.20.0 wrote (kind=floor, proof:floor, born: floor … of=floor) judges as its renamed twin does, silently"
@@ -241,62 +317,46 @@ ap_both "AP-7 units_waiting at step 7" units_waiting 7
 expect_contains "AP-7b …and the 1.20.0 plan's T4 waits on approval:release, its regression read met" \
   "$(printf 'T4\tapproval:release')" "$(ap "$AP_DIR/old.plan.md" units_waiting 7)"
 ap_both "AP-8 units_edges" units_edges
-expect_eq "AP-9 none of these readers printed a deprecated: line for the on-disk tokens" "0" "$(deps_in "$(cat "$TMPROOT/ap.err")")"
+expect_eq "AP-9 none of these readers printed a word on stderr for the on-disk tokens (the readers' positives are the answers above)" "0" "$(wc -c < "$TMPROOT/ap.err" | tr -d ' ')"
+
 
 # ============================================================
-section "§AGREE-SEAM: each typed token is read at its one seam, through the map"
+section "§AGREE-SEAM: each typed token is refused at its one seam, through the map; a plan token is read through it"
 # ============================================================
 SP_SH="$POKER"; PROOF_SH="$LIB/proof.sh"; UNITS_SH="$LIB/units.sh"
 code_lines() { /usr/bin/grep -v -E '^[[:space:]]*#' "$1"; }   # <file> -> its lines that are not comments
-expect_eq "AG-1 the verb is normalised once, on the line after VERB is read, before both case blocks" "1|1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_read verb "\$VERB"' | tr -d ' ')|$(awk '/^VERB="\$1"; shift$/ { getline; print ($0 ~ /alias_read verb "\$VERB"/) ? 1 : 0; exit }' "$SP_SH")"
+expect_eq "AG-1 the verb is refused once, on the line after VERB is read, before both case blocks" "1|1" \
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone verb "\$VERB"' | tr -d ' ')|$(awk '/^VERB="\$1"; shift$/ { getline; print ($0 ~ /alias_gone verb "\$VERB"/) ? 1 : 0; exit }' "$SP_SH")"
 expect_eq "AG-2 each case block holds one regression-run) arm, and no block a floor-run) arm" "2|0" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c -E '^[[:space:]]+regression-run\)' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c -E '^[[:space:]]+floor-run\)' | tr -d ' ')"
-expect_eq "AG-3 the proof kind is normalised once, where PF_KIND is read" "1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_read proof-kind "\$PF_KIND"' | tr -d ' ')"
-expect_eq "AG-4 the born operand is normalised once, in task-add's --born parse" "1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_read born-operand' | tr -d ' ')"
-expect_eq "AG-5 the regression's command is read once, through alias_config" "1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_config "\$FR_ROOT" config' | tr -d ' ')"
-expect_eq "AG-6 the second-run glob walks every spelling of the log name" "1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_spellings log' | tr -d ' ')"
+expect_eq "AG-3 the proof kind is refused once, where PF_KIND is read" "1" \
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone proof-kind "\$PF_KIND"' | tr -d ' ')"
+expect_eq "AG-4 the born operand is refused once, in task-add's --born parse" "1" \
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone born-operand' | tr -d ' ')"
+expect_eq "AG-5 the config's old key is refused once, and the regression's command is read once, by its one key" "1|1" \
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_text config' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c 'config_value "\$FR_ROOT" regression-command' | tr -d ' ')"
+expect_eq "AG-6 the second-run glob walks the new log name only, and the old one is refused from the map's names" "1|1" \
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_names log' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c -F 'regression-run-"*.log; do' | tr -d ' ')"
+expect_eq "AG-6b a typed reads cell is refused at its two sites, task-add and task-set reads=" "2" \
+  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_cell reads' | tr -d ' ')"
 expect_eq "AG-7 proof_fields normalises the kind through the map, written once at load and pasted once" "1|1" \
   "$(code_lines "$PROOF_SH" | /usr/bin/grep -c '_PROOF_KIND_NORM="$(_proof_alias_norm kind PROOF_KIND)"' | tr -d ' ')|$(code_lines "$PROOF_SH" | /usr/bin/grep -c -F '"$_PROOF_KIND_NORM"' | tr -d ' ')"
 expect_eq "AG-8 the reads token is normalised through the map at the tokenizer and at the validator" "2" \
   "$(code_lines "$UNITS_SH" | /usr/bin/grep -c -F '"$_UNITS_READS_NORM"' | tr -d ' ')"
 expect_eq "AG-9 both born-marker readers take their spellings from the map" "1|1" \
   "$(code_lines "$UNITS_SH" | /usr/bin/grep -c -F '$(_proof_alias_born)' | tr -d ' ')|$(code_lines "$PROOF_SH" | /usr/bin/grep -c -F '$(_proof_alias_born)' | tr -d ' ')"
-expect_eq "AG-10 the governing-skill hook reads the rigor minimum through the map, at its two readers" "2" \
-  "$(code_lines "$GOV_HOOK" | /usr/bin/grep -c 'alias_keyed rigor-key' | tr -d ' ')"
+expect_eq "AG-10 the governing-skill hook refuses the old rigor key through the map, at its two readers" "2" \
+  "$(code_lines "$GOV_HOOK" | /usr/bin/grep -c 'alias_gone_text rigor-key' | tr -d ' ')"
+
 
 # ============================================================
-section "§AGREE-ONE: the alias and the new name reach one implementation"
+section "§AGREE-ONE: a plan token's old and new spelling reach one implementation"
 # ============================================================
-# THE VERB AND THE KIND: the same refusal, word for word, from the old and the new spelling; the old adds one line.
-RAG="$(make_repo rename-agree)"
-ag_same() {  # <label> <new args> -- <old args>
-  local label="$1" n o; shift
-  local -a na=() oa=()
-  while [ "$1" != -- ]; do na+=("$1"); shift; done; shift; oa=("$@")
-  poke "$RAG" "${na[@]}"; n="$RC|$OUT"
-  poke "$RAG" "${oa[@]}"; o="$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -v '^deprecated: ')"
-  expect_nonempty "$label — the new spelling answers" "${n#*|}"
-  expect_eq "$label — the old spelling answers the same, less its deprecated: line" "$n" "$o"
-  expect_eq "$label — …which it printed once" "1" "$(deps_in "$OUT")"
-}
-ag_same "AO-1 regression-run x / floor-run x (the usage error)" regression-run x -- floor-run x
-ag_same "AO-2 proof-add regression / proof-add floor with a flag that takes no value (the usage error)" proof-add regression record/x.log --reader -- proof-add floor record/x.log --reader
 # THE PROOF LINE: proof_fields, lifted from proof_awk, reads the old and new line as one kind.
 ag_kind() { printf '%s\n' "$1" | awk "$(bash -c '. "$1"; proof_awk' _ "$PROOF_SH")"'{ if (proof_fields($0)) print PROOF_KIND }'; }
 expect_eq "AO-3 proof_fields reads kind=regression as regression" "regression" "$(ag_kind "proved: kind=regression head=$AP_H at=x evidence=e")"
 expect_eq "AO-3b …and kind=floor as regression" "regression" "$(ag_kind "proved: kind=floor head=$AP_H at=x evidence=e")"
 expect_eq "AO-3c …and every other kind as itself" "review" "$(ag_kind "proved: kind=review head=$AP_H at=x evidence=e")"
-# THE CONFIG KEY: one reader, alias_config, answers both keys with one value.
-printf 'floor: bash x.sh\n' > "$AM_CFG/.bionic/config.yaml"
-AO_OLD="$(bash -c '. "$1/roots.sh"; . "$1/alias.sh"; alias_config "$2" config ""; printf "%s" "$ALIAS_VALUE"' _ "$LIB" "$AM_CFG" 2>/dev/null)"
-printf 'regression-command: bash x.sh\n' > "$AM_CFG/.bionic/config.yaml"
-AO_NEW="$(bash -c '. "$1/roots.sh"; . "$1/alias.sh"; alias_config "$2" config ""; printf "%s" "$ALIAS_VALUE"' _ "$LIB" "$AM_CFG" 2>/dev/null)"
-expect_eq "AO-4 alias_config answers floor: and regression-command: with one value" "bash x.sh|bash x.sh" "$AO_OLD|$AO_NEW"
 # THE AWK NORMALISATION: alias_awk_norm emits the statements every awk reader runs, from the one map.
 ag_norm() { awk "BEGIN { t = \"$2\"; $(bash -c '. "$1"; alias_awk_norm "$2" t' _ "$ALIAS_SH" "$1") print t }"; }
 expect_eq "AO-5 alias_awk_norm reads turns proof:floor and live:proof:floor into the new token" \
@@ -304,6 +364,7 @@ expect_eq "AO-5 alias_awk_norm reads turns proof:floor and live:proof:floor into
   "$(ag_norm reads proof:floor)|$(ag_norm reads live:proof:floor)|$(ag_norm reads proof:review)"
 expect_eq "AO-6 alias_awk_norm kind and born answer as alias_token does" "regression|regression|$(al alias_token kind floor)|$(al alias_token born floor)" \
   "$(ag_norm kind floor)|$(ag_norm born floor)|regression|regression"
+
 
 # ============================================================
 section "§AGREE-SCAN: no production line outside alias.sh spells an old token; a planted second copy goes red"

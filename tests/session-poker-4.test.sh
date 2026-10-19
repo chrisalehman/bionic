@@ -6024,6 +6024,81 @@ BIONIC_GATE_DIR="$TMPROOT/rl-gate" poke "$RRL" landing-report "$PRL"
 expect_eq "RL-6 AC-6.2 landing-report exits 0 and counts the record's one run line under runs: as run=1 (§REPORT-RTL pins run=0 on records with none)" \
   "0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'landings: ' | /usr/bin/grep -c 'red-then-green=0 run=1 reused=0 absent=0 · ' | tr -d ' ')"
 
+# ---------- AC-10.1: a regression-run started with HUP, INT and QUIT ignored hands its command all three at their defaults ----------
+# A shell that starts with a signal ignored cannot trap it, and the ignored state is inherited (wave-38 T33, T34; A-orch-69).
+# regression-run's command is `exec`ed through a perl that resets the three first (D17), in both arms: the declared
+# regression-command: and tests/run.sh whole. The command traps HUP, INT and QUIT and writes what it saw; the verb is
+# started as `bash -c 'trap "" HUP INT QUIT; …'`, as a nohup'd background job starts it. The command waits on a timed
+# read of a fifo nobody writes, which a trapped signal interrupts (no poll or sleep stands in for it). The control is the same
+# command under the same ignored start with no reset: it sees none, so the row can fail.
+[ "$(type -t wait_for)" = function ] || . "$(dirname "$0")/lib/wait.sh"
+RS_D="$TMPROOT/rs-sig"; mkdir -p "$RS_D"
+rs_script() {  # <name> -> writes the command's script, prints its path
+  local n="$1"
+  cat > "$RS_D/$n.sh" <<RSEOF
+#!/bin/bash
+for s in HUP INT QUIT; do trap "echo trapped-\$s >> '$RS_D/$n.saw'" \$s; done
+mkfifo '$RS_D/$n.fifo' 2>/dev/null
+exec 3<> '$RS_D/$n.fifo'
+echo \$\$ > '$RS_D/$n.pid'
+: > '$RS_D/$n.up'
+i=0
+while [ "\$(wc -l < '$RS_D/$n.saw' 2>/dev/null || echo 0)" -lt 3 ] && [ \$i -lt 10 ]; do i=\$((i+1)); read -t 1 -u 3 _; done
+exit 0
+RSEOF
+  chmod +x "$RS_D/$n.sh"
+}
+rs_saw() { cat "$RS_D/$1.saw" 2>/dev/null | tr '\n' ' '; }
+rs_drive() {  # <name> <repo> <verb args…> — the verb with the three ignored; sends each signal once the command is up
+  local n="$1" repo="$2" pid sig grp
+  shift 2
+  rm -f "$RS_D/$n".saw "$RS_D/$n".pid "$RS_D/$n".up
+  ( cd "$repo" && exec bash -c 'trap "" HUP INT QUIT; exec env CLAUDE_CODE_SESSION_ID="$1" bash "$2" "${@:3}"' _ "$SID" "$POKER" "$@" ) \
+    > "$RS_D/$n.out" 2>&1 < /dev/null &
+  grp=$!
+  wait_for 30 test -e "$RS_D/$n.up"
+  pid="$(cat "$RS_D/$n.pid" 2>/dev/null)"
+  if [ -n "$pid" ]; then
+    for sig in HUP INT QUIT; do
+      kill -"$sig" "$pid" 2>/dev/null
+      wait_for 2 grep -q "trapped-$sig" "$RS_D/$n.saw"
+    done
+    kill -KILL "$pid" 2>/dev/null
+  fi
+  wait_for 20 bash -c '! kill -0 "$1" 2>/dev/null' _ "$grp" || kill -KILL "$grp" 2>/dev/null
+  wait "$grp" 2>/dev/null
+}
+# the control: no launcher, the three ignored — a bash the command is started under sees none of them
+rs_script ctl
+( exec bash -c 'trap "" HUP INT QUIT; exec bash "$1"' _ "$RS_D/ctl.sh" ) > /dev/null 2>&1 < /dev/null &
+RS_CTL=$!
+wait_for 30 test -e "$RS_D/ctl.up"
+for _s in HUP INT QUIT; do kill -"$_s" "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait_for 1 grep -q "trapped-$_s" "$RS_D/ctl.saw"; done
+kill -KILL "$(cat "$RS_D/ctl.pid" 2>/dev/null)" 2>/dev/null; wait "$RS_CTL" 2>/dev/null
+expect_eq "RL-7-ctl control: a command started with the three ignored and no reset sees none of them (the row can fail)" "" "$(rs_saw ctl)"
+
+# the declared regression-command: arm
+rs_script cfg
+printf 'regression-command: bash %s\n' "$RS_D/cfg.sh" > "$RRL/.bionic/config.yaml"
+rs_drive cfg "$RRL" regression-run
+expect_eq "RL-7 AC-10.1 regression-run started with HUP, INT and QUIT ignored: the declared command sees all three" \
+  "trapped-HUP trapped-INT trapped-QUIT " "$(rs_saw cfg)"
+printf 'regression-command: bash %s\n' "$RL_STUB" > "$RRL/.bionic/config.yaml"
+
+# the tests/run.sh whole arm: a fresh repository, no declared command, a tests/run.sh that is the command
+rs_script whole
+RRW="$(make_repo runwhole)"; ( cd "$RRW" && git commit -q --allow-empty -m init )
+PRW="$(s42_plan "$RRW" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PRW" | sed 's/| active |/| landed |/' > "$PRW.tmp" && mv "$PRW.tmp" "$PRW"
+( cd "$RRW" && git add -f "$PRW" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RRW/.worktrees/01-fixture" \
+  && mkdir -p "$RRW/.worktrees/01-fixture/tests" ) >/dev/null 2>&1
+cp "$RS_D/whole.sh" "$RRW/.worktrees/01-fixture/tests/run.sh"
+( cd "$RRW/.worktrees/01-fixture" && git add tests/run.sh && git commit -q -m "wave work" ) >/dev/null 2>&1
+rs_drive whole "$RRW" regression-run
+expect_eq "RL-8 AC-10.1 …and the whole arm (tests/run.sh, no declared command): it sees all three" \
+  "trapped-HUP trapped-INT trapped-QUIT " "$(rs_saw whole)"
+
 POKE_BOUND="$RL_BOUND_WAS"
 
 
@@ -6794,5 +6869,61 @@ poke "$RHS" row-landed T2 "$HS_C3" 2026-10-04T04:10:00Z --by-hand "Dana Fixture"
 expect_eq "HS-6 AC-9.1 a passing proof AT the commit stands too (exit 0, landed)" "0 landed" "$RC $(hs_status T2)"
 expect_contains "HS-6b …saying so" "${HS_C3:0:12} is held by the passing release check at ${HS_C3:0:12}" "$OUT"
 POKE_BOUND="$HS_BOUND_WAS"
+
+# ============================================================
+section "§HAND: row-landed --by-hand records the hand landing on the landing record, ev=published kind=hand, once, so landing-report lists the row and its hand-holds count it (wave-39 T10; D14; REQ-6 AC-6.2)"
+# ============================================================
+#
+# A landing the orchestrator makes by hand is marked on the plan with `row-landed <row> <commit> <at> --by-hand
+# <who> <why>`. Before wave 39 that wrote the plan's three lines and nothing to the landing record, so the run's
+# Landings and its hand-holds count missed every one (record/wave-39-landing-proof/landing-proofs.log: six kind=hand
+# lines tonight came only from the line's own hand landing). The verb now appends the line the line's hand landing
+# writes, `line/v1|ev=published|row=|commit=|kind=hand|by=|why=|at=`, at the landing's own instant, unless the record
+# already holds a published line for that row and commit: the line's `land --by-hand` writes its event, then runs
+# this verb, and one landing is one line.
+#
+# FIXTURE FIDELITY. §DELIVER's plan builder (`dv_plan`) in a repository of its own; the record line the line writes
+# is copied from lib/line.sh `line_publish`'s `_wt_proofs_put` call, field for field.
+HD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RHD="$(make_repo hd-hand)"; ( cd "$RHD" && git commit -q --allow-empty -m init )
+git -C "$RHD" config user.name "Dana Fixture"
+HD_DVB_WAS="$DV_B"; DV_B="$(git -C "$RHD" rev-parse HEAD)"
+PHD="$(dv_plan "$RHD")"
+DV_B="$HD_DVB_WAS"
+HD_C="$(git -C "$RHD" rev-parse HEAD)"
+HD_C2="$(printf 'e%.0s' $(seq 40))"
+HD_REC="$RHD/$DV_REL/landing-proofs.log"; mkdir -p "${HD_REC%/*}"
+hd_pub()   { [ -f "$HD_REC" ] || { echo 0; return 0; }; /usr/bin/grep -c '^line/v1|ev=published|' "$HD_REC" | tr -d ' '; }   # -> published lines in the record
+hd_step()  { /usr/bin/grep -E "^- $1: " "$PHD" | head -1; }
+hd_holds() { poke "$RHD" landing-report --hand-holds "$PHD"; printf '%s\n' "$OUT" | /usr/bin/grep -oE 'by-hand=[0-9]+' | head -1; }
+
+expect_eq "HD-0 precondition: the record holds no published line, and the hand-holds line reads by-hand=0 (its extractor proved on the verb's own line)" \
+  "0|by-hand=0" "$(hd_pub)|$(hd_holds)"
+poke "$RHD" row-landed T8 "$HD_C" 2026-10-04T05:00:00Z --by-hand "Dana Fixture" "merged by hand on its in-tree greens"
+expect_eq "HD-1 row-landed --by-hand exits 0 and writes the plan's hand-landing line" \
+  "0|- T8: landed-by-hand: Dana Fixture 2026-10-04T05:00:00Z \"merged by hand on its in-tree greens\"" "$RC|$(hd_step T8)"
+expect_eq "HD-2 AC-6.2 …and the landing record gains one ev=published line, kind=hand, at the landing's own instant, in the line's field order" \
+  "line/v1|ev=published|row=T8|commit=$HD_C|kind=hand|by=Dana Fixture|why=merged by hand on its in-tree greens|at=2026-10-04T05:00:00Z" \
+  "$(/usr/bin/grep '^line/v1|ev=published|' "$HD_REC" 2>/dev/null)"
+expect_eq "HD-3 AC-6.2 landing-report --hand-holds counts it: by-hand=1" "by-hand=1" "$(hd_holds)"
+poke "$RHD" landing-report --rows "$PHD"
+expect_eq "HD-4 …and landing-report's landings line and its rows list the row as a hand landing" \
+  "hand=1|T8 hand ready=- landed=2026-10-04T05:00:00Z" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'hand=[0-9]+' | head -1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^T8 ' | cut -d' ' -f1-4)"
+dv_snap_hd() { cp "$PHD" "$TMPROOT/hd-before"; }
+dv_snap_hd
+poke "$RHD" row-landed T8 "$HD_C" 2026-10-04T05:00:00Z --by-hand "Dana Fixture" "merged by hand on its in-tree greens"
+expect_eq "HD-5 the same hand landing again: exit 0, the plan byte-identical, still one published line" \
+  "0|same|1" "$RC|$(cmp -s "$TMPROOT/hd-before" "$PHD" && echo same || echo changed)|$(hd_pub)"
+# The line's own hand landing writes its published line first, then runs this verb: one landing, one line.
+printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=Dana Fixture|why=the line landed it|at=2026-10-04T06:00:00Z\n' "$HD_C2" >> "$HD_REC"
+poke "$RHD" row-landed T9 "$HD_C2" 2026-10-04T06:00:00Z --by-hand "Dana Fixture" "the line landed it"
+expect_eq "HD-6 a hand landing the line already recorded (its published line for that row and commit) is not recorded twice" \
+  "0|1|2|by-hand=2" \
+  "$RC|$(/usr/bin/grep -c '^line/v1|ev=published|row=T9|' "$HD_REC" | tr -d ' ')|$(hd_pub)|$(hd_holds)"
+poke "$RHD" row-landed T12 "$HD_C" 2026-10-04T07:00:00Z
+expect_eq "HD-7 a landing not by hand (the queue's, whose publish writes its own line) adds no line here" \
+  "0|2" "$RC|$(hd_pub)"
+POKE_BOUND="$HD_BOUND_WAS"
 
 finish

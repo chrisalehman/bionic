@@ -372,7 +372,7 @@ rc_file() {
 #                  person to read before they consent, and every line of that page
 #                  fits 100 columns (setup.test.sh §PROXY P18). One printf argument
 #                  per line, so no line of this function is a bare `}` and
-#                  rc-item.test.sh's line-for-line copy check reads it whole.
+#                  rc-item-2.test.sh's line-for-line copy check reads it whole.
 rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
     claude-proxy) printf '%s\n' \

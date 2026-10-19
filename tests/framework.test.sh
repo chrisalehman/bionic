@@ -2044,7 +2044,7 @@ expect_regex "READS: proof.sh is read by landing-line (the wave-35 floor miss)" 
 expect_regex "READS: anchors.sh is read by shell-lint, whose find walks the library directory (the directory rule)" \
   "^payload/scripts/lib/anchors\\.sh	([^,]+,)*tests/shell-lint\\.test\\.sh(,|$)" "$RD_IDX"
 expect_regex "READS: said.sh is read by cross-gate-agreement, whose find walks hooks and the libraries" \
-  "^payload/scripts/lib/said\\.sh	([^,]+,)*tests/cross-gate-agreement\\.test\\.sh(,|$)" "$RD_IDX"
+  "^payload/scripts/lib/said\\.sh	([^,]+,)*tests/cross-gate-agreement-1\\.test\\.sh(,|$)" "$RD_IDX"
 expect_regex "READS: dispatch-preflight.sh is read by dispatch-preflight-3, through its prelude (the prelude hop)" \
   "^hooks/dispatch-preflight\\.sh	([^,]+,)*tests/dispatch-preflight-3\\.test\\.sh(,|$)" "$RD_IDX"
 expect_regex "READS: the anchor index the fold is checked against is §22's, and it is not empty" \

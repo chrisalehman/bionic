@@ -159,7 +159,9 @@ line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
 }
 
 # The fold's raw form, one tab-separated line per open entry, in record order:
-#   row name commit carrier candidate cbase cat outcome suites branch tree
+#   row name commit carrier candidate cbase cat outcome suites branch tree greens
+# greens (wave-39 T10; AC-6.3) is how many of its suites are green (or absent) on its candidate, 0 before one: the
+# sitrep's `in its landing, <greens> of <suites> suites green`.
 _line_fold() {  # <record>
   [ -f "$1" ] || return 0
   awk -F'|' '
@@ -203,7 +205,7 @@ _line_fold() {  # <record>
             m = split(s, names, ",")
             for (j = 1; j <= m; j++) {
               r = v[e, c, names[j]]
-              if (r == "green" || r == "absent") continue
+              if (r == "green" || r == "absent") { grn[e]++; continue }
               if (r == "red") {
                 if (names[j] == debt[e]) dec = 1
                 else if ((cbase[e], names[j]) in stand) std = 1
@@ -213,9 +215,9 @@ _line_fold() {  # <record>
           }
           if (miss || unx) out = "proving"; else if (std) out = "standing"; else if (dec) out = "declared"; else out = "green"
         }
-        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rowof[e], name[e], com[e], car[e], \
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", rowof[e], name[e], com[e], car[e], \
           (c == "" ? "-" : c), (cbase[e] == "" ? "-" : cbase[e]), (cat[e] == "" ? "-" : cat[e]), out, \
-          (sui[e] == "" ? "none" : sui[e]), br[e], tr[e]
+          (sui[e] == "" ? "none" : sui[e]), br[e], tr[e], grn[e]
       }
     }' "$1" 2>/dev/null
 }
@@ -223,8 +225,8 @@ _line_fold() {  # <record>
 # The fold with presence and the base rule applied: the interface's eight fields, then the raw
 # fields line_publish needs (carrier, the candidate's own base and time, branch, tree).
 _line_entries() {  # <record> <accepted head>
-  local rec="$1" head="$2" row name com car cand cbase cat out sui br tr present base prev="$2"
-  while IFS=$'\t' read -r row name com car cand cbase cat out sui br tr; do
+  local rec="$1" head="$2" row name com car cand cbase cat out sui br tr _gr present base prev="$2"
+  while IFS=$'\t' read -r row name com car cand cbase cat out sui br tr _gr; do
     [ -n "$row" ] || continue
     if _line_alive "$car"; then present=yes; else present=no; fi
     base="$prev"

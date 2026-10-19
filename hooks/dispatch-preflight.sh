@@ -3316,7 +3316,7 @@ esac
 # are sweepable is closed, so a row adopt will never offer no longer holds the dispatch. A dead session
 # whose files are still inside the poker interval holds it, and the remedy names both ways out: adopt,
 # then ack; or wait out the interval and `sweep`.
-# [WALL: tests/dispatch-preflight-4.test.sh §REMARK, §HOLD]
+# [WALL: tests/dispatch-preflight-4b.test.sh §REMARK, §HOLD]
 dp_tree_of() {  # <cell or path> -> the linked tree it names, absolute, or nothing
   local t="${1:-}"
   case "$t" in ''|—|-) return 0 ;; /*) ;; *) t="$BIONIC_ROOT/$t" ;; esac
