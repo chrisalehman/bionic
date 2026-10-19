@@ -2550,43 +2550,47 @@ expect_contains "54b0 precondition: the task tree with no suite run LANDED throu
 expect_false "54b0b precondition: …and no suite ever stamped it" \
   test -e "$R54/.git/worktrees/01-T7/bionic-stamps"
 S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+# INVERTED BY WAVE-39 T24 (D5, AC-18.1): a file no suite reads changes no suite's read set, so the landing is proved by
+# the whole run before it; wave-26 AC-3.4 made it wait for a whole run. The release entry records the reversal.
 s54_tick
-expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
-expect_contains "54b AC-3.4 AC-13.4 integrate WAITS: the commit past the floor has no run recorded at it, and the line names it and the way out" \
-  "poker: WAIT T3 — proof:regression: ${S54_WHY} ${S54_W0:0:12}, commit ${S54_W1:0:12} (" "$(s54_wait)"
-expect_contains "54b1b …saying what it lacks" \
-  ") is not proved: no suite run is recorded at it${S54_OUT}; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the regression holds" \
-  "$(s54_wait)"
-expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
-# THE COST: one tick walks each state it owes once (wave-36 T40; D9, AC-3.6). The integrate row owes two: the
-# regression (proof_state, through the floor memo) and the readings (facts_state, through the judge). The
-# schedule and the change fingerprint each ask the ready set, and gate_report reads the budget a second time,
-# so a state asked twice would be walked twice. The walk's one git call is what the shim counts; each state is
-# measured alone under the same shim, and the tick must walk their sum.
-: > "$S54_COUNT"; PATH="$S54_SHIM:$PATH" s54_tick; S54_TICK_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
-: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
-S54_PS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
-: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; facts_state "$P54" "$(proof_branch_head "$P54" "$R54")" ) >/dev/null 2>&1
-S54_FS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
-expect_true "54b2c precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
-  test "$S54_PS_WALKS" -gt 0
-expect_true "54b2c2 precondition: …and so does one facts_state (the counter reads real calls)" \
-  test "$S54_FS_WALKS" -gt 0
-expect_eq "54b2d …and one tick walks each state once: the sum of one proof_state and one facts_state" \
-  "$((S54_PS_WALKS + S54_FS_WALKS))" "$S54_TICK_WALKS"
+expect_contains "54b D5 AC-18.1 a new file under a directory no suite names, no suite run: the floor stands and the merge is offered (inverted from AC-3.4)" \
+  "poker: FILL T3" "$OUT"
+expect_eq "54b1 …and integrate waits on nothing (54c reads a real WAIT line through the same extractor)" "" "$(s54_wait)"
 s54_floor floor-2.log
-expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add regression (exit 0)" "0" "$RC"
+expect_eq "54b3 a full run on the new head is recorded with proof-add regression all the same (exit 0)" "0" "$RC"
 expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
 s54_tick
-expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
+expect_contains "54b5 …and the tick still offers the merge" "poker: FILL T3" "$OUT"
 
 # ---------- AC-13.3: a later landing is proved by the runs of its suites at it, never by a second full run ----------
 s54_land T8 lib/one.sh 'one, changed'
 expect_contains "54c0 precondition: the change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
 S54_W2="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
-expect_contains "54c a landing with no suite run at it: integrate WAITS naming the commit" \
+expect_nonempty "54c0b precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
+expect_contains "54c a landing of lib/one.sh, which a.test.sh reads, with no suite run at it: integrate WAITS naming the commit" \
   "proof:regression: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_W2:0:12} (" "$(s54_wait)"
+expect_contains "54c1 …saying the suite that reads it has no run" \
+  ") is not proved: a.test.sh has no run recorded at it or after it${S54_OUT}" \
+  "$(s54_wait)"
+expect_absent "54c1b …and the merge is not offered" "poker: FILL T3" "$OUT"
+# THE COST: one tick walks each state it owes once (wave-36 T40; D9, AC-3.6). The integrate row owes two: the
+# regression (proof_state, through the floor memo) and the readings (facts_state, through the judge). The
+# schedule and the change fingerprint each ask the ready set, and gate_report reads the budget a second time,
+# so a state asked twice would be walked twice. The walk's one git call is what the shim counts; each state is
+# measured alone under the same shim, and the tick must walk their sum. (Moved here by wave-39 T24: the plant above
+# no longer leaves the regression uncovered.)
+: > "$S54_COUNT"; PATH="$S54_SHIM:$PATH" s54_tick; S54_TICK_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
+S54_PS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( PATH="$S54_SHIM:$PATH"; . "$S46_LIB" >/dev/null 2>&1; facts_state "$P54" "$(proof_branch_head "$P54" "$R54")" ) >/dev/null 2>&1
+S54_FS_WALKS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+expect_true "54c1c precondition: one proof_state over this change walks the commits (the counter reads real calls)" \
+  test "$S54_PS_WALKS" -gt 0
+expect_true "54c1d precondition: …and so does one facts_state (the counter reads real calls)" \
+  test "$S54_FS_WALKS" -gt 0
+expect_eq "54c1e …and one tick walks each state once: the sum of one proof_state and one facts_state" \
+  "$((S54_PS_WALKS + S54_FS_WALKS))" "$S54_TICK_WALKS"
 s54_run a.test.sh; s54_run b.test.sh
 s54_tick
 expect_contains "54c2 AC-13.3 …with a and b run green at the head (the real shim's stamps), the floor stands: the merge is offered" "poker: FILL T3" "$OUT"
@@ -2601,7 +2605,7 @@ expect_true "54e0 precondition: the outside commit is on the working branch" \
   git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
 s54_tick
 expect_contains "54e a merge from outside the run with nothing run at it: integrate WAITS, naming the merge" \
-  "proof:regression: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_M:0:12} (no landing row) is not proved: no suite run is recorded at it" \
+  "proof:regression: ${S54_WHY} ${S54_W1:0:12}, commit ${S54_M:0:12} (no landing row) is not proved: a.test.sh has no run recorded at it or after it" \
   "$(s54_wait)"
 expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 s54_floor floor-4.log

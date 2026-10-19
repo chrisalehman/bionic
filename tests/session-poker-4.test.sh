@@ -5054,7 +5054,9 @@ R7="$(make_repo cur7)"
 git -C "$R7" config user.email t@example.com; git -C "$R7" config user.name "Dana Fixture"
 printf '.bionic\n' > "$R7/.gitignore"
 mkdir -p "$R7/tests" "$R7/lib" "$R7/.bionic/docs/plans" "$R7/.bionic/docs/record/w35"
-printf '#!/bin/bash\nexit 0\n' > "$R7/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$R7/tests/b.test.sh"
+# a.test.sh READS lib/x.sh (wave-39 T24; D5, AC-18.1): a commit past the floor owes the suites that read what it changed,
+# so C below, a change to lib/x.sh, is unproved until a.test.sh runs at it; a file no suite reads would owe nothing.
+printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$R7/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$R7/tests/b.test.sh"
 printf 'one\n' > "$R7/lib/x.sh"
 ( cd "$R7" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
 printf 'generic fixture proof\n' > "$R7/.bionic/docs/record/generic-evidence.md"
@@ -6545,10 +6547,11 @@ section "§FN-5: approve regression-2 is the user's word for ONE second whole ru
 # it, lib/proof.sh `proof_regression2_open`), and once that run's proof is written the approval is spent, so a later
 # head whose change no suite reads owes again and a third whole run is refused, naming the user's word for the
 # regression (`waive regression`).
-# FIXTURE FIDELITY: §FLOOR-RUN's shape: a stub tests/run.sh in the runner's output shape, one suite (a.test.sh, which
-# reads no file), s42_plan's plan bound to this session with its build rows landed, its working branch a linked
-# worktree. Each later change is a row's landing in the landing record's lib/line.sh shape (ready, published, a green
-# verdict of a.test.sh), so the walk reaches the reads arm: the file it changed is read by no suite it ran. The
+# FIXTURE FIDELITY: §FLOOR-RUN's shape: a stub tests/run.sh in the runner's output shape, two suites (a.test.sh, which
+# reads no file, and b.test.sh, which reads lib/y.sh and lib/z.sh), s42_plan's plan bound to this session with its build
+# rows landed, its working branch a linked worktree. Each later change is a row's landing in the landing record's
+# lib/line.sh shape (ready, published, a green verdict of a.test.sh), so the walk owes b.test.sh, which reads the file it
+# changed and which no row ran (wave-39 T24; D5: a file no suite reads would owe nothing). The
 # approval line is the approve verb's shape, planted at the instant (no row here reads approval:regression-2).
 # fails-when: the approved head reads covered; the second run is refused; the later head reads covered or a third
 # whole run runs.
@@ -6566,6 +6569,7 @@ printf 'Gating: 1 passed, 0 failed\n'
 exit 0
 F5_EOF
 printf '#!/bin/bash\nexit 0\n' > "$RF5/tests/a.test.sh"
+printf '#!/bin/bash\ncat "$(dirname "$0")/../lib/y.sh" "$(dirname "$0")/../lib/z.sh" >/dev/null\n' > "$RF5/tests/b.test.sh"
 ( cd "$RF5" && git add tests && git commit -qm suites ) >/dev/null 2>&1
 PF5="$(s42_plan "$RF5" 4)"; s42_builds_landed "$PF5"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF5" > "$PF5.tmp" && mv "$PF5.tmp" "$PF5"
@@ -6592,8 +6596,8 @@ poke "$RF5" proof-add regression "record/wave-01-fixture/regression-run-$F5_W.lo
 expect_eq "FN5-0 precondition: the first whole run ran once and its proof covers the working head" "1|covered	$F5_W" "$(f5_runs)|$(f5_state)"
 F5_C="$(f5_land T9 lib/y.sh)"
 F5_ST="$(f5_state)"
-expect_eq "FN5-0b precondition: a landing that changed lib/y.sh, which no suite it ran reads: uncovered" "uncovered" "${F5_ST%%	*}"
-expect_contains "FN5-0c …naming the reads arm and the approval" "lib/y.sh is read by no suite it ran (a.test.sh); a second whole run owed, or approve regression-2" "$F5_ST"
+expect_eq "FN5-0b precondition: a landing that changed lib/y.sh, which b.test.sh reads and the row did not run: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-0c …naming the suite that reads it" "commit ${F5_C:0:12} (row T9) is not proved: b.test.sh has no run recorded at it or after it" "$F5_ST"
 poke "$RF5" regression-run
 expect_eq "FN5-1 with no approval a second whole run is refused, and nothing ran (exit 1)" "1|1" "$RC|$(f5_runs)"
 awk -v at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ print } /^approved-by: / && !d { print "approved: regression-2 by Dana " at " \"yes, run it again\""; d = 1 }' \
@@ -6606,8 +6610,8 @@ poke "$RF5" proof-add regression "record/wave-01-fixture/regression-run-$F5_C.lo
 expect_eq "FN5-3b …and its proof covers that head" "0|covered	$F5_C" "$RC|$(f5_state)"
 F5_D="$(f5_land T10 lib/z.sh)"
 F5_ST="$(f5_state)"
-expect_eq "FN5-4 AC-4.5 a later head whose change no suite reads owes again: uncovered" "uncovered" "${F5_ST%%	*}"
-expect_contains "FN5-4b …naming the commit and the file" "commit ${F5_D:0:12} (row T10) is not proved: lib/z.sh is read by no suite it ran" "$F5_ST"
+expect_eq "FN5-4 AC-4.5 a later head whose change a suite reads, unrun, owes again: uncovered" "uncovered" "${F5_ST%%	*}"
+expect_contains "FN5-4b …naming the commit and the suite" "commit ${F5_D:0:12} (row T10) is not proved: b.test.sh has no run recorded at it or after it" "$F5_ST"
 s42_snap "$RF5" "$PF5"
 poke "$RF5" regression-run
 s42_unchanged "FN5-5 AC-4.5 a third whole run, the approval spent by the second's proof" 1 "$PF5"
