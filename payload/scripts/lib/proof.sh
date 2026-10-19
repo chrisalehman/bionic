@@ -1226,8 +1226,10 @@ _proof_records() {
 # every suite owed at or before its commit red there, and a newer run, the whole or the suite's own,
 # decides again (wave-31 T41).
 #
-# A SUITE OWES WHAT IT READS (wave-39 T24; REQ-18 AC-18.1; D5, D9; ADR-061). When the reads index at H (lib/anchors.sh
-# `reads_index`, file to suites by file name, a narrowed `<file>#<name>` row read as its file; A-orch-8) names a suite,
+# A SUITE OWES WHAT IT READS (wave-39 T24; REQ-18 AC-18.1; D5, D9; ADR-061). When the reads index at H names a suite
+# (lib/anchors.sh `reads_index_closed`, file to suites by file name over the CLOSED read sets the key reads, so a suite
+# that reaches a file only through another script's load is on its row; a narrowed `<file>#<name>` row read as its file,
+# A-orch-8; a `! TAB <suite>` line, a load the closure cannot resolve, read as tree-keyed; wave-39 T46, A-orch-3),
 # a commit not excused above owes THE OWED SET's members that read a path it changed (`_proof_owed_keys`: the suite's
 # read key at H differs from its key at F and no green fact holds at the new key), each proved as above; a commit whose
 # paths no such suite reads owes nothing, so a docs commit outside the fixed list and a code file no suite reads are
@@ -1287,7 +1289,7 @@ _proof_walk() {
 $(git -C "$co" log --no-renames --first-parent -m --name-only --format='%x01%H' "${from}..${to}" 2>/dev/null)
 PROOF_WALK_FILES
   case "$changed" in
-    *"	code	"*|*"	test	"*) _proof_anchors_load && idx="$(reads_index "$co" "$to" 2>/dev/null | sed 's/^/I	/')" ;;
+    *"	code	"*|*"	test	"*) _proof_anchors_load && idx="$(reads_index_closed "$co" "$to" 2>/dev/null | sed 's/^/I	/')" ;;
   esac
   # THE ARM (wave-39 T24; D5, D10): an index that names a suite keys the walk by what each suite read; with none, the
   # project's declared `regression-reads:` globs stand in for it; with neither, the previous rule stands.
@@ -1400,20 +1402,22 @@ _proof_glob_hit() {
   return "$hit"
 }
 
-# _proof_owed_keys <checkout> <F> <H> <landing record> <C lines> <I lines> -> `Q<TAB><suite>[<TAB>all]` for each suite THE
-# OWED SET holds (wave-39 T24; D5, D9; ADR-061): a suite the index at H names for a path some walked commit changed, or one
-# keyed by the whole tree (`tree:`, a load the scan cannot resolve: it may read any path, so `all` joins it to every
-# commit), whose read key at H (lib/anchors.sh `reads_hashes`, the one derivation, A-orch-13) differs from its key at F,
-# and that no green fact holds at the new key (lib/line.sh `_line_proved`: a landing's verdict, or the regression's own
-# facts, any row, any commit). The key at F is the regression's fact for the suite at F (`proof_regression_fold`), else
-# derived at F. A key that cannot be read owes the suite (fail closed).
+# _proof_owed_keys <checkout> <F> <H> <landing record> <C lines> <I lines> -> `Q<TAB><suite>[<TAB>all]` for each suite
+# THE OWED SET holds (wave-39 T24; D5, D9; ADR-061): a suite the index at H names for a path some walked commit changed,
+# or one keyed by the whole tree (`tree:`, or a `!` line of the closed index: a load the scan cannot resolve, so it may
+# read any path and `all` joins it to every commit, even when its key cannot be read; wave-39 T46), whose read key at H
+# (lib/anchors.sh `reads_hashes`, the one derivation, A-orch-13) differs from its key at F, and that no green fact holds
+# at the new key (lib/line.sh `_line_proved`: a landing's verdict, or the regression's own facts, any row, any commit).
+# The key at F is the regression's fact for the suite at F (`proof_regression_fold`), else derived at F. A key that
+# cannot be read owes the suite (fail closed).
 _proof_owed_keys() {
   local co="$1" from="$2" to="$3" rec="$4" every cands kh kf miss s k f all
   every="$(printf '%s\n' "$6" | awk -F'\t' '$1 == "I" { n = split($3, a, ","); for (i = 1; i <= n; i++) { s = a[i]; sub(/.*\//, "", s); if (s != "") print s } }' | LC_ALL=C sort -u)"
   [ -n "$every" ] || return 0
   # shellcheck disable=SC2086  # suite file names, one word each
   kh="$(_proof_keys_at "$co" "$to" $every)" || kh=""
-  all="$(printf '%s\n' "$kh" | awk -F'\t' 'index($2, "tree:") == 1 { print $1 }')"
+  all="$( { printf '%s\n' "$kh" | awk -F'\t' 'index($2, "tree:") == 1 { print $1 }'
+    printf '%s\n' "$6" | awk -F'\t' '$1 == "I" && $2 == "!" { s = $3; sub(/.*\//, "", s); print s }'; } | awk 'NF' | LC_ALL=C sort -u)"
   cands="$( { printf '%s\n%s\n' "$5" "$6" | awk -F'\t' '
     $1 == "C" { p[$4] = 1; next }
     $1 == "I" { f = $2; sub(/#.*$/, "", f); if (f in p) { n = split($3, a, ","); for (i = 1; i <= n; i++) { s = a[i]; sub(/.*\//, "", s); if (s != "") print s } } }'
@@ -1434,7 +1438,7 @@ _proof_owed_keys() {
     f="$(printf '%s\n' "$kf" | awk -F'\t' -v s="$s" '$1 == s { print $2; exit }')"
     if [ -n "$k" ] && [ "$k" = "$f" ]; then continue; fi
     if [ -n "$k" ] && [ -n "$rec" ] && declare -F _line_proved >/dev/null 2>&1 && _line_proved "$rec" "$s" "reads=$k" >/dev/null; then continue; fi
-    case "$k" in tree:*) printf 'Q\t%s\tall\n' "$s" ;; *) printf 'Q\t%s\n' "$s" ;; esac
+    case $'\n'"$all"$'\n' in *$'\n'"$s"$'\n'*) printf 'Q\t%s\tall\n' "$s" ;; *) printf 'Q\t%s\n' "$s" ;; esac
   done
 }
 
