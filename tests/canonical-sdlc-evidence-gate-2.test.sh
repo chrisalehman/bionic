@@ -3719,8 +3719,8 @@ section "§COVER — a reading covers its head; a later commit extends it when i
 # FIXTURE FIDELITY. §FIXED-PASSES's repository on its working branch: init (the base), one code commit (R, the
 # readings' head), then five commits, each the shape it stands for: a CHANGELOG.md edit; the landing of T7, a
 # row born of the adversarial reading's finding (` born: review S2 on of=<adv.md>#1`, with no verdict event, so
-# `proof_fixed` does not name it and only the landing-record path holds it; wave-36 T31: the chain it holds on is
-# adversarial's, §COVER-ASKER), touching b.sh; the landing of T8, a row born of the floor's red
+# `proof_fixed` does not name it and only the landing-record path holds it; wave-39 D7: it holds on every
+# question's chain, §COVER-ASKER), touching b.sh; the landing of T8, a row born of the floor's red
 # (` born: regression a.test.sh`), touching c.sh; the landing of T9, a doc row touching payload/x.sh; a commit
 # touching tests/lib/assert.sh alone. The landing record's `ev=published` events are lib/line.sh's shape.
 RCV="$(fp_repo cover)"
@@ -3793,24 +3793,27 @@ cv_cover "$CV_R" "$CV_R"
 expect_eq "CV-8 asked at its own head: no commit, no line, rc 0" "|0" "$CV_OUT|$CV_RC"
 
 # ============================================================
-section "§COVER-ASKER — a fix is seen by its asker: a born row's landing holds on the chain of the question whose reading bore it, and owes on every other (wave-36 T31; REQ-3 AC-3.3; D9, D16)"
+section "§COVER-ASKER — a review's fixes are inside the review: a born row naming a registered reading's finding holds on every question's chain, and a marker naming none owes on every chain (wave-39 T15; REQ-11 AC-11.1, AC-11.2; D7, ADR-062; reverses wave-36 T31's D16)"
 # ============================================================
-# The born-review basis is a fact of the question, not of the commit (D16; ADR-056 "a row born of that reading").
-# A row's ` born: review S<n> <reach> of=<record>#<n>[,…]` marker names findings; each <record> is the evidence of
-# a registered reading, and the reading names its question. The landing holds on that question's chain alone; a
-# marker naming findings of several readings holds on each of their questions. A fix row `proof_fixed` names (its
-# green verdict, or a `moved: … to=fixed row=<T>` line) reaches the walk the same way, by its finding's record.
-# A rating-form marker (` born: review S2 on`, no `of=`) names no reading, so its landing owes on every chain.
-# born-regression and prose are unchanged. `facts_cover <plan> <from> <to> <question>` prints the basis on that
-# question's chain: the same commit reads `born-review` on its asker's chain and `owes` on the others; with no
-# question it names no asker, so a review-born landing owes there too.
+# The born-review basis is a fact of the commit, under a provenance guard (D7; ADR-062). A row's
+# ` born: review S<n> <reach> of=<record>#<n>[,…]` marker names findings; when a <record> is the evidence of a
+# registered reading, the row is born of a registered finding and its landing holds on every question's chain, and
+# with no question named. A fix row `proof_fixed` names (its green verdict, or a `moved: … to=fixed row=<T>` line)
+# reaches the walk the same way, by its finding's record. THE GUARD: a rating-form marker (` born: review S2 on`, no
+# `of=`), or an `of=` naming a record no registered reading names, buys nothing, so that landing owes on every chain.
+# born-regression and prose are unchanged.
 #
 # FIXTURE FIDELITY. §FIXED-PASSES's repository on its working branch: init (the base), one code commit (R, the
-# head of three registered readings, evidence, adversarial and structure, each a pass carrying S3 notes), then four
+# head of three registered readings, evidence, adversarial and structure, each a pass carrying S3 notes), then five
 # code commits, each the landing of one fix row: T7, born of the evidence reading's finding 1, touching b.sh; T8,
 # born of findings of the evidence and structure readings, touching c.sh; T9, born of the adversarial reading's
 # finding, named by its green verdict alone (no published event), so only `proof_fixed` reaches it, touching d.sh;
-# T10, the rating form naming no reading, touching e.sh. The landing record's events are lib/line.sh's shapes.
+# T10, the rating form naming no reading, touching e.sh; T11, an `of=` naming a record no registered reading names
+# (a hand-typed marker), touching f.sh. The landing record's events are lib/line.sh's shapes.
+#
+# THE MUTATION CONTROL. The asker match wave-36 D16 set (born-review only on the chain of a question whose reading
+# bore the row, owes with no question named) is restored in a copy of lib/proof.sh by the shaped anchor; the copy
+# still runs and reads born-review on the asker's chain, and the rows CA-1b, CA-2 and CA-3 hold read red on it.
 RCA="$(fp_repo asker)"
 CA_B="$(git -C "$RCA" rev-parse HEAD)"
 CA_R="$(fp_commit "$RCA" a.sh one)"
@@ -3818,6 +3821,7 @@ CA_D1="$(fp_commit "$RCA" b.sh 'the fix the evidence reading asked for')"
 CA_D2="$(fp_commit "$RCA" c.sh 'the fix the evidence and structure readings asked for')"
 CA_D3="$(fp_commit "$RCA" d.sh 'the fix the adversarial reading asked for')"
 CA_D4="$(fp_commit "$RCA" e.sh 'a fix naming no reading')"
+CA_D5="$(fp_commit "$RCA" f.sh 'a fix naming a record no reading registered')"
 fp_record "$RCA" ev.md evidence pass "${CA_B:0:10}..${CA_R:0:10}" 'findings: 2' \
   'finding: 1 S3 off b.sh:1 the b reader is unproven' 'finding: 2 S3 off c.sh:1 the c reader is unproven'
 fp_record "$RCA" adv.md adversarial pass "${CA_B:0:10}..${CA_R:0:10}" 'findings: 1' 'finding: 1 S3 off d.sh:1 the d reader races'
@@ -3828,13 +3832,15 @@ $(fp_proved "$CA_R" st.md structure pass)
 - T7: landed $CA_D1 2026-10-04T13:00:00Z born: review S3 off of=$FP_REC/ev.md#1
 - T8: landed $CA_D2 2026-10-04T13:00:00Z born: review S3 off of=$FP_REC/ev.md#2,$FP_REC/st.md#1
 - T9: landed $CA_D3 2026-10-04T13:00:00Z born: review S3 off of=$FP_REC/adv.md#1
-- T10: landed $CA_D4 2026-10-04T13:00:00Z born: review S2 on" \
+- T10: landed $CA_D4 2026-10-04T13:00:00Z born: review S2 on
+- T11: landed $CA_D5 2026-10-04T13:00:00Z born: review S3 off of=$FP_REC/nobody.md#1" \
   "| T7 | 4 | build | fix the b reader · born: review | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |
 | T8 | 4 | build | fix the c reader · born: review | implementor | — | 30 | REQ-1 | c.sh | — | — | landed |
 | T9 | 4 | build | fix the d reader · born: review | implementor | — | 30 | REQ-1 | d.sh | — | — | landed |
-| T10 | 4 | build | fix the e reader · born: review | implementor | — | 30 | REQ-1 | e.sh | — | — | landed |"
+| T10 | 4 | build | fix the e reader · born: review | implementor | — | 30 | REQ-1 | e.sh | — | — | landed |
+| T11 | 4 | build | fix the f reader · born: review | implementor | — | 30 | REQ-1 | f.sh | — | — | landed |"
 fp_landing "$RCA" "$(cv_published T7 "$CA_D1")" "$(cv_published T8 "$CA_D2")" "$(fp_verdict T9 "$CA_D3" green)" \
-  "$(cv_published T10 "$CA_D4")"
+  "$(cv_published T10 "$CA_D4")" "$(cv_published T11 "$CA_D5")"
 CA_EV="$(printf 'review\tevidence\tbionic:auditor\tpiece')"
 CA_ST="$(printf 'review\tstructure\tbionic:critic\tpiece')"
 ca_chains() {  # <from> <to> -> CA_OUT: the basis on each question's chain, then with none, '/'-joined, each chain's lines '|'-joined
@@ -3846,8 +3852,8 @@ ca_chains() {  # <from> <to> -> CA_OUT: the basis on each question's chain, then
   CA_OUT="$out"
 }
 
-expect_eq "CA-0 precondition: each commit after R touches the one code path it stands for" "b.sh|c.sh|d.sh|e.sh" \
-  "$(for c in "$CA_D1" "$CA_D2" "$CA_D3" "$CA_D4"; do git -C "$RCA" show --name-only --format= "$c"; done | paste -sd'|' -)"
+expect_eq "CA-0 precondition: each commit after R touches the one code path it stands for" "b.sh|c.sh|d.sh|e.sh|f.sh" \
+  "$(for c in "$CA_D1" "$CA_D2" "$CA_D3" "$CA_D4" "$CA_D5"; do git -C "$RCA" show --name-only --format= "$c"; done | paste -sd'|' -)"
 fp_state "$RCA" "$CA_R"
 expect_eq "CA-0b precondition: at R the three readings are covered (the judge reads this fixture, all three questions)" \
   "covered covered covered" "$(fp_of "$CA_EV") $(fp_of "$FP_AD") $(fp_of "$CA_ST")"
@@ -3857,27 +3863,49 @@ expect_eq "CA-0c precondition: proof_fixed names T9's landing for the adversaria
      | awk -F'\t' '{ printf "%s%s|%s|%s", (NR > 1 ? " " : ""), $1, $2, $3 }')"
 
 fp_state "$RCA" "$CA_D1"
-expect_eq "CA-1 D16 a landing born of the evidence reading's finding: the evidence chain holds it, covered" \
+expect_eq "CA-1 D7 a landing born of the evidence reading's finding: the evidence chain holds it, covered" \
   "covered" "$(fp_of "$CA_EV")"
-expect_eq "CA-1b …the adversarial chain does not: its reader did not ask for the change, uncovered from R" \
-  "uncovered	${CA_R}..${CA_D1}" "$(fp_of "$FP_AD")"
-expect_eq "CA-1c …nor the structure chain" "uncovered	${CA_R}..${CA_D1}" "$(fp_of "$CA_ST")"
+expect_eq "CA-1b D7 …and so does the adversarial chain, whose reader did not ask for it: covered" "covered" "$(fp_of "$FP_AD")"
+expect_eq "CA-1c …and the structure chain" "covered" "$(fp_of "$CA_ST")"
 ca_chains "$CA_R" "$CA_D1"
-expect_eq "CA-2 AC-3.3 the basis line says so per chain: born-review on evidence, owes on adversarial and structure and with no question named" \
-  "evidence:born-review/adversarial:owes/structure:owes/none:owes" "$CA_OUT"
+expect_eq "CA-2 AC-11.1 the basis line says so on every chain: born-review on evidence, adversarial, structure and with no question named" \
+  "evidence:born-review/adversarial:born-review/structure:born-review/none:born-review" "$CA_OUT"
 cv_cover "$CA_R" "$CA_D1" evidence "$RCA"
 expect_eq "CA-2b …rc 0 on the asker's chain" "0" "$CV_RC"
 cv_cover "$CA_R" "$CA_D1" adversarial "$RCA"
-expect_eq "CA-2c …rc 1 on another's" "1" "$CV_RC"
+expect_eq "CA-2c …and rc 0 on another's" "0" "$CV_RC"
 
-ca_chains "$CA_R" "$CA_D4"
-expect_eq "CA-3 D16 every landing past R on each chain: a marker naming two readings holds on both; a fix proof_fixed names holds on its finding's question; the rating form owes everywhere" \
-  "evidence:born-review|born-review|owes|owes/adversarial:owes|owes|born-review|owes/structure:owes|born-review|owes|owes/none:owes|owes|owes|owes" \
+ca_chains "$CA_R" "$CA_D5"
+expect_eq "CA-3 AC-11.1, AC-11.2 every landing past R on each chain: each of a registered finding holds everywhere (one finding, two, a fix proof_fixed names); the rating form and an of= naming no reading owe everywhere" \
+  "evidence:born-review|born-review|born-review|owes|owes/adversarial:born-review|born-review|born-review|owes|owes/structure:born-review|born-review|born-review|owes|owes/none:born-review|born-review|born-review|owes|owes" \
   "$CA_OUT"
-fp_state "$RCA" "$CA_D2"
-expect_eq "CA-4 the evidence chain past both its fixes: covered" "covered" "$(fp_of "$CA_EV")"
-expect_eq "CA-4b …the structure chain past T7, which evidence asked for: uncovered from R" \
-  "uncovered	${CA_R}..${CA_D2}" "$(fp_of "$CA_ST")"
+fp_state "$RCA" "$CA_D3"
+expect_eq "CA-4 AC-11.1 past the three fixes of registered findings: every question covered at the head" \
+  "covered covered covered" "$(fp_of "$CA_EV") $(fp_of "$FP_AD") $(fp_of "$CA_ST")"
+expect_eq "CA-4b …the structure chain past T7, which evidence asked for: covered" "covered" "$(fp_of "$CA_ST")"
+fp_state "$RCA" "$CA_D4"
+expect_eq "CA-4c AC-11.2 past the rating-form marker: every question uncovered from R (beside CA-4, the same judge one commit earlier)" \
+  "uncovered	${CA_R}..${CA_D4}|uncovered	${CA_R}..${CA_D4}|uncovered	${CA_R}..${CA_D4}" "$(fp_of "$CA_EV")|$(fp_of "$FP_AD")|$(fp_of "$CA_ST")"
+cv_cover "$CA_D4" "$CA_D5" structure "$RCA"
+expect_eq "CA-4d AC-11.2 an of= naming a record no registered reading names owes, rc 1 (positive: CA-2 read born-review through the same walk)" \
+  "cover $CA_D5 owes|1" "$CV_OUT|$CV_RC"
+
+# THE MUTATION CONTROL: the asker match restored. The copy is the shipped lib/ beside one doctored proof.sh.
+CA_MLIB="$(mktemp -d "${TMPDIR:-/tmp}/ca-asker-mut.XXXXXX")"
+for ca_f in "$FP_LIB"/*; do [ "${ca_f##*/}" = proof.sh ] || ln -s "$(cd "${ca_f%/*}" && pwd -P)/${ca_f##*/}" "$CA_MLIB/${ca_f##*/}"; done
+anchor file payload/scripts/lib/proof.sh 'review) [ -n "$qs" ] || continue; b=born-review; break ;;' \
+  'review) [ -n "${4:-}" ] || continue; case " $qs " in *" $4 "*) b=born-review; break ;; esac ;;' "$CA_MLIB/proof.sh"
+CA_SHIPPED_LIB="$FP_LIB"; FP_LIB="$CA_MLIB"
+ca_chains "$CA_R" "$CA_D1"
+expect_eq "CA-5 the mutant runs and still holds the asker's chain (born-review on evidence)" \
+  "evidence:born-review" "${CA_OUT%%/*}"
+expect_eq "CA-5b …and the row CA-2 holds goes red on it: owes on the chains that did not ask" \
+  "evidence:born-review/adversarial:owes/structure:owes/none:owes" "$CA_OUT"
+fp_state "$RCA" "$CA_D1"
+expect_eq "CA-5c …so the row CA-1b holds goes red: the adversarial chain reads uncovered from R" \
+  "uncovered	${CA_R}..${CA_D1}" "$(fp_of "$FP_AD")"
+FP_LIB="$CA_SHIPPED_LIB"
+rm -rf "$CA_MLIB"
 
 # ============================================================
 section "§DISPOSITION — one verb renders every finding of the registered readings and records the person's ruling per finding (wave-33 T13; REQ-5 AC-5.1; D6)"
