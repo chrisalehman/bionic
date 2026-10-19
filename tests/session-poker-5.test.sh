@@ -695,4 +695,118 @@ for QL_P in $QL_PIDS; do kill "$QL_P" 2>/dev/null; wait "$QL_P" 2>/dev/null; don
 ql_clear
 POKE_BOUND="$QL_BOUND_WAS"
 
+# ============================================================
+section "§BRIEF-UNION: brief always unions the reads index into Suites: and Lands-on:, whether or not the row has a suites cell, and the wall admits the rendered text (wave-39 T23; REQ-17 AC-17.1; D22)"
+# ============================================================
+# T43's brief rendered Suites: pending and Lands-on: pending from a row with an empty suites cell and the orchestrator
+# filled both by hand from the index. A row's own cells used to END the derivation (a suites cell, a lands-on cell, and
+# the index was never read), so a row that named some of its suites got a Lands-on the wall refused for omitting the
+# rest. Now Suites: is the row's suites cell (else its Files' *.test.sh entries) with the reads index over its Files
+# unioned after it, and Lands-on: is the lands-on cell (else the Suites) with the same index unioned after it, once
+# each, for a row whose Files write the head. A row that writes no code keeps Lands-on: none <reason>.
+# FIXTURE FIDELITY: session-poker-3 §BRIEF's world (three suites read payload/scripts/lib/walls.sh by the three routes
+# the index knows, one names it only in a comment, committed on the working branch; the index is the real one, read by
+# the real verb) and session-poker-4 §BRIEF's gate (the wall run on the rendered text, as an Agent call's prompt, under
+# a scratch HOME, attestation, patrol stamp and engagement).
+# fails-when: a row with a suites cell, or a lands-on cell, or neither, prints a Suites: or Lands-on: that omits a suite
+# the index names for its Files; the rendered brief is refused by the wall for a Lands-on: outside Suites: or one that
+# omits an index suite; a code-free row loses its `none <reason>`.
+BU_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBU="$(make_repo brief-union)"; ( cd "$RBU" && git commit -q --allow-empty -m init )
+mkdir -p "$RBU/payload/scripts/lib" "$RBU/hooks" "$RBU/tests"
+printf 'the wall line\n' > "$RBU/payload/scripts/lib/walls.sh"
+printf '#!/bin/bash\nBIONIC_LIB_WANT="walls.sh"\n' > "$RBU/hooks/h.sh"
+printf '#!/bin/bash\ngrep -c wall "$REPO/payload/scripts/lib/walls.sh"\n' > "$RBU/tests/s-grep.test.sh"
+printf "#!/bin/bash\nanchor file payload/scripts/lib/walls.sh 'the wall line'\n" > "$RBU/tests/s-anchor.test.sh"
+printf '#!/bin/bash\nbash "$REPO/hooks/h.sh"\n' > "$RBU/tests/s-hook.test.sh"
+printf '#!/bin/bash\n# payload/scripts/lib/walls.sh is named only in this comment\necho none\n' > "$RBU/tests/s-none.test.sh"
+printf '#!/bin/bash\necho extra\n' > "$RBU/tests/s-extra.test.sh"
+( cd "$RBU" && git add payload hooks tests && git commit -qm "three suites read walls.sh" )
+PBU="$(s42_plan "$RBU" 4)"
+BU_REC=".bionic/docs/record/wave-01-fixture"
+BU_TABLE="$TMPROOT/bu-table.md"
+{
+  printf '## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T51 | 4 | build | a row that names some suites and a lands-on | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T51-w.md | — | — | pending | s-grep.test.sh, s-extra.test.sh | s-grep.test.sh |\n' "$BU_REC"
+  printf '| T52 | 4 | build | a row with an empty suites cell | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T52-w.md | — | — | pending | — | — |\n' "$BU_REC"
+  printf '| T53 | 4 | build | a row that names suites and no lands-on | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T53-w.md | — | — | pending | s-extra.test.sh | — |\n' "$BU_REC"
+  printf '| T55 | 4 | build | a row whose task carries an escaped pipe, a case label (a\\|b), as T43'"'"'s did | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T55-w.md | — | — | pending | s-extra.test.sh | — |\n' "$BU_REC"
+  printf '| T54 | 4 | doc | a record and no code | implementor | — | 30 | REQ-1 | %s/T54-text.md | — | — | pending | — | — |\n' "$BU_REC"
+  printf '\n'
+} > "$BU_TABLE"
+awk -v t="$BU_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBU" \
+  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBU.new" && mv "$PBU.new" "$PBU"
+( cd "$RBU" && git add -f "$PBU" && git commit -qm "brief-union fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
+BU_DIR="$RBU/$BU_REC/briefs"
+bu_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
+  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+}
+BU_IDX="s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh"
+expect_eq "BU-0 precondition: the reads index at the working head names the three reading suites for walls.sh, and not s-none or s-extra" \
+  "tests/s-anchor.test.sh,tests/s-grep.test.sh,tests/s-hook.test.sh" \
+  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$RBU" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh" { print $2 }')"
+
+poke "$RBU" brief T51
+expect_eq "BU-1 a row with a suites cell and a lands-on cell: exit 0, Suites is the cell then the index's suites it lacks" \
+  "0|s-grep.test.sh, s-extra.test.sh, s-anchor.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T51.md" Suites)"
+expect_eq "BU-1b …and Lands-on is its cell then the index's suites it lacks (the index's union, none omitted)" \
+  "s-grep.test.sh, s-anchor.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T51.md" Lands-on)"
+poke "$RBU" brief T52
+expect_eq "BU-2 a row whose suites cell is empty (T43's row): Suites is the index's union, no slot" \
+  "0|$BU_IDX" "$RC|$(bu_field "$BU_DIR/T52.md" Suites)"
+expect_eq "BU-2b …and Lands-on is the index's union" "$BU_IDX" "$(bu_field "$BU_DIR/T52.md" Lands-on)"
+poke "$RBU" brief T53
+expect_eq "BU-3 a row with a suites cell and no lands-on cell: Suites is the cell then the index's suites" \
+  "0|s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T53.md" Suites)"
+expect_eq "BU-3b …and Lands-on is the same set, so it holds every index suite and stays inside Suites" \
+  "s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T53.md" Lands-on)"
+expect_absent "BU-3c …a suite naming the file only in a comment is named by none of the three (positive: BU-3 read four)" \
+  "s-none.test.sh" "$(bu_field "$BU_DIR/T51.md" Suites)$(bu_field "$BU_DIR/T52.md" Suites)$(bu_field "$BU_DIR/T53.md" Suites)"
+poke "$RBU" brief T54
+expect_eq "BU-4 a row that writes no code keeps Suites: none (positive: Row reads from the same file)" "T54|none" \
+  "$(bu_field "$BU_DIR/T54.md" Row)|$(bu_field "$BU_DIR/T54.md" Suites)"
+expect_regex "BU-4b …and Lands-on: none with a reason" '^none [A-Za-z]' "$(bu_field "$BU_DIR/T54.md" Lands-on)"
+
+# T43's row carried a case label `(name\|other)` in its task cell, and the cell reader split on every `|`, so its
+# suites cell read as the status cell to its left: `pending`. The units reader honours `\|`; the cell reader now does.
+poke "$RBU" brief T55
+expect_eq "BU-8 a row whose task cell carries an escaped pipe reads its own suites cell (not the status beside it): the cell, then the index's suites" \
+  "0|s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T55.md" Suites)"
+expect_eq "BU-8b …and its Lands-on is the same set" "s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T55.md" Lands-on)"
+expect_absent "BU-8c …and neither line says pending (positive: BU-8 read a Suites)" "pending" "$(bu_field "$BU_DIR/T55.md" Suites)$(bu_field "$BU_DIR/T55.md" Lands-on)"
+
+# ---------- the wall, run on the rendered text ----------
+BU_HOME="$TMPROOT/bu-home"; BU_PROJ="$BU_HOME/.claude/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RBU")"
+mkdir -p "$BU_PROJ"; : > "$BU_PROJ/$SID.jsonl"
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBU/.bionic/tmp/patrol-$SID.state"
+printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBU" > "$RBU/.bionic/tmp/preflight-$SID.state"
+bu_gate() {  # <brief text file> <agent name> -> sets BU_OUT, BU_ERR
+  local payload
+  payload="$(jq -n --arg s "$SID" --arg c "$RBU" --arg n "$2" --rawfile p "$1" \
+    '{session_id:$s, transcript_path:"/nonexistent.jsonl", cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a rendered brief", subagent_type:"implementor", prompt:$p, run_in_background:true, name:$n},
+      tool_use_id:"toolu_brief_union"}')"
+  BU_OUT="$( cd "$RBU" && printf '%s' "$payload" | env HOME="$BU_HOME" CLAUDE_CONFIG_DIR="$BU_HOME/.claude" ANTHROPIC_API_KEY=sk-fixture \
+    CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "${BIONIC_HOOKS_DIR}/dispatch-preflight.sh" 2>"$TMPROOT/bu-gate.err" )"
+  BU_ERR="$(cat "$TMPROOT/bu-gate.err")"
+}
+bu_row() { /usr/bin/grep -F "|name=$2|" "$(roster_of "$1")" 2>/dev/null | tail -1; }
+for BU_T in T51 T52 T53 T55; do
+  bu_gate "$BU_DIR/$BU_T.md" "w-$BU_T"
+  expect_absent "BU-5-$BU_T the wall does not refuse the rendered $BU_T brief (outside-Suites and omission arms: zero refusals)" '"permissionDecision":"deny"' "$BU_OUT"
+  expect_contains "BU-5b-$BU_T …and it journalled the launch row for $BU_T (the positive that the wall read the brief)" "|name=w-$BU_T|" "$(bu_row "$RBU" "w-$BU_T")"
+done
+# the wall can refuse each arm on this same text: the two negatives above are tests only beside these two positives
+sed 's/^Lands-on: .*/Lands-on: s-grep.test.sh, s-anchor.test.sh, s-hook.test.sh, s-none.test.sh/' "$BU_DIR/T52.md" > "$TMPROOT/bu-outside.md"
+bu_gate "$TMPROOT/bu-outside.md" w-T52o
+expect_contains "BU-6 the rendered T52 with a Lands-on: suite outside Suites: is denied by the wall" '"permissionDecision":"deny"' "$BU_OUT"
+expect_contains "BU-6b …by the outside-Suites arm" "is outside Suites" "$BU_OUT$BU_ERR"
+sed 's/^Lands-on: .*/Lands-on: s-grep.test.sh/' "$BU_DIR/T52.md" > "$TMPROOT/bu-omits.md"
+bu_gate "$TMPROOT/bu-omits.md" w-T52m
+expect_contains "BU-7 the rendered T52 with a Lands-on: that omits two index suites is denied by the wall" '"permissionDecision":"deny"' "$BU_OUT"
+expect_contains "BU-7b …by the omission arm" "omits" "$BU_OUT$BU_ERR"
+POKE_BOUND="$BU_BOUND_WAS"
+
 finish
