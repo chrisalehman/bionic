@@ -8,6 +8,301 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.22.0 — 2026-10-19
+
+This is the landing proof release: a verdict is a fact about what its suite read, keyed by the hash of those files, so
+a landing reuses a green it already holds, skips a suite whose reads the diff does not meet, and the regression's judge
+owes only the suites whose key moved (D5, ADR-061). A suite narrows what it reads by one declared line beside its
+anchors (D6), no suite promises more than ten minutes on the gate (D1), the promise is scaled by load (D11), and the
+15-minute landing bar is on the sitrep and the scorecard (D12, D25). A fix row born of a review finding is covered for
+every review question once it lands (D7, ADR-062). This release reverses 1.21.0's fold (T17) of the Step-0 card into the
+requirements card, on the user's word at D3: "I didn't want to eliminate step 0 configuration card. That's different
+than requirements. It doesn't make sense to combine them." A clean run again has five human stops: the configuration
+card, the requirements card, the design card, the plan card and the final card (D3, D4, D23). The typed and config
+spellings of `floor` that 1.21.0 kept as aliases are removed, as 1.21.0 promised, and the spellings a delivered plan
+already holds still read (D2). Thirty-six build rows landed: six through the line and thirty by hand, one before the
+run's operating rules and twenty-nine under them (D26, D27). The one-file median that was this release's headline
+number was never measured, because no one-file fix row landed through the line; the numbers are below. This is a minor
+release by the policy above: the proof fact, the narrowing, the skip, the suite bar, the promise with load, the
+`Re-executes:` landing and the restored Step-0 card are new capability, and the aliases go as 1.21.0 said they would.
+`canonical_sdlc_version` stays 14.
+
+**Migration.** Rename one key: `rigor-floor:` in `.bionic/config.yaml` or an epic plan's frontmatter is now refused,
+naming `rigor-minimum:`, as this repository's own config was renamed (T18). Rows that changed what a script of yours
+may meet:
+- T18: the aliases 1.21.0 kept are removed. `floor-run`, `proof-add floor`, `--born floor:`, `proof:floor` typed in a
+  reads argument, the `floor:` config key, a `floor-run-<sha>.log` whole-run log and `rigor-floor:` are each refused,
+  nothing written, naming `regression-run`, `proof-add regression`, `--born regression:`, `proof:regression`,
+  `regression-command:`, `regression-run-<sha>.log` and `rigor-minimum:`. `kind=floor`, `born: floor`, `of=floor` and
+  `proof:floor` in a plan's reads cell still read, silently.
+- T26: Step 0 puts its own card again. `card.sh step0 <plan>` renders the 1.20.0 shape and ends on the configuration
+  question, and `card.sh step1` prints no Configuration section.
+- T39: `ready` refuses a Lands-on suite whose gate promise is over 600 seconds with `too-long <suite> <s>s — split it`,
+  exit 1, nothing run.
+- T6, T35 to T38: close-out.test.sh is close-out-1 to close-out-4; landing-line, cross-gate-agreement and rc-item are
+  `-1` and `-2`, and dispatch-preflight-4 is `-4a` and `-4b`, each part over a `<suite>.prelude.sh`. The old names are
+  gone.
+- T3, T43: a suite may declare `reads <file> fn <name>`, `reads <file> section <label>` or `reads <file> verb <name>`;
+  a name the finder cannot locate at the tree is refused at index time, naming the line.
+- T8: every verdict carries `promised=` and `actual=`, and `ready` prints `promised <t>s of <w>s`. T2: the landings line
+  carries `reused=<n> absent=<n>` after `run=`, a zero included.
+- T9: the schedule mark reads the plan's `forecast: <n>h` key; with none it prints ❔ beside the 15-minute bar.
+- T10, T13: `row-landed --by-hand` writes `ev=published kind=hand`, which `landing-report` counts, and runs the release
+  check over the accepted range; a hit is refused unless a passing `kind=check` proof stands at or past the commit.
+- T20, T21: Lands-on admits a backticked command named under `Re-executes:`, judged by its exit code, and the budget
+  wall admits a wrapper whose inner run is declared there.
+- T25: the judge's refusal, the tick's wait reason and `regression-run`'s refusal each end on
+  `waive regression '<reply>'`, and the final card offers the waiver only when the owed set is not empty.
+
+### A proof is keyed by what it read (D5, D8, D9, D10, ADR-061)
+
+ADR-061 records the rule: a proof is keyed by its inputs, never by a commit. It is Proposed until close-out.
+
+- T1 (`T1-proof-fact.md`): `reads_hash <suite> <commit>` hashes the sorted path-and-blob lines of the suite's read set,
+  closed over the scripts it runs and the libraries they load, with the suite file and its prelude; a suite the index
+  cannot derive keys as `tree:<hash>`.
+- T40 (`T40-one-key.md`): the narrowing moved from line.sh into `reads_hashes`, the one derivation the landing, the owed
+  set and the regression facts read, and `reads_index_closed` was built for the judge.
+- T2 (`T2-reuse.md`): the drain reuses a matching verdict and starts no runner; a carrier sent back to wait rebuilds
+  and runs each suite once.
+- T4 (`T4-skip.md`): `ready` skips a suite whose key equals the accepted head's with a green there, printing
+  `skip <suite> reads=<h> (head)` and `suites <n> of <m>`.
+- T24 (`T24-owed.md`): `proof_owed_suites <head>` is the suites whose key changed since the last whole run with no
+  green at the new key, and the judge owes that set in place of a changed code file.
+- T25 (`T25-owed-words.md`): the owed set is on every surface: the judge's refusal, the tick's wait reason and
+  `regression-run`'s refusal end on `waive regression '<reply>'`, the final card shows the waiver only with a non-empty
+  owed set, and a `waived: question=regression` line closes it through `current 8`.
+- T45 (`T45-pc-owed.md`): dispatch-preflight's §PC pins the owed-set rule after an outside merge (a standing red that
+  T24's hand landing left).
+- T46 (`T46-owed-closed.md`): the judge joins a changed path to suites through the closed index, so every suite whose
+  key moved is owed (critic-adversarial #1, S2, fixed in the wave).
+- T19 (`T19-fixed-by-regression.md`): a finding counts fixed by a row with no verdict events when a green regression
+  stands at a descendant of its landing; a suite the row removed is `result=absent` and not owed.
+
+### A suite narrows its reads by one declared line (D6)
+
+- T3 (`T3-narrowing.md`): `reads <file> fn <name>` and `reads <file> section <label>`, read by the anchor awk.
+- T43 (`T43-verb-kind.md`): `reads <file> verb <name>`, every case arm whose label is the verb.
+- T41 (`T41-declarations-a.md`), T42 (`T42-declarations-b.md`) and T44 (`T44-declarations-by-verb.md`): the suites
+  that read hooks/session-poker.sh declare the verbs and functions they drive. T5 was split into T41 and T42. The
+  hook's whole-file readers went from 55 at the base to 34.
+
+### No suite is longer than a landing window (D1, D13)
+
+- T6 (`T6-bar-and-split.md`): `LINE_SUITE_BAR=600`, and close-out.test.sh split in four over a prelude.
+- T7 (`T7-splits.md`) was split into T35 (`T35-landing-line-split.md`), T36 (`T36-cross-gate-split.md`), T37
+  (`T37-dp4-split.md`) and T38 (`T38-rc-item-split.md`), each suite in two over a prelude.
+- T39 (`T39-too-long.md`): the refusal went live once every suite was under the bar; timing.tsv names the eight parts.
+  The largest promise at 4edbbc04 is 521 seconds, over 117 suites (`logs/T28-promises.log`).
+
+### The promise and the bars on the page (D11, D12, D25)
+
+- T8 (`T8-promise.md`): the gate's promise is the median scaled by load now over load then, clamped and bounded by the
+  largest kept, and `ready` waits a suite that cannot fit.
+- T9 (`T9-bars.md`): `LINE_LANDING_BAR=15`, and the schedule mark grades rows landed per hour since the Step-3 approval
+  against the pace the plan needs to close on its forecast. D25 amends wave 38's D10 and D12: three indicators stay,
+  and the schedule one changes its basis to something the run cannot set for itself.
+
+### A review's fixes are inside the review (D7, ADR-062)
+
+- T15 (`T15-cover.md`): a fix row born of a registered review finding is covered for every review question once it
+  lands; a marker naming no registered reading still owes on every chain. This reverses wave 36's D16; ADR-062 is
+  Proposed until close-out.
+
+### The Step-0 card is its own stop again (D3, D4, D23)
+
+- T26 (`T26-step0-card.md`): `card.sh step0` returns in the 1.20.0 shape, `card.sh step1` drops its Configuration
+  section, and SKILL.md, steps/0.md and steps/1.md say five human stops. ADR-059 is amended in place. D4 shipped it in
+  this release rather than in a 1.21.1. This run's own Step-0 card was put by hand in the 1.20.0 shape (A-orch-1).
+
+### The floor aliases go (D2)
+
+- T18 (`T18-aliases.md`): `lib/alias.sh` holds two tables, the plan-read rows read silently and the typed and config
+  rows refused at their one seam each; this repository's `rigor-floor:` became `rigor-minimum:`.
+
+### The hand landing is recorded, timed and scanned (D14)
+
+- T10 (`T10-sitrep-shapes.md`): the Situation times every landed shape, lists the run in execution order with steps 0
+  to 3, and `row-landed --by-hand` writes `ev=published kind=hand`.
+- T13 (`T13-hand-scan.md`): `row-landed --by-hand` runs the release check over the accepted range, and a hit names its
+  commit, path and the rewrite line.
+
+### A landing may re-execute a command (D19, D20)
+
+- T20 (`T20-reexec-landing.md`): a backticked `Re-executes:` command lands with verdict events, green on exit 0.
+- T21 (`T21-wrapper.md`): the budget wall admits a wrapper whose inner run is declared, and refuses an undeclared one
+  naming its target.
+
+### The run's surfaces tell the truth (D15, D16, D21, D22)
+
+- T11 (`T11-register.md`): the decisions register reads amended, ratified, final, a qualifier and the `ruled:` heading.
+- T12 (`T12-model.md`): a dispatch that names no model journals the role file's `model-effort`.
+- T22 (`T22-quiet.md`): the quiet check reads the landing carrier and the gate's open request before the mtimes, so a
+  writer blocked in `ready` is active.
+- T23 (`T23-brief.md`): the brief unions the reads index into `Suites:` and `Lands-on:` whatever the plan row's cell.
+
+### Five readers folded (D18)
+
+- T16 (`T16-folds-a.md`): one reader of the integration branch for close-out and the handoff verb, and one of the
+  handoff pointer.
+- T17 (`T17-folds-b.md`): one `iso_epoch`, one landing-key alphabet and one named-field reader of the landing record.
+  Five debt lines are burned (`debt list`, AC-12.2).
+
+### The launchers reset signals (D17)
+
+- T14 (`T14-signals.md`): `regression-run`, tests/run.sh and `booked.sh --detach` reset HUP, INT and QUIT through perl
+  before starting.
+
+### The release (D24)
+
+- T32 (`T32-release.md`): this entry, plugin.json 1.22.0, the help and version pages rendered by
+  `agents-src/render.sh`, `rendered.sha256` refreshed, and release-check.test.sh §REL-1.22.0 pinning the alias removal,
+  the reversal and this entry's parts.
+
+### How this run landed (D26, D27)
+
+D26 and D27 are not product decisions. They are this run's operating rules, and they changed how rows landed, not what
+bionic does. D26 landed a row that changes how landings work by hand on its in-tree greens, the row after it through
+the line being the proof. D27 extended that to any row whose line landing would exceed 30 minutes, the whole regression
+at Step 6 covering the merged head once. Twenty-nine rows landed under them (T6 landed by hand before them, A-orch-7).
+Four of those hand landings each left a red that a later landing found and fixed: T24 left dispatch-preflight §PC
+(fixed by T45), T40 left framework §21 (fixed by T41), T22 left the shell-lint clock ledger (fixed by T25), and T20
+left a reads-hash anchor (fixed by T17) (A-orch-28, A-orch-71). T26's writer was stopped and its record written by the
+orchestrator (A-orch-36).
+
+### The readings
+
+- The walk (`walk.md`, T27): eight scenes, no criterion named; its observations are below.
+- The matrix (`T28-matrix-fill.md`, T28): 45 of 49 rows discharged; AC-13.2, AC-19.1 and AC-20.3 wait for this row
+  and AC-11.3 for ADR-062 at close-out.
+- The auditor (`auditor-evidence.md`, T29): REFUTED, with 37 confirmed, 5 refuted and 7 unverifiable, on three gaps of
+  substance: the owed set proven only for direct readers (REQ-18, fixed by T46), the regression fix only for the
+  `landed:` header (REQ-14) and the one-file median never measured (REQ-5). Three refuted cells were given their
+  replacement evidence (A-orch-77).
+- The critic (`critic-adversarial.md`, `critic-structure.md`, T30): four adversarial findings, one S2 fixed by T46, two
+  S3 deferred and one S4 note; one structure finding, the same defect, fixed by T46, and one debt line.
+- The regression (T31): one whole run at 44666977, running as this entry was written; its result is under Standing
+  reds.
+
+### The landing numbers
+
+`landing-report --rows` at 44666977 (`logs/T28-landing-report-rows.log` holds the same numbers at 4edbbc04, before
+T46's hand landing):
+
+```
+landings: queue=6 hand=30 git=0 · ready-to-landed median=119.6m p75=176.4m max=278.1m · runs: green=557 red=3 none=1 discarded=10 red-then-green=0 run=346 reused=8 absent=0 · waited median=949s · killed=19
+T3 queue ready=2026-10-18T16:57:44Z landed=2026-10-18T19:04:34Z minutes=126.8 runs=109 waited=391s wait=6.5 prove=120.3 rework=0.0 width=4
+T1 queue ready=2026-10-18T17:51:46Z landed=2026-10-18T22:29:53Z minutes=278.1 runs=205 waited=4711s wait=78.5 prove=173.2 rework=26.4 width=4
+T4 queue ready=2026-10-18T23:24:11Z landed=2026-10-19T01:16:37Z minutes=112.4 runs=40 waited=1492s wait=24.9 prove=87.6 rework=0.0 width=3
+T8 queue ready=2026-10-19T00:30:43Z landed=2026-10-19T03:43:42Z minutes=193.0 runs=71 waited=5451s wait=90.8 prove=102.1 rework=0.0 width=4
+T9 queue ready=2026-10-19T04:45:25Z landed=2026-10-19T06:21:32Z minutes=96.1 runs=70 waited=290s wait=4.8 prove=91.3 rework=0.0 width=3
+T2 queue ready=2026-10-19T06:23:24Z landed=2026-10-19T07:58:31Z minutes=95.1 runs=62 waited=405s wait=6.8 prove=88.4 rework=0.0 width=2
+```
+
+| | wave 38 | wave 39 |
+|---|---|---|
+| ready-to-landed median | 303.9 m | 119.6 m |
+| p75 | 449.9 m | 176.4 m |
+| max | 1763.2 m (T8) | 278.1 m (T1) |
+| min | 43.0 m (T36) | 95.1 m (T2) |
+
+Wave 39's numbers are over its six line landings only; its thirty hand landings carry no ready time. `reused=8` is
+T2's landing: eight suites skipped on T9's greens, `suites 62 of 70`, the first narrowed landing (A-orch-34,
+A-orch-38). T9 before it ran 70 of 70 with nothing reused, because the night's hand landings had moved every key
+(A-orch-33). The one-file median was never measured: no one-file fix row landed through the line, so AC-5.3 is a miss
+by about eight times against the 15-minute bar, carried to the next charter (`T28-matrix-fill.md`).
+
+The scorecard at the same head, `landing-report --scorecard`:
+
+```
+human stops (autonomous half): 0 · target 1
+agent minutes after the final reply: unverified · target 0
+widest landing ready→landed: T1 278.1 min · target < 15
+human-wait minutes: unverified · no target (the user's)
+✖️ schedule — 40 of 44 landed in 21h, pace needs 38 · median ready→landed 119.6m over the 15m bar
+✖️ correctness — 3 red, all returned, 2 open S1/S2
+✅ waste 2% discarded · 0% idle-width
+```
+
+### Standing reds
+
+The whole regression (T31) at 44666977 had not finished when this entry was written; the orchestrator states its result here.
+
+### Known limits
+
+- a fix row marked by row-landed --by-hand alone is never fixed by a green regression: T10 writes ev=published kind=hand, and T19's arm reads only landed: headers (`critic-adversarial.md#2`). Land a review-born fix row with
+  `spawn-worktree.sh land <tree> --by-hand`, which writes the header.
+- AC-14.1's fixture plants only a landed: header, so a row marked by row-landed --by-hand, the shape 28 of 35 rows took,
+  is never shown fixed by a green regression (`auditor-evidence.md`, finding 2; REQ-14).
+- a Lands-on command (T20) is never held to the suite bar (T39): the merge-holds test reads the command as a file the
+  candidate lacks and skips it (`critic-adversarial.md#3`). Behind the holds test, `_line_too_long` also keys a
+  command's promise by the suite-name reader and reads 0; `_line_gate_key` is the right call (A-orch-69).
+- ready's promised total (T8) still adds the promise of a suite the row removed, which the carrier records absent and
+  never runs (T6) (`critic-adversarial.md#4`, A-orch-67). No suite starts short, because waits are per suite.
+- AC-5.3's number, the one-file fix rows' median, was not measured; the cell's median is over six multi-file build rows
+  (`auditor-evidence.md`, finding 3; REQ-5). The 15-minute bar for a one-file fix row is unproven, and the six line
+  landings took 95.1 to 278.1 minutes.
+- AC-2.4's T3 observation, ready printing n under 55 for a one-line poker change, was replaced by an index count
+  (`auditor-evidence.md`, finding 8). The live `ready` line is T2's `suites 62 of 70` on a multi-file row (A-orch-78).
+- AC-8.1's cell has no head or dirty line and no clean dispatch-preflight-2 log holds T12's change; T31's whole run is
+  the first that can (`auditor-evidence.md`, finding 6).
+- A hand landing behind a line entry rebuilds its candidate on every 0.2-second poll while the entry ahead has not
+  published: behind T9 it minted 1,298 candidates in 16 minutes, each a git merge (A-orch-25). `_line_hand` should
+  rebuild only when the base moved, as `_line_carry` does.
+- A hand landing runs none of its row's Lands-on suites, so four of this run's left a red that a later landing found
+  (A-orch-71). The whole regression is the only reading of the merged head.
+- A one-line change to lib/proof.sh now owes 117 suites, and the judge's walk takes 52 seconds cold (A-orch-79).
+  Fixtures that assert a short owed set may read red under the wider set.
+- Six sites read a landing-record field outside line.sh's reader: `fv` in `landing_evidence` beside `line_kv`, and
+  positional readers in proof.sh, session-poker.sh's `row-landed` and line.sh (`critic-structure.md`, debt
+  `landing-record-reader`), with `_line_count_git` and the tick's landing ETA (A-orch-72).
+- T25's concerns (A-orch-68): close-out-1 1ag and close-out-3 INSERT.8 assert on an unbound marker and prove nothing;
+  dispatch-preflight's second-regression refusal and close-out's WOULD REFUSE print no waiver; the tick does not name
+  the owed set.
+- card.sh and walls.sh keep three more readers of the integration branch, and session-start keeps its own handoff
+  pointer reader (A-orch-57). The sweeper keeps its own `iso_epoch` by design, and suites that copy the hook resolve the
+  main checkout's libraries mid-wave (A-orch-72).
+- A row the regression fixed still reads `landed green at <commit>` in its disposition (A-orch-66).
+- payload/context/severity.md keeps the sentence D7 replaced, and ADR-056's decision text is unamended until ADR-062 is
+  Accepted (A-orch-59).
+- The floor allow-list shrank by one line only, to 27, because every pattern still admits lines the tree needs
+  (A-orch-44). The heredoc readers at anchors.sh and assert.sh are carried (A-orch-22b).
+- tests/dispatch-preflight.prelude.sh still says four shards, and about 100 comment lines name
+  cross-gate-agreement.test.sh by its old name (A-orch-46, A-orch-47).
+- The walk's observations (`walk.md`, A-orch-74): the sitrep printed no Landings block and a stale Bottom line with
+  `approve:step1` still under Blockers; the Step-1 card prints empty Requirements and Not Doing headings;
+  `landing-report --rows` shows reuse only as `reused=8` in its header, and T2's row omits its eight reused suites;
+  the owed set at a docs-only commit prints `*` while no regression fact exists; the commit wall gave two contradictory
+  `git -C` refusals on one command; the brief verb rewrites everything above `## Judgment`.
+
+Of 1.21.0's twenty-one Known limits, seven are closed and fourteen are carried:
+- ~~The gathered landing by hand skipped the release-name scan~~: closed by T13 (`T13-hand-scan.md`).
+- ~~A whole run launched with HUP, INT and QUIT ignored paints the signal suites red~~: closed by T14
+  (`T14-signals.md`).
+- ~~A single suite near a writer's 30-minute Bash ceiling cannot land through `ready`~~: closed by T6 and T35 to T39;
+  no suite promises over 600 seconds (`T39-too-long.md`).
+- ~~Situation shows the landing time only for a bare `landed <sha> <ISO>` line~~: closed by T10
+  (`T10-sitrep-shapes.md`).
+- ~~A test-runner dispatch that names no model journals an empty `model=`~~: closed by T12 (`T12-model.md`). The
+  auditor could not verify the cell's log (finding 6 above).
+- ~~The decisions register reads `ruled`, `re-ruled` and `withdrawn` only~~: closed by T11 (`T11-register.md`).
+- ~~`landing-report` reads `hand=0` though fourteen rows landed by hand~~: closed by T10; this run's report reads
+  `hand=30`.
+- Carried, narrowed: every landing missed the target again, now 15 minutes; the promise is scaled by load (T8), and the
+  gap a `WAITING` exit leaves for a younger landing (A-orch-62 of 1.21.0) is not addressed.
+- Carried, narrowed: of T37's three concerns, the handoff verb's own integration-branch reader is folded by T16; the
+  `archive-on-close: false` plan and the third close-out run carry.
+- Carried, narrowed: a regression proof behind the head offers the waiver only when the owed set is not empty (T25),
+  where a review reading behind the head stays `CARD-EARLY`.
+- Carried, narrowed: of the seven debt lines 1.21.0 added, T16 and T17 burned five (`iso-to-epoch`,
+  `handoff-pointer-reader`, `landing-key-alphabet`, `landing-record-grammar`, `integration-branch-reader`), and
+  `approval-names` and `closed-form-instant` stand (`logs/T28-debt-list.log`).
+- Carried as they stood, not re-triaged: resume arms the Patrol whatever the scale; a standing order `refuse: suite` lets `ready` and
+  `regression-run` through; the forecast divides by the admitted-run count; the closed form reads `co_pr_owed` after
+  the close; a red-check `CARD-EARLY` names the check's first line; the walk's six observations of 1.21.0; the stop
+  count reads `approved:` lines only; the release row lands after the readers; Blockers is not pinned for `finding:`
+  and `gate:` items; the tolerance marks' colours are the emoji font's.
+
 ## 1.21.0 — 2026-10-18
 
 This is the one-stop release: on a clean run the user is asked four things, the requirements card, the design card,
