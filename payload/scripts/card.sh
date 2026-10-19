@@ -44,9 +44,9 @@
 #
 # USAGE
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
-#     bash card.sh <step1|step2|step3> <artifact>      (the whole card; no stdin)
+#     bash card.sh <step0|step1|step2|step3> <artifact> (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
-#     bash card.sh regression <scale> [<plan>]          (the regression line Configuration prints)
+#     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh final <plan>                         (the final card, from the record; CARD-EARLY while early)
@@ -104,7 +104,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -1545,19 +1545,20 @@ _card_debt_refuse() {  # <the debt line>
   exit 2
 }
 
-# ── THE CONFIGURATION, THE STEP 1 CARD'S FIRST SECTION (wave-38 T17; D17, AC-1.7, AC-5.2) ──────
+# ── THE CONFIGURATION CARD, STEP 0'S OWN STOP (wave-39 T26; D3, D23, AC-20.1; was wave-38 T17's fold) ──────
 #
-# ONE STOP WHERE THERE WERE TWO. Step 0 used to put its own card, a display the model TYPED from the plan it
-# had just written, and the user approved it minutes before approving the requirements. Step 0's acts still
-# run first (plan skeleton, bind, arm, branch); its settings are the first section of this card, RENDERED
-# from the plan's frontmatter, so one reply approves both and what is shown is what was written. No
-# `step0` verb exists. Every row folds through `_card_labelled`, so a long path stays inside the budget, and
-# an absent value prints `unknown` rather than dropping its line (the Step 0 display's rule).
+# TWO STOPS, BECAUSE THEY ARE TWO DECISIONS. Wave 38 (T17, D17) folded Step 0's settings into the requirements
+# card as its first section, so one reply approved both. The user reopened it (wave-39 D3): "I didn't want to
+# eliminate step 0 configuration card. That's different than requirements. It doesn't make sense to combine
+# them." `step0 <plan>` renders the card in the 1.20.0 shape (Purpose, Seed, Run, Branches, Paths, Shape, Gates,
+# Models, the question), and what the fold kept stays: it is RENDERED from the plan's frontmatter, never typed by
+# the model, so what is shown is what was written. Every row folds through `_card_labelled` when it does not
+# fit, and an absent value prints `unknown` rather than dropping its line. `step1` prints none of it.
 #
 # THE SOURCE IS THE PLAN BESIDE THE REQUIREMENTS FILE (A-T17-4): `<docs root>/plans/<the requirements
 # file's directory name>/<stem>.plan.md`, the file Step 0 wrote. A plan given as the artifact (task scale)
 # is its own source; with no such plan the artifact's own frontmatter answers.
-_card_config_src() {  # <artifact path as given> -> the file whose frontmatter the Configuration reads
+_card_config_src() {  # <artifact path as given> -> the file whose frontmatter the settings are read from
   local a="$1" root d cand
   case "$a" in *.plan.md) printf '%s' "$a"; return 0 ;; esac
   root="$(_card_plan_root "$a")"
@@ -1580,7 +1581,7 @@ _card_cfg_row() {  # <indent> <label> <text> <label width>
   fi
 }
 
-_card_fm() {  # <key> -> the Configuration source's value, or `unknown`
+_card_fm() {  # <key> -> the settings source's value, or `unknown`
   local v
   v="$(plan_frontmatter_get "$CARD_CFG" "$1")"
   printf '%s' "${v:-unknown}"
@@ -1591,9 +1592,9 @@ _card_fm() {  # <key> -> the Configuration source's value, or `unknown`
 _card_review_field() {  # <label> <value as written, or empty> <the level's default, or empty>
   local v="$2"
   [ -n "$v" ] || v="$3"
-  if [ -z "$v" ]; then _card_cfg_row 6 "$1" unknown 16
-  elif [ "$v" = "$3" ]; then _card_cfg_row 6 "$1" "$v  (from rigor)" 16
-  else _card_cfg_row 6 "$1" "$v  (set)" 16
+  if [ -z "$v" ]; then _card_cfg_row 4 "$1" unknown 16
+  elif [ "$v" = "$3" ]; then _card_cfg_row 4 "$1" "$v  (from rigor)" 16
+  else _card_cfg_row 4 "$1" "$v  (set)" 16
   fi
 }
 
@@ -1601,7 +1602,7 @@ _card_model_of() {  # <model_plan value> <role> -> the tier it names for the rol
   printf '%s\n' "$1" | tr ';' '\n' | sed -n "s/^[[:space:]]*$2=//p" | head -1 | sed 's/[[:space:]]*$//'
 }
 
-_card_config() {  # <artifact path as given> — the Configuration section; sets CARD_CFG
+_card_config() {  # <artifact path as given> — the Step-0 card's settings, Seed to Models; sets CARD_CFG
   local root scale rig lvl v t rec docs mp r f m e
   CARD_CFG="$(_card_config_src "$1")"
   root="$(_card_plan_root "$CARD_CFG")"
@@ -1614,17 +1615,16 @@ _card_config() {  # <artifact path as given> — the Configuration section; sets
     v="$(plan_frontmatter_get "$CARD_CFG" integration-branch)"; [ -z "$v" ] || WCARD_IB="$v"
     v="$(plan_frontmatter_get "$CARD_CFG" base-sha)"; [ -z "$v" ] || WCARD_BASE="$v"
   fi
-  printf '  Configuration\n'
   v="$(plan_frontmatter_get "$CARD_CFG" seed)"
-  [ -z "$v" ] || _card_cfg_row 4 Seed "$v" 14
-  printf '    Run\n'
-  _card_cfg_row 6 intent "$(_card_fm intent)" 16
+  [ -z "$v" ] || { printf '\n  Seed\n'; _card_cfg_row 4 brief "$v" 14; }
+  printf '\n  Run\n'
+  _card_cfg_row 4 intent "$(_card_fm intent)" 16
   t="(scale default)"; [ -z "$(plan_frontmatter_get "$CARD_CFG" rigor-override)" ] || t="(overridden)"
   v="$(_card_rigor_line "$rig")"; v="${v#review rigor: }"
   [ -n "$lvl" ] || t=""
-  _card_cfg_row 6 rigor "${v}${t:+  $t}" 16
+  _card_cfg_row 4 rigor "${v}${t:+  $t}" 16
   v="$(_card_regression_line "$scale" "$CARD_CFG" 2>/dev/null)" || v="unknown"
-  _card_cfg_row 6 regression "${v#regression }" 16
+  _card_cfg_row 4 regression "${v#regression }" 16
   _card_review_field review-cadence "$(plan_frontmatter_get "$CARD_CFG" review-cadence)" \
     "$([ -n "$lvl" ] && printf '%s' "$REVIEW_CADENCE_DEFAULT")"
   _card_review_field fix-policy "$(plan_frontmatter_get "$CARD_CFG" fix-policy)" \
@@ -1632,51 +1632,52 @@ _card_config() {  # <artifact path as given> — the Configuration section; sets
   _card_review_field fix-cap "$(plan_frontmatter_get "$CARD_CFG" fix-cap)" "$(fix_cap_default "$lvl" 2>/dev/null)"
   # THE SCALE CARRIES ITS RECOMMENDATION (AC-5.2): two sentences Step 0 wrote as `scale-recommendation:`.
   rec="$(plan_frontmatter_get "$CARD_CFG" scale-recommendation)"
-  _card_cfg_row 6 scale "${scale:-unknown} — ${rec:-(no recommendation recorded)}" 16
-  _card_cfg_row 6 name "$(_card_stem "$CARD_CFG")" 16
-  _card_branches 4
-  printf '    Paths\n'
+  _card_cfg_row 4 scale "${scale:-unknown} — ${rec:-(no recommendation recorded)}" 16
+  _card_cfg_row 4 name "$(_card_stem "$CARD_CFG")" 16
+  printf '\n'
+  _card_branches
+  printf '\n  Paths\n'
   if [ -n "$root" ]; then
-    _card_cfg_row 6 project "$root" 14
+    _card_cfg_row 4 project "$root" 14
     docs="$(docs_root "$root")"; docs="${docs#"$root"/}"
     t="(default)"; [ -z "$(config_value "$root" docs-root "")" ] || t="(from config.yaml)"
-    _card_cfg_row 6 docs "$docs  $t" 14
-    _card_cfg_row 6 tmp ".bionic/tmp  (default)" 14
+    _card_cfg_row 4 docs "$docs  $t" 14
+    _card_cfg_row 4 tmp ".bionic/tmp  (default)" 14
     v="$(plan_frontmatter_get "$CARD_CFG" archive-root)"
     if [ -z "$v" ]; then
       t="(default)"; [ -z "$(config_value "$root" archive-root "")" ] || t="(from config.yaml)"
       v="$(archive_root "$root")  $t"
     fi
-    _card_cfg_row 6 archive "$v" 14
+    _card_cfg_row 4 archive "$v" 14
   else
-    for v in project docs tmp archive; do _card_cfg_row 6 "$v" unknown 14; done
+    for v in project docs tmp archive; do _card_cfg_row 4 "$v" unknown 14; done
   fi
-  printf '    Shape\n'
-  _card_cfg_row 6 surface "$(_card_fm surface_type)" 14
+  printf '\n  Shape\n'
+  _card_cfg_row 4 surface "$(_card_fm surface_type)" 14
   case "$(plan_frontmatter_get "$CARD_CFG" multi_agent)" in
     true) v="multi-agent, tiered dispatch" ;; false) v="single-thread" ;; *) v=unknown ;;
   esac
-  _card_cfg_row 6 agents "$v" 14
-  _card_cfg_row 6 deploy "$(_card_fm deploy_target)" 14
-  _card_cfg_row 6 worktree "$(_card_fm use_worktree)" 14
-  _card_cfg_row 6 cleanup "$(_card_fm cleanup_on_finish)" 14
-  printf '    Gates\n'
-  _card_cfg_row 6 walk "$(_card_fm walk)" 14
+  _card_cfg_row 4 agents "$v" 14
+  _card_cfg_row 4 deploy "$(_card_fm deploy_target)" 14
+  _card_cfg_row 4 worktree "$(_card_fm use_worktree)" 14
+  _card_cfg_row 4 cleanup "$(_card_fm cleanup_on_finish)" 14
+  printf '\n  Gates\n'
+  _card_cfg_row 4 walk "$(_card_fm walk)" 14
   v="$(plan_frontmatter_get "$CARD_CFG" design-interview)"
   case "$v" in
     false*) v="${v#false}"; v="${v# }"; v="waived (${v:-the user})" ;;
     *) v=required ;;
   esac
-  _card_cfg_row 6 interview "$v" 14
+  _card_cfg_row 4 interview "$v" 14
   v="answered from the run's workspace"
   [ -z "$root" ] || [ "$(config_value "$root" permission-answers "")" != false ] || v=off
-  _card_cfg_row 6 permissions "$v" 14
+  _card_cfg_row 4 permissions "$v" 14
   # THE MODELS ARE model_plan's, AND A ROLE IT DOES NOT NAME RUNS AT ITS ROLE FILE'S MODEL (steps/0.md):
   # each role file beside this script answers for the role model_plan leaves out, marked so.
-  printf '    Models\n'
+  printf '\n  Models\n'
   mp="$(plan_frontmatter_get "$CARD_CFG" model_plan)"
   v="$(_card_model_of "$mp" orchestrator)"
-  _card_cfg_row 6 orchestrator "${v:-not declared}" 20
+  _card_cfg_row 4 orchestrator "${v:-not declared}" 20
   for f in "${CARD_SELF_DIR}/../agents/"*.md; do
     [ -f "$f" ] || continue
     r="${f##*/}"; r="${r%.md}"
@@ -1685,7 +1686,7 @@ _card_config() {  # <artifact path as given> — the Configuration section; sets
       m="$(awk '/^model:/ { print $2; exit }' "$f")"; e="$(awk '/^effort:/ { print $2; exit }' "$f")"
       v="${m:-unknown}${e:+-$e}  (role file)"
     fi
-    _card_cfg_row 6 "$r" "$v" 20
+    _card_cfg_row 4 "$r" "$v" 20
   done
 }
 
@@ -1708,6 +1709,13 @@ _card_inherited_line() {  # <the _card_inherited reading> <artifact path as give
   fi
 }
 
+_card_step0() {  # <artifact path as given>
+  printf 'Step 0 · Plan Configuration\n\n  Purpose\n'
+  _card_fold_at 4 "$WCARD_GOAL"
+  _card_config "$1"
+  printf '\n%s\n' "$CARD_Q_STEP0"
+}
+
 _card_step1() {  # <citation path> <artifact path as given>
   local inh l
   inh="$(_card_inherited "$2")"
@@ -1717,9 +1725,7 @@ _card_step1() {  # <citation path> <artifact path as given>
     debt:*) _card_debt_refuse "$l" ;;
     *) _card_inherit_refuse "$l" ;;
   esac
-  printf 'Step 1 · Requirements\n\n'
-  _card_config "$2"
-  printf '\n  Purpose\n'
+  printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
   printf '\n'
   CARD_ROWS=( ${WCARD_RROW[@]+"${WCARD_RROW[@]}"} )
@@ -2093,7 +2099,7 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 
 # ── THE FINAL CARD (epic-23 wave-38 T3; REQ-1 AC-1.1, AC-1.2; D19, D20; ADR-059) ──────────────
 #
-# THE ONE CARD OF THE AUTONOMOUS HALF. A run waits for its human at the three intent cards and at this one,
+# THE ONE CARD OF THE AUTONOMOUS HALF. A run waits for its human at the four intent cards and at this one,
 # before the merge. It was prose the orchestrator composed, and in 1.20.0 it came early (wave-37 A-orch-37:
 # readers still out, so their second passes ran after the approval) and as several cards for one decision.
 # `final <plan>` renders it from the record and nothing else: the owed ledger's open items (lib/owed.sh), the
@@ -2529,7 +2535,7 @@ case "$1" in
     [ "$1" = early ] && exit 0
     _card_final
     exit 0 ;;
-  step1|step2|step3)
+  step0|step1|step2|step3)
     if [ "$1" = step2 ]; then
       [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
     else
@@ -2544,6 +2550,7 @@ case "$1" in
     fi
     _card_art="$(_card_artifact_rel "$2")"
     case "$1" in
+      step0) _card_step0 "$2" ;;
       step1) _card_step1 "$_card_art" "$2" ;;
       step2) _card_step2 "$_card_art" ;;
       step3) _card_step3 "$_card_art" "$2" ;;
