@@ -327,7 +327,7 @@ RNL="$(rn_note --on 2026-01-02T04:30:00Z)"; git -C "$R" checkout -q -b carry
   awk 'BEGIN { for (i = 0; i < 20000; i++) print "- an older line" }'; } > "$R/CHANGELOG.md"
 git -C "$R" commit -q -am "the long entry"; git -C "$R" checkout -q -; git -C "$R" merge -q --no-ff -m "land" carry
 M="$(git -C "$R" rev-parse HEAD)"; rn_pub T7 "$M" hand 2026-01-02T05:00:00Z
-expect_eq "(t3) setup: the carrier is a merge whose first parent lacks the entry's head line" "2" "$(git -C "$R" rev-list --parents -n 1 "$M" | wc -w | awk '{ print $1 - 1 }')"
+expect_eq "(t3) setup: the carrier is a merge of two parents" "2" "$(git -C "$R" rev-list --parents -n 1 "$M" | wc -w | awk '{ print $1 - 1 }')"
 rn_check "$M"
 expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
 

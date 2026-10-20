@@ -154,6 +154,11 @@ nums_fence() {
     h && /^```/ { if (f) exit; f = 1; next }
     f'
 }
+# nums_holds <rev> <line> -> 0 when CHANGELOG.md at <rev> holds <line> whole. grep reads the file to its end: under
+# pipefail, a grep that quits at its match kills the writer of a file longer than a pipe's buffer, and the test fails.
+nums_holds() {
+  git show "$1:CHANGELOG.md" 2>/dev/null | /usr/bin/grep -xF -- "$2" >/dev/null
+}
 nums_check() {  # <version> <changelog text> -> one line per disagreement and per later landing, else one landing-numbers: line
   local ver="$1" cl="$2" hl at on plan said rep h12 row c bad=0
   hl="$(entry_part "$cl" "$ver" 'The landing numbers' | /usr/bin/grep -E -m 1 '^`landing-report --rows` at [0-9a-f]{40} on [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:$')"
@@ -195,8 +200,7 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   while IFS='|' read -r row c; do
     git merge-base --is-ancestor "$c" "$head" 2>/dev/null || continue
     ! git merge-base --is-ancestor "$c" "$at" 2>/dev/null || continue
-    if git show "$c:CHANGELOG.md" 2>/dev/null | /usr/bin/grep -qxF "$hl" \
-       && ! git show "$c^1:CHANGELOG.md" 2>/dev/null | /usr/bin/grep -qxF "$hl"; then continue; fi
+    if nums_holds "$c" "$hl" && ! nums_holds "$c^1" "$hl"; then continue; fi
     echo "release-check: the landing numbers of $ver are at $h12, and $row landed after them at ${c:0:12}; render them again with release-note"
     bad=1
   done < <(awk -F'|' '$1 == "line/v1" && $2 == "ev=published" { r = c = ""
