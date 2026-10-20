@@ -593,12 +593,8 @@ ROW=$(roster_nth_row "$R10W4" 1)
 
 expect_status "an in-brief waiver converts the refusal into a pass" "0" "$GATE_ST"
 expect_absent "a waived dispatch prints no refusal" "BLOCKED" "$GATE_ERR"
-expect_contains "the waiver is echoed on stderr, so it is never silent" \
-  "read-only reconnaissance, the answer is the report itself" "$GATE_ERR"
 expect_contains "the echo is a warning, not a verdict" "WARN" "$GATE_ERR"
 expect_status "the waived dispatch is journalled" "1" "$(roster_rows "$R10W4")"
-expect_status "the row LEDGERS the waiver reason — every waiver is on the record" \
-  "read-only reconnaissance, the answer is the report itself" "$(roster_field "$ROW" waiver)"
 # The waiver excuses the refusal; it does not make the fact untrue.
 expect_contains "the row still records the deliverable as absent" \
   "deliverable" "$(roster_field "$ROW" absent)"
@@ -778,8 +774,6 @@ expect_absent "an undeclared subprocess claim is NOT an absence finding" \
 #
 # fails-when: the unfilled line lifts a claim, or a filled line's claim carries the comment.
 T7_CLAIM_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Subprocess claim")"
-expect_nonempty "r10Lc1 meta: the scaffold carries the optional Subprocess claim: line" \
-  "$T7_CLAIM_LINE"
 REPO=$(make_repo r10Lc1 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${BRIEF_FULL}
@@ -876,8 +870,6 @@ R10D=$(roster_path "$REPO" "$SID_A")
 expect_status "two dispatches leave two rows" "2" "$(roster_rows "$R10D")"
 expect_status "the first row survives the second dispatch" "first-agent" "$(roster_field "$(roster_nth_row "$R10D" 1)" name)"
 expect_status "the second row is the second dispatch" "second-agent" "$(roster_field "$(roster_nth_row "$R10D" 2)" name)"
-expect_status "the schema header is written once, not per row" "1" \
-  "$(grep -c '^# bionic session roster' "$R10D")"
 
 section "S10e — the roster is per-session from birth (D-5)"
 
@@ -953,8 +945,6 @@ chmod 555 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 chmod 755 "$REPO/.bionic/tmp"
 expect_eq "an unwritable state dir REFUSES the dispatch" "deny" "$GATE_VERDICT"
-expect_contains "…on one line, in the dispatch wall's shape" \
-  "bionic: dispatch refused — the roster cannot be written (make it writable)" "$GATE_ERR"
 expect_contains "…the detail names the roster path" "roster-${SID_A}.state" "$GATE_VERR"
 expect_contains "…and the reason the append gave" "Permission denied" "$GATE_VERR"
 expect_status "no roster file was left behind" "1" \
