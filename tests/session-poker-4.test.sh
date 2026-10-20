@@ -28,6 +28,18 @@ set -uo pipefail
 #   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash tests/session-poker-4.test.sh
 POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 
+# THE CORE SCRIPT IS EIGHT FILES: the dispatcher and its seven parts under poker/ beside it. A doctored copy is the
+# whole set, as files, each through the doctor; a count of the lines a doctor changed reads the whole set.
+poker_text() {  # <dispatcher> -> its text, then each part's, in name order
+  cat "$1" "$(dirname "$1")"/poker/*.sh
+}
+poker_doctored() {  # <dispatcher> <dest hooks dir> <filter> [<arg>...] -> the set under dest, each file through the filter
+  local src="$1" dst="$2" f; shift 2
+  rm -rf "$dst/poker"; mkdir -p "$dst/poker"
+  "$@" < "$src" > "$dst/session-poker.sh"
+  for f in "$(dirname "$src")"/poker/*.sh; do "$@" < "$f" > "$dst/poker/${f##*/}"; done
+}
+
 # THE FILES THIS SHARD'S HOISTED HELPERS READ, NAMED HERE. tests/lib/impact.sh maps a suite
 # from its own lines and never follows it into the prelude, so a path a prelude helper
 # reads is named by every shard that calls that helper.
@@ -381,9 +393,9 @@ cp "$TMPROOT/sev-before-waive.md" "$PSEV"
 AWM="$TMPROOT/aw-mutant"; mkdir -p "$AWM/hooks"
 cp -R "$BIONIC_HOOKS_DIR/." "$AWM/hooks/"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$AWM/scripts"
 awk 'index($0, "owed_open \"waive:$q\"") { sub(/owed_open /, ": "); n++ } { print } END { print n + 0 > "/dev/stderr" }' \
-  "$BIONIC_HOOKS_DIR/session-poker.sh" > "$AWM/hooks/session-poker.sh" 2> "$TMPROOT/aw-mutant.n"
+  "$BIONIC_HOOKS_DIR/poker/judge.sh" > "$AWM/hooks/poker/judge.sh" 2> "$TMPROOT/aw-mutant.n"   # the opener is the judge's
 expect_eq "AW-M the doctored opener is one line, and the copy parses and differs" "1 0 differs" \
-  "$(cat "$TMPROOT/aw-mutant.n") $(bash -n "$AWM/hooks/session-poker.sh" >/dev/null 2>&1; echo "$?") $(cmp -s "$AWM/hooks/session-poker.sh" "$BIONIC_HOOKS_DIR/session-poker.sh" && echo same || echo differs)"
+  "$(cat "$TMPROOT/aw-mutant.n") $(bash -n "$AWM/hooks/poker/judge.sh" >/dev/null 2>&1; echo "$?") $(cmp -s "$AWM/hooks/poker/judge.sh" "$BIONIC_HOOKS_DIR/poker/judge.sh" && echo same || echo differs)"
 AW_POKER_KEEP="$POKER"; POKER="$AWM/hooks/session-poker.sh"
 poke "$RSEV" current 8
 POKER="$AW_POKER_KEEP"
@@ -831,14 +843,15 @@ rd_mutant() {  # <name> <sed script> -> $RD_MUT/<name>/hooks/session-poker.sh, s
   ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$d/scripts/lib"
   for _sib in "$(dirname "$POKER")"/*; do
     [ "$(basename "$_sib")" = session-poker.sh ] && continue
+    [ "$(basename "$_sib")" = poker ] && continue
     ln -s "$_sib" "$d/hooks/$(basename "$_sib")"
   done
-  sed "$2" "$POKER" > "$d/hooks/session-poker.sh"
+  poker_doctored "$POKER" "$d/hooks" sed "$2"
 }
 rd_mutant nowrite 's/^    FS_TAIL=" stated=.*$/    FS_TAIL=""/'
 rd_mutant inverted 's/^    \[ -n "\$DS_ST" \] && case .*$/    [ -n "$DS_ST" ] \&\& case "$DS_CL" in *"$DS_ST"*) : ;; *) DS_ANS=stated ;; esac/'
 expect_eq "RD-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
-  "$(diff "$POKER" "$RD_MUT/nowrite/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/inverted/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/nowrite/hooks/session-poker.sh") | /usr/bin/grep -c '^>')|$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/inverted/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 RD_REAL_POKER="$POKER"
 POKER="$RD_MUT/nowrite/hooks/session-poker.sh"
 poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the doctored verb"
@@ -1643,7 +1656,7 @@ expect_eq "RTL9 an unknown flag is the usage error (2)" "2" "$RC"
 RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rp-mut.XXXXXX")"
 rd_mutant lastready 's/if (!(rk in rdy)) rdy\[rk\] = e$/rdy[rk] = e/'
 expect_eq "RTL-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
-  "$(diff "$POKER" "$RD_MUT/lastready/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/lastready/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 rp_world rp-mut
 rp_ready T1 w-T1 10:00:00; rp_ready T1 w-T1 10:20:00; rp_pub T1 queue 10:30:00
 RP_REAL_POKER="$POKER"; POKER="$RD_MUT/lastready/hooks/session-poker.sh"
@@ -1854,7 +1867,7 @@ rd_mutant nokey 's/^      vk = rk SUBSEP span\[rk\] SUBSEP kv\["commit"\] SUBSEP
 rd_mutant noguard 's/^        say "unchanged since .*$/&; [ -z "$TICK_LANDINGS" ] || say "$TICK_LANDINGS"/'
 rd_mutant nounm 's/^  if landing_unmeasured "\$rec"; then .*$/  :/'
 expect_eq "RK-mut0 each doctored poker differs from the real one in exactly one line (the four doctors took)" "1|1|1|1" \
-  "$(for _m in nohead nokey noguard nounm; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
+  "$(for _m in nohead nokey noguard nounm; do diff <(poker_text "$POKER") <(poker_text "$RD_MUT/$_m/hooks/session-poker.sh") | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
 RK_REAL_POKER="$POKER"
 # commit ignored (the head's run counted): the probe's shape reads green=1 where RK-K1 reads 0
 rp_world rk-mut1
@@ -1988,21 +2001,22 @@ expect_contains "PASS-6g …and the fix" "write the pass to a new record path" "
 
 # ---------- the mutation arms: the guard removed, and the guard refusing every second registration ----------
 PK_ANCHOR='PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
-anchor file hooks/session-poker.sh 'PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
+anchor file hooks/poker/proof.sh 'PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")"'
 PK_MUT="$TMPROOT/poker-pass-mut"; mkdir -p "$PK_MUT/hooks" "$PK_MUT/scripts" "$PK_MUT/b/hooks" "$PK_MUT/b/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PK_MUT/scripts/lib"
 for _pk_f in "$(dirname "$POKER")"/*; do  # the verb's siblings (the dry commit's wall among them), by link
-  [ "${_pk_f##*/}" = session-poker.sh ] || { ln -s "$_pk_f" "$PK_MUT/hooks/${_pk_f##*/}"; ln -s "$_pk_f" "$PK_MUT/b/hooks/${_pk_f##*/}" 2>/dev/null; }
+  case "${_pk_f##*/}" in session-poker.sh|poker) continue ;; esac
+  ln -s "$_pk_f" "$PK_MUT/hooks/${_pk_f##*/}"; ln -s "$_pk_f" "$PK_MUT/b/hooks/${_pk_f##*/}" 2>/dev/null
 done
-PK_N="$PK_ANCHOR" PK_R='PF_PASS=""' awk 'BEGIN { n = ENVIRON["PK_N"]; r = ENVIRON["PK_R"] }
-  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$POKER" > "$PK_MUT/hooks/session-poker.sh"
+PK_N="$PK_ANCHOR" PK_R='PF_PASS=""' poker_doctored "$POKER" "$PK_MUT/hooks" awk 'BEGIN { n = ENVIRON["PK_N"]; r = ENVIRON["PK_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }'
 expect_eq "PASS-mut0 the guard-removed copy differs from the verb in one line" "1" \
-  "$(diff "$POKER" "$PK_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "$POKER") <(poker_text "$PK_MUT/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$PK_MUT/b/scripts/lib"
-PK_N="$PK_ANCHOR" PK_R='PF_PASS="head x y"' awk 'BEGIN { n = ENVIRON["PK_N"]; r = ENVIRON["PK_R"] }
-  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$POKER" > "$PK_MUT/b/hooks/session-poker.sh"
+PK_N="$PK_ANCHOR" PK_R='PF_PASS="head x y"' poker_doctored "$POKER" "$PK_MUT/b/hooks" awk 'BEGIN { n = ENVIRON["PK_N"]; r = ENVIRON["PK_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }'
 expect_eq "PASS-mut0b the always-refusing copy differs from the verb in one line" "1" \
-  "$(diff "$POKER" "$PK_MUT/b/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "$POKER") <(poker_text "$PK_MUT/b/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 PK_POKER="$POKER"
 cp "$PSEV" "$TMPROOT/pk-plan-keep"
 POKER="$PK_MUT/hooks/session-poker.sh"; pk_rec pk-a "$PK_H2" fail "findings: 1" "finding: 1 S2 on b.sh:3 - a second finding, a fix" "shown: 1 bash b.sh --twice"
@@ -2103,10 +2117,10 @@ expect_contains "(up-c3) …the budget line is as the probe wrote it" "$UP_BUDGE
 # from a directory outside every checkout, and the tracked file is not touched.
 UPM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/up-mutant.XXXXXX")"
 cp -R "${BIONIC_HOOKS_DIR}" "$UPM_DIR/hooks" && ln -s "${BIONIC_SCRIPTS_DIR}/payload" "$UPM_DIR/payload"
-awk '/^    plan_verb_swap row-landed "\$PV_ID landed at/ && !d { print "    sed \"s/^\\(parallel-budget: .*\\)source=probe/\\1source=probes/\" \"$PV_NEW\" > \"$PV_NEW.m\" && mv -f \"$PV_NEW.m\" \"$PV_NEW\""; d = 1 }
-  { print }' "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$UPM_DIR/hooks/session-poker.sh"
+poker_doctored "${BIONIC_HOOKS_DIR}/session-poker.sh" "$UPM_DIR/hooks" awk '/^    plan_verb_swap row-landed "\$PV_ID landed at/ && !d { print "    sed \"s/^\\(parallel-budget: .*\\)source=probe/\\1source=probes/\" \"$PV_NEW\" > \"$PV_NEW.m\" && mv -f \"$PV_NEW.m\" \"$PV_NEW\""; d = 1 }
+  { print }'
 expect_eq "(up-m0) the mutant differs from the hook by the one line that edits the budget" "1" \
-  "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$UPM_DIR/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "${BIONIC_HOOKS_DIR}/session-poker.sh") <(poker_text "$UPM_DIR/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 UPM="$(up_world)"
 UPM_P="$(up_plan "$UPM")"; cp "$UPM_P" "$UPM_P.before"
 UPM_OUT="$( cd "$UPM" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$UPM_DIR/hooks/session-poker.sh" row-landed T1 0123456789abcdef0123456789abcdef01234567 2026-10-07T03:30:00Z 2>&1 )"; UPM_RC=$?
@@ -2275,7 +2289,7 @@ RI_N="$RI_GNEEDLE" RI_R='if [ "$_R_rc" = 137 ]; then _R_state=killed; fi' awk 'B
 expect_eq "RI-mut0b the doctored gate.sh copy differs from the library in one line (the doctor took)" "1" \
   "$(diff "$RI_LIB/gate.sh" "$RD_MUT/kill137/scripts/lib/gate.sh" | /usr/bin/grep -c '^>')"
 expect_eq "RI-mut0 each doctored poker differs from the real one in the lines its doctor names: 1, 3, 1 and 2 (the four doctors took)" "1|3|1|2" \
-  "$(for _m in noclear excl kill137 late; do diff "$POKER" "$RD_MUT/$_m/hooks/session-poker.sh" | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
+  "$(for _m in noclear excl kill137 late; do diff <(poker_text "$POKER") <(poker_text "$RD_MUT/$_m/hooks/session-poker.sh") | /usr/bin/grep -c '^>'; done | tr '\n' '|' | sed 's/|$//')"
 RI_REAL_POKER="$POKER"
 # the own set never cleared: P3's second landing counts its first candidate's head run again (RI-P3a reads green=2)
 ri_p3 ri-mut-p3
@@ -2447,12 +2461,12 @@ expect_eq "MP-fill4 positive, the same extractor: with nothing parked the senten
 # THE MUTANT: the parked ids dropped from the sentence (a doctored copy of the hook, its siblings and library linked in).
 MP_HROOT="$(mktemp -d "$TMPROOT/mp-hook.XXXXXX")"; mkdir -p "$MP_HROOT/hooks" "$MP_HROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MP_HROOT/scripts/lib"
-for _sib in "$(dirname "$POKER")"/*; do _sibn="$(basename "$_sib")"; [ "$_sibn" = "session-poker.sh" ] || ln -s "$_sib" "$MP_HROOT/hooks/$_sibn"; done
+for _sib in "$(dirname "$POKER")"/*; do _sibn="$(basename "$_sib")"; case "$_sibn" in session-poker.sh|poker) ;; *) ln -s "$_sib" "$MP_HROOT/hooks/$_sibn" ;; esac; done
 MP_HOOK_NEEDLE='SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}"'
-anchor file hooks/session-poker.sh 'SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}"'
-MP_N="$MP_HOOK_NEEDLE" awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ":" substr($0, i + length(n)); print }' \
-  "$POKER" > "$MP_HROOT/hooks/session-poker.sh"
-expect_eq "MP-fillmut0 the hook mutant differs from the hook in one line" "1" "$(diff "$POKER" "$MP_HROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+anchor file hooks/poker/tick.sh 'SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}"'
+MP_N="$MP_HOOK_NEEDLE" poker_doctored "$POKER" "$MP_HROOT/hooks" \
+  awk 'BEGIN { n = ENVIRON["MP_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) ":" substr($0, i + length(n)); print }'
+expect_eq "MP-fillmut0 the hook mutant differs from the hook in one line" "1" "$(diff <(poker_text "$POKER") <(poker_text "$MP_HROOT/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 MP_POKER_WAS="$POKER"; POKER="$MP_HROOT/hooks/session-poker.sh"
 forget_digest "$R74B"
 poke_pressure "$R74B" 8192 1.0 tick
@@ -6417,14 +6431,14 @@ expect_eq "REOPEN-7c a decline written after the lapse stands afresh" "2026-10-1
 # and no free slots reads the ledger alone: the decline stands at room=yes and the row is never asked again. The
 # copy sits beside a copy of the libraries, so it loads its own; REOPEN-3 goes red under it.
 RO_MUT="$TMPROOT/ro-mut"; mkdir -p "$RO_MUT/hooks" "$RO_MUT/payload/scripts"
-cp "${BIONIC_HOOKS_DIR}"/*.sh "$RO_MUT/hooks/"
+cp "${BIONIC_HOOKS_DIR}"/*.sh "$RO_MUT/hooks/"; cp -R "${BIONIC_HOOKS_DIR}/poker" "$RO_MUT/hooks/poker"
 cp -R "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RO_MUT/payload/scripts/lib"
 RO_POKER_WAS="$POKER"
-anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/session-poker.sh"
-anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"'
-RO_MUT_SRC="$RO_MUT/hooks/session-poker.sh"
+anchor file hooks/poker/tick.sh 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"' 'SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"' "$RO_MUT/hooks/poker/tick.sh"
+anchor file hooks/poker/tick.sh 'SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"'
+RO_MUT_SRC="$RO_MUT/hooks/poker/tick.sh"   # both calls are the tick's
 awk 'index($0, "SCHED_SD=\"$(fill_standing_decline ") { sub(/ "\$\{SCHED_GATE_ROOM:-\}" "\$\{SCHED_FREE_PRE:-\}" "\$SCHED_PLAN"/, "") } { print }' "$RO_MUT_SRC" > "$RO_MUT_SRC.tmp" && mv "$RO_MUT_SRC.tmp" "$RO_MUT_SRC"
-expect_eq "REOPEN-mut0 the mutant differs from the poker by the two calls" "2" "$(diff "${BIONIC_HOOKS_DIR}/session-poker.sh" "$RO_MUT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
+expect_eq "REOPEN-mut0 the mutant differs from the poker by the two calls" "2" "$(diff "${BIONIC_HOOKS_DIR}/poker/tick.sh" "$RO_MUT/hooks/poker/tick.sh" | /usr/bin/grep -c '^<')"
 poke "$RRO" decline T4 'declined again, after the lapse'
 expect_eq "REOPEN-mut-pre a fresh decline of the row is recorded (it stands afresh after the lapse)" "0" "$RC"
 POKER="$RO_MUT/hooks/session-poker.sh"
@@ -6594,7 +6608,7 @@ RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rr-mut.XXXXXX")"
 rd_mutant queue 's#^        nad\[rk\]++; as\[rk, nad\[rk\]\] = kv\["admitted"\] + 0; ae\[rk, nad\[rk\]\] = e$#        nad[rk]++; as[rk, nad[rk]] = fc[rk]; ae[rk, nad[rk]] = e#'
 rd_mutant norework 's#^    ev == "returned" { if (e >= 0) { nrw\[rk\]++; rs\[rk, nrw\[rk\]\] = e; re\[rk, nrw\[rk\]\] = "" }; next }$#    ev == "returned" { next }#'
 expect_eq "RR-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
-  "$(diff "$POKER" "$RD_MUT/queue/hooks/session-poker.sh" | /usr/bin/grep -c '^>')|$(diff "$POKER" "$RD_MUT/norework/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/queue/hooks/session-poker.sh") | /usr/bin/grep -c '^>')|$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/norework/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 rr_world rr-mut
 RR_REAL_POKER="$POKER"
 POKER="$RD_MUT/queue/hooks/session-poker.sh"; rp_report --rows; RR_M1_RC="$RC"; RR_M1="$(rr_row T1)"
@@ -6664,7 +6678,7 @@ expect_eq "RU4 a reuse line with no suite is skipped and counted malformed: reus
 RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-ru-mut.XXXXXX")"
 rd_mutant noreuse 's/^    ev == "reused" { nru++; next }$/    ev == "reused" { next }/'
 expect_eq "RU-mut0 the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
-  "$(diff "$POKER" "$RD_MUT/noreuse/hooks/session-poker.sh" | /usr/bin/grep -c '^>')"
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/noreuse/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
 ru_world ru-mut
 RU_REAL_POKER="$POKER"
 POKER="$RD_MUT/noreuse/hooks/session-poker.sh"; rp_report

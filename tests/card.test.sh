@@ -42,26 +42,8 @@ set -uo pipefail
 # defining the globals they read, and each helper outside those.
 reads hooks/session-poker.sh section "the library"
 reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the contract grammar"
 reads hooks/session-poker.sh section "the plan transaction"
-reads hooks/session-poker.sh section "the launch sync"
-reads hooks/session-poker.sh verb current
-reads hooks/session-poker.sh verb debt
-reads hooks/session-poker.sh verb disposition
-reads hooks/session-poker.sh verb finding-move
-reads hooks/session-poker.sh verb finding-stated
-reads hooks/session-poker.sh fn adopt_copy_marker
-reads hooks/session-poker.sh fn adopt_fold
-reads hooks/session-poker.sh fn adopt_write_row
 reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn cover_basis
-reads hooks/session-poker.sh fn cur7_judge
-reads hooks/session-poker.sh fn cur8_owed_waivers
-reads hooks/session-poker.sh fn current_admit
-reads hooks/session-poker.sh fn deferral_escape
-reads hooks/session-poker.sh fn deferral_fold
-reads hooks/session-poker.sh fn deferral_line
-reads hooks/session-poker.sh fn deferral_sentence
 reads hooks/session-poker.sh fn file_mtime
 reads hooks/session-poker.sh fn finding_owed_key
 reads hooks/session-poker.sh fn finding_read
@@ -69,7 +51,6 @@ reads hooks/session-poker.sh fn iso_now
 reads hooks/session-poker.sh fn line_field
 reads hooks/session-poker.sh fn note
 reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn pair
 reads hooks/session-poker.sh fn parse_seconds
 reads hooks/session-poker.sh fn row_has_key
 reads hooks/session-poker.sh fn said_refuse

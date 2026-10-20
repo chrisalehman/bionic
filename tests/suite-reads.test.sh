@@ -38,7 +38,6 @@ set -uo pipefail
 
 # WHAT THIS SUITE READS OF THE POKER (wave-39 T42; D6): §AGREE lifts poker_brief_index_suites' text out
 # of the hook and runs it beside the library; it runs no verb of the poker.
-reads hooks/session-poker.sh fn poker_brief_index_suites
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 ANCHORS="$REPO/payload/scripts/lib/anchors.sh"
@@ -277,7 +276,7 @@ SP_HOOK="$REPO/hooks/session-poker.sh"; DP_HOOK="$REPO/hooks/dispatch-preflight.
 fn_body() {  # fn_body <file> <function> -> the function's definition, through its first closing `}` line
   awk -v f="$2" 'index($0, f "() {") == 1 { on = 1 } on { print } on && /^}/ { exit }' "$1"
 }
-SP_FN="$(fn_body "$SP_HOOK" poker_brief_index_suites)"; DP_FN="$(fn_body "$DP_HOOK" dp_lands_index_suites)"
+SP_FN="$(fn_body "$REPO/hooks/poker/plan.sh" poker_brief_index_suites)"   # the brief's reader is the plan verbs' part; DP_FN="$(fn_body "$DP_HOOK" dp_lands_index_suites)"
 expect_contains "AGREE: the brief's reader is lifted out of session-poker.sh" "poker_brief_index_suites() {" "$SP_FN"
 expect_contains "AGREE: the wall's reader is lifted out of dispatch-preflight.sh" "dp_lands_index_suites() {" "$DP_FN"
 expect_contains "AGREE: the brief's reader calls reads_suites" "reads_suites " "$SP_FN"

@@ -43,6 +43,8 @@ set -uo pipefail
 # mutated copy without ever touching the shipped file:
 #   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash tests/session-poker.test.sh
 POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
+# The dispatcher loads its seven parts from poker/ beside it; a doctored copy carries that directory too.
+POKER_PARTS="$(dirname "$POKER")/poker"
 # Everything else every shard shares: tests/session-poker.prelude.sh.
 . "$(dirname "$0")/session-poker.prelude.sh"
 
@@ -1318,7 +1320,7 @@ cat >> "$OBS_MUT_ROOT/scripts/lib/observe.sh" <<'OBS_MUT'
 
 observe_class() { OBS_CLASS=alive; echo alive; return 0; }
 OBS_MUT
-cp "$POKER" "$OBS_MUT_ROOT/hooks/session-poker.sh"
+cp "$POKER" "$OBS_MUT_ROOT/hooks/session-poker.sh"; cp -R "$POKER_PARTS" "$OBS_MUT_ROOT/hooks/poker"
 if grep -qF 'OBS_CLASS=alive; echo alive' "$OBS_MUT_ROOT/scripts/lib/observe.sh"; then
   ok "8j meta: the doctored predicate landed (the pair below proves something)"
 else
@@ -2830,8 +2832,8 @@ expect_eq "the poker wants worktree.sh from the library" "1" \
   "$(grep -c '^BIONIC_LIB_WANT=".*worktree\.sh' "$POKER")"
 expect_eq "…and sources it out of BIONIC_LIB" "1" \
   "$(grep -c '^\. "\$BIONIC_LIB/worktree\.sh"' "$POKER")"
-expect_eq "…and calls the library's walk rather than restating it" "1" \
-  "$(grep -c 'worktree_lease_overruns "' "$POKER")"
+expect_eq "…and calls the library's walk rather than restating it (in the tick)" "1" \
+  "$(grep -c 'worktree_lease_overruns "' "$POKER_PARTS/tick.sh")"
 
 # ============================================================
 section "Section 15: the unengaged session — tick and adopt decide nothing (AC-10, AC-15)"
@@ -3782,13 +3784,15 @@ ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$S19I_MUT_
 for _sib in "$(dirname "$POKER")"/*; do
   _sibname="$(basename "$_sib")"
   [ "$_sibname" = "session-poker.sh" ] && continue
+  [ "$_sibname" = "poker" ] && continue
   ln -s "$_sib" "$S19I_MUT_ROOT/hooks/$_sibname"
 done
 S19I_MUT="$S19I_MUT_ROOT/hooks/session-poker.sh"
+cp "$POKER" "$S19I_MUT"; cp -R "$POKER_PARTS" "$S19I_MUT_ROOT/hooks/poker"
 sed 's@^        live_agents "\$TICK_TR" >/dev/null 2>&1 || :$@        : # priming removed@' \
-  "$POKER" > "$S19I_MUT"
-expect_eq "19i meta: the sed anchor landed exactly once (the doctor took)" "1" \
-  "$(diff "$POKER" "$S19I_MUT" | /usr/bin/grep -c '^>')"
+  "$POKER_PARTS/tick.sh" > "$S19I_MUT_ROOT/hooks/poker/tick.sh"
+expect_eq "19i meta: the sed anchor landed exactly once, in the tick (the doctor took)" "1" \
+  "$(diff "$POKER_PARTS/tick.sh" "$S19I_MUT_ROOT/hooks/poker/tick.sh" | /usr/bin/grep -c '^>')"
 : > "$S19I_COUNT"
 S19I_POKER_REAL="$POKER"; POKER="$S19I_MUT"
 forget_digest "$R19I"
@@ -3840,8 +3844,8 @@ S21A_DIR="$TMPROOT/s21-poker-head"
 mkdir -p "$S21A_DIR/hooks" "$S21A_DIR/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$S21A_DIR/scripts/lib"
 S21A_LIB="$S21A_DIR/hooks/session-poker-head.sh"
-sed -n '1,/^# ---------------------------------------------------------------- verbs$/p' "$POKER" \
-  | sed '$d' > "$S21A_LIB"
+{ sed -n '1,/^# ---------------------------------------------------------------- verbs$/p' "$POKER" | sed '$d'
+  cat "$POKER_PARTS/roster.sh"; } > "$S21A_LIB"   # the dispatcher's head, then the part adopt_write_row lives in
 # `$0` CARRIES THE PATH, not `$1`: the script resolves its library off `dirname "$0"`, so a
 # `bash -c … _ <lib>` invocation would look for it beside the caller's cwd and step aside.
 expect_eq "21a meta: the sourceable head really does define adopt_write_row" "function" \
@@ -5476,9 +5480,12 @@ expect_eq "30t2e …unidentified, as the row it copied" "intended:" \
 S30T3_ROOT="$TMPROOT/poker-no-identity"
 mkdir -p "$S30T3_ROOT/hooks" "$S30T3_ROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$S30T3_ROOT/scripts/lib"
-sed '/+=(${POKER_ID_ARGS\[@\]+/d' "$POKER" > "$S30T3_ROOT/hooks/session-poker.sh"
+cp "$POKER" "$S30T3_ROOT/hooks/session-poker.sh"; cp -R "$POKER_PARTS" "$S30T3_ROOT/hooks/poker"
+for _s30p in roster plan; do   # extend and hold are the roster's verbs, amend the plan's
+  sed '/+=(${POKER_ID_ARGS\[@\]+/d' "$POKER_PARTS/$_s30p.sh" > "$S30T3_ROOT/hooks/poker/$_s30p.sh"
+done
 expect_eq "30t3 meta: the scratch copy lost exactly the three identity appends (extend, amend, hold)" "3" \
-  "$(diff "$POKER" "$S30T3_ROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
+  "$( { diff "$POKER_PARTS/roster.sh" "$S30T3_ROOT/hooks/poker/roster.sh"; diff "$POKER_PARTS/plan.sh" "$S30T3_ROOT/hooks/poker/plan.sh"; } | /usr/bin/grep -c '^<')"
 R30T3="$(make_repo s30-selfcheck)"; new_roster "$R30T3"; s30_teammate "$R30T3"
 S30T3_POKER="$POKER"; POKER="$S30T3_ROOT/hooks/session-poker.sh"
 poke "$R30T3" amend w1 --reexec+ 'npx jest --testPathPatterns widget' --reason 'run B'
@@ -5722,7 +5729,7 @@ s32_extract() {  # <poker file> -> the text of its _sched_plan_current_field, as
 s32_poker_read() {  # <plan> [poker file] -> _sched_plan_current_field's answer, extracted and eval'd
   ( . "$S32_LIB_DIR/run.sh" >/dev/null 2>&1      # normalize_newlines is run.sh's
     . "$S32_LIB_DIR/fill.sh" >/dev/null 2>&1     # the reader the wrapper delegates to
-    eval "$(s32_extract "${2:-$POKER}")"
+    eval "$(s32_extract "${2:-$POKER_PARTS/tick.sh}")"
     _sched_plan_current_field "$1" ) 2>/dev/null
 }
 s32_fill_read() {  # <plan> -> _fill_current_field's answer, from the library itself
@@ -5827,7 +5834,7 @@ expect_eq "32 …and so does fill.sh" "" "$(s32_fill_read "$TMPROOT/s30-absent.m
 
 # 32p: ONE PARSER. The poker's body delegates and parses nothing itself — a body that grew its
 # own awk back would be the second reader AC-6.1 retires, agreeing today and drifting later.
-S32_BODY="$(s32_extract "$POKER")"
+S32_BODY="$(s32_extract "$POKER_PARTS/tick.sh")"
 expect_contains "32p the poker's reader delegates to fill.sh's" "_fill_current_field" "$S32_BODY"
 expect_absent "32p …and runs no parse of its own (no awk)" "awk" "$S32_BODY"
 expect_absent "32p …(no grep)" "grep" "$S32_BODY"
@@ -5836,9 +5843,9 @@ expect_absent "32p …(no grep)" "grep" "$S32_BODY"
 # for the plain shape, so the agreement rows above discriminate a broken delegation.
 S32_MUT="$TMPROOT/s32-poker-dropped-arg.sh"
 LC_ALL=C awk '{ if ($0 ~ /^  _fill_current_field "\$@"/) print "  _fill_current_field"; else print }' \
-  "$POKER" > "$S32_MUT"
-expect_eq "32m the mutant differs from the shipped poker by exactly the wrapper line" \
-  "1" "$(diff "$POKER" "$S32_MUT" | grep -c '^< ')"
+  "$POKER_PARTS/tick.sh" > "$S32_MUT"
+expect_eq "32m the mutant differs from the shipped tick by exactly the wrapper line" \
+  "1" "$(diff "$POKER_PARTS/tick.sh" "$S32_MUT" | grep -c '^< ')"
 expect_eq "32m …and its reader answers nothing on the plain shape (the table would go red)" \
   "" "$(s32_poker_read "$(s32_plan plain "$S32_LF")" "$S32_MUT")"
 

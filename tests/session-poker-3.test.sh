@@ -244,7 +244,7 @@ expect_contains "56f12 …and reader= is that row's name" "question=adversarial 
 S56_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction"
 s56_tree() {  # <root> [<checks file body>] -> a copy of the hook tree, the checks file planted when given
   mkdir -p "$1/hooks" "$1/scripts"
-  cp "$BIONIC_HOOKS_DIR"/*.sh "$1/hooks/"
+  cp "$BIONIC_HOOKS_DIR"/*.sh "$1/hooks/"; cp -R "$BIONIC_HOOKS_DIR/poker" "$1/hooks/poker"   # the dispatcher loads its parts from poker/
   cp -R "$(cd "$BIONIC_HOOKS_DIR/../payload/scripts/lib" && pwd -P)" "$1/scripts/lib"
   cp "$BIONIC_HOOKS_DIR"/../payload/scripts/*.sh "$1/scripts/"
   if [ $# -ge 2 ]; then mkdir -p "$1/context"; printf '%s' "$2" > "$1/context/checks-structure.md"; fi
@@ -4001,17 +4001,20 @@ expect_eq "SCV-8e a head that is no commit here is refused (exit 1)" "1" "$SCV_R
 expect_contains "SCV-8f …in the library's words" "is no commit here" "$SCV_ERR"
 
 # ---------- the tick never asks: facts_cover has the one call site, the verb's and the refusal's helper ----------
-SCV_CALLS="$(awk '/^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { n++ } END { print n + 0 }' "${BIONIC_HOOKS_DIR}/session-poker.sh")"
+# The core script is the dispatcher and its seven parts under poker/; the census reads all eight.
+SCV_CALLS="$(cat "${BIONIC_HOOKS_DIR}/session-poker.sh" "${BIONIC_HOOKS_DIR}"/poker/*.sh | awk '/^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { n++ } END { print n + 0 }')"
 expect_eq "SCV-9 the hook calls facts_cover from exactly one place, the helper both the refusal and the verb print through" "1" "$SCV_CALLS"
 expect_eq "SCV-9b …and that place is inside cover_basis" "cover_basis" \
-  "$(awk '/^[a-z_0-9]+\(\)/ { fn = $1; sub(/\(\).*/, "", fn) } /^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { print fn }' "${BIONIC_HOOKS_DIR}/session-poker.sh")"
+  "$(cat "${BIONIC_HOOKS_DIR}/session-poker.sh" "${BIONIC_HOOKS_DIR}"/poker/*.sh | awk '/^[a-z_0-9]+\(\)/ { fn = $1; sub(/\(\).*/, "", fn) } /^[[:space:]]*#/ { next } /facts_cover[[:space:]]+"/ { print fn }')"
 
 # ---------- a mutant that empties the verb's print while the refusal's basis stands goes red ----------
 # The print is one line of the verb's arm; the mutant prints an empty line there and nothing else changes.
 SCV_MROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-cover-mut.XXXXXX")"; mkdir -p "$SCV_MROOT/hooks" "$SCV_MROOT/scripts"
 ln -s "$(cd "$SCV_LIB" && pwd -P)" "$SCV_MROOT/scripts/lib"
-for scv_h in "${BIONIC_HOOKS_DIR}"/*; do [ "${scv_h##*/}" = session-poker.sh ] || ln -s "$scv_h" "$SCV_MROOT/hooks/${scv_h##*/}"; done
-anchor file hooks/session-poker.sh '"$COV_VERB_LINES"' '""' "$SCV_MROOT/hooks/session-poker.sh"
+for scv_h in "${BIONIC_HOOKS_DIR}"/*; do case "${scv_h##*/}" in session-poker.sh|poker) ;; *) ln -s "$scv_h" "$SCV_MROOT/hooks/${scv_h##*/}" ;; esac; done
+# The print is in the judge, the part that holds the cover verb; the copy carries the dispatcher and its own poker/.
+cp "${BIONIC_HOOKS_DIR}/session-poker.sh" "$SCV_MROOT/hooks/session-poker.sh"; cp -R "${BIONIC_HOOKS_DIR}/poker" "$SCV_MROOT/hooks/poker"
+anchor file hooks/poker/judge.sh '"$COV_VERB_LINES"' '""' "$SCV_MROOT/hooks/poker/judge.sh"
 scv_verb_reads() {  # <poker> -> ok when the verb prints the refusal's cover line, else red
   scv_run "$1" cover "$SCV_Q" "$SCV_RANGE"
   [ "$SCV_RC" = 0 ] && [ "$SCV_OUT" = "cover ${SCV_C} owes" ] && printf ok || printf red

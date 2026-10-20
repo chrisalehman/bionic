@@ -42,48 +42,21 @@ set -uo pipefail
 # those.
 reads hooks/session-poker.sh section "the library"
 reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the runs (wave-30 T12; D6, D7d)"
 reads hooks/session-poker.sh section "a successor row"
 reads hooks/session-poker.sh section "the hold's fingerprint"
-reads hooks/session-poker.sh section "the contract grammar"
 reads hooks/session-poker.sh section "the plan transaction"
-reads hooks/session-poker.sh section "the launch sync"
-reads hooks/session-poker.sh section "the sweep"
-reads hooks/session-poker.sh section "the run's scorecard"
-reads hooks/session-poker.sh section "the situation report"
-reads hooks/session-poker.sh verb debt
-reads hooks/session-poker.sh verb fill-report
-reads hooks/session-poker.sh verb hold
-reads hooks/session-poker.sh verb interval
-reads hooks/session-poker.sh verb interval-default
-reads hooks/session-poker.sh verb landing-report
-reads hooks/session-poker.sh verb launch-sync
-reads hooks/session-poker.sh verb prompt
-reads hooks/session-poker.sh verb sweep
-reads hooks/session-poker.sh verb window
 reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn count_main_thread_dispatches
-reads hooks/session-poker.sh fn count_refused_dispatches
-reads hooks/session-poker.sh fn cover_basis
-reads hooks/session-poker.sh fn cur7_judge
-reads hooks/session-poker.sh fn cur8_owed_waivers
 reads hooks/session-poker.sh fn epoch_iso
 reads hooks/session-poker.sh fn file_birth
 reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn hand_holds_report
 reads hooks/session-poker.sh fn iso_epoch
 reads hooks/session-poker.sh fn iso_now
-reads hooks/session-poker.sh fn landing_report
-reads hooks/session-poker.sh fn landing_unmeasured
 reads hooks/session-poker.sh fn line_field
 reads hooks/session-poker.sh fn note
 reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn pair
 reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_armed_file
 reads hooks/session-poker.sh fn patrol_stamp_file
 reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn remove_patrol_stamp
 reads hooks/session-poker.sh fn roster_window
 reads hooks/session-poker.sh fn row_has_key
 reads hooks/session-poker.sh fn session_transcript

@@ -38,26 +38,12 @@ set -uo pipefail
 # below is that closure: the library (every run executes it), the arm of each verb, the sections defining the
 # globals they read, and each helper outside those.
 reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "the contract grammar"
-reads hooks/session-poker.sh verb interval
-reads hooks/session-poker.sh verb interval-default
-reads hooks/session-poker.sh verb share
-reads hooks/session-poker.sh verb window
-reads hooks/session-poker.sh fn adopt_copy_marker
-reads hooks/session-poker.sh fn adopt_fold
-reads hooks/session-poker.sh fn adopt_write_row
 reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn count_main_thread_dispatches
-reads hooks/session-poker.sh fn count_refused_dispatches
-reads hooks/session-poker.sh fn cover_basis
-reads hooks/session-poker.sh fn cur7_judge
-reads hooks/session-poker.sh fn cur8_owed_waivers
 reads hooks/session-poker.sh fn epoch_iso
 reads hooks/session-poker.sh fn file_birth
 reads hooks/session-poker.sh fn file_mtime
 reads hooks/session-poker.sh fn line_field
 reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn pair
 reads hooks/session-poker.sh fn parse_seconds
 reads hooks/session-poker.sh fn patrol_stamp_file
 reads hooks/session-poker.sh fn poker_interval_seconds

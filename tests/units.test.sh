@@ -4850,9 +4850,9 @@ expect_eq "BR-2 AC-5.3 ready's reader reads the SDLC-State-only plan's branch" "
 expect_eq "BR-3 AC-5.3 the card's Branches names it" "working wave/35-fixture" "$(br_card "$REPO_ROOT")"
 expect_eq "BR-4 AC-5.3 the proof judge holds the floor against its checkout" "covered	$BR_HEAD" "$(br_proof "$REPO_ROOT")"
 
-# BR-6: the two hook surfaces call the reader at their site, once each.
+# BR-6: the two hook surfaces call the reader at their site, once each (the poker's is in its judge, `current`).
 anchor file payload/scripts/lib/stop.sh 'LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")'
-anchor file hooks/session-poker.sh 'PV_WB="$(plan_working_branch "$PV_PLAN")"'
+anchor file hooks/poker/judge.sh 'PV_WB="$(plan_working_branch "$PV_PLAN")"'
 
 # BR-7: THE CENSUS. A line that reads the key itself: the key as a regex an awk, grep or sed matches, the key
 # compared as a frontmatter name, or the key handed to the frontmatter getter. Comments are not read.
@@ -5114,5 +5114,37 @@ SL_BRIEF="$SL_R/.bionic/docs/record/wave-01-fixture/briefs/T3.md"
 expect_eq "SL-3 AC-11.3 brief of the review row renders Suites from the cell (positive: Row reads)" "T3|a.test.sh, b.test.sh" \
   "$(awk -F': ' '$1 == "Row" { print $2 }' "$SL_BRIEF" 2>/dev/null)|$(awk -F': ' '$1 == "Suites" { print $2 }' "$SL_BRIEF" 2>/dev/null)"
 expect_eq "SL-3b …and Lands-on from its cell" "a.test.sh" "$(awk -F': ' '$1 == "Lands-on" { print $2 }' "$SL_BRIEF" 2>/dev/null)"
+
+section "§PARTS — the core script's parts: no two of them call each other both ways, and the line loads first"
+# tests/lib/callgraph.py reads the dispatcher and its seven parts: a function belongs to the file that defines it, a
+# call is its name in another part's text. Calls into the dispatcher are the common case; a part calling a part is
+# listed, and two parts calling each other is the fault. The four loads the dispatcher declares by its order: the
+# release check, the situation report and the tick on the line (each prints the landing report), and the tick on the
+# situation report (it prints the report's one line).
+# fails-when: a function moves so that two parts call each other, or a part reaches another the dispatcher loads
+# after it, or a part is not loaded, or one name is defined in two of the files.
+CG_OUT="$(cd "$REPO_ROOT" && python3 -I tests/lib/callgraph.py hooks/session-poker.sh hooks/poker/*.sh 2>&1)"; CG_RC=$?
+expect_eq "PARTS-1 the call graph of the dispatcher and the seven parts exits 0" "0" "$CG_RC"
+expect_eq "PARTS-1b …over seven parts, with no two-way pair" "callgraph: ok — 7 part(s), 4 declared load(s), no two-way pair" \
+  "$(printf '%s\n' "$CG_OUT" | tail -1)"
+expect_eq "PARTS-2 the declared loads: the proof record, the situation report and the tick on the line, the tick on the report" \
+  "$(printf 'load hooks/poker/proof.sh hooks/poker/line.sh\nload hooks/poker/sitrep.sh hooks/poker/line.sh\nload hooks/poker/tick.sh hooks/poker/line.sh\nload hooks/poker/tick.sh hooks/poker/sitrep.sh')" \
+  "$(printf '%s\n' "$CG_OUT" | awk '$1 == "load"')"
+# The positive for the exit 0 above: two planted parts that call each other, loaded in an order, are named.
+CG_D="$SANDBOX/callgraph"; mkdir -p "$CG_D/poker"
+printf '%s\n' '. "$HOOK_DIR/poker/a.sh"' '. "$HOOK_DIR/poker/b.sh"' 'common() { :; }' > "$CG_D/d.sh"
+printf '%s\n' 'fa() { fb; common; }' > "$CG_D/poker/a.sh"
+printf '%s\n' 'fb() {  # fa is named in this comment and is no call' '  :; }' > "$CG_D/poker/b.sh"
+CG_ONE="$(python3 -I "$REPO_ROOT/tests/lib/callgraph.py" "$CG_D/d.sh" "$CG_D/poker/a.sh" "$CG_D/poker/b.sh" 2>&1)"; CG_ONE_RC=$?
+expect_eq "PARTS-3 control: a calls b one way, b loaded after a, is the order fault (exit 1)" \
+  "1|order $CG_D/poker/a.sh $CG_D/poker/b.sh" "$CG_ONE_RC|$(printf '%s\n' "$CG_ONE" | awk '$1 == "order"')"
+printf '%s\n' 'fb() { fa; }' > "$CG_D/poker/b.sh"
+CG_TWO="$(python3 -I "$REPO_ROOT/tests/lib/callgraph.py" "$CG_D/d.sh" "$CG_D/poker/a.sh" "$CG_D/poker/b.sh" 2>&1)"; CG_TWO_RC=$?
+expect_eq "PARTS-3b …and b calling a back is the two-way pair, named (exit 1)" \
+  "1|two-way $CG_D/poker/a.sh $CG_D/poker/b.sh" "$CG_TWO_RC|$(printf '%s\n' "$CG_TWO" | awk '$1 == "two-way"')"
+printf '%s\n' 'fb() { :; }' > "$CG_D/poker/b.sh"; printf '%s\n' '. "$HOOK_DIR/poker/b.sh"' '. "$HOOK_DIR/poker/a.sh"' > "$CG_D/d.sh"
+CG_OK="$(python3 -I "$REPO_ROOT/tests/lib/callgraph.py" "$CG_D/d.sh" "$CG_D/poker/a.sh" "$CG_D/poker/b.sh" 2>&1)"; CG_OK_RC=$?
+expect_eq "PARTS-3c …and with b loaded first the one-way call is the one declared load (exit 0)" \
+  "0|load $CG_D/poker/a.sh $CG_D/poker/b.sh" "$CG_OK_RC|$(printf '%s\n' "$CG_OK" | awk '$1 == "load"')"
 
 finish
