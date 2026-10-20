@@ -446,4 +446,25 @@ expect_eq "LC.4c …its first line at most 100 columns with a 39-character comma
   "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
 expect_contains "LC.4d …the command cut in the line, its start kept" 'Lands-on: `npx jest --testPath' "$(lc_first)"
 
+section "§WAIVER-NONE — \`Deliverable-waiver: none\` is no waiver, so a declared artifact is no conflict"
+# A brief that waives nothing may still carry the scaffold's `Deliverable-waiver:` line with the word `none`. Read as a
+# reason, it rode the row beside the declared artifact, and the sweeper reported the pair as a contradiction.
+# FIXTURES: make_repo's bound plan; BRIEF_FULL's contract (a declared artifact) with one waiver line; the sweeper's
+# verdict asked of the journalled row, as the stop gate asks it. SYNTHESIZED.
+wn_gate() {  # <repo tag> <waiver line> -> GATE_*, WN_ROW, WN_VERDICT
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\n%s' "$BRIEF_FULL" "$2")" w99-wn)"
+  WN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+  WN_VERDICT="$(cd "$REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$BIONIC_HOOKS_DIR/session-sweeper.sh" verdict w99-wn 2>&1)"
+}
+wn_gate wn1 'Deliverable-waiver: the answer is the report itself'
+expect_eq "WN.1 control: a waiver with a reason, beside a declared artifact, rides the row" \
+  "the answer is the report itself" "$(roster_field "$WN_ROW" waiver)"
+expect_contains "WN.1b …and the sweeper reports the contradiction" "waiver disregarded" "$WN_VERDICT"
+wn_gate wn2 'Deliverable-waiver: none'
+expect_eq "WN.2 AC-20.4 Deliverable-waiver: none is no waiver: the row carries the artifact and no waiver" \
+  "allow|.bionic/docs/record/w99-widget.txt|" "$GATE_VERDICT|$(roster_field "$WN_ROW" deliverable)|$(roster_field "$WN_ROW" waiver)"
+expect_contains "WN.2b …the sweeper judges the row" "w99-wn" "$WN_VERDICT"
+expect_absent "WN.2c AC-20.4 …and reports no conflict" "waiver disregarded" "$WN_VERDICT"
+
 finish
