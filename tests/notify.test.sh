@@ -651,14 +651,62 @@ expect_eq "AK-8a …and no other: the question's and the other row's stay open" 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
 # needs the person ("fix it, defer it, or waive <question>"); `waive <question>` is that answer for every finding of
 # the question's readings, so it closes them with `waive:<question>`. A finding of another question stays open.
-# FIXTURE FIDELITY: canonical-sdlc-evidence-gate-2.test.sh's §DISPOSITION builders, read out of that file by name
-# (a repository on its working branch, reading records in the reader's shape, their proof lines in lib/proof.sh's).
-NT_EG2="$(dirname "$0")/canonical-sdlc-evidence-gate-2.test.sh"
-NT_IMPORT_MISSING=""
-for _f in fp_repo fp_commit fp_plan_path fp_plan fp_record fp_proved fp_landing; do
-  nt_import_fn "$_f" "$NT_EG2" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
-done
-expect_eq "AK-9 precondition: the §DISPOSITION builders were all read out of canonical-sdlc-evidence-gate-2.test.sh" "" "$NT_IMPORT_MISSING"
+# FIXTURE FIDELITY: a repository on its working branch, engaged for the session, reading records in the reader's
+# shape and their proof lines in lib/proof.sh's, so the disposition and waive verbs run as they do on a real run.
+fp_repo() {  # <label> -> a repository on wave/01-fixture with one init commit, engaged for FP_SID
+  local r="$FP_ROOT/$1"
+  mkdir -p "$r"
+  ( cd "$r" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+    && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/$FP_REC" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture"
+  : > "$r/.bionic/tmp/engaged-$FP_SID.state"
+  printf '%s' "$r"
+}
+fp_commit() {  # <repo> <path> <text> -> the new commit's sha
+  printf '%s\n' "$3" > "$1/$2"
+  ( cd "$1" && git add -f "$2" && git commit -qm "$2: $3" ) >/dev/null 2>&1
+  git -C "$1" rev-parse HEAD
+}
+fp_plan_path() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
+fp_plan() {  # <repo> <base> <SDLC lines> <task rows> -> writes the plan (a plan the gate admits, plus the review header fields)
+  local r="$1" f; f="$(fp_plan_path "$1")"
+  printf '# requirements\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "$2"
+    printf -- '- T1: landed at record/T1.md\n'
+    [ -z "$3" ] || printf '%s\n' "$3"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    [ -z "$4" ] || printf '%s\n' "$4"
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+    printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+  } > "$f"
+}
+fp_record() {  # <repo> <file> <question> <result> <range> <line>... -> a reading record in the docs root
+  local r="$1" f="$2" q="$3" res="$4" rg="$5"; shift 5
+  { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s\n' "$q" "$res" "$rg"; printf '%s\n' "$@"; printf '\nwhat the reader found\n'; } \
+    > "$r/.bionic/docs/$FP_REC/$f"
+}
+fp_proved() {  # <head> <file> <question> <result> -> the reading's proof line, as proof_line writes it
+  bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' _ "$FP_LIB" "$1" "$FP_REC/$2" "$3" "$4"
+}
+fp_landing() {  # <repo> <line>... -> the run's landing record, whole
+  printf '%s\n' "$@" > "$1/.bionic/docs/$FP_REC/landing-proofs.log"
+}
 FP_SID="$SID"; FP_LIB="$NT_LIB"; FP_REC="record/wave-01-fixture"
 FP_ROOT="$TMPROOT/nt-findings"; mkdir -p "$FP_ROOT"
 RFW="$(fp_repo findings)"
@@ -747,19 +795,19 @@ CW_HOOK="$CW_KEEP"
 # The person's other asks: the Step card, the tick's approval WAIT and GATE, the dispatch wall, the disposition, the
 # close's delivery. The poker copy finds the copy's library beside it, as the tree's does.
 POKER_KEEP="$POKER"; POKER="$NM/hooks/session-poker.sh"
-nt_doctor "MA-5 [the tick's approval]" hooks/session-poker.sh owed_open '"approve:$c"'
+nt_doctor "MA-5 [the tick's approval]" hooks/poker/tick.sh owed_open '"approve:$c"'
 RMK="$(nk_world nt-mut-approval)"
 poke_pressure "$RMK" 8192 1.0 tick
 expect_eq "MA-5a the mutant tick still prints the release's WAIT" "poker: WAIT T4 — approval:release" "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
 expect_absent "MA-5b AC-4.5 …and AK2 goes red: no approve:release item" "approve:release" "$(nt_owed "$RMK" owed_list | cut -f1)"
-nt_undo hooks/session-poker.sh
-nt_doctor "MA-6 [the tick's GATE]" hooks/session-poker.sh owed_open '"gate:$k"'
+nt_undo hooks/poker/tick.sh
+nt_doctor "MA-6 [the tick's GATE]" hooks/poker/tick.sh owed_open '"gate:$k"'
 RMS="$(nt_world nt-mut-gate)"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RMS")"
 poke "$RMS" tick
 expect_absent "MA-6b AC-4.5 …and S2b goes red: no gate: item" "gate:" "$(nt_owed "$RMS" owed_list | cut -f1)"
-nt_undo hooks/session-poker.sh
-nt_doctor "MA-7 [the disposition's finding]" hooks/session-poker.sh owed_open '"$(finding_owed_key "$DSP_FID")"'
+nt_undo hooks/poker/tick.sh
+nt_doctor "MA-7 [the disposition's finding]" hooks/poker/proof.sh owed_open '"$(finding_owed_key "$DSP_FID")"'
 FP_ROOT="$TMPROOT/nt-mut-findings"; mkdir -p "$FP_ROOT"
 RMF="$(fp_repo findings)"
 cp -R "$RFW/.bionic/docs/." "$RMF/.bionic/docs/"
@@ -769,18 +817,18 @@ POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 poke "$RMF" disposition
 expect_contains "MA-7a the mutant disposition still renders the open finding" "poker: finding $FP_REC/st.md#2 S1" "$OUT"
 expect_eq "MA-7b AC-4.5 …and AK-9a goes red: no finding: item" "" "$(cw_open "$RMF")"
-nt_undo hooks/session-poker.sh
+nt_undo hooks/poker/proof.sh
 
 # The closers: a waive-row that closes nothing, a waive that closes only waive:<q>.
-nt_doctor "MA-8 [waive-row's close]" hooks/session-poker.sh poker_owed_close '"waive-row:'
+nt_doctor "MA-8 [waive-row's close]" hooks/poker/proof.sh poker_owed_close '"waive-row:'
 RMW="$(mk_repo nt-mut-row)"; H_EG6="$(git -C "$RMW" rev-parse HEAD)"
 cw_commit "$RMW" "$(printf '%s\n' "$CW_NA" | sed "s/$(git -C "$RCW" rev-parse HEAD)/$H_EG6/g")"
 expect_eq "MA-8a precondition: the n/a row's ask is open in the mutant's world" "waive-row:AC-1" "$(cw_open "$RMW")"
 cw_waive_row "$RMW"
 expect_eq "MA-8b the mutant waive-row still records the waiver (exit 0)" "0" "$RC"
 expect_eq "MA-8c AC-4.5 …and AK-8 goes red: the item stays open" "waive-row:AC-1" "$(cw_open "$RMW")"
-nt_undo hooks/session-poker.sh
-nt_doctor "MA-9 [waive's finding close]" hooks/session-poker.sh poker_owed_close '"$2" "$key" "waive"'
+nt_undo hooks/poker/proof.sh
+nt_doctor "MA-9 [waive's finding close]" hooks/poker/proof.sh poker_owed_close '"$2" "$key" "waive"'
 FP_ROOT="$TMPROOT/nt-mut-waive"; mkdir -p "$FP_ROOT"
 RMV="$(fp_repo findings)"
 cp -R "$RFW/.bionic/docs/." "$RMV/.bionic/docs/"
@@ -791,7 +839,7 @@ expect_eq "MA-9a precondition: the findings are open in the mutant's world" "$FW
 poke "$RMV" waive structure 'ship it as it stands'
 expect_eq "MA-9b the mutant waive still records the waiver (exit 0)" "0" "$RC"
 expect_eq "MA-9c AC-4.5 …and AK-9 goes red: structure's findings stay open" "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RMV")"
-nt_undo hooks/session-poker.sh
+nt_undo hooks/poker/proof.sh
 POKE_BOUND="$POKE_BOUND_WAS"
 POKER="$POKER_KEEP"
 
