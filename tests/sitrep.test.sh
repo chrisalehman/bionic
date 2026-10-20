@@ -777,8 +777,13 @@ expect_eq "GM1 four 20-minute one-file landings miss the 15-minute goal: the tic
   "decide:goal:fast-landings" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' "$SR_OWED_F" 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
 expect_eq "GM2 …it is owed: the tick's sitrep line counts it" "owed: 1" \
   "$(/usr/bin/grep '^poker: sitrep ' "$TMPROOT/tick.out" | /usr/bin/grep -oE 'owed: [0-9]+')"
-sed 's/^owed\/v1|key=decide:goal:fast-landings|state=open|.*/owed\/v1|key=decide:goal:fast-landings|state=closed|by=ruled|at=2026-10-06T22:00:30Z/' "$SR_OWED_F" > "$SR_OWED_F.t" && mv "$SR_OWED_F.t" "$SR_OWED_F"
+sr_run "$SR_PLAN"
+expect_eq "GM3 the page prints the open goal decision as one sentence: one bullet under Blocked on you, the theme named once" "1|1" \
+  "$(sr_sect 'Blocked on you' | /usr/bin/grep -c '^- ')|$(sr_sect 'Blocked on you' | /usr/bin/grep -o 'fast landings' | /usr/bin/grep -c .)"
+sed -i.bak 's/one-file median under 15m/one-file median under 30m/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 SR_AT=$((SR_NOW + 60)) sr_tick
+expect_eq "GM4 the goal now reads reached: the tick closes its open decision, and the item stays on the ledger closed" "1|0" \
+  "$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=closed|' "$SR_OWED_F")|$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=open|' "$SR_OWED_F")"
 
 # ============================================================
 section "§ONE-FILE: the schedule's bar half and the one-file goal read the one-file landings only; a landing of more files moves neither"
