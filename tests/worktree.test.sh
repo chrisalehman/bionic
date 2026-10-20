@@ -985,4 +985,17 @@ expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, 
   "0|line/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
   "$(awk 'END { print NR }' "$TMP/hand-runs")|$(grep '|ev=verdict|' "$BHREC" | sed 's/|at=[^|]*$//')"
 
+# A hand landing that names its suites leaves a ready line that names them too, so the judge and the door read one
+# row's suites; with none named, the ready line says none.
+printf '| T3 | 4 | build | row three | bh-T3 | — | | 10 | REQ-1 | bh-T3.txt | .worktrees/bh-T3 | | active |\n' >> "$BHP"
+awk '{ print } /^- T2:/ { print "- T3: active" }' "$BHP" > "$BHP.n" && mv "$BHP.n" "$BHP"
+BHT3="$(new_tree "$BH" wt/bh-T3)"; printf 'three\n' > "$BHT3/three.txt"; git -C "$BHT3" add three.txt && git -C "$BHT3" commit -qm "T3: a row"
+printf '%s|row=T3|lands_on=a.test.sh,b.test.sh\n' "$(roster_row_fixture status=intended session="$BHSID" name=bh-T3 agent_id=b00T3 plan="$BHP")" \
+  >> "$BH/.bionic/tmp/roster-${BHSID}.state"
+BHC3="$(git -C "$BHT3" rev-parse HEAD)"
+bh_land "$BHT3" --by-hand --reason "landed on the report" --suites a.test.sh,b.test.sh --green-at "$BHC3" --log /logs/T3-green.log >/dev/null
+expect_eq    "(hd4) …and its ready line names the suites the person named, where a landing that named none says none" \
+  "a.test.sh,b.test.sh|none" \
+  "$(grep '|ev=ready|row=T3|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')|$(grep '|ev=ready|row=T1|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')"
+
 finish
