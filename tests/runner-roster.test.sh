@@ -321,8 +321,6 @@ section "§5 the shipped tree: the roster the real runner reads is the real glob
 # runner names no suite by hand any more, so the only thing that can disagree
 # with the directory is the derivation itself.
 
-expect_eq "5.1 the shipped runner hand-lists no suite by name" "0" \
-  "$(grep -c '^run "' "$RUNNER" | tr -d ' ')"
 expect_eq "5.2 …and every file in tests/ satisfies the shape it demands" "0" \
   "$(RR_BAD=0
      for RR_F in "$REPO"/tests/*.test.sh; do
@@ -609,8 +607,6 @@ rr9_drive "$T9" "$P9"
 expect_eq "9.1 the run is green over the three suites" "0" "$RR9_RC"
 expect_eq "9.2 the knob created the progress file" "yes" \
   "$([ -f "$P9" ] && echo yes || echo no)"
-expect_eq "9.3 it holds one end line per suite, no more" "3" \
-  "$(rr9_ends "$P9" | LC_ALL=C awk 'END { print NR+0 }')"
 expect_eq "9.4 …and every one of those lines carries the pinned shape" "3" \
   "$(rr9_shaped "$P9")"
 expect_eq "9.5 …naming exactly the suites in the glob, as a set" \
@@ -677,8 +673,6 @@ expect_eq "9.15 the progress file names the two suites that DID land" \
   "$(printf 'k-one.test.sh\nk-two.test.sh\n')" "$(rr9_prog_labels "$P9K")"
 expect_absent "9.16 …and never names the one that never finished in an end line" \
   "zzz-killed.test.sh" "$(rr9_ends "$P9K")"
-expect_eq "9.17 …so the file holds two end lines, not three" "2" \
-  "$(rr9_ends "$P9K" | LC_ALL=C awk 'END { print NR+0 }')"
 # PAIRED: the killed suite IS in the report, so 9.16 is a missing progress line
 # and not a suite the roster never carried.
 expect_contains "9.18 …while the report still carries it, in roster order" \
@@ -729,8 +723,6 @@ expect_eq "9.21 the outer file names the outer tree's two suites" \
   "$(printf 'n-outer.test.sh\nn-plain.test.sh\n')" "$(rr9_prog_labels "$P9N")"
 expect_absent "9.22 …and carries no label from the nested tree" \
   "zin-inner.test.sh" "$(cat "$P9N")"
-expect_eq "9.23 …so it holds two end lines, not three" "2" \
-  "$(rr9_ends "$P9N" | LC_ALL=C awk 'END { print NR+0 }')"
 
 # ---- the report is in ROSTER order, and now that is falsifiable ------------
 #

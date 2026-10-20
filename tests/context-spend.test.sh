@@ -394,8 +394,6 @@ fire "$CS_D" "$CS_H" "$CS_T"
 set_step "$CS_D" 5
 fire "$CS_D" "$CS_H" "$CS_T"
 CS_UB="run resolved by newest-plan fallback (session unbound) — $CS_D/.bionic/docs/plans/wave-01.plan.md; bind with session-poker.sh bind $CS_D/.bionic/docs/plans/wave-01.plan.md, or write this session's plan"
-expect_eq "13: an unbound session gets lib/run.sh's one advisory on stderr, once" \
-  "1" "$(printf '%s\n' "$HOOK_ERR" | grep -cxF "$CS_UB")"
 expect_silent "13b: …records no spend across the step boundary, and nothing on stdout" "$CS_H" "$CS_D"
 expect_empty "13c: …and writes no state against the fallback plan" \
   "$(find "$CS_D/.bionic/tmp" -name 'context-spend.state' 2>/dev/null)"

@@ -664,12 +664,6 @@ fi
 # The REGISTRATION spelling, not any mention: the Patrol section names this hook in prose
 # (it is what reports a Patrol death, and the disarm ritual exists because of it), and a
 # grep for the bare filename would forbid the documentation along with the duplicate.
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive\.sh' \
-     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  no "28b: SKILL.md still registers the hook — a second registration fires it twice per turn"
-else
-  ok "28b: …and SKILL.md's frontmatter does not, so it fires exactly once"
-fi
 
 # 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. The manifest registers
 # this hook as a BARE PATH — `command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh`,

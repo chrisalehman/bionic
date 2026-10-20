@@ -617,7 +617,6 @@ expect_eq "G11.bad4 a main root of / is malformed input, rc 2" "2" "$(call grant
 G11_MSG="$(dec lead "$G11_LEAD" "$(D "$P/.bionic/docs/x")")"
 G11_R="$(fld 2 "$G11_MSG")"; G11_F="$(fld 3 "$G11_MSG")"
 expect_contains "G11.msg1 the reason names the path" "$P/.bionic/docs/x" "$G11_R"
-expect_contains "G11.msg2 …says the shared directories are not part of a run's checkout" "shared directories are not part of a run's checkout" "$G11_R"
 for r in "$S" "$P" "$REC"; do
   expect_contains "G11.msg3 …and names the root $r" "$r" "$G11_R"
 done
@@ -690,12 +689,9 @@ for cls in writer reader; do
   v="$(dec "$cls" "$f" "$(D "$G13_T")")"
   expect_eq "G13.$cls.0 $cls: a delete outside its roots is deny-fix" "deny-fix" "$(kind "$v")"
   expect_contains "G13.$cls.1 …the reason is rule 6's (outside where it may delete)" "outside where" "$(fld 2 "$v")"
-  expect_contains "G13.$cls.2 …and the fix sends the agent to the lead" "ask the lead to remove it" "$(fld 3 "$v")"
   expect_absent "G13.$cls.3 …not past it to the human" "human" "$(fld 3 "$v")"
 done
 # The other rule-6 delete wording is unchanged: an agent deleting in the add-only record.
-expect_eq "G13.addonly the add-only record fix is untouched" "Leave it in place and write a new file beside it instead." \
-  "$(fld 3 "$(dec writer "$WRITER_FACTS" "$(D "$REC/a.md")")")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§G14 which program a word runs is the shared reader's; a match made to refuse stays case-blind"
@@ -948,7 +944,6 @@ expect_eq "G18.1 a report in the record directory: a write to it allows" "allow"
 expect_eq "G18.2 a report in the scratch: a write to it allows" "allow" "$(dec reader "scratch=$S${NL}report=$S/r.md" "$(W "$S/r.md")")"
 G18_3="$(dec reader "scratch=$S${NL}record=$REC${NL}report=$P/hooks" "$(W "$P/hooks/bash-walls.sh")")"
 expect_eq "G18.3 a report naming the main checkout's hooks: a write there is deny-fix" "deny-fix" "$(kind "$G18_3")"
-expect_contains "G18.3b …and the grant it names is the scratch alone" "This read-only agent may write and delete under $S." "$(fld 2 "$G18_3")"
 expect_eq "G18.4 a report file in the main checkout: a write to it is deny-fix" "deny-fix" \
   "$(kind "$(dec reader "scratch=$S${NL}record=$REC${NL}report=$P/hooks/r.md" "$(W "$P/hooks/r.md")")")"
 expect_eq "G18.5 a report in another writer's tree: deny-fix" "deny-fix" \

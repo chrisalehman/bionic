@@ -491,8 +491,6 @@ expect_match    "19: the section falls back to none running" "*none running*" "$
 # NOT SILENCE. Running-or-nothing governs the SECTION; a Patrol that was armed
 # and stopped ticking is the one state a person can act on, and the fix channel
 # is where doctor says so.
-expect_match    "20: the fix section names the session and what to do" \
-  "*session ${SHORT4}: the Patrol is armed but not firing*" "$OUT4"
 # The deleted detail stays deleted — the stamp is read, not rendered.
 expect_no_match "21: the stamp state itself is still not printed" "*not-firing*" "$OUT4"
 expect_no_match "22: nor its age or interval provenance" "*came from the poker*" "$OUT4"

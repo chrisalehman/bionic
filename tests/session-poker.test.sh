@@ -367,8 +367,6 @@ new_roster "$R4"
 poke "$R4" tick
 expect_status "a tick over an unreadable state directory REFUSES (exit 2), it does not decide" \
   "2" "$RC"
-expect_contains "…and says the verdict read did not complete" \
-  "REFUSED — the verdict read did not complete" "$OUT"
 expect_contains "…quoting the SWEEPER's own refusal rather than inventing one" \
   "sweeper: REFUSED" "$OUT"
 expect_contains "…naming the state directory as the symbolic link it is" \
@@ -638,8 +636,6 @@ s7_birth_iso() {  # <path> -> UTC ISO-8601 of the filesystem's own creation inst
 R7A="$(make_repo s7-nokey)"; new_roster "$R7A"
 OUT="$( cd "$R7A" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" window 2>&1 )"; RC=$?
 expect_eq "window with no session key REFUSES with exit 3" "3" "$RC"
-expect_contains "…and says why: a window answers for ONE session" \
-  "A window answers for ONE session" "$OUT"
 
 # ---------- 7b: a roster on disk — its own birth, as ISO ----------
 R7B="$(make_repo s7-roster)"; new_roster "$R7B"

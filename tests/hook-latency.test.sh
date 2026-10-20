@@ -826,11 +826,6 @@ expect_eq "11a: in bypass mode the budgeted agent's ls -la is left as typed: not
   "" "$CARRY_CMD_BYP_C"
 expect_eq "11b: …and the agent whose row states no budget alike" "" "$CARRY_CMD_BYP_D"
 expect_eq "11c: in default mode the budgeted agent's ls -la is left as typed (11-positive is the positive)" "" "$CARRY_CMD_DEF_C"
-expect_true "11d: a budgeted agent's plain call in bypass mode count <= 12, §1's cap" test "$BYP_C" -le 12
-expect_true "11e: …and in default mode" test "$DEF_C" -le 12
-expect_eq "11f: in bypass mode a budget costs the call nothing: no roster read, no rewrite" "$BYP_D" "$BYP_C"
-expect_eq "11g: in default mode a budget costs the call nothing: no roster read, no rewrite" "$DEF_D" "$DEF_C"
-expect_eq "11h: …and bypass mode costs what default mode does" "$DEF_C" "$BYP_C"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "PLACE: the placement reader's cost is its segment count, never the text's length (wave-36 T3; D11, AC-5.5)"

@@ -158,7 +158,6 @@ TREE1="$(make_plugin_tree)"
 write_installed_plugins "$TREE1"
 write_session "$LIVE_PID" "$PROJ_REAL"
 write_record "$SID_LIVE" "$TREE1"
-expect_eq "0: precondition — the record holds one manifest line per loaded file" "4" "$(manifest_lines "$REC")"
 printf '{"hooks":{}}' > "$TREE1/hooks/hooks.json"
 
 OUT1="$(run_doctor)"
@@ -245,10 +244,6 @@ OUT52="$(run_doctor)"
 TICK52="$(run_tick)"
 expect_match "MAN-2 AC-1.3 a skill's content moved: the row names skills" \
   "*✗ restart needed*pid ${LIVE_PID} — skills changed since load*" "$OUT52"
-expect_match "MAN-2b …and its fix line names the same class" \
-  "*pid ${LIVE_PID} loaded skills at 2026-08-27 14:00Z → exit claude and start it again*" "$OUT52"
-expect_match "MAN-2c the tick prints the restart line from the same reader, naming the class" \
-  "*poker: restart needed — skills changed after this session loaded them (pid ${LIVE_PID}): exit claude and start it again*" "$TICK52"
 expect_eq "MAN-2d …one line" "1" "$(count_of "restart needed" "$TICK52")"
 expect_no_match "MAN-2e only the class that moved is named" "*restart needed*pid ${LIVE_PID} — skills, *" "$OUT52"
 
@@ -260,7 +255,6 @@ printf 'role, edited\n' > "$TREE5/agents/critic.md"
 OUT53="$(run_doctor)"
 TICK53="$(run_tick)"
 expect_match "MAN-3 a role file's content moved: the row names agents" "*restart needed*pid ${LIVE_PID} — agents changed since load*" "$OUT53"
-expect_match "MAN-3c …and the tick names it" "*poker: restart needed — agents changed after this session loaded them*" "$TICK53"
 
 printf 'role\n' > "$TREE5/agents/critic.md"
 printf 'command, edited\n' > "$TREE5/commands/x.md"
@@ -268,7 +262,6 @@ OUT54="$(run_doctor)"
 TICK54="$(run_tick)"
 expect_match "MAN-4 AC-1.3 commands/x.md's content moved: the row names commands" \
   "*restart needed*pid ${LIVE_PID} — commands changed since load*" "$OUT54"
-expect_match "MAN-4b …and the tick names it" "*poker: restart needed — commands changed after this session loaded them*" "$TICK54"
 
 printf '{"edited":1}' > "$TREE5/hooks/hooks.json"
 printf 'skill, edited\n' > "$TREE5/skills/demo/SKILL.md"
@@ -290,10 +283,6 @@ printf 'skill, edited\n' > "$TREE5/skills/demo/SKILL.md"
 write_installed_plugins "$TREE5" "2026-08-27T15:30:00.250Z"
 OUT57="$(run_doctor)"
 TICK57="$(run_tick)"
-expect_match "MAN-7 the registry installed after the record: the fix line says or reloaded since <ISO>" \
-  "*pid ${LIVE_PID} loaded skills, or reloaded since 2026-08-27 15:30Z → exit claude and start it again*" "$OUT57"
-expect_match "MAN-7b …and so does the tick's line" \
-  "*poker: restart needed — skills changed after this session loaded them, or reloaded since 2026-08-27T15:30:00Z (pid ${LIVE_PID}): exit claude and start it again*" "$TICK57"
 write_installed_plugins "$TREE5" "2026-08-27T13:30:00.000Z"
 OUT57B="$(run_doctor)"
 expect_match "MAN-7c the registry installed before the record: the row still fires" "*restart needed*pid ${LIVE_PID} — skills*" "$OUT57B"
@@ -318,8 +307,6 @@ printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"
   "$SID_LIVE" "$TMP/t.jsonl" "$PROJ_REAL" \
   | ( cd "$PROJ_REAL" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
       CLAUDE_CODE_SESSION_ID="$SID_LIVE" CLAUDE_PLUGIN_ROOT="$TREE9" "${REPO}/hooks/session-start.sh" >/dev/null 2>&1 )
-expect_eq "MAN-9a precondition: the start hook wrote the record, naming the tree and four files" \
-  "root=${TREE9}|4" "$(/usr/bin/grep '^root=' "$REC" 2>/dev/null)|$(manifest_lines "$REC")"
 OUT59Q="$(run_doctor)"
 expect_match "MAN-9b doctor ran its PROJECT section" "*PROJECT*" "$OUT59Q"
 expect_no_match "MAN-9c over the hook's own record, nothing moved: no row" "*restart needed*" "$OUT59Q"

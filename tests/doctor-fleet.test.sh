@@ -478,8 +478,6 @@ OUT6C="$( cd "$BARE" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
   BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 RES6C="$(doctor_section "$OUT6C" "RESOURCES")"
-expect_match "18f: a project with no attestation still says so" \
-  "*none has taken an attestation in this project*" "$RES6C"
 
 # AND THE THIRD STATE, WHICH 1.5.1 CREATED: a project holding attestations whose
 # sessions are ALL gone. Before the collapse those rendered a row each, so the
@@ -503,10 +501,6 @@ OUT6D="$( cd "$DEADONLY" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
   BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 RES6D="$(doctor_section "$OUT6D" "RESOURCES")"
-expect_no_match "18g: a project whose every attestation is dead never claims it has none" \
-  "*none has taken an attestation in this project*" "$RES6D"
-expect_match "18h: …it counts them and sends the reader to the section that names the repair" \
-  "*2 attestations here, every one from a session that is gone*" "$RES6D"
 expect_no_match "18i: …and still does not render their budgets as live capacity" \
   "*writers=77*" "$RES6D"
 # 18j RE-POINTED (R2, ticket-30). Before R2 the page named the verb

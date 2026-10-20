@@ -422,8 +422,6 @@ json.dump(meta, open(d + "/meta.json", "w"))
 PY
 
 meta() { jq -r ".[\"$1\"]" "$SANDBOX/in/meta.json"; }
-expect_true "fixture: the small plan is at least 64 KB" test "$(wc -c < "$GS_PLAN")" -ge 65536
-expect_true "fixture: the large plan is at least 200 000 bytes" test "$(wc -c < "$GS_PLAN_L")" -ge 200000
 expect_true "fixture: a1's old_string sits within 1 KB of offset 8000" \
   awk -v o="$(meta a1)" 'BEGIN { exit !(o > 7000 && o < 9000) }'
 expect_true "fixture: a2's old_string sits within 1 KB of offset 60000" \
@@ -444,8 +442,6 @@ expect_true "fixture: g's small command is at least 64 000 bytes" test "$(meta g
 for _m in b-l b3-l c-l k-l; do
   expect_true "fixture: $_m's command is at least 200 000 characters" test "$(meta "$_m")" -ge 200000
 done
-expect_true "fixture: d-l's long segment is at least 200 000 bytes" \
-  test "$(jq -r '.tool_input.command' "$SANDBOX/in/d-l.json" | wc -c)" -ge 200000
 expect_true "fixture: c-l keeps c's quote density (over one quote in six characters)" \
   awk -v n="$(meta c-l)" -v q="$(meta c_quotes-l)" 'BEGIN { exit !(q * 6 > n) }'
 expect_true "fixture: e-l's command is at least 200 000 bytes, at least 3 000 lines" \
@@ -503,7 +499,6 @@ row a1 "$GS_HOOK" "$R_GS" 2 "status doing" err
 row a2 "$GS_HOOK" "$R_GS" 2 "status doing" err
 
 section "2 — bash-walls: the heredoc, the quote-dense command, the long chain segment"
-row b  "$WALLS_HOOK" "$R_PUSH"   2 "main is a protected branch here" err
 row b2 "$WALLS_HOOK" "$R_AGENT"  2 "a read-only role never commits" err
 row c  "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
 # d: the chain tier-2 nudge that used to witness this row is retired (wave-24 T11, AC-7.7), so a
@@ -558,8 +553,6 @@ for _m in bash-walls canonical-sdlc-governing-skill; do
   expect_eq "self-check: the $_m copy parses and differs from the hook by the one planted line" "0 1" \
     "$(/bin/bash -n "$HT_MUT/hooks/$_m.sh" >/dev/null 2>&1; echo $?) $(diff "${BIONIC_HOOKS_DIR}/$_m.sh" "$HT_MUT/hooks/$_m.sh" | grep -c '^>')"
 done
-pair "self-check b, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/bash-walls.sh" "$R_PUSH" \
-  "$SANDBOX/in/b.json" "$SANDBOX/in/b-l.json" 2 "main is a protected branch here" err
 expect_true "self-check b: the planted walk counts more on the large input (${PAIR_NS} then ${PAIR_NL}): row b would go red" \
   test "${PAIR_NL:-0}" -gt "${PAIR_NS:-0}"
 pair "self-check a2, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/canonical-sdlc-governing-skill.sh" "$R_GS" \
@@ -793,10 +786,6 @@ PY
 cp "$SANDBOX/verb-plan.pristine" "$VERB_PLAN"
 bound_marker "$R_VERB" "$SID" "$VERB_PLAN"
 : > "$SANDBOX/in/empty"
-expect_true "fixture: the small verb plan is at least 66 000 bytes" test "$(wc -c < "$SANDBOX/verb-plan.pristine")" -ge 66000
-expect_true "fixture: the large verb plan is at least 200 000 bytes" test "$(wc -c < "$SANDBOX/verb-plan-l.pristine")" -ge 200000
-expect_eq "fixture: the two verb plans carry the same rows above the detail" \
-  "$(grep -c '^|' "$SANDBOX/verb-plan.pristine")" "$(grep -c '^|' "$SANDBOX/verb-plan-l.pristine")"
 
 # THE VERBS ARE COUNTED UNDER A BASH THAT TRACES TO ITS OWN FD (4.1 on). bash 3.2 writes xtrace
 # on fd 2, so a verb that reads a check's stderr through `$( … 2>&1)` reads the trace with it

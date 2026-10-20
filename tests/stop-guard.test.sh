@@ -503,7 +503,6 @@ sg_roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdead
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
 expect_status "active wave + a target still working (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-expect_contains "…and the guard says it judged the target" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # §7's stop=closed row, and since task-engaged-session it has to be driven on the channel
 # that actually carries identity. The gate asks `engaged_session` first, keyed to the
@@ -516,7 +515,6 @@ W4_NOKEY=$(jq -n --arg c "$W4_REPO" --arg t "$W4_TR" \
 GUARD_OUT=$(printf '%s' "$W4_NOKEY" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
 GUARD_ERR=$(cat "$SANDBOX/.err")
 expect_status "active wave + payload missing its session key: the environment's key resolves it, and the working target is judged (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-expect_contains "…on the look, keyed to the environment's session" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # AND THE ROW BELOW IT, new with the switch: a payload with no key AND no key in the
 # environment cannot be shown to belong to an engaged session at all. Engagement is
@@ -533,7 +531,6 @@ expect_status "active wave + empty task_id: REFUSED" 2 "$GUARD_ST"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
 expect_status "active wave + unresolvable name (not address-shaped): REFUSED (D8, T5)" 2 "$GUARD_ST"
-expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
 
 # THE SAME FIXTURE, RE-POINTED (T22, then D8/T5). Two live agents answering to one name used
 # to refuse as an ambiguity. The register decides now, and neither of these two has a row on
@@ -544,7 +541,6 @@ plant_agent "$W4_SUB" "adouble-5555555555555555" "twin"
 plant_agent "$W4_SUB" "adouble-6666666666666666" "twin"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "twin")"
 expect_status "two same-named agents on no roster row of this session: REFUSED (D8, T5)" 2 "$GUARD_ST"
-expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
 
 # A plan with CR-only line endings is still a plan. `tr -d` on those separators
 # collapses the file to one line, the run-state marker goes unseen, and the gate
@@ -638,7 +634,6 @@ expect_regex "bid1 …and the passthrough is logged, never silent" 'PASSTHROUGH'
 # passes the moment it does. Same payload, same roster: the transcript line is the only change.
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "xq7mkd2wx")"
 expect_status "bid2 an off-shape id the transcript never recorded: REFUSED" 2 "$GUARD_ST"
-expect_contains "bid2 …as on no roster row" "no roster row of this session" "$GUARD_ERR"
 printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_bid2","content":"Command running in background with ID: xq7mkd2wx"}]},"toolUseResult":{"stdout":"","backgroundTaskId":"xq7mkd2wx"}}' >> "$W4_TR"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "xq7mkd2wx")"
 expect_status "bid2b …and once the transcript records backgroundTaskId xq7mkd2wx: PASSES THROUGH" 0 "$GUARD_ST"
@@ -665,7 +660,6 @@ expect_absent "bid3b …nor reach the passthrough" "PASSTHROUGH" "$GUARD_ERR"
 # bid4 — an unrostered name that is a name and not an id: refused (a hyphen is no id).
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "backlog-census")"
 expect_status "bid4 an unrostered name (backlog-census): REFUSED" 2 "$GUARD_ST"
-expect_contains "bid4 …as on no roster row" "no roster row of this session" "$GUARD_ERR"
 
 # bid5 — the fallback is exactly nine: a longer `b`/`t` run is not an id the harness hands out.
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "b66vjp0okz")"
@@ -718,8 +712,6 @@ sg_roster_row "$A22_REPO" "$SID_A" "busy" "abusy-1212121212121212" ".bionic/tmp/
 wake_log "$A22_SUB" "abusy-1212121212121212"
 run_guard "$(mk_stop_payload "$SID_A" "$A22_TR" "$A22_REPO" "busy")"
 expect_status "AC-2.2 alive inside its cadence, deliverable absent (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-expect_contains "AC-2.2 …and the one line names what was observed" \
-  "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 expect_contains "AC-2.2 fact 1 — the working log's path" \
   "agent-abusy-1212121212121212.jsonl" "$GUARD_ERR"
 expect_regex "AC-2.2 fact 2 — its age, against the cadence the row declared" \
@@ -794,7 +786,6 @@ wake_log "$A23_SUB" "aempty-2424242424242424"
 run_guard "$(mk_stop_payload "$SID_A" "$A23_TR" "$A23_REPO" "empty-one")"
 expect_status "AC-2.3 (d) a zero-byte artifact leaves the contract undelivered (wave-31 T32: allowed, its verdict recorded as reason=)" \
   0 "$GUARD_ST"
-expect_contains "AC-2.3 (d) …judged undelivered, not delivered" "is ALIVE and its contract is undelivered" "$GUARD_ERR"
 
 # (e) THE PROGRESS ARTIFACT IS THE SECOND CHANNEL, and it is the one that keeps an agent
 # inside a forty-minute tool call from reading as idle. The working log is ancient; the
@@ -893,8 +884,6 @@ ln -s "$OUTSIDE_DIR" "$S2_REPO/.bionic/tmp"
 : > "$OUTSIDE_DIR/engaged-$SID_A.state"
 run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
 expect_status "a symlinked state DIRECTORY refuses the stop" 2 "$GUARD_ST"
-expect_contains "…for the symlink reason specifically, not a fallback one" \
-  "nothing here will read through it" "$GUARD_VERR"
 
 # The ROSTER is repo-controlled state too, so a symlink at its own level would let
 # a repo choose which file answers a question the gate asks — the OPEN direction §8

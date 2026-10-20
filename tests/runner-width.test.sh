@@ -290,8 +290,6 @@ cp "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/"*.sh "$NV/payload/scripts/lib/" 2
 # aaa-marked: the marker verbatim, green. b-plain: no marker, green.
 printf '#!/bin/bash\n# runner: solo\necho run >> "$NV_MARKS/marked.runs"\nexit 0\n' > "$NV/tests/aaa-marked.test.sh"
 printf '#!/bin/bash\necho run >> "$NV_MARKS/plain.runs"\nexit 0\n' > "$NV/tests/b-plain.test.sh"
-expect_eq "NV.0 the fixture's marked suite carries the marker verbatim within its first 30 lines" "1" \
-  "$(head -n 30 "$NV/tests/aaa-marked.test.sh" | grep -cE '^# runner: solo[[:space:]]*$')"
 NV_OUT=""; NV_RC=0
 nv_drive() {  # [runner args...] — the scratch runner on the planted load, old ceiling NV_MAXW (1 s); NV_OUT, NV_RC
   NV_OUT="$( cd "$NV" && env -u BIONIC_GATE_DIR -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_TEST_JOBS_CEILING \

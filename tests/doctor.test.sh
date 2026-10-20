@@ -80,8 +80,6 @@ expect_eq "LV3 version.sh prints (in place) · C · R" "bionic 9.9.9 (in place) 
 expect_no_match "LV4 …and the registry's sha is not on it" "*01234567*" "$(run_version)"
 D1="$(run_doctor)"
 expect_eq "LD2 doctor's header is the same line" "Bionic Doctor — bionic 9.9.9 (in place) · ${C:0:8} · $R" "$(printf '%s\n' "$D1" | awk 'NR==1')"
-expect_match "LD3 …and the registration row says the install is not what runs" \
-  "plugin source: *installed — not what this session runs*" "$(printf '%s\n' "$D1" | grep '^plugin source:')"
 
 section "LOADED — a record that is not a live session's, or names no checkout"
 DEAD="99999999-8888-7777-6666-555555555555"

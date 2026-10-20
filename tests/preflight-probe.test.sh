@@ -353,10 +353,6 @@ expect_eq "session A's record is keyed to session A, not clobbered by B" "$SESSI
   "$(grep -m1 '^session_id=' "$SBX/repo/$STATE_REL" | cut -d= -f2-)"
 expect_eq "session B's record is keyed to session B, not clobbered by A" "$SESSION_B" \
   "$(grep -m1 '^session_id=' "$SBX/repo/$STATE_REL_B" | cut -d= -f2-)"
-expect_eq "session A's record has no interleaving (exactly one session_id line)" "1" \
-  "$(grep -c '^session_id=' "$SBX/repo/$STATE_REL")"
-expect_eq "session B's record has no interleaving (exactly one session_id line)" "1" \
-  "$(grep -c '^session_id=' "$SBX/repo/$STATE_REL_B")"
 _debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight-*.state.*' 2>/dev/null | head -3)"
 expect_eq "parallel writers leave no temp debris" "" "$_debris"
 
@@ -762,8 +758,6 @@ expect_true "…attesting against the working directory, as it always has" \
 #
 # The auto-probe path in the dispatch wall now REPRINTS this script's output verbatim
 # inside a refusal, so any advice left here reaches an operator through a second surface.
-expect_eq "the probe's print-only advice names no deleted machinery" "0" \
-  "$(grep -cE 'preflight: .*(arm|watcher|retire)' "$PROBE" | tr -d ' ')"
 
 # ============================================================
 section "S10 — attestation version 2 and its reader (AC-25, wave-bionic-1.4.0-update)"

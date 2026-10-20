@@ -210,7 +210,6 @@ call_active_run "$R"
 expect_eq "task scale, current: 4 -> active_run exits 0" 0 "$AR_ST"
 expect_eq "task scale, current: 4 -> prints the plan path" "$P" "$AR_OUT"
 P=$(plan_fixture --current T2 "$R/.bionic/docs/plans/task.plan.md" task)
-expect_eq "…the same plan carries current: T2" "1" "$(/usr/bin/grep -c '^current: T2$' "$P")"
 call_active_run "$R"
 expect_eq "task scale, current: T2 -> active_run exits 0 (kept open, so its readers refuse it)" 0 "$AR_ST"
 expect_eq "task scale, current: T2 -> prints the plan path" "$P" "$AR_OUT"

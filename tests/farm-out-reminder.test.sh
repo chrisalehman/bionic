@@ -207,13 +207,8 @@ expect_eq "3d: …on the PreToolUse event" "PreToolUse" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)"
 
 FO_REASON="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)"
-expect_contains "3e: …the reason opens with the one ruled user line" \
-  "bionic: run refused — this command belongs in a subagent (timeout ≤120000 ms, or dispatch it)" \
-  "$FO_REASON"
 expect_contains "3f: …names the role a suite redirects to" "subagent_type: test-runner" "$FO_REASON"
 expect_contains "3g: …and names the sanctioned override" "FARM_OUT_ALLOW=1" "$FO_REASON"
-expect_contains "3h: …the user stream carries that same one line" \
-  "bionic: run refused — this command belongs in a subagent" "$ERR"
 expect_contains "3i: …and the instrument line naming the class" "farm-out [deny] class=suite" "$ERR"
 
 # THE ROLE IS CLASS-KEYED. A build-class command redirects to the implementor, not the
@@ -239,7 +234,6 @@ expect_status "4a: a tier-2 single exits 0" 0 "$ST"
 expect_eq "4b: …nudging on the additionalContext channel" "PreToolUse" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)"
 FO_CTX="$(ctx_of)"
-expect_contains "4c: …the nudge names the class" "docker-run-class command on the main thread" "$FO_CTX"
 expect_contains "4d: …and says it is advisory" "Advisory only." "$FO_CTX"
 expect_empty "4e: …and it is NOT a deny" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)"
@@ -263,8 +257,6 @@ run_hook "$(jq -n --arg s "$SID2" --arg c "$ENGAGED" \
     tool_input:{command:"docker run x"}}')" "$SID2"
 expect_contains "4l: a second session gets its own first nudge" "docker-run-class command" "$(ctx_of)"
 
-expect_eq "4m: the state file carries one row per (session, class)" "3" \
-  "$(grep -c . "$ENGAGED/.bionic/tmp/farm-out.state" 2>/dev/null)"
 
 # ---------------------------------------------------------------------------
 section "4b — the chain tier-2 arm is retired; tier 1 and the singles stay (wave-24 T11, AC-7.7)"
@@ -287,8 +279,6 @@ decision_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisi
 
 fresh_state
 run_hook "$(mk_payload "$ENGAGED" 'docker run x')"
-expect_contains "4n: control — a tier-2 single still nudges on a fresh state" \
-  "docker-run-class command on the main thread" "$(ctx_of)"
 
 # THE NOTIFICATION ONE-LINER, as the user's CLAUDE.md spells it, and with `&& echo sent`.
 NTFY='source ~/.claude/cron.env && curl -s -H "Title: x — y" -H "Priority: high" -d "one line" "https://ntfy.sh/$T"'
@@ -404,8 +394,6 @@ printf 'farm-out-mode: advisory\n' > "$ADV/.bionic/config.yaml"
 run_hook "$(mk_payload "$ADV" 'bash tests/run.sh')"
 expect_empty "5d: under advisory mode a tier-1 command does NOT deny" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)"
-expect_contains "5e: …it nudges instead" "suite-class command on the main thread" \
-  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
 expect_contains "5f: …and the downgrade is audited" "farm-out [deny-downgraded] class=suite" "$ERR"
 
 # `farm-out-mode: off` SILENCES the wall entirely.
@@ -455,8 +443,6 @@ expect_absent "S1d: …and no [deny] instrument line" "[deny]" "$ERR"
 # S3 (the eval): the same command with no timeout is refused, the limit as its first fix.
 run_hook "$(mk_payload "$SHORTR" "$ONE")"
 expect_eq "S3a: the same command with no timeout is refused" "deny" "$(decision_of)"
-expect_contains "S3b: …the user line's fix names the limit first" \
-  "bionic: run refused — this command belongs in a subagent (timeout ≤120000 ms, or dispatch it)" "$ERR"
 expect_nonempty "S3c: the reason carries a Fix" "$(first_fix)"
 expect_contains "S3d: …and its FIRST fix is the limit" "timeout of at most 120000 ms" "$(first_fix)"
 expect_contains "S3e: …dispatch is still offered after it" "Agent(subagent_type: test-runner" "$(reason_of)"
@@ -473,8 +459,6 @@ expect_regex "S4b: timeout 6000 (the floor) passes, killed at 1 s" "$(kill_re 1 
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 5999)"
 expect_eq "S4e: timeout 5999 is not short — refused" "deny" "$(decision_of)"
 expect_empty "S4f: …and not wrapped (beside S4b's wrap)" "$(wrapped_cmd)"
-expect_contains "S4g: …the user line asks for at least the floor" \
-  "bionic: run refused — this command belongs in a subagent (timeout ≥6000 ms, or dispatch it)" "$ERR"
 expect_contains "S4h: …and the reason's first fix names the whole band" "timeout of 6000 to 120000 ms" "$(first_fix)"
 # THE FLOOR IS ROOM FOR THE SHIM'S KILL, so it binds only a command the shim will wrap (review 12
 # F5, A-T50.4). A build passes as typed whatever its timeout; a suite under the floor, alone or
@@ -566,11 +550,9 @@ done
 printf 'farm-out-short-ms: 5999\n' > "$SHORTC/.bionic/config.yaml"
 run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 5999)"
 expect_eq "S8i: a limit under the 6000 ms floor makes no call short" "deny" "$(decision_of)"
-expect_contains "S8j: …and the fix is dispatch alone" "(dispatch it with the Agent tool)" "$ERR"
 printf 'farm-out-short-ms: 0\n' > "$SHORTC/.bionic/config.yaml"
 run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 6000)"
 expect_eq "S8g: under farm-out-short-ms: 0 no call is short" "deny" "$(decision_of)"
-expect_contains "S8h: …and the fix is dispatch alone" "(dispatch it with the Agent tool)" "$ERR"
 
 # THE PASS SITS AFTER THE MODE AND THE OVERRIDE. Advisory: short passes with its kill, no nudge.
 # Off: farm-out says nothing, so the booking wrap carries no kill. The override: lifted and

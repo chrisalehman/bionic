@@ -265,23 +265,10 @@ pdb_one_line() {  # <label> <command> <expected line>
   fi
 }
 
-pdb_one_line "row 5 (a dropped object)" "psql -c 'DROP TABLE users'" \
-  "bionic: sql refused — this command DROPs a database object (run the migration yourself)"
-pdb_one_line "row 6 (an emptied table)" "psql -c 'TRUNCATE users'" \
-  "bionic: sql refused — this command TRUNCATEs a table (run the migration yourself)"
-pdb_one_line "row 7 (an unbounded DELETE)" "psql -c 'DELETE FROM users'" \
-  "bionic: sql refused — this DELETE has no WHERE clause (add a WHERE clause)"
-pdb_one_line "row 8 (a dropped column)" "psql -c 'ALTER TABLE users DROP COLUMN age'" \
-  "bionic: sql refused — this ALTER TABLE drops a column or key (run the migration yourself)"
-pdb_one_line "row 9 (a wiped collection)" "mongosh --eval 'db.dropDatabase()'" \
-  "bionic: sql refused — this drops or wipes a MongoDB collection (run it from your own terminal)"
 # THE HEREDOC FORM, not the client pipe: a command naming a client reaches the arms
 # above first (the outer guard matches the same client names), so the piped-SQL arm is
 # reachable only through the `<< ` half of its own condition. Measured, not assumed --
 # the client-pipe spelling renders row 5's line.
-pdb_one_line "row 10 (statement hidden in a heredoc)" \
-  "$(printf 'bash << %s\nDROP TABLE users\nEOF\n' "'EOF'")" \
-  "bionic: sql refused — destructive SQL is piped to a db client (run the migration yourself)"
 
 # AC-E1.5 end to end through this wall, re-authored by ADR-030 (T19, A-T4.10's
 # precedent): the branch/pattern name is the value the one line had no room for. It

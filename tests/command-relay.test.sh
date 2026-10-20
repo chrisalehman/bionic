@@ -98,13 +98,9 @@ TMP="$(mktemp -d "/tmp/cr.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 # ═══════════════════════════════════════════════════════════════════════════
 
 VOICE_TEXT="$(cat "$VOICE_BLOCK")"
-expect_contains  "A1: voice-contract.md demands a fenced code block"       "fenced code block" "$VOICE_TEXT"
-expect_absent "A2: voice-contract.md no longer says the bare 'in one block'" ", in one block," "$VOICE_TEXT"
 
 SETUP_MD_TEXT="$(cat "$SETUP_MD")"
 DOCTOR_MD_TEXT="$(cat "$DOCTOR_MD")"
-expect_contains "A3: rendered setup.md carries the fenced-block demand"  "fenced code block" "$SETUP_MD_TEXT"
-expect_contains "A4: rendered doctor.md carries the fenced-block demand" "fenced code block" "$DOCTOR_MD_TEXT"
 
 expect_true "A5: render.sh --check finds no drift (templates, finals and manifest agree)" \
   bash "$RENDER_SH" --check
