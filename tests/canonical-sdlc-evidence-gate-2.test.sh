@@ -931,4 +931,17 @@ od_poke current 8 --check
 expect_eq "AH-4 no approved: release line: refused (exit 1), naming the verb that writes it" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 
+# A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the red run at H, then the fix row
+# green at C, the hand landing green by its row head, and the release docs. The verb accepts the log at the head A
+# where the judge says covered, and a later commit no run proves is refused by that commit, not by "a whole run".
+od_plan 5 '' "$(od_rows landed landed pending)"
+od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"
+expect_eq "PA-1 a whole run at ancestor H, every commit since proved or excused: proof-add accepts it (exit 0), and the head is covered" \
+  "0|covered" "$OD_RC|$(od_state)"
+printf 'four\n' > "$OD/lib/b.sh"; od_git commit -qam 'a change no run proves'; OD_D="$(od_git rev-parse HEAD)"
+od_plan 5 '' "$(od_rows landed landed pending)"
+od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"
+expect_eq "PA-2 …and one commit later that no landing proves: refused (exit 1), naming that commit and that it is not proved" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "commit ${OD_D:0:12} .*is not proved" && echo yes || echo no)"
+
 finish
