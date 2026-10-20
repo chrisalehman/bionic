@@ -389,6 +389,12 @@ sr_run "$SR_PLAN"
 printf 'reviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
 awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/critic.md question=adversarial reader=crit result=fail scope=piece" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
+expect_eq "M3a the correctness line names the class of the one open finding, never the bucket" "1 open S2 finding|0" \
+  "$(sr_ind correctness | /usr/bin/grep -oE '[0-9]+ open S[12] finding')|$(sr_ind correctness | /usr/bin/grep -c 'S1 or S2')"
+printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
+sr_run "$SR_PLAN"
+expect_eq "M3b …and of two, each class counted" "2 open findings, one S1 and one S2" \
+  "$(sr_ind correctness | /usr/bin/grep -oE '[0-9]+ open findings, [^;.]*')"
 # The clock 1.25× behind: a 40-hour forecast needs 17 × 12/40 = 5.1, so 5, and 4 done: schedule ➖.
 SR_FORECAST=40h sr_world marks-slow "6 6 12 12"
 sr_run "$SR_PLAN"
