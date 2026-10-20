@@ -573,15 +573,18 @@ tmp_file_exists() {
 
 # gate_rc <project> -> the real hooks/bash-walls.sh verdict on a `git commit` payload,
 # driven exactly the way tests/canonical-sdlc-evidence-gate.test.sh drives it: env
-# session id agreeing with the payload's, an engagement marker armed for that id,
-# CLAUDE_PROJECT_DIR empty, cwd pinned to the project.
+# session id agreeing with the payload's, an engagement marker bound to the project's plan
+# for that id through tests/lib/bound-marker.sh (an empty marker is no binding, and the wall
+# then resolves the newest plan and judges nothing against this one), CLAUDE_PROJECT_DIR
+# empty, cwd pinned to the project.
 gate_rc() {
   local proj="$1"
   local sid="closeout-suite-1"
   local input
   case "$proj" in "$SANDBOX"/*) : ;; *) echo "gate_rc: refusing outside the sandbox: '$proj'" >&2; echo 9; return 0 ;; esac
   mkdir -p "$proj/.bionic/tmp"
-  : > "$proj/.bionic/tmp/engaged-${sid}.state"
+  ( in_fixture "$proj" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$proj" "$sid" "$proj/$PLAN_REL" ) \
+    || { echo "gate_rc: could not bind the marker in '$proj'" >&2; echo 9; return 0; }
   input=$(jq -n --arg c "git commit -m x" --arg cwd "$proj" --arg s "$sid" \
             '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
               tool_input: {command: $c}, tool_use_id: "toolu_suite"}')

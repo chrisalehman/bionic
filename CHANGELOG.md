@@ -209,7 +209,8 @@ T2 queue ready=2026-10-19T06:23:24Z landed=2026-10-19T07:58:31Z minutes=95.1 run
 | max | 1763.2 m (T8) | 278.1 m (T1) |
 | min | 43.0 m (T36) | 95.1 m (T2) |
 
-Wave 39's numbers are over its six line landings only; its thirty hand landings carry no ready time. `reused=8` is
+Wave 39's numbers are over the six multi-file build rows it landed through the line before the one-file fixes; its
+thirty hand landings carry no ready time. `reused=8` is
 T2's landing: eight suites skipped on T9's greens, `suites 62 of 70`, the first narrowed landing (A-orch-34,
 A-orch-38). T9 before it ran 70 of 70 with nothing reused, because the night's hand landings had moved every key
 (A-orch-33). The one-file median was measured afterwards: the two one-file fix rows, T47 and T48, landed through the line
@@ -237,7 +238,7 @@ hooks/session-poker.sh:5199, written by T25 after T18 removed the alias) is fixe
 tests/fixtures/refusal-inventory.md) is fixed by T48, landed through the line at 3d9b9b77. Each fix row ran its red
 suite red, then green, and the line ran the suites that read the changed file (62 of 63 for T47, 5 of 5 for T48). No
 red stands at the release head. A second whole run at 4dfc59df, approved by the user, was 117 of 117 green (11:46 AM to
-12:33 PM PDT).
+12:30 PM PDT).
 
 ### Known limits
 
@@ -254,9 +255,11 @@ red stands at the release head. A second whole run at 4dfc59df, approved by the 
   through the line: 58.4 minutes against the 15-minute bar, a miss carried to the next charter (`auditor-evidence-2.md`,
   finding 3; REQ-5). The six multi-file build rows before them took 95.1 to 278.1 minutes.
 - AC-2.4 was observed live on T47: ready printed `suites 62 of 63` for a one-line session-poker.sh change, against the
-  criterion's 55, a miss carried to the next charter (`auditor-evidence.md`, finding 8).
-- AC-8.1's cell has no head or dirty line and no clean dispatch-preflight-2 log holds T12's change; T31's whole run is
-  the first that can (`auditor-evidence.md`, finding 6).
+  criterion's 55, a miss carried to the next charter (`auditor-evidence-2.md`, finding 4).
+- AC-8.1 is confirmed, and the evidence is in the wave's record:
+  `regression-run-44666977dd5b15448379f0b367d9388fdeb54e08.log`, T31's whole run, reads `head=44666977… dirty=0` on its
+  first line and `dispatch-preflight-2.test.sh ✓ PASS` on line 34, and T12's commits are ancestors of that head
+  (`auditor-evidence-2.md`, the AC-8.1 row).
 - A hand landing behind a line entry rebuilds its candidate on every 0.2-second poll while the entry ahead has not
   published: behind T9 it minted 1,298 candidates in 16 minutes, each a git merge (A-orch-25). `_line_hand` should
   rebuild only when the base moved, as `_line_carry` does.
