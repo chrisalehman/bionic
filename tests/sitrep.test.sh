@@ -810,4 +810,18 @@ expect_eq "WW1 the review-gated task's clause names the review facts at the head
   "$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -q ' — waits on the review facts at the head' && echo yes)|$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -cE 'facts_state|record/|\.md')"
 
 
+# ============================================================
+section "§NEXT-STOPS: the Bottom line's Next names the review results card to the user, in order, while it lies ahead of the merge; once it is replied it names no stop"
+# ============================================================
+sr_world next-stops "6 6 12 12"
+sed -i.bak 's/^| T17 | 4 | build |/| T17 | 4 | integrate |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_run "$SR_PLAN"
+expect_eq "NX1 an open integrate row ahead and no reply to the review results: Next puts the card to you before that row" "yes" \
+  "$(sr_line '- Next: ' | /usr/bin/grep -q ', then the review results card to you, then T17\.$' && echo yes)"
+printf 'review-results/v1|plan=%s|head=%s|at=2026-10-06T20:00:00Z|decisions=0\nreplied: at=2026-10-06T20:30:00Z all default\n' "$SR_PLAN" "$SR_H" > "$SR_DIR/review-results-abcd1234.md"
+sr_run "$SR_PLAN"
+expect_eq "NX2 …the card replied: Next is still there, and names no stop" "1|0" \
+  "$(sr_line '- Next: ' | /usr/bin/grep -c 'then')|$(sr_line '- Next: ' | /usr/bin/grep -c 'review results card')"
+
+
 finish
