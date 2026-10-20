@@ -2866,12 +2866,9 @@ cmd_whole_run() {  # <command> [<repo root>] -> rc 0 when the command is a whole
   # `-h`, `--help` and `--list` claim nothing, by `cmd_suite_targets`' own arms, so none of the four
   # is a whole run here, and nothing in this function reads a flag.
   #
-  # TWO READERS ARE SERVED, AND THEY ASK DIFFERENT THINGS OF THE SAME TOKEN. The regression-runs
-  # counter (hooks/session-poker.sh `regression_runs_count`) asks of the command a finished run
-  # ran, and calls this. The full-run wall's `fr_whole_run` (hooks/dispatch-preflight.sh) counts
-  # LAUNCHES, before any command exists, from the `suites_allowed=` a brief declared, whose
-  # `run.sh` is the very token `payload/scripts/lib/brief.sh` emits for the path-qualified runner,
-  # so it does not call this. One word, `run.sh`, names a whole run in both.
+  # THE READER IS the regression-runs counter (hooks/session-poker.sh `regression_runs_count`), which
+  # asks of the command a finished run ran, and calls this. `run.sh` is also the token
+  # `payload/scripts/lib/brief.sh` emits for the path-qualified runner in a brief's suite set.
   #
   # With a root the script a shell runs is opened and read for what it runs (`bash red.sh`, wave-31
   # T11), as `cmd_suite_claims` does; without one nothing is opened.
