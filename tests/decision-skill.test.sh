@@ -352,9 +352,9 @@ expect_true "23: the core names the decision skill and says to invoke it" \
 expect_true "24: …at any step and with no run open" grep -q 'at any step and with no run open' "$CORE"
 expect_true "25: …naming the Step-1 and Step-2 interviews as its heaviest users" \
   grep -qE 'Step-1 .*Step-2 .*heaviest users' "$CORE"
-expect_true "26: …small decisions may share a turn; approvals wait for the final card" \
-  grep -qE 'small decisions may share a turn.*Approvals wait for the final card' "$CORE"
-expect_true "26b: …rendered by card.sh final and answered by reply" grep -qF '(`card.sh final`, answered by `reply`)' "$CORE"
+expect_true "26: …small decisions may share a turn; approvals wait for the review results page" \
+  grep -qE 'small decisions may share a turn.*Approvals wait for the review results page' "$CORE"
+expect_true "26b: …rendered by review-results and answered by reply" grep -qF '(`review-results`, answered by `reply`)' "$CORE"
 expect_false "26c: …and the core keeps no approval card of its own" grep -qE 'keeps its (own )?card' "$CORE"
 
 section "§REACH — the description names the case the live check exposed (T27, AC-11.2)"
