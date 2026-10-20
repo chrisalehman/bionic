@@ -10,8 +10,8 @@
 # whole run is early, not waived. The page refuses to render, `CARD-EARLY — <reason>` on stderr and exit 1, while
 # a reader row is open, an owed reading is unregistered at the head, or `current <N> --check` is red for N = 6, 7
 # or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. One
-# reply, typed by the user, `all default` or `all recommended`, is replayed by `reply` into approve, waive,
-# waive-row and finding-move with the user's words.
+# reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
+# approve, waive, waive-row and finding-move with the user's words.
 #
 # §SHAPE     the prototype's sections in order, plain text, no record path, no quotation, the title, the record
 # §TRIGGERS  a carried S3 stays under Findings; a criterion miss and a recommendation against the default decide
@@ -199,7 +199,8 @@ expect_eq "SHAPE-9 Decisions: numbered, the recommendation first and the default
   "1. AC-1.2, not run on this release — recommended: waive · default: waive
 2. Release 1.0.0 — recommended: approve · default: approve
 3. Merge into main — recommended: approve · default: approve" "$(fc_under Decisions)"
-expect_eq "SHAPE-10 the page ends on the reply line" 'Reply "all recommended" or "all default".' "$(printf '%s\n' "$FC_OUT" | tail -1)"
+expect_eq "SHAPE-10 the page ends on the reply line, its example decision 1's other choice" \
+  'Reply "all recommended", "all default", or by number, as "1 run, rest default".' "$(printf '%s\n' "$FC_OUT" | tail -1)"
 expect_nonempty "SHAPE-11 precondition: the page has a body to read" "$(printf '%s\n' "$FC_OUT" | sed '$d')"
 expect_eq "SHAPE-11b AC-13.4 …in plain text: no markdown label" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '\*\*')"
 expect_eq "SHAPE-11c …no record path" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c 'record/')"
@@ -212,7 +213,7 @@ expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
 expect_eq "SHAPE-12c …its replay table one line per decision, in the page's order" \
   "row:AC-1.2 approve:release approve:merge" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "SHAPE-12d …each with its default, its other choice and the recommendation" \
-  "review-results/v1|dec=1|key=row:AC-1.2|default=waive-row AC-1.2|other=-|pick=default|why=not run on this release" "$(fc_table)"
+  "review-results/v1|dec=1|key=row:AC-1.2|default=waive-row AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
 fc_card final
 expect_eq "SHAPE-13 card.sh final is gone: a usage error, nothing rendered" "64|" "$FC_RC|$FC_OUT"
 expect_contains "SHAPE-13b …naming final as no row kind" "unknown row kind 'final'" "$FC_ERR"
