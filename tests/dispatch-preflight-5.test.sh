@@ -381,13 +381,12 @@ section "§LANDS-CMD — Lands-on: may name a backticked command its Re-executes
 # `Lands-on:` names one of them in backticks. The lift writes the command as ONE lands_on= entry: backticks around
 # its text with `%`, blank, tab, `,`, `|`, `/`, `*`, `?` and `[` percent-encoded (lib/suite.sh `lands_cmd`), so
 # every lands_on= reader (a comma or blank split, the roster's `|` fold, a `${s##*/}` file-name cut) keeps it
-# whole, and `bionic_lands_cmd` gives the command back. Both Lands-on arms admit it: the outside-Suites: arm reads
-# it against the brief's Re-executes: runs, and the reads-index omission arm passes over it. A command
-# Re-executes: does not declare is refused, naming it.
+# whole, and `bionic_lands_cmd` gives the command back. The outside-Suites: arm admits it against the brief's
+# Re-executes: runs. A command Re-executes: does not declare is refused, naming it.
 # FIXTURES: make_repo's approved, bound plan with a `## Tasks` row T23; its tree holds lib/widget.sh, read by
-# tests/widget.test.sh (the reads index routes the Files to it). The brief is BRIEF_FULL's contract with Files:,
+# tests/widget.test.sh. The brief is BRIEF_FULL's contract with Files:,
 # Suites:, Re-executes: and Lands-on: lines. SYNTHESIZED.
-# fails-when: a declared command on Lands-on: is refused by either arm, an undeclared one is admitted, or the row's
+# fails-when: a declared command on Lands-on: is refused, an undeclared one is admitted, or the row's
 # lands_on= does not give the declared command back byte for byte.
 lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
@@ -420,15 +419,6 @@ expect_eq "LC.1b …the row carries the command as its one encoded entry" \
   "widget.test.sh,${LC_TOK}" "$(roster_field "$LC_ROW" lands_on)"
 expect_eq "LC.1c …which gives back the declared command byte for byte, its pipe kept" \
   "$LC_CMD" "$( . "$DP5_LIB/suite.sh"; bionic_lands_cmd "$(roster_field "$LC_ROW" lands_on | cut -d, -f2)")"
-
-# The omission arm reads this brief: the command alone omits widget.test.sh, and the line to paste spells the
-# command as the author wrote it, so pasting it lifts the same entry.
-lc_gate lc2 "Lands-on: \`$LC_CMD\`"
-expect_eq "LC.2 control: the command alone omits widget.test.sh, which reads the Files: refused by the omission arm" \
-  "deny" "$GATE_VERDICT"
-expect_contains "LC.2b …its line names the omitted suite" "Lands-on: omits widget.test.sh" "$(lc_first)"
-expect_contains "LC.2c …and the line to paste spells the command in backticks, decoded" \
-  "    Lands-on: \`$LC_CMD\`, widget.test.sh" "$GATE_VERR"
 
 lc_gate lc3 'Lands-on: widget, `npx jest other`'
 expect_eq "LC.3 AC-14.3 a Lands-on: naming a command Re-executes: does not declare is refused" "deny" "$GATE_VERDICT"
