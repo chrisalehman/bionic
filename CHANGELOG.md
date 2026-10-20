@@ -250,8 +250,8 @@ made past it: under D19 a head past it is proved by its landings' own green verd
   asserts nothing about them (`auditor-evidence-2.md`, finding 2).
 - proof-add's refusal past the whole run still offers to run the whole at the head, the second whole run D16 and D19
   rule out (`auditor-evidence-2.md`, finding 1).
-- The comment lint is called at two doors, the line and the hand door, where ADR-064 and its criterion name one
-  (`auditor-evidence-2.md`, finding 3).
+- ADR-064 still says the comment lint runs at the landing line. The lint now runs at both landing doors, one function
+  with one test, and the criterion was amended to say so after T57 (A-orch-D19.1).
 - The handoff and sitrep reader tests were run by an agent that had read the run, and neither is confirmed by the
   user (`auditor-evidence-2.md`, findings 4 and 5).
 - The tests goal's 45 minutes was read as the whole run's wall time, 1,159 seconds, where the summed suite time is
