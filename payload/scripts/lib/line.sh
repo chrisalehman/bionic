@@ -999,7 +999,7 @@ _line_lease_end() {  # <the carrier's exit status>
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
-  local c rc s said anchored="" counted="" nrun nall
+  local c rc s said anchored="" linted="" counted="" nrun nall
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
@@ -1068,6 +1068,18 @@ EOF
            _wt_refuse "anchor-moved row=${row} candidate=${cand} — a suite's mutation anchor no longer holds on the candidate; re-anchor it in that suite or restore the text, then say ready again"
            printf '%s\n' "$c"; return 2 ;;
         *) _wt_refuse "anchors-unreadable row=${row} — ${c:-the check printed nothing}"; return 2 ;;
+      esac
+    fi
+    # 3b. THE COMMENT LINT, once per candidate and before any suite: a comment the row adds that cites the run
+    # returns the row to its writer, one LINT line per hit.
+    if [ "$linted" != "$cand" ]; then
+      c="$(_line_comment_lint "$root" "$cbase" "$cand")"; rc=$?
+      case $rc in
+        0) linted="$cand" ;;
+        1) line_event "$plan" returned "row=${row}" why=lint "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
+           printf '%s\n' "$c" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
+           return 1 ;;
+        *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
       esac
     fi
     # 3. THE PROOF, A DRAIN (wave-37 T1; D3, AC-1.1; wave-38 T6, D21): each named suite not yet green on this
@@ -1202,6 +1214,153 @@ _line_load_anchors() {
   declare -F reads_hashes >/dev/null 2>&1 && return 0
   # shellcheck source=/dev/null
   [ -r "$_LINE_LIB_DIR/anchors.sh" ] && . "$_LINE_LIB_DIR/anchors.sh" && declare -F reads_hashes >/dev/null 2>&1
+}
+
+# THE COMMENT LINT. A comment says what the code does and why; where its history lives belongs to the record. The
+# lint reads the lines a candidate adds to a shell or python source under hooks/, payload/, tests/ or agents-src/
+# and refuses a comment on one that cites the run: one `<file>:<line> <shapes>` line per hit, rc 1; rc 0 when none
+# is; rc 2, with the reason, when the diff cannot be read. Only what is added is judged, so an old comment stands
+# until a writer touches its line. A line the same diff removes elsewhere, the same text bar its indent, is moved,
+# not added. The comment is the one a lexer reading the whole file at the candidate finds on the line: from an
+# unquoted `#` that starts a word to the end of the line, outside quotes and heredoc bodies; in python, from a
+# `#` outside a string. A decision id or a bare assumption id is named only beside one of the shapes that refuse.
+_LINE_SHAPES_AWK='
+function line_shapes(t,   b, e, f, s, n, i, a) {
+  b = "(^|[^A-Za-z0-9_])"; e = "([^A-Za-z0-9_]|$)"
+  f["epic"] = (t ~ (b "epic[- ]?[0-9]"))
+  f["wave"] = (t ~ (b "wave-[0-9]+([^|0-9]|$)") || t ~ (b "wave [0-9]"))
+  f["writer"] = (t ~ (b "w[0-9]+-[A-Z]+[0-9]"))
+  f["wave-code"] = (t ~ (b "E[0-9]+W[0-9]"))
+  f["wave-slice"] = (t ~ (b "W[0-9]+ S[0-9]"))
+  f["criterion"] = (t ~ (b "AC-?[0-9]+(\\.[0-9]+)?" e))
+  f["requirement"] = (t ~ (b "REQ-?[0-9]+" e))
+  f["assumption"] = (t ~ (b "A-orch-[0-9]") || t ~ (b "A-T[0-9]+[-.][0-9]"))
+  f["delta"] = (t ~ /\316\224[0-9]/)
+  f["record-path"] = (t ~ /\.bionic\/docs\/(record|adrs|ideas|specs|requirements|plans|incidents|spikes)\/[A-Za-z0-9]/ \
+    || t ~ /(^|[^A-Za-z0-9_\/<])record\/(wave|epic|w[0-9])/)
+  n = split("epic wave writer wave-code wave-slice criterion requirement assumption delta record-path", a, " ")
+  s = ""
+  for (i = 1; i <= n; i++) if (f[a[i]]) s = s "," a[i]
+  if (s == "") return ""
+  if (!f["assumption"] && t ~ (b "A-[0-9]+" e)) {
+    s = ""; f["assumption"] = 1
+    for (i = 1; i <= n; i++) if (f[a[i]]) s = s "," a[i]
+  }
+  if (t ~ (b "D[0-9]+" e)) s = s ",decision"
+  return substr(s, 2)
+}'
+# The added lines of a `git diff -U0` that carry a shape anywhere on them and are not moved: `<file> TAB <line>`.
+_LINE_ADDS_AWK='
+function line_trim(t) { sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); return t }
+/^diff --git / { hdr = 1; f = ""; next }
+hdr && /^\+\+\+ / { f = substr($0, 5); if (f == "/dev/null") f = ""; else sub(/^b\//, "", f); next }
+hdr && /^--- / { next }
+/^@@ / { hdr = 0; split($3, c, ","); ln = substr(c[1], 2) + 0; next }
+hdr { next }
+/^\+/ { if (f != "") { na++; AF[na] = f; AL[na] = ln; AT[na] = substr($0, 2) } ln++; next }
+/^-/ { R[line_trim(substr($0, 2))]++; next }
+END {
+  for (i = 1; i <= na; i++) {
+    t = line_trim(AT[i])
+    if (R[t] > 0) { R[t]--; continue }
+    if (line_shapes(AT[i]) != "") print AF[i] "\t" AL[i]
+  }
+}'
+# The comment on each wanted line of one file: `<line> TAB <comment>`. want= the line numbers, py=1 for python.
+# A shell frame is c (commands: the top, `$( )`, `$(( ))`), b (backquoted commands), d (double quotes), s (single),
+# x (dollar-single) or p (`${ }`); PD counts the open parens of a `$( )`. A heredoc body is skipped to its word.
+_LINE_LEX_AWK='
+function push(k) { d++; K[d] = k; PD[d] = 0 }
+function heredoc(s, i,   j, n, c, w, e, strip) {
+  j = i + 2; n = length(s); strip = 0; w = ""
+  if (substr(s, j, 1) == "-") { strip = 1; j++ }
+  while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+  for (; j <= n; j++) {
+    c = substr(s, j, 1)
+    if (c == "\047" || c == "\"") {
+      e = index(substr(s, j + 1), c)
+      if (e == 0) { w = w substr(s, j + 1); j = n; break }
+      w = w substr(s, j + 1, e - 1); j += e; continue
+    }
+    if (c == "\\") { w = w substr(s, j + 1, 1); j++; continue }
+    if (index(" \t;&|()<>", c)) break
+    w = w c
+  }
+  if (w != "") { nh++; HT[nh] = w; HS[nh] = strip }
+  return j - 1
+}
+BEGIN { n = split(want, a, " "); for (i = 1; i <= n; i++) W[a[i]] = 1; d = 1; K[1] = "c"; hq = 1 }
+py {
+  com = ""; n = length($0)
+  for (i = 1; i <= n; i++) {
+    ch = substr($0, i, 1)
+    if (tq != "") { if (substr($0, i, 3) == tq) { tq = ""; i += 2 } else if (ch == "\\") i++; continue }
+    if (sq != "") { if (ch == "\\") i++; else if (ch == sq) sq = ""; continue }
+    if (ch == "#") { com = substr($0, i); break }
+    if (ch == "\047" || ch == "\"") { if (substr($0, i, 3) == ch ch ch) { tq = ch ch ch; i += 2 } else sq = ch }
+  }
+  sq = ""
+  if (com != "" && (FNR in W)) printf "%d\t%s\n", FNR, com
+  next
+}
+inh {
+  t = $0; if (HS[hq]) sub(/^\t+/, "", t)
+  if (t == HT[hq]) { hq++; if (hq > nh) { inh = 0; nh = 0; hq = 1 } }
+  next
+}
+{
+  com = ""; n = length($0); prev = ""
+  for (i = 1; i <= n; i++) {
+    ch = substr($0, i, 1); k = K[d]
+    if (k == "s") { if (ch == "\047") d--; prev = ch; continue }
+    if (ch == "\\") { i++; prev = "x"; continue }
+    if (k == "x") { if (ch == "\047") d--; prev = ch; continue }
+    if (ch == "$") {
+      c2 = substr($0, i + 1, 1)
+      if (c2 == "(") { push("c"); PD[d] = 1; i++; if (substr($0, i + 1, 1) == "(") { PD[d] = 2; i++ } prev = "("; continue }
+      if (c2 == "{") { push("p"); i++; prev = "{"; continue }
+      if (c2 == "\047" && k != "d") { push("x"); i++; prev = c2; continue }
+      prev = ch; continue
+    }
+    if (ch == "`") { if (k == "b") d--; else push("b"); prev = ch; continue }
+    if (k == "d") { if (ch == "\"") d--; prev = ch; continue }
+    if (k == "p") {
+      if (ch == "}") d--; else if (ch == "\047") push("s"); else if (ch == "\"") push("d")
+      prev = ch; continue
+    }
+    if (ch == "\047") { push("s"); prev = ch; continue }
+    if (ch == "\"") { push("d"); prev = ch; continue }
+    if (ch == "#" && (prev == "" || index(" \t;&|()<>", prev))) { com = substr($0, i); break }
+    if (ch == "(" && d > 1 && k == "c") PD[d]++
+    else if (ch == ")" && d > 1 && k == "c") { PD[d]--; if (PD[d] <= 0) d-- }
+    else if (ch == "<" && substr($0, i + 1, 1) == "<") {
+      if (substr($0, i + 2, 1) == "<") i += 2; else i = heredoc($0, i)
+    }
+    prev = ch
+  }
+  if (com != "" && (FNR in W)) printf "%d\t%s\n", FNR, com
+  if (nh >= hq) inh = 1
+}'
+_line_comment_lint() {  # <root> <base> <candidate> -> `<file>:<line> <shapes>` per hit; 0 none · 1 hits · 2 unreadable
+  local root="$1" base="$2" cand="$3" diff adds f lines py hits="" out
+  diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
+    --src-prefix=a/ --dst-prefix=b/ "$base" "$cand" -- 'hooks/*.sh' 'hooks/*.py' 'payload/*.sh' 'payload/*.py' \
+    'tests/*.sh' 'tests/*.py' 'agents-src/*.sh' 'agents-src/*.py' 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$diff" | head -1)"; return 2; }
+  adds="$(printf '%s\n' "$diff" | LC_ALL=C awk "$_LINE_SHAPES_AWK$_LINE_ADDS_AWK")"
+  [ -n "$adds" ] || return 0
+  for f in $(printf '%s\n' "$adds" | cut -f1 | awk '!seen[$0]++'); do
+    lines="$(printf '%s\n' "$adds" | awk -F'\t' -v f="$f" '$1 == f { printf "%s ", $2 }')"
+    py=0; case "$f" in *.py) py=1 ;; esac
+    out="$(git -C "$root" show "${cand}:${f}" 2>/dev/null | LC_ALL=C awk -v want="$lines" -v py="$py" "$_LINE_LEX_AWK")"
+    hits="${hits}$(printf '%s\n' "$out" | LC_ALL=C awk -F'\t' -v f="$f" "$_LINE_SHAPES_AWK"'
+      NF { s = line_shapes(substr($0, index($0, "\t") + 1)); if (s != "") print f ":" $1 " " s }')
+"
+  done
+  hits="$(printf '%s' "$hits" | awk 'NF')"
+  [ -n "$hits" ] || return 0
+  printf '%s\n' "$hits"
+  return 1
 }
 
 # THE PROOF FACT'S KEY (wave-39 T1; D5, D8; ADR-061): a verdict is keyed by what its suite read at the commit
