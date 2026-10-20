@@ -135,4 +135,17 @@ expect_eq "P13 setup's yes rewrites it, and the reader calls it written" "env:rc
 expect_eq "P14 …and the rewritten block launches the checkout" \
   "$(printf '%s\n' --allow-dangerously-skip-permissions --plugin-dir "$CO/payload" one)" "$(type_claude "$SB_OLD" zsh "$CO" one)"
 
+section "PRINCIPLES — the span setup writes carries the comment rule"
+# A fresh home, a yes, and the user's CLAUDE.md is read back: the span holds the rule's own words.
+SB_PR="$TMP/sb-principles"; mkdir -p "$SB_PR/.claude"
+PR_OUT="$(printf 'y\n' | HOME="$SB_PR" ZDOTDIR="$SB_PR" SHELL=/bin/zsh PATH="$STUB:$PATH" BIONIC_CLAUDE_HOME="$SB_PR/.claude" \
+  bash "$SETUP_SH" --only working-principles 2>&1)"
+PR_FILE="$(cat "$SB_PR/.claude/CLAUDE.md" 2>/dev/null)"
+expect_contains "R1 setup wrote the principles span (the file was read)" "bionic:principles:start" "$PR_FILE"
+expect_contains "R2 the span carries the comment rule" "A comment states the reason and the invariant" "$PR_FILE"
+expect_contains "R3 …including what a comment never names" "never names a wave" "$PR_FILE"
+# The page folds the text at 94 columns, so a phrase can break across two lines: read it unfolded.
+PR_FLAT="$(printf '%s' "$PR_OUT" | tr '\n' ' ' | tr -s ' ')"
+expect_contains "R4 the consent screen shows the rule before the question (the page was read)" "never names a wave" "$PR_FLAT"
+
 finish

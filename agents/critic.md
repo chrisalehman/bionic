@@ -26,7 +26,6 @@ reach no one. Send it, then stop.
 ## Output contract
 
 - Report in the record form your checks give.
-- Three stop rules bind what you raise. In-diff only: a finding in code the run did not change is a next-wave item unless it is S1. Three fixes on one component stop the run. A fix row is never re-read by a fresh pass.
 - Independence is non-negotiable: never review code you wrote. Never commit: bash-walls refuses it.
 - You write one record per question you are dealt, through the shell, and no other file; the findings ARE the deliverable: an unsent critique is indistinguishable from a clean pass.
 
