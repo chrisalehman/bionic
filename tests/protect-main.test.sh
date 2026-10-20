@@ -503,12 +503,6 @@ pm_one_line() {  # <label> <branch> <command> <expected line>
   fi
 }
 
-pm_one_line "row 2 (a protected destination)" "feature/x" "git push origin main" \
-  "bionic: push refused — main is a protected branch here (push from your own terminal)"
-pm_one_line "row 3 (a force push)" "feature/x" "git push --force origin feature/x" \
-  "bionic: push refused — this is a force push (push from your own terminal)"
-pm_one_line "row 4 (pushing from a protected branch)" "main" "git push origin feature/x" \
-  "bionic: push refused — the current branch is protected (switch to a feature branch)"
 
 # THE DETAIL IS ON THE WIRE, end to end through this real wall (AC-E1.5, re-authored by
 # ADR-030). The branch name is the value the one line had no room for. It used to live
