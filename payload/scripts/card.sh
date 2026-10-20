@@ -2215,7 +2215,10 @@ CF_OPEN
 # absent reading, a declared check or debt not held, a judge that could not deal the plan. The dry commit stops at
 # its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it
 # finds, and the rows are read from the matrix, so the page puts each of them whichever refusal the dry commit
-# stopped on.
+# stopped on. In the release order the advance to 8 refuses first on the missing release approval (no `approved:
+# release` line, or one naming no head), before it reads any other fact: that approval is the page's own decision, so
+# it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. The advance
+# prints no refusal for the merge approval, so none is read here.
 _card_settles() {
   local l q judge=0 reading=0 any=0
   local -a _cs_f=()
@@ -2232,6 +2235,8 @@ _card_settles() {
       "- "*) [ "$reading" = 1 ] && return 1 ;;
       "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
       "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
+      "poker: REFUSED — current: 8 in the order "*" carries no approved: release line; "*|"poker: REFUSED — current: 8 in the order "*" names no head; the user's word for the working head "*)
+        CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1 ;;
       "poker: REFUSED"*) return 1 ;;
       *"	"*)
         [ "$judge" = 1 ] || continue
