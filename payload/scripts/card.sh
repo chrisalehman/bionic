@@ -87,6 +87,9 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # And `budget_cap`, the one reader of a person's writer cap (wave-28 T9; D15).
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/run.sh"
+# The integration branch is lib/plan.sh `plan_integration_branch`'s answer, the reader close-out and the gate ask too.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/plan.sh"
 # THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): a carried `debt:` line is read by `DEBT_LINE_ERE`,
 # the regex `debt add` holds each line to and close-out carries by, never a third copy of it here.
 # shellcheck source=/dev/null
@@ -787,7 +790,6 @@ fm == 1 && $0 == "---" { fm = 0; next }
 fm == 1 {
   k = $0; sub(/:.*$/, "", k); v = $0; sub(/^[^:]*:[ \t]*/, "", v)
   if (k == "scale") SCALE = v
-  else if (k == "integration-branch") IB = v
   else if (k == "base-sha") BASE = v
   else if (k == "rigor") RIGOR = v
   else if (k == "walk") WALK = v
@@ -944,7 +946,6 @@ END {
   if (verb == "step2" && !saweval && SCALE != "task") err("the spec has no ## Eval design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
   print "GOAL" OFS GOAL
-  print "META" OFS "ib" OFS IB
   print "META" OFS "base" OFS BASE
   print "META" OFS "rigor" OFS RIGOR
   print "META" OFS "walk" OFS WALK
@@ -991,7 +992,6 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
         k="${rest%%"$CARD_TAB"*}"; v="${rest#*"$CARD_TAB"}"
         [ "$v" != "$rest" ] || v=""
         case "$k" in
-          ib) WCARD_IB="$v" ;;
           base) WCARD_BASE="$v" ;;       rigor) WCARD_RIGOR="$v" ;;
           walk) WCARD_WALK="$v" ;;       adrs) WCARD_ADRS="$v" ;;
           ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
@@ -1022,6 +1022,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   # the walls and the judge ask: SDLC State, then frontmatter. The card used to read the frontmatter alone,
   # so a plan naming its branch under SDLC State showed `not declared` for a branch `ready` lands on.
   WCARD_WB="$(plan_working_branch "$2")"
+  WCARD_IB="$(plan_integration_branch "$2")"
   # THE ONE ASSIGNMENT OF THE SCALE: the Step-2 card's artifact arms read it, and a whole
   # card is the only caller that can know it.
   case "$WCARD_SCALE" in
@@ -1100,8 +1101,8 @@ _card_artifact_rel() {  # <path as given by the caller>
   printf '%s' "$given"
 }
 
-# THE BRANCH BLOCK, WHICH SAYS "not declared" RATHER THAN GUESSING. The three
-# keys are frontmatter or they are absent; an absent branch is a real state
+# THE BRANCH BLOCK, WHICH SAYS "not declared" RATHER THAN GUESSING. The two
+# branches are the plan readers' answers and the base its frontmatter, or they are absent; an absent branch is a real state
 # (a task-scale run, a spec written before the tree existed) and the card's job
 # is to show it as one, not to infer a branch from the checkout the renderer
 # happens to be standing in.
@@ -1611,7 +1612,7 @@ _card_config() {  # <artifact path as given> — the Step-0 card's settings, See
   # The branches are the plan's when it names them (`ready` and the walls read the plan).
   if [ "$CARD_CFG" != "$1" ]; then
     v="$(plan_working_branch "$CARD_CFG")"; [ -z "$v" ] || WCARD_WB="$v"
-    v="$(plan_frontmatter_get "$CARD_CFG" integration-branch)"; [ -z "$v" ] || WCARD_IB="$v"
+    v="$(plan_integration_branch "$CARD_CFG")"; [ -z "$v" ] || WCARD_IB="$v"
     v="$(plan_frontmatter_get "$CARD_CFG" base-sha)"; [ -z "$v" ] || WCARD_BASE="$v"
   fi
   v="$(plan_frontmatter_get "$CARD_CFG" seed)"

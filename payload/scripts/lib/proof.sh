@@ -694,19 +694,18 @@ proof_fixed() {
     part == 2 && ($1 in landed) { print $1 "\t" $2 "\tmoved" }')"
   [ -n "$born" ] || [ -n "$moved" ] || return 0
   rec="$(proof_debt_record "$rplan" "$tree")" || return 0
-  [ -f "$rec" ] || return 0
+  [ -f "$rec" ] && _proof_fields || return 0
   # Each finding comes out `F` (its row's newest verdict commit owes a suite and every owed suite reads green there:
   # fixed at that commit) or `R` (the row's landing owes no verdict: none recorded, or every one `result=absent`, so
   # the regression arm asks below); a row with a red, or any word but green or absent, is neither.
   out="$({ printf '\034born\n'; [ -z "$moved" ] || printf '%s\n' "$moved"; [ -z "$born" ] || printf '%s\n' "$born"
-    printf '\034rec\n'; cat "$rec" 2>/dev/null; } | awk -F'|' '
-    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    printf '\034rec\n'; cat "$rec" 2>/dev/null; } | awk -F'|' "$_LINE_FIELDS_AWK"'
     $0 == SUBSEP "born" { part = 1; next }
     $0 == SUBSEP "rec" { part = 2; next }
     part == 1 { split($0, b, "\t"); if (b[2] in seen1) next; seen1[b[2]] = 1; nb++; brow[nb] = b[1]; bid[nb] = b[2]; bhow[nb] = b[3]; want[b[1]] = 1; next }
-    part == 2 && substr($0, 1, 8) == "line/v1|" && fv("ev") == "verdict" {
-      r = fv("row"); if (!(r in want)) next
-      c = fv("commit"); s = fv("suite"); v = fv("result")
+    part == 2 && line_ev() == "verdict" {
+      r = line_kv("row"); if (!(r in want)) next
+      c = line_kv("commit"); s = line_kv("suite"); v = line_kv("result")
       if (c == "" || s == "") next
       if (lc[r] != c) { lc[r] = c; ns[r] = 0 }
       if (!((r SUBSEP c SUBSEP s) in seen)) { seen[r, c, s] = 1; ns[r]++; sl[r, ns[r]] = s }
@@ -768,10 +767,11 @@ PROOF_REG_HEADS
 # as the regression's judge does not count it (`_proof_floor_base`). A waiver is the person's word, not a green run: not read.
 _proof_regression_heads() {
   local inh
+  _proof_fields || return 0
   inh="$(proof_inherited "$1")"
   { printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$1" 2>/dev/null
     printf '\034rec\n'; [ -z "${2:-}" ] || [ ! -f "$2" ] || cat "$2" 2>/dev/null; } \
-    | PROOF_I=",$inh," awk "$(proof_awk)"'
+    | PROOF_I=",$inh," awk -F'|' "$(proof_awk)$_LINE_FIELDS_AWK"'
     function inh(s) { return index(ENVIRON["PROOF_I"], "," s ",") > 0 }
     function clean(o,   n, a, i) { n = split(o, a, ","); for (i = 1; i <= n; i++) if (a[i] != "" && !inh(a[i])) return 0; return 1 }
     function put(h) { if (!(h in out)) { out[h] = 1; print h } }
@@ -781,15 +781,9 @@ _proof_regression_heads() {
     part == 1 && fence { next }
     part == 1 && /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     part == 1 && insdlc && proof_fields($0) && PROOF_KIND == "regression" && clean(PROOF_OWED) { put(PROOF_HEAD); next }
-    part == 2 && substr($0, 1, 8) == "line/v1|" && index($0, "|kind=regression|") {
-      n = split($0, f, "|"); ev = ""; c = ""; s = ""; v = ""
-      for (i = 2; i <= n; i++) {
-        if (index(f[i], "ev=") == 1) ev = substr(f[i], 4)
-        else if (index(f[i], "commit=") == 1) c = substr(f[i], 8)
-        else if (index(f[i], "suite=") == 1) s = substr(f[i], 7)
-        else if (index(f[i], "result=") == 1) v = substr(f[i], 8)
-      }
-      if (ev != "verdict" || c == "" || s == "") next
+    part == 2 && line_ev() == "verdict" && line_kv("kind") == "regression" {
+      c = line_kv("commit"); s = line_kv("suite"); v = line_kv("result")
+      if (c == "" || s == "") next
       if (!(c in nc)) { nc[c] = 0; co[++nh] = c }
       if (!((c SUBSEP s) in w)) { nc[c]++; su[c, nc[c]] = s }
       w[c, s] = v
@@ -1074,24 +1068,24 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 # part after the last `/`, and a reader compares file names.
 _proof_records() {
   local co="$1" rec="${2:-}" gd f
+  _proof_fields || return 0
   gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
   { if [ -n "$rec" ] && [ -f "$rec" ]; then cat "$rec"; fi
     if [ -n "$gd" ]; then for f in "$gd/bionic-stamps" "$gd"/worktrees/*/bionic-stamps; do
-      [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' '
-    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+      [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
     function out(l) { lines[++nl] = l }
     function key(p) { sub(/.*\//, "", p); return p }
     function keys(l,   a, n, i, o) { n = split(l, a, ","); o = ""; for (i = 1; i <= n; i++) o = o (i > 1 ? "," : "") key(a[i]); return o }
-    substr($0, 1, 8) == "line/v1|" {
-      ev = substr($2, 4); r = fv("row")
-      if (ev == "ready") { if (r != "") su[r] = keys(fv("suites")) }
-      else if (ev == "published") { c = fv("commit"); if (c != "") out("O\t" c "\t" r "\t" ((r in su) ? su[r] : "-")) }
+    (ev = line_ev()) != "" {
+      r = line_kv("row")
+      if (ev == "ready") { if (r != "") su[r] = keys(line_kv("suites")) }
+      else if (ev == "published") { c = line_kv("commit"); if (c != "") out("O\t" c "\t" r "\t" ((r in su) ? su[r] : "-")) }
       else if (ev == "verdict") {
-        c = fv("commit"); s = key(fv("suite")); v = fv("result")
-        if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" fv("at") "\t" c "\t" s "\t" v "\t" (fv("kind") == "regression" ? "regression" : "verdict")); if (v == "red") { vc[nl] = c; vs[nl] = s } }
+        c = line_kv("commit"); s = key(line_kv("suite")); v = line_kv("result")
+        if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" line_kv("at") "\t" c "\t" s "\t" v "\t" (line_kv("kind") == "regression" ? "regression" : "verdict")); if (v == "red") { vc[nl] = c; vs[nl] = s } }
       }
-      else if (ev == "candidate") { c = fv("commit"); if (c != "") base[c] = fv("base") }
-      else if (ev == "standing") { if (fv("cause") == "environment") env[fv("head"), key(fv("suite"))] = 1 }
+      else if (ev == "candidate") { c = line_kv("commit"); if (c != "") base[c] = line_kv("base") }
+      else if (ev == "standing") { if (line_kv("cause") == "environment") env[line_kv("head"), key(line_kv("suite"))] = 1 }
       next
     }
     substr($0, 1, 8) == "landed: " {
@@ -1136,6 +1130,9 @@ _proof_line_load() {
   [ -n "$d" ] && [ -r "$d/line.sh" ] && . "$d/line.sh" >/dev/null 2>&1
   declare -F line_event >/dev/null 2>&1
 }
+# _proof_fields -> 0 once lib/line.sh's reader of a record line (`_LINE_FIELDS_AWK`) is loaded: every read of the
+# landing record below goes through it, so a field is read by its name and there is no second parser.
+_proof_fields() { [ -n "${_LINE_FIELDS_AWK:-}" ] || _proof_line_load; [ -n "${_LINE_FIELDS_AWK:-}" ]; }
 
 # proof_regression_results <whole-run log> -> `<suite><TAB>green|red` for each suite the log's last run judged, in its
 # order (wave-39 T24; D9): tests/run.sh's verdict lines (`  <suite>  ✓ PASS`, `✗ FAIL…`, `✗ KILLED…`) after its last
@@ -1170,8 +1167,9 @@ proof_regression_fold() {
   rec="$(line_record "$plan" 2>/dev/null)" || rec=""
   while IFS='	' read -r s r; do
     [ -n "$s" ] || continue
-    [ -z "$rec" ] || ! awk -F'|' -v c="commit=$head" -v su="suite=$s" -v l="log=$rel" '
-      $2 == "ev=verdict" && $4 == c && $5 == su && $7 == l && index($0, "|kind=regression|") { f = 1 } END { exit !f }' "$rec" 2>/dev/null \
+    [ -z "$rec" ] || ! awk -F'|' -v c="$head" -v su="$s" -v l="$rel" "$_LINE_FIELDS_AWK"'
+      line_ev() == "verdict" && line_kv("commit") == c && line_kv("suite") == su && line_kv("log") == l && line_kv("kind") == "regression" { f = 1 }
+      END { exit !f }' "$rec" 2>/dev/null \
       || continue
     line_event "$plan" verdict "row=regression" "commit=$head" "suite=$s" "result=$r" "log=$rel" "admitted=-" "width=-" \
       "kind=regression" || return 1
@@ -1284,16 +1282,15 @@ _proof_floor_match() {
   fi
   [ -z "$plan" ] || rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" || rec=""
   key="$(_proof_run_key "$log" "$root")"
-  [ -n "$rec" ] && [ -f "$rec" ] && got="$(awk -F'|' -v key="$key" -v h="$hash" -v hd="$sha" -v rc="$rc" '
-    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    $1 != "line/v1" || $2 != "ev=run" { next }
-    { l = fv("log"); s = fv("sha256") }
+  [ -n "$rec" ] && [ -f "$rec" ] && _proof_fields && got="$(awk -F'|' -v key="$key" -v h="$hash" -v hd="$sha" -v rc="$rc" "$_LINE_FIELDS_AWK"'
+    line_ev() != "run" { next }
+    { l = line_kv("log"); s = line_kv("sha256") }
     l != key && s != h { next }
-    s == h && fv("head") == hd && fv("rc") == rc { ok = fv("at") " " hd " " rc; next }
+    s == h && line_kv("head") == hd && line_kv("rc") == rc { ok = line_kv("at") " " hd " " rc; next }
     l == key {
-      if (s != h) bad = fv("at") "\tsha256\t" h "\t" s
-      else if (fv("head") != hd) bad = fv("at") "\thead\t" hd "\t" fv("head")
-      else bad = fv("at") "\trc\t" rc "\t" fv("rc")
+      if (s != h) bad = line_kv("at") "\tsha256\t" h "\t" s
+      else if (line_kv("head") != hd) bad = line_kv("at") "\thead\t" hd "\t" line_kv("head")
+      else bad = line_kv("at") "\trc\t" rc "\t" line_kv("rc")
     }
     END { if (ok != "") print "ok\t" ok; else if (bad != "") print "changed\t" bad }' "$rec" 2>/dev/null)"
   case "${got:-}" in
@@ -1998,11 +1995,10 @@ proof_plan_slug() {
 # only by a green run after the later one. A line whose `at=` is no <ISO-UTC> leaves the time empty,
 # and an empty time is never covered.
 proof_debts_read() {
-  [ -f "${1:-}" ] || return 0
-  awk '
-    function fld(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    $1 == "void:" { v = fld("id"); if (v != "") voided[v] = 1; next }
-    $1 == "debt:" { n++; id[n] = fld("id"); su[n] = fld("suite"); tk[n] = fld("token"); at[n] = fld("at") }
+  [ -f "${1:-}" ] && _proof_fields || return 0
+  awk "$_LINE_FIELDS_AWK"'
+    $1 == "void:" { v = line_kv("id"); if (v != "") voided[v] = 1; next }
+    $1 == "debt:" { n++; id[n] = line_kv("id"); su[n] = line_kv("suite"); tk[n] = line_kv("token"); at[n] = line_kv("at") }
     END {
       iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
       for (i = 1; i <= n; i++) {
@@ -2414,6 +2410,7 @@ _facts_born_landings() {
     fi
   fi
   [ -n "$fixed" ] || [ -n "$rec" ] || return 0
+  _proof_fields || return 0
   # A fixed finding or a review mark needs the askers; a `case` on the string, never a pipe into a quitting grep (§BP).
   want="$fixed"; case "$marks" in *"	review	"*) want=1 ;; esac
   if [ -n "$want" ]; then
@@ -2427,8 +2424,7 @@ _facts_born_landings() {
       }' "$plan" 2>/dev/null)"
   fi
   { printf '\034asks\n%s\n\034fixed\n%s\n\034marks\n%s\n\034finds\n%s\n\034rec\n' "$asks" "$fixed" "$marks" "$finds"
-    [ -z "$rec" ] || cat "$rec" 2>/dev/null; } | awk -F'|' '
-    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    [ -z "$rec" ] || cat "$rec" 2>/dev/null; } | awk -F'|' "$_LINE_FIELDS_AWK"'
     function rec_of(id) { return match(id, /#[0-9]+$/) ? substr(id, 1, RSTART - 1) : "" }
     function addq(cur, qs,   n, a, i) {
       n = split(qs, a, " ")
@@ -2446,8 +2442,8 @@ _facts_born_landings() {
     part == 2 { split($0, x, "\t"); if (x[3] != "") print x[3] "\treview\t" recq[rec_of(x[1])]; next }
     part == 3 { split($0, m, "\t"); if (m[1] != "") kind[m[1]] = m[2]; next }
     part == 4 { split($0, f, "\t"); if (f[1] != "") rowq[f[1]] = addq(rowq[f[1]], recq[rec_of(f[3])]); next }
-    part == 5 && substr($0, 1, 8) == "line/v1|" && fv("ev") == "published" {
-      r = fv("row"); c = fv("commit"); if ((r in kind) && c != "") print c "\t" kind[r] "\t" says(r); next
+    part == 5 && line_ev() == "published" {
+      r = line_kv("row"); c = line_kv("commit"); if ((r in kind) && c != "") print c "\t" kind[r] "\t" says(r); next
     }
     part == 5 && substr($0, 1, 8) == "landed: " {
       r = ""; c = ""; n = split($0, w, " ")

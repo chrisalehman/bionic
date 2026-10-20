@@ -159,10 +159,10 @@ handoff_landing_lines() {  # <plan> <root> -> `  - <row> landing from <tree> · 
   now="$(sitrep_now)"
   while IFS='|' read -r row car tr; do
     [ -n "$row" ] || continue
-    at="$(awk -F'|' -v r="row=$row" '
-      $1 != "line/v1" || $3 != r { next }
-      $2 == "ev=published" || $2 == "ev=returned" { a = ""; next }
-      $2 == "ev=ready" && a == "" { for (i = 4; i <= NF; i++) if (index($i, "at=") == 1) a = substr($i, 4) }
+    at="$(awk -F'|' -v r="$row" "${_LINE_FIELDS_AWK:-}"'
+      { e = line_ev() } e == "" || line_kv("row") != r { next }
+      e == "published" || e == "returned" { a = ""; next }
+      e == "ready" && a == "" { a = line_kv("at") }
       END { print a }' "$rec" 2>/dev/null)"
     e="$(iso_epoch "$at")"; [ -n "$e" ] || e="$now"
     case "$tr" in "$2"/*) tr="${tr#"$2"/}" ;; esac
@@ -769,12 +769,12 @@ SITREP_READINGS
 # published since; a later green on that row and suite, or the row's landing, answers it.
 sitrep_reds() {
   [ -f "$1" ] && [ ! -L "$1" ] || { printf 'N\t0\n'; return 0; }
-  awk -F'|' '
-    function fv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    index($0, "line/v1|") != 1 { next }
-    { ev = fv("ev"); rk = fv("row") }
-    ev == "verdict" && fv("kind") == "regression" { next }   # facts of the whole run (wave-39 T24; D9): no row holds them
-    ev == "verdict" && rk != "" { k = rk SUBSEP fv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = fv("result"); next }
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  awk -F'|' "${_LINE_FIELDS_AWK:-}"'
+    (ev = line_ev()) == "" { next }
+    { rk = line_kv("row") }
+    ev == "verdict" && line_kv("kind") == "regression" { next }   # facts of the whole run: no row holds them
+    ev == "verdict" && rk != "" { k = rk SUBSEP line_kv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = line_kv("result"); next }
     ev == "published" && rk != "" { for (i = 1; i <= n; i++) { split(ord[i], p, SUBSEP); if (p[1] == rk) last[ord[i]] = "landed" } }
     END {
       for (i = 1; i <= n; i++) if (last[ord[i]] == "red") { split(ord[i], p, SUBSEP); c++; if (!(p[1] in said)) { said[p[1]] = 1; printf "R\t%s\n", p[1] } }

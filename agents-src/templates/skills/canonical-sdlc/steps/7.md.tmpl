@@ -4,4 +4,6 @@
 
 ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead. Where any doc produced here should live is settled by one question — **who reads it unbidden?** Nobody → operational: park it at a path and cite that path when it is needed; nothing loads it on its own, so its size costs nothing and it may grow freely. Every session → knowledge: it reaches a reader only if the always-loaded index points at it, and that index is read in full every time, so it must earn its line or not be written.
 
+**Promotion, before the release.** A durable record (each ADR the run wrote or amended, its design, its requirements) is copied into the project's tracked home, `docs-tracked:` in `.bionic/config.yaml`, `docs/` when absent: `session-poker.sh promote <adr|design|requirement> <path>`, one call per record, landing at `<home>/<kind>s/<name>` with the run number dropped from the name. A plan, a log, a handoff and every other run record are operational: they stay under `.bionic/` and the verb refuses them.
+
 **The release, last.** After review the release row lands on release-check.test.sh alone; the user approves that head, then it merges.

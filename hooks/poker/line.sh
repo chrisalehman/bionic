@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
-# (row-landed, deliver).
+# (row-landed, deliver, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -9,16 +9,17 @@
 # cells written; <plan out> holds the plan with them (and is left alone when none). rc 1 when the pass cannot run.
 landing_evidence() {
   local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
-  logs="$( [ -f "$rec" ] && awk -F'|' -v row="row=$row" -v c="commit=$commit" -v root="$droot/" '
-    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    $2 == "ev=verdict" && $6 == "result=green" {
-      s = $5; sub(/^suite=/, "", s); l = $7; sub(/^log=/, "", l)
-      gl[substr($4, 8) SUBSEP s SUBSEP fv("reads")] = l   # any row: a reuse line after it may name it as its proof
-      if ($3 == row && $4 == c && s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  logs="$( [ -f "$rec" ] && awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "${_LINE_FIELDS_AWK:-}"'
+    { e = line_ev() }
+    e == "verdict" && line_kv("result") == "green" {
+      s = line_kv("suite"); l = line_kv("log")
+      gl[line_kv("commit") SUBSEP s SUBSEP line_kv("reads")] = l   # any row: a reuse line after it may name it as its proof
+      if (line_kv("row") == row && line_kv("commit") == c && s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
     }
-    $2 == "ev=reused" && $3 == row && $4 == c {
-      s = fv("suite"); k = fv("from") SUBSEP s SUBSEP fv("reads")
-      if (s != "" && fv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
+    e == "reused" && line_kv("row") == row && line_kv("commit") == c {
+      s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
+      if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
     }
     END { for (s in last) printf "%s\t%s\n", s, last[s] }' "$rec" 2>/dev/null )"
   if [ -z "$logs" ]; then printf '0'; return 0; fi
@@ -333,6 +334,7 @@ landing_unmeasured() {  # <record> -> rc 0 when it holds `landed:` lines and no 
 }
 landing_report() {  # <record> <project root> <rows yes|no> -> the line [and rows]; rc 0
   local rec="$1" root="$2" rows="$3" gd f dead reqs="" out mal
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   gd="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
   for f in "$gd"/requests/*; do
     case "${f##*/}" in ''|*[!0-9]*) continue ;; esac
@@ -352,7 +354,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
   done
   if landing_unmeasured "$rec"; then printf 'landings: unmeasured — the landing record holds no line/v1 events\n'; return 0; fi
   [ -f "$rec" ] && [ ! -L "$rec" ] || rec=/dev/null
-  out="$(printf '%s' "$reqs" | awk -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK"'
+  out="$(printf '%s' "$reqs" | awk -F'|' -v root="$root" -v rows="$rows" "$_PATROL_ISO_AWK${_LINE_FIELDS_AWK:-}"'
     function num(s) { return s ~ /^[0-9]+$/ }
     # adm <row> <lo> <hi> -> how many intervals MS/ME now hold: the admitted runs of the row clipped to [lo, hi], merged.
     function adm(rk, lo, hi,   i, j, m, s, t) {
@@ -387,25 +389,23 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
     }
     phase == 0 { split($0, q, "\t"); nq++
       qa[nq] = q[1]; qd[nq] = q[2]; qt[nq] = q[3]; qx[nq] = q[4]; next }
-    index($0, "line/v1|") != 1 { next }
+    (ev = line_ev()) == "" { next }
     {
-      split("", kv); nf = split($0, p, "|")
-      for (i = 2; i <= nf; i++) { j = index(p[i], "="); if (j > 1) kv[substr(p[i], 1, j - 1)] = substr(p[i], j + 1) }
-      ev = kv["ev"]; rk = kv["row"]; e = iso2epoch(kv["at"])
+      rk = line_kv("row"); e = iso2epoch(line_kv("at"))
       g = rk SUBSEP (gen[rk] + 0)
       if (ev == "run") nrl++
-      if (ev == "verdict" && kv["kind"] == "regression") next   # facts of the whole run (wave-39 T24; D9), no row ran them
-      if ((ev == "candidate" || ev == "ready") && kv["commit"] != "") ownc[g SUBSEP kv["commit"]] = 1
+      if (ev == "verdict" && line_kv("kind") == "regression") next   # facts of the whole run, no row ran them
+      if ((ev == "candidate" || ev == "ready") && line_kv("commit") != "") ownc[g SUBSEP line_kv("commit")] = 1
       if (ev == "candidate") hasc[g] = 1
       if (ev == "candidate" && e >= 0 && !(rk in fc)) fc[rk] = e
       if (ev != "ready" && ev != "verdict" && ev != "returned" && ev != "published" && ev != "reused") { if (e >= 0 && t0 == "") t0 = e; next }
       if (rk == "" || e < 0) { mal++; next }
-      if (ev == "verdict" && (kv["suite"] == "" || kv["result"] !~ /^(green|red|none|discarded|absent)$/)) { mal++; next }
-      if (ev == "reused" && kv["suite"] == "") { mal++; next }
-      if (ev == "published" && kv["kind"] !~ /^(queue|hand|git)$/) { mal++; next }
+      if (ev == "verdict" && (line_kv("suite") == "" || line_kv("result") !~ /^(green|red|none|discarded|absent)$/)) { mal++; next }
+      if (ev == "reused" && line_kv("suite") == "") { mal++; next }
+      if (ev == "published" && line_kv("kind") !~ /^(queue|hand|git)$/) { mal++; next }
       if (t0 == "") t0 = e
-      iso[e] = kv["at"]
-      if (ev == "verdict" && kv["result"] != "absent" && kv["width"] ~ /^[0-9]+$/) wd[rk] = kv["width"]
+      iso[e] = line_kv("at")
+      if (ev == "verdict" && line_kv("result") != "absent" && line_kv("width") ~ /^[0-9]+$/) wd[rk] = line_kv("width")
     }
     # THE SAVING (wave-39 T2; D5, AC-1.4): a suite proved by the verdict of another candidate, no run of its own.
     ev == "reused" { nru++; next }
@@ -416,29 +416,29 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
       span[rk]++; next
     }
     ev == "verdict" {
-      if ((g in hasc) && !((g SUBSEP kv["commit"]) in ownc)) next
-      res = kv["result"]; cnt[res]++
+      if ((g in hasc) && !((g SUBSEP line_kv("commit")) in ownc)) next
+      res = line_kv("result"); cnt[res]++
       if (res == "absent") next   # a suite the row removed: no run, counted beside the runs only (A-orch-20)
       nrun[rk]++
       # THE PROMISE AND THE ACTUAL (wave-39 T8; D11, AC-4.2): one line per counted run that carries either field.
-      if (("promised" in kv) || ("actual" in kv)) {
-        vp = (num(kv["promised"]) ? kv["promised"] : "-"); va = (num(kv["actual"]) ? kv["actual"] : "-")
+      if (line_kv("promised") != "" || line_kv("actual") != "") {
+        vp = (num(line_kv("promised")) ? line_kv("promised") : "-"); va = (num(line_kv("actual")) ? line_kv("actual") : "-")
         vr = ((vp != "-" && va != "-" && vp + 0 > 0) ? sprintf("%.2f", va / vp) : "-")
-        sv[rk] = sv[rk] sprintf("  %s %s promised=%s actual=%s ratio=%s\n", kv["suite"], res, (vp == "-" ? "-" : vp "s"), (va == "-" ? "-" : va "s"), vr)
+        sv[rk] = sv[rk] sprintf("  %s %s promised=%s actual=%s ratio=%s\n", line_kv("suite"), res, (vp == "-" ? "-" : vp "s"), (va == "-" ? "-" : va "s"), vr)
       }
       # THE ADMISSION (wave-38 T7): the run was admitted from admitted= to this verdict; no field at all makes the row uncomputable.
-      if (!("admitted" in kv)) noad[rk] = 1
-      else if (num(kv["admitted"])) {
-        nad[rk]++; as[rk, nad[rk]] = kv["admitted"] + 0; ae[rk, nad[rk]] = e
+      if (line_kv("admitted") == "") noad[rk] = 1
+      else if (num(line_kv("admitted"))) {
+        nad[rk]++; as[rk, nad[rk]] = line_kv("admitted") + 0; ae[rk, nad[rk]] = e
       }
-      vk = rk SUBSEP span[rk] SUBSEP kv["commit"] SUBSEP kv["suite"]
+      vk = rk SUBSEP span[rk] SUBSEP line_kv("commit") SUBSEP line_kv("suite")
       if (res == "red") red[vk] = 1
       else if (res == "green" && (vk in red)) { rtg++; delete red[vk] }
       next
     }
     ev == "published" {
-      k = kv["kind"]; kinds[k]++; n++
-      prow[n] = rk; pk[n] = k; pat[n] = kv["at"]; pruns[n] = nrun[rk] + 0
+      k = line_kv("kind"); kinds[k]++; n++
+      prow[n] = rk; pk[n] = k; pat[n] = line_kv("at"); pruns[n] = nrun[rk] + 0
       psv[n] = sv[rk]
       pfrom[n] = ((rk in rdy) ? rdy[rk] : "")
       if (k == "queue" && pfrom[n] != "") { pmin[n] = (e - pfrom[n]) / 60; mins[++nm2] = pmin[n] }
@@ -526,14 +526,11 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
   slug="$(proof_plan_slug "$plan")"
-  if [ -f "$rec" ] && [ ! -L "$rec" ]; then
-    read -r hand stp <<< "$(awk -F'|' '
-      index($0, "line/v1|") == 1 {
-        ev = ""; k = ""
-        for (i = 2; i <= NF; i++) { if (index($i, "ev=") == 1) ev = substr($i, 4); else if (index($i, "kind=") == 1) k = substr($i, 6) }
-        if (ev == "published" && k == "hand") n++
-        else if (ev == "stop-run") s++
-      }
+  if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
+    read -r hand stp <<< "$(awk -F'|' "${_LINE_FIELDS_AWK:-}"'
+      { ev = line_ev() }
+      ev == "published" && line_kv("kind") == "hand" { n++ }
+      ev == "stop-run" { s++ }
       END { print n + 0, s + 0 }' "$rec")"
   fi
   led="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || led=""
@@ -707,7 +704,9 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     # writes the record line alone.
     if [ "$RL_HAND" -eq 1 ]; then
       RL_REC="$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")"
-      if ! awk -F'|' -v r="row=$PV_ID" -v c="commit=$RL_COMMIT" '$1 == "line/v1" && $2 == "ev=published" && $3 == r && $4 == c { f = 1 } END { exit !f }' "$RL_REC" 2>/dev/null; then
+      { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+      if ! awk -F'|' -v r="$PV_ID" -v c="$RL_COMMIT" "${_LINE_FIELDS_AWK:-}"'
+        line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c { f = 1 } END { exit !f }' "$RL_REC" 2>/dev/null; then
         mkdir -p "${RL_REC%/*}" 2>/dev/null
         if ! _wt_proofs_put "$RL_REC" "line/v1|ev=published|row=${PV_ID}|commit=${RL_COMMIT}|kind=hand|by=${RL_BY}|why=${RL_WHY}|at=${RL_AT}"; then
           die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take its published line; make it writable and run the same row-landed again."
@@ -718,5 +717,89 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     fi
     say "evidence: $RL_N cell(s) written by landing"
     [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
+    exit 0
+  }
+
+# ---------------------------------------------------------------- the release note
+#
+# A RELEASE ENTRY'S NUMBERS ARE RENDERED, NEVER TYPED. `release-note [--at <commit>] [--on <instant>] [<plan>]` prints
+# the entry's `### The landing numbers` block as CHANGELOG.md carries it: one line naming the head and the instant,
+# then `landing_report`'s line and rows in a fence. The report is folded over the landing record's lines written at
+# or before the instant (a line's `at=`; a line with none is kept), so a block rendered for a head and an instant is
+# the same block whenever it is rendered for them again, and nothing recorded later is in it. The head is the plan's
+# working branch's (lib/proof.sh `proof_branch_head`), else the checkout's, or the commit --at names; the instant is
+# now, or --on's. The release check renders the block again for the head and instant an entry names and holds the
+# entry to it.
+release_note_cut() {  # <record> <instant> -> the record's lines written at or before <instant>
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  awk -v t="$2" '{ a = ""; n = split($0, f, "|")
+    for (i = n; i >= 1; i--) if (index(f[i], "at=") == 1) { a = substr(f[i], 4); break } }
+    a == "" || a <= t' "$1"
+}
+
+  poker_verb_release_note() {
+    local at="" on="" arg="" plan root rec head cut body
+    local use="release-note takes --at <commit> and --on <YYYY-MM-DDTHH:MM:SSZ> at most once each, and at most one plan."
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at) { [ $# -ge 2 ] && [ -z "$at" ]; } || usage "$use"; at="$2"; shift ;;
+        --on) { [ $# -ge 2 ] && [ -z "$on" ]; } || usage "$use"; on="$2"; shift ;;
+        -*) usage "$use" ;;
+        *) [ -z "$arg" ] || usage "$use"; arg="$1" ;;
+      esac
+      shift
+    done
+    case "${on:-2000-01-01T00:00:00Z}" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) usage "$use" ;;
+    esac
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    if [ -n "$arg" ]; then
+      case "$arg" in
+        /*) plan="$arg" ;;
+        *)  plan="$REPO_REAL/$arg"
+            [ -f "$plan" ] || plan="$(docs_root "$REPO_REAL")/$arg" ;;
+      esac
+      if [ ! -f "$plan" ] || [ -L "$plan" ]; then
+        die "REFUSED — no plan file at $arg; name the plan whose landings the release describes."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a release note without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      plan="$POKER_RUN_PLAN"
+      if [ -z "$plan" ] || [ ! -f "$plan" ]; then
+        die "REFUSED — this session has no run to render; bind its plan first, or name it: release-note <plan>."
+        exit 2
+      fi
+    fi
+    root="$(cd "$(project_root "${plan%/*}")" 2>/dev/null && pwd -P)"
+    [ -n "$root" ] || root="$REPO_REAL"
+    if ! rec="$(_wt_proofs_path "$root" "$plan")"; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
+      exit 2
+    fi
+    if [ -n "$at" ]; then head="$(git -C "$REPO_REAL" rev-parse --verify -q "$at^{commit}" 2>/dev/null)"
+    else head="$(proof_branch_head "$plan" "$root")" || head="$(git -C "$REPO_REAL" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
+    fi
+    if [ -z "$head" ]; then
+      die "REFUSED — ${at:-the working head} names no commit in $REPO_REAL; name the head the entry is written at."
+      exit 2
+    fi
+    [ -n "$on" ] || on="$(iso_now)"
+    cut="$(mktemp "${TMPDIR:-/tmp}/release-note.XXXXXX")" || { die "REFUSED — no temporary file for the record's cut."; exit 2; }
+    release_note_cut "$rec" "$on" > "$cut"
+    body="$(landing_report "$cut" "$root" yes)"
+    rm -f "$cut"
+    printf '### The landing numbers\n\n`landing-report --rows` at %s on %s:\n\n```\n%s\n```\n' "$head" "$on" "$body"
     exit 0
   }

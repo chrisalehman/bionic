@@ -50,15 +50,15 @@ born_floor_backing() {
   case ",$BFB_OWED," in *",$suite,"*) BFB_OF=regression; return 0 ;; esac
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     h="$(git -C "$repo" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || continue
     git -C "$repo" merge-base --is-ancestor "$h" "$bh" 2>/dev/null || continue
     BFB_OF="standing@${h:0:12}"; return 0
   done <<BFB_STANDING
-$(awk -F'|' -v want="$suite" '
-    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    $1 == "line/v1" && $2 == "ev=standing" { s = fv("suite"); sub(/.*\//, "", s); if (s == want && fv("head") != "") h[++n] = fv("head") }
+$(awk -F'|' -v want="$suite" "${_LINE_FIELDS_AWK:-}"'
+    line_ev() == "standing" { s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv("head") != "") h[++n] = line_kv("head") }
     END { for (i = n; i >= 1; i--) print h[i] }' "$rec" 2>/dev/null)
 BFB_STANDING
   return 1
@@ -2791,7 +2791,7 @@ RR_DISP_EOF
 
     # APPROVALS: every name an open row reads, release and merge first, each not yet given.
     RR_NAMES=""
-    RR_INTO="$(rr_sdlc_value "$PV_PLAN" integration-branch)"
+    RR_INTO="$(plan_integration_branch "$PV_PLAN")"
     for nm in release merge $(units_approval_names "$PV_PLAN" 2>/dev/null); do
       [ "$nm" != plan ] || continue
       case " $RR_NAMES " in *" $nm "*) continue ;; esac
@@ -3059,5 +3059,48 @@ RP_TABLE
     fi
     plan_verb_swap order "the order" writer
     say "order — $line, under ## SDLC State of $PV_PLAN; dry-committed first."
+    exit 0
+  }
+
+  # THE PROMOTION. One durable record, an adr, a design or a requirement, copied into the project's tracked
+  # home under its kind with a stable name (lib/roots.sh `promote_target`, which owns the destination and every
+  # refusal). It reads no plan and writes none: a promotion is a copy of a record the project keeps, so the
+  # project root of the working directory is its only operand beside the two it is given. The source is an
+  # absolute path, else project-root-relative, else docs-root-relative. A second promotion of the same record
+  # lands at the same path and replaces it, so an amended record is promoted again by the same call.
+  # REFUSED (1), nothing copied: no such file, or anything promote_target refuses. REFUSED (2): no project root.
+  poker_verb_promote() {
+    local root src to err
+    root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    if [ -z "$root" ]; then
+      die "REFUSED — cannot resolve the project root from the working directory. Nothing was copied."
+      exit 2
+    fi
+    case "$PR_ARG" in
+      /*) src="$PR_ARG" ;;
+      *) if [ -f "$root/$PR_ARG" ]; then src="$root/$PR_ARG"; else src="$(docs_root "$root")/$PR_ARG"; fi ;;
+    esac
+    if [ ! -f "$src" ]; then
+      die "REFUSED — no file $(clean "$PR_ARG") (read as $src). Nothing was copied."
+      exit 1
+    fi
+    src="$(cd "${src%/*}" 2>/dev/null && pwd -P)/${src##*/}"
+    err="$(mktemp "${TMPDIR:-/tmp}/bionic-promote.XXXXXX")" || err=/dev/null
+    if ! to="$(promote_target "$root" "$PR_KIND" "$src" 2>"$err")"; then
+      die "REFUSED — $(sed 's/^promote: //' "$err" 2>/dev/null). Nothing was copied."
+      rm -f "$err"
+      exit 1
+    fi
+    rm -f "$err"
+    if [ -f "$to" ] && cmp -s "$src" "$to"; then
+      say "promote — ${to#"$root"/} already holds ${src#"$root"/}; nothing changed."
+      exit 0
+    fi
+    if ! { mkdir -p "${to%/*}" && cp "$src" "$to.promote.$$" && mv -f "$to.promote.$$" "$to"; }; then
+      rm -f "$to.promote.$$"
+      die "REFUSED — cannot write $to. Nothing was copied."
+      exit 2
+    fi
+    say "promote — ${src#"$root"/} is promoted to ${to#"$root"/}."
     exit 0
   }
