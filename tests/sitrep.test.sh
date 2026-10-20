@@ -391,7 +391,7 @@ awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=review head=" h
 sr_run "$SR_PLAN"
 expect_eq "M3a the correctness line names the class of the one open finding, never the bucket" "1 open S2 finding|0" \
   "$(sr_ind correctness | /usr/bin/grep -oE '[0-9]+ open S[12] finding')|$(sr_ind correctness | /usr/bin/grep -c 'S1 or S2')"
-printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
+printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\nshown: 2 bash tests/y.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
 sr_run "$SR_PLAN"
 expect_eq "M3b …and of two, each class counted" "2 open findings, one S1 and one S2" \
   "$(sr_ind correctness | /usr/bin/grep -oE '[0-9]+ open findings, [^;.]*')"

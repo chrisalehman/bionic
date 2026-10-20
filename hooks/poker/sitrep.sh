@@ -595,6 +595,11 @@ sitrep_dur() {
     if (h == 0) printf "%d min\n", r; else if (r == 0) printf "%d h\n", h; else printf "%d h %d min\n", h, r }'
 }
 
+# sitrep_count_word <n> -> one to ten in words, else the digits
+sitrep_count_word() {
+  case "$1" in 1) echo one ;; 2) echo two ;; 3) echo three ;; 4) echo four ;; 5) echo five ;; 6) echo six ;; 7) echo seven ;; 8) echo eight ;; 9) echo nine ;; 10) echo ten ;; *) echo "$1" ;; esac
+}
+
 # sitrep_list <cap> <word>… -> the words as prose, `A`, `A and B`, `A, B and C`, the first <cap> named and the rest
 # counted (`A, B, C and 6 more`); nothing for no word
 sitrep_list() {
@@ -729,11 +734,11 @@ sitrep_prev() {
   printf '%s\t%s\n' "$(proof_plan_slug "$best")" "${pace##*$'\t'}"
 }
 
-# sitrep_open_s12 <plan> <root> -> the number of open S1 and S2 findings of the plan's registered readings: a
+# sitrep_open_s12 <plan> <root> -> `<open S1 count> <open S2 count>` over the plan's registered readings: a
 # finding `disposition` would print state=open (its effective priority fix, and no fix of it landed).
 sitrep_open_s12() {
-  local plan="$1" root="$2" docs fixed reads ev q h got num s r n=0
-  declare -F proof_findings >/dev/null 2>&1 || { echo 0; return 0; }
+  local plan="$1" root="$2" docs fixed reads ev q h got num s r n1=0 n2=0
+  declare -F proof_findings >/dev/null 2>&1 || { echo "0 0"; return 0; }
   docs="$(docs_root "$root")"
   fixed="$(proof_fixed "$plan" "$root" 2>/dev/null)"
   reads="$(awk "$(proof_awk)"'
@@ -753,14 +758,14 @@ sitrep_open_s12() {
       case "$num:$s" in debt:*|:*) continue ;; *:S1|*:S2) : ;; *) continue ;; esac
       case "$_PROOF_FIXED_IDS" in *$'\n'"$ev#$num"$'\n'*) continue ;; esac
       set -- $(proof_finding_rating "$plan" "$ev#$num" "$s" "$r")
-      [ "${3:-}" != fix ] || n=$((n + 1))
+      [ "${3:-}" != fix ] || { [ "$s" = S1 ] && n1=$((n1 + 1)) || n2=$((n2 + 1)); }
     done <<SITREP_FINDINGS
 $got
 SITREP_FINDINGS
   done <<SITREP_READINGS
 $reads
 SITREP_READINGS
-  echo "$n"
+  echo "$n1 $n2"
 }
 
 # sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`), then `N<TAB><count>`
@@ -988,18 +993,20 @@ SITREP_SIT
   [ -z "$pace" ] || IFS='	' read -r s_med s_decl ratio <<< "$pace"
   IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$landed" "$total" "$now" "$lmed")"
   s_text="$s_mark $s_text"
-  local lred="${lr1#*· runs: green=}" s12 c_reds c_find
+  local lred="${lr1#*· runs: green=}" s12 s1n s2n c_reds c_find
   case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
   case "$lred" in ''|*[!0-9]*) lred=0 ;; esac
-  s12="$(sitrep_open_s12 "$plan" "$root")"
+  s12="$(sitrep_open_s12 "$plan" "$root")"; s1n="${s12% *}"; s2n="${s12#* }"; s12=$((s1n + s2n))
   if [ "${nred:-0}" -gt 1 ]; then c_reds="$nred red suites at head"
   elif [ "${nred:-0}" -eq 1 ]; then c_reds="1 red suite at head"
   elif [ "$lred" -gt 1 ]; then c_reds="$lred red suite runs, each answered by a later green"
   elif [ "$lred" -eq 1 ]; then c_reds="1 red suite run, answered by a later green"
   else c_reds="no red suite at head"; fi
-  if [ "${s12:-0}" -gt 1 ]; then c_find="$s12 open S1 or S2 findings"
-  elif [ "${s12:-0}" -eq 1 ]; then c_find="1 open S1 or S2 finding"
-  else c_find="no open S1 or S2 finding"; fi
+  # each open finding is named by its class: one class reads `2 open S2 findings`, both `2 open findings, one S1 and one S2`
+  if [ "$s12" -eq 0 ]; then c_find="no open S1 or S2 finding"
+  elif [ "$s1n" -eq 0 ] || [ "$s2n" -eq 0 ]; then
+    c_find="$s12 open $([ "$s1n" -gt 0 ] && echo S1 || echo S2) finding$([ "$s12" -gt 1 ] && echo s)"
+  else c_find="$s12 open findings, $(sitrep_count_word "$s1n") S1 and $(sitrep_count_word "$s2n") S2"; fi
   if [ "${nred:-0}" -gt 0 ] || [ "${s12:-0}" -gt 0 ]; then c_mark="$SITREP_MARK_OVER"
   elif [ "$lred" -gt 0 ]; then c_mark="$SITREP_MARK_NEAR"
   else c_mark="$SITREP_MARK_WITHIN"; fi
