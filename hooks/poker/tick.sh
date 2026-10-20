@@ -438,6 +438,26 @@ TOA
   return 0
 }
 
+# A GOAL'S FIRST MISS IS A DECISION THE PERSON OWES, NEVER A NOTE. Every goal the plan declares is read through
+# lib/plan.sh `plan_goals_read`; one read missed opens `decide:goal:<theme>` on the person's ledger (lib/owed.sh),
+# carrying the reading, and the tick says it once. A key the ledger already holds, open or closed, opens nothing: the
+# person's ruling on a miss stands, so a later tick on the same miss puts no second decision.
+tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per goal it opens
+  local f st t m rd k
+  declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
+  f="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file 2>/dev/null)" || return 0
+  while IFS='	' read -r st t m rd; do
+    [ "$st" = missed ] || continue
+    k="decide:goal:$(plan_goal_slug "$t")"
+    [ -f "$f" ] && /usr/bin/grep -qF "|key=$k|" "$f" 2>/dev/null && continue
+    OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "$k" "Goal missed: $t" "poker: GOAL $t missed — $m: $rd; keep the target or change course" >/dev/null 2>&1 \
+      && say "GOAL $t missed — $m: $rd; owed: $k"
+  done <<TOG
+$(plan_goals_read "$1" "$2" "$(landing_report "$2" "$REPO_REAL" yes 2>/dev/null)")
+TOG
+  return 0
+}
+
 # THE FINAL CARD'S EARLY FACTS, AS ADVICE (wave-38 T3; D20, AC-1.2). While the plan carries an open integrate row,
 # the tick asks payload/scripts/card.sh `early`, the one owner of the three facts the final card is refused on (an
 # open reader, a reading unregistered at the head, a red check of the advance to 6, 7 or 8), and says its line,
@@ -1241,6 +1261,7 @@ EOF
     if [ -n "$LT_REC" ] && { /usr/bin/grep -q '^line/v1|ev=published|' "$LT_REC" 2>/dev/null || landing_unmeasured "$LT_REC"; }; then
       TICK_LANDINGS="$(landing_report "$LT_REC" "$REPO_REAL" no 2>/dev/null | head -1)"
     fi
+    [ -z "$LT_REC" ] || tick_owed_goals "$POKER_RUN_PLAN" "$LT_REC"
 
     # ---------- THE GATE REQUESTS, READ ONCE (wave-25 T5, REQ-4 AC-4.3; D7) ----------
     #
