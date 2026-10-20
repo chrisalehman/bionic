@@ -190,7 +190,7 @@ proof_waiver_line() {
   printf 'waived: question=%s head=%s by %s %s "%s"\n' "$1" "$2" "$3" "$4" "$5"
 }
 
-# ---------- THE RELEASE'S COVER (wave-38 T2; D18) ----------
+# ---------- THE RELEASE'S COVER ----------
 #
 # A release-set commit (`_proof_release_path`) is covered by a passing release check at its head (`proof_check_passes`),
 # for every question and the regression. The regression is never waived and never run a second time.
