@@ -532,7 +532,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   Score: <grade> (graded <time>), or Score: not graded yet
 #                      <mark> schedule, correctness, waste, decisions, goals — what each measured, in words; then
 #                      `- <rationale>` when graded
-#   Blocked on you     one bullet per open approve:, waive:, finding: or gate: item of the plan's run
+#   Blocked on you     one bullet per open approve:, waive:, finding:, gate: or decide: item of the plan's run, one sentence each
 #   Predicted close    the close and its basis, or why there is none
 #
 # and `--line` prints only `<schedule><correctness><waste marks> · owed: <n> · <the close>`.
@@ -1100,7 +1100,10 @@ SITREP_SIT
         fi ;;
     esac
     nown=$((nown + 1))
-    blk="${blk}2	- $what: $det"$'\n'
+    case "$k" in
+      approve:*|waive:*) blk="${blk}2	- $what: $det"$'\n' ;;
+      *) blk="${blk}2	- $det"$'\n' ;;   # a decision, finding or gate: the item's own sentence, never its title beside it
+    esac
     whats="${whats}${what}"$'\n'
   done <<SITREP_OWED
 $owed
