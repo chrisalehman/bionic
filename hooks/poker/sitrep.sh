@@ -340,9 +340,9 @@ decisions_all() {
 #                   no launch of this plan on any roster.
 #   widest landing  `landing_report`'s rows: the queue landing with the largest `minutes=`, as printed. unverified when
 #                   no landing is measured.
-#   human-wait      the final-card records (record/<wave>/final-card-*.md, card.sh final): each card's `at=` on its
-#                   `final-card/v1|plan=` line to its `replied: at=`, summed and rounded. unverified with no record, or
-#                   a record with no reply.
+#   human-wait      the review results records (review-results-*.md beside the run's records, and the final-card-*.md
+#                   an older run wrote): each page's `at=` on its `review-results/v1|plan=` (or `final-card/v1|plan=`)
+#                   line to its `replied: at=`, summed and rounded. unverified with no record, or a record with no reply.
 # READ-ONLY. The rosters live in .bionic/tmp, which close-out's act 3 wipes, so close-out reads this before the wipe.
 # Set in hooks/session-poker.sh, before any part loads: SCORECARD_STOP_GAP.
 scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
@@ -375,10 +375,10 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
     NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
     END { if (b != "") print r " " b " min" }')"
-  wait="$(for f in "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk "$_PATROL_ISO_AWK"'
+  wait="$(for f in "$recdir"/review-results-*.md "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk "$_PATROL_ISO_AWK"'
     { file = $0; a = ""; r = ""
       while ((getline l < file) > 0) {
-        if (index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
+        if (index(l, "review-results/v1|plan=") == 1 || index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
         else if (index(l, "replied: at=") == 1) { r = substr(l, 13); sub(/ .*/, "", r) }
       }
       close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
