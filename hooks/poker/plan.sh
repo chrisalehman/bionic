@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (decline,
 # budget, amend, task-add, task-set, ledger-add, ledger-set, step-line, step-field, matrix-render, discharge,
-# matrix-set, tasks-prose, epic-row, continuation-fill, brief, task-split, reply).
+# matrix-set, tasks-prose, epic-row, continuation-fill, brief, task-split, review-results, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -2394,19 +2394,483 @@ BRF_EOF
     exit 0
   }
 
-  # THE FINAL CARD'S REPLY, REPLAYED (wave-38 T3; D19, AC-1.1; ADR-059). `card.sh final` renders one card and
-  # writes it, with its replay table, to `record/<wave>/final-card-<head8>.md`; the user answers it once, and this
-  # verb replays that answer into the record with the user's words. The table holds one line per item,
+  # ---------------------------------------------------------------- the review results page
   #
-  #   final-card/v1|opt=<k>|key=<key>|default=<verb args…|->|override=<verb args…|->|why=<why|->
+  # THE PAGE THE AUTONOMOUS HALF WAITS ON. `review-results [--preview] [--against <key>]... [<plan>]` renders, from
+  # the record and nothing else, what the run reached, what the machine proved, what the readers judged and what is
+  # the user's, in that order, each line folded at 92 columns (`sitrep_fold`), a blank line between sections:
   #
-  # so the verbs are strings: option 1 replays every item's default, option <k> replays item k's override in its
-  # place; a verb is run as `<verb> <args…> '<the reply>' ['<why>']`, a `-` default is applied as carried (a
-  # deferral needs no verb) and a `-` override is withheld. Each item applied is written to the card's record
-  # (`applied: <key> …`), a re-run skipping those, and the reply last (`replied: …`), so a card is answered once.
-  # REFUSED (1), the plan unchanged: no card for the bound run, a card rendered at another head than the working
-  # one (render it again), a card already answered, a reply naming no option of the card, and words the user did
-  # not type (lib/said.sh, asked once before any verb runs, so a reply that is not the user's writes nothing).
+  #   Review results · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
+  #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
+  #   Goals         each goal the plan's `goals:` line declares, ❔ until a reader of it exists
+  #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
+  #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
+  #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
+  #   Decisions     numbered, the recommendation first and the default second, then the reply line
+  #
+  # WHAT IS A DECISION. Every approval an open row reads that is not yet given; every question waiver the person
+  # owes; every matrix row neither proved nor waived (only the user waives a criterion); and a finding only when the
+  # orchestrator recommends against the policy's default, `--against finding:<record>#<n>`. Every other finding
+  # follows the policy by severity and is a line under Findings; one that names a criterion put as a decision waits
+  # on that decision. A decision has two choices, its default and the other one; the recommendation is the default
+  # unless `--against <key>` names it. The regression is never a decision: a head without a green whole run is early.
+  #
+  # THE ACTING RENDER. On the session's bound run, when `card.sh early` holds, the page is printed, each approval and
+  # waiver it puts is opened on the person's ledger, and the page is written beside the run's records as
+  # `review-results-<head8>.md` with its replay table, which `reply` reads:
+  #
+  #   review-results/v1|plan=<plan>|head=<40-hex>|at=<ISO>|decisions=<n>
+  #   review-results/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|why=<why|->
+  #
+  # Early, it prints `CARD-EARLY — <reason>` on stderr, exit 1, and writes nothing. `--preview` renders the page
+  # whatever the facts, the reason first when it is early, and records no page and opens no item. REFUSED (1),
+  # nothing written: a plan that is not the bound run, a branch naming no commit, an `--against` naming nothing the
+  # page holds.
+  rr_field() {  # <disposition line> <name> -> the value of name="…" or of name=<word>
+    local l="$1" n="$2" v
+    case "$l" in
+      *" $n=\""*) v="${l#* "$n"=\"}"; if [ "$n" = title ]; then v="${v%\"}"; else v="${v%%\"*}"; fi ;;
+      *" $n="*) v="${l#* "$n"=}"; v="${v%% *}" ;;
+      *) v="" ;;
+    esac
+    printf '%s' "$v"
+  }
+
+  rr_rows() {  # <plan> -> `<AC><TAB><status><TAB><auditor>` per matrix row, table order
+    awk -F'|' '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
+      inm && /^[ \t]*\|/ {
+        a = $2; s = $4; u = $6; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", u)
+        if (a == "" || a == "AC" || a ~ /^-+$/) next
+        printf "%s\t%s\t%s\n", a, s, (u == "" ? "-" : u)
+      }' "$1"
+  }
+
+  rr_block_key() {  # <plan> <AC> <key> -> the first value of <key>: in the AC's block, or nothing
+    RR_AC="$2" RR_BK="$3" awk "$(units_ac_head_awk)"'
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
+      !inm { next }
+      ac_head($0, ENVIRON["RR_AC"]) { inb = 1; next }
+      inb && /^[^[:space:]]/ { inb = 0 }
+      inb {
+        l = $0; sub(/^[ \t]+/, "", l); k = ENVIRON["RR_BK"] ":"
+        if (index(l, k) == 1) { v = substr(l, length(k) + 1); sub(/^[ \t]+/, "", v); print v; exit }
+      }' "$1"
+  }
+
+  rr_approved() {  # <plan> <name> -> the plan's approved: line for it, or nothing
+    RR_NM="$2" awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && /^approved:[ \t]/ { split($0, w, /[ \t]+/); if (w[2] == ENVIRON["RR_NM"] && w[3] == "by") { print; exit } }' "$1"
+  }
+
+  rr_sdlc_value() {  # <plan> <field> -> the value of `<field>:` under ## SDLC State, or nothing
+    RR_F="$2" awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && index($0, ENVIRON["RR_F"] ":") == 1 { v = substr($0, length(ENVIRON["RR_F"]) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
+  }
+
+  rr_proof_field() {  # <proof line> <name> -> the value of name=<word> on it, or nothing
+    case " $1 " in *" $2="*) local v="${1#* "$2"=}"; [ "$v" != "$1" ] || v="${1#"$2"=}"; printf '%s' "${v%% *}" ;; esac
+  }
+
+  rr_question_of() {  # <plan> <evidence> -> the question of the newest reading that cites it
+    RR_EV="$2" awk "$(proof_awk)"'
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == ENVIRON["RR_EV"] { q = PROOF_QUESTION }
+      END { print q }' "$1"
+  }
+
+  rr_carried() {  # <record dir> <finding id> -> 0 when a replied page of this run applied its carry
+    local f
+    for f in "$1"/review-results-*.md; do
+      [ -f "$f" ] || continue
+      /usr/bin/grep -qxF "applied: finding:$2 carried" "$f" 2>/dev/null && return 0
+    done
+    return 1
+  }
+
+  rr_add() {  # <kind> <key> <default verb> <other verb> <why> <subject> <default label> <other label> <default phrase> <other phrase>
+    RR_KIND[RR_N]="$1"; RR_KEY[RR_N]="$2"; RR_DO[RR_N]="$3"; RR_ELSE[RR_N]="$4"; RR_WHYS[RR_N]="$5"
+    RR_SUBJ[RR_N]="$6"; RR_DLAB[RR_N]="$7"; RR_OLAB[RR_N]="$8"; RR_DPH[RR_N]="$9"; RR_OPH[RR_N]="${10}"
+    RR_PICK[RR_N]=default
+    printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "$2" && RR_PICK[RR_N]=other
+    RR_N=$((RR_N + 1))
+  }
+
+  rr_dec_of() {  # <key> -> the decision number the page gives it, or nothing
+    local i
+    for ((i = 0; i < RR_N; i++)); do [ "${RR_KEY[$i]}" != "$1" ] || { printf '%s' "$((i + 1))"; return 0; }; done
+    return 1
+  }
+
+  rr_plural() {  # <n> <singular> <plural> -> `<n> <word>`
+    if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
+  }
+
+  rr_page() {  # -> the page on stdout, from the RR_* facts the verb gathered; every line through sitrep_fold
+    local i k p l g n t sub lab
+    local -a ph=() ap=() wv=() rn=()
+    {
+      printf '0\tReview results · %s%s · %s · head %s%s\n' "$RR_PROJ" "${RR_REL:+ $RR_REL}" \
+        "$(sitrep_date "$(sitrep_now)" '%A %-I:%M %p')" "$RR_H8" \
+        "$([ "$RR_TOTAL" -gt 0 ] && printf ' · %d of %d tasks landed' "$RR_LANDED" "$RR_TOTAL")"
+      printf '0\t\n0\tBottom line\n'
+      if [ -n "$RR_EARLY" ]; then printf '2\t- Not ready for your decisions: %s.\n' "${RR_EARLY#CARD-EARLY — }"
+      elif [ "$RR_N" -gt 0 ]; then printf '2\t- Ready for your decisions: every check holds at %s.\n' "$RR_H8"
+      else printf '2\t- Every check holds at %s.\n' "$RR_H8"; fi
+      if [ -n "$RR_MISS" ]; then
+        set -- $RR_MISS
+        l="$(rr_plural "$#" criterion criteria) not proved: $(sitrep_list 6 "$@")"
+        n=""; for p in "$@"; do k="$(rr_dec_of "row:$p")" && n="$n $k"; done
+        # shellcheck disable=SC2086  # the decision numbers, one word each; a run of them said as a range
+        if [ -n "$n" ]; then
+          set -- $n
+          if [ "$#" -eq 1 ]; then l="$l (decision $1)"
+          elif [ "$(( ${!#} - $1 + 1 ))" -eq "$#" ]; then l="$l (decisions $1 to ${!#})"
+          else l="$l (decisions $(sitrep_list 6 "$@"))"; fi
+        fi
+        printf '2\t- %s.\n' "$l"
+      elif [ "$RR_ACW" -gt 0 ]; then printf '2\t- Every criterion is proved or waived by you.\n'
+      elif [ "$RR_ACT" -gt 0 ]; then printf '2\t- Every criterion is proved.\n'
+      else printf '2\t- The matrix holds no criterion.\n'; fi
+      if [ "$RR_N" -gt 0 ]; then
+        printf '2\t- You owe %s, listed below. Everything else has a default the record supports.\n' "$(rr_plural "$RR_N" decision decisions)"
+      else
+        printf '2\t- You owe nothing: every approval and waiver is recorded.\n'
+      fi
+      while IFS= read -r l; do [ -z "$l" ] || printf '2\t- Also yours, outside the run: %s.\n' "${l%.}"; done <<RR_ASIDE_EOF
+$RR_ASIDE
+RR_ASIDE_EOF
+      if [ "$RR_N" -gt 0 ]; then
+        # One phrase per decision, the rows' said once per choice over their criteria, the approvals given last.
+        for ((i = 0; i < RR_N; i++)); do
+          if [ "${RR_KIND[$i]}" = approve ] && [ "${RR_PICK[$i]}" = default ]; then ap[${#ap[@]}]="${RR_KEY[$i]#approve:}"
+          elif [ "${RR_KIND[$i]}" = row ] && [ "${RR_PICK[$i]}" = default ]; then wv[${#wv[@]}]="${RR_KEY[$i]#row:}"
+          elif [ "${RR_KIND[$i]}" = row ]; then rn[${#rn[@]}]="${RR_KEY[$i]#row:}"
+          elif [ "${RR_PICK[$i]}" = default ]; then ph[${#ph[@]}]="${RR_DPH[$i]}"
+          else ph[${#ph[@]}]="${RR_OPH[$i]}"; fi
+          if [ "${RR_KIND[$i]}" = row ] && { [ "$((i + 1))" -eq "$RR_N" ] || [ "${RR_KIND[$((i + 1))]}" != row ]; }; then
+            [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(sitrep_list 6 "${wv[@]}")"
+            [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(sitrep_list 6 "${rn[@]}")"
+          fi
+        done
+        l=""
+        for ((i = 0; i < ${#ph[@]}; i++)); do l="${l:+$l, }${ph[$i]}"; done
+        if [ "${#ap[@]}" -gt 0 ]; then l="${l:+$l, then }$(sitrep_list 6 "${ap[@]}")"; fi
+        printf '2\t- Recommended: %s.\n' "$l"
+      fi
+      printf '0\t\n'
+      if [ -z "$RR_GOALS" ]; then
+        printf '0\tGoals — none declared\n'
+      else
+        printf '0\tGoals — 0 of %s reached\n' "$(printf '%s\n' "$RR_GOALS" | /usr/bin/grep -c .)"
+        while IFS='	' read -r g t; do [ -z "$g" ] || printf '3\t❔ %s — %s, not measured yet\n' "$g" "$t"; done <<RR_GOALS_EOF
+$RR_GOALS
+RR_GOALS_EOF
+      fi
+      printf '0\t\n0\tTests\n3\t%s\n3\t%s\n' "$RR_TACC" "$RR_TREG"
+      printf '0\t\n0\tReviews\n'
+      printf '%s\n' "$RR_REVIEWS" | awk 'NF { print "3\t" $0 }'
+      printf '0\t\n'
+      if [ "$RR_FN" -eq 0 ]; then
+        printf '0\tFindings — none\n'
+      else
+        l=""
+        [ "$RR_FNF" -eq 0 ] || l="$RR_FNF fixed"
+        [ "$RR_FNA" -eq 0 ] || l="${l:+$l · }$RR_FNA for your decision"
+        [ "$RR_FNC" -eq 0 ] || l="${l:+$l · }$RR_FNC carried"
+        printf '0\tFindings — %s: %s\n' "$RR_FN" "$l"
+        for g in F A C; do
+          sub="$(printf '%s\n' "$RR_FLINES" | awk -F'\t' -v g="$g" '$1 == g')"
+          [ -n "$sub" ] || continue
+          case "$g" in
+            F) lab="Fixed"; [ -z "$RR_FROWS" ] || lab="Fixed by $(sitrep_list 6 $RR_FROWS)" ;;
+            A) lab="Awaiting your decision" ;;
+            C) lab="Carried as known limits" ;;
+          esac
+          printf '0\t%s\n' "$lab"
+          printf '%s\n' "$sub" | awk -F'\t' '{ printf "7\t  %s   %s\n", $2, $3 }'
+        done
+      fi
+      printf '0\t\n0\tDecisions\n'
+      if [ "$RR_N" -eq 0 ]; then
+        printf '3\tNone wait on you.\n'
+      else
+        for ((i = 0; i < RR_N; i++)); do
+          if [ "${RR_PICK[$i]}" = default ]; then lab="${RR_DLAB[$i]}"; else lab="${RR_OLAB[$i]}"; fi
+          printf '3\t%d. %s — recommended: %s · default: %s\n' "$((i + 1))" "${RR_SUBJ[$i]}" "$lab" "${RR_DLAB[$i]}"
+        done
+      fi
+      if [ "$RR_PREVIEW" = yes ]; then
+        printf '0\t\n0\tPreview only: nothing is recorded, and reply cannot act on it.\n'
+      elif [ "$RR_N" -gt 0 ]; then
+        printf '0\t\n0\tReply "all recommended" or "all default".\n'
+      fi
+    } | sitrep_fold
+  }
+
+  rr_record() {  # <page text> -> writes the page and its replay table beside the run's records; prints nothing
+    local f n=2 i
+    f="$RR_DIR/review-results-$RR_H8.md"
+    while [ -f "$f" ] && /usr/bin/grep -q '^replied: ' "$f" 2>/dev/null; do
+      f="$RR_DIR/review-results-$RR_H8-$n.md"; n=$((n + 1))
+    done
+    mkdir -p "$RR_DIR" 2>/dev/null || return 0
+    [ ! -L "$f" ] || return 0
+    {
+      printf '%s\n\n## Replay\n\n' "$1"
+      printf 'review-results/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "$(iso_now)" "$RR_N"
+      for ((i = 0; i < RR_N; i++)); do
+        printf 'review-results/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
+          "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "${RR_WHYS[$i]}"
+      done
+    } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
+    rm -f "$f.new.$$" 2>/dev/null
+    return 0
+  }
+
+  poker_verb_review_results() {
+    local nm line key reply ac st au wl why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind
+    if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_last_line >/dev/null 2>&1; then
+      die "REFUSED — the review results are read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      exit 2
+    fi
+    plan_verb_open review-results
+    if [ -n "$RR_ARG" ]; then
+      nm="$(cd "$(dirname "$RR_ARG")" 2>/dev/null && pwd -P)/$(basename "$RR_ARG")"
+      line="$(cd "$(dirname "$PV_PLAN")" 2>/dev/null && pwd -P)/$(basename "$PV_PLAN")"
+      if [ "$nm" != "$line" ]; then
+        die "REFUSED — '$(clean "$RR_ARG")' is not the run this session is bound to ($PV_PLAN); the review results are the bound run's, and nothing is written."
+        exit 1
+      fi
+    fi
+    RR_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || RR_HEAD=""
+    case "$RR_HEAD" in
+      [0-9a-f]*) : ;;
+      *) die "REFUSED — the plan's working branch names no commit, so there is no head to render the review results at; nothing is written."; exit 1 ;;
+    esac
+    RR_H8="${RR_HEAD:0:8}"
+    RR_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
+    # THE THREE FACTS ARE card.sh's (`early`), asked as this session in the run's root.
+    RR_EOUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" early "$PV_PLAN" 2>&1 )"; RR_ERC=$?
+    RR_EARLY=""
+    if [ "$RR_ERC" -ne 0 ]; then
+      RR_EARLY="$(printf '%s\n' "$RR_EOUT" | awk '!/^settles: / && NF { print; exit }')"
+      RR_EARLY="${RR_EARLY:-card.sh early exited $RR_ERC}"
+      if [ "$RR_PREVIEW" != yes ]; then printf '%s\n' "$RR_EARLY" >&2; exit 1; fi
+    fi
+    RR_SETTLE="$(printf '%s\n' "$RR_EOUT" | sed -n 's/^settles: //p')"
+
+    # THE TITLE'S FACTS: the project, the release, the tasks landed.
+    RR_PROJ="$(git -C "$PV_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+    case "$RR_PROJ" in */.git) RR_PROJ="${RR_PROJ%/.git}"; RR_PROJ="${RR_PROJ##*/}" ;; *) RR_PROJ="${PV_REPO##*/}" ;; esac
+    RR_REL="$(plan_frontmatter_get "$PV_PLAN" release 2>/dev/null)"
+    RR_UROWS="$(units_rows "$PV_PLAN" 2>/dev/null)"
+    set -- $(printf '%s\n' "$RR_UROWS" | awk -F'\t' 'NF >= 10 { t++; if ($10 == "landed") l++ } END { print t + 0, l + 0 }')
+    RR_TOTAL="${1:-0}"; RR_LANDED="${2:-0}"
+    RR_LANDED_IDS=" $(printf '%s\n' "$RR_UROWS" | awk -F'\t' 'NF >= 10 && $10 == "landed" { printf "%s ", $1 }')"
+
+    RR_N=0; RR_ASIDE=""
+    RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=()
+
+    # WAIVERS: the person's open waive: items, then the ones the red check owes, each once; never the regression.
+    RR_WAIVE=""
+    while IFS='	' read -r key _ _ reply; do
+      case "$key" in
+        waive:regression) : ;;
+        waive:?*) RR_WAIVE="${RR_WAIVE}${key}"$'\n' ;;
+        gate:?*) RR_ASIDE="${RR_ASIDE}${reply#poker: }"$'\n' ;;
+      esac
+    done <<RR_OWED
+$(OWED_ROOT="$PV_REPO" owed_list 2>/dev/null)
+RR_OWED
+    RR_WAIVE="$(printf '%s%s\n' "$RR_WAIVE" "$(printf '%s\n' "$RR_SETTLE" | /usr/bin/grep '^waive:' | /usr/bin/grep -vx 'waive:regression')" | awk 'NF && !seen[$0]++')"
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      q="${key#waive:}"
+      line="$(proof_last_line "$PV_PLAN" review "$q" 2>/dev/null)"
+      if [ "$(rr_proof_field "$line" result)" = fail ]; then why="failing at this head"; else why="not held at this head"; fi
+      rr_add waive "$key" "waive $q" "-" "-" "The $q reading, $why" waive withhold "waive the $q reading" "hold the $q waiver"
+    done <<RR_WAIVES
+$RR_WAIVE
+RR_WAIVES
+
+    # ROWS: every matrix row; a decision when neither proved (discharged, CONFIRMED) nor waived on its waiver: line.
+    RR_ACT=0; RR_ACP=0; RR_ACW=0; RR_ACU=0; RR_ACR=0; RR_MISS=""
+    while IFS='	' read -r ac st au; do
+      [ -n "$ac" ] || continue
+      RR_ACT=$((RR_ACT + 1))
+      if [ "$st" = discharged ] && [ "$au" = CONFIRMED ]; then RR_ACP=$((RR_ACP + 1)); continue; fi
+      wl="$(rr_block_key "$PV_PLAN" "$ac" waiver)"
+      if [ "$st" = waived ] && [ -n "$wl" ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
+      if [ "$st" = discharged ]; then RR_ACU=$((RR_ACU + 1)); else RR_ACR=$((RR_ACR + 1)); fi
+      RR_MISS="${RR_MISS:+$RR_MISS }$ac"
+      why="$(rr_block_key "$PV_PLAN" "$ac" reason)"
+      if [ -z "$why" ]; then
+        if [ "$st" = discharged ]; then why="not confirmed by the auditor on this release"; else why="not run on this release"; fi
+      fi
+      rr_add row "row:$ac" "waive-row $ac" "-" "$why" "$ac, $why" waive "run it" "waive $ac" "run $ac"
+    done <<RR_ROWS
+$(rr_rows "$PV_PLAN")
+RR_ROWS
+    if [ "$RR_ACT" -eq 0 ]; then
+      RR_TACC="❔ acceptance — the matrix holds no criterion"
+    else
+      line=""
+      [ "$RR_ACW" -eq 0 ] || line="$RR_ACW waived by you"
+      [ "$RR_ACU" -eq 0 ] || line="${line:+$line, }$RR_ACU not confirmed by the auditor"
+      [ "$RR_ACR" -eq 0 ] || line="${line:+$line, }$RR_ACR not run"
+      if [ -z "$RR_MISS" ]; then RR_TACC="✅"; else RR_TACC="✖️"; fi
+      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
+    fi
+
+    # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against.
+    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""
+    RR_DISP="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+    while IFS= read -r line; do
+      case "$line" in "poker: finding "*) : ;; *) continue ;; esac
+      line="${line#poker: }"
+      fid="$(printf '%s' "$line" | awk '{ print $2 }')"; sev="$(printf '%s' "$line" | awk '{ print $3 }')"
+      state="$(rr_field "$line" state)"; rows="$(rr_field "$line" row)"; ev="$(rr_field "$line" record)"
+      stated="$(rr_field "$line" stated)"; ttl="$(rr_field "$line" title)"
+      sent="${stated:-$ttl}"; [ "$sent" != - ] || sent="$ttl"; sent="${sent%.}"
+      q="$(rr_question_of "$PV_PLAN" "$ev")"; num="${fid##*#}"
+      RR_FN=$((RR_FN + 1)); RR_FIDS="${RR_FIDS}finding:$fid"$'\n'
+      dec=""; grp=C
+      [ "$rows" != "—" ] || rows=""
+      if [ "$state" = fixed ] || [ -n "$rows" ]; then
+        # FIXED BY ITS ROWS: the disposition's own fixed, or a row born of it or moved to fix it; not landed yet, said.
+        grp=F; dec=""
+        for ac in $(printf '%s' "$rows" | tr ',' ' '); do
+          RR_FROWS="$RR_FROWS $ac"
+          case "$RR_LANDED_IDS" in *" $ac "*) : ;; *) dec=open ;; esac
+        done
+        [ "$state" = fixed ] || [ -z "$dec" ] || sent="$sent (not landed yet)"
+        dec=""
+      elif printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" && ! rr_carried "$RR_DIR" "$fid"; then
+        rr_add finding "finding:$fid" "-" "finding-move $fid fix" "the review results: fixed instead of carried" \
+          "$sent (${q:-a reading} #$num)" carry "fix now, one row" "carry ${q:-a} finding $num" "fix ${q:-a} finding $num"
+        grp=A; dec="$RR_N"
+      else
+        for ac in $(printf '%s' "$sent" | /usr/bin/grep -oE 'AC-[0-9]+\.[0-9]+'); do
+          dec="$(rr_dec_of "row:$ac")" && { grp=A; break; }
+        done
+        if [ "$grp" = C ] && [ "$state" = open ]; then grp=A; dec="$(rr_dec_of "waive:$q")" || dec=""; fi
+      fi
+      case "$grp" in F) RR_FNF=$((RR_FNF + 1)) ;; A) RR_FNA=$((RR_FNA + 1)) ;; C) RR_FNC=$((RR_FNC + 1)) ;; esac
+      RR_FLINES="${RR_FLINES}${grp}	${sev}	${sent}${dec:+ (decision $dec)}"$'\n'
+    done <<RR_DISP_EOF
+$RR_DISP
+RR_DISP_EOF
+    RR_FROWS="$(printf '%s\n' $RR_FROWS | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//')"
+
+    # APPROVALS: every name an open row reads, release and merge first, each not yet given.
+    RR_NAMES=""
+    RR_INTO="$(rr_sdlc_value "$PV_PLAN" integration-branch)"
+    for nm in release merge $(units_approval_names "$PV_PLAN" 2>/dev/null); do
+      [ "$nm" != plan ] || continue
+      case " $RR_NAMES " in *" $nm "*) continue ;; esac
+      units_approval_names "$PV_PLAN" 2>/dev/null | /usr/bin/grep -qxF "$nm" || continue
+      RR_NAMES="$RR_NAMES $nm"
+      [ -z "$(rr_approved "$PV_PLAN" "$nm")" ] || continue
+      case "$nm" in
+        release) line="Release${RR_REL:+ $RR_REL}" ;;
+        merge) line="Merge${RR_INTO:+ into $RR_INTO}" ;;
+        *) line="Approval $nm" ;;
+      esac
+      rr_add approve "approve:$nm" "approve $nm" "-" "-" "$line" approve withhold "$nm" "hold the $nm"
+    done
+
+    # AN --against THAT NAMES NOTHING ON THE PAGE is refused before anything is written.
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      rr_dec_of "$key" >/dev/null && continue
+      printf '%s' "$RR_FIDS" | /usr/bin/grep -qxF -- "$key" && continue
+      die "REFUSED — --against $(clean "$key") names nothing the review results hold; nothing is written."
+      exit 1
+    done <<RR_AGAINST_EOF
+$RR_AGAINST
+RR_AGAINST_EOF
+
+    # GOALS: the plan's `goals:` line, `<theme> · <measure> (<reader>)` per goal, `;` between them.
+    RR_GOALS="$(plan_frontmatter_get "$PV_PLAN" goals 2>/dev/null | awk '{ n = split($0, g, /;/)
+      for (i = 1; i <= n; i++) { s = g[i]; gsub(/^[ \t]+|[ \t]+$/, "", s); if (s == "") continue
+        j = index(s, " · "); if (j == 0) { print s "\t-"; continue }
+        t = substr(s, 1, j - 1); m = substr(s, j + length(" · ")); sub(/[ \t]*\([^()]*\)$/, "", m); print t "\t" m } }')"
+
+    # THE REGRESSION: the last whole run's proof line, and its log's verdict when the log is here to read.
+    line="$(proof_last_line "$PV_PLAN" regression 2>/dev/null)"
+    if [ -z "$line" ]; then
+      RR_TREG="✖️ regression — no whole run on record"
+    else
+      h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" owed)"
+      if [ "$h" = "$RR_HEAD" ]; then nm="this head"; else nm="${h:0:8}"; fi
+      ev="$(rr_proof_field "$line" evidence)"
+      st="$(awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4 } END { if (p != "") print p, f }' "$(docs_root "$PV_REPO")/$ev" 2>/dev/null)"
+      if [ -n "$r" ]; then
+        RR_TREG="✖️ regression — whole run at $nm left $(rr_plural "$(printf '%s' "$r" | tr ',' '\n' | /usr/bin/grep -c .)" suite suites) red"
+      else
+        RR_TREG="✅ regression — whole run green at $nm"
+        [ -z "$st" ] || RR_TREG="$RR_TREG, ${st%% *} of $(( ${st%% *} + ${st##* } )) suites"
+      fi
+    fi
+
+    # THE REVIEWS: each question's newest reading, by the role the rigor deals it.
+    RR_REVIEWS=""
+    for q in evidence adversarial structure; do
+      role=critic
+      [ "$q" != evidence ] || [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" != double ] || role=auditor
+      line="$(proof_last_line "$PV_PLAN" review "$q" 2>/dev/null)"
+      if [ -z "$line" ]; then RR_REVIEWS="${RR_REVIEWS}❔ $q — not read yet"$'\n'; continue; fi
+      h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" result)"
+      behind="$(git -C "$PV_REPO" rev-list --count "$h..$RR_HEAD" 2>/dev/null)" || behind=""
+      if [ "$h" = "$RR_HEAD" ] || [ "$behind" = 0 ]; then nm="$role at this head"
+      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(rr_plural "$behind" commit commits) behind"
+      else nm="$role at ${h:0:8}"; fi
+      case "$r" in
+        pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
+        fail) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
+        *) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, ${r:-no result}"$'\n' ;;
+      esac
+    done
+
+    RR_TEXT="$(rr_page)"
+    printf '%s\n' "$RR_TEXT"
+    [ "$RR_PREVIEW" != yes ] || exit 0
+    # THE ACTING RENDER OPENS WHAT IT PUTS on the person's ledger, so the ledger and the page agree, and records it.
+    for ((num = 0; num < RR_N; num++)); do
+      key="${RR_KEY[$num]}"
+      case "$key" in
+        approve:*|waive:*) OWED_ROOT="$PV_REPO" owed_open "$key" "${RR_KIND[$num]}: ${key#*:}" \
+          "poker: ${key#*:} is decision $((num + 1)) on the review results at $RR_H8" >/dev/null 2>&1 || : ;;
+      esac
+    done
+    [ "$RR_N" -eq 0 ] || rr_record "$RR_TEXT"
+    exit 0
+  }
+
+  # THE REPLY TO THE REVIEW RESULTS, REPLAYED. `review-results` writes the page with its replay table, one line per
+  # decision with its default, its other choice and the recommendation (`pick=`); the user answers it once, and
+  # this verb replays that answer into the record with the user's words. `all default` takes every default, `all
+  # recommended` every recommendation. A verb is run as `<verb> <args…> '<the reply>' ['<why>']`; a `-` default is
+  # applied as carried (a deferral needs no verb) and a `-` other choice is withheld. Each decision applied is
+  # written to the page's record (`applied: <key> …`), a re-run skipping those, and the reply last (`replied: …`),
+  # so a page is answered once.
+  # REFUSED (1), the plan unchanged: no page for the bound run, a page rendered at another head than the working one
+  # (render it again), a page already answered, a reply that is neither of the two, and words the user did not type
+  # (lib/said.sh, asked once before any verb runs, so a reply that is not the user's writes nothing).
   poker_verb_reply() {
     case "$RP_TEXT" in
       *$'\n'*|*$'\r'*) die "REFUSED — a reply is one line, and this one carries a line break; the plan is unchanged."; exit 1 ;;
@@ -2419,58 +2883,52 @@ BRF_EOF
     fi
     plan_verb_open reply
     RP_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
-    # The newest card by its time of writing: a re-render at a head writes over that head's card, a later head's card is newer.
-    # shellcheck disable=SC2012  # card names are final-card-<hex>[-<n>].md, no blank or line break in any
-    RP_CARD="$(ls -t "$RP_DIR"/final-card-*.md 2>/dev/null | head -1)"
+    # The newest page by its time of writing: a re-render at a head writes over that head's page, a later head's is newer.
+    # shellcheck disable=SC2012  # page names are review-results-<hex>[-<n>].md, no blank or line break in any
+    RP_CARD="$(ls -t "$RP_DIR"/review-results-*.md 2>/dev/null | head -1)"
     if [ -z "$RP_CARD" ] || [ ! -f "$RP_CARD" ] || [ -L "$RP_CARD" ]; then
-      die "REFUSED — no final card is recorded for $PV_PLAN: render it with card.sh final <plan>, put it to the user, and replay their reply; the plan is unchanged."
+      die "REFUSED — no review results are recorded for $PV_PLAN: render them with review-results, show the page to the user, and replay their reply; the plan is unchanged."
       exit 1
     fi
-    RP_HDR="$(/usr/bin/grep -m1 '^final-card/v1|plan=' "$RP_CARD" 2>/dev/null)"
+    RP_HDR="$(/usr/bin/grep -m1 '^review-results/v1|plan=' "$RP_CARD" 2>/dev/null)"
     RP_RHEAD="${RP_HDR#*|head=}"; RP_RHEAD="${RP_RHEAD%%|*}"
-    RP_N="${RP_HDR#*|options=}"; RP_N="${RP_N%%|*}"
-    case "$RP_N" in ''|*[!0-9]*) RP_N=0 ;; esac
     RP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || RP_HEAD=""
     if [ -z "$RP_HDR" ] || [ "$RP_RHEAD" != "$RP_HEAD" ]; then
-      die "REFUSED — the final card $RP_CARD was rendered at $(printf '%.8s' "${RP_RHEAD:-(no head)}") and the working head is $(printf '%.8s' "${RP_HEAD:-(none)}") now: render it again with card.sh final <plan> and put that card to the user; the plan is unchanged."
+      die "REFUSED — the review results $RP_CARD were rendered at $(printf '%.8s' "${RP_RHEAD:-(no head)}") and the working head is $(printf '%.8s' "${RP_HEAD:-(none)}") now: render them again with review-results and show that page to the user; the plan is unchanged."
       exit 1
     fi
     if /usr/bin/grep -q '^replied: ' "$RP_CARD" 2>/dev/null; then
-      die "REFUSED — the final card $RP_CARD is already answered ($(clean "$(/usr/bin/grep -m1 '^replied: ' "$RP_CARD")")); render the card again for what is still open; the plan is unchanged."
+      die "REFUSED — the review results $RP_CARD are already answered ($(clean "$(/usr/bin/grep -m1 '^replied: ' "$RP_CARD")")); render them again for what is still open; the plan is unchanged."
       exit 1
     fi
-    RP_K=""
-    [[ "$RP_TEXT" =~ ^[[:space:]]*([Oo]ption[[:space:]]+)?([0-9]+)([^0-9]|$) ]] && RP_K="${BASH_REMATCH[2]}"
-    if [ -z "$RP_K" ]; then
-      die "REFUSED — the reply \"$(clean "$RP_TEXT")\" names no option of the final card $RP_CARD: it offers 1 to $RP_N, the number first; the plan is unchanged."
-      exit 1
-    fi
-    RP_K=$((10#$RP_K))
-    if [ "$RP_K" -lt 1 ] || [ "$RP_K" -gt "$RP_N" ]; then
-      die "REFUSED — option $RP_K is not on the final card $RP_CARD: it offers 1 to $RP_N; the plan is unchanged."
-      exit 1
-    fi
+    RP_NORM="$(printf '%s' "$RP_TEXT" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]"]*//' -e 's/[[:space:]".!]*$//' -e 's/[[:space:]][[:space:]]*/ /g')"
+    case "$RP_NORM" in
+      'all default'|'all defaults') RP_ALL=default ;;
+      'all recommended') RP_ALL=recommended ;;
+      *) die "REFUSED — the reply \"$(clean "$RP_TEXT")\" is neither all recommended nor all default, the two replies the review results $RP_CARD take; the plan is unchanged."
+         exit 1 ;;
+    esac
     user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
     if [ "$RP_SAID" -ne 0 ]; then
-      said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the final card"
+      said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the review results"
       exit 1
     fi
     RP_DONE=0; RP_HELD=0
     while IFS= read -r RP_L; do
       [ -n "$RP_L" ] || continue
-      RP_OPT=""; RP_KEY=""; RP_DO=""; RP_ELSE=""; RP_WHY=""
+      RP_KEY=""; RP_DO=""; RP_ELSE=""; RP_PICK=default; RP_WHY=""
       IFS='|' read -r -a RP_F <<< "$RP_L"
       for RP_X in "${RP_F[@]}"; do
         case "$RP_X" in
-          opt=*) RP_OPT="${RP_X#opt=}" ;; key=*) RP_KEY="${RP_X#key=}" ;; default=*) RP_DO="${RP_X#default=}" ;;
-          override=*) RP_ELSE="${RP_X#override=}" ;; why=*) RP_WHY="${RP_X#why=}" ;;
+          key=*) RP_KEY="${RP_X#key=}" ;; default=*) RP_DO="${RP_X#default=}" ;; other=*) RP_ELSE="${RP_X#other=}" ;;
+          pick=*) RP_PICK="${RP_X#pick=}" ;; why=*) RP_WHY="${RP_X#why=}" ;;
         esac
       done
       [ -n "$RP_KEY" ] || continue
-      # AN ITEM ALREADY REPLAYED FROM THIS CARD is skipped: a reply that stopped on a refusal is finished by the same reply.
+      # A DECISION ALREADY REPLAYED FROM THIS PAGE is skipped: a reply that stopped on a refusal is finished by the same reply.
       RP_KEY="$RP_KEY" awk 'index($0, "applied: " ENVIRON["RP_KEY"] " ") == 1 || $0 == "withheld: " ENVIRON["RP_KEY"] { f = 1 }
         END { exit !f }' "$RP_CARD" 2>/dev/null && continue
-      if [ "$RP_OPT" = "$RP_K" ]; then RP_CMD="$RP_ELSE"; RP_SIDE=override; else RP_CMD="$RP_DO"; RP_SIDE=default; fi
+      if [ "$RP_ALL" = recommended ] && [ "$RP_PICK" = other ]; then RP_CMD="$RP_ELSE"; RP_SIDE=other; else RP_CMD="$RP_DO"; RP_SIDE=default; fi
       if [ "$RP_CMD" = - ]; then
         if [ "$RP_SIDE" = default ]; then RP_REC="applied: $RP_KEY carried"; RP_DONE=$((RP_DONE + 1))
         else RP_REC="withheld: $RP_KEY"; RP_HELD=$((RP_HELD + 1)); fi
@@ -2483,19 +2941,19 @@ BRF_EOF
       RP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "${RP_ARGV[@]}" 2>&1 )"; RP_RC=$?
       [ -z "$RP_OUT" ] || printf '%s\n' "$RP_OUT"
       if [ "$RP_RC" -ne 0 ]; then
-        die "reply — $(clean "$RP_KEY"): ${RP_ARGV[0]} refused (exit $RP_RC), and the reply stops there; $RP_DONE item(s) applied before it are kept in $RP_CARD, and the same reply again replays the rest."
+        die "reply — $(clean "$RP_KEY"): ${RP_ARGV[0]} refused (exit $RP_RC), and the reply stops there; $RP_DONE decision(s) applied before it are kept in $RP_CARD, and the same reply again replays the rest."
         exit "$RP_RC"
       fi
       printf 'applied: %s %s rc=0\n' "$RP_KEY" "${RP_ARGV[0]}" >> "$RP_CARD"
       RP_DONE=$((RP_DONE + 1))
     done <<RP_TABLE
-$(/usr/bin/grep '^final-card/v1|opt=' "$RP_CARD" 2>/dev/null)
+$(/usr/bin/grep '^review-results/v1|dec=' "$RP_CARD" 2>/dev/null)
 RP_TABLE
-    printf 'replied: at=%s option=%s words="%s"\n' "$(iso_now)" "$RP_K" "$(clean "$RP_TEXT")" >> "$RP_CARD"
-    if [ "$RP_HELD" -gt 0 ] || [ "$RP_K" -gt 1 ]; then
-      say "reply — option $RP_K of $RP_CARD replayed on the user's words: $RP_DONE item(s) recorded, $RP_HELD held back; what the override holds renders a new card (card.sh final) once it is settled."
+    printf 'replied: at=%s reply=all-%s words="%s"\n' "$(iso_now)" "$RP_ALL" "$(clean "$RP_TEXT")" >> "$RP_CARD"
+    if [ "$RP_HELD" -gt 0 ]; then
+      say "reply — all $RP_ALL replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded, $RP_HELD held back; render the review results again once what is held is settled."
     else
-      say "reply — option 1 of $RP_CARD replayed on the user's words: $RP_DONE item(s) recorded; nothing on the card is left open."
+      say "reply — all $RP_ALL replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded; nothing on the page is left open."
     fi
     exit 0
   }
