@@ -12,7 +12,7 @@
 #     --born floor:<suite>      -> --born regression:<suite>  task-add's operand
 #     proof:floor (typed)       -> proof:regression           a reads cell given to task-add or task-set reads=
 #     floor: (config.yaml)      -> regression-command:        the regression's command, read by `regression-run`
-#     floor-run-<sha>.log       -> regression-run-<sha>.log   the log name the second-run glob reads
+#     floor-run-<sha>.log       -> regression-run-<sha>.log   the whole-run log's name: the old one is not read, not refused
 #     rigor-floor:              -> rigor-minimum:             the rigor minimum, read by hooks/canonical-sdlc-governing-skill.sh
 #
 # What a 1.20.0 TOOL wrote into a plan is read as it always was, silently (D-w39-2; A-T8-1): a proof line's kind=floor,
@@ -221,11 +221,13 @@ expect_contains "GB-5d …and writes the cell" "| approval:plan, proof:regressio
 POKE_BOUND="$AB_BOUND_WAS"
 
 # ============================================================
-section "§GONE-LOG: a floor-run-<sha>.log in the record is refused naming regression-run-<sha>.log; the same log under the new name is the first whole run"
+section "§GONE-LOG: the one-run glob reads regression-run-<sha>.log; a floor-run-<sha>.log is not the head's whole run"
 # ============================================================
 # FIXTURE FIDELITY: session-poker-4 §FLOOR-RUN's shape: a stub tests/run.sh at the head, the plan's build rows landed, no
 # config key, no regression proof. The record holds a log opening as the verb's whole-run logs do, `head=` on line one
-# and `command: tests/run.sh` on line two, under the 1.20.0 name; the second-run glob read it as the first whole run.
+# and `command: tests/run.sh` on line two. Under the new name it is the head's one whole run and refuses another; under
+# the 1.20.0 name it is not read, so the run goes; the log that run writes refuses the next. The name alone moves the
+# answer, on one fixture.
 GL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RGL="$(make_repo gone-log)"; ( cd "$RGL" && git commit -q --allow-empty -m init )
 GL_SEEN="$TMPROOT/gl-seen"
@@ -244,18 +246,15 @@ gl_ran() { [ -f "$GL_SEEN" ] && awk 'END { print NR + 0 }' "$GL_SEEN" || echo 0;
 expect_regex "GL-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$GL_W"
 printf 'head=%s dirty=0\ncommand: tests/run.sh\nGating: 1 passed, 0 failed\nrc=0\n' "$GL_W" > "$GL_REC/regression-run-$GL_W.log"
 poke "$RGL" regression-run
-expect_eq "GL-1 a whole-run log under the new name is the first whole run: the second is refused (exit 1)" "1" "$RC"
-expect_contains "GL-1b …as a second whole run, which is the glob reading the new name" "a second whole run" "$OUT"
+expect_eq "GL-1 a whole-run log under the new name at the head refuses another run: exit 1, and the stub never ran" "1|0" "$RC|$(gl_ran)"
 rm -f "$GL_REC/regression-run-$GL_W.log"
 printf 'head=%s dirty=0\ncommand: tests/run.sh\nGating: 1 passed, 0 failed\nrc=0\n' "$GL_W" > "$GL_REC/floor-run-$GL_W.log"
 poke "$RGL" regression-run
-expect_eq "GL-2 the same log under the 1.20.0 name is refused (exit 1)" "1" "$RC"
-expect_contains "GL-2b …the refusal names the new log name" "floor-run-<sha>.log is gone; write regression-run-<sha>.log" "$OUT"
-expect_absent "GL-2c …and is not read as a first whole run: the refusal is not the second-run one (GL-1b is the positive)" "a second whole run" "$OUT"
-expect_eq "GL-2d …and nothing ran (the stub never wrote its mark)" "0" "$(gl_ran)"
+expect_eq "GL-2 the same log under the 1.20.0 name is not read: the whole run goes (exit 0), the stub ran once" "0|1" "$RC|$(gl_ran)"
+expect_true "GL-2b …and wrote its log under the new name" test -f "$GL_REC/regression-run-$GL_W.log"
 rm -f "$GL_REC/floor-run-$GL_W.log"
 poke "$RGL" regression-run
-expect_eq "GL-3 with neither log in the record the whole run goes (the refusals above were the log's): exit 0, the stub ran once" "0|1" "$RC|$(gl_ran)"
+expect_eq "GL-3 the verb's own log refuses the next run at that head: exit 1, the stub still ran once" "1|1" "$RC|$(gl_ran)"
 POKE_BOUND="$GL_BOUND_WAS"
 
 
@@ -275,8 +274,8 @@ ap_plan() {  # <proof kind> <reads token> <born word> <of word> -> a plan on std
   printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
   printf '| T3 | 6 | build | the fix | implementor | — | 30 | REQ-1 | a.sh | landed | — |\n'
-  printf '| T4 | 7 | doc | the release | implementor | — | 30 | REQ-1 | b.md | pending | %s, approval:release |\n' "$2"
   printf '| T5 | 7 | review | the live read | critic | — | 30 | REQ-1 | .bionic/docs/record/w/r2.md | pending | live:%s |\n' "$2"
+  printf '| T4 | 7 | doc | the release | implementor | — | 30 | REQ-1 | b.md | pending | %s, approval:release |\n' "$2"
   printf '| T6 | 8 | integrate | the merge | implementor | — | 30 | REQ-1 | — | pending | — |\n'
 }
 ap_plan floor proof:floor floor floor > "$AP_DIR/old.plan.md"
