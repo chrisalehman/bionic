@@ -1003,9 +1003,11 @@ _tf_require_derived_helpers() {
 # scanner the adoption wall reads (S10) — and it is not a suite: it has no
 # assertion calls to derive, and dying at its load would take the whole run with
 # it. The runner is the ONE exception, recognised by its own name, so nothing in
-# the environment can turn this off for a suite.
+# the environment can turn this off for a suite. The label is `run[.]sh`, the same match:
+# the name scan (lib/anchors.sh) takes a bare file name for a read of every file so named,
+# and a label runs nothing.
 case "${0##*/}" in
-  run.sh) : ;;
+  run[.]sh) : ;;
   *)      _tf_require_derived_helpers "${0:-}" ;;
 esac
 
@@ -1019,7 +1021,7 @@ esac
 # not asked. It runs AFTER the derivation, so a suite that both shadows and calls
 # a vanished helper is told about the helper first; either way it never reaches a row.
 case "${0##*/}" in
-  run.sh) : ;;
+  run[.]sh) : ;;
   *.test.sh)
     _tf_wall_line="$(_tf_adoption_wall "$0")" || {
       printf '%s\n' "$_tf_wall_line" >&2

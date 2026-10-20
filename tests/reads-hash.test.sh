@@ -39,6 +39,8 @@
 #   §AT       the commit is read, never the working tree
 #   §LIVE     this repository at HEAD: the closure reaches payload/scripts/lib/line.sh from
 #             tests/session-poker.test.sh, which runs hooks/session-poker.sh, and keys it by content
+#   §EDGES    a case label or a message that spells a file name is not followed: tests/lib/assert.sh's runner
+#             exemption reaches no run.sh, lib/run.sh's unbound advisory reaches no poker, its sentence unchanged
 #
 # ONE KEY SPACE (wave-39 T40; D5, D6, A-orch-13; REQ-2 AC-2.1, AC-2.2). `reads_hashes` is the one derivation: a
 # declared `reads <file> fn|section <name>` whose every declaration on that file `reads_declared` locates contributes
@@ -336,6 +338,35 @@ expect_no_match "(ci4) …which does not name session-poker.test.sh: it reaches 
   'tests/session-poker\.test\.sh' "$(row_of payload/scripts/lib/line.sh "$LIX")"
 expect_contains "(ci4) the closed index's row for lib/line.sh names session-poker.test.sh" "tests/session-poker.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
 expect_contains "(ci4) …and landing-line-1.test.sh, as the plain one does" "tests/landing-line-1.test.sh" "$(row_of payload/scripts/lib/line.sh "$LCX")"
+
+# ------------------------------------------------------------
+section "§EDGES: a case label and a message spell a file name; neither runs or loads it, so the closure does not follow them"
+# ------------------------------------------------------------
+# fails-when: tests/lib/assert.sh's runner exemption is a bare runner name, which the scan takes for every file of that
+# name (e1); or lib/run.sh's unbound advisory spells the poker's file name in its source, which the closure follows into
+# the poker (e2); or the advisory's printed sentence changes, which seven suites pin (e3).
+# FIXTURE: the live assert.sh and lib/run.sh, beside a runner, the library and a poker each one line, so a pair to any of
+# them is an edge out of the live text alone.
+E="$SB/edges"
+mkdir -p "$E/tests/lib" "$E/payload/scripts/lib" "$E/hooks"
+cp "$REPO/tests/lib/assert.sh" "$E/tests/lib/assert.sh"
+cp "$REPO/payload/scripts/lib/run.sh" "$E/payload/scripts/lib/run.sh"
+printf '#!/bin/bash\necho runner\n' > "$E/tests/run.sh"
+printf '#!/bin/bash\necho poker\n' > "$E/hooks/session-poker.sh"
+printf '#!/bin/bash\n. "$(dirname "$0")/lib/assert.sh"\n' > "$E/tests/s-assert.test.sh"
+printf '#!/bin/bash\nROOT="$(cd "$(dirname "$0")/.." && pwd -P)"\n. "$ROOT/payload/scripts/lib/run.sh"\n' > "$E/tests/s-run.test.sh"
+git -C "$E" init -q && git -C "$E" config user.email t@t && git -C "$E" config user.name t && git -C "$E" config commit.gpgsign false
+git -C "$E" add -A && git -C "$E" commit -qm edges
+E1="$(git -C "$E" rev-parse HEAD)"
+EA="$(rh_set "$E" "$E1" tests/s-assert.test.sh)"; ER="$(rh_set "$E" "$E1" tests/s-run.test.sh)"
+expect_contains "(e1-pre) s-assert's closed set holds tests/lib/assert.sh, the helper it sources" "tests/lib/assert.sh" "$EA"
+expect_no_regex "(e1) …and not tests/run.sh: the runner's exemption names it in a case label" '^tests/run\.sh$' "$EA"
+expect_no_regex "(e1) …nor payload/scripts/lib/run.sh, which shares the runner's file name" '^payload/scripts/lib/run\.sh$' "$EA"
+expect_contains "(e2-pre) s-run's closed set holds payload/scripts/lib/run.sh, the library it loads" "payload/scripts/lib/run.sh" "$ER"
+expect_no_regex "(e2) …and not hooks/session-poker.sh: the unbound advisory names it in a message" '^hooks/session-poker\.sh$' "$ER"
+expect_eq "(e3) the advisory's sentence is unchanged, the poker's name in it" \
+  "run resolved by newest-plan fallback (session unbound) — /p; bind with session-poker.sh bind /p, or write this session's plan" \
+  "$(bash -c '. "$1" && run_unbound_advisory /p' _ "$REPO/payload/scripts/lib/run.sh" 2>/dev/null)"
 
 # ------------------------------------------------------------
 setup_section "plant the one-key fixture: calc.sh's one() and two(), a suite declaring one(), one declaring nothing, one refused"
