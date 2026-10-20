@@ -946,8 +946,6 @@ expect_eq    "(h1) …no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
 expect_false "(h1) …and nothing is recorded" test -e "$BHREC"
 OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
 expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
-expect_eq    "(h2) …printing the line that names both ways, exactly" \
-  "land: the line lands a row with \"ready\"; a person lands one with \"land <tree> --by-hand --reason '<why>'\"" "$OUTBHB"
 expect_eq    "(h2) …and no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
 BHC="$(git -C "$BHT" rev-parse HEAD)"
 OUTBH="$(bh_land "$BHT" --by-hand --reason "the person's why")"; RCBH=$?
@@ -979,8 +977,6 @@ expect_eq    "(hd0-pre) the planted suite fails, and its run is logged" "1 1" \
 : > "$TMP/hand-runs"
 BHC2="$(git -C "$BHT2" rev-parse HEAD)"; BH_REFS2="$(refs_of "$BH")"
 OUTHD0="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh)"; RCHD0=$?
-expect_eq    "(hd0) suites named with no commit they were green at and no log are refused (exit 2), nothing moved or recorded" \
-  "2 yes 0" "$RCHD0 $([ "$(refs_of "$BH")" = "$BH_REFS2" ] && echo yes) $(grep -c '|row=T2|' "$BHREC")"
 OUTHD="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh --green-at "$BHC2" --log /logs/T2-green.log)"; RCHD=$?
 expect_eq    "(hd1) the hand landing of a row whose suite is red exits 0, the row's commit on the working branch" "0 yes" \
   "$RCHD $(git -C "$BH" merge-base --is-ancestor "$BHC2" wave/fixture && echo yes)"

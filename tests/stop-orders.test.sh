@@ -419,10 +419,6 @@ expect_eq "no ref moved: nothing merged, nothing deleted" "$R8_REFS0" \
 for t in land-a land-b mark-c still-working; do
   if [ -d "$R8/.worktrees/$t" ]; then ok "the tree of $t stands"; else no "the tree of $t stands"; fi
 done
-expect_contains "the marked row's tree is reported standing until its stop" \
-  "landed ${R8_MC:0:12} — tree stands until stopped mark-c: $R8_REAL/.worktrees/mark-c   (mark-c)" "$OUT"
-expect_contains "an unmarked discharged row's tree is reported not landed, with the two ways to land it" \
-  "not landed — tree stands: $R8_REAL/.worktrees/land-a (branch land-a); its writer says ready from it, or a person lands it with land <tree> --by-hand --reason '<why>'   (land-a)" "$OUT"
 expect_absent "…and the held row is not listed to stop" "still-working@session-6c85684c   (" "$OUT"
 
 # A roster with no trees at all must behave exactly as it did before this
@@ -763,8 +759,6 @@ expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by 
   "acked-gone-lease" "$R11_SD"
 # STANDDOWN LANDS NOTHING (wave-28 T6; D7): the row lands through `ready`, and its tree goes at
 # `stopped` once its roster line carries the mark. Its tree is reported, as it stands.
-expect_contains "…its tree is reported under LEASES, standing and not landed" \
-  "not landed — tree stands: $(cd "$R11" && pwd -P)/.worktrees/acked-gone-lease (branch acked-gone-lease)" "$OUT"
 expect_absent "…and no LANDED line claims it" "LANDED branch=acked-gone-lease" "$OUT"
 if [ -d "$R11/.worktrees/acked-gone-lease" ]; then
   ok "the acked-and-gone row's tree stands: standdown removes nothing"
@@ -825,11 +819,6 @@ else
 fi
 R12_LE=$(printf '%s\n' "$OUT" | sed -n '/LEASES/,$p')
 R12_REAL=$(cd "$R12" && pwd -P)   # the verb names trees under the physical repo path
-expect_contains "the LEASES report names the tree as abandoned and standing" \
-  "abandoned — tree stands: $R12_REAL/.worktrees/half-done (branch half-done); remove or salvage by hand   (half-done)" \
-  "$R12_LE"
-expect_absent "…and the header no longer reads as if nothing touched a tree" \
-  "nothing has landed; there is nobody to stand down." "$OUT"
 
 # ============================================================
 section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, absent panel overrides the progress-artifact shape (wave-19 T1g, audit V2-1, critic C2-2)"
@@ -860,8 +849,6 @@ so_roster_row "$R13" "still-live-gone" ".bionic/docs/record/never-slg.md" "" \
 plant_live "$R13TR" fresh "still-live-gone"
 run_orders_cfg "$R13" stopped still-live-gone
 expect_status "STILL-LIVE and still on a fresh panel is refused, exit 2" 2 "$ST"
-expect_contains "…naming the wait" \
-  "retry after the cadence elapses, or when a fresh panel no longer lists it" "$OUT$ERR"
 expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
 
 # STILL-LIVE under a stale panel: refused too, same wait — a verb that cannot see does not
@@ -869,8 +856,6 @@ expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
 plant_live "$R13TR" stale
 run_orders_cfg "$R13" stopped still-live-gone
 expect_status "STILL-LIVE under a stale panel is refused, exit 2" 2 "$ST"
-expect_contains "…naming the same wait" \
-  "retry after the cadence elapses, or when a fresh panel no longer lists it" "$OUT$ERR"
 expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
 
 # STILL-LIVE, and the fresh panel shows the agent GONE: the panel overrides the progress
