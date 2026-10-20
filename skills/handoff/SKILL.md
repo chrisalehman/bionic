@@ -63,9 +63,9 @@ Typed as `/bionic:handoff` with no argument, it hands off whatever this session 
 
    A refusal is the answer: say it in one line and stop.
 
-3. Quote the verb's say line (`poker: handoff — written to …`). It names the file and counts what is uncommitted, what runs, the agents, and anything redacted or left out.
+3. Quote the verb's two lines: the file it wrote (`poker: handoff — written to …`) and the resume line. It prints nothing else.
 
-4. End on the file's last line in a fenced block, as the one thing the next session needs. With a run bound it is `/bionic:canonical-sdlc <path>`, which rebinds the run, arms its Patrol at a scale that has one, adopts the running agents and prints the recap. With no run it is `Read <path> whole, then do Next 1.`
+4. End on the file's last line in a fenced block, as the one thing the next session needs. With a run bound it is `/bionic:canonical-sdlc <path>`, which rebinds the run, arms its Patrol at a scale that has one and adopts the running agents. Typing it is the consent: the resume engages the session itself when the slash command did not, and says so in its first line. It prints about a dozen lines (bound, the step, the agents still open, what landed since, what is owed now, the Patrol) and the path of one recap file holding the rest. With no run it is `Read <path> whole, then do Next 1.`
 
 ## The rules
 

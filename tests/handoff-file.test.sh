@@ -218,6 +218,8 @@ expect_absent "N2d …and nothing of the bionic folder (N2c read the same status
 expect_contains "N3 it says what it wrote" "handoff — written to $(cd "$HF_NR" && pwd -P)/$HF_HOME/2026-10-06-$HF_NR_BR.md" "$OUT"
 expect_eq "N3b …the last line says how to resume with no run: read the file, then Next 1" \
   "Read $HF_HOME/2026-10-06-$HF_NR_BR.md whole, then do Next 1." "$(tail -1 "$HF_NR_F")"
+expect_eq "N3c …and prints only the path and the resume line" "2|$(tail -1 "$HF_NR_F")" \
+  "$(printf '%s\n' "$OUT" | grep -c . | tr -d ' ')|$(printf '%s\n' "$OUT" | tail -1)"
 rm -rf "$HF_NR/.bionic"
 hf_poke "$HF_NR" "$HF_C" handoff
 expect_eq "N4 with a session key the project never engaged: exits 0" "0" "$RC"
@@ -281,7 +283,6 @@ expect_eq "S12d …the Summary's four lines say they were not given" "- Doing: (
 - Learned: (not given)
 - Open: (not given)
 - First: (not given)" "$(hf_sec "$HF_NR_F" Summary)"
-expect_contains "S12e …and it says what is missing" "nothing was composed" "$OUT"
 
 # ============================================================
 section "§STATE: bound, every State fact is computed: the tree, what runs, the agents with their briefs and progress files, the plan, step, open tasks and Patrol; a Finding with no source says unverified"
@@ -371,7 +372,6 @@ expect_absent "P2e …the cloud key's too" "$HF_TOK_AWS" "$HF_PALL"
 expect_absent "P2f …a password's" "hunter2hunter2" "$HF_PALL"
 expect_absent "P2g …and a mail address" "dana@example.com" "$HF_PALL"
 expect_contains "P2h …the address said as redacted" "[address redacted]" "$HF_PALL"
-expect_contains "P2i it says how many it redacted" "5 redacted" "$OUT"
 expect_contains "P3 a copied block is left out, the reader sent to its path" \
   "- (a copied block of 2 lines was left out: name its file by path)" "$HF_PALL"
 expect_contains "P3b …the path given beside it stays" "- The spec says how the shape is settled — .bionic/docs/specs/x.requirements.md" "$HF_PALL"
@@ -383,8 +383,8 @@ expect_absent "P4b no safe-to-clear line (P4 read the same file)" "safe to clear
 expect_absent "P4c …and no wait line" "minutes —" "$HF_PALL"
 HF_NFILES="$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
 HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C" handoff --mid-flight 'the old human line'
-expect_eq "P5 a retired human-line flag is refused, exit 2" "2" "$RC"
-expect_contains "P5b …naming the sections on stdin instead" "stdin" "$OUT"
+expect_eq "P5 a retired human-line flag is the usage error, exit 2" "2" "$RC"
+expect_contains "P5b …the usage error names stdin for the sections" "stdin" "$OUT"
 expect_eq "P5c …and nothing is written" "$HF_NFILES" "$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
 
 # ============================================================
@@ -424,7 +424,6 @@ hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — close
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "D1 handoff on a delivered plan exits 0" "0" "$RC"
 expect_absent "D1b …and does not refuse" "REFUSED" "$OUT"
-expect_contains "D1c …saying the run is closed" "closed" "$OUT"
 expect_eq "D2 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_F")"
 expect_eq "D2b State says where the run closed" \
   "resume point: NONE — DELIVERED at 2026-10-08T13:00Z; trunk @ $(git -C "$HF_R" rev-parse --short trunk)." "$(hf_label "$HF_F" 'resume point')"
@@ -576,8 +575,27 @@ expect_false "RS0d precondition: …and unarmed (no stamp)" test -e "$(stamp_of 
 poke "$HF_R" prompt; HF_PROMPT="$OUT"
 expect_nonempty "RS0e precondition: the prompt verb prints this session's Patrol prompt" "$HF_PROMPT"
 poke "$HF_R" resume "$HF_DOOR"
-HF_RS="$OUT"
+HF_RS_TERM="$OUT"
 expect_eq "RS1 resume <file> exits 0" "0" "$RC"
+hf_recap() {  # <terminal output> -> the recap file it names
+  printf '%s/%s' "$HF_R" "$(printf '%s\n' "$1" | sed -n 's/^recap: \([^ ]*\) — .*$/\1/p')"
+}
+HF_RECAP="$(hf_recap "$HF_RS_TERM")"
+expect_true "RS1b …naming its recap file, under the run's record" test -s "$HF_RECAP"
+HF_RS="$(cat "$HF_RECAP")"
+hf_labels() {  # <text> -> the labels of its unindented lines, comma-joined
+  printf '%s\n' "$1" | awk '!/^  / && NF { l = $0; sub(/:.*$/, "", l); sub(/ \(.*$/, "", l); printf "%s%s", (n++ ? "," : ""), l } END { print "" }'
+}
+expect_eq "RS1c the terminal is the short page: bound, step, running, landed since, owed now, patrol, the recap" \
+  "poker,step,running,landed since the handoff,owed now,patrol,recap" "$(hf_labels "$HF_RS_TERM")"
+expect_eq "RS1d …the step" "step: 4 Implement" "$(printf '%s\n' "$HF_RS_TERM" | grep '^step: ')"
+expect_regex "RS1e …each open agent with what it does and for how long" '^  - w-pred · implementor · for [0-9]+ min$' \
+  "$(printf '%s\n' "$HF_RS_TERM" | grep '^  - ')"
+expect_eq "RS1f …what landed after the handoff was written" "landed since the handoff: T4, T3" \
+  "$(printf '%s\n' "$HF_RS_TERM" | grep '^landed since')"
+expect_eq "RS1g …and the one thing owed now" "owed now: approve:release — approve release — reply with your words" \
+  "$(printf '%s\n' "$HF_RS_TERM" | grep '^owed now: ')"
+expect_absent "RS1h …the adopt verdicts and the task list stay in the recap (RS4 and RS5 read them there)" "task-list: " "$HF_RS_TERM"
 expect_eq "RS2 it binds: the marker's plan= line names the plan the file names" "1" \
   "$(grep -c '^plan=.*/\.bionic/docs/plans/epic-99-fixture/wave-01-fixture\.plan\.md$' "$(marker_of "$HF_R")" 2>/dev/null)"
 expect_contains "RS2b …saying so (bind's own line)" "poker: bound " "$HF_RS"
@@ -628,6 +646,12 @@ HF_ORDER="$(hf_first "$HF_RS" "poker: bound " "poker: armed" "poker: w-pred (" "
   "working branch: " "plan: " "tree: " "step-file: " "patrol-interval: " "patrol: " "poker-tick/v1|")"
 expect_eq "RS12 every step is present and in the ritual's order" "yes" \
   "$(printf '%s\n' "$HF_ORDER" | awk '{ ok = "yes"; for (i = 1; i <= NF; i++) { if ($i == "-" || (i > 1 && $i + 0 <= p)) ok = "no: field " i " of " $0; p = $i + 0 } print ok }')"
+# Typing the resume is the consent: a session with no engagement marker is engaged by the door itself.
+hf_resume_new_session
+rm -f "$(marker_of "$HF_R")"
+poke "$HF_R" resume "$HF_DOOR"
+expect_eq "RE1 a session with no marker: resume ends engaged and bound, and says it engaged" "0|1|yes" \
+  "$RC|$(hf_marker_plans)|$(printf '%s\n' "$OUT" | head -1 | grep -q 'engaged this session and bound it' && echo yes || echo no)"
 
 # A task-scale run has no Patrol: resume binds and adopts, and arms nothing, and removes the stamp engagement left.
 hf_world resume-task no
@@ -640,7 +664,10 @@ poke "$HF_R" arm
 expect_true "RT0b precondition: the stamp an unbound engagement arms is there" test -f "$(stamp_of "$HF_R")"
 poke "$HF_R" resume "$HF_DOOR"
 expect_eq "RT1 resume on a task-scale run exits 0" "0" "$RC"
+HF_RT_TERM="$OUT"; OUT="$(cat "$(hf_recap "$HF_RT_TERM")" 2>/dev/null)"
 expect_contains "RT1b …it binds" "poker: bound " "$OUT"
+expect_eq "RT1c …and the terminal says there is no Patrol" "patrol: none — a task-scale run has no Patrol" \
+  "$(printf '%s\n' "$HF_RT_TERM" | grep '^patrol: ')"
 expect_eq "RT2 precondition: the wave-scale resume printed the cron line (the RT2b extractor)" "1" \
   "$(printf '%s\n' "$HF_RS" | grep -c 'CronCreate recurring')"
 expect_eq "RT2b …the task-scale resume prints none" "0" "$(printf '%s\n' "$OUT" | grep -c 'CronCreate recurring')"

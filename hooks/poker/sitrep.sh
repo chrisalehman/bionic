@@ -1315,13 +1315,9 @@ sitrep_grade() {
   # `/bionic:canonical-sdlc <path>`, the door that rebinds the run; with no run, `Read <path> whole, then do Next 1.`
   # There is no safe-to-clear line: the source session is disposable, and anything in flight is in State.
   # Bound, the plan's `## Handoff` becomes the heading and one pointer line, through the plan transaction, plan
-  # first. REFUSED (2), nothing written: one of the retired human-line flags, the file's path a link or a directory;
+  # first. REFUSED (2), nothing written: the file's path a link or a directory;
   # (1) a bound open plan with no `## Tasks` or no `## SDLC State`.
   poker_verb_handoff() {
-    if [ -n "$HO_F_MID$HO_F_ORDER$HO_F_RULINGS$HO_F_LESSONS$HO_F_RISKS" ]; then
-      die "REFUSED — handoff takes its composed sections on stdin, not --mid-flight, --order, --rulings, --lessons or --risks: pipe Summary, Goal, Findings, Decisions, Ruled out, Open, Suggested skills and Next to it, as the handoff skill does. Nothing was written."
-      exit 2
-    fi
     HO_IN=""; [ -t 0 ] || HO_IN="$(cat)"
     HO_E="$(sitrep_now)"
     HO_NOW="$(epoch_iso "$HO_E")"
@@ -1393,9 +1389,6 @@ sitrep_grade() {
     fi
     # THE COMPOSED HALF.
     HO_COMP="$(printf '%s\n' "$HO_IN" | handoff_compose)"
-    HO_META="$(printf '%s\n' "$HO_COMP" | awk -F'\t' '$1 == "@" { print $2 }')"
-    HO_LEFT="${HO_META#left=}"; HO_LEFT="${HO_LEFT%% *}"
-    HO_NCOMP="$(printf '%s\n' "$HO_COMP" | awk -F'\t' '$1 != "@" && $1 != "State" && $1 != "Resume" && NF' | grep -c .)"
     # THE STATE.
     HO_TREE="$(handoff_tree_lines "$HO_ROOT")"
     HO_RUNS="$(handoff_running_lines "$HO_ROOT")"
@@ -1540,21 +1533,16 @@ sitrep_grade() {
       } | handoff_redact "$HO_CF" | sitrep_fold
       printf '%s\n' "$HO_LAST"
     } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
-    HO_RED="$(cat "$HO_CF" 2>/dev/null)"; case "$HO_RED" in ''|*[!0-9]*) HO_RED=0 ;; esac
-    HO_NUC="$(printf '%s\n' "$HO_TREE" | sed -n 's/^uncommitted (\([0-9]*\)):$/\1/p')"
-    HO_SAY="handoff — written to $(cd "${HO_FILE%/*}" 2>/dev/null && pwd -P)/${HO_FILE##*/} ($HO_RUNWORD"
-    [ "$HO_MODE" != closed ] || HO_SAY="$HO_SAY, closed: $HO_KIND"
-    HO_SAY="$HO_SAY; ${HO_NUC:-0} uncommitted, $HO_N_RUN running, $HO_N_AG agents"
-    [ "$HO_RED" -eq 0 ] || HO_SAY="$HO_SAY; $HO_RED redacted"
-    case "$HO_LEFT" in ''|0) : ;; *) HO_SAY="$HO_SAY; $HO_LEFT copied block(s) left out, to be named by path" ;; esac
-    [ "$HO_NCOMP" -gt 0 ] || HO_SAY="$HO_SAY; nothing was composed: the handoff skill composes Summary, Goal, Findings, Decisions, Ruled out, Open, Suggested skills and Next"
-    HO_SAY="$HO_SAY)"
+    # WHAT IT SAYS IS WHERE THE FILE IS AND HOW THE NEXT SESSION RESUMES, and nothing more: the counts, the
+    # redactions and the blocks left out are in the file for whoever reads it.
+    HO_SAY="handoff — written to $(cd "${HO_FILE%/*}" 2>/dev/null && pwd -P)/${HO_FILE##*/}"
     if [ "$HO_MODE" = none ]; then
       if ! mv -f "$HO_TMP" "$HO_FILE" 2>/dev/null; then
         die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
         exit 2
       fi
-      say "$HO_SAY."
+      say "$HO_SAY"
+      printf '%s\n' "$HO_LAST"
       exit 0
     fi
     # THE POINTER: the section's whole body is one line, rewritten in place or created before ## Not Doing.
@@ -1590,7 +1578,8 @@ sitrep_grade() {
       die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
       exit 2
     fi
-    say "$HO_SAY; the plan's ## Handoff points to it, dry-committed first."
+    say "$HO_SAY"
+    printf '%s\n' "$HO_LAST"
     exit 0
   }
 
@@ -1701,8 +1690,8 @@ sitrep_grade() {
   # step file. A file whose resume point says the run closed resumes nothing and says so, and a file that names no
   # plan, written with no run bound, binds nothing and prints its Next. The arm comes before the CronCreate here, as
   # at engagement (hooks/engage.sh arms at the marker's write): the stamp says the session asked for its Patrol.
-  # Refusals name the fix and change nothing: no file or no kind line (2), a session the skill did not engage or a
-  # plan that is not there (1); a sub-verb's refusal stops the ritual with that verb's code.
+  # Refusals name the fix and change nothing: no file or no kind line (2), a plan that is not there or a session that
+  # cannot be engaged (1); a sub-verb's refusal stops the ritual with that verb's code.
   poker_verb_resume() {
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -1753,29 +1742,48 @@ sitrep_grade() {
       die "REFUSED — the plan '$RS_SHOWN' names is missing: $RS_PLAN. Check out the branch that holds it, or bind the run by hand (bash ${HOOK_DIR}/session-poker.sh bind <plan>). Nothing was bound or armed."
       exit 1
     fi
-    SESSION_ID="$(session_id)" || SESSION_ID=""
+    SESSION_ID="$(session_id 2>/dev/null)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty); a resume binds and arms ONE session."
       exit 3
-    fi
-    if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
-      die "REFUSED — this session has not invoked /bionic:canonical-sdlc; resume through the door, /bionic:canonical-sdlc $RS_SHOWN, which engages the session and runs this verb. Nothing was bound or armed."
-      exit 1
     fi
     if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_plan_slug >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was bound or armed."
       exit 2
     fi
-    rs_sub() { ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "$@" ); }
+    # THE TERMINAL GETS WHAT A PERSON READS; THE RECAP FILE GETS THE REST. From here every line the ritual prints, the
+    # sub-verbs' own included (bind, arm, adopt's verdicts, the tick's rows), goes to one file in the run's record,
+    # rewritten each resume; the terminal gets about a dozen lines at the end and that file's path. A refusal is
+    # still said on stderr, naming the file that holds the lines before it.
+    RS_RECAP="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/resume-recap.md"
+    RS_RECAP_REL="${RS_RECAP#"$REPO_REAL"/}"
+    if ! mkdir -p "${RS_RECAP%/*}" 2>/dev/null || [ -L "$RS_RECAP" ] || ! : > "$RS_RECAP" 2>/dev/null; then
+      die "REFUSED — the recap file cannot be written at $RS_RECAP_REL; nothing was bound or armed."
+      exit 2
+    fi
+    exec 3>&1 >> "$RS_RECAP"
+    rs_sub() { ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "$@" ) 2>&1; }
     rs_step() {  # <codes it may exit with, comma-joined> <verb> [args] -> runs it; any other code stops the ritual with it
       local ok="$1" rc=0; shift
       rs_sub "$@" || rc=$?
       case ",$ok," in *",$rc,"*) return 0 ;; esac
-      die "resume stopped at $1 (exit $rc): the lines above say why; the steps after it did not run."
+      die "resume stopped at $1 (exit $rc): its lines are in $RS_RECAP_REL; the steps after it did not run."
+      tail -n 3 "$RS_RECAP" >&2
       exit "$rc"
     }
-    say "resume — $RS_SHOWN ($(handoff_line "$RS_FILE" written | sed 's/^written: //')): bind, arm and adopt, then the task list, the recap, the step file, the patrol and the tick"
+    say "resume — $RS_SHOWN ($(handoff_line "$RS_FILE" written | sed 's/^written: //')): engage, bind, arm and adopt, then the task list, the recap, the step file, the patrol and the tick"
+    # TYPING THE RESUME IS THE CONSENT. A session the slash command's hook did not engage is engaged here, through the
+    # one verb that does it (hooks/engage.sh --root), before the binding; an engaged session is left as it is.
+    RS_ENGAGED=already
+    if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
+      ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/engage.sh" --root "$REPO_REAL" ) 2>&1
+      if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
+        die "REFUSED — this session could not be engaged: hooks/engage.sh --root $REPO_REAL left no marker (its lines are in $RS_RECAP_REL). Nothing was bound or armed."
+        exit 1
+      fi
+      RS_ENGAGED=now
+    fi
     # THE PATROL IS THE SCALE'S CELL (lib/scale.sh): a scale whose profile has none, the task row, is never armed here,
     # and a stamp an unbound engagement armed before this binding is removed. A plan with no `scale:` arms as before.
     RS_PATROL=yes
@@ -1852,17 +1860,57 @@ sitrep_grade() {
       printf 'patrol-interval: %s — CronList, CronDelete every job whose prompt begins with bionic-patrol session=, then CronCreate recurring %s with the patrol: line'"'"'s text as its prompt (the stamp is armed)\n' "$RS_EVERY" "${RS_EVERY%% (*}"
       printf 'patrol: %s\n' "${RS_PROMPT:-(the prompt verb printed nothing: run bash ${HOOK_DIR}/session-poker.sh prompt)}"
     fi
-    if [ "$RS_PATROL" = no ]; then
+    if [ "$RS_PATROL" = yes ]; then
+      RS_RC=0
+      rs_sub tick || RS_RC=$?
+      case "$RS_RC" in
+        0|1) : ;;
+        *) die "resume stopped at tick (exit $RS_RC): its lines are in $RS_RECAP_REL."; exit "$RS_RC" ;;
+      esac
+      say "resume — done: bound, armed, adopted, ticked. Yours now: rebuild the task list from the task-list: lines (TaskList first), read the step-file:, and create the Patrol job from the patrol: line."
+    else
       say "resume — done: bound and adopted; a task-scale run has no Patrol, so nothing ticks. Yours now: rebuild the task list from the task-list: lines (TaskList first) and read the step-file:."
-      exit 0
     fi
-    RS_RC=0
-    rs_sub tick || RS_RC=$?
-    case "$RS_RC" in
-      0|1) : ;;
-      *) die "resume stopped at tick (exit $RS_RC): the lines above say why."; exit "$RS_RC" ;;
-    esac
-    say "resume — done: bound, armed, adopted, ticked. Yours now: rebuild the task list from the task-list: lines (TaskList first), read the step-file:, and create the Patrol job from the patrol: line."
+    exec 1>&3 3>&-
+    # THE TERMINAL: bound (and engaged, when it was not), the step, the agents still open with what each does and for
+    # how long, what landed since the handoff was written, the one thing owed now, the Patrol, and the recap's path.
+    RS_NOW="$(now_epoch)"
+    if [ "$RS_ENGAGED" = now ]; then say "resume — engaged this session and bound it to $RS_PLAN_REL"
+    else say "resume — bound this session to $RS_PLAN_REL"; fi
+    printf 'step: %s\n' "$(awk -v cur="$RS_CURN" 'BEGIN { split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
+      if (cur == "") print "none named"; else print cur " " nm[cur + 1] }')"
+    RS_RF="$REPO_REAL/.bionic/tmp/roster-$SESSION_ID.state"
+    RS_UROWS="$(units_rows "$RS_PLAN" 2>/dev/null)"
+    RS_AG=""
+    while IFS= read -r RS_NAME; do
+      [ -n "$RS_NAME" ] || continue
+      RS_ROW="$(awk -v k="|name=$RS_NAME|" 'index($0 "|", k) { l = $0 } END { print l }' "$RS_RF" 2>/dev/null)"
+      RS_WHAT="$(printf '%s\n' "$RS_UROWS" | awk -F'\t' -v n="$RS_NAME" "$_ROW_SHORT_AWK"'$5 == n { print $1 " " row_short($4); exit }')"
+      [ -n "$RS_WHAT" ] || RS_WHAT="$(line_field "$RS_ROW" subagent_type)"
+      RS_E="$(iso_epoch "$(line_field "$RS_ROW" launched_at)")"
+      RS_FOR="for an unrecorded time"
+      [ -z "$RS_E" ] || RS_FOR="for $(sitrep_dur $(( (RS_NOW - RS_E) / 60 )))"
+      RS_AG="${RS_AG:+$RS_AG
+}  - $(clean "$RS_NAME") · $(clean "${RS_WHAT:-agent}") · $RS_FOR"
+    done <<< "$(roster_open_names "$RS_RF" "$REPO_REAL/.bionic/tmp/sweeper-$SESSION_ID.state" "$SESSION_ID")"
+    if [ -n "$RS_AG" ]; then printf 'running (%s):\n%s\n' "$(printf '%s\n' "$RS_AG" | grep -c .)" "$RS_AG"
+    else printf 'running: none\n'; fi
+    RS_AT="$(handoff_line "$RS_FILE" written)"; RS_AT="${RS_AT#written: }"
+    RS_LANDED="$(awk -v at="$RS_AT" '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      s && /^- T[0-9]+:/ && match($0, /landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z/) {
+        split(substr($0, RSTART, RLENGTH), f, " "); id = $2; sub(/:$/, "", id)
+        if (at == "" || f[3] > at) out = out (out == "" ? "" : ", ") id }
+      END { print out }' "$RS_PLAN")"
+    printf 'landed since the handoff: %s\n' "${RS_LANDED:-none}"
+    RS_FIRST="$(printf '%s\n' "$RS_OWN" | awk 'NF { sub(/^owned-by-user: /, ""); print; exit }')"
+    [ -n "$RS_FIRST" ] || RS_FIRST="$(printf '%s\n' "$RS_OPEN" | awk 'NF { sub(/^open: /, ""); print; exit }')"
+    printf 'owed now: %s\n' "${RS_FIRST:-nothing waits on you}"
+    if [ "$RS_PATROL" = yes ]; then printf 'patrol: armed — create its job from the patrol: line in the recap\n'
+    else printf 'patrol: none — a task-scale run has no Patrol\n'; fi
+    printf 'recap: %s — the task list, the rulings and open decisions, the step file, the Patrol job and the tick\n' "$RS_RECAP_REL"
     exit 0
   }
 
