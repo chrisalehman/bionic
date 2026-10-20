@@ -34,8 +34,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44): of hooks/session-poker.sh this suite reads one function's text, never a verb.
-reads hooks/session-poker.sh fn iso_epoch
 
 LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
 POKER="$BIONIC_HOOKS_DIR/session-poker.sh"

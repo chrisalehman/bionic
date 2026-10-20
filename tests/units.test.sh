@@ -924,4 +924,38 @@ expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
 
 # ============================================================
+section "§JUDGE — covered at the last green whole run's head, else a whole run owed naming both heads"
+# ============================================================
+
+# The judge asks one question: is the working head the head of the last green whole run? A verdict is
+# keyed by the commit it ran at, so a key of any other kind proves nothing.
+PROOF_LIB="$REPO_ROOT/payload/scripts/lib/proof.sh"
+LINE_LIB="$REPO_ROOT/payload/scripts/lib/line.sh"
+JR="$SANDBOX/judge-repo"
+git init -q "$JR" && git -C "$JR" config user.email t@example.com && git -C "$JR" config user.name t
+printf 'a\n' > "$JR/a.sh"; git -C "$JR" add a.sh; git -C "$JR" commit -qm H
+JH="$(git -C "$JR" rev-parse HEAD)"
+printf 'b\n' > "$JR/b.sh"; git -C "$JR" add b.sh; git -C "$JR" commit -qm H1
+JH1="$(git -C "$JR" rev-parse HEAD)"
+git -C "$JR" commit -q --allow-empty -m H2
+JH2="$(git -C "$JR" rev-parse HEAD)"
+printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\nproved: kind=regression head=%s at=2026-01-01T00:00:00Z evidence=whole.log\n' \
+  "$JH" > "$SANDBOX/judge-plan.md"
+judge() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_floor_judge "$2" "$3" "$4"' _ "$PROOF_LIB" "$SANDBOX/judge-plan.md" "$JR" "$1"; }
+owed_whole() { printf 'uncovered\ta whole run is owed: the last green whole run read %.12s, and the working head is %.12s' "$1" "$2"; }
+
+expect_eq "the fixture's three heads are three commits" "3" \
+  "$(printf '%s\n%s\n%s\n' "$JH" "$JH1" "$JH2" | sort -u | grep -c '^[0-9a-f]\{40\}$' | tr -d ' ')"
+expect_eq "head H, the last green whole run's head: covered" "covered" "$(judge "$JH")"
+expect_eq "head H+1: a whole run owed, naming H and H+1, and no suite" "$(owed_whole "$JH" "$JH1")" "$(judge "$JH1")"
+expect_eq "a commit that changed no file is still another head: a whole run owed" "$(owed_whole "$JH" "$JH2")" "$(judge "$JH2")"
+
+# A verdict proves its suite at the commit it ran at; a reads key is not a commit and proves nothing.
+printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|reads=%s|at=2026-01-01T00:00:00Z\n' \
+  "$JH1" "$(printf '%064d' 7)" > "$SANDBOX/judge-rec.log"
+proved() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _line_proved "$2" a.test.sh "$3"; echo "rc=$?"' _ "$LINE_LIB" "$SANDBOX/judge-rec.log" "$1"; }
+expect_eq "a verdict at a commit proves its suite at that commit" "$(printf '%s\nrc=0' "$JH1")" "$(proved "$JH1")"
+expect_eq "…and a reads key in its place is refused" "rc=1" "$(proved "reads=$(printf '%064d' 7)")"
+
+# ============================================================
 finish

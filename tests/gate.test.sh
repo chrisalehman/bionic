@@ -172,18 +172,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: share. Each line below is that closure: the library
-# (every run executes it), the arm of each verb, the sections defining the globals they read, and each helper
-# outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/wait.sh"   # wait_for <seconds> <cmd>…, the bounded poll
 

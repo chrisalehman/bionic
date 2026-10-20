@@ -41,10 +41,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T41; D6, AC-2.4). This suite drives one verb of hooks/session-poker.sh,
-# `anchors`, whose parse arm loads lib/anchors.sh and exits inside the library section, so it reads the
-# poker only there (the loader, the constants, usage).
-reads hooks/session-poker.sh section "the library"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 FRAMEWORK="${REPO}/tests/lib/assert.sh"
