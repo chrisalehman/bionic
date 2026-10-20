@@ -1471,4 +1471,162 @@ ll_wait_file "$WORLD_ROOT/xv-T1.out.rc" 1200
 expect_eq "(xv11m) MUTANT the exit-code arm dropped: the command, which prints no end line, is none and the entry stalls" "70|none" \
   "$(cat "$WORLD_ROOT/xv-T1.out.rc" 2>/dev/null)|$(xv_verdict "$RXM" "$(ll_last_cand "$RXM" T1)" "$XV_TOK" | awk 'NR == 1 { print $1 }')"
 
+
+section "§LINT: a comment a candidate adds is refused when it cites the run, naming the line and the shape"
+#
+# The landing line judges the lines a candidate adds to a shell or python file under hooks/, payload/, tests/ or
+# agents-src/: the comment on each line, as a lexer reading the whole file at the candidate finds it, is refused when
+# it carries a run citation (an epic, a wave, a criterion, a requirement, an assumption id, a record path). A decision
+# id or a bare assumption id is named only beside one of those. Lines the diff keeps or removes are never judged, and
+# neither is a line the same diff removes elsewhere word for word: moved text is old text.
+# FIXTURES: ln1 to ln3 call the lint on a scratch repository, its candidate holding every refused shape beside every
+# shape that passes; ln4 to ln8 drive ready on a world row that plants three citations.
+# fails-when: a planted citation is not named, a quoted, heredoc, moved, untouched or plain comment is named, or ready
+# runs a suite or publishes before the refusal.
+LN_REPO="$WORLD_ROOT/lint-repo"
+mkdir -p "$LN_REPO/payload/scripts" "$LN_REPO/tests" "$LN_REPO/other"
+git -C "$LN_REPO" init -q && git -C "$LN_REPO" config user.name lint && git -C "$LN_REPO" config user.email lint@example.invalid
+cat > "$LN_REPO/payload/scripts/old.sh" <<'LN_OLD'
+#!/bin/bash
+# wave-30 T4 keeps one
+echo one
+# wave-31 T2 keeps two
+# epic-7 moved this whole
+LN_OLD
+git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm base
+LN_BASE="$(git -C "$LN_REPO" rev-parse HEAD)"
+cat > "$LN_REPO/payload/scripts/old.sh" <<'LN_OLD2'
+#!/bin/bash
+# wave-30 T4 keeps one
+echo one
+echo two
+# wave-31 T2 keeps two, reworded
+LN_OLD2
+cat > "$LN_REPO/payload/scripts/new.sh" <<'LN_NEW'
+#!/bin/bash
+# (wave-39 T5)
+# AC-3.2 holds here
+# reads .bionic/docs/record/wave-12/x.md
+echo hi  # epic 7 started this
+# w39-T5 wrote this
+# E53W2-D12
+# W4 S3
+# REQ-16
+# A-orch-3 and A-T27.1
+# Δ5
+# under record/wave-x
+# D4 and A-12 with wave 3
+# epic-7 moved this whole
+# T12 waits on T2
+# reads .bionic/tmp and .bionic/config.yaml and .bionic/docs/plans/
+# see docs/adrs/adr-063.md
+# D3 alone, and A-2 alone
+echo "wave-39 T5 in a string"
+printf '%s\n' '# AC-3 in single quotes'
+cat <<'EOF'
+# REQ-9 in a heredoc
+EOF
+echo $# ${#x} a#AC-1
+# wave-99|status=landed
+x="a
+# AC-4 inside a string that spans lines"
+echo "$(echo '# wave-5 in a substitution')" # REQ-5 after it
+LN_NEW
+cat > "$LN_REPO/payload/x.py" <<'LN_PY'
+x = 1  # wave-2 left this
+s = "# wave-3 in a string"
+t = '''
+# AC-1 in a triple-quoted string
+'''
+# plain words only
+LN_PY
+cat > "$LN_REPO/tests/x.test.sh" <<'LN_TEST'
+#!/bin/bash
+# T12 waits on T2
+# REQ-2 in a test
+# reads .bionic/tmp
+LN_TEST
+printf '%s\n' '# wave-39 outside the linted homes' > "$LN_REPO/other/y.sh"
+printf '%s\n' 'wave-39 in prose' > "$LN_REPO/payload/notes.md"
+git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm candidate
+LN_CAND="$(git -C "$LN_REPO" rev-parse HEAD)"
+LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_BASE" "$LN_CAND")"; LN_RC=$?
+expect_eq "(ln1) the candidate is refused: rc 1" "1" "$LN_RC"
+expect_eq "(ln2) each planted citation is named by file, line and shape, and nothing else is" \
+"payload/scripts/new.sh:2 wave
+payload/scripts/new.sh:3 criterion
+payload/scripts/new.sh:4 wave,record-path
+payload/scripts/new.sh:5 epic
+payload/scripts/new.sh:6 writer
+payload/scripts/new.sh:7 wave-code,decision
+payload/scripts/new.sh:8 wave-slice
+payload/scripts/new.sh:9 requirement
+payload/scripts/new.sh:10 assumption
+payload/scripts/new.sh:11 delta
+payload/scripts/new.sh:12 record-path
+payload/scripts/new.sh:13 wave,assumption,decision
+payload/scripts/new.sh:28 requirement
+payload/scripts/old.sh:5 wave
+payload/x.py:1 wave
+tests/x.test.sh:3 requirement" "$(printf '%s\n' "$LN_OUT" | sort -t: -k1,1 -k2,2n)"
+printf '%s\n' '# plain words, and T3 waits on T1' >> "$LN_REPO/tests/x.test.sh"
+git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm clean
+expect_eq "(ln3) a candidate adding only a plain comment beside the refused one above: nothing printed, rc 0" "|0" \
+  "$(_line_comment_lint "$LN_REPO" "$LN_CAND" "$(git -C "$LN_REPO" rev-parse HEAD)"; printf '|%s' "$?")"
+
+RLN="$(ll_world)"
+ll_launch "$RLN" T1 a.test.sh
+mkdir -p "$RLN/.worktrees/T1/payload/scripts"
+cat > "$RLN/.worktrees/T1/payload/scripts/lint.sh" <<'LN_E1'
+#!/bin/bash
+# (wave-39 T5)
+# AC-3.2 holds here
+# reads .bionic/docs/record/wave-12/x.md
+echo done
+LN_E1
+git -C "$RLN/.worktrees/T1" add payload/scripts/lint.sh && git -C "$RLN/.worktrees/T1" commit -qm "T1: three citations"
+KLN="$(ll_head "$RLN")"
+ll_verb "$RLN" T1 --within 300
+expect_eq "(ln4) ready on a row adding three citations exits 1" "1" "$LL_RC"
+expect_eq "(ln5) …it prints one LINT line per citation, naming the row, the file and line, and the shape" \
+"LINT T1 payload/scripts/lint.sh:2 wave
+LINT T1 payload/scripts/lint.sh:3 criterion
+LINT T1 payload/scripts/lint.sh:4 wave,record-path" "$(printf '%s\n' "$LL_OUT" | grep '^LINT ')"
+expect_eq "(ln6) …the entry is returned for the lint, once" "1" "$(ll_ev "$RLN" returned | grep -c 'why=lint')"
+expect_eq "(ln7) …no suite ran: the record holds no verdict" "0" "$(ll_ev "$RLN" verdict | awk 'END { print NR }')"
+expect_eq "(ln8) …and nothing is published: the head is unmoved" "$KLN" "$(ll_head "$RLN")"
+
+section "§LINT-OK: an untouched old citation, a fixture row id, a runtime path and a tracked docs path land"
+#
+# The same line, a row the lint must let through. The working branch holds an old cited comment; the row merges it,
+# edits another line of that file, adds a fixture row comment to a suite, and a script naming a runtime path and a
+# tracked docs path. ready runs the suite and lands the row.
+# fails-when: any of those lines is named, or the row does not land.
+RLO="$(ll_world)"
+ll_launch "$RLO" T1 a.test.sh
+mkdir -p "$RLO/payload/scripts"
+cat > "$RLO/payload/scripts/old.sh" <<'LN_O1'
+#!/bin/bash
+# wave-30 T4 keeps one
+echo one
+LN_O1
+git -C "$RLO" add payload/scripts/old.sh && git -C "$RLO" commit -qm "the working branch holds an old cited comment"
+git -C "$RLO/.worktrees/T1" merge -q --no-edit wave/x
+printf '%s\n' 'echo two' >> "$RLO/.worktrees/T1/payload/scripts/old.sh"
+printf '%s\n' '# T12 waits on T2' >> "$RLO/.worktrees/T1/tests/a.test.sh"
+cat > "$RLO/.worktrees/T1/payload/scripts/ok.sh" <<'LN_O2'
+#!/bin/bash
+# reads .bionic/tmp
+# see docs/adrs/adr-063.md
+echo ok
+LN_O2
+git -C "$RLO/.worktrees/T1" add -A && git -C "$RLO/.worktrees/T1" commit -qm "T1: plain comments"
+expect_eq "(lo0) precondition: the working branch holds the old comment, and the row's diff does not touch it" "1|0" \
+  "$(git -C "$RLO" show wave/x:payload/scripts/old.sh | grep -c 'wave-30')|$(git -C "$RLO" diff -U0 wave/x wt/T1 | grep -c 'wave-30')"
+ll_verb "$RLO" T1 --within 300
+expect_eq "(lo1) ready lands the row: exit 0, LANDED, no LINT line" "0|LANDED T1|0" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | grep '^LANDED ' | head -n 1 | cut -d' ' -f1-2)|$(printf '%s\n' "$LL_OUT" | grep -c '^LINT ')"
+expect_eq "(lo2) …and the working branch now holds ok.sh" "yes" \
+  "$(git -C "$RLO" cat-file -e "$(ll_head "$RLO"):payload/scripts/ok.sh" 2>/dev/null && echo yes || echo no)"
+
 finish
