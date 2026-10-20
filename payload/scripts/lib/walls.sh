@@ -4782,7 +4782,7 @@ dispatch() {
   case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
   esac
-  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7 (wave-35 T31; D20, A-orch-50), or from Step 6 in the order
+  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7, or from Step 6 in the order
   # (`_eg_refuse_floor_absent`), asked last.
   case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_floor_absent "the run" ;;
