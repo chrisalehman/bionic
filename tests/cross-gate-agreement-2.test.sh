@@ -15,6 +15,15 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/cross-gate-agreement.prelude.sh"
 
+# THE CORE SCRIPT'S TEXT. hooks/session-poker.sh is the dispatcher of eight files: it loads its seven parts from poker/
+# beside it. A reader below that asks the core script's text reads all eight, the dispatcher first; a mutation is
+# made in the part that holds the line it doctors.
+CG2_PARTS="$(dirname "$PARTY_PK")/poker"
+CG2_POKER_TEXT="$SANDBOX/cg2-poker-text.sh"
+cat "$PARTY_PK" "$CG2_PARTS"/*.sh > "$CG2_POKER_TEXT"
+expect_eq "CG2 precondition: the core script's text holds the dispatcher and its seven parts" "8" \
+  "$( { printf '%s\n' "$PARTY_PK"; ls "$CG2_PARTS"/*.sh; } | /usr/bin/grep -c '\.sh$' | tr -d ' ')"
+
 # ============================================================
 section "CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's run_open step-read (epic-21 T6)"
 # ============================================================
@@ -41,8 +50,8 @@ section "CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's ru
 # payload/scripts/lib/run.sh, which this section already had in hand as RUN_LIB — so it is
 # sourced rather than extracted, which is also what the shipped poker does. run_open is
 # sourced from the same RUN_LIB exactly as §PC below sources it.
-cg_extract_fn() {  # <fn-name> -> that function's body text, from session-poker.sh (PARTY_PK)
-  awk -v n="$1" '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$PARTY_PK"
+cg_extract_fn() {  # <fn-name> -> that function's body text, from the core script's text (the tick holds these two)
+  awk -v n="$1" '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG2_POKER_TEXT"
 }
 cg_sched_current() {  # <plan path> -> sched_plan_current's real answer, called for real
   ( . "$RUN_LIB" >/dev/null 2>&1            # normalize_newlines is run.sh's since REQ-8/D6
@@ -116,12 +125,12 @@ done
 # The pre-fix bug, planted. A copy of session-poker.sh with ONLY the a/b-strip line reverted
 # to a bare assignment — the exact shape this section would have caught before T6.
 CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"
-anchor insert hooks/session-poker.sh '  step="${current%[ab]}"'
+anchor insert hooks/poker/tick.sh '  step="${current%[ab]}"'
 LC_ALL=C awk '{
   if ($0 == "  step=\"${current%[ab]}\"") { print "  step=\"$current\"" } else { print }
-}' "$PARTY_PK" > "$CG_MUT"
-expect_eq "CG.4 the mutant differs from the shipped file by exactly the strip line" \
-  "1" "$(diff "$PARTY_PK" "$CG_MUT" | grep -c '^< ')"
+}' "$CG2_PARTS/tick.sh" > "$CG_MUT"
+expect_eq "CG.4 the mutant differs from the shipped tick by exactly the strip line" \
+  "1" "$(diff "$CG2_PARTS/tick.sh" "$CG_MUT" | grep -c '^< ')"
 cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the MUTANT copy
   ( . "$RUN_LIB" >/dev/null 2>&1            # ditto: the mutant is a poker copy, not a lib copy
     . "$FILL_LIB" >/dev/null 2>&1
@@ -214,7 +223,7 @@ expect_eq "S15b payload/scripts/lib/stop.sh declares the constant" \
 expect_eq "S15b …and hooks/session-poker.sh's copy agrees, byte for byte" \
   "$S15_LG_SCHEMA_LINE" "$S15_PK_SCHEMA_LINE"
 expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_marker's own grep" \
-  "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
+  "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$CG2_POKER_TEXT" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
 
 # ============================================================
 section "S13 — the suite budget: the brief's own set, one row writer, one alphabet"
@@ -333,7 +342,7 @@ done
 expect_eq "S13.4 dispatch-preflight assembles no row segment of its own" "0" \
   "$(grep -cE '\|suites_allowed=[$%]' "$S13_DP")"
 expect_eq "S13.4 …and neither does session-poker's adopt" "0" \
-  "$(grep -cE '\|suites_allowed=[$%]' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$CG2_POKER_TEXT")"
 expect_eq "S13.4 …because the one library that may is the one that does" "1" \
   "$(grep -cE '\|suites_allowed=[$%]' "$S13_ROSTER_LIB")"
 # The paired POSITIVE: both writers do pass the key by name, so the two zeros above are
@@ -349,7 +358,7 @@ expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
 # `clean` in one loop; the group rule (a stated group lacking `files=` or `suites_allowed=` gets the
 # empty member, and `suites_source=` goes with them) is two lines beside it. Both are counted.
 expect_eq "S13.4 …and session-poker builds its three as one group: every list field through clean by name, the group's missing members empty" "1 1 1" \
-  "$(grep -c 'LIST_FIELDS_ARGS+=("\$lf=\$(clean "\$(line_field "\$src" "\$lf")" "\$lf")")' "$BIONIC_HOOKS_DIR/session-poker.sh") $(grep -c 'row_has_key "\$src" suites_allowed || LIST_FIELDS_ARGS+=("suites_allowed=")' "$BIONIC_HOOKS_DIR/session-poker.sh") $(grep -c 'LIST_FIELDS_ARGS+=("suites_source=\$(clean "\$ssrc")")' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+  "$(grep -c 'LIST_FIELDS_ARGS+=("\$lf=\$(clean "\$(line_field "\$src" "\$lf")" "\$lf")")' "$CG2_POKER_TEXT") $(grep -c 'row_has_key "\$src" suites_allowed || LIST_FIELDS_ARGS+=("suites_allowed=")' "$CG2_POKER_TEXT") $(grep -c 'LIST_FIELDS_ARGS+=("suites_source=\$(clean "\$ssrc")")' "$CG2_POKER_TEXT")"
 
 # MUTATION (§N-shaped, :3572-3588) — the shape-aware grep must actually REJECT a planted
 # assembler, not merely fail to see one that was never there. TWO copies of
@@ -988,9 +997,9 @@ expect_eq "S17b …and the key-set pin goes red on it (the pin discriminates)" \
 # RETIRED WITH THE EMERGENCY LINE (wave-28 T13; D14): the kill floor named a writer to stop,
 # and the gate admits no run past memory's share, so the function and its two marker pins go.
 expect_eq "S17c youngest_suite_writer is gone with the EMERGENCY line" "0" \
-  "$(grep -c '^youngest_suite_writer()' "$PARTY_PK")"
+  "$(grep -c '^youngest_suite_writer()' "$CG2_POKER_TEXT")"
 expect_eq "S17c …while the marker's other reader stands (the count extractor reads the file)" "1" \
-  "$(grep -c '^adopt_copy_marker()' "$PARTY_PK")"
+  "$(grep -c '^adopt_copy_marker()' "$CG2_POKER_TEXT")"
 
 # ============================================================
 section "B — no backtick pair hides inside a double-quoted assertion name (AC-B.1/AC-B.2, epic-22 task 7)"
@@ -2198,14 +2207,14 @@ cgc_adopt() {  # <repo> <name> -> open | closed
   local out
   out=$( ( BIONIC_LIB_WANT=""
            . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
-           eval "$(awk '/^adopt_fold\(\) \{/,/^\}/' "$CGC_POKER")"
+           eval "$(awk '/^adopt_fold\(\) \{/,/^\}/' "$CG2_POKER_TEXT")"
            adopt_fold "$1/.bionic/tmp/roster-$SID_A.state" "$1/.bionic/tmp/sweeper-$SID_A.state" ) 2>/dev/null \
          | cut -d'|' -f1)
   if grep -qxF -- "$2" <<< "$out"; then printf 'open'; else printf 'closed'; fi
 }
 
 expect_nonempty "CG-close meta: adopt_fold's source text is extractable" \
-  "$(awk '/^adopt_fold\(\) \{/,/^\}/' "$CGC_POKER")"
+  "$(awk '/^adopt_fold\(\) \{/,/^\}/' "$CG2_POKER_TEXT")"
 
 for _cgc in again:open met:open done:closed; do
   _cgc_case="${_cgc%%:*}"; _cgc_want="${_cgc#*:}"; _cgc_name="cgc-$_cgc_case"
@@ -2224,13 +2233,13 @@ done
 # ONE DEFINITION, AND EVERY READER CALLS IT. The behaviour above is the proof; this names the
 # owner, so a fifth reader grown with a private ack set fails here rather than in the field.
 expect_eq "CG-close roster_open_names is defined exactly once in the shipped tree" "1" \
-  "$( { grep -l '^roster_open_names()' "$CGC_LIBDIR"/*.sh; grep -l '^roster_open_names()' "$BIONIC_HOOKS_DIR"/*.sh; } 2>/dev/null | sort -u | wc -l | tr -d ' ')"
-for _cgc_f in "$PARTY_DP" "$SWEEPER" "$CGC_LIBDIR/stop.sh" "$CGC_POKER"; do
+  "$( { grep -l '^roster_open_names()' "$CGC_LIBDIR"/*.sh; grep -l '^roster_open_names()' "$BIONIC_HOOKS_DIR"/*.sh "$BIONIC_HOOKS_DIR"/poker/*.sh; } 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+for _cgc_f in "$PARTY_DP" "$SWEEPER" "$CGC_LIBDIR/stop.sh" "$CG2_POKER_TEXT"; do
   expect_true "CG-close ${_cgc_f##*/} calls roster_open_names" \
     grep -q 'roster_open_names "' "$_cgc_f"
 done
 expect_eq "CG-close no reader keeps a private name-only ack set (acked[an] = 1)" "0" \
-  "$(cat "$PARTY_DP" "$SWEEPER" "$CGC_LIBDIR/stop.sh" "$CGC_POKER" | grep -c 'acked\[an\] = 1' || true)"
+  "$(cat "$PARTY_DP" "$SWEEPER" "$CGC_LIBDIR/stop.sh" "$CG2_POKER_TEXT" | grep -c 'acked\[an\] = 1' || true)"
 
 # THE MUTATION PROOF (research D3 §CG-close): the stop wall's old name-only reading restored
 # in a copy of the library, nothing else touched, must make `again` disagree again.
@@ -2461,7 +2470,7 @@ done
 
 # BOTH NEW READERS NAME THE ONE PREDICATE, and neither keeps a private MET close. The
 # behaviour above is the proof; this names the owner, as CG-close does for the four.
-for _cgt_f in "$PARTY_ER" "$CGC_POKER"; do
+for _cgt_f in "$PARTY_ER" "$CG2_POKER_TEXT"; do
   expect_true "CG-close T20 ${_cgt_f##*/} calls roster_open_names" \
     grep -q 'roster_open_names "' "$_cgt_f"
 done
@@ -2812,7 +2821,7 @@ for _cgb_fn in plan_budget_line budget_line_of budget_field; do
     "$( { grep -l "^${_cgb_fn}()" "$CGC_LIBDIR"/*.sh; grep -l "^[[:space:]]*${_cgb_fn}()" "$BIONIC_HOOKS_DIR"/*.sh; } 2>/dev/null | sed 's#.*/##' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 done
 expect_eq "CG-budget no reader cuts writers= at its first substring any more" "0" \
-  "$(cat "$PARTY_SG_W" "$CGC_LIBDIR/stop.sh" "$PARTY_DP" "$CGC_POKER" | grep -c '#\*writers=}' || true)"
+  "$(cat "$PARTY_SG_W" "$CGC_LIBDIR/stop.sh" "$PARTY_DP" "$CG2_POKER_TEXT" | grep -c '#\*writers=}' || true)"
 expect_eq "CG-budget the stop wall no longer reads the budget through plan_frontmatter_get" "0" \
   "$(grep -c 'plan_frontmatter_get "$PLAN" parallel-budget' "$CGC_LIBDIR/stop.sh" || true)"
 
@@ -2886,10 +2895,10 @@ for _rm in quiet:1.0:1.0 loaded:4.0:4.0 5m:1.0:7.0; do
 done
 export BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_GATE_DIR="$ROOM_GATE_SAVED"
 # THE TWO READERS SIZE THEIR FILL BY THE ONE FUNCTION, and neither keeps a width of its own.
-expect_true "ROOM the tick sizes its fill by fill_gate_width" grep -q 'fill_gate_width "' "$CGC_POKER"
+expect_true "ROOM the tick sizes its fill by fill_gate_width" grep -q 'fill_gate_width "' "$CG2_PARTS/tick.sh"
 expect_true "ROOM the stop wall sizes its fill by fill_gate_width" grep -q 'fill_gate_width "' "$CGC_LIBDIR/stop.sh"
 expect_eq "ROOM neither reads a rung any more" "0" \
-  "$(cat "$CGC_POKER" "$CGC_LIBDIR/stop.sh" | grep -c 'pressure_level\|resources_pressure' || true)"
+  "$(cat "$CG2_POKER_TEXT" "$CGC_LIBDIR/stop.sh" | grep -c 'pressure_level\|resources_pressure' || true)"
 
 # ============================================================
 section "CG-standdown — the tick's printed stand-down set IS the stop wall's computed one (epic-23 wave-20 T19; REQ-5 AC-5.4's plants, on the stand-down)"
@@ -4280,12 +4289,13 @@ SD_MUT="$SANDBOX/fx/sd-mut"
 mkdir -p "$SD_MUT/hooks" "$SD_MUT/scripts"
 ln -s "$CGC_LIBDIR" "$SD_MUT/scripts/lib"
 for _sd_sib in "$BIONIC_HOOKS_DIR"/*; do
-  [ "$(basename "$_sd_sib")" = session-poker.sh ] || ln -s "$_sd_sib" "$SD_MUT/hooks/$(basename "$_sd_sib")"
+  case "$(basename "$_sd_sib")" in session-poker.sh|poker) ;; *) ln -s "$_sd_sib" "$SD_MUT/hooks/$(basename "$_sd_sib")" ;; esac
 done
-anchor file hooks/session-poker.sh 'SCHED_SD="$(fill_standing_decline '
-anchor file hooks/session-poker.sh 'SCHED_LAPSE="$(fill_decline_lapsing '
+cp "$CGSD_POKER" "$SD_MUT/hooks/session-poker.sh"; cp -R "$CG2_PARTS" "$SD_MUT/hooks/poker"
+anchor file hooks/poker/tick.sh 'SCHED_SD="$(fill_standing_decline '
+anchor file hooks/poker/tick.sh 'SCHED_LAPSE="$(fill_decline_lapsing '
 sed -e 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' \
-    -e 's/^\( *\)SCHED_LAPSE="\$(fill_decline_lapsing .*$/\1SCHED_LAPSE=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
+    -e 's/^\( *\)SCHED_LAPSE="\$(fill_decline_lapsing .*$/\1SCHED_LAPSE=""/' "$CG2_PARTS/tick.sh" > "$SD_MUT/hooks/poker/tick.sh"
 SD_RM=$(sd_world mut R1,R2)
 SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
 expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
@@ -4429,7 +4439,7 @@ section "FACT — the proof line: one writer, every reader gives its kind, head 
 # wrote: kind review, its head, its time.
 PRF_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 PRF_STOP="$PRF_LIB/stop.sh"
-PRF_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
+PRF_POKER="$CG2_POKER_TEXT"   # the core script's text: the launch sync's reader is the roster's, the judge the judge's
 PRF_NEEDLE='insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {'
 PRF_D="$SANDBOX/fx/prf"; mkdir -p "$PRF_D"
 PRF_PLAN="$PRF_D/plan.md"
@@ -4502,7 +4512,7 @@ expect_eq "PRF proof_last (floor): the floor line is a different kind, with its 
 expect_eq "PRF units.sh (proof_fields, through units_live_range): the same review head" "${PRF_B}..${PRF_LIVE}" \
   "$(. "$PRF_LIB/units.sh" && UNITS_LIVE_HEAD="$PRF_LIVE" units_live_range "$PRF_PLAN")"
 anchor file payload/scripts/lib/stop.sh 'insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {'
-anchor file hooks/session-poker.sh 'insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {'
+anchor file hooks/poker/roster.sh 'insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {'
 expect_nonempty "PRF the turn-end wall's at= reader is cut out of stop.sh by its text" "$(prf_cut "$PRF_STOP")"
 expect_nonempty "PRF the launch sync's at= reader is cut out of session-poker.sh by its text" "$(prf_cut "$PRF_POKER")"
 PRF_AT="${PRF_LINE##* at=}"; PRF_AT="${PRF_AT%% *}"
@@ -5092,7 +5102,7 @@ section "DEBT-LINE — one debt-line grammar, owned once in lib/debt.sh and sour
 # `debt_carry_lines` beside it, and `debt add`, close-out and card.sh source it. fails-when: a consumer
 # holds a debt-line regex of its own, or a mutant of the one regex leaves any consumer's verdict unchanged.
 DL_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/debt.sh"
-DL_CONSUMERS="payload/scripts/card.sh payload/scripts/close-out.sh hooks/session-poker.sh"
+DL_CONSUMERS="payload/scripts/card.sh payload/scripts/close-out.sh hooks/poker/proof.sh"   # the debt verb is the proof record's
 dl_defs() {  # <pattern> -> path:line of each flush-left match in hooks/ and payload/scripts/
   ( cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rnE "$1" hooks payload/scripts --include='*.sh' 2>/dev/null )
 }
