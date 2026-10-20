@@ -796,10 +796,6 @@ REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
 expect_eq "(n1) a suite promising 600 s with 60 s left: exit 75" "75" "$LL_RC"
 expect_eq "(n1) …printing WAITING and the same command (§WHY reads the reason after it)" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
-# THE PROMISE, PRINTED (wave-39 T8; D11, AC-4.3): ready says once, at its start, the seconds its suites promise
-# against the --within it was given; it is the first line, ahead of everything the carrier prints.
-expect_eq "(n1p) AC-4.3 ready's first line is the promised total against --within: promised 600s of 60s" "promised 600s of 60s" \
-  "$(printf '%s\n' "$LL_OUT" | head -n 1)"
 expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN" \
   "$(ll_ev "$RN" verdict | awk 'END { print NR }') $(ls "$RN/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" | wc -l | tr -d ' ')"
 expect_eq "(n1) …the entry kept, its carrier gone" "T1 no" "$(line_state "$(ll_plan "$RN")" | cut -f1,4 | tr '\t' ' ')"
@@ -826,6 +822,10 @@ expect_eq "(n5) …waiting on c, whose promise the time left cannot hold" "waiti
   "$(printf '%s\n' "$LL_OUT" | grep '^waiting: ' | head -n 1 | cut -d' ' -f1-6)"
 expect_eq "(n5) …a ran and is green; c has no verdict and no gate request: it was waited, not started short" "a.test.sh:green $N5_C" \
   "$(ll_ev "$RN5" verdict | while IFS= read -r v; do printf '%s:%s ' "$(ll_field "$v" suite)" "$(ll_field "$v" result)"; done | sed 's/ $//') $(grep -l '^key=c.test.sh$' "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | awk 'END { print NR }')"
+RN6="$(ll_world)"; ll_launch "$RN6" T1 a,c; ( cd "$RN6" && world_cost a.test.sh 5 && world_cost c.test.sh 600 && world_suite c green >/dev/null )
+git -C "$RN6" add tests/c.test.sh && git -C "$RN6" commit -qm "suite c" && git -C "$RN6/.worktrees/T1" merge -q --no-edit wave/x
+git -C "$RN6/.worktrees/T1" rm -q tests/c.test.sh && git -C "$RN6/.worktrees/T1" commit -qm "T1: c removed"; ll_verb "$RN6" T1 --within 60
+expect_eq "(n6) AC-10.3 a,c, c on the accepted head and removed by the row: the promised total leaves c out, 5s of 60s" "promised 5s of 60s" "$(printf '%s\n' "$LL_OUT" | head -n 1)"
 # THE LOOKUP NAMES THE LANDING TREE (wave-33 T1; Δ10). Durations are keyed by project, so
 # `_line_time_for` reads the landing tree's, wherever the carrier stands: asked from outside every
 # repository (the world's root), it still finds the fixture repository's 600 s.
