@@ -350,6 +350,22 @@ poke "$RFC" reply "$FC_WD"
 expect_eq "EARLY-8f reply all default waives the three rows" "waived waived waived" "$(fc_row AC-1.1) $(fc_row AC-1.3) $(fc_row AC-1.4)"
 FC_CK=""; for fc_n in 6 7 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
 expect_eq "EARLY-8g …and current 6, 7 and 8 --check are then green" "000" "$FC_CK"
+# THE STEP-8 APPROVAL REFUSAL IS THE PAGE'S OWN: in the release order the advance to 8 refuses first on the missing
+# `approved: release` line, which is decision 7 of the page, so a run whose every other fact holds renders and puts both
+# approvals. (The order is a test row at Step 5 and the release's doc row; the fixture's matrix is fully confirmed.)
+fc_plan "$FC_GOOD" 's/^\(| AC-1\.2 | T1 \)| pending |/\1| discharged |/
+/^| T1 | 4 | build/a\
+| T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
+poke "$RFC" current 8 --check
+FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+poke "$RFC" current 8 --check
+expect_eq "EARLY-9 precondition: current 6 and 7 --check are green, and current 8 --check refuses (exit 1) on the missing approval alone" \
+  "001|1" "$FC_CK$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')"
+expect_contains "EARLY-9a …naming the missing approved: release line" "carries no approved: release line" "$OUT"
+fc_page
+expect_eq "EARLY-9b …and the page renders (exit 0, no refusal, a page written)" "0||review-results-$FC_H8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
+expect_eq "EARLY-9c …putting the release approval and the merge approval" "approve:release approve:merge" \
+  "$(fc_keys | /usr/bin/grep '^approve:' | tr '\n' ' ' | sed 's/ $//')"
 
 # ============================================================
 section "§PREVIEW: --preview renders an early run's page and records nothing"
