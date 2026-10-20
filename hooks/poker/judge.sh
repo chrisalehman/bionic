@@ -34,7 +34,8 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
 # `current 7` is held to the same judge `current 8` is, and a run never leaves Step 6 with its floor behind
 # the head.
 # IN THE ORDER build, regression, review, release (lib/units.sh `units_order`) `current 8` asks besides that the
-# newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is the working head. The whole run need
+# newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is the working head, or one that only prose
+# touching no release-set file follows (lib/proof.sh `proof_prose_past`). The whole run need
 # not be at that head: the regression judge holds it covered past its run when every later commit is proved by the
 # suites its row named. A plan outside that order is judged as before.
 # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, the judge's one
@@ -54,8 +55,9 @@ cover_basis() {
   facts_cover "$1" "$3" "$4" "$2"
 }
 
-# cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8; otherwise
-# refuses `current 8`, exit 1, naming both heads, the plan unchanged.
+# cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8, or a head on its
+# first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
+# exit 1, naming both heads, the plan unchanged.
 cur8_approved_head() {
   local ah
   ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
@@ -67,8 +69,8 @@ cur8_approved_head() {
     fi
     exit 1
   fi
-  if [ "$ah" != "$PV_HEAD8" ]; then
-    die "REFUSED — current: 8 is admitted at the head the user approved for release: the working head ${PV_HEAD8:0:12} is not the head the user approved for release, ${ah:0:12}. Land nothing past the approval, or have the user approve this head (approve release '<reply>'). The plan is unchanged."
+  if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
+    die "REFUSED — current: 8 is admitted at the head the user approved for release: the working head ${PV_HEAD8:0:12} is not the head the user approved for release, ${ah:0:12}, and a commit past it is code or a release-set file. Land only docs past the approval, or have the user approve this head (approve release '<reply>'). The plan is unchanged."
     exit 1
   fi
 }

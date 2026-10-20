@@ -1637,12 +1637,13 @@ EOF
   # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17). A `- Step N:` block is the evidence the gate reads, and
   # the fields it reads were hand edits: `units_step_fields --replace` writes one `  <key>: <value>` line under
   # the step line, after the block last line, or replaces the line where it stands (the gate reads the first
-  # line of a key, so a second could not win); the rest of the plan is the same bytes. Ten keys, the ones the
+  # line of a key, so a second could not win); the rest of the plan is the same bytes. Eleven keys, the ones the
   # gate reads at Steps 4, 5, 7 and 8: head cmd pass total output (the regression run), merge worktree-removed (the
-  # integration), adr (the document step), share (the Step-4 fact), walk-artifact (the walk gate's pointer, Step 5
+  # integration), adr (the document step), share (the Step-4 fact), auditor (the Verify gate's verdict, Step 5 alone),
+  # walk-artifact (the walk gate's pointer, Step 5
   # alone; wave-33 T7). It takes the plan transaction every row verb
   # takes (copy, dry commit through the real gate, checksum, swap), so a plan the gate would refuse is not
-  # written. REFUSED (1), the plan unchanged: a key outside the ten, a value with a line break, a step with no
+  # written. REFUSED (1), the plan unchanged: a key outside the eleven, a value with a line break, a step with no
   # line (step-line writes it), a key the step line itself carries (step-line owns that text), and Step 9
   # (close-out writes that block). The refusals are this verb family die lines, not refuse.sh refusals.
   poker_verb_step_field() {
@@ -1652,10 +1653,10 @@ EOF
         exit 1 ;;
     esac
     case "$PV_FKEY" in
-      head|cmd|pass|total|output|merge|worktree-removed|adr|share|walk-artifact) : ;;
+      head|cmd|pass|total|output|merge|worktree-removed|adr|share|walk-artifact|auditor) : ;;
       *)
         die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field; the plan is unchanged."
-        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share, walk-artifact (Step 5)."
+        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share, walk-artifact and auditor (Step 5)."
         exit 1 ;;
     esac
     # THE WALK POINTER (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-42). The walk gate reads `walk-artifact:`
@@ -1672,6 +1673,13 @@ EOF
           die "REFUSED — the walk artifact '$(clean "$PV_FVAL")' has a '..' component, which the walk gate refuses: name it under record/. The plan is unchanged."
           exit 1 ;;
       esac
+    fi
+    # THE AUDITOR'S VERDICT is read by the Verify gate from the Step 5 block alone (walls.sh `validate_verify_step`), so
+    # the key is written there and at no other step.
+    if [ "$PV_FKEY" = auditor ] && [ "$PV_KEY" != 5 ]; then
+      die "REFUSED — auditor is read from the Step 5 block only (the Verify gate's), not Step $PV_KEY's; the plan is unchanged."
+      pv_next step-field 5 "auditor=$PV_FVAL"
+      exit 1
     fi
     case "$PV_FVAL" in
       *$'\n'*|*$'\r'*)
