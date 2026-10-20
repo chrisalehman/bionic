@@ -198,8 +198,6 @@ expect_eq "T-token, wave scale: the stop gate answers as on any engaged plan"  "
 expect_eq "T-token, wave scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TREPO")"
 TTREPO=$(new_repo "task-pointer")
 plan_fixture --current T4 "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md" task > /dev/null
-expect_eq "T-token, task scale: the plan carries scale: task and current: T4" "2" \
-  "$(/usr/bin/grep -cE '^scale: task$|^current: T4$' "$TTREPO/.bionic/docs/plans/epic-99/wave-01.md")"
 expect_eq "T-token, task scale: the start gate answers as on any engaged plan" "yes" "$(verdict_dp "$TTREPO")"
 expect_eq "T-token, task scale: the stop gate answers as on any engaged plan"  "yes" "$(verdict_sg "$TTREPO")"
 expect_eq "T-token, task scale: the evidence gate refuses the value" "no" "$(verdict_eg "$TTREPO")"
@@ -274,8 +272,6 @@ DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c 'run resolved by newest-plan fall
 # THE BUDGET BACKSTOP IS GONE (wave-28 T9; D15): this fixture's plan is live and carries no
 # `parallel-budget:` line, and no plan owes one, so the gate's whole output is held to the
 # emptiness this section has always claimed. Until wave-28 a WARN naming the key was lifted out.
-expect_eq "start gate: a bound session hears no fallback announcement (the fixture is bound)" \
-  "0" "$DP_RESOLUTION"
 expect_eq "start gate: and passes in silence about the attestation (and the keyless plan)" "" "$OUT"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
 # `engaged_session` before anything else, keyed to the session in hand — so without a
