@@ -977,4 +977,16 @@ ll_kill_bg "$T6_BG"
 expect_eq "(t6m) …and no stalled event" "" "$(ll_ev "$RT6" stalled)"
 
 # ---------------------------------------------------------------------------
+section "§RELEASE-ROW: a release row whose Lands-on names the release check alone runs that suite only"
+#
+# The row's tree also holds another suite, which a run of the whole project would take. The verdicts the line writes name
+# the suites that ran: the release check, green, and nothing else.
+RR="$(ll_world)"; ll_launch "$RR" T1 release-check.test.sh
+ll_commit_suite "$RR" T1 release-check 'echo "PASS: rr"; echo; echo "release-check.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"'
+ll_commit_suite "$RR" T1 other 'echo run >> "$LL_SIG/other.runs"; echo "PASS: o"; echo; echo "other.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"'
+ll_verb "$RR" T1
+expect_eq "(rr1) ready lands the row (exit 0), and its verdicts name the release check alone, green" "0 release-check.test.sh=green" \
+  "$LL_RC $(ll_ev "$RR" verdict | sed 's/.*|suite=\([^|]*\)|result=\([^|]*\)|.*/\1=\2/' | paste -sd' ' -)"
+
+# ---------------------------------------------------------------------------
 finish

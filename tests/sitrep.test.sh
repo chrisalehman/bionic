@@ -497,17 +497,14 @@ expect_eq "H7 every task in flight carries its state in words after a dash" "4|4
   "$(sr_rows | /usr/bin/grep -c '^🔄 ')|$(sr_rows | /usr/bin/grep -cE '^🔄 [^ ]+: .* — [a-z]')"
 
 # ============================================================
+section "§GRADE: the skill writes only a grade and a rationale that names an indicator line; a rationale that names none is refused"
 # ============================================================
 sr_world slots "6 6 12 12"
-SR_LOG="$SR_DIR/sitrep.log"
-sr_run grade C 'the decisions line is the red one: three rounds too many' "$SR_PLAN"
+sr_run grade C 'the decisions line is the red one: three rounds too many' "$SR_PLAN"; GR_RC1="$RC"
+sr_run grade B 'the run is going fine' "$SR_PLAN"; GR_RC2="$RC"
 sr_run "$SR_PLAN"
-sr_run grade C 'the run is going fine' "$SR_PLAN"
-sr_run grade G 'the schedule line is behind' "$SR_PLAN"
-sr_run grade C 'waste | correctness' "$SR_PLAN"
-sr_run grade C "$SR_PLAN"
-SR_AT=$((SR_NOW + 600)) sr_run grade B 'Schedule caught up once the long task moved' "$SR_PLAN"
-SR_AT=$((SR_NOW + 900)) sr_run "$SR_PLAN"
+expect_eq "SL1 a grade citing an indicator line exits 0, one citing none exits 1, and the page still shows the first grade's letter" "0|1|C" \
+  "$GR_RC1|$GR_RC2|$(printf '%s\n' "$OUT" | sr_heads | cut -d'|' -f3 | sed 's/^Score: \(.\) .*/\1/')"
 
 # ============================================================
 section "§SCOPE: what you owe is read from the named plan's run, never the session running the verb; a delivered plan prints no close; the plan's table words never print"

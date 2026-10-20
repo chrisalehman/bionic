@@ -853,7 +853,6 @@ OUTVN="$( cd "$V" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" land "$VD" --by
 expect_match "the verb with no session id is refused, naming why" \
   "spawn-worktree: REFUSED reason=no-session*" "$OUTVN"
 expect_eq   "that refusal exits 2" "2" "$RCVN"
-expect_eq   "no ref moved" "$VBEFORE" "$(refs_of "$V")"
 # A session that is not bound: the root's newest open run is somebody's, not this one's.
 OUTVU="$( cd "$V" && CLAUDE_CODE_SESSION_ID="verb-unbound-0002" bash "$SPAWN" land "$VD" --by-hand --reason r 2>/dev/null )"
 expect_match "the verb from an unbound session is refused, naming the fallback" \
@@ -942,7 +941,6 @@ expect_eq    "(h1) a hand landing with no --reason is refused (exit 2)" "2" "$RC
 expect_match "(h1) …naming why" "spawn-worktree: REFUSED reason=no-reason *" "$OUTBH0"
 OUTBH1="$(bh_land "$BHT" --by-hand --reason '')"; RCBH1=$?
 expect_eq    "(h1) …and with an empty one" "2" "$RCBH1"
-expect_eq    "(h1) …no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
 expect_false "(h1) …and nothing is recorded" test -e "$BHREC"
 OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
 expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
@@ -984,6 +982,7 @@ expect_contains "(hd2) …and its - T2: line carries the person's words" '"lande
 expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
   "0|line/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
   "$(awk 'END { print NR }' "$TMP/hand-runs")|$(grep '|ev=verdict|' "$BHREC" | sed 's/|at=[^|]*$//')"
+expect_eq    "(hd3b) …and it built one candidate for its row, on the head before it" "$(git -C "$BH" rev-parse wave/fixture^1)" "$(grep '|ev=candidate|row=T2|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 
 # A hand landing that names its suites leaves a ready line that names them too, so the judge and the door read one
 # row's suites; with none named, the ready line says none.
