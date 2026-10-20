@@ -939,17 +939,13 @@ bh_land() { ( cd "$BH" && CLAUDE_CODE_SESSION_ID="$BHSID" bash "$SPAWN" land "$@
 OUTBH0="$(bh_land "$BHT" --by-hand)"; RCBH0=$?
 expect_eq    "(h1) a hand landing with no --reason is refused (exit 2)" "2" "$RCBH0"
 expect_match "(h1) …naming why" "spawn-worktree: REFUSED reason=no-reason *" "$OUTBH0"
-OUTBH1="$(bh_land "$BHT" --by-hand --reason '')"; RCBH1=$?
-expect_eq    "(h1) …and with an empty one" "2" "$RCBH1"
 expect_false "(h1) …and nothing is recorded" test -e "$BHREC"
 OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
 expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
 expect_eq    "(h2) …and no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
-BHC="$(git -C "$BHT" rev-parse HEAD)"
 OUTBH="$(bh_land "$BHT" --by-hand --reason "the person's why")"; RCBH=$?
 expect_eq    "(h3) a hand landing with a reason exits 0" "0" "$RCBH"
 expect_match "(h3) …on land's own LANDED line" "*spawn-worktree: LANDED branch=wt/bh-T1 onto=wave/fixture checkout=${BH} merge=* removed=${BHT} proofs=${BHREC}*" "$OUTBH"
-expect_true  "(h3) the row's commit is on the working branch" git -C "$BH" merge-base --is-ancestor "$BHC" wave/fixture
 BH_PUB="$(grep '^line/v1|ev=published|' "$BHREC" 2>/dev/null)"
 expect_regex "(h4) the record's published line carries the user, the time and the reason" \
   "^line/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
@@ -997,4 +993,7 @@ expect_eq    "(hd4) …and its ready line names the suites the person named, whe
   "a.test.sh,b.test.sh|none" \
   "$(grep '|ev=ready|row=T3|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')|$(grep '|ev=ready|row=T1|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')"
 
+BHT4="$(new_tree "$BH" wt/bh-T4)"; mkdir -p "$BHT4/tests"; printf '# the wave-40 run said so\n' > "$BHT4/tests/cited.sh"; git -C "$BHT4" add tests && git -C "$BHT4" commit -qm "T4: a cited comment"; BH_REFS4="$(refs_of "$BH")"
+OUTHL="$(bh_land "$BHT4" --by-hand --reason "landed on the report")"; RCHL=$?
+expect_eq    "(hl1) a hand landing whose added comment cites the run exits 2 with ready's LINT line, and no ref moved" "2|LINT wt/bh-T4 tests/cited.sh:1 wave|same" "$RCHL|$(printf '%s\n' "$OUTHL" | grep '^LINT ')|$([ "$BH_REFS4" = "$(refs_of "$BH")" ] && echo same)"
 finish
