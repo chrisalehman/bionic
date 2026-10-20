@@ -974,9 +974,13 @@ session_run() {
 #
 # A STRING BUILDER, NOT A VERDICT. It decides nothing and reads nothing; the consumer has
 # already decided to act as under `none`.
+#
+# The poker's name goes in as an argument: spelled whole in this source, the name scan
+# (lib/anchors.sh) would read the message as a run of the poker, and every suite that
+# loads this file would reach the poker's whole closure. The sentence printed is the same.
 run_unbound_advisory() {  # <plan>
-  printf "run resolved by newest-plan fallback (session unbound) — %s; bind with session-poker.sh bind %s, or write this session's plan\n" \
-    "${1:-}" "${1:-}"
+  printf "run resolved by newest-plan fallback (session unbound) — %s; bind with %s.sh bind %s, or write this session's plan\n" \
+    "${1:-}" session-poker "${1:-}"
 }
 
 # session_working_branch <root> <sid> -> the bound plan's `working-branch:` on stdout, exit 0;
