@@ -8,6 +8,261 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.23.0 — 2026-10-20
+
+This is the small files, plain words release. The 15,715-line core script is now a dispatcher and seven parts, one
+concern each (D11, ADR-063). A row proves its own change with its own suites, the whole regression runs once after the
+build, and a head past it is proved by its landings' own green verdicts, never by a second whole run (D15, D16, D19).
+The reads index that keyed proofs by what a suite read is deleted outright (D18), and the test suites were cut from
+171,255 lines to 81,361, none over 1,000, with 1,341 sentence, count and document checks removed (D17). The sitrep and
+the final card now answer in plain language what is done, what is next, what the user owes and when the run closes
+(D6, D7, D8). A handoff is one self-contained document any session can write and any session can resume, with a run
+bound or none (D9, D10). An order is the user's words, recorded by a verb and enforced where suites start (D3). A
+comment never names a wave, task, criterion, decision or record path, and a lint refuses one on both landing doors
+(D4, D14). This is a minor release by the policy above: the pages, the handoff document, the order verb, the lint,
+the promote and release-note verbs are new capability; the index, the `standing-orders:` key and `card.sh final` are
+removed. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T29, T55: `standing-orders:` in `.bionic/config.yaml` is no longer read, and the bash walls no longer enforce it.
+  The user says the order in the conversation and the orchestrator records it with `order '<words>'` and lifts it
+  with `order lift`. While it stands, tests/run.sh and the landing line refuse with the user's words and run nothing.
+- T23, T24: `card.sh final` is deleted. The final card is the review results page, `session-poker.sh review-results`
+  (`--preview` renders it and records nothing). `reply` takes `all default`, `all recommended`, or a sequence of
+  numbered choices, and a bad item refuses the whole reply. The page offers no regression waiver.
+- T45: the reads index is deleted. A suite's `reads` lines are no longer read, a verdict is keyed by the commit it ran
+  at, and `ready` reuses and skips nothing. The suites reads-hash, suite-reads, name-scan and doctor-reads are deleted.
+- T16, T18: the order is build, regression, review, release, approval, merge. In a plan with a reads column,
+  `task-add` refuses a regression row placed after a review or release row. An `approved:` line carries
+  `head=<40-hex>`, and `current 8` is admitted only at the head the user approved for release.
+- T14, T57: `spawn-worktree.sh land --by-hand` takes `--suites`, `--green-at` and `--log`, all three or none, and
+  records the suites as green verdicts at that commit. It runs nothing, and it refuses a candidate the comment lint
+  refuses, with a `LINT` line.
+- T25, T47, T54: a handoff is written to `.bionic/docs/record/handoffs/<date>-<slug>.md`, with or without a bound
+  run. close-out writes the new document and keeps every line of an old-shape handoff file.
+- T28: `docs-tracked:` names where durable records go, `docs/` when absent, and `session-poker.sh promote
+  <adr|design|requirement> <source>` copies one there. A plan, a log or a handoff is refused.
+- T19: `session-poker.sh release-note` prints an entry's landing numbers, and the release check holds an entry that
+  names its head to the landing report at that head.
+- T14: a landing has no width of its own. The line asks the gate before each suite.
+- T17: a Lands-on command is held to the 600-second suite bar, as a suite is.
+- T22: `decisions put D<n> '<what is decided>'` writes the put to the design ledger with its wait line.
+- T31: `step-field 5 auditor=<name>` is accepted at Step 5 alone, and `Deliverable-waiver: none` is read as no waiver.
+
+### The core script is eight files (D11, ADR-063)
+
+- T1 (`T1-split.md`): hooks/session-poker.sh keeps the loader, the parse case, the shared helpers and the plan
+  transaction, and loads seven parts under hooks/poker/: judge, line, proof, roster, tick, sitrep and plan. No two
+  parts call each other both ways, and the two real dependencies are declared loads.
+- T2 (`T2-folds.md`): 25 readers of the landing record now go through `line_kv`, and four readers of the integration
+  branch through `plan_integration_branch`.
+- T3 (`T3-edges.md`): the two scan edges were cut with byte-identical output. They dropped no pair, and the index
+  they served was deleted afterwards (D18).
+
+### One whole run, and a landing proves its own change (D13, D15, D16, D17, D18, D19, ADR-065)
+
+ADR-065 records the rule and is Proposed. It supersedes ADR-061 and amends ADR-063: the parts are kept, the
+declarations and the reach by file are not. D5's suite count and D12's reach by file went with the index (D18).
+- T45 (`T45-index-deleted.md`): the index, the owed-set walk, the reads-keyed reuse and skip, and every `reads`
+  declaration are deleted, 4,709 lines. The judge holds a head covered when it is the head of the last green whole
+  run.
+- T16 (`T16-order.md`): the step order and its validator. The judge holds a head past the last green whole run
+  covered when each later commit is excused or is a landing whose row's suites are green at it, and each red that
+  run left has a later green. D19 made that the criterion.
+- T51 (`T51-fix-proof-add.md`) and T52 (`T52-fix-hand-suites.md`): `proof-add regression` and the hand door agree
+  with the judge on that rule.
+- T18 (`T18-release-order.md`): the approved head, read by one reader, `proof_approved_head`.
+- T14 (`T14-no-width.md`): no width constant, and a hand landing records the writer's verdicts and runs nothing.
+- T17 (`T17-command-bar.md`): a Lands-on command is keyed by its gate key and held to the bar.
+- T43 (`T43-cull-1.md`): every suite capped at 1,000 lines at whole-section boundaries, 89,894 lines deleted.
+- T44 (`T44-cull-3.md`): 1,341 checks that quoted a sentence, counted lines or read a document deleted across 95
+  suites.
+- T32 (`T32-measure-1.md`): the promised total leaves out a suite the row removed.
+- T33 (`T33-measure-2.md`): a finding's disposition says when the regression fixed it.
+
+### The sitrep page and the review results page (D6, D7, D8)
+
+- T21 (`T21-sitrep.md`): the sitrep is the accepted page. The Bottom line comes first, with what you owe, what is
+  next, what is done and when it closes. Then the task list, the Score with one line per indicator, and Blocked on
+  you. Every line is folded at 92 columns.
+- T20 (`T20-goals.md`): the plan's `goals:` are read by one reader and printed on both pages, and the first miss is
+  put as a decision.
+- T22 (`T22-rounds.md`): decisions are counted in rounds, and a put prints what waiting on it costs.
+- T23 (`T23-review-results.md`) and T24 (`T24-reply.md`): the review results page and the one reply that orders
+  several acts in sequence. A finding reaches the user as a decision only as a missed criterion or when the
+  orchestrator recommends against the policy (D7).
+- T56 (`T56-fix-page-judge.md`): the review results page asks the judge for the regression verdict.
+- T59 (`T59-fix-sitrep-page.md`): nine defects the user found reading the live page, among them the wait clause in
+  words, the percent on the title line in place of the Completion section, and killed runs counted as waste.
+- T62 (`T62-fix-owed-decision.md`): an open decision is owed by the user on the Bottom line, under Blocked on you and
+  in the one-line form.
+
+### The handoff document (D2, D9, D10)
+
+- T25 (`T25-handoff.md`): `/bionic:handoff` writes one document, with or without a run, to an ignored folder. It has a
+  four-line Summary, the Goal in the person's words, State as computed facts, Findings with their sources, Decisions,
+  Ruled out, Open, Suggested skills, Next with the first command and Resume as its last line. Resume engages the
+  session quietly.
+- T47 (`T47-fix-close-out.md`) and T54 (`T54-fix-closeout-oldshape.md`): close-out writes the new document and carries
+  every line of an old-shape file into it.
+
+### Orders are the user's words (D3, ADR-064)
+
+- T29 (`T29-orders.md`): the `order` verb, the one reader `gate_order`, and the runner's refusal. The config key, its
+  wall and its suite are deleted.
+- T55 (`T55-fix-line-order.md`): the landing line reads the order before it starts a suite.
+
+### The comment rule and its lint (D4, D14, ADR-064)
+
+- T26 (`T26-rule.md`): one block, rendered into every place a comment is written. A comment states the reason and the
+  invariant, and cites a tracked path under `docs/` when it needs a document.
+- T27 (`T27-lint.md`): the landing line refuses a candidate whose added comment lines name a run's history. It judges
+  the lines a landing adds, never the tree it inherits.
+- T57 (`T57-fix-hand-lint.md`): the hand door runs the same lint, and the six comment lines the wave landed by hand
+  are rewritten.
+- T53 (`T53-fix-cap-lint.md`): the lint and the hand landing's candidate each get one behaviour check.
+
+### Durable records have a tracked home (D1)
+
+- T28 (`T28-promote.md`): `docs-tracked:` and the promote verb. ADR-056 is amended as ADR-062 requires.
+- T38 (`T38-release.md`): ADR-056, ADR-062, ADR-063 and ADR-064 are promoted to docs/adrs/. ADR-063 and ADR-064
+  are accepted at this release, ADR-063 amended by ADR-065. ADR-061 is superseded by ADR-065, which stays Proposed.
+
+### Wave 39's leftovers (D3)
+
+- T30 (`T30-leftovers.md`): the five wrong sentences of the 1.22.0 entry are corrected, the prelude binds its marker,
+  and the closed form owes no pull request for a branch that was merged and deleted.
+- T31 (`T31-verb-gaps.md`): the five verb gaps met at wave 39's close.
+
+### The release (D16)
+
+- T38 (`T38-release.md`): this entry, plugin.json 1.23.0, the help and version pages rendered by
+  `agents-src/render.sh`, `rendered.sha256` refreshed, and release-check.test.sh §REL-1.23.0 pinning the version, the
+  head this entry's numbers name and the promoted records.
+
+### How this run landed (D15)
+
+On the user's word, "we do not need to do excessive proving of every suite. That is the entire point of this wave.
+Land these by hand", a writer ran only the suites that pin its own change, RED then GREEN, and the orchestrator landed
+the tree by hand on the report. The landing report below counts thirty-eight rows landed by hand and three through
+the line. The whole regression after the build is the proof for everything else (D16).
+
+### The readings
+
+- The walk (`walk.md`, T34): the pages and a landing used as a user would, from the main checkout and a spawned tree.
+- The regression (`T39-regression.md`, T39): one whole run at f7205ad6, 2:20 to 2:39 AM PDT, 101 of 113 suites green
+  and 12 red. Each red was turned green by a fix row with its own suites, T46 to T52.
+- The matrix (`T35-matrix-fill.md`, T35): filled from the landed records at 48e47cc5.
+- The auditor's first reading (`auditor-evidence.md`, T36): five rows refuted, fixed by T58
+  (`T58-fix-evidence-misses.md`).
+- The critic's first reading (`critic-adversarial.md`, `critic-structure.md`, T37): two S1 and two S2 findings, fixed
+  by T54 to T57; four S3 findings deferred, below.
+- The second readings, on the fix rows (`critic-adversarial-2.md`, `critic-structure-2.md`, T61, and
+  `critic-adversarial-3.md`, `critic-structure-3.md`, T63): five S3 findings deferred, below, and S4 notes.
+- The auditor's second reading on the whole (`auditor-evidence-2.md`, T60): 66 rows confirmed, 3 refuted and 3
+  unverifiable. The user confirmed both reader tests (D21), waived AC-5.1 and AC-7.1 with their fixes carried (D20),
+  and waived AC-16.3 and AC-17.3 on the amended criterion and this row's promotion (D22). Its open findings are under
+  Known limits.
+
+### The landing numbers
+
+`landing-report --rows` at e110a68c782617b1e4c549fd8f625b8f67f83cf1 on 2026-10-20T17:54:01Z:
+
+```
+landings: queue=3 hand=38 git=0 · ready-to-landed median=5.0m p75=11.7m max=18.4m · runs: green=55 red=0 none=0 discarded=0 red-then-green=0 run=243 reused=0 absent=0 · waited median=15s · killed=2
+T1 hand ready=- landed=2026-10-20T03:54:44Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T27 hand ready=- landed=2026-10-20T03:57:02Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T26 hand ready=- landed=2026-10-20T03:57:49Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T30 hand ready=- landed=2026-10-20T03:58:32Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T3 hand ready=- landed=2026-10-20T04:34:49Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T21 hand ready=- landed=2026-10-20T04:49:05Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T18 hand ready=- landed=2026-10-20T05:03:48Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T43 hand ready=- landed=2026-10-20T05:15:15Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T45 hand ready=- landed=2026-10-20T06:11:34Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T23 hand ready=- landed=2026-10-20T06:32:06Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T25 hand ready=- landed=2026-10-20T06:40:04Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T16 hand ready=- landed=2026-10-20T06:53:33Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T14 hand ready=- landed=2026-10-20T06:56:26Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T29 hand ready=- landed=2026-10-20T07:14:32Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T20 hand ready=- landed=2026-10-20T07:23:55Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T31 hand ready=- landed=2026-10-20T07:26:20Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T19 hand ready=- landed=2026-10-20T07:53:25Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T28 hand ready=- landed=2026-10-20T07:54:46Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T2 hand ready=- landed=2026-10-20T08:01:29Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T22 hand ready=- landed=2026-10-20T08:08:18Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T32 queue ready=2026-10-20T08:14:56Z landed=2026-10-20T08:19:59Z minutes=5.0 runs=1 waited=15s wait=0.2 prove=4.6 rework=0.2 width=3
+  landing-line-1.test.sh green promised=282s actual=273s ratio=0.97
+T33 queue ready=2026-10-20T08:30:03Z landed=2026-10-20T08:31:41Z minutes=1.6 runs=1 waited=11s wait=0.2 prove=1.4 rework=0.0 width=3
+  session-poker-4.test.sh green promised=74s actual=87s ratio=1.18
+T24 hand ready=- landed=2026-10-20T08:31:51Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T17 hand ready=- landed=2026-10-20T08:34:07Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T44 hand ready=- landed=2026-10-20T09:17:48Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T34 queue ready=2026-10-20T09:21:17Z landed=2026-10-20T09:39:42Z minutes=18.4 runs=1 waited=1101s wait=18.4 prove=0.1 rework=0.0 width=1
+  time.test.sh green promised=3s actual=3s ratio=1.00
+T49 hand ready=- landed=2026-10-20T10:05:50Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T50 hand ready=- landed=2026-10-20T10:14:04Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T47 hand ready=- landed=2026-10-20T10:27:19Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T46 hand ready=- landed=2026-10-20T10:27:40Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T51 hand ready=- landed=2026-10-20T10:32:28Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T52 hand ready=- landed=2026-10-20T10:41:36Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T48 hand ready=- landed=2026-10-20T10:49:43Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T53 hand ready=- landed=2026-10-20T11:55:09Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T54 hand ready=- landed=2026-10-20T12:28:10Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T56 hand ready=- landed=2026-10-20T12:41:27Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T55 hand ready=- landed=2026-10-20T12:43:45Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T57 hand ready=- landed=2026-10-20T12:52:25Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T59 hand ready=- landed=2026-10-20T13:36:39Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T58 hand ready=- landed=2026-10-20T13:41:02Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T62 hand ready=- landed=2026-10-20T16:43:23Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+```
+
+The three line landings are T32 and T33, the two one-file rows, at 5.0 and 1.6 minutes, and T34 at 18.4 minutes, of
+which 18.4 were spent waiting for the gate. Every other row landed by hand and carries no ready time.
+
+### Standing reds
+
+The whole run at f7205ad6 left 12 red suites, each turned green by a fix row's own suites. No second whole run was
+made past it: under D19 a head past it is proved by its landings' own green verdicts.
+
+### Known limits
+
+- the hand door accepts any ancestor of the row head as the commit the suites were green at, but the judge reads a
+  verdict only at the merge or the row head, so a landing it accepts can later be refused as unproved
+  (`critic-adversarial.md#5`).
+- the review results page counts dropped rows as tasks not landed (36 of 53 now), where the sitrep leaves them out, so
+  the two pages disagree on how much is left (`critic-adversarial.md#6`).
+- the tests goal reads reached on wall time alone, so both pages show it met by a red whole run at a head nobody
+  approved (`critic-adversarial.md#7`).
+- the count of tasks has two owners, the review results page counting dropped rows and the sitrep
+  (hooks/poker/sitrep.sh:803) leaving them out, and the pages disagree (`critic-structure.md#2`).
+- a reached goal closes its decision only on the ticking session's own ledger, so the comments decision opened by an
+  earlier session stays open after the goal reads reached, and the resume recap still lists it while the sitrep says
+  you owe nothing (`critic-adversarial-2.md#1`).
+- the waste line adds the gate's killed requests to the landing verdicts, so a run the carrier stopped counts twice
+  (once as its discarded verdict, once as its killed request) and the base mixes every suite run under the root with
+  landing verdicts (`critic-adversarial-2.md#2`).
+- the line reads the user's order once per pass, before the drain, so a pass already past that check still starts its
+  remaining suites and the red judge's run at the head while the order stands (`critic-adversarial-2.md#3`).
+- the open decision joins the owed set on the page alone, so the resume recap of the same run still prints 'open: none
+  — no decision is open' and 'owed now: nothing waits on you' while a decision is put and unruled
+  (`critic-adversarial-3.md#1`).
+- a decision a row waits on is owed twice, as the tick's approve:D<n> and the page's decide:D<n>, so You owe counts
+  two for one reply (`critic-adversarial-3.md#2`).
+- The plan validator has no check showing it refuses out-of-order rows; the rule holds, the check is written back next
+  wave. AC-7.1 is waived at D20 (`auditor-evidence-2.md#2`).
+- proof-add's refusal past the whole run still offers to run the whole at the head, the second whole run D16 and D19
+  rule out (`auditor-evidence-2.md`, finding 1). AC-5.1 is waived and the fix carried to the next wave (D20).
+- ADR-064 still says the comment lint runs at the landing line. The lint now runs at both landing doors, one function
+  with one test, and the criterion was amended to say so after T57 (A-orch-D19.1).
+- The tests goal's 45 minutes was read as the whole run's wall time, 1,159 seconds, where the summed suite time is
+  7,422 seconds (`auditor-evidence-2.md`, finding 10).
+- The debt ledger still names hooks/session-poker.sh lines past its new end (`critic-adversarial.md`, finding 8), and
+  the structure readings added fourteen debt lines, among them two owners of the task count, of the run's owed set and
+  of the approved-head rule.
+- `_line_promise_total` still leaves a Lands-on command out of the printed promised total (A-T17.4).
+- The cull left five doctored copies in release-check.test.sh that are built and never read
+  (`critic-adversarial.md`, finding 12).
+
 ## 1.22.0 — 2026-10-19
 
 This is the landing proof release: a verdict is a fact about what its suite read, keyed by the hash of those files, so
