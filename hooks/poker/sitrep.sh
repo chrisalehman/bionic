@@ -334,6 +334,20 @@ decisions_rounds() {  # <ledger> -> `D<n><TAB><rounds><TAB><ruled|withdrawn|open
     END { for (i = 1; i <= n; i++) printf "%s\t%d\t%s\n", o[i], r[o[i]], st[o[i]] }'
 }
 
+# sitrep_open_decisions <ledger> -> the decisions put to the user and not yet ruled, each as an owed item in the
+# owed store's field order: `decide:<D<n>><TAB>-<TAB>reply to D<n><TAB>D<n> · <title>: reply with the option number`.
+# Open is `decisions_rounds`' word for it; the title is the newest put's.
+sitrep_open_decisions() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  local open
+  open="$(decisions_rounds "$1" | awk -F'\t' '$3 == "open" { printf "%s ", $1 }')"
+  [ -n "$open" ] || return 0
+  decisions_list "$1" puts | awk -F' · ' -v open="$open" '
+    BEGIN { n = split(open, a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
+    $2 == "put" && ($1 in want) { t = $4; for (i = 5; i <= NF; i++) t = t " · " $i; title[$1] = t }
+    END { for (i = 1; i <= n; i++) printf "decide:%s\t-\treply to %s\t%s · %s: reply with the option number\n", a[i], a[i], a[i], title[a[i]] }'
+}
+
 # sitrep_decisions <ledger> <record dir> -> the decisions indicator line. Each review results page the run put is a
 # round of the review results, ruled once the newest is replied. The mark is the most rounds any one decision took:
 # one within the bar, two near it, three or more over it; with nothing put or ruled, the no-record form.
@@ -821,6 +835,8 @@ sitrep_render() {
   local gk gt
   gk="$(plan_goals_read "$plan" "$rec" "$lr" | awk -F'\t' '$1 == "reached" { print $2 }' | while IFS= read -r gt; do printf 'decide:goal:%s ' "$(plan_goal_slug "$gt")"; done)"
   [ -z "$gk" ] || owed="$(printf '%s\n' "$owed" | awk -F'\t' -v ks="$gk" 'BEGIN { n = split(ks, a, " "); for (i = 1; i <= n; i++) drop[a[i]] = 1 } !($1 in drop)')"
+  # a decision put to the user and not yet ruled is owed by them as much as an item of the owed store is
+  owed="$(printf '%s\n' "$owed"; sitrep_open_decisions "$recdir/design-ledger.md")"
   # the schedule's bar half reads the one-file landings alone (lib/plan.sh), so a landing of many files moves it not
   lmed="$(plan_one_file_median "$plan" "$lr")"; lmed="${lmed%%	*}"
   appr_at="$(sitrep_approved_at "$plan")"
