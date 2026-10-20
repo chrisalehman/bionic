@@ -50,15 +50,15 @@ born_floor_backing() {
   case ",$BFB_OWED," in *",$suite,"*) BFB_OF=regression; return 0 ;; esac
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     h="$(git -C "$repo" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || continue
     git -C "$repo" merge-base --is-ancestor "$h" "$bh" 2>/dev/null || continue
     BFB_OF="standing@${h:0:12}"; return 0
   done <<BFB_STANDING
-$(awk -F'|' -v want="$suite" '
-    function fv(k,   i) { for (i = 3; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-    $1 == "line/v1" && $2 == "ev=standing" { s = fv("suite"); sub(/.*\//, "", s); if (s == want && fv("head") != "") h[++n] = fv("head") }
+$(awk -F'|' -v want="$suite" "${_LINE_FIELDS_AWK:-}"'
+    line_ev() == "standing" { s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv("head") != "") h[++n] = line_kv("head") }
     END { for (i = n; i >= 1; i--) print h[i] }' "$rec" 2>/dev/null)
 BFB_STANDING
   return 1
@@ -2791,7 +2791,7 @@ RR_DISP_EOF
 
     # APPROVALS: every name an open row reads, release and merge first, each not yet given.
     RR_NAMES=""
-    RR_INTO="$(rr_sdlc_value "$PV_PLAN" integration-branch)"
+    RR_INTO="$(plan_integration_branch "$PV_PLAN")"
     for nm in release merge $(units_approval_names "$PV_PLAN" 2>/dev/null); do
       [ "$nm" != plan ] || continue
       case " $RR_NAMES " in *" $nm "*) continue ;; esac
