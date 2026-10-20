@@ -257,11 +257,12 @@ handoff_render() {  # <composed> <section>
 # line of any other shape, a body line and a fenced example are not entries, so a ledger written before D24 reads as
 # having none. ONE PARSER: `decisions` prints it and the resume recap's settled: lines are
 # it, prefixed. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
-# parenthesis is `(untitled)`.
-decisions_list() {  # <ledger> -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
-  awk '
+# parenthesis is `(untitled)`. With `puts`, a put is an entry too, `D<n> · put · <who> <date> · <title>`: the line
+# `decisions put` writes, read only by the rounds count, never by the register.
+decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
+  awk -v puts="${2:-}" '
     function lead_verb(s,   i, n, vs, c) {  # the verb s opens with, followed by a space or a colon; "" when none
-      n = split("amended again|amended|re-ruled|ruled|ratified|final|withdrawn", vs, "|")
+      n = split("amended again|amended|re-ruled|ruled|ratified|final|withdrawn" (puts == "puts" ? "|put" : ""), vs, "|")
       for (i = 1; i <= n; i++) {
         if (index(s, vs[i]) != 1) continue
         c = substr(s, length(vs[i]) + 1, 1)
@@ -322,6 +323,83 @@ decisions_list() {  # <ledger> -> one line per entry: D<n> · "<reply>" · <who>
     index($0, "## Δ") == 1 { s = $0; sub(/^## Δ[0-9]+ — /, "", s); if (s != $0) entry(s); next }
     /^- D[0-9]+ / { entry(substr($0, 3)) }' "$1" 2>/dev/null
 }
+# ROUNDS. A put opens a round of its decision and the next ruling of the same number closes it; a second put before
+# the ruling is a second round; a ruling with no put open is a round of its own, as every ruling of a ledger written
+# before puts is. A decision is open while its last put has no ruling after it, withdrawn when its last ruling is.
+decisions_rounds() {  # <ledger> -> `D<n><TAB><rounds><TAB><ruled|withdrawn|open>` per decision, in order of first entry
+  decisions_list "$1" puts | awk -F' · ' '
+    { d = $1; if (!(d in r)) { o[++n] = d; r[d] = 0 } }
+    $2 == "put" { r[d]++; st[d] = "open"; next }
+    { if (st[d] != "open") r[d]++; st[d] = ($2 ~ /^([A-Za-z][A-Za-z0-9_-]* )?withdrawn( |$)/) ? "withdrawn" : "ruled" }
+    END { for (i = 1; i <= n; i++) printf "%s\t%d\t%s\n", o[i], r[o[i]], st[o[i]] }'
+}
+
+# sitrep_decisions <ledger> <record dir> -> the decisions indicator line. Each review results page the run put is a
+# round of the review results, ruled once the newest is replied. The mark is the most rounds any one decision took:
+# one within the bar, two near it, three or more over it; with nothing put or ruled, the no-record form.
+sitrep_decisions() {
+  local f rr=""
+  for f in "$2"/review-results-*.md; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    rr="$rr$(awk '
+      index($0, "review-results/v1|plan=") == 1 && match($0, /\|at=[^|]*/) { a = substr($0, RSTART + 4, RLENGTH - 4) }
+      index($0, "replied: ") == 1 { y = 1 }
+      END { printf "%s\t%s\n", a, y ? "ruled" : "open" }' "$f" 2>/dev/null)
+"
+  done
+  { [ -f "$1" ] && [ ! -L "$1" ] && decisions_rounds "$1"
+    [ -z "$rr" ] || printf '%s' "$rr" | awk -F'\t' 'NF { n++; if ($1 >= a) { a = $1; s = $2 } } END { if (n) printf "the review results\t%d\t%s\n", n, s }'
+  } | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v R="$SITREP_MARK_NEAR" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
+    function word(k,   w) { split("one two three four five six seven eight nine ten", w, " "); return (k >= 1 && k <= 10) ? w[k] : k }
+    function list(a, m,   i, s, c) {  # the first six, then how many more
+      c = (m > 6) ? 6 : m
+      for (i = 1; i <= c; i++) s = s ((i == 1) ? "" : ((i == c && m == c) ? " and " : ", ")) a[i]
+      return (m > c) ? s " and " (m - c) " more" : s }
+    NF >= 3 { n++; id[n] = $1; r[n] = $2 + 0; st[n] = $3; t += $2; if ($3 == "ruled") ok++; if ($2 + 0 > mx) mx = $2 + 0 }
+    END {
+      if (n == 0) { printf "3\t%s decisions — rounds not counted yet\n", N; exit }
+      for (k = 1; k <= mx; k++) {
+        m = 0; for (i = 1; i <= n; i++) if (r[i] == k) g[++m] = id[i]
+        if (m) gs = gs (gs == "" ? "" : ", ") list(g, m) " " word(k) (m > 1 ? " each" : "")
+      }
+      for (k = 1; k <= 2; k++) {
+        m = 0; for (i = 1; i <= n; i++) if (st[i] == (k == 1 ? "open" : "withdrawn")) g[++m] = id[i]
+        if (m) gs = gs "; " list(g, m) (k == 1 ? " open" : " withdrawn")
+      }
+      printf "3\t%s decisions — %d ruled in %d round%s; %s\n", (mx <= 1) ? W : ((mx == 2) ? R : O), ok, t, (t == 1) ? "" : "s", gs
+    }'
+}
+
+# sitrep_chain <plan> <units_rows output> -> `<ids, comma-joined><TAB><minutes>`: the longest chain of open tasks,
+# `units_chain`'s over `units_edges`, as wide as the plan has tasks
+sitrep_chain() {
+  { printf '%s\n' "$2" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
+      m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH); printf "N\t%s\t%d\n", $1, m }'
+    units_edges "$1" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
+  } | units_chain "$(printf '%s\n' "$2" | grep -c . | awk '{ print ($1 > 0) ? $1 : 1 }')" 2>/dev/null \
+    | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }'
+}
+
+# THE WAIT LINE: what changes if a decision is answered in an hour rather than now. The tasks that wait on it are the
+# pending ones whose reads name it as an approval, `approval:D<n>`; one of them on the longest open chain moves the
+# predicted close an hour, and off it they start an hour later while the close holds.
+decision_wait() {  # <plan> <D<n>> -> one sentence
+  local rows chain cids
+  rows="$(units_rows "$1" 2>/dev/null)"
+  if [ -z "$rows" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
+  chain="$(sitrep_chain "$1" "$rows")"; cids="${chain%%$'\t'*}"
+  printf '%s\n' "$rows" | awk -F'\t' -v k="approval:$2" -v c=",$cids," '
+    function list(a, m,   i, s) { for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m) ? " and " : ", ")) a[i]; return s }
+    { s = tolower($10); gsub(/[ \t]/, "", s) } s != "pending" { next }
+    { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x)
+        if (x == k) { if (index(c, "," $1 ",")) on[++a] = $1; else off[++b] = $1; break } } }
+    END {
+      if (a) { printf "Answered in an hour rather than now, the predicted close moves an hour later: %s %s on the longest chain and %s on it", list(on, a), (a > 1) ? "are" : "is", (a > 1) ? "wait" : "waits"
+               if (b) printf "; %s also %s on it", list(off, b), (b > 1) ? "wait" : "waits"; printf ".\n" }
+      else if (b) printf "Answered in an hour rather than now, %s %s an hour later and the predicted close holds: %s off the longest chain.\n", list(off, b), (b > 1) ? "start" : "starts", (b > 1) ? "they are" : "it is"
+      else printf "Answered now or in an hour, nothing moves: no task waits on it.\n" }'
+}
+
 # decisions_all <docs root> -> every run's entries, each line keyed `<wave> `, waves in slug order; a ledger with no
 # entry in the grammar is named once; every ADR (adrs/*/adr-*.md) follows its wave's entries, keyed by its
 # frontmatter `wave:` (its directory when it has none), as `ADR-<n> · <status> · <title>`.
@@ -468,8 +546,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # ratio, the marks, a red not yet answered by a green, the close.
 #
 # THE MARKS ENCODE DEVIATION FROM A TOLERANCE, never a work state: a measurement held against its bar is ✅ within
-# it, ➖ near it, ✖️ over it, or ❔ not measurable, and its line says the bar in words. The decisions line prints its
-# no-record form until a reader of rounds exists. The goals line is `sitrep_goals`'.
+# it, ➖ near it, ✖️ over it, or ❔ not measurable, and its line says the bar in words. The decisions line is
+# `sitrep_decisions`', the goals line `sitrep_goals`'.
 #
 # THE CLOSE: now + max(the longest open chain, all open work ÷ the admitted count) × the measured pace, so admitting
 # more can shorten the work's share and never one chain. The pace is this run's median landing over its median
@@ -952,10 +1030,7 @@ SITREP_SIT
   nodes="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
              m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH); printf "N\t%s\t%d\n", $1, m }')"
   work="$(printf '%s\n' "$nodes" | awk -F'\t' '$1 == "N" { s += $3 } END { print s + 0 }')"
-  chain="$( { printf '%s\n' "$nodes"
-              units_edges "$plan" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
-            } | units_chain "$(printf '%s\n' "$rows" | grep -c . | awk '{ print ($1 > 0) ? $1 : 1 }')" 2>/dev/null \
-            | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }')"
+  chain="$(sitrep_chain "$plan" "$rows")"
   cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
   admitted="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
   case "$admitted" in ''|*[!0-9]*) admitted=0 ;; esac
@@ -1101,7 +1176,8 @@ SITREP_OWED
 $sit
 SITREP_SIT
     printf '0\t\n0\t%s\n' "$gh"
-    printf '3\t%s\n' "$s_text" "$c_text" "$w_text" "$SITREP_MARK_NONE decisions — rounds not counted yet"
+    printf '3\t%s\n' "$s_text" "$c_text" "$w_text"
+    sitrep_decisions "$recdir/design-ledger.md" "$recdir"
     sitrep_goals "$plan" "$rec" "$lr"
     [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
     printf '0\t\n0\tBlocked on you\n'
@@ -1657,9 +1733,43 @@ sitrep_grade() {
     case "$LR_TEXT" in *$'\n'*) printf '%s\n' "${LR_TEXT#*$'\n'}" ;; esac
     exit 0
   }
+  # THE PUT. A decision put during a run is one ledger entry before it is shown, `## Δ<k> — D<n> put (orchestrator
+  # <date> <time>): <title>`, Δ one past the ledger's highest, its body the wait line; the ledger is begun when the run
+  # has none. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
+  # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line, a ledger that
+  # is a symlink.
+  decisions_put() {  # <plan> <ledger> <D<n>> <title>
+    local plan="$1" led="$2" d="$3" title="$4" wait k at r
+    case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
+    if [ -z "$d" ]; then
+      die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
+      exit 1
+    fi
+    case "$title" in ''|*$'\n'*) die "REFUSED — the title is one line saying what is decided; nothing is written."; exit 1 ;; esac
+    if [ -L "$led" ]; then
+      die "REFUSED — ${led#"$REPO_REAL"/} is a symlink; nothing is written."
+      exit 1
+    fi
+    wait="$(decision_wait "$plan" "$d")"
+    k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
+    at="$(date '+%Y-%m-%d %-I:%M %p %Z')"
+    mkdir -p "${led%/*}" 2>/dev/null
+    { if [ -f "$led" ]; then cat "$led"; else printf '# Design ledger — %s\n' "$(proof_plan_slug "$plan")"; fi
+      printf '\n## Δ%s — %s put (orchestrator %s): %s\n\n%s\n' "$k" "$d" "$at" "$title" "$wait"
+    } > "$led.new.$$" 2>/dev/null && mv -f "$led.new.$$" "$led" 2>/dev/null || {
+      rm -f "$led.new.$$" 2>/dev/null
+      die "REFUSED — ${led#"$REPO_REAL"/} cannot be written; nothing is written."
+      exit 1
+    }
+    r="$(decisions_rounds "$led" | awk -F'\t' -v d="$d" '$1 == d { print $2 }')"
+    printf 'put: %s · round %s · %s\n' "$d" "${r:-1}" "$title"
+    printf 'wait: %s\n' "$wait"
+    exit 0
+  }
+
   # THE REGISTER (wave-38 T13; D24, AC-3.4). Read-only. `decisions` is the bound run's ledger through `decisions_list`;
   # `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1 in one line
-  # naming the path when the run's ledger is absent; 2 when there is no run to read.
+  # naming the path when the run's ledger is absent; 2 when there is no run to read. `decisions put` is the one writer.
   poker_verb_decisions() {
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -1689,6 +1799,7 @@ sitrep_grade() {
       exit 2
     fi
     DC_LEDGER="$DC_DOCS/record/$(proof_plan_slug "$DC_PLAN")/design-ledger.md"
+    [ -z "${DC_PUT:-}" ] || decisions_put "$DC_PLAN" "$DC_LEDGER" "$DC_PUT" "${DC_TITLE:-}"
     if [ ! -f "$DC_LEDGER" ] || [ -L "$DC_LEDGER" ]; then
       say "no design ledger at ${DC_LEDGER#"$REPO_REAL"/} — this run has recorded no ruling"
       exit 1
