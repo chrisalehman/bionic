@@ -13,30 +13,6 @@ set -euo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/canonical-sdlc-evidence-gate.prelude.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: adopt, arm, current, fill-report, interval, interval-
-# default, landing-report, window. Each line below is that closure: the library (every run executes it), the
-# arm of each verb, the sections defining the globals they read, and each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the plan transaction"
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn iso_epoch
-reads hooks/session-poker.sh fn iso_now
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn sched_facts_state
-reads hooks/session-poker.sh fn session_transcript
-reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
@@ -927,6 +903,12 @@ expect_eq "FX-3 AC-6.2 the fix row green on its own suite and the red one: the h
 od_poke regression-run
 expect_eq "FX-4 AC-6.2 …and no second whole run is asked: regression-run at C refuses (exit 1), no log" "1|2" "$OD_RC|$(od_logs)"
 expect_contains "FX-4b …saying the head is proved" "is already proved" "$OD_OUT"
+od_git checkout -q -b row/T7; printf 'three\n' > "$OD/lib/b.sh"; od_git commit -qam 'T7: a second fix'; OD_R="$(od_git rev-parse HEAD)"
+od_git checkout -q wave/01-fixture; od_git merge -q --no-ff -m 'land T7 by hand' row/T7; OD_M="$(od_git rev-parse HEAD)"
+OD_S3="$(od_state)"
+expect_true "HL-1 a hand landing M with no verdict recorded is not covered (HL-2 reads the same extractor)" test -n "$OD_S3" -a "$OD_S3" != covered
+printf 'line/v1|ev=verdict|row=T7|commit=%s|suite=b.test.sh|result=green|log=/fixture/T7.log|at=2026-10-12T12:20:00Z\n' "$OD_R" >> "$(od_lrec)"
+expect_eq "HL-2 AC-6.2 …and covered by the row's green verdict keyed by the row head M brought in" "covered" "$(od_state)"
 
 printf '# fixture\n' > "$OD/README.md"; od_git add README.md; od_git commit -qm 'T4: the release'; OD_A="$(od_git rev-parse HEAD)"
 od_reads() {  # the five readings a double wave plan is dealt, at A

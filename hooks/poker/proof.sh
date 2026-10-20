@@ -1403,10 +1403,10 @@ DSP_READINGS
       die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
     fi
     # THE REGRESSION'S FACTS (wave-39 T24; D9; ADR-061): a clean whole run folds into one verdict per suite at its head,
-    # each keyed by what it read (lib/proof.sh `proof_regression_fold`), so the owed set and a later landing read it as
-    # any verdict. A run the gate never admitted returned above; a dirty run proves no commit and folds nothing.
+    # each keyed by the commit it ran at (lib/proof.sh `proof_regression_fold`). A run the gate never admitted returned
+    # above; a dirty run proves no commit and folds nothing.
     if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -eq 0 ] && ! proof_regression_fold "$PV_PLAN" "$FR_CO" "$FR_HEAD" "$FR_LOG" "$FR_REL" 2>/dev/null; then
-      say "regression-run — this run's per-suite facts could not be written to the plan's landing record; the owed set derives each suite's key at ${FR_HEAD:0:12} instead."
+      say "regression-run — this run's per-suite facts could not be written to the plan's landing record; the judge reads the run's proof line at ${FR_HEAD:0:12} alone."
     fi
     if [ -n "$FR_WHOLE" ]; then
       FR_VERDICT="$(/usr/bin/grep '^Gating: ' "$FR_TMP" 2>/dev/null | tail -n 1)"

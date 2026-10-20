@@ -20,12 +20,9 @@
 #   ready     row name commit branch tree suites debt carrier age   (a carrier is `<pid>:<start>`; age
 #             `<first>:<seq>`, the lease the gate orders the entry by, wave-38 T30)
 #   candidate row base commit tree
-#   verdict   row commit suite result log admitted width reads   (green | red | none | discarded | absent: a
-#             suite the candidate's base holds and the candidate does not, log `-`, wave-39 T6, A-orch-5; reads=
-#             the suite's read key at the commit, lib/anchors.sh `reads_hash`, wave-39 T1)
-#   reused    row commit suite reads from      (the suite proved on this candidate by the verdict of `from`, an
-#             earlier candidate whose suite read the same blobs; the fold reads it as green; wave-39 T1, D5)
-#             [head]   (a skip: the key is also the suite's key at the accepted head `head`; wave-39 T4, D6)
+#   verdict   row commit suite result log admitted width   (green | red | none | discarded | absent: a
+#             suite the candidate's base holds and the candidate does not, log `-`); a
+#             verdict is keyed by the commit it ran at and nothing else
 #   standing  head suite lines log cause against   (cause: environment | code; against: the run that
 #             disagrees, `<stamp|verdict>:<commit>@<at>`, or `-`; wave-33 T2, AC-7.2)
 #   returned  row why detail                   (red | conflict | guard)
@@ -191,9 +188,6 @@ _line_fold() {  # <record>
       } else if (ev == "verdict") {
         e = cur[row]; if (e == "" || !open[e]) next
         v[e, line_kv("commit"), line_kv("suite")] = line_kv("result")
-      } else if (ev == "reused") {
-        e = cur[row]; if (e == "" || !open[e]) next
-        v[e, line_kv("commit"), line_kv("suite")] = "green"
       } else if (ev == "stalled") {
         e = cur[row]; if (e != "" && open[e]) stl[e] = 1
       } else if (ev == "published" || ev == "returned") {
@@ -674,7 +668,7 @@ _line_suites() {  # <lands_on value> -> `a.test.sh,d/b.test.sh` | none; 1 when a
 # command the brief declared under Re-executes: (the dispatch wall held it to them). `_line_suites` keeps it as it
 # is; ready runs it in the landing tree (`_line_runner`, suite.sh `bionic_command_start`) and judges it by its exit
 # code (`_line_verdict`); its red is the row's (`_line_red_owner`). Where a suite is named by its file name, it is
-# named so (`_line_gate_key`, `_line_suite_log`, `_line_reads_fill`).
+# named so (`_line_gate_key`, `_line_suite_log`).
 # The key the gate keeps an entry's cost under: a suite's file name; a command's text as booked.sh keys a command
 # run (`booked_one_line`, its first 60 characters), so a landing and the writer's own run share one history.
 _line_gate_key() {  # <lands_on entry> -> its gate key
@@ -999,12 +993,11 @@ _line_lease_end() {  # <the carrier's exit status>
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
-  local c rc s said anchored="" linted="" counted="" nrun nall
+  local c rc s said anchored="" linted=""
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
   _LINE_LEASED=""   # set once this carrier holds the landing's lease (`_line_enter`)
-  _LINE_RH_SUITES="$suites"   # the suites whose read keys are derived together, once per commit (`_line_reads_fill`)
   trap '_line_lease_end "$?"; [ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
   _line_me
   _line_enter "$plan" "$rec" "$row" "$deadline" "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
@@ -1093,29 +1086,16 @@ EOF
     # with both logs.
     _LINE_REPASS=""
     _line_drain_init
-    nrun=0; nall=0
     for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
       [ "$s" != none ] || break
-      nall=$((nall + 1))
-      # THE REUSE TEST (wave-39 T1; D5): a verdict whose suite read what this candidate's reads proves it, whichever
-      # candidate it ran on; one from another candidate is recorded and printed as reused, and nothing starts.
-      _line_reads_fill "$root" "$cand" "$s"
-      if c="$(_line_proved "$rec" "$s" "reads=$(_line_reads_of "$cand" "$s")")"; then
-        # THE SKIP (wave-39 T4; D5, D6): the suite's key here equal to its key at the accepted head, where that
-        # green stands, is the head's green carried; ready prints `skip`, not `reused`. One already proved on this
-        # very candidate ran here, and counts as run.
-        if [ "$c" = "$cand" ]; then nrun=$((nrun + 1)); continue; fi
-        _line_reads_fill "$root" "$head" "$s"
-        _line_reused "$plan" "$rec" "$row" "$cand" "$s" "reads=$(_line_reads_of "$cand" "$s")" "$c" \
-          "$head" "reads=$(_line_reads_of "$head" "$s")"
-        continue
-      fi
+      # EVERY NAMED SUITE RUNS ON THE CANDIDATE: only its own green verdict at this very commit stands for it.
+      ! _line_proved "$rec" "$s" "$cand" >/dev/null || continue
       # A SUITE THE ROW REMOVED IS NOT OWED (wave-39 T6; A-orch-5): a row that removes or splits a suite still
       # names it on the Lands-on its brief gave, and a runner could only fail to start it (two `none`s stall the
       # entry). Held by the candidate's base and not by the candidate, it is recorded once, `absent` with no log,
       # and counts as proved; nothing runs for it. A name the base lacks too still stalls (wave-34 T27).
       if _line_removed "$root" "$cbase" "$cand" "$s"; then
-        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; nall=$((nall - 1)); continue
+        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; continue
       fi
       said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
@@ -1123,13 +1103,8 @@ EOF
         line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
         printf 'STALLED %s %s\n' "$row" "$said"; return 70
       fi
-      nrun=$((nrun + 1))
       _line_drain_add "$s"
     done
-    # SUITES <N> OF <M> (wave-39 T4; AC-2.4): once per candidate, when it runs fewer than its suites, how many of the
-    # Lands-on suites it holds this candidate runs (now or earlier); the rest were skipped or reused. A landing that
-    # runs them all prints nothing here, so its outcome stays the first line ready prints.
-    if [ "$counted" != "$cand" ] && [ "$nrun" -lt "$nall" ]; then printf 'suites %s of %s\n' "$nrun" "$nall"; counted="$cand"; fi
     if [ "$_LINE_DN" -gt 0 ]; then
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
       # ONE TREE PER CANDIDATE, POINTED ONCE (D3): every run of the pass starts from the candidate, clean, in
@@ -1211,9 +1186,9 @@ _line_anchors() {  # <root> <commit>
   anchors_check "$1" "$2"
 }
 _line_load_anchors() {
-  declare -F reads_hashes >/dev/null 2>&1 && return 0
+  declare -F anchors_check >/dev/null 2>&1 && return 0
   # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/anchors.sh" ] && . "$_LINE_LIB_DIR/anchors.sh" && declare -F reads_hashes >/dev/null 2>&1
+  [ -r "$_LINE_LIB_DIR/anchors.sh" ] && . "$_LINE_LIB_DIR/anchors.sh" && declare -F anchors_check >/dev/null 2>&1
 }
 
 # THE COMMENT LINT. A comment says what the code does and why; where its history lives belongs to the record. The
@@ -1363,52 +1338,8 @@ _line_comment_lint() {  # <root> <base> <candidate> -> `<file>:<line> <shapes>` 
   return 1
 }
 
-# THE PROOF FACT'S KEY (wave-39 T1; D5, D8; ADR-061): a verdict is keyed by what its suite read at the commit
-# judged, `reads=<lib/anchors.sh reads_hash>`, never by the commit. The key is anchors.sh's, narrowed where the
-# suite declares (wave-39 T40): line.sh derives none of its own, so the landing, the owed set and the regression
-# facts read one key space. _LINE_RH remembers the keys this carrier has
-# read, `<commit> TAB <suite> TAB <key>` per line; _LINE_RH_SUITES names the suites to read with any one asked
-# (the entry's), so a commit's read set is derived once. Fill it in the carrier's own shell, never inside
-# `$( )`, where what it remembers would be lost; read it anywhere.
-_LINE_RH=""; _LINE_RH_SUITES=""
-# A LANDS-ON COMMAND'S KEY (wave-39 T20; D20): a command reads what its row's suites do, and no index says which; it
 # is keyed by the commit's tree, `tree:<id>` (anchors.sh's key for a set it cannot derive), unless it names a suite
 # file, whose key it then takes.
-_line_reads_fill() {  # <root> <commit> <suite>
-  local want s got ask="" q c k tree=""
-  _line_reads_of "$2" "$3" >/dev/null && return 0
-  want="$3"
-  for s in $(printf '%s\n' "$_LINE_RH_SUITES" | tr ',' ' '); do
-    [ "$s" = none ] || [ "$s" = "$3" ] || _line_reads_of "$2" "$s" >/dev/null || want="$want $s"
-  done
-  for s in $want; do
-    q="$s"; ! c="$(bionic_lands_cmd "$s")" || q="$(_line_cmd_suite "$c")"
-    [ -z "$q" ] || ask="$ask $q"
-  done
-  got=""
-  if [ -n "$1" ] && [ -n "$ask" ] && _line_load_anchors; then
-    # shellcheck disable=SC2086
-    got="$(reads_hashes "$1" "$2" $ask 2>/dev/null)"
-  fi
-  for s in $want; do
-    q="$s"; ! c="$(bionic_lands_cmd "$s")" || q="$(_line_cmd_suite "$c")"
-    if [ -z "$q" ]; then
-      [ -n "$tree" ] || [ -z "$1" ] || tree="$(git -C "$1" rev-parse --verify -q "${2}^{tree}" 2>/dev/null)"
-      k=-; [ -z "$tree" ] || k="tree:${tree}"
-    else
-      k="$(printf '%s\n' "$got" | awk -F'\t' -v s="$q" '$1 == s && $2 != "" { k = $2 } END { print (k == "" ? "-" : k) }')"
-    fi
-    _LINE_RH="${_LINE_RH}${2}	${s}	${k}
-"
-  done
-}
-_line_reads_of() {  # <commit> <suite> -> its key as remembered; 1 when none is
-  printf '%s' "$_LINE_RH" | awk -F'\t' -v c="$1" -v s="$2" '$1 == c && $2 == s { k = $3 } END { if (k == "") exit 1; print k }'
-}
-_line_reads() {  # <root> <commit> <suite> -> the key, `-` when it cannot be read (then nothing ever matches it)
-  _line_reads_fill "$@"
-  _line_reads_of "$2" "$3" || echo -
-}
 
 # An entry other than <row> still in line, present and not stalled, whose candidate is <candidate>:
 # the one a conflicting row waits on (A-orch-51). <entries> is `_line_entries`'s output.
@@ -1429,33 +1360,14 @@ _line_closed() {  # <rec> <row> <name> [<plan>]
   printf '%s\n' "${last:-RETURNED ${2}}"; return 1
 }
 
-# THE REUSE TEST (wave-39 T1; D5, ADR-061): <suite> is proved by the record's latest green or red verdict for it
-# whose read key is <key> (`reads=<h>`), on any candidate, of any row; it prints that verdict's commit. Never by
-# commit: a rebuilt or re-ordered candidate whose suite read the same blobs keeps the verdict. A verdict with no
-# reads= (one written before this release) and the unreadable key `reads=-` match nothing; a `none` or
-# `discarded` verdict says nothing about the content and is passed over. An `absent` one (the row removed the
-# suite; wave-39 T6) proves it, as a green does.
-_line_proved() {  # <rec> <suite> <key> -> the proving verdict's commit
-  case "$3" in ''|*=|*=-) return 1 ;; esac
-  awk -F'|' -v s="suite=$2" -v k="$3" '
-    $2 == "ev=verdict" && $5 == s && ($6 == "result=green" || $6 == "result=red" || $6 == "result=absent") {
-      for (i = 4; i <= NF; i++) if ($i == k) { ok = ($6 != "result=red"); c = substr($4, 8) }
-    }
-    END { if (!ok) exit 1; print c }' "$1" 2>/dev/null
-}
-# A suite proved by another candidate's verdict, once per candidate: the record's `reused` line, which the fold
-# reads as green on this one, and the line ready prints. A SKIP (wave-39 T4; D5, D6) is the case where the key is
-# also the suite's key at the accepted head: the line names that head (`head=`, after from=, so a positional reader
-# reads it as before) and ready prints `skip <suite> reads=<h> (head)`.
-_line_reused() {  # <plan> <rec> <row> <candidate> <suite> <reads key> <proving commit> [<accepted head> <its reads key>]
-  awk -F'|' -v r="row=$3" -v c="commit=$4" -v s="suite=$5" '$2 == "ev=reused" && $3 == r && $4 == c && $5 == s { f = 1 } END { exit !f }' "$2" 2>/dev/null \
-    && return 0
-  if [ -n "${8:-}" ] && [ "${9:-}" = "$6" ]; then
-    line_event "$1" reused "row=$3" "commit=$4" "suite=$5" "$6" "from=$7" "head=$8" >/dev/null
-    printf 'skip %s %s (head)\n' "$5" "$6"; return 0
-  fi
-  line_event "$1" reused "row=$3" "commit=$4" "suite=$5" "$6" "from=$7" >/dev/null
-  printf 'reused %s %s\n' "$5" "$6"
+# THE VERDICT AT A COMMIT: <suite> is proved at <commit> when the record's latest green, red or absent verdict for it
+# at that commit, of any row, is not red (`absent`: the row removed the suite). It prints the commit.
+# A verdict is keyed by the commit it ran at: an argument that is not a commit id proves nothing.
+_line_proved() {  # <rec> <suite> <commit> -> the commit, when proved
+  case "$3" in ''|*[!0-9a-f]*) return 1 ;; esac
+  awk -F'|' -v s="suite=$2" -v c="commit=$3" '
+    $2 == "ev=verdict" && $4 == c && $5 == s && ($6 == "result=green" || $6 == "result=red" || $6 == "result=absent") { ok = ($6 != "result=red") }
+    END { if (!ok) exit 1; print substr(c, 8) }' "$1" 2>/dev/null
 }
 
 # The logs of the `none` verdicts for <suite> on <candidate> since the entry was last published, returned
@@ -1837,19 +1749,17 @@ _line_room_one() {  # <plan> <rec> <row> <cbase> <deadline>
   done
 }
 # THE VERDICT LINE, the one writer of every verdict a landing writes (on the candidate and at the head):
-# `line/v1|ev=verdict|row=|commit=|suite=|result=|log=|admitted=<epoch|->|width=<J>|reads=|promised=|actual=|at=`. The readers that
+# `line/v1|ev=verdict|row=|commit=|suite=|result=|log=|admitted=<epoch|->|width=<J>|promised=|actual=|at=`. The readers that
 # read by position (`_line_proved`, `_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`)
 # read $2..$7, so a field added to it goes after `log=`. admitted= is the gate's admission instant for the run
 # the verdict judges (wave-38 T6; AC-6.4), `-` when none is on record; width= the width the gate gave the
 # landing when that run started (`_line_ask`).
-# reads= (wave-39 T1; D5, D8) is the suite's read key at <commit>, `_line_reads`; the reuse test matches on it.
-# promised= and actual= (wave-39 T8; D11, AC-4.2) go after reads=: the seconds the gate promised the run at its
+# promised= and actual= go after width=: the seconds the gate promised the run at its
 # admission (its request's promise=) and the gate's own measure of it (ended less admitted), `-` for a run never
 # admitted, a run stopped before it ended, and a verdict no run wrote (absent).
 _line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log> [<admitted epoch>] [<promised s>] [<actual s>]
-  _line_reads_fill "$(_line_root "$1")" "$3" "$4"
   line_event "$1" verdict "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:-1}" \
-    "reads=$(_line_reads_of "$3" "$4" || echo -)" "promised=${8:--}" "actual=${9:--}"
+    "promised=${8:--}" "actual=${9:--}"
 }
 # THE PASS'S SUITES, in the order named. For each: its suite (_LINE_DS), its runner's pid (_LINE_DP: empty
 # until started, `-` for a red judged from its log), result file (_LINE_DR), log (_LINE_DL) and the width it
