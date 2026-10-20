@@ -2402,7 +2402,7 @@ BRF_EOF
   #
   #   Review results · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
   #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
-  #   Goals         each goal the plan declares, its mark and its reading, reached ones included
+  #   Goals         each goal the plan's `goals:` line declares, ❔ until a reader of it exists
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
