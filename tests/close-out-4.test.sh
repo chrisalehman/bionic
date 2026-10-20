@@ -530,6 +530,24 @@ expect_eq "OW-4 the handoff verb on the pull-request plan exits 0" "0" "$OW_RC"
 expect_nonempty "OW-4c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-pr")"
 expect_eq "OW-4d the verb's closed lines are close-out's" "$(ow_lines "$SANDBOX/ow-copy-pr")" "$(ow_lines "$OW_FILE")"
 
+# OW-5: a handoff file of the old shape (the kind line, then lines of facts and five human lines) is carried into the
+# closed document, not overwritten: each human line's words land under a section, the facts under State.
+ow_sec_of() {  # <file> <words> -> the section heading that holds the first line carrying the words
+  awk -v s="$HANDOFF_SECTIONS" -v w="$2" 'BEGIN { n = split(s, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1 } ($0 in H) { cur = $0; next } index($0, w) { print cur; exit }' "$1"
+}
+OWO="$(mk_task_pr_fixture ow-old "fix/x")"
+printf 'archive-on-close: false\n' >> "$OWO/.bionic/config.yaml"
+OWO_FILE="$(handoff_default_of "$OWO/$PLAN_REL" "$OWO")"
+mkdir -p "${OWO_FILE%/*}"
+printf '%s\n' "bionic-handoff/v1" "sitrep head: Bottom line" "- You owe nothing now." "written: 2026-01-01T00:00:00Z" \
+  "step: 4" "open rows (1):" "  - T9 · w-T9 · .worktrees/T9 · active" \
+  "mid-flight: zebra row is halfway" "order: quince goes first" "rulings: D99 mango stays" \
+  "lessons: ferret waits for the gate" "risks: walnut will conflict" "/bionic:canonical-sdlc old/path.md" > "$OWO_FILE"
+run_close "$OWO" run
+expect_eq "OW-5 close-out carries an old-shape handoff file: the human lines under their sections, the facts under State" \
+  "0|Open|Next|Decisions|Findings|Open|State|State|State" \
+  "$CO_RC|$(ow_sec_of "$OWO_FILE" zebra)|$(ow_sec_of "$OWO_FILE" quince)|$(ow_sec_of "$OWO_FILE" mango)|$(ow_sec_of "$OWO_FILE" ferret)|$(ow_sec_of "$OWO_FILE" walnut)|$(ow_sec_of "$OWO_FILE" 'step: 4')|$(ow_sec_of "$OWO_FILE" 'w-T9')|$(ow_sec_of "$OWO_FILE" 'Bottom line')"
+
 # ============================================================
 section "§TOLERANT — wave-38 T15 (REQ-4 AC-4.4): a prose line in the debt ledger is skipped with a note; a missing epic table is added"
 # ============================================================
