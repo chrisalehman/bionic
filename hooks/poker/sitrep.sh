@@ -1013,13 +1013,16 @@ SITREP_SIT
   c_text="$c_mark correctness — $c_reds; $c_find"
   # Waste: discarded runs over runs (landing_report's counts), idle-width minutes (fill-report's) over the
   # minutes the fill ledger spans (its first line to now while the run is open, else to its last line).
-  local rg rr rn rd w_disc w_idle
+  local rg rr rn rd rk w_disc w_idle
   case "$lr1" in
     *'· runs: green='*)
       rg="${lr1#*runs: green=}"; rg="${rg%% *}"; rr="${lr1#* red=}"; rr="${rr%% *}"
       rn="${lr1#* none=}"; rn="${rn%% *}"; rd="${lr1#* discarded=}"; rd="${rd%% *}" ;;
     *) rg=0 rr=0 rn=0 rd=0 ;;
   esac
+  # a run killed at the gate (rc over 128) is a wasted run, so the report's killed count is discarded too
+  rk="${lr1##*killed=}"; case "$rk" in ''|*[!0-9]*) rk=0 ;; esac
+  rd=$((rd + rk))
   d_pct="$(awk -v g="$rg" -v r="$rr" -v n="$rn" -v d="$rd" 'BEGIN { t = g + r + n + d; printf "%.4f\n", (t > 0) ? d * 100 / t : 0 }')"
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   elapsed="$(awk -v now="$now" -v open="$(run_open "$plan" && echo yes)" "$_PATROL_ISO_AWK"'

@@ -408,7 +408,7 @@ sr_run "$SR_PLAN"
 # A run killed at the gate (rc 137) is a wasted run: the landing report's killed count reads as discarded.
 sr_world marks-killed "6 6 12 12"
 printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T9\ntree=%s/.worktrees/02-T9\nasked=%d\nholder=-\nadmitted=%d\nended=%d\nrc=137\npromise=5:0.1:30\n' \
-  "$SID" "$SR_REPO" "$((SR_NOW - 600))" "$((SR_NOW - 590))" "$((SR_NOW - 300))" > "$SR_GATE/requests/3"
+  "$SID" "$(cd "$SR_REPO" && pwd -P)" "$((SR_NOW - 600))" "$((SR_NOW - 590))" "$((SR_NOW - 300))" > "$SR_GATE/requests/3"
 sr_run "$SR_PLAN"
 expect_eq "M4 a killed run counts as discarded on the waste line" "yes" \
   "$(sr_ind waste | /usr/bin/grep -qE 'waste — ([0-9]+%|under 1%) of suite runs discarded' && echo yes)"
