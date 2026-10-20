@@ -837,7 +837,7 @@ expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STA
 # MUTANT: the count reset at every ready, as before. Each call starts from nothing, and the stall never fires.
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-stm"
 RSM="$(ll_stall_world stm)"
-anchor fn payload/scripts/lib/line.sh '$2 == "ev=stalled"' _line_none_logs '$2 == "ev=ready"'
+anchor fn payload/scripts/lib/line.sh 'e == "stalled"' _line_none_logs 'e == "ready"'
 STM=""
 for w in 500 900 900; do
   rm -f "$WORLD_ROOT/stm.out.rc"
