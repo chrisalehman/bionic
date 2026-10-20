@@ -144,8 +144,7 @@ declarations and the reach by file are not. D5's suite count and D12's reach by 
 On the user's word, "we do not need to do excessive proving of every suite. That is the entire point of this wave.
 Land these by hand", a writer ran only the suites that pin its own change, RED then GREEN, and the orchestrator landed
 the tree by hand on the report. The landing report below counts thirty-eight rows landed by hand and three through
-the line. The whole regression
-after the build is the proof for everything else (D16).
+the line. The whole regression after the build is the proof for everything else (D16).
 
 ### The readings
 
