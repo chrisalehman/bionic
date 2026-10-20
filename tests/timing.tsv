@@ -35,6 +35,7 @@ dispatch-preflight-4b.test.sh	265
 dispatch-preflight.test.sh	185
 doctor-fleet.test.sh	72
 doctor-patrol.test.sh	72
+doctor-reads.test.sh	139
 doctor-restart.test.sh	43
 doctor-version.test.sh	68
 doctor-walls.test.sh	38
@@ -60,6 +61,7 @@ landing-line-1.test.sh	438
 landing-line-2.test.sh	301
 live-agents.test.sh	7
 loader.test.sh	1
+name-scan.test.sh	230
 notify.test.sh	72
 patrol-duties-gate.test.sh	185
 patrol-marker.test.sh	1
