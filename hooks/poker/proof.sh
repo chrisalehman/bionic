@@ -1030,6 +1030,7 @@ FM_FINDING
     fi
     DSP_DOCS="$(docs_root "$PV_REPO")"
     DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")"
+    DSP_REC="$(proof_debt_record "$PV_PLAN" "$PV_REPO")" || DSP_REC=""
     DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
     DSP_READS="$(awk "$(proof_awk)"'
       /^[[:space:]]*```/ { fence = !fence; next }
@@ -1067,7 +1068,14 @@ FM_FINDING
           *$'\n'"$DSP_FID"$'\n'*)
             DSP_STATE=fixed
             DSP_FROW="$(printf '%s\n' "$DSP_FIXED" | awk -F'\t' -v id="$DSP_FID" '$1 == id { print $2 "\t" $3; exit }')"
-            DSP_DEC="none: fixed by ${DSP_FROW%%	*}, landed green at $(printf '%.12s' "${DSP_FROW#*	}")" ;;
+            DSP_DEC="none: fixed by ${DSP_FROW%%	*}, landed green at $(printf '%.12s' "${DSP_FROW#*	}")"
+            # A landing no green verdict names is fixed by the first green whole run that descends from it.
+            if ! { [ -f "$DSP_REC" ] && /usr/bin/grep -F "|row=${DSP_FROW%%	*}|commit=${DSP_FROW#*	}|" "$DSP_REC" | /usr/bin/grep -qF "|result=green|"; }; then
+              for DSP_RH in $(_proof_regression_heads "$PV_PLAN" "$DSP_REC"); do
+                git -C "$PV_REPO" merge-base --is-ancestor "${DSP_FROW#*	}" "$DSP_RH" 2>/dev/null || continue
+                DSP_DEC="none: ${DSP_FROW%%	*} landed on no suite; fixed by the regression at $(printf '%.12s' "$DSP_RH")"; break
+              done
+            fi ;;
           *)
             case "$DSP_P" in
               fix)
