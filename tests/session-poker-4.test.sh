@@ -962,7 +962,7 @@ section "§REPLY-SEQ: one reply orders the review results' decisions in sequence
 # ============================================================
 # FIXTURE FIDELITY. §STEP-FIELD's plan at its working head, its reading's record given one S3 finding; the page's
 # record carries the replay table in its writer's row shape (review-results.test.sh §SHAPE pins that row). Decision 1's
-# default names a row the plan lacks, so taking it refuses; 2 waives AC-1.1; 3 moves the finding. The user's words
+# default names a row the plan lacks, so taking it refuses; 2 waives the plan's one matrix row; 3 moves the finding. The user's words
 # stand in a transcript of this session under a config dir of this section's own.
 RS_H="$(git -C "$RVG" rev-parse wave/01-fixture)"; RS_F="record/wave-01-fixture/past-waiver.md#1"; RS_P="$VG_DIR/review-results-${RS_H:0:8}.md"
 printf 'findings: 1\nfinding: 1 S3 off lib/a.sh:1 a side path\n' >> "$VG_DIR/past-waiver.md"
