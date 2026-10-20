@@ -125,7 +125,8 @@ declarations and the reach by file are not. D5's suite count and D12's reach by 
 ### Durable records have a tracked home (D1)
 
 - T28 (`T28-promote.md`): `docs-tracked:` and the promote verb. ADR-056 is amended as ADR-062 requires.
-- T38 (`T38-release.md`): ADR-056, ADR-063 and ADR-064 are promoted to docs/adrs/.
+- T38 (`T38-release.md`): ADR-056, ADR-062, ADR-063 and ADR-064 are promoted to docs/adrs/. ADR-063 and ADR-064
+  are accepted at this release, ADR-063 amended by ADR-065. ADR-061 is superseded by ADR-065, which stays Proposed.
 
 ### Wave 39's leftovers (D3)
 

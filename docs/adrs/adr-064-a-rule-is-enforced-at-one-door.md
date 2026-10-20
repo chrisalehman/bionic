@@ -15,14 +15,14 @@ deploy_target: n/a
 cleanup_on_finish: true
 use_worktree: false
 model_plan: orchestrator=claude-fable-5-1; implementor=sonnet-high; senior-implementor=opus-high; researcher=opus-high; test-runner=haiku-high; auditor=opus-high; critic=opus-high
-status: Proposed (Step 2, 2026-10-19)
+status: Accepted (Step 7, 2026-10-20, 1.23.0)
 created: 2026-10-19
 ---
 # ADR-064 — A rule about what a writer does is enforced at one door, and an instruction is the user's words
 
 ## Status
 
-**Proposed** (Step 2, 2026-10-19). On Chris Lehman's rulings D3 (Δ5, Δ6), D4 and D13.
+**Accepted** (Step 7, 2026-10-20, 1.23.0). Proposed at Step 2, 2026-10-19. On Chris Lehman's rulings D3 (Δ5, Δ6), D4 and D13.
 
 ## Context
 

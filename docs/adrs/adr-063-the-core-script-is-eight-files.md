@@ -15,14 +15,16 @@ deploy_target: n/a
 cleanup_on_finish: true
 use_worktree: false
 model_plan: orchestrator=claude-fable-5-1; implementor=sonnet-high; senior-implementor=opus-high; researcher=opus-high; test-runner=haiku-high; auditor=opus-high; critic=opus-high
-status: Proposed (Step 2, 2026-10-19)
+status: Accepted (Step 7, 2026-10-20, 1.23.0)
 created: 2026-10-19
 ---
 # ADR-063 — The core script is eight files, cut by function, and a test reads a file
 
 ## Status
 
-**Proposed** (Step 2, 2026-10-19). On Chris Lehman's rulings D11 "1", D12 "1" and D5 "1".
+**Accepted** (Step 7, 2026-10-20, 1.23.0). Proposed at Step 2, 2026-10-19. On Chris Lehman's rulings D11 "1", D12 "1" and D5 "1".
+
+**Amended by** ADR-065 (Proposed 2026-10-19), which keeps the eight parts and withdraws the rest: a test declares no parts it reads, and no proof is keyed by a file's content, because the reads index is deleted. The Decision below is as it was ruled; ADR-065 states what no longer holds.
 
 ## Context
 
