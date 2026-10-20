@@ -924,4 +924,44 @@ expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
 
 # ============================================================
+
+section "§ORDER — build, regression, review, release: units_validate refuses any other order naming the rows; units_order reads it"
+# The regression is an open test row, a review row is kind review, the release a doc row at Step 7 or later. A pair
+# out of order is refused when neither row is dropped and one of them is open; landed history is not judged.
+# fails-when: the regression after a review or the release validates, or the release ahead of a review does.
+OR_P="$SANDBOX/order.plan.md"
+or_plan() {  # <row>... -> OR_P: a reads table holding a landed build row and the rows given
+  { printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh | landed | |\n'
+    printf '%s\n' "$@"; } > "$OR_P"
+}
+OR_REG='| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | pending | approval:plan, head |'
+OR_REV='| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | pending | approval:plan, head |'
+OR_REL='| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | pending | approval:plan, head |'
+or_plan "$OR_REG" "$OR_REV" "$OR_REL"
+expect_eq "ORD-1 control: regression at 5, review at 6, release at 7: no violation (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+expect_eq "ORD-1b …and units_order names the regression row" "T5|0" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
+or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+expect_eq "ORD-2 AC-7.1 the regression after the release (the old order): refused, naming the first row it follows" \
+  "T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6|1" \
+  "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+expect_eq "ORD-2b …and units_order reads no order" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
+or_plan "$OR_REV" "${OR_REG/| 5 | test |/| 6 | test |}" "$OR_REL"
+expect_eq "ORD-3 AC-7.1 the regression at the review's step, after it in the table: refused" \
+  "T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6" \
+  "$(call units_validate "$OR_P")"
+or_plan "$OR_REG" "$OR_REL" "${OR_REV/| 6 | review |/| 7 | review |}"
+expect_eq "ORD-4 AC-7.1 the release ahead of a review row: refused, naming both" \
+  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6" \
+  "$(call units_validate "$OR_P")"
+or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+sed 's/ pending | approval/ landed | approval/' "$OR_P" > "$OR_P.x" && mv "$OR_P.x" "$OR_P"
+expect_eq "ORD-5 the ORD-2 plan with every row landed: history is not judged (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+or_plan "$OR_REG" "$OR_REL"
+expect_eq "ORD-6 no review row: the regression ahead of the release validates, and is the order" "|T5" \
+  "$(call units_validate "$OR_P")|$(call units_order "$OR_P")"
+or_plan "$OR_REG" "$OR_REV"
+expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
+
 finish

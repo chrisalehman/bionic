@@ -2221,25 +2221,14 @@ CF_OPEN
 }
 
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a default the card offers, the
-# items appended to CF_SETTLE (`waive:<q>`, `waive:regression`, `row:<AC>`); 1 at the first refusal none settles.
+# items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles.
 # THE CARD'S OWN DEFAULTS (D17, D19; A-orch-11): a matrix row the auditor has not confirmed (waived with the user's
-# words, `waive-row`), a question whose newest reading fails (`waive <q>`), and the regression's word (`waive
-# regression`, only where the waive verb admits the question). Anything else the check prints is CARD-EARLY: a missing
+# words, `waive-row`) and a question whose newest reading fails (`waive <q>`). The regression is never a default: it
+# is run, not waived. Anything else the check prints is CARD-EARLY: a missing
 # proof, another refused dry commit, an uncovered or absent reading, a declared check or debt not held, a judge that
 # could not deal the plan. The dry commit stops at its first refusal, so a check names one wall at a time; the judge
 # at 8 runs no dry commit and names every fact it finds, and the rows are read from the matrix, so the card offers
 # each of them whichever refusal the dry commit stopped on.
-# _card_owed_say -> lib/proof.sh `proof_owed_say` over THE OWED SET at the card's head (`proof_owed_suites`), exit 0; nothing,
-# exit 1, when the set is empty (wave-39 T25; REQ-18 AC-18.3; D5). The regression's waiver is the card's default only while
-# the head owes a run, and the card names what it owes beside it. Asked once per render: the set is kept in CF_OWED_SAY.
-_card_owed_say() {
-  if [ -z "${CF_OWED_ASKED:-}" ]; then
-    CF_OWED_ASKED=1
-    CF_OWED_SAY="$(proof_owed_say "$(proof_owed_suites "$CF_PLAN" "$CF_ROOT" "$CF_HEAD" 2>/dev/null)")" || CF_OWED_SAY=""
-  fi
-  [ -n "$CF_OWED_SAY" ] && printf '%s' "$CF_OWED_SAY"
-}
-
 _card_settles() {
   local l q judge=0 reading=0 any=0
   local -a _cs_f=()
@@ -2249,10 +2238,6 @@ _card_settles() {
         q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
       "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
-      "bionic: commit refused — no regression proof on this plan yet "*)
-        proof_question_ok regression waive 2>/dev/null || return 1
-        _card_owed_say >/dev/null || return 1
-        CF_SETTLE="${CF_SETTLE}waive:regression"$'\n'; any=1 ;;
       "bionic: "*) return 1 ;;
       "- "*": the newest reading is result=fail "*)
         [ "$reading" = 1 ] || continue
@@ -2268,12 +2253,6 @@ _card_settles() {
           review)
             [ "${_cs_f[4]:-}" = failing ] || return 1
             CF_SETTLE="${CF_SETTLE}waive:${_cs_f[1]}"$'\n' ;;
-          regression)
-            # A REGRESSION LINE THE OWED SET DOES NOT CARRY IS NOT THE CARD'S (AC-18.3): the reds of the whole run with
-            # no commit past its head are a fix row's, so the check stays red and the card is early.
-            proof_question_ok regression waive 2>/dev/null || return 1
-            _card_owed_say >/dev/null || return 1
-            CF_SETTLE="${CF_SETTLE}waive:regression"$'\n' ;;
           *) return 1 ;;
         esac ;;
     esac
@@ -2373,18 +2352,12 @@ _card_final_items() {  # -> fills the CF_* item arrays, CF_FIXED (the policy's l
   done <<CF_SETTLED
 ${CF_SETTLE:-}
 CF_SETTLED
-  # WAIVERS AND THE ITEMS WITH NO DEFAULT, from the owed ledger, in its order. THE REGRESSION'S WAIVER STANDS ONLY WITH A
-  # NON-EMPTY OWED SET, named beside it (wave-39 T25; AC-18.3): an item a refusal opened before the head stopped owing a
-  # run is closed here, not offered.
+  # WAIVERS AND THE ITEMS WITH NO DEFAULT, from the owed ledger, in its order. A regression item an older version opened is
+  # closed here, never offered: the regression is not waived.
   while IFS='	' read -r key _ _ reply; do
     case "$key" in
       waive:regression)
-        if say="$(_card_owed_say)"; then
-          _card_final_add "$key" "waive regression" "-" "-" "waive regression with your words — ${say%%: *}" \
-            "Withhold the regression waiver: every other default applies; regression stays owed and the card renders again." ""
-        else
-          OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_close "$key" "card.sh final: the head $CF_HEAD8 owes no run past the regression" >/dev/null 2>&1
-        fi ;;
+        OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_close "$key" "card.sh final: the regression is never waived" >/dev/null 2>&1 ;;
       waive:?*)
         _card_final_add "$key" "waive ${key#waive:}" "-" "-" "waive ${key#waive:} with your words" \
           "Withhold the ${key#waive:} waiver: every other default applies; ${key#waive:} stays owed and the card renders again." "" ;;

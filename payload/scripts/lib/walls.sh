@@ -2398,23 +2398,21 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 # that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
 # green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes
 # this arm whatever its `owed=`. A plan at `regression: no` owes no floor here (facts_owed deals none).
-# IN THE RELEASE ORDER the floor is owed from Step 8: the regression row runs inside Step 7, after the release row,
-# read by lib/units.sh `units_release_order`, the judge's and the validator's one reading of the order.
+# IN THE ORDER build, regression, review, release (lib/units.sh `units_order`) the regression is Step 5's act, so the
+# floor is owed from Step 6; every other plan owes it from Step 7.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 _eg_refuse_floor_absent() {
-  local why
+  local why from=7
   [ "$(plan_regression "$PLAN")" = no ] && return 0
-  if [ "${CURRENT%[ab]}" = 7 ] && declare -F units_release_order >/dev/null 2>&1 \
-     && units_release_order "$PLAN" >/dev/null 2>&1; then
-    return 0
-  fi
+  ! declare -F units_order >/dev/null 2>&1 || ! units_order "$PLAN" >/dev/null 2>&1 || from=6
+  [ "${CURRENT%[ab]}" -ge "$from" ] 2>/dev/null || return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
     why="$(proof_floor_absent "$PLAN")" || return 0
     why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"
   else
     why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
-  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 7 the regression is owed: ${why}.
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step ${from} the regression is owed: ${why}.
 Plan: $PLAN
 Fix: run the whole run with 'session-poker.sh regression-run' and record its log with 'session-poker.sh proof-add regression <log>'. Whether that regression is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
   refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add regression" "$_eg_detail"
@@ -4792,9 +4790,10 @@ dispatch() {
   case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
   esac
-  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7 (wave-35 T31; D20, A-orch-50), asked last.
+  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7 (wave-35 T31; D20, A-orch-50), or from Step 6 in the order
+  # (`_eg_refuse_floor_absent`), asked last.
   case "${CURRENT%[ab]}" in
-    7|8|9) _eg_refuse_floor_absent "the run" ;;
+    6|7|8|9) _eg_refuse_floor_absent "the run" ;;
   esac
 }
 
