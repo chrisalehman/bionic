@@ -954,6 +954,25 @@ s57_commit "$VG_WT" lib/b.sh C3 >/dev/null
 poke "$RVG" current 8 --check
 expect_contains "VG-5c control: a code commit after them is past the approval: current 8 is refused, naming it" \
   "is not the head the user approved for release, ${VG_C2:0:12}" "$OUT"
+
+# ---------- §DISPOSITION: a finding the whole run fixed says so, not that a landing did ----------
+# A build row that landed on no suite owes no verdict, so a green whole run past its landing is what fixes its finding.
+VG_FR="record/wave-01-fixture/adv-fix.md"
+printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/a.sh:1 data lost\nshown: 1 bash lib/a.sh\n' \
+  "$VG_B" "$VG_A" > "$VG_DIR/adv-fix.md"
+VG_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" adversarial vg-crit fail piece' _ "$S46_LIB" "$VG_A" "$VG_FR")"
+VG_CX="$(s57_commit "$VG_WT" lib/a.sh landing-of-the-fix)"
+VG_C4="$(s57_commit "$VG_WT" lib/b.sh after-it)"
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c4.log" "$VG_C4" 0 0
+poke "$RVG" proof-add regression record/wave-01-fixture/whole-c4.log
+VG_PL="$VG_PL" VG_CX="$VG_CX" VG_FR="$VG_FR" awk '{ print } /^current: / && !p { print ENVIRON["VG_PL"]; p = 1 }
+  /^- T5: / { print "- T9: landed " ENVIRON["VG_CX"] " 2026-10-04T13:00:00Z born: review S2 on of=" ENVIRON["VG_FR"] "#1" }
+  /^\| T5 \| 5 \| verify / { print "| T9 | 4 | build | fix the finding · born: review | implementor | — | 30 | REQ-1 | lib/a.sh | — | — | landed |" }' \
+  "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+printf 'landed: row=T9 branch=wt/01-T9 head=%s merge=%s at=2026-10-04T13:00:00Z\n' "$VG_CX" "$VG_CX" >> "$VG_DIR/landing-proofs.log"
+poke "$RVG" disposition
+expect_contains "VG-6 AC-10.4 a finding fixed by the whole run reads fixed by the regression at its head" \
+  "fixed by the regression at ${VG_C4:0:12}" "$(printf '%s\n' "$OUT" | /usr/bin/grep "finding $VG_FR#1 ")"
 POKE_BOUND="$VG_BOUND_WAS"
 
 finish
