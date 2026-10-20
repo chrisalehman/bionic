@@ -1995,7 +1995,7 @@ presence_missing() {
 # FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence.
 FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""
 facts_judge() {
-  local out err
+  local out err ah
   if ! declare -F facts_state >/dev/null 2>&1; then
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
@@ -2007,6 +2007,23 @@ facts_judge() {
   if [ -z "$FACTS_HEAD" ]; then
     FACTS_WHY="the working branch $WORKING names no commit here, so the regression is uncovered and there is no head to judge the facts the run owes at"
     return 0
+  fi
+  # THE APPROVED HEAD: in the order build, regression, review, release (lib/units.sh `units_order`) the
+  # head closed is the one the newest `approved: release` line names (lib/proof.sh `proof_approved_head`), or one that
+  # only prose past it follows (`proof_prose_past`), as `current 8` admits it; a code commit landed after the approval
+  # is refused here, naming both heads. A plan outside that order is judged as before.
+  if units_order "$PLAN" >/dev/null 2>&1; then
+    ah="$(proof_approved_head "$PLAN" release 2>/dev/null)" || ah=""
+    if [ -z "$ah" ]; then
+      FACTS_RC=1
+      FACTS_WHY="the plan is in the release order and no approved: release line names a head, so the head the user approved for release cannot be read; the user's word for the working head $FACTS_HEAD is approve release '<reply>'"
+      return 0
+    fi
+    if [ "$ah" != "$FACTS_HEAD" ] && ! proof_prose_past "$PLAN" "$ah" "$FACTS_HEAD"; then
+      FACTS_RC=1
+      FACTS_WHY="the working head ${FACTS_HEAD:0:12} is not the head the user approved for release, ${ah:0:12}, and a commit past it is code or a release-set file; land only docs past the approval, or have the user approve this head (approve release '<reply>')"
+      return 0
+    fi
   fi
   out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
   err="$(cat "$TMP_DIR/.facts-judge.$$" 2>/dev/null)"; rm -f "$TMP_DIR/.facts-judge.$$"

@@ -579,7 +579,7 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" "$suites" "$at" "$log" )
 }
 _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <log> — the carrier's own subshell
-  local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt rc i n s g="" lo lc
+  local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt lb rc i n s g="" lo lc
   _wt_land_checks "$target" "$onto" "$plan" 0 || return 2
   wt="$_WT_ABS"; root="$_WT_ROOT"; branch="$_WT_BRANCH"
   head="$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)"
@@ -604,7 +604,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
     "carrier=${LINE_ME}" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
   LINE_KIND=hand; LINE_BY="$by"; LINE_WHY="$why"; LINE_SID="$sid"
   n="${BIONIC_LINE_HAND_WAIT:-900}"; case "$n" in ''|*[!0-9]*) n=900 ;; esac
-  lt=""; i=0; rc=3
+  lt=""; lb=""; i=0; rc=3
   while [ "$rc" = 3 ]; do
     local base
     base="$(_line_entries "$rec" "$(line_head "$plan")" | awk -F'\t' -v r="$row" '$1 == r { print $5; exit }')"
@@ -613,22 +613,27 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
       _wt_refuse "not-in-line branch=${branch} — the row left the line before its publish (git log ${onto})"; rc=2; break
     fi
     if [ "$base" != - ]; then
-      [ -n "$lt" ] || lt="$(landing_tree_take "$root")" || { _wt_refuse "landing-tree-unavailable root=${root}"; rc=2; break; }
-      if ! c="$(line_build "$lt" "$base" "$head" "$branch")"; then
-        line_event "$plan" returned "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
-        _wt_refuse "conflict branch=${branch} onto=${onto} files=${c:-<unreadable>} — the row does not merge onto what is ahead of it; merge ${onto} into the tree, land again"; rc=2; break
+      # One candidate per base, as the queue builds it (`_line_carry` 2): a retry on the base this call last built on
+      # publishes that candidate again, and only a new base builds, lints and records another.
+      if [ "$base" != "$lb" ]; then
+        [ -n "$lt" ] || lt="$(landing_tree_take "$root")" || { _wt_refuse "landing-tree-unavailable root=${root}"; rc=2; break; }
+        if ! c="$(line_build "$lt" "$base" "$head" "$branch")"; then
+          line_event "$plan" returned "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
+          _wt_refuse "conflict branch=${branch} onto=${onto} files=${c:-<unreadable>} — the row does not merge onto what is ahead of it; merge ${onto} into the tree, land again"; rc=2; break
+        fi
+        # The comment lint the queue runs (`_line_carry` 3b), over the same range: a comment the row adds that cites
+        # the run returns the row with a LINT line per hit, and nothing publishes.
+        lo="$(_line_comment_lint "$root" "$base" "$c")"; lc=$?
+        case $lc in
+          0) ;;
+          1) line_event "$plan" returned "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
+             printf '%s\n' "$lo" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
+             _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
+          *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
+        esac
+        line_event "$plan" candidate "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
+        lb="$base"
       fi
-      # The comment lint the queue runs (`_line_carry` 3b), over the same range: a comment the row adds that cites
-      # the run returns the row with a LINT line per hit, and nothing publishes.
-      lo="$(_line_comment_lint "$root" "$base" "$c")"; lc=$?
-      case $lc in
-        0) ;;
-        1) line_event "$plan" returned "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
-           printf '%s\n' "$lo" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
-           _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
-        *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
-      esac
-      line_event "$plan" candidate "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
       line_publish "$plan" "$row"; rc=$?
       [ "$rc" = 3 ] || break
     fi

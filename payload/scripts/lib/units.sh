@@ -853,7 +853,8 @@ units_whole_read() {
 }
 
 # units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
-# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed`
+# `## Tasks` row the record names, with its last merge (a `landed:` header's `merge=`, or the `commit=` of a
+# `line/v1|ev=published|` event, the one line a hand landing may leave), and each `build` row that is `landed`
 # with none, as `-`. `owed` marks a landed build row: it must carry a landing, so the
 # caller counts it unknown when the record has none or its merge is no commit. A header whose
 # `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
@@ -894,12 +895,21 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      if ($0 !~ /^landed:[ \t]/) next
-      r = ""; m = ""; nf = split($0, f, /[ \t]+/)
-      for (k = 2; k <= nf; k++) {
-        if (f[k] ~ /^row=/) r = substr(f[k], 5)
-        else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
-      }
+      r = ""; m = ""
+      if ($0 ~ /^line\/v1\|ev=published\|/) {
+        # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
+        nf = split($0, f, "|")
+        for (k = 3; k <= nf; k++) {
+          if (f[k] ~ /^row=/) r = substr(f[k], 5)
+          else if (f[k] ~ /^commit=/) m = tolower(substr(f[k], 8))
+        }
+      } else if ($0 ~ /^landed:[ \t]/) {
+        nf = split($0, f, /[ \t]+/)
+        for (k = 2; k <= nf; k++) {
+          if (f[k] ~ /^row=/) r = substr(f[k], 5)
+          else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
+        }
+      } else next
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
       if (lm[r] != "-") rm[lm[r]] = 1
