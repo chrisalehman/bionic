@@ -524,7 +524,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # its rationale, is the /bionic:sitrep skill's, recorded through `sitrep grade` and printed back by the verb (a
 # hook never judges). The page, in order, a blank line between sections, every line folded at 92 columns:
 #
-#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9 · <k> of <m> tasks done
+#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9 · <k> of <m> tasks done (<p>%)
 #   Bottom line        four bullets: what you owe, what is next, what is done, when it closes
 #   Task list          <glyph> <step>: <name> for steps 0 to 3 and each later step with no task of its own, and
 #                      <glyph> <step>/<task>: <short description> for every task in execution order; a time in
@@ -1161,7 +1161,7 @@ SITREP_OWED
   fi
   {
     printf '0\tSitrep · %s%s · %s · step %s of 9%s\n' "$proj" "${title_rel:+ $title_rel}" "$(sitrep_date "$now" '%A %-I:%M %p')" \
-      "${cur:--}" "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done' "$landed" "$total")"
+      "${cur:--}" "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done (%d%%)' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) )))"
     printf '0\t\n0\tBottom line\n'
     printf '2\t- %s\n' "$b_owe" "$b_next" "$b_done" "Close: $btext."
     printf '0\t\n0\tTask list\n'

@@ -39,7 +39,7 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
 ## The shape
 
 ```text
-Sitrep · <project> <release> · <weekday> <time> · step <n> of 9 · <k> of <m> tasks done
+Sitrep · <project> <release> · <weekday> <time> · step <n> of 9 · <k> of <m> tasks done (<p>%)
 
 Bottom line
 - You owe <what, or nothing now>.
