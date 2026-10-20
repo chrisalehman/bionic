@@ -8,7 +8,7 @@ loading: deferred
 
 # Sitrep
 
-The situation report: what you owe, what is next, what is done and when it closes, then every task, the run's score, what is blocked on you, the completion and the predicted close. The verb prints every fact on the page. This skill writes one thing, the grade and its rationale, and the verb records it and prints it.
+The situation report: what you owe, what is next, what is done and when it closes, then every task, the run's score, what is blocked on you and the predicted close. The verb prints every fact on the page. This skill writes one thing, the grade and its rationale, and the verb records it and prints it.
 
 Typed as `/bionic:sitrep` with no argument, it reports on this session's bound run. With an argument, it reports on the plan named (absolute, project-relative or docs-root-relative).
 
@@ -34,12 +34,12 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
 
    The verb refuses a letter outside A to F and a rationale that names no indicator line or holds `|` or a line break; nothing is recorded. Correct it and record again.
 
-4. Run the verb of step 1 again and show its page inside one fenced code block, byte for byte. Then quote the verb's confirmation line under it (`poker: sitrep grade <letter> — recorded at …`).
+4. Run the verb of step 1 again and show its page inside one fenced code block, byte for byte.
 
 ## The shape
 
 ```text
-Sitrep · <project> <release> · <weekday> <time> · step <n> of 9 · <k> of <m> tasks done
+Sitrep · <project> <release> · <weekday> <time> · step <n> of 9 · <k> of <m> tasks done (<p>%)
 
 Bottom line
 - You owe <what, or nothing now>.
@@ -62,10 +62,6 @@ Score: <grade> (graded <time>)
 Blocked on you
 - <what to do>: <what waits on it>
 
-Completion
-- <n> of 9 steps.
-- <k> of <m> tasks done (<p>%).
-
 Predicted close
 - <the close, its basis and the pace, or why there is none>
 ```
@@ -75,5 +71,4 @@ Predicted close
 - A fact outside the verb's output is a contract violation: every line of the page is the verb's, byte for byte and in the verb's order. The grade and the rationale reach the page through the grade verb, never typed into it.
 - The rationale names an indicator line, one of schedule, correctness, waste, decisions or goals; the verb refuses one that names none.
 - The page has three surfaces, all from the one verb: `/bionic:sitrep` is this page, the handoff file's head is its Bottom line, and the Patrol's tick prints the one-line form `poker: sitrep <marks> · owed: <n> · <the close>` on every tick.
-- Quote the verb's confirmation line after the page, so the user sees the grade was recorded.
 - Nothing here changes a plan, a record or a run beyond the `sitrep.log` line the grade verb writes.

@@ -4,7 +4,7 @@
 # THE VERB PRINTS THE WHOLE PAGE BUT ONE JUDGMENT. The title (project, release, weekday and time, the
 # step of nine, the tasks done), the Bottom line's four answers (what you owe, what is next, what is
 # done, when it closes), the Task list (a glyph, `step/task: description`, a time in parentheses or a
-# state after " — "), the Score's five indicator lines, Blocked on you, Completion and Predicted close,
+# state after " — "), the Score's five indicator lines, Blocked on you and Predicted close,
 # every section bulleted and every line folded at 92 columns. The one judgment is the grade and its
 # rationale, which the skill writes through `sitrep grade <A-F> '<rationale>'`, refused unless the
 # rationale names an indicator line; the page prints the newest one recorded. `--line` is the Patrol's
@@ -188,6 +188,7 @@ sr_sect() {  # <heading, an extended regex matched whole> -> the section's logic
 }
 sr_sit() { sr_sect 'Task list'; }
 sr_rows() { sr_sit | /usr/bin/grep -E '^[^ ]+ [^ /]+/[^ ]+: '; }   # -> its task lines, `<glyph> <step>/<task>: …`
+sr_tasks() { sr_page | head -1 | /usr/bin/grep -oE '[0-9]+ of [0-9]+ tasks done'; }   # -> the title's count of tasks done
 sr_steps() { sr_sit | /usr/bin/grep -E '^[^ ]+ [0-9]+: '; }        # -> its step lines, `<glyph> <step>: …`
 sr_heads() { awk 'p && NF { print } { p = ($0 == "") }' "${1:--}" | tr '\n' '|' | sed 's/|$//'; }   # -> the line after each blank
 sr_join() { tr '\n' '|' | sed 's/|$//'; }
@@ -211,21 +212,23 @@ sr_widths() { LC_ALL=C awk "$SR_CW_AWK"'{ print cw($0) }'; }   # -> one width pe
 sr_maxw() { sr_widths | sort -n | tail -1; }
 
 # ============================================================
-section "§ROWS: every task of ## Tasks, glyph in column 1, [step]/[task]: description, a done task with its local 12-hour time, a state after \" — \"; the title, the Completion counts and the Bottom line's four answers"
+section "§ROWS: every task of ## Tasks, glyph in column 1, [step]/[task]: description, a done task with its local 12-hour time, a state after \" — \"; the title's counts and the Bottom line's four answers"
 # ============================================================
 sr_world rows "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "R0 sitrep <plan> exits 0 with nothing on stderr" "0|" "$RC|$ERR"
-expect_eq "R2 the Completion: steps, then tasks done with the percent" "- 4 of 9 steps.|- 4 of 17 tasks done (24%)." \
-  "$(sr_sect Completion | sr_join)"
+expect_eq "R2 the title carries the step of nine and the tasks done, and the page has no Completion section" "step 4 of 9 · 4 of 17 tasks done|0" \
+  "$(sr_page | head -1 | /usr/bin/grep -oE 'step [0-9]+ of 9 · [0-9]+ of [0-9]+ tasks done')|$(sr_page | /usr/bin/grep -c '^Completion$')"
 SR_ROWS="$(sr_rows)"
+expect_eq "R2b the title's task count carries its percent, rounded" "4 of 17 tasks done (24%)" \
+  "$(sr_page | head -1 | /usr/bin/grep -oE '[0-9]+ of [0-9]+ tasks done \([0-9]+%\)')"
 expect_eq "R3 seventeen task lines under Task list" "17" "$(printf '%s\n' "$SR_ROWS" | /usr/bin/grep -c .)"
 expect_eq "R4 every task line opens with one of the four glyphs in column 1, then [step]/[task]:" "17" \
   "$(printf '%s\n' "$SR_ROWS" | /usr/bin/grep -cE '^(✅|🔄|⬜|⛔) 4/T[0-9]+: ')"
 expect_eq "R6 no UTC instant anywhere on the page (no ISO Z time, no UTC word)" "" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z|UTC')"
 expect_eq "R7 the section headings in order, each after a blank line" \
-  "Bottom line|Task list|Score: not graded yet|Blocked on you|Completion|Predicted close" "$(printf '%s\n' "$OUT" | sr_heads)"
+  "Bottom line|Task list|Score: not graded yet|Blocked on you|Predicted close" "$(printf '%s\n' "$OUT" | sr_heads)"
 expect_eq "R8 …and no line of rule characters" "" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
 # A task done on another day than now's carries its local date after the time.
 SR_AT=$((SR_NOW + 86400)) sr_run "$SR_PLAN"
@@ -317,8 +320,8 @@ sr_w38_world() {
 }
 sr_w38_world
 sr_run "$SR_PLAN"
-expect_eq "SH0 precondition: the 38-task plan renders (rc 0), every task done, read by the Completion" \
-  "0|- 38 of 38 tasks done (100%)." "$RC|$(sr_sect Completion | sed -n 2p)"
+expect_eq "SH0 precondition: the 38-task plan renders (rc 0), every task done, read by the title" \
+  "0|38 of 38 tasks done" "$RC|$(sr_tasks)"
 expect_eq "SH0b precondition: the fixture holds the three shapes — bare, text before landed, landed-by-hand (lead and after text)" "yes|yes|yes|yes" \
   "$(sr_w38_lines | /usr/bin/grep -qE '^- T1: landed [0-9a-f]{40} ' && echo yes)|$(sr_w38_lines | /usr/bin/grep -qE '^- T2: reason: .* landed [0-9a-f]{40} ' && echo yes)|$(sr_w38_lines | /usr/bin/grep -qE '^- T12: landed-by-hand: ' && echo yes)|$(sr_w38_lines | /usr/bin/grep -qE '^- T3: reason: .* landed-by-hand: ' && echo yes)"
 expect_eq "SH1 38 of 38 done tasks print a time" "38" \
@@ -355,7 +358,7 @@ sr_ev "ev=verdict|row=T8|commit=$SR_CAND|suite=a.test.sh|result=green|log=/rec/T
 sr_ev "ev=ready|row=T5|name=w-T5|commit=$SR_C1|branch=wt/02-T5|tree=$SR_REPO/.worktrees/02-T5|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:40:00Z"
 sr_run "$SR_PLAN"
 expect_eq "ORD0 precondition: the world renders (rc 0) and its counts are §ROWS' own" \
-  "0|- 4 of 17 tasks done (24%)." "$RC|$(sr_sect Completion | sed -n 2p)"
+  "0|4 of 17 tasks done" "$RC|$(sr_tasks)"
 expect_eq "ORD1 the Task list opens on steps 0 to 3, each with its approval time (the approved by instant, not an earlier approved)" \
   "✅ 0: Configure (1:10 AM)|✅ 1: Scope (1:40 AM)|✅ 2: Design (2:20 AM)|✅ 3: Plan (3:00 AM)" \
   "$(sr_sit | head -4 | sr_join)"
@@ -386,6 +389,12 @@ sr_run "$SR_PLAN"
 printf 'reviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
 awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/critic.md question=adversarial reader=crit result=fail scope=piece" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
+expect_eq "M3a the correctness line names the class of the one open finding, never the bucket" "1 open S2 finding|0" \
+  "$(sr_ind correctness | /usr/bin/grep -oE '[0-9]+ open S[12] finding')|$(sr_ind correctness | /usr/bin/grep -c 'S1 or S2')"
+printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\nshown: 2 bash tests/y.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
+sr_run "$SR_PLAN"
+expect_eq "M3b …and of two, each class counted" "2 open findings, one S1 and one S2" \
+  "$(sr_ind correctness | /usr/bin/grep -oE '[0-9]+ open findings, [^;.]*')"
 # The clock 1.25× behind: a 40-hour forecast needs 17 × 12/40 = 5.1, so 5, and 4 done: schedule ➖.
 SR_FORECAST=40h sr_world marks-slow "6 6 12 12"
 sr_run "$SR_PLAN"
@@ -396,6 +405,13 @@ sr_run "$SR_PLAN"
 sr_world marks-waste "6 6 12 12"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
+# A run killed at the gate (rc 137) is a wasted run: the landing report's killed count reads as discarded.
+sr_world marks-killed "6 6 12 12"
+printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T9\ntree=%s/.worktrees/02-T9\nasked=%d\nholder=-\nadmitted=%d\nended=%d\nrc=137\npromise=5:0.1:30\n' \
+  "$SID" "$(cd "$SR_REPO" && pwd -P)" "$((SR_NOW - 600))" "$((SR_NOW - 590))" "$((SR_NOW - 300))" > "$SR_GATE/requests/3"
+sr_run "$SR_PLAN"
+expect_eq "M4 a killed run counts as discarded on the waste line" "yes" \
+  "$(sr_ind waste | /usr/bin/grep -qE 'waste — ([0-9]+%|under 1%) of suite runs discarded' && echo yes)"
 # Idle width: an idle turn from 16:00Z to 17:12Z is 72 of 720 elapsed minutes, 10%: ➖.
 sr_world marks-idle "6 6 12 12"
 printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
@@ -415,7 +431,7 @@ section "§CLOCK: the schedule mark reads the clock, tasks done since the Step-3
 # so 18. The four landings take 120 120 134 134 minutes: median 127.
 SR_FORECAST=24h SR_EXTRA=22 sr_world clock "120 120 134 134"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
-expect_eq "CK0 precondition: 39 tasks, 4 done, read by the Completion" "- 4 of 39 tasks done (10%)." "$(sr_sect Completion | sed -n 2p)"
+expect_eq "CK0 precondition: 39 tasks, 4 done, read by the title" "4 of 39 tasks done" "$(sr_tasks)"
 SR_CK1="$(sr_ind schedule)"
 SR_CK1_PACE="$(sr_line '- The pace: ')"
 # The declared sizes change and nothing else: the mark and its line do not move. The forecast's pace line, which
@@ -426,9 +442,12 @@ expect_eq "CK2a precondition: the sizes rewrite reached the page (the pace line 
   "yes|yes" "$(sr_line '- The pace: ' | /usr/bin/grep -q 'against 500 min planned' && echo yes)|$([ "$(sr_line '- The pace: ')" != "$SR_CK1_PACE" ] && echo yes)"
 expect_eq "CK2 …and the schedule line is byte for byte what it was: the declared sizes feed nothing of the mark" \
   "$SR_CK1" "$(sr_ind schedule)"
-# Ahead of pace: a 120-hour forecast needs 39 × 11/120 = 3.6, so 4, and 4 done in a 9-minute median.
-SR_FORECAST=120h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
+# Ahead of pace: a 240-hour forecast needs 39 × 11/240 = 1.8, so 2, and 4 done in a 9-minute median.
+SR_FORECAST=240h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
+expect_eq "CK3 the clock half says done against needed with the forecast, and a verdict: behind in one world, ahead in the other" \
+  "the 24 h forecast needs 18 by now, behind|the 240 h forecast needs 2 by now, ahead" \
+  "$(printf '%s\n' "$SR_CK1" | /usr/bin/grep -oE 'the [0-9]+ h forecast needs [0-9]+ by now, [a-z ]+')|$(sr_ind schedule | /usr/bin/grep -oE 'the [0-9]+ h forecast needs [0-9]+ by now, [a-z ]+')"
 # The scorecard's target is the same bar, and its schedule line is the page's, joined to one line.
 SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null)"
 expect_eq "CK4 the scorecard's widest landing prints against target < 15, the landing bar" \
@@ -458,7 +477,7 @@ expect_eq "BP6 …and the scorecard's target reads it too" \
   "widest landing ready→landed: T1 20.0 min · target < 25" "$(printf '%s\n' "$SR_MUT_SC" | /usr/bin/grep '^widest landing ')"
 
 # ============================================================
-section "§SHAPE: the page is the prototype's — title with the step and the task count, Bottom line, Task list, Score, Blocked on you, Completion, Predicted close; no glyph before the Bottom line; every section bulleted; every line at most 92 columns; a task in flight carries its state in words"
+section "§SHAPE: the page is the prototype's — title with the step and the task count, Bottom line, Task list, Score, Blocked on you, Predicted close; no glyph before the Bottom line; every section bulleted; every line at most 92 columns; a task in flight carries its state in words"
 # ============================================================
 # sr_breaks -> the first physical line that breaks its section's form, or nothing: a bulleted section's lines open
 # on `- ` or a two-space continuation; a Task list line on a glyph or a five-space continuation; a Score line on a
@@ -478,7 +497,7 @@ sr_world shape "6 6 12 12"
 awk -v t="$SR_LONG" -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $5 = " " t " · complexity: standard " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "H1 the sections, in the prototype's order, each heading after a blank line" \
-  "Bottom line|Task list|Score: not graded yet|Blocked on you|Completion|Predicted close" "$(printf '%s\n' "$OUT" | sr_heads)"
+  "Bottom line|Task list|Score: not graded yet|Blocked on you|Predicted close" "$(printf '%s\n' "$OUT" | sr_heads)"
 SR_GL1="$(printf '%s\n' "$OUT" | /usr/bin/grep -nE '✅|🔄|⬜|⛔|❔|➖|✖' | head -1 | cut -d: -f1)"
 SR_BL1="$(printf '%s\n' "$OUT" | /usr/bin/grep -n '^Bottom line$' | head -1 | cut -d: -f1)"
 expect_eq "H3 no glyph before the Bottom line: the first glyph sits below its heading, which is line 3" "3|yes" \
@@ -491,8 +510,8 @@ SR_MAXW="$(printf '%s\n' "$OUT" | sr_maxw)"
 expect_eq "H5 every line of the page is at most 92 columns, and the widest is a folded one near the edge (widest $SR_MAXW)" "yes" \
   "$([ "${SR_MAXW:-999}" -le 92 ] && [ "${SR_MAXW:-0}" -ge 80 ] && echo yes)"
 expect_eq "H6 every section is bulleted: no physical line breaks its section's form" "" "$(sr_breaks)"
-expect_eq "H6b …read through the same sections: four Bottom line bullets, one under Blocked on you, two under Completion" "4|1|2" \
-  "$(sr_sect 'Bottom line' | /usr/bin/grep -c '^- ')|$(sr_sect 'Blocked on you' | /usr/bin/grep -c '^- ')|$(sr_sect Completion | /usr/bin/grep -c '^- ')"
+expect_eq "H6b …read through the same sections: four Bottom line bullets, one under Blocked on you" "4|1" \
+  "$(sr_sect 'Bottom line' | /usr/bin/grep -c '^- ')|$(sr_sect 'Blocked on you' | /usr/bin/grep -c '^- ')"
 expect_eq "H7 every task in flight carries its state in words after a dash" "4|4" \
   "$(sr_rows | /usr/bin/grep -c '^🔄 ')|$(sr_rows | /usr/bin/grep -cE '^🔄 [^ ]+: .* — [a-z]')"
 
@@ -555,8 +574,8 @@ expect_eq "FC1b …and the Bottom line's close is the same time" "- Close: about
 SR_FC1_ABOUT="$(sr_line '- About ')"
 awk '{ sub(/^forecast: 48h$/, "forecast: 24h") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: pace needs 9)" \
-  "$SR_FC1_ABOUT|yes" "$(sr_line '- About ')|$(sr_ind schedule | /usr/bin/grep -q 'pace needs 9' && echo yes)"
+expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: it needs 9 by now)" \
+  "$SR_FC1_ABOUT|yes" "$(sr_line '- About ')|$(sr_ind schedule | /usr/bin/grep -q 'needs 9 by now' && echo yes)"
 # One admitted request, not two: the work is no longer divided and outweighs the chain.
 rm -f "$SR_GATE/requests/2"
 sr_run "$SR_PLAN"
@@ -670,21 +689,23 @@ sr_check() {  # <report file> <page file> -> `ok`, or the first rule the report 
 }
 
 # ============================================================
-section "§SKILL: the skill's page opens Sitrep · …, then Bottom line, Task list, Score, Blocked on you, Completion, Predicted close; it records only the grade and its rationale, and shows the verb's page unaltered"
+section "§SKILL: the skill's page opens Sitrep · …, then Bottom line, Task list, Score, Blocked on you, Predicted close; it records only the grade and its rationale, and shows the verb's page unaltered"
 # ============================================================
 SR_SHAPE="$(sr_shape)"
 expect_eq "O2 …its headings, in order, the prototype's" \
-  "Bottom line|Task list|Score: <grade> (graded <time>)|Blocked on you|Completion|Predicted close" "$(printf '%s\n' "$SR_SHAPE" | sr_heads)"
+  "Bottom line|Task list|Score: <grade> (graded <time>)|Blocked on you|Predicted close" "$(printf '%s\n' "$SR_SHAPE" | sr_heads)"
 expect_eq "O3 …and no rule line in the shape (the same block O1 read)" "" "$(printf '%s\n' "$SR_SHAPE" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
+expect_eq "O3b the skill shows the page in one code block and stops: it names no confirmation line to quote under it" "yes|0" \
+  "$(/usr/bin/grep -q 'inside one fenced code block' "$SR_SKILL" && echo yes)|$(/usr/bin/grep -ci 'confirmation line' "$SR_SKILL")"
 sr_world skill "6 6 12 12"
 sr_run grade C 'the schedule line holds; nothing else is graded yet' "$SR_PLAN"
 sr_run "$SR_PLAN"; printf '%s\n' "$OUT" > "$TMPROOT/page.txt"
 expect_eq "O4 the verb's page after a grade: its headings are the shape's, the Score heading carrying the letter and time" \
-  "Bottom line|Task list|Score: C (graded 3:00 PM)|Blocked on you|Completion|Predicted close" "$(sr_heads "$TMPROOT/page.txt")"
+  "Bottom line|Task list|Score: C (graded 3:00 PM)|Blocked on you|Predicted close" "$(sr_heads "$TMPROOT/page.txt")"
 cp "$TMPROOT/page.txt" "$TMPROOT/rep.txt"
 expect_eq "O5 the page shown unaltered meets the contract" "ok" "$(sr_check "$TMPROOT/rep.txt" "$TMPROOT/page.txt")"
-awk '$0 == "Blocked on you" { print "Completion"; next } $0 == "Completion" { print "Blocked on you"; next } { print }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_regex "O6 …Blocked on you and Completion swapped: refused on the headings" "^headings: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
+awk '$0 == "Blocked on you" { print "Predicted close"; next } $0 == "Predicted close" { print "Blocked on you"; next } { print }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
+expect_regex "O6 …Blocked on you and Predicted close swapped: refused on the headings" "^headings: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 sed 's/^Task list$/TASK LIST/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
 expect_regex "O7 …a heading uppercased: refused on the headings" "^headings: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 awk '{ print } index($0, "- the schedule line holds") == 1 { print "- diagnosis: the gate is the bottleneck" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
@@ -700,8 +721,8 @@ awk '{ print } /^✅ 4\/T4: / { print "✅ 4/T18: Shipped early (7:30 AM)" }' "$
 expect_true "FA2 the plant is in the copy" grep -q '^✅ 4/T18: ' "$TMPROOT/bad.txt"
 expect_eq "FA3 …a planted task the verb never printed: refused, naming it" "fact: > ✅ 4/T18: Shipped early (7:30 AM)" \
   "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-sed 's/^- 4 of 17 tasks done (24%)\.$/- 5 of 17 tasks done (29%)./' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_regex "FA4 …a rendered line altered (the counts): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
+sed '/^- Done: /s/4 of 17 tasks/5 of 17 tasks/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
+expect_regex "FA4 …a rendered line altered (the Done line's count): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 awk '{ print } index($0, "- It assumes ") == 1 { print "- the release ships tonight" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
 expect_eq "FA5 …an unlabelled claim appended to Predicted close: refused on the fact" "fact: > - the release ships tonight" \
   "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
@@ -774,8 +795,18 @@ expect_eq "GM1 four 20-minute one-file landings miss the 15-minute goal: the tic
   "decide:goal:fast-landings" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' "$SR_OWED_F" 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
 expect_eq "GM2 …it is owed: the tick's sitrep line counts it" "owed: 1" \
   "$(/usr/bin/grep '^poker: sitrep ' "$TMPROOT/tick.out" | /usr/bin/grep -oE 'owed: [0-9]+')"
-sed 's/^owed\/v1|key=decide:goal:fast-landings|state=open|.*/owed\/v1|key=decide:goal:fast-landings|state=closed|by=ruled|at=2026-10-06T22:00:30Z/' "$SR_OWED_F" > "$SR_OWED_F.t" && mv "$SR_OWED_F.t" "$SR_OWED_F"
+sr_run "$SR_PLAN"
+expect_eq "GM3 the page prints the open goal decision as one sentence: one bullet under Blocked on you, the theme named once" "1|1" \
+  "$(sr_sect 'Blocked on you' | /usr/bin/grep -c '^- ')|$(sr_sect 'Blocked on you' | /usr/bin/grep -o 'fast landings' | /usr/bin/grep -c .)"
+sed -i.bak 's/one-file median under 15m/one-file median under 30m/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
+sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_run "$SR_PLAN"
+expect_eq "GM3b both goals read reached while the decision is still open: the page drops it and keeps the approval, in You owe and in Blocked on you, with nothing on stderr" \
+  "- You owe 1: approve release.|- approve release: T12 waits on it|" "$(sr_line '- You owe')|$(sr_sect 'Blocked on you' | sr_join)|$ERR"
 SR_AT=$((SR_NOW + 60)) sr_tick
+expect_eq "GM4 the goal now reads reached: the tick closes its open decision, and the item stays on the ledger closed" "1|0" \
+  "$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=closed|' "$SR_OWED_F")|$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=open|' "$SR_OWED_F")"
 
 # ============================================================
 section "§ONE-FILE: the schedule's bar half and the one-file goal read the one-file landings only; a landing of more files moves neither"
@@ -787,6 +818,31 @@ expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file la
   "$SR_MARK_WITHIN|10 min" "$(sr_ind schedule | awk '{ print $1 }')|$(sr_ind schedule | /usr/bin/grep -oE 'takes [0-9]+ min' | sed 's/^takes //')"
 expect_eq "OF2 …and the one-file goal reads 10 min against its 5-minute target" \
   "10 min" "$(sr_goal_lines | /usr/bin/grep ' fast landings: ' | sed 's/.* — //' | /usr/bin/grep -oE '[0-9]+ min')"
+
+# ============================================================
+section "§WAIT-WORDS: a task waiting on the review facts says so in words; the judge's facts string and its record paths never reach the page"
+# ============================================================
+sr_world wait-words "6 6 12 12"
+SR_W_ROW="$(sr_row T19 "Review-gated row · complexity: standard" proof:review 30 pending)"
+awk -v r="$SR_W_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+SR_W_LINE="$(sr_rows | /usr/bin/grep '/T19: ')"
+expect_eq "WW1 the review-gated task's clause names the review facts at the head, with no facts string and no record path" "yes|0" \
+  "$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -q ' — waits on the review facts at the head' && echo yes)|$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -cE 'facts_state|record/|\.md')"
+
+
+# ============================================================
+section "§NEXT-STOPS: the Bottom line's Next names the review results card to the user, in order, while it lies ahead of the merge; once it is replied it names no stop"
+# ============================================================
+sr_world next-stops "6 6 12 12"
+sed -i.bak 's/^| T17 | 4 | build |/| T17 | 4 | integrate |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_run "$SR_PLAN"
+expect_eq "NX1 an open integrate row ahead and no reply to the review results: Next puts the card to you before that row" "yes" \
+  "$(sr_line '- Next: ' | /usr/bin/grep -q ', then the review results card to you, then T17\.$' && echo yes)"
+printf 'review-results/v1|plan=%s|head=%s|at=2026-10-06T20:00:00Z|decisions=0\nreplied: at=2026-10-06T20:30:00Z all default\n' "$SR_PLAN" "$SR_H" > "$SR_DIR/review-results-abcd1234.md"
+sr_run "$SR_PLAN"
+expect_eq "NX2 …the card replied: Next is still there, and names no stop" "1|0" \
+  "$(sr_line '- Next: ' | /usr/bin/grep -c 'then')|$(sr_line '- Next: ' | /usr/bin/grep -c 'review results card')"
 
 
 finish

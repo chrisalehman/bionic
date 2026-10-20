@@ -524,7 +524,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # its rationale, is the /bionic:sitrep skill's, recorded through `sitrep grade` and printed back by the verb (a
 # hook never judges). The page, in order, a blank line between sections, every line folded at 92 columns:
 #
-#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9 · <k> of <m> tasks done
+#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9 · <k> of <m> tasks done (<p>%)
 #   Bottom line        four bullets: what you owe, what is next, what is done, when it closes
 #   Task list          <glyph> <step>: <name> for steps 0 to 3 and each later step with no task of its own, and
 #                      <glyph> <step>/<task>: <short description> for every task in execution order; a time in
@@ -532,8 +532,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   Score: <grade> (graded <time>), or Score: not graded yet
 #                      <mark> schedule, correctness, waste, decisions, goals — what each measured, in words; then
 #                      `- <rationale>` when graded
-#   Blocked on you     one bullet per open approve:, waive:, finding: or gate: item of the plan's run
-#   Completion         the steps done of nine; the tasks done of all, with the percent
+#   Blocked on you     one bullet per open approve:, waive:, finding:, gate: or decide: item of the plan's run, one sentence each
 #   Predicted close    the close and its basis, or why there is none
 #
 # and `--line` prints only `<schedule><correctness><waste marks> · owed: <n> · <the close>`.
@@ -594,6 +593,11 @@ sitrep_fold() {
 sitrep_dur() {
   awk -v m="$1" 'BEGIN { m = int(m + 0.5); h = int(m / 60); r = m - h * 60
     if (h == 0) printf "%d min\n", r; else if (r == 0) printf "%d h\n", h; else printf "%d h %d min\n", h, r }'
+}
+
+# sitrep_count_word <n> -> one to ten in words, else the digits
+sitrep_count_word() {
+  case "$1" in 1) echo one ;; 2) echo two ;; 3) echo three ;; 4) echo four ;; 5) echo five ;; 6) echo six ;; 7) echo seven ;; 8) echo eight ;; 9) echo nine ;; 10) echo ten ;; *) echo "$1" ;; esac
 }
 
 # sitrep_list <cap> <word>… -> the words as prose, `A`, `A and B`, `A, B and C`, the first <cap> named and the rest
@@ -690,7 +694,7 @@ sitrep_schedule() {
       k = int(t * r + 0.5)
       g = (l >= k) ? "w" : ((k <= 1.25 * l) ? "a" : "o")
       printf "%s\t%d\t%d\n", g, k, e / 60 }')"
-    clock="$landed of $total tasks done in $(sitrep_dur "$em"), the forecast's pace needs $k"
+    clock="$landed of $total tasks done in $(sitrep_dur "$em"); the $(sitrep_dur "$fc") forecast needs $k by now, $([ "$landed" -gt "$k" ] && echo ahead || { [ "$landed" -eq "$k" ] && echo on pace || echo behind; })"
   fi
   bar="$(sitrep_bar)"
   if [ -z "$med" ]; then bg=n; bt="no one-file landing yet against the ${bar:-unverified} min bar"
@@ -730,11 +734,11 @@ sitrep_prev() {
   printf '%s\t%s\n' "$(proof_plan_slug "$best")" "${pace##*$'\t'}"
 }
 
-# sitrep_open_s12 <plan> <root> -> the number of open S1 and S2 findings of the plan's registered readings: a
+# sitrep_open_s12 <plan> <root> -> `<open S1 count> <open S2 count>` over the plan's registered readings: a
 # finding `disposition` would print state=open (its effective priority fix, and no fix of it landed).
 sitrep_open_s12() {
-  local plan="$1" root="$2" docs fixed reads ev q h got num s r n=0
-  declare -F proof_findings >/dev/null 2>&1 || { echo 0; return 0; }
+  local plan="$1" root="$2" docs fixed reads ev q h got num s r n1=0 n2=0
+  declare -F proof_findings >/dev/null 2>&1 || { echo "0 0"; return 0; }
   docs="$(docs_root "$root")"
   fixed="$(proof_fixed "$plan" "$root" 2>/dev/null)"
   reads="$(awk "$(proof_awk)"'
@@ -754,14 +758,14 @@ sitrep_open_s12() {
       case "$num:$s" in debt:*|:*) continue ;; *:S1|*:S2) : ;; *) continue ;; esac
       case "$_PROOF_FIXED_IDS" in *$'\n'"$ev#$num"$'\n'*) continue ;; esac
       set -- $(proof_finding_rating "$plan" "$ev#$num" "$s" "$r")
-      [ "${3:-}" != fix ] || n=$((n + 1))
+      [ "${3:-}" != fix ] || { [ "$s" = S1 ] && n1=$((n1 + 1)) || n2=$((n2 + 1)); }
     done <<SITREP_FINDINGS
 $got
 SITREP_FINDINGS
   done <<SITREP_READINGS
 $reads
 SITREP_READINGS
-  echo "$n"
+  echo "$n1 $n2"
 }
 
 # sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`), then `N<TAB><count>`
@@ -813,6 +817,10 @@ sitrep_render() {
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
   nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
   lr="$(landing_report "$rec" "$root" yes 2>/dev/null)"; lr1="${lr%%$'\n'*}"
+  # a goal decision whose goal now reads reached is closed in fact, whether or not the tick has closed it yet
+  local gk gt
+  gk="$(plan_goals_read "$plan" "$rec" "$lr" | awk -F'\t' '$1 == "reached" { print $2 }' | while IFS= read -r gt; do printf 'decide:goal:%s ' "$(plan_goal_slug "$gt")"; done)"
+  [ -z "$gk" ] || owed="$(printf '%s\n' "$owed" | awk -F'\t' -v ks="$gk" 'BEGIN { n = split(ks, a, " "); for (i = 1; i <= n; i++) drop[a[i]] = 1 } !($1 in drop)')"
   # the schedule's bar half reads the one-file landings alone (lib/plan.sh), so a landing of many files moves it not
   lmed="$(plan_one_file_median "$plan" "$lr")"; lmed="${lmed%%	*}"
   appr_at="$(sitrep_approved_at "$plan")"
@@ -874,8 +882,9 @@ sitrep_render() {
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
           } | awk -F'\t' -v dlv="${dlv_at:+yes}" "$_ROW_SHORT_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function words(r) {   # a read, in words: an approval is the person'"'"'s, a step its number
+    function words(r) {   # a read, in words: an approval is the person'"'"'s, a step its number, a proof its facts
       sub(/^live:/, "", r)
+      if (index(r, "proof:") == 1) { sub(/: .*$/, "", r); return "the " substr(r, 7) " facts at the head" }
       if (index(r, "approval:") == 1) return "your approval of " substr(r, 10)
       if (index(r, "step:") == 1) return "step " substr(r, 6)
       return r
@@ -984,31 +993,36 @@ SITREP_SIT
   [ -z "$pace" ] || IFS='	' read -r s_med s_decl ratio <<< "$pace"
   IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$landed" "$total" "$now" "$lmed")"
   s_text="$s_mark $s_text"
-  local lred="${lr1#*· runs: green=}" s12 c_reds c_find
+  local lred="${lr1#*· runs: green=}" s12 s1n s2n c_reds c_find
   case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
   case "$lred" in ''|*[!0-9]*) lred=0 ;; esac
-  s12="$(sitrep_open_s12 "$plan" "$root")"
+  s12="$(sitrep_open_s12 "$plan" "$root")"; s1n="${s12% *}"; s2n="${s12#* }"; s12=$((s1n + s2n))
   if [ "${nred:-0}" -gt 1 ]; then c_reds="$nred red suites at head"
   elif [ "${nred:-0}" -eq 1 ]; then c_reds="1 red suite at head"
   elif [ "$lred" -gt 1 ]; then c_reds="$lred red suite runs, each answered by a later green"
   elif [ "$lred" -eq 1 ]; then c_reds="1 red suite run, answered by a later green"
   else c_reds="no red suite at head"; fi
-  if [ "${s12:-0}" -gt 1 ]; then c_find="$s12 open S1 or S2 findings"
-  elif [ "${s12:-0}" -eq 1 ]; then c_find="1 open S1 or S2 finding"
-  else c_find="no open S1 or S2 finding"; fi
+  # each open finding is named by its class: one class reads `2 open S2 findings`, both `2 open findings, one S1 and one S2`
+  if [ "$s12" -eq 0 ]; then c_find="no open S1 or S2 finding"
+  elif [ "$s1n" -eq 0 ] || [ "$s2n" -eq 0 ]; then
+    c_find="$s12 open $([ "$s1n" -gt 0 ] && echo S1 || echo S2) finding$([ "$s12" -gt 1 ] && echo s)"
+  else c_find="$s12 open findings, $(sitrep_count_word "$s1n") S1 and $(sitrep_count_word "$s2n") S2"; fi
   if [ "${nred:-0}" -gt 0 ] || [ "${s12:-0}" -gt 0 ]; then c_mark="$SITREP_MARK_OVER"
   elif [ "$lred" -gt 0 ]; then c_mark="$SITREP_MARK_NEAR"
   else c_mark="$SITREP_MARK_WITHIN"; fi
   c_text="$c_mark correctness — $c_reds; $c_find"
   # Waste: discarded runs over runs (landing_report's counts), idle-width minutes (fill-report's) over the
   # minutes the fill ledger spans (its first line to now while the run is open, else to its last line).
-  local rg rr rn rd w_disc w_idle
+  local rg rr rn rd rk w_disc w_idle
   case "$lr1" in
     *'· runs: green='*)
       rg="${lr1#*runs: green=}"; rg="${rg%% *}"; rr="${lr1#* red=}"; rr="${rr%% *}"
       rn="${lr1#* none=}"; rn="${rn%% *}"; rd="${lr1#* discarded=}"; rd="${rd%% *}" ;;
     *) rg=0 rr=0 rn=0 rd=0 ;;
   esac
+  # a run killed at the gate (rc over 128) is a wasted run, so the report's killed count is discarded too
+  rk="${lr1##*killed=}"; case "$rk" in ''|*[!0-9]*) rk=0 ;; esac
+  rd=$((rd + rk))
   d_pct="$(awk -v g="$rg" -v r="$rr" -v n="$rn" -v d="$rd" 'BEGIN { t = g + r + n + d; printf "%.4f\n", (t > 0) ? d * 100 / t : 0 }')"
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   elapsed="$(awk -v now="$now" -v open="$(run_open "$plan" && echo yes)" "$_PATROL_ISO_AWK"'
@@ -1100,7 +1114,10 @@ SITREP_SIT
         fi ;;
     esac
     nown=$((nown + 1))
-    blk="${blk}2	- $what: $det"$'\n'
+    case "$k" in
+      approve:*|waive:*) blk="${blk}2	- $what: $det"$'\n' ;;
+      *) blk="${blk}2	- $det"$'\n' ;;   # a decision, finding or gate: the item's own sentence, never its title beside it
+    esac
     whats="${whats}${what}"$'\n'
   done <<SITREP_OWED
 $owed
@@ -1120,9 +1137,21 @@ SITREP_OWED
   [ -z "$inflight" ] || parts="$(sitrep_list 5 $inflight) in flight"
   # shellcheck disable=SC2086
   [ -z "$blocked" ] || parts="${parts:+$parts; }$(sitrep_list 5 $blocked) blocked"
+  # THE STOPS AHEAD ARE NAMED, IN ORDER: while the review results card has no reply and an integrate row still
+  # waits, the card to the user stands between the tasks before that row and the row itself.
+  local intids nbefore="" nafter="" t seq
+  intids=" $(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } $3 == "integrate" && s == "pending" { printf "%s ", $1 }')"
+  if [ -n "$nextup" ] && ! /usr/bin/grep -qs '^replied: at=' "$recdir"/review-results-*.md; then
+    for t in $nextup; do
+      if [ -n "$nafter" ] || { [ "$intids" != " " ] && case "$intids" in *" $t "*) true ;; *) false ;; esac; }; then nafter="$nafter $t"; else nbefore="$nbefore $t"; fi
+    done
+  fi
   # shellcheck disable=SC2086
   if [ -n "$nextup" ]; then
-    if [ -n "$parts" ]; then parts="$parts; then $(sitrep_list 3 $nextup)"; else parts="$(sitrep_list 3 $nextup)"; fi
+    if [ -n "$nafter" ]; then
+      seq="${nbefore:+$(sitrep_list 3 $nbefore), then }the review results card to you, then $(sitrep_list 3 $nafter)"
+    else seq="$(sitrep_list 3 $nextup)"; fi
+    if [ -n "$parts" ]; then parts="$parts; then $seq"; else parts="$seq"; fi
   fi
   if [ -n "$parts" ]; then b_next="Next: $parts."
   elif [ -n "$dlv_at" ]; then b_next="Next: nothing; the run is delivered."
@@ -1140,11 +1169,10 @@ SITREP_OWED
   b_done="${sp}${sp:+${tp:+; }}${tp}"; b_done="Done: ${b_done:-nothing yet}."
 
   # ---- the page, each line with its continuation indent, folded at 92 columns
-  local proj title_rel steps_done gh grade_at grade_g grade_why gline
+  local proj title_rel gh grade_at grade_g grade_why gline
   proj="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
   case "$proj" in */.git) proj="${proj%/.git}"; proj="${proj##*/}" ;; *) proj="${root##*/}" ;; esac
   title_rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"
-  steps_done="${cur:-0}"; [ -z "$dlv_at" ] || steps_done=9; [ "$steps_done" -le 9 ] || steps_done=9
   gline=""
   if [ -f "$recdir/sitrep.log" ] && [ ! -L "$recdir/sitrep.log" ]; then
     gline="$(awk 'index($0, "sitrep-grade/v1|at=") == 1 { l = $0 } END { print l }' "$recdir/sitrep.log")"
@@ -1159,7 +1187,7 @@ SITREP_OWED
   fi
   {
     printf '0\tSitrep · %s%s · %s · step %s of 9%s\n' "$proj" "${title_rel:+ $title_rel}" "$(sitrep_date "$now" '%A %-I:%M %p')" \
-      "${cur:--}" "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done' "$landed" "$total")"
+      "${cur:--}" "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done (%d%%)' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) )))"
     printf '0\t\n0\tBottom line\n'
     printf '2\t- %s\n' "$b_owe" "$b_next" "$b_done" "Close: $btext."
     printf '0\t\n0\tTask list\n'
@@ -1182,9 +1210,6 @@ SITREP_SIT
     [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
     printf '0\t\n0\tBlocked on you\n'
     if [ -n "$blk" ]; then printf '%s' "$blk"; else printf '2\t- Nothing: no decision or action is owed by you.\n'; fi
-    printf '0\t\n0\tCompletion\n2\t- %s of 9 steps.\n' "$steps_done"
-    if [ "$total" -gt 0 ]; then printf '2\t- %d of %d tasks done (%d%%).\n' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) ))
-    else printf '2\t- No tasks defined yet; the plan is not written.\n'; fi
     printf '0\t\n0\tPredicted close\n'
     for k in "$@"; do printf '2\t- %s\n' "$k"; done
   } | sitrep_fold

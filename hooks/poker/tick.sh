@@ -441,14 +441,19 @@ TOA
 # A GOAL'S FIRST MISS IS A DECISION THE PERSON OWES, NEVER A NOTE. Every goal the plan declares is read through
 # lib/plan.sh `plan_goals_read`; one read missed opens `decide:goal:<theme>` on the person's ledger (lib/owed.sh),
 # carrying the reading, and the tick says it once. A key the ledger already holds, open or closed, opens nothing: the
-# person's ruling on a miss stands, so a later tick on the same miss puts no second decision.
+# person's ruling on a miss stands, so a later tick on the same miss puts no second decision. A goal that reads
+# reached closes its item if one is open, so a miss the run recovered from stops asking.
 tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per goal it opens
   local f st t m rd k
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
   f="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file 2>/dev/null)" || return 0
   while IFS='	' read -r st t m rd; do
-    [ "$st" = missed ] || continue
     k="decide:goal:$(plan_goal_slug "$t")"
+    if [ "$st" = reached ]; then
+      declare -F owed_close >/dev/null 2>&1 && OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_close "$k" "goal reached" >/dev/null 2>&1
+      continue
+    fi
+    [ "$st" = missed ] || continue
     [ -f "$f" ] && /usr/bin/grep -qF "|key=$k|" "$f" 2>/dev/null && continue
     OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "$k" "Goal missed: $t" "poker: GOAL $t missed — $m: $rd; keep the target or change course" >/dev/null 2>&1 \
       && say "GOAL $t missed — $m: $rd; owed: $k"
