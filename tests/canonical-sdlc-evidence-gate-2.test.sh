@@ -894,6 +894,14 @@ OD_S3="$(od_state)"
 expect_true "HL-1 a hand landing M with no verdict recorded is not covered (HL-2 reads the same extractor)" test -n "$OD_S3" -a "$OD_S3" != covered
 printf 'line/v1|ev=verdict|row=T7|commit=%s|suite=b.test.sh|result=green|log=/fixture/T7.log|at=2026-10-12T12:20:00Z\n' "$OD_R" >> "$(od_lrec)"
 expect_eq "HL-2 AC-6.2 …and covered by the row's green verdict keyed by the row head M brought in" "covered" "$(od_state)"
+od_git checkout -q -b row/T8; printf 'four\n' > "$OD/lib/b.sh"; od_git commit -qam 'T8: a third fix'; OD_R2="$(od_git rev-parse HEAD)"
+od_git checkout -q wave/01-fixture; od_git merge -q --no-ff -m 'land T8 by hand' row/T8; OD_M2="$(od_git rev-parse HEAD)"
+{ printf 'line/v1|ev=ready|row=T8|commit=%s|suites=none|at=2026-10-12T12:30:00Z\n' "$OD_R2"
+  printf 'line/v1|ev=published|row=T8|commit=%s|kind=hand|by=Fixture|at=2026-10-12T12:31:00Z\n' "$OD_M2"; } >> "$(od_lrec)"
+OD_S4="$(od_state)"
+expect_true "HL-3 a hand landing whose ready says none, with no verdict recorded, is not covered (HL-4 reads the same extractor)" test -n "$OD_S4" -a "$OD_S4" != covered
+printf 'line/v1|ev=verdict|row=T8|commit=%s|suite=b.test.sh|result=green|log=/fixture/T8.log|at=2026-10-12T12:32:00Z\n' "$OD_R2" >> "$(od_lrec)"
+expect_eq "HL-4 …and covered once the verdicts the row recorded name a green suite at the row head" "covered" "$(od_state)"
 
 printf '# fixture\n' > "$OD/README.md"; od_git add README.md; od_git commit -qm 'T4: the release'; OD_A="$(od_git rev-parse HEAD)"
 od_reads() {  # the five readings a double wave plan is dealt, at A
