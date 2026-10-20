@@ -173,8 +173,8 @@ for T75_SHAPE in userline useronly envten; do
       expect_contains "${T75_L}: …named by its lines as changed since bionic wrote it" "$T75_LINES" "$(report_row "$T75_OUT" "changed since bionic wrote it")"
       expect_absent "${T75_L}: …the user's text is never printed" "SECRETTOKEN" "$T75_OUT"
       case "${T75_D%%:*}" in
-        setup-all) expect_eq "${T75_L}: …and the page does not offer it" \
-                     "$(case "$T75_SH" in zsh) echo "$T75_PG_zsh" ;; *) echo "$T75_PG_bash" ;; esac)" "$(t75_page_n "$T75_OUT")" ;;
+        setup-all) T75_PG="$T75_PG_bash"; [ "$T75_SH" = zsh ] && T75_PG="$T75_PG_zsh"
+                   expect_eq "${T75_L}: …and the page does not offer it" "$T75_PG" "$(t75_page_n "$T75_OUT")" ;;
         *) expect_absent "${T75_L}: …and nothing is asked" "[y/N]" "$T75_OUT" ;;
       esac
     done
