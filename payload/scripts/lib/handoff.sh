@@ -138,16 +138,16 @@ handoff_compose() {
 # and service keys (`sk-ant-…`, `sk-…`), GitHub tokens (`ghp_…` and its kin, `github_pat_…`), AWS access key ids
 # (`AKIA…`), Slack tokens (`xox?-…`), JSON web tokens, a bearer token's value, the value of a key, token, secret or
 # password assignment (`password=…`), and a private key's armour line; a mail address becomes `[address redacted]`.
-# Each shape starts at a word's edge and has a floor length, so a word like `task-scale` is never one. A commit id
+# Each shape starts at a word's edge and has a minimum length, so a word like `task-scale` is never one. A commit id
 # is no secret, and is kept.
 handoff_redact() {  # <count file>
   LC_ALL=C awk -v cf="${1:-/dev/null}" '
-    function sweep(s, re, floor, rep,    out, m, c) {
+    function sweep(s, re, least, rep,    out, m, c) {
       out = ""
       while (match(s, re)) {
         m = substr(s, RSTART, RLENGTH); c = ""
         if (substr(m, 1, 1) ~ /[^A-Za-z0-9_]/) { c = substr(m, 1, 1); m = substr(m, 2) }
-        if (length(m) >= floor) { out = out substr(s, 1, RSTART - 1) c rep; red++ }
+        if (length(m) >= least) { out = out substr(s, 1, RSTART - 1) c rep; red++ }
         else out = out substr(s, 1, RSTART + RLENGTH - 1)
         s = substr(s, RSTART + RLENGTH)
       }

@@ -1579,12 +1579,14 @@ STEP9
 STEP9
 }
 
-# THE HANDOFF FILE IS THE STORE (wave-38 T12; D23). The closed form is written into the run's handoff file — the
-# one the plan's `## Handoff` pointer names, else record/<wave>/handoff.md — as its line 2, under the kind line, with
-# the five human lines the file already holds kept; the plan's section becomes the one pointer line
-# `handoff: <path> written <local time>`. The file's grammar is session-poker.sh `handoff`'s closed form, line for
-# line, the door last. Which file is lib/handoff.sh `handoff_file_of`'s answer (wave-39 T16; D18, AC-12.1): the
-# poker's heading test, the path relative to this project's root, the same reader the poker's handoff readers ask.
+# THE HANDOFF DOCUMENT IS THE STORE. The closed run's document goes to the run's handoff file, the one the plan's
+# `## Handoff` pointer names, else the run's home file in the handoffs folder (lib/handoff.sh `handoff_file_of`, the
+# one answer every handoff reader asks). It is the document session-poker.sh `handoff` writes, in its shape: the kind
+# line, the title, the sections in their order, the door last. Its State is the closed run's, and its two closed
+# lines are `closed-form`'s, the branch line under the verb's `working branch:` label. A section a session composed
+# into that document before the close is kept as it stands, title included; a section it lacks is the one line
+# `- none.`. The page is not folded: every reader joins a folded line back, so a long line reads the same. The plan's
+# section becomes the one pointer line `handoff: <path> written <local time>`.
 CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
   [ -z "$CO_HO_FILE" ] || return 0
@@ -1601,36 +1603,45 @@ handoff_block() {
 handoff: $CO_HO_REL written $CO_HO_LOCAL
 HANDOFF
 }
-co_handoff_closed() {  # -> 0 when the handoff file's line 2 is the closed form
+co_handoff_closed() {  # -> 0 when the handoff document's resume point is the closed one
   co_handoff_where
   [ -f "$CO_HO_FILE" ] || return 1
-  case "$(sed -n 2p "$CO_HO_FILE" 2>/dev/null)" in 'resume point: NONE — DELIVERED at '*|'resume point: PARKED on '*) return 0 ;; esac
+  case "$(handoff_line "$CO_HO_FILE" "resume point")" in 'resume point: NONE — DELIVERED at '*|'resume point: PARKED on '*) return 0 ;; esac
   return 1
 }
-co_handoff_write() {  # -> writes the closed form to the handoff file, the five human lines kept; rc 1 not written
-  local main_sha k got human="" tmp
+co_handoff_write() {  # -> writes the closed document to the handoff file, a session's sections kept; rc 1 not written
+  local src=/dev/null title="" tmp
   co_handoff_where
-  main_sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  for k in mid-flight order rulings lessons risks; do
-    got=""
-    [ -f "$CO_HO_FILE" ] && got="$(awk -v k="$k: " 'f { if ($0 ~ /^[ \t]/) { print; next } exit } index($0, k) == 1 { f = 1; print }' "$CO_HO_FILE" 2>/dev/null)"
-    [ -n "$got" ] || got="$k: (to fill)"
-    human="${human:+$human
-}$got"
-  done
   mkdir -p "${CO_HO_FILE%/*}" 2>/dev/null || return 1
   [ ! -L "$CO_HO_FILE" ] || return 1
+  if [ -f "$CO_HO_FILE" ] && [ "$(sed -n 1p "$CO_HO_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+    title="$(sed -n '2{/^Handoff · /p;}' "$CO_HO_FILE" 2>/dev/null)"
+    [ -z "$title" ] || src="$CO_HO_FILE"
+  fi
+  [ -n "$title" ] || title="Handoff · ${ROOT##*/} · $(date '+%A %-I:%M %p') · $WAVE_SLUG · closed"
   tmp="$CO_HO_FILE.close-out.$$"
   {
-    printf 'bionic-handoff/v1\n'
-    printf '%s\n' "$(co_resume_point)"
-    printf 'written: %s\n' "$CO_HO_WRITTEN"
-    printf 'plan: %s\n' "${PLAN#"$ROOT"/}"
-    printf '%s\n' "$(co_branch_line)"
-    printf 'patrol: %s\n' "$PATROL_LINE"
-    printf 'continuation: %s\n' "$CONT_REL"
-    printf '%s\n' "$human"
-    printf 'safe to clear\n'
+    printf 'bionic-handoff/v1\n%s\n\n' "$title"
+    CO_HO_STATE="$(printf 'written: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
+        "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
+        "$CONT_REL" "$PATROL_LINE")" \
+      awk -v secs="$HANDOFF_SECTIONS" '
+        BEGIN { n = split(secs, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1 }
+        FNR <= 2 { next }
+        ($0 in H) { cur = $0; next }
+        $0 == "" { cur = ""; next }
+        cur != "" { B[cur] = B[cur] $0 "\n" }
+        END {
+          for (i = 1; i <= n; i++) {
+            if (h[i] == "Resume") break
+            print h[i]
+            if (h[i] == "State") print ENVIRON["CO_HO_STATE"]
+            else if (B[h[i]] != "") printf "%s", B[h[i]]
+            else print "- none."
+            print ""
+          }
+          print "Resume"
+        }' "$src"
     printf '/bionic:canonical-sdlc %s\n' "$CO_HO_REL"
   } > "$tmp" 2>/dev/null && mv -f "$tmp" "$CO_HO_FILE" 2>/dev/null && return 0
   rm -f "$tmp" 2>/dev/null
