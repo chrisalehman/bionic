@@ -848,7 +848,7 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   # THE PROMISE, PRINTED (wave-39 T8; D11, AC-4.3): once, before the carrier starts, the seconds the row's suites
   # promise now against the --within it was given. A suite whose promise the time left cannot hold is waited,
   # never started short (`_line_time_for`, D3); this line says the sum up front. No --within, no line.
-  [ -z "$within" ] || printf 'promised %ss of %ss\n' "$(_line_promise_total "$suites" "$wt")" "$((10#$within))"
+  [ -z "$within" ] || printf 'promised %ss of %ss\n' "$(_line_promise_total "$suites" "$wt" "$root" "$acc" "$head")" "$((10#$within))"
   LINE_SID="$sid"   # the session the publish's plan write and roster mark run under (T6)
   _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
@@ -913,12 +913,15 @@ _line_width_why() {  # -> the gate's answer of 0 to this landing, naming the old
 }
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 # The seconds <suites> promise now, summed: each one's `_gate_promise` from <tree>'s project, as `_line_time_for`
-# reads it (wave-39 T8; D11, AC-4.3). 0 for a suite with no recorded duration, and when the store cannot be read.
-_line_promise_total() {  # <suites, comma-joined | none> <tree>
-  local s p t=0
+# reads it. 0 for a suite with no recorded duration, and when the store cannot be read. A
+# suite the candidate will not hold, as its merge decides it (`_line_merge_holds`), promises nothing.
+_line_promise_total() {  # <suites, comma-joined | none> <tree> <root> <accepted head> <row head>
+  local s p mb t=0
   _gate_store >/dev/null 2>&1 || { echo 0; return 0; }
+  mb="$(git -C "$3" merge-base "${4:-}" "${5:-}" 2>/dev/null)"
   for s in $(printf '%s\n' "$1" | tr ',' ' '); do
     [ "$s" != none ] || continue
+    _line_merge_holds "$3" "$mb" "${4:-}" "${5:-}" "$s" || continue
     p="$(_gate_promise "$(_line_gate_key "$s")" "${2:-}" 2>/dev/null)"; p="${p##*:}"
     case "$p" in ''|*[!0-9]*) p=0 ;; esac
     t=$((t + p))
