@@ -677,6 +677,8 @@ SR_SHAPE="$(sr_shape)"
 expect_eq "O2 …its headings, in order, the prototype's" \
   "Bottom line|Task list|Score: <grade> (graded <time>)|Blocked on you|Predicted close" "$(printf '%s\n' "$SR_SHAPE" | sr_heads)"
 expect_eq "O3 …and no rule line in the shape (the same block O1 read)" "" "$(printf '%s\n' "$SR_SHAPE" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
+expect_eq "O3b the skill shows the page in one code block and stops: it names no confirmation line to quote under it" "yes|0" \
+  "$(/usr/bin/grep -q 'inside one fenced code block' "$SR_SKILL" && echo yes)|$(/usr/bin/grep -ci 'confirmation line' "$SR_SKILL")"
 sr_world skill "6 6 12 12"
 sr_run grade C 'the schedule line holds; nothing else is graded yet' "$SR_PLAN"
 sr_run "$SR_PLAN"; printf '%s\n' "$OUT" > "$TMPROOT/page.txt"
