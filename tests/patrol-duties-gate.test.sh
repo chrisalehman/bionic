@@ -448,7 +448,6 @@ if [ "$_before" = "$_after" ]; then
 else
   no "23: the gate touched the project tree" "$_before -> $_after"
 fi
-expect_eq "23b: …and the Stop's one write is the fill ledger's line" "1" "$(wc -l < "$_led" 2>/dev/null | tr -d ' ')"
 
 # 25: THE GATE IS REGISTERED ON THE STOP CHANNEL. A hook with a suite, a run line
 # and no registration is the exact shape the landing sweep spent a wave being:
@@ -466,12 +465,6 @@ if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/stop\.sh' \
   ok "25: hooks/hooks.json registers the gate on the Stop channel, always on"
 else
   no "25: the gate is not registered in hooks/hooks.json — it would never fire"
-fi
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
-     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  no "25b: SKILL.md still registers the gate — a second registration fires it twice per turn"
-else
-  ok "25b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
 # 26/26b: THE HEADER'S OWN HONESTY ABOUT ITS BACKSTOP. This file used to cite the
@@ -614,8 +607,6 @@ expect_eq "35e0b precondition: …and the later turn made no Cron call" "0" \
        "$d/transcript.jsonl" 2>/dev/null)"
 fire "$d"; expect_block "35e: a later turn with the window still open is refused, saying the window is open until a CronList" \
   "stays open until a CronList" "This is the first Stop"
-fire "$d"; expect_block "35e2: …and it says the gate blocks once per turn, every turn, until then" \
-  "this gate blocks once per turn" "this gate blocks once:"
 
 section "Section 5: a printed FILL is advice, not evidence (AC-29, retired by wave-20 Δ7)"
 

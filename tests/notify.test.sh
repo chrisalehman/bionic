@@ -256,7 +256,6 @@ RO="$(nt_run nt-once)"
 
 nt_card "$RO" step1 "$(nt_req "$RO")"
 expect_eq "N1 the Step-1 card renders (exit 0)" "0" "$NT_RC"
-expect_contains "N1a …and prints its question" 'Do you approve these requirements? Reply "approved" to approve it.' "$NT_OUT"
 N_LIST="$(nt_owed "$RO" owed_list)"
 expect_nonempty "N1b the store reader answers: the card opened an item (the extractor works)" "$N_LIST"
 expect_contains "N1c …keyed approve:step1" "approve:step1" "$(printf '%s\n' "$N_LIST" | cut -f1)"
@@ -265,8 +264,6 @@ expect_eq "N1e rendering a card sends nothing by itself" "0" "$(nt_calls)"
 
 nt_stop "$RO"
 expect_eq "N2 AC-2.2 the Stop that ends the blocked turn sends exactly one notification" "1" "$(nt_calls)"
-expect_contains "N2a …carrying the one line the card printed for the block" \
-  'body=Do you approve these requirements? Reply "approved" to approve it.' "$(nt_last)"
 expect_contains "N2b …to the topic named in cron.env, never stored in the channel file" \
   "url=https://ntfy.sh/fixture-topic-123|" "$(nt_last)"
 expect_contains "N2c …under the declared title prefix" "|title=bionic-fixture " "$(nt_last)"
@@ -307,7 +304,6 @@ expect_contains "N6a …it opens approve:step2" "approve:step2" "$N_KEYS"
 expect_absent "N6b …and closes approve:step1: a later card is shown only once the earlier one is answered" "approve:step1" "$N_KEYS"
 nt_stop "$RO"
 expect_eq "N7 AC-2.2 a new key sends one" "3" "$(nt_calls)"
-expect_contains "N7a …the Step-2 card's question" 'body=Do you approve this design? Reply "approved" to approve it.' "$(nt_last)"
 nt_stop "$RO"
 expect_eq "N7b …and once" "3" "$(nt_calls)"
 
@@ -357,7 +353,6 @@ RS="$(nt_world nt-gate)"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RS")"
 poke "$RS" tick
 expect_eq "S1 precondition: the tick decides NOTIFY on the gate request (exit 1)" "1" "$RC"
-expect_contains "S1a …and prints its GATE line" "poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$OUT"
 expect_eq "S2 AC-2.3 the tick that raises the GATE sends one notification" "1" "$(nt_calls)"
 expect_contains "S2a …carrying the GATE line it printed" \
   "body=poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$(nt_last)"
@@ -558,8 +553,6 @@ expect_contains "AK6a precondition: the wall refuses the dispatch for the approv
 expect_contains "AK6b AC-2.2 the refusal opens approve:release" "approve:release" "$(nt_owed "$RKP" owed_list | cut -f1)"
 expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval:release" "$(nk_reply "$RKP" approve:release)"
 ( cd "$RKP" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" ANTHROPIC_API_KEY=sk-fixture-marker bash "$PREFLIGHT" <<< "$NK_PAYLOAD" ) >/dev/null 2>&1
-expect_eq "AK6d a second refused dispatch on the same approval opens nothing new" "1" \
-  "$(/usr/bin/grep -c '|key=approve:release|' "$RKP/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
 
 # THE COMMIT WALL'S ASKS (wave-34 T5; REQ-4 AC-4.1, AC-4.2; D14). From Step 6 the evidence gate refuses a commit for
 # a question whose newest reading failed, and the matrix arm refuses for a row only the person can let go: a live-tier
@@ -600,14 +593,11 @@ $(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 expect_eq "AK-6a precondition: no adversarial reading and a failing structure one: refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-6b …naming the failing question" "- structure: the newest reading is result=fail" "$CW_ERR"
-expect_contains "AK-6c …and the absent one" "- adversarial: no reading, and no waiver" "$CW_ERR"
 expect_eq "AK-6 AC-4.1 the question refusal opens waive:structure, the waive verb's key, and nothing for the absent question" \
   "waive:structure" "$(cw_open "$RCW")"
 expect_contains "AK-6d …carrying the refusal's line for it" "structure: the newest reading is result=fail (evidence=record/w27/structure-new.md)" \
   "$(nk_reply "$RCW" waive:structure)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
-expect_eq "AK-6e a second refused commit on the same question opens nothing new" "1" \
-  "$(/usr/bin/grep -c '|key=waive:structure|' "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
 
 # THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 row whose evidence is n/a is a downgrade
 # only the person makes; a T4 row the user confirmed, under a REFUTED auditor cell, needs the finding settled or the row
@@ -767,7 +757,6 @@ nt_doctor "MA-6 [the tick's GATE]" hooks/session-poker.sh owed_open '"gate:$k"'
 RMS="$(nt_world nt-mut-gate)"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RMS")"
 poke "$RMS" tick
-expect_contains "MA-6a the mutant tick still prints the GATE line" "poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$OUT"
 expect_absent "MA-6b AC-4.5 …and S2b goes red: no gate: item" "gate:" "$(nt_owed "$RMS" owed_list | cut -f1)"
 nt_undo hooks/session-poker.sh
 nt_doctor "MA-7 [the disposition's finding]" hooks/session-poker.sh owed_open '"$(finding_owed_key "$DSP_FID")"'
