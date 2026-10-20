@@ -845,4 +845,22 @@ expect_eq "NX2 …the card replied: Next is still there, and names no stop" "1|0
   "$(sr_line '- Next: ' | /usr/bin/grep -c 'then')|$(sr_line '- Next: ' | /usr/bin/grep -c 'review results card')"
 
 
+# ============================================================
+section "§OPEN-DECISION: a decision put to the user and not yet ruled is owed by the user, on the page and in the one-line form"
+# ============================================================
+sr_world open-dec "6 6 12 12"
+sr_bind
+printf '# Design ledger — wave-02-fx\n\n## Δ0 — D19 put (orchestrator 2026-10-20 6:44 AM PDT): the regression rule the judge holds\n\nAnswered now or in an hour.\n' > "$SR_DIR/design-ledger.md"
+sr_run "$SR_PLAN"
+expect_eq "OD1 one put with no ruling: You owe counts it" "- You owe 1: reply to D19." "$(sr_line '- You owe')"
+expect_eq "OD2 …Blocked on you prints one sentence with its number, its title and the reply asked" \
+  "- D19 · the regression rule the judge holds: reply with the option number" "$(sr_sect 'Blocked on you' | sr_join)"
+sr_run --line "$SR_PLAN"
+expect_eq "OD3 …the one-line form's owed number counts it" "owed: 1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'owed: [0-9]+')"
+printf '\n## Δ1 — D19 ruled "2" (Chris Lehman 2026-10-20): the regression rule the judge holds\n' >> "$SR_DIR/design-ledger.md"
+sr_run "$SR_PLAN"
+expect_eq "OD4 the same decision ruled: the page owes nothing and says so, and the decisions line reads it ruled" \
+  "- You owe nothing now.|- Nothing: no decision or action is owed by you.|yes" \
+  "$(sr_line '- You owe')|$(sr_sect 'Blocked on you' | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'decisions — 1 ruled in 1 round;' && echo yes)"
+
 finish
