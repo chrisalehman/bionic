@@ -1314,8 +1314,8 @@ sitrep_grade() {
   # (lib/handoff.sh `handoff_redact`) and folds at 92 columns (sitrep_fold); the last line is never folded: bound,
   # `/bionic:canonical-sdlc <path>`, the door that rebinds the run; with no run, `Read <path> whole, then do Next 1.`
   # There is no safe-to-clear line: the source session is disposable, and anything in flight is in State.
-  # Bound, the plan's `## Handoff` becomes the heading and one pointer line, through the plan transaction, plan
-  # first. REFUSED (2), nothing written: the file's path a link or a directory;
+  # Bound, the plan's `## Handoff` then becomes the heading and one pointer line, through the plan transaction,
+  # best-effort: the document is in place first. REFUSED (2), nothing written: the file's path a link or a directory;
   # (1) a bound open plan with no `## Tasks` or no `## SDLC State`.
   poker_verb_handoff() {
     HO_IN=""; [ -t 0 ] || HO_IN="$(cat)"
@@ -1494,7 +1494,7 @@ sitrep_grade() {
       if [ -n "$HO_RUNS" ]; then printf '2\trunning (%s):\n' "$HO_N_RUN"; printf '%s\n' "$HO_RUNS" | awk '{ print "4\t" $0 }'
       else printf '2\trunning: none\n'; fi
       if [ "$HO_N_AG" -gt 0 ]; then printf '2\tagents (%s): %s\n' "$HO_N_AG" "$HO_VER"; printf '%s\n' "$HO_AGENTS" | awk '{ print "4\t" $0 }'
-      else printf '2\tagents: none — %s\n' "$HO_VER"; fi
+      else printf '2\tagents: none (%s)\n' "$HO_VER"; fi
       [ "$HO_MODE" != none ] || return 0
       printf '2\tplan: %s\n' "$HO_PLAN_REL"
       if [ "$HO_MODE" = closed ]; then
@@ -1545,7 +1545,17 @@ sitrep_grade() {
       printf '%s\n' "$HO_LAST"
       exit 0
     fi
-    # THE POINTER: the section's whole body is one line, rewritten in place or created before ## Not Doing.
+    # THE DOCUMENT FIRST, ALWAYS; THE POINTER AFTER, AND ONLY IF THE PLAN TAKES IT. The source session may be dying,
+    # so nothing about the plan may cost it the document: the file is moved into place before the plan is touched.
+    # The plan's `## Handoff` then becomes one line, rewritten in place or created before ## Not Doing, through the
+    # plan transaction (its dry commit through the real gate); when the gate or the rewrite refuses, one line says the
+    # pointer was not written and why, the plan is left as it was, and the verb still exits 0.
+    if ! mv -f "$HO_TMP" "$HO_FILE" 2>/dev/null; then
+      die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
+      exit 2
+    fi
+    say "$HO_SAY"
+    printf '%s\n' "$HO_LAST"
     HO_PTR="handoff: $HO_REL written $(handoff_local_time "$HO_NOW")"
     PV_RC=0
     HO_PTR="$HO_PTR" awk "$_HANDOFF_SEC_AWK"'
@@ -1566,20 +1576,17 @@ sitrep_grade() {
         }
         print
       }' "$PV_PLAN" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    if [ "$PV_RC" -ne 0 ]; then
-      die "REFUSED — the handoff cannot be written (awk exit $PV_RC); the plan is unchanged."
-      exit 2
-    fi
     HO_DRY=writer; [ "$HO_MODE" != closed ] || HO_DRY=as-is
-    # The plan first, then the file: a refused plan leaves no file pointing nowhere. A pointer the plan already
-    # carries (the same path, the same minute) needs no transaction, and the file is still rewritten.
-    cmp -s "$PV_NEW" "$PV_PLAN" || plan_verb_swap handoff "the handoff pointed at $HO_REL" "$HO_DRY"
-    if ! mv -f "$HO_TMP" "$HO_FILE" 2>/dev/null; then
-      die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
-      exit 2
+    HO_NOPTR=""
+    if [ "$PV_RC" -ne 0 ]; then
+      HO_NOPTR="its rewrite failed (awk exit $PV_RC)"
+    elif ! cmp -s "$PV_NEW" "$PV_PLAN"; then
+      HO_SWAP="$( ( plan_verb_swap handoff "the handoff pointed at $HO_REL" "$HO_DRY" ) 2>&1 )" || {
+        HO_NOPTR="$(printf '%s\n' "$HO_SWAP" | sed -n 's/^poker: //p' | awk 'NF { print; exit }')"
+        [ -n "$HO_NOPTR" ] || HO_NOPTR="the plan transaction refused it"
+      }
     fi
-    say "$HO_SAY"
-    printf '%s\n' "$HO_LAST"
+    [ -z "$HO_NOPTR" ] || say "handoff — the plan's ## Handoff pointer was not written: $(clean "${HO_NOPTR:0:240}")"
     exit 0
   }
 

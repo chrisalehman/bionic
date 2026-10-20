@@ -406,6 +406,13 @@ expect_eq "PT4b …the same run's file, the purpose in its title" \
   "Handoff · hf-state · Tuesday 3:00 PM · wave-01-fixture · for the next session reviews T2" "$(sed -n 2p "$HF_F")"
 expect_eq "PT4c …and still one pointer line" "1" "$(hf_section "$HF_P" | grep -c .)"
 expect_eq "PT4d …the rest of the plan is as it was" "$(hf_outside "$TMPROOT/s42-before")" "$(hf_outside "$HF_P")"
+# The document first, always: a plan the gate refuses (its requirements file gone) costs the pointer, never the file.
+hf_world pointer-refused no
+rm -f "$HF_R/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "PT5 a plan the gate refuses: exit 0, the document written whole, one line saying the pointer was not written, the plan unchanged" \
+  "0|$HF_HEADS|/bionic:canonical-sdlc $HF_DOOR|3|yes|yes" \
+  "$RC|$(hf_heads "$HF_F")|$(tail -1 "$HF_F")|$(printf '%s\n' "$OUT" | grep -c . | tr -d ' ')|$(printf '%s\n' "$OUT" | tail -1 | grep -q "pointer was not written" && echo yes || echo no)|$(cmp -s "$TMPROOT/s42-before" "$HF_P" && echo yes || echo no)"
 
 # ============================================================
 section "§CLOSED: handoff on a delivered or parked plan writes the same document, its State saying where the run closed; the pointer stays"
