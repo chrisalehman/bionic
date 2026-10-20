@@ -956,4 +956,45 @@ expect_contains "VG-5c control: a code commit after them is past the approval: c
   "is not the head the user approved for release, ${VG_C2:0:12}" "$OUT"
 POKE_BOUND="$VG_BOUND_WAS"
 
+
+# ============================================================
+section "§REPLY-SEQ: one reply orders the review results' decisions in sequence, each applied in order and recorded"
+# ============================================================
+# FIXTURE FIDELITY. §STEP-FIELD's plan at its working head, its reading's record given one S3 finding; the page's
+# record carries the replay table in its writer's row shape (review-results.test.sh §SHAPE pins that row). Decision 1's
+# default names a row the plan lacks, so taking it refuses; 2 waives AC-1.1; 3 moves the finding. The user's words
+# stand in a transcript of this session under a config dir of this section's own.
+RS_H="$(git -C "$RVG" rev-parse wave/01-fixture)"; RS_F="record/wave-01-fixture/past-waiver.md#1"; RS_P="$VG_DIR/review-results-${RS_H:0:8}.md"
+printf 'findings: 1\nfinding: 1 S3 off lib/a.sh:1 a side path\n' >> "$VG_DIR/past-waiver.md"
+rs_page() {  # <dec fields>... -> the page's record at the working head, one replay row each, numbered from 1
+  local n=0 l; printf 'Review results\n\n## Replay\n\nreview-results/v1|plan=%s|head=%s|at=2026-10-20T00:00:00Z|decisions=%s\n' "$PVG" "$RS_H" "$#" > "$RS_P"
+  for l in "$@"; do n=$((n + 1)); printf 'review-results/v1|dec=%s|%s\n' "$n" "$l" >> "$RS_P"; done
+}
+rs_done() { /usr/bin/grep -E '^(applied|withheld): ' "$RS_P" | paste -sd'|' -; }  # what the reply recorded, in order
+RS_TX="$TMPROOT/rs-cfg/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${S46_LIB%/*}" "$RVG")/$SID.jsonl"
+mkdir -p "${RS_TX%/*}"; export CLAUDE_CONFIG_DIR="$TMPROOT/rs-cfg"; RS_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RVG" > "$RVG/.bionic/tmp/loaded-$SID.state"
+{ cat "$RS_FX/frame.jsonl"; for l in '1 run, 3 fix, rest default' 'all recommended' '1 run, 4 fix, rest default' '1 fix, rest default'; do
+  jq -c --arg t "$l" '.message.content = $t' "$RS_FX/typed.jsonl"; done; } > "$RS_TX"
+RS_ROW='other=-|pick=default|choices=waive/run|why=not run on this release'
+RS_FIND="key=finding:$RS_F|default=-|other=finding-move $RS_F fix|pick=other|choices=carry/fix|why=fixed instead of carried"
+rs_page "key=row:AC-9.1|default=waive-row AC-9.1|$RS_ROW" "key=row:AC-1.1|default=waive-row AC-1.1|$RS_ROW" "$RS_FIND"
+s42_snap "$RVG" "$PVG"
+poke "$RVG" reply '1 run, 4 fix, rest default'
+s42_unchanged "RS-1 an item naming a decision the page does not hold refuses the whole reply" 1 "$PVG"
+expect_eq "RS-1b …naming the item, nothing recorded on the page" "1|" "$(printf '%s' "$OUT" | /usr/bin/grep -c '"4 fix"')|$(rs_done)"
+poke "$RVG" reply '1 fix, rest default'
+s42_unchanged "RS-2 an item naming a choice its decision does not offer refuses the whole reply" 1 "$PVG"
+expect_eq "RS-2b …naming the item and the two it offers, nothing recorded" "1|" "$(printf '%s' "$OUT" | /usr/bin/grep -c '"1 fix".*waive.*run')|$(rs_done)"
+poke "$RVG" reply '1 run, 3 fix, rest default'
+expect_eq "RS-3 AC-13.3 '1 run, 3 fix, rest default': 1 run, 2 its default, 3 fixed, recorded in that order (exit 0)" \
+  "0|withheld: row:AC-9.1|applied: row:AC-1.1 waive-row rc=0|applied: finding:$RS_F finding-move rc=0" "$RC|$(rs_done)"
+expect_eq "RS-3b …AC-1.1 waived and the finding moved to fix, each on the user's words" "| waived |1" \
+  "$(/usr/bin/grep -oE '^\| AC-1\.1 \| [^|]* \| [a-z]+ \|' "$PVG" | /usr/bin/grep -oE '\| [a-z]+ \|$')$(/usr/bin/grep -cF "moved: $RS_F to=fix by=Dana Fixture at=" "$PVG")"
+rs_page "key=row:AC-9.1|default=waive-row AC-9.1|${RS_ROW/pick=default/pick=other}" "${RS_FIND/pick=other/pick=default}"
+poke "$RVG" reply 'all recommended'
+expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on each, in order (exit 0)" \
+  "0|withheld: row:AC-9.1|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
+
 finish
