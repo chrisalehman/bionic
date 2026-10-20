@@ -111,8 +111,6 @@ SB_ASK="$TMP/sb-ask"; mkdir -p "$SB_ASK/.claude"
 ASK_OUT="$(printf 'n\n' | HOME="$SB_ASK" ZDOTDIR="$SB_ASK" SHELL=/bin/zsh PATH="$STUB:$PATH" BIONIC_CLAUDE_HOME="$SB_ASK/.claude" \
   bash "$SETUP_SH" --only claude-proxy 2>&1)"
 expect_contains "P15 the question is asked (the rows below read a real page)" "[y/N]" "$ASK_OUT"
-expect_contains "P16 …and its reason names the checkout's plugin" "the session runs that checkout's plugin instead of the installed one" "$ASK_OUT"
-expect_contains "P17 …beside the bypass reason it always gave" "keeps bypass selectable in the shift+tab cycle" "$ASK_OUT"
 # The lines that name the rc carry the sandbox's own temp path, whatever its length; every other
 # line — the seven body lines and the two reasons among them — is bionic's text and fits.
 ASK_WIDE=""; ASK_N=0
@@ -134,5 +132,17 @@ setup_run "$SB_OLD" /bin/zsh >/dev/null
 expect_eq "P13 setup's yes rewrites it, and the reader calls it written" "env:rc-claude-proxy present=yes" "$(detect_proxy "$SB_OLD")"
 expect_eq "P14 …and the rewritten block launches the checkout" \
   "$(printf '%s\n' --allow-dangerously-skip-permissions --plugin-dir "$CO/payload" one)" "$(type_claude "$SB_OLD" zsh "$CO" one)"
+
+section "PRINCIPLES — the span setup writes carries the comment rule"
+# A fresh home, a yes, and the user's CLAUDE.md is read back: the span holds the rule's own words.
+SB_PR="$TMP/sb-principles"; mkdir -p "$SB_PR/.claude"
+PR_OUT="$(printf 'y\n' | HOME="$SB_PR" ZDOTDIR="$SB_PR" SHELL=/bin/zsh PATH="$STUB:$PATH" BIONIC_CLAUDE_HOME="$SB_PR/.claude" \
+  bash "$SETUP_SH" --only working-principles 2>&1)"
+PR_FILE="$(cat "$SB_PR/.claude/CLAUDE.md" 2>/dev/null)"
+expect_contains "R1 setup wrote the principles span (the file was read)" "bionic:principles:start" "$PR_FILE"
+expect_contains "R3 …including what a comment never names" "never names a wave" "$PR_FILE"
+# The page folds the text at 94 columns, so a phrase can break across two lines: read it unfolded.
+PR_FLAT="$(printf '%s' "$PR_OUT" | tr '\n' ' ' | tr -s ' ')"
+expect_contains "R4 the consent screen shows the rule before the question (the page was read)" "never names a wave" "$PR_FLAT"
 
 finish

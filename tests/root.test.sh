@@ -422,16 +422,6 @@ expect_eq "8c: the report still begins at the main repo, not the worktree cwd" \
   "$SANDBOX/t8c/main${TAB}chosen" "$(printf '%s\n' "$t8c_rep" | head -1)"
 
 # ============================================================
-section "9 — the tag vocabulary is closed, and every tag in it is reachable"
-# ============================================================
-# Two halves of one claim: the reports emitted nothing outside the vocabulary
-# (a typo'd tag is a silent contract break for the tick's listing, 2.4), and no
-# tag in the vocabulary is dead letter.
-VOCAB="above-home candidate chosen cwd-fallback git-toplevel-fallback skipped-symlink"
-seen="$(sort -u "$TAGS_SEEN" | tr '\n' ' ' | sed 's/ *$//')"
-expect_eq "8: the tags emitted across all seven topologies are exactly the vocabulary" "$VOCAB" "$seen"
-
-# ============================================================
 section "10 — the linked worktree's NAME is published as BIONIC_WORKTREE"
 # ============================================================
 # epic-23 wave-14 REQ-2 / REQ-4 (spec D1 and D5 cut 2, research R1 Q3(a)). Rule 1

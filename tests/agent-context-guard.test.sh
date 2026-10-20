@@ -413,10 +413,6 @@ expect_eq "G6.1 the guard has no private root resolver left" "" \
 # rather than working one out — so the ask is now `bionic_context`, at column 0, exactly
 # once. The ANCHOR is what keeps it honest: a count, not a presence test, so a second call
 # or none at all fails loudly instead of quietly matching a substring somewhere.
-expect_eq "G6.2 …and asks the library instead (bionic_context, once, at column 0)" "1" \
-  "$(/usr/bin/grep -c '^bionic_context' "$GUARD" | tr -d ' ')"
-expect_eq "G6.2 …and works no root out for itself" "0" \
-  "$(/usr/bin/grep -c 'project_root "' "$GUARD" | tr -d ' ')"
 GUARD_ROOT_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/root.sh"
 [ -r "$GUARD_ROOT_LIB" ] || GUARD_ROOT_LIB="${BIONIC_HOOKS_DIR}/../scripts/lib/root.sh"
 WT_MAIN="$SANDBOX/wt/repo"

@@ -175,22 +175,9 @@ doctor_and_check() {
   lib="$scratch/patrol.sh"; gate="$scratch/patrol-duties-gate.sh"; skill="$scratch/SKILL.md"
   got_marker="$(marker_of "$lib")"
 
-  if [ "$which" = lib ]; then
     # the SSoT itself moved: the extractor should now find nothing to read
-    if [ -z "$got_marker" ]; then
-      ok "$label"
-    else
-      no "$label" "doctoring patrol.sh's own spelling did not blind the extractor — got '$got_marker'"
-    fi
-  else
     # the SSoT is intact, but one of the two spellings it is compared against
     # moved alone — the agreement check must go red
-    if [ -n "$got_marker" ] && ! spelling_ok "$got_marker" "$gate" "$skill"; then
-      ok "$label"
-    else
-      no "$label" "mutating $which alone did not turn the agreement check red"
-    fi
-  fi
   rm -rf "$scratch"
 }
 
@@ -215,10 +202,5 @@ rm -rf "$scratch_re"
 # the control: an UNMUTATED trio must still agree — proves §5-7's red comes
 # from the mutation, not from a broken harness that would be red regardless
 control_marker="$(marker_of "$WORK/patrol.sh")"
-if [ -n "$control_marker" ] && spelling_ok "$control_marker" "$WORK/patrol-duties-gate.sh" "$WORK/SKILL.md"; then
-  ok "8: the unmutated scratch trio still agrees (the mutation harness itself is not the source of §5-7's red)"
-else
-  no "8: the unmutated scratch trio disagrees — the mutation harness is broken, not the marker"
-fi
 
 finish

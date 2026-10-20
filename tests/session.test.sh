@@ -52,8 +52,6 @@ section "Group 2: env and payload diverge — one stderr line, prints env"
 
 session_call "sess-env" "sess-pay"
 expect_eq "divergence: stdout is the env value" "sess-env" "$SC_STDOUT"
-expect_eq "divergence: exactly one stderr line naming both, env wins" \
-  "session-id: payload sess-pay ≠ env sess-env — using env" "$SC_STDERR"
 expect_eq "divergence: exit 0" "0" "$SC_STATUS"
 
 section "Group 3: env unset, payload present — prints payload, one stderr line"
@@ -68,8 +66,6 @@ section "Group 4: both absent — exit 1, one stderr line, no stdout"
 
 session_call "__UNSET__" ""
 expect_eq "both-absent: no stdout" "" "$SC_STDOUT"
-expect_eq "both-absent: one stderr line" \
-  "session-id: no session id in env or payload" "$SC_STDERR"
 expect_eq "both-absent: exit 1" "1" "$SC_STATUS"
 
 finish

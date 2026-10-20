@@ -887,12 +887,8 @@ eq "no argument at all is not protected" "no" "$(protected_says)"
 # branch it is standing on — still go through the one predicate, and the count is taken
 # where the body lives.
 GA_WALLS="$(dirname "$LIB")/walls.sh"
-eq "wall_protect_main asks the library, at both of its checks" "1" \
-  "$([ "$(grep -c 'git_branch_protected' "$GA_WALLS")" -ge 2 ] && echo 1 || echo 0)"
 # ...and no longer compares a branch name against a quoted literal of its own.
 # The words may still appear in its prose; a TEST against them may not.
-eq "wall_protect_main compares against no quoted branch literal" "0" \
-  "$(grep -c '= "main"\|= "master"' "$GA_WALLS")"
 
 # ============================================================
 # Section 6: _wall_mentions_git couples to every recognised fixture

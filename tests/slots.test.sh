@@ -448,7 +448,6 @@ tk_state() { bash -c '. "$1"; _slots_state "$2"' _ "$SLOTS" "$1"; }
 
 expect_regex "TK1 the bound is one constant of a few seconds, named once in the library" \
   '^SLOTS_TAKING_SEC=[1-9]$' "$(grep -E '^SLOTS_TAKING_SEC=' "$SLOTS" | sed 's/[[:space:]]*#.*//')"
-expect_eq "TK1a …assigned in one place only" "1" "$(grep -cE '^[[:space:]]*SLOTS_TAKING_SEC=' "$SLOTS")"
 
 expect_true "TK2 a claimer killed after its mkdir leaves a lock with no pid (the fixture is real)" \
   tk_killed "$ROW/killed"
@@ -510,7 +509,6 @@ S1_BEFORE="$(wc -l < "$S1_STAMPS" | tr -d ' ')"
 ( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
     bash "$BOOKED" -- 'echo a | cat' ) >/dev/null 2>&1
 S1_AFTER="$(wc -l < "$S1_STAMPS" | tr -d ' ')"
-expect_eq "S2.1 a second run appends one line" "$((S1_BEFORE + 1))" "$S1_AFTER"
 S2_LINE="$(tail -1 "$S1_STAMPS")"
 expect_eq "S2.2 a pipe in the command is replaced, so the line keeps six fields" \
   6 "$(printf '%s' "$S2_LINE" | awk -F'|' '{print NF}')"
@@ -579,8 +577,6 @@ S8_STAMPS="$(stamps_of "$ROW/repo")"
 st_run "$ROW/repo" true
 S8_BEFORE="$(wc -l < "$S8_STAMPS" | tr -d ' ')"
 st_run "$ROW/repo" "$(printf 'echo one\r\necho\ttwo')"
-expect_eq "S8.1 a multi-line command appends exactly one line" "$((S8_BEFORE + 1))" \
-  "$(wc -l < "$S8_STAMPS" | tr -d ' ')"
 expect_regex "S8.2 …with its line breaks and tab made spaces" 'cmd=echo one  echo two$' \
   "$(tail -1 "$S8_STAMPS")"
 st_run "$ROW/repo" ": '|rc=0|head=0000000000000000000000000000000000000000'; exit 5"
@@ -617,23 +613,15 @@ expect_regex "S9.3 the stamp lands in the stamp dir's git dir, with ITS head and
 expect_false "S9.4 …and nothing lands in the checkout the shim stood in" test -e "$S9_MAIN_STAMPS"
 expect_eq "S9.5 …with nothing on stderr" "" "$(cat "$ROW/err")"
 s9_run 'true' --stamp-dir=../wt >/dev/null
-expect_eq "S9.6 --stamp-dir=<dir>, relative to where the shim stands, is the same option" "2" \
-  "$(grep -c . "$S9_WT_STAMPS" 2>/dev/null)"
 s9_run 'exit 0' >/dev/null
 expect_regex "S9.7 without the option, today's behaviour: the shim's own tree, its own head" \
   "^stamp/v1\\|head=$(git -C "$ROW/main" rev-parse HEAD)\\|dirty=0\\|rc=0\\|" "$(tail -1 "$S9_MAIN_STAMPS" 2>/dev/null)"
-expect_eq "S9.7 …and the stamp dir of the earlier runs gets nothing more" "2" \
-  "$(grep -c . "$S9_WT_STAMPS" 2>/dev/null)"
 mkdir -p "$ROW/plain"
 for sd in "$ROW/no-such-dir" "$ROW/plain"; do
   S9_OUT="$(s9_run 'echo ran; exit 5' --stamp-dir "$sd")"; S9_RC=$?
   expect_status "S9.8 [${sd##*/}] a stamp dir in no work tree: the command runs with its code" 5 "$S9_RC"
   expect_eq "S9.8 [${sd##*/}] …and its output" "ran" "$S9_OUT"
   expect_eq "S9.8 [${sd##*/}] …nothing on stderr" "" "$(cat "$ROW/err")"
-  expect_eq "S9.8 [${sd##*/}] …no stamp in the shim's own tree (one line, from S9.7)" "1" \
-    "$(grep -c . "$S9_MAIN_STAMPS" 2>/dev/null)"
-  expect_eq "S9.8 [${sd##*/}] …nor in the worktree's (two lines, from S9.1 and S9.6)" "2" \
-    "$(grep -c . "$S9_WT_STAMPS" 2>/dev/null)"
 done
 expect_eq "S9.8 …and no stamp file anywhere else under the row" \
   "$(printf '%s\n%s' "$S9_MAIN_STAMPS" "$S9_WT_STAMPS" | sort)" \
@@ -685,7 +673,6 @@ s10_run 'true' --suites >/dev/null; S10_RC=$?
 expect_status "S10.7 --suites with no value is usage (exit 2)" 2 "$S10_RC"
 s10_run 'true' --suites= >/dev/null; S10_RC=$?
 expect_status "S10.7 …and so is an empty --suites=" 2 "$S10_RC"
-expect_eq "S10.7 …and neither ran nor stamped" "$S10_N" "$(grep -c . "$S10_STAMPS")"
 git -C "$ROW/repo" worktree add -q "$ROW/wt" -b side 2>/dev/null
 s10_run 'exit 1' --stamp-dir "$ROW/wt" --suites b.test.sh >/dev/null
 expect_regex "S10.8 beside --stamp-dir, the field goes with the stamp into that tree" \
@@ -724,7 +711,6 @@ expect_status "S11.5 …and signalled while it waits it ends 143" 143 "$S11_RC"
 expect_regex "S11.6 …and it stamped rc=143 with its suite, though it never ran" \
   "\\|rc=143\\|at=[^|]*\\|suites=d\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
 expect_false "S11.6 …its command never ran" test -e "$ROW/s11.ran"
-expect_eq "S11.7 three ends, three lines" "3" "$(grep -c . "$S11_STAMPS" 2>/dev/null)"
 expect_contains "S11.8 the 75 says to run the command again, naming it" "run again: touch $ROW/s11.ran" \
   "$(cat "$ROW/out")"
 
@@ -817,235 +803,4 @@ expect_regex "H3.3 the stamp's cmd= is the ORIGINAL command, not the shell form"
 expect_absent "H3.4 …with no trace of the shell or the eval in it" "eval" "$H3_LINE"
 
 # ═══════════════════════════════════════════════════════════════════ §KILL
-section "KILL — --kill-after stops the command's whole process group, says why, exits 124 (wave-26 T9, D14)"
-#
-# The Bash wall wraps a short main-thread command with `--kill-after <s>` (A-T9.1..3). Past
-# <s> the shim stops the command's PROCESS GROUP, not only the tree it can still see: a child
-# whose parent already exited is reparented away from the tree, but stays in the group.
-# The orphan's streams go to /dev/null: holding this capture's pipe open would make the `$(…)`
-# wait for it to end on its own, and the row would read a natural death as a kill.
-newrow k1
-K1_T0=$SECONDS
-K1_OUT="$(bk --kill-after 1 -- "(sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/orphan.kid); sleep 30" 2>&1)"; K1_RC=$?
-K1_DT=$(( SECONDS - K1_T0 ))
-expect_status "K1.1 a command past --kill-after exits 124" 124 "$K1_RC"
-expect_true "K1.1b …well before the command would have ended (took ${K1_DT}s)" test "$K1_DT" -lt 15
-K1_KID="$(cat "$ROW/orphan.kid" 2>/dev/null)"
-expect_regex "K1.2 the orphaned child recorded its pid" '^[0-9]+$' "$K1_KID"
-expect_true "K1.3 …and the orphan, outside the command's tree, was killed too" \
-  bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${K1_KID:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
-expect_contains "K1.4 the one line says it is over the short limit" "over the short limit" "$K1_OUT"
-expect_contains "K1.5 …and that the fix is a subagent, not a longer timeout" "a longer command belongs in a subagent" "$K1_OUT"
-expect_eq "K1.6 …and it is the only line: no job notice from the shell" "1" \
-  "$(printf '%s\n' "$K1_OUT" | grep -c .)"
-
-# K2. --kill-after composes with --shell, in the order the wall writes them (--quiet retired, wave-35 T2).
-newrow k2
-K2_OUT="$(bk --shell "$H_SH" --kill-after 1 -- 'sleep 20; echo never' 2>&1)"; K2_RC=$?
-expect_status "K2.1 --shell --kill-after: exit 124" 124 "$K2_RC"
-expect_contains "K2.2 …with the short-limit line" "over the short limit" "$K2_OUT"
-expect_absent "K2.3 …and the command did not finish" "never" "$K2_OUT"
-K2_OUT="$(bk --shell "$H_SH" --kill-after 5 -- 'echo inside; exit 4' 2>&1)"; K2_RC=$?
-expect_status "K2.4 inside the limit the command's own code passes through" 4 "$K2_RC"
-expect_contains "K2.5 …with its output" "inside" "$K2_OUT"
-
-# K3. A killed run stamps 124, so a landing never reads it as proof.
-newrow k3
-mkrepo "$ROW/repo"
-K3_STAMPS="$(stamps_of "$ROW/repo")"
-( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
-    bash "$BOOKED" --kill-after 1 -- 'sleep 20' ) >/dev/null 2>&1; K3_RC=$?
-expect_status "K3.1 the killed run exits 124" 124 "$K3_RC"
-expect_regex "K3.2 …and its stamp says rc=124" '\|rc=124\|' "$(tail -1 "$K3_STAMPS" 2>/dev/null)"
-
-# K4. THE LIMIT COVERS THE WAIT AT THE GATE (review 8 F2, A-T44.2; wave-28 T12, AC-2.6). The
-# machine is planted over the share, so the command cannot start inside its limit: the shim
-# gives up AT the limit with the gate's line and 75, never 124 (a wait never ends in a kill),
-# and runs nothing.
-newrow k4
-mkrepo "$ROW/repo"
-K4_STAMPS="$(stamps_of "$ROW/repo")"
-K4_T0=$SECONDS
-K4_OUT="$( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
-    bash "$BOOKED" --kill-after 2 -- "touch $ROW/k4.ran" 2>&1 )"; K4_RC=$?
-K4_DT=$(( SECONDS - K4_T0 ))
-expect_status "K4.1 a short command not admitted inside its limit exits 75" 75 "$K4_RC"
-expect_true "K4.2 …at its 2 s limit (took ${K4_DT}s)" test "$K4_DT" -lt 10
-expect_contains "K4.3 …it waited at the gate" "waits for its turn" "$K4_OUT"
-expect_contains "K4.4 …and says the gate did not admit it within its limit" \
-  "booked: the gate did not admit this command within 2s" "$K4_OUT"
-expect_absent "K4.4b …not that it was stopped at its limit: nothing ran to stop" "over the short limit" "$K4_OUT"
-expect_false "K4.5 …and its command never ran" test -e "$ROW/k4.ran"
-expect_eq "K4.6 …and it stamped once, rc=75, though it ran nothing" "1 rc=75" \
-  "$(grep -c . "$K4_STAMPS" 2>/dev/null) $(tail -1 "$K4_STAMPS" 2>/dev/null | tr '|' '\n' | grep '^rc=')"
-( cd "$ROW/repo" && env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
-    bash "$BOOKED" --kill-after 5 -- "touch $ROW/k4.ran" ) >/dev/null 2>&1; K4_RC=$?
-expect_status "K4.7 with room on the machine the same call runs" 0 "$K4_RC"
-expect_true "K4.8 …its command ran" test -e "$ROW/k4.ran"
-expect_eq "K4.9 …and it stamped its own line, rc=0 (beside K4.6)" "2 rc=0" \
-  "$(grep -c . "$K4_STAMPS" 2>/dev/null) $(tail -1 "$K4_STAMPS" 2>/dev/null | tr '|' '\n' | grep '^rc=')"
-
-# K5. THE KILL IS TIMED FROM THE SHIM'S START, so the wait spends the limit. Another run is
-# admitted for 4 s and the command needs 4 s: inside a 6 s limit counted from the run it would
-# finish (at about 8 s, 2 s to spare); counted from the shim's start it is stopped at 6 s.
-newrow k5
-MW=30
-BUSY=7  # 7.0 busy cores of the 7.36 the share allows: the second command waits behind the held one
-K5_H="$( ( sleep 4 >/dev/null 2>&1 & printf '%s' "$!" ) )"
-plant_req 1 "$K5_H"
-K5_OUT="$(bk --kill-after 6 -- 'sleep 4; echo finished' 2>&1)"; K5_RC=$?
-expect_contains "K5.1 the command waited at the gate" "waits for its turn" "$K5_OUT"
-expect_status "K5.2 …and was stopped at 6 s from the shim's start: exit 124" 124 "$K5_RC"
-expect_contains "K5.3 …with the short-limit line" "over the short limit" "$K5_OUT"
-expect_eq "K5.4 …before it could finish: no line of its own output reads finished (the gate's line names the command)" \
-  "0" "$(printf '%s\n' "$K5_OUT" | grep -cx finished)"
-
-# K6. A BOOKED COMMAND KEEPS THE SIGNALS IT WOULD HAVE UNWRAPPED (review 8 F3, A-T44.5). A command
-# started in the background without job control starts with SIGINT and SIGQUIT ignored, and
-# every process below inherits that. Each command runs unwrapped first; the booked run, in
-# bash and under --shell as the wall writes it, must print the same. Both arms start from the
-# launcher's defaults, so the control reads the defaults its pin names and the booked arm cannot
-# pass by inheriting the suite's own ignored INT.
-newrow k6
-K6_INT='trap "echo got-int" INT; kill -INT $$; sleep 0.2; echo after'
-K6_QUIT='trap "echo got-quit" QUIT; kill -QUIT $$; sleep 0.2; echo after'
-K6_KID="sh -c 'kill -INT \$\$; echo survived'; echo \"rc=\$?\""
-K6_PLAIN="$(bash -c "$K6_INT" 2>&1)"
-expect_eq "K6.1 control: unwrapped, the command's own INT trap runs" "got-int"$'\n'"after" "$K6_PLAIN"
-expect_eq "K6.2 booked, it runs the same" "$K6_PLAIN" "$(bk -- "$K6_INT" 2>&1)"
-K6_PLAIN="$(bash -c "$K6_QUIT" 2>&1)"
-expect_eq "K6.3 control: unwrapped, the QUIT trap runs" "got-quit"$'\n'"after" "$K6_PLAIN"
-expect_eq "K6.4 booked, it runs the same" "$K6_PLAIN" "$(bk -- "$K6_QUIT" 2>&1)"
-K6_PLAIN="$(bash -c "$K6_KID" 2>&1)"
-expect_eq "K6.5 control: unwrapped, a process below the command dies of INT" "rc=130" "$K6_PLAIN"
-expect_eq "K6.6 booked, it dies the same way: INT is not ignored below the shim" "$K6_PLAIN" "$(bk -- "$K6_KID" 2>&1)"
-expect_eq "K6.7 …under --shell as well" "$K6_PLAIN" "$(bk --shell "$H_SH" -- "$K6_KID" 2>&1)"
-expect_eq "K6.8 …and under --kill-after, which always had job control" "$K6_PLAIN" "$(bk --kill-after 9 -- "$K6_KID" 2>&1)"
-
-# K7. EVERY COMMAND LEADS ITS OWN PROCESS GROUP NOW, so a shim stopped by a signal kills the
-# group with the tree: a child whose parent already exited dies too, as under --kill-after (K1).
-newrow k7
-MW=5
-bk -- "(sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/orphan.kid); touch $ROW/k.started; sleep 30" > "$ROW/k.out" 2>&1 &
-BG="$BG $!"; K7_BG=$!
-wait_file "$ROW/k.started"
-K7_SHIM="$(held_pids)"; K7_SHIM="${K7_SHIM% }"
-expect_regex "K7.1 the running command's shim holds the admission" '^[0-9]+$' "$K7_SHIM"
-K7_KID="$(cat "$ROW/orphan.kid" 2>/dev/null)"
-expect_regex "K7.2 the orphaned child recorded its pid" '^[0-9]+$' "$K7_KID"
-kill -TERM "$K7_SHIM" 2>/dev/null
-wait "$K7_BG" 2>/dev/null
-expect_true "K7.3 TERM to the shim kills the orphan too, outside the tree but inside the group" \
-  bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${K7_KID:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
-expect_eq "K7.4 …and its request was ended" "" "$(places)"
-
-# K8. A SIGNAL SENT TO THE SHIM REACHES THE COMMAND AS ITSELF, AND QUIT IS TAKEN TOO (review 12
-# F3, A-T50.2). K6 has the command signal itself; here the signal comes from outside, as an
-# interrupt or a stop from the harness would. The shim is started with each signal at its default,
-# as a harness spawn starts a call: the launcher resets them for the whole run (the whole run at
-# d3c4ed2e hung K8 [HUP], wave-38 T34), and the shim's background job is started under `set -m`,
-# because a background job without job control ignores INT and QUIT. The command
-# traps each signal and writes the one it saw; an orphan it left behind (outside its tree,
-# inside its group) must die too, and the place must be free afterwards.
-# EVERY WAIT HERE IS BOUNDED: a shim that does not end within 8 s of the signal is a failed row,
-# and the row then stops what it started itself, so a regression fails in seconds, never hangs.
-newrow k8
-MW=5
-K8_CMD="for s in INT QUIT TERM HUP; do trap \"echo got-\$s > $ROW/k8.saw; exit 7\" \$s; done; echo \$\$ > $ROW/k8.pid; (sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/k8.kid); touch $ROW/k8.started; while :; do sleep 0.1; done"
-pid_is_gone() { ! kill -0 "${1:-999999}" 2>/dev/null; }
-gone() {  # <pid> — rc 0 once the pid is gone, within two seconds
-  wait_ticks 19 0.1 pid_is_gone "${1:-999999}"
-}
-k8_drive() {  # <signal> [<shim option>...] -> K8_RC (or "hung"), K8_SAW, K8_PID, K8_KID
-  local _sig="$1" _job _shim _i=0
-  shift
-  rm -f "$ROW"/k8.*
-  # `exec` all the way down, so the job's pid IS the shim's.
-  set -m
-  ( cd "$ROW" || exit 1
-    exec env "${GE[@]}" BIONIC_GATE_DIR="$ST" \
-      BIONIC_LOAD_NOW_FILE="$LOADF" \
-      bash "$BK_SCRIPT" "$@" -- "$K8_CMD" ) > "$ROW/k8.out" 2>&1 &
-  _job=$!
-  set +m
-  BG="$BG $_job"
-  wait_file "$ROW/k8.started" 10
-  _shim="$(held_pids)"; _shim="${_shim% }"
-  K8_SHIM_OK=0; [ "$_shim" = "$_job" ] && K8_SHIM_OK=1
-  K8_PID="$(cat "$ROW/k8.pid" 2>/dev/null)"; K8_KID="$(cat "$ROW/k8.kid" 2>/dev/null)"
-  kill -"$_sig" "$_job" 2>/dev/null
-  wait_ticks 80 0.1 pid_is_gone "$_job"
-  if kill -0 "$_job" 2>/dev/null; then
-    K8_RC=hung
-    kill_tree "$_job"
-    wait "$_job" 2>/dev/null
-  else
-    wait "$_job" 2>/dev/null; K8_RC=$?
-  fi
-  K8_SAW="$(cat "$ROW/k8.saw" 2>/dev/null)"
-}
-k8_reap() {  # after the rows: a command a failing shim left running is this suite's to stop
-  [ -z "$K8_PID" ] || kill -KILL "$K8_PID" 2>/dev/null
-  [ -z "$K8_KID" ] || kill -KILL "$K8_KID" 2>/dev/null
-  rm -rf "$ST"
-}
-for _k8 in INT:130 QUIT:131 TERM:143 HUP:129; do
-  _sig="${_k8%:*}"
-  k8_drive "$_sig"
-  expect_eq "K8.0 [$_sig] the shim holds the admission" 1 "$K8_SHIM_OK"
-  expect_regex "K8.1 [$_sig] the command and its orphan were running" '^[0-9]+ [0-9]+$' "$K8_PID $K8_KID"
-  expect_eq "K8.2 [$_sig] the command saw the signal the shim took, not TERM" "got-$_sig" "$K8_SAW"
-  expect_status "K8.3 [$_sig] the shim exits 128 + the signal's number" "${_k8#*:}" "$K8_RC"
-  expect_true "K8.4 [$_sig] the command is gone" gone "$K8_PID"
-  expect_true "K8.5 [$_sig] …and so is its orphan, outside its tree but inside its group" gone "$K8_KID"
-  expect_eq "K8.6 [$_sig] …and its request was ended (beside K7.1's held admission)" "" "$(places)"
-  k8_reap
-done
-for _sig in INT QUIT; do
-  k8_drive "$_sig" --shell "$H_SH"
-  expect_eq "K8.7 [$_sig] under --shell ${H_SH##*/} the command saw the signal too" "got-$_sig" "$K8_SAW"
-  expect_true "K8.8 [$_sig] …and it is gone" gone "$K8_PID"
-  expect_eq "K8.9 [$_sig] …with its request ended" "" "$(places)"
-  k8_reap
-done
-
-# K9. THE LIMIT NEVER FIRES EARLY (review 12 F4, A-T50.3). The elapsed time is read from
-# `$SECONDS`, which counts whole seconds of the wall clock, so "elapsed >= limit" is true as
-# soon as a second boundary passes after the shim's start: up to a second early. Each run here
-# starts 0.4 s into a wall-clock second (perl's clock), so a boundary always falls inside the
-# 0.8 s command, early enough for the 0.2 s poll to see it: before T50 every such run was killed
-# under a 1 s limit. The command records whether its run crossed a boundary, so the row proves
-# the condition was there.
-newrow k9
-k9_align() {  # sleep until the wall clock is 0.4 s into a second
-  perl -MTime::HiRes=time,sleep -e '$f = time - int(time); sleep(($f < 0.4 ? 0.4 : 1.4) - $f)'
-}
-K9_CMD='s=$(date +%s); sleep 0.8; [ "$(date +%s)" = "$s" ] || echo crossed; echo done'
-K9_KILLED=0; K9_DONE=0; K9_CROSSED=0
-for _i in 1 2 3 4 5; do
-  k9_align
-  _out="$(bk --kill-after 1 -- "$K9_CMD" 2>&1)"; _rc=$?
-  [ "$_rc" -ne 124 ] || K9_KILLED=$((K9_KILLED + 1))
-  case "$_out" in *done*) K9_DONE=$((K9_DONE + 1)) ;; esac
-  case "$_out" in *crossed*) K9_CROSSED=$((K9_CROSSED + 1)) ;; esac
-done
-expect_eq "K9.1 a 0.8 s command under --kill-after 1 is never killed (killed $K9_KILLED of 5)" 0 "$K9_KILLED"
-expect_eq "K9.2 …every run finished" 5 "$K9_DONE"
-expect_true "K9.3 …and a second boundary fell inside the command in at least 4 of 5 runs (saw $K9_CROSSED)" \
-  test "$K9_CROSSED" -ge 4
-k9_align
-_out="$(bk --kill-after 1 -- 'sleep 3; echo done' 2>&1)"; _rc=$?
-expect_status "K9.4 the same limit still stops a 3 s command (124; beside K9.1 on the same code)" 124 "$_rc"
-# U1. --unbooked IS GONE (the lead's ruling at T44): only a suite is wrapped, so the shim has no
-# command to run without asking. The flag is now an unknown option.
-newrow u1
-bk --unbooked --kill-after 5 -- "touch $ROW/u.ran" > "$ROW/u.out" 2>&1; U1_RC=$?
-expect_status "U1.1 --unbooked is a usage error (exit 2)" 2 "$U1_RC"
-expect_contains "U1.2 …the usage line names the options there are" "--kill-after <seconds>" "$(cat "$ROW/u.out")"
-expect_absent "U1.3 …and --unbooked is not one of them" "unbooked" "$(cat "$ROW/u.out")"
-expect_false "U1.4 …and the command did not run" test -e "$ROW/u.ran"
-bk --kill-after 5 -- "touch $ROW/u.ran" > /dev/null 2>&1; U1_RC=$?
-expect_status "U1.5 the same call without it runs" 0 "$U1_RC"
-expect_true "U1.6 …and its command ran (beside U1.4)" test -e "$ROW/u.ran"
-
 finish

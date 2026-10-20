@@ -63,7 +63,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 
 | piece | shape |
 |---|---|
-| approval | `approved: <name> by <who> <ISO-UTC> "<reply>"`, written by `session-poker.sh approve <name> '<reply>'` on the user's own reply, quoted verbatim |
+| approval | `approved: <name> by <who> <ISO-UTC> head=<40-hex> "<reply>"`, written by `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim, at the working head |
 | proof | `proved: kind=<regression\|review\|task\|check> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`, written by `session-poker.sh proof-add <kind> <evidence>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
 | reading | `proof-add review <record> --question <q> --reader <name>` adds ` question=<q> reader=<name> result=<pass\|flag\|fail> scope=<piece\|whole>`; the reader's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
 | declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and the `kind=check` line (` result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |
@@ -72,7 +72,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 | declared debt | a brief's one `Lands-red: <name>.test.sh until <ext:slug\|approval:name>` with `Red-evidence: <path under record/>`, recorded by the dispatch wall alone (`amend` cannot add them). `land` accepts that one suite red, every other suite green, when the evidence holds `head: <40-hex>` naming the head landed, and appends `debt: id=… row=… suite=… token=…` to the landing record. It stays open until a regression or task proof shows the suite green after the red landing (and after the `approved:` line, for `approval:`); `current 8`, close-out, the integrate row and, from Step 6, the commit gate refuse while it is open |
 | debt ledger | `## Debt ledger` below |
 
-**The regression, once** (`steps/5.md` holds the rule). A second whole run needs the user's word, `session-poker.sh approve regression-2`: the dispatch wall reads a suite set holding `run.sh` as a whole run and refuses one at `regression: no`, while a row the regression waits on writes tracked files, on a proved head, or a second on this plan unless the row reads `approval:regression-2` and its `approved:` line exists.
+**The regression, once** (`steps/5.md` holds the rule). `session-poker.sh regression-run` refuses it at `regression: no`, beside an open build row, on a proved head, or at a head that has a whole run; a red is a fix row's, never a second run, and nothing waives it.
 
 **`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and `worktree_land_for_session` merges a landed tree into it. A plan naming none falls back to the main checkout's branch, announced inert.
 
@@ -177,7 +177,7 @@ SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-s
 
 ## Debt ledger
 
-Debt is paid by the next change that touches it, not by a user, so it is kept as a ledger and burned when touched. Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
+Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
 
 **The file.** `<docs-root>/record/<run>/debt.md`, under the header:
 
@@ -187,7 +187,7 @@ concept | kind | sites | raised-by <record> | touches N | burned <row> | —
 
 one line per item, its last cell `—` while open and `burned <row>` once a row has burned it.
 
-**Burn when touched.** A debt finding's disposition is burn-when-touched, never fix now and never note. The orchestrator records it at the Step-6 disposition, and the next row whose `Files:` touch the item's concept burns it inside its own work, or says why not.
+**Burn when touched.** The orchestrator records it at the Step-6 disposition, and the next row whose `Files:` touch the item's concept burns it inside its own work, or says why not.
 
 **The touch counter.** A brief whose `Files:` cover one of an item's sites adds one to its `touches`, and the dispatch wall prints `debt: <concept> <kind> touches <N> — burn it in this row or say why not`; the highest count burns first. `ready` prints `debt: burned <N>, touched <M>` and close-out `debt: touched N · burned M`, never the ledger's length.
 

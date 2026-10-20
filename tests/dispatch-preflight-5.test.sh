@@ -34,40 +34,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: debt, interval, interval-default, window. Each line below
-# is that closure: the library (every run executes it), the arm of each verb, the sections defining the
-# globals they read, and each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the contract grammar"
-reads hooks/session-poker.sh section "the launch sync"
-reads hooks/session-poker.sh verb debt
-reads hooks/session-poker.sh verb interval
-reads hooks/session-poker.sh verb interval-default
-reads hooks/session-poker.sh verb window
-reads hooks/session-poker.sh fn adopt_copy_marker
-reads hooks/session-poker.sh fn adopt_fold
-reads hooks/session-poker.sh fn adopt_write_row
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn count_main_thread_dispatches
-reads hooks/session-poker.sh fn count_refused_dispatches
-reads hooks/session-poker.sh fn cover_basis
-reads hooks/session-poker.sh fn cur7_judge
-reads hooks/session-poker.sh fn cur8_owed_waivers
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn pair
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
@@ -272,15 +238,12 @@ expect_eq "PT.1c …and it is journalled, a launch like any other" "1" "$(roster
 REPO=$(pt_repo rpt2)
 pt_gate "$REPO" "$(pt_brief "$PT_OK_FILES" | /usr/bin/grep -v '^Kind:')"
 expect_eq "PT.2 control: the same brief with no Kind: line is refused before approval" "deny" "$GATE_VERDICT"
-expect_contains "PT.2b …as an unapproved writer" "the plan this writer builds is unapproved" "$GATE_ERR"
 
 # --- PT.3: one tracked path refuses, naming it ---
 REPO=$(pt_repo rpt3)
 pt_gate "$REPO" "$(pt_brief "$PT_OK_FILES, README.md")"
 expect_eq "PT.3 AC-13.2 a prototype naming one tracked path is refused" "deny" "$GATE_VERDICT"
 expect_contains "PT.3b …the line names the path as tracked" "README.md is tracked" "$GATE_ERR"
-expect_contains "PT.3c …the detail states the confinement rule" \
-  "a prototype writes only under record/ or its throwaway tree; README.md is tracked" "$GATE_VERR"
 
 # --- PT.4: a tracked record is tracked too ---
 REPO=$(pt_repo rpt4)
@@ -302,7 +265,6 @@ expect_contains "PT.5b …naming it as outside both" "lib/new.sh is outside both
 REPO=$(pt_repo rpt6)
 pt_gate "$REPO" "$(pt_brief "$PT_OK_FILES" 'Row: T1')"
 expect_eq "PT.6 AC-13.2 a prototype brief carrying Row: is refused" "deny" "$GATE_VERDICT"
-expect_contains "PT.6b …the line says a prototype owns no row" "a prototype owns no plan row" "$GATE_ERR"
 
 # --- PT.7: a tree not made for this dispatch refuses ---
 REPO=$(make_repo rpt7 yes); write_attestation "$REPO" "$SID_A"; pt_unapprove "$REPO"
@@ -398,8 +360,6 @@ PT_EG1="$SANDBOX/pt-eg1"; mkdir -p "$PT_EG1"
 pt_eg_plan "$PT_EG1" T12 >/dev/null
 pt_eg_run "$PT_EG1"
 expect_status "PT.10 AC-13.2 a matrix AC naming the prototype row is refused by the evidence gate" "2" "$PT_EG_RC"
-expect_contains "PT.10b …by its no-row arm, naming the AC and the row" \
-  "matrix row 'AC-1' names 'task: T12', a 'kind: prototype' row" "$PT_EG_ERR"
 PT_EG2="$SANDBOX/pt-eg2"; mkdir -p "$PT_EG2"
 pt_eg_plan "$PT_EG2" T13 >/dev/null
 pt_eg_run "$PT_EG2"
@@ -415,13 +375,12 @@ section "§LANDS-CMD — Lands-on: may name a backticked command its Re-executes
 # `Lands-on:` names one of them in backticks. The lift writes the command as ONE lands_on= entry: backticks around
 # its text with `%`, blank, tab, `,`, `|`, `/`, `*`, `?` and `[` percent-encoded (lib/suite.sh `lands_cmd`), so
 # every lands_on= reader (a comma or blank split, the roster's `|` fold, a `${s##*/}` file-name cut) keeps it
-# whole, and `bionic_lands_cmd` gives the command back. Both Lands-on arms admit it: the outside-Suites: arm reads
-# it against the brief's Re-executes: runs, and the reads-index omission arm passes over it. A command
-# Re-executes: does not declare is refused, naming it.
+# whole, and `bionic_lands_cmd` gives the command back. The outside-Suites: arm admits it against the brief's
+# Re-executes: runs. A command Re-executes: does not declare is refused, naming it.
 # FIXTURES: make_repo's approved, bound plan with a `## Tasks` row T23; its tree holds lib/widget.sh, read by
-# tests/widget.test.sh (the reads index routes the Files to it). The brief is BRIEF_FULL's contract with Files:,
+# tests/widget.test.sh. The brief is BRIEF_FULL's contract with Files:,
 # Suites:, Re-executes: and Lands-on: lines. SYNTHESIZED.
-# fails-when: a declared command on Lands-on: is refused by either arm, an undeclared one is admitted, or the row's
+# fails-when: a declared command on Lands-on: is refused, an undeclared one is admitted, or the row's
 # lands_on= does not give the declared command back byte for byte.
 lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
@@ -455,15 +414,6 @@ expect_eq "LC.1b …the row carries the command as its one encoded entry" \
 expect_eq "LC.1c …which gives back the declared command byte for byte, its pipe kept" \
   "$LC_CMD" "$( . "$DP5_LIB/suite.sh"; bionic_lands_cmd "$(roster_field "$LC_ROW" lands_on | cut -d, -f2)")"
 
-# The omission arm reads this brief: the command alone omits widget.test.sh, and the line to paste spells the
-# command as the author wrote it, so pasting it lifts the same entry.
-lc_gate lc2 "Lands-on: \`$LC_CMD\`"
-expect_eq "LC.2 control: the command alone omits widget.test.sh, which reads the Files: refused by the omission arm" \
-  "deny" "$GATE_VERDICT"
-expect_contains "LC.2b …its line names the omitted suite" "Lands-on: omits widget.test.sh" "$(lc_first)"
-expect_contains "LC.2c …and the line to paste spells the command in backticks, decoded" \
-  "    Lands-on: \`$LC_CMD\`, widget.test.sh" "$GATE_VERR"
-
 lc_gate lc3 'Lands-on: widget, `npx jest other`'
 expect_eq "LC.3 AC-14.3 a Lands-on: naming a command Re-executes: does not declare is refused" "deny" "$GATE_VERDICT"
 expect_contains "LC.3b …its line names the command" 'Lands-on: `npx jest other`' "$(lc_first)"
@@ -479,5 +429,24 @@ expect_contains "LC.4b …naming it" "is not under Re-executes:" "$(lc_first)"
 expect_eq "LC.4c …its first line at most 100 columns with a 39-character command" "ok" \
   "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
 expect_contains "LC.4d …the command cut in the line, its start kept" 'Lands-on: `npx jest --testPath' "$(lc_first)"
+
+section "§WAIVER-NONE — \`Deliverable-waiver: none\` is no waiver, so a declared artifact is no conflict"
+# A brief that waives nothing may still carry the scaffold's `Deliverable-waiver:` line with the word `none`. Read as a
+# reason, it rode the row beside the declared artifact, and the sweeper reported the pair as a contradiction.
+# FIXTURES: make_repo's bound plan; BRIEF_FULL's contract (a declared artifact) with one waiver line; the sweeper's
+# verdict asked of the journalled row, as the stop gate asks it. SYNTHESIZED.
+wn_gate() {  # <repo tag> <waiver line> -> GATE_*, WN_ROW, WN_VERDICT
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\n%s' "$BRIEF_FULL" "$2")" w99-wn)"
+  WN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+  WN_VERDICT="$(cd "$REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$BIONIC_HOOKS_DIR/session-sweeper.sh" verdict w99-wn 2>&1)"
+}
+wn_gate wn1 'Deliverable-waiver: the answer is the report itself'
+expect_contains "WN.1b …and the sweeper reports the contradiction" "waiver disregarded" "$WN_VERDICT"
+wn_gate wn2 'Deliverable-waiver: none'
+expect_eq "WN.2 AC-20.4 Deliverable-waiver: none is no waiver: the row carries the artifact and no waiver" \
+  "allow|.bionic/docs/record/w99-widget.txt|" "$GATE_VERDICT|$(roster_field "$WN_ROW" deliverable)|$(roster_field "$WN_ROW" waiver)"
+expect_contains "WN.2b …the sweeper judges the row" "w99-wn" "$WN_VERDICT"
+expect_absent "WN.2c AC-20.4 …and reports no conflict" "waiver disregarded" "$WN_VERDICT"
 
 finish

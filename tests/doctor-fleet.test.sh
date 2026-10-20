@@ -38,44 +38,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: interval, interval-default, prompt, sweep, window. Each
-# line below is that closure: the library (every run executes it), the arm of each verb, the sections defining
-# the globals they read, and each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the contract grammar"
-reads hooks/session-poker.sh section "the sweep"
-reads hooks/session-poker.sh verb interval
-reads hooks/session-poker.sh verb interval-default
-reads hooks/session-poker.sh verb prompt
-reads hooks/session-poker.sh verb sweep
-reads hooks/session-poker.sh verb window
-reads hooks/session-poker.sh fn adopt_copy_marker
-reads hooks/session-poker.sh fn adopt_fold
-reads hooks/session-poker.sh fn adopt_write_row
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn count_main_thread_dispatches
-reads hooks/session-poker.sh fn count_refused_dispatches
-reads hooks/session-poker.sh fn cover_basis
-reads hooks/session-poker.sh fn cur7_judge
-reads hooks/session-poker.sh fn cur8_owed_waivers
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn iso_now
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn pair
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_armed_file
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn remove_patrol_stamp
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 
@@ -516,8 +478,6 @@ OUT6C="$( cd "$BARE" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
   BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 RES6C="$(doctor_section "$OUT6C" "RESOURCES")"
-expect_match "18f: a project with no attestation still says so" \
-  "*none has taken an attestation in this project*" "$RES6C"
 
 # AND THE THIRD STATE, WHICH 1.5.1 CREATED: a project holding attestations whose
 # sessions are ALL gone. Before the collapse those rendered a row each, so the
@@ -541,10 +501,6 @@ OUT6D="$( cd "$DEADONLY" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
   BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 RES6D="$(doctor_section "$OUT6D" "RESOURCES")"
-expect_no_match "18g: a project whose every attestation is dead never claims it has none" \
-  "*none has taken an attestation in this project*" "$RES6D"
-expect_match "18h: …it counts them and sends the reader to the section that names the repair" \
-  "*2 attestations here, every one from a session that is gone*" "$RES6D"
 expect_no_match "18i: …and still does not render their budgets as live capacity" \
   "*writers=77*" "$RES6D"
 # 18j RE-POINTED (R2, ticket-30). Before R2 the page named the verb

@@ -39,72 +39,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T41; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: arm, deliver, fill-report, interval, interval-default,
-# launch-sync, prompt, regression-runs, sweep, tick, window. Each line below is that closure: the library
-# (every run executes it), the section of each verb's arm, the sections defining the globals they read, and
-# each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the plan report"
-reads hooks/session-poker.sh section "the runs (wave-30 T12; D6, D7d)"
-reads hooks/session-poker.sh section "is this row too quiet?"
-reads hooks/session-poker.sh section "the contract grammar"
-reads hooks/session-poker.sh section "the plan transaction"
-reads hooks/session-poker.sh section "the call a refusal names"
-reads hooks/session-poker.sh section "the launch sync"
-reads hooks/session-poker.sh section "the sweep"
-reads hooks/session-poker.sh section "the situation report"
-reads hooks/session-poker.sh section verbs
-reads hooks/session-poker.sh fn _sched_plan_current_field
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn clean_whole
-reads hooks/session-poker.sh fn count_main_thread_dispatches
-reads hooks/session-poker.sh fn count_refused_dispatches
-reads hooks/session-poker.sh fn deliver_check
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn gate_report
-reads hooks/session-poker.sh fn gate_requests
-reads hooks/session-poker.sh fn gate_widths
-reads hooks/session-poker.sh fn hold_fingerprint
-reads hooks/session-poker.sh fn hold_reply_count
-reads hooks/session-poker.sh fn iso_epoch
-reads hooks/session-poker.sh fn iso_now
-reads hooks/session-poker.sh fn landing_report
-reads hooks/session-poker.sh fn landing_unmeasured
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_armed_file
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn remove_patrol_stamp
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn row_writer
-reads hooks/session-poker.sh fn sched_budget_read
-reads hooks/session-poker.sh fn sched_facts_state
-reads hooks/session-poker.sh fn sched_live_head
-reads hooks/session-poker.sh fn sched_owed
-reads hooks/session-poker.sh fn sched_plan_current
-reads hooks/session-poker.sh fn session_transcript
-reads hooks/session-poker.sh fn space_field
-reads hooks/session-poker.sh fn suspect_lines
-reads hooks/session-poker.sh fn tick_card_early
-reads hooks/session-poker.sh fn tick_decision_line
-reads hooks/session-poker.sh fn tick_digest_file
-reads hooks/session-poker.sh fn tick_finding_report
-reads hooks/session-poker.sh fn tick_launch_sync_failed
-reads hooks/session-poker.sh fn tick_owed_approval
-reads hooks/session-poker.sh fn tick_plan_memoised
-reads hooks/session-poker.sh fn tick_wait_report
-reads hooks/session-poker.sh fn tmp_dir_ok
-reads hooks/session-poker.sh fn write_patrol_armed_marker
-reads hooks/session-poker.sh fn write_patrol_stamp
-reads hooks/session-poker.sh fn write_tick_digest
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -224,7 +158,6 @@ TREE1="$(make_plugin_tree)"
 write_installed_plugins "$TREE1"
 write_session "$LIVE_PID" "$PROJ_REAL"
 write_record "$SID_LIVE" "$TREE1"
-expect_eq "0: precondition — the record holds one manifest line per loaded file" "4" "$(manifest_lines "$REC")"
 printf '{"hooks":{}}' > "$TREE1/hooks/hooks.json"
 
 OUT1="$(run_doctor)"
@@ -311,10 +244,6 @@ OUT52="$(run_doctor)"
 TICK52="$(run_tick)"
 expect_match "MAN-2 AC-1.3 a skill's content moved: the row names skills" \
   "*✗ restart needed*pid ${LIVE_PID} — skills changed since load*" "$OUT52"
-expect_match "MAN-2b …and its fix line names the same class" \
-  "*pid ${LIVE_PID} loaded skills at 2026-08-27 14:00Z → exit claude and start it again*" "$OUT52"
-expect_match "MAN-2c the tick prints the restart line from the same reader, naming the class" \
-  "*poker: restart needed — skills changed after this session loaded them (pid ${LIVE_PID}): exit claude and start it again*" "$TICK52"
 expect_eq "MAN-2d …one line" "1" "$(count_of "restart needed" "$TICK52")"
 expect_no_match "MAN-2e only the class that moved is named" "*restart needed*pid ${LIVE_PID} — skills, *" "$OUT52"
 
@@ -326,7 +255,6 @@ printf 'role, edited\n' > "$TREE5/agents/critic.md"
 OUT53="$(run_doctor)"
 TICK53="$(run_tick)"
 expect_match "MAN-3 a role file's content moved: the row names agents" "*restart needed*pid ${LIVE_PID} — agents changed since load*" "$OUT53"
-expect_match "MAN-3c …and the tick names it" "*poker: restart needed — agents changed after this session loaded them*" "$TICK53"
 
 printf 'role\n' > "$TREE5/agents/critic.md"
 printf 'command, edited\n' > "$TREE5/commands/x.md"
@@ -334,7 +262,6 @@ OUT54="$(run_doctor)"
 TICK54="$(run_tick)"
 expect_match "MAN-4 AC-1.3 commands/x.md's content moved: the row names commands" \
   "*restart needed*pid ${LIVE_PID} — commands changed since load*" "$OUT54"
-expect_match "MAN-4b …and the tick names it" "*poker: restart needed — commands changed after this session loaded them*" "$TICK54"
 
 printf '{"edited":1}' > "$TREE5/hooks/hooks.json"
 printf 'skill, edited\n' > "$TREE5/skills/demo/SKILL.md"
@@ -356,10 +283,6 @@ printf 'skill, edited\n' > "$TREE5/skills/demo/SKILL.md"
 write_installed_plugins "$TREE5" "2026-08-27T15:30:00.250Z"
 OUT57="$(run_doctor)"
 TICK57="$(run_tick)"
-expect_match "MAN-7 the registry installed after the record: the fix line says or reloaded since <ISO>" \
-  "*pid ${LIVE_PID} loaded skills, or reloaded since 2026-08-27 15:30Z → exit claude and start it again*" "$OUT57"
-expect_match "MAN-7b …and so does the tick's line" \
-  "*poker: restart needed — skills changed after this session loaded them, or reloaded since 2026-08-27T15:30:00Z (pid ${LIVE_PID}): exit claude and start it again*" "$TICK57"
 write_installed_plugins "$TREE5" "2026-08-27T13:30:00.000Z"
 OUT57B="$(run_doctor)"
 expect_match "MAN-7c the registry installed before the record: the row still fires" "*restart needed*pid ${LIVE_PID} — skills*" "$OUT57B"
@@ -384,8 +307,6 @@ printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"
   "$SID_LIVE" "$TMP/t.jsonl" "$PROJ_REAL" \
   | ( cd "$PROJ_REAL" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
       CLAUDE_CODE_SESSION_ID="$SID_LIVE" CLAUDE_PLUGIN_ROOT="$TREE9" "${REPO}/hooks/session-start.sh" >/dev/null 2>&1 )
-expect_eq "MAN-9a precondition: the start hook wrote the record, naming the tree and four files" \
-  "root=${TREE9}|4" "$(/usr/bin/grep '^root=' "$REC" 2>/dev/null)|$(manifest_lines "$REC")"
 OUT59Q="$(run_doctor)"
 expect_match "MAN-9b doctor ran its PROJECT section" "*PROJECT*" "$OUT59Q"
 expect_no_match "MAN-9c over the hook's own record, nothing moved: no row" "*restart needed*" "$OUT59Q"

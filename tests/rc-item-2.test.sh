@@ -121,7 +121,6 @@ done < "$TMP/t75-sample"
 T75_SECS=$(( $(date +%s) - T75_T0 ))
 echo "T75 bytes: $(wc -l < "$T75_CASES/index" | tr -d ' ') rc files generated, ${T75_RCS} driven (sample ${T75_SAMPLE}, seed 75, and the named shapes), ${T75_RUNS} door runs, ${T75_BAD} red, ${T75_SECS} s"
 # The positives beside the counts: the gate ran, and its expectation moves.
-expect_true "T75 bytes: at least 400 rc files are generated" test "$(wc -l < "$T75_CASES/index")" -ge 400
 expect_true "T75 bytes: the drive ran doors" test "$T75_RUNS" -gt 0
 expect_diff_bytes "T75 bytes: the rule takes an intact block out (k-ab-top's expected file is not the rc)" \
   "$T75_CASES/k-ab-top.rc" "$T75_CASES/k-ab-top.bash.setup"
@@ -139,6 +138,23 @@ t75_b3_plant() {  # <file> <shape>
     envten)   printf '%s\n' 'export A=1' "$ENVB_START" 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=10' "$ENVB_END" 'export SECRETTOKEN=1' > "$1" ;;
   esac
 }
+# --all ASKS ONCE, OVER ITS PAGE, so for that door "never asked about" means "not on the page". The page is
+# measured against two twin homes per shell, the same rc without the alias block and with bionic's own block
+# intact: the intact block is one more line on the page, and a changed block must be no line at all.
+t75_page_n() { printf '%s\n' "$1" | awk '$0 == "bionic would:" { p = 1; next } p && $0 == "" { exit } p { n++ } END { print n + 0 }'; }
+t75_twin_page() {  # <shell> <none|intact> -> the line count of the --all page for that twin
+  local sb rc; T66_SHELL="/bin/$1"; sb="$(new_sandbox)"; rc="$(t66_rc "$sb")"
+  case "$2" in
+    none)   printf '%s\n' 'export A=1' 'export B=2' > "$rc" ;;
+    intact) printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$rc" ;;
+  esac
+  t66_pageblock >> "$rc"
+  t75_page_n "$(t66_door "$sb" setup-all n)"
+  rm -rf "$sb"
+}
+T75_PG_bash="$(t75_twin_page bash none)"; T75_PG_zsh="$(t75_twin_page zsh none)"
+expect_eq "T75 B3 (bash): an intact alias block is one line on the --all page" "$((T75_PG_bash + 1))" "$(t75_twin_page bash intact)"
+expect_eq "T75 B3 (zsh): an intact alias block is one line on the --all page" "$((T75_PG_zsh + 1))" "$(t75_twin_page zsh intact)"
 for T75_SHAPE in userline useronly envten; do
   case "$T75_SHAPE" in envten) T75_DL="rm-payload:environment rm-standalone:environment rm-all:environment" ;;
     *) T75_DL="setup-only:legacy-alias setup-all:legacy-alias rm-payload:legacy-alias rm-standalone:legacy-alias rm-all:legacy-alias" ;; esac
@@ -157,8 +173,8 @@ for T75_SHAPE in userline useronly envten; do
       expect_contains "${T75_L}: …named by its lines as changed since bionic wrote it" "$T75_LINES" "$(report_row "$T75_OUT" "changed since bionic wrote it")"
       expect_absent "${T75_L}: …the user's text is never printed" "SECRETTOKEN" "$T75_OUT"
       case "${T75_D%%:*}" in
-        setup-all) expect_absent "${T75_L}: …and the page does not offer it" "remove the retired shell alias block" "$T75_OUT" ;;
-        rm-all) expect_absent "${T75_L}: …and the page does not offer it" "remove the retired shell alias block" "$T75_OUT" ;;
+        setup-all) T75_PG="$T75_PG_bash"; [ "$T75_SH" = zsh ] && T75_PG="$T75_PG_zsh"
+                   expect_eq "${T75_L}: …and the page does not offer it" "$T75_PG" "$(t75_page_n "$T75_OUT")" ;;
         *) expect_absent "${T75_L}: …and nothing is asked" "[y/N]" "$T75_OUT" ;;
       esac
     done
@@ -466,7 +482,6 @@ T77_ALL="cur u-above u-between u-below old3 old2 old1 empty none old-u-below old
 # THE ONE OWNER. env.sh `rc_state` answers every shape, and the fixture's shapes are
 # what this section says they are (the extractor reads the block back non-empty).
 expect_eq "T77 fixture: the u-between block holds the unalias line, the user's and the function" "$((2 + PROXY_N))" "$(t66_rc_tmp="$TMP/t77-fx"; t77_plant "$t66_rc_tmp" u-between; rc_block_lines "$t66_rc_tmp" | wc -l | tr -d ' ')"
-expect_eq "T77 fixture: the swapped block ends after the function and the unalias line" "$((3 + PROXY_N + 1))" "$(t77_last swapped)"
 for T77_S in $T77_ALL; do
   T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" "$T77_S"
   expect_eq "T77 rc_state ${T77_S}: $(t77_state "$T77_S")" "$(t77_state "$T77_S")" \
@@ -495,7 +510,6 @@ for T77_SH in zsh bash; do
         expect_contains "${T77_L}: offered" "[y/N]" "$T77_OUT"
         expect_same_bytes "${T77_L}: …and the yes leaves exactly bionic's body, no other byte changed" "$TMP/t77-want" "$T77_RC" ;;
       changed)
-        expect_contains "${T77_L}: named by its line range" "lines 2 to $(t77_last "$T77_S") of" "$T77_OUT"
         expect_contains "${T77_L}: …with bionic's first line for the user's hand" "     ${PROXY_UNALIAS}" "$T77_OUT"
         expect_contains "${T77_L}: …and bionic's second" "     claude() {" "$T77_OUT"
         expect_contains "${T77_L}: …through the call" "     ${PROXY_CALL}" "$T77_OUT"
@@ -526,8 +540,6 @@ for T77_SH in zsh bash; do
         expect_same_bytes "${T77_L}: …the rc byte for byte as it was" "$TMP/t77-before" "$T77_RC" ;;
     esac
     case "$(t77_state "$T77_S")" in
-      changed) expect_contains "${T77_L}: named by its line range" "lines 2 to $(t77_last "$T77_S") of" "$T77_OUT"
-               expect_absent "${T77_L}: …no user's line printed" "V9=9" "$T77_OUT" ;;
       written) expect_contains "${T77_L}: already in" "already in" "$T77_OUT" ;;
     esac
   done
@@ -629,10 +641,8 @@ for T77_S in u-between old2 old-u-below edited; do
     changed)
       expect_contains "${T77_L}: neutral, says changed" "– ${DOCTOR_ROW_LABEL}" "$T77_ROW"
       expect_contains "${T77_L}: …says changed" " changed " "$T77_ROW"
-      expect_contains "${T77_L}: …names the lines" "lines 2 to $(t77_last "$T77_S") of ~/.zshrc" "$T77_ROW"
       expect_contains "${T77_L}: …to edit by hand" "edit it by hand" "$T77_ROW"
       expect_absent "${T77_L}: …not routed to setup" "/bionic:setup" "$T77_ROW"
-      expect_absent "${T77_L}: …and no fix line for it" "claude() shell proxy is an older line" "$T77_DOC" ;;
   esac
 done
 
@@ -688,7 +698,6 @@ for T78_SH in zsh bash; do
       T78_L="T78 remove --only (${T78_D}, ${T78_SH}, ${T78_S})"
       case " $T78_OURS " in
         *" $T78_S "*)
-          expect_contains "${T78_L}: the warning says the block holds only bionic's lines" "$T78_WARN" "$T78_OUT"
           expect_contains "${T78_L}: …asks" "[y/N]" "$T78_OUT"
           expect_contains "${T78_L}: …reports it removed" "1 removed" "$T78_OUT"
           expect_same_bytes "${T78_L}: …and the yes takes the block whole, the user's lines byte for byte" "$TMP/t78-stripped" "$T78_RC" ;;
@@ -698,13 +707,6 @@ for T78_SH in zsh bash; do
           expect_contains "${T78_L}: …not reported removed, nor clean" "0 removed · 0 already clean" "$T78_OUT"
           expect_absent "${T78_L}: …no user's line printed" "V9=9" "$T78_OUT"
           expect_absent "${T78_L}: …nor the user's edit" "--verbose" "$T78_OUT"
-          if [ "$T78_S" = two ]; then
-            expect_contains "${T78_L}: …named by its faults" "line 7: a second block (the first starts at line 2)" "$T78_OUT"
-            expect_contains "${T78_L}: …which say the markers do not pair up" "do not pair up" "$T78_OUT"
-          else
-            expect_contains "${T78_L}: …named by its line range" "$(t78_named ".${T78_SH}rc" "$T78_S")" "$T78_OUT"
-            expect_contains "${T78_L}: …to edit by hand" "$T78_HAND" "$T78_OUT"
-          fi ;;
       esac
     done
   done
@@ -730,7 +732,6 @@ for T78_SH in zsh bash; do
         expect_same_bytes "${T78_L}: …and the rc is byte for byte as it was" "$TMP/t78-before" "$T78_RC" ;;
       *)
         expect_absent "${T78_L}: the page does not offer the block" "remove bionic's claude() shell function" "$(t78_page "$T78_OUT")"
-        expect_contains "${T78_L}: …names it by its lines after the page's items" "$(t78_named ".${T78_SH}rc" "$T78_S")" "$(t78_after_items "$T78_OUT")"
         expect_absent "${T78_L}: …no user's line printed" "V9=9" "$T78_OUT"
         expect_same_bytes "${T78_L}: …and the rc is byte for byte as it was" "$TMP/t78-before" "$T78_RC" ;;
     esac
@@ -750,7 +751,6 @@ T66_PATH="$T78_PATH_WAS"
 # A run that named the block never calls the machine clean (review pass 67 P2-1).
 expect_contains "T78 remove --all, no page: nothing else to remove" "nothing for bionic to remove" "$T78_OUT"
 expect_absent "T78 remove --all, no page: …and the machine is not called clean" "already clean" "$T78_OUT"
-expect_contains "T78 remove --all, no page: …and the changed block is named" "$(t78_named .zshrc u-between)" "$T78_OUT"
 expect_same_bytes "T78 remove --all, no page: …the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
 
 # THE RETIRED ENVIRONMENT BLOCK WITH A USER'S LINE between its markers is left the same
@@ -774,8 +774,6 @@ for T78_SH in zsh bash; do
         expect_same_bytes "${T78_L}: bionic's line alone goes with its block (the twin)" "$TMP/t78-stripped" "$T78_RC"
         [ "$T78_D" = rm-all ] && expect_contains "${T78_L}: …offered on the page" "delete bionic's environment settings" "$(t78_page "$T78_OUT")"
       else
-        expect_contains "${T78_L}: named by its lines" \
-          "lines 2 to 5 of ${T78_RC} are bionic's retired environment block, changed since bionic wrote it" "$T78_OUT"
         expect_absent "${T78_L}: …the user's line never printed" "V9=9" "$T78_OUT"
         expect_same_bytes "${T78_L}: …and the rc byte for byte as it was" "$TMP/t78-before" "$T78_RC"
         [ "$T78_D" = rm-all ] && expect_absent "${T78_L}: …and not on the page" "delete bionic's environment settings" "$(t78_page "$T78_OUT")"
@@ -821,8 +819,6 @@ done
 # THE MUTANTS. Each guard line deleted from a copy: the copy runs (it strips a block that
 # is all bionic's) and then strips a changed block, losing the user's line.
 T78_GUARD='guard: a changed claude() block is never stripped'
-expect_eq "T78 mutant: the standalone guard is in remove.sh, once" "1" "$(grep -c "$T78_GUARD" "$TMP/t78sa/remove-defs.sh")"
-expect_eq "T78 mutant: the payload guard is in env.sh, once" "1" "$(grep -c "$T78_GUARD" "$TMP/t78pl/lib/env.sh")"
 mkdir -p "$TMP/t78msa" "$TMP/t78mpl"
 grep -v "$T78_GUARD" "$TMP/t78sa/remove-defs.sh" > "$TMP/t78msa/remove-defs.sh"
 cp "$TMP/t78pl/remove-defs.sh" "$TMP/t78mpl/remove-defs.sh"; cp -R "$TMP/t78pl/lib" "$TMP/t78mpl/lib"

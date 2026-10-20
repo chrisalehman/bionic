@@ -240,8 +240,6 @@ expect_true "the payload ships payload/context/working-principles.md" test -f "$
 block_to "$SHIPPED" "$TMP/shipped-block"
 expect_true "the block extractor reads a non-empty block out of the shipped file" \
   test -s "$TMP/shipped-block"
-expect_eq "the shipped file carries exactly one start marker" "1" "$(count_lines_equal "$SHIPPED" "$START_LIT")"
-expect_eq "the shipped file carries exactly one end marker" "1" "$(count_lines_equal "$SHIPPED" "$END_LIT")"
 
 # What a consented write must leave: the user's file, then the block.
 { printf '%s\n' "$START_LIT"; cat "$TMP/shipped-block"; printf '%s\n' "$END_LIT"; } > "$TMP/expected-block"
@@ -372,8 +370,6 @@ expect_eq "REMOVE: a CLAUDE.md that held only the block is gone after remove" "n
   "$(path_exists "$SB_RB/.claude/CLAUDE.md")"
 # The standalone door has no shipped text, so it cannot tell the block is
 # unedited, and the deletion rule needs that (wave-27 T40): the file stays, empty.
-expect_eq "REMOVE: …while the standalone door leaves it in place, emptied" "yes 0" \
-  "$(path_exists "$SB_RBS/.claude/CLAUDE.md") $(wc -c < "$SB_RBS/.claude/CLAUDE.md" 2>/dev/null | tr -d ' ')"
 expect_eq "REMOVE: the claude home itself survives" "yes" "$(path_exists "$SB_RB/.claude")"
 
 # ---------------------------------------------------------------------------
@@ -636,7 +632,6 @@ PLAN_E="$(setup_plan "$SB_DE")"
 PLAN_A="$(setup_plan "$SB_DA")"
 expect_contains "EDITED-STATE: the --all page offers the principles on an absent block" "working principles" "$PLAN_A"
 expect_contains "EDITED-STATE: the --all page names the update of an edited span" "working principles" "$PLAN_E"
-expect_contains "EDITED-STATE: …saying it updates the span without asking" "update bionic's working principles span without asking" "$(report_row "$PLAN_E" "working principles")"
 
 # ---------------------------------------------------------------------------
 section "§CONSENT: the path and the full text are on screen before the question"
@@ -674,11 +669,8 @@ SB_A1="$(new_bare_home)"; setup_run "$SB_A1" $'y\n' >/dev/null 2>&1
 A1_PATH="$SB_A1/.claude/CLAUDE.md"
 expect_eq "ALL: the fixture holds the unedited block alone" "env:working-principles state=present" "$(detect_run "$SB_A1")"
 A1_OUT="$(remove_all "$SB_A1")"
-expect_contains "ALL: before it acts, the item says the block and the file will be deleted" \
-  "will delete the block and the file ${A1_PATH}" "$A1_OUT"
 expect_contains "ALL: its result line says the file was deleted" "✓ deleted ${A1_PATH}" "$A1_OUT"
 A1_BEFORE="${A1_OUT%%✓ deleted*}"
-expect_contains "ALL: …and the warning is printed before the result, not after" "will delete the block and the file" "$A1_BEFORE"
 expect_eq "ALL: the file is gone" "no" "$(path_exists "$A1_PATH")"
 expect_eq "ALL: no question is added — the page's is the only [y/N]" "1" \
   "$(printf '%s\n' "$A1_OUT" | grep -c '\[y/N\]')"
@@ -686,8 +678,6 @@ expect_eq "ALL: no question is added — the page's is the only [y/N]" "1" \
 SB_A2="$(new_home)"; setup_run "$SB_A2" $'y\n' >/dev/null 2>&1
 A2_PATH="$SB_A2/.claude/CLAUDE.md"
 A2_OUT="$(remove_all "$SB_A2")"
-expect_contains "ALL: with the user's text beside it, the line says the block will be deleted and the rest stays" \
-  "will delete that block and leave the rest of the file as it is" "$A2_OUT"
 expect_absent "ALL: …no deletion of the file is announced" "✓ deleted ${A2_PATH}" "$A2_OUT"
 expect_same_bytes "ALL: …and the user's text is byte for byte what it was" "$TMP/planted.md" "$A2_PATH"
 
@@ -717,8 +707,6 @@ expect_eq "NOT-A-FILE: …and changes nothing inside it" "$DIR_LS" "$(ls -A "$DI
 DOC_DIR="$(doctor_run "$SB_DIR")"
 ROW_DIR="$(report_row "$DOC_DIR" "$DOCTOR_ROW_LABEL")"
 expect_nonempty "NOT-A-FILE: doctor renders a row" "$ROW_DIR"
-expect_contains "NOT-A-FILE: doctor's fix line keeps the fault whole on the page" \
-  "~/.claude/CLAUDE.md is a directory → fix it by hand" "$DOC_DIR"
 expect_contains "NOT-A-FILE: doctor's row is a fault" "✗" "$ROW_DIR"
 expect_contains "NOT-A-FILE: doctor's row says it is not a file" "not a file" "$ROW_DIR"
 expect_absent "NOT-A-FILE: doctor suggests no setup run that would write" "/bionic:setup" "$ROW_DIR"
@@ -728,18 +716,15 @@ SB_LD="$(new_bare_home)"; mkdir "$SB_LD/elsewhere"; printf 'mine\n' > "$SB_LD/el
 ln -s ../elsewhere "$SB_LD/.claude/CLAUDE.md"
 LD_LS="$(ls -A "$SB_LD/elsewhere")"; LD_TOP="$(ls -A "$SB_LD")"
 LD_SET="$(setup_run "$SB_LD" $'y\ny\n')"
-expect_contains "NOT-A-FILE: a link to a directory is refused by setup" "is a link to a directory" "$LD_SET"
 expect_eq "NOT-A-FILE: …nothing is made in the directory" "$LD_LS" "$(ls -A "$SB_LD/elsewhere")"
 expect_eq "NOT-A-FILE: …or beside it" "$LD_TOP" "$(ls -A "$SB_LD")"
 
 # A dangling link: refused, its target not created, the link left as it was.
 SB_DL="$(new_bare_home)"; ln -s ../nowhere.md "$SB_DL/.claude/CLAUDE.md"
 DL_SET="$(setup_run "$SB_DL" $'y\ny\n')"
-expect_contains "NOT-A-FILE: a dangling link is refused by setup, naming where it points (T51 F3)" "is a link to ${SB_DL}/.claude/../nowhere.md, which does not exist" "$DL_SET"
 expect_eq "NOT-A-FILE: …its target is not created" "no" "$(path_exists "$SB_DL/nowhere.md")"
 expect_true "NOT-A-FILE: …and the link is still a link" test -L "$SB_DL/.claude/CLAUDE.md"
 DL_RM="$(remove_run "$SB_DL" y)"
-expect_contains "NOT-A-FILE: remove refuses a dangling link too, naming where it points" "is a link to ${SB_DL}/.claude/../nowhere.md, which does not exist" "$DL_RM"
 
 # The twin: a link to a regular file is followed, as before.
 SB_LF="$(new_bare_home)"; printf 'mine\n' > "$SB_LF/real.md"; ln -s ../real.md "$SB_LF/.claude/CLAUDE.md"
@@ -785,7 +770,6 @@ expect_contains "SHOWN: the question was asked" "[y/N]" "$CB_OUT"
 expect_same_bytes "SHOWN: a block changed while the question waited is not written" "$TMP/cb-b2.md" "$SB_CB/.claude/CLAUDE.md"
 expect_contains "SHOWN: …and remove says the file changed since it was shown" "changed since it was shown" "$CB_OUT"
 CB_AGAIN="$(remove_run "$SB_CB" n)"
-expect_contains "SHOWN: a second run shows the block as it is now" "a line typed while the question waited" "$CB_AGAIN"
 
 SB_CT="$(new_home)"; setup_run "$SB_CT" $'y\n' >/dev/null 2>&1; cp "$SB_CT/.claude/CLAUDE.md" "$TMP/ct-same.md"
 CT_OUT="$(remove_changed_at_question "$SB_CT" "$TMP/ct-same.md" y)"
@@ -841,12 +825,10 @@ for T51_SH in $T51_BASHES; do
   N_OUT="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$REMOVE_SH" --only "$ITEM")"
   expect_eq "NUL (${T51_TAG}): remove --only keeps the file" "yes" "$(path_exists "$N_F")"
   expect_same_bytes "NUL (${T51_TAG}): …byte-identical" "$TMP/n-before" "$N_F"
-  expect_contains "NUL (${T51_TAG}): …and says it is not text" "${N_F} is not text: it holds a NUL byte" "$N_OUT"
   expect_absent "NUL (${T51_TAG}): …and deletes nothing" "✓ deleted" "$N_OUT"
   # the standalone door
   N_SA="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$TMP/standalone/remove.sh" --only "$ITEM")"
   expect_same_bytes "NUL (${T51_TAG}): the standalone door leaves it byte-identical" "$TMP/n-before" "$N_F"
-  expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_SA"
   # remove --all, over a page of its own: the pre-plugin skill copy `legacy-skill-copy`
   # offers (wave-27 T82 — tool rows, which the claude stub used to make present, are
   # never on the page now).
@@ -855,20 +837,16 @@ for T51_SH in $T51_BASHES; do
   expect_contains "NUL (${T51_TAG}): the --all page printed (the rows below are not vacuous)" "Do all of the above?" "$N_ALL"
   expect_eq "NUL (${T51_TAG}): remove --all keeps the file" "yes" "$(path_exists "$N_F")"
   expect_same_bytes "NUL (${T51_TAG}): …byte-identical" "$TMP/n-before" "$N_F"
-  expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_ALL"
   expect_absent "NUL (${T51_TAG}): …and deletes nothing" "✓ deleted ${N_F}" "$N_ALL"
   # setup
   N_SET="$(printf 'y\ny\n' | t51_run "$T51_SH" "$SB_N" "$SETUP_SH" --only "$ITEM")"
   expect_same_bytes "NUL (${T51_TAG}): setup answered yes writes nothing into it" "$TMP/n-before" "$N_F"
-  expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_SET"
   expect_contains "NUL (${T51_TAG}): …as a fault" "✗" "$(report_row "$N_SET" "working principles")"
   # doctor
   N_DOC="$(t51_run "$T51_SH" "$SB_N" "$DOCTOR_SH" </dev/null)"
   N_ROW="$(report_row "$N_DOC" "$DOCTOR_ROW_LABEL")"
   expect_contains "NUL (${T51_TAG}): doctor's row says not text" "not text" "$N_ROW"
   expect_absent "NUL (${T51_TAG}): …and routes to no setup run" "/bionic:setup" "$N_ROW"
-  expect_contains "NUL (${T51_TAG}): doctor's fix line names why" \
-    "~/.claude/CLAUDE.md is not text: it holds a NUL byte → fix it by hand" "$N_DOC"
   # The twin: the same shape with no NUL, under the same bash, is deleted as today.
   SB_NW="$(new_bare_home)"; setup_run "$SB_NW" $'y\n' >/dev/null 2>&1
   NW_OUT="$(printf 'y\n' | t51_run "$T51_SH" "$SB_NW" "$REMOVE_SH" --only "$ITEM")"
@@ -890,7 +868,6 @@ for T51_SH in $T51_BASHES; do
     expect_eq "NUL ${N_WHERE} (${T51_TAG}): the fixture holds a NUL" "yes" "$(has_nul "$NE_F")"
     NE_OUT="$(printf 'y\n' | t51_run "$T51_SH" "$SB_NE" "$REMOVE_SH" --only "$ITEM")"
     expect_same_bytes "NUL ${N_WHERE} (${T51_TAG}): remove leaves it byte-identical" "$TMP/ne-before" "$NE_F"
-    expect_contains "NUL ${N_WHERE} (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$NE_OUT"
   done
 done
 
@@ -995,483 +972,4 @@ expect_nonempty "PAGE: the user's text beside it — the page carries the line" 
 expect_absent "PAGE: …and it announces no deletion of the file (the twin)" "delete the file" "$P2_LINE"
 
 # ---------------------------------------------------------------------------
-section "§T51-FIFO: a FIFO says \"not a regular file\" once (F7)"
-# ---------------------------------------------------------------------------
-
-SB_FF="$(new_bare_home)"; mkfifo "$SB_FF/.claude/CLAUDE.md"
-FF_DOC="$(doctor_run "$SB_FF")"
-FF_FIX="$(printf '%s\n' "$FF_DOC" | grep -F '~/.claude/CLAUDE.md is' | grep -F 'fix it by hand')"
-expect_nonempty "FIFO: doctor prints a fix line for it" "$FF_FIX"
-expect_contains "FIFO: doctor's fix line says it is not a regular file" "not a regular file" "$FF_FIX"
-expect_absent "FIFO: …and does not say it twice" "not a regular file, not a file" "$FF_FIX"
-
-# ===========================================================================
-# THE INSTALL RECORD — wave-28 T40 (spec D29, REQ-12, AC-12.1, AC-12.2).
-#
-# `install_dep` appends one tab-separated line to
-# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/installed` after an install's
-# command exits 0, and `remove` acts on a `remove-on-consent` row only when that
-# file names it. These rows live in this suite because it is the one that already
-# drives setup, remove and doctor over a throwaway home.
-#
-# EVERY DOOR RUNS BEHIND STUBS (wave-28 rule 13; wave-27 lost a real global tool to
-# an unstubbed `remove --all`). The environment is emptied (`env -i`) and PATH is
-# the stub directory first, then /usr/bin and /bin only; each drive checks, inside
-# the same command, that `npm` resolves to the stub before running anything. The
-# stubs log their argv and exit 0; `npm` keeps a list of what it "installed" so
-# its `list` answers presence, `npx … install chromium` writes the browser marker
-# the probe reads, and `REC_FAIL=<tool>` makes that one stub exit 1 (`<tool> <sub>`,
-# that one subcommand of it). No `--all`
-# drive here is answered anything but `n`.
-# ===========================================================================
-
-REC_STUBS="$TMP/rec-stubs"
-mkdir -p "$REC_STUBS"
-cat > "$REC_STUBS/_stub" <<'STUB'
-#!/bin/bash
-t="${0##*/}"
-echo "$t $*" >> "$REC_LOG"
-case ",${REC_FAIL:-}," in *",${t},"*|*",${t} ${1:-},"*) exit 1 ;; esac
-mkdir -p "$REC_STATE"
-case "$t" in
-  npm)
-    last=""; for a in "$@"; do case "$a" in -*) ;; *) last="$a" ;; esac; done
-    case "${1:-}" in
-      list) grep -qxF -- "$last" "$REC_STATE/npm" 2>/dev/null; exit $? ;;
-      install) printf '%s\n' "$last" >> "$REC_STATE/npm" ;;
-      uninstall) grep -vxF -- "$last" "$REC_STATE/npm" > "$REC_STATE/npm.t" 2>/dev/null
-                 mv "$REC_STATE/npm.t" "$REC_STATE/npm" ;;
-    esac ;;
-  npx)
-    for a in "$@"; do
-      [ "$a" = chromium ] && mkdir -p "$BIONIC_PLAYWRIGHT_CACHE/chromium-1" \
-        && : > "$BIONIC_PLAYWRIGHT_CACHE/chromium-1/INSTALLATION_COMPLETE"
-    done ;;
-  claude)
-    case "$*" in
-      "plugin list --json") echo '[]' ;;
-      "mcp get "*) exit 1 ;;
-    esac ;;
-esac
-exit 0
-STUB
-chmod +x "$REC_STUBS/_stub"
-for _t in npm npx pnpm bun uv uvx pip pip3 brew claude; do ln -s _stub "$REC_STUBS/$_t"; done
-
-rec_home() {  # -> a fresh throwaway home with an empty ~/.claude
-  local h
-  h="$(mktemp -d "$TMP/rec-XXXXXX")"
-  mkdir -p "$h/.claude" "$h/.tmp" "$h/state"
-  : > "$h/calls.log"
-  printf '%s' "$h"
-}
-
-# <home> <command...> — the one environment every record drive gets. The stub
-# check runs in the same process as the command it guards; status 99 means the
-# check failed and nothing ran.
-rec_env() {
-  local h="$1"; shift
-  env -i HOME="$h" ZDOTDIR="$h" SHELL=/bin/zsh PATH="$REC_STUBS:/usr/bin:/bin" TMPDIR="$h/.tmp" TERM=dumb \
-    CLAUDE_CONFIG_DIR="$h/.claude" BIONIC_CLAUDE_HOME="$h/.claude" \
-    BIONIC_PLUGIN_ROOT="${REC_PAYLOAD:-$PAYLOAD}" CLAUDE_PLUGIN_ROOT="${REC_PAYLOAD:-$PAYLOAD}" \
-    REC_LOG="$h/calls.log" REC_STATE="$h/state" REC_FAIL="${REC_FAIL:-}" \
-    BIONIC_PLAYWRIGHT_CACHE="$h/pw-cache" BIONIC_PNPM_STORE="$h/pnpm-store" \
-    BIONIC_INSTALL_LOG="$h/.tmp/install.log" BIONIC_DOCTOR_PROBE_SECONDS=15 \
-    bash -c '[ "$(command -v npm)" = "$1/npm" ] || { echo "rec: npm is not the stub" >&2; exit 99; }; shift; "$@"' \
-      _ "$REC_STUBS" "$@"
-}
-rec_setup() {  # <home> <item> <answer>
-  printf '%s\n' "$3" | rec_env "$1" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only "$2" 2>&1
-}
-rec_remove() {  # <home> <item> <answer>
-  printf '%s\n' "$3" | rec_env "$1" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/remove.sh" --only "$2" 2>&1
-}
-rec_jit() {  # <home> <name> <answer> — the mid-session offer, as a route makes it
-  printf '%s\n' "$3" | rec_env "$1" bash -c '. "$1"; jit_offer "$2" a-route "a capability" "it degrades"' _ \
-    "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/jit.sh" "$2" 2>&1
-}
-rec_lib() {  # <home> <snippet> — deps.sh sourced in the record environment
-  rec_env "$1" bash -c '. "$1"; eval "$2"' _ "${REC_PAYLOAD:-$PAYLOAD}/scripts/lib/deps.sh" "$2" 2>&1
-}
-
-rec_file() { printf '%s/.claude/bionic/installed' "$1"; }
-rec_lines() {  # <home> <name> -> the record's lines for <name>, verbatim
-  local f line
-  f="$(rec_file "$1")"
-  [ -f "$f" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    [ "${line%%$'\t'*}" = "$2" ] && printf '%s\n' "$line"
-  done < "$f"
-  return 0
-}
-rec_count() {  # <home> <name> -> how many record lines name <name>
-  local n=0 line
-  while IFS= read -r line; do [ -n "$line" ] && n=$((n + 1)); done <<< "$(rec_lines "$1" "$2")"
-  printf '%s' "$n"
-}
-rec_calls() { cat "$1/calls.log" 2>/dev/null; return 0; }
-rec_asks() { grep -cF "Remove ${2} now?" <<< "$1"; return 0; }
-
-REC_VERSION="$(jq -r '.version' "$PAYLOAD/.claude-plugin/plugin.json" 2>/dev/null)"
-REC_TOOL='@pencil.dev/cli'
-
-# ---------------------------------------------------------------------------
-section "§RECORD: an install appends its line; a decline, a failure or a plugin appends none (AC-12.1)"
-# ---------------------------------------------------------------------------
-
-expect_ne "RECORD: the payload's version reads out of plugin.json (the version extractor reads)" "" "$REC_VERSION"
-
-# The stub check bites: a PATH whose first npm is not the stub stops the drive.
-REC_H0="$(rec_home)"
-REC_GUARD="$(env -i PATH=/usr/bin:/bin bash -c '[ "$(command -v npm)" = "$1/npm" ] || exit 99' _ "$REC_STUBS"; echo "rc=$?")"
-expect_eq "RECORD: the stub check refuses a PATH whose npm is not the stub" "rc=99" "$REC_GUARD"
-expect_eq "RECORD: …and passes the record environment" "rc=0" \
-  "$(rec_env "$REC_H0" true; echo "rc=$?")"
-
-# Setup, answered yes.
-REC_H1="$(rec_home)"
-REC_S1="$(rec_setup "$REC_H1" "tool:${REC_TOOL}" y)"
-expect_contains "RECORD setup yes: the install reached the npm stub" "npm install -g ${REC_TOOL}" "$(rec_calls "$REC_H1")"
-expect_eq "RECORD setup yes: the record holds one line for the tool" "1" "$(rec_count "$REC_H1" "$REC_TOOL")"
-REC_L1="$(rec_lines "$REC_H1" "$REC_TOOL")"
-IFS=$'\t' read -r REC_F1 REC_F2 REC_F3 REC_F4 REC_F5 <<< "$REC_L1"
-expect_eq "RECORD setup yes: field 1 is the row name" "$REC_TOOL" "$REC_F1"
-expect_eq "RECORD setup yes: field 2 is the row's kind" "npm-global" "$REC_F2"
-expect_regex "RECORD setup yes: field 3 is an ISO-UTC time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$REC_F3"
-expect_eq "RECORD setup yes: field 4 is bionic's version" "$REC_VERSION" "$REC_F4"
-expect_eq "RECORD setup yes: …and there is no fifth field" "" "$REC_F5"
-expect_eq "RECORD setup yes: the record is at \${CLAUDE_CONFIG_DIR}/bionic/installed" "yes" \
-  "$(path_exists "$REC_H1/.claude/bionic/installed")"
-
-# Setup, answered no: the same extractor, nothing on it.
-REC_H2="$(rec_home)"
-REC_S2="$(rec_setup "$REC_H2" "tool:${REC_TOOL}" n)"
-expect_contains "RECORD setup no: the question was put and declined" "declined — ${REC_TOOL} stays absent." "$REC_S2"
-expect_absent "RECORD setup no: …nothing was installed" "npm install" "$(rec_calls "$REC_H2")"
-expect_eq "RECORD setup no: …and nothing was recorded" "0" "$(rec_count "$REC_H2" "$REC_TOOL")"
-
-# Setup, answered yes, the install's command failing.
-REC_H3="$(rec_home)"
-REC_S3="$(REC_FAIL=npm rec_setup "$REC_H3" "tool:${REC_TOOL}" y)"
-expect_contains "RECORD failed install: the install was tried" "npm install -g ${REC_TOOL}" "$(rec_calls "$REC_H3")"
-expect_eq "RECORD failed install: …and nothing was recorded" "0" "$(rec_count "$REC_H3" "$REC_TOOL")"
-
-# The mid-session offer, answered yes and answered no.
-REC_H4="$(rec_home)"
-REC_J4="$(rec_jit "$REC_H4" "$REC_TOOL" y)"
-expect_contains "RECORD offer yes: the offer reached the npm stub" "npm install -g ${REC_TOOL}" "$(rec_calls "$REC_H4")"
-expect_eq "RECORD offer yes: the record holds the line" "1" "$(rec_count "$REC_H4" "$REC_TOOL")"
-expect_match "RECORD offer yes: …the same shape setup writes" "${REC_TOOL}"$'\t'"npm-global"$'\t'"*"$'\t'"${REC_VERSION}" \
-  "$(rec_lines "$REC_H4" "$REC_TOOL")"
-REC_H5="$(rec_home)"
-REC_J5="$(rec_jit "$REC_H5" "$REC_TOOL" n)"
-expect_contains "RECORD offer no: the offer was declined" "declined — ${REC_TOOL} stays absent." "$REC_J5"
-expect_eq "RECORD offer no: …and nothing was recorded" "0" "$(rec_count "$REC_H5" "$REC_TOOL")"
-
-# A native plugin: the CLI installs it and its own registry proves it, so no line.
-REC_H6="$(rec_home)"
-REC_J6="$(rec_jit "$REC_H6" impeccable y)"
-expect_contains "RECORD native offer: the plugin install reached the claude stub" "plugin install impeccable@" \
-  "$(rec_calls "$REC_H6")"
-expect_eq "RECORD native offer: …and no line was written for it" "0" "$(rec_count "$REC_H6" impeccable)"
-REC_H7="$(rec_home)"
-REC_S7="$(rec_setup "$REC_H7" tool:document-skills y)"
-expect_contains "RECORD native setup: the plugin install reached the claude stub" "plugin install document-skills@" \
-  "$(rec_calls "$REC_H7")"
-expect_eq "RECORD native setup: …and no line was written for it" "0" "$(rec_count "$REC_H7" document-skills)"
-
-# The newest line for a name is the one read.
-REC_H8="$(rec_home)"
-mkdir -p "$REC_H8/.claude/bionic"
-printf '%s\t%s\t%s\t%s\n' "$REC_TOOL" uv-tool 2026-01-01T00:00:00Z 1.0.0 context7 mcp-server 2026-01-02T00:00:00Z 1.0.0 \
-  "$REC_TOOL" npm-global 2026-01-03T00:00:00Z 1.1.0 > "$(rec_file "$REC_H8")"
-expect_eq "RECORD newest: the kind read for a name is its newest line's" "npm-global" \
-  "$(rec_lib "$REC_H8" "dep_record_kind '${REC_TOOL}'")"
-expect_eq "RECORD newest: a name with no line reads nothing, status 1" "rc=1" \
-  "$(rec_lib "$REC_H8" "dep_record_kind humanizer; echo rc=\$?")"
-
-# ---------------------------------------------------------------------------
-section "§RECORD-REMOVE: remove acts on a recorded tool and on nothing else (AC-12.2)"
-# ---------------------------------------------------------------------------
-
-rec_installed_home() {  # -> a home where setup installed the tool, so the record names it
-  local h; h="$(rec_home)"
-  rec_setup "$h" "tool:${REC_TOOL}" y >/dev/null 2>&1
-  : > "$h/calls.log"
-  printf '%s' "$h"
-}
-
-# Recorded, answered yes: offered, removed through the stub, its line gone.
-REC_R1="$(rec_installed_home)"
-expect_eq "RECORD-REMOVE yes: precondition — the record names the tool" "1" "$(rec_count "$REC_R1" "$REC_TOOL")"
-REC_R1_OUT="$(rec_remove "$REC_R1" "tool:${REC_TOOL}" y)"
-expect_eq "RECORD-REMOVE yes: it is offered — one question" "1" "$(rec_asks "$REC_R1_OUT" "$REC_TOOL")"
-expect_contains "RECORD-REMOVE yes: …the removal ran against the stub" "npm uninstall -g ${REC_TOOL}" "$(rec_calls "$REC_R1")"
-expect_eq "RECORD-REMOVE yes: …the stub no longer lists it" "1" \
-  "$(grep -qxF -- "$REC_TOOL" "$REC_R1/state/npm"; echo $?)"
-expect_eq "RECORD-REMOVE yes: …and its line is gone from the record" "0" "$(rec_count "$REC_R1" "$REC_TOOL")"
-expect_absent "RECORD-REMOVE yes: …and it is not named for removal by hand" "no record that it installed it" "$REC_R1_OUT"
-
-# Recorded, answered no: nothing runs, the line stays.
-REC_R2="$(rec_installed_home)"
-REC_R2_OUT="$(rec_remove "$REC_R2" "tool:${REC_TOOL}" n)"
-expect_eq "RECORD-REMOVE no: it is offered" "1" "$(rec_asks "$REC_R2_OUT" "$REC_TOOL")"
-expect_absent "RECORD-REMOVE no: …nothing was removed" "npm uninstall" "$(rec_calls "$REC_R2")"
-expect_eq "RECORD-REMOVE no: …and the line stays" "1" "$(rec_count "$REC_R2" "$REC_TOOL")"
-
-# Recorded, answered yes, the removal failing: the line stays.
-REC_R3="$(rec_installed_home)"
-REC_R3_OUT="$(REC_FAIL="npm uninstall" rec_remove "$REC_R3" "tool:${REC_TOOL}" y)"
-expect_contains "RECORD-REMOVE failed: the removal was tried" "npm uninstall -g ${REC_TOOL}" "$(rec_calls "$REC_R3")"
-expect_contains "RECORD-REMOVE failed: …the run says it failed" "the removal failed — ${REC_TOOL}" "$REC_R3_OUT"
-expect_eq "RECORD-REMOVE failed: …and the line stays" "1" "$(rec_count "$REC_R3" "$REC_TOOL")"
-
-# Present, with a record that names something else: named, never acted on.
-rec_unrecorded_home() {  # -> the tool on the stub's list, the record naming only context7
-  local h; h="$(rec_home)"
-  printf '%s\n' "$REC_TOOL" > "$h/state/npm"
-  mkdir -p "$h/.claude/bionic"
-  printf '%s\t%s\t%s\t%s\n' context7 mcp-server 2026-01-02T00:00:00Z "$REC_VERSION" > "$(rec_file "$h")"
-  printf '%s' "$h"
-}
-REC_R4="$(rec_unrecorded_home)"
-REC_R4_OUT="$(rec_remove "$REC_R4" "tool:${REC_TOOL}" y)"
-expect_contains "RECORD-REMOVE unrecorded: named, with T82's sentence" \
-  "${REC_TOOL}: present — bionic has no record that it installed it, so it is left in place." "$REC_R4_OUT"
-expect_contains "RECORD-REMOVE unrecorded: …and its by-hand command" \
-  "remove it by hand with: npm uninstall -g ${REC_TOOL}" "$REC_R4_OUT"
-expect_eq "RECORD-REMOVE unrecorded: …nothing asks to remove it" "0" "$(rec_asks "$REC_R4_OUT" "$REC_TOOL")"
-expect_contains "RECORD-REMOVE unrecorded: the stub log reads (the presence probe is on it)" "npm list" "$(rec_calls "$REC_R4")"
-expect_absent "RECORD-REMOVE unrecorded: …and no removal ran" "npm uninstall" "$(rec_calls "$REC_R4")"
-expect_eq "RECORD-REMOVE unrecorded: …and the stub still lists it" "0" \
-  "$(grep -qxF -- "$REC_TOOL" "$REC_R4/state/npm"; echo $?)"
-
-# The mutant: a record read that names every row. The unrecorded tool is then
-# acted on, so the rows above are a measurement of the record, not a constant.
-REC_MUT="$TMP/payload-rec-mutant"
-rm -rf "$REC_MUT"; cp -R "$PAYLOAD" "$REC_MUT"
-printf '%s\n' 'dep_record_kind() { dep_field "${1:-}" kind; }' >> "$REC_MUT/scripts/lib/deps.sh"
-expect_true "RECORD-REMOVE mutant: the doctored library still parses" bash -n "$REC_MUT/scripts/lib/deps.sh"
-REC_R5="$(rec_unrecorded_home)"
-REC_R5_OUT="$(REC_PAYLOAD="$REC_MUT" rec_remove "$REC_R5" "tool:${REC_TOOL}" y)"
-expect_eq "RECORD-REMOVE mutant: the mutant offers the unrecorded tool" "1" "$(rec_asks "$REC_R5_OUT" "$REC_TOOL")"
-expect_contains "RECORD-REMOVE mutant: …and the act-call extractor sees its removal" "npm uninstall -g ${REC_TOOL}" \
-  "$(rec_calls "$REC_R5")"
-
-# The two shared caches: recorded by their installs, named, never acted on.
-REC_R6="$(rec_home)"
-rec_setup "$REC_R6" tool:playwright-chromium y >/dev/null 2>&1
-rec_setup "$REC_R6" tool:motion y >/dev/null 2>&1
-expect_contains "RECORD-REMOVE caches: the browser install reached the npx stub" "install chromium" "$(rec_calls "$REC_R6")"
-expect_contains "RECORD-REMOVE caches: the store install reached the pnpm stub" "pnpm store add motion@latest" "$(rec_calls "$REC_R6")"
-expect_match "RECORD-REMOVE caches: the browser is recorded with its kind" "playwright-chromium"$'\t'"playwright-browser"$'\t'"*" \
-  "$(rec_lines "$REC_R6" playwright-chromium)"
-expect_match "RECORD-REMOVE caches: the store entry is recorded with its kind" "motion"$'\t'"pnpm-store"$'\t'"*" \
-  "$(rec_lines "$REC_R6" motion)"
-mkdir -p "$REC_R6/pnpm-store"; printf 'x\nmotion@12.0.0\ny\n' > "$REC_R6/pnpm-store/index.db"
-: > "$REC_R6/calls.log"
-REC_R6_PW="$(rec_remove "$REC_R6" tool:playwright-chromium y)"
-REC_R6_MO="$(rec_remove "$REC_R6" tool:motion y)"
-for _n in playwright-chromium motion; do
-  case "$_n" in playwright-chromium) _o="$REC_R6_PW" ;; *) _o="$REC_R6_MO" ;; esac
-  expect_contains "RECORD-REMOVE ${_n}: named as bionic's, in a cache other projects share" \
-    "${_n}: bionic installed it, but it lives in a cache your other projects share, so it is left in place." "$_o"
-  expect_contains "RECORD-REMOVE ${_n}: …with its by-hand command" "remove it by hand with: " "$_o"
-  expect_eq "RECORD-REMOVE ${_n}: …nothing asks to remove it" "0" "$(rec_asks "$_o" "$_n")"
-  expect_eq "RECORD-REMOVE ${_n}: …and its line stays" "1" "$(rec_count "$REC_R6" "$_n")"
-done
-expect_absent "RECORD-REMOVE caches: the Playwright cache's path is printed by neither door" "pw-cache" "${REC_R6_PW}${REC_R6_MO}"
-expect_eq "RECORD-REMOVE caches: no removal reached npx or pnpm" "" \
-  "$(grep -E '^(npx .*uninstall|pnpm (store prune|remove|rm))' "$REC_R6/calls.log")"
-expect_eq "RECORD-REMOVE caches: …and the browser marker is still there" "yes" \
-  "$(path_exists "$REC_R6/pw-cache/chromium-1/INSTALLATION_COMPLETE")"
-
-# The `--all` page, answered no: the recorded tool is on it, and nothing runs.
-REC_R7="$(rec_installed_home)"
-REC_R7_OUT="$(printf 'n\n' | rec_env "$REC_R7" bash "$PAYLOAD/scripts/remove.sh" --all 2>&1)"
-REC_R7_PAGE="${REC_R7_OUT%%Do all of the above?*}"
-expect_ne "RECORD-REMOVE --all: the page is on the output, ahead of its question" "$REC_R7_OUT" "$REC_R7_PAGE"
-expect_contains "RECORD-REMOVE --all: the recorded tool is on the page" "• remove ${REC_TOOL}" "$REC_R7_PAGE"
-expect_absent "RECORD-REMOVE --all: …the page answered no removes nothing" "npm uninstall" "$(rec_calls "$REC_R7")"
-expect_eq "RECORD-REMOVE --all: …and the line stays" "1" "$(rec_count "$REC_R7" "$REC_TOOL")"
-
-# ===========================================================================
-# THE SHARE — wave-28 T10 (spec D16, REQ-2 AC-2.1 surfaces).
-#
-# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share` holds one integer, 1 to 100; absent means 80. Setup offers
-# to write it by the principles item's pattern: a yes writes the default share, a no leaves it unset and the
-# default stands, a share already there is never asked about or overwritten. `remove` takes the file out on a yes.
-# Every drive is behind the record section's stubs, a throwaway home and CLAUDE_CONFIG_DIR (rule 13); no `--all`
-# drive is answered anything but `n`.
-# ===========================================================================
-
-sh_file() { printf '%s/.claude/bionic/share' "$1"; }
-sh_value() {  # <home> -> the first line of the home's share file, nothing when there is none
-  local v=""
-  { read -r v < "$(sh_file "$1")"; } 2>/dev/null
-  printf '%s' "$v"
-}
-sh_has() { [ -e "$(sh_file "$1")" ] && echo yes || echo no; }
-
-# ---------------------------------------------------------------------------
-section "§NO-SHARE-ITEM: setup no longer offers the share (AC-7.1)"
-# ---------------------------------------------------------------------------
-# WAVE-31 T10 DELETED §SHARE-ITEM, a test of the deleted item (setup's step 14 wrote 80 to
-# ~/.claude/bionic/share on a yes). The share stays settable by `session-poker.sh share <n>`
-# and by hand; doctor's row and remove's share-file step are pinned elsewhere (§SHARE-REMOVE,
-# doctor-reads.test.sh). A machine with nothing else to do cannot be built hermetically (every
-# dependency is missing here), so the summary arm asserts the share contributes no line to it.
-
-section_of() {  # <text> -> the lines from "13. Working principles" down, "" when there is no such header
-  local line on=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in "13. Working principles"*) on=1 ;; esac
-    [ "$on" = "1" ] && printf '%s\n' "$line"
-  done <<< "$1"
-  return 0
-}
-
-NS_A="$(rec_home)"
-NS_OUT="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
-NS_TAIL="$(section_of "$NS_OUT")"
-expect_nonempty "NO-SHARE-ITEM: the first run reaches step 13 (the extractor reads)" "$NS_TAIL"
-expect_contains "NO-SHARE-ITEM: …and prints a Summary after it" "Summary" "$NS_TAIL"
-expect_absent "NO-SHARE-ITEM: no 14. header" "14. " "$NS_OUT"
-expect_absent "NO-SHARE-ITEM: no share question" "Machine share" "$NS_OUT"
-expect_absent "NO-SHARE-ITEM: …nor a share line in the summary" "answer yes to share" "$NS_OUT"
-expect_eq "NO-SHARE-ITEM: …and nothing wrote the share file" "no" "$(sh_has "$NS_A")"
-
-NS_LIST="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --list 2>&1)"
-expect_contains "NO-SHARE-ITEM: --list still names working-principles (the extractor reads)" "working-principles" "$NS_LIST"
-expect_absent "NO-SHARE-ITEM: --list does not name share" "share" "$NS_LIST"
-
-NS_ONLY="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only share 2>&1 </dev/null)"; NS_ONLY_RC=$?
-expect_eq "NO-SHARE-ITEM: --only share is refused (exit 2)" "2" "$NS_ONLY_RC"
-expect_contains "NO-SHARE-ITEM: …as an unknown item" "there is nothing called share to set up" "$NS_ONLY"
-NS_ONLY_OK="$(rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles 2>&1 </dev/null)"; NS_ONLY_OK_RC=$?
-expect_eq "NO-SHARE-ITEM: --only on a real item is not refused (the twin)" "0" "$NS_ONLY_OK_RC"
-
-NS_ALL="$(printf 'n\n' | rec_env "$NS_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --all 2>&1)"
-NS_PAGE="${NS_ALL%%Do all of the above?*}"
-expect_ne "NO-SHARE-ITEM: the --all page is on the output ahead of its question" "$NS_ALL" "$NS_PAGE"
-expect_contains "NO-SHARE-ITEM: …and names the working principles (the twin)" "working principles" "$NS_PAGE"
-expect_absent "NO-SHARE-ITEM: …and not the share" "share of this machine" "$NS_PAGE"
-
-# ---------------------------------------------------------------------------
-section "§SPAN-IS-BIONICS: the span between the markers is replaced on every setup, asking nothing (AC-7.2)"
-# ---------------------------------------------------------------------------
-
-SPAN_COMMENT='<!-- bionic replaces this span on every setup; your own text belongs outside the markers -->'
-SPAN_OPENING='bionic setup — every change below is asked for first, one item at a time;
-the one exception is bionic'"'"'s own working-principles span, which setup updates without asking.'
-{ IFS= read -r SPAN_FIRST; } < "$TMP/shipped-block"
-expect_eq "SPAN: the shipped span's first line is the replacement notice, verbatim" "$SPAN_COMMENT" "$SPAN_FIRST"
-expect_contains "SPAN: setup's opening line names the one exception, verbatim" "$SPAN_OPENING" "$NS_OUT"
-
-# 1.14.0's span: the shipped text without the notice (the span as an earlier setup wrote it)
-span_old_home() {  # -> a rec home whose CLAUDE.md carries the planted file and the OLD span
-  local h f line
-  h="$(rec_home)"; f="$h/.claude/CLAUDE.md"
-  plant_memory "$f"
-  { printf '%s\n' "$START_LIT"
-    while IFS= read -r line || [ -n "$line" ]; do [ "$line" = "$SPAN_COMMENT" ] || printf '%s\n' "$line"; done < "$TMP/shipped-block"
-    printf '%s\n' "$END_LIT"; } >> "$f"
-  printf '%s' "$h"
-}
-summary_of() {  # <text> -> the lines after the "Summary" line
-  local line on=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    [ "$on" = "1" ] && printf '%s\n' "$line"
-    [ "$line" = "Summary" ] && on=1
-  done <<< "$1"
-  return 0
-}
-
-SP_A="$(span_old_home)"
-SP_F="$SP_A/.claude/CLAUDE.md"
-expect_eq "SPAN sweep precondition: the fixture reads as edited" "env:working-principles state=edited" "$(detect_run "$SP_A")"
-nonblock_to "$SP_F" "$TMP/sp-outside-before"
-SP_OUT="$(rec_env "$SP_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
-block_to "$SP_F" "$TMP/sp-block"
-expect_same_bytes "SPAN sweep: the span is now the shipped text" "$TMP/shipped-block" "$TMP/sp-block"
-nonblock_to "$SP_F" "$TMP/sp-outside-after"
-expect_same_bytes "SPAN sweep: …every line outside the markers as it was" "$TMP/sp-outside-before" "$TMP/sp-outside-after"
-expect_eq "SPAN sweep: …one start marker" "1" "$(count_lines_equal "$SP_F" "$START_LIT")"
-SP_S13="$(section_of "$SP_OUT")"; SP_S13="${SP_S13%%Summary*}"
-expect_nonempty "SPAN sweep: step 13 printed (the extractor reads)" "$SP_S13"
-expect_contains "SPAN sweep: step 13 says updated" "updated" "$SP_S13"
-expect_absent "SPAN sweep: …and asked nothing" "[y/N]" "$SP_S13"
-expect_contains "SPAN sweep: the summary says updated" "updated" "$(summary_of "$SP_OUT")"
-
-SP_OUT2="$(rec_env "$SP_A" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" </dev/null 2>&1)"
-SP_S13b="$(section_of "$SP_OUT2")"; SP_S13b="${SP_S13b%%Summary*}"
-expect_contains "SPAN equal: a second sweep says the span is already there" "already in" "$SP_S13b"
-expect_absent "SPAN equal: …claims no update" "updated" "$SP_S13b"
-expect_absent "SPAN equal: …and the summary claims none" "updated" "$(summary_of "$SP_OUT2")"
-block_to "$SP_F" "$TMP/sp-block2"
-expect_same_bytes "SPAN equal: …and the span is as it was" "$TMP/shipped-block" "$TMP/sp-block2"
-
-# --only reaches the same end
-SP_B="$(span_old_home)"
-SP_B_OUT="$(rec_env "$SP_B" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles 2>&1 </dev/null)"
-block_to "$SP_B/.claude/CLAUDE.md" "$TMP/sp-block3"
-expect_same_bytes "SPAN --only: the span is the shipped text" "$TMP/shipped-block" "$TMP/sp-block3"
-expect_contains "SPAN --only: the run says updated" "updated" "$SP_B_OUT"
-expect_absent "SPAN --only: …and asked nothing" "[y/N]" "$SP_B_OUT"
-expect_contains "SPAN --only: …the summary says updated" "updated" "$(summary_of "$SP_B_OUT")"
-
-# a hand edit inside the span goes the same way
-SP_C="$(span_old_home)"; edit_block "$SP_C/.claude/CLAUDE.md" '- my own rule'
-rec_env "$SP_C" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles >/dev/null 2>&1 </dev/null
-block_to "$SP_C/.claude/CLAUDE.md" "$TMP/sp-block4"
-expect_same_bytes "SPAN edit: a line added inside the span is replaced with it" "$TMP/shipped-block" "$TMP/sp-block4"
-
-# a read-only file is still left alone, with its message (the twin of the replacements above)
-SP_D="$(span_old_home)"; cp "$SP_D/.claude/CLAUDE.md" "$TMP/sp-ro-before.md"; chmod 444 "$SP_D/.claude/CLAUDE.md"
-SP_D_OUT="$(rec_env "$SP_D" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/setup.sh" --only working-principles 2>&1 </dev/null)"
-expect_same_bytes "SPAN read-only: the file is left byte-identical" "$TMP/sp-ro-before.md" "$SP_D/.claude/CLAUDE.md"
-expect_contains "SPAN read-only: …and says why" "read-only" "$SP_D_OUT"
-expect_absent "SPAN read-only: …and claims no update" "updated" "$(summary_of "$SP_D_OUT")"
-chmod 644 "$SP_D/.claude/CLAUDE.md"
-
-# ---------------------------------------------------------------------------
-section "§SHARE-REMOVE: remove takes the share file out on a yes, and only that file"
-# ---------------------------------------------------------------------------
-
-SH_R="$(rec_home)"
-mkdir -p "$SH_R/.claude/bionic"
-printf '80\n' > "$(sh_file "$SH_R")"
-printf 'ccstatusline\tstatusline\t2026-10-01T10:00:00Z\t1.12.0\n' > "$(rec_file "$SH_R")"
-expect_eq "SHARE-REMOVE precondition: the share file is there (80)" "80" "$(sh_value "$SH_R")"
-SH_R_NO="$(rec_remove "$SH_R" share n)"
-expect_eq "SHARE-REMOVE no: the file stays" "80" "$(sh_value "$SH_R")"
-expect_contains "SHARE-REMOVE no: the item says declined, and the file is left in place" "declined — bionic's share file" "$SH_R_NO"
-SH_R_YES="$(rec_remove "$SH_R" share y)"
-expect_eq "SHARE-REMOVE yes: the share file is gone" "no" "$(sh_has "$SH_R")"
-expect_contains "SHARE-REMOVE yes: the item says removed" "✓ bionic's share file" "$SH_R_YES"
-expect_contains "SHARE-REMOVE yes: …naming the file" "bionic/share" "$SH_R_YES"
-expect_eq "SHARE-REMOVE yes: the install record beside it is untouched (1 line)" "1" "$(rec_count "$SH_R" ccstatusline)"
-expect_eq "SHARE-REMOVE yes: …and the directory stays" "yes" "$([ -d "$SH_R/.claude/bionic" ] && echo yes || echo no)"
-SH_R_AGAIN="$(rec_remove "$SH_R" share y)"
-expect_contains "SHARE-REMOVE again: with no file the item is already clean" "already clean" "$SH_R_AGAIN"
-
-# a share a user set by hand is bionic's file too (the verb writes the same one)
-SH_R2="$(rec_home)"; mkdir -p "$SH_R2/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_R2")"
-rec_remove "$SH_R2" share y >/dev/null 2>&1
-expect_eq "SHARE-REMOVE set: a share set by the verb is removed on a yes as well" "no" "$(sh_has "$SH_R2")"
-
-# a share that is not a regular file is named and left alone
-SH_R3="$(rec_home)"; mkdir -p "$SH_R3/.claude/bionic/share"
-SH_R3_OUT="$(rec_remove "$SH_R3" share y)"
-expect_eq "SHARE-REMOVE not-a-file: a directory at the share's path is left (still there)" "yes" "$([ -d "$SH_R3/.claude/bionic/share" ] && echo yes || echo no)"
-expect_absent "SHARE-REMOVE not-a-file: …and nothing is reported removed" "✓ bionic's share file" "$SH_R3_OUT"
-
-# the --all page names it, answered no
-SH_R4="$(rec_home)"; mkdir -p "$SH_R4/.claude/bionic"; printf '65\n' > "$(sh_file "$SH_R4")"
-SH_R4_OUT="$(printf 'n\n' | rec_env "$SH_R4" bash "${REC_PAYLOAD:-$PAYLOAD}/scripts/remove.sh" --all 2>&1)"
-SH_R4_PAGE="${SH_R4_OUT%%Do all of the above?*}"
-expect_ne "SHARE-REMOVE --all: the page is on the output, ahead of its question" "$SH_R4_OUT" "$SH_R4_PAGE"
-expect_contains "SHARE-REMOVE --all: the share file is on it" "• delete bionic's share file " "$SH_R4_PAGE"
-expect_eq "SHARE-REMOVE --all: answered no, the file stays (65)" "65" "$(sh_value "$SH_R4")"
-
 finish

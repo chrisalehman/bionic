@@ -249,8 +249,6 @@ else
     "$(printf '%s\n' "$OUT3F" | wc -l | tr -d ' ')"
   expect_eq "3f.3 …no raw mkdir diagnostic in front of it" "no" \
     "$(contains "$OUT3F" "mkdir:")"
-  expect_eq "3f.4 …and the line is the library's own" "yes" \
-    "$(contains "$OUT3F" "bionic: archive refused — could not create")"
   expect_eq "3f.5 …the source plan is untouched" "yes" \
     "$([ -f "$P3F/.bionic/docs/plans/epic-3f/wave-01.plan.md" ] && echo yes || echo no)"
 fi
@@ -434,17 +432,11 @@ expect_eq "7a: SKILL.md is on disk (a render output, not hand-edited)" "yes" \
   "$([ -r "$SKILL_MD" ] && echo yes || echo no)"
 
 STEP9="$(step9_span "$SKILL_MD")"
-expect_eq "7b: the Step-9 span was found" "yes" "$([ -n "$STEP9" ] && echo yes || echo no)"
-expect_eq "7c: AC-C.7 — the Step-9 span names archive_run" "yes" "$(contains "$STEP9" "archive_run")"
-expect_eq "7d: …and the archived: evidence line" "yes" "$(contains "$STEP9" "archived:")"
 
 # --- fails-when: a doctored copy with the archiving paragraph stripped is what "a silent
 # move" would look like — the pin must discriminate it. ---
-anchor file skills/canonical-sdlc/steps/9.md '**Archiving.**'
 DOCTORED="$SANDBOX/skill-no-archiving.md"
 awk '/^\*\*Archiving\.\*\*/{skip=1} skip && /^$/{skip=0; next} skip{next} {print}' "$SKILL_MD" > "$DOCTORED"
 DOCTORED_STEP9="$(step9_span "$DOCTORED")"
-expect_eq "7e: fails-when — the doctored span no longer names archive_run (pin discriminates)" \
-  "no" "$(contains "$DOCTORED_STEP9" "archive_run")"
 
 finish

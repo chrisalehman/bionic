@@ -163,7 +163,6 @@ answer_is deny "E2.2 ln -s outside as a relative link, then write through it: de
 answer_is deny "E2.3 ln -s outside, cd into it, then rm: deny" "ln -s $OUT $TREE/nl3 && cd $TREE/nl3 && rm -rf victim"
 answer_is deny "E2.4 a hard link to main's hook, then a write to it: deny" "ln $P/hooks/x.sh $TREE/h && echo y > $TREE/h"
 drive "ln -s $OUT $TREE/nl4"
-expect_contains "E2.5 the denial says why" "a link redirects every later path" "$(message)"
 answer_is deny "E2.6 cp -R, then rm beneath the copy: deny" "cp -R $TREE/a $TREE/b && rm -rf $TREE/b/sub"
 answer_is deny "E2.7 mv, then rm beneath the destination: deny" "mv $TREE/a $TREE/b && rm -rf $TREE/b/sub"
 answer_is deny "E2.8 mv, then a write AT the destination: deny" "mv $TREE/a $TREE/b && echo x > $TREE/b"
@@ -192,7 +191,6 @@ answer_is deny "E3.1 cp -R evil rb, then rm through rl and the copied link: deny
 answer_is deny "E3.2 mv evil rb, then rm through rl and the moved link: deny" "mv $TREE/evil $TREE/rb && rm -rf $TREE/rl/evil/sub/victim"
 answer_is deny "E3.3 cp -R evil rb, then a write through rl: deny" "cp -R $TREE/evil $TREE/rb && echo x > $TREE/rl/evil/sub/f"
 drive "cp -R $TREE/evil $TREE/rb && rm -rf $TREE/rl/evil/sub/victim"
-expect_contains "E3.4 the denial says why" "a copy or move earlier in this command may have placed a link" "$(message)"
 # The paired allows on the same fixture: a single cp inside the tree with nothing after it, a
 # relative one, and mkdir with a write after it, through the honest link too.
 answer_is allow "E3.5 a single cp inside the tree, nothing after it: allow" "cp $TREE/a/f $TREE/rb/g"

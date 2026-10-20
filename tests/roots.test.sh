@@ -87,7 +87,7 @@ expect_eq "roots.sh is on disk" "yes" "$([ -r "$LIB" ] && echo yes || echo no)"
 expect_eq "roots.sh parses" "yes" "$(bash -n "$LIB" 2>/dev/null && echo yes || echo no)"
 
 for _fn in project_root bionic_root docs_root tmp_root archive_root plugin_root \
-           claude_home worktree_root transcripts_dir config_value config_section; do
+           claude_home worktree_root transcripts_dir config_value docs_tracked promote_target; do
   expect_eq "sourcing roots.sh defines $_fn" "yes" \
     "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; declare -F "$2" >/dev/null 2>&1 && echo yes || echo no' _ "$LIB" "$_fn")"
 done
@@ -283,40 +283,47 @@ expect_eq "…and another key from the same file" "30d" "$(call config_value "$C
 expect_eq "config_value: a missing key is the default" "7d" "$(call config_value "$C" nope 7d)"
 
 # ============================================================
-section "1d — config_section is the one list reader (wave-38 T18; REQ-7 AC-7.1)"
+section "1e — docs_tracked: the project's tracked home, and where a record is promoted"
 # ============================================================
 #
-# config_value's sibling for a YAML list: the `- ` items under `<key>:`, one per line, in order,
-# until the next flush-left key; comments and blank lines skipped; one layer of quotes stripped
-# around an item; a `| refuse: <class>` tail kept verbatim (the Bash wall reads it). Nothing when the
-# key is absent or holds no items. tests/standing-orders.test.sh drives the three surfaces it feeds.
+# A durable record belongs to the project, so its tracked home is a project folder named by
+# `docs-tracked:`, `docs/` when the key is absent. promote_target answers where a record of a
+# kind lands there, and refuses anything operational: a plan, a log, a run's record, or a
+# home that resolves under the state directory.
 
-CS="$SANDBOX/cslist"; mkdir -p "$CS/.bionic"
-cat > "$CS/.bionic/config.yaml" <<'CS_YAML'
-docs-root: dd
-standing-orders:
-  - hand test in progress | refuse: suite
+T="$SANDBOX/tracked"; mkdir -p "$T/.bionic"
+expect_eq "docs_tracked defaults to <root>/docs" "$T/docs" "$(call docs_tracked "$T")"
+printf 'docs-tracked: handbook\n' > "$T/.bionic/config.yaml"
+expect_eq "docs_tracked: a relative docs-tracked: joins onto the project" "$T/handbook" \
+  "$(call docs_tracked "$T")"
+rm -f "$T/.bionic/config.yaml"
 
-  # a comment is not an order
-  - "a quoted order"
-  - 'single-quoted'
-- flush-left item
-empty-list:
-next-list:
-  - not ours
-CS_YAML
-expect_eq "config_section returns the items under the key, in order, quotes stripped, the tail kept" \
-  "hand test in progress | refuse: suite
-a quoted order
-single-quoted
-flush-left item" "$(call config_section "$CS" standing-orders)"
-expect_eq "…stopping at the next flush-left key (the next list is its own section)" "not ours" \
-  "$(call config_section "$CS" next-list)"
-expect_eq "…a key with no items: nothing (the rows above read the same file)" "" "$(call config_section "$CS" empty-list)"
-expect_eq "…a key the file lacks: nothing" "" "$(call config_section "$CS" nope)"
-expect_eq "…a flat key is not a list: nothing" "" "$(call config_section "$CS" docs-root)"
-expect_eq "…no config file: nothing" "" "$(call config_section "$SANDBOX/no-such-root" standing-orders)"
-expect_eq "config_section ends with one newline" "yes" "$(trailing_nl config_section "$CS" standing-orders)"
+TS="$T/.bionic/docs"
+expect_eq "promote_target: an ADR lands under adrs/ with its own name" \
+  "$T/docs/adrs/adr-007-one-door.md" \
+  "$(call promote_target "$T" adr "$TS/adrs/epic-99/adr-007-one-door.md")"
+expect_eq "promote_target: a design's name drops its run-number prefix" \
+  "$T/docs/designs/tidy.spec.md" \
+  "$(call promote_target "$T" design "$TS/specs/epic-99/wave-03-tidy.spec.md")"
+expect_eq "promote_target: a requirement lands under requirements/" \
+  "$T/docs/requirements/tidy.requirements.md" \
+  "$(call promote_target "$T" requirement "$TS/specs/epic-99/wave-03-tidy.requirements.md")"
+
+expect_eq "promote_target: the kind plan is refused, and names no target" "1|" \
+  "$(out="$(call promote_target "$T" plan "$TS/plans/epic-99/wave-03-tidy.plan.md")"; echo "$?|$out")"
+expect_eq "promote_target: a plan file under a durable kind is refused" "1|" \
+  "$(out="$(call promote_target "$T" design "$TS/plans/epic-99/wave-03-tidy.plan.md")"; echo "$?|$out")"
+expect_eq "promote_target: a log is refused" "1|" \
+  "$(out="$(call promote_target "$T" design "$T/build.log")"; echo "$?|$out")"
+expect_eq "promote_target: a run's record, a handoff among them, is refused" "1|" \
+  "$(out="$(call promote_target "$T" design "$TS/record/handoffs/2026-01-01-x.md")"; echo "$?|$out")"
+expect_eq "promote_target: an ADR's kind holds ADRs only" "1|" \
+  "$(out="$(call promote_target "$T" adr "$TS/specs/epic-99/wave-03-tidy.spec.md")"; echo "$?|$out")"
+
+printf 'docs-tracked: .bionic/kept\n' > "$T/.bionic/config.yaml"
+expect_eq "promote_target: a tracked home under .bionic/ is refused" "1|" \
+  "$(out="$(call promote_target "$T" adr "$TS/adrs/epic-99/adr-007-one-door.md")"; echo "$?|$out")"
+rm -f "$T/.bionic/config.yaml"
 
 # ============================================================
 setup_section "2 — one config change moves EVERY consumer (AC-N1.3)"
@@ -547,5 +554,50 @@ DOC_OUT="$( cd "$PROJ" && bash "$REPO_ROOT/payload/scripts/doctor.sh" 2>&1 )"
 expect_eq "doctor's active-run row names the plan under alt/" "yes" \
   "$(contains "$DOC_OUT" "alt/plans/epic-99/wave-01.plan.md")"
 expect_eq "…and not the decoy under the default root" "no" "$(contains "$DOC_OUT" "decoy.plan.md")"
+
+# ============================================================
+section "3 — the promote verb copies a durable record into the tracked home"
+# ============================================================
+#
+# The verb is driven from the planted tree with its parts beside it, in a project whose
+# records sit in their default places. What is proved is the file on disk: it is in the
+# tracked home, byte for byte the record, and a second promotion of an edited record lands at
+# the same path.
+
+mkdir -p "$PLANT/hooks/poker"
+cp "$HOOKS_SRC"/poker/*.sh "$PLANT/hooks/poker/" 2>/dev/null
+PR="$SANDBOX/promote"
+PRD="$PR/.bionic/docs"
+mkdir -p "$PRD/adrs/epic-99" "$PRD/specs/epic-99" "$PRD/plans/epic-99"
+printf '# ADR-007 — One door\n' > "$PRD/adrs/epic-99/adr-007-one-door.md"
+printf '# Tidy, the design\n' > "$PRD/specs/epic-99/wave-03-tidy.spec.md"
+printf '# Tidy, the requirements\n' > "$PRD/specs/epic-99/wave-03-tidy.requirements.md"
+printf '# Tidy, the plan\n' > "$PRD/plans/epic-99/wave-03-tidy.plan.md"
+git -C "$PR" init -q 2>/dev/null
+
+promote() { ( cd "$PR" && bash "$PLANT/hooks/session-poker.sh" promote "$@" ) >"$SANDBOX/.promote.out" 2>&1; }
+tracked_list() { ( cd "$PR" && find docs -type f 2>/dev/null | sort | tr '\n' ' ' ); }
+
+promote adr .bionic/docs/adrs/epic-99/adr-007-one-door.md
+expect_status "promote adr: exits 0" 0 "$?"
+expect_eq "…and the tracked copy is the record, byte for byte" "yes" \
+  "$(cmp -s "$PRD/adrs/epic-99/adr-007-one-door.md" "$PR/docs/adrs/adr-007-one-door.md" && echo yes || echo no)"
+promote design .bionic/docs/specs/epic-99/wave-03-tidy.spec.md
+expect_status "promote design: exits 0" 0 "$?"
+promote requirement "$PRD/specs/epic-99/wave-03-tidy.requirements.md"
+expect_status "promote requirement, by absolute path: exits 0" 0 "$?"
+expect_eq "the tracked home holds the three records, under their kinds" \
+  "docs/adrs/adr-007-one-door.md docs/designs/tidy.spec.md docs/requirements/tidy.requirements.md " \
+  "$(tracked_list)"
+
+printf '# ADR-007 — One door, amended\n' > "$PRD/adrs/epic-99/adr-007-one-door.md"
+promote adr .bionic/docs/adrs/epic-99/adr-007-one-door.md
+expect_eq "an edited record promoted again lands at the same path, refreshed" "yes" \
+  "$(cmp -s "$PRD/adrs/epic-99/adr-007-one-door.md" "$PR/docs/adrs/adr-007-one-door.md" && echo yes || echo no)"
+
+BEFORE="$(tracked_list)"
+promote plan .bionic/docs/plans/epic-99/wave-03-tidy.plan.md
+expect_status "promote plan: refused, exit 1" 1 "$?"
+expect_eq "…and the tracked home is as it was" "$BEFORE" "$(tracked_list)"
 
 finish

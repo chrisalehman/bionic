@@ -447,9 +447,8 @@ units_rows() {
 #     REQ-3 AC-3.4; the floor's rule from wave-31 T25, D3): with no open writer, `proof:floor` is
 #     satisfied when lib/proof.sh `proof_state` answers `covered`, and waits on `uncovered` — a
 #     commit past the proof that no recorded run proves, or a state that cannot be computed —
-#     saying `proof:floor: the floor is one whole run plus each later commit proved; past the proof
-#     at <12 hex>, <its reason>; run suites its row named, proof-add floor;
-#     a second run: approve regression-2` (short: the tick cuts a WAIT reason at 400 characters). The state is asked only when a pending row's
+#     saying `the regression is one whole run plus each later commit proved; past the proof
+#     at <12 hex>, <its reason>; run the suites its row named`. The state is asked only when a pending row's
 #     answer turns on it, a row held for its step is judged without it, and inside
 #     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
@@ -854,7 +853,8 @@ units_whole_read() {
 }
 
 # units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
-# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed`
+# `## Tasks` row the record names, with its last merge (a `landed:` header's `merge=`, or the `commit=` of a
+# `line/v1|ev=published|` event, the one line a hand landing may leave), and each `build` row that is `landed`
 # with none, as `-`. `owed` marks a landed build row: it must carry a landing, so the
 # caller counts it unknown when the record has none or its merge is no commit. A header whose
 # `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
@@ -895,12 +895,21 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      if ($0 !~ /^landed:[ \t]/) next
-      r = ""; m = ""; nf = split($0, f, /[ \t]+/)
-      for (k = 2; k <= nf; k++) {
-        if (f[k] ~ /^row=/) r = substr(f[k], 5)
-        else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
-      }
+      r = ""; m = ""
+      if ($0 ~ /^line\/v1\|ev=published\|/) {
+        # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
+        nf = split($0, f, "|")
+        for (k = 3; k <= nf; k++) {
+          if (f[k] ~ /^row=/) r = substr(f[k], 5)
+          else if (f[k] ~ /^commit=/) m = tolower(substr(f[k], 8))
+        }
+      } else if ($0 ~ /^landed:[ \t]/) {
+        nf = split($0, f, /[ \t]+/)
+        for (k = 2; k <= nf; k++) {
+          if (f[k] ~ /^row=/) r = substr(f[k], 5)
+          else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
+        }
+      } else next
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
       if (lm[r] != "-") rm[lm[r]] = 1
@@ -977,6 +986,18 @@ units_approval_names() {
     }
   }
   END { if (hasrel && openint) print "release" }' | sort -u
+}
+
+# units_order <plan> -> the id of the regression row when the plan is in the order build, regression, review, release,
+# exit 0: a test row at Step 5 or earlier and a doc row at Step 7 or later (the release), neither dropped. Nothing, exit 1,
+# otherwise. THE ONE READING of the order: `current 8` (hooks/poker/judge.sh) and the commit wall ask it, and
+# `units_validate` holds an open plan to the order itself.
+units_order() {
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '
+    tolower($10) == "dropped" || $2 !~ /^[0-9]+$/ { next }
+    $3 == "test" && $2 + 0 <= 5 && reg == "" { reg = $1 }
+    $3 == "doc" && $2 + 0 >= 7 { rel = 1 }
+    END { if (reg == "" || !rel) exit 1; print reg }'
 }
 
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
@@ -1287,17 +1308,6 @@ _units_sched_awk() {
       } else if (l ~ /^approved[ \t]*:/) {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
-      } else if (l ~ /^waived:[ \t]/) {
-        # THE USER WORD FOR THE REGRESSION IS ITS LINE (wave-39 T25; REQ-18 AC-18.4; D5): a `waived: question=regression`
-        # line is the regression newest link where it is newer than its proof, as proof.sh `proof_regression_waiver`
-        # reads it (question and head before the first `by`), so a run whose regression is waived meets its
-        # proof:regression read on the judge answer, as one with a proof line does. Plan order is age: the last wins.
-        wvm = split(l, wvw, /[ \t]+/); wvq = ""; wvh = ""
-        for (wvk = 2; wvk <= wvm && wvw[wvk] != "by"; wvk++) {
-          if (wvw[wvk] ~ /^question=/) wvq = substr(wvw[wvk], 10)
-          else if (wvw[wvk] ~ /^head=/) wvh = substr(wvw[wvk], 6)
-        }
-        if (wvq == "regression" && wvh ~ /^[0-9a-f]+$/ && length(wvh) >= 7 && length(wvh) <= 40) { proved["regression"] = 1; prvh["regression"] = wvh }
       } else if (proof_fields($0)) {
         # ONE READING OF A PROOF LINE, proof.sh `proof_fields` (wave-26 T14; review 7 F6), the one
         # `proof_last` reads through. THE HEAD IS KEPT (review 5 F8): the last line of a kind is
@@ -1617,11 +1627,8 @@ _units_sched_awk() {
           else if (floorst !~ /^covered/) {
             fr = floorst; sub(/^[^\t]*\t?/, "", fr)
             if (fr == "") fr = "the proof state could not be computed"
-            # THE WAIT ENDS ON THE USER\047S WORD FOR THE REGRESSION (wave-39 T25; REQ-18 AC-18.3; D5), beside the second run, so
-            # an orchestrator reading it never invents an approval the record cannot hold.
             lwhy = "the regression is one whole run plus each later commit proved; past the proof at " \
-              substr(prvh["regression"], 1, 12) ", " fr "; run suites its row named, proof-add regression; a second run: approve regression-2" \
-              ", or the user\047s word: waive regression \047<reply>\047"
+              substr(prvh["regression"], 1, 12) ", " fr "; run the suites its row named"
             return 0
           }
         }
@@ -1951,7 +1958,7 @@ units_validate() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)"'
+      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
@@ -2142,6 +2149,34 @@ units_validate() {
             if (a[j] == "" || a[j] !~ /[\/.*?]/ || a[j] ~ /[ \t]/) continue
             sub(/!$/, "", a[j])
             if (index(a[j], "[") || index(a[j], "]")) printf "%s: Files entry %s has a bracket; Files globs with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
+          }
+        }
+        # THE ORDER IS BUILD, REGRESSION, REVIEW, RELEASE. The regression is a test row, a review row is kind review,
+        # the release a doc row at Step 7 or later. A row comes before another by step, then by table order. A pair out
+        # of order is refused when neither row is dropped and one of them is open, so landed history is not judged.
+        # Only a table with a reads column, as the head rule above.
+        if (hasreads) {
+          for (i = 1; i <= n; i++) {
+            if ((id[i] in skip) || stp[i] !~ /^[0-9]+$/ || sta[i] == "dropped") continue
+            if (knd[i] == "test") ord[i] = 1
+            else if (knd[i] == "review") ord[i] = 2
+            else if (knd[i] == "doc" && stp[i] + 0 >= 7) ord[i] = 3
+          }
+          for (i = 1; i <= n; i++) {
+            if (!(i in ord) || ord[i] == 2) continue
+            for (j = 1; j <= n; j++) {
+              if (!(j in ord) || ord[j] == 1 || (ord[i] == 3 && ord[j] != 2)) continue
+              if (!(sta[i] == "pending" || sta[i] == "active" || sta[j] == "pending" || sta[j] == "active")) continue
+              ahead = (stp[i] + 0 < stp[j] + 0 || (stp[i] + 0 == stp[j] + 0 && i < j))
+              if (ord[i] == 1 && !ahead) {
+                printf "%s: the regression row comes after the %s row %s; the order is build, regression, review, release: put %s at step 5, ahead of %s\n", id[i], (ord[j] == 2 ? "review" : "release"), id[j], id[i], id[j]
+                break
+              }
+              if (ord[i] == 3 && ahead) {
+                printf "%s: the release row comes ahead of the review row %s; the order is build, regression, review, release: put %s at step 7, after %s\n", id[i], id[j], id[i], id[j]
+                break
+              }
+            }
           }
         }
       }')"

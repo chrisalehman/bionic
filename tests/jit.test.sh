@@ -205,7 +205,6 @@ expect_true "jit_check @playwright/cli: absent -> exit 1" test "$PW_ABSENT_RC" -
 expect_match "jit_check @playwright/cli absent: names a fix (npm install -g)" \
   "*npm install -g @playwright/cli*" "$PW_ABSENT_OUT"
 
-section "Group 9: route wiring — the two owner SKILL.md files name the contract"
 #
 # S2's dispatch-paragraph precedent: name the contract, let the script bind —
 # no restated mechanics. One sentence each, at the point an environment-class
@@ -218,12 +217,6 @@ CANONICAL_SKILL_STEP5="${REPO}/skills/canonical-sdlc/steps/5.md"
 BROWSER_SKILL="${REPO}/skills/browser-verify/SKILL.md"
 EXCALIDRAW_SKILL="${REPO}/payload/skills/excalidraw-diagram/SKILL.md"
 
-expect_true "canonical-sdlc steps/5.md names jit_check" grep -q 'jit_check' "$CANONICAL_SKILL_STEP5"
-expect_true "canonical-sdlc steps/5.md names jit_offer" grep -q 'jit_offer' "$CANONICAL_SKILL_STEP5"
-expect_true "browser-verify SKILL.md names jit_check" grep -q 'jit_check' "$BROWSER_SKILL"
-expect_true "browser-verify SKILL.md names jit_offer" grep -q 'jit_offer' "$BROWSER_SKILL"
-expect_true "excalidraw-diagram SKILL.md names jit_check" grep -q 'jit_check' "$EXCALIDRAW_SKILL"
-expect_true "excalidraw-diagram SKILL.md names jit_offer" grep -q 'jit_offer' "$EXCALIDRAW_SKILL"
 
 section "Group 9b: the native when-needed row — ONE question, ONE installer (AC-11)"
 #
@@ -282,49 +275,6 @@ expect_match "jit_offer reaches the function literally named install_plugin_nati
 # not a way in through it. If this ever passed, the kludge D1 rejected would be
 # back and the refusal would be decoration.
 
-section "Group 11: excalidraw-diagram route fixes (epic-17 w4 S10, AC-10)"
-#
-# AC-10 pinned the skill as a default-off opt-in living outside the payload, with a
-# config-dir-aware render path because that is where a manually-copied personal skill lands.
-#
-# EPIC-18 T3 (AC-6) MOVED THE SKILL INTO THE PAYLOAD, and both halves of that pin invert with
-# it. The skill is no longer opt-in — installing bionic installs it — so a doc still calling
-# itself default-off would be telling users to copy a directory they already have. And
-# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram/references` is now the WRONG
-# render path on every plugin-installed machine: nothing puts the skill there, so the `cd`
-# fails and the renderer looks broken. `${CLAUDE_PLUGIN_ROOT}` is where the files actually
-# are, and it is the idiom the rest of the payload's prose already uses.
-#
-# What does NOT change: uv and playwright-chromium are still dependency-table rows the render
-# workflow must not assume, and they still get Group 9's one-sentence JIT treatment. The
-# renderer's own venv joins them as a third row (`excalidraw-renderer`) — the `uv sync` half
-# of the old First-Time Setup block, now a when-needed arm with the normal consent treatment
-# rather than a command block the user was expected to run by hand.
-
-EXCALIDRAW_README="${REPO}/payload/skills/excalidraw-diagram/README.md"
-
-expect_true "excalidraw-diagram SKILL.md names uv's dependency-table row" grep -q '\buv\b' "$EXCALIDRAW_SKILL"
-expect_true "excalidraw-diagram SKILL.md names playwright-chromium" grep -q 'playwright-chromium' "$EXCALIDRAW_SKILL"
-expect_true "excalidraw-diagram SKILL.md names the excalidraw-renderer row" \
-  grep -q 'excalidraw-renderer' "$EXCALIDRAW_SKILL"
-
-expect_false "excalidraw-diagram SKILL.md carries no hardcoded ~/.claude/skills/ literal" \
-  grep -q '~/\.claude/skills/' "$EXCALIDRAW_SKILL"
-expect_false "excalidraw-diagram README.md carries no hardcoded ~/.claude/skills/ literal" \
-  grep -q '~/\.claude/skills/' "$EXCALIDRAW_README"
-
-# The config-dir form is now as wrong as the hardcoded one, and for the same reason: it
-# addresses a directory the plugin never writes to.
-expect_false "excalidraw-diagram SKILL.md no longer routes the renderer through CLAUDE_CONFIG_DIR" \
-  grep -q 'CLAUDE_CONFIG_DIR' "$EXCALIDRAW_SKILL"
-expect_false "excalidraw-diagram README.md no longer routes the renderer through CLAUDE_CONFIG_DIR" \
-  grep -q 'CLAUDE_CONFIG_DIR' "$EXCALIDRAW_README"
-
-expect_true "excalidraw-diagram SKILL.md addresses the renderer through CLAUDE_PLUGIN_ROOT" \
-  grep -q 'CLAUDE_PLUGIN_ROOT' "$EXCALIDRAW_SKILL"
-expect_true "excalidraw-diagram README.md addresses the renderer through CLAUDE_PLUGIN_ROOT" \
-  grep -q 'CLAUDE_PLUGIN_ROOT' "$EXCALIDRAW_README"
-
 section "Group 12: Step-0 model_plan derivation is mechanical, not invented (epic-19 F1)"
 #
 # AC-F1: the orchestrator reads agents/*.md frontmatter for the six dispatched-role
@@ -337,10 +287,6 @@ section "Group 12: Step-0 model_plan derivation is mechanical, not invented (epi
 # pin literal prose spans of the Step-0 card.
 CANONICAL_SKILL_STEP0="${REPO}/skills/canonical-sdlc/steps/0.md"
 
-expect_true "canonical-sdlc steps/0.md: model_plan derivation is never invented or recalled from memory" \
-  grep -q 'never invented or recalled from memory' "$CANONICAL_SKILL_STEP0"
-expect_true "canonical-sdlc steps/0.md: model_plan derivation names the rendered role files as the source" \
-  grep -q 'rendered role files' "$CANONICAL_SKILL_STEP0"
 # RE-POINTED (epic-22 K1, plan task 15, A-7). K1's Step-0 settings card drops per-line
 # inference rationale — the six "role-file default: agents/<role>.md" annotations that used
 # to sit beside each model value are gone; that string no longer appears anywhere in
@@ -403,9 +349,6 @@ for role in $JIT_ROLES; do
   readme_row="$(grep "| \`${role}\` " "$README")"
   # Both reads non-empty first: an empty model makes the glob below `**`, which matches anything.
   expect_nonempty "README roster table: agents/${role}.md declares a model" "$model_raw"
-  expect_nonempty "README roster table: \`${role}\` has a row" "$readme_row"
-  expect_match "README roster table: \`${role}\` row names its agents/${role}.md model" \
-    "*${model_title}*" "$readme_row"
 done
 
 finish

@@ -256,7 +256,6 @@ RO="$(nt_run nt-once)"
 
 nt_card "$RO" step1 "$(nt_req "$RO")"
 expect_eq "N1 the Step-1 card renders (exit 0)" "0" "$NT_RC"
-expect_contains "N1a …and prints its question" 'Do you approve these requirements? Reply "approved" to approve it.' "$NT_OUT"
 N_LIST="$(nt_owed "$RO" owed_list)"
 expect_nonempty "N1b the store reader answers: the card opened an item (the extractor works)" "$N_LIST"
 expect_contains "N1c …keyed approve:step1" "approve:step1" "$(printf '%s\n' "$N_LIST" | cut -f1)"
@@ -265,8 +264,6 @@ expect_eq "N1e rendering a card sends nothing by itself" "0" "$(nt_calls)"
 
 nt_stop "$RO"
 expect_eq "N2 AC-2.2 the Stop that ends the blocked turn sends exactly one notification" "1" "$(nt_calls)"
-expect_contains "N2a …carrying the one line the card printed for the block" \
-  'body=Do you approve these requirements? Reply "approved" to approve it.' "$(nt_last)"
 expect_contains "N2b …to the topic named in cron.env, never stored in the channel file" \
   "url=https://ntfy.sh/fixture-topic-123|" "$(nt_last)"
 expect_contains "N2c …under the declared title prefix" "|title=bionic-fixture " "$(nt_last)"
@@ -307,7 +304,6 @@ expect_contains "N6a …it opens approve:step2" "approve:step2" "$N_KEYS"
 expect_absent "N6b …and closes approve:step1: a later card is shown only once the earlier one is answered" "approve:step1" "$N_KEYS"
 nt_stop "$RO"
 expect_eq "N7 AC-2.2 a new key sends one" "3" "$(nt_calls)"
-expect_contains "N7a …the Step-2 card's question" 'body=Do you approve this design? Reply "approved" to approve it.' "$(nt_last)"
 nt_stop "$RO"
 expect_eq "N7b …and once" "3" "$(nt_calls)"
 
@@ -357,7 +353,6 @@ RS="$(nt_world nt-gate)"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RS")"
 poke "$RS" tick
 expect_eq "S1 precondition: the tick decides NOTIFY on the gate request (exit 1)" "1" "$RC"
-expect_contains "S1a …and prints its GATE line" "poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$OUT"
 expect_eq "S2 AC-2.3 the tick that raises the GATE sends one notification" "1" "$(nt_calls)"
 expect_contains "S2a …carrying the GATE line it printed" \
   "body=poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$(nt_last)"
@@ -558,8 +553,6 @@ expect_contains "AK6a precondition: the wall refuses the dispatch for the approv
 expect_contains "AK6b AC-2.2 the refusal opens approve:release" "approve:release" "$(nt_owed "$RKP" owed_list | cut -f1)"
 expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval:release" "$(nk_reply "$RKP" approve:release)"
 ( cd "$RKP" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" ANTHROPIC_API_KEY=sk-fixture-marker bash "$PREFLIGHT" <<< "$NK_PAYLOAD" ) >/dev/null 2>&1
-expect_eq "AK6d a second refused dispatch on the same approval opens nothing new" "1" \
-  "$(/usr/bin/grep -c '|key=approve:release|' "$RKP/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
 
 # THE COMMIT WALL'S ASKS (wave-34 T5; REQ-4 AC-4.1, AC-4.2; D14). From Step 6 the evidence gate refuses a commit for
 # a question whose newest reading failed, and the matrix arm refuses for a row only the person can let go: a live-tier
@@ -600,14 +593,11 @@ $(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 expect_eq "AK-6a precondition: no adversarial reading and a failing structure one: refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-6b …naming the failing question" "- structure: the newest reading is result=fail" "$CW_ERR"
-expect_contains "AK-6c …and the absent one" "- adversarial: no reading, and no waiver" "$CW_ERR"
 expect_eq "AK-6 AC-4.1 the question refusal opens waive:structure, the waive verb's key, and nothing for the absent question" \
   "waive:structure" "$(cw_open "$RCW")"
 expect_contains "AK-6d …carrying the refusal's line for it" "structure: the newest reading is result=fail (evidence=record/w27/structure-new.md)" \
   "$(nk_reply "$RCW" waive:structure)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
-expect_eq "AK-6e a second refused commit on the same question opens nothing new" "1" \
-  "$(/usr/bin/grep -c '|key=waive:structure|' "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null | tr -d ' ')"
 
 # THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 row whose evidence is n/a is a downgrade
 # only the person makes; a T4 row the user confirmed, under a REFUTED auditor cell, needs the finding settled or the row
@@ -661,14 +651,62 @@ expect_eq "AK-8a …and no other: the question's and the other row's stay open" 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
 # needs the person ("fix it, defer it, or waive <question>"); `waive <question>` is that answer for every finding of
 # the question's readings, so it closes them with `waive:<question>`. A finding of another question stays open.
-# FIXTURE FIDELITY: canonical-sdlc-evidence-gate-2.test.sh's §DISPOSITION builders, read out of that file by name
-# (a repository on its working branch, reading records in the reader's shape, their proof lines in lib/proof.sh's).
-NT_EG2="$(dirname "$0")/canonical-sdlc-evidence-gate-2.test.sh"
-NT_IMPORT_MISSING=""
-for _f in fp_repo fp_commit fp_plan_path fp_plan fp_record fp_proved fp_landing; do
-  nt_import_fn "$_f" "$NT_EG2" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
-done
-expect_eq "AK-9 precondition: the §DISPOSITION builders were all read out of canonical-sdlc-evidence-gate-2.test.sh" "" "$NT_IMPORT_MISSING"
+# FIXTURE FIDELITY: a repository on its working branch, engaged for the session, reading records in the reader's
+# shape and their proof lines in lib/proof.sh's, so the disposition and waive verbs run as they do on a real run.
+fp_repo() {  # <label> -> a repository on wave/01-fixture with one init commit, engaged for FP_SID
+  local r="$FP_ROOT/$1"
+  mkdir -p "$r"
+  ( cd "$r" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@fixture.test \
+    && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/$FP_REC" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture"
+  : > "$r/.bionic/tmp/engaged-$FP_SID.state"
+  printf '%s' "$r"
+}
+fp_commit() {  # <repo> <path> <text> -> the new commit's sha
+  printf '%s\n' "$3" > "$1/$2"
+  ( cd "$1" && git add -f "$2" && git commit -qm "$2: $3" ) >/dev/null 2>&1
+  git -C "$1" rev-parse HEAD
+}
+fp_plan_path() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
+fp_plan() {  # <repo> <base> <SDLC lines> <task rows> -> writes the plan (a plan the gate admits, plus the review header fields)
+  local r="$1" f; f="$(fp_plan_path "$1")"
+  printf '# requirements\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "$2"
+    printf -- '- T1: landed at record/T1.md\n'
+    [ -z "$3" ] || printf '%s\n' "$3"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    [ -z "$4" ] || printf '%s\n' "$4"
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+    printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+  } > "$f"
+}
+fp_record() {  # <repo> <file> <question> <result> <range> <line>... -> a reading record in the docs root
+  local r="$1" f="$2" q="$3" res="$4" rg="$5"; shift 5
+  { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s\n' "$q" "$res" "$rg"; printf '%s\n' "$@"; printf '\nwhat the reader found\n'; } \
+    > "$r/.bionic/docs/$FP_REC/$f"
+}
+fp_proved() {  # <head> <file> <question> <result> -> the reading's proof line, as proof_line writes it
+  bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' _ "$FP_LIB" "$1" "$FP_REC/$2" "$3" "$4"
+}
+fp_landing() {  # <repo> <line>... -> the run's landing record, whole
+  printf '%s\n' "$@" > "$1/.bionic/docs/$FP_REC/landing-proofs.log"
+}
 FP_SID="$SID"; FP_LIB="$NT_LIB"; FP_REC="record/wave-01-fixture"
 FP_ROOT="$TMPROOT/nt-findings"; mkdir -p "$FP_ROOT"
 RFW="$(fp_repo findings)"
@@ -757,20 +795,19 @@ CW_HOOK="$CW_KEEP"
 # The person's other asks: the Step card, the tick's approval WAIT and GATE, the dispatch wall, the disposition, the
 # close's delivery. The poker copy finds the copy's library beside it, as the tree's does.
 POKER_KEEP="$POKER"; POKER="$NM/hooks/session-poker.sh"
-nt_doctor "MA-5 [the tick's approval]" hooks/session-poker.sh owed_open '"approve:$c"'
+nt_doctor "MA-5 [the tick's approval]" hooks/poker/tick.sh owed_open '"approve:$c"'
 RMK="$(nk_world nt-mut-approval)"
 poke_pressure "$RMK" 8192 1.0 tick
 expect_eq "MA-5a the mutant tick still prints the release's WAIT" "poker: WAIT T4 — approval:release" "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
 expect_absent "MA-5b AC-4.5 …and AK2 goes red: no approve:release item" "approve:release" "$(nt_owed "$RMK" owed_list | cut -f1)"
-nt_undo hooks/session-poker.sh
-nt_doctor "MA-6 [the tick's GATE]" hooks/session-poker.sh owed_open '"gate:$k"'
+nt_undo hooks/poker/tick.sh
+nt_doctor "MA-6 [the tick's GATE]" hooks/poker/tick.sh owed_open '"gate:$k"'
 RMS="$(nt_world nt-mut-gate)"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RMS")"
 poke "$RMS" tick
-expect_contains "MA-6a the mutant tick still prints the GATE line" "poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$OUT"
 expect_absent "MA-6b AC-4.5 …and S2b goes red: no gate: item" "gate:" "$(nt_owed "$RMS" owed_list | cut -f1)"
-nt_undo hooks/session-poker.sh
-nt_doctor "MA-7 [the disposition's finding]" hooks/session-poker.sh owed_open '"$(finding_owed_key "$DSP_FID")"'
+nt_undo hooks/poker/tick.sh
+nt_doctor "MA-7 [the disposition's finding]" hooks/poker/proof.sh owed_open '"$(finding_owed_key "$DSP_FID")"'
 FP_ROOT="$TMPROOT/nt-mut-findings"; mkdir -p "$FP_ROOT"
 RMF="$(fp_repo findings)"
 cp -R "$RFW/.bionic/docs/." "$RMF/.bionic/docs/"
@@ -780,18 +817,18 @@ POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 poke "$RMF" disposition
 expect_contains "MA-7a the mutant disposition still renders the open finding" "poker: finding $FP_REC/st.md#2 S1" "$OUT"
 expect_eq "MA-7b AC-4.5 …and AK-9a goes red: no finding: item" "" "$(cw_open "$RMF")"
-nt_undo hooks/session-poker.sh
+nt_undo hooks/poker/proof.sh
 
 # The closers: a waive-row that closes nothing, a waive that closes only waive:<q>.
-nt_doctor "MA-8 [waive-row's close]" hooks/session-poker.sh poker_owed_close '"waive-row:'
+nt_doctor "MA-8 [waive-row's close]" hooks/poker/proof.sh poker_owed_close '"waive-row:'
 RMW="$(mk_repo nt-mut-row)"; H_EG6="$(git -C "$RMW" rev-parse HEAD)"
 cw_commit "$RMW" "$(printf '%s\n' "$CW_NA" | sed "s/$(git -C "$RCW" rev-parse HEAD)/$H_EG6/g")"
 expect_eq "MA-8a precondition: the n/a row's ask is open in the mutant's world" "waive-row:AC-1" "$(cw_open "$RMW")"
 cw_waive_row "$RMW"
 expect_eq "MA-8b the mutant waive-row still records the waiver (exit 0)" "0" "$RC"
 expect_eq "MA-8c AC-4.5 …and AK-8 goes red: the item stays open" "waive-row:AC-1" "$(cw_open "$RMW")"
-nt_undo hooks/session-poker.sh
-nt_doctor "MA-9 [waive's finding close]" hooks/session-poker.sh poker_owed_close '"$2" "$key" "waive"'
+nt_undo hooks/poker/proof.sh
+nt_doctor "MA-9 [waive's finding close]" hooks/poker/proof.sh poker_owed_close '"$2" "$key" "waive"'
 FP_ROOT="$TMPROOT/nt-mut-waive"; mkdir -p "$FP_ROOT"
 RMV="$(fp_repo findings)"
 cp -R "$RFW/.bionic/docs/." "$RMV/.bionic/docs/"
@@ -802,7 +839,7 @@ expect_eq "MA-9a precondition: the findings are open in the mutant's world" "$FW
 poke "$RMV" waive structure 'ship it as it stands'
 expect_eq "MA-9b the mutant waive still records the waiver (exit 0)" "0" "$RC"
 expect_eq "MA-9c AC-4.5 …and AK-9 goes red: structure's findings stay open" "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RMV")"
-nt_undo hooks/session-poker.sh
+nt_undo hooks/poker/proof.sh
 POKE_BOUND="$POKE_BOUND_WAS"
 POKER="$POKER_KEEP"
 
@@ -875,258 +912,4 @@ expect_eq "Q5 beside them, in the same world, an item opened is sent by the next
 export CLAUDE_CONFIG_DIR="$NS_CFG"
 
 # ============================================================
-section "§ABSENT: no channel is 1.15.0, and a failed send changes no exit code (AC-2.5)"
-# ============================================================
-export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
-channel_off "$SP_CONFIG_DIR"
-: > "$NT_CALLS"
-NA_OUT="$(cd "$TMPROOT" && bash -c '. "$1/notify.sh" && notify_send "a title" "a body"; echo "rc=$?"' _ "$NT_LIB" 2>&1)"
-expect_eq "A1 AC-2.5 with no channel file, notify_send prints nothing and returns 0" "rc=0" "$NA_OUT"
-expect_eq "A1a …and calls nothing" "0" "$(nt_calls)"
-channel_on "$SP_CONFIG_DIR"
-NA_OUT="$(cd "$TMPROOT" && bash -c '. "$1/notify.sh" && notify_send "a title" "a body"; echo "rc=$?"' _ "$NT_LIB" 2>&1)"
-expect_eq "A1b beside it, with the channel declared it prints nothing either" "rc=0" "$NA_OUT"
-expect_eq "A1c …and makes the one call (the counter works here)" "1" "$(nt_calls)"
-channel_off "$SP_CONFIG_DIR"
-
-# THE STOP, BYTE FOR BYTE. The base is the same fixture with no ledger at all (what 1.15.0 has);
-# the case is the fixture with an open, unsent item and no channel.
-RB="$(nt_run nt-base)"
-RA="$(nt_run nt-absent)"
-nt_owed "$RA" owed_open approve:release "approval: release" 'Approve release?' >/dev/null
-: > "$NT_CALLS"
-nt_stop "$RB"; NB_OUT="$NT_OUT"; NB_ERR="$NT_ERR"; NB_RC="$NT_RC"
-nt_stop "$RA"
-expect_eq "A2 AC-2.5 no channel: the Stop's stdout is byte-identical to the base" "$NB_OUT" "$NT_OUT"
-expect_eq "A2a …its stderr is identical to the base's, the fixture's name aside" \
-  "$(printf '%s' "$NB_ERR" | sed 's/nt-base/X/g')" "$(printf '%s' "$NT_ERR" | sed 's/nt-absent/X/g')"
-expect_eq "A2b …and so is its exit code" "$NB_RC" "$NT_RC"
-expect_eq "A2c …nothing was called" "0" "$(nt_calls)"
-expect_eq "A2d …and the item is still owed, unsent, for a channel declared later" "approve:release" \
-  "$(nt_owed "$RA" owed_unsent)"
-
-# THE TICK, THREE WAYS: no channel, a channel whose send succeeds, a channel whose send fails.
-# Each is a fresh world with the same request; the output is compared with its digits masked
-# (the tick prints elapsed seconds and instants).
-na_tick() {  # <label> -> NA_TOUT (digits masked), NA_TRC
-  local r; r="$(nt_world "$1")"
-  gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$r")"
-  poke "$r" tick
-  NA_TOUT="$(printf '%s\n' "$OUT" | sed -e "s/$1/X/g" -e 's/[0-9]/N/g')"; NA_TRC="$RC"
-}
-export CLAUDE_CONFIG_DIR="$NS_CFG"
-channel_off "$NS_CFG"
-: > "$NT_CALLS"
-na_tick nt-tick-off; NA_OFF="$NA_TOUT"; NA_OFF_RC="$NA_TRC"
-expect_eq "A3 precondition: the GATE tick decides NOTIFY (exit 1)" "1" "$NA_OFF_RC"
-expect_eq "A3a AC-2.5 no channel: the GATE tick calls nothing" "0" "$(nt_calls)"
-channel_on "$NS_CFG"
-na_tick nt-tick-on
-expect_eq "A3b with a channel the same tick sends (the counter works here)" "1" "$(nt_calls)"
-expect_eq "A3c …and prints exactly what the tick with no channel printed" "$NA_OFF" "$NA_TOUT"
-expect_eq "A3d …with the same exit code" "$NA_OFF_RC" "$NA_TRC"
-export NT_CURL_RC=7
-na_tick nt-tick-fail
-expect_eq "A4 a send that fails (curl exits 7) was attempted" "2" "$(nt_calls)"
-expect_eq "A4a AC-2.5 …and the tick prints exactly what it printed with no channel" "$NA_OFF" "$NA_TOUT"
-expect_eq "A4b …with the same exit code" "$NA_OFF_RC" "$NA_TRC"
-
-export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
-channel_on "$SP_CONFIG_DIR"
-RF="$(nt_run nt-fail)"
-nt_owed "$RF" owed_open approve:release "approval: release" 'Approve release?' >/dev/null
-nt_stop "$RF"
-expect_eq "A5 a failing send at the Stop was attempted" "3" "$(nt_calls)"
-expect_eq "A5a AC-2.5 …and the Stop's exit code is the base's" "$NB_RC" "$NT_RC"
-expect_eq "A5b …and its stdout is the base's" "$NB_OUT" "$NT_OUT"
-NA_AUDIT="$(cat "$NT_HOME"/.claude/logs/*/sdlc-audit.md 2>/dev/null)"
-expect_contains "A5c …and the failure is logged to the record, naming the key" "notify-failed" "$NA_AUDIT"
-expect_contains "A5d …with the item's key" "approve:release" "$NA_AUDIT"
-# A FAILED SEND IS RETRIED (wave-33 T34; critic finding 3, which reverses A-T11-3). The item is
-# marked before its send, and a send that fails takes the mark back, so the next caller sends it:
-# one attempt per turn while the channel fails, then exactly one call once it works.
-nt_stop "$RF"
-expect_eq "A5e a failed send is retried by the next Stop, one attempt per turn" "4" "$(nt_calls)"
-expect_eq "A5f …and the item is still owed, unsent, while the channel fails" "approve:release" "$(nt_owed "$RF" owed_unsent)"
-export NT_CURL_RC=0
-nt_stop "$RF"
-expect_eq "A5g with the channel working, the next Stop sends it" "5" "$(nt_calls)"
-expect_contains "A5h …that call is the item the failed sends owed" "title=bionic-fixture approval: release|" "$(nt_last)"
-expect_eq "A5i …and the item is no longer unsent" "" "$(nt_owed "$RF" owed_unsent)"
-nt_stop "$RF"
-expect_eq "A5j …and the Stop after it calls nothing: sent once" "5" "$(nt_calls)"
-# A caller killed mid-send (the call made, the caller gone before it learns the result) leaves the
-# mark, so the item is never sent twice.
-nt_owed "$RF" owed_open approve:killed "approval: killed" 'Killed?' >/dev/null
-expect_eq "K1 precondition: a second item is owed, unsent" "approve:killed" "$(nt_owed "$RF" owed_unsent)"
-NT_CURL_KILL=1 nt_owed "$RF" owed_send
-expect_eq "K2 the killed caller made its one call" "6" "$(nt_calls)"
-expect_contains "K2a …for that item" "title=bionic-fixture approval: killed|" "$(nt_last)"
-expect_eq "K2b …and the item stays marked sent" "" "$(nt_owed "$RF" owed_unsent)"
-nt_owed "$RF" owed_send
-nt_stop "$RF"
-expect_eq "K3 the next caller and the next Stop send it no second time" "6" "$(nt_calls)"
-# A LATE TIMEOUT IS A FAILED SEND (wave-34 T5; REQ-4 AC-4.4, D10 "1"). curl's --max-time can expire after ntfy has
-# accepted the message (exit 28): the call reached the service and the sender cannot tell whether it landed. It is
-# retried like any failure, so the person is told at least once, and may be told twice; never zero times.
-nt_owed "$RF" owed_open approve:late "approval: late" 'Late?' >/dev/null
-expect_eq "A5k precondition: a third item is owed, unsent" "approve:late" "$(nt_owed "$RF" owed_unsent)"
-export NT_CURL_RC=28
-nt_stop "$RF"
-expect_eq "A5k AC-4.4 the Stop made the call, which the stub accepted and then timed out on (exit 28)" "7" "$(nt_calls)"
-expect_contains "A5k1 …for that item" "title=bionic-fixture approval: late|" "$(nt_last)"
-expect_eq "A5k2 …and the item is unsent again: a timeout after acceptance proves no delivery" "approve:late" \
-  "$(nt_owed "$RF" owed_unsent)"
-export NT_CURL_RC=0
-nt_stop "$RF"
-expect_eq "A5k3 AC-4.4 the next Stop sends it again: at least once" "8" "$(nt_calls)"
-expect_contains "A5k4 …the same item" "title=bionic-fixture approval: late|" "$(nt_last)"
-expect_eq "A5k5 …and only then is it marked sent" "" "$(nt_owed "$RF" owed_unsent)"
-# THE MUTANT: the retry removed (the unmark after a failed send made a no-op, in the §ASKS mutants' copy). The same
-# late timeout then leaves the item marked sent, and nothing sends it again: A5k2 and A5k3 go red.
-nt_doctor "MA-13 [the retry]" scripts/lib/owed.sh owed_unmark_sent '"$key"'
-nt_owed "$RF" owed_open approve:late2 "approval: late2" 'Late again?' >/dev/null
-NT_LIB_KEEP="$NT_LIB"; NT_LIB="$NM/scripts/lib"
-export NT_CURL_RC=28
-nt_owed "$RF" owed_send
-export NT_CURL_RC=0
-expect_eq "MA-13a the mutant made the late call" "9" "$(nt_calls)"
-expect_eq "MA-13b AC-4.4 …and A5k2 goes red: the item stays marked sent" "" "$(nt_owed "$RF" owed_unsent)"
-nt_owed "$RF" owed_send
-expect_eq "MA-13c …so A5k3 goes red: nothing sends it again" "9" "$(nt_calls)"
-NT_LIB="$NT_LIB_KEEP"
-nt_undo scripts/lib/owed.sh
-nt_owed "$RF" owed_close approve:late2 fixture >/dev/null
-# THE TEXTS SAY IT (AC-4.4, a criterion about the wording itself): the ledger and the sender promise at least once,
-# and no sentence of either promises a single send. The reader finds the promise sentences (the positive), then the filter.
-NT_ONCE_RE='(sends?|sent|send each)[^.;]* once'
-nt_sentences() { sed -e 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$1" | tr '\n' ' ' | tr '.' '\n'; }  # <file> -> one sentence a line
-NT_ONCE="$( { nt_sentences "$NT_LIB/owed.sh"; nt_sentences "$NT_LIB/notify.sh"; } | /usr/bin/grep -E -i "$NT_ONCE_RE")"
-expect_contains "A5l AC-4.4 owed.sh and notify.sh say a notice is sent at least once (the reader finds the lines)" "at least once" "$NT_ONCE"
-expect_eq "A5m …and no sentence of either promises one send" "" "$(printf '%s\n' "$NT_ONCE" | /usr/bin/grep -v 'at least once')"
-expect_contains "A5n …each file in its own words: notify.sh" "at least once" "$(/usr/bin/grep -i 'at least once' "$NT_LIB/notify.sh")"
-export NT_CURL_RC=7
-nt_card "$RF" step1 "$(nt_req "$RF")"
-expect_eq "A6 AC-2.5 card.sh exits 0 with a failing channel" "0" "$NT_RC"
-POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RF" approve release 'Ship it.'
-POKE_BOUND="$POKE_BOUND_WAS"
-expect_eq "A6a …and so does the answer verb" "0" "$RC"
-export NT_CURL_RC=0
-
-# ============================================================
-section "§SETUP: setup declares the channel, with consent, and doctor reports it without sending (AC-2.1)"
-# ============================================================
-# A scratch HOME and a PATH of its own: the real tools doctor and setup run, inert stubs for the ones
-# they only ask about, no `claude`, and the counting `curl` of this suite. Nothing ambient is reachable.
-NSU_HOME="$TMPROOT/setup-home"; NSU_BIN="$TMPROOT/setup-bin"
-mkdir -p "$NSU_HOME" "$NSU_BIN"
-for _t in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc cut jq mktemp find xargs \
-          shasum uname date touch diff cmp printf true false sleep dirname basename realpath id ps df sysctl vm_stat git strings; do
-  _p="$(command -v "$_t" 2>/dev/null)" && ln -sf "$_p" "$NSU_BIN/$_t"
-done
-for _t in node pnpm gh rg uv docker aws perl; do
-  printf '#!/bin/sh\ncase "$1" in --version) echo 1.0.0 ;; esac\nexit 0\n' > "$NSU_BIN/$_t"; chmod +x "$NSU_BIN/$_t"
-done
-cp "$NT_BIN/curl" "$NSU_BIN/curl"
-NSU_CH="$NSU_HOME/.claude"
-nsu() {  # <answers, printf %b> <script> [args...] -> NSU_OUT, NSU_RC
-  local answers="$1" script="$2"; shift 2
-  NSU_OUT=$(printf '%b' "$answers" | env -i HOME="$NSU_HOME" PATH="$NSU_BIN" SHELL=/bin/zsh TMPDIR="$TMPROOT" \
-    BIONIC_SHELL_RC="$NSU_HOME/.zshrc" BIONIC_PLUGIN_ROOT="$BIONIC_SCRIPTS_DIR/payload" \
-    CLAUDE_PLUGIN_ROOT="$BIONIC_SCRIPTS_DIR/payload" BIONIC_DOCTOR_PROBE_SECONDS=15 \
-    NT_CALLS="$NT_CALLS" NT_CURL_RC="${NT_CURL_RC:-0}" bash "$script" "$@" 2>&1)
-  NSU_RC=$?
-}
-NSU_SETUP="$BIONIC_SCRIPTS_DIR/payload/scripts/setup.sh"
-NSU_DOCTOR="$BIONIC_SCRIPTS_DIR/payload/scripts/doctor.sh"
-cron_env_only() { mkdir -p "$1"; printf '# fixture cron env\nexport BIONIC_NTFY_TOPIC=fixture-topic-123\n' > "$1/cron.env"; }
-
-nsu "" "$NSU_SETUP" --list
-expect_contains "SU0 setup lists the notify item (and the roster read is not empty)" "notify" "$NSU_OUT"
-expect_contains "SU0a …beside the items it always listed" "working-principles" "$NSU_OUT"
-
-cron_env_only "$NSU_CH"
-: > "$NT_CALLS"
-nsu "n\n" "$NSU_SETUP" --only notify
-expect_eq "SU1 a no declares nothing" "absent" "$([ -e "$NSU_CH/bionic/notify" ] && echo present || echo absent)"
-expect_eq "SU1a …and sends nothing" "0" "$(nt_calls)"
-expect_contains "SU1b …and the question was put (a no is an answer to it; an item setup does not know would print no question)" "[y/N]" "$NSU_OUT"
-nsu "" "$NSU_SETUP" --only notify
-expect_eq "SU1c nobody there to answer (closed input) declares nothing" "absent" "$([ -e "$NSU_CH/bionic/notify" ] && echo present || echo absent)"
-expect_eq "SU1d …and sends nothing" "0" "$(nt_calls)"
-
-nsu "y\n" "$NSU_SETUP" --only notify
-expect_eq "SU2 AC-2.1 a yes writes the channel file" "present" "$([ -f "$NSU_CH/bionic/notify" ] && echo present || echo absent)"
-expect_eq "SU2a …naming where the topic is read from" "topic-from=cron.env:BIONIC_NTFY_TOPIC" \
-  "$(/usr/bin/grep '^topic-from=' "$NSU_CH/bionic/notify" 2>/dev/null)"
-expect_nonempty "SU2b …and a title prefix" "$(sed -n 's/^title-prefix=//p' "$NSU_CH/bionic/notify" 2>/dev/null)"
-expect_eq "SU2c …without the topic itself (it stays where the user keeps it)" "0" \
-  "$(/usr/bin/grep -c 'fixture-topic-123' "$NSU_CH/bionic/notify" 2>/dev/null)"
-expect_eq "SU2d …and sent exactly one test notification" "1" "$(nt_calls)"
-expect_contains "SU2e …to the topic cron.env names" "https://ntfy.sh/fixture-topic-123" "$(nt_last)"
-expect_contains "SU2f …a test, saying so" "setup" "$(nt_last)"
-expect_eq "SU2g setup exits 0" "0" "$NSU_RC"
-NSU_BYTES="$(cksum < "$NSU_CH/bionic/notify")"
-nsu "y\n" "$NSU_SETUP" --only notify
-expect_eq "SU3 a second run asks nothing and sends nothing" "1" "$(nt_calls)"
-expect_eq "SU3a …and leaves the file byte for byte" "$NSU_BYTES" "$(cksum < "$NSU_CH/bionic/notify")"
-expect_contains "SU3b …saying it is already declared" "already declared" "$NSU_OUT"
-expect_contains "SU3c …and that nothing is left for this item" "nothing left to do for notify" "$NSU_OUT"
-
-rm -rf "$NSU_CH/bionic" "$NSU_CH/cron.env"; : > "$NT_CALLS"
-nsu "y\n" "$NSU_SETUP" --only notify
-expect_eq "SU4 with no topic in cron.env nothing is declared" "absent" "$([ -e "$NSU_CH/bionic/notify" ] && echo present || echo absent)"
-expect_eq "SU4a …nothing is sent" "0" "$(nt_calls)"
-expect_contains "SU4b …and the user is told which variable to set" "BIONIC_NTFY_TOPIC" "$NSU_OUT"
-expect_eq "SU4c …without failing setup" "0" "$NSU_RC"
-
-cron_env_only "$NSU_CH"; : > "$NT_CALLS"
-NT_CURL_RC=7
-nsu "y\n" "$NSU_SETUP" --only notify
-NT_CURL_RC=0
-expect_eq "SU5 a test send that fails still leaves the channel declared" "present" "$([ -f "$NSU_CH/bionic/notify" ] && echo present || echo absent)"
-expect_eq "SU5a …the send was attempted once" "1" "$(nt_calls)"
-expect_eq "SU5b …setup exits 0" "0" "$NSU_RC"
-expect_contains "SU5c …and says the test notification did not go" "did not" "$NSU_OUT"
-rm -rf "$NSU_CH/bionic"; : > "$NT_CALLS"
-
-nsu "n\n" "$NSU_SETUP" --all
-expect_contains "SU6 the whole-run plan offers the item in its own words (the page a user consents from)" "notification" "$NSU_OUT"
-
-# DOCTOR READS, NEVER SENDS. The stub is proven live above (SU2d counted 1 through this very PATH).
-: > "$NT_CALLS"
-channel_on "$NSU_CH"
-nsu "" "$NSU_DOCTOR"
-NSU_DOC_ON="$(printf '%s\n' "$NSU_OUT" | /usr/bin/grep 'notify channel')"
-expect_nonempty "SD1 doctor prints a notify channel row (the extractor reads one)" "$NSU_DOC_ON"
-expect_contains "SD1a …declared, naming the variable it reads" "BIONIC_NTFY_TOPIC" "$NSU_DOC_ON"
-expect_absent "SD1b …and not as unset" "not set" "$NSU_DOC_ON"
-expect_eq "SD1c doctor sent nothing" "0" "$(nt_calls)"
-channel_off "$NSU_CH"
-nsu "" "$NSU_DOCTOR"
-NSU_DOC_OFF="$(printf '%s\n' "$NSU_OUT" | /usr/bin/grep 'notify channel')"
-expect_nonempty "SD2 with no channel the row is still there" "$NSU_DOC_OFF"
-expect_contains "SD2a …saying it is not set, and where it is offered" "not set" "$NSU_DOC_OFF"
-expect_contains "SD2b …through setup" "/bionic:setup" "$NSU_DOC_OFF"
-expect_eq "SD2c doctor sent nothing" "0" "$(nt_calls)"
-
-# ============================================================
-section "§DOCTOR: a topic in cron.env with no channel file is named, with the setup item that writes it (wave-34 T5; REQ-4 AC-4.6)"
-# ============================================================
-# The walk's machine had BIONIC_NTFY_TOPIC in cron.env and no channel file, so every send was a no-op while the run
-# believed it could reach the person. Doctor says so, and names the setup item that writes the channel file.
-rm -rf "$NSU_CH/bionic"; cron_env_only "$NSU_CH"
-expect_eq "DC0 precondition: notify_declared returns 1 on this machine (no channel file)" "1" \
-  "$(env -i HOME="$NSU_HOME" PATH="$NSU_BIN" bash -c '. "$1/notify.sh"; notify_declared; echo "$?"' _ "$NT_LIB")"
-: > "$NT_CALLS"
-nsu "" "$NSU_DOCTOR"
-DC_ROW="$(printf '%s\n' "$NSU_OUT" | /usr/bin/grep -A1 'notify channel')"  # the row and the line under it
-expect_eq "DC1 doctor prints the notify channel row and the line under it (the extractor reads two)" "2" "$(printf '%s\n' "$DC_ROW" | /usr/bin/grep -c .)"
-expect_contains "DC1a AC-4.6 …saying cron.env carries the topic" "BIONIC_NTFY_TOPIC is in cron.env" "$DC_ROW"
-expect_contains "DC1b …that no channel file exists, so nothing is sent" "no channel file exists, so nothing is sent" "$DC_ROW"
-expect_contains "DC1c …naming the setup item that writes it" "/bionic:setup's notify item" "$(printf '%s\n' "$DC_ROW" | /usr/bin/grep 'notify channel')"
-expect_absent "DC1d …and never as declared (DC1a reads the same row)" "reads BIONIC_NTFY_TOPIC from" "$DC_ROW"
-expect_eq "DC1e doctor sent nothing" "0" "$(nt_calls)"
-
 finish

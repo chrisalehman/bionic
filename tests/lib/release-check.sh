@@ -4,7 +4,7 @@ set +x +v
 # D1, REQ-3 AC-3.5). The release gate runs it from the repository being published, from the last
 # release to the working head, and refuses the release on a non-zero exit.
 #
-# THREE CHECKS, each always run, and the exit is 0 only when all pass:
+# FOUR CHECKS, each always run, and the exit is 0 only when all pass:
 #
 #   1. the name scan (tests/lib/name-scan.sh <list path>, same working directory, same
 #      environment: BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD are the scan's own). Its output is
@@ -27,6 +27,16 @@ set +x +v
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
 #      sentences held says how many, in one such line. Generalised from the §CORR rule of
 #      tests/release-check.test.sh, which held one release to one plan by hand.
+#   4. the landing numbers: the entry's `### The landing numbers` part names the head and the instant it
+#      was rendered for (``landing-report --rows` at <40-hex> on <ISO-UTC>:`, the line `release-note`
+#      prints), and its fenced block must equal, field for field, what `hooks/session-poker.sh release-note
+#      --at <head> --on <instant> <plan>` prints for the plan the Known limits read. `killed=` is the one
+#      field not held: it counts the gate's requests, which the gate prunes. A field that differs is ONE
+#      line naming the entry's and the report's. A landing in the run's landing record whose commit the
+#      checked head holds and the entry's head does not is ONE line naming the row, unless that landing
+#      carried the entry (its commit's CHANGELOG.md holds the head line, its first parent's does not): the
+#      entry is rendered again after it. An entry naming no head, and no plan naming the release, each
+#      pass with one `landing-numbers:` line.
 #
 # On a mismatch it prints ONE line naming both versions and exits 1. A missing list path, a list
 # that is not a file, and a pair that cannot be read (no release heading, no `.version`, a path
@@ -71,14 +81,33 @@ elif [ "$chg_version" != "$plugin_version" ]; then
 fi
 
 # ---- the Known limits of the release being shipped -------------------------------------------
-# lim_section <changelog text> <version> -> the lines of that entry's `### Known limits` part, up to the next
-# `### ` or `## ` heading.
-lim_section() {
-  printf '%s\n' "$1" | awk -v v="$2" '
+# entry_part <changelog text> <version> <part> -> the lines of that entry's `### <part>`, up to the next `### ` or
+# `## ` heading.
+entry_part() {
+  printf '%s\n' "$1" | awk -v v="$2" -v h="### $3" '
     /^## / { inb = (index($0, "## " v " ") == 1); inp = 0; next }
     !inb { next }
-    /^### / { inp = ($0 ~ /^### Known limits[[:space:]]*$/); next }
+    /^### / { t = $0; sub(/[[:space:]]+$/, "", t); inp = (t == h); next }
     inp'
+}
+# rel_load <check> -> the libraries both plan-reading checks use, loaded; TOP and DROOT set. One refusal line, rc 2.
+rel_load() {
+  local lib f
+  lib="$HERE/../../payload/scripts/lib"
+  command -v jq >/dev/null 2>&1 || { echo "release-check: refused — $1 needs jq, to fold as the sentences were written"; return 2; }
+  for f in run.sh proof.sh said.sh worktree.sh; do
+    # shellcheck source=/dev/null
+    [ -f "$lib/$f" ] && . "$lib/$f" >/dev/null 2>&1 || { echo "release-check: refused — $1 cannot load $lib/$f"; return 2; }
+  done
+  TOP="$(git rev-parse --show-toplevel 2>/dev/null)" && TOP="$(cd "$TOP" && pwd -P)" || {
+    echo "release-check: refused — $1 finds no checkout top"; return 2; }
+  DROOT="$(docs_root "$TOP")" || DROOT=""
+}
+rel_plans() {  # <version> -> each run plan under DROOT whose frontmatter says `release: <version>`
+  local f
+  while IFS= read -r -d '' f; do
+    [ "$(plan_frontmatter_get "$f" release 2>/dev/null)" = "$1" ] && printf '%s\n' "$f"
+  done < <([ -z "$DROOT" ] || _run_candidates "$DROOT" 2>/dev/null)
 }
 # lim_sentence <plan> <record>#<n> -> the stated sentence of the first `deferred:` line of `## SDLC State`
 # naming it, unescaped; nothing when the line states none.
@@ -91,25 +120,14 @@ lim_sentence() {
     | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p' | sed -e 's/\\\(.\)/\1/g'
 }
 lim_check() {  # <version> <changelog text> -> one line per omission, or one known-limits: line; exit 1 on an omission
-  local ver="$1" cl="$2" lib top droot f plans="" plan kl id s r p t st n=0 bad=0
-  lib="$HERE/../../payload/scripts/lib"
-  command -v jq >/dev/null 2>&1 || { echo "release-check: refused — the Known limits check needs jq, to fold as the sentences were written"; return 2; }
-  for f in run.sh proof.sh said.sh; do
-    # shellcheck source=/dev/null
-    [ -f "$lib/$f" ] && . "$lib/$f" >/dev/null 2>&1 || { echo "release-check: refused — the Known limits check cannot load $lib/$f"; return 2; }
-  done
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" && pwd -P)" || {
-    echo "release-check: refused — the Known limits check finds no checkout top"; return 2; }
-  droot="$(docs_root "$top")" || droot=""
-  while IFS= read -r -d '' f; do
-    [ "$(plan_frontmatter_get "$f" release 2>/dev/null)" = "$ver" ] && plans="${plans}${f}
-"
-  done < <([ -z "$droot" ] || _run_candidates "$droot" 2>/dev/null)
+  local ver="$1" cl="$2" plans plan kl id s r p t st n=0 bad=0
+  rel_load "the Known limits check" || return 2
+  plans="$(rel_plans "$ver")"
   if [ -z "$plans" ]; then
-    echo "known-limits: $ver — no plan under ${droot:-$top} names release: $ver, so no deferred sentence is held"
+    echo "known-limits: $ver — no plan under ${DROOT:-$TOP} names release: $ver, so no deferred sentence is held"
     return 0
   fi
-  kl="$(said_fold "$(lim_section "$cl" "$ver")")"
+  kl="$(said_fold "$(entry_part "$cl" "$ver" 'Known limits')")"
   while IFS= read -r plan; do
     [ -n "$plan" ] || continue
     n=0
@@ -129,15 +147,79 @@ $plans
 LIM_PLANS
   return "$bad"
 }
-# The libraries it sources are written for callers without `set -u`, so the check runs in a subshell
+# nums_fence <text> -> the lines of the first fence after the line naming the head the numbers were rendered at.
+nums_fence() {
+  printf '%s\n' "$1" | awk '
+    index($0, "`landing-report --rows` at ") == 1 { h = 1; next }
+    h && /^```/ { if (f) exit; f = 1; next }
+    f'
+}
+# nums_holds <rev> <line> -> 0 when CHANGELOG.md at <rev> holds <line> whole. grep reads the file to its end: under
+# pipefail, a grep that quits at its match kills the writer of a file longer than a pipe's buffer, and the test fails.
+nums_holds() {
+  git show "$1:CHANGELOG.md" 2>/dev/null | /usr/bin/grep -xF -- "$2" >/dev/null
+}
+nums_check() {  # <version> <changelog text> -> one line per disagreement and per later landing, else one landing-numbers: line
+  local ver="$1" cl="$2" hl at on plan said rep h12 row c bad=0
+  hl="$(entry_part "$cl" "$ver" 'The landing numbers' | /usr/bin/grep -E -m 1 '^`landing-report --rows` at [0-9a-f]{40} on [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:$')"
+  at="${hl#* at }"; at="${at%% *}"; on="${hl##* on }"; on="${on%:}"
+  if [ -z "$hl" ]; then
+    echo "landing-numbers: $ver — the entry names no head its numbers were rendered at, so none is held to the report"
+    return 0
+  fi
+  rel_load "the landing numbers check" || return 2
+  plan="$(rel_plans "$ver" | head -n 1)"
+  if [ -z "$plan" ]; then
+    echo "landing-numbers: $ver — no plan under ${DROOT:-$TOP} names release: $ver, so its numbers are not held to the report"
+    return 0
+  fi
+  h12="${at:0:12}"
+  rep="$(bash "$HERE/../../hooks/session-poker.sh" release-note --at "$at" --on "$on" "$plan" 2>&1)" || {
+    echo "release-check: refused — release-note cannot render the landing report at $h12: $(printf '%s\n' "$rep" | head -n 1)"; return 2; }
+  said="$(nums_fence "$(entry_part "$cl" "$ver" 'The landing numbers')")"
+  rep="$(nums_fence "$rep")"
+  # Field for field, line by line: the first field of a line that differs is that line's one finding.
+  if [ "$said" != "$rep" ]; then
+    awk -v ver="$ver" -v h="$h12" '
+      FILENAME == ARGV[1] { e[++ne] = $0; next }
+      { r[++nr] = $0 }
+      END {
+        if (ne != nr) { printf "release-check: the landing numbers of %s hold %d lines where the landing report at %s holds %d\n", ver, ne, h, nr; exit 1 }
+        for (i = 1; i <= ne; i++) {
+          n = split(e[i], a, " "); m = split(r[i], b, " "); if (m > n) n = m
+          for (k = 1; k <= n; k++) {
+            if (a[k] == b[k] || (a[k] ~ /^killed=/ && b[k] ~ /^killed=/)) continue
+            printf "release-check: the landing numbers of %s say %s where the landing report at %s says %s\n", ver, (a[k] == "" ? "nothing" : a[k]), h, (b[k] == "" ? "nothing" : b[k])
+            bad = 1; break
+          }
+        }
+        exit bad
+      }' <(printf '%s\n' "$said") <(printf '%s\n' "$rep") || bad=1
+  fi
+  # A landing the checked head holds and the entry's head does not came after the entry, unless it carried it.
+  while IFS='|' read -r row c; do
+    git merge-base --is-ancestor "$c" "$head" 2>/dev/null || continue
+    ! git merge-base --is-ancestor "$c" "$at" 2>/dev/null || continue
+    if nums_holds "$c" "$hl" && ! nums_holds "$c^1" "$hl"; then continue; fi
+    echo "release-check: the landing numbers of $ver are at $h12, and $row landed after them at ${c:0:12}; render them again with release-note"
+    bad=1
+  done < <(awk -F'|' '$1 == "line/v1" && $2 == "ev=published" { r = c = ""
+      for (k = 3; k <= NF; k++) { if (index($k, "row=") == 1) r = substr($k, 5); if (index($k, "commit=") == 1) c = substr($k, 8) }
+      if (r != "" && c != "") print r "|" c }' "$(_wt_proofs_path "$TOP" "$plan")" 2>/dev/null)
+  [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
+  return "$bad"
+}
+# The libraries they source are written for callers without `set -u`, so each plan-reading check runs in a subshell
 # without it; its lines pass through and its status is read.
 if [ -n "$chg_version" ]; then
-  ( set +u; lim_check "$chg_version" "$changelog" ); rc=$?
-  case "$rc" in
-    0) : ;;
-    1) [ "$status" -ne 0 ] || status=1 ;;
-    *) refusals=1 ;;
-  esac
+  for chk in lim_check nums_check; do
+    ( set +u; "$chk" "$chg_version" "$changelog" ); rc=$?
+    case "$rc" in
+      0) : ;;
+      1) [ "$status" -ne 0 ] || status=1 ;;
+      *) refusals=1 ;;
+    esac
+  done
 fi
 
 # ---- the name scan ---------------------------------------------------------------------------

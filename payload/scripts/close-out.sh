@@ -303,9 +303,11 @@ scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 # It never runs it: opening a pull request is an outward act, the person's.
 CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
 CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
-# co_pr_owed -> 0 when the act is `pr` and the working branch is not yet reachable from the integration branch
+# co_pr_owed -> 0 when the act is `pr` and the working branch exists and is not yet reachable from the integration
+# branch; a branch that is gone was merged and deleted, so nothing is owed
 co_pr_owed() {
   [ "$CO_INTEGRATE" = pr ] || return 1
+  git -C "$ROOT" rev-parse --verify -q "refs/heads/$WORKING" >/dev/null 2>&1 || return 1
   ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
 }
 # co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
@@ -1577,12 +1579,16 @@ STEP9
 STEP9
 }
 
-# THE HANDOFF FILE IS THE STORE (wave-38 T12; D23). The closed form is written into the run's handoff file — the
-# one the plan's `## Handoff` pointer names, else record/<wave>/handoff.md — as its line 2, under the kind line, with
-# the five human lines the file already holds kept; the plan's section becomes the one pointer line
-# `handoff: <path> written <local time>`. The file's grammar is session-poker.sh `handoff`'s closed form, line for
-# line, the door last. Which file is lib/handoff.sh `handoff_file_of`'s answer (wave-39 T16; D18, AC-12.1): the
-# poker's heading test, the path relative to this project's root, the same reader the poker's handoff readers ask.
+# THE HANDOFF DOCUMENT IS THE STORE. The closed run's document goes to the run's handoff file, the one the plan's
+# `## Handoff` pointer names, else the run's home file in the handoffs folder (lib/handoff.sh `handoff_file_of`, the
+# one answer every handoff reader asks). It is the document session-poker.sh `handoff` writes, in its shape: the kind
+# line, the title, the sections in their order, the door last. Its State is the closed run's, and its two closed
+# lines are `closed-form`'s, the branch line under the verb's `working branch:` label. A section a session composed
+# into that document before the close is kept as it stands, title included; a section it lacks is the one line
+# `- none.`. A file of the old shape (the kind line, then facts and five human lines) is carried whole: mid-flight and
+# risks into Open, order into Next, rulings into Decisions, lessons into Findings, every other line into State after
+# the closed run's own, a line under a key State writes itself marked `was`. The page is not folded: every reader
+# joins a folded line back, so a long line reads the same. The plan's section becomes the one pointer line `handoff: <path> written <local time>`.
 CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
   [ -z "$CO_HO_FILE" ] || return 0
@@ -1599,36 +1605,73 @@ handoff_block() {
 handoff: $CO_HO_REL written $CO_HO_LOCAL
 HANDOFF
 }
-co_handoff_closed() {  # -> 0 when the handoff file's line 2 is the closed form
+co_handoff_closed() {  # -> 0 when the handoff document's resume point is the closed one
   co_handoff_where
   [ -f "$CO_HO_FILE" ] || return 1
-  case "$(sed -n 2p "$CO_HO_FILE" 2>/dev/null)" in 'resume point: NONE — DELIVERED at '*|'resume point: PARKED on '*) return 0 ;; esac
+  case "$(handoff_line "$CO_HO_FILE" "resume point")" in 'resume point: NONE — DELIVERED at '*|'resume point: PARKED on '*) return 0 ;; esac
   return 1
 }
-co_handoff_write() {  # -> writes the closed form to the handoff file, the five human lines kept; rc 1 not written
-  local main_sha k got human="" tmp
+co_handoff_write() {  # -> writes the closed document to the handoff file, a session's sections kept; rc 1 not written
+  local src=/dev/null title="" tmp old=0
   co_handoff_where
-  main_sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  for k in mid-flight order rulings lessons risks; do
-    got=""
-    [ -f "$CO_HO_FILE" ] && got="$(awk -v k="$k: " 'f { if ($0 ~ /^[ \t]/) { print; next } exit } index($0, k) == 1 { f = 1; print }' "$CO_HO_FILE" 2>/dev/null)"
-    [ -n "$got" ] || got="$k: (to fill)"
-    human="${human:+$human
-}$got"
-  done
   mkdir -p "${CO_HO_FILE%/*}" 2>/dev/null || return 1
   [ ! -L "$CO_HO_FILE" ] || return 1
+  if [ -f "$CO_HO_FILE" ] && [ "$(sed -n 1p "$CO_HO_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+    title="$(sed -n '2{/^Handoff · /p;}' "$CO_HO_FILE" 2>/dev/null)"
+    src="$CO_HO_FILE"
+    [ -n "$title" ] || old=1
+  fi
+  [ -n "$title" ] || title="Handoff · ${ROOT##*/} · $(date '+%A %-I:%M %p') · $WAVE_SLUG · closed"
   tmp="$CO_HO_FILE.close-out.$$"
   {
-    printf 'bionic-handoff/v1\n'
-    printf '%s\n' "$(co_resume_point)"
-    printf 'written: %s\n' "$CO_HO_WRITTEN"
-    printf 'plan: %s\n' "${PLAN#"$ROOT"/}"
-    printf '%s\n' "$(co_branch_line)"
-    printf 'patrol: %s\n' "$PATROL_LINE"
-    printf 'continuation: %s\n' "$CONT_REL"
-    printf '%s\n' "$human"
-    printf 'safe to clear\n'
+    printf 'bionic-handoff/v1\n%s\n\n' "$title"
+    CO_HO_STATE="$(printf 'written: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
+        "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
+        "$CONT_REL" "$PATROL_LINE")" \
+      awk -v secs="$HANDOFF_SECTIONS" -v old="$old" '
+        BEGIN {
+          n = split(secs, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1
+          # an old-shape file: its five human lines go to the section that holds their kind of thing
+          M["mid-flight"] = "Open"; M["order"] = "Next"; M["rulings"] = "Decisions"; M["lessons"] = "Findings"; M["risks"] = "Open"
+          # the keys the closed State writes itself: an old line under one of them is kept, marked "was"
+          K["written"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
+        }
+        FNR == 1 { next }
+        old {
+          L[++ln] = $0; next
+        }
+        FNR == 2 { next }
+        ($0 in H) { cur = $0; next }
+        $0 == "" { cur = ""; next }
+        cur != "" { B[cur] = B[cur] $0 "\n" }
+        END {
+          if (old) {
+            if (ln > 0 && L[ln] ~ /^\/bionic:canonical-sdlc /) ln--
+            for (j = 1; j <= ln; j++) {
+              t = L[j]
+              if (t == "") continue
+              if (t ~ /^ / && mode != "") {
+                if (mode == "h") { sub(/^ +/, "", t); I[tgt] = I[tgt] " " t } else X = X "\n" t
+                continue
+              }
+              key = t; mode = "m"
+              if (match(t, /^[^ :][^:]*:( |$)/)) key = substr(t, 1, RLENGTH - 1); sub(/:$/, "", key)
+              if (key in M) { mode = "h"; tgt = ++nh; S[nh] = M[key]; I[nh] = "- " t; continue }
+              if (key in K) t = "was " t
+              X = X (X == "" ? "" : "\n") t
+            }
+            for (j = 1; j <= nh; j++) B[S[j]] = B[S[j]] I[j] "\n"
+          }
+          for (i = 1; i <= n; i++) {
+            if (h[i] == "Resume") break
+            print h[i]
+            if (h[i] == "State") { print ENVIRON["CO_HO_STATE"]; if (X != "") print X }
+            else if (B[h[i]] != "") printf "%s", B[h[i]]
+            else print "- none."
+            print ""
+          }
+          print "Resume"
+        }' "$src"
     printf '/bionic:canonical-sdlc %s\n' "$CO_HO_REL"
   } > "$tmp" 2>/dev/null && mv -f "$tmp" "$CO_HO_FILE" 2>/dev/null && return 0
   rm -f "$tmp" 2>/dev/null
@@ -1952,7 +1995,7 @@ presence_missing() {
 # FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence.
 FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""
 facts_judge() {
-  local out err
+  local out err ah
   if ! declare -F facts_state >/dev/null 2>&1; then
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
@@ -1964,6 +2007,23 @@ facts_judge() {
   if [ -z "$FACTS_HEAD" ]; then
     FACTS_WHY="the working branch $WORKING names no commit here, so the regression is uncovered and there is no head to judge the facts the run owes at"
     return 0
+  fi
+  # THE APPROVED HEAD: in the order build, regression, review, release (lib/units.sh `units_order`) the
+  # head closed is the one the newest `approved: release` line names (lib/proof.sh `proof_approved_head`), or one that
+  # only prose past it follows (`proof_prose_past`), as `current 8` admits it; a code commit landed after the approval
+  # is refused here, naming both heads. A plan outside that order is judged as before.
+  if units_order "$PLAN" >/dev/null 2>&1; then
+    ah="$(proof_approved_head "$PLAN" release 2>/dev/null)" || ah=""
+    if [ -z "$ah" ]; then
+      FACTS_RC=1
+      FACTS_WHY="the plan is in the release order and no approved: release line names a head, so the head the user approved for release cannot be read; the user's word for the working head $FACTS_HEAD is approve release '<reply>'"
+      return 0
+    fi
+    if [ "$ah" != "$FACTS_HEAD" ] && ! proof_prose_past "$PLAN" "$ah" "$FACTS_HEAD"; then
+      FACTS_RC=1
+      FACTS_WHY="the working head ${FACTS_HEAD:0:12} is not the head the user approved for release, ${ah:0:12}, and a commit past it is code or a release-set file; land only docs past the approval, or have the user approve this head (approve release '<reply>')"
+      return 0
+    fi
   fi
   out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
   err="$(cat "$TMP_DIR/.facts-judge.$$" 2>/dev/null)"; rm -f "$TMP_DIR/.facts-judge.$$"

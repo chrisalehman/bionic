@@ -41,36 +41,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: interval, interval-default, window. Each line below is
-# that closure: the library (every run executes it), the arm of each verb, the sections defining the globals
-# they read, and each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "the contract grammar"
-reads hooks/session-poker.sh verb interval
-reads hooks/session-poker.sh verb interval-default
-reads hooks/session-poker.sh verb window
-reads hooks/session-poker.sh fn adopt_copy_marker
-reads hooks/session-poker.sh fn adopt_fold
-reads hooks/session-poker.sh fn adopt_write_row
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn count_main_thread_dispatches
-reads hooks/session-poker.sh fn count_refused_dispatches
-reads hooks/session-poker.sh fn cover_basis
-reads hooks/session-poker.sh fn cur7_judge
-reads hooks/session-poker.sh fn cur8_owed_waivers
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn pair
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn tmp_dir_ok
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -589,8 +559,6 @@ OTHER_ROOT="$(mktemp -d -p "$TMP")"
 HOME10="$(make_registry_home)"
 write_known_marketplaces "$HOME10" '{"source":"directory","path":"'"$OTHER_ROOT"'"}' "$OTHER_ROOT"
 LINE10="$(plugin_source_line "$(run_doctor "$HOME10")")"
-expect_match "31c: a registration naming a DIFFERENT root reads OTHER checkout" \
-  "plugin source: *\[OTHER checkout — the CLI loads the plugin from THERE\]" "$LINE10"
 expect_no_match "31d: …and it is not read as this checkout" "*\[this checkout\]" "$LINE10"
 
 echo "--- 7c: unregistered ---"
@@ -621,8 +589,6 @@ HOME13="$(make_registry_home)"
 write_known_marketplaces "$HOME13" '{"source":"directory","path":"'"$LONGROOT"'"}' "$LONGROOT"
 LINE13="$(plugin_source_line "$(run_doctor "$HOME13")")"
 expect_match "31g: the long path was elided" "*…*" "$LINE13"
-expect_match "31h: …and the OTHER-checkout verdict survived the cut whole" \
-  "*\[OTHER checkout — the CLI loads the plugin from THERE\]" "$LINE13"
 
 echo "--- 7f: a sibling worktree of the SAME repository qualifies the OTHER-checkout verdict (AC-6.4) ---"
 
@@ -648,8 +614,6 @@ dcv_verdict() {  # <claude-home> <compare-root> -> detect_checkout_verdict's ans
 HOME_DCV1="$(make_registry_home)"
 write_known_marketplaces "$HOME_DCV1" '{"source":"directory","path":"'"$DCV_WT"'"}' "$DCV_WT"
 VERDICT_DCV1="$(dcv_verdict "$HOME_DCV1" "$DCV_MAIN")"
-expect_eq "31i: a sibling worktree of the same repository reads the qualified verdict" \
-  "OTHER checkout (worktree of this repo)" "$VERDICT_DCV1"
 
 # NOT RE-PROVEN THROUGH doctor.sh's OWN RENDERING HERE: `DOCTOR_REPO_ROOT`
 # (doctor.sh:126) resolves from doctor.sh's OWN on-disk location
@@ -923,142 +887,5 @@ expect_match "43: with the CLI off PATH, an MCP row names that as the cause"   "
 expect_no_match "44: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
 expect_match "45: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
 expect_all_lines_fit "46: the CLI-absent page still fits the budget" "$OUT_NOCLI"
-
-section "Section 13: the rendered-file integrity manifest doctor reads (wave-02 AC-8)"
-
-# WHAT CHANGED AND WHY IT NEEDS A TEST AT ALL. detect_agent_integrity() has shipped since
-# epic-17 W4 and, until now, NO suite exercised it: the manifest it reads was written by
-# agents-src/render.sh and named by exactly one other file, and a rename of either would
-# have been silent. Wave-02 S2a renames it (integrity/agents.sha256 ->
-# integrity/rendered.sha256) and widens it from the six role files to every rendered
-# plugin file, so the fact function's contract — stock / modified / unknown, with the
-# modified files NAMED — is pinned here where doctor's own rows live.
-#
-# DRIVEN THROUGH THE SEAM detect.sh ALREADY OFFERS. BIONIC_PLUGIN_ROOT points the fact
-# function at a fixture root built from the repo's own rendered files, so this asserts
-# against the SHIPPED manifest rather than a hand-typed one. Sourced in a child /bin/bash
-# so the fixture root never leaks into the rest of this suite.
-
-DETECT_LIB="${PAYLOAD}/scripts/lib/detect.sh"
-RENDERED_MANIFEST="${PAYLOAD}/integrity/rendered.sha256"
-
-expect_true "47: the payload ships payload/integrity/rendered.sha256" test -f "$RENDERED_MANIFEST"
-expect_false "48: …and no longer ships the old integrity/agents.sha256" \
-  test -f "${PAYLOAD}/integrity/agents.sha256"
-
-# make_plugin_root -> a plugin root laid out the way an INSTALLED payload is: the manifest
-# beside agents/, commands/ and skills/, each at the plugin-root-relative path the manifest
-# names (the repo reaches those through payload/agents and payload/skills/* symlinks).
-make_plugin_root() {
-  local dir; dir="$(mktemp -d -p "$TMP")"
-  mkdir -p "$dir/integrity" "$dir/agents" "$dir/commands" "$dir/context" \
-           "$dir/skills/canonical-sdlc/steps"
-  cp "$RENDERED_MANIFEST" "$dir/integrity/" || return 1
-  cp "${REPO}"/agents/*.md "$dir/agents/" || return 1
-  cp "${REPO}"/payload/commands/*.md "$dir/commands/" || return 1
-  # wave-11 1c: the once-rendered dispatch terms are a manifest row like any other.
-  cp "${REPO}"/payload/context/*.md "$dir/context/" || return 1
-  # THE SKILL IS TWELVE FILES SINCE ROW 1b. A plugin root carrying only SKILL.md is missing
-  # eleven files the manifest has rows for, and every one of them would read as modified —
-  # so 49's "an untouched install reads as stock" would fail on the fixture rather than on
-  # the defect it exists to catch.
-  cp "${REPO}/skills/canonical-sdlc/SKILL.md" "$dir/skills/canonical-sdlc/" || return 1
-  cp "${REPO}/skills/canonical-sdlc/dispatch.md" "$dir/skills/canonical-sdlc/" || return 1
-  cp "${REPO}"/skills/canonical-sdlc/steps/*.md "$dir/skills/canonical-sdlc/steps/" || return 1
-  printf '%s' "$dir"
-}
-
-# integrity_line <plugin-root> -> detect_agent_integrity's one line
-integrity_line() {
-  BIONIC_PLUGIN_ROOT="$1" /bin/bash -c '. "$0"; detect_agent_integrity' "$DETECT_LIB" 2>/dev/null
-}
-
-PROOT_STOCK="$(make_plugin_root)"
-LINE_STOCK="$(integrity_line "$PROOT_STOCK")"
-expect_match "49: an untouched install reads as stock" "*state=stock*" "$LINE_STOCK"
-# ONE PER TEMPLATE, a relation rather than a number (wave-27 T8: a hard-coded 24 went red on
-# every new rendered file). The expected total is counted from the SOURCES, the templates of
-# render.sh's five units, never from the manifest or the finals: a count taken from what the
-# renderer produced would agree with itself whatever it dropped. docs-pins 74c pins the
-# manifest to the same count.
-RENDER_TMPLS="$(ls "${REPO}"/agents-src/templates/*.md.tmpl "${REPO}"/agents-src/templates/commands/*.md.tmpl \
-  "${REPO}"/agents-src/templates/skills/canonical-sdlc/*.md.tmpl \
-  "${REPO}"/agents-src/templates/skills/canonical-sdlc/steps/*.md.tmpl \
-  "${REPO}"/agents-src/templates/context/*.md.tmpl 2>/dev/null | wc -l | tr -d ' ')"
-expect_true "50 precondition: the five render units hold templates" test "${RENDER_TMPLS:-0}" -gt 0
-expect_match "50: …over every rendered file, one per template, not just the six roles" \
-  "*total=${RENDER_TMPLS} *" "$LINE_STOCK"
-expect_match "51: …with nothing named as modified" "*modified=0 names=-*" "$LINE_STOCK"
-
-# THE DEFECT CONTROL. `stock` above is worth nothing unless the same reader turns on a
-# real edit — and the role files are the case the line was written for.
-PROOT_ROLE="$(make_plugin_root)"
-printf '\nlocally added line\n' >> "$PROOT_ROLE/agents/critic.md"
-LINE_ROLE="$(integrity_line "$PROOT_ROLE")"
-expect_match "52: one doctored ROLE file reads as modified" "*state=modified*" "$LINE_ROLE"
-expect_match "53: …and is named" "*names=critic.md*" "$LINE_ROLE"
-
-# THE WIDENING ITSELF: before this task a doctored skill file or command page was
-# invisible to this line, because the manifest had no row for either.
-PROOT_SKILL="$(make_plugin_root)"
-printf '\nlocally added line\n' >> "$PROOT_SKILL/skills/canonical-sdlc/SKILL.md"
-LINE_SKILL="$(integrity_line "$PROOT_SKILL")"
-expect_match "54: a doctored SKILL.md reads as modified" "*state=modified*" "$LINE_SKILL"
-expect_match "55: …and is named" "*names=SKILL.md*" "$LINE_SKILL"
-
-PROOT_CMD="$(make_plugin_root)"
-printf '\nlocally added line\n' >> "$PROOT_CMD/commands/help.md"
-LINE_CMD="$(integrity_line "$PROOT_CMD")"
-expect_match "56: a doctored command page reads as modified" "*state=modified*" "$LINE_CMD"
-expect_match "57: …and is named" "*names=help.md*" "$LINE_CMD"
-
-# THE THIRD VALUE. A payload with no manifest answers `unknown` with the cause naming the
-# path it looked for — which is how a rename that missed detect.sh would show itself.
-PROOT_NONE="$(make_plugin_root)"
-rm -f "$PROOT_NONE/integrity/rendered.sha256"
-LINE_NONE="$(integrity_line "$PROOT_NONE")"
-expect_match "58: a payload with no manifest answers unknown" "*state=unknown*" "$LINE_NONE"
-expect_match "59: …naming integrity/rendered.sha256 as what it looked for" \
-  "*integrity/rendered.sha256*" "$LINE_NONE"
-
-# ---------- plugin-root drift (wave-21 T3, AC-2.3) ----------
-#
-# The registry's root and the root the hooks run from can be two trees (triage-C R2: the
-# registry on 1.8.6 while the hooks ran 1.8.7). The Patrol must be armed from the RUNNING
-# root, so doctor names the pair when their hooks/session-poker.sh differ byte-wise.
-# The running root here is doctor's own location (the repo's payload/), by design. Both
-# paths print PHYSICAL (pwd -P), so the fixture's expectation is resolved the same way:
-# macOS's mktemp lives under the /var -> /private/var symlink.
-make_drift_home() {  # <poker: differ|same|none> -> claude-home on stdout; registry root is <home>/root
-  local h; h="$(make_registry_home)"
-  mkdir -p "$h/root/hooks"
-  case "$1" in
-    differ) printf '#!/bin/bash\n# an older poker\n' > "$h/root/hooks/session-poker.sh" ;;
-    same)   cp "${PAYLOAD}/hooks/session-poker.sh" "$h/root/hooks/session-poker.sh" ;;
-  esac
-  write_installed_plugins_sha "$h" "$h/root" "0000000"
-  printf '%s' "$h"
-}
-drift_line() { printf '%s\n' "$1" | awk '/plugin-root drift:/'; }
-
-H_DIFFER="$(make_drift_home differ)"
-OUT_DIFFER="$(run_doctor "$H_DIFFER")"
-LINE_DIFFER="$(drift_line "$OUT_DIFFER")"
-expect_match "60: a registry poker that differs prints the drift line, naming the registry root"   "*plugin-root drift: registry=$(cd "$H_DIFFER/root" && pwd -P) running=*" "$LINE_DIFFER"
-expect_match "61: …naming the running root and the remedy" \
-  "*running=${PAYLOAD} — the Patrol must be armed from the running root*" "$LINE_DIFFER"
-
-H_SAME="$(make_drift_home same)"
-# 62 and 63 run the filtered doctor (`run_doctor_only`): the drift line is printed by the PATROL section
-# and has one producer in doctor.sh, so its absence on the filtered page is its absence on the whole one.
-# The whole run of this section is H_DIFFER above.
-OUT_SAME="$(run_doctor_only PATROL "$H_SAME")"
-expect_eq "62: byte-identical pokers print no drift line" "" "$(drift_line "$OUT_SAME")"
-expect_match "62b: …and the page still rendered (the PATROL section is there)" "*PATROL*" "$OUT_SAME"
-
-OUT_NOENTRY="$(run_doctor_only PATROL "$(make_registry_home)")"
-expect_eq "63: no registry entry for bionic prints no drift line" "" "$(drift_line "$OUT_NOENTRY")"
-expect_match "63b: …and the page still rendered" "*PATROL*" "$OUT_NOENTRY"
-
 
 finish

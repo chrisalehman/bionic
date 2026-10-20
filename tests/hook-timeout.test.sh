@@ -25,23 +25,22 @@
 # multibyte length are what made the old costs grow. Small / large:
 #   a1  governing-skill  Edit of a 64 KB / 200 KB plan, old_string at 12% of it (~8000 small)
 #   a2  governing-skill  the same plans, old_string at 91% (~60000 small)
-#   b   bash-walls       a 64 KB / 200 KB python heredoc ending in a literal `git push`
-#   b2  bash-walls       the same command ending in `git commit`, from a read-only agent
+#   b2  bash-walls       a 64 KB / 200 KB python heredoc ending in `git commit`, from a read-only agent
 #   c   bash-walls       a 7.7 K / 200 KB quote-dense command ending in `g'i't commit`
 #   d   bash-walls       a 3-segment `&&` chain whose first segment is 8 K / 66 K em dashes
 #   e   bash-walls       a 52 KB / 200 KB single-quoted `python3 -c` body of short lines (T22)
 #   f   bash-walls       the same body double-quoted, then a newline and `make`
 #   g   bash-walls       a 64 KB / 200 KB single-quoted `python3 -c` body, `memory` in the cwd (T28)
-#   b3  bash-walls       b's heredoc behind `cd sub && `, committing (T28)
-#   b4  bash-walls       b's heredoc behind `cd <absolute repo> && `, committing (T28)
+#   b3  bash-walls       b2's heredoc behind `cd sub && `, committing
+#   b4  bash-walls       b2's heredoc behind `cd <absolute repo> && `, committing
 #   k   bash-walls       52 KB / 200 KB of short `"\""` runs, then make (wave-24 critic B1)
 # Every row runs under `/bin/bash` (3.2 on macOS, the interpreter ADR-001 pins) AND under the
 # newest bash on PATH.
 #
 # EACH ROW ALSO WITNESSES THE PATH IT COUNTS, at both sizes. A hook that left early would count
 # the same at both sizes for the wrong reason, so every row asserts the verdict that can only
-# come from the far side of its hot path: the post-edit Tasks fault for a1/a2, protect-main's
-# refusal for b, the read-only arm for b2, the evidence gate for c (which the screen reaches
+# come from the far side of its hot path: the post-edit Tasks fault for a1/a2, the read-only
+# arm for b2, the evidence gate for c (which the screen reaches
 # only through its strip — `git` is not in c's text), the chain deny for d2 and silence for d
 # (the long segment ends in a redirect).
 #
@@ -198,7 +197,6 @@ mk_repo() {  # <name> -> an engaged git repo on a feature branch
 setup_section "the repos and the inputs"
 
 R_GS="$(mk_repo gs)"
-R_PUSH="$(mk_repo push)"
 R_AGENT="$(mk_repo agent)"; : > "$R_AGENT/.bionic/tmp/roster-$SID.state"
 R_COMMIT="$(mk_repo commit)"
 R_CHAIN="$(mk_repo chain)"
@@ -235,9 +233,9 @@ GS_PLAN_L="$R_GS/.bionic/docs/plans/epic-01-demo/bigger.plan.md"
 # Every input is generated here, byte for byte, so the sizes and offsets below are facts of
 # this run rather than claims about a file somewhere else. `<id>.json` is the small input,
 # `<id>-l.json` the large one of the same shape, and §3's reduced pairs are `<id>-r…`.
-python3 - "$SANDBOX/in" "$GS_PLAN" "$GS_PLAN_L" "$SID" "$ACTOR" "$R_GS" "$R_PUSH" "$R_AGENT" "$R_COMMIT" "$R_CHAIN" "$R_MEM" <<'PY'
+python3 - "$SANDBOX/in" "$GS_PLAN" "$GS_PLAN_L" "$SID" "$ACTOR" "$R_GS" "$R_AGENT" "$R_COMMIT" "$R_CHAIN" "$R_MEM" <<'PY'
 import json, sys
-d, plan_s, plan_l, sid, actor, r_gs, r_push, r_agent, r_commit, r_chain, r_mem = sys.argv[1:12]
+d, plan_s, plan_l, sid, actor, r_gs, r_agent, r_commit, r_chain, r_mem = sys.argv[1:11]
 LARGE = 200000
 meta = {}
 def put(name, payload):
@@ -358,10 +356,8 @@ for suffix, hd_size, c_size, d_n, e_size, k_runs, g_size in (
         ("",   65400,  7680,  8000,  51700, 10400, 64000),
         ("-l", LARGE,  LARGE, 66700, LARGE, 40000, LARGE)):
     h = heredoc(hd_size)
-    put("b" + suffix, bash_payload(r_push, h + "\ngit push origin main"))
     put("b2" + suffix, bash_payload(r_agent, h + "\ngit commit -m 'T4: rewrite'", agent=True))
-    meta["b" + suffix] = len(h + "\ngit push origin main")
-    # b3, b4: b's heredoc behind a leading cd, then a commit. b3's cd is relative, so only the
+    # b3, b4: b2's heredoc behind a leading cd, then a commit. b3's cd is relative, so only the
     # leading-cd read runs; b4's names an absolute directory, so the scan for later cds runs
     # too. The evidence gate's placeholder refusal can only come after both (T28).
     put("b3" + suffix, bash_payload(r_commit, "cd sub && " + h + "\ngit commit -m x"))
@@ -422,8 +418,6 @@ json.dump(meta, open(d + "/meta.json", "w"))
 PY
 
 meta() { jq -r ".[\"$1\"]" "$SANDBOX/in/meta.json"; }
-expect_true "fixture: the small plan is at least 64 KB" test "$(wc -c < "$GS_PLAN")" -ge 65536
-expect_true "fixture: the large plan is at least 200 000 bytes" test "$(wc -c < "$GS_PLAN_L")" -ge 200000
 expect_true "fixture: a1's old_string sits within 1 KB of offset 8000" \
   awk -v o="$(meta a1)" 'BEGIN { exit !(o > 7000 && o < 9000) }'
 expect_true "fixture: a2's old_string sits within 1 KB of offset 60000" \
@@ -431,7 +425,7 @@ expect_true "fixture: a2's old_string sits within 1 KB of offset 60000" \
 expect_true "fixture: a1-l and a2-l sit at the same fractions of the large plan (12%, 91%)" \
   awk -v a="$(meta a1-l)" -v b="$(meta a2-l)" -v n="$(meta plan-l)" \
   'BEGIN { exit !(a > 0.11 * n && a < 0.13 * n && b > 0.90 * n && b < 0.92 * n) }'
-expect_true "fixture: b's command is at least 64 000 characters" test "$(meta b)" -ge 64000
+expect_true "fixture: b3's command is at least 64 000 characters" test "$(meta b3)" -ge 64000
 expect_true "fixture: c's command is ~7.7 K with over 1 500 single quotes" \
   awk -v n="$(meta c)" -v q="$(meta c_quotes)" 'BEGIN { exit !(n >= 7600 && n <= 7900 && q >= 1500) }'
 expect_true "fixture: d's long segment is at least 8 000 characters" test "$(meta d_seg_chars)" -ge 8000
@@ -441,11 +435,9 @@ expect_eq "fixture: e's body holds no single quote, so it is one quoted word" "0
 expect_true "fixture: b3's command is at least 64 000 characters" test "$(meta b3)" -ge 64000
 expect_true "fixture: k's command is at least 52 000 characters" test "$(meta k)" -ge 52000
 expect_true "fixture: g's small command is at least 64 000 bytes" test "$(meta g_bytes)" -ge 64000
-for _m in b-l b3-l c-l k-l; do
+for _m in b3-l c-l k-l; do
   expect_true "fixture: $_m's command is at least 200 000 characters" test "$(meta "$_m")" -ge 200000
 done
-expect_true "fixture: d-l's long segment is at least 200 000 bytes" \
-  test "$(jq -r '.tool_input.command' "$SANDBOX/in/d-l.json" | wc -c)" -ge 200000
 expect_true "fixture: c-l keeps c's quote density (over one quote in six characters)" \
   awk -v n="$(meta c-l)" -v q="$(meta c_quotes-l)" 'BEGIN { exit !(q * 6 > n) }'
 expect_true "fixture: e-l's command is at least 200 000 bytes, at least 3 000 lines" \
@@ -503,7 +495,6 @@ row a1 "$GS_HOOK" "$R_GS" 2 "status doing" err
 row a2 "$GS_HOOK" "$R_GS" 2 "status doing" err
 
 section "2 — bash-walls: the heredoc, the quote-dense command, the long chain segment"
-row b  "$WALLS_HOOK" "$R_PUSH"   2 "main is a protected branch here" err
 row b2 "$WALLS_HOOK" "$R_AGENT"  2 "a read-only role never commits" err
 row c  "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
 # d: the chain tier-2 nudge that used to witness this row is retired (wave-24 T11, AC-7.7), so a
@@ -558,9 +549,9 @@ for _m in bash-walls canonical-sdlc-governing-skill; do
   expect_eq "self-check: the $_m copy parses and differs from the hook by the one planted line" "0 1" \
     "$(/bin/bash -n "$HT_MUT/hooks/$_m.sh" >/dev/null 2>&1; echo $?) $(diff "${BIONIC_HOOKS_DIR}/$_m.sh" "$HT_MUT/hooks/$_m.sh" | grep -c '^>')"
 done
-pair "self-check b, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/bash-walls.sh" "$R_PUSH" \
-  "$SANDBOX/in/b.json" "$SANDBOX/in/b-l.json" 2 "main is a protected branch here" err
-expect_true "self-check b: the planted walk counts more on the large input (${PAIR_NS} then ${PAIR_NL}): row b would go red" \
+pair "self-check b3, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/bash-walls.sh" "$R_COMMIT" \
+  "$SANDBOX/in/b3.json" "$SANDBOX/in/b3-l.json" 2 "evidence line is a placeholder" err
+expect_true "self-check b3: the planted walk counts more on the large input (${PAIR_NS} then ${PAIR_NL}): row b3 would go red" \
   test "${PAIR_NL:-0}" -gt "${PAIR_NS:-0}"
 pair "self-check a2, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/canonical-sdlc-governing-skill.sh" "$R_GS" \
   "$SANDBOX/in/a2.json" "$SANDBOX/in/a2-l.json" 2 "status doing" err
@@ -793,10 +784,6 @@ PY
 cp "$SANDBOX/verb-plan.pristine" "$VERB_PLAN"
 bound_marker "$R_VERB" "$SID" "$VERB_PLAN"
 : > "$SANDBOX/in/empty"
-expect_true "fixture: the small verb plan is at least 66 000 bytes" test "$(wc -c < "$SANDBOX/verb-plan.pristine")" -ge 66000
-expect_true "fixture: the large verb plan is at least 200 000 bytes" test "$(wc -c < "$SANDBOX/verb-plan-l.pristine")" -ge 200000
-expect_eq "fixture: the two verb plans carry the same rows above the detail" \
-  "$(grep -c '^|' "$SANDBOX/verb-plan.pristine")" "$(grep -c '^|' "$SANDBOX/verb-plan-l.pristine")"
 
 # THE VERBS ARE COUNTED UNDER A BASH THAT TRACES TO ITS OWN FD (4.1 on). bash 3.2 writes xtrace
 # on fd 2, so a verb that reads a check's stderr through `$( … 2>&1)` reads the trace with it

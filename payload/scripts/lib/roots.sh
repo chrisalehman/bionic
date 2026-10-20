@@ -9,6 +9,9 @@
 #   docs_root    <root>   <root>/<docs-root:>, else <root>/.bionic/docs
 #   tmp_root     <root>   <root>/.bionic/tmp — session-keyed state
 #   archive_root <root>   <archive-root:>, else $HOME/bionic-archive
+#   docs_tracked <root>   <root>/<docs-tracked:>, else <root>/docs — the tracked home
+#   promote_target <root> <kind> <source>
+#                         where a durable record is copied in the tracked home
 #   plugin_root           this payload's own root
 #   claude_home           the CLI's config directory
 #   worktree_root [dir]   the MAIN checkout, from anywhere inside the repository
@@ -123,77 +126,6 @@ config_value() {
   printf '%s\n' "$default"
 }
 
-# config_section <root> <key> -> the items of the YAML list `<key>:` in <root>/.bionic/config.yaml,
-# one per line, in file order; nothing when the file, the key or its items are absent. Always rc 0.
-#
-# THE ONE READER OF A LIST IN config.yaml (wave-38 T18; REQ-7 AC-7.1), config_value's sibling: that
-# one reads a flat `key: value`, this one the `- ` items under a top-level `key:` — the key at column
-# 0 with nothing after the colon but a comment — until the next flush-left key. An item is one line,
-# indented or flush-left (both are YAML); blank lines and `#` lines are skipped, a trailing CR is
-# dropped, one matching pair of quotes around the whole item is stripped, and anything after a `|`
-# stays verbatim (a standing order's `| refuse: <class>` tail is the Bash wall's to read, below). A
-# key carrying a flat value is not a list and prints nothing; the FIRST `key:` line decides, as
-# config_value's head -1 does.
-#
-# PURE BASH, NO FORK: hooks/bash-walls.sh reads `standing-orders:` on every Bash call, and
-# session-start's command counts are pinned (tests/session-start.test.sh §16).
-config_section() {
-  local config="${1:-}/.bionic/config.yaml" key="${2:-}" line t rest in=0
-  [ -n "$key" ] && [ -f "$config" ] && [ -r "$config" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%$'\r'}"
-    if [ "$in" = 0 ]; then
-      case "$line" in
-        "$key:"*)
-          rest="${line#"$key:"}"
-          case "$rest" in ''|[[:space:]]*) ;; *) continue ;; esac   # `key:x` / `keyx:` is another key
-          rest="${rest#"${rest%%[![:space:]]*}"}"
-          case "$rest" in ''|'#'*) in=1 ;; *) return 0 ;; esac ;;
-      esac
-      continue
-    fi
-    t="${line#"${line%%[![:space:]]*}"}"
-    case "$t" in ''|'#'*) continue ;; esac
-    case "$t" in
-      '-'|'- '*|-$'\t'*) ;;
-      *) case "$line" in [[:space:]]*) continue ;; *) return 0 ;; esac ;;   # an indented non-item, or the next key
-    esac
-    t="${t#-}"; t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
-    case "$t" in
-      \"*\"|\'*\') [ "${#t}" -ge 2 ] && t="${t:1:${#t}-2}" ;;
-    esac
-    [ -n "$t" ] && printf '%s\n' "$t"
-  done < "$config"
-  return 0
-}
-
-# THE CLASSES A STANDING ORDER'S `refuse:` CLAUSE MAY NAME — lib/cmd-class.sh `cmd_class`'s answers,
-# all but `none` (a lock on "every command no class names" would refuse ordinary work). An order
-# naming anything else is a config error: session-start says so and the Bash wall enforces it never.
-STANDING_ORDER_CLASSES="suite bootstrap install build"
-
-# standing_order_split <item> -> sets STANDING_ORDER_TEXT, STANDING_ORDER_REFUSES (0|1) and
-# STANDING_ORDER_CLASS. An item `<text> | refuse: <class>` refuses: the text is the words before its
-# last `|`, the class the word after `refuse:` (possibly empty, which no class is). Any other item is
-# all text and refuses nothing. A string function: it reads no file.
-standing_order_split() {
-  local item="${1-}" tail
-  STANDING_ORDER_TEXT="$item"; STANDING_ORDER_REFUSES=0; STANDING_ORDER_CLASS=""
-  case "$item" in *'|'*) ;; *) return 0 ;; esac
-  tail="${item##*|}"; tail="${tail#"${tail%%[![:space:]]*}"}"; tail="${tail%"${tail##*[![:space:]]}"}"
-  case "$tail" in refuse:*) ;; *) return 0 ;; esac
-  tail="${tail#refuse:}"; tail="${tail#"${tail%%[![:space:]]*}"}"
-  STANDING_ORDER_CLASS="$tail"; STANDING_ORDER_REFUSES=1
-  STANDING_ORDER_TEXT="${item%|*}"
-  STANDING_ORDER_TEXT="${STANDING_ORDER_TEXT%"${STANDING_ORDER_TEXT##*[![:space:]]}"}"
-  return 0
-}
-
-# standing_order_class_known <class> -> rc 0 when <class> is one of STANDING_ORDER_CLASSES.
-standing_order_class_known() {
-  case " $STANDING_ORDER_CLASSES " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
-}
-
 # _roots_join <root> <value> -> <value> if absolute, else <root>/<value>.
 # The joining rule every configurable root shares: an absolute override stands, a
 # relative one hangs off the project. One rule, so `docs-root: /srv/docs` and
@@ -248,6 +180,70 @@ archive_root() {
     return 0
   fi
   printf '%s\n' "${HOME:-/nonexistent}/bionic-archive"
+}
+
+# docs_tracked <root> -> the project's tracked home for durable records: the
+# `docs-tracked:` config value if set (joined onto <root> when relative), else
+# <root>/docs. A durable record belongs to the project, not to the tool that wrote
+# it, so its home is a folder the project already keeps under version control, and
+# the state directory is never it.
+docs_tracked() {
+  local root="$1" override
+  override="$(config_value "$root" "docs-tracked" "")"
+  if [ -n "$override" ]; then
+    _roots_join "$root" "$override"
+    return 0
+  fi
+  printf '%s\n' "$1/docs"
+}
+
+# promote_target <root> <kind> <source> -> where a durable record of <kind> (adr,
+# design or requirement) is copied in the tracked home: <tracked>/<kind>s/<name>.
+# Prints nothing and returns 1, the reason on stderr, for anything that is not a
+# durable record: another kind, a plan, a log, a run's record (a handoff among
+# them), a source whose name is not its kind's, or a tracked home inside the state
+# directory. Reads no file and writes none; the copy is the caller's.
+#
+# THE STABLE NAME is the source's own file name with a leading run number
+# (`wave-<n>-`, `epic-<n>-`) dropped, and an epic's own file (`epic.<ext>`) named
+# after its folder first. The same record always lands at the same path, and that
+# path carries no run history, so a comment can cite it.
+promote_target() {
+  local root="$1" kind="$2" src="$3" dir name rel home docs parent
+  case "$kind" in
+    adr) dir=adrs ;;
+    design) dir=designs ;;
+    requirement) dir=requirements ;;
+    *) printf "promote: '%s' is not a durable kind: an adr, a design or a requirement is promoted; a plan, a log or a handoff is operational and stays where it is\n" "$kind" >&2
+       return 1 ;;
+  esac
+  name="${src##*/}"
+  docs="$(docs_root "$root")"
+  rel=""
+  case "$src" in "$docs"/*) rel="${src#"$docs"/}" ;; esac
+  case "$name" in
+    *.plan.md) printf 'promote: %s is a plan, which is operational and is never promoted\n' "$src" >&2; return 1 ;;
+    *.md) ;;
+    *) printf 'promote: %s is not a markdown record (a log is operational and is never promoted)\n' "$src" >&2; return 1 ;;
+  esac
+  case "$rel" in
+    plans/*|record/*) printf "promote: %s is a run's operational record, which is never promoted\n" "$src" >&2; return 1 ;;
+  esac
+  case "$kind:$name" in
+    adr:adr-*.md|requirement:*.requirements.md) ;;
+    adr:*|requirement:*|design:adr-*|design:*.requirements.md)
+      printf "promote: %s is not named as a %s is (an adr is adr-<n>-<title>.md, a requirement <name>.requirements.md, a design anything else)\n" "$src" "$kind" >&2
+      return 1 ;;
+  esac
+  case "$name" in
+    epic.*) parent="${src%/*}"; parent="${parent##*/}"; name="$parent.${name#epic.}" ;;
+  esac
+  if [[ "$name" =~ ^(wave|epic)-[0-9]+-(.+)$ ]]; then name="${BASH_REMATCH[2]}"; fi
+  home="$(docs_tracked "$root")"
+  case "/$home/" in
+    */.bionic/*) printf 'promote: the tracked home %s is inside the state directory; set docs-tracked: to a folder the project tracks\n' "$home" >&2; return 1 ;;
+  esac
+  printf '%s\n' "$home/$dir/$name"
 }
 
 # ─── The machine's roots ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 ---
 name: sitrep
-description: 'Use when the user asks where the run stands: /bionic:sitrep, "sitrep", "status", "where are we", "how is it going", "what is left". Runs the situation report''s verb on the bound plan, shows its page with every rendered line unaltered and two judgment slots filled (a Bottom line first, a Diagnosis under Assessment), and records the Bottom line so the next report, the handoff head and the Patrol''s tick start from it.'
+description: 'Use when the user asks where the run stands: /bionic:sitrep, "sitrep", "status", "where are we", "how is it going", "what is left". Runs the situation report''s verb on the bound plan, writes the one judgment its page leaves open (a grade and a rationale that names an indicator line), records it with the verb, and shows the page the verb then prints, unaltered.'
 layer: technique
 needs: []
 loading: deferred
@@ -8,7 +8,7 @@ loading: deferred
 
 # Sitrep
 
-The situation report: what the run has done, how it is going, what it needs from the user, and when it closes. One verb prints every fact; this skill adds only judgment, in two labelled slots.
+The situation report: what you owe, what is next, what is done and when it closes, then every task, the run's score, what is blocked on you and the predicted close. The verb prints every fact on the page. This skill writes one thing, the grade and its rationale, and the verb records it and prints it.
 
 Typed as `/bionic:sitrep` with no argument, it reports on this session's bound run. With an argument, it reports on the plan named (absolute, project-relative or docs-root-relative).
 
@@ -24,49 +24,51 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
 
    A refusal (no plan bound, no plan at the path) is the answer: say it in one line and stop.
 
-2. Write the two slots from the page alone.
-   - **Bottom line:** two to four items, each one claim that changes what the user does next. An item is a fact cited to the rendered line it reads, `(line n)`, or a judgment labelled `hypothesis:`, `diagnosis:` or `projection:`. A diagnosis or a projection cites the lines it rests on. A hypothesis says what would confirm it. Each item ends with the recommended move and its cost, `— <move> · <cost>`, when there is one.
-   - **Diagnosis:** at most five lines, each a judgment about the Assessment's three indicators that cites the line it reads, `(line n)`. Say what is working as well as what is broken, and the cause when the page shows it.
-   - `(line n)` is the line's number on the verb's page as step 1 printed it, the title line being 1.
+2. Grade the run from the Score's five indicator lines alone, A to F. The grade grades the run, never the code, and never moves on a fact the page does not print. Write one rationale of one or two sentences that names an indicator line it rests on: schedule, correctness, waste, decisions or goals. Say the cause when the page shows it.
 
-3. Record the items, each quoted, the plan last when one was named:
+3. Record the grade, the rationale quoted, the plan last when one was named:
 
    ```bash
-   bash <plugin-root>/hooks/session-poker.sh sitrep bottom-line '<item>' ['<item>' …] [<plan>]
+   bash <plugin-root>/hooks/session-poker.sh sitrep grade <A-F> '<rationale>' [<plan>]
    ```
 
-   A refused item is named on stderr; correct it and record again. An item may not hold `|` or a line break.
+   The verb refuses a letter outside A to F and a rationale that names no indicator line or holds `|` or a line break; nothing is recorded. Correct it and record again.
 
-4. Show the report in the shape below, then quote the verb's confirmation line under it (`poker: sitrep bottom-line — <n> item(s) recorded at …`).
+4. Run the verb of step 1 again and show its page inside one fenced code block, byte for byte.
 
 ## The shape
 
 ```text
-Sitrep · <wave> · <release> · <local date and time> · step <n>
+Sitrep · <project> <release> · <weekday> <time> · step <n> of 9 · <k> of <m> tasks done (<p>%)
+
 Bottom line
-- <fact> (line n) — <move> · <cost>
-- hypothesis: <claim> — <move> · <cost>
+- You owe <what, or nothing now>.
+- Next: <tasks in flight; blocked; then the next ones>.
+- Done: <steps and tasks, the last one at its time>.
+- Close: <about a time, or why there is none>.
 
-Situation
-<the verb's Situation lines>
+Task list
+<glyph> <step>: <name> (<time>), or — <state>
+<glyph> <step>/<task>: <description> (<time>), or — <state>
 
-Assessment
-<the verb's Assessment lines: three indicators, then the within/near/over line>
+Score: <grade> (graded <time>)
+<mark> schedule — <what it measured>
+<mark> correctness — <what it measured>
+<mark> waste — <what it measured>
+<mark> decisions — <what it measured>
+<mark> goals — <what it measured>
+- <your rationale>
 
-Diagnosis
-<one to five lines, each citing (line n)>
+Blocked on you
+- <what to do>: <what waits on it>
 
-Blockers
-<the verb's Blockers lines>
-
-Forecast
-<the verb's four Forecast lines>
+Predicted close
+- <the close, its basis and the pace, or why there is none>
 ```
 
 ## The rules
 
-- A fact outside the verb's output is a contract violation: every line but the two slots is the verb's, byte for byte and in the verb's order, and a fact the verb does not print is not in the report.
-- The shape and length rules: the headings are the six above, title case, in that order, with no rule line; the Bottom line holds two to four items and replaces the verb's own Bottom line section; Diagnosis holds at most five lines and sits directly under Assessment.
-- The report has three surfaces, all from the one verb: `/bionic:sitrep` is this full report, the handoff file's head is the report with the last recorded Bottom line and its time, and the Patrol's tick prints the one-line form `poker: sitrep <glyphs> · owed: <n> · closes ~<time>` on every tick.
-- Quote the verb's confirmation line after the report, so the user sees the Bottom line was recorded.
-- Nothing here changes a plan, a record or a run beyond the `sitrep.log` line the verb writes.
+- A fact outside the verb's output is a contract violation: every line of the page is the verb's, byte for byte and in the verb's order. The grade and the rationale reach the page through the grade verb, never typed into it.
+- The rationale names an indicator line, one of schedule, correctness, waste, decisions or goals; the verb refuses one that names none.
+- The page has three surfaces, all from the one verb: `/bionic:sitrep` is this page, the handoff file's head is its Bottom line, and the Patrol's tick prints the one-line form `poker: sitrep <marks> · owed: <n> · <the close>` on every tick.
+- Nothing here changes a plan, a record or a run beyond the `sitrep.log` line the grade verb writes.

@@ -24,6 +24,7 @@
 #
 # Sourced, never executed; bash 3.2.
 
+# A field like "08" is read by awk as decimal eight, never as octal, so no leading zero needs stripping.
 _TIME_ISO_AWK='
 function alldig(s,   i, c) {
   if (length(s) == 0) return 0
