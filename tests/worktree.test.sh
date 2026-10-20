@@ -965,6 +965,7 @@ section "§HAND: a hand landing lands a row whose suite is red, writes the perso
 #
 # A second row of the same plan commits a suite that fails and logs each run of it, and its launch line names that suite
 # as the one it lands on. The hand landing merges it all the same: running a suite is no part of it, and none is wanted.
+# What the person says of the writer's run (its suites, the commit they were green at, its log) is recorded as verdicts.
 printf '| T2 | 4 | build | row two | bh-T2 | — | | 10 | REQ-1 | bh-T2.txt | .worktrees/bh-T2 | | active |\n' >> "$BHP"
 awk '{ print } /^- T1:/ { print "- T2: active" }' "$BHP" > "$BHP.n" && mv "$BHP.n" "$BHP"
 BHT2="$(new_tree "$BH" wt/bh-T2)"; mkdir -p "$BHT2/tests"
@@ -976,12 +977,16 @@ printf '%s|row=T2|lands_on=r.test.sh\n' "$(roster_row_fixture status=intended se
 expect_eq    "(hd0-pre) the planted suite fails, and its run is logged" "1 1" \
   "$( cd "$BHT2" && bash tests/r.test.sh >/dev/null; echo "$? $(awk 'END { print NR }' "$TMP/hand-runs")" )"
 : > "$TMP/hand-runs"
-BHC2="$(git -C "$BHT2" rev-parse HEAD)"
-OUTHD="$(bh_land "$BHT2" --by-hand --reason "landed on the report")"; RCHD=$?
+BHC2="$(git -C "$BHT2" rev-parse HEAD)"; BH_REFS2="$(refs_of "$BH")"
+OUTHD0="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh)"; RCHD0=$?
+expect_eq    "(hd0) suites named with no commit they were green at and no log are refused (exit 2), nothing moved or recorded" \
+  "2 yes 0" "$RCHD0 $([ "$(refs_of "$BH")" = "$BH_REFS2" ] && echo yes) $(grep -c '|row=T2|' "$BHREC")"
+OUTHD="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh --green-at "$BHC2" --log /logs/T2-green.log)"; RCHD=$?
 expect_eq    "(hd1) the hand landing of a row whose suite is red exits 0, the row's commit on the working branch" "0 yes" \
   "$RCHD $(git -C "$BH" merge-base --is-ancestor "$BHC2" wave/fixture && echo yes)"
 expect_contains "(hd2) …and its - T2: line carries the person's words" '"landed on the report"' "$(grep '^- T2:' "$BHP")"
-expect_eq    "(hd3) …and no suite ran: the planted suite logged no run, the record holds no verdict" "0 0" \
-  "$(awk 'END { print NR }' "$TMP/hand-runs") $(grep -c '|ev=verdict|' "$BHREC")"
+expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
+  "0|line/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
+  "$(awk 'END { print NR }' "$TMP/hand-runs")|$(grep '|ev=verdict|' "$BHREC" | sed 's/|at=[^|]*$//')"
 
 finish
