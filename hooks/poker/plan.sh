@@ -2402,7 +2402,7 @@ BRF_EOF
   #
   #   Review results · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
   #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
-  #   Goals         each goal the plan's `goals:` line declares, ❔ until a reader of it exists
+  #   Goals         each goal the plan declares, its mark and its reading, reached ones included
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
@@ -2574,10 +2574,9 @@ RR_ASIDE_EOF
       if [ -z "$RR_GOALS" ]; then
         printf '0\tGoals — none declared\n'
       else
-        printf '0\tGoals — 0 of %s reached\n' "$(printf '%s\n' "$RR_GOALS" | /usr/bin/grep -c .)"
-        while IFS='	' read -r g t; do [ -z "$g" ] || printf '3\t❔ %s — %s, not measured yet\n' "$g" "$t"; done <<RR_GOALS_EOF
-$RR_GOALS
-RR_GOALS_EOF
+        printf '%s\n' "$RR_GOALS" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
+          NF { n++; if ($1 == "reached") r++; l[n] = "3\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) " " $2 " — " $3 ", " $4 }
+          END { printf "0\tGoals — %d of %d reached\n", r, n; for (i = 1; i <= n; i++) print l[i] }'
       fi
       printf '0\t\n0\tTests\n3\t%s\n3\t%s\n' "$RR_TACC" "$RR_TREG"
       printf '0\t\n0\tReviews\n'
@@ -2810,11 +2809,9 @@ RR_DISP_EOF
 $RR_AGAINST
 RR_AGAINST_EOF
 
-    # GOALS: the plan's `goals:` line, `<theme> · <measure> (<reader>)` per goal, `;` between them.
-    RR_GOALS="$(plan_frontmatter_get "$PV_PLAN" goals 2>/dev/null | awk '{ n = split($0, g, /;/)
-      for (i = 1; i <= n; i++) { s = g[i]; gsub(/^[ \t]+|[ \t]+$/, "", s); if (s == "") continue
-        j = index(s, " · "); if (j == 0) { print s "\t-"; continue }
-        t = substr(s, 1, j - 1); m = substr(s, j + length(" · ")); sub(/[ \t]*\([^()]*\)$/, "", m); print t "\t" m } }')"
+    # GOALS: each goal the plan declares, read by lib/plan.sh `plan_goals_read`, the reader the sitrep reads too.
+    RR_GOALS="$(plan_goals_read "$PV_PLAN" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
+      "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
 
     # THE REGRESSION: the last whole run's proof line, and its log's verdict when the log is here to read.
     line="$(proof_last_line "$PV_PLAN" regression 2>/dev/null)"
