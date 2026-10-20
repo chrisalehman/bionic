@@ -49,8 +49,7 @@
 #     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
-#     bash card.sh final <plan>                         (the final card, from the record; CARD-EARLY while early)
-#     bash card.sh early <plan>                         (only the CARD-EARLY line, or nothing: the tick's advice)
+#     bash card.sh early <plan>                         (the CARD-EARLY line, or what the review results settle)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -2097,30 +2096,20 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   return 0
 }
 
-# ── THE FINAL CARD (epic-23 wave-38 T3; REQ-1 AC-1.1, AC-1.2; D19, D20; ADR-059) ──────────────
+# ── WHETHER THE REVIEW RESULTS PAGE MAY RENDER ───────────────────────────────
 #
-# THE ONE CARD OF THE AUTONOMOUS HALF. A run waits for its human at the four intent cards and at this one,
-# before the merge. It was prose the orchestrator composed, and in 1.20.0 it came early (wave-37 A-orch-37:
-# readers still out, so their second passes ran after the approval) and as several cards for one decision.
-# `final <plan>` renders it from the record and nothing else: the owed ledger's open items (lib/owed.sh), the
-# matrix rows not discharged, and the findings disposition (`session-poker.sh disposition`, the one reading of
-# them), each item with its default shown. Option 1 accepts every default; options 2..n are the single
-# overrides, one per item, in a fixed order: approvals, waivers, rows, findings. S1 and S2-on findings are
-# listed as fixed by policy, never offered. The card is printed and written to
-# `record/<wave>/final-card-<head8>.md` with its replay table, which `session-poker.sh reply` reads.
+# The page itself is `session-poker.sh review-results`; this file keeps the one owner of the three facts it is
+# refused on, because the tick asks them too. `early <plan>` asks, cheapest first: an open reader row on the
+# session's roster (an auditor or a critic, not acked), an owed reading unregistered at the working head
+# (lib/units.sh `_units_readings_state`, the tick's own reading), and `current <N> --check` for 6, 7 and 8 (the
+# check-only advance; its exit is read and its verdict line is the reason, never a second judgment here). On the
+# first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
+# on stdout, one `settles: <key>` line per item a red check owes that the page settles with a decision of the
+# user's (`waive:<question>` or `row:<AC>`), so the page opens each on the person's ledger.
 #
-# REFUSED EARLY, ON THREE FACTS (D20). `_card_early` asks, cheapest first: an open reader row on the session's
-# roster (an auditor or a critic, not acked), an owed reading unregistered at the working head (lib/units.sh
-# `_units_readings_state`, the tick's own reading), and `current <N> --check` for 6, 7 and 8 (the check-only
-# advance; its exit is read and its verdict line is the reason, never a second judgment here). On the first
-# that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1, and renders nothing. `early <plan>` asks the
-# same and renders nothing either way: the tick prints its line as advice. No wall refuses anything for it.
-#
-# THE SESSION'S OWN RUN. The checks and the reply act on the run the session is bound to, so a plan that is
-# not that run is refused by name rather than carded against another run's advances.
-CF_ORDER_APPROVALS="release merge"
-
-_card_final_load() {  # -> 0 when the owed ledger and the roster readers are loaded beside this file
+# THE SESSION'S OWN RUN. The checks act on the run the session is bound to, so a plan that is not that run is
+# refused by name rather than judged against another run's advances.
+_card_early_load() {  # -> 0 when the owed ledger and the roster readers are loaded beside this file
   # shellcheck source=/dev/null
   declare -F owed_list >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null
   # shellcheck source=/dev/null
@@ -2128,38 +2117,36 @@ _card_final_load() {  # -> 0 when the owed ledger and the roster readers are loa
   declare -F owed_list >/dev/null 2>&1 && declare -F roster_open_names >/dev/null 2>&1
 }
 
-_card_final_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ERR
+_card_early_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ERR
   local bound=""
   CF_ERR=""
   CF_SID="${CLAUDE_CODE_SESSION_ID:-}"
-  [ -n "$CF_SID" ] || { CF_ERR="no session key (CLAUDE_CODE_SESSION_ID is unset), and the final card is a session's own run"; return 1; }
+  [ -n "$CF_SID" ] || { CF_ERR="no session key (CLAUDE_CODE_SESSION_ID is unset), and the review results are a session's own run"; return 1; }
   CF_PLAN="$(_card_phys "$1")" || { CF_ERR="no plan at '$1'"; return 1; }
   CF_ROOT="$(project_root "${CF_PLAN%/*}" 2>/dev/null)"
   [ -n "$CF_ROOT" ] || { CF_ERR="'$1' is under no project root"; return 1; }
   bound="$(session_plan "$CF_ROOT" "$CF_SID" 2>/dev/null)" && bound="$(_card_phys "$bound" 2>/dev/null)" || bound=""
   [ "$bound" = "$CF_PLAN" ] || {
-    CF_ERR="'$1' is not the run this session is bound to (${bound:-none}); the final card checks and records the bound run"
+    CF_ERR="'$1' is not the run this session is bound to (${bound:-none}); the review results check the bound run"
     return 1
   }
   CF_HEAD="$(proof_branch_head "$CF_PLAN" "$CF_ROOT" 2>/dev/null)" || CF_HEAD=""
   case "$CF_HEAD" in
     [0-9a-f]*) : ;;
-    *) CF_ERR="the plan's working branch names no commit, so there is no head to render the card at"; return 1 ;;
+    *) CF_ERR="the plan's working branch names no commit, so there is no head to check"; return 1 ;;
   esac
   CF_HEAD8="${CF_HEAD:0:8}"
-  CF_SLUG="$(proof_plan_slug "$CF_PLAN")"
-  CF_DIR="$(docs_root "$CF_ROOT")/record/$CF_SLUG"
   CF_POKER="${CARD_SELF_DIR}/../hooks/session-poker.sh"
   [ -f "$CF_POKER" ] || { CF_ERR="no session-poker.sh beside this file (${CF_POKER}) to check the advances with"; return 1; }
   return 0
 }
 
 _card_poke() {  # <verb> <args...> -> the poker's output, stdout and stderr, run as this session in the run's root; its rc
-  # The readings a tick handed the card (below) are the card's alone: each check judges for itself.
+  # The readings a tick handed this check are its alone: each advance's check judges for itself.
   ( cd "$CF_ROOT" && exec env -u UNITS_LIVE_HEAD -u UNITS_READINGS_STATE CLAUDE_CODE_SESSION_ID="$CF_SID" "${BASH:-bash}" "$CF_POKER" "$@" ) 2>&1
 }
 
-_card_early() {  # -> 0 when the card may render; 1 and CARD_EARLY_WHY on the first of the three facts that fails
+_card_early() {  # -> 0 when the page may render; 1 and CARD_EARLY_WHY on the first of the three facts that fails
   local roster ledger names n type st q head8 out rc line
   CARD_EARLY_WHY=""
   # (1) AN OPEN READER: the roster's open names (lib/roster.sh, the one closing rule), each read by its latest row's role.
@@ -2186,10 +2173,9 @@ $names
 CF_OPEN
   fi
   # (2) A READING UNREGISTERED AT THE HEAD: facts_state's review lines at the branch ref, as the tick reads them.
-  # A failing reading is registered; the advance's check below is what refuses it.
-  # ASKED ONCE PER TICK (wave-36 T40; D9, AC-3.6): the tick (session-poker.sh `tick_card_early`) hands the answer
-  # its `sched_live_head` already got, with the head it was asked at; the card reads it when that head is this one,
-  # and asks the judge itself otherwise.
+  # A failing reading is registered; the advance's check below is what refuses it. The tick hands the answer its
+  # `sched_live_head` already got, with the head it was asked at; this reads it when that head is this one, and
+  # asks the judge itself otherwise.
   head8="$CF_HEAD8"
   if [ -n "${UNITS_READINGS_STATE:-}" ] && [ "${UNITS_LIVE_HEAD:-}" = "$CF_HEAD" ]; then
     st="$UNITS_READINGS_STATE"
@@ -2205,9 +2191,9 @@ CF_OPEN
       *) CARD_EARLY_WHY="the readings cannot be judged at $head8: $st"; return 1 ;;
     esac
   fi
-  # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE ITSELF (`current <N> --check`, wave-38 T1). A red check is
-  # early unless every refusal it prints is one of the card's own defaults settles (A-orch-11): its lines are read as
-  # the check captured them, never judged again here (`_card_settles`).
+  # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE ITSELF. A red check is early unless every refusal it
+  # prints is one the page settles with a decision (`_card_settles`): its lines are read as the check captured
+  # them, never judged again here.
   CF_SETTLE=""
   for n in 6 7 8; do
     out="$(_card_poke current "$n" --check)"; rc=$?
@@ -2220,26 +2206,15 @@ CF_OPEN
   return 0
 }
 
-# _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a default the card offers, the
-# items appended to CF_SETTLE (`waive:<q>`, `waive:regression`, `row:<AC>`); 1 at the first refusal none settles.
-# THE CARD'S OWN DEFAULTS (D17, D19; A-orch-11): a matrix row the auditor has not confirmed (waived with the user's
-# words, `waive-row`), a question whose newest reading fails (`waive <q>`), and the regression's word (`waive
-# regression`, only where the waive verb admits the question). Anything else the check prints is CARD-EARLY: a missing
-# proof, another refused dry commit, an uncovered or absent reading, a declared check or debt not held, a judge that
-# could not deal the plan. The dry commit stops at its first refusal, so a check names one wall at a time; the judge
-# at 8 runs no dry commit and names every fact it finds, and the rows are read from the matrix, so the card offers
-# each of them whichever refusal the dry commit stopped on.
-# _card_owed_say -> lib/proof.sh `proof_owed_say` over THE OWED SET at the card's head (`proof_owed_suites`), exit 0; nothing,
-# exit 1, when the set is empty (wave-39 T25; REQ-18 AC-18.3; D5). The regression's waiver is the card's default only while
-# the head owes a run, and the card names what it owes beside it. Asked once per render: the set is kept in CF_OWED_SAY.
-_card_owed_say() {
-  if [ -z "${CF_OWED_ASKED:-}" ]; then
-    CF_OWED_ASKED=1
-    CF_OWED_SAY="$(proof_owed_say "$(proof_owed_suites "$CF_PLAN" "$CF_ROOT" "$CF_HEAD" 2>/dev/null)")" || CF_OWED_SAY=""
-  fi
-  [ -n "$CF_OWED_SAY" ] && printf '%s' "$CF_OWED_SAY"
-}
-
+# _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
+# items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
+# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`) and a question
+# whose newest reading fails (`waive <q>`). Anything else the check prints is early: a missing or red whole run (the
+# regression is run before review and is never waived), a missing proof, another refused dry commit, an uncovered or
+# absent reading, a declared check or debt not held, a judge that could not deal the plan. The dry commit stops at
+# its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it
+# finds, and the rows are read from the matrix, so the page puts each of them whichever refusal the dry commit
+# stopped on.
 _card_settles() {
   local l q judge=0 reading=0 any=0
   local -a _cs_f=()
@@ -2249,10 +2224,6 @@ _card_settles() {
         q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
       "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
-      "bionic: commit refused — no regression proof on this plan yet "*)
-        proof_question_ok regression waive 2>/dev/null || return 1
-        _card_owed_say >/dev/null || return 1
-        CF_SETTLE="${CF_SETTLE}waive:regression"$'\n'; any=1 ;;
       "bionic: "*) return 1 ;;
       "- "*": the newest reading is result=fail "*)
         [ "$reading" = 1 ] || continue
@@ -2268,12 +2239,6 @@ _card_settles() {
           review)
             [ "${_cs_f[4]:-}" = failing ] || return 1
             CF_SETTLE="${CF_SETTLE}waive:${_cs_f[1]}"$'\n' ;;
-          regression)
-            # A REGRESSION LINE THE OWED SET DOES NOT CARRY IS NOT THE CARD'S (AC-18.3): the reds of the whole run with
-            # no commit past its head are a fix row's, so the check stays red and the card is early.
-            proof_question_ok regression waive 2>/dev/null || return 1
-            _card_owed_say >/dev/null || return 1
-            CF_SETTLE="${CF_SETTLE}waive:regression"$'\n' ;;
           *) return 1 ;;
         esac ;;
     esac
@@ -2281,237 +2246,6 @@ _card_settles() {
 $1
 CF_CHECKED
   [ "$any" = 1 ]
-}
-
-# THE ITEMS. One array entry per item, in the card's order; a settled item carries what settled it and is shown, never
-# offered. CF_KEY: `approve:<name>` · `waive:<q>` · `row:<AC>` · `finding:<record>#<n>`. CF_DO / CF_ELSE: the verb the
-# default / the override replays (its words appended by `reply`, then CF_WHY when it is not `-`), or `-` for none.
-_card_final_add() {  # <key> <default cmd> <override cmd> <why> <default shown> <override label> <settled text or "">
-  CF_KEY[CF_N]="$1"; CF_DO[CF_N]="$2"; CF_ELSE[CF_N]="$3"; CF_WHY[CF_N]="$4"
-  CF_SHOW[CF_N]="$5"; CF_LABEL[CF_N]="$6"; CF_SET[CF_N]="$7"
-  CF_N=$((CF_N + 1))
-}
-
-_card_final_approved() {  # <name> -> the plan's approved: line for it, or nothing
-  CF_NM="$1" awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^approved:[ \t]/ { split($0, w, /[ \t]+/); if (w[2] == ENVIRON["CF_NM"] && w[3] == "by") { print; exit } }' "$CF_PLAN"
-}
-
-_card_final_rows() {  # -> `<AC><TAB><status><TAB><auditor>` per matrix row not discharged or not CONFIRMED, table order
-  awk -F'|' '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
-    inm && /^[ \t]*\|/ {
-      a = $2; s = $4; u = $6; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", u)
-      if (a == "" || a == "AC" || a ~ /^-+$/ || (s == "discharged" && u == "CONFIRMED")) next
-      printf "%s\t%s\t%s\n", a, s, (u == "" ? "-" : u)
-    }' "$CF_PLAN"
-}
-
-_card_final_block_key() {  # <AC> <key> -> the first value of <key>: in the AC's block, or nothing
-  CF_AC="$1" CF_BK="$2" awk "$(units_ac_head_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
-    !inm { next }
-    ac_head($0, ENVIRON["CF_AC"]) { inb = 1; next }
-    inb && /^[^[:space:]]/ { inb = 0 }
-    inb {
-      l = $0; sub(/^[ \t]+/, "", l); k = ENVIRON["CF_BK"] ":"
-      if (index(l, k) == 1) { v = substr(l, length(k) + 1); sub(/^[ \t]+/, "", v); print v; exit }
-    }' "$CF_PLAN"
-}
-
-_card_final_carried() {  # <finding id> -> 0 when a replied final card of this run applied its carry
-  local f
-  for f in "$CF_DIR"/final-card-*.md; do
-    [ -f "$f" ] || continue
-    /usr/bin/grep -qxF "applied: finding:$1 carried" "$f" 2>/dev/null && return 0
-  done
-  return 1
-}
-
-# _card_final_field <line> <name> -> the value of name="…" on a disposition line, or of name=<word>
-_card_final_field() {
-  local l="$1" n="$2" v
-  case "$l" in
-    *" $n=\""*) v="${l#* "$n"=\"}"; if [ "$n" = title ]; then v="${v%\"}"; else v="${v%%\"*}"; fi ;;
-    *" $n="*) v="${l#* "$n"=}"; v="${v%% *}" ;;
-    *) v="" ;;
-  esac
-  printf '%s' "$v"
-}
-
-_card_final_items() {  # -> fills the CF_* item arrays, CF_FIXED (the policy's lines) and CF_ASIDE (owed items with no default)
-  local names="" nm line key reply rows ac st why wl disp fid sev reach state dec stated ttl sent say
-  CF_N=0; CF_FIXED=""; CF_ASIDE=""
-  CF_KEY=(); CF_DO=(); CF_ELSE=(); CF_WHY=(); CF_SHOW=(); CF_LABEL=(); CF_SET=()
-  # APPROVALS: every name an open row reads (lib/units.sh, the names `approve` admits), release and merge first. The
-  # card opens the person's item for each one still owed, as the tick does, so the ledger and the card agree.
-  for nm in $CF_ORDER_APPROVALS $(units_approval_names "$CF_PLAN" 2>/dev/null); do
-    [ "$nm" != plan ] || continue
-    case " $names " in *" $nm "*) continue ;; esac
-    units_approval_names "$CF_PLAN" 2>/dev/null | /usr/bin/grep -qxF "$nm" || continue
-    names="$names $nm"
-    line="$(_card_final_approved "$nm")"
-    [ -n "$line" ] || OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_open "approve:$nm" "approval: $nm" \
-      "poker: approval:$nm is an option on the final card (card.sh final)" >/dev/null 2>&1
-    _card_final_add "approve:$nm" "approve $nm" "-" "-" "approve $nm" \
-      "Withhold $nm: every other default applies; $nm stays owed and the card renders again when you give it." "$line"
-  done
-  # THE WAIVERS A RED CHECK OWES (A-orch-11): `_card_settles` named them; each is opened on the person's ledger, as the
-  # judge's refusal opens it on an advance, so the ledger and the card agree.
-  while IFS= read -r key; do
-    case "$key" in
-      waive:?*) OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_open "$key" "waiver: ${key#waive:}" \
-        "poker: ${key#waive:} is not held at $CF_HEAD8; waiving it is an option on the final card (card.sh final)" >/dev/null 2>&1 ;;
-    esac
-  done <<CF_SETTLED
-${CF_SETTLE:-}
-CF_SETTLED
-  # WAIVERS AND THE ITEMS WITH NO DEFAULT, from the owed ledger, in its order. THE REGRESSION'S WAIVER STANDS ONLY WITH A
-  # NON-EMPTY OWED SET, named beside it (wave-39 T25; AC-18.3): an item a refusal opened before the head stopped owing a
-  # run is closed here, not offered.
-  while IFS='	' read -r key _ _ reply; do
-    case "$key" in
-      waive:regression)
-        if say="$(_card_owed_say)"; then
-          _card_final_add "$key" "waive regression" "-" "-" "waive regression with your words — ${say%%: *}" \
-            "Withhold the regression waiver: every other default applies; regression stays owed and the card renders again." ""
-        else
-          OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_close "$key" "card.sh final: the head $CF_HEAD8 owes no run past the regression" >/dev/null 2>&1
-        fi ;;
-      waive:?*)
-        _card_final_add "$key" "waive ${key#waive:}" "-" "-" "waive ${key#waive:} with your words" \
-          "Withhold the ${key#waive:} waiver: every other default applies; ${key#waive:} stays owed and the card renders again." "" ;;
-      gate:?*) CF_ASIDE="${CF_ASIDE}- ${reply#poker: }"$'\n' ;;
-    esac
-  done <<CF_OWED
-$(OWED_ROOT="$CF_ROOT" OWED_SID="$CF_SID" owed_list 2>/dev/null)
-CF_OWED
-  # ROWS: every matrix row not discharged; a waived one is settled by its waiver: line.
-  rows="$(_card_final_rows)"
-  while IFS='	' read -r ac st _; do
-    [ -n "$ac" ] || continue
-    wl="$(_card_final_block_key "$ac" waiver)"
-    if [ "$st" = waived ] && [ -n "$wl" ]; then
-      _card_final_add "row:$ac" "-" "-" "-" "" "" "waived: $ac — $wl"
-      continue
-    fi
-    # A ROW CONFIRMED AS DISCHARGED IS NOT THE CARD'S; a discharged row the auditor did not confirm is (A-orch-11):
-    # the gate past Verify refuses it, and its default is the user's waiver.
-    why="$(_card_final_block_key "$ac" reason)"
-    if [ -z "$why" ]; then
-      if [ "$st" = discharged ]; then why="not confirmed by the auditor on this release"; else why="not run on this release"; fi
-    fi
-    _card_final_add "row:$ac" "waive-row $ac" "-" "$why" "waive $ac — $why" \
-      "Run $ac instead of waiving: every other default applies; the row's run is recorded and the card renders again." ""
-  done <<CF_ROWS
-$rows
-CF_ROWS
-  # FINDINGS: the disposition's one reading. S1 and S2-on are the policy's; S2-off, S3 and S4 that are deferred or
-  # notes default to carried, with the changelog sentence the deferral states, else the finding's own title.
-  disp="$(_card_poke disposition)"
-  while IFS= read -r line; do
-    case "$line" in "poker: finding "*) : ;; *) continue ;; esac
-    line="${line#poker: }"
-    fid="$(printf '%s' "$line" | awk '{ print $2 }')"; sev="$(printf '%s' "$line" | awk '{ print $3 }')"
-    reach="$(_card_final_field "$line" user-facing)"; state="$(_card_final_field "$line" state)"
-    dec="$(_card_final_field "$line" decision)"; stated="$(_card_final_field "$line" stated)"
-    ttl="$(_card_final_field "$line" title)"
-    if [ "$sev" = S1 ] || { [ "$sev" = S2 ] && [ "$reach" = on ]; } || { [ "$state" != deferred ] && [ "$state" != accepted ]; }; then
-      CF_FIXED="${CF_FIXED}- $fid ($sev $reach) — $ttl: $dec"$'\n'
-      continue
-    fi
-    sent="${stated:-$ttl}"; [ "$sent" != - ] || sent="$ttl"
-    if _card_final_carried "$fid"; then
-      _card_final_add "finding:$fid" "-" "-" "-" "" "" "carried: $fid ($sev $reach) — \"$sent\""
-    else
-      _card_final_add "finding:$fid" "-" "finding-move $fid fix" "the final card: fixed instead of carried" \
-        "carry $fid ($sev $reach) — \"$sent\"" \
-        "Fix $fid instead: every other default applies; a fix row is born of it and the card renders again after it lands." ""
-    fi
-  done <<CF_DISP
-$disp
-CF_DISP
-}
-
-_card_final_reply_line() {  # <options n> -> `Reply 1, 2 … or n`
-  local i=1 s="Reply 1"
-  while [ "$i" -lt "$1" ]; do
-    i=$((i + 1))
-    if [ "$i" -eq "$1" ]; then s="$s or $i"; else s="$s, $i"; fi
-  done
-  printf '%s' "$s"
-}
-
-_card_final_count() {  # -> sets CF_OPTS: the card's option count, 1 + the items not yet settled
-  local i
-  CF_OPTS=1
-  for ((i = 0; i < CF_N; i++)); do [ -n "${CF_SET[$i]}" ] || CF_OPTS=$((CF_OPTS + 1)); done
-}
-
-_card_final_render() {  # -> the card on stdout, CF_OPTS already counted
-  local i k last
-  if [ "$CF_OPTS" -eq 1 ]; then
-    printf '**Final card · %s at %s · settled**\n\n' "$CF_SLUG" "$CF_HEAD8"
-    printf 'Every item on the final card is recorded; nothing on it waits on you.\n\n'
-    for ((i = 0; i < CF_N; i++)); do printf -- '- %s\n' "${CF_SET[$i]}"; done
-    [ -z "$CF_FIXED" ] || printf '\nFixed by policy:\n%s' "$CF_FIXED"
-    return 0
-  fi
-  printf '**Final card · %s at %s**\n\n' "$CF_SLUG" "$CF_HEAD8"
-  printf '**Goal:** Decide whether this run merges with every default below applied, or with one of them overridden: every reader has reported, and every advance checks green at %s once the defaults below are recorded.\n\n' "$CF_HEAD8"
-  if [ -n "$CF_FIXED" ]; then printf 'Fixed by policy, not options:\n%s\n' "$CF_FIXED"; fi
-  if [ -n "$CF_ASIDE" ]; then printf 'Yours to do outside the run, not options:\n%s\n' "$CF_ASIDE"; fi
-  printf '**Options:**\n\n1. Accept every default:\n'
-  for ((i = 0; i < CF_N; i++)); do
-    if [ -n "${CF_SET[$i]}" ]; then printf '   - recorded: %s\n' "${CF_SET[$i]}"; else printf '   - %s\n' "${CF_SHOW[$i]}"; fi
-  done
-  k=1
-  for ((i = 0; i < CF_N; i++)); do
-    [ -z "${CF_SET[$i]}" ] || continue
-    k=$((k + 1)); printf '%s. %s\n' "$k" "${CF_LABEL[$i]}"
-  done
-  if [ "$CF_OPTS" -eq 2 ]; then last="Not 2"; else last="Not 2 to $CF_OPTS"; fi
-  printf '\n**Recommendation:** Option 1, because each default is what the run'"'"'s policy and record already say, and every check holds at %s once they are recorded. %s: each holds one item back and costs a second card.\n\n' "$CF_HEAD8" "$last"
-  printf '**Significance:** The merge is the run'"'"'s last act and reaches the integration branch; every approval and waiver is recorded in your words, and an item held back renders a new card once it is settled.\n\n'
-  _card_final_reply_line "$CF_OPTS"; printf '\n'
-}
-
-_card_final_record() {  # <the card text> -> writes the record beside the plan's others; prints nothing
-  local f n=2 i k=1
-  f="$CF_DIR/final-card-$CF_HEAD8.md"
-  while [ -f "$f" ] && /usr/bin/grep -q '^replied: ' "$f" 2>/dev/null; do
-    f="$CF_DIR/final-card-$CF_HEAD8-$n.md"; n=$((n + 1))
-  done
-  mkdir -p "$CF_DIR" 2>/dev/null || return 0
-  [ ! -L "$f" ] || return 0
-  {
-    printf '%s\n\n## Replay\n\n' "$1"
-    printf 'final-card/v1|plan=%s|head=%s|at=%s|options=%s\n' "$CF_PLAN" "$CF_HEAD" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CF_OPTS"
-    for ((i = 0; i < CF_N; i++)); do
-      [ -z "${CF_SET[$i]}" ] || continue
-      k=$((k + 1))
-      printf 'final-card/v1|opt=%s|key=%s|default=%s|override=%s|why=%s\n' "$k" "${CF_KEY[$i]}" "${CF_DO[$i]}" "${CF_ELSE[$i]}" "${CF_WHY[$i]}"
-    done
-  } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
-  rm -f "$f.new.$$" 2>/dev/null
-  return 0
-}
-
-_card_final() {  # -> the card printed and, when it offers an option, recorded
-  local card
-  _card_final_items
-  _card_final_count
-  card="$(_card_final_render)"
-  printf '%s\n' "$card"
-  [ "$CF_OPTS" -le 1 ] || _card_final_record "$card"
-  return 0
 }
 
 # ── THE COMMAND LINE ─────────────────────────────────────────────────────────
@@ -2549,15 +2283,14 @@ case "$1" in
     [ "$#" -eq 2 ] || _card_usage "inherited-debt takes exactly one requirements file path (got $(( $# - 1 )))"
     _card_inherited "$2" | awk -F '\t' '$1 == "open" && index($2, "debt: ") == 1 { print substr($0, 6) }'
     exit 0 ;;
-  final|early)
-    # THE FINAL CARD (wave-38 T3; D19, D20): `final <plan>` renders it, `early <plan>` asks only whether it may.
+  early)
+    # Whether the review results page may render: the three facts, and what a red check owes that the page settles.
     [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one plan path (got $(( $# - 1 )))"
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
-    _card_final_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
-    _card_final_ctx "$2" || { printf 'card.sh: %s: %s\n' "$1" "$CF_ERR" >&2; exit 1; }
+    _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
+    _card_early_ctx "$2" || { printf 'card.sh: %s: %s\n' "$1" "$CF_ERR" >&2; exit 1; }
     if ! _card_early; then printf 'CARD-EARLY — %s\n' "$CARD_EARLY_WHY" >&2; exit 1; fi
-    [ "$1" = early ] && exit 0
-    _card_final
+    printf '%s' "$CF_SETTLE" | awk 'NF && !seen[$0]++ { print "settles: " $0 }'
     exit 0 ;;
   step0|step1|step2|step3)
     if [ "$1" = step2 ]; then
