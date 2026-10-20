@@ -429,10 +429,6 @@ ll_launch "$RR6b" T1 'none docs only'
 ll_verb "$RR6b" T1
 expect_eq "(r6d3) …while the same tree, lands_on=none <why> (a declared waiver) publishes with no run (the one parser, the key's meaning)" "0 none 0" \
   "$LL_RC $(ll_field "$(ll_ev "$RR6b" ready)" suites) $(ll_ev "$RR6b" verdict | awk 'END { print NR }')"
-ll_launch "$RR3" T1 none
-ll_verb "$RR3" T1
-expect_eq "(r7) lands_on=none: the candidate publishes with no run" "0 none 0" \
-  "$LL_RC $(ll_field "$(ll_ev "$RR3" ready)" suites) $(ll_ev "$RR3" verdict | awk 'END { print NR }')"
 
 # THE ROW THE WALL READS (wave-28 T64; D26, REQ-7 AC-7.2, REQ-2 AC-2.11). `ready` takes a row's suites from the
 # roster row the walls read for its agent (`roster_row_for_id`: the latest row carrying the agent's id, the
@@ -843,6 +839,10 @@ LL_MUTANT='s/exit 1/exit 0/' LL_MUTANT_FN=_line_time_for ll_drive "$RN2" T1 "$WO
 ll_wait_file "$WORLD_ROOT/n-T1.out.rc" 300
 expect_eq "(n3m) MUTANT the time check removed: the suite starts past its time (the rows can fail)" "0 green" \
   "$(cat "$WORLD_ROOT/n-T1.out.rc" 2>/dev/null) $(ll_field "$(ll_ev "$RN2" verdict)" result)"
+
+section "§TOO-LONG: a Lands-on command is held to the suite bar as a suite is"
+RL="$(ll_world)"; ll_launch "$RL" T1 '`bash%20c.test.sh`'; ( cd "$RL" && world_cost "bash c.test.sh" 700 ); ll_verb "$RL" T1
+expect_eq "(tl1) a command promising 700 s: refused, exit 1, nothing entered the line" "1 too-long 0" "$LL_RC $(printf '%s\n' "$LL_OUT" | awk '/^too-long /{ print $1 }') $(ll_ev "$RL" ready | awk 'END { print NR }')"
 
 # ---------------------------------------------------------------------------
 section "§GUARD (ready half): a row that commits .bionic is refused before any landing tree (AC-14.1)"
