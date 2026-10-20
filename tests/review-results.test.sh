@@ -27,7 +27,7 @@
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
 # every proof line in its production writer's shape (`proof_line`, `proof_floor_line`), and five reading records in
 # the readers' grammar, one carrying an S3 finding. The release row T2 and the build row T1 are landed; the
-# integrate row T3 reads `approval:release, approval:merge, head`. The unproved row AC-1.2 is `pending` with the
+# integrate row T3 reads `approval:release, approval:merge, head`. The second matrix row, unproved, is `pending` with the
 # auditor's CONFIRMED. The user's words stand in a transcript where the CLI writes one, under a CLAUDE_CONFIG_DIR
 # of this suite's own, with the session's load record beside the root (lib/said.sh's two witnesses).
 #
