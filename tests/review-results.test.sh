@@ -556,7 +556,7 @@ fc_page --preview
 expect_contains "JUDGE-0 precondition: the Tests section renders a regression line" "regression — " "$(fc_under Tests)"
 expect_contains "JUDGE-1 a red the whole run left and a later landing greened: the page reads covered" "covered" \
   "$(fc_under Tests | /usr/bin/grep 'regression')"
-expect_absent "JUDGE-1b …and counts no suite red" "red" "$(fc_under Tests | /usr/bin/grep 'regression')"
+expect_eq "JUDGE-1b …and the word red is not on the line" "0" "$(fc_under Tests | /usr/bin/grep 'regression' | /usr/bin/grep -cw 'red')"
 printf 'line/v1|ev=verdict|row=T6|commit=%s|suite=a.test.sh|result=red|log=/fixture/T6.log|at=2026-10-12T14:10:00Z\n' "$FC_F6" \
   >> "$FC_REC/landing-proofs.log"
 fc_page --preview
