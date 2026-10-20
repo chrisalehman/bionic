@@ -73,7 +73,7 @@ rt_poke() {  # <args...> -> OUT, RC: the poker in the world, as the bound sessio
 }
 rt_run() {  # [nokey] -> OUT, RC: the world's runner on its one suite; nokey drops the session key
   if [ "${1:-}" = nokey ]; then
-    OUT="$(cd "$W" && env "${RT_ENV[@]}" -u CLAUDE_CODE_SESSION_ID bash tests/run.sh --only x.test.sh 2>&1)"; RC=$?
+    OUT="$(cd "$W" && env -u CLAUDE_CODE_SESSION_ID "${RT_ENV[@]}" bash tests/run.sh --only x.test.sh 2>&1)"; RC=$?
   else
     OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" bash tests/run.sh --only x.test.sh 2>&1)"; RC=$?
   fi
