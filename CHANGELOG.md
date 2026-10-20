@@ -249,7 +249,7 @@ made past it: under D19 a head past it is proved by its landings' own green verd
 - a decision a row waits on is owed twice, as the tick's approve:D<n> and the page's decide:D<n>, so You owe counts
   two for one reply (`critic-adversarial-3.md#2`).
 - The plan validator has no check showing it refuses out-of-order rows; the rule holds, the check is written back next
-  wave (`auditor-evidence-2.md#2`; AC-7.1 waived at D20).
+  wave. AC-7.1 is waived at D20 (`auditor-evidence-2.md#2`).
 - proof-add's refusal past the whole run still offers to run the whole at the head, the second whole run D16 and D19
   rule out (`auditor-evidence-2.md`, finding 1). AC-5.1 is waived and the fix carried to the next wave (D20).
 - ADR-064 still says the comment lint runs at the landing line. The lint now runs at both landing doors, one function
