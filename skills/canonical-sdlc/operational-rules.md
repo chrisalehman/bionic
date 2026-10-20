@@ -177,7 +177,7 @@ SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-s
 
 ## Debt ledger
 
-Debt is paid by the next change that touches it, not by a user, so it is kept as a ledger and burned when touched. Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
+Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
 
 **The file.** `<docs-root>/record/<run>/debt.md`, under the header:
 
@@ -187,7 +187,7 @@ concept | kind | sites | raised-by <record> | touches N | burned <row> | —
 
 one line per item, its last cell `—` while open and `burned <row>` once a row has burned it.
 
-**Burn when touched.** A debt finding's disposition is burn-when-touched, never fix now and never note. The orchestrator records it at the Step-6 disposition, and the next row whose `Files:` touch the item's concept burns it inside its own work, or says why not.
+**Burn when touched.** The orchestrator records it at the Step-6 disposition, and the next row whose `Files:` touch the item's concept burns it inside its own work, or says why not.
 
 **The touch counter.** A brief whose `Files:` cover one of an item's sites adds one to its `touches`, and the dispatch wall prints `debt: <concept> <kind> touches <N> — burn it in this row or say why not`; the highest count burns first. `ready` prints `debt: burned <N>, touched <M>` and close-out `debt: touched N · burned M`, never the ledger's length.
 

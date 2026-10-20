@@ -601,4 +601,21 @@ sed 's/^model: haiku$/model: sonnet/' "$_ru_f" > "$_ru_neg"
 expect_eq "16f: a planted model: sonnet is read back as sonnet (not vacuous)" "sonnet" "$(rt_fm "$_ru_neg" model)"
 expect_true "16g: …and the 16a comparison goes red on it" test "$(rt_fm "$_ru_neg" model)" != "haiku"
 
+section "Section 17: §COMMENT-RULE — one block, read in every place a comment is written"
+# fails-when: a file that carries the comment rule reads it without the words "never names a
+# wave", or the block is hand-typed into one of them instead of rendered; or the reader cannot
+# tell a file that lacks the rule from one that has it.
+_cr_block="$REPO/agents-src/blocks/comment-rule.md"
+expect_contains "17a: the block states the reason and the invariant (the block was read)" "A comment states the reason and the invariant" "$(cat "$_cr_block" 2>/dev/null)"
+expect_contains "17b: …and names what a comment never carries" "never names a wave" "$(cat "$_cr_block" 2>/dev/null)"
+for _cr_f in agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/4.md payload/context/working-principles.md; do
+  expect_contains "17c: $_cr_f carries the rendered rule" "never names a wave" "$(cat "$REPO/$_cr_f" 2>/dev/null)"
+  expect_contains "17d: …between the block's own markers" "<!-- COMMENT-RULE-BEGIN -->" "$(cat "$REPO/$_cr_f" 2>/dev/null)"
+done
+# The grep a reader runs: the three files that carry the rule, and no other agent file.
+expect_eq "17e: grep -l prints the three files" "$(printf '%s\n' agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/4.md)" \
+  "$(cd "$REPO" && /usr/bin/grep -l 'never names a wave' agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/4.md)"
+# THE PAIRED NEGATIVE: a file without the rule is read as lacking it, so 17c cannot pass blind.
+expect_absent "17f: a role file that does not carry the rule does not match (not vacuous)" "never names a wave" "$(cat "$REPO/agents/auditor.md")"
+
 finish

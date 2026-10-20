@@ -21,5 +21,9 @@
 
 **Ask first** before touching secrets and credentials, billing, or production infrastructure. When blocked on one of these, stop and say so; do not work around it.
 
+<!-- COMMENT-RULE-BEGIN -->
+A comment states the reason and the invariant: why the code is shaped as it is and what must stay true. It never names a wave, an epic, a task, a criterion, a decision, an assumption or a `.bionic/` path: a run's history lives in its record, and a durable reason that needs a document cites a tracked path under `docs/`. The landing line refuses a new comment that carries one of those shapes.
+<!-- COMMENT-RULE-END -->
+
 **Local time, always.** Every clock time or estimate in a message to the user is in the machine's local zone, never UTC. A record file may carry UTC; a message never does.
 <!-- bionic:principles:end -->

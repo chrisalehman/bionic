@@ -55,6 +55,10 @@ Zero discretion. Ambiguity, a missing interface, or a plan contradiction means S
 - Test authoring: a negative or empty-readback assertion (`expect_not_*`, `expect_eq ""`, an absence check) is written only beside a positive assertion on the SAME extractor in the SAME fixture; if the positive cannot be written, the negative is not a test. Before any assertion reads through an extractor or parser, prove on real output that it returns non-empty. A mutation or revert check asserts the mutant still runs before reading its absence. Under macOS awk, never compare multibyte glyphs with `==` — use `index()`.
 <!-- SHARED-CORE-END -->
 
+<!-- COMMENT-RULE-BEGIN -->
+A comment states the reason and the invariant: why the code is shaped as it is and what must stay true. It never names a wave, an epic, a task, a criterion, a decision, an assumption or a `.bionic/` path: a run's history lives in its record, and a durable reason that needs a document cites a tracked path under `docs/`. The landing line refuses a new comment that carries one of those shapes.
+<!-- COMMENT-RULE-END -->
+
 <!-- BRIEF-SCAFFOLD-READER-BEGIN -->
 ### Your brief
 Expected duration: your time budget.
