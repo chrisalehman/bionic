@@ -72,7 +72,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 | declared debt | a brief's one `Lands-red: <name>.test.sh until <ext:slug\|approval:name>` with `Red-evidence: <path under record/>`, recorded by the dispatch wall alone (`amend` cannot add them). `land` accepts that one suite red, every other suite green, when the evidence holds `head: <40-hex>` naming the head landed, and appends `debt: id=… row=… suite=… token=…` to the landing record. It stays open until a regression or task proof shows the suite green after the red landing (and after the `approved:` line, for `approval:`); `current 8`, close-out, the integrate row and, from Step 6, the commit gate refuse while it is open |
 | debt ledger | `## Debt ledger` below |
 
-**The regression, once** (`steps/5.md` holds the rule). A second whole run needs the user's word, `session-poker.sh approve regression-2`: the dispatch wall reads a suite set holding `run.sh` as a whole run and refuses one at `regression: no`, while a row the regression waits on writes tracked files, on a proved head, or a second on this plan unless the row reads `approval:regression-2` and its `approved:` line exists.
+**The regression, once** (`steps/5.md` holds the rule). `session-poker.sh regression-run` refuses it at `regression: no`, beside an open build row, on a proved head, or at a head that has a whole run; a red is a fix row's, never a second run, and nothing waives it.
 
 **`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and `worktree_land_for_session` merges a landed tree into it. A plan naming none falls back to the main checkout's branch, announced inert.
 
