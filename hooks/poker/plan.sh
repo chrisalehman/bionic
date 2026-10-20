@@ -2828,21 +2828,29 @@ RR_AGAINST_EOF
     RR_GOALS="$(plan_goals_read "$PV_PLAN" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
 
-    # THE REGRESSION: the last whole run's proof line, and its log's verdict when the log is here to read.
+    # THE REGRESSION is the floor judge's answer at the head (`proof_state`), never the whole run's own
+    # red list, which a later green landing does not shorten.
     line="$(proof_last_line "$PV_PLAN" regression 2>/dev/null)"
     if [ -z "$line" ]; then
       RR_TREG="✖️ regression — no whole run on record"
     else
       h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" owed)"
-      if [ "$h" = "$RR_HEAD" ]; then nm="this head"; else nm="${h:0:8}"; fi
       ev="$(rr_proof_field "$line" evidence)"
       st="$(awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4 } END { if (p != "") print p, f }' "$(docs_root "$PV_REPO")/$ev" 2>/dev/null)"
-      if [ -n "$r" ]; then
-        RR_TREG="✖️ regression — whole run at $nm left $(rr_plural "$(printf '%s' "$r" | tr ',' '\n' | /usr/bin/grep -c .)" suite suites) red"
-      else
-        RR_TREG="✅ regression — whole run green at $nm"
-        [ -z "$st" ] || RR_TREG="$RR_TREG, ${st%% *} of $(( ${st%% *} + ${st##* } )) suites"
-      fi
+      jv="$(proof_state "$PV_PLAN" "$PV_REPO" 2>/dev/null | awk 'NR == 1')"
+      case "$jv" in
+        covered"	"*)
+          if [ "$h" = "$RR_HEAD" ]; then
+            RR_TREG="✅ regression — whole run green at this head"
+            [ -z "$st" ] || RR_TREG="$RR_TREG, ${st%% *} of $(( ${st%% *} + ${st##* } )) suites"
+          else
+            RR_TREG="✅ regression — covered at this head by the whole run at ${h:0:8} and the landings since"
+            [ -z "$r" ] || RR_TREG="$RR_TREG, which greened its $(rr_plural "$(printf '%s' "$r" | tr ',' '\n' | /usr/bin/grep -c .)" "failing suite" "failing suites")"
+          fi ;;
+        owed"	"*) RR_TREG="✖️ regression — still owed at this head: $(printf '%s' "${jv#owed	}" | sed 's/,/, /g')" ;;
+        uncovered"	"*) RR_TREG="✖️ regression — not covered at this head: ${jv#uncovered	}" ;;
+        *) RR_TREG="✖️ regression — not covered at this head" ;;
+      esac
     fi
 
     # THE REVIEWS: each question's newest reading, by the role the rigor deals it.

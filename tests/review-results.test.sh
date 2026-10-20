@@ -21,6 +21,7 @@
 # §AGREE     the decisions are exactly the owed items, the unproved rows and the findings recommended against
 # §REPLY     all default and all recommended replay into their verbs; anything else writes nothing
 # §BORN      two fix rows born of different questions render the page with no re-read
+# §JUDGE     the Tests line names the floor judge's answer: covered after a later green, the owed suite while none
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
@@ -534,6 +535,38 @@ expect_eq "BORN-3b …exit 1, nothing rendered, no page written" "1||" "$FC_RC|$
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/review-results-*.md
 fc_record structure structure piece
+
+# ============================================================
+section "§JUDGE: the Tests line names the floor judge's answer, not the whole run's red list"
+# ============================================================
+# fails-when: the page counts the suites a whole run left red after a later landing greened them, or says nothing
+# of a suite still owed; the page's line and the judge disagree at the head the user approves from.
+FC_F6="$(s57_commit "$RFC" lib/x.sh 'T6: the fix that greens a')"
+fc_published T6 "$FC_F6" > "$FC_REC/landing-proofs.log"
+fc_judge_plan() {  # <floor's owed suites> -> PFC: the whole run at C left <suites> red, T6 landed after it, born of the adversarial finding
+  fc_plan "$(fc_floor "$FC_C" "$1")
+$(fc_reads "$FC_C")
+- T6: landed $FC_F6 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/adversarial.md#1"
+  awk '{ print } /^\| T2 \|/ {
+    print "| T6 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+    "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+}
+fc_judge_plan a.test.sh
+fc_page --preview
+expect_contains "JUDGE-0 precondition: the Tests section renders a regression line" "regression — " "$(fc_under Tests)"
+expect_contains "JUDGE-1 a red the whole run left and a later landing greened: the page reads covered" "covered" \
+  "$(fc_under Tests | fc_flat)"
+expect_eq "JUDGE-1b …and the word red is not on the line" "0" "$(fc_under Tests | fc_flat | /usr/bin/grep -cw 'red')"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log"
+fc_plan "$(fc_floor "$FC_C" a.test.sh)
+$(fc_reads "$FC_C")"
+fc_page --preview
+expect_contains "JUDGE-2 the control: no landing greened it, the page names a.test.sh as still owed" "a.test.sh" \
+  "$(fc_under Tests | fc_flat)"
+expect_absent "JUDGE-2b …and does not read covered" "covered" "$(fc_under Tests | fc_flat)"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/review-results-*.md
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
