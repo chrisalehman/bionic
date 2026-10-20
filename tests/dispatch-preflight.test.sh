@@ -42,28 +42,6 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T44; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: arm, debt, fill-report, interval, interval-default,
-# landing-report, window. Each line below is that closure: the library (every run executes it), the arm of
-# each verb, the sections defining the globals they read, and each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn iso_epoch
-reads hooks/session-poker.sh fn iso_now
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn sched_facts_state
-reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
@@ -888,5 +866,37 @@ fi
 #
 # Every arm below holds the roster, the repo and the budget fixed and moves ONLY the
 # status in the answer, so nothing but the status can explain the verdict.
+
+section "§LANDS-ON — a brief's Lands-on is held within its Suites and nothing more"
+# A writer bound to a row names its Lands-on suites from its own Suites; no other suite that reads its
+# Files is asked of it. FIXTURES: make_repo's approved, bound plan with T23 in its Tasks table; the tree
+# holds payload/scripts/lib/widget.sh, run by widget.test.sh and grepped by reader.test.sh.
+lo_gate() {  # <repo tag> <Lands-on line> -> GATE_*, LO_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
+  printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"
+  printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
+  printf '#!/bin/bash\ngrep -c widget "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/reader.test.sh"
+  git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "suites that read the widget" >/dev/null 2>&1
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
+Your task: implement the widget behind the existing seam.
+$2
+Expected artifact: .bionic/docs/record/w99-widget.txt
+Exit condition: the artifact exists and the paired suite is green.
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99-widget.progress
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  LO_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+lo_gate lo1 'Lands-on: widget'
+expect_eq "LO-1 one suite on Lands-on, within Suites, is admitted though another suite reads the Files" \
+  "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$LO_ROW" lands_on)"
+expect_absent "LO-1b …and nothing asks for the other reader" "reader.test.sh" "$GATE_ERR"
+lo_gate lo2 'Lands-on: reader'
+expect_eq "LO-2 control: a Lands-on suite outside Suites is refused on the same tree" "deny" "$GATE_VERDICT"
+expect_contains "LO-2b …for being outside Suites" "is outside Suites:" "$GATE_ERR"
 
 finish
