@@ -1,37 +1,29 @@
 #!/bin/bash
-# Tests for `hooks/session-poker.sh handoff [path]` — the handoff file is the store (wave-38 T12;
-# REQ-3 AC-3.1, AC-3.2, AC-3.5; design-ledger Δ17 D23, Δ21 D4, D13).
+# Tests for `hooks/session-poker.sh handoff [<purpose>]` and `resume <file>`: the handoff document.
 #
-# THE VERB WRITES A FILE, AND THE PLAN CARRIES A POINTER. `handoff` writes record/<wave>/handoff.md
-# (or the [path] it is given, under the docs root): the kind line `bionic-handoff/v1`; the sitrep
-# head (the last recorded Bottom line with its time, and the one-line form, both the sitrep verb's
-# own lines); the machine lines (written, plan, branch, integration, step, open rows, last landed,
-# live writers with tree and current act, last proof, patrol); the five human lines from
-# --mid-flight --order --rulings --lessons --risks, carried from the previous file when a flag is
-# absent; the safe line (`safe to clear`, or `wait N minutes` while a landing's `ready` is in
-# flight); and last the literal next command `/bionic:canonical-sdlc <path>`. The plan's
-# `## Handoff` becomes the heading and one line `handoff: <path> written <local time>`. A delivered
-# plan gets the closed form `resume point: NONE — DELIVERED at …` instead of a refusal. adopt's
-# STALE note and launch-sync's HANDOFF-STALE judge the file's own written instant.
+# ONE DOCUMENT, WITH OR WITHOUT A RUN. `handoff` writes one self-contained file, <date>-<slug>.md in the
+# handoffs folder of the project's docs record, whether or not the session is bound to a run, and creates the
+# project's bionic folder with its ignore file (the literal `*`) when the project has none. The kind line, then
+# the title line, then ten sections in order: Summary (doing, learned, open, first), Goal, State, Findings,
+# Decisions, Ruled out, Open, Suggested skills, Next, Resume. State is computed: branch, head, uncommitted files,
+# running processes with their logs, live agents with their briefs and progress files, and, bound, the plan, step,
+# open tasks and Patrol. Every other section is composed by the session and read on the verb's stdin: a Finding
+# with no source gets `unverified`, a secret is redacted, a copied block is left out, and an empty section is one
+# line. There is no safe-to-clear line: the source session is disposable. Bound, the plan's `## Handoff` points at
+# the file and the last line is `/bionic:canonical-sdlc <path>`; with no run, it says to read the file and do Next 1.
 #
-# Sections: §WRITE §CARRY §POINTER §SAFE §CLOSED §READERS, and §RESUME (AC-3.3, wave-38 T13): the one door,
-# `session-poker.sh resume <handoff.md>`, which /bionic:canonical-sdlc <handoff.md> runs first.
-# §BRANCH-AGREE and §POINTER-AGREE (wave-39 T16; D18, AC-12.1): close-out and the verb read one integration branch
-# through lib/plan.sh and one pointer through lib/handoff.sh.
+# Sections: §NO-RUN §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §BRANCH-AGREE §POINTER-AGREE.
 #
-# FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`, as
-# session-poker-4 §HANDOFF builds it), one repository per world. The landing record and the sitrep
-# log are planted in the shapes their writers write (lib/line.sh's `line/v1` events, as
-# tests/sitrep.test.sh plants them; T10's `sitrep-log/v1` lines). A live landing is a real process
-# whose pid and start time are the `ready` event's carrier, the rule lib/slots.sh reads.
+# FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`), one
+# repository per world; a no-run world is a bare `git init` with no bionic folder at all. A running process is a
+# real process whose command line is the detached shim's (`booked.sh --run-log <log>`), the rule `run_live`
+# reads; a landing in flight is a real process carried by a `ready` event, the rule lib/slots.sh reads. The
+# composed sections are a file on the verb's stdin, as the handoff skill pipes them.
 #
-# THE CLOCK IS PINNED. Now is BIONIC_NOW_EPOCH, the poker's seam (sitrep_now), fixed below; the suite reads no
-# clock and waits on nothing, so the shell-lint census has no row for it. The verb's own `written:` instant is the
-# machine's clock, and session-poker-4 §HANDOFF HO-2b holds it to the clock around the run.
+# THE CLOCK IS PINNED. Now is BIONIC_NOW_EPOCH, the poker's seam (sitrep_now): the file's date, its title and its
+# `written:` instant all read it.
 #
-# ANTI-VACUITY. Every absence sits beside a positive read through the same extractor on the same
-# file: the shape extractor is proved non-empty by W2, the human-line extractor by C1, the safe
-# line by S1 before S2 reads its absence.
+# ANTI-VACUITY. Every absence sits beside a positive read through the same extractor on the same file.
 #
 # THE SEAM, for RED evidence against a mutated copy without touching the shipped file:
 #   HANDOFF_POKER_UNDER_TEST=/path/to/mutant.sh bash tests/handoff-file.test.sh
@@ -42,38 +34,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-# THE NARROWING (wave-39 T41; D6, AC-2.4, A-orch-22). The verbs of hooks/session-poker.sh this suite reaches,
-# directly or through the hooks and scripts it runs: adopt, arm, bind, deliver, fill-report, handoff,
-# interval, interval-default, landing-report, launch-sync, prompt, regression-runs, resume, sitrep, tick,
-# window. Each line below is that closure: the library (every run executes it), the section of each verb's
-# arm, the sections defining the globals they read, and each helper outside those.
-reads hooks/session-poker.sh section "the library"
-reads hooks/session-poker.sh section "whose run is this?"
-reads hooks/session-poker.sh section "the plan transaction"
-reads hooks/session-poker.sh section verbs
-reads hooks/session-poker.sh fn clean
-reads hooks/session-poker.sh fn clean_whole
-reads hooks/session-poker.sh fn epoch_iso
-reads hooks/session-poker.sh fn file_birth
-reads hooks/session-poker.sh fn file_mtime
-reads hooks/session-poker.sh fn hold_fingerprint
-reads hooks/session-poker.sh fn hold_reply_count
-reads hooks/session-poker.sh fn iso_epoch
-reads hooks/session-poker.sh fn iso_now
-reads hooks/session-poker.sh fn line_field
-reads hooks/session-poker.sh fn note
-reads hooks/session-poker.sh fn now_epoch
-reads hooks/session-poker.sh fn parse_seconds
-reads hooks/session-poker.sh fn patrol_stamp_file
-reads hooks/session-poker.sh fn poker_interval_seconds
-reads hooks/session-poker.sh fn roster_window
-reads hooks/session-poker.sh fn row_has_key
-reads hooks/session-poker.sh fn sched_budget_read
-reads hooks/session-poker.sh fn sched_facts_state
-reads hooks/session-poker.sh fn sched_live_head
-reads hooks/session-poker.sh fn session_transcript
-reads hooks/session-poker.sh fn suspect_lines
-reads hooks/session-poker.sh fn tmp_dir_ok
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -88,30 +48,37 @@ export TZ=America/Los_Angeles
 HF_PIDS=""
 trap 'for _p in $HF_PIDS; do kill "$_p" 2>/dev/null; done; cleanup' EXIT
 
-HF_NOW=1791324000     # 2026-10-06T22:00:00Z = 3:00 PM PDT, the pinned now
+HF_NOW=1791324000     # 2026-10-06T22:00:00Z = Tuesday 3:00 PM PDT, the pinned now
 export BIONIC_NOW_EPOCH="$HF_NOW"
-HF_DOOR=".bionic/docs/record/wave-01-fixture/handoff.md"
+HF_ISO="2026-10-06T22:00:00Z"
+HF_HOME=".bionic/docs/record/handoffs"
+HF_DOOR="$HF_HOME/2026-10-06-wave-01-fixture.md"
 HF_PLAN_REL=".bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
-HF_OPEN_SHAPE="bionic-handoff/v1,sitrep head,sitrep line,written,plan,branch,integration,step,open rows,last landed,live writers,last proof,patrol,mid-flight,order,rulings,lessons,risks,safe,door"
-HF_CLOSED_SHAPE="bionic-handoff/v1,resume point,written,plan,branch,patrol,continuation,mid-flight,order,rulings,lessons,risks,safe,door"
+HF_LEDGER_REL=".bionic/docs/record/wave-01-fixture/design-ledger.md"
+HF_HEADS="Summary,Goal,State,Findings,Decisions,Ruled out,Open,Suggested skills,Next,Resume"
 
 # ---------- extractors ----------
-hf_shape() {  # <file> -> the labels of its top-level lines, in order, comma-joined
-  awk '
-    NR == 1 { out = $0; next }
-    /^[ \t]/ || /^- / { next }
-    { l = $0
-      if (l ~ /^(safe to clear$|wait [0-9]+ minutes|STALE — )/) l = "safe"
-      else if (index(l, "/bionic:") == 1) l = "door"
-      else { sub(/:.*$/, "", l); sub(/ \(.*$/, "", l) }
-      out = out "," l }
-    END { print out }' "$1" 2>/dev/null
+HF_HEAD_AWK='BEGIN { n = split("Summary,Goal,State,Findings,Decisions,Ruled out,Open,Suggested skills,Next,Resume", h, ",")
+                     for (i = 1; i <= n; i++) H[h[i]] = 1 }'
+hf_heads() {  # <file> -> the section headings it holds, in order, comma-joined
+  awk "$HF_HEAD_AWK"' ($0 in H) { out = out (out == "" ? "" : ",") $0 } END { print out }' "$1" 2>/dev/null
 }
-hf_human() {  # <file> -> the five human lines with their continuation lines, verbatim
-  awk '/^(mid-flight|order|rulings|lessons|risks):/ { h = 1; print; next } h && /^[ \t]/ { print; next } { h = 0 }' "$1" 2>/dev/null
+hf_bare() {  # <file> -> how many headings stand over nothing (a blank line, another heading or the end next)
+  awk "$HF_HEAD_AWK"' { l[NR] = $0 } END { c = 0
+    for (i = 1; i <= NR; i++) if ((l[i] in H) && (i == NR || l[i + 1] == "" || (l[i + 1] in H))) c++
+    print c }' "$1" 2>/dev/null
 }
-hf_label() {  # <file> <label> -> that line, verbatim (the first)
-  awk -v k="$2: " 'index($0, k) == 1 { print; exit }' "$1" 2>/dev/null
+hf_unfold() {  # <file> -> its lines with every fold joined back: a line opening on spaces that is no `  - ` item continues the one above
+  awk 'NR > 1 && /^ / && !/^  - / { t = $0; sub(/^ +/, "", t); buf = buf " " t; next } { if (NR > 1) print buf; buf = $0 } END { if (NR) print buf }' "$1" 2>/dev/null
+}
+hf_sec() {  # <file> <heading> -> the lines under that heading, unfolded, up to the blank line that ends it
+  hf_unfold "$1" | awk -v h="$2" '$0 == h { f = 1; next } f && $0 == "" { exit } f { print }'
+}
+hf_label() {  # <file> <label> -> the first line that starts `<label>: `, unfolded
+  hf_unfold "$1" | awk -v k="$2: " 'index($0, k) == 1 { print; exit }'
+}
+hf_wide() {  # <file> -> how many of its lines are wider than 92 columns (a UTF-8 character is one)
+  LC_ALL=C awk '{ t = $0; n = gsub(/[\200-\277]/, "", t); if (length($0) - n > 92) c++ } END { print c + 0 }' "$1" 2>/dev/null
 }
 hf_section() {  # <plan> -> the lines of ## Handoff, the heading excluded
   awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next } h { print }' "$1"
@@ -119,7 +86,6 @@ hf_section() {  # <plan> -> the lines of ## Handoff, the heading excluded
 hf_outside() {  # <plan> -> every line outside ## Handoff
   awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/) } !h { print }' "$1"
 }
-hf_safe() { tail -2 "$1" 2>/dev/null | head -1; }   # <file> -> its safe line (the one before the door)
 hf_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 hf_ev() { mkdir -p "${HF_REC%/*}"; printf 'line/v1|%s\n' "$1" >> "$HF_REC"; }
 hf_live() {  # -> HF_CARRIER, a live process's `<pid>:<start>` (lib/slots.sh's rule); its pid in HF_PID
@@ -130,16 +96,76 @@ hf_live() {  # -> HF_CARRIER, a live process's `<pid>:<start>` (lib/slots.sh's r
   set -- $s
   HF_CARRIER="$HF_PID:$*"
 }
+hf_shim() {  # <repo> <run id> -> a live process the runs folder records as running, as the detached shim leaves it; HF_SHIM its pid
+  local d; d="$(cd "$1" && pwd -P)/.bionic/tmp/runs"
+  mkdir -p "$d"; : > "$d/$2.log"
+  ( exec -a "booked.sh --run-log $d/$2.log" sleep 600 ) &
+  HF_SHIM=$!; HF_PIDS="$HF_PIDS $HF_SHIM"
+  printf '%s\n' "$HF_SHIM" > "$d/$2.log.pid"
+}
+hf_poke() {  # <repo> <stdin file> <args...> -> OUT, RC: the poker with that file on its stdin; HF_NOKEY=1 drops the session key
+  local repo="$1" in="$2" p i=0; shift 2
+  if [ "${HF_NOKEY:-0}" = 1 ]; then
+    ( cd "$repo" && exec env -u CLAUDE_CODE_SESSION_ID "${POKE_BASH:-bash}" "$POKER" "$@" ) < "$in" > "$TMPROOT/hf-poke.out" 2>&1 &
+  else
+    ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" "${POKE_BASH:-bash}" "$POKER" "$@" ) < "$in" > "$TMPROOT/hf-poke.out" 2>&1 &
+  fi
+  p=$!
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt $(( POKE_BOUND * 10 )) ]; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$p" 2>/dev/null; then kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; RC=124
+  else wait "$p" 2>/dev/null; RC=$?; fi
+  OUT="$(cat "$TMPROOT/hf-poke.out")"
+}
 
-# ---------- the world ----------
+# ---------- the composed sections, as the skill pipes them ----------
+HF_LONG="The closed index is never cached, so a warm call still pays for the whole scan of the tree text and the declarations on every call, twelve seconds of it measured warm — time-keys-head.log"
+HF_C="$TMPROOT/hf-compose.md"
+cat > "$HF_C" <<COMPOSE
+Summary
+- Doing: finding out why the judge takes 52 s on a one-line change.
+- Learned: it derives the same closure three times per call.
+- Open: whether an incremental owed test is sound.
+- First: rerun the timing script against a cached closure.
+
+Goal
+- "Why does current 7 take 52 s on a one-line library change, and what would under 5 s take?" (Dana Fixture, 3:19 PM)
+
+State
+- typed by hand: this line is not computed
+
+Findings
+- The walk is _proof_walk — payload/scripts/lib/proof.sh:1248
+- Each key derivation runs the closed scan three times per cold call
+- $HF_LONG
+- Deriving once per commit saves about 22 s — unverified
+
+Decisions
+- Dana Fixture ruled "a reading, not a change" (2026-10-06 3:20 PM)
+
+Ruled out
+
+Open
+- hypothesis: caching the closed index per commit brings a warm call under 1 s. Not tried.
+
+Suggested skills
+- bionic:map-instrument-narrow, before instrumenting the judge
+
+Next
+- \`bash scratch/time-keys.sh\` after caching the closure
+- read judge-1.log beside it
+COMPOSE
+HF_EMPTY="$TMPROOT/hf-empty.md"; : > "$HF_EMPTY"
+
+# ---------- the bound world ----------
 #
-# hf_world <label> [roster yes|no] -> HF_R (repo), HF_P (plan), HF_F (the default handoff file),
-# HF_REC (its landing record), HF_INT/HF_WORK (the two heads). session-poker-4 §HANDOFF's plan: the
-# frontmatter branch keys over real branches, two landed lines, two proof lines, active rows T2 and
-# T3 and a pending T6 with a worktree, a Not Doing; with `roster yes`, w-T2's finished run.
+# hf_world <label> [roster yes|no] -> HF_R (repo), HF_P (plan), HF_F (the handoff file), HF_REC (its landing record),
+# HF_INT/HF_WORK (the two heads). The frontmatter branch keys over real branches, two landed lines, two proof lines,
+# active rows T2 and T3 and a pending T6 with a worktree, a Not Doing; the bionic folder excluded from git, as a
+# project ignores it; with `roster yes`, w-T2's finished run, its progress file named and its brief on disk.
 hf_world() {
   local label="$1" roster="${2:-yes}" rd
   HF_R="$(make_repo "hf-$label")"; ( cd "$HF_R" && git commit -q --allow-empty -m init )
+  printf '.bionic/\n' >> "$HF_R/.git/info/exclude"
   git -C "$HF_R" config user.name "Dana Fixture"
   git -C "$HF_R" branch -f trunk HEAD
   git -C "$HF_R" commit -q --allow-empty -m "work"
@@ -161,7 +187,10 @@ hf_world() {
   if [ "$roster" = yes ]; then
     rd="$HF_R/.bionic/tmp/runs"; mkdir -p "$rd"; : > "$rd/w-T2-x.test.sh.log"
     roster_row_fixture session="$SID" name=w-T2 agent_id=a-w-T2 subagent_type=implementor \
+      progress=.bionic/docs/record/wave-01-fixture/T2.progress.md \
       run_log="$rd/w-T2-x.test.sh.log" run_cmd='tests/run.sh --only x.test.sh' run_rc=0 >> "$(roster_of "$HF_R")"
+    mkdir -p "$HF_R/.bionic/docs/record/wave-01-fixture/briefs"
+    printf '# the brief for T2\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/briefs/T2.md"
   fi
   HF_F="$HF_R/$HF_DOOR"
   HF_REC="$HF_R/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
@@ -169,225 +198,325 @@ hf_world() {
 }
 
 # ============================================================
-section "§WRITE: handoff writes record/<wave>/handoff.md — kind line, sitrep head, machine lines, five human lines, safe line, the literal next command (AC-3.1; D23, D4, D13)"
+section "§NO-RUN: with no run bound, handoff writes the document under the handoffs folder, creating the bionic folder and its ignore file; it never refuses for want of a plan"
 # ============================================================
-hf_world write
-mkdir -p "$HF_R/.bionic/docs/record/wave-01-fixture"
-printf 'sitrep-log/v1|at=2026-10-08T21:00:00Z|item=an older item (line 9)\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/sitrep.log"
-printf 'sitrep-log/v1|at=2026-10-08T22:00:00Z|item=schedule holds at 1.2x (line 37)\n' >> "$HF_R/.bionic/docs/record/wave-01-fixture/sitrep.log"
-printf 'sitrep-log/v1|at=2026-10-08T22:00:00Z|item=hypothesis: the gate sets the close\n' >> "$HF_R/.bionic/docs/record/wave-01-fixture/sitrep.log"
-expect_false "W0 precondition: no handoff file before the first run" test -e "$HF_F"
-poke "$HF_R" sitrep --line
-HF_LINE="$OUT"
-expect_nonempty "W0b precondition: the sitrep verb's one-line form reads non-empty on this world" "$HF_LINE"
-poke "$HF_R" handoff --mid-flight 'T2 is in its ready loop' --order 'T2, then T6'
-expect_eq "W1 handoff exits 0" "0" "$RC"
-expect_true "W1b …and writes the default file record/<wave>/handoff.md" test -s "$HF_F"
-expect_eq "W2 every line in order: kind, sitrep head, machine lines, the five human lines, the safe line, the door" \
-  "$HF_OPEN_SHAPE" "$(hf_shape "$HF_F")"
-expect_eq "W3 line 1 is the kind line" "bionic-handoff/v1" "$(sed -n 1p "$HF_F")"
-expect_eq "W4 the sitrep head is the last recorded Bottom line with its time (the sitrep verb's own line)" \
-  "sitrep head: Bottom line (since 3:00 PM 2026-10-08)" "$(sed -n 2p "$HF_F")"
-expect_eq "W4b …its first item" "- schedule holds at 1.2x (line 37)" "$(sed -n 3p "$HF_F")"
-expect_eq "W4c …its second item" "- hypothesis: the gate sets the close" "$(sed -n 4p "$HF_F")"
-expect_absent "W4d …and not the older Bottom line (W4b read the same file)" "an older item" "$(cat "$HF_F")"
-expect_eq "W5 the sitrep line is byte-equal to sitrep --line (D13: one renderer)" "sitrep line: $HF_LINE" "$(sed -n 5p "$HF_F")"
-HF_W="$(hf_label "$HF_F" written)"; HF_AT="${HF_W#written: }"
-expect_regex "W6 written: is the ISO-UTC instant" '^written: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$HF_W"
-expect_eq "W7 plan: the bound plan, project-root-relative" "plan: $HF_PLAN_REL" "$(hf_label "$HF_F" plan)"
-expect_eq "W8 branch: the working branch and its head" "branch: wave/01-fixture @ $HF_WORK" "$(hf_label "$HF_F" branch)"
-expect_eq "W8b integration: the integration branch and its head" "integration: trunk @ $HF_INT" "$(hf_label "$HF_F" integration)"
-expect_eq "W9 step: the plan's current:" "step: 4" "$(hf_label "$HF_F" step)"
-expect_eq "W10 open rows: the count" "open rows (3):" "$(awk 'index($0, "open rows (") == 1 { print; exit }' "$HF_F")"
-expect_contains "W10b …the active row T2 with its agent, worktree and status" "  - T2 · w-T2 · 01-T2 · active" "$(cat "$HF_F")"
-expect_contains "W10c …a pending row with a worktree" "  - T6 · — · .worktrees/01-T6 · pending" "$(cat "$HF_F")"
-expect_absent "W10d …not a pending row with none (T5; W10b read the same file)" "  - T5 ·" "$(cat "$HF_F")"
-expect_eq "W11 last landed: by its time" "last landed: T4 2222222222222222222222222222222222222222 2026-10-08T10:30:00Z" "$(hf_label "$HF_F" 'last landed')"
-expect_regex "W12 live writers: the count, with how it was verified" '^live writers \(1\): ' "$(awk 'index($0, "live writers (") == 1 { print; exit }' "$HF_F")"
-expect_contains "W12b …each writer with its tree and current act (the roster's run line)" "  - w-T2 · 01-T2 · FINISHED rc=0 run=w-T2-x.test.sh" "$(cat "$HF_F")"
-expect_eq "W13 last proof: the newest" "last proof: kind=review head=$HF_WORK at=2026-10-08T12:30:00Z" "$(hf_label "$HF_F" 'last proof')"
-expect_eq "W14 patrol: not armed (no stamp for this session)" "patrol: not armed" "$(hf_label "$HF_F" patrol)"
-expect_eq "W15 mid-flight: the flag's text" "mid-flight: T2 is in its ready loop" "$(hf_label "$HF_F" mid-flight)"
-expect_eq "W15b order: the flag's text" "order: T2, then T6" "$(hf_label "$HF_F" order)"
-expect_eq "W15c rulings: no flag and no previous file — the stub" "rulings: (to fill)" "$(hf_label "$HF_F" rulings)"
-expect_eq "W15d lessons: the stub" "lessons: (to fill)" "$(hf_label "$HF_F" lessons)"
-expect_eq "W15e risks: the stub" "risks: (to fill)" "$(hf_label "$HF_F" risks)"
-expect_eq "W16 the safe line: no landing in flight" "safe to clear" "$(hf_safe "$HF_F")"
-expect_eq "W17 the last line is the literal next command naming the file (D4: one door)" \
-  "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
-expect_absent "W17b …no /bionic:resume anywhere in the file (W17 read the same file)" "/bionic:resume" "$(cat "$HF_F")"
-expect_contains "W18 it says what it wrote" "handoff — written to $(cd "${HF_F%/*}" && pwd -P)/handoff.md" "$OUT"
-# A missing line is a failure of W2: the shape extractor goes red on a planted file with one line cut.
-grep -v '^step: ' "$HF_F" > "$TMPROOT/hf-cut"
-expect_ne "W19 anti-vacuity: the shape extractor tells a file with the step line cut" "$HF_OPEN_SHAPE" "$(hf_shape "$TMPROOT/hf-cut")"
-HF_FIRST_FILE="$(cat "$HF_F")"
+HF_NR="$TMPROOT/hf-norun"; mkdir -p "$HF_NR"
+( cd "$HF_NR" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
+  && printf 'one\n' > a.txt && git add a.txt && git commit -qm "the first file" && printf 'two\n' >> a.txt && : > notes.txt )
+HF_NR_BR="$(git -C "$HF_NR" symbolic-ref --short HEAD)"
+HF_NR_F="$HF_NR/$HF_HOME/2026-10-06-$HF_NR_BR.md"
+expect_false "N0 precondition: the project has no bionic folder" test -e "$HF_NR/.bionic"
+HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C" handoff
+expect_eq "N1 handoff with no session key and no bionic folder exits 0" "0" "$RC"
+expect_absent "N1b …and refuses nothing" "REFUSED" "$OUT"
+expect_true "N1c …writing <date>-<branch>.md under the handoffs folder" test -s "$HF_NR_F"
+expect_eq "N2 the bionic folder it created carries the ignore file, the literal *" "*" "$(cat "$HF_NR/.bionic/.gitignore" 2>/dev/null)"
+expect_true "N2b …so git ignores the handoff" git -C "$HF_NR" check-ignore -q "$HF_NR_F"
+HF_NR_ST="$(git -C "$HF_NR" status --porcelain)"
+expect_contains "N2c precondition: git status lists the project's own change" "a.txt" "$HF_NR_ST"
+expect_absent "N2d …and nothing of the bionic folder (N2c read the same status)" ".bionic" "$HF_NR_ST"
+expect_contains "N3 it says what it wrote" "handoff — written to $(cd "$HF_NR" && pwd -P)/$HF_HOME/2026-10-06-$HF_NR_BR.md" "$OUT"
+expect_eq "N3b …the last line says how to resume with no run: read the file, then Next 1" \
+  "Read $HF_HOME/2026-10-06-$HF_NR_BR.md whole, then do Next 1." "$(tail -1 "$HF_NR_F")"
+rm -rf "$HF_NR/.bionic"
+hf_poke "$HF_NR" "$HF_C" handoff
+expect_eq "N4 with a session key the project never engaged: exits 0" "0" "$RC"
+expect_absent "N4b …and is not the NOT-ENGAGED no-op" "NOT-ENGAGED" "$OUT"
+expect_true "N4c …the file is written" test -s "$HF_NR_F"
+HF_EU="$(make_repo hf-engaged-unbound)"; ( cd "$HF_EU" && git commit -q --allow-empty -m init )
+HF_EU_F="$HF_EU/$HF_HOME/2026-10-06-$(git -C "$HF_EU" symbolic-ref --short HEAD).md"
+hf_poke "$HF_EU" "$HF_C" handoff
+expect_eq "N5 an engaged session bound to no run: exits 0" "0" "$RC"
+expect_absent "N5b …and is not refused for want of a plan" "REFUSED" "$OUT"
+expect_true "N5c …the file is written" test -s "$HF_EU_F"
+expect_true "N6 a bionic folder git does not ignore: the handoffs folder gets its own ignore file, so the file is ignored" \
+  git -C "$HF_EU" check-ignore -q "$HF_EU_F"
+expect_eq "N6b …the literal *" "*" "$(cat "$HF_EU/$HF_HOME/.gitignore" 2>/dev/null)"
 
 # ============================================================
-section "§CARRY: a second run with no flags carries the five human lines byte for byte; a flag replaces only its line (AC-3.1; D23)"
+section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; the page folds at 92 columns"
 # ============================================================
-HF_H1="$(hf_human "$HF_F")"
-expect_eq "C1 precondition: the human-line extractor reads five lines" "5" "$(printf '%s\n' "$HF_H1" | grep -c .)"
-sed 's/^written: .*/written: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
-poke "$HF_R" handoff
-expect_eq "C2 a second handoff with no flags exits 0" "0" "$RC"
-expect_eq "C2b …the five human lines carried byte for byte" "$HF_H1" "$(hf_human "$HF_F")"
-expect_eq "C2c …and the shape is the same" "$HF_OPEN_SHAPE" "$(hf_shape "$HF_F")"
-expect_ne "C2d …written: is refreshed (an older instant planted before the run is gone)" "written: 2026-01-01T00:00:00Z" "$(hf_label "$HF_F" written)"
-poke "$HF_R" handoff --risks 'the gate queue is long'
-expect_eq "C3 a flag on a later run exits 0" "0" "$RC"
-expect_eq "C3b …replaces its own line" "risks: the gate queue is long" "$(hf_label "$HF_F" risks)"
-expect_eq "C3c …and only its line: the other four are as they were" \
-  "$(printf '%s\n' "$HF_H1" | grep -v '^risks:')" "$(hf_human "$HF_F" | grep -v '^risks:')"
-poke "$HF_R" handoff --lessons $'brief renders at the head\nre-render after every landing'
-expect_eq "C4 a flag holding a line break exits 0" "0" "$RC"
-expect_eq "C4b …its first line on the label" "lessons: brief renders at the head" "$(hf_label "$HF_F" lessons)"
-expect_contains "C4c …its next line as an indented continuation" $'lessons: brief renders at the head\n  re-render after every landing' "$(cat "$HF_F")"
-HF_H2="$(hf_human "$HF_F")"
-poke "$HF_R" handoff
-expect_eq "C5 a run with no flags carries the continuation line too" "$HF_H2" "$(hf_human "$HF_F")"
-expect_eq "C5b …and the shape holds" "$HF_OPEN_SHAPE" "$(hf_shape "$HF_F")"
-cp "$HF_F" "$TMPROOT/hf-before"
-poke "$HF_R" handoff --risks
-expect_eq "C6 a flag with no value is the usage error" "2" "$RC"
-expect_true "C6b …and the file is untouched (cmp)" cmp -s "$TMPROOT/hf-before" "$HF_F"
-poke "$HF_R" handoff --whatever 'x'
-expect_eq "C7 an unknown flag is the usage error" "2" "$RC"
-expect_true "C7b …and the file is untouched (cmp)" cmp -s "$TMPROOT/hf-before" "$HF_F"
+expect_eq "S1 line 1 is the kind line" "bionic-handoff/v1" "$(sed -n 1p "$HF_NR_F")"
+expect_eq "S2 line 2 is the title: the project, the local day and time, no run" \
+  "Handoff · hf-norun · Tuesday 3:00 PM · no run bound" "$(sed -n 2p "$HF_NR_F")"
+expect_eq "S3 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_NR_F")"
+expect_eq "S4 no heading stands over nothing (S3 read every heading)" "0" "$(hf_bare "$HF_NR_F")"
+grep -v '^- none\.$' "$HF_NR_F" > "$TMPROOT/hf-cut"
+expect_ne "S4b anti-vacuity: the bare-heading count tells a file with the empty section's line cut" "0" "$(hf_bare "$TMPROOT/hf-cut")"
+expect_eq "S5 an empty Ruled out is one line" "- none." "$(hf_sec "$HF_NR_F" "Ruled out")"
+expect_eq "S6 Summary: the four lines, doing, learned, open, first" \
+  "- Doing: finding out why the judge takes 52 s on a one-line change.
+- Learned: it derives the same closure three times per call.
+- Open: whether an incremental owed test is sound.
+- First: rerun the timing script against a cached closure." "$(hf_sec "$HF_NR_F" Summary)"
+expect_eq "S7 Goal: the person's words, verbatim" \
+  '- "Why does current 7 take 52 s on a one-line library change, and what would under 5 s take?" (Dana Fixture, 3:19 PM)' \
+  "$(hf_sec "$HF_NR_F" Goal)"
+expect_eq "S8 Next: numbered, the first command verbatim" \
+  '1. `bash scratch/time-keys.sh` after caching the closure
+2. read judge-1.log beside it' "$(hf_sec "$HF_NR_F" Next)"
+expect_eq "S9 Resume is the last section and the last line" "Read $HF_HOME/2026-10-06-$HF_NR_BR.md whole, then do Next 1." \
+  "$(hf_sec "$HF_NR_F" Resume)"
+expect_contains "S10 precondition: the long finding's last words are in the file" "time-keys-head.log" "$(cat "$HF_NR_F")"
+expect_eq "S10b …and no line is wider than 92 columns" "0" "$(hf_wide "$HF_NR_F")"
+expect_eq "S10c anti-vacuity: the width count reads the composed line itself as too wide" "1" \
+  "$(printf -- '- %s\n' "$HF_LONG" > "$TMPROOT/hf-long"; hf_wide "$TMPROOT/hf-long")"
+expect_ne "S10d …its fold opens a line on two spaces, and the unfolded section joins it back (S10 read its last words)" "0" \
+  "$(awk '/^  [^ -]/' "$HF_NR_F" | grep -c . | tr -d ' ')"
+expect_contains "S10e …the long finding reads whole through the unfolding extractor" "- $HF_LONG" "$(hf_sec "$HF_NR_F" Findings)"
+expect_eq "S11 State is computed: its written: line is the instant" "written: $HF_ISO" "$(hf_label "$HF_NR_F" written)"
+expect_absent "S11b …and a composed State line is not in the file (S11 read the same file)" "not computed" "$(cat "$HF_NR_F")"
+expect_eq "S11c State: the branch" "branch: $HF_NR_BR" "$(hf_label "$HF_NR_F" branch)"
+expect_eq "S11d State: the head and its subject" "head: $(git -C "$HF_NR" rev-parse HEAD) the first file" "$(hf_label "$HF_NR_F" head)"
+expect_eq "S11e State: the uncommitted files by name" "uncommitted (2):
+  - a.txt · modified
+  - notes.txt · untracked" "$(hf_sec "$HF_NR_F" State | awk '/^uncommitted/ { f = 1 } f && /^[a-z]/ && !/^uncommitted/ { exit } f')"
+expect_eq "S11f State: nothing running" "running: none" "$(hf_label "$HF_NR_F" running)"
+expect_absent "S11g …and no plan line with no run (S11c read the same extractor)" "plan: " "$(hf_label "$HF_NR_F" plan)"
+hf_poke "$HF_NR" "$HF_EMPTY" handoff
+expect_eq "S12 a handoff with nothing composed exits 0" "0" "$RC"
+expect_eq "S12b …every section still stands, in order" "$HF_HEADS" "$(hf_heads "$HF_NR_F")"
+expect_eq "S12c …none of them bare" "0" "$(hf_bare "$HF_NR_F")"
+expect_eq "S12d …the Summary's four lines say they were not given" "- Doing: (not given)
+- Learned: (not given)
+- Open: (not given)
+- First: (not given)" "$(hf_sec "$HF_NR_F" Summary)"
+expect_contains "S12e …and it says what is missing" "nothing was composed" "$OUT"
 
 # ============================================================
-section "§POINTER: the plan's ## Handoff is the heading and one line handoff: <path> written <local time> (AC-3.1; D23)"
+section "§STATE: bound, every State fact is computed: the tree, what runs, the agents with their briefs and progress files, the plan, step, open tasks and Patrol; a Finding with no source says unverified"
+# ============================================================
+hf_world state
+( cd "$HF_R" && printf 'one\n' > tracked.txt && git add tracked.txt && git commit -qm "the tracked file" \
+  && printf 'two\n' >> tracked.txt && : > dirty.txt )
+mkdir -p "${HF_R}/${HF_LEDGER_REL%/*}"
+printf '# design ledger — wave-01-fixture\n\n## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds\n' > "$HF_R/$HF_LEDGER_REL"
+hf_shim "$HF_R" w-main-x.test.sh
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "T1 handoff on a bound run exits 0" "0" "$RC"
+expect_true "T1b …writing <date>-<the run's slug>.md under the handoffs folder" test -s "$HF_F"
+expect_eq "T1c the title names the run" "Handoff · hf-state · Tuesday 3:00 PM · wave-01-fixture" "$(sed -n 2p "$HF_F")"
+expect_eq "T1d the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_F")"
+expect_eq "T2 branch: the branch checked out" "branch: $(git -C "$HF_R" symbolic-ref --short HEAD)" "$(hf_label "$HF_F" branch)"
+expect_eq "T2b head: its commit and subject" "head: $(git -C "$HF_R" rev-parse HEAD) the tracked file" "$(hf_label "$HF_F" head)"
+expect_contains "T3 uncommitted: the modified file by name" "  - tracked.txt · modified" "$(hf_sec "$HF_F" State)"
+expect_contains "T3b …and the untracked one" "  - dirty.txt · untracked" "$(hf_sec "$HF_F" State)"
+expect_eq "T3c …counted" "uncommitted (2):" "$(hf_sec "$HF_F" State | grep '^uncommitted')"
+expect_contains "T4 running: the live run with its pid and its log" \
+  "  - w-main-x.test.sh · pid $HF_SHIM · log .bionic/tmp/runs/w-main-x.test.sh.log" "$(hf_sec "$HF_F" State)"
+expect_regex "T5 agents: counted, with how the count was verified" '^agents \(1\): ' "$(hf_sec "$HF_F" State | grep '^agents ')"
+expect_contains "T5b …each with its type, its run, its brief and its progress file" \
+  "  - w-T2 · implementor · FINISHED rc=0 run=w-T2-x.test.sh · brief .bionic/docs/record/wave-01-fixture/briefs/T2.md · progress .bionic/docs/record/wave-01-fixture/T2.progress.md" \
+  "$(hf_sec "$HF_F" State)"
+expect_eq "T6 plan: the bound plan, project-root-relative" "plan: $HF_PLAN_REL" "$(hf_label "$HF_F" plan)"
+expect_eq "T6b step: the plan's current:" "step: 4" "$(hf_label "$HF_F" step)"
+expect_eq "T6c working branch: the run's branch and its head" "working branch: wave/01-fixture @ $HF_WORK" "$(hf_label "$HF_F" 'working branch')"
+expect_eq "T6d integration: the integration branch and its head" "integration: trunk @ $HF_INT" "$(hf_label "$HF_F" integration)"
+expect_eq "T6e open tasks: the count" "open tasks (3):" "$(hf_sec "$HF_F" State | grep '^open tasks')"
+expect_contains "T6f …the active row with its agent, worktree and status" "  - T2 · w-T2 · 01-T2 · active" "$(hf_sec "$HF_F" State)"
+expect_contains "T6g …a pending row with a worktree" "  - T6 · — · .worktrees/01-T6 · pending" "$(hf_sec "$HF_F" State)"
+expect_absent "T6h …not a pending row with none (T6f read the same section)" "  - T5 ·" "$(hf_sec "$HF_F" State)"
+expect_eq "T6i patrol: not armed (no stamp for this session)" "patrol: not armed" "$(hf_label "$HF_F" patrol)"
+HF_FD="$(hf_sec "$HF_F" Findings)"
+expect_contains "T7 a Finding with its source keeps it" "- The walk is _proof_walk — payload/scripts/lib/proof.sh:1248" "$HF_FD"
+expect_contains "T7b a Finding with no source says unverified on its line" \
+  "- Each key derivation runs the closed scan three times per cold call — unverified" "$HF_FD"
+expect_contains "T7c a Finding already marked unverified is said once" "- Deriving once per commit saves about 22 s — unverified" "$HF_FD"
+expect_absent "T7d …never twice (T7c read the same section)" "unverified — unverified" "$HF_FD"
+expect_eq "T8 Decisions: the composed ruling, then the run's ledger by path" \
+  '- Dana Fixture ruled "a reading, not a change" (2026-10-06 3:20 PM)
+- every ruling of this run: '"$HF_LEDGER_REL" "$(hf_sec "$HF_F" Decisions)"
+expect_eq "T9 the last line is the door that resumes the run" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
+kill "$HF_SHIM" 2>/dev/null; wait "$HF_SHIM" 2>/dev/null
+# A landing in flight is a fact the next session acts on, never a wait: its ready carrier is a live process.
+hf_live
+hf_ev "ev=ready|row=T2|name=w-T2|commit=$HF_WORK|branch=wt/01-T2|tree=$(cd "$HF_R" && pwd -P)/01-T2|suites=a.test.sh|debt=-|carrier=$HF_CARRIER|at=$(hf_iso $((HF_NOW - 720)))"
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "T10 a landing in flight: handoff exits 0" "0" "$RC"
+expect_contains "T10b …running names the landing, its tree, when it went ready and its carrier" \
+  "  - T2 landing from 01-T2 · ready since 2:48 PM · pid $HF_PID" "$(hf_sec "$HF_F" State)"
+expect_eq "T10c …and the run that ended is no longer running (T4's extractor)" "running (1):" "$(hf_sec "$HF_F" State | grep '^running')"
+expect_absent "T10d …no wait line (T10b read the same file)" "wait " "$(grep -E '^wait [0-9]+ minutes' "$HF_F")"
+kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
+
+# ============================================================
+section "§PORTABLE: an argument tailors the document; secrets and addresses are redacted; a copied block is left out for its path; no safe-to-clear line exists"
+# ============================================================
+HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C" handoff 'measure the judge cold and warm'
+HF_PF="$HF_NR/$HF_HOME/2026-10-06-measure-the-judge-cold-and-warm.md"
+expect_eq "P1 handoff <purpose> exits 0" "0" "$RC"
+expect_true "P1b …the file is named for the purpose" test -s "$HF_PF"
+expect_eq "P1c …and the title says who it is for" "Handoff · hf-norun · Tuesday 3:00 PM · no run bound · for measure the judge cold and warm" \
+  "$(sed -n 2p "$HF_PF")"
+HF_TOK_GH="ghp_$(printf 'A%.0s' 1 2 3 4 5 6 7 8 9 10)0123456789abcdefghij"
+HF_TOK_AN="sk-ant-api03-$(printf 'Bx%.0s' 1 2 3 4 5 6 7 8 9 10 11 12)"
+HF_TOK_AWS="AKIA$(printf 'Q%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16)"
+HF_SPEC_LINE="One handoff shape from two sources, the machine facts plus the human lines."
+HF_C2="$TMPROOT/hf-compose-secrets.md"
+{ cat "$HF_C"
+  printf '\nFindings\n'
+  printf -- '- The key %s opened the API — payload/x.sh\n' "$HF_TOK_GH"
+  printf -- '- The model key was %s and the cloud key %s — unverified\n' "$HF_TOK_AN" "$HF_TOK_AWS"
+  printf -- '- The fixture logs in with password=hunter2hunter2 as dana@example.com — tests/x.sh\n'
+  printf -- '- The spec says how the shape is settled — .bionic/docs/specs/x.requirements.md\n'
+  printf '```text\nREQ-11 — A handoff for any session\n%s\n```\n' "$HF_SPEC_LINE"
+} > "$HF_C2"
+HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C2" handoff 'measure the judge cold and warm'
+HF_PALL="$(cat "$HF_PF")"
+expect_eq "P2 precondition: handoff exits 0" "0" "$RC"
+expect_contains "P2b a token is redacted where it stood" "- The key [redacted] opened the API — payload/x.sh" "$HF_PALL"
+expect_absent "P2c …its text is gone (P2b read the same file)" "$HF_TOK_GH" "$HF_PALL"
+expect_absent "P2d …the model key's too" "$HF_TOK_AN" "$HF_PALL"
+expect_absent "P2e …the cloud key's too" "$HF_TOK_AWS" "$HF_PALL"
+expect_absent "P2f …a password's" "hunter2hunter2" "$HF_PALL"
+expect_absent "P2g …and a mail address" "dana@example.com" "$HF_PALL"
+expect_contains "P2h …the address said as redacted" "[address redacted]" "$HF_PALL"
+expect_contains "P2i it says how many it redacted" "5 redacted" "$OUT"
+expect_contains "P3 a copied block is left out, the reader sent to its path" \
+  "- (a copied block of 2 lines was left out: name its file by path)" "$HF_PALL"
+expect_contains "P3b …the path given beside it stays" "- The spec says how the shape is settled — .bionic/docs/specs/x.requirements.md" "$HF_PALL"
+expect_absent "P3c …and the copied text is gone (P3 read the same file)" "$HF_SPEC_LINE" "$HF_PALL"
+expect_eq "P3d a second Findings block joins the first: one heading, in order" "$HF_HEADS" "$(hf_heads "$HF_PF")"
+expect_eq "P4 precondition: the last line is the Resume line" "Read $HF_HOME/2026-10-06-measure-the-judge-cold-and-warm.md whole, then do Next 1." \
+  "$(tail -1 "$HF_PF")"
+expect_absent "P4b no safe-to-clear line (P4 read the same file)" "safe to clear" "$HF_PALL"
+expect_absent "P4c …and no wait line" "minutes —" "$HF_PALL"
+HF_NFILES="$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
+HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C" handoff --mid-flight 'the old human line'
+expect_eq "P5 a retired human-line flag is refused, exit 2" "2" "$RC"
+expect_contains "P5b …naming the sections on stdin instead" "stdin" "$OUT"
+expect_eq "P5c …and nothing is written" "$HF_NFILES" "$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
+
+# ============================================================
+section "§POINTER: bound, the plan's ## Handoff is the heading and one line handoff: <path> written <local time>"
 # ============================================================
 HF_SEC="$(hf_section "$HF_P")"
-expect_eq "P1 the section holds exactly one non-blank line" "1" "$(printf '%s\n' "$HF_SEC" | grep -c .)"
-expect_regex "P1b …the pointer, in handoff_local_time's format" \
+expect_eq "PT1 the section holds exactly one non-blank line" "1" "$(printf '%s\n' "$HF_SEC" | grep -c .)"
+expect_regex "PT1b …the pointer to the handoffs file, in handoff_local_time's format" \
   "^handoff: $(printf '%s' "$HF_DOOR" | sed 's/\./\\./g') written [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} P[DS]T$" \
   "$(printf '%s\n' "$HF_SEC" | grep .)"
-expect_eq "P2 one ## Handoff heading in the plan" "1" "$(grep -c '^## Handoff' "$HF_P")"
-expect_eq "P2b …placed before ## Not Doing" "## Not Doing" "$(awk '/^## Handoff[ \t]*$/ { f = 1; next } f && /^## / { print; exit }' "$HF_P")"
-expect_absent "P2c …no machine line is left in the plan (P1b read the section)" "open rows" "$HF_SEC"
+expect_eq "PT2 one ## Handoff heading in the plan" "1" "$(grep -c '^## Handoff' "$HF_P")"
+expect_eq "PT2b …placed before ## Not Doing" "## Not Doing" "$(awk '/^## Handoff[ \t]*$/ { f = 1; next } f && /^## / { print; exit }' "$HF_P")"
 s34_gate "$HF_R"
-expect_eq "P3 the plan with the pointer is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "PT3 the plan with the pointer is admitted by the real gate" "0" "$GATE_RC"
 s42_snap "$HF_R" "$HF_P"
-poke "$HF_R" handoff .bionic/docs/record/wave-01-fixture/alt-handoff.md
-expect_eq "P4 handoff <path> exits 0" "0" "$RC"
-expect_true "P4b …writes the file at that path" test -s "$HF_R/.bionic/docs/record/wave-01-fixture/alt-handoff.md"
-expect_eq "P4c …whose last line names it" "/bionic:canonical-sdlc .bionic/docs/record/wave-01-fixture/alt-handoff.md" \
-  "$(tail -1 "$HF_R/.bionic/docs/record/wave-01-fixture/alt-handoff.md")"
-expect_contains "P4d …and the pointer names it" "handoff: .bionic/docs/record/wave-01-fixture/alt-handoff.md written " "$(hf_section "$HF_P")"
-expect_eq "P4e …the rest of the plan is as it was" "$(hf_outside "$TMPROOT/s42-before")" "$(hf_outside "$HF_P")"
-expect_eq "P4f …and the human lines carried from the file the pointer named" "$HF_H2" \
-  "$(hf_human "$HF_R/.bionic/docs/record/wave-01-fixture/alt-handoff.md")"
-s42_snap "$HF_R" "$HF_P"
-poke "$HF_R" handoff notes/elsewhere.md
-expect_eq "P5 a path outside the docs root is refused" "2" "$RC"
-expect_true "P5b …the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$HF_P"
-expect_false "P5c …and nothing is written there" test -e "$HF_R/notes/elsewhere.md"
-poke "$HF_R" handoff "$HF_DOOR" "$HF_DOOR"
-expect_eq "P6 two paths is the usage error" "2" "$RC"
+hf_poke "$HF_R" "$HF_C" handoff 'the next session reviews T2'
+expect_eq "PT4 a bound handoff with a purpose exits 0" "0" "$RC"
+expect_eq "PT4b …the same run's file, the purpose in its title" \
+  "Handoff · hf-state · Tuesday 3:00 PM · wave-01-fixture · for the next session reviews T2" "$(sed -n 2p "$HF_F")"
+expect_eq "PT4c …and still one pointer line" "1" "$(hf_section "$HF_P" | grep -c .)"
+expect_eq "PT4d …the rest of the plan is as it was" "$(hf_outside "$TMPROOT/s42-before")" "$(hf_outside "$HF_P")"
 
 # ============================================================
-section "§SAFE: a ready in flight prints wait N minutes from the landing's remaining measured time; none prints safe to clear (AC-3.2; D23)"
+section "§CLOSED: handoff on a delivered or parked plan writes the same document, its State saying where the run closed; the pointer stays"
 # ============================================================
-# The record: T1 and T4 landed through the queue in 20 and 40 minutes (landing-report's median 30.0m).
-hf_world safe
-hf_ev "ev=ready|row=T1|name=w-T1|commit=$HF_WORK|branch=wt/01-T1|tree=$HF_R/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-08T10:00:00Z"
-hf_ev "ev=published|row=T1|commit=$HF_WORK|kind=queue|by=-|why=-|at=2026-10-08T10:20:00Z"
-hf_ev "ev=ready|row=T4|name=w-T4|commit=$HF_WORK|branch=wt/01-T4|tree=$HF_R/.worktrees/01-T4|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-08T11:00:00Z"
-hf_ev "ev=published|row=T4|commit=$HF_WORK|kind=queue|by=-|why=-|at=2026-10-08T11:40:00Z"
-cp "$HF_REC" "$TMPROOT/hf-rec-base"
-hf_live
-hf_ev "ev=ready|row=T2|name=w-T2|commit=$HF_WORK|branch=wt/01-T2|tree=$HF_R/01-T2|suites=a.test.sh|debt=-|carrier=$HF_CARRIER|at=$(hf_iso $((HF_NOW - 720)))"
-poke "$HF_R" handoff
-expect_eq "S1 a live ready, 12 minutes in, median 30.0m: handoff exits 0" "0" "$RC"
-expect_regex "S1b …the safe line is wait 18 minutes (30 measured − 12 elapsed)" '^wait 18 minutes' "$(hf_safe "$HF_F")"
-expect_contains "S1c …naming the landing row" "T2" "$(hf_safe "$HF_F")"
-expect_absent "S2 …and never safe while it runs (S1b read the same line)" "safe to clear" "$(hf_safe "$HF_F")"
-expect_eq "S2b …the shape holds with the wait form" "$HF_OPEN_SHAPE" "$(hf_shape "$HF_F")"
-kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
-poke "$HF_R" handoff
-expect_eq "S3 the ready's carrier is gone: safe to clear" "safe to clear" "$(hf_safe "$HF_F")"
-# A live carrier whose entry has published is no landing in flight.
-cp "$TMPROOT/hf-rec-base" "$HF_REC"; hf_live
-hf_ev "ev=ready|row=T2|name=w-T2|commit=$HF_WORK|branch=wt/01-T2|tree=$HF_R/01-T2|suites=a.test.sh|debt=-|carrier=$HF_CARRIER|at=$(hf_iso $((HF_NOW - 720)))"
-hf_ev "ev=published|row=T2|commit=$HF_WORK|kind=queue|by=-|why=-|at=$(hf_iso $((HF_NOW - 60)))"
-poke "$HF_R" handoff
-expect_eq "S4 a live carrier whose entry published: safe to clear" "safe to clear" "$(hf_safe "$HF_F")"
-# The floor: a landing past its measured time still says wait, 1 minute.
-cp "$TMPROOT/hf-rec-base" "$HF_REC"
-hf_ev "ev=ready|row=T2|name=w-T2|commit=$HF_WORK|branch=wt/01-T2|tree=$HF_R/01-T2|suites=a.test.sh|debt=-|carrier=$HF_CARRIER|at=$(hf_iso $((HF_NOW - 7200)))"
-poke "$HF_R" handoff
-expect_regex "S5 a landing 120 minutes in against a 30.0m median: floor 1 minute" '^wait 1 minutes' "$(hf_safe "$HF_F")"
-# The ceiling: the row's declared size (30) bounds a longer measured median (landings of 80 and 120 minutes).
-{ printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=/x|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-08T10:00:00Z\n' "$HF_WORK"
-  printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-08T11:20:00Z\n' "$HF_WORK"
-  printf 'line/v1|ev=ready|row=T4|name=w-T4|commit=%s|branch=wt/01-T4|tree=/x|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-08T12:00:00Z\n' "$HF_WORK"
-  printf 'line/v1|ev=published|row=T4|commit=%s|kind=queue|by=-|why=-|at=2026-10-08T14:00:00Z\n' "$HF_WORK"
-  printf 'line/v1|ev=ready|row=T2|name=w-T2|commit=%s|branch=wt/01-T2|tree=%s/01-T2|suites=a.test.sh|debt=-|carrier=%s|at=%s\n' "$HF_WORK" "$HF_R" "$HF_CARRIER" "$(hf_iso $((HF_NOW - 720)))"
-} > "$HF_REC"
-poke "$HF_R" handoff
-expect_regex "S6 a 100.0m median, 12 minutes in, a 30-minute row: the declared size caps it" '^wait 30 minutes' "$(hf_safe "$HF_F")"
-kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
-
-# ============================================================
-section "§CLOSED: handoff on a delivered plan writes the closed form instead of refusing; the pointer stays in the plan (AC-3.5; D23)"
-# ============================================================
+hf_close() {  # <step-9 line> -> the plan at current: 9 with that line, snapped
+  HF_S9="$1" awk '
+    /^current: 4$/ { print "current: 9"; next }
+    /^- T1: landed at record\/T1.md$/ { print ENVIRON["HF_S9"]; print; next }
+    { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
+  s42_snap "$HF_R" "$HF_P"
+}
 hf_world closed
-poke "$HF_R" handoff --rulings 'D1 ruled "1"'
-expect_eq "D0 precondition: the open handoff carries a rulings line" 'rulings: D1 ruled "1"' "$(hf_label "$HF_F" rulings)"
-awk '
-  /^current: 4$/ { print "current: 9"; next }
-  /^- T1: landed at record\/T1.md$/ { print "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"; print; next }
-  { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
 poke "$HF_R" handoff
+expect_eq "D0 precondition: the open handoff is written" "0" "$RC"
+hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
+hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "D1 handoff on a delivered plan exits 0" "0" "$RC"
 expect_absent "D1b …and does not refuse" "REFUSED" "$OUT"
-expect_contains "D1c …saying it wrote the closed form" "closed form" "$OUT"
-expect_eq "D2 line 1 is the kind line" "bionic-handoff/v1" "$(sed -n 1p "$HF_F")"
-expect_eq "D2b line 2 is the closed form" \
-  "resume point: NONE — DELIVERED at 2026-10-08T13:00Z; trunk @ $(git -C "$HF_R" rev-parse --short trunk)." "$(sed -n 2p "$HF_F")"
-expect_eq "D2c the closed file's lines in order" "$HF_CLOSED_SHAPE" "$(hf_shape "$HF_F")"
-expect_eq "D2d the human lines are kept" 'rulings: D1 ruled "1"' "$(hf_label "$HF_F" rulings)"
+expect_contains "D1c …saying the run is closed" "closed" "$OUT"
+expect_eq "D2 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_F")"
+expect_eq "D2b State says where the run closed" \
+  "resume point: NONE — DELIVERED at 2026-10-08T13:00Z; trunk @ $(git -C "$HF_R" rev-parse --short trunk)." "$(hf_label "$HF_F" 'resume point')"
+expect_eq "D2c …and where its continuation is" "continuation: record/wave-01-fixture/continuation.md" "$(hf_label "$HF_F" continuation)"
+expect_eq "D2d the composed sections are kept" "- Dana Fixture ruled \"a reading, not a change\" (2026-10-06 3:20 PM)" \
+  "$(hf_sec "$HF_F" Decisions | head -1)"
 expect_eq "D2e the last line is still the door" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
 expect_contains "D3 the plan keeps the pointer" "handoff: $HF_DOOR written " "$(hf_section "$HF_P")"
 expect_eq "D3b …and only the pointer" "1" "$(hf_section "$HF_P" | grep -c .)"
 
+# The closed lines are close-out.sh's: the verb prints what `close-out.sh <plan> closed-form` prints, a parked run's
+# `PARKED on` and its branch kept, a task-scale run's branch to be pulled, then merged once the integration branch
+# holds the work. fails-when: the verb reads a parked or pull-request plan's `delivered:` line as a merge.
+HF_WHY="The release waits on a hand test on the user's machine."
+hf_world closed-parked no
+poke "$HF_R" handoff
+HF_WS="$(git -C "$HF_R" rev-parse --short wave/01-fixture)"
+expect_eq "OW0 precondition: the working branch is not merged into trunk (a parked run's branch is kept)" "no" \
+  "$(git -C "$HF_R" merge-base --is-ancestor wave/01-fixture trunk && echo yes || echo no)"
+printf '\n## Wake Note\n\n%s\n' "$HF_WHY" >> "$HF_P"
+hf_close "- Step 9: delivered: parked on wave/01-fixture @ $HF_WS — $HF_WHY (2026-10-08T13:00Z wave-01-fixture); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at record/wave-01-fixture/continuation.md"
+poke "$HF_R" handoff
+expect_eq "OW1 handoff on a parked plan exits 0" "0" "$RC"
+expect_eq "OW1b …State says where the work is parked and why" \
+  "resume point: PARKED on wave/01-fixture @ $HF_WS — $HF_WHY" "$(hf_label "$HF_F" 'resume point')"
+expect_eq "OW1c …the working branch kept, not merged" \
+  "working branch: wave/01-fixture kept, not merged into trunk; its worktrees are kept." "$(hf_label "$HF_F" 'working branch')"
+expect_eq "OW1d …in the document's order" "$HF_HEADS" "$(hf_heads "$HF_F")"
+expect_absent "OW1e …never DELIVERED (OW1b read the same file)" "NONE — DELIVERED" "$(cat "$HF_F")"
+hf_resume_new_session() {  # -> this session engaged and unbound, with no stamp, armed marker or digest
+  engage "$HF_R"
+  rm -f "$(stamp_of "$HF_R")" "$(armed_of "$HF_R")" "$(digest_of "$HF_R")"
+}
+hf_marker_plans() { grep -c '^plan=' "$(marker_of "${1:-$HF_R}")" 2>/dev/null; }  # [<repo>] -> how many plan= lines the marker holds
+hf_resume_new_session
+poke "$HF_R" resume "$HF_DOOR"
+expect_eq "OW2 resume on the parked document exits 0" "0" "$RC"
+expect_contains "OW2b …and prints its resume point verbatim" "$(hf_label "$HF_F" 'resume point')" "$OUT"
+expect_contains "OW2c …saying the run is parked and its work is kept unmerged" "is parked: its work is kept on its branch, not merged" "$OUT"
+expect_absent "OW2d …and never that there is nothing to resume (OW2c read the same output)" "nothing to resume" "$OUT"
+expect_eq "OW2e …a closed run binds nothing" "0" "$(hf_marker_plans)"
+expect_false "OW2f …and arms nothing" test -e "$(stamp_of "$HF_R")"
+hf_world closed-pr no
+sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+poke "$HF_R" handoff
+hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
+poke "$HF_R" handoff
+expect_eq "OW3 handoff on a task-scale plan whose pull request is owed exits 0" "0" "$RC"
+expect_eq "OW3b …the delivered resume point" \
+  "resume point: NONE — DELIVERED at 2026-10-08T13:00Z; trunk @ $(git -C "$HF_R" rev-parse --short trunk)." "$(hf_label "$HF_F" 'resume point')"
+expect_eq "OW3c …the working branch to be pulled" "working branch: wave/01-fixture to be pulled into trunk." "$(hf_label "$HF_F" 'working branch')"
+git -C "$HF_R" branch -f trunk wave/01-fixture
+poke "$HF_R" handoff
+expect_eq "OW3d …and merged into, once trunk holds the work (the same extractor)" "working branch: wave/01-fixture merged into trunk." \
+  "$(hf_label "$HF_F" 'working branch')"
+HF_CO_OUT="$(cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" closed-form 2>&1)"
+expect_eq "OW4 close-out.sh closed-form prints the two lines the document carries: one writer" \
+  "$(hf_label "$HF_F" 'resume point')|$(hf_label "$HF_F" 'working branch' | sed 's/^working branch: /branch: /')" \
+  "$(printf '%s\n' "$HF_CO_OUT" | paste -sd'|' -)"
+hf_resume_new_session
+poke "$HF_R" resume "$HF_DOOR"
+expect_eq "RC1 resume on the delivered document exits 0" "0" "$RC"
+expect_contains "RC2 …and prints its resume point verbatim" "$(hf_label "$HF_F" 'resume point')" "$OUT"
+expect_contains "RC2b …saying nothing is resumed" "nothing to resume" "$OUT"
+expect_eq "RC3 …nothing is bound" "0" "$(hf_marker_plans)"
+expect_absent "RC3b …and no task list is offered" "task-list: " "$OUT"
+
 # ============================================================
-section "§READERS: adopt's STALE note and launch-sync's HANDOFF-STALE read the file's written instant; a wave-37 plan's in-place section reads as before (D23)"
+section "§READERS: adopt's STALE note reads the document's written instant through the pointer; launch-sync has no safe line to mark; a wave-37 plan's in-place section reads as before"
 # ============================================================
 hf_world readers no
 poke "$HF_R" handoff
 expect_eq "R0 precondition: the handoff is written" "0" "$RC"
-expect_eq "R0b …with no sitrep log, the head says so" "sitrep head: (none recorded)" "$(sed -n 2p "$HF_F")"
-# The file's instant is moved, so only a reader of the FILE can tell the dispatch from the handoff.
+expect_eq "R0b precondition: …its written: line is the instant adopt reads" "written: $HF_ISO" "$(hf_label "$HF_F" written)"
 sed 's/^written: .*/written: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 new_roster "$HF_R"
 add_row "$HF_R" name=w-after status=intended agent_id= plan="$HF_P" launched_at=2026-06-01T00:00:00Z
 poke "$HF_R" adopt --report-only
-expect_contains "R1 adopt judges the file's instant: a dispatch after it is STALE" \
+expect_contains "R1 adopt judges the document's instant: a dispatch after it is STALE" \
   "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es) of this plan since (w-after)" "$OUT"
 s42_snap "$HF_R" "$HF_P"
+cp "$HF_F" "$TMPROOT/hf-unmarked"
 poke "$HF_R" launch-sync
-expect_eq "R2 launch-sync exits 0 with a later dispatch to mark" "0" "$RC"
-expect_regex "R2b the file's safe line reads STALE, naming the dispatch" \
-  '^STALE — dispatched after this handoff was written: w-after at .*\(2026-06-01T00:00:00Z\)' "$(hf_safe "$HF_F")"
-expect_contains "R2c …and launch-sync says so, naming the file" "HANDOFF-STALE — $HF_DOOR" "$OUT"
-expect_true "R2d …the plan is byte-identical: the pointer stands (cmp)" cmp -s "$TMPROOT/s42-before" "$HF_P"
-expect_eq "R2e …the door is still the last line" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
-cp "$HF_F" "$TMPROOT/hf-marked"
-poke "$HF_R" launch-sync
-expect_true "R3 a second launch-sync with nothing new leaves the file byte-identical (cmp)" cmp -s "$TMPROOT/hf-marked" "$HF_F"
-poke "$HF_R" handoff
-expect_eq "R4 handoff written again clears the mark" "safe to clear" "$(hf_safe "$HF_F")"
+expect_eq "R2 launch-sync exits 0 with a later dispatch" "0" "$RC"
+expect_true "R2b …the document is byte-identical: it has no safe line to mark (cmp)" cmp -s "$TMPROOT/hf-unmarked" "$HF_F"
+expect_true "R2c …and the plan is byte-identical: the pointer stands (cmp)" cmp -s "$TMPROOT/s42-before" "$HF_P"
 sed 's/^written: .*/written: 2027-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 poke "$HF_R" adopt --report-only
-expect_contains "R5 a dispatch before the file's instant: adopt reads the handoff current" \
+expect_contains "R3 a dispatch before the document's instant: adopt reads the handoff current" \
   "handoff written 2027-01-01T00:00:00Z — current: no dispatch of this plan since" "$OUT"
-expect_absent "R5b …not STALE (R1 read STALE through the same verb)" "STALE" "$OUT"
-cp "$HF_F" "$TMPROOT/hf-current"
-poke "$HF_R" launch-sync
-expect_true "R5c …and launch-sync marks nothing (cmp)" cmp -s "$TMPROOT/hf-current" "$HF_F"
-# A wave-37 plan: the old in-place section, no pointer. Both readers judge its written: as before.
+expect_absent "R3b …not STALE (R1 read STALE through the same verb)" "STALE" "$OUT"
 awk '
   /^## Handoff[ \t]*$/ { print; print ""; print "written: 2026-01-01T00:00:00Z"; print "- safe to exit: yes"; print "- safe to /clear: yes"; print ""; h = 1; next }
   h && /^## / { h = 0 }
@@ -395,29 +524,21 @@ awk '
   { print }' "$HF_P" > "$HF_P.o" && mv "$HF_P.o" "$HF_P"
 s42_snap "$HF_R" "$HF_P"
 poke "$HF_R" adopt --report-only
-expect_contains "R6 a wave-37 in-place section: adopt still reads its written:" \
+expect_contains "R4 a wave-37 in-place section: adopt still reads its written:" \
   "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es) of this plan since (w-after)" "$OUT"
 poke "$HF_R" launch-sync
-expect_contains "R6b …and launch-sync marks the plan's safety line as before" \
+expect_contains "R4b …and launch-sync marks the plan's safety line as before" \
   "- safe to exit: no — STALE: dispatched after this handoff was written: w-after at " "$(hf_section "$HF_P")"
 
 # ============================================================
-section "§RESUME: /bionic:canonical-sdlc <handoff.md> runs session-poker.sh resume <handoff.md>: bind, arm, adopt, the task list, the recap, the step file, the patrol, the tick; no resume command ships (wave-38 T13; AC-3.3; D4, D24, D13)"
+section "§RESUME: /bionic:canonical-sdlc <file> runs session-poker.sh resume <file>: bind, arm (at a scale with a Patrol), adopt, the task list, the recap, the step file, the patrol, the tick; a no-run document binds nothing; no resume command ships"
 # ============================================================
-# The door is a verb the governing skill runs first when it is invoked with a handoff file's path; a /clear
-# leaves a new session that is engaged (the skill's invocation engages it) but unbound and unarmed. The verb
-# does every ritual step a script can do, in order, through the one implementation of each (bind, arm, adopt,
-# prompt, interval, tick are its own sub-verbs, run as the same session), and prints the two the model must:
-# the task list to create and the CronCreate. FIXTURE FIDELITY: §WRITE's world; the handoff written by the real
-# verb while bound; then the session made new — its marker emptied (engaged, unbound), its stamp, armed marker
-# and digest removed — beside a predecessor session's roster holding a planted open row of this plan and an open
-# owed item, the predecessor recorded on the plan as bind records it; the run's design ledger in the register's
-# grammar (D24). fails-when: a ritual step is skipped, out of order, or a resume command ships.
-hf_resume_new_session() {  # -> this session engaged and unbound, with no stamp, armed marker or digest
-  engage "$HF_R"
-  rm -f "$(stamp_of "$HF_R")" "$(armed_of "$HF_R")" "$(digest_of "$HF_R")"
-}
-hf_marker_plans() { grep -c '^plan=' "$(marker_of "$HF_R")" 2>/dev/null; }  # -> how many plan= lines the marker holds
+# The door is a verb the governing skill runs first when it is invoked with a handoff file's path; a /clear leaves a
+# new session that is engaged but unbound and unarmed. FIXTURE FIDELITY: §STATE's world; the document written by the
+# real verb while bound; then the session made new beside a predecessor session's roster holding a planted open row
+# of this plan and an open owed item, the predecessor recorded on the plan as bind records it; the run's design
+# ledger in the register's grammar. fails-when: a ritual step is skipped, out of order, a task-scale resume prints
+# the cron line, or a resume command ships.
 hf_first() {  # <text> <prefix>... -> the first line number of each prefix in <text>, space-joined ('-' when absent)
   local text="$1" p n out=""; shift
   for p in "$@"; do
@@ -428,7 +549,7 @@ hf_first() {  # <text> <prefix>... -> the first line number of each prefix in <t
 }
 hf_world resume no
 HF_PRED="5f0e2d1c-7a6b-4c3d-9e8f-0a1b2c3d4e5f"
-HF_LEDGER="$HF_R/.bionic/docs/record/wave-01-fixture/design-ledger.md"
+HF_LEDGER="$HF_R/$HF_LEDGER_REL"
 mkdir -p "${HF_LEDGER%/*}"
 cat > "$HF_LEDGER" <<'LEDGER'
 # design ledger — wave-01-fixture
@@ -437,10 +558,9 @@ cat > "$HF_LEDGER" <<'LEDGER'
 
 ## Δ1 — D2 ruled "Option 2" (Dana Fixture 2026-10-06): one door
 LEDGER
-poke "$HF_R" handoff --mid-flight 'T2 is in its ready loop'
-expect_eq "RS0 precondition: the handoff is written by the real verb while bound" "0" "$RC"
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "RS0 precondition: the document is written by the real verb while bound" "0" "$RC"
 expect_eq "RS0b precondition: …its last line is the door" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
-# The predecessor: it bound the plan, left an open writer row of this plan and an open owed item.
 awk -v s="$HF_PRED" '/^approved-by:/ { print; print "- session: " s " bound 2026-10-08T09:00:00Z by bind"; next } { print }' \
   "$HF_P" > "$HF_P.p" && mv "$HF_P.p" "$HF_P"
 HF_PRED_ROSTER="$(roster_of "$HF_R" "$HF_PRED")"
@@ -457,11 +577,11 @@ poke "$HF_R" prompt; HF_PROMPT="$OUT"
 expect_nonempty "RS0e precondition: the prompt verb prints this session's Patrol prompt" "$HF_PROMPT"
 poke "$HF_R" resume "$HF_DOOR"
 HF_RS="$OUT"
-expect_eq "RS1 resume <handoff.md> exits 0" "0" "$RC"
+expect_eq "RS1 resume <file> exits 0" "0" "$RC"
 expect_eq "RS2 it binds: the marker's plan= line names the plan the file names" "1" \
   "$(grep -c '^plan=.*/\.bionic/docs/plans/epic-99-fixture/wave-01-fixture\.plan\.md$' "$(marker_of "$HF_R")" 2>/dev/null)"
 expect_contains "RS2b …saying so (bind's own line)" "poker: bound " "$HF_RS"
-expect_true "RS3 it arms: the Patrol stamp exists" test -f "$(stamp_of "$HF_R")"
+expect_true "RS3 it arms at the wave scale: the Patrol stamp exists" test -f "$(stamp_of "$HF_R")"
 expect_contains "RS3b …saying so (arm's own line)" "poker: armed — " "$HF_RS"
 expect_contains "RS4 it adopts: the predecessor's planted row is listed" "|name=w-pred|" "$HF_RS"
 expect_contains "RS4b …and written onto this session's roster as an adoption" "|adopted_from=$HF_PRED|" \
@@ -482,15 +602,16 @@ task-list: 4/T2: the second build · in_progress
 task-list: 4/T3: the third build · in_progress
 task-list: 4/T6: the sixth build · pending
 task-list: 5/T5: the floor · pending" "$(printf '%s\n' "$HF_RS" | grep '^task-list: ')"
-expect_eq "RS6 the recap's settled set: every ruling of this run's design ledger, through the decisions parser (D24)" \
+expect_eq "RS6 the recap's settled set: every ruling of this run's design ledger, through the decisions parser" \
   'settled: D1 · "1" · Dana Fixture 2026-10-05 · the frame holds
 settled: D2 · "Option 2" · Dana Fixture 2026-10-06 · one door' "$(printf '%s\n' "$HF_RS" | grep '^settled: ')"
 expect_eq "RS7 open: the open decisions, read from every session the plan recorded" \
   "open: approve:release — approve release — reply with your words" "$(printf '%s\n' "$HF_RS" | grep '^open: ')"
 expect_eq "RS7b owned-by-user: what only the user can give" \
   "owned-by-user: approve:release — approve release — reply with your words" "$(printf '%s\n' "$HF_RS" | grep '^owned-by-user: ')"
-expect_eq "RS8 branch: the file's branch line, verbatim" "branch: wave/01-fixture @ $HF_WORK" "$(printf '%s\n' "$HF_RS" | grep '^branch: ')"
-expect_eq "RS8b plan: the file's plan line" "plan: $HF_PLAN_REL" "$(printf '%s\n' "$HF_RS" | grep '^plan: ')"
+expect_eq "RS8 working branch: the document's line, verbatim" "working branch: wave/01-fixture @ $HF_WORK" \
+  "$(printf '%s\n' "$HF_RS" | grep '^working branch: ')"
+expect_eq "RS8b plan: the document's plan line" "plan: $HF_PLAN_REL" "$(printf '%s\n' "$HF_RS" | grep '^plan: ')"
 expect_eq "RS8c tree: the checkout's physical path and the branch it has out" \
   "tree: $(cd "$HF_R" && pwd -P) (checked out: $(git -C "$HF_R" symbolic-ref --short HEAD))" "$(printf '%s\n' "$HF_RS" | grep '^tree: ')"
 HF_STEP_FILE="$(cd "$(dirname "$POKER")/.." && pwd -P)/skills/canonical-sdlc/steps/4.md"
@@ -504,46 +625,49 @@ expect_regex "RS10b patrol-interval: the interval, and the ritual's order (CronL
 expect_regex "RS11 it ticks: the tick's decision line, for this session" \
   "^poker-tick/v1\|at=[^|]*\|session=$SID\|decision=" "$(printf '%s\n' "$HF_RS" | grep '^poker-tick/v1|')"
 HF_ORDER="$(hf_first "$HF_RS" "poker: bound " "poker: armed" "poker: w-pred (" "task-list: " "settled: " "open: " "owned-by-user: " \
-  "branch: " "plan: " "tree: " "step-file: " "patrol-interval: " "patrol: " "poker-tick/v1|")"
+  "working branch: " "plan: " "tree: " "step-file: " "patrol-interval: " "patrol: " "poker-tick/v1|")"
 expect_eq "RS12 every step is present and in the ritual's order" "yes" \
   "$(printf '%s\n' "$HF_ORDER" | awk '{ ok = "yes"; for (i = 1; i <= NF; i++) { if ($i == "-" || (i > 1 && $i + 0 <= p)) ok = "no: field " i " of " $0; p = $i + 0 } print ok }')"
-expect_absent "RS13 a file that is not STALE prints no stale: line" "stale: " "$(printf '%s\n' "$HF_RS" | grep '^stale: ')"
-# The STALE reading: launch-sync's mark on the safe line is said, and the resume still runs (adopt is the truth).
-awk '{ l[NR] = $0 } END { for (i = 1; i <= NR; i++) print (i == NR - 1) ? "STALE — dispatched after this handoff was written: w-x at 2026-10-08 05:00 PDT (2026-10-08T12:00:00Z); rewrite it: session-poker.sh handoff" : l[i] }' \
-  "$HF_F" > "$HF_F.s" && mv "$HF_F.s" "$HF_F"
-hf_resume_new_session
-poke "$HF_R" resume "$HF_DOOR"
-expect_eq "RS14 a STALE file resumes, exit 0" "0" "$RC"
-expect_contains "RS14b …saying the file is stale, with its safe line verbatim (the RS13 extractor reads it here)" \
-  "stale: STALE — dispatched after this handoff was written: w-x" "$(printf '%s\n' "$OUT" | grep '^stale: ')"
-expect_contains "RS14c …and binding all the same" "poker: bound " "$OUT"
 
-# The closed form: a delivered run resumes nothing.
-hf_world resume-closed no
-poke "$HF_R" handoff --rulings 'D1 ruled "1"'
-awk '
-  /^current: 4$/ { print "current: 9"; next }
-  /^- T1: landed at record\/T1.md$/ { print "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"; print; next }
-  { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
-poke "$HF_R" handoff
-expect_contains "RC0 precondition: the file is the closed form" "resume point: NONE — DELIVERED at " "$(sed -n 2p "$HF_F")"
+# A task-scale run has no Patrol: resume binds and adopts, and arms nothing, and removes the stamp engagement left.
+hf_world resume-task no
+sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "RT0 precondition: the task-scale document is written" "0" "$RC"
 hf_resume_new_session
+poke "$HF_R" arm
+expect_true "RT0b precondition: the stamp an unbound engagement arms is there" test -f "$(stamp_of "$HF_R")"
 poke "$HF_R" resume "$HF_DOOR"
-expect_eq "RC1 resume on the closed form exits 0" "0" "$RC"
-expect_contains "RC2 …and prints the closed recap: line 2 verbatim" "$(sed -n 2p "$HF_F")" "$OUT"
-expect_contains "RC2b …saying nothing is resumed" "nothing to resume" "$OUT"
-expect_eq "RC3 …nothing is bound (the RS2 extractor reads 0 here)" "0" "$(hf_marker_plans)"
-expect_false "RC3b …nothing is armed" test -e "$(stamp_of "$HF_R")"
-expect_absent "RC3c …and no task list is offered (RS5 read the task-list lines through the same output)" "task-list: " "$OUT"
+expect_eq "RT1 resume on a task-scale run exits 0" "0" "$RC"
+expect_contains "RT1b …it binds" "poker: bound " "$OUT"
+expect_eq "RT2 precondition: the wave-scale resume printed the cron line (the RT2b extractor)" "1" \
+  "$(printf '%s\n' "$HF_RS" | grep -c 'CronCreate recurring')"
+expect_eq "RT2b …the task-scale resume prints none" "0" "$(printf '%s\n' "$OUT" | grep -c 'CronCreate recurring')"
+expect_eq "RT2c …nor a patrol: prompt line (RS10's extractor)" "" "$(printf '%s\n' "$OUT" | grep '^patrol: ')"
+expect_contains "RT3 …it says the run has no Patrol" "patrol-interval: none — a task-scale run has no Patrol" "$OUT"
+expect_false "RT3b …and the stamp is gone" test -e "$(stamp_of "$HF_R")"
+expect_absent "RT3c …nor does it arm (RS3b's line)" "poker: armed — " "$OUT"
+expect_eq "RT4 …and nothing ticks: no Patrol, no tick (RS11's extractor)" "" "$(printf '%s\n' "$OUT" | grep '^poker-tick/v1|')"
+
+# A no-run document: resume binds nothing and points at Next 1.
+poke "$HF_EU" resume "$HF_EU_F"
+expect_eq "RN1 resume on a no-run document exits 0" "0" "$RC"
+expect_contains "RN1b …saying there is no run to bind" "no run bound" "$OUT"
+expect_contains "RN1c …and printing Next" '1. `bash scratch/time-keys.sh` after caching the closure' "$OUT"
+expect_eq "RN1d …nothing is bound" "0" "$(hf_marker_plans "$HF_EU")"
+expect_absent "RN1e …and no task list is offered" "task-list: " "$OUT"
+
 # Refusals, each naming the fix.
+mkdir -p "$HF_R/.bionic/docs/record/wave-01-fixture"
 printf 'not a handoff\n/bionic:canonical-sdlc x.md\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/plain.md"
 poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/plain.md
 expect_eq "RX1 a file whose first line is not the kind line is refused, exit 2" "2" "$RC"
-expect_contains "RX1b …naming the kind line it lacks and the verb that writes one" "bionic-handoff/v1" "$OUT"
+expect_contains "RX1b …naming the kind line it lacks" "bionic-handoff/v1" "$OUT"
 expect_contains "RX1c …and the writer" "session-poker.sh handoff" "$OUT"
-expect_eq "RX1d …nothing is bound" "0" "$(hf_marker_plans)"
 printf 'bionic-handoff/v1\nsitrep head: (none recorded)\nplan: .bionic/docs/plans/epic-99-fixture/gone.plan.md\nbranch: wave/01-fixture @ x\nstep: 4\nsafe to clear\n/bionic:canonical-sdlc .bionic/docs/record/wave-01-fixture/gone.md\n' \
   > "$HF_R/.bionic/docs/record/wave-01-fixture/gone.md"
+hf_resume_new_session
 poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/gone.md
 expect_eq "RX2 a file naming a plan that is missing is refused, exit 1" "1" "$RC"
 expect_contains "RX2b …naming the missing plan" "gone.plan.md" "$OUT"
@@ -552,85 +676,18 @@ poke "$HF_R" resume .bionic/docs/record/wave-01-fixture/nowhere.md
 expect_eq "RX3 no file at the path is refused, exit 2" "2" "$RC"
 poke "$HF_R" resume
 expect_eq "RX4 no path is the usage error" "2" "$RC"
-
-# No resume command or skill ships: one door (D4).
 HF_PAYLOAD="${BIONIC_SCRIPTS_DIR}/payload"
-expect_eq "RN0 precondition: the listing reads the shipped commands and skills (the decision skill is found)" "1" \
+expect_eq "RX5 precondition: the listing reads the shipped commands and skills (the decision skill is found)" "1" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c '^decision$')"
-expect_eq "RN1 ls payload/commands payload/skills has no resume" "0" \
+expect_eq "RX5b ls payload/commands payload/skills has no resume" "0" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
 
-
-# THE CLOSED FORM IS ONE WRITER'S (wave-38 T37; critic-adversarial #2, critic-structure #1). A parked run and a
-# pull-request run are closed too, and the verb's closed form says what close-out's says: `resume point: PARKED on
-# <branch> @ <sha> — <why>` and `branch: <b> kept, not merged into <i>; its worktrees are kept.` on a parked plan;
-# `branch: <b> to be pulled into <i>.` while a task-scale plan's pull request is owed, `merged into` once the
-# integration branch holds the work. The two lines are close-out.sh's: the verb prints what `close-out.sh <plan>
-# closed-form` prints (OW4), and close-out-4.test.sh §ONE-WRITER holds the two doors' files to each other line for line.
-# FIXTURE FIDELITY: §CLOSED's world; the Step-9 lines in the shapes close-out.sh writes them, the Wake Note in the
-# shape steps/8.md asks for. fails-when: the verb reads a parked or pull-request plan's `delivered:` line as a merge.
-HF_WHY="The release waits on a hand test on the user's machine."
-hf_close() {  # <step-9 line> -> the plan at current: 9 with that line, snapped
-  HF_S9="$1" awk '
-    /^current: 4$/ { print "current: 9"; next }
-    /^- T1: landed at record\/T1.md$/ { print ENVIRON["HF_S9"]; print; next }
-    { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
-  s42_snap "$HF_R" "$HF_P"
-}
-hf_world closed-parked no
-poke "$HF_R" handoff --rulings 'D1 ruled "1"'
-HF_WS="$(git -C "$HF_R" rev-parse --short wave/01-fixture)"
-expect_eq "OW0 precondition: the working branch is not merged into trunk (a parked run's branch is kept)" "no" \
-  "$(git -C "$HF_R" merge-base --is-ancestor wave/01-fixture trunk && echo yes || echo no)"
-printf '\n## Wake Note\n\n%s\n' "$HF_WHY" >> "$HF_P"
-hf_close "- Step 9: delivered: parked on wave/01-fixture @ $HF_WS — $HF_WHY (2026-10-08T13:00Z wave-01-fixture); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at record/wave-01-fixture/continuation.md"
-poke "$HF_R" handoff
-expect_eq "OW1 handoff on a parked plan exits 0" "0" "$RC"
-expect_eq "OW1b …line 2 says where the work is parked and why" \
-  "resume point: PARKED on wave/01-fixture @ $HF_WS — $HF_WHY" "$(sed -n 2p "$HF_F")"
-expect_eq "OW1c …the branch line says it was kept, not merged" \
-  "branch: wave/01-fixture kept, not merged into trunk; its worktrees are kept." "$(hf_label "$HF_F" branch)"
-expect_eq "OW1d …in the closed file's order" "$HF_CLOSED_SHAPE" "$(hf_shape "$HF_F")"
-expect_absent "OW1e …never DELIVERED (OW1b read line 2 through the same file)" "NONE — DELIVERED" "$(cat "$HF_F")"
-expect_absent "OW1f …never merged (OW1c read the branch line through the same file)" "merged into trunk." "$(cat "$HF_F")"
-hf_resume_new_session
-poke "$HF_R" resume "$HF_DOOR"
-expect_eq "OW2 resume on the parked closed form exits 0" "0" "$RC"
-expect_contains "OW2b …and prints line 2 verbatim" "$(sed -n 2p "$HF_F")" "$OUT"
-expect_contains "OW2c …saying the run is parked and its work is kept unmerged" "is parked: its work is kept on its branch, not merged" "$OUT"
-expect_absent "OW2d …and never that there is nothing to resume (RC2b read it on the delivered form)" "nothing to resume" "$OUT"
-expect_eq "OW2e …a closed run binds nothing (the RS2 extractor)" "0" "$(hf_marker_plans)"
-expect_false "OW2f …and arms nothing" test -e "$(stamp_of "$HF_R")"
-
-hf_world closed-pr no
-sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
-poke "$HF_R" handoff --rulings 'D1 ruled "1"'
-hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
-poke "$HF_R" handoff
-expect_eq "OW3 handoff on a task-scale plan whose pull request is owed exits 0" "0" "$RC"
-expect_eq "OW3b …line 2 is the delivered closed form" \
-  "resume point: NONE — DELIVERED at 2026-10-08T13:00Z; trunk @ $(git -C "$HF_R" rev-parse --short trunk)." "$(sed -n 2p "$HF_F")"
-expect_eq "OW3c …the branch line says it is to be pulled" "branch: wave/01-fixture to be pulled into trunk." "$(hf_label "$HF_F" branch)"
-git -C "$HF_R" branch -f trunk wave/01-fixture
-poke "$HF_R" handoff
-expect_eq "OW3d …and merged into, once trunk holds the work (the same extractor)" "branch: wave/01-fixture merged into trunk." "$(hf_label "$HF_F" branch)"
-HF_CO_OUT="$(cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" closed-form 2>&1)"
-expect_eq "OW4 close-out.sh closed-form prints the two lines the verb's file carries: one writer, both doors" \
-  "$(sed -n 2p "$HF_F")|$(hf_label "$HF_F" branch)" "$(printf '%s\n' "$HF_CO_OUT" | paste -sd'|' -)"
-
-
 # ============================================================
-section "§BRANCH-AGREE: one reader of the integration branch, lib/plan.sh plan_integration_branch; the verb and close-out name one branch, ## SDLC State's before the frontmatter's (wave-39 T16; D18, AC-12.1)"
+section "§BRANCH-AGREE: one reader of the integration branch, lib/plan.sh plan_integration_branch; the verb and close-out name one branch, ## SDLC State's before the frontmatter's"
 # ============================================================
-# Two orders stood: the verb read the frontmatter's `integration-branch:` first, then ## SDLC State's, with its own awk;
-# close-out read ## SDLC State, its closed-form then the frontmatter (critic-structure-2; debt integration-branch-reader).
-# D18 rules ## SDLC State first, the frontmatter as the fallback. Each door is asked on one plan: the verb's open-form
-# `integration:` line, close-out `check`'s merge verdict and its `closed-form` branch line. close-out-1.test.sh
-# §BRANCH-AGREE holds close-out's two doors on its own fixture, the frontmatter-only plan included.
-# FIXTURE FIDELITY: §WRITE's world, whose frontmatter names `integration-branch: trunk` as a Step-0 plan does, with
-# ## SDLC State naming `mainline`, a real branch at trunk's head, so both values name branches and only the order decides.
-# fails-when: a door names the frontmatter's branch while ## SDLC State names another.
+# Each door is asked on one plan whose frontmatter names `trunk` and whose ## SDLC State names `mainline`, a real
+# branch at trunk's head: the verb's `integration:` line, close-out `check`'s merge verdict and its `closed-form`
+# branch line. fails-when: a door names the frontmatter's branch while ## SDLC State names another.
 hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
 hf_world branch-agree no
 git -C "$HF_R" branch -f mainline trunk
@@ -646,39 +703,36 @@ expect_eq "BR1b the verb's integration line, close-out check's merge verdict and
   "$(sed -n 's/^integration: \([^ ]*\) @ .*$/\1/p' "$HF_F")|$(hf_co check | sed -n 's/^merge: .* from \([^ ]*\) @ .*$/\1/p')|$(hf_co closed-form | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
 
 # ============================================================
-section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh handoff_file_of; a tab-led heading and a project-root-relative path read alike by close-out and the verb (wave-39 T16; D18, AC-12.1)"
+section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh handoff_file_of; with no pointer the default is today's handoffs file; a tab-led heading reads alike to close-out and the verb"
 # ============================================================
-# Two readers stood: close-out.sh found the section by `## Handoff` after one space, its own heading test, while the
-# poker's `handoff_file_of` takes `##` and any run of blanks (`_HANDOFF_SEC_AWK`); each resolved the relative path and
-# the default file by its own hand (debt handoff-pointer-reader). D18 rules the poker's heading test, the path
-# project-root relative, the default record/<wave>/handoff.md. Each door is asked on one plan: close-out `check` names
-# the file its closed form would be written to; the verb with no path, whose own default file does not exist yet,
-# carries the human lines from the file the pointer names.
-# FIXTURE FIDELITY: §WRITE's world, the plan's ## SDLC State naming its integration branch as Step 0 writes it, so
-# check reads the plan through; the pointer written by the real verb to a second file (`handoff <path>`), then its
-# heading re-spelled with a tab after `##`, as an editor leaves it.
-# fails-when: a door reads the tab-led heading as no pointer and falls to the default file.
+# Each door is asked on one plan: close-out `check` names the file its closed form would be written to; the verb
+# rewrites the pointer it finds under the heading. FIXTURE FIDELITY: the plan's ## SDLC State naming its integration
+# branch as Step 0 writes it, so check reads the plan through; the pointer moved by hand to an older file, then its
+# heading re-spelled with a tab after `##`, as an editor leaves it. fails-when: a door reads the tab-led heading as
+# no pointer.
 pa_check_file() {  # -> the file close-out check says its closed form would be written to
   hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the plan.*$/\1/p'
 }
-HF_ALT=".bionic/docs/record/wave-01-fixture/alt-handoff.md"
+HF_OLD="$HF_HOME/2026-10-05-wave-01-fixture.md"
 hf_world pointer-agree no
 awk '/^## SDLC State/ { s = 1 } s && /^current:/ { print "integration-branch: trunk"; s = 0 } { print }' "$HF_P" > "$HF_P.pa" \
   && mv "$HF_P.pa" "$HF_P"
 s42_snap "$HF_R" "$HF_P"
-expect_eq "PA0 with no pointer, close-out check names the default file, the one §WRITE's verb writes" "$HF_DOOR" "$(pa_check_file)"
-poke "$HF_R" handoff "$HF_ALT" --mid-flight 'written into the second file'
-expect_eq "PA1 precondition: the verb wrote the second file and the pointer names it; the default file is absent" \
-  "0|1|no" "$RC|$(hf_section "$HF_P" | /usr/bin/grep -c "^handoff: $HF_ALT written " | tr -d ' ')|$([ -e "$HF_F" ] && echo yes || echo no)"
-awk '$0 == "## Handoff" { print "##\tHandoff"; next } { print }' "$HF_P" > "$HF_P.pa" && mv "$HF_P.pa" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
-expect_eq "PA2 precondition: the heading is tab-led and still names the relative pointer" "1|1" \
-  "$(/usr/bin/grep -c "$(printf '^##\tHandoff$')" "$HF_P" | tr -d ' ')|$(/usr/bin/grep -c "^handoff: $HF_ALT written " "$HF_P" | tr -d ' ')"
-expect_eq "PA3 close-out check names the file the tab-led pointer names" "$HF_ALT" "$(pa_check_file)"
+expect_eq "PA0 with no pointer, close-out check names today's handoffs file, the one the verb writes" "$HF_DOOR" "$(pa_check_file)"
 poke "$HF_R" handoff
-expect_eq "PA4 the verb with no path exits 0" "0" "$RC"
-expect_eq "PA4b …and carries its human line from that same file, the one close-out named" \
-  "mid-flight: written into the second file" "$(hf_label "$HF_F" mid-flight)"
+expect_eq "PA1 precondition: the verb wrote the file and the pointer names it" "0|1" \
+  "$RC|$(hf_section "$HF_P" | /usr/bin/grep -c "^handoff: $HF_DOOR written " | tr -d ' ')"
+cp "$HF_F" "$HF_R/$HF_OLD"
+awk -v o="$HF_OLD" '$0 == "## Handoff" { print "##\tHandoff"; next } index($0, "handoff: ") == 1 { print "handoff: " o " written 2026-10-05 15:00 PDT"; next } { print }' \
+  "$HF_P" > "$HF_P.pa" && mv "$HF_P.pa" "$HF_P"
+s42_snap "$HF_R" "$HF_P"
+expect_eq "PA2 precondition: the heading is tab-led and names the older file" "1|1" \
+  "$(/usr/bin/grep -c "$(printf '^##\tHandoff$')" "$HF_P" | tr -d ' ')|$(/usr/bin/grep -c "^handoff: $HF_OLD written " "$HF_P" | tr -d ' ')"
+expect_eq "PA3 close-out check names the file the tab-led pointer names" "$HF_OLD" "$(pa_check_file)"
+poke "$HF_R" handoff
+expect_eq "PA4 the verb exits 0" "0" "$RC"
+expect_eq "PA4b …and rewrites the pointer under the tab-led heading: one heading, one pointer, today's file" "1|1|1" \
+  "$(/usr/bin/grep -c 'Handoff$' "$HF_P" | tr -d ' ')|$(awk '/^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next } h' "$HF_P" | grep -c . | tr -d ' ')|$(/usr/bin/grep -c "^handoff: $HF_DOOR written " "$HF_P" | tr -d ' ')"
 
 
 finish
