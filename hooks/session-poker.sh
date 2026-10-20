@@ -34,7 +34,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>] | sitrep bottom-line '<item>'… [<plan>]   the situation report's facts, or its one line (read-only); record the Bottom line's items (writes record/<wave>/sitrep.log)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>] | sitrep grade <A-F> '<rationale>' [<plan>]   the situation report's page, or its one line (read-only); record the run's grade and its rationale (writes record/<wave>/sitrep.log)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
@@ -507,8 +507,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sitrep's three indicators (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's facts: the last recorded Bottom line with its time, every row with its glyph, the schedule, correctness and waste indicators by their printed thresholds, the person's open items, and the forecast from measured pace; --line prints the one-line form (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep bottom-line '<item>'… [<plan>]   record one to four Bottom line items, each cited (line <n>) or labelled hypothesis:, diagnosis: or projection:, with the time, to record/<wave>/sitrep.log"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's page: the Bottom line (what you owe, what is next, what is done, when it closes), every task with its glyph, the Score's five indicator lines, what is blocked on you, the completion and the predicted close; --line prints the one-line form (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep grade <A-F> '<rationale>' [<plan>]   record the run's grade and one rationale that names an indicator line (schedule, correctness, waste, decisions or goals), with the time, to record/<wave>/sitrep.log"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
@@ -1172,25 +1172,24 @@ $1"; shift ;;
     done
     [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
     ;;
-  # THE SITUATION REPORT (wave-38 T10; D9–D14, REQ-2). `sitrep [--line] [<plan>]` renders, read-only but for the
-  # gate's own scan; `sitrep bottom-line '<item>'… [<plan>]` records one to four judgment items. The plan, when
-  # named, is the last operand and ends in `.plan.md`; without it, the session's bound run, as landing-report's.
-  # An item's own rules (cited or labelled, no `|`) are the verb's refusal (1); the count is the usage error (2).
+  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` renders, read-only but for the gate's own scan;
+  # `sitrep grade <A-F> '<rationale>' [<plan>]` records the grade. The plan, when named, is the last operand and
+  # ends in `.plan.md`; without it, the session's bound run, as landing-report's. The letter's and the rationale's
+  # own rules are the verb's refusal (1); the count is the usage error (2).
   sitrep)
-    SR_LINE=no; SR_BL=no; SR_ARG=""; SR_ITEMS=()
-    if [ "${1:-}" = bottom-line ]; then
-      SR_BL=yes; shift
+    SR_LINE=no; SR_GRADE=no; SR_ARG=""; SR_LETTER=""; SR_WHY=""
+    if [ "${1:-}" = grade ]; then
+      SR_GRADE=yes; shift
       if [ $# -gt 0 ]; then
         case "${!#}" in *.plan.md) SR_ARG="${!#}"; set -- "${@:1:$(($# - 1))}" ;; esac
       fi
-      [ $# -ge 1 ] || usage "sitrep bottom-line takes one to four items, each cited (line <n>) or labelled hypothesis:, diagnosis: or projection:, then optionally the plan."
-      [ $# -le 4 ] || usage "sitrep bottom-line takes at most four items; the Bottom line carries two to four claims (D11)."
-      SR_ITEMS=("$@")
+      [ $# -eq 2 ] || usage "sitrep grade takes a letter, A to F, and one rationale that names an indicator line, then optionally the plan."
+      SR_LETTER="$1"; SR_WHY="$2"
     else
       for _sr_a in "$@"; do
         case "$_sr_a" in
           --line) [ "$SR_LINE" = no ] || usage "sitrep takes --line once."; SR_LINE=yes ;;
-          -*) usage "sitrep takes the flag --line and at most one plan, or bottom-line '<item>'… [<plan>]." ;;
+          -*) usage "sitrep takes the flag --line and at most one plan, or grade <A-F> '<rationale>' [<plan>]." ;;
           *) [ -z "$SR_ARG" ] || usage "sitrep takes at most one plan."; SR_ARG="$_sr_a" ;;
         esac
       done
@@ -2988,7 +2987,6 @@ SITREP_MARK_WITHIN='✅'
 SITREP_MARK_NEAR='➖'
 SITREP_MARK_OVER='✖️'
 SITREP_MARK_NONE='❔'
-SITREP_LEGEND='within / near / over — schedule at or ahead of the pace its forecast needs and the median landing at or under the bar / either within 1.25× / further · correctness no red at head and no open S1/S2 / reds all returned and fixed / an open S1/S2 or a red at head · waste < 5% discarded and < 10% idle / < 15% either / above'
 # the tick
 SCHED_HOLDS=""
 TICK_CARRIERS=""; TICK_CARRIERS_READ=no
