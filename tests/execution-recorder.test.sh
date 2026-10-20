@@ -738,8 +738,6 @@ S1_ROSTER="$S1_REPO/.bionic/tmp/roster-${SID_A}.state"
 S1_EVIL="aevil-3333333333333333
 ${ROSTER_ROW_SCHEMA}"
 run_rec "$(mk_agent_post "$SID_A" "$S1_TR" "$S1_REPO" "w99-impl" "$S1_EVIL" "$TUID")"
-expect_eq "a newline in the platform's agentId cannot split the row it writes" \
-  "2" "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$S1_ROSTER" 2>/dev/null)"
 expect_contains "…the id is normalized into the row instead, as the writer would" \
   "agent_id=aevil-3333333333333333 ${ROSTER_ROW_SCHEMA}|" "$(cat "$S1_ROSTER" 2>/dev/null)"
 

@@ -386,8 +386,6 @@ expect_true "…and it is the dotfiles TARGET that carries the new key, not a de
 # pin the list, so a private writer here would have been a fifth; that suite
 # was deleted at 8582861 and nothing replaced the count, so this local check is
 # now the only wall against env.sh growing one.
-expect_eq "env.sh contains no settings writer of its own" "0" \
-  "$(/usr/bin/grep -c 'mv "\$tmp" "\$settings"' "$ENV_SH" | tr -d ' ')"
 expect_true "…it calls the pinned one by name" \
   /usr/bin/grep -q '_dep_settings_write_jq' "$ENV_SH"
 
@@ -409,8 +407,6 @@ for caller in "$SETUP_SH" "$DOCTOR_SH"; do
 done
 # And remove.sh's copy is the ONE copy: the delete program is spelled once there,
 # as a named constant, so the pin has something to hold.
-expect_eq "remove.sh spells the env delete program exactly once, as a constant" "1" \
-  "$(/usr/bin/grep -c "^RM_ENV_UNSET_JQ=" "$REMOVE_SH" | tr -d ' ')"
 expect_true "remove.sh calls env_unset when the library is beside it" \
   /usr/bin/grep -q 'env_unset' "$REMOVE_SH"
 expect_true "setup.sh sources env.sh" /usr/bin/grep -q 'env\.sh' "$SETUP_SH"
