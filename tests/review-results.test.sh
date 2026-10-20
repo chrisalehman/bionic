@@ -405,6 +405,14 @@ expect_eq "PREV-4 …ending on the preview's line, not the reply line" \
 expect_eq "PREV-5 …no page written, no approval opened" "|" "$(fc_pages)|$(fc_owed | /usr/bin/grep '^approve:')"
 fc_page
 expect_eq "PREV-6 the same run without --preview is early (exit 1)" "1" "$FC_RC"
+fc_plan "$FC_FAILR"
+fc_page --preview
+expect_contains "PREV-7 precondition: the preview shows the S2 finding the person must rule on" \
+  "  S2   the value is lost on a second run" "$(fc_under Findings)"
+expect_eq "PREV-7b …and opens no item on the person's ledger, the finding's nor the waiver's" "" "$(fc_owed)"
+fc_page
+expect_contains "PREV-7c the acting render of the same run opens the finding's item (the reader is not vacuous)" \
+  "finding:" "$(fc_owed)"
 
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"

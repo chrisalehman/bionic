@@ -517,7 +517,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
-  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the final card (card.sh final) into approve, waive, waive-row and finding-move with their words: option 1 every default, option <k> its override in place of that default"
+  die "  bash ${HOOK_DIR}/session-poker.sh review-results [--preview] [--against <key>]... [<plan>]   the review results page of the bound run: Bottom line, Goals, Tests, Reviews, Findings and Decisions; --against names a decision or finding the orchestrator recommends against its default; --preview renders it whatever the facts and records nothing"
+  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the review results, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
   die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
@@ -994,12 +995,30 @@ case "$VERB" in
       esac
     fi
     ;;
-  # THE FINAL CARD'S REPLY (wave-38 T3; D19, AC-1.1). One operand: the user's reply to the card `card.sh final`
-  # rendered, verbatim. Its option, its words and whether the user typed it are the verb's own refusals (1).
+  # THE REPLY TO THE REVIEW RESULTS. One operand: the user's reply to the page `review-results` rendered, verbatim.
+  # Its words, and whether the user typed them, are the verb's own refusals (1).
   reply)
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } \
-      || usage "reply takes exactly one argument: the user's reply to the final card (card.sh final), verbatim."
+      || usage "reply takes exactly one argument: the user's reply to the review results, verbatim."
     RP_TEXT="$1"
+    ;;
+  # THE REVIEW RESULTS PAGE. `--preview` once, `--against <key>` any number of times, at most one plan. A key's
+  # shape is the usage error (2); whether it names anything on the page is the verb's own refusal (1).
+  review-results)
+    RR_PREVIEW=no; RR_AGAINST=""; RR_ARG=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --preview) [ "$RR_PREVIEW" = no ] || usage "review-results takes --preview once."; RR_PREVIEW=yes ;;
+        --against)
+          case "${2:-}" in
+            approve:?*|waive:?*|row:?*|finding:?*) RR_AGAINST="${RR_AGAINST}$2"$'\n'; shift ;;
+            *) usage "review-results --against takes one key: approve:<name>, waive:<question>, row:<AC> or finding:<record>#<n>." ;;
+          esac ;;
+        -*) usage "review-results takes --preview, --against <key> and at most one plan." ;;
+        *) [ -z "$RR_ARG" ] || usage "review-results takes at most one plan."; RR_ARG="$1" ;;
+      esac
+      shift
+    done
     ;;
   # THE APPROVAL VERB (wave-26 T13; D3, AC-6.2). Two operands, both required: the name a row
   # reads as `approval:<name>`, in the grammar `units_validate` admits there, and the user's
@@ -3421,6 +3440,7 @@ case "$VERB" in
   task-split) poker_verb_task_split "$@" ;;
   current) poker_verb_current "$@" ;;
   reply) poker_verb_reply "$@" ;;
+  review-results) poker_verb_review_results "$@" ;;
   approve) poker_verb_approve "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;
   waive) poker_verb_waive "$@" ;;

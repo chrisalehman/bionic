@@ -2738,7 +2738,13 @@ RR_ROWS
 
     # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against.
     RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""
-    RR_DISP="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+    # A PREVIEW OPENS NOTHING: the disposition it reads is handed a ledger key no file can carry, so the person's
+    # items the disposition opens on any other run are left unopened here.
+    if [ "$RR_PREVIEW" = yes ]; then
+      RR_DISP="$( cd "$PV_REPO" && OWED_SID="preview/none" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+    else
+      RR_DISP="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+    fi
     while IFS= read -r line; do
       case "$line" in "poker: finding "*) : ;; *) continue ;; esac
       line="${line#poker: }"
