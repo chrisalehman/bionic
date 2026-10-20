@@ -1842,11 +1842,6 @@ sitrep_grade() {
       END { for (i = 1; i <= n; i++) print "owned-by-user: approval:" ord[i] " — " ids[ord[i]] " wait on it; record it: approve " ord[i] " '"'"'<the user'"'"'s words>'"'"'" }')"
     RS_OWN="$(printf '%s\n%s\n' "$RS_OWN" "$RS_APPR" | awk 'NF')"
     if [ -n "$RS_OWN" ]; then printf '%s\n' "$RS_OWN"; else printf 'owned-by-user: none — nothing waits on you\n'; fi
-    # The user's standing orders (wave-38 T18; REQ-7 AC-7.1, D17): every item of config.yaml's standing-orders:,
-    # in config order, through its one reader (lib/roots.sh `config_section`); none printed when there are none.
-    while IFS= read -r RS_ORDER; do
-      [ -z "$RS_ORDER" ] || printf 'standing-order: %s\n' "$RS_ORDER"
-    done <<< "$(config_section "$REPO_REAL" standing-orders 2>/dev/null)"
     RS_BR="$(handoff_line "$RS_FILE" "working branch")"
     [ -n "$RS_BR" ] || RS_BR="$(handoff_line "$RS_FILE" branch)"
     printf '%s\n' "${RS_BR:-branch: (the file names none)}"
