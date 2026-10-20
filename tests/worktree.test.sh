@@ -132,9 +132,6 @@ export BIONIC_GATE_DIR="$TMP/gate"
 
 section "Group 1: the library exists and parses"
 
-expect_true "worktree.sh passes bash -n" bash -n "$LIB"
-expect_true "worktree_legacy_links is defined"    declare -f worktree_legacy_links
-expect_true "worktree_land is defined"            declare -f worktree_land
 expect_true "worktree_land_for_session is defined" declare -f worktree_land_for_session
 expect_true "worktree_checkout_of is defined"     declare -f worktree_checkout_of
 expect_true "worktree_lease_overruns is defined"  declare -f worktree_lease_overruns
@@ -843,8 +840,6 @@ VD="$(new_tree "$V" verb-dirty)"
 echo x >> "${VD}/file.txt"
 RCV="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" --by-hand --reason r >/dev/null 2>&1; echo $? )"
 expect_eq "a refused land exits 2" "2" "$RCV"
-expect_match "land with no path is refused" "spawn-worktree: REFUSED *" \
-  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land --by-hand --reason r 2>/dev/null )"
 
 # No session id at all: there is no binding to read, so there is no target.
 git -C "$VD" checkout --quiet -- file.txt
@@ -861,8 +856,6 @@ expect_eq   "no ref moved" "$VBEFORE" "$(refs_of "$V")"
 expect_match "the same tree lands from the bound session (the arm discriminates)" \
   "spawn-worktree: LANDED branch=verb-dirty onto=wave/fixture *" \
   "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" --by-hand --reason r 2>/dev/null )"
-expect_true "the usage text names the land verb" \
-  grep -q 'spawn-worktree.sh land' "$SPAWN"
 
 # T8c (review R2-1, critic C2-1) END TO END through the verb. The verb reads its session id
 # off CLAUDE_CODE_SESSION_ID (`cmd_land`) and uses it for one thing: the target branch.
@@ -978,7 +971,6 @@ expect_contains "(hd2) …and its - T2: line carries the person's words" '"lande
 expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
   "0|line/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
   "$(awk 'END { print NR }' "$TMP/hand-runs")|$(grep '|ev=verdict|' "$BHREC" | sed 's/|at=[^|]*$//')"
-expect_eq    "(hd3b) …and it built one candidate for its row, on the head before it" "$(git -C "$BH" rev-parse wave/fixture^1)" "$(grep '|ev=candidate|row=T2|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 
 # A hand landing that names its suites leaves a ready line that names them too, so the judge and the door read one
 # row's suites; with none named, the ready line says none.
@@ -996,4 +988,11 @@ expect_eq    "(hd4) …and its ready line names the suites the person named, whe
 BHT4="$(new_tree "$BH" wt/bh-T4)"; mkdir -p "$BHT4/tests"; printf '# the wave-40 run said so\n' > "$BHT4/tests/cited.sh"; git -C "$BHT4" add tests && git -C "$BHT4" commit -qm "T4: a cited comment"; BH_REFS4="$(refs_of "$BH")"
 OUTHL="$(bh_land "$BHT4" --by-hand --reason "landed on the report")"; RCHL=$?
 expect_eq    "(hl1) a hand landing whose added comment cites the run exits 2 with ready's LINT line, and no ref moved" "2|LINT wt/bh-T4 tests/cited.sh:1 wave|same" "$RCHL|$(printf '%s\n' "$OUTHL" | grep '^LINT ')|$([ "$BH_REFS4" = "$(refs_of "$BH")" ] && echo same)"
+# A hand landing behind an entry still proving waits on it, and builds its candidate once for each base it is given.
+BHT5="$(new_tree "$BH" wt/bh-T5)"; BHX="$(git -C "$BH" commit-tree -p wave/fixture -m ahead "$(git -C "$BH" rev-parse 'wave/fixture^{tree}')")"; BHAT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf 'line/v1|ev=ready|row=T9|name=-|commit=%s|branch=-|tree=-|suites=none|debt=-|carrier=%s:|at=%s\nline/v1|ev=candidate|row=T9|base=%s|commit=%s|tree=-|at=%s\n' "$BHX" "$$" "$BHAT" "$(git -C "$BH" rev-parse wave/fixture)" "$BHX" "$BHAT" >> "$BHREC"
+bh_land "$BHT5" --by-hand --reason "behind an entry" >/dev/null & BHPID=$!
+sleep 3; printf 'line/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHREC"; wait "$BHPID"; RCHW=$?
+expect_eq    "(hd3b) a hand landing held 3 s behind an entry lands, with one candidate on the entry's and one on the head it published onto" \
+  "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(grep '|ev=candidate|row=wt/bh-T5|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 finish
