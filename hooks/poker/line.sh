@@ -492,7 +492,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · regression-2=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -512,7 +512,6 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #   waivers        the plan's `waived: question=…` line under `## SDLC State` (`waive`) and an AC block's indented
 #                  `waiver: <who> <YYYY-MM-DD> "<words>"` under `## Verification Matrix` (`waive-row`). Fenced text is
 #                  skipped, as every reader of the plan skips it.
-#   regression-2   the plan's `approved: regression-2` line under `## SDLC State` (`approve`).
 #   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
 #                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
@@ -525,7 +524,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
 # continuation (and a person).
 hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
-  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 r2=0 fl=0 ado=0 fix=0 pl
+  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ]; then
     read -r hand stp <<< "$(awk -F'|' '
@@ -570,14 +569,13 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
   if [ -f "$plan" ] && [ ! -L "$plan" ]; then
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
     if declare -F proof_awk >/dev/null 2>&1; then
-      read -r fl wv r2 fix <<< "$(awk "$(proof_awk)"'
+      read -r fl wv fix <<< "$(awk "$(proof_awk)"'
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
         sec == "sdlc" {
           if (proof_fields($0) && PROOF_KIND == "regression") f++
           else if ($0 ~ /^waived:[ \t]+question=/) w++
-          else if ($0 ~ /^approved:[ \t]+regression-2([ \t]|$)/) r++
           else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) x++
           next
         }
@@ -589,12 +587,12 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
           }
           inb = 0
         }
-        END { print f + 0, w + 0, r + 0, x + 0 }' "$plan")"
+        END { print f + 0, w + 0, x + 0 }' "$plan")"
     fi
   fi
   [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · regression-2=%d · second-regressions=%d · adoptions=%d · fixed=%d\n' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + r2 + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$r2" "$fl" "$ado" "$fix"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d\n' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$fl" "$ado" "$fix"
   return 0
 }
 

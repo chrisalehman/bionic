@@ -867,6 +867,24 @@ fi
 # Every arm below holds the roster, the repo and the budget fixed and moves ONLY the
 # status in the answer, so nothing but the status can explain the verdict.
 
+section "§WHOLE-RUN-ADMITTED — the dispatch wall holds no whole-run rule: regression-run is the one that refuses"
+# The one-whole-run rules left this wall: a whole run beside an open build row, and a second whole run on the plan,
+# are both admitted here; the regression verb refuses a run beside an open build row or at a head that has one.
+# FIXTURE FIDELITY: pf_repo's real repository on its working branch; the gate journals each admitted run.
+# fails-when: the wall refuses a whole run, or names approve regression-2.
+REPO=$(pf_repo rwr1)
+write_attestation "$REPO" "$SID_A"
+pf_plan "$REPO" "" "$(pf_row T1 4 active 'lib/two.sh')" "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt test T1)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
+expect_eq "WA.1 AC-7.3 a whole run with a build row open is ADMITTED by the dispatch wall" "allow" "$GATE_VERDICT"
+expect_status "WA.1 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+expect_contains "WA.1 …its row holds run.sh (the run a second dispatch follows)" "run.sh" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-wr-again")"
+expect_eq "WA.2 AC-7.3 a second whole run on the plan is ADMITTED: no approval is asked" "allow" "$GATE_VERDICT"
+expect_absent "WA.2 …and nothing names a second-run approval" "regression-2" "$GATE_ERR"
+expect_status "WA.2 …and it is journalled beside the first" "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
 section "§LANDS-ON — a brief's Lands-on is held within its Suites and nothing more"
 # A writer bound to a row names its Lands-on suites from its own Suites; no other suite that reads its
 # Files is asked of it. FIXTURES: make_repo's approved, bound plan with T23 in its Tasks table; the tree

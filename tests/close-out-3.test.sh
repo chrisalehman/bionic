@@ -33,12 +33,11 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 #   holds          roster              distinct (name, held=<value>)
 #   extensions     roster              distinct (name, extended=<value>)
 #   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
-#   regression-2   plan                `approved: regression-2` under ## SDLC State
 #   second-floors  plan                `proved: kind=regression` lines past the first
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 # HH_GATE: hoisted to tests/close-out.prelude.sh (a later part reads it)
 HH_C="$(printf 'd%.0s' $(seq 40))"
-HH_WANT="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · regression-2=1 · second-regressions=1 · adoptions=0 · fixed=0"
+HH_WANT="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=0"
 # hh_report: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # hh_plant <project> -> one use of every verb, and the prose that must count for nothing
 hh_plant() {
@@ -70,7 +69,7 @@ hh_plant() {
     roster_row_fixture status=identified name=w-c agent_id=ac plan="$plan" extended="2026-10-06T12:30:00Z more work"
     roster_row_fixture status=identified name=w-z agent_id=az plan="/elsewhere/wave-99-other.plan.md" amended="2026-10-06T13:00:00Z another run's"
   } >> "$p/.bionic/tmp/roster-fixture.state"
-  # the plan: a second floor, a waive, a waive-row, an approve regression-2, and the prose that must count nothing
+  # the plan: a second floor, a waive, a waive-row, and the prose and an old approve regression-2 line that count nothing
   h="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_last "$2" floor' _ "$REPO_ROOT/payload/scripts/lib" "$plan")"
   expect_nonempty "HH-0a precondition: the fixture plan already holds one floor proof, whose head the second reuses" "$h"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
@@ -110,7 +109,7 @@ awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: eviden
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · regression-2=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check

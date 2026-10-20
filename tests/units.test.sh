@@ -924,11 +924,49 @@ expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
 
 # ============================================================
-section "§JUDGE — covered at the last green whole run's head, else a whole run owed naming both heads"
+
+section "§ORDER — build, regression, review, release: units_validate refuses any other order naming the rows; units_order reads it"
+# A pair out of order is refused when neither row is dropped and one is open; landed history is not judged.
+OR_P="$SANDBOX/order.plan.md"
+or_plan() {  # <row>... -> OR_P: a reads table holding a landed build row and the rows given
+  { printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh | landed | |\n'
+    printf '%s\n' "$@"; } > "$OR_P"
+}
+OR_REG='| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | pending | approval:plan, head |'
+OR_REV='| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | pending | approval:plan, head |'
+OR_REL='| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | pending | approval:plan, head |'
+or_plan "$OR_REG" "$OR_REV" "$OR_REL"
+expect_eq "ORD-1 control: regression at 5, review at 6, release at 7: no violation (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+expect_eq "ORD-1b …and units_order names the regression row" "T5|0" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
+or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+expect_eq "ORD-2 AC-7.1 the regression after the release (the old order): refused, naming the first row it follows" \
+  "T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6|1" \
+  "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+expect_eq "ORD-2b …and units_order reads no order" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
+or_plan "$OR_REV" "${OR_REG/| 5 | test |/| 6 | test |}" "$OR_REL"
+expect_eq "ORD-3 AC-7.1 the regression at the review's step, after it in the table: refused" \
+  "T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6" \
+  "$(call units_validate "$OR_P")"
+or_plan "$OR_REG" "$OR_REL" "${OR_REV/| 6 | review |/| 7 | review |}"
+expect_eq "ORD-4 AC-7.1 the release ahead of a review row: refused, naming both" \
+  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6" \
+  "$(call units_validate "$OR_P")"
+or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+sed 's/ pending | approval/ landed | approval/' "$OR_P" > "$OR_P.x" && mv "$OR_P.x" "$OR_P"
+expect_eq "ORD-5 the ORD-2 plan with every row landed: history is not judged (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+or_plan "$OR_REG" "$OR_REL"
+expect_eq "ORD-6 no review row: the regression ahead of the release validates, and is the order" "|T5" "$(call units_validate "$OR_P")|$(call units_order "$OR_P")"
+or_plan "$OR_REG" "$OR_REV"
+expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
+
+
+section "§JUDGE — covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run"
 # ============================================================
 
-# The judge asks one question: is the working head the head of the last green whole run? A verdict is
-# keyed by the commit it ran at, so a key of any other kind proves nothing.
+# At the last green whole run's head the judge holds the head covered; past it, a commit no landing proves is named,
+# and no whole run is asked. A verdict is keyed by the commit it ran at, so a key of any other kind proves nothing.
 PROOF_LIB="$REPO_ROOT/payload/scripts/lib/proof.sh"
 LINE_LIB="$REPO_ROOT/payload/scripts/lib/line.sh"
 JR="$SANDBOX/judge-repo"
@@ -942,13 +980,13 @@ JH2="$(git -C "$JR" rev-parse HEAD)"
 printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\nproved: kind=regression head=%s at=2026-01-01T00:00:00Z evidence=whole.log\n' \
   "$JH" > "$SANDBOX/judge-plan.md"
 judge() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_floor_judge "$2" "$3" "$4"' _ "$PROOF_LIB" "$SANDBOX/judge-plan.md" "$JR" "$1"; }
-owed_whole() { printf 'uncovered\ta whole run is owed: the last green whole run read %.12s, and the working head is %.12s' "$1" "$2"; }
+unproved() { printf 'uncovered\tcommit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it' "$1"; }
 
 expect_eq "the fixture's three heads are three commits" "3" \
   "$(printf '%s\n%s\n%s\n' "$JH" "$JH1" "$JH2" | sort -u | grep -c '^[0-9a-f]\{40\}$' | tr -d ' ')"
 expect_eq "head H, the last green whole run's head: covered" "covered" "$(judge "$JH")"
-expect_eq "head H+1: a whole run owed, naming H and H+1, and no suite" "$(owed_whole "$JH" "$JH1")" "$(judge "$JH1")"
-expect_eq "a commit that changed no file is still another head: a whole run owed" "$(owed_whole "$JH" "$JH2")" "$(judge "$JH2")"
+expect_eq "head H+1, a commit no landing proves: named, and no whole run asked" "$(unproved "$JH1")" "$(judge "$JH1")"
+expect_eq "H+2 changed no file, so the judge names H+1 still" "$(unproved "$JH1")" "$(judge "$JH2")"
 
 # A verdict proves its suite at the commit it ran at; a reads key is not a commit and proves nothing.
 printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|reads=%s|at=2026-01-01T00:00:00Z\n' \

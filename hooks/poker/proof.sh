@@ -765,10 +765,8 @@ $PF_PLANL"
   # covering that question up to the head the plan's working branch's ref names, the head the judge
   # (lib/proof.sh `facts_state`) is asked about. It goes in through the plan transaction, placed
   # with the proof lines by `proof_add_line`, so a fact written after it is newer than it.
-  # THE REGRESSION AND ALL (wave-38 T2; REQ-4 AC-4.2): `waive regression` writes the line with question=regression,
-  # the user's word that the head needs no whole run (lib/proof.sh `proof_regression_waiver`, which the regression
-  # judge and the Step-7 wall read); `waive all` writes four, evidence, adversarial, structure and regression, in that
-  # order, in one transaction.
+  # `waive all` writes three, evidence, adversarial and structure, in that order, in one transaction. The regression
+  # is never waived: it runs once after the build.
   poker_verb_waive() {
     if ! { declare -F proof_waiver_line >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_waiver_line >/dev/null 2>&1; then
@@ -776,10 +774,10 @@ $PF_PLANL"
       exit 2
     fi
     if ! proof_question_ok "$WV_Q" waive; then
-      die "REFUSED — '$(clean "$WV_Q")' is not a question to waive: name evidence, adversarial, structure, regression or all. The plan is unchanged."
+      die "REFUSED — '$(clean "$WV_Q")' is not a question to waive: name evidence, adversarial, structure or all. The plan is unchanged."
       exit 1
     fi
-    WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS regression"
+    WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS"
     case "$WV_REPLY" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — a waiver line is one line, and the reply carries a line break; the plan is unchanged."
@@ -812,7 +810,7 @@ $PF_PLANL"
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
     for _wv_q in $WV_QS; do
       poker_owed_close "$PV_REPO" "waive:$_wv_q" "waive"
-      [ "$_wv_q" = regression ] || waive_owed_findings "$PV_PLAN" "$PV_REPO" "$_wv_q"
+      waive_owed_findings "$PV_PLAN" "$PV_REPO" "$_wv_q"
       say "waive — question=$_wv_q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
     done
     exit 0
@@ -1268,12 +1266,10 @@ DSP_READINGS
   # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, naming the
   # other way: run the regression and cite its log. A config carrying `floor-attestation:`, a key removed in wave-36
   # (T35), is refused first, naming it (lib/proof.sh `proof_floor_retired`).
-  # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, HELD TO THE FULL-RUN RULES (AC-1.8): the dispatch wall's
-  # (hooks/dispatch-preflight.sh, THE FULL-RUN WALL), asked of the same facts in the same order, before anything
-  # runs: `regression: no` refuses it (`plan_regression`); a row the regression waits on that still writes the head
-  # refuses it (`units_floor_holds`); a covered head refuses it (`proof_state`); and a second whole run — the plan
-  # already carries a floor proof, or a floor-run log of tests/run.sh — needs the user's `approved: regression-2`
-  # (`proof_approved`). The bash wall's full-tree refusal names this verb as the whole run's path (lib/walls.sh).
+  # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, asked before anything runs: `regression: no` refuses it
+  # (`plan_regression`); a row the regression waits on that still writes the head refuses it (`units_floor_holds`); a
+  # covered head refuses it (`proof_state`); and a head that already has a whole-run log refuses it. The bash wall's
+  # full-tree refusal names this verb as the whole run's path (lib/walls.sh).
   poker_verb_regression_run() {
     FR_ROOT="$(project_root "$PWD")"
     # THE COMMAND'S KEY IS regression-command: and no other (wave-39 T18; REQ-13 AC-13.1, D2): the old key is refused, naming it
@@ -1329,52 +1325,13 @@ DSP_READINGS
           die "REFUSED — the working head ${FR_HEAD:0:12} is already proved: the plan's regression covers it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); a change landed after it is proved by the suites its row names. Nothing was run."
           exit 1 ;;
       esac
-      # RULES 4 AND 5. The first whole run runs; a second is the user's word.
-      FR_FIRST=""
-      FR_LAST="$(proof_last "$PV_PLAN" regression)"
-      [ -z "$FR_LAST" ] || FR_FIRST="the regression proof at ${FR_LAST:0:12}"
-      if [ -z "$FR_FIRST" ]; then
-        # THE GLOB READS THE LOG'S NEW NAME ONLY (wave-39 T18; REQ-13 AC-13.1, D2): with no whole-run log under the new name, one
-        # under the 1.20.0 name is refused, naming the new one (lib/alias.sh `alias_gone_names log`), never counted, never passed over.
-        for _fr_l in "$FR_DOCS/record/$FR_WAVE/regression-run-"*.log; do
-          [ -f "$_fr_l" ] || continue
-          [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
-          FR_FIRST="the run logged at ${_fr_l#"$FR_DOCS"/}"; break
-        done
-        for _fr_p in $(alias_gone_names log 2>/dev/null); do
-          [ -z "$FR_FIRST" ] || break
-          for _fr_l in "$FR_DOCS/record/$FR_WAVE/$_fr_p"*.log; do
-            [ -f "$_fr_l" ] || continue
-            [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
-            alias_gone_say log
-            die "REFUSED — ${_fr_l#"$FR_DOCS"/}: $ALIAS_GONE_SAID, the one name the second-run glob reads; copy the log to that name, and the run it holds counts as the first whole run. Nothing was run."
-            exit 1
-          done
-        done
-      fi
-      # EACH REFUSAL OF A FURTHER WHOLE RUN ENDS ON THE USER'S WORD FOR THE REGRESSION (wave-39 T25; REQ-18 AC-18.3; D5):
-      # THE OWED SET and `waive regression '<reply>'` beside the second whole run (lib/proof.sh `proof_owed_suites`,
-      # `proof_owed_say`, the words the judge's refusal ends on); a head that owes no suite past the regression's head
-      # (the reds of the whole run alone) is still offered the waiver, which closes those too.
-      FR_SAY=""
-      if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN"; then
-        FR_SAY="$(proof_owed_say "$(proof_owed_suites "$PV_PLAN" "$PV_REPO" 2>/dev/null)" "bash ${HOOK_DIR}/session-poker.sh ")" \
-          || FR_SAY="or the user's word that the head needs none: bash ${HOOK_DIR}/session-poker.sh waive regression '<reply>'"
-      fi
-      # THE APPROVAL BUYS ONE RUN (wave-38 T2; AC-4.5): it covers no head, and a regression proof after it spends it.
-      if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN" && proof_approved "$PV_PLAN" regression-2; then
-        die "REFUSED — a further whole run on this plan: the user's approved: regression-2 admitted one run, and the regression proof recorded after it spent it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); the regression reads $(clean "${FR_STATE//	/ }"). Nothing was run. An approval is recorded once, so a second one buys no run; $FR_SAY"
+      # ONE WHOLE RUN AT A HEAD. A log of tests/run.sh at this head refuses another: a red is a fix row's, its own
+      # suites plus the red one, and no second whole run is asked.
+      for _fr_l in "$FR_DOCS/record/$FR_WAVE/regression-run-$FR_HEAD"*.log; do
+        [ -f "$_fr_l" ] && [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
+        die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: ${_fr_l#"$FR_DOCS"/}. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         exit 1
-      fi
-      if [ -n "$FR_FIRST" ] && ! proof_regression2_open "$PV_PLAN"; then
-        FR_OWED=""; case "$FR_STATE" in owed"	"*) FR_OWED="${FR_STATE#owed	}" ;; esac
-        if [ -n "$FR_OWED" ]; then
-          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and it left $FR_OWED red, each owed until a later landing runs it green. Nothing was run. Dispatch a fix row that runs $FR_OWED; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'; $FR_SAY"
-        else
-          die "REFUSED — a second whole run on this plan: the first is $FR_FIRST, and the regression reads $(clean "${FR_STATE//	/ }"). Nothing was run. A change after the whole run is proved by a fix row's suites; a second whole run needs the user's word: a row that reads approval:regression-2, and bash ${HOOK_DIR}/session-poker.sh approve regression-2 '<the user's reply>'; $FR_SAY"
-        fi
-        exit 1
-      fi
+      done
     fi
     FR_DIRT="$(_wt_piece_dirt "$FR_CO")"
     FR_DIRTY="$(printf '%s' "$FR_DIRT" | awk 'END { print NR + 0 }')"
@@ -1385,7 +1342,7 @@ DSP_READINGS
     if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -ne 0 ]; then
       FR_PATHS="$(printf '%s\n' "$FR_DIRT" | sed -n '1,5p' | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $0 }')"
       FR_MORE=""; [ "$FR_DIRTY" -le 5 ] || FR_MORE=", and $((FR_DIRTY - 5)) more"
-      die "REFUSED — the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) is dirty (dirty=$FR_DIRTY): $(clean "$FR_PATHS")$FR_MORE. The whole run proves a committed head, and a log of a dirty tree is refused by proof-add regression yet would count as the first whole run; nothing was run and no log was written; commit or stash it and run regression-run again."
+      die "REFUSED — the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) is dirty (dirty=$FR_DIRTY): $(clean "$FR_PATHS")$FR_MORE. The whole run proves a committed head, and a log of a dirty tree is refused by proof-add regression yet would be the head's one whole run; nothing was run and no log was written; commit or stash it and run regression-run again."
       exit 1
     fi
     FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-run.XXXXXX")" || {

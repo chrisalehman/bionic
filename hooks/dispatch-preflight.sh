@@ -228,9 +228,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # string this hook used to carry (spec AC-25, design ledger D3).
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
-# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO (wave-15 REQ-5, D7). The full-run wall
-# at the bottom of this file asks whether any row that writes tracked files is open, and it asks
-# `units_rows` — the library epic-23 wave-11 built to be the only parser of that table.
+# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO (wave-15 REQ-5, D7). Every arm below that reads the
+# table asks `units_rows` — the library epic-23 wave-11 built to be the only parser of that table.
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
@@ -1051,7 +1050,7 @@ fi
 # WHICH ROW A DISPATCH IS: ONE ANSWER, asked here once (wave-28 T55). The brief's `Row:` when it
 # carries one (T7), else the row the Agent call's NAME matches, by the rule `fill_row_launched` uses —
 # the id itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. This arm,
-# T7's Lands-on arm and the full-run wall's regression row all read `DP_BOUND_ROW`; none reads the name
+# and T7's Lands-on arm read `DP_BOUND_ROW`; none reads the name
 # again. A name that is no row's id and a brief with no `Row:` bind nothing, and nothing is judged.
 # A name that matches MORE than one row, with no `Row:`, binds nothing either and is refused, naming the
 # rows it matched but no remedy row (wave-28 T58; the reader below carries the rule).
@@ -1076,7 +1075,7 @@ DP_MINE_AWK='
 # dp_row_reader — sets DP_ROW (the brief's `Row:`, or empty), DP_NAME_ROWS (every plan row the name
 # matches, one per line), DP_NAME_ROW (the first), DP_BOUND_ROW: the row this dispatch is bound to, and
 # DP_BOUND_REC: that row's record, `units_rows`' thirteen cells, read here once (wave-35 T7; burns debt
-# bound-row-read). The approval arm, the full-run wall's regression row and the live-writer arm read their
+# bound-row-read). The approval arm and the live-writer arm read their
 # cells off it with `units_field`; none reads the table again.
 # A name that matches more than one row, with no `Row:` to say which, binds NOTHING and is refused
 # (wave-28 T58): the launch record records no row for such a name either (session-poker NOT-RECORDED),
@@ -1971,8 +1970,8 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # it is that reading one did not depend on the other being clean (wave-14 REQ-8, D3).
 #
 # SO EVERYTHING BELOW THE ATTESTATION POOLS. The arming wall, the approval checkpoint, the
-# lease wall, the budget, the name-in-flight arm, the five brief-shape arms and the
-# full-run wall all call `dp_finding` and carry on. Principle P-A reads the same way
+# lease wall, the budget, the name-in-flight arm and the five brief-shape arms
+# all call `dp_finding` and carry on. Principle P-A reads the same way
 # at a wall as at a precondition: where the machine already has the facts, the machine
 # reports them; asking the model to rediscover them one round trip at a time is a chore on
 # the normal path.
@@ -3051,208 +3050,6 @@ the suite to the brief's Suites: or Files: line so the row runs it.
 Then retry the dispatch."
 fi
 
-# ===================================================== THE FULL-RUN WALL (wave-31 REQ-13, D3, D4)
-# (replaces the map-bounded wall of wave-26 REQ-3 D6, which replaced 1.10's one-regression wall.)
-#
-# ONE WHOLE RUN PER PLAN, AFTER THE BUILD. REQ-13's four rules, in their order: a build row runs
-# the suites its brief names; after the last build row lands, one whole run, when the plan's
-# `regression:` is `yes`; a fix row runs the red suites plus its own; the floor is one whole green
-# run at a commit on the branch plus every later commit proved by the suites its row named
-# (lib/proof.sh). A whole run is a dispatch whose suite set holds `run.sh`, and this wall asks five
-# things of it, in order, and refuses on the first that fails:
-#   1. `regression: no` in the plan's frontmatter (lib/run.sh `plan_frontmatter_get`; an absent key
-#      reads `yes`) refuses it, naming the setting. No approval overrides it (A-orch-36 ruling 4):
-#      the setting is changed by `session-poker.sh regression`, not run around.
-#   2. A row the regression waits on that still writes tracked files refuses it, naming the rows.
-#   3. `covered` refuses it: the working head is the tree the last floor proof read, and nothing
-#      is owed.
-#   4. Otherwise (`uncovered`, whatever the reason: no proof yet, a later commit no run proved, an
-#      outside merge; or `owed`, the whole run's reds not yet run green, wave-35 T10) the plan's FIRST
-#      whole run is admitted.
-#   5. A second is refused, naming the approval, unless the dispatch's bound row reads
-#      `approval:regression-2` and `## SDLC State` carries its `approved: regression-2` line. The
-#      approval wall above is the one reader of both (DP_APPROVAL_WAITS, DP_APPROVALS_HAD), and a
-#      row that reads the approval with no line is already refused there, naming the verb.
-#
-# "LAUNCHED BEFORE" IS A ROSTER FACT (A-orch-36 ruling 3; REQ-13: "the full regression is run.
-# Once."). Any row of any roster of this project (`$STATE_DIR/roster-*.state`, a regular file,
-# never a link) whose `plan=` is this plan and whose `suites_allowed=` holds `run.sh`, red runs
-# included. A refused dispatch writes no row, so only launches count; a `proved: kind=floor` line
-# would count green runs only. The row's fields are read by key through roster.sh's `_roster_kv`.
-#
-# THE HOLD IS ASKED OF THE READY SET (wave-26 T52; review 14 B1, ruling R1). lib/units.sh
-# `units_floor_holds` answers: the rows the regression row waits on through its deps and its
-# reads, judged by the ready set's own program, not landed, that write a tracked file by its
-# `writes_head` — so the release, which waits FOR the regression, never holds it, and a
-# `record/…` path is not tracked. The regression row is the dispatch's own, by `DP_BOUND_ROW`,
-# the one reader (wave-28 T55); a dispatch that binds no row is held by what the plan's open
-# verify and test rows wait on.
-#
-# LOADED LAZILY, LIKE brief.sh's BOUND. proof.sh is sourced at the one arm that spends it, from
-# the directory the loader settled on. A copied hook whose library directory predates proof.sh
-# says `not checked` for this arm rather than refusing a dispatch for a library it cannot see.
-#
-# PLAN-FREE SESSIONS SKIP IT. With no bound plan there is no proof record and no ledger.
-fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each row the regression waits on that writes the head
-  local floor=""
-  [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
-  [ -z "$DP_BOUND_REC" ] || floor="$(units_field "$DP_BOUND_REC" id)"
-  units_floor_holds "$PLAN" "$floor" 2>/dev/null
-}
-# fr_whole_run -> `name<TAB>launched_at` of the earliest whole run any roster of the project holds
-# on this plan; nothing when none does. A row with no stamp is named only when no row has one.
-fr_whole_run() {
-  local f
-  [ -n "$PLAN" ] || return 0
-  for f in "$STATE_DIR"/"$ROSTER_PREFIX"*"$ROSTER_SUFFIX"; do
-    { [ -f "$f" ] && [ ! -L "$f" ]; } || continue
-    FR_PLAN="$PLAN" awk "$_ROSTER_OPEN_AWK"'
-      index($0, "roster-state/") == 1 && _roster_kv($0, "plan") == ENVIRON["FR_PLAN"] \
-        && index(" " _roster_kv($0, "suites_allowed") " ", " run.sh ") {
-        printf "%s\t%s\n", _roster_kv($0, "name"), _roster_kv($0, "launched_at")
-      }' "$f" 2>/dev/null
-  done | awk -F'\t' '
-    n == "" || ($2 != "" && (a == "" || $2 < a)) { n = $1; a = $2 }
-    END { if (n != "" || a != "") printf "%s\t%s\n", n, a }'
-}
-# fr_fit <budget> <item>... -> the items comma-joined while they fit <budget> columns, then
-# ` +<n>` for the rest; at least the first item, cut to the budget, is always named.
-fr_fit() {
-  local budget="$1" out="" shown=0 n=0 full=0 sep cand; shift
-  for cand in "$@"; do
-    n=$((n + 1))
-    [ "$full" -eq 0 ] || continue
-    sep=""; [ -z "$out" ] || sep=", "
-    if [ $((${#out} + ${#sep} + ${#cand})) -le "$budget" ]; then
-      out="$out$sep$cand"; shown=$((shown + 1))
-    else
-      full=1
-    fi
-  done
-  if [ "$shown" -eq 0 ] && [ "$n" -gt 0 ]; then
-    out="$(printf '%s' "$1" | cut -c1-"$budget")"; shown=1
-  fi
-  [ "$shown" -lt "$n" ] && out="$out +$((n - shown))"
-  printf '%s' "$out"
-}
-if [ -z "$SUITES_ALLOWED" ]; then
-  # THE ARM'S OWN DEPENDENCY, STATED (AC-8.2): its whole input is the set built above, and a
-  # brief that produced none leaves it unable to answer rather than answering "no".
-  dp_not_checked "full-run" "a suite set"
-fi
-case " $SUITES_ALLOWED " in
-  *" run.sh "*)
-    if [ -n "$PLAN" ]; then
-      _fr_poker="$(refuse_shell_word "$HOOK_DIR/session-poker.sh")"
-      _fr_open=""
-      # A copied hook whose units.sh predates the regression's holds cannot ask; it says so.
-      if declare -F units_floor_holds >/dev/null 2>&1; then
-        _fr_open="$(fr_open_writers)"
-      else
-        dp_not_checked "full-run hold" "the regression's holds (lib/units.sh units_floor_holds)"
-      fi
-      if [ "$(plan_regression "$PLAN")" = "no" ]; then
-        # RULE 1. The setting, not a run.
-        _dp_detail="The plan declares regression: no (Step 0);
-change it with session-poker.sh regression yes '<reply>', not by running the suite.
-    Plan: ${PLAN}
-
-The setting says this plan owes no whole run, and no approval overrides it: a whole run on a
-plan that declared none is the setting run around, not changed.
-
-Fix: put the setting to the user; on their reply, change it, then retry the dispatch:
-       bash ${_fr_poker} regression yes '<the reply, verbatim>'"
-        dp_finding "the plan declares regression: no" "session-poker.sh regression yes" "$_dp_detail"
-      elif [ -n "$_fr_open" ]; then
-        # RULE 2. A build row still writes the head.
-        _fr_lines=""; _fr_idv=""
-        while IFS=$'\t' read -r _fo_id _fo_step _fo_status; do
-          [ -n "$_fo_id" ] || continue
-          _fr_lines="${_fr_lines}    $(printf '%-4s' "$_fo_id") (step ${_fo_step}, ${_fo_status})
-"
-          _fr_idv="${_fr_idv:+$_fr_idv }$_fo_id"
-        done <<FR_OPEN_ROWS
-$_fr_open
-FR_OPEN_ROWS
-        set -f
-        # shellcheck disable=SC2086
-        _fr_ids="$(fr_fit 9 $_fr_idv)"
-        set +f
-        _dp_detail="The whole run comes once, after the last build row lands. Rows the regression waits on
-still write tracked files, and a run now proves a head that does not survive them landing:
-${_fr_lines}
-Fix: land or drop those rows, then dispatch the whole run."
-        dp_finding "rows write tracked files: ${_fr_ids}" "land them, then dispatch it" "$_dp_detail"
-      else
-        if ! declare -F proof_state >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
-          # shellcheck source=/dev/null
-          . "$BIONIC_LIB/proof.sh"
-        fi
-        _fr_state=""
-        if declare -F proof_state >/dev/null 2>&1; then
-          _fr_state="$(proof_state "$PLAN" "$BIONIC_ROOT" 2>/dev/null)"
-        fi
-        case "$_fr_state" in
-          covered*)
-            # RULE 3. THE RELEASED HEAD IS NAMED (T52; review 14 N6). proof_state says which working
-            # head it judged; an empty change since the proof is covered too (A-T5.5), so that head
-            # can differ from the proof's, and the line names the head being released.
-            _fr_proof="$(proof_last_line "$PLAN" regression 2>/dev/null)"
-            _fr_head="$(proof_last "$PLAN" regression 2>/dev/null)"
-            _fr_short="$(printf '%.7s' "$_fr_head")"
-            _fr_cur="${_fr_state#covered}"; _fr_cur="${_fr_cur#$'\t'}"
-            _fr_tree=""
-            if [ -n "$_fr_cur" ] && [ "$_fr_cur" != "$_fr_head" ]; then
-              _fr_tree=" (the tree proved at ${_fr_short})"
-              _fr_short="$(printf '%.7s' "$_fr_cur")"
-            fi
-            _dp_detail="The working branch's head ${_fr_short}${_fr_tree} is the tree the plan's last regression proof read:
-    ${_fr_proof}
-
-Fix: dispatch no whole run. That proof stands for this head; a change landed after it is
-proved by the suites its row names."
-            dp_finding "head ${_fr_short} is already proved" "keep the regression proof; run nothing" "$_dp_detail" ;;
-          uncovered*|owed*)
-            # RULES 4 AND 5. The first whole run is admitted; a second needs the user's word.
-            # AN OWED FLOOR IS ON THIS ROAD (wave-35 T10; T9 concern 1): `owed<TAB><suites>` says the floor's whole
-            # run was run and left those suites red, each closed by a later green landing of it (a fix row), so a
-            # second whole run is the user's word as on the uncovered road, and the refusal names what is owed.
-            _fr_owed=""
-            case "$_fr_state" in owed*) _fr_owed="${_fr_state#owed}"; _fr_owed="${_fr_owed#$'\t'}" ;; esac
-            _fr_first="$(fr_whole_run)"
-            if [ -n "$_fr_first" ]; then
-              _fr_reads2=""
-              printf '%s\n' "${DP_APPROVAL_WAITS:-}" | awk -F'\t' '$2 == "regression-2" { f = 1 } END { exit !f }' \
-                && _fr_reads2=1
-              # A row that reads the approval with no line is the approval wall's refusal, already
-              # recorded above with the verb; this wall adds nothing to it, and admits it with the line.
-              if [ -z "$_fr_reads2" ]; then
-                _fr_owes=""
-                [ -z "$_fr_owed" ] || _fr_owes="
-The regression's whole run left ${_fr_owed} red, each owed until a later landing runs it green."
-                _dp_detail="A whole run was launched on this plan (${_fr_first%%$'\t'*} at ${_fr_first#*$'\t'}); a second needs the user's word:
-a row that reads approval:regression-2, and session-poker.sh approve regression-2 '<reply>'.
-    Plan: ${PLAN}${_fr_owes}
-
-Step 5 owes the matrix, the walk and the auditor. Step 7 is where the regression is demanded,
-as the judge closes it: one whole run, green or red, each red owed until a later landing
-runs it green, and every later commit proved by the suites its row named. A change after
-the whole run is proved by a fix row, the red suites plus its own.
-
-Fix: dispatch the fix row's suites${_fr_owed:+ (${_fr_owed})}. For a second whole run, add a verify row that reads
-approval:regression-2, head; put it to the user, and on their reply record it:
-       bash ${_fr_poker} approve regression-2 '<the reply, verbatim>'"
-                dp_finding "a second whole run on this plan" "session-poker.sh approve regression-2" "$_dp_detail"
-              fi
-            fi
-            ;;
-          *)
-            dp_not_checked "full-run" "the proof record (lib/proof.sh)" ;;
-        esac
-      fi
-    fi
-    ;;
-esac
 
 # ================== THE ROW'S LIVE WRITER KEEPS ITS TREE (wave-35 T7; REQ-5 AC-5.4, D14)
 #

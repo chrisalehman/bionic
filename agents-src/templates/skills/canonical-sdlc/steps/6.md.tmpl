@@ -18,4 +18,4 @@ By the core's rigor principle, review is one event at Step 6, once the code sett
 
 **The waiver is the user's.** `session-poker.sh waive <question> '<reply>'` writes `waived: question=<q> head=<40-hex> by <git user.name> <ISO-UTC> "<reason>"`, covering that question up to that head. An agent never waives.
 
-**The order.** The readers dispatch when the code settles; the readings and their fix rows come first. At Step 7 the release row (`approval:plan, head`) lands, the user approves its head, then the regression row (`approval:release, head`) runs there. `approval:release` and `approval:merge` sit on the integrate row, each a decision on the review results page.
+**The order.** The readers read the head the regression left green; a required change is a fix row with its own tests, read again where it changed. At Step 7 the release row (`approval:plan, head`) lands and the user approves its head. `approval:release` and `approval:merge` sit on the integrate row, each a decision on the review results page.

@@ -799,4 +799,153 @@ rmdir "$h34d/.bionic/tmp/engaged-$EG_SID.state"
 # rule agrees there. 35b swaps which plan carries the evidence, so the bound session
 # blocks on the OLDER plan while the newest one is clean, which the old rule cannot do.
 
+# ============================================================
+section "§ORDER-VERB, §WHOLE-RUN, §FIX-ROW, §APPROVED-HEAD — build, regression, review, release, approval, merge, through the verbs"
+# ============================================================
+# FIXTURE FIDELITY: one real repository on its working branch; tests/run.sh is a fixture runner printing the real
+# runner's verdict lines (each suite green unless tests/red names it); the plan bound to this session;
+# hooks/session-poker.sh run as that session. The floor proof and the landing lines are written in their writers'
+# shapes (lib/proof.sh proof_floor_line, lib/line.sh's events); the judge reads text whatever wrote it.
+# fails-when: a regression runs beside an open build row or twice at one head, a fixed red asks a second whole run,
+# or current 8 passes at a head the user did not approve.
+OD_SID="6e7f8091-2a3b-4c4d-9e0f-1a2b3c4d5e6f"; OD_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+OD_ROOT="$(mktemp -d)"; cleanup_dirs+=("$OD_ROOT"); OD="$(cd "$OD_ROOT" && pwd -P)/repo"
+OD_RL="record/wave-01-fixture"; OD_REC="$OD/.bionic/docs/$OD_RL"; OD_PLAN="$OD/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$OD/.bionic/tmp" "$OD_REC" "${OD_PLAN%/*}" "$OD/.bionic/docs/specs/epic-99-fixture" "$OD/tests" "$OD/lib"
+od_git() { git -C "$OD" -c user.email=dana@fixture.test "$@"; }
+od_git init -q; od_git config user.name "Dana Fixture"; od_git checkout -q -b wave/01-fixture
+printf '.bionic/\n' > "$OD/.gitignore"; printf 'one\n' > "$OD/lib/b.sh"; : > "$OD/tests/red"
+printf 'true\n' > "$OD/tests/a.test.sh"; printf 'true\n' > "$OD/tests/b.test.sh"
+cat > "$OD/tests/run.sh" <<'OD_RUN'
+#!/bin/bash
+cd "$(dirname "$0")" || exit 1
+p=0; f=0; bad=""; printf 'Gating suites: a.test.sh b.test.sh\n'
+for s in a.test.sh b.test.sh; do
+  if grep -qx "$s" red; then printf '  %s  ✗ FAIL\n' "$s"; f=$((f + 1)); bad="$bad    - $s"$'\n'; else printf '  %s  ✓ PASS\n' "$s"; p=$((p + 1)); fi
+done
+printf 'Gating: %s passed, %s failed\n' "$p" "$f"; [ "$f" -eq 0 ] && exit 0; printf 'Failed:\n%s' "$bad"; exit 1
+OD_RUN
+od_git add -A; od_git commit -qm base; OD_B="$(od_git rev-parse HEAD)"
+: > "$OD/.bionic/tmp/engaged-$OD_SID.state"
+printf '# r\n' > "$OD/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# s\n' > "$OD/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+for od_f in dispatch audit review docs generic-evidence; do printf 'fixture evidence\n' > "$OD_REC/$od_f.md"; done
+od_row() { printf '| %s | %s | %s | %s | %s | — | 30 | REQ-1 | %s | — | — | %s | %s |\n' "$@"; }  # id step kind task agent Files status reads
+od_plan() {  # <current> <SDLC lines> <row>... -> OD_PLAN, bound to this session
+  local cur="$1" sd="$2"; shift 2
+  { printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: %s\nworking-branch: wave/01-fixture\nintegration-branch: main\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$cur"
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: dispatched, %s/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n- T1: landed at %s/dispatch.md\n' "$OD_RL" "$OD_B" "$OD_RL"
+    [ -z "$sd" ] || printf '%s\n' "$sd"
+    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'; printf '%s\n' "$@"
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |\n\nAC-1.1:\n  fails-when: the planted defect this eval must go red on\n'
+    printf '  evidence: %s/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n' "$OD_RL"
+  } > "$OD_PLAN"
+  bound_marker "$OD" "$OD_SID" "$OD_PLAN" >/dev/null 2>&1 || :
+}
+od_rows() {  # <T1 status> <T2 status> <T3 and T4 status> -> the order's rows: build, regression, review, release, integrate
+  od_row T1 4 build 'the lib writer' implementor lib/b.sh "$1" 'approval:plan'
+  od_row T2 5 test 'the whole regression' test-runner — "$2" 'approval:plan, head'
+  od_row T3 6 review 'the critic' critic .bionic/docs/record/w/T3.md "$3" 'approval:plan, head'
+  od_row T4 7 doc 'the release' implementor README.md "$3" 'approval:plan, head'
+  od_row T5 8 integrate 'merge into main' orchestrator — pending 'approval:release, approval:merge, head'
+}
+od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in the repository
+  OD_RC=0
+  OD_OUT="$(cd "$OD" && env CLAUDE_CODE_SESSION_ID="$OD_SID" HOME="$OD_ROOT/home" CLAUDE_CONFIG_DIR="$OD_ROOT/config" \
+    BIONIC_GATE_DIR="$OD_ROOT/gate" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" "$@" 2>&1)" || OD_RC=$?
+}
+od_logs() { find "$OD_REC" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
+od_lrec() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$OD_LIB" "$OD_PLAN" || printf '%s/none' "$OD_ROOT"; }
+od_state() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_state "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null | cut -f1; }
+
+od_plan 4 '' "$(od_rows pending pending pending)"
+cp "$OD_PLAN" "$OD_ROOT/before"
+od_poke task-add T9 7 test 'a second regression' test-runner — 90 REQ-1 .bionic/docs/record/w/T9.md 'approval:plan, head'
+expect_eq "OV-1 AC-7.1 task-add of a regression row after the review and the release is refused (exit 1)" "1" "$OD_RC"
+expect_contains "OV-1b …on the validator's line, naming the rows" \
+  "T9: the regression row comes after the review row T3; the order is build, regression, review, release: put T9 at step 5, ahead of T3" "$OD_OUT"
+expect_true "OV-1c …and the plan is byte-identical" cmp -s "$OD_ROOT/before" "$OD_PLAN"
+
+od_plan 5 '' "$(od_rows pending pending pending)"
+od_poke regression-run
+expect_eq "WR-1 AC-6.1 a build row open: regression-run refuses (exit 1), and nothing ran" "1|0" "$OD_RC|$(od_logs)"
+expect_contains "WR-1b …naming the open row" "T1 (step 4, pending)" "$OD_OUT"
+od_plan 5 '' "$(od_rows landed pending pending)"
+od_poke regression-run
+expect_eq "WR-2 AC-6.1 every build row landed: one whole run at the head (exit 0, one log)" "0|1" "$OD_RC|$(od_logs)"
+expect_eq "WR-2b …recording one verdict per suite at that commit" "2" \
+  "$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_B|" "$(od_lrec)" 2>/dev/null || :)"
+od_poke regression-run
+expect_eq "WR-3 AC-6.1 a second whole run at the same green head: refused (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
+expect_contains "WR-3b …saying the head has its whole run" "runs once at a head" "$OD_OUT"
+
+printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
+od_poke regression-run
+expect_eq "FX-1 the whole run at a new head H runs, red (exit 1, a second log)" "1|2" "$OD_RC|$(od_logs)"
+OD_FL="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z "$3" b.test.sh' _ "$OD_LIB" "$OD_H" "$OD_RL/regression-run-$OD_H.log")"
+od_plan 5 "$OD_FL" "$(od_rows landed landed pending)"
+expect_eq "FX-1b precondition: the regression at H owes the red suite" "owed" "$(od_state)"
+: > "$OD/tests/red"; printf 'two\n' > "$OD/lib/b.sh"; od_git commit -qam 'T6: the fix'; OD_C="$(od_git rev-parse HEAD)"
+OD_S2="$(od_state)"
+expect_true "FX-2 the fix commit C with no run of its own is not covered (FX-1b and FX-3 read the same extractor)" test -n "$OD_S2" -a "$OD_S2" != covered
+{ printf 'line/v1|ev=ready|row=T6|suites=tests/a.test.sh,tests/b.test.sh|at=2026-10-12T12:00:00Z\n'
+  printf 'line/v1|ev=published|row=T6|commit=%s|at=2026-10-12T12:10:00Z\n' "$OD_C"
+  for od_s in a.test.sh b.test.sh; do
+    printf 'line/v1|ev=verdict|row=T6|commit=%s|suite=%s|result=green|log=/fixture/T6.log|at=2026-10-12T12:05:00Z\n' "$OD_C" "$od_s"
+  done; } >> "$(od_lrec)"
+expect_eq "FX-3 AC-6.2 the fix row green on its own suite and the red one: the head is accepted" "covered" "$(od_state)"
+od_poke regression-run
+expect_eq "FX-4 AC-6.2 …and no second whole run is asked: regression-run at C refuses (exit 1), no log" "1|2" "$OD_RC|$(od_logs)"
+expect_contains "FX-4b …saying the head is proved" "is already proved" "$OD_OUT"
+od_git checkout -q -b row/T7; printf 'three\n' > "$OD/lib/b.sh"; od_git commit -qam 'T7: a second fix'; OD_R="$(od_git rev-parse HEAD)"
+od_git checkout -q wave/01-fixture; od_git merge -q --no-ff -m 'land T7 by hand' row/T7; OD_M="$(od_git rev-parse HEAD)"
+OD_S3="$(od_state)"
+expect_true "HL-1 a hand landing M with no verdict recorded is not covered (HL-2 reads the same extractor)" test -n "$OD_S3" -a "$OD_S3" != covered
+printf 'line/v1|ev=verdict|row=T7|commit=%s|suite=b.test.sh|result=green|log=/fixture/T7.log|at=2026-10-12T12:20:00Z\n' "$OD_R" >> "$(od_lrec)"
+expect_eq "HL-2 AC-6.2 …and covered by the row's green verdict keyed by the row head M brought in" "covered" "$(od_state)"
+
+printf '# fixture\n' > "$OD/README.md"; od_git add README.md; od_git commit -qm 'T4: the release'; OD_A="$(od_git rev-parse HEAD)"
+od_reads() {  # the five readings a double wave plan is dealt, at A
+  local q
+  for q in evidence adversarial structure; do
+    printf 'question: %s\nresult: pass\nscope: piece\nreviewed: %s..%s\nfindings: 0\n' "$q" "${OD_B:0:10}" "${OD_A:0:10}" > "$OD_REC/$q.md"
+    bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-12T13:00:00Z "$3" "$4" w-read pass piece' _ "$OD_LIB" "$OD_A" "$OD_RL/$q.md" "$q"
+  done
+  for q in adversarial structure; do
+    printf 'question: %s\nresult: pass\nscope: whole\nreviewed: %s..%s\nfindings: 0\n' "$q" "${OD_B:0:10}" "${OD_A:0:10}" > "$OD_REC/$q-whole.md"
+    bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-12T13:00:00Z "$3" "$4" w-read pass whole' _ "$OD_LIB" "$OD_A" "$OD_RL/$q-whole.md" "$q"
+  done
+}
+od_appr() { printf 'approved: release by Dana Fixture 2026-10-12T14:00:00Z head=%s "Ship it."' "$1"; }
+od_s8() {  # <approval line> -> the plan at current: 8, every row but integrate landed
+  local st
+  st="$(printf -- '- Step 5: verified, %s/audit.md\n  auditor: CONFIRMED, %s/audit.md\n- Step 6: review at %s/review.md\n' "$OD_RL" "$OD_RL" "$OD_RL")"
+  st="$st"$'\n'"$(printf -- '- Step 7: documented at %s/docs.md\n  n/a: no decision this run' "$OD_RL")"$'\n'"$OD_FL"$'\n'"$(od_reads)"
+  od_plan 8 "${1:+$1$'\n'}$st" "$(od_rows landed landed landed)"$'\n'"$(od_row T6 5 build 'the fix' implementor lib/b.sh landed 'approval:plan')"$'\n'
+}
+od_s8 "$(od_appr "$OD_A")"
+expect_eq "AH-0 precondition: the plan is in the order, the regression row named" "T2" \
+  "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null || :)"
+od_poke current 8 --check
+expect_eq "AH-1 AC-7.2 approved head A, the working head A, the whole run at H with C fixed on its suites: passes" "0" "$OD_RC"
+od_s8 "$(od_appr "$OD_C")"
+od_poke current 8 --check
+expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
+expect_contains "AH-2b AC-7.2 …naming both heads" \
+  "the working head ${OD_A:0:12} is not the head the user approved for release, ${OD_C:0:12}" "$OD_OUT"
+od_s8 'approved: release by Dana Fixture 2026-10-12T14:00:00Z "Ship it."'
+od_poke current 8 --check
+expect_eq "AH-3 an approval line that names no head: refused (exit 1), saying so" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
+od_s8 ''
+od_poke current 8 --check
+expect_eq "AH-4 no approved: release line: refused (exit 1), naming the verb that writes it" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+
 finish

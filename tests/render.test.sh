@@ -502,10 +502,10 @@ expect_contains "14a: the Step-5 opening paragraph is found (the extractor is no
 expect_contains "14b: …and names the matrix as owed" "matrix" "$_dc_owed"
 expect_contains "14c: …and the walk" "walk" "$_dc_owed"
 expect_contains "14d: …and the auditor" "auditor" "$_dc_owed"
-expect_contains "14e: …and hands the regression to Step 7" "Step 7" "$_dc_owed"
+expect_contains "14e: …and owes the regression at Step 5" "the auditor and the regression" "$_dc_owed"
 _dc_reg=$(rt_para "$S5" '^\*\*The regression, once')
-expect_contains "14f: the regression paragraph is found, and places the whole run after the release" "After the release" "$_dc_reg"
-expect_contains "14g: …at the approved head" "at the approved head" "$_dc_reg"
+expect_contains "14f: the regression paragraph is found, and places the whole run after the build" "After the last build row lands" "$_dc_reg"
+expect_contains "14g: …and asks no second run of a fixed red" "with no second run" "$_dc_reg"
 _dc_read=$(rt_para "$S5" '^\*\*The whole read, once')
 expect_contains "14h: the readers' dispatch paragraph is found (it dispatches the readers)" "dispatch the readers" "$_dc_read"
 expect_absent "14i: …and does not wait on the whole run" "full run" "$_dc_read"
@@ -517,18 +517,18 @@ _dc_s6b=$(rt_para "$S6" '^\*\*The reading, once')
 expect_contains "14m: the reading paragraph is found (it says the readers are dispatched)" "dispatched once" "$_dc_s6b"
 expect_absent "14n: …and does not wait on the regression" "regression" "$_dc_s6b"
 _dc_last=$(rt_last_para "$S6")
-expect_contains "14o: Step 6's last paragraph is the order, ending on the regression row" "the regression row" "$_dc_last"
-expect_contains "14p: …which runs after the release row lands" "lands, the user approves its head, then the regression row" "$_dc_last"
+expect_contains "14o: Step 6's last paragraph is the order, reading the head the regression left green" "the regression left green" "$_dc_last"
+expect_contains "14p: …then the release row lands and the user approves its head" "lands and the user approves its head" "$_dc_last"
 _dc_row5=$(/usr/bin/grep -E '^\| 5 \| `head:`' "$REPO/skills/canonical-sdlc/SKILL.md")
 expect_contains "14q: the core's Step-5 field row is found (it names the matrix)" "Verification Matrix" "$_dc_row5"
-expect_contains "14r: …and puts the whole run in Step 7" "Step 7" "$_dc_row5"
+expect_contains "14r: …and puts the whole run in Step 5" "Step 5's" "$_dc_row5"
 _dc_tbl5=$(/usr/bin/grep -E '^\| 5 Verify \|' "$REPO/skills/canonical-sdlc/SKILL.md")
 expect_contains "14s: the core's Verify row is found (it names the walk)" "alk" "$_dc_tbl5"
-expect_absent "14t: …and no longer owes the regression at Step 5" "regression" "$_dc_tbl5"
+expect_contains "14t: …and owes the regression at Step 5" "regression run once" "$_dc_tbl5"
 for _dc_role in auditor test-runner; do
   _dc_rb=$(cat "$REPO/agents/$_dc_role.md" 2>/dev/null)
   expect_contains "14u: agents/$_dc_role.md carries its role section (not vacuous)" "## Role" "$_dc_rb"
-  expect_contains "14v: …and says the regression is Step 7's" "Step 7" "$_dc_rb"
+  [ "$_dc_role" != test-runner ] || expect_contains "14v: …and says the regression is Step 5's, after the build" "Step 5 after the build" "$_dc_rb"
   expect_contains "14w: …naming the regression" "regression" "$_dc_rb"
 done
 # The stale sentences other rows found.
@@ -553,11 +553,11 @@ _or_line() { /usr/bin/grep -n -E "$2" "$1" | head -1 | cut -d: -f1; }
 _or_readers=$(_or_line "$S6" '^\*\*The readers\.')
 _or_rel=$(_or_line "$S6" 'release')
 _or_disp=$(_or_line "$S6" '^\*\*The disposition\.')
-_or_floor=$(_or_line "$S6" 'the regression row')
+_or_floor=$(_or_line "$S6" '^\*\*The order\.')
 expect_true "15a: the readers' paragraph is found in steps/6.md" test -n "$_or_readers"
 expect_true "15b: the release text is named in steps/6.md" test -n "$_or_rel"
 expect_true "15c: the readers come before the release text" test "${_or_readers:-999}" -lt "${_or_rel:-0}"
-expect_true "15d: the disposition is found, and the regression comes after it" test -n "$_or_disp" -a "${_or_floor:-0}" -gt "${_or_disp:-999}"
+expect_true "15d: the disposition is found, and the order comes after it" test -n "$_or_disp" -a "${_or_floor:-0}" -gt "${_or_disp:-999}"
 _or_rl=$(/usr/bin/grep -E 'release' "$S6")
 expect_contains "15e: the release text waits on the plan alone" 'approval:plan' "$_or_rl"
 expect_contains "15f: approvals sit on the integrate row" "integrate" "$_or_rl"
@@ -566,7 +566,7 @@ expect_contains "15h: …and the merge approval" 'approval:merge' "$_or_rl"
 # THE ONE-STOP RULE (wave-38 T3; D18, D19, AC-1.6): the release row lands at Step 7, after the readings, and its
 # approvals are options on the final card; no rendered skill keeps a card per approval.
 expect_contains "15k: the release row lands at Step 7, after the readings" "At Step 7 the release row" "$_or_rl"
-expect_contains "15l: …and each approval is an option on the final card" "each an option on the final card" "$_or_rl"
+expect_contains "15l: …and each approval is a decision on the review results page" "each a decision on the review results page" "$_or_rl"
 _or_gone='keeps its own card\|keeps its card\|never wait on the release text'
 expect_eq "15m: AC-1.6 no skill keeps a card per approval, nor holds the readers off the release text" "" \
   "$(cd "$REPO" && /usr/bin/grep -rn "$_or_gone" skills/ payload/skills/decision 2>/dev/null)"
