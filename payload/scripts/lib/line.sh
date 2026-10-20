@@ -552,7 +552,8 @@ EOF
 # `spawn-worktree.sh land <tree> --by-hand --reason '<why>'` (D9, AC-5.1): the person's landing.
 # The tree is judged as land judged it (lib/worktree.sh `_wt_land_checks`) and by the `.bionic` guard
 # on the accepted head and the row's head, before anything is written; then the row enters the line,
-# its candidate is built on the base rule's base, nothing runs, and it publishes through
+# its candidate is built on the base rule's base, no suite runs, the comment lint reads the candidate's added
+# comments as the queue's does, and it publishes through
 # `line_publish`, the queue's one publish and lock. Its carrier is this call, in a subshell of its
 # own: when it ends, published or not, its entry holds nothing.
 # THE WRITER'S VERDICTS, IN THE PERSON'S WORDS. A hand landing runs nothing, so what it records of the
@@ -578,7 +579,7 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" "$suites" "$at" "$log" )
 }
 _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <log> — the carrier's own subshell
-  local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt rc i n s g=""
+  local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt rc i n s g="" lo lc
   _wt_land_checks "$target" "$onto" "$plan" 0 || return 2
   wt="$_WT_ABS"; root="$_WT_ROOT"; branch="$_WT_BRANCH"
   head="$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)"
@@ -617,6 +618,16 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
         line_event "$plan" returned "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
         _wt_refuse "conflict branch=${branch} onto=${onto} files=${c:-<unreadable>} — the row does not merge onto what is ahead of it; merge ${onto} into the tree, land again"; rc=2; break
       fi
+      # The comment lint the queue runs (`_line_carry` 3b), over the same range: a comment the row adds that cites
+      # the run returns the row with a LINT line per hit, and nothing publishes.
+      lo="$(_line_comment_lint "$root" "$base" "$c")"; lc=$?
+      case $lc in
+        0) ;;
+        1) line_event "$plan" returned "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
+           printf '%s\n' "$lo" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
+           _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
+        *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
+      esac
       line_event "$plan" candidate "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
       line_publish "$plan" "$row"; rc=$?
       [ "$rc" = 3 ] || break
