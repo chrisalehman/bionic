@@ -631,6 +631,27 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSE" run
 
 # ============================================================
+section "§APPROVED-HEAD — REQ-7 AC-7.2: in the release order, close-out refuses a working head that is not the head the user approved"
+# ============================================================
+# `current 8` admits the release order's Step 8 at the approved head (canonical-sdlc-evidence-gate-2 AH-2); close-out
+# asks the same of the head it closes, so a code commit landed after the approval is refused, naming both heads.
+# FIXTURE FIDELITY: mk_fixture with a regression row and a release row, its facts held at the working head B; the
+# approval lines are the approve verb's shape, the newest one read.
+# fails-when: run closes the plan with the newest approval at B's parent A and code between them.
+PAH="$(mk_fixture approved-head)"
+awk '{ print } /^\| T2 \|/ { print "| T3 | 5 | test | the whole regression | test-runner | — | 10 | AC-1 | — | landed | |"; print "| T4 | 7 | doc | the release | implementor | — | 10 | AC-1 | CHANGELOG.md | landed | |" }' \
+  "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.r" && mv "$PAH/$PLAN_REL.r" "$PAH/$PLAN_REL"; advance_to "$PAH" 8
+AH_B="$(fixture_git "$PAH" rev-parse wave/01-fixture)"; AH_A="$(fixture_git "$PAH" rev-parse wave/01-fixture^)"
+ah_appr() { awk -v l="approved: release by Dana Fixture 2026-10-12T14:00:00Z head=$1 \"Ship it.\"" '/^- Step 7:/ && !d { print l; d = 1 } { print }' \
+  "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.a" && mv "$PAH/$PLAN_REL.a" "$PAH/$PLAN_REL"; }
+ah_appr "$AH_B"; run_close "$PAH" check
+expect_contains "AH-C0 control: the plan is in the order, approved at the working head B, and check reads every fact holding at B" \
+  "facts: every fact the run owes holds at $AH_B" "$CO_OUT"
+ah_appr "$AH_A"; AH_CK0="$(cksum < "$PAH/$PLAN_REL")"; run_close "$PAH" run
+expect_eq "AH-C1 AC-7.2 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, the plan unchanged" \
+  "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")"
+
+# ============================================================
 section "§ASKS-NOTHING — wave-38 T15 (D17; AC-1.6, AC-1.7): close-out puts no question to the user"
 # ============================================================
 # Close-out asks nothing: no `read` in close-out.sh reaches a terminal (every one is a loop fed by a here-string, a
