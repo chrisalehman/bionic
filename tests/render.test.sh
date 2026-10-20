@@ -566,7 +566,7 @@ expect_contains "15h: …and the merge approval" 'approval:merge' "$_or_rl"
 # THE ONE-STOP RULE (wave-38 T3; D18, D19, AC-1.6): the release row lands at Step 7, after the readings, and its
 # approvals are options on the final card; no rendered skill keeps a card per approval.
 expect_contains "15k: the release row lands at Step 7, after the readings" "At Step 7 the release row" "$_or_rl"
-expect_contains "15l: …and each approval is an option on the final card" "each an option on the final card" "$_or_rl"
+expect_contains "15l: …and each approval is a decision on the review results page" "each a decision on the review results page" "$_or_rl"
 _or_gone='keeps its own card\|keeps its card\|never wait on the release text'
 expect_eq "15m: AC-1.6 no skill keeps a card per approval, nor holds the readers off the release text" "" \
   "$(cd "$REPO" && /usr/bin/grep -rn "$_or_gone" skills/ payload/skills/decision 2>/dev/null)"
