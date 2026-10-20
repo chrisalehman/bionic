@@ -6,7 +6,7 @@
 # the user: four bold labels in order (Goal, Options, Recommendation, Significance), a numbered
 # Options list, and one reply line last. The labels and the reply line are an INTERFACE: a script
 # can read decisions back out of the transcripts by them, so they are fixed strings, and this suite
-# is what fixes them (AC-11.6). Nothing runs at decision time; the shape is held here, in the text.
+# is what fixes them. The shape is held here, in the text; a put during a run is one verb of the run's script.
 #
 # EVERY CHECK IS A PREDICATE OVER A FILE. The shipped skill must pass each one, and §PIN hands the
 # same predicates doctored copies — a renamed label, a dropped altitude clause, text after the reply
@@ -49,8 +49,8 @@ CORE_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"
 STEP2_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl"
 HEADING='**D<n> · <what is decided, in a few words>**'
 KINDS='How a rule is enforced|How a shared resource is shared|What a wave builds'
-# The skill's size cap (AC-12.4): raised from 5,000 bytes to carry the three worked pairs.
-SIZE_CAP=10000
+# The skill's size cap: raised to carry the worked pairs and the put command.
+SIZE_CAP=11000
 REPLY_LINE='Reply 1, 2 or 3 · or matrix, diagram, page'
 LABELS='Goal Options Recommendation Significance'
 
@@ -146,6 +146,12 @@ forms_ok() {
   vr="$(grep -iE 'video|raster' "$1")"
   [ -n "$vr" ] || return 1
   ! grep -viq 'never' <<<"$vr"
+}
+
+# put_ok <file> — the put command is named, and the layout's Significance ends on the line it prints.
+put_ok() {
+  grep -qF "decisions put D<n> '" "$1" || return 1
+  layout "$1" | grep -E '^\*\*Significance:\*\*' | grep -qi 'wait line'
 }
 
 # desc_of <file> -> the front-matter description line's text (the line the model reads to decide to invoke).
@@ -327,13 +333,13 @@ doctor "$SKILL" "$TMP/climb.md" 's/^(\*\*Goal:\*\*)/\1 climb/'
 expect_true "16a: the forbidden-word copy carries the plant" grep -qw 'climb' "$TMP/climb.md"
 expect_false "16b: a copy naming climb fails the words pin" words_ok "$TMP/climb.md"
 
-# Nothing is run or written per decision: the skill is text only, and says so. A relation, not a
-# count — markdown may join SKILL.md later; a script, a hook or a store may not.
+# The skill directory is text only: markdown may join SKILL.md later; a script, a hook or a store may not. A put
+# during a run is the run script's verb, and the line it prints is the last of Significance, never typed.
 expect_true "17a: the skill directory holds SKILL.md" test -f "${REPO}/skills/decision/SKILL.md"
 expect_empty "17b: …and nothing that is not markdown (no script, hook or store runs per decision)" \
   "$(find "${REPO}/skills/decision" -type f ! -name '*.md')"
-expect_true "18: the skill states nothing is run or written per decision" \
-  grep -qi 'nothing is run or written' "$SKILL"
+expect_true "18: during a run a put is the put verb, and its wait line ends Significance" put_ok "$SKILL"
+expect_false "18b: …and the skill no longer says a put writes nothing" grep -qi 'nothing is run or written when a decision is put' "$SKILL"
 
 section "§SIZE — at most ${SIZE_CAP} bytes, listed in the README, no person named (AC-11.7, AC-12.4)"
 

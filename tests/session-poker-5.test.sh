@@ -481,6 +481,56 @@ expect_eq "DG-6b AC-7.1 the recap's settled: lines are the same eight, in the sa
 expect_eq "DG-6c …and the recap lists every entry of the ledger as settled: (3 + 5 + 2)" "10" "$(printf '%s\n' "$OUT" | grep -c '^settled: D')"
 
 # ============================================================
+section "§ROUNDS: decisions put writes a put line to the run's ledger and its ruling closes it, so the sitrep's decisions line counts rounds; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
+# ============================================================
+# A put opens a round and the next ruling of the same number closes it; a ruling with no put open is a round of its
+# own, the shape of a ledger written before puts. The wait line reads the tasks whose reads cell names the decision
+# as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, §DECISIONS's
+# plan shape with a reads column, the ruling headings in the register's grammar written as the person's word is.
+# fails-when: a re-put is uncounted; the wait line is absent, or reads the same whether its task is on the chain.
+RW="$(make_repo rounds)"; PW="$(s34_plan "$RW" 4)"
+RW_L="$RW/.bionic/docs/record/wave-01-fixture/design-ledger.md"; mkdir -p "${RW_L%/*}"
+rw_table() {  # <the side task's size> -> the task table: a side task reads one decision; the last reads another and the long one's file
+  awk -v s="$1" '/^## Tasks/ { print; print ""; print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the first | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | approval:plan |"
+    print "| T2 | 4 | build | the side | implementor | — | " s " | REQ-1 | b.sh | — | — | pending | approval:plan, approval:D7 |"
+    print "| T3 | 4 | build | the long | implementor | — | 200 | REQ-1 | c.sh | — | — | pending | approval:plan |"
+    print "| T4 | 4 | build | the last | implementor | — | 100 | REQ-1 | d.sh | — | — | pending | approval:plan, c.sh, approval:D8 |"
+    print ""; skip = 1; next } skip && /^## / { skip = 0 } !skip' "$PW" > "$PW.t" && mv "$PW.t" "$PW"
+}
+rw_table 30
+printf '# design ledger\n\n## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds\n' > "$RW_L"
+rw_rule() { printf '\n## Δ%s — D3 %s (Dana Fixture 2026-10-06): the third\n' "$1" "$2" >> "$RW_L"; }  # the person's word, as recorded
+rw_line() { poke "$RW" sitrep; printf '%s\n' "$OUT" | grep ' decisions — '; }
+poke "$RW" decisions put D3 'the third'
+expect_eq "RD-1 decisions put exits 0 on the bound run" "0" "$RC"
+expect_eq "RD-1b …and writes one put line for it to the run's ledger" "1" "$(grep -c '^## Δ[0-9]* — D3 put (' "$RW_L")"
+rw_rule 50 'ruled "1"'; poke "$RW" decisions put D3 'the third, again'; rw_rule 51 'amended "2"'
+RD_TWO="$(rw_line)"
+poke "$RW" decisions put D3 'the third, once more'; rw_rule 52 'amended "3"'; poke "$RW" decisions put D2 'the second'
+expect_contains "RD-2 two puts, each ruled, read as two rounds" "D3 two" "$RD_TWO"
+expect_eq "RD-3 …a third reads three, beside a ruling with no put (one round) and a put still open" \
+  "✖️ decisions — 2 ruled in 5 rounds; D1 and D2 one each, D3 three; D2 open" "$(rw_line)"
+poke "$RW" decisions
+expect_contains "RD-4 the register still lists the rulings" 'D3 · amended "3"' "$OUT"
+expect_absent "RD-4b …and no put (RD-4 read the same output)" " put" "$OUT"
+poke "$RW" decisions put 7 'no number'
+expect_eq "RD-5 a put that names no D<n> is refused, the ledger unchanged" "1|4" "$RC|$(grep -c ' put (' "$RW_L")"
+poke "$RW" decisions put D8 'on the chain'; RW_ON="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+poke "$RW" decisions put D7 'off the chain'; RW_OFF="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+poke "$RW" decisions put D9 'read by none'; RW_NONE="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+expect_contains "WT-1 a task on the longest chain reads it: an hour's wait moves the close" "the predicted close moves an hour later" "$RW_ON"
+expect_contains "WT-1b …and names that task" "T4" "$RW_ON"
+expect_contains "WT-2 a task off the chain reads it: that task starts an hour later and the close holds" \
+  "T2 starts an hour later and the predicted close holds" "$RW_OFF"
+expect_contains "WT-3 no task reads it: nothing moves" "nothing moves" "$RW_NONE"
+expect_true "WT-4 the put line in the ledger carries its wait line" grep -qF "${RW_ON#wait: }" "$RW_L"
+rw_table 500; poke "$RW" decisions put D7 'off the chain, now on it'
+expect_contains "WT-5 the side task made the longest: the same decision's line now moves the close" \
+  "the predicted close moves an hour later" "$(printf '%s\n' "$OUT" | grep '^wait: ')"
+
+# ============================================================
 section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines while an integrate row is open (wave-38 T3; REQ-1 AC-1.2; D20)"
 # ============================================================
 # The final card refuses to render while a reader is open, a reading is unregistered at the head, or the advance to
