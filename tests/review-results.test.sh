@@ -498,7 +498,11 @@ section "§BORN: two fix rows born of different questions' findings render the p
 fc_record structure structure piece 'finding: 1 S3 off lib/x.sh:1 the x writer repeats the y writer'
 FC_F1="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
 FC_F2="$(s57_commit "$RFC" lib/x.sh 'T5: the fix the structure reading asked for')"
-fc_published() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-12T14:00:00Z\n' "$1" "$2" "$1"; }
+fc_published() {  # <row> <commit> -> a landing's events: its suites ready, its green verdict at the commit, published
+  printf 'line/v1|ev=ready|row=%s|suites=tests/a.test.sh|at=2026-10-12T13:50:00Z\n' "$1"
+  printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=a.test.sh|result=green|log=/fixture/%s.log|at=2026-10-12T13:55:00Z\n' "$1" "$2" "$1"
+  printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-12T14:00:00Z\n' "$1" "$2" "$1"
+}
 { fc_published T4 "$FC_F1"; fc_published T5 "$FC_F2"; } > "$FC_REC/landing-proofs.log"
 fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding
   fc_plan "$FC_GOOD

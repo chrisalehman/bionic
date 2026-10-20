@@ -1817,7 +1817,7 @@ PROOF_PAST_FILES
 # proof_owed_suites <plan> <tree> [<head>] -> `*` when <head> (default: the working branch's ref, `proof_branch_head`)
 # owes a whole run: it is not F, the head of the regression's newest link (`_proof_floor_base`), or there is none.
 # Nothing at F; a waiver makes its own head F. No suite is ever named: the suites F's whole run left red (`owed=`)
-# are the judge's. Read by the judge's refusal, the tick's wait reason, `regression-run` and `card.sh final`.
+# are the judge's.
 # Exit 0; 1 when the plan or the head cannot be read.
 proof_owed_suites() {
   local plan="${1:-}" tree="${2:-}" c="${3:-}"

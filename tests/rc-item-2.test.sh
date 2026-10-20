@@ -138,6 +138,23 @@ t75_b3_plant() {  # <file> <shape>
     envten)   printf '%s\n' 'export A=1' "$ENVB_START" 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=10' "$ENVB_END" 'export SECRETTOKEN=1' > "$1" ;;
   esac
 }
+# --all ASKS ONCE, OVER ITS PAGE, so for that door "never asked about" means "not on the page". The page is
+# measured against two twin homes per shell, the same rc without the alias block and with bionic's own block
+# intact: the intact block is one more line on the page, and a changed block must be no line at all.
+t75_page_n() { printf '%s\n' "$1" | awk '$0 == "bionic would:" { p = 1; next } p && $0 == "" { exit } p { n++ } END { print n + 0 }'; }
+t75_twin_page() {  # <shell> <none|intact> -> the line count of the --all page for that twin
+  local sb rc; T66_SHELL="/bin/$1"; sb="$(new_sandbox)"; rc="$(t66_rc "$sb")"
+  case "$2" in
+    none)   printf '%s\n' 'export A=1' 'export B=2' > "$rc" ;;
+    intact) printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$rc" ;;
+  esac
+  t66_pageblock >> "$rc"
+  t75_page_n "$(t66_door "$sb" setup-all n)"
+  rm -rf "$sb"
+}
+T75_PG_bash="$(t75_twin_page bash none)"; T75_PG_zsh="$(t75_twin_page zsh none)"
+expect_eq "T75 B3 (bash): an intact alias block is one line on the --all page" "$((T75_PG_bash + 1))" "$(t75_twin_page bash intact)"
+expect_eq "T75 B3 (zsh): an intact alias block is one line on the --all page" "$((T75_PG_zsh + 1))" "$(t75_twin_page zsh intact)"
 for T75_SHAPE in userline useronly envten; do
   case "$T75_SHAPE" in envten) T75_DL="rm-payload:environment rm-standalone:environment rm-all:environment" ;;
     *) T75_DL="setup-only:legacy-alias setup-all:legacy-alias rm-payload:legacy-alias rm-standalone:legacy-alias rm-all:legacy-alias" ;; esac
@@ -156,6 +173,8 @@ for T75_SHAPE in userline useronly envten; do
       expect_contains "${T75_L}: …named by its lines as changed since bionic wrote it" "$T75_LINES" "$(report_row "$T75_OUT" "changed since bionic wrote it")"
       expect_absent "${T75_L}: …the user's text is never printed" "SECRETTOKEN" "$T75_OUT"
       case "${T75_D%%:*}" in
+        setup-all) T75_PG="$T75_PG_bash"; [ "$T75_SH" = zsh ] && T75_PG="$T75_PG_zsh"
+                   expect_eq "${T75_L}: …and the page does not offer it" "$T75_PG" "$(t75_page_n "$T75_OUT")" ;;
         *) expect_absent "${T75_L}: …and nothing is asked" "[y/N]" "$T75_OUT" ;;
       esac
     done
