@@ -19,6 +19,11 @@
 #                   exits 1 in one line naming it; all present is green; a sentence elsewhere in the entry or
 #                   only under an older entry is an omission; no stated deferral, and no plan naming the
 #                   release, each pass with one `known-limits:` line saying so.
+#   §FROM-REPORT    `release-note` renders the entry's landing numbers: `landing-report --rows` over the landing
+#                   record through the head's last landing. The check renders them again at the head the entry names
+#                   and refuses a number that disagrees, naming both; the gate's killed count is not held to it.
+#   §LAST           a landing the entry's head does not hold, other than the one that carried the entry, refuses it
+#                   until the entry is rendered again.
 #   §STRIKE         the 1.17.0 block against the strike list of ten (wave-34 REQ-6, AC-6.1, AC-6.2,
 #                   AC-1.5): each of the ten 1.16.0 Known limits is struck with a record or carried
 #                   with a sentence that says why, no other 1.16.0 bullet vanishes, the count of
@@ -268,6 +273,58 @@ lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
 run_check "$R"
 expect_status "(l6) …positive, the same repository once the plan names 2.3.4: the omissions fail it" 1 "$RC"
 expect_eq "(l6) …one line for each of the two sentences" "2" "$(lines_of "$OUT")"
+
+section "§FROM-REPORT — release-note renders the landing numbers at a head; the check holds the entry to them"
+
+# FIXTURE FIDELITY: the run's plan names 2.3.4, and its landing record holds, in the line's event shapes, a queue
+# landing at L1 and a hand landing at L2. The entry is rendered at L2 and committed as E, which a hand landing
+# carries; a third row then lands L3 on top. The poker runs from the fixture as a user runs it. SYNTHESIZED: the events.
+POKER="${BIONIC_SCRIPTS_DIR}/hooks/session-poker.sh"; RN_PLAN=".bionic/docs/plans/epic-01/wave-01.plan.md"
+rn_pub() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=%s|by=t|why=w|at=%s\n' "$@" >> "$RN_REC"; }
+rn_commit() {  # <file> -> commit a change to it, print the head
+  printf '%s\n' "$1" > "$R/$1"; git -C "$R" add -A; git -C "$R" commit -q -m "$1"; git -C "$R" rev-parse HEAD
+}
+rn_entry() {  # <release-note output> -> commit a CHANGELOG whose 2.3.4 entry carries it, print the head
+  { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n%s\n## 0.0.1 — 2026-01-01\n\n- first\n' "${1%rc=0}"
+  } > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "the entry"; git -C "$R" rev-parse HEAD
+}
+rn_note() { (cd "$R" && bash "$POKER" release-note "$@" "$RN_PLAN" 2>&1; echo "rc=$?"); }
+rn_check() { OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
+R="$TMP/rn"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4
+RN_REC="$R/.bionic/docs/record/wave-01/landing-proofs.log"; mkdir -p "${RN_REC%/*}"
+L1="$(rn_commit l1)"; L2="$(rn_commit l2)"
+{ printf 'line/v1|ev=ready|row=T1|commit=%s|at=2026-01-02T00:00:00Z\n' "$L1"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=-|admitted=1767312060|width=2|promised=60|actual=90|at=2026-01-02T00:05:00Z\n' "$L1"
+} > "$RN_REC"; rn_pub T1 "$L1" queue 2026-01-02T00:10:00Z; rn_pub T2 "$L2" hand 2026-01-02T01:00:00Z
+LR1="$(cd "$R" && bash "$POKER" landing-report --rows "$RN_PLAN" 2>&1)"; RN1="$(rn_note)"
+expect_contains "(f0) setup: the landing report reads the record's two landings" "queue=1 hand=1" "$LR1"
+expect_eq "(f1) release-note prints the landing report's rows at the working head as the entry's numbers block, byte for byte" \
+  "$(printf '### The landing numbers\n\n`landing-report --rows` at %s:\n\n```\n%s\n```\nrc=0' "$L2" "$LR1")" "$RN1"
+E="$(rn_entry "$RN1")"; rn_pub T9 "$E" hand 2026-01-02T02:00:00Z
+rn_doctor() { sed "$1" "$R/CHANGELOG.md" > "$TMP/rn.cl" && cp "$TMP/rn.cl" "$R/CHANGELOG.md"; git -C "$R" commit -q -am doctored; git -C "$R" rev-parse HEAD; git -C "$R" reset -q --hard "$E"; }
+D="$(rn_doctor 's/ hand=1 / hand=2 /')"; K="$(rn_doctor 's/killed=0/killed=5/')"
+L3="$(rn_commit l3)"; rn_pub T3 "$L3" hand 2026-01-02T03:00:00Z
+expect_ne "(f2) setup: the later landings move the landing report" "$LR1" "$(cd "$R" && bash "$POKER" landing-report --rows "$RN_PLAN" 2>&1)"
+expect_eq "(f2) …and release-note --at the entry's head still prints the entry's block" "$RN1" "$(rn_note --at "$L2")"
+rn_check "$E"
+expect_status "(f3) the entry at its own head, carried by T9's landing: the check passes" 0 "$RC"
+expect_contains "(f3) …saying the numbers agree with the report at that head" "landing-numbers: 2.3.4 agrees with the landing report at ${L2:0:12}" "$OUT"
+rn_check "$D"
+expect_status "(f4) §FROM-REPORT a typed number that disagrees with the report at the entry's head: the check fails" 1 "$RC"
+expect_contains "(f4) …in a line naming both" "release-check: the landing numbers of 2.3.4 say hand=2 where the landing report at ${L2:0:12} says hand=1" "$OUT"
+rn_check "$K"
+expect_status "(f5) the killed count, which the gate holds and prunes, is not held to the report" 0 "$RC"
+expect_contains "(f5) …and the rest still agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
+
+section "§LAST — the entry is written after the last landing it describes"
+
+rn_check HEAD
+expect_status "(t1) §LAST T3 landed after the entry's head, no rewrite: the check fails" 1 "$RC"
+expect_contains "(t1) …naming the landing" "release-check: the landing numbers of 2.3.4 are at ${L2:0:12}, and T3 landed after them at ${L3:0:12}; render them again with release-note" "$OUT"
+expect_eq "(t1) …in one line" "1" "$(lines_of "$OUT")"
+rn_check "$(rn_entry "$(rn_note)")"
+expect_status "(t2) the entry rendered again at the new head: the check passes" 0 "$RC"
+expect_contains "(t2) …at that head" "landing-numbers: 2.3.4 agrees with the landing report at ${L3:0:12}" "$OUT"
 
 section "§STRIKE — the 1.17.0 block against the strike list of ten (AC-6.1, AC-6.2, AC-1.5)"
 
