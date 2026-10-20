@@ -185,6 +185,20 @@ owed_list() {
   ' "$f" 2>/dev/null
 }
 
+# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, never the caller's session: the
+# open items of every session whose binding act under <root> names that plan (lib/binding.sh `bind_sessions`
+# with a root; a line it refuses is skipped), each key once, in the order the plan records its sessions. rc 1
+# when there is no plan, no root, or no binding reader loaded; nothing printed when no session is bound to it.
+owed_list_plan() {
+  local plan="${1:-}" root="${2:-}" sid
+  [ -n "$plan" ] && [ -n "$root" ] || return 1
+  declare -F bind_sessions >/dev/null 2>&1 || return 1
+  bind_sessions "$plan" "$root" 2>/dev/null | while IFS= read -r sid; do
+    case "$sid" in ''|*' '*) continue ;; esac
+    OWED_ROOT="$root" OWED_SID="$sid" owed_list 2>/dev/null
+  done | awk -F'\t' 'NF && !k[$1]++'
+}
+
 # owed_unsent [<key prefix>] -> the keys of the open items not yet sent, one per line, in the order
 # they were opened; with a prefix, only the keys that start with it.
 owed_unsent() {

@@ -325,8 +325,9 @@ decisions_all() {
 #   widest landing ready→landed: <row> <m> min · target < <LINE_LANDING_BAR, the landing bar: 15>
 #   human-wait minutes: <n> · no target (the user's)
 #
-# then the sitrep's three indicator lines at close, schedule, correctness and waste (not the legend line under them), cut from `sitrep_render`'s
-# Assessment (D13: computed there, once). Every number is read from the record, and one the record cannot compute is
+# then the sitrep's three indicator lines at close, schedule, correctness and waste, each folded line joined back to
+# one, cut from `sitrep_render`'s Score (computed there, once). Every number is read from the record, and one the
+# record cannot compute is
 # `unverified` (D9), never a literal:
 #   human stops     the plan's `approved: <name> by <who> <ISO> "<reply>"` lines under ## SDLC State (`approve`, the
 #                   final card's replay) dated after its `approved-by:` instant, where the autonomous half starts; one
@@ -383,7 +384,11 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
       close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
       if (ea < 0 || er < 0 || er < ea) bad = 1; else sum += er - ea }
     END { if (!cards || bad) print "unverified"; else printf "%d\n", int(sum / 60 + 0.5) }')"
-  ind="$(sitrep_render "$plan" "$root" no 2>/dev/null | awk '/^Assessment$/ { f = 1; next } f && NF == 0 { exit } f && ++n <= 3 { print }')"
+  ind="$(sitrep_render "$plan" "$root" no 2>/dev/null | awk '
+    /^Score: / { f = 1; next } f && NF == 0 { exit }
+    f && /^ / { if (keep) { sub(/^ +/, ""); l = l " " $0 }; next }
+    f { if (keep) print l; keep = ($2 == "schedule" || $2 == "correctness" || $2 == "waste"); l = $0 }
+    END { if (keep) print l }')"
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
   printf 'agent minutes after the final reply: %s · target 0\n' "$agent"
   printf 'widest landing ready→landed: %s · target < %s\n' "${widest:-unverified}" "$(b="$(sitrep_bar)"; printf '%s' "${b:-unverified}")"
@@ -394,57 +399,117 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 
 # ---------------------------------------------------------------- the situation report
 #
-# THE SITUATION REPORT'S RENDERER (wave-38 T10; REQ-2 AC-2.2–AC-2.8; design-ledger Δ0–Δ8, D9–D14). One verb
-# prints every fact of the report; the judgment slots (the Bottom line's items, the Diagnosis) are the
-# /bionic:sitrep skill's, and the verb only carries the LAST RECORDED Bottom line back, with its time (a hook
-# never judges, D13). The page, in order, title case, no rule line, a blank line between sections:
+# THE SITUATION REPORT'S RENDERER. One verb prints the page and every fact on it; the one judgment, the grade and
+# its rationale, is the /bionic:sitrep skill's, recorded through `sitrep grade` and printed back by the verb (a
+# hook never judges). The page, in order, a blank line between sections, every line folded at 92 columns:
 #
-#   Sitrep · <wave> · <release> · <local date and time> · step <n>
-#   Bottom line (since <H:MM AM/PM>)            then `- <item>` per recorded item; or the one line
-#   Bottom line — none recorded yet
-#   Situation
-#   <l> landed · <a> in flight · <p> not started · <r> red/blocked of <total>
-#   <glyph> <step>/<id>: <short description>[ — <H:MM AM/PM>[ <local date>]]    one per row, table order
-#   Assessment
-#   <mark> schedule — <l> of <n> landed in <h>h, pace needs <k> · median ready→landed <m>m over the <bar>m bar
-#   <mark> correctness — <reds>, <findings>
-#   <mark> waste <d>% discarded · <i>% idle-width
-#   within / near / over — <the bars, once, SITREP_LEGEND>
+#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9 · <k> of <m> tasks done
+#   Bottom line        four bullets: what you owe, what is next, what is done, when it closes
+#   Task list          <glyph> <step>: <name> for steps 0 to 3 and each later step with no task of its own, and
+#                      <glyph> <step>/<task>: <short description> for every task in execution order; a time in
+#                      parentheses, a state after " — "
+#   Score: <grade> (graded <time>), or Score: not graded yet
+#                      <mark> schedule, correctness, waste, decisions, goals — what each measured, in words; then
+#                      `- <rationale>` when graded
+#   Blocked on you     one bullet per open approve:, waive:, finding: or gate: item of the plan's run
+#   Completion         the steps done of nine; the tasks done of all, with the percent
+#   Predicted close    the close and its basis, or why there is none
 #
-# THE MARKS ENCODE DEVIATION FROM A TOLERANCE, never a work state (D31): a measurement held against its bar is
-# ✅ within it, ➖ near it, ✖️ over it, or ❔ not measurable. Each indicator line opens on its mark, left-justified as
-# Situation's glyphs are (D30); the bars print once, in the one legend line under the three (D29).
-#   Blockers
-#   <owed key> — <the line the run printed>     one per open approve:, waive:, finding: or gate: item; or
-#   none — no decision or action is owed by you
-#   Forecast
-#   <l>/<total> rows landed (<n>%)
-#   closes ~<H:MM AM/PM>[ <local date>]
-#   basis: <whose ratio> · admitted width <w> · remaining chain <id>→<id>… <c>m
-#   assuming open blockers are answered now; each hour they wait moves it an hour
+# and `--line` prints only `<schedule><correctness><waste marks> · owed: <n> · <the close>`.
 #
-# and `--line` prints only `<schedule><correctness><waste glyphs> · owed: <n> · closes ~<H:MM AM/PM>`.
+# EVERY FACT IS ANOTHER READER'S, CALLED: the tasks and sizes are `units_rows`', the longest open chain
+# `units_chain`'s over `units_edges`, the landings, runs and the median ready→landed `landing_report`'s, the idle
+# minutes `fill-report`'s own line, the open items `owed_list_plan`'s (the sessions bound to the plan, never the
+# caller's), the admitted count `gate_state`'s, the findings `proof_findings` at `proof_finding_rating` less
+# `proof_fixed`. What no reader computes is computed here, once: the declared median of the done tasks, the pace
+# ratio, the marks, a red not yet answered by a green, the close.
 #
-# EVERY FACT IS ANOTHER READER'S, CALLED (the brief's reuse rule): the rows and sizes are `units_rows`', the
-# remaining chain `units_chain`'s over `units_edges` (the tick's CHAIN, its nodes the open rows), the landings,
-# runs and the ready→landed median `landing_report`'s, the idle minutes `fill-report`'s own line, the open items
-# `owed_list`'s, the admitted width `gate_state`'s, the findings `proof_findings` at `proof_finding_rating` less
-# `proof_fixed` (disposition's open state). What no reader computes is computed here, once: the declared median
-# of the landed rows, the ratio, the marks, a red not yet answered by a green, the closing time.
+# THE MARKS ENCODE DEVIATION FROM A TOLERANCE, never a work state: a measurement held against its bar is ✅ within
+# it, ➖ near it, ✖️ over it, or ❔ not measurable, and its line says the bar in words. The decisions and goals lines
+# print their no-record form until a reader of rounds and one of goals exist.
 #
-# THE SCHEDULE MARK READS THE CLOCK AND THE BAR (wave-39 T9; D25, Δ9; D12): rows landed since the Step-3 approval
-# against the pace the plan's `forecast:` needs, and the median ready→landed against LINE_LANDING_BAR, each half
-# graded at or within / within 1.25× / further, the line taking the worse. The declared sizes feed only the
-# Forecast's closing time, never the mark (`sitrep_schedule`).
+# THE CLOSE: now + max(the longest open chain, all open work ÷ the admitted count) × the measured pace, so admitting
+# more can shorten the work's share and never one chain. The pace is this run's median landing over its median
+# declared size, else the newest delivered run's, else there is no forecast. A plan not approved at Step 3 prints
+# the no-forecast sentence; a delivered one prints its delivery and no close. No typed number feeds it: the plan's
+# own `forecast:` grades the schedule mark and nothing else.
 #
-# A VALUE THE RECORD CANNOT COMPUTE PRINTS `unverified` (D9), and its mark is ❔ (on its line and in the one-line form).
-# Local times are 12-hour on this machine's clock (`sitrep_clock`, the 12-hour sibling of `handoff_local_time`);
-# a time on another local day than now's carries its date. Now is BIONIC_NOW_EPOCH when set, fill-report's seam.
-# The four marks, from one place: the next re-mark is these four lines. ✖️ is U+2716 U+FE0F.
+# THE PLAN'S TABLE WORDS NEVER PRINT: no "rows", no status name, no cell value; a read prints in words.
+#
+# A value the record cannot compute prints `unverified` or its no-record sentence, and its mark is ❔. Local times
+# are 12-hour on this machine's clock (`sitrep_clock`); a time on another local day than now's carries its date.
+# Now is BIONIC_NOW_EPOCH when set, fill-report's seam.
+# The four marks, from one place. ✖️ is U+2716 U+FE0F.
 # Set in hooks/session-poker.sh, before any part loads: SITREP_MARK_WITHIN, SITREP_MARK_NEAR, SITREP_MARK_OVER,
 # SITREP_MARK_NONE.
-# The bars, once, as the one line under the three indicator lines (D29). The thresholds in sitrep_render are these.
-# Set in hooks/session-poker.sh, before any part loads: SITREP_LEGEND.
+
+# sitrep_fold -> stdin's `<continuation indent><TAB><text>` lines, each folded at 92 display columns: a wider text
+# breaks at its last space that fits, every continuation opening on that many spaces. Width is counted byte-wise so
+# no locale decides it: a character is one column, a four-byte one two, the three-byte mark glyphs (✅ ⬜ ⛔ ❔ ➖ ✖)
+# two, U+FE0F none. A word wider than the page prints whole.
+sitrep_fold() {
+  LC_ALL=C awk '
+    function cw(s,   t, n, w) {
+      t = s; n = gsub(/[\200-\277]/, "", t); w = length(s) - n
+      t = s; w -= gsub(/\357\270\217/, "", t)
+      t = s; w += gsub(/[\360-\364]/, "", t)
+      t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t)
+      return w
+    }
+    {
+      i = index($0, "\t"); k = substr($0, 1, i - 1) + 0; s = substr($0, i + 1)
+      if (cw(s) <= 92) { print s; next }
+      match(s, /^ */); lead = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
+      pad = sprintf("%" k "s", ""); n = split(s, wd, / /); l = lead wd[1]
+      for (j = 2; j <= n; j++) {
+        if (cw(l " " wd[j]) <= 92) l = l " " wd[j]
+        else { print l; l = pad wd[j] }
+      }
+      print l
+    }'
+}
+
+# sitrep_dur <minutes> -> `<h> h <m> min`, `<h> h` or `<m> min`, to the whole minute
+sitrep_dur() {
+  awk -v m="$1" 'BEGIN { m = int(m + 0.5); h = int(m / 60); r = m - h * 60
+    if (h == 0) printf "%d min\n", r; else if (r == 0) printf "%d h\n", h; else printf "%d h %d min\n", h, r }'
+}
+
+# sitrep_list <cap> <word>… -> the words as prose, `A`, `A and B`, `A, B and C`, the first <cap> named and the rest
+# counted (`A, B, C and 6 more`); nothing for no word
+sitrep_list() {
+  local cap="$1"; shift
+  awk -v cap="$cap" 'BEGIN {
+    n = ARGC - 1; if (n < 1) exit
+    m = (n > cap) ? cap : n
+    for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m && n == m) ? " and " : ", ")) ARGV[i]
+    if (n > m) s = s " and " (n - m) " more"
+    print s }' "$@"
+}
+
+# sitrep_approved_at <plan> -> the epoch of its `approved-by:` instant under ## SDLC State, the Step-3 approval;
+# nothing when it has none
+sitrep_approved_at() {
+  awk "$_PATROL_ISO_AWK"'
+    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
+    s && /^approved-by:/ { n = split($0, t, /[ \t]+/); for (i = 2; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) { print e; exit } } exit }' "$1" 2>/dev/null
+}
+
+# sitrep_delivered_at <plan> -> the epoch of its Step 9 line's `delivered: <ISO>` when `run_open` calls the run
+# closed; nothing for a run still open, one that cannot be read, or a plan that names no delivery
+sitrep_delivered_at() {
+  local at rc=0
+  run_open "$1" || rc=$?
+  [ "$rc" -eq 1 ] || return 0
+  at="$(awk '/^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:/ && match($0, /delivered:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z?/) {
+               s = substr($0, RSTART, RLENGTH); sub(/^delivered:[ \t]*/, "", s); print s; exit }' "$1" 2>/dev/null)"
+  [ -n "$at" ] || return 0
+  case "$at" in *T[0-9][0-9]:[0-9][0-9]Z) at="${at%Z}:00Z" ;; *T[0-9][0-9]:[0-9][0-9]) at="$at:00Z" ;; *[0-9]) at="${at}Z" ;; esac
+  iso_epoch "$at"
+}
 
 sitrep_ratio_fmt() {  # <ratio> -> two places, trailing zeros dropped: 1.2, 1.37, 2
   awk -v r="$1" 'BEGIN { s = sprintf("%.2f", r); sub(/0+$/, "", s); sub(/\.$/, "", s); print s }'
@@ -481,43 +546,37 @@ sitrep_bar() {
   printf '%s\n' "$LINE_LANDING_BAR"
 }
 
-# sitrep_schedule <plan> <landed> <total> <now epoch> <median ready→landed | empty> -> `<mark><TAB><text>`, the
-# schedule line after its mark (wave-39 T9; D25, Δ9; AC-5.1, AC-5.2). Two halves, each against a bar the run cannot
-# set for itself:
-#   the clock  rows landed in the hours since the plan's `approved-by:` instant (the Step-3 approval, under
-#              ## SDLC State) against the rows its frontmatter `forecast: <n>h|<n>m` needs by now,
-#              total × elapsed/forecast rounded, never above total: landed ≥ needed within, needed ≤ 1.25 ×
-#              landed near, else over; unverified with no approval instant or no forecast.
-#   the bar    the median ready→landed against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else over;
+# sitrep_schedule <plan> <done> <total> <now epoch> <median ready→landed | empty> -> `<mark><TAB><text>`, the
+# schedule line after its mark. Two halves, each against a bar the run cannot set for itself:
+#   the clock  tasks done in the time since the plan's `approved-by:` instant (the Step-3 approval) against the
+#              tasks its frontmatter `forecast: <n>h|<n>m` needs by now, total × elapsed/forecast rounded, never
+#              above total: done ≥ needed within, needed ≤ 1.25 × done near, else over; not graded with no
+#              approval instant or no forecast.
+#   the bar    the median landing against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else over;
 #              unmeasured before the first landing.
 # The mark is the worse half, ranked over ✖️ > ➖ > ❔ > ✅, so an unmeasured half never reads within.
 sitrep_schedule() {
-  local plan="$1" landed="$2" total="$3" now="$4" med="$5" appr fc bar clock cg bg bt
-  appr="$(awk "$_PATROL_ISO_AWK"'
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
-    s && /^approved-by:/ { n = split($0, t, /[ \t]+/); for (i = 2; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) { print e; exit } } exit }' "$plan" 2>/dev/null)"
+  local plan="$1" landed="$2" total="$3" now="$4" med="$5" appr fc bar clock cg bg bt k em
+  appr="$(sitrep_approved_at "$plan")"
   fc="$(plan_frontmatter_get "$plan" forecast 2>/dev/null | awk '
     match($0, /^[0-9]+(\.[0-9]+)?[hm]?$/) { v = $0 + 0; if (v > 0) { if ($0 ~ /m$/) print v; else print v * 60 } }')"
-  if [ -z "$appr" ]; then cg=n; clock="clock unverified, no Step-3 approval instant (approved-by:)"
-  elif [ -z "$fc" ]; then cg=n; clock="clock unverified, the plan declares no forecast:"
+  if [ -z "$appr" ]; then cg=n; clock="the clock cannot be graded, no Step 3 approval time"
+  elif [ -z "$fc" ]; then cg=n; clock="the clock cannot be graded, the plan declares no forecast"
   else
-    IFS='	' read -r cg clock <<< "$(awk -v now="$now" -v a="$appr" -v f="$fc" -v l="$landed" -v t="$total" 'BEGIN {
+    IFS='	' read -r cg k em <<< "$(awk -v now="$now" -v a="$appr" -v f="$fc" -v l="$landed" -v t="$total" 'BEGIN {
       e = now - a; if (e < 0) e = 0
       r = e / (f * 60); if (r > 1) r = 1
       k = int(t * r + 0.5)
-      h = sprintf("%.1f", e / 3600); sub(/\.0$/, "", h)
       g = (l >= k) ? "w" : ((k <= 1.25 * l) ? "a" : "o")
-      printf "%s\t%d of %d landed in %sh, pace needs %d\n", g, l, t, h, k }')"
+      printf "%s\t%d\t%d\n", g, k, e / 60 }')"
+    clock="$landed of $total tasks done in $(sitrep_dur "$em"), the forecast's pace needs $k"
   fi
   bar="$(sitrep_bar)"
-  if [ -z "$med" ]; then bg=n; bt="no landing yet against the ${bar:-unverified}m bar"
-  elif [ -z "$bar" ]; then bg=n; bt="median ready→landed $(sitrep_ratio_fmt "$med")m, the landing bar unverified"
+  if [ -z "$med" ]; then bg=n; bt="no landing yet against the ${bar:-unverified} min bar"
+  elif [ -z "$bar" ]; then bg=n; bt="the median landing takes $(sitrep_ratio_fmt "$med") min; the bar is unverified"
   else
     bg="$(awk -v m="$med" -v b="$bar" 'BEGIN { print (m <= b) ? "w" : ((m <= 1.25 * b) ? "a" : "o") }')"
-    bt="median ready→landed $(sitrep_ratio_fmt "$med")m over the ${bar}m bar"
+    bt="the median landing takes $(sitrep_ratio_fmt "$med") min, $([ "$bg" = w ] && echo within || echo over) the ${bar} min bar"
   fi
   case "$cg$bg" in
     *o*) printf '%s' "$SITREP_MARK_OVER" ;;
@@ -525,7 +584,7 @@ sitrep_schedule() {
     *n*) printf '%s' "$SITREP_MARK_NONE" ;;
     *)   printf '%s' "$SITREP_MARK_WITHIN" ;;
   esac
-  printf '\tschedule — %s · %s\n' "$clock" "$bt"
+  printf '\tschedule — %s; %s\n' "$clock" "$bt"
 }
 
 # sitrep_prev <root> <plan> -> `<slug><TAB><ratio>` of the newest delivered run under the docs root other than
@@ -605,40 +664,42 @@ sitrep_reds() {
 # sitrep_render <plan> <root> <line yes|no> -> the page, or with `yes` the one line; rc 0
 sitrep_render() {
   local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
-  local title_wave title_rel cur bl_at bl_items glyphs s_mark s_text c_mark c_text w_mark w_text
-  local gl stp rid desc lat ty lab kind note idle_min elapsed i_pct d_pct prev ratio s_med s_decl basis_who width chain cids cmins closes ctext ltext
-  local landed=0 active=0 pending=0 redn=0 total=0 blockers nown approvals lmed=""
+  local s_mark s_text c_mark c_text w_mark w_text ty gl lab desc kind note glyph
+  local idle_min elapsed i_pct d_pct prev ratio s_med s_decl width admitted chain cids cmins work
+  local landed=0 active=0 pending=0 redn=0 total=0 approvals lmed="" appr_at dlv_at cur
   now="$(sitrep_now)"
   slug="$(proof_plan_slug "$plan")"
   recdir="$(docs_root "$root")/record/$slug"
   rec="$(_wt_proofs_path "$root" "$plan")"
   rows="$(units_rows "$plan" 2>/dev/null)"
-  # The person's open items, the four kinds that are theirs; and the approvals they hold rows on.
-  owed="$( { OWED_ROOT="$root" owed_list 2>/dev/null || :; } | awk -F'\t' '$1 ~ /^(approve|waive|finding|gate):/')"
+  # What the person owes: the four kinds that are theirs, from the stores of the sessions bound to this plan.
+  owed="$( { owed_list_plan "$plan" "$root" 2>/dev/null || :; } | awk -F'\t' '$1 ~ /^(approve|waive|finding|gate):/')"
   approvals="$(printf '%s\n' "$owed" | awk -F'\t' 'index($1, "approve:") == 1 { print substr($1, 9) }')"
   reds="$(sitrep_reds "$rec")"
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
   nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
   lr="$(landing_report "$rec" "$root" yes 2>/dev/null)"; lr1="${lr%%$'\n'*}"
-  # the median ready→landed, landing_report's own figure, once a queue landing is measured (its rows say so)
+  # the median ready→landed, landing_report's own figure, once a queue landing is measured (its lines say so)
   if printf '%s\n' "$lr" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") f = 1 } END { exit !f }'; then
     lmed="${lr1#*ready-to-landed median=}"; lmed="${lmed%%m *}"
   fi
+  appr_at="$(sitrep_approved_at "$plan")"
+  dlv_at="$(sitrep_delivered_at "$plan")"
+  cur="$(awk '/^[[:space:]]*```/ { f = !f; next } !f && /^[[:space:]]*current[[:space:]]*:/ { s = $0; sub(/^[^:]*:[ \t]*/, "", s); sub(/[^0-9].*$/, "", s); print s; exit }' "$plan")"
 
-  # ---- Situation (wave-38 T10; wave-39 T10, D14, A-orch-19, AC-6.1, AC-6.3): the attended steps 0 to 3, each with
-  # its approval time, then every row in EXECUTION ORDER, one line each, `<glyph> <step>/<row>: <short> (<time or
-  # state>)`:
-  #   landed     by landing time, with it; the time is read from the row's `- T<n>:` line wherever it sits on it,
-  #              `landed <sha> <ISO>` or `landed-by-hand: <who> <ISO> "<why>"` (` by hand` said), the earlier of the
-  #              two when both appear, after any text (a `reason:`, a placeholder's tail); a landed row whose line
-  #              names no landing instant follows them, so said;
+  # ---- The Task list: the attended steps 0 to 3, each with its approval time, then every task in EXECUTION ORDER,
+  # then each later step with no task of its own. One line each, `<glyph> <step>/<task>: <short>`, then a time in
+  # parentheses or a state after " — ":
+  #   done       by landing time, with it; the time is read from the task's `- T<n>:` line wherever it sits on it,
+  #              `landed <sha> <ISO>` or `landed-by-hand: <who> <ISO> "<why>"` (`by hand` said), the earlier of the
+  #              two when both appear, after any text; a done task whose line names no instant follows them, so said;
   #   in flight  by their place on the line, lib/line.sh's fold read as it stands (read-only: no git counting, no
   #              liveness), saying what each does: `in its landing, <n> of <m> suites green` (a candidate built),
-  #              `queued on the line behind <row>` or `next on the line` (none built yet), or `building` (no entry);
-  #   pending    in dependency order over `units_edges` (a row after every pending row it waits on, else table
-  #              order), each saying what it `waits on` (`units_waiting`: the writer row, else the read; five named,
-  #              the rest counted), or `not started`; a row of another status (split, …) says that status.
-  # The reds, approvals and landings are read first, so each row is judged with them in hand.
+  #              `queued on the line behind <task>` or `next on the line` (none built yet), or `building`;
+  #   the rest   in dependency order over `units_edges` (a task after every open task it waits on, else table
+  #              order), each saying what it `waits on` (`units_waiting`: the writer task, else the read in words;
+  #              five named, the rest counted); a task not started is bare, a held one says so.
+  # A task with a red at head or waiting on an approval the person owes is blocked (⛔); a red says so first.
   local sit lq="" lwait ledges
   if [ -f "$rec" ] && [ ! -L "$rec" ] \
      && { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
@@ -679,9 +740,19 @@ sitrep_render() {
               }' "$plan"
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | awk -F'\t' "$_ROW_SHORT_AWK"'
+          } | awk -F'\t' -v dlv="${dlv_at:+yes}" "$_ROW_SHORT_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function row(i, kind, note,   d) { d = tk[i]; if (d == "") d = "—"; printf "R\t%s\t%s/%s\t%s\t%s\t%s\n", g[i], stp[i], id[i], d, kind, note }
+    function words(r) {   # a read, in words: an approval is the person'"'"'s, a step its number
+      sub(/^live:/, "", r)
+      if (index(r, "approval:") == 1) return "your approval of " substr(r, 10)
+      if (index(r, "step:") == 1) return "step " substr(r, 6)
+      return r
+    }
+    function row(i, kind, note,   d) {
+      d = tk[i]; if (d == "") d = "—"
+      if (id[i] in red && st[i] != "landed") { kind = "s"; note = (note == "") ? "red at head" : "red at head, " note }
+      printf "R\t%s\t%s/%s\t%s\t%s\t%s\n", g[i], stp[i], id[i], d, kind, note
+    }
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
@@ -689,11 +760,12 @@ sitrep_render() {
     $1 == "AB" { ab = $2; next }
     $1 == "S" { sap[$2] = $3; sline[$2] = 1; next }
     $1 == "Q" { nq++; qr[nq] = $2; qc[nq] = $3; qo[nq] = $4; qg[nq] = $5; qm[nq] = $6; next }
-    $1 == "W" { w = ($4 != "" && $4 != "-") ? $4 : $3; if (!(($2, w) in wseen)) { wseen[$2, w] = 1; wait[$2] = wait[$2] (wait[$2] == "" ? "" : ", ") w }; next }
+    $1 == "W" { w = ($4 != "" && $4 != "-") ? $4 : words($3); if (!(($2, w) in wseen)) { wseen[$2, w] = 1; wait[$2] = wait[$2] (wait[$2] == "" ? "" : ", ") w }; next }
     $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
       n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = row_short($5); rd[n] = $14; st[n] = s; at[id[n]] = n
+      if (stp[n] ~ /^[0-9]+$/) hasstep[stp[n] + 0] = 1
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
@@ -703,23 +775,23 @@ sitrep_render() {
       g[n] = (s == "landed") ? "L" : (b ? "X" : (s == "active" ? "A" : "P"))
     }
     END {
-      split("Configure Scope Design Plan", nm, " ")
+      split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
       for (k = 0; k <= 3; k++) {
         e = ((k in sap) && sap[k] != "-") ? sap[k] : ""
         if (e == "" && k == 3 && ab != "") e = ab
-        if (e != "") printf "S\tL\t%d\t%s\tta\t%s\n", k, nm[k + 1], e
-        else if (cur != "" && k < cur + 0) printf "S\tL\t%d\t%s\ts\t%s\n", k, nm[k + 1], (k in sline) ? "done, no approval time on its line" : "done, no step line"
+        if (e != "") printf "S\tL\t%d\t%s\tt\t%s\n", k, nm[k + 1], e
+        else if (dlv == "yes" || (cur != "" && k < cur + 0)) printf "S\tL\t%d\t%s\ts\tdone, no time on record\n", k, nm[k + 1]
         else if (cur != "" && k == cur + 0) printf "S\tA\t%d\t%s\ts\tin progress\n", k, nm[k + 1]
-        else printf "S\tP\t%d\t%s\ts\tnot started\n", k, nm[k + 1]
+        else printf "S\tP\t%d\t%s\tb\t\n", k, nm[k + 1]
       }
-      # landed: by landing time (a tie in table order), then those whose line names no instant
+      # done: by landing time (a tie in table order), then those whose line names no instant
       nl = 0
       for (i = 1; i <= n; i++) if (st[i] == "landed" && (id[i] in land)) {
         for (j = nl; j >= 1 && (land[id[lo[j]]] + 0 > land[id[i]] + 0); j--) lo[j + 1] = lo[j]
         lo[j + 1] = i; nl++
       }
       for (j = 1; j <= nl; j++) { i = lo[j]; row(i, hand[id[i]] ? "th" : "t", land[id[i]]) }
-      for (i = 1; i <= n; i++) if (st[i] == "landed" && !(id[i] in land)) row(i, "s", "landed, no time on its line")
+      for (i = 1; i <= n; i++) if (st[i] == "landed" && !(id[i] in land)) row(i, "s", "done, no time on record")
       # in flight: by place on the line, then building
       prev = ""
       for (q = 1; q <= nq; q++) {
@@ -730,7 +802,7 @@ sitrep_render() {
         row(i, "s", note); prev = qr[q]
       }
       for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) row(i, "s", "building")
-      # pending (and any other status): dependency order, the lowest table position first among the free
+      # the rest: dependency order, the lowest table position first among the free
       for (k = 1; k <= ne; k++) {
         a1 = at[ef[k]]; b1 = at[et[k]]
         if (a1 == "" || b1 == "" || a1 == b1) continue
@@ -745,26 +817,37 @@ sitrep_render() {
         if (!pick) for (i = 1; i <= n; i++) if (st[i] != "landed" && st[i] != "active" && !(i in out)) { pick = i; break }   # a cycle: table order
         out[pick] = 1; done++
         for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
-        if (st[pick] != "pending") note = st[pick]
-        else if (!(id[pick] in wait)) note = "not started"
-        else {   # five named, the rest counted: a close row waits on every open row
-          m = split(wait[id[pick]], wl, ", "); note = "waits on " wl[1]
-          for (k = 2; k <= m && k <= 5; k++) note = note ", " wl[k]
-          if (m > 5) note = note " and " (m - 5) " more"
-        }
+        if (st[pick] == "held") { row(pick, "s", "on hold"); continue }
+        if (st[pick] != "pending" || !(id[pick] in wait)) { row(pick, "b", ""); continue }
+        m = split(wait[id[pick]], wl, ", "); note = "waits on " wl[1]   # five named, the rest counted
+        for (k = 2; k <= m && k <= 5; k++) note = note ", " wl[k]
+        if (m > 5) note = note " and " (m - 5) " more"
         row(pick, "s", note)
       }
+      # each later step that has no task of its own
+      for (k = 4; k <= 9; k++) {
+        if (k in hasstep) continue
+        if (dlv == "yes" || (cur != "" && k < cur + 0)) printf "S\tL\t%d\t%s\tb\t\n", k, nm[k + 1]
+        else if (cur != "" && k == cur + 0) printf "S\tA\t%d\t%s\ts\tin progress\n", k, nm[k + 1]
+        else printf "S\tP\t%d\t%s\tb\t\n", k, nm[k + 1]
+      }
     }')"
+  local inflight="" blocked="" nextup="" last_id="" last_at=""
   while IFS='	' read -r ty gl lab desc kind note; do
     [ "$ty" = R ] || continue
     total=$((total + 1))
-    case "$gl" in L) landed=$((landed + 1)) ;; A) active=$((active + 1)) ;; X) redn=$((redn + 1)) ;; *) pending=$((pending + 1)) ;; esac
+    case "$gl" in
+      L) landed=$((landed + 1)); case "$kind" in t|th) last_id="${lab#*/}"; last_at="$note" ;; esac ;;
+      A) active=$((active + 1)); inflight="$inflight ${lab#*/}" ;;
+      X) redn=$((redn + 1)); blocked="$blocked ${lab#*/}" ;;
+      *) pending=$((pending + 1)); nextup="$nextup ${lab#*/}" ;;
+    esac
   done <<SITREP_SIT
 $sit
 SITREP_SIT
 
-  # ---- Assessment
-  # the schedule mark: the clock and the bar (sitrep_schedule); the declared-size pace feeds the Forecast only
+  # ---- The Score's indicators
+  # the schedule mark: the clock and the bar (sitrep_schedule); the declared-size pace feeds the close only
   pace="$(sitrep_pace "$plan" "$root")"
   [ -z "$pace" ] || IFS='	' read -r s_med s_decl ratio <<< "$pace"
   IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$landed" "$total" "$now" "$lmed")"
@@ -773,17 +856,21 @@ SITREP_SIT
   case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
   case "$lred" in ''|*[!0-9]*) lred=0 ;; esac
   s12="$(sitrep_open_s12 "$plan" "$root")"
-  if [ "${nred:-0}" -gt 0 ]; then c_reds="$nred red at head"
-  elif [ "$lred" -gt 0 ]; then c_reds="$lred red, all returned"
-  else c_reds="no red run at head"; fi
-  if [ "${s12:-0}" -gt 0 ]; then c_find="$s12 open S1/S2"; else c_find="no open S1/S2"; fi
+  if [ "${nred:-0}" -gt 1 ]; then c_reds="$nred red suites at head"
+  elif [ "${nred:-0}" -eq 1 ]; then c_reds="1 red suite at head"
+  elif [ "$lred" -gt 1 ]; then c_reds="$lred red suite runs, each answered by a later green"
+  elif [ "$lred" -eq 1 ]; then c_reds="1 red suite run, answered by a later green"
+  else c_reds="no red suite at head"; fi
+  if [ "${s12:-0}" -gt 1 ]; then c_find="$s12 open S1 or S2 findings"
+  elif [ "${s12:-0}" -eq 1 ]; then c_find="1 open S1 or S2 finding"
+  else c_find="no open S1 or S2 finding"; fi
   if [ "${nred:-0}" -gt 0 ] || [ "${s12:-0}" -gt 0 ]; then c_mark="$SITREP_MARK_OVER"
   elif [ "$lred" -gt 0 ]; then c_mark="$SITREP_MARK_NEAR"
   else c_mark="$SITREP_MARK_WITHIN"; fi
-  c_text="$c_mark correctness — $c_reds, $c_find"
+  c_text="$c_mark correctness — $c_reds; $c_find"
   # Waste: discarded runs over runs (landing_report's counts), idle-width minutes (fill-report's) over the
   # minutes the fill ledger spans (its first line to now while the run is open, else to its last line).
-  local rg rr rn rd
+  local rg rr rn rd w_disc w_idle
   case "$lr1" in
     *'· runs: green='*)
       rg="${lr1#*runs: green=}"; rg="${rg%% *}"; rr="${lr1#* red=}"; rr="${rr%% *}"
@@ -801,85 +888,175 @@ SITREP_SIT
   case "$idle_min:$elapsed" in *[!0-9:]*|:*|*:) : ;; *) [ "$elapsed" -gt 0 ] && i_pct="$(awk -v i="$idle_min" -v e="$elapsed" 'BEGIN { printf "%.4f\n", i * 100 / e }')" ;; esac
   w_mark="$(awk -v d="$d_pct" -v i="${i_pct:--1}" -v w="$SITREP_MARK_WITHIN" -v n="$SITREP_MARK_NEAR" -v o="$SITREP_MARK_OVER" 'BEGIN {
     if (d < 5 && i < 10) print w; else if (d < 15 && i < 15) print n; else print o }')"
-  w_text="$w_mark waste $(awk -v d="$d_pct" 'BEGIN { printf "%d", d + 0.5 }')% discarded · $( [ -n "$i_pct" ] && awk -v i="$i_pct" 'BEGIN { printf "%d%%", i + 0.5 }' || printf 'unverified' ) idle-width"
+  w_disc="$(awk -v d="$d_pct" 'BEGIN { r = int(d + 0.5); if (d + 0 == 0) print "nothing discarded"; else if (r == 0) print "under 1% of suite runs discarded"; else printf "%d%% of suite runs discarded\n", r }')"
+  if [ -z "$i_pct" ]; then w_idle="idle time unverified"
+  else w_idle="$(awk -v i="$i_pct" 'BEGIN { r = int(i + 0.5); if (i + 0 == 0) print "no writer slot sat idle"; else if (r == 0) print "a writer slot sat idle under 1% of the time"; else printf "a writer slot sat idle %d%% of the time\n", r }')"; fi
+  w_text="$w_mark waste — $w_disc; $w_idle"
 
-  # ---- Forecast: the remaining chain (the tick's CHAIN), the ratio, the admitted width
-  chain="$( { printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
-                m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH); printf "N\t%s\t%d\n", $1, m }'
+  # ---- The close: the longest open chain (the tick's CHAIN) and all open work, the pace, the admitted count
+  local nodes larger per wtxt cmin_txt ctext ltext btext pace_txt closes cl
+  nodes="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
+             m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH); printf "N\t%s\t%d\n", $1, m }')"
+  work="$(printf '%s\n' "$nodes" | awk -F'\t' '$1 == "N" { s += $3 } END { print s + 0 }')"
+  chain="$( { printf '%s\n' "$nodes"
               units_edges "$plan" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
             } | units_chain "$(printf '%s\n' "$rows" | grep -c . | awk '{ print ($1 > 0) ? $1 : 1 }')" 2>/dev/null \
             | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }')"
   cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
-  width="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
-  case "$width" in ''|*[!0-9]*|0) width=1 ;; esac
+  admitted="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
+  case "$admitted" in ''|*[!0-9]*) admitted=0 ;; esac
+  width="$admitted"; [ "$width" -gt 0 ] || width=1
   if [ -n "$pace" ]; then
-    basis_who="median ready→landed ${s_med}m over median declared ${s_decl}m = $(sitrep_ratio_fmt "$ratio")×"
+    pace_txt="the median landing takes $(sitrep_ratio_fmt "$s_med") min against $(sitrep_ratio_fmt "$s_decl") min planned, $(sitrep_ratio_fmt "$ratio")×"
   else
     prev="$(sitrep_prev "$root" "$plan")"
     if [ -n "$prev" ]; then
       ratio="${prev##*$'\t'}"
-      basis_who="$(printf '%s' "${prev%%$'\t'*}" | awk -F- '$1 == "wave" && NF >= 2 { print $1 "-" $2; next } { print }')'s measured ratio $(sitrep_ratio_fmt "$ratio")× — no landing yet on this run"
+      pace_txt="$(printf '%s' "${prev%%$'\t'*}" | awk -F- '$1 == "wave" && NF >= 2 { print $1 "-" $2; next } { print }')'s measured $(sitrep_ratio_fmt "$ratio")×; no landing yet on this run"
     else
-      ratio=""; basis_who="no measured pace on this run or a delivered one"
+      ratio=""
     fi
   fi
-  if [ -z "$cids" ]; then
-    ctext="closes — no row remains open"; ltext="closes — no row open"
+  set --
+  if [ -n "$dlv_at" ]; then
+    cl="$(sitrep_clock "$dlv_at" "$now")"
+    set -- "Delivered at $cl; nothing is left to forecast."
+    btext="delivered at $cl"; ltext="delivered"
+  elif [ -z "$appr_at" ]; then
+    set -- "No forecast until the plan is approved at Step 3." \
+           "The forecast will be the plan's chain at the line's measured pace, never a typed number."
+    btext="no forecast until the plan is approved at Step 3"; ltext="no forecast until approved"
+  elif [ -z "$cids" ]; then
+    set -- "No task is open, so nothing is left to forecast."
+    btext="nothing left to forecast; no task is open"; ltext="closes — no task open"
   elif [ -z "$ratio" ]; then
-    ctext="closes unverified — no measured pace on this run or a delivered one"; ltext="closes unverified"
+    set -- "No forecast: no pace is measured on this run or a delivered one."
+    btext="no forecast; no pace is measured on this run or a delivered one"; ltext="closes unverified"
   else
-    closes="$(awk -v now="$now" -v c="$cmins" -v r="$ratio" -v w="$width" 'BEGIN { s = now + c * r / w * 60; printf "%d\n", int(s / 60 + 0.5) * 60 }')"
-    ctext="closes ~$(sitrep_clock "$closes" "$now")"; ltext="$ctext"
+    IFS='	' read -r per larger closes <<< "$(awk -v now="$now" -v c="$cmins" -v t="$work" -v w="$width" -v r="$ratio" 'BEGIN {
+      p = t / w; l = (p > c) ? p : c; s = now + l * r * 60
+      printf "%d\t%d\t%d\n", p + 0.5, l + 0.5, int(s / 60 + 0.5) * 60 }')"
+    cl="$(sitrep_clock "$closes" "$now")"
+    if [ "$admitted" -eq 0 ]; then wtxt="over 1 suite run, none admitted now"
+    elif [ "$admitted" -eq 1 ]; then wtxt="over the 1 suite run the gate admits"
+    else wtxt="over the $admitted suite runs the gate admits"; fi
+    cmin_txt="$(awk -v c="$cmins" -v t="$work" -v w="$width" -v r="$ratio" 'BEGIN { p = t / w; l = (p > c) ? p : c; printf "%.4f\n", l * r }')"
+    set -- "About $cl." \
+           "The work left is $work min as planned, $per min $wtxt; the longest chain left, $(printf '%s' "$cids" | sed 's/,/ → /g'), is $cmins min; the larger, $larger min, at the pace below is $(sitrep_dur "$cmin_txt")." \
+           "The pace: $pace_txt." \
+           "It assumes what you owe is answered now."
+    btext="about $cl"; ltext="closes ~$cl"
   fi
 
-  # ---- Blockers
-  blockers="$(printf '%s\n' "$owed" | awk -F'\t' 'NF >= 1 && $1 != "" { r = $4; sub(/^poker: /, "", r); if (r == "") r = $3; print $1 " — " r }')"
-  nown="$(printf '%s\n' "$blockers" | grep -c .)"
+  # ---- What is owed, in words: what to do, then what waits on it
+  local blk="" whats="" nown=0 k sent ttl rep what det wids
+  while IFS='	' read -r k sent ttl rep; do
+    [ -n "$k" ] || continue
+    rep="${rep#poker: }"; [ -n "$rep" ] || rep="$ttl"
+    det="$rep"
+    case "$k" in
+      approve:step[0-9]*) what="approve the Step ${k#approve:step} card" ;;
+      approve:*) what="approve ${k#approve:}" ;;
+      waive:*) what="waive or read ${k#waive:}" ;;
+      *) what="$(printf '%s' "$ttl" | awk '{ print tolower(substr($0, 1, 1)) substr($0, 2) }')" ;;
+    esac
+    case "$k" in
+      approve:*)
+        wids="$(printf '%s\n' "$rows" | awk -F'\t' -v want="approval:${k#approve:}" '
+          { s = tolower($10); gsub(/[ \t]/, "", s); if (s == "landed" || s == "dropped") next
+            n = split($13, a, ","); for (i = 1; i <= n; i++) { x = a[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (x == want) { print $1; next } } }')"
+        if [ -n "$wids" ]; then
+          # shellcheck disable=SC2086
+          det="$(sitrep_list 5 $wids) $([ "$(printf '%s\n' "$wids" | grep -c .)" -gt 1 ] && echo wait || echo waits) on it"
+        fi ;;
+    esac
+    nown=$((nown + 1))
+    blk="${blk}2	- $what: $det"$'\n'
+    whats="${whats}${what}"$'\n'
+  done <<SITREP_OWED
+$owed
+SITREP_OWED
 
   if [ "$line" = yes ]; then
     printf '%s%s%s · owed: %s · %s\n' "$s_mark" "$c_mark" "$w_mark" "$nown" "$ltext"
     return 0
   fi
 
-  # ---- the page
-  title_wave="$(plan_frontmatter_get "$plan" wave 2>/dev/null)"; [ -n "$title_wave" ] || title_wave="$slug"
-  title_rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"; [ -n "$title_rel" ] || title_rel="-"
-  cur="$(awk '/^[[:space:]]*```/ { f = !f; next } !f && /^[[:space:]]*current[[:space:]]*:/ { s = $0; sub(/^[^:]*:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); print s; exit }' "$plan")"
-  printf 'Sitrep · %s · %s · %s · step %s\n' "$title_wave" "$title_rel" "$(sitrep_date "$now" '%Y-%m-%d %-I:%M %p %Z')" "${cur:--}"
-  # The last recorded Bottom line: every item sharing the newest `at=` of the record.
-  bl_at=""; bl_items=""
-  if [ -f "$recdir/sitrep.log" ] && [ ! -L "$recdir/sitrep.log" ]; then
-    bl_at="$(awk -F'|' 'index($0, "sitrep-log/v1|") == 1 && index($2, "at=") == 1 { a = substr($2, 4) } END { print a }' "$recdir/sitrep.log")"
-    [ -z "$bl_at" ] || bl_items="$(awk -F'|' -v at="at=$bl_at" 'index($0, "sitrep-log/v1|") == 1 && $2 == at && index($3, "item=") == 1 { s = $0; sub(/^[^|]*\|[^|]*\|item=/, "", s); print "- " s }' "$recdir/sitrep.log")"
+  # ---- The Bottom line: owe, next, done, close
+  local b_owe b_next b_done parts sp tp
+  if [ "$nown" -eq 0 ]; then b_owe="You owe nothing now."
+  else b_owe="You owe $nown: $(printf '%s' "$whats" | awk 'NF { n++; w[n] = $0 } END { for (i = 1; i <= n; i++) s = s ((i == 1) ? "" : ((i == n) ? " and " : ", ")) w[i]; print s }')."; fi
+  parts=""
+  # shellcheck disable=SC2086
+  [ -z "$inflight" ] || parts="$(sitrep_list 5 $inflight) in flight"
+  # shellcheck disable=SC2086
+  [ -z "$blocked" ] || parts="${parts:+$parts; }$(sitrep_list 5 $blocked) blocked"
+  # shellcheck disable=SC2086
+  if [ -n "$nextup" ]; then
+    if [ -n "$parts" ]; then parts="$parts; then $(sitrep_list 3 $nextup)"; else parts="$(sitrep_list 3 $nextup)"; fi
   fi
-  if [ -n "$bl_items" ] && [ -n "$(iso_epoch "$bl_at")" ]; then
-    printf 'Bottom line (since %s)\n%s\n' "$(sitrep_clock "$(iso_epoch "$bl_at")" "$now")" "$bl_items"
+  if [ -n "$parts" ]; then b_next="Next: $parts."
+  elif [ -n "$dlv_at" ]; then b_next="Next: nothing; the run is delivered."
   else
-    printf 'Bottom line — none recorded yet\n'
+    b_next="Next: step ${cur:-0}, $(printf '%s' "${cur:-0}" | awk '{ split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " "); print nm[$1 + 1] }')."
   fi
-  printf '\nSituation\n%d landed · %d in flight · %d not started · %d red/blocked of %d\n' "$landed" "$active" "$pending" "$redn" "$total"
-  while IFS='	' read -r ty gl lab desc kind note; do
-    [ -n "$ty" ] || continue
-    case "$gl" in L) glyphs="✅" ;; A) glyphs="🔄" ;; X) glyphs="⛔" ;; *) glyphs="⬜" ;; esac
-    case "$kind" in
-      ta) note="approved $(sitrep_clock "$note" "$now")" ;;
-      t)  note="$(sitrep_clock "$note" "$now")" ;;
-      th) note="$(sitrep_clock "$note" "$now"), by hand" ;;
-    esac
-    printf '%s %s: %s (%s)\n' "$glyphs" "$lab" "$desc" "$note"
-  done <<SITREP_SIT
+  if [ -n "$dlv_at" ]; then sp="steps 0 to 9"
+  elif [ "${cur:-0}" -ge 2 ]; then sp="steps 0 to $((cur - 1))"
+  elif [ "${cur:-0}" -eq 1 ]; then sp="step 0"
+  else sp=""; fi
+  if [ "$total" -eq 0 ]; then tp=""
+  elif [ "$landed" -eq 0 ]; then tp="no task yet"
+  elif [ -n "$last_id" ]; then tp="$landed of $total tasks, the last $last_id at $(sitrep_clock "$last_at" "$now")"
+  else tp="$landed of $total tasks"; fi
+  b_done="${sp}${sp:+${tp:+; }}${tp}"; b_done="Done: ${b_done:-nothing yet}."
+
+  # ---- the page, each line with its continuation indent, folded at 92 columns
+  local proj title_rel steps_done gh grade_at grade_g grade_why gline
+  proj="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  case "$proj" in */.git) proj="${proj%/.git}"; proj="${proj##*/}" ;; *) proj="${root##*/}" ;; esac
+  title_rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"
+  steps_done="${cur:-0}"; [ -z "$dlv_at" ] || steps_done=9; [ "$steps_done" -le 9 ] || steps_done=9
+  gline=""
+  if [ -f "$recdir/sitrep.log" ] && [ ! -L "$recdir/sitrep.log" ]; then
+    gline="$(awk 'index($0, "sitrep-grade/v1|at=") == 1 { l = $0 } END { print l }' "$recdir/sitrep.log")"
+  fi
+  if [ -n "$gline" ]; then
+    grade_at="${gline#*|at=}"; grade_at="${grade_at%%|*}"
+    grade_g="${gline#*|grade=}"; grade_g="${grade_g%%|*}"
+    grade_why="${gline#*|why=}"
+    gh="Score: $grade_g (graded $(sitrep_clock "$(iso_epoch "$grade_at")" "$now"))"
+  else
+    gh="Score: not graded yet"
+  fi
+  {
+    printf '0\tSitrep · %s%s · %s · step %s of 9%s\n' "$proj" "${title_rel:+ $title_rel}" "$(sitrep_date "$now" '%A %-I:%M %p')" \
+      "${cur:--}" "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done' "$landed" "$total")"
+    printf '0\t\n0\tBottom line\n'
+    printf '2\t- %s\n' "$b_owe" "$b_next" "$b_done" "Close: $btext."
+    printf '0\t\n0\tTask list\n'
+    while IFS='	' read -r ty gl lab desc kind note; do
+      [ -n "$ty" ] || continue
+      case "$gl" in L) glyph="✅" ;; A) glyph="🔄" ;; X) glyph="⛔" ;; *) glyph="⬜" ;; esac
+      case "$kind" in
+        t)  printf '5\t%s %s: %s (%s)\n' "$glyph" "$lab" "$desc" "$(sitrep_clock "$note" "$now")" ;;
+        th) printf '5\t%s %s: %s (%s, by hand)\n' "$glyph" "$lab" "$desc" "$(sitrep_clock "$note" "$now")" ;;
+        s)  printf '5\t%s %s: %s — %s\n' "$glyph" "$lab" "$desc" "$note" ;;
+        *)  printf '5\t%s %s: %s\n' "$glyph" "$lab" "$desc" ;;
+      esac
+    done <<SITREP_SIT
 $sit
 SITREP_SIT
-  printf '\nAssessment\n%s\n%s\n%s\n%s\n' "$s_text" "$c_text" "$w_text" "$SITREP_LEGEND"
-  printf '\nBlockers\n'
-  if [ -n "$blockers" ]; then printf '%s\n' "$blockers"; else printf 'none — no decision or action is owed by you\n'; fi
-  printf '\nForecast\n%d/%d rows landed (%d%%)\n%s\n' "$landed" "$total" "$( [ "$total" -gt 0 ] && echo $(( (landed * 200 + total) / (total * 2) )) || echo 0 )" "$ctext"
-  if [ -n "$cids" ]; then
-    printf 'basis: %s · admitted width %d · remaining chain %s %sm\n' "$basis_who" "$width" "$(printf '%s' "$cids" | sed 's/,/→/g')" "$cmins"
-  else
-    printf 'basis: %s · admitted width %d · no remaining chain\n' "$basis_who" "$width"
-  fi
-  printf 'assuming open blockers are answered now; each hour they wait moves it an hour\n'
+    printf '0\t\n0\t%s\n' "$gh"
+    printf '3\t%s\n' "$s_text" "$c_text" "$w_text" "$SITREP_MARK_NONE decisions — rounds not counted yet" "$SITREP_MARK_NONE goals — not measured yet"
+    [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
+    printf '0\t\n0\tBlocked on you\n'
+    if [ -n "$blk" ]; then printf '%s' "$blk"; else printf '2\t- Nothing: no decision or action is owed by you.\n'; fi
+    printf '0\t\n0\tCompletion\n2\t- %s of 9 steps.\n' "$steps_done"
+    if [ "$total" -gt 0 ]; then printf '2\t- %d of %d tasks done (%d%%).\n' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) ))
+    else printf '2\t- No tasks defined yet; the plan is not written.\n'; fi
+    printf '0\t\n0\tPredicted close\n'
+    for k in "$@"; do printf '2\t- %s\n' "$k"; done
+  } | sitrep_fold
   return 0
 }
 
@@ -897,33 +1074,32 @@ sitrep_tick_line() {
   [ -z "$l" ] || say "sitrep $l"
 }
 
-# sitrep_bottom_line <plan> <root> <item>… -> records the items, one `sitrep-log/v1|at=<ISO-UTC>|item=<text>` line
-# each, all at one instant, to record/<wave>/sitrep.log; rc 1 (nothing written) when an item is empty, holds a
-# `|` or a line break, or is neither cited `(line <n>)` nor labelled `hypothesis:`, `diagnosis:` or `projection:`.
-sitrep_bottom_line() {
-  local plan="$1" root="$2" it at out="" dir log cited='\(line [0-9]+\)'
-  shift 2
-  for it in "$@"; do
-    case "$it" in
-      *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — the item '$(clean "$it")' holds a | or a line break, which the record cannot carry; nothing is recorded."; return 1 ;;
-    esac
-    [ -n "${it//[[:space:]]/}" ] || { die "REFUSED — an empty item; nothing is recorded."; return 1; }
-    case "$it" in
-      hypothesis:*|diagnosis:*|projection:*) : ;;
-      *) if ! [[ "$it" =~ $cited ]]; then
-           die "REFUSED — the item '$(clean "$it")' cites no rendered line (line <n>) and carries no label (hypothesis:, diagnosis:, projection:); nothing is recorded."
-           return 1
-         fi ;;
-    esac
-  done
+# sitrep_grade <plan> <root> <letter> <rationale> -> records one `sitrep-grade/v1|at=<ISO-UTC>|grade=<letter>|why=<text>`
+# line in the run's sitrep.log, which the next page prints under its Score; rc 1, nothing written, when the letter
+# is not one of A to F, or the rationale is empty, holds a `|` or a line break, or names no indicator line
+# (schedule, correctness, waste, decisions or goals, as a word in any case).
+sitrep_grade() {
+  local plan="$1" root="$2" g="$3" why="$4" at dir log lc re='(^|[^a-z])(schedule|correctness|waste|decisions?|goals?)([^a-z]|$)'
+  case "$g" in
+    [A-F]) : ;;
+    *) die "REFUSED — the grade '$(clean "$g")' is not one of A to F; nothing is recorded."; return 1 ;;
+  esac
+  case "$why" in
+    *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — the rationale '$(clean "$why")' holds a | or a line break, which the record cannot carry; nothing is recorded."; return 1 ;;
+  esac
+  [ -n "${why//[[:space:]]/}" ] || { die "REFUSED — an empty rationale; nothing is recorded."; return 1; }
+  lc="$(printf '%s' "$why" | tr '[:upper:]' '[:lower:]')"
+  if ! [[ "$lc" =~ $re ]]; then
+    die "REFUSED — the rationale '$(clean "$why")' names no indicator line (schedule, correctness, waste, decisions or goals); nothing is recorded."
+    return 1
+  fi
   at="$(sitrep_now)"
   at="$(date -u -r "$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  [ -n "$at" ] || { die "REFUSED — no clock to stamp the items with; nothing is recorded."; return 1; }
-  for it in "$@"; do out="${out}sitrep-log/v1|at=${at}|item=${it}"$'\n'; done
+  [ -n "$at" ] || { die "REFUSED — no clock to stamp the grade with; nothing is recorded."; return 1; }
   dir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"; log="$dir/sitrep.log"
-  { mkdir -p "$dir" && [ ! -L "$log" ] && printf '%s' "$out" >> "$log"; } 2>/dev/null \
+  { mkdir -p "$dir" && [ ! -L "$log" ] && printf 'sitrep-grade/v1|at=%s|grade=%s|why=%s\n' "$at" "$g" "$why" >> "$log"; } 2>/dev/null \
     || { die "REFUSED — the record $log cannot be written; nothing is recorded."; return 1; }
-  say "sitrep bottom-line — $# item(s) recorded at $(sitrep_clock "$(iso_epoch "$at")" "$(sitrep_now)") in $log; the next sitrep opens on them"
+  say "sitrep grade $g — recorded at $(sitrep_clock "$(iso_epoch "$at")" "$(sitrep_now)") in $log; the next sitrep prints it"
   return 0
 }
 
@@ -1083,7 +1259,7 @@ sitrep_bottom_line() {
   # portable state lives in a record file and the plan carries a pointer. The verb writes record/<wave>/handoff.md
   # (or <path>, under the docs root) whole, and never by hand, one line per fact in this order:
   #   bionic-handoff/v1                          the kind line
-  #   sitrep head: <Bottom line (since …)>       the sitrep verb's own last recorded Bottom line and its items, or
+  #   sitrep head: Bottom line                   the sitrep page's own Bottom line and its four bullets, or
   #   - <item>                                   `sitrep head: (none recorded)`; then `sitrep line: <sitrep --line>`.
   #   sitrep line: <…>                           Both come from sitrep_render, never a second reader (D13).
   #   written: <date -u>                         the instant adopt and launch-sync judge a later dispatch against
@@ -1265,9 +1441,9 @@ sitrep_bottom_line() {
       } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff file cannot be written at $HO_FILE; the plan is unchanged."; exit 2; }
     else
       # THE SITREP HEAD: the verb's page, its Bottom line block cut out whole, and its one-line form (D13).
-      HO_BL="$(sitrep_render "$PV_PLAN" "$PV_REPO" no 2>/dev/null | awk 'index($0, "Bottom line") == 1 { f = 1; print; next } f && /^- / { print; next } f { exit }')"
+      HO_BL="$(sitrep_render "$PV_PLAN" "$PV_REPO" no 2>/dev/null | awk 'index($0, "Bottom line") == 1 { f = 1; print; next } f && /^(- |  )/ { print; next } f { exit }')"
       case "$HO_BL" in
-        'Bottom line ('*) HO_HEAD="sitrep head: $HO_BL" ;;
+        'Bottom line'*) HO_HEAD="sitrep head: $HO_BL" ;;
         *) HO_HEAD="sitrep head: (none recorded)" ;;
       esac
       HO_SLINE="$(sitrep_render "$PV_PLAN" "$PV_REPO" yes 2>/dev/null | head -1)"
@@ -1630,8 +1806,8 @@ sitrep_bottom_line() {
     fi
     SR_ROOT="$(cd "$(project_root "${SR_PLAN%/*}")" 2>/dev/null && pwd -P)"
     [ -n "$SR_ROOT" ] || SR_ROOT="$REPO_REAL"
-    if [ "$SR_BL" = yes ]; then
-      sitrep_bottom_line "$SR_PLAN" "$SR_ROOT" ${SR_ITEMS[@]+"${SR_ITEMS[@]}"}
+    if [ "${SR_GRADE:-no}" = yes ]; then
+      sitrep_grade "$SR_PLAN" "$SR_ROOT" "${SR_LETTER:-}" "${SR_WHY:-}"
       exit $?
     fi
     sitrep_render "$SR_PLAN" "$SR_ROOT" "$SR_LINE"
