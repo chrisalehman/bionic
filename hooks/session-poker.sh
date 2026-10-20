@@ -42,8 +42,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh handoff [<path>] [--mid-flight|--order|--rulings|--lessons|--risks '<text>']…   write the handoff file (record/<wave>/handoff.md, or <path> under the docs root): the sitrep head, the machine lines, the five human lines carried, safe to clear or wait N minutes, /bionic:canonical-sdlc <path> last; the plan's ## Handoff becomes one pointer line (writes the file and the plan)
-#     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door (D4): bind the plan the file names, arm, adopt, then print the task list, the recap, the step file and the patrol, and tick (writes the marker, the stamp and this session's roster)
+#     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, the plan's ## Handoff becomes one pointer line (writes the file, and the plan when bound)
+#     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, the stamp, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register (D24): this run's rulings from record/<wave>/design-ledger.md, or every run's with the ADRs (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh brief <row>   render the row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold from the row, the head, the orchestrator's sections marked (writes that file, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as two or more children, each <id>:<task>:<size>:<Files>, its waiters re-pointed (writes the plan)
@@ -523,8 +523,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
-  die "  bash ${HOOK_DIR}/session-poker.sh handoff [<path>] [--mid-flight|--order|--rulings|--lessons|--risks '<text>']…   write the handoff file, record/<wave>/handoff.md or <path> under the docs root: kind line, sitrep head, machine lines, the five human lines (a flag's text, else carried from the previous file), safe to clear or wait N minutes, and /bionic:canonical-sdlc <path> last; the plan's ## Handoff becomes the one line handoff: <path> written <local time>; a closed plan, delivered or parked, gets the closed form"
-  die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: bind the plan the handoff file names, arm the stamp, adopt; print task-list: lines, the recap (settled:, open:, owned-by-user:, standing-order:, branch:, plan:, tree:), step-file:, the CronCreate (patrol-interval:, patrol:); then tick. The closed form prints its recap and resumes nothing"
+  die "  bash ${HOOK_DIR}/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document, .bionic/docs/record/handoffs/<date>-<slug>.md, bound or not: the kind line, the title, Summary, Goal, State (computed), Findings, Decisions, Ruled out, Open, Suggested skills and Next (composed, on stdin), the resume line last; prints the path and the resume line; bound, the plan's ## Handoff becomes the one line handoff: <path> written <local time>"
+  die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, patrol) and the path of the recap file holding the rest (task-list:, settled:, open:, the Patrol job). A closed or no-run file binds nothing"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md; --all: every run's, keyed by wave, with the ADRs (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
@@ -1295,26 +1295,14 @@ $1"; shift ;;
   matrix-render)
     [ $# -eq 0 ] || usage "matrix-render takes no argument: it renders the bound plan's matrix from its ## Eval design."
     ;;
-  # THE HANDOFF FILE (wave-38 T12; D23, AC-3.1). At most one path, and the five human lines by flag, each taking
-  # one value: the line's text, a line break making the next line a continuation. A flag with no value or an empty
-  # one, a flag named twice, an unknown flag and a second path are the usage error (2); where the path may point is
-  # the verb's (it needs the root).
+  # THE HANDOFF DOCUMENT. At most one operand, the purpose: what the next session is for, in words. The composed
+  # sections come on stdin, never as flags; any flag is the usage error (2).
   handoff)
-    HO_ARG_PATH=""; HO_F_MID=""; HO_F_ORDER=""; HO_F_RULINGS=""; HO_F_LESSONS=""; HO_F_RISKS=""
+    HO_ARG_PATH=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --mid-flight|--order|--rulings|--lessons|--risks)
-          { [ $# -ge 2 ] && [ -n "$2" ]; } || usage "handoff: $1 takes the line's text, as in: handoff $1 '<text>'."
-          case "$1" in
-            --mid-flight) [ -z "$HO_F_MID" ] || usage "handoff takes $1 once."; HO_F_MID="$2" ;;
-            --order) [ -z "$HO_F_ORDER" ] || usage "handoff takes $1 once."; HO_F_ORDER="$2" ;;
-            --rulings) [ -z "$HO_F_RULINGS" ] || usage "handoff takes $1 once."; HO_F_RULINGS="$2" ;;
-            --lessons) [ -z "$HO_F_LESSONS" ] || usage "handoff takes $1 once."; HO_F_LESSONS="$2" ;;
-            --risks) [ -z "$HO_F_RISKS" ] || usage "handoff takes $1 once."; HO_F_RISKS="$2" ;;
-          esac
-          shift 2 ;;
-        -*) usage "handoff takes at most one path and the flags --mid-flight, --order, --rulings, --lessons and --risks, each with its text." ;;
-        *) { [ -z "$HO_ARG_PATH" ] && [ -n "$1" ]; } || usage "handoff takes at most one path: the handoff file to write, under the docs root."
+        -*) usage "handoff takes at most one operand, the purpose, and its composed sections on stdin: handoff ['<purpose>'] <<'HANDOFF' … HANDOFF." ;;
+        *) { [ -z "$HO_ARG_PATH" ] && [ -n "$1" ]; } || usage "handoff takes at most one operand: the purpose, quoted as one word."
            HO_ARG_PATH="$1"; shift ;;
       esac
     done
@@ -3000,7 +2988,6 @@ LAUNCH_SYNC_LOCK=""
 LS_PROOFS=""; LS_PROOFS_READ=no
 SWEEP_SCHEMA="poker-sweep/v1"
 # the situation report
-HANDOFF_HUMAN_KEYS="mid-flight order rulings lessons risks"
 SCORECARD_STOP_GAP=600
 SITREP_MARK_WITHIN='✅'
 SITREP_MARK_NEAR='➖'
