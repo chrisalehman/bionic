@@ -1136,6 +1136,12 @@ EOF
       fi
       _line_drain_add "$s"
     done
+    # While the user's order stands no suite starts, here as in tests/run.sh. The entry is returned with the
+    # user's words and nothing ran; once the user lifts the order, the writer says ready again.
+    if [ "$_LINE_DN" -gt 0 ] && c="$(_line_order "$root")"; then
+      line_event "$plan" returned "row=${row}" why=order "detail=${c%%$'\n'*}" >/dev/null
+      printf 'ORDER %s %s\n' "$row" "${c#*$'\n'}"; return 1
+    fi
     if [ "$_LINE_DN" -gt 0 ]; then
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
       # ONE TREE PER CANDIDATE, POINTED ONCE (D3): every run of the pass starts from the candidate, clean, in
@@ -1208,6 +1214,15 @@ EOF
     fi
     sleep "$LINE_POLL"
   done
+}
+
+# The user's order (lib/gate.sh `gate_order`): 0 when one stands, printing `given <ISO-UTC>` and then the refusal
+# tests/run.sh prints, with the user's words; 1 when none does.
+_line_order() {  # <root>
+  local o w at
+  o="$(gate_order "$1" 2>/dev/null)" || return 1
+  w="${o#*\"}"; w="${w%\"}"; at="${o#given }"; at="${at%% *}"
+  printf 'given %s\nrefused — the user'"'"'s order stands: "%s" (given %s). Nothing was run. Only the user lifts it, in their own words; ask the user.\n' "$at" "$w" "$at"
 }
 
 # The anchor check (lib/anchors.sh), loaded on first use: its lines, and 0 every anchor holds · 1 one moved

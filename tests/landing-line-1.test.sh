@@ -653,6 +653,14 @@ expect_eq "(x4) a conflict with the accepted head returns the row (exit 1)" "1" 
 expect_eq "(x4) …printing CONFLICT and the files" "CONFLICT T1 T1.txt" "$LL_OUT"
 expect_regex "(x4) …returned why=conflict" "^line/v1\\|ev=returned\\|row=T1\\|why=conflict\\|detail=T1.txt\\|" "$(ll_ev "$RC1" returned)"
 expect_eq "(x4) …nothing published" "$HC1" "$(ll_head "$RC1")"
+# THE USER'S ORDER: while one stands the line starts no suite and returns the entry with the user's words; lifted, the same ready runs it.
+RO="$(ll_rworld)"; HO="$(ll_head "$RO")"; ll_order() { awk -v l="$2" '/^## Tasks/ { print l } { print }' "$(ll_plan "$1")" > "$(ll_plan "$1").n" && mv "$(ll_plan "$1").n" "$(ll_plan "$1")"; }
+ll_order "$RO" 'order: given 2026-10-20T00:00:00Z "no suites, I said"'; ll_verb "$RO" T1
+expect_eq "(x5) an order standing: ready exits 1" "1" "$LL_RC"
+expect_contains "(x5) …printing the user's words" 'the user'"'"'s order stands: "no suites, I said"' "$LL_OUT"
+expect_eq "(x5) …no suite started and the row is returned for the order" "0 $HO order" "$(ll_ev "$RO" verdict | wc -l | tr -d ' ') $(ll_head "$RO") $(ll_field "$(ll_ev "$RO" returned)" why)"
+ll_order "$RO" 'order: lifted 2026-10-20T00:01:00Z "go on"'; ll_verb "$RO" T1
+expect_eq "(x6) once lifted, the same ready runs the suite and lands (exit 0, a green verdict)" "0 green" "$LL_RC $(ll_field "$(ll_ev "$RO" verdict)" result)"
 
 # ---------------------------------------------------------------------------
 section "§AHEAD-RED: a refused row holds nothing behind it (AC-1.6)"
