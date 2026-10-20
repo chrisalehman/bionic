@@ -18,8 +18,6 @@ skipfloor
 floorv
 floor\[
 floor=()
-local floor=
-floor="[$](units_field
 "[$]floor"
 floor=[01]
 (floor == 1)
