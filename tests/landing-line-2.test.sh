@@ -931,27 +931,28 @@ expect_eq "(o2) both land, T2 then T1" "0 0 T2 T1" \
   "$(cat "$WORLD_ROOT/o2-T2.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/o2-T1.out.rc" 2>/dev/null) $(ll_ev "$RO2" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------------------------------------------------------------------------
-section "§LINT: a comment that cites the run is refused at its line, and one that cites a tracked docs path is accepted"
+section "§LINT: a comment that cites the run is refused at its line; a tracked docs path, a test's fixture row ids and a .bionic/tmp path are accepted"
 #
-# The landing line reads the comments a candidate adds to a shell file under payload/ and refuses one that names a wave
-# or a record path, printing the file, the line and the shapes. A tracked docs path names no shape.
-# fails-when: a planted citation is not named by its file and line, or the tracked-path comment is named.
+# The landing line reads the comments a candidate adds to a shell file under payload/ or tests/ and refuses one that
+# names a wave or a record path, printing the file, the line and the shapes. A tracked docs path, a fixture's row ids
+# in a test and a path under .bionic/tmp name no shape.
+# fails-when: a planted citation is not named by its file and line, or one of the three accepted comments is named.
 LN_REPO="$WORLD_ROOT/lint-repo"
-mkdir -p "$LN_REPO/payload/scripts"
+mkdir -p "$LN_REPO/payload/scripts" "$LN_REPO/tests"
 git -C "$LN_REPO" init -q && git -C "$LN_REPO" config user.name lint && git -C "$LN_REPO" config user.email lint@example.invalid
-printf '%s\n' '#!/bin/bash' 'echo one' > "$LN_REPO/payload/scripts/a.sh"
+printf '%s\n' '#!/bin/bash' 'echo one' > "$LN_REPO/payload/scripts/a.sh"; printf '%s\n' '#!/bin/bash' 'echo t' > "$LN_REPO/tests/t.test.sh"
 git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm base
 LN_BASE="$(git -C "$LN_REPO" rev-parse HEAD)"
-printf '%s\n' '# reads .bionic/docs/record/x.md' '# started in wave-39 T5' >> "$LN_REPO/payload/scripts/a.sh"
+printf '%s\n' '# reads .bionic/docs/record/x.md' '# started in wave-39 T5' >> "$LN_REPO/payload/scripts/a.sh"; printf '%s\n' '# from wave-39' >> "$LN_REPO/tests/t.test.sh"
 git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm cited
 LN_CITED="$(git -C "$LN_REPO" rev-parse HEAD)"
 LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_BASE" "$LN_CITED")"; LN_RC=$?
-expect_eq "(ln1) a comment citing a record path, and one naming a wave, are refused at their lines: rc 1, each named" \
-  "1|payload/scripts/a.sh:3 record-path|payload/scripts/a.sh:4 wave" "$LN_RC|$(printf '%s\n' "$LN_OUT" | paste -sd'|' -)"
-printf '%s\n' '# see docs/adrs/adr-001.md' >> "$LN_REPO/payload/scripts/a.sh"
+expect_eq "(ln1) a comment citing a record path, and one naming a wave in a script and in a test, are refused at their lines: rc 1, each named" \
+  "1|payload/scripts/a.sh:3 record-path|payload/scripts/a.sh:4 wave|tests/t.test.sh:3 wave" "$LN_RC|$(printf '%s\n' "$LN_OUT" | paste -sd'|' -)"
+printf '%s\n' '# see docs/adrs/adr-001.md' '# scratch goes under .bionic/tmp/scratch' >> "$LN_REPO/payload/scripts/a.sh"; printf '%s\n' '# T12 waits on T2' >> "$LN_REPO/tests/t.test.sh"
 git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm tracked
 LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_CITED" "$(git -C "$LN_REPO" rev-parse HEAD)")"; LN_RC=$?
-expect_eq "(ln2) a comment citing a tracked docs path is accepted: rc 0, nothing named" "0|" "$LN_RC|$LN_OUT"
+expect_eq "(ln2) AC-16.2 a tracked docs path and a .bionic/tmp path in a script, and a test's T12 waits on T2, are accepted: rc 0, nothing named" "0|" "$LN_RC|$LN_OUT"
 
 # ---------------------------------------------------------------------------
 finish
