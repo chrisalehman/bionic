@@ -220,6 +220,8 @@ expect_eq "R0 sitrep <plan> exits 0 with nothing on stderr" "0|" "$RC|$ERR"
 expect_eq "R2 the title carries the step of nine and the tasks done, and the page has no Completion section" "step 4 of 9 · 4 of 17 tasks done|0" \
   "$(sr_page | head -1 | /usr/bin/grep -oE 'step [0-9]+ of 9 · [0-9]+ of [0-9]+ tasks done')|$(sr_page | /usr/bin/grep -c '^Completion$')"
 SR_ROWS="$(sr_rows)"
+expect_eq "R2b the title's task count carries its percent, rounded" "4 of 17 tasks done (24%)" \
+  "$(sr_page | head -1 | /usr/bin/grep -oE '[0-9]+ of [0-9]+ tasks done \([0-9]+%\)')"
 expect_eq "R3 seventeen task lines under Task list" "17" "$(printf '%s\n' "$SR_ROWS" | /usr/bin/grep -c .)"
 expect_eq "R4 every task line opens with one of the four glyphs in column 1, then [step]/[task]:" "17" \
   "$(printf '%s\n' "$SR_ROWS" | /usr/bin/grep -cE '^(✅|🔄|⬜|⛔) 4/T[0-9]+: ')"
