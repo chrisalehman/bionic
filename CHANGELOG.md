@@ -160,7 +160,9 @@ the line. The whole regression after the build is the proof for everything else 
 - The second readings, on the fix rows (`critic-adversarial-2.md`, `critic-structure-2.md`, T61, and
   `critic-adversarial-3.md`, `critic-structure-3.md`, T63): five S3 findings deferred, below, and S4 notes.
 - The auditor's second reading on the whole (`auditor-evidence-2.md`, T60): 66 rows confirmed, 3 refuted and 3
-  unverifiable. Its open findings are under Known limits.
+  unverifiable. The user confirmed both reader tests (D21), waived AC-5.1 and AC-7.1 with their fixes carried (D20),
+  and waived AC-16.3 and AC-17.3 on the amended criterion and this row's promotion (D22). Its open findings are under
+  Known limits.
 
 ### The landing numbers
 
@@ -246,14 +248,12 @@ made past it: under D19 a head past it is proved by its landings' own green verd
   (`critic-adversarial-3.md#1`).
 - a decision a row waits on is owed twice, as the tick's approve:D<n> and the page's decide:D<n>, so You owe counts
   two for one reply (`critic-adversarial-3.md#2`).
-- No check shows `units_validate` or `task-add` refusing an out-of-order plan: the suite builds three such plans and
-  asserts nothing about them (`auditor-evidence-2.md`, finding 2).
+- The plan validator has no check showing it refuses out-of-order rows; the rule holds, the check is written back next
+  wave (`auditor-evidence-2.md#2`; AC-7.1 waived at D20).
 - proof-add's refusal past the whole run still offers to run the whole at the head, the second whole run D16 and D19
-  rule out (`auditor-evidence-2.md`, finding 1).
+  rule out (`auditor-evidence-2.md`, finding 1). AC-5.1 is waived and the fix carried to the next wave (D20).
 - ADR-064 still says the comment lint runs at the landing line. The lint now runs at both landing doors, one function
   with one test, and the criterion was amended to say so after T57 (A-orch-D19.1).
-- The handoff and sitrep reader tests were run by an agent that had read the run, and neither is confirmed by the
-  user (`auditor-evidence-2.md`, findings 4 and 5).
 - The tests goal's 45 minutes was read as the whole run's wall time, 1,159 seconds, where the summed suite time is
   7,422 seconds (`auditor-evidence-2.md`, finding 10).
 - The debt ledger still names hooks/session-poker.sh lines past its new end (`critic-adversarial.md`, finding 8), and
