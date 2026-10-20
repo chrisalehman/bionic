@@ -189,15 +189,17 @@ release_deferrals() {
   # THE APPROVAL (wave-26 T13; D3, AC-6.2). A row that reads `approval:<name>` is not ready, and
   # the dispatch wall refuses it, until `## SDLC State` carries
   #
-  #   approved: <name> by <who> <ISO-UTC> "<reply>"
+  #   approved: <name> by <who> <ISO-UTC> head=<40-hex> "<reply>"
   #
   # written here on the user's reply and nowhere else: `<who>` is the project's git user name,
-  # the instant is `date -u`, the reply is the user's own words. It goes through the plan
-  # transaction every row verb takes (copy, dry commit through the real gate, checksum, swap),
-  # beside the approval lines already there — after the last `approved:` or `approved-by:` line,
-  # else after `current:`. An approval is recorded once: a second `approve` of a name the plan
-  # already carries is refused, so the first reply stands. `plan` is refused by name: the plan's
-  # approval is the `approved-by:` line Step 3 writes, which `approval:plan` reads.
+  # the instant is `date -u`, the head is the working branch's (lib/proof.sh `proof_branch_head`;
+  # no head= when the plan names no branch with a commit), the reply is the user's own words. It
+  # goes through the plan transaction every row verb takes (copy, dry commit through the real gate,
+  # checksum, swap), beside the approval lines already there — after the last `approved:` or
+  # `approved-by:` line, else after `current:`. An approval is recorded once: a second `approve` of
+  # a name the plan already carries is refused, so the first reply stands, except `release` at a
+  # head its newest line does not name: the release is approved per head. `plan` is refused
+  # by name: the plan's approval is the `approved-by:` line Step 3 writes, which `approval:plan` reads.
   poker_verb_approve() {
     if [ "$AP_NAME" = plan ]; then
       die "REFUSED — approval:plan is the plan's approved-by: line, written at Step 3 when the user approves the plan card; approve records any other approval a row reads (approval:<name>). The plan is unchanged."
@@ -230,16 +232,21 @@ release_deferrals() {
         sub(/^approved[ \t]*:[ \t]*/, "", l); split(l, w, /[ \t]+/)
         if (w[1] == want) { print $0; exit }
       }' "$PV_PLAN")"
+    AP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || AP_HEAD=""
+    case "$AP_HEAD" in *[!0-9a-f]*|'') AP_HEAD="" ;; esac
     if [ -n "$AP_HAVE" ]; then
-      die "REFUSED — $PV_PLAN already records this approval: $(clean "$AP_HAVE"). An approval is recorded once; the plan is unchanged."
-      exit 1
+      AP_WAS="$(proof_approved_head "$PV_PLAN" "$AP_NAME" 2>/dev/null)" || AP_WAS=""
+      if [ "$AP_NAME" != release ] || [ -z "$AP_HEAD" ] || [ "$AP_WAS" = "$AP_HEAD" ]; then
+        die "REFUSED — $PV_PLAN already records this approval: $(clean "$AP_HAVE"). An approval is recorded once; the plan is unchanged."
+        exit 1
+      fi
     fi
     AP_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
     if [ -z "$AP_WHO" ] || ! plan_verb_value_ok "$AP_WHO"; then
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
       exit 1
     fi
-    AP_LINE="approved: $AP_NAME by $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$AP_REPLY\""
+    AP_LINE="approved: $AP_NAME by $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ)${AP_HEAD:+ head=$AP_HEAD} \"$AP_REPLY\""
     # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
     # user's reply as an escape and write a different reply than the one given.
     if ! AP_LINE="$AP_LINE" awk '

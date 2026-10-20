@@ -4953,4 +4953,98 @@ fp_landing "$RFR" "$(fr_landed)" "$(fr_reg "$FR_R" a.test.sh green)"
 expect_eq "FR-10b …and the row FR-3 holds goes red on it: a regression at R names the finding" "$FR_ID|T5|$FR_L|born" "$(fr_fixed)"
 FP_LIB="$FR_SHIPPED_LIB"
 
+# ============================================================
+section "§APPROVED-HEAD — in the release order, current 8 is admitted only at the head the user approved for release, with the whole run at that head"
+# ============================================================
+# A plan whose regression row (a test row at Step 7) comes after its release row (a doc row at Step 7) is in the
+# release order (lib/units.sh `units_release_order`). For it, `current 8` asks, besides every fact the run owes: the
+# newest `approved: release` line's head= (lib/proof.sh `proof_approved_head`) is the working branch's head, and the
+# last regression proof is at that head. Each refusal names both heads. A plan outside that order is judged as §OWED
+# judges it.
+# FIXTURE FIDELITY: a real repository on its working branch: the base B, a code commit E, a README commit A (prose to
+# the walk) and a later code commit C; the readings and the regression proof by their writers; the plan in §OWED's
+# shape with the rows in the release order, bound to this session; `current 8 --check` is the real verb.
+# fails-when: current 8 passes at a head the user did not approve, or with the whole run at another head.
+AHR="$(fp_repo approved-head)"
+printf '.bionic\n' > "$AHR/.gitignore"; ( cd "$AHR" && git add .gitignore && git commit -qm ignore ) >/dev/null 2>&1
+AH_B="$(git -C "$AHR" rev-parse HEAD)"
+AH_E="$(fp_commit "$AHR" lib.sh one)"
+AH_A="$(fp_commit "$AHR" README.md 'the readme')"
+AH_C="$(fp_commit "$AHR" lib.sh two)"
+AHP="$(fp_plan_path "$AHR")"
+for ah_f in dispatch audit review docs generic-evidence; do printf 'fixture evidence\n' > "$AHR/.bionic/docs/$FP_REC/$ah_f.md"; done
+for ah_q in evidence adversarial structure; do fp_record "$AHR" "$ah_q.md" "$ah_q" pass "${AH_B:0:10}..${AH_C:0:10}" 'findings: 0'; done
+fp_record "$AHR" adversarial-whole.md adversarial pass "${AH_B:0:10}..${AH_C:0:10}" 'findings: 0'
+fp_record "$AHR" structure-whole.md structure pass "${AH_B:0:10}..${AH_C:0:10}" 'findings: 0'
+ah_plan() {  # <working head> <regression proof head> [<approval line>] -> AHP at current: 8, the readings at the working head
+  git -C "$AHR" reset -q --hard "$1"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: 8\nworking-branch: wave/01-fixture\nintegration-branch: main\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+    [ -z "${3:-}" ] || printf '%s\n' "$3"
+    printf -- '- Step 4: dispatched, %s/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$FP_REC" "$AH_B"
+    printf -- '- T1: landed %s 2026-10-12T10:00:00Z\n- T2: landed %s 2026-10-12T13:00:00Z\n' "$AH_E" "$AH_A"
+    printf -- '- T3: landed at %s/regression-run.log\n' "$FP_REC"
+    printf -- '- Step 5: verified, %s/audit.md\n  auditor: CONFIRMED, %s/audit.md\n' "$FP_REC" "$FP_REC"
+    printf -- '- Step 6: review at %s/review.md\n' "$FP_REC"
+    printf -- '- Step 7: documented at %s/docs.md\n  n/a: no decision this run\n' "$FP_REC"
+    bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T15:00:00Z "$3"' _ "$FP_LIB" "$2" "$FP_REC/regression-run.log"
+    ow_reads "$1"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the lib writer | implementor | — | 30 | REQ-1 | lib.sh | — | — | landed | approval:plan |\n'
+    printf '| T2 | 7 | doc | the release | implementor | — | 30 | REQ-1 | README.md | — | — | landed | approval:plan, head |\n'
+    printf '| T3 | 7 | test | the whole regression | test-runner | — | 90 | REQ-1 | — | — | — | landed | approval:release, head |\n'
+    printf '| T4 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | pending | approval:release, approval:merge, head |\n'
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |\n\n'
+    printf 'AC-1.1:\n  fails-when: the planted defect this eval must go red on\n  evidence: %s/generic-evidence.md\n' "$FP_REC"
+    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
+  } > "$AHP"
+  bound_marker "$AHR" "$FP_SID" "$AHP" >/dev/null 2>&1
+}
+ah_appr() { printf 'approved: release by Dana Fixture 2026-10-12T14:00:00Z head=%s "Ship it."' "$1"; }  # <head>
+ah_poke() {  # <args...> -> AH_OUT, AH_RC: session-poker.sh as this session, in the repository
+  AH_RC=0
+  AH_OUT="$(cd "$AHR" && env CLAUDE_CODE_SESSION_ID="$FP_SID" CLAUDE_CONFIG_DIR="$FP_ROOT/ow-config" HOME="$FP_ROOT/ow-home" \
+    BIONIC_GATE_DIR="$FP_ROOT/ow-gate" bash "$FP_POKER" "$@" 2>&1)" || AH_RC=$?
+}
+ah_facts() {  # <head> -> facts_state's rc over the plan at <head>, and its lines that are not covered
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" || exit 99; o="$(facts_state "$2" "$3")"; rc=$?
+    printf "%s\n" "$o" | awk -F"\t" "\$NF != \"covered\""; echo "rc=$rc"' _ "$FP_LIB" "$AHP" "$1" 2>/dev/null | paste -sd'|' -
+}
+
+ah_plan "$AH_A" "$AH_A" "$(ah_appr "$AH_A")"
+expect_eq "AH-0 precondition: the plan is in the release order, the regression row named" "T3" \
+  "$(bash -c '. "$1/units.sh" && units_release_order "$2"' _ "$FP_LIB" "$AHP" 2>/dev/null)"
+expect_eq "AH-0b precondition: every fact the run owes holds at A" "rc=0" "$(ah_facts "$AH_A")"
+ah_poke current 8 --check
+expect_eq "AH-1 control: approved head A, the whole run at A, the working head A: current 8 --check passes" "0" "$AH_RC"
+
+ah_plan "$AH_C" "$AH_C" "$(ah_appr "$AH_A")"
+expect_eq "AH-2 precondition: every fact the run owes holds at C (the whole run and the readings are at C)" "rc=0" "$(ah_facts "$AH_C")"
+ah_poke current 8 --check
+expect_eq "AH-2b AC-7.2 approved head A, the regression at C, the working head C: current 8 --check refuses (exit 1)" "1" "$AH_RC"
+expect_contains "AH-2c AC-7.2 …naming both heads" \
+  "the working head ${AH_C:0:12} is not the head the user approved for release, ${AH_A:0:12}" "$AH_OUT"
+
+ah_plan "$AH_A" "$AH_E" "$(ah_appr "$AH_A")"
+expect_eq "AH-3 precondition: with the whole run at E, every fact still holds at A (E..A touched only the README)" "rc=0" "$(ah_facts "$AH_A")"
+ah_poke current 8 --check
+expect_eq "AH-3b AC-7.2 approved head A, the working head A, the whole run at E: refused (exit 1)" "1" "$AH_RC"
+expect_contains "AH-3c …naming both heads" \
+  "the whole run is at ${AH_E:0:12}, not at the head the user approved for release, ${AH_A:0:12}" "$AH_OUT"
+
+ah_plan "$AH_A" "$AH_A" 'approved: release by Dana Fixture 2026-10-12T14:00:00Z "Ship it."'
+ah_poke current 8 --check
+expect_eq "AH-4 an approval line that names no head: refused (exit 1), saying so" "1|yes" \
+  "$AH_RC|$(printf '%s\n' "$AH_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
+ah_plan "$AH_A" "$AH_A"
+ah_poke current 8 --check
+expect_eq "AH-5 no approved: release line at all: refused (exit 1), naming the verb that writes it" "1|yes" \
+  "$AH_RC|$(printf '%s\n' "$AH_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+
 finish

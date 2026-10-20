@@ -33,6 +33,11 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
 # STEPS 7 AND 8 ASK IT (wave-35 T10; D10, AC-1.2): Step 7 is entered once the floor is Step 6's last act, so
 # `current 7` is held to the same judge `current 8` is, and a run never leaves Step 6 with its floor behind
 # the head.
+# IN THE RELEASE ORDER (lib/units.sh `units_release_order`: the regression row at Step 7, after the release row)
+# the regression is that row's, run inside Step 7, so `current 7` judges every fact but the regression, and
+# `current 8` asks besides that the newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is
+# the working head and the last regression proof is at it: one green whole run at the head the user approved. A
+# plan outside that order is judged as before.
 # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, the judge's one
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
@@ -48,6 +53,32 @@ cover_basis() {
     return 2
   fi
   facts_cover "$1" "$3" "$4" "$2"
+}
+
+# cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8 and the last
+# regression proof is at that head; otherwise refuses `current 8`, exit 1, naming both heads, the plan unchanged.
+cur8_approved_head() {
+  local ah rh rs
+  ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
+  if [ -z "$ah" ]; then
+    if proof_approved "$PV_PLAN" release; then
+      die "REFUSED — current: 8 in the release order (the regression row $PV_ORDER after the release) is admitted at the head the user approved for release, and the newest approved: release line names no head; the user's word for the working head $PV_HEAD8 is approve release '<reply>'. The plan is unchanged."
+    else
+      die "REFUSED — current: 8 in the release order (the regression row $PV_ORDER after the release) is admitted at the head the user approved for release, and $PV_PLAN carries no approved: release line; the user's word for the working head $PV_HEAD8 is approve release '<reply>'. The plan is unchanged."
+    fi
+    exit 1
+  fi
+  if [ "$ah" != "$PV_HEAD8" ]; then
+    die "REFUSED — current: 8 is admitted at the head the user approved for release: the working head ${PV_HEAD8:0:12} is not the head the user approved for release, ${ah:0:12}. Land nothing past the approval, or have the user approve this head (approve release '<reply>') and run the whole run at it. The plan is unchanged."
+    exit 1
+  fi
+  rh="$(proof_last "$PV_PLAN" regression 2>/dev/null)"
+  [ -z "$rh" ] || rh="$(git -C "$PV_REPO" rev-parse --verify -q "${rh}^{commit}" 2>/dev/null)" || rh=""
+  if [ "$rh" != "$ah" ]; then
+    rs="${rh:0:12}"; [ -n "$rs" ] || rs="no commit (none is recorded)"
+    die "REFUSED — current: 8 is admitted on one green whole run at the head the user approved for release: the whole run is at $rs, not at the head the user approved for release, ${ah:0:12}. Run it there (regression-run) and record it with proof-add regression. The plan is unchanged."
+    exit 1
+  fi
 }
 
 cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judges Step 8 too)
@@ -69,8 +100,14 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
       die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the working branch $wb names no commit here, so the regression is uncovered (there is no head to judge); the plan is unchanged."
       exit 1 ;;
   esac
+  PV_ORDER="$(units_release_order "$PV_PLAN" 2>/dev/null)" || PV_ORDER=""
+  [ "$step" != 8 ] || [ -z "$PV_ORDER" ] || cur8_approved_head
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
+  if [ "$step" = 7 ] && [ -n "$PV_ORDER" ] && [ "$rc" -eq 1 ]; then
+    out="$(printf '%s\n' "$out" | awk -F'\t' '$1 != "regression"')"
+    printf '%s\n' "$out" | awk -F'\t' '$NF != "covered" { f = 1 } END { exit f }' && rc=0
+  fi
   # The check-only advance (`current <N> --check`; wave-38 T1, D20) takes this judgment and not its ledger write.
   [ "$rc" -eq 2 ] || [ -n "${PV_CHECK:-}" ] || cur8_owed_waivers "$out"
   [ "$rc" -eq 0 ] && return 0
@@ -178,10 +215,12 @@ current_admit() {
         cur7_judge 7
         PV_DRYMODE=judged
         PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
+        [ -z "$PV_ORDER" ] || PV_HOW="$PV_HOW, the regression aside: row $PV_ORDER runs it in this step"
       fi ;;
     8|8a|8b)
       cur7_judge 8
-      PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
+      PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)"
+      [ -z "$PV_ORDER" ] || PV_HOW="$PV_HOW, the head the user approved for release, with its whole run" ;;
   esac
   # THE DRY COMMIT AT 5 AND 6 IS RUN HERE, NOT IN THE SWAP (wave-38 T1; D20): the swap would run it for an
   # `as-is` copy that differs from the plan, so this runs it on the same condition and hands the swap `judged`.

@@ -165,6 +165,26 @@ proof_approved() {
     END { exit !f }' "$1"
 }
 
+# proof_approved_head <plan> <name> -> the 40-hex head the plan's NEWEST `approved: <name> by <who> <ISO-UTC> head=<sha>
+# "<reply>"` line records, exit 0; nothing, exit 1, with no such line or a newest line that names no head. The head is
+# read before the line's first quote, so the reply cannot move it. The approve verb writes it (the working branch's
+# head at the user's reply); `current 8` reads it for the release.
+proof_approved_head() {
+  [ -f "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  awk -v n="$2" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && /^approved:[ \t]/ {
+      l = $0; q = index(l, "\""); if (q) l = substr(l, 1, q - 1)
+      m = split(l, w, /[ \t]+/)
+      if (w[2] != n || w[3] != "by") next
+      h = ""
+      for (i = 4; i <= m; i++) if (w[i] ~ /^head=[0-9a-f]+$/ && length(w[i]) == 45) h = substr(w[i], 6)
+    }
+    END { if (h == "") exit 1; print h }' "$1"
+}
+
 # proof_waiver_line <question> <head> <who> <at> <reason> -> the one waiver line, newline-terminated:
 # the user's act, covering <question> up to <head> (wave-27 T9; written by `session-poker.sh waive`).
 proof_waiver_line() {
