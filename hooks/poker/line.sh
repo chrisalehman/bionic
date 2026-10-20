@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
-# (row-landed, deliver).
+# (row-landed, deliver, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -718,5 +718,89 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     fi
     say "evidence: $RL_N cell(s) written by landing"
     [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
+    exit 0
+  }
+
+# ---------------------------------------------------------------- the release note
+#
+# A RELEASE ENTRY'S NUMBERS ARE RENDERED, NEVER TYPED. `release-note [--at <commit>] [--on <instant>] [<plan>]` prints
+# the entry's `### The landing numbers` block as CHANGELOG.md carries it: one line naming the head and the instant,
+# then `landing_report`'s line and rows in a fence. The report is folded over the landing record's lines written at
+# or before the instant (a line's `at=`; a line with none is kept), so a block rendered for a head and an instant is
+# the same block whenever it is rendered for them again, and nothing recorded later is in it. The head is the plan's
+# working branch's (lib/proof.sh `proof_branch_head`), else the checkout's, or the commit --at names; the instant is
+# now, or --on's. The release check renders the block again for the head and instant an entry names and holds the
+# entry to it.
+release_note_cut() {  # <record> <instant> -> the record's lines written at or before <instant>
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  awk -v t="$2" '{ a = ""; n = split($0, f, "|")
+    for (i = n; i >= 1; i--) if (index(f[i], "at=") == 1) { a = substr(f[i], 4); break } }
+    a == "" || a <= t' "$1"
+}
+
+  poker_verb_release_note() {
+    local at="" on="" arg="" plan root rec head cut body
+    local use="release-note takes --at <commit> and --on <YYYY-MM-DDTHH:MM:SSZ> at most once each, and at most one plan."
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at) { [ $# -ge 2 ] && [ -z "$at" ]; } || usage "$use"; at="$2"; shift ;;
+        --on) { [ $# -ge 2 ] && [ -z "$on" ]; } || usage "$use"; on="$2"; shift ;;
+        -*) usage "$use" ;;
+        *) [ -z "$arg" ] || usage "$use"; arg="$1" ;;
+      esac
+      shift
+    done
+    case "${on:-2000-01-01T00:00:00Z}" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) usage "$use" ;;
+    esac
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    if [ -n "$arg" ]; then
+      case "$arg" in
+        /*) plan="$arg" ;;
+        *)  plan="$REPO_REAL/$arg"
+            [ -f "$plan" ] || plan="$(docs_root "$REPO_REAL")/$arg" ;;
+      esac
+      if [ ! -f "$plan" ] || [ -L "$plan" ]; then
+        die "REFUSED — no plan file at $arg; name the plan whose landings the release describes."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a release note without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      plan="$POKER_RUN_PLAN"
+      if [ -z "$plan" ] || [ ! -f "$plan" ]; then
+        die "REFUSED — this session has no run to render; bind its plan first, or name it: release-note <plan>."
+        exit 2
+      fi
+    fi
+    root="$(cd "$(project_root "${plan%/*}")" 2>/dev/null && pwd -P)"
+    [ -n "$root" ] || root="$REPO_REAL"
+    if ! rec="$(_wt_proofs_path "$root" "$plan")"; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
+      exit 2
+    fi
+    if [ -n "$at" ]; then head="$(git -C "$REPO_REAL" rev-parse --verify -q "$at^{commit}" 2>/dev/null)"
+    else head="$(proof_branch_head "$plan" "$root")" || head="$(git -C "$REPO_REAL" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
+    fi
+    if [ -z "$head" ]; then
+      die "REFUSED — ${at:-the working head} names no commit in $REPO_REAL; name the head the entry is written at."
+      exit 2
+    fi
+    [ -n "$on" ] || on="$(iso_now)"
+    cut="$(mktemp "${TMPDIR:-/tmp}/release-note.XXXXXX")" || { die "REFUSED — no temporary file for the record's cut."; exit 2; }
+    release_note_cut "$rec" "$on" > "$cut"
+    body="$(landing_report "$cut" "$root" yes)"
+    rm -f "$cut"
+    printf '### The landing numbers\n\n`landing-report --rows` at %s on %s:\n\n```\n%s\n```\n' "$head" "$on" "$body"
     exit 0
   }

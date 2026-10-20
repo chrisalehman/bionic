@@ -510,6 +510,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sitrep's three indicators (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's page: the Bottom line (what you owe, what is next, what is done, when it closes), every task with its glyph, the Score's five indicator lines, what is blocked on you, the completion and the predicted close; --line prints the one-line form (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep grade <A-F> '<rationale>' [<plan>]   record the run's grade and one rationale that names an indicator line (schedule, correctness, waste, decisions or goals), with the time, to record/<wave>/sitrep.log"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
@@ -1193,6 +1194,7 @@ $1"; shift ;;
   # ONE OPTIONAL FLAG AND ONE OPTIONAL OPERAND, IN EITHER ORDER (wave-28 T14; D18; A-orch-145): `--rows`
   # adds a line per landed row; `<plan>` names the run, as fill-report's does, for a caller with no
   # binding left (close-out writes its continuation after its tmp is wiped).
+  release-note) : ;;
   landing-report)
     LR_ROWS=no; LR_HH=no; LR_SC=no; LR_ARG=""
     for _lr_a in "$@"; do
@@ -3455,6 +3457,7 @@ case "$VERB" in
   cover) poker_verb_cover "$@" ;;
   debt) poker_verb_debt "$@" ;;
   landing-report) poker_verb_landing_report "$@" ;;
+  release-note) poker_verb_release_note "$@" ;;
   decisions) poker_verb_decisions "$@" ;;
   resume) poker_verb_resume "$@" ;;
   sitrep) poker_verb_sitrep "$@" ;;
