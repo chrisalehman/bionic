@@ -775,4 +775,36 @@ expect_eq "WR-5c …writing the continuation" "yes" "$( [ -s "$PWR/$CONT_REL" ] 
 expect_eq "WR-5d …and the plan closed at current: 9 by its delivered line" "9|1|1" \
   "$(sed -n 's/^current: //p' "$PWR/$PLAN_REL")|$(/usr/bin/grep -c '^- Step 9: delivered: ' "$PWR/$PLAN_REL" | tr -d ' ')|$(run_open_rc "$PWR/$PLAN_REL")"
 
+# ============================================================
+section "CLOSED — the closed form says merged into after a merge, and to be pulled into only while a pull request is owed"
+# ============================================================
+# `co_into` told how the working branch reaches the integration branch from `co_pr_owed`, which read "not an ancestor" as
+# "owed" even when the branch was gone: a pull request merged and its branch deleted left the closed form saying
+# "to be pulled into" for good. The branch line is read by `closed-form`, the door the handoff verb prints.
+# FIXTURE FIDELITY: mk_fixture's wave-scale run, its wave branch merged into main as close-out leaves it; and
+# mk_task_pr_fixture's task-scale run, whose pull request is owed until its branch is merged into main by the real git
+# merge, then deleted by the real git branch -d. closed-form is the real close-out.sh verb, read-only.
+# fails-when: a merged branch is called "to be pulled", or an unmerged pull-request branch is called "merged".
+cf_branch() {  # <project> -> the branch: line close-out's closed-form prints
+  run_close "$1" closed-form
+  printf '%s\n' "$CO_OUT" | /usr/bin/grep -m1 '^branch: '
+}
+PCW="$(mk_fixture closed-wave)"
+expect_eq "CLOSED-0 precondition: the wave branch is merged into main" "yes" \
+  "$(git -C "$PCW" merge-base --is-ancestor wave/01-fixture main && echo yes || echo no)"
+expect_eq "CLOSED-1 a merged wave: the closed form says merged into main" "branch: wave/01-fixture merged into main." "$(cf_branch "$PCW")"
+PCP="$(mk_task_pr_fixture closed-pr "fix/x")"
+expect_eq "CLOSED-2 precondition: the pull-request branch is not merged" "no" \
+  "$(git -C "$PCP" merge-base --is-ancestor fix/x main && echo yes || echo no)"
+expect_eq "CLOSED-3 an unmerged pull-request branch keeps to be pulled into" "branch: fix/x to be pulled into main." "$(cf_branch "$PCP")"
+git -C "$PCP" merge -q --no-edit fix/x >/dev/null 2>&1
+expect_eq "CLOSED-4 precondition: the real merge put the branch into main" "yes" \
+  "$(git -C "$PCP" merge-base --is-ancestor fix/x main && echo yes || echo no)"
+expect_eq "CLOSED-5 after the pull request merges, the closed form says merged into main" "branch: fix/x merged into main." "$(cf_branch "$PCP")"
+PCP_WT="$(git -C "$PCP" worktree list --porcelain | awk '/^worktree /{ w = substr($0, 10) } $0 == "branch refs/heads/fix/x" { print w }')"
+[ -z "$PCP_WT" ] || git -C "$PCP_WT" checkout -q --detach
+git -C "$PCP" branch -q -d fix/x
+expect_eq "CLOSED-6 precondition: the merged branch is deleted" "no" "$(git -C "$PCP" rev-parse --verify -q fix/x >/dev/null && echo yes || echo no)"
+expect_eq "CLOSED-7 …and a deleted merged branch still says merged into main, never to be pulled" "branch: fix/x merged into main." "$(cf_branch "$PCP")"
+
 finish

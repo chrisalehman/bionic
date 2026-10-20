@@ -52,8 +52,12 @@
 #                   names its record; D1 to D24 each head a section and D25 to D27 are named; the landing numbers carry
 #                   reused=8, the median and the one-file sentence, which states the 58.4 minutes T47 and T48
 #                   measured; Known limits state AC-2.4's measured 62 of 63 and the entry says nothing "never
-#                   measured" or "replaced by an index count"; Standing reds and Known limits stand, the latter
-#                   with the critic's two deferred sentences. Each rule has a doctored copy that goes red.
+#                   measured", "was not measured", "unproven" or "replaced by an index count", and the five
+#                   sentences the first correction left wrong read as corrected (the second whole run ends at 12:30 PM PDT,
+#                   the landing numbers are over the six multi-file build rows, the AC-2.4 limit cites
+#                   auditor-evidence-2.md finding 4, the AC-8.1 limit names the regression log and what it shows);
+#                   Standing reds and Known limits stand, the latter with the critic's two deferred sentences. Each
+#                   rule has a doctored copy that goes red.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -995,6 +999,18 @@ r22_check() {
   has "$lim" '62 of 63' || echo "r22: Known limits do not state AC-2.4's measured 62 of 63"
   ! has "$blk" 'never measured' || echo "r22: the entry still says something was never measured"
   ! has "$blk" 'replaced by an index count' || echo "r22: the entry still says AC-2.4 was replaced by an index count"
+  ! has "$blk" 'was not measured' || echo "r22: the entry still says something was not measured"
+  ! has "$blk" 'unproven' || echo "r22: the entry still says something is unproven"
+  # the five sentences the critic found wrong in the first correction (AC-19.1). Each negative sits beside a positive
+  # read from the same extractor.
+  has "$blk" '12:30 PM PDT' || echo "r22: the second whole run's end time is not 12:30 PM PDT"
+  ! has "$blk" '12:33' || echo "r22: the second whole run still ends at 12:33"
+  has "$land" 'the six multi-file build rows it landed through the line' || echo "r22: the landing numbers do not say they are over the six multi-file build rows"
+  ! has "$land" 'six line landings' || echo "r22: the landing numbers still say six line landings"
+  has "$lim" 'a miss carried to the next charter (`auditor-evidence-2.md`, finding 4)' || echo "r22: the AC-2.4 limit does not cite auditor-evidence-2.md finding 4"
+  ! has "$lim" 'finding 8' || echo "r22: the AC-2.4 limit still cites finding 8"
+  has "$lim" 'regression-run-44666977' && has "$lim" 'dirty=0' && has "$lim" 'PASS' || echo "r22: the AC-8.1 limit does not name the regression log and what it shows"
+  ! has "$lim" 'no clean dispatch-preflight-2 log' || echo "r22: the AC-8.1 limit still says the evidence is missing"
 }
 # --- the extractors are not vacuous
 expect_nonempty "(w0) the 1.22.0 block is found" "$(cl_block "$CL" 1.22.0)"
@@ -1028,5 +1044,27 @@ doctor w_nodef sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/kind=hand, and T19/
 expect_contains "(w2j) Known limits without the critic's #2: red" "r22: Known limits omit critic-adversarial.md#2" "$(r22_check "$TMP/doctored.w_nodef")"
 doctor w_nored sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/^### Standing reds$/### Reds/'
 expect_contains "(w2k) no Standing reds section: red" "r22: no Standing reds section" "$(r22_check "$TMP/doctored.w_nored")"
+doctor w_no584 sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/58\.4/58.0/g'
+expect_contains "(w2l) landing numbers that state no 58.4 median: red" "r22: the landing numbers do not state the one-file median of 58.4 minutes" "$(r22_check "$TMP/doctored.w_no584")"
+doctor w_no62 sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/62 of 63/62 of 64/g'
+expect_contains "(w2m) Known limits that state no 62 of 63: red" "r22: Known limits do not state AC-2.4's measured 62 of 63" "$(r22_check "$TMP/doctored.w_no62")"
+doctor w_nevermeasured sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/reused=8/reused=8, never measured,/'
+expect_contains "(w2n) an entry that says never measured: red" "r22: the entry still says something was never measured" "$(r22_check "$TMP/doctored.w_nevermeasured")"
+doctor w_index sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/reused=8/reused=8, replaced by an index count,/'
+expect_contains "(w2o) an entry that says replaced by an index count: red" "r22: the entry still says AC-2.4 was replaced by an index count" "$(r22_check "$TMP/doctored.w_index")"
+doctor w_notmeas sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/reused=8/reused=8, which was not measured,/'
+expect_contains "(w2p) an entry that says was not measured: red" "r22: the entry still says something was not measured" "$(r22_check "$TMP/doctored.w_notmeas")"
+doctor w_unproven sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/reused=8/reused=8, unproven,/'
+expect_contains "(w2q) an entry that says unproven: red" "r22: the entry still says something is unproven" "$(r22_check "$TMP/doctored.w_unproven")"
+doctor w_1233 sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/12:30 PM PDT/12:33 PM PDT/'
+expect_contains "(w2r) a second whole run ending at 12:33: red" "r22: the second whole run still ends at 12:33" "$(r22_check "$TMP/doctored.w_1233")"
+doctor w_six sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/over the six multi-file build rows it landed through the line/over its six line landings/'
+expect_contains "(w2s) landing numbers over six line landings: red" "r22: the landing numbers still say six line landings" "$(r22_check "$TMP/doctored.w_six")"
+doctor w_f8 sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/(`auditor-evidence-2\.md`, finding 4)/(`auditor-evidence.md`, finding 8)/'
+expect_contains "(w2t) an AC-2.4 limit citing finding 8: red" "r22: the AC-2.4 limit still cites finding 8" "$(r22_check "$TMP/doctored.w_f8")"
+doctor w_nolog sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/regression-run-44666977/no such log, 44666977/'
+expect_contains "(w2u) an AC-8.1 limit that names no regression log: red" "r22: the AC-8.1 limit does not name the regression log and what it shows" "$(r22_check "$TMP/doctored.w_nolog")"
+doctor w_nocleanlog sed '/^## 1\.22\.0 — /,/^## 1\.21\.0 — /s/AC-8\.1 is confirmed/AC-8.1 has no clean dispatch-preflight-2 log/'
+expect_contains "(w2v) an AC-8.1 limit that says the evidence is missing: red" "r22: the AC-8.1 limit still says the evidence is missing" "$(r22_check "$TMP/doctored.w_nocleanlog")"
 
 finish

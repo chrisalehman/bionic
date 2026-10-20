@@ -303,9 +303,11 @@ scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 # It never runs it: opening a pull request is an outward act, the person's.
 CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
 CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
-# co_pr_owed -> 0 when the act is `pr` and the working branch is not yet reachable from the integration branch
+# co_pr_owed -> 0 when the act is `pr` and the working branch exists and is not yet reachable from the integration
+# branch; a branch that is gone was merged and deleted, so nothing is owed
 co_pr_owed() {
   [ "$CO_INTEGRATE" = pr ] || return 1
+  git -C "$ROOT" rev-parse --verify -q "refs/heads/$WORKING" >/dev/null 2>&1 || return 1
   ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
 }
 # co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
