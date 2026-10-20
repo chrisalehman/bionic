@@ -874,8 +874,9 @@ sitrep_render() {
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
           } | awk -F'\t' -v dlv="${dlv_at:+yes}" "$_ROW_SHORT_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function words(r) {   # a read, in words: an approval is the person'"'"'s, a step its number
+    function words(r) {   # a read, in words: an approval is the person'"'"'s, a step its number, a proof its facts
       sub(/^live:/, "", r)
+      if (index(r, "proof:") == 1) { sub(/: .*$/, "", r); return "the " substr(r, 7) " facts at the head" }
       if (index(r, "approval:") == 1) return "your approval of " substr(r, 10)
       if (index(r, "step:") == 1) return "step " substr(r, 6)
       return r
