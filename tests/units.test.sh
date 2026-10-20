@@ -4850,9 +4850,9 @@ expect_eq "BR-2 AC-5.3 ready's reader reads the SDLC-State-only plan's branch" "
 expect_eq "BR-3 AC-5.3 the card's Branches names it" "working wave/35-fixture" "$(br_card "$REPO_ROOT")"
 expect_eq "BR-4 AC-5.3 the proof judge holds the floor against its checkout" "covered	$BR_HEAD" "$(br_proof "$REPO_ROOT")"
 
-# BR-6: the two hook surfaces call the reader at their site, once each.
+# BR-6: the two hook surfaces call the reader at their site, once each (the poker's is in its judge, `current`).
 anchor file payload/scripts/lib/stop.sh 'LG_WORKING_BRANCH=$(plan_working_branch "$LG_RUN_PLAN")'
-anchor file hooks/session-poker.sh 'PV_WB="$(plan_working_branch "$PV_PLAN")"'
+anchor file hooks/poker/judge.sh 'PV_WB="$(plan_working_branch "$PV_PLAN")"'
 
 # BR-7: THE CENSUS. A line that reads the key itself: the key as a regex an awk, grep or sed matches, the key
 # compared as a frontmatter name, or the key handed to the frontmatter getter. Comments are not read.

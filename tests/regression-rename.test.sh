@@ -324,6 +324,8 @@ expect_eq "AP-9 none of these readers printed a word on stderr for the on-disk t
 section "§AGREE-SEAM: each typed token is refused at its one seam, through the map; a plan token is read through it"
 # ============================================================
 SP_SH="$POKER"; PROOF_SH="$LIB/proof.sh"; UNITS_SH="$LIB/units.sh"
+# The regression-run verb's body is in the proof record's part beside the dispatcher; its parse arm stays in the dispatcher.
+SP_PROOF="$(dirname "$POKER")/poker/proof.sh"
 code_lines() { /usr/bin/grep -v -E '^[[:space:]]*#' "$1"; }   # <file> -> its lines that are not comments
 expect_eq "AG-1 the verb is refused once, on the line after VERB is read, before both case blocks" "1|1" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone verb "\$VERB"' | tr -d ' ')|$(awk '/^VERB="\$1"; shift$/ { getline; print ($0 ~ /alias_gone verb "\$VERB"/) ? 1 : 0; exit }' "$SP_SH")"
@@ -334,9 +336,9 @@ expect_eq "AG-3 the proof kind is refused once, where PF_KIND is read" "1" \
 expect_eq "AG-4 the born operand is refused once, in task-add's --born parse" "1" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone born-operand' | tr -d ' ')"
 expect_eq "AG-5 the config's old key is refused once, and the regression's command is read once, by its one key" "1|1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_text config' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c 'config_value "\$FR_ROOT" regression-command' | tr -d ' ')"
+  "$(code_lines "$SP_PROOF" | /usr/bin/grep -c 'alias_gone_text config' | tr -d ' ')|$(code_lines "$SP_PROOF" | /usr/bin/grep -c 'config_value "\$FR_ROOT" regression-command' | tr -d ' ')"
 expect_eq "AG-6 the second-run glob walks the new log name only, and the old one is refused from the map's names" "1|1" \
-  "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_names log' | tr -d ' ')|$(code_lines "$SP_SH" | /usr/bin/grep -c -F 'regression-run-"*.log; do' | tr -d ' ')"
+  "$(code_lines "$SP_PROOF" | /usr/bin/grep -c 'alias_gone_names log' | tr -d ' ')|$(code_lines "$SP_PROOF" | /usr/bin/grep -c -F 'regression-run-"*.log; do' | tr -d ' ')"
 expect_eq "AG-6b a typed reads cell is refused at its two sites, task-add and task-set reads=" "2" \
   "$(code_lines "$SP_SH" | /usr/bin/grep -c 'alias_gone_cell reads' | tr -d ' ')"
 expect_eq "AG-7 proof_fields normalises the kind through the map, written once at load and pasted once" "1|1" \
@@ -381,14 +383,17 @@ scan() {  # <file>... -> the lines spelling an old token, `<file>:<line>`
   done | /usr/bin/grep -E "$SCAN_ERE" | /usr/bin/grep -v -E '^alias\.sh:'
 }
 SCAN_FILES=()
-for f in "${BIONIC_HOOKS_DIR}"/*.sh "${BIONIC_SCRIPTS_DIR}"/payload/scripts/*.sh "$LIB"/*.sh; do [ -f "$f" ] && SCAN_FILES+=("$f"); done
+for f in "${BIONIC_HOOKS_DIR}"/*.sh "${BIONIC_HOOKS_DIR}"/poker/*.sh "${BIONIC_SCRIPTS_DIR}"/payload/scripts/*.sh "$LIB"/*.sh; do [ -f "$f" ] && SCAN_FILES+=("$f"); done
+expect_eq "AS-0b the scan reads the core script's seven parts beside the dispatcher" "7" \
+  "$(printf '%s\n' "${SCAN_FILES[@]}" | /usr/bin/grep -c '/hooks/poker/[a-z]*\.sh$' | tr -d ' ')"
 expect_nonempty "AS-0 the scan has files to read (the scanner's positive)" "${SCAN_FILES[*]}"
 AS_HITS="$(scan "${SCAN_FILES[@]}")"
 expect_eq "AS-1 no production code line spells an old token (hits: $(printf '%s' "$AS_HITS" | head -c 400))" "0" \
   "$(printf '%s' "$AS_HITS" | /usr/bin/grep -c . | tr -d ' ')"
 AS_MUT="$TMPROOT/as-mut"; mkdir -p "$AS_MUT"
 cp "$SP_SH" "$AS_MUT/session-poker.sh"; cp "$PROOF_SH" "$AS_MUT/proof.sh"
-anchor -E "$AS_MUT/session-poker.sh" '^  regression-run\)$' 2
+# One `  regression-run)` arm: the parse case's. The exec arm is a one-line call into the proof record's part.
+anchor -E "$AS_MUT/session-poker.sh" '^  regression-run\)$' 1
 awk '/^  regression-run\)$/ && !d { print "  floor-run) : ;;"; d = 1 } { print }' "$AS_MUT/session-poker.sh" > "$AS_MUT/sp.tmp" && mv "$AS_MUT/sp.tmp" "$AS_MUT/session-poker.sh"
 expect_true "AS-2 precondition: the planted poker still parses" bash -n "$AS_MUT/session-poker.sh"
 expect_eq "AS-2b a planted floor-run) arm, a second copy of the verb, is found" "1" "$(scan "$AS_MUT/session-poker.sh" | /usr/bin/grep -c . | tr -d ' ')"
