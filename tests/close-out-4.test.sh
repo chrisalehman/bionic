@@ -517,14 +517,14 @@ expect_eq "OW-2d the verb's closed lines are close-out's" "$(ow_lines "$SANDBOX/
 
 OWR="$(mk_task_pr_fixture ow-pr "fix/x")"
 printf 'archive-on-close: false\n' >> "$OWR/.bionic/config.yaml"
-OW_FINDING="- the late fix waits on its pull request — file.txt"
+OW_FINDING="- the late fix waits — file.txt"
 lands_bind "$OWR" "$OW_SID"
 lands_poker "$OWR" "$OW_SID" handoff <<< "Findings
 $OW_FINDING"
 run_close "$OWR" run
 expect_eq "OW-3 precondition: close-out closed the task-scale plan rc 0, unmerged and in place" "0|no|yes" \
   "$CO_RC|$(git -C "$OWR" merge-base --is-ancestor fix/x main && echo yes || echo no)|$([ -f "$OWR/$PLAN_REL" ] && echo yes || echo no)"
-expect_contains "OW-3b close-out keeps the Finding a session wrote before the close" "$OW_FINDING" "$(cat "$(ow_file "$OWR")" 2>/dev/null)"
+expect_eq "OW-3b close-out keeps the Finding a session wrote before the close: yes" "yes" "$(grep -q -F -- "$OW_FINDING" "$(ow_file "$OWR")" 2>/dev/null && echo yes || echo no)"
 ow_doors pr "$OWR" "$OW_SID"
 expect_eq "OW-4 the handoff verb on the pull-request plan exits 0" "0" "$OW_RC"
 expect_nonempty "OW-4c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-pr")"

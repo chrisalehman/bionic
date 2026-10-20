@@ -696,7 +696,7 @@ expect_eq "(c0) the table of build rows holds 36 rows" "36" "$(printf '%s\n' $RO
 expect_eq "(c1) …and the rendered pages read plugin.json's version and are the rendered pages" "" "$(help_check)"
 
 # --- doctored copies: each rule has one that goes red, named by its rule
-cor_check() { corr_check "$1" "$PLUGIN_JSON" "$PLAN_36"; }
+cor_check() { corr_check "$1" "$PLUGIN_JSON" ""; }
 doctor c_no119 sed 's/^## 1\.19\.0 — /## 1.18.9 — /'
 expect_contains "(c2a) no 1.19.0 block: red" "corr: no 1.19.0 block" "$(cor_check "$TMP/doctored.c_no119")"
 doctor c_nocor sed 's/^### Corrections to 1\.18\.0/### Notes/'
