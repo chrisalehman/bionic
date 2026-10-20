@@ -1753,12 +1753,12 @@ _line_room_one() {  # <plan> <rec> <row> <cbase> <deadline>
 # read by position (`_line_proved`, `_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`)
 # read $2..$7, so a field added to it goes after `log=`. admitted= is the gate's admission instant for the run
 # the verdict judges (wave-38 T6; AC-6.4), `-` when none is on record; width= the width the gate gave the
-# landing when that run started (`_line_ask`).
+# landing when that run started (`_line_ask`), `-` for a verdict no answer of the gate's stands behind (absent).
 # promised= and actual= go after width=: the seconds the gate promised the run at its
 # admission (its request's promise=) and the gate's own measure of it (ended less admitted), `-` for a run never
 # admitted, a run stopped before it ended, and a verdict no run wrote (absent).
 _line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log> [<admitted epoch>] [<promised s>] [<actual s>]
-  line_event "$1" verdict "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:-1}" \
+  line_event "$1" verdict "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:--}" \
     "promised=${8:--}" "actual=${9:--}"
 }
 # THE PASS'S SUITES, in the order named. For each: its suite (_LINE_DS), its runner's pid (_LINE_DP: empty
@@ -1772,7 +1772,7 @@ _line_drain_init() {
   LINE_SUITE=""   # a pass whose base is replaced before it takes a suite reads it (wave-38 T30): set, never unbound
 }
 _line_drain_add() {  # <suite>
-  _LINE_DS[$_LINE_DN]="$1"; _LINE_DP[$_LINE_DN]=""; _LINE_DR[$_LINE_DN]=""; _LINE_DL[$_LINE_DN]=""; _LINE_DW[$_LINE_DN]=1
+  _LINE_DS[$_LINE_DN]="$1"; _LINE_DP[$_LINE_DN]=""; _LINE_DR[$_LINE_DN]=""; _LINE_DL[$_LINE_DN]=""; _LINE_DW[$_LINE_DN]=-
   _LINE_DN=$((_LINE_DN + 1))
 }
 _line_drain_ended() {  # <i> -> 0 once that runner has ended: its result written, or its process gone
