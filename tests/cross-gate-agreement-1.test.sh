@@ -5460,7 +5460,7 @@ expect_contains "…and names the verb that ends the ambiguity" \
 S4_MUT="$SANDBOX/s4-mutant"
 mkdir -p "$S4_MUT/hooks" "$S4_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$S4_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$S4_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$S4_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$S4_MUT/hooks/" 2>/dev/null
 anchor file payload/scripts/lib/run.sh '  if plan=$(session_plan "$root" "$sid"); then'
 sed 's/  if plan=$(session_plan "$root" "$sid"); then/  if false \&\& plan=$(session_plan "$root" "$sid"); then/' \
   "$RUN_LIB" > "$S4_MUT/scripts/lib/run.sh"
@@ -5607,7 +5607,7 @@ expect_contains "…at mode 0600, the invariant the marker has always carried" "
 B2_MUT="$SANDBOX/b2-mutant"
 mkdir -p "$B2_MUT/hooks" "$B2_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$B2_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$B2_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$B2_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$B2_MUT/hooks/" 2>/dev/null
 anchor file hooks/engage.sh 'bind_plan "$REPO" "$SID"'
 awk '
   /bind_plan "\$REPO" "\$SID"/ && !done {
@@ -5823,14 +5823,14 @@ expect_eq "…and so does an unbound adopter, the same word from the other write
 RA_MUT="$SANDBOX/ra-mutant"
 mkdir -p "$RA_MUT/hooks" "$RA_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$RA_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$RA_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$RA_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$RA_MUT/hooks/" 2>/dev/null
 # The field is now an ARGUMENT to `roster_row` rather than a slot in a format string
 # (S14, AC-25), so the doctoring deletes the line that passes it. What the mutant writes
 # is `plan=` empty rather than no `plan=` at all, and both are the same thing to the
 # reader under test: `ra_field` returns "" either way, and the row is still written.
-anchor file hooks/session-poker.sh '"plan=$(clean "$plan")"'
+anchor file hooks/poker/roster.sh '"plan=$(clean "$plan")"'
 sed '/"plan=$(clean "$plan")"/d' \
-  "$SPO" > "$RA_MUT/hooks/session-poker.sh"
+  "$BIONIC_HOOKS_DIR/poker/roster.sh" > "$RA_MUT/hooks/poker/roster.sh"
 RA_REPO_M=$(new_repo "ra-mutant-repo")
 RA_PLAN_M="$RA_REPO_M/.bionic/docs/plans/epic-99/ra-run.md"
 write_plan "$RA_PLAN_M" "current: 4"
@@ -6368,7 +6368,7 @@ expect_contains "…saying so in the register's own words" \
 LA_MUT="$SANDBOX/la-mutant"
 mkdir -p "$LA_MUT/hooks" "$LA_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$LA_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$LA_MUT/hooks/" 2>/dev/null
 anchor file payload/scripts/lib/agents.sh 'drop the harness ref suffix'
 grep -v 'drop the harness ref suffix' "$LIB_DIR_SRC/agents.sh" > "$LA_MUT/scripts/lib/agents.sh"
 # …AND THE MUTANT IS STILL A PARSER. If it returned nothing the three readers would move for
@@ -6448,7 +6448,7 @@ expect_absent "…which it does not call absent from the recorded answer" "is no
 LA_MUT_S="$SANDBOX/la-mutant-status"
 mkdir -p "$LA_MUT_S/hooks" "$LA_MUT_S/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$LA_MUT_S/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_S/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_S/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$LA_MUT_S/hooks/" 2>/dev/null
 anchor file payload/scripts/lib/agents.sh 'print name "|" type "|" status'
 sed 's/print name "|" type "|" status/print name "|" type "|" "running"/' \
   "$LIB_DIR_SRC/agents.sh" > "$LA_MUT_S/scripts/lib/agents.sh"
@@ -6489,7 +6489,7 @@ expect_contains "…and that channel is a real verdict, not an empty string (not
 LA_MUT_F="$SANDBOX/la-mutant-filter"
 mkdir -p "$LA_MUT_F/hooks" "$LA_MUT_F/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$LA_MUT_F/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_F/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_F/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$LA_MUT_F/hooks/" 2>/dev/null
 anchor file payload/scripts/lib/agents.sh 'if (name != "") print name "|" type "|" status'
 sed 's/if (name != "") print name "|" type "|" status/if (name != "" \&\& status == "running") print name "|" type "|" status/' \
   "$LIB_DIR_SRC/agents.sh" > "$LA_MUT_F/scripts/lib/agents.sh"
@@ -6627,7 +6627,7 @@ expect_contains "…while the tick's own roster carries two rows (the narrowing 
 LA6_MUT="$SANDBOX/la-mutant-predicate"
 mkdir -p "$LA6_MUT/hooks" "$LA6_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$LA6_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$LA6_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA6_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$LA6_MUT/hooks/" 2>/dev/null
 anchor file payload/scripts/lib/agents.sh '_LA_ROW_CLOSED_STATUS="idle"'
 sed 's/_LA_ROW_CLOSED_STATUS="idle"/_LA_ROW_CLOSED_STATUS="no-such-status"/' \
   "$LIB_DIR_SRC/agents.sh" > "$LA6_MUT/scripts/lib/agents.sh"
@@ -6784,7 +6784,7 @@ expect_contains "…while a row naming a DIFFERENT plan is filed under another r
 PC_MUT="$SANDBOX/pc-mutant"
 mkdir -p "$PC_MUT/hooks" "$PC_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$PC_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$PC_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$PC_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$PC_MUT/hooks/" 2>/dev/null
 anchor insert payload/scripts/lib/binding.sh '_bind_resolve() {'
 awk '
   /^_bind_resolve\(\) \{/ && !d { print; print "  printf '"'"'%s\\n'"'"' \"$1\"; return 0"; d = 1; next }
@@ -6944,7 +6944,7 @@ expect_eq "…and it is not the clear answer wearing a different name" "no" \
 RG_MUT="$SANDBOX/rg-mutant"
 mkdir -p "$RG_MUT/hooks" "$RG_MUT/scripts/lib" "$RG_MUT/tests" "$RG_MUT/payload/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$RG_MUT/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_MUT/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_MUT/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$RG_MUT/hooks/" 2>/dev/null
 cp "$REPO_ROOT/tests/run.sh" "$RG_MUT/tests/run.sh"
 # ONE STUB SUITE, because the roster is the directory (fixit 1.5.1) and a runner
 # asked to gate on an empty tests/ refuses rather than reporting green over
@@ -6994,7 +6994,7 @@ expect_eq "moved band threshold: the runner halves instead of quartering" "4" "$
 RG_NOSAMP="$SANDBOX/rg-nosample"
 mkdir -p "$RG_NOSAMP/hooks" "$RG_NOSAMP/scripts/lib" "$RG_NOSAMP/tests/lib" "$RG_NOSAMP/payload/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$RG_NOSAMP/scripts/lib/" "$RG_NOSAMP/payload/scripts/lib/" 2>/dev/null
-cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_NOSAMP/hooks/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_NOSAMP/hooks/" 2>/dev/null; cp -R "$BIONIC_HOOKS_DIR/poker" "$RG_NOSAMP/hooks/" 2>/dev/null
 cp "$REPO_ROOT/tests/lib/resolve-roots.sh" "$RG_NOSAMP/tests/lib/resolve-roots.sh"
 printf '#!/bin/bash\nexit 0\n' > "$RG_NOSAMP/tests/stub.test.sh"
 # the runner with its `pressure_sample` line removed, and nothing else changed.

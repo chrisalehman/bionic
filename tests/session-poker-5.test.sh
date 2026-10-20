@@ -184,12 +184,17 @@ CK_MUT="$TMPROOT/ck-mutant"; mkdir -p "$CK_MUT/hooks" "$CK_MUT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$CK_MUT/scripts/lib"
 for ck_sib in "$(dirname "$POKER")"/*; do
   [ "$(basename "$ck_sib")" = session-poker.sh ] && continue
+  [ "$(basename "$ck_sib")" = poker ] && continue
   ln -s "$ck_sib" "$CK_MUT/hooks/$(basename "$ck_sib")"
 done
+# The two calls are in the judge, the part beside the dispatcher that holds the current verb; the copy carries its own
+# poker/ so the doctored judge is the one the copied dispatcher loads.
+cp "$POKER" "$CK_MUT/hooks/session-poker.sh"; cp -R "$(dirname "$POKER")/poker" "$CK_MUT/hooks/poker"
+CK_JUDGE="$(dirname "$POKER")/poker/judge.sh"
 awk '/^[[:space:]]*cur7_judge [0-9]+[[:space:]]*$/ { sub(/cur7_judge [0-9]+/, ": \"${PV_HEAD8:=}\""); n++ } { print } END { print n + 0 > "/dev/stderr" }' \
-  "$POKER" > "$CK_MUT/hooks/session-poker.sh" 2> "$TMPROOT/ck-mutant.n"
-expect_eq "CK-mut0 the mutant replaces the judge's two call lines, parses, and differs from the poker" "2 0 differs" \
-  "$(cat "$TMPROOT/ck-mutant.n") $(bash -n "$CK_MUT/hooks/session-poker.sh" >/dev/null 2>&1; echo "$?") $(cmp -s "$CK_MUT/hooks/session-poker.sh" "$POKER" && echo same || echo differs)"
+  "$CK_JUDGE" > "$CK_MUT/hooks/poker/judge.sh" 2> "$TMPROOT/ck-mutant.n"
+expect_eq "CK-mut0 the mutant replaces the judge's two call lines, parses, and differs from the judge" "2 0 differs" \
+  "$(cat "$TMPROOT/ck-mutant.n") $(bash -n "$CK_MUT/hooks/poker/judge.sh" >/dev/null 2>&1; echo "$?") $(cmp -s "$CK_MUT/hooks/poker/judge.sh" "$CK_JUDGE" && echo same || echo differs)"
 CK_REAL_POKER="$POKER"
 ck_plan 6 "$CK_GOOD"
 POKER="$CK_MUT/hooks/session-poker.sh"; poke "$RCK" current 7 --check; POKER="$CK_REAL_POKER"
