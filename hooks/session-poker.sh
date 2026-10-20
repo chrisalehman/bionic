@@ -25,6 +25,7 @@
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
+#     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
 #     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a reading question, or all three, at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
@@ -487,6 +488,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
+  die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
@@ -1037,6 +1040,18 @@ case "$VERB" in
         usage "approve: '$1' is not an approval name: a letter or a digit, then letters, digits, '.', '_' or '-'." ;;
     esac
     AP_NAME="$1"; AP_REPLY="$2"
+    ;;
+  # THE USER'S ORDER. One operand: the user's words, which must hold something once blanks are gone,
+  # or the word lift, which ends the open order.
+  order)
+    OR_WORDS=""; OR_LIFT=""
+    if [ $# -eq 1 ] && [ "$1" = lift ]; then
+      OR_LIFT=yes
+    elif [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; then
+      OR_WORDS="$1"
+    else
+      usage "order takes one argument: the user's words, quoted, or lift to end the open order."
+    fi
     ;;
   # TWO OPERANDS AND NO THIRD (wave-26 T4; REQ-3, D5): the kind and the evidence. The head is the
   # one the evidence names, held against the working branch's checkout (T14), never typed, so a
@@ -3429,6 +3444,7 @@ case "$VERB" in
   reply) poker_verb_reply "$@" ;;
   review-results) poker_verb_review_results "$@" ;;
   approve) poker_verb_approve "$@" ;;
+  order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;
   waive) poker_verb_waive "$@" ;;
   finding-stated) poker_verb_finding_stated "$@" ;;

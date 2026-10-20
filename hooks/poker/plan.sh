@@ -2971,3 +2971,96 @@ RP_TABLE
     fi
     exit 0
   }
+
+  # THE USER'S ORDER. `order '<words>'` records what the user said as an order every suite obeys;
+  # `order lift` ends the open one. Each is one line with the time and the words:
+  #
+  #   order: given <ISO-UTC> "<words>"
+  #   order: lifted <ISO-UTC> "<the words of the order it ends>"
+  #
+  # With a bound open run the line goes under the plan's `## SDLC State`, after its last order: line,
+  # else after its last approved: or approved-by: line, else after current:, through the plan
+  # transaction every row verb takes. With no run bound it is appended to record/orders.log under the
+  # docs root, made when absent. tests/run.sh asks lib/gate.sh `gate_order`, the one reader of both,
+  # and refuses every suite while an order is open. A newer order replaces the open one; the newest
+  # line decides.
+  #
+  # REFUSED (1), nothing written: words that hold a line break, a lift with no open order, a plan
+  # with no current: line under ## SDLC State, the log a link. (2): the order reader cannot be loaded,
+  # or the log cannot be written.
+  poker_verb_order() {
+    local sid mode=log root log open line
+    if ! declare -F gate_order_of >/dev/null 2>&1; then
+      die "REFUSED — the order reader (lib/gate.sh gate_order_of) cannot be loaded from $BIONIC_LIB; nothing was written."
+      exit 2
+    fi
+    case "$OR_WORDS" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — an order is one line, and the words carry a line break; nothing was written."
+        exit 1 ;;
+    esac
+    sid="$(session_id 2>/dev/null)" || sid=""
+    root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    if [ -z "$root" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    if [ -n "$sid" ] && engaged_session "$root" "$sid"; then
+      case "$(session_run "$root" "$sid")" in 'bound-open '*) mode=plan ;; esac
+    fi
+    if [ "$mode" = plan ]; then
+      plan_verb_open order
+      open="$(gate_order_of "$PV_PLAN" plan)" || open=""
+    else
+      log="$(docs_root "$root")/record/orders.log"
+      if [ -L "$log" ]; then
+        die "REFUSED — $log is a link, and an order is not written through one; nothing was written."
+        exit 1
+      fi
+      open="$(gate_order_of "$log")" || open=""
+    fi
+    if [ -n "$OR_LIFT" ]; then
+      if [ -z "$open" ]; then
+        die "REFUSED — no order is open$([ "$mode" = plan ] && printf ' in %s' "$PV_PLAN" || printf ' in %s' "$log"), so there is nothing to lift; nothing was written."
+        exit 1
+      fi
+      OR_WORDS="${open#*\"}"; OR_WORDS="${OR_WORDS%\"}"
+      line="order: lifted $(iso_now) \"$OR_WORDS\""
+    else
+      line="order: given $(iso_now) \"$OR_WORDS\""
+    fi
+    if [ "$mode" = log ]; then
+      # A bionic folder made here gets its ignore file, as the handoff's does: the log is never tracked.
+      [ -d "$root/.bionic" ] || { mkdir -p "$root/.bionic" 2>/dev/null && printf '*\n' > "$root/.bionic/.gitignore"; }
+      if ! mkdir -p "${log%/*}" 2>/dev/null || ! printf '%s\n' "$line" >> "$log" 2>/dev/null; then
+        die "REFUSED — $log cannot be written; nothing was written."
+        exit 2
+      fi
+      say "order — $line, in $log (no run is bound)."
+      exit 0
+    fi
+    # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
+    # user's words as an escape.
+    if ! OR_LINE="$line" awk '
+      { L[++n] = $0 }
+      END {
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
+          if (fence) continue
+          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
+          if (!insdlc) continue
+          if (L[i] ~ /^order:/) ord = i
+          else if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) ap = i
+          else if (!cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
+        }
+        at = ord ? ord : (ap ? ap : cur)
+        if (!at) exit 1
+        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["OR_LINE"] }
+      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the order beside; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap order "the order" writer
+    say "order — $line, under ## SDLC State of $PV_PLAN; dry-committed first."
+    exit 0
+  }
