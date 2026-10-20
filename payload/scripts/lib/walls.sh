@@ -2398,10 +2398,16 @@ Fix: register each reading with 'session-poker.sh proof-add review <record> --qu
 # that floor is covered, owed or uncovered at the working head needs git (an owed red is closed by a later
 # green landing), so it stays the judge's, asked by `current 7` and `current 8`, and a floor line passes
 # this arm whatever its `owed=`. A plan at `regression: no` owes no floor here (facts_owed deals none).
+# IN THE RELEASE ORDER the floor is owed from Step 8: the regression row runs inside Step 7, after the release row,
+# read by lib/units.sh `units_release_order`, the judge's and the validator's one reading of the order.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 _eg_refuse_floor_absent() {
   local why
   [ "$(plan_regression "$PLAN")" = no ] && return 0
+  if [ "${CURRENT%[ab]}" = 7 ] && declare -F units_release_order >/dev/null 2>&1 \
+     && units_release_order "$PLAN" >/dev/null 2>&1; then
+    return 0
+  fi
   if declare -F proof_floor_absent >/dev/null 2>&1; then
     why="$(proof_floor_absent "$PLAN")" || return 0
     why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"

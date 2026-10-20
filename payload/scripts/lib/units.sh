@@ -979,6 +979,18 @@ units_approval_names() {
   END { if (hasrel && openint) print "release" }' | sort -u
 }
 
+# units_release_order <plan> -> the id of the regression row when the plan is in the release order, exit 0: a test row
+# at Step 7 or later comes after a doc row at Step 7 or later (the release), by step and then by table order, neither
+# dropped. Nothing, exit 1, otherwise. THE ONE READING of the order: `current 7` and `current 8` (hooks/poker/judge.sh)
+# and the commit wall ask it, and `units_validate` holds an open plan to it.
+units_release_order() {
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '
+    tolower($10) == "dropped" || $2 !~ /^[0-9]+$/ || $2 + 0 < 7 { next }
+    $3 == "doc" { rel = 1; next }
+    $3 == "test" && rel { reg = $1 }
+    END { if (reg == "") exit 1; print reg }'
+}
+
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
 # ONE SPELLING for the validator that admits it and the readiness program that reports it, so
 # a token the validator lets into a plan is exactly a token the held report names. A bare
@@ -1951,7 +1963,7 @@ units_validate() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)"'
+      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
@@ -2142,6 +2154,30 @@ units_validate() {
             if (a[j] == "" || a[j] !~ /[\/.*?]/ || a[j] ~ /[ \t]/) continue
             sub(/!$/, "", a[j])
             if (index(a[j], "[") || index(a[j], "]")) printf "%s: Files entry %s has a bracket; Files globs with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
+          }
+        }
+        # THE RELEASE LANDS BEFORE THE REGRESSION. The release is a doc row at Step 7 or later, not dropped; the
+        # regression an open test row at Step 6 or later. A regression row at an earlier step than a release row, or
+        # at its step and earlier in the table, is refused, and so is one whose reads (its cell, else its kind
+        # default) lack approval:release or head: the whole run is at the head the user approved for the release.
+        # Only a table with a reads column, and only an open regression row, as the head rule above.
+        if (hasreads) {
+          lr = 0
+          for (j = 1; j <= n; j++)
+            if (!(id[j] in skip) && knd[j] == "doc" && stp[j] ~ /^[0-9]+$/ && stp[j] + 0 >= 7 && sta[j] != "dropped") { isrel[j] = 1; lr = j }
+          for (i = 1; lr && i <= n; i++) {
+            if ((id[i] in skip) || knd[i] != "test" || stp[i] !~ /^[0-9]+$/ || stp[i] + 0 < 6 || (sta[i] != "pending" && sta[i] != "active")) continue
+            for (j = 1; j <= n; j++)
+              if (isrel[j] && (stp[i] + 0 < stp[j] + 0 || (stp[i] + 0 == stp[j] + 0 && i < j))) {
+                printf "%s: the regression row comes ahead of the release row %s; the release lands first: put %s at step %s after %s\n", id[i], id[j], id[i], stp[j], id[j]
+                break
+              }
+            r = rd[i]; gsub(/^[ \t]+|[ \t]+$/, "", r); dflt = ""
+            if (r !~ /[A-Za-z0-9]/) { r = kdef(knd[i], stp[i]); dflt = " (its kind default)" }
+            m = split(r, a, ","); hr = 0; ha = 0
+            for (k = 1; k <= m; k++) { gsub(/^[ \t]+|[ \t]+$/, "", a[k]); if (a[k] == "head") hr = 1; if (a[k] == "approval:release") ha = 1 }
+            if (!hr || !ha)
+              printf "%s: the regression row reads %s%s, not approval:release, head; it runs at the head the user approved for the release row %s\n", id[i], r, dflt, id[lr]
           }
         }
       }')"

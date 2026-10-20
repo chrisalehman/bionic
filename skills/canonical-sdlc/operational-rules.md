@@ -63,7 +63,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 
 | piece | shape |
 |---|---|
-| approval | `approved: <name> by <who> <ISO-UTC> "<reply>"`, written by `session-poker.sh approve <name> '<reply>'` on the user's own reply, quoted verbatim |
+| approval | `approved: <name> by <who> <ISO-UTC> head=<40-hex> "<reply>"`, written by `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim, at the working head |
 | proof | `proved: kind=<regression\|review\|task\|check> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`, written by `session-poker.sh proof-add <kind> <evidence>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
 | reading | `proof-add review <record> --question <q> --reader <name>` adds ` question=<q> reader=<name> result=<pass\|flag\|fail> scope=<piece\|whole>`; the reader's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
 | declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and the `kind=check` line (` result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |

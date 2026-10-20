@@ -5147,4 +5147,113 @@ CG_OK="$(python3 -I "$REPO_ROOT/tests/lib/callgraph.py" "$CG_D/d.sh" "$CG_D/poke
 expect_eq "PARTS-3c …and with b loaded first the one-way call is the one declared load (exit 0)" \
   "0|load $CG_D/poker/a.sh $CG_D/poker/b.sh" "$CG_OK_RC|$(printf '%s\n' "$CG_OK" | awk '$1 == "load"')"
 
+# ============================================================
+section "§ORDER — the release row lands before the regression row, which reads approval:release, head; an approval records the head approved"
+# ============================================================
+# The release is a doc row at Step 7 or later, the regression an open test row at Step 6 or later. units_validate
+# refuses a regression row that comes ahead of a release row (an earlier step, or the same step earlier in the table)
+# and one whose reads do not carry approval:release and head, naming both rows. A plan with no release row is not
+# held, nor is a regression row that has landed. `units_release_order` says whether a plan is in that order: the
+# judge and the commit wall ask it. The verbs: task-add is refused on the validator's lines, and `approve` writes
+# the working branch's head on its line, read back by lib/proof.sh `proof_approved_head`.
+# FIXTURE FIDELITY: the library's own reader over plan files; for the verbs, a real repository on its working
+# branch, the plan bound to this session, hooks/session-poker.sh run as that session.
+# fails-when: the regression ahead of the release validates, task-add admits it, or approve writes no head.
+OR_P="$SANDBOX/order.plan.md"
+or_plan() {  # <row>... -> OR_P: a reads table at Step 4 holding the rows given
+  { printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh | landed | |\n'
+    printf '%s\n' "$@"; } > "$OR_P"
+}
+OR_REL='| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | pending | approval:plan, head |'
+OR_REG='| T8 | 7 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T8.md | pending | approval:release, head |'
+or_plan "$OR_REL" "$OR_REG"
+expect_eq "ORD-1 control: the release at Step 7, the regression after it reading approval:release, head: no violation (rc 0)" \
+  "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+expect_eq "ORD-1b …and the plan is in the release order, the regression row named" "T8|0" "$(call units_release_order "$OR_P")|$(call_rc units_release_order "$OR_P")"
+or_plan "${OR_REG/| 7 | test |/| 6 | test |}" "$OR_REL"
+expect_eq "ORD-2 AC-7.1 the regression at Step 6, ahead of the release: refused, naming both rows" \
+  "T8: the regression row comes ahead of the release row T7; the release lands first: put T8 at step 7 after T7|1" \
+  "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+expect_eq "ORD-2b …and the plan is not in the release order" "|1" "$(call units_release_order "$OR_P")|$(call_rc units_release_order "$OR_P")"
+or_plan "$OR_REG" "$OR_REL"
+expect_eq "ORD-3 AC-7.1 both at Step 7, the regression first in the table: refused" \
+  "T8: the regression row comes ahead of the release row T7; the release lands first: put T8 at step 7 after T7" \
+  "$(call units_validate "$OR_P")"
+or_plan "$OR_REL" "${OR_REG/approval:release, head/approval:plan, head}"
+expect_eq "ORD-4 the regression reads approval:plan, head: refused, naming the reads and the release row" \
+  "T8: the regression row reads approval:plan, head, not approval:release, head; it runs at the head the user approved for the release row T7" \
+  "$(call units_validate "$OR_P")"
+or_plan "$OR_REL" "${OR_REG/approval:release, head |/|}"
+expect_eq "ORD-4b …an empty cell is its kind default, refused the same way" \
+  "T8: the regression row reads approval:plan, proof:review, head (its kind default), not approval:release, head; it runs at the head the user approved for the release row T7" \
+  "$(call units_validate "$OR_P")"
+or_plan "${OR_REG/| 7 | test |/| 6 | test |}" "$OR_REL"
+sed 's/^| T8 \(.*\) pending |\(.*\)$/| T8 \1 landed |\2/' "$OR_P" > "$OR_P.x" && mv "$OR_P.x" "$OR_P"
+expect_eq "ORD-5 a regression row that has landed ahead of the release is not held (the row ORD-2 refused, landed)" \
+  "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+or_plan "${OR_REG/| 7 | test |/| 6 | test |}"
+expect_eq "ORD-6 a plan with no release row holds its regression to nothing new" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+or_plan "$OR_REL" "${OR_REG/| 7 | test |/| 4 | test |}"
+expect_eq "ORD-6b …nor a test row before Step 6, which is no regression" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
+
+# THE VERBS, in a real repository on its working branch.
+OV="$SANDBOX/order-verbs"; OV_PLAN="$OV/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"; OV_SID="7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+. "$(dirname "$0")/lib/bound-marker.sh"
+mkdir -p "$OV/.bionic/tmp" "${OV_PLAN%/*}" "$OV/.bionic/docs/specs/epic-99-fixture" "$SANDBOX/ov-home" "$SANDBOX/ov-config"
+ov_git() { git -C "$OV" -c user.email=dana@fixture.test "$@"; }
+ov_git init -q 2>/dev/null; ov_git config user.name "Dana Fixture"; ov_git checkout -q -b wave/01-fixture 2>/dev/null
+printf '.bionic/\n' > "$OV/.gitignore"; printf 'one\n' > "$OV/a.sh"; ov_git add .gitignore a.sh; ov_git commit -qm base
+: > "$OV/.bionic/tmp/engaged-$OV_SID.state"
+printf '# requirements\n' > "$OV/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+printf '# spec\n' > "$OV/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\nrigor: double\nscale: wave\n'
+  printf 'multi_agent: true\nuse_worktree: true\nhas_ui: false\nwalk: exempt\ndeploy_target: n/a\n'
+  printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n# fixture wave\n\n## SDLC State\n\n'
+  printf 'current: 4\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+  printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+  printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+  printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+  printf -- '- Step 4: opened\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$(ov_git rev-parse --short HEAD)"
+  printf -- '- T1: landed at record/T1.md\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | |\n'
+  printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | — | — | pending | approval:plan, head |\n'
+  printf '| T8 | 7 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T8.md | — | — | pending | approval:release, head |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1.1 | T1 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+} > "$OV_PLAN"
+bound_marker "$OV" "$OV_SID" "$OV_PLAN" >/dev/null 2>&1
+ov_poke() {  # <args...> -> OV_OUT, OV_RC: session-poker.sh as this session, in the repository
+  OV_RC=0
+  OV_OUT="$(cd "$OV" && env CLAUDE_CODE_SESSION_ID="$OV_SID" HOME="$SANDBOX/ov-home" CLAUDE_CONFIG_DIR="$SANDBOX/ov-config" \
+    BIONIC_GATE_DIR="$SANDBOX/ov-gate" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" 2>&1)" || OV_RC=$?
+}
+ov_head() { bash -c '. "$1/proof.sh" && proof_approved_head "$2" "$3"' _ "${LIB%/*}" "$OV_PLAN" "$1" 2>/dev/null; }  # <name>
+cp "$OV_PLAN" "$SANDBOX/ov-before"
+ov_poke task-add T9 6 test 'a second regression' test-runner — 90 REQ-1 .bionic/docs/record/w/T9.md 'approval:release, head'
+expect_eq "ORD-7 AC-7.1 task-add of a regression row ahead of the release is refused (exit 1)" "1" "$OV_RC"
+expect_contains "ORD-7b …on the validator's line, naming both rows" \
+  "T9: the regression row comes ahead of the release row T7; the release lands first: put T9 at step 7 after T7" "$OV_OUT"
+expect_true "ORD-7c …and the plan is byte-identical" cmp -s "$SANDBOX/ov-before" "$OV_PLAN"
+OV_H="$(ov_git rev-parse refs/heads/wave/01-fixture)"
+ov_poke approve release 'Ship this head.'
+expect_eq "ORD-8 approve release exits 0 (the control for ORD-7: the verbs run in this fixture)" "0" "$OV_RC"
+expect_regex "ORD-8b AC-7.1 …and its line records the working branch's head before the reply" \
+  "^approved: release by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z head=$OV_H \"Ship this head\\.\"$" \
+  "$(/usr/bin/grep '^approved: release ' "$OV_PLAN")"
+expect_eq "ORD-8c …which proof_approved_head reads back" "$OV_H" "$(ov_head release)"
+ov_poke approve release 'Again.'
+expect_eq "ORD-9 a second approve release at the same head is refused, as an approval is recorded once (exit 1)" "1|1" \
+  "$OV_RC|$(/usr/bin/grep -c '^approved: release ' "$OV_PLAN" | tr -d ' ')"
+printf 'two\n' > "$OV/a.sh"; ov_git commit -qam 'a fix after the approval'
+OV_H2="$(ov_git rev-parse HEAD)"
+ov_poke approve release 'Ship the fixed head.'
+expect_eq "ORD-10 past the approved head, approve release records the new head on a second line (exit 0)" "0|2" \
+  "$OV_RC|$(/usr/bin/grep -c '^approved: release ' "$OV_PLAN" | tr -d ' ')"
+expect_eq "ORD-10b …and the newest approval's head is the one read" "$OV_H2" "$(ov_head release)"
+expect_eq "ORD-10c …and a name with no approval line reads none (the extractor read heads in ORD-8c and ORD-10b)" "" "$(ov_head merge)"
+
 finish
