@@ -471,7 +471,10 @@ expect_contains "WT-1b …and names that task" "T4" "$RW_ON"
 expect_contains "WT-3 no task reads it: nothing moves" "nothing moves" "$RW_NONE"
 expect_true "WT-4 the put line in the ledger carries its wait line (WT-1 read it non-empty)" \
   bash -c '[ -n "$1" ] && grep -qF "$1" "$2"' _ "${RW_ON#wait: }" "$RW_L"
-rw_table 500; poke "$RW" decisions put D7 'off the chain, now on it'
+rw_table 500; poke "$RW" decisions put D7 'off the chain, now on it'; RW_FLIP="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+rw_close() { case "$1" in *'the predicted close moves'*) echo moves ;; *'the predicted close holds'*) echo holds ;; *) echo none ;; esac; }
+expect_eq "WT-2 AC-14.1 the line reads the chain: D8's task on it moves the close, D7's off it holds the close, and D7 once its task is the longest moves it" \
+  "moves|holds|moves" "$(rw_close "$RW_ON")|$(rw_close "$RW_OFF")|$(rw_close "$RW_FLIP")"
 
 # ============================================================
 section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines while an integrate row is open (wave-38 T3; REQ-1 AC-1.2; D20)"
