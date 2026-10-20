@@ -1054,6 +1054,7 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 # _proof_records <checkout> [<landing record>] -> THE RECORDS lib/line.sh weighs,
 # one tab-separated line each, in the order read (the landing record, then every git dir's stamp file):
 #   O <commit> <row> <suites | ->               a published commit (or a `landed:` merge) and its row's suites
+#                                               (`-` for a hand landing whose ready named none: its verdicts are its suites)
 #   R <at> <commit> <suite | *> <green | red> <verdict | stamp | regression>   one suite's run at one commit (`*`, a
 #                                               whole run); `regression` is a fact the whole run's fold wrote (wave-39 T24;
 #                                               D9), a run at its tree but never a landing's, so it closes no owed red
@@ -1079,7 +1080,7 @@ _proof_records() {
     (ev = line_ev()) != "" {
       r = line_kv("row")
       if (ev == "ready") { if (r != "") su[r] = keys(line_kv("suites")) }
-      else if (ev == "published") { c = line_kv("commit"); if (c != "") out("O\t" c "\t" r "\t" ((r in su) ? su[r] : "-")) }
+      else if (ev == "published") { c = line_kv("commit"); x = (r in su) ? su[r] : "-"; if (line_kv("kind") == "hand" && x == "none") x = "-"; if (c != "") out("O\t" c "\t" r "\t" x) }
       else if (ev == "verdict") {
         c = line_kv("commit"); s = key(line_kv("suite")); v = line_kv("result")
         if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" line_kv("at") "\t" c "\t" s "\t" v "\t" (line_kv("kind") == "regression" ? "regression" : "verdict")); if (v == "red") { vc[nl] = c; vs[nl] = s } }
