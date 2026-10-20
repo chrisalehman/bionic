@@ -415,9 +415,8 @@ park_fixture() {
   esac
   printf '%s\n' "$p"
 }
-# pk_handoff <project> -> the plan and the run's handoff file, wherever the closed form went (the plan's
-# ## Handoff before wave-38 T12 lands, the file record/<wave>/handoff.md after it)
-pk_handoff() { cat "$1/$PLAN_REL" "$1/.bionic/docs/record/wave-01-fixture/handoff.md" 2>/dev/null; }
+# pk_handoff <project> -> the handoff document the plan's ## Handoff pointer names
+pk_handoff() { local r; r="$(sed -n 's/^handoff: \(.*\) written .*$/\1/p' "$1/$PLAN_REL" | head -1)"; [ -n "$r" ] && cat "$1/$r" 2>/dev/null; }
 
 PPK="$(park_fixture parked1 wake)"
 PK_WS="$(fixture_git "$PPK" rev-parse --short wave/01-fixture)"
@@ -437,7 +436,7 @@ expect_eq "PK-4 …the continuation is written and its header says parked, where
   "$([ -f "$PPK/$CONT_REL" ] && echo 1 || echo 0)|$(contains "$(sed -n 3p "$PPK/$CONT_REL" 2>/dev/null)" "Parked ")|$(contains "$(sed -n 3,4p "$PPK/$CONT_REL" 2>/dev/null)" "\`wave/01-fixture\` @ $PK_WS")"
 expect_absent "PK-4c …and never says the branch was merged" "merged into" "$(sed -n 1,6p "$PPK/$CONT_REL" 2>/dev/null)"
 expect_contains "PK-5 …the epic row is written parked" "parked" "$(/usr/bin/grep '^| 01 |' "$PPK/$EPIC_REL")"
-expect_absent "PK-7b …and never DELIVERED" "resume point: NONE — DELIVERED" "$(pk_handoff "$PPK")"
+expect_contains "PK-7 …the handoff document's resume point is PARKED on <branch> @ <sha>" "resume point: PARKED on wave/01-fixture @ $PK_WS" "$(pk_handoff "$PPK")"
 expect_eq "PK-8 the work is kept: wt/01-x and the working branch stand, main never moved" "yes|yes|$PK_MAIN0" \
   "$(branch_exists "$PPK" wt/01-x)|$(branch_exists "$PPK" wave/01-fixture)|$(fixture_git "$PPK" rev-parse main)"
 expect_contains "PK-8b …and the card says nothing was removed" "worktree-removed: none — parked" "$CO_OUT"
@@ -478,43 +477,58 @@ PPN_CK="$(cksum < "$PPN/$PLAN_REL")"
 lands_poker "$PPN" "$PK_SID" step-line 9 "delivered by hand"
 
 # ============================================================
-section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #1; D23): the handoff verb's closed form on a parked or pull-request plan is close-out's, line for line"
+section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #1; D23): close-out and the handoff verb write one document on a parked or pull-request plan, with one pair of closed lines"
 # ============================================================
-# The closed form has one writer of its two state lines, `resume point:` and `branch:`, and both doors print it:
-# close-out.sh's tail and session-poker.sh `handoff` on the closed plan. Every line but the two each door reads for
-# itself (`written:`, its own instant; `patrol:`, the disarm instruction close-out prints and the state the verb
-# reads, T12's closed form) is the same. resume on close-out's parked file says the run is parked, never that it
-# has nothing to resume. FIXTURE FIDELITY: §PARKED's closed parked plan (PPK), and §ANY-BRANCH's task-scale plan
-# whose pull request is owed (mk_task_pr_fixture), closed with `archive-on-close: false` so the plan stays where the
-# verb can bind it (an archived plan leaves the project root); each as close-out left it, the session bound by the verb.
-# fails-when: the verb writes `NONE — DELIVERED` or `merged into` on a parked or pull-request run.
-OW_HO=".bionic/docs/record/wave-01-fixture/handoff.md"
-ow_lines() { awk 'index($0, "written: ") != 1 && index($0, "patrol: ") != 1' "$1" 2>/dev/null; }  # <file> -> all but the two own lines
-ow_doors() {  # <label> <project> <sid> -> close-out's file kept at $SANDBOX/ow-copy-<label>, then the verb's written over it; OW_RC
-  cp "$2/$OW_HO" "$SANDBOX/ow-copy-$1" 2>/dev/null
+# The closed document has one writer of its two state lines, `resume point:` and `working branch:`, and both doors
+# write them into the one handoff document: close-out.sh's tail, and session-poker.sh `handoff` on the closed plan.
+# close-out's document has the verb's sections in the verb's order and keeps what a session composed before the
+# close. resume on close-out's parked document reads it parked. FIXTURE FIDELITY: §PARKED's closed parked plan
+# (PPK), and §ANY-BRANCH's task-scale plan whose pull request is owed (mk_task_pr_fixture), closed with
+# `archive-on-close: false` so the plan stays where the verb can bind it (an archived plan leaves the project root);
+# each as close-out left it, the session bound by the verb.
+# fails-when: close-out writes another shape or drops a composed section; the two doors' closed lines differ.
+. "$REPO_ROOT/payload/scripts/lib/handoff.sh"
+ow_file() {  # <project> -> the absolute file the plan's ## Handoff pointer names
+  local r
+  r="$(sed -n 's/^handoff: \(.*\) written .*$/\1/p' "$1/$PLAN_REL" | head -1)"
+  [ -n "$r" ] && printf '%s/%s\n' "$1" "$r"
+}
+ow_lines() { handoff_line "$1" "resume point"; handoff_line "$1" "working branch"; }  # <file> -> the two closed lines
+ow_heads() {  # <file> -> the section headings, in order, each ending on |
+  awk -v s="$HANDOFF_SECTIONS" 'BEGIN { n = split(s, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1 } ($0 in H) { printf "%s|", $0 }' "$1" 2>/dev/null
+}
+ow_doors() {  # <label> <project> <sid> -> close-out's document kept at $SANDBOX/ow-copy-<label>, then the verb's; OW_RC, OW_FILE
+  cp "$(ow_file "$2")" "$SANDBOX/ow-copy-$1" 2>/dev/null
   lands_bind "$2" "$3"
-  lands_poker "$2" "$3" handoff
-  OW_RC="$LP_RC"; OW_OUT="$LP_OUT"
+  lands_poker "$2" "$3" handoff < /dev/null
+  OW_RC="$LP_RC"; OW_FILE="$(printf '%s\n' "$LP_OUT" | sed -n 's/^.*handoff — written to //p' | head -1)"
 }
 OW_SID="closeout-onewriter-sid"
+OW_PK="$(ow_file "$PPK")"
 : > "$PPK/.bionic/tmp/engaged-$OW_SID.state"
-lands_poker "$PPK" "$OW_SID" resume "$OW_HO"
-expect_eq "OW-1 resume on close-out's parked file exits 0" "0" "$LP_RC"
-expect_absent "OW-1c …and never that there is nothing to resume (OW-1b read the same output)" "nothing to resume" "$LP_OUT"
+lands_poker "$PPK" "$OW_SID" resume "${OW_PK#"$PPK"/}"
+expect_eq "OW-1 resume on close-out's parked document exits 0 and reads it parked; the document has the verb's sections, in order" \
+  "0|yes|Summary|Goal|State|Findings|Decisions|Ruled out|Open|Suggested skills|Next|Resume|" \
+  "$LP_RC|$(contains "$LP_OUT" "resume point: PARKED on ")|$(ow_heads "$OW_PK")"
 ow_doors parked "$PPK" "$OW_SID"
 expect_eq "OW-2 the handoff verb on the parked plan exits 0" "0" "$OW_RC"
 expect_nonempty "OW-2c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-parked")"
-expect_eq "OW-2d the verb's closed form is close-out's, line for line" "$(ow_lines "$SANDBOX/ow-copy-parked")" "$(ow_lines "$PPK/$OW_HO")"
+expect_eq "OW-2d the verb's closed lines are close-out's" "$(ow_lines "$SANDBOX/ow-copy-parked")" "$(ow_lines "$OW_FILE")"
 
 OWR="$(mk_task_pr_fixture ow-pr "fix/x")"
 printf 'archive-on-close: false\n' >> "$OWR/.bionic/config.yaml"
+OW_FINDING="- the late fix waits on its pull request — file.txt"
+lands_bind "$OWR" "$OW_SID"
+lands_poker "$OWR" "$OW_SID" handoff <<< "Findings
+$OW_FINDING"
 run_close "$OWR" run
 expect_eq "OW-3 precondition: close-out closed the task-scale plan rc 0, unmerged and in place" "0|no|yes" \
   "$CO_RC|$(git -C "$OWR" merge-base --is-ancestor fix/x main && echo yes || echo no)|$([ -f "$OWR/$PLAN_REL" ] && echo yes || echo no)"
+expect_contains "OW-3b close-out keeps the Finding a session wrote before the close" "$OW_FINDING" "$(cat "$(ow_file "$OWR")" 2>/dev/null)"
 ow_doors pr "$OWR" "$OW_SID"
 expect_eq "OW-4 the handoff verb on the pull-request plan exits 0" "0" "$OW_RC"
 expect_nonempty "OW-4c precondition: close-out's copy reads" "$(ow_lines "$SANDBOX/ow-copy-pr")"
-expect_eq "OW-4d the verb's closed form is close-out's, line for line" "$(ow_lines "$SANDBOX/ow-copy-pr")" "$(ow_lines "$OWR/$OW_HO")"
+expect_eq "OW-4d the verb's closed lines are close-out's" "$(ow_lines "$SANDBOX/ow-copy-pr")" "$(ow_lines "$OW_FILE")"
 
 # ============================================================
 section "§TOLERANT — wave-38 T15 (REQ-4 AC-4.4): a prose line in the debt ledger is skipped with a note; a missing epic table is added"
