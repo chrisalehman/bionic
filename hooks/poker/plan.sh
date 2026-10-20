@@ -1637,12 +1637,13 @@ EOF
   # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17). A `- Step N:` block is the evidence the gate reads, and
   # the fields it reads were hand edits: `units_step_fields --replace` writes one `  <key>: <value>` line under
   # the step line, after the block last line, or replaces the line where it stands (the gate reads the first
-  # line of a key, so a second could not win); the rest of the plan is the same bytes. Ten keys, the ones the
+  # line of a key, so a second could not win); the rest of the plan is the same bytes. Eleven keys, the ones the
   # gate reads at Steps 4, 5, 7 and 8: head cmd pass total output (the regression run), merge worktree-removed (the
-  # integration), adr (the document step), share (the Step-4 fact), walk-artifact (the walk gate's pointer, Step 5
+  # integration), adr (the document step), share (the Step-4 fact), auditor (the Verify gate's verdict, Step 5 alone),
+  # walk-artifact (the walk gate's pointer, Step 5
   # alone; wave-33 T7). It takes the plan transaction every row verb
   # takes (copy, dry commit through the real gate, checksum, swap), so a plan the gate would refuse is not
-  # written. REFUSED (1), the plan unchanged: a key outside the ten, a value with a line break, a step with no
+  # written. REFUSED (1), the plan unchanged: a key outside the eleven, a value with a line break, a step with no
   # line (step-line writes it), a key the step line itself carries (step-line owns that text), and Step 9
   # (close-out writes that block). The refusals are this verb family die lines, not refuse.sh refusals.
   poker_verb_step_field() {
@@ -1652,10 +1653,10 @@ EOF
         exit 1 ;;
     esac
     case "$PV_FKEY" in
-      head|cmd|pass|total|output|merge|worktree-removed|adr|share|walk-artifact) : ;;
+      head|cmd|pass|total|output|merge|worktree-removed|adr|share|walk-artifact|auditor) : ;;
       *)
         die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field; the plan is unchanged."
-        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share, walk-artifact (Step 5)."
+        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, adr, share, walk-artifact and auditor (Step 5)."
         exit 1 ;;
     esac
     # THE WALK POINTER (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-42). The walk gate reads `walk-artifact:`
@@ -1672,6 +1673,13 @@ EOF
           die "REFUSED — the walk artifact '$(clean "$PV_FVAL")' has a '..' component, which the walk gate refuses: name it under record/. The plan is unchanged."
           exit 1 ;;
       esac
+    fi
+    # THE AUDITOR'S VERDICT is read by the Verify gate from the Step 5 block alone (walls.sh `validate_verify_step`), so
+    # the key is written there and at no other step.
+    if [ "$PV_FKEY" = auditor ] && [ "$PV_KEY" != 5 ]; then
+      die "REFUSED — auditor is read from the Step 5 block only (the Verify gate's), not Step $PV_KEY's; the plan is unchanged."
+      pv_next step-field 5 "auditor=$PV_FVAL"
+      exit 1
     fi
     case "$PV_FVAL" in
       *$'\n'*|*$'\r'*)
@@ -2402,7 +2410,7 @@ BRF_EOF
   #
   #   Review results · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
   #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
-  #   Goals         each goal the plan's `goals:` line declares, ❔ until a reader of it exists
+  #   Goals         each goal the plan declares, its mark and its reading, reached ones included
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
@@ -2574,10 +2582,9 @@ RR_ASIDE_EOF
       if [ -z "$RR_GOALS" ]; then
         printf '0\tGoals — none declared\n'
       else
-        printf '0\tGoals — 0 of %s reached\n' "$(printf '%s\n' "$RR_GOALS" | /usr/bin/grep -c .)"
-        while IFS='	' read -r g t; do [ -z "$g" ] || printf '3\t❔ %s — %s, not measured yet\n' "$g" "$t"; done <<RR_GOALS_EOF
-$RR_GOALS
-RR_GOALS_EOF
+        printf '%s\n' "$RR_GOALS" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
+          NF { n++; if ($1 == "reached") r++; l[n] = "3\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) " " $2 " — " $3 ", " $4 }
+          END { printf "0\tGoals — %d of %d reached\n", r, n; for (i = 1; i <= n; i++) print l[i] }'
       fi
       printf '0\t\n0\tTests\n3\t%s\n3\t%s\n' "$RR_TACC" "$RR_TREG"
       printf '0\t\n0\tReviews\n'
@@ -2810,11 +2817,9 @@ RR_DISP_EOF
 $RR_AGAINST
 RR_AGAINST_EOF
 
-    # GOALS: the plan's `goals:` line, `<theme> · <measure> (<reader>)` per goal, `;` between them.
-    RR_GOALS="$(plan_frontmatter_get "$PV_PLAN" goals 2>/dev/null | awk '{ n = split($0, g, /;/)
-      for (i = 1; i <= n; i++) { s = g[i]; gsub(/^[ \t]+|[ \t]+$/, "", s); if (s == "") continue
-        j = index(s, " · "); if (j == 0) { print s "\t-"; continue }
-        t = substr(s, 1, j - 1); m = substr(s, j + length(" · ")); sub(/[ \t]*\([^()]*\)$/, "", m); print t "\t" m } }')"
+    # GOALS: each goal the plan declares, read by lib/plan.sh `plan_goals_read`, the reader the sitrep reads too.
+    RR_GOALS="$(plan_goals_read "$PV_PLAN" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
+      "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
 
     # THE REGRESSION: the last whole run's proof line, and its log's verdict when the log is here to read.
     line="$(proof_last_line "$PV_PLAN" regression 2>/dev/null)"
@@ -2961,5 +2966,98 @@ RP_TABLE
     else
       say "reply — all $RP_ALL replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded; nothing on the page is left open."
     fi
+    exit 0
+  }
+
+  # THE USER'S ORDER. `order '<words>'` records what the user said as an order every suite obeys;
+  # `order lift` ends the open one. Each is one line with the time and the words:
+  #
+  #   order: given <ISO-UTC> "<words>"
+  #   order: lifted <ISO-UTC> "<the words of the order it ends>"
+  #
+  # With a bound open run the line goes under the plan's `## SDLC State`, after its last order: line,
+  # else after its last approved: or approved-by: line, else after current:, through the plan
+  # transaction every row verb takes. With no run bound it is appended to record/orders.log under the
+  # docs root, made when absent. tests/run.sh asks lib/gate.sh `gate_order`, the one reader of both,
+  # and refuses every suite while an order is open. A newer order replaces the open one; the newest
+  # line decides.
+  #
+  # REFUSED (1), nothing written: words that hold a line break, a lift with no open order, a plan
+  # with no current: line under ## SDLC State, the log a link. (2): the order reader cannot be loaded,
+  # or the log cannot be written.
+  poker_verb_order() {
+    local sid mode=log root log open line
+    if ! declare -F gate_order_of >/dev/null 2>&1; then
+      die "REFUSED — the order reader (lib/gate.sh gate_order_of) cannot be loaded from $BIONIC_LIB; nothing was written."
+      exit 2
+    fi
+    case "$OR_WORDS" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — an order is one line, and the words carry a line break; nothing was written."
+        exit 1 ;;
+    esac
+    sid="$(session_id 2>/dev/null)" || sid=""
+    root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    if [ -z "$root" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    if [ -n "$sid" ] && engaged_session "$root" "$sid"; then
+      case "$(session_run "$root" "$sid")" in 'bound-open '*) mode=plan ;; esac
+    fi
+    if [ "$mode" = plan ]; then
+      plan_verb_open order
+      open="$(gate_order_of "$PV_PLAN" plan)" || open=""
+    else
+      log="$(docs_root "$root")/record/orders.log"
+      if [ -L "$log" ]; then
+        die "REFUSED — $log is a link, and an order is not written through one; nothing was written."
+        exit 1
+      fi
+      open="$(gate_order_of "$log")" || open=""
+    fi
+    if [ -n "$OR_LIFT" ]; then
+      if [ -z "$open" ]; then
+        die "REFUSED — no order is open$([ "$mode" = plan ] && printf ' in %s' "$PV_PLAN" || printf ' in %s' "$log"), so there is nothing to lift; nothing was written."
+        exit 1
+      fi
+      OR_WORDS="${open#*\"}"; OR_WORDS="${OR_WORDS%\"}"
+      line="order: lifted $(iso_now) \"$OR_WORDS\""
+    else
+      line="order: given $(iso_now) \"$OR_WORDS\""
+    fi
+    if [ "$mode" = log ]; then
+      # A bionic folder made here gets its ignore file, as the handoff's does: the log is never tracked.
+      [ -d "$root/.bionic" ] || { mkdir -p "$root/.bionic" 2>/dev/null && printf '*\n' > "$root/.bionic/.gitignore"; }
+      if ! mkdir -p "${log%/*}" 2>/dev/null || ! printf '%s\n' "$line" >> "$log" 2>/dev/null; then
+        die "REFUSED — $log cannot be written; nothing was written."
+        exit 2
+      fi
+      say "order — $line, in $log (no run is bound)."
+      exit 0
+    fi
+    # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
+    # user's words as an escape.
+    if ! OR_LINE="$line" awk '
+      { L[++n] = $0 }
+      END {
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
+          if (fence) continue
+          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
+          if (!insdlc) continue
+          if (L[i] ~ /^order:/) ord = i
+          else if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) ap = i
+          else if (!cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
+        }
+        at = ord ? ord : (ap ? ap : cur)
+        if (!at) exit 1
+        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["OR_LINE"] }
+      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the order beside; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap order "the order" writer
+    say "order — $line, under ## SDLC State of $PV_PLAN; dry-committed first."
     exit 0
   }

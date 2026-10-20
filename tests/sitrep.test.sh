@@ -82,6 +82,7 @@ sr_world() {
   {
     printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
     [ -z "${SR_FORECAST-48h}" ] || printf 'forecast: %s\n' "${SR_FORECAST-48h}"
+    [ -z "${SR_GOALS:-}" ] || printf '%s\n' "$SR_GOALS" | sed 's/^/goals: /'
     printf -- '---\n'
     printf '# fixture plan\n\n## SDLC State\n\n'
     [ "${SR_APPROVED-}" = none ] || printf 'approved-by: fixture 2026-10-06T10:00:00Z "approved"\n'
@@ -397,7 +398,7 @@ section "§MARKS: the Score's five indicator lines, each opening on its mark (�
 sr_world marks "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "M0 the clean world: schedule ✅, 4 of 17 tasks done in the 12 hours since approval where a 48-hour forecast needs 4, and the median landing 9 min (landing-report's) within the 15 min bar" \
-  "$SR_MARK_WITHIN schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_WITHIN schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median one-file landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
 expect_eq "M1 …correctness ✅, no red, no open S1 or S2" \
   "$SR_MARK_WITHIN correctness — no red suite at head; no open S1 or S2 finding" "$(sr_ind correctness)"
 expect_eq "M2 …waste ✅, nothing discarded, nothing idle" \
@@ -408,8 +409,8 @@ expect_eq "M2b …no indicator line carries a parenthesised bar" "0" \
   "$(sr_sect 'Score: .*' | /usr/bin/grep -E '^[^ ]+ (schedule|correctness|waste|decisions|goals) ' | /usr/bin/grep -c '(')"
 expect_eq "M2c …each indicator line opens on one of the four marks, then its name" "5" \
   "$(sr_sect 'Score: .*' | /usr/bin/grep -cE "^($SR_MARK_WITHIN|$SR_MARK_NEAR|$SR_MARK_OVER|$SR_MARK_NONE) (schedule|correctness|waste|decisions|goals) ")"
-expect_eq "M2d …decisions and goals print their no-record form, ❔, until their readers are built" \
-  "$SR_MARK_NONE decisions — rounds not counted yet|$SR_MARK_NONE goals — not measured yet" "$(sr_ind decisions)|$(sr_ind goals)"
+expect_eq "M2d …decisions print their no-record form, ❔; a plan that declares no goals says so" \
+  "$SR_MARK_NONE decisions — rounds not counted yet|$SR_MARK_NONE goals — none declared" "$(sr_ind decisions)|$(sr_ind goals)"
 # A planted red run, not answered: correctness over its bar, and the task it is on reads ⛔.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
@@ -434,12 +435,12 @@ expect_eq "M6 an open S2 finding of a registered reading → correctness ✖️"
 SR_FORECAST=40h sr_world marks-slow "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "M7 4 done where the forecast's pace needs 5 (within 1.25× behind) → schedule ➖" \
-  "$SR_MARK_NEAR schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 5; the median landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_NEAR schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 5; the median one-file landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
 # …further behind: a 24-hour forecast needs 17 × 12/24 = 8.5, so 9.
 SR_FORECAST=24h sr_world marks-late "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "M7b 4 done where the pace needs 9 (over 1.25× behind) → schedule ✖️, the bar half still within" \
-  "$SR_MARK_OVER schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 9; the median landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_OVER schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 9; the median one-file landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
 # 20% of runs discarded: waste ✖️.
 sr_world marks-waste "6 6 12 12"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
@@ -457,12 +458,12 @@ expect_eq "M9 72 idle minutes over 720 elapsed (10%) → waste ➖, the minutes 
 sr_world marks-none none
 sr_run "$SR_PLAN"
 expect_eq "M10 nothing done yet: the clock half is behind (0 where 4 are needed) → ✖️, and the bar still prints with its number" \
-  "$SR_MARK_OVER schedule — 0 of 17 tasks done in 12 h, the forecast's pace needs 4; no landing yet against the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_OVER schedule — 0 of 17 tasks done in 12 h, the forecast's pace needs 4; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
 # …and with no forecast declared, neither half can be graded: ❔, each half saying why.
 SR_FORECAST= sr_world marks-bare none
 sr_run "$SR_PLAN"
 expect_eq "M10b no forecast declared and no landing: schedule ❔, the bar still on the line" \
-  "$SR_MARK_NONE schedule — the clock cannot be graded, the plan declares no forecast; no landing yet against the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_NONE schedule — the clock cannot be graded, the plan declares no forecast; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
 
 # ============================================================
 section "§CLOCK: the schedule mark reads the clock, tasks done since the Step-3 approval against the pace the plan's forecast: needs, ✅ at or ahead, ➖ within 1.25× behind, ✖️ further; the median landing against the 15-minute bar beside it; the declared sizes feed nothing of the mark"
@@ -475,7 +476,7 @@ expect_eq "CK0 precondition: 39 tasks, 4 done, read by the Completion" "- 4 of 3
 SR_CK1="$(sr_ind schedule)"
 SR_CK1_PACE="$(sr_line '- The pace: ')"
 expect_eq "CK1 10% done after 11 hours of a 24-hour forecast: ✖️, the counts and the needed pace, the median against the 15 min bar beside it" \
-  "$SR_MARK_OVER schedule — 4 of 39 tasks done in 11 h, the forecast's pace needs 18; the median landing takes 127 min, over the 15 min bar" "$SR_CK1"
+  "$SR_MARK_OVER schedule — 4 of 39 tasks done in 11 h, the forecast's pace needs 18; the median one-file landing takes 127 min, over the 15 min bar" "$SR_CK1"
 # The declared sizes change and nothing else: the mark and its line do not move. The forecast's pace line, which
 # still reads the sizes, is the proof the rewrite reached the renderer.
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 500 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
@@ -488,7 +489,7 @@ expect_eq "CK2 …and the schedule line is byte for byte what it was: the declar
 SR_FORECAST=120h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
 expect_eq "CK3 a fixture at the forecast's pace, its median under the bar: ✅" \
-  "$SR_MARK_WITHIN schedule — 4 of 39 tasks done in 11 h, the forecast's pace needs 4; the median landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_WITHIN schedule — 4 of 39 tasks done in 11 h, the forecast's pace needs 4; the median one-file landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
 # The scorecard's target is the same bar, and its schedule line is the page's, joined to one line.
 SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null)"
 expect_eq "CK4 the scorecard's widest landing prints against target < 15, the landing bar" \
@@ -502,13 +503,13 @@ section "§BAR-PLANT: planted 20-minute landings turn the indicator ✖️ with 
 sr_world bar-plant "20 20 20 20"
 sr_run "$SR_PLAN"
 expect_eq "BP1 four landings of 20 minutes, the clock at pace (4 of 17, needs 4): the median over the 15 min bar turns the indicator ✖️" \
-  "$SR_MARK_OVER schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median landing takes 20 min, over the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_OVER schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median one-file landing takes 20 min, over the 15 min bar" "$(sr_ind schedule)"
 sr_run --line "$SR_PLAN"
 expect_eq "BP2 …and the one-line form opens on it (the line: $OUT)" "yes" "$([ "${OUT#"$SR_MARK_OVER$SR_MARK_WITHIN$SR_MARK_WITHIN · "}" != "$OUT" ] && echo yes)"
 sr_world bar-near "17 17 17 17"
 sr_run "$SR_PLAN"
 expect_eq "BP3 a 17-minute median, within 1.25× of the bar: ➖" \
-  "$SR_MARK_NEAR schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median landing takes 17 min, over the 15 min bar" "$(sr_ind schedule)"
+  "$SR_MARK_NEAR schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median one-file landing takes 17 min, over the 15 min bar" "$(sr_ind schedule)"
 # One constant: a mutant tree whose lib/line.sh sets the bar to 25 moves both surfaces that read it.
 SR_MUT="$TMPROOT/mut"; mkdir -p "$SR_MUT/payload"
 cp -R "$BIONIC_HOOKS_DIR" "$SR_MUT/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_MUT/payload/scripts"
@@ -521,7 +522,7 @@ sr_run "$SR_PLAN"
 SR_MUT_SC="$(sr_poke_with "$POKER" landing-report --scorecard "$SR_PLAN")"
 POKER="$SR_KEEP_POKER"
 expect_eq "BP5 under the mutant bar of 25 the same 20-minute landings render (rc 0) and read ✅ within the 25 min bar" \
-  "0|$SR_MARK_WITHIN schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median landing takes 20 min, within the 25 min bar" "$RC|$(sr_ind schedule)"
+  "0|$SR_MARK_WITHIN schedule — 4 of 17 tasks done in 12 h, the forecast's pace needs 4; the median one-file landing takes 20 min, within the 25 min bar" "$RC|$(sr_ind schedule)"
 expect_eq "BP6 …and the scorecard's target reads it too" \
   "widest landing ready→landed: T1 20.0 min · target < 25" "$(printf '%s\n' "$SR_MUT_SC" | /usr/bin/grep '^widest landing ')"
 
@@ -605,7 +606,7 @@ expect_eq "SL2 …the run's sitrep.log gains one sitrep-grade/v1 line with the t
   "sitrep-grade/v1|at=2026-10-06T22:00:00Z|grade=C|why=the decisions line is the red one: three rounds too many" "$(cat "$SR_LOG" 2>/dev/null)"
 sr_run "$SR_PLAN"
 expect_eq "SL3 the next page heads its Score with the grade and its time, and ends the Score on the rationale, under the goals line" \
-  "Score: C (graded 3:00 PM)|$SR_MARK_NONE goals — not measured yet|- the decisions line is the red one: three rounds too many" \
+  "Score: C (graded 3:00 PM)|$SR_MARK_NONE goals — none declared|- the decisions line is the red one: three rounds too many" \
   "$(printf '%s\n' "$OUT" | sr_heads | cut -d'|' -f3)|$(sr_sect 'Score: .*' | tail -2 | sr_join)"
 sr_run grade C 'the run is going fine' "$SR_PLAN"
 expect_eq "SL4 a rationale naming no indicator line is refused (1), naming it, and the log is unchanged" \
@@ -900,5 +901,58 @@ sr_run --line "$SR_PLAN"
 expect_eq "S7 a plan with no landing: the tick prints the forms --line prints" \
   "poker: sitrep $SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · no forecast until approved|poker: sitrep $OUT" \
   "$(printf '%s\n' "$SR_T4" | /usr/bin/grep '^poker: sitrep ')|poker: sitrep $OUT"
+
+# ============================================================
+section "§GOALS: the plan's goals: lines, each read from the reader it names; reached goals collapse into the count, the rest print one line each, mark first, with their reading"
+# ============================================================
+# sr_goal_lines -> the raw page's goal lines under the goals indicator, `<mark> <theme>: <measure> — <reading>`, each
+# folded line joined back
+sr_goal_lines() { printf '%s\n' "$OUT" | awk '/^[^ ]+ goals — / { on = 1; next } on && /^   [^ ]/ { if (l != "") print l; l = substr($0, 4); next }
+  on && /^      / { sub(/^ +/, ""); l = l " " $0; next } on { exit } END { if (l != "") print l }'; }
+SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
+tests · whole run under 45 min at the approved head (the Step-5 run log)
+handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" sr_world goals "6 6 12 12"
+printf 'Gating: 9 passed, 0 failed\nWall: 3000s · work 9000s · width 4\n' > "$SR_DIR/regression-run-$SR_H.log"
+awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "G1 three goals, the one-file median of 9 min reached, the 50-minute whole run missed, the reader test unrecorded: ✖️, 1 of 3" \
+  "$SR_MARK_OVER goals — 1 of 3 reached" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')"
+expect_eq "G2 …the two not reached print one line each, mark and theme first, in the plan's order; the reached one is in the count only" \
+  "$SR_MARK_OVER tests|$SR_MARK_NONE handoff" "$(sr_goal_lines | awk -F': ' '{ print $1 }' | sr_join)"
+expect_eq "G3 …the missed goal's line carries the reading its reader took, 50 min" \
+  "50 min" "$(sr_goal_lines | /usr/bin/grep ' tests: ' | sed 's/.* — //' | /usr/bin/grep -oE '[0-9]+ min')"
+printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
+sr_run "$SR_PLAN"
+expect_eq "G4 a reader-test record that passes flips its goal: 2 of 3 reached, and only the missed goal still prints" \
+  "$SR_MARK_OVER goals — 2 of 3 reached|$SR_MARK_OVER tests" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')|$(sr_goal_lines | awk -F': ' '{ print $1 }' | sr_join)"
+
+# ============================================================
+section "§GOAL-MISS: the first landing that misses a goal makes the tick open decide:goal:<theme> on the person's ledger, once"
+# ============================================================
+SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
+handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" SR_APPROVED=none sr_tick_world goal-miss "20 20 20 20"
+SR_OWED_F="$SR_REPO/.bionic/tmp/owed-$SID.state"
+sr_tick
+expect_eq "GM1 four 20-minute one-file landings miss the 15-minute goal: the tick opens decide:goal:fast-landings, and nothing for the unmeasured goal" \
+  "decide:goal:fast-landings" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' "$SR_OWED_F" 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
+expect_eq "GM2 …it is owed: the tick's sitrep line counts it" "owed: 1" \
+  "$(/usr/bin/grep '^poker: sitrep ' "$TMPROOT/tick.out" | /usr/bin/grep -oE 'owed: [0-9]+')"
+sed 's/^owed\/v1|key=decide:goal:fast-landings|state=open|.*/owed\/v1|key=decide:goal:fast-landings|state=closed|by=ruled|at=2026-10-06T22:00:30Z/' "$SR_OWED_F" > "$SR_OWED_F.t" && mv "$SR_OWED_F.t" "$SR_OWED_F"
+SR_AT=$((SR_NOW + 60)) sr_tick
+expect_eq "GM3 once the person has ruled, a later tick on the same miss opens nothing again: the key closed, none open" "1|0" \
+  "$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=closed|' "$SR_OWED_F")|$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=open|' "$SR_OWED_F")"
+
+# ============================================================
+section "§ONE-FILE: the schedule's bar half and the one-file goal read the one-file landings only; a landing of more files moves neither"
+# ============================================================
+SR_GOALS="fast landings · one-file median under 5m (landing-report --rows)" sr_world one-file "90 90 10 10"
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[12] $/ { $11 = " lib/t1.sh, lib/x.sh " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file landings: the schedule mark reads 10 min, ✅ within the bar" \
+  "$SR_MARK_WITHIN|10 min" "$(sr_ind schedule | awk '{ print $1 }')|$(sr_ind schedule | /usr/bin/grep -oE 'takes [0-9]+ min' | sed 's/^takes //')"
+expect_eq "OF2 …and the one-file goal reads 10 min against its 5-minute target" \
+  "10 min" "$(sr_goal_lines | /usr/bin/grep ' fast landings: ' | sed 's/.* — //' | /usr/bin/grep -oE '[0-9]+ min')"
+
 
 finish

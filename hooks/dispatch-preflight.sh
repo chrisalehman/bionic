@@ -1867,6 +1867,9 @@ C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
+# `Deliverable-waiver: none` waives nothing: the word answers the scaffold's line, it gives no reason, so the row
+# carries no waiver and a declared artifact beside it is no contradiction for the sweeper to report.
+case "$(printf '%s' "$C_WAIVER" | tr '[:upper:]' '[:lower:]')" in none|none.) C_WAIVER="" ;; esac
 C_DONE=$(sanitize "$(field_of done)" 300)   # the Done marker (wave-24 T9, D3); on the row only when declared
 # THE THREE INSTRUMENT FIELDS, READ THROUGH THE GRAMMAR (wave-20 T6; REQ-4, D4, Δ10).
 # `brief_field` (payload/scripts/lib/brief.sh) bounds each kind as the roster row stores it —

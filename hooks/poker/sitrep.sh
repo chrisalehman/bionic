@@ -468,8 +468,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # ratio, the marks, a red not yet answered by a green, the close.
 #
 # THE MARKS ENCODE DEVIATION FROM A TOLERANCE, never a work state: a measurement held against its bar is ✅ within
-# it, ➖ near it, ✖️ over it, or ❔ not measurable, and its line says the bar in words. The decisions and goals lines
-# print their no-record form until a reader of rounds and one of goals exist.
+# it, ➖ near it, ✖️ over it, or ❔ not measurable, and its line says the bar in words. The decisions line prints its
+# no-record form until a reader of rounds exists. The goals line is `sitrep_goals`'.
 #
 # THE CLOSE: now + max(the longest open chain, all open work ÷ the admitted count) × the measured pace, so admitting
 # more can shorten the work's share and never one chain. The pace is this run's median landing over its median
@@ -589,14 +589,14 @@ sitrep_bar() {
   printf '%s\n' "$LINE_LANDING_BAR"
 }
 
-# sitrep_schedule <plan> <done> <total> <now epoch> <median ready→landed | empty> -> `<mark><TAB><text>`, the
+# sitrep_schedule <plan> <done> <total> <now epoch> <median one-file ready→landed | empty> -> `<mark><TAB><text>`, the
 # schedule line after its mark. Two halves, each against a bar the run cannot set for itself:
 #   the clock  tasks done in the time since the plan's `approved-by:` instant (the Step-3 approval) against the
 #              tasks its frontmatter `forecast: <n>h|<n>m` needs by now, total × elapsed/forecast rounded, never
 #              above total: done ≥ needed within, needed ≤ 1.25 × done near, else over; not graded with no
 #              approval instant or no forecast.
-#   the bar    the median landing against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else over;
-#              unmeasured before the first landing.
+#   the bar    the median one-file landing against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else
+#              over; unmeasured before the first one-file landing. A landing of more files is not graded here.
 # The mark is the worse half, ranked over ✖️ > ➖ > ❔ > ✅, so an unmeasured half never reads within.
 sitrep_schedule() {
   local plan="$1" landed="$2" total="$3" now="$4" med="$5" appr fc bar clock cg bg bt k em
@@ -615,11 +615,11 @@ sitrep_schedule() {
     clock="$landed of $total tasks done in $(sitrep_dur "$em"), the forecast's pace needs $k"
   fi
   bar="$(sitrep_bar)"
-  if [ -z "$med" ]; then bg=n; bt="no landing yet against the ${bar:-unverified} min bar"
-  elif [ -z "$bar" ]; then bg=n; bt="the median landing takes $(sitrep_ratio_fmt "$med") min; the bar is unverified"
+  if [ -z "$med" ]; then bg=n; bt="no one-file landing yet against the ${bar:-unverified} min bar"
+  elif [ -z "$bar" ]; then bg=n; bt="the median one-file landing takes $(sitrep_ratio_fmt "$med") min; the bar is unverified"
   else
     bg="$(awk -v m="$med" -v b="$bar" 'BEGIN { print (m <= b) ? "w" : ((m <= 1.25 * b) ? "a" : "o") }')"
-    bt="the median landing takes $(sitrep_ratio_fmt "$med") min, $([ "$bg" = w ] && echo within || echo over) the ${bar} min bar"
+    bt="the median one-file landing takes $(sitrep_ratio_fmt "$med") min, $([ "$bg" = w ] && echo within || echo over) the ${bar} min bar"
   fi
   case "$cg$bg" in
     *o*) printf '%s' "$SITREP_MARK_OVER" ;;
@@ -705,6 +705,19 @@ sitrep_reds() {
 }
 
 # sitrep_render <plan> <root> <line yes|no> -> the page, or with `yes` the one line; rc 0
+# sitrep_goals <plan> <landing record> <landing report with rows> -> the goals indicator as fold lines: `goals — <r> of
+# <n> reached`, ✅ when all are, ✖️ when one is missed, else ❔; then one line per goal not reached, its mark, theme,
+# measure and reading (lib/plan.sh `plan_goals_read`), so a reached goal is in the count only. `goals — none
+# declared`, ❔, for a plan with no goals: line.
+sitrep_goals() {
+  local g
+  g="$(plan_goals_read "$1" "$2" "$3")"
+  if [ -z "$g" ]; then printf '3\t%s goals — none declared\n' "$SITREP_MARK_NONE"; return 0; fi
+  printf '%s\n' "$g" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
+    { n++; if ($1 == "reached") r++; else { if ($1 == "missed") miss = 1; k++; l[k] = "6\t   " (($1 == "missed") ? O : N) " " $2 ": " $3 " — " $4 } }
+    END { printf "3\t%s goals — %d of %d reached\n", (r == n) ? W : (miss ? O : N), r, n; for (i = 1; i <= k; i++) print l[i] }'
+}
+
 sitrep_render() {
   local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
   local s_mark s_text c_mark c_text w_mark w_text ty gl lab desc kind note glyph
@@ -716,16 +729,14 @@ sitrep_render() {
   rec="$(_wt_proofs_path "$root" "$plan")"
   rows="$(units_rows "$plan" 2>/dev/null)"
   # What the person owes: the four kinds that are theirs, from the stores of the sessions bound to this plan.
-  owed="$( { owed_list_plan "$plan" "$root" 2>/dev/null || :; } | awk -F'\t' '$1 ~ /^(approve|waive|finding|gate):/')"
+  owed="$( { owed_list_plan "$plan" "$root" 2>/dev/null || :; } | awk -F'\t' '$1 ~ /^(approve|waive|finding|gate|decide):/')"
   approvals="$(printf '%s\n' "$owed" | awk -F'\t' 'index($1, "approve:") == 1 { print substr($1, 9) }')"
   reds="$(sitrep_reds "$rec")"
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
   nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
   lr="$(landing_report "$rec" "$root" yes 2>/dev/null)"; lr1="${lr%%$'\n'*}"
-  # the median ready→landed, landing_report's own figure, once a queue landing is measured (its lines say so)
-  if printf '%s\n' "$lr" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") f = 1 } END { exit !f }'; then
-    lmed="${lr1#*ready-to-landed median=}"; lmed="${lmed%%m *}"
-  fi
+  # the schedule's bar half reads the one-file landings alone (lib/plan.sh), so a landing of many files moves it not
+  lmed="$(plan_one_file_median "$plan" "$lr")"; lmed="${lmed%%	*}"
   appr_at="$(sitrep_approved_at "$plan")"
   dlv_at="$(sitrep_delivered_at "$plan")"
   cur="$(awk '/^[[:space:]]*```/ { f = !f; next } !f && /^[[:space:]]*current[[:space:]]*:/ { s = $0; sub(/^[^:]*:[ \t]*/, "", s); sub(/[^0-9].*$/, "", s); print s; exit }' "$plan")"
@@ -1090,7 +1101,8 @@ SITREP_OWED
 $sit
 SITREP_SIT
     printf '0\t\n0\t%s\n' "$gh"
-    printf '3\t%s\n' "$s_text" "$c_text" "$w_text" "$SITREP_MARK_NONE decisions — rounds not counted yet" "$SITREP_MARK_NONE goals — not measured yet"
+    printf '3\t%s\n' "$s_text" "$c_text" "$w_text" "$SITREP_MARK_NONE decisions — rounds not counted yet"
+    sitrep_goals "$plan" "$rec" "$lr"
     [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
     printf '0\t\n0\tBlocked on you\n'
     if [ -n "$blk" ]; then printf '%s' "$blk"; else printf '2\t- Nothing: no decision or action is owed by you.\n'; fi
@@ -1830,11 +1842,6 @@ sitrep_grade() {
       END { for (i = 1; i <= n; i++) print "owned-by-user: approval:" ord[i] " — " ids[ord[i]] " wait on it; record it: approve " ord[i] " '"'"'<the user'"'"'s words>'"'"'" }')"
     RS_OWN="$(printf '%s\n%s\n' "$RS_OWN" "$RS_APPR" | awk 'NF')"
     if [ -n "$RS_OWN" ]; then printf '%s\n' "$RS_OWN"; else printf 'owned-by-user: none — nothing waits on you\n'; fi
-    # The user's standing orders (wave-38 T18; REQ-7 AC-7.1, D17): every item of config.yaml's standing-orders:,
-    # in config order, through its one reader (lib/roots.sh `config_section`); none printed when there are none.
-    while IFS= read -r RS_ORDER; do
-      [ -z "$RS_ORDER" ] || printf 'standing-order: %s\n' "$RS_ORDER"
-    done <<< "$(config_section "$REPO_REAL" standing-orders 2>/dev/null)"
     RS_BR="$(handoff_line "$RS_FILE" "working branch")"
     [ -n "$RS_BR" ] || RS_BR="$(handoff_line "$RS_FILE" branch)"
     printf '%s\n' "${RS_BR:-branch: (the file names none)}"

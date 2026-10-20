@@ -539,27 +539,6 @@ elif [ "$N" -ge 2 ]; then
   fi
 fi
 
-# THE STANDING ORDERS (wave-38 T18; REQ-7 AC-7.1; design ledger Δ10, D17). Each item of `standing-orders:` in
-# .bionic/config.yaml is the user's standing answer, so an engaged start prints every one, in config order, as
-# `bionic: standing order — <item>`, after the bind/door lines and before the arm line: the model reads what has
-# already been decided before it asks. Read by its one reader (lib/roots.sh `config_section`, pure bash, no fork,
-# soft-sourced by run.sh); nothing when there are none. An item whose `refuse:` names no command class is a config
-# error said here, once per start, beside the order: the Bash wall enforces it never (A-T18-3). An unengaged
-# session prints none, as the walls do not arm for it.
-if [ "$BIONIC_ENGAGED" = 1 ] && declare -F config_section >/dev/null 2>&1; then
-  while IFS= read -r SS_ORDER; do
-    [ -n "$SS_ORDER" ] || continue
-    printf 'bionic: standing order — %s\n' "$SS_ORDER"
-    standing_order_split "$SS_ORDER"
-    if [ "$STANDING_ORDER_REFUSES" = 1 ] && ! standing_order_class_known "$STANDING_ORDER_CLASS"; then
-      printf 'bionic: standing order config error — refuse: %s is not a command class (%s); it is not enforced\n' \
-        "${STANDING_ORDER_CLASS:-(empty)}" "${STANDING_ORDER_CLASSES// /, }"
-    fi
-  done <<SS_ORDERS
-$(config_section "$BIONIC_ROOT" standing-orders 2>/dev/null)
-SS_ORDERS
-fi
-
 AGREE="agree"
 _first=""
 for _v in "$ENV_SID" "$PAYLOAD_SID" "$PID_SID"; do

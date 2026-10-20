@@ -225,15 +225,21 @@ expect_true "SHAPE-15 AC-13.4 the skill says the page is shown whole in one fenc
   /usr/bin/grep -q 'review results page.*whole, in one fenced block' "$FC_SK/steps/6.md"
 expect_true "SHAPE-15b …and close-out shows it the same way" /usr/bin/grep -q 'review results page' "$FC_SK/steps/9.md"
 
-# ---------- goals declared, none measured ----------
+# ---------- goals declared: each read by the one goals reader the sitrep reads ----------
 fc_plan "$FC_GOOD" '/^release: 1.0.0$/a\
-goals: fast landings · one-file median under 15m (landing-report --rows) ; pages · a fresh agent answers four questions (reader-test.md)'
+goals: fast landings · one-file median under 15m (landing-report --rows) ; pages · a fresh agent answers four questions (record/reader-test.md)'
 fc_page --preview
-expect_eq "SHAPE-16 declared goals with no reader of them: each one ❔ with its measure" \
+expect_eq "SHAPE-16 declared goals with nothing measured: each one ❔ with its measure and what its reader found" \
   "Goals — 0 of 2 reached
-❔ fast landings — one-file median under 15m, not measured yet
-❔ pages — a fresh agent answers four questions, not measured yet" \
+❔ fast landings — one-file median under 15m, no one-file landing yet
+❔ pages — a fresh agent answers four questions, no record yet" \
   "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals'; fc_under Goals)"
+printf '# reader test\n\nverdict: pass\n' > "$FC_REC/reader-test.md"
+fc_page --preview
+expect_eq "SHAPE-16b a reader-test record that passes flips its goal: 1 of 2 reached, the other still ❔, both in the plan's order" \
+  "Goals — 1 of 2 reached|❔ fast landings|✅ pages" \
+  "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_under Goals | awk -F' — ' '{ print $1 }' | tr '\n' '|' | sed 's/|$//')"
+rm -f "$FC_REC/reader-test.md"
 
 # ============================================================
 section "§TRIGGERS: a finding is a decision only on a criterion miss or a recommendation against the default (AC-13.2; D7)"

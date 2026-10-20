@@ -1013,6 +1013,12 @@ proof_attested() {
     fi
     if [ -n "$plan" ] && [ "$kind" = review ]; then
       since="$(proof_last "$plan" review "$q")"; what="the last ${q:-review} proof"
+      # THE USER'S WAIVER IS A LINK OF THE CHAIN: a waiver of the question later than its last reading holds it up to
+      # the head it names, so the next reading starts there (`proof_chain_head`), as the judge's chain does.
+      if [ -n "$q" ]; then
+        sh="$(proof_chain_head "$plan" "$q")"
+        case "$sh" in *" waiver") since="${sh% *}"; what="the user's $q waiver at" ;; esac
+      fi
       [ -n "$since" ] || { since="$(proof_plan_base "$plan" "$co")"; what="the plan's base"; }
       sh=""
       if [ -n "$since" ] && { [ "$what" != "the plan's base" ] || proof_base_id "$since"; }; then
@@ -1460,6 +1466,30 @@ proof_last() {
 # refusal quotes when it names the proof it read (head and evidence), so no caller parses the plan.
 proof_last_line() {
   _proof_last_read "$1" "$2" line "${3:-}"
+}
+
+# proof_chain_head <plan> <question> -> `<head> proof` or `<head> waiver`: the question's newest link in the plan's
+# unfenced `## SDLC State`, its last review proof or the user's last `waived: question=<question>` line, whichever is
+# later in the section (a line's place is its age, `proof_add_line`); nothing when it has neither. A waiver's head is
+# read as the judge's chain reads it (`facts_state`): 7 to 40 hex, before the line's `by`.
+proof_chain_head() {
+  [ -f "${1:-}" ] && [ -n "${2:-}" ] || return 0
+  _proof_run_load
+  plan_lines "$1" | awk -v q="$2" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION == q { h = PROOF_HEAD; w = "proof"; next }
+    /^waived:[ \t]/ {
+      m = split($0, f, /[ \t]+/); wq = ""; wh = ""
+      for (i = 2; i <= m && f[i] != "by"; i++) {
+        if (f[i] ~ /^question=/) wq = substr(f[i], 10)
+        else if (f[i] ~ /^head=/) wh = substr(f[i], 6)
+      }
+      if (wq == q && wh ~ /^[0-9a-f]+$/ && length(wh) >= 7 && length(wh) <= 40) { h = wh; w = "waiver" }
+    }
+    END { if (h != "") print h " " w }'
 }
 
 # proof_floor_absent <plan> -> the judge's words for a plan with no floor proof, `no regression proof on this
@@ -2481,6 +2511,23 @@ PROOF_DOCS_FILES
 # lines unprinted.
 _facts_holds() {
   _facts_walk "$@" >/dev/null
+}
+
+# proof_prose_past <plan> <from> <to> -> exit 0 when <from> is on <to>'s first-parent line and nothing an approval at
+# <from> covers changed after it: every later commit is prose by the walk's basis (`_facts_walk`, no born landing, no
+# release check) and no path differs between the two in the release set (`_proof_release_path`), so the release the
+# user approved is the one at <to>. Exit 1 otherwise, or when the plan or either head cannot be read.
+proof_prose_past() {
+  local plan="${1:-}" tree f
+  [ -f "$plan" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ] || return 1
+  tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  _proof_roots_load
+  _facts_holds "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" || return 1
+  while IFS= read -r f; do
+    [ -z "$f" ] || ! _proof_release_path "$f" || return 1
+  done <<PROOF_PROSE_PAST
+$(git -C "$tree" diff --no-renames --name-only "$2" "$3" 2>/dev/null)
+PROOF_PROSE_PAST
 }
 
 # facts_cover <plan> <from> <to> [<question>] -> THE JUDGE'S BASIS (AC-3.3): one `cover <sha> prose|release|born-review|
