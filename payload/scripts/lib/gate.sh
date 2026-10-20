@@ -1009,6 +1009,66 @@ gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's li
   return 75
 }
 
+# ── THE ORDER: THE USER'S WORDS STOP EVERY SUITE ─────────────────────────────────────────────
+#
+# An order is what the user said, recorded by the poker's `order` verb as one line, and ended by
+# `order lift` with another:
+#
+#   order: given <ISO-UTC> "<words>"
+#   order: lifted <ISO-UTC> "<words>"
+#
+# under the bound plan's `## SDLC State`, or, with no run bound, in record/orders.log under the docs
+# root. The newest line decides: a `given` line is an open order. tests/run.sh asks gate_order before
+# it starts anything and, while an order is open, refuses with the user's words. Who runs it does not
+# matter: the plan read is the asking session's bound run, else the project's one open run, so a shell
+# with no session key is refused by the same order; the log is read when no plan holds an open one.
+#
+# gate_order_of <file> [plan] -> the open order's `given <ISO-UTC> "<words>"`, rc 0; rc 1 when none.
+#   With `plan`, only the lines under `## SDLC State` count, outside code fences.
+# gate_order [<root>] -> the open order, as gate_order_of prints it, rc 0; rc 1 when none. The root
+#   defaults to the project the working directory belongs to (lib/root.sh `project_root`, so a linked
+#   tree reads its main checkout's run).
+gate_order_of() {
+  [ -f "${1:-}" ] && [ -r "$1" ] || return 1
+  awk -v plan="${2:-}" '
+    plan != "" && /^[[:space:]]*```/ { fence = !fence; next }
+    plan != "" && fence { next }
+    plan != "" && /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    plan != "" && !s { next }
+    /^order:[ \t]+(given|lifted)[ \t]/ { last = $0 }
+    END {
+      if (last !~ /^order:[ \t]+given[ \t]/) exit 1
+      sub(/^order:[ \t]+/, "", last); print last
+    }' "$1" 2>/dev/null
+}
+
+_gate_order_libs() {  # -> 0 once project_root, session_run and docs_root are loaded
+  local f
+  for f in root.sh run.sh; do
+    case "$f" in
+      root.sh) declare -F project_root >/dev/null 2>&1 && continue ;;
+      run.sh) declare -F session_run >/dev/null 2>&1 && declare -F docs_root >/dev/null 2>&1 && continue ;;
+    esac
+    # shellcheck disable=SC1090
+    [ -r "$_GATE_LIB_DIR/$f" ] && . "$_GATE_LIB_DIR/$f" >/dev/null 2>&1
+  done
+  declare -F project_root >/dev/null 2>&1 && declare -F session_run >/dev/null 2>&1 && declare -F docs_root >/dev/null 2>&1
+}
+
+gate_order() {
+  local root="${1:-}" run plan=""
+  _gate_order_libs || return 1
+  [ -n "$root" ] || root="$(project_root "$PWD")"
+  root="$(cd "$root" 2>/dev/null && pwd -P)" || return 1
+  run="$(session_run "$root" "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null)"
+  case "$run" in
+    'bound-open '*) plan="${run#bound-open }" ;;
+    'fallback '*) plan="${run#fallback }" ;;
+  esac
+  [ -z "$plan" ] || ! gate_order_of "$plan" plan || return 0
+  gate_order_of "$(docs_root "$root")/record/orders.log"
+}
+
 # ── THE TERM TRAP (wave-38 T5; AC-6.2; ADR-060) ──────────────────────────────────────────────
 #
 # The drain stops a runner with TERM to it and to its descendants (line.sh `_line_kill_tree`). One

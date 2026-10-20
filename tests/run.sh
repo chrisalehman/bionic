@@ -366,6 +366,17 @@ if [ "$WRITE_TIMING" -eq 1 ] && { [ "$ONLY" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; }; 
   exit 2
 fi
 
+# THE USER'S ORDER. While the user's order stands (lib/gate.sh `gate_order`, THE ORDER), no suite
+# starts, in any mode and whoever runs this: the refusal prints the user's words, and only the user
+# lifts it. A dry run starts nothing and is not refused.
+if [ "$DRY_RUN" -eq 0 ] && _gate_load && declare -F gate_order >/dev/null 2>&1 && _order="$(gate_order "$REPO")"; then
+  _order_words="${_order#*\"}"; _order_words="${_order_words%\"}"
+  _order_at="${_order#given }"; _order_at="${_order_at%% *}"
+  echo "tests/run.sh: refused — the user's order stands: \"${_order_words}\" (given ${_order_at}). Nothing was run."
+  echo "tests/run.sh: only the user lifts it, in their own words; ask the user."
+  exit 1
+fi
+
 # ── THE ROSTER IS THE DIRECTORY (fixit 1.5.1; design D-1, AC-3/AC-4/AC-5) ────
 #
 # ONE PRODUCER OF "GATING". The glob is expanded HERE and nowhere else in this
