@@ -533,7 +533,6 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #                      <mark> schedule, correctness, waste, decisions, goals — what each measured, in words; then
 #                      `- <rationale>` when graded
 #   Blocked on you     one bullet per open approve:, waive:, finding: or gate: item of the plan's run
-#   Completion         the steps done of nine; the tasks done of all, with the percent
 #   Predicted close    the close and its basis, or why there is none
 #
 # and `--line` prints only `<schedule><correctness><waste marks> · owed: <n> · <the close>`.
@@ -1141,11 +1140,10 @@ SITREP_OWED
   b_done="${sp}${sp:+${tp:+; }}${tp}"; b_done="Done: ${b_done:-nothing yet}."
 
   # ---- the page, each line with its continuation indent, folded at 92 columns
-  local proj title_rel steps_done gh grade_at grade_g grade_why gline
+  local proj title_rel gh grade_at grade_g grade_why gline
   proj="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
   case "$proj" in */.git) proj="${proj%/.git}"; proj="${proj##*/}" ;; *) proj="${root##*/}" ;; esac
   title_rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"
-  steps_done="${cur:-0}"; [ -z "$dlv_at" ] || steps_done=9; [ "$steps_done" -le 9 ] || steps_done=9
   gline=""
   if [ -f "$recdir/sitrep.log" ] && [ ! -L "$recdir/sitrep.log" ]; then
     gline="$(awk 'index($0, "sitrep-grade/v1|at=") == 1 { l = $0 } END { print l }' "$recdir/sitrep.log")"
@@ -1183,9 +1181,6 @@ SITREP_SIT
     [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
     printf '0\t\n0\tBlocked on you\n'
     if [ -n "$blk" ]; then printf '%s' "$blk"; else printf '2\t- Nothing: no decision or action is owed by you.\n'; fi
-    printf '0\t\n0\tCompletion\n2\t- %s of 9 steps.\n' "$steps_done"
-    if [ "$total" -gt 0 ]; then printf '2\t- %d of %d tasks done (%d%%).\n' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) ))
-    else printf '2\t- No tasks defined yet; the plan is not written.\n'; fi
     printf '0\t\n0\tPredicted close\n'
     for k in "$@"; do printf '2\t- %s\n' "$k"; done
   } | sitrep_fold

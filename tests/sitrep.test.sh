@@ -701,8 +701,8 @@ awk '{ print } /^✅ 4\/T4: / { print "✅ 4/T18: Shipped early (7:30 AM)" }' "$
 expect_true "FA2 the plant is in the copy" grep -q '^✅ 4/T18: ' "$TMPROOT/bad.txt"
 expect_eq "FA3 …a planted task the verb never printed: refused, naming it" "fact: > ✅ 4/T18: Shipped early (7:30 AM)" \
   "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-sed 's/^- 4 of 17 tasks done (24%)\.$/- 5 of 17 tasks done (29%)./' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_regex "FA4 …a rendered line altered (the counts): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
+sed '/^- Done: /s/4 of 17 tasks/5 of 17 tasks/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
+expect_regex "FA4 …a rendered line altered (the Done line's count): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 awk '{ print } index($0, "- It assumes ") == 1 { print "- the release ships tonight" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
 expect_eq "FA5 …an unlabelled claim appended to Predicted close: refused on the fact" "fact: > - the release ships tonight" \
   "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"

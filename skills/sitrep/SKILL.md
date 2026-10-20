@@ -8,7 +8,7 @@ loading: deferred
 
 # Sitrep
 
-The situation report: what you owe, what is next, what is done and when it closes, then every task, the run's score, what is blocked on you, the completion and the predicted close. The verb prints every fact on the page. This skill writes one thing, the grade and its rationale, and the verb records it and prints it.
+The situation report: what you owe, what is next, what is done and when it closes, then every task, the run's score, what is blocked on you and the predicted close. The verb prints every fact on the page. This skill writes one thing, the grade and its rationale, and the verb records it and prints it.
 
 Typed as `/bionic:sitrep` with no argument, it reports on this session's bound run. With an argument, it reports on the plan named (absolute, project-relative or docs-root-relative).
 
@@ -61,10 +61,6 @@ Score: <grade> (graded <time>)
 
 Blocked on you
 - <what to do>: <what waits on it>
-
-Completion
-- <n> of 9 steps.
-- <k> of <m> tasks done (<p>%).
 
 Predicted close
 - <the close, its basis and the pace, or why there is none>
