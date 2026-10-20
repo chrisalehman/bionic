@@ -931,4 +931,27 @@ expect_eq "(o2) both land, T2 then T1" "0 0 T2 T1" \
   "$(cat "$WORLD_ROOT/o2-T2.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/o2-T1.out.rc" 2>/dev/null) $(ll_ev "$RO2" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------------------------------------------------------------------------
+section "§LINT: a comment that cites the run is refused at its line, and one that cites a tracked docs path is accepted"
+#
+# The landing line reads the comments a candidate adds to a shell file under payload/ and refuses one that names a wave
+# or a record path, printing the file, the line and the shapes. A tracked docs path names no shape.
+# fails-when: a planted citation is not named by its file and line, or the tracked-path comment is named.
+LN_REPO="$WORLD_ROOT/lint-repo"
+mkdir -p "$LN_REPO/payload/scripts"
+git -C "$LN_REPO" init -q && git -C "$LN_REPO" config user.name lint && git -C "$LN_REPO" config user.email lint@example.invalid
+printf '%s\n' '#!/bin/bash' 'echo one' > "$LN_REPO/payload/scripts/a.sh"
+git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm base
+LN_BASE="$(git -C "$LN_REPO" rev-parse HEAD)"
+printf '%s\n' '# reads .bionic/docs/record/x.md' '# started in wave-39 T5' >> "$LN_REPO/payload/scripts/a.sh"
+git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm cited
+LN_CITED="$(git -C "$LN_REPO" rev-parse HEAD)"
+LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_BASE" "$LN_CITED")"; LN_RC=$?
+expect_eq "(ln1) a comment citing a record path, and one naming a wave, are refused at their lines: rc 1, each named" \
+  "1|payload/scripts/a.sh:3 record-path|payload/scripts/a.sh:4 wave" "$LN_RC|$(printf '%s\n' "$LN_OUT" | paste -sd'|' -)"
+printf '%s\n' '# see docs/adrs/adr-001.md' >> "$LN_REPO/payload/scripts/a.sh"
+git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm tracked
+LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_CITED" "$(git -C "$LN_REPO" rev-parse HEAD)")"; LN_RC=$?
+expect_eq "(ln2) a comment citing a tracked docs path is accepted: rc 0, nothing named" "0|" "$LN_RC|$LN_OUT"
+
+# ---------------------------------------------------------------------------
 finish
