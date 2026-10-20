@@ -437,7 +437,7 @@ sed 's/floor-body/floor-body-edited/' "$RL_LOG" > "$RL_LOG.tmp" && mv "$RL_LOG.t
 RL_EDIT="$(rl_judge "$RL_PROOF" "$RL_LOG")"
 expect_contains "BR-5 AC-6.1 the log edited after its run is refused (exit 1)…" "1|" "${RL_EDIT%%|*}|"
 RL_MUT="$D/rl-mutlib"; rm -rf "$RL_MUT"; cp -R "$REPO/payload/scripts/lib" "$RL_MUT"
-sed 's/s == h \&\& fv("head")/fv("head")/' "$RL_PROOF" > "$RL_MUT/proof.sh"
+sed 's/s == h \&\& line_kv("head") == hd/line_kv("head") == hd/' "$RL_PROOF" > "$RL_MUT/proof.sh"
 expect_false "BR-mut0 the mutant differs from the reader (its hash comparison dropped)" cmp -s "$RL_PROOF" "$RL_MUT/proof.sh"
 expect_eq "BR-mut1 …and still runs: it accepts the unedited copy as the reader does" \
   "0|$RL_H|$RL_AT $RL_H 0" "$(rl_judge "$RL_MUT/proof.sh" "${RL_RECORD%/*}/booked-floor.log")"
