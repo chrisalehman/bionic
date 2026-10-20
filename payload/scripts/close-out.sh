@@ -1585,8 +1585,10 @@ STEP9
 # line, the title, the sections in their order, the door last. Its State is the closed run's, and its two closed
 # lines are `closed-form`'s, the branch line under the verb's `working branch:` label. A section a session composed
 # into that document before the close is kept as it stands, title included; a section it lacks is the one line
-# `- none.`. The page is not folded: every reader joins a folded line back, so a long line reads the same. The plan's
-# section becomes the one pointer line `handoff: <path> written <local time>`.
+# `- none.`. A file of the old shape (the kind line, then facts and five human lines) is carried whole: mid-flight and
+# risks into Open, order into Next, rulings into Decisions, lessons into Findings, every other line into State after
+# the closed run's own, a line under a key State writes itself marked `was`. The page is not folded: every reader
+# joins a folded line back, so a long line reads the same. The plan's section becomes the one pointer line `handoff: <path> written <local time>`.
 CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
   [ -z "$CO_HO_FILE" ] || return 0
@@ -1610,13 +1612,14 @@ co_handoff_closed() {  # -> 0 when the handoff document's resume point is the cl
   return 1
 }
 co_handoff_write() {  # -> writes the closed document to the handoff file, a session's sections kept; rc 1 not written
-  local src=/dev/null title="" tmp
+  local src=/dev/null title="" tmp old=0
   co_handoff_where
   mkdir -p "${CO_HO_FILE%/*}" 2>/dev/null || return 1
   [ ! -L "$CO_HO_FILE" ] || return 1
   if [ -f "$CO_HO_FILE" ] && [ "$(sed -n 1p "$CO_HO_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
     title="$(sed -n '2{/^Handoff · /p;}' "$CO_HO_FILE" 2>/dev/null)"
-    [ -z "$title" ] || src="$CO_HO_FILE"
+    src="$CO_HO_FILE"
+    [ -n "$title" ] || old=1
   fi
   [ -n "$title" ] || title="Handoff · ${ROOT##*/} · $(date '+%A %-I:%M %p') · $WAVE_SLUG · closed"
   tmp="$CO_HO_FILE.close-out.$$"
@@ -1625,17 +1628,44 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
     CO_HO_STATE="$(printf 'written: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
         "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
         "$CONT_REL" "$PATROL_LINE")" \
-      awk -v secs="$HANDOFF_SECTIONS" '
-        BEGIN { n = split(secs, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1 }
-        FNR <= 2 { next }
+      awk -v secs="$HANDOFF_SECTIONS" -v old="$old" '
+        BEGIN {
+          n = split(secs, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1
+          # an old-shape file: its five human lines go to the section that holds their kind of thing
+          M["mid-flight"] = "Open"; M["order"] = "Next"; M["rulings"] = "Decisions"; M["lessons"] = "Findings"; M["risks"] = "Open"
+          # the keys the closed State writes itself: an old line under one of them is kept, marked "was"
+          K["written"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
+        }
+        FNR == 1 { next }
+        old {
+          L[++ln] = $0; next
+        }
+        FNR == 2 { next }
         ($0 in H) { cur = $0; next }
         $0 == "" { cur = ""; next }
         cur != "" { B[cur] = B[cur] $0 "\n" }
         END {
+          if (old) {
+            if (ln > 0 && L[ln] ~ /^\/bionic:canonical-sdlc /) ln--
+            for (j = 1; j <= ln; j++) {
+              t = L[j]
+              if (t == "") continue
+              if (t ~ /^ / && mode != "") {
+                if (mode == "h") { sub(/^ +/, "", t); I[tgt] = I[tgt] " " t } else X = X "\n" t
+                continue
+              }
+              key = t; mode = "m"
+              if (match(t, /^[^ :][^:]*:( |$)/)) key = substr(t, 1, RLENGTH - 1); sub(/:$/, "", key)
+              if (key in M) { mode = "h"; tgt = ++nh; S[nh] = M[key]; I[nh] = "- " t; continue }
+              if (key in K) t = "was " t
+              X = X (X == "" ? "" : "\n") t
+            }
+            for (j = 1; j <= nh; j++) B[S[j]] = B[S[j]] I[j] "\n"
+          }
           for (i = 1; i <= n; i++) {
             if (h[i] == "Resume") break
             print h[i]
-            if (h[i] == "State") print ENVIRON["CO_HO_STATE"]
+            if (h[i] == "State") { print ENVIRON["CO_HO_STATE"]; if (X != "") print X }
             else if (B[h[i]] != "") printf "%s", B[h[i]]
             else print "- none."
             print ""
