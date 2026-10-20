@@ -1453,7 +1453,8 @@ gate_landing_close() {
 #          s starts at the processor promises of the admitted runs plus PROMISE for each waiting
 #          landing request (the order serves those before any new landing ask); a run counts
 #          while max(_res_busy_cores, s) + PROMISE ≤ share × cores ÷ 100, and each one counted
-#          adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost. Nothing counts
+#          adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost, above 0, so the
+#          room ends the count and no number caps it, whatever the machine. Nothing counts
 #          while a whole run is admitted, or while the memory reading is over the share or unknown.
 #   floor  the oldest landing with nothing of its own open is answered at least 1, so a landing
 #          always progresses (the gate admits a run whatever the load while nothing is admitted).
@@ -1530,7 +1531,7 @@ _gate_width() {
       n = 0; p += 0
       if (!whole && r >= 0 && fits(u, share) && p > 0) {
         s = sc + lwait * p; b0 = busy + 0
-        while (n < 4096) { b = b0; if (s > b) b = s; if (b + p > lim) break; n++; s += p }
+        while (1) { b = b0; if (s > b) b = s; if (b + p > lim) break; n++; s += p }
       }
       if (n == 0 && !own) n = 1
       print n, "-"
