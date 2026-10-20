@@ -405,6 +405,13 @@ sr_run "$SR_PLAN"
 sr_world marks-waste "6 6 12 12"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
+# A run killed at the gate (rc 137) is a wasted run: the landing report's killed count reads as discarded.
+sr_world marks-killed "6 6 12 12"
+printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T9\ntree=%s/.worktrees/02-T9\nasked=%d\nholder=-\nadmitted=%d\nended=%d\nrc=137\npromise=5:0.1:30\n' \
+  "$SID" "$SR_REPO" "$((SR_NOW - 600))" "$((SR_NOW - 590))" "$((SR_NOW - 300))" > "$SR_GATE/requests/3"
+sr_run "$SR_PLAN"
+expect_eq "M4 a killed run counts as discarded on the waste line" "yes" \
+  "$(sr_ind waste | /usr/bin/grep -qE 'waste — ([0-9]+%|under 1%) of suite runs discarded' && echo yes)"
 # Idle width: an idle turn from 16:00Z to 17:12Z is 72 of 720 elapsed minutes, 10%: ➖.
 sr_world marks-idle "6 6 12 12"
 printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
