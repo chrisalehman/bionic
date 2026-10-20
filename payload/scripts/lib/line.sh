@@ -913,7 +913,7 @@ _line_width_why() {  # -> the gate's answer of 0 to this landing, naming the old
 }
 _line_late() { [ -n "$1" ] && [ "$(_res_now)" -ge "$1" ]; }   # <deadline | empty>
 # The seconds <suites> promise now, summed: each one's `_gate_promise` from <tree>'s project, as `_line_time_for`
-# reads it (wave-39 T8; D11, AC-4.3). 0 for a suite with no recorded duration, and when the store cannot be read. A
+# reads it. 0 for a suite with no recorded duration, and when the store cannot be read. A
 # suite the candidate will not hold, as its merge decides it (`_line_merge_holds`), promises nothing.
 _line_promise_total() {  # <suites, comma-joined | none> <tree> <root> <accepted head> <row head>
   local s p mb t=0
