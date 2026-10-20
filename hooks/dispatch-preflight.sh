@@ -228,8 +228,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # string this hook used to carry (spec AC-25, design ledger D3).
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
-# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO (wave-15 REQ-5, D7). Every arm below that reads the
-# table asks `units_rows` — the library epic-23 wave-11 built to be the only parser of that table.
+# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO. Every arm below that reads the table asks `units_rows`,
+# the library that is the only parser of that table.
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"

@@ -509,7 +509,7 @@ _or_rel=$(_or_line "$S6" 'release')
 _or_disp=$(_or_line "$S6" '^\*\*The disposition\.')
 _or_floor=$(_or_line "$S6" '^\*\*The order\.')
 _or_rl=$(/usr/bin/grep -E 'release' "$S6")
-# THE ONE-STOP RULE (wave-38 T3; D18, D19, AC-1.6): the release row lands at Step 7, after the readings, and its
+# THE ONE-STOP RULE: the release row lands at Step 7, after the readings, and its
 # approvals are options on the final card; no rendered skill keeps a card per approval.
 _or_gone='keeps its own card\|keeps its card\|never wait on the release text'
 printf 'An approval keeps its own card.\n' > "$TMPROOT/or-gone.md"

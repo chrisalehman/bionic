@@ -59,8 +59,8 @@
 #                   measured; Known limits state AC-2.4's measured 62 of 63 and the entry says nothing "never
 #                   measured", "was not measured", "unproven" or "replaced by an index count", and the five
 #                   sentences the first correction left wrong read as corrected (the second whole run ends at 12:30 PM PDT,
-#                   the landing numbers are over the six multi-file build rows, the AC-2.4 limit cites
-#                   auditor-evidence-2.md finding 4, the AC-8.1 limit names the regression log and what it shows);
+#                   the landing numbers are over the six multi-file build rows, the measured-rows limit cites
+#                   auditor-evidence-2.md finding 4, the regression limit names the regression log and what it shows);
 #                   Standing reds and Known limits stand, the latter with the critic's two deferred sentences. Each
 #                   rule has a doctored copy that goes red.
 #
