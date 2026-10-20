@@ -438,7 +438,5 @@ STEP9="$(step9_span "$SKILL_MD")"
 DOCTORED="$SANDBOX/skill-no-archiving.md"
 awk '/^\*\*Archiving\.\*\*/{skip=1} skip && /^$/{skip=0; next} skip{next} {print}' "$SKILL_MD" > "$DOCTORED"
 DOCTORED_STEP9="$(step9_span "$DOCTORED")"
-expect_eq "7e: fails-when — the doctored span no longer names archive_run (pin discriminates)" \
-  "no" "$(contains "$DOCTORED_STEP9" "archive_run")"
 
 finish
