@@ -4431,6 +4431,23 @@ hFL4=$(make_home)
 write_plan "$hFL4" "$(plan 7 "$v9_step7_body" "$matrix_complete" | awk '{ print } /^walk: exempt$/ { print "regression: no" }')" > /dev/null
 expect_eq "FL-4 precondition: the plan reads regression: no" "1" "$(/usr/bin/grep -c '^regression: no$' "$hFL4/.bionic/docs/plans/active.md")"
 expect_allow "FL-4 …a regression: no plan at current: 7 owes no floor line → admitted" "$hFL4" 'git commit -m "x"'
+# FL-6 IN THE RELEASE ORDER THE FLOOR IS OWED FROM STEP 8: the regression row runs inside Step 7, after the release
+# row, so a plan whose Tasks put a test row at Step 7 after a doc row at Step 7 (lib/units.sh `units_release_order`, the
+# judge's and the validator's reading too) commits at current: 7 with no floor line, and is refused at 8 as FL-3 is.
+fl_order() {  # <plan content> -> the content with the readings and a Tasks table in the release order
+  eg_readings "$1"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T8 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | pending | approval:plan, head |\n'
+  printf '| T9 | 7 | test | the whole regression | test-runner | — | 90 | REQ-1 | — | pending | approval:release, head |\n'
+}
+hFL6=$(make_home)
+write_plan "$hFL6" "$(fl_order "$(plan 7 "$v9_step7_body" "$matrix_complete")")" > /dev/null
+expect_eq "FL-6 precondition: the plan is in the release order, the regression row named" "T9" \
+  "$(bash -c '. "$1/units.sh" && units_release_order "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$hFL6/.bionic/docs/plans/active.md" 2>/dev/null)"
+expect_allow "FL-6b in the release order, current: 7 with no floor proof line → admitted: the regression row runs in this step" \
+  "$hFL6" 'git commit -m "x"'
+write_plan "$hFL6" "$(fl_order "$(plan 8 "$v9_step8_body" "$matrix_complete")")" > /dev/null
+expect_block "FL-6c …and current: 8 with none → refused, as FL-3 is" "$hFL6" 'git commit -m "x"' "$FL_WHY"
 # FL-5 THE WALL AND THE JUDGE READ ONE FLOOR LINE (wave-35 T38; critic-structure-3 debt `unpinned-pair floor-absent`;
 # A-T38-3, A-T38-4). Each plan text at current: 7 goes to the real wall (hooks/bash-walls.sh) and to the judge
 # (lib/proof.sh `proof_state`) as the same file. Each answers `absent` (the wall refuses in the judge's words for
