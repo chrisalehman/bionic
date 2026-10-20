@@ -2,7 +2,7 @@
 # Written by agents-src/render.sh alongside the finals themselves; regenerate with
 # `bash agents-src/render.sh`. /bionic:doctor reads it to report whether an installed
 # machine's rendered files are stock or locally modified.
-40bf22c7812391f3d2d47e4af10d1cd25b9e94129d3213c20de8af5c4f98bc97  agents/auditor.md
+53951008abcd6198ec1c0e1fee8e95c31d0b49080aa1f915f3ba44d45243ffce  agents/auditor.md
 fce5499598badcd87775933fdf8c7974b77a77cdffdea863e01c6bf4cfd40fba  agents/critic.md
 e6d963bebf334cc2414a4460457643192f0b66687f02633a60037cb42c6fc716  agents/implementor.md
 14b4d5dd5ecba662a20186ff905a84303f6555bc4d94df8de983f24fc243f705  agents/researcher.md
