@@ -529,6 +529,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document, .bionic/docs/record/handoffs/<date>-<slug>.md, bound or not: the kind line, the title, Summary, Goal, State (computed), Findings, Decisions, Ruled out, Open, Suggested skills and Next (composed, on stdin), the resume line last; prints the path and the resume line; bound, the plan's ## Handoff becomes the one line handoff: <path> written <local time>"
   die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, patrol) and the path of the recap file holding the rest (task-list:, settled:, open:, the Patrol job). A closed or no-run file binds nothing"
+  die "  bash ${HOOK_DIR}/session-poker.sh promote <adr|design|requirement> <path>   copy one durable record into the project's tracked home (docs-tracked: in .bionic/config.yaml, docs/ when absent) as <home>/<kind>s/<name>, the run number dropped from the name; a plan, a log or a run record is refused and nothing is copied"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md; --all: every run's, keyed by wave, with the ADRs (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
@@ -1329,6 +1330,11 @@ $1"; shift ;;
   resume)
     { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "resume takes exactly one argument: the handoff file, as in: resume .bionic/docs/record/<wave>/handoff.md."
     RS_ARG="$1"
+    ;;
+  # THE PROMOTION. Exactly two operands: the kind and the record's path.
+  promote)
+    { [ $# -eq 2 ] && [ -n "$1" ] && [ -n "$2" ]; } || usage "promote takes exactly two arguments: the kind (adr, design or requirement) and the record's path, as in: promote adr adrs/<epic>/adr-<n>-<title>.md."
+    PR_KIND="$1"; PR_ARG="$2"
     ;;
   # THE REGISTER (wave-38 T13; D24, AC-3.4). At most one flag, --all.
   decisions)
@@ -3459,6 +3465,7 @@ case "$VERB" in
   landing-report) poker_verb_landing_report "$@" ;;
   release-note) poker_verb_release_note "$@" ;;
   decisions) poker_verb_decisions "$@" ;;
+  promote) poker_verb_promote "$@" ;;
   resume) poker_verb_resume "$@" ;;
   sitrep) poker_verb_sitrep "$@" ;;
   launch-sync) poker_verb_launch_sync "$@" ;;

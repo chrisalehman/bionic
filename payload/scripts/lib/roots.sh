@@ -9,6 +9,9 @@
 #   docs_root    <root>   <root>/<docs-root:>, else <root>/.bionic/docs
 #   tmp_root     <root>   <root>/.bionic/tmp — session-keyed state
 #   archive_root <root>   <archive-root:>, else $HOME/bionic-archive
+#   docs_tracked <root>   <root>/<docs-tracked:>, else <root>/docs — the tracked home
+#   promote_target <root> <kind> <source>
+#                         where a durable record is copied in the tracked home
 #   plugin_root           this payload's own root
 #   claude_home           the CLI's config directory
 #   worktree_root [dir]   the MAIN checkout, from anywhere inside the repository
@@ -177,6 +180,70 @@ archive_root() {
     return 0
   fi
   printf '%s\n' "${HOME:-/nonexistent}/bionic-archive"
+}
+
+# docs_tracked <root> -> the project's tracked home for durable records: the
+# `docs-tracked:` config value if set (joined onto <root> when relative), else
+# <root>/docs. A durable record belongs to the project, not to the tool that wrote
+# it, so its home is a folder the project already keeps under version control, and
+# the state directory is never it.
+docs_tracked() {
+  local root="$1" override
+  override="$(config_value "$root" "docs-tracked" "")"
+  if [ -n "$override" ]; then
+    _roots_join "$root" "$override"
+    return 0
+  fi
+  printf '%s\n' "$1/docs"
+}
+
+# promote_target <root> <kind> <source> -> where a durable record of <kind> (adr,
+# design or requirement) is copied in the tracked home: <tracked>/<kind>s/<name>.
+# Prints nothing and returns 1, the reason on stderr, for anything that is not a
+# durable record: another kind, a plan, a log, a run's record (a handoff among
+# them), a source whose name is not its kind's, or a tracked home inside the state
+# directory. Reads no file and writes none; the copy is the caller's.
+#
+# THE STABLE NAME is the source's own file name with a leading run number
+# (`wave-<n>-`, `epic-<n>-`) dropped, and an epic's own file (`epic.<ext>`) named
+# after its folder first. The same record always lands at the same path, and that
+# path carries no run history, so a comment can cite it.
+promote_target() {
+  local root="$1" kind="$2" src="$3" dir name rel home docs parent
+  case "$kind" in
+    adr) dir=adrs ;;
+    design) dir=designs ;;
+    requirement) dir=requirements ;;
+    *) printf "promote: '%s' is not a durable kind: an adr, a design or a requirement is promoted; a plan, a log or a handoff is operational and stays where it is\n" "$kind" >&2
+       return 1 ;;
+  esac
+  name="${src##*/}"
+  docs="$(docs_root "$root")"
+  rel=""
+  case "$src" in "$docs"/*) rel="${src#"$docs"/}" ;; esac
+  case "$name" in
+    *.plan.md) printf 'promote: %s is a plan, which is operational and is never promoted\n' "$src" >&2; return 1 ;;
+    *.md) ;;
+    *) printf 'promote: %s is not a markdown record (a log is operational and is never promoted)\n' "$src" >&2; return 1 ;;
+  esac
+  case "$rel" in
+    plans/*|record/*) printf "promote: %s is a run's operational record, which is never promoted\n" "$src" >&2; return 1 ;;
+  esac
+  case "$kind:$name" in
+    adr:adr-*.md|requirement:*.requirements.md) ;;
+    adr:*|requirement:*|design:adr-*|design:*.requirements.md)
+      printf "promote: %s is not named as a %s is (an adr is adr-<n>-<title>.md, a requirement <name>.requirements.md, a design anything else)\n" "$src" "$kind" >&2
+      return 1 ;;
+  esac
+  case "$name" in
+    epic.*) parent="${src%/*}"; parent="${parent##*/}"; name="$parent.${name#epic.}" ;;
+  esac
+  if [[ "$name" =~ ^(wave|epic)-[0-9]+-(.+)$ ]]; then name="${BASH_REMATCH[2]}"; fi
+  home="$(docs_tracked "$root")"
+  case "/$home/" in
+    */.bionic/*) printf 'promote: the tracked home %s is inside the state directory; set docs-tracked: to a folder the project tracks\n' "$home" >&2; return 1 ;;
+  esac
+  printf '%s\n' "$home/$dir/$name"
 }
 
 # ─── The machine's roots ─────────────────────────────────────────────────────

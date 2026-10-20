@@ -3061,3 +3061,46 @@ RP_TABLE
     say "order — $line, under ## SDLC State of $PV_PLAN; dry-committed first."
     exit 0
   }
+
+  # THE PROMOTION. One durable record, an adr, a design or a requirement, copied into the project's tracked
+  # home under its kind with a stable name (lib/roots.sh `promote_target`, which owns the destination and every
+  # refusal). It reads no plan and writes none: a promotion is a copy of a record the project keeps, so the
+  # project root of the working directory is its only operand beside the two it is given. The source is an
+  # absolute path, else project-root-relative, else docs-root-relative. A second promotion of the same record
+  # lands at the same path and replaces it, so an amended record is promoted again by the same call.
+  # REFUSED (1), nothing copied: no such file, or anything promote_target refuses. REFUSED (2): no project root.
+  poker_verb_promote() {
+    local root src to err
+    root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    if [ -z "$root" ]; then
+      die "REFUSED — cannot resolve the project root from the working directory. Nothing was copied."
+      exit 2
+    fi
+    case "$PR_ARG" in
+      /*) src="$PR_ARG" ;;
+      *) if [ -f "$root/$PR_ARG" ]; then src="$root/$PR_ARG"; else src="$(docs_root "$root")/$PR_ARG"; fi ;;
+    esac
+    if [ ! -f "$src" ]; then
+      die "REFUSED — no file $(clean "$PR_ARG") (read as $src). Nothing was copied."
+      exit 1
+    fi
+    src="$(cd "${src%/*}" 2>/dev/null && pwd -P)/${src##*/}"
+    err="$(mktemp "${TMPDIR:-/tmp}/bionic-promote.XXXXXX")" || err=/dev/null
+    if ! to="$(promote_target "$root" "$PR_KIND" "$src" 2>"$err")"; then
+      die "REFUSED — $(sed 's/^promote: //' "$err" 2>/dev/null). Nothing was copied."
+      rm -f "$err"
+      exit 1
+    fi
+    rm -f "$err"
+    if [ -f "$to" ] && cmp -s "$src" "$to"; then
+      say "promote — ${to#"$root"/} already holds ${src#"$root"/}; nothing changed."
+      exit 0
+    fi
+    if ! { mkdir -p "${to%/*}" && cp "$src" "$to.promote.$$" && mv -f "$to.promote.$$" "$to"; }; then
+      rm -f "$to.promote.$$"
+      die "REFUSED — cannot write $to. Nothing was copied."
+      exit 2
+    fi
+    say "promote — ${src#"$root"/} is promoted to ${to#"$root"/}."
+    exit 0
+  }
