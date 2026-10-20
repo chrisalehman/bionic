@@ -1702,10 +1702,89 @@ _proof_floor_judge() {
   c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" \
     || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
   if [ "$h" != "$c" ]; then
-    printf 'uncovered\ta whole run is owed: the last green whole run read %.12s, and the working head is %.12s\n' "$h" "$c"
-    return 0
+    git -C "$tree" merge-base --is-ancestor "$h" "$c" 2>/dev/null \
+      || { printf 'uncovered\tthe last whole run read %.12s, which is not in the history of %.12s\n' "$h" "$c"; return 0; }
+    owed="$(_proof_past_f "$plan" "$tree" "$h" "$c" "$owed")"
+    case $? in
+      0) owed="" ;;
+      2) : ;;
+      *) [ -n "$owed" ] || owed="the commits since ${h:0:12} cannot be read"; printf 'uncovered\t%s\n' "$owed"; return 0 ;;
+    esac
   fi
   if [ -n "$owed" ]; then printf 'owed\t%s\n' "$owed"; else printf 'covered\n'; fi
+}
+
+# _proof_past_f <plan> <tree> <F> <head> <owed> -> exit 0, printing nothing, when every commit on the first-parent line
+# F..<head> is excused or proved and every suite of <owed> (comma-joined) is closed; exit 2 printing the suites still
+# open, comma-joined; exit 1 printing one sentence naming the first commit that is not proved and what it lacks.
+# EXCUSED: its tree is its first parent's; or every path it changed is docs (`_proof_docs_path`, or under the docs
+# root); or every path is in the release set (`_proof_release_path`) and a check passed at it (`proof_check_passes`).
+# PROVED: each suite its row's landing names (the row's last `ready` before the `published` event naming the commit;
+# with no such event, the suites the landing verdicts at it name) has a newest record at it that is green. A record is
+# at the commit it ran at, or at the row head a merge commit brought in as its second parent.
+# CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
+_proof_past_f() {
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" files="" c f cls
+  walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
+    printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
+  rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
+  recs="$(_proof_records "$tree" "$rec")"
+  _proof_roots_load
+  top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)"
+  ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
+  case "${droot:-}" in "$top"/?*) pfx="${droot#"$top"/}"; pfx="${pfx%/}/" ;; esac
+  while IFS= read -r f; do
+    case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
+    cls=code
+    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then cls=doc
+    elif _proof_release_path "$f"; then cls=rel; fi
+    files="$files${files:+$'\n'}C	$c	$cls"
+  done <<PROOF_PAST_FILES
+$(git -C "$tree" log --no-renames --first-parent -m --name-only --format='%x01%H' "$from..$to" 2>/dev/null)
+PROOF_PAST_FILES
+  printf '%s\n%s\n%s\n%s\n' "$walk" "$recs" "$files" "$(proof_check_passes "$plan" "$tree" | sed '/^$/d; s/^/K	/')" \
+    | PROOF_OWED_SET="$owed" awk -F'\t' '
+    $1 == "W" { n++; wc[n] = $2; wt[n] = $3; np = split($4, p, " "); wp[n] = p[1]; wq[n] = (np > 1 ? p[2] : ""); tof[$2] = $3; next }
+    $1 == "K" { chk[$2] = 1; next }
+    $1 == "O" { if ($3 != "" && index($3, "—") != 1) orow[$2] = $3; if ($4 != "" && $4 != "-") osu[$2] = $4; next }
+    $1 == "R" {
+      k = $3 SUBSEP $4
+      if (!(k in rat) || $2 >= rat[k]) { rat[k] = $2; rres[k] = $5 }
+      if ($6 == "verdict") { if (!(k in vat) || $2 >= vat[k]) { vat[k] = $2; vres[k] = $5 }; vs[$3] = vs[$3] "," $4 }
+      next
+    }
+    $1 == "C" { touched[$2] = 1; if ($3 != "doc") nondoc[$2] = 1; if ($3 != "rel") notrel[$2] = 1; next }
+    function at(c, q, s,   r) { r = ""; if ((c SUBSEP s) in rat) { r = rres[c, s]; w = rat[c, s] }
+      if (q != "" && (q SUBSEP s) in rat && (r == "" || rat[q, s] >= w)) r = rres[q, s]; return r }
+    END {
+      for (i = 1; i <= n; i++) {
+        c = wc[i]
+        if (!(c in touched) || !(c in nondoc)) continue
+        if (!(c in notrel) && (c in chk)) continue
+        su = (c in osu) ? osu[c] : substr(vs[c] (wq[i] != "" ? vs[wq[i]] : ""), 2)
+        who = (c in orow) ? "row " orow[c] : "no landing row"
+        lead = "commit " substr(c, 1, 12) " (" who ") is not proved: "
+        m = split(su, a, ","); lack = ""; split("", seen)
+        if (m == 0) { print lead "no run of its row\047s suites is recorded at it"; exit 1 }
+        for (x = 1; x <= m; x++) {
+          s = a[x]; sub(/.*\//, "", s); if (s == "" || s == "?" || (s in seen)) continue; seen[s] = 1
+          r = at(c, wq[i], s)
+          if (r == "green") continue
+          lack = lack (lack == "" ? "" : "; ") s (r == "" ? " has no run recorded at it" : " is red at it")
+        }
+        if (lack != "") { print lead lack; exit 1 }
+      }
+      no = split(ENVIRON["PROOF_OWED_SET"], o, ","); open = ""
+      for (x = 1; x <= no; x++) {
+        s = o[x]; if (s == "") continue; r = ""; w = ""
+        for (i = 1; i <= n; i++) for (j = 0; j < 2; j++) {
+          q = (j == 0) ? wc[i] : wq[i]; if (q == "" || !((q SUBSEP s) in vat)) continue
+          if (w == "" || vat[q, s] >= w) { w = vat[q, s]; r = vres[q, s] }
+        }
+        if (r != "green") open = open (open == "" ? "" : ",") s
+      }
+      if (open != "") { printf "%s", open; exit 2 }
+    }'
 }
 
 # proof_owed_suites <plan> <tree> [<head>] -> `*` when <head> (default: the working branch's ref, `proof_branch_head`)
