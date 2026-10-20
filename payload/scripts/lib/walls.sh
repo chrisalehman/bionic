@@ -4550,21 +4550,13 @@ validate_merge_target() {
   [ -n "$epic" ] || return 0
   epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
   [ -r "$epic_plan" ] || return 0
-  # Fence-aware (matches the SECTION extraction): an epic plan documenting a
-  # `## SDLC State` example in a ``` fence must not shadow its real section.
+  # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
+  # handoff ask: ## SDLC State, fenced lines unread, then the frontmatter.
   # [INSTRUMENT]
-  epic_branch=$(normalize_newlines "$epic_plan" \
-    | awk '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^## SDLC State/ { f=1; next }
-      /^## / { f=0 }
-      f' \
-    | grep -E '^[[:space:]]*integration-branch[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+  wall_libs evidence-gate plan.sh || return 0
+  epic_branch=$(plan_integration_branch "$epic_plan")
   [ -n "$epic_branch" ] || return 0
-  this_branch=$(echo "$SECTION" | grep -E '^[[:space:]]*integration-branch[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+  this_branch=$(plan_integration_branch "$PLAN")
   if [ -n "$this_branch" ] && [ "$this_branch" != "$epic_branch" ]; then
     log_finding merge-target "plan integration-branch '$this_branch' != epic '$epic' integration-branch '$epic_branch'"
   fi

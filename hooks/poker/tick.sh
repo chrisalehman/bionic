@@ -1241,24 +1241,27 @@ RUNNING $TR_NAME $RUN_ID"
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
       || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$POKER_RUN_PLAN")/landing-proofs.log"
-    if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}"; then
-      lt_f() { printf '%s\n' "$LT_EV" | tr '|' '\n' | sed -n "s/^$1=//p" | head -1; }   # <key> -> its value in the event
+    [ -z "$LT_REC" ] || [ ! -f "$LT_REC" ] || declare -F line_value >/dev/null 2>&1 \
+      || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}" && declare -F line_value >/dev/null 2>&1; then
+      lt_f() { line_value "$LT_EV" "$1"; }   # <key> -> its value in the event
       while IFS= read -r LT_EV; do
         [ -n "$LT_EV" ] || continue
         [ -f "$LT_TOLD" ] && /usr/bin/grep -qxF -- "$LT_EV" "$LT_TOLD" && continue
-        case "$LT_EV" in
-          *'|ev=standing|'*) LT_H="$(lt_f head)"
+        case "$(lt_f ev)" in
+          standing) LT_H="$(lt_f head)"
             note "standing $(lt_f suite) at ${LT_H:0:12} — $(lt_f lines) failing line(s) fail at the accepted head too: a red the branch carries, not one a row added; log $(lt_f log)" ;;
           *) note "stalled $(lt_f row) — two runs ended with no verdict and no third starts; logs $(lt_f logs)" ;;
         esac
         printf '%s\n' "$LT_EV" >> "$LT_TOLD"
       done <<EOF
-$(/usr/bin/grep -E '^line/v1\|ev=(standing|stalled)\|' "$LT_REC" 2>/dev/null)
+$(awk -F'|' "${_LINE_FIELDS_AWK:-}"'{ e = line_ev() } e == "standing" || e == "stalled"' "$LT_REC" 2>/dev/null)
 EOF
     fi
     # THE RUN'S LANDING LINE (wave-28 T14; D18): the report's first line, once the record holds a landing.
     # It is printed by the exit trap above the buffer, in the re-arm slot, so the decision stays the last line, and it enters no hash.
-    if [ -n "$LT_REC" ] && { /usr/bin/grep -q '^line/v1|ev=published|' "$LT_REC" 2>/dev/null || landing_unmeasured "$LT_REC"; }; then
+    if [ -n "$LT_REC" ] && { awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_ev() == "published" { f = 1; exit } END { exit !f }' "$LT_REC" 2>/dev/null \
+      || landing_unmeasured "$LT_REC"; }; then
       TICK_LANDINGS="$(landing_report "$LT_REC" "$REPO_REAL" no 2>/dev/null | head -1)"
     fi
     [ -z "$LT_REC" ] || tick_owed_goals "$POKER_RUN_PLAN" "$LT_REC"
