@@ -788,5 +788,16 @@ expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file la
 expect_eq "OF2 …and the one-file goal reads 10 min against its 5-minute target" \
   "10 min" "$(sr_goal_lines | /usr/bin/grep ' fast landings: ' | sed 's/.* — //' | /usr/bin/grep -oE '[0-9]+ min')"
 
+# ============================================================
+section "§WAIT-WORDS: a task waiting on the review facts says so in words; the judge's facts string and its record paths never reach the page"
+# ============================================================
+sr_world wait-words "6 6 12 12"
+SR_W_ROW="$(sr_row T19 "Review-gated row · complexity: standard" proof:review 30 pending)"
+awk -v r="$SR_W_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+SR_W_LINE="$(sr_rows | /usr/bin/grep '/T19: ')"
+expect_eq "WW1 the review-gated task's clause names the review facts at the head, with no facts string and no record path" "yes|0" \
+  "$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -q ' — waits on the review facts at the head' && echo yes)|$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -cE 'facts_state|record/|\.md')"
+
 
 finish
