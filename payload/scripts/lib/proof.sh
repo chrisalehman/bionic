@@ -195,16 +195,17 @@ proof_waiver_line() {
 # A release-set commit (`_proof_release_path`) is covered by a passing release check at its head (`proof_check_passes`),
 # for every question and the regression. The regression is never waived and never run a second time.
 
-# _proof_release_path <path> -> 0 when <path> (relative to the repository root) is in THE RELEASE SET, exactly
-# CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/*.md (one level: a deeper page is not in it) and
-# payload/integrity/rendered.sha256 (D18; spec §Assumptions bullet 2). THIS CASE IS THE ONE LIST. A commit whose every
-# path is in it is covered by a passing release check at its head (`proof_check_passes`): the review walk's `release`
-# basis (`_facts_basis`) reads it. One path outside it and the commit owes.
+# _proof_release_path <path> -> 0 when <path> (relative to the repository root) is in THE RELEASE SET: the release
+# row's own files, exactly CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/*.md,
+# payload/integrity/rendered.sha256, the check suite tests/release-check.test.sh, and the promoted records
+# docs/adrs/*.md. A folder's files are one level deep: a deeper path is not in it. THIS CASE IS THE ONE LIST. A commit
+# whose every path is in it is covered by a passing release check at its head (`proof_check_passes`): the review
+# walk's `release` basis (`_facts_basis`) reads it. One path outside it and the commit owes.
 _proof_release_path() {
   case "$1" in
-    CHANGELOG.md|payload/.claude-plugin/plugin.json|payload/integrity/rendered.sha256) return 0 ;;
-    payload/commands/*/*) return 1 ;;
-    payload/commands/?*.md) return 0 ;;
+    CHANGELOG.md|payload/.claude-plugin/plugin.json|payload/integrity/rendered.sha256|tests/release-check.test.sh) return 0 ;;
+    payload/commands/*/*|docs/adrs/*/*) return 1 ;;
+    payload/commands/?*.md|docs/adrs/?*.md) return 0 ;;
   esac
   return 1
 }
