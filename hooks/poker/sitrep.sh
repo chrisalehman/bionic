@@ -812,6 +812,10 @@ sitrep_render() {
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
   nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
   lr="$(landing_report "$rec" "$root" yes 2>/dev/null)"; lr1="${lr%%$'\n'*}"
+  # a goal decision whose goal now reads reached is closed in fact, whether or not the tick has closed it yet
+  local gk gt
+  gk="$(plan_goals_read "$plan" "$rec" "$lr" | awk -F'\t' '$1 == "reached" { print $2 }' | while IFS= read -r gt; do printf 'decide:goal:%s\n' "$(plan_goal_slug "$gt")"; done)"
+  [ -z "$gk" ] || owed="$(printf '%s\n' "$owed" | awk -F'\t' -v ks="$gk" 'BEGIN { n = split(ks, a, "\n"); for (i = 1; i <= n; i++) drop[a[i]] = 1 } !($1 in drop)')"
   # the schedule's bar half reads the one-file landings alone (lib/plan.sh), so a landing of many files moves it not
   lmed="$(plan_one_file_median "$plan" "$lr")"; lmed="${lmed%%	*}"
   appr_at="$(sitrep_approved_at "$plan")"
