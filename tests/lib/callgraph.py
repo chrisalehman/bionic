@@ -16,7 +16,9 @@
 #   one line per fault:
 #   two-way <a> <b>               two parts call each other: <a> calls <b> and <b> calls <a>
 #   order <from> <to>             <from> needs <to>, and the dispatcher does not load <to> before <from>
-#   unloaded <part>               the dispatcher has no `. "<dir>/<part file>"` line for the part
+#   unloaded <part>               the dispatcher has no `. "<...>/<part dir>/<part file>"` line for the part (a load
+#                                 is matched on the part's directory name and file name, so a library of the same
+#                                 file name elsewhere is not taken for it)
 #   twice <function> <file> <file>  one name defined in two files: the later load silently replaces the first
 # Exit 2: a file cannot be read, or no part was named.
 import re
@@ -24,7 +26,7 @@ import sys
 
 DEF = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*(\{|\(|$)')
 WORD = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
-LOAD = re.compile(r'(?:^|[\s;&|({!])\.\s+"?[^"\s]*/([^/"\s]+\.sh)"?')
+LOAD = re.compile(r'(?:^|[\s;&|({!])\.\s+"?[^"\s]*?([^/"\s]+/[^/"\s]+\.sh)"?')
 
 
 def text_of(path):
@@ -75,7 +77,7 @@ def main(argv):
     for l in lines[disp]:
         for m in LOAD.finditer(l):
             order.append(m.group(1))
-    base = {p: p.rsplit('/', 1)[-1] for p in parts}
+    base = {p: '/'.join(p.rsplit('/', 2)[-2:]) for p in parts}
     pos = {}
     for p in parts:
         if base[p] in order:
