@@ -63,6 +63,10 @@
 #                   auditor-evidence-2.md finding 4, the regression limit names the regression log and what it shows);
 #                   Standing reds and Known limits stand, the latter with the critic's two deferred sentences. Each
 #                   rule has a doctored copy that goes red.
+#   §REL-1.23.0     the repository's own release, read from its HEAD tree: the newest heading is 1.23.0, dated, and
+#                   plugin.json agrees; the entry's landing numbers name the head and instant they were rendered at,
+#                   a commit the head holds, so the check holds them to the landing report; the tracked home holds the
+#                   promoted records, and the cover record states the amended rule and not the one it replaced.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -893,5 +897,27 @@ doctor v_noalias sed '/^## 1\.21\.0 — /,/^### /s/`proof:floor`/the reads token
 doctor v_no121 sed 's/^## 1\.21\.0 — /## 1.20.9 — /'
 expect_contains "(v2d) no 1.21.0 block: red" "rev: no 1.21.0 block" "$(rev_check "$TMP/doctored.v_no121")"
 doctor v_nodate sed 's/^## 1\.21\.0 — .*/## 1.21.0 —/'
+
+section "§REL-1.23.0 — the newest entry names the head its numbers were rendered at; the tracked home holds the records"
+
+# Read from this repository's HEAD tree, as the release check reads. An entry that names no head passes the check
+# unheld, so the newest entry must name one for its numbers to be held to the landing report. The promoted records
+# are the copies a project reads; the cover record must state the amended rule and not the one it replaced.
+REPO="$BIONIC_SCRIPTS_DIR"
+rel_show() { git -C "$REPO" show "HEAD:$1" 2>/dev/null; }
+NEWEST="$(rel_show CHANGELOG.md | sed -n 's/^## \([0-9][0-9.]*[0-9]\) — \(20[0-9-]*\)$/\1 \2/p' | head -n 1)"
+expect_regex "(n1) the newest CHANGELOG heading is 1.23.0, dated" '^1\.23\.0 20[0-9]{2}-[0-9]{2}-[0-9]{2}$' "$NEWEST"
+expect_eq "(n1) …and plugin.json at the same head says 1.23.0" "1.23.0" "$(rel_show payload/.claude-plugin/plugin.json | jq -r '.version // empty')"
+HL="$(rel_show CHANGELOG.md | awk '/^## / { if (seen) exit; seen = 1 } /^### / { inp = ($0 == "### The landing numbers"); next } inp' \
+  | grep -E '^`landing-report --rows` at [0-9a-f]{40} on [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:$')"
+expect_nonempty "(n2) the newest entry's landing numbers name the head and instant they were rendered at" "$HL"
+AT="${HL#* at }"; AT="${AT%% *}"
+expect_true "(n2) …and that head is a commit the release head holds" git -C "$REPO" merge-base --is-ancestor "${AT:-none}" HEAD
+for adr in adr-056-cover-is-a-fact-of-the-tree adr-063-the-core-script-is-eight-files adr-064-a-rule-is-enforced-at-one-door; do
+  expect_nonempty "(n3) the tracked home holds $adr" "$(rel_show "docs/adrs/$adr.md" | sed -n '/^# ADR-/p')"
+done
+A56="$(rel_show docs/adrs/adr-056-cover-is-a-fact-of-the-tree.md)"
+expect_contains "(n4) the promoted cover record states the amended rule" "covered for every review question once it lands green" "$A56"
+expect_absent "(n4) …and not the rule it replaced" "born of that reading" "$A56"
 
 finish
