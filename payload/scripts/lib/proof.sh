@@ -1191,7 +1191,7 @@ PROOF_FOLD
 # ADR-054). No tests/*.test.sh roster is counted, no `Gating:` verdict is asked for and no config key is needed,
 # so tests/run.sh's log, floor-run's log and the log of a project's own runner are each one such log.
 _proof_floor_log() {
-  local ev="$1" head="$2" co="$3" plan="${4:-}" root="${5:-}" ends hdr sha dirty rc owed nred m run
+  local ev="$1" head="$2" co="$3" plan="${4:-}" root="${5:-}" ends hdr sha dirty rc owed nred m run inh why
   ends="$(_proof_floor_ends "$ev")"; hdr="${ends%%$'\n'*}"; rc="${ends#*$'\n'}"; [ "$ends" != "$hdr" ] || rc=""
   case "$hdr" in
     '') printf 'the evidence %s carries no head=<sha> dirty=<n> line; a regression proof cites the log of a run, which opens with it' "$ev"; return 1 ;;
@@ -1214,8 +1214,25 @@ _proof_floor_log() {
   # THE LOG IS A RUN THE MACHINE RECORDED (wave-37 T4; D7, AC-6.1; ADR-057): the grammar above is read first, then
   # one `ev=run` line of the plan's landing record must match the log on head, exit and hash (`_proof_floor_match`).
   run="$(_proof_floor_match "$ev" "$plan" "$root" "$sha" "$rc")" || { printf '%s' "$run"; return 1; }
-  # A RUN AT ANOTHER HEAD STANDS FOR NOTHING: the regression is a whole run at the working head.
+  # A RUN AT AN ANCESTOR STANDS WHERE THE JUDGE SAYS IT DOES: the head is covered when every commit after the run is
+  # excused or proved (`_proof_past_f`, the question `_proof_floor_judge` asks), a red the run left still open being
+  # the owed set the proof line carries. Else the first commit it cannot prove is named. A run at a head outside the
+  # working head's history, or cited with no plan, stands for nothing: a whole run is owed at the working head.
   if [ "$sha" != "$head" ]; then
+    if [ -n "$plan" ] && git -C "$co" merge-base --is-ancestor "$sha" "$head" 2>/dev/null; then
+      inh="$(proof_inherited "$plan")"
+      [ -z "$owed" ] || [ -z "$inh" ] || owed="$(PROOF_I=",$inh," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_I"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_LOG_OWED
+$owed
+PROOF_LOG_OWED
+)"
+      why="$(_proof_past_f "$plan" "$co" "$sha" "$head" "$owed")"
+      case $? in
+        0|2) printf '%s' "$sha"; return 0 ;;
+      esac
+      printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s; land the suites it lacks there, or run the whole at %.12s and cite that log' \
+        "$ev" "$sha" "$head" "$why" "$head"
+      return 1
+    fi
     printf 'the run in %s read head %.12s, and the working branch is at %.12s: a whole run is owed at %.12s; run it there and cite that log' \
       "$ev" "$sha" "$head" "$head"
     return 1
