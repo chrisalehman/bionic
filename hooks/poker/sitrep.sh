@@ -1123,9 +1123,21 @@ SITREP_OWED
   [ -z "$inflight" ] || parts="$(sitrep_list 5 $inflight) in flight"
   # shellcheck disable=SC2086
   [ -z "$blocked" ] || parts="${parts:+$parts; }$(sitrep_list 5 $blocked) blocked"
+  # THE STOPS AHEAD ARE NAMED, IN ORDER: while the review results card has no reply and an integrate row still
+  # waits, the card to the user stands between the tasks before that row and the row itself.
+  local intids nbefore="" nafter="" t seq
+  intids=" $(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } $3 == "integrate" && s == "pending" { printf "%s ", $1 }')"
+  if [ -n "$nextup" ] && ! /usr/bin/grep -qs '^replied: at=' "$recdir"/review-results-*.md; then
+    for t in $nextup; do
+      if [ -n "$nafter" ] || { [ "$intids" != " " ] && case "$intids" in *" $t "*) true ;; *) false ;; esac; }; then nafter="$nafter $t"; else nbefore="$nbefore $t"; fi
+    done
+  fi
   # shellcheck disable=SC2086
   if [ -n "$nextup" ]; then
-    if [ -n "$parts" ]; then parts="$parts; then $(sitrep_list 3 $nextup)"; else parts="$(sitrep_list 3 $nextup)"; fi
+    if [ -n "$nafter" ]; then
+      seq="${nbefore:+$(sitrep_list 3 $nbefore), then }the review results card to you, then $(sitrep_list 3 $nafter)"
+    else seq="$(sitrep_list 3 $nextup)"; fi
+    if [ -n "$parts" ]; then parts="$parts; then $seq"; else parts="$seq"; fi
   fi
   if [ -n "$parts" ]; then b_next="Next: $parts."
   elif [ -n "$dlv_at" ]; then b_next="Next: nothing; the run is delivered."
