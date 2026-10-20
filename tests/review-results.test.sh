@@ -555,14 +555,16 @@ fc_judge_plan a.test.sh
 fc_page --preview
 expect_contains "JUDGE-0 precondition: the Tests section renders a regression line" "regression — " "$(fc_under Tests)"
 expect_contains "JUDGE-1 a red the whole run left and a later landing greened: the page reads covered" "covered" \
-  "$(fc_under Tests | /usr/bin/grep 'regression')"
-expect_eq "JUDGE-1b …and the word red is not on the line" "0" "$(fc_under Tests | /usr/bin/grep 'regression' | /usr/bin/grep -cw 'red')"
-printf 'line/v1|ev=verdict|row=T6|commit=%s|suite=a.test.sh|result=red|log=/fixture/T6.log|at=2026-10-12T14:10:00Z\n' "$FC_F6" \
-  >> "$FC_REC/landing-proofs.log"
+  "$(fc_under Tests | fc_flat)"
+expect_eq "JUDGE-1b …and the word red is not on the line" "0" "$(fc_under Tests | fc_flat | /usr/bin/grep -cw 'red')"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log"
+fc_plan "$(fc_floor "$FC_C" a.test.sh)
+$(fc_reads "$FC_C")"
 fc_page --preview
-expect_contains "JUDGE-2 the control: the landing's newest verdict red, the page names a.test.sh as still owed" "a.test.sh" \
-  "$(fc_under Tests | /usr/bin/grep 'regression')"
-expect_absent "JUDGE-2b …and does not read covered" "covered" "$(fc_under Tests | /usr/bin/grep 'regression')"
+expect_contains "JUDGE-2 the control: no landing greened it, the page names a.test.sh as still owed" "a.test.sh" \
+  "$(fc_under Tests | fc_flat)"
+expect_absent "JUDGE-2b …and does not read covered" "covered" "$(fc_under Tests | fc_flat)"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/review-results-*.md
 
