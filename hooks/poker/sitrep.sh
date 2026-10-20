@@ -694,7 +694,7 @@ sitrep_schedule() {
       k = int(t * r + 0.5)
       g = (l >= k) ? "w" : ((k <= 1.25 * l) ? "a" : "o")
       printf "%s\t%d\t%d\n", g, k, e / 60 }')"
-    clock="$landed of $total tasks done in $(sitrep_dur "$em"), the forecast's pace needs $k"
+    clock="$landed of $total tasks done in $(sitrep_dur "$em"); the $(sitrep_dur "$fc") forecast needs $k by now, $([ "$landed" -gt "$k" ] && echo ahead || { [ "$landed" -eq "$k" ] && echo on pace || echo behind; })"
   fi
   bar="$(sitrep_bar)"
   if [ -z "$med" ]; then bg=n; bt="no one-file landing yet against the ${bar:-unverified} min bar"
