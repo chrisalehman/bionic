@@ -632,7 +632,7 @@ expect_eq "(g3) the fold reads them by key: a and c green, b the declared debt's
 RGM="$(ll_world)"; PGM="$(ll_plan "$RGM")"
 line_event "$PGM" ready row=T1 name=wx-T1 "commit=$(git -C "$RGM/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
-anchor fn payload/scripts/lib/line.sh '"log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:-1}"' _line_verdict_put '"admitted=${7:--}" "width=${LINE_WIDTH:-1}" "log=$6"'
+anchor fn payload/scripts/lib/line.sh '"log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:--}"' _line_verdict_put '"admitted=${7:--}" "width=${LINE_WIDTH:--}" "log=$6"'
 GM_READ="$( eval "$(declare -f _line_verdict_put | sed "$ANCHOR_SED")"; ll_grammar_put "$PGM"; ll_grammar_read "$(ll_rec "$RGM")" )"
 expect_contains "(g4m-pre) the mutant wrote: admitted= and width= before log=" "|result=red|admitted=1000|width=2|log=/logs/b.log|" "$(ll_ev "$RGM" verdict)"
 expect_true "(g4m) MUTANT admitted= and width= before log=: the positional readers read another answer (the rows can fail)" \

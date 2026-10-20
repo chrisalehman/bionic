@@ -91,7 +91,7 @@
 #   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
 #   spawn-worktree.sh remove <worktree-path>
 #   spawn-worktree.sh mark   <worktree-path> --for <name>
-#   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
+#   spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>' [--suites <a,b> --green-at <commit> --log <path>]
 #   spawn-worktree.sh ready  [--within <seconds>]
 
 set -uo pipefail
@@ -138,7 +138,7 @@ Usage:
   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
   spawn-worktree.sh remove <worktree-path>
   spawn-worktree.sh mark   <worktree-path> --for <name>
-  spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>'
+  spawn-worktree.sh land   <worktree-path> --by-hand --reason '<why>' [--suites <a,b> --green-at <commit> --log <path>]
   spawn-worktree.sh ready  [--within <seconds>]
 
 create  makes the branch AND the worktree at exactly <base-sha>, verifies
@@ -173,7 +173,11 @@ land    a person's landing (the line lands a row with ready). With
         session's bound plan's working-branch to it under the line's one
         publish lock; then removes the tree, prunes, keeps the branch. The
         record's published line and the row's - T<n>: line carry the git
-        user, the time and the reason. Reads the session from
+        user, the time and the reason. With --suites <a,b> --green-at
+        <commit> --log <path>, all three or none, what the person says of
+        the writer's run is recorded too: one green verdict per suite,
+        keyed by that commit (one the row's head holds), its log that
+        path; nothing is run for it. Reads the session from
         CLAUDE_CODE_SESSION_ID. Refuses, naming why, with no reason, no
         session or no bound plan, on a dirty or detached tree, on nothing
         to land, on a range that commits .bionic, and on a conflict; holds
@@ -513,12 +517,18 @@ cmd_remove() {
 # main thread may run it: the Bash wall's arm that keeps subagents off the plan verbs names it.
 # A bare `land` refuses with the line that names both, before anything is read.
 cmd_land() {
-  local target="" by_hand=0 why="" lib_session sid root
+  local target="" by_hand=0 why="" suites="" at="" log="" lib_session sid root
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --by-hand) by_hand=1; shift ;;
       --reason) why="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
       --reason=*) why="${1#--reason=}"; shift ;;
+      --suites) suites="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --suites=*) suites="${1#--suites=}"; shift ;;
+      --green-at) at="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --green-at=*) at="${1#--green-at=}"; shift ;;
+      --log) log="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+      --log=*) log="${1#--log=}"; shift ;;
       *) [ -n "$target" ] || target="$1"; shift ;;
     esac
   done
@@ -539,7 +549,7 @@ cmd_land() {
   . "${LIB_WORKTREE%/*}/line.sh" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${LIB_WORKTREE%/*}/line.sh"; exit 2; }
   sid="$(session_id 2>/dev/null)" || sid=""
   root="$(worktree_root "${target:-.}" 2>/dev/null)" || root="$(worktree_root 2>/dev/null)" || root=""
-  WORKTREE_CONTRACT_PROG="$PROG" line_land_by_hand "$target" "$root" "$sid" "$why"
+  WORKTREE_CONTRACT_PROG="$PROG" line_land_by_hand "$target" "$root" "$sid" "$why" "$suites" "$at" "$log"
   exit $?
 }
 
