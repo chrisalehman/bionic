@@ -584,34 +584,36 @@ expect_eq "(r6k2) …a path keeps its directories, one spelling per file; no ..,
   "tests/a.test.sh|./a.test.sh|d/x.test.sh,x.test.sh|FAIL|FAIL|FAIL|FAIL|FAIL" \
   "$(_line_suites './tests/a, tests/a.test.sh')|$(_line_suites ./a)|$(_line_suites 'd/x x')|$(_line_suites ../a.test.sh || echo FAIL)|$(_line_suites /d/a.test.sh || echo FAIL)|$(_line_suites d//a.test.sh || echo FAIL)|$(_line_suites d/./a.test.sh || echo FAIL)|$(_line_suites d/run.sh || echo FAIL)"
 
-# THE PASS IS GONE (wave-35 T1; D12, REQ-3 AC-3.1; ADR-054, which supersedes ADR-053): a landing starts
-# no background run, whatever .bionic/config.yaml says. The project declares a regression (`floor:`, a
-# stub that writes where it ran and waits for its go file) and the old switch, `background-pass: on`.
-# fails-when: ready starts a detached run, prints a pass line, or the record gains an ev=pass.
-R7_STUB="$WORLD_ROOT/r7-floor-stub.sh"
-printf '#!/bin/bash\nd=%s/r7-$1\nprintf "%%s\\n" "$(pwd -P)" >> "$d.started"\ni=0; while [ ! -e "$d.go" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done\necho "stub regression: 4 passed"\n' "$WORLD_ROOT" > "$R7_STUB"
-r7_started() { awk 'END { print NR + 0 }' "$WORLD_ROOT/r7-$1.started" 2>/dev/null || echo 0; }   # <tag> -> runs of the stub
-r7_ps() { ps -axo command= 2>/dev/null | R7N="$R7_STUB $1" awk 'index($0, ENVIRON["R7N"]) { c++ } END { print c + 0 }'; }   # <tag> -> live stubs (the needle in the environment, so awk never counts itself)
-RR7="$(ll_rworld)"
-printf 'floor: bash %s r7\nbackground-pass: on\n' "$R7_STUB" > "$RR7/.bionic/config.yaml"
-ll_verb "$RR7" T1
-K7="$(ll_field "$(ll_ev "$RR7" candidate | tail -1)" commit)"
-expect_nonempty "(r7-pre) a candidate was built" "$K7"
-expect_eq "(r7) AC-3.1 background-pass: on and a declared floor: ready lands and prints LANDED and the owed line, exactly" \
-  "0|$(printf 'LANDED T1 %s\nlanded T1 %s — owed: complete task T1, then stop wx-T1' "$K7" "$K7")" "$LL_RC|$LL_OUT"
-sleep 2
-expect_eq "(r7b) …the record holds the landing's published event (the reader reads this record)" "1" \
-  "$(ll_ev "$RR7" published | awk 'END { print NR + 0 }')"
-expect_eq "(r7c) …the declared regression never ran, and no process runs it" "0 0" "$(r7_started r7) $(r7_ps r7)"
-( bash "$R7_STUB" r7 >/dev/null 2>&1 & )
-ll_wait_lines "$WORLD_ROOT/r7-r7.started" 1 100
-expect_eq "(r7d) control: the same stub started by hand is counted by both readers" "1 1" "$(r7_started r7) $(r7_ps r7)"
-: > "$WORLD_ROOT/r7-r7.go"
-r7_gone() { [ "$(r7_ps r7)" = 0 ]; }
-r7_i=0; while ! r7_gone && [ "$r7_i" -lt 100 ]; do sleep 0.1; r7_i=$((r7_i + 1)); done
-sleep 1
-expect_eq "(r7e) …and once every stub is released and gone, the record still holds no ev=pass" "0 0" \
-  "$(r7_ps r7) $(ll_ev "$RR7" pass | awk 'END { print NR + 0 }')"
+# ---------------------------------------------------------------------------
+section "§GATE: the line runs the suites the brief names, asks the gate before each start, and holds no width of its own"
+#
+# A fixture gate answers 2, then 5; seven named suites log their start and wait for a go file. x, named by no brief, is
+# the project's declared floor, the old background switch on. A width of the line's own would start more or fewer.
+GT_FIX='s|gate_width_ask "\$1"|bash "$LL_SIG/gate-fix.sh"|'
+printf '#!/bin/bash\na=5; [ -e "$LL_SIG/g.asked" ] || { a=2; : > "$LL_SIG/g.asked"; }\necho "ask $a" >> "$LL_SIG/g.log"; echo "$a"\n' > "$LL_SIG/gate-fix.sh"
+expect_contains "(g0-pre) the fixture gate is in _line_width_ask" 'bash "$LL_SIG/gate-fix.sh"' "$(declare -f _line_width_ask | sed "$GT_FIX")"
+RG="$(ll_world)"; ll_launch "$RG" T1 'n1 n2 n3 n4 n5 n6 n7'
+for s in n1 n2 n3 n4 n5 n6 n7 x; do
+  printf '#!/bin/bash\necho "start %s" >> "$LL_SIG/g.log"\ni=0; while [ %s = 1 ] && [ ! -e "$LL_SIG/g-%s.go" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done\necho "PASS: %s"; echo; echo "%s.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' \
+    "$s" "$([ "$s" = x ] && echo 0 || echo 1)" "$s" "$s" "$s" > "$RG/tests/$s.test.sh"
+done
+git -C "$RG" add tests && git -C "$RG" commit -qm "eight suites"
+printf 'floor: bash tests/x.test.sh\nbackground-pass: on\n' > "$RG/.bionic/config.yaml"; world_machine 64 65536 40 0.5
+LL_MUTANT="$GT_FIX" LL_MUTANT_FN=_line_width_ask ll_drive "$RG" T1 "$WORLD_ROOT/g.out"; G_BG=$!
+ll_wait_lines "$LL_SIG/g.log" 3 300 && touch "$LL_SIG/g-n1.go"
+ll_wait_lines "$LL_SIG/g.log" 9 300
+expect_eq "(g1) asked before the first start and again as n1 ended, it starts exactly each answer: 2, then 5 beside n2" \
+  "ask 2|start|start|ask 5|start|start|start|start|start" "$(sed 's/^start n[1-7]$/start/' "$LL_SIG/g.log" | paste -sd'|' -)"
+touch "$LL_SIG"/g-n[1-7].go
+ll_wait_file "$WORLD_ROOT/g.out.rc" 600 || ll_kill_bg "$G_BG"; KG="$(ll_last_cand "$RG" T1)"
+expect_eq "(g2) the row lands on its seven suites: exit 0, the branch at its candidate" "0 $KG" "$(cat "$WORLD_ROOT/g.out.rc" 2>/dev/null) $(ll_head "$RG")"
+expect_false "(g3) x, which no brief names, never ran, though the project declares it its floor" wait_for 2 grep -q '^start x$' "$LL_SIG/g.log"
+( cd "$RG" && bash tests/x.test.sh >/dev/null )
+expect_true "(g3) …while x run by hand logs its start (the control)" grep -q '^start x$' "$LL_SIG/g.log"
+( unset LINE_WIDTH; _line_verdict_put "$(ll_plan "$RG")" T9 "$KG" z.test.sh absent - >/dev/null )
+expect_eq "(g4) n1's verdict carries the gate's first answer as its width; one written with no answer asked carries -" "2 -" \
+  "$(ll_field "$(ll_ev "$RG" verdict | grep -F '|suite=n1.test.sh|')" width) $(ll_field "$(ll_ev "$RG" verdict | grep -F '|suite=z.test.sh|')" width)"
+world_machine 8 8192 40 0.5
 
 # ---------------------------------------------------------------------------
 section "§PROOF: the tool makes the proof; no stamp is read (AC-1.2)"
@@ -806,9 +808,9 @@ expect_eq "(n2p) …its first line the same promise against the new bound: promi
 N2V="$(ll_ev "$RN" verdict)"
 expect_regex "(n2f-pre) the gate's request for the run holds its promise and its admission and end" '^600 [0-9]+$' \
   "$(ll_req_last c.test.sh promise) $(ll_req_last c.test.sh actual)"
-expect_eq "(n2f) AC-4.2 the verdict carries promised=600 and actual= the gate's ended less admitted, after reads=" \
+expect_eq "(n2f) AC-4.2 the verdict carries promised=600 and actual= the gate's ended less admitted, after width=" \
   "600 $(ll_req_last c.test.sh actual) yes" \
-  "$(ll_field "$N2V" promised) $(ll_field "$N2V" actual) $(printf '%s\n' "$N2V" | grep -qE '\|reads=[^|]+\|promised=600\|actual=[0-9]+\|at=' && echo yes)"
+  "$(ll_field "$N2V" promised) $(ll_field "$N2V" actual) $(printf '%s\n' "$N2V" | grep -qE '\|width=[^|]+\|promised=600\|actual=[0-9]+\|at=' && echo yes)"
 # AC-4.3 WITH TWO SUITES: a (5 s) fits in 60 s, c (600 s) does not. ready prints the total, runs a, and waits c:
 # WAITING exit 75, a's verdict written, nothing started for c.
 RN5="$(ll_world)"; ll_launch "$RN5" T1 a,c

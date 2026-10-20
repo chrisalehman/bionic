@@ -474,6 +474,13 @@ expect_eq "WA.16 the mutant whose resources.sh says one core a suite runs and pr
   "$(bash -c '. "$1" 2>/dev/null; gate_promise k 2>/dev/null | cut -d: -f2' _ "$MWA")"
 expect_eq "WA.17 …and answers 7 at load 2.0, not 4: the answer reads resources.sh's cost" "7|0" "$(wask_fresh "$MWA")"
 expect_eq "WA.17b the same fresh shell on the shipped gate answers 4 (the control)" "4|0" "$(wask_fresh "$GATE")"
+# NO NUMBER CAPS THE ANSWER: on a machine with room for thousands of runs it is that room, the share's cores over the
+# suite cost, whatever that comes to.
+fresh width-ask-room
+printf '100\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+world_machine 8192 65536 30 0.0
+expect_eq "WA.18 share 100 on 8192 cores at load 0: answered the room, 8192 cores over the suite cost" \
+  "$(awk -v p="$PROMISE" 'BEGIN { print int(8192 / p) }')|0" "$(wask LA)"
 
 
 # ── §LEASE ───────────────────────────────────────────────────────────────────
