@@ -929,20 +929,21 @@ _line_promise_total() {  # <suites, comma-joined | none> <tree> <root> <accepted
   printf '%s\n' "$t"
 }
 
-# THE SUITE BAR, HELD (wave-39 T39; D1, AC-3.2): each Lands-on suite the row's candidate will hold whose
-# `_gate_promise` is over LINE_SUITE_BAR, one `too-long <suite> <s>s — split it` line; nothing when none is. The
-# candidate is not built yet, so whether it holds a suite is read as its merge will (`_line_merge_holds`). A suite it
-# will not hold is not judged: one the row removed is recorded absent by the carrier (T6), so a split row naming its
-# old whole still lands, and a name no tree holds stalls there (wave-34 T27). A store that cannot be read judges
-# nothing, as `_line_promise_total` sums nothing: the runner's own ask refuses a gate that is not there.
+# THE SUITE BAR, HELD: each Lands-on entry the row's candidate will hold whose `_gate_promise` is over LINE_SUITE_BAR,
+# one `too-long <entry> <s>s — split it` line; nothing when none is. The candidate is not built yet, so whether it
+# holds a suite is read as its merge will (`_line_merge_holds`). A suite it will not hold is not judged: one the row
+# removed is recorded absent by the carrier, so a split row naming its old whole still lands, and a name no tree
+# holds stalls there. A command entry names no file, so it is always held, and is judged under its gate key
+# (`_line_gate_key`), the text its own runs are booked under. A store that cannot be read judges nothing, as
+# `_line_promise_total` sums nothing: the runner's own ask refuses a gate that is not there.
 _line_too_long() {  # <suites, comma-joined | none> <tree> <root> <accepted head> <row head>
   local s p mb
   _gate_store >/dev/null 2>&1 || return 0
   mb="$(git -C "$3" merge-base "${4:-}" "${5:-}" 2>/dev/null)"
   for s in $(printf '%s\n' "$1" | tr ',' ' '); do
     [ "$s" != none ] || continue
-    _line_merge_holds "$3" "$mb" "${4:-}" "${5:-}" "$s" || continue
-    p="$(_gate_promise "${s##*/}" "${2:-}" 2>/dev/null)"; p="${p##*:}"
+    bionic_lands_cmd "$s" >/dev/null || _line_merge_holds "$3" "$mb" "${4:-}" "${5:-}" "$s" || continue
+    p="$(_gate_promise "$(_line_gate_key "$s")" "${2:-}" 2>/dev/null)"; p="${p##*:}"
     case "$p" in ''|*[!0-9]*) continue ;; esac
     [ "$p" -gt "$LINE_SUITE_BAR" ] && printf 'too-long %s %ss — split it\n' "$s" "$p"
   done
