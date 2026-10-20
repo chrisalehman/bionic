@@ -144,7 +144,7 @@ declarations and the reach by file are not. D5's suite count and D12's reach by 
 
 On the user's word, "we do not need to do excessive proving of every suite. That is the entire point of this wave.
 Land these by hand", a writer ran only the suites that pin its own change, RED then GREEN, and the orchestrator landed
-the tree by hand on the report. The landing report below counts forty rows landed by hand and three through
+the tree by hand on the report. The landing report below counts forty-one rows landed by hand and three through
 the line. The whole regression after the build is the proof for everything else (D16).
 
 ### The readings
@@ -166,10 +166,10 @@ the line. The whole regression after the build is the proof for everything else 
 
 ### The landing numbers
 
-`landing-report --rows` at 96680333edfd6f5cdec045aba8b975d879d6a858 on 2026-10-20T18:20:07Z:
+`landing-report --rows` at c8a022d5ba618bb5f82ee02f30b4500b4b18c9fd on 2026-10-20T18:39:49Z:
 
 ```
-landings: queue=3 hand=40 git=0 · ready-to-landed median=5.0m p75=11.7m max=18.4m · runs: green=58 red=0 none=0 discarded=0 red-then-green=0 run=254 reused=0 absent=0 · waited median=15s · killed=2
+landings: queue=3 hand=41 git=0 · ready-to-landed median=5.0m p75=11.7m max=18.4m · runs: green=59 red=0 none=0 discarded=0 red-then-green=0 run=257 reused=0 absent=0 · waited median=15s · killed=2
 T1 hand ready=- landed=2026-10-20T03:54:44Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 T27 hand ready=- landed=2026-10-20T03:57:02Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 T26 hand ready=- landed=2026-10-20T03:57:49Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
@@ -216,6 +216,7 @@ T58 hand ready=- landed=2026-10-20T13:41:02Z minutes=- runs=0 waited=- wait=- pr
 T62 hand ready=- landed=2026-10-20T16:43:23Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 T38 hand ready=- landed=2026-10-20T18:04:06Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 T65 hand ready=- landed=2026-10-20T18:19:27Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T66 hand ready=- landed=2026-10-20T18:39:15Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 ```
 
 The three line landings are T32 and T33, the two one-file rows, at 5.0 and 1.6 minutes, and T34 at 18.4 minutes, of
