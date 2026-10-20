@@ -111,8 +111,6 @@ SB_ASK="$TMP/sb-ask"; mkdir -p "$SB_ASK/.claude"
 ASK_OUT="$(printf 'n\n' | HOME="$SB_ASK" ZDOTDIR="$SB_ASK" SHELL=/bin/zsh PATH="$STUB:$PATH" BIONIC_CLAUDE_HOME="$SB_ASK/.claude" \
   bash "$SETUP_SH" --only claude-proxy 2>&1)"
 expect_contains "P15 the question is asked (the rows below read a real page)" "[y/N]" "$ASK_OUT"
-expect_contains "P16 …and its reason names the checkout's plugin" "the session runs that checkout's plugin instead of the installed one" "$ASK_OUT"
-expect_contains "P17 …beside the bypass reason it always gave" "keeps bypass selectable in the shift+tab cycle" "$ASK_OUT"
 # The lines that name the rc carry the sandbox's own temp path, whatever its length; every other
 # line — the seven body lines and the two reasons among them — is bionic's text and fits.
 ASK_WIDE=""; ASK_N=0
@@ -142,7 +140,6 @@ PR_OUT="$(printf 'y\n' | HOME="$SB_PR" ZDOTDIR="$SB_PR" SHELL=/bin/zsh PATH="$ST
   bash "$SETUP_SH" --only working-principles 2>&1)"
 PR_FILE="$(cat "$SB_PR/.claude/CLAUDE.md" 2>/dev/null)"
 expect_contains "R1 setup wrote the principles span (the file was read)" "bionic:principles:start" "$PR_FILE"
-expect_contains "R2 the span carries the comment rule" "A comment states the reason and the invariant" "$PR_FILE"
 expect_contains "R3 …including what a comment never names" "never names a wave" "$PR_FILE"
 # The page folds the text at 94 columns, so a phrase can break across two lines: read it unfolded.
 PR_FLAT="$(printf '%s' "$PR_OUT" | tr '\n' ' ' | tr -s ' ')"

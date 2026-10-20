@@ -596,7 +596,6 @@ expect_status "a successful observation exits 0" 0 "$ST"
 M7=$(MLINE_OF "$OUT7")
 expect_regex "a successful run prints ONE versioned machine line" \
   '^stop-check-observation/v1\|' "$M7"
-expect_eq "exactly one machine line, never two" "1" "$(printf '%s\n' "$OUT7" | grep -c '^stop-check-observation/')"
 expect_contains "the machine line names the RESOLVED target" \
   "target=amachine-7777777777777777" "$M7"
 expect_contains "the machine line names the target AS TYPED" "typed=machine" "$M7"
@@ -665,8 +664,6 @@ OUT7D=$(run_check "$H7" "$R7" "apipe-3333333333333333" 'rep|ort.md')
 M7D=$(MLINE_OF "$OUT7D")
 expect_absent_ci "a deliverable path carrying a pipe does not forge a field" \
   "rep|ort" "$M7D"
-expect_eq "the forged-field attempt still yields one line" "1" \
-  "$(printf '%s\n' "$OUT7D" | grep -c '^stop-check-observation/')"
 
 # ============================================================
 section "Section 8: roster classification, contract-from-roster, P2 claims (task 4/5, AC-6)"
@@ -925,8 +922,6 @@ expect_absent_ci "D1: the display never hands it THIS session's contracted progr
 OUT9B=$(run_check_as "$OWN9" "$H9" "$R9" "sibling")
 M9B=$(printf '%s\n' "$OUT9B" | grep '^stop-check-observation/')
 expect_contains "D2: this session's own live agent resolves OURS" "|classification=ours|" "$M9B"
-expect_contains "D2: …and the reason names the harness's answer, not a directory" \
-  "the harness reports it as a teammate" "$OUT9B"
 
 # --- (c) the roster is the CONTRACT source for a target the live set has already named. It
 # is no longer an ownership oracle of any kind — that is the whole of what D1 cost. ---

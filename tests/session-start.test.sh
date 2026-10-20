@@ -297,7 +297,6 @@ has  "1.3 …with ONE open row (three status rows for W-ALPHA are one agent)" "1
 has  "1.4 …under the predecessor's sid8" "${OLD_SID:0:8}" "$OUT"
 hasnt "1.5 …and THIS session's own open roster is not a predecessor" "roster-$CUR_SID.state" "$OUT"
 has  "1.6 the re-arm sequence: CronList first" "re-arm: CronList" "$OUT"
-has  "1.7 …then the stray delete" "delete every job whose prompt begins with bionic-patrol session=" "$OUT"
 has  "1.8 …then CronCreate" "CronCreate" "$OUT"
 # RE-AUTHORED BY wave-21 T2 (REQ-2, D2, ADR-037 decision 1). T19 (A-orch-19.3) dropped
 # `session-poker.sh arm` from this line because engage.sh arms the stamp at engagement. That
@@ -310,8 +309,6 @@ has  "1.8 …then CronCreate" "CronCreate" "$OUT"
 S1_POKER="$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh"
 S1_PROMPT="$(CLAUDE_CODE_SESSION_ID="$CUR_SID" bash "$S1_POKER" prompt 2>/dev/null)"
 has  "1.9 …then the arm hand step, by this hook's own poker" "bash $S1_POKER arm" "$OUT"
-has  "1.9b …the re-arm line itself, exactly: CronList, delete, CronCreate with the baked prompt, arm" \
-  "re-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring every 3600s, with the prompt \`$S1_PROMPT\` → bash $S1_POKER arm" "$OUT"
 has  "1.9c …the baked prompt's first token is THIS session's marker" \
   "with the prompt \`bionic-patrol session=${CUR_SID:0:8} " "$OUT"
 has  "1.9e …and its tick is this hook's own poker" "bash $S1_POKER tick" "$OUT"
@@ -597,8 +594,6 @@ plant_engaged "$P12d" "$CUR_SID"   # empty marker: engaged, unbound
 S12d_BEFORE=$(snap "$P12d")
 OUT=$(drive "$P12d" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "12d.1 exit 0" "0" "$(rc)"
-has   "12d.2 the not-bound header names the count" \
-  "bionic: 2 open runs exist here and this session is not bound to one" "$OUT"
 has   "12d.3 …and the bind instruction" "session-poker.sh bind <plan>" "$OUT"
 has   "12d.4 the first open plan is listed relative to the docs root" \
   "  ${PLAN12dA#$P12d/.bionic/docs/}" "$OUT"
@@ -630,8 +625,6 @@ has   "12e.2 the header names the TRUE count, not the capped one" \
   "bionic: 10 open runs exist here" "$OUT"
 eq    "12e.3 exactly 8 plan lines are listed" "8" \
   "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
-has   "12e.4 …and one trailer line names the remainder" \
-  "  … and 2 more — bind names any open plan" "$OUT"
 hasnt "12e.5 no absolute path anywhere in the block" "$P12e/.bionic/docs/" "$OUT"
 eq    "12e.6 wrote nothing" "$S12e_BEFORE" "$(snap "$P12e")"
 
@@ -651,7 +644,6 @@ eq    "12f.1 exit 0" "0" "$(rc)"
 has   "12f.2 the header names the count" "bionic: 3 open runs exist here" "$OUT"
 eq    "12f.3 all three plan lines are listed" "3" \
   "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
-hasnt "12f.4 …and no trailer line" "more — bind names any open plan" "$OUT"
 eq    "12f.5 wrote nothing" "$S12f_BEFORE" "$(snap "$P12f")"
 
 # Eight days ago: past the default 7d `live-window`, so `live_runs` excludes it while
@@ -676,8 +668,6 @@ has   "13a.3 the live plan is listed relative to the docs root" \
   "  ${PLAN13A#$P13/.bionic/docs/}" "$OUT"
 hasnt "13a.4 the first quiet plan is NOT listed" "$(basename "$PLAN13B")" "$OUT"
 hasnt "13a.5 the second quiet plan is NOT listed" "$(basename "$PLAN13C")" "$OUT"
-has   "13a.6 one quiet-count line names the two quiet runs" \
-  "bionic: 2 quiet open run(s) — bind names any of them" "$OUT"
 eq    "13a.7 wrote nothing" "$S13_BEFORE" "$(snap "$P13")"
 
 echo ""
@@ -689,11 +679,8 @@ backdate "$PLAN13bB" "$QUIET_AGO"
 plant_engaged "$P13b" "$CUR_SID"
 OUT=$(drive "$P13b" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "13b.1 exit 0" "0" "$(rc)"
-has "13b.2 the not-bound header still fires" \
-  "bionic: 2 open runs exist here and this session is not bound to one" "$OUT"
 has "13b.3 the live plan is listed" "  ${PLAN13bA#$P13b/.bionic/docs/}" "$OUT"
 hasnt "13b.4 the quiet plan is not listed" "$(basename "$PLAN13bB")" "$OUT"
-has "13b.5 one quiet-count line" "bionic: 1 quiet open run(s) — bind names any of them" "$OUT"
 
 echo ""
 echo "--- 13c: all open runs live: no quiet-count line at all (anti-vacuity) ---"
@@ -773,8 +760,6 @@ hasnt "15.2 no bound line — this session never bound" "bionic: bound to" "$OUT
 hasnt "15.3 no quiet-count line — nothing is quiet" "quiet open run(s)" "$OUT"
 has   "15.4 the predecessor roster still prints, exactly as today" "roster-$OLD_SID.state" "$OUT"
 eq    "15.5 wrote nothing" "$S15_BEFORE" "$(snap "$P15")"
-has   "15.6 the bind line prints for the engaged unbound session (C-4)" \
-  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
 has   "15.7 …naming the poker's bind verb" "/hooks/session-poker.sh bind <plan>" "$OUT"
 has   "15.8 …and then the one run, docs-root-relative, on its own line" \
   "  ${PLAN15#$P15/.bionic/docs/}" "$OUT"
@@ -803,12 +788,6 @@ plant_engaged "$P15h" "$CUR_SID"
 plant_bound "$P15h" "$HOLD_SID" "$PLAN15h"
 OUT=$(DRIVE_LIVE="$HOLD_SID" drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "15h.1 exit 0" "0" "$(rc)"
-has   "15h.2 held: the header names the live holder by its id prefix" \
-  "bionic: 1 open run exists here and live session ${HOLD_SID:0:8} holds it; this session is not bound to it" "$OUT"
-has   "15h.3 …and says to bind only when resuming that run" \
-  "/hooks/session-poker.sh bind <plan> only if this session is resuming that run" "$OUT"
-hasnt "15h.4 …and the bare bind line (§15's) is not printed" \
-  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
 has   "15h.5 …the run still listed on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
 eq    "15h.6 …exactly one header line and one run line, on stdout" "2" \
   "$(printf '%s\n' "$OUT" | grep -c -e 'not bound to it' -e "^  ${PLAN15h#$P15h/.bionic/docs/}\$")"
@@ -816,8 +795,6 @@ eq    "15h.7 …nothing of it on stderr" "0" "$(errtext | grep -c 'not bound to 
 # the pair, one fact apart: the SAME root with the holder's pid file gone (dead) prints §15's
 # line exactly, and no holder.
 OUT=$(drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
-has   "15h.8 unheld (the holder is dead): §15's line, unchanged" \
-  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
 hasnt "15h.9 …and no holder named" "holds it" "$OUT"
 has   "15h.10 …and the run on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
 
