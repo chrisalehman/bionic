@@ -66,7 +66,8 @@
 #   §REL-1.23.0     the repository's own release, read from its HEAD tree: the newest heading is 1.23.0, dated, and
 #                   plugin.json agrees; the entry's landing numbers name the head and instant they were rendered at,
 #                   a commit the head holds, so the check holds them to the landing report; the tracked home holds the
-#                   promoted records, and the cover record states the amended rule and not the one it replaced.
+#                   promoted records, the cover record states the amended rule and not the one it replaced, and the
+#                   two records this release decided are accepted at it.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -913,8 +914,11 @@ HL="$(rel_show CHANGELOG.md | awk '/^## / { if (seen) exit; seen = 1 } /^### / {
 expect_nonempty "(n2) the newest entry's landing numbers name the head and instant they were rendered at" "$HL"
 AT="${HL#* at }"; AT="${AT%% *}"
 expect_true "(n2) …and that head is a commit the release head holds" git -C "$REPO" merge-base --is-ancestor "${AT:-none}" HEAD
-for adr in adr-056-cover-is-a-fact-of-the-tree adr-063-the-core-script-is-eight-files adr-064-a-rule-is-enforced-at-one-door; do
+for adr in adr-056-cover-is-a-fact-of-the-tree adr-062-a-reviews-fixes-are-inside-the-review adr-063-the-core-script-is-eight-files adr-064-a-rule-is-enforced-at-one-door; do
   expect_nonempty "(n3) the tracked home holds $adr" "$(rel_show "docs/adrs/$adr.md" | sed -n '/^# ADR-/p')"
+done
+for adr in adr-063-the-core-script-is-eight-files adr-064-a-rule-is-enforced-at-one-door; do
+  expect_regex "(n5) $adr is accepted at this release" '^status: Accepted \(Step 7, [0-9-]+, 1\.23\.0\)$' "$(rel_show "docs/adrs/$adr.md" | sed -n '/^status:/{p;q;}')"
 done
 A56="$(rel_show docs/adrs/adr-056-cover-is-a-fact-of-the-tree.md)"
 expect_contains "(n4) the promoted cover record states the amended rule" "covered for every review question once it lands green" "$A56"
