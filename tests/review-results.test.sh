@@ -10,8 +10,8 @@
 # whole run is early, not waived. The page refuses to render, `CARD-EARLY — <reason>` on stderr and exit 1, while
 # a reader row is open, an owed reading is unregistered at the head, or `current <N> --check` is red for N = 6, 7
 # or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. One
-# reply, typed by the user, `all default` or `all recommended`, is replayed by `reply` into approve, waive,
-# waive-row and finding-move with the user's words.
+# reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
+# approve, waive, waive-row and finding-move with the user's words.
 #
 # §SHAPE     the prototype's sections in order, plain text, no record path, no quotation, the title, the record
 # §TRIGGERS  a carried S3 stays under Findings; a criterion miss and a recommendation against the default decide

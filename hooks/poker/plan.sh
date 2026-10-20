@@ -2428,7 +2428,9 @@ BRF_EOF
   # `review-results-<head8>.md` with its replay table, which `reply` reads:
   #
   #   review-results/v1|plan=<plan>|head=<40-hex>|at=<ISO>|decisions=<n>
-  #   review-results/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|why=<why|->
+  #   review-results/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|choices=<word>/<word>|why=<why|->
+  #
+  # `choices=` holds the word a reply names each choice by, the default's then the other's: the first word of its label.
   #
   # Early, it prints `CARD-EARLY — <reason>` on stderr, exit 1, and writes nothing. `--preview` renders the page
   # whatever the facts, the reason first when it is early, and records no page and opens no item. REFUSED (1),
@@ -2520,6 +2522,11 @@ BRF_EOF
     local i
     for ((i = 0; i < RR_N; i++)); do [ "${RR_KEY[$i]}" != "$1" ] || { printf '%s' "$((i + 1))"; return 0; }; done
     return 1
+  }
+
+  rr_word() {  # <label> -> the one word a reply names that choice by: its first, in lower case
+    local w="${1%% *}"; w="${w%,}"
+    printf '%s' "$w" | tr '[:upper:]' '[:lower:]'
   }
 
   rr_plural() {  # <n> <singular> <plural> -> `<n> <word>`
@@ -2622,7 +2629,7 @@ RR_ASIDE_EOF
       if [ "$RR_PREVIEW" = yes ]; then
         printf '0\t\n0\tPreview only: nothing is recorded, and reply cannot act on it.\n'
       elif [ "$RR_N" -gt 0 ]; then
-        printf '0\t\n0\tReply "all recommended" or "all default".\n'
+        printf '0\t\n0\tReply "all recommended", "all default", or by number, as "1 %s, rest default".\n' "$(rr_word "${RR_OLAB[0]}")"
       fi
     } | sitrep_fold
   }
@@ -2639,8 +2646,8 @@ RR_ASIDE_EOF
       printf '%s\n\n## Replay\n\n' "$1"
       printf 'review-results/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "$(iso_now)" "$RR_N"
       for ((i = 0; i < RR_N; i++)); do
-        printf 'review-results/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
-          "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "${RR_WHYS[$i]}"
+        printf 'review-results/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
+          "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "$(rr_word "${RR_DLAB[$i]}")" "$(rr_word "${RR_OLAB[$i]}")" "${RR_WHYS[$i]}"
       done
     } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
     rm -f "$f.new.$$" 2>/dev/null
@@ -2875,13 +2882,73 @@ RR_AGAINST_EOF
   # THE REPLY TO THE REVIEW RESULTS, REPLAYED. `review-results` writes the page with its replay table, one line per
   # decision with its default, its other choice and the recommendation (`pick=`); the user answers it once, and
   # this verb replays that answer into the record with the user's words. `all default` takes every default, `all
-  # recommended` every recommendation. A verb is run as `<verb> <args…> '<the reply>' ['<why>']`; a `-` default is
+  # recommended` every recommendation. Or the reply orders the decisions by number, items split by commas: `<n>
+  # <choice>`, the choice one of the decision's two words (`choices=`), `default` or `recommended`, and a last item
+  # `rest default` or `rest recommended` for every decision not named ("1 run, 3 fix, rest default"). Every item is
+  # read before anything is applied: one naming no decision on the page, a choice its decision does not offer, a
+  # decision twice, or a reply leaving a decision unnamed with no `rest`, refuses the whole reply, naming the item.
+  # The decisions are then applied in the page's order. A verb is run as `<verb> <args…> '<the reply>' ['<why>']`; a `-` default is
   # applied as carried (a deferral needs no verb) and a `-` other choice is withheld. Each decision applied is
   # written to the page's record (`applied: <key> …`), a re-run skipping those, and the reply last (`replied: …`),
   # so a page is answered once.
   # REFUSED (1), the plan unchanged: no page for the bound run, a page rendered at another head than the working one
-  # (render it again), a page already answered, a reply that is neither of the two, and words the user did not type
+  # (render it again), a page already answered, a reply it cannot read as above, and words the user did not type
   # (lib/said.sh, asked once before any verb runs, so a reply that is not the user's writes nothing).
+  rp_items() {  # <normalised reply> -> RP_PICKS (` <n>=<default|other|recommended>` per item) and RP_REST, from RP_TABLE; 1 refused
+    local it n c row w dw ow last="" i=0 all left="" k
+    local -a items
+    RP_PICKS=" "; RP_REST=""
+    k="$(printf '%s\n' "$RP_TABLE" | /usr/bin/grep -c .)"
+    IFS=',' read -r -a items <<< "$1"
+    for it in "${items[@]}"; do
+      i=$((i + 1)); it="${it# }"; it="${it% }"
+      [ "$i" -lt "${#items[@]}" ] || last=yes
+      case "$it" in
+        'rest default'|'rest defaults'|'rest recommended')
+          if [ -z "$last" ]; then
+            die "REFUSED — the reply's item \"$it\" comes before other items, and rest answers what is left once every other item is read: put it last; nothing is applied and the plan is unchanged."
+            return 1
+          fi
+          RP_REST="${it#rest }"; RP_REST="${RP_REST%s}"; continue ;;
+      esac
+      n="${it%% *}"; c="${it#* }"
+      case "$n" in ''|*[!0-9]*) n="" ;; esac
+      if [ -z "$n" ] || [ "$c" = "$it" ] || [ "$c" != "${c%% *}" ]; then
+        die "REFUSED — the reply's item \"$(clean "$it")\" is not a decision number and a choice: reply \"all recommended\", \"all default\", or by number, as \"1 run, rest default\"; nothing is applied and the plan is unchanged."
+        return 1
+      fi
+      row="$(printf '%s\n' "$RP_TABLE" | /usr/bin/grep -m1 -F "|dec=$n|")"
+      if [ -z "$row" ]; then
+        die "REFUSED — the reply's item \"$it\" names decision $n, and the review results hold decisions 1 to $k; nothing is applied and the plan is unchanged."
+        return 1
+      fi
+      case "$RP_PICKS" in *" $n="*)
+        die "REFUSED — the reply names decision $n twice (\"$it\" is the second); nothing is applied and the plan is unchanged."
+        return 1 ;;
+      esac
+      dw=""; ow=""
+      case "$row" in *"|choices="*) w="${row#*|choices=}"; w="${w%%|*}"; dw="${w%%/*}"; ow="${w#*/}" ;; esac
+      case "$c" in
+        default|recommended) : ;;
+        *) if [ -n "$dw" ] && [ "$c" = "$dw" ]; then c=default
+           elif [ -n "$ow" ] && [ "$c" = "$ow" ]; then c=other
+           else
+             all="${dw:+$dw or }${ow:+$ow, or }default or recommended"
+             die "REFUSED — the reply's item \"$(clean "$it")\" names a choice decision $n does not offer: it offers $all; nothing is applied and the plan is unchanged."
+             return 1
+           fi ;;
+      esac
+      RP_PICKS="$RP_PICKS$n=$c "
+    done
+    [ -z "$RP_REST" ] || return 0
+    for ((i = 1; i <= k; i++)); do case "$RP_PICKS" in *" $i="*) : ;; *) left="${left:+$left, }$i" ;; esac; done
+    if [ -n "$left" ]; then
+      die "REFUSED — the reply leaves decision(s) $left unanswered: name each, or end on rest default or rest recommended; nothing is applied and the plan is unchanged."
+      return 1
+    fi
+    return 0
+  }
+
   poker_verb_reply() {
     case "$RP_TEXT" in
       *$'\n'*|*$'\r'*) die "REFUSED — a reply is one line, and this one carries a line break; the plan is unchanged."; exit 1 ;;
@@ -2913,11 +2980,11 @@ RR_AGAINST_EOF
       exit 1
     fi
     RP_NORM="$(printf '%s' "$RP_TEXT" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]"]*//' -e 's/[[:space:]".!]*$//' -e 's/[[:space:]][[:space:]]*/ /g')"
+    RP_TABLE="$(/usr/bin/grep '^review-results/v1|dec=' "$RP_CARD" 2>/dev/null)"
     case "$RP_NORM" in
-      'all default'|'all defaults') RP_ALL=default ;;
-      'all recommended') RP_ALL=recommended ;;
-      *) die "REFUSED — the reply \"$(clean "$RP_TEXT")\" is neither all recommended nor all default, the two replies the review results $RP_CARD take; the plan is unchanged."
-         exit 1 ;;
+      'all default'|'all defaults') RP_HOW=all-default; RP_REST=default; RP_PICKS=" " ;;
+      'all recommended') RP_HOW=all-recommended; RP_REST=recommended; RP_PICKS=" " ;;
+      *) RP_HOW=by-number; rp_items "$RP_NORM" || exit 1 ;;
     esac
     user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
     if [ "$RP_SAID" -ne 0 ]; then
@@ -2936,10 +3003,13 @@ RR_AGAINST_EOF
         esac
       done
       [ -n "$RP_KEY" ] || continue
+      RP_N="${RP_L#*|dec=}"; RP_N="${RP_N%%|*}"
+      case "$RP_PICKS" in *" $RP_N="*) RP_S="${RP_PICKS#* "$RP_N"=}"; RP_S="${RP_S%% *}" ;; *) RP_S="$RP_REST" ;; esac
+      [ "$RP_S" != recommended ] || RP_S="$RP_PICK"
       # A DECISION ALREADY REPLAYED FROM THIS PAGE is skipped: a reply that stopped on a refusal is finished by the same reply.
       RP_KEY="$RP_KEY" awk 'index($0, "applied: " ENVIRON["RP_KEY"] " ") == 1 || $0 == "withheld: " ENVIRON["RP_KEY"] { f = 1 }
         END { exit !f }' "$RP_CARD" 2>/dev/null && continue
-      if [ "$RP_ALL" = recommended ] && [ "$RP_PICK" = other ]; then RP_CMD="$RP_ELSE"; RP_SIDE=other; else RP_CMD="$RP_DO"; RP_SIDE=default; fi
+      if [ "$RP_S" = other ]; then RP_CMD="$RP_ELSE"; RP_SIDE=other; else RP_CMD="$RP_DO"; RP_SIDE=default; fi
       if [ "$RP_CMD" = - ]; then
         if [ "$RP_SIDE" = default ]; then RP_REC="applied: $RP_KEY carried"; RP_DONE=$((RP_DONE + 1))
         else RP_REC="withheld: $RP_KEY"; RP_HELD=$((RP_HELD + 1)); fi
@@ -2958,13 +3028,13 @@ RR_AGAINST_EOF
       printf 'applied: %s %s rc=0\n' "$RP_KEY" "${RP_ARGV[0]}" >> "$RP_CARD"
       RP_DONE=$((RP_DONE + 1))
     done <<RP_TABLE
-$(/usr/bin/grep '^review-results/v1|dec=' "$RP_CARD" 2>/dev/null)
+$RP_TABLE
 RP_TABLE
-    printf 'replied: at=%s reply=all-%s words="%s"\n' "$(iso_now)" "$RP_ALL" "$(clean "$RP_TEXT")" >> "$RP_CARD"
+    printf 'replied: at=%s reply=%s words="%s"\n' "$(iso_now)" "$RP_HOW" "$(clean "$RP_TEXT")" >> "$RP_CARD"
     if [ "$RP_HELD" -gt 0 ]; then
-      say "reply — all $RP_ALL replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded, $RP_HELD held back; render the review results again once what is held is settled."
+      say "reply — \"$(clean "$RP_TEXT")\" replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded, $RP_HELD held back; render the review results again once what is held is settled."
     else
-      say "reply — all $RP_ALL replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded; nothing on the page is left open."
+      say "reply — \"$(clean "$RP_TEXT")\" replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded; nothing on the page is left open."
     fi
     exit 0
   }
