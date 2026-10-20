@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 5: the sections wave-38 adds (§CHECK, §WORD, §EARLY-TICK, §DECISIONS, §ORDER).
+# Tests for hooks/session-poker.sh — shard 5: §CHECK, §WORD, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -178,8 +178,8 @@ expect_eq "CK-u6 …control: current 7 --check on that plan is admitted (exit 0)
 # A doctored copy of the poker (hooks/ beside scripts/lib, the tree's own library linked in, so the copy's
 # loader finds this tree's library) with every `cur7_judge <N>` call line replaced by one that only binds the head
 # the judge would have set (`PV_HEAD8`, read by the advance's summary under `set -u`), so the judge is gone and
-# nothing else is. It runs, and says "would advance" on the two judge-refused fixtures, so the agreement rows
-# CK-7r and CK-8r go red on it.
+# nothing else is. It runs, and says "would advance" on the judge-refused fixture at Step 7, so the agreement row
+# there goes red on it; at Step 8 the dry commit refuses failing readings before the judge is asked.
 CK_MUT="$TMPROOT/ck-mutant"; mkdir -p "$CK_MUT/hooks" "$CK_MUT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$CK_MUT/scripts/lib"
 for ck_sib in "$(dirname "$POKER")"/*; do
@@ -207,32 +207,18 @@ CK_M7="$RC|$(printf '%s\n' "$OUT" | head -1)"
 poke "$RCK" current 7; CK_A7="$RC"
 expect_eq "CK-mut2 the mutant flips CK-7r: its check says would advance (exit 0) where the real advance refuses (exit 1)" \
   "0|poker: current 7 --check: would advance|1" "$CK_M7|$CK_A7"
-ck_plan 7 "$CK_8R_PROOFS"
-POKER="$CK_MUT/hooks/session-poker.sh"; poke "$RCK" current 8 --check; POKER="$CK_REAL_POKER"
-CK_M8="$RC|$(printf '%s\n' "$OUT" | head -1)"
-poke "$RCK" current 8; CK_A8="$RC"
-expect_eq "CK-mut3 the mutant flips CK-8r: its check says would advance (exit 0) where the real advance refuses (exit 1)" \
-  "0|poker: current 8 --check: would advance|1" "$CK_M8|$CK_A8"
 POKE_BOUND="$CK_BOUND_WAS"
 
 # ============================================================
-section "§WORD: the user's word for the regression — waive regression '<reply>' writes one waived: line the regression judge and the Step-7 wall honour, and waive all '<reply>' writes four in one call (wave-38 T2; REQ-4 AC-4.2)"
+section "§WORD: a question's waiver is the user's word in one waived: line; the regression is never waived, so waive all writes the three questions and a head the regression cannot prove stays refused"
 # ============================================================
-# A question's waiver covers it up to its head; the regression had no such line, so a head the regression could
-# not prove waited on a run or on `approve regression-2`. `waive regression '<reply>'` writes
-#
-#   waived: question=regression head=<working head> by <git user.name> <ISO-UTC> "<reply>"
-#
-# in the grammar the three questions use (lib/proof.sh `proof_waiver_line`), and `waive all '<reply>'` writes four such
-# lines, evidence, adversarial, structure and regression, in one transaction. The judge (lib/proof.sh
-# `_proof_floor_judge`, asked by facts_state for `current 7` and `current 8`) reads a regression waiver newer than the
-# plan's last regression proof as the regression's newest link, covered to its head; the Step-7 text wall
-# (`_eg_refuse_floor_absent`) reads it through `proof_floor_absent`, the one reader of "is there a regression line".
-# FIXTURE FIDELITY: §CUR7's shape (session-poker-4): a real repository on `wave/01-fixture` with two suites and
-# lib/x.sh, base B and one code commit C; a double wave plan the real gate admits at Steps 6 and 7, bound to this
-# session; every fact in the production writer's shape (`proof_line`, `proof_floor_line`). Every move is the real verb.
-# fails-when: a gate still refuses at the waived head; the line is not the three questions' grammar; `waive all` writes
-# other than four lines.
+# `waive <question> '<reply>'` writes `waived: question=<q> head=<working head> by <git user.name> <ISO-UTC> "<reply>"`
+# (lib/proof.sh `proof_waiver_line`) for evidence, adversarial or structure; `waive all` writes those three in one
+# transaction. The regression is a run to find bugs, never a waiver: `waive regression` is refused with the plan
+# unchanged, and the judge keeps reading a head past the regression's proof as uncovered. FIXTURE FIDELITY: a real
+# repository on `wave/01-fixture` with two suites and lib/x.sh, base B and one code commit C; a double wave plan the
+# real gate admits at Steps 6 and 7, bound to this session; every fact in the production writer's shape.
+# fails-when: the regression takes a waiver; `waive all` writes other than the three questions.
 WD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 WD_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 RWD="$(make_repo word)"
@@ -283,7 +269,7 @@ wd_judge() {  # -> facts_state's lines for PWD8 at the working branch's ref, `re
 wd_current() { sed -n 's/^current: //p' "$PWD8"; }
 WD_ISO='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
 
-# ---------- waive regression: the one line, and current 7 passes at a head the regression refuses without it ----------
+# ---------- waive regression: refused, and the head the regression cannot prove stays refused ----------
 wd_plan 6 "$(wd_floor "$WD_B")
 $(wd_reads "$WD_C")"
 expect_eq "WD-0 precondition: the regression proof at B, the head at C: the judge reads it uncovered, the readings covered" \
@@ -291,16 +277,13 @@ expect_eq "WD-0 precondition: the regression proof at B, the head at C: the judg
 poke "$RWD" current 7
 expect_eq "WD-0b precondition: …so current 7 is refused at C (exit 1), the plan at current: 6" "1|6" "$RC|$(wd_current)"
 expect_contains "WD-0c …in the judge's words" "uncovered" "$OUT"
+cp "$PWD8" "$TMPROOT/wd-before"
 poke "$RWD" waive regression '1'
-expect_eq "WD-1 AC-4.2 waive regression '1' is admitted (exit 0)" "0" "$RC"
-expect_regex "WD-1b …and writes one line in the three questions' grammar: the question, the working head, who, when, the reply" \
-  "^waived: question=regression head=${WD_C} by Dana Fixture ${WD_ISO} \"1\"$" "$(/usr/bin/grep -E '^waived: ' "$PWD8")"
-expect_contains "WD-1c …and the success line names it" "question=regression head=${WD_C}" "$OUT"
-expect_eq "WD-2 AC-4.2 …which the judge reads: the regression covered at C" "regression covered" "$(wd_judge | awk 'NR == 1')"
-poke "$RWD" current 7
-expect_eq "WD-3 AC-4.2 current 7 passes at the waived head (exit 0), the plan at current: 7" "0|7" "$RC|$(wd_current)"
+expect_eq "WD-1 waive regression is refused (exit 1), the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/wd-before" "$PWD8" && echo same || echo changed)"
+expect_eq "WD-2 …and the judge still reads the regression uncovered at C" "regression uncovered" "$(wd_judge | awk 'NR == 1')"
 
-# ---------- waive all: four lines in one call, and current 8 passes ----------
+# ---------- waive all: the three questions in one call; the regression still holds current 8 ----------
 wd_plan 7 "$(wd_floor "$WD_B")
 $(wd_reads "$WD_B")"
 expect_eq "WD-4 precondition: every reading and the regression at B, the head at C: the judge reads all six uncovered" \
@@ -309,22 +292,21 @@ poke "$RWD" current 8
 expect_eq "WD-4b precondition: …so current 8 is refused at C (exit 1), the plan at current: 7" "1|7" "$RC|$(wd_current)"
 poke "$RWD" waive all '1'
 expect_eq "WD-5 AC-4.2 waive all '1' is admitted (exit 0)" "0" "$RC"
-expect_eq "WD-5b …and writes four lines, evidence, adversarial, structure and regression, each at C with the reply" \
-  "evidence ${WD_C} \"1\"|adversarial ${WD_C} \"1\"|structure ${WD_C} \"1\"|regression ${WD_C} \"1\"" \
+expect_eq "WD-5b …and writes three lines, evidence, adversarial and structure, each at C with the reply" \
+  "evidence ${WD_C} \"1\"|adversarial ${WD_C} \"1\"|structure ${WD_C} \"1\"" \
   "$(/usr/bin/grep -E '^waived: ' "$PWD8" | awk '{ q = $2; h = $3; sub(/^question=/, "", q); sub(/^head=/, "", h); print q " " h " " $NF }' | paste -sd'|' -)"
-expect_eq "WD-5c …each in the one grammar" "4" \
-  "$(/usr/bin/grep -cE "^waived: question=(evidence|adversarial|structure|regression) head=${WD_C} by Dana Fixture ${WD_ISO} \"1\"$" "$PWD8" | tr -d ' ')"
-expect_eq "WD-6 AC-4.2 …which the judge reads: all six covered at C" "6" "$(wd_judge | awk '$2 == "covered"' | awk 'END { print NR }')"
+expect_eq "WD-6 …which the judge reads: the five readings covered at C, the regression not" "5|regression uncovered" \
+  "$(wd_judge | awk '$2 == "covered"' | awk 'END { print NR }')|$(wd_judge | awk 'NR == 1')"
 poke "$RWD" current 8
-expect_eq "WD-7 AC-4.2 current 8 passes at the waived head (exit 0), the plan at current: 8" "0|8" "$RC|$(wd_current)"
+expect_eq "WD-7 current 8 stays refused at C (exit 1), the plan at current: 7" "1|7" "$RC|$(wd_current)"
 
 # ---------- what the verb refuses ----------
 wd_plan 6 "$(wd_floor "$WD_B")"
 cp "$PWD8" "$TMPROOT/wd-before"
 poke "$RWD" waive verdict '1'
-expect_eq "WD-8 a word outside the five is refused (exit 1), the plan byte-identical" "1|same" \
+expect_eq "WD-8 a word outside the four is refused (exit 1), the plan byte-identical" "1|same" \
   "$RC|$(cmp -s "$TMPROOT/wd-before" "$PWD8" && echo same || echo changed)"
-expect_contains "WD-8b …naming the five" "evidence, adversarial, structure, regression or all" "$OUT"
+expect_contains "WD-8b …naming the four it takes" "evidence, adversarial, structure or all" "$OUT"
 POKE_BOUND="$WD_BOUND_WAS"
 
 # ============================================================
@@ -463,22 +445,58 @@ expect_eq "DG-3b …and no line is the put line's: no entry whose verb is put" "
 poke "$RD6" decisions --all
 expect_eq "DG-4 decisions --all exits 0" "0" "$RC"
 expect_eq "DG-4b AC-7.1 …and lists the same eight, keyed by the wave, in the same order" "$D6_WANT" "$(printf '%s\n' "$OUT" | d6_pick)"
-# The resume recap reads the same list. The world is handoff-file §RESUME's, reduced: the plan on its branches, the
-# handoff written by the real verb while bound, then the session made new (engaged, unbound, unstamped).
-git -C "$RD6" config user.name "Dana Fixture"; git -C "$RD6" config user.email t@example.com
-( cd "$RD6" && git commit -q --allow-empty -m init && git branch -f trunk HEAD && git commit -q --allow-empty -m work && git branch -f wave/01-fixture HEAD )
-awk 'NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next } { print }' "$PD6" > "$PD6.d6" && mv "$PD6.d6" "$PD6"
-s42_snap "$RD6" "$PD6"
-poke "$RD6" handoff --mid-flight 'T2 is in its ready loop'
-expect_eq "DG-5 precondition: the handoff is written by the real verb while bound" "0" "$RC"
-D6_DOOR=".bionic/docs/record/wave-01-fixture/handoff.md"
-expect_true "DG-5b precondition: …and the file is there" test -s "$RD6/$D6_DOOR"
-engage "$RD6"
-rm -f "$(stamp_of "$RD6")" "$(armed_of "$RD6")" "$(digest_of "$RD6")"
-poke "$RD6" resume "$D6_DOOR"
-expect_eq "DG-6 precondition: resume exits 0" "0" "$RC"
-expect_eq "DG-6b AC-7.1 the recap's settled: lines are the same eight, in the same order" "$D6_WANT" "$(printf '%s\n' "$OUT" | grep '^settled: ' | d6_pick)"
-expect_eq "DG-6c …and the recap lists every entry of the ledger as settled: (3 + 5 + 2)" "10" "$(printf '%s\n' "$OUT" | grep -c '^settled: D')"
+# The resume recap's settled: lines are this parser's output too, and handoff-file §RESUME reads them there.
+
+# ============================================================
+section "§ROUNDS: decisions put writes a put line to the run's ledger and its ruling closes it, so the sitrep's decisions line counts rounds; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
+# ============================================================
+# A put opens a round and the next ruling of the same number closes it; a ruling with no put open is a round of its
+# own, the shape of a ledger written before puts. The wait line reads the tasks whose reads cell names the decision
+# as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, §DECISIONS's
+# plan shape with a reads column, the ruling headings in the register's grammar written as the person's word is.
+# fails-when: a re-put is uncounted; the wait line is absent, or reads the same whether its task is on the chain.
+RW="$(make_repo rounds)"; PW="$(s34_plan "$RW" 4)"
+RW_L="$RW/.bionic/docs/record/wave-01-fixture/design-ledger.md"; mkdir -p "${RW_L%/*}"
+rw_table() {  # <the side task's size> -> the task table: a side task reads one decision; the last reads another and the long one's file
+  awk -v s="$1" '/^## Tasks/ { print; print ""; print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the first | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | approval:plan |"
+    print "| T2 | 4 | build | the side | implementor | — | " s " | REQ-1 | b.sh | — | — | pending | approval:plan, approval:D7 |"
+    print "| T3 | 4 | build | the long | implementor | — | 200 | REQ-1 | c.sh | — | — | pending | approval:plan |"
+    print "| T4 | 4 | build | the last | implementor | — | 100 | REQ-1 | d.sh | — | — | pending | approval:plan, c.sh, approval:D8 |"
+    print ""; skip = 1; next } skip && /^## / { skip = 0 } !skip' "$PW" > "$PW.t" && mv "$PW.t" "$PW"
+}
+rw_table 30
+printf '# design ledger\n\n## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds\n' > "$RW_L"
+rw_rule() { printf '\n## Δ%s — D3 %s (Dana Fixture 2026-10-06): the third\n' "$1" "$2" >> "$RW_L"; }  # the person's word, as recorded
+rw_line() { poke "$RW" sitrep; printf '%s\n' "$OUT" | grep ' decisions — '; }
+poke "$RW" decisions put D3 'the third'
+expect_eq "RD-1 decisions put exits 0 on the bound run" "0" "$RC"
+expect_eq "RD-1b …and writes one put line for it to the run's ledger" "1" "$(grep -c '^## Δ[0-9]* — D3 put (' "$RW_L")"
+rw_rule 50 'ruled "1"'; poke "$RW" decisions put D3 'the third, again'; rw_rule 51 'amended "2"'
+RD_TWO="$(rw_line)"
+poke "$RW" decisions put D3 'the third, once more'; rw_rule 52 'amended "3"'; poke "$RW" decisions put D2 'the second'
+expect_contains "RD-2 two puts, each ruled, read as two rounds" "D3 two" "$RD_TWO"
+expect_eq "RD-3 …a third reads three, beside a ruling with no put (one round) and a put still open" \
+  "✖️ decisions — 2 ruled in 5 rounds; D1 and D2 one each, D3 three; D2 open" "$(rw_line)"
+poke "$RW" decisions
+expect_contains "RD-4 the register still lists the rulings" 'D3 · amended "3"' "$OUT"
+expect_absent "RD-4b …and no put (RD-4 read the same output)" " put" "$OUT"
+poke "$RW" decisions put 7 'no number'
+expect_eq "RD-5 a put that names no D<n> is refused, the ledger unchanged" "1|4" "$RC|$(grep -c ' put (' "$RW_L")"
+poke "$RW" decisions put D8 'on the chain'; RW_ON="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+poke "$RW" decisions put D7 'off the chain'; RW_OFF="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+poke "$RW" decisions put D9 'read by none'; RW_NONE="$(printf '%s\n' "$OUT" | grep '^wait: ')"
+expect_contains "WT-1 a task on the longest chain reads it: an hour's wait moves the close" "the predicted close moves an hour later" "$RW_ON"
+expect_contains "WT-1b …and names that task" "T4" "$RW_ON"
+expect_contains "WT-2 a task off the chain reads it: that task starts an hour later and the close holds" \
+  "T2 starts an hour later and the predicted close holds" "$RW_OFF"
+expect_contains "WT-3 no task reads it: nothing moves" "nothing moves" "$RW_NONE"
+expect_true "WT-4 the put line in the ledger carries its wait line (WT-1 read it non-empty)" \
+  bash -c '[ -n "$1" ] && grep -qF "$1" "$2"' _ "${RW_ON#wait: }" "$RW_L"
+rw_table 500; poke "$RW" decisions put D7 'off the chain, now on it'
+expect_contains "WT-5 the side task made the longest: the same decision's line now moves the close" \
+  "the predicted close moves an hour later" "$(printf '%s\n' "$OUT" | grep '^wait: ')"
 
 # ============================================================
 section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines while an integrate row is open (wave-38 T3; REQ-1 AC-1.2; D20)"
@@ -699,247 +717,6 @@ expect_eq "QL-7 an open request for another agent, w2, masks nothing: w1 is NOTI
 for QL_P in $QL_PIDS; do kill "$QL_P" 2>/dev/null; wait "$QL_P" 2>/dev/null; done
 ql_clear
 POKE_BOUND="$QL_BOUND_WAS"
-
-# ============================================================
-section "§BRIEF-UNION: brief always unions the reads index into Suites: and Lands-on:, whether or not the row has a suites cell, and the wall admits the rendered text (wave-39 T23; REQ-17 AC-17.1; D22)"
-# ============================================================
-# T43's brief rendered Suites: pending and Lands-on: pending from a row with an empty suites cell and the orchestrator
-# filled both by hand from the index. A row's own cells used to END the derivation (a suites cell, a lands-on cell, and
-# the index was never read), so a row that named some of its suites got a Lands-on the wall refused for omitting the
-# rest. Now Suites: is the row's suites cell (else its Files' *.test.sh entries) with the reads index over its Files
-# unioned after it, and Lands-on: is the lands-on cell (else the Suites) with the same index unioned after it, once
-# each, for a row whose Files write the head. A row that writes no code keeps Lands-on: none <reason>.
-# FIXTURE FIDELITY: session-poker-3 §BRIEF's world (three suites read payload/scripts/lib/walls.sh by the three routes
-# the index knows, one names it only in a comment, committed on the working branch; the index is the real one, read by
-# the real verb) and session-poker-4 §BRIEF's gate (the wall run on the rendered text, as an Agent call's prompt, under
-# a scratch HOME, attestation, patrol stamp and engagement).
-# fails-when: a row with a suites cell, or a lands-on cell, or neither, prints a Suites: or Lands-on: that omits a suite
-# the index names for its Files; the rendered brief is refused by the wall for a Lands-on: outside Suites: or one that
-# omits an index suite; a code-free row loses its `none <reason>`.
-BU_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RBU="$(make_repo brief-union)"; ( cd "$RBU" && git commit -q --allow-empty -m init )
-mkdir -p "$RBU/payload/scripts/lib" "$RBU/hooks" "$RBU/tests"
-printf 'the wall line\n' > "$RBU/payload/scripts/lib/walls.sh"
-printf '#!/bin/bash\nBIONIC_LIB_WANT="walls.sh"\n' > "$RBU/hooks/h.sh"
-printf '#!/bin/bash\ngrep -c wall "$REPO/payload/scripts/lib/walls.sh"\n' > "$RBU/tests/s-grep.test.sh"
-printf "#!/bin/bash\nanchor file payload/scripts/lib/walls.sh 'the wall line'\n" > "$RBU/tests/s-anchor.test.sh"
-printf '#!/bin/bash\nbash "$REPO/hooks/h.sh"\n' > "$RBU/tests/s-hook.test.sh"
-printf '#!/bin/bash\n# payload/scripts/lib/walls.sh is named only in this comment\necho none\n' > "$RBU/tests/s-none.test.sh"
-printf '#!/bin/bash\necho extra\n' > "$RBU/tests/s-extra.test.sh"
-( cd "$RBU" && git add payload hooks tests && git commit -qm "three suites read walls.sh" )
-PBU="$(s42_plan "$RBU" 4)"
-BU_REC=".bionic/docs/record/wave-01-fixture"
-BU_TABLE="$TMPROOT/bu-table.md"
-{
-  printf '## Tasks\n\n'
-  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | suites | lands-on |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T51 | 4 | build | a row that names some suites and a lands-on | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T51-w.md | — | — | pending | s-grep.test.sh, s-extra.test.sh | s-grep.test.sh |\n' "$BU_REC"
-  printf '| T52 | 4 | build | a row with an empty suites cell | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T52-w.md | — | — | pending | — | — |\n' "$BU_REC"
-  printf '| T53 | 4 | build | a row that names suites and no lands-on | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T53-w.md | — | — | pending | s-extra.test.sh | — |\n' "$BU_REC"
-  printf '| T55 | 4 | build | a row whose task carries an escaped pipe, a case label (a\\|b), as T43'"'"'s did | implementor | — | 30 | REQ-1 | payload/scripts/lib/walls.sh, %s/T55-w.md | — | — | pending | s-extra.test.sh | — |\n' "$BU_REC"
-  printf '| T54 | 4 | doc | a record and no code | implementor | — | 30 | REQ-1 | %s/T54-text.md | — | — | pending | — | — |\n' "$BU_REC"
-  printf '\n'
-} > "$BU_TABLE"
-awk -v t="$BU_TABLE" '/^## Tasks/ { while ((getline l < t) > 0) print l; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$PBU" \
-  | awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' > "$PBU.new" && mv "$PBU.new" "$PBU"
-( cd "$RBU" && git add -f "$PBU" && git commit -qm "brief-union fixture" && git branch -f wave/01-fixture HEAD ) >/dev/null 2>&1
-BU_DIR="$RBU/$BU_REC/briefs"
-bu_field() {  # <file> <label> -> the value of the first `<label>:` line, trimmed
-  awk -v l="$2" 'index($0, l ":") == 1 { v = substr($0, length(l) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
-}
-BU_IDX="s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh"
-expect_eq "BU-0 precondition: the reads index at the working head names the three reading suites for walls.sh, and not s-none or s-extra" \
-  "tests/s-anchor.test.sh,tests/s-grep.test.sh,tests/s-hook.test.sh" \
-  "$(bash "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/anchors.sh" reads_index "$RBU" --at wave/01-fixture 2>/dev/null | awk -F'\t' '$1 == "payload/scripts/lib/walls.sh" { print $2 }')"
-
-poke "$RBU" brief T51
-expect_eq "BU-1 a row with a suites cell and a lands-on cell: exit 0, Suites is the cell then the index's suites it lacks" \
-  "0|s-grep.test.sh, s-extra.test.sh, s-anchor.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T51.md" Suites)"
-expect_eq "BU-1b …and Lands-on is its cell then the index's suites it lacks (the index's union, none omitted)" \
-  "s-grep.test.sh, s-anchor.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T51.md" Lands-on)"
-poke "$RBU" brief T52
-expect_eq "BU-2 a row whose suites cell is empty (T43's row): Suites is the index's union, no slot" \
-  "0|$BU_IDX" "$RC|$(bu_field "$BU_DIR/T52.md" Suites)"
-expect_eq "BU-2b …and Lands-on is the index's union" "$BU_IDX" "$(bu_field "$BU_DIR/T52.md" Lands-on)"
-poke "$RBU" brief T53
-expect_eq "BU-3 a row with a suites cell and no lands-on cell: Suites is the cell then the index's suites" \
-  "0|s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T53.md" Suites)"
-expect_eq "BU-3b …and Lands-on is the same set, so it holds every index suite and stays inside Suites" \
-  "s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T53.md" Lands-on)"
-expect_absent "BU-3c …a suite naming the file only in a comment is named by none of the three (positive: BU-3 read four)" \
-  "s-none.test.sh" "$(bu_field "$BU_DIR/T51.md" Suites)$(bu_field "$BU_DIR/T52.md" Suites)$(bu_field "$BU_DIR/T53.md" Suites)"
-poke "$RBU" brief T54
-expect_eq "BU-4 a row that writes no code keeps Suites: none (positive: Row reads from the same file)" "T54|none" \
-  "$(bu_field "$BU_DIR/T54.md" Row)|$(bu_field "$BU_DIR/T54.md" Suites)"
-expect_regex "BU-4b …and Lands-on: none with a reason" '^none [A-Za-z]' "$(bu_field "$BU_DIR/T54.md" Lands-on)"
-
-# T43's row carried a case label `(name\|other)` in its task cell, and the cell reader split on every `|`, so its
-# suites cell read as the status cell to its left: `pending`. The units reader honours `\|`; the cell reader now does.
-poke "$RBU" brief T55
-expect_eq "BU-8 a row whose task cell carries an escaped pipe reads its own suites cell (not the status beside it): the cell, then the index's suites" \
-  "0|s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$RC|$(bu_field "$BU_DIR/T55.md" Suites)"
-expect_eq "BU-8b …and its Lands-on is the same set" "s-extra.test.sh, s-anchor.test.sh, s-grep.test.sh, s-hook.test.sh" "$(bu_field "$BU_DIR/T55.md" Lands-on)"
-expect_absent "BU-8c …and neither line says pending (positive: BU-8 read a Suites)" "pending" "$(bu_field "$BU_DIR/T55.md" Suites)$(bu_field "$BU_DIR/T55.md" Lands-on)"
-
-# ---------- the wall, run on the rendered text ----------
-BU_HOME="$TMPROOT/bu-home"; BU_PROJ="$BU_HOME/.claude/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$RBU")"
-mkdir -p "$BU_PROJ"; : > "$BU_PROJ/$SID.jsonl"
-printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$RBU/.bionic/tmp/patrol-$SID.state"
-printf '# fixture attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$RBU" > "$RBU/.bionic/tmp/preflight-$SID.state"
-bu_gate() {  # <brief text file> <agent name> -> sets BU_OUT, BU_ERR
-  local payload
-  payload="$(jq -n --arg s "$SID" --arg c "$RBU" --arg n "$2" --rawfile p "$1" \
-    '{session_id:$s, transcript_path:"/nonexistent.jsonl", cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
-      tool_input:{description:"a rendered brief", subagent_type:"implementor", prompt:$p, run_in_background:true, name:$n},
-      tool_use_id:"toolu_brief_union"}')"
-  BU_OUT="$( cd "$RBU" && printf '%s' "$payload" | env HOME="$BU_HOME" CLAUDE_CONFIG_DIR="$BU_HOME/.claude" ANTHROPIC_API_KEY=sk-fixture \
-    CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "${BIONIC_HOOKS_DIR}/dispatch-preflight.sh" 2>"$TMPROOT/bu-gate.err" )"
-  BU_ERR="$(cat "$TMPROOT/bu-gate.err")"
-}
-bu_row() { /usr/bin/grep -F "|name=$2|" "$(roster_of "$1")" 2>/dev/null | tail -1; }
-for BU_T in T51 T52 T53 T55; do
-  bu_gate "$BU_DIR/$BU_T.md" "w-$BU_T"
-  expect_absent "BU-5-$BU_T the wall does not refuse the rendered $BU_T brief (outside-Suites and omission arms: zero refusals)" '"permissionDecision":"deny"' "$BU_OUT"
-  expect_contains "BU-5b-$BU_T …and it journalled the launch row for $BU_T (the positive that the wall read the brief)" "|name=w-$BU_T|" "$(bu_row "$RBU" "w-$BU_T")"
-done
-# the wall can refuse each arm on this same text: the two negatives above are tests only beside these two positives
-sed 's/^Lands-on: .*/Lands-on: s-grep.test.sh, s-anchor.test.sh, s-hook.test.sh, s-none.test.sh/' "$BU_DIR/T52.md" > "$TMPROOT/bu-outside.md"
-bu_gate "$TMPROOT/bu-outside.md" w-T52o
-expect_contains "BU-6 the rendered T52 with a Lands-on: suite outside Suites: is denied by the wall" '"permissionDecision":"deny"' "$BU_OUT"
-expect_contains "BU-6b …by the outside-Suites arm" "is outside Suites" "$BU_OUT$BU_ERR"
-sed 's/^Lands-on: .*/Lands-on: s-grep.test.sh/' "$BU_DIR/T52.md" > "$TMPROOT/bu-omits.md"
-bu_gate "$TMPROOT/bu-omits.md" w-T52m
-expect_contains "BU-7 the rendered T52 with a Lands-on: that omits two index suites is denied by the wall" '"permissionDecision":"deny"' "$BU_OUT"
-expect_contains "BU-7b …by the omission arm" "omits" "$BU_OUT$BU_ERR"
-POKE_BOUND="$BU_BOUND_WAS"
-
-# ============================================================
-section "§OWED-WORDS: the judge's refusal, the tick's wait reason and regression-run's refusal each end waive regression '<reply>' beside the second whole run, and name the owed set (wave-39 T25; REQ-18 AC-18.3; D5)"
-# ============================================================
-# A run whose head owes suites past the regression's head was told the way out in three places, and none of them named
-# the user's word for the regression: `current 8` closed on "waive a question", the tick's wait on `approve regression-2`,
-# and regression-run's second-run refusal on the approval. An orchestrator reading them invented `approve regression-2`
-# where the record could only say `waive regression`. Now each ends on `waive regression '<reply>'` beside the second
-# whole run, and the judge and regression-run name THE OWED SET (lib/proof.sh `proof_owed_suites`, the one reader) in
-# one clause (`proof_owed_say`). A head whose owed set is empty owes no run, so no surface offers the waiver for it.
-# FIXTURE FIDELITY: §CHECK's world shape, built afresh: a real repository on `wave/01-fixture`, a.test.sh reading
-# lib/x.sh and b.test.sh reading nothing, a stub tests/run.sh that only counts its runs; base B, a code commit C that
-# a.test.sh reads, and later a glossary commit D in a Markdown file outside the fixed docs list, which no suite reads
-# (AC-18.1). A double wave plan bound to this session, its integrate row pending, every fact in the production
-# writer's shape (`proof_line`, `proof_floor_line`). Every move is the real verb.
-# fails-when: a surface names the run and not the waiver, or ends on anything else; the judge or regression-run names
-# another set than proof_owed_suites prints; a surface offers the waiver at a head whose owed set is empty.
-OW_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-ROW="$(make_repo owed-words)"
-git -C "$ROW" config user.email t@example.com; git -C "$ROW" config user.name "Dana Fixture"
-printf '.bionic\n' > "$ROW/.gitignore"
-mkdir -p "$ROW/tests" "$ROW/lib" "$ROW/notes" "$ROW/.bionic/docs/plans" "$ROW/.bionic/docs/record/w35"
-OW_SEEN="$TMPROOT/ow-seen"; : > "$OW_SEEN"
-printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$ROW/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$ROW/tests/b.test.sh"
-printf '#!/bin/bash\nprintf ran >> "%s"\nexit 0\n' "$OW_SEEN" > "$ROW/tests/run.sh"
-printf 'one\n' > "$ROW/lib/x.sh"; printf '# Glossary\n' > "$ROW/notes/glossary.md"
-( cd "$ROW" && git add .gitignore tests lib notes && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
-printf 'generic fixture proof\n' > "$ROW/.bionic/docs/record/generic-evidence.md"
-OW_B="$(git -C "$ROW" rev-parse HEAD)"
-OW_C="$(s57_commit "$ROW" lib/x.sh 'C: a code change a.test.sh reads')"
-POW="$ROW/.bionic/docs/plans/wave-x.plan.md"
-ow_plan() {  # <current> <proof lines> -> POW with a pending integrate row, bound to this session
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
-    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
-    printf 'current: %s\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
-    printf -- '- Step 4: dispatched, record/w35/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$OW_B"
-    printf -- '- Step 5: floor, record/w35/floor.log\n  auditor: CONFIRMED, record/w35/audit.md\n'
-    printf -- '- Step 6: review at record/w35/review.md\n'
-    printf -- '- Step 7: documented at record/w35/docs.md\n  n/a: no decision this run\n'
-    printf '%s\n' "$2"
-    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
-    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
-    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
-    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
-    printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | pending | approval:release, approval:merge, proof:regression, head |\n'
-  } > "$POW"
-  bind_marker "$ROW" "$POW"; new_roster "$ROW"
-}
-ow_set() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_owed_suites "$2" "$3"' _ "$CK_LIB" "$POW" "$ROW" 2>/dev/null; }
-ow_last() { printf '%s\n' "$1" | awk 'NF { l = $0 } END { print l }'; }   # <text> -> its last non-blank line
-ow_wait() { printf '%s\n' "$OUT" | awk 'index($0, "poker: WAIT T3 ") == 1 { print; exit }'; }   # the tick's WAIT line for T3
-ow_runs() { wc -c < "$OW_SEEN" | tr -d ' '; }
-OW_TAIL="waive regression '<reply>'"
-
-# ---------- a head that owes a.test.sh: the three surfaces ----------
-ow_plan 7 "$(ck_floor "$OW_B")
-$(ck_reads "$OW_C")"
-OW_SET="$(ow_set)"
-expect_eq "OW-0 precondition: the owed set at C is a.test.sh, the suite that reads what C changed (proof_owed_suites, the one reader)" \
-  "a.test.sh" "$OW_SET"
-poke "$ROW" current 8
-expect_eq "OW-1 precondition: current 8 is refused at C (exit 1), the plan at current: 7" "1|7" "$RC|$(sed -n 's/^current: //p' "$POW")"
-expect_contains "OW-1b …by the judge, on the regression" "regression	uncovered	" "$OUT"
-expect_regex "OW-2 AC-18.3 the judge's refusal ends on the user's word for the regression" "waive regression '<reply>'\$" "$(ow_last "$OUT")"
-expect_contains "OW-2b …beside the second whole run" "a second whole run, or the user's word: ${OW_TAIL}" "$(ow_last "$OUT")"
-expect_contains "OW-2c …and names the owed set proof_owed_suites prints" "the head owes ${OW_SET}:" "$(ow_last "$OUT")"
-# The integrate row waits for its step first, so the tick is asked of the run at current: 8, C landed after the advance.
-ow_plan 8 "$(ck_floor "$OW_B")
-$(ck_reads "$OW_C")"
-forget_digest "$ROW"
-poke "$ROW" tick
-expect_contains "OW-3 precondition: the tick holds the integrate row on the regression (the extractor reads real output)" \
-  "proof:regression: the regression is one whole run plus each later commit proved" "$(ow_wait)"
-expect_regex "OW-3b AC-18.3 the tick's wait reason ends on the user's word for the regression" "waive regression '<reply>'\$" "$(ow_wait)"
-expect_contains "OW-3c …beside the second whole run" "a second run: approve regression-2, or the user's word: ${OW_TAIL}" "$(ow_wait)"
-ow_plan 7 "$(ck_floor "$OW_B")
-$(ck_reads "$OW_C")"
-poke "$ROW" regression-run
-expect_eq "OW-4 precondition: regression-run refuses a second whole run at C (exit 1), and nothing ran" "1|0" "$RC|$(ow_runs)"
-expect_contains "OW-4b …as a second whole run" "a second whole run on this plan" "$OUT"
-expect_regex "OW-4c AC-18.3 regression-run's refusal ends on the user's word for the regression" "waive regression '<reply>'\$" "$(ow_last "$OUT")"
-expect_contains "OW-4d …and names the owed set proof_owed_suites prints" "the head owes ${OW_SET}:" "$OUT"
-
-# ---------- the user's word closes it: every surface goes quiet ----------
-poke "$ROW" waive regression '1'
-expect_eq "OW-5 the user's waive regression '1' is admitted (exit 0)" "0" "$RC"
-expect_eq "OW-5b …and the owed set is empty to the waiver's head" "" "$(ow_set)"
-poke "$ROW" current 8
-expect_eq "OW-5c …so current 8 is admitted (exit 0), the plan at current: 8" "0|8" "$RC|$(sed -n 's/^current: //p' "$POW")"
-
-# ---------- AC-18.1: a glossary commit past the regression's head owes nothing, and no surface offers the waiver ----------
-OW_D="$(s57_commit "$ROW" notes/glossary.md 'D: a glossary line, read by no suite')"
-ow_plan 7 "$(ck_floor "$OW_C")
-$(ck_reads "$OW_D")"
-expect_eq "OW-6 precondition: past the regression's head at C, the glossary commit D owes nothing (the extractor read a.test.sh at OW-0)" \
-  "" "$(ow_set)"
-poke "$ROW" current 8
-expect_eq "OW-6b current 8 is admitted at D (exit 0)" "0" "$RC"
-expect_absent "OW-6c …and says nothing of the regression's waiver (OW-2 is the positive)" "waive regression" "$OUT"
-ow_plan 8 "$(ck_floor "$OW_C")
-$(ck_reads "$OW_D")"
-forget_digest "$ROW"
-poke "$ROW" tick
-expect_contains "OW-7 precondition: the tick still holds the integrate row (the extractor reads real output)" "poker: WAIT T3 " "$(ow_wait)"
-expect_absent "OW-7b …but not on the regression, and with no waiver (OW-3 is the positive)" "proof:regression" "$(ow_wait)"
-poke "$ROW" regression-run
-expect_eq "OW-8 regression-run refuses a run at D, which the regression covers (exit 1), and nothing ran" "1|0" "$RC|$(ow_runs)"
-expect_contains "OW-8b …saying the head is already proved" "is already proved" "$OUT"
-expect_absent "OW-8c …and offering no waiver (OW-4c is the positive)" "waive regression" "$OUT"
-
-# ---------- the waiver alone: the tick's plan reader (lib/units.sh) takes it as the regression's line (AC-18.4) ----------
-# A run whose regression was never run and is waived: the judge reads it covered, so the tick must not hold the
-# integrate row on a `proof:regression` read only a `proved: kind=regression` line could meet.
-ow_plan 7 "$(ck_reads "$OW_D")"
-poke "$ROW" waive regression '1'
-expect_eq "OW-9 precondition: with no regression proof, the user's waive regression '1' is admitted (exit 0)" "0" "$RC"
-poke "$ROW" current 8
-expect_eq "OW-9b …and the real current 8 is admitted on it (exit 0), the plan at current: 8" "0|8" "$RC|$(sed -n 's/^current: //p' "$POW")"
-forget_digest "$ROW"
-poke "$ROW" tick
-expect_contains "OW-9c precondition: the tick holds the integrate row on its approvals (the extractor reads real output)" "poker: WAIT T3 " "$(ow_wait)"
-expect_absent "OW-9d AC-18.4 …and not on the regression, which the waiver answers (OW-3 is the positive)" "proof:regression" "$(ow_wait)"
-POKE_BOUND="$OW_BOUND_WAS"
 
 # ============================================================
 finish

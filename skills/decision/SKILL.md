@@ -29,7 +29,7 @@ Typed as `/bionic:decision` with no argument, it puts what was last under discus
 
 **Recommendation:** Option 2, because <the principle that decides it>. Not 1: <why not>. Not 3: <why not>.
 
-**Significance:** <the rule it sets for later work, what follows downstream, what compounds, how hard it is to reverse>
+**Significance:** <the rule it sets for later work, what follows downstream, what compounds, how hard it is to reverse> <during a run, the put's wait line, as printed>
 
 Reply 1, 2 or 3 · or matrix, diagram, page
 ```
@@ -158,4 +158,4 @@ A reply that names a form gets that form directly, with no form in between. The 
 - Approvals and reversible calls stay out. Approvals wait for the final card. A reversible call is yours: make it and say so.
 - A settled decision, one the run's design ledger records, is put again only as `reopening D<n>: <one sentence of new evidence>`; with no new evidence, the ruling stands.
 
-Nothing is run or written when a decision is put, and no hook checks it; once ruled, it is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` delta in `record/<wave>/design-ledger.md`, the run's register. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.
+During a run, a decision is put with one command before it is shown: `bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'`. It writes the put line to `record/<wave>/design-ledger.md`, the run's register, and prints a `wait:` line: what changes if the decision is answered in an hour rather than now, computed from the tasks that wait on it and the longest chain. That line ends Significance as printed, never typed. Each put is a round, so a re-put or a reopening is put the same way. Once ruled, the decision is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` delta in the same ledger, which closes the round. With no run open, nothing is written. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.
