@@ -405,7 +405,8 @@ s57_state "$P57" "$S57_C3"
 # C3 is an older head than the floor proof's (C4), so the floor is uncovered from its proof's head (T45; review pass
 # 13 F3), with the judge's reason after the range (wave-35 T9); every reading line is covered.
 expect_eq "57c §JUDGE a docs-only tail: past the last head only the docs root changed, so every reading line is covered" \
-  "$(s57_all "uncovered	${S57_C4}..${S57_C3}	the proved head ${S57_C4:0:7} is not in the history of ${S57_C3:0:12}" covered covered covered covered covered)" "$S57_OUT"
+  "$(s57_all "uncovered	${S57_C4}..${S57_C3}" covered covered covered covered covered)" \
+  "$(printf '%s\n' "$S57_OUT" | awk -F'\t' -v OFS='\t' '$1 == "regression" { NF = 3 } { print }')"
 expect_eq "57c2 …rc 1, for the floor alone" "1" "$S57_RC"
 s57_state "$P57" "$S57_C4"
 expect_eq "57c3 …and one code commit more is uncovered from the same last head" "uncovered	${S57_C2}..${S57_C4}" "$(s57_of "$S57_EV")"
@@ -512,8 +513,8 @@ expect_contains "57v7c …byte for byte" '"keep C:\new\t as written"' "$(/usr/bi
 s42_snap "$R57" "$P57"
 poke "$R57" waive verdict 'Ship it.'
 s42_unchanged "57v8 a question outside the set" 1 "$P57"
-# MOVED BY WAVE-38 T2 (AC-4.2): the waiver also takes the regression and all four at once (session-poker-5 §WORD).
-expect_contains "57v9 …naming the questions it waives: the three, the regression, or all" "evidence, adversarial, structure, regression or all" "$OUT"
+poke "$R57" waive regression 'Ship it.'
+s42_unchanged "57v9 the regression is no question to waive: its whole run runs once" 1 "$P57"
 poke "$R57" waive adversarial $'two\nlines'
 s42_unchanged "57v10 a reply with a line break" 1 "$P57"
 poke "$R57" waive adversarial

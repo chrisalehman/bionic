@@ -874,4 +874,86 @@ cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
 POKE_BOUND="$RD_BOUND_WAS"
 
 # ============================================================
+section "§STEP-FIELD §COPIED-LOG §REVIEW-RANGE §CUR7-COVERED: what a run's close wrote by hand, a verb writes or reads"
+# ============================================================
+# FIXTURE FIDELITY. §SEV's shape, built fresh: a plan bound to this session at Step 5, its working branch in a
+# linked worktree, real commits, a reader row from the production writer, and the run line through the product's
+# writer (regression_fixture). Every write goes through the real verb.
+VG_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RVG="$(make_repo verb-gaps)"; ( cd "$RVG" && git commit -q --allow-empty -m init )
+git -C "$RVG" config user.name "Dana Fixture"
+VG_B="$(git -C "$RVG" rev-parse HEAD)"
+PVG="$(s42_plan "$RVG" 5 "  worktree: .worktrees/01-fixture
+  base-sha: ${VG_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+s42_builds_landed "$PVG"
+( cd "$RVG" && git add -f "$PVG" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RVG/.worktrees/01-fixture" "$VG_B" ) >/dev/null 2>&1
+VG_WT="$RVG/.worktrees/01-fixture"; VG_DIR="$RVG/.bionic/docs/record/wave-01-fixture"; mkdir -p "$VG_DIR"
+VG_A="$(s57_commit "$VG_WT" lib/a.sh A)"
+new_roster "$RVG"
+printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$SID" name=vg-crit agent_id=a-vg-crit \
+  subagent_type=bionic:critic files=.bionic/docs/record/wave-01-fixture/past-waiver.md)" >> "$(roster_of "$RVG")"
+
+# ---------- §STEP-FIELD: the Step-5 auditor: line is a field the verb writes ----------
+s42_snap "$RVG" "$PVG"
+poke "$RVG" step-field 5 "auditor=CONFIRMED 3 of 3, record/wave-01-fixture/auditor.md"
+expect_eq "VG-1 AC-20.1 step-field 5 auditor= writes the line under the Step 5 line (exit 0)" \
+  "0|  auditor: CONFIRMED 3 of 3, record/wave-01-fixture/auditor.md" "$RC|$(awk '/^- Step 5:/ { getline; print; exit }' "$PVG")"
+s42_snap "$RVG" "$PVG"
+poke "$RVG" step-field 4 "auditor=CONFIRMED"
+s42_unchanged "VG-1b the auditor: line is read from the Step 5 block alone, so Step 4's is" 1 "$PVG"
+
+# ---------- §COPIED-LOG: a recorded run's log, copied under record/, is that run ----------
+# The run's log is written outside record/ (where a detached run keeps it), its run line naming that path; the
+# copy matches the line by its sha256. An edited copy matches no run.
+VG_RUN="$RVG/.bionic/tmp/runs/w-whole.log"
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture --pre 'whole run' "$PVG" "$VG_RUN" "$VG_A" 0 0
+cp "$VG_RUN" "$VG_DIR/whole-copy.log"; sed 's/^whole run$/whole run, edited/' "$VG_RUN" > "$VG_DIR/whole-edited.log"
+s42_snap "$RVG" "$PVG"
+poke "$RVG" proof-add regression record/wave-01-fixture/whole-edited.log
+s42_unchanged "VG-3 control: an edited copy matches no recorded run" 1 "$PVG"
+expect_contains "VG-3b …saying so" "no run recorded for this log" "$OUT"
+poke "$RVG" proof-add regression record/wave-01-fixture/whole-copy.log
+expect_eq "VG-3c AC-20.3 a byte copy of the recorded run's log registers (exit 0), naming the run it is" "0|1" \
+  "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=regression head=$VG_A .* evidence=record/wave-01-fixture/whole-copy.log run=[^ ]* head=$VG_A rc=0$")"
+
+# ---------- §REVIEW-RANGE: the user's waiver of a question is where its next reading starts ----------
+poke "$RVG" waive all 'I waive the readings at A'
+expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(/usr/bin/grep -c "^waived: question=[a-z]* head=$VG_A " "$PVG")"
+VG_C="$(s57_commit "$VG_WT" lib/a.sh C)"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n' "$VG_A" "$VG_C" > "$VG_DIR/past-waiver.md"
+poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question adversarial --reader vg-crit
+expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
+  "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
+
+# ---------- §CUR7-COVERED: an approval and a waiver at an earlier head hold over the prose landed after them ----------
+# The plan is put in the order (a whole-run row at Step 5, a release row at 7, an open integrate row reading the
+# release); the user approves the release at C2 and waives the readings there, then two prose commits land.
+VG_C2="$(s57_commit "$VG_WT" lib/b.sh C2)"
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c2.log" "$VG_C2" 0 0
+poke "$RVG" proof-add regression record/wave-01-fixture/whole-c2.log
+poke "$RVG" waive all 'I waive the readings at C2'
+awk '{ print } /^- T5: / { print "- T6: landed at record/T6.md\n- T7: landed at record/T7.md" } /^\| T5 \| 5 \| verify / {
+  print "| T6 | 5 | test | the whole run | test-runner | — | 30 | REQ-1 | — | — | — | landed |"
+  print "| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | — | — | landed |"
+  print "| T8 | 8 | integrate | the merge | implementor | — | 30 | REQ-1 | — | — | — | pending |" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+poke "$RVG" approve release 'ship C2'
+expect_eq "VG-5 the plan is in the order, and the user approves the release at C2 (exit 0)" "0|T6|$VG_C2" \
+  "$RC|$(bash -c '. "$1/units.sh" && units_order "$2"' _ "${S46_LIB%/*}" "$PVG")|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
+s57_commit "$VG_WT" .bionic/docs/record/wave-01-fixture/notes.md P1 >/dev/null
+s57_commit "$VG_WT" README.md P2 >/dev/null
+# The Step 7 gate asks for a whole matrix this fixture does not model, so the judge is asked at the plan's Step 7
+# through `current 8 --check`, which asks the facts and the approved head at the working head.
+sed 's/^current: .*/current: 7/' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+poke "$RVG" current 8 --check
+expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: current 8 is admitted" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+s57_commit "$VG_WT" lib/b.sh C3 >/dev/null
+poke "$RVG" current 8 --check
+expect_contains "VG-5c control: a code commit after them is past the approval: current 8 is refused, naming it" \
+  "is not the head the user approved for release, ${VG_C2:0:12}" "$OUT"
+POKE_BOUND="$VG_BOUND_WAS"
+
 finish
