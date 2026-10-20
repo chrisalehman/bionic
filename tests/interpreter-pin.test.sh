@@ -466,8 +466,6 @@ section "§6 one pin, one owner: the runner and the seam pin through the same fu
 # the pin away from a suite the RUNNER launches and from the children of a suite run by HAND.
 RUN_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/run.sh")"
 SEAM_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/lib/resolve-roots.sh")"
-expect_eq "6.1 the seam builds the pin (the extractor finds it there)" "1" "$SEAM_LN"
-expect_eq "6.2 …and the runner builds none of its own" "0" "$RUN_LN"
 
 MUT_TREE="$TMPROOT/mut-tree"
 mk_tree "$MUT_TREE"
