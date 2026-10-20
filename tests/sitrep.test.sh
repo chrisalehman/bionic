@@ -435,9 +435,12 @@ expect_eq "CK2a precondition: the sizes rewrite reached the page (the pace line 
   "yes|yes" "$(sr_line '- The pace: ' | /usr/bin/grep -q 'against 500 min planned' && echo yes)|$([ "$(sr_line '- The pace: ')" != "$SR_CK1_PACE" ] && echo yes)"
 expect_eq "CK2 …and the schedule line is byte for byte what it was: the declared sizes feed nothing of the mark" \
   "$SR_CK1" "$(sr_ind schedule)"
-# Ahead of pace: a 120-hour forecast needs 39 × 11/120 = 3.6, so 4, and 4 done in a 9-minute median.
-SR_FORECAST=120h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
+# Ahead of pace: a 240-hour forecast needs 39 × 11/240 = 1.8, so 2, and 4 done in a 9-minute median.
+SR_FORECAST=240h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
+expect_eq "CK3 the clock half says done against needed with the forecast, and a verdict: behind in one world, ahead in the other" \
+  "the 24 h forecast needs 18 by now, behind|the 240 h forecast needs 2 by now, ahead" \
+  "$(printf '%s\n' "$SR_CK1" | /usr/bin/grep -oE 'the [0-9]+ h forecast needs [0-9]+ by now, [a-z ]+')|$(sr_ind schedule | /usr/bin/grep -oE 'the [0-9]+ h forecast needs [0-9]+ by now, [a-z ]+')"
 # The scorecard's target is the same bar, and its schedule line is the page's, joined to one line.
 SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null)"
 expect_eq "CK4 the scorecard's widest landing prints against target < 15, the landing bar" \
@@ -564,8 +567,8 @@ expect_eq "FC1b …and the Bottom line's close is the same time" "- Close: about
 SR_FC1_ABOUT="$(sr_line '- About ')"
 awk '{ sub(/^forecast: 48h$/, "forecast: 24h") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: pace needs 9)" \
-  "$SR_FC1_ABOUT|yes" "$(sr_line '- About ')|$(sr_ind schedule | /usr/bin/grep -q 'pace needs 9' && echo yes)"
+expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: it needs 9 by now)" \
+  "$SR_FC1_ABOUT|yes" "$(sr_line '- About ')|$(sr_ind schedule | /usr/bin/grep -q 'needs 9 by now' && echo yes)"
 # One admitted request, not two: the work is no longer divided and outweighs the chain.
 rm -f "$SR_GATE/requests/2"
 sr_run "$SR_PLAN"
