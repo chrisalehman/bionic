@@ -5118,16 +5118,17 @@ expect_eq "SL-3b …and Lands-on from its cell" "a.test.sh" "$(awk -F': ' '$1 ==
 section "§PARTS — the core script's parts: no two of them call each other both ways, and the line loads first"
 # tests/lib/callgraph.py reads the dispatcher and its seven parts: a function belongs to the file that defines it, a
 # call is its name in another part's text. Calls into the dispatcher are the common case; a part calling a part is
-# listed, and two parts calling each other is the fault. The two loads the dispatcher declares by its order are the
-# tick's and the situation report's on the line (both print the landing report).
+# listed, and two parts calling each other is the fault. The four loads the dispatcher declares by its order: the
+# release check, the situation report and the tick on the line (each prints the landing report), and the tick on the
+# situation report (it prints the report's one line).
 # fails-when: a function moves so that two parts call each other, or a part reaches another the dispatcher loads
 # after it, or a part is not loaded, or one name is defined in two of the files.
 CG_OUT="$(cd "$REPO_ROOT" && python3 -I tests/lib/callgraph.py hooks/session-poker.sh hooks/poker/*.sh 2>&1)"; CG_RC=$?
 expect_eq "PARTS-1 the call graph of the dispatcher and the seven parts exits 0" "0" "$CG_RC"
-expect_eq "PARTS-1b …over seven parts, with no two-way pair" "callgraph: ok — 7 part(s), 2 declared load(s), no two-way pair" \
+expect_eq "PARTS-1b …over seven parts, with no two-way pair" "callgraph: ok — 7 part(s), 4 declared load(s), no two-way pair" \
   "$(printf '%s\n' "$CG_OUT" | tail -1)"
-expect_eq "PARTS-2 the declared loads are the situation report's and the tick's, on the line" \
-  "$(printf 'load hooks/poker/sitrep.sh hooks/poker/line.sh\nload hooks/poker/tick.sh hooks/poker/line.sh')" \
+expect_eq "PARTS-2 the declared loads: the proof record, the situation report and the tick on the line, the tick on the report" \
+  "$(printf 'load hooks/poker/proof.sh hooks/poker/line.sh\nload hooks/poker/sitrep.sh hooks/poker/line.sh\nload hooks/poker/tick.sh hooks/poker/line.sh\nload hooks/poker/tick.sh hooks/poker/sitrep.sh')" \
   "$(printf '%s\n' "$CG_OUT" | awk '$1 == "load"')"
 # The positive for the exit 0 above: two planted parts that call each other, loaded in an order, are named.
 CG_D="$SANDBOX/callgraph"; mkdir -p "$CG_D/poker"
