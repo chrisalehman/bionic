@@ -799,9 +799,11 @@ sr_run "$SR_PLAN"
 expect_eq "GM3 the page prints the open goal decision as one sentence: one bullet under Blocked on you, the theme named once" "1|1" \
   "$(sr_sect 'Blocked on you' | /usr/bin/grep -c '^- ')|$(sr_sect 'Blocked on you' | /usr/bin/grep -o 'fast landings' | /usr/bin/grep -c .)"
 sed -i.bak 's/one-file median under 15m/one-file median under 30m/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
+sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 sr_run "$SR_PLAN"
-expect_eq "GM3b the goal reads reached while its decision is still open: the page owes nothing for it, in You owe and in Blocked on you" \
-  "- You owe nothing now.|- Nothing: no decision or action is owed by you." "$(sr_line '- You owe')|$(sr_sect 'Blocked on you' | sr_join)"
+expect_eq "GM3b both goals read reached while the decision is still open: the page drops it and keeps the approval, in You owe and in Blocked on you, with nothing on stderr" \
+  "- You owe 1: approve release.|- approve release: T12 waits on it|" "$(sr_line '- You owe')|$(sr_sect 'Blocked on you' | sr_join)|$ERR"
 SR_AT=$((SR_NOW + 60)) sr_tick
 expect_eq "GM4 the goal now reads reached: the tick closes its open decision, and the item stays on the ledger closed" "1|0" \
   "$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=closed|' "$SR_OWED_F")|$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=open|' "$SR_OWED_F")"
