@@ -12,7 +12,7 @@
 #   line_head <plan>                the accepted head: the working branch's tip
 #   line_build <tree> <base> <commit> <branch>   the candidate, merged in a landing tree
 #   line_publish <plan> <row>       the one publish, under the lock, in the interface's order
-#   line_land_by_hand <tree> <root> <sid> <why>  `spawn-worktree.sh land <tree> --by-hand`
+#   line_land_by_hand <tree> <root> <sid> <why> [<suites> <green-at> <log>]  `spawn-worktree.sh land <tree> --by-hand`
 #   line_ready <tree> <root> <sid> <within> <again>  `spawn-worktree.sh ready [--within <s>]` (T4)
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
@@ -551,21 +551,37 @@ EOF
 # its candidate is built on the base rule's base, nothing runs, and it publishes through
 # `line_publish`, the queue's one publish and lock. Its carrier is this call, in a subshell of its
 # own: when it ends, published or not, its entry holds nothing.
-line_land_by_hand() {  # <tree> <root> <sid> <why> -> LANDED | REFUSED
-  local target="${1:-}" root="${2:-}" sid="${3:-}" why="${4:-}" onto plan
+# THE WRITER'S VERDICTS, IN THE PERSON'S WORDS. A hand landing runs nothing, so what it records of the
+# row's suites is what the person says of the writer's run: the suites, the commit they were green at
+# (a commit the row's head holds) and the log that shows it. Once published, each is one green verdict
+# for the row keyed by that commit, written by the line's one verdict writer, its log that source. All
+# three or none: with none the landing records the row alone, as before.
+line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -> LANDED | REFUSED
+  local target="${1:-}" root="${2:-}" sid="${3:-}" why="${4:-}" suites="${5:-}" at="${6:-}" log="${7:-}" onto plan
   [ -n "$why" ] || { _wt_refuse "no-reason path=${target:-<none>} — a hand landing says why: land <tree> --by-hand --reason '<why>'"; return 2; }
   case "$why" in *'|'*|*$'\n'*|*$'\r'*) _wt_refuse "reason-unwritable path=${target:-<none>} — the reason holds a | or a line break; say it on one line without |"; return 2 ;; esac
+  if [ -n "${suites}${at}${log}" ]; then
+    { [ -n "$suites" ] && [ -n "$at" ] && [ -n "$log" ]; } || {
+      _wt_refuse "verdicts-incomplete path=${target:-<none>} — the writer's verdicts are its suites, the commit they were green at and its log: --suites <a,b> --green-at <commit> --log <path>, all three or none"; return 2; }
+    suites="$(_line_suites "$suites")" && [ "$suites" != none ] || {
+      _wt_refuse "suites-unreadable path=${target:-<none>} suites=${5} — name suites bare or by path"; return 2; }
+    case "$log" in *'|'*|*$'\n'*|*$'\r'*) _wt_refuse "log-unwritable path=${target:-<none>} — the log path holds a | or a line break"; return 2 ;; esac
+  fi
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
   _line_load_run || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
   onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
   plan="$(session_plan "$root" "$sid")" || { _wt_refuse "no-bound-plan sid=${sid}"; return 2; }
-  ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" )
+  ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" "$suites" "$at" "$log" )
 }
-_line_hand() {  # <tree> <onto> <plan> <sid> <why> — the carrier's own subshell
-  local target="$1" onto="$2" plan="$3" sid="$4" why="$5" wt root branch head acc rec row by c lt rc i n
+_line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <log> — the carrier's own subshell
+  local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt rc i n s g=""
   _wt_land_checks "$target" "$onto" "$plan" 0 || return 2
   wt="$_WT_ABS"; root="$_WT_ROOT"; branch="$_WT_BRANCH"
   head="$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)"
+  if [ -n "$suites" ]; then
+    g="$(git -C "$wt" rev-parse --verify -q "${at}^{commit}" 2>/dev/null)" && git -C "$wt" merge-base --is-ancestor "$g" "$head" 2>/dev/null \
+      || { _wt_refuse "green-at-not-in-row green-at=${at} branch=${branch} — the commit the suites were green at is one the row's head holds"; return 2; }
+  fi
   acc="$(git -C "$root" rev-parse --verify -q "refs/heads/${onto}" 2>/dev/null)"
   c="$(_wt_bionic_committed "$root" "$acc" "$head")" && {
     c="${c%/}"; _wt_refuse_bionic "$wt" "$branch" "$onto" "${c%% *}" "${c#* }" "$(_wt_bionic_kind "$root" "$acc")"; return 2
@@ -606,6 +622,13 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> — the carrier's own subshel
   done
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
+  if [ -n "$suites" ]; then
+    for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
+      LINE_WIDTH=- _line_verdict_put "$plan" "$row" "$g" "$s" green "$vlog" >/dev/null \
+        || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — published ${LINE_PUBLISHED}; the verdict for ${s} at ${g} is not recorded"; return 2; }
+    done
+    printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
+  fi
   _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
   # What is owed, when the row has an agent on this session's roster (T6): its task, then its stop.
   [ -z "$LINE_MARKED" ] || _line_owed "$row" "$LINE_PUBLISHED" "$LINE_MARKED"
