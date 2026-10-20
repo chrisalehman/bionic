@@ -815,7 +815,7 @@ section "BRANCH-AGREE — wave-39 T16 (D18; AC-12.1): one reader of the integrat
 # the branch, its closed-form fell back to the frontmatter, and the handoff verb read the frontmatter first
 # (critic-structure-2; debt integration-branch-reader). D18 rules ## SDLC State first, the frontmatter as the fallback,
 # and lib/plan.sh `plan_integration_branch` is that one reader. Here close-out's two doors are asked on one plan: `check`
-# (its merge verdict) and `closed-form` (the branch line). handoff-file.test.sh §BRANCH-AGREE asks the handoff verb and
+# (its merge verdict) and `closed-form` (the branch line), then card.sh's Step-0 card and the gate's merge-target check. handoff-file.test.sh §BRANCH-AGREE asks the handoff verb and
 # close-out on one plan in the verb's own world: this fixture is close-out's, and the verb's dry commit through the
 # real gate is judged there at a worktree row's Step 4, a plan shape this suite does not build.
 # FIXTURE FIDELITY: mk_fixture's plan at Step 7, as a run that has not closed holds it (check reads it as a diagnosis,
@@ -841,6 +841,24 @@ expect_eq "BA0 precondition: ## SDLC State names main and the frontmatter trunk,
   "$(sed -n '/^## SDLC State/,/^## /s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(sed -n '2s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(branch_exists "$PBA" main)|$(branch_exists "$PBA" trunk)"
 ba_doors "$PBA"
 expect_eq "BA1 close-out check and closed-form name one branch, ## SDLC State's" "main|main" "$BA_CHECK|$BA_CLOSED"
+# The card's Step-0 branch block and the gate's epic merge-target check read the same reader. The card needs a ## Goal;
+# the gate reads at Step 8 against an epic naming trunk, and names the plan's branch in its finding when the two differ.
+ba_card() {  # <project> -> the integration branch card.sh step0 prints for the plan, a ## Goal added first
+  awk '/^## SDLC State/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
+    > "$1/$PLAN_REL.g" && mv "$1/$PLAN_REL.g" "$1/$PLAN_REL"
+  bash "$REPO_ROOT/payload/scripts/card.sh" step0 "$1/$PLAN_REL" 2>/dev/null | sed -n 's/^    integration  *\([^ ]*\) .*/\1/p'
+}
+ba_gate() {  # <project> -> the plan's branch the gate's merge-target finding names, at Step 8, its epic naming trunk
+  local e="$1/.bionic/docs/plans/epic-fx/epic.plan.md"
+  sed 's/^current: 4$/&\
+integration-branch: trunk/' "$e" > "$e.b" && mv "$e.b" "$e"
+  awk 'NR == 1 && $0 == "---" { print; print "epic: epic-fx"; next } { print }' "$1/$PLAN_REL" > "$1/$PLAN_REL.e" \
+    && mv "$1/$PLAN_REL.e" "$1/$PLAN_REL"
+  advance_to "$1" 8; gate_rc "$1" >/dev/null
+  cat "$SB_HOME"/.claude/logs/*/sdlc-audit.md 2>/dev/null | grep -F "($1/$PLAN_REL)" \
+    | sed -n "s/.* merge-target: plan integration-branch '\([^']*\)' != epic .*/\1/p" | tail -1
+}
+expect_eq "BA3 the card and the gate name ## SDLC State's branch too" "main|main" "$(ba_card "$PBA")|$(ba_gate "$PBA")"
 
 PBF="$(mk_fixture branch-agree-fm)"
 awk '/^## SDLC State/ { s = 1 } /^## Tasks/ { s = 0 } !(s && /^integration-branch:/)' "$PBF/$PLAN_REL" > "$PBF/$PLAN_REL.ba" \
@@ -851,5 +869,7 @@ expect_eq "BA2 precondition: the frontmatter alone names the integration branch"
 ba_doors "$PBF"
 expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
   "main|main" "$BA_CHECK|$BA_CLOSED"
+expect_eq "BA4 the card and the gate read the frontmatter's branch too when ## SDLC State names none" "main|main" \
+  "$(ba_card "$PBF")|$(ba_gate "$PBF")"
 
 finish
