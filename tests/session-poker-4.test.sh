@@ -901,9 +901,10 @@ VG_PL="$VG_PL" VG_CX="$VG_CX" VG_FR="$VG_FR" awk '{ print } /^current: / && !p {
   /^- T5: / { print "- T9: landed " ENVIRON["VG_CX"] " 2026-10-04T13:00:00Z born: review S2 on of=" ENVIRON["VG_FR"] "#1" }
   /^\| T5 \| 5 \| verify / { print "| T9 | 4 | build | fix the finding · born: review | implementor | — | 30 | REQ-1 | lib/a.sh | — | — | landed |" }' \
   "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
-printf 'landed: row=T9 branch=wt/01-T9 head=%s merge=%s at=2026-10-04T13:00:00Z\n' "$VG_CX" "$VG_CX" >> "$VG_DIR/landing-proofs.log"
+# The fix row landed by hand: `row-landed --by-hand` records it as the published event alone (hooks/poker/line.sh), no `landed:` header.
+printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=Dana Fixture|why=landed on the report|at=2026-10-04T13:00:00Z\n' "$VG_CX" >> "$VG_DIR/landing-proofs.log"
 poke "$RVG" disposition
-expect_contains "VG-6 AC-10.4 a finding fixed by the whole run reads fixed by the regression at its head" \
+expect_contains "VG-6 AC-10.1 AC-10.4 a finding a hand-landed row fixed, with a green whole run past it, reads fixed by the regression at its head" \
   "fixed by the regression at ${VG_C4:0:12}" "$(printf '%s\n' "$OUT" | /usr/bin/grep "finding $VG_FR#1 ")"
 POKE_BOUND="$VG_BOUND_WAS"
 
