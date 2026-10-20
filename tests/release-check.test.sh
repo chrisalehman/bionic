@@ -321,6 +321,15 @@ expect_status "(t1) §LAST T3 landed after the entry's head, no rewrite: the che
 expect_eq "(t1) …in one line" "1" "$(lines_of "$OUT")"
 rn_check "$(rn_entry "$(rn_note --on 2026-01-02T03:30:00Z)")"
 expect_status "(t2) the entry rendered again at the new head: the check passes" 0 "$RC"
+# A real CHANGELOG runs past a pipe's buffer, so the carrier is read whole after its match; here the carrier is a merge.
+RNL="$(rn_note --on 2026-01-02T04:30:00Z)"; git -C "$R" checkout -q -b carry
+{ printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n%s\n## 0.0.1 — 2026-01-01\n\n' "${RNL%rc=0}"
+  awk 'BEGIN { for (i = 0; i < 20000; i++) print "- an older line" }'; } > "$R/CHANGELOG.md"
+git -C "$R" commit -q -am "the long entry"; git -C "$R" checkout -q -; git -C "$R" merge -q --no-ff -m "land" carry
+M="$(git -C "$R" rev-parse HEAD)"; rn_pub T7 "$M" hand 2026-01-02T05:00:00Z
+expect_eq "(t3) setup: the carrier is a merge whose first parent lacks the entry's head line" "2" "$(git -C "$R" rev-list --parents -n 1 "$M" | wc -w | awk '{ print $1 - 1 }')"
+rn_check "$M"
+expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
 
 section "§STRIKE — the 1.17.0 block against the strike list of ten (AC-6.1, AC-6.2, AC-1.5)"
 
