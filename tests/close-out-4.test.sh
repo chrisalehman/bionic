@@ -650,6 +650,8 @@ expect_contains "AH-C0 control: the plan is in the order, approved at the workin
 ah_appr "$AH_A"; AH_CK0="$(cksum < "$PAH/$PLAN_REL")"; run_close "$PAH" run
 expect_eq "AH-C1 AC-7.2 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, the plan unchanged" \
   "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")"
+/usr/bin/grep -v '^approved: release ' "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.n" && mv "$PAH/$PLAN_REL.n" "$PAH/$PLAN_REL"; run_close "$PAH" check
+expect_contains "AH-C2 …and with no approved: release line, check says run would refuse, naming the missing approval" "facts: WOULD REFUSE — the plan is in the release order and no approved: release line names a head" "$CO_OUT"
 
 # ============================================================
 section "§ASKS-NOTHING — wave-38 T15 (D17; AC-1.6, AC-1.7): close-out puts no question to the user"
