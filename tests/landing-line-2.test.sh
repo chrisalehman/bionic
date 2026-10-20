@@ -275,8 +275,10 @@ ll_stamp() {  # <tree> <commit> <suite> <rc> <at> — a door run's stamp in the 
   printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=%s|suites=%s|cmd=bash tests/run.sh --only %s\n' "$2" "$4" "$5" "$3" "$3" \
     >> "$(git -C "$1" rev-parse --absolute-git-dir)/bionic-stamps"
 }
-ll_walk() {  # <root> <from> <to> -> the floor judge's sentence; LL_WALK_RC its exit
-  LL_WALK="$( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_walk "$1" "$2" "$3" "$(ll_rec "$1")" )"; LL_WALK_RC=$?
+ll_runs() {  # <root> <suite> <red commit> <green commit> -> "<reds> <greens>": the records the floor judge weighs, for the suite
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$1" "$(ll_rec "$1")" ) 2>/dev/null \
+    | awk -F'\t' -v s="$2" -v rc="$3" -v gc="$4" '$1 == "R" && $4 == s { if ($5 == "red" && $3 == rc) r++; if ($5 == "green" && $3 == gc) g++ }
+      END { print r + 0, g + 0 }'
 }
 RC1="$(ll_cause_world c1)"; HC1="$(ll_head "$RC1")"; TC1="$(git -C "$RC1/.worktrees/T2" rev-parse HEAD)"
 ll_stamp "$RC1/.worktrees/T2" "$TC1" a.test.sh 0 2020-01-01T00:00:00Z
@@ -291,9 +293,8 @@ expect_regex "(cause1) the standing event names its cause, environment, and the 
   "$(ll_ev "$RC1" standing)"
 expect_contains "(cause2) ready reports the environment red as a defect, with the run that disagrees and the head's log" \
   "STANDING T2 a.test.sh cause=environment against=stamp:${TC1}@2020-01-01T00:00:00Z log=${LC1}" "$LL_OUT"
-ll_walk "$RC1" "$HC1" "$KC1"
-expect_eq "(cause3) the floor judge does not count the environment red: the door run's green proves the landed commit (exit 0, no sentence)" \
-  "0|" "$LL_WALK_RC|$LL_WALK"
+expect_eq "(cause3) the records the floor judge weighs leave the environment red out and keep the door run's green" \
+  "0 1" "$(ll_runs "$RC1" a.test.sh "$KC1" "$TC1")"
 RC2="$(ll_cause_world c2)"; HC2="$(ll_head "$RC2")"
 ll_verb "$RC2" T2
 KC2="$(ll_last_cand "$RC2" T2)"; LC2="$RC2/.bionic/docs/record/wave-x/line/T2-a-${HC2:0:12}.log"
@@ -304,9 +305,8 @@ expect_regex "(cause4) …and its standing event names its cause, code, and no r
   "$(ll_ev "$RC2" standing)"
 expect_contains "(cause5-pre) ready printed its landing" "LANDED T2 $KC2" "$LL_OUT"
 expect_absent "(cause5) …and no STANDING report: a code red is the branch's own, as before" "STANDING " "$LL_OUT"
-ll_walk "$RC2" "$HC2" "$KC2"
-expect_eq "(cause6) the floor judge counts the code red as the suite's state (exit 1)" "1" "$LL_WALK_RC"
-expect_contains "(cause6) …naming it red at the landed commit" "a.test.sh is red at ${KC2:0:12}" "$LL_WALK"
+expect_eq "(cause6) the records the floor judge weighs keep the code red as the suite's state at the landed commit" \
+  "1" "$(ll_runs "$RC2" a.test.sh "$KC2" "$KC2" | cut -d' ' -f1)"
 # A STANDING EVENT WITH NO cause= (a record written before 1.16.0) is counted as code: the judge
 # drops only what an environment-class event names.
 RC3="$(ll_cause_world c3)"; HC3="$(ll_head "$RC3")"; TC3="$(git -C "$RC3/.worktrees/T2" rev-parse HEAD)"
@@ -315,9 +315,8 @@ ll_verb "$RC3" T2
 KC3="$(ll_last_cand "$RC3" T2)"
 expect_contains "(cause7-pre) the landing wrote an environment-class standing event" "cause=environment" "$(ll_ev "$RC3" standing)"
 sed 's/|cause=environment|against=[^|]*|/|/' "$(ll_rec "$RC3")" > "$(ll_rec "$RC3").n" && mv "$(ll_rec "$RC3").n" "$(ll_rec "$RC3")"
-ll_walk "$RC3" "$HC3" "$KC3"
-expect_eq "(cause7) a standing event with no cause is counted: the judge refuses (exit 1), naming the red" "1 1" \
-  "$LL_WALK_RC $(printf '%s\n' "$LL_WALK" | grep -c "a.test.sh is red at ${KC3:0:12}")"
+expect_eq "(cause7) a standing event with no cause is counted: the red stays in the records the floor judge weighs, the door run's green beside it" \
+  "1 1" "$(ll_runs "$RC3" a.test.sh "$KC3" "$TC3")"
 
 # ---------------------------------------------------------------------------
 section "§KEY: a standing red and the floor judge key a suite by its file name (wave-35 T6; REQ-5 AC-5.2; D14)"
@@ -335,9 +334,8 @@ expect_contains "(key0-pre) …the verdict filed under the declared path" "|suit
 expect_contains "(key1) the door run's green of a.test.sh on the candidate's tree makes the standing red environment" \
   "|cause=environment|against=stamp:${TK}@2020-01-01T00:00:00Z|" "$(ll_ev "$RK" standing)"
 expect_contains "(key2) …and ready reports it as one" "STANDING T2 tests/a.test.sh cause=environment against=stamp:${TK}@2020-01-01T00:00:00Z" "$LL_OUT"
-ll_walk "$RK" "$HK" "$KK"
-expect_eq "(key3) the floor judge closes the owed suite on the door run's green, by file name (exit 0, no sentence)" \
-  "0|" "$LL_WALK_RC|$LL_WALK"
+expect_eq "(key3) the records the floor judge weighs key the suite by file name: the declared path's red is left out, the door run's green kept" \
+  "0 1" "$(ll_runs "$RK" a.test.sh "$KK" "$TK")"
 
 # ---------------------------------------------------------------------------
 section "§CAUSE-TREE: a standing red's cause reads only runs the shim could place (wave-35 T6; REQ-5 AC-5.1; D14, Δ7)"
@@ -581,14 +579,13 @@ expect_true "(dr6m) MUTANT the candidate's tree re-pointed mid-drain: a sibling 
 world_machine 8 8192 40 0.5
 
 # ---------------------------------------------------------------------------
-section "§GRAMMAR: a verdict's admitted= and width= go after log=, so every positional reader reads it (wave-37 T1; D3, AC-3.2; wave-38 T6, AC-6.4; ownership row 'the landing record grammar')"
+section "§GRAMMAR: a verdict's admitted= and width= go after log=, and every reader reads them by key (wave-37 T1; D3, AC-3.2; wave-38 T6, AC-6.4; ownership row 'the landing record grammar')"
 #
-# `line/v1|ev=verdict|row=<row>|commit=<candidate>|suite=<suite>|result=<result>|log=<log>|admitted=<epoch|->|width=<J>|at=<UTC>`.
+# `line/v1|ev=verdict|row=<row>|commit=<candidate>|suite=<suite>|result=<result>|log=<log>|admitted=<epoch|->|width=<J>|promised=<s|->|actual=<s|->|at=<UTC>`.
 # admitted= is the gate's admission instant for the run the verdict judges, `-` when no admission is on
 # record for it (wave-38 T6; AC-6.4).
-# The readers that read by position (`_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`)
-# read $2..$7; `_line_proved` reads suite= by position and reads= by key (wave-39 T1); `_line_fold` and the
-# landing report read by key.
+# Every reader (`_line_proved`, `_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`,
+# `_line_fold` and the landing report) reads a field by its key, so a field's place is the writer's own.
 # One writer, `_line_verdict_put`, writes every verdict line a landing writes.
 RGR="$(ll_world)"; PGR="$(ll_plan "$RGR")"; RECGR="$(ll_rec "$RGR")"; KGR="$(ll_head "$RGR")"
 # The ready names the row's own commit: a commit the head already holds would be counted published by git.
@@ -600,31 +597,31 @@ ll_grammar_put() {  # <plan> — three verdicts by the writer, J=2; a and b admi
     && LINE_WIDTH=2 _line_verdict_put "$1" T1 "$KGR" c.test.sh none /logs/c.log
 }
 ll_grammar_read() {  # <record> -> every positional reader's answer, one line
-  printf '%s|%s|%s|%s|%s' "$(_line_proved "$1" a.test.sh "reads=$(_line_reads "$RGR" "$KGR" a.test.sh)" >/dev/null && echo proved)" "$(_line_red_log "$1" T1 "$KGR" b.test.sh)" \
+  printf '%s|%s|%s|%s|%s' "$(_line_proved "$1" a.test.sh "$KGR" >/dev/null && echo proved)" "$(_line_red_log "$1" T1 "$KGR" b.test.sh)" \
     "$(_line_none_logs "$1" T1 "$KGR" c.test.sh)" "$(_line_head_verdict "$1" "$KGR" b.test.sh | tr '\t' ' ')" "$(_line_declared "$1" T1 "$KGR")"
 }
 ll_grammar_put "$PGR"
-expect_regex "(g1) the writer puts admitted=, width=, reads=, then promised= and actual= after log=, and at= last (wave-39 T8; AC-4.2)" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|reads=[^|]+\\|promised=300\\|actual=280\\|at=[0-9T:-]+Z$" \
+expect_regex "(g1) the writer puts admitted=, width=, then promised= and actual= after log=, and at= last (wave-39 T8; AC-4.2)" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|promised=300\\|actual=280\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
 expect_regex "(g1b) …and a verdict given no admission carries admitted=-, promised=- and actual=-" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|reads=[^|]+\\|promised=-\\|actual=-\\|at=[0-9T:-]+Z$" \
+  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|promised=-\\|actual=-\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
-expect_eq "(g2) every positional reader reads it: green proved, the red's log, the none's log, the head's verdict, the declared debt" \
+expect_eq "(g2) every reader reads it: green proved, the red's log, the none's log, the head's verdict, the declared debt" \
   "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$(ll_grammar_read "$RECGR")"
 line_event "$PGR" candidate row=T1 "base=$KGR" "commit=$KGR" tree=/t >/dev/null
 LINE_WIDTH=2 _line_verdict_put "$PGR" T1 "$KGR" c.test.sh green /logs/c-2.log 1000
 expect_eq "(g3) the fold reads them by key: a and c green, b the declared debt's red, so the entry is declared" "T1 declared" \
   "$(line_state "$PGR" | awk -F'\t' '$1 == "T1" { print $1, $7 }')"
-# MUTANT: the fields placed before log=. The positional readers then read admitted= as the log.
+# The fields placed before log= (a mutated writer): the readers, reading by key, answer as before.
 RGM="$(ll_world)"; PGM="$(ll_plan "$RGM")"
 line_event "$PGM" ready row=T1 name=wx-T1 "commit=$(git -C "$RGM/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
 anchor fn payload/scripts/lib/line.sh '"log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:--}"' _line_verdict_put '"admitted=${7:--}" "width=${LINE_WIDTH:--}" "log=$6"'
 GM_READ="$( eval "$(declare -f _line_verdict_put | sed "$ANCHOR_SED")"; ll_grammar_put "$PGM"; ll_grammar_read "$(ll_rec "$RGM")" )"
-expect_contains "(g4m-pre) the mutant wrote: admitted= and width= before log=" "|result=red|admitted=1000|width=2|log=/logs/b.log|" "$(ll_ev "$RGM" verdict)"
-expect_true "(g4m) MUTANT admitted= and width= before log=: the positional readers read another answer (the rows can fail)" \
-  test "$GM_READ" != "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh"
+expect_contains "(g4m-pre) the mutated writer put admitted= and width= before log=" "|result=red|admitted=1000|width=2|log=/logs/b.log|" "$(ll_ev "$RGM" verdict)"
+expect_eq "(g4m) …and every reader answers as it did: they read by key, not by place" \
+  "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$GM_READ"
 
 
 # ============================================================================ the drain asks the gate (wave-38 T6)
