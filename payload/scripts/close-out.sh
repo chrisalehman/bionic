@@ -2008,7 +2008,7 @@ facts_judge() {
     FACTS_WHY="the working branch $WORKING names no commit here, so the regression is uncovered and there is no head to judge the facts the run owes at"
     return 0
   fi
-  # THE APPROVED HEAD (REQ-7 AC-7.2): in the order build, regression, review, release (lib/units.sh `units_order`) the
+  # THE APPROVED HEAD: in the order build, regression, review, release (lib/units.sh `units_order`) the
   # head closed is the one the newest `approved: release` line names (lib/proof.sh `proof_approved_head`), or one that
   # only prose past it follows (`proof_prose_past`), as `current 8` admits it; a code commit landed after the approval
   # is refused here, naming both heads. A plan outside that order is judged as before.
