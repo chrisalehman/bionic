@@ -205,7 +205,7 @@ a_tool_agentid() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
-# The orchestrator's own words: a turn's prose, and one of the places a decline may be
+# The orchestrator's own words: a turn's prose, and the one place a stand-down decline may be
 # written. DEFINED WITH THE OTHER ENTRY BUILDERS, above every case (wave-21 T14): §4's 35e calls
 # it, and a definition in §5 left those calls printing "command not found" while the case passed.
 a_text() {  # <dir> <text>
@@ -281,84 +281,8 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   ok "$1"
 }
 
-# THE ROW LIST, NOT THE WHOLE TEXT (wave-27 T37; review pass 42 S1, A-orch-112). The fill refusal
-# prints `bash <hooks dir>/session-poker.sh decline <ids> …`, so a must-not over the whole reason
-# also reads the checkout's path, and a tree whose path holds `T20` turned 69c red. A row that says
-# an id is NOT named reads the ids of the refusal's `decline` operand and matches one as a whole
-# word there. The list must be non-empty, so the absence is read off a real list.
-refusal_rows() {  # -> the ids the fill refusal's decline operand names, space-joined
-  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
-    | sed 's/.* decline //' | tr ',' ' '
-}
-expect_block_unnamed() {  # <label> <id the refusal's row list must not hold>
-  local d rows; d=$(decision_of); rows=$(refusal_rows)
-  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
-    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
-  fi
-  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
-  case " $rows " in
-    *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;;
-  esac
-  ok "$1"
-}
-# THE SAME READ FOR A ROW THAT NAMES ONE ID AND NOT ANOTHER (wave-31 T34; A-orch-53 (1)). 60c, 60e, 71c and
-# L8a asked `expect_block ... "T3" "T2"`, whose must-not is a substring of the WHOLE reason, and the reason
-# prints the checkout's path (`bash <hooks dir>/session-poker.sh decline ...` and the scratch path in the
-# note), so a tree under `.worktrees/31-T24` held `T2` and all four read red. Both ids are read off the
-# refusal's decline operand instead, as whole words, and the list must be non-empty.
-expect_block_rows() {  # <label> <id the row list must hold> <id it must not hold>
-  local d rows; d=$(decision_of); rows=$(refusal_rows)
-  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
-    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
-  fi
-  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
-  case " $rows " in
-    *" $2 "*) ;;
-    *) no "$1" "the row list <$rows> does not name <$2>"; return ;;
-  esac
-  case " $rows " in
-    *" $3 "*) no "$1" "the row list <$rows> names <$3>"; return ;;
-  esac
-  ok "$1"
-}
-
 LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
-
-section "Section 1: the six contract cases (Design T5)"
-
-# 1: tick + both duties -> allow.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
-fire "$d"; expect_allow "1: tick + ListAgents + TaskList passes"
-
-# 2: tick + panel refresh only, no TaskList -> ends (wave-31 T32; AC-6.5).
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents
-fire "$d"; expect_allow "2: AC-6.5 tick + ListAgents only, no TaskList: not refused (the task-list duty is gone)"
-
-# 3: THE LISTAGENTS DUTY IS RETIRED (T22, A-orch-33; AC-4.4). A tick turn used to be
-# refused until the transcript showed a main-thread `ListAgents` call — a chore demanded of
-# the model before this gate would let its turn end, which is ADR-024's P-A. The obligation
-# it stood for moved to the tick, which reads the roster and prints `poker: TASKSTOP <name>`
-# for every MET lineage still open on it (tests/session-poker.test.sh §12a-T22-e). One duty
-# remains here, and a tick that discharged it ends its turn.
-d=$(make_env); u_tick "$d"; a_tool "$d" TaskList
-fire "$d"; expect_allow "3: tick + TaskList alone now passes — the panel duty is retired"
-
-# 4: the version-gated fallback — a write naming the active plan file stands in
-# for TaskList, because in a session without the task tools the plan ledger IS
-# the task list (the task-tools census in payload/scripts/lib/env.sh).
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_REL"
-fire "$d"; expect_allow "4: tick + ListAgents + an Edit naming the plan passes"
-
-# 5: a turn the user started is not a Patrol tick — the wall is silent on it,
-# whatever it did or did not do.
-d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
-fire "$d"; expect_allow "5: a non-tick turn with neither duty passes"
-
-# 6: blocks ONCE. The harness re-enters the stop with stop_hook_active true;
-# refusing again wedges the turn with no way out.
-d=$(make_env); u_tick "$d"
-fire "$d" Stop true; expect_allow "6: stop_hook_active true passes the same incomplete tick"
 
 section "Section 2: discrimination — what counts, and when"
 
@@ -608,102 +532,6 @@ expect_eq "35e0b precondition: …and the later turn made no Cron call" "0" \
 fire "$d"; expect_block "35e: a later turn with the window still open is refused, saying the window is open until a CronList" \
   "stays open until a CronList" "This is the first Stop"
 
-section "Section 5: a printed FILL is advice, not evidence (AC-29, retired by wave-20 Δ7)"
-
-# THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
-# the roster and name the tasks that are ready, but it cannot dispatch — and a
-# recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
-# writers against a budget of twenty-two. The turn's END is the only moment at which "the
-# FILL went unanswered" is a fact, so it is the moment this gate asks.
-#
-# ANSWERED = an `Agent` tool_use naming the task, or an explicit `fill-declined: <reason>`
-# anywhere in the turn. The decline is the point, not a loophole: there are good reasons not
-# to fill and every one is worth one line in the record. What is refused is SILENCE.
-#
-# The FILL line reaches the transcript as the CONTENT of the tick's Bash tool result — a
-# `user`-typed entry that is deliberately NOT a prompt — so these fixtures carry it the way
-# a live transcript does.
-
-# A tool_result carrying the tick's output.
-u_tick_out() {  # <dir> <text>
-  jq -nc --arg t "$2" \
-    '{type:"user",isSidechain:false,
-      message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_x",content:$t}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
-# One Agent dispatch, shaped as the harness sends it: the task id may land in the name, the
-# description or the prompt, and this gate reads all of them.
-a_agent() {  # <dir> <name> [prompt]
-  jq -nc --arg n "$2" --arg p "${3:-}" \
-    '{type:"assistant",isSidechain:false,
-      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
-        input:{name:$n,prompt:$p,subagent_type:"implementor"}}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
-a_agent_sidechain() {  # <dir> <name>
-  jq -nc --arg n "$2" \
-    '{type:"assistant",isSidechain:true,
-      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
-        input:{name:$n,prompt:"x",subagent_type:"implementor"}}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
-# A TASK ENTRY SET IN PROGRESS (wave-28 T38; REQ-13, D30), the harness's TaskUpdate shape. A turn
-# that dispatched plan rows owes one per row, so a row here that pins "the dispatching turn ends"
-# sets them, as the doctrine's dispatch turn does.
-# Since wave-31 T32 (D6) no wall counts it: the rows that call it keep the doctrine's dispatch turn
-# whole, and §5c's AC-6.5 row drives the same dispatch with none.
-a_taskup() {  # <dir> <task number>
-  jq -nc --arg n "$2" \
-    '{type:"assistant",isSidechain:false,agentId:null,
-      message:{role:"assistant",content:[{type:"tool_use",id:("toolu_up" + $n),name:"TaskUpdate",
-        input:{taskId:$n,status:"in_progress"}}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
-both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD one alone
-  a_tool "$1" ListAgents; a_tool "$1" TaskList
-}
-
-FILL_MARK="fill unanswered"
-
-# THE PRINTED FILL IS ADVICE NOW (wave-20 REQ-5, AC-5.4; Δ7; ADR-036 decision 3). Rows 36-47
-# used to pin a wall that read the tick's `poker: FILL <ids>` out of the transcript and asked
-# for each printed id to be answered by an Agent call NAMING it. Every way of planting that
-# line reproduced (research D1 §4): the model's own prose, a file read, a grep. The wall now
-# computes the ready set and the pressure state itself and judges the turn by count (§5c,
-# §5d), so on this section's fixture — a task-shaped plan with no table, nothing ready — a
-# printed FILL is owed nothing, whoever printed it.
-
-# 36: a tick turn whose tick printed FILL, both duties done, nothing dispatched: the wall's own
-# ready set is empty, so the printed line binds nothing.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-fire "$d"; expect_allow "36: Δ7 a printed FILL over an empty computed ready set is not a duty"
-
-# 37: …and with no refresh either the turn ends (wave-31 T32; AC-6.5).
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
-fire "$d"; expect_allow "37: AC-6.5 a tick turn with a printed FILL and no refresh ends: neither is owed"
-# 37b: the paired positive: the same turn under an arm stamp is refused for the tick, and never
-# names the printed id — the FILL line is not evidence.
-tick_stamp "$d" "" arm
-fire "$d"; expect_block "37b: …and the same turn unticked is refused for the tick, never the printed id" "session-poker.sh tick" "ALPHA"
-
-# 41: INERT with no FILL line, as before.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
-fire "$d"; expect_allow "41: a tick that printed no FILL is not asked about one"
-
-# 45: BLOCKS ONCE, through the existing stop_hook_active valve — no new bookkeeping.
-d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
-fire "$d" Stop true
-expect_allow "45: stop_hook_active true passes the same turn"
-
-# 47: a non-tick turn is never asked about a printed line either.
-d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
-u_tick_out "$d" "poker: FILL ALPHA"
-fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
-
 section "Section 5b: the fourth duty — a stand-down the tick ordered is answered (AC-1.2; T1, D1; wave-20 T19)"
 #
 # THE CONTRACT. `session-poker.sh tick` stands down every row whose contract is MET and whose
@@ -725,12 +553,26 @@ section "Section 5b: the fourth duty — a stand-down the tick ordered is answer
 #
 # ANSWERED = a main-thread `TaskStop` tool_use naming the agent (by its name or by the address
 # the roster carries for it) that the harness did not refuse, an ack closing the row, or a
-# `standdown-declined: <name> <reason>` line at the start of a line of the model's own text —
-# the fill-declined rule (AC-5.4). The decline is the point, not a loophole: an agent still
+# `standdown-declined: <name> <reason>` line at the start of a line of the model's own text,
+# never a quote of one. The decline is the point, not a loophole: an agent still
 # writing its record is a good reason not to stop it, and it is worth one line in the record.
 
 # The stop itself, shaped as the harness sends it: the id may be the agent's name or the
 # `name@session-xxxxxxxx` address the launch response handed back.
+# A tool_result carrying the tick's output.
+u_tick_out() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"user",isSidechain:false,
+      message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_x",content:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD one alone
+  a_tool "$1" ListAgents; a_tool "$1" TaskList
+}
+
+FILL_MARK="fill unanswered"
+
 a_taskstop() {  # <dir> <task-id> [tool_use id]
   jq -nc --arg t "$2" --arg id "${3:-toolu_7}" \
     '{type:"assistant",isSidechain:false,

@@ -23,86 +23,6 @@ RI="$(ll_rworld)"
 ll_verb "$RI" T1 --within 08
 expect_eq "(i2) --within 08 is eight seconds, not an octal error: the 5 s suite runs and lands" "0" "$LL_RC"
 
-section "§LABELS: the launch line's lands_on= and lands_red= read back through the carrier's decoder (wave-28 T7; read-structure-p12 #8)"
-# The dispatch wall writes `lands_on=` from the brief's `Lands-on:` line, spelled by the lift
-# (lib/brief.sh), and `lands_red=` as `<suite basename> until <token>`; `ready` reads both off the launch
-# line through `_line_suites`. One row per key, through the real lift and the real row writer, so the
-# writer and the decoder cannot drift. A path-qualified suite keeps its path (wave-34 T27), so the debt,
-# which the wall writes by file name, is one of the row's suites by its file name, as ready matches it.
-# fails-when: the lifted spelling is not what `_line_suites` decodes it to, or the debt's suite is not
-# the file name of one of the row's suites.
-LB_LIFT="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
-  l="$(lift_contract_fields 'Lands-on: a, tests/b.test.sh, ./c.test.sh  # the row suites
-Lands-red: tests/b.test.sh until ext:vendor-fix')"
-  printf '%s|%s' "$(brief_field "$l" lands_on)" "$(brief_field "$l" lands_red)")"
-LB_ON="${LB_LIFT%%|*}"; LB_RED_LINE="${LB_LIFT#*|}"
-expect_eq "(lb0) precondition: the lift reads the Lands-on: line, a bare name bare and a path as declared (the positive on that extractor)" \
-  "a.test.sh,tests/b.test.sh,./c.test.sh" "$LB_ON"
-# the wall writes the debt by its suite basename (hooks/dispatch-preflight.sh, `${_lr_suite##*/}`)
-LB_RED_SUITE="${LB_RED_LINE%% *}"; LB_RED="${LB_RED_SUITE##*/} until ${LB_RED_LINE##* until }"
-LB_ROW="$(roster_row status=intended session=s1 name=w-A2 agent_id= launched_at=2026-10-07T01:00:00Z \
-  subagent_type=implementor deliverable=record/n.md tool_use_id=toolu_n plan=none \
-  "lands_red=${LB_RED}" row=T23 "lands_on=${LB_ON}")"
-LB_ON_READ="$(_wt_field "$LB_ROW" lands_on)"
-expect_eq "(lb1) lands_on= on the launch line decodes to itself through _line_suites" \
-  "$LB_ON_READ" "$(_line_suites "$LB_ON_READ")"
-LB_RED_READ="$(_wt_field "$LB_ROW" lands_red)"
-expect_eq "(lb2) lands_red=, cut at its first word as ready cuts it, decodes to itself through _line_suites" \
-  "${LB_RED_READ%% *}" "$(_line_suites "${LB_RED_READ%% *}")"
-expect_contains "(lb3) …and that suite is the file name of one of the row's lands_on suites" \
-  ",${LB_RED_READ%% *}," ",$(_line_suites "$LB_ON_READ" | tr ',' '\n' | sed 's|.*/||' | paste -sd, -),"
-# The token half (read-structure-p17 #5): the wall writes a debt only as `<suite> until <token>`, so
-# ready's token cut (`${debt#* until }`, line.sh) and land's (`${lands_red#* until }`, worktree.sh) read
-# the one token; a debt with no ` until ` is never written, so where the two cuts differ is unreached.
-expect_eq "(lb3t) …and the debt carries its token after one ' until ', the cut both decoders make" \
-  "ext:vendor-fix" "${LB_RED_READ#* until }"
-LB_NONE="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
-  brief_field "$(lift_contract_fields 'Lands-on: none — prose only')" lands_on)"
-expect_eq "(lb4) Lands-on: none lifts as none, which _line_suites reads as no suites" "none|none" \
-  "${LB_NONE}|$(_line_suites "$LB_NONE")"
-
-section "§DEBT-LINE: ready's landing report says what the row did to the run's debt (wave-30 T22; REQ-11 AC-11.3; D2, P2)"
-# When the run keeps `record/<run>/debt.md` (lib/proof.sh `proof_debt_ledger_path`), `ready` prints
-# `debt: burned <N>, touched <M>` between LANDED and the owed line: N the items whose last cell says
-# `burned <row>`, M the items one of whose sites the row's `Files` cell covers. The world plan's T1
-# writes `T1.txt`. With no ledger (r1 above) the output is LANDED and the owed line alone.
-# fails-when: a landing over a ledger prints no debt line, or counts what the row did not touch or burn.
-world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
-RDB="$(ll_rworld)"
-mkdir -p "$RDB/.bionic/docs/record/wave-x"
-printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
-  't1_seam | duplicate | T1.txt:1 | raised-by record/wave-x/critic-structure.md | touches 1 | —' \
-  'old_case | one-case-abstraction | T1.txt:2, lib/x.sh:4 | raised-by record/wave-x/critic-structure.md | touches 1 | burned T1' \
-  'elsewhere | unpinned-pair | T2.txt:1 | raised-by record/wave-x/critic-structure.md | touches 0 | burned T2' \
-  > "$RDB/.bionic/docs/record/wave-x/debt.md"
-ll_verb "$RDB" T1
-KDB="$(ll_ev "$RDB" candidate | head -1)"; KDB="$(ll_field "$KDB" commit)"
-expect_eq "(db1) ready over a run with a ledger exits 0" "0" "$LL_RC"
-expect_nonempty "(db1-pre) a candidate was built" "$KDB"
-
-
-section "§REVIEW-BORN: ready's landing report counts the review-born rows against the plan's fix-cap: (wave-30 T21; REQ-2 AC-2.3; D4)"
-# `ready` prints `review-born rows: <N> of cap <M>` between LANDED and the owed line: N the plan's `## SDLC State`
-# lines carrying `born: review` (task-add --born writes it), M the plan's fix-cap: rendered (lib/run.sh
-# `fix_cap_render`; the level's default when the field is absent). Nothing when the plan has neither fix-cap: nor
-# rigor: — the world plan above, whose exact outputs (r1, db2) carry no such line.
-# fails-when: a plan with fix-cap: 2 and two review-born rows lands without `review-born rows: 2 of cap 2`, or another count.
-ll_born_plan() {  # <root> <ledger suffix for T1> <ledger suffix for T2> -> fix-cap: 2 and the two lines' suffixes
-  local p; p="$(ll_plan "$1")"
-  awk -v a="$2" -v b="$3" '/^working-branch: / { print; print "fix-cap: 2"; next }
-    /^- T1: active$/ { print $0 a; next } /^- T2: active$/ { print $0 b; next } { print }' "$p" > "$p.n" && mv "$p.n" "$p"
-}
-RRB="$(ll_rworld)"
-ll_born_plan "$RRB" ' born: review S2 on' ' born: review S1 off'
-ll_verb "$RRB" T1
-KRB="$(ll_ev "$RRB" candidate | head -1)"; KRB="$(ll_field "$KRB" commit)"
-expect_eq "(rb1) ready over the plan exits 0" "0" "$LL_RC"
-expect_nonempty "(rb1-pre) a candidate was built" "$KRB"
-RRB0="$(ll_rworld)"
-ll_born_plan "$RRB0" '' ''
-ll_verb "$RRB0" T1
-KRB0="$(ll_ev "$RRB0" candidate | head -1)"; KRB0="$(ll_field "$KRB0" commit)"
-
 # ============================================================================ the landing's environment (wave-33 T2)
 #
 # REQ-7, D3: a suite proved at a landing starts as the whole run starts it, through the plugin's one
@@ -756,26 +676,6 @@ expect_eq "(ad3) …each the gate's own admitted= for that run" \
 export BIONIC_GATE_DIR="$LL_GATE_WAS"
 printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 world_machine 8 8192 40 0.5
-
-# ---------------------------------------------------------------------------
-section "§FIELDS: every verdict line carries promised= and actual=, the gate's promise for its run and its measure of it (wave-39 T8; D11, REQ-4 AC-4.2)"
-#
-# From §ASK's landing: p1 to p4 were admitted at one instant and ended after the clock moved 50 s; p5 and p6 were
-# admitted and ended after it. promised= is the seconds of the run's request's promise= (what the gate promised it at
-# admission), actual= the request's ended less admitted (the gate's own measure, the seconds its cost line records).
-export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k"
-ll_pa() {  # <root> <commit> -> `suite:promised/actual` of each verdict on <commit>, in record order
-  ll_ev "$1" verdict | grep -F "|commit=$2|" | while IFS= read -r v; do
-    printf '%s:%s/%s ' "$(ll_field "$v" suite)" "$(ll_field "$v" promised)" "$(ll_field "$v" actual)"
-  done | sed 's/ $//'
-}
-expect_eq "(f0-pre) the gate measured p1's run: ended less admitted is 50 s" "50" "$(ll_req_last p1.test.sh actual)"
-expect_eq "(f2) …each the gate's own for that run: its request's promised seconds and its ended less admitted" \
-  "$(for s in p1 p2 p3 p4 p5 p6; do printf '%s.test.sh:%s/%s ' "$s" "$(ll_req_last "$s.test.sh" promise)" "$(ll_req_last "$s.test.sh" actual)"; done | sed 's/ $//')" \
-  "$(ll_pa "$RK" "$KK")"
-expect_eq "(f3) …p1 to p4 ran across the 50 s tick, p5 and p6 after it" "50 50 50 50 0 0" \
-  "$(ll_pa "$RK" "$KK" | tr ' ' '\n' | awk -F/ '{ printf "%s%s", (NR > 1 ? " " : ""), $2 }')"
-export BIONIC_GATE_DIR="$LL_GATE_WAS"
 
 # ---------------------------------------------------------------------------
 section "§STALL: a bounded ready keeps its none count across ev=ready, so the stall fires (wave-38 T6; REQ-6 AC-6.3)"

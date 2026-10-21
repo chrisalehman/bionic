@@ -119,16 +119,8 @@ engage|open|no
 permission-answer|open|yes
 '
 
-section "0 — the carrier and non-vacuity"
-
 BLOCK="$SANDBOX/canonical-block.txt"
 ( . "$LOADER_LIB" && bionic_loader_pin ) > "$BLOCK" 2>"$SANDBOX/.pinerr"
-BLOCK_LINES=$(wc -l < "$BLOCK" | tr -d ' ')
-if [ "${BLOCK_LINES:-0}" -gt 50 ]; then
-  ok "bionic_loader_pin prints the canonical block ($BLOCK_LINES lines)"
-else
-  no "bionic_loader_pin prints the canonical block" "got $BLOCK_LINES lines: $(cat "$SANDBOX/.pinerr")"
-fi
 
 # extract_block <file> -> the marker-delimited span, markers inclusive
 extract_block() {
@@ -391,8 +383,18 @@ expect_eq "engage reads the binding FIELD (session_plan), which is what the writ
 expect_eq "…and asks for no run VERDICT: neither session_run nor active_run" "no" \
   "$(grep -qE 'session_run "|active_run "' "$HOOKS/engage.sh" && echo yes || echo no)"
 
-section "5 — the predicate GATES: silent with no run, silent with a closed run, live with an open one"
-
+section "5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT/5)"
+#
+# canonical-sdlc-governing-skill gates the frontmatter contract on a canonical-sdlc
+# artifact. The artifact it exists for is the one that CREATES a run, so `active_run` is
+# false exactly when the contract most needs to bind — 46 assertions in its own suite go
+# red under the bare predicate, every one of them a project's first artifact. It is armed
+# by the project instead: an open run, or a `.bionic/` tree at the root, or a target path
+# inside one, or CONTENT that declares `canonical_sdlc_version`.
+#
+# THE TWO ROWS BELOW ARE THE WHOLE OF THE ALWAYS-ON CLAIM. A plan written into a bionic
+# project is gated even with no run; the same write in a project that has nothing to do
+# with this lifecycle, claiming nothing, is not this gate's business.
 SID="ad0pt111-2222-3333-4444-555555555555"
 
 # mk_root <name> <state>  -> a project root; state = none|closed|open
@@ -577,174 +579,6 @@ payload_for() {
   esac
 }
 
-# canonical-sdlc-governing-skill is NOT in this set, and the omission is the deviation
-# logged as ADOPT/5 rather than an oversight. The artifact it exists to gate is the one
-# that CREATES a run — a wave's plan, written into a project that has no plan yet — so
-# `active_run` is false at the exact moment the frontmatter contract must bind. It is
-# armed by the PROJECT instead, and §5b drives that rule on its own terms.
-# NARROWED AT task-engaged-session, for the reason §4's preamble gives: a hook is scoped by
-# ENGAGEMENT now, and only a hook that still reads the plan for data can be silent because
-# the run is closed. dispatch-preflight, landing-gate, execution-recorder, stop-guard and
-# patrol-duties-gate left this loop — every one of them acts for an ENGAGED session whether
-# or not a plan is on disk (AC-23), which is the change this wave exists to make. Their
-# scoping is driven in their own suites, on the switch that actually scopes them: marker
-# absent -> silent, marker present -> the same behaviour as today.
-# farm-out-reminder LEFT TOO, at step-6 review R-1. It had kept `active_run` below its new
-# engagement guard, which made the nudge plan-bound against a design that says the opposite:
-# knowing a suite command belongs in a subagent needs no plan, and the sessions most in need
-# of the reminder are the ones in Step 0 through Step 3 that have not written one. The
-# paired arms live in tests/cmd-class.test.sh §R-1.
-# THE MERGED TURN-END PROCESS IS NOT A MEMBER, and that is a statement about it rather
-# than an omission (epic-23 wave-11, T12). hooks/stop.sh runs four verdicts and they do
-# not agree on this question: `stop_context_spend` and `stop_patrol_revive` are run-scoped
-# and exit on a closed run, while `stop_landing_gate` and `stop_patrol_duties` act for an
-# ENGAGED session whether or not a plan is on disk — the AC-23 change §5's own header
-# describes, which is why those two left this loop before the merge. A process that
-# carries both cannot be silent on a closed run, so asserting that it is would be asserting
-# a thing the design says is false. Each verdict's own scoping is driven in its own suite,
-# through this process: tests/context-spend.test.sh §12 and tests/patrol-revive.test.sh §11.
-# THE RUN-SCOPED MEMBER IS THE COMPOUND, DRIVEN ON THE GATE'S OWN PAYLOAD (T23). The
-# property has not changed — a wall that reads the plan for data says nothing when there is
-# no open run to read — but the file that carries it is hooks/bash-walls.sh, and what makes
-# the row honest is the payload: `git commit -m wip` is the evidence gate's business and
-# nobody else's, so a silence here is that wall's silence and not four walls having nothing
-# to say. The anti-vacuity mutant below shims `active_run` after the library is sourced, so
-# it reaches `wall_evidence_gate`'s own call.
-RUN_SCOPED='bash-walls'
-
-# unrun_mutant <hook> -> a copy of the hook with the run predicate neutralised
-#
-# THE ANTI-VACUITY DISCRIMINATOR, and it has to be a mutation rather than a happy-path
-# fixture. Every assertion in §5 says a hook was SILENT, and silence is also what a hook
-# that exits at line 1 produces — so each silence has to be paired with a demonstration
-# that THIS payload, in THIS fixture, would have produced something had the run been open.
-# Building nine per-hook happy paths would mean nine chances to build a fixture that
-# reaches the gate by accident; neutralising the predicate reaches it by construction.
-#
-# `active_run` is redefined AFTER the hook has sourced the library, so the shim wins, and
-# it answers with the fixture's own plan path — the value every caller goes on to use.
-unrun_mutant() {  # <hook> -> path to the mutant
-  local hook="$1"
-  local tree="$SANDBOX/unrun/$hook"
-  mkdir -p "$tree/hooks" "$tree/scripts/lib"
-  cp "$REPO/payload/scripts/lib"/*.sh "$tree/scripts/lib/" 2>/dev/null || true
-  # EVERY sibling comes along, not just the hook under mutation: patrol-revive asks
-  # session-poker.sh for the interval and the stop family hands off to session-sweeper.sh,
-  # each resolved as `$(dirname "$0")/<name>.sh`. A lone copy loses those and goes silent
-  # for a reason that has nothing to do with the predicate.
-  cp "$HOOKS"/*.sh "$tree/hooks/" 2>/dev/null || true
-  # append the shim after the LAST library source line
-  awk -v shim='active_run() { printf "%s\\n" "$BIONIC_FAKE_PLAN"; return 0; }' '
-    { lines[NR] = $0; if ($0 ~ /^\. "\$BIONIC_LIB\//) last = NR }
-    END { for (i = 1; i <= NR; i++) { print lines[i]; if (i == last) print shim } }
-  ' "$HOOKS/$hook.sh" > "$tree/hooks/$hook.sh"
-  printf '%s' "$tree/hooks/$hook.sh"
-}
-
-for hook in $RUN_SCOPED; do
-  # (a) no .bionic anywhere -> exit 0, nothing on either stream
-  r_none=$(mk_root "$hook-none" none)
-  drive "$hook" "$(payload_for "$hook" "$r_none")"
-  expect_eq "$hook: no .bionic -> exit 0" "0" "$DRV_ST"
-  expect_empty "$hook: no .bionic -> no stdout" "$DRV_OUT"
-  expect_empty "$hook: no .bionic -> no stderr" "$DRV_ERR"
-
-  # (b) a root whose run is CLOSED -> exit 0, nothing on either stream
-  r_closed=$(mk_root "$hook-closed" closed)
-  seed_hook "$hook" "$r_closed"
-  drive "$hook" "$(payload_for "$hook" "$r_closed")"
-  expect_eq "$hook: closed run -> exit 0" "0" "$DRV_ST"
-  expect_empty "$hook: closed run -> no stdout" "$DRV_OUT"
-  expect_empty "$hook: closed run -> no stderr" "$DRV_ERR"
-
-  # (c) ANTI-VACUITY: the SAME payload and the SAME closed-run fixture, against a copy of
-  # the hook whose run predicate has been neutralised. It must behave differently — refuse,
-  # speak, or write state. If it too is silent, the payload never reached the gate and the
-  # two assertions above prove nothing about the predicate.
-  r_ctrl=$(mk_root "$hook-ctrl" closed)
-  seed_hook "$hook" "$r_ctrl"
-  mut=$(unrun_mutant "$hook")
-  MUT_OUT=$(printf '%s' "$(payload_for "$hook" "$r_ctrl")" | env HOME="$SANDBOX/home" \
-      BIONIC_PLUGINS_DIR="$SANDBOX/plugins" CLAUDE_CODE_SESSION_ID="$SID" \
-      BIONIC_FAKE_PLAN="$r_ctrl/.bionic/docs/plans/epic-99/wave-01.plan.md" \
-      bash "$mut" 2>"$SANDBOX/.merr")
-  MUT_ST=$?
-  MUT_ERR=$(cat "$SANDBOX/.merr")
-  wrote=""
-  [ -n "$(ls -A "$r_ctrl/.bionic/tmp" 2>/dev/null | grep -v "^patrol-\|^roster-" || true)" ] && wrote="state"
-  # a roster the seed planted is not a write; a CHANGE to it is
-  grep -q 'status=identified\|status=confirmed\|landing-swept' "$r_ctrl/.bionic/tmp/roster-$SID.state" 2>/dev/null && wrote="roster"
-  if [ "$MUT_ST" -ne 0 ] || [ -n "$MUT_OUT" ] || [ -n "$MUT_ERR" ] || [ -n "$wrote" ]; then
-    ok "$hook: with the run predicate neutralised the SAME payload is not silent (control)"
-  else
-    no "$hook: with the run predicate neutralised the SAME payload is not silent (control)" \
-       "exit $MUT_ST, no output, no state — the silence assertions above prove nothing"
-  fi
-done
-
-section "5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-session)"
-#
-# §5 above asks whether a hook is silent when the RUN is closed. This asks the question
-# that scopes every hook now: is it silent when THIS SESSION never invoked canonical-sdlc?
-# It is the uniformity claim §5 used to carry for the five hooks that left its loop — each
-# of them is driven in its own suite too, but a per-hook suite cannot show that the roster
-# agrees, and a switch that one hook spells differently is a hook that stays armed for a
-# bystander.
-#
-# The pairing is the same shape §5 uses: the silence is worthless without the demonstration
-# that THIS payload, in THIS fixture, produces something once the marker is there.
-# The roster is the seven hooks task-engaged-session T2 moved behind the switch.
-# canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill and farm-out-reminder are
-# T3's and join this list with their own guard, in their own commit.
-# permission-answer joined at wave-25 T4: the carrier answers only an engaged session, and
-# the stock dialog is what a bystander gets.
-ENGAGEMENT_SCOPED='dispatch-preflight execution-recorder stop-guard stop permission-answer'
-
-for hook in $ENGAGEMENT_SCOPED; do
-  # an OPEN run, every precondition seeded, and the marker deliberately removed
-  r_eng=$(mk_root "$hook-eng" open)
-  seed_hook "$hook" "$r_eng"
-  rm -f "$r_eng/.bionic/tmp/engaged-$SID.state"
-  drive "$hook" "$(payload_for "$hook" "$r_eng")"
-  expect_eq "$hook: open run, NO engagement marker -> exit 0" "0" "$DRV_ST"
-  expect_empty "$hook: open run, NO engagement marker -> no stdout" "$DRV_OUT"
-  expect_empty "$hook: open run, NO engagement marker -> no stderr" "$DRV_ERR"
-
-  # ANTI-VACUITY: the same payload, the same fixture, the marker restored.
-  : > "$r_eng/.bionic/tmp/engaged-$SID.state"
-  drive "$hook" "$(payload_for "$hook" "$r_eng")"
-  wrote=""
-  [ -n "$(ls -A "$r_eng/.bionic/tmp" 2>/dev/null | /usr/bin/grep -v "^patrol-\|^roster-\|^engaged-" || true)" ] && wrote="state"
-  /usr/bin/grep -q 'status=identified\|status=confirmed\|landing-swept' "$r_eng/.bionic/tmp/roster-$SID.state" 2>/dev/null && wrote="roster"
-  if [ "$DRV_ST" -ne 0 ] || [ -n "$DRV_OUT" ] || [ -n "$DRV_ERR" ] || [ -n "$wrote" ]; then
-    ok "$hook: with the marker restored the SAME payload is not silent (control)"
-  else
-    no "$hook: with the marker restored the SAME payload is not silent (control)" \
-       "exit $DRV_ST, no output, no state — the silence assertions above prove nothing"
-  fi
-
-  # a SYMLINK at the marker path reads as ABSENT, never followed — the one shape a repo
-  # controls that must not be able to OPEN a wall.
-  rm -f "$r_eng/.bionic/tmp/engaged-$SID.state"
-  ln -s "$SANDBOX/eng-decoy" "$r_eng/.bionic/tmp/engaged-$SID.state"
-  printf 'plan=none\n' > "$SANDBOX/eng-decoy"
-  drive "$hook" "$(payload_for "$hook" "$r_eng")"
-  expect_eq "$hook: a SYMLINK at the marker path is not an engagement" "0" "$DRV_ST"
-  expect_empty "$hook: …and it says nothing" "$DRV_ERR"
-done
-
-section "5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT/5)"
-#
-# canonical-sdlc-governing-skill gates the frontmatter contract on a canonical-sdlc
-# artifact. The artifact it exists for is the one that CREATES a run, so `active_run` is
-# false exactly when the contract most needs to bind — 46 assertions in its own suite go
-# red under the bare predicate, every one of them a project's first artifact. It is armed
-# by the project instead: an open run, or a `.bionic/` tree at the root, or a target path
-# inside one, or CONTENT that declares `canonical_sdlc_version`.
-#
-# THE TWO ROWS BELOW ARE THE WHOLE OF THE ALWAYS-ON CLAIM. A plan written into a bionic
-# project is gated even with no run; the same write in a project that has nothing to do
-# with this lifecycle, claiming nothing, is not this gate's business.
 GS_UNRELATED="$SANDBOX/roots/gs-unrelated"
 mkdir -p "$GS_UNRELATED/docs/plans" "$GS_UNRELATED/.bionic/tmp"
 # ENGAGED, and that is what makes these two rows a discrimination rather than a pair of

@@ -19,11 +19,51 @@
 # comments, heredocs and case states, and names each hazard by file and line. It is the one
 # home of what bash 3.2 rejects, so it also holds what tests/cross-gate-agreement.test.sh §BP
 # held before it: the `/bin/bash -n` sweep (§PARSE) and the one-line `$(case` grep (§CASE),
-# each with its mutant. §BP keeps its quitting-`grep -q` sweep.
+# each with its mutant.
+#
+# §BP is a fourth shape that neither `-n` nor a run at test size can see: a writer piped into a
+# reader that quits early (`grep -q`, `grep -l`, `grep -m`, `head`, an awk that exits) in a file
+# that runs under pipefail, with the pipeline's status read. Past the 64 KB pipe buffer the writer
+# takes SIGPIPE, the pipeline reports 141, and a present line reads as absent. The sweep reads the
+# hooks, payload/scripts and the declared check's two files; tests/lib/quitting-readers.allow lists
+# each bounded site with its reason. §BP-PIN proves the fixed form of observe.sh's process scan
+# returns 0 on a listing larger than the buffer, and the quitting form returns 141.
+#
+# §CENSUS-COMPLETE-1 to -3 hold the tests tree to tests/CENSUS.md: every suite has a heading, every
+# `section` call a record line under its key, every verdict is one of the five words, and a `rule:`
+# line is a keep. The calls are found by the section-list command in tests/RUBRIC.md, run from here.
 #
 # §LOAD sources every library under payload/scripts/lib in a bare `/bin/bash` and requires
 # every function the lexer finds it defining at load to be defined after, with nothing on
 # stderr. A hook or a payload command is parsed (§PARSE), never run.
+#
+# §ADR and §HEADER hold a document to the fact it restates. An ADR says its state twice, in its front
+# matter's `status:` and under its `## Status` heading, and the first word of each must be the same word
+# (`Accepted`, `Proposed`, `Superseded`); every ADR under docs/adrs/, and under .bionic/docs/adrs/ where
+# that directory exists, is read, and a disagreement is refused naming the file and both words. A suite
+# header lists the sections it holds as `#   §KEY` lines, and the keys must be exactly the keys of the
+# body's `section` calls; a suite is refused naming the key it lists that the body lacks and the key the
+# body has that it omits. A `§` inside a sentence is a reference and a header with no list makes no claim,
+# but this suite's own list is pinned to its body, so a sweep named here that the body never runs is refused.
+#
+# THE SECTIONS, in the order the body runs them:
+#
+#   §LEXER               the lexer reads every shipped file to its end with every frame closed.
+#   §PARSE               every shell file in the tree parses under the system interpreter.
+#   §LOAD                every library loads in a bare /bin/bash with its functions defined.
+#   §CASE                no `case` arm without its opening paren inside `$( … )`.
+#   §HEREDOC             the two heredoc shapes: a paren-less arm in an unquoted body, a lone `)` in a body.
+#   §BP                  no writer is piped into a reader that quits early where the status is read.
+#   §BP-PIN              a writer of more than 64 KB into the fixed form returns 0 under pipefail.
+#   §CENSUS-COMPLETE-1   a section with no census line, a suite with no heading and a suite with no line are refused.
+#   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
+#   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
+#   §CENSUS-1            a section the census culls that is still in its suite is refused.
+#   §CENSUS-2            a section the census keeps that is gone from its suite is refused.
+#   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
+#   §CENSUS-4            the real tests tree is cut as tests/CENSUS.md says.
+#   §ADR                 an ADR whose `status:` word differs from its `## Status` word is refused by file.
+#   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -871,5 +911,840 @@ for c in $HD_B_CASES; do
     expect_absent "${c%%:*}: …and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
   fi
 done
+
+# ============================================================
+section "BP — no writer is piped into a reader that quits early where the status is read"
+# ============================================================
+#
+# fails-when: a hook or payload script pipes a writer into `grep -q`, `grep -l`, `grep -m`, `head` or an
+# awk that exits, under pipefail with the status read, and neither fixes it nor lists it with a reason; or
+# the process scan in observe.sh is the quitting form again.
+#
+# WHY IT EXISTS. `w | grep -q x` parses and answers right while w's output fits the 64 KB pipe buffer.
+# Past it, grep exits at the first match while w is still writing, w takes SIGPIPE, and under pipefail the
+# pipeline reports w's 141: `if w | grep -q x` reads a present line as absent, and a wall built on it
+# inverts. The sites are found by reading the shell, because no run at test size can see them.
+#
+# THE ROSTER: hooks/, payload/scripts/ and the two files of the declared release check's closure
+# (tests/lib/release-check.sh and tests/lib/name-scan.sh). Other suites build fixtures and are not walls.
+#
+# WHAT IS A SITE. A pipe whose far side is a quitting reader: grep with -q, -l or -m (also --quiet,
+# --silent, --files-with-matches, --max-count), head, or an awk program with an `exit` outside its END.
+# The file must run under pipefail: it sets it, or it is a library (a path with /lib/ or under
+# hooks/poker/), which runs inside whichever process sourced it. The status must be read:
+#   grep -q or -l      always, since a pipeline that only reports a status is read for it
+#   the others         an `&&` or `||` after them, `; then` or `; do`, a `$?` on the line or the next
+#                      line, or a `then` on the next line; inside `$( )` only when the substitution is
+#                      the value of an assignment and one of those follows it
+# WHAT IS EXCUSED, each with a control below: a whole-line or trailing comment; a heredoc body; a pipe that
+# is `||` or `|&` or sits inside quotes; an awk whose only `exit` is in END (it has read every line); a
+# limiter whose status nobody reads (`v=$(w | head -n 1)` keeps the whole value); `|| true` or `|| :`;
+# a file that is an entry point and sets no pipefail. NOT READ: sed with a q command, `read` fed by a
+# pipe, and errexit (no file of the roster sets it).
+#
+# THE ALLOW FILE, tests/lib/quitting-readers.allow: `<path>:<pattern> # <reason>`. The pattern is a
+# fixed substring of the logical line; the reason says why the writer cannot outrun the buffer. A line
+# without a reason, without a colon, or naming a path outside the roster is refused.
+QUIT_AWK="$TMP/quit.awk"
+cat > "$QUIT_AWK" <<'QUIT_AWK_EOF'
+# QUITTING READERS. A writer piped into a reader that quits early (grep -q, -l or -m, head, an awk that
+# exits) is sent SIGPIPE once its output outruns the 64 KB pipe buffer; under pipefail the pipeline then
+# reports the writer's 141, and a test of its status reads a present line as absent.
+#
+# Run once per file with -v ALLOW=<allow file> -v ROSTER=<file listing every path swept>, the file's path
+# relative to the root as its one argument. -v REPORT=1 on a run over /dev/null prints the allow file's
+# own faults. Prints
+#   Q<TAB><path>:<line><TAB><the logical line>      a site neither allowed nor excused
+#   A<TAB><allow line number><TAB><what is wrong>   an allow line that is refused
+function blank(s,   n, i, c, q, o) {  # quoted text becomes underscores, so a quoted ; | && is not read
+  n = length(s); q = ""; o = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "") {
+      if (c == "\\") { o = o c substr(s, i + 1, 1); i++; continue }
+      if (c == "'" || c == "\"") { q = c; o = o c; continue }
+      o = o c
+    } else if (c == q) { q = ""; o = o c }
+    else if (q == "\"" && c == "\\") { o = o "__"; i++ }
+    else o = o "_"
+  }
+  return o
+}
+function strip_comment(s,   b, n, i, c, prev) {
+  b = blank(s); n = length(b); prev = " "
+  for (i = 1; i <= n; i++) {
+    c = substr(b, i, 1)
+    if (c == "#" && (prev == " " || prev == "\t" || prev == ";" || prev == "") && i > 1) return substr(s, 1, i - 1)
+    prev = c
+  }
+  return s
+}
+function open_sq(s,   n, i, c, q) {  # does s end inside a single-quoted string
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "'") { if (c == "'") q = ""; continue }
+    if (q == "\"") { if (c == "\\") i++; else if (c == "\"") q = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (c == "'" || c == "\"") q = c
+  }
+  return q == "'"
+}
+# s starts right after a pipe: 0 not a quitting reader, 1 a predicate (grep -q, -l), 2 a limiter
+function reader(s,   rest, n, i, t, prog) {
+  sub(/^[ \t]+/, "", s)
+  while (match(s, /^(env|LC_ALL=[A-Za-z0-9_.]+|LANG=[A-Za-z0-9_.]+)[ \t]+/)) s = substr(s, RLENGTH + 1)
+  sub(/^(\/usr\/bin\/|\/bin\/)/, "", s)
+  if (match(s, /^(grep|egrep|fgrep)[ \t]/)) {
+    n = split(substr(s, RLENGTH + 1), T, /[ \t]+/)
+    for (i = 1; i <= n; i++) {
+      t = T[i]
+      if (t == "") continue
+      if (t == "--") break
+      if (t == "--quiet" || t == "--silent" || t == "--files-with-matches") return 1
+      if (t ~ /^--max-count/) return 2
+      if (t ~ /^--/) continue
+      if (t ~ /^-[A-Za-z0-9]/) {
+        if (t ~ /^-[A-Za-z]*[ql]/) return 1
+        if (t ~ /^-[A-Za-z]*m/) return 2
+        if (t == "-e" || t == "-f") i++
+        continue
+      }
+      break
+    }
+    return 0
+  }
+  if (s ~ /^head([ \t]|$)/) return 2
+  if (match(s, /^(awk|gawk|mawk)[ \t]/)) {
+    prog = s
+    gsub(/END[ \t]*\{[^}]*\}/, "", prog)
+    return (prog ~ /(^|[^A-Za-z0-9_])exit([^A-Za-z0-9_]|$)/) ? 2 : 0
+  }
+  return 0
+}
+# Is the status of the pipeline whose reader starts at `rest` (the text from the reader on) consumed?
+# before is the text ahead of the pipe. Inside a command substitution the status is the assignment's,
+# so it counts only when the substitution is the value of an assignment and && or || follows it.
+function consumed(before, rest, nxt,   b, n, i, c, d, tail, cut, inside, pre) {
+  b = blank(rest); n = length(b); d = 0; inside = 0; cut = n + 1
+  for (i = 1; i <= n; i++) {
+    c = substr(b, i, 1)
+    if (c == "(") d++
+    else if (c == ")") { if (d == 0) { inside = 1; cut = i; break } d-- }
+  }
+  if (inside) {
+    pre = before
+    if (!(pre ~ /[A-Za-z_][A-Za-z0-9_]*\+?=\"?[$][(][^$]*$/ || pre ~ /[A-Za-z_][A-Za-z0-9_]*\+?=\"?`[^`]*$/)) return 0
+    tail = substr(b, cut + 1)
+  } else tail = b
+  sub(/;[ \t]*(then|do)([ \t;]|$).*/, " THEN ", tail)
+  sub(/;.*/, "", tail)
+  if (tail ~ /THEN/) return 1
+  if (tail ~ /&&/) return 1
+  if (tail ~ /[|][|]/ && tail !~ /[|][|][ \t]*(true|:)([ \t)]|$)/) return 1
+  if (tail ~ /[$][?]/) return 1
+  if (tail ~ /^[ \t]*$/ && nxt ~ /^[ \t]*(then|do)([ \t;]|$)/) return 1
+  if (nxt ~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=[$][?]/ || nxt ~ /^[ \t]*(if|\[\[?)[^#]*[$][?]/) return 1
+  return 0
+}
+BEGIN {
+  nallow = 0
+  while ((getline al < ALLOW) > 0) {
+    alno++
+    if (al ~ /^[ \t]*(#|$)/) continue
+    reason = ""; entry = al
+    k = index(al, " # ")
+    if (k > 0) { entry = substr(al, 1, k - 1); reason = substr(al, k + 3) }
+    gsub(/^[ \t]+|[ \t]+$/, "", reason)
+    c = index(entry, ":")
+    if (c == 0) { if (REPORT) printf "A\t%d\tno <path>:<pattern>\n", alno; continue }
+    if (reason == "") { if (REPORT) printf "A\t%d\tno reason after a space, a hash and a space\n", alno; continue }
+    nallow++; ALNO[nallow] = alno; APATH[nallow] = substr(entry, 1, c - 1); APAT[nallow] = substr(entry, c + 1)
+    gsub(/[ \t]+$/, "", APAT[nallow])
+  }
+  while ((getline r < ROSTER) > 0) IN[r] = 1
+  for (a = 1; a <= nallow; a++)
+    if (!(APATH[a] in IN)) { if (REPORT) printf "A\t%d\tthe path %s is not in the roster\n", ALNO[a], APATH[a]; APATH[a] = "" }
+}
+{ P[++nl] = $0 }
+END {
+  pf = (FILENAME ~ /\/lib\// || FILENAME ~ /^hooks\/poker\//) ? 1 : 0
+  for (ln = 1; ln <= nl; ln++)
+    if (P[ln] ~ /^[ \t]*set[ \t]/ && P[ln] ~ /pipefail/) pf = 1
+  if (!pf) exit
+  hd = ""
+  for (ln = 1; ln <= nl; ln++) {
+    s = P[ln]
+    if (hd != "") { t = s; sub(/^\t+/, "", t); if (t == hd) hd = ""; continue }
+    if (s ~ /^[ \t]*#/) continue
+    start = ln; end = ln
+    while (end < nl && end - start < 40 && (s ~ /\\$/ || strip_comment(s) ~ /[|][ \t]*$/ || (s ~ /(awk|gawk|mawk)[ \t]/ && open_sq(s)))) {
+      if (s ~ /\\$/) s = substr(s, 1, length(s) - 1)
+      end++; s = s " " P[end]
+    }
+    if (open_sq(s) && end - start >= 40) end = start   # a quote that never closes: read the one line
+    if (end == start) s = P[start]
+    ln = end
+    if (match(s, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/) && substr(s, RSTART - 1, 1) != "<" && substr(s, RSTART + 2, 1) != "<") {
+      d = substr(s, RSTART, RLENGTH); sub(/^<<-?[ \t]*['"]?/, "", d); hd = d
+    }
+    s = strip_comment(s)
+    if (s !~ /[|]/) continue
+    nxt = ""
+    for (k = ln + 1; k <= nl; k++) if (P[k] !~ /^[ \t]*$/) { nxt = P[k]; break }
+    b = blank(s); n = length(b); site = 0
+    for (i = 1; i <= n; i++) {
+      if (substr(b, i, 1) != "|") continue
+      if (substr(b, i + 1, 1) == "|") { i++; continue }
+      if (substr(b, i + 1, 1) == "&") continue
+      if (i > 1 && substr(b, i - 1, 1) == "|") continue
+      cls = reader(substr(s, i + 1))
+      if (cls == 1 && substr(s, i + 1) !~ /[|][|][ \t]*(true|:)([ \t)]|$)/) site = 1
+      else if (cls == 2 && consumed(substr(s, 1, i - 1), substr(s, i + 1), nxt)) site = 1
+      if (site) break
+    }
+    if (!site) continue
+    ok = 0
+    for (a = 1; a <= nallow; a++) if (APATH[a] != "" && APATH[a] == FILENAME && index(s, APAT[a]) > 0) { ok = 1; break }
+    if (ok) continue
+    printf "Q\t%s:%d\t%s\n", FILENAME, start, s
+  }
+}
+QUIT_AWK_EOF
+QUIT_ALLOW="$TESTS_DIR/lib/quitting-readers.allow"
+
+# quit_sweep <root> <allow file> <relative path>... -> the Q and A rows the awk prints
+quit_sweep() {
+  local root="$1" allow="$2" roster f
+  shift 2
+  roster="$(mktemp "$TMP/quit-roster.XXXXXX")"
+  printf '%s\n' "$@" > "$roster"
+  ( cd "$root" || exit 1
+    LC_ALL=C awk -v REPORT=1 -v ALLOW="$allow" -v ROSTER="$roster" -f "$QUIT_AWK" /dev/null
+    for f in "$@"; do
+      LC_ALL=C awk -v ALLOW="$allow" -v ROSTER="$roster" -f "$QUIT_AWK" "$f"
+    done )
+}
+# quit_sites <sweep output> -> the sorted path:line of each site
+quit_sites() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '$1 == "Q" { print $2 }' | LC_ALL=C sort; }
+
+BP_ROSTER="$(cd "$REPO" && { find hooks payload/scripts -name '*.sh' -type f; \
+  printf '%s\n' tests/lib/release-check.sh tests/lib/name-scan.sh; } 2>/dev/null | LC_ALL=C sort)"
+expect_eq "the sweep found shell files to read" "yes" "$([ -n "$BP_ROSTER" ] && echo yes || echo no)"
+expect_eq "…and its roster reaches hooks, payload/scripts and both files of the check closure" "yes" \
+  "$(LC_ALL=C grep -q '^hooks/poker/' <<< "$BP_ROSTER" \
+     && LC_ALL=C grep -q '^payload/scripts/lib/' <<< "$BP_ROSTER" \
+     && LC_ALL=C grep -qx 'tests/lib/release-check.sh' <<< "$BP_ROSTER" \
+     && LC_ALL=C grep -qx 'tests/lib/name-scan.sh' <<< "$BP_ROSTER" && echo yes || echo no)"
+expect_eq "the allow file exists" "yes" "$([ -f "$QUIT_ALLOW" ] && echo yes || echo no)"
+
+# BP-1: the real tree. Every site is fixed or listed with a reason.
+# shellcheck disable=SC2086
+BP_REAL="$(quit_sweep "$REPO" "$QUIT_ALLOW" $BP_ROSTER)"
+expect_eq "BP-1 no hook or payload script pipes a writer into a quitting reader unlisted" "" "$BP_REAL"
+# shellcheck disable=SC2086
+BP_NONE="$(quit_sweep "$REPO" /dev/null $BP_ROSTER)"
+expect_contains "…and with no allow file the same sweep names the carrier site in the tick, so the file is what silences it" \
+  "hooks/poker/tick.sh:" "$(quit_sites "$BP_NONE")"
+
+# BP-2: planted sites, read by the same instrument in the same call as their controls.
+BP2="$TMP/bp2"
+mkdir -p "$BP2/hooks/poker" "$BP2/payload/scripts/lib"
+plant "$BP2/hooks/plant.sh" <<'EOF'
+#!/bin/bash
+set -uo pipefail
+gen() { seq 1 5; }
+if git show HEAD:x | grep -q y; then :; fi  # MARK-S1
+gen | grep -m1 needle && echo y  # MARK-S2
+gen | grep -l needle && echo y  # MARK-S3
+v=$(gen | head -n 1) || v=none  # MARK-S4
+gen | awk '/needle/ { exit }' && echo y  # MARK-S5
+if ! gen | head -1 | grep -c y >/dev/null; then :; fi  # MARK-S6
+# MARK-S7 the next two lines are one pipeline
+if gen \
+  | grep -qF needle; then :; fi
+if gen | awk '
+    /needle/ { print; exit }
+  ' | grep -c . >/dev/null; then :; fi  # MARK-S8
+v=$(gen | head -n 1)  # MARK-C1 the value is whole and nobody reads the status
+# if gen | grep -q needle; then :; fi  # MARK-C2 a comment
+gen | awk '{ n++ } END { exit n > 3 }' && echo y  # MARK-C3 an exit in END has read every line
+grep -qF needle <<< "$v" && echo y  # MARK-C4 a here-string has no writer
+gen | grep -q needle || true  # MARK-C5 the status is thrown away
+if gen | grep needle >/dev/null; then :; fi  # MARK-C6 reads to the end
+if gen | grep -c needle; then :; fi  # MARK-C7 reads to the end
+x="gen | grep -q y" && echo "$x"  # MARK-C8 the pipe is quoted
+gen | head -n 3  # MARK-C9 a limiter whose status nobody reads
+cat <<'DOC'
+if gen | grep -q needle; then :; fi  # MARK-C10 heredoc text
+DOC
+if printf '%s\n' "$bounded" | grep -qx needle; then :; fi  # MARK-A1 allowed with a reason
+EOF
+plant "$BP2/hooks/plain.sh" <<'EOF'
+#!/bin/bash
+gen() { seq 1 5; }
+if gen | grep -q needle; then :; fi  # MARK-P1 an entry point that sets no pipefail
+EOF
+plant "$BP2/payload/scripts/lib/plant-lib.sh" <<'EOF'
+gen() { seq 1 5; }
+if gen | grep -q needle; then :; fi  # MARK-L1 a library runs inside its caller
+EOF
+plant "$BP2/hooks/poker/plant-tick.sh" <<'EOF'
+landing_carrier_names "$plan" | /usr/bin/grep -qxF -- "$name" && return 0  # MARK-CARRIER the carrier exemption as a quitting grep
+EOF
+printf '%s\n' '# a comment' '' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded" # the writer is one short variable' > "$BP2/allow"
+BP2_ROSTER="hooks/plant.sh
+hooks/plain.sh
+payload/scripts/lib/plant-lib.sh
+hooks/poker/plant-tick.sh"
+# shellcheck disable=SC2086
+BP2_OUT="$(quit_sweep "$BP2" "$BP2/allow" $BP2_ROSTER)"
+BP2_SITES="$(quit_sites "$BP2_OUT")"
+bp2_at() { printf '%s:%s\n' "$1" "$(mark_line "$BP2/$1" "$2")"; }
+# bp_fline <file> <fixed text> -> the number of the first line that holds the text
+bp_fline() { LC_ALL=C grep -nF -- "$2" "$1" | head -1 | cut -d: -f1; }
+expect_contains "BP-2 a pipe from git show into grep -q is named by file and line" "$(bp2_at hooks/plant.sh MARK-S1)" "$BP2_SITES"
+expect_contains "…grep -m1 with an && after it" "$(bp2_at hooks/plant.sh MARK-S2)" "$BP2_SITES"
+expect_contains "…grep -l with an && after it" "$(bp2_at hooks/plant.sh MARK-S3)" "$BP2_SITES"
+expect_contains "…head -n inside an assignment with a || after it" "$(bp2_at hooks/plant.sh MARK-S4)" "$BP2_SITES"
+expect_contains "…an awk that exits, with an && after it" "$(bp2_at hooks/plant.sh MARK-S5)" "$BP2_SITES"
+expect_contains "…head -1 in an if condition" "$(bp2_at hooks/plant.sh MARK-S6)" "$BP2_SITES"
+expect_contains "…a pipeline split across lines, named at its first line" \
+  "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S7) + 1 ))" "$BP2_SITES"
+expect_contains "…an awk program open across lines" "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S8) - 2 ))" "$BP2_SITES"
+expect_contains "…a library with no pipefail of its own" "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$BP2_SITES"
+expect_contains "…the carrier exemption as a quitting grep, in a file the allow file does not name" \
+  "$(bp2_at hooks/poker/plant-tick.sh MARK-CARRIER)" "$BP2_SITES"
+expect_eq "…and the sites named are those and no others, so every control in the same call passes" \
+  "$(printf '%s\n' "$(bp2_at hooks/plant.sh MARK-S1)" "$(bp2_at hooks/plant.sh MARK-S2)" "$(bp2_at hooks/plant.sh MARK-S3)" \
+       "$(bp2_at hooks/plant.sh MARK-S4)" "$(bp2_at hooks/plant.sh MARK-S5)" "$(bp2_at hooks/plant.sh MARK-S6)" \
+       "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S7) + 1 ))" \
+       "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S8) - 2 ))" \
+       "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$(bp2_at hooks/poker/plant-tick.sh MARK-CARRIER)" | LC_ALL=C sort)" \
+  "$BP2_SITES"
+expect_eq "…the listed line is silenced by its allow entry" "no" \
+  "$(quit_sites "$BP2_OUT" | LC_ALL=C grep -qx "$(bp2_at hooks/plant.sh MARK-A1)" && echo yes || echo no)"
+expect_eq "…and was a site before it was listed" "yes" \
+  "$(quit_sites "$(quit_sweep "$BP2" /dev/null $BP2_ROSTER)" | grep -qx "$(bp2_at hooks/plant.sh MARK-A1)" && echo yes || echo no)"
+
+# BP-3: observe.sh with the quitting form restored, in a scratch copy of the real file.
+BP3="$TMP/bp3"
+mkdir -p "$BP3/payload/scripts/lib"
+LC_ALL=C awk '
+  /procs="\$\(ps -eo command/ { print "  ps -eo command 2>/dev/null | grep -qF -- \"$pat\""; skip = 1; next }
+  skip && /<<< "\$procs"/ { skip = 0; next }
+  { print }' "$LIB_DIR/observe.sh" > "$BP3/payload/scripts/lib/observe.sh"
+expect_eq "BP-3 the scratch copy has the quitting scan and parses" "1 0" \
+  "$(/usr/bin/grep -cF 'ps -eo command 2>/dev/null | grep -qF' "$BP3/payload/scripts/lib/observe.sh") $(/bin/bash -n "$BP3/payload/scripts/lib/observe.sh" >/dev/null 2>&1; echo $?)"
+BP3_OUT="$(quit_sweep "$BP3" "$QUIT_ALLOW" payload/scripts/lib/observe.sh)"
+expect_contains "…and the sweep names it, unlisted, by file and line" \
+  "payload/scripts/lib/observe.sh:$(bp_fline "$BP3/payload/scripts/lib/observe.sh" 'ps -eo command 2>/dev/null | grep -qF')" \
+  "$(quit_sites "$BP3_OUT")"
+expect_eq "…while the shipped observe.sh, read in the same call, is not named" "" \
+  "$(quit_sites "$(quit_sweep "$REPO" "$QUIT_ALLOW" payload/scripts/lib/observe.sh)")"
+
+# BP-4: an allow line must carry its reason.
+BP4="$TMP/bp4.allow"
+{ printf '%s\n' '# a comment' ''
+  printf '%s\n' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded"'
+  printf '%s\n' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded" # '
+  printf '%s\n' 'no colon here # a reason'
+  printf '%s\n' 'hooks/nowhere.sh:x # a reason'; } > "$BP4"
+# shellcheck disable=SC2086
+BP4_OUT="$(quit_sweep "$BP2" "$BP4" $BP2_ROSTER)"
+expect_eq "BP-4 an allow line with no reason, an empty one, one with no colon and one with a path outside the roster are each refused by line" \
+  "3 4 5 6" "$(printf '%s\n' "$BP4_OUT" | LC_ALL=C awk -F'\t' '$1 == "A" { print $2 }' | LC_ALL=C sort -n | tr '\n' ' ' | sed 's/ $//')"
+expect_contains "…and a refused entry silences nothing: the line it named is still a site" \
+  "$(bp2_at hooks/plant.sh MARK-A1)" "$(quit_sites "$BP4_OUT")"
+expect_eq "…while the comment, the blank line and the entry with its reason, read in the same call, are not refused" "" \
+  "$(quit_sweep "$BP2" "$BP2/allow" $BP2_ROSTER | LC_ALL=C awk -F'\t' '$1 == "A"')"
+expect_eq "the real allow file has no refused line" "" \
+  "$(printf '%s\n' "$BP_REAL" | LC_ALL=C awk -F'\t' '$1 == "A"')"
+
+# ============================================================
+section "BP-PIN — a writer of more than 64 KB into the fixed form returns 0 under pipefail"
+# ============================================================
+#
+# fails-when: the process scan in observe_claims_live is `ps | grep -qF` again, so a process listing larger than
+# the pipe buffer with the match near its top returns 141 under pipefail and the claim reads as dead.
+#
+# The writer is `seq 1 20000` (108894 bytes). The match must come BEFORE the bulk: a reader whose match is
+# on the last line has read everything and quits no earlier than a reader that reads to the end, so only a
+# match-first listing can show the defect. The real function is driven with a stub `ps` and a PATH that
+# holds no `pgrep`, so it takes its `ps` fallback, with pipefail set the way a hook sets it.
+pin_writer() { printf 'needle\n'; seq 1 20000; }
+expect_true "the writer is larger than the 64 KB pipe buffer" [ "$(pin_writer | wc -c | tr -d ' ')" -gt 65536 ]
+expect_eq "…the quitting form on it returns 141 under pipefail: the defect is real on this machine" "141" \
+  "$(set -o pipefail; pin_writer | /usr/bin/grep -q needle; echo $?)"
+expect_eq "…the quitting form returns 0 without pipefail, so only the pipeline status is lost" "0" \
+  "$(set +o pipefail; pin_writer | /usr/bin/grep -q needle; echo $?)"
+expect_eq "…a here-string of the same writer returns 0 under pipefail" "0" \
+  "$(set -o pipefail; v="$(pin_writer)"; /usr/bin/grep -qF needle <<< "$v"; echo $?)"
+expect_eq "…and so does a match on the last line" "0" \
+  "$(set -o pipefail; v="$({ seq 1 20000; printf 'needle\n'; })"; /usr/bin/grep -qF needle <<< "$v"; echo $?)"
+
+PIN_BIN="$TMP/pin-bin"
+mkdir -p "$PIN_BIN"
+printf '%s\n' '#!/bin/bash' 'printf "needle-proc --flag\n"' 'PATH=/usr/bin:/bin' 'seq 1 20000' > "$PIN_BIN/ps"
+chmod +x "$PIN_BIN/ps"
+ln -s /usr/bin/grep "$PIN_BIN/grep"
+pin_scan() {  # <observe.sh> -> observe_claims_live's status for a process that is listed, under pipefail
+  env -i PATH="$PIN_BIN" /bin/bash -c 'set -o pipefail; . "$1"; observe_claims_live needle-proc; echo $?' _ "$1" 2>/dev/null
+}
+expect_true "the stub listing is larger than the pipe buffer" [ "$("$PIN_BIN/ps" | wc -c | tr -d ' ')" -gt 65536 ]
+expect_eq "the PATH holds no pgrep, so the ps fallback is the branch that runs" "no" \
+  "$(env -i PATH="$PIN_BIN" /bin/bash -c 'command -v pgrep >/dev/null 2>&1 && echo yes || echo no')"
+expect_eq "observe_claims_live finds a listed process in a listing larger than the pipe buffer" "0" \
+  "$(pin_scan "$LIB_DIR/observe.sh")"
+expect_eq "…and with the quitting scan restored in a scratch copy the same call returns 141" "141" \
+  "$(pin_scan "$BP3/payload/scripts/lib/observe.sh")"
+
+# ── the census ───────────────────────────────────────────────────────────────
+# tests/CENSUS.md holds one record line per section of every suite under tests/, under a heading per
+# suite, in the shape tests/RUBRIC.md §4 sets. This sweep refuses a tests tree the census does not
+# cover. A `section` call is found by the rubric's own section-list command, extracted from the
+# rubric and run here, so there is one key rule and no second copy of it. A call inside a heredoc
+# body is fixture text, written into a scratch suite, and is not a section.
+CENSUS_MD="$TESTS_DIR/CENSUS.md"
+CENSUS_RUBRIC="$TESTS_DIR/RUBRIC.md"
+CENSUS_PROG="$TMP/census-prog.awk"
+cat > "$TMP/census-extract.awk" <<'CENSUS_EXTRACT_EOF'
+index($0, "awk '/^[[:space:]]*(setup_)?section") == 1 { on = 1; sub(/^awk '/, "") }
+on && (i = index($0, "' tests/<suite>.test.sh")) { print substr($0, 1, i - 1); exit }
+on { print }
+CENSUS_EXTRACT_EOF
+awk -f "$TMP/census-extract.awk" "$CENSUS_RUBRIC" > "$CENSUS_PROG" 2>/dev/null
+# The file with every heredoc body blanked, line numbers kept. A `<<` opens a body only outside
+# quotes (a nested `$( )` has quotes of its own) and not as a here-string, and a body ends at its
+# delimiter line.
+cat > "$TMP/census-blank.awk" <<'CENSUS_BLANK_EOF'
+function opener(line,   i, n, c, top, rest, d, st) {
+  n = length(line); st = "c"
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1); top = substr(st, length(st), 1)
+    if (top == "s") { if (c == "'") st = substr(st, 1, length(st) - 1); continue }
+    if (c == "\\") { i++; continue }
+    if (top == "d") {
+      if (c == "\"") st = substr(st, 1, length(st) - 1)
+      else if (c == "$" && substr(line, i + 1, 1) == "(") { st = st "c"; i++ }
+      continue
+    }
+    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) return ""
+    if (c == "'") { st = st "s"; continue }
+    if (c == "\"") { st = st "d"; continue }
+    if (c == "$" && substr(line, i + 1, 1) == "(") { st = st "c"; i++; continue }
+    if (c == ")" && length(st) > 1) { st = substr(st, 1, length(st) - 1); continue }
+    if (c == "<" && substr(line, i, 2) == "<<") {
+      if (substr(line, i, 3) == "<<<") { i += 2; continue }
+      rest = substr(line, i + 2); hdash = 0
+      if (substr(rest, 1, 1) == "-") { hdash = 1; rest = substr(rest, 2) }
+      sub(/^[ \t]+/, "", rest)
+      if (match(rest, /^(\\?'[A-Za-z_0-9]+'|"[A-Za-z_0-9]+"|\\?[A-Za-z_0-9]+)/)) {
+        d = substr(rest, 1, RLENGTH); gsub(/['"\\]/, "", d); return d
+      }
+      i += 1
+    }
+  }
+  return ""
+}
+{
+  if (hd != "") {
+    ln = $0
+    if (hdash) sub(/^\t+/, "", ln)
+    if (ln == hd) hd = ""
+    print ""
+    next
+  }
+  hd = opener($0)
+  print
+}
+CENSUS_BLANK_EOF
+# census_calls <tests dir> -> `<suite> TAB <section|setup> TAB <key>` per call outside a heredoc body.
+census_calls() {
+  local d f
+  d="$(mktemp -d "$TMP/census-blank.XXXXXX")"
+  for f in "$1"/*.test.sh; do
+    [ -f "$f" ] || continue
+    awk -f "$TMP/census-blank.awk" "$f" > "$d/${f##*/}"
+  done
+  ( cd "$d" && LC_ALL=C awk -f "$CENSUS_PROG" ./*.test.sh 2>/dev/null ) \
+    | awk '{ loc = $1; kind = $2; key = $0; sub(/^[^ ]+ [^ ]+ §/, "", key); sub(/^\.\//, "", loc); sub(/:[0-9]+$/, "", loc)
+             printf "%s\t%s\t%s\n", loc, kind, key }'
+}
+# census_records <census file> -> `R TAB <suite> TAB <key> TAB <verdict> TAB <defect>` per record line.
+census_records() {
+  awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\n", $1, k, $3, $4 }' "$1" 2>/dev/null
+}
+# census_refusals <tests dir> <census file> -> one line per refusal, none when the census covers the tree:
+#   no heading: a suite with no `## <suite>` heading
+#   no line: a suite with no section call and no `no section` line
+#   no verdict: a section call with fewer record lines under its key than the suite has calls of it
+#   bad verdict: a record line whose verdict is not one of the five words
+#   rule mark on a cull: a `rule:` defect on a line whose verdict is not keep
+#   no section line on a suite with sections: the `no section` line beside a suite that has calls
+census_refusals() {
+  local f
+  {
+    for f in "$1"/*.test.sh; do [ -f "$f" ] && printf 'S\t%s\n' "${f##*/}"; done
+    sed -n 's/^## \(.*\.test\.sh\)$/H\t\1/p' "$2" 2>/dev/null
+    census_records "$2"
+    census_calls "$1" | sed 's/^/C\t/'
+  } | LC_ALL=C awk -F'\t' '
+    $1 == "S" { suite[$2] = 1 }
+    $1 == "H" { head[$2] = 1 }
+    $1 == "C" { ncall[$2]++; if ($3 == "section") need[$2 SUBSEP $4]++ }
+    $1 == "R" {
+      s = $2; k = $3; v = $4; d = $5
+      if (k == "—" && v == "—" && d == "no section") { nosec[s] = 1; next }
+      have[s SUBSEP k]++
+      if (v != "keep" && v != "duplicate" && v != "prose pin" && v != "tally" && v != "vacuous") print "bad verdict: " s " §" k " " v
+      else if (d ~ /^rule: / && v != "keep") print "rule mark on a cull: " s " §" k " " v
+    }
+    END {
+      for (s in suite) {
+        if (!(s in head)) print "no heading: " s
+        if (ncall[s] == 0 && !(s in nosec)) print "no line: " s
+        if (ncall[s] > 0 && (s in nosec)) print "no section line on a suite with sections: " s
+      }
+      for (key in need) { split(key, p, SUBSEP); if (have[key] < need[key]) print "no verdict: " p[1] " §" p[2] }
+    }' | LC_ALL=C sort
+}
+# census_scratch <dir> -> a tests tree of three suites: x with two sections, y with none, z holding a
+# section call only inside a heredoc body that writes a scratch suite.
+census_scratch() {
+  mkdir -p "$1/tests"
+  printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' 'section "TWO: the second"' 'expect_eq b 1 1' > "$1/tests/x.test.sh"
+  printf '%s\n' 'echo no sections here' > "$1/tests/y.test.sh"
+  printf '%s\n' "cat > scratch.sh <<'PLANT'" 'section "HIDDEN: inside a heredoc"' 'PLANT' 'echo done' > "$1/tests/z.test.sh"
+}
+# census_file <file> <x lines...> -> a census with headings for x, y and z, y and z with a `no section` line, and
+# the given record lines under x.
+census_file() {
+  local out="$1"; shift
+  { printf '# census\n\n## x.test.sh\n'; [ "$#" -eq 0 ] || printf '%s\n' "$@"
+    printf '\n## y.test.sh\nynosec\n\n## z.test.sh\nznosec\n'; } \
+    | sed -e 's/^ynosec$/y.test.sh | — | — | no section | —/' -e 's/^znosec$/z.test.sh | — | — | no section | —/' > "$out"
+}
+CS_ONE='x.test.sh | §ONE | keep | lib/x.sh: the first arm deleted | none (searched x in tests/)'
+CS_TWO='x.test.sh | §TWO | prose pin | "the second" | carried by exit 1'
+
+# ============================================================
+section "CENSUS-COMPLETE-1: a section with no census line, a suite with no heading and a suite with no line are refused by name"
+# ============================================================
+# fails-when: a census missing a section's line, a suite's heading or a section-less suite's line passes.
+CC1="$TMP/cc1"; census_scratch "$CC1"
+expect_eq "the sweep reads the scratch tree: two sections of x, and nothing of the heredoc body in z" \
+  "x.test.sh	section	ONE|x.test.sh	section	TWO" \
+  "$(census_calls "$CC1/tests" | awk -F'\t' '$1 == "x.test.sh"' | paste -sd'|' -)"
+expect_eq "…and z, whose only section call sits in a heredoc body, has no call at all" "0" \
+  "$(census_calls "$CC1/tests" | awk -F'\t' '$1 == "z.test.sh"' | wc -l | tr -d ' ')"
+census_file "$CC1/full.md" "$CS_ONE" "$CS_TWO"
+expect_eq "control: a census with both lines and the section-less suites' lines is refused for nothing" "" \
+  "$(census_refusals "$CC1/tests" "$CC1/full.md")"
+census_file "$CC1/one.md" "$CS_ONE"
+expect_eq "the census missing x's second section is refused naming the suite and the key" \
+  "no verdict: x.test.sh §TWO" "$(census_refusals "$CC1/tests" "$CC1/one.md")"
+census_file "$CC1/none.md"
+expect_eq "…missing both, it names both" "no verdict: x.test.sh §ONE|no verdict: x.test.sh §TWO" \
+  "$(census_refusals "$CC1/tests" "$CC1/none.md" | paste -sd'|' -)"
+sed -e '/^## x.test.sh$/d' "$CC1/full.md" > "$CC1/nohead.md"
+expect_eq "a suite with lines and no heading is refused naming the suite" "no heading: x.test.sh" \
+  "$(census_refusals "$CC1/tests" "$CC1/nohead.md")"
+sed -e '/^y.test.sh | /d' "$CC1/full.md" > "$CC1/noline.md"
+expect_eq "a suite with no section and no \`no section\` line is refused naming the suite" "no line: y.test.sh" \
+  "$(census_refusals "$CC1/tests" "$CC1/noline.md")"
+{ cat "$CC1/full.md"; printf 'x.test.sh | — | — | no section | —\n'; } > "$CC1/wrongnosec.md"
+expect_eq "a \`no section\` line beside a suite that has sections is refused" \
+  "no section line on a suite with sections: x.test.sh" "$(census_refusals "$CC1/tests" "$CC1/wrongnosec.md")"
+
+# ============================================================
+section "CENSUS-COMPLETE-2: a verdict outside the five words, and a rule line marked as a cull, are refused"
+# ============================================================
+# fails-when: a record line with a word of its own for a verdict, or a rule: line that is not keep, passes.
+CC2="$TMP/cc2"; census_scratch "$CC2"
+census_file "$CC2/odd.md" "$CS_ONE" 'x.test.sh | §TWO | maybe | lib/x.sh: a line changed | none (searched x in tests/)'
+expect_eq "a verdict that is not one of the five words is refused naming the suite, the key and the word" \
+  "bad verdict: x.test.sh §TWO maybe" "$(census_refusals "$CC2/tests" "$CC2/odd.md")"
+census_file "$CC2/rule.md" 'x.test.sh | §ONE | duplicate | rule: lint — a shape planted | x.test.sh §TWO' "$CS_TWO"
+expect_eq "a rule: line whose verdict is duplicate is refused naming the suite, the key and the verdict" \
+  "rule mark on a cull: x.test.sh §ONE duplicate" "$(census_refusals "$CC2/tests" "$CC2/rule.md")"
+census_file "$CC2/rulekeep.md" 'x.test.sh | §ONE | keep | rule: lint — a shape planted | none (searched x in tests/)' "$CS_TWO"
+expect_eq "control: the same rule: line as keep, and a two-word verdict, are refused for nothing" "" \
+  "$(census_refusals "$CC2/tests" "$CC2/rulekeep.md")"
+
+# ============================================================
+section "CENSUS-COMPLETE-3: the census covers every suite and every section of the tests tree"
+# ============================================================
+# fails-when: a suite under tests/ has no heading, a section call has no record line under its key, a verdict is
+# not one of the five words, or a rule: line is not keep.
+CC3_CALLS="$(census_calls "$TESTS_DIR")"
+expect_contains "the sweep reads the real tree: it finds this suite's own section" \
+  "shell-lint.test.sh	section	CENSUS-COMPLETE-3" "$CC3_CALLS"
+expect_eq "the census file is there, with a heading for this suite" "yes" \
+  "$(/usr/bin/grep -q '^## shell-lint.test.sh$' "$CENSUS_MD" 2>/dev/null && echo yes)"
+expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(census_refusals "$TESTS_DIR" "$CENSUS_MD")"
+
+
+# ── the cut ──────────────────────────────────────────────────────────────────
+# The census is also the cut: a section whose verdict is a cull is deleted from its suite, and a section the census
+# keeps stays. A key's calls in its suite must number its keep lines, so a culled section still called and a kept
+# one gone are both refused, by suite and key. `## Culled` lists the cull as `<suite> §<key> — <verdict>`, the
+# verdict after the last ` — ` because a key may hold one. A line there whose verdict is keep, or whose key carries a
+# `rule:` record (a door refusal, a lint or a check pin), culls what the rubric never lets go.
+# census_cull_refusals <tests dir> <census file> -> one line per refusal, none when the tree is cut as the census says:
+#   culled section present: a key with a cull line still called more often than it has keep lines
+#   kept section absent: a key with more keep lines than calls in its suite
+#   keep in the culled list: a `## Culled` line whose verdict is keep
+#   rule pin culled: a `## Culled` line whose key has a record line with a `rule:` defect
+census_cull_refusals() {
+  {
+    census_records "$2"
+    sed -n '/^## Culled$/,$p' "$2" 2>/dev/null | LC_ALL=C awk '/^[A-Za-z0-9._-]+\.test\.sh §/ {
+      sep = " — "; s = $0; sub(/ .*/, "", s); r = substr($0, length(s) + length(" §") + 1); v = r
+      while ((i = index(v, sep)) > 0) v = substr(v, i + length(sep))
+      printf "U\t%s\t%s\t%s\n", s, substr(r, 1, length(r) - length(v) - length(sep)), v }'
+    census_calls "$1" | sed 's/^/C\t/'
+  } | LC_ALL=C awk -F'\t' '
+    $1 == "R" { if ($3 == "—") next; key = $2 SUBSEP $3; seen[key] = 1
+                if ($4 == "keep") nkeep[key]++; else ncull[key]++
+                if ($5 ~ /^rule: /) rule[key] = 1 }
+    $1 == "U" { key = $2 SUBSEP $3
+                if ($4 == "keep") print "keep in the culled list: " $2 " §" $3
+                U[key] = 1 }
+    $1 == "C" { called[$2 SUBSEP $4]++ }
+    END {
+      for (key in U) if (key in rule) { split(key, p, SUBSEP); print "rule pin culled: " p[1] " §" p[2] }
+      for (key in seen) {
+        split(key, p, SUBSEP)
+        if (ncull[key] > 0 && called[key] > nkeep[key]) print "culled section present: " p[1] " §" p[2]
+        if (nkeep[key] > called[key]) print "kept section absent: " p[1] " §" p[2]
+      }
+    }' | LC_ALL=C sort
+}
+CS_THREE='x.test.sh | §THREE | duplicate | lib/x.sh: the third arm deleted | x.test.sh §ONE'
+
+# ============================================================
+section "CENSUS-1: a section the census culls that is still in its suite is refused by suite and key"
+# ============================================================
+# fails-when: a suite still calls a section whose only census line is a cull, and the sweep passes.
+CN1="$TMP/cn1"; census_scratch "$CN1"
+printf '%s\n' 'section "THREE: the third"' 'expect_eq c 1 1' >> "$CN1/tests/x.test.sh"
+census_file "$CN1/cut.md" "$CS_ONE" "$CS_TWO" "$CS_THREE"
+printf '\n## Culled\n\nx.test.sh §TWO — prose pin\nx.test.sh §THREE — duplicate\n' >> "$CN1/cut.md"
+expect_eq "the sweep reads the scratch tree: three sections of x" "ONE|TWO|THREE" \
+  "$(census_calls "$CN1/tests" | awk -F'\t' '$1 == "x.test.sh" { print $3 }' | paste -sd'|' -)"
+expect_eq "both culled sections still called are refused, each by suite and key" \
+  "culled section present: x.test.sh §THREE|culled section present: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CN1/tests" "$CN1/cut.md" | paste -sd'|' -)"
+sed -e '/^section "THREE/,$d' "$CN1/tests/x.test.sh" > "$CN1/x.one" && mv "$CN1/x.one" "$CN1/tests/x.test.sh"
+expect_eq "…with the third cut, the second alone is refused" "culled section present: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CN1/tests" "$CN1/cut.md")"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CN1/tests/x.test.sh"
+expect_eq "control: with both culled sections cut and the kept one called, nothing is refused" "" \
+  "$(census_cull_refusals "$CN1/tests" "$CN1/cut.md")"
+printf '%s\n' 'section "ONE: the first"' 'section "TWO: twice"' 'section "TWO: again"' > "$CN1/tests/x.test.sh"
+census_file "$CN1/twice.md" "$CS_ONE" 'x.test.sh | §TWO: twice | vacuous | the branch is never taken | none (searched x in tests/)' \
+  'x.test.sh | §TWO: again | keep | lib/x.sh: the second arm deleted | none (searched x in tests/)'
+printf '\n## Culled\n\nx.test.sh §TWO: twice — vacuous\n' >> "$CN1/twice.md"
+expect_eq "a shared key is read by whole title, and the culled one of the two is refused alone" \
+  "culled section present: x.test.sh §TWO: twice" "$(census_cull_refusals "$CN1/tests" "$CN1/twice.md")"
+
+# ============================================================
+section "CENSUS-2: a section the census keeps that is gone from its suite is refused by suite and key"
+# ============================================================
+# fails-when: a section whose census line is a keep is deleted from its suite, and the sweep passes.
+CN2="$TMP/cn2"; census_scratch "$CN2"
+census_file "$CN2/keep.md" "$CS_ONE" "$CS_TWO"
+printf '\n## Culled\n\nx.test.sh §TWO — prose pin\n' >> "$CN2/keep.md"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CN2/tests/x.test.sh"
+expect_eq "control: the kept section called and the culled one cut are refused for nothing" "" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+printf '%s\n' 'echo the first section went' > "$CN2/tests/x.test.sh"
+expect_eq "the kept section deleted is refused naming the suite and the key" "kept section absent: x.test.sh §ONE" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+rm -f "$CN2/tests/x.test.sh"
+expect_eq "…and so is a kept section whose whole suite is gone" "kept section absent: x.test.sh §ONE" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+
+# ============================================================
+section "CENSUS-3: a culled-list line that culls a keep or a rule pin is refused"
+# ============================================================
+# fails-when: `## Culled` names a section whose verdict is keep, or whose record carries a door refusal, lint or
+# check pin, and the sweep passes.
+CN3="$TMP/cn3"; census_scratch "$CN3"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CN3/tests/x.test.sh"
+CS_RULE='x.test.sh | §ONE | keep | rule: lint — a shape planted | none (searched x in tests/)'
+census_file "$CN3/ok.md" "$CS_RULE" "$CS_TWO"
+printf '\n## Culled\n\nx.test.sh §TWO — prose pin\n' >> "$CN3/ok.md"
+expect_eq "control: a rule: keep left out of the culled list is refused for nothing" "" \
+  "$(census_cull_refusals "$CN3/tests" "$CN3/ok.md")"
+{ cat "$CN3/ok.md"; printf 'x.test.sh §ONE — duplicate\n'; } > "$CN3/rule.md"
+expect_contains "a culled-list line for the rule: record is refused naming the suite and the key" \
+  "rule pin culled: x.test.sh §ONE" "$(census_cull_refusals "$CN3/tests" "$CN3/rule.md")"
+{ cat "$CN3/ok.md"; printf 'x.test.sh §ONE — keep\n'; } > "$CN3/keep.md"
+expect_contains "a culled-list line whose verdict is keep is refused naming the suite and the key" \
+  "keep in the culled list: x.test.sh §ONE" "$(census_cull_refusals "$CN3/tests" "$CN3/keep.md")"
+
+# ============================================================
+section "CENSUS-4: the tests tree is cut as tests/CENSUS.md says"
+# ============================================================
+# fails-when: a suite under tests/ still calls a section the census culls, a kept section is gone, or the culled
+# list holds a keep or a rule pin.
+CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep -c '\.test\.sh §')"
+expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
+expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled" "" \
+  "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD")"
+
+# ── the agreement checks ─────────────────────────────────────────────────────
+# A document states a fact twice, once in a front matter or a header and once in the body that carries it, and
+# nothing reads the two against each other. Two sweeps do: an ADR's `status:` against its `## Status` section, and a
+# suite's header list of sections against the `section` calls of its body. The body is the fact and the header
+# follows it.
+# adr_refusals <dir...> -> one line per ADR under the directories (every *.md, recursively) whose front-matter
+# `status:` and `## Status` section open with different words, naming the file and both. The word is the first run
+# of letters, folded to lower case, so `accepted` and `**Accepted** (Step 7)` agree. A file with only one of the two
+# is not compared, and a directory that is not there is skipped.
+adr_refusals() {
+  local d f
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    find -H "$d" -name '*.md' -type f | LC_ALL=C sort | while IFS= read -r f; do
+      LC_ALL=C awk -v F="$f" '
+        function word(s,   w) { sub(/^[^A-Za-z]*/, "", s); w = s; sub(/[^A-Za-z].*$/, "", w); return tolower(w) }
+        NR == 1 { fm = ($0 == "---"); next }
+        fm == 1 { if ($0 == "---") fm = 2; else if (sw == "" && $0 ~ /^status:/) { v = $0; sub(/^status:[ \t]*/, "", v); sw = word(v) }; next }
+        /^## Status[ \t]*$/ { ins = 1; next }
+        /^## / { ins = 0 }
+        ins && bw == "" && NF { bw = word($0) }
+        END { if (sw != "" && bw != "" && sw != bw) print F ": status: " sw " but ## Status " bw }' "$f"
+    done
+  done
+}
+
+# header_entries <suite file> -> the keys the suite header lists, one per line: a line of the leading comment block
+# that opens `#`, two or more spaces and `§KEY`. A `§` inside a sentence refers to something else and is not a claim.
+header_entries() {
+  awk 'NR == 1 && /^#!/ { next } /^#/ { print; next } { exit }' "$1" \
+    | LC_ALL=C sed -n 's/^#[ ][ ][ ]*§\([A-Za-z0-9][A-Za-z0-9._-]*\).*$/\1/p' \
+    | sed 's/[._-]*$//' | LC_ALL=C sort -u
+}
+# body_keys <census_calls output> <suite file name> -> the keys of the suite's `section` calls, one per line: the
+# census key cut again at its first space. A title with no ` — ` or `: ` and more than one word is a sentence, not a
+# key, and is left out.
+body_keys() {
+  printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v S="$2" '$1 == S && $2 == "section" {
+    k = $3; i = index(k, " — "); j = index(k, ": ")
+    if (i && (!j || i < j)) k = substr(k, 1, i - 1); else if (j) k = substr(k, 1, j - 1); else if (k ~ /[ \t]/) next
+    sub(/[ \t].*$/, "", k); sub(/[.,;:-]*$/, "", k); print k }' | LC_ALL=C sort -u
+}
+# header_refusals <tests dir> -> one line per suite whose header lists a section its body lacks, or whose body has a
+# section its header does not list, naming the suite and both differences. A header that lists none makes no claim.
+header_refusals() {
+  local f s calls hdr bdy only_h only_b out
+  calls="$(census_calls "$1")"
+  for f in "$1"/*.test.sh; do
+    [ -f "$f" ] || continue
+    s="${f##*/}"
+    header_entries "$f" > "$TMP/hdr.keys"
+    [ -s "$TMP/hdr.keys" ] || continue
+    body_keys "$calls" "$s" > "$TMP/bdy.keys"
+    only_h="$(LC_ALL=C comm -23 "$TMP/hdr.keys" "$TMP/bdy.keys" | sed 's/^/§/' | paste -sd' ' -)"
+    only_b="$(LC_ALL=C comm -13 "$TMP/hdr.keys" "$TMP/bdy.keys" | sed 's/^/§/' | paste -sd' ' -)"
+    out=""
+    [ -z "$only_h" ] || out="header lists ${only_h} with no section"
+    [ -z "$only_b" ] || out="${out:+$out; }body has ${only_b} with no header entry"
+    [ -z "$out" ] || printf '%s: %s\n' "$s" "$out"
+  done
+}
+
+# ============================================================
+section "ADR: an ADR whose status: word differs from its ## Status word is refused by file, naming both words"
+# ============================================================
+# fails-when: an ADR's front matter says Accepted while its ## Status section still says Proposed, and the sweep passes.
+AD="$TMP/adr"; mkdir -p "$AD/hermetic" "$AD/own/epic/deep"
+adr_file() { # <path> <status: value or -> <body line or ->
+  { printf -- '---\nname: x\n'; [ "$2" = "-" ] || printf 'status: %s\n' "$2"; printf -- '---\n# ADR\n\n## Status\n\n'
+    [ "$3" = "-" ] || printf '%s\n' "$3"; printf '\n## Context\n\nProposed in the prose below Context is not a status.\n'; } > "$1"
+}
+adr_file "$AD/hermetic/agree.md"  "Accepted (Step 7, 2026-10-01)" "**Accepted** (Step 7, 2026-10-01). Ruled."
+adr_file "$AD/hermetic/case.md"   "accepted" "Accepted, 2026-09-05."
+adr_file "$AD/hermetic/nobody.md" "Accepted" "-"
+adr_file "$AD/hermetic/nostatus.md" "-" "Proposed"
+printf '# no front matter\n\n## Status\n\nProposed\n' > "$AD/hermetic/bare.md"
+adr_file "$AD/hermetic/drift.md"  "Accepted (close-out, 2026-10-19; Proposed at Step 2)" "**Proposed** (Step 2, 2026-10-18)."
+adr_file "$AD/own/epic/deep/drift2.md" "Superseded (Step 7) by adr-065" "Proposed (Step 2)."
+expect_eq "the sweep reads every file of both halves, nested ones too: seven files" "7" \
+  "$(find -H "$AD" -name '*.md' | wc -l | tr -d ' ')"
+expect_eq "control: an agreeing pair, a case and emphasis difference, a file with no body status, no status: and no front matter are refused for nothing" "" \
+  "$(adr_refusals "$AD/hermetic" | /usr/bin/grep -v 'drift' )"
+expect_eq "a status: Accepted over a ## Status Proposed is refused naming the file and both words" \
+  "$AD/hermetic/drift.md: status: accepted but ## Status proposed" "$(adr_refusals "$AD/hermetic")"
+expect_eq "a second directory is read too, recursively, and a directory that is not there is skipped" \
+  "$AD/hermetic/drift.md: status: accepted but ## Status proposed|$AD/own/epic/deep/drift2.md: status: superseded but ## Status proposed" \
+  "$(adr_refusals "$AD/hermetic" "$AD/none" "$AD/own" | paste -sd'|' -)"
+sed -e 's/Proposed\*\*/Accepted**/' "$AD/hermetic/drift.md" > "$AD/fixed.md" && mv "$AD/fixed.md" "$AD/hermetic/drift.md"
+expect_eq "the body word brought to the front matter's clears the refusal for that file alone" \
+  "$AD/own/epic/deep/drift2.md: status: superseded but ## Status proposed" \
+  "$(adr_refusals "$AD/hermetic" "$AD/own")"
+ADR_HERMETIC="$(find -H "$REPO/docs/adrs" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+ADR_OWN="$(find -H "$REPO/.bionic/docs/adrs" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+expect_true "the real tree is read: docs/adrs holds ${ADR_HERMETIC} ADRs (the run's own .bionic/docs/adrs holds ${ADR_OWN}, read when present)" \
+  [ "${ADR_HERMETIC:-0}" -gt 0 ]
+expect_contains "the real sweep reads ADR-062 and finds its own ## Status word beside its status: word" \
+  "adr-062" "$(find -H "$REPO/docs/adrs" -name 'adr-062*.md')"
+expect_eq "every ADR of the real tree has the same state word in its status: and in its ## Status: no refusal" "" \
+  "$(adr_refusals "$REPO/docs/adrs" "$REPO/.bionic/docs/adrs")"
+
+# ============================================================
+section "HEADER: a suite header that lists a section its body lacks, or misses one its body has, is refused by suite"
+# ============================================================
+# fails-when: a header lists a section no longer called in its body, or a body section is missing from the header's list,
+# and the sweep passes.
+HD="$TMP/hd"; mkdir -p "$HD/tests"
+hdr_suite() { # <name> <header entry keys, space-separated, - for none> <body section titles, | separated>
+  local out="$HD/tests/$1.test.sh" k t
+  { printf '#!/bin/bash\n# A suite header.\n#\n'
+    for k in $2; do [ "$k" = "-" ] || printf '#   §%s   what the section holds\n' "$k"; done
+    printf '# See §ZZ of the plan, a sentence naming a section of something else.\n\n. lib.sh\n'
+    printf '%s\n' "$3" | tr '|' '\n' | while IFS= read -r t; do printf 'section "%s"\nexpect_eq a 1 1\n' "$t"; done
+    printf 'finish\n'; } > "$out"
+}
+hdr_suite equal   "ONE TWO THREE" "ONE — the first|§TWO: the second|THREE|a sentence that names no key"
+hdr_suite ghost   "ONE TWO GHOST" "ONE: the first|TWO: the second"
+hdr_suite short   "ONE" "ONE: the first|TWO: the second"
+hdr_suite both    "ONE GHOST" "ONE: the first|TWO: the second"
+hdr_suite bare    "-" "ONE: the first|TWO: the second"
+hdr_suite shared  "TWO" "TWO: the first|TWO: the second"
+printf '%s\n' "cat > scratch.sh <<'PLANT'" 'section "HIDDEN: inside a heredoc"' 'PLANT' 'section "ONE: real"' > "$HD/tests/hidden.sh"
+{ printf '#!/bin/bash\n#\n#   §ONE   real\n\n'; cat "$HD/tests/hidden.sh"; } > "$HD/tests/hidden.test.sh"; rm -f "$HD/tests/hidden.sh"
+expect_eq "the sweep reads the scratch header: three entries for equal, in order" "ONE|THREE|TWO" \
+  "$(header_entries "$HD/tests/equal.test.sh" | paste -sd'|' -)"
+expect_eq "…and the entry in a sentence (§ZZ) is not one, and a bare header lists none" "" \
+  "$(header_entries "$HD/tests/bare.test.sh")"
+expect_eq "…the body keys of equal are the census keys cut at the first space, § dropped, and a title that is a sentence has none" "ONE|THREE|TWO" \
+  "$(body_keys "$(census_calls "$HD/tests")" equal.test.sh | paste -sd'|' -)"
+expect_eq "control: a header whose entries equal its body's keys, a header with no entry, a shared key, and a section call inside a heredoc body are refused for nothing" "" \
+  "$(header_refusals "$HD/tests" | /usr/bin/grep -v '^ghost\|^short\|^both')"
+expect_eq "a header entry with no section is refused naming the suite and the entry" \
+  "ghost.test.sh: header lists §GHOST with no section" "$(header_refusals "$HD/tests" | /usr/bin/grep '^ghost')"
+expect_eq "a body section the header does not list is refused naming the suite and the key" \
+  "short.test.sh: body has §TWO with no header entry" "$(header_refusals "$HD/tests" | /usr/bin/grep '^short')"
+expect_eq "both differences on one suite are named on one line" \
+  "both.test.sh: header lists §GHOST with no section; body has §TWO with no header entry" \
+  "$(header_refusals "$HD/tests" | /usr/bin/grep '^both')"
+SL_COPY="$TMP/hd-self"; mkdir -p "$SL_COPY"; cp "$TESTS_DIR/shell-lint.test.sh" "$SL_COPY/shell-lint.test.sh"
+SL_CALLS="$(census_calls "$SL_COPY")"
+expect_eq "shell-lint's own header lists exactly the sections its body calls" \
+  "$(body_keys "$SL_CALLS" shell-lint.test.sh | paste -sd' ' -)" "$(header_entries "$SL_COPY/shell-lint.test.sh" | paste -sd' ' -)"
+awk 'NR == 2 { print "#   §GHOST   a sweep the body never runs" } { print }' "$TESTS_DIR/shell-lint.test.sh" > "$SL_COPY/shell-lint.test.sh"
+expect_eq "mutant: a sweep named in shell-lint's header that its body lacks is refused naming the suite" \
+  "shell-lint.test.sh: header lists §GHOST with no section" "$(header_refusals "$SL_COPY")"
+expect_eq "control: the unmutated copy beside it is refused for nothing" "" \
+  "$(cp "$TESTS_DIR/shell-lint.test.sh" "$SL_COPY/shell-lint.test.sh"; header_refusals "$SL_COPY")"
+HD_LISTED=0
+for f in "$TESTS_DIR"/*.test.sh; do [ -z "$(header_entries "$f")" ] || HD_LISTED=$((HD_LISTED + 1)); done
+expect_true "the real sweep judges suites: ${HD_LISTED} headers list their sections" [ "$HD_LISTED" -gt 0 ]
+expect_eq "every suite header of the real tests tree lists only sections its body calls, and every body section it lists: no refusal" "" \
+  "$(header_refusals "$TESTS_DIR")"
 
 finish

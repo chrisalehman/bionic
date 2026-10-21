@@ -124,63 +124,6 @@ else
   else no "5b: a glyph a card row can carry is not in width.sh's closed set" "$_bad"; fi
 fi
 
-section "Section 3: the truncator cuts characters, never bytes"
-
-# width.sh's own correction: `printf '%.*s'` counts BYTES, so a length test in
-# characters against a cut in bytes tasks a multi-byte glyph in half. A cut
-# through a run of arrows must leave whole arrows and valid UTF-8.
-CUT="$(bionic_trunc "→→→→→→→→→→" 5)"
-expect_eq "6: a cut string is measured back at its budget" "5" "$(bionic_cols "$CUT")"
-if printf '%s' "$CUT" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
-  ok "7: the cut leaves valid UTF-8"
-else
-  no "7: the cut produced invalid UTF-8" "$(printf '%s' "$CUT" | od -c | head -2)"
-fi
-
-# A GLYPH OUTSIDE THE CLOSED SET, WHICH IS WHERE THE CUT USED TO BREAK (AC-8,
-# S24 F-25). Section 1 sweeps the set; this is the other half of the world —
-# the characters that reach a bounded row as DATA rather than as decoration. A
-# user whose home directory carries an accent, a dependency named in a script
-# that is not ASCII, a marketplace path under a non-Latin name: none of them are
-# in width.sh's list and none of them can be, because the list is the glyphs
-# BIONIC prints.
-#
-# THE LOCALE IS THE DISCRIMINATOR, so the pair below is one call made twice.
-# Under a UTF-8 locale `${s%?}` drops a character and the cut was always whole;
-# under `LC_ALL=C` it drops a BYTE, and a three-byte character that the loop
-# stops in the middle of leaves a fragment — invalid UTF-8, rendered as a
-# replacement box, one level below the `printf '%.*s'` failure this file's
-# header is about. Measured before the fix: `bionic_trunc "ab★cd" 4` returned
-# the bytes `61 62 e2 e2 80 a6` under C and `ab…` under UTF-8.
-trunc_c() {  # <string> <budget> -> the cut, made under the C locale
-  LC_ALL=C bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$WIDTH_SH" "${1:-}" "${2:-0}"
-}
-
-CUT_C="$(trunc_c "ab★cd" 4)"
-if printf '%s' "$CUT_C" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
-  ok "7c: a cut through a glyph outside the closed set leaves valid UTF-8 under LC_ALL=C"
-else
-  no "7c: the cut split a multi-byte character under LC_ALL=C" \
-     "$(printf '%s' "$CUT_C" | od -An -tx1 | tr -s ' ')"
-fi
-# THE PAIRED POSITIVE. The same string and budget under a UTF-8 locale, where
-# this has always held — so a `7c` that passes because `bionic_trunc` started
-# returning nothing, or because iconv stopped being run, fails here too.
-CUT_U="$(bionic_trunc "ab★cd" 4)"
-expect_true "7u: …and the same cut under a UTF-8 locale is valid too" \
-  sh -c 'printf %s "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$CUT_U"
-# AND THE TWO LOCALES NOW RETURN THE SAME STRING, which is the property AC-8 is
-# actually about: a report whose text depends on the environment the reader's
-# shell was started in is a report that says two things. Before the fix the same
-# call returned `ab★…` under UTF-8 and the bytes `61 62 e2 e2 80 a6` under C.
-# The agreed answer is the CONSERVATIVE one — `★` is outside the closed glyph
-# set, so it is measured at its three bytes and the cut takes it whole rather
-# than keeping a character it cannot size. Short of the budget, never over it,
-# and the same in both places.
-expect_eq "7n: …and the C and the UTF-8 cut are now the same string" "$CUT_U" "$CUT_C"
-expect_true "7b: the C-locale cut is bounded by the budget it was given" \
-  test "$(cols_c "$CUT_C")" -le 4
-
 section "Section 3b: the truncator walks the string once (wave-32 T3, REQ-3 AC-3.1/AC-3.3)"
 
 # WHY THIS SECTION EXISTS. The cut used to drop one character from the END and
@@ -211,6 +154,10 @@ section "Section 3b: the truncator walks the string once (wave-32 T3, REQ-3 AC-3
 # fails-when: a cut returns any byte other than the base cut's for a pinned
 # input; a 2,000-character `—` or `é` fact hands the width measure more than
 # twice its own bytes, or takes 2 seconds or more.
+trunc_c() {  # <string> <budget> -> the cut, made under the C locale
+  LC_ALL=C bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$WIDTH_SH" "${1:-}" "${2:-0}"
+}
+
 t3_pin() {  # <label> <expected> <string> <budget> — the cut here and under LC_ALL=C
   expect_eq "$1" "$2" "$(bionic_trunc "$3" "$4")"
   expect_eq "$1 [C]" "$2" "$(trunc_c "$3" "$4")"

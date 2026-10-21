@@ -146,12 +146,16 @@ fmt_age() {  # <seconds> -> "3m 12s"
 # Existence only, for P2 (Liveness contract, ratified 2026-08-05). `pgrep -f` matches the
 # full command line; a `ps` fallback covers a machine without it.
 observe_claims_live() {  # <pattern> -> 0 if a process matches, 1 otherwise
-  local pat="$1"
+  local pat="$1" procs
   if command -v pgrep >/dev/null 2>&1; then
     pgrep -f -- "$pat" >/dev/null 2>&1
     return $?
   fi
-  ps -eo command 2>/dev/null | grep -qF -- "$pat"
+  # The listing is read whole before it is searched. `ps | grep -q` quits at its first match while
+  # `ps` is still writing; past the 64 KB pipe buffer `ps` takes SIGPIPE, and under the caller's
+  # pipefail the pipeline reports 141 for a process that is there.
+  procs="$(ps -eo command 2>/dev/null)"
+  grep -qF -- "$pat" <<< "$procs"
 }
 
 # A `|`, a newline or a control character inside a VALUE would forge a field. Every value on

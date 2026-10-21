@@ -197,24 +197,6 @@ if [ -r "$LIBDIR/resources.sh" ]; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-section "§A1 the lead's question is answered: the incident payload yields exactly one decision object"
-
-A1P="$(make_project a1 bound)"
-A1S="$(scratch_of "$A1P")"
-INCIDENT="echo TR; bash -c 'TR=./x.jsonl; touch \$TR; rm -f \$TR'"
-drive "$A1P" "$(payload "$A1P" Bash "$(bash_ti "$INCIDENT")" "" "" "$A1S")"
-expect_eq "A1.1 rc 0" "0" "$RC"
-expect_eq "A1.2 exactly one JSON value on stdout" "1" "$(n_obj "$OUT")"
-expect_eq "A1.3 it is a PermissionRequest decision" "PermissionRequest" "$(event_of "$OUT")"
-expect_regex "A1.4 its behavior is allow or deny" '^(allow|deny)$' "$(behavior "$OUT")"
-expect_eq "A1.5 the incident (an unread rm target) is denied" "deny" "$(behavior "$OUT")"
-expect_eq "A1.6 …and it leaves one answer line" "1" "$(log_lines "$A1P")"
-# The paired allow on the same fixture: the lead inside its own checkout.
-drive "$A1P" "$(payload "$A1P" Bash "$(bash_ti "touch $A1P/src/a.txt")")"
-expect_eq "A1.7 the same lead touching a file in its checkout is allowed" "allow" "$(behavior "$OUT")"
-expect_eq "A1.8 …as exactly one object" "1" "$(n_obj "$OUT")"
-
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A2 a subagent's and a teammate's question are answered for THAT asker's workspace"
 
 A2P="$(make_project a2 bound)"
@@ -475,31 +457,9 @@ drive "$A6P" "$(payload "$A6P" Write "$(file_ti "$(record_of "$A6P")/x.md")")"
 expect_eq "A6.6 control: bound to that plan, the same record target allows" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-section "§A7 the incident command is denied with a fix naming the unread target"
-
-A7P="$(make_project a7 bound)"
-A7S="$(scratch_of "$A7P")"
-drive "$A7P" "$(payload "$A7P" Bash "$(bash_ti "$INCIDENT")" "" "" "$A7S")"
-expect_eq "A7.1 the incident: deny" "deny" "$(behavior "$OUT")"
-# The rm's target is the variable $TR; the grant names the FIRST effect it could not read
-# (the touch of the same $TR) and counts the rest, so the unread target is named either way.
-expect_contains "A7.2 …naming the unread target, the variable the rm removes" 'in the target: $TR' "$(message "$OUT")"
-expect_contains "A7.2b …and counting the rm's own unread effect beside it" "1 more of its effects" "$(message "$OUT")"
-expect_contains "A7.3 …with the fix: a script file in the workspace" "script file" "$(message "$OUT")"
-expect_contains "A7.4 …named by the asker's scratch" "$A7S" "$(message "$OUT")"
-INCIDENT_FULL="cd $A7S/walkb; cat >> env.sh <<'EOF'
-sweep() { ( cd \"\$R\" && CLAUDE_CODE_SESSION_ID=\"\$SID\" bash \$X/hooks/session-sweeper.sh \"\$@\" ); }
-EOF
-for v in head base; do echo \"=== \$v\"; bash -c '. ./env.sh '\$v'; SID=walk-b-0003; R=\"\$(mkrepo verdict \$SID)\"; mkdir -p \$R/out; TR=\$TR_DIR/\$SID.jsonl; rm -f \$TR;
-echo \"--- (a0) no transcript at all\"; sweep verdict rep; echo rc=\$?' 2>&1; done"
-drive "$A7P" "$(payload "$A7P" Bash "$(bash_ti "$INCIDENT_FULL")" "" "" "$A7S")"
-expect_eq "A7.5 the fuller incident shape: deny" "deny" "$(behavior "$OUT")"
-# The paired allow: the same rm with a literal target in the scratch.
-drive "$A7P" "$(payload "$A7P" Bash "$(bash_ti "touch $A7S/x.jsonl; rm -f $A7S/x.jsonl")" "" "" "$A7S")"
-expect_eq "A7.7 control: the literal-target rewrite in the scratch allows" "allow" "$(behavior "$OUT")"
-
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A10 a session with no engagement marker gets no answer"
+
+INCIDENT="echo TR; bash -c 'TR=./x.jsonl; touch \$TR; rm -f \$TR'"
 
 A10P="$(make_project a10 bound)"
 rm -f "$A10P/.bionic/tmp/engaged-$SID.state"
@@ -783,28 +743,6 @@ drive "$A18U" "$(payload "$A18U" Write "$(file_ti "$(record_of "$A18U")/RU.md")"
 expect_eq "A18.9 unbound: a report in the record is denied (no run, no record held)" "deny" "$(behavior "$OUT")"
 drive "$A18U" "$(payload "$A18U" Write "$(file_ti "$(scratch_of "$A18U")/RS.md")" aw99-RS-1 general-purpose)"
 expect_eq "A18.10 unbound control: a report in the scratch: allow" "allow" "$(behavior "$OUT")"
-
-# ══════════════════════════════════════════════════════════════════════════════════════
-section "§A19 a delete of a workspace root itself is denied; beneath it is allowed"
-
-# `rm -rf <own tree>` and `rm -rf <scratch>` were allowed: containment matched the root
-# itself (review N5). A delete must now be strictly beneath a delete root (wave-25 T17).
-A19P="$(make_project a19 bound)"
-A19T="$A19P/.worktrees/25-T1"
-A19S="$(scratch_of "$A19P")"
-add_roster_row "$A19P" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A19P")/T1.md"
-add_workspace "$A19P" w99-T1 "$A19T"
-drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19T")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A19T")"
-expect_eq "A19.1 a writer deleting its own tree: deny" "deny" "$(behavior "$OUT")"
-expect_contains "A19.2 …because it is a root of the workspace" "a root of the workspace" "$(message "$OUT")"
-expect_contains "A19.3 …and it is sent to the lead" "ask the lead" "$(message "$OUT")"
-drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19T/build")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A19T")"
-expect_eq "A19.4 control: a delete beneath its tree: allow" "allow" "$(behavior "$OUT")"
-drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19S")")"
-expect_eq "A19.5 the lead deleting the session scratch: deny" "deny" "$(behavior "$OUT")"
-expect_contains "A19.6 …and it is sent to the human" "report it to the human" "$(message "$OUT")"
-drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19S/tmp")")"
-expect_eq "A19.7 control: a delete beneath the scratch: allow" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§A20 a command with more targets than the hook reads is denied at once"

@@ -49,7 +49,7 @@
 #     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
-#     bash card.sh early <plan>                         (the CARD-EARLY line, or what the review results settle)
+#     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -2097,11 +2097,12 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   return 0
 }
 
-# ── WHETHER THE REVIEW RESULTS PAGE MAY RENDER ───────────────────────────────
+# ── WHETHER THE RELEASE APPROVAL CARD MAY RENDER ───────────────────────────────
 #
-# The page itself is `session-poker.sh review-results`; this file keeps the one owner of the three facts it is
+# The page itself is `session-poker.sh release-approval`; this file keeps the one owner of the three facts it is
 # refused on, because the tick asks them too. `early <plan>` asks, cheapest first: an open reader row on the
-# session's roster (an auditor or a critic, not acked), an owed reading unregistered at the working head
+# session's roster (an auditor or a critic, not acked) or a reader row past the landed release whose reading is not
+# registered, an owed reading unregistered at the working head
 # (lib/units.sh `_units_readings_state`, the tick's own reading), and `current <N> --check` for 6, 7 and 8 (the
 # check-only advance; its exit is read and its verdict line is the reason, never a second judgment here). On the
 # first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
@@ -2122,13 +2123,13 @@ _card_early_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ER
   local bound=""
   CF_ERR=""
   CF_SID="${CLAUDE_CODE_SESSION_ID:-}"
-  [ -n "$CF_SID" ] || { CF_ERR="no session key (CLAUDE_CODE_SESSION_ID is unset), and the review results are a session's own run"; return 1; }
+  [ -n "$CF_SID" ] || { CF_ERR="no session key (CLAUDE_CODE_SESSION_ID is unset), and the release approval card is a session's own run"; return 1; }
   CF_PLAN="$(_card_phys "$1")" || { CF_ERR="no plan at '$1'"; return 1; }
   CF_ROOT="$(project_root "${CF_PLAN%/*}" 2>/dev/null)"
   [ -n "$CF_ROOT" ] || { CF_ERR="'$1' is under no project root"; return 1; }
   bound="$(session_plan "$CF_ROOT" "$CF_SID" 2>/dev/null)" && bound="$(_card_phys "$bound" 2>/dev/null)" || bound=""
   [ "$bound" = "$CF_PLAN" ] || {
-    CF_ERR="'$1' is not the run this session is bound to (${bound:-none}); the review results check the bound run"
+    CF_ERR="'$1' is not the run this session is bound to (${bound:-none}); the release approval card checks the bound run"
     return 1
   }
   CF_HEAD="$(proof_branch_head "$CF_PLAN" "$CF_ROOT" 2>/dev/null)" || CF_HEAD=""
@@ -2173,6 +2174,16 @@ _card_early() {  # -> 0 when the page may render; 1 and CARD_EARLY_WHY on the fi
 $names
 CF_OPEN
   fi
+  # A READER ROW PAST THE LANDED RELEASE (lib/units.sh `units_post_readers`), pending or active, holds the page until
+  # its reading is registered, even before it is dispatched: what landed after the release is read before the person
+  # is asked. Once registered, the piece reading carries its question's chain to the head, so no waiver is put for it.
+  while IFS='	' read -r n st q; do
+    case "$st:$q" in
+      pending:unread|active:unread) CARD_EARLY_WHY="reader row $n reads what landed after the release, and its reading is not registered"; return 1 ;;
+    esac
+  done <<CF_POST
+$(units_post_readers "$CF_PLAN" 2>/dev/null)
+CF_POST
   # (2) A READING UNREGISTERED AT THE HEAD: facts_state's review lines at the branch ref, as the tick reads them.
   # A failing reading is registered; the advance's check below is what refuses it. The tick hands the answer its
   # `sched_live_head` already got, with the head it was asked at; this reads it when that head is this one, and
@@ -2207,25 +2218,71 @@ CF_OPEN
   return 0
 }
 
+# _card_t4_confirm_key -> the key a T4 row's block carries beside `evidence:`, the user's confirmation of the row's own
+# check, as walls.sh `keys_for_tier` names it; nothing when walls.sh cannot be loaded, so the refusal stays early.
+_card_t4_confirm_key() {
+  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F keys_for_tier >/dev/null 2>&1 || exit 1
+    for _ck in $(keys_for_tier T4); do [ "$_ck" = evidence ] || { printf '%s' "$_ck"; break; }; done )
+}
+
+# _card_unapproved -> the format of the refusal `current 8` prints while the release approval is missing, as the judge
+# spells it (hooks/poker/judge.sh `cur8_unapproved_line`), read from the judge beside CF_POKER. judge.sh defines
+# functions only, so sourcing it in a subshell runs nothing and defines nothing here. Nothing when the judge cannot be
+# read, and then no line is settled as that refusal, so the page stays early.
+_card_unapproved() {
+  ( . "${CF_POKER%/*}/poker/judge.sh" >/dev/null 2>&1 && declare -F cur8_unapproved_line >/dev/null 2>&1 || exit 1
+    cur8_unapproved_line )
+}
+
+# _card_fmt_is <format> <line> -> 0 when <line> is <format> with each %s standing for any text. Each piece between the
+# placeholders is matched as a literal, so no character of the judge's words is read as a pattern.
+_card_fmt_is() {
+  local f="$1" l="$2" m='%s' p
+  [ -n "$f" ] || return 1
+  p="${f%%"$m"*}"
+  case "$l" in "$p"*) l="${l#"$p"}" ;; *) return 1 ;; esac
+  f="${f#"$p"}"
+  while [ -n "$f" ]; do
+    f="${f#"$m"}"
+    [ -n "$f" ] || return 0
+    case "$f" in
+      *"$m"*) p="${f%%"$m"*}" ;;
+      *) case "$l" in *"$f") return 0 ;; *) return 1 ;; esac ;;
+    esac
+    case "$l" in *"$p"*) l="${l#*"$p"}" ;; *) return 1 ;; esac
+    f="${f#"$p"}"
+  done
+  [ -z "$l" ]
+}
+
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
-# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`) and a question
-# whose newest reading fails (`waive <q>`). Anything else the check prints is early: a missing or red whole run (the
+# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`), a T4 row whose
+# user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `confirm-row`, or
+# waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
+# evidence that was never recorded. Anything else the check prints is early: a missing or red whole run (the
 # regression is run before review and is never waived), a missing proof, another refused dry commit, an uncovered or
 # absent reading, a declared check or debt not held, a judge that could not deal the plan. The dry commit stops at
 # its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it
 # finds, and the rows are read from the matrix, so the page puts each of them whichever refusal the dry commit
 # stopped on. In the release order the advance to 8 refuses first on the missing release approval (no `approved:
 # release` line, or one naming no head), before it reads any other fact: that approval is the page's own decision, so
-# it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. The advance
+# it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. That refusal is
+# known by the judge's own format (`_card_unapproved`), never by a second spelling of its words here. The advance
 # prints no refusal for the merge approval, so none is read here.
 _card_settles() {
-  local l q judge=0 reading=0 any=0
+  local l q k judge=0 reading=0 any=0 unap
   local -a _cs_f=()
+  unap="$(_card_unapproved)"
   while IFS= read -r l; do
+    if [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; then CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue; fi
     case "$l" in
       "bionic: commit refused — the auditor has not confirmed "*)
         q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
+        CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
+      "bionic: commit refused — "*" has placeholder "*" evidence (record what actually ran)")
+        q="${l#bionic: commit refused — }"; k="${q#* has placeholder }"; k="${k%% evidence (*}"; q="${q%% *}"
+        [ "$k" = "$(_card_t4_confirm_key)" ] || return 1
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
       "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
       "bionic: "*) return 1 ;;
@@ -2235,8 +2292,6 @@ _card_settles() {
       "- "*) [ "$reading" = 1 ] && return 1 ;;
       "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
       "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
-      "poker: REFUSED — current: 8 in the order "*" carries no approved: release line; "*|"poker: REFUSED — current: 8 in the order "*" names no head; the user's word for the working head "*)
-        CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1 ;;
       "poker: REFUSED"*) return 1 ;;
       *"	"*)
         [ "$judge" = 1 ] || continue
@@ -2290,7 +2345,7 @@ case "$1" in
     _card_inherited "$2" | awk -F '\t' '$1 == "open" && index($2, "debt: ") == 1 { print substr($0, 6) }'
     exit 0 ;;
   early)
-    # Whether the review results page may render: the three facts, and what a red check owes that the page settles.
+    # Whether the release approval card may render: the three facts, and what a red check owes that the page settles.
     [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one plan path (got $(( $# - 1 )))"
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
     _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }

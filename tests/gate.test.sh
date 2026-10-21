@@ -7,6 +7,7 @@
 #
 #   §SHARE     AC-2.1  asks from two fixture projects read one share file; a project's own
 #                      config or plan line changes neither; absent or unreadable is 92
+#   §WIDTH     D1      the width a whole run takes is the share's room, floored
 #   §HARD      AC-2.2  memory planted over the share is not admitted; a busy processor with
 #                      nothing admitted is; an unknown command or an unknown reading waits for
 #                      an idle gate. Mutation: the share's ceiling lifted admits at 85%
@@ -35,111 +36,6 @@
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
-#   §ROBUST    D21     (wave-38 T31; A-orch-43) a suite's promised seconds are robust to one
-#                      contended run: with three kept durations the largest at or below twice
-#                      their median (285, 300, 1775 promises 300, and `_line_time_for` fits it in
-#                      1700); with fewer, the largest (1775 alone promises 1775)
-#   §PROMISE   D11, AC-4.1 (wave-39 T8) the promise carries its load: three cost lines at load 1.5 asked at
-#                      load 6 promise the median × 4 bounded by the largest kept; at 1.5 the median; the factor
-#                      clamped to 0.5..4, a load below one counted as one; a line with no load, or a load now that
-#                      cannot be read, is §ROBUST's promise; the admission's promise= and load=, the cost line it
-#                      writes, `_line_time_for` and `_line_time_why` read the one figure. Mutation: every factor 1
-#   §FINISHED  D22, AC-6.2 (wave-38 T31; A-orch-43) a landing's request records the row's window
-#                      (its lease's span) and its landing record at ask, and when it was handed back;
-#                      the scan ends a handed-back request whose row's record shows published,
-#                      returned or stalled after its ask (why=row-finished), or whose holder has been
-#                      gone longer than its window, 1800 s with none recorded (why=holder-gone), a
-#                      landing request naming no landing by the window alone; a live waiter, one
-#                      gone 10 s (AC-6.2's killed waiter), and a writer's work request are kept. Its
-#                      landing record is written by line.sh's own `line_event` (wave-39 T17; AC-12.1)
-#   §KEY       D18, AC-12.1 (wave-39 T17) one landing-key alphabet, line.sh `landing_key`: a multibyte row is
-#                      written `_` a byte under every locale; the gate's row sanitiser and line.sh's key agree
-#                      on it across locales; the gate's validator accepts exactly what landing_key leaves alone
-#   §RECORD    D18, AC-12.1 (wave-39 T17) the gate reads the landing record through line.sh's reader, by
-#                      name: published, returned and stalled finish a row, ready and verdict do not, each line
-#                      written by `line_event`. Mutation: the writer moves ev= to the end of its fields, and the
-#                      gate still reads the row finished
-#   §FIRST     AC-2.7  a writer's number waits, a landing's arrives, and the landing is admitted
-#                      first. Mutation: landing-before-work removed admits the writer
-#   §ANCESTOR  AC-2.13 an admission passed down is believed only from an ancestor holder; a
-#                      typed one asks anyway; BIONIC_SLOT_HELD=1 is ignored. Mutation: the
-#                      ancestor test removed believes the stranger
-#   §ANCESTRY  AC-1.4  (wave-32 T1; D5) a child of an admitted holder, BIONIC_GATE_ADMIT unset
-#                      or naming an id the store cannot believe, is admitted as the holder's and
-#                      files nothing; a process that is not a descendant files its own; an
-#                      ended admission is believed by nobody
-#   §WAITED    AC-4.2  a request holds its asked and admitted times, and the wait is their gap
-#   §KILLED    AC-4.3  a real child admitted and then killed with signal 9 is counted once;
-#                      it holds no peak and writes no duration
-#   §COST      D12     (wave-33 T1; Δ10: durations only) gate_end's duration line,
-#                      <seconds>:<epoch>:<load> (wave-39 T8), three kept; the promise is the suite cost, no memory and the
-#                      key's longest kept duration; an unknown command's is one core and no
-#                      seconds; an overlapped run records its own seconds; a run's processor
-#                      work and memory are not recorded; an overlong run held until it ages out
-#                      of the three lines; an unknown request line ignored. Mutation: four
-#                      lines kept
-#   §ZERO-SECONDS D5   (wave-32 T1) a run admitted and ended in one second writes its end and
-#                      rc and no duration line; one ended 2 s later writes its line
-#   §CORES-OVER Δ10    (wave-33 T1, retiring wave-32 T19's core-count test) a run whose
-#                      children's processor time is impossible writes its seconds all the same,
-#                      and no cores
-#   §WHOLE-COST D1, D5, Δ10 a whole request is promised its width, gate_width; its gate_end
-#                      records its seconds unmarked; a never-seen key is promised the suite cost and
-#                      an owed writer charged one, before and after a whole run; its next ask
-#                      waits while another is held and is admitted once nothing is
-#   §ONE-CORE  AC-8.1  (wave-33 T1) a command is promised the suite cost whatever is on record (the
-#                      research store's 4.4- and 3.94-core lines); two writers admitted on it;
-#                      an empty store promises one core; a whole run its width
-#   §SIDE-BY-SIDE AC-8.2 two writers' single suites on an idle 8-core probe at share 92 are
-#                      admitted side by side, on a fresh store and on the probe's stray line
-#   §DURATIONS AC-8.6  durations keyed by project and command: a run in project A writes A's
-#                      file only, B's time limit (line.sh `_line_time_for`) is unchanged; a
-#                      worktree is its repository's project; an unkeyed 1.15.0 file is read for
-#                      its seconds only and never changed
-#   §SHARE-ROOM AC-9.1 share × cores ÷ 100 at one site and the one core at one site: a mutant
-#                      at each moves every reader. Mutations: the room doubled; the core set to 3
-#   §ROOM      AC-2.5  gate_room (T13, D14): a five-minute load over the share, promised work
-#                      not yet showing and memory over the share each give no room; a waiting
-#                      request alone gives room (wave-38 T5, D21); a quiet machine gives room;
-#                      two asks on one reading give room once; gate_state prints the loads where
-#                      clears= stood. Mutations: the waiting clause put back, the owed count, the
-#                      five-minute reading
-#   §OPEN      T71     one rule says which requests are open (no ended= line, holder alive): the
-#                      scan, gate_list, gate_asked and the prune read it; a holder-gone request is
-#                      not showing and is pruned after BIONIC_GATE_KEEP; gate_asked answers over
-#                      20,000 request files, takes no lock and survives a file removed mid-read;
-#                      2,000 expired requests are pruned by a batch, under a second; ended=008 and
-#                      BIONIC_GATE_KEEP=abc abort nothing. Mutations: the rule split back, the exec
-#                      list back, an rm per file back, the decimal read removed
-#   §REAPED    T47     a request killed earlier is written ended (rc 137) by the next locked act;
-#                      runs after it and beside it record their own seconds. Mutation: the
-#                      killed-write removed leaves the killed request never ended
-#   §ALONE     T47, Δ10 a request promises no memory: a small ask is admitted beside a big run
-#                      while the reading is at most the share; a reading over it still refuses
-#   §OWN       T47     a second ask by one who for one key, the first still polling, gets a
-#                      number of its own. Mutation: the liveness test on reuse removed
-#   §CLEARED   T47     a request returned 75 has its holder cleared, so a live caller that no
-#                      longer polls keeps no head. Mutation: the clearing removed
-#   §MACHINES  AC-7.3  the admission rows run under three planted machines and decide alike, but
-#                      for a 2-core machine whose share holds one command of one core (Δ10)
-#   §WRAP      AC-2.6, AC-2.13 (T12) the wrapper, booked.sh, asks the gate: the command's own code
-#                      on a run; 75 and nothing run when the wait runs out, under --max-wait or
-#                      --kill-after; its next call resumes the number and runs first; a nested
-#                      shim is believed; a typed admission and BIONIC_SLOT_HELD=1 ask anyway; 2
-#                      on usage; a stamp on every end but usage; the runner takes no number; a
-#                      run is sampled while it runs. Mutations: the wrapper believing a typed
-#                      admission without asking; the wrapper exiting 0 on a timeout
-#   §BUDGET-AT-ASK AC-6.2 (wave-33 T3; D7) an agent budgeted for a.test.sh, in a real checkout of
-#                      the runner: a whole run through a symlinked script, a variable and a symlink
-#                      at argv[0], and b.test.sh through a script's door, are refused at the ask,
-#                      75, the budget's own line, nothing run; a.test.sh through a script runs; the
-#                      main thread, a row with no budget, a believed admission and a landing are
-#                      not judged; a declared Re-executes run admits the suite it names. Mutation:
-#                      the ask's budget call removed admits the off-budget ask
-#   §CASE      AC-6.3  (wave-33 T3) on a case-blind filesystem (planted both ways) A.TEST.SH is
-#                      a.test.sh and TESTS/RUN.SH the whole run; case-exact, A.TEST.SH is another
-#                      file; `bash TESTS/RUN.SH` from a script, where this filesystem folds, is
-#                      refused at the ask
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's

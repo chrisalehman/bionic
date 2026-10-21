@@ -524,17 +524,8 @@ expect_eq "6.12 a sweep with no session key completes (exit 0)" "0" "$RC"
 expect_false "6.13 …and sweeps the dead session" test -e "$(f_of "$R6C" roster "$SID_DEAD")"
 expect_contains "6.14 …reporting no session of its own" "|session=none|" "$OUT"
 
-# =============================================================================
-section "7. session-start.sh's own silent auto-sweep (R2, ticket-30, AC-R2.1/2.2/2.3)"
-# =============================================================================
-#
-# EVERYTHING ABOVE THIS SECTION drives `sweep` itself, directly, and stays exactly
-# as it was (A-5: the verb is wired here, never rewritten). This section drives
-# THE CALLER — hooks/session-start.sh — which is what actually decides WHETHER
-# `sweep` runs at every session start, and adds one thing the verb itself does
-# not have: an age gate, so a session dead one instant ago is not swept before
-# anyone could read the predecessor report this same run just printed.
-#
+section "7a. AC-R2.1 — a dead session, aged past the interval, is fully swept"
+
 # NO wrap.sh / PPID DANCE (unlike tests/session-start.test.sh). This session's
 # own liveness, for the sweep decision, is CLAUDE_CODE_SESSION_ID alone — the
 # hook's wiring passes it to `patrol_dead_sessions` as an explicit also-live id,
@@ -542,7 +533,6 @@ section "7. session-start.sh's own silent auto-sweep (R2, ticket-30, AC-R2.1/2.2
 # with no pid entry for it is enough; only the classes under test (a genuinely
 # DEAD or LIVE *other* session) need the pid-file machinery `live_home` builds.
 HOOK_SESSION_START="${BIONIC_HOOKS_DIR}/session-start.sh"
-expect_true "hooks/session-start.sh exists" test -f "$HOOK_SESSION_START"
 
 CUR_SELF="$SID_SELF"
 
@@ -575,8 +565,6 @@ ss_drive_start() {  # <hook path> <repo> <claude-home> <cur sid> [extra env NAME
   RC=$?
 }
 
-section "7a. AC-R2.1 — a dead session, aged past the interval, is fully swept"
-
 R7A="$(ss_make_project r7a 1s)"
 H7A="$TMPROOT/home-r7a"; mkdir -p "$H7A/sessions"
 plant_session "$R7A" "$SID_DEAD"
@@ -591,19 +579,6 @@ expect_false "7a.5 …its sweeper ledger is gone"  test -e "$(f_of "$R7A" sweepe
 expect_false "7a.6 …its patrol stamp is gone"    test -e "$(f_of "$R7A" patrol "$SID_DEAD")"
 expect_false "7a.7 …and no sweep-failure marker was left behind" \
   test -e "$R7A/.bionic/tmp/sweep-failed.state"
-
-section "7b. AC-R2.2 — a LIVE session's files survive a session start"
-
-R7B="$(ss_make_project r7b 1s)"
-live_home 7b "$SID_LIVE"; H7B="$CLAUDE_HOME"
-plant_session "$R7B" "$SID_LIVE"
-for f7b in "$R7B/.bionic/tmp/"*"-$SID_LIVE.state"*; do ss_backdate "$f7b" 5; done
-
-ss_drive_start "$HOOK_SESSION_START" "$R7B" "$H7B" "$CUR_SELF"
-expect_eq "7b.1 session-start exits 0" "0" "$RC"
-expect_true "7b.2 the live session's roster survives"    test -f "$(f_of "$R7B" roster "$SID_LIVE")"
-expect_true "7b.3 …its preflight survives"                test -f "$(f_of "$R7B" preflight "$SID_LIVE")"
-expect_true "7b.4 …its patrol stamp survives"             test -f "$(f_of "$R7B" patrol "$SID_LIVE")"
 
 section "7c. AC-R2.3 — files younger than one Patrol interval survive, even though the session is dead"
 

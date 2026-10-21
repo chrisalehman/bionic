@@ -4,7 +4,7 @@ set +x +v
 # D1, REQ-3 AC-3.5). The release gate runs it from the repository being published, from the last
 # release to the working head, and refuses the release on a non-zero exit.
 #
-# FOUR CHECKS, each always run, and the exit is 0 only when all pass:
+# FIVE CHECKS, each always run, and the exit is 0 only when all pass:
 #
 #   1. the name scan (tests/lib/name-scan.sh <list path>, same working directory, same
 #      environment: BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD are the scan's own). Its output is
@@ -22,7 +22,10 @@ set +x +v
 #      states its sentence (the ` stated="…"` field `finding-stated` writes, unescaped) must stand
 #      under the entry's `### Known limits`, both sides folded by lib/said.sh `said_fold`, the one
 #      fold the sentence was written through. A missing one is ONE line naming the finding and the
-#      sentence, and exit 1. The plan is read from the working files: `.bionic/` is ignored, so the
+#      sentence, and exit 1. An open deferral rated `defer` that states none, or a `-` for one (the form a
+#      carried unstated deferral is written in), is ONE line naming the finding, and exit 1: no sentence is
+#      no limit to carry, for a release at or past LIM_RULE_FROM only: an earlier release's unstated deferral is
+#      passed over, its known-limits line unchanged. The plan is read from the working files: `.bionic/` is ignored, so the
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
 #      sentences held says how many, in one such line. Generalised from the §CORR rule of
@@ -37,6 +40,14 @@ set +x +v
 #      carried the entry (its commit's CHANGELOG.md holds the head line, its first parent's does not): the
 #      entry is rendered again after it. An entry naming no head, and no plan naming the release, each
 #      pass with one `landing-numbers:` line.
+#
+#   5. the cap on tests: the tracked `*.sh` lines under tests/ against the tracked `*.sh` lines everywhere else, in
+#      the tree at BIONIC_CHECK_HEAD, never the working files. A head whose tests exceed its code is ONE line naming
+#      both counts and exit 1; a head under (equal passes) prints `test-ratio: <tests>/<code>`, the line the release
+#      approval page and the situation report read. A head with no shell file outside tests/ has nothing to count
+#      against: ONE line and exit 2, never a pass. A symlink is a blob of mode 120000 and is not counted, so a
+#      directory reached through one counts once, by its real files. One `git ls-tree` and one `git cat-file --batch`
+#      read the head: a `git show` per file would cost a minute where this costs a second.
 #
 # On a mismatch it prints ONE line naming both versions and exits 1. A missing list path, a list
 # that is not a file, and a pair that cannot be read (no release heading, no `.version`, a path
@@ -81,6 +92,25 @@ elif [ "$chg_version" != "$plugin_version" ]; then
 fi
 
 # ---- the Known limits of the release being shipped -------------------------------------------
+# The first release the unstated-deferral refusal applies to. Releases before it shipped under the older rule,
+# which let a deferral go unstated, so theirs are passed over: not counted, not refused. From this release on an
+# unstated or dashed defer deferral refuses the release. A stated deferral is held to Known limits at every release.
+LIM_RULE_FROM=1.24.0
+# lim_version_at_least <a> <b> -> exit 0 when dotted version <a> is at or past <b>, compared part by part as
+# integers (1.9.9 is below 1.24.0, which a string compare gets wrong); a missing part reads as 0.
+lim_version_at_least() {
+  local a="$1" b="$2" x y
+  while [ -n "$a$b" ]; do
+    x="${a%%.*}"; y="${b%%.*}"
+    case "$a" in *.*) a="${a#*.}" ;; *) a="" ;; esac
+    case "$b" in *.*) b="${b#*.}" ;; *) b="" ;; esac
+    x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"
+    x=$((10#${x:-0})); y=$((10#${y:-0}))
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+  done
+  return 0
+}
 # entry_part <changelog text> <version> <part> -> the lines of that entry's `### <part>`, up to the next `### ` or
 # `## ` heading.
 entry_part() {
@@ -120,7 +150,7 @@ lim_sentence() {
     | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p' | sed -e 's/\\\(.\)/\1/g'
 }
 lim_check() {  # <version> <changelog text> -> one line per omission, or one known-limits: line; exit 1 on an omission
-  local ver="$1" cl="$2" plans plan kl id s r p t st n=0 bad=0
+  local ver="$1" cl="$2" plans plan kl id s r p t st n=0 un=0 bad=0
   rel_load "the Known limits check" || return 2
   plans="$(rel_plans "$ver")"
   if [ -z "$plans" ]; then
@@ -130,17 +160,26 @@ lim_check() {  # <version> <changelog text> -> one line per omission, or one kno
   kl="$(said_fold "$(entry_part "$cl" "$ver" 'Known limits')")"
   while IFS= read -r plan; do
     [ -n "$plan" ] || continue
-    n=0
+    n=0 un=0
     while read -r id s r p t; do
       [ "$p" = defer ] || continue
       st="$(said_fold "$(lim_sentence "$plan" "$id")")"
-      [ -n "$st" ] || continue
+      # Before the floor an unstated deferral, or a dash for one, is passed over as the older rule passed it.
+      if ! lim_version_at_least "$ver" "$LIM_RULE_FROM"; then
+        { [ -z "$st" ] || [ "$st" = - ]; } && continue
+      fi
+      # A deferral with no sentence, or a dash where it would stand, leaves nothing for Known limits to carry.
+      if [ -z "$st" ] || [ "$st" = - ]; then
+        echo "release-check: $ver defers $id with no stated sentence; state it or fix it"
+        un=$((un + 1)); bad=1
+        continue
+      fi
       n=$((n + 1))
       case "$kl" in *"$st"*) continue ;; esac
       echo "release-check: Known limits of $ver omit the deferred sentence of $id: $st"
       bad=1
     done < <(proof_findings_owed "$plan" 2>/dev/null)
-    if [ "$n" -eq 0 ]; then echo "known-limits: $ver — $plan states no deferred sentence"
+    if [ "$n" -eq 0 ] && [ "$un" -eq 0 ]; then echo "known-limits: $ver — $plan states no deferred sentence"
     elif [ "$bad" -eq 0 ]; then echo "known-limits: $ver carries the $n deferred sentences of $plan"; fi
   done <<LIM_PLANS
 $plans
@@ -209,18 +248,58 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
   return "$bad"
 }
+# ratio_check -> `test-ratio: <tests>/<code>` on a pass; one line and exit 1 when tests exceed code, one line and
+# exit 2 when the head cannot be read or holds no shell code outside tests/. The blobs of both sides ride one
+# `git cat-file --batch`: the code side's names follow a name no object has, whose `missing` line splits the stream.
+# A blob is its header line, its newline-counted content and the one newline git prints after it, so its lines are
+# the stream's lines less two. LC_ALL=C keeps awk off multibyte rules for files that are not valid text.
+ratio_check() {
+  local lst nt nc t c sentinel="0000000000000000000000000000000000000000"
+  # One tagged line per counted blob: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
+  lst="$(git ls-tree -r -z "$head" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
+    { split($1, m, " "); p = substr($0, length($1) + 2)
+      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print (index(p, "tests/") == 1 ? "T " : "C ") m[3] }')" || lst=""
+  nt="$(printf '%s\n' "$lst" | /usr/bin/grep -c '^T ')"
+  nc="$(printf '%s\n' "$lst" | /usr/bin/grep -c '^C ')"
+  if [ -z "$lst" ] && ! git rev-parse --verify -q "$head^{tree}" >/dev/null 2>&1; then
+    echo "release-check: refused — test-ratio cannot read the tree at $head"
+    return 2
+  fi
+  if [ "$nc" -eq 0 ]; then
+    echo "release-check: refused — test-ratio finds no shell file outside tests/ at $head, so there is no code to count tests against"
+    return 2
+  fi
+  c="$({ printf '%s\n' "$lst" | sed -n 's/^T //p'; printf '%s\n' "$sentinel"; printf '%s\n' "$lst" | sed -n 's/^C //p'; } \
+    | git cat-file --batch 2>/dev/null | LC_ALL=C awk -v s="$sentinel missing" -v nt="$nt" -v nc="$nc" '
+      $0 == s && !cut { cut = NR; next }
+      END { if (!cut) exit 1; printf "%d %d\n", cut - 1 - 2 * nt, NR - cut - 2 * nc }')" || {
+    echo "release-check: refused — test-ratio cannot read the shell files at $head"
+    return 2
+  }
+  t="${c% *}"; c="${c#* }"
+  if [ "$t" -gt "$c" ]; then
+    echo "release-check: test-ratio $t/$c — tests exceed code at $head"
+    return 1
+  fi
+  echo "test-ratio: $t/$c"
+}
+# fold_rc <rc> -> a check's status read into the exit: 0 passes, 1 fails the release, anything else is a refusal.
+fold_rc() {
+  case "$1" in
+    0) : ;;
+    1) [ "$status" -ne 0 ] || status=1 ;;
+    *) refusals=1 ;;
+  esac
+}
 # The libraries they source are written for callers without `set -u`, so each plan-reading check runs in a subshell
 # without it; its lines pass through and its status is read.
 if [ -n "$chg_version" ]; then
   for chk in lim_check nums_check; do
-    ( set +u; "$chk" "$chg_version" "$changelog" ); rc=$?
-    case "$rc" in
-      0) : ;;
-      1) [ "$status" -ne 0 ] || status=1 ;;
-      *) refusals=1 ;;
-    esac
+    ( set +u; "$chk" "$chg_version" "$changelog" ); fold_rc $?
   done
 fi
+# The cap reads the head's tree alone, so it runs whatever the release heading says.
+( set +u; ratio_check ); fold_rc $?
 
 # ---- the name scan ---------------------------------------------------------------------------
 bash "$HERE/name-scan.sh" "$list" || { rc=$?; [ "$status" -ne 0 ] || status="$rc"; }

@@ -4,16 +4,31 @@
 #
 # WHAT IT OWNS. The contract three callers bind to after T8 — the evidence gate's ledger
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
-# that none of them carries a parser of its own. Three questions, one per function:
+# that none of them carries a parser of its own. The questions, one per section:
 #
 #   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the
-#                                 table's columns are written in
-#   §10 the `worktree` cell        slot 11, OPTIONAL: a table without the column is valid
-#                                 and reads it empty (wave-14 REQ-2, ADR-027)
-#   §13 the `base` cell            slot 12, OPTIONAL, and a commit id when it holds one
-#                                 (wave-17 REQ-2, ADR-032)
+#                                 table's columns are written in; the `worktree` cell (slot 11)
+#                                 and the `base` cell (slot 12) are OPTIONAL, a table without the
+#                                 column is valid and reads it empty, and `base` is a commit id
+#                                 when it holds one
+#   §2 header names               reversed columns give identical output
+#   §3 the ## Tasks section       is read, and nothing else
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
-#   §5 units_validate <plan>      which of the Task invariants the table breaks
+#   §5 units_validate <plan>      the live table is the clean case
+#   §6 units_validate <plan>      one line per broken invariant, naming the id and the rule
+#   §7 units_validate <plan>      a missing column is a violation of the table, not of a row
+#   §8 the differential           the old fill derivation and units_ready answer the same
+#   §9 a markdown-escaped pipe    in a cell
+#   §ORDER   build, regression, review, release: units_validate refuses any other order naming the
+#            rows; units_order reads it
+#   §POST    a review row after a landed release is admitted when it reads only approval:plan, head
+#            and the rows landed past the release
+#   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites,
+#            never a second whole run
+#   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's
+#            cover reads it
+#   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one
+#            line with nothing run, and at the head the whole run read it does not refuse
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
@@ -42,6 +57,8 @@
 # HERMETIC. Every fixture is a file under one mktemp sandbox; nothing reads the repository's
 # own plans, no hook runs, and the library is sourced in a CHILD shell per call so no row can
 # be answered by a function an earlier row left defined in this one.
+# §WALK alone is live tier: it reads this repository's own release merges, read-only, and skips
+# by version and hash a merge the history does not hold.
 #
 # Usage: bash tests/units.test.sh
 
@@ -51,6 +68,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/regression-fixture.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
@@ -237,23 +256,6 @@ MISSING_EOF
 printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\n- Step 4: in flight\n' > "$SANDBOX/no-table.md"
 
 ROWS_LIVE="$(call units_rows "$SANDBOX/live.md")"
-
-# ============================================================
-section "0 — the library is on disk, parses, sources silently, and defines the three verbs"
-# ============================================================
-
-expect_eq "units.sh is on disk" "yes" "$([ -r "$LIB" ] && echo yes || echo no)"
-expect_eq "units.sh parses" "yes" "$(bash -n "$LIB" 2>/dev/null && echo yes || echo no)"
-
-for _fn in units_rows units_ready units_validate; do
-  expect_eq "sourcing units.sh defines $_fn" "yes" \
-    "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; declare -F "$2" >/dev/null 2>&1 && echo yes || echo no' _ "$LIB" "$_fn")"
-done
-
-# SOURCED, NEVER EXECUTED. A library that printed on the way in would corrupt every caller
-# that reads a verb's output through a command substitution — which is all three of them.
-expect_eq "sourcing units.sh prints nothing on stdout" "" "$(bash -c '. "$1"' _ "$LIB" 2>/dev/null)"
-expect_eq "…and nothing on stderr" "" "$(bash -c '. "$1"' _ "$LIB" 2>&1 >/dev/null)"
 
 # ============================================================
 section "1 — units_rows: the live table, thirteen fields per row, in the fixed order"
@@ -458,35 +460,6 @@ expect_eq "a Step-6 row that reaches one Step-4 row of five draws no violation" 
 # PAIRED POSITIVE. The good row is in the same table and is not accused of anything.
 expect_eq "the one well-formed row draws no violation of its own" "0" \
   "$(printf '%s\n' "$VAL_BAD" | grep -c '^T1: [^d]' | tr -d ' ')"
-
-# ============================================================
-section "6b — the every-build-row rule is gone: a later row waits for what it reads (wave-26 T2, D2)"
-# ============================================================
-#
-# Through 1.10 the validator refused any Step-5+ row that did not depend, transitively, on
-# every Step-4 row, and `units_add_row` threaded each new Step-4 id into the rows that owed it
-# (research R3 B4, B6). That rule is removed: a verify or final-review row waits for the build
-# through its `head` read, and a review that reads only the diff waits for nobody. The table
-# below is the one that rule used to refuse — T5 reaches T2 and not T3.
-
-cat > "$SANDBOX/leak.md" <<'LEAK_EOF'
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
-| T2 | 4 | build | first | implementor | T1 | 15m | REQ-x | a.sh | landed |
-| T3 | 4 | build | second | implementor | T1 | 15m | REQ-x | b.sh | landed |
-| T4 | 5 | verify | reaches both Step-4 rows | researcher | T2, T3 | 30m | all | w.md | pending |
-| T5 | 5 | test | reaches only T2 | test-runner | T2 | 40m | all | f.md | pending |
-LEAK_EOF
-
-expect_eq "6b.1 a Step-5 row that reaches one Step-4 row of two validates clean (rc 0)" "0" \
-  "$(call_rc units_validate "$SANDBOX/leak.md")"
-# THE EXTRACTOR READS THIS FIXTURE: one real fault planted in the same table is named, and
-# still nothing accuses T5 of the edge it does not carry.
-sed 's/| T5 | 5 | test | reaches only T2 | test-runner | T2 |/| T5 | 5 | test | reaches only T2 | test-runner | T2, T99 |/' \
-  "$SANDBOX/leak.md" > "$SANDBOX/leak-t99.md"
 
 # ============================================================
 section "7 — units_validate: a missing column is a violation of the table, not of a row"
@@ -917,9 +890,17 @@ or_plan "$OR_REG" "$OR_REV" "$OR_REL"
 expect_eq "ORD-1 control: regression at 5, review at 6, release at 7: no violation (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 expect_eq "ORD-1b …and units_order names the regression row" "T5|0" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
 or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+OR_REGLINE='T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6'
+expect_eq "ORD-2 the regression after the release (the old order): refused with rc 1, one line naming T5 and the first row it follows, T6" \
+  "$OR_REGLINE|1" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 expect_eq "ORD-2b …and units_order reads no order" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
 or_plan "$OR_REV" "${OR_REG/| 5 | test |/| 6 | test |}" "$OR_REL"
+expect_eq "ORD-3 the regression at the review's step, after it in the table: refused with rc 1, one line naming T5 and T6" \
+  "$OR_REGLINE|1" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 or_plan "$OR_REG" "$OR_REL" "${OR_REV/| 6 | review |/| 7 | review |}"
+expect_eq "ORD-4 the release ahead of a review row: refused with rc 1, one line naming T7 and T6" \
+  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6|1" \
+  "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
 sed 's/ pending | approval/ landed | approval/' "$OR_P" > "$OR_P.x" && mv "$OR_P.x" "$OR_P"
 expect_eq "ORD-5 the ORD-2 plan with every row landed: history is not judged (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
@@ -928,6 +909,45 @@ expect_eq "ORD-6 no review row: the regression ahead of the release validates, a
 or_plan "$OR_REG" "$OR_REV"
 expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
 
+
+section "§POST — a review row after a landed release is admitted when it reads only approval:plan, head and the rows landed past the release"
+# The fix that lands after the release is read as a piece, so its reader row stands after the release row. It is
+# admitted only when the release row has landed and the reader names nothing written before the release; while the
+# release is open the order text refuses it as before. Each case projects the row the way task-add does
+# (units_add_row, then units_validate on the projection).
+PO_P="$SANDBOX/post.plan.md"
+po_plan() {  # <release status> -> PO_P: build, regression, review and release rows, and a build row landed past the release
+  { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
+    printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
+    printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
+    printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | %s | approval:plan, head |\n' "$1"
+    printf '| T8 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | landed | approval:plan |\n'
+  } > "$PO_P"
+}
+po_add() {  # <reads> -> PO_P with the review row T9 added past the release, as task-add projects it
+  call units_add_row "$PO_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
+    .bionic/docs/record/w/T9-adversarial.md "$1" > "$PO_P.new" && mv "$PO_P.new" "$PO_P"
+}
+PO_ORD='T7: the release row comes ahead of the review row T9; the order is build, regression, review, release: put T7 at step 7, after T9'
+po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
+expect_eq "POST-0 precondition: the projection carries T9 after the release row T7 and the fix row T8" "T7 T8 T9" \
+  "$(call units_rows "$PO_P" | awk -F'\t' '$2 == 7 { printf "%s%s", (n++ ? " " : ""), $1 }')"
+expect_eq "POST-1 the release landed and T9 reads approval:plan, head and the fix row's record: admitted (no line, rc 0)" "|0" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan pending; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
+expect_eq "POST-2 the same reader while the release row is open: refused with the order text (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T1.md'
+expect_eq "POST-3 the release landed and T9 reads a row written before it: refused with the order text (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan landed; po_add 'approval:plan, head'
+expect_eq "POST-4 the release landed and T9 names no row it reads: refused with the order text, a whole read stays ahead of the release (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md, .bionic/docs/record/w/T6.md'
+expect_eq "POST-5 the release landed and T9 reads the fix and a pre-release reading: refused with the order text (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
 
 section "§JUDGE — covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run"
 # ============================================================
@@ -973,6 +993,83 @@ git -C "$RR" add -A; git -C "$RR" commit -qm release; RH="$(git -C "$RR" rev-par
 printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\nproved: kind=check head=%s at=2026-01-01T00:00:00Z evidence=check.log\n' "$RH" > "$RR/plan.md"
 cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RB" "$RH"; }
 expect_eq "a release commit with the check suite and a promoted ADR, a check passing at it: release" "$(printf 'cover %s release\nrc=0' "$RH")" "$(cover)"
+
+section "§WALK — the regression walk excuses a real release merge whose check passed, as the judge's cover reads it"
+# ============================================================
+
+# A path's place in the release set is asked apart from its place in the docs: CHANGELOG.md is in both, and a release
+# merge whose every path is in the set is excused by the check that passed at it, never sent to a landing row. Live
+# tier, read-only: this repository's own release merges, pinned by hash, skipped by version and hash when absent.
+# Without the check line the same merge is named as not proved, so the excuse is the check's.
+WK_PASS="$SANDBOX/walk-pass.md"; WK_NONE="$SANDBOX/walk-none.md"
+printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\n' > "$WK_NONE"
+cp "$WK_NONE" "$WK_PASS"
+walk() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4^1" "$4" ""; echo "rc=$?"' _ "$PROOF_LIB" "$1" "$REPO_ROOT" "$2" </dev/null; }
+expect_eq "WALK-0 the release commit built above, CHANGELOG.md among its paths, a check passing at it: excused (rc 0)" "rc=0" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" ""; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RR" "$RB" "$RH" </dev/null)"
+WK_N=0
+while read -r v m; do
+  if ! git -C "$REPO_ROOT" cat-file -e "$m^{commit}" 2>/dev/null || ! git -C "$REPO_ROOT" cat-file -e "$m^1^{commit}" 2>/dev/null; then
+    echo "SKIP: WALK $v merge ${m:0:12}: the merge $m or its first parent is absent from this repository"; continue
+  fi
+  WK_N=$((WK_N + 1))
+  printf 'proved: kind=check head=%s at=2026-10-20T00:00:00Z evidence=check-%s.log\n' "$m" "$v" >> "$WK_PASS"
+  expect_eq "WALK-$WK_N the $v merge ${m:0:12} with no check and no landing row: the walk names it not proved (rc 1)" \
+    "$(printf 'commit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it\nrc=1' "$m")" \
+    "$(walk "$WK_NONE" "$m")"
+  expect_eq "WALK-${WK_N}b …with a check passing at it: excused, nothing printed (rc 0)" "rc=0" "$(walk "$WK_PASS" "$m")"
+done <<EOF
+1.23.0 f75f8bbc7cd78a963f6b9f922bb2fd1af2933335
+1.22.0 1c451183069a6c78a53d57135f36b7bb1a2b2d1e
+1.21.0 7d5a0f719fbbf106226a41cf93c17f1d0355ee12
+EOF
+
+section "§SECOND — regression-run at a head past the plan's whole run refuses a second whole run, one line, nothing run"
+# ============================================================
+
+# FIXTURE FIDELITY: one real repository on its working branch; the plan bound to a session through the product's own
+# binder; the whole run recorded through the product's own writers (tests/lib/regression-fixture.sh); the verb is
+# session-poker.sh run as that session. The project's regression is a command that writes a marker file, so a run
+# that started leaves proof of it and a refusal leaves none. fails-when: a second whole run starts past the first,
+# or the refusal fires at the head the whole run read.
+SEC_SID="5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a"
+SEC_ROOT="$SANDBOX/second"; mkdir -p "$SEC_ROOT"; SEC="$SEC_ROOT/repo"
+SEC_PLAN="$SEC/.bionic/docs/plans/epic-99-fixture/wave-01-second.plan.md"; SEC_REL="record/wave-01-second"
+mkdir -p "$SEC/.bionic/tmp" "${SEC_PLAN%/*}" "$SEC/.bionic/docs/$SEC_REL"
+sec_git() { git -C "$SEC" -c user.email=dana@fixture.test "$@"; }
+sec_git init -q; sec_git config user.name "Dana Fixture"; sec_git checkout -q -b wave/01-second
+printf '.bionic/\n' > "$SEC/.gitignore"; printf 'one\n' > "$SEC/a.sh"
+printf 'regression-command: touch %s/ran\n' "$SEC_ROOT" > "$SEC/.bionic/config.yaml"
+sec_git add -A; sec_git commit -qm base; SEC_H="$(sec_git rev-parse HEAD)"
+{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n---\n# plan\n\n'
+  printf '## SDLC State\n\ncurrent: 5\nworking-branch: wave/01-second\nintegration-branch: main\n'; } > "$SEC_PLAN"
+bound_marker "$SEC" "$SEC_SID" "$SEC_PLAN" >/dev/null 2>&1 || :
+sec_poke() {  # -> SEC_OUT (stdout and stderr), SEC_RC: regression-run as the bound session, in the repository
+  SEC_RC=0
+  SEC_OUT="$(cd "$SEC" && env CLAUDE_CODE_SESSION_ID="$SEC_SID" HOME="$SEC_ROOT/home" CLAUDE_CONFIG_DIR="$SEC_ROOT/config" \
+    BIONIC_GATE_DIR="$SEC_ROOT/gate" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" regression-run 2>&1)" || SEC_RC=$?
+}
+sec_ran() { [ -e "$SEC_ROOT/ran" ] && printf yes || printf no; }
+sec_logs() { find "$SEC/.bionic/docs/$SEC_REL" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
+sec_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$SEC_PLAN"; }
+printf 'all green\n' | regression_fixture "$SEC_PLAN" "$SEC/.bionic/docs/$SEC_REL/regression-run-$SEC_H.log" "$SEC_H" 0 0
+expect_eq "SEC-0 precondition: the record holds a whole run at H, clean, and no run has started" "1|no|1" \
+  "$(/usr/bin/grep -c "^line/v1|ev=run|log=$SEC_REL/regression-run-$SEC_H.log|head=$SEC_H|dirty=0|" "$(sec_rec)" 2>/dev/null || :)|$(sec_ran)|$(sec_logs)"
+
+# SEC-2 first, at the head the whole run read: this arm does not refuse it, so the declared regression starts.
+sec_poke
+expect_eq "SEC-2 the working head is H, the head the whole run read: not refused by this arm — the regression starts (exit 0, marker written)" \
+  "0|yes" "$SEC_RC|$(sec_ran)"
+rm -f "$SEC_ROOT/ran"
+printf 'two\n' > "$SEC/a.sh"; sec_git commit -qam 'a fix row lands'; SEC_H1="$(sec_git rev-parse HEAD)"
+SEC_N="$(sec_logs)"
+sec_poke
+expect_eq "SEC-1 the working head is H+1, past the whole run at H: refused (exit 1), nothing ran (no marker), no log written" \
+  "1|no|$SEC_N" "$SEC_RC|$(sec_ran)|$(sec_logs)"
+expect_eq "SEC-1b …in one line, naming the whole run's head and that a fix row's landing proves the head" \
+  "poker: REFUSED — the whole run runs once, and ${SEC_H:0:12} has it ($SEC_REL/regression-run-$SEC_H.log): a red suite is a fix row's, and a fix row's landing proves the head ${SEC_H1:0:12}. Nothing was run." \
+  "$SEC_OUT"
+
 
 # ============================================================
 finish

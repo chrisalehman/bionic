@@ -27,7 +27,9 @@
 #             disagrees, `<stamp|verdict>:<commit>@<at>`, or `-`; wave-33 T2, AC-7.2)
 #   returned  row why detail                   (red | conflict | guard)
 #   stalled   row logs
-#   published row commit kind by why           (queue | hand | git)
+#   published row commit kind by why [numbers] (queue | hand | git; numbers: the commit on the candidate that
+#             carries the release numbers re-rendered at a landing past the release, the head the branch
+#             moved to, `_line_numbers`)
 #   stop-run  request who kind key by why, or run name by why   (hooks/session-poker.sh `stop-run`,
 #             through `line_event`; wave-36 T11, D8): an act, not an entry's — the fold below reads no
 #             row from it, and the hand-hold count (`hand_holds_report`) counts it as `stop-runs`
@@ -257,7 +259,9 @@ _line_lock_live() {  # <record> -> 0 when a live holder has the publish lock
 _line_count_git() {  # <plan> <record> <root> <accepted head>
   local plan="$1" rec="$2" root="$3" head="$4" named last row com rec_row cell tree tip
   [ -n "$head" ] && [ -f "$rec" ] || return 0
-  named="$(awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" { c = line_kv("commit"); if (c != "") print c }' "$rec" 2>/dev/null)"
+  # A numbers commit is a head the line itself published, named as its candidate is.
+  named="$(awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" { c = line_kv("commit"); if (c != "") print c
+    c = line_kv("numbers"); if (c != "") print c }' "$rec" 2>/dev/null)"
   case $'\n'"${named}"$'\n' in *$'\n'"${head}"$'\n'*) return 0 ;; esac
   _line_lock_live "$rec" && return 0
   while IFS=$'\t' read -r row _ com _; do
@@ -460,9 +464,108 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
   roster_mark_landed "$roster" "$LINE_WRITER" "$4" "$5" && LINE_MARKED="$LINE_WRITER"
 }
 
+# THE RELEASE ROW'S COVER. The release row is a doc row at step 7 or later, as the plan's order check and
+# units_order read it. Its merge first exists here, so its landing prints the judge's basis of its own candidate
+# (lib/proof.sh `proof_door_cover`): `COVER <row> <candidate> release`, or `… owes outside=<paths>` naming each
+# path outside the release set, since past such a merge no reading reaches. A line, never a refusal: a release may
+# have to touch a path the set lacks, and the person who reads the line decides.
+_line_release_rows() {  # <plan> -> the id of each doc row at step 7 or later, one a line
+  local rec s
+  _wt_units_load || return 1
+  while IFS= read -r rec; do
+    [ -n "$rec" ] && [ "$(units_field "$rec" kind)" = doc ] || continue
+    s="$(units_field "$rec" step)"
+    case "$s" in ''|*[!0-9]*) continue ;; esac
+    [ "$s" -lt 7 ] || printf '%s\n' "$(units_field "$rec" id)"
+  done <<EOF
+$(units_rows "$1" 2>/dev/null)
+EOF
+}
+_line_release_row() {  # <plan> <row> -> 0 when the row is a release row
+  local r
+  while IFS= read -r r; do
+    [ "$r" != "$2" ] || return 0
+  done <<EOF
+$(_line_release_rows "$1")
+EOF
+  return 1
+}
+_line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
+  local b
+  _line_release_row "$1" "$2" && _line_load_proof && declare -F proof_door_cover >/dev/null 2>&1 || return 0
+  b="$(proof_door_cover "$3" "$4" "$5")" || return 0
+  case "$b" in
+    owes*) printf 'COVER %s %s owes outside=%s — the release row touches paths outside the release set, so the judge reads its merge as owing and no reading reaches past it; land them in a row of their own, or add them to the set (lib/proof.sh _proof_release_path)\n' "$2" "$5" "${b#*	}" ;;
+    *) printf 'COVER %s %s %s\n' "$2" "$5" "$b" ;;
+  esac
+}
+
+# THE RELEASE NUMBERS, AT A LANDING PAST THE RELEASE. The release entry's `### The landing numbers` block names the
+# head it was rendered at, and the release check refuses any landing the checked head holds and that head does not:
+# once a release row of the plan has published, every later landing would leave the check red until someone typed
+# the numbers again by hand. So the line renders them as part of that landing: `release-note --at <candidate> --on
+# <instant>` for the plan, the entry's block in the candidate's CHANGELOG.md replaced by what it prints, committed on
+# the candidate under the line's own author. The commit is made in the object store alone, before the release check
+# and the fast-forward, which then judge and publish it: a render that fails refuses the landing with nothing moved.
+# The instant is one second before the render, since the record's lines carry whole seconds and the report keeps a
+# line written at the instant: every line the block folds is then written before it is rendered, so the release
+# check rendering it again for the same head and instant gets the same block. No published release row (the release
+# row itself carries its own numbers), no `release:` in the plan, or an entry with no numbers block: nothing is made.
+# Sets LINE_NUMBERS (the commit, or empty) and, on a refusal, LINE_NUMBERS_SAID (the renderer's words).
+LINE_NUMBERS_AUTHOR="bionic line"; LINE_NUMBERS_EMAIL="line@bionic.invalid"
+_line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothing to make · 1 refused
+  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" r landed="" ver tmp now on note mode blob tree c
+  LINE_NUMBERS=""; LINE_NUMBERS_SAID=""
+  _line_release_row "$plan" "$row" && return 0
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    awk -F'|' -v r="$r" "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("row") == r { f = 1 } END { exit !f }' \
+      "$rec" 2>/dev/null && { landed="$r"; break; }
+  done <<EOF
+$(_line_release_rows "$plan")
+EOF
+  [ -n "$landed" ] || return 0
+  _line_load_run || { LINE_NUMBERS_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
+  ver="$(plan_frontmatter_get "$plan" release)"
+  [ -n "$ver" ] || return 0
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-numbers.XXXXXX")" || { LINE_NUMBERS_SAID="no temporary directory"; return 1; }
+  git -C "$root" show "${cand}:CHANGELOG.md" > "$tmp/old" 2>/dev/null || { rm -rf "$tmp"; return 0; }
+  awk -v v="## ${ver} " '/^## / { inb = (index($0, v) == 1) }
+    inb && /^### / { t = $0; sub(/[[:space:]]+$/, "", t); if (t == "### The landing numbers") f = 1 }
+    END { exit !f }' "$tmp/old" || { rm -rf "$tmp"; return 0; }
+  now="$(date -u +%s)"
+  on="$(date -u -r "$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  if ! note="$(cd "$root" 2>/dev/null && bash "$(plugin_root 2>/dev/null)/hooks/session-poker.sh" release-note \
+         --at "$cand" --on "${on:-unreadable}" "$plan" 2>&1)"; then
+    LINE_NUMBERS_SAID="${note:-release-note printed nothing}"; rm -rf "$tmp"; return 1
+  fi
+  printf '%s\n' "$note" > "$tmp/note"
+  # The entry's numbers part, from its first heading to the next heading of another name (a doubled heading is one
+  # part), gives way to the rendered block and one blank line.
+  awk -v v="## ${ver} " -v nf="$tmp/note" '
+    function put(   l) { while ((getline l < nf) > 0) print l; print ""; inp = 0; done = 1 }
+    /^###? / { t = $0; sub(/[[:space:]]+$/, "", t)
+      if (inp && t != "### The landing numbers") put()
+      if (substr($0, 1, 3) == "## ") inb = (index($0, v) == 1)
+      else if (inb && !done && t == "### The landing numbers") { inp = 1; next } }
+    inp { next }
+    { print }
+    END { if (inp) put() }' "$tmp/old" > "$tmp/new" \
+  && mode="$(git -C "$root" ls-tree "$cand" CHANGELOG.md 2>/dev/null | awk '{ print $1 }')" \
+  && blob="$(git -C "$root" hash-object -w --path CHANGELOG.md "$tmp/new" 2>&1)" \
+  && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$cand" >/dev/null 2>&1 \
+  && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
+  && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
+  && c="$(GIT_AUTHOR_NAME="$LINE_NUMBERS_AUTHOR" GIT_AUTHOR_EMAIL="$LINE_NUMBERS_EMAIL" \
+         git -C "$root" commit-tree "$tree" -p "$cand" -m "line: release numbers ${row}" 2>&1)" \
+  || { LINE_NUMBERS_SAID="the numbers commit on ${cand} cannot be made: ${c:-${tree:-${blob:-git refused}}}"; rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  LINE_NUMBERS="$c"
+}
+
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
-  local name com present base cand out sui car cbase cat br tr co rc run moved at rundir lt
+  local name com present base cand out sui car cbase cat br tr co rc run moved at rundir lt tip
   rec="$(line_record "$plan")" && root="$(_line_root "$plan")" && branch="$(_line_branch "$plan")" \
     || { _wt_refuse "line-unreadable plan=${plan:-<none>}"; return 2; }
   lk="$(_line_lock_dir "$rec")"
@@ -495,13 +598,22 @@ EOF
   if moved="$(_line_moved "$root" "$co" "$cat")"; then
     _line_lock_drop "$lk"; printf 'MOVED %s\n' "$moved"; return 5
   fi
+  # 4b. THE RELEASE NUMBERS, past a published release row (`_line_numbers`): the commit on the candidate that
+  # the release check judges and the fast-forward publishes; a render that fails refuses here, nothing written
+  # (else rc 2). The head the branch moves to is that commit, else the candidate.
+  if ! _line_numbers "$plan" "$rec" "$root" "$row" "$cand"; then
+    _line_lock_drop "$lk"
+    _wt_refuse "numbers-unrendered row=${row} candidate=${cand} — the release numbers cannot be rendered for this landing past the release, so nothing is published: $(printf '%s\n' "$LINE_NUMBERS_SAID" | awk 'NF { printf "%s%s", s, $0; s = " · " }'); make release-note render for the plan at the candidate, then land again"
+    return 2
+  fi
+  tip="${LINE_NUMBERS:-$cand}"
   # 5. THE PROJECT'S RELEASE CHECK, READ FROM THE ACCEPTED HEAD: in the checkout that holds the
   # branch, or in a landing tree pointed at the accepted head when none does (recheck Q3, O3).
   rundir="$co"; lt=""
   if [ -z "$rundir" ] && [ -n "$(config_value "$root" release-check "" 2>/dev/null)" ]; then
     lt="$(landing_tree_take "$root")" && landing_tree_point "$lt" "$head" && rundir="$lt"
   fi
-  _wt_release_check "$root" "${rundir:-$root}" "$head" "$cand" "$tr" "$br" "$branch"; rc=$?
+  _wt_release_check "$root" "${rundir:-$root}" "$head" "$tip" "$tr" "$br" "$branch" "$row"; rc=$?
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" -eq 0 ] || { _line_lock_drop "$lk"; return 2; }
   # 6. THE DEBT WRITE (wave-28 T5; D8, AC-9.4): a declared red's `debt:` line, at the publish's own
@@ -511,9 +623,9 @@ EOF
   # 7. THE FAST-FORWARD, after the pause seam.
   _line_pause "$row"
   if [ -n "$co" ]; then
-    GIT_REFLOG_ACTION="line: publish ${row}" git -C "$co" merge --ff-only -q "$cand" >/dev/null 2>&1; rc=$?
+    GIT_REFLOG_ACTION="line: publish ${row}" git -C "$co" merge --ff-only -q "$tip" >/dev/null 2>&1; rc=$?
   else
-    git -C "$root" update-ref -m "line: publish ${row}" "refs/heads/${branch}" "$cand" "$head" >/dev/null 2>&1; rc=$?
+    git -C "$root" update-ref -m "line: publish ${row}" "refs/heads/${branch}" "$tip" "$head" >/dev/null 2>&1; rc=$?
   fi
   if [ "$rc" -ne 0 ]; then
     # A debt written for a publish that did not happen is voided; a void that cannot be written
@@ -527,12 +639,14 @@ EOF
     _wt_refuse "publish-failed row=${row} branch=${branch} candidate=${cand} checkout=${co:-<none>} — the fast-forward did not go through and nothing is published; say ready again"
     return 2
   fi
-  # 8. THE `published` EVENT, one instant for the record, the row and the debt.
-  _wt_proofs_put "$rec" "line/v1|ev=published|row=${row}|commit=${cand}|kind=${LINE_KIND}|by=${LINE_BY}|why=${LINE_WHY}|at=${at}"
+  # 8. THE `published` EVENT, one instant for the record, the row and the debt; the numbers commit, when
+  # one was made, beside the candidate it sits on.
+  _wt_proofs_put "$rec" "line/v1|ev=published|row=${row}|commit=${cand}|kind=${LINE_KIND}|by=${LINE_BY}|why=${LINE_WHY}${LINE_NUMBERS:+|numbers=${LINE_NUMBERS}}|at=${at}"
   _wt_proofs_append "$rec" "$row" "$br" "$com" "$cand" "" "$at"
   [ -z "$LINE_DEBT_ID" ] \
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
          "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$rec"
+  _line_cover "$plan" "$row" "$root" "$head" "$cand"
   # 9. THE PLAN WRITE (T6): the row's status, its `- T<n>:` line and its ledger line, in one
   # transaction, at the publish's own instant. A refusal now is after the publish: it is printed, with
   # what is owed by hand, and the publish stands.

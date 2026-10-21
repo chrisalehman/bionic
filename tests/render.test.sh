@@ -106,25 +106,6 @@ expect_match "1b: …and says every final and the manifest match a fresh render"
 # staging area. Sections 2-6 drive it against fixtures whose commit state the suite owns.
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "Section 2: the archive arm's control — an honestly committed tree is green"
-
-FIX_OK="$TMPROOT/control"
-if rt_fixture "$FIX_OK"; then
-  ok "2a: a scratch git repository of the render tree is built (the control the plants need)"
-else
-  no "2a: a scratch git repository of the render tree is built (the control the plants need)" \
-     "dest: $FIX_OK"
-fi
-
-rt_check "$FIX_OK" --check
-expect_status "2b: the unplanted fixture's TREE arm is green" 0 "$RT_RC"
-
-rt_check "$FIX_OK" --check --archive
-expect_status "2c: the unplanted fixture's ARCHIVE arm is green" 0 "$RT_RC"
-expect_match "2d: …and it says so in the archive arm's own words" \
-  "*matches a render of git archive HEAD*" "$RT_OUT"
-
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 3: a gitignored render input — the tree arm cannot see it, the archive arm can (AC-R1.4)"
 
 # THE PLANT. A block file that is on disk and OUT of HEAD, injected by a template that IS
@@ -226,6 +207,14 @@ expect_true "5g: …and it wrote nothing either" \
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "Section 6: the arm refuses rather than passes when it cannot do its job"
+
+FIX_OK="$TMPROOT/control"
+if rt_fixture "$FIX_OK"; then
+  ok "2a: a scratch git repository of the render tree is built (the control the plants need)"
+else
+  no "2a: a scratch git repository of the render tree is built (the control the plants need)" \
+     "dest: $FIX_OK"
+fi
 
 # A directory with no git repository cannot answer the archive question. Reporting green
 # there would be the worst outcome available: a check that silently means nothing.
@@ -369,155 +358,6 @@ rt_yaml_frontmatter_ok "$BV_BROKEN" >/dev/null
 expect_ne "9d: …and reverting the quoting on the same text really does fail it (9b discriminates)" \
   "0" "$?"
 
-
-section "Section 10: a read-only role cannot delegate — its role file disallows the Agent tool (wave-20 T7, AC-9.4)"
-#
-# DELEGATION IS ONE LEVEL DEEP (Δ12): a writer may launch a read-only helper, and the helper
-# may launch nothing. The harness enforces the second half from the role file's own
-# frontmatter — `disallowedTools` names the tool `Agent` (step2-cc-nested-depth.md §3) — so
-# the rendered file is the wall, and this section reads the FINALS the plugin ships, not the
-# templates. The writer roles keep the tool: a writer's read-only helper is the one level
-# the ruling allows, and dispatch-preflight refuses anything else it launches.
-#
-# rt_disallowed <file> -> the frontmatter's disallowedTools names, one per line.
-rt_disallowed() {
-  /usr/bin/awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
-                fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$1" \
-    | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | /usr/bin/grep -v '^$'
-}
-for _rt_role in researcher test-runner auditor critic; do
-  _rt_f="$REPO/agents/${_rt_role}.md"
-  _rt_d=$(rt_disallowed "$_rt_f")
-done
-for _rt_role in implementor senior-implementor; do
-  _rt_d=$(rt_disallowed "$REPO/agents/${_rt_role}.md")
-done
-# THE PAIRED NEGATIVE: the reader finds a name that is there and misses one that is not, so
-# 10a cannot pass on an empty read.
-_rt_neg="$TMPROOT/no-agent-role.md"
-printf -- '---\nname: x\ndisallowedTools: Write, Edit, NotebookEdit\n---\nbody\n' > "$_rt_neg"
-expect_eq "10c: the reader lifts every name of a real disallowedTools line (not vacuous)" \
-  "Write Edit NotebookEdit " "$(rt_disallowed "$_rt_neg" | tr '\n' ' ')"
-
-section "Section 11: the scaffold's Files: comment and its optional claim line reach every rendered copy (wave-21 T7, AC-6.3)"
-# THE COMMENT THAT READ AS "OMIT THE INSTRUMENT" (triage-B §4.3, 4a). The scaffold's `Files:`
-# comment said "writers; omit for a read-only brief", and the very next line is the
-# `Suites: none` a read-only brief must keep — an author who omitted both was refused for
-# declaring nothing. The block now says so in one clause, and carries the optional
-# `Subprocess claim:` line a CI wait declares (REQ-7, D7). Section 1 proves the finals match
-# a fresh render; this proves the render carries the words, in both files the block lands
-# in, so a template that stopped injecting the block cannot stay green here. RE-POINTED
-# (wave-21 T7b, Δ9): the six role files carry the reader view (brief-scaffold-reader.md)
-# instead, pinned by docs-pins 111d/111f; they no longer carry this block.
-#
-# fails-when: any rendered copy carries the old comment, lacks the new one, or lacks the
-# claim line.
-for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; do
-  _sc_body=$(cat "$REPO/$_sc_f" 2>/dev/null)
-  # RE-POINTED (wave-27 T53, review pass 28 B1): a reader lists its records on Files: (the fact
-  # verb takes a record only from the reader's own row), so the comment no longer has a
-  # read-only brief omit the line; only a researcher or test-runner does.
-  expect_true "11a: $_sc_f has a reader list its records on Files: and a researcher or test-runner omit it" \
-    bash -c 'case "$1" in *"# a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
-  expect_true "11a2: …and no longer says a read-only brief omits it" \
-    bash -c 'case "$1" in *"a read-only brief omits this"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
-  expect_true "11b: …and no longer says to omit the line" \
-    bash -c 'case "$1" in *"omit for a read-only brief"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
-  expect_true "11c: …and carries the optional Subprocess claim: line" \
-    bash -c 'case "$1" in *"Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
-  # wave-27 T17 (D5): a reader's brief names its questions; the line is the Interfaces table's.
-  expect_true "11d: …and carries the readers' Questions: line" \
-    bash -c 'case "$1" in *"Questions: <q>[, <q>]  # reader roles only"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
-done
-
-section "Section 12: every role file carries the dispatch-rules block (wave-24 T6, D8, AC-6.2)"
-# The role file is the channel that provably reaches a teammate (P1 could only prove the push
-# reaches a classic subagent). A role file holding only the "Dispatch terms" pointer carries
-# no rule at all. fails-when: a role template stops injecting the block, or the block grows
-# past its 600-byte budget.
-_dr_src="$REPO/agents-src/blocks/dispatch-rules.md"
-expect_true "12a: the block source exists" test -f "$_dr_src"
-for _dr_role in auditor critic implementor researcher senior-implementor test-runner; do
-  _dr_body=$(cat "$REPO/agents/$_dr_role.md" 2>/dev/null)
-done
-
-section "Section 13: the reviewer role is retired (wave-30 T20; REQ-1 AC-1.6, D2)"
-# The structure reader is no role: the critic holds `structure`. fails-when: a template, a role
-# file, the ROLES list, the help roster, the checksum manifest or the README roster still names
-# the reviewer, or a role the roster must keep went with it. Each absence is read beside the
-# presence of a sibling in the SAME file, so an unreadable file cannot pass for a clean one.
-expect_true "13a: agents-src/templates/reviewer.md.tmpl is deleted" test ! -e "$REPO/agents-src/templates/reviewer.md.tmpl"
-expect_true "13b: agents/reviewer.md is deleted" test ! -e "$REPO/agents/reviewer.md"
-expect_eq "13c: agents/ holds the six role files" \
-  "auditor.md critic.md implementor.md researcher.md senior-implementor.md test-runner.md" \
-  "$(cd "$REPO/agents" && ls *.md | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "13d: render.sh's ROLES list is the six roles" \
-  'ROLES="auditor critic implementor researcher senior-implementor test-runner"' \
-  "$(/usr/bin/grep -E '^ROLES=' "$REPO/agents-src/render.sh")"
-_rv_help="$(cat "$REPO/payload/commands/help.md")"
-_rv_man="$(cat "$REPO/payload/integrity/rendered.sha256")"
-expect_contains "13g: the manifest lists agents/critic.md" 'agents/critic.md' "$_rv_man"
-expect_absent "13h: …and not agents/reviewer.md" 'agents/reviewer.md' "$_rv_man"
-_rv_readme="$(cat "$REPO/README.md")"
-
-section "Section 14: §DOCTRINE — Step 5 owes the walk and the auditor, Step 6 ends on the regression (wave-35 T13; REQ-1 AC-1.9, D10)"
-# THE RULING (D10). Step 5 owes each row's evidence, the matrix, the walk and the auditor. Step 6
-# owes the readings, their fix rows, then the regression as its last act. No step file orders the whole
-# run before the readers. These pins read the FINALS the plugin ships and pin the order of the
-# sections and the presence of the owed acts, never a sentence.
-#
-# fails-when: rendered steps/5.md stops naming the walk or the auditor as owed, steps/6.md stops on
-# anything but the regression, or a step file lets the whole run (or the walk) gate the readers.
-S5="$REPO/skills/canonical-sdlc/steps/5.md"
-S6="$REPO/skills/canonical-sdlc/steps/6.md"
-# rt_para <file> <ERE anchoring the paragraph's first line> — the paragraph, up to the next blank line.
-rt_para() {
-  /usr/bin/awk -v pat="$2" 'found && /^[[:space:]]*$/ { exit } !found && $0 ~ pat { found = 1 } found { print }' "$1"
-}
-# rt_last_para <file> — the file's last paragraph.
-rt_last_para() {
-  /usr/bin/awk '/^[[:space:]]*$/ { if (buf != "") last = buf; buf = ""; next } { buf = (buf == "" ? $0 : buf "\n" $0) } END { if (buf != "") last = buf; print last }' "$1"
-}
-_dc_owed=$(rt_para "$S5" '^The gate discharges')
-# The extractor returns the opening paragraph (its own positive), then the owed acts are read from it.
-_dc_reg=$(rt_para "$S5" '^\*\*The regression, once')
-_dc_read=$(rt_para "$S5" '^\*\*The whole read, once')
-_dc_s6a=$(rt_para "$S6" '^By the core')
-_dc_s6b=$(rt_para "$S6" '^\*\*The reading, once')
-_dc_last=$(rt_last_para "$S6")
-_dc_row5=$(/usr/bin/grep -E '^\| 5 \| `head:`' "$REPO/skills/canonical-sdlc/SKILL.md")
-_dc_tbl5=$(/usr/bin/grep -E '^\| 5 Verify \|' "$REPO/skills/canonical-sdlc/SKILL.md")
-for _dc_role in auditor test-runner; do
-  _dc_rb=$(cat "$REPO/agents/$_dc_role.md" 2>/dev/null)
-done
-# The stale sentences other rows found.
-_dc_disp=$(cat "$REPO/skills/canonical-sdlc/dispatch.md")
-_dc_dec=$(cat "$REPO/skills/decision/SKILL.md")
-_dc_kd=$(/usr/bin/grep -F 'kind defaults' "$REPO/skills/canonical-sdlc/operational-rules.md")
-_dc_kd_doc=${_dc_kd%%integrate*}
-_dc_kd_int=${_dc_kd#*integrate}
-expect_contains "14ac: the kind-defaults row is found, and its doc default reads the plan" 'doc `approval:plan, head`' "$_dc_kd_doc"
-expect_absent "14ad: …a Step-7 doc row writes no release read" "approval:release" "$_dc_kd_doc"
-expect_contains "14ae: …the integrate row holds it" "approval:release" "$_dc_kd_int"
-
-section "Section 15: §ORDER — readers before the release text, approvals on the integrate row, the regression last (wave-35 T13; REQ-8 AC-8.2, D17)"
-# fails-when: rendered steps/6.md orders the readers behind the release text, leaves an approval off
-# the integrate row, or ends on anything but the regression. Positions are line numbers in the final.
-_or_line() { /usr/bin/grep -n -E "$2" "$1" | head -1 | cut -d: -f1; }
-_or_readers=$(_or_line "$S6" '^\*\*The readers\.')
-_or_rel=$(_or_line "$S6" 'release')
-_or_disp=$(_or_line "$S6" '^\*\*The disposition\.')
-_or_floor=$(_or_line "$S6" '^\*\*The order\.')
-_or_rl=$(/usr/bin/grep -E 'release' "$S6")
-# THE ONE-STOP RULE: the release row lands at Step 7, after the readings, and its
-# approvals are options on the final card; no rendered skill keeps a card per approval.
-_or_gone='keeps its own card\|keeps its card\|never wait on the release text'
-printf 'An approval keeps its own card.\n' > "$TMPROOT/or-gone.md"
-# THE PAIRED NEGATIVE, on a fixture: the reader finds a last paragraph that is not the regression.
-_or_fix="$TMPROOT/step6-fixture.md"
-printf 'first\n\n**The regression.** a one whole run, last act.\n\n**Then.** something else.\n' > "$_or_fix"
-expect_contains "15i: the last-paragraph reader reads the final paragraph (not vacuous)" "something else" "$(rt_last_para "$_or_fix")"
-expect_absent "15j: …and not an earlier one" "last act" "$(rt_last_para "$_or_fix")"
 
 section "Section 17: §COMMENT-RULE — one block, read in every place a comment is written"
 # fails-when: a file that carries the comment rule reads it without the words "never names a

@@ -134,34 +134,6 @@ RR_MARKS="$TMPROOT/marks"
 mkdir -p "$RR_MARKS"
 
 # ============================================================
-section "§1 the roster is the directory: every file in tests/ is a label (d)"
-# ============================================================
-#
-# NOT VACUOUS: the runner under drive is the shipped file, byte for byte — the
-# roster it reads is the one this repo ships, not a fixture of this suite's own.
-
-T1="$TMPROOT/t1"
-rr_tree "$T1"
-expect_eq "1.1 the scratch runner is the shipped one, byte for byte" "yes" \
-  "$(cmp -s "$RUNNER" "$T1/tests/run.sh" && echo yes || echo no)"
-
-for RR_N in alpha bravo charlie; do rr_stub "$T1" "$RR_N"; done
-rr_drive "$T1"
-
-expect_eq "1.2 the run is green over the three suites in the directory" "0" "$RR_RC"
-expect_contains "1.3 …and the tally counts three" "Gating: 3 passed, 0 failed" "$RR_OUT"
-expect_eq "1.4 the labels the runner printed ARE the glob, as a set" \
-  "$(rr_glob "$T1")" "$(rr_labels "$RR_OUT")"
-# PAIRED POSITIVE for 1.4: the set is not empty, so an equality of two empty
-# strings cannot be what passed it.
-expect_eq "1.5 …and that set has the three files in it (not two empty sets)" "3" \
-  "$(rr_labels "$RR_OUT" | grep -c .)"
-# Each suite really ran: a label is printed for a refused suite too, so the
-# markers are what separate "listed" from "launched".
-expect_eq "1.6 each of the three actually ran (its own marker)" "3" \
-  "$(ls "$RR_MARKS" 2>/dev/null | grep -c '\.ran$')"
-
-# ============================================================
 section "§2 a suite dropped into tests/ gates on the next invocation (a)"
 # ============================================================
 #
@@ -169,6 +141,11 @@ section "§2 a suite dropped into tests/ gates on the next invocation (a)"
 # new file in between and no edit anywhere: absent in the first run, present and
 # run in the second. Under the hand list the second run looked exactly like the
 # first, which is the silent false green this suite exists to close.
+
+T1="$TMPROOT/t1"
+rr_tree "$T1"
+for RR_N in alpha bravo charlie; do rr_stub "$T1" "$RR_N"; done
+rr_drive "$T1"
 
 expect_absent "2.1 before the drop, the new suite is not in the roster" \
   "delta.test.sh" "$RR_OUT"

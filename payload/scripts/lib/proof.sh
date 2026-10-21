@@ -1180,6 +1180,30 @@ $res
 PROOF_FOLD
 }
 
+# proof_whole_run_behind <plan> <root> <tree> <head> -> `<run head><TAB><log>` of the plan's first whole run that read a
+# commit strictly behind <head> on its history, exit 0; nothing and exit 1 when the record holds none. THE ONE FACT
+# BEHIND "the whole run comes once": a whole run is the verb's own run line (`ev=run`, a log named
+# `record/<run>/regression-run-<head>`, a clean tree) or a whole run's per-suite fact (`ev=verdict`, `kind=regression`,
+# keyed by the commit it ran at). A run line that any other command wrote (booked.sh books every gated command)
+# names another log and is not one, and a dirty run proves no commit. A run at <head> itself is not behind it; a
+# run on a history that does not hold <head> proves nothing here and is passed over.
+proof_whole_run_behind() {
+  local plan="${1:-}" root="${2:-}" tree="${3:-}" head="${4:-}" rec h log
+  rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" && [ -f "$rec" ] && _proof_fields || return 1
+  head="$(git -C "$tree" rev-parse --verify -q "${head}^{commit}" 2>/dev/null)" || return 1
+  while IFS='	' read -r h log; do
+    [ -n "$h" ] && [ "$h" != "$head" ] || continue
+    git -C "$tree" merge-base --is-ancestor "$h" "$head" 2>/dev/null || continue
+    printf '%s\t%s' "$h" "$log"
+    return 0
+  done <<PROOF_WHOLE_BEHIND
+$(awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_ev() == "run" && line_kv("dirty") == 0 && index(line_kv("log"), "record/") == 1 && index(line_kv("log"), "/regression-run-") { print line_kv("head") "\t" line_kv("log") }
+    line_ev() == "verdict" && line_kv("kind") == "regression" && line_kv("commit") != "" { print line_kv("commit") "\t" line_kv("log") }' "$rec" 2>/dev/null)
+PROOF_WHOLE_BEHIND
+  return 1
+}
+
 # _proof_floor_log <evidence> <working head> <checkout> [<plan>] [<root>] -> the 40-hex head the log read, exit 0;
 # or exit 1 with the refusal's sentence (wave-36 T35; D13, AC-7.10; the synth-vision filing). THE FLOOR'S ONE
 # GRAMMAR. What a project's regression is belongs to the project; the judge asks only that a run of it read a
@@ -1231,8 +1255,8 @@ PROOF_LOG_OWED
       case $? in
         0|2) printf '%s' "$sha"; return 0 ;;
       esac
-      printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s; land the suites it lacks there, or run the whole at %.12s and cite that log' \
-        "$ev" "$sha" "$head" "$why" "$head"
+      printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s; land the suites it lacks there' \
+        "$ev" "$sha" "$head" "$why"
       return 1
     fi
     printf 'the run in %s read head %.12s, and the working branch is at %.12s: a whole run is owed at %.12s; run it there and cite that log' \
@@ -1668,8 +1692,16 @@ _proof_roots_load() {
 #                              is the working head judged, which the full-run wall names
 #     owed<TAB><suites>        the proof names the working head, and these suites its whole run left red,
 #                              comma-joined file names
-#     uncovered<TAB><reason>   anything else, the reason in words: a whole run owed, naming the head the
-#                              last one read and the working head, or the question that could not be answered
+#     uncovered<TAB><reason>   anything else, the reason in words: the first commit past the last whole run that
+#                              no landing proves, the head that run read when it is not on this history, or the
+#                              question that could not be answered; it never offers a second whole run
+#
+# THE READBACK A WALK READS IS THIS ANSWER CUT TO A LOG, so it is read as a fact and not recalled. The log holds the
+# command that reaches the judge (`bash -c '. lib/proof.sh && proof_state <plan> <tree>'`; a verb that refuses before
+# it asks the judge, as `current N --check` does on an unfinished matrix, is not a readback), the command's output,
+# and `rc=<n>` as its last line. The first field of the output is `covered` at the working head, or `uncovered`
+# naming a commit; no line of it offers a whole run. A log missing any of the three, or one whose first field is
+# anything else, is refused as no readback.
 #
 # (wave-26 T5; REQ-3, D6.) THE ONE PLACE THAT RUNS GIT FOR THE FLOOR'S STATE. The dispatch wall asks
 # this and judges nothing itself. <tree> is the project root: its repository holds the working branch,
@@ -1770,7 +1802,7 @@ _proof_floor_judge() {
 # at the commit it ran at, or at the row head a merge commit brought in as its second parent.
 # CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" files="" c f cls
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" files="" c f isdoc isrel
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -1781,10 +1813,12 @@ _proof_past_f() {
   case "${droot:-}" in "$top"/?*) pfx="${droot#"$top"/}"; pfx="${pfx%/}/" ;; esac
   while IFS= read -r f; do
     case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
-    cls=code
-    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then cls=doc
-    elif _proof_release_path "$f"; then cls=rel; fi
-    files="$files${files:+$'\n'}C	$c	$cls"
+    # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
+    # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
+    isdoc=0; isrel=0
+    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then isdoc=1; fi
+    ! _proof_release_path "$f" || isrel=1
+    files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
   done <<PROOF_PAST_FILES
 $(git -C "$tree" log --no-renames --first-parent -m --name-only --format='%x01%H' "$from..$to" 2>/dev/null)
 PROOF_PAST_FILES
@@ -1799,7 +1833,7 @@ PROOF_PAST_FILES
       if ($6 == "verdict") { if (!(k in vat) || $2 >= vat[k]) { vat[k] = $2; vres[k] = $5 }; vs[$3] = vs[$3] "," $4 }
       next
     }
-    $1 == "C" { touched[$2] = 1; if ($3 != "doc") nondoc[$2] = 1; if ($3 != "rel") notrel[$2] = 1; next }
+    $1 == "C" { touched[$2] = 1; if ($3 != 1) nondoc[$2] = 1; if ($4 != 1) notrel[$2] = 1; next }
     function at(c, q, s,   r) { r = ""; if ((c SUBSEP s) in rat) { r = rres[c, s]; w = rat[c, s] }
       if (q != "" && (q SUBSEP s) in rat && (r == "" || rat[q, s] >= w)) r = rres[q, s]; return r }
     END {
@@ -2564,6 +2598,28 @@ facts_cover() {
   fixed="$(proof_fixed "$plan" "$tree")"
   _facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" "$(_facts_born_landings "$plan" "$tree" "$fixed")" "${4:-}" \
     "$(proof_check_passes "$plan" "$tree")"
+}
+
+# proof_door_cover <tree> <from> <candidate> -> THE JUDGE'S BASIS OF A CANDIDATE AT ITS DOOR: `release`, `prose`, or
+# `owes`, a tab, and each path the range touched outside the release set, comma-joined, read by the walk facts_cover
+# reads, over <from>..<candidate>, with the check that has just passed at the door taken as passing at <candidate>.
+# A release row's merge first exists at its landing, before any release check line names it, so this is the one
+# place a path the set lacks can be named before the judge reads the release as owing. Exit 1, nothing printed, when
+# the range cannot be read or holds no commit.
+proof_door_cover() {
+  local tree="${1:-}" from="${2:-}" c b f out=""
+  c="$(git -C "$tree" rev-parse --verify -q "${3:-}^{commit}" 2>/dev/null)" || return 1
+  _proof_roots_load
+  b="$(_facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$from" "$c" "" "" "$c" \
+    | awk '$3 == "owes" { o = 1 } $3 == "release" { r = 1 } NF { n = 1 } END { if (n) print (o ? "owes" : (r ? "release" : "prose")) }')"
+  [ -n "$b" ] || return 1
+  [ "$b" = owes ] || { printf '%s\n' "$b"; return 0; }
+  while IFS= read -r f; do
+    [ -z "$f" ] || _proof_release_path "$f" || case ",$out," in *",$f,"*) ;; *) out="${out:+$out,}$f" ;; esac
+  done <<PROOF_DOOR_COVER
+$(git -C "$tree" log --first-parent -m --no-renames --name-only --format= "$from..$c" 2>/dev/null)
+PROOF_DOOR_COVER
+  printf 'owes\t%s\n' "$out"
 }
 
 

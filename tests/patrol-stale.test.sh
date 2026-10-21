@@ -53,58 +53,6 @@ sourced() {  # <fn-or-expr...> — run against a clean copy of patrol.sh's globa
   bash -c '. "$1"; shift; "$@"' _ "$PATROL_SH" "$@" 2>/dev/null
 }
 
-section "Section 1: the multiplier is gone, and the predicate that replaced it works"
-
-# THE RETIREMENT IS COMPLETE AT THIS HEAD (epic-23 wave-16, T9 commit 33d3d12, re-authored
-# here by T22). This section used to pin the opposite: the export OUTLIVED its last reader by
-# one task, deliberately, because deleting the definition before the readers moved would have
-# left a head reading an unset name under `set -u` (A-orch-6, A-orch-12). Both halves have
-# landed now — T8 moved the last stamp-grading readers onto `patrol_verdict`, T9 deleted the
-# `export` line — so the state this section must assert has INVERTED, and rows 1 and 1b say
-# so. The rows below were measured green in a tree that still carried the export (T8's 18/18,
-# per A-orch-6's own revert), which is why their staleness only surfaced at the wave head's
-# floor; the pins follow the code rather than the order the tasks were written in.
-SP="${BIONIC_HOOKS_DIR}/session-poker.sh"
-DP="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
-SS="${BIONIC_HOOKS_DIR}/session-start.sh"
-DOC="${REPO}/payload/scripts/doctor.sh"
-STOP_SH="${REPO}/payload/scripts/lib/stop.sh"
-
-# A READER, NOT A MENTION. Comment lines are excluded because this library and the stop
-# library both narrate the retirement in prose, and a row that counted narration would be a
-# row against the history rather than against the code.
-stale_lines() {  # <file> -> the number of non-comment lines naming the constant
-  local n
-  n="$(grep -cE '^[[:space:]]*[^#[:space:]].*PATROL_STALE_MULTIPLIER' "$1" 2>/dev/null || true)"
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
-}
-
-# THE LIBRARY HOLDS NEITHER THE DEFINITION NOR A READER: the name is gone from this file
-# entirely, narration included, and the export line in particular is gone.
-
-# THE POSITIVE THAT KEEPS THAT ABSENCE FROM BEING VACUOUS. An absence row passes over a file
-# that was emptied, renamed or broken as readily as over one that was correctly retired, so
-# the two rows above are paired with the thing that REPLACED the constant — and paired by
-# EXERCISING it, not by grepping for its name, because a grep would pass on a definition that
-# no longer runs. `patrol_fire_window` is the arithmetic the multiplier used to carry and
-# `patrol_verdict` is the predicate that reads it; both are called here against a clean
-# sourced copy of the library under test. 1c drives the window on a real interval and checks
-# it against the formula's own terms rather than a number typed here; 1d drives the verdict
-# on a stamp path that does not exist, which is the one branch that needs no fixture, and
-# reads back the record shape every caller parses.
-PS_IV=1200
-expect_eq "1c: …because patrol_fire_window computes that window instead, and runs" \
-  "$(( PS_IV + PS_IV / 10 ))" "$(sourced patrol_fire_window "$PS_IV")"
-expect_eq "1d: …and patrol_verdict runs and answers in the record shape its callers read" \
-  "yes" \
-  "$(printf '%s' "$(sourced patrol_verdict "$TMP/no-such-stamp" "$TMP/no-such-transcript" "$PS_IV")" \
-     | grep -qE '^verdict=[a-z]+\|ref=[0-9]+\|gap=[0-9]+\|window=[0-9]+\|reason=' && echo yes || echo no)"
-
-# AND EVERY READER THAT GRADES A STAMP IS OFF IT. Four files, one row each side of the
-# blocking/reporting divide: the doctor's reading and the banner moved at wave-16, the
-# dispatch wall and the stop library at wave-15.
-
 section "Section 2: patrol_stamp_state measures against the fire window"
 
 # No hooks/session-poker.sh beside this fixture repo, so patrol_interval falls
@@ -136,6 +84,9 @@ section "Section 3: every reader of \"how stale is stale\" calls the predicate"
 # COUNTED AS A CALL, NEVER AS A MENTION: this file DEFINES `patrol_verdict`, so a bare
 # containment row here would pass on the definition alone and prove nothing about the
 # reading. `$(patrol_verdict ` is the call, and `patrol_stamp_state` is its one site.
+DP="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
+SS="${BIONIC_HOOKS_DIR}/session-start.sh"
+
 expect_eq "8: …and it thresholds on the library's fire window" "yes" \
   "$(grep -qF 'patrol_fire_window' "$PATROL_SH" && echo yes || echo no)"
 expect_eq "9: the session-start banner asks the same predicate" "yes" \

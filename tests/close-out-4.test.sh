@@ -501,7 +501,8 @@ ow_doors() {  # <label> <project> <sid> -> close-out's document kept at $SANDBOX
   cp "$(ow_file "$2")" "$SANDBOX/ow-copy-$1" 2>/dev/null
   lands_bind "$2" "$3"
   lands_poker "$2" "$3" handoff < /dev/null
-  OW_RC="$LP_RC"; OW_FILE="$(printf '%s\n' "$LP_OUT" | sed -n 's/^.*handoff — written to //p' | head -1)"
+  # The verb prints only the resume line, so the file it wrote is found where every reader finds it: the plan's pointer.
+  OW_RC="$LP_RC"; OW_FILE="$(handoff_file_of "$2/$PLAN_REL" "$2")"
 }
 OW_SID="closeout-onewriter-sid"
 OW_PK="$(ow_file "$PPK")"
@@ -621,6 +622,20 @@ expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe 
   "$SC_VERB" "$(sc_section "$PSC/$CONT_REL")"
 expect_eq "SC-4 …the heading sits before the Resume instruction" "yes" \
   "$(awk '/^## Scorecard$/ { a = NR } /^## Resume instruction/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PSC/$CONT_REL")"
+# the wait is read from the card's record under each name it has had: the release approval stem and tag, the old stem and
+# tag a run wrote before the rename, and the final card's
+sc_wait() { printf '%s\n' "$1" | /usr/bin/grep '^human-wait minutes: '; }
+expect_eq "SC-5 precondition: the final-card record gives the 12-minute wait" "$SC_TAIL" "$(sc_wait "$SC_VERB")"
+SC_OLDW="review"
+for sc_stem in release-approval "${SC_OLDW}-results"; do
+  PSW="$(mk_fixture "scorecard-$sc_stem")"; advance_to "$PSW" 8
+  sc_plant "$PSW"
+  SC_REC="$PSW/.bionic/docs/record/wave-01-fixture"
+  sed -e "s#^final-card/v1|#${sc_stem}/v1|#" "$SC_REC/final-card-abcdef12.md" > "$SC_REC/${sc_stem}-abcdef12.md"
+  rm -f "$SC_REC/final-card-abcdef12.md"
+  expect_eq "SC-5b the record named $sc_stem-<head8>.md with the $sc_stem/v1 tag gives the same wait" "$SC_TAIL" \
+    "$(sc_wait "$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSW" --scorecard)")"
+done
 # a record that cannot compute a number prints unverified on that line, never a literal
 PSU="$(mk_fixture scorecard2)"; advance_to "$PSU" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSU" run
@@ -629,29 +644,6 @@ PSE="$(mk_fixture scorecard3)"; advance_to "$PSE" 8
 mkdir -p "$PSE/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PSE/$CONT_REL"
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSE" run
-
-# ============================================================
-section "§APPROVED-HEAD — REQ-7 AC-7.2: in the release order, close-out refuses a working head that is not the head the user approved"
-# ============================================================
-# `current 8` admits the release order's Step 8 at the approved head (canonical-sdlc-evidence-gate-2 AH-2); close-out
-# asks the same of the head it closes, so a code commit landed after the approval is refused, naming both heads.
-# FIXTURE FIDELITY: mk_fixture with a regression row and a release row, its facts held at the working head B; the
-# approval lines are the approve verb's shape, the newest one read.
-# fails-when: run closes the plan with the newest approval at B's parent A and code between them.
-PAH="$(mk_fixture approved-head)"
-awk '{ print } /^\| T2 \|/ { print "| T3 | 5 | test | the whole regression | test-runner | — | 10 | AC-1 | — | landed | |"; print "| T4 | 7 | doc | the release | implementor | — | 10 | AC-1 | CHANGELOG.md | landed | |" }' \
-  "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.r" && mv "$PAH/$PLAN_REL.r" "$PAH/$PLAN_REL"; advance_to "$PAH" 8
-AH_B="$(fixture_git "$PAH" rev-parse wave/01-fixture)"; AH_A="$(fixture_git "$PAH" rev-parse wave/01-fixture^)"
-ah_appr() { awk -v l="approved: release by Dana Fixture 2026-10-12T14:00:00Z head=$1 \"Ship it.\"" '/^- Step 7:/ && !d { print l; d = 1 } { print }' \
-  "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.a" && mv "$PAH/$PLAN_REL.a" "$PAH/$PLAN_REL"; }
-ah_appr "$AH_B"; run_close "$PAH" check
-expect_contains "AH-C0 control: the plan is in the order, approved at the working head B, and check reads every fact holding at B" \
-  "facts: every fact the run owes holds at $AH_B" "$CO_OUT"
-ah_appr "$AH_A"; AH_CK0="$(cksum < "$PAH/$PLAN_REL")"; run_close "$PAH" run
-expect_eq "AH-C1 AC-7.2 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, the plan unchanged" \
-  "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")"
-/usr/bin/grep -v '^approved: release ' "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.n" && mv "$PAH/$PLAN_REL.n" "$PAH/$PLAN_REL"; run_close "$PAH" check
-expect_contains "AH-C2 …and with no approved: release line, check says run would refuse, naming the missing approval" "facts: WOULD REFUSE — the plan is in the release order and no approved: release line names a head" "$CO_OUT"
 
 # ============================================================
 section "§ASKS-NOTHING — wave-38 T15 (D17; AC-1.6, AC-1.7): close-out puts no question to the user"

@@ -12,7 +12,7 @@
 # line. There is no safe-to-clear line: the source session is disposable. Bound, the plan's `## Handoff` points at
 # the file and the last line is `/bionic:canonical-sdlc <path>`; with no run, it says to read the file and do Next 1.
 #
-# Sections: §NO-RUN §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §BRANCH-AGREE §POINTER-AGREE.
+# Sections: §NO-RUN §ONE-LINE §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §POINTER-AGREE.
 #
 # FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`), one
 # repository per world; a no-run world is a bare `git init` with no bionic folder at all. A running process is a
@@ -215,10 +215,10 @@ expect_true "N2b …so git ignores the handoff" git -C "$HF_NR" check-ignore -q 
 HF_NR_ST="$(git -C "$HF_NR" status --porcelain)"
 expect_contains "N2c precondition: git status lists the project's own change" "a.txt" "$HF_NR_ST"
 expect_absent "N2d …and nothing of the bionic folder (N2c read the same status)" ".bionic" "$HF_NR_ST"
-expect_contains "N3 it says what it wrote" "handoff — written to $(cd "$HF_NR" && pwd -P)/$HF_HOME/2026-10-06-$HF_NR_BR.md" "$OUT"
+expect_absent "N3 it prints no line naming the file it wrote (N3b reads the resume line through the same output)" "written to" "$OUT"
 expect_eq "N3b …the last line says how to resume with no run: read the file, then Next 1" \
   "Read $HF_HOME/2026-10-06-$HF_NR_BR.md whole, then do Next 1." "$(tail -1 "$HF_NR_F")"
-expect_eq "N3c …and prints only the path and the resume line" "2|$(tail -1 "$HF_NR_F")" \
+expect_eq "N3c …and prints only the resume line" "1|$(tail -1 "$HF_NR_F")" \
   "$(printf '%s\n' "$OUT" | grep -c . | tr -d ' ')|$(printf '%s\n' "$OUT" | tail -1)"
 rm -rf "$HF_NR/.bionic"
 hf_poke "$HF_NR" "$HF_C" handoff
@@ -234,6 +234,51 @@ expect_true "N5c …the file is written" test -s "$HF_EU_F"
 expect_true "N6 a bionic folder git does not ignore: the handoffs folder gets its own ignore file, so the file is ignored" \
   git -C "$HF_EU" check-ignore -q "$HF_EU_F"
 expect_eq "N6b …the literal *" "*" "$(cat "$HF_EU/$HF_HOME/.gitignore" 2>/dev/null)"
+
+# ============================================================
+section "§ONE-LINE: on success the verb prints the resume line alone and nothing on stderr; the handoff skill ends on that line in a fence and quotes nothing"
+# ============================================================
+# A reader sees one line. The verb's stdout and stderr are captured apart here, so a second line on either stream is
+# caught where hf_poke's merged capture would only count it.
+hf_split() {  # <repo> <stdin file> <args...> -> OL_OUT, OL_ERR, OL_RC: the poker's stdout and stderr, apart
+  local repo="$1" in="$2"; shift 2
+  OL_OUT="$( cd "$repo" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" < "$in" 2> "$TMPROOT/hf-ol.err" )"; OL_RC=$?
+  OL_ERR="$(cat "$TMPROOT/hf-ol.err")"
+}
+hf_world one-line no
+hf_split "$HF_R" "$HF_C" handoff
+expect_eq "OL-1 bound: the verb exits 0 and its stdout is exactly the resume line, the file's last line, with nothing on stderr" \
+  "0|/bionic:canonical-sdlc $HF_DOOR|" "$OL_RC|$OL_OUT|$OL_ERR"
+expect_eq "OL-1b …the line is the written file's last line (the read is not empty)" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
+expect_eq "OL-1c …and stdout holds that one line only" "1" "$(printf '%s\n' "$OL_OUT" | grep -c . | tr -d ' ')"
+HF_OL_NR="$TMPROOT/hf-ol-norun"; mkdir -p "$HF_OL_NR"
+( cd "$HF_OL_NR" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
+  && printf 'one\n' > a.txt && git add a.txt && git commit -qm "the first file" )
+HF_OL_BR="$(git -C "$HF_OL_NR" symbolic-ref --short HEAD)"
+HF_OL_F="$HF_OL_NR/$HF_HOME/2026-10-06-$HF_OL_BR.md"
+hf_split "$HF_OL_NR" "$HF_C" handoff
+expect_eq "OL-2 unbound: stdout is exactly Read <path> whole, then do Next 1., with nothing on stderr" \
+  "0|Read $HF_HOME/2026-10-06-$HF_OL_BR.md whole, then do Next 1.|" "$OL_RC|$OL_OUT|$OL_ERR"
+expect_eq "OL-2b …the line is the written file's last line (the read is not empty)" \
+  "Read $HF_HOME/2026-10-06-$HF_OL_BR.md whole, then do Next 1." "$(tail -1 "$HF_OL_F")"
+expect_eq "OL-2c …and stdout holds that one line only" "1" "$(printf '%s\n' "$OL_OUT" | grep -c . | tr -d ' ')"
+# The skill is read where it ships: the real file, which payload/skills/handoff links to.
+OL_SKILL="${BIONIC_HOOKS_DIR}/../skills/handoff/SKILL.md"
+# ol_last_step <skill> -> the lines of the last numbered step under ## The steps, up to the next heading.
+ol_last_step() {
+  awk '/^## The steps/ { s = 1; next } s && /^## / { exit } s && /^[0-9]+\. / { buf = ""; } s { buf = buf $0 "\n" } END { printf "%s", buf }' "$1"
+}
+# ol_fence_body <text on stdin> -> the lines inside the first fenced block.
+ol_fence_body() { awk '/^[ \t]*```/ { f = !f; if (!f) exit; next } f { print }'; }
+expect_true "OL-3 precondition: the skill is read and holds its steps" /usr/bin/grep -q '^## The steps' "$OL_SKILL"
+expect_eq "OL-3 no step tells the model to quote the verb" "0" "$(/usr/bin/grep -c 'Quote the verb' "$OL_SKILL")"
+expect_eq "OL-3b …nor names the written-to line the verb no longer prints" "0" "$(/usr/bin/grep -c 'written to' "$OL_SKILL")"
+OL_LASTSTEP="$(ol_last_step "$OL_SKILL")"
+expect_contains "OL-3c precondition: the last step is read (it is the one that ends the session)" "/bionic:canonical-sdlc" "$OL_LASTSTEP"
+expect_eq "OL-3d the last step ends on a fenced block holding the resume line" "/bionic:canonical-sdlc <path>" \
+  "$(printf '%s' "$OL_LASTSTEP" | ol_fence_body | /usr/bin/grep -F '/bionic:canonical-sdlc' | sed 's/^[[:space:]]*//' | head -1)"
+expect_eq "OL-3e …and the step's last non-blank line closes that fence" '```' "$(printf '%s' "$OL_LASTSTEP" | /usr/bin/grep . | tail -1 | tr -d ' ')"
+
 
 # ============================================================
 section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; the page folds at 92 columns"
@@ -367,8 +412,8 @@ expect_eq "PT4d …the rest of the plan is as it was" "$(hf_outside "$TMPROOT/s4
 hf_world pointer-refused no
 rm -f "$HF_R/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
 hf_poke "$HF_R" "$HF_C" handoff
-expect_eq "PT5 a plan the gate refuses: exit 0, the document written whole, one line saying the pointer was not written, the plan unchanged" \
-  "0|$HF_HEADS|/bionic:canonical-sdlc $HF_DOOR|3|yes|yes" \
+expect_eq "PT5 a plan the gate refuses: exit 0, the document written whole, the resume line then one line saying the pointer was not written, the plan unchanged" \
+  "0|$HF_HEADS|/bionic:canonical-sdlc $HF_DOOR|2|yes|yes" \
   "$RC|$(hf_heads "$HF_F")|$(tail -1 "$HF_F")|$(printf '%s\n' "$OUT" | grep -c . | tr -d ' ')|$(printf '%s\n' "$OUT" | tail -1 | grep -q "pointer was not written" && echo yes || echo no)|$(cmp -s "$TMPROOT/s42-before" "$HF_P" && echo yes || echo no)"
 
 # ============================================================
@@ -614,26 +659,6 @@ expect_eq "RX5b ls payload/commands payload/skills has no resume" "0" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
 
 # ============================================================
-section "§BRANCH-AGREE: one reader of the integration branch, lib/plan.sh plan_integration_branch; the verb and close-out name one branch, ## SDLC State's before the frontmatter's"
-# ============================================================
-# Each door is asked on one plan whose frontmatter names `trunk` and whose ## SDLC State names `mainline`, a real
-# branch at trunk's head: the verb's `integration:` line, close-out `check`'s merge verdict and its `closed-form`
-# branch line. fails-when: a door names the frontmatter's branch while ## SDLC State names another.
-hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
-hf_world branch-agree no
-git -C "$HF_R" branch -f mainline trunk
-awk '/^## SDLC State/ { s = 1 } s && /^current:/ { print "integration-branch: mainline"; s = 0 } { print }' "$HF_P" > "$HF_P.ba" \
-  && mv "$HF_P.ba" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
-expect_eq "BR0 precondition: the frontmatter names trunk, ## SDLC State mainline, both branches" "trunk|mainline|yes" \
-  "$(awk 'NR > 1 && /^---$/ { exit } sub(/^integration-branch: /, "")' "$HF_P")|$(sed -n '/^## SDLC State/,/^## Tasks/s/^integration-branch: //p' "$HF_P")|$(git -C "$HF_R" rev-parse -q --verify refs/heads/mainline >/dev/null && echo yes || echo no)"
-poke "$HF_R" handoff
-expect_eq "BR1 the verb exits 0" "0" "$RC"
-expect_eq "BR1b the verb's integration line, close-out check's merge verdict and its closed-form branch line name one branch, ## SDLC State's" \
-  "mainline|mainline|mainline" \
-  "$(sed -n 's/^integration: \([^ ]*\) @ .*$/\1/p' "$HF_F")|$(hf_co check | sed -n 's/^merge: .* from \([^ ]*\) @ .*$/\1/p')|$(hf_co closed-form | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
-
-# ============================================================
 section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh handoff_file_of; with no pointer the default is today's handoffs file; a tab-led heading reads alike to close-out and the verb"
 # ============================================================
 # Each door is asked on one plan: close-out `check` names the file its closed form would be written to; the verb
@@ -641,6 +666,8 @@ section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh h
 # branch as Step 0 writes it, so check reads the plan through; the pointer moved by hand to an older file, then its
 # heading re-spelled with a tab after `##`, as an editor leaves it. fails-when: a door reads the tab-led heading as
 # no pointer.
+hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
+
 pa_check_file() {  # -> the file close-out check says its closed form would be written to
   hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the plan.*$/\1/p'
 }

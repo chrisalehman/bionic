@@ -216,7 +216,7 @@ DELIVER_FILES
 # its fast-forward and then calls this verb, so a hand landing through `land --by-hand` meets it twice; the second
 # run sees the whole release range, which the first did not. Exits on a refusal; returns when the mark may be written.
 row_landed_scan() {
-  local cmd wb co p out rc
+  local cmd wb co p out rc scan n
   cmd="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
   [ -n "$cmd" ] || return 0
   if ! { declare -F proof_check_passes >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -231,9 +231,32 @@ row_landed_scan() {
     die "REFUSED — row-landed --by-hand: $RL_COMMIT is no commit in $co, so the declared release-check has nothing to run over; the plan is unchanged."
     exit 1
   fi
+  # WHICH COPY JUDGES. The scan runs in the checkout after the landing, so it reads the landed copy of the check; a
+  # passing proof at a commit that holds this one read a copy past it too. When this landing's own range (its
+  # commit's first parent to the commit) changes a file of the check's closure, that copy is the candidate's, not the
+  # target's the door ran before the merge: the row's line says which, so a copy change is never silent.
+  RL_JUDGED=target
+  if p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^1" 2>/dev/null)" \
+     && _wt_check_judge "$co" "$p" "$RL_COMMIT" "$cmd" >/dev/null 2>&1; then
+    RL_JUDGED=candidate
+  fi
+  # A LANDING PAST THE RELEASE IS JUDGED AT ITS NUMBERS. The line publishes such a landing with the release numbers
+  # rendered again in a commit on its candidate (lib/line.sh `_line_numbers`) and moves the branch to that commit;
+  # the candidate alone still carries the numbers rendered before it, which the check rightly refuses as landed after
+  # them. So when the record's published line for this row and commit names a numbers commit whose parent is the
+  # commit, the scan runs to that commit. The row's line and the landing's record keep the commit itself.
+  scan="$RL_COMMIT"
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" 2>/dev/null)"
+  n="$(awk -F'|' -v r="$PV_ID" -v c="$p" "${_LINE_FIELDS_AWK:-}"'
+    line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c && line_kv("numbers") != "" { n = line_kv("numbers") }
+    END { print n }' "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" 2>/dev/null)"
+  if [ -n "$n" ] && [ -n "$p" ] && [ "$(git -C "$co" rev-parse --verify -q "$n^1" 2>/dev/null)" = "$p" ]; then
+    scan="$n"
+  fi
   for p in $(proof_check_passes "$PV_PLAN" "$co"); do
-    if git -C "$co" merge-base --is-ancestor "$RL_COMMIT" "$p" 2>/dev/null; then
-      say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
+    if git -C "$co" merge-base --is-ancestor "$scan" "$p" 2>/dev/null; then
+      say "row-landed — release-check: ${scan:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
       return 0
     fi
   done
@@ -241,21 +264,22 @@ row_landed_scan() {
     die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) has no range to run over: no tag reachable from the plan's integration-branch (${RB_IB:-none named}) is a proper ancestor of $RL_COMMIT and its base-sha (${RB_BS:-none}) is no commit here; name the last release as the plan's base-sha, or tag it. The plan is unchanged."
     exit 1
   fi
-  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$RL_COMMIT" 2>/dev/null)" = 0 ]; then
+  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$scan" 2>/dev/null)" = 0 ]; then
+    RL_JUDGED=""
     say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
     return 0
   fi
   out="$(cd "$co" 2>/dev/null || exit 1
     set -f
-    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$RL_COMMIT" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
+    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$scan" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
     # shellcheck disable=SC2086  # the configured command is meant to split on blanks
     exec $cmd </dev/null 2>&1)"; rc=$?
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out"
-    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) exited $rc over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${RL_COMMIT:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")), judged-by=$RL_JUDGED, exited $rc over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${scan:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
     exit 1
   fi
-  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM)."
+  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), judged-by=$RL_JUDGED."
   return 0
 }
 # ---------------------------------------------------------------- the run's numbers
@@ -510,8 +534,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  `plan=none`, is not this run's). The roster lives in `.bionic/tmp`, which close-out's act 3 wipes,
 #                  so close-out reads this line BEFORE the wipe and carries it.
 #   waivers        the plan's `waived: question=…` line under `## SDLC State` (`waive`) and an AC block's indented
-#                  `waiver: <who> <YYYY-MM-DD> "<words>"` under `## Verification Matrix` (`waive-row`). Fenced text is
-#                  skipped, as every reader of the plan skips it.
+#                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
+#                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
+#                  reader of the plan skips it.
 #   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
 #                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
@@ -521,29 +546,66 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #   fixed          the plan's `moved: <record>#<n> to=fixed row=<T> …` line under `## SDLC State` (`finding-move …
 #                  fixed`, wave-36 T8), one per line (wave-36 T14; AC-7.6). A verb act: never counted as by-hand.
 #
+# THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
+# and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
+# put on it: the landing record's `at=`, the fill ledger's `at=`, the leading ISO of a roster `amended=`, `held=` or
+# `extended=` value, the ISO on a `waived:` line, a `moved:` or regression proof line's `at=`, and the matrix waiver's
+# time. A waiver of the date form is placed when its whole day falls on one side of each end. A line that cannot be
+# placed (an adoption row carries no time of the adopt; a date form a window end falls inside) is not counted, and with
+# either end set the line ends ` · unplaced=<n>`, so a windowed count never hides what it left out. With no end set
+# every line counts and the line keeps its open shape, so a run with no window reads as it always has.
+#
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
-# continuation (and a person).
-hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-holds line; rc 0
+# continuation, the release approval page and the goal that names landing-report (and a person).
+_HH_PLACE_AWK='
+  function hh_iso(t) { return t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z$/ }
+  function hh_day(t) { return t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ }
+  function hh_norm(t) { return (hh_iso(t) && length(t) == 17) ? substr(t, 1, 16) ":00Z" : t }
+  function hh_first(s,   n, w, i) { n = split(s, w, /[ \t]+/); for (i = 1; i <= n; i++) if (hh_iso(w[i]) || hh_day(w[i])) return w[i]; return "" }
+  function hh_at(s,   n, w, i) { n = split(s, w, /[ \t|]+/); for (i = 1; i <= n; i++) if (index(w[i], "at=") == 1) return substr(w[i], 4); return "" }
+  # 1 inside the window, 0 outside it, -1 not placeable; HH_S and HH_U are the ends, empty when open
+  function hh_place(t,   a, b) {
+    if (HH_S == "" && HH_U == "") return 1
+    if (hh_iso(t)) { t = hh_norm(t); return ((HH_S == "" || t > HH_S) && (HH_U == "" || t <= HH_U)) ? 1 : 0 }
+    if (hh_day(t)) {
+      a = t "T00:00:00Z"; b = t "T23:59:59Z"
+      if ((HH_S != "" && b <= HH_S) || (HH_U != "" && a > HH_U)) return 0
+      return ((HH_S == "" || a > HH_S) && (HH_U == "" || b <= HH_U)) ? 1 : -1
+    }
+    return -1
+  }
+  function hh_take(t,   p) { p = hh_place(t); if (p < 0) HH_UNPLACED++; return p > 0 }
+  BEGIN { HH_S = hh_norm(HH_S); HH_U = hh_norm(HH_U) }
+'
+hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
+  local since="" until="" u1=0 u2=0 u3=0 u4=0
+  shift 3
+  while [ $# -ge 2 ]; do
+    case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
+    shift 2
+  done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
-    read -r hand stp <<< "$(awk -F'|' "${_LINE_FIELDS_AWK:-}"'
+    read -r hand stp u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       { ev = line_ev() }
-      ev == "published" && line_kv("kind") == "hand" { n++ }
-      ev == "stop-run" { s++ }
-      END { print n + 0, s + 0 }' "$rec")"
+      ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
+      ev == "stop-run" && hh_take(line_kv("at")) { s++ }
+      END { print n + 0, s + 0, HH_UNPLACED + 0 }' "$rec")"
   fi
   led="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || led=""
   if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
-    read -r dec lif <<< "$(awk -F'|' '
+    read -r dec lif u2 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
       index($0, "fill-ledger/v1|") == 1 {
-        for (i = 2; i <= NF; i++) if (index($i, "state=") == 1) { s = substr($i, 7); if (s == "decline") d++; else if (s == "lift") l++ }
+        s = ""; a = ""
+        for (i = 2; i <= NF; i++) { if (index($i, "state=") == 1) s = substr($i, 7); else if (index($i, "at=") == 1) a = substr($i, 4) }
+        if ((s == "decline" || s == "lift") && hh_take(a)) { if (s == "decline") d++; else l++ }
       }
-      END { print d + 0, l + 0 }' "$led")"
+      END { print d + 0, l + 0, HH_UNPLACED + 0 }' "$led")"
   fi
-  read -r amd hld ext ado <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
+  read -r amd hld ext ado u3 <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
       [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"
-    done 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" '
+    done 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
       index($0, "roster-state/") == 1 {
         name = ""; plan = ""; a = ""; h = ""; x = ""; id = ""; src = ""; af = ""
         for (i = 2; i <= NF; i++) {
@@ -562,34 +624,97 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
         if (x != "") X[name SUBSEP x] = 1
         if (src == "adopted" && af != "" && id != "") D[id SUBSEP af] = 1
       }
-      END { for (k in A) na++; for (k in H) nh++; for (k in X) nx++; for (k in D) nd++; print na + 0, nh + 0, nx + 0, nd + 0 }')"
+      # a value opens on the time its verb wrote it; an adoption row carries none of the adopt
+      function lead(k,   v) { v = substr(k, index(k, SUBSEP) + 1); return hh_first(substr(v, 1, index(v " ", " ") - 1)) }
+      END {
+        for (k in A) if (hh_take(lead(k))) na++
+        for (k in H) if (hh_take(lead(k))) nh++
+        for (k in X) if (hh_take(lead(k))) nx++
+        for (k in D) if (hh_take("")) nd++
+        print na + 0, nh + 0, nx + 0, nd + 0, HH_UNPLACED + 0 }')"
   if [ -f "$plan" ] && [ ! -L "$plan" ]; then
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
     if declare -F proof_awk >/dev/null 2>&1; then
-      read -r fl wv fix <<< "$(awk "$(proof_awk)"'
+      read -r fl wv fix u4 <<< "$(awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$_HH_PLACE_AWK"'
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
         sec == "sdlc" {
-          if (proof_fields($0) && PROOF_KIND == "regression") f++
-          else if ($0 ~ /^waived:[ \t]+question=/) w++
-          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) x++
+          # the first regression proof is the floor itself; each one past it is a hand-hold
+          if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && hh_take(hh_at($0))) f++ }
+          else if ($0 ~ /^waived:[ \t]+question=/) { q = index($0, "\""); if (hh_take(hh_first(q ? substr($0, 1, q - 1) : $0))) w++ }
+          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) { if (hh_take(hh_at($0))) x++ }
           next
         }
         sec == "mx" {
           if ($0 ~ /^AC-[^ \t]*:[ \t]*$/) { inb = 1; next }
           if (inb && $0 ~ /^[ \t]+[^ \t]/) {
-            if ($0 ~ /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+"/) w++
+            if ($0 ~ /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/) {
+              q = index($0, "\""); if (hh_take(hh_first(substr($0, 1, q - 1)))) w++
+            }
             next
           }
           inb = 0
         }
-        END { print f + 0, w + 0, x + 0 }' "$plan")"
+        END { print f + 0, w + 0, x + 0, HH_UNPLACED + 0 }' "$plan")"
     fi
   fi
-  [ "${fl:-0}" -gt 1 ] && fl=$((fl - 1)) || fl=0
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d\n' \
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
     $(( hand + stp + dec + lif + amd + hld + ext + wv + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$fl" "$ado" "$fix"
+  if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u2:-0} + ${u3:-0} + ${u4:-0} )); fi
+  printf '\n'
+  return 0
+}
+
+# THE WINDOW'S ENDS, FROM RECORDS. The measure runs from the last build landing to the release approval card: the start
+# is the newest `ev=published` of a row whose kind is build in the plan's table, the end the newest release approval
+# page's replay `at=` (a page under the card's old stem `$RR_OLD_VERB` reads too). A page no later than the start was
+# rendered for an earlier build, so it ends nothing.
+# hand_holds_ends <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><page|none|stale>`
+hand_holds_ends() {
+  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=none recdir f
+  builds="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$3 == "build" { printf "%s ", $1 }')"
+  if [ -n "$builds" ] && [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
+    read -r s row <<< "$(awk -F'|' -v B=" $builds" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
+      line_ev() == "published" && index(B, " " line_kv("row") " ") { a = hh_norm(line_kv("at")); if (hh_iso(a) && a > m) { m = a; r = line_kv("row") } }
+      END { if (m != "") print m, r; else print "-", "-" }' "$rec")"
+  fi
+  recdir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"
+  u="$(for f in "$recdir"/release-approval-*.md ${RR_OLD_VERB:+"$recdir/$RR_OLD_VERB"-*.md}; do
+      [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"
+    done 2>/dev/null | awk -v OLD="${RR_OLD_VERB:-release-approval}/v1|plan=" "$_HH_PLACE_AWK"'
+      index($0, "release-approval/v1|plan=") == 1 || index($0, OLD) == 1 { a = hh_norm(hh_at($0)); if (hh_iso(a) && a > m) m = a }
+      END { print (m != "") ? m : "-" }')"
+  if [ "$u" != - ]; then
+    if [ "$s" = - ] || [[ "$u" > "$s" ]]; then st=page; else st=stale; u="-"; fi
+  fi
+  printf '%s\t%s\t%s\t%s\n' "${s:--}" "${row:--}" "${u:--}" "$st"
+}
+
+# hand_holds_verb <landing record> <project root> <plan> <since> <until> -> `landing-report --hand-holds`'s two lines:
+# the counts over the window, then the ends that bound it. With neither end named the ends are read from records
+# (hand_holds_ends); with no page the window runs to now and says the card has not rendered, printing no end it has not
+# read from a record.
+hand_holds_verb() {
+  local rec="$1" root="$2" plan="$3" since="$4" until="$5" e s row u st sw uw
+  if [ -n "$since" ] || [ -n "$until" ]; then
+    hand_holds_report "$rec" "$root" "$plan" ${since:+--since "$since"} ${until:+--until "$until"}
+    printf 'hand-holds window: since %s · until %s\n' "${since:-the first line}" "${until:-now}"
+    return 0
+  fi
+  e="$(hand_holds_ends "$rec" "$root" "$plan")"
+  IFS=$'\t' read -r s row u st <<< "$e"
+  [ "$s" != - ] || s=""
+  [ "$u" != - ] || u=""
+  if [ -n "$s" ] || [ -n "$u" ]; then hand_holds_report "$rec" "$root" "$plan" ${s:+--since "$s"} ${u:+--until "$u"}
+  else hand_holds_report "$rec" "$root" "$plan"; fi
+  if [ -n "$s" ]; then sw="since $s (the last build landing, $row)"; else sw="since the first line (no build row has landed)"; fi
+  case "$st" in
+    page) uw="until $u (the release approval card)" ;;
+    stale) uw="until now: the card has not rendered since the last build landing" ;;
+    *) uw="until now: the card has not rendered" ;;
+  esac
+  printf 'hand-holds window: %s · %s\n' "$sw" "$uw"
   return 0
 }
 
@@ -604,7 +729,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
   # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
   # 60 and 63: the dry copy is `plan_verb_open`'s own, so the gate resolves it to the real plan).
   # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
-  # <who> <at> "<why>"`, the hand landing's interface), once: a text already there is not added
+  # <who> <at> "<why>" judged-by=<target|candidate>`, the hand landing's interface, the field present when the
+  # scan judged), once: a text already there is not added
   # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
   # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
   # same landing finds the plan already so and writes nothing.
@@ -628,6 +754,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     fi
     plan_verb_open row-landed
     [ "$VERB" != deliver ] || deliver_check
+    RL_JUDGED=""
     [ "$RL_HAND" -eq 0 ] || row_landed_scan
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
@@ -647,7 +774,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     case "$PV_ID" in
       T[0-9]*)
         RL_TEXT="landed $RL_COMMIT $RL_AT"
-        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\""
+        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\"${RL_JUDGED:+ judged-by=$RL_JUDGED}"
         RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
         case " $RL_REST " in
           *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;

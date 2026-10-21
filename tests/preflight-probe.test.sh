@@ -642,28 +642,6 @@ expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
 expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
 
 # ============================================================
-section "S10 — the sweeper arm line is GONE (epic-16 w2 task S1)"
-# ============================================================
-#
-# The probe used to close with a print-only ACTION LINE naming the command that armed this
-# session's watcher. The watcher is deleted — supervision reads facts off disk when a
-# decision needs them, so there is no process to point an operator at — and its absence is
-# pinned here, in the suite that used to pin its presence, because an action line telling an
-# operator to run a verb that no longer exists is worse than no line at all.
-
-SBX="$(mk_sandbox)"
-rc="$(run_probe "$SBX")"
-expect_eq "a clean run without the arm line still exits 0" "0" "$rc"
-expect_file_no_regex "the probe never names the deleted arm verb" \
-  'session-sweeper\.sh arm' "$PROBE"
-expect_file_no_regex "…nor invites anyone to arm a sweeper" 'arm the session sweeper' "$PROBE"
-
-# The probe still never spawns the sweeper, which was true before the deletion and stays
-# true after it: nothing here backgrounds or execs the script under any verb.
-expect_file_no_regex "the probe source never execs or backgrounds session-sweeper.sh (D2)" \
-  'session-sweeper\.sh[^"]*&|exec[^\n]*session-sweeper\.sh' "$PROBE"
-
-# ============================================================
 section "S11 — the project root is PINNED, never taken from the shell (epic-16 w2 S5, AC-4/R5)"
 # ============================================================
 #

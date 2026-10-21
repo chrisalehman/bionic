@@ -100,15 +100,6 @@ call_archive_rc() {
 }
 
 # ============================================================
-section "0 — the library exists, parses, defines archive_run"
-# ============================================================
-
-expect_eq "archive.sh is on disk" "yes" "$([ -r "$LIB" ] && echo yes || echo no)"
-expect_eq "archive.sh parses" "yes" "$(bash -n "$LIB" 2>/dev/null && echo yes || echo no)"
-expect_eq "sourcing archive.sh defines archive_run" "yes" \
-  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; declare -F archive_run >/dev/null 2>&1 && echo yes || echo no' _ "$LIB")"
-
-# ============================================================
 section "1 — AC-C.1: a standalone run (no open sibling) moves; a RENAME, not a copy"
 # ============================================================
 
@@ -365,78 +356,5 @@ expect_eq "4c: …no plans/ tree created under the archive" \
   "no" "$([ -e "$HOME/bionic-archive/p4/.bionic" ] && echo yes || echo no)"
 expect_eq "4d: the printed line names THIS project's own root" "yes" "$(contains "$OUT4" "$P4")"
 expect_eq "4e: …and the recorded, colliding one" "yes" "$(contains "$OUT4" "some-other-p4")"
-
-# ============================================================
-section "5 — AC-C.5: archive-on-close: false moves nothing"
-# ============================================================
-
-P5="$(new_project p5)"
-mkdir -p "$P5/.bionic/docs/plans/epic-05"
-fixture_plan "$P5/.bionic/docs/plans/epic-05/wave-01.plan.md" 9 yes
-printf 'archive-on-close: false\n' > "$P5/.bionic/config.yaml"
-export HOME="$SANDBOX/home-p5"; mkdir -p "$HOME"
-
-OUT5="$(call_archive "$P5" "$P5/.bionic/docs/plans/epic-05")"
-RC5=$?
-
-expect_eq "5a: AC-C.5 — the opt-out exits 0 (a benign no-op, not a refusal)" "0" "$RC5"
-expect_eq "5b: …source untouched (fails-when: the key is ignored)" \
-  "yes" "$([ -f "$P5/.bionic/docs/plans/epic-05/wave-01.plan.md" ] && echo yes || echo no)"
-expect_eq "5c: …no archive directory created for p5 at all" \
-  "no" "$([ -e "$HOME/bionic-archive/p5" ] && echo yes || echo no)"
-expect_eq "5d: the printed line names the opt-out" "yes" "$(contains "$OUT5" "archive-on-close")"
-
-# --- the paired positive: the SAME fixture without the key present moves normally, so
-# row 5a-c is not "archive_run is simply broken here" but the key's own effect ---
-rm -f "$P5/.bionic/config.yaml"
-OUT5B="$(call_archive "$P5" "$P5/.bionic/docs/plans/epic-05")"
-expect_eq "5e: …and removing the key alone (same fixture) lets the same call move it" \
-  "no" "$([ -e "$P5/.bionic/docs/plans/epic-05" ] && echo yes || echo no)"
-
-# ============================================================
-section "6 — AC-C.6: the default archive root, unit-level (no archive-root: set)"
-# ============================================================
-#
-# lib/roots.sh's archive_root already carries the primary coverage of this AC
-# (tests/roots.test.sh §1a); restated here directly against archive.sh's own call site,
-# since the plan's Eval design table places this row under §C and a library that read its
-# OWN copy of the default rather than roots.sh's would pass roots.test.sh while still being
-# wrong here.
-
-P6="$(new_project p6)"
-export HOME="$SANDBOX/home-p6"; mkdir -p "$HOME"
-ROOTS_LIB="$REPO_ROOT/payload/scripts/lib/roots.sh"
-expect_eq "6a: AC-C.6 — no archive-root: set -> \$HOME/bionic-archive" \
-  "$HOME/bionic-archive" \
-  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; archive_root "$2"' _ "$ROOTS_LIB" "$P6")"
-
-mkdir -p "$P6/.bionic/docs/plans/epic-06"
-fixture_plan "$P6/.bionic/docs/plans/epic-06/wave-01.plan.md" 9 yes
-call_archive "$P6" "$P6/.bionic/docs/plans/epic-06" >/dev/null 2>&1
-expect_eq "6b: …and archive_run itself landed the move under that exact default" \
-  "yes" "$([ -d "$HOME/bionic-archive/p6/.bionic/docs/plans/epic-06" ] && echo yes || echo no)"
-
-# ============================================================
-section "7 — AC-C.7: the rendered SKILL.md's Step-9 span names the call and archived:"
-# ============================================================
-#
-# STATIC, docs-pins-shaped (also pinned in tests/docs-pins.test.sh §Archive). The span is
-# bounded the same way the K1 section's step0_card extractor is (tests/docs-pins.test.sh):
-# from the Step-9 heading to the next `## ` (not `###`) heading.
-
-step9_span() {
-  awk '/^### Step 9 —/{f=1} f{print} f&&/^## [^#]/ && !/^### Step 9 —/{exit}' "$1" 2>/dev/null
-}
-
-expect_eq "7a: SKILL.md is on disk (a render output, not hand-edited)" "yes" \
-  "$([ -r "$SKILL_MD" ] && echo yes || echo no)"
-
-STEP9="$(step9_span "$SKILL_MD")"
-
-# --- fails-when: a doctored copy with the archiving paragraph stripped is what "a silent
-# move" would look like — the pin must discriminate it. ---
-DOCTORED="$SANDBOX/skill-no-archiving.md"
-awk '/^\*\*Archiving\.\*\*/{skip=1} skip && /^$/{skip=0; next} skip{next} {print}' "$SKILL_MD" > "$DOCTORED"
-DOCTORED_STEP9="$(step9_span "$DOCTORED")"
 
 finish

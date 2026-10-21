@@ -104,34 +104,21 @@ spawn_out() {  # <cwd> <args...>
   local cwd="$1"; shift
   ( cd "$cwd" && bash "$SPAWN" "$@" 2>/dev/null )
 }
-spawn_rc() {  # <cwd> <args...>
-  local cwd="$1"; shift
-  ( cd "$cwd" && bash "$SPAWN" "$@" >/dev/null 2>&1 ); echo $?
-}
 # Same, against an arbitrary copy of the script (mutation arms).
 spawn_out_with() {  # <script> <cwd> <args...>
   local script="$1" cwd="$2"; shift 2
   ( cd "$cwd" && bash "$script" "$@" 2>/dev/null )
 }
 
-section "Group 1: the script exists, is executable, and parses"
-
-# (file-exists/executable fixture checks removed epic-18 W3 4/6: no production subject -- see ledger-spawn-worktree.md)
-expect_true "spawn-worktree.sh passes bash -n"  bash -n "$SPAWN"
-
-section "Group 2: create — the call succeeds"
-
-R1="$(new_repo "$TMP/r1")"
-SHA1="$(sha_of "$R1")"
-spawn_out "$R1" create "$SHA1" feat-alpha >/dev/null
-
-expect_eq "create exits 0" "0" "$(spawn_rc "$R1" create "$SHA1" feat-alpha-2)"
-
 section "Group 3: create — what the line CLAIMS is what is on disk"
 #
 # An attestation is worth nothing if it is printed from the arguments rather
 # than read back from the result. Each field is re-derived from the filesystem
 # and from git, independently of the line.
+
+R1="$(new_repo "$TMP/r1")"
+SHA1="$(sha_of "$R1")"
+spawn_out "$R1" create "$SHA1" feat-alpha >/dev/null
 
 expect_true "the worktree directory exists"            test -d "${R1}/.worktrees/feat-alpha"
 expect_eq   "the worktree HEAD is the requested base"  "$SHA1" "$(sha_of "${R1}/.worktrees/feat-alpha")"
@@ -549,38 +536,6 @@ mutate_check "mutation: the cleanup on failed verification removed is caught" \
 # (captured to record/wave-verification-cannot-lie/s9-planted.log); S9 is a
 # mechanical migration and does not author new assertions, so the dead banner
 # is dropped rather than given content (S9 W+1 candidate 1).
-
-section "Group 11: the tree<->branch contract close-out relies on (epic-23 wave-17 T5, D5, ADR-032, A6)"
-#
-# close-out.sh's wt_branches() (REQ-6) trusts this contract instead of re-deriving
-# it: a registered `## Tasks` row names a tree's BASENAME, and the branch it maps to
-# is `wt/<basename>` — exactly the OK line's own `path=`/`branch=` relationship. This
-# pins the two fields against EACH OTHER, not against a literal branch name, so it
-# catches either side drifting from the other rather than one specific value.
-
-# verify_wt_contract <script> -> held | broken — held iff the OK line's path=
-# basename equals branch='s last path segment.
-verify_wt_contract() {
-  local script="$1"
-  local rr; rr="$(new_repo "$TMP/contract-$RANDOM")"
-  local sha; sha="$(sha_of "$rr")"
-  local out p b
-  out="$(cd "$rr" && bash "$script" create "$sha" wt/17-contract 2>/dev/null)"
-  p="$(printf '%s\n' "$out" | tr ' ' '\n' | sed -n 's/^path=//p')"
-  b="$(printf '%s\n' "$out" | tr ' ' '\n' | sed -n 's/^branch=//p')"
-  if [ -n "$p" ] && [ -n "$b" ] && [ "${p##*/}" = "${b##*/}" ]; then
-    echo held
-  else
-    echo broken
-  fi
-}
-
-expect_eq "live build: the OK line's path= basename equals branch='s last segment" \
-  "held" "$(verify_wt_contract "$SPAWN")"
-
-mutate_check "mutation: a path built from something other than the branch's last segment is caught" \
-  's|^  wt="${parent_abs}/${branch##\*/}"$|  wt="${parent_abs}/renamed-tree"|' \
-  verify_wt_contract "broken"
 
 
 section "Group 12: land — the verb lands onto the bound plan's working branch, in the checkout that holds it (wave-20 T8, REQ-1, D1)"

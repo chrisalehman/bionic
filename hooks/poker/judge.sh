@@ -11,8 +11,13 @@
 # `waive:<question>`, the key the waive verb closes, carrying the line the refusal prints; every other
 # question's item is closed, its block gone (a passing reading over the fix). Opening is idempotent per
 # key, so a second refusal on the same question is one item. Prints nothing; never changes the verdict.
-cur8_owed_waivers() {  # <facts_state output> -> always 0
-  local q fl
+#
+# AN UNRULED MATRIX ROW IS THE PERSON'S TO RULE. Asked with a second argument, the matrix rows the advance to 8
+# finds unruled (`cur8_unruled`), it opens `row:<AC>` for each, the key the release approval card settles with its
+# row decision, carrying the line the refusal prints for it, and closes every other open `row:` item, the row
+# ruled since. Without the argument (the advance to 7) the row items are left as they are: the card puts them.
+cur8_owed_waivers() {  # <facts_state output> [<unruled AC ids, one per line>] -> always 0
+  local q fl k
   declare -F owed_open >/dev/null 2>&1 || return 0
   for q in $PROOF_QUESTIONS; do
     fl="$(printf '%s\n' "$1" | awk -F'\t' -v q="$q" '$1 == "review" && $2 == q && $(NF - 1) == "failing" { print; exit }')"
@@ -22,7 +27,34 @@ cur8_owed_waivers() {  # <facts_state output> -> always 0
       poker_owed_close "$PV_REPO" "waive:$q" "no longer failing"
     fi
   done
+  [ "$#" -ge 2 ] || return 0
+  for k in $2; do
+    OWED_ROOT="$PV_REPO" owed_open "row:$k" "ruling: row $k" "$(cur8_unruled_line "$k")" >/dev/null 2>&1
+  done
+  while IFS= read -r k; do
+    case "$k" in row:?*) : ;; *) continue ;; esac
+    /usr/bin/grep -qxF "${k#row:}" <<< "$2" || poker_owed_close "$PV_REPO" "$k" "ruled"
+  done <<OWED_ROWS
+$(OWED_ROOT="$PV_REPO" owed_list 2>/dev/null | cut -f1)
+OWED_ROWS
   return 0
+}
+
+# cur8_unruled -> the AC id of each matrix row the advance to 8 finds unruled, one per line: walls.sh
+# `matrix_unruled`, the commit gate's own reader and predicate (`matrix_row_ruled`), asked in a subshell so nothing
+# walls.sh defines outlives it. Never a second reading of the matrix here: the advance and every commit after it
+# answer one row one way. rc 1 when the library or the reader cannot be had.
+cur8_unruled() {
+  [ -f "$BIONIC_LIB/walls.sh" ] || return 1
+  ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 || exit 1
+    declare -F matrix_unruled >/dev/null 2>&1 || exit 1
+    matrix_unruled "$PV_PLAN" 8 )
+}
+
+# cur8_unruled_line <AC> -> the refusal's line for an unruled row: the matrix arm's own fact, as a commit at
+# current: 8 is refused with it, so the release approval card settles it as `row:<AC>` whichever refusal names it.
+cur8_unruled_line() {
+  printf 'bionic: commit refused — the auditor has not confirmed %s (rule it: the auditor confirms it, the row is waived, or a T4 row carries its user'"'"'s confirmation)' "$1"
 }
 
 # cur7_judge <step> -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
@@ -55,18 +87,27 @@ cover_basis() {
   facts_cover "$1" "$3" "$4" "$2"
 }
 
+# cur8_unapproved_line -> the printf format of the refusal `current 8` prints in the release order while the release
+# approval is missing, its three %s the regression row, what is missing and the working head. THE ONE SPELLING of that
+# refusal: the release approval card (payload/scripts/card.sh `_card_settles`) runs in a process of its own and reads
+# this function from this file, so it settles the refusal by the words the judge prints, and a reworded refusal is
+# reworded for both. The words are a printf format, so a percent sign in them is written as two.
+cur8_unapproved_line() {
+  printf '%s' "REFUSED — current: 8 in the order (the regression row %s before review and the release) is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
+}
+
 # cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8, or a head on its
 # first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
 # exit 1, naming both heads, the plan unchanged.
 cur8_approved_head() {
-  local ah
+  local ah fmt missing
   ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
   if [ -z "$ah" ]; then
-    if proof_approved "$PV_PLAN" release; then
-      die "REFUSED — current: 8 in the order (the regression row $PV_ORDER before review and the release) is admitted at the head the user approved for release, and the newest approved: release line names no head; the user's word for the working head $PV_HEAD8 is approve release '<reply>'. The plan is unchanged."
-    else
-      die "REFUSED — current: 8 in the order (the regression row $PV_ORDER before review and the release) is admitted at the head the user approved for release, and $PV_PLAN carries no approved: release line; the user's word for the working head $PV_HEAD8 is approve release '<reply>'. The plan is unchanged."
-    fi
+    missing="$PV_PLAN carries no approved: release line"
+    ! proof_approved "$PV_PLAN" release || missing="the newest approved: release line names no head"
+    fmt="$(cur8_unapproved_line)"
+    # shellcheck disable=SC2059  # the format is cur8_unapproved_line, whose only conversions are its three %s
+    die "$(printf "$fmt" "$PV_ORDER" "$missing" "$PV_HEAD8")"
     exit 1
   fi
   if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
@@ -96,11 +137,24 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   esac
   PV_ORDER="$(units_order "$PV_PLAN" 2>/dev/null)" || PV_ORDER=""
   [ "$step" != 8 ] || [ -z "$PV_ORDER" ] || cur8_approved_head
+  # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
+  local unruled="" ac
+  if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
+    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix reader (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
   # The check-only advance (`current <N> --check`; wave-38 T1, D20) takes this judgment and not its ledger write.
-  [ "$rc" -eq 2 ] || [ -n "${PV_CHECK:-}" ] || cur8_owed_waivers "$out"
-  [ "$rc" -eq 0 ] && return 0
+  if [ "$rc" -ne 2 ] && [ -z "${PV_CHECK:-}" ]; then
+    if [ "$step" = 8 ]; then cur8_owed_waivers "$out" "$unruled"; else cur8_owed_waivers "$out"; fi
+  fi
+  [ "$rc" -eq 0 ] && [ -z "$unruled" ] && return 0
+  for ac in $unruled; do printf '%s\n' "$(cur8_unruled_line "$ac")" >&2; done
+  if [ "$rc" -eq 0 ]; then
+    die "current: 8 waits on a ruling of each row above; settle each on the release approval card, or waive it with waive-row <AC> '<reply>'. The plan is unchanged."
+    exit 1
+  fi
   if [ "$rc" -eq 2 ]; then
     die "REFUSED — current: $step is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
     [ -z "$err" ] || printf '%s\n' "$err" >&2

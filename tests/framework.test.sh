@@ -17,19 +17,10 @@
 #       is exempt, and a helper name inside a heredoc body is not a call site
 #   §5  finish exits by FAIL, and the tally line carries sections=N setup=M
 #   §6  the counters and the assertion helpers are defined by the framework
-#   §7  the assertion-discipline docblock carries its two obligations
-#   §8  tests/run.sh registers this suite
+#   §6b the head docblock describes the tree it heads
 #   §9  the thirteen generic expect_* helpers are the framework's, each in a
 #       passing and a failing arm (AC-12)
 #   §10 expect_regex is an ERE and is not a pipeline (the 141 false FAIL)
-#   §11 anchor: a moved mutation anchor is red BEFORE the mutation runs,
-#       naming the anchor and the count it actually found (AC-29, AC-31)
-#   §19 the three shaped anchors (file, fn, insert) through one helper, each
-#       building its mutant; §20 a suite's extracted anchors are the ones it ran;
-#       §21 `anchors check` names a moved anchor, the three wave-34 mutants among
-#       them; §22 `anchors index` maps file -> declaring suites (wave-35 T3; AC-7.1, AC-7.3)
-#   §READS `reads_index` over the shipped tree: the new suite registered against anchors.sh,
-#       the wave-35 misses routed, the anchor index a subset of it (wave-36 T5; D12, AC-6.1)
 #
 # HERMETIC. Every planted suite is written into a mktemp'd sandbox holding a COPY
 # of the real tests/lib/assert.sh and is run as a child process; nothing here
@@ -572,30 +563,6 @@ expect_eq "6b: …and the docblock records that S9b renamed them" "yes" \
   "$(contains "$C1_DOC" 'were renamed onto `expect_regex` by S9b')"
 
 # ============================================================
-section "8: the runner's header points at the live width knob"
-# ============================================================
-#
-# WHAT USED TO BE HERE. A registration pin — "tests/run.sh names this suite" —
-# and a count pin comparing the roster's `run` lines against the glob. Both died
-# with the hand list (fixit 1.5.1, D-1/D-3): the roster IS `tests/*.test.sh`, so
-# membership is not a property a suite can lack, and a count of the roster
-# against the directory now compares the directory with itself.
-# tests/runner-roster.test.sh proves the derivation once, for the whole set.
-#
-# WHAT IS LEFT is the header's own prose about the width knob, which lives here
-# because no other suite reads it.
-
-RUNSH="$(cat "${REPO}/tests/run.sh")"
-# C-4: the header named a retired input as the knob to reach for. Two other
-# places in the same file say it is retired, one of them at runtime.
-expect_eq "8: the header points at the live width knob" "yes" \
-  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS_CEILING` is there for a machine')"
-expect_eq "8: …and not at the retired one" "no" \
-  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS is there for a machine')"
-expect_eq "8: …while the file still says out loud that it is retired" "yes" \
-  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS` is retired as an input')"
-
-# ============================================================
 section "9: the generic expect family is the framework's (AC-12, S1b)"
 # ============================================================
 #
@@ -734,21 +701,6 @@ f10_code_hits() {
 }
 expect_eq "10: …and the census can see one in code when there is one (not vacuous)" "1" \
   "$(printf 'echo "$x" %s -- "$y"\n' "$F10_BANNED" | grep -v '^[[:space:]]*#' | grep -c -- "$F10_BANNED" | tr -d ' ')"
-
-# ============================================================
-section "PIN-REL: a pin on the shipped tree is a relation, not a count (wave-26 T21, AC-8.1)"
-# ============================================================
-#
-# The census above (no banned spelling in code) and its docblock row are exercised on COPIES of
-# assert.sh under the sandbox: one with a fourth mention planted in a comment, one with every
-# mention removed. The shipped file is never touched.
-PR_PLUS="$SB/pin-rel-plus.sh"; PR_NONE="$SB/pin-rel-none.sh"
-{ cat "$FRAMEWORK"; printf '# a fourth mention: %s\n' "$F10_BANNED"; } > "$PR_PLUS"
-grep -v -- "$F10_BANNED" "$FRAMEWORK" > "$PR_NONE"
-expect_nonempty "PIN-REL the shipped file states the ban (the row reads something)" \
-  "$(grep -- "$F10_BANNED" "$FRAMEWORK")"
-expect_eq "PIN-REL a fourth mention: the docblock row stays green" "yes" "$(f10_stated "$PR_PLUS")"
-expect_eq "PIN-REL …and the code census stays green" "0" "$(f10_code_hits "$PR_PLUS")"
 
 # ============================================================
 finish

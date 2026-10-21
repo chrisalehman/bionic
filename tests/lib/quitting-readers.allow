@@ -1,0 +1,23 @@
+# Sites where a writer is piped into a reader that quits early, in a file that runs under pipefail,
+# with the status read, and the writer cannot outrun the 64 KB pipe buffer. The sweep in
+# tests/shell-lint.test.sh section BP reads this file.
+#
+# One site per line:  <path>:<pattern> # <reason>
+# The pattern is a fixed substring of the line, so an entry follows its line when the file moves.
+# The reason says what bounds the writer. A line with no reason, no colon, or a path the sweep does
+# not read is refused, and a refused line silences nothing.
+#
+# A writer that is a variable the shell holds (printf of it) is bounded only by that variable; the
+# fix for a variable that can grow is a here-string, which has no second process to lose.
+
+hooks/poker/plan.sh:"$RR_AGAINST" | /usr/bin/grep -qxF -- "$2" # RR_AGAINST holds the finding ids and rows named against one review, one short token each
+hooks/poker/plan.sh:"$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" # RR_AGAINST holds the finding ids and rows named against one review, one short token each
+hooks/poker/plan.sh:units_approval_names "$PV_PLAN" 2>/dev/null | /usr/bin/grep -qxF "$nm" # one approval name per open row of one plan, sorted unique
+hooks/poker/plan.sh:"$RR_FIDS" | /usr/bin/grep -qxF -- "$key" # RR_FIDS holds one finding:<id> line per finding of one review
+hooks/poker/proof.sh:/usr/bin/grep -F "|row=${DSP_FROW%%	*}|commit=${DSP_FROW#*	}|" "$DSP_REC" | /usr/bin/grep -qF # the writer is a grep of the record for one row at one commit, a handful of lines
+hooks/poker/roster.sh:grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null | grep -qF # the writer keeps the roster-state lines of one session, one per teammate
+hooks/poker/roster.sh:roster_open_names "$ROSTER_FILE" # the writer prints the open teammate names of one roster, one short name a line
+hooks/poker/tick.sh:landing_carrier_names "$POKER_RUN_PLAN" | /usr/bin/grep -qxF # the writer prints one name per live landing carrier of one plan
+payload/scripts/close-out.sh:epic_shipped_table "$EPIC_PLAN" | grep -qE # the writer prints the shipped table of one epic plan, a row per wave
+payload/scripts/lib/alias.sh:printf '%s\n' "$text" | awk -v k="$mo" # the writer is one config file or one frontmatter, read once
+payload/scripts/lib/walls.sh:if head -c 8192 "$f" # the writer is head -c 8192, so at most 8 KB

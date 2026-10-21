@@ -35,7 +35,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>] | sitrep grade <A-F> '<rationale>' [<plan>]   the situation report's page, or its one line (read-only); record the run's grade and its rationale (writes record/<wave>/sitrep.log)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line|--basis] [<plan>] | sitrep grade <A-F> '<rationale>' [<plan>]   the situation report's page, its one line, or the close's arithmetic (read-only); record the run's grade and its rationale (writes record/<wave>/sitrep.log)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
@@ -344,7 +344,7 @@ POKER_WORD="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
 
 # THE PERSON'S LEDGER AND ITS ONE SENDER (epic-23 wave-33-workhorse, T11; REQ-2, D2). owed.sh keeps
 # what the person owes and sources notify.sh beside it: the tick opens and sends each GATE request
-# it raises, and approve, waive and decline close the item their answer settles. NOT in
+# it raises, and approve and waive close the item their answer settles. NOT in
 # `BIONIC_LIB_WANT`, and sourced only when readable: a library without it (one older than this wave)
 # leaves every verb and every tick exactly as it was, so the ledger can never refuse a command.
 if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
@@ -415,9 +415,6 @@ PATROL_DIGEST_SCHEMA="patrol-digest/v1"
 # (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker-2.test.sh §HOLD-fix pins
 # the three sites.
 HOLD_REASON_SLOT="'why it stays up'"
-# THE DECLINE'S REASON, the same kind of placeholder (wave-27 T34; D24): the prompt's FILL answer and
-# the turn-end wall's refusal (payload/scripts/lib/stop.sh) print it in the decline command.
-DECLINE_REASON_SLOT="'why they wait'"
 # v=3 (wave-25 T5; D7): the prompt says what the decision line's `gate=` field asks of the turn,
 # so a Patrol armed under v=2 does not know it and the tick's re-arm note asks for the new job.
 # v=4 (wave-26 T15; D16): an `unchanged` or a WAITING tick ends the turn's duties, the task-list
@@ -426,8 +423,46 @@ DECLINE_REASON_SLOT="'why they wait'"
 # line, which it prints whenever the duty is owed (v=4 asked on a change the tick never printed),
 # and a FILL asks for the dispatch alone: the launch records the row and its ledger line.
 # v=6 (wave-27 T34; REQ-15, D24): a FILL left unfilled is answered by the `decline` verb, which records
-# the decline on disk, and no longer by a `fill-declined:` line in the reply the user reads.
-PATROL_PROMPT_VERSION=6
+# the decline on disk, and no longer by a line in the reply the user reads.
+# v=7: the decline is gone, so a session armed under v=6 asks for a verb that answers unknown. A FILL
+# is answered by its dispatch; a row that should wait is made not ready instead, by the forms the stop
+# wall prints, and the tick's re-arm note asks for the new job.
+# v=8: the prompt carries the one sentence the orchestrator says after re-arming, and no other
+# instruction about what to say there, so a session armed under v=7 lacks it and the tick's re-arm
+# note asks for the new job.
+PATROL_PROMPT_VERSION=8
+
+# THE ONE SENTENCE THE ORCHESTRATOR SAYS AFTER RE-ARMING A PATROL, kept in one double-quoted literal
+# because it holds an apostrophe. The dispatch rules (agents-src/blocks/orchestrator-dispatch.md) carry
+# the same words, and tests/stop.test.sh §PATROL pins both sites to this one.
+PATROL_REARM_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
+
+# THE EXPLANATION OF A DEAD PATROL CLOCK, printed by `patrol --explain` and by nothing else. The stop
+# hook's refusal is one line and the tick prints none of this, so a user sees it only by asking.
+# Static text over this script's own path: it reads no project and no session, so it answers anywhere.
+poker_patrol_explain() {
+  cat <<EXPLAIN_EOF
+Why the Patrol clock dies, and the acts that revive it
+
+The CLI holds the session's cron table in process memory, with no file behind it. A plugin update, a /reload-plugins, a session continue or a /clear and resume therefore deletes the Patrol job and leaves the stamp as the only trace. Nothing ticks the poker after that: no dispatched row is judged against its declared duration, and anything the run launched waits on a clock that stopped.
+
+The stop hook reads the stamp and the transcript. A stamp older than one fire window (the poker interval plus the scheduler's jitter), with an idle stretch that long and no tick in it, is a dead clock. The hook refuses the turn once per turn, in one line, until the stamp is fresh or removed.
+
+The three acts, in this order. Look first: creating a second job over one that is still there is two clocks on one run.
+  1. CronList. Is this session's bionic-patrol job still listed?
+  2. Only if it is absent: CronCreate a RECURRING session job at the interval that bash ${POKER_WORD} interval prints, carrying exactly the prompt that bash ${POKER_WORD} prompt prints.
+  3. Only once step 2 returned a job, or step 1 showed the job listed: bash ${POKER_WORD} arm
+
+If CronCreate is refused or fails, do NOT run step 3. A fresh stamp over an empty cron table reads alive to the stop hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
+
+If the Patrol was stopped ON PURPOSE, record that instead of re-arming: bash ${POKER_WORD} disarm removes the stamp, and the notice goes with it.
+
+The clock that fires and never ticks. When a Patrol marker turn has run since the stamp and no tick stamped, the job exists and fires but its prompt never runs the tick, so nothing has decided anything. Re-creating the job as it is buys the same silence, and arming the stamp over it makes a Patrol that never decides read alive. Repair the job, not the clock:
+  1. Run the tick now: bash ${POKER_WORD} tick
+  2. CronList, and CronDelete this session's Patrol job.
+  3. CronCreate a RECURRING session job at the interval bash ${POKER_WORD} interval prints, carrying exactly the prompt bash ${POKER_WORD} prompt prints. It leads with this session's marker and runs the tick.
+EXPLAIN_EOF
+}
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -458,12 +493,15 @@ die()  { printf 'poker: %s\n' "$1" >&2; }
 # other usage error here, and one verb spelling it differently is a surface the operator has
 # to learn per verb. Reverted at S8 with the `USAGE_EXIT` indirection deleted with it —
 # tests/session-poker.test.sh 16g asserts the 2.
+# THE RELEASE APPROVAL CARD'S ONE LINE OF USAGE, said by `usage` and by `release-approval --help`, so the two cannot disagree.
+RA_USAGE="release-approval [--preview] [--against <key>]... [<plan>]   the release approval card of the bound run: Bottom line, Goals, Tests, Reviews, Findings and Decisions; --against names a decision or finding the orchestrator recommends against its default; --preview renders it whatever the facts and records nothing"
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
+  die "  bash ${HOOK_DIR}/session-poker.sh patrol --explain   why the Patrol clock dies and the acts that revive it: the explanation the stop hook's one-line refusal leaves out (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (92 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
@@ -479,13 +517,11 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh decline <id>[,<id>] '<reason>' [--on <row>]   answer a FILL by recording why those ready rows wait: one line in the run's fill ledger, standing until a row it did not name is ready; --on names the row they wait on (declined-on=); a file or a word is refused"
-  die "  bash ${HOOK_DIR}/session-poker.sh decline lift [<ids>]   end the standing decline for those rows (every row it answers with no ids): one ledger line, and the next tick offers the rows it ended"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
@@ -509,10 +545,10 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
-  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sitrep's three indicators (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's page: the Bottom line (what you owe, what is next, what is done, when it closes), every task with its glyph, the Score's five indicator lines, what is blocked on you, the completion and the predicted close; --line prints the one-line form (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line|--basis] [<plan>]   the situation report's page: the Bottom line (what you owe, what is next, what is done, when it closes), every task with its glyph, the Score's five indicator lines and what is blocked on you; --line prints the one-line form, --basis the close's arithmetic (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep grade <A-F> '<rationale>' [<plan>]   record the run's grade and one rationale that names an indicator line (schedule, correctness, waste, decisions or goals), with the time, to record/<wave>/sitrep.log"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
@@ -522,9 +558,10 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
-  die "  bash ${HOOK_DIR}/session-poker.sh review-results [--preview] [--against <key>]... [<plan>]   the review results page of the bound run: Bottom line, Goals, Tests, Reviews, Findings and Decisions; --against names a decision or finding the orchestrator recommends against its default; --preview renders it whatever the facts and records nothing"
-  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the review results, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
+  die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
+  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
+  die "  bash ${HOOK_DIR}/session-poker.sh confirm-row <AC-id> '<the user's words>' ['<why>']   record the user's own confirmation of a T4 row's check, on words they typed in this session: its block's attributed confirmation line"
   die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
@@ -548,6 +585,13 @@ usage() {  # [message]
 # lib/alias.sh names the new one.
 VERB="$1"; shift
 if declare -F alias_gone >/dev/null 2>&1 && alias_gone verb "$VERB"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing was run."; exit 1; fi
+# THE CARD'S OLD NAME. The card the autonomous half waits on was called by another name before it was the release approval
+# card, and the person's decision it asks for is the release's. The old verb still runs, as the new one, and says so once
+# on stderr. Pages already written carry the old stem and
+# tag, and the readers (`reply`, the situation report) go on reading them through this variable: it is the only place the
+# old name is spelled, so a sweep for it finds one line and a page written under it stays readable.
+RR_OLD_VERB="review-results"
+if [ "$VERB" = "$RR_OLD_VERB" ]; then die "$RR_OLD_VERB is now release-approval"; VERB="release-approval"; fi
 
 # `--report-only` IS THE ONE FLAG MOST VERBS TAKE, and `adopt` and `sweep` are the two that
 # take it — the same word for the same promise on both, so an operator who has learned it
@@ -658,36 +702,6 @@ case "$VERB" in
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "rulings takes exactly one argument: the writer's roster name."
     RULE_WRITER="$1"
     ;;
-  # THE FILL'S ANSWER, AS HOLD IS THE STAND-DOWN'S (wave-27 T34; REQ-15, D24). Two operands: the
-  # ready rows, comma-joined, and the reason. No ids is the usage error, never "every row": a
-  # decline names what it answers. A blank reason is no reason, as for hold.
-  # `--on <row>` (wave-30 T16; REQ-12 AC-12.7, Δ13) names the row the hold waits on; it changes what
-  # the verb prints and the ledger's `declined-on=`. A value that is no row of the plan (a file, a word)
-  # is the verb's refusal, nothing recorded (wave-33 T7, AC-4.3). `--on` with no value is the usage
-  # error, as a missing reason is.
-  # `decline lift [<ids>]` (wave-35 T8; REQ-6 AC-6.2; D15) ends the standing decline for the rows named,
-  # comma-joined, or for every row it answers when none is named. More than one operand is the usage error.
-  decline)
-    DC_ON=""; DC_LIFT=""
-    if [ $# -ge 1 ] && [ "$1" = lift ]; then
-      [ $# -le 2 ] || usage "decline lift takes at most one operand: the row ids to lift, comma-joined; with none it lifts every row the standing decline answers."
-      DC_LIFT=yes; DC_IDS="${2:-}"; DC_REASON=""
-      [ -z "$DC_IDS" ] || [ -n "${DC_IDS//[[:space:],]/}" ] || usage "decline lift: '$DC_IDS' names no row id."
-      set --
-    fi
-    if [ -n "$DC_LIFT" ]; then
-      :
-    elif [ $# -eq 4 ] && [ "$3" = "--on" ] && [ -n "${4//[[:space:]]/}" ]; then
-      DC_ON="$4"; set -- "$1" "$2"
-    fi
-    if [ -z "$DC_LIFT" ]; then
-      if [ $# -ne 2 ] || [ -z "${1//[[:space:],]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-        usage "decline takes two arguments, the ready row ids, comma-joined, and the reason, then optionally --on <row>, the row they wait on. There is no form that declines every row. decline lift [<ids>] ends one."
-      fi
-      DC_IDS="$1"
-      DC_REASON="$2"
-    fi
-    ;;
   # THE USER'S WRITER CAP (wave-27 T34; REQ-15 AC-15.4, D24). `writers=<n>` and the user's reply,
   # verbatim; the value's own shape is the verb's refusal (1), its absence or another field the
   # usage error.
@@ -719,7 +733,7 @@ case "$VERB" in
   # a table may carry (wave-26 T2), from which the row's edges are computed. Left off, the row
   # is written exactly as the nine-operand form always wrote it.
   # `--born '<rating>'` (wave-30 T21; REQ-10 AC-10.2, D4) marks a row review made unasked: it comes
-  # last, after the operands, as `decline`'s `--on` does, and its value is `review S<n> <on|off>`, the
+  # last, after the operands, and its value is `review S<n> <on|off>`, the
   # rating the reader wrote. A missing or malformed value is the usage error; whether the rating may
   # become a row (fix-policy:, fix-cap:, the fourth fix on a component) is the verb's refusal (1).
   # `--born <record>#<n>[,<record>#<n>…]` (wave-33 T13; REQ-5, D6) names the findings the row answers, each a
@@ -842,6 +856,7 @@ case "$VERB" in
       for _pv_i in "${!PV_ARGS[@]}"; do
         case "${PV_ARGS[$_pv_i]}" in
           reads=*) if alias_gone_cell reads "${PV_ARGS[$_pv_i]#reads=}"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi ;;
+          reads+=*) if alias_gone_cell reads "${PV_ARGS[$_pv_i]#reads+=}"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi ;;
         esac
       done
     fi
@@ -901,6 +916,17 @@ case "$VERB" in
         usage "waive-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
     esac
     WR_AC="$1"; WR_RAW="$2"; WR_WHY_RAW="$3"
+    ;;
+  # THE USER'S CONFIRMATION OF A T4 ROW: the criterion, the user's words as typed, and optionally why, which the
+  # release approval card's reply passes to whichever choice it applies. The words' standing is the verb's own refusal (1).
+  confirm-row)
+    CR_USAGE="confirm-row takes <AC>, the user's words as typed, and optionally why."
+    { { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ]; }; } && [ -n "$1" ] && [ -n "${2//[[:space:]]/}" ]; } || usage "$CR_USAGE"
+    case "$1" in
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+        usage "confirm-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
+    esac
+    CR_AC="$1"; CR_RAW="$2"; CR_WHY_RAW="${3:-}"
     ;;
   # A PROSE PARAGRAPH UNDER ## Tasks (wave-33 T7; REQ-4 AC-4.1, D8). The text, then optionally
   # `--replace '<first words>'`, naming the paragraph it rewrites.
@@ -1002,27 +1028,29 @@ case "$VERB" in
       esac
     fi
     ;;
-  # THE REPLY TO THE REVIEW RESULTS. One operand: the user's reply to the page `review-results` rendered, verbatim.
+  # THE REPLY TO THE RELEASE APPROVAL CARD. One operand: the user's reply to the page `release-approval` rendered, verbatim.
   # Its words, and whether the user typed them, are the verb's own refusals (1).
   reply)
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } \
-      || usage "reply takes exactly one argument: the user's reply to the review results, verbatim."
+      || usage "reply takes exactly one argument: the user's reply to the release approval card, verbatim."
     RP_TEXT="$1"
     ;;
-  # THE REVIEW RESULTS PAGE. `--preview` once, `--against <key>` any number of times, at most one plan. A key's
-  # shape is the usage error (2); whether it names anything on the page is the verb's own refusal (1).
-  review-results)
+  # THE RELEASE APPROVAL CARD. `--preview` once, `--against <key>` any number of times, at most one plan; `--help` says the
+  # verb's usage line and exits 0 before anything else is read. A key's shape is the usage error (2); whether it names
+  # anything on the page is the verb's own refusal (1).
+  release-approval)
     RR_PREVIEW=no; RR_AGAINST=""; RR_ARG=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --preview) [ "$RR_PREVIEW" = no ] || usage "review-results takes --preview once."; RR_PREVIEW=yes ;;
+        -h|--help) printf 'poker: %s\n' "$RA_USAGE"; exit 0 ;;
+        --preview) [ "$RR_PREVIEW" = no ] || usage "release-approval takes --preview once."; RR_PREVIEW=yes ;;
         --against)
           case "${2:-}" in
             approve:?*|waive:?*|row:?*|finding:?*) RR_AGAINST="${RR_AGAINST}$2"$'\n'; shift ;;
-            *) usage "review-results --against takes one key: approve:<name>, waive:<question>, row:<AC> or finding:<record>#<n>." ;;
+            *) usage "release-approval --against takes one key: approve:<name>, waive:<question>, row:<AC> or finding:<record>#<n>." ;;
           esac ;;
-        -*) usage "review-results takes --preview, --against <key> and at most one plan." ;;
-        *) [ -z "$RR_ARG" ] || usage "review-results takes at most one plan."; RR_ARG="$1" ;;
+        -*) usage "release-approval takes --preview, --against <key> and at most one plan." ;;
+        *) [ -z "$RR_ARG" ] || usage "release-approval takes at most one plan."; RR_ARG="$1" ;;
       esac
       shift
     done
@@ -1181,6 +1209,10 @@ $1"; shift ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
+  # ONE FLAG: the explanation of a dead Patrol clock, the only thing this verb prints.
+  patrol)
+    { [ $# -eq 1 ] && [ "$1" = --explain ]; } || usage "patrol takes one flag: --explain."
+    ;;
   # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). No operand prints it; one operand sets it. The
   # value's own shape is the verb's refusal (1); a second operand is the usage error.
   share)
@@ -1199,19 +1231,31 @@ $1"; shift ;;
   # binding left (close-out writes its continuation after its tmp is wiped).
   release-note) : ;;
   landing-report)
-    LR_ROWS=no; LR_HH=no; LR_SC=no; LR_ARG=""
-    for _lr_a in "$@"; do
+    LR_ROWS=no; LR_HH=no; LR_SC=no; LR_ARG=""; LR_SINCE=""; LR_UNTIL=""
+    # A window end is an ISO-UTC instant, the shape every source the count places carries; any other value is the
+    # usage error, so a typo never reads as an open end.
+    while [ $# -gt 0 ]; do
+      _lr_a="$1"; shift
       case "$_lr_a" in
         --rows) [ "$LR_ROWS" = no ] || usage "landing-report takes --rows once."; LR_ROWS=yes ;;
         --hand-holds) [ "$LR_HH" = no ] || usage "landing-report takes --hand-holds once."; LR_HH=yes ;;
         --scorecard) [ "$LR_SC" = no ] || usage "landing-report takes --scorecard once."; LR_SC=yes ;;
-        -*) usage "landing-report takes the flags --rows and --hand-holds, and at most one plan." ;;
-        *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
+        --since|--until)
+          case "${1:-}" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+            *) usage "landing-report $_lr_a takes an ISO-UTC instant, as 2026-10-20T16:43:24Z." ;;
+          esac
+          if [ "$_lr_a" = --since ]; then [ -z "$LR_SINCE" ] || usage "landing-report takes --since once."; LR_SINCE="$1"
+          else [ -z "$LR_UNTIL" ] || usage "landing-report takes --until once."; LR_UNTIL="$1"; fi
+          shift ;;
+        -*) usage "landing-report takes the flags --rows and --hand-holds (with --since and --until), and at most one plan." ;;
+        *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds (with --since and --until), and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
     [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
+    { [ -z "$LR_SINCE" ] && [ -z "$LR_UNTIL" ]; } || [ "$LR_HH" = yes ] || usage "landing-report takes --since and --until only with --hand-holds: they bound its window."
     ;;
-  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` renders, read-only but for the gate's own scan;
+  # THE SITUATION REPORT. `sitrep [--line|--basis] [<plan>]` renders, read-only but for the gate's own scan;
   # `sitrep grade <A-F> '<rationale>' [<plan>]` records the grade. The plan, when named, is the last operand and
   # ends in `.plan.md`; without it, the session's bound run, as landing-report's. The letter's and the rationale's
   # own rules are the verb's refusal (1); the count is the usage error (2).
@@ -1227,8 +1271,9 @@ $1"; shift ;;
     else
       for _sr_a in "$@"; do
         case "$_sr_a" in
-          --line) [ "$SR_LINE" = no ] || usage "sitrep takes --line once."; SR_LINE=yes ;;
-          -*) usage "sitrep takes the flag --line and at most one plan, or grade <A-F> '<rationale>' [<plan>]." ;;
+          --line|--basis) [ "$SR_LINE" = no ] || usage "sitrep takes one of --line and --basis, once."
+                          SR_LINE=yes; [ "$_sr_a" = --line ] || SR_LINE=basis ;;
+          -*) usage "sitrep takes one of the flags --line and --basis and at most one plan, or grade <A-F> '<rationale>' [<plan>]." ;;
           *) [ -z "$SR_ARG" ] || usage "sitrep takes at most one plan."; SR_ARG="$_sr_a" ;;
         esac
       done
@@ -2050,8 +2095,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
 #   - a task id read (a table without `reads`) is `waits for T2 (active)`;
 #   - any other read names its writers: `reads payload/x.sh, written by T1 (active)`;
 #   - a gate act held for its step: `step 8 integrate row waits for current: 8`.
-# A row that IS ready and was not offered says why: the writer gap is closed, or the standing
-# fill-declined answered it. Then one line for the longest remaining chain over the pending and
+# A row that IS ready and was not offered says why: the writer gap is closed. Then one line for the longest remaining chain over the pending and
 # active rows — sizes from the `size` column (its leading digits, minutes), edges from
 # `units_edges`, through `units_chain` at the plan's writer ceiling:
 #
@@ -3384,13 +3428,19 @@ case "$VERB" in
   # like `interval`: it decides nothing.
   #
   # IT ASKS ONLY FOR WHAT THE TICK PRINTED (wave-24 T7, REQ-4; D5). Through 1.8.10 it asked for a
-  # `fill-declined:` line on every tick, and all 29 declines of that run answered nothing a wall
-  # had asked. Each answer is now conditional on the line that owes it, ListAgents on an open
+  # reason in prose on every tick, and all 29 of that run answered nothing a wall had asked. A FILL
+  # is answered by its dispatch alone: a row that should wait is made not ready by a fact the tick
+  # judges, never answered ready by a sentence, and the prompt names no verb for it. Each answer is now conditional on the line that owes it, ListAgents on an open
   # row, the task-list refresh only on a change of a row's status or the ready set (wave-26 T15;
   # D16), which the tick prints as its RECONCILE line (T32), nothing at all after `unchanged` or
   # WAITING, and `v=` after the
   # marker names the prompt's version so `arm` can record it and a later tick can ask for a
   # re-arm when the poker has moved on.
+  patrol)
+    poker_patrol_explain
+    exit 0
+    ;;
+
   prompt)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -3398,8 +3448,8 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand) or record why they wait: bash %s decline IDS %s, IDS the rows as printed, comma-joined, the reason inside the quotes. Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
-      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$DECLINE_REASON_SLOT" "$POKER_WORD" "$HOLD_REASON_SLOT"
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand); a row that should wait is made not ready instead, by one of the three forms the stop wall prints. Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. After you re-arm this Patrol, say exactly: "%s" Continue the run toward its goal until a wall only when something is ready or changed.\n' \
+      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT" "$PATROL_REARM_SAY"
     exit 0
     ;;
 
@@ -3434,7 +3484,6 @@ case "$VERB" in
   extend) poker_verb_extend "$@" ;;
   hold) poker_verb_hold "$@" ;;
   rule|ruling-ack|rulings) poker_verb_rule "$@" ;;
-  decline) poker_verb_decline "$@" ;;
   budget) poker_verb_budget "$@" ;;
   regression) poker_verb_regression "$@" ;;
   amend) poker_verb_amend "$@" ;;
@@ -3447,6 +3496,7 @@ case "$VERB" in
   discharge) poker_verb_discharge "$@" ;;
   matrix-set) poker_verb_matrix_set "$@" ;;
   waive-row) poker_verb_waive_row "$@" ;;
+  confirm-row) poker_verb_confirm_row "$@" ;;
   tasks-prose) poker_verb_tasks_prose "$@" ;;
   epic-row) poker_verb_epic_row "$@" ;;
   continuation-fill) poker_verb_continuation_fill "$@" ;;
@@ -3455,7 +3505,7 @@ case "$VERB" in
   task-split) poker_verb_task_split "$@" ;;
   current) poker_verb_current "$@" ;;
   reply) poker_verb_reply "$@" ;;
-  review-results) poker_verb_review_results "$@" ;;
+  release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;
   order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;

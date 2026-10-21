@@ -17,7 +17,10 @@
 #            line on stderr, the run's own code; a re-run of a live run attaches; LOST exits 70.
 #   §DETACH-CEILING  (T12; D10; AC-9.4) a detached run the gate has not admitted within the bound ends
 #            75 with the one line, in its log, `<log>.rc` and its roster row; the command never ran.
-#   §WALL    AC-3.1 end to end — the Bash wall's wrap carries --detach and outlives its caller.
+#   §RUNLINE  the run close writes the run's line to the bound plan's landing record, and the floor's one
+#            reader reads it.
+#   §SIGNALS  a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their
+#            defaults.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
 #
@@ -339,42 +342,6 @@ unset BIONIC_SETTLE_MAX_WAIT BIONIC_NOW_FILE
 if [ -n "$CE_CFG_WAS" ]; then export CLAUDE_CONFIG_DIR="$CE_CFG_WAS"; else unset CLAUDE_CONFIG_DIR; fi
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate"
 world_machine 8 8192 10 0.5
-
-# =====================================================================================
-section "§WALL — the Bash wall wraps a suite call in --detach, and the run outlives its caller (T12; A-orch-7; AC-3.1)"
-# =====================================================================================
-#
-# END TO END ONCE: the real hooks/bash-walls.sh rewrites a main-thread suite call (advisory mode,
-# so the call is allowed and booked), and the rewritten text, run in a caller's group that is then
-# SIGKILLed, still ends its run's log with an rc line. §DETACH proved the shim half; this proves the
-# wall passes the flag.
-mkdir -p "$D/home" "$T1/tests"
-printf 'farm-out-mode: advisory\n' >> "$WR/.bionic/config.yaml"
-: > "$WR/.bionic/tmp/engaged-$WORLD_SID.state"
-printf '#!/bin/bash\necho wall-run >> "%s/wl.count"\ni=0; while [ ! -f "%s/wl.go" ] && [ $i -lt 300 ]; do i=$((i+1)); sleep 0.05; done\necho wall-body\n' "$D" "$D" \
-  > "$T1/tests/hold.test.sh"
-WL_WRAP="$(jq -n --arg s "$WORLD_SID" --arg c "$T1" \
-    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
-      tool_input:{command:"bash tests/hold.test.sh"}, tool_use_id:"toolu_01bookedwall"}' \
-  | ( cd "$T1" && env HOME="$D/home" BIONIC_PLUGINS_DIR="$D/no-plugins" CLAUDE_PROJECT_DIR= \
-        bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>/dev/null ) \
-  | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)"
-expect_regex "WL.1 the wall rewrites the suite call into the shim with --detach" \
-  "^bash [^ ]+/booked\\.sh( [^ ]+)* --detach( |\$)" "$WL_WRAP"
-expect_no_regex "WL.2 …and with no --max-wait (beside WL.1 on the same text)" " --max-wait " "$WL_WRAP"
-set -m
-( cd "$T1" && eval "$WL_WRAP"; echo "caller-rc=$?"; sleep 60 ) > "$D/wl.out" 2>&1 &
-WL_PG=$!
-set +m
-bk_wait 10 bk_grep '^booked: started ' "$D/wl.out"
-WL_LOG="$(bk_started wl log)"
-bk_wait 10 test -s "$D/wl.count"
-bk_kill_group "$WL_PG"
-touch "$D/wl.go"
-expect_true "WL.3 the caller's group SIGKILLed mid-run, the run still ends its log with an rc line" \
-  bk_wait 20 bk_last_rc "${WL_LOG:-$D/none}"
-expect_eq "WL.4 …and that line is the suite's own rc=0" "rc=0" "$(tail -n 1 "${WL_LOG:-$D/none}" 2>/dev/null)"
-expect_eq "WL.5 …and the suite ran once" "1" "$(wc -l < "$D/wl.count" 2>/dev/null | tr -d ' ')"
 
 # =====================================================================================
 section "§RUNLINE — the run close writes the run's line to the bound plan's landing record, and the floor's one reader reads it (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"

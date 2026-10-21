@@ -454,7 +454,10 @@ units_rows() {
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
 #     failing one included, is not enough;
 #   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
-#     `approved: <name> …` otherwise. No row writes one; the user's act does.
+#     `approved: <name> …` otherwise. No row writes one; the user's act does. `approval:plan` is
+#     met only while the plan's `current:` is 4 or later: a plan approved and still at Step 2 or 3
+#     has a table nobody has started, and the line alone readies none of it (lib/fill.sh
+#     `fill_ledger_live` holds the fill's gate to the same rule).
 #   - `ext:<slug>`: never, until its owner removes it from the cell.
 # A writer that has LANDED or been DROPPED satisfies the read: a dropped row writes nothing
 # (through 1.10 a dependency on a dropped row held its dependents for ever; A-T2.3). A token
@@ -722,40 +725,30 @@ units_split_candidate() {
     }'
 }
 
-# units_hold_read <plan> <id> <holder id> -> the `task-set` operand that makes "<id> waits on
-# <holder>" a table fact: `reads=<id's cell, its kind default when empty, then the holder's record
-# path>` in a table with a reads column, `deps=<id's deps, then the holder>` in one without. Exit 1,
-# nothing printed, when either id is no row, or the holder writes no path to read.
+# units_cell_append <plan> <id> <reads|deps> <token> -> the cell with <token> after what it holds, as
+# `task-set <id> <column>+=<token>` writes it; exit 1, nothing printed, when the plan has no row <id>.
 #
-# A DECLINE NAMES WHAT IT WAITS ON (Δ13; REQ-12 AC-12.7). `decline <ids> '<reason>' --on <row>` prints
-# `task-set <id> <this>`: the hand-hold, written where the tick judges it once instead of in a reason
-# it re-reads every turn. The holder's record is its first Files path in the record; a holder with
-# none is read by its first path. A cell already naming that path is printed as it stands.
-units_hold_read() {
-  local plan="${1:-}" want="${2:-}" holder="${3:-}" rows hasreads=0
+# A ROW IS MADE TO WAIT BY APPENDING, NEVER BY REPLACING. A read of the record of the row it waits on, or
+# a read of a decision nobody has ruled, is added to what the row already reads: written over the cell,
+# it would drop the row's `approval:plan, head` and ready it the moment that one read is met. An EMPTY
+# reads cell stands for its kind's default (`kdef`, the reading the scheduler takes), so the default is
+# written out first and the token after it. A cell already naming the token is printed as it stands.
+units_cell_append() {
+  local plan="${1:-}" want="${2:-}" col tok="${4:-}" rows
+  case "${3:-}" in reads) col=13 ;; deps) col=6 ;; *) return 1 ;; esac
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
   [ -n "$rows" ] || return 1
-  units_has_column "$plan" reads && hasreads=1
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v holder="$holder" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v col="$col" -v tok="$tok" -v regno="$(_units_regno "$plan")" \
     "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
-    { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
-    END {
-      if (!(want in at) || !(holder in at) || want == holder) exit 1
-      i = at[want]; j = at[holder]
-      if (!hasreads) {
-        tokens(dep[i]); o = ""
-        for (k = 1; k <= ntk; k++) { if (tk[k] == holder) { print "deps=" cellq(dep[i]); exit 0 } o = o (o == "" ? "" : ", ") tk[k] }
-        print "deps=" cellq(o (o == "" ? "" : ", ") holder); exit 0
-      }
-      paths(j); p = ""
-      for (k = 1; k <= npe; k++) if (in_docs(pe[k])) { p = pe[k]; break }
-      if (p == "" && npe > 0) p = pe[1]
-      if (p == "") exit 1
-      c = rd[i]; if (c !~ /[A-Za-z0-9]/) c = kdef(knd[i], stp[i])
-      tokens(c); o = ""
-      for (k = 1; k <= ntk; k++) { if (tk[k] == p) { print "reads=" cellq(c); exit 0 } o = o (o == "" ? "" : ", ") tk[k] }
-      print "reads=" cellq(o (o == "" ? "" : ", ") p)
-    }'
+    $1 == want && !found {
+      found = 1
+      c = $col
+      if (col == 13 && c !~ /[A-Za-z0-9]/) c = kdef($3, $2)
+      tokens(c); o = ""; had = 0
+      for (k = 1; k <= ntk; k++) { if (tk[k] == tok) had = 1; o = o (o == "" ? "" : ", ") tk[k] }
+      print (had ? o : o (o == "" ? "" : ", ") tok)
+    }
+    END { exit !found }'
 }
 
 # units_live_range <plan> [<row id>] -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the
@@ -1228,8 +1221,8 @@ _units_files_awk() {
 # _units_cell_awk -> the awk functions `kdef(kind, step)`, the reads a row of that kind takes when its cell is
 # empty (units_ready above), and `cellq(v)`, a cell value as a `task-set` operand prints it: `—` for
 # nothing, else the value in single quotes. ONE DEFAULT, THREE READERS (wave-30 T16): the scheduler
-# reads an empty cell through it, and the suspect test and the decline line write a cell back
-# through it, so a printed `task-set` line keeps the default the row was scheduled by. NO APOSTROPHE
+# reads an empty cell through it, and the suspect test and `task-set <id> reads+=` write a cell back
+# through it, so a printed or appended cell keeps the default the row was scheduled by. NO APOSTROPHE
 # inside it: cellq builds its quotes with sprintf.
 # AT `regression: no` THE INTEGRATE ROW READS NO FLOOR (wave-31 T27; REQ-12 AC-12.2; D4): each reader
 # hands the awk `-v regno=` from _units_regno below, and the default drops `proof:floor`. Unset (a
@@ -1280,6 +1273,73 @@ _units_questions_awk() {
 '
 }
 
+# _units_post_awk -> the awk functions `after(a, b)` and `post_reader(j, r)`, over the row arrays `n`, `stp`, `fil`,
+# `rd` and `sta` the caller filled in table order; it needs `cell_covers` (`_units_files_awk`) before it.
+# A FIX LANDED AFTER THE RELEASE IS READ AS A PIECE: its reader row stands after the release row, so the order check
+# admits a review row there only when what it reads was written after the release. `after(a, b)` is the order the
+# check judges by, the step and then the table position. `post_reader(j, r)` is 1 when the review row j reads only
+# `approval:plan`, `head` and paths that rows placed after the release row r write, and names at least one such path:
+# a row that names none would read the whole head, which belongs ahead of the release. A path some row at or before
+# r also writes is pre-release work and refuses the row, and so does a path no row but j writes. ONE PREDICATE, TWO
+# READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
+_units_post_awk() {
+  printf '%s' '
+    function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
+    function post_reader(j, r,   m, a, k, t, w, hit, named) {
+      named = 0
+      m = split(rd[j], a, ",")
+      for (k = 1; k <= m; k++) {
+        t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
+        if (t == "" || t == "approval:plan" || t == "head") continue
+        hit = 0
+        for (w = 1; w <= n; w++) {
+          if (w == j || sta[w] == "dropped" || !cell_covers(fil[w], t)) continue
+          if (!after(w, r)) return 0
+          hit = 1
+        }
+        if (!hit) return 0
+        named = 1
+      }
+      return named
+    }
+'
+}
+
+# units_post_readers <plan> -> `<id>\t<status>\t<read|unread>` for each review row standing after a landed release row
+# that `post_reader` admits there, in table order. `read` when every record path in its Files is the evidence of a
+# registered review reading (`proved: kind=review … evidence=`), in either spelling the record takes; `unread`
+# otherwise. The release approval card waits on an open row that is unread: what landed after the release is read
+# before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column.
+units_post_readers() {
+  local plan="${1:-}" rows
+  rows="$(units_rows "$plan")" || return 1
+  [ -n "$rows" ] && units_has_column "$plan" reads || return 0
+  printf '%s\n' "$rows" | awk -F'\t' "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    FNR == NR { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
+    END {
+      for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
+      for (j = 1; j <= n; j++) {
+        if (knd[j] != "review" || sta[j] == "dropped" || stp[j] !~ /^[0-9]+$/) continue
+        ok = 0
+        for (r in rel) if (after(j, r) && post_reader(j, r)) { ok = 1; break }
+        if (!ok) continue
+        m = split(fil[j], e, ","); read = 0; unread = 0
+        for (k = 1; k <= m; k++) {
+          gsub(/^[ \t`]+|[ \t`]+$/, "", e[k]); sub(/^\.\//, "", e[k])
+          if (e[k] == "" || !in_docs(e[k])) continue
+          read = 1; got = 0
+          for (x = 1; x <= ne; x++) if (covers(e[k], ev[x])) { got = 1; break }
+          if (!got) unread = 1
+        }
+        printf "%s\t%s\t%s\n", id[j], sta[j], ((read && !unread) ? "read" : "unread")
+      }
+    }' - "$plan"
+}
+
 # _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
 # can sit beside the code; NO APOSTROPHE anywhere inside it (it is single-quoted). It opens with
 # the question test it shares with the validator.
@@ -1294,17 +1354,21 @@ _units_sched_awk() {
       at[$1] = n
       next
     }
-    # THE PLAN TEXT: approval and proof lines inside `## SDLC State`, fences skipped.
+    # THE PLAN TEXT: the step, and the approval and proof lines inside `## SDLC State`, fences skipped.
     part == 2 {
       if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
       if (fence) next
       if ($0 ~ /^## SDLC State/) { insec = 1; next }
       if ($0 ~ /^## /) insec = 0
       if (!insec) next
+      if (!plancurseen && $0 ~ /^[ \t]*current[ \t]*:/) {
+        plancur = $0; sub(/^[ \t]*current[ \t]*:[ \t]*/, "", plancur); gsub(/[ \t]/, "", plancur); sub(/[ab]$/, "", plancur)
+        plancurseen = 1
+      }
       l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
       if (l ~ /^approved-by[ \t]*:/) {
         v = l; sub(/^approved-by[ \t]*:[ \t]*/, "", v)
-        if (v ~ /[^ \t]/) appr["plan"] = 1
+        if (v ~ /[^ \t]/) planapby = 1
       } else if (l ~ /^approved[ \t]*:/) {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
@@ -1326,6 +1390,12 @@ _units_sched_awk() {
 
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
+    # apprmet(nm) -> 1 when approval:<nm> is met. The approval of the plan itself needs its approved-by:
+    # line AND a current: of 4 or later, so the line alone readies nothing; any other name, its approved: line.
+    function apprmet(nm) {
+      if (nm == "plan") return (planapby && plancur ~ /^[0-9]+$/ && plancur + 0 >= 4)
+      return (nm in appr)
+    }
     function writes(j, p,   k) {
       for (k = 1; k <= nfe[j]; k++) if (overlap(fe[j, k], p)) return 1
       return 0
@@ -1455,7 +1525,7 @@ _units_sched_awk() {
       if (a == "head" || substr(a, 1, 5) == "head:") return live_head(i)
       if (a == "record") return 1
       if (substr(a, 1, 6) == "proof:") return (substr(a, 7) in proved)
-      if (substr(a, 1, 9) == "approval:") return (substr(a, 10) in appr)
+      if (substr(a, 1, 9) == "approval:") return apprmet(substr(a, 10))
       if (a !~ /[\/.*?]/ || a ~ /[ \t:!]/) return 0
       lw = 0; ow = 0
       for (j = 1; j <= n; j++) {
@@ -1577,7 +1647,7 @@ _units_sched_awk() {
     function judge(i, t,   j, a, q) {
       nw = 0; lwhy = ""
       if (t ~ extre) return 0
-      if (substr(t, 1, 9) == "approval:") return (substr(t, 10) in appr)
+      if (substr(t, 1, 9) == "approval:") return apprmet(substr(t, 10))
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6))
       # A PROOF IS SETTLED ONLY WHEN NOTHING OPEN WILL WRITE A NEWER ONE (T35 F2): a second regression row
       # added after the regression was proved makes that line stale, so the open writers are asked
@@ -1958,7 +2028,7 @@ units_validate() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)"'
+      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
@@ -2173,6 +2243,10 @@ units_validate() {
                 break
               }
               if (ord[i] == 3 && ahead) {
+                # A FIX LANDED AFTER THE RELEASE IS READ AS A PIECE: once the release row has landed, a review row
+                # past it that reads only what rows past it wrote is that piece read, not a review out of order.
+                # While the release is open the order holds whatever the reader names.
+                if (sta[i] == "landed" && post_reader(j, i)) continue
                 printf "%s: the release row comes ahead of the review row %s; the order is build, regression, review, release: put %s at step 7, after %s\n", id[i], id[j], id[i], id[j]
                 break
               }

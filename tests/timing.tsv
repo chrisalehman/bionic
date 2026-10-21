@@ -4,6 +4,9 @@
 # on the 1aacdc03 run the runner's timing equalled the span for 56 of 95 suites and exceeded it by 0.84 s on average, 21 s at most. Taken at width 2 beside other work. Built by spans.py; rows sorted by label (C).
 # Wave-39 T6 split close-out.test.sh (its 1.17.0 row: 266) into close-out-1..4.test.sh; their rows are the gate's admitted-to-ended seconds for each part run alone (cost files, 2026-10-18), not spans.
 # Wave-39 T39 replaced the rows of the four suites T35 to T38 split (cross-gate-agreement 427, dispatch-preflight-4 392, landing-line 374, rc-item 490 at 1.17.0) with their eight parts, each the gate's admitted-to-ended seconds for the part run alone (cost files, 2026-10-18 and 2026-10-19), not spans; landing-line-1 is its run with T39's §TOO-LONG (438; T35 measured 376 without it).
+# door-landing.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20, beside other suites at a load near 5 on 8 cores), not a span.
+# door-cover.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20), not a span.
+# door-card.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20, the green run at 07ced9cc), not a span; two release-check runs of about 94 s each are most of it.
 agent-context-guard.test.sh	9
 archive.test.sh	1
 background-suite-guard.test.sh	63
@@ -35,9 +38,13 @@ dispatch-preflight-4b.test.sh	265
 dispatch-preflight.test.sh	185
 doctor-fleet.test.sh	72
 doctor-patrol.test.sh	72
+doctor-reads.test.sh	139
 doctor-restart.test.sh	43
 doctor-version.test.sh	68
 doctor-walls.test.sh	38
+door-card.test.sh	230
+door-cover.test.sh	2
+door-landing.test.sh	136
 engage.test.sh	25
 env.test.sh	1
 execution-recorder.test.sh	197
@@ -60,6 +67,7 @@ landing-line-1.test.sh	438
 landing-line-2.test.sh	301
 live-agents.test.sh	7
 loader.test.sh	1
+name-scan.test.sh	230
 notify.test.sh	72
 patrol-duties-gate.test.sh	185
 patrol-marker.test.sh	1

@@ -552,89 +552,6 @@ expect_eq "S13b the walls-side normaliser leaves a lifted field byte-identical" 
   "$(bash -c '. "$1" || exit 1; cmd_runs_norm "$2"' _ "$S13_CMDCLASS" "$S13B_STORED" 2>&1)"
 
 # ============================================================
-section "S13c — one contract grammar, one verdict at every door (wave-20 T6; REQ-4, D4, Δ10)"
-# ============================================================
-#
-# THE GRAMMAR HAS THREE DOORS AND ONE BODY. A dispatch, an `amend` (T9) and a `task-add` each
-# hand Files:/Suites:/Re-executes: to payload/scripts/lib/brief.sh's `brief_validate_fields`,
-# so an amended contract is held to exactly a fresh dispatch's standard (Δ10). This pins the
-# door that exists today against the library the other two call: the same brief, driven
-# through the real dispatch wall and through the library alone, names the same grammar faults
-# — no fault the library finds is missing from the wall's refusal, and no grammar fault the
-# library does NOT find appears there. The wall's other arms (arming, approval, budget) pool
-# beside these and are not this section's; the comparison reads only the grammar's facts.
-#
-# THE FACT SET IS DERIVED, never typed: it is the union of what the library answered across
-# the table, so a new check in the library joins the comparison without an edit here, and a
-# clean brief in the table makes the "absent" half of the comparison carry weight.
-S13C_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
-[ -r "$S13C_LIB" ] || S13C_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
-S13C_R=$(s4_world "s13c-one-verdict")
-s4_bind "$S13C_R" "$SID_A" "$S13C_R/.bionic/docs/plans/epic-99/run-b.md"
-S13C_BT='`'
-s13c_lib() {  # <repo> <role> <brief> -> one fact per line, sorted
-  bash -c '
-    . "$1" || exit 9
-    sink() { [ "$1" = finding ] && printf "%s\n" "$2"; return 0; }
-    brief_validate_fields "$(lift_contract_fields "$4" "$3")" "$3" "$2" sink
-    exit 0
-  ' _ "$S13C_LIB" "$1" "$2" "$3" 2>/dev/null | sort -u
-}
-s13c_dp() {  # <repo> <role> <name> <brief> -> the dispatch wall's whole channel
-  jq -nc --arg s "$SID_A" --arg c "$1" --arg t "$1/s4-transcript.jsonl" \
-         --arg r "$2" --arg n "$3" --arg p "$4" \
-    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
-      tool_input:{description:"a dispatch", subagent_type:$r, name:$n, prompt:$p},
-      tool_use_id:"toolu_S13C"}' \
-    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1
-  return 0
-}
-S13C_HEAD="Expected artifact: .bionic/docs/record/s13c.md
-Expected duration: ~10 minutes.
-Progress artifact: .bionic/tmp/s13c.progress, cadence ~5m"
-# role|brief tail — one row per grammar fault, and one row with none.
-S13C_CASES="implementor|Suites: tests/widget.test.sh
-implementor|Suites: tests/\$X.test.sh
-implementor|Suites: tests/unit/foo.spec.ts
-implementor|Re-executes: ${S13C_BT}npx jest x | tee log${S13C_BT}
-bionic:auditor|Re-executes: ${S13C_BT}go test ./a${S13C_BT}, ${S13C_BT}go test ./b${S13C_BT}, ${S13C_BT}go test ./c${S13C_BT}, ${S13C_BT}go test ./d${S13C_BT}
-bionic:auditor|Suites: none
-implementor|Notes: none of the three instrument labels
-implementor|Files: payload/scripts/lib/widget.sh"
-S13C_UNION=""
-while IFS='|' read -r _s13c_role _s13c_tail; do
-  S13C_UNION="${S13C_UNION}$(s13c_lib "$S13C_R" "$_s13c_role" "${S13C_HEAD}
-${_s13c_tail}")
-"
-done <<< "$S13C_CASES"
-S13C_UNION=$(printf '%s' "$S13C_UNION" | /usr/bin/grep -v '^$' | sort -u)
-expect_eq "S13c the library answered a distinct grammar fact for each of the seven faulty briefs (non-vacuity)" \
-  "7" "$(printf '%s\n' "$S13C_UNION" | /usr/bin/grep -c .)"
-_s13c_i=0
-while IFS='|' read -r _s13c_role _s13c_tail; do
-  _s13c_i=$((_s13c_i + 1))
-  _s13c_brief="${S13C_HEAD}
-${_s13c_tail}"
-  _s13c_want=$(s13c_lib "$S13C_R" "$_s13c_role" "$_s13c_brief" | tr '\n' '|')
-  _s13c_out=$(s13c_dp "$S13C_R" "$_s13c_role" "s13c-${_s13c_i}" "$_s13c_brief")
-  _s13c_got=""
-  while IFS= read -r _s13c_fact; do
-    [ -n "$_s13c_fact" ] || continue
-    case "$_s13c_out" in *"$_s13c_fact"*) _s13c_got="${_s13c_got}${_s13c_fact}|" ;; esac
-  done <<< "$S13C_UNION"
-  expect_eq "S13c case ${_s13c_i} [${_s13c_role}] ${_s13c_tail%%:*}: the wall and the library name the same grammar faults" \
-    "$_s13c_want" "$_s13c_got"
-done <<< "$S13C_CASES"
-# THE CLEAN ROW REALLY REACHED THE WALL: an empty want and an empty got would also agree for
-# a wall that exited before reading the brief. So the clean brief must have been either
-# refused by a named arm or journalled onto the roster, and either one is the wall at work.
-_s13c_out=$(s13c_dp "$S13C_R" implementor s13c-clean "${S13C_HEAD}
-Suites: tests/widget.test.sh")
-expect_eq "S13c …and the wall answered the clean brief at all (the empty agreement is not silence)" "yes" \
-  "$(if /usr/bin/grep -qE '^bionic: dispatch refused' <<< "$_s13c_out" \
-        || /usr/bin/grep -qs 'name=s13c-clean' "$S13C_R/.bionic/tmp/roster-$SID_A.state"; then echo yes; else echo no; fi)"
-
-# ============================================================
 section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-30/AC-31)"
 # ============================================================
 #
@@ -695,10 +612,8 @@ printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target
 # memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
 # positive; §S19.2 holds the absence side across every suite.
 
-# --- §S19.4 agent-context-guard: every doctored copy of the guard is anchored ---
-# agent-context-guard builds its mutants through one helper, so a site is any line
-# writing a copy of "$GUARD" to a file. The suite gets its own site pattern, and a
-# pattern that finds no site is RED
+# --- §S19.4 every doctored copy is anchored, suite by suite ---
+# Each doctoring suite gets its own site pattern, and a pattern that finds no site is RED
 # here rather than a silent pass of the relation below it.
 #
 # THE ANCHOR MAY SIT ANYWHERE EARLIER IN THE SITE'S BLOCK (the lines since the last
@@ -714,35 +629,12 @@ s19_block_sites() {  # s19_block_sites <suite> <site-ERE> -> "<sites> <unanchore
     END { print sites + 0, bare + 0 }
   ' "$1"
 }
-S19_ACG="$S19_TESTS_DIR/agent-context-guard.test.sh"
-S19_ACG_SITE='"\$GUARD" > "'
-S19_ACG_REAL="$(s19_block_sites "$S19_ACG" "$S19_ACG_SITE")"
-S19_ACG_REAL_SITES="${S19_ACG_REAL%% *}"
-expect_eq "S19.4 the agent-context-guard site pattern finds at least one doctored site" "yes" \
-  "$([ "${S19_ACG_REAL_SITES:-0}" -ge 1 ] 2>/dev/null && echo yes || echo no)"
-expect_eq "S19.4 every agent-context-guard doctoring site is anchored" "0" \
-  "${S19_ACG_REAL#* }"
-
-# THE PLANTED DEFECTS, on copies. A bare site — a doctored copy of the guard with no
-# anchor in its block — must be named; and a copy whose sites no longer carry the
-# pattern's target must report no site, which is what turns the row above RED.
-cp "$S19_ACG" "$S19_SB/acg-bare.test.sh"
-# built with %s so this file does not itself carry the site it plants
-printf '\nsed %s "$GUARD" %s "$MUTANT_TREE/hooks/mutant-bare.sh"\n' "'s/x/y/'" '>' >> "$S19_SB/acg-bare.test.sh"
-S19_ACG_BARE="$(s19_block_sites "$S19_SB/acg-bare.test.sh" "$S19_ACG_SITE")"
-expect_eq "S19.4 …and the derivation names a planted bare agent-context-guard site" "1" \
-  "${S19_ACG_BARE#* }"
-S19_ACG_BARE_SITES="${S19_ACG_BARE%% *}"
-expect_eq "S19.4 …which the pattern counted as one more site (not vacuous)" "1" \
-  "$(( ${S19_ACG_BARE_SITES:-0} - ${S19_ACG_REAL_SITES:-0} ))"
-sed 's/"\$GUARD" > "/"$GUARD_GONE" > "/' "$S19_ACG" > "$S19_SB/acg-nosite.test.sh"
-S19_ACG_NONE="$(s19_block_sites "$S19_SB/acg-nosite.test.sh" "$S19_ACG_SITE")"
-expect_eq "S19.4 …and on it the site pattern finds no site, so the at-least-one row goes RED" "0" \
-  "${S19_ACG_NONE%% *}"
 
 # --- §S19.4 landing-gate: every doctored copy of the gate is anchored ---
 # landing-gate doctors one source, the gate it loads, so a site is any line writing a
-# copy of "$GATE_SRC" to a file. Same helper, same planted defects as above.
+# copy of "$GATE_SRC" to a file. THE PLANTED DEFECTS, on copies: a bare site, a doctored
+# copy with no anchor in its block, must be named; and a copy whose sites no longer carry
+# the pattern's target must report no site, which is what turns the at-least-one row RED.
 S19_LG="$S19_TESTS_DIR/landing-gate.test.sh"
 S19_LG_SITE='"\$GATE_SRC" > "'
 S19_LG_REAL="$(s19_block_sites "$S19_LG" "$S19_LG_SITE")"

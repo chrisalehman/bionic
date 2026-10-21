@@ -165,6 +165,9 @@ $ship_trio")" > /dev/null
 # human actually said it; a fabricated `chris 2026-08-19 ...` passes the form.
 # The form buys a record that names who and when — it does not buy honesty, and
 # it is not sold as if it did.
+# WHERE IT BITES. The ruling is demanded from step 8, the merge advance, where the release approval card
+# settles it; from step 6 the arm asks only for a verdict, and a T4 row's `user-confirmed:` line is one. So
+# every arm below is written at current: 8, and 30m pins the step-6 half beside them.
 section "Section 30: T4 rows discharge on user-confirmed, impostors do not"
 
 # $1 = tier, $2 = auditor cell, $3 = the block's user-confirmed value.
@@ -193,19 +196,21 @@ GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and conf
 # 30a — the case the blind spot refused: a real user confirmation, no auditor
 # verdict, no waiver → allow.
 h30a=$(make_home)
-write_plan "$h30a" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")")" > /dev/null
+expect_allow "30a T4 + attributed user-confirmed + empty auditor cell at current 8 → allow (ruled by the user)" \
+  "$h30a" 'git commit -m "x"'
 
 # 30b — an agent-shaped claim: no attributed human, no date. Still refused.
 h30b=$(make_home)
-write_plan "$h30b" "$(wave_plan 6 "$step6_body" \
-  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
+write_plan "$h30b" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
+  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")")" > /dev/null
 expect_block "30b T4 + agent-shaped user-confirmed → block (no attributed user)" \
   "$h30b" 'git commit -m "x"' "CONFIRMED"
 
 # 30c — a date with nobody attached is not an attribution either.
 h30c=$(make_home)
-write_plan "$h30c" "$(wave_plan 6 "$step6_body" \
-  "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")" > /dev/null
+write_plan "$h30c" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
+  "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")")" > /dev/null
 expect_block "30c T4 + dated but unattributed user-confirmed → block" \
   "$h30c" 'git commit -m "x"' "CONFIRMED"
 
@@ -213,13 +218,13 @@ expect_block "30c T4 + dated but unattributed user-confirmed → block" \
 # auditor by writing a user's name into its block: T3's evidence is a live
 # reading an auditor CAN re-take independently, so the verdict still stands.
 h30d=$(make_home)
-write_plan "$h30d" "$(wave_plan 6 "$step6_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30d" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")")" > /dev/null
 expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-only)" \
   "$h30d" 'git commit -m "x"' "CONFIRMED"
 
 # 30e — no regression: a T4 row an auditor DID confirm still passes.
 h30e=$(make_home)
-write_plan "$h30e" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30e" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
 expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
   "$h30e" 'git commit -m "x"'
 
@@ -227,8 +232,7 @@ expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
 # only. At current: 5 the row is still being discharged and the contract there
 # is the one it always was — `user-confirmed` present, non-empty, not a
 # placeholder. An impostor value passes the VERIFY gate and meets the form
-# check on the 5->6 advance, which is where the authority claim is actually
-# made. Widening the check to Step 5 would false-block mid-discharge commits
+# check on the advance to 8, which is where the ruling is demanded. Widening the check to Step 5 would false-block mid-discharge commits
 # on plans written before this contract existed.
 h30f=$(make_home)
 write_plan "$h30f" "$(wave_plan 5 "$step5_base" \
@@ -249,7 +253,7 @@ expect_allow "30f impostor at current: 5 → allow (form check is post-Verify on
 # than the attribution, because the attribution is fine and re-writing it is
 # not the fix.
 h30h=$(make_home)
-write_plan "$h30h" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30h" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")")" > /dev/null
 expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" \
   "$h30h" 'git commit -m "x"' "REFUTED"
 
@@ -257,9 +261,22 @@ expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" \
 # evidence could not be checked, which is not the same as nobody having looked.
 # Same arm, same reason.
 h30i=$(make_home)
-write_plan "$h30i" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30i" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")")" > /dev/null
 expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" \
   "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
+
+# 30m — the step-6 half of the move. At current: 6 the arm asks for a verdict, not a ruling: the impostor of
+# 30b and the standing finding of 30h each carry a `user-confirmed:` line, which is a T4 row's verdict, so the
+# gate admits both there; 30b and 30h refuse the same rows at current: 8.
+h30m=$(make_home)
+write_plan "$h30m" "$(wave_plan 6 "$step6_body" \
+  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
+expect_allow "30m T4 + agent-shaped user-confirmed at current 6 → allow (a verdict; the ruling is step 8's)" \
+  "$h30m" 'git commit -m "x"'
+h30m2=$(make_home)
+write_plan "$h30m2" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "30m2 T4 + well-formed user-confirmed + auditor REFUTED at current 6 → allow" \
+  "$h30m2" 'git commit -m "x"'
 
 # (30j — an arm asserting the refusal SENTENCE ("does not overturn") on the same
 # fixture 30h already blocks on — deleted at epic-18 W1: its only failure mode
@@ -271,7 +288,7 @@ expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → blo
 # refutation twin so a future edit that broke the agreement case would fail
 # next to the one that proves the refusal.)
 h30k=$(make_home)
-write_plan "$h30k" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30k" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
 
 # 30g — META-EVIDENCE, and the durable half of this section.
 #
@@ -317,7 +334,7 @@ cp "$HOOK" "$DOCTORED_HOOK"
 H30G_LIB="$h30g_dir/scripts/lib/walls.sh"
 H30G_LIB_REAL="$(dirname "$H30G_LIB")/.walls-real.sh"
 cp "$H30G_LIB" "$H30G_LIB_REAL"
-sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
+sed 's#^user_confirmed_attributed() {#user_confirmed_attributed() { [ -n "$1" ]; return; #' \
   "$H30G_LIB_REAL" > "$H30G_LIB"
 
 if ! diff -q "$H30G_LIB_REAL" "$H30G_LIB" > /dev/null 2>&1; then
@@ -855,6 +872,9 @@ od_plan 4 '' "$(od_rows pending pending pending)"
 cp "$OD_PLAN" "$OD_ROOT/before"
 od_poke task-add T9 7 test 'a second regression' test-runner — 90 REQ-1 .bionic/docs/record/w/T9.md 'approval:plan, head'
 expect_eq "OV-1 AC-7.1 task-add of a regression row after the review and the release is refused (exit 1)" "1" "$OD_RC"
+expect_eq "OV-1b …and the refusal is the validator's one line for T9, naming T3, the review row it follows" \
+  'T9: the regression row comes after the review row T3; the order is build, regression, review, release: put T9 at step 5, ahead of T3' \
+  "$(printf '%s\n' "$OD_OUT" | grep '^T9:' || :)"
 expect_true "OV-1c …and the plan is byte-identical" cmp -s "$OD_ROOT/before" "$OD_PLAN"
 
 od_plan 5 '' "$(od_rows pending pending pending)"
@@ -872,7 +892,16 @@ expect_contains "WR-3b …saying the head has its whole run" "runs once at a hea
 
 printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
 od_poke regression-run
-expect_eq "FX-1 the whole run at a new head H runs, red (exit 1, a second log)" "1|2" "$OD_RC|$(od_logs)"
+expect_eq "FX-1 AC-14.3 a new head H past the one whole run: regression-run refuses a second (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
+expect_contains "FX-1b …naming the whole run's head" "${OD_B:0:12} has it" "$OD_OUT"
+# THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's own report as the log's body, the
+# run line through the product's writer, and the per-suite facts through the fold.
+OD_PLANT=0
+(cd "$OD" && { bash tests/run.sh 2>&1 || :; }) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?
+bash -c '. "$1/proof.sh" && proof_regression_fold "$2" "$3" "$4" "$5" "$6"' _ "$OD_LIB" "$OD_PLAN" "$OD" "$OD_H" \
+  "$OD_REC/regression-run-$OD_H.log" "$OD_RL/regression-run-$OD_H.log" || OD_PLANT=$((OD_PLANT + 10))
+expect_eq "FX-1c precondition: the red run is left at H (both writers exit 0), its run line and its one red verdict in the record" "0|1|1" \
+  "$OD_PLANT|$(/usr/bin/grep -c "^line/v1|ev=run|log=$OD_RL/regression-run-$OD_H.log|head=$OD_H|" "$(od_lrec)" || :)|$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_H|suite=b.test.sh|result=red|" "$(od_lrec)" || :)"
 OD_FL="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z "$3" b.test.sh' _ "$OD_LIB" "$OD_H" "$OD_RL/regression-run-$OD_H.log")"
 od_plan 5 "$OD_FL" "$(od_rows landed landed pending)"
 expect_eq "FX-1b precondition: the regression at H owes the red suite" "owed" "$(od_state)"
@@ -951,5 +980,6 @@ od_plan 5 '' "$(od_rows landed landed pending)"
 od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"
 expect_eq "PA-2 …and one commit later that no landing proves: refused (exit 1), naming that commit and that it is not proved" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "commit ${OD_D:0:12} .*is not proved" && echo yes || echo no)"
+expect_absent "PA-2b …and the same refusal offers no second whole run (the positive above reads this output)" "run the whole" "$OD_OUT"
 
 finish

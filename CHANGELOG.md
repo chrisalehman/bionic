@@ -8,6 +8,411 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.24.0 — 2026-10-21
+
+This is the run closes itself release. After the last build row lands, a run reaches its release approval card
+without a person: no ready row is held on the user, every gate before the card holds machine facts only, and the card
+is the one place the user rules on evidence and approves the release and the merge (D1, D8, ADR-066). A fix landed
+after the release is read like any other code, and the line renders the release numbers again at that landing (D2,
+D11). The door refuses a change to the check that judges it, and a test tree larger than the code (D4, D6, ADR-067).
+The 1,034 sections of the test tree were read against a written rubric and 194 culled, the two suites that were
+deleted in error came back, and a test now earns its place only by a stated criterion (D3, D5, D12, ADR-068). The
+decline verb is deleted (D9). The sitrep says when the run closes as a forecast or a floor, prints one line per task,
+always has a best guess, and grades the requirements' own themes as its goals (D13 to D18). A quitting-reader lint
+guards the check, a dead Patrol clock is one line, and the handoff ends on one line. This is a minor release by the
+policy above: the door fixture suites, the cap on tests and the census are new capability, and the decline verb is
+removed. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T1: `session-poker.sh decline` is gone, with its lapse and its standing line. A row is ready only once the run is at
+  step 4, and a wait is a fact of the plan: a dependency, a read of an unruled decision (`task-set <id>
+  reads+=approval:D<n>`), or an open `order`. The wall's gap refusal names those three forms. Old ledgers still read
+  as history.
+- T4: the `review-results` verb is `release-approval`. The old word still runs, prints the new name once, and reads
+  pages written under either name.
+- T13: `regression-run` refuses a second whole run past the first, and the `proof-add` refusal no longer offers one. A
+  head past the whole run is proved by its landings' own green verdicts.
+- T19, T43: from 1.24.0 on, a deferral the policy defers must carry a stated sentence. The release check refuses
+  one with none, or with a dash, in one line naming the finding. A release before 1.24.0 is passed over as before.
+- T20: the stop hook's dead-clock refusal is one line, `bionic: stop refused — Patrol dead (CronList; CronCreate if
+  absent; arm)`. The explanation is `session-poker.sh patrol --explain`.
+- T26: the release check prints `test-ratio: <tests>/<code>`, shell lines under tests/ against shell lines elsewhere
+  at the head, and refuses a head where tests exceed code. A head with no shell outside tests/ is a refusal, never a
+  pass. The release approval card and the sitrep print the same line.
+- T10: a landing past the release renders its numbers again. The line adds a commit, `line: release numbers <row>`,
+  that replaces the entry's `### The landing numbers` part, and the `published` event gains `numbers=<sha>`.
+- T15, T48: the door's refusal of a landing whose range changes the release check names its judge:
+  `judged-by=target script=<path>@<base12> changed-here=<path>`. For a release check named relative to the project,
+  as bionic's own is, a change to the check's own files is refused whatever the check answers. It lands by hand, through `row-landed <row> <merge> <at> --by-hand`, and that line
+  records `judged-by=candidate`.
+- T36: a wave or epic requirements document groups its REQs under theme sections, three to six of them. The
+  governing-skill hook refuses a REQ under no theme, and the sitrep and the card grade one goal row per theme.
+- T39: `handoff` prints the resume line alone. The `handoff — written to <path>` line is gone.
+- T5: `tests/shell-lint.test.sh` holds two agreement checks. An ADR's `status:` line must open with the word its
+  `## Status` section opens with, and a suite's header list of sections must equal the sections of its body.
+- T18: a writer piped into `grep -q`, `grep -m` or an early-exit `awk` in a file under `set -o pipefail` is refused by
+  the lint over hooks/, payload/scripts/ and the two files of the release check. Each allowed site is a line of
+  `tests/lib/quitting-readers.allow` with its reason.
+
+### The run closes itself (D1, D2, D8, D9, D11, ADR-066, ADR-067)
+
+- T1 (`T1-decline.md`): the decline verb, its ledger reader and lapse, the tick's standing line and the stop wall's
+  `fill-declined:` scan are deleted. A ready row is dispatched or made not ready.
+- T6 (`T6-ruled.md`) and T7 (`T7-card-ruled.md`): one predicate, `matrix_row_ruled`, read by the commit wall, the
+  judge and the card. Every row has a verdict by Step 6, and a ruling is demanded only at the merge advance. The card
+  lists no row the user already confirmed, and `confirm-row <AC> '<reply>'` writes the attributed confirmation.
+- T37 (`T37-notify.md`) and T38 (`T38-pending-confirm.md`): the gate-move fixtures follow the ruling demand to step 8,
+  and a `user-confirmed: pending` stub holds nothing before the merge advance.
+- T8 (`T8-pages.md`): the sitrep and the resume recap read open decisions and landed readings through one reader, a
+  decision is owed once, and the title reads `step 4 of 9 · work at step 5 (…)` when the work is ahead of the
+  counter.
+- T9 (`T9-post-release.md`) and T10 (`T10-rerender.md`): a review row that reads only rows after the release is
+  admitted, the card waits for it, and the line renders the release numbers again at a landing past the release.
+- T11 (`T11-window.md`): the hand-holds count is measured from the last build landing to the card.
+- T42 (`T42-holder.md`): the gate's live-holder rule holds under the runner's `IFS`.
+
+### Rules tested where they run (D4, D7, D10, ADR-067)
+
+- T14 (`T14-door.md`): `tests/lib/door.sh` builds one fixture of the door's whole closure, and
+  `tests/door-landing.test.sh` lands rows through it by hand and by the line.
+- T15 (`T15-judged.md`) and T48 (`T48-judge-always.md`): the refusal names the copy that judged. T48 closes the
+  critic's one S1: a rewrite of the check that the target's copy passes was admitted, and is now refused with the hand
+  route.
+- T16 (`T16-door-card.md`): `tests/door-card.test.sh` carries a run to its end state with the verbs alone and renders
+  the card.
+- T17 (`T17-cover.md`): `tests/door-cover.test.sh` reads the judge's cover over the real 1.21.0, 1.22.0 and 1.23.0
+  merges, which keep their rewritten hashes (D7).
+- T18 (`T18-lint.md`) and T3 (`T3-bind.md`): the quitting-reader lint and its allow file, `observe.sh` reading its
+  process listing to the end, and the bind path's session reader reading to the end, tested on a plan with 3,000
+  session lines.
+
+### The small test debts (D3)
+
+- T2 (`T2-suites.md`): the privacy scan's suite and the doctor's come back from the carry tag, each header naming only
+  the sections its body has.
+- T12 (`T12-order.md`): the three order refusals are asserted by row id.
+- T13 (`T13-whole-run.md`): the one-whole-run rule is a fact the suites hold.
+- T19 (`T19-deferral.md`) and T43 (`T43-rule-floor.md`): a deferral without a sentence refuses the release, from
+  1.24.0 on.
+- T5 (`T5-agreement.md`): the two agreement checks, and ADR-062's two status words made one.
+
+### Tests earn their place (D5, D6, D12, ADR-068)
+
+- T21 (`T21-rubric.md`): `tests/RUBRIC.md` names five verdicts, each with its test and calibration examples.
+- T22 (`T22-census.md`): `tests/CENSUS.md` gives every section of every suite one verdict, read by calibrated
+  readers.
+- T23 (`T23-cull-a.md`), T24 (`T24-cull-b.md`), T25 (`T25-cull-c.md`): 192 of the 194 culled sections deleted at
+  whole-section boundaries. The other two are kept as lints.
+- T26 (`T26-ratio.md`): the cap. At the build head the tests hold 89,269 shell lines against 96,187 elsewhere.
+
+### The pages (D13 to D18)
+
+- T33 (`T33-close.md`): the Bottom line prints the close once, as a floor or a likely clock with whose pace it is,
+  never now. The pace is dispatched-to-landed time, and `sitrep --basis` prints the arithmetic.
+- T34 (`T34-tasklist.md`): every Task list line is one line, the name clipped at a word with `…`.
+- T35 (`T35-guess.md`): the schedule always has a best guess, graded against the forecast end.
+- T36 (`T36-goals.md`) and T40 (`T40-one-reader.md`): the goals are the requirements' themes, read by one reader.
+- T4 (`T4-rename.md`): the card is the release approval card in code and in words.
+- T20 (`T20-patrol.md`): the dead Patrol clock is one line and one sentence to the user.
+- T39 (`T39-handoff-line.md`) and T46 (`T46-close-out-pointer.md`): the handoff ends on its resume line, and
+  close-out reads the handoff pointer.
+- T41 (`T41-revive.md`) and T47 (`T47-floor-sweep.md`): the revive suite follows the one-line reason, and the close
+  sentence says "earliest instant" so the floor sweep finds nothing.
+
+### The release (D8)
+
+- T30 (`T30-release.md`): this entry, plugin.json 1.24.0, the help and version pages rendered by
+  `agents-src/render.sh`, `rendered.sha256` refreshed, ADR-066, ADR-067 and ADR-068 accepted and promoted to
+  docs/adrs/, and release-check.test.sh §REL-1.24.0 pinning the entry's rows and its Known limits.
+
+### How this run landed (ADR-067)
+
+Thirty-eight rows landed through the line and five by hand. T26 and T43 changed the release check itself, so the line
+refused them by design (D4) and the orchestrator landed them by hand on the candidate's own green suites. T27, T44 and
+T45 wrote only their records.
+
+### The readings
+
+- The walk (`walk.md`, T44): the pages and the verbs used as a user would, at the build head.
+- The regression (`T27-regression.md`, T27): one whole run at 00943de4, 117 suites green and 1 red. The red,
+  regression-rename, was turned green by T47.
+- The matrix (`T45-matrix-fill.md`, T45): filled from the landed records.
+- The critic (`critic-adversarial.md`, `critic-structure.md`, T29): one S1, fixed by T48, and three S3 findings
+  deferred, below. The structure reading flagged two duplicated readers and the census counts.
+- The auditor (`auditor-evidence.md`, T28): 68 rows confirmed, two refuted and three unverifiable. Each of those five
+  reaches the release approval card as a decision.
+
+### The landing numbers
+
+`landing-report --rows` at 4822ef014852afadaa2501ff43e0d88ba77cd487 on 2026-10-21T16:42:58Z:
+
+```
+landings: queue=40 hand=6 git=0 · ready-to-landed median=4.0m p75=6.8m max=24.2m · runs: green=184 red=8 none=1 discarded=6 red-then-green=0 run=427 reused=0 absent=0 · waited median=18s · killed=11
+T6 queue ready=2026-10-21T01:09:41Z landed=2026-10-21T01:11:12Z minutes=1.5 runs=3 waited=19s wait=0.3 prove=0.9 rework=0.2 width=2
+  bash-walls.test.sh green promised=21s actual=22s ratio=1.05
+  canonical-sdlc-evidence-gate-2.test.sh green promised=51s actual=55s ratio=1.08
+  units.test.sh green promised=9s actual=13s ratio=1.44
+T21 queue ready=2026-10-21T01:21:13Z landed=2026-10-21T01:21:26Z minutes=0.2 runs=0 waited=13s wait=0.2 prove=0.0 rework=0.0 width=-
+T14 queue ready=2026-10-21T01:28:07Z landed=2026-10-21T01:30:30Z minutes=2.4 runs=1 waited=13s wait=0.2 prove=2.2 rework=0.0 width=4
+  door-landing.test.sh green promised=115s actual=130s ratio=1.13
+T4 queue ready=2026-10-21T01:28:14Z landed=2026-10-21T01:41:27Z minutes=13.2 runs=6 waited=235s wait=3.9 prove=9.3 rework=0.0 width=4
+  release-approval.test.sh green promised=189s actual=288s ratio=1.52
+  close-out-1.test.sh green promised=179s actual=320s ratio=1.79
+  close-out-2.test.sh green promised=144s actual=321s ratio=2.23
+  close-out-3.test.sh green promised=134s actual=316s ratio=2.36
+  close-out-4.test.sh green promised=224s actual=235s ratio=1.05
+  sitrep.test.sh green promised=85s actual=75s ratio=0.88
+T8 queue ready=2026-10-21T01:55:39Z landed=2026-10-21T02:00:06Z minutes=4.5 runs=2 waited=155s wait=2.6 prove=1.9 rework=0.0 width=1
+  sitrep.test.sh green promised=92s actual=111s ratio=1.21
+  session-poker-4.test.sh red promised=74s actual=105s ratio=1.42
+T7 queue ready=2026-10-21T02:21:37Z landed=2026-10-21T02:26:47Z minutes=5.2 runs=2 waited=16s wait=0.3 prove=4.0 rework=0.9 width=4
+  release-approval.test.sh green promised=211s actual=237s ratio=1.12
+  bash-walls.test.sh green promised=17s actual=20s ratio=1.18
+T9 queue ready=2026-10-21T02:34:56Z landed=2026-10-21T02:38:58Z minutes=4.0 runs=2 waited=13s wait=0.2 prove=3.8 rework=0.0 width=4
+  units.test.sh green promised=5s actual=10s ratio=2.00
+  release-approval.test.sh green promised=102s actual=228s ratio=2.24
+T22 queue ready=2026-10-21T02:46:54Z landed=2026-10-21T02:47:18Z minutes=0.4 runs=1 waited=11s wait=0.2 prove=0.2 rework=0.0 width=4
+  shell-lint.test.sh green promised=12s actual=12s ratio=1.00
+T17 queue ready=2026-10-21T03:03:03Z landed=2026-10-21T03:03:29Z minutes=0.4 runs=2 waited=13s wait=0.2 prove=0.2 rework=0.0 width=3
+  door-cover.test.sh green promised=2s actual=3s ratio=1.50
+  units.test.sh green promised=11s actual=11s ratio=1.00
+T15 queue ready=2026-10-21T03:12:24Z landed=2026-10-21T03:15:46Z minutes=3.4 runs=2 waited=15s wait=0.2 prove=3.1 rework=0.0 width=3
+  door-landing.test.sh green promised=102s actual=186s ratio=1.82
+  worktree.test.sh green promised=30s actual=43s ratio=1.43
+T23 queue ready=2026-10-21T03:36:02Z landed=2026-10-21T03:50:30Z minutes=14.5 runs=28 waited=17s wait=0.3 prove=14.2 rework=0.0 width=3
+  shell-lint.test.sh red promised=12s actual=16s ratio=1.33
+  agent-context-guard.test.sh green promised=16s actual=8s ratio=0.50
+  archive.test.sh green promised=3s actual=1s ratio=0.33
+  background-suite-guard.test.sh green promised=49s actual=27s ratio=0.55
+  bash-walls.test.sh green promised=12s actual=18s ratio=1.50
+  binding.test.sh green promised=5s actual=4s ratio=0.80
+  booked.test.sh green promised=16s actual=25s ratio=1.56
+  canonical-sdlc-evidence-gate.test.sh green promised=18s actual=14s ratio=0.78
+  close-out-1.test.sh green promised=297s actual=261s ratio=0.88
+  close-out-4.test.sh green promised=236s actual=278s ratio=1.18
+  cmd-class.test.sh green promised=14s actual=9s ratio=0.64
+  commands.test.sh green promised=3s actual=1s ratio=0.33
+  context-spend.test.sh green promised=8s actual=7s ratio=0.88
+  context.test.sh green promised=4s actual=5s ratio=1.25
+  cross-gate-agreement-1.test.sh green promised=307s actual=38s ratio=0.12
+  cross-gate-agreement-2.test.sh green promised=15s actual=8s ratio=0.53
+  decision-skill.test.sh green promised=1s actual=1s ratio=1.00
+  detect-probes.test.sh green promised=18s actual=16s ratio=0.89
+  detect.test.sh green promised=4s actual=2s ratio=0.50
+  dispatch-preflight-2.test.sh green promised=178s actual=36s ratio=0.20
+  dispatch-preflight-4b.test.sh green promised=267s actual=199s ratio=0.75
+  dispatch-preflight.test.sh green promised=59s actual=42s ratio=0.71
+  doctor-patrol.test.sh green promised=116s actual=49s ratio=0.42
+  doctor-restart.test.sh green promised=233s actual=209s ratio=0.90
+  doctor-version.test.sh green promised=118s actual=76s ratio=0.64
+  doctor-walls.test.sh green promised=63s actual=41s ratio=0.65
+  doctor.test.sh green promised=20s actual=6s ratio=0.30
+  door-landing.test.sh green promised=175s actual=176s ratio=1.01
+T11 queue ready=2026-10-21T03:42:21Z landed=2026-10-21T04:00:12Z minutes=17.9 runs=2 waited=500s wait=8.3 prove=9.0 rework=0.5 width=4
+  landing-line-1.test.sh green promised=329s actual=292s ratio=0.89
+  release-approval.test.sh green promised=260s actual=248s ratio=0.95
+T24 queue ready=2026-10-21T04:03:07Z landed=2026-10-21T04:17:57Z minutes=14.8 runs=28 waited=35s wait=0.6 prove=8.2 rework=6.0 width=1
+  engage.test.sh green promised=21s actual=22s ratio=1.05
+  execution-recorder.test.sh green promised=127s actual=7s ratio=0.06
+  fail-direction-table.test.sh green promised=25s actual=18s ratio=0.72
+  farm-out-reminder.test.sh green promised=35s actual=27s ratio=0.77
+  fold.test.sh green promised=2s actual=3s ratio=1.50
+  framework.test.sh green promised=47s actual=8s ratio=0.17
+  git-argv.test.sh green promised=22s actual=17s ratio=0.77
+  grant.test.sh green promised=23s actual=15s ratio=0.65
+  handoff-file.test.sh green promised=39s actual=47s ratio=1.21
+  hook-adoption.test.sh green promised=10s actual=7s ratio=0.70
+  hook-latency.test.sh green promised=19s actual=15s ratio=0.79
+  hook-timeout.test.sh green promised=244s actual=265s ratio=1.09
+  interpreter-pin.test.sh green promised=70s actual=6s ratio=0.09
+  jit.test.sh green promised=2s actual=2s ratio=1.00
+  landing-gate.test.sh green promised=36s actual=12s ratio=0.33
+  landing-line-1.test.sh green promised=314s actual=323s ratio=1.03
+  landing-line-2.test.sh green promised=175s actual=178s ratio=1.02
+  live-agents.test.sh green promised=10s actual=5s ratio=0.50
+  notify.test.sh red promised=73s actual=69s ratio=0.95
+  patrol-duties-gate.test.sh green promised=428s actual=44s ratio=0.10
+  patrol-revive.test.sh green promised=40s actual=18s ratio=0.45
+  patrol-stale.test.sh green promised=3s actual=3s ratio=1.00
+  permission-answer.test.sh green promised=60s actual=50s ratio=0.83
+  permission-effects.test.sh green promised=11s actual=7s ratio=0.64
+  placement.test.sh green promised=1s actual=3s ratio=3.00
+  preflight-probe.test.sh green promised=19s actual=15s ratio=0.79
+  principles-item.test.sh green promised=97s actual=76s ratio=0.78
+  protect-main.test.sh green promised=38s actual=7s ratio=0.18
+T25 queue ready=2026-10-21T04:40:21Z landed=2026-10-21T04:50:13Z minutes=9.9 runs=26 waited=28s wait=0.5 prove=9.4 rework=0.0 width=4
+  shell-lint.test.sh green promised=16s actual=18s ratio=1.12
+  rc-item-1.test.sh green promised=132s actual=138s ratio=1.05
+  rc-item-2.test.sh green promised=272s actual=307s ratio=1.13
+  regression-rename.test.sh green promised=14s actual=18s ratio=1.29
+  release-check.test.sh green promised=37s actual=44s ratio=1.19
+  render.test.sh green promised=21s actual=16s ratio=0.76
+  root.test.sh green promised=6s actual=4s ratio=0.67
+  roots.test.sh green promised=9s actual=11s ratio=1.22
+  roster.test.sh green promised=3s actual=3s ratio=1.00
+  run-predicate.test.sh green promised=8s actual=5s ratio=0.62
+  runner-roster.test.sh green promised=52s actual=24s ratio=0.46
+  runner-width.test.sh green promised=9s actual=12s ratio=1.33
+  scale-profile.test.sh green promised=17s actual=15s ratio=0.88
+  seam-resolution.test.sh green promised=2s actual=6s ratio=3.00
+  session-poker-5.test.sh green promised=72s actual=81s ratio=1.12
+  session-start.test.sh green promised=105s actual=21s ratio=0.20
+  session-sweep.test.sh green promised=40s actual=24s ratio=0.60
+  session.test.sh green promised=4s actual=1s ratio=0.25
+  sitrep.test.sh green promised=109s actual=101s ratio=0.93
+  spawn-worktree.test.sh green promised=114s actual=73s ratio=0.64
+  stop-guard.test.sh green promised=81s actual=11s ratio=0.14
+  stop.test.sh green promised=89s actual=31s ratio=0.35
+  units.test.sh green promised=12s actual=14s ratio=1.17
+  version-compare.test.sh green promised=2s actual=1s ratio=0.50
+  width.test.sh green promised=2s actual=1s ratio=0.50
+  worktree.test.sh green promised=44s actual=37s ratio=0.84
+T36 queue ready=2026-10-21T04:44:14Z landed=2026-10-21T04:52:07Z minutes=7.9 runs=3 waited=375s wait=6.2 prove=1.6 rework=0.0 width=4
+  canonical-sdlc-governing-skill.test.sh green promised=25s actual=32s ratio=1.28
+  sitrep.test.sh green promised=83s actual=97s ratio=1.17
+  shell-lint.test.sh green promised=12s actual=16s ratio=1.33
+T33 queue ready=2026-10-21T04:46:33Z landed=2026-10-21T04:56:40Z minutes=10.1 runs=2 waited=349s wait=5.8 prove=1.7 rework=2.6 width=4
+  sitrep.test.sh green promised=61s actual=102s ratio=1.67
+  shell-lint.test.sh green promised=11s actual=16s ratio=1.45
+T34 queue ready=2026-10-21T05:12:44Z landed=2026-10-21T05:21:02Z minutes=8.3 runs=5 waited=19s wait=0.3 prove=5.3 rework=2.7 width=4
+  sitrep.test.sh red promised=63s actual=109s ratio=1.73
+  shell-lint.test.sh green promised=12s actual=16s ratio=1.33
+  sitrep.test.sh none promised=109s actual=103s ratio=0.94
+  shell-lint.test.sh green promised=13s actual=15s ratio=1.15
+  sitrep.test.sh green promised=105s actual=103s ratio=0.98
+T2 queue ready=2026-10-21T05:18:25Z landed=2026-10-21T05:23:04Z minutes=4.7 runs=3 waited=174s wait=2.9 prove=1.8 rework=0.0 width=3
+  name-scan.test.sh green promised=116s actual=104s ratio=0.90
+  doctor-reads.test.sh green promised=64s actual=71s ratio=1.11
+  shell-lint.test.sh green promised=13s actual=17s ratio=1.31
+T1 queue ready=2026-10-21T05:37:38Z landed=2026-10-21T05:41:28Z minutes=3.8 runs=5 waited=20s wait=0.3 prove=2.7 rework=0.8 width=3
+  stop.test.sh red promised=18s actual=33s ratio=1.83
+  session-poker-5.test.sh red promised=69s actual=91s ratio=1.32
+  patrol-duties-gate.test.sh green promised=26s actual=43s ratio=1.65
+  render.test.sh green promised=16s actual=18s ratio=1.12
+  shell-lint.test.sh green promised=17s actual=18s ratio=1.06
+T10 queue ready=2026-10-21T05:54:58Z landed=2026-10-21T05:58:50Z minutes=3.9 runs=2 waited=17s wait=0.3 prove=3.6 rework=0.0 width=2
+  door-landing.test.sh green promised=220s actual=214s ratio=0.97
+  shell-lint.test.sh green promised=14s actual=17s ratio=1.21
+T18 queue ready=2026-10-21T05:57:07Z landed=2026-10-21T05:59:33Z minutes=2.4 runs=1 waited=120s wait=2.0 prove=0.4 rework=0.0 width=3
+  shell-lint.test.sh green promised=23s actual=26s ratio=1.13
+T20 queue ready=2026-10-21T06:16:30Z landed=2026-10-21T06:19:38Z minutes=3.1 runs=4 waited=128s wait=2.1 prove=1.0 rework=0.0 width=3
+  stop.test.sh red promised=32s actual=31s ratio=0.97
+  patrol-stale.test.sh green promised=2s actual=2s ratio=1.00
+  render.test.sh green promised=17s actual=17s ratio=1.00
+  shell-lint.test.sh green promised=27s actual=27s ratio=1.00
+T16 queue ready=2026-10-21T06:18:06Z landed=2026-10-21T06:24:31Z minutes=6.4 runs=3 waited=111s wait=1.9 prove=4.6 rework=0.0 width=3
+  door-card.test.sh green promised=235s actual=245s ratio=1.04
+  release-approval.test.sh green promised=260s actual=272s ratio=1.05
+  shell-lint.test.sh green promised=27s actual=31s ratio=1.15
+T35 queue ready=2026-10-21T06:27:43Z landed=2026-10-21T06:29:59Z minutes=2.3 runs=2 waited=17s wait=0.3 prove=2.0 rework=0.0 width=4
+  sitrep.test.sh green promised=74s actual=118s ratio=1.59
+  shell-lint.test.sh green promised=17s actual=28s ratio=1.65
+T5 queue ready=2026-10-21T06:39:17Z landed=2026-10-21T06:40:17Z minutes=1.0 runs=2 waited=18s wait=0.3 prove=0.7 rework=0.0 width=2
+  shell-lint.test.sh green promised=31s actual=33s ratio=1.06
+  release-check.test.sh green promised=45s actual=42s ratio=0.93
+T13 queue ready=2026-10-21T06:41:46Z landed=2026-10-21T06:46:29Z minutes=4.7 runs=6 waited=20s wait=0.3 prove=1.9 rework=2.5 width=2
+  canonical-sdlc-evidence-gate-2.test.sh green promised=48s actual=54s ratio=1.12
+  units.test.sh green promised=14s actual=16s ratio=1.14
+  shell-lint.test.sh red promised=33s actual=35s ratio=1.06
+  canonical-sdlc-evidence-gate-2.test.sh green promised=54s actual=58s ratio=1.07
+  units.test.sh green promised=16s actual=15s ratio=0.94
+  shell-lint.test.sh green promised=35s actual=34s ratio=0.97
+T42 queue ready=2026-10-21T07:06:38Z landed=2026-10-21T07:08:25Z minutes=1.8 runs=3 waited=18s wait=0.3 prove=1.5 rework=0.0 width=3
+  stop.test.sh green promised=30s actual=37s ratio=1.23
+  session-poker-5.test.sh green promised=80s actual=88s ratio=1.10
+  shell-lint.test.sh green promised=33s actual=34s ratio=1.03
+T12 queue ready=2026-10-21T07:15:52Z landed=2026-10-21T07:17:09Z minutes=1.3 runs=3 waited=18s wait=0.3 prove=1.0 rework=0.0 width=2
+  units.test.sh green promised=15s actual=15s ratio=1.00
+  canonical-sdlc-evidence-gate-2.test.sh green promised=50s actual=58s ratio=1.16
+  shell-lint.test.sh green promised=34s actual=35s ratio=1.03
+T19 queue ready=2026-10-21T07:20:34Z landed=2026-10-21T07:21:36Z minutes=1.0 runs=2 waited=17s wait=0.3 prove=0.8 rework=0.0 width=3
+  release-check.test.sh green promised=47s actual=44s ratio=0.94
+  shell-lint.test.sh green promised=35s actual=32s ratio=0.91
+T43 hand ready=- landed=2026-10-21T07:58:27Z minutes=- runs=2 waited=- wait=- prove=- rework=- width=-
+  release-check.test.sh green promised=40s actual=50s ratio=1.25
+  shell-lint.test.sh green promised=23s actual=30s ratio=1.30
+T37 queue ready=2026-10-21T07:36:55Z landed=2026-10-21T08:01:05Z minutes=24.2 runs=6 waited=1247s wait=20.8 prove=3.4 rework=0.0 width=4
+  notify.test.sh green promised=64s actual=68s ratio=1.06
+  session-poker-4.test.sh green promised=86s actual=101s ratio=1.17
+  shell-lint.test.sh green promised=36s actual=34s ratio=0.94
+  notify.test.sh green promised=37s actual=70s ratio=1.89
+  session-poker-4.test.sh green promised=54s actual=98s ratio=1.81
+  shell-lint.test.sh green promised=18s actual=38s ratio=2.11
+T38 queue ready=2026-10-21T07:40:37Z landed=2026-10-21T08:01:59Z minutes=21.4 runs=12 waited=1192s wait=19.9 prove=1.2 rework=0.3 width=3
+  bash-walls.test.sh discarded promised=19s actual=- ratio=-
+  canonical-sdlc-evidence-gate.test.sh discarded promised=13s actual=- ratio=-
+  shell-lint.test.sh discarded promised=27s actual=- ratio=-
+  bash-walls.test.sh green promised=18s actual=23s ratio=1.28
+  canonical-sdlc-evidence-gate.test.sh green promised=13s actual=14s ratio=1.08
+  shell-lint.test.sh green promised=25s actual=32s ratio=1.28
+  bash-walls.test.sh discarded promised=13s actual=- ratio=-
+  canonical-sdlc-evidence-gate.test.sh discarded promised=8s actual=- ratio=-
+  shell-lint.test.sh discarded promised=18s actual=- ratio=-
+  bash-walls.test.sh green promised=20s actual=23s ratio=1.15
+  canonical-sdlc-evidence-gate.test.sh green promised=14s actual=14s ratio=1.00
+  shell-lint.test.sh green promised=38s actual=33s ratio=0.87
+T3 queue ready=2026-10-21T08:08:37Z landed=2026-10-21T08:09:27Z minutes=0.8 runs=2 waited=18s wait=0.3 prove=0.5 rework=0.0 width=2
+  binding.test.sh green promised=3s actual=4s ratio=1.33
+  shell-lint.test.sh green promised=31s actual=32s ratio=1.03
+T26 hand ready=- landed=2026-10-21T08:12:57Z minutes=- runs=10 waited=- wait=- prove=- rework=- width=-
+  release-check.test.sh green promised=47s actual=58s ratio=1.23
+  door-landing.test.sh green promised=213s actual=277s ratio=1.30
+  release-approval.test.sh green promised=278s actual=315s ratio=1.13
+  sitrep.test.sh green promised=129s actual=157s ratio=1.22
+  shell-lint.test.sh green promised=35s actual=36s ratio=1.03
+  release-check.test.sh green promised=57s actual=68s ratio=1.19
+  door-landing.test.sh green promised=277s actual=266s ratio=0.96
+  release-approval.test.sh green promised=273s actual=312s ratio=1.14
+  sitrep.test.sh green promised=145s actual=160s ratio=1.10
+  shell-lint.test.sh green promised=34s actual=34s ratio=1.00
+T41 queue ready=2026-10-21T08:13:17Z landed=2026-10-21T08:14:06Z minutes=0.8 runs=2 waited=16s wait=0.3 prove=0.6 rework=0.0 width=4
+  patrol-revive.test.sh green promised=13s actual=17s ratio=1.31
+  shell-lint.test.sh green promised=28s actual=31s ratio=1.11
+T39 queue ready=2026-10-21T08:17:49Z landed=2026-10-21T08:18:51Z minutes=1.0 runs=2 waited=18s wait=0.3 prove=0.7 rework=0.0 width=3
+  handoff-file.test.sh green promised=42s actual=44s ratio=1.05
+  shell-lint.test.sh green promised=31s actual=33s ratio=1.06
+T40 queue ready=2026-10-21T08:28:03Z landed=2026-10-21T08:33:18Z minutes=5.2 runs=2 waited=17s wait=0.3 prove=5.0 rework=0.0 width=3
+  landing-line-1.test.sh green promised=254s actual=297s ratio=1.17
+  sitrep.test.sh green promised=110s actual=139s ratio=1.26
+T46 queue ready=2026-10-21T08:33:35Z landed=2026-10-21T08:37:56Z minutes=4.3 runs=2 waited=17s wait=0.3 prove=4.1 rework=0.0 width=4
+  close-out-4.test.sh green promised=269s actual=244s ratio=0.91
+  shell-lint.test.sh green promised=33s actual=31s ratio=0.94
+T44 hand ready=- landed=2026-10-21T08:55:00Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T27 hand ready=- landed=2026-10-21T09:25:37Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T47 queue ready=2026-10-21T09:31:56Z landed=2026-10-21T09:34:17Z minutes=2.4 runs=3 waited=20s wait=0.3 prove=2.0 rework=0.0 width=4
+  regression-rename.test.sh green promised=13s actual=15s ratio=1.15
+  sitrep.test.sh green promised=117s actual=119s ratio=1.02
+  shell-lint.test.sh green promised=19s actual=33s ratio=1.74
+T45 hand ready=- landed=2026-10-21T09:50:14Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T48 queue ready=2026-10-21T10:15:28Z landed=2026-10-21T10:20:09Z minutes=4.7 runs=2 waited=18s wait=0.3 prove=4.4 rework=0.0 width=4
+  door-landing.test.sh green promised=168s actual=263s ratio=1.57
+  shell-lint.test.sh green promised=24s actual=31s ratio=1.29
+T30 queue ready=2026-10-21T10:59:30Z landed=2026-10-21T11:00:59Z minutes=1.5 runs=1 waited=16s wait=0.3 prove=1.0 rework=0.2 width=4
+  release-check.test.sh green promised=58s actual=58s ratio=1.00
+T51 queue ready=2026-10-21T13:29:52Z landed=2026-10-21T13:35:01Z minutes=5.2 runs=2 waited=16s wait=0.3 prove=4.9 rework=0.0 width=4
+  door-landing.test.sh green promised=165s actual=292s ratio=1.77
+  shell-lint.test.sh green promised=23s actual=33s ratio=1.43
+T53 hand ready=- landed=2026-10-21T16:16:58Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+```
+
+### Known limits
+
+- A fix row landed after the release is read only when it sits at step 7 or later in the plan, though the line
+  re-renders the release numbers for a fix row at any step; a fix row born at step 4 has its numbers refreshed and its
+  reader row refused. (`critic-adversarial.md#2`)
+- The release approval card prints a pending or overdue requirements theme as ❔ where the situation report prints ➖ or
+  ✖️ for the same goal. (`critic-adversarial.md#3`)
+- The release approval card does not say when the release range changed the door's own check: neither the release
+  check's check-changed line nor a landing's judged-by=candidate mark has a reader on the card.
+  (`critic-adversarial.md#4`)
+- A landing that changes a library the release check sources (payload/scripts/lib, hooks/poker) is refused only when
+  the accepted head's copy of the check fails over it. A change that keeps that copy passing lands through the door
+  and is recorded by the release check's check-changed line (`T48-judge-always.md`).
+- A release check named by full path is only partly guarded. Named through a symlink or in another letter case, it
+  has no closure, so a landing that rewrites it is judged only by whether the old copy passes. Run from a landing tree,
+  it runs the main checkout's working copy, while the refusal says the accepted head's copy ran. Name the release
+  check relative to the project, as bionic's own is, and neither applies. (`critic-adversarial-4.md#1`, `#2`)
+
 ## 1.23.0 — 2026-10-20
 
 This is the small files, plain words release. The 15,715-line core script is now a dispatcher and seven parts, one
