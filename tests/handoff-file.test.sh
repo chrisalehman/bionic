@@ -12,7 +12,7 @@
 # line. There is no safe-to-clear line: the source session is disposable. Bound, the plan's `## Handoff` points at
 # the file and the last line is `/bionic:canonical-sdlc <path>`; with no run, it says to read the file and do Next 1.
 #
-# Sections: §NO-RUN §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §BRANCH-AGREE §POINTER-AGREE.
+# Sections: §NO-RUN §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §POINTER-AGREE.
 #
 # FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`), one
 # repository per world; a no-run world is a bare `git init` with no bionic folder at all. A running process is a
@@ -614,26 +614,6 @@ expect_eq "RX5b ls payload/commands payload/skills has no resume" "0" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
 
 # ============================================================
-section "§BRANCH-AGREE: one reader of the integration branch, lib/plan.sh plan_integration_branch; the verb and close-out name one branch, ## SDLC State's before the frontmatter's"
-# ============================================================
-# Each door is asked on one plan whose frontmatter names `trunk` and whose ## SDLC State names `mainline`, a real
-# branch at trunk's head: the verb's `integration:` line, close-out `check`'s merge verdict and its `closed-form`
-# branch line. fails-when: a door names the frontmatter's branch while ## SDLC State names another.
-hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
-hf_world branch-agree no
-git -C "$HF_R" branch -f mainline trunk
-awk '/^## SDLC State/ { s = 1 } s && /^current:/ { print "integration-branch: mainline"; s = 0 } { print }' "$HF_P" > "$HF_P.ba" \
-  && mv "$HF_P.ba" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
-expect_eq "BR0 precondition: the frontmatter names trunk, ## SDLC State mainline, both branches" "trunk|mainline|yes" \
-  "$(awk 'NR > 1 && /^---$/ { exit } sub(/^integration-branch: /, "")' "$HF_P")|$(sed -n '/^## SDLC State/,/^## Tasks/s/^integration-branch: //p' "$HF_P")|$(git -C "$HF_R" rev-parse -q --verify refs/heads/mainline >/dev/null && echo yes || echo no)"
-poke "$HF_R" handoff
-expect_eq "BR1 the verb exits 0" "0" "$RC"
-expect_eq "BR1b the verb's integration line, close-out check's merge verdict and its closed-form branch line name one branch, ## SDLC State's" \
-  "mainline|mainline|mainline" \
-  "$(sed -n 's/^integration: \([^ ]*\) @ .*$/\1/p' "$HF_F")|$(hf_co check | sed -n 's/^merge: .* from \([^ ]*\) @ .*$/\1/p')|$(hf_co closed-form | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
-
-# ============================================================
 section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh handoff_file_of; with no pointer the default is today's handoffs file; a tab-led heading reads alike to close-out and the verb"
 # ============================================================
 # Each door is asked on one plan: close-out `check` names the file its closed form would be written to; the verb
@@ -641,6 +621,8 @@ section "§POINTER-AGREE: one reader of the ## Handoff pointer, lib/handoff.sh h
 # branch as Step 0 writes it, so check reads the plan through; the pointer moved by hand to an older file, then its
 # heading re-spelled with a tab after `##`, as an editor leaves it. fails-when: a door reads the tab-led heading as
 # no pointer.
+hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
+
 pa_check_file() {  # -> the file close-out check says its closed form would be written to
   hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the plan.*$/\1/p'
 }

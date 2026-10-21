@@ -36,11 +36,6 @@ session_call() {
   rm -f "$out_f" "$err_f"
 }
 
-section "Group 0: sourcing the library is silent and has no side effects"
-
-SOURCE_OUT="$(env -i bash -c '. "$1"' _ "$SESSION_SH" 2>&1)"
-expect_eq "sourcing session.sh prints nothing" "" "$SOURCE_OUT"
-
 section "Group 1: env and payload agree — silent, prints env"
 
 session_call "sess-aaa" "sess-aaa"

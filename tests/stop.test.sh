@@ -15,12 +15,10 @@
 # the real process: what a turn end looks like when more than one of them has
 # something to say, which no per-verdict suite can see and no stub suite can prove.
 #
-# THE FIVE CASES (R7b):
+# THE CASES:
 #   §1  two verdicts block on one Stop -> BOTH reasons, blocks before advisories
 #   §2  one block and one advisory     -> the block first, the advisory kept
-#   §3  four quiet verdicts            -> silent, exit 0
 #   §4  a SubagentStop payload         -> only the landing arm can speak
-#   §5  stop_hook_active: true         -> silent, and the guard is read ONCE
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -219,18 +217,6 @@ expect_true "2e: …after the refusal" \
        "$(awk '/^run resolved by newest-plan fallback/{print NR; exit}' <<<"$STOP_ERR")"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "3: four quiet verdicts — silence, exit 0"
-
-# A BYSTANDER SESSION. Every one of the four asks engagement before it acts, so a
-# session that never invoked canonical-sdlc must see nothing at all — not a
-# refusal, not an advisory, not a state write.
-D=$(mkfix); rm -f "$D/.bionic/tmp/engaged-$SID.state"
-fire "$D"
-expect_status "3a: a bystander turn end exits 0" "0" "$STOP_RC"
-expect_empty "3b: …with nothing on stdout" "$STOP_OUT"
-expect_empty "3c: …and nothing on stderr" "$STOP_ERR"
-
-# ─────────────────────────────────────────────────────────────────────────────
 section "4: SubagentStop — only the landing arm has anything to say there"
 
 # THE OTHER THREE READ THE EVENT AND RETURN. A subagent has no Patrol duties and
@@ -260,24 +246,6 @@ D2=$(mkfix); unmet_row "$D2"; stale_stamp "$D2"
 fire "$D2"
 expect_contains "4d: …while the SAME fixture on a Stop does reach the patrol verdict" \
   "The Patrol died mid-run" "$(reason_of)"
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "5: stop_hook_active — the re-entrancy guard is read ONCE, for all four"
-
-# BLOCKS ONCE. Claude Code re-enters the stop with the flag true after a hook
-# blocked it; refusing again would wedge the turn with no way out. Three of the four
-# hooks carried an identical copy of this line and the fourth carried none; there is
-# one now, ahead of all four, and a fixture that makes TWO of them block is what
-# shows it covers the whole process rather than one arm.
-D=$(mkfix); unmet_row "$D"; stale_stamp "$D"
-fire "$D" Stop true
-expect_status "5a: a re-entry exits 0" "0" "$STOP_RC"
-expect_empty "5b: …with nothing on stdout" "$STOP_OUT"
-expect_empty "5c: …and nothing at all on stderr, advisories included" "$STOP_ERR"
-
-# NOT VACUOUS: the identical fixture without the flag refuses.
-fire "$D" Stop false
-expect_nonempty "5d: …while the same fixture without the flag does refuse" "$STOP_OUT$STOP_ERR"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"

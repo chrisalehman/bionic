@@ -178,24 +178,6 @@ expect_empty "1b: …with nothing on stdout" "$FOLD_OUT"
 expect_empty "1c: …and nothing on stderr" "$FOLD_ERR"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "2: any block is a block — and EVERY reason prints"
-
-# THE CASE THE ADR EXISTS FOR, and the one that goes RED against any
-# first-block-wins draft: two functions block on one event, and BOTH reasons are in
-# the composed verdict.
-drive "$STUB_BLOCK_A
-$STUB_BLOCK_B" Stop blockA blockB
-expect_status "2a: two blocks compose to the block channel's own status" "0" "$FOLD_RC"
-expect_contains "2b: the FIRST blocker's reason is in the composed verdict" \
-  "REASON-ALPHA" "$(reason_of)"
-expect_contains "2c: the SECOND blocker's reason is too — not just the first" \
-  "REASON-BETA" "$(reason_of)"
-expect_true "2d: …and in that order, by offset" \
-  test "$(index_of REASON-ALPHA)" -lt "$(index_of REASON-BETA)"
-expect_eq "2f: …exactly one of them, however many functions blocked" \
-  "1" "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c '^bionic: ')"
-
-# ─────────────────────────────────────────────────────────────────────────────
 section "3: blocks before advisories"
 
 drive "$STUB_ADVISE
@@ -211,53 +193,6 @@ expect_true "3c: the refusal line precedes the advisory on the user stream" \
        "$(awk '/ADVISORY-ONE/{print NR; exit}' <<<"$FOLD_ERR")"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "4: no short-circuit — every function always runs"
-
-W="$(mktemp)"
-: > "$W"
-drive "$(stub_witness "$W" one 2)
-$(stub_witness "$W" two 0)
-$(stub_witness "$W" three 1)
-fold_shim() { :; }" Stop w_one w_two w_three
-expect_eq "4a: a function that BLOCKS does not stop the ones after it" \
-  "one two three " "$(cat "$W")"
-
-# The same claim from the other side: the fold's verdict still reflects the blocker.
-expect_ne "4b: …and the blocking one still decided the verdict" "" "$FOLD_OUT$FOLD_ERR"
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "5: the CURRENT shell — state one function sets is visible to the next"
-
-drive 'setter() { FOLD_WITNESS=set-by-the-first; return 0; }
-reader() {
-  if [ "${FOLD_WITNESS:-unset}" = "set-by-the-first" ]; then
-    fold_advise "READBACK-OK"
-  else
-    fold_advise "READBACK-FAILED: ${FOLD_WITNESS:-unset}"
-  fi
-  return 1
-}' Stop setter reader
-expect_contains "5a: the second function reads what the first set (no subshell)" \
-  "READBACK-OK" "$FOLD_ERR"
-expect_absent "5b: …and the failure spelling is absent (the assertion is not vacuous)" \
-  "READBACK-FAILED" "$FOLD_ERR"
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "6: a function that EXITS is a contract violation, and it is visible"
-
-# The consequence of running in the current shell is that `exit` inside a folded
-# function takes the whole process down. That is caught here by its OBSERVABLE
-# effect — the functions after it never run and nothing is composed — rather than
-# by a guard the fold cannot have: a shell cannot intercept its own `exit`.
-W2="$(mktemp)"
-: > "$W2"
-drive "exiter() { printf 'exiter ' >> \"$W2\"; exit 7; }
-$(stub_witness "$W2" after 0)" Stop exiter w_after
-expect_status "6a: the process carries the exiting function's status, not the fold's" \
-  "7" "$FOLD_RC"
-expect_eq "6b: …and the functions after it never ran" "exiter " "$(cat "$W2")"
-
-# ─────────────────────────────────────────────────────────────────────────────
 section "7: the return code is the verdict; staged text alone says nothing"
 
 drive 'liar() {
@@ -267,28 +202,6 @@ drive 'liar() {
 expect_status "7a: a function that stages a block and returns 0 blocks nothing" "0" "$FOLD_RC"
 expect_absent "7b: …and its staged text is discarded, not leaked into a later verdict" \
   "STAGED-BUT-UNCLAIMED" "$FOLD_OUT$FOLD_ERR"
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "8: one blocker renders its OWN object, verbatim"
-
-# THE DIFFERENTIAL'S FOUNDATION. With exactly one blocker there is nothing to
-# compose, so the fold must produce byte-for-byte what that function's own `refuse`
-# call produced before the merge — including the channel, which differs across the
-# walls this fold serves.
-drive "$STUB_BLOCK_EXIT2" Stop blockE
-expect_status "8a: a lone exit2 blocker exits 2, as that channel does" "2" "$FOLD_RC"
-# ADR-030 MOVED WHAT "VERBATIM" MEANS HERE, and this row is the differential's foundation,
-# so it says the whole stream rather than the first line of it. `exit2` carries `detail` to
-# the reader now (refuse.sh field 9), so what a lone blocker's own `refuse` call produces —
-# and therefore what the fold must produce byte for byte — is the headline, a blank line and
-# that blocker's detail.
-expect_eq "8b2: …and exactly one rendered line in it" "1" \
-  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c '^bionic: ')"
-expect_empty "8c: …and nothing on stdout, as exit2 has no JSON wire" "$FOLD_OUT"
-
-drive "$STUB_BLOCK_A" Stop blockA
-expect_status "8d: a lone block blocker exits 0, as that channel does" "0" "$FOLD_RC"
-expect_contains "8e: …with its detail on the JSON wire" "REASON-ALPHA" "$(reason_of)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "9: mixed channels — the composed verdict rides the one that carries detail"

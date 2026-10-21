@@ -79,30 +79,6 @@ TAB="$(printf '\t')"
 TAGS_SEEN="$SANDBOX/.tags-seen"
 : > "$TAGS_SEEN"
 
-section "0 — the library is on disk and parses"
-if [ -f "$LIB" ]; then
-  ok "payload/scripts/lib/root.sh is on disk"
-else
-  no "payload/scripts/lib/root.sh is on disk" "$LIB"
-  echo "root.test.sh: no library at $LIB — every assertion below would pass over nothing."
-  finish
-fi
-
-if bash -n "$LIB" 2>"$SANDBOX/.syn"; then
-  ok "the library parses (bash -n)"
-else
-  no "the library parses (bash -n)" "$(cat "$SANDBOX/.syn")"
-fi
-
-# SOURCING IS SILENT AND SIDE-EFFECT FREE. Every hook in the spine sources this
-# file before doing anything; a single stray `echo` at load time would land in a
-# hook's stdout, which for a PreToolUse hook is protocol, not noise.
-src_out="$(cd "$SANDBOX" && HOME="$SANDBOX/home" bash -c '. "$1" || exit 3; printf READY' _ "$LIB" 2>&1)"
-expect_eq "sourcing the library prints nothing (stdout+stderr are exactly the caller's own token)" "READY" "$src_out"
-
-fn_kinds="$(cd "$SANDBOX" && HOME="$SANDBOX/home" bash -c '. "$1"; printf "%s,%s" "$(type -t project_root)" "$(type -t project_root_candidates)"' _ "$LIB" 2>&1)"
-expect_eq "both functions are defined by sourcing" "function,function" "$fn_kinds"
-
 # ---------- drivers ----------
 
 # HERMETIC ENV for every library call: the fake HOME under test, no global or

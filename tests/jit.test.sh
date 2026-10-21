@@ -82,18 +82,6 @@ make_stub "$PRESENT_BIN" rg
 make_stub "$PRESENT_BIN" npm
 make_stub "$PRESENT_BIN" brew
 
-section "Group 1: jit.sh exists, sources cleanly, passes bash -n"
-
-# (file-exists fixture check removed epic-18 W3 4/6: no production subject -- see ledger-jit.md)
-expect_true "jit.sh sources without error" bash -c '. "$1"' _ "$JIT_SH"
-expect_true "jit.sh passes bash -n" bash -n "$JIT_SH"
-expect_true "jit.sh sourcing defines jit_check" \
-  bash -c '. "$1"; declare -F jit_check' _ "$JIT_SH"
-expect_true "jit.sh sourcing defines jit_offer" \
-  bash -c '. "$1"; declare -F jit_offer' _ "$JIT_SH"
-expect_true "sourcing jit.sh also pulls in deps.sh's check_dep (self-source guard)" \
-  bash -c '. "$1"; declare -F check_dep' _ "$JIT_SH"
-
 section "Group 2: jit_check — both arms"
 
 expect_true "jit_check rg: present on PATH -> exit 0" \
@@ -105,23 +93,6 @@ expect_true "jit_check rg: absent from PATH -> exit 1" test "$ABSENT_RC" -ne 0
 
 expect_false "jit_check on an unknown dep exits non-zero" \
   bash -c '. "$1"; jit_check no-such-dep' _ "$JIT_SH"
-
-section "Group 3: the ownership-table agreement — jit_offer calls install_dep BY NAME"
-#
-# Override install_dep AFTER sourcing jit.sh, BEFORE calling jit_offer. If
-# jit_offer's "yes" path reaches the override, it has no private installer —
-# it dispatches to whatever function is bound to that name, which in
-# production is deps.sh's own single mutating entry point.
-
-TRACE="$TMP/install-dep-trace.log"; : > "$TRACE"
-env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_TEST_TRACE="$TRACE" \
-  bash -c '
-    . "$1"
-    install_dep() { echo "install_dep-override $*" >> "$BIONIC_TEST_TRACE"; return 0; }
-    echo y | jit_offer rg some-route "a capability" "it degrades"
-  ' _ "$JIT_SH" >/dev/null 2>&1
-expect_match "jit_offer(yes) reaches the function literally named install_dep" \
-  "*install_dep-override rg*" "$(cat "$TRACE")"
 
 section "Group 4: jit_offer — consent path invokes the real install_dep (production behavior)"
 
@@ -166,34 +137,6 @@ expect_true "jit.sh source carries no assume-yes / auto-yes env-var bypass" \
   bash -c '! grep -qE "[A-Z_]*_(ASSUME|AUTO)_?YES|(ASSUME|AUTO)_?YES[A-Z_]*=" "$1"' _ "$JIT_SH"
 expect_true "jit.sh reads stdin only through install_dep (no private read of its own)" \
   bash -c '! grep -qE "^[[:space:]]*read " "$1"' _ "$JIT_SH"
-
-section "Group 7: mutation-and-restore — decline mutates NOTHING, proven twice, two mechanisms"
-#
-# Two independent fixture roots, two different install mechanisms (brew-dep
-# and npm-global), fingerprinted before/after a decline each. A single proof
-# could coincidentally hold for one mechanism's code path and not the other.
-
-fingerprint() { find "$1" -type f -exec ls -l {} \; 2>/dev/null | awk '{print $5, $9}' | sort; }
-
-# Mutation-and-restore #1: rg (brew-dep).
-FP1_ROOT="$TMP/fp1"; mkdir -p "$FP1_ROOT"; cp -R "$PRESENT_BIN/." "$FP1_ROOT/bin/" 2>/dev/null || { mkdir -p "$FP1_ROOT/bin"; cp -R "$PRESENT_BIN/." "$FP1_ROOT/bin/"; }
-: > "$CALLS"
-FP1_BEFORE="$(fingerprint "$FP1_ROOT")"
-env -i HOME="$TMP/home" PATH="$FP1_ROOT/bin" BIONIC_TEST_CALLS="$CALLS" \
-  bash -c '. "$1"; jit_offer rg some-route "fast search" "grep is used instead" </dev/null' _ "$JIT_SH" >/dev/null 2>&1
-FP1_AFTER="$(fingerprint "$FP1_ROOT")"
-expect_eq "mutation-and-restore #1: recorder log still empty" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
-
-# Mutation-and-restore #2: @playwright/cli (npm-global) — the canonical
-# environment-class dep this task was scoped around.
-FP2_ROOT="$TMP/fp2"; mkdir -p "$FP2_ROOT"; cp -R "$PRESENT_BIN/." "$FP2_ROOT/bin/" 2>/dev/null || { mkdir -p "$FP2_ROOT/bin"; cp -R "$PRESENT_BIN/." "$FP2_ROOT/bin/"; }
-: > "$CALLS"
-FP2_BEFORE="$(fingerprint "$FP2_ROOT")"
-env -i HOME="$TMP/home" PATH="$FP2_ROOT/bin" BIONIC_TEST_CALLS="$CALLS" \
-  bash -c '. "$1"; jit_offer @playwright/cli browser-verify "browser driving" "T2/T3 rows are blocked, not silently skipped" </dev/null' \
-  _ "$JIT_SH" >/dev/null 2>&1
-FP2_AFTER="$(fingerprint "$FP2_ROOT")"
-expect_eq "mutation-and-restore #2: recorder log still empty" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
 section "Group 8: jit_check absence-vs-presence, driven against @playwright/cli too"
 

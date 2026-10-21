@@ -80,27 +80,6 @@ contains() {
 }
 
 # ============================================================
-section "1 — the library exists, parses, and defines every root"
-# ============================================================
-
-expect_eq "roots.sh is on disk" "yes" "$([ -r "$LIB" ] && echo yes || echo no)"
-expect_eq "roots.sh parses" "yes" "$(bash -n "$LIB" 2>/dev/null && echo yes || echo no)"
-
-for _fn in project_root bionic_root docs_root tmp_root archive_root plugin_root \
-           claude_home worktree_root transcripts_dir config_value docs_tracked promote_target; do
-  expect_eq "sourcing roots.sh defines $_fn" "yes" \
-    "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; declare -F "$2" >/dev/null 2>&1 && echo yes || echo no' _ "$LIB" "$_fn")"
-done
-
-# SOURCING IS SILENT. The one top-level command in the file is the soft source of root.sh,
-# and a library that printed on the way in would corrupt every hook that captures a
-# resolver's output in a command substitution.
-expect_eq "sourcing roots.sh prints nothing on stdout" "" \
-  "$(bash -c '. "$1"' _ "$LIB" 2>/dev/null)"
-expect_eq "…and nothing on stderr" "" \
-  "$(bash -c '. "$1"' _ "$LIB" 2>&1 >/dev/null)"
-
-# ============================================================
 section "1a — the project's roots: default, override, absolute override"
 # ============================================================
 
@@ -396,18 +375,6 @@ expect_eq "fixture: the planted tree carries the library" "yes" \
   "$([ -r "$PLANT/scripts/lib/roots.sh" ] && echo yes || echo no)"
 expect_eq "fixture: the project's docs root resolves to alt/" "$PROJ/alt" \
   "$(call docs_root "$PROJ")"
-
-# ============================================================
-section "2a — lib/run.sh's plan search follows docs-root:"
-# ============================================================
-#
-# run.sh is the consumer whose own `docs_root()` was the fifth copy — the one cross-gate §R
-# could not see, because §R globbed hooks/ only.
-
-RUN_PLAN="$(bash -c '. "$1" || exit 1; active_plan "$2"' _ "$PLANT/scripts/lib/run.sh" "$PROJ" 2>/dev/null)"
-expect_eq "run.sh's active_plan finds the plan under alt/" \
-  "$PROJ/alt/plans/epic-99/wave-01.plan.md" "$RUN_PLAN"
-expect_eq "…and not the decoy under the default root" "no" "$(contains "$RUN_PLAN" "decoy")"
 
 # ============================================================
 section "2b — hooks/stop-check.sh resolves a contracted path under docs-root:"

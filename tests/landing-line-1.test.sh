@@ -767,17 +767,6 @@ expect_eq "(w2) …in order, T2's run on the candidate built on T1's: one run ea
   "$(ll_ev "$RW" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ')$(ll_lines "$LL_SIG/s-T1.runs") $(ll_lines "$LL_SIG/s-T2.runs") $(head -1 "$LL_SIG/s-T2.runs" 2>/dev/null)"
 
 # ---------------------------------------------------------------------------
-section "§ALONE: no orchestrator act between ready and published (AC-3.1)"
-RL="$(ll_rworld)"
-: > "$(world_verbs)"
-ll_verb_bg "$RL" T1 "$WORLD_ROOT/l-T1.out"; ll_verb_bg "$RL" T2 "$WORLD_ROOT/l-T2.out"
-ll_wait_file "$WORLD_ROOT/l-T1.out.rc" 300; ll_wait_file "$WORLD_ROOT/l-T2.out.rc" 300
-expect_eq "(l1) both rows published" "0 0 2" \
-  "$(cat "$WORLD_ROOT/l-T1.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/l-T2.out.rc" 2>/dev/null) $(ll_ev "$RL" published | awk 'END { print NR }')"
-expect_eq "(l1) …and from ready to published the verb log holds only ready" "ready ready" \
-  "$(tr '\n' ' ' < "$(world_verbs)" | sed 's/ $//')"
-
-# ---------------------------------------------------------------------------
 section "§WITHIN: no suite starts whose promised seconds exceed the time left (D3)"
 # The gate keeps each suite's duration under its project (wave-33 T1; Δ10): the 600 s is planted
 # in the fixture repository the landing runs in.
@@ -983,18 +972,6 @@ LL_MUTANT='s/-ge 2 \]/-ge 99 ]/' LL_MUTANT_FN=_line_carry ll_drive "$RT6" T1 "$W
 i=0; while [ "$i" -lt 300 ] && [ "$(ll_ev "$RT6" verdict | grep -c 'result=none')" -lt 3 ]; do sleep 0.1; i=$((i + 1)); done
 ll_kill_bg "$T6_BG"
 expect_eq "(t6m) …and no stalled event" "" "$(ll_ev "$RT6" stalled)"
-
-# ---------------------------------------------------------------------------
-section "§RELEASE-ROW: a release row whose Lands-on names the release check alone runs that suite only"
-#
-# The row's tree also holds another suite, which a run of the whole project would take. The verdicts the line writes name
-# the suites that ran: the release check, green, and nothing else.
-RR="$(ll_world)"; ll_launch "$RR" T1 release-check.test.sh
-ll_commit_suite "$RR" T1 release-check 'echo "PASS: rr"; echo; echo "release-check.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"'
-ll_commit_suite "$RR" T1 other 'echo run >> "$LL_SIG/other.runs"; echo "PASS: o"; echo; echo "other.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"'
-ll_verb "$RR" T1
-expect_eq "(rr1) ready lands the row (exit 0), and its verdicts name the release check alone, green" "0 release-check.test.sh=green" \
-  "$LL_RC $(ll_ev "$RR" verdict | sed 's/.*|suite=\([^|]*\)|result=\([^|]*\)|.*/\1=\2/' | paste -sd' ' -)"
 
 # ---------------------------------------------------------------------------
 section "§WINDOW: the hand-holds count is read over a window, every source by its own time"

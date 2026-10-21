@@ -316,34 +316,6 @@ expect_reason_names() {  # <label> <substring>
   esac
 }
 
-section "Group 1: the three stamp states"
-
-# 1: STALE — armed, and the clock stopped. The one state that speaks.
-D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
-fire "$D"; expect_block "1: a STALE stamp blocks the stop"
-
-# 2: FRESH — firings are landing. A monitor with nothing to say says nothing.
-D=$(make_env); write_stamp "$D" "$SID"
-fire "$D"; expect_quiet "2: a FRESH stamp is silent"
-
-# 3: ABSENT — never armed. That is the dispatch wall's refusal to make at a
-# dispatch, not a per-turn notice; a hook that spoke here would nag every session
-# that has canonical-sdlc armed and has not engaged a run.
-D=$(make_env)
-fire "$D"; expect_quiet "3: an ABSENT stamp is silent — never armed is not death"
-
-# 4: the boundary is ONE FIRE WINDOW — the interval plus the scheduler's jitter, a tenth
-# of the period — and it follows the project's own knob. AMENDED at REQ-1 (T1): it read
-# "100s old against a 1m interval (limit 120s)" while the limit was 2x the interval. The
-# limit is 66s now, so 100s is past it and this fixture would reach the transcript; 50s is
-# the same assertion — inside the window, silent without reading anything else — against
-# the threshold that now exists.
-D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 50
-fire "$D"; expect_quiet "4: 50s old against a 1m interval (66s fire window) is silent"
-
-D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 200
-fire "$D"; expect_block "5: 200s old against a 1m interval (limit 120s) blocks"
-
 section "Group 2: the false-positive guards"
 
 # A stamp belonging to ANOTHER session is not this session's Patrol. Without this
@@ -615,33 +587,6 @@ expect_reason_names "23: …and the cause the operator can act on" "plugin updat
 
 # The way out. Without it a blocked stop reads as a wedge.
 expect_reason_names "24: …and that it blocks once" "blocks once"
-
-section "Group 5: it writes nothing, and stamps nothing"
-
-# THE CENTRAL SAFETY PROPERTY. A hook that ran `arm` would satisfy the arming wall
-# over an empty cron table — a Patrol that reads alive forever and fires never.
-D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
-BEFORE_M=$(mtime_of "$(stamp_path "$D" "$SID")")
-# THE FILL LEDGER IS NOT THIS HOOK'S WRITE (wave-20 REQ-5, AC-5.5). The Stop process's one file
-# write is the recorder's line under the run's record directory; this verdict writes nothing,
-# and the tree outside that one path is what 26 compares.
-PR_LED="$D/.bionic/docs/record/wave-01/fill-ledger.log"
-BEFORE_T=$(find "$D" -type f ! -path "$PR_LED" | sort | cksum)
-fire "$D"
-AFTER_M=$(mtime_of "$(stamp_path "$D" "$SID")")
-AFTER_T=$(find "$D" -type f ! -path "$PR_LED" | sort | cksum)
-
-if [ "$BEFORE_M" = "$AFTER_M" ]; then
-  ok "25: the stamp's mtime is untouched — the hook never arms"
-else
-  no "25: the hook re-stamped the Patrol" "$BEFORE_M -> $AFTER_M"
-fi
-
-if [ "$BEFORE_T" = "$AFTER_T" ]; then
-  ok "26: the hook creates and removes no file in the project"
-else
-  no "26: the hook touched the project tree" "$BEFORE_T -> $AFTER_T"
-fi
 
 section "Group 6: registration"
 

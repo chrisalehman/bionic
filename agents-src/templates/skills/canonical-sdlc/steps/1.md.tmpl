@@ -7,6 +7,14 @@ wanted, in the user's terms — and lands it in ONE artifact: `wave-NN-<slug>.re
 beside the spec under `specs/epic-NN-<slug>/`. Numbered requirements, each with its
 `provenance:` and its acceptance criteria; then "Not Doing". No design, no tasks, no evals.
 
+**At wave and epic scale the requirements sit under their themes.** Three to six `## <theme>`
+sections, each opening on one sentence that says what the run is for in that respect, with the
+`### REQ-<n>` headings under them; never a flat `## Requirements` list, which the governing-skill
+hook refuses. The themes are the run's goals: the situation report prints one goal line per
+theme, its criteria discharged and its open REQs read from the matrix, so a theme is never typed
+into the plan's `goals:` line, which carries measured goals only. The `## Goal` paragraph names
+the themes, so the card's Purpose lists them.
+
 **Write every criterion so a "fails when" is nameable.** Step 2 has to be able to say what
 planted defect would turn each criterion's eval red; a criterion that admits no such sentence
 ("the code is clean", "performance is good") cannot be evaluated and is rewritten here, where

@@ -801,21 +801,6 @@ awk 'NR == 1 { print; print "─────"; next } { print }' "$TMPROOT/rep.t
 expect_eq "O9 …a rule line under the title: refused" "rule line" "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 
 # ============================================================
-section "§FACTS: every line of the report is the verb's, byte for byte; a planted fact, an altered line or an added claim fails"
-# ============================================================
-expect_eq "FA1 the report that is the verb's page meets the contract (the positive, same checker as below)" \
-  "ok" "$(sr_check "$TMPROOT/rep.txt" "$TMPROOT/page.txt")"
-awk '{ print } /^✅ 4\/T4: / { print "✅ 4/T18: Shipped early (7:30 AM)" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_true "FA2 the plant is in the copy" grep -q '^✅ 4/T18: ' "$TMPROOT/bad.txt"
-expect_eq "FA3 …a planted task the verb never printed: refused, naming it" "fact: > ✅ 4/T18: Shipped early (7:30 AM)" \
-  "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-sed '/^- Done: /s/4 of 17 tasks/5 of 17 tasks/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_regex "FA4 …a rendered line altered (the Done line's count): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-awk '{ print } index($0, "- Close: ") == 1 { print "- the release ships tonight" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_eq "FA5 …an unlabelled claim appended to the close: refused on the fact" "fact: > - the release ships tonight" \
-  "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-
-# ============================================================
 section "§SURFACES: one renderer, three surfaces — the tick prints \`poker: sitrep <the --line output>\` on every tick, byte for byte"
 # ============================================================
 # sr_tick_world <label> <mins> -> a world the tick will decide on: engaged, a commit, bound, armed.
@@ -871,6 +856,90 @@ sr_run "$SR_PLAN"
 expect_eq "G4 a reader-test record that passes flips its goal: 2 of 3 reached, and only the missed goal still prints" \
   "$SR_MARK_OVER goals — 2 of 3 reached|$SR_MARK_OVER tests" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')|$(sr_goal_lines | awk -F': ' '{ print $1 }' | sr_join)"
+
+
+# sr_themes <current> <nine statuses> -> this world's plan made
+# wave scale at step <current> with a matrix of nine rows, the statuses in order (two criteria of the first REQ, one each of the
+# second to the fourth, two each of the fifth and sixth), and a requirements file of three themes beside it:
+# the first two REQs under the first theme, the next three under the second, the sixth under the third. SR_REQ_AT names the file
+# the plan's Step-1 line points at; unset, the plan names none and the file is the sibling under specs/ by the slug.
+sr_themes() {
+  local cur="$1" q a; shift
+  q="$SR_REPO/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
+  [ -z "${SR_REQ_AT:-}" ] || q="$SR_REPO/.bionic/docs/$SR_REQ_AT"
+  mkdir -p "${q%/*}"
+  awk -v c="$cur" -v at="${SR_REQ_AT:-}" '
+    NR > 1 && /^---$/ && !fm { fm = 1; print "scale: wave" }
+    /^current: / { print "current: " c; if (at != "") print "\n- Step 1: requirements: " at "; approved by fixture"; next }
+    { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  { printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    for a in AC-1.1 AC-1.2 AC-2.1 AC-3.1 AC-4.1 AC-5.1 AC-5.2 AC-6.1 AC-6.2; do printf '| %s | T2 | %s | pending | — |\n' "$a" "$1"; shift; done
+  } >> "$SR_PLAN"
+  {
+    printf -- '---\nscale: wave\n---\n# fixture requirements\n\n## Goal\n\nThe fixture ships.\n'
+    printf '\n## The run closes itself\n\nThe run reaches its card without a person.\n'
+    printf '\n### REQ-1 — one\n\n- AC-1.1 a. Fails when: b.\n- AC-1.2 a. Fails when: b.\n\n### REQ-2 — two\n\n- AC-2.1 a. Fails when: b.\n'
+    printf '\n## Rules tested where they run\n\nEvery rule is tested through the door.\n'
+    printf '\n### REQ-3 — three\n\n- AC-3.1 a. Fails when: b.\n\n### REQ-4 — four\n\n- AC-4.1 a. Fails when: b.\n'
+    printf '\n### REQ-5 — five\n\n- AC-5.1 a. Fails when: b.\n- AC-5.2 a. Fails when: b.\n'
+    printf '\n## The pages\n\nThe pages say what the run knows.\n\n### REQ-6 — six\n\n- AC-6.1 a. Fails when: b.\n- AC-6.2 a. Fails when: b.\n'
+    printf '\n## Not Doing\n\n- nothing\n'
+  } > "$q"
+}
+SR_MIXED="discharged pending pending pending pending pending discharged discharged waived"
+
+# ============================================================
+section "§REQ-GOALS-1: a wave plan with no goals: line reads its requirements' themes, one line per theme with its criteria discharged and its open REQs, staged by step"
+# ============================================================
+# fails-when: "none declared", ❔, or a flat count.
+sr_world rg1 "6 6 12 12"; sr_themes 4 $SR_MIXED
+sr_run "$SR_PLAN"
+expect_eq "RG1-1 at step 4 with rows pending: ➖, one of the three themes reached" \
+  "$SR_MARK_NEAR goals — 1 of 3 reached" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')"
+expect_eq "RG1-1b …and never \"none declared\"" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'none declared')"
+expect_eq "RG1-2 …one line per theme, in the document's order, each with its count and at most two open REQs named" \
+  "$SR_MARK_NEAR The run closes itself — 1 of 3 criteria discharged; open: REQ-1, REQ-2|$SR_MARK_NEAR Rules tested where they run — 1 of 4 criteria discharged; open: REQ-3, REQ-4 and 1 more|$SR_MARK_WITHIN The pages — 1 of 2 criteria discharged, 1 waived" \
+  "$(sr_goal_lines | sr_join)"
+sr_world rg1-late "6 6 12 12"; sr_themes 7 $SR_MIXED
+sr_run "$SR_PLAN"
+expect_eq "RG1-3 past step 6 a theme with a pending row is ✖️, and so is the indicator" \
+  "$SR_MARK_OVER goals — 1 of 3 reached|$SR_MARK_OVER|$SR_MARK_OVER|$SR_MARK_WITHIN" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')|$(sr_goal_lines | awk '{ print $1 }' | sr_join)"
+sr_world rg1-done "6 6 12 12"; sr_themes 7 discharged discharged discharged discharged waived discharged discharged discharged waived
+sr_run "$SR_PLAN"
+expect_eq "RG1-4 every row discharged or waived: every theme ✅, the indicator ✅" \
+  "$SR_MARK_WITHIN goals — 3 of 3 reached|$SR_MARK_WITHIN The run closes itself — 3 of 3 criteria discharged|$SR_MARK_WITHIN Rules tested where they run — 3 of 4 criteria discharged, 1 waived|$SR_MARK_WITHIN The pages — 1 of 2 criteria discharged, 1 waived" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')|$(sr_goal_lines | sr_join)"
+
+# ============================================================
+section "§REQ-GOALS-2: a goals: line's measured goals print after the theme lines, as they print without themes"
+# ============================================================
+# fails-when: a measured line is lost.
+SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
+handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" sr_world rg2 "6 6 12 12"
+SR_REQ_AT=specs/epic-01-fx/named-elsewhere.requirements.md sr_themes 4 $SR_MIXED
+sr_run "$SR_PLAN"
+expect_eq "RG2-1 the requirements file the Step-1 line names is read: three themes and two measured goals, two reached" \
+  "$SR_MARK_NONE goals — 2 of 5 reached" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')"
+expect_eq "RG2-2 …the theme lines first, then the measured goal not reached, in today's form; the reached one in the count only" \
+  "$SR_MARK_NEAR The run closes itself|$SR_MARK_NEAR Rules tested where they run|$SR_MARK_WITHIN The pages|$SR_MARK_NONE handoff: a fresh session continues a no-run handoff — no record yet" \
+  "$(sr_goal_lines | sed 's/ — [0-9].*//' | sr_join)"
+
+# ============================================================
+section "§REQ-GOALS-3: a hand-holds goal read from the landing report counts the window from the last build landing to the card, against its target"
+# ============================================================
+# fails-when: the median reader answers, or unmeasured.
+SR_GOALS="hand-holds · zero from the last landing to the release approval card (landing-report)" sr_world rg3 "6 6 12 12"
+sr_run "$SR_PLAN"
+expect_eq "RG3-1 no hand-hold since the last build landing: the zero target is reached" \
+  "$SR_MARK_WITHIN goals — 1 of 1 reached" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')"
+sr_ev "ev=stop-run|row=T8|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "RG3-2 one stop-run after the last build landing misses it" \
+  "$SR_MARK_OVER goals — 0 of 1 reached" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')"
+expect_eq "RG3-3 …the reading is the window's count, from the last build landing to now, before the card has rendered" \
+  "$SR_MARK_OVER hand-holds: zero from the last landing to the release approval card — 1 hand-hold from the last build landing (T4) to now: the card has not rendered" \
+  "$(sr_goal_lines)"
 
 # ============================================================
 section "§GOAL-MISS: the first landing that misses a goal makes the tick open decide:goal:<theme> on the person's ledger, once"

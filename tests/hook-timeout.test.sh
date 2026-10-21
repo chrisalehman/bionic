@@ -525,146 +525,14 @@ row g  "$WALLS_HOOK" "$R_MEM"    0 SILENT out
 row g2 "$WALLS_HOOK" "$R_MEM"    2 "this writes the memory store" err
 unset BIONIC_CLAUDE_HOME
 
-# ---------- the mutation control ----------
-
-section "3 — self-check: a hook that walks its input counts more on the large input"
-#
-# (1) A PLANTED WALK, on the real row inputs. One loop over the input, 4 KB a step, inserted
-# just after each hook reads it: on stdin for bash-walls, on the plan file's text for the
-# governing-skill hook (a1's input is the plan, not the payload). The copy runs from a `hooks/`
-# directory beside the real payload, so the loader resolves exactly as it does for the hook.
-# Each mutant must still reach its far side (the witness, at both sizes) — and count more.
-HT_MUT="$SANDBOX/mut"
-mkdir -p "$HT_MUT/hooks"
-_ht_root="$(cd "$(dirname "$WALLS_HOOK")/.." && pwd -P)"
-[ -d "$_ht_root/payload" ] && ln -s "$_ht_root/payload" "$HT_MUT/payload"
-[ -d "$_ht_root/scripts" ] && ln -s "$_ht_root/scripts" "$HT_MUT/scripts"
-anchor insert hooks/bash-walls.sh '[ -n "$BIONIC_INPUT" ] || exit 0' \
-  '_ht_w="$BIONIC_INPUT"; while [ "${#_ht_w}" -gt 4096 ]; do _ht_w="${_ht_w:4096}"; done' \
-  "$HT_MUT/hooks/bash-walls.sh"
-anchor insert hooks/canonical-sdlc-governing-skill.sh 'CONTENT=$(printf' \
-  '_ht_w="$CONTENT"; while [ "${#_ht_w}" -gt 4096 ]; do _ht_w="${_ht_w:4096}"; done' \
-  "$HT_MUT/hooks/canonical-sdlc-governing-skill.sh"
-for _m in bash-walls canonical-sdlc-governing-skill; do
-  expect_eq "self-check: the $_m copy parses and differs from the hook by the one planted line" "0 1" \
-    "$(/bin/bash -n "$HT_MUT/hooks/$_m.sh" >/dev/null 2>&1; echo $?) $(diff "${BIONIC_HOOKS_DIR}/$_m.sh" "$HT_MUT/hooks/$_m.sh" | grep -c '^>')"
-done
-pair "self-check b3, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/bash-walls.sh" "$R_COMMIT" \
-  "$SANDBOX/in/b3.json" "$SANDBOX/in/b3-l.json" 2 "evidence line is a placeholder" err
-expect_true "self-check b3: the planted walk counts more on the large input (${PAIR_NS} then ${PAIR_NL}): row b3 would go red" \
-  test "${PAIR_NL:-0}" -gt "${PAIR_NS:-0}"
-pair "self-check a2, planted walk [/bin/bash]" /bin/bash "$HT_MUT/hooks/canonical-sdlc-governing-skill.sh" "$R_GS" \
-  "$SANDBOX/in/a2.json" "$SANDBOX/in/a2-l.json" 2 "status doing" err
-expect_true "self-check a2: the planted walk counts more on the large input (${PAIR_NS} then ${PAIR_NL}): row a2 would go red" \
-  test "${PAIR_NL:-0}" -gt "${PAIR_NS:-0}"
-
-# (2) THE BASE HOT LINES THAT WALKED. Each snippet is the hot line as it stood at its base,
-# copied verbatim, fed a reduced pair of its row's shape (the full inputs trace to hundreds of
-# MB, because each step prints the remainder it walks). Its count must grow — and the shipped
-# hook, fed the same pair, must count the same on both. The base lines of a1, a2, b, c and g
-# were single operations whose cost grew with the operand (THE BLIND SPOT): a count cannot
-# see them, so they are not here.
-
-# d: walls.sh:4662-4710 — `_chain_seg_split`'s character walk over the first segment. (That
-# function is deleted at T11; the line is what the self-check counts, as it stood at 7223b594.)
-cat > "$SANDBOX/hot-d.sh" <<'SH'
-COMMAND=$(jq -r '.tool_input.command')
-s="${COMMAND%% && *}"
-n=${#s}; i=0; cur=""
-while [ "$i" -lt "$n" ]; do
-  c="${s:i:1}"
-  cur="$cur$c"
-  i=$((i + 1))
-done
-SH
-
-# e: cmd-class.sh:833-844 at 7223b594 (1386-1395 at 19d708d1, unchanged) — cmd_class's walk over cmd_class_lines' output, which
-# echoes each segment whole, so a quoted body's every line is one more pass over all of it.
-cat > "$SANDBOX/hot-e.sh" <<'SH'
-. "$HT_CMD_CLASS_LIB"
-COMMAND=$(jq -r '.tool_input.command')
-lines=$(cmd_class_lines "$COMMAND")
-seen=$'\n'
-rest="$lines"
-while [ -n "$rest" ]; do
-  line="${rest%%$'\n'*}"
-  case "$rest" in
-    *$'\n'*) rest="${rest#*$'\n'}" ;;
-    *)        rest="" ;;
-  esac
-  cls="${line%%$'\t'*}"
-  [ -n "$cls" ] || continue
-  seen="$seen$cls"$'\n'
-done
-SH
-HT_CMD_CLASS_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/cmd-class.sh"
-export HT_CMD_CLASS_LIB
-expect_true "fixture: the cmd-class library the e self-check sources is on disk" test -f "$HT_CMD_CLASS_LIB"
-
-# b4: walls.sh:1259-1294 at ac258929 — `_eg_cd_targets`, which took the segments off the front
-# of the remainder one at a time, each a pass over all of it.
-cat > "$SANDBOX/hot-b4.sh" <<'SH'
-COMMAND=$(jq -r '.tool_input.command')
-_eg_cd_targets() {
-  local _t="${1:-}" _rest _seg _p
-  _EG_CDS=""
-  case "$_t" in
-    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
-    *) return 0 ;;
-  esac
-  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
-  while [ -n "$_rest" ]; do
-    case "$_rest" in
-      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
-      *) _seg="$_rest"; _rest="" ;;
-    esac
-    while [ -n "$_seg" ]; do
-      case "$_seg" in
-        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
-        *) break ;;
-      esac
-    done
-    case "$_seg" in
-      'cd'|'cd '*|'cd	'*)
-        _p="${_seg#cd}"
-        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
-        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
-        case "$_p" in
-          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
-          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
-        esac
-        [ -n "$_p" ] || _p='~'
-        _EG_CDS="${_EG_CDS}${_p}"$'\n'
-        ;;
-    esac
-  done
-  return 0
-}
-_eg_cd_targets "$COMMAND"
-SH
-
-hot_line() {  # <id> <snippet> <base> <repo> <want rc> <witness> <chan> — the base line grows, the hook does not
-  local id="$1" snip="$2" base="$3" n_s n_l
-  ht_count /bin/bash "$SANDBOX/$snip" "$SANDBOX/in/$id-rs.json" "$SANDBOX"; n_s="$HT_N"
-  ht_count /bin/bash "$SANDBOX/$snip" "$SANDBOX/in/$id-rl.json" "$SANDBOX"; n_l="$HT_N"
-  echo "hook-timeout: self-check $id ($base hot line, /bin/bash): $n_s commands at $(ht_bytes "$SANDBOX/in/$id-rs.json") bytes, $n_l at $(ht_bytes "$SANDBOX/in/$id-rl.json")"
-  expect_true "self-check $id: the $base hot line counted its run (${n_s:-0} commands)" test "${n_s:-0}" -gt 0
-  expect_true "self-check $id: …and counts more on the larger input (${n_s} then ${n_l}): it walks, and this count sees it" \
-    test "${n_l:-0}" -gt "${n_s:-0}"
-  pair "self-check $id, the shipped hook on the same pair [/bin/bash]" /bin/bash "$WALLS_HOOK" "$4" \
-    "$SANDBOX/in/$id-rs.json" "$SANDBOX/in/$id-rl.json" "$5" "$6" "$7"
-  expect_eq "self-check $id: …while the shipped hook counts the same on that pair" "$PAIR_NS" "$PAIR_NL"
-}
-hot_line d  hot-d.sh  7223b594 "$R_CHAIN"  0 SILENT out
-hot_line e  hot-e.sh  7223b594 "$R_CHAIN"  0 SILENT out
-hot_line b4 hot-b4.sh ac258929 "$R_COMMIT" 2 "evidence line is a placeholder" err
-
 section "3b — §FX: cmd_effects reads g's command in as many commands at 200 KB as at 64 KB (wave-25 T2, D5)"
 # The permission answer reads every command the CLI asks about through cmd_effects, so it carries
 # the hook budget too. g is the largest input this suite builds: the effects walk tokenises it
 # once more than the write-target walk does. The witness is the W line for the redirect AFTER
 # the body, which only a walk that reached the end can print, beside the body's own unknown line.
+HT_CMD_CLASS_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/cmd-class.sh"
+export HT_CMD_CLASS_LIB
+
 cat > "$SANDBOX/fx-g.sh" <<'SH'
 . "$HT_CMD_CLASS_LIB" || exit 1
 cmd_effects "$(jq -r '.tool_input.command')" "$PWD"

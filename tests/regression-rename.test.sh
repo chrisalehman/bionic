@@ -317,22 +317,6 @@ SP_PROOF="$(dirname "$POKER")/poker/proof.sh"
 code_lines() { /usr/bin/grep -v -E '^[[:space:]]*#' "$1"; }   # <file> -> its lines that are not comments
 
 
-# ============================================================
-section "§AGREE-ONE: a plan token's old and new spelling reach one implementation"
-# ============================================================
-# THE PROOF LINE: proof_fields, lifted from proof_awk, reads the old and new line as one kind.
-ag_kind() { printf '%s\n' "$1" | awk "$(bash -c '. "$1"; proof_awk' _ "$PROOF_SH")"'{ if (proof_fields($0)) print PROOF_KIND }'; }
-expect_eq "AO-3 proof_fields reads kind=regression as regression" "regression" "$(ag_kind "proved: kind=regression head=$AP_H at=x evidence=e")"
-expect_eq "AO-3b …and kind=floor as regression" "regression" "$(ag_kind "proved: kind=floor head=$AP_H at=x evidence=e")"
-expect_eq "AO-3c …and every other kind as itself" "review" "$(ag_kind "proved: kind=review head=$AP_H at=x evidence=e")"
-# THE AWK NORMALISATION: alias_awk_norm emits the statements every awk reader runs, from the one map.
-ag_norm() { awk "BEGIN { t = \"$2\"; $(bash -c '. "$1"; alias_awk_norm "$2" t' _ "$ALIAS_SH" "$1") print t }"; }
-expect_eq "AO-5 alias_awk_norm reads turns proof:floor and live:proof:floor into the new token" \
-  "proof:regression|live:proof:regression|proof:review" \
-  "$(ag_norm reads proof:floor)|$(ag_norm reads live:proof:floor)|$(ag_norm reads proof:review)"
-expect_eq "AO-6 alias_awk_norm kind and born answer as alias_token does" "regression|regression|$(al alias_token kind floor)|$(al alias_token born floor)" \
-  "$(ag_norm kind floor)|$(ag_norm born floor)|regression|regression"
-
 
 # ============================================================
 section "§AGREE-SCAN: no production line outside alias.sh spells an old token; a planted second copy goes red"

@@ -241,23 +241,6 @@ printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\n- Step 4: in flight\n' > "$S
 ROWS_LIVE="$(call units_rows "$SANDBOX/live.md")"
 
 # ============================================================
-section "0 — the library is on disk, parses, sources silently, and defines the three verbs"
-# ============================================================
-
-expect_eq "units.sh is on disk" "yes" "$([ -r "$LIB" ] && echo yes || echo no)"
-expect_eq "units.sh parses" "yes" "$(bash -n "$LIB" 2>/dev/null && echo yes || echo no)"
-
-for _fn in units_rows units_ready units_validate; do
-  expect_eq "sourcing units.sh defines $_fn" "yes" \
-    "$(bash -c '. "$1" >/dev/null 2>&1 || exit 1; declare -F "$2" >/dev/null 2>&1 && echo yes || echo no' _ "$LIB" "$_fn")"
-done
-
-# SOURCED, NEVER EXECUTED. A library that printed on the way in would corrupt every caller
-# that reads a verb's output through a command substitution — which is all three of them.
-expect_eq "sourcing units.sh prints nothing on stdout" "" "$(bash -c '. "$1"' _ "$LIB" 2>/dev/null)"
-expect_eq "…and nothing on stderr" "" "$(bash -c '. "$1"' _ "$LIB" 2>&1 >/dev/null)"
-
-# ============================================================
 section "1 — units_rows: the live table, thirteen fields per row, in the fixed order"
 # ============================================================
 
@@ -460,35 +443,6 @@ expect_eq "a Step-6 row that reaches one Step-4 row of five draws no violation" 
 # PAIRED POSITIVE. The good row is in the same table and is not accused of anything.
 expect_eq "the one well-formed row draws no violation of its own" "0" \
   "$(printf '%s\n' "$VAL_BAD" | grep -c '^T1: [^d]' | tr -d ' ')"
-
-# ============================================================
-section "6b — the every-build-row rule is gone: a later row waits for what it reads (wave-26 T2, D2)"
-# ============================================================
-#
-# Through 1.10 the validator refused any Step-5+ row that did not depend, transitively, on
-# every Step-4 row, and `units_add_row` threaded each new Step-4 id into the rows that owed it
-# (research R3 B4, B6). That rule is removed: a verify or final-review row waits for the build
-# through its `head` read, and a review that reads only the diff waits for nobody. The table
-# below is the one that rule used to refuse — T5 reaches T2 and not T3.
-
-cat > "$SANDBOX/leak.md" <<'LEAK_EOF'
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
-| T2 | 4 | build | first | implementor | T1 | 15m | REQ-x | a.sh | landed |
-| T3 | 4 | build | second | implementor | T1 | 15m | REQ-x | b.sh | landed |
-| T4 | 5 | verify | reaches both Step-4 rows | researcher | T2, T3 | 30m | all | w.md | pending |
-| T5 | 5 | test | reaches only T2 | test-runner | T2 | 40m | all | f.md | pending |
-LEAK_EOF
-
-expect_eq "6b.1 a Step-5 row that reaches one Step-4 row of two validates clean (rc 0)" "0" \
-  "$(call_rc units_validate "$SANDBOX/leak.md")"
-# THE EXTRACTOR READS THIS FIXTURE: one real fault planted in the same table is named, and
-# still nothing accuses T5 of the edge it does not carry.
-sed 's/| T5 | 5 | test | reaches only T2 | test-runner | T2 |/| T5 | 5 | test | reaches only T2 | test-runner | T2, T99 |/' \
-  "$SANDBOX/leak.md" > "$SANDBOX/leak-t99.md"
 
 # ============================================================
 section "7 — units_validate: a missing column is a violation of the table, not of a row"

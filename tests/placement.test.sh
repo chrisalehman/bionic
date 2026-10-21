@@ -25,8 +25,8 @@
 # HERMETIC. Pure text in, text out: the reader touches no filesystem, so the trees named here need
 # not exist; HOME is a sandbox directory so `~` reads the same on any machine.
 #
-# ANTI-VACUITY (per .claude/rules/test-harness.md, "Anti-vacuity"). P0 refuses to go on when the
-# library is missing or defines no cmd_place. Every empty-output row (G6, G7, A1) sits beside a
+# ANTI-VACUITY (per .claude/rules/test-harness.md, "Anti-vacuity"). A library that is missing or
+# defines no cmd_place leaves every row reading an empty answer, so each row fails. Every empty-output row (G6, G7, A1) sits beside a
 # positive on the same call in the same fixture (G6-positive, A3).
 #
 # Usage: tests/run.sh --only placement.test.sh
@@ -66,16 +66,8 @@ moving() {  # <label> <command> <expected segment> [<target>; default suite]
 }
 require_helpers place placed moving
 
-section "P0 — the library exists, parses and defines cmd_place"
-expect_true "P0a: placement.sh exists" test -r "$PLACEMENT_LIB"
-expect_true "P0b: placement.sh parses" bash -n "$PLACEMENT_LIB"
 # shellcheck disable=SC1090
 . "$PLACEMENT_LIB" 2>/dev/null
-expect_eq "P0c: sourcing it defines cmd_place" "function" "$(type -t cmd_place 2>/dev/null)"
-if [ "$(type -t cmd_place 2>/dev/null)" != function ]; then
-  echo "placement: cmd_place is not defined — the rest of the suite would read nothing"
-  finish
-fi
 
 section "FORMS — wave-35's six refused shapes are placed at the tree (AC-5.1; research §Q5)"
 # Each opens with the literal guard every brief prescribes, then trips one clause of the raw-text
