@@ -192,7 +192,7 @@ expect_contains "1b: the LANDING reason is in the composed verdict" \
   "LANDING CONTRACT UNMET" "$(reason_of)"
 expect_true "1d: …and in the manifest's order, landing before patrol, by offset" \
   test "$(offset_in_reason 'LANDING CONTRACT UNMET')" -lt \
-       "$(offset_in_reason 'The Patrol died mid-run')"
+       "$(offset_in_reason 'Patrol dead')"
 expect_eq "1e: the user stream carries exactly ONE rendered refusal, not two" \
   "1" "$(refusal_lines)"
 
@@ -227,7 +227,7 @@ section "4: SubagentStop — only the landing arm has anything to say there"
 D=$(mkfix); unmet_row "$D"; stale_stamp "$D"
 fire "$D" SubagentStop false "$(jq -nc --arg a "$AID" '{agent_id:$a,agent_type:"worker"}')"
 expect_absent "4a: the PATROL verdict does not speak on SubagentStop" \
-  "The Patrol died mid-run" "$STOP_OUT$STOP_ERR"
+  "Patrol dead" "$STOP_OUT$STOP_ERR"
 # THE STOP-ONLY ARMS' ADVISORY, on an UNBOUND copy of the fixture: the instrument, the duties
 # gate and the revive arm are the ones that announce the unbound state, and none of them runs
 # on SubagentStop — while the same unbound fixture on a Stop does announce it, so the absence
@@ -245,7 +245,7 @@ expect_contains "4c: …which the SAME unbound fixture on a Stop does print" \
 D2=$(mkfix); unmet_row "$D2"; stale_stamp "$D2"
 fire "$D2"
 expect_contains "4d: …while the SAME fixture on a Stop does reach the patrol verdict" \
-  "The Patrol died mid-run" "$(reason_of)"
+  "Patrol dead" "$(reason_of)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"
@@ -905,6 +905,93 @@ expect_contains "GONE2b …and says it is unknown" "unknown verb: decline" "$GON
 GONE_PROMPT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$GONE_POKER" prompt 2>/dev/null)"
 expect_contains "GONE3 the Patrol prompt still says how a FILL is answered" 'Answer a FILL only if a "poker: FILL" line printed' "$GONE_PROMPT"
 expect_absent "GONE3b …and names no decline" "decline" "$GONE_PROMPT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "PATROL: a dead Patrol clock is one line of at most 80 characters, the same line on a repeat; the explanation is asked for, and the one report sentence is in the rules and the prompt"
+
+# THE USER-VISIBLE REASON IS THE CLI'S "Stop hook error:" LINE, and the plugin can only make it short.
+# A dead clock is three acts in one order (look, create if absent, stamp), so the line names them and
+# nothing else; the explanation moved behind `session-poker.sh patrol --explain`, and the line must not
+# vary with the stamp's age, or a repeat for the same stale stamp would print more than the first.
+PT_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+PT_EXPLAIN_FIRST="Why the Patrol clock dies, and the acts that revive it"
+PT_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
+
+D=$(mkfix); stale_stamp "$D"
+fire "$D"
+PT_R1="$(reason_of)"
+expect_eq "PATROL0 meta: the dead-clock fixture is refused" "block" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_contains "PATROL1 the reason names the verdict" "Patrol dead" "$PT_R1"
+expect_eq "PATROL1b …is one line" "1" "$(printf '%s' "$PT_R1" | awk 'END{print NR}')"
+expect_true "PATROL1c …of at most 80 characters, newline counted" \
+  test "$(printf '%s\n' "$PT_R1" | wc -c | tr -d ' ')" -le 80
+expect_true "PATROL1d …naming CronList, then CronCreate, then arm" \
+  test "$(offset_in_reason 'CronList')" -ge 0 -a "$(offset_in_reason 'CronList')" -lt "$(offset_in_reason 'CronCreate')" \
+       -a "$(offset_in_reason 'CronCreate')" -lt "$(offset_in_reason '; arm')"
+expect_contains "PATROL1e …CronCreate only if absent" "CronCreate if absent" "$PT_R1"
+expect_absent "PATROL1f …and carries none of the explanation" "process memory" "$PT_R1"
+
+# THE SAME STAMP, OLDER: an age in the line would make the repeat differ.
+touch -t "$(date -v-1100S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1100 seconds' +%Y%m%d%H%M.%S)" \
+  "$D/.bionic/tmp/patrol-$SID.state"
+fire "$D"
+expect_nonempty "PATROL2 meta: the repeat is refused too" "$(reason_of)"
+expect_eq "PATROL2b a second Stop over the same stale stamp prints the identical line" "$PT_R1" "$(reason_of)"
+
+# THE CLOCK THAT FIRES AND NEVER TICKS: the job exists, so its repair differs and it names the tick first.
+PT_TX="$(mktemp)"
+PT_OLD="$(date -u -v-10000S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-10000 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+PT_MARK="$(date -u -v-5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+{ jq -nc --arg t "$PT_OLD" '{type:"assistant",timestamp:$t,message:{role:"assistant",content:[{type:"text",text:"working"}]}}'
+  jq -nc --arg t "$PT_MARK" '{type:"user",timestamp:$t,message:{role:"user",content:"bionic-patrol session=aaaaaaaa v=8 — Patrol tick."}}'
+} > "$PT_TX"
+D=$(mkfix); stale_stamp "$D"
+fire "$D" Stop false "$(jq -nc --arg t "$PT_TX" '{transcript_path:$t}')"
+PT_NT="$(reason_of | awk '/Patrol never ticks/{print; exit}')"
+expect_nonempty "PATROL3 meta: a marker turn after the stamp reads as a clock that never ticks" "$PT_NT"
+expect_true "PATROL3b …in one line of at most 80 characters" \
+  test "$(printf '%s\n' "$PT_NT" | wc -c | tr -d ' ')" -le 80
+expect_true "PATROL3c …naming the tick first, then CronList" \
+  test "$(printf '%s' "${PT_NT%%(tick;*}" | wc -c | tr -d ' ')" -lt "$(printf '%s' "${PT_NT%%CronList*}" | wc -c | tr -d ' ')" \
+       -a "$(printf '%s' "$PT_NT" | /usr/bin/grep -c '(tick; CronList')" -eq 1
+expect_absent "PATROL3d …and not the dead-clock line" "Patrol dead" "$(reason_of)"
+
+# THE EXPLANATION IS ASKED FOR AND NOWHERE ELSE. The verb prints it; the stop reason, the user stream, the
+# tick and the prompt print none of it.
+PT_EXP="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$PT_POKER" patrol --explain 2>&1)"
+PT_EXP_RC=$?
+expect_status "PATROL4 patrol --explain exits 0" "0" "$PT_EXP_RC"
+expect_eq "PATROL4b …and its first line is the heading" "$PT_EXPLAIN_FIRST" "$(printf '%s\n' "$PT_EXP" | sed -n 1p)"
+expect_contains "PATROL4c …it says why the clock dies" "process memory" "$PT_EXP"
+expect_contains "PATROL4d …and the three acts, the stamp last" "CronList" "$PT_EXP"
+expect_contains "PATROL4e …and the case of a clock that fires and never ticks" "never ticks" "$PT_EXP"
+
+D=$(mkfix); stale_stamp "$D"
+fire "$D"
+PT_TICK="$(cd "$D" && env HOME="$(mktemp -d)" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" bash "$PT_POKER" tick 2>&1)"
+PT_PROMPT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$PT_POKER" prompt 2>/dev/null)"
+expect_nonempty "PATROL5 meta: the tick over the stale stamp printed something" "$PT_TICK"
+for PT_PHRASE in "$PT_EXPLAIN_FIRST" "process memory"; do
+  expect_absent "PATROL5b the stop reason does not carry: $PT_PHRASE" "$PT_PHRASE" "$(reason_of)"
+  expect_absent "PATROL5c …nor the user stream: $PT_PHRASE" "$PT_PHRASE" "$STOP_ERR"
+  expect_absent "PATROL5d …nor the tick: $PT_PHRASE" "$PT_PHRASE" "$PT_TICK"
+  expect_absent "PATROL5e …nor the prompt: $PT_PHRASE" "$PT_PHRASE" "$PT_PROMPT"
+done
+
+# THE ONE SENTENCE, in the rules and in the prompt, and no other instruction about what to say beside it.
+# The words are counted in the two arming paragraphs of the rendered rules and in the prompt line.
+PT_RULES="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
+PT_ARMING="$(/usr/bin/grep -E '^\*\*(The Patrol|The arming wall)\.\*\*' "$PT_RULES")"
+expect_eq "PATROL6 meta: both arming paragraphs are found" "2" "$(printf '%s\n' "$PT_ARMING" | /usr/bin/grep -c .)"
+expect_eq "PATROL6b the rules carry the sentence once" "1" "$(/usr/bin/grep -c 'Patrol re-armed: the session' "$PT_RULES")"
+expect_contains "PATROL6c …whole, with its two slots" "$PT_SAY" "$PT_RULES"
+expect_eq "PATROL6d the prompt carries it once" "1" "$(printf '%s\n' "$PT_PROMPT" | /usr/bin/grep -c 'Patrol re-armed: the session')"
+expect_contains "PATROL6e …whole, with its two slots" "$PT_SAY" "$PT_PROMPT"
+PT_SAYRE='(^|[^[:alpha:]])(say|says|tell|tells)([^[:alpha:]]|$)'
+expect_eq "PATROL6f the arming paragraphs hold one instruction about what to say: the sentence" "1" \
+  "$(printf '%s\n' "$PT_ARMING" | /usr/bin/grep -oiE "$PT_SAYRE" | wc -l | tr -d ' ')"
+expect_eq "PATROL6g the prompt holds one as well" "1" \
+  "$(printf '%s\n' "$PT_PROMPT" | /usr/bin/grep -oiE "$PT_SAYRE" | wc -l | tr -d ' ')"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish
