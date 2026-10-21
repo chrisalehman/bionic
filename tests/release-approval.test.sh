@@ -20,6 +20,7 @@
 # §EARLY     each of the three facts refuses the render in its own words; the tick says the same line as advice
 # §PREVIEW   --preview renders an early run's page and writes nothing
 # §AGREE     the decisions are exactly the owed items, the unproved rows and the findings recommended against
+# §REGISTER  a waiver another session of the run raised is a decision on the card, and the reply closes it for that session
 # §REPLY     all default and all recommended replay into their verbs; anything else writes nothing
 # §T4        a T4 row through the gate's predicate: confirmed by you is proved; pending or a standing finding decides
 # §CONFIRM   confirm-row writes the attributed confirmation; the card offers confirm or waive; reply applies either
@@ -124,7 +125,8 @@ fc_plan() {  # <proof lines> [<sed edit>] -> PFC at current: 8, bound to this se
     printf 'AC-1.2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
     printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
   } | sed -e "${2:-}" > "$PFC"
-  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
+  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" \
+    "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
   bind_marker "$RFC" "$PFC"
 }
 FC_GOOD="$(fc_floor "$FC_C")
@@ -467,6 +469,36 @@ expect_eq "AGREE-3b …and so does a dropped one" "differs" "$(fc_agree "$TMPROO
 fc_plan "$FC_GOOD"
 fc_page --against "finding:$FC_FID"
 expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agree "$FC_REC/release-approval-$FC_H8.md" "finding:$FC_FID")"
+
+# ============================================================
+section "§REGISTER: the card's waivers are the run's asks, whichever session of the run raised them (AC-6.6)"
+# ============================================================
+# fails-when: a waiver another session of the run raised has no decision on the card. A question failing at the head
+# is settled by the card's own check whichever session holds its ask, so here the question passes at the head and only
+# the run's register owes its waiver, as when a close-out preflight raised it on a failing reading at an earlier head.
+FC_SID2="fc-other-session-7e7e7e7e"
+fc_ask2() {  # <key> <reply> -> the item opened as the run's other session
+  bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_open "$4" "fixture: $4" "$5"' _ "$FC_LIB" "$RFC" "$FC_SID2" "$1" "$2"
+}
+fc_owed2() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$FC_LIB" "$RFC" "$FC_SID2" 2>/dev/null | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
+fc_plan "$FC_GOOD"
+rm -f "$RFC/.bionic/tmp/owed-$FC_SID2.state"
+bind_marker "$RFC" "$PFC" "$FC_SID2"
+fc_ask2 waive:structure "commit refused — structure: the newest reading is result=fail; waive it with: session-poker.sh waive structure '<your reply>'"
+fc_ask2 gate:fixture "poker: GATE fixture — the other session's gate act"
+expect_eq "REG-0 precondition: the other session holds the waiver open, and a gate act the card does not decide" \
+  "gate:fixture waive:structure" "$(fc_owed2)"
+fc_page
+expect_eq "REG-1 release-approval renders as this session (exit 0)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "REG-2 the other session's waiver is a decision on the card" "waive:structure" "$(fc_keys)"
+expect_contains "REG-2b …with its replay line, waive or withhold" "|key=waive:structure|default=waive structure|" "$(fc_table)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "REG-3 reply all default applies it (exit 0)" "0" "$RC"
+expect_regex "REG-3b …writing the waiver with the reply's words" \
+  "^waived: question=structure head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=structure ' "$PFC")"
+expect_eq "REG-4 answered here, the waiver is closed for the session that raised it; its gate act stays open" \
+  "gate:fixture" "$(fc_owed2)"
+rm -f "$RFC/.bionic/tmp/engaged-$FC_SID2.state" "$RFC/.bionic/tmp/owed-$FC_SID2.state"
 
 # ============================================================
 section "§REPLY: all default and all recommended replay into their verbs with the user's words; anything else writes nothing"
@@ -901,7 +933,7 @@ section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 sha
   printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
   printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
 } > "$PFC"
-rm -f "$RFC/.bionic/tmp/owed-$SID.state"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state"
 bind_marker "$RFC" "$PFC"
 fc_card step0
 expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \

@@ -1868,6 +1868,11 @@ write_plan_blocks() {
 # The environment agrees with the payload because on a real call it does: lib/session.sh
 # takes the env value as primary and the payload as a witness, and a dry-run whose two
 # disagreed would be answered for a session that does not exist.
+#
+# THE ASKS IT RAISES ARE THE RUN'S. The stand-in session is in no plan's session list and its
+# marker may name the scratch copy, so `OWED_PLAN` names the plan this close-out acts for: a
+# waiver the gate asks for is opened in that run's register (lib/owed.sh), where the run's
+# pages read it, never in a session file nothing reads.
 GATE_RC=0
 GATE_ERR=""
 GATE_LINE=""
@@ -1887,7 +1892,7 @@ gate_ask() {
       tool_name: "Bash",
       tool_input: {command: "git commit -m close-out"},
       tool_use_id: "toolu_closeout"}')"
-  GATE_ERR="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
+  GATE_ERR="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" OWED_PLAN="$PLAN" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
   GATE_RC=$?
   rm -f "$marker"
   GATE_LINE="$(grep -m1 '^bionic: ' <<< "$GATE_ERR")"
