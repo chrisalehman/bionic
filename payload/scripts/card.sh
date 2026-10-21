@@ -2101,7 +2101,8 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 #
 # The page itself is `session-poker.sh release-approval`; this file keeps the one owner of the three facts it is
 # refused on, because the tick asks them too. `early <plan>` asks, cheapest first: an open reader row on the
-# session's roster (an auditor or a critic, not acked), an owed reading unregistered at the working head
+# session's roster (an auditor or a critic, not acked) or a reader row past the landed release whose reading is not
+# registered, an owed reading unregistered at the working head
 # (lib/units.sh `_units_readings_state`, the tick's own reading), and `current <N> --check` for 6, 7 and 8 (the
 # check-only advance; its exit is read and its verdict line is the reason, never a second judgment here). On the
 # first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
@@ -2173,6 +2174,16 @@ _card_early() {  # -> 0 when the page may render; 1 and CARD_EARLY_WHY on the fi
 $names
 CF_OPEN
   fi
+  # A READER ROW PAST THE LANDED RELEASE (lib/units.sh `units_post_readers`), pending or active, holds the page until
+  # its reading is registered, even before it is dispatched: what landed after the release is read before the person
+  # is asked. Once registered, the piece reading carries its question's chain to the head, so no waiver is put for it.
+  while IFS='	' read -r n st q; do
+    case "$st:$q" in
+      pending:unread|active:unread) CARD_EARLY_WHY="reader row $n reads what landed after the release, and its reading is not registered"; return 1 ;;
+    esac
+  done <<CF_POST
+$(units_post_readers "$CF_PLAN" 2>/dev/null)
+CF_POST
   # (2) A READING UNREGISTERED AT THE HEAD: facts_state's review lines at the branch ref, as the tick reads them.
   # A failing reading is registered; the advance's check below is what refuses it. The tick hands the answer its
   # `sched_live_head` already got, with the head it was asked at; this reads it when that head is this one, and

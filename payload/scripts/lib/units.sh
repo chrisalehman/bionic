@@ -1280,6 +1280,73 @@ _units_questions_awk() {
 '
 }
 
+# _units_post_awk -> the awk functions `after(a, b)` and `post_reader(j, r)`, over the row arrays `n`, `stp`, `fil`,
+# `rd` and `sta` the caller filled in table order; it needs `cell_covers` (`_units_files_awk`) before it.
+# A FIX LANDED AFTER THE RELEASE IS READ AS A PIECE: its reader row stands after the release row, so the order check
+# admits a review row there only when what it reads was written after the release. `after(a, b)` is the order the
+# check judges by, the step and then the table position. `post_reader(j, r)` is 1 when the review row j reads only
+# `approval:plan`, `head` and paths that rows placed after the release row r write, and names at least one such path:
+# a row that names none would read the whole head, which belongs ahead of the release. A path some row at or before
+# r also writes is pre-release work and refuses the row, and so does a path no row but j writes. ONE PREDICATE, TWO
+# READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
+_units_post_awk() {
+  printf '%s' '
+    function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
+    function post_reader(j, r,   m, a, k, t, w, hit, named) {
+      named = 0
+      m = split(rd[j], a, ",")
+      for (k = 1; k <= m; k++) {
+        t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
+        if (t == "" || t == "approval:plan" || t == "head") continue
+        hit = 0
+        for (w = 1; w <= n; w++) {
+          if (w == j || sta[w] == "dropped" || !cell_covers(fil[w], t)) continue
+          if (!after(w, r)) return 0
+          hit = 1
+        }
+        if (!hit) return 0
+        named = 1
+      }
+      return named
+    }
+'
+}
+
+# units_post_readers <plan> -> `<id>\t<status>\t<read|unread>` for each review row standing after a landed release row
+# that `post_reader` admits there, in table order. `read` when every record path in its Files is the evidence of a
+# registered review reading (`proved: kind=review … evidence=`), in either spelling the record takes; `unread`
+# otherwise. The release approval card waits on an open row that is unread: what landed after the release is read
+# before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column.
+units_post_readers() {
+  local plan="${1:-}" rows
+  rows="$(units_rows "$plan")" || return 1
+  [ -n "$rows" ] && units_has_column "$plan" reads || return 0
+  printf '%s\n' "$rows" | awk -F'\t' "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    FNR == NR { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
+    END {
+      for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
+      for (j = 1; j <= n; j++) {
+        if (knd[j] != "review" || sta[j] == "dropped" || stp[j] !~ /^[0-9]+$/) continue
+        ok = 0
+        for (r in rel) if (after(j, r) && post_reader(j, r)) { ok = 1; break }
+        if (!ok) continue
+        m = split(fil[j], e, ","); read = 0; unread = 0
+        for (k = 1; k <= m; k++) {
+          gsub(/^[ \t`]+|[ \t`]+$/, "", e[k]); sub(/^\.\//, "", e[k])
+          if (e[k] == "" || !in_docs(e[k])) continue
+          read = 1; got = 0
+          for (x = 1; x <= ne; x++) if (covers(e[k], ev[x])) { got = 1; break }
+          if (!got) unread = 1
+        }
+        printf "%s\t%s\t%s\n", id[j], sta[j], ((read && !unread) ? "read" : "unread")
+      }
+    }' - "$plan"
+}
+
 # _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
 # can sit beside the code; NO APOSTROPHE anywhere inside it (it is single-quoted). It opens with
 # the question test it shares with the validator.
@@ -1958,7 +2025,7 @@ units_validate() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)"'
+      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
@@ -2173,6 +2240,10 @@ units_validate() {
                 break
               }
               if (ord[i] == 3 && ahead) {
+                # A FIX LANDED AFTER THE RELEASE IS READ AS A PIECE: once the release row has landed, a review row
+                # past it that reads only what rows past it wrote is that piece read, not a review out of order.
+                # While the release is open the order holds whatever the reader names.
+                if (sta[i] == "landed" && post_reader(j, i)) continue
                 printf "%s: the release row comes ahead of the review row %s; the order is build, regression, review, release: put %s at step 7, after %s\n", id[i], id[j], id[i], id[j]
                 break
               }

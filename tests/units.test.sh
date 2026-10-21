@@ -929,6 +929,45 @@ or_plan "$OR_REG" "$OR_REV"
 expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
 
 
+section "§POST — a review row after a landed release is admitted when it reads only approval:plan, head and the rows landed past the release"
+# The fix that lands after the release is read as a piece, so its reader row stands after the release row. It is
+# admitted only when the release row has landed and the reader names nothing written before the release; while the
+# release is open the order text refuses it as before. Each case projects the row the way task-add does
+# (units_add_row, then units_validate on the projection).
+PO_P="$SANDBOX/post.plan.md"
+po_plan() {  # <release status> -> PO_P: build, regression, review and release rows, and a build row landed past the release
+  { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
+    printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
+    printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
+    printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | %s | approval:plan, head |\n' "$1"
+    printf '| T8 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | landed | approval:plan |\n'
+  } > "$PO_P"
+}
+po_add() {  # <reads> -> PO_P with the review row T9 added past the release, as task-add projects it
+  call units_add_row "$PO_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
+    .bionic/docs/record/w/T9-adversarial.md "$1" > "$PO_P.new" && mv "$PO_P.new" "$PO_P"
+}
+PO_ORD='T7: the release row comes ahead of the review row T9; the order is build, regression, review, release: put T7 at step 7, after T9'
+po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
+expect_eq "POST-0 precondition: the projection carries T9 after the release row T7 and the fix row T8" "T7 T8 T9" \
+  "$(call units_rows "$PO_P" | awk -F'\t' '$2 == 7 { printf "%s%s", (n++ ? " " : ""), $1 }')"
+expect_eq "POST-1 the release landed and T9 reads approval:plan, head and the fix row's record: admitted (no line, rc 0)" "|0" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan pending; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
+expect_eq "POST-2 the same reader while the release row is open: refused with the order text (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T1.md'
+expect_eq "POST-3 the release landed and T9 reads a row written before it: refused with the order text (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan landed; po_add 'approval:plan, head'
+expect_eq "POST-4 the release landed and T9 names no row it reads: refused with the order text, a whole read stays ahead of the release (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md, .bionic/docs/record/w/T6.md'
+expect_eq "POST-5 the release landed and T9 reads the fix and a pre-release reading: refused with the order text (rc 1)" "$PO_ORD|1" \
+  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+
 section "§JUDGE — covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run"
 # ============================================================
 
