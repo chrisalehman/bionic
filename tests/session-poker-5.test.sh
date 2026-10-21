@@ -639,7 +639,7 @@ awk '{ if (index($0, "| T4 |") == 1) sub(/\| landed \|/, "| pending |"); print }
      /^approved-by:/ { print "order: given 2026-10-20T00:00:00Z \"hold the fleet while I read\"" }' "$NR_P" > "$NR_P.t" && mv "$NR_P.t" "$NR_P"
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_contains "NR-8 under an open order the tick says so, quoting the words" \
-  "no FILL — the user's order stands: given 2026-10-20T00:00:00Z \"hold the fleet while I read\"" "$OUT"
+  "no FILL — an order of the user stands: given 2026-10-20T00:00:00Z \"hold the fleet while I read\"" "$OUT"
 expect_eq "NR-8b …and offers no row" "" "$(nr_fill)"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
 expect_eq "NR-8c …and the wall ends the turn" "" "$(s31_decision)"

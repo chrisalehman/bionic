@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (decline,
-# budget, amend, task-add, task-set, ledger-add, ledger-set, step-line, step-field, matrix-render, discharge,
+# hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (budget,
+# amend, task-add, task-set, ledger-add, ledger-set, step-line, step-field, matrix-render, discharge,
 # matrix-set, tasks-prose, epic-row, continuation-fill, brief, task-split, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -619,213 +619,8 @@ pv_roster_names_row() {
   return 1
 }
 
-  # THE FILL'S ANSWER, RECORDED (wave-27 T34; REQ-15 AC-15.1, AC-15.5; D24; design ledger Δ9). The
-  # turn-end wall read its answer out of the reply, so the orchestrator answered it with a
-  # `fill-declined:` line the user read on every turn. As `hold` writes the stand-down's answer where
-  # the tick reads its facts, this verb writes the fill's where the wall and the tick read it: the
-  # line a reply-form turn leaves in the run's fill ledger (`fill_ledger_path`), `ready=` the rows it
-  # answers, `declined=` the reason, `at=` the time, `session=` this session. So
-  # `fill_standing_decline` (lib/fill.sh), the one reader of both, applies its one rule: the line
-  # answers those rows and stands until a row it did not name is ready. The rows a decline already
-  # standing answers ride into the new line, as a reply-form turn's ready set carries them, so a
-  # second decline never un-answers the first's rows. `named=` keeps this call's ids; `state=decline`
-  # and an empty `turn=` say no Stop wrote it, so `fill-report` charges the interval after it to the
-  # decline as one interval of its own. One printf, appended; a ledger that is a symlink is not
-  # written through.
-  #
-  # REFUSED: no session key (3), an unengaged session (decides nothing, 0), no run (1), an id that is
-  # no row of the plan or a row that is not ready (1, naming each), a reason with no letter or digit
-  # (1), a ledger that cannot be written (2). A subagent cannot reach this verb: walls.sh refuses it.
-  poker_verb_decline() {
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "A decline answers for ONE session's turn-end wall, so without the key there is nothing to write."
-      exit 3
-    fi
-    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
-      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
-      exit 0
-    fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    sched_budget_read "$REPO_REAL" "$SESSION_ID"
-    if [ -z "$SCHED_PLAN" ] || [ "$POKER_RUN_OPEN" = unreadable ]; then
-      die "REFUSED — a decline answers this session's run, and no readable plan was resolved (${SCHED_PLAN:-none}); nothing was recorded."
-      exit 1
-    fi
-    # THE LIFT (wave-35 T8; REQ-6 AC-6.2; D15). A decline stood until a row it did not name was ready, so a
-    # hold the user ended ("Build on Opus") stood on and the FILL it held never printed (field report item
-    # 10). `decline lift [<ids>]` appends a line of its own, `state=lift` with `lifted=` the rows it ends and
-    # no `declined=`; `fill_standing_decline` takes every lift after the latest declined line off that
-    # line's rows, for the tick and the stop wall alike. With no ids it ends every row the decline stands
-    # for. REFUSED, nothing recorded: no decline standing (1), a row the standing decline does not answer (1).
-    if [ -n "$DC_LIFT" ]; then
-      DC_LED="$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" || DC_LED=""
-      DC_SD="$(fill_standing_decline "$DC_LED" "$SESSION_ID" "")"
-      if [ -z "$DC_SD" ]; then
-        die "REFUSED — decline lift: no decline stands for this session, so there is nothing to lift; nothing was recorded."
-        exit 1
-      fi
-      IFS=$'\037' read -r _ _ DC_SD_IDS <<< "$DC_SD"
-      DC_LIFTED=""; DC_NOT=""
-      if [ -z "$DC_IDS" ]; then
-        DC_LIFTED="$DC_SD_IDS"
-      else
-        IFS=', ' read -r -a DC_LIST <<< "$DC_IDS"
-        for DC_ID in ${DC_LIST[@]+"${DC_LIST[@]}"}; do
-          [ -n "$DC_ID" ] || continue
-          case " $DC_LIFTED $DC_NOT " in *" $DC_ID "*) continue ;; esac
-          case " $DC_SD_IDS " in
-            *" $DC_ID "*) DC_LIFTED="${DC_LIFTED}${DC_LIFTED:+ }$DC_ID" ;;
-            *) DC_NOT="${DC_NOT}${DC_NOT:+ }$(clean "$DC_ID")" ;;
-          esac
-        done
-      fi
-      if [ -n "$DC_NOT" ]; then
-        die "REFUSED — decline lift names $DC_NOT, which no standing decline answers: the decline stands for $DC_SD_IDS. Nothing was recorded."
-        exit 1
-      fi
-      if [ -z "$DC_LED" ] || [ -L "$DC_LED" ] || ! mkdir -p "${DC_LED%/*}" 2>/dev/null; then
-        die "REFUSED — the run's fill ledger (${DC_LED:-no path}) cannot be written; nothing was recorded."
-        exit 2
-      fi
-      DC_CUR="$(_fill_current_field "$SCHED_PLAN")"
-      DC_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=${DC_CUR//|/ }|state=lift"
-      DC_LINE="${DC_LINE}|ceiling=${SCHED_WRITERS}|width=|open=|free=|ready=|launched=|declined=|missed=0|idle=|room="
-      DC_LINE="${DC_LINE}|lifted=${DC_LIFTED// /,}"
-      if ! printf '%s\n' "$DC_LINE" >> "$DC_LED" 2>/dev/null; then
-        die "REFUSED — could not write to $DC_LED; nothing was recorded."
-        exit 2
-      fi
-      DC_LEFT=""
-      for DC_ID in $DC_SD_IDS; do
-        case " $DC_LIFTED " in *" $DC_ID "*) : ;; *) DC_LEFT="${DC_LEFT}${DC_LEFT:+ }$DC_ID" ;; esac
-      done
-      if [ -n "$DC_LEFT" ]; then
-        say "decline lift — ${DC_LIFTED// /,}: ended; the decline still stands for $DC_LEFT. Recorded in $DC_LED; the next tick offers the rows it ended."
-      else
-        say "decline lift — ${DC_LIFTED// /,}: ended; no decline stands now. Recorded in $DC_LED; the next tick offers the rows it ended."
-      fi
-      exit 0
-    fi
-    # THE SAME READY SET THE WALL OWES: every ready row, untrimmed (`fill_ready_tagged`), at the head
-    # the tick reads (`sched_budget_read` set it).
-    DC_ROWS=" $(units_rows "$SCHED_PLAN" 2>/dev/null | cut -f1 | tr '\n' ' ')"
-    DC_READY=" $(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null | cut -f1 | tr '\n' ' ')"
-    DC_NAMED=""; DC_NOROW=""; DC_NOTREADY=""
-    IFS=', ' read -r -a DC_LIST <<< "$DC_IDS"
-    for DC_ID in ${DC_LIST[@]+"${DC_LIST[@]}"}; do
-      [ -n "$DC_ID" ] || continue
-      case " $DC_NAMED $DC_NOROW $DC_NOTREADY " in *" $DC_ID "*) continue ;; esac
-      case "$DC_ROWS" in
-        *" $DC_ID "*) : ;;
-        *) DC_NOROW="${DC_NOROW}${DC_NOROW:+ }$(clean "$DC_ID")"; continue ;;
-      esac
-      case "$DC_READY" in
-        *" $DC_ID "*) DC_NAMED="${DC_NAMED}${DC_NAMED:+ }$DC_ID" ;;
-        *) DC_NOTREADY="${DC_NOTREADY}${DC_NOTREADY:+ }$DC_ID" ;;
-      esac
-    done
-    if [ -n "$DC_NOROW" ]; then
-      die "REFUSED — decline names $DC_NOROW, no row of $SCHED_PLAN; nothing was recorded."
-      exit 1
-    fi
-    if [ -n "$DC_NOTREADY" ]; then
-      DC_RNOW="$(printf '%s' "$DC_READY" | sed 's/^ *//; s/ *$//')"
-      die "REFUSED — decline names $DC_NOTREADY, not ready, and only a ready row is declined (ready now: ${DC_RNOW:-none}); nothing was recorded."
-      exit 1
-    fi
-    DC_WHY="$(printf '%s' "$DC_REASON" | tr '|\n\r\t' '    ')"
-    DC_WHY="${DC_WHY:0:200}"
-    # THE PRINTED PLACEHOLDER IS NO REASON (wave-27 T37; review pass 42 N1, A-orch-112): the wall's
-    # refusal prints this verb with DECLINE_REASON_SLOT where the reason goes, and the line run as
-    # printed recorded the placeholder as the reason.
-    DC_SLOT="${DECLINE_REASON_SLOT//\'/}"
-    DC_TRIM="$(printf '%s' "$DC_WHY" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    if [ "$DC_TRIM" = "$DC_SLOT" ]; then
-      die "REFUSED — '$DC_SLOT' is the placeholder the refusal prints, not a reason: put the reason in its place; nothing was recorded."
-      exit 1
-    fi
-    case "$DC_WHY" in
-      *[[:alnum:]]*) : ;;
-      *)
-        die "REFUSED — a decline is a reason, and '$(clean "$DC_WHY")' carries no letter or digit; nothing was recorded."
-        exit 1 ;;
-    esac
-    # WHAT THE HOLD WAITS ON (wave-30 T16; REQ-12 AC-12.7, Δ13; F11: 23.4% of wave-28's build
-    # wait-minutes were order holds written only in decline reasons). A row of the plan is a holder
-    # the table can carry: for each declined row the `task-set` line that writes the wait as a read,
-    # which the tick then judges once (`units_hold_read`). ANYTHING ELSE IS REFUSED (wave-33 T7; REQ-4
-    # AC-4.3, D8): a path is a shared file, and a shared file is no dependency (`ready` reconciles it on
-    # the line), and a word that is neither names nothing the tick can judge; wave-30 recorded both
-    # with `declined-on=` the value, which read as a dependency nothing held. The refusal records
-    # nothing and prints the call that succeeds, the same decline without `--on`.
-    if [ -n "$DC_ON" ]; then
-      DC_ON="$(clean "$DC_ON")"
-      case "$DC_ROWS" in
-        *" $DC_ON "*) : ;;
-        *)
-          case "$DC_ON" in
-            */*|*.*) die "REFUSED — --on $DC_ON: a shared file is no dependency; \`ready\` reconciles $DC_ON on the line, and a CONFLICT returns the row to merge. Nothing was recorded." ;;
-            *) die "REFUSED — --on $DC_ON names no row of $SCHED_PLAN, and only a row is a wait the tick can judge. Nothing was recorded." ;;
-          esac
-          pv_next decline "$DC_IDS" "$DC_REASON"
-          exit 1 ;;
-      esac
-    fi
-    DC_LED="$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" || DC_LED=""
-    DC_ALL="$DC_NAMED"
-    DC_SD="$(fill_standing_decline "$DC_LED" "$SESSION_ID" "")"
-    if [ -n "$DC_SD" ]; then
-      IFS=$'\037' read -r _ _ DC_SD_IDS <<< "$DC_SD"
-      for DC_ID in $DC_SD_IDS; do
-        case "$DC_READY" in *" $DC_ID "*) : ;; *) continue ;; esac
-        case " $DC_ALL " in *" $DC_ID "*) : ;; *) DC_ALL="${DC_ALL} ${DC_ID}" ;; esac
-      done
-    fi
-    if [ -z "$DC_LED" ] || [ -L "$DC_LED" ] || ! mkdir -p "${DC_LED%/*}" 2>/dev/null; then
-      die "REFUSED — the run's fill ledger (${DC_LED:-no path}) cannot be written; nothing was recorded."
-      exit 2
-    fi
-    # The line is recorded with `declined-on=` the row, or `-` with no --on (a hand-hold the tick
-    # cannot judge, and the verb says so).
-    DC_ON_AS=-
-    [ -z "$DC_ON" ] || DC_ON_AS=row
-    DC_CUR="$(_fill_current_field "$SCHED_PLAN")"
-    DC_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=${DC_CUR//|/ }|state=decline"
-    DC_LINE="${DC_LINE}|ceiling=${SCHED_WRITERS}|width=|open=|free=|ready=${DC_ALL// /,}|launched="
-    DC_LINE="${DC_LINE}|declined=${DC_WHY}|missed=0|idle=|room=|named=${DC_NAMED// /,}"
-    DC_LINE="${DC_LINE}|declined-on=$([ "$DC_ON_AS" = - ] && printf -- - || printf '%s' "$DC_ON")"
-    if ! printf '%s\n' "$DC_LINE" >> "$DC_LED" 2>/dev/null; then
-      die "REFUSED — could not write to $DC_LED; nothing was recorded."
-      exit 2
-    fi
-    for DC_ID in $DC_NAMED; do poker_owed_close "$REPO_REAL" "decline:$DC_ID" "decline"; done
-    say "decline — ${DC_NAMED// /,}: recorded in $DC_LED; it stands for those rows until a row it did not name is ready."
-    DC_UNREC="unrecorded as a dependency: this hold is a hand-hold the tick cannot judge; it stands only in the decline's reason"
-    case "$DC_ON_AS" in
-      row)
-        for DC_ID in $DC_NAMED; do
-          DC_PAIR="$(units_hold_read "$SCHED_PLAN" "$DC_ID" "$DC_ON" 2>/dev/null)" || DC_PAIR=""
-          if [ -n "$DC_PAIR" ]; then
-            say "decline — $DC_ID waits on $DC_ON: make it a table fact the tick judges once: bash ${HOOK_DIR}/session-poker.sh task-set $DC_ID $(clean_whole "$DC_PAIR")"
-          else
-            say "decline — $DC_ID waits on $DC_ON, which writes no path to read: $DC_UNREC."
-          fi
-        done ;;
-      *)
-        say "decline — $DC_UNREC; name the row it waits on with --on <row>." ;;
-    esac
-    exit 0
-  }
-
   # THE USER'S WRITER CAP (wave-27 T34; REQ-15 AC-15.4; D24; design ledger Δ10). A cap the user
-  # chose is a fact, not a decline to repeat on every turn: it is written once into the plan header
+  # chose is a fact, not a reason to repeat on every turn: it is written once into the plan header
   # every reader of the ceiling already reads (`plan_budget_line`, `budget_field` in lib/run.sh: the
   # dispatch wall, the tick and the turn-end wall). `parallel-budget:` keeps its other fields, its
   # `writers=` becomes the user's and its `source=` reads `user`; the frontmatter gains
@@ -1382,6 +1177,12 @@ EOF
   # changes nothing a wall reads), so the refusal names `amend`, the verb that widens it. A PENDING row no
   # roster names has no contract, and `files=<list>` is the table's to set (wave-36 T41; the pre-pass below). `task-set` is judged by `units_validate` before the
   # gate, as `task-add` is: a status, step or deps cell is a schedule change.
+  #
+  # `<col>+=<token>` APPENDS, for the two cells that list what a row waits on, `reads` and `deps`: the
+  # token goes after what the cell holds, an empty reads cell standing for its kind's default (units.sh
+  # `units_cell_append`), and a cell already naming it is left as it is. It is how a ready row is made to
+  # wait, by a read of the record of the row it waits on or of a decision nobody has ruled, without
+  # dropping the reads that already hold it. Any other column takes `=`.
   poker_verb_task_set() {
     # THE ROWS A CALL SETS (wave-33 T7). One entry per row: its id and its pairs, joined by the unit
     # separator. A ledger verb names one row; task-set's groups name many, each id with its group's pairs.
@@ -1433,6 +1234,12 @@ EOF
         fi
         [ "$VERB" = task-set ] || continue
         _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
+        case "$_pv_l" in
+          reads+|deps+) _pv_l="${_pv_l%+}"; PV_APPEND_ASKED=1 ;;
+          *+)
+            die "REFUSED — += appends to a cell that lists what a row waits on, reads or deps; ${_pv_l%+} takes =. The plan is unchanged."
+            exit 1 ;;
+        esac
         case "$_pv_l" in
           files) PV_FILES_ASKED=1; continue ;;  # a fixed column, judged after the plan is open, not an optional one the header lists
           id)
@@ -1494,6 +1301,43 @@ EOF
         pv_cols_refuse "$(pv_header_cells "$PV_PLAN" tasks | awk '{ l = tolower($0) } l != "id" && l != "files" { print l }')"
         exit 1
       fi
+    fi
+    # THE APPENDS, WRITTEN OUT: each `reads+=` or `deps+=` pair becomes `<col>=<the cell with the token after
+    # it>`, read from the plan as it stands, so the write below is the one transaction it always was. Two
+    # appends to one cell in one group build on each other.
+    if [ "$VERB" = task-set ] && [ -n "${PV_APPEND_ASKED:-}" ]; then
+      PV_JUDGED=()
+      for _pv_s in "${PV_SETS[@]}"; do
+        pv_set_pairs "$_pv_s"
+        _pv_new="$PV_SET_ID"; _pv_rv=""; _pv_dv=""
+        for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+          _pv_c="$(printf '%s' "${_pv_a%%=*}" | tr '[:upper:]' '[:lower:]')"
+          case "$_pv_c" in
+            reads+|deps+)
+              _pv_c="${_pv_c%+}"; _pv_tok="$(printf '%s' "${_pv_a#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+              if [ -z "$_pv_tok" ]; then
+                die "REFUSED — ${_pv_c}+= names nothing to append for $PV_SET_ID; the plan is unchanged."
+                exit 1
+              fi
+              if [ "$_pv_c" = reads ]; then _pv_v="$_pv_rv"; else _pv_v="$_pv_dv"; fi
+              if [ -z "$_pv_v" ]; then
+                _pv_v="$(units_cell_append "$PV_PLAN" "$PV_SET_ID" "$_pv_c" "$_pv_tok")" || {
+                  die "REFUSED — $PV_PLAN carries no ## Tasks row $PV_SET_ID; the plan is unchanged."
+                  exit 1
+                }
+              else
+                case ", $_pv_v, " in *", $_pv_tok, "*) ;; *) _pv_v="$_pv_v, $_pv_tok" ;; esac
+              fi
+              if [ "$_pv_c" = reads ]; then _pv_rv="$_pv_v"; else _pv_dv="$_pv_v"; fi
+              continue ;;
+          esac
+          _pv_new="$_pv_new"$'\037'"$_pv_a"
+        done
+        [ -z "$_pv_rv" ] || _pv_new="$_pv_new"$'\037'"reads=$_pv_rv"
+        [ -z "$_pv_dv" ] || _pv_new="$_pv_new"$'\037'"deps=$_pv_dv"
+        PV_JUDGED+=("$_pv_new")
+      done
+      PV_SETS=("${PV_JUDGED[@]}")
     fi
     # A PENDING ROW'S FILES CELL IS THE TABLE'S, A LAUNCHED ROW'S IS A CONTRACT (wave-36 T41; REQ-7 AC-7.1, AC-10.2;
     # D13; A-orch-5, A-orch-6, A-orch-9, A-orch-10). One rule: a row `pending` with no roster row naming it has no
