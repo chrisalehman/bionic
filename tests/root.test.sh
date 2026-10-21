@@ -28,6 +28,18 @@
 # repository before the walk begins; `$HOME` and everything above it are never
 # candidates; a `.bionic` that is a symlink is never a root (C2).
 #
+# THE SECTIONS:
+#
+#   §1   a git repo nested under a non-git workspace holding .bionic
+#   §2   a linked worktree maps onto its main repository
+#   §3   a phantom nested .bionic below the repo root: nearest wins
+#   §4   a symlinked .bionic is never a root
+#   §5   a .bionic inside $HOME is never a candidate
+#   §6   an unrelated repo with no .bionic anywhere
+#   §7   no git, no .bionic: the cwd answers
+#   §8   a worktree of a bare repository: the checkout is the only working tree
+#   §10  the linked worktree's name is published as BIONIC_WORKTREE
+#
 # SIX TOPOLOGIES, BUILT FOR REAL — no mocked filesystem, no stubbed git. Every
 # fixture below is `mkdir`, `git init`, `git worktree add` and `ln -s` under one
 # `mktemp -d`, because the whole subject of this library is what is actually on
@@ -44,10 +56,10 @@
 # share the name. So each rule-bearing fixture is run TWICE, once with the
 # feature and once with the feature removed, and the answer must MOVE:
 #
-#   §2b  the worktree gains its own real `.bionic`  → answer must still be main
-#   §3b  the phantom `.bionic` is deleted           → answer must climb to proj
-#   §4b  the symlink becomes a real directory       → answer must fall to repo
-#   §5b  `$HOME` is moved out of the way            → the ignored dir must win
+#   2b   the worktree gains its own real `.bionic`  → answer must still be main
+#   3b   the phantom `.bionic` is deleted           → answer must climb to proj
+#   4b   the symlink becomes a real directory       → answer must fall to repo
+#   5b   `$HOME` is moved out of the way            → the ignored dir must win
 #
 # A test that cannot go red for the right reason is not evidence, and each
 # control is the same assertion run against a filesystem that differs in

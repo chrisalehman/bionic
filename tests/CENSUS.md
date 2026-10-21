@@ -1286,6 +1286,8 @@ shell-lint.test.sh | §CENSUS-1 | keep | rule: lint — a section whose only cen
 shell-lint.test.sh | §CENSUS-2 | keep | rule: lint — a section whose census line is a keep deleted from its suite, or its whole suite deleted, planted in a scratch tree, so census_cull_refusals names the suite and the key | none (searched 'census_cull_refusals' and 'kept section absent' in tests/)
 shell-lint.test.sh | §CENSUS-3 | keep | rule: lint — a `## Culled` line naming a record whose defect carries a rule: prefix, or whose verdict is keep, planted in a scratch census, so census_cull_refusals names it | none (searched 'census_cull_refusals' and 'rule pin culled' in tests/)
 shell-lint.test.sh | §CENSUS-4 | keep | rule: lint — a section the census culls left in, or a kept section deleted, in the real tests tree, so the sweep over tests/ with tests/CENSUS.md names it | none (searched 'census_cull_refusals' and '## Culled' in tests/)
+shell-lint.test.sh | §ADR | keep | rule: lint — an ADR whose front-matter status: says Accepted over a ## Status section that still says Proposed, planted in a scratch directory (also nested, in a second directory, and the real tree's ADR-062), so adr_refusals names the file and both words | none (searched 'adr_refusals' and '## Status' in tests/)
+shell-lint.test.sh | §HEADER | keep | rule: lint — a header entry for a section the body lacks, or a body section the header's list omits, planted in a scratch suite and in a copy of shell-lint's own header, so header_refusals names the suite and the key (also the real tree's release-check §REL-1.22.0) | none (searched 'header_refusals' and 'header lists' in tests/)
 
 ## shell-rc.test.sh
 

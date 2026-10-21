@@ -17,7 +17,10 @@
 #            line on stderr, the run's own code; a re-run of a live run attaches; LOST exits 70.
 #   §DETACH-CEILING  (T12; D10; AC-9.4) a detached run the gate has not admitted within the bound ends
 #            75 with the one line, in its log, `<log>.rc` and its roster row; the command never ran.
-#   §WALL    AC-3.1 end to end — the Bash wall's wrap carries --detach and outlives its caller.
+#   §RUNLINE  the run close writes the run's line to the bound plan's landing record, and the floor's one
+#            reader reads it.
+#   §SIGNALS  a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their
+#            defaults.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
 #

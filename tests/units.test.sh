@@ -4,16 +4,29 @@
 #
 # WHAT IT OWNS. The contract three callers bind to after T8 — the evidence gate's ledger
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
-# that none of them carries a parser of its own. Three questions, one per function:
+# that none of them carries a parser of its own. The questions, one per section:
 #
 #   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the
-#                                 table's columns are written in
-#   §10 the `worktree` cell        slot 11, OPTIONAL: a table without the column is valid
-#                                 and reads it empty (wave-14 REQ-2, ADR-027)
-#   §13 the `base` cell            slot 12, OPTIONAL, and a commit id when it holds one
-#                                 (wave-17 REQ-2, ADR-032)
+#                                 table's columns are written in; the `worktree` cell (slot 11)
+#                                 and the `base` cell (slot 12) are OPTIONAL, a table without the
+#                                 column is valid and reads it empty, and `base` is a commit id
+#                                 when it holds one
+#   §2 header names               reversed columns give identical output
+#   §3 the ## Tasks section       is read, and nothing else
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
-#   §5 units_validate <plan>      which of the Task invariants the table breaks
+#   §5 units_validate <plan>      the live table is the clean case
+#   §6 units_validate <plan>      one line per broken invariant, naming the id and the rule
+#   §7 units_validate <plan>      a missing column is a violation of the table, not of a row
+#   §8 the differential           the old fill derivation and units_ready answer the same
+#   §9 a markdown-escaped pipe    in a cell
+#   §ORDER   build, regression, review, release: units_validate refuses any other order naming the
+#            rows; units_order reads it
+#   §POST    a review row after a landed release is admitted when it reads only approval:plan, head
+#            and the rows landed past the release
+#   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites,
+#            never a second whole run
+#   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's
+#            cover reads it
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields

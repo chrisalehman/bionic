@@ -17,19 +17,10 @@
 #       is exempt, and a helper name inside a heredoc body is not a call site
 #   §5  finish exits by FAIL, and the tally line carries sections=N setup=M
 #   §6  the counters and the assertion helpers are defined by the framework
-#   §7  the assertion-discipline docblock carries its two obligations
-#   §8  tests/run.sh registers this suite
+#   §6b the head docblock describes the tree it heads
 #   §9  the thirteen generic expect_* helpers are the framework's, each in a
 #       passing and a failing arm (AC-12)
 #   §10 expect_regex is an ERE and is not a pipeline (the 141 false FAIL)
-#   §11 anchor: a moved mutation anchor is red BEFORE the mutation runs,
-#       naming the anchor and the count it actually found (AC-29, AC-31)
-#   §19 the three shaped anchors (file, fn, insert) through one helper, each
-#       building its mutant; §20 a suite's extracted anchors are the ones it ran;
-#       §21 `anchors check` names a moved anchor, the three wave-34 mutants among
-#       them; §22 `anchors index` maps file -> declaring suites (wave-35 T3; AC-7.1, AC-7.3)
-#   §READS `reads_index` over the shipped tree: the new suite registered against anchors.sh,
-#       the wave-35 misses routed, the anchor index a subset of it (wave-36 T5; D12, AC-6.1)
 #
 # HERMETIC. Every planted suite is written into a mktemp'd sandbox holding a COPY
 # of the real tests/lib/assert.sh and is run as a child process; nothing here
