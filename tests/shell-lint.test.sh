@@ -1162,7 +1162,7 @@ gen() { seq 1 5; }
 if gen | grep -q needle; then :; fi  # MARK-L1 a library runs inside its caller
 EOF
 plant "$BP2/hooks/poker/plant-tick.sh" <<'EOF'
-landing_carrier_names "$plan" | /usr/bin/grep -qxF -- "$name" && return 0  # MARK-T1 the carrier exemption as a quitting grep
+landing_carrier_names "$plan" | /usr/bin/grep -qxF -- "$name" && return 0  # MARK-CARRIER the carrier exemption as a quitting grep
 EOF
 printf '%s\n' '# a comment' '' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded" # the writer is one short variable' > "$BP2/allow"
 BP2_ROSTER="hooks/plant.sh
@@ -1186,13 +1186,13 @@ expect_contains "…a pipeline split across lines, named at its first line" \
 expect_contains "…an awk program open across lines" "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S8) - 2 ))" "$BP2_SITES"
 expect_contains "…a library with no pipefail of its own" "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$BP2_SITES"
 expect_contains "…the carrier exemption as a quitting grep, in a file the allow file does not name" \
-  "$(bp2_at hooks/poker/plant-tick.sh MARK-T1)" "$BP2_SITES"
+  "$(bp2_at hooks/poker/plant-tick.sh MARK-CARRIER)" "$BP2_SITES"
 expect_eq "…and the sites named are those and no others, so every control in the same call passes" \
   "$(printf '%s\n' "$(bp2_at hooks/plant.sh MARK-S1)" "$(bp2_at hooks/plant.sh MARK-S2)" "$(bp2_at hooks/plant.sh MARK-S3)" \
        "$(bp2_at hooks/plant.sh MARK-S4)" "$(bp2_at hooks/plant.sh MARK-S5)" "$(bp2_at hooks/plant.sh MARK-S6)" \
        "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S7) + 1 ))" \
        "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S8) - 2 ))" \
-       "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$(bp2_at hooks/poker/plant-tick.sh MARK-T1)" | LC_ALL=C sort)" \
+       "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$(bp2_at hooks/poker/plant-tick.sh MARK-CARRIER)" | LC_ALL=C sort)" \
   "$BP2_SITES"
 expect_eq "…the listed line is silenced by its allow entry" "no" \
   "$(quit_sites "$BP2_OUT" | LC_ALL=C grep -qx "$(bp2_at hooks/plant.sh MARK-A1)" && echo yes || echo no)"
