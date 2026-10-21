@@ -999,31 +999,22 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
 # and its `cd … && pwd` and BASH_SOURCE forms), from simple assignments of such paths, and from plain `for v in
 # words` lists. A load that does not resolve, or names a path the commit lacks, is no member, so the closure never
 # names a file the check cannot have read. The closure is read from the declaration each time, never listed, so a
-# check that comes to load a new library brings it into its closure by that load alone.
+# check that comes to load a new library brings it into its closure by that load alone. Every word, the
+# declaration's and each load's, becomes a repository path in one place, `_wt_repo_paths`, so the two can never
+# disagree on a spelling. Its roots are every directory the check may be run from or may name: the run dir, physical
+# and as named, and the main checkout, since the declaration is read there while the door runs it in the checkout
+# that holds the branch, in a landing tree under the main checkout, or in a linked worktree elsewhere.
 _wt_check_closure() {  # <repo dir> <rev> <check command> -> the members' paths, one per line · 1 when no script
   local dir="$1" rev="$2" cmd="$3" nl='
-' held w script queue f seen top rel p
+' held w script queue f seen roots
   held="$(git -C "$dir" ls-tree -r --name-only "$rev" 2>/dev/null)" || return 1
-  top="$(cd "$dir" 2>/dev/null && pwd -P)" || top=""
+  roots="$(_wt_abs "$dir")${nl}${dir%/}${nl}$(worktree_root "$dir")"
   script=""
   while IFS= read -r w; do
-    w="${w#./}"
-    # The command runs in the checkout, so an absolute word under it names the file its relative path names; one
-    # outside it (a list in the user's own directory) is no file the commit holds. The match is on whole path
-    # components, so a sibling that shares the checkout's name as a prefix stays outside.
-    case "$w" in
-      /*) rel=""
-          for p in "$top" "${dir%/}"; do
-            [ -n "$p" ] || continue
-            case "$w" in "$p"/?*) rel="${w#"$p"/}"; break ;; esac
-          done
-          [ -n "$rel" ] || continue
-          w="$rel" ;;
-    esac
-    case "$w" in ''|/*|-*) continue ;; esac
+    [ -n "$w" ] || continue
     case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) script="$w"; break ;; esac
   done <<EOF
-$(printf '%s\n' "$cmd" | tr -s ' \t' '\n\n')
+$(printf '%s\n' "$cmd" | tr -s ' \t' '\n\n' | _wt_repo_paths "$roots")
 EOF
   [ -n "$script" ] || return 1
   queue="$script"; seen="${nl}${script}${nl}"
@@ -1037,23 +1028,43 @@ EOF
       case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) : ;; *) continue ;; esac
       seen="${seen}${w}${nl}"; queue="${queue:+${queue}${nl}}${w}"
     done <<EOF
-$(git -C "$dir" show "${rev}:${f}" 2>/dev/null | _wt_check_loads "$(dirname "$f")")
+$(git -C "$dir" show "${rev}:${f}" 2>/dev/null | _wt_check_loads "$(dirname "$f")" | _wt_repo_paths "$roots")
 EOF
   done
 }
-# The loads one member names, resolved against <dir>, its directory under the repository root ("." for the root).
-_wt_check_loads() {  # <dir> < the member's text -> one repository path per resolved load
-  awk -v d="$1" -v sq="'" '
-    function norm(p,   n, a, i, o, k, r) {
-      n = split(p, a, "/"); k = 0
+# A WORD AS THE REPOSITORY PATH IT NAMES, the one place the closure decides it. A relative word is read against the
+# repository root, where the check runs; an absolute one under the longest of <roots> it lies in, matched on whole
+# components, so a sibling sharing a root as a name prefix stays outside. Components are normalized once: an empty one
+# or `.` dropped, `..` taken back. A relative word that climbs out of the root, an absolute one under no root (a list
+# in the user's own directory) and the root itself name nothing: an empty line, so every word keeps its place.
+_wt_repo_paths() {  # <roots, one per line> < words, one per line -> per word its repository path, or an empty line
+  _WT_ROOTS="$1" awk '
+    function norm(p,   n, a, i, o, k, r, abs) {
+      abs = (substr(p, 1, 1) == "/"); n = split(p, a, "/"); k = 0
       for (i = 1; i <= n; i++) {
         if (a[i] == "" || a[i] == ".") continue
-        if (a[i] == "..") { if (k == 0) return ""; k--; continue }
+        if (a[i] == "..") { if (k > 0) k--; else if (!abs) return ""; continue }
         o[++k] = a[i]
       }
-      r = ""; for (i = 1; i <= k; i++) r = r (i > 1 ? "/" : "") o[i]
-      return r
+      r = ""; for (i = 1; i <= k; i++) r = r (i > 1 || abs ? "/" : "") o[i]
+      return (abs && r == "") ? "/" : r
     }
+    BEGIN {
+      n = split(ENVIRON["_WT_ROOTS"], t, "\n")
+      for (i = 1; i <= n; i++) if (substr(t[i], 1, 1) == "/" && (r = norm(t[i])) != "/") root[++nr] = r
+    }
+    substr($0, 1, 1) != "/" { print norm($0); next }
+    {
+      p = norm($0); best = ""
+      for (i = 1; i <= nr; i++) if (index(p, root[i] "/") == 1 && length(root[i]) > length(best)) best = root[i]
+      print (best == "" ? "" : substr(p, length(best) + 2))
+    }'
+}
+# The loads one member names, as the words a shell would read: a load from the member's own directory prefixed with
+# <dir>, its directory under the repository root ("." for the root), a relative load as written, read from the root
+# where the check runs, an absolute one as written. `_wt_repo_paths` turns each into the path it names.
+_wt_check_loads() {  # <dir> < the member's text -> one word per resolved load
+  awk -v d="$1" -v sq="'" '
     # Every $NAME or ${NAME} in s replaced by its value; "" when one has none. A loop variable, the last one met,
     # is left as @L for the caller to expand.
     function subst(s,   out, name, m) {
@@ -1070,13 +1081,12 @@ _wt_check_loads() {  # <dir> < the member's text -> one repository path per reso
     function emit(p,   n, a, i) {
       if (p == "" || index(p, "$") || index(p, "`")) return
       if (index(p, "@D") == 1) p = d substr(p, 3)
-      else if (substr(p, 1, 1) == "/") return
       if (index(p, "@L")) {
         n = split(loop[lv], a, " ")
-        for (i = 1; i <= n; i++) { q = p; sub(/@L/, a[i], q); q = norm(q); if (q != "") print q }
+        for (i = 1; i <= n; i++) { q = p; sub(/@L/, a[i], q); print q }
         return
       }
-      p = norm(p); if (p != "") print p
+      print p
     }
     {
       l = $0
