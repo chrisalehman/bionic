@@ -231,6 +231,15 @@ row_landed_scan() {
     die "REFUSED — row-landed --by-hand: $RL_COMMIT is no commit in $co, so the declared release-check has nothing to run over; the plan is unchanged."
     exit 1
   fi
+  # WHICH COPY JUDGES. The scan runs in the checkout after the landing, so it reads the landed copy of the check; a
+  # passing proof at a commit that holds this one read a copy past it too. When this landing's own range (its
+  # commit's first parent to the commit) changes a file of the check's closure, that copy is the candidate's, not the
+  # target's the door ran before the merge: the row's line says which, so a copy change is never silent.
+  RL_JUDGED=target
+  if p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^1" 2>/dev/null)" \
+     && _wt_check_judge "$co" "$p" "$RL_COMMIT" "$cmd" >/dev/null 2>&1; then
+    RL_JUDGED=candidate
+  fi
   for p in $(proof_check_passes "$PV_PLAN" "$co"); do
     if git -C "$co" merge-base --is-ancestor "$RL_COMMIT" "$p" 2>/dev/null; then
       say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
@@ -242,6 +251,7 @@ row_landed_scan() {
     exit 1
   fi
   if [ "$(git -C "$co" rev-list --count "$RB_BASE..$RL_COMMIT" 2>/dev/null)" = 0 ]; then
+    RL_JUDGED=""
     say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
     return 0
   fi
@@ -252,10 +262,10 @@ row_landed_scan() {
     exec $cmd </dev/null 2>&1)"; rc=$?
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out"
-    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) exited $rc over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${RL_COMMIT:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")), judged-by=$RL_JUDGED, exited $rc over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${RL_COMMIT:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
     exit 1
   fi
-  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM)."
+  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), judged-by=$RL_JUDGED."
   return 0
 }
 # ---------------------------------------------------------------- the run's numbers
@@ -604,7 +614,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
   # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
   # 60 and 63: the dry copy is `plan_verb_open`'s own, so the gate resolves it to the real plan).
   # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
-  # <who> <at> "<why>"`, the hand landing's interface), once: a text already there is not added
+  # <who> <at> "<why>" judged-by=<target|candidate>`, the hand landing's interface, the field present when the
+  # scan judged), once: a text already there is not added
   # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
   # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
   # same landing finds the plan already so and writes nothing.
@@ -628,6 +639,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     fi
     plan_verb_open row-landed
     [ "$VERB" != deliver ] || deliver_check
+    RL_JUDGED=""
     [ "$RL_HAND" -eq 0 ] || row_landed_scan
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
@@ -647,7 +659,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> -> the one hand-
     case "$PV_ID" in
       T[0-9]*)
         RL_TEXT="landed $RL_COMMIT $RL_AT"
-        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\""
+        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\"${RL_JUDGED:+ judged-by=$RL_JUDGED}"
         RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
         case " $RL_REST " in
           *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;
