@@ -432,8 +432,8 @@ sv_run() {  # <args after `sitrep`…> [stdin from the caller] -> SV_RC, SV_OUT,
 }
 expect_contains "VE0 precondition: the register holds D5 open before any read" "|key=decide:D5|state=open|" "$(cat "$SV_REG")"
 sv_run "$SV_P" < /dev/null
-expect_eq "VE1 the sheet prints (exit 0) and holds the open approval as an ask" "0|ask: key=approve:release holds=T3" \
-  "$SV_RC|$(printf '%s\n' "$SV_OUT" | /usr/bin/grep -o '^ask: key=approve:release holds=T3')"
+expect_eq "VE1 the sheet prints (exit 0) and holds the open approval as an ask, naming the task it holds by its card label" "0|ask: key=approve:release holds=8/3" \
+  "$SV_RC|$(printf '%s\n' "$SV_OUT" | /usr/bin/grep -o '^ask: key=approve:release holds=8/3')"
 expect_contains "VE2 the sheet settled the register against the ledger: D5, ruled there, is closed on it" \
   "|key=decide:D5|state=closed|" "$(cat "$SV_REG")"
 expect_absent "VE2b …and the sheet shows no D5 (VE1 read the asks of the same sheet)" "decide:D5" "$SV_OUT"
