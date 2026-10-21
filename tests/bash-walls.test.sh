@@ -817,7 +817,7 @@ H_RU="$(git -C "$R_RU" rev-parse HEAD)"
 RU_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 RU_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 ru_reading() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$RU_LIB" review "$H_RU" 2026-10-12T12:00:00Z "$@"; }
-ru_plan() {  # <current> <AC-2's tier | status | evidence | auditor> [<AC-2 block lines>] -> the plan text
+ru_plan() {  # <current> <the second row's tier | status | evidence | auditor> [<its block lines>] -> the plan text
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
   printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
   printf 'current: %s\nworking-branch: feature/t23\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
@@ -862,7 +862,7 @@ ru_put 5 'T4 | discharged | see AC-2 | UNVERIFIABLE' "  user-confirmed: $RU_CONF
 ru_poke current 6 --check
 expect_eq "VERDICT-3: a confirmed T4 row under UNVERIFIABLE — current 6 --check passes" "0" "$RU_RC"
 
-# §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens row:AC-2.
+# §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens its row item.
 rm -f "$R_RU/.bionic/tmp/owed-$SID.state"
 ru_put 7 'T1 | discharged | see AC-2 | REFUTED'
 ru_poke current 8 --check
