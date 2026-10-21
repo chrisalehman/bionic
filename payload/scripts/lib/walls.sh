@@ -1716,6 +1716,17 @@ user_confirmed_attributed() {  # <value> -> 0 when attributed
   grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]' <<< "$1"
 }
 
+# Is this key's value the stub Step 3 renders for the user's confirmation? `pending` in the
+# `user-confirmed` key and nowhere else: a T4 row awaiting its user holds no machine fact the
+# per-key check could ask of it, so the stub passes there while the key stays present and
+# non-blank. The merge advance refuses it, because `user_confirmed_attributed` (the one reader of
+# the confirmation) does not take it. Any other placeholder in that key stays a placeholder.
+# [WALL: tests/bash-walls.test.sh]
+user_confirmed_pending() {  # <key> <value> -> 0 when the key is user-confirmed and the value is the stub
+  [ "$1" = user-confirmed ] || return 1
+  [ "$(tr '[:upper:]' '[:lower:]' <<< "$2")" = pending ]
+}
+
 # Is a row WAIVED on the record? A `waiver:` token in its evidence cell or a `waiver:` line in
 # its AC block. Not the status cell alone: a row that says `waived` while recording no waiver
 # has not been through the Waiver Protocol.
@@ -4113,7 +4124,7 @@ validate_matrix() {
             "matrix row '${ac}' (${tier}) evidence key '${key}' is empty." \
             "record the evidence for '${key}' in the '${ac}:' block, or waive the row."
         fi
-        if matrix_is_placeholder "$val"; then
+        if matrix_is_placeholder "$val" && ! user_confirmed_pending "$key" "$val"; then
           block_matrix "${ac} has placeholder ${key} evidence" "record what actually ran" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is a placeholder (\"${val}\")." \
             "replace '${key}' with the real evidence before committing."
