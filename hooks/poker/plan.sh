@@ -2452,6 +2452,8 @@ RR_MATRIX
         printf 'release-approval/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
           "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "$(rr_word "${RR_DLAB[$i]}")" "$(rr_word "${RR_OLAB[$i]}")" "${RR_WHYS[$i]}"
       done
+      # THE CARRIES THE PAGE PUTS: every finding it shows deferred, so the reply that answers the page rules each.
+      printf '%s' "$RR_CARRY" | while IFS= read -r i; do [ -z "$i" ] || printf 'carried: %s\n' "$i"; done
     } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
     rm -f "$f.new.$$" 2>/dev/null
     return 0
@@ -2576,7 +2578,7 @@ RR_ROWS_EOF
     fi
 
     # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against.
-    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""
+    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""
     # A PREVIEW OPENS NOTHING: the disposition it reads is handed a ledger key no file can carry, so the person's
     # items the disposition opens on any other run are left unopened here.
     if [ "$RR_PREVIEW" = yes ]; then
@@ -2593,6 +2595,7 @@ RR_ROWS_EOF
       sent="${stated:-$ttl}"; [ "$sent" != - ] || sent="$ttl"; sent="${sent%.}"
       q="$(rr_question_of "$PV_PLAN" "$ev")"; num="${fid##*#}"
       RR_FN=$((RR_FN + 1)); RR_FIDS="${RR_FIDS}finding:$fid"$'\n'
+      [ "$state" != deferred ] || RR_CARRY="${RR_CARRY}$fid"$'\n'
       dec=""; grp=C
       [ "$rows" != "—" ] || rows=""
       if [ "$state" = fixed ] || [ -n "$rows" ]; then
@@ -2896,6 +2899,13 @@ RR_AGAINST_EOF
 $RP_TABLE
 RP_TABLE
     printf 'replied: at=%s reply=%s words="%s"\n' "$(iso_now)" "$RP_HOW" "$(clean "$RP_TEXT")" >> "$RP_CARD"
+    # THE REPLY IS THE RULING ON EVERY CARRY THE PAGE PUT: carried as shown, or moved by the decision the reply took (whose
+    # finding-move closed it already), so the carry's ask on the run's register closes here.
+    if declare -F owed_close >/dev/null 2>&1 && declare -F carry_owed_key >/dev/null 2>&1; then
+      sed -n 's/^carried: //p' "$RP_CARD" 2>/dev/null | while IFS= read -r RP_X; do
+        [ -z "$RP_X" ] || OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$(carry_owed_key "$RP_X")" "release approval reply" >/dev/null 2>&1
+      done
+    fi
     if [ "$RP_HELD" -gt 0 ]; then
       say "reply — \"$(clean "$RP_TEXT")\" replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded, $RP_HELD held back; render the release approval card again once what is held is settled."
     else

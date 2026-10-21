@@ -33,6 +33,7 @@
 # §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
 # §RATIO     the page prints the release check's test-ratio line once, read from the log of the newest check proof
 # §CHECK-CHANGED the Bottom line says when the release changes a file of the declared release check's closure
+# §CARRY     a finding the run carries by its own choice is an ask on the run's register; the page records it and the reply closes it
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -969,5 +970,26 @@ expect_eq "STEP0-2 …its sections in the 1.20.0 order" "Purpose|Seed|Run|Branch
 expect_eq "STEP0-6 rendered for the session's own run, it opens the person's approve:step0 item" "approve:step0" "$(fc_owed)"
 expect_eq "STEP0-7 every line of the card is within the shared 100 columns" "0" \
   "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 100' | /usr/bin/grep -c .)"
+
+# ============================================================
+section "§CARRY: a carry the run chose is the run's ask until the release approval card's reply rules it"
+# ============================================================
+# A reading's S3 on finding is deferred by the severity table and moved by no person: the run carries it. The acting
+# render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
+# page closes each. fails-when: the reply leaves the carry open on the run's register.
+FC_CK="carry:record:wave-x:adversarial.md:1"
+fc_reg() { cat "$FC_REC/asks.state" 2>/dev/null; }
+fc_record adversarial adversarial piece 'finding: 1 S3 on lib/x.sh:1 a message could be clearer'
+fc_plan "$FC_GOOD"
+fc_page
+expect_eq "CARRY-0 precondition: the page renders (exit 0)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "CARRY-1 the render's disposition opens the carry on the run's register" "$FC_CK" "$(fc_owed)"
+expect_contains "CARRY-2 …and the page records the carry it puts" "carried: $FC_FID" "$(cat "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "CARRY-3 reply all default exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_absent "CARRY-4 the reply rules the carry: it is no longer open (CARRY-1 read it open)" "$FC_CK" "$(fc_owed)"
+expect_contains "CARRY-4b …the register says the reply closed it" "|key=$FC_CK|state=closed|by=release approval reply|" "$(fc_reg)"
+fc_record adversarial adversarial piece "$FC_S3"
 
 finish

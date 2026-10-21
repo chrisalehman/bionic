@@ -965,10 +965,18 @@ expect_eq "DE1 one put with no ruling: one ask, its number and title, what it ho
   "$(for f in key title holds raised; do sr_f "$(sr_lines ask)" "$f"; done | sr_join)"
 sr_run --line "$SR_PLAN"
 expect_eq "DE2 …the Patrol's status counts it" "owed: 1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'owed: [0-9]+')"
+# The put's own ask on the register, as `decisions put` opens it, and a held merge naming the decision.
+sr_owed "key=decide:D19|state=open|sent=-|at=2026-10-06T20:30:00Z|title=reply to D19|reply=D19 · the regression rule the judge holds: reply with the option number."
+sr_owed "key=hold:merge|state=open|sent=-|at=2026-10-06T21:00:00Z|title=held merge: D19 unruled|reply=bionic: close-out refused — the merge waits on D19"
+sr_run "$SR_PLAN"
+expect_eq "DE2b the decision is still one ask, now holding the merge a held merge names it in, raised when its ask was opened" \
+  "decide:D19|the merge|1:30 PM|hold:merge" \
+  "$(sr_f "$(sr_ask decide:D19)" key)|$(sr_f "$(sr_ask decide:D19)" holds)|$(sr_f "$(sr_ask decide:D19)" raised)|$(sr_f "$(sr_ask hold:merge)" key)"
 printf '\n## Δ1 — D19 ruled "2" (Chris Lehman 2026-10-20): the regression rule the judge holds\n' >> "$SR_DIR/design-ledger.md"
 sr_run "$SR_PLAN"
-expect_eq "DE3 the same decision ruled: no ask, while both reviews still print" "0|2" \
-  "$(sr_lines ask | /usr/bin/grep -c .)|$(sr_lines review | /usr/bin/grep -c .)"
+expect_eq "DE3 the same decision ruled: no ask for it though its own ask is not yet closed, the held merge still one, both reviews still print" \
+  "0|1|2" \
+  "$(sr_lines ask | /usr/bin/grep -c 'key=decide:D19 ')|$(sr_lines ask | /usr/bin/grep -c 'key=hold:merge ')|$(sr_lines review | /usr/bin/grep -c .)"
 
 # ============================================================
 section "§RECAP: the resume recap carries the run's status line and one line per open ask, from the sheet's own facts"
@@ -1097,6 +1105,46 @@ sr_world bar-plant-mut "20 20 20 20"
 SR_MUT_SC="$(sr_poke_with "$SR_MUT/hooks/session-poker.sh" landing-report --scorecard "$SR_PLAN")"
 expect_eq "SCO3 a mutant bar of 25 moves the scorecard's target" \
   "widest landing ready→landed: T1 20.0 min · target < 25" "$(printf '%s\n' "$SR_MUT_SC" | /usr/bin/grep '^widest landing ')"
+
+# ============================================================
+section "§WAIT: a decision's wait line names everything that waits on it: a row not landed or dropped that reads it, the release its newest approval page lists it on, the merge an open held-merge ask names it in"
+# ============================================================
+# FIXTURE FIDELITY: the world's plan bound by the bind verb, the put through the real `decisions put`, the held merge
+# opened on the run's register through lib/owed.sh as close-out opens it, and the release approval page's replay
+# line in the shape plan.sh `rr_record` writes. fails-when: a held merge naming D<n> leaves the put's wait line
+# saying nothing waits, as a run's put once did while its merge waited on that decision.
+SR_WLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+sr_wait() {  # <D<n>> -> the wait: line the put prints, its label stripped
+  sr_poke decisions put "$1" "the decision $1" 2>&1 | sed -n 's/^wait: //p'
+}
+sr_hold() {  # <title> -> hold:merge open on this world's register, as a refused close-out opens it
+  OWED_ROOT="$SR_REPO" OWED_SID="$SID" OWED_PLAN="$SR_PLAN" bash -c '. "$1/run.sh" && . "$1/owed.sh" && owed_open hold:merge "$2" "bionic: close-out refused — $2"' \
+    _ "$SR_WLIB" "$1"
+}
+sr_world wait "6 6 12 12"
+sr_bind
+SR_W_NONE="Answered now or in an hour, nothing moves: no task waits on it."
+expect_eq "WA-0 nothing reads D31 and nothing names it: nothing moves" "$SR_W_NONE" "$(sr_wait D31)"
+sr_hold "the commit gate refuses the merge until D30 is ruled"
+expect_eq "WA-1 an open held merge naming D30: the put's wait line names the merge, and the close moves" \
+  "Answered in an hour rather than now, the predicted close moves an hour later: the merge waits on it." "$(sr_wait D30)"
+expect_eq "WA-1b …a held merge naming D30 does not name D3 (WA-0 read the same line)" "$SR_W_NONE" "$(sr_wait D3)"
+SR_W_ROW="$(sr_row T20 "Decision-gated row · complexity: standard" approval:D32 30 held)"
+awk -v r="$SR_W_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+expect_eq "WA-2 a row held, not pending, that reads approval:D32 waits on it" \
+  "Answered in an hour rather than now, T20 starts an hour later and the predicted close holds: it is off the longest chain." \
+  "$(sr_wait D32)"
+sed -e 's/^\(| T20 | .*| \)held\( | — | — | — |\)$/\1landed\2/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+expect_eq "WA-2b …landed, it waits on nothing" "$SR_W_NONE" "$(sr_wait D32)"
+printf 'Release approval\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=2026-10-06T21:00:00Z|decisions=1\nrelease-approval/v1|dec=1|key=approve:D33|default=approve D33|other=-|pick=default|choices=approve/hold|why=-\n' \
+  "$SR_PLAN" "$SR_H" > "$SR_DIR/release-approval-${SR_H:0:8}.md"
+expect_eq "WA-3 the newest release approval page lists D33: the release waits on it" \
+  "Answered in an hour rather than now, the predicted close moves an hour later: the release waits on it." "$(sr_wait D33)"
+sr_hold "the commit gate refuses the merge until D30 is ruled"
+printf 'release-approval/v1|dec=2|key=approve:D30|default=approve D30|other=-|pick=default|choices=approve/hold|why=-\n' \
+  >> "$SR_DIR/release-approval-${SR_H:0:8}.md"
+expect_eq "WA-4 the release and the merge both wait on D30" \
+  "Answered in an hour rather than now, the predicted close moves an hour later: the release and the merge wait on it." "$(sr_wait D30)"
 
 
 finish

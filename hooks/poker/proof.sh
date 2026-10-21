@@ -52,6 +52,23 @@ waive_owed_findings() {
   return 0
 }
 
+# proof_owed <open|close> <key> <title or closer> [<reply>] -> always 0, prints nothing: the item opened or closed on the
+# register of the run this verb writes (PV_PLAN), never a session file, whichever session runs the verb.
+proof_owed() {
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  case "$1" in
+    open)  OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$2" "$3" "${4:-}" >/dev/null 2>&1 ;;
+    close) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$2" "$3" >/dev/null 2>&1 ;;
+  esac
+  return 0
+}
+# carry_owed_key <record>#<n> -> the register's key of a carry no person ruled: `finding_owed_key`'s identity under
+# `carry:`, so the finding's own ruling item and its carry are two needs, never one key.
+carry_owed_key() {
+  local k; k="$(finding_owed_key "$1")"
+  printf 'carry:%s' "${k#finding:}"
+}
+
 deferral_sentence() {  # <plan> <record>#<n> -> the stated sentence, unescaped (nothing when none); exit 1: no deferred: line
   local l
   l="$(deferral_line "$1" "$2")" || return 1
@@ -820,6 +837,16 @@ $PF_PLANL"
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
+    # A FAILING READING IS THE PERSON'S TO WAIVE FROM THE MOMENT IT IS RECORDED: fix it, or waive the question. The ask
+    # opens here, under the key the judge and the waive verb use, rather than waiting for an advance or a commit to be
+    # refused on it; a passing reading of the same question closes it, as the judge closes a question no longer failing.
+    if [ "$PF_KIND" = review ] && [ -n "$PF_QUESTION" ]; then
+      case "$PF_RESULT" in
+        fail) proof_owed open "waive:$PF_QUESTION" "waiver: $PF_QUESTION" \
+                "proof-add: the $PF_QUESTION reading $PF_REL failed at ${PF_HEAD:0:12}: fix it, or waive $PF_QUESTION" ;;
+        pass) proof_owed close "waive:$PF_QUESTION" "passing reading" ;;
+      esac
+    fi
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
@@ -1047,6 +1074,7 @@ FM_FINDING
     }
     mv -f "$PV_NEW.2" "$PV_NEW"
     plan_verb_swap finding-move "the move of $FM_ID" writer
+    proof_owed close "$(carry_owed_key "$FM_ID")" "finding-move $FM_TO"
     if [ -n "$FM_ROW" ]; then
       poker_owed_close "$PV_REPO" "$(finding_owed_key "$FM_ID")" "finding-move fixed $FM_ROW"
       say "finding-move — $(clean "$FM_ID") fixed by $FM_ROW, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first. It reads fixed once $FM_ROW has landed green, and counts against no fix-cap."
@@ -1166,6 +1194,12 @@ FM_FINDING
                 fi ;;
               defer)
                 DSP_STATE=deferred
+                # A DEFERRAL NO PERSON RULED IS A CARRY THE RUN CHOSE: the reader's rating deferred it and the run carries
+                # it on, so it is an ask until the release approval card rules it. A move to defer is the person's own
+                # ruling (finding-move takes their words), and owes nothing more.
+                [ -n "$(_proof_moved_to "$PV_PLAN" "$DSP_FID")" ] \
+                  || proof_owed open "$(carry_owed_key "$DSP_FID")" "Carried $DSP_S finding" \
+                       "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — carried, not fixed; the release approval card rules it"
                 DSP_STATED="$(deferral_sentence "$PV_PLAN" "$DSP_FID" 2>/dev/null)" || DSP_STATED=""
                 if [ -n "$DSP_STATED" ]; then DSP_DEC="none: stated"
                 else DSP_DEC="its changelog sentence: finding-stated $DSP_FID '<sentence>'"; fi ;;
