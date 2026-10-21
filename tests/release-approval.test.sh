@@ -551,7 +551,7 @@ section "§T4: a T4 row is read through the gate's one predicate: confirmed by y
 # ============================================================
 # fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
 # the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
-fc_t4() {  # <auditor cell> <user-confirmed value, or noblock> -> PFC: FC_GOOD with a discharged T4 row AC-1.3
+fc_t4() {  # <auditor cell> <user-confirmed value, or noblock> -> PFC: FC_GOOD with a third row, discharged and T4
   local c="$1" v="$2"
   fc_plan "$FC_GOOD"
   FC_T4_ROW="| AC-1.3 | T4 | discharged | see AC-1.3 | $c |" awk '
