@@ -636,7 +636,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #
 # THE CLOSE IS A FLOOR OR A FORECAST, NEVER NOW. L = max(the longest open chain, all open work ÷ the admitted count) in
 # the plan's own minutes, so admitting more can shorten the work's share and never one chain. The floor is now + L at
-# 1×; the likely close is now + L × the pace, printed only when it falls after the floor. The pace is the median of a
+# 1×; the likely close is now + L × the pace, printed only when it falls after now. The pace is the median of a
 # landing's dispatched-to-landed minutes over its planned minutes, this run's, else the newest delivered run's at the
 # same scale on the same project, named; with neither the floor stands alone. The queue's ready-to-landed time is a
 # wait at the gate and feeds nothing. A plan not approved at Step 3 prints the no-forecast sentence; a delivered one
@@ -841,8 +841,8 @@ sitrep_prev() {
 # of it (the page, its basis, the schedule mark); nothing when no task is open. The fields, `-` where none:
 #   1 floor     now + L minutes at 1×, rounded to the minute, and always after now: L is the larger of the longest
 #               open chain and all open work over the admitted count, in the plan's own minutes
-#   2 likely    now + L × the pace, rounded to the minute; `-` with no pace or when it falls at or before the floor,
-#               since a likely close earlier than the floor contradicts it
+#   2 likely    now + L × the pace, rounded to the minute; `-` with no pace or when it falls at or before now. A pace
+#               under 1× puts it before the floor, and it still prints: it is the estimate, the floor the plan's own
 #   3 ratio     the pace: this run's (`sitrep_pace`), else the newest same-scale delivered run's (`sitrep_prev`)
 #   4 whose     `this run`, or the lending run's short name, a wave slug's first two words
 #   5 landings  how many of this run's landings the pace is the median of (`-` when borrowed)
@@ -874,7 +874,7 @@ sitrep_close() {
     p = t / w; l = (p > c) ? p : c
     f = int((now + l * 60) / 60 + 0.5) * 60; if (f <= now) f = (int(now / 60) + 1) * 60
     y = 0; if (r != "-" && r + 0 > 0) y = int((now + l * r * 60) / 60 + 0.5) * 60
-    if (y > f) printf "%d\t%d\t", f, y; else printf "%d\t-\t", f }'
+    if (y > now) printf "%d\t%d\t", f, y; else printf "%d\t-\t", f }'
   printf '%s\t%s\t%s\t' "$ratio" "$whose" "$n"
   awk -v c="$cmins" -v t="$work" -v w="$width" 'BEGIN { p = t / w; l = (p > c) ? p : c; printf "%d\t%d\t%d\t", t, p + 0.5, l + 0.5 }'
   printf '%s\t%s\t%s\n' "$cids" "$cmins" "$admitted"
@@ -1228,7 +1228,7 @@ SITREP_SIT
         lk_txt="the likely close: $(awk -v l="$larger" -v r="$ratio" 'BEGIN { printf "%d", l * r + 0.5 }') min at $(sitrep_ratio_fmt "$ratio")×, $lkc"
       else
         btext="not before $cl ($pt)"; ltext="closes ≥$cl"
-        lk_txt="at $(sitrep_ratio_fmt "$ratio")× the likely close falls no later than the floor, so the floor stands"
+        lk_txt="at $(sitrep_ratio_fmt "$ratio")× the likely close falls at or before now, so the floor stands alone"
       fi
     fi
     if [ "$admitted" -eq 0 ]; then wtxt="over 1 suite run, none admitted now"
