@@ -1412,6 +1412,15 @@ DSP_READINGS
         exit 1
       done
     fi
+    # THE WHOLE RUN COMES ONCE, AND A HEAD PAST IT IS A FIX ROW'S TO PROVE. Whatever the regression is (tests/run.sh or
+    # the declared command), a record that already holds a whole run at a commit behind the working head refuses another
+    # before anything runs: a red suite is closed by the landing of the fix row that runs it, never by a second
+    # run, so a second run would only move the head the plan proves. A run at this very head is not behind it, and a
+    # run on a history that does not hold this head proves nothing here.
+    if FR_PAST="$(proof_whole_run_behind "$PV_PLAN" "$PV_REPO" "$FR_CO" "$FR_HEAD")"; then
+      die "REFUSED — the whole run runs once, and ${FR_PAST:0:12} has it (${FR_PAST#*$'\t'}): a red suite is a fix row's, and a fix row's landing proves the head ${FR_HEAD:0:12}. Nothing was run."
+      exit 1
+    fi
     FR_DIRT="$(_wt_piece_dirt "$FR_CO")"
     FR_DIRTY="$(printf '%s' "$FR_DIRT" | awk 'END { print NR + 0 }')"
     # A DIRTY TREE IS REFUSED BEFORE THE RUN, NOT LOGGED AFTER IT (wave-35 T32; D20, A-orch-32). The log of a dirty

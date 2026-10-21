@@ -1180,6 +1180,30 @@ $res
 PROOF_FOLD
 }
 
+# proof_whole_run_behind <plan> <root> <tree> <head> -> `<run head><TAB><log>` of the plan's first whole run that read a
+# commit strictly behind <head> on its history, exit 0; nothing and exit 1 when the record holds none. THE ONE FACT
+# BEHIND "the whole run comes once": a whole run is the verb's own run line (`ev=run`, a log named
+# `record/<run>/regression-run-<head>`, a clean tree) or a whole run's per-suite fact (`ev=verdict`, `kind=regression`,
+# keyed by the commit it ran at). A run line that any other command wrote (booked.sh books every gated command)
+# names another log and is not one, and a dirty run proves no commit. A run at <head> itself is not behind it; a
+# run on a history that does not hold <head> proves nothing here and is passed over.
+proof_whole_run_behind() {
+  local plan="${1:-}" root="${2:-}" tree="${3:-}" head="${4:-}" rec h log
+  rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" && [ -f "$rec" ] && _proof_fields || return 1
+  head="$(git -C "$tree" rev-parse --verify -q "${head}^{commit}" 2>/dev/null)" || return 1
+  while IFS='	' read -r h log; do
+    [ -n "$h" ] && [ "$h" != "$head" ] || continue
+    git -C "$tree" merge-base --is-ancestor "$h" "$head" 2>/dev/null || continue
+    printf '%s\t%s' "$h" "$log"
+    return 0
+  done <<PROOF_WHOLE_BEHIND
+$(awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_ev() == "run" && line_kv("dirty") == 0 && index(line_kv("log"), "record/") == 1 && index(line_kv("log"), "/regression-run-") { print line_kv("head") "\t" line_kv("log") }
+    line_ev() == "verdict" && line_kv("kind") == "regression" && line_kv("commit") != "" { print line_kv("commit") "\t" line_kv("log") }' "$rec" 2>/dev/null)
+PROOF_WHOLE_BEHIND
+  return 1
+}
+
 # _proof_floor_log <evidence> <working head> <checkout> [<plan>] [<root>] -> the 40-hex head the log read, exit 0;
 # or exit 1 with the refusal's sentence (wave-36 T35; D13, AC-7.10; the synth-vision filing). THE FLOOR'S ONE
 # GRAMMAR. What a project's regression is belongs to the project; the judge asks only that a run of it read a
@@ -1231,8 +1255,8 @@ PROOF_LOG_OWED
       case $? in
         0|2) printf '%s' "$sha"; return 0 ;;
       esac
-      printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s; land the suites it lacks there, or run the whole at %.12s and cite that log' \
-        "$ev" "$sha" "$head" "$why" "$head"
+      printf 'the run in %s read head %.12s, and the working branch is at %.12s: %s; land the suites it lacks there' \
+        "$ev" "$sha" "$head" "$why"
       return 1
     fi
     printf 'the run in %s read head %.12s, and the working branch is at %.12s: a whole run is owed at %.12s; run it there and cite that log' \
@@ -1668,8 +1692,16 @@ _proof_roots_load() {
 #                              is the working head judged, which the full-run wall names
 #     owed<TAB><suites>        the proof names the working head, and these suites its whole run left red,
 #                              comma-joined file names
-#     uncovered<TAB><reason>   anything else, the reason in words: a whole run owed, naming the head the
-#                              last one read and the working head, or the question that could not be answered
+#     uncovered<TAB><reason>   anything else, the reason in words: the first commit past the last whole run that
+#                              no landing proves, the head that run read when it is not on this history, or the
+#                              question that could not be answered; it never offers a second whole run
+#
+# THE READBACK A WALK READS IS THIS ANSWER CUT TO A LOG, so it is read as a fact and not recalled. The log holds the
+# command that reaches the judge (`bash -c '. lib/proof.sh && proof_state <plan> <tree>'`; a verb that refuses before
+# it asks the judge, as `current N --check` does on an unfinished matrix, is not a readback), the command's output,
+# and `rc=<n>` as its last line. The first field of the output is `covered` at the working head, or `uncovered`
+# naming a commit; no line of it offers a whole run. A log missing any of the three, or one whose first field is
+# anything else, is refused as no readback.
 #
 # (wave-26 T5; REQ-3, D6.) THE ONE PLACE THAT RUNS GIT FOR THE FLOOR'S STATE. The dispatch wall asks
 # this and judges nothing itself. <tree> is the project root: its repository holds the working branch,
