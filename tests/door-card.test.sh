@@ -180,8 +180,12 @@ dcm_tree() {
     && cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$BIONIC_SCRIPTS_DIR/payload/context" "$1/payload/" \
     && ln -s ../hooks "$1/payload/hooks"
 }
-# dcm_card <tree> <copy> -> DOOR_OUT, DOOR_RC of that tree's release-approval in a copy of the end state
-dcm_card() { door_run "$2" bash "$1/hooks/session-poker.sh" release-approval "$2/$DOOR_PLAN_REL"; }
+# dcm_card <tree> <copy> -> DOOR_OUT, DOOR_RC of that tree's release-approval in a copy of the end state. The copy
+# carries the page §CLOSE wrote, so it is removed first: a replay table read afterwards is this render's alone.
+dcm_card() {
+  rm -f "$2"/.bionic/docs/record/wave-x/release-approval-*.md
+  door_run "$2" bash "$1/hooks/session-poker.sh" release-approval "$2/$DOOR_PLAN_REL"
+}
 
 DCM0="$WORLD_ROOT/tree-same"; dcm_tree "$DCM0"
 read -r DCM0_R _ <<EOF

@@ -2225,6 +2225,36 @@ _card_t4_confirm_key() {
     for _ck in $(keys_for_tier T4); do [ "$_ck" = evidence ] || { printf '%s' "$_ck"; break; }; done )
 }
 
+# _card_unapproved -> the format of the refusal `current 8` prints while the release approval is missing, as the judge
+# spells it (hooks/poker/judge.sh `cur8_unapproved_line`), read from the judge beside CF_POKER. judge.sh defines
+# functions only, so sourcing it in a subshell runs nothing and defines nothing here. Nothing when the judge cannot be
+# read, and then no line is settled as that refusal, so the page stays early.
+_card_unapproved() {
+  ( . "${CF_POKER%/*}/poker/judge.sh" >/dev/null 2>&1 && declare -F cur8_unapproved_line >/dev/null 2>&1 || exit 1
+    cur8_unapproved_line )
+}
+
+# _card_fmt_is <format> <line> -> 0 when <line> is <format> with each %s standing for any text. Each piece between the
+# placeholders is matched as a literal, so no character of the judge's words is read as a pattern.
+_card_fmt_is() {
+  local f="$1" l="$2" m='%s' p
+  [ -n "$f" ] || return 1
+  p="${f%%"$m"*}"
+  case "$l" in "$p"*) l="${l#"$p"}" ;; *) return 1 ;; esac
+  f="${f#"$p"}"
+  while [ -n "$f" ]; do
+    f="${f#"$m"}"
+    [ -n "$f" ] || return 0
+    case "$f" in
+      *"$m"*) p="${f%%"$m"*}" ;;
+      *) case "$l" in *"$f") return 0 ;; *) return 1 ;; esac ;;
+    esac
+    case "$l" in *"$p"*) l="${l#*"$p"}" ;; *) return 1 ;; esac
+    f="${f#"$p"}"
+  done
+  [ -z "$l" ]
+}
+
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
 # DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`), a T4 row whose
@@ -2237,12 +2267,15 @@ _card_t4_confirm_key() {
 # finds, and the rows are read from the matrix, so the page puts each of them whichever refusal the dry commit
 # stopped on. In the release order the advance to 8 refuses first on the missing release approval (no `approved:
 # release` line, or one naming no head), before it reads any other fact: that approval is the page's own decision, so
-# it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. The advance
+# it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. That refusal is
+# known by the judge's own format (`_card_unapproved`), never by a second spelling of its words here. The advance
 # prints no refusal for the merge approval, so none is read here.
 _card_settles() {
-  local l q k judge=0 reading=0 any=0
+  local l q k judge=0 reading=0 any=0 unap
   local -a _cs_f=()
+  unap="$(_card_unapproved)"
   while IFS= read -r l; do
+    if [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; then CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue; fi
     case "$l" in
       "bionic: commit refused — the auditor has not confirmed "*)
         q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
@@ -2259,8 +2292,6 @@ _card_settles() {
       "- "*) [ "$reading" = 1 ] && return 1 ;;
       "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
       "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
-      "poker: REFUSED — current: 8 in the order "*" carries no approved: release line; "*|"poker: REFUSED — current: 8 in the order "*" names no head; the user's word for the working head "*)
-        CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1 ;;
       "poker: REFUSED"*) return 1 ;;
       *"	"*)
         [ "$judge" = 1 ] || continue

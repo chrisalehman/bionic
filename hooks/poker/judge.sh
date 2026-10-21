@@ -87,18 +87,27 @@ cover_basis() {
   facts_cover "$1" "$3" "$4" "$2"
 }
 
+# cur8_unapproved_line -> the printf format of the refusal `current 8` prints in the release order while the release
+# approval is missing, its three %s the regression row, what is missing and the working head. THE ONE SPELLING of that
+# refusal: the release approval card (payload/scripts/card.sh `_card_settles`) runs in a process of its own and reads
+# this function from this file, so it settles the refusal by the words the judge prints, and a reworded refusal is
+# reworded for both. The words are a printf format, so a percent sign in them is written as two.
+cur8_unapproved_line() {
+  printf '%s' "REFUSED — current: 8 in the order (the regression row %s before review and the release) is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
+}
+
 # cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8, or a head on its
 # first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
 # exit 1, naming both heads, the plan unchanged.
 cur8_approved_head() {
-  local ah
+  local ah fmt missing
   ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
   if [ -z "$ah" ]; then
-    if proof_approved "$PV_PLAN" release; then
-      die "REFUSED — current: 8 in the order (the regression row $PV_ORDER before review and the release) is admitted at the head the user approved for release, and the newest approved: release line names no head; the user's word for the working head $PV_HEAD8 is approve release '<reply>'. The plan is unchanged."
-    else
-      die "REFUSED — current: 8 in the order (the regression row $PV_ORDER before review and the release) is admitted at the head the user approved for release, and $PV_PLAN carries no approved: release line; the user's word for the working head $PV_HEAD8 is approve release '<reply>'. The plan is unchanged."
-    fi
+    missing="$PV_PLAN carries no approved: release line"
+    ! proof_approved "$PV_PLAN" release || missing="the newest approved: release line names no head"
+    fmt="$(cur8_unapproved_line)"
+    # shellcheck disable=SC2059  # the format is cur8_unapproved_line, whose only conversions are its three %s
+    die "$(printf "$fmt" "$PV_ORDER" "$missing" "$PV_HEAD8")"
     exit 1
   fi
   if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
