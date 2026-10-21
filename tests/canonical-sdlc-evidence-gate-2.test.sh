@@ -889,7 +889,16 @@ expect_contains "WR-3b …saying the head has its whole run" "runs once at a hea
 
 printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
 od_poke regression-run
-expect_eq "FX-1 the whole run at a new head H runs, red (exit 1, a second log)" "1|2" "$OD_RC|$(od_logs)"
+expect_eq "FX-1 AC-14.3 a new head H past the one whole run: regression-run refuses a second (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
+expect_contains "FX-1b …naming the whole run's head" "${OD_B:0:12} has it" "$OD_OUT"
+# THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's own report as the log's body, the
+# run line through the product's writer, and the per-suite facts through the fold.
+OD_PLANT=0
+(cd "$OD" && bash tests/run.sh 2>&1) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?
+bash -c '. "$1/proof.sh" && proof_regression_fold "$2" "$3" "$4" "$5" "$6"' _ "$OD_LIB" "$OD_PLAN" "$OD" "$OD_H" \
+  "$OD_REC/regression-run-$OD_H.log" "$OD_RL/regression-run-$OD_H.log" || OD_PLANT=$((OD_PLANT + 10))
+expect_eq "FX-1c precondition: the red run is left at H (both writers exit 0), its run line and its one red verdict in the record" "0|1|1" \
+  "$OD_PLANT|$(/usr/bin/grep -c "^line/v1|ev=run|log=$OD_RL/regression-run-$OD_H.log|head=$OD_H|" "$(od_lrec)" || :)|$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_H|suite=b.test.sh|result=red|" "$(od_lrec)" || :)"
 OD_FL="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z "$3" b.test.sh' _ "$OD_LIB" "$OD_H" "$OD_RL/regression-run-$OD_H.log")"
 od_plan 5 "$OD_FL" "$(od_rows landed landed pending)"
 expect_eq "FX-1b precondition: the regression at H owes the red suite" "owed" "$(od_state)"
@@ -968,5 +977,6 @@ od_plan 5 '' "$(od_rows landed landed pending)"
 od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"
 expect_eq "PA-2 …and one commit later that no landing proves: refused (exit 1), naming that commit and that it is not proved" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "commit ${OD_D:0:12} .*is not proved" && echo yes || echo no)"
+expect_absent "PA-2b …and the same refusal offers no second whole run (the positive above reads this output)" "run the whole" "$OD_OUT"
 
 finish

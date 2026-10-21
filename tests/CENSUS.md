@@ -1431,6 +1431,7 @@ units.test.sh | §ORDER | keep | payload/scripts/lib/units.sh units_order drops 
 units.test.sh | §POST | keep | payload/scripts/lib/units.sh units_validate: the release-landed test dropped from the post-release admission, so a reader past a release that is still open is admitted instead of refused with the order text (POST-2) | none (searched 'the release row comes ahead' and 'units_add_row' in tests/)
 units.test.sh | §JUDGE | keep | payload/scripts/lib/line.sh _line_proved matches its commit argument against a verdict's reads= key as well as commit=, so "…and a reads key in its place is refused" goes red | none (searched '_line_proved' and '_proof_floor_judge' in tests/: landing-line-2 §GRAMMAR reads field order only)
 units.test.sh | §WALK | keep | payload/scripts/lib/proof.sh _proof_past_f: the release-set question asked through the docs class again, so CHANGELOG.md reads as prose and a real release merge with a check passing at it is named not proved (WALK-0, WALK-1b to WALK-3b) | none (searched '_proof_past_f' in tests/)
+units.test.sh | §SECOND | keep | hooks/poker/proof.sh poker_verb_regression_run: the arm that refuses a whole run behind the working head moved inside the branch that has no declared regression-command, so a declared command starts again at H+1 and writes its marker (SEC-1, SEC-1b) | none (searched 'regression-run' and 'proof_whole_run_behind' in tests/: canonical-sdlc-evidence-gate-2 FX-1 reads the tests/run.sh arm only)
 
 ## version-compare.test.sh
 
