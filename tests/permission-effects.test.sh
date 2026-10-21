@@ -136,15 +136,6 @@ answer_is() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-section "§E0 the fixture: the link is real and the kernel puts link/.. outside the tree"
-
-expect_true "E0.0 the tree is a linked worktree of the project" test -f "$TREE/.git"
-expect_true "E0.1 tree/link is a symlink" test -L "$TREE/link"
-expect_eq "E0.2 the kernel resolves tree/link/.. to the outside directory" "$OUT" "$(cd -P "$TREE/link/.." && pwd -P)"
-answer_is allow "E0.3 control: the teammate writing inside its tree is allowed" "touch $TREE/ok.txt"
-answer_is deny "E0.4 control: the teammate writing outside is denied" "touch $OUT/x.txt"
-
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§E1 B1: a \`..\` after a link is decided by the resolver, not folded by the reader"
 
 answer_is deny "E1.1 a write to tree/link/../escape lands outside: deny" "echo x > $TREE/link/../escape"

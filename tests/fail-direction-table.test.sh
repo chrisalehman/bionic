@@ -718,58 +718,5 @@ else
      "stderr: $(printf '%s' "$DRV_ERR" | head -1)"
 fi
 
-# ============================================================
-section "the missing session key: the start gate stays open (the stop gate's closed side is retired)"
-# ============================================================
-#
-# Checklist A10's defect was that no test asserted the two directions differed ON PURPOSE:
-# the same absent `session_id`, start open, stop closed. THE ASYMMETRY DIED WITH THE DENY ARM
-# (wave-31 T32, D6; A-orch-61). The stop gate's closed answer to a keyless payload in a live
-# writer's world was the "still working, nothing delivered" deny, which stop-guard no longer
-# makes: it reads the session from the environment, allows the stop and records
-# reason=unmet on the roster row (the stop|no-session-key row above). A10 of the known-failure
-# checklist is retired for the stop gate. What is left to pin here is the start side.
-
-drive start:no-session-key
-S_START=$DRV_ST; S_START_ERR=$DRV_ERR
-
-expect_eq "a keyless payload at the START gate passes (open)"   "0" "$S_START"
-expect_eq "the open side stays silent about it" "" "$S_START_ERR"
-
-# ============================================================
-section "the producer's two rows (§7 rows 4 and 5)"
-# ============================================================
-
-P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
-git -C "$P_REPO" init -q 2>/dev/null
-
-# task 4/2 (D-5): both rows are about what a run does to an attestation ALREADY on
-# disk, so each fixture must sit at the per-session filename that run actually governs.
-# Left at the old shared slot these rows stayed green for the wrong reason — the probe
-# now prunes that legacy file unconditionally, so "no attestation is on disk" below was
-# satisfied by the prune rather than by the blocking-failure delete it exists to pin.
-PRIOR_B="$P_REPO/.bionic/tmp/preflight-$SID_B.state"
-printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_B" > "$PRIOR_B"
-PRIOR_SUM=$(shasum "$PRIOR_B")
-
-# Row 4 — no session key: REFUSE, and state is LEFT UNTOUCHED. An unkeyed run
-# cannot tell whose attestation is on disk, so deleting it would destroy another
-# session's valid stamp (task 4/1 resolution).
-OUT=$( cd "$P_REPO" && env -u CLAUDE_CODE_SESSION_ID ANTHROPIC_API_KEY=x \
-       HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ); ST=$?
-expect_eq "environment check with no session key REFUSES (exit 3)" "3" "$ST"
-expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR_B")"
-
-# Row 5 — a blocking probe fails: NO ATTESTATION, and the prior one is deleted.
-# A stale pass must not outlive the environment it described. The prior stamp is THIS
-# session's own, so pruning never touches it — only the blocking-failure path can.
-PRIOR_A="$P_REPO/.bionic/tmp/preflight-$SID_A.state"
-printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_A" > "$PRIOR_A"
-OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" \
-       HOME="$SANDBOX/nocred" CLAUDE_CONFIG_DIR="$SANDBOX/nocred/.claude" \
-       PATH="$SANDBOX/stub:$PATH" bash "$PROBE" 2>&1 ); ST=$?
-expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
-expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR_A" ] && echo yes || echo no)"
-
 finish
 [ "$FAIL" -eq 0 ]

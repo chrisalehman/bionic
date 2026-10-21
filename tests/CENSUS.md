@@ -839,7 +839,7 @@ preflight-probe.test.sh | §S8 | keep | rule: lint — `docs/plans` or an undocu
 preflight-probe.test.sh | §S9 | keep | hooks/preflight-probe.sh: the PAYLOAD_SHAPE_VALIDATED_CLI comparison deleted, so a drifted CLI draws no warning; ("mismatched pin warns, naming the installed version") goes red | none (searched 'unvalidated' in tests/)
 preflight-probe.test.sh | §S10 — the sweeper arm line is GONE (epic-16 w2 task S1) | duplicate | hooks/preflight-probe.sh exits non-zero on a clean run; the three source greps are a tombstone for a deleted verb, which no change to code that is there can plant | preflight-probe.test.sh §S1
 preflight-probe.test.sh | §S11 | keep | hooks/preflight-probe.sh: the project_root call replaced by the working directory, so a run inside a linked worktree writes the attestation under the worktree; ("…the attestation lands under the MAIN repository's .bionic") goes red | none (searched 'probe-wt' in tests/)
-preflight-probe.test.sh | §S10 — attestation version 2 and its reader (AC-25, wave-bionic-1.4.0-update) | keep | hooks/preflight-probe.sh:171 the --read absent-file `exit 5` made `exit 1`, so ("--read on an absent file exits 5") goes red while resources.test.sh, which asks only for non-zero, stays green. also: the version-literal pins are tallies of the current schema | none (searched '--read' in tests/)
+preflight-probe.test.sh | §S10 | keep | hooks/preflight-probe.sh:171 the --read absent-file `exit 5` made `exit 1`, so ("--read on an absent file exits 5") goes red while resources.test.sh, which asks only for non-zero, stays green. also: the version-literal pins are tallies of the current schema | none (searched '--read' in tests/)
 
 ## principles-item.test.sh
 
