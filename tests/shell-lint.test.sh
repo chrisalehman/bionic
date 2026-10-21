@@ -21,6 +21,10 @@
 # held before it: the `/bin/bash -n` sweep (§PARSE) and the one-line `$(case` grep (§CASE),
 # each with its mutant. §BP keeps its quitting-`grep -q` sweep.
 #
+# §CENSUS-COMPLETE-1 to -3 hold the tests tree to tests/CENSUS.md: every suite has a heading, every
+# `section` call a record line under its key, every verdict is one of the five words, and a `rule:`
+# line is a keep. The calls are found by the section-list command in tests/RUBRIC.md, run from here.
+#
 # §LOAD sources every library under payload/scripts/lib in a bare `/bin/bash` and requires
 # every function the lexer finds it defining at load to be defined after, with nothing on
 # stderr. A hook or a payload command is parsed (§PARSE), never run.
@@ -871,5 +875,186 @@ for c in $HD_B_CASES; do
     expect_absent "${c%%:*}: …and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
   fi
 done
+
+# ── the census ───────────────────────────────────────────────────────────────
+# tests/CENSUS.md holds one record line per section of every suite under tests/, under a heading per
+# suite, in the shape tests/RUBRIC.md §4 sets. This sweep refuses a tests tree the census does not
+# cover. A `section` call is found by the rubric's own section-list command, extracted from the
+# rubric and run here, so there is one key rule and no second copy of it. A call inside a heredoc
+# body is fixture text, written into a scratch suite, and is not a section.
+CENSUS_MD="$TESTS_DIR/CENSUS.md"
+CENSUS_RUBRIC="$TESTS_DIR/RUBRIC.md"
+CENSUS_PROG="$TMP/census-prog.awk"
+cat > "$TMP/census-extract.awk" <<'CENSUS_EXTRACT_EOF'
+index($0, "awk '/^[[:space:]]*(setup_)?section") == 1 { on = 1; sub(/^awk '/, "") }
+on && (i = index($0, "' tests/<suite>.test.sh")) { print substr($0, 1, i - 1); exit }
+on { print }
+CENSUS_EXTRACT_EOF
+awk -f "$TMP/census-extract.awk" "$CENSUS_RUBRIC" > "$CENSUS_PROG" 2>/dev/null
+# The file with every heredoc body blanked, line numbers kept. A `<<` opens a body only outside
+# quotes (a nested `$( )` has quotes of its own) and not as a here-string, and a body ends at its
+# delimiter line.
+cat > "$TMP/census-blank.awk" <<'CENSUS_BLANK_EOF'
+function opener(line,   i, n, c, top, rest, d, st) {
+  n = length(line); st = "c"
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1); top = substr(st, length(st), 1)
+    if (top == "s") { if (c == "'") st = substr(st, 1, length(st) - 1); continue }
+    if (c == "\\") { i++; continue }
+    if (top == "d") {
+      if (c == "\"") st = substr(st, 1, length(st) - 1)
+      else if (c == "$" && substr(line, i + 1, 1) == "(") { st = st "c"; i++ }
+      continue
+    }
+    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) return ""
+    if (c == "'") { st = st "s"; continue }
+    if (c == "\"") { st = st "d"; continue }
+    if (c == "$" && substr(line, i + 1, 1) == "(") { st = st "c"; i++; continue }
+    if (c == ")" && length(st) > 1) { st = substr(st, 1, length(st) - 1); continue }
+    if (c == "<" && substr(line, i, 2) == "<<") {
+      if (substr(line, i, 3) == "<<<") { i += 2; continue }
+      rest = substr(line, i + 2); hdash = 0
+      if (substr(rest, 1, 1) == "-") { hdash = 1; rest = substr(rest, 2) }
+      sub(/^[ \t]+/, "", rest)
+      if (match(rest, /^(\\?'[A-Za-z_0-9]+'|"[A-Za-z_0-9]+"|\\?[A-Za-z_0-9]+)/)) {
+        d = substr(rest, 1, RLENGTH); gsub(/['"\\]/, "", d); return d
+      }
+      i += 1
+    }
+  }
+  return ""
+}
+{
+  if (hd != "") {
+    ln = $0
+    if (hdash) sub(/^\t+/, "", ln)
+    if (ln == hd) hd = ""
+    print ""
+    next
+  }
+  hd = opener($0)
+  print
+}
+CENSUS_BLANK_EOF
+# census_calls <tests dir> -> `<suite> TAB <section|setup> TAB <key>` per call outside a heredoc body.
+census_calls() {
+  local d f
+  d="$(mktemp -d "$TMP/census-blank.XXXXXX")"
+  for f in "$1"/*.test.sh; do
+    [ -f "$f" ] || continue
+    awk -f "$TMP/census-blank.awk" "$f" > "$d/${f##*/}"
+  done
+  ( cd "$d" && LC_ALL=C awk -f "$CENSUS_PROG" ./*.test.sh 2>/dev/null ) \
+    | awk '{ loc = $1; kind = $2; key = $0; sub(/^[^ ]+ [^ ]+ §/, "", key); sub(/^\.\//, "", loc); sub(/:[0-9]+$/, "", loc)
+             printf "%s\t%s\t%s\n", loc, kind, key }'
+}
+# census_refusals <tests dir> <census file> -> one line per refusal, none when the census covers the tree:
+#   no heading: a suite with no `## <suite>` heading
+#   no line: a suite with no section call and no `no section` line
+#   no verdict: a section call with fewer record lines under its key than the suite has calls of it
+#   bad verdict: a record line whose verdict is not one of the five words
+#   rule mark on a cull: a `rule:` defect on a line whose verdict is not keep
+#   no section line on a suite with sections: the `no section` line beside a suite that has calls
+census_refusals() {
+  local f
+  {
+    for f in "$1"/*.test.sh; do [ -f "$f" ] && printf 'S\t%s\n' "${f##*/}"; done
+    sed -n 's/^## \(.*\.test\.sh\)$/H\t\1/p' "$2" 2>/dev/null
+    awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\n", $1, k, $3, $4 }' "$2" 2>/dev/null
+    census_calls "$1" | sed 's/^/C\t/'
+  } | LC_ALL=C awk -F'\t' '
+    $1 == "S" { suite[$2] = 1 }
+    $1 == "H" { head[$2] = 1 }
+    $1 == "C" { ncall[$2]++; if ($3 == "section") need[$2 SUBSEP $4]++ }
+    $1 == "R" {
+      s = $2; k = $3; v = $4; d = $5
+      if (k == "—" && v == "—" && d == "no section") { nosec[s] = 1; next }
+      have[s SUBSEP k]++
+      if (v != "keep" && v != "duplicate" && v != "prose pin" && v != "tally" && v != "vacuous") print "bad verdict: " s " §" k " " v
+      else if (d ~ /^rule: / && v != "keep") print "rule mark on a cull: " s " §" k " " v
+    }
+    END {
+      for (s in suite) {
+        if (!(s in head)) print "no heading: " s
+        if (ncall[s] == 0 && !(s in nosec)) print "no line: " s
+        if (ncall[s] > 0 && (s in nosec)) print "no section line on a suite with sections: " s
+      }
+      for (key in need) { split(key, p, SUBSEP); if (have[key] < need[key]) print "no verdict: " p[1] " §" p[2] }
+    }' | LC_ALL=C sort
+}
+# census_scratch <dir> -> a tests tree of three suites: x with two sections, y with none, z holding a
+# section call only inside a heredoc body that writes a scratch suite.
+census_scratch() {
+  mkdir -p "$1/tests"
+  printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' 'section "TWO: the second"' 'expect_eq b 1 1' > "$1/tests/x.test.sh"
+  printf '%s\n' 'echo no sections here' > "$1/tests/y.test.sh"
+  printf '%s\n' "cat > scratch.sh <<'PLANT'" 'section "HIDDEN: inside a heredoc"' 'PLANT' 'echo done' > "$1/tests/z.test.sh"
+}
+# census_file <file> <x lines...> -> a census with headings for x, y and z, y and z with a `no section` line, and
+# the given record lines under x.
+census_file() {
+  local out="$1"; shift
+  { printf '# census\n\n## x.test.sh\n'; [ "$#" -eq 0 ] || printf '%s\n' "$@"
+    printf '\n## y.test.sh\nynosec\n\n## z.test.sh\nznosec\n'; } \
+    | sed -e 's/^ynosec$/y.test.sh | — | — | no section | —/' -e 's/^znosec$/z.test.sh | — | — | no section | —/' > "$out"
+}
+CS_ONE='x.test.sh | §ONE | keep | lib/x.sh: the first arm deleted | none (searched x in tests/)'
+CS_TWO='x.test.sh | §TWO | prose pin | "the second" | carried by exit 1'
+
+# ============================================================
+section "CENSUS-COMPLETE-1: a section with no census line, a suite with no heading and a suite with no line are refused by name"
+# ============================================================
+# fails-when: a census missing a section's line, a suite's heading or a section-less suite's line passes.
+CC1="$TMP/cc1"; census_scratch "$CC1"
+expect_eq "the sweep reads the scratch tree: two sections of x, and nothing of the heredoc body in z" \
+  "x.test.sh	section	ONE|x.test.sh	section	TWO" \
+  "$(census_calls "$CC1/tests" | awk -F'\t' '$1 == "x.test.sh"' | paste -sd'|' -)"
+expect_eq "…and z, whose only section call sits in a heredoc body, has no call at all" "0" \
+  "$(census_calls "$CC1/tests" | awk -F'\t' '$1 == "z.test.sh"' | wc -l | tr -d ' ')"
+census_file "$CC1/full.md" "$CS_ONE" "$CS_TWO"
+expect_eq "control: a census with both lines and the section-less suites' lines is refused for nothing" "" \
+  "$(census_refusals "$CC1/tests" "$CC1/full.md")"
+census_file "$CC1/one.md" "$CS_ONE"
+expect_eq "the census missing x's second section is refused naming the suite and the key" \
+  "no verdict: x.test.sh §TWO" "$(census_refusals "$CC1/tests" "$CC1/one.md")"
+census_file "$CC1/none.md"
+expect_eq "…missing both, it names both" "no verdict: x.test.sh §ONE|no verdict: x.test.sh §TWO" \
+  "$(census_refusals "$CC1/tests" "$CC1/none.md" | paste -sd'|' -)"
+sed -e '/^## x.test.sh$/d' "$CC1/full.md" > "$CC1/nohead.md"
+expect_eq "a suite with lines and no heading is refused naming the suite" "no heading: x.test.sh" \
+  "$(census_refusals "$CC1/tests" "$CC1/nohead.md")"
+sed -e '/^y.test.sh | /d' "$CC1/full.md" > "$CC1/noline.md"
+expect_eq "a suite with no section and no \`no section\` line is refused naming the suite" "no line: y.test.sh" \
+  "$(census_refusals "$CC1/tests" "$CC1/noline.md")"
+{ cat "$CC1/full.md"; printf 'x.test.sh | — | — | no section | —\n'; } > "$CC1/wrongnosec.md"
+expect_eq "a \`no section\` line beside a suite that has sections is refused" \
+  "no section line on a suite with sections: x.test.sh" "$(census_refusals "$CC1/tests" "$CC1/wrongnosec.md")"
+
+# ============================================================
+section "CENSUS-COMPLETE-2: a verdict outside the five words, and a rule line marked as a cull, are refused"
+# ============================================================
+# fails-when: a record line with a word of its own for a verdict, or a rule: line that is not keep, passes.
+CC2="$TMP/cc2"; census_scratch "$CC2"
+census_file "$CC2/odd.md" "$CS_ONE" 'x.test.sh | §TWO | maybe | lib/x.sh: a line changed | none (searched x in tests/)'
+expect_eq "a verdict that is not one of the five words is refused naming the suite, the key and the word" \
+  "bad verdict: x.test.sh §TWO maybe" "$(census_refusals "$CC2/tests" "$CC2/odd.md")"
+census_file "$CC2/rule.md" 'x.test.sh | §ONE | duplicate | rule: lint — a shape planted | x.test.sh §TWO' "$CS_TWO"
+expect_eq "a rule: line whose verdict is duplicate is refused naming the suite, the key and the verdict" \
+  "rule mark on a cull: x.test.sh §ONE duplicate" "$(census_refusals "$CC2/tests" "$CC2/rule.md")"
+census_file "$CC2/rulekeep.md" 'x.test.sh | §ONE | keep | rule: lint — a shape planted | none (searched x in tests/)' "$CS_TWO"
+expect_eq "control: the same rule: line as keep, and a two-word verdict, are refused for nothing" "" \
+  "$(census_refusals "$CC2/tests" "$CC2/rulekeep.md")"
+
+# ============================================================
+section "CENSUS-COMPLETE-3: the census covers every suite and every section of the tests tree"
+# ============================================================
+# fails-when: a suite under tests/ has no heading, a section call has no record line under its key, a verdict is
+# not one of the five words, or a rule: line is not keep.
+CC3_CALLS="$(census_calls "$TESTS_DIR")"
+expect_contains "the sweep reads the real tree: it finds this suite's own section" \
+  "shell-lint.test.sh	section	CENSUS-COMPLETE-3" "$CC3_CALLS"
+expect_eq "the census file is there, with a heading for this suite" "yes" \
+  "$(/usr/bin/grep -q '^## shell-lint.test.sh$' "$CENSUS_MD" 2>/dev/null && echo yes)"
+expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(census_refusals "$TESTS_DIR" "$CENSUS_MD")"
 
 finish

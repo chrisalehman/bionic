@@ -17,12 +17,15 @@
 #            `check-failed` and nothing is merged, and the one run of the check is the target checkout's copy. A
 #            driver that lands as the verb does refuses the same; with the door's check moved into the writer's
 #            tree, the same piece publishes, so these rows can fail.
+#   §COVER   the release row, a doc row at step 7, lands with the release and a template outside the release set:
+#            it publishes, and its landing prints the judge's cover over its own candidate naming the template. A
+#            release whose every path is in the set lands with the cover read as release; the build row, none.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under the world directory with real commits; the door is
 # the tree under test's spawn-worktree.sh and session-poker.sh, run from the fixture with every variable that names
 # the tree under test unset. Mutants are seds on a COPY of the fixture, committed there as its accepted head, or a
 # sed over one function in a driver's own process; the tracked files are never written. SYNTHESIZED: the version,
-# the listed name and the rows.
+# the listed name, the rows, and the template §COVER lands outside the release set.
 #
 # ANTI-VACUITY: with no fixture built the suite records one failing row and stops, so no row stands on an empty
 # root (and no git command runs from the tree under test). Each sentinel read that expects nothing sits beside a
@@ -276,5 +279,39 @@ expect_eq "(cdm) MUTANT the check run in the writer's tree: the piece's copy jud
 expect_eq "(cdm-b) MUTANT …the working branch now holds the planted blob" "$DC_BLOB" \
   "$(git -C "$DD" rev-parse "$(dl_head "$DD"):planted.txt" 2>/dev/null | cut -c1-12)"
 expect_eq "(cdm-c) MUTANT …and the target's copy never ran" "" "$(door_seen)"
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§COVER: the release row's landing reads the judge's cover over its own candidate and names a path outside the set"
+
+# dl_cover_world <dir> -> DV, the root of a copy whose T2 is the release row (a doc row at step 7, the plan's own
+# reading of it), with the library row T1 landed ahead of it; DV_T1_OUT, what T1's landing printed.
+dl_cover_world() {
+  read -r DV DV_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/$1")
+EOF
+  sed -i.orig 's/^| T2 | 4 | doc |/| T2 | 7 | doc |/' "$DV/$DOOR_PLAN_REL" && rm -f "$DV/$DOOR_PLAN_REL.orig"
+  dl_lib_row "$DV"; DV_T1_RC="$DOOR_RC"; DV_T1_OUT="$DOOR_OUT"
+}
+DL_TMPL=agents-src/templates/commands/help.md.tmpl
+dl_cover_world cover-out
+expect_eq "(v0) precondition: T2 is a doc row at step 7, the release row, and T1 landed ahead of it" "1 0" \
+  "$(/usr/bin/grep -c '^| T2 | 7 | doc |' "$DV/$DOOR_PLAN_REL") $DV_T1_RC"
+DL_P2="$(door_piece "$DV" T2)" && door_release "$DV" "$DL_P2" >/dev/null
+mkdir -p "$DL_P2/${DL_TMPL%/*}" && printf 'the help page, before it is rendered\n' > "$DL_P2/$DL_TMPL"
+dl_commit "$DL_P2" "the help page's template"
+door_land "$DV" "$DL_P2"
+DV_OUT="$DOOR_OUT"; DV_H="$(dl_head "$DV")"
+expect_eq "(v1) the release row carrying a template outside the release set lands by hand (exit 0)" "0" "$DOOR_RC"
+expect_contains "(v1b) …onto the working branch" "LANDED branch=wt/T2 onto=wave/x" "$DV_OUT"
+expect_contains "(v2) …and its landing names the path outside the set, read over its own candidate, the landed merge" \
+  "COVER T2 $DV_H owes outside=$DL_TMPL" "$DV_OUT"
+expect_absent "(v2b) …while T1, a build row, landed in the same fixture with no cover line" "COVER " "$DV_T1_OUT"
+
+dl_cover_world cover-in
+DL_P2="$(door_piece "$DV" T2)" && door_release "$DV" "$DL_P2" >/dev/null
+door_land "$DV" "$DL_P2"
+expect_eq "(v3) CONTROL the release row whose every path is in the set lands by hand (exit 0)" "0" "$DOOR_RC"
+expect_contains "(v3b) CONTROL …and its landing reads the cover over its candidate as release" \
+  "COVER T2 $(dl_head "$DV") release" "$DOOR_OUT"
 
 finish
