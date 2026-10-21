@@ -488,7 +488,7 @@ fc_owed2() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ 
 fc_plan "$FC_GOOD"
 rm -f "$RFC/.bionic/tmp/owed-$FC_SID2.state"
 bind_marker "$RFC" "$PFC" "$FC_SID2"
-fc_ask2 waive:structure "commit refused — structure: the newest reading is result=fail; waive it with: session-poker.sh waive structure '<your reply>'"
+fc_ask2 waive:structure "commit refused — structure: the newest review is result=fail; waive it with: session-poker.sh waive structure '<your reply>'"
 fc_ask2 gate:fixture "poker: GATE fixture — the other session's gate act"
 expect_eq "REG-0 precondition: the other session holds the waiver open, and a gate act the card does not decide" \
   "gate:fixture waive:structure" "$(fc_owed2)"

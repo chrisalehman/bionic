@@ -1857,11 +1857,20 @@ loaded_set_sizes() {
   fi
 }
 
+# eg_review_unanswered_fact -> the fact of the refusal `_eg_refuse_readings` stages when an owed review question is
+# unanswered, and eg_review_failing_line -> the printf format of its line for a question whose newest review fails, its
+# two %s the question and the record. THE ONE SPELLING of both: the release approval card (payload/scripts/card.sh
+# `_card_settles`) runs in a process of its own and reads them from this file, so it settles the refusal by the words
+# the wall prints, and a reworded refusal is reworded for both. At file scope, outside `_eg_body`, so a source defines
+# them.
+eg_review_unanswered_fact() { printf '%s' "a review question is unanswered"; }
+eg_review_failing_line() { printf '%s' "- %s: the newest review is result=fail (evidence=%s), and no waiver is newer"; }
+
 # ── the hook's body, carried whole ───────────────────────────────────────────
 #
 # EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
 # LINE TO ITS LAST `exit 0`, less what moved to file scope above it: the `audit_path` copy,
-# `keys_for_tier`, and the matrix's readers and predicates, so a source defines them. Its `exit` statements are load-bearing and deliberate — see the subshell
+# `keys_for_tier`, the matrix's readers and predicates, and the review refusal's two spellings, so a source defines them. Its `exit` statements are load-bearing and deliberate — see the subshell
 # note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
 # and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
 _eg_body() {
@@ -2510,10 +2519,10 @@ _eg_refuse_readings() {
   local gaps lines _eg_debts
   gaps="$(_eg_reading_gaps "$2")"
   [ -n "$gaps" ] || return 0
-  lines="$(printf '%s\n' "$gaps" | awk -F'\t' '
+  lines="$(printf '%s\n' "$gaps" | awk -F'\t' -v failing="$(eg_review_failing_line)" '
     $1 == "unreadable" { print "- the review record cannot be read here: lib/proof.sh is not loaded beside units.sh" }
     $1 == "absent"     { print "- " $2 ": no review, and no waiver" }
-    $1 == "failing"    { print "- " $2 ": the newest review is result=fail (evidence=" $3 "), and no waiver is newer" }')"
+    $1 == "failing"    { printf failing "\n", $2, $3 }')"
   # A DECLARED DEBT ALONE is not a reading (wave-27 T31; D23): its own fact and fix.
   if [ -z "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 != "debt"')" ]; then
     lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
@@ -2537,7 +2546,7 @@ ${_eg_debts}"
 ${lines}
 Plan: $PLAN
 Fix: register each review with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
-  refuse exit2 commit "a review question is unanswered" "record or waive each review" "$_eg_detail"
+  refuse exit2 commit "$(eg_review_unanswered_fact)" "record or waive each review" "$_eg_detail"
 }
 
 # THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key
