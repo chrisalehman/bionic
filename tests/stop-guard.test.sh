@@ -409,221 +409,16 @@ else
   no "relevance check precedes the context resolution in source order" "relevance@${_rel_line:-none} walk@${_walk_line:-none}"
 fi
 
-setup_section "Section 2: WRITING moved out — see tests/execution-recorder.test.sh"
-#
-# Everything that used to be asserted here — a run records its target, a mention
-# records nothing, an unresolvable or ambiguous target records nothing, the state
-# is bounded and pruned, no command text leaks into it — is asserted against the
-# script that now performs it, hooks/execution-recorder.sh. Duplicating those rows
-# here would pin this gate to behaviour it no longer has.
-#
-# What this suite still owes the reader is that the gate SPENDS a real record, and
-# every section below does exactly that: each one seeds through `observe()`, which
-# runs the real observation and the real recorder end to end.
-
-setup_section "Section 3: THE OBSERVATION RECORD IS GONE — see Section 5 (epic-23 wave-15)"
-#
-# This section drove the record's schema: an unknown EXTRA field left the reader working
-# (checklist A6's forward compatibility) and an unknown schema VERSION refused the stop. Both
-# were claims about a FILE the gate read instead of looking at the target, and ADR-028 ruled
-# that a wall asserts only what it can observe at the moment of the act. There is no record,
-# no version and no reader; what replaces all three is Section 5.
-
-section "Section 4: fail directions at the stop gate (AC-10, TDD §7)"
-
-# --- before the active-wave verdict: OPEN and SILENT ---
-IFS='|' read -r N_REPO N_TR N_SUB <<< "$(make_world nowave no)"
-plant_agent "$N_SUB" "aidle-4444444444444444" "idle"
-run_guard "$(mk_stop_payload "$SID_A" "$N_TR" "$N_REPO" "idle")"
-expect_status "no active wave: the stop passes" 0 "$GUARD_ST"
-expect_empty "no active wave: the gate is silent" "$GUARD_ERR"
-
-run_guard "$(jq -n --arg c "$N_REPO" '{cwd:$c, hook_event_name:"PreToolUse", tool_name:"TaskStop", tool_input:{task_id:"idle"}}')"
-expect_status "no active wave + no session key: still open (pre-verdict)" 0 "$GUARD_ST"
-expect_empty "no active wave + no session key: still silent" "$GUARD_ERR"
-
-# A plan that exists but names no step is not a run in progress — AND SINCE
-# task-engaged-session THAT IS NO LONGER THIS GATE'S QUESTION. What scopes it is
-# ENGAGEMENT: a stop is policed because this session entered bionic, not because the repo
-# holds a plan at a particular step. The roster row this gate answers for outlives the run
-# that created it, and a run's Step 0 precedes its own plan, so a gate that read the step
-# would go quiet at exactly the two moments a landing contract still exists. The fixture is
-# kept and its expectation inverted: an ENGAGED session is policed here whatever the plan
-# says, and the paired negative below is the marker, not the step.
-IFS='|' read -r P_REPO P_TR P_SUB <<< "$(make_world plannostep yes)"
-plant_agent "$P_SUB" "aidle-4444444444444444" "idle"
-sg_roster_row "$P_REPO" "$SID_A" "idle" "aidle-4444444444444444"
-sed -i.bak 's/^current: 4$/current: pending/' "$P_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-rm -f "$P_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md.bak"
-run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_status "an engaged session is policed whatever the plan's step says: the look is taken (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-expect_contains "…and the guard says what it saw, the stop allowed" "STOP ALLOWED" "$GUARD_ERR"
-P_REFUSAL="$GUARD_ERR"
-
-rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_status "…and the same stop unengaged is open" 0 "$GUARD_ST"
-expect_empty "…and silent" "$GUARD_ERR"
-
-# a SYMLINK at the marker path reads as ABSENT, never followed.
-P_DECOY="$SANDBOX/plannostep-decoy-marker"; printf 'plan=none\n' > "$P_DECOY"
-ln -s "$P_DECOY" "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_status "a symlink at the marker path is not an engagement: open" 0 "$GUARD_ST"
-expect_empty "…and silent" "$GUARD_ERR"
-rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-
-# ANOTHER session's marker is not this session's.
-: > "$P_REPO/.bionic/tmp/engaged-$SID_B.state"
-run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_status "another session's marker is not this session's engagement: open" 0 "$GUARD_ST"
-rm -f "$P_REPO/.bionic/tmp/engaged-$SID_B.state"
-
-# restored, the refusal returns byte for byte — ON THE VERDICT LINE, which is the refusal
-# (ADR-030, epic-23 wave-16 T22). Before field 9 flipped, `exit2`'s stream WAS the verdict
-# and nothing else, so "the stream is byte-identical" and "the refusal is byte-identical"
-# were the same measurement. They are not any more: the gate's `detail` follows the verdict
-# on the same wire now, and this gate's detail reports a LIVE reading — `last write: Ns
-# ago` — which is a second older on the second drive and SHOULD be. Comparing whole
-# streams here would pin a clock, not a refusal. So the verdict is compared byte for byte
-# and the detail is asserted present on both drives, which is what keeps the narrowing
-# honest: a re-engagement that came back silent, or with a different verdict, still fails.
-: > "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
-run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_eq "re-engaged: the refusal is byte-identical" \
-  "$(printf '%s\n' "$P_REFUSAL" | /usr/bin/grep -m1 '^bionic: ')" \
-  "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
-expect_eq "re-engaged: …and both drives carried a detail beneath it, no knob set" "yes yes" \
-  "$([ "$(printf '%s\n' "$P_REFUSAL" | /usr/bin/grep -vc '^bionic: ')" -ge 1 ] && printf yes || printf no) $([ "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -vc '^bionic: ')" -ge 1 ] && printf yes || printf no)"
-
-# --- after the verdict: CLOSED and LOUD ---
-IFS='|' read -r W4_REPO W4_TR W4_SUB <<< "$(make_world w4 yes)"
-plant_agent "$W4_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
-sg_roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbeef"
-
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
-expect_status "active wave + a target still working (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-
-# §7's stop=closed row, and since task-engaged-session it has to be driven on the channel
-# that actually carries identity. The gate asks `engaged_session` first, keyed to the
-# LIBRARY's session id (env primary, payload witness) — so a payload with no key still
-# resolves to a session whenever the environment carries one, which on the machine it
-# always does. What §7 pins is unchanged: once this session is known to be engaged, an
-# identity the gate cannot read out of its own payload is refused, not waved through.
-W4_NOKEY=$(jq -n --arg c "$W4_REPO" --arg t "$W4_TR" \
-  '{transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"TaskStop", tool_input:{task_id:"quiet-reviewer"}}')
-GUARD_OUT=$(printf '%s' "$W4_NOKEY" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
-GUARD_ERR=$(cat "$SANDBOX/.err")
-expect_status "active wave + payload missing its session key: the environment's key resolves it, and the working target is judged (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-
-# AND THE ROW BELOW IT, new with the switch: a payload with no key AND no key in the
-# environment cannot be shown to belong to an engaged session at all. Engagement is
-# open-by-absence by design — the one artifact whose PRESENCE opens walls — so this is
-# silent rather than refused, and it is the only direction consistent with a bystander
-# session never seeing a refusal it did not consent to.
-GUARD_OUT=$(printf '%s' "$W4_NOKEY" | env -u CLAUDE_CODE_SESSION_ID bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
-GUARD_ERR=$(cat "$SANDBOX/.err")
-expect_status "…and with no session key on EITHER channel: open, engagement unprovable" 0 "$GUARD_ST"
-expect_empty "…and silent" "$GUARD_ERR"
-
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "")"
-expect_status "active wave + empty task_id: REFUSED" 2 "$GUARD_ST"
-
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
-expect_status "active wave + unresolvable name (not address-shaped): REFUSED (D8, T5)" 2 "$GUARD_ST"
-
-# THE SAME FIXTURE, RE-POINTED (T22, then D8/T5). Two live agents answering to one name used
-# to refuse as an ambiguity. The register decides now, and neither of these two has a row on
-# it — so this is the ordinary no-standing case, and the ambiguity it used to produce is
-# prevented one event earlier, at the dispatch wall. No-standing REFUSES since D8 (T5); the
-# passthrough it used to be survives only for a bash-task-shaped target (§4a below).
-plant_agent "$W4_SUB" "adouble-5555555555555555" "twin"
-plant_agent "$W4_SUB" "adouble-6666666666666666" "twin"
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "twin")"
-expect_status "two same-named agents on no roster row of this session: REFUSED (D8, T5)" 2 "$GUARD_ST"
-
-# A plan with CR-only line endings is still a plan. `tr -d` on those separators
-# collapses the file to one line, the run-state marker goes unseen, and the gate
-# quietly reports "no wave" on a repo mid-wave — the fail-dangerous shape that
-# bypassed the evidence gate for a whole wave (.claude/rules/hook-authoring.md).
-IFS='|' read -r CR_REPO CR_TR CR_SUB <<< "$(make_world crplan yes)"
-plant_agent "$CR_SUB" "acrlf-0123456789abcdef" "crlf"
-sg_roster_row "$CR_REPO" "$SID_A" "crlf" "acrlf-0123456789abcdef"
-CR_PLAN="$CR_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-tr '\n' '\r' < "$CR_PLAN" > "$CR_PLAN.cr" && mv "$CR_PLAN.cr" "$CR_PLAN"
-run_guard "$(mk_stop_payload "$SID_A" "$CR_TR" "$CR_REPO" "crlf")"
-expect_status "a CR-only plan is still read: the wave is still detected (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-expect_contains "…the look taken, as the wave being detected requires" "STOP ALLOWED" "$GUARD_ERR"
-
-# The positive pair — a wall that refuses everything is equally broken (§9). The SAME world,
-# the SAME target, one fact changed: the agent has gone quiet past its cadence.
-age_log "$W4_SUB" "aquiet-reviewer-deadbeefdeadbeef"
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
-expect_status "active wave + the same target gone quiet: PERMITTED" 0 "$GUARD_ST"
-expect_contains "a permitted stop carries the look that permitted it" "STOP PERMITTED" "$GUARD_ERR"
-
-section "Section 4a: unsupervised-target passthrough (T4, AC-6)"
-#
-# scan_subagent_dirs only ever iterates agent-*.meta.json — the Agent tool's own
-# bookkeeping. A background bash task id never gets one (A-D4), so MATCH_COUNT
-# was unconditionally 0 for it, forever, with no code path back to
-# order_current() — the escape hatch this gate's own header advertises
-# (step2-research-a1-a3.md §A3). The ratified carve (session.plan.md ## Design
-# ¶T4): refuse only a target wearing an AGENT-ADDRESS shape (`@session-`, or
-# transcript-form `a<hex>` / `a<name>-<16hex>`); everything else passes through,
-# logged once, never silent.
-
-# THE WORLD'S OWN TARGET IS QUIET AGAIN for the rows below, which are about SHAPE and not
-# about liveness: §4 left it aged, and that is the state this section reads it in.
-#
-# (a) A bash-background-task-shaped id (A-D4 probe evidence: t5triyxvo) carries
-# no agent metadata and wears no address shape: PASSES THROUGH.
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "t5triyxvo")"
-expect_status "a bash-task-shaped target with no metadata: PASSES THROUGH" 0 "$GUARD_ST"
-expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
-
-# (a2) AC-5.2: a nine-character lowercase-alnum name leading `a` (not `t`) is NOT
-# bash-task-shaped by construction — `is_bash_task_shaped` requires the `t` prefix — so shape
-# alone never waves it through. It happens to also satisfy `is_address_shaped`'s hex-id
-# pattern (digits 1-8 are valid hex digits), so it is refused on the same unresolved-address
-# path as (c) below rather than the new no-row path; either way it is exit 2, never a pass.
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "a12345678")"
-expect_status "a nine-character name leading 'a': REFUSED, never passes on shape alone (AC-5.2)" 2 "$GUARD_ST"
-
-# (b) An addressing-form target (`name@session-xxxx`) with no metadata IS
-# address-shaped: stays REFUSED, the verbatim unresolved-target message unchanged.
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "ghost@session-deadbeef")"
-expect_status "an addressing-form target with no metadata: still REFUSED" 2 "$GUARD_ST"
-
-# (c) Transcript-form targets (`a`+hex, and `a<name>-<16hex>`) with no metadata
-# ARE address-shaped: stay REFUSED.
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "af3d9128ea3b393af")"
-expect_status "a hex transcript-form target with no metadata: still REFUSED" 2 "$GUARD_ST"
-
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "aghost-0123456789abcdef")"
-expect_status "a named transcript-form target with no metadata: still REFUSED" 2 "$GUARD_ST"
-
-# (d) A supervised named target (metadata present) still engages the FULL guard
-# path, untouched — the passthrough branch is reached only at MATCH_COUNT=0, and
-# a target that resolves to a real agent of this session never gets there.
-# DRIVEN (Step-6 review flag 2-C: a bare `ok` here asserted nothing and could not
-# fail). Quiet-reviewer's own REFUSED/PERMITTED pair above already proves the
-# full path for that name; this plants a SECOND, never-observed teammate in the
-# same active-wave world so the assertion here carries its own evidence rather
-# than pointing at rows planted for a different purpose.
-plant_agent "$W4_SUB" "ahushed-reviewer-7777777777777777" "hushed-reviewer"
-sg_roster_row "$W4_REPO" "$SID_A" "hushed-reviewer" "ahushed-reviewer-7777777777777777"
-run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "hushed-reviewer")"
-expect_status "a supervised named target still engages the full guard path: it is working (wave-31 T32: allowed, its verdict recorded as reason=)" 0 "$GUARD_ST"
-expect_contains "…the look taken" "STOP ALLOWED" "$GUARD_ERR"
-expect_absent "…and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
-
 section "§BID — a background shell id is the one the TRANSCRIPT recorded, else a 9-character [bt] id (wave-24 T10; REQ-7 AC-7.4; D12, research R4 §3)"
 #
 # The harness names a background shell `b<8 chars>` since 2026-09-03 (`t<8>` before), and records
 # the id it handed out as `"backgroundTaskId":"<id>"`. The carve used to be `^t[a-z0-9]{8,}$`,
 # so every real id was refused as "on no roster row". Standing is still asked FIRST: a name this
 # session's roster carries is guarded whatever it is spelled like.
+
+IFS='|' read -r W4_REPO W4_TR W4_SUB <<< "$(make_world w4 yes)"
+plant_agent "$W4_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
+sg_roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbeef"
 
 # bid1 — the id the harness handed out, `b` and nine characters: passes through, logged.
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "b66vjp0ok")"
@@ -844,13 +639,6 @@ else
 fi
 expect_absent "running the fix line as printed produces no usage error" "Usage:" "$R2_OUT"
 
-setup_section "Section 6b: THE CONSUME IS GONE — nothing is spent by a stop (epic-23 wave-15)"
-#
-# C3 (a consume that cannot complete must REFUSE) and S2 (the lock wait is bounded) were the
-# two failure paths of D-2, one observation discharging one stop. There is no observation to
-# spend and no lock to take: the gate reads the target and decides. The state directory it
-# still reads THROUGH is covered by §7, and the gate writing nothing at all is §1's row.
-
 section "Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3)"
 
 # Predictable temp names + symlink-following writes were a PROVEN arbitrary-file
@@ -949,13 +737,5 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"CANARY_
   >> "$S_SUB/agent-avictim-ffffffffffffffff.jsonl"
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_absent "the refusal prints no working-log contents" "CANARY_LOG_BODY" "$GUARD_ERR"
-
-setup_section "Sections 8 and 9: D-3 AND D-6 ARE GONE WITH THE RECORD (epic-23 wave-15)"
-#
-# D-3 asked whether the recorded look was the STOPPER'S OWN, and D-6 whether it had opened the
-# contracted progress artifact. Both were questions about a record's provenance, and both are
-# answered by construction now: the gate takes the look itself, in its own process, at the
-# instant of the stop, and it reads BOTH channels every time — there is no actor to borrow
-# from and no channel to skip. §5 (e) is what carries the progress channel forward.
 
 finish

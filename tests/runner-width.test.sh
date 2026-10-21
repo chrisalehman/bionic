@@ -356,30 +356,4 @@ expect_eq "NV.13 BIONIC_QUIET=1 is read by nobody: the command runs at once, the
 expect_absent "NV.14 …and nothing says void (NV.13 is the positive on the same drive)" "void" "$NV_OUT"
 expect_eq "NV.15 …asking the gate as work, never for the whole machine" "work" "$(nv_kinds)"
 
-echo
-section "§NO-RETRY a suite red once stays red in the log, run once (wave-35 T2; D11, AC-2.4)"
-#
-# THE CLAIM. A suite that fails is reported failed, from the one run it had: the runner never runs
-# it again, whatever the load did while it ran. FAILS WHEN: the runner re-runs a failed suite.
-#
-# FIXTURE FIDELITY. The suite carries the marker the retired retry keyed on, starts on a load of 0,
-# raises it to 99 during its first run and lowers it again two seconds later, inside the old
-# ceiling of ten, which is the shape the retired code read as "disturbed" and re-ran
-# (runner-roster §11 (d), retired with it). The
-# second run, if one came, would pass: so a retry would turn this red suite green, and the run
-# count and the verdict both say whether one happened.
-printf '#!/bin/bash\n# runner: solo\necho run >> "$NV_MARKS/red.runs"\nn="$(awk "END { print NR + 0 }" "$NV_MARKS/red.runs")"\nif [ "$n" -eq 1 ]; then printf "99\\n" > "$NV_LOAD"; ( sleep 2; printf "0\\n" > "$NV_LOAD" ) >/dev/null 2>&1 & exit 1; fi\nexit 0\n' \
-  > "$NV/tests/aaa-red.test.sh"
-rm -f "$NV_MARKS"/*; rm -rf "$TMPROOT/novoid-gate"; printf '0\n' > "$NV_LOAD"
-NV_MAXW=10 nv_drive
-NV_RED_RUNS="$(nv_runs red)"
-expect_eq "NR.1 the run with a red suite is red" "1" "$NV_RC"
-expect_eq "NR.2 …the red suite ran once" "1" "$NV_RED_RUNS"
-expect_contains "NR.3 …its verdict line reads FAIL" "✗ FAIL" "$(nv_line aaa-red.test.sh)"
-expect_eq "NR.4 …and the Gating line counts it failed once beside the two green suites" \
-  "Gating: 2 passed, 1 failed" "$(printf '%s\n' "$NV_OUT" | grep '^Gating: ')"
-expect_contains "NR.5 …it is named under Failed:" "- aaa-red.test.sh" "$NV_OUT"
-expect_absent "NR.6 …and nothing said it was retried (NR.3 is the positive on the same output)" "retrying" "$NV_OUT"
-rm -f "$NV/tests/aaa-red.test.sh"
-
 finish

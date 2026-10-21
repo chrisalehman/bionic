@@ -129,18 +129,6 @@ expect_ne "the two rows differ" "$ROW_ABSENT" "$ROW_PRESENT"
 expect_contains "the absent row routes the reader to setup" "/bionic:setup" "$ROW_ABSENT"
 expect_absent "the present row does not route to setup" "/bionic:setup" "$ROW_PRESENT"
 
-section "detect: the presence fact"
-
-SB_DET="$(new_sandbox)"
-# detect_run: hoisted to tests/rc-item.prelude.sh (§T75 in part 2 calls it)
-DET_ABSENT="$(detect_run "$SB_DET")"
-setup_run "$SB_DET" y >/dev/null 2>&1
-DET_PRESENT="$(detect_run "$SB_DET")"
-expect_eq "detect_rc_claude_proxy reports present after setup" \
-  "env:rc-claude-proxy present=yes" "$DET_PRESENT"
-expect_eq "detect_rc_claude_proxy reports absent before setup" \
-  "env:rc-claude-proxy present=no" "$DET_ABSENT"
-
 section "the two doors answer the same question the same way"
 
 # WHAT THIS SECTION OWNS. "Is bionic's `claude()` proxy in place" is asked by

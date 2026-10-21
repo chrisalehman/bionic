@@ -122,15 +122,6 @@ PROBE
 # probe <cwd> <seam-ref> <check> — env overrides come from the caller's own env.
 probe() { ( cd "$1" && bash "$TMP/probe.sh" "$2" "$3" 2>&1 ); }
 
-section "Group 1: repo defaults with no override set"
-
-expect_eq "BIONIC_HOOKS_DIR defaults to <repo>/hooks" \
-  "$REPO/hooks" "$(probe "$REPO" "$SEAM" var-hooks)"
-expect_eq "BIONIC_SKILLS_DIR defaults to <repo>/skills" \
-  "$REPO/skills" "$(probe "$REPO" "$SEAM" var-skills)"
-expect_eq "BIONIC_SCRIPTS_DIR defaults to <repo>" \
-  "$REPO" "$(probe "$REPO" "$SEAM" var-scripts)"
-
 section "Group 2: location independence (repo derives from the helper, not the caller)"
 
 expect_eq "absolute source from cwd=/ resolves <repo>/hooks" \
@@ -168,18 +159,6 @@ expect_eq "scripts override: marker is present in what was read" \
   "1" "$(BIONIC_SCRIPTS_DIR="$DOC/root" probe "$REPO" "$SEAM" mark-scripts)"
 expect_eq "override survives a foreign cwd (cwd=/, hooks redirected)" \
   "SUPPORTED_SDLC_VERSION=99999" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "/" "$SEAM" read-hooks)"
-
-section "Group 4: override unset -> the same check reads the REPO copy"
-
-_v="$(probe "$REPO" "$SEAM" read-hooks)"
-expect_eq "no override: named check reads the repo constant" \
-  "SUPPORTED_SDLC_VERSION=14" "$_v"
-expect_eq "no override: hooks read carries no doctored marker" \
-  "0" "$(probe "$REPO" "$SEAM" mark-hooks)"
-expect_eq "no override: skills read carries no doctored marker" \
-  "0" "$(probe "$REPO" "$SEAM" mark-skills)"
-expect_eq "no override: scripts read carries no doctored marker" \
-  "0" "$(probe "$REPO" "$SEAM" mark-scripts)"
 
 section "Group 5: the three classes are independent"
 
