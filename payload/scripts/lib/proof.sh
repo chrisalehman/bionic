@@ -249,19 +249,19 @@ proof_check_passes() {
 proof_reading() {
   local rec="$1" q="$2" ck="${3:-}" sev="${4:-}" span got rv rq rr rs ids miss worst
   span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$rec" 2>/dev/null)"
-  [ -n "$span" ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
+  [ -n "$span" ] || { printf 'the review %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
   # A READING RECORD IS ONE PASS, AND A KEY IS GIVEN ONCE IN IT (wave-27 T45; review pass 16
   # findings 1, 3). A second flush-left `reviewed:` line is a second pass, whatever it holds, so a
   # record of two is refused rather than read from its top; and a pass that states question:,
   # result:, scope: or one check id twice is refused, rather than taken at its first value.
   got="$(awk '/^reviewed:[ \t]/ { n++ } END { print n + 0 }' "$rec" 2>/dev/null)"
   [ "$got" -le 1 ] \
-    || { printf 'the reading %s holds %s passes (%s flush-left reviewed: lines); a reading record holds one pass, so write each pass as a record of its own' "$rec" "$got" "$got"; return 1; }
+    || { printf 'the review %s holds %s passes (%s flush-left reviewed: lines); a review record holds one pass, so write each pass as a record of its own' "$rec" "$got" "$got"; return 1; }
   got="$(printf '%s\n' "$span" | awk '
     /^(question|result|scope):/ { k = $0; sub(/:.*$/, ":", k); if (seen[k]++) { print k; exit } }
     /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m >= 2) { k = "check: " f[2]; if (seen[k]++) { print k; exit } } }')"
   [ -z "$got" ] \
-    || { printf 'the reading %s gives %s twice in its pass; a key is given once, so keep the line the reader meant' "$rec" "$got"; return 1; }
+    || { printf 'the review %s gives %s twice in its pass; a key is given once, so keep the line the reviewer meant' "$rec" "$got"; return 1; }
   got="$(printf '%s\n' "$span" | awk '
     function val(s) { sub(/^[a-z]+:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
     NR == 1 { rv = $0; sub(/^reviewed:[ \t]+/, "", rv); sub(/[ \t].*$/, "", rv); sub(/\.\..*$/, "", rv) }
@@ -272,20 +272,20 @@ proof_reading() {
   { IFS= read -r rv; IFS= read -r rq; IFS= read -r rr; IFS= read -r rs; } <<PROOF_READING
 $got
 PROOF_READING
-  [ -n "$rq" ] || { printf 'the reading %s carries no question: <q> line; write question: %s (a reading record holds exactly one pass; a second is refused)' "$rec" "$q"; return 1; }
+  [ -n "$rq" ] || { printf 'the review %s carries no question: <q> line; write question: %s (a review record holds exactly one pass; a second is refused)' "$rec" "$q"; return 1; }
   proof_word_in "$rq" "$PROOF_QUESTIONS" \
-    || { printf 'the reading %s says question: '"'"'%s'"'"', which is not one of evidence, adversarial or structure; write the question it answers' "$rec" "$rq"; return 1; }
+    || { printf 'the review %s says question: '"'"'%s'"'"', which is not one of evidence, adversarial or structure; write the question it answers' "$rec" "$rq"; return 1; }
   [ "$rq" = "$q" ] \
-    || { printf 'the reading %s says question: %s, but the proof is for %s; register it under the question it answers' "$rec" "$rq" "$q"; return 1; }
-  [ -n "$rr" ] || { printf 'the reading %s carries no result: line; write result: pass, flag or fail (a reading record holds exactly one pass; a second is refused)' "$rec"; return 1; }
+    || { printf 'the review %s says question: %s, but the proof is for %s; register it under the question it answers' "$rec" "$rq" "$q"; return 1; }
+  [ -n "$rr" ] || { printf 'the review %s carries no result: line; write result: pass, flag or fail (a review record holds exactly one pass; a second is refused)' "$rec"; return 1; }
   proof_word_in "$rr" "$PROOF_RESULTS" \
-    || { printf 'the reading %s says result: '"'"'%s'"'"', which is not one of pass, flag or fail; write the result the reader gave' "$rec" "$rr"; return 1; }
-  [ -n "$rs" ] || { printf 'the reading %s carries no scope: line; write scope: piece or whole (a reading record holds exactly one pass; a second is refused)' "$rec"; return 1; }
+    || { printf 'the review %s says result: '"'"'%s'"'"', which is not one of pass, flag or fail; write the result the reviewer gave' "$rec" "$rr"; return 1; }
+  [ -n "$rs" ] || { printf 'the review %s carries no scope: line; write scope: piece or whole (a review record holds exactly one pass; a second is refused)' "$rec"; return 1; }
   proof_word_in "$rs" "$PROOF_SCOPES" \
-    || { printf 'the reading %s says scope: '"'"'%s'"'"', which is not one of piece or whole; write the scope the reader read' "$rec" "$rs"; return 1; }
+    || { printf 'the review %s says scope: '"'"'%s'"'"', which is not one of piece or whole; write the scope the reviewer read' "$rec" "$rs"; return 1; }
   if [ "$q" = structure ]; then
     [ -n "$ck" ] && [ -f "$ck" ] && [ -r "$ck" ] \
-      || { printf 'the structure checks file %s cannot be read, so the check ids a structure reading answers are unknown; reinstall the plugin' "$ck"; return 1; }
+      || { printf 'the structure checks file %s cannot be read, so the check ids a structure review answers are unknown; reinstall the plugin' "$ck"; return 1; }
     ids="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); print s }' "$ck" 2>/dev/null)"
     [ -n "$ids" ] \
       || { printf 'the structure checks file %s names no check id (a - **<id>** item); reinstall the plugin' "$ck"; return 1; }
@@ -295,7 +295,7 @@ PROOF_READING
       /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m >= 4 && (f[3] in ok)) done[f[2]] = 1 }
       END { for (i = 1; i <= w; i++) if (want[i] != "" && !(want[i] in done)) printf "%s%s", (c++ ? " " : ""), want[i] }')"
     [ -z "$miss" ] \
-      || { printf 'the structure reading %s leaves %s unanswered; write one line check: <id> <answer> <reason> for each, the answer PASS, FLAG, FAIL or n/a' "$rec" "$miss"; return 1; }
+      || { printf 'the structure review %s leaves %s unanswered; write one line check: <id> <answer> <reason> for each, the answer PASS, FLAG, FAIL or n/a' "$rec" "$miss"; return 1; }
     # The first check answering FAIL, else the first answering FLAG: the worst the pass found.
     worst="$(printf '%s\n' "$span" | awk '
       /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m < 3) next
@@ -304,7 +304,7 @@ PROOF_READING
       END { if (fail != "") print fail; else if (flag != "") print flag }')"
     case "$rr:$worst" in
       pass:?*|flag:*' FAIL')
-        printf 'the structure reading %s says result: %s beside check: %s; a pass stands beside no FLAG or FAIL check and a flag beside no FAIL, so write the result its checks give' "$rec" "$rr" "$worst"; return 1 ;;
+        printf 'the structure review %s says result: %s beside check: %s; a pass stands beside no FLAG or FAIL check and a flag beside no FAIL, so write the result its checks give' "$rec" "$rr" "$worst"; return 1 ;;
     esac
   fi
   # THE RESULT IS DERIVED FROM THE FINDINGS (wave-28 T15; D19, AC-8.4), when the reader was pushed the scale.
@@ -318,14 +318,14 @@ PROOF_READING
       ids="$(printf '%s\n' "$got" | awk -F'\t' '$5 == "fix" { print "finding " $1 " (" $2 " " $3 ")"; exit }')"
       case "$worst" in
         *' FAIL') [ -n "$ids" ] \
-          || { printf 'the structure reading %s gives check: %s beside no finding to fix; a FAIL check stands beside a finding the table sends to fix and a finding to fix beside a FAIL check, so rate the finding or answer the check to agree' "$rec" "$worst"; return 1; } ;;
+          || { printf 'the structure review %s gives check: %s beside no finding to fix; a FAIL check stands beside a finding the table sends to fix and a finding to fix beside a FAIL check, so rate the finding or answer the check to agree' "$rec" "$worst"; return 1; } ;;
         *) [ -z "$ids" ] \
-          || { printf 'the structure reading %s gives %s to fix beside no FAIL check; a FAIL check stands beside a finding the table sends to fix and a finding to fix beside a FAIL check, so rate the finding or answer the check to agree' "$rec" "$ids"; return 1; } ;;
+          || { printf 'the structure review %s gives %s to fix beside no FAIL check; a FAIL check stands beside a finding the table sends to fix and a finding to fix beside a FAIL check, so rate the finding or answer the check to agree' "$rec" "$ids"; return 1; } ;;
       esac
     fi
     worst="$(proof_findings_result "$got")"
     [ "$rr" = "$worst" ] \
-      || { printf 'the reading %s says result: %s, but its findings give %s (a finding to fix gives fail, any other finding flag, none pass); write result: %s' "$rec" "$rr" "$worst" "$worst"; return 1; }
+      || { printf 'the review %s says result: %s, but its findings give %s (a finding to fix gives fail, any other finding flag, none pass); write result: %s' "$rec" "$rr" "$worst" "$worst"; return 1; }
   fi
   printf '%s %s %s' "$rr" "$rs" "$rv"
 }
@@ -412,7 +412,7 @@ _proof_priority_var() {
 proof_findings() {
   local span
   span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$1" 2>/dev/null)"
-  [ -n "$span" ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$1"; return 1; }
+  [ -n "$span" ] || { printf 'the review %s carries no reviewed: <a>..<b> line; write the range it read' "$1"; return 1; }
   _proof_findings_span "$1" "$span"
 }
 
@@ -441,7 +441,7 @@ _proof_findings_span() {
       n = split(ENVIRON["PROOF_REACH"], c, " "); for (i = 1; i <= n; i++) rch[c[i]] = 1
       n = split(ENVIRON["PROOF_DK"], c, " "); for (i = 1; i <= n; i++) { dk[c[i]] = 1; dkl = (i == 1 ? "" : dkl (i == n ? " or " : ", ")) c[i] }
     }
-    function bad(m) { if (err == "") err = "the reading " rec " " m }
+    function bad(m) { if (err == "") err = "the review " rec " " m }
     function rest(s, k,   i) { for (i = 0; i < k; i++) sub(/^[^ \t]+[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
     /^findings:/ {
       if (hf++) { bad("gives findings: twice in its pass; a key is given once"); next }
@@ -481,7 +481,7 @@ _proof_findings_span() {
       next
     }
     END {
-      if (err == "" && !hf) err = "the reading " rec " carries no findings: <n> line, and its reader was pushed the severity scale; write findings: <n> and one finding: line per finding (findings: 0 when it found none)"
+      if (err == "" && !hf) err = "the review " rec " carries no findings: <n> line, and its reviewer was pushed the severity scale; write findings: <n> and one finding: line per finding (findings: 0 when it found none)"
       if (err == "" && cnt != want + 0) bad("says findings: " want " but holds " cnt " finding: lines; write one finding: line per finding, and the count they make")
       for (k in named) if (err == "" && !(k in S)) bad("has a " named[k] ": line for finding " k ", which it does not hold; name a finding it numbers")
       for (i = 1; i <= cnt && err == ""; i++) {
@@ -1023,7 +1023,7 @@ proof_attested() {
       # hold its start, a reading of the last commit alone would stand for every commit before it,
       # and the judge would call the question covered. Nothing is derived in the base's place.
       if [ -n "$q" ] && [ "$what" = "the plan's base" ] && [ -z "$sh" ]; then
-        printf 'add base-sha: <the commit the work started from> to the frontmatter of %s: %s, so where the %s chain starts cannot be held, and its first reading is refused' \
+        printf 'add base-sha: <the commit the work started from> to the frontmatter of %s: %s, so where the %s chain starts cannot be held, and its first review is refused' \
           "$plan" "$(if [ -z "$since" ]; then printf 'it names no base-sha:'; elif proof_base_id "$since"; then printf 'its base-sha: %s is no commit here' "$since"; else printf 'its base-sha: %s is not a commit id' "$since"; fi)" "$q"
         return 1
       fi

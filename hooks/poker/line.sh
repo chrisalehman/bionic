@@ -96,7 +96,7 @@ deliver_check() {
     exit 2
   fi
   if [ -n "$(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id')" ]; then
-    die "REFUSED — $PV_ID is a live review row (it reads live:head): proof-add returns it to pending at each reading and the next landing makes it ready again, so deliver does not land it. The plan is unchanged."
+    die "REFUSED — $PV_ID is a live review row (it reads live:head): proof-add returns it to pending at each review and the next landing makes it ready again, so deliver does not land it. The plan is unchanged."
     exit 2
   fi
   docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
@@ -165,7 +165,7 @@ DELIVER_FILES
         fence { next }
         /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
         insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }' "$PV_PLAN" 2>/dev/null)" ]; then
-      die "REFUSED — $PV_ID is a review row and no proved: kind=review line names its record $rel; register the reading first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID is a review row and no proved: kind=review line names its record $rel; register the review first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
       exit 2
     fi
   fi
