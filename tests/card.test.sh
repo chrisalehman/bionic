@@ -820,6 +820,112 @@ check_artifact_resolves "68e: …the Step-1 card over this wave's own requiremen
 check_artifact_resolves "68f: …the Step-2 card over this wave's own spec" "$S2_REAL"
 check_artifact_resolves "68g: …the Step-3 card over this wave's own plan" "$S3_REAL"
 
+section "§KINDS: the release kind draws the release approval card from the facts on stdin"
+# fails-when: the release card is drawn anywhere but this renderer, a fact is dropped or reordered on the way, or a
+# fact the renderer does not know is drawn as nothing instead of refused. The sitrep kind joins this section with
+# the sitrep card.
+rel_fact() { local IFS=$'\t'; printf '%s\n' "$*"; }  # <tag> <field>... -> one fact line, its fields tab-separated
+rel_card() {  # <facts> — sets WC_OUT, WC_RC, WC_ERR of `card.sh release` with the facts on stdin
+  WC_RC=0
+  printf '%s\n' "$1" | bash "$CARD_SH" release >"${CARD_SANDBOX}/.out" 2>"${CARD_SANDBOX}/.err" || WC_RC=$?
+  WC_OUT="$(cat "${CARD_SANDBOX}/.out" 2>/dev/null)"
+  WC_ERR="$(cat "${CARD_SANDBOX}/.err" 2>/dev/null)"
+}
+REL_FACTS="$(
+  rel_fact title proj 1.2.0 'Tuesday 9:05 AM' abcdef12 3 4
+  rel_fact criteria 2 0
+  rel_fact miss AC-1.2
+  rel_fact aside 'a gate the operator owes.'
+  rel_fact decision row row:AC-1.2 default 'AC-1.2, not run on this release' waive 'run it' 'waive AC-1.2' 'run AC-1.2'
+  rel_fact decision approve approve:release default 'Release 1.2.0' approve withhold release 'hold the release'
+  rel_fact reply run
+  rel_fact goal reached '✅' 'fast landings' 'one-file median under 15m' '12m'
+  rel_fact goal missed '✖️' pages 'a fresh agent answers' 'no record'
+  rel_fact handholds 'hand-holds: 0 nudges'
+  rel_fact ratio 'test-ratio: 1/2'
+  rel_fact acceptance '✖️ acceptance — 1 of 2 criteria proved; 1 not run'
+  rel_fact regression '✅ regression — whole run green at this head'
+  rel_fact review '✅ evidence — auditor at abcdef12'
+  rel_fact findings 1 0 0 1 ''
+  rel_fact finding C S3 'a message could be clearer'
+)"
+REL_WANT='Release approval · proj 1.2.0 · Tuesday 9:05 AM · head abcdef12 · 3 of 4 tasks landed
+
+Bottom line
+- Ready for your decisions: every check holds at abcdef12.
+- 1 criterion not proved: AC-1.2 (decision 1).
+- You owe 2 decisions, listed below. Everything else has a default the record supports.
+- Also yours, outside the run: a gate the operator owes.
+- Recommended: waive AC-1.2, then release.
+
+Goals — 1 of 2 reached
+✅ fast landings — one-file median under 15m, 12m
+✖️ pages — a fresh agent answers, no record
+
+hand-holds: 0 nudges
+test-ratio: 1/2
+
+Tests
+✖️ acceptance — 1 of 2 criteria proved; 1 not run
+✅ regression — whole run green at this head
+
+Reviews
+✅ evidence — auditor at abcdef12
+
+Findings — 1: 1 carried
+Carried as known limits
+  S3   a message could be clearer
+
+Decisions
+1. AC-1.2, not run on this release — recommended: waive · default: waive
+2. Release 1.2.0 — recommended: approve · default: approve
+
+Reply "all recommended", "all default", or by number, as "1 run, rest default".'
+rel_card "$REL_FACTS"
+expect_eq "KINDS-1 card.sh release renders the facts (exit 0, nothing on stderr)" "0|" "$WC_RC|$WC_ERR"
+expect_eq "KINDS-2 …the release approval card, every section in its order and every fact in its place" "$REL_WANT" "$WC_OUT"
+rel_card "$REL_FACTS
+$(rel_fact preview)"
+expect_eq "KINDS-3 a preview fact ends the card on the preview line instead of the reply line" \
+  "Preview only: nothing is recorded, and reply cannot act on it." "$(printf '%s\n' "$WC_OUT" | tail -1)"
+rel_card "$REL_FACTS
+$(rel_fact verdict maybe)"
+expect_eq "KINDS-4 a fact the renderer does not know refuses the card: exit 64, nothing drawn" "64|" "$WC_RC|$WC_OUT"
+expect_contains "KINDS-4b …naming the fact" "unknown release fact 'verdict'" "$WC_ERR"
+rel_card "$(printf '%s\n' "$REL_FACTS" | /usr/bin/grep -v '^title')"
+expect_eq "KINDS-5 facts with no title refuse the card: exit 64, nothing drawn" "64|" "$WC_RC|$WC_OUT"
+# The release-approval verb hands its facts to this renderer; its own page renderer is gone.
+KINDS_HIT="$(cd "$REPO" && /usr/bin/grep -rln 'card.sh" release' hooks payload 2>/dev/null)"
+expect_eq "KINDS-6 precondition: the release-approval verb calls the release kind" "hooks/poker/plan.sh" "$KINDS_HIT"
+expect_eq "KINDS-6b …and no shipped file defines or calls rr_page" "" \
+  "$(cd "$REPO" && /usr/bin/grep -rn 'rr_page' hooks payload 2>/dev/null)"
+expect_eq "KINDS-6c …and the release path folds through no sitrep_fold" "" \
+  "$(/usr/bin/grep -n 'sitrep_fold' "$REPO/hooks/poker/plan.sh" 2>/dev/null)"
+
+section "§WIDTH: every line of the release and Step cards fits the shared width, and the release card folds at it"
+# fails-when: a line exceeds BIONIC_LINE_WIDTH, or the release card folds a line that fits it (the old fold at 92).
+REL_FIT="✅ evidence — auditor at abcdef12"
+while [ "$(cols "$REL_FIT")" -lt "$(( BIONIC_LINE_WIDTH - 3 ))" ]; do REL_FIT="$REL_FIT x"; done
+REL_LONG="a finding sentence that runs well past the shared width of the card, so the renderer must fold it under its own severity code and keep going"
+rel_card "$REL_FACTS
+$(rel_fact review "$REL_FIT")
+$(rel_fact finding C S2 "$REL_LONG")"
+expect_eq "WIDTH-0 precondition: the wide facts render (exit 0) and the fitting line is wider than 92 columns" "0|yes" \
+  "$WC_RC|$([ "$(cols "$REL_FIT")" -gt 92 ] && echo yes)"
+expect_eq "WIDTH-1 a line that fits the shared width prints whole on one line" "1" \
+  "$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -cxF "$REL_FIT")"
+REL_FOLD="$(printf '%s\n' "$WC_OUT" | awk '/^  S2   a finding/ { f = 1; print; next } f && /^       [^ ]/ { print; next } { f = 0 }')"
+expect_eq "WIDTH-2 a line wider than the width folds under its severity code, its words all kept" \
+  "$REL_LONG" "$(printf '%s\n' "$REL_FOLD" | sed 's/^  S2   //; s/^       //' | paste -sd' ' -)"
+expect_eq "WIDTH-2b …on more than one line" "yes" "$([ "$(printf '%s\n' "$REL_FOLD" | /usr/bin/grep -c .)" -gt 1 ] && echo yes)"
+expect_empty "WIDTH-3 no line of the release card exceeds the width" "$(over_budget "$WC_OUT")"
+expect_empty "WIDTH-4 nor of the Step-1, Step-2 and Step-3 cards" "$(over_budget "$S1_IT
+$S2_IT
+$S3_IT")"
+expect_nonempty "WIDTH-5 precondition: the renderer folds at the shared width" \
+  "$(/usr/bin/grep -n 'BIONIC_LINE_WIDTH' "$CARD_SH")"
+expect_eq "WIDTH-5b …and holds no 92" "" "$(/usr/bin/grep -nw '92' "$CARD_SH")"
+
 card_intree_cleanup
 
 

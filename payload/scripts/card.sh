@@ -50,6 +50,7 @@
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
+#     bash card.sh release                 < facts      (the release approval card, from the facts its verb gathers)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -106,7 +107,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh release with its facts on stdin\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -2309,6 +2310,236 @@ CF_CHECKED
   [ "$any" = 1 ]
 }
 
+# ── THE RELEASE APPROVAL CARD ────────────────────────────────────────────────
+#
+# The release-approval verb (hooks/poker/plan.sh) gathers what the run reached and what is the user's; this file
+# draws it, so the release card folds at the width every other card folds at and no second renderer drifts from it.
+# The facts come on stdin, one per line, a tag then its fields, every field separated by a tab:
+#
+#   title       <project> <release> <clock> <head8> <tasks landed> <tasks>
+#   early       <why the card is early>          preview          (a fact each, at most once)
+#   criteria    <in the matrix> <waived by you>  miss <AC>        (a miss per criterion not proved)
+#   check       <path>                           (one per file of the declared release check the release changes)
+#   aside       <an item of the user's outside the run>
+#   decision    <kind> <key> <default|other> <subject> <default label> <other label> <default phrase> <other phrase>
+#   reply       <the word a reply names the first decision's other choice by>
+#   goal        <status> <mark> <name> <reading> <evidence>
+#   handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
+#   findings    <n> <fixed> <awaiting your decision> <carried> <the rows that fix them, space-separated>
+#   finding     <F|A|C> <severity> <sentence>
+#
+# Decisions, misses, goals, reviews and findings print in the order they came. A fact the renderer does not know,
+# or no title, refuses the card (64, nothing drawn): a card that silently dropped a fact would ask the user to
+# approve less than the record holds.
+
+# A line folded at BIONIC_LINE_WIDTH: a wider one breaks at its last space that fits, each continuation opening on
+# <hang> spaces. Unlike bionic_wrap it keeps the spaces inside the line, which align a finding under its severity
+# code. A word wider than the room prints whole.
+_card_hang() {  # <hang> <text>
+  local text="${2:-}" pad lead rest word line more=1
+  _bionic_cols_into "$text"
+  if [ "$BIONIC_COLS" -le "$BIONIC_LINE_WIDTH" ]; then printf '%s\n' "$text"; return 0; fi
+  pad="$(_card_spaces "${1:-0}")"
+  rest="${text#"${text%%[! ]*}"}"; lead="${text%"$rest"}"
+  case "$rest" in *' '*) line="$lead${rest%% *}"; rest="${rest#* }" ;; *) line="$text"; more=0 ;; esac
+  while [ "$more" = 1 ]; do
+    case "$rest" in *' '*) word="${rest%% *}"; rest="${rest#* }" ;; *) word="$rest"; more=0 ;; esac
+    _bionic_cols_into "$line $word"
+    if [ "$BIONIC_COLS" -le "$BIONIC_LINE_WIDTH" ]; then line="$line $word"
+    else _card_rstrip "$line"; printf '\n'; line="$pad$word"; fi
+  done
+  printf '%s\n' "$line"
+}
+
+_card_list() {  # <cap> <word>... -> `A`, `A and B`, `A, B and C`, the first <cap> named and the rest counted
+  local cap="$1"; shift
+  awk -v cap="$cap" 'BEGIN {
+    n = ARGC - 1; if (n < 1) exit
+    m = (n > cap) ? cap : n
+    for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m && n == m) ? " and " : ", ")) ARGV[i]
+    if (n > m) s = s " and " (n - m) " more"
+    print s }' "$@"
+}
+
+_card_plural() {  # <n> <singular> <plural> -> `<n> <word>`
+  if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
+}
+
+_card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 when none
+  local i=0
+  while [ "$i" -lt "$RL_N" ]; do
+    [ "${RL_DKEY[$i]}" != "$1" ] || { printf '%s' "$((i + 1))"; return 0; }
+    i=$((i + 1))
+  done
+  return 1
+}
+
+_card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on stderr on a fact it does not know
+  local l t title=0
+  RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
+  RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""
+  RL_MISS=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
+  RL_DKIND=(); RL_DKEY=(); RL_DPICK=(); RL_DSUBJ=(); RL_DLAB=(); RL_OLAB=(); RL_DPH=(); RL_OPH=()
+  while IFS= read -r l || [ -n "$l" ]; do
+    [ -n "$l" ] || continue
+    _card_split "$l"; t="${CARD_CELLS[0]}"
+    case "$t" in
+      title)
+        RL_PROJ="${CARD_CELLS[1]:-}"; RL_REL="${CARD_CELLS[2]:-}"; RL_CLOCK="${CARD_CELLS[3]:-}"; RL_H8="${CARD_CELLS[4]:-}"
+        RL_LANDED="${CARD_CELLS[5]:-0}"; RL_TOTAL="${CARD_CELLS[6]:-0}"; title=1 ;;
+      early) RL_EARLY="${CARD_CELLS[1]:-}" ;;
+      preview) RL_PREVIEW=yes ;;
+      criteria) RL_ACT="${CARD_CELLS[1]:-0}"; RL_ACW="${CARD_CELLS[2]:-0}" ;;
+      miss) RL_MISS[${#RL_MISS[@]}]="${CARD_CELLS[1]:-}" ;;
+      check) RL_CHK[${#RL_CHK[@]}]="${CARD_CELLS[1]:-}" ;;
+      aside) RL_ASIDE[${#RL_ASIDE[@]}]="${CARD_CELLS[1]:-}" ;;
+      decision)
+        RL_DKIND[RL_N]="${CARD_CELLS[1]:-}"; RL_DKEY[RL_N]="${CARD_CELLS[2]:-}"; RL_DPICK[RL_N]="${CARD_CELLS[3]:-default}"
+        RL_DSUBJ[RL_N]="${CARD_CELLS[4]:-}"; RL_DLAB[RL_N]="${CARD_CELLS[5]:-}"; RL_OLAB[RL_N]="${CARD_CELLS[6]:-}"
+        RL_DPH[RL_N]="${CARD_CELLS[7]:-}"; RL_OPH[RL_N]="${CARD_CELLS[8]:-}"; RL_N=$((RL_N + 1)) ;;
+      reply) RL_REPLY="${CARD_CELLS[1]:-}" ;;
+      goal) RL_GOAL[${#RL_GOAL[@]}]="${l#goal"$CARD_TAB"}" ;;
+      handholds) RL_HH="${CARD_CELLS[1]:-}" ;;
+      ratio) RL_TR="${CARD_CELLS[1]:-}" ;;
+      acceptance) RL_TACC="${CARD_CELLS[1]:-}" ;;
+      regression) RL_TREG="${CARD_CELLS[1]:-}" ;;
+      review) RL_REVIEW[${#RL_REVIEW[@]}]="${CARD_CELLS[1]:-}" ;;
+      findings)
+        RL_FN="${CARD_CELLS[1]:-0}"; RL_FNF="${CARD_CELLS[2]:-0}"; RL_FNA="${CARD_CELLS[3]:-0}"; RL_FNC="${CARD_CELLS[4]:-0}"
+        RL_FROWS="${CARD_CELLS[5]:-}" ;;
+      finding) RL_FIND[${#RL_FIND[@]}]="${l#finding"$CARD_TAB"}" ;;
+      *) printf "card.sh: unknown release fact '%s' — card.sh release takes the facts its header names\n" "$t" >&2; return 64 ;;
+    esac
+  done
+  [ "$title" = 1 ] || { printf 'card.sh: release: no title fact, so there is no card to draw\n' >&2; return 64; }
+}
+
+# The Bottom line: whether every check holds, what the release changes of its own check, the criteria not proved,
+# what is owed, the recommendation. One phrase per decision, the rows' said once per choice over their criteria, the
+# approvals given last.
+_card_release_bottom() {
+  local i p l n
+  local -a ph=() ap=() cf=() wv=() rn=() nums=()
+  if [ -n "$RL_EARLY" ]; then _card_hang 2 "- Not ready for your decisions: $RL_EARLY."
+  elif [ "$RL_N" -gt 0 ]; then _card_hang 2 "- Ready for your decisions: every check holds at $RL_H8."
+  else _card_hang 2 "- Every check holds at $RL_H8."; fi
+  [ "${#RL_CHK[@]}" -eq 0 ] || _card_hang 2 "- This release changes the release check: $(_card_list 6 "${RL_CHK[@]}")."
+  if [ "${#RL_MISS[@]}" -gt 0 ]; then
+    l="$(_card_plural "${#RL_MISS[@]}" criterion criteria) not proved: $(_card_list 6 "${RL_MISS[@]}")"
+    for p in "${RL_MISS[@]}"; do n="$(_card_release_dec_of "row:$p")" && nums[${#nums[@]}]="$n"; done
+    # A run of decision numbers is said as a range.
+    if [ "${#nums[@]}" -eq 1 ]; then l="$l (decision ${nums[0]})"
+    elif [ "${#nums[@]}" -gt 1 ]; then
+      n="${nums[$(( ${#nums[@]} - 1 ))]}"
+      if [ "$(( n - nums[0] + 1 ))" -eq "${#nums[@]}" ]; then l="$l (decisions ${nums[0]} to $n)"
+      else l="$l (decisions $(_card_list 6 "${nums[@]}"))"; fi
+    fi
+    _card_hang 2 "- $l."
+  elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every criterion is proved or waived by you."
+  elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every criterion is proved."
+  else _card_hang 2 "- The matrix holds no criterion."; fi
+  if [ "$RL_N" -gt 0 ]; then
+    _card_hang 2 "- You owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+  else
+    _card_hang 2 "- You owe nothing: every approval and waiver is recorded."
+  fi
+  i=0
+  while [ "$i" -lt "${#RL_ASIDE[@]}" ]; do _card_hang 2 "- Also yours, outside the run: ${RL_ASIDE[$i]%.}."; i=$((i + 1)); done
+  [ "$RL_N" -gt 0 ] || return 0
+  for ((i = 0; i < RL_N; i++)); do
+    if [ "${RL_DKIND[$i]}" = approve ] && [ "${RL_DPICK[$i]}" = default ]; then ap[${#ap[@]}]="${RL_DKEY[$i]#approve:}"
+    elif [ "${RL_DKIND[$i]}" = row ]; then
+      if [ "${RL_DPICK[$i]}" = default ]; then p="${RL_DPH[$i]}"; else p="${RL_OPH[$i]}"; fi
+      case "${p%% *}" in
+        confirm) cf[${#cf[@]}]="${RL_DKEY[$i]#row:}" ;;
+        waive) wv[${#wv[@]}]="${RL_DKEY[$i]#row:}" ;;
+        *) rn[${#rn[@]}]="${RL_DKEY[$i]#row:}" ;;
+      esac
+    elif [ "${RL_DPICK[$i]}" = default ]; then ph[${#ph[@]}]="${RL_DPH[$i]}"
+    else ph[${#ph[@]}]="${RL_OPH[$i]}"; fi
+    if [ "${RL_DKIND[$i]}" = row ] && { [ "$((i + 1))" -eq "$RL_N" ] || [ "${RL_DKIND[$((i + 1))]}" != row ]; }; then
+      [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(_card_list 6 "${cf[@]}")"
+      [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(_card_list 6 "${wv[@]}")"
+      [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(_card_list 6 "${rn[@]}")"
+    fi
+  done
+  l=""
+  for ((i = 0; i < ${#ph[@]}; i++)); do l="${l:+$l, }${ph[$i]}"; done
+  [ "${#ap[@]}" -eq 0 ] || l="${l:+$l, then }$(_card_list 6 "${ap[@]}")"
+  _card_hang 2 "- Recommended: $l."
+}
+
+_card_release() {  # facts on stdin -> the release approval card; 64 when the facts refuse
+  local i g lab r=0 lines="" sent
+  _card_release_read || return 64
+  _card_hang 0 "Release approval · ${RL_PROJ}${RL_REL:+ $RL_REL} · $RL_CLOCK · head $RL_H8$([ "$RL_TOTAL" -gt 0 ] && printf ' · %d of %d tasks landed' "$RL_LANDED" "$RL_TOTAL")"
+  printf '\nBottom line\n'
+  _card_release_bottom
+  printf '\n'
+  if [ "${#RL_GOAL[@]}" -eq 0 ]; then
+    printf 'Goals — none declared\n'
+  else
+    for ((i = 0; i < ${#RL_GOAL[@]}; i++)); do
+      _card_split "${RL_GOAL[$i]}"
+      [ "${CARD_CELLS[0]}" != reached ] || r=$((r + 1))
+      lines="${lines}${CARD_CELLS[1]:-} ${CARD_CELLS[2]:-} — ${CARD_CELLS[3]:-}, ${CARD_CELLS[4]:-}"$'\n'
+    done
+    printf 'Goals — %d of %d reached\n' "$r" "${#RL_GOAL[@]}"
+    while IFS= read -r g; do [ -z "$g" ] || _card_hang 3 "$g"; done <<< "$lines"
+  fi
+  if [ -n "$RL_HH" ] || [ -n "$RL_TR" ]; then
+    printf '\n'
+    [ -z "$RL_HH" ] || _card_hang 3 "$RL_HH"
+    [ -z "$RL_TR" ] || _card_hang 3 "$RL_TR"
+  fi
+  printf '\nTests\n'
+  _card_hang 3 "$RL_TACC"; _card_hang 3 "$RL_TREG"
+  printf '\nReviews\n'
+  for ((i = 0; i < ${#RL_REVIEW[@]}; i++)); do [ -z "${RL_REVIEW[$i]}" ] || _card_hang 3 "${RL_REVIEW[$i]}"; done
+  printf '\n'
+  if [ "$RL_FN" -eq 0 ]; then
+    printf 'Findings — none\n'
+  else
+    lab=""
+    [ "$RL_FNF" -eq 0 ] || lab="$RL_FNF fixed"
+    [ "$RL_FNA" -eq 0 ] || lab="${lab:+$lab · }$RL_FNA for your decision"
+    [ "$RL_FNC" -eq 0 ] || lab="${lab:+$lab · }$RL_FNC carried"
+    _card_hang 0 "Findings — $RL_FN: $lab"
+    for g in F A C; do
+      lines=""
+      for ((i = 0; i < ${#RL_FIND[@]}; i++)); do
+        _card_split "${RL_FIND[$i]}"
+        [ "${CARD_CELLS[0]}" != "$g" ] || lines="${lines}  ${CARD_CELLS[1]:-}   ${CARD_CELLS[2]:-}"$'\n'
+      done
+      [ -n "$lines" ] || continue
+      case "$g" in
+        F) lab="Fixed"
+           # shellcheck disable=SC2086  # the fixing rows, one word each
+           [ -z "$RL_FROWS" ] || lab="Fixed by $(_card_list 6 $RL_FROWS)" ;;
+        A) lab="Awaiting your decision" ;;
+        C) lab="Carried as known limits" ;;
+      esac
+      _card_hang 0 "$lab"
+      while IFS= read -r sent; do [ -z "$sent" ] || _card_hang 7 "$sent"; done <<< "$lines"
+    done
+  fi
+  printf '\nDecisions\n'
+  if [ "$RL_N" -eq 0 ]; then
+    printf 'None wait on you.\n'
+  else
+    for ((i = 0; i < RL_N; i++)); do
+      if [ "${RL_DPICK[$i]}" = default ]; then lab="${RL_DLAB[$i]}"; else lab="${RL_OLAB[$i]}"; fi
+      _card_hang 3 "$((i + 1)). ${RL_DSUBJ[$i]} — recommended: $lab · default: ${RL_DLAB[$i]}"
+    done
+  fi
+  if [ "$RL_PREVIEW" = yes ]; then
+    printf '\nPreview only: nothing is recorded, and reply cannot act on it.\n'
+  elif [ "$RL_N" -gt 0 ]; then
+    printf '\n'
+    _card_hang 0 "Reply \"all recommended\", \"all default\", or by number, as \"1 $RL_REPLY, rest default\"."
+  fi
+}
+
 # ── THE COMMAND LINE ─────────────────────────────────────────────────────────
 [ "$#" -ge 1 ] || _card_usage "no row kind"
 
@@ -2343,6 +2574,11 @@ case "$1" in
     # ledger holds the concept and kind; withheld above, it was dropped at the next close-out.
     [ "$#" -eq 2 ] || _card_usage "inherited-debt takes exactly one requirements file path (got $(( $# - 1 )))"
     _card_inherited "$2" | awk -F '\t' '$1 == "open" && index($2, "debt: ") == 1 { print substr($0, 6) }'
+    exit 0 ;;
+  release)
+    # The release approval card, drawn from the facts the release-approval verb gathers, on stdin.
+    [ "$#" -eq 1 ] || _card_usage "release takes no argument; its facts come on stdin (got $(( $# - 1 )))"
+    _card_release || exit 64
     exit 0 ;;
   early)
     # Whether the release approval card may render: the three facts, and what a red check owes that the page settles.
