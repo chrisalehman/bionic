@@ -24,6 +24,11 @@
 #                   and refuses a number that disagrees, naming both; the gate's killed count is not held to it.
 #   §LAST           a landing the entry's head does not hold, other than the one that carried the entry, refuses it
 #                   until the entry is rendered again.
+#   §RATIO          the cap on tests: the tracked shell lines under tests/ against the tracked shell lines everywhere
+#                   else, counted in the tree at BIONIC_CHECK_HEAD. A head whose tests exceed its code is refused in
+#                   one line naming both counts; a head under passes with `test-ratio: <tests>/<code>`; the counts are
+#                   the head's, never the working files'; a directory reached through a symlink counts once; a head
+#                   with no shell code outside tests/ is a refusal, never a pass.
 #   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
 #                   AC-9.2): the block exists at its own heading, dated; the Corrections
 #                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
@@ -87,7 +92,7 @@ fx_repo() {
   git -C "$1" init -q --template= &&
   git -C "$1" config commit.gpgsign false &&
   fx_changelog "$2" > "$1/CHANGELOG.md" && fx_plugin "$3" > "$1/payload/.claude-plugin/plugin.json" &&
-  printf 'base\n' > "$1/a.txt" &&
+  printf 'base\n' > "$1/a.txt" && printf '#!/bin/bash\n:\n:\n' > "$1/code.sh" &&
   git -C "$1" add -A && git -C "$1" commit -q -m "first"
 }
 # run_check <repo> [args...] — sets OUT (stdout+stderr) and RC; the list is the default argument
@@ -305,6 +310,65 @@ M="$(git -C "$R" rev-parse HEAD)"; rn_pub T7 "$M" hand 2026-01-02T05:00:00Z
 expect_eq "(t3) setup: the carrier is a merge of two parents" "2" "$(git -C "$R" rev-list --parents -n 1 "$M" | wc -w | awk '{ print $1 - 1 }')"
 rn_check "$M"
 expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
+
+section "§RATIO — tests may not outgrow the code: shell lines under tests/ against shell lines elsewhere, at the head"
+
+# fx_ratio <dir> <tests lines> <code lines> — a committed pair whose tracked shell files hold exactly that many lines.
+fx_lines() { awk -v n="$1" 'BEGIN { for (i = 0; i < n; i++) print ":" }'; }
+fx_ratio() {
+  fx_repo "$1" 2.3.4 2.3.4 || return 1
+  mkdir -p "$1/tests" &&
+  fx_lines "$2" > "$1/tests/big.test.sh" && fx_lines "$3" > "$1/code.sh" &&
+  git -C "$1" add -A && git -C "$1" commit -q -m "the shell files"
+}
+
+R="$TMP/ratio-over"; fx_ratio "$R" 50 10
+run_check "$R"
+expect_status "(R-1) a head whose tests/ shell lines exceed the rest: the check fails" 1 "$RC"
+expect_contains "(R-1) …and the line names both counts" "test-ratio 50/10" "$OUT"
+expect_contains "(R-1) …and says tests exceed code at the head" "tests exceed code at HEAD" "$OUT"
+expect_eq "(R-1) …in one line" "1" "$(lines_of "$OUT")"
+
+R="$TMP/ratio-under"; fx_ratio "$R" 10 50
+run_check "$R"
+expect_status "(R-2) a head under: the check passes" 0 "$RC"
+expect_contains "(R-2) …and prints the ratio" "test-ratio: 10/50" "$OUT"
+expect_absent "(R-2) …with no refusal beside it" "tests exceed code" "$OUT"
+R="$TMP/ratio-equal"; fx_ratio "$R" 40 40
+run_check "$R"
+expect_status "(R-2b) tests equal to code is not over: the check passes" 0 "$RC"
+expect_contains "(R-2b) …printing the ratio" "test-ratio: 40/40" "$OUT"
+
+# (R-3) the head's counts, never the working files': the committed head is under, the working files are far over.
+R="$TMP/ratio-head"; fx_ratio "$R" 10 50
+fx_lines 900 > "$R/tests/untracked.test.sh"; fx_lines 1 > "$R/code.sh"
+expect_nonempty "(R-3) setup: the repository really is dirty" "$(git -C "$R" status --porcelain)"
+run_check "$R"
+expect_status "(R-3) working files edited and added after the commit: the check still passes" 0 "$RC"
+expect_contains "(R-3) …on the head's counts" "test-ratio: 10/50" "$OUT"
+git -C "$R" add -A; git -C "$R" commit -q -m "now over"
+run_check "$R"
+expect_status "(R-3) setup: the same files committed are over, so the dirty pass above was the head" 1 "$RC"
+OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD='HEAD~1' bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+expect_contains "(R-3) …and BIONIC_CHECK_HEAD=HEAD~1 reads the earlier commit's counts" "test-ratio: 10/50" "$OUT"
+
+# (R-4) a symlinked directory counts once: the blob the link names, never the files seen through it.
+R="$TMP/ratio-link"; fx_repo "$R" 2.3.4 2.3.4
+mkdir -p "$R/lib" "$R/tests" && fx_lines 20 > "$R/lib/x.sh" && fx_lines 5 > "$R/tests/t.test.sh"
+ln -s lib "$R/lib2" && ln -s lib/x.sh "$R/alias.sh" && ln -s ../lib "$R/tests/viaLink"
+git -C "$R" rm -q -f code.sh && git -C "$R" add -A && git -C "$R" commit -q -m "links"
+expect_eq "(R-4) setup: the links are committed as links" "3" "$(git -C "$R" ls-tree -r HEAD | awk '$1 == "120000"' | wc -l | tr -d ' ')"
+run_check "$R"
+expect_status "(R-4) the check passes" 0 "$RC"
+expect_contains "(R-4) …the code is the 20 lines of the real file, counted once, and the tests are their own 5" "test-ratio: 5/20" "$OUT"
+
+# (R-5) no shell outside tests/ is no code to count against: a refusal, never a pass.
+R="$TMP/ratio-nocode"; fx_repo "$R" 2.3.4 2.3.4
+git -C "$R" rm -q -f code.sh; mkdir -p "$R/tests"; fx_lines 3 > "$R/tests/t.test.sh"; git -C "$R" add -A; git -C "$R" commit -q -m "tests only"
+run_check "$R"
+expect_status "(R-5) a head with no shell outside tests/: the check refuses (exit 2)" 2 "$RC"
+expect_contains "(R-5) …in a line that says so" "no shell file outside tests/" "$OUT"
+expect_eq "(R-5) …one line" "1" "$(lines_of "$OUT")"
 
 section "§CORR — the 1.19.0 entry names the run and corrects 1.18.0 (REQ-8 AC-8.1, AC-8.3, AC-8.4; REQ-9 AC-9.1, AC-9.2)"
 

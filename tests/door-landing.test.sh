@@ -31,6 +31,11 @@
 #            equals what `release-note` renders for the head and instant it names. With the renderer refusing
 #            the plan, the landing is refused in the renderer's words and the branch does not move. While the
 #            release row is open, a landing leaves CHANGELOG.md as it was.
+#   §RATIO   the cap on tests at the door. On the fixture, whose shell lines under tests/ and elsewhere are measured and
+#            printed first, a piece adding more test lines than the code has room for is refused `check-failed` with
+#            the `test-ratio` line and nothing is published; the same piece with fewer test lines lands, beside it.
+#   §RATIO-2 a fixture whose accepted head is already over the cap: the piece that cuts the test lines back under it is
+#            admitted, and the declared check at the landed head prints the ratio.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under the world directory with real commits; the door is
 # the tree under test's spawn-worktree.sh and session-poker.sh, run from the fixture with every variable that names
@@ -490,5 +495,76 @@ expect_eq "(rr6c) …and the head after it carries the same file" "$DR_B0" "$(gi
 DR_PUB="$(dl_published "$DR" T3)"
 expect_contains "(rr6d) the record publishes the landing at the head" "line/v1|ev=published|row=T3|commit=$DR_H3|" "$DR_PUB"
 expect_absent "(rr6e) …with no numbers commit" "numbers=" "$DR_PUB"
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§RATIO: a landing that pushes tests past code is refused at the door; one under the cap lands beside it"
+
+# dl_counts <check output> -> `<tests> <code>` from the check's one ratio line, a pass's or a refusal's; nothing when it has none.
+dl_counts() { printf '%s\n' "$1" | sed -n 's/^.*test-ratio:\{0,1\} \([0-9][0-9]*\)\/\([0-9][0-9]*\).*$/\1 \2/p' | head -n 1; }
+# dl_lines <n> -> n lines of shell, one colon each.
+dl_lines() { awk -v n="$1" 'BEGIN { for (i = 0; i < n; i++) print ":" }'; }
+# dl_ratio_piece <root> <test lines> -> DL_PR the row T1's tree: a tests/big.test.sh of that many lines and ten lines
+# of code appended to a library file, committed.
+dl_ratio_piece() {
+  DL_PR="$(door_piece "$1" T1)" || return 1
+  mkdir -p "$DL_PR/tests" && dl_lines "$2" > "$DL_PR/tests/big.test.sh" || return 1
+  dl_lines 10 >> "$DL_PR/payload/scripts/lib/said.sh"
+  dl_commit "$DL_PR" "a test file and ten lines of code"
+}
+
+read -r DA DA_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/ratio-over")
+EOF
+dl_check "$DA" "$DA_H0" "$DA_H0"
+DA_COUNTS="$(dl_counts "$DOOR_OUT")"
+DA_T="${DA_COUNTS% *}"; DA_C="${DA_COUNTS#* }"
+echo "door fixture shell lines at its accepted head: tests ${DA_T:-?} against code ${DA_C:-?}"
+expect_regex "(ra0) precondition: the fixture's check reads its counts" '^[0-9]+ [0-9]+$' "$DA_COUNTS"
+expect_true "(ra0b) …and the fixture has room for more tests: ${DA_T:-?} under ${DA_C:-?}" [ "${DA_T:-1}" -lt "${DA_C:-0}" ]
+DA_ROOM=$(( ${DA_C:-0} - ${DA_T:-0} ))
+dl_ratio_piece "$DA" "$(( DA_ROOM + 2000 ))"
+: > "$DOOR_SEEN"
+door_land "$DA" "$DL_PR"
+DA_OUT="$DOOR_OUT"
+DA_NEWT=$(( ${DA_T:-0} + DA_ROOM + 2000 )); DA_NEWC=$(( ${DA_C:-0} + 10 ))
+expect_eq "(ra1) a piece adding more test lines than the code has room for is refused (exit 2); the working branch does not move" \
+  "2 $DA_H0" "$DOOR_RC $(dl_head "$DA")"
+expect_contains "(ra1b) …check-failed, by the declared check" "REFUSED reason=check-failed why=release-check rc=1 branch=wt/T1" "$DA_OUT"
+expect_contains "(ra1c) …with the test-ratio line naming both counts" "test-ratio $DA_NEWT/$DA_NEWC — tests exceed code at " "$DA_OUT"
+expect_eq "(ra1d) …nothing is published: the working head has no tests/big.test.sh and the record no published line" \
+  "gone 0" "$(git -C "$DA" cat-file -e "$(dl_head "$DA"):tests/big.test.sh" 2>/dev/null && echo here || echo gone) $(dl_record "$DA" | /usr/bin/grep -c 'ev=published|row=T1|')"
+expect_eq "(ra1e) …and the check that refused is the target's copy, run once" "pwd=$DA script=$DA/tests/lib/release-check.sh" "$(door_seen)"
+
+# The same piece under the cap, in a copy of its own: the refusal above is the count, not the file.
+read -r DK DK_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/ratio-under")
+EOF
+dl_ratio_piece "$DK" 1000
+door_land "$DK" "$DL_PR"
+expect_eq "(ra2) CONTROL the piece with 1000 test lines lands by hand (exit 0)" "0" "$DOOR_RC"
+expect_contains "(ra2b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
+expect_absent "(ra2c) CONTROL …with no ratio refusal" "tests exceed code" "$DOOR_OUT"
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§RATIO-2: a landing that cuts test lines is admitted, and the ratio prints"
+
+# A fixture whose accepted head is over the cap (the big file committed on the working branch), and a piece that cuts it.
+read -r DC DC_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/ratio-cut")
+EOF
+mkdir -p "$DC/tests" && dl_lines "$(( DA_ROOM + 2000 ))" > "$DC/tests/big.test.sh" && dl_commit "$DC" "tests past the cap"
+DC_H1="$(dl_head "$DC")"
+dl_check "$DC" "$DC_H0" "$DC_H1"
+expect_eq "(rb0) precondition: the accepted head is over the cap, the declared check refusing it (exit 1)" "1" "$DOOR_RC"
+expect_contains "(rb0b) …with the test-ratio line" "test-ratio $(( DA_T + DA_ROOM + 2000 ))/$DA_C — tests exceed code at $DC_H1" "$DOOR_OUT"
+DL_PC="$(door_piece "$DC" T1)" && git -C "$DL_PC" rm -q tests/big.test.sh && dl_commit "$DL_PC" "cut the tests"
+door_land "$DC" "$DL_PC"
+DC_OUT="$DOOR_OUT"; DC_H2="$(dl_head "$DC")"
+expect_eq "(rb1) the piece that cuts the test lines under the cap lands by hand (exit 0) and moves the working branch" \
+  "0 yes" "$DOOR_RC $([ "$DC_H2" != "$DC_H1" ] && echo yes)"
+expect_contains "(rb1b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DC_OUT"
+expect_absent "(rb1c) …with no ratio refusal" "tests exceed code" "$DC_OUT"
+dl_check "$DC" "$DC_H0" "$DC_H2"
+expect_contains "(rb2) the declared check at the landed head prints the ratio, the fixture's own again" "test-ratio: $DA_T/$DA_C" "$DOOR_OUT"
 
 finish
