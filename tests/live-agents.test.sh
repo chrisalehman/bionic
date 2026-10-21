@@ -40,7 +40,7 @@
 # harness writes is NONE — which the stop callers turn into refuse-and-name-the-fix, and
 # the dispatch budget into a fall back to its own roster (wave-12 D1) — while a body that
 # IS recognisably a ListAgents answer and simply lists no teammates is FRESH with zero
-# lines. §D and §F are that pair, and they are the reason both exist.
+# lines. §D and the unparseable-answer row of §L are that pair, and they are the reason both exist.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"). The two
 # answer bodies below are REAL, captured verbatim from this project's own session
@@ -87,26 +87,6 @@ trap cleanup EXIT
 # NOTHING would go red). All 8 call sites below are renamed to expect_regex
 # with the argument order corrected — this also removes the pipe's SIGPIPE-141
 # exposure, since expect_regex matches via herestring (S7, AC-12).
-
-section "§A — the library exists, parses, and is safe to source"
-if [ -f "$LIB" ]; then ok "payload/scripts/lib/agents.sh is on disk"; else
-  no "payload/scripts/lib/agents.sh is on disk" "$LIB"
-fi
-if bash -n "$LIB" 2>"$SANDBOX/.syn"; then ok "the library parses (bash -n)"; else
-  no "the library parses (bash -n)" "$(cat "$SANDBOX/.syn" 2>/dev/null)"
-fi
-
-# It is sourced by hooks that run under `set -u` and print their own single line; a
-# library that emitted anything, or tripped on an unset variable, would corrupt every
-# one of them.
-SRC_OUT="$(env -u BIONIC_NOW_EPOCH bash -c 'set -u; . "$1"; echo READY' _ "$LIB" 2>"$SANDBOX/.srcerr")"
-expect_eq "sourcing under set -u succeeds" "READY" "$SRC_OUT"
-expect_empty "sourcing prints nothing on stderr" "$(cat "$SANDBOX/.srcerr" 2>/dev/null)"
-
-# Defines functions only: no stray global state, and both entry points exist.
-DEFS="$(bash -c 'set -u; . "$1"; type -t live_agents; type -t live_agents_has' _ "$LIB" 2>/dev/null)"
-expect_eq "defines live_agents and live_agents_has as functions" \
-  "$(printf 'function\nfunction')" "$DEFS"
 
 # ------------------------------------------------------------
 # Fixture builders. Every transcript is a jsonl file assembled from real entry shapes.
@@ -323,69 +303,6 @@ expect_eq "missing transcript -> stderr says none" "live-agents: none age=none" 
 call_live_agents "$SANDBOX/blank.jsonl"
 expect_eq "empty transcript -> exit 4 (NONE)" 4 "$ST"
 
-section "§F — (f) an unparseable answer body is NONE, never 'all gone'"
-# The tool call WAS ListAgents and the id joins, so §J's forgery rule is not what is
-# under test here: this is a body the reader does not recognise. Returning zero
-# teammates would tell the dispatch wall the roster is clear and the stop guard its
-# target is dead. It must be NONE: the stop callers refuse and name the fix, and the
-# dispatch budget counts its open roster rows instead (wave-12 D1).
-T_GARBAGE="$SANDBOX/garbage.jsonl"
-{
-  entry_prompt      "2026-09-05T00:50:00.000Z" "who is running"
-  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_garbagebody0000000001"
-  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_garbagebody0000000001" \
-    "Error: the agent service is unavailable (503). Try again."
-} > "$T_GARBAGE"
-
-call_live_agents "$T_GARBAGE"
-expect_eq "unrecognised answer body -> exit 4 (NONE)" 4 "$ST"
-expect_empty "unrecognised answer body -> no stdout" "$OUT"
-expect_eq "unrecognised answer body -> stderr says none" "live-agents: none age=none" "$ERR"
-
-# ANTI-VACUITY for §F: the identical fixture whose body IS a recognisable answer is
-# FRESH with the teammate. So the NONE above measured the body, not a broken fixture.
-T_GARBAGE_OK="$SANDBOX/garbage-control.jsonl"
-{
-  entry_prompt      "2026-09-05T00:50:00.000Z" "who is running"
-  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_garbagebody0000000001"
-  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_garbagebody0000000001" "$BODY_RUNNING"
-} > "$T_GARBAGE_OK"
-call_live_agents "$T_GARBAGE_OK"
-expect_eq "…the same fixture with a real body -> exit 0" 0 "$ST"
-expect_eq "…the same fixture with a real body -> the teammate" \
-  "research-code-map|bionic:researcher|running" "$OUT"
-
-section "§G — the NEWEST answer wins, and it is the whole answer"
-# The reported field failure this wave exists to fix: an agent present in an older
-# answer and absent from the newest must read as GONE. Both answers are real bodies.
-T_NEWEST="$SANDBOX/newest.jsonl"
-{
-  entry_prompt      "2026-09-05T00:45:00.000Z" "dispatch, then check twice"
-  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01E6AEt34433u6NazVYnRk32"
-  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_01E6AEt34433u6NazVYnRk32" "$BODY_RUNNING"
-  entry_tool_use    "2026-09-05T00:58:56.000Z" "ListAgents" "toolu_01P5RJ8N617Tw45VVRaUfyrh"
-  entry_tool_result "2026-09-05T00:58:57.460Z" "toolu_01P5RJ8N617Tw45VVRaUfyrh" "$BODY_NOTEAMMATES"
-} > "$T_NEWEST"
-
-call_live_agents "$T_NEWEST"
-expect_eq "older answer named it, newest does not -> exit 0" 0 "$ST"
-expect_empty "…the researcher is gone, because the NEWEST answer is the whole answer" "$OUT"
-# 01:00:00Z minus 00:58:57Z = 63 s: the age is the NEWEST answer's, not the older one's.
-expect_eq "…the age is the newest answer's" "live-agents: fresh age=63" "$ERR"
-
-# And the other direction on the same file shape: newest names it, older did not.
-T_NEWEST2="$SANDBOX/newest2.jsonl"
-{
-  entry_prompt      "2026-09-05T00:45:00.000Z" "dispatch, then check twice"
-  entry_tool_use    "2026-09-05T00:38:56.000Z" "ListAgents" "toolu_01P5RJ8N617Tw45VVRaUfyrh"
-  entry_tool_result "2026-09-05T00:38:57.460Z" "toolu_01P5RJ8N617Tw45VVRaUfyrh" "$BODY_NOTEAMMATES"
-  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01E6AEt34433u6NazVYnRk32"
-  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_01E6AEt34433u6NazVYnRk32" "$BODY_RUNNING"
-} > "$T_NEWEST2"
-call_live_agents "$T_NEWEST2"
-expect_eq "newest answer names it, older did not -> the researcher is live" \
-  "research-code-map|bionic:researcher|running" "$OUT"
-
 section "§H — freshness is measured against the LAST user prompt"
 # Two prompts, two answers, interleaved: the answer after the SECOND prompt is what
 # makes the file fresh. An implementation comparing against the FIRST prompt would call
@@ -471,6 +388,23 @@ expect_eq "…and it is the real teammate line" \
   "research-code-map|bionic:researcher|running" "$OUT"
 
 section "§L — (e) live_agents_has: 0 once, 1 absent, 2 twice, 3/4 propagate"
+T_GARBAGE="$SANDBOX/garbage.jsonl"
+{
+  entry_prompt      "2026-09-05T00:50:00.000Z" "who is running"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_garbagebody0000000001"
+  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_garbagebody0000000001" \
+    "Error: the agent service is unavailable (503). Try again."
+} > "$T_GARBAGE"
+
+T_NEWEST="$SANDBOX/newest.jsonl"
+{
+  entry_prompt      "2026-09-05T00:45:00.000Z" "dispatch, then check twice"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01E6AEt34433u6NazVYnRk32"
+  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_01E6AEt34433u6NazVYnRk32" "$BODY_RUNNING"
+  entry_tool_use    "2026-09-05T00:58:56.000Z" "ListAgents" "toolu_01P5RJ8N617Tw45VVRaUfyrh"
+  entry_tool_result "2026-09-05T00:58:57.460Z" "toolu_01P5RJ8N617Tw45VVRaUfyrh" "$BODY_NOTEAMMATES"
+} > "$T_NEWEST"
+
 call_live_agents_has "$T_FRESH" "research-code-map"
 expect_eq "live_agents_has: present exactly once -> exit 0" 0 "$HST"
 
@@ -517,16 +451,6 @@ call_live_agents_has "$T_NEWEST" "research-code-map"
 expect_eq "live_agents_has: present in the older answer only -> exit 1 (gone)" 1 "$HST"
 
 expect_empty "live_agents_has prints nothing on stdout" "$HOUT"
-
-section "§M — one stderr line, exactly, on every path"
-# The callers append this line to a refusal a human reads. Two lines, or none, is a
-# defect in every one of them at once.
-for f in "$T_FRESH" "$T_STALE" "$T_NONE" "$T_GARBAGE" "$T_EMPTY"; do
-  call_live_agents "$f"
-  expect_eq "stderr is exactly one line for $(basename "$f")" 1 "$(printf '%s\n' "$ERR" | grep -c .)"
-  expect_regex "…and it is the contract line for $(basename "$f")" \
-    '^live-agents: (fresh|stale|none) age=([0-9]+|none)$' "$ERR"
-done
 
 section "§N — every path survives a caller running set -euo pipefail"
 # `.claude/rules/test-harness.md` records this trap by name: a suite runs

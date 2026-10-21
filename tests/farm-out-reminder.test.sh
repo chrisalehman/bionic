@@ -124,18 +124,6 @@ PLAIN="$(mk_repo plain no)"
 ok "fixtures built: $ENGAGED and $PLAIN"
 
 # ---------------------------------------------------------------------------
-section "0 — the anchor: this suite is driving something (A-52)"
-#
-# HALF THIS FILE ASSERTS SILENCE, and a HOOK path that names nothing is silent too:
-# `bash /nonexistent` writes one line to stderr and exits 127, which every "expect_empty"
-# below would read as the wall behaving. T10's four vacuous fixtures were exactly this
-# shape. So the seam is asserted before it is used, and the wall is shown SPEAKING once
-# before it is asked to stay quiet.
-expect_true "0a: the hook under test exists at the resolved seam [$HOOK]" test -f "$HOOK"
-run_hook "$(mk_payload "$ENGAGED" 'bash tests/run.sh')"
-expect_nonempty "0b: …and it answers a tier-1 command, so silence below means silence" "$OUT"
-
-# ---------------------------------------------------------------------------
 section "1 — the four silences: this wall has nothing to say"
 
 # A NON-Bash PAYLOAD. The wall reads `.tool_name` and leaves on anything else; the

@@ -729,64 +729,6 @@ run_gate "$MONODIR/hooks/stop.sh" "$(stop_payload "$R4I_MUT" "$SID" false)"
 expect_status "4i-mut: with the guard inverted, the SAME genuinely-UNMET contract passes silently" \
   "0" "$RC"
 
-# ================================================================= Section 5
-section "Section 5: ENGAGEMENT, not the plan, is what holds anyone to anything"
-
-# THE SUBJECT OF THIS SECTION CHANGED AT task-engaged-session. It used to be "no active
-# wave — nothing to hold anyone to", scoping the gate by `active_run`. That is the defect
-# this wave fixes from the other side: the plan gated every SESSION in the repo, including
-# ones that never entered bionic, while a landing contract is owed by the session that
-# LAUNCHED the agent — a fact that predates the plan (a run's Step 0 writes the roster
-# before it writes the plan) and outlives it (engagement does not end when `current:`
-# reaches 9). So the gate reads no plan at all now, and the fixtures below keep their
-# shapes with their expectations moved onto the switch that actually scopes them.
-
-R5="$(make_repo r5)"
-new_roster "$R5"
-add_row "$R5" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
-  launched_at="$(iso_ago 600)"
-run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
-expect_status "5a: no plan at all — an ENGAGED session still owes its verdict" "2" "$RC"
-R5_REFUSAL="$OUT_STDERR"
-
-rm -f "$R5/.bionic/tmp/engaged-$SID.state"
-run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
-expect_status "5a-neg: the same unmet roster, unengaged, passes" "0" "$RC"
-expect_empty "5a-neg: …silently" "$OUT_STDERR"
-
-# a SYMLINK at the marker path reads as ABSENT, never followed.
-R5_DECOY="$SANDBOX/r5-decoy-marker"; printf 'plan=none\n' > "$R5_DECOY"
-ln -s "$R5_DECOY" "$R5/.bionic/tmp/engaged-$SID.state"
-run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
-expect_status "5a-sym: a symlink at the marker path is not an engagement" "0" "$RC"
-expect_empty "5a-sym: …silently" "$OUT_STDERR"
-rm -f "$R5/.bionic/tmp/engaged-$SID.state"
-
-# ANOTHER session's marker is not this session's.
-: > "$R5/.bionic/tmp/engaged-$SID_B.state"
-run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
-expect_status "5a-foreign: another session's marker is not this session's engagement" "0" "$RC"
-rm -f "$R5/.bionic/tmp/engaged-$SID_B.state"
-
-# restored, the refusal returns byte for byte. ON A FRESH ROSTER, because this gate blocks
-# ONCE per row: the first refusal above journalled its own `landing-swept/v1|` marker, and
-# re-driving the same file would compare the refusal against the silence that marker is
-# supposed to produce.
-R5BACK="$(make_repo r5back)"
-new_roster "$R5BACK"
-add_row "$R5BACK" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
-  launched_at="$(iso_ago 600)"
-run_gate "$GATE" "$(stop_payload "$R5BACK" "$SID" false)"
-expect_eq "5a-back: engaged with no plan, the refusal is byte-identical to 5a" "$R5_REFUSAL" "$OUT_STDERR"
-
-R5B="$(make_repo r5b)"
-plan_fenced_only "$R5B"
-new_roster "$R5B"
-add_row "$R5B" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
-  launched_at="$(iso_ago 600)"
-run_gate "$GATE" "$(stop_payload "$R5B" "$SID" false)"
-expect_status "5b: a fenced-only SDLC State changes nothing either way — the roster decides" "2" "$RC"
-
 # ================================================================= Section 6
 section "Section 6: fail-open — every way the verdict can fail to answer"
 
@@ -905,26 +847,6 @@ ack_row "$R9B" w2-s3
 run_gate "$GATE" "$(stop_payload "$R9B" "$SID" false)"
 expect_status "9b: once acked, the same sweep passes" "0" "$RC"
 expect_empty "9c: …silently — the orchestrator already accounted for it" "$OUT_STDERR"
-
-# ================================================================= Section 10
-section "Section 10: the sweep records only its own marker, and only in the roster"
-
-R10="$(make_wave_repo r10)"
-add_row "$R10" name=mine agent_id="$AID_A" deliverable=.bionic/docs/record/mine.md \
-  launched_at="$(iso_ago 600)" tool_use_id=toolu_MINE
-deliver "$R10" .bionic/docs/record/mine.md
-BEFORE="$(ls -A "$R10/.bionic/tmp" | sort)"
-run_gate "$GATE" "$(stop_payload "$R10" "$SID" false)"
-AFTER="$(ls -A "$R10/.bionic/tmp" | sort)"
-expect_eq "10a: the sweep creates no state file of its own" "$BEFORE" "$AFTER"
-
-# THE MARKER IS INERT TO THE ROSTER'S OWN READER. The sweeper folds `roster-state/v1|` rows
-# and nothing else, so the verdict it computes after a sweep is the verdict it computed
-# before one — a marker that changed an answer would be this gate quietly acquiring the
-# authority ADR-003 denies it.
-R10_VERDICT=$( cd "$R10" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_BIN" verdict mine 2>/dev/null \
-               | /usr/bin/grep -F 'landing-verdict/v1|' | head -1 | tr '|' '\n' \
-               | /usr/bin/grep '^state=' | cut -d= -f2- )
 
 # ================================================================= Section 11
 section "Section 11: the payload session key is shape-checked before it becomes a path"

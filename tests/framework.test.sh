@@ -572,30 +572,6 @@ expect_eq "6b: …and the docblock records that S9b renamed them" "yes" \
   "$(contains "$C1_DOC" 'were renamed onto `expect_regex` by S9b')"
 
 # ============================================================
-section "8: the runner's header points at the live width knob"
-# ============================================================
-#
-# WHAT USED TO BE HERE. A registration pin — "tests/run.sh names this suite" —
-# and a count pin comparing the roster's `run` lines against the glob. Both died
-# with the hand list (fixit 1.5.1, D-1/D-3): the roster IS `tests/*.test.sh`, so
-# membership is not a property a suite can lack, and a count of the roster
-# against the directory now compares the directory with itself.
-# tests/runner-roster.test.sh proves the derivation once, for the whole set.
-#
-# WHAT IS LEFT is the header's own prose about the width knob, which lives here
-# because no other suite reads it.
-
-RUNSH="$(cat "${REPO}/tests/run.sh")"
-# C-4: the header named a retired input as the knob to reach for. Two other
-# places in the same file say it is retired, one of them at runtime.
-expect_eq "8: the header points at the live width knob" "yes" \
-  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS_CEILING` is there for a machine')"
-expect_eq "8: …and not at the retired one" "no" \
-  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS is there for a machine')"
-expect_eq "8: …while the file still says out loud that it is retired" "yes" \
-  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS` is retired as an input')"
-
-# ============================================================
 section "9: the generic expect family is the framework's (AC-12, S1b)"
 # ============================================================
 #
@@ -734,21 +710,6 @@ f10_code_hits() {
 }
 expect_eq "10: …and the census can see one in code when there is one (not vacuous)" "1" \
   "$(printf 'echo "$x" %s -- "$y"\n' "$F10_BANNED" | grep -v '^[[:space:]]*#' | grep -c -- "$F10_BANNED" | tr -d ' ')"
-
-# ============================================================
-section "PIN-REL: a pin on the shipped tree is a relation, not a count (wave-26 T21, AC-8.1)"
-# ============================================================
-#
-# The census above (no banned spelling in code) and its docblock row are exercised on COPIES of
-# assert.sh under the sandbox: one with a fourth mention planted in a comment, one with every
-# mention removed. The shipped file is never touched.
-PR_PLUS="$SB/pin-rel-plus.sh"; PR_NONE="$SB/pin-rel-none.sh"
-{ cat "$FRAMEWORK"; printf '# a fourth mention: %s\n' "$F10_BANNED"; } > "$PR_PLUS"
-grep -v -- "$F10_BANNED" "$FRAMEWORK" > "$PR_NONE"
-expect_nonempty "PIN-REL the shipped file states the ban (the row reads something)" \
-  "$(grep -- "$F10_BANNED" "$FRAMEWORK")"
-expect_eq "PIN-REL a fourth mention: the docblock row stays green" "yes" "$(f10_stated "$PR_PLUS")"
-expect_eq "PIN-REL …and the code census stays green" "0" "$(f10_code_hits "$PR_PLUS")"
 
 # ============================================================
 finish

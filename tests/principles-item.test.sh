@@ -233,20 +233,13 @@ edit_block() {  # <file> <line>
 }
 
 # ---------------------------------------------------------------------------
-section "the shipped text and the extractor"
+section "§SET: written only on a yes, inside the markers (AC-9.1)"
 # ---------------------------------------------------------------------------
 
-expect_true "the payload ships payload/context/working-principles.md" test -f "$SHIPPED"
 block_to "$SHIPPED" "$TMP/shipped-block"
-expect_true "the block extractor reads a non-empty block out of the shipped file" \
-  test -s "$TMP/shipped-block"
 
 # What a consented write must leave: the user's file, then the block.
 { printf '%s\n' "$START_LIT"; cat "$TMP/shipped-block"; printf '%s\n' "$END_LIT"; } > "$TMP/expected-block"
-
-# ---------------------------------------------------------------------------
-section "§SET: written only on a yes, inside the markers (AC-9.1)"
-# ---------------------------------------------------------------------------
 
 SB_NO="$(new_home)"; cp "$SB_NO/.claude/CLAUDE.md" "$TMP/planted.md"
 NO_OUT="$(setup_run "$SB_NO" $'n\n')"

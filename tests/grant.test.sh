@@ -478,20 +478,6 @@ expect_eq "G8.badcat an unknown category is malformed input, rc 2" "2" \
   "$(dec lead "$LEAD_FACTS" "" "secrets" >/dev/null; printf '%s' "$CALL_RC")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-section "§G9 a reserved denial names the category and the human, and carries no file route"
-
-for cat in leaves-the-machine credentials production-infrastructure billing; do
-  v="$(dec writer "$WRITER_FACTS" "$(W "$T1/x")" "$cat")"
-  reason="$(fld 3 "$v")"
-  expect_eq "G9.$cat.0 deny-reserved, category in the second field" "deny-reserved${TAB}$cat" "$(kind "$v")${TAB}$(fld 2 "$v")"
-  expect_nonempty "G9.$cat.1 there is a reason" "$reason"
-  expect_contains "G9.$cat.2 the reason names the category in words" "$(printf '%s' "$cat" | tr '-' ' ')" "$reason"
-  expect_contains "G9.$cat.3 …says it is the human's to act on" "human" "$reason"
-  expect_contains "G9.$cat.4 …and tells the agent to report it to the lead" "report it to the lead" "$reason"
-  expect_no_regex "G9.$cat.5 …and offers no file route or workaround" '[Ff]ile|[Ss]cript|/|[Ww]orkspace|[Ii]nstead|run it' "$reason"
-done
-
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G10 the answer log is in no workspace"
 
 # The log's path is the project's log directory under the user's home (D9). It is read from

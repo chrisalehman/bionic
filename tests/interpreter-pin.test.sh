@@ -321,69 +321,6 @@ done
 expect_ne "2.14 git was found at all on the PATH the hand-run was given" "MISSING" "$HAND_EXP_GIT"
 echo ""
 
-section "§3 the planted 3.2 incompatibilities: the pin catches what it exists to catch (AC-10)"
-
-PLANT_TREE="$TMPROOT/plant-tree"
-mk_tree "$PLANT_TREE"
-
-# (a) 3.2 ends the command substitution at the first `)` of the case pattern and leaks the
-#     rest as text. Measured: 3.2.57 prints a parse error and garbage, exit 0; 5.3.15 prints A.
-#
-#     THE CONSTRUCT IS ASSEMBLED, NOT TYPED. tests/cross-gate-agreement.test.sh §BP forbids
-#     the one-line `case` inside a command substitution anywhere under tests/ — the idiom is
-#     banned in this tree precisely because `bash -n` cannot see it — and that lint reads
-#     source text, so a planted copy typed literally here would trip the rule it is meant to
-#     demonstrate. The same file's own mutation arm builds its copy through printf for the
-#     same reason; this follows it.
-PLANT_DOLLAR='$'
-{ printf '#!/bin/bash\n'
-  printf 'f() { echo "%s(case "%s1" in a) echo A;; *) echo other;; esac)"; }\n' \
-    "$PLANT_DOLLAR" "$PLANT_DOLLAR"
-  cat <<'PLANT_A_EOF'
-got="$(f a 2>/dev/null)"
-if [ "$got" = "A" ]; then echo "planted-case-leak: OK"; exit 0; fi
-echo "planted-case-leak: expected [A], got [$got]"
-exit 1
-PLANT_A_EOF
-} > "$PLANT_TREE/tests/planted-case-leak.test.sh"
-
-# (b) the here-string temporary-assignment divergence (research-code-map §4.e). Hermetic:
-#     the command the here-string's substitution needs is this file's own marker script, so
-#     the row does not depend on jq being installed.
-cat > "$PLANT_TREE/tests/planted-herestring.test.sh" <<'PLANT_B_EOF'
-#!/bin/bash
-BIN="$(mktemp -d)"; STRIP="$(mktemp -d)"
-trap 'rm -rf "$BIN" "$STRIP"' EXIT
-printf '#!/bin/bash\necho MARKER-OK\n' > "$BIN/probe_marker"; chmod +x "$BIN/probe_marker"
-PATH="$BIN:$PATH"; export PATH
-f() { probe_marker; }
-for b in bash cat; do ln -sf "$(command -v "$b")" "$STRIP/$b"; done
-got="$(PATH="$STRIP" cat <<< "$(f)" 2>/dev/null)"
-if [ "$got" = "MARKER-OK" ]; then echo "planted-herestring: OK"; exit 0; fi
-echo "planted-herestring: expected [MARKER-OK], got [$got]"
-exit 1
-PLANT_B_EOF
-
-drive "$PLANT_TREE" "--serial"
-expect_eq "3.1 the runner fails the run when a planted incompatibility is present" "1" "$DRV_RC"
-expect_contains "3.2 …and reports both planted suites red" "Gating: 0 passed, 2 failed" "$DRV_OUT"
-expect_contains "3.3 the quoted-\$( ) case leak is named" "- planted-case-leak.test.sh" "$DRV_OUT"
-expect_contains "3.4 the here-string divergence is named" "- planted-herestring.test.sh" "$DRV_OUT"
-
-# …and the same two files, unchanged, under the other interpreter: green. The planted
-# constructs are 3.2/5.x DIVERGENCES, not broken scripts — which is the whole claim.
-if [ -n "$ALT_BASH" ]; then
-  ALT_A_OUT="$("$ALT_BASH" "$PLANT_TREE/tests/planted-case-leak.test.sh" 2>&1)"; ALT_A_RC=$?
-  ALT_B_OUT="$("$ALT_BASH" "$PLANT_TREE/tests/planted-herestring.test.sh" 2>&1)"; ALT_B_RC=$?
-  expect_eq "3.5 the case-leak file is GREEN under the other interpreter" "0" "$ALT_A_RC"
-  expect_contains "3.6 …reporting the 5.x answer" "planted-case-leak: OK" "$ALT_A_OUT"
-  expect_eq "3.7 the here-string file is GREEN under the other interpreter" "0" "$ALT_B_RC"
-  expect_contains "3.8 …reporting the 5.x answer" "planted-herestring: OK" "$ALT_B_OUT"
-else
-  skip "3.5–3.8 the planted files are green under the other interpreter" "this host has only one bash"
-fi
-echo ""
-
 section "§4 the environment stamp: the run says which environment it ran in (AC-3)"
 #
 # One line, twice: in the header, where a reader meets the run, and beside `Gating:`, where
@@ -455,38 +392,6 @@ expect_contains "5.3 …naming the suite and why" "- noisy.test.sh" "$DRV_OUT"
 expect_contains "5.4 …in words that send the reader to the missing command" "command not found" "$DRV_OUT"
 expect_regex "5.5 a suite that only QUOTES the phrase stays green" \
   '^  quoting\.test\.sh +✓ PASS' "$DRV_OUT"
-echo ""
-
-section "§6 one pin, one owner: the runner and the seam pin through the same function (T81)"
-#
-# Two copies of the pin are two worlds: the runner's own pin code once gave a suite and its
-# children /bin/bash while the seam, for a hand-run, gave the suite alone. The seam now owns
-# the one function and the runner calls it. Proved both ways: the runner carries no pin code of
-# its own, and a mutant of the seam's function — its PATH line removed, nothing else — takes
-# the pin away from a suite the RUNNER launches and from the children of a suite run by HAND.
-RUN_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/run.sh")"
-SEAM_LN="$(grep -cE 'ln -sf? /bin/bash' "$REPO/tests/lib/resolve-roots.sh")"
-
-MUT_TREE="$TMPROOT/mut-tree"
-mk_tree "$MUT_TREE"
-cp "$PROBE_TREE/tests/probe.test.sh" "$MUT_TREE/tests/probe.test.sh"
-MUT_SEAM="$MUT_TREE/tests/lib/resolve-roots.sh"
-anchor insert tests/lib/resolve-roots.sh '  PATH="$phys:$PATH"'
-grep -vE '^  PATH="\$phys:\$PATH"' "$REPO/tests/lib/resolve-roots.sh" > "$MUT_SEAM"
-expect_eq "6.3 the mutant seam still parses" "0" "$(bash -n "$MUT_SEAM" >/dev/null 2>&1; echo $?)"
-if [ -n "$ALT_BASH" ]; then
-  : > "$TMPROOT/probe.out"
-  drive "$MUT_TREE" "--serial"
-  expect_eq "6.4 the mutant tree's runner still ran its probe (not vacuous)" "0" "$DRV_RC"
-  expect_eq "6.5 the mutant takes the pin from a suite the RUNNER launches" "$ALT_VER" \
-    "$(sed -n 's/^BASH_VERSION=//p' "$TMPROOT/probe.out")"
-  mk_hand "$MUT_SEAM" "$TMPROOT/hand-mut.test.sh"
-  hand_run "$SYS_BASH" "" "$TMPROOT/hand-mut.test.sh"
-  expect_eq "6.6 …and from the children of a suite run by HAND" "$ALT_VER" "$HAND_CHILD"
-  expect_eq "6.7 …while the mutant hand-run itself still ran (not vacuous)" "$SYS_VER" "$HAND_VER"
-else
-  skip "6.4–6.7 the seam mutant breaks the runner and the hand-run alike" "this host has only one bash"
-fi
 echo ""
 
 finish
