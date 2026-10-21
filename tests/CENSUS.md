@@ -83,6 +83,7 @@ binding.test.sh | §3 | keep | payload/scripts/lib/binding.sh bind_plan:242 the 
 binding.test.sh | §4 | duplicate | payload/scripts/lib/binding.sh bind_plan:161 BIND_REFUSAL initialised to a word instead of empty, so a success names a reason | binding.test.sh §7
 binding.test.sh | §5 | keep | payload/scripts/lib/binding.sh bind_holders: the symlinked-marker skip deleted, so a linked marker naming the plan holds it (exit 0 instead of 1) | none (searched 'bind_holders' and 'BIND_HOLDERS' in tests/)
 binding.test.sh | §7 | keep | payload/scripts/lib/binding.sh bind_delivered: the abandoned: test deleted, so the bind verb's act binds an abandoned plan (7c) | none (searched 'bind_delivered' and 'abandoned' in tests/)
+binding.test.sh | §SIZE | keep | payload/scripts/lib/binding.sh bind_record_session: the presence read made a quitting reader over the id stream (`_bind_session_ids "$plan" | grep -qxF -- "$sid"`), so a session already on a 3,000-line plan reads absent under pipefail and the call answers recorded and adds a second line (SZ-3; SZ-1 is the same plan read to the end) | none (searched 'bind_record_session' and 'by bind' in tests/; session-start.test.sh binds on plans of a few lines, which the writer finishes before the reader quits)
 
 ## booked.test.sh
 
