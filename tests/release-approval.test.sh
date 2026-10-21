@@ -162,6 +162,39 @@ fc_under() {  # <section> -> the page's lines under that section head, to the ne
 }
 
 # ============================================================
+section "§NAME: the card is the release approval card; the old name is read only as an alias and as the stem of pages already written"
+# ============================================================
+# The old spelling is built from parts so this file, which the sweep reads too, never spells it.
+RN_W="review"
+RN_ROOT="$(cd "${BIONIC_HOOKS_DIR}/.." && pwd)"
+rn_sweep() {  # <root> -> file:line:text for every line under the shipped trees that spells the old name, either way
+  ( cd "$1" && /usr/bin/grep -rniE "${RN_W}[ -]results" payload hooks tests skills agents-src 2>/dev/null )
+}
+# The sweep finds each spelling it is asked to find, in a tree that plants them (so an empty answer below means something).
+mkdir -p "$TMPROOT/rn-plant/skills" "$TMPROOT/rn-plant/hooks"
+printf 'the %s-results page\nthe %s results card\nThe %s Results page\n' "$RN_W" "$RN_W" "$RN_W" > "$TMPROOT/rn-plant/skills/x.md"
+expect_eq "NAME-1 the sweep finds the hyphenated, the spaced and the capitalised spelling in a planted tree" "3" \
+  "$(rn_sweep "$TMPROOT/rn-plant" | wc -l | tr -d ' ')"
+RN_ALL="$(rn_sweep "$RN_ROOT")"
+RN_KEPT='^hooks/session-poker\.sh:[0-9]+:RR_OLD_VERB="'"${RN_W}"'-results"'
+expect_eq "NAME-2 the old name is spelled once in the shipped trees: the alias constant in session-poker.sh" "1" \
+  "$(printf '%s\n' "$RN_ALL" | /usr/bin/grep -cE "$RN_KEPT")"
+expect_empty "NAME-3 …and nowhere else under payload, hooks, tests, skills and agents-src" \
+  "$(printf '%s\n' "$RN_ALL" | /usr/bin/grep -vE "$RN_KEPT")"
+rn_run() {  # <verb> [<arg>...] -> RN_RC, RN_OUT, RN_ERR of the verb with no session, run in the fixture
+  ( cd "$RFC" && exec env -u CLAUDE_CODE_SESSION_ID bash "$POKER" "$@" ) > "$TMPROOT/rn.out" 2> "$TMPROOT/rn.err"
+  RN_RC=$?; RN_OUT="$(cat "$TMPROOT/rn.out")"; RN_ERR="$(cat "$TMPROOT/rn.err")"
+}
+rn_run release-approval --help
+expect_eq "NAME-4 release-approval --help exits 0 and names itself on stdout" "0|yes" \
+  "$RN_RC|$(printf '%s\n' "$RN_OUT" | /usr/bin/grep -q 'release-approval' && echo yes)"
+RN_HELP="$RN_OUT"
+rn_run "${RN_W}-results" --help
+expect_eq "NAME-5 the old verb is an alias: it exits 0, prints the same help, and says the new name once on stderr" \
+  "0|yes|poker: ${RN_W}-results is now release-approval|1" \
+  "$RN_RC|$([ "$RN_OUT" = "$RN_HELP" ] && echo yes)|$RN_ERR|$(printf '%s\n' "$RN_ERR" | wc -l | tr -d ' ')"
+
+# ============================================================
 section "§SHAPE: the page is the prototype's, in plain text, recorded with its replay table (AC-13.1, AC-13.4; D8)"
 # ============================================================
 # fails-when: a section is missing or out of order; a markdown label, a record path or a quotation is printed; the
