@@ -656,7 +656,7 @@ expect_eq "PA3 a zero pace is unmeasured: the floor with no pace, and now's cloc
   "- Close: not before 7:00 PM (no pace yet)." "$(sr_line '- Close: ')"
 
 # ============================================================
-section "§FLOOR: before this run measures a pace, the newest delivered run on the same project at the same scale lends its pace, named; with none the floor stands alone; a likely close at or before the floor never prints; the page states the close once and --basis prints its arithmetic"
+section "§FLOOR: before this run measures a pace, the newest delivered run on the same project at the same scale lends its pace, named; with none the floor stands alone; a likely close at or before now never prints; the page states the close once and --basis prints its arithmetic"
 # ============================================================
 # No landing: the work left is 510 min over 2 admitted, 255 min, so the floor is 7:15 PM; at the delivered run's 72/60 the
 # likely close is 306 min on, 8:06 PM.
@@ -687,6 +687,12 @@ awk -F'|' 'BEGIN { OFS = "|" }
 sr_run "$SR_PLAN"
 expect_eq "FL2 a likely close at or before now prints the floor, never now's clock" \
   "- Close: not before 3:10 PM (this run's 0.001×).|0" "$(sr_line '- Close: ')|$(sr_line '- Close: ' | /usr/bin/grep -c '3:00 PM')"
+# The same pace over a 6000-minute task: the likely close is 6 minutes on, after now, so it prints though the
+# floor is days off; it is the estimate, the floor the plan's own minutes.
+awk -F'|' 'BEGIN { OFS = "|" } $2 == " T9 " { $9 = " 6000 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "FL2b a likely close after now prints beside the floor, whichever is earlier" \
+  "- Close: not before 7:00 PM 2026-10-10 · likely 3:06 PM (this run's 0.001×)." "$(sr_line '- Close: ')"
 # The page states the close once; the arithmetic is --basis's.
 sr_world floor-basis "6 6 12 12"
 sr_run "$SR_PLAN"
