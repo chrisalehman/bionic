@@ -2217,7 +2217,7 @@ EOF
       SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
       say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
     elif [ -n "$SCHED_PLAN" ] && ! fill_plan_approved "$SCHED_PLAN"; then
-      # THE APPROVAL LINE FIRST (wave-26 T13; D3, AC-6.2): the fact the dispatch wall keys on, and
+      # THE APPROVAL LINE FIRST: the fact the dispatch wall keys on, and
       # one half of `fill_ledger_live`; the step, its other half, is the arm below. The step is
       # named because it is what a reader looks for; the line says which fact is missing.
       say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
@@ -2241,7 +2241,7 @@ EOF
       # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above, and `SCHED_HOLDS`
       # still carries the step holds for the no-FILL line below (wave-21 T13).
       SCHED_CAP="$(fill_cap "$SCHED_PLAN")"
-      # THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.5). The writer rows ready are offered one
+      # THE WIDTH IS THE GATE'S. The writer rows ready are offered one
       # at a time: `fill_gate_width` asks `gate_room` once per row, with the open writers not yet showing plus the rows already
       # offered on this reading counted as owed, and stops at the first no or at a person's cap.
       # A gate line that read no room offers none, so the line and the fill never disagree.

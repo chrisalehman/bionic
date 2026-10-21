@@ -547,7 +547,7 @@ S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
 s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing names both ready rows" "ready with room: T13 T14 (" "$(s9_headline)"
 
-# T16 (wave-26, D17): the ledger line ends with `idle=` and `room=`, the ready rows no launch
+# The ledger line ends with `idle=` and `room=`, the ready rows no launch
 # covered while a slot was free, and the free slots at that moment. Positive on the same
 # line first: the launched row is out of idle, the unlaunched one is in, and room is the line's own free.
 S9_LED0="$S9_D0/.bionic/docs/record/wave-09-fixture/fill-ledger.log"

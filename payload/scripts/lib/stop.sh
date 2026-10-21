@@ -1672,7 +1672,7 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # (hooks/execution-recorder.sh, wave-26 T12) sets it `active`, and until then the turn that
 # launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
 # the inverse of `fill_name`) takes it out of what the turn missed (wave-20 T11b, A-T11b.2).
-# The headline names the ready rows the turn did not launch (wave-36 T32).
+# The headline names the ready rows the turn did not launch.
 #
 # A ROW THAT SHOULD WAIT IS MADE NOT READY, NEVER ANSWERED IN WORDS. There are good reasons not to
 # fill (a row landing this minute, a decision the user has not ruled, an order), and each is a
@@ -1693,7 +1693,7 @@ if [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ]; then
 fi
 
 if [ "$FILL_SRC" = "GAP" ]; then
-  # ONE LINE, EVERY READY ROW (wave-36 T32; D13, AC-7.1). Until wave-36 this was a six-line
+  # ONE LINE, EVERY READY ROW. This was once a six-line
   # paragraph naming `min(free slots, ready rows)` of the rows. The user reads one line naming every
   # ready row the turn left (`_ST_NAMED`); the rule behind it lives in the dispatch doctrine ('The
   # FILL line is advice; the wall counts'). The model's copy adds the rows comma-joined in one
@@ -1795,7 +1795,7 @@ fi
 #   - an ack closing the row (the sweeper's, which `stop-orders.sh stopped` writes): the
 #     computed set leaves out an acked row, so it is never asked about;
 #   - a `standdown-declined: <name> <reason>` line at the start of a line of the model's own
-#     reply (AC-5.4): never thinking, a tool input or a tool result.
+#     reply: never thinking, a tool input or a tool result.
 #     The reason is required (wave-24 T8, AC-4.10): a name alone is not an answer. It stands as
 #     a hold does (wave-26 T15, AC-4.6; D16): below, the wall writes it to the roster through
 #     `session-poker.sh hold`, so the tick reads it with the hold's fingerprint check and orders
@@ -1982,7 +1982,7 @@ return "$_adv"
 #   _ST_GAP         |ready not launched|, the writers among them counted only while a slot is
 #                   free — what the wall refuses on
 #   _ST_NAMED       those ids, every one, the ones a refusal names: a slot free is room for the
-#                   refusal, never a trim of it (wave-36 T32)
+#                   refusal, never a trim of it
 #   (`_ST_TICK_DUTY`, `_ST_RECONCILE` and `_ST_ENTERED`, the task-list duties' inputs, went with
 #   those duties at wave-31 T32; the tick still writes `duty=` and `reconcile=`, read by no wall)
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
@@ -2017,8 +2017,8 @@ return "$_adv"
 #                                    result
 #   SD-DECLINE <name> <reason>       `standdown-declined: <name> <reason>` at a LINE START of a
 #                                    main-thread assistant TEXT block — never thinking, never a
-#                                    tool_use input, never a tool result (wave-20 T19; AC-5.4:
-#                                    prose quoting, a file read and a grep plant nothing). The name alone is not an answer:
+#                                    tool_use input, never a tool result, so prose quoting,
+#                                    a file read and a grep plant nothing. The name alone is not an answer:
 #                                    the reason must carry a letter or digit (wave-24 T8, D2,
 #                                    AC-4.10). The tick's printed `poker: STANDDOWN` line is
 #                                    no longer a record at all: the set is computed from disk
@@ -2257,7 +2257,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # turn did not launch, offered one `gate_room` at a time (`fill_gate_width`), the open writers
   # not yet showing counted as owed (`fill_gate_owed`), and a person's cap obeyed. The tick and
   # this wall size their fill by the one function, so on one reading they name the same rows, every
-  # one while a slot is free (wave-36 T32). ONE QUESTION, NOT TWO: `fill_gate_width`'s first ask,
+  # one while a slot is free. ONE QUESTION, NOT TWO: `fill_gate_width`'s first ask,
   # `gate_room --owed <owed>`, is the tick's own gate line (`gate_report`, hooks/session-poker.sh),
   # so on one reading a tick that ends `no FILL — the gate gives no room` and this wall agree; a
   # later reading answers for the turn's end, after its acks and launches (tests/stop.test.sh
@@ -2341,7 +2341,7 @@ stop_owed_send() {  # <event> -> always 0
 #
 #   fill-ledger/v1|at|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room
 #
-# `idle` and `room` close the line (wave-26 T16): the ready rows nothing launched while a slot was
+# `idle` and `room` close the line: the ready rows nothing launched while a slot was
 # free, and the free slots; a reader of the older shape stops at `missed` and still parses.
 # `declined` IS KEPT, EMPTY: nothing answers a ready row in words now, and the field stays so a
 # reader of the shape by position, and fill-report's history column, read every line as before.
@@ -2352,7 +2352,7 @@ stop_owed_send() {  # <event> -> always 0
 # the refusal — is recorded too; `fill-report` folds lines by `turn=`, so a refused turn's two
 # lines count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook
 # feedback:") opens no turn in `stop_turn_facts`: both lines carry the prompt's key, and the
-# later one still holds the launches made before the refusal (wave-20 T11b).
+# later one still holds the launches made before the refusal.
 #
 # APPEND-ONLY, ONE printf PER STOP, so a crash leaves at most a line that did not happen and a
 # concurrent reader never sees a rewrite. A ledger path that is a symlink is not written through.
@@ -2369,7 +2369,7 @@ stop_fill_ledger() {  # <event> -> always 0
   mkdir -p "$d" 2>/dev/null || return 0
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
-  # THE ROWS THAT SAT IDLE (wave-26 T16, D17): ready, not launched this turn, while a writer slot
+  # THE ROWS THAT SAT IDLE: ready, not launched this turn, while a writer slot
   # was free. `fill-report` charges the interval to the next line. The ids are the plan's own,
   # space-split here exactly as `stop_turn_facts` matched them.
   idle=""

@@ -554,7 +554,7 @@ section "Section 5b: the fourth duty — a stand-down the tick ordered is answer
 # ANSWERED = a main-thread `TaskStop` tool_use naming the agent (by its name or by the address
 # the roster carries for it) that the harness did not refuse, an ack closing the row, or a
 # `standdown-declined: <name> <reason>` line at the start of a line of the model's own text,
-# never a quote of one (AC-5.4). The decline is the point, not a loophole: an agent still
+# never a quote of one. The decline is the point, not a loophole: an agent still
 # writing its record is a good reason not to stop it, and it is worth one line in the record.
 
 # The stop itself, shaped as the harness sends it: the id may be the agent's name or the
