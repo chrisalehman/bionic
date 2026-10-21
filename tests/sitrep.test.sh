@@ -785,9 +785,10 @@ expect_eq "G4 a reader-test record that passes flips its goal: 2 of 3 reached, a
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[^ ]+ goals — ')|$(sr_goal_lines | awk -F': ' '{ print $1 }' | sr_join)"
 
 
-# sr_themes <current> <status of AC-1.1 AC-1.2 AC-2.1 AC-3.1 AC-4.1 AC-5.1 AC-5.2 AC-6.1 AC-6.2> -> this world's plan made
-# wave scale at step <current> with a matrix of those nine rows, and a requirements file of three themes beside it:
-# REQ-1 and REQ-2 under the first, REQ-3 to REQ-5 under the second, REQ-6 under the third. SR_REQ_AT names the file
+# sr_themes <current> <nine statuses> -> this world's plan made
+# wave scale at step <current> with a matrix of nine rows, the statuses in order (two criteria of the first REQ, one each of the
+# second to the fourth, two each of the fifth and sixth), and a requirements file of three themes beside it:
+# the first two REQs under the first theme, the next three under the second, the sixth under the third. SR_REQ_AT names the file
 # the plan's Step-1 line points at; unset, the plan names none and the file is the sibling under specs/ by the slug.
 sr_themes() {
   local cur="$1" q a; shift
