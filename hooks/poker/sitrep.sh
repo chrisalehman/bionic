@@ -461,41 +461,20 @@ sitrep_chain() {
     | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }'
 }
 
-# THE WAIT LINE: what changes if a decision is answered in an hour rather than now. Three things wait on D<n>: every task
-# not landed or dropped whose reads name it as an approval, `approval:D<n>`, whatever its state; the release, while the
-# newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
-# names D<n> in its reason or its line. A task on the longest open chain, the release or the merge moves the predicted
-# close an hour; a task off the chain starts an hour later while the close holds. The line says nothing moves only when
-# none of the three waits on it.
+# THE WAIT LINE: what changes if a decision is answered in an hour rather than now, rendered from `decision_waiters`, the
+# one reader of what waits on a decision, so the line and the fact sheet cannot disagree. A task on the longest open
+# chain, the release or the merge moves the predicted close an hour; a task off the chain starts an hour later while the
+# close holds. The line says nothing moves only when nothing waits.
 decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
-  local rows chain cids root dir page holds=""
-  root="${3:-}"; [ -n "$root" ] || root="$(project_root "${1%/*}" 2>/dev/null)"
-  if [ -n "$root" ] && declare -F docs_root >/dev/null 2>&1 && declare -F proof_plan_slug >/dev/null 2>&1; then
-    dir="$(docs_root "$root")/record/$(proof_plan_slug "$1")"
-    # The newest page by its time of writing, as the reply verb finds it.
-    # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, or the old stem's, no blank or line break in any
-    page="$(ls -t "$dir"/release-approval-*.md "$dir/${RR_OLD_VERB:-review-results}"-*.md 2>/dev/null | head -1)"
-    if [ -n "$page" ] && [ ! -L "$page" ] && awk -v d="$2" '
-        /^(release-approval|review-results)\/v1\|dec=/ { k = $0; sub(/^.*\|key=/, "", k); sub(/\|.*$/, "", k); sub(/^[^:]*:/, "", k)
-          if (k == d) { y = 1; exit } }
-        END { exit !y }' "$page" 2>/dev/null; then
-      holds="the release"
-    fi
-  fi
-  if [ -n "$root" ] && declare -F owed_list_plan >/dev/null 2>&1 && owed_list_plan "$1" "$root" 2>/dev/null | awk -F'\t' -v d="$2" '
-      function names(s,   r) { r = "(^|[^A-Za-z0-9])" d "([^0-9]|$)"; return s ~ r }
-      $1 == "hold:merge" && (names($3) || names($4)) { y = 1 } END { exit !y }'; then
-    holds="${holds:+$holds|}the merge"
-  fi
+  local rows waits chain cids
   rows="$(units_rows "$1" 2>/dev/null)"
-  if [ -z "$rows" ] && [ -z "$holds" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
+  waits="$(decision_waiters "$1" "$2" "${3:-}")"
+  if [ -z "$rows" ] && [ -z "$waits" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
   chain="$(sitrep_chain "$1" "$rows")"; cids="${chain%%$'\t'*}"
-  printf '%s\n' "$rows" | awk -F'\t' -v k="approval:$2" -v c=",$cids," -v h="$holds" '
+  printf '%s\n' "$waits" | awk -v c=",$cids," '
     function list(a, m,   i, s) { for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m) ? " and " : ", ")) a[i]; return s }
-    BEGIN { hn = (h == "") ? 0 : split(h, hd, "|") }
-    { s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { next }
-    { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x)
-        if (x == k) { if (index(c, "," $1 ",")) on[++a] = $1; else off[++b] = $1; break } } }
+    $0 == "release" || $0 == "merge" { hd[++hn] = "the " $0; next }
+    NF { if (index(c, "," $0 ",")) on[++a] = $0; else off[++b] = $0 }
     END {
       if (a) { printf "Answered in an hour rather than now, the predicted close moves an hour later: %s %s on the longest chain and %s on it", list(on, a), (a > 1) ? "are" : "is", (a > 1) ? "wait" : "waits"
                m = 0; for (i = 1; i <= hn; i++) also[++m] = hd[i]; for (i = 1; i <= b; i++) also[++m] = off[i]
@@ -504,6 +483,38 @@ decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
                if (b) printf "; %s also %s on it", list(off, b), (b > 1) ? "wait" : "waits"; printf ".\n" }
       else if (b) printf "Answered in an hour rather than now, %s %s an hour later and the predicted close holds: %s off the longest chain.\n", list(off, b), (b > 1) ? "start" : "starts", (b > 1) ? "they are" : "it is"
       else printf "Answered now or in an hour, nothing moves: no task waits on it.\n" }'
+}
+
+# WHAT WAITS ON A DECISION, the one reader the wait line and the fact sheet share. Three things wait on D<n>: every task
+# not landed or dropped whose reads name it as an approval, `approval:D<n>`, whatever its state; the release, while the
+# newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
+# names D<n> as a whole word (D3 is not D30) in its reason or its line.
+decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id, in the plan's order, then `release`, then `merge`
+  local root dir page
+  units_rows "$1" 2>/dev/null | awk -F'\t' -v k="approval:$2" '
+    { s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { next }
+    { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x)
+        if (x == k) { print $1; break } } }'
+  root="${3:-}"; [ -n "$root" ] || root="$(project_root "${1%/*}" 2>/dev/null)"
+  [ -n "$root" ] || return 0
+  if declare -F docs_root >/dev/null 2>&1 && declare -F proof_plan_slug >/dev/null 2>&1; then
+    dir="$(docs_root "$root")/record/$(proof_plan_slug "$1")"
+    # The newest page by its time of writing, as the reply verb finds it.
+    # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, or the old stem's, no blank or line break in any
+    page="$(ls -t "$dir"/release-approval-*.md "$dir/$RR_OLD_VERB"-*.md 2>/dev/null | head -1)"
+    if [ -n "$page" ] && [ ! -L "$page" ] && awk -v d="$2" -v old="$RR_OLD_VERB/v1|dec=" '
+        index($0, "release-approval/v1|dec=") == 1 || index($0, old) == 1 { k = $0; sub(/^.*\|key=/, "", k); sub(/\|.*$/, "", k); sub(/^[^:]*:/, "", k)
+          if (k == d) { y = 1; exit } }
+        END { exit !y }' "$page" 2>/dev/null; then
+      printf 'release\n'
+    fi
+  fi
+  if declare -F owed_list_plan >/dev/null 2>&1 && owed_list_plan "$1" "$root" 2>/dev/null | awk -F'\t' -v d="$2" '
+      function names(s,   r) { r = "(^|[^A-Za-z0-9])" d "([^0-9]|$)"; return s ~ r }
+      $1 == "hold:merge" && (names($3) || names($4)) { y = 1 } END { exit !y }'; then
+    printf 'merge\n'
+  fi
+  return 0
 }
 
 # decisions_all <docs root> -> every run's entries, each line keyed `<wave> `, waves in slug order; a ledger with no
