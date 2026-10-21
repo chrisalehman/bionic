@@ -37,7 +37,10 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 # HH_GATE: hoisted to tests/close-out.prelude.sh (a later part reads it)
 HH_C="$(printf 'd%.0s' $(seq 40))"
-HH_WANT="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=0"
+# The report reads from the last build landing, T2's at 10:40, so the decline, the lift, the 10:00 amend and T2's own
+# hand landing fall before the window, and the date-only matrix waiver's day holds that start, so it is unplaced.
+HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=1"
+HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=0"
 # hh_report: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # hh_plant <project> -> one use of every verb, and the prose that must count for nothing
 hh_plant() {
@@ -94,6 +97,8 @@ hh_plant "$PH"
 HH_OUT="$(hh_report "$PH" --hand-holds)"
 expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
   "$(printf '%s\n' "$HH_OUT" | grep '^hand-holds: ')"
+expect_eq "HH-1b …and a window opening before every line counts every kind from its own line" "$HH_ALL" \
+  "$(hh_report "$PH" --hand-holds --since 2026-10-01T00:00:00Z | grep '^hand-holds: ')"
 expect_eq "HH-2 …after the landings line, which is the one the default prints" "1/2" \
   "$(printf '%s\n' "$HH_OUT" | grep -c '^landings: ')/$(printf '%s\n' "$HH_OUT" | grep -n '^hand-holds: ' | cut -d: -f1)"
 expect_eq "HH-3 the default landing-report prints no hand-holds line (its output stays what it was)" "0" \

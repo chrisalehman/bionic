@@ -226,7 +226,12 @@ expect_eq "SHAPE-11b AC-13.4 …in plain text: no markdown label" "0" "$(printf 
 expect_eq "SHAPE-11c …no record path" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c 'record/')"
 expect_eq "SHAPE-11d …no quotation above the reply line" "0" "$(printf '%s\n' "$FC_OUT" | sed '$d' | /usr/bin/grep -c '"')"
 expect_eq "SHAPE-11e …and never the old name" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -ci 'final card')"
-expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | LC_ALL=en_US.UTF-8 awk 'length($0) > 92' | /usr/bin/grep -c .)"
+# Columns are counted as sitrep_fold counts them, byte-wise: macOS awk's length() counts bytes in every locale, so a
+# line with a two-byte `·` would read wider than it prints.
+fc_cols() { LC_ALL=C awk '{ s = $0; t = s; w = length(s) - gsub(/[\200-\277]/, "", t); t = s; w -= gsub(/\357\270\217/, "", t)
+  t = s; w += gsub(/[\360-\364]/, "", t); t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t); print w }'; }
+expect_eq "SHAPE-11f-0 precondition: the column count reads a two-byte middle dot as one column" "3" "$(printf 'a\302\267b\n' | fc_cols)"
+expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 92' | /usr/bin/grep -c .)"
 expect_eq "SHAPE-12 the page is written to the run's record, one file at the head" "release-approval-$FC_H8.md" "$(fc_pages)"
 expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
   "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"

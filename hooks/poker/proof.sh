@@ -133,12 +133,13 @@ release_deferrals() {
   }
 
   # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32's four row waivers were typed by hand (A-orch-49):
-  # the AC block's `  waiver: <who> <date> "<the user's words>" — <why>` line, which the gate reads as the
+  # the AC block's `  waiver: <who> <ISO-UTC> "<the user's words>" — <why>` line, which the gate reads as the
   # row's waiver (walls.sh `row_is_waived`), and the status cell `waived`. The words are held to the rule a
   # finding's move is (finding-move): lib/said.sh `user_said` finds them, as whole words and at least SAID_MIN_WORDS (three)
   # of them unless they are a whole prompt, in a prompt the user typed in this session. Who is git
-  # user.name, the date UTC. A second waiver of the row replaces the first line. REFUSED (1), the plan
-  # unchanged: an AC with no row or no block, no git user.name, words the user did not type, too few words.
+  # user.name, the time ISO-UTC, so the hand-holds window can place it. A second waiver of the row
+  # replaces the first line. REFUSED (1), the plan unchanged: an AC with no row or no block, no git
+  # user.name, words the user did not type, too few words.
   poker_verb_waive_row() {
     if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
       . "$BIONIC_LIB/said.sh"
@@ -163,7 +164,7 @@ release_deferrals() {
       said_refuse "$WR_SAID" "$WR_WORDS" "a waiver"
       exit 1
     fi
-    WR_LINE="$WR_WHO $(date -u +%Y-%m-%d) \"$(deferral_escape "$WR_WORDS")\" — $WR_WHY"
+    WR_LINE="$WR_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$(deferral_escape "$WR_WORDS")\" — $WR_WHY"
     PV_RC=0
     matrix_row_cells "$PV_PLAN" "$WR_AC" 3=waived > "$PV_NEW" 2>/dev/null || PV_RC=$?
     if [ "$PV_RC" -eq 0 ]; then
