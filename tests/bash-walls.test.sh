@@ -672,7 +672,9 @@ ru_put 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
 ru_poke current 6 --check
 expect_eq "PT-1: a T4 row whose user-confirmed is pending — current 6 --check passes" "0" "$RU_RC"
 expect_contains "PT-1b: …saying it would advance" "current 6 --check: would advance" "$RU_OUT"
-ru_put 6 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
+# The advance to 7 needs the Step 7 line on the plan, which the fixture writes only at 7, so the plan is written at 7
+# and put back to 6: a check on a plan already at 7 would be no advance at all.
+ru_plan 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING" | sed 's/^current: 7$/current: 6/' > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
 ru_poke current 7 --check
 expect_eq "PT-2: the same row — current 7 --check passes" "0" "$RU_RC"
 rm -f "$R_RU/.bionic/tmp/owed-$SID.state"
