@@ -617,6 +617,7 @@ grant.test.sh | §G18 a read-only agent's report is a root only inside what the 
 ## handoff-file.test.sh
 
 handoff-file.test.sh | §NO-RUN | keep | payload/scripts/lib/handoff.sh: the .bionic folder created without its `*` ignore file, so git status lists the handoff (N2, N2d) | none (searched 'check-ignore' and 'handoffs folder' in tests/)
+handoff-file.test.sh | §ONE-LINE | keep | hooks/poker/sitrep.sh handoff verb: `say "$HO_SAY"` restored before the resume line, so a second line prints on stdout (OL-1, OL-2, N3c); skills/handoff/SKILL.md: the quoting step restored (OL-3) | none (searched 'handoff — written to' in tests/; close-out-4.test.sh reads that line for the path and asserts nothing on its text)
 handoff-file.test.sh | §SECTIONS | keep | payload/scripts/lib/handoff.sh: an empty section written as a bare heading instead of its one "- none." line (S4, S5) | none (searched 'hf_bare' and 'bionic-handoff/v1' in tests/)
 handoff-file.test.sh | §STATE | keep | payload/scripts/lib/handoff.sh: the open-tasks list keeps a pending row with no worktree, so "  - T5 ·" is printed (T6h); also the uncommitted files' count (T3c) | none (searched 'open tasks (' in tests/)
 handoff-file.test.sh | §PORTABLE | keep | payload/scripts/lib/handoff.sh: the cloud-key pattern dropped from the redaction, so the AWS key's text stays in the file (P2e) | none (searched 'address redacted' and 'redact' in tests/)

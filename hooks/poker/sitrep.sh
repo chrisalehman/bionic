@@ -1916,15 +1916,14 @@ sitrep_grade() {
       } | handoff_redact "$HO_CF" | sitrep_fold
       printf '%s\n' "$HO_LAST"
     } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
-    # WHAT IT SAYS IS WHERE THE FILE IS AND HOW THE NEXT SESSION RESUMES, and nothing more: the counts, the
-    # redactions and the blocks left out are in the file for whoever reads it.
-    HO_SAY="handoff — written to $(cd "${HO_FILE%/*}" 2>/dev/null && pwd -P)/${HO_FILE##*/}"
+    # WHAT IT SAYS IS HOW THE NEXT SESSION RESUMES, and nothing more: the resume line carries the file's path as its
+    # operand, so no second line names it, and the counts, the redactions and the blocks left out are in the file
+    # for whoever reads it. On success stdout is that one line and stderr is empty.
     if [ "$HO_MODE" = none ]; then
       if ! mv -f "$HO_TMP" "$HO_FILE" 2>/dev/null; then
         die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
         exit 2
       fi
-      say "$HO_SAY"
       printf '%s\n' "$HO_LAST"
       exit 0
     fi
@@ -1937,7 +1936,6 @@ sitrep_grade() {
       die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
       exit 2
     fi
-    say "$HO_SAY"
     printf '%s\n' "$HO_LAST"
     HO_PTR="handoff: $HO_REL written $(handoff_local_time "$HO_NOW")"
     PV_RC=0
