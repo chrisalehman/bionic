@@ -569,7 +569,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   step: n=<0-9> name=<name> state=<done|running|pending> tasks=<k>          one line per step, 0 to 9
 #   task: id=<Tn> step=<n> state=<done|running|held|failed|pending> desc=<short description> note=<few words or ->
 #                      one line per task not dropped, in execution order
-#   metric.completed · metric.pace · metric.correctness · metric.waste · metric.runs · metric.goals
+#   metric.completed · metric.pace · metric.correctness · metric.waste · metric.goals
 #   goal: name=<goal> status=<met|not met|not measured> measure=<what measures it — what it read, or ->
 #   close.predicted · close.forecast · close.basis
 #   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or ->
@@ -583,7 +583,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # `units_chain`'s over `units_edges`, the landings, runs and the line `landing_report`'s and lib/line.sh's fold, the
 # idle minutes `fill-report`'s own line, the asks the run's register's (`owed_list_plan`, never the caller's
 # session), the admitted count `gate_state`'s, the findings `proof_findings` at `proof_finding_rating` less
-# `proof_fixed`, the dispatch instants `launch_sync_ledger`'s, a goal's status lib/plan.sh `plan_goal_status`'s, the
+# `proof_fixed`, the landings the landing record's `landed:` headers, a goal's status lib/plan.sh `plan_goal_status`'s, the
 # one the release approval card reads too. What no reader computes is computed here, once: the pace, a red not yet
 # answered by a green, the close.
 #
@@ -600,9 +600,9 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # the plan's own minutes, so admitting more can shorten the work's share and never one chain. The floor is now + L at
 # 1×; the likely close is now + L × the pace, read only when it falls after now. The predicted close runs from the
 # floor to the likely close, is the likely close alone when that falls at or before the floor (a pace of 1× or less),
-# and the floor alone with no pace. The pace is the median of a landing's dispatched-to-landed minutes over its
-# planned minutes, this run's, else the newest delivered run's at the same scale on the same project, named. The
-# queue's ready-to-landed time is a wait at the gate and feeds nothing. The forecast end is the Step-3 approval plus
+# and the floor alone with no pace. The pace is the minutes from the Step-3 approval to the last landing over the
+# minutes the plan allowed for the landed tasks, this run's, else the newest delivered run's at the same scale on the
+# same project, named; the metric says the same two numbers. The forecast end is the Step-3 approval plus
 # the plan's own `forecast:`, else plus its own minutes. A plan not approved at Step 3 predicts nothing; a delivered
 # one predicts its delivery; one with no task open, now. No typed number moves the predicted close.
 #
@@ -683,42 +683,35 @@ sitrep_ratio_fmt() {  # <ratio> -> two places, trailing zeros dropped: 1.2, 1.37
   awk -v r="$1" 'BEGIN { s = (r > 0 && r < 0.01) ? sprintf("%.1g", r) : sprintf("%.2f", r); if (index(s, ".") && s !~ /e/) { sub(/0+$/, "", s); sub(/\.$/, "", s) }; print s }'
 }
 
-# sitrep_pace_facts <plan> <root> -> `<landings><TAB><ratio or -><TAB><minutes taken><TAB><minutes planned>`: over the
-# plan's queue landings whose dispatch ledger row carries a `dispatched` instant and whose task declares a size, how
-# many, the median of (landed − dispatched) in minutes over the declared minutes (`-` when it is not a positive
-# number), and the two sums, each rounded to the minute; nothing when no landing qualifies. A row's landing is its
-# earliest queue `published` at or after its dispatch. The queue's ready-to-landed time is a wait at the gate, not
-# the work's own time, so it feeds nothing here.
+# sitrep_pace_facts <plan> <root> -> `<landings><TAB><ratio or -><TAB><minutes taken><TAB><minutes planned>`: the plan's
+# rows that carry a `landed: row=<id> … at=<ISO>` header in the run's landing record (`_wt_proofs_path`), how many,
+# the minutes from the plan's Step-3 approval to the latest such header, and the sum of those rows' declared size
+# cells, each rounded to the minute; the ratio is taken over planned and is `-` unless both are positive. A row
+# landed twice counts once. The record's headers are the landings the run's own writer leaves, and the approval
+# the start of the span, so no dispatch ledger is read: a plan keeps none until a launch writes it, and a pace
+# that needed one measured nothing on a run without. Nothing when the plan is unapproved or no row has landed.
 sitrep_pace_facts() {
-  local rec
+  local rec appr
   rec="$(_wt_proofs_path "$2" "$1")"
   [ -f "$rec" ] && [ ! -L "$rec" ] || return 0
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-  [ -n "${_LINE_FIELDS_AWK:-}" ] || return 0
-  { launch_sync_ledger "$1" | awk -F'\037' '{ print "D\t" $1 "\t" $3 }'
-    units_rows "$1" 2>/dev/null | awk -F'\t' '{ print "R\t" $1 "\t" $7 }'
-    awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("kind") == "queue" { print "P\t" line_kv("row") "\t" line_kv("at") }' "$rec"
-  } | awk -F'\t' "$_PATROL_ISO_AWK"'
+  appr="$(sitrep_approved_at "$1")"
+  [ -n "$appr" ] || return 0
+  { units_rows "$1" 2>/dev/null | awk -F'\t' '{ print "R\t" $1 "\t" $7 }'
+    awk '/^landed: row=/ && match($0, / at=[0-9T:Z-]+/) { r = $2; sub(/^row=/, "", r); print "L\t" r "\t" substr($0, RSTART + 4, RLENGTH - 4) }' "$rec"
+  } | awk -F'\t' -v appr="$appr" "$_PATROL_ISO_AWK"'
     function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    $1 == "D" { e = iso2epoch(norm($3)); if (e >= 0) disp[$2] = e; next }
-    $1 == "R" { if (match($3, /^[0-9]+/) && substr($3, RSTART, RLENGTH) + 0 > 0) size[$2] = substr($3, RSTART, RLENGTH) + 0; next }
-    $1 == "P" { e = iso2epoch(norm($3)); if (e >= 0) { np++; pr[np] = $2; pe[np] = e } }
+    $1 == "R" { if (match($3, /^[0-9]+/)) size[$2] = substr($3, RSTART, RLENGTH) + 0; else size[$2] = 0; next }
+    $1 == "L" { e = iso2epoch(norm($3)); if (e >= 0) { if (!($2 in land) || e > land[$2]) land[$2] = e } }
     END {
-      for (i = 1; i <= np; i++) {
-        r = pr[i]
-        if (!(r in disp) || !(r in size) || pe[i] < disp[r]) continue
-        if (!(r in land) || pe[i] < land[r]) land[r] = pe[i]
-      }
-      for (r in land) { v[++k] = (land[r] - disp[r]) / 60 / size[r]; took += (land[r] - disp[r]) / 60; plan += size[r] }
+      for (r in land) if (r in size) { k++; plan += size[r]; if (land[r] > last) last = land[r] }
       if (k == 0) exit
-      for (i = 2; i <= k; i++) { t = v[i]; for (j = i - 1; j >= 1 && v[j] > t; j--) v[j + 1] = v[j]; v[j + 1] = t }
-      d = (k % 2) ? v[(k + 1) / 2] : (v[k / 2] + v[k / 2 + 1]) / 2
-      printf "%d\t%s\t%d\t%d\n", k, (d > 0) ? sprintf("%.6f", d) : "-", took + 0.5, plan + 0.5
+      took = (last - appr) / 60; if (took < 0) took = 0
+      printf "%d\t%s\t%d\t%d\n", k, (took > 0 && plan > 0) ? sprintf("%.6f", took / plan) : "-", took + 0.5, plan + 0.5
     }'
 }
 
 # sitrep_pace <plan> <root> -> `<landings><TAB><ratio>`, `sitrep_pace_facts`' first two fields; nothing when no landing
-# qualifies or the median is not a positive number, so a pace that is not measured feeds no close.
+# qualifies or the ratio is not a positive number, so a pace that is not measured feeds no close.
 sitrep_pace() {
   local f
   f="$(sitrep_pace_facts "$1" "$2")"
@@ -766,14 +759,16 @@ sitrep_prev() {
 #               open chain and all open work over the admitted count, in the plan's own minutes
 #   2 likely    now + L × the pace, rounded to the minute; `-` with no pace or when it falls at or before now. A pace
 #               under 1× puts it before the floor, and it still prints: it is the estimate, the floor the plan's own
-#   3 ratio     the pace: this run's (`sitrep_pace`), else the newest same-scale delivered run's (`sitrep_prev`)
+#   3 ratio     the pace: this run's (`sitrep_pace_facts`), else the newest same-scale delivered run's (`sitrep_prev`)
 #   4 whose     `this run`, or the lending run's short name, a wave slug's first two words
-#   5 landings  how many of this run's landings the pace is the median of (`-` when borrowed)
+#   5 landings  how many of this run's landings the pace is taken over (`-` when borrowed)
 #   6 work · 7 per · 8 larger   the open minutes, those over the admitted count, and L, each rounded
 #   9 chain · 10 chain min · 11 admitted   the chain's ids comma-joined, its minutes, the gate's admitted count
+#  12 taken · 13 planned   the minutes from the approval to the last landing and the minutes planned for those landings
+#                          (`-` when borrowed)
 # Admitting more can shorten the work's share and never one chain.
 sitrep_close() {
-  local plan="$1" root="$2" now="$3" rows="${4:-}" chain cids cmins work admitted width pace ratio="-" whose="-" n="-"
+  local plan="$1" root="$2" now="$3" rows="${4:-}" chain cids cmins work admitted width pace ratio="-" whose="-" n="-" took="-" planned="-"
   [ -n "$rows" ] || rows="$(units_rows "$plan" 2>/dev/null)"
   chain="$(sitrep_chain "$plan" "$rows")"
   cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
@@ -783,10 +778,12 @@ sitrep_close() {
   admitted="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
   case "$admitted" in ''|*[!0-9]*) admitted=0 ;; esac
   width="$admitted"; [ "$width" -gt 0 ] || width=1
-  pace="$(sitrep_pace "$plan" "$root")"
-  if [ -n "$pace" ]; then
-    n="${pace%%$'\t'*}"; ratio="${pace##*$'\t'}"; whose="this run"
-  else
+  pace="$(sitrep_pace_facts "$plan" "$root")"
+  case "$pace" in
+    ''|*$'\t-\t'*) pace="" ;;
+    *) IFS='	' read -r n ratio took planned <<< "$pace"; whose="this run" ;;
+  esac
+  if [ -z "$pace" ]; then
     pace="$(sitrep_prev "$root" "$plan")"
     if [ -n "$pace" ]; then
       ratio="${pace##*$'\t'}"
@@ -800,7 +797,7 @@ sitrep_close() {
     if (y > now) printf "%d\t%d\t", f, y; else printf "%d\t-\t", f }'
   printf '%s\t%s\t%s\t' "$ratio" "$whose" "$n"
   awk -v c="$cmins" -v t="$work" -v w="$width" 'BEGIN { p = t / w; l = (p > c) ? p : c; printf "%d\t%d\t%d\t", t, p + 0.5, l + 0.5 }'
-  printf '%s\t%s\t%s\n' "$cids" "$cmins" "$admitted"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$cids" "$cmins" "$admitted" "$took" "$planned"
 }
 
 # sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`), then `N<TAB><count>`
@@ -1159,7 +1156,7 @@ SITREP_SIT
     SG_BASIS="no forecast until the plan is approved at Step 3: then the open work's chain from now, at 1× for its earliest instant and at the measured pace for its likely close"
   else
     clo="$(sitrep_close "$plan" "$root" "$now" "$rows")"
-    IFS='	' read -r fl lk ratio whose nland work per larger cids cmins admitted <<< "$clo"
+    IFS='	' read -r fl lk ratio whose nland work per larger cids cmins admitted ptook pplan <<< "$clo"
     if [ -z "$fl" ]; then
       cl="$(sitrep_clock "$now" "$now")"
       SG_PREDICTED="$cl"; SG_LINE_CLOSE="$cl"; SG_BASIS="no task is open; nothing is left to forecast"
@@ -1170,7 +1167,7 @@ SITREP_SIT
         lkw="no pace yet: no landing on this run measures one, and no delivered run at the same scale lends one"
       else
         if [ "$whose" = "this run" ]; then
-          pw="this run's $(sitrep_ratio_fmt "$ratio")×, the median over $nland landing$([ "$nland" = 1 ] || echo s) of dispatch-to-landing over planned minutes"
+          pw="this run's $(sitrep_ratio_fmt "$ratio")×, $(sitrep_dur "$ptook") from the plan's approval to the last of $nland landing$([ "$nland" = 1 ] || echo s) over the $(sitrep_dur "$pplan") the plan allowed for $([ "$nland" = 1 ] && echo it || echo them)"
         else
           pw="$whose's $(sitrep_ratio_fmt "$ratio")×, borrowed: no landing on this run measures one yet"
         fi
@@ -1192,7 +1189,7 @@ SITREP_SIT
   [ "$mode" = sheet ] || return 0
 
   # ---- the metrics, numbers only
-  local pf k took planned rv q sc res at ev nf passed=0 failed=0 running=0 open dropped idle_min rg rr rn rd rk g m st t md rdg
+  local pf k took planned rv q sc res at ev nf passed=0 failed=0 running=0 open dropped idle_min idle_words rg rr rn rd rk g m st t md rdg
   pf="$(sitrep_pace_facts "$plan" "$root")"
   IFS='	' read -r k _ took planned <<< "$pf"
   SG_PACE="${k:-0} tasks in $(sitrep_dur "${took:-0}"); the plan allowed $(sitrep_dur "${planned:-0}") for them"
@@ -1220,8 +1217,6 @@ SITREP_RUNNING
   SG_CORRECT="${SG_NRED:-0} tests red; $passed reviews passed, $failed failed, $running running; $open open findings"
   dropped="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "dropped" { n++ } END { print n + 0 }')"
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
-  if [ -n "$idle_min" ]; then SG_WASTE="$dropped tasks discarded; $idle_min minutes idle"
-  else SG_WASTE="$dropped tasks discarded; idle minutes unverified"; fi
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
   case "$lr1" in
     *'· runs: green='*)
@@ -1230,7 +1225,8 @@ SITREP_RUNNING
     *) rg=0 rr=0 rn=0 rd=0 ;;
   esac
   rk="${lr1##*killed=}"; case "$rk" in ''|*[!0-9]*) rk=0 ;; esac
-  SG_RUNS="$((rg + rr + rn + rd + rk)) suite runs; $((rd + rk)) discarded"
+  if [ -n "$idle_min" ]; then idle_words="$idle_min minutes idle"; else idle_words="idle minutes unverified"; fi
+  SG_WASTE="$dropped tasks dropped; $((rd + rk)) of $((rg + rr + rn + rd + rk)) suite runs discarded; $idle_words"
   # the goals, each status the one function's
   SG_GOAL_LINES=""; g=0; m=0; k=0
   # split by hand: a goal with no measure has an empty field, which a tab-split read would close up
@@ -1240,6 +1236,8 @@ SITREP_RUNNING
     g=$((g + 1))
     st="$(plan_goal_status "$st")"
     case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; esac
+    # the status already says a goal is not measured; its measure prints once
+    [ "$rdg" != "not measured" ] || rdg=""
     if [ -n "$md" ] && [ -n "$rdg" ]; then md="$md — $rdg"; elif [ -z "$md" ]; then md="${rdg:--}"; fi
     SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md"$'\n'
   done <<SITREP_GOALS
@@ -1257,8 +1255,8 @@ sitrep_sheet() {
   printf 'run.project: %s\nrun.started: %s\nrun.last-landing: %s\n' "$SG_PROJECT" "$SG_STARTED" "$SG_LAST"
   printf '%s\n' "$SG_STEPS"
   printf '%s' "$SG_TASKS"
-  printf 'metric.completed: %s\nmetric.pace: %s\nmetric.correctness: %s\nmetric.waste: %s\nmetric.runs: %s\nmetric.goals: %s\n' \
-    "$SG_COMPLETED" "$SG_PACE" "$SG_CORRECT" "$SG_WASTE" "$SG_RUNS" "$SG_GOALS"
+  printf 'metric.completed: %s\nmetric.pace: %s\nmetric.correctness: %s\nmetric.waste: %s\nmetric.goals: %s\n' \
+    "$SG_COMPLETED" "$SG_PACE" "$SG_CORRECT" "$SG_WASTE" "$SG_GOALS"
   printf '%s' "$SG_GOAL_LINES"
   printf 'close.predicted: %s\nclose.forecast: %s\nclose.basis: %s\n' "$SG_PREDICTED" "$SG_FORECAST" "$SG_BASIS"
   while IFS='	' read -r k h t r; do

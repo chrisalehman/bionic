@@ -4,7 +4,7 @@
 # THE VERB PRINTS FACTS, NEVER A PAGE. `sitrep [<plan>]` prints the sheet: a first line saying it is the model's
 # input, then one fact per line, `<key>: <value>`, in a fixed order — the run (its release, name, wave, now, step,
 # project, start and last landing), the ten steps, every task in execution order with its step, state, short
-# description and a few words of note, the metrics in numbers (completed, pace, correctness, waste, suite runs,
+# description and a few words of note, the metrics in numbers (completed, pace, correctness, waste,
 # goals) and each goal's status, the close (predicted, forecast end and the arithmetic in words), every ask open on
 # the run's register with what it holds, and every review result with its open findings. Every clock time is
 # local and 12-hour. `--line` is the Patrol's status, `<k> of <m> tasks · owed: <n> · close <time>`. The page,
@@ -60,8 +60,7 @@ SR_H="$(printf 'a%.0s' $(seq 40))"
 # ---------- the world ----------
 #
 # sr_world <label> <landing minutes for T1..T4, space-separated | none> -> SR_REPO, SR_PLAN, SR_REC,
-# SR_DIR, SR_GATE. Seventeen rows, all Step 4 builds: T1–T4 landed (sizes 5 5 10 10, so the median
-# declared is 7.5), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
+# SR_DIR, SR_GATE. Seventeen rows, all Step 4 builds: T1–T4 landed (30 min each), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
 # chain is T8→T9 (90 + 60 = 150 min); every other open row is 30 min and reads nothing of another's.
 # T12 reads approval:release and T17 approval:merge. With `none`, T1–T4 are pending too and the
 # landing record holds no landing. Two gate requests are admitted and held by this shell, so the
@@ -71,12 +70,10 @@ SR_H="$(printf 'a%.0s' $(seq 40))"
 # unset; an empty SR_FORECAST declares none). SR_EXTRA
 # appends that many more pending 30-minute rows (T18…), reading nothing, so the plan's total grows and the
 # chain does not. SR_SCALE, when set, declares `scale:`.
-# THE DISPATCH LEDGER: each landed row of SR_DISPATCH_ROWS (all four when unset) has a `dispatched` instant,
-# at its ready instant, or SR_DISPATCH_LEAD minutes before its landing when set, minute-precise as the
-# roster writes it. At the ready instant the pace is the queue's own 1.2×, so the close moves only where a
-# world sets a lead apart from the queue time.
+# THE LANDING RECORD: each landed row has a `landed: row=…` header at its landing instant, as the landing writes it,
+# beside the queue's `published` event. The plan has no dispatch ledger, as the live plan has none.
 sr_world() {
-  local label="$1" mins="$2" r d p led=""
+  local label="$1" mins="$2" r d p
   r="$TMPROOT/$label"; mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-01-fx"
   ( cd "$r" && git init -q . 2>/dev/null )
   d="$r/.bionic/docs/record/wave-02-fx"; mkdir -p "$d"
@@ -107,9 +104,7 @@ sr_world() {
       sr_ev "ev=ready|row=T$i|name=w-T$i|commit=$SR_C1|branch=wt/02-T$i|tree=$r/.worktrees/02-T$i|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T${rd}Z"
       sr_ev "ev=verdict|row=T$i|commit=$SR_C1|suite=a.test.sh|result=green|log=/rec/T$i.log|at=$(sr_iso $((e - 60)))"
       sr_ev "ev=published|row=T$i|commit=$SR_C1|kind=queue|by=-|why=-|at=$at"
-      case " ${SR_DISPATCH_ROWS-1 2 3 4} " in
-        *" $i "*) led="$led$(sr_disp "T$i" $(( e - ${SR_DISPATCH_LEAD:-${!i}} * 60 )))"$'\n' ;;
-      esac
+      printf 'landed: row=T%d branch=wt/02-T%d head=%s merge=%s at=%s\n' "$i" "$i" "$SR_C1" "$SR_C1" "$at" >> "$SR_REC"
       i=$((i + 1))
     done
   fi
@@ -118,10 +113,10 @@ sr_world() {
     printf '\n## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    sr_row T1 "Row one the thing (D1; AC-1.1). More words · complexity: standard" — 5 "$st1"
-    sr_row T2 "Haiku 5.5 at high (REQ-8; AC-8.1) · complexity: standard" — 5 "$st1"
-    sr_row T3 "Third row. A second sentence · complexity: standard" — 10 "$st1"
-    sr_row T4 "Fourth · complexity: complex" — 10 "$st1"
+    sr_row T1 "Row one the thing (D1; AC-1.1). More words · complexity: standard" — 30 "$st1"
+    sr_row T2 "Haiku 5.5 at high (REQ-8; AC-8.1) · complexity: standard" — 30 "$st1"
+    sr_row T3 "Third row. A second sentence · complexity: standard" — 30 "$st1"
+    sr_row T4 "Fourth · complexity: complex" — 30 "$st1"
     for i in 5 6 7; do sr_row "T$i" "Row $i body · complexity: standard" — 30 active; done
     sr_row T8 "The long one (D8) · complexity: complex" — 90 active
     sr_row T9 "Waits on the long one · complexity: standard" lib/t8.sh 60 pending
@@ -129,7 +124,6 @@ sr_world() {
     sr_row T12 "Release-gated row · complexity: standard" approval:release 30 pending
     sr_row T17 "Merge-gated row · complexity: standard" approval:merge 30 pending
     i=18; while [ "$i" -le $((17 + ${SR_EXTRA:-0})) ]; do sr_row "T$i" "Row $i body · complexity: standard" — 30 pending; i=$((i + 1)); done
-    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n%s' "$led"
     printf '\n## Not Doing\n\n- nothing\n'
   } >> "$p"
   # The fill ledger: two turns, nothing idle, the first at 10:00Z (elapsed 720 min at NOW).
@@ -144,9 +138,6 @@ sr_world() {
 sr_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 sr_hms() { local h="${1%%:*}" r="${1#*:}"; printf '%d' $(( 10#$h * 3600 + 10#${r%%:*} * 60 + 10#${r#*:} - 36000 )); }
 sr_ev() { printf 'line/v1|%s\n' "$1" >> "$SR_REC"; }
-sr_disp() {  # <id> <epoch> -> its dispatch ledger row, dispatched at that minute
-  printf '| %s | implementor (w-%s) | %s | 30 min | — | — | — |' "$1" "$1" "$(date -u -r "$2" +%Y-%m-%dT%H:%MZ 2>/dev/null || date -u -d "@$2" +%Y-%m-%dT%H:%MZ)"
-}
 sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
@@ -163,7 +154,7 @@ sr_owed_sid() {  # <owed/v1 fields after the schema> <session> -> one line in th
   printf 'owed/v1|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"
 }
 # sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
-# declaring `scale: <scale>` when given) whose T1 is dispatched at 10:00Z the day before and lands <minutes>
+# declaring `scale: <scale>` when given) approved at 10:00Z the day before, whose T1 lands <minutes>
 # later: the previous wave's measured ratio is <minutes> / 60. Its queue time is 1 minute, so a pace read
 # from the queue would be 1/60.
 sr_prev() {
@@ -171,17 +162,16 @@ sr_prev() {
   local land=$((SR_E0 - 86400 + $1 * 60))
   mkdir -p "$d"
   {
-    printf -- '---\nwave: wave-40-prev\nrelease: 9.8.0\n%s---\n# prev\n\n## SDLC State\n\ncurrent: 9\n\n' "${2:+scale: $2$'\n'}"
+    printf -- '---\nwave: wave-40-prev\nrelease: 9.8.0\n%s---\n# prev\n\n## SDLC State\n\napproved-by: fixture 2026-10-05T10:00:00Z "approved"\ncurrent: 9\n\n' "${2:+scale: $2$'\n'}"
     printf -- '- Step 9: delivered: 2026-10-05T20:00Z wave-40-prev 9.8.0 — closed by close-out.sh\n'
     printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | Prev row · complexity: standard | — | — | — | 60 | REQ-1 | lib/p1.sh | — | — | landed | — | — | — |\n'
-    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n%s\n' \
-      "$(sr_disp T1 $((SR_E0 - 86400)))"
   } > "$p"
   {
     printf 'line/v1|ev=ready|row=T1|name=p-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=%s\n' "$SR_C1" "$SR_REPO" "$(sr_iso $((land - 60)))"
     printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$SR_C1" "$(sr_iso "$land")"
+    printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=%s\n' "$SR_C1" "$SR_C1" "$(sr_iso "$land")"
   } > "$d/landing-proofs.log"
 }
 sr_run() {  # <args after the verb…> -> OUT (stdout), ERR (stderr), RC; the world's plan is named last by the caller
@@ -231,20 +221,11 @@ sr_tasks_f() { sr_lines task | while IFS= read -r l; do sr_f "$l" "$1"; done; } 
 # sr_keys -> the sheet's keys in order, a run of one key printed once
 sr_keys() { printf '%s\n' "$OUT" | tail -n +2 | awk -F': ' '$1 != p { print $1; p = $1 }' | sr_join; }
 SR_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
-SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|metric.completed|metric.pace|metric.correctness|metric.waste|metric.runs|metric.goals|goal|close.predicted|close.forecast|close.basis|ask|review"
-
-# ============================================================
-section "§FIELDS: the suite's field reader, proved on known lines before it reads a sheet"
-# ============================================================
-expect_eq "F0 a task line's five fields, the description and the note holding spaces" \
-  "T7|4|failed|Row 7 body|red at head" \
-  "$(for f in id step state desc note; do sr_f 'task: id=T7 step=4 state=failed desc=Row 7 body note=red at head' "$f"; done | sr_join)"
-expect_eq "F0b an ask line's four fields" "approve:release|T12 and T17|approval: release|1:00 PM" \
-  "$(for f in key holds title raised; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM' "$f"; done | sr_join)"
+SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|metric.completed|metric.pace|metric.correctness|metric.waste|metric.goals|goal|close.predicted|close.forecast|close.basis|ask|review"
 
 # ---------- the world that holds every fact kind ----------
 #
-# sr_sheet_world -> the §ROWS world moved so it holds one of each fact: T7 red at head (failed), T11 held, T13 a
+# sr_sheet_world -> the world moved so it holds one of each fact: T7 red at head (failed), T11 held, T13 a
 # review row in flight, T16 dropped, one discarded suite run, a 72-minute idle turn, a review of the whole failing
 # with one open S2 finding and a review of a piece passing, three goals (one met, one not met, one not measured),
 # five asks of five kinds open on the register beside one closed, and a decision put and not ruled.
@@ -292,7 +273,13 @@ handoff · a fresh session continues a no-run handoff (record/reader-test-handof
 # ============================================================
 section "§SHEET: the sheet over a run holding every fact kind — each fact appears as its key, in the sheet's order"
 # ============================================================
-# fails-when: a fact of the fixture is missing from the sheet.
+# fails-when: a fact of the fixture is missing from the sheet. The field reader every later section reads through is
+# proved on known lines first (F0), so a reader that returns nothing cannot pass for an absence.
+expect_eq "F0 a task line's five fields, the description and the note holding spaces" \
+  "T7|4|failed|Row 7 body|red at head" \
+  "$(for f in id step state desc note; do sr_f 'task: id=T7 step=4 state=failed desc=Row 7 body note=red at head' "$f"; done | sr_join)"
+expect_eq "F0b an ask line's four fields" "approve:release|T12 and T17|approval: release|1:00 PM" \
+  "$(for f in key holds title raised; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM' "$f"; done | sr_join)"
 sr_sheet_world sheet
 sr_run "$SR_PLAN"
 SR_SHEET="$OUT"
@@ -315,15 +302,15 @@ expect_eq "SH7 each task's step, state and few words: done with its landing time
 expect_eq "SH8 each task's short description: the cell up to its first ' (', ': ', '. ' or ' · '" \
   "Row one the thing|Haiku 5.5 at high|Third row|The long one" \
   "$(for t in T1 T2 T3 T8; do sr_f "$(sr_task "$t")" desc; done | sr_join)"
-expect_eq "SH9 the metrics, in numbers: completed, pace, correctness, waste, suite runs, goals" \
-  "4 of 16 tasks (25%)|4 tasks in 36 min; the plan allowed 30 min for them|1 tests red; 1 reviews passed, 1 failed, 1 running; 1 open findings|1 tasks discarded; 72 minutes idle|6 suite runs; 1 discarded|1 of 3 met; 1 not measured yet" \
-  "$(for k in metric.completed metric.pace metric.correctness metric.waste metric.runs metric.goals; do sr_val "$k"; done | sr_join)"
+expect_eq "SH9 the five metrics, in numbers: completed, pace (the approval to the last landing), correctness, the one waste line, goals; no metric.runs" \
+  "4 of 16 tasks (25%)|4 tasks in 2 h 12 min; the plan allowed 2 h for them|1 tests red; 1 reviews passed, 1 failed, 1 running; 1 open findings|1 tasks dropped; 1 of 6 suite runs discarded; 72 minutes idle|1 of 3 met; 1 not measured yet|0" \
+  "$(for k in metric.completed metric.pace metric.correctness metric.waste metric.goals; do sr_val "$k"; done | sr_join)|$(sr_lines metric.runs | /usr/bin/grep -c .)"
 expect_eq "SH10 each goal's name and status, in the plan's order" "fast landings=met|tests=not met|handoff=not measured" \
   "$(sr_lines goal | while IFS= read -r l; do printf '%s=%s\n' "$(sr_f "$l" name)" "$(sr_f "$l" status)"; done | sr_join)"
 expect_eq "SH10b …each with what measures it and what it read" "yes|yes" \
   "$(sr_f "$(sr_lines goal | /usr/bin/grep 'name=tests ')" measure | /usr/bin/grep -q '^whole run under 45 min at the approved head — the whole run took 50 min' && echo yes)|$(sr_f "$(sr_lines goal | /usr/bin/grep 'name=fast landings ')" measure | /usr/bin/grep -q 'median is 9 min' && echo yes)"
 expect_eq "SH11 the close: predicted, the forecast end, and the arithmetic in words" "yes|3:00 AM 2026-10-08|yes" \
-  "$(sr_val close.predicted | /usr/bin/grep -qE '^[0-9]{1,2}:[0-9]{2} [AP]M( 2026-10-0[67])?( – [0-9]{1,2}:[0-9]{2} [AP]M( 2026-10-0[67])?)?$' && echo yes)|$(sr_val close.forecast)|$(sr_val close.basis | /usr/bin/grep -q "this run's 1.2×" && echo yes)"
+  "$(sr_val close.predicted | /usr/bin/grep -qE '^[0-9]{1,2}:[0-9]{2} [AP]M( 2026-10-0[67])?( – [0-9]{1,2}:[0-9]{2} [AP]M( 2026-10-0[67])?)?$' && echo yes)|$(sr_val close.forecast)|$(sr_val close.basis | /usr/bin/grep -q "this run's 1.1×, 2 h 12 min from the plan's approval to the last of 4 landings over the 2 h the plan allowed for them" && echo yes)"
 expect_eq "SH12 every ask open on the register is one ask line, the decision put on the ledger among them; the closed one is not" \
   "approve:release|waive:adversarial|row:AC-1.2|ruling:r1|gate:abc|decide:D21|0" \
   "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$(sr_lines ask | /usr/bin/grep -c 'key=approve:merge ')"
@@ -521,8 +508,8 @@ section "§METRICS: correctness, waste and suite runs are numbers read from the 
 sr_world metrics "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "ME0 the clean world: no test red, no review, no finding; nothing discarded, no minute idle" \
-  "0 tests red; 0 reviews passed, 0 failed, 0 running; 0 open findings|0 tasks discarded; 0 minutes idle|4 suite runs; 0 discarded" \
-  "$(sr_val metric.correctness)|$(sr_val metric.waste)|$(sr_val metric.runs)"
+  "0 tests red; 0 reviews passed, 0 failed, 0 running; 0 open findings|0 tasks dropped; 0 of 4 suite runs discarded; 0 minutes idle" \
+  "$(sr_val metric.correctness)|$(sr_val metric.waste)"
 # A planted red run, not answered: one test red, and the task it is on is failed.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
@@ -547,31 +534,31 @@ expect_eq "ME3 one failing review with one open S2 finding, then the same record
 sr_world metrics-runs "6 6 12 12"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-SR_ME4="$(sr_val metric.runs)"
+SR_ME4="$(sr_val metric.waste)"
 printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T9\ntree=%s/.worktrees/02-T9\nasked=%d\nholder=-\nadmitted=%d\nended=%d\nrc=137\npromise=5:0.1:30\n' \
   "$SID" "$(cd "$SR_REPO" && pwd -P)" "$((SR_NOW - 600))" "$((SR_NOW - 590))" "$((SR_NOW - 300))" > "$SR_GATE/requests/3"
 sr_run "$SR_PLAN"
-expect_eq "ME4 a discarded run, then a run killed at the gate: each counts as discarded" "5 suite runs; 1 discarded|6 suite runs; 2 discarded" \
-  "$SR_ME4|$(sr_val metric.runs)"
+expect_eq "ME4 a discarded run, then a run killed at the gate: each counts as discarded, of every suite run" "0 tasks dropped; 1 of 5 suite runs discarded; 0 minutes idle|0 tasks dropped; 2 of 6 suite runs discarded; 0 minutes idle" \
+  "$SR_ME4|$(sr_val metric.waste)"
 # A task dropped, and an idle turn from 16:00Z to 17:12Z: 72 minutes.
 awk -F'|' 'BEGIN { OFS = "|" } ($2 == " T15 " || $2 == " T16 ") && NF > 12 { $14 = " dropped " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
 printf 'fill-ledger/v1|at=2026-10-06T17:12:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
 sr_run "$SR_PLAN"
 expect_eq "ME5 two tasks dropped and a 72-minute idle turn: the waste in numbers; the dropped tasks leave the count" \
-  "2 tasks discarded; 72 minutes idle|4 of 15 tasks (27%)" "$(sr_val metric.waste)|$(sr_val metric.completed)"
+  "2 tasks dropped; 2 of 6 suite runs discarded; 72 minutes idle|4 of 15 tasks (27%)" "$(sr_val metric.waste)|$(sr_val metric.completed)"
 
 # ============================================================
 section "§FORECAST: the predicted close is the open work, the larger of the longest chain and the work over the count the gate admits, from now: the floor at the plan's own minutes and the likely close at the measured pace; no typed number moves it, and admitting more never shortens one chain"
 # ============================================================
 # The work left is 480 min over 2 admitted, 240 min, above the 150-min chain: the floor is 3:00 PM + 4 h, the
-# likely close the same 240 min at this run's 1.2× (its four rows land 1.2× their planned minutes after dispatch).
+# likely close the same 240 min at this run's 1.1× (its four rows of 30 min land 132 min after the approval).
 sr_world forecast "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "FC1 the predicted close runs from the floor to the likely close; the forecast end is the approval plus the 48 h forecast" \
-  "7:00 PM – 7:48 PM|3:00 AM 2026-10-08" "$(sr_val close.predicted)|$(sr_val close.forecast)"
+  "7:00 PM – 7:24 PM|3:00 AM 2026-10-08" "$(sr_val close.predicted)|$(sr_val close.forecast)"
 expect_eq "FC1b the basis is the arithmetic in words: the work and the width, the chain, the floor, whose pace and the likely close, the forecast" \
-  "480 min of work left, 240 min over the 2 suite runs the gate admits; the longest chain left, T8 → T9, is 150 min; the larger, 240 min, at 1× ends 7:00 PM; at this run's 1.2×, the median over 4 landings of dispatch-to-landing over planned minutes, the likely close is 7:48 PM; the forecast end is the Step-3 approval plus the 48 h forecast; it assumes what you owe is answered now" \
+  "480 min of work left, 240 min over the 2 suite runs the gate admits; the longest chain left, T8 → T9, is 150 min; the larger, 240 min, at 1× ends 7:00 PM; at this run's 1.1×, 2 h 12 min from the plan's approval to the last of 4 landings over the 2 h the plan allowed for them, the likely close is 7:24 PM; the forecast end is the Step-3 approval plus the 48 h forecast; it assumes what you owe is answered now" \
   "$(sr_val close.basis)"
 SR_FC1="$(sr_val close.predicted)"
 awk '{ sub(/^forecast: 48h$/, "forecast: 24h") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
@@ -584,7 +571,7 @@ SR_AT=$((SR_NOW - 6 * 3600)) sr_run "$SR_PLAN"; SR_FC8="$(sr_val close.predicted
 SR_AT=$((SR_NOW + 12 * 3600)) sr_run "$SR_PLAN"; SR_FC9="$(sr_val close.predicted)"
 SR_AT=$((SR_NOW + 8 * 3600 + 1800)) sr_run "$SR_PLAN"
 expect_eq "FC8 at 9:00 AM and at 3:00 AM the next morning, now's own day: no date; at 11:30 PM both are past midnight, dated" \
-  "1:00 PM – 1:48 PM|7:00 AM – 7:48 AM|3:30 AM 2026-10-07 – 4:18 AM 2026-10-07" "$SR_FC8|$SR_FC9|$(sr_val close.predicted)"
+  "1:00 PM – 1:24 PM|7:00 AM – 7:24 AM|3:30 AM 2026-10-07 – 3:54 AM 2026-10-07" "$SR_FC8|$SR_FC9|$(sr_val close.predicted)"
 # One chain: every open task reads what the one before it writes, so no width can shorten it.
 sr_world one-chain "6 6 12 12"
 awk -F'|' 'BEGIN { OFS = "|" }
@@ -599,56 +586,62 @@ sr_run "$SR_PLAN"
 expect_eq "FC11 precondition: the chain is every open task, and the gate's count reached the basis, 2 then 4" \
   "yes|over the 2 suite runs|over the 4 suite runs" \
   "$(sr_val close.basis | /usr/bin/grep -q 'T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12 → T13 → T14 → T15 → T16 → T17, is 480 min' && echo yes)|$SR_OC2W|$(sr_val close.basis | /usr/bin/grep -oE 'over the [0-9]+ suite runs')"
-expect_eq "FC12 admitted 2 then 4 on one chain: the predicted close does not move, 480 min at 1× and at 1.2× either way" \
-  "11:00 PM – 12:36 AM 2026-10-07|$SR_OC2" "$(sr_val close.predicted)|$SR_OC2"
+expect_eq "FC12 admitted 2 then 4 on one chain: the predicted close does not move, 480 min at 1× and at 1.1× either way" \
+  "11:00 PM – 11:48 PM|$SR_OC2" "$(sr_val close.predicted)|$SR_OC2"
 
 # ============================================================
-section "§PACE: the pace is the median, over this run's queue landings with a dispatched instant and a declared size, of landed less dispatched over the planned minutes; the queue's ready-to-landed time feeds nothing; a pace that is not positive is unmeasured"
+section "§PACE: the pace is the run's landed tasks over the time from the plan's approval to the last landing against the minutes the plan allowed for them; read from the landing record's headers, never from a dispatch ledger"
 # ============================================================
-# Three rows sized 60 min, dispatched 90 min before each landing and ready 5 min before it: the pace is 1.5×,
-# never the queue's 5/60. T4 lands too, with no ledger row, and joins nothing.
-SR_DISPATCH_LEAD=90 SR_DISPATCH_ROWS="1 2 3" sr_world pace "5 5 5 5"
-awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-3] $/ { $9 = " 60 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+# Four rows of 30 min land 5 min after their ready instants, the last at 12:05Z: 125 min from the 10:00Z approval
+# against 120 min planned is 1.04×. The plan has no dispatch ledger, as the live plan has none.
+sr_world pace "5 5 5 5"
 sr_run "$SR_PLAN"
-expect_eq "PA1 this run's pace, 1.5×, over the three landings with a dispatched instant: the basis names it, the metric counts them" \
-  "yes|3 tasks in 4 h 30 min; the plan allowed 3 h for them" \
-  "$(sr_val close.basis | /usr/bin/grep -q "at this run's 1.5×, the median over 3 landings " && echo yes)|$(sr_val metric.pace)"
-# Landings 0 min after ready and no dispatched instant: nothing measures a pace, so the floor alone is predicted.
-SR_DISPATCH_ROWS="" sr_world pace-zero "0 0 0 0"
+expect_eq "PA1 four landings count: the metric, and the basis naming the same pace" \
+  "4 tasks in 2 h 5 min; the plan allowed 2 h for them|yes" \
+  "$(sr_val metric.pace)|$(sr_val close.basis | /usr/bin/grep -q "at this run's 1.04×, 2 h 5 min from the plan's approval to the last of 4 landings over the 2 h the plan allowed for them, the likely close" && echo yes)"
+# A row landed twice counts once and moves the last landing to its later header; a header naming no row of the plan
+# (— or an id the table lacks) counts nothing.
+printf 'landed: row=T1 branch=wt/02-T1 head=%s merge=%s at=2026-10-06T12:30:00Z\nlanded: row=— branch=wt/02-x head=%s merge=%s at=2026-10-06T13:00:00Z\nlanded: row=T99 branch=wt/02-y head=%s merge=%s at=2026-10-06T13:00:00Z\n' \
+  "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" >> "$SR_REC"
 sr_run "$SR_PLAN"
-expect_eq "PA2 no dispatched instant: the floor alone, no pace yet, nothing measured" \
-  "7:00 PM|yes|0 tasks in 0 min; the plan allowed 0 min for them" \
+expect_eq "PA1b a re-landed row counts once and ends the span; a header naming no row of the plan counts nothing" \
+  "4 tasks in 2 h 30 min; the plan allowed 2 h for them" "$(sr_val metric.pace)"
+# No landing: nothing measures a pace, so the floor alone is predicted.
+sr_world pace-zero none
+sr_run "$SR_PLAN"
+expect_eq "PA2 no landing: the floor alone, no pace yet, nothing measured" \
+  "8:00 PM|yes|0 tasks in 0 min; the plan allowed 0 min for them" \
   "$(sr_val close.predicted)|$(sr_val close.basis | /usr/bin/grep -q '; no pace yet: ' && echo yes)|$(sr_val metric.pace)"
-# Dispatched at the very minute each lands: every ratio is 0, a pace that is not positive, unmeasured.
-SR_DISPATCH_LEAD=0 sr_world pace-nil "0 0 0 0"
+# Landings and no approval: there is no start to the span, so nothing is measured.
+SR_APPROVED=none sr_world pace-unapproved "5 5 5 5"
 sr_run "$SR_PLAN"
-expect_eq "PA3 a zero pace is unmeasured: the floor alone, while the metric still counts the four tasks it read" \
-  "7:00 PM|4 tasks in 0 min; the plan allowed 30 min for them" "$(sr_val close.predicted)|$(sr_val metric.pace)"
+expect_eq "PA3 landings under an unapproved plan: no span to measure, none counted" \
+  "0 tasks in 0 min; the plan allowed 0 min for them" "$(sr_val metric.pace)"
 
 # ============================================================
 section "§FLOOR: before this run measures a pace, the newest delivered run on the same project at the same scale lends its pace, named; with none the floor stands alone; a likely close at or before now never prints"
 # ============================================================
-# No landing: the work left is 510 min over 2 admitted, 255 min, so the floor is 7:15 PM; at the delivered run's 72/60 the
-# likely close is 306 min on, 8:06 PM.
+# No landing: the work left is 600 min over 2 admitted, 300 min, so the floor is 8:00 PM; at the delivered run's 72/60 the
+# likely close is 360 min on, 9:00 PM.
 SR_SCALE=wave sr_world floor none
 sr_prev 72 wave
 sr_run "$SR_PLAN"
-expect_eq "FL1 a delivered run at the same scale lends its pace, named" "7:15 PM – 8:06 PM|yes" \
+expect_eq "FL1 a delivered run at the same scale lends its pace, named" "8:00 PM – 9:00 PM|yes" \
   "$(sr_val close.predicted)|$(sr_val close.basis | /usr/bin/grep -q "at wave-40's 1.2×, borrowed" && echo yes)"
 sr_run --line "$SR_PLAN"
-expect_eq "FL1b …and the Patrol's status carries the likely close" "close 8:06 PM" "${OUT##* · }"
+expect_eq "FL1b …and the Patrol's status carries the likely close" "close 9:00 PM" "${OUT##* · }"
 SR_SCALE=wave sr_world floor-epic none
 sr_prev 72 epic
 sr_run "$SR_PLAN"
-expect_eq "FL1c a delivered run at another scale lends nothing: the floor, no pace yet" "7:15 PM|yes" \
+expect_eq "FL1c a delivered run at another scale lends nothing: the floor, no pace yet" "8:00 PM|yes" \
   "$(sr_val close.predicted)|$(sr_val close.basis | /usr/bin/grep -q '; no pace yet: ' && echo yes)"
 sr_run --line "$SR_PLAN"
-expect_eq "FL1d …and the Patrol's status carries the floor" "close 7:15 PM" "${OUT##* · }"
-# This run's pace 0.001× (three rows sized 1000 min, each landed 1 min after dispatch) over a 10-minute chain, one
-# task open: the likely close is now's own minute, so the floor stands with the pace named.
-SR_DISPATCH_LEAD=1 SR_DISPATCH_ROWS="1 2 3" sr_world floor-fast "5 5 5 5"
+expect_eq "FL1d …and the Patrol's status carries the floor" "close 8:00 PM" "${OUT##* · }"
+# This run's pace 0.001× (four rows sized 30000 min, the last landing 125 min after the approval) over a 10-minute
+# chain, one task open: the likely close is now's own minute, so the floor stands with the pace named.
+sr_world floor-fast "5 5 5 5"
 awk -F'|' 'BEGIN { OFS = "|" }
-  $2 ~ /^ T[1-3] $/ { $9 = " 1000 " }
+  $2 ~ /^ T[1-4] $/ { $9 = " 30000 " }
   $2 ~ /^ T([5-9]|1[0-7]) $/ { $14 = ($2 == " T9 ") ? " pending " : " dropped "; if ($2 == " T9 ") $9 = " 10 " }
   { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
@@ -666,8 +659,8 @@ SR_NINE=$((SR_NOW - 21600))
 SR_SCALE=wave SR_FORECAST= sr_world guess-plan none
 sr_prev 60 wave
 SR_AT=$SR_NINE sr_run "$SR_PLAN"
-expect_eq "CC1 no forecast: the plan's own 510 minutes from the 3:00 AM approval end it at 11:30 AM, said" "11:30 AM|yes|1:15 PM" \
-  "$(sr_val close.forecast)|$(sr_val close.basis | /usr/bin/grep -q 'the forecast end is the Step-3 approval plus the plan.s 510 min' && echo yes)|$(sr_val close.predicted)"
+expect_eq "CC1 no forecast: the plan's own 600 minutes from the 3:00 AM approval end it at 1:00 PM, said" "1:00 PM|yes|2:00 PM" \
+  "$(sr_val close.forecast)|$(sr_val close.basis | /usr/bin/grep -q 'the forecast end is the Step-3 approval plus the plan.s 600 min' && echo yes)|$(sr_val close.predicted)"
 SR_APPROVED=none sr_world guess-unapproved none
 sr_run "$SR_PLAN"
 SR_CC2="$(sr_val close.predicted)|$(sr_val close.forecast)|$(sr_val close.basis | /usr/bin/grep -c '^no forecast until the plan is approved at Step 3')"
@@ -688,14 +681,14 @@ expect_eq "CC4 a delivered run with a task still open after the delivery: its cl
   "$(sr_f "$(sr_task T21)" state)|$(sr_val close.predicted)|$(sr_val close.forecast)|$(sr_val close.basis | /usr/bin/grep -c '^delivered at 8:07 AM 2026-10-18')"
 sr_run --line "$SR_PLAN"
 expect_eq "CC5 …and the Patrol's status closes at the delivery" "close 8:07 AM 2026-10-18" "${OUT##* · }"
-# A pace of 0.36× on this run (four rows sized 100 min, dispatched 36 min before they land) puts the likely close at
-# 4:26 PM, before the 7:00 PM floor: the one instant, the floor omitted.
-SR_DISPATCH_LEAD=36 sr_world guess-fast "5 5 5 5"
+# A pace of 0.31× on this run (four rows sized 100 min, the last landing 125 min after the approval) puts the likely
+# close at 4:15 PM, before the 7:00 PM floor: the one instant, the floor omitted.
+sr_world guess-fast "5 5 5 5"
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 100 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 SR_CC6="$(sr_val close.predicted)"
 sr_run --line "$SR_PLAN"
-expect_eq "CC6 a pace of 0.36×: the one instant, on the sheet and in the Patrol's status" "4:26 PM|close 4:26 PM" "$SR_CC6|${OUT##* · }"
+expect_eq "CC6 a pace of 0.31×: the one instant, on the sheet and in the Patrol's status" "4:15 PM|close 4:15 PM" "$SR_CC6|${OUT##* · }"
 
 # ============================================================
 section "§LINE: --line is the Patrol's status, <k> of <m> tasks · owed: <n> · close <time>"
@@ -703,18 +696,18 @@ section "§LINE: --line is the Patrol's status, <k> of <m> tasks · owed: <n> ·
 sr_world line "6 6 12 12"
 sr_bind
 sr_run --line "$SR_PLAN"
-expect_eq "L1 the clean world: one line, exit 0" "0|4 of 17 tasks · owed: 0 · close 7:48 PM" "$RC|$OUT"
+expect_eq "L1 the clean world: one line, exit 0" "0|4 of 17 tasks · owed: 0 · close 7:24 PM" "$RC|$OUT"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 sr_owed "key=gate:abc|state=open|sent=-|at=2026-10-06T20:00:00Z|title=gate act: merge|reply=poker: GATE T28 — merge: approve it"
 sr_run --line "$SR_PLAN"
 SR_L2="$OUT"
 sr_run "$SR_PLAN"
-expect_eq "L2 two asks open: owed counts them, the same asks the sheet lists" "4 of 17 tasks · owed: 2 · close 7:48 PM|2" \
+expect_eq "L2 two asks open: owed counts them, the same asks the sheet lists" "4 of 17 tasks · owed: 2 · close 7:24 PM|2" \
   "$SR_L2|$(sr_lines ask | /usr/bin/grep -c .)"
 SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
-expect_eq "L3 no landing and no pace: the close is the floor" "0 of 17 tasks · owed: 0 · close 7:15 PM" "$OUT"
+expect_eq "L3 no landing and no pace: the close is the floor" "0 of 17 tasks · owed: 0 · close 8:00 PM" "$OUT"
 
 # ============================================================
 section "§ARGS: the verb's operands"
@@ -796,9 +789,11 @@ awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=regression head
 sr_run "$SR_PLAN"
 expect_eq "G1 four goals: the one-file median of 9 min met, the 50-minute whole run not met, the record and the measure nobody reads not measured" \
   "fast landings=met|tests=not met|handoff=not measured|taste=not measured|1 of 4 met; 2 not measured yet" "$(sr_goal_st)|$(sr_val metric.goals)"
-expect_eq "G2 …each with what it read: 50 min for the whole run; a measure nothing reads is not measured, never a missing reader" \
-  "yes|the user likes the card — not measured|0" \
+expect_eq "G2 …each with what it read: 50 min for the whole run; a measure nothing reads prints once, the status saying it is not measured, never a missing reader or a repeat" \
+  "yes|the user likes the card|0" \
   "$(sr_goal_m tests | /usr/bin/grep -q 'the whole run took 50 min' && echo yes)|$(sr_goal_m taste)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'no reader')"
+expect_eq "G2b the status says a goal is not measured once: two goals say it, and no goal line's measure ends in it" "2|0|yes" \
+  "$(sr_lines goal | /usr/bin/grep -c ' status=not measured ')|$(sr_lines goal | /usr/bin/grep -c ' — not measured$')|$(sr_goal_m taste | /usr/bin/grep -q . && echo yes)"
 printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
 sr_run "$SR_PLAN"
 expect_eq "G3 a record that passes flips its goal to met" "handoff=met|2 of 4 met; 1 not measured yet" \

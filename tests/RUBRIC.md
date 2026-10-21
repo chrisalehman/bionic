@@ -302,7 +302,8 @@ sitrep.test.sh | §FACTS | duplicate | hooks/poker/sitrep.sh: a page heading ren
 
 Split three duplicate, one keep. FA2 to FA5 run the suite's own `sr_check` on doctored copies,
 which reads only suite code, so each is vacuous. FA1 runs over the verb's page, and §SKILL's O5
-catches the same mutation. Rule: vacuous's "reads only suite code".
+catches the same mutation. Rule: vacuous's "reads only suite code". Both sections went with the page
+when the fact sheet replaced it; the rule stands.
 
 ### The defect must be code that is there
 
@@ -388,10 +389,11 @@ All keep by rule lint. Three readers flagged the expected `line.sh:2` as a possi
 ### The page carries the fact
 
 ```
-sitrep.test.sh | §WAIT-WORDS | keep | hooks/poker/sitrep.sh sitrep_render: a proof:review dependency printed as the judge's facts string and record path instead of its words (WW1) | none (searched 'review facts' in tests/)
+sitrep.test.sh | §WAIT-WORDS | keep | hooks/poker/sitrep.sh sitrep_gather's `words()`: a proof:review dependency printed as its facts string and record path instead of `the <question> facts at the head` (WW1) | none (searched 'review facts' in tests/)
 ```
 
-All keep, flagged by three readers, with §ROWS and §NEXT-STOPS as the same case. The page is the
-sitrep's only output, and the asserted words change with the task's state. units.test.sh §6's
+All keep, flagged by three readers, with §ROWS and §NEXT-STOPS as the same case (both went with the
+page; §NAMES is the sheet's). The sheet is the sitrep's only output, and the asserted words change with
+the task's state. units.test.sh §6's
 violation lines ("T3: step 2 is outside 3-9") are the same case, since no exit code or field says
 which rule broke. Rule: "when the page is the only carrier, the page is the fact".
