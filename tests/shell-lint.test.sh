@@ -19,7 +19,15 @@
 # comments, heredocs and case states, and names each hazard by file and line. It is the one
 # home of what bash 3.2 rejects, so it also holds what tests/cross-gate-agreement.test.sh §BP
 # held before it: the `/bin/bash -n` sweep (§PARSE) and the one-line `$(case` grep (§CASE),
-# each with its mutant. §BP keeps its quitting-`grep -q` sweep.
+# each with its mutant.
+#
+# §BP is a fourth shape that neither `-n` nor a run at test size can see: a writer piped into a
+# reader that quits early (`grep -q`, `grep -l`, `grep -m`, `head`, an awk that exits) in a file
+# that runs under pipefail, with the pipeline's status read. Past the 64 KB pipe buffer the writer
+# takes SIGPIPE, the pipeline reports 141, and a present line reads as absent. The sweep reads the
+# hooks, payload/scripts and the declared check's two files; tests/lib/quitting-readers.allow lists
+# each bounded site with its reason. §BP-PIN proves the fixed form of observe.sh's process scan
+# returns 0 on a listing larger than the buffer, and the quitting form returns 141.
 #
 # §CENSUS-COMPLETE-1 to -3 hold the tests tree to tests/CENSUS.md: every suite has a heading, every
 # `section` call a record line under its key, every verdict is one of the five words, and a `rule:`
@@ -875,6 +883,393 @@ for c in $HD_B_CASES; do
     expect_absent "${c%%:*}: …and the lint, in the same call, does not name it" "/${c%%:*}.sh:" "$HD_B_HITS"
   fi
 done
+
+# ============================================================
+section "BP — no writer is piped into a reader that quits early where the status is read"
+# ============================================================
+#
+# fails-when: a hook or payload script pipes a writer into `grep -q`, `grep -l`, `grep -m`, `head` or an
+# awk that exits, under pipefail with the status read, and neither fixes it nor lists it with a reason; or
+# the process scan in observe.sh is the quitting form again.
+#
+# WHY IT EXISTS. `w | grep -q x` parses and answers right while w's output fits the 64 KB pipe buffer.
+# Past it, grep exits at the first match while w is still writing, w takes SIGPIPE, and under pipefail the
+# pipeline reports w's 141: `if w | grep -q x` reads a present line as absent, and a wall built on it
+# inverts. The sites are found by reading the shell, because no run at test size can see them.
+#
+# THE ROSTER: hooks/, payload/scripts/ and the two files of the declared release check's closure
+# (tests/lib/release-check.sh and tests/lib/name-scan.sh). Other suites build fixtures and are not walls.
+#
+# WHAT IS A SITE. A pipe whose far side is a quitting reader: grep with -q, -l or -m (also --quiet,
+# --silent, --files-with-matches, --max-count), head, or an awk program with an `exit` outside its END.
+# The file must run under pipefail: it sets it, or it is a library (a path with /lib/ or under
+# hooks/poker/), which runs inside whichever process sourced it. The status must be read:
+#   grep -q or -l      always, since a pipeline that only reports a status is read for it
+#   the others         an `&&` or `||` after them, `; then` or `; do`, a `$?` on the line or the next
+#                      line, or a `then` on the next line; inside `$( )` only when the substitution is
+#                      the value of an assignment and one of those follows it
+# WHAT IS EXCUSED, each with a control below: a whole-line or trailing comment; a heredoc body; a pipe that
+# is `||` or `|&` or sits inside quotes; an awk whose only `exit` is in END (it has read every line); a
+# limiter whose status nobody reads (`v=$(w | head -n 1)` keeps the whole value); `|| true` or `|| :`;
+# a file that is an entry point and sets no pipefail. NOT READ: sed with a q command, `read` fed by a
+# pipe, and errexit (no file of the roster sets it).
+#
+# THE ALLOW FILE, tests/lib/quitting-readers.allow: `<path>:<pattern> # <reason>`. The pattern is a
+# fixed substring of the logical line; the reason says why the writer cannot outrun the buffer. A line
+# without a reason, without a colon, or naming a path outside the roster is refused.
+QUIT_AWK="$TMP/quit.awk"
+cat > "$QUIT_AWK" <<'QUIT_AWK_EOF'
+# QUITTING READERS. A writer piped into a reader that quits early (grep -q, -l or -m, head, an awk that
+# exits) is sent SIGPIPE once its output outruns the 64 KB pipe buffer; under pipefail the pipeline then
+# reports the writer's 141, and a test of its status reads a present line as absent.
+#
+# Run once per file with -v ALLOW=<allow file> -v ROSTER=<file listing every path swept>, the file's path
+# relative to the root as its one argument. -v REPORT=1 on a run over /dev/null prints the allow file's
+# own faults. Prints
+#   Q<TAB><path>:<line><TAB><the logical line>      a site neither allowed nor excused
+#   A<TAB><allow line number><TAB><what is wrong>   an allow line that is refused
+function blank(s,   n, i, c, q, o) {  # quoted text becomes underscores, so a quoted ; | && is not read
+  n = length(s); q = ""; o = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "") {
+      if (c == "\\") { o = o c substr(s, i + 1, 1); i++; continue }
+      if (c == "'" || c == "\"") { q = c; o = o c; continue }
+      o = o c
+    } else if (c == q) { q = ""; o = o c }
+    else if (q == "\"" && c == "\\") { o = o "__"; i++ }
+    else o = o "_"
+  }
+  return o
+}
+function strip_comment(s,   b, n, i, c, prev) {
+  b = blank(s); n = length(b); prev = " "
+  for (i = 1; i <= n; i++) {
+    c = substr(b, i, 1)
+    if (c == "#" && (prev == " " || prev == "\t" || prev == ";" || prev == "") && i > 1) return substr(s, 1, i - 1)
+    prev = c
+  }
+  return s
+}
+function open_sq(s,   n, i, c, q) {  # does s end inside a single-quoted string
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "'") { if (c == "'") q = ""; continue }
+    if (q == "\"") { if (c == "\\") i++; else if (c == "\"") q = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (c == "'" || c == "\"") q = c
+  }
+  return q == "'"
+}
+# s starts right after a pipe: 0 not a quitting reader, 1 a predicate (grep -q, -l), 2 a limiter
+function reader(s,   rest, n, i, t, prog) {
+  sub(/^[ \t]+/, "", s)
+  while (match(s, /^(env|LC_ALL=[A-Za-z0-9_.]+|LANG=[A-Za-z0-9_.]+)[ \t]+/)) s = substr(s, RLENGTH + 1)
+  sub(/^(\/usr\/bin\/|\/bin\/)/, "", s)
+  if (match(s, /^(grep|egrep|fgrep)[ \t]/)) {
+    n = split(substr(s, RLENGTH + 1), T, /[ \t]+/)
+    for (i = 1; i <= n; i++) {
+      t = T[i]
+      if (t == "") continue
+      if (t == "--") break
+      if (t == "--quiet" || t == "--silent" || t == "--files-with-matches") return 1
+      if (t ~ /^--max-count/) return 2
+      if (t ~ /^--/) continue
+      if (t ~ /^-[A-Za-z0-9]/) {
+        if (t ~ /^-[A-Za-z]*[ql]/) return 1
+        if (t ~ /^-[A-Za-z]*m/) return 2
+        if (t == "-e" || t == "-f") i++
+        continue
+      }
+      break
+    }
+    return 0
+  }
+  if (s ~ /^head([ \t]|$)/) return 2
+  if (match(s, /^(awk|gawk|mawk)[ \t]/)) {
+    prog = s
+    gsub(/END[ \t]*\{[^}]*\}/, "", prog)
+    return (prog ~ /(^|[^A-Za-z0-9_])exit([^A-Za-z0-9_]|$)/) ? 2 : 0
+  }
+  return 0
+}
+# Is the status of the pipeline whose reader starts at `rest` (the text from the reader on) consumed?
+# before is the text ahead of the pipe. Inside a command substitution the status is the assignment's,
+# so it counts only when the substitution is the value of an assignment and && or || follows it.
+function consumed(before, rest, nxt,   b, n, i, c, d, tail, cut, inside, pre) {
+  b = blank(rest); n = length(b); d = 0; inside = 0; cut = n + 1
+  for (i = 1; i <= n; i++) {
+    c = substr(b, i, 1)
+    if (c == "(") d++
+    else if (c == ")") { if (d == 0) { inside = 1; cut = i; break } d-- }
+  }
+  if (inside) {
+    pre = before
+    if (!(pre ~ /[A-Za-z_][A-Za-z0-9_]*\+?=\"?[$][(][^$]*$/ || pre ~ /[A-Za-z_][A-Za-z0-9_]*\+?=\"?`[^`]*$/)) return 0
+    tail = substr(b, cut + 1)
+  } else tail = b
+  sub(/;[ \t]*(then|do)([ \t;]|$).*/, " THEN ", tail)
+  sub(/;.*/, "", tail)
+  if (tail ~ /THEN/) return 1
+  if (tail ~ /&&/) return 1
+  if (tail ~ /[|][|]/ && tail !~ /[|][|][ \t]*(true|:)([ \t)]|$)/) return 1
+  if (tail ~ /[$][?]/) return 1
+  if (tail ~ /^[ \t]*$/ && nxt ~ /^[ \t]*(then|do)([ \t;]|$)/) return 1
+  if (nxt ~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=[$][?]/ || nxt ~ /^[ \t]*(if|\[\[?)[^#]*[$][?]/) return 1
+  return 0
+}
+BEGIN {
+  nallow = 0
+  while ((getline al < ALLOW) > 0) {
+    alno++
+    if (al ~ /^[ \t]*(#|$)/) continue
+    reason = ""; entry = al
+    k = index(al, " # ")
+    if (k > 0) { entry = substr(al, 1, k - 1); reason = substr(al, k + 3) }
+    gsub(/^[ \t]+|[ \t]+$/, "", reason)
+    c = index(entry, ":")
+    if (c == 0) { if (REPORT) printf "A\t%d\tno <path>:<pattern>\n", alno; continue }
+    if (reason == "") { if (REPORT) printf "A\t%d\tno reason after a space, a hash and a space\n", alno; continue }
+    nallow++; ALNO[nallow] = alno; APATH[nallow] = substr(entry, 1, c - 1); APAT[nallow] = substr(entry, c + 1)
+    gsub(/[ \t]+$/, "", APAT[nallow])
+  }
+  while ((getline r < ROSTER) > 0) IN[r] = 1
+  for (a = 1; a <= nallow; a++)
+    if (!(APATH[a] in IN)) { if (REPORT) printf "A\t%d\tthe path %s is not in the roster\n", ALNO[a], APATH[a]; APATH[a] = "" }
+}
+{ P[++nl] = $0 }
+END {
+  pf = (FILENAME ~ /\/lib\// || FILENAME ~ /^hooks\/poker\//) ? 1 : 0
+  for (ln = 1; ln <= nl; ln++)
+    if (P[ln] ~ /^[ \t]*set[ \t]/ && P[ln] ~ /pipefail/) pf = 1
+  if (!pf) exit
+  hd = ""
+  for (ln = 1; ln <= nl; ln++) {
+    s = P[ln]
+    if (hd != "") { t = s; sub(/^\t+/, "", t); if (t == hd) hd = ""; continue }
+    if (s ~ /^[ \t]*#/) continue
+    start = ln; end = ln
+    while (end < nl && end - start < 40 && (s ~ /\\$/ || strip_comment(s) ~ /[|][ \t]*$/ || (s ~ /(awk|gawk|mawk)[ \t]/ && open_sq(s)))) {
+      if (s ~ /\\$/) s = substr(s, 1, length(s) - 1)
+      end++; s = s " " P[end]
+    }
+    if (open_sq(s) && end - start >= 40) end = start   # a quote that never closes: read the one line
+    if (end == start) s = P[start]
+    ln = end
+    if (match(s, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/) && substr(s, RSTART - 1, 1) != "<" && substr(s, RSTART + 2, 1) != "<") {
+      d = substr(s, RSTART, RLENGTH); sub(/^<<-?[ \t]*['"]?/, "", d); hd = d
+    }
+    s = strip_comment(s)
+    if (s !~ /[|]/) continue
+    nxt = ""
+    for (k = ln + 1; k <= nl; k++) if (P[k] !~ /^[ \t]*$/) { nxt = P[k]; break }
+    b = blank(s); n = length(b); site = 0
+    for (i = 1; i <= n; i++) {
+      if (substr(b, i, 1) != "|") continue
+      if (substr(b, i + 1, 1) == "|") { i++; continue }
+      if (substr(b, i + 1, 1) == "&") continue
+      if (i > 1 && substr(b, i - 1, 1) == "|") continue
+      cls = reader(substr(s, i + 1))
+      if (cls == 1 && substr(s, i + 1) !~ /[|][|][ \t]*(true|:)([ \t)]|$)/) site = 1
+      else if (cls == 2 && consumed(substr(s, 1, i - 1), substr(s, i + 1), nxt)) site = 1
+      if (site) break
+    }
+    if (!site) continue
+    ok = 0
+    for (a = 1; a <= nallow; a++) if (APATH[a] != "" && APATH[a] == FILENAME && index(s, APAT[a]) > 0) { ok = 1; break }
+    if (ok) continue
+    printf "Q\t%s:%d\t%s\n", FILENAME, start, s
+  }
+}
+QUIT_AWK_EOF
+QUIT_ALLOW="$TESTS_DIR/lib/quitting-readers.allow"
+
+# quit_sweep <root> <allow file> <relative path>... -> the Q and A rows the awk prints
+quit_sweep() {
+  local root="$1" allow="$2" roster f
+  shift 2
+  roster="$(mktemp "$TMP/quit-roster.XXXXXX")"
+  printf '%s\n' "$@" > "$roster"
+  ( cd "$root" || exit 1
+    LC_ALL=C awk -v REPORT=1 -v ALLOW="$allow" -v ROSTER="$roster" -f "$QUIT_AWK" /dev/null
+    for f in "$@"; do
+      LC_ALL=C awk -v ALLOW="$allow" -v ROSTER="$roster" -f "$QUIT_AWK" "$f"
+    done )
+}
+# quit_sites <sweep output> -> the sorted path:line of each site
+quit_sites() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '$1 == "Q" { print $2 }' | LC_ALL=C sort; }
+
+BP_ROSTER="$(cd "$REPO" && { find hooks payload/scripts -name '*.sh' -type f; \
+  printf '%s\n' tests/lib/release-check.sh tests/lib/name-scan.sh; } 2>/dev/null | LC_ALL=C sort)"
+expect_eq "the sweep found shell files to read" "yes" "$([ -n "$BP_ROSTER" ] && echo yes || echo no)"
+expect_eq "…and its roster reaches hooks, payload/scripts and both files of the check closure" "yes" \
+  "$(LC_ALL=C grep -q '^hooks/poker/' <<< "$BP_ROSTER" \
+     && LC_ALL=C grep -q '^payload/scripts/lib/' <<< "$BP_ROSTER" \
+     && LC_ALL=C grep -qx 'tests/lib/release-check.sh' <<< "$BP_ROSTER" \
+     && LC_ALL=C grep -qx 'tests/lib/name-scan.sh' <<< "$BP_ROSTER" && echo yes || echo no)"
+expect_eq "the allow file exists" "yes" "$([ -f "$QUIT_ALLOW" ] && echo yes || echo no)"
+
+# BP-1: the real tree. Every site is fixed or listed with a reason.
+# shellcheck disable=SC2086
+BP_REAL="$(quit_sweep "$REPO" "$QUIT_ALLOW" $BP_ROSTER)"
+expect_eq "BP-1 no hook or payload script pipes a writer into a quitting reader unlisted" "" "$BP_REAL"
+# shellcheck disable=SC2086
+BP_NONE="$(quit_sweep "$REPO" /dev/null $BP_ROSTER)"
+expect_contains "…and with no allow file the same sweep names the carrier site in the tick, so the file is what silences it" \
+  "hooks/poker/tick.sh:" "$(quit_sites "$BP_NONE")"
+
+# BP-2: planted sites, read by the same instrument in the same call as their controls.
+BP2="$TMP/bp2"
+mkdir -p "$BP2/hooks/poker" "$BP2/payload/scripts/lib"
+plant "$BP2/hooks/plant.sh" <<'EOF'
+#!/bin/bash
+set -uo pipefail
+gen() { seq 1 5; }
+if git show HEAD:x | grep -q y; then :; fi  # MARK-S1
+gen | grep -m1 needle && echo y  # MARK-S2
+gen | grep -l needle && echo y  # MARK-S3
+v=$(gen | head -n 1) || v=none  # MARK-S4
+gen | awk '/needle/ { exit }' && echo y  # MARK-S5
+if ! gen | head -1 | grep -c y >/dev/null; then :; fi  # MARK-S6
+# MARK-S7 the next two lines are one pipeline
+if gen \
+  | grep -qF needle; then :; fi
+if gen | awk '
+    /needle/ { print; exit }
+  ' | grep -c . >/dev/null; then :; fi  # MARK-S8
+v=$(gen | head -n 1)  # MARK-C1 the value is whole and nobody reads the status
+# if gen | grep -q needle; then :; fi  # MARK-C2 a comment
+gen | awk '{ n++ } END { exit n > 3 }' && echo y  # MARK-C3 an exit in END has read every line
+grep -qF needle <<< "$v" && echo y  # MARK-C4 a here-string has no writer
+gen | grep -q needle || true  # MARK-C5 the status is thrown away
+if gen | grep needle >/dev/null; then :; fi  # MARK-C6 reads to the end
+if gen | grep -c needle; then :; fi  # MARK-C7 reads to the end
+x="gen | grep -q y" && echo "$x"  # MARK-C8 the pipe is quoted
+gen | head -n 3  # MARK-C9 a limiter whose status nobody reads
+cat <<'DOC'
+if gen | grep -q needle; then :; fi  # MARK-C10 heredoc text
+DOC
+if printf '%s\n' "$bounded" | grep -qx needle; then :; fi  # MARK-A1 allowed with a reason
+EOF
+plant "$BP2/hooks/plain.sh" <<'EOF'
+#!/bin/bash
+gen() { seq 1 5; }
+if gen | grep -q needle; then :; fi  # MARK-P1 an entry point that sets no pipefail
+EOF
+plant "$BP2/payload/scripts/lib/plant-lib.sh" <<'EOF'
+gen() { seq 1 5; }
+if gen | grep -q needle; then :; fi  # MARK-L1 a library runs inside its caller
+EOF
+plant "$BP2/hooks/poker/plant-tick.sh" <<'EOF'
+landing_carrier_names "$plan" | /usr/bin/grep -qxF -- "$name" && return 0  # MARK-T1 the carrier exemption as a quitting grep
+EOF
+printf '%s\n' '# a comment' '' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded" # the writer is one short variable' > "$BP2/allow"
+BP2_ROSTER="hooks/plant.sh
+hooks/plain.sh
+payload/scripts/lib/plant-lib.sh
+hooks/poker/plant-tick.sh"
+# shellcheck disable=SC2086
+BP2_OUT="$(quit_sweep "$BP2" "$BP2/allow" $BP2_ROSTER)"
+BP2_SITES="$(quit_sites "$BP2_OUT")"
+bp2_at() { printf '%s:%s\n' "$1" "$(mark_line "$BP2/$1" "$2")"; }
+# bp_fline <file> <fixed text> -> the number of the first line that holds the text
+bp_fline() { LC_ALL=C grep -nF -- "$2" "$1" | head -1 | cut -d: -f1; }
+expect_contains "BP-2 a pipe from git show into grep -q is named by file and line" "$(bp2_at hooks/plant.sh MARK-S1)" "$BP2_SITES"
+expect_contains "…grep -m1 with an && after it" "$(bp2_at hooks/plant.sh MARK-S2)" "$BP2_SITES"
+expect_contains "…grep -l with an && after it" "$(bp2_at hooks/plant.sh MARK-S3)" "$BP2_SITES"
+expect_contains "…head -n inside an assignment with a || after it" "$(bp2_at hooks/plant.sh MARK-S4)" "$BP2_SITES"
+expect_contains "…an awk that exits, with an && after it" "$(bp2_at hooks/plant.sh MARK-S5)" "$BP2_SITES"
+expect_contains "…head -1 in an if condition" "$(bp2_at hooks/plant.sh MARK-S6)" "$BP2_SITES"
+expect_contains "…a pipeline split across lines, named at its first line" \
+  "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S7) + 1 ))" "$BP2_SITES"
+expect_contains "…an awk program open across lines" "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S8) - 2 ))" "$BP2_SITES"
+expect_contains "…a library with no pipefail of its own" "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$BP2_SITES"
+expect_contains "…the carrier exemption as a quitting grep, in a file the allow file does not name" \
+  "$(bp2_at hooks/poker/plant-tick.sh MARK-T1)" "$BP2_SITES"
+expect_eq "…and the sites named are those and no others, so every control in the same call passes" \
+  "$(printf '%s\n' "$(bp2_at hooks/plant.sh MARK-S1)" "$(bp2_at hooks/plant.sh MARK-S2)" "$(bp2_at hooks/plant.sh MARK-S3)" \
+       "$(bp2_at hooks/plant.sh MARK-S4)" "$(bp2_at hooks/plant.sh MARK-S5)" "$(bp2_at hooks/plant.sh MARK-S6)" \
+       "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S7) + 1 ))" \
+       "hooks/plant.sh:$(( $(mark_line "$BP2/hooks/plant.sh" MARK-S8) - 2 ))" \
+       "$(bp2_at payload/scripts/lib/plant-lib.sh MARK-L1)" "$(bp2_at hooks/poker/plant-tick.sh MARK-T1)" | LC_ALL=C sort)" \
+  "$BP2_SITES"
+expect_eq "…the listed line is silenced by its allow entry" "no" \
+  "$(quit_sites "$BP2_OUT" | LC_ALL=C grep -qx "$(bp2_at hooks/plant.sh MARK-A1)" && echo yes || echo no)"
+expect_eq "…and was a site before it was listed" "yes" \
+  "$(quit_sites "$(quit_sweep "$BP2" /dev/null $BP2_ROSTER)" | grep -qx "$(bp2_at hooks/plant.sh MARK-A1)" && echo yes || echo no)"
+
+# BP-3: observe.sh with the quitting form restored, in a scratch copy of the real file.
+BP3="$TMP/bp3"
+mkdir -p "$BP3/payload/scripts/lib"
+LC_ALL=C awk '
+  /procs="\$\(ps -eo command/ { print "  ps -eo command 2>/dev/null | grep -qF -- \"$pat\""; skip = 1; next }
+  skip && /<<< "\$procs"/ { skip = 0; next }
+  { print }' "$LIB_DIR/observe.sh" > "$BP3/payload/scripts/lib/observe.sh"
+expect_eq "BP-3 the scratch copy has the quitting scan and parses" "1 0" \
+  "$(/usr/bin/grep -cF 'ps -eo command 2>/dev/null | grep -qF' "$BP3/payload/scripts/lib/observe.sh") $(/bin/bash -n "$BP3/payload/scripts/lib/observe.sh" >/dev/null 2>&1; echo $?)"
+BP3_OUT="$(quit_sweep "$BP3" "$QUIT_ALLOW" payload/scripts/lib/observe.sh)"
+expect_contains "…and the sweep names it, unlisted, by file and line" \
+  "payload/scripts/lib/observe.sh:$(bp_fline "$BP3/payload/scripts/lib/observe.sh" 'ps -eo command 2>/dev/null | grep -qF')" \
+  "$(quit_sites "$BP3_OUT")"
+expect_eq "…while the shipped observe.sh, read in the same call, is not named" "" \
+  "$(quit_sites "$(quit_sweep "$REPO" "$QUIT_ALLOW" payload/scripts/lib/observe.sh)")"
+
+# BP-4: an allow line must carry its reason.
+BP4="$TMP/bp4.allow"
+{ printf '%s\n' '# a comment' ''
+  printf '%s\n' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded"'
+  printf '%s\n' 'hooks/plant.sh:printf '"'"'%s\n'"'"' "$bounded" # '
+  printf '%s\n' 'no colon here # a reason'
+  printf '%s\n' 'hooks/nowhere.sh:x # a reason'; } > "$BP4"
+# shellcheck disable=SC2086
+BP4_OUT="$(quit_sweep "$BP2" "$BP4" $BP2_ROSTER)"
+expect_eq "BP-4 an allow line with no reason, an empty one, one with no colon and one with a path outside the roster are each refused by line" \
+  "3 4 5 6" "$(printf '%s\n' "$BP4_OUT" | LC_ALL=C awk -F'\t' '$1 == "A" { print $2 }' | LC_ALL=C sort -n | tr '\n' ' ' | sed 's/ $//')"
+expect_contains "…and a refused entry silences nothing: the line it named is still a site" \
+  "$(bp2_at hooks/plant.sh MARK-A1)" "$(quit_sites "$BP4_OUT")"
+expect_eq "…while the comment, the blank line and the entry with its reason, read in the same call, are not refused" "" \
+  "$(quit_sweep "$BP2" "$BP2/allow" $BP2_ROSTER | LC_ALL=C awk -F'\t' '$1 == "A"')"
+expect_eq "the real allow file has no refused line" "" \
+  "$(printf '%s\n' "$BP_REAL" | LC_ALL=C awk -F'\t' '$1 == "A"')"
+
+# ============================================================
+section "BP-PIN — a writer of more than 64 KB into the fixed form returns 0 under pipefail"
+# ============================================================
+#
+# fails-when: the process scan in observe_claims_live is `ps | grep -qF` again, so a process listing larger than
+# the pipe buffer with the match near its top returns 141 under pipefail and the claim reads as dead.
+#
+# The writer is `seq 1 20000` (108894 bytes). The match must come BEFORE the bulk: a reader whose match is
+# on the last line has read everything and quits no earlier than a reader that reads to the end, so only a
+# match-first listing can show the defect. The real function is driven with a stub `ps` and a PATH that
+# holds no `pgrep`, so it takes its `ps` fallback, with pipefail set the way a hook sets it.
+pin_writer() { printf 'needle\n'; seq 1 20000; }
+expect_true "the writer is larger than the 64 KB pipe buffer" [ "$(pin_writer | wc -c | tr -d ' ')" -gt 65536 ]
+expect_eq "…the quitting form on it returns 141 under pipefail: the defect is real on this machine" "141" \
+  "$(set -o pipefail; pin_writer | /usr/bin/grep -q needle; echo $?)"
+expect_eq "…the quitting form returns 0 without pipefail, so only the pipeline status is lost" "0" \
+  "$(set +o pipefail; pin_writer | /usr/bin/grep -q needle; echo $?)"
+expect_eq "…a here-string of the same writer returns 0 under pipefail" "0" \
+  "$(set -o pipefail; v="$(pin_writer)"; /usr/bin/grep -qF needle <<< "$v"; echo $?)"
+expect_eq "…and so does a match on the last line" "0" \
+  "$(set -o pipefail; v="$({ seq 1 20000; printf 'needle\n'; })"; /usr/bin/grep -qF needle <<< "$v"; echo $?)"
+
+PIN_BIN="$TMP/pin-bin"
+mkdir -p "$PIN_BIN"
+printf '%s\n' '#!/bin/bash' 'printf "needle-proc --flag\n"' 'PATH=/usr/bin:/bin' 'seq 1 20000' > "$PIN_BIN/ps"
+chmod +x "$PIN_BIN/ps"
+ln -s /usr/bin/grep "$PIN_BIN/grep"
+pin_scan() {  # <observe.sh> -> observe_claims_live's status for a process that is listed, under pipefail
+  env -i PATH="$PIN_BIN" /bin/bash -c 'set -o pipefail; . "$1"; observe_claims_live needle-proc; echo $?' _ "$1" 2>/dev/null
+}
+expect_true "the stub listing is larger than the pipe buffer" [ "$("$PIN_BIN/ps" | wc -c | tr -d ' ')" -gt 65536 ]
+expect_eq "the PATH holds no pgrep, so the ps fallback is the branch that runs" "no" \
+  "$(env -i PATH="$PIN_BIN" /bin/bash -c 'command -v pgrep >/dev/null 2>&1 && echo yes || echo no')"
+expect_eq "observe_claims_live finds a listed process in a listing larger than the pipe buffer" "0" \
+  "$(pin_scan "$LIB_DIR/observe.sh")"
+expect_eq "…and with the quitting scan restored in a scratch copy the same call returns 141" "141" \
+  "$(pin_scan "$BP3/payload/scripts/lib/observe.sh")"
 
 # ── the census ───────────────────────────────────────────────────────────────
 # tests/CENSUS.md holds one record line per section of every suite under tests/, under a heading per
