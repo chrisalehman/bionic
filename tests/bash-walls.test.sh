@@ -802,4 +802,103 @@ expect_status "13e: no usable payload cwd — falls back to the hook's own direc
 expect_contains "13f: …in the existing words" "the current branch is protected" "$ERR"
 
 # ---------------------------------------------------------------------------
+section "§VERDICT / §RULED — the matrix asks for a verdict from step 6 and for a ruling from step 8"
+# The matrix arm used to demand CONFIRMED-or-waived on the advance to 6, so a run could not leave Step 5 until the
+# person answered what the release approval card collects after Step 7. From step 6 every row needs a verdict; from
+# step 8 every row needs a ruling, and the advance to 8 is the judge's, so the judge asks the wall's own predicate
+# (walls.sh `matrix_row_ruled`) and opens one `row:<AC>` item per unruled row for the card to settle.
+# Fixture fidelity: a real repository on feature/t23, a double wave plan bound to this session, its floor and its
+# five readings in their production writer's shape (lib/proof.sh `proof_floor_line`, `proof_line`) at the head.
+# fails-when: a REFUTED row is refused at 6; an empty auditor cell passes 6; an unruled row passes 8 or opens no
+#   item; a waived row is refused at 8; a second definition of the predicate, or a parser of the user's
+#   confirmation outside walls.sh.
+R_RU="$(mk_repo ruled)"
+H_RU="$(git -C "$R_RU" rev-parse HEAD)"
+RU_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+RU_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+ru_reading() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$RU_LIB" review "$H_RU" 2026-10-12T12:00:00Z "$@"; }
+ru_plan() {  # <current> <the second row's tier | status | evidence | auditor> [<its block lines>] -> the plan text
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+  printf 'current: %s\nworking-branch: feature/t23\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
+  printf -- '- Step 4: dispatched, record/r/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t23\n' "$H_RU"
+  printf -- '- Step 5: floor green, record/r/floor.log\n  auditor: CONFIRMED, record/r/audit.md\n'
+  printf -- '- Step 6: review at record/r/review.md\n'
+  [ "$1" -ge 7 ] && printf -- '- Step 7: documented at record/r/docs.md\n  n/a: no decision this run\n'
+  bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/r/floor.log ""' _ "$RU_LIB" "$H_RU"
+  ru_reading record/r/evidence.md evidence w-read pass piece
+  ru_reading record/r/adversarial.md adversarial w-read pass piece
+  ru_reading record/r/structure.md structure w-read pass piece
+  ru_reading record/r/adversarial-whole.md adversarial w-read pass whole
+  ru_reading record/r/structure-whole.md structure w-read pass whole
+  printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n'
+  printf '| AC-2 | %s |\n\n' "$2"
+  printf 'AC-1:\n  fails-when: the planted defect\n  evidence: record/generic-evidence.md\n'
+  printf 'AC-2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
+  [ -z "${3:-}" ] || printf '%s\n' "$3"
+}
+ru_put() { ru_plan "$@" > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"; }
+RU_OUT=""; RU_RC=0
+ru_poke() {  # <verb args...> -> RU_OUT (both streams), RU_RC of session-poker.sh in the repository, as this session
+  RU_OUT="$( cd "$R_RU" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
+    CLAUDE_PROJECT_DIR= bash "$RU_POKER" "$@" 2>&1 )"; RU_RC=$?
+}
+ru_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null | cut -f1 | sort | paste -sd, -; }
+RU_CONFIRM='Dana 2026-10-20 opened the page and read the line back'
+
+# §VERDICT-1 — a REFUTED row with no waiver is a verdict: the advance to 6 takes it.
+ru_put 5 'T1 | discharged | see AC-2 | REFUTED'
+ru_poke current 6 --check
+expect_eq "VERDICT-1: a REFUTED row with no waiver — current 6 --check passes" "0" "$RU_RC"
+expect_contains "VERDICT-1b: …saying it would advance" "current 6 --check: would advance" "$RU_OUT"
+# §VERDICT-2 — an empty auditor cell on a non-T4 row is no verdict: refused, naming the row.
+ru_put 5 'T1 | discharged | see AC-2 |  '
+ru_poke current 6 --check
+expect_eq "VERDICT-2: an empty auditor cell on a T1 row — current 6 --check refuses" "1" "$RU_RC"
+expect_contains "VERDICT-2b: …naming the row" "the auditor has not confirmed AC-2" "$RU_OUT"
+# §VERDICT-3 — a T4 row the user confirmed under a standing UNVERIFIABLE has a verdict at 6 (its ruling is step 8's).
+ru_put 5 'T4 | discharged | see AC-2 | UNVERIFIABLE' "  user-confirmed: $RU_CONFIRM"
+ru_poke current 6 --check
+expect_eq "VERDICT-3: a confirmed T4 row under UNVERIFIABLE — current 6 --check passes" "0" "$RU_RC"
+
+# §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens its row item.
+rm -f "$R_RU/.bionic/tmp/owed-$SID.state"
+ru_put 7 'T1 | discharged | see AC-2 | REFUTED'
+ru_poke current 8 --check
+expect_eq "RULED-1: an unruled REFUTED row — current 8 --check refuses" "1" "$RU_RC"
+expect_contains "RULED-1b: …naming the row in the matrix arm's words" "the auditor has not confirmed AC-2" "$RU_OUT"
+expect_eq "RULED-1c: …and the check writes no item" "" "$(ru_owed)"
+ru_poke current 8
+expect_eq "RULED-1d: the advance itself refuses too, the plan unchanged" "1|7" \
+  "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
+expect_eq "RULED-1e: …and the judge opens one row:AC-2 item for the card to settle" "row:AC-2" "$(ru_owed)"
+# §RULED-3 — a confirmed T4 row under a standing UNVERIFIABLE has a verdict and no ruling: refused at 8.
+ru_put 7 'T4 | discharged | see AC-2 | UNVERIFIABLE' "  user-confirmed: $RU_CONFIRM"
+ru_poke current 8 --check
+expect_eq "RULED-3: a confirmed T4 row under UNVERIFIABLE — current 8 --check refuses" "1" "$RU_RC"
+expect_contains "RULED-3b: …naming the row" "AC-2" "$RU_OUT"
+# §RULED-4 — the same T4 row with the auditor cell a dash is ruled by the user's confirmation.
+ru_put 7 'T4 | discharged | see AC-2 | —' "  user-confirmed: $RU_CONFIRM"
+ru_poke current 8 --check
+expect_eq "RULED-4: a confirmed T4 row under a dash — current 8 --check passes" "0" "$RU_RC"
+# §RULED-2 — the REFUTED row waived: ruled, the advance to 8 takes it, and the judge closes the item it opened.
+ru_put 7 'T1 | waived | see AC-2 | REFUTED' '  waiver: Dana 2026-10-20 "waive it" — the finding is accepted'
+ru_poke current 8 --check
+expect_eq "RULED-2: the same row waived — current 8 --check passes" "0" "$RU_RC"
+ru_poke current 8
+expect_eq "RULED-2b: the advance writes current: 8" "0|8" \
+  "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
+expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
+
+# §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh parses the user's confirmation.
+RU_WALLS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
+expect_eq "RULED-ONE: matrix_row_ruled has exactly one definition in walls.sh" "1" \
+  "$(/usr/bin/grep -c '^matrix_row_ruled()' "$RU_WALLS")"
+RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts" | /usr/bin/grep -v 'walls.sh')"
+expect_contains "RULED-ONE-b: the search outside walls.sh reads the matrix-render writer" "matrix-render" "$RU_UC"
+expect_eq "RULED-ONE-c: …and nothing else names user-confirmed outside walls.sh" "" \
+  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'matrix-render')"
+
+# ---------------------------------------------------------------------------
 finish

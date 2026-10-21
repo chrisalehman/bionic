@@ -1614,6 +1614,197 @@ keys_for_tier() {
   esac
 }
 
+# ── THE MATRIX'S VERDICT AND ITS RULING, AT FILE SCOPE ──────────────────────
+#
+# Three readers ask one question of a Verification Matrix row: the matrix arm in the body
+# below, on every commit; the facts judge on the advance to Step 8 (hooks/poker/judge.sh,
+# which sources this file in a subshell); and the release approval card, which puts each
+# unruled row to the person. The readers and the two predicates live here, outside
+# `_eg_body`, so a source defines them and the three cannot answer one row two ways. A
+# second copy of `matrix_row_ruled`, or a second parser of the `user-confirmed:` form
+# outside this file, is the drift they exist to prevent.
+#
+# A VERDICT is the auditor's word on a row: CONFIRMED, REFUTED or UNVERIFIABLE, or, on a T4
+# row, the user's `user-confirmed:` line. From Step 6 every row needs one.
+# A RULING settles the row: the auditor CONFIRMED it, the person waived it, or a T4 row
+# carries its user's attributed confirmation and no standing finding. From Step 8, the merge
+# advance, every row needs one, and the card is where a REFUTED or UNVERIFIABLE row is ruled.
+# Asking for the ruling earlier held the run at Step 5 for a question the card puts anyway.
+
+# A TABLE CELL THAT MEANS "NOTHING HERE".
+#
+# The `## Tasks` table spells "none" as an em dash in its `deps` and `worktree` cells, and a
+# table author carries that spelling into every other free-text cell, including the
+# matrix's `auditor` cell, where "no verdict yet" is the ordinary state of a T4 row. Three
+# spellings fold to empty: the em dash, a bare ASCII hyphen, and `n/a` in any case.
+#
+# WHAT DOES NOT FOLD is anything with content (`REFUTED`, `UNVERIFIABLE`, `n/a: <reason>`),
+# because those are verdicts or claims, and the arm that exists for them must still meet them.
+# Every reader of an auditor cell folds through this one function.
+placeholder_cell() {  # $1 = a cell's text -> the text, or empty when it means "none"
+  case "$1" in
+    '—'|'-'|'n/a'|'N/A'|'n/A'|'N/a') printf '' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Is the independent auditor's verdict a WALL on this run? At `single` the critic holds
+# every question and no auditor is ever sent, so the matrix's auditor column is NOT READ (any
+# value, empty included, passes) and the Step-5 `auditor:` pointer is not demanded. At
+# `double` both walls stand. Reads `$RIGOR`, the plan's frontmatter value.
+#
+# FAIL-CLOSED on an unknown or missing value: a plan that does not say what rigor it runs at
+# has not bought the relaxation, and a typo must not become a bypass.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+matrix_auditor_required() {
+  case "$(rigor_level "$RIGOR")" in
+    single) return 1 ;;
+    *)      return 0 ;;  # double, and anything unrecognized
+  esac
+}
+
+# The `## Verification Matrix` section body of `$PLAN`, newline-normalized. Lines inside ```
+# fenced code blocks are dropped, so a shell pipeline written in leading-pipe continuation
+# style is never mistaken for a table row; every downstream matrix parse (rows, stack-health,
+# false-green, AC blocks) reads this body, so the fence-skip here covers all of them.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+matrix_section() {
+  normalize_newlines "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Verification Matrix/ { f=1; next }
+    /^## / { f=0 }
+    f'
+}
+
+# The indented evidence block under "<AC-id>:" within `$MATRIX` (up to the next
+# non-indented line). The heading matcher is lib/units.sh `units_ac_head_awk`, the one the
+# matrix writers read too: it tolerates a markdown list leader (a `- ` before the id reads
+# like the bare id) on a COPY of the line, so the terminator below still tests the raw line
+# and a following list item still ends the block; and it anchors at the line's start
+# without regex-escaping the id, so an id never matches the block of a longer id it
+# prefixes. Without the leader tolerance a list-shaped block extracted as EMPTY and every
+# consumer went silent at once.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+matrix_block() {
+  echo "$MATRIX" | awk -v ac="$1" "$(units_ac_head_awk)"'
+    ac_head($0, ac) {f=1; next}
+    /^[^[:space:]]/ {f=0}
+    f'
+}
+
+# The `user-confirmed:` value out of an AC block (empty when absent). The one parser of the
+# key: every reader of a T4 row's confirmation reads it through here.
+user_confirmed_value() {
+  echo "$1" | grep -E '^[[:space:]]*user-confirmed[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*user-confirmed[[:space:]]*:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//'
+}
+
+# Is a `user-confirmed:` value in the attributed form `<user> <YYYY-MM-DD> <what>`? This is
+# what lets a T4 row be ruled without a waiver, so it is the one place the shape is checked
+# rather than merely recorded, unlike `waiver:`, whose presence is the whole test because a
+# human wrote it by definition.
+#
+# What the form buys: a record naming WHO confirmed and WHEN. What it cannot buy, and is not
+# sold as buying: whether the named human actually said it. A fabricated `chris 2026-08-19 ...`
+# passes here. The check refuses the shape an agent's own claim naturally takes ("confirmed
+# after the re-render", "2026-08-18 the wall renders"), which is the failure actually
+# observed, not a defense against a determined forger.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+user_confirmed_attributed() {  # <value> -> 0 when attributed
+  grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]' <<< "$1"
+}
+
+# Is a row WAIVED on the record? A `waiver:` token in its evidence cell or a `waiver:` line in
+# its AC block. Not the status cell alone: a row that says `waived` while recording no waiver
+# has not been through the Waiver Protocol.
+matrix_row_waiver() {  # <evidence cell> <AC block> -> 0 when a waiver is recorded
+  grep -qE 'waiver:' <<< "$1" || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$2"
+}
+
+# The `task:` value out of an AC block (empty when absent). Only the exact value `9` means
+# anything to the matrix: a criterion whose evidence is a Step-9 artifact (see the arm).
+matrix_block_task() {  # <AC block> -> the value
+  echo "$1" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//'
+}
+
+# matrix_row_has_verdict <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0>
+#   -> 0 when the row is waived (status `waived` with its waiver recorded), its auditor cell
+#   is CONFIRMED, REFUTED or UNVERIFIABLE, or it is a T4 row carrying any `user-confirmed:`.
+matrix_row_has_verdict() {
+  [ "$2" = waived ] && [ "$5" = 1 ] && return 0
+  case "$(placeholder_cell "$3")" in
+    CONFIRMED|REFUTED|UNVERIFIABLE) return 0 ;;
+  esac
+  [ "$1" = T4 ] && [ -n "$4" ]
+}
+
+# matrix_row_ruled <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0>
+#   -> 0 when the row is waived (status `waived` with its waiver recorded), its auditor cell is
+#   CONFIRMED, or it is a T4 row whose `user-confirmed:` is attributed and whose auditor cell
+#   is empty-like. A user's confirmation replaces the WAIVER a T4 row used to need, never the
+#   auditor: a standing REFUTED or UNVERIFIABLE on a confirmed T4 row is a verdict, not a
+#   ruling, and the person rules on it.
+matrix_row_ruled() {
+  local aud
+  aud="$(placeholder_cell "$3")"
+  [ "$2" = waived ] && [ "$5" = 1 ] && return 0
+  [ "$aud" = CONFIRMED ] && return 0
+  [ "$1" = T4 ] && [ -z "$aud" ] && user_confirmed_attributed "$4"
+}
+
+# matrix_row_owes <step> <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0> <task 9: 1|0>
+#   -> prints `verdict` or `ruling` and returns 0 when the row owes one at <step>; returns 1,
+#   printing nothing, when it owes neither. Below Step 6 nothing is owed. A row tagged
+#   `task: 9` and still pending or blocked owes nothing before Step 9: its evidence is a
+#   close-out artifact that does not exist yet, so no auditor can have ruled on it.
+#   The caller asks `matrix_auditor_required` first: at `single` the column is not read.
+matrix_row_owes() {
+  local n="${1%[ab]}"
+  [ "$n" -gt 5 ] 2>/dev/null || return 1
+  if [ "$7" = 1 ] && [ "$n" -lt 9 ] && { [ "$3" = pending ] || [ "$3" = blocked ]; }; then
+    return 1
+  fi
+  if [ "$n" -ge 8 ]; then
+    matrix_row_ruled "$2" "$3" "$4" "$5" "$6" && return 1
+    printf 'ruling'
+  else
+    matrix_row_has_verdict "$2" "$3" "$4" "$5" "$6" && return 1
+    printf 'verdict'
+  fi
+  return 0
+}
+
+# matrix_unruled <plan> <step> -> the AC id of each matrix row that owes a ruling or a verdict
+# at <step>, one per line, table order; nothing at `single` rigor. The judge's read of the
+# matrix at the advance to 8: the same readers and the same `matrix_row_owes` the arm walks,
+# so the advance and the commit after it cannot disagree on a row. A row that is not five
+# cells is the arm's to refuse on a commit, and is skipped here. Needs lib/run.sh and
+# lib/units.sh loaded, as every caller of this file has them.
+matrix_unruled() {
+  local PLAN="$1" MATRIX RIGOR ac tier status ev aud block waiver task9
+  RIGOR="$(plan_frontmatter_get "$1" rigor)"
+  matrix_auditor_required || return 0
+  MATRIX="$(matrix_section)"
+  while IFS=$'\037' read -r ac tier status ev aud; do
+    [ -n "$ac" ] || continue
+    block="$(matrix_block "$ac")"
+    waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
+    task9=0; [ "$(matrix_block_task "$block")" = 9 ] && task9=1
+    matrix_row_owes "$2" "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" "$task9" >/dev/null \
+      && printf '%s\n' "$ac"
+  done <<MATRIX_ROWS
+$(awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
+    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
+    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
+    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
+  }' <<< "$MATRIX")
+MATRIX_ROWS
+  return 0
+}
+
 # THE LOADED SET, NAMED ONCE (wave-31 T30; REQ-14 AC-14.1, D13). The doctrine a session or a
 # dispatch loads: the rendered outputs and the hand-kept operational rules, never the sources they
 # are rendered from. One member per line, a repository-root path in which `*` stands for one path
@@ -1658,8 +1849,8 @@ loaded_set_sizes() {
 # ── the hook's body, carried whole ───────────────────────────────────────────
 #
 # EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
-# LINE TO ITS LAST `exit 0`, with TWO deletions: the `audit_path` copy and `keys_for_tier` (wave-30 T14),
-# both at file scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
+# LINE TO ITS LAST `exit 0`, less what moved to file scope above it: the `audit_path` copy,
+# `keys_for_tier`, and the matrix's readers and predicates, so a source defines them. Its `exit` statements are load-bearing and deliberate — see the subshell
 # note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
 # and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
 _eg_body() {
@@ -2196,26 +2387,6 @@ is_placeholder_value() {
 # path's own directory), so there is no fallback arm left to get wrong — the old
 # copy's second argument existed only because its git call could fail silently.
 # [INSTRUMENT]
-# A TABLE CELL THAT MEANS "NOTHING HERE" (wave-16 REQ-12, AC-12.2; carry-over 20).
-#
-# The ten-column `## Tasks` contract spells "none" as an em dash in its `deps` and
-# `worktree` cells, and a table author carries that spelling into every other free-text
-# cell — including the Verification Matrix's `auditor` cell, where "no verdict yet" is the
-# ordinary state of a T4 row. The T4 exemption asks for an auditor cell that is EMPTY or
-# `CONFIRMED` (see the arm below), so `—` took a row nobody had ruled on to the refusal
-# written for a STANDING FINDING, and told its author to settle a verdict that did not
-# exist. Three spellings fold: the em dash, a bare ASCII hyphen, and `n/a` in any case.
-#
-# WHAT DOES NOT FOLD is anything with content — `REFUTED`, `UNVERIFIABLE`, `n/a: <reason>`
-# — because those are verdicts, and the arm that exists for them must still meet them.
-# Both readers of an auditor cell fold the same way, which is the agreement D15 names.
-placeholder_cell() {  # $1 = a cell's text -> the text, or empty when it means "none"
-  case "$1" in
-    '—'|'-'|'n/a'|'N/A'|'n/A'|'N/a') printf '' ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
-
 audit_root() {
   local r
   r=$(project_root "$(dirname "$PLAN")")
@@ -2247,31 +2418,6 @@ audit_root() {
 BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
-
-# Is the independent auditor's verdict a WALL on this run? (B-10 / R-11.)
-# SKILL.md's rigor table: at `single` the critic holds every question and no
-# auditor is ever sent, so demanding an auditor CONFIRMED on every matrix row
-# (and an `auditor:` pointer in the Step-5 block) refused a `single` run for
-# the absence of a verdict its own rigor says nobody was commissioned to write.
-# B-10's repro: a bugfix · single · task run refused at current: 9 on "matrix
-# row 'AC-1' auditor verdict is 'empty'".
-#
-# At `single` the matrix's auditor column is NOT READ — any value, empty
-# included, passes — and the Step-5 pointer is not demanded. At `double`
-# (which adds the auditor) both walls stand unchanged.
-#
-# FAIL-CLOSED on an unknown or missing value: a plan that does not say what
-# rigor it runs at has not bought the relaxation, and a typo must not become a
-# bypass (same rationale as walk_mode's off-enum arm).
-#
-# Scope: the MATRIX wall and the Step-5 pointer only.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-matrix_auditor_required() {
-  case "$(rigor_level "$RIGOR")" in
-    single) return 1 ;;
-    *)      return 0 ;;  # double, and anything unrecognized
-  esac
-}
 
 # THE READINGS A RUN OWES, JUDGED ON THE SECTION IN HAND (wave-27 T14; REQ-2 AC-2.2, D3, D19).
 # From `current: 6` a commit is admitted only when, for each question `facts_owed` (lib/proof.sh)
@@ -2522,54 +2668,11 @@ Fix: populate the section with 'current: N' and per-step evidence lines."
   refuse exit2 commit "'## SDLC State' is empty" "add current: and the step lines" "$_eg_detail"
 fi
 
-# The `## Verification Matrix` section body (newline-normalized, like SECTION at
-# the top of the hook — a separate awk pass over the whole plan). Lines inside
-# ``` fenced code blocks are dropped so a jq/shell pipeline written in
-# leading-pipe continuation style is never mistaken for a table row; every
-# downstream matrix parse (rows, stack-health, false-green, AC blocks) reads
-# this body, so scoping the fence-skip here covers all of them. Fence state
-# is tracked across the whole file so section detection stays fence-aware.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-matrix_section() {
-  normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Verification Matrix/ { f=1; next }
-    /^## / { f=0 }
-    f'
-}
-
-# The indented evidence block under "<AC-id>:" within MATRIX (up to the next
-# non-indented line). index()==1 anchors at line start without regex-escaping
-# the AC id, so AC-1 never matches the AC-11 block.
-#
-# A markdown list leader before the header is tolerated: `- AC-1:` reads exactly
-# like `AC-1:`. Without this, a list-shaped block extracted as EMPTY and every
-# consumer below went silent at once — the provenance arm saw no citation, the
-# per-tier key loop saw no keys and blocked a conformant plan, and both
-# `waiver:` exemptions (per-tier and post-Verify CONFIRMED) lost their token.
-# One extractor, four behaviors, so the leader was a whole-contract bypass.
-# The strip runs on a COPY inside lib/units.sh `units_ac_head_awk` (wave-36 T24: the one matcher the
-# hook's matrix_block_key and matrix_block_has read too), which keeps two invariants: the terminator
-# below still tests the RAW line, so a following list item still ends the
-# previous block; and the index test still runs against a line that begins with
-# the AC id, so AC-1 still does not match `- AC-11:`. Accepted: the three
-# CommonMark bullet markers plus at least one space, flush left — `-AC-1:` is
-# not a list item, and an INDENTED header is refused on purpose because the
-# terminator could never end a block it introduced.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-matrix_block() {
-  echo "$MATRIX" | awk -v ac="$1" "$(units_ac_head_awk)"'
-    ac_head($0, ac) {f=1; next}
-    /^[^[:space:]]/ {f=0}
-    f'
-}
-
 # ================================================== THE TWO STEP-4 ARMS (epic-22 K2)
 #
-# Defined here, directly before `CURRENT` is parsed; `matrix_section`/`matrix_block` need only
-# `$PLAN`, which is set long before this point. The CALL runs right before the pointer-step
-# exit below.
+# Defined here, directly before `CURRENT` is parsed; the matrix readers they call are at file
+# scope and need only `$PLAN`, which is set long before this point. The CALL runs right before
+# the pointer-step exit below.
 #
 # THE STEP NUMBER IS READ AS A NUMBER, ONCE. `CURRENT` reaches the call as `4`, `8b` or `10`:
 # the gate has already refused a `current:` that is not a step number, at every scale (one
@@ -3748,9 +3851,10 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 #
 # Mid-discharge commits: at current: 5, rows with status
 # pending/blocked skip the per-tier key check, and the Step-5 `auditor:`
-# pointer is required only when no such row remains. The full contract —
-# per-tier keys, plus (at double rigor) CONFIRMED on every
-# non-waived row — bites on the 5→6 advance via the 6..9 prefix check. At
+# pointer is required only when no such row remains. The per-tier keys bite
+# on the advance to 6 via the 6..9 prefix check; at double rigor the auditor
+# column asks a verdict of every row from 6 and a ruling from 8
+# (`matrix_row_owes`, at file scope). At
 # `single` rigor the auditor column is not a wall at all: see
 # matrix_auditor_required. The status cell is enum-checked
 # (pending|blocked|discharged|waived) since the relaxation makes it
@@ -3769,8 +3873,7 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
 # It names `evidence` for every tier and `user-confirmed` for T4 and nothing else (wave-31 T6).
 
-# THE THREE STEP-4 ARMS (epic-22 K2, K4): `matrix_section`, `matrix_block`,
-# `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
+# THE THREE STEP-4 ARMS: `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
 # `validate_prototype_no_matrix_row` are defined just before `CURRENT` is parsed, above.
 # This is their call, right before the pointer-step exit below. The net-zero arm
 # (`validate_net_zero`, wave-31 T30) is defined beside them and called after them, at every step.
@@ -3798,31 +3901,6 @@ for _ps in $POINTER_STEPS; do
   exit 0
 done
 
-# The `user-confirmed:` value out of an AC block (empty when absent).
-user_confirmed_value() {
-  echo "$1" | grep -E '^[[:space:]]*user-confirmed[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*user-confirmed[[:space:]]*:[[:space:]]*//' \
-    | sed -E 's/[[:space:]]+$//'
-}
-
-# Is an AC block's `user-confirmed:` in the attributed form
-# `<user> <YYYY-MM-DD> <what>`? This is what lets a T4 row discharge without a
-# waiver below, so it is the one place the shape is checked rather than merely
-# recorded — unlike `waiver:` and `rigor-override:`, whose presence is the whole
-# test because a human wrote them by definition.
-#
-# What the form buys: a record naming WHO confirmed and WHEN. What it cannot
-# buy, and is not sold as buying: whether the named human actually said it. A
-# fabricated `chris 2026-08-19 ...` passes here. The check refuses the shape an
-# agent's own claim naturally takes — "confirmed after the re-render",
-# "2026-08-18 the wall renders" — which is the failure mode that was actually
-# observed, not a defense against a determined forger.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-user_confirmed_form_ok() {
-  echo "$(user_confirmed_value "$1")" \
-    | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
-}
-
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
 # every other validator uses). The edit-then-commit note is no longer appended here:
 # the gate's `refuse` shim (wall_evidence_gate) stages it as detail line 1 of every commit
@@ -3847,7 +3925,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs hk hv hf
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs hk hv hf ucv owed
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -3941,10 +4019,8 @@ validate_matrix() {
     # the per-tier key loop has always demanded its evidence anyway.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     row_is_waived=0
-    if grep -qE 'waiver:' <<< "$ev" \
-       || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$block_txt"; then
-      row_is_waived=1
-    fi
+    matrix_row_waiver "$ev" "$block_txt" && row_is_waived=1
+    ucv=$(user_confirmed_value "$block_txt")
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
     # implementation` in an AC block is circular — it names the change as the
     # source of its own requirement, which is unfalsifiable by construction.
@@ -3987,8 +4063,7 @@ validate_matrix() {
     # Only the exact value `9` means anything; `task: 4` is an ordinary
     # annotation this hook does not read.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    task_val=$(echo "$block_txt" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    task_val=$(matrix_block_task "$block_txt")
     task9=0
     if [ "$task_val" = "9" ]; then
       # A WAIVED row is exempt from the tier refusal (review-a C-2). The tag on
@@ -4118,80 +4193,54 @@ validate_matrix() {
         fi
       done
     fi
-    # Once past the Verify gate, every non-waived row must be CONFIRMED —
-    # at double rigor. At `single` no auditor was ever
-    # commissioned (SKILL.md's rigor table), so this whole arm stands down;
-    # matrix_auditor_required is the predicate and carries the reasoning.
+    # PAST THE VERIFY GATE: FROM STEP 6 A VERDICT, FROM STEP 8 A RULING, at double rigor.
+    # `matrix_row_owes` (file scope, above) says which a row owes at this step, and the facts
+    # judge asks the same function on the advance to 8, so the advance and any commit after it
+    # agree. From Step 6 a REFUTED or UNVERIFIABLE row is a verdict and passes: it is the
+    # release approval card's to put, after the release, with every other decision. From
+    # Step 8 the row must be ruled, CONFIRMED, waived, or a T4 row carrying its user's
+    # attributed confirmation under an empty-like auditor cell. At `single` no auditor was
+    # ever commissioned, so the whole arm stands down (matrix_auditor_required).
     #
-    # T4 is the exception, and it is not a relaxation. T4's evidence IS the
-    # user's own confirmation — an independent auditor sent at it can only
-    # re-read what the user said, which is transcription, not independence. So
-    # a legitimately user-confirmed row used to have exactly one way past this
-    # arm: the Waiver Protocol, which recorded a waiver where nothing had been
-    # waived (epic-17 W4 paid its AC-7 in that form, and the row reads forever
-    # as if the criterion had been let go). A T4 row carrying a well-formed
-    # `user-confirmed: <user> <date> <what>` now discharges on that value —
-    # the same value keys_for_tier already demanded of it — and an
-    # agent-shaped claim with no attributed human still meets the wall.
-    #
-    # WHAT THE EXEMPTION REPLACES IS THE WAIVER FORM, NOT THE AUDITOR (critic
-    # C-1, W5). Those are two authorities and only the first substitution was
-    # ratified. So the exemption is scoped to an auditor cell that is EMPTY —
-    # nobody has ruled, which is the ordinary state of a T4 row — or CONFIRMED,
-    # where the two authorities agree. A STANDING REFUTED or UNVERIFIABLE is a
-    # positive finding on the record (this wave's own first audit pass produced
-    # three), and a user's confirmation does not overturn one: the row meets
-    # the wall, and the refusal names the FINDING rather than the attribution,
-    # because the attribution is correct and sending the user to rewrite it
-    # would point them at the one thing that is not broken.
+    # A T4 row's confirmation replaces the WAIVER FORM it used to need, not the AUDITOR. A
+    # standing REFUTED or UNVERIFIABLE is a positive finding on the record and a user's
+    # confirmation does not overturn it, so the refusal names the FINDING rather than the
+    # attribution: the attribution is correct, and sending the user to rewrite it would point
+    # them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    if [ "${CURRENT%[ab]}" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
-      if [ "$status" = "waived" ] || [ "$row_is_waived" = "1" ]; then
-        :
-      elif [ "$task9" = "1" ] && [ "${CURRENT%[ab]}" -lt 9 ] 2>/dev/null \
-           && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
-        # The second of the `task: 9` tag's two arms. An auditor cannot
-        # CONFIRM a row whose evidence Step 9 has not produced; demanding it
-        # here would re-impose the wall the key-loop exemption just lifted.
-        :
-      elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt" \
-           && { [ -z "$aud" ] || [ "$aud" = "CONFIRMED" ]; }; then
-        :
-      elif [ "$aud" != "CONFIRMED" ]; then
-        # THE CELL IS AN EQUALITY, AND THE VERDICT NOW SAYS WHICH FAULT IT IS (wave-17
-        # REQ-5, AC-5.4). `CONFIRMED (audit-b3b87dc.md)` refused with "the auditor has not
-        # confirmed <AC>" — a sentence that reads as "no audit happened" to the one person
-        # who knows one did and annotated the cell with its path. The equality does not
-        # move: an annotated cell still refuses, because a reader scanning the column has
-        # to be able to compare it, and the audit's own path has a key of its own. A cell
-        # that does NOT start with the token is a different fact (no verdict, or a
-        # standing one) and keeps the verdict it has always had, below.
-        #
-        # AHEAD OF THE T4 BRANCHES ON PURPOSE: the shape fault is the same fault whatever
-        # the row's tier, and a T4 row annotated past the token would otherwise be told
-        # its user-confirmation was the problem.
-        # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-        case "$aud" in
-          CONFIRMED*)
-            block_matrix "the auditor cell is not the bare token" "write CONFIRMED; cite in evidence:" \
-              "matrix row '${ac}' auditor cell is '${aud}' — it starts with CONFIRMED but is not the bare token, at step ${CURRENT}." \
-              "write exactly 'CONFIRMED' in the auditor cell and cite the audit's own path in the row's 'evidence:' key — the column is compared, not read." ;;
-        esac
-        if [ "$tier" = "T4" ]; then
-          if user_confirmed_form_ok "$block_txt"; then
-            _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
-            block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
-              "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
-              "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
-          fi
-          block_matrix "${ac} says confirmed but names nobody" "name who confirmed it, and when" \
-            "matrix row '${ac}' (T4) auditor verdict is '${aud:-empty}', not CONFIRMED, and its 'user-confirmed:' names no attributed user, at step ${CURRENT}." \
-            "record the user's own confirmation as 'user-confirmed: <user> <date> <what they confirmed>' in the '${ac}:' block — a T4 row discharges on that, no waiver needed. An unattributed or agent-written claim is not one."
+    if matrix_auditor_required \
+       && owed=$(matrix_row_owes "$CURRENT" "$tier" "$status" "$aud" "$ucv" "$row_is_waived" "$task9"); then
+      # THE CELL IS AN EQUALITY, AND THE VERDICT SAYS WHICH FAULT IT IS. An annotated cell
+      # (`CONFIRMED (audit-b3b87dc.md)`) refuses, because a reader scanning the column has to be
+      # able to compare it and the audit's own path has a key of its own; but it refuses as a
+      # shape fault, not as "no audit happened" to the one person who knows one did.
+      # AHEAD OF THE T4 BRANCHES ON PURPOSE: the shape fault is the same whatever the tier.
+      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+      case "$aud" in
+        CONFIRMED*)
+          block_matrix "the auditor cell is not the bare token" "write CONFIRMED; cite in evidence:" \
+            "matrix row '${ac}' auditor cell is '${aud}' — it starts with CONFIRMED but is not the bare token, at step ${CURRENT}." \
+            "write exactly 'CONFIRMED' in the auditor cell and cite the audit's own path in the row's 'evidence:' key — the column is compared, not read." ;;
+      esac
+      if [ "$tier" = "T4" ]; then
+        if user_confirmed_attributed "$ucv"; then
+          _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+          block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
+            "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
+            "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
         fi
-        block_matrix "the auditor has not confirmed ${ac}" "get the auditor to confirm it" \
-          "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
-          "the independent auditor must CONFIRM every non-waived row before advancing past the Verify gate, or the row must be waived."
+        block_matrix "${ac} says confirmed but names nobody" "name who confirmed it, and when" \
+          "matrix row '${ac}' (T4) auditor verdict is '${aud:-empty}', not CONFIRMED, and its 'user-confirmed:' names no attributed user, at step ${CURRENT}." \
+          "record the user's own confirmation as 'user-confirmed: <user> <date> <what they confirmed>' in the '${ac}:' block — a T4 row is ruled on that, no waiver needed. An unattributed or agent-written claim is not one."
       fi
+      if [ "$owed" = verdict ]; then
+        block_matrix "the auditor has not confirmed ${ac}" "get the auditor's verdict on it" \
+          "matrix row '${ac}' has no auditor verdict: the cell is '${aud:-empty}', not CONFIRMED, REFUTED or UNVERIFIABLE, at step ${CURRENT}." \
+          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or waive the row."
+      fi
+      block_matrix "the auditor has not confirmed ${ac}" "get the auditor to confirm it" \
+        "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
+        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation."
     fi
   done <<< "$rows"
 
