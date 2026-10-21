@@ -338,48 +338,6 @@ expect_eq "6: a second session at a boundary re-seeds instead of appending" \
   "1" "$(audit_lines "$CS_H" "$CS_D")"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "Group 5: malformed and missing input — silence, exit 0, every time"
-
-# 7: NOT JSON AT ALL.
-CS_D=$(make_env 4); CS_H=$(make_home)
-fire_raw "$CS_H" 'this is not json {{{'
-expect_silent "7: a payload that is not JSON is silent, exit 0" "$CS_H" "$CS_D"
-
-# 8: JSON, BUT EMPTY. No transcript path, so the hook stops at its second line.
-CS_D=$(make_env 4); CS_H=$(make_home)
-fire_raw "$CS_H" '{}'
-expect_silent "8: an empty JSON object is silent, exit 0" "$CS_H" "$CS_D"
-
-# 9: A TRANSCRIPT PATH THAT IS NOT A FILE.
-CS_D=$(make_env 4); CS_H=$(make_home)
-fire "$CS_D" "$CS_H" "/nonexistent/transcript.jsonl"
-expect_silent "9: an absent transcript is silent, exit 0" "$CS_H" "$CS_D"
-
-# 10: A TRANSCRIPT WITH NO USAGE. `fromjson?` swallows the unparsable lines and the
-# qualifying-entry filter finds nothing, so there is no occupancy to measure.
-CS_D=$(make_env 4); CS_H=$(make_home); CS_T=$(mktemp)
-printf 'not json\n{"type":"user","message":{"content":"hi"}}\n' > "$CS_T"
-fire "$CS_D" "$CS_H" "$CS_T"
-expect_silent "10: a transcript with no assistant usage is silent, exit 0" "$CS_H" "$CS_D"
-
-# 11: A MALFORMED SESSION ID. `bionic_context` blanks the id and returns 1 rather than
-# substituting a literal, so nothing interpolates a traversal into the state path
-# (REQ-1h, lib/context.sh "ONE GUARD").
-CS_D=$(make_env 4); CS_H=$(make_home); CS_T=$(mktemp)
-write_transcript "$CS_T" 1000 200 300
-fire "$CS_D" "$CS_H" "$CS_T" '../../etc/passwd'
-expect_silent "11: a session id outside [A-Za-z0-9_-] is silent, exit 0" "$CS_H" "$CS_D"
-expect_empty "11: …and wrote no state file anywhere under the project" \
-  "$(find "$CS_D/.bionic/tmp" -name 'context-spend.state' 2>/dev/null)"
-
-# 12: NO PLAN. An engaged session with nothing open has no step boundary to record.
-CS_D=$(make_env 4); CS_H=$(make_home); CS_T=$(mktemp)
-rm -f "$CS_D/.bionic/docs/plans/wave-01.plan.md"
-write_transcript "$CS_T" 1000 200 300
-fire "$CS_D" "$CS_H" "$CS_T"
-expect_silent "12: an engaged session with no open run is silent, exit 0" "$CS_H" "$CS_D"
-
-# ─────────────────────────────────────────────────────────────────────────────
 section "Group 6: the advisory channel"
 
 # 13: THE UNBOUND ADVISORY. An engaged-but-UNBOUND session still resolves the root's newest

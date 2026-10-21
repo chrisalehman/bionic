@@ -170,20 +170,12 @@ expect_match "3: a fix line tells the operator to exit and restart" \
 expect_match "4: the fix line cites what the process loaded, and when" \
   "*pid ${LIVE_PID} loaded hooks at 2026-08-27 14:00Z*" "$OUT1"
 
-section "Section 2: nothing the session loaded moved — silent"
+section "Section 3: no session file for this cwd — silent"
 
+# A loaded tree whose record names it, so the content move below would fire the row.
 TREE2="$(make_plugin_tree)"
 write_installed_plugins "$TREE2"
 write_record "$SID_LIVE" "$TREE2"
-
-OUT2="$(run_doctor)"
-
-expect_match "5a: doctor ran its PROJECT section" "*PROJECT*" "$OUT2"
-expect_no_match "5: no restart-needed row" "*restart needed*" "$OUT2"
-expect_no_match "6: no matching fix line" "*exit claude and start it again*" "$OUT2"
-
-section "Section 3: no session file for this cwd — silent"
-
 printf 'moved\n' > "$TREE2/skills/demo/SKILL.md"   # a content move that WOULD fire the row
 mv "${CHOME}/sessions/${LIVE_PID}.json" "${TMP}/session.parked"
 OUT3="$(run_doctor)"

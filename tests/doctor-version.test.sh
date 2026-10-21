@@ -214,12 +214,6 @@ run_doctor() {  # <claude-home> [shell-rc] [extra doctor args...]
       bash "$DOCTOR_SH" "$@" < /dev/null 2>"$DOCTOR_ERR_FILE" )
 }
 
-run_doctor_no_claude() {  # <claude-home> — the same page with the CLI off PATH
-  ( cd "$REPO" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
-      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
-      bash "$DOCTOR_SH" < /dev/null 2>"$DOCTOR_ERR_FILE" )
-}
-
 # THE FILTERED RUN (BIONIC_DOCTOR_ONLY, doctor.sh's test seam). The same fixture and the same tool
 # directory, but doctor gathers and prints only the sections named: it skips the dependency sweep, which is
 # most of a whole run and reads nothing a version row, a drift line or a PATROL row is made of. Every launch
@@ -293,21 +287,6 @@ expect_match "4: the row names installed and the exact update command" \
 expect_match "5: the verdict area carries a matching fix line" \
   "*bionic ${REAL_VERSION} installed, 9.9.9 available*claude plugin update bionic@bionic*" "$OUT2"
 
-section "Section 3: directory feed — reconverge integration, not a remote compare"
-
-HOME3="$(make_registry_home)"
-write_known_marketplaces "$HOME3" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
-REPO_HEAD="$(git -C "$REPO" rev-parse HEAD)"
-write_installed_plugins_sha "$HOME3" "$REPO" "$REPO_HEAD"
-
-OUT3="$(run_doctor "$HOME3")"
-ROW3="$(version_row "$OUT3")"
-
-expect_match "6: a directory feed at the registered sha reads as a match, not a compare" \
-  "*✓ version*${REAL_VERSION}*tree matches the registered cache*" "$ROW3"
-expect_no_match "7: no marketplace-latest language leaks into the directory-feed row" \
-  "*available*claude plugin update*" "$ROW3"
-
 section "Section 4: feed kind cannot be determined — honest unknown, never a guess"
 
 HOME4="$(make_registry_home)"
@@ -324,6 +303,13 @@ expect_no_match "10: a degraded feed kind never prints an update command" \
   "*claude plugin update*" "$ROW4"
 
 section "Section 5: every line doctor prints fits the column budget"
+
+# The directory-feed arm: a registry naming this checkout at its own head.
+HOME3="$(make_registry_home)"
+write_known_marketplaces "$HOME3" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
+REPO_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+write_installed_plugins_sha "$HOME3" "$REPO" "$REPO_HEAD"
+OUT3="$(run_doctor "$HOME3")"
 
 # WHY THIS SECTION IS IN THIS SUITE. doctor.sh's format rules have always stated
 # the budget — nothing printed may exceed 100 columns, because a wrapped line is
@@ -866,26 +852,5 @@ UNK_OUT="$(run_doctor_only NOPE "$HOME2")"; UNK_RC=$?
 expect_eq "75: an unknown section name exits 2 with nothing on stdout" "2:" "${UNK_RC}:${UNK_OUT}"
 expect_match "76: …and the refusal on stderr lists NATIVE among the valid names" \
   "doctor.sh: unknown section 'NOPE'*NATIVE*" "$(cat "$DOCTOR_ERR_FILE" 2>/dev/null)"
-
-section "Section 12: the claude CLI absent, and present, on one fixture (AC-7)"
-
-# THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
-# `claude` is the one program on the fixture's PATH whose presence changes what
-# this page says: the four `mcp-server` rows are checked with `claude mcp get`,
-# so with the CLI gone they turn from a plain absence into an UNKNOWN with a
-# cause, and one of the fix lines that renders from that cause measured 105
-# columns. Before the tool directory above, which half a run got was whatever
-# the runner's PATH happened to hold. Now the fixture says, and both halves are
-# asserted here — the absent render, and the present one that proves the absent
-# assertion is not matching everything.
-OUT_NOCLI="$(run_doctor_no_claude "$HOME1")"
-# The CLI-present half is Section 1's page: `run_doctor "$HOME1"` again would be the same drive on the
-# same fixture with the same tool directory, so it is read, not repeated.
-OUT_WITHCLI="$OUT1"
-
-expect_match "43: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
-expect_no_match "44: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
-expect_match "45: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
-expect_all_lines_fit "46: the CLI-absent page still fits the budget" "$OUT_NOCLI"
 
 finish

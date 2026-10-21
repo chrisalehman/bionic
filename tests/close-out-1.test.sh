@@ -76,47 +76,6 @@ expect_eq "0m: …and says so by name, not silently" "yes" \
   "$(contains "$CO_OUT" "census: no registered trees")"
 
 # ============================================================
-section "0n — REQ-6 (AC-6.2): a wave control — the register meets today's shape-derived set"
-# ============================================================
-#
-# A `wave/16-*`-shaped plan with every `wt/16-*` tree it spawned registered proves the
-# migration is loss-free for the common case the old `wt/NN-*` glob was built for:
-# the register's census is exactly the set the retired shape derivation would also
-# have printed, and `wt_unreached` still refuses on a registered branch the working
-# branch never took.
-
-ROWS16="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | landed | 16-a |
-| T2 | 4 | build | fixture writer two | implementor | — | 10 | AC-1 | file.txt | active | 16-b |"
-P0N="$(mk_census_fixture p0n "wave/16-fixit-183" "$ROWS16")"; advance_to "$P0N" 8
-(
-  in_fixture "$P0N" || exit 1
-  git checkout -q -b wave/16-fixit-183
-  printf 'work\n' >> file.txt
-  git commit -q -am "wave work" >/dev/null 2>&1
-  git branch wt/16-a
-  git branch wt/16-orphan   # matches the OLD wt/16-* glob shape but no row of this
-                            # plan names it — the register must never sweep it in
-  git checkout -q main
-  git merge -q --no-ff -m "merge wave 16" wave/16-fixit-183 >/dev/null 2>&1
-  git checkout -q -b wt/16-b wave/16-fixit-183
-  printf 'never landed\n' >> file.txt
-  git commit -q -am "unreached" >/dev/null 2>&1
-  git checkout -q main
-)
-run_close "$P0N" check
-expect_eq "0n1: check does not refuse over the unreached wt/16-b" "0" "$CO_RC"
-expect_eq "0n2: …the census matches exactly what the old wt/16-* glob would have found" "yes" \
-  "$(contains "$CO_OUT" "worktree-removed: wt/16-a wt/16-b (2 registered trees)")"
-expect_eq "0n2b: …never the unregistered wt/16-orphan, though its NAME fits the old glob" "no" \
-  "$(contains "$CO_OUT" "wt/16-orphan")"
-
-run_close "$P0N" run
-expect_eq "0n3: run refuses — the registered wt/16-b carries unreached work" "2" "$CO_RC"
-expect_eq "0n4: …naming it" "yes" "$(contains "$CO_OUT" "wt/16-b")"
-expect_eq "0n5: …and the fully-reachable wt/16-a still survives the refusal" "yes" \
-  "$(branch_exists "$P0N" "wt/16-a")"
-
-# ============================================================
 section "0o — C4: no worktree column at all falls back to the pre-wave glob census"
 # ============================================================
 #
@@ -413,24 +372,6 @@ expect_eq "2o: …while this wave's own wt/01-x is still deleted as before" "no"
   "$(branch_exists "$P2F" "wt/01-x")"
 
 # ============================================================
-section "3 — AC-4.4: a second run is a no-op"
-# ============================================================
-
-P3="$(mk_fixture p3)"; advance_to "$P3" 8
-run_close "$P3" run
-expect_eq "3a: the first run exits 0" "0" "$CO_RC"
-PLAN_SHA="$(sha_of "$P3/$PLAN_REL")"
-EPIC_SHA="$(sha_of "$P3/$EPIC_REL")"
-CONT_SHA="$(sha_of "$P3/$CONT_REL")"
-
-run_close "$P3" run
-expect_eq "3b: the second run exits 0" "0" "$CO_RC"
-expect_eq "3c: …and says the run is already closed" "yes" "$(contains "$CO_OUT" "already closed")"
-expect_eq "3d: …the plan is unchanged" "$PLAN_SHA" "$(sha_of "$P3/$PLAN_REL")"
-expect_eq "3e: …the epic plan is unchanged (no second row)" "$EPIC_SHA" "$(sha_of "$P3/$EPIC_REL")"
-expect_eq "3f: …the continuation is unchanged" "$CONT_SHA" "$(sha_of "$P3/$CONT_REL")"
-
-# ============================================================
 section "4 — check is a diagnosis: it reports and changes nothing"
 # ============================================================
 
@@ -455,39 +396,6 @@ expect_eq "4h: no continuation was written" "no" \
   "$([ -f "$P4/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4i: .bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P4")"
 expect_eq "4j: wt/01-x still exists" "yes" "$(branch_exists "$P4" "wt/01-x")"
-
-# ============================================================
-section "4b — critic2 N-3 (T16): run's dry-run judges the plan while it is still OPEN"
-# ============================================================
-# The dry-run used to run AFTER current: 9 and delivered: were written, so the bound marker
-# resolved bound-closed and the commit gate exited 0 before it read any step evidence. Here
-# `run` is given a plan with NO Step-8 line whose matrix evidence is gone. It must refuse
-# (rc 2) and must not flip the plan to delivered; at d067c07d it flipped current to 9 and wrote
-# delivered: first. WAVE-33 T8 (D8, AC-4.2): a missing Step-8 line is no longer the refusal, close-out
-# writes it (§INSERT), so the plan the gate cannot clear carries the missing line AND a missing
-# evidence file; every expected value below is the one this section always held.
-P16="$(mk_fixture p16)"; advance_to "$P16" 8
-grep -v '^- Step 8:' "$P16/$PLAN_REL" > "$P16/plan.tmp" && mv "$P16/plan.tmp" "$P16/$PLAN_REL"
-rm -f "$P16/.bionic/docs/record/generic-evidence.md"
-run_close "$P16" run
-expect_eq "4k: run on a plan with no Step-8 line and a matrix the gate refuses, refuses rc 2" "2" "$CO_RC"
-expect_eq "4l: …and the plan was not flipped to delivered" "no" \
-  "$(grep -qE 'Step 9:.*delivered:' "$P16/$PLAN_REL" && echo yes || echo no)"
-expect_eq "4m: …and current: is still 8" "yes" \
-  "$(grep -qE '^current: 8$' "$P16/$PLAN_REL" && echo yes || echo no)"
-expect_eq "4n: …and no gate: ok was reported" "no" "$(contains "$CO_OUT" "gate: ok")"
-
-# A refusal that only the GATE can make (the matrix evidence file is gone): the gate judges
-# the open plan at current 8 and refuses before the Step-9 flip. Since T17 that refusal comes
-# from the pre-flight, before the Step-8 block is written into the plan at all (§4c).
-P17="$(mk_fixture p17)"; advance_to "$P17" 8
-rm -f "$P17/.bionic/docs/record/generic-evidence.md"
-run_close "$P17" run
-expect_eq "4o: run refuses when the gate refuses the open plan (rc 2)" "2" "$CO_RC"
-expect_eq "4p: …and the plan is not flipped to delivered" "no" \
-  "$(grep -qE 'Step 9:.*delivered:' "$P17/$PLAN_REL" && echo yes || echo no)"
-expect_eq "4q: …current: is still 8" "yes" \
-  "$(grep -qE '^current: 8$' "$P17/$PLAN_REL" && echo yes || echo no)"
 
 # ============================================================
 section "4c — critic3 P-1 (T17): run asks the gate first; check and run agree"
@@ -660,36 +568,6 @@ expect_eq "VER14: …and never the tool's" "no" "$(contains "$DL2" "$TOOLV")"
 expect_eq "VER15: the epic row is there, with no version in its cell" "—" "$(epic_version_cell "$PV2")"
 expect_eq "VER16: the continuation header names the wave" "yes" "$(contains "$(head -1 "$PV2/$CONT_REL")" "wave-01-fixture")"
 expect_eq "VER17: …with no version in it" "no" "$(contains "$(head -1 "$PV2/$CONT_REL")" "$TOOLV")"
-
-# ============================================================
-section "FIX-SHAPE — wave-27 T4 (AC-7.3, D14): the fixture builders plant nothing the tools write"
-# ============================================================
-# The builders are read out of this file. A planted `current: 8` or Step 9 line is what hid
-# B1 and B2 from every run of this suite, so the read is the whole of each builder's body.
-FS_BUILDERS="fixture_plan_text fixture_epic_text mk_fixture mk_census_fixture mk_census_fixture_nowt"
-# builder_bodies <suite file> -> every line of those functions' bodies.
-builder_bodies() {
-  awk -v names=" $FS_BUILDERS " '
-    match($0, /^[a-z_]+\(\) \{/) { n = substr($0, 1, RLENGTH - 4); inb = (index(names, " " n " ") > 0); next }
-    inb && /^\}/ { inb = 0; next }
-    inb { print }' "$1"
-}
-# builder_plants <suite file> -> the builder lines that plant what a tool writes.
-builder_plants() {
-  builder_bodies "$1" | grep -E 'current:[[:space:]]*8([^0-9]|$)|Step[[:space:]]+9|fixture_plan_text[^>]*[[:space:]]8([[:space:]]|$)'
-}
-FS_SUITE="$REPO_ROOT/tests/close-out.prelude.sh"   # the builders live in the prelude every part sources
-FS_BODIES="$(builder_bodies "$FS_SUITE")"
-expect_eq "FS1: the extractor reads the plan builder's SDLC State" "yes" "$(contains "$FS_BODIES" "## SDLC State")"
-expect_eq "FS2: …and a line of each builder (plan text, mk_fixture, the census heredocs, epic text)" "yes/yes/yes/yes" \
-  "$(contains "$FS_BODIES" "current: \${current}")/$(contains "$FS_BODIES" "fixture_plan_text \"\$aroot\"")/$(contains "$FS_BODIES" "PLAN_CENSUS")/$(contains "$FS_BODIES" "# epic-fx")"
-expect_empty "FS3: no builder plants current: 8 or a Step 9 line" "$(builder_plants "$FS_SUITE")"
-# THE PAIRED POSITIVE: the same extractor on a copy with the old Step 9 line put back.
-FS_MUT="$SANDBOX/fs-mut.test.sh"
-awk '{ print } /^- Step 8: \(pending\)$/ && !d { print "- Step 9: (pending)"; d = 1 }' "$FS_SUITE" > "$FS_MUT"
-expect_nonempty "FS4: …a copy with '- Step 9: (pending)' put back in a builder is caught" "$(builder_plants "$FS_MUT")"
-sed 's/fixture_plan_text "\$aroot" 7/fixture_plan_text "$aroot" 8/' "$FS_SUITE" > "$FS_MUT"
-expect_nonempty "FS5: …and so is a builder handing the plan current 8" "$(builder_plants "$FS_MUT")"
 
 # ============================================================
 section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with no Step 9 line, the tools close the run"

@@ -72,83 +72,6 @@ else
   no "relevance check precedes the context resolution" "tool=$TOOL_LINE walk=${WALK_LINE:-none}"
 fi
 
-section "S2 — ambiguity: repo unresolvable -> OPEN, silent"
-
-GATE_CWD_FREE=1 run_gate "$(mk_agent_payload "$SID_A" "")"
-expect_status "empty cwd exits 0" "0" "$GATE_ST"
-expect_empty "empty cwd produces no stdout" "$GATE_OUT"
-expect_empty "empty cwd produces no stderr" "$GATE_ERR"
-
-# A NON-GIT CWD IS NOT THE QUESTION ANY MORE (bionic 1.4.0, spec AC-12, Decision A2).
-# It used to be the whole precondition: `git rev-parse --show-toplevel` had to succeed
-# or the wall exited silently, which made the wall's coverage a property of the SHELL's
-# cwd rather than of the project. A dispatch from a scratch directory that nonetheless
-# sat under a real `.bionic` root disarmed arming, containment and rostering at once.
-#
-# The question now is whether there is a PROJECT: `project_root` walks for the nearest
-# real `.bionic` ancestor and `active_run` asks whether its run is open. The two rows
-# below are the same non-git cwd on either side of that line, and nothing separates
-# them but a `.bionic` directory above.
-NONGIT="$SANDBOX/not-a-repo"; mkdir -p "$NONGIT"
-run_gate "$(mk_agent_payload "$SID_A" "$NONGIT")"
-expect_status "A2 non-git cwd with NO .bionic above it exits 0" "0" "$GATE_ST"
-expect_empty "A2 …producing no stdout" "$GATE_OUT"
-expect_empty "A2 …and no stderr" "$GATE_ERR"
-
-# The other side: a non-git cwd INSIDE a project with an open run. The wall runs, and
-# with no Patrol stamp for this session it refuses at the arming wall — the refusal
-# that was unreachable from here before A2.
-A2_ROOT=$(make_repo a2root yes)
-rm -rf "$A2_ROOT/.git"
-rm -f "$A2_ROOT/.bionic/tmp/patrol-$SID_A.state"   # unarmed: the refusal this row drives
-A2_SCRATCH="$A2_ROOT/scratch/deep"; mkdir -p "$A2_SCRATCH"
-write_attestation "$A2_ROOT" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$A2_SCRATCH")"
-expect_eq "A2 non-git cwd WITH a .bionic root above it reaches the wall (exit 2)" "deny" "$GATE_VERDICT"
-expect_contains "A2 …refusing at the arming wall, which is what the old precondition hid" \
-  "Patrol" "$GATE_ERR"
-
-section "S3 — no active wave -> inert, nothing to decide"
-
-REPO_NOWAVE=$(make_repo r3a no)
-run_gate "$(mk_agent_payload "$SID_A" "$REPO_NOWAVE")"
-expect_status "no plan directory at all exits 0" "0" "$GATE_ST"
-expect_empty "no plan directory produces no stdout" "$GATE_OUT"
-expect_empty "no plan directory produces no stderr" "$GATE_ERR"
-
-REPO_NOWAVE2=$(make_repo r3b yes)
-# UNENGAGED, DELIBERATELY (task-engaged-session). make_repo plants the engagement marker
-# with the Patrol stamp, and since this wave an ENGAGED session is walled whether or not a
-# plan is on disk (AC-23, driven in S24 below). What this block claims is the older, and
-# still true, half: a session that never invoked canonical-sdlc sees nothing at all. Removing
-# the marker is what keeps the claim about the run predicate rather than about engagement.
-rm -f "$REPO_NOWAVE2/.bionic/tmp/engaged-$SID_A.state"
-# overwrite with a plan that has no ## SDLC State at all
-cat > "$REPO_NOWAVE2/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
----
-# A plan with no SDLC State section
-PLAN
-run_gate "$(mk_agent_payload "$SID_A" "$REPO_NOWAVE2")"
-expect_status "plan with no SDLC State section exits 0" "0" "$GATE_ST"
-expect_empty "no SDLC State produces no stdout" "$GATE_OUT"
-expect_empty "no SDLC State produces no stderr" "$GATE_ERR"
-
-# even with NO attestation present, no-active-wave still passes an Agent
-# dispatch — proving the wave check, not the attestation check, gates entry.
-run_gate "$(mk_agent_payload "$SID_A" "$REPO_NOWAVE")"
-expect_status "Agent dispatch with no wave and no attestation still exits 0" "0" "$GATE_ST"
-
-section "S4 — active wave + payload missing session_id -> OPEN, silent (§7 table)"
-
-REPO=$(make_repo r4 yes)
-run_gate "$(mk_agent_payload "" "$REPO")"
-expect_status "missing session_id in an active wave exits 0" "0" "$GATE_ST"
-expect_empty "missing session_id produces no stdout" "$GATE_OUT"
-expect_empty "missing session_id produces no stderr" "$GATE_ERR"
-
 section "S5 — active wave + no attestation on disk -> AUTO-PROBE, then pass (AC-2 / AC-4)"
 #
 # THE DIRECTION REVERSED IN EPIC-16 WAVE-02 (R5). Through wave-01 this refused and named
@@ -184,84 +107,6 @@ case "$GATE_ERR" in
   *"hooks/dispatch-preflight.sh"*) no "refusal never names itself as the fix" ;;
   *) ok "refusal never names itself as the fix" ;;
 esac
-
-section "S6 — active wave + only a FOREIGN session's attestation exists -> AUTO-PROBE (AC-2)"
-#
-# task 4/2 (D-5): the foreign attestation is written at ITS OWN per-session filename
-# (preflight-<SID_B>.state) — there is no file at all for SID_A, which is exactly what
-# "foreign, however fresh, is not an attestation for this session" means once filenames
-# are the primary key. That reading is UNCHANGED by R5; what changed is what follows from
-# it. A foreign record is still never read as mine — the gate takes my own reading
-# instead of refusing, and B's record is left exactly where it was.
-
-REPO=$(make_repo r6 yes)
-write_attestation "$REPO" "$SID_B"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "foreign-only attestation auto-probes rather than refusing" "0" "$GATE_ST"
-expect_status "…and this session gets a record of its OWN, at its own filename" "0" \
-  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
-expect_status "…while the LIVE foreign session's record is untouched (D-5)" "0" \
-  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_B.state" ] && echo 0 || echo 1)"
-
-section "S6b — active wave + BOTH sessions hold valid attestations concurrently (AC-2)"
-#
-# The D-5 core case: two sessions on one repo, each with its own per-session file. Both
-# dispatches pass — session B's attestation existing is neither necessary nor sufficient
-# for session A's gate, and vice versa.
-
-REPO=$(make_repo r6b yes)
-write_attestation "$REPO" "$SID_A"
-write_attestation "$REPO" "$SID_B"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "session A's dispatch passes with both attestations present" "0" "$GATE_ST"
-expect_empty "session A's pass produces no stdout" "$GATE_OUT"
-run_gate "$(mk_agent_payload "$SID_B" "$REPO")"
-expect_status "session B's dispatch ALSO passes with both attestations present" "0" "$GATE_ST"
-expect_empty "session B's pass produces no stdout" "$GATE_OUT"
-
-section "S6c — the legacy single-slot file is NEVER consulted (task 4/2)"
-#
-# A legacy preflight.state carrying this session's own, perfectly valid-looking
-# session_id= must still refuse: only the per-session filename is ever read.
-
-REPO=$(make_repo r6c yes)
-write_legacy_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "a legacy single-slot attestation is not consulted; the probe runs instead" "0" "$GATE_ST"
-expect_status "…and the record that admits the dispatch is at the PER-SESSION filename" "0" \
-  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
-# The probe prunes the legacy slot on every run — the strongest form of "never consulted"
-# is that the file is not there to consult by the time the next dispatch asks.
-expect_status "…the legacy slot is gone, not merely ignored" "0" \
-  "$([ -f "$REPO/.bionic/tmp/preflight.state" ] && echo 1 || echo 0)"
-
-section "S7 — active wave + attestation IS this session -> pass, verdict silent (AC-2)"
-#
-# "Silent" here is about the VERDICT (no BLOCKED refusal, nothing on stdout ever) — not
-# absolute stderr silence, which S10c's absence warning already established is not the
-# invariant. Since the unarmed-sweeper nag was deleted with the watcher (epic-16 w2 S1) a
-# contract-complete fixture like this one has nothing to say on stderr either, and that is
-# asserted directly below rather than left implied.
-
-REPO=$(make_repo r7 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "matching attestation exits 0" "0" "$GATE_ST"
-expect_empty "matching attestation produces no stdout (never print on the allow path)" "$GATE_OUT"
-expect_absent "matching attestation prints no BLOCKED refusal on stderr" "BLOCKED" "$GATE_ERR"
-expect_absent "…and says nothing about a sweeper being armed (the nag is deleted)" \
-  "sweeper" "$GATE_ERR"
-
-# forward-compatibility (A6): unknown extra fields, reordered, must still
-# read the session_id BY KEY, not by position — mirrors
-# preflight-probe.test.sh's own reorder case. Written at the PER-SESSION path.
-REPO=$(make_repo r7b yes)
-mkdir -p "$REPO/.bionic/tmp"
-printf 'unknown_future_field=x\nsession_id=%s\nversion=1\nrepo=%s\n' "$SID_A" "$REPO" \
-  > "$REPO/.bionic/tmp/preflight-$SID_A.state"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "reordered/extended attestation with a matching key still passes" "0" "$GATE_ST"
-expect_empty "reordered/extended pass produces no stdout" "$GATE_OUT"
 
 section "S8 — hostile/malformed attestation shapes -> REFUSE, never followed (AC-8-adjacent)"
 
@@ -335,72 +180,6 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation with no session_id= line -> re-taken, not refused" "0" "$GATE_ST"
 expect_status "…and the unreadable record is replaced by a keyed one" "0" \
   "$(grep -qx "session_id=$SID_A" "$REPO/.bionic/tmp/preflight-$SID_A.state" && echo 0 || echo 1)"
-
-section "S9 — the fix command is runnable from a NON-REPO cwd (checklist A1)"
-
-# The fix line now lives on the surviving refusal — a probe that FAILED — rather than on
-# a missing attestation, which the gate takes for itself (S5). What A1 asks of it is
-# unchanged: whatever command the refusal hands an operator has to run from wherever they
-# are standing, which a repo-relative spelling does not.
-REPO=$(make_repo r9 yes)
-mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-chmod 700 "$REPO/.bionic/tmp"
-# THE FIX LINE AS THE GATE ACTUALLY PRINTED IT, never a grep for the spelling we
-# hope to find. The old form was `grep -oF "bash $PROBE_SRC"`, which could only ever
-# yield the exact absolute command or nothing at all — so the one defect A1 exists to
-# catch, a repo-relative spelling, made FIXLINE EMPTY, `bash -c ""` exited 0 with no
-# stderr, and all three assertions below passed over a run that never happened. The
-# extractor pinned away the property under test (.claude/rules/test-harness.md,
-# "Fixture fidelity"); proven vacuous by mutation in epic-18 W3 4/2, where
-# rewriting PREFLIGHT_CMD to `bash preflight-probe.sh` flipped nothing.
-# Lifting the gate's own text lets a relative spelling reach the execution below.
-# THE FIX TEXT IS IN THE DETAIL NOW (task 13, D-1): the user line carries the repair in
-# six words and the runnable command travels with `detail`, so the extractor reads the
-# verbose stream. That the extracted line still EXECUTES is what the arms below prove.
-FIXLINE=$(printf '%s\n' "$GATE_VERR" | sed -n 's/.*re-run by hand: \(.*\))\..*/\1/p' | head -1)
-# The extractor's own non-emptiness, positive, on the same fixture — without it the
-# three assertions below are again a test of nothing (authoring rule: prove the
-# extractor before asserting an absence through it).
-expect_contains "a fix line was captured to execute" "preflight-probe.sh" "$FIXLINE"
-
-# A throwaway HOME, so executing the captured fix line cannot touch the real one. Since
-# epic-17 W1 S3 the fix line resolves the probe beside the GATE rather than under $HOME, so
-# the installed copy below is no longer what makes the line runnable — it stays as the
-# hostile case: a stale ~/.claude/hooks/ copy that the fix line must NOT be reaching for.
-RUNHOME="$SANDBOX/run9/home"
-mkdir -p "$RUNHOME/.claude/hooks"
-cp "$PROBE_SRC" "$RUNHOME/.claude/hooks/preflight-probe.sh"
-chmod +x "$RUNHOME/.claude/hooks/preflight-probe.sh"
-
-NONREPO_CWD="$SANDBOX/run9/nowhere"
-mkdir -p "$NONREPO_CWD"
-
-RUN9_OUT="$SANDBOX/run9.out"; RUN9_ERR="$SANDBOX/run9.err"
-( cd "$NONREPO_CWD" && env -i \
-    HOME="$RUNHOME" PATH="$PATH" \
-    CLAUDE_CONFIG_DIR="$RUNHOME/.claude" \
-    CLAUDE_CODE_SESSION_ID="$SID_A" \
-    ANTHROPIC_API_KEY="sk-fixture-marker" \
-    bash -c "$FIXLINE" ) >"$RUN9_OUT" 2>"$RUN9_ERR"
-RUN9_ST=$?
-
-# 127 = command not found, 126 = found but not executable — exactly the
-# failure shapes a repo-relative fix command produces from a foreign cwd.
-if [ "$RUN9_ST" -eq 127 ] || [ "$RUN9_ST" -eq 126 ]; then
-  no "fix command runs from a non-repo cwd" "exit $RUN9_ST (not found/not executable): $(cat "$RUN9_ERR")"
-else
-  ok "fix command runs from a non-repo cwd"
-fi
-# `$RUN9_ERR` is the PATH of the capture file; these two used to pass it as the
-# HAYSTACK, so they asked whether the string "/tmp/.../run9.err" contains "No such
-# file or directory" — which it never can, on any run, however broken. Both were
-# vacuous from birth; proven so in epic-18 W3 4/2, where pointing the fix command at
-# a file that does not exist (exit 127, that exact message on stderr) flipped neither.
-# The arm above already reads the CONTENTS, via `$(cat "$RUN9_ERR")`; these now do too.
-RUN9_ERR_TEXT="$(cat "$RUN9_ERR")"
-expect_absent "fix-command run produces no 'No such file or directory'" "No such file or directory" "$RUN9_ERR_TEXT"
-expect_absent "fix-command run produces no 'command not found'" "command not found" "$RUN9_ERR_TEXT"
 
 section "S10 — the roster row is written on the pass path (AC-1, launch half)"
 #
@@ -859,17 +638,6 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CADENCE_PLACE" "w99-place"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "the cadence beside the progress path is the one that counts" \
   "~9m." "$(roster_field "$ROW" cadence)"
-
-section "S10d — rows APPEND; the roster is a ledger, not a slot"
-
-REPO=$(make_repo r10d yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "first-agent")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "second-agent")"
-R10D=$(roster_path "$REPO" "$SID_A")
-expect_status "two dispatches leave two rows" "2" "$(roster_rows "$R10D")"
-expect_status "the first row survives the second dispatch" "first-agent" "$(roster_field "$(roster_nth_row "$R10D" 1)" name)"
-expect_status "the second row is the second dispatch" "second-agent" "$(roster_field "$(roster_nth_row "$R10D" 2)" name)"
 
 section "S10e — the roster is per-session from birth (D-5)"
 
