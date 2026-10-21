@@ -42,8 +42,8 @@ removed. `canonical_sdlc_version` stays 14.
 - T10: a landing past the release renders its numbers again. The line adds a commit, `line: release numbers <row>`,
   that replaces the entry's `### The landing numbers` part, and the `published` event gains `numbers=<sha>`.
 - T15, T48: the door's refusal of a landing whose range changes the release check names its judge:
-  `judged-by=target script=<path>@<base12> changed-here=<path>`. A change to the check's own files is refused
-  whatever the check answers. It lands by hand, through `row-landed <row> <merge> <at> --by-hand`, and that line
+  `judged-by=target script=<path>@<base12> changed-here=<path>`. For a release check named relative to the project,
+  as bionic's own is, a change to the check's own files is refused whatever the check answers. It lands by hand, through `row-landed <row> <merge> <at> --by-hand`, and that line
   records `judged-by=candidate`.
 - T36: a wave or epic requirements document groups its REQs under theme sections, three to six of them. The
   governing-skill hook refuses a REQ under no theme, and the sitrep and the card grade one goal row per theme.
@@ -404,6 +404,10 @@ T30 queue ready=2026-10-21T10:59:30Z landed=2026-10-21T11:00:59Z minutes=1.5 run
 - A landing that changes a library the release check sources (payload/scripts/lib, hooks/poker) is refused only when
   the accepted head's copy of the check fails over it. A change that keeps that copy passing lands through the door
   and is recorded by the release check's check-changed line (`T48-judge-always.md`).
+- A release check named by full path is only partly guarded. Named through a symlink or in another letter case, it
+  has no closure, so a landing that rewrites it is judged only by whether the old copy passes. Run from a landing tree,
+  it runs the main checkout's working copy, while the refusal says the accepted head's copy ran. Name the release
+  check relative to the project, as bionic's own is, and neither applies. (`critic-adversarial-4.md#1`, `#2`)
 
 ## 1.23.0 — 2026-10-20
 
