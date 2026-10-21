@@ -894,7 +894,7 @@ expect_contains "FX-1b …naming the whole run's head" "${OD_B:0:12} has it" "$O
 # THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's own report as the log's body, the
 # run line through the product's writer, and the per-suite facts through the fold.
 OD_PLANT=0
-(cd "$OD" && bash tests/run.sh 2>&1) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?
+(cd "$OD" && { bash tests/run.sh 2>&1 || :; }) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?
 bash -c '. "$1/proof.sh" && proof_regression_fold "$2" "$3" "$4" "$5" "$6"' _ "$OD_LIB" "$OD_PLAN" "$OD" "$OD_H" \
   "$OD_REC/regression-run-$OD_H.log" "$OD_RL/regression-run-$OD_H.log" || OD_PLANT=$((OD_PLANT + 10))
 expect_eq "FX-1c precondition: the red run is left at H (both writers exit 0), its run line and its one red verdict in the record" "0|1|1" \
