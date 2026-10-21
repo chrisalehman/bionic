@@ -2172,7 +2172,7 @@ _card_early() {  # -> 0 when the page may render; 1 and CARD_EARLY_WHY on the fi
           if (nm == ENVIRON["CF_NM"]) t = st }
         END { print t }' "$roster" 2>/dev/null)"
       case "$type" in
-        *auditor|*critic) CARD_EARLY_WHY="reader $n open"; return 1 ;;
+        *auditor|*critic) CARD_EARLY_WHY="reviewer $n open"; return 1 ;;
       esac
     done <<CF_OPEN
 $names
@@ -2183,7 +2183,7 @@ CF_OPEN
   # is asked. Once registered, the piece reading carries its question's chain to the head, so no waiver is put for it.
   while IFS='	' read -r n st q; do
     case "$st:$q" in
-      pending:unread|active:unread) CARD_EARLY_WHY="reader row $n reads what landed after the release, and its reading is not registered"; return 1 ;;
+      pending:unread|active:unread) CARD_EARLY_WHY="review row $n reads what landed after the release, and its review is not registered"; return 1 ;;
     esac
   done <<CF_POST
 $(units_post_readers "$CF_PLAN" 2>/dev/null)
@@ -2204,7 +2204,7 @@ CF_POST
     if [ -n "$q" ]; then CARD_EARLY_WHY="$q unregistered at $head8"; return 1; fi
     case "$st" in
       review" "*) : ;;
-      *) CARD_EARLY_WHY="the readings cannot be judged at $head8: $st"; return 1 ;;
+      *) CARD_EARLY_WHY="the reviews cannot be judged at $head8: $st"; return 1 ;;
     esac
   fi
   # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE ITSELF. A red check is early unless every refusal it

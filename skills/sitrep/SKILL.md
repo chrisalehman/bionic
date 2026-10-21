@@ -1,6 +1,6 @@
 ---
 name: sitrep
-description: 'Use when the user asks where the run stands: /bionic:sitrep, "sitrep", "status", "where are we", "how is it going", "what is left". Runs the situation report''s verb on the bound plan, writes the one judgment its page leaves open (a grade and a rationale that names an indicator line), records it with the verb, and shows the page the verb then prints, unaltered.'
+description: 'Use when the user asks where the run stands: /bionic:sitrep, "sitrep", "status", "where are we", "how is it going", "what is left". Runs the situation report''s verb on the bound plan, weighs its facts, writes the judgment, and shows the card the card verb prints from both, unaltered.'
 layer: technique
 needs: []
 loading: deferred
@@ -8,66 +8,69 @@ loading: deferred
 
 # Sitrep
 
-The situation report: what you owe, what is next, what is done and when it closes, then every task, the run's score and what is blocked on you. The verb prints every fact on the page. This skill writes one thing, the grade and its rationale, and the verb records it and prints it.
+The situation report is one card: the head, Call to action, Task list, Metrics, Assessment, Blocked on you and Predicted close. The verb gathers every fact. You write only the judgment. The card verb draws the card from both and checks it before it prints anything.
 
-Typed as `/bionic:sitrep` with no argument, it reports on this session's bound run. With an argument, it reports on the plan named (absolute, project-relative or docs-root-relative).
+Typed as `/bionic:sitrep` with no argument, it reports on this session's bound run. With an argument, it reports on the plan named (absolute, project-relative or docs-root-relative). Pass that plan as `[<plan>]` to both verbs below.
 
 `<plugin-root>` below is the plugin's root, two directories above this skill's own.
 
 ## The steps
 
-1. Run the verb and read its page:
+1. Run the verb and read the fact sheet:
 
    ```bash
    bash <plugin-root>/hooks/session-poker.sh sitrep [<plan>]
    ```
 
-   A refusal (no plan bound, no plan at the path) is the answer: say it in one line and stop.
+   The sheet is input for you; never show it, quote it or summarize it to the user. A refusal (no plan bound, no plan at the path) is the answer: say it in one line and stop.
 
-2. Grade the run from the Score's five indicator lines alone, A to F. The grade grades the run, never the code, and never moves on a fact the page does not print. Write one rationale of one or two sentences that names an indicator line it rests on: schedule, correctness, waste, decisions or goals. Say the cause when the page shows it.
+2. Before you write, weigh these six questions against the sheet:
+   - **Pace.** Is the run on pace? Compare the predicted close with the forecast, and say why it is ahead or behind.
+   - **Correctness.** Of the red tests, failed reviews and open findings, which matter and which are cosmetic?
+   - **Waste.** What effort was lost to dropped tasks, discarded runs, idle time or waiting on the user?
+   - **Goals.** Which goals are met, which are not, and which are not measured yet?
+   - **Leverage.** What single thing would most change the outcome now?
+   - **Change.** What is new since the last sitrep? What does the user need to know that the numbers don't show?
 
-3. Record the grade, the rationale quoted, the plan last when one was named:
+3. Grade the run by this rubric. The grade is for the run, not the code.
+   - **A**: on pace, correct, and nothing held on the user.
+   - **B**: one thing held or slipping, with a clear way through.
+   - **C**: behind, or a real defect open.
+   - **D**: at risk of missing the close or shipping something wrong.
+   - **F**: stopped.
+
+4. Write the judgment to the card verb's stdin, one tagged line each, and pass the plan last when you named one:
 
    ```bash
-   bash <plugin-root>/hooks/session-poker.sh sitrep grade <A-F> '<rationale>' [<plan>]
+   bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] <<'JUDGMENT'
+   call: <the single first move>
+   grade: <A-F>
+   point: <one row of the Assessment>
+   ask <key>: <what is asked> — recommend <answer>
+   close: <what the close depends on>
+   JUDGMENT
    ```
 
-   The verb refuses a letter outside A to F and a rationale that names no indicator line or holds `|` or a line break; nothing is recorded. Correct it and record again.
+   - `call:` is the single first move. Never restate the whole Blocked on you list. When an ask is open, the call names one of them by its id.
+   - `grade:` is one letter, A to F.
+   - `point:` gives one to five lines, each a row of the Assessment.
+   - `ask <key>:` is one line for every `ask:` line on the sheet. Copy its key, then write what is asked and `— recommend <answer>`. Never list a decision's options.
+   - `ask +:` is optional: an ask the sheet lacks.
+   - `close:` is one line: what the close depends on.
 
-4. Run the verb of step 1 again and show its page inside one fenced code block, byte for byte.
+5. If the card verb exits with rc 1, it prints the reasons and no card. Fix the judgment and run it again. Never show a refused card, and never write a card by hand.
 
-## The shape
+6. Show the card exactly as printed, inside one fenced code block, and add nothing after it.
 
-```text
-Sitrep · <project> <release> · <weekday> <time> · step <n> of 9 · <k> of <m> tasks done (<p>%)
+## The words
 
-Bottom line
-- You owe <what, or nothing now>.
-- Next: <tasks in flight; blocked; then the next ones>.
-- Done: <steps and tasks, the last one at its time>.
-- Close: likely <clock> (<whose pace>), or not before <earliest> · likely <clock> (<whose pace>) when the likely is after the earliest, or why there is none.
+Say "review", never "reading" or "reader". A goal nobody measures is "not measured". The card verb refuses a judgment that breaks either rule.
 
-Task list
-<glyph> <step>: <name> (<time>), or — <state>             (steps 0 to 3 only)
-<glyph> <step>/<task>: <name> (<time>), or — <short state>  (every task, in execution order)
+## Asks
 
-Score: <grade> (graded <time>)
-<mark> schedule — likely <clock> against <forecast end>, <n> min <inside|over> the <forecast>; <whose pace>; <the bar half>
-<mark> correctness — <what it measured>
-<mark> waste — <what it measured>
-<mark> decisions — <what it measured>
-<mark> goals — <what it measured>
-- <your rationale>
-
-Blocked on you
-- <what to do>: <what waits on it>
-```
+Before you put any ask to the user in chat, record it through its verb so the sheet reads it. Record a decision or a stop-rule call with `decisions put D<n> '<what is decided>'`. Approvals and waivers are opened by the verbs and cards that raise them. An ask the sheet does not hold is missing from the card, so the user cannot see it is owed.
 
 ## The rules
 
-- A fact outside the verb's output is a contract violation: every line of the page is the verb's, byte for byte and in the verb's order. The grade and the rationale reach the page through the grade verb, never typed into it.
-- The rationale names an indicator line, one of schedule, correctness, waste, decisions or goals; the verb refuses one that names none.
-- Every Task list line is one line, never continued: the name is the task's cell up to its first " (", ": ", ". " or " · ", clipped at a word with "…" to fit, the time or short state (`building`, `waits on T1 +8`, `held`, `red`) always whole.
-- The schedule line always holds a best guess once the plan is approved: the likely close against the forecast end, the typed `forecast:` else the plan's own minutes, said which. Before the first one-file landing its bar half is words and its mark is the clock's; from the first landing the mark is the worse half.
-- The page has three surfaces, all from the one verb: `/bionic:sitrep` is this page, the handoff file's head is its Bottom line, and the Patrol's tick prints the one-line form `poker: sitrep <marks> · owed: <n> · <the close>` on every tick.
-- Nothing here changes a plan, a record or a run beyond the `sitrep.log` line the grade verb writes.
+- Every fact on the card comes from the verb. Your words reach the card only through the judgment.
+- Both verbs first close any ask whose decision the design ledger already reads as ruled. Apart from that and the asks you record, nothing here changes a plan, a record or a run.

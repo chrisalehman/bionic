@@ -3,11 +3,13 @@
 # it is never a "reader", and a goal nobody measures is "not measured".
 #
 # WHAT THIS SUITE OWNS. The lint `words_hits` and the surfaces it reads: the skill texts
-# (skills/canonical-sdlc, skills/handoff), the command pages (payload/commands), the agent role
-# texts and the texts pushed to an agent at start (agents/, payload/context), the strings the poker
-# verbs, the dispatch wall and the plan, proof, walls and units libraries print (hooks/poker/*.sh,
-# hooks/dispatch-preflight.sh, payload/scripts/lib/{plan,proof,walls,units}.sh), and the sources
-# under agents-src/ the generated texts are rendered from. It refuses "reader", "readers" and
+# (skills/canonical-sdlc, skills/handoff, skills/sitrep), the command pages (payload/commands), the
+# agent role texts and the texts pushed to an agent at start (agents/, payload/context), the strings
+# the poker and its verbs, the card renderer, the dispatch wall and the plan, proof, walls and units
+# libraries print (hooks/session-poker.sh, hooks/poker/*.sh, payload/scripts/card.sh,
+# hooks/dispatch-preflight.sh, payload/scripts/lib/{plan,proof,walls,units}.sh), the sources under
+# agents-src/ the generated texts are rendered from, and what the user reads rendered: the sitrep
+# card, the handoff head and the Patrol line. It refuses "reader", "readers" and
 # "readings" anywhere in that text, and "reading" as a noun: after a determiner ("a reading", "the
 # reading", "the $q reading", "its whole reading"). The verb ("reading the file") and the
 # participle ("every key reading `pending`") pass.
@@ -24,14 +26,16 @@
 # answers, each with its reason. An entry that matches no line of its file is refused (§ALLOW), so
 # the list cannot outlive the line it was written for.
 #
-# NOT READ HERE: hooks/poker/sitrep.sh, hooks/session-poker.sh and payload/scripts/card.sh, the
-# cards they print, the handoff head and the Patrol line. Those are linted where they are rendered,
-# not as source.
+# RENDERED SURFACES. A card prints facts the source does not spell (a task's name, an ask's title),
+# so the sitrep card, the handoff head and the Patrol line are also read as printed, over one
+# fixture run, every line whole (§RENDERED).
 #
 # FIXTURE FIDELITY (see .claude/rules/test-harness.md, "Fixture fidelity"). §TEXTS reads the
 # shipped files in place. §PLANT and §SENSE are SYNTHESIZED: each copies a shipped surface into
 # scratch and appends one line, so the lint reads the real file plus the plant; each copy proves
-# its plant landed.
+# its plant landed. §RENDERED draws its three surfaces through the real verbs over a SYNTHESIZED
+# run: a plan in the shipped `## Tasks` shape, an ask opened on its register in lib/owed.sh's
+# line shape, and a session bound to it by lib/binding.sh `bind_plan`.
 #
 # ANTI-VACUITY (same file, "Anti-vacuity"). The surface list is proved non-empty in each class
 # and the extractor non-empty on every file before any absence is read (§TEXTS); the clean
@@ -52,8 +56,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 # ── the allow list ───────────────────────────────────────────────────────────
 # <paths from the repo root, space-separated>|<a fixed string of the line, the word inside it>|<why it
-# is not the review sense>. The string is cut from the line before the line is read, so a refused
-# word elsewhere on the same line is still found. A generated file and its source each carry the
+# is not the review sense>. The paths end at the first `|` and the reason starts after the last, so
+# the string may hold a `|` and the reason may not. The string is cut from the line before the line
+# is read, so a refused word elsewhere on the same line is still found. A generated file and its source each carry the
 # line, so an entry names both.
 WORDS_ALLOW="$TMP/allow"
 cat > "$WORDS_ALLOW" <<'WORDS_ALLOW_EOF'
@@ -71,6 +76,8 @@ payload/context/working-principles.md agents-src/templates/context/working-princ
 payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl|the reader may act on it|whoever reads the answer, not a review
 hooks/dispatch-preflight.sh|a reason the reader can check|whoever reads the plan row, not a review
 hooks/poker/tick.sh|the panel reading is|a reading of the agent panel, a measurement, not a review
+skills/sitrep/SKILL.md|never "reading" or "reader"|names the refused words, to refuse them
+payload/scripts/card.sh|(readers?|readings|(a|the) reading)|the judgment check's pattern of the refused words
 WORDS_ALLOW_EOF
 
 # ── the surfaces ─────────────────────────────────────────────────────────────
@@ -78,20 +85,21 @@ WORDS_ALLOW_EOF
 words_surfaces() {
   (
     cd "$1" || exit 1
-    ls skills/canonical-sdlc/*.md skills/canonical-sdlc/steps/*.md skills/handoff/*.md \
+    ls skills/canonical-sdlc/*.md skills/canonical-sdlc/steps/*.md skills/handoff/*.md skills/sitrep/*.md \
       payload/commands/*.md agents/*.md agents-src/blocks/*.md \
       agents-src/templates/*.tmpl agents-src/templates/commands/*.tmpl \
       agents-src/templates/skills/canonical-sdlc/*.tmpl agents-src/templates/skills/canonical-sdlc/steps/*.tmpl \
       agents-src/templates/context/*.tmpl payload/context/*.md \
       payload/scripts/lib/plan.sh payload/scripts/lib/proof.sh payload/scripts/lib/walls.sh payload/scripts/lib/units.sh \
-      hooks/dispatch-preflight.sh 2>/dev/null
-    ls hooks/poker/*.sh 2>/dev/null | /usr/bin/grep -v '^hooks/poker/sitrep\.sh$'
+      hooks/dispatch-preflight.sh hooks/session-poker.sh hooks/poker/*.sh payload/scripts/card.sh 2>/dev/null
   )
 }
 
-# words_text <file> — "<line number><TAB><text>" for every line the lint reads.
+# words_text <file> — "<line number><TAB><text>" for every line the lint reads; a rendered surface
+# (.txt) is read whole, since nothing on it is code.
 words_text() {
   case "$1" in
+    *.txt) awk '$0 ~ /[^ \t]/ { printf "%d\t%s\n", NR, $0 }' "$1" ;;
     *.sh) awk '
       # the line with its comment cut, quotes and $( ) tracked so a # inside a string is kept
       function code(s,   n, i, c, st, top) {
@@ -140,7 +148,9 @@ words_hits() {
     BEGIN {
       while ((getline e < allow) > 0) {
         p = index(e, "|"); if (!p) continue
-        rest = substr(e, p + 1); q = index(rest, "|"); if (q < 2) continue
+        rest = substr(e, p + 1); q = 0
+        for (j = length(rest); j > 0; j--) if (substr(rest, j, 1) == "|") { q = j; break }
+        if (q < 2) continue
         k = split(substr(e, 1, p - 1), P, " ")
         for (j = 1; j <= k; j++) if (P[j] == rel) { n++; A[n] = substr(rest, 1, q - 1) }
       }
@@ -156,8 +166,9 @@ words_hits() {
 section "§TEXTS: no review-sense reading or reader, and no \"no reader for\", on the texts the user reads"
 
 SURF="$(words_surfaces "$REPO")"
-for cls in 'skills/canonical-sdlc/' 'skills/handoff/' 'payload/commands/' 'agents/' 'agents-src/blocks/' \
-  'agents-src/templates/' 'agents-src/templates/context/' 'payload/context/' 'hooks/poker/' 'hooks/dispatch-preflight.sh' \
+for cls in 'skills/canonical-sdlc/' 'skills/handoff/' 'skills/sitrep/' 'payload/commands/' 'agents/' 'agents-src/blocks/' \
+  'agents-src/templates/' 'agents-src/templates/context/' 'payload/context/' 'hooks/poker/' 'hooks/poker/sitrep.sh' \
+  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' \
   'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh'; do
   expect_nonempty "the surfaces include $cls" "$(printf '%s\n' "$SURF" | /usr/bin/grep -F "$cls" | head -1)"
 done
@@ -237,7 +248,9 @@ done
 section "§ALLOW: every allow entry gives a reason, answers a refused word, and still matches a line of each file it names"
 
 expect_nonempty "the allow list has entries" "$(head -1 "$WORDS_ALLOW")"
-while IFS='|' read -r paths str why; do
+while IFS= read -r e; do
+  paths="${e%%|*}"; str="${e#*|}"; why=""
+  case "$str" in *'|'*) why="${str##*|}"; str="${str%|*}" ;; esac
   [ -n "$paths" ] || continue
   expect_nonempty "'$str': it gives a reason" "$why"
   expect_nonempty "'$str': it carries a refused word" "$(printf 'x\t%s\n' "$str" | words_refused)"
@@ -245,5 +258,75 @@ while IFS='|' read -r paths str why; do
     expect_true "'$str': $f still holds it" /usr/bin/grep -qF -- "$str" "$REPO/$f"
   done
 done < "$WORDS_ALLOW"
+
+# ── §RENDERED ────────────────────────────────────────────────────────────────
+section "§RENDERED: the sitrep card, the handoff head and the Patrol line, drawn over a fixture run, carry no refused word; a plant on each goes red"
+
+# One run in a temp repository: a three-row plan at Step 4, an approval open on its register, the session bound to it,
+# the clock, the zone, the machine's probes, the gate store and the share pinned as tests/sitrep-card.test.sh pins them.
+. "$(dirname "$0")/lib/bound-marker.sh"
+export BIONIC_PLUGINS_DIR="$TMP/no-plugins" BIONIC_PRESSURE_RING="$TMP/pressure.ring" CLAUDE_CONFIG_DIR="$TMP/config"
+export BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_SWAP_PCT=0
+export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
+export BIONIC_GATE_DIR="$TMP/gate" BIONIC_NOW_EPOCH=1791324000 TZ=America/Los_Angeles   # 2026-10-06 3:00 PM PDT
+mkdir -p "$BIONIC_PLUGINS_DIR" "$CLAUDE_CONFIG_DIR/bionic" "$BIONIC_GATE_DIR/requests" "$BIONIC_GATE_DIR/cost"
+printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
+WR_SID="5c1e7a2b-3d4f-4e8a-9b6c-1f2e3d4c5b6a"
+WR_R="$TMP/run"; WR_P="$WR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+mkdir -p "${WR_P%/*}" "$WR_R/.bionic/docs/record/wave-02-fx" "$WR_R/.bionic/tmp"
+( cd "$WR_R" && git init -q . && printf '.bionic/\n' >> .git/info/exclude && git -c user.name=fx -c user.email=fx@example.invalid commit -q --allow-empty -m init )
+wr_row() { printf '| %s | %s | build | %s · complexity: standard | — | — | %s | 30 | REQ-1 | lib/%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$1" "$5"; }
+{
+  printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
+  printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n\n## SDLC State\n\n'
+  printf 'approved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
+  printf -- '- T1: landed %s 2026-10-06T18:00:00Z — .worktrees/02-T1\n' "$(printf 'c%.0s' $(seq 40))"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  wr_row T1 4 "The first row" — landed
+  wr_row T2 4 "The second row" — active
+  wr_row T3 8 "Merge it" "approval:release" pending
+  printf '\n## Not Doing\n\n- nothing\n'
+} > "$WR_P"
+WR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "$REPO/payload/scripts/lib/owed.sh" "$WR_R" "$WR_P")"
+mkdir -p "${WR_REG%/*}"
+printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n' > "$WR_REG"
+bound_marker "$WR_R" "$WR_SID" "$WR_P"
+wr_poke() {  # <args after the poker…> [stdin from the caller] -> the verb's stdout; its exit code in WR_RC
+  WR_RC=0
+  ( cd "$WR_R" && exec env CLAUDE_CODE_SESSION_ID="$WR_SID" bash "$REPO/hooks/session-poker.sh" "$@" ) 2> "$TMP/wr.err" || WR_RC=$?
+}
+mkdir -p "$TMP/rendered"
+wr_poke sitrep card "$WR_P" > "$TMP/rendered/card.txt" <<'WR_JUDGMENT_EOF'
+call: Approve the release once T2 lands.
+grade: C
+point: One task is in flight and nothing is red.
+ask approve:release: the release approval — recommend approve once T2 lands
+close: Depends on T2 landing first time.
+WR_JUDGMENT_EOF
+expect_eq "RD1 the sitrep card is drawn (exit 0) and holds the open approval under Blocked on you" "0|1" \
+  "$WR_RC|$(/usr/bin/grep -c '^    • the release approval — holds T3' "$TMP/rendered/card.txt")"
+wr_poke sitrep --line "$WR_P" > "$TMP/rendered/line.txt"
+expect_eq "RD2 the Patrol line is drawn (exit 0): one line, the approval owed" "0|1|1" \
+  "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/line.txt")|$(/usr/bin/grep -c ' tasks · owed: 1 · close ' "$TMP/rendered/line.txt")"
+wr_poke handoff > /dev/null <<'WR_HANDOFF_EOF'
+Summary
+- Doing: the fixture run.
+- Learned: nothing new.
+- Open: none.
+- First: land T2.
+WR_HANDOFF_EOF
+WR_HF="$(ls "$WR_R/.bionic/docs/record/handoffs/"*.md 2>/dev/null | head -1)"
+awk 'NR > 1 && $0 == "" { exit } NR > 1 { print }' "$WR_HF" > "$TMP/rendered/head.txt" 2>/dev/null
+expect_eq "RD3 the handoff head is drawn (exit 0): the title, the run line, Blocked on you: yes and the approval's line" "0|1|1|1" \
+  "$WR_RC|$(/usr/bin/grep -c ' tasks · owed: 1 · close ' "$TMP/rendered/head.txt")|$(/usr/bin/grep -cx 'Blocked on you: yes' "$TMP/rendered/head.txt")|$(/usr/bin/grep -c '^- approval: release — holds ' "$TMP/rendered/head.txt")"
+for wr_s in card line head; do
+  expect_nonempty "$wr_s: the lint reads the rendered text (the extractor reads the real output)" "$(words_text "$TMP/rendered/$wr_s.txt")"
+  expect_empty "$wr_s: no refused word on it" "$(words_hits "$TMP/rendered/$wr_s.txt" "rendered/$wr_s.txt")"
+  cp "$TMP/rendered/$wr_s.txt" "$TMP/rendered/$wr_s.plant.txt"
+  printf '%s\n' '    • PLANT no reader for the goal' >> "$TMP/rendered/$wr_s.plant.txt"
+  expect_contains "$wr_s: a planted \"no reader for\" on it is refused" "PLANT no reader for" \
+    "$(words_hits "$TMP/rendered/$wr_s.plant.txt" "rendered/$wr_s.txt")"
+done
 
 finish

@@ -16,6 +16,7 @@
 #   §REFUSE    a refused card prints nothing on stdout, every reason on stderr
 #   §JUDGMENT  the judgment's own floors: one grade A to F, one to five points, a call, one close, known tags
 #   §VERB      the verb draws the card from the run's own sheet, and settles a decision the ledger ruled first
+#   §SKILL     the skill writes the tags the verb takes and shows only what the verb printed, in one fenced block
 #
 # HERMETIC. card.sh is fed fixture sheets in the verb's own `sheet/v1` shape (the verb's sheet is proved to parse
 # the same way in §VERB); the verb runs in one temp repository with a pinned clock and zone, its own gate store and
@@ -457,5 +458,40 @@ expect_eq "VE5 the verb refuses a judgment that drops the open ask: exit 1, stdo
 expect_contains "VE5b …the renderer's reason reaching stderr" "approve:release" "$SV_ERR"
 sv_run card --line "$SV_P" <<< "$SV_J"
 expect_eq "VE6 card with --line is a usage error (2)" "2" "$SV_RC"
+
+# ============================================================
+section "§SKILL: the skill writes the judgment in the tags the verb takes and shows only what the verb printed, in one fenced block"
+# ============================================================
+# FIXTURE FIDELITY: the shipped skill text read in place; the tags are the ones card.sh says it takes in its own
+# refusal of an unknown tag; each plant is a scratch copy of the skill with one line moved.
+# fails-when: the skill shows text the verb did not print (a paraphrase, a card written by hand, a refused card), or
+# names a judgment tag the verb refuses, or leaves one out.
+SK_SKILL="${BIONIC_SKILLS_DIR}/sitrep/SKILL.md"
+sk_tags() {  # -> each judgment tag card.sh takes, one per line, read from its refusal of an unknown tag
+  sc_card "$SC_OWED" "$SC_J_OWED
+verdict: fine"
+  printf '%s\n' "$SC_ERR" | sed -n 's/.*it takes \(.*\)$/\1/p' | head -1 | sed 's/ and /, /' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | /usr/bin/grep .
+}
+sk_unshown() {  # <skill file> -> each line that shows the card yet lets other text through: not exactly as printed, or not one fence
+  awk '{ l = tolower($0) } l ~ /(^|[^a-z])shows?([^a-z]|$)/ && l ~ /card/ && l !~ /never/ && l !~ /description:/ \
+    && (l !~ /exactly as printed/ || l !~ /one fenced code block/ || l !~ /nothing after/) { print }' "$1"
+}
+SK_TAGS="$(sk_tags)"
+expect_eq "SK0 the verb names the tags it takes (the extractor reads card.sh's own refusal)" \
+  "call:|grade:|point:|ask <key>:|ask +:|close:" "$(printf '%s\n' "$SK_TAGS" | paste -sd'|' -)"
+SK_MISS=""
+while IFS= read -r t; do /usr/bin/grep -qF -- "\`$t" "$SK_SKILL" || SK_MISS="$SK_MISS $t"; done <<< "$SK_TAGS"
+expect_empty "SK1 the skill names every tag the verb takes, each in code (SK0 read them)" "$SK_MISS"
+expect_eq "SK2 the skill shows the card exactly as printed, inside one fenced code block, nothing after it" "1" \
+  "$(/usr/bin/grep -i 'card' "$SK_SKILL" | /usr/bin/grep -i 'exactly as printed' | /usr/bin/grep -i 'one fenced code block' | /usr/bin/grep -ci 'nothing after')"
+expect_empty "SK2b …and no other line shows the card some other way (SK2 read the same file)" "$(sk_unshown "$SK_SKILL")"
+expect_eq "SK3 rc 1: the skill fixes the judgment and runs it again, never shows a refused card, never writes one by hand" "1" \
+  "$(/usr/bin/grep -F 'rc 1' "$SK_SKILL" | /usr/bin/grep -i 'never show a refused card' | /usr/bin/grep -ci 'never write a card by hand')"
+cp "$SK_SKILL" "$TMPROOT/sk-plant.md"; printf '%s\n' 'Show the card to the user in your own words.' >> "$TMPROOT/sk-plant.md"
+expect_eq "SK4 a planted paraphrase of the card is found" "Show the card to the user in your own words." "$(sk_unshown "$TMPROOT/sk-plant.md")"
+sed 's/`ask +:`/the extra ask tag/g' "$SK_SKILL" > "$TMPROOT/sk-plant.md"
+SK_MISS=""
+while IFS= read -r t; do /usr/bin/grep -qF -- "\`$t" "$TMPROOT/sk-plant.md" || SK_MISS="$SK_MISS $t"; done <<< "$SK_TAGS"
+expect_eq "SK5 a copy with one tag left out is found" " ask +:" "$SK_MISS"
 
 finish
