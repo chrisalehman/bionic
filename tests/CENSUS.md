@@ -2,9 +2,9 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: f021cf812 · suites: 114 · sections: 1032 · keep: 838 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 114 · sections: 1034 · keep: 840 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
 
-The section-list command counts 1062 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1062 - 22 - 8 = 1032.
+The section-list command counts 1064 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1064 - 22 - 8 = 1034.
 
 ## agent-context-guard.test.sh
 
@@ -947,6 +947,7 @@ release-approval.test.sh | §CONFIRM | keep | hooks/poker/proof.sh poker_verb_co
 release-approval.test.sh | §LEGACY | keep | hooks/poker/plan.sh poker_verb_reply: RP_CARD no longer lists the old-stem pages beside the new ones, so a reply over a page written before the rename finds no card (LEGACY-3) | none (searched 'RR_OLD_VERB' in tests/; sitrep.test.sh §NEXT-STOPS NX3 reads the Next line, not reply)
 release-approval.test.sh | §BORN | keep | payload/scripts/card.sh early: the born-row excuse for commits past the readings deleted, so two fix rows born of findings demand a re-read; (BORN-1) goes red | none (searched 'Fixed by T' and 'born: review' at 05b5b9dec in tests/)
 release-approval.test.sh | §JUDGE | keep | hooks/session-poker.sh release-approval: the Tests line built from the whole run's owed list instead of the floor judge, so a suite a later landing greened still reads red; (JUDGE-1) goes red | none (searched 'regression — ' Tests lines at 05b5b9dec in tests/; canonical-sdlc-evidence-gate-2 reads the judge, not the page)
+release-approval.test.sh | §POST | keep | payload/scripts/card.sh early: the check of a reader row placed after the landed release dropped, so the card renders while that row's reading is unregistered instead of CARD-EARLY naming the row (POST-1, POST-1b) | none (searched 'reads what landed after the release' in tests/; units.test.sh §POST reads the validator's admission, not the card)
 release-approval.test.sh | §STEP0 | keep | payload/scripts/card.sh step0: the approve:step0 opener deleted, so rendering the session's own configuration card owes nothing; (STEP0-6) goes red | none (searched 'approve:step0' at 05b5b9dec in tests/)
 
 ## release-check.test.sh
@@ -1352,6 +1353,7 @@ units.test.sh | §7 | keep | payload/scripts/lib/units.sh units_validate's `## T
 units.test.sh | §8 | keep | payload/scripts/lib/units.sh:1702 the gate test drops `knd[i] == "integrate"`, so the Step-8 integrate row is ready at Step 4; "…units_ready at Step 4 does not: a gate act waits for its step" goes red | none (searched 'gate act' and 'integrate' in tests/: session-poker-2 §Section 37 holds only a Step-7 doc row)
 units.test.sh | §9 | keep | payload/scripts/lib/units.sh _units_read's trim() restores only the first escaped pipe of a cell (sub for gsub), so "a cell carrying two escaped pipes reads back with both" goes red | none (searched 'units_rows' in tests/: units.test.sh alone; session-poker-2 §Section 37 carries one escaped pipe per cell)
 units.test.sh | §ORDER | keep | payload/scripts/lib/units.sh units_order drops `$2 + 0 <= 5`, so a regression row at Step 7 is read as the order; "ORD-2b …and units_order reads no order" goes red | none (searched 'units_order' in tests/: canonical-sdlc-evidence-gate-2 §AH and session-poker-4 assert only an ordered plan)
+units.test.sh | §POST | keep | payload/scripts/lib/units.sh units_validate: the release-landed test dropped from the post-release admission, so a reader past a release that is still open is admitted instead of refused with the order text (POST-2) | none (searched 'the release row comes ahead' and 'units_add_row' in tests/)
 units.test.sh | §JUDGE | keep | payload/scripts/lib/line.sh _line_proved matches its commit argument against a verdict's reads= key as well as commit=, so "…and a reads key in its place is refused" goes red | none (searched '_line_proved' and '_proof_floor_judge' in tests/: landing-line-2 §GRAMMAR reads field order only)
 
 ## version-compare.test.sh
