@@ -385,6 +385,24 @@ doctor-patrol.test.sh | §Section 10 | keep | payload/scripts/doctor.sh: the abs
 doctor-patrol.test.sh | §Section 11 | keep | payload/scripts/doctor.sh: the parse loop stops reading here= (or resolving cwd through project_root), so another project's session and its CronDelete line reach this page (41, 42) | none (searched 'here=' and 'two projects' in tests/)
 doctor-patrol.test.sh | §Section 12 | keep | payload/scripts/lib/patrol.sh: agents counted over the transcript's whole life instead of from the roster's birth, so 12a earns a 4-launch fix line (76) and 12b reads 6 not 2 (78) | none (searched 'roster_window' and 'launches unrostered' in tests/)
 
+## doctor-reads.test.sh
+
+doctor-reads.test.sh | §Section 1 | keep | payload/scripts/doctor.sh:753 the pnpm-store cause `no store index at ${idx}` replaced by the catch-all, so a store with no index.db reads "no presence surface" (1, 2) | none (searched 'no store index' and 'pnpm_store' in tests/; fresh-home.test.sh's pnpm shim stops before the index)
+doctor-reads.test.sh | §Section 2 | keep | payload/scripts/lib/deps.sh _dep_check_pnpm_store: the `strings` read of index.db dropped, so a readable index holding motion@12.3.4 reports no version (3) | none (searched 'motion@' and 'index.db' in tests/)
+doctor-reads.test.sh | §Section 3 | keep | payload/scripts/doctor.sh:2191 the installed-agent drift fix line deleted, so a drifted copy in the claude-home is named nowhere on the page (6, 7) | none (searched 'installed agent' and 'legacy-agent-copies' in tests/)
+doctor-reads.test.sh | §Section 4 | keep | payload/scripts/doctor.sh:2188 the legacy-hook-files fix line deleted, so two hook files in the claude-home reach no line and no repair (8, 9) | none (searched 'legacy hook file' in tests/)
+doctor-reads.test.sh | §Section 5 | keep | payload/scripts/doctor.sh:2939 `_doctor_tilde "$SKILL_COPY_PATH"` made the raw path, so the row no longer names ~/claude-home/skills/canonical-sdlc (10) | none (searched 'legacy installed skill copy' and 'SKILL_COPY' in tests/)
+doctor-reads.test.sh | §Section 6 | keep | payload/scripts/doctor.sh:1157 DUP_LINES no longer read from bionic_check_duplicate_lines, so a plugin registered under two marketplaces reaches no row and no consolidation command (11, 12) | none (searched 'plugin uninstall' in tests/; detect-probes.test.sh drives detect.sh's probe, not the page)
+doctor-reads.test.sh | §Section 6b | keep | payload/scripts/doctor.sh:1372 the dependency row's stale arm deleted, so a venv stale against uv.lock renders as the catch-all with no re-sync (12b1, 12b2) | none (searched 're-sync' and 'excalidraw-renderer' in tests/)
+doctor-reads.test.sh | §Section 6c | keep | payload/scripts/setup.sh _setup_install_class: `SETUP_ALL=1` dropped from the stale arm, so a stale venv is asked the install question again (12c2) | none (searched 'SETUP_ALL' and '_setup_install_class' in tests/)
+doctor-reads.test.sh | §Section 6d | keep | payload/scripts/lib/detect.sh detect_statusline_npx_command, read at doctor.sh:933: the npx test made never true, so a statusLine command still naming npx is not flagged and the THIRD PARTY row calls it healthy (12d1, 12d2, 12d5) | none (searched 'statusLine command' and 'still uses npx' in tests/)
+doctor-reads.test.sh | §Section 6f | keep | payload/scripts/doctor.sh:2229-2247 the core-absence collapse folded back into the setup line, so superpowers reads "→ run /bionic:setup" and the headline counts its rows twice (12f2, 12f5b, 12f6, 12f11) | none (searched 'core dependencies absent' and 'BIONIC_DEP_MARKETPLACE' in tests/; doctor-walls.test.sh and loader.test.sh read the not-installed route, not a core row)
+doctor-reads.test.sh | §Section 7 | keep | rule: lint — a top-level assignment that no line reads planted in payload/scripts/doctor.sh, so the never-read sweep names it (13) | none (searched 'KNOWN_DEAD' and 'never read' in tests/)
+doctor-reads.test.sh | §Section 8 | keep | payload/scripts/doctor.sh: the claude() shell proxy row's rc path printed whole instead of cut to the row's budget, so a changed block at a long rc path passes 100 columns (15b) | none (searched 'claude() shell proxy' and 'fits 100 columns' in tests/; rc-item-2.test.sh's doctor rows use a short rc path)
+doctor-reads.test.sh | §Section 9 | duplicate | payload/scripts/doctor.sh:772 the CLI-absent cause dropped from the mcp-server rows, so chrome-devtools no longer reads "the claude CLI is not on PATH" (16.1); a cause line wider than 100 columns (16.4) | doctor-fleet.test.sh §Section 8
+doctor-reads.test.sh | §Section 10 | keep | payload/scripts/doctor.sh:2269-2270 the environment fix line's row count "$ENV_MISSING" dropped, so writing the four names moves the headline by 1 against 4 rows (18.5) | none (searched 'environment settings' and 'CLAUDE_CODE_DISABLE_AUTO_MEMORY' in tests/ suites that run doctor)
+doctor-reads.test.sh | §Section 19 | keep | payload/scripts/doctor.sh:1894 the sweep-failed fix line deleted, so a failure marker earns no line and no problem (19.3-19.6) | none (searched 'sweep-failed' and 'dead-session sweep failed' in tests/; session-sweep.test.sh drives session-start, not doctor)
+
 ## doctor-restart.test.sh
 
 doctor-restart.test.sh | §Section 1 | keep | payload/scripts/doctor.sh restart row: the fix line's load time taken from somewhere other than the record's started=, so "pid … loaded hooks at 2026-08-27 14:00Z" goes red (4); the page is the only carrier of that time. also: 1 prose pin on the exit-and-restart fix line | none (searched 'loaded hooks at' and 'restart needed' in tests/)
@@ -752,6 +770,26 @@ live-agents.test.sh | §P | keep | payload/scripts/lib/agents.sh live_row_open: 
 ## loader.test.sh
 
 loader.test.sh | — | — | no section | —
+
+## name-scan.test.sh
+
+name-scan.test.sh | §PUB | keep | rule: check pin — tests/lib/name-scan.sh:662 the closing `[ "$hits" -eq 0 ]` made `true`, so a scan that prints a hit in a committed file, a message or an annotated tag exits 0 (PUB1, PUB2, PUB4); also :618 `${BIONIC_CHECK_HEAD:-HEAD}` made `HEAD` (PUB6) | release-check.test.sh §SCAN
+name-scan.test.sh | §POWER | keep | rule: check pin — tests/lib/name-scan.sh:653 the prove_power call deleted, so a scan whose object reader is blind exits a clean 0 instead of 2 (POW5); also :578-580 the inside-checkout refusal deleted (POW1) | name-scan.test.sh §SITES (unverified), name-scan.test.sh §CEIL (unverified)
+name-scan.test.sh | §PATH | keep | rule: check pin — tests/lib/name-scan.sh prove_power: the expected `path name` line deleted, so a scan whose path list is blind exits a clean 0 instead of 2 (PATH4) | name-scan.test.sh §SITES (unverified)
+name-scan.test.sh | §BASE | keep | rule: check pin — tests/lib/name-scan.sh:626 the `--exclude` of the tags at the head dropped, so at a tagged head the base is the head itself, the range is empty and a message inside the release exits 0 (BASE1, BASE2, BASE4) | none (searched 'points-at' and 'base=' in tests/)
+name-scan.test.sh | §LIST | keep | rule: check pin — tests/lib/name-scan.sh:593 the byte-order-mark strip deleted, so a list line led by a BOM plants and finds its own BOM-led entry in the throwaway and exits 0 on a repository that holds the entry (the BOM rows) | none (searched 'BOM' and '357' in tests/)
+name-scan.test.sh | §TRACE | keep | tests/lib/name-scan.sh:116 the GIT_TRACE* unset loop deleted, so a caller's GIT_TRACE_REFS file records the entry the power check plants in a tag name | none (searched 'GIT_TRACE' in tests/)
+name-scan.test.sh | §BASH32 | duplicate | tests/lib/name-scan.sh:627 `${EXCL[@]+"${EXCL[@]}"}` made `"${EXCL[@]}"`, which bash 3.2 under set -u aborts on at an untagged head, so the default base is lost and an older message is read; the /bin/bash-against-PATH-bash row compares an interpreter with itself under the runner's pin | name-scan.test.sh §PUB (PUB2, shown red on a doctored copy), name-scan.test.sh §PATH, name-scan.test.sh §BASE, name-scan.test.sh §LIST
+name-scan.test.sh | §ARGV | keep | tests/lib/name-scan.sh:531 the power check's tag names written through `update-ref -z --stdin` replaced by one `git tag <entry>` per entry, so an entry is a word of a git command line the argv shim logs | none (searched 'argv' and 'eventTarget' in tests/)
+name-scan.test.sh | §BYTES | keep | rule: check pin — tests/lib/name-scan.sh:658 the refusal on a scan_repo status above 1 deleted, so a blob the range introduces that cannot be read leaves the scan a clean 0 (BYT4) | none (searched 'could not read everything' and 'cannot be read' in tests/)
+name-scan.test.sh | §RANGE | keep | tests/lib/name-scan.sh:223 hit()'s `$seen` check dropped, so an author whose name and email both hold the entry prints two author lines (RNG3) | none (searched 'author' in tests/ suites that run the scan)
+name-scan.test.sh | §SEP | keep | tests/lib/name-scan.sh:302 the head path list split on `[\0\n]` instead of NUL, so the path holding a newline is two records and the later paths' positions shift (SEP1) | none (searched 'newline' and 'pos_of' in tests/)
+name-scan.test.sh | §CASE | keep | tests/lib/name-scan.sh:146 fold's `fc(Encode::decode("UTF-8", …))` made `lc` of the raw bytes, so an upper-case Ö is not folded and the upper-case path and contents are not found (CASE1, CASE2) | none (searched 'fc(' and 'diaeresis' in tests/)
+name-scan.test.sh | §XTRACE | keep | tests/lib/name-scan.sh:2 `set +x +v` deleted, so `bash -x` on the scan prints every entry in its trace | none (searched 'bash -x' and 'set +x' in tests/)
+name-scan.test.sh | §CEIL | keep | rule: check pin — tests/lib/name-scan.sh:112 GIT_CEILING_DIRECTORIES dropped from the unset line, so a caller's ceiling hides the checkout around a list and the list inside it is scanned to a clean 0 | none (searched 'GIT_CEILING_DIRECTORIES' in tests/)
+name-scan.test.sh | §SITES | keep | rule: check pin — tests/lib/name-scan.sh prove_power: the expected `range-only blob` line deleted, so a scan blind to the blobs only the range holds (`--filter=blob:none`) exits a clean 0 | none (searched 'range-only blob' and 'filter=object:type=blob' in tests/)
+name-scan.test.sh | §COST | keep | tests/lib/name-scan.sh:285 look()'s `$line += ($1 =~ tr/\n//)` made a count from the text's start at each hit, so 20,000 matching lines in one blob cost their square and pass 5 seconds (unverified) | none (searched 'took under 5 seconds' in tests/)
+name-scan.test.sh | §QUIET | keep | tests/lib/name-scan.sh:648 the EXIT trap's `rm -rf "$TMP_SCAN"` deleted, so the throwaway, whose paths and blobs hold every entry, is left in TMPDIR (QUIET1, QUIET2); also :405-406 `2>/dev/null` dropped from for-each-ref (QUIET4) | none (searched 'TMPDIR' and 'left behind' in tests/)
 
 ## notify.test.sh
 
@@ -1483,6 +1521,7 @@ dispatch-preflight-4b.test.sh §RIGOR — duplicate
 dispatch-preflight.test.sh §S22b — duplicate
 dispatch-preflight.test.sh §budget-markers — duplicate
 doctor-patrol.test.sh §Section 8 — duplicate
+doctor-reads.test.sh §Section 9 — duplicate
 doctor-restart.test.sh §Section 2 — duplicate
 doctor-version.test.sh §Section 3 — duplicate
 doctor-version.test.sh §Section 12 — duplicate
@@ -1533,6 +1572,7 @@ live-agents.test.sh §A — duplicate
 live-agents.test.sh §F — duplicate
 live-agents.test.sh §G — duplicate
 live-agents.test.sh §M — duplicate
+name-scan.test.sh §BASH32 — duplicate
 notify.test.sh §ASKS mutants — duplicate
 patrol-duties-gate.test.sh §Section 1 — duplicate
 patrol-duties-gate.test.sh §Section 5 — duplicate
