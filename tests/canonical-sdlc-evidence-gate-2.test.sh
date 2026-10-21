@@ -197,6 +197,8 @@ GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and conf
 # verdict, no waiver → allow.
 h30a=$(make_home)
 write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")")" > /dev/null
+expect_allow "30a T4 + attributed user-confirmed + empty auditor cell at current 8 → allow (ruled by the user)" \
+  "$h30a" 'git commit -m "x"'
 
 # 30b — an agent-shaped claim: no attributed human, no date. Still refused.
 h30b=$(make_home)
