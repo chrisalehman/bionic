@@ -442,30 +442,32 @@ SR_FORECAST= sr_world marks-bare none
 sr_run "$SR_PLAN"
 
 # ============================================================
-section "§CLOCK: the schedule mark reads the clock, tasks done since the Step-3 approval against the pace the plan's forecast: needs, ✅ at or ahead, ➖ within 1.25× behind, ✖️ further; the median landing against the 15-minute bar beside it; the declared sizes feed nothing of the mark"
+section "§CLOCK: the schedule mark grades the likely close against the forecast end, the Step-3 approval plus the plan's forecast:; the pace behind the likely close is the run's own, whose sizes it reads; the median landing against the 15-minute bar beside it"
 # ============================================================
-# 39 tasks, 4 done (10%), 11 hours after approval, against a 24-hour forecast: the pace needs 39 × 11/24 = 17.9,
-# so 18. The four landings take 120 120 134 134 minutes: median 127.
+# 39 tasks, 4 done, 11 hours after approval, against a 24-hour forecast. The four landings take 120 120 134 134
+# minutes against sizes of 5 5 10 10: a pace of 18.7×, a likely close far past the forecast end.
 SR_FORECAST=24h SR_EXTRA=22 sr_world clock "120 120 134 134"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
 expect_eq "CK0 precondition: 39 tasks, 4 done, read by the title" "4 of 39 tasks done" "$(sr_tasks)"
 SR_CK1="$(sr_ind schedule)"
 SR_AT=$((SR_NOW - 3600)) sr_run --basis "$SR_PLAN"; SR_CK1_PACE="$(sr_line '- The pace: ')"
-# The declared sizes change and nothing else: the mark and its line do not move. The close's pace, which still
-# reads the sizes, is the proof the rewrite reached the renderer: 127 min over 500 planned, 0.25×.
+expect_eq "CK1 behind: the likely close is past the 24 h forecast's end, the mark is ✖️ and the line names the forecast and the pace" \
+  "$SR_MARK_OVER|yes|yes" \
+  "${SR_CK1%% *}|$(printf '%s\n' "$SR_CK1" | /usr/bin/grep -qE 'over the 24 h forecast; this run.s 18\.7×' && echo yes)|$(printf '%s\n' "$SR_CK1" | /usr/bin/grep -qE 'likely .* against 3:00 AM 2026-10-07, [0-9]+ min over' && echo yes)"
+# The declared sizes change: the pace is the likely close's, and the sizes are what it reads, so the line moves with
+# it. The close's pace is the proof the rewrite reached the renderer: 127 min over 500 planned, 0.25×.
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 500 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 SR_AT=$((SR_NOW - 3600)) sr_run --basis "$SR_PLAN"
 expect_eq "CK2a precondition: the sizes rewrite reached the renderer (the pace moved to 0.25×)" \
   "yes|yes" "$(sr_line '- The pace: ' | /usr/bin/grep -q '^- The pace: 0\.25×, ' && echo yes)|$([ "$(sr_line '- The pace: ')" != "$SR_CK1_PACE" ] && echo yes)"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
-expect_eq "CK2 …and the schedule line is byte for byte what it was: the declared sizes feed nothing of the mark" \
-  "$SR_CK1" "$(sr_ind schedule)"
-# Ahead of pace: a 240-hour forecast needs 39 × 11/240 = 1.8, so 2, and 4 done in a 9-minute median.
+expect_eq "CK2 …and the schedule line names that pace: the sizes reach the mark only through the likely close" \
+  "yes|yes" "$(sr_ind schedule | /usr/bin/grep -q "; this run.s 0\.25×" && echo yes)|$([ "$(sr_ind schedule)" != "$SR_CK1" ] && echo yes)"
+# Ahead: a 240-hour forecast, the same four landings at 1.2×.
 SR_FORECAST=240h SR_EXTRA=22 sr_world clock-ahead "6 6 12 12"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
-expect_eq "CK3 the clock half says done against needed with the forecast, and a verdict: behind in one world, ahead in the other" \
-  "the 24 h forecast needs 18 by now, behind|the 240 h forecast needs 2 by now, ahead" \
-  "$(printf '%s\n' "$SR_CK1" | /usr/bin/grep -oE 'the [0-9]+ h forecast needs [0-9]+ by now, [a-z ]+')|$(sr_ind schedule | /usr/bin/grep -oE 'the [0-9]+ h forecast needs [0-9]+ by now, [a-z ]+')"
+expect_eq "CK3 ahead: the likely close is inside the 240 h forecast, ✅, and the line names that forecast" \
+  "$SR_MARK_WITHIN|yes" "$(sr_ind schedule | awk '{ print $1 }')|$(sr_ind schedule | /usr/bin/grep -q 'min inside the 240 h forecast; this run.s 1\.2×; ' && echo yes)"
 # The scorecard's target is the same bar, and its schedule line is the page's, joined to one line.
 SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null)"
 expect_eq "CK4 the scorecard's widest landing prints against target < 15, the landing bar" \
@@ -596,8 +598,8 @@ expect_eq "FC1b the Bottom line's close is the floor and the likely close, namin
 SR_FC1_CLOSE="$(sr_line '- Close: ')"
 awk '{ sub(/^forecast: 48h$/, "forecast: 24h") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: it needs 9 by now)" \
-  "$SR_FC1_CLOSE|yes" "$(sr_line '- Close: ')|$(sr_ind schedule | /usr/bin/grep -q 'needs 9 by now' && echo yes)"
+expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: it names the 24 h forecast)" \
+  "$SR_FC1_CLOSE|yes" "$(sr_line '- Close: ')|$(sr_ind schedule | /usr/bin/grep -q 'inside the 24 h forecast' && echo yes)"
 # The close on the local clock: a time on now's day bare, past midnight with its date.
 sr_world forecast-late "6 6 12 12"
 SR_AT=$((SR_NOW - 6 * 3600)) sr_run "$SR_PLAN"
@@ -648,7 +650,7 @@ expect_regex "PA1b …and the page's close names it" " \(this run's 1\.5×\)\.$"
 SR_DISPATCH_ROWS="" sr_world pace-zero "0 0 0 0"
 sr_run "$SR_PLAN"
 expect_eq "PA2 no dispatched instant: the floor with no pace, and no likely close or About" \
-  "- Close: not before 7:00 PM (no pace yet).|0" "$(sr_line '- Close: ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE 'likely|About ')"
+  "- Close: not before 7:00 PM (no pace yet).|0" "$(sr_line '- Close: ')|$(sr_line '- Close: ' | /usr/bin/grep -cE 'likely|About ')"
 # Dispatched at the very minute each lands: every ratio is 0, a pace that is not positive, unmeasured.
 SR_DISPATCH_LEAD=0 sr_world pace-nil "0 0 0 0"
 sr_run "$SR_PLAN"
@@ -691,8 +693,8 @@ expect_eq "FL2 a likely close at or before now prints the floor, never now's clo
 # floor is days off; it is the estimate, the floor the plan's own minutes.
 awk -F'|' 'BEGIN { OFS = "|" } $2 == " T9 " { $9 = " 6000 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "FL2b a likely close after now prints beside the floor, whichever is earlier" \
-  "- Close: not before 7:00 PM 2026-10-10 · likely 3:06 PM (this run's 0.001×)." "$(sr_line '- Close: ')"
+expect_eq "FL2b a likely close before the floor is the one instant, the floor omitted" \
+  "- Close: likely 3:06 PM (this run's 0.001×).|0" "$(sr_line '- Close: ')|$(sr_line '- Close: ' | /usr/bin/grep -c 'not before')"
 # The page states the close once; the arithmetic is --basis's.
 sr_world floor-basis "6 6 12 12"
 sr_run "$SR_PLAN"
@@ -702,6 +704,101 @@ sr_run --basis "$SR_PLAN"
 expect_eq "FL3b --basis prints the work and the width, the chain, the pace, and the floor and likely instants" \
   "- The work left is 480 min as planned, 240 min over the 2 suite runs the gate admits; the longest chain left, T8 → T9, is 150 min; the larger is 240 min.|- The pace: 1.2×, the median over 4 landings of the minutes from dispatch to landing over the minutes planned.|- The floor: 240 min at 1× from now, 7:00 PM; the likely close: 288 min at 1.2×, 7:48 PM." \
   "$(sr_line '- The work left ')|$(sr_line '- The pace: ')|$(sr_line '- The floor: ')"
+
+# ============================================================
+section "§GUESS: the schedule always has a best guess — the likely close against the forecast end (the Step-3 approval plus the typed forecast:, else the plan's own minutes), ✅ inside, ➖ over by at most a quarter, ✖️ beyond; before the first one-file landing the bar half is words and the mark is the clock's; a likely close at or before the floor is the one instant"
+# ============================================================
+# The `none` world has no landing and 510 open minutes, 255 over the 2 admitted, above the 150-minute chain: the floor
+# is 255 minutes on. Run at 9:00 AM, 360 minutes after the 3:00 AM approval, a delivered run at the same scale lending
+# 1× puts the likely close at 1:15 PM. The 12 h forecast ends at 3:00 PM, 105 minutes on.
+SR_NINE=$((SR_NOW - 21600))
+SR_SCALE=wave SR_FORECAST=12h sr_world guess-in none
+sr_prev 60 wave
+SR_AT=$SR_NINE sr_run "$SR_PLAN"
+SR_G1="$(sr_ind schedule)"
+expect_eq "G-1 an approved plan with forecast: 12h and a delivered run lending 1×, the likely close inside: ✅, the line against the forecast end, naming the forecast, the pace and the bar in words" \
+  "$SR_MARK_WITHIN schedule — likely 1:15 PM against 3:00 PM, 105 min inside the 12 h forecast; wave-40's 1×; no one-file landing yet against the 15 min bar" "$SR_G1"
+expect_eq "G-1b …and the line never says it cannot be graded, nor reads ❔ (a positive read of the same line first)" "yes|0|0" \
+  "$(printf '%s\n' "$SR_G1" | /usr/bin/grep -q '^.* schedule — likely ' && echo yes)|$(printf '%s\n' "$SR_G1" | /usr/bin/grep -c 'declares no forecast\|cannot be graded')|$(printf '%s\n' "$SR_G1" | /usr/bin/grep -c "^$SR_MARK_NONE")"
+# The same likely close, 1:00 PM at 345 minutes in, against forecasts of 500, 400 and 480 minutes: 100, 200 and 120
+# minutes over, a fifth, a half and exactly a quarter of the forecast.
+SR_AT=$((SR_NOW - 22500))
+for fc in 500m 400m 8h; do
+  SR_SCALE=wave SR_FORECAST=$fc sr_world "guess-$fc" none
+  sr_prev 60 wave
+  sr_run "$SR_PLAN"
+  eval "SR_G2_$fc=\"\$(sr_ind schedule)\""
+done
+unset SR_AT
+expect_eq "G-2 the likely close a fifth over the forecast end: ➖, the minutes over said" \
+  "$SR_MARK_NEAR schedule — likely 1:00 PM against 11:20 AM, 100 min over the 8 h 20 min forecast; wave-40's 1×; no one-file landing yet against the 15 min bar" "$SR_G2_500m"
+expect_eq "G-2b …half over: ✖️" \
+  "$SR_MARK_OVER schedule — likely 1:00 PM against 9:40 AM, 200 min over the 6 h 40 min forecast; wave-40's 1×; no one-file landing yet against the 15 min bar" "$SR_G2_400m"
+expect_eq "G-2c …exactly a quarter over: ➖, the bound inclusive" \
+  "$SR_MARK_NEAR schedule — likely 1:00 PM against 11:00 AM, 120 min over the 8 h forecast; wave-40's 1×; no one-file landing yet against the 15 min bar" "$SR_G2_8h"
+# No forecast: the plan's own minutes, 510, end the forecast at 11:30 AM; the run at 9:00 AM likely closes 1:15 PM,
+# 105 minutes over, a fifth of 510.
+SR_SCALE=wave SR_FORECAST= sr_world guess-plan none
+sr_prev 60 wave
+SR_AT=$SR_NINE sr_run "$SR_PLAN"
+expect_eq "G-3 no forecast:, graded against the plan's own 510 minutes, said: ➖, never \"declares no forecast\" or ❔" \
+  "$SR_MARK_NEAR schedule — likely 1:15 PM against 11:30 AM, 105 min over the plan's 510 min; wave-40's 1×; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
+# No landing, no delivered run to lend a pace: the floor is the guess at 1×. At 3:00 PM it is 7:15 PM, inside the 48 h
+# forecast ending 3:00 AM on the 8th, 1905 minutes on.
+sr_world guess-bare none
+sr_run "$SR_PLAN"
+expect_eq "G-4 before any one-file landing and with no pace yet, the tasks on pace: ✅, the floor is the guess and says so, the bar half in words" \
+  "$SR_MARK_WITHIN schedule — likely 7:15 PM against 3:00 AM 2026-10-08, 1905 min inside the 48 h forecast; at 1×, no pace yet; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
+# From the first landing the mark is the worse half. Four 20-minute landings put the bar over with the clock inside; a
+# 6 h forecast puts the clock over with the bar within.
+sr_world guess-bar "20 20 20 20"
+sr_run "$SR_PLAN"
+SR_G4B="$(sr_ind schedule)"
+SR_FORECAST=6h sr_world guess-clock "6 6 12 12"
+sr_run "$SR_PLAN"
+SR_G4C="$(sr_ind schedule)"
+sr_world guess-both "6 6 12 12"
+sr_run "$SR_PLAN"
+expect_eq "G-4b from the first landing, the bar over and the clock inside: the worse half, ✖️, the bar half the median landing in words" \
+  "$SR_MARK_OVER|yes|yes" "${SR_G4B%% *}|$(printf '%s\n' "$SR_G4B" | /usr/bin/grep -q 'min inside the 48 h forecast; ' && echo yes)|$(printf '%s\n' "$SR_G4B" | /usr/bin/grep -q '; the median one-file landing takes 20 min, over the 15 min bar$' && echo yes)"
+expect_eq "G-4c …the clock over and the bar within: ✖️ again; both within: ✅" \
+  "$SR_MARK_OVER|yes|$SR_MARK_WITHIN" \
+  "${SR_G4C%% *}|$(printf '%s\n' "$SR_G4C" | /usr/bin/grep -q '; the median one-file landing takes 9 min, within the 15 min bar$' && echo yes)|$(sr_ind schedule | awk '{ print $1 }')"
+# An unapproved plan keeps its sentence: nothing to grade the close against.
+SR_APPROVED=none sr_world guess-unapproved none
+sr_run "$SR_PLAN"
+expect_eq "G-4d no Step 3 approval: the sentence stays, ❔, and the bar half is words" \
+  "$SR_MARK_NONE schedule — the clock cannot be graded, no Step 3 approval time; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
+# Nothing left to forecast: every task landed, the run not yet delivered, the guess is now; delivered, it is the
+# delivery instant. Neither says it cannot be graded.
+sr_world guess-done "6 6 12 12"
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T([5-9]|1[0-7]) $/ { $14 = " landed " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "G-6 every task landed and the run open: the guess is now, 3:00 PM, inside the 48 h forecast" \
+  "$SR_MARK_WITHIN schedule — likely 3:00 PM against 3:00 AM 2026-10-08, 2160 min inside the 48 h forecast; every task done; the median one-file landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
+sr_w38_world
+awk '{ print } /^current: 9$/ && !d { print "approved-by: fixture 2026-10-18T03:00:00Z \"approved\""; d = 1 }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "G-6b a delivered run: the delivery instant against the forecast end (727 of 2880 minutes), the pace \"delivered\", never cannot be graded" \
+  "$SR_MARK_WITHIN schedule — closed 8:07 AM 2026-10-18 against 8:00 PM 2026-10-19, 2153 min inside the 48 h forecast; delivered; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
+# A pace of 0.36× on this run (four rows sized 100 min, dispatched 36 min before they land) puts the likely close at
+# 4:26 PM, before the 7:00 PM floor: the one instant, the floor omitted.
+SR_DISPATCH_LEAD=36 sr_world guess-fast "5 5 5 5"
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 100 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "G-5 a pace of 0.36× on this run: the Bottom line prints the one instant and the pace, no \"not before\"" \
+  "- Close: likely 4:26 PM (this run's 0.36×).|0" "$(sr_line '- Close: ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'not before')"
+expect_eq "G-5b …and the schedule line grades that same instant" "yes" "$(sr_ind schedule | /usr/bin/grep -q 'schedule — likely 4:26 PM against ' && echo yes)"
+sr_run --line "$SR_PLAN"
+expect_eq "G-5c …and --line reads closes ~<clock>" "closes ~4:26 PM" "${OUT##* · }"
+# The pace the floor is made of, 1×: the likely close is the floor, still the one instant.
+SR_SCALE=wave sr_world guess-equal none
+sr_prev 60 wave
+SR_AT=$SR_NINE sr_run "$SR_PLAN"
+expect_eq "G-5d a likely close equal to the floor is the one instant too" "- Close: likely 1:15 PM (wave-40's 1×)." "$(sr_line '- Close: ')"
+SR_AT=$SR_NINE sr_run --basis "$SR_PLAN"
+expect_eq "G-5e …and --basis still prints both instants (the arithmetic is whole)" "yes" \
+  "$(sr_line '- The floor: ' | /usr/bin/grep -q '^- The floor: 255 min at 1× from now, 1:15 PM; the likely close: 255 min at 1×, 1:15 PM\.$' && echo yes)"
 
 # ============================================================
 section "§LINE: --line is the one-line form, the three indicator glyphs in order · owed: <n> · the close"
@@ -721,8 +818,8 @@ expect_eq "L3 …the one line's glyphs are the full page's first three marks, in
   "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN" "$(sr_page | awk '$2 == "schedule" || $2 == "correctness" || $2 == "waste" { printf "%s", $1 }')"
 SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
-expect_eq "L4 an indicator the record cannot compute (no forecast:, no landing) prints ❔ in the one line, and a close with no pace is its floor" \
-  "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ≥7:15 PM" "$OUT"
+expect_eq "L4 no forecast: and no landing: the schedule is graded against the plan's own minutes, never ❔, and a close with no pace is its floor" \
+  "$SR_MARK_OVER$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ≥7:15 PM" "$OUT"
 SR_APPROVED=none sr_world line-unapproved "6 6 12 12"
 sr_run --line "$SR_PLAN"
 expect_eq "L5 an unapproved plan: no forecast, said" "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · no forecast until approved" "$OUT"
@@ -968,7 +1065,8 @@ expect_eq "GM4 the goal now reads reached: the tick closes its open decision, an
 # ============================================================
 section "§ONE-FILE: the schedule's bar half and the one-file goal read the one-file landings only; a landing of more files moves neither"
 # ============================================================
-SR_GOALS="fast landings · one-file median under 5m (landing-report --rows)" sr_world one-file "90 90 10 10"
+# The forecast is 200 h: the landings' pace puts the likely close far out, and only the bar half is under test here.
+SR_FORECAST=200h SR_GOALS="fast landings · one-file median under 5m (landing-report --rows)" sr_world one-file "90 90 10 10"
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[12] $/ { $11 = " lib/t1.sh, lib/x.sh " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file landings: the schedule mark reads 10 min, ✅ within the bar" \

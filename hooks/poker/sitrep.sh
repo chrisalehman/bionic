@@ -638,11 +638,14 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #
 # THE CLOSE IS A FLOOR OR A FORECAST, NEVER NOW. L = max(the longest open chain, all open work ÷ the admitted count) in
 # the plan's own minutes, so admitting more can shorten the work's share and never one chain. The floor is now + L at
-# 1×; the likely close is now + L × the pace, printed only when it falls after now. The pace is the median of a
+# 1×; the likely close is now + L × the pace, printed only when it falls after now, and alone when it falls at or
+# before the floor (a pace of 1× or less), the floor then being no bound. The pace is the median of a
 # landing's dispatched-to-landed minutes over its planned minutes, this run's, else the newest delivered run's at the
 # same scale on the same project, named; with neither the floor stands alone. The queue's ready-to-landed time is a
 # wait at the gate and feeds nothing. A plan not approved at Step 3 prints the no-forecast sentence; a delivered one
-# prints its delivery and no close. No typed number feeds it: the plan's own `forecast:` grades the schedule mark.
+# prints its delivery and no close. No typed number feeds it: the schedule mark grades the likely close against the
+# forecast end, the Step-3 approval plus the plan's own `forecast:`, else plus its own minutes, and is never ungraded
+# on an approved plan.
 #
 # THE PLAN'S TABLE WORDS NEVER PRINT: no "rows", no status name, no cell value; a read prints in words.
 #
@@ -823,33 +826,50 @@ sitrep_bar() {
   printf '%s\n' "$LINE_LANDING_BAR"
 }
 
-# sitrep_schedule <plan> <done> <total> <now epoch> <median one-file ready→landed | empty> -> `<mark><TAB><text>`, the
-# schedule line after its mark. Two halves, each against a bar the run cannot set for itself:
-#   the clock  tasks done in the time since the plan's `approved-by:` instant (the Step-3 approval) against the
-#              tasks its frontmatter `forecast: <n>h|<n>m` needs by now, total × elapsed/forecast rounded, never
-#              above total: done ≥ needed within, needed ≤ 1.25 × done near, else over; not graded with no
-#              approval instant or no forecast.
-#   the bar    the median one-file landing against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else
-#              over; unmeasured before the first one-file landing. A landing of more files is not graded here.
-# The mark is the worse half, ranked over ✖️ > ➖ > ❔ > ✅, so an unmeasured half never reads within.
+# sitrep_schedule <plan> <now epoch> <median one-file ready→landed | empty> <sitrep_close line | empty> <units_rows
+# output> <delivered epoch | empty> -> `<mark><TAB><text>`, the schedule line after its mark. The line always carries a
+# best guess once the plan is approved, in two halves:
+#   the clock  the likely close against the forecast end: the Step-3 approval (`approved-by:`) plus the plan's typed
+#              `forecast: <n>h|<n>m`, else plus the plan's own minutes (the size cells of every row not dropped).
+#              The likely close is `sitrep_close`'s: this run's pace, else the borrowed one, else the floor at 1×,
+#              said; with no task open it is now, or the delivery instant. Whole minutes inside the end is within,
+#              over by at most a quarter of the forecast near, further over. Not graded before the approval only.
+#   the bar    the median one-file landing against LINE_LANDING_BAR: ≤ bar within, ≤ 1.25 × bar near, else over.
+#              Before the first one-file landing it is words and joins no rank, so the mark is the clock's alone;
+#              from the first landing it is the worse half. A landing of more files is not graded here.
+# The mark is ranked over ✖️ > ➖ > ❔ > ✅, so a half the record cannot grade never reads within.
 sitrep_schedule() {
-  local plan="$1" landed="$2" total="$3" now="$4" med="$5" appr fc bar clock cg bg bt k em
+  local plan="$1" now="$2" med="$3" clo="$4" rows="$5" dlv="$6" appr fc span which bar clock cg="n" bg="-" bt
+  local fl lk ratio whose rest likely word who end g dm
   appr="$(sitrep_approved_at "$plan")"
-  fc="$(plan_frontmatter_get "$plan" forecast 2>/dev/null | awk '
-    match($0, /^[0-9]+(\.[0-9]+)?[hm]?$/) { v = $0 + 0; if (v > 0) { if ($0 ~ /m$/) print v; else print v * 60 } }')"
-  if [ -z "$appr" ]; then cg=n; clock="the clock cannot be graded, no Step 3 approval time"
-  elif [ -z "$fc" ]; then cg=n; clock="the clock cannot be graded, the plan declares no forecast"
+  if [ -z "$appr" ]; then clock="the clock cannot be graded, no Step 3 approval time"
   else
-    IFS='	' read -r cg k em <<< "$(awk -v now="$now" -v a="$appr" -v f="$fc" -v l="$landed" -v t="$total" 'BEGIN {
-      e = now - a; if (e < 0) e = 0
-      r = e / (f * 60); if (r > 1) r = 1
-      k = int(t * r + 0.5)
-      g = (l >= k) ? "w" : ((k <= 1.25 * l) ? "a" : "o")
-      printf "%s\t%d\t%d\n", g, k, e / 60 }')"
-    clock="$landed of $total tasks done in $(sitrep_dur "$em"); the $(sitrep_dur "$fc") forecast needs $k by now, $([ "$landed" -gt "$k" ] && echo ahead || { [ "$landed" -eq "$k" ] && echo on pace || echo behind; })"
+    fc="$(plan_frontmatter_get "$plan" forecast 2>/dev/null | awk '
+      match($0, /^[0-9]+(\.[0-9]+)?[hm]?$/) { v = $0 + 0; if (v > 0) { if ($0 ~ /m$/) print v; else print v * 60 } }')"
+    if [ -n "$fc" ]; then span="$fc"; which="the $(sitrep_dur "$fc") forecast"
+    else
+      span="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s != "dropped" && match($7, /^[0-9]+/) { t += substr($7, RSTART, RLENGTH) } END { print t + 0 }')"
+      which="the plan's $span min"
+    fi
+    IFS='	' read -r fl lk ratio whose rest <<< "$clo"
+    word=likely
+    if [ -n "$dlv" ]; then likely="$dlv"; word=closed; who=delivered
+    elif [ -z "$fl" ]; then likely="$now"; who="every task done"
+    elif [ "$ratio" = - ]; then likely="$fl"; who="at 1×, no pace yet"
+    else
+      who="$whose's $(sitrep_ratio_fmt "$ratio")×"
+      if [ "$lk" != - ]; then likely="$lk"; else likely="$now"; fi
+    fi
+    end="$(awk -v a="$appr" -v s="$span" 'BEGIN { printf "%d", a + s * 60 }')"
+    IFS='	' read -r cg dm <<< "$(awk -v l="$likely" -v e="$end" -v f="$span" 'BEGIN {
+      d = (l - e) / 60; m = (d >= 0) ? int(d + 0.5) : -int(-d + 0.5)
+      g = (m <= 0) ? "w" : ((m <= 0.25 * f) ? "a" : "o")
+      printf "%s\t%d\n", g, (m < 0) ? -m : m }')"
+    g=$([ "$cg" = w ] && echo inside || echo over)
+    clock="$word $(sitrep_clock "$likely" "$now") against $(sitrep_clock "$end" "$now"), $dm min $g $which; $who"
   fi
   bar="$(sitrep_bar)"
-  if [ -z "$med" ]; then bg=n; bt="no one-file landing yet against the ${bar:-unverified} min bar"
+  if [ -z "$med" ]; then bt="no one-file landing yet against the ${bar:-unverified} min bar"
   elif [ -z "$bar" ]; then bg=n; bt="the median one-file landing takes $(sitrep_ratio_fmt "$med") min; the bar is unverified"
   else
     bg="$(awk -v m="$med" -v b="$bar" 'BEGIN { print (m <= b) ? "w" : ((m <= 1.25 * b) ? "a" : "o") }')"
@@ -1204,8 +1224,11 @@ $sit
 SITREP_SIT
 
   # ---- The Score's indicators
-  # the schedule mark: the clock and the bar (sitrep_schedule); the pace feeds the close only
-  IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$landed" "$total" "$now" "$lmed")"
+  # the schedule mark: the likely close against the forecast end, and the bar (sitrep_schedule). The close is read
+  # once, here, and the Bottom line prints the same line the schedule grades.
+  local clo=""
+  { [ -n "$dlv_at" ] || [ -z "$appr_at" ]; } || clo="$(sitrep_close "$plan" "$root" "$now" "$rows")"
+  IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$now" "$lmed" "$clo" "$rows" "$dlv_at")"
   s_text="$s_mark $s_text"
   local lred="${lr1#*· runs: green=}" s12 s1n s2n c_reds c_find
   case "$lr1" in *'· runs: green='*) lred="${lred#* red=}"; lred="${lred%% *}" ;; *) lred=0 ;; esac
@@ -1264,7 +1287,7 @@ SITREP_SIT
     set -- "The close will be the plan's chain from now, at 1× for its floor and at the measured pace for its likely close, never a typed number."
     btext="no forecast until the plan is approved at Step 3"; ltext="no forecast until approved"
   else
-    IFS='	' read -r fl lk ratio whose nland work per larger cids cmins admitted <<< "$(sitrep_close "$plan" "$root" "$now" "$rows")"
+    IFS='	' read -r fl lk ratio whose nland work per larger cids cmins admitted <<< "$clo"
   fi
   if [ -n "$dlv_at" ] || [ -z "$appr_at" ]; then :
   elif [ -z "$fl" ]; then
@@ -1284,7 +1307,8 @@ SITREP_SIT
       fi
       if [ "$lk" != - ]; then
         lkc="$(sitrep_clock "$lk" "$now")"
-        btext="not before $cl · likely $lkc ($pt)"; ltext="closes ≥$cl ~$lkc"
+        if [ "$lk" -le "$fl" ]; then btext="likely $lkc ($pt)"; ltext="closes ~$lkc"
+        else btext="not before $cl · likely $lkc ($pt)"; ltext="closes ≥$cl ~$lkc"; fi
         lk_txt="the likely close: $(awk -v l="$larger" -v r="$ratio" 'BEGIN { printf "%d", l * r + 0.5 }') min at $(sitrep_ratio_fmt "$ratio")×, $lkc"
       else
         btext="not before $cl ($pt)"; ltext="closes ≥$cl"
