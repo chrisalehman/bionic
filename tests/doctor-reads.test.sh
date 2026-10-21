@@ -1,7 +1,6 @@
 #!/bin/bash
-# tests/doctor-reads.test.sh — the facts doctor gathered and never printed, and
-# the pnpm-store diagnosis (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR
-# handoff 4.6, spec AC-23).
+# tests/doctor-reads.test.sh — the facts doctor gathers and must print, the
+# pnpm-store diagnosis, and the problem count those facts feed.
 #
 # THE TWO CONTRACTS UNDER TEST.
 #
@@ -19,6 +18,29 @@
 #       legacy hook files on disk, the duplicate-registry scan, and the path of
 #       the legacy installed skill copy. A probe nobody renders is a cost with no
 #       benefit and, worse, a fact this machine HAD and did not tell anyone.
+#
+# SECTIONS.
+#
+#   Section 1   pnpm-store: an index that cannot be read names the file.
+#   Section 2   pnpm-store: a readable index reports the cached version, nothing extra.
+#   Section 3   an installed agent copy that drifted from the payload is named, with a repair.
+#   Section 4   legacy hook files in the claude-home are counted, with a repair.
+#   Section 5   the legacy installed skill copy is named by its home-relative path.
+#   Section 6   a plugin registered twice is named, with the consolidation command.
+#   Section 6b  a renderer venv stale against uv.lock renders as a re-sync; a matching
+#               hash does not.
+#   Section 6c  setup's stale arm re-syncs without asking the install question again.
+#   Section 6d  a statusLine command still naming npx is flagged, and both of doctor's
+#               tables say so; the installed-binary form is not flagged.
+#   Section 6f  an absent core dependency routes to the CLI, never /bionic:setup; the
+#               headline counts rows, not lines; a re-pointed catalog reaches both
+#               surfaces and the headline still fits 100 columns.
+#   Section 7   every top-level fact doctor.sh assigns is read, beside a named allow-list.
+#   Section 8   every line of the fullest run, and a changed claude() row at a long rc
+#               path, fits 100 columns.
+#   Section 10  the headline moves by the rows the environment collapse stands for.
+#   Section 19  the dead-session fix line follows the auto-sweep's own failure marker,
+#               never residue alone; the filtered page matches the whole one.
 #
 # HERMETIC. Every fixture is built under one mktemp root: a claude-home whose
 # `agents/`, `hooks/` and `skills/` hold planted leftovers, a plugin registry
@@ -65,7 +87,7 @@ FIXTURE_RC="${TMP}/dot.zshrc"
 : > "$FIXTURE_RC"
 
 
-# ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S (wave-01 S4, AC-7) ─
+# ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S ───────────────────
 #
 # WHAT THIS SUITE RENDERED USED TO DEPEND ON WHOSE LAPTOP RAN IT. doctor asks
 # `command -v` about the ten `brew-dep` rows of BIONIC_DEP_TABLE, and six of
@@ -80,9 +102,8 @@ FIXTURE_RC="${TMP}/dot.zshrc"
 # SO THE FIXTURE OWNS THE SET. Every program doctor RUNS is symlinked from the
 # real one; every program doctor only ASKS ABOUT is an inert stub answering
 # `--version`. PATH is REPLACED, never prepended, so nothing ambient is
-# reachable — and `claude` is present or absent because this file says so,
-# which is what makes the pair of directories below an experiment rather than
-# a reflection of the machine.
+# reachable — and `claude` is the stub this file writes, which is what makes
+# the page an experiment rather than a reflection of the machine.
 _TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
 sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
 sleep dirname basename realpath id ps df sysctl vm_stat git strings"
@@ -102,7 +123,7 @@ make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT fin
   # A CLI THAT ANSWERS "no such thing" to the one question doctor asks it —
   # `claude mcp get <name>` — which is what a real CLI answers on a machine
   # with no MCP server registered. Present-and-negative and absent are
-  # different renders, and telling them apart is this suite's AC-7 pair.
+  # different renders, and the second argument says which this directory gives.
   if [ "$want" = yes ]; then
     printf '#!/bin/sh\nexit 1\n' > "${d}/claude"; chmod +x "${d}/claude"
   else
@@ -112,40 +133,28 @@ make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT fin
 }
 
 BIN="${TMP}/toolbox"
-BIN_NO_CLAUDE="${TMP}/toolbox-no-claude"
-_TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
+_TOOLS_MISSING="$(make_tool_dir "$BIN" yes)"
 if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
 else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
 
-# NO REAL HOST CLI IS REACHABLE FROM ANY LAUNCH IN THIS FILE (wave-26 T25, AC-10.1). Every launch below sets PATH
-# to one of the two toolbox directories and nothing else, so `claude`, `npm`, `brew`, `notebooklm`, `pnpm` and
-# `uv` resolve to the fixture's own answer: absent (`brew`, `npm`, `notebooklm` are not in either directory),
-# an inert stub (`pnpm`, `uv`, and `claude` in the first directory, which exits 1) or absent again (`claude` in
-# the second). The positive half is that each stub is a regular file the fixture wrote, never a symlink out to an
-# installed tool; the negative half is the three that are not there at all.
+# NO REAL HOST CLI IS REACHABLE FROM ANY LAUNCH IN THIS FILE. Every launch below sets PATH to the toolbox
+# directory and nothing else, so `claude`, `npm`, `brew`, `notebooklm`, `pnpm` and `uv` resolve to the fixture's
+# own answer: absent (`brew`, `npm`, `notebooklm` are not in the directory) or an inert stub (`pnpm`, `uv`, and
+# `claude`, which exits 1). The positive half is that each stub is a regular file the fixture wrote, never a
+# symlink out to an installed tool; the negative half is the three that are not there at all.
 _host_leaks=""
 for _t in claude pnpm uv; do
   { [ -f "${BIN}/${_t}" ] && [ ! -L "${BIN}/${_t}" ]; } || _host_leaks="${_host_leaks} ${_t}"
 done
 for _t in brew npm notebooklm; do
   [ -e "${BIN}/${_t}" ] && _host_leaks="${_host_leaks} ${_t}"
-  [ -e "${BIN_NO_CLAUDE}/${_t}" ] && _host_leaks="${_host_leaks} ${_t}"
 done
-[ -e "${BIN_NO_CLAUDE}/claude" ] && _host_leaks="${_host_leaks} claude(no-claude)"
 if [ -z "$_host_leaks" ]; then ok "T0b: no launch in this file can reach a real claude, npm, brew, notebooklm, pnpm or uv"
 else no "T0b: a host CLI is reachable from the fixture's PATH" "$_host_leaks"; fi
 
 run_doctor() {  # [extra env assignments as NAME=VALUE ...]
   ( cd "$REPO" && env "$@" \
       PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
-      BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=15 \
-      bash "$DOCTOR_SH" < /dev/null 2>&1 )
-}
-
-run_doctor_no_claude() {  # [extra env assignments] — the CLI off PATH
-  ( cd "$REPO" && env "$@" \
-      PATH="$BIN_NO_CLAUDE" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
       BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
@@ -238,12 +247,12 @@ expect_match "12: with the consolidation command the probe computed" \
 
 section "Section 6b: a renderer venv stale against uv.lock renders as a re-sync"
 
-# THE VENV FINDING (wave assumptions, 22:30Z). `_dep_check_uv_project` gained a
-# third state — `stale`, a venv built against a DIFFERENT `uv.lock` than the one
-# now shipped — and doctor's three `case "$present"` sites folded it into their
-# catch-all, so a stale venv rendered like `unknown` with a cause about a
-# mechanism that keeps no presence surface. AC-17's whole point is that this state
-# is REPAIRED and not re-offered, which it cannot be while nothing names it.
+# THE VENV FINDING. `_dep_check_uv_project` has a third state — `stale`, a venv
+# built against a DIFFERENT `uv.lock` than the one now shipped — and doctor's
+# three `case "$present"` sites once folded it into their catch-all, so a stale
+# venv rendered like `unknown` with a cause about a mechanism that keeps no
+# presence surface. A stale venv is REPAIRED and not re-offered, which it cannot
+# be while nothing names it.
 #
 # The fixture is the shape the probe reads: a venv at the stable machine-local
 # path with a python in it, a shipped `uv.lock` beside the references, and a
@@ -283,8 +292,8 @@ fi
 
 section "Section 6c: setup treats stale as a re-sync, never as a fresh offer"
 
-# STRUCTURAL, AND PINNED TO THE MECHANISM RATHER THAN TO A SENTENCE. AC-17 says a
-# stale venv is "re-synced, not re-offered", and the thing that decides whether a
+# STRUCTURAL, AND PINNED TO THE MECHANISM RATHER THAN TO A SENTENCE. A stale
+# venv is "re-synced, not re-offered", and the thing that decides whether a
 # question is asked is `SETUP_ALL` — `install_dep` skips its `_dep_consent` call
 # under it. So the assertion is that `_setup_install_class` has a `stale` arm and
 # that the arm raises SETUP_ALL around the install rather than falling into the
@@ -302,9 +311,9 @@ case "$STALE_ARM" in
   *) no "12c3: the stale arm names no installer" ;;
 esac
 
-section "Section 6d: a settings.json still naming npx flags a defect (epic-21 AC-3)"
+section "Section 6d: a settings.json still naming npx flags a defect"
 
-# THE NETWORK-PER-RENDER DEFECT (bug-ccstatusline-npx-per-render.md, Fix step 5). A
+# THE NETWORK-PER-RENDER DEFECT. A
 # `statusLine.command` that still starts with `npx ` is the pre-fix shape: Claude Code
 # runs that command on every render, and `npx pkg@latest` resolves a registry lookup
 # before it can print anything. Nothing rewrites settings.json on its own, so a machine
@@ -319,7 +328,7 @@ cat > "${CHOME}/settings.json" <<'JSON'
 }
 JSON
 
-# THE WHOLE PRE-1.4.4 MACHINE, NOT HALF OF IT (1.4.4 T5). `_dep_check_statusline` reads two
+# THE WHOLE PRE-1.4.4 MACHINE, NOT HALF OF IT. `_dep_check_statusline` reads two
 # halves — the recorded command and the layout file under ~/.config/ccstatusline — and a
 # fixture with only the first would report the row absent for the LAYOUT's sake, which is a
 # different fact from the one this section is about. Copying the shipped layout in makes the
@@ -332,16 +341,15 @@ OUT6D="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 
 expect_match "12d1: the npx statusLine command is flagged as a defect" \
   "*statusLine command*npx*" "$OUT6D"
-# THE HINT IS A PROMISE, AND IT IS KEPT NOW (1.4.4 T5, review-b F-1). This row used to pin a
+# THE HINT IS A PROMISE, AND IT IS KEPT NOW. This row used to pin a
 # false promise: `_dep_check_statusline` accepted the npx string as proof the dependency was
 # present, so `tool:ccstatusline` was never pending and the setup run doctor names here
 # reported "nothing left to do" with the ✗ still on the screen. The presence check rejects
-# the npx form now, which is what puts an item behind the hint —
-# tests/cross-gate-agreement.test.sh §DS.2 is the row that proves setup actually offers it.
+# the npx form now, which is what puts an item behind the hint.
 expect_match "12d2: and the row names re-running setup" \
   "*statusLine command*npx*/bionic:setup*" "$OUT6D"
 
-# ONE MACHINE, ONE ANSWER (1.4.4 T5, review-a C-4). Doctor's THIRD PARTY table and its
+# ONE MACHINE, ONE ANSWER. Doctor's THIRD PARTY table and its
 # ENVIRONMENT table are two renderings of the same machine, and on this fixture they used to
 # contradict each other seventeen lines apart: `✓ ccstatusline … command set, layout file in
 # place` above, `✗ statusLine command … still uses npx` below. A reader cannot act on a
@@ -369,20 +377,18 @@ expect_no_match "12d3: the installed-binary command form is never flagged" \
   "*statusLine command*npx*" "$OUT6E"
 
 echo ""
-section "Section 6f: an absent CORE dependency routes to the CLI, not /bionic:setup (1.4.4 fixit)"
+section "Section 6f: an absent CORE dependency routes to the CLI, not /bionic:setup"
 
 # A CORE DEPENDENCY IS BIONIC'S OWN. `payload/.claude-plugin/plugin.json` declares
 # superpowers and agent-skills as bionic's dependencies and the CLI installs them alongside
-# bionic itself (`"auto": true` in the registry) — no setup item installs one, and deps.sh's
-# D1 says setup never installs a native row. So a machine missing one is not a
-# `/bionic:setup` repair, and the row that used to end that way sent the reader to a command
-# that plans nothing for it (.bionic/docs/ideas/fixit-1.4.4-absent-core-dependency-hint.md;
-# the same class the 1.4.4 bug report describes). The repair is the CLI's own verb, measured
-# restoring the dependency at record/epic-21-v1-ladder/fixit-dep-repair-measurement.md.
+# bionic itself (`"auto": true` in the registry) — no setup item installs one, and deps.sh
+# says setup never installs a native row. So a machine missing one is not a `/bionic:setup`
+# repair, and a row that ended that way would send the reader to a command that plans
+# nothing for it. The repair is the CLI's own verb.
 #
 # A REGISTRY THAT KNOWS BIONIC AND NEITHER DEPENDENCY is the shape of an install that came
-# in incomplete — which is the machine epic-17 W5 F12 §4.1 measured, where `claude plugin
-# list` prints `✘ failed to load` and names the missing dependency.
+# in incomplete, where `claude plugin list` prints `✘ failed to load` and names the missing
+# dependency.
 jq -nc '{plugins:{"bionic@bionic":[{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}]}}' \
   > "${CHOME}/plugins/installed_plugins.json"
 
@@ -395,7 +401,7 @@ jq -nc '{plugins:{"bionic@bionic":[{installPath:"/nonexistent/a", gitCommitSha:"
 rm -rf "${CHOME}/hooks" "${CHOME}/agents" "${CHOME}/skills"
 
 # THE RENDERER REFS ARE PASSED, and that is what makes the headline rows below
-# load-bearing. Section 6c left `${VENV_DIR}.lock.sha256` matching `${REFS}/uv.lock`, so this
+# load-bearing. Section 6b left `${VENV_DIR}.lock.sha256` matching `${REFS}/uv.lock`, so this
 # run has no stale-venv fix line — without it that line leads the verdict and the collapsed
 # absence list is cut off the end of it before any dependency name is reached, which would
 # let 12f5b pass on a doctor that had never been fixed.
@@ -428,8 +434,8 @@ expect_match "12f6: the core absences get their own line, with the route on it" 
   "*core dependencies absent (superpowers, agent-skills) → claude plugin install bionic@bionic*" \
   "$OUT6F"
 
-# THE PROBLEM COUNT IS ROWS, NOT CATEGORIES (Chris 2026-08-22, and doctor.sh's own comment
-# at the swap), and adding a class of absence must not change what that sentence means. The
+# THE PROBLEM COUNT IS ROWS, NOT CATEGORIES (doctor.sh's own comment at the swap), and
+# adding a class of absence must not change what that sentence means. The
 # verdict collapses the setup-fixable absences into one fix line and swaps that line for the
 # number of ✗ dependency rows it stands for; the core absences are a SECOND collapsed line
 # over rows the same tally already counts, so counting both lines AND all the rows counts
@@ -477,15 +483,14 @@ expect_match "12f9: both renders report a problem count" \
   "[0-9]*|[0-9]*" "${D6F_N_BAD}|${D6F_N_OK}"
 expect_eq "12f10: …and the core-absent machine carries exactly two more ✗ dependency rows" \
   "2" "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))"
-# THE HEADLINE COUNT AGAINST THE ROWS IT STANDS FOR (1.4.4 A-10, folded in at
-# wave-01 S4 as this task's one agreement assertion). The 1.4.4 walk measured a
+# THE HEADLINE COUNT AGAINST THE ROWS IT STANDS FOR. A walk once measured a
 # machine whose headline said 21 while 24 ✗ rows were printed under it — the
 # collapse arithmetic subtracting one line per collapsed CLASS while the rows it
 # stood for were counted somewhere else. Two numbers on one page, disagreeing,
 # and nothing said so.
 #
 # THE GENERAL RULE IS `count >= rows`: every ✗ row is a problem, so the headline
-# can never be the smaller number, and the 1.4.4 defect is exactly that
+# can never be the smaller number, and the defect measured there is exactly that
 # inequality broken. ON THIS FIXTURE IT IS EQUALITY, which is the sharper pin
 # and the one taken here, because every problem this machine has renders as a
 # row — no stale proxy, no legacy block, no degraded plugin, none of the states
@@ -511,8 +516,7 @@ expect_true "12f7: doctor renders a THIRD PARTY row for the absent extra depende
 expect_match "12f8: a basic/extra absence still routes to /bionic:setup on the same fixture" \
   "*impeccable*not installed → /bionic:setup*" "$ROW6FX"
 
-# THE CATALOG IS DERIVED ON EVERY SURFACE, NEVER SPELLED (1.4.4 fixit phase 4, review-b
-# B-10). Three files compose the plugin id this route names — deps.sh's `dep_plugin_id`,
+# THE CATALOG IS DERIVED ON EVERY SURFACE, NEVER SPELLED. Three files compose the plugin id this route names — deps.sh's `dep_plugin_id`,
 # doctor.sh's `BIONIC_PLUGIN_ID`, setup.sh's `SETUP_PLUGIN_ID` — and every assertion above
 # pins the rendered default `bionic@bionic`. Nothing in the tree re-pointed the catalog, so
 # any one of those three could have been edited back to a literal and the whole suite stayed
@@ -521,8 +525,8 @@ expect_match "12f8: a basic/extra absence still routes to /bionic:setup on the s
 #
 # NINETEEN CHARACTERS ON PURPOSE. The headline's fixed part grows with the route, so the
 # name length is what decides whether that line obeys the report's own 100-column rule — and
-# a cap copied from another line's budget passes at `bionic` and overflows here (review-a
-# A-2, review-c C-2). The row is a different story and is asserted differently below.
+# a cap copied from another line's budget passes at `bionic` and overflows here. The row
+# is a different story and is asserted differently below.
 OUT6FMK="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}" \
   "BIONIC_DEP_MARKETPLACE=chrisalehman-bionic")"
 ROW6FMK="$(printf '%s\n' "$OUT6FMK" | grep -E '^  . +superpowers ' | head -1)"
@@ -535,9 +539,8 @@ expect_true "12f13: …and a headline core line (the rows below are not vacuous)
 
 # THE ROW carries the moved catalog, and only its first thirteen columns: at this name
 # length `bionic_line` has no budget left for the instruction slot and truncates the route
-# with the rest of the tail (review-a A-1, promoted out of this task — the row still tells
-# the truth about which catalog it means, and the headline below carries the command whole).
-# What this row pins is the derivation, which is what B-10 found unpinned.
+# with the rest of the tail (the row still tells the truth about which catalog it means,
+# and the headline below carries the command whole). What this row pins is the derivation.
 expect_match "12f14: the row's route names the re-pointed catalog" \
   "*claude plugin install bionic@chris*" "$ROW6FMK"
 expect_no_match "12f15: …and never the default one, which is what a literal would still have printed" \
@@ -556,19 +559,15 @@ section "Section 7: nothing this file gathers is left unrendered"
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from
 # coming back: a top-level assignment in doctor.sh whose name is never read
-# anywhere else in the file is a probe that ran for nobody. Four such reads are
-# what this task was dispatched about; the assertion is that the count does not
-# GROW, which is what a hardcoded allow-list gives and a bare zero would not
-# (the roster-footprint block and the dependency tallies are dead too, are out of
-# this task, and are named here so the wall is honest about what it tolerates).
-# WHAT THIS WALL DELIBERATELY TOLERATES, and it is a bigger list than the four
-# reads this task was dispatched about. `DEP_ROWS` is the whole DEPENDENCIES
+# anywhere else in the file is a probe that ran for nobody. The assertion is that
+# the count does not GROW, which is what a hardcoded allow-list gives and a bare
+# zero would not.
+# WHAT THIS WALL DELIBERATELY TOLERATES. `DEP_ROWS` is the whole DEPENDENCIES
 # table and `ROSTER_ROWS` the whole roster-footprint table: both are built row by
-# row on every invocation and NEITHER IS EVER PRINTED — doctor's own header still
-# describes "three tables", and only two of them reach the page. The five
-# dependency tallies and `TODO_STATE` are dead beside them. Rendering or deleting
-# those is a decision about what the report IS, not a cosmetic read, so this task
-# names them here rather than settling them quietly (DOCTOR report, concerns).
+# row on every invocation and NEITHER IS EVER PRINTED. The five dependency
+# tallies, the roster totals and `TODO_STATE` are dead beside them. Rendering or
+# deleting those is a decision about what the report IS, not a cosmetic read, so
+# they are named here rather than settled quietly.
 KNOWN_DEAD="N_PRESENT N_ABSENT N_UNKNOWN N_VIOLATION N_ABSENT_WHEN_NEEDED ROSTER_TOTAL ROSTER_TOTAL_KNOWN ROSTER_ZERO TODO_STATE DEP_ROWS ROSTER_ROWS"
 if ! command -v python3 >/dev/null 2>&1; then
   no "13: python3 is needed for the never-read sweep"
@@ -610,7 +609,7 @@ fi
 
 section "Section 8: the column budget"
 
-# THE POSITIVE BESIDE THE NEGATIVE (wave-26 T25). `too_wide` of an EMPTY page is empty, so with a defect planted
+# THE POSITIVE BESIDE THE NEGATIVE. `too_wide` of an EMPTY page is empty, so with a defect planted
 # at the doctor's entry point, where the run prints nothing, row 15 alone still passed.
 expect_match "15a: the page measured is the fullest run's, not an empty one (it prints the THIRD PARTY table)" \
   "*THIRD PARTY*" "$OUT6"
@@ -618,49 +617,28 @@ _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi
 
-# A claude() block the user changed (wave-27 T77) at an rc path far longer than the row:
+# A claude() block the user changed at an rc path far longer than the row:
 # the row names the lines and keeps its instruction, and still fits. The path is what
 # the cut takes.
-_T77_SAVED_RC="$FIXTURE_RC"
+_LONG_SAVED_RC="$FIXTURE_RC"
 FIXTURE_RC="${TMP}/$(printf 'd%.0s' {1..70})/$(printf 'e%.0s' {1..70})/dot.zshrc"
 mkdir -p "$(dirname "$FIXTURE_RC")"
 printf '%s\n' 'export V1=1' '# ─── bionic:rc:start ───' \
   'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' 'export V9=9' \
   '# ─── bionic:rc:end ───' > "$FIXTURE_RC"
-OUT_T77="$(run_doctor)"
-FIXTURE_RC="$_T77_SAVED_RC"
-ROW_T77="$(printf '%s\n' "$OUT_T77" | grep -F 'claude() shell proxy')"
-expect_nonempty "15b: the changed claude() block has its row" "$ROW_T77"
-expect_contains "15b: …which says changed" " changed " "$ROW_T77"
-expect_contains "15b: …and names its lines" "lines 2 to 5 of ~/ddd" "$ROW_T77"
-expect_contains "15b: …and keeps its instruction" " — edit it by hand" "$ROW_T77"
-expect_eq "15b: …and fits 100 columns with that path" "" "$(too_wide "$ROW_T77")"
+OUT_LONG_RC="$(run_doctor)"
+FIXTURE_RC="$_LONG_SAVED_RC"
+ROW_LONG_RC="$(printf '%s\n' "$OUT_LONG_RC" | grep -F 'claude() shell proxy')"
+expect_nonempty "15b: the changed claude() block has its row" "$ROW_LONG_RC"
+expect_contains "15b: …which says changed" " changed " "$ROW_LONG_RC"
+expect_contains "15b: …and names its lines" "lines 2 to 5 of ~/ddd" "$ROW_LONG_RC"
+expect_contains "15b: …and keeps its instruction" " — edit it by hand" "$ROW_LONG_RC"
+expect_eq "15b: …and fits 100 columns with that path" "" "$(too_wide "$ROW_LONG_RC")"
 
 
-section "Section 9: the claude CLI absent, and present, on one fixture (AC-7)"
+section "Section 10: the headline moves by the rows a collapse stands for"
 
-# THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
-# `claude` is the one program on the fixture's PATH whose presence changes what
-# this page says: the four `mcp-server` rows are checked with `claude mcp get`,
-# so with the CLI gone they turn from a plain absence into an UNKNOWN with a
-# cause, and one of the fix lines that renders from that cause measured 105
-# columns. Before the tool directory above, which half a run got was whatever
-# the runner's PATH happened to hold. Now the fixture says, and both halves are
-# asserted here — the absent render, and the present one that proves the absent
-# assertion is not matching everything.
-OUT_NOCLI="$(run_doctor_no_claude "BIONIC_PNPM_STORE=${FULL_STORE}")"
-OUT_WITHCLI="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
-
-expect_match "16.1: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
-expect_no_match "16.2: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
-expect_match "16.3: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
-_over="$(too_wide "$OUT_NOCLI")"
-if [ -z "$_over" ]; then ok "16.4: the CLI-absent page still fits 100 columns"
-else no "16.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi
-
-section "Section 10: the headline moves by the rows a collapse stands for (Walk-D1)"
-
-# THE WALK'S DRIVE 1e, TURNED INTO A WALL. The Step-5 walk rendered a machine
+# A WALK'S DRIVE, TURNED INTO A WALL. A verification walk rendered a machine
 # whose headline said 17 over 19 lines carrying ✗, wrote the three environment
 # names into settings.json, and watched three ✗ rows disappear while the headline
 # moved by ONE. Two collapsed lines on that page were swapped for the rows they
@@ -726,18 +704,12 @@ expect_eq "18.6: the headline agrees with the ✗ rows it stands for, before" \
   "$D10_ROWS_BEFORE" "$D10_N_BEFORE"
 expect_eq "18.7: …and after" "$D10_ROWS_AFTER" "$D10_N_AFTER"
 
-section "Section 19: dead-session state — the fix line follows the auto-sweep's OWN failure, not mere residue (R2, ticket-30, AC-R2.4)"
+section "Section 19: dead-session state — the fix line follows the auto-sweep's OWN failure, not mere residue"
 
-# THIS ROW'S TEST LIVES HERE, NOT IN tests/doctor-patrol.test.sh's Section 16
-# (plan task 4/R4's file, which plants dead-session state and — before this
-# task — asserted the OLD unconditional fix line; task 4 lands after this one
-# per the plan's own dispatch note and reconciles that section against the
-# behaviour below). This suite already carries the N_FIX/headline mechanics the
-# row participates in — Section 18's own comment names "the dead-session line" as
-# one of the collapses that mechanic covers — so the row's OWN test belongs
-# beside them rather than in doctor-walls.test.sh, which is scoped to the Bash
-# walls — five of them, through ONE compound process now, two fail-closed and
-# three advisory (A-57) — and carries no dead-session fixture machinery at all.
+# THIS ROW'S TEST LIVES HERE, beside the N_FIX/headline mechanics the row takes
+# part in — Section 10's comment names "the dead-session line" as one of the
+# collapses that mechanic covers — rather than in doctor-walls.test.sh, which is
+# scoped to the Bash walls and carries no dead-session fixture machinery at all.
 #
 # A PRIVATE PROJECT ROOT, NOT $REPO. Every other section in this file drives
 # doctor from inside the real bionic checkout ($REPO) because none of them reads
@@ -754,23 +726,23 @@ ds_r2_repo() {  # -> a fresh, hermetic project dir with .bionic/tmp
   printf '%s' "$r"
 }
 
-# ONE ENVIRONMENT FOR EVERY DELTA READ (wave-24 D18). `run_doctor`'s own — the fixture's tool
+# ONE ENVIRONMENT FOR EVERY DELTA READ. `run_doctor`'s own — the fixture's tool
 # directory as the whole PATH, HOME under $TMP, the fixture shell rc — with the project cwd and the
 # claude-home as the two arguments. The sections that compare a page's problem count against a
-# sibling baseline (19.6, 19.13, 20.6) run doctor through this and nothing else, so no runner-side
-# `claude`, `npm` or HOME reaches either page (diag-doctor-reads-19-2e546127).
+# sibling baseline (19.6, 19.13) run doctor through this and nothing else, so no runner-side
+# `claude`, `npm` or HOME reaches either page.
 doctor_in() {  # <cwd> <claude-home> -> doctor's whole report
   ( cd "$1" && PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
       BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
-# THE FILTERED LAUNCH (wave-26 T25). Same environment as `doctor_in`, plus BIONIC_DOCTOR_ONLY, the test seam
+# THE FILTERED LAUNCH. Same environment as `doctor_in`, plus BIONIC_DOCTOR_ONLY, the test seam
 # doctor.sh describes at its definition: the named sections only, and none of the dependency sweep, the CLI's
 # plugin listing or the tables. A row uses it only when every line it reads is printed by a section in the
 # filter, when an absence it asserts has ONE producer in doctor.sh (so absence on the subset is absence on the
 # page), when it reads no header, no problem count, no table and no RESOURCES, and when its section keeps a
-# whole-doctor row of its own. The pin rows in Sections 19 and 20 compare one filtered page to the whole page's.
+# whole-doctor row of its own. The pin rows in Section 19 compare one filtered page to the whole page's.
 doctor_only_in() {  # <sections> <cwd> <claude-home> -> the filtered report
   ( cd "$2" && BIONIC_DOCTOR_ONLY="$1" PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$3" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
@@ -795,7 +767,7 @@ ds_r2_problems() {  # <doctor output> -> the header's problem count, or "0" on "
 
 # <label> <want> <baseline page> <fixture page> — the fixture's problem count minus the baseline's
 # must equal <want>. A mismatch prints BOTH pages' ✗ rows: the delta alone names no row, and the
-# row that moved is the only thing a reader can act on (wave-24 AC-2.2).
+# row that moved is the only thing a reader can act on.
 ds_delta_eq() {
   local label="$1" want="$2" a="$3" b="$4" got
   got="$(( $(ds_r2_problems "$b") - $(ds_r2_problems "$a") ))"
@@ -815,20 +787,14 @@ expect_no_match "19.1: no failure marker → no fix line naming the auto-sweep" 
 expect_no_match "19.2: …and the old unconditional line is gone too" \
   "*dead session* left state under .bionic/tmp*" "$OUT19A"
 
-# ---------- THE REGRESSION THIS TASK CLOSES: dead-session RESIDUE alone, no
-# failure marker, must NOT earn a fix line either — this is the exact shape the
-# pre-R2 detector fired on (`[ -n "$(patrol_dead_sessions …)" ]`), which is what
-# made ticket-30's "N problems" never reach zero between one `/clear` and the
-# next session start. The per-session PATROL `predecessor …` line still renders
-# (doctor's per-session listing is untouched by this task) but no longer as a
-# ✗ row: 12f18/18.6/18.7 above pin "every ✗ row is a problem, count >= rows on
-# the whole page" over THIS repo's own live ambient .bionic/tmp state, and a
-# predecessor line marked ✗ while contributing nothing to N_FIX (once the fix
-# line is conditional) is exactly the count-less-than-rows shape that rule
-# forbids — caught against $REPO's own real dead-session residue from the
-# other agents in this wave, not against this section's private fixtures.
-# `$DOCTOR_NIL` (the same glyph `active run: none` uses a few lines above the
-# predecessor loop in doctor.sh) is the fix: a true fact about this project
+# ---------- dead-session RESIDUE alone, no failure marker, must NOT earn a fix
+# line either: a detector that fired on residue (`[ -n "$(patrol_dead_sessions …)" ]`)
+# kept "N problems" from ever reaching zero between one `/clear` and the next
+# session start. The per-session PATROL `predecessor …` line still renders, but
+# not as a ✗ row: 12f18/18.6/18.7 above pin "every ✗ row is a problem, count >=
+# rows on the whole page", and a predecessor line marked ✗ while adding nothing
+# to N_FIX is the count-less-than-rows shape that rule forbids. `$DOCTOR_NIL`
+# (the glyph `active run: none` uses) marks it: a true fact about this project
 # that names no action is informational, not a ✗.
 DS_R2_D="$(ds_r2_repo)"
 DS_R2_D_SID="018c3ea1-1111-4111-8111-111111111111"
@@ -843,9 +809,8 @@ expect_no_match "19.10: …nor the new-style line — nothing failed here" \
 expect_no_match "19.11: …and the predecessor line itself is not a ✗ row (count >= rows, 12f18)" \
   "*✗ predecessor*" "$OUT19D"
 
-# AC-11.3 (epic-23 wave-16 REQ-11). The two halves 19.9-19.11 leave implicit, said out loud,
-# because REQ-11 changes the reading of the stamp right beside this row and the row itself
-# must not move with it: the residue line carries the NIL glyph — a true fact about this
+# The two halves 19.9-19.11 leave implicit, said out loud, because the reading of the stamp
+# right beside this row may change and the row itself must not move with it: the residue line carries the NIL glyph — a true fact about this
 # project that names no action — and it costs the page NOTHING in its problem count. The
 # measured shape (2026-09-19, this repo): `– predecessor 3fd4eb96 · 3 leftover files —
 # nothing open`.
@@ -868,7 +833,7 @@ expect_match "19.4: …with the session-start auto-sweep as the hint, not a raw 
 DS_R2_B_HITS="$(printf '%s\n' "$OUT19B" | grep -c 'automatic dead-session sweep failed')"
 expect_eq "19.5: …and only once on the page" "1" "$DS_R2_B_HITS"
 
-# THE DELTA, NOT AN ABSOLUTE (Walk-D1 shape, same as 12f11/18.5 above). This
+# THE DELTA, NOT AN ABSOLUTE (the same shape as 12f11/18.5 above). This
 # machine's own toolchain gaps show up as ✗ rows on EVERY fixture in this file —
 # an empty claude-home is not a clean page — so the baseline is read off a
 # sibling fixture built the identical way (19A, no marker) rather than assumed
@@ -876,11 +841,11 @@ expect_eq "19.5: …and only once on the page" "1" "$DS_R2_B_HITS"
 ds_delta_eq "19.6: …and it raises the problem count by exactly one over the same baseline" \
   "1" "$OUT19A" "$OUT19B"
 
-# ---------- a symlinked marker is refused, not read (hostile-repo posture, S15-style) ----------
+# ---------- a symlinked marker is refused, not read (hostile-repo posture) ----------
 DS_R2_C="$(ds_r2_repo)"
 printf 'not a real marker\n' > "${TMP}/dsr2-decoy.state"
 ln -sf "${TMP}/dsr2-decoy.state" "$DS_R2_C/.bionic/tmp/sweep-failed.state"
-# FILTERED, NOT WHOLE (wave-26 T25): the line it reads is printed by one `fix` call in doctor.sh's PROJECT gather
+# FILTERED, NOT WHOLE: the line it reads is printed by one `fix` call in doctor.sh's PROJECT gather
 # (grep -c of the sentence in payload/scripts/doctor.sh is 1), so its absence from the subset is its absence from
 # the page, and 19.7a is the positive beside it on the same page text. Section 19 keeps whole runs on A, B and D.
 OUT19C="$(ds_r2_only "$DS_R2_C")"

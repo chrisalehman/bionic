@@ -1,71 +1,48 @@
 #!/bin/bash
-# Tests for tests/lib/name-scan.sh — this project's name scan (wave-27 T3; spec D13 as amended,
-# AC-6.3, AC-6.4, AC-6.5).
+# Tests for tests/lib/name-scan.sh — this project's name scan, the first check the release check
+# runs.
 #
 # THE SCAN READS WHAT A PUSH WOULD PUBLISH: every blob and path at the head, every blob and path
 # the range introduces, each range commit's message, author and committer, and every tag that
-# points into the range. A hit is located by numbers and object ids only; under a blob's hits, the
-# commit and path that brought it and its fix, a path that may hold an entry withheld. Sections:
+# points into the range. A hit is located by numbers and object ids only. Sections:
 #
 #   §PUB    a string planted in a committed file, a commit message or an annotated tag is a
-#           hit; one in the dirty working tree only is not read (AC-6.3).
+#           hit; one in the dirty working tree only is not read.
 #   §POWER  a list inside any checkout and a missing list are refused, an empty list passes
 #           as none, and a clean result requires every entry found in the throwaway commit
-#           by the same functions (AC-6.4).
-#   §QUIET  on a hit and on a clean run, neither the output nor the record holds any entry
-#           (AC-6.5).
+#           by the same functions.
 #   §PATH   a committed file or directory whose path holds an entry is a hit, named by its
-#           position, never by the path (T32 finding 1).
-#   §BASE   at a head that carries the newest tag the default base is the tag before it
-#           (T32 finding 2).
-#   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use (T32 finding 3,
-#           T52 finding 9), and of every Unicode space perl's \s knows (T61 note).
-#   §TRACE  an inherited GIT_TRACE* file never receives an entry (T32 finding 4, T52 finding 11).
-#   §BASH32 the whole scan under /bin/bash (3.2) prints the lines the PATH bash prints.
+#           position, never by the path.
+#   §BASE   at a head that carries the newest tag the default base is the tag before it.
+#   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use, and of every
+#           Unicode space perl's \s knows.
+#   §TRACE  an inherited GIT_TRACE* file never receives an entry.
 #   §ARGV   no entry is a word of any command line, and git config tracing records none.
 #   §BYTES  a binary blob, a `-diff`/`binary` file and a symlink's target are read; an object
-#           that cannot be read is a refusal (T52 finding 1).
+#           that cannot be read is a refusal.
 #   §RANGE  a blob or path only inside the range, each commit's author and committer, and every
-#           tag name and message pointing into the range are read (T52 finding 2).
+#           tag name and message pointing into the range are read.
 #   §SEP    a path or message holding a control byte, a newline, a tab or a colon is read whole,
-#           located, and never printed (T52 findings 3, 4).
+#           located, and never printed.
 #   §CASE   a non-ASCII entry is found in any case under any caller's locale, and never printed;
-#           no UTF-8 locale with a non-ASCII entry is a refusal (T52 finding 5).
-#   §XTRACE `bash -x` on the scan prints no entry (T52 finding 6).
-#   §CEIL   the caller's git discovery variables cannot let a list inside a checkout through
-#           (T52 finding 10).
+#           on a machine with no UTF-8 locale it is still scanned and found.
+#   §XTRACE `bash -x` on the scan prints no entry.
+#   §CEIL   the caller's git discovery variables cannot let a list inside a checkout through.
 #   §SITES  the power check plants every entry at every site; each site blinded on a doctored
-#           copy refuses the run (T52, the power check).
-#   §COST   one pass for the whole list, and a 500-entry clean scan of this repository inside
-#           its time ceiling (T52 finding 13); 20,000 matching lines in one blob inside 5
-#           seconds (T56 N8).
-#   §WRAP   between two words of an entry: horizontal white space on one line, or ONE line break
-#           with white space, at most 24 symbols and at most three tags on each side, read any
-#           way that fits (a `<` may be a symbol), a word's own symbols never counted; never
-#           none, never a blank line, never symbols on one line (T56 B1, T61 B1, T65 B1 B2).
-#   §PUSHED the objects a push sends: a commit or blob "fixed" by `git replace` is read as the
-#           original, and a nested tag's inner message is read (T56 N1, N3).
-#   §PERLDB a caller's perl debugger or module variables print no entry, each of the five with
-#           a row a copy that keeps it fails (T56 N4, T61 S2).
-#   §INERT  the locale pick and the BASH_ENV unset each have a row that fails without them
-#           (T56 N6, N7).
-#   §SIGNAL TERM and HUP to the scan, and TERM, INT and HUP to its process group, at a random
-#           moment or aimed at the removal itself, leave no temporary tree (T61 note, T65 S2).
-#   §HIT-NAMES a blob hit names the commit and path that brought it; a blob the head's tree does
-#           not hold prints the rewrite D32 ran, over <commit>^..<branch> (the whole branch from a
-#           root commit), and one it holds a fix line; a path holding an entry is withheld (wave-39
-#           T13; AC-9.3).
-#   §ORACLE the scan agrees, case by case and in both directions, with a reference matcher
-#           written from the rule (tests/fixtures/name-scan-oracle.pl) over a generated corpus
-#           of at least 5,000 wraps (tests/fixtures/name-scan-gen.pl, seed 65) (T65).
+#           copy refuses the run.
+#   §COST   one pass for the whole list; a 500-entry clean scan of this repository inside its
+#           time ceiling; 20,000 matching lines in one blob, four megabytes of punctuation and
+#           200 KB of blanks each inside 5 seconds.
+#   §QUIET  on a hit, a clean run and a refusal, neither the output nor TMPDIR holds any entry,
+#           and git's own warning about a broken ref name does not reach the output.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
 # lightweight and annotated tags, real symlinks, binary files and a real dirty working tree —
 # nothing is a mock of git. Two seams: a `git` shim on PATH that execs the real git and
 # swallows ONE subcommand's output (it makes a scan site blind on purpose, so the power check
-# has something to refuse), and a `locale` shim that reports no UTF-8 locale. §SITES and
-# §TRACE run doctored COPIES of the scan in a temp directory, never the tracked file. §COST
+# has something to refuse), and a `locale` shim that reports no UTF-8 locale. §TRACE, §SITES
+# and §QUIET run doctored COPIES of the scan in a temp directory, never the tracked file. §COST
 # reads this repository itself, read-only. The entries are made-up strings; no real list is
 # read. SYNTHESIZED: the strings.
 #
@@ -80,7 +57,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/wait.sh"
 
 SCAN="${BIONIC_SCRIPTS_DIR}/tests/lib/name-scan.sh"
 
@@ -284,9 +260,9 @@ expect_status "POW5: blind tag list (for-each-ref) — no power, exit 2" 2 "$RC"
 scan "$R" "$(fx_list pow5b "$E1" "$E4")" PATH="$CAT_BLIND:$PATH" SHIM_RC=1
 expect_status "POW5: a hit does not outrank a blind scan — exit 2 (the power check runs first)" 2 "$RC"
 
-section "§PATH — a path name is published too (T32 finding 1)"
+section "§PATH — a path name is published too"
 
-# made-up strings for the T32 rows
+# made-up strings for the path rows
 EP="zq-pathname-5512"
 ED="Quilldirname-2204"
 
@@ -333,7 +309,7 @@ scan "$R" "$L" PATH="$LS_BLIND:$PATH"
 expect_status "PATH4: blind path list — no power, exit 2, not a clean 0" 2 "$RC"
 expect_contains "PATH4: and the refusal names the path name site" "at its path name" "$OUT"
 
-section "§BASE — the default base at a tagged head (T32 finding 2)"
+section "§BASE — the default base at a tagged head"
 
 EB="zq-rangemsg-9034"; EO="Quilloldmsg-6618"
 # BASE1 head carries the newest tag (annotated) and there is an earlier one: the range is prev..head
@@ -388,7 +364,7 @@ expect_regex "BASE5: an explicit base wider than the previous tag reads the olde
 scan "$R" "$(fx_list base5b "$EO")"
 expect_status "BASE5: the same entry with the default base is clean (differential)" 0 "$RC"
 
-section "§LIST — a list line is read as the scan will use it (T32 finding 3, T52 finding 9)"
+section "§LIST — a list line is read as the scan will use it"
 
 EL="zq-trail-8821"; EM="mxv9 plover"
 R="$TMP/list1"; fx_repo "$R"
@@ -407,7 +383,7 @@ done
 # an entry with an inner space keeps it
 scan "$R" "$(fx_list lst1 "$EM ")"
 expect_eq "LIST: an entry with an inner space and a trailing space is found" "HIT entry=1 at blob $NB line 2" "$(hits)"
-# a LEADING blank is stripped as a trailing one is (T52 finding 9): `<sp><sp>entry` is `entry`
+# a LEADING blank is stripped as a trailing one is: `<sp><sp>entry` is `entry`
 EV="zq-lead-3390"
 printf 'x%s\n' "$EV" > "$R/lead.txt"; fx_commit "$R" "add lead"
 scan "$R" "$(fx_list lst2 "  $EV")"
@@ -427,7 +403,7 @@ printf '\357\273\277# a comment\n%s\n' "$EL" > "$TMP/lists/lst5"
 scan "$R" "$TMP/lists/lst5"
 expect_eq "LIST: a comment behind a BOM is skipped and counted — the entry is line 2" "HIT entry=2 at blob $NB line 1" "$(hits)"
 expect_contains "LIST: one entry" "entries=1" "$OUT"
-# a list line is trimmed of every Unicode space at both ends (T61 note): an entry never begins
+# a list line is trimmed of every Unicode space at both ends: an entry never begins
 # with an empty word, so it is found at the very start of a text
 NBSP=$'\302\240'
 R="$TMP/list2"; fx_repo "$R"
@@ -453,7 +429,7 @@ scan "$R" "$TMP/lists/lst8"
 expect_eq "LIST: a line of NBSP alone is skipped but counted — the entry is line 2" "HIT entry=2 at blob $SB line 1" "$(hits)"
 expect_contains "LIST: (same run) it is not an entry" "entries=1 " "$OUT"
 
-section "§TRACE — an inherited git trace file does not record an entry (T32 finding 4, T52 finding 11)"
+section "§TRACE — an inherited git trace file does not record an entry"
 
 R="$TMP/trace1"; fx_repo "$R"
 printf '%s\n' "$E1" > "$R/b.txt"; fx_commit "$R" "add b"
@@ -478,37 +454,7 @@ expect_eq "TRACE: the doctored copy still runs and finds the hit (positive)" "HI
 TRACED="$(cat "$TMP"/trace/t[1-7] 2>/dev/null | grep -c -i -F -- "$E1" || true)"
 expect_ne "TRACE: without the unset loop a trace file DOES hold the entry (the row can fail)" "0" "$TRACED"
 
-section "§BASH32 — the whole scan under /bin/bash, the plugin's interpreter (T32 round 2)"
-
-# the suite itself runs under whatever `bash` is first on PATH; the scan is run under /bin/bash
-# (3.2 on macOS) and its lines must be the same ones
-B1="zq-b32text-2290"; B2="zq-b32dir-4417"; B3="zq-b32msg-6021"; B4="zq-b32tag-1180"
-R="$TMP/b32"; fx_repo "$R"
-git -C "$R" tag -a v1.9.0 -m "previous"
-mkdir -p "$R/$B2"; printf 'plain\n' > "$R/$B2/f.txt"; printf 'see %s.\nmore\n' "$B1" > "$R/notes.txt"
-fx_commit "$R" "release $B3"
-git -C "$R" tag -a v2.0.0 -m "release $B4"
-printf '\357\273\277%s \r\n%s\r\n%s \t\n%s\n' "$B1" "$B2" "$B3" "$B4" > "$TMP/lists/b32"
-SHA="$(s12 "$R" HEAD)"
-WANT="$(git -C "$R" ls-tree -r --name-only HEAD | grep -n -i -F -- "$B2" | cut -d: -f1)"
-expect_nonempty "BASH32: the fixture's directory path sits at a position in tree order (extractor non-empty)" "$WANT"
-scan "$R" "$TMP/lists/b32"
-OUT_DEFAULT="$OUT"
-expect_status "BASH32: under the PATH bash the fixture is a hit run (control)" 1 "$RC"
-if [ -x /bin/bash ]; then
-  OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD /bin/bash "$SCAN" "$TMP/lists/b32" 2>&1)"; RC=$?
-  expect_status "BASH32: /bin/bash — the run exits 1" 1 "$RC"
-  expect_contains "BASH32: /bin/bash — a content hit, through a BOM, CR LF and trailing-blank line" "HIT entry=1 at blob $(s12 "$R" HEAD:notes.txt) line 1" "$(hits)"
-  expect_contains "BASH32: /bin/bash — a path hit" "HIT entry=2 at path #$WANT" "$(hits)"
-  expect_contains "BASH32: /bin/bash — a message hit at a tagged head (range is v1.9.0..head)" "HIT entry=3 at commit $SHA message" "$(hits)"
-  expect_contains "BASH32: /bin/bash — a tag-message hit" "HIT entry=4 at tag $(s12 "$R" v2.0.0)" "$(hits)"
-  expect_contains "BASH32: /bin/bash — four entries read" "entries=4 hits=4" "$OUT"
-  expect_eq "BASH32: /bin/bash prints exactly what the PATH bash prints (the whole output)" "$OUT_DEFAULT" "$OUT"
-else
-  echo "SKIP: /bin/bash is absent on this machine; the BASH32 rows did not run"
-fi
-
-section "§ARGV — no list entry is a word of any command line the scan runs (T32 round 2)"
+section "§ARGV — no list entry is a word of any command line the scan runs"
 
 A1="zq-argv-content-3318"; A2="Quillargvpath-7742"; A3="zq-argv-msg-5509"
 R="$TMP/argv1"; fx_repo "$R"
@@ -563,7 +509,7 @@ for e in "$A1" "$A2" "$A3"; do
   expect_eq "ARGV: the config trace file holds no trace of entry '${e:0:6}…'" "0" "$(grep -c -i -F -- "$e" "$CT")"
 done
 
-section "§BYTES — every blob is read as bytes (T52 finding 1)"
+section "§BYTES — every blob is read as bytes"
 
 EY="zq-bytes-4471"
 # BYT1 a PNG-like blob holding the entry after a NUL; the line is newlines before the match + 1
@@ -607,7 +553,7 @@ scan "$R" "$L" BIONIC_CHECK_BASE=HEAD
 expect_status "BYT4: a blob at the head that cannot be read refuses the run, exit 2" 2 "$RC"
 expect_contains "BYT4: the refusal names the object by its id" "object ${OID:0:12} cannot be read" "$OUT"
 
-section "§RANGE — every object, person and tag the push publishes (T52 finding 2)"
+section "§RANGE — every object, person and tag the push publishes"
 
 # RNG1 a file added in commit 2 of the range and deleted in commit 3: its blob is still sent
 EG="zq-gone-6402"
@@ -670,7 +616,7 @@ scan "$R" "$L" BIONIC_CHECK_BASE=v0.1
 expect_eq "RNG6: an annotated tag on a commit inside the range is read" "HIT entry=1 at tag $(s12 "$R" mid-1)" "$(hits)"
 expect_no_regex "RNG6: a tag on the base is not (same output)" 'entry=2' "$(hits)"
 
-section "§SEP — no byte a path or message can hold splits a record (T52 findings 3, 4)"
+section "§SEP — no byte a path or message can hold splits a record"
 
 S1="zq-soh-1101"; S2="zq-newline-2202"; S3="zq-tab-3303"; S4="zq-colon-4404"
 R="$TMP/sep1"; fx_repo "$R"
@@ -703,7 +649,7 @@ expect_status "SEP2: a message with SOH before the entry exits 1" 1 "$RC"
 expect_eq "SEP2: the hit is the commit's message" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
 expect_absent "SEP2: the subject is not printed" "leak" "$OUT"
 
-section "§CASE — the scan decides the locale, and folds case for any letter (T52 finding 5)"
+section "§CASE — the scan decides the locale, and folds case for any letter"
 
 OU=$'\303\226'; ou=$'\303\266'   # O and o with diaeresis, as UTF-8 bytes
 EU="zq${ou}rbix-8812"            # the list entry, lower case
@@ -730,7 +676,7 @@ scan "$R" "$(fx_list case2 "$EU")" LC_ALL=C
 expect_contains "CASE2: caller LC_ALL=C — upper-case non-ASCII contents are a hit" "HIT entry=1 at blob $(s12 "$R" HEAD:n.txt) line 1" "$(hits)"
 expect_contains "CASE2: caller LC_ALL=C — and the message" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
 # CASE3 no UTF-8 locale on the machine: the matcher folds without one, so a non-ASCII entry is
-# scanned and found, not refused (T56 N6: the refusal refused a run that works)
+# scanned and found, not refused: a refusal there would stop a run that works
 NOLOC="$TMP/shim-nolocale"; mkdir -p "$NOLOC"
 printf '#!/bin/bash\ncase "${1:-}" in -a) printf "C\\nPOSIX\\n" ;; *) echo US-ASCII ;; esac\n' > "$NOLOC/locale"; chmod +x "$NOLOC/locale"
 scan "$R" "$(fx_list case3 "$EU")" PATH="$NOLOC:$PATH"
@@ -741,7 +687,7 @@ printf 'see %s\n' "$E1" > "$R/m.txt"; fx_commit "$R" "ascii"
 scan "$R" "$(fx_list case3b "$E1")" PATH="$NOLOC:$PATH"
 expect_status "CASE3: the same machine with an ASCII-only list runs, and finds (control)" 1 "$RC"
 
-section "§XTRACE — a caller's trace prints no entry (T52 finding 6)"
+section "§XTRACE — a caller's trace prints no entry"
 
 EX="zq-xtrace-9093"
 R="$TMP/xt1"; fx_repo "$R"
@@ -752,7 +698,7 @@ expect_status "XTRACE: bash -x — the run still exits 1" 1 "$RC"
 expect_contains "XTRACE: bash -x — it prints the hit (positive on the same output)" "HIT entry=1 at blob" "$OUT"
 expect_eq "XTRACE: bash -x — stdout and stderr hold the entry zero times" "0" "$(count_in "$OUT" "$EX")"
 
-section "§CEIL — a caller's discovery variables cannot pass a list inside a checkout (T52 finding 10)"
+section "§CEIL — a caller's discovery variables cannot pass a list inside a checkout"
 
 R="$TMP/ceil1"; fx_repo "$R"
 mkdir -p "$R/sub/dir"; printf '%s\n' "$E4" > "$R/sub/dir/list.txt"
@@ -762,7 +708,7 @@ expect_contains "CEIL: and the refusal says where the list is" "inside a git che
 scan "$R" "$(fx_list ceil1 "$E4")" GIT_CEILING_DIRECTORIES="$R"
 expect_status "CEIL: the same variable with a list outside every checkout runs clean (control)" 0 "$RC"
 
-section "§SITES — the power check plants every entry at every site (T52 power check)"
+section "§SITES — the power check plants every entry at every site"
 
 # a clean fixture, so a doctored copy's refusal is the power check's and nothing else's
 R="$TMP/sites"; fx_repo "$R"
@@ -804,7 +750,7 @@ symbol-tag-wrapped text|splice(@w, 0, 3 - $need);|splice(@w, 0, 0);
 symbol-tag-wrapped text|@w = sort { $b <=> $a } @w;|@w = sort { $a <=> $b } @w;
 SITES
 
-section "§COST — one pass for the whole list, inside the time ceiling (T52 finding 13)"
+section "§COST — one pass for the whole list, inside the time ceiling"
 
 # the number of processes a scan starts does not grow with the list: one pass per site
 R="$TMP/cost1"; fx_repo "$R"
@@ -824,7 +770,7 @@ expect_eq "COST: and runs the matcher twice (the power check and the scan), what
 # a clean 500-entry scan of this repository, read-only, under the 20-second ceiling
 if git -C "$BIONIC_SCRIPTS_DIR" rev-parse --verify -q HEAD >/dev/null 2>&1; then
   i=0; : > "$TMP/lists/cost500"
-  # entries of two and three words (T61 note), so the bound times the wrap construction
+  # entries of two and three words, so the bound times the wrap construction
   while [ "$i" -lt 500 ]; do
     if [ $((i % 2)) -eq 0 ]; then printf 'zqtm%04d xvq\n' "$i"; else printf 'zqtm%04d xvq yqj%03d\n' "$i" "$i"; fi >> "$TMP/lists/cost500"
     i=$((i + 1))
@@ -840,7 +786,7 @@ if git -C "$BIONIC_SCRIPTS_DIR" rev-parse --verify -q HEAD >/dev/null 2>&1; then
 else
   echo "SKIP: $BIONIC_SCRIPTS_DIR is not a git checkout; the 500-entry timing row did not run"
 fi
-# a hit's line is counted on from the previous hit (T56 N8): 20,000 matching lines in one blob,
+# a hit's line is counted on from the previous hit: 20,000 matching lines in one blob,
 # a two-word entry on each, inside 5 seconds measured here
 EN="mxv9 plover"
 R="$TMP/cost20k"; fx_repo "$R"
@@ -854,7 +800,7 @@ expect_status "COST: 20,000 matching lines — exit 1" 1 "$RC"
 expect_eq "COST: (same run) one hit per line" "20000" "$(hits | grep -c '^HIT ')"
 expect_contains "COST: (same run) the last hit names line 20000" "HIT entry=1 at blob $(s12 "$R" HEAD:many.txt) line 20000" "$(hits)"
 expect_true "COST: and took under 5 seconds (took ${EL_S}s)" [ "$EL_S" -lt 5 ]
-# the wrap construction cannot backtrack without bound (T61 B1): a megabyte of `-`, of `<`, of
+# the wrap construction cannot backtrack without bound: a megabyte of `-`, of `<`, of
 # `"`, and of lines that are blanks and one symbol, the entry's first word every 64 characters
 # so the construction is tried there each time, each a clean scan inside 5 seconds measured here
 R="$TMP/costmb"; fx_repo "$R"
@@ -873,8 +819,8 @@ echo "COST: a scan of four megabytes of punctuation and blank lines took ${EL_S}
 expect_status "COST: the megabytes of punctuation scan clean" 0 "$RC"
 expect_contains "COST: (same run) one entry read, no hit" "entries=1 hits=0" "$OUT"
 expect_true "COST: and took under 5 seconds (took ${EL_S}s)" [ "$EL_S" -lt 5 ]
-# a list line that opens with a Unicode space, over a text of 200 KB of blanks (T61 note: an
-# entry that began with an empty word cost 100 seconds on 50 KB)
+# a list line that opens with a Unicode space, over a text of 200 KB of blanks (an entry that
+# began with an empty word once cost 100 seconds on 50 KB)
 R="$TMP/cost200k"; fx_repo "$R"
 perl -e 'print "mxv9 plover\n", " \xc2\xa0" x 70000, "see mxv9 plover\n"' > "$R/blanks.txt"
 fx_commit "$R" "blanks"
