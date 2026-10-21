@@ -297,13 +297,13 @@ expect_eq "SH5 ten steps, each with its number, name, state and task count: 0 to
 expect_eq "SH6 one task line per task not dropped: sixteen, T16 among none of them while T15 is there" "16|0|1" \
   "$(sr_lines task | /usr/bin/grep -c .)|$(sr_lines task | /usr/bin/grep -c '^task: id=T16 ')|$(sr_lines task | /usr/bin/grep -c '^task: id=T15 ')"
 expect_eq "SH7 each task's step, state and few words: done with its landing time, failed red, held, a review in flight, waiting" \
-  "4|done|landed 3:06 AM|failed|red|held|held|held|waits on your approval of release|running|pending|waits on T8|pending|-" \
+  "4|done|landed 3:06 AM|failed|red|held|held|held|waits on your approval of release|running|pending|waits on 4/8|pending|-" \
   "$(sr_f "$(sr_task T1)" step)|$(sr_f "$(sr_task T1)" state)|$(sr_f "$(sr_task T1)" note)|$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)|$(sr_f "$(sr_task T11)" state)|$(sr_f "$(sr_task T11)" note)|$(sr_f "$(sr_task T12)" state)|$(sr_f "$(sr_task T12)" note)|$(sr_f "$(sr_task T13)" state)|$(sr_f "$(sr_task T9)" state)|$(sr_f "$(sr_task T9)" note)|$(sr_f "$(sr_task T10)" state)|$(sr_f "$(sr_task T10)" note)"
 expect_eq "SH8 each task's short description: the cell up to its first ' (', ': ', '. ' or ' · '" \
   "Row one the thing|Haiku 5.5 at high|Third row|The long one" \
   "$(for t in T1 T2 T3 T8; do sr_f "$(sr_task "$t")" desc; done | sr_join)"
 expect_eq "SH9 the five metrics, in numbers: completed, pace (the approval to the last landing), correctness, the one waste line, goals; no metric.runs" \
-  "4 of 16 tasks (25%)|4 tasks in 2 h 12 min; the plan allowed 2 h for them|1 tests red; 1 reviews passed, 1 failed, 1 running; 1 open findings|1 tasks dropped; 1 of 6 suite runs discarded; 72 minutes idle|1 of 3 met; 1 not measured yet|0" \
+  "4 of 16 tasks (25%)|4 tasks in 2 h 12 min; the plan allowed 2 h for them|1 test red; 1 review passed, 1 failed, 1 running; 1 open finding|1 task dropped; 1 of 6 suite runs discarded; 72 minutes idle|1 of 3 met; 1 not measured yet|0" \
   "$(for k in metric.completed metric.pace metric.correctness metric.waste metric.goals; do sr_val "$k"; done | sr_join)|$(sr_lines metric.runs | /usr/bin/grep -c .)"
 expect_eq "SH10 each goal's name and status, in the plan's order" "fast landings=met|tests=not met|handoff=not measured" \
   "$(sr_lines goal | while IFS= read -r l; do printf '%s=%s\n' "$(sr_f "$l" name)" "$(sr_f "$l" status)"; done | sr_join)"
@@ -497,7 +497,7 @@ expect_eq "ORD0 precondition: the world prints (rc 0), four of its seventeen tas
 expect_eq "ORD1 done by landing time, the hand landing among them, then in flight by place on the line, then building" \
   "T2|T3|T1|T4|T8|T6|T5|T7" "$(sr_tasks_f id | head -8 | sr_join)"
 expect_eq "ORD2 …each saying what it does: by hand, in its landing with its suites, queued behind the one before it, building" \
-  "landed 3:50 AM by hand|in its landing, 1 of 2 suites green|queued behind T8|queued behind T6|building" \
+  "landed 3:50 AM by hand|in its landing, 1 of 2 suites green|queued behind 4/8|queued behind 4/6|building" \
   "$(for t in T3 T8 T6 T5 T7; do sr_f "$(sr_task "$t")" note; done | sr_join)"
 expect_eq "ORD3 the rest in dependency order: T11, which T10 reads, before T10" "yes" \
   "$(sr_tasks_f id | awk '$0 == "T11" { a = NR } $0 == "T10" { b = NR } END { print (a && b > a) ? "yes" : "no" }')"
@@ -513,7 +513,7 @@ expect_eq "ME0 the clean world: no test red, no review, no finding; nothing disc
 # A planted red run, not answered: one test red, and the task it is on is failed.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME1 a red at head: one test red, its task failed" "1 tests red|failed" \
+expect_eq "ME1 a red at head: one test red, its task failed" "1 test red|failed" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_f "$(sr_task T8)" state)"
 # The red answered: a later green on the same task and suite.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=green|log=/rec/T8b.log|at=2026-10-06T15:00:00Z"
@@ -528,7 +528,7 @@ SR_ME3="$(sr_val metric.correctness)"
 printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\nshown: 2 bash tests/y.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
 sr_run "$SR_PLAN"
 expect_eq "ME3 one failing review with one open S2 finding, then the same record holding an S1 too" \
-  "0 tests red; 0 reviews passed, 1 failed, 0 running; 1 open findings|2 open findings|2" \
+  "0 tests red; 0 reviews passed, 1 failed, 0 running; 1 open finding|2 open findings|2" \
   "$SR_ME3|$(sr_val metric.correctness | sed 's/.*; //')|$(sr_f "$(sr_lines review)" open-findings)"
 # A run discarded, then a run killed at the gate (rc 137): each a discarded suite run.
 sr_world metrics-runs "6 6 12 12"
@@ -547,6 +547,57 @@ printf 'fill-ledger/v1|at=2026-10-06T17:12:00Z|session=%s|turn=t3|current=4|stat
 sr_run "$SR_PLAN"
 expect_eq "ME5 two tasks dropped and a 72-minute idle turn: the waste in numbers; the dropped tasks leave the count" \
   "2 tasks dropped; 2 of 6 suite runs discarded; 72 minutes idle|4 of 15 tasks (27%)" "$(sr_val metric.waste)|$(sr_val metric.completed)"
+
+# A red a suite stands in at the working head counts though no row added it: a `standing` event the line recorded, until a
+# later green of the suite answers it. It marks no task failed.
+sr_world metrics-standing "6 6 12 12"
+sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "ME6 a suite red standing at the head: one test red, and no task is failed by it" "1 test red|0" \
+  "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_tasks_f state | /usr/bin/grep -c '^failed$')"
+sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b2.log|cause=code|against=-|at=2026-10-06T14:30:00Z"
+sr_ev "ev=standing|head=$SR_H|suite=c.test.sh|lines=1|log=/rec/standing-c.log|cause=environment|against=stamp|at=2026-10-06T14:31:00Z"
+sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=d.test.sh|result=red|log=/rec/T7d.log|at=2026-10-06T14:40:00Z"
+sr_run "$SR_PLAN"
+expect_eq "ME6b a suite standing twice counts once; a standing suite and a row's own red add: three tests red, T7 failed" "3 tests red|1" \
+  "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_tasks_f state | /usr/bin/grep -c '^failed$')"
+sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=red|log=/rec/T6c.log|at=2026-10-06T14:50:00Z"
+sr_run "$SR_PLAN"
+expect_eq "ME6c a row's red of a suite already standing is one red, not two: still three" "3 tests red|2" \
+  "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_tasks_f state | /usr/bin/grep -c '^failed$')"
+sr_ev "ev=verdict|row=T5|commit=$SR_C1|suite=b.test.sh|result=green|log=/rec/T5b.log|at=2026-10-06T15:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "ME6d a later green of the standing suite answers it: two tests red" "2 tests red" "$(sr_val metric.correctness | cut -d';' -f1)"
+
+section "§COUNTS: a count agrees in number with what it counts — one task, two tasks; the sheet never says 1 tests"
+# ============================================================
+# fails-when: any count phrase on the sheet says a plural for one, or a singular for two.
+sr_world counts-one "6 6 12 12"
+awk -F'|' '!(/^\| T[0-9]+ / && $2 != " T1 ")' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
+printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
+printf 'fill-ledger/v1|at=2026-10-06T16:01:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
+sr_run "$SR_PLAN"
+expect_eq "CN0 precondition: the plan holds the one task, landed, and the sheet draws it" "1|1" \
+  "$(sr_lines task | /usr/bin/grep -c .)|$(sr_tasks_f state | /usr/bin/grep -c '^done$')"
+expect_eq "CN1 one task: completed says 1 of 1 task, the pace says 1 task, correctness says 1 test red" \
+  "1 of 1 task (100%)|1 task in |1 test red" \
+  "$(sr_val metric.completed)|$(sr_val metric.pace | cut -c1-10)|$(sr_val metric.correctness | cut -d';' -f1)"
+expect_eq "CN2 one minute idle says minute" "yes" \
+  "$(sr_val metric.waste | /usr/bin/grep -q '; 1 minute idle$' && echo yes)"
+expect_eq "CN3 the status line says 1 of 1 task" "yes" \
+  "$(sr_poke sitrep --line "$SR_PLAN" 2>/dev/null | /usr/bin/grep -q '^1 of 1 task · ' && echo yes)"
+sr_world counts-two "6 6 12 12"
+sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
+sr_ev "ev=standing|head=$SR_H|suite=c.test.sh|lines=2|log=/rec/standing-c.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "CN4 two of each stays plural: tests, and a plan of many tasks" "2 tests red|4 of 17 tasks (24%)" \
+  "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_val metric.completed)"
+sr_world counts-landing "6 6 12 12"
+sr_ev "ev=candidate|row=T8|base=$SR_C1|commit=$(printf 'd%.0s' $(seq 40))|tree=/landing/1|at=2026-10-06T13:35:00Z"
+sr_ev "ev=verdict|row=T8|commit=$(printf 'd%.0s' $(seq 40))|suite=a.test.sh|result=green|log=/rec/T8a.log|at=2026-10-06T13:50:00Z"
+sr_run "$SR_PLAN"
+expect_eq "CN5 a landing with its one suite green says 1 of 1 suite green" "in its landing, 1 of 1 suite green" "$(sr_f "$(sr_task T8)" note)"
 
 # ============================================================
 section "§FORECAST: the predicted close is the open work, the larger of the longest chain and the work over the count the gate admits, from now: the floor at the plan's own minutes and the likely close at the measured pace; no typed number moves it, and admitting more never shortens one chain"
@@ -1073,7 +1124,7 @@ expect_eq "NM2 the description stops at the first of \" (\", \": \", \". \" and 
   "Alpha one|Beta two|Gamma three|Delta four|0" \
   "$(for t in T13 T14 T15 T16; do sr_f "$(sr_task "$t")" desc; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'and the rest')"
 expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on the first and a count, waiting on one, held" \
-  "T1 landed 3:06 AM|T8 next on the line|T6 queued behind T8|T5 building|T7 red|T10 waits on T5 +2|T9 waits on T8|T11 held" \
+  "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5 +2|T9 waits on 4/8|T11 held" \
   "$(for t in T1 T8 T6 T5 T7 T10 T9 T11; do printf '%s %s\n' "$t" "$(sr_f "$(sr_task "$t")" note)"; done | sr_join)"
 # a 40-task plan: one line per step and per task
 SR_EXTRA=23 sr_world names-forty "6 6 12 12"

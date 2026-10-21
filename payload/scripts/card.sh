@@ -2581,7 +2581,8 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # THE TASK LIST. A finished step is one row, with its task count when it had tasks. Inside a step not finished, its
 # finished tasks are one row, labelled by the range of their numbers (one finished task is its own row), and every
 # task that can still move has its own row with its note; a step not finished with no task is one row of its own. A
-# task's label is its step, a slash and its id without the T.
+# task's label is its step, a slash and its id without the T. Every row is one line: a task's description is cut at a
+# word and ends in "…" when the label, the glyph and the note after " — " would not otherwise print whole in the width.
 #
 # THE CHECK. Nothing prints until the judgment and the drawn text both pass. The judgment is refused when it drops an
 # open ask, names a key the sheet lacks, says no recommended answer, lists a decision's options, names none of the
@@ -2589,7 +2590,8 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # or two, a tag the card does not know, or a refused word (reader, readers, readings, a reading, the reading). The
 # drawn text (`_card_sitrep_check`, also `card.sh sitrep-check`, so a planted card can prove each test) is refused
 # for a line over BIONIC_LINE_WIDTH, a row with no bullet or icon, the sections out of their order or one with no
-# row, a step row above its own tasks, and an open task with no row or two. A refusal prints every reason on stderr
+# row, a step row above its own tasks, a Task list row spanning two lines, and an open task with no row or two. A
+# refusal prints every reason on stderr
 # and nothing on stdout: a card that dropped an ask would tell the user they owe less than they do.
 CARD_SITREP_NOTHING="Nothing: no decision or action is owed right now."
 CARD_SITREP_SECTIONS="Call to action|Task list|Metrics|Assessment|Blocked on you|Predicted close"
@@ -2621,12 +2623,14 @@ _card_sitrep_fact() {
   printf '%s\n' "$SR_RECS" | awk -F'\t' -v k="$1" '$1 == "R" && $2 == k { v = $3; f = 1; exit } END { print (f && v != "") ? v : "-" }'
 }
 
-# _card_sitrep_tasks -> the Task list's rows from SR_RECS, one per line, without their indent (THE TASK LIST, above).
+# _card_sitrep_tasks -> the Task list's rows from SR_RECS, one per line, without their indent (THE TASK LIST, above),
+# each as `<lead>US<description>US<tail>` (US the unit separator): the row is the three joined, and only the
+# description is cut to fit (`_card_sitrep_fit`). A row with no task description is all lead.
 # A task on a step the sheet does not list keeps its row, after the steps.
 _card_sitrep_tasks() {
   printf '%s\n' "$SR_RECS" | awk -F'\t' '
     function lab(id) { return (substr(id, 1, 1) == "T") ? substr(id, 2) : id }
-    function open_row(j) { return "⬜ " ts[j] "/" lab(ti[j]) ": " td[j] ((tn[j] != "" && tn[j] != "-") ? " — " tn[j] : "") }
+    function open_row(j) { return "⬜ " ts[j] "/" lab(ti[j]) ": \037" td[j] "\037" ((tn[j] != "" && tn[j] != "-") ? " — " tn[j] : "") }
     $1 == "S" { ns++; sn[ns] = $2; sm[ns] = $3; ss[ns] = $4; sk[ns] = $5 + 0; known[$2] = 1; next }
     $1 == "T" { nt++; ti[nt] = $2; ts[nt] = $3; tt[nt] = $4; td[nt] = $5; tn[nt] = $6; next }
     END {
@@ -2640,7 +2644,7 @@ _card_sitrep_tasks() {
         }
         nd = 0; num = 1
         for (j = 1; j <= nt; j++) if (ts[j] == s && tt[j] == "done") { d[++nd] = j; if (lab(ti[j]) !~ /^[0-9]+$/) num = 0 }
-        if (nd == 1) print "✅ " s "/" lab(ti[d[1]]) ": " td[d[1]]
+        if (nd == 1) print "✅ " s "/" lab(ti[d[1]]) ": \037" td[d[1]] "\037"
         else if (nd > 1) {
           lo = lab(ti[d[1]]); hi = lab(ti[d[nd]])
           if (num) for (k = 1; k <= nd; k++) { x = lab(ti[d[k]]) + 0; if (x < lo + 0) lo = x; if (x > hi + 0) hi = x }
@@ -2651,6 +2655,22 @@ _card_sitrep_tasks() {
       }
       for (j = 1; j <= nt; j++) if (!(ts[j] in known) && tt[j] != "done") print open_row(j)
     }'
+}
+
+# _card_sitrep_fit <lead> <description> <tail> -> the row at 4 columns of indent, in one line: the description whole when
+# the row fits BIONIC_LINE_WIDTH, else cut at the last word that lets the row fit and ended in "…", so the label and the
+# tail (the note) always print whole. A row that fits no word prints its "…" alone.
+_card_sitrep_fit() {
+  local lead="$1" desc="$2" tail="$3" cut
+  _bionic_cols_into "    $lead$desc$tail"
+  if [ "$BIONIC_COLS" -le "$BIONIC_LINE_WIDTH" ]; then printf '%s%s%s\n' "$lead" "$desc" "$tail"; return 0; fi
+  cut="$desc"
+  while :; do
+    case "$cut" in *' '*) cut="${cut% *}" ;; *) cut="" ;; esac
+    _bionic_cols_into "    $lead$cut…$tail"
+    if [ "$BIONIC_COLS" -le "$BIONIC_LINE_WIDTH" ] || [ -z "$cut" ]; then break; fi
+  done
+  printf '%s%s…%s\n' "$lead" "$cut" "$tail"
 }
 
 # _card_sitrep_names <calls> <id>... -> 0 when a call names one of the ids as a whole word: no letter, digit or _ on
@@ -2743,14 +2763,16 @@ _card_sitrep_row() {  # <text> -> the row at 4 columns opening on a bullet, fold
 
 # _card_sitrep_draw -> the card from SR_* and SJ_*
 _card_sitrep_draw() {
-  local i j h rel wave pred fc row
+  local i j h rel wave pred fc lead desc tail
   rel="$(_card_sitrep_fact run.release)"; wave="$(_card_sitrep_fact run.wave)"
   h="Sitrep · $(_card_sitrep_fact run.project)"; [ "$rel" = - ] || h="$h $rel"
   [ "$wave" = - ] || h="$h · wave $wave"
   printf '%s · %s\n\n  Call to action\n' "$h" "$(_card_sitrep_fact run.now)"
   for ((i = 0; i < ${#SJ_CALL[@]}; i++)); do _card_sitrep_row "${SJ_CALL[$i]}"; done
   printf '\n  Task list\n'
-  while IFS= read -r row; do [ -z "$row" ] || _card_hang 7 "    $row"; done <<< "$(_card_sitrep_tasks)"
+  while IFS=$'\037' read -r lead desc tail; do
+    [ -z "$lead" ] || _card_hang 7 "    $(_card_sitrep_fit "$lead" "$desc" "$tail")"
+  done <<< "$(_card_sitrep_tasks)"
   printf '\n  Metrics\n'
   _card_sitrep_row "Completed: $(_card_sitrep_fact metric.completed)"
   _card_sitrep_row "Pace: $(_card_sitrep_fact metric.pace)"
@@ -2814,7 +2836,10 @@ _card_sitrep_check() {
         if (cur == "") bad("a row before any section, line " NR ": " t)
         rows[cur]++; prev = "row"; next
       }
-      if (ind >= 5 && (prev == "row" || prev == "cont")) { prev = "cont"; next }
+      if (ind >= 5 && (prev == "row" || prev == "cont")) {
+        if (cur == "Task list") bad("a task row spans two lines, line " NR ": " t)
+        prev = "cont"; next
+      }
       bad("a row with no bullet or icon, line " NR ": " t)
     }
     END {
