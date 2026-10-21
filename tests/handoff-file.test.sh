@@ -248,7 +248,7 @@ hf_split() {  # <repo> <stdin file> <args...> -> OL_OUT, OL_ERR, OL_RC: the poke
 hf_world one-line no
 hf_split "$HF_R" "$HF_C" handoff
 expect_eq "OL-1 bound: the verb exits 0 and its stdout is exactly the resume line, the file's last line, with nothing on stderr" \
-  "0|/bionic:canonical-sdlc $HF_DOOR||" "$OL_RC|$OL_OUT|$OL_ERR"
+  "0|/bionic:canonical-sdlc $HF_DOOR|" "$OL_RC|$OL_OUT|$OL_ERR"
 expect_eq "OL-1b …the line is the written file's last line (the read is not empty)" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
 expect_eq "OL-1c …and stdout holds that one line only" "1" "$(printf '%s\n' "$OL_OUT" | grep -c . | tr -d ' ')"
 HF_OL_NR="$TMPROOT/hf-ol-norun"; mkdir -p "$HF_OL_NR"
@@ -258,7 +258,7 @@ HF_OL_BR="$(git -C "$HF_OL_NR" symbolic-ref --short HEAD)"
 HF_OL_F="$HF_OL_NR/$HF_HOME/2026-10-06-$HF_OL_BR.md"
 hf_split "$HF_OL_NR" "$HF_C" handoff
 expect_eq "OL-2 unbound: stdout is exactly Read <path> whole, then do Next 1., with nothing on stderr" \
-  "0|Read $HF_HOME/2026-10-06-$HF_OL_BR.md whole, then do Next 1.||" "$OL_RC|$OL_OUT|$OL_ERR"
+  "0|Read $HF_HOME/2026-10-06-$HF_OL_BR.md whole, then do Next 1.|" "$OL_RC|$OL_OUT|$OL_ERR"
 expect_eq "OL-2b …the line is the written file's last line (the read is not empty)" \
   "Read $HF_HOME/2026-10-06-$HF_OL_BR.md whole, then do Next 1." "$(tail -1 "$HF_OL_F")"
 expect_eq "OL-2c …and stdout holds that one line only" "1" "$(printf '%s\n' "$OL_OUT" | grep -c . | tr -d ' ')"
@@ -276,7 +276,7 @@ expect_eq "OL-3b …nor names the written-to line the verb no longer prints" "0"
 OL_LASTSTEP="$(ol_last_step "$OL_SKILL")"
 expect_contains "OL-3c precondition: the last step is read (it is the one that ends the session)" "/bionic:canonical-sdlc" "$OL_LASTSTEP"
 expect_eq "OL-3d the last step ends on a fenced block holding the resume line" "/bionic:canonical-sdlc <path>" \
-  "$(printf '%s' "$OL_LASTSTEP" | ol_fence_body | /usr/bin/grep -F '/bionic:canonical-sdlc' | head -1)"
+  "$(printf '%s' "$OL_LASTSTEP" | ol_fence_body | /usr/bin/grep -F '/bionic:canonical-sdlc' | sed 's/^[[:space:]]*//' | head -1)"
 expect_eq "OL-3e …and the step's last non-blank line closes that fence" '```' "$(printf '%s' "$OL_LASTSTEP" | /usr/bin/grep . | tail -1 | tr -d ' ')"
 
 
