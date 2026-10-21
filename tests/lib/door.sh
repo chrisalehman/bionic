@@ -37,7 +37,7 @@
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
 # (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
 # writes and no verb creates: `rigor: double` and `scale: wave`, without which the judge cannot deal the readings a
-# run owes, and the matrix skeleton, an `## Eval design` row for AC-1.1 and its `## Verification Matrix` table row,
+# run owes, and the matrix skeleton, one `## Eval design` row and its `## Verification Matrix` table row at tier T1,
 # which matrix-render, matrix-set and discharge fill. Every later state of the plan is a verb's.
 #
 # WHICH COPY RAN. The fixture's committed release-check.sh carries one line more than the tree under test's, after
