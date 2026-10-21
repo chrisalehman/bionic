@@ -144,10 +144,10 @@ T45 wrote only their records.
 
 ### The landing numbers
 
-`landing-report --rows` at dc784d79a254895b1dec120938fc491aa3ee4918 on 2026-10-21T13:34:55Z:
+`landing-report --rows` at 4822ef014852afadaa2501ff43e0d88ba77cd487 on 2026-10-21T16:42:58Z:
 
 ```
-landings: queue=39 hand=5 git=0 · ready-to-landed median=3.9m p75=7.2m max=24.2m · runs: green=184 red=8 none=1 discarded=6 red-then-green=0 run=415 reused=0 absent=0 · waited median=18s · killed=11
+landings: queue=40 hand=6 git=0 · ready-to-landed median=4.0m p75=6.8m max=24.2m · runs: green=184 red=8 none=1 discarded=6 red-then-green=0 run=427 reused=0 absent=0 · waited median=18s · killed=11
 T6 queue ready=2026-10-21T01:09:41Z landed=2026-10-21T01:11:12Z minutes=1.5 runs=3 waited=19s wait=0.3 prove=0.9 rework=0.2 width=2
   bash-walls.test.sh green promised=21s actual=22s ratio=1.05
   canonical-sdlc-evidence-gate-2.test.sh green promised=51s actual=55s ratio=1.08
@@ -389,6 +389,10 @@ T48 queue ready=2026-10-21T10:15:28Z landed=2026-10-21T10:20:09Z minutes=4.7 run
   shell-lint.test.sh green promised=24s actual=31s ratio=1.29
 T30 queue ready=2026-10-21T10:59:30Z landed=2026-10-21T11:00:59Z minutes=1.5 runs=1 waited=16s wait=0.3 prove=1.0 rework=0.2 width=4
   release-check.test.sh green promised=58s actual=58s ratio=1.00
+T51 queue ready=2026-10-21T13:29:52Z landed=2026-10-21T13:35:01Z minutes=5.2 runs=2 waited=16s wait=0.3 prove=4.9 rework=0.0 width=4
+  door-landing.test.sh green promised=165s actual=292s ratio=1.77
+  shell-lint.test.sh green promised=23s actual=33s ratio=1.43
+T53 hand ready=- landed=2026-10-21T16:16:58Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 ```
 
 ### Known limits
