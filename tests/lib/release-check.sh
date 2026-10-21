@@ -22,7 +22,9 @@ set +x +v
 #      states its sentence (the ` stated="…"` field `finding-stated` writes, unescaped) must stand
 #      under the entry's `### Known limits`, both sides folded by lib/said.sh `said_fold`, the one
 #      fold the sentence was written through. A missing one is ONE line naming the finding and the
-#      sentence, and exit 1. The plan is read from the working files: `.bionic/` is ignored, so the
+#      sentence, and exit 1. An open deferral rated `defer` that states none, or a `-` for one (the form a
+#      carried unstated deferral is written in), is ONE line naming the finding, and exit 1: no sentence is
+#      no limit to carry. The plan is read from the working files: `.bionic/` is ignored, so the
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
 #      sentences held says how many, in one such line. Generalised from the §CORR rule of
@@ -120,7 +122,7 @@ lim_sentence() {
     | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p' | sed -e 's/\\\(.\)/\1/g'
 }
 lim_check() {  # <version> <changelog text> -> one line per omission, or one known-limits: line; exit 1 on an omission
-  local ver="$1" cl="$2" plans plan kl id s r p t st n=0 bad=0
+  local ver="$1" cl="$2" plans plan kl id s r p t st n=0 un=0 bad=0
   rel_load "the Known limits check" || return 2
   plans="$(rel_plans "$ver")"
   if [ -z "$plans" ]; then
@@ -130,17 +132,22 @@ lim_check() {  # <version> <changelog text> -> one line per omission, or one kno
   kl="$(said_fold "$(entry_part "$cl" "$ver" 'Known limits')")"
   while IFS= read -r plan; do
     [ -n "$plan" ] || continue
-    n=0
+    n=0 un=0
     while read -r id s r p t; do
       [ "$p" = defer ] || continue
       st="$(said_fold "$(lim_sentence "$plan" "$id")")"
-      [ -n "$st" ] || continue
+      # A deferral with no sentence, or a dash where it would stand, leaves nothing for Known limits to carry.
+      if [ -z "$st" ] || [ "$st" = - ]; then
+        echo "release-check: $ver defers $id with no stated sentence; state it or fix it"
+        un=$((un + 1)); bad=1
+        continue
+      fi
       n=$((n + 1))
       case "$kl" in *"$st"*) continue ;; esac
       echo "release-check: Known limits of $ver omit the deferred sentence of $id: $st"
       bad=1
     done < <(proof_findings_owed "$plan" 2>/dev/null)
-    if [ "$n" -eq 0 ]; then echo "known-limits: $ver — $plan states no deferred sentence"
+    if [ "$n" -eq 0 ] && [ "$un" -eq 0 ]; then echo "known-limits: $ver — $plan states no deferred sentence"
     elif [ "$bad" -eq 0 ]; then echo "known-limits: $ver carries the $n deferred sentences of $plan"; fi
   done <<LIM_PLANS
 $plans
