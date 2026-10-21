@@ -530,7 +530,7 @@ EOF
   if [ -z "$rundir" ] && [ -n "$(config_value "$root" release-check "" 2>/dev/null)" ]; then
     lt="$(landing_tree_take "$root")" && landing_tree_point "$lt" "$head" && rundir="$lt"
   fi
-  _wt_release_check "$root" "${rundir:-$root}" "$head" "$cand" "$tr" "$br" "$branch"; rc=$?
+  _wt_release_check "$root" "${rundir:-$root}" "$head" "$cand" "$tr" "$br" "$branch" "$row"; rc=$?
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" -eq 0 ] || { _line_lock_drop "$lk"; return 2; }
   # 6. THE DEBT WRITE (wave-28 T5; D8, AC-9.4): a declared red's `debt:` line, at the publish's own
