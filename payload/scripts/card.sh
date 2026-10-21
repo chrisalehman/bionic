@@ -2238,6 +2238,19 @@ _card_unapproved() {
     cur8_unapproved_line )
 }
 
+# _card_review_fact, _card_review_failing -> the fact of the evidence gate's refusal while an owed review question is
+# unanswered, and the printf format of its line for a question whose newest review fails, as the wall spells them
+# (payload/scripts/lib/walls.sh `eg_review_unanswered_fact`, `eg_review_failing_line`), read in a subshell. Nothing
+# when walls.sh cannot be loaded, and then no line is settled as that refusal, so the page stays early.
+_card_review_fact() {
+  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F eg_review_unanswered_fact >/dev/null 2>&1 || exit 1
+    eg_review_unanswered_fact )
+}
+_card_review_failing() {
+  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F eg_review_failing_line >/dev/null 2>&1 || exit 1
+    eg_review_failing_line )
+}
+
 # _card_fmt_is <format> <line> -> 0 when <line> is <format> with each %s standing for any text. Each piece between the
 # placeholders is matched as a literal, so no character of the judge's words is read as a pattern.
 _card_fmt_is() {
@@ -2273,13 +2286,22 @@ _card_fmt_is() {
 # release` line, or one naming no head), before it reads any other fact: that approval is the page's own decision, so
 # it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. That refusal is
 # known by the judge's own format (`_card_unapproved`), never by a second spelling of its words here. The advance
-# prints no refusal for the merge approval, so none is read here.
+# prints no refusal for the merge approval, so none is read here. The wall's refusal for an unanswered review question,
+# and its line for a failing one, are known the same way, by the wall's own spellings (`_card_review_fact`,
+# `_card_review_failing`).
 _card_settles() {
-  local l q k judge=0 reading=0 any=0 unap
+  local l q k judge=0 reading=0 any=0 unap rfact rfail
   local -a _cs_f=()
   unap="$(_card_unapproved)"
+  rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"
   while IFS= read -r l; do
     if [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; then CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue; fi
+    if [ -n "$rfact" ]; then
+      case "$l" in "bionic: commit refused — $rfact "*) reading=1; any=1; continue ;; esac
+    fi
+    if [ "$reading" = 1 ] && [ -n "$rfail" ] && _card_fmt_is "$rfail" "$l"; then
+      q="${l#- }"; q="${q%%:*}"; CF_SETTLE="${CF_SETTLE}waive:$q"$'\n'; continue
+    fi
     case "$l" in
       "bionic: commit refused — the auditor has not confirmed "*)
         q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
@@ -2288,11 +2310,7 @@ _card_settles() {
         q="${l#bionic: commit refused — }"; k="${q#* has placeholder }"; k="${k%% evidence (*}"; q="${q%% *}"
         [ "$k" = "$(_card_t4_confirm_key)" ] || return 1
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
-      "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
       "bionic: "*) return 1 ;;
-      "- "*": the newest reading is result=fail "*)
-        [ "$reading" = 1 ] || continue
-        q="${l#- }"; q="${q%%:*}"; CF_SETTLE="${CF_SETTLE}waive:$q"$'\n' ;;
       "- "*) [ "$reading" = 1 ] && return 1 ;;
       "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
       "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
