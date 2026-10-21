@@ -635,6 +635,24 @@ _sitrep_name_awk() {
     }'
 }
 
+# _sitrep_label_awk -> the awk source of `label(id)`: a task is named by the label its row prints on the card, its step,
+# a slash and its id without the T. It reads `at[id]` (the row's index) and `stp[index]` (its step); an id no row carries
+# is named as it stands. Every place that names a task to the user takes its name from here, so no two disagree.
+_sitrep_label_awk() {
+  printf '%s' '
+    function label(w) {
+      if (!(w in at)) return w
+      return (stp[at[w]] == "" ? "-" : stp[at[w]]) "/" ((substr(w, 1, 1) == "T") ? substr(w, 2) : w)
+    }'
+}
+
+# sitrep_task_label <units_rows output> <id> -> the label of that task, as the notes and the card's rows name it
+sitrep_task_label() {
+  printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v w="$2" "$(_sitrep_label_awk)"'
+    { x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x); if (x != "") { at[x] = NR; s = $2; gsub(/^[ \t]+|[ \t]+$/, "", s); stp[NR] = s } }
+    END { print label(w) }'
+}
+
 # sitrep_task_name <cell> -> the task's name: the cell up to its first " (", ": ", ". " or " · ".
 sitrep_task_name() { printf '%s\n' "$1" | LC_ALL=C awk "$(_sitrep_name_awk)"'{ print task_name($0) }'; }
 
@@ -908,7 +926,7 @@ $reads
 SITREP_REVIEWS
 }
 
-# sitrep_holds <plan> <root> <units_rows output> <key> <reply> -> what waits on the ask, in words: task ids, the release
+# sitrep_holds <plan> <root> <units_rows output> <key> <reply> -> what waits on the ask, in words: task labels, the release
 # and the merge (the first five named, the rest counted), `step <n>` for a step card, or `nothing`. An approval holds
 # the open tasks that read it; a decision what `decision_waiters` names; a waiver, a finding, a matrix row or a held
 # merge the open integrate tasks, the merge they make; a gate act the task its line names.
@@ -928,7 +946,7 @@ sitrep_holds() {
     gate:*) ids="$(printf '%s\n' "$5" | sed -n 's/.*GATE \(T[0-9A-Za-z._-]*\).*/\1/p' | head -n 1)" ;;
   esac
   while IFS= read -r w; do
-    case "$w" in '') ;; release|merge) words[${#words[@]}]="the $w" ;; *) words[${#words[@]}]="$w" ;; esac
+    case "$w" in '') ;; release|merge) words[${#words[@]}]="the $w" ;; *) words[${#words[@]}]="$(sitrep_task_label "$rows" "$w")" ;; esac
   done <<SITREP_HOLDS
 $ids
 SITREP_HOLDS
@@ -1028,7 +1046,7 @@ sitrep_gather() {
               }' "$plan"
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | LC_ALL=C awk -F'\t' "$(_sitrep_name_awk)"'
+          } | LC_ALL=C awk -F'\t' "$(_sitrep_name_awk)$(_sitrep_label_awk)"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function words(r) {   # a read, in words: an approval is the user'"'"'s, a step its number, a proof its facts
       sub(/^live:/, "", r)
@@ -1036,10 +1054,6 @@ sitrep_gather() {
       if (index(r, "approval:") == 1) return "your approval of " substr(r, 10)
       if (index(r, "step:") == 1) return "step " substr(r, 6)
       return r
-    }
-    function label(w) {   # a task is named by the label its row prints on the card: its step, a slash, its id without the T
-      if (!(w in at)) return w
-      return (stp[at[w]] == "" ? "-" : stp[at[w]]) "/" ((substr(w, 1, 1) == "T") ? substr(w, 2) : w)
     }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }

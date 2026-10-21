@@ -315,7 +315,7 @@ expect_eq "SH12 every ask open on the register is one ask line, the decision put
   "approve:release|waive:adversarial|row:AC-1.2|ruling:r1|gate:abc|decide:D21|0" \
   "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$(sr_lines ask | /usr/bin/grep -c 'key=approve:merge ')"
 expect_eq "SH13 an ask's line: what it holds, its title and when it was raised, on the local clock" \
-  "T12|approval: release|1:00 PM|nothing|D21 · the gate the judge holds|1:30 PM" \
+  "4/12|approval: release|1:00 PM|nothing|D21 · the gate the judge holds|1:30 PM" \
   "$(for k in approve:release decide:D21; do for f in holds title raised; do sr_f "$(sr_ask "$k")" "$f"; done; done | sr_join)"
 expect_eq "SH14 every review: its question, scope, result, time, open findings and record; the review in flight with them" \
   "evidence whole fail 1:00 PM 1 record/wave-02-fx/auditor-evidence.md|adversarial piece pass 1:05 PM 0 record/wave-02-fx/critic-adversarial.md|T13 whole running - 0 -" \
@@ -818,11 +818,11 @@ sr_owed "key=approve:merge|state=open|sent=-|at=2026-10-06T20:01:00Z|title=appro
 sr_owed_sid "key=waive:structure|state=open|sent=-|at=2026-10-06T20:02:00Z|title=waiver: structure|reply=poker: the structure review is owed" "$SID3"
 sr_ask_keys() { sr_lines ask | while IFS= read -r l; do printf '%s %s\n' "$(sr_f "$l" key)" "$(sr_f "$l" holds)"; done | sr_join; }
 sr_run "$SR_PLAN_B"
-expect_eq "SC0 precondition: the other run's register is read — plan B owes its own ask, which T17 waits on" "approve:merge T17" "$(sr_ask_keys)"
+expect_eq "SC0 precondition: the other run's register is read — plan B owes its own ask, which T17 waits on" "approve:merge 4/17" "$(sr_ask_keys)"
 sr_run "$SR_PLAN_A"
-expect_eq "SC1 plan A owes only its own run's ask: not the other run's, not a session's acting for no run" "approve:release T12" "$(sr_ask_keys)"
+expect_eq "SC1 plan A owes only its own run's ask: not the other run's, not a session's acting for no run" "approve:release 4/12" "$(sr_ask_keys)"
 SR_SID="$SID2" sr_run "$SR_PLAN_A"
-expect_eq "SC2 …and the same when the verb runs in the other run's session: the session running it plays no part" "approve:release T12" "$(sr_ask_keys)"
+expect_eq "SC2 …and the same when the verb runs in the other run's session: the session running it plays no part" "approve:release 4/12" "$(sr_ask_keys)"
 sr_run --line "$SR_PLAN_A"
 expect_eq "SC3 …the Patrol's status counts the plan's ask alone" "owed: 1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'owed: [0-9]+')"
 
@@ -1072,8 +1072,8 @@ sr_tick
 expect_eq "ON0 precondition: the tick says T20 waits on approval:D21 and opens an item for it on the register" "yes|1" \
   "$(/usr/bin/grep -q '^poker: WAIT T20 — approval:D21$' "$TMPROOT/tick.out" && echo yes)|$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REG_F")"
 sr_run "$SR_PLAN"
-expect_eq "ON1 the sheet carries the decision once, beside the two approvals the tick opened, holding T20" \
-  "approve:release|approve:merge|decide:D21|T20" \
+expect_eq "ON1 the sheet carries the decision once, beside the two approvals the tick opened, holding the row by its card label (step 4, id 20)" \
+  "approve:release|approve:merge|decide:D21|4/20" \
   "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$(sr_f "$(sr_ask decide:D21)" holds)"
 expect_eq "ON2 …and the row waiting on it is held on you" "held|waits on your approval of D21" \
   "$(sr_f "$(sr_task T20)" state)|$(sr_f "$(sr_task T20)" note)"
