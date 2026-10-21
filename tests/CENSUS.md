@@ -1277,6 +1277,7 @@ sitrep.test.sh | §DECISIONS | keep | hooks/poker/sitrep.sh sitrep_render, the S
 sitrep.test.sh | §RECAP | keep | hooks/poker/sitrep.sh poker_verb_resume: the pages_readings loop dropped from the recap, so it prints no `reading:` line for a landed reading (RC2) | none (searched 'reading: ' and 'resume-recap' in tests/)
 sitrep.test.sh | §ONCE | keep | payload/scripts/lib/owed.sh owed_key: the `approve:D<n>` fold onto `decide:D<n>` deleted, so the tick's item and the page's decision are two and You owe counts D21 twice (ON1), and the approve verb leaves the tick's item open (ON5) | none (searched 'owed_key' and 'approve:D' in tests/)
 sitrep.test.sh | §TITLE | keep | hooks/poker/sitrep.sh sitrep_render: the `work at step` clause of the title deleted, so a plan at step 5 with an active step 7 task names step 5 alone (TI1) | none (searched 'work at step' in tests/)
+sitrep.test.sh | §ONE-LINE | keep | hooks/poker/sitrep.sh sitrep_task_lines: the clip's width test `cw(head nm tail) > 92` made unreachable, so a 300-character cell prints whole and the fold continues it onto a second line; "ONE1 a 300-character cell in each state prints one line each" and "ONE5 a 40-task plan … 44 lines" go red | none (searched 'sitrep_task_lines' and 'Task list' in tests/: session-poker-4 reads the recap's task-list: lines, not the page)
 
 ## slots.test.sh
 

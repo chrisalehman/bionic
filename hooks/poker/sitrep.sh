@@ -609,9 +609,11 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9[ · work at step <w> (<tasks>)] · <k> of <m>
 #                      tasks done (<p>%), the clause when a landed or active task stands at a step past current:
 #   Bottom line        four bullets: what you owe, what is next, what is done, when it closes
-#   Task list          <glyph> <step>: <name> for steps 0 to 3 and each later step with no task of its own, and
-#                      <glyph> <step>/<task>: <short description> for every task in execution order; a time in
-#                      parentheses, a state after " — "
+#   Task list          <glyph> <step>: <name> for steps 0 to 3, and <glyph> <step>/<task>: <name> for every task in
+#                      execution order, ONE line each and never continued: the name is the task's cell up to its first
+#                      " (", ": ", ". " or " · ", clipped at a word with "…" when the line would pass 92 columns; a
+#                      time in parentheses or a short state after " — " (`building`, `waits on T1 +8`, `held`, `red`)
+#                      always prints whole
 #   Score: <grade> (graded <time>), or Score: not graded yet
 #                      <mark> schedule, correctness, waste, decisions, goals — what each measured, in words; then
 #                      `<mark> reading — …` per landed reading with its result (`pages_readings`); then
@@ -651,19 +653,26 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # Set in hooks/session-poker.sh, before any part loads: SITREP_MARK_WITHIN, SITREP_MARK_NEAR, SITREP_MARK_OVER,
 # SITREP_MARK_NONE.
 
-# sitrep_fold -> stdin's `<continuation indent><TAB><text>` lines, each folded at 92 display columns: a wider text
-# breaks at its last space that fits, every continuation opening on that many spaces. Width is counted byte-wise so
-# no locale decides it: a character is one column, a four-byte one two, the three-byte mark glyphs (✅ ⬜ ⛔ ❔ ➖ ✖)
-# two, U+FE0F none. A word wider than the page prints whole.
-sitrep_fold() {
-  LC_ALL=C awk '
+# _sitrep_cw_awk -> the awk source of `cw(s)`, a text's display columns, counted byte-wise so no locale decides it: a
+# character is one column, a four-byte one two, the three-byte mark glyphs (✅ ⬜ ⛔ ❔ ➖ ✖) two, U+FE0F none. The one
+# measure, read by the fold and by the Task list's clip alike, so a line the clip fits is a line the fold passes.
+_sitrep_cw_awk() {
+  printf '%s' '
     function cw(s,   t, n, w) {
       t = s; n = gsub(/[\200-\277]/, "", t); w = length(s) - n
       t = s; w -= gsub(/\357\270\217/, "", t)
       t = s; w += gsub(/[\360-\364]/, "", t)
       t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t)
       return w
-    }
+    }'
+}
+
+# sitrep_fold -> stdin's `<continuation indent><TAB><text>` lines, each folded at 92 display columns: a wider text
+# breaks at its last space that fits, every continuation opening on that many spaces. A word wider than the page
+# prints whole. A Task list line is clipped to fit before it reaches the fold (`sitrep_task_lines`), so the fold
+# passes it and never continues it.
+sitrep_fold() {
+  LC_ALL=C awk "$(_sitrep_cw_awk)"'
     {
       i = index($0, "\t"); k = substr($0, 1, i - 1) + 0; s = substr($0, i + 1)
       if (cw(s) <= 92) { print s; next }
@@ -674,6 +683,50 @@ sitrep_fold() {
         else { print l; l = pad wd[j] }
       }
       print l
+    }'
+}
+
+# _sitrep_name_awk -> the awk source of `task_name(cell)`: the task's cell up to the first of " (", ": ", ". " or " · ",
+# trimmed, a closing "." dropped; a cell that opens on one of them keeps its whole trimmed text, so no task prints
+# nameless. Index-based, so the cut is byte-exact under any locale.
+_sitrep_name_awk() {
+  printf '%s' '
+    function task_name(t,   c, i, k, d, w) {
+      d[1] = " ("; d[2] = ": "; d[3] = ". "; d[4] = " · "
+      w = t; c = length(t) + 1
+      for (k = 1; k <= 4; k++) { i = index(t, d[k]); if (i && i < c) c = i }
+      t = substr(t, 1, c - 1); sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); sub(/\.$/, "", t)
+      if (t == "") { t = w; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t) }
+      return t
+    }'
+}
+
+# sitrep_task_name <cell> -> the task's name: the cell up to its first " (", ": ", ". " or " · ".
+sitrep_task_name() { printf '%s\n' "$1" | LC_ALL=C awk "$(_sitrep_name_awk)"'{ print task_name($0) }'; }
+
+# sitrep_task_lines -> stdin's `<glyph><TAB><label><TAB><cell><TAB><state>` rows as page lines, `5<TAB><glyph> <label>:
+# <name> <state>`, each ONE line of at most 92 display columns. THE CLIP, before the fold: the glyph, the label and the
+# state print whole, and only the name gives way. A name that does not fit ends at the last whole word that does,
+# then "…" (a word wider than the room is cut inside the room, on a character boundary). A line never continues.
+sitrep_task_lines() {
+  LC_ALL=C awk -F'\t' "$(_sitrep_cw_awk)$(_sitrep_name_awk)"'
+    {
+      head = $1 " " $2 ": "; nm = task_name($3); tail = ($4 == "") ? "" : " " $4
+      if (cw(head nm tail) > 92) {
+        n = split(nm, wd, " "); out = ""
+        for (j = 1; j <= n; j++) {
+          c = (out == "") ? wd[j] : out " " wd[j]
+          if (cw(head c "…" tail) > 92) break
+          out = c
+        }
+        if (out == "") {
+          L = length(wd[1])
+          while (L > 0 && (cw(head substr(wd[1], 1, L) "…" tail) > 92 || substr(wd[1], L + 1, 1) ~ /[\200-\277]/)) L--
+          out = substr(wd[1], 1, L)
+        }
+        sub(/[ ,;:(-]+$/, "", out); nm = out "…"
+      }
+      print "5\t" head nm tail
     }'
 }
 
@@ -999,18 +1052,19 @@ sitrep_render() {
     END { if (cur ~ /^[0-9]+$/ && mx > cur + 0) print mx " " ids }')"
 
   # ---- The Task list: the attended steps 0 to 3, each with its approval time, then every task in EXECUTION ORDER,
-  # then each later step with no task of its own. One line each, `<glyph> <step>/<task>: <short>`, then a time in
-  # parentheses or a state after " — ":
+  # and nothing else. One line each, `<glyph> <step>/<task>: <name>`, then a time in parentheses or a short state after
+  # " — " (`sitrep_task_lines` fits the line to the page, the name alone giving way):
   #   done       by landing time, with it; the time is read from the task's `- T<n>:` line wherever it sits on it,
   #              `landed <sha> <ISO>` or `landed-by-hand: <who> <ISO> "<why>"` (`by hand` said), the earlier of the
   #              two when both appear, after any text; a done task whose line names no instant follows them, so said;
   #   in flight  by their place on the line, lib/line.sh's fold read as it stands (read-only: no git counting, no
   #              liveness), saying what each does: `in its landing, <n> of <m> suites green` (a candidate built),
-  #              `queued on the line behind <task>` or `next on the line` (none built yet), or `building`;
+  #              `queued behind <task>` or `next on the line` (none built yet), or `building`;
   #   the rest   in dependency order over `units_edges` (a task after every open task it waits on, else table
   #              order), each saying what it `waits on` (`units_waiting`: the writer task, else the read in words;
-  #              five named, the rest counted); a task not started is bare, a held one says so.
-  # A task with a red at head or waiting on an approval the person owes is blocked (⛔); a red says so first.
+  #              the first named and the others counted, `waits on T1 +8`); a task not started is bare, a held one
+  #              says `held`.
+  # A task with a red at head or waiting on an approval the person owes is blocked (⛔); a red says `red`.
   local sit lq="" lwait ledges
   if [ -f "$rec" ] && [ ! -L "$rec" ] \
      && { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
@@ -1051,7 +1105,7 @@ sitrep_render() {
               }' "$plan"
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | awk -F'\t' -v dlv="${dlv_at:+yes}" "$_ROW_SHORT_AWK"'
+          } | awk -F'\t' -v dlv="${dlv_at:+yes}" '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function words(r) {   # a read, in words: an approval is the person'"'"'s, a step its number, a proof its facts
       sub(/^live:/, "", r)
@@ -1062,7 +1116,7 @@ sitrep_render() {
     }
     function row(i, kind, note,   d) {
       d = tk[i]; if (d == "") d = "—"
-      if (id[i] in red && st[i] != "landed") { kind = "s"; note = (note == "") ? "red at head" : "red at head, " note }
+      if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
       printf "R\t%s\t%s/%s\t%s\t%s\t%s\n", g[i], stp[i], id[i], d, kind, note
     }
     $1 == "X" { red[$2] = 1; next }
@@ -1072,12 +1126,11 @@ sitrep_render() {
     $1 == "AB" { ab = $2; next }
     $1 == "S" { sap[$2] = $3; sline[$2] = 1; next }
     $1 == "Q" { nq++; qr[nq] = $2; qc[nq] = $3; qo[nq] = $4; qg[nq] = $5; qm[nq] = $6; next }
-    $1 == "W" { w = ($4 != "" && $4 != "-") ? $4 : words($3); if (!(($2, w) in wseen)) { wseen[$2, w] = 1; wait[$2] = wait[$2] (wait[$2] == "" ? "" : ", ") w }; next }
+    $1 == "W" { w = ($4 != "" && $4 != "-") ? $4 : words($3); if (!(($2, w) in wseen)) { wseen[$2, w] = 1; if (!($2 in wfirst)) wfirst[$2] = w; wcount[$2]++ }; next }
     $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = row_short($5); rd[n] = $14; st[n] = s; at[id[n]] = n
-      if (stp[n] ~ /^[0-9]+$/) hasstep[stp[n] + 0] = 1
+      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = trim($5); rd[n] = $14; st[n] = s; at[id[n]] = n
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
@@ -1110,7 +1163,7 @@ sitrep_render() {
         i = at[qr[q]]; if (i == "" || st[i] != "active" || (i in placed)) continue
         placed[i] = 1
         if (qc[q] != "-" && qc[q] != "") note = ((qo[q] == "stalled") ? "stalled in its landing, " : "in its landing, ") ((qm[q] + 0 > 0) ? qg[q] " of " qm[q] " suites green" : "no suite to run")
-        else note = (prev == "") ? "next on the line" : "queued on the line behind " prev
+        else note = (prev == "") ? "next on the line" : "queued behind " prev
         row(i, "s", note); prev = qr[q]
       }
       for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) row(i, "s", "building")
@@ -1129,19 +1182,11 @@ sitrep_render() {
         if (!pick) for (i = 1; i <= n; i++) if (st[i] != "landed" && st[i] != "active" && !(i in out)) { pick = i; break }   # a cycle: table order
         out[pick] = 1; done++
         for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
-        if (st[pick] == "held") { row(pick, "s", "on hold"); continue }
-        if (st[pick] != "pending" || !(id[pick] in wait)) { row(pick, "b", ""); continue }
-        m = split(wait[id[pick]], wl, ", "); note = "waits on " wl[1]   # five named, the rest counted
-        for (k = 2; k <= m && k <= 5; k++) note = note ", " wl[k]
-        if (m > 5) note = note " and " (m - 5) " more"
+        if (st[pick] == "held") { row(pick, "s", "held"); continue }
+        if (st[pick] != "pending" || !(id[pick] in wfirst)) { row(pick, "b", ""); continue }
+        note = "waits on " wfirst[id[pick]]   # the first blocker, the others counted
+        if (wcount[id[pick]] > 1) note = note " +" (wcount[id[pick]] - 1)
         row(pick, "s", note)
-      }
-      # each later step that has no task of its own
-      for (k = 4; k <= 9; k++) {
-        if (k in hasstep) continue
-        if (dlv == "yes" || (cur != "" && k < cur + 0)) printf "S\tL\t%d\t%s\tb\t\n", k, nm[k + 1]
-        else if (cur != "" && k == cur + 0) printf "S\tA\t%d\t%s\ts\tin progress\n", k, nm[k + 1]
-        else printf "S\tP\t%d\t%s\tb\t\n", k, nm[k + 1]
       }
     }')"
   local inflight="" blocked="" nextup="" last_id="" last_at=""
@@ -1368,12 +1413,13 @@ SITREP_OWED
       [ -n "$ty" ] || continue
       case "$gl" in L) glyph="✅" ;; A) glyph="🔄" ;; X) glyph="⛔" ;; *) glyph="⬜" ;; esac
       case "$kind" in
-        t)  printf '5\t%s %s: %s (%s)\n' "$glyph" "$lab" "$desc" "$(sitrep_clock "$note" "$now")" ;;
-        th) printf '5\t%s %s: %s (%s, by hand)\n' "$glyph" "$lab" "$desc" "$(sitrep_clock "$note" "$now")" ;;
-        s)  printf '5\t%s %s: %s — %s\n' "$glyph" "$lab" "$desc" "$note" ;;
-        *)  printf '5\t%s %s: %s\n' "$glyph" "$lab" "$desc" ;;
+        t)  state="($(sitrep_clock "$note" "$now"))" ;;
+        th) state="($(sitrep_clock "$note" "$now"), by hand)" ;;
+        s)  state="— $note" ;;
+        *)  state="" ;;
       esac
-    done <<SITREP_SIT
+      printf '%s\t%s\t%s\t%s\n' "$glyph" "$lab" "$desc" "$state"
+    done <<SITREP_SIT | sitrep_task_lines
 $sit
 SITREP_SIT
     printf '0\t\n0\t%s\n' "$gh"

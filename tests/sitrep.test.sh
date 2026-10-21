@@ -379,7 +379,7 @@ expect_eq "ORD0 precondition: the world renders (rc 0) and its counts are §ROWS
 expect_eq "ORD1 the Task list opens on steps 0 to 3, each with its approval time (the approved by instant, not an earlier approved)" \
   "✅ 0: Configure (1:10 AM)|✅ 1: Scope (1:40 AM)|✅ 2: Design (2:20 AM)|✅ 3: Plan (3:00 AM)" \
   "$(sr_sit | head -4 | sr_join)"
-expect_eq "ORD5 …and nothing else: 9 steps and 17 tasks, one logical line each" "26|9|17" \
+expect_eq "ORD5 …and nothing else: the four attended steps and 17 tasks, one logical line each" "21|4|17" \
   "$(sr_sit | /usr/bin/grep -c .)|$(sr_steps | /usr/bin/grep -c .)|$(sr_rows | /usr/bin/grep -c .)"
 # A step with no approval instant on its line says so.
 awk '/^- Step 2: / { print "- Step 2: spec: specs/x.spec.md; frame approved at the card"; next } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
@@ -1140,5 +1140,72 @@ sr_world title-pending "6 6 12 12"
 sed -i.bak -e 's/^current: 4$/current: 5/' -e 's/^| T9 | 4 | build |/| T9 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sr_run "$SR_PLAN"
 expect_eq "TI3 a pending task at step 7 is not work at step 7: one step alone" "step 5 of 9" "$(sr_title)"
+
+# ============================================================
+section "§ONE-LINE: every task of the plan has one Task list line, never continued: the name is the cell up to its first \" (\", \": \", \". \" or \" · \", cut at a word with … to fit 92 columns, the glyph, the label and the short state whole"
+# ============================================================
+# fails-when: a 300-character task cell prints over two lines or past 92 columns; a clipped line loses its state or
+# time, or names two blockers; the cut falls inside a word; a task of a 40-task plan has no line, or the list holds
+# any line beyond one per step 0 to 3 and per task.
+# sr_rawsit -> the Task list's physical lines as printed (nothing unfolded), heading excluded, to the first blank.
+sr_rawsit() { printf '%s\n' "$OUT" | awk 'on && /^$/ { exit } on { print } $0 == "Task list" { on = 1 }'; }
+# sr_cell <id> <cell> -> SR_PLAN with that task's description cell replaced, in the Tasks table alone (a row of the
+# dispatch ledger names the same id)
+sr_cell() { awk -v id=" $1 " -v t="$2" -F'|' 'BEGIN { OFS = "|" } $2 == id && NF > 12 { $5 = " " t " " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }
+SR_LONG300="$(awk 'BEGIN { for (i = 1; length(s) < 300; i++) s = s (i > 1 ? " " : "") "wordnumber" i; print substr(s, 1, 300) }')"
+sr_world oneline "6 6 12 12"
+sed -i.bak -e 's#^\(| T10 | 4 | build | [^|]*| — | — | \)—#\1lib/t5.sh,lib/t6.sh,lib/t7.sh#' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending/\1held/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+for SR_T in T1 T5 T10 T11; do sr_cell "$SR_T" "$SR_LONG300"; done
+sr_run "$SR_PLAN"
+expect_eq "ONE0 precondition: the world renders, four task cells are 300 characters, and T10 waits on three open tasks, T11 is held" "0|4|yes|yes" \
+  "$RC|$(/usr/bin/grep -E '^\| (T1|T5|T10|T11) \|' "$SR_PLAN" | awk -F'|' 'NF > 12 && length($5) == 302 { n++ } END { print n + 0 }')|$(/usr/bin/grep -q '^| T10 | .*lib/t5.sh,lib/t6.sh,lib/t7.sh' "$SR_PLAN" && echo yes)|$(/usr/bin/grep -q '^| T11 | .*| held |' "$SR_PLAN" && echo yes)"
+SR_ONE_LINES="$(for SR_T in T1 T5 T10 T11; do sr_rawsit | /usr/bin/grep -E "^[^ ]+ 4/$SR_T: "; done)"
+expect_eq "ONE1 a 300-character cell in each state (done, building, waiting on three, held) prints one line each, and the list has no continuation line" "4|0" \
+  "$(printf '%s\n' "$SR_ONE_LINES" | /usr/bin/grep -c .)|$(sr_rawsit | /usr/bin/grep -c '^ ')"
+expect_eq "ONE1b …each at most 92 columns by the suite's own measure, and the widest is within a word of the edge (widest $(printf '%s\n' "$SR_ONE_LINES" | sr_maxw))" "yes" \
+  "$([ "$(printf '%s\n' "$SR_ONE_LINES" | sr_maxw)" -le 92 ] && [ "$(printf '%s\n' "$SR_ONE_LINES" | sr_maxw)" -ge 70 ] && echo yes)"
+expect_eq "ONE2 each clipped line ends in its short state whole: the time, building, waits on the first blocker and a count, held" \
+  "(3:06 AM)|— building|— waits on T5 +2|— held" \
+  "$(for SR_T in T1 T5 T10 T11; do printf '%s\n' "$SR_ONE_LINES" | /usr/bin/grep -E "^[^ ]+ 4/$SR_T: " | sed -E 's/^.*… (\(3:06 AM\)|— .*)$/\1/'; done | sr_join)"
+# the cut: the name ends in … after a whole word of the cell, never inside one
+sr_cutok() {  # <task line> -> yes when its name is a whole-word prefix of the 300-character cell, ending in …
+  local nm; nm="$(printf '%s\n' "$1" | sed -E 's/^[^ ]+ [0-9]+\/T[0-9]+: (.*)… (\(.*|— .*)$/\1/')"
+  case "$SR_LONG300" in "$nm "*) echo yes ;; *) echo no ;; esac
+}
+expect_eq "ONE2b the name of each clipped line is a whole-word prefix of the cell, then …" "yes|yes|yes|yes" \
+  "$(for SR_T in T1 T5 T10 T11; do sr_cutok "$(printf '%s\n' "$SR_ONE_LINES" | /usr/bin/grep -E "^[^ ]+ 4/$SR_T: ")"; done | sr_join)"
+# the name of a cell that fits is whole, cut at the first " (", ": ", ". " or " · "
+sr_cell T13 "Alpha one (the aside) and the rest"
+sr_cell T14 "Beta two: and the rest"
+sr_cell T15 "Gamma three. And the rest"
+sr_cell T16 "Delta four · and the rest"
+sr_run "$SR_PLAN"
+expect_eq "ONE3 the name stops at the first of \" (\", \": \", \". \" and \" · \", and the rest of the cell never prints" \
+  "⬜ 4/T13: Alpha one|⬜ 4/T14: Beta two|⬜ 4/T15: Gamma three|⬜ 4/T16: Delta four" \
+  "$(for SR_T in T13 T14 T15 T16; do sr_rawsit | /usr/bin/grep -E "^[^ ]+ 4/$SR_T: "; done | sr_join)"
+# every state, in short form
+sr_world oneline-states "6 6 12 12"
+sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending/\1held/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_ev "ev=ready|row=T6|name=w-T6|commit=$SR_C1|branch=wt/02-T6|tree=$SR_REPO/.worktrees/02-T6|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:30:00Z"
+sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T7.log|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "ONE4 the short state of each kind: done a time, next on the line, queued behind, building, red, waiting on one, held" \
+  "T1 (3:06 AM)|T8 — next on the line|T6 — queued behind T8|T5 — building|T7 — red|T9 — waits on T8|T11 — held" \
+  "$(for SR_T in T1 T8 T6 T5 T7 T9 T11; do sr_rawsit | /usr/bin/grep -E "^[^ ]+ 4/$SR_T: " | sed -E 's/^[^ ]+ 4\/(T[0-9]+): [^(—]*(\(.*|— .*)$/\1 \2/'; done | sr_join)"
+# a 40-task plan in every state: one line per step 0 to 3 and per task
+SR_EXTRA=23 sr_world oneline-forty "6 6 12 12"
+sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending/\1held/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T7.log|at=2026-10-06T14:00:00Z"
+for SR_T in T1 T9 T20 T30 T40; do sr_cell "$SR_T" "$SR_LONG300"; done
+sr_run "$SR_PLAN"
+SR_FORTY_IDS="$(sr_rawsit | /usr/bin/grep -oE '^[^ ]+ 4/T[0-9]+:' | sed -E 's/^[^ ]+ 4\/(T[0-9]+):$/\1/' | sort -u | wc -l | tr -d ' ')"
+expect_eq "ONE5 a 40-task plan in every state: 44 lines in the Task list and every task id prints once" "of 40 tasks done|44|40" \
+  "$(sr_page | head -1 | /usr/bin/grep -oE 'of [0-9]+ tasks done')|$(sr_rawsit | /usr/bin/grep -c .)|$SR_FORTY_IDS"
+expect_eq "ONE5b …the four attended steps and nothing but the tasks after them: no step 5 to 9 line" "4|0" \
+  "$(sr_rawsit | /usr/bin/grep -cE '^[^ ]+ [0-3]: ')|$(sr_rawsit | /usr/bin/grep -cE '^[^ ]+ [4-9]: ')"
+expect_eq "ONE5c …no line wider than 92 columns, none continued" "yes|0" \
+  "$([ "$(sr_rawsit | sr_maxw)" -le 92 ] && echo yes)|$(sr_rawsit | /usr/bin/grep -c '^ ')"
+
 
 finish
