@@ -461,24 +461,60 @@ sitrep_chain() {
     | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }'
 }
 
-# THE WAIT LINE: what changes if a decision is answered in an hour rather than now. The tasks that wait on it are the
-# pending ones whose reads name it as an approval, `approval:D<n>`; one of them on the longest open chain moves the
-# predicted close an hour, and off it they start an hour later while the close holds.
-decision_wait() {  # <plan> <D<n>> -> one sentence
-  local rows chain cids
+# THE WAIT LINE: what changes if a decision is answered in an hour rather than now, rendered from `decision_waiters`, the
+# one reader of what waits on a decision, so the line and the fact sheet cannot disagree. A task on the longest open
+# chain, the release or the merge moves the predicted close an hour; a task off the chain starts an hour later while the
+# close holds. The line says nothing moves only when nothing waits.
+decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
+  local rows waits chain cids
   rows="$(units_rows "$1" 2>/dev/null)"
-  if [ -z "$rows" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
+  waits="$(decision_waiters "$1" "$2" "${3:-}")"
+  if [ -z "$rows" ] && [ -z "$waits" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
   chain="$(sitrep_chain "$1" "$rows")"; cids="${chain%%$'\t'*}"
-  printf '%s\n' "$rows" | awk -F'\t' -v k="approval:$2" -v c=",$cids," '
+  printf '%s\n' "$waits" | awk -v c=",$cids," '
     function list(a, m,   i, s) { for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m) ? " and " : ", ")) a[i]; return s }
-    { s = tolower($10); gsub(/[ \t]/, "", s) } s != "pending" { next }
-    { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x)
-        if (x == k) { if (index(c, "," $1 ",")) on[++a] = $1; else off[++b] = $1; break } } }
+    $0 == "release" || $0 == "merge" { hd[++hn] = "the " $0; next }
+    NF { if (index(c, "," $0 ",")) on[++a] = $0; else off[++b] = $0 }
     END {
       if (a) { printf "Answered in an hour rather than now, the predicted close moves an hour later: %s %s on the longest chain and %s on it", list(on, a), (a > 1) ? "are" : "is", (a > 1) ? "wait" : "waits"
+               m = 0; for (i = 1; i <= hn; i++) also[++m] = hd[i]; for (i = 1; i <= b; i++) also[++m] = off[i]
+               if (m) printf "; %s also %s on it", list(also, m), (m > 1) ? "wait" : "waits"; printf ".\n" }
+      else if (hn) { printf "Answered in an hour rather than now, the predicted close moves an hour later: %s %s on it", list(hd, hn), (hn > 1) ? "wait" : "waits"
                if (b) printf "; %s also %s on it", list(off, b), (b > 1) ? "wait" : "waits"; printf ".\n" }
       else if (b) printf "Answered in an hour rather than now, %s %s an hour later and the predicted close holds: %s off the longest chain.\n", list(off, b), (b > 1) ? "start" : "starts", (b > 1) ? "they are" : "it is"
       else printf "Answered now or in an hour, nothing moves: no task waits on it.\n" }'
+}
+
+# WHAT WAITS ON A DECISION, the one reader the wait line and the fact sheet share. Three things wait on D<n>: every task
+# not landed or dropped whose reads name it as an approval, `approval:D<n>`, whatever its state; the release, while the
+# newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
+# names D<n> as a whole word (the third decision is not the thirtieth) in its reason or its line.
+decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id, in the plan's order, then `release`, then `merge`
+  local root dir page
+  units_rows "$1" 2>/dev/null | awk -F'\t' -v k="approval:$2" '
+    { s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { next }
+    { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x)
+        if (x == k) { print $1; break } } }'
+  root="${3:-}"; [ -n "$root" ] || root="$(project_root "${1%/*}" 2>/dev/null)"
+  [ -n "$root" ] || return 0
+  if declare -F docs_root >/dev/null 2>&1 && declare -F proof_plan_slug >/dev/null 2>&1; then
+    dir="$(docs_root "$root")/record/$(proof_plan_slug "$1")"
+    # The newest page by its time of writing, as the reply verb finds it.
+    # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, or the old stem's, no blank or line break in any
+    page="$(ls -t "$dir"/release-approval-*.md "$dir/$RR_OLD_VERB"-*.md 2>/dev/null | head -1)"
+    if [ -n "$page" ] && [ ! -L "$page" ] && awk -v d="$2" -v old="$RR_OLD_VERB/v1|dec=" '
+        index($0, "release-approval/v1|dec=") == 1 || index($0, old) == 1 { k = $0; sub(/^.*\|key=/, "", k); sub(/\|.*$/, "", k); sub(/^[^:]*:/, "", k)
+          if (k == d) { y = 1; exit } }
+        END { exit !y }' "$page" 2>/dev/null; then
+      printf 'release\n'
+    fi
+  fi
+  if declare -F owed_list_plan >/dev/null 2>&1 && owed_list_plan "$1" "$root" 2>/dev/null | awk -F'\t' -v d="$2" '
+      function names(s,   r) { r = "(^|[^A-Za-z0-9])" d "([^0-9]|$)"; return s ~ r }
+      $1 == "hold:merge" && (names($3) || names($4)) { y = 1 } END { exit !y }'; then
+    printf 'merge\n'
+  fi
+  return 0
 }
 
 # decisions_all <docs root> -> every run's entries, each line keyed `<wave> `, waves in slug order; a ledger with no
@@ -2028,6 +2064,18 @@ sitrep_grade() {
     case "$LR_TEXT" in *$'\n'*) printf '%s\n' "${LR_TEXT#*$'\n'}" ;; esac
     exit 0
   }
+  # decisions_settle <plan> <ledger> -> always 0, prints nothing: the ask of every decision the ledger reads ruled or
+  # withdrawn is closed on the run's register. A ruling is the ledger's own entry, written in the person's words with no
+  # verb of its own, so every `decisions` call settles the register against the ledger before it reads or puts.
+  decisions_settle() {
+    local d st
+    declare -F owed_close >/dev/null 2>&1 || return 0
+    [ -f "$2" ] && [ ! -L "$2" ] || return 0
+    decisions_rounds "$2" | while IFS='	' read -r d _ st; do
+      [ "$st" = open ] || OWED_ROOT="$REPO_REAL" OWED_PLAN="$1" owed_close "decide:$d" "$st" >/dev/null 2>&1
+    done
+    return 0
+  }
   # THE PUT. A decision put during a run is one ledger entry before it is shown, `## Δ<k> — D<n> put (orchestrator
   # <date> <time>): <title>`, Δ one past the ledger's highest, its body the wait line; the ledger is begun when the run
   # has none. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
@@ -2045,7 +2093,7 @@ sitrep_grade() {
       die "REFUSED — ${led#"$REPO_REAL"/} is a symlink; nothing is written."
       exit 1
     fi
-    wait="$(decision_wait "$plan" "$d")"
+    wait="$(decision_wait "$plan" "$d" "$REPO_REAL")"
     k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
     at="$(date '+%Y-%m-%d %-I:%M %p %Z')"
     mkdir -p "${led%/*}" 2>/dev/null
@@ -2056,6 +2104,11 @@ sitrep_grade() {
       die "REFUSED — ${led#"$REPO_REAL"/} cannot be written; nothing is written."
       exit 1
     }
+    # THE PUT IS AN ASK ON THE RUN'S REGISTER, in the words the pages owe it in (`pages_owed`), so a decision put and
+    # not yet ruled is owed wherever the register is read; the ledger's ruling closes it (`decisions_settle`).
+    if declare -F owed_open >/dev/null 2>&1; then
+      OWED_ROOT="$REPO_REAL" OWED_PLAN="$plan" owed_open "decide:$d" "reply to $d" "$d · $title: reply with the option number. $wait" >/dev/null 2>&1 || :
+    fi
     r="$(decisions_rounds "$led" | awk -F'\t' -v d="$d" '$1 == d { print $2 }')"
     printf 'put: %s · round %s · %s\n' "$d" "${r:-1}" "$title"
     printf 'wait: %s\n' "$wait"
@@ -2094,6 +2147,7 @@ sitrep_grade() {
       exit 2
     fi
     DC_LEDGER="$DC_DOCS/record/$(proof_plan_slug "$DC_PLAN")/design-ledger.md"
+    decisions_settle "$DC_PLAN" "$DC_LEDGER"
     [ -z "${DC_PUT:-}" ] || decisions_put "$DC_PLAN" "$DC_LEDGER" "$DC_PUT" "${DC_TITLE:-}"
     if [ ! -f "$DC_LEDGER" ] || [ -L "$DC_LEDGER" ]; then
       say "no design ledger at ${DC_LEDGER#"$REPO_REAL"/} — this run has recorded no ruling"

@@ -2,9 +2,9 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 115 · sections: 1036 · keep: 842 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 115 · sections: 1041 · keep: 850 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
 
-The section-list command counts 1066 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1066 - 22 - 8 = 1036.
+The section-list command counts 1071 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1071 - 22 - 8 = 1041.
 
 ## agent-context-guard.test.sh
 
@@ -35,6 +35,9 @@ archive.test.sh | §7 | vacuous | its one assertion is that the tracked skill fi
 ## asks.test.sh
 
 asks.test.sh | §ONE-REGISTER | keep | payload/scripts/close-out.sh gate_ask: the commit wall run without OWED_PLAN="$PLAN", so the preflight's waiver is filed under its stand-in session's file and the run's page, which reads the register, says nothing is owed (ONE-2, ONE-3); payload/scripts/lib/owed.sh owed_register: the register path made the session's own file, so a bound session no longer reads the run's asks as its own | none (searched 'owed_list_plan' and 'closeout-preflight' in tests/; release-approval.test.sh §REGISTER reads the card's decisions off the register, not the preflight's write)
+asks.test.sh | §HELD | keep | payload/scripts/close-out.sh co_hold: the hold:merge opener in _co_refuse deleted, so a close-out refused at Step 8 leaves no held merge on the run's register (HELD-2, HELD-3, HELD-3b), nor does check's first WOULD REFUSE (HELD-6); co_hold_release deleted, so the delivering run leaves it open (HELD-8) | none (searched 'hold:merge' in tests/; sitrep.test.sh §WAIT opens a held merge through owed.sh, never through close-out)
+asks.test.sh | §FAILED | keep | hooks/poker/proof.sh poker_verb_proof_add: the result=fail opener deleted, so the waiver is not on the register until an advance or a commit is refused (FL-1, FL-1b); the result=pass closer deleted, so a passing reading leaves it open (FL-3, FL-3b) | none (searched 'waive:evidence' and 'proof-add review' in tests/; session-poker-4 §ASK-WAIVE reads the judge's refusal, not the registration)
+asks.test.sh | §STOP | keep | hooks/poker/sitrep.sh decisions_put: the decide:D<n> opener deleted, so a put leaves no ask on the register (ST-1, ST-1b); decisions_settle deleted, so a decision the ledger reads ruled stays open (ST-2, ST-2b, ST-2c); hooks/poker/proof.sh poker_verb_disposition: the carry opener deleted, so a deferral no person ruled is no ask (ST-4, ST-4b) | none (searched 'decide:D' and 'carry:' in tests/; release-approval.test.sh §CARRY closes a carry, it does not open one by disposition alone)
 
 ## background-suite-guard.test.sh
 
@@ -136,6 +139,8 @@ card.test.sh | §Section 4 | keep | payload/scripts/card.sh: the free cell cut a
 card.test.sh | §Section 5 | keep | payload/scripts/card.sh: cells padded by byte length instead of bionic_cols, so the em-dash row's trailing column starts two columns early (27, 27a) | none (searched 'card.sh' and 'em dash' in tests/)
 card.test.sh | §Section 6 | keep | payload/scripts/card.sh: the ownership owner column fixed instead of sized per batch, so surfaces starts on different columns for the two owner widths (40, 41) | none (searched 'per-batch' and 'card.sh' in tests/)
 card.test.sh | §Section 7 | keep | payload/scripts/card.sh step1: the missing-provenance refusal deleted, so a REQ heading with no provenance line renders a card at exit 0 (64, 64b) | none (searched 'provenance' and 'card.sh step1' in tests/)
+card.test.sh | §KINDS | keep | payload/scripts/card.sh release: a fact dropped or reordered on the way to the page, or an unknown fact drawn as nothing instead of refused, so the release card differs from REL_WANT (KINDS-2) or exits 0 on an unknown fact (KINDS-4, KINDS-4b); a second renderer (rr_page, sitrep_fold) left on the release path (KINDS-6b, KINDS-6c) | none (searched 'card.sh release' and 'rr_page' in tests/; release-approval.test.sh renders through the verb, never the kind on raw facts)
+card.test.sh | §WIDTH | keep | payload/scripts/card.sh _card_hang: the fold set back to 92, so a line that fits BIONIC_LINE_WIDTH folds (WIDTH-1, WIDTH-5b), or the fold removed, so a release, Step-1, Step-2 or Step-3 card line exceeds the width (WIDTH-3, WIDTH-4) | none (searched 'BIONIC_LINE_WIDTH' and 'over_budget' in tests/; release-approval.test.sh STEP0-7 holds the Step 0 card alone)
 
 ## close-out-1.test.sh
 
@@ -1020,6 +1025,8 @@ release-approval.test.sh | §STEP0 | keep | payload/scripts/card.sh step0: the a
 release-approval.test.sh | §HANDHOLDS | keep | hooks/poker/plan.sh the release approval verb: the hand-holds line read with no --since, so the decline before the last build landing counts and "HANDHOLDS-2 the page prints the windowed line" goes red; also proof.sh waive-row writes the date alone (WINDOW-2a) | none (searched 'hand-holds:' and 'waiver: ' in tests/)
 release-approval.test.sh | §RATIO | keep | hooks/poker/plan.sh poker_verb_release_approval:2468 the RR_TR line dropped from the head facts block, so the page prints no test-ratio line and (RATIO-1) goes red; the planted log (RATIO-3) and the earlier head (RATIO-4) move the line with the log | none (searched 'test-ratio' in tests/)
 release-approval.test.sh | §REGISTER | keep | hooks/poker/plan.sh the card's waiver decisions: owed_list_plan "$PV_PLAN" "$PV_REPO" read as the rendering session's own owed_list, so a waiver another session of the run raised is no decision on the card (REG-2, REG-2b, REG-3b, REG-4) | none (searched 'owed_list_plan' in tests/; asks.test.sh §ONE-REGISTER reads the register through owed_list_plan itself, never the card)
+release-approval.test.sh | §CHECK-CHANGED | keep | hooks/poker/plan.sh rr_facts: the check-changed fact dropped, so a release that changes its check's script says nothing of it under Bottom line (CHECK-CHANGED-2, CHECK-CHANGED-2b); emitted whatever the range, so a release that leaves the check alone names it (CHECK-CHANGED-3b) | none (searched 'changes the release check' and 'check-changed' in tests/; release-check tests read the log line, not the card)
+release-approval.test.sh | §CARRY | keep | hooks/poker/plan.sh poker_verb_reply: the carry closer after replied: deleted, so the reply leaves the carry open on the run's register (CARRY-4, CARRY-4b); rr_record's carried: lines deleted, so the page records no carry (CARRY-2) | none (searched 'carried: ' and 'carry:' in tests/; asks.test.sh §STOP opens a carry by disposition and never replies)
 
 ## release-check.test.sh
 
@@ -1349,6 +1356,7 @@ sitrep.test.sh | §RECAP | keep | hooks/poker/sitrep.sh poker_verb_resume: the p
 sitrep.test.sh | §ONCE | keep | payload/scripts/lib/owed.sh owed_key: the `approve:D<n>` fold onto `decide:D<n>` deleted, so the tick's item and the page's decision are two and You owe counts D21 twice (ON1), and the approve verb leaves the tick's item open (ON5) | none (searched 'owed_key' and 'approve:D' in tests/)
 sitrep.test.sh | §TITLE | keep | hooks/poker/sitrep.sh sitrep_render: the `work at step` clause of the title deleted, so a plan at step 5 with an active step 7 task names step 5 alone (TI1) | none (searched 'work at step' in tests/)
 sitrep.test.sh | §ONE-LINE | keep | hooks/poker/sitrep.sh sitrep_task_lines: the clip's width test `cw(head nm tail) > 92` made unreachable, so a 300-character cell prints whole and the fold continues it onto a second line; "ONE1 a 300-character cell in each state prints one line each" and "ONE5 a 40-task plan … 44 lines" go red | none (searched 'sitrep_task_lines' and 'Task list' in tests/: session-poker-4 reads the recap's task-list: lines, not the page)
+sitrep.test.sh | §WAIT | keep | hooks/poker/sitrep.sh decision_waiters: the held-merge reader deleted, so a held merge naming D30 leaves the put's wait line saying nothing moves (WA-1, WA-4); the release-page reader deleted (WA-3, WA-4); the row filter set back to pending alone, so a held row reading approval:D32 waits on nothing (WA-2); the whole-word match loosened, so D3 reads D30's hold (WA-1b) | none (searched 'wait: ' and 'decisions put' in tests/; session-poker-5 §ROUNDS reads the chain half of the line, never the release or the merge)
 
 ## slots.test.sh
 
