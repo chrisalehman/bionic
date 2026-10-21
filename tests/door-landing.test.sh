@@ -62,10 +62,11 @@ dl_plan_line() { /usr/bin/grep -E "^- $2:" "$1/$DOOR_PLAN_REL" 2>/dev/null; }   
 dl_commit() { _door_inside "$1" && git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
 # dl_lib_row <root> -> the library row T1 landed by hand: one commit to a file the check's closure holds.
 dl_lib_row() {
-  local p
+  local p t0="$SECONDS"
   p="$(door_piece "$1" T1)" || return 1
   printf 'door_landed() { :; }\n' >> "$p/payload/scripts/lib/said.sh"
   dl_commit "$p" "a library change" && door_land "$1" "$p"
+  echo "door: T1 landed by hand in $((SECONDS - t0)) s (rc ${DOOR_RC})"
 }
 # dl_release_row <root> -> DL_P2 the release row's tree, its release committed and landed by hand, the sentinel
 # emptied first so it holds this landing's runs alone.
@@ -73,9 +74,17 @@ dl_release_row() {
   DL_P2="$(door_piece "$1" T2)" && door_release "$1" "$DL_P2" >/dev/null || return 1
   DL_P2_HEAD="$(git -C "$DL_P2" rev-parse HEAD)"
   : > "$DOOR_SEEN"
+  local t0="$SECONDS"
   door_land "$1" "$DL_P2"
+  echo "door: T2 landed by hand in $((SECONDS - t0)) s (rc ${DOOR_RC})"
 }
 # dl_mutant <root> — the carrier test planted back as a reader that quits at its match, committed as the head.
+# dl_check <root> <base> <head> -> DOOR_OUT, DOOR_RC: the declared check run as the verb runs it, from the root,
+# over <base>..<head>. The verb's own run is §LAND's; its report after a pass folds the whole changelog and costs a
+# minute and more, so the mutant and the control read the check alone.
+dl_check() {
+  door_run "$1" env BIONIC_CHECK_BASE="$2" BIONIC_CHECK_HEAD="$3" BIONIC_CHECK_TREE="$1" bash tests/lib/release-check.sh "$DL_LIST"
+}
 dl_mutant() {
   _door_inside "$1" || return 1
   sed -i.orig 's|/usr/bin/grep -xF -- "\$2" >/dev/null|/usr/bin/grep -qxF -- "$2"|' "$1/tests/lib/release-check.sh" \
@@ -178,16 +187,17 @@ expect_contains "(lm2b) MUTANT …and the plan row is not written" "PLAN-UNWRITT
 expect_contains "(lm2c) MUTANT …T1's line, written by the same reader, is landed by hand" \
   "landed-by-hand:" "$(dl_plan_line "$DM" T1)"
 expect_absent "(lm2d) MUTANT …T2's is not" "landed-by-hand:" "$(dl_plan_line "$DM" T2)"
-door_run "$DM" bash "$DOOR_POKER" release-check
-expect_eq "(lm3) MUTANT the release-check verb at the landed head is red" "1" "$DOOR_RC"
-expect_contains "(lm3b) MUTANT …naming the carrier" "T2 landed after them" "$DOOR_OUT"
+dl_check "$DM" "$DM_H0" "$DM_H2"
+expect_eq "(lm3) MUTANT the declared check at the landed head is red" "1" "$DOOR_RC"
+expect_contains "(lm3b) MUTANT …naming the carrier" "T2 landed after them at ${DM_H2:0:12}" "$DOOR_OUT"
 
 # The same mutant with a CHANGELOG that fits one pipe write: the reader takes the whole file before it quits.
 read -r DS DS_H0 <<EOF
 $(door_copy "$DW" "$WORLD_ROOT/small")
 EOF
 dl_mutant "$DS"
-awk '/^## [0-9]/ { n++ } n < 2 { print }' "$DS/CHANGELOG.md" | head -n 40 > "$DS/CHANGELOG.small" \
+# One awk, no pipe into a reader that stops early: under pipefail that is the failure this control measures.
+awk '/^## [0-9]/ { n++ } n < 2 && NR <= 40 { print }' "$DS/CHANGELOG.md" > "$DS/CHANGELOG.small" \
   && mv "$DS/CHANGELOG.small" "$DS/CHANGELOG.md" && dl_commit "$DS" "a changelog of a few lines"
 DS_SIZE="$(git -C "$DS" cat-file -s HEAD:CHANGELOG.md 2>/dev/null || echo 0)"
 expect_true "(ls0) CONTROL precondition: the small changelog fits a pipe's buffer (${DS_SIZE} bytes)" \
@@ -196,8 +206,10 @@ dl_lib_row "$DS"
 dl_release_row "$DS"
 expect_contains "(ls1) CONTROL the same mutant passes the carrier when the changelog is small: T2 is written landed" \
   "landed-by-hand:" "$(dl_plan_line "$DS" T2)"
-door_run "$DS" bash "$DOOR_POKER" release-check
-expect_eq "(ls2) CONTROL …and the verb is green, so the red above is the real file's size" "0" "$DOOR_RC"
+dl_check "$DS" "$DS_H0" "$(dl_head "$DS")"
+expect_eq "(ls2) CONTROL …and the declared check at the landed head is green, so the red above is the file's size" "0" \
+  "$DOOR_RC"
+expect_contains "(ls2b) CONTROL …its numbers agreeing" "landing-numbers: $DOOR_VERSION agrees" "$DOOR_OUT"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§COPY: a piece that rewrites the check is judged by the target's copy and refused"
