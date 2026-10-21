@@ -35,7 +35,10 @@
 # Ignored and so never landed: .bionic/config.yaml declaring `release-check: bash tests/lib/release-check.sh
 # <list>`, the list a file beside <dir>, outside every checkout; the bound plan with `release: DOOR_VERSION`,
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
-# (build) and T2 (the release).
+# (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
+# writes and no verb creates: `rigor: double` and `scale: wave`, without which the judge cannot deal the readings a
+# run owes, and the matrix skeleton, an `## Eval design` row for AC-1.1 and its `## Verification Matrix` table row,
+# which matrix-render, matrix-set and discharge fill. Every later state of the plan is a verb's.
 #
 # WHICH COPY RAN. The fixture's committed release-check.sh carries one line more than the tree under test's, after
 # its shebang: when DOOR_SEEN names a file, it appends where it ran and which script it is. A run of the tree
@@ -115,6 +118,8 @@ door_world() (  # <dir> -> `<root> <accepted head>`
 working-branch: wave/x
 base-sha: $head
 release: $DOOR_VERSION
+rigor: double
+scale: wave
 canonical_sdlc_version: 14
 ---
 # door fixture plan (tests/lib/door.sh)
@@ -133,6 +138,20 @@ approved-by: fixture 2026-10-04T00:00Z "approved"
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | a library change | dw-T1 | — | | 10 | REQ-1 | payload/scripts/lib/said.sh | .worktrees/T1 | | active |
 | T2 | 4 | doc | the release $DOOR_VERSION | dw-T2 | — | | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | .worktrees/T2 | | active |
+
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |
+
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T1 | pending | — | — |
 PLAN
   bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
   printf '%s %s\n' "$root" "$head"
