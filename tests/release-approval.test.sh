@@ -21,6 +21,8 @@
 # §PREVIEW   --preview renders an early run's page and writes nothing
 # §AGREE     the decisions are exactly the owed items, the unproved rows and the findings recommended against
 # §REPLY     all default and all recommended replay into their verbs; anything else writes nothing
+# §T4        a T4 row through the gate's predicate: confirmed by you is proved; pending or a standing finding decides
+# §CONFIRM   confirm-row writes the attributed confirmation; the card offers confirm or waive; reply applies either
 # §BORN      two fix rows born of different questions render the page with no re-read
 # §JUDGE     the Tests line names the floor judge's answer: covered after a later green, the owed suite while none
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
@@ -543,6 +545,110 @@ poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-11 reply all default over an open waive:adversarial item exits 0" "0" "$RC"
 expect_regex "REPLY-11b …writing the waiver at the working head with the reply's words" \
   "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
+
+# ============================================================
+section "§T4: a T4 row is read through the gate's one predicate: confirmed by you is proved, pending or a standing finding is a decision"
+# ============================================================
+# fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
+# the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
+fc_t4() {  # <auditor cell> <user-confirmed value, or noblock> -> PFC: FC_GOOD with a discharged T4 row AC-1.3
+  local c="$1" v="$2"
+  fc_plan "$FC_GOOD"
+  FC_T4_ROW="| AC-1.3 | T4 | discharged | see AC-1.3 | $c |" awk '
+    { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }' "$PFC" > "$PFC.t4" && mv -f "$PFC.t4" "$PFC"
+  [ "$v" = noblock ] && return 0
+  printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$PFC"
+  printf '  user-confirmed: %s\n  readback: what the user saw\n' "$v" >> "$PFC"
+}
+fc_acc() { fc_under Tests | /usr/bin/grep 'acceptance —' | fc_flat; }  # the Tests section's acceptance line, unfolded
+FC_UC='Dana-Fixture 2026-10-20 "checked it by hand"'
+fc_t4 '—' "$FC_UC"
+fc_page --preview
+expect_contains "T4-1 an attributed T4 row under —: the acceptance line counts it proved" "2 of 3 criteria proved" "$(fc_acc)"
+expect_contains "T4-1b …and says it was confirmed by you" "1 confirmed by you" "$(fc_acc)"
+expect_absent "T4-1c …never not confirmed by the auditor" "not confirmed by the auditor" "$(fc_acc)"
+expect_contains "T4-1d the Decisions still put the unrun row" "AC-1.2" "$(fc_under Decisions)"
+expect_absent "T4-1e …and not the confirmed one" "AC-1.3" "$(fc_under Decisions)"
+FC_ACC_DASH="$(fc_acc)"
+fc_t4 '-' "$FC_UC"; fc_page --preview
+expect_eq "T4-1f the cell - reads as — does" "$FC_ACC_DASH" "$(fc_acc)"
+fc_t4 '' "$FC_UC"; fc_page --preview
+expect_eq "T4-1g …and so does the empty cell" "$FC_ACC_DASH" "$(fc_acc)"
+fc_t4 '—' pending
+fc_page --preview
+expect_contains "T4-2 a pending T4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
+expect_contains "T4-2b …its choice is confirm" "recommended: confirm · default: confirm" \
+  "$(fc_under Decisions | /usr/bin/grep 'AC-1.3' | fc_flat)"
+expect_contains "T4-2c the acceptance line says it awaits your confirmation" "1 awaiting your confirmation" "$(fc_acc)"
+expect_contains "T4-2d …counting the auditor-confirmed row alone as proved" "1 of 3 criteria proved" "$(fc_acc)"
+fc_t4 'UNVERIFIABLE' "$FC_UC"
+fc_page --preview
+expect_contains "T4-3 an attributed T4 row the auditor found UNVERIFIABLE is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
+expect_contains "T4-3b …with the gate's reason" "the auditor's finding stands" \
+  "$(fc_under Decisions | /usr/bin/grep 'AC-1.3' | fc_flat)"
+expect_contains "T4-3c …and is not counted proved" "1 of 3 criteria proved" "$(fc_acc)"
+expect_contains "T4-3d …the line counts it among the auditor's" "1 not confirmed by the auditor" "$(fc_acc)"
+expect_absent "T4-3e …and not as confirmed by you" "1 confirmed by you" "$(fc_acc)"
+
+# ============================================================
+section "§CONFIRM: confirm-row writes a T4 row's attributed confirmation from the user's words; the card offers confirm or waive and reply applies either"
+# ============================================================
+# fails-when: no verb writes the attributed form, the card's choices for a pending T4 row are waive and run, or a
+# reply naming either choice leaves the row unruled.
+FC_CR2='2 waive, rest default'
+fc_typed "$FC_WD" "$FC_WR" 'yes' "$FC_CR2"
+fc_t4 '—' pending
+poke "$RFC" confirm-row AC-1.3 'yes'
+expect_eq "CONFIRM-1 confirm-row AC-1.3 'yes' exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      confirm-row said: %s\n' "$OUT"
+expect_regex "CONFIRM-1b the block carries the attributed line: the git user as one word, the date, the words" \
+  '^  user-confirmed: Dana-Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} "yes"$' "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
+expect_contains "CONFIRM-1c …and the verb prints what it wrote" 'Dana-Fixture' "$OUT"
+expect_eq "CONFIRM-1d …once: the pending line is replaced, not joined" "1" "$(/usr/bin/grep -c 'user-confirmed:' "$PFC")"
+fc_page --preview
+expect_absent "CONFIRM-1e the card then reads the row as confirmed by you, no longer a decision" "AC-1.3" "$(fc_under Decisions)"
+expect_contains "CONFIRM-1f …on the acceptance line" "1 confirmed by you" "$(fc_acc)"
+fc_t4 '—' pending
+cp "$PFC" "$TMPROOT/fc-before-cr"
+poke "$RFC" confirm-row AC-1.1 'yes'
+expect_eq "CONFIRM-2 a T1 row: refused, exit 1, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+expect_contains "CONFIRM-2b …naming the tier" "T1" "$OUT"
+poke "$RFC" confirm-row AC-1.3 'never typed by the user'
+expect_eq "CONFIRM-3 words the user never typed: refused, exit 1, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+poke "$RFC" confirm-row AC-9.9 'yes'
+expect_eq "CONFIRM-4 no such row: refused, exit 1, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+fc_t4 '—' noblock
+cp "$PFC" "$TMPROOT/fc-before-cr"
+poke "$RFC" confirm-row AC-1.3 'yes'
+expect_eq "CONFIRM-5 a T4 row with no block: refused, exit 1, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+fc_t4 '—' pending
+fc_page
+expect_eq "CONFIRM-6 the acting render of a pending T4 row exits 0" "0" "$FC_RC"
+[ "$FC_RC" = 0 ] || printf '      release-approval said: %s\n' "$FC_ERR"
+expect_contains "CONFIRM-6b its replay offers confirm, then waive" "|default=confirm-row AC-1.3|other=waive-row AC-1.3|pick=default|choices=confirm/waive|" \
+  "$(fc_table | /usr/bin/grep -F 'key=row:AC-1.3|')"
+expect_absent "CONFIRM-6c …never waive and run" "choices=waive/run" "$(fc_table | /usr/bin/grep -F 'key=row:AC-1.3|')"
+poke "$RFC" reply "$FC_WD"
+expect_eq "CONFIRM-7 reply all default applies it (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_regex "CONFIRM-7b …confirm-row wrote the attributed line with the reply's words" \
+  "^  user-confirmed: Dana-Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} \"$FC_WD\"( — .+)?\$" "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
+expect_contains "CONFIRM-7c …through the page's applied: path" "applied: row:AC-1.3 confirm-row rc=0" \
+  "$(cat "$FC_REC/release-approval-$FC_H8.md")"
+expect_eq "CONFIRM-7d …and the row stays discharged" "discharged" "$(fc_row AC-1.3)"
+fc_t4 '—' pending
+fc_page
+poke "$RFC" reply "$FC_CR2"
+expect_eq "CONFIRM-8 reply '$FC_CR2' applies the other choice (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_eq "CONFIRM-8b …the row is waived" "waived" "$(fc_row AC-1.3)"
+expect_contains "CONFIRM-8c …through waive-row" "applied: row:AC-1.3 waive-row rc=0" "$(cat "$FC_REC/release-approval-$FC_H8.md")"
+expect_eq "CONFIRM-8d …and its confirmation stays pending" "  user-confirmed: pending" "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
+fc_typed "$FC_WD" "$FC_WR"
 
 # ============================================================
 section "§LEGACY: a page written under the card's old name is still replied to; the alias writes the new page"

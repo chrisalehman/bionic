@@ -897,8 +897,11 @@ expect_eq "RULED-ONE: matrix_row_ruled has exactly one definition in walls.sh" "
   "$(/usr/bin/grep -c '^matrix_row_ruled()' "$RU_WALLS")"
 RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts" | /usr/bin/grep -v 'walls.sh')"
 expect_contains "RULED-ONE-b: the search outside walls.sh reads the matrix-render writer" "matrix-render" "$RU_UC"
+# The second writer, confirm-row, spells the key once, on the line that names it for its one write; that line is
+# the whole of its allowance, so a parser of the confirmation added beside it still turns this check red.
+expect_contains "RULED-ONE-d: …and the confirm-row writer's one key line" "CR_KEY=user-confirmed" "$RU_UC"
 expect_eq "RULED-ONE-c: …and nothing else names user-confirmed outside walls.sh" "" \
-  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'matrix-render')"
+  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'matrix-render' | /usr/bin/grep -v 'proof\.sh:[0-9]*:[[:space:]]*CR_KEY=user-confirmed$')"
 
 # ---------------------------------------------------------------------------
 finish
