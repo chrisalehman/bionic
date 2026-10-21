@@ -9,13 +9,22 @@
 # its copy and then spelled `$PROJECT/.bionic/docs` inline satisfies every count in §Roots.
 # So:
 #
-#   §1  each resolver's own answer, default and override, over fixture roots.
-#   §2  ONE CONFIG CHANGE MOVES EVERY CONSUMER. A fixture project sets `docs-root: alt`;
-#       lib/run.sh's plan search, doctor's active-run row, hooks/stop-check.sh's contracted
-#       -path resolution and hooks/canonical-sdlc-governing-skill.sh's project scaffold must
-#       all land under `alt/`. AC-N1.3's fails-when is "one consumer still hard-codes", and
-#       §2's mutation arm is exactly that consumer: a scratch copy of stop-check with the
-#       library call replaced by the literal must go red where the shipped one is green.
+#   §1a  the project's roots: default, override, absolute override.
+#   §1b  the machine's roots.
+#   §1c  config_value is the one reader, and docs_root goes through it.
+#   §1d  the output contract: absolute at source time, one trailing newline.
+#   §1e  docs_tracked: the project's tracked home, and where a record is promoted.
+#   §2b  hooks/stop-check.sh resolves a contracted path under docs-root:.
+#   §2c  the governing-skill hook scaffolds under docs-root:.
+#   §2d  doctor's active-run row reads the same root.
+#   §3   the promote verb copies a durable record into the tracked home.
+#
+# ONE CONFIG CHANGE MOVES EVERY CONSUMER (§2b to §2d). A fixture project sets `docs-root: alt`;
+# lib/run.sh's plan search, doctor's active-run row, hooks/stop-check.sh's contracted
+# -path resolution and hooks/canonical-sdlc-governing-skill.sh's project scaffold must
+# all land under `alt/`. AC-N1.3's fails-when is "one consumer still hard-codes", and
+# the mutation arm is exactly that consumer: a scratch copy of stop-check with the
+# library call replaced by the literal must go red where the shipped one is green.
 #
 # THE LIVE DEFECT §2c FIXES. canonical-sdlc-governing-skill.sh resolved `docs-root:` into
 # `$DOCS_ROOT` at the top of the file and then scaffolded `$PROJECT/.bionic/docs/{specs,

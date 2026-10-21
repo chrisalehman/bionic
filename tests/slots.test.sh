@@ -28,8 +28,6 @@
 #   §SHELL       `--shell <path>` runs the command the way the harness runs a Bash call
 #                (`<path> -c "eval '<cmd>'"`), so its output, diagnostics and exit code are
 #                the harness's own; the stamp's `cmd=` stays the command as given (T7).
-#   §KILL        --kill-after stops the command's whole process group; its limit covers the
-#                wait at the gate, which ends 75, never 124 (AC-2.6).
 #
 # REMOVED AT T12, with the place count, the take loop and the wait they pinned (lib/slots.sh's
 # slots_take, slots_take_all, slots_release, slots_count and the knobs BIONIC_SLOTS_*): §BOOK's

@@ -37,6 +37,34 @@
 # every function the lexer finds it defining at load to be defined after, with nothing on
 # stderr. A hook or a payload command is parsed (§PARSE), never run.
 #
+# §ADR and §HEADER hold a document to the fact it restates. An ADR says its state twice, in its front
+# matter's `status:` and under its `## Status` heading, and the first word of each must be the same word
+# (`Accepted`, `Proposed`, `Superseded`); every ADR under docs/adrs/, and under .bionic/docs/adrs/ where
+# that directory exists, is read, and a disagreement is refused naming the file and both words. A suite
+# header lists the sections it holds as `#   §KEY` lines, and the keys must be exactly the keys of the
+# body's `section` calls; a suite is refused naming the key it lists that the body lacks and the key the
+# body has that it omits. A `§` inside a sentence is a reference and a header with no list makes no claim,
+# but this suite's own list is pinned to its body, so a sweep named here that the body never runs is refused.
+#
+# THE SECTIONS, in the order the body runs them:
+#
+#   §LEXER               the lexer reads every shipped file to its end with every frame closed.
+#   §PARSE               every shell file in the tree parses under the system interpreter.
+#   §LOAD                every library loads in a bare /bin/bash with its functions defined.
+#   §CASE                no `case` arm without its opening paren inside `$( … )`.
+#   §HEREDOC             the two heredoc shapes: a paren-less arm in an unquoted body, a lone `)` in a body.
+#   §BP                  no writer is piped into a reader that quits early where the status is read.
+#   §BP-PIN              a writer of more than 64 KB into the fixed form returns 0 under pipefail.
+#   §CENSUS-COMPLETE-1   a section with no census line, a suite with no heading and a suite with no line are refused.
+#   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
+#   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
+#   §CENSUS-1            a section the census culls that is still in its suite is refused.
+#   §CENSUS-2            a section the census keeps that is gone from its suite is refused.
+#   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
+#   §CENSUS-4            the real tests tree is cut as tests/CENSUS.md says.
+#   §ADR                 an ADR whose `status:` word differs from its `## Status` word is refused by file.
+#   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
+#
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
 # proven to be the hazard it stands for: it parses under `/bin/bash -n`, and run under
@@ -1566,5 +1594,157 @@ CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep
 expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
 expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled" "" \
   "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD")"
+
+# ── the agreement checks ─────────────────────────────────────────────────────
+# A document states a fact twice, once in a front matter or a header and once in the body that carries it, and
+# nothing reads the two against each other. Two sweeps do: an ADR's `status:` against its `## Status` section, and a
+# suite's header list of sections against the `section` calls of its body. The body is the fact and the header
+# follows it.
+# adr_refusals <dir...> -> one line per ADR under the directories (every *.md, recursively) whose front-matter
+# `status:` and `## Status` section open with different words, naming the file and both. The word is the first run
+# of letters, folded to lower case, so `accepted` and `**Accepted** (Step 7)` agree. A file with only one of the two
+# is not compared, and a directory that is not there is skipped.
+adr_refusals() {
+  local d f
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    find -H "$d" -name '*.md' -type f | LC_ALL=C sort | while IFS= read -r f; do
+      LC_ALL=C awk -v F="$f" '
+        function word(s,   w) { sub(/^[^A-Za-z]*/, "", s); w = s; sub(/[^A-Za-z].*$/, "", w); return tolower(w) }
+        NR == 1 { fm = ($0 == "---"); next }
+        fm == 1 { if ($0 == "---") fm = 2; else if (sw == "" && $0 ~ /^status:/) { v = $0; sub(/^status:[ \t]*/, "", v); sw = word(v) }; next }
+        /^## Status[ \t]*$/ { ins = 1; next }
+        /^## / { ins = 0 }
+        ins && bw == "" && NF { bw = word($0) }
+        END { if (sw != "" && bw != "" && sw != bw) print F ": status: " sw " but ## Status " bw }' "$f"
+    done
+  done
+}
+
+# header_entries <suite file> -> the keys the suite header lists, one per line: a line of the leading comment block
+# that opens `#`, two or more spaces and `§KEY`. A `§` inside a sentence refers to something else and is not a claim.
+header_entries() {
+  awk 'NR == 1 && /^#!/ { next } /^#/ { print; next } { exit }' "$1" \
+    | LC_ALL=C sed -n 's/^#[ ][ ][ ]*§\([A-Za-z0-9][A-Za-z0-9._-]*\).*$/\1/p' \
+    | sed 's/[._-]*$//' | LC_ALL=C sort -u
+}
+# body_keys <census_calls output> <suite file name> -> the keys of the suite's `section` calls, one per line: the
+# census key cut again at its first space. A title with no ` — ` or `: ` and more than one word is a sentence, not a
+# key, and is left out.
+body_keys() {
+  printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v S="$2" '$1 == S && $2 == "section" {
+    k = $3; i = index(k, " — "); j = index(k, ": ")
+    if (i && (!j || i < j)) k = substr(k, 1, i - 1); else if (j) k = substr(k, 1, j - 1); else if (k ~ /[ \t]/) next
+    sub(/[ \t].*$/, "", k); sub(/[.,;:-]*$/, "", k); print k }' | LC_ALL=C sort -u
+}
+# header_refusals <tests dir> -> one line per suite whose header lists a section its body lacks, or whose body has a
+# section its header does not list, naming the suite and both differences. A header that lists none makes no claim.
+header_refusals() {
+  local f s calls hdr bdy only_h only_b out
+  calls="$(census_calls "$1")"
+  for f in "$1"/*.test.sh; do
+    [ -f "$f" ] || continue
+    s="${f##*/}"
+    header_entries "$f" > "$TMP/hdr.keys"
+    [ -s "$TMP/hdr.keys" ] || continue
+    body_keys "$calls" "$s" > "$TMP/bdy.keys"
+    only_h="$(LC_ALL=C comm -23 "$TMP/hdr.keys" "$TMP/bdy.keys" | sed 's/^/§/' | paste -sd' ' -)"
+    only_b="$(LC_ALL=C comm -13 "$TMP/hdr.keys" "$TMP/bdy.keys" | sed 's/^/§/' | paste -sd' ' -)"
+    out=""
+    [ -z "$only_h" ] || out="header lists ${only_h} with no section"
+    [ -z "$only_b" ] || out="${out:+$out; }body has ${only_b} with no header entry"
+    [ -z "$out" ] || printf '%s: %s\n' "$s" "$out"
+  done
+}
+
+# ============================================================
+section "ADR: an ADR whose status: word differs from its ## Status word is refused by file, naming both words"
+# ============================================================
+# fails-when: an ADR's front matter says Accepted while its ## Status section still says Proposed, and the sweep passes.
+AD="$TMP/adr"; mkdir -p "$AD/hermetic" "$AD/own/epic/deep"
+adr_file() { # <path> <status: value or -> <body line or ->
+  { printf -- '---\nname: x\n'; [ "$2" = "-" ] || printf 'status: %s\n' "$2"; printf -- '---\n# ADR\n\n## Status\n\n'
+    [ "$3" = "-" ] || printf '%s\n' "$3"; printf '\n## Context\n\nProposed in the prose below Context is not a status.\n'; } > "$1"
+}
+adr_file "$AD/hermetic/agree.md"  "Accepted (Step 7, 2026-10-01)" "**Accepted** (Step 7, 2026-10-01). Ruled."
+adr_file "$AD/hermetic/case.md"   "accepted" "Accepted, 2026-09-05."
+adr_file "$AD/hermetic/nobody.md" "Accepted" "-"
+adr_file "$AD/hermetic/nostatus.md" "-" "Proposed"
+printf '# no front matter\n\n## Status\n\nProposed\n' > "$AD/hermetic/bare.md"
+adr_file "$AD/hermetic/drift.md"  "Accepted (close-out, 2026-10-19; Proposed at Step 2)" "**Proposed** (Step 2, 2026-10-18)."
+adr_file "$AD/own/epic/deep/drift2.md" "Superseded (Step 7) by adr-065" "Proposed (Step 2)."
+expect_eq "the sweep reads every file of both halves, nested ones too: seven files" "7" \
+  "$(find -H "$AD" -name '*.md' | wc -l | tr -d ' ')"
+expect_eq "control: an agreeing pair, a case and emphasis difference, a file with no body status, no status: and no front matter are refused for nothing" "" \
+  "$(adr_refusals "$AD/hermetic" | /usr/bin/grep -v 'drift' )"
+expect_eq "a status: Accepted over a ## Status Proposed is refused naming the file and both words" \
+  "$AD/hermetic/drift.md: status: accepted but ## Status proposed" "$(adr_refusals "$AD/hermetic")"
+expect_eq "a second directory is read too, recursively, and a directory that is not there is skipped" \
+  "$AD/hermetic/drift.md: status: accepted but ## Status proposed|$AD/own/epic/deep/drift2.md: status: superseded but ## Status proposed" \
+  "$(adr_refusals "$AD/hermetic" "$AD/none" "$AD/own" | paste -sd'|' -)"
+sed -e 's/Proposed\*\*/Accepted**/' "$AD/hermetic/drift.md" > "$AD/fixed.md" && mv "$AD/fixed.md" "$AD/hermetic/drift.md"
+expect_eq "the body word brought to the front matter's clears the refusal for that file alone" \
+  "$AD/own/epic/deep/drift2.md: status: superseded but ## Status proposed" \
+  "$(adr_refusals "$AD/hermetic" "$AD/own")"
+ADR_HERMETIC="$(find -H "$REPO/docs/adrs" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+ADR_OWN="$(find -H "$REPO/.bionic/docs/adrs" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+expect_true "the real tree is read: docs/adrs holds ${ADR_HERMETIC} ADRs (the run's own .bionic/docs/adrs holds ${ADR_OWN}, read when present)" \
+  [ "${ADR_HERMETIC:-0}" -gt 0 ]
+expect_contains "the real sweep reads ADR-062 and finds its own ## Status word beside its status: word" \
+  "adr-062" "$(find -H "$REPO/docs/adrs" -name 'adr-062*.md')"
+expect_eq "every ADR of the real tree has the same state word in its status: and in its ## Status: no refusal" "" \
+  "$(adr_refusals "$REPO/docs/adrs" "$REPO/.bionic/docs/adrs")"
+
+# ============================================================
+section "HEADER: a suite header that lists a section its body lacks, or misses one its body has, is refused by suite"
+# ============================================================
+# fails-when: a header lists a section no longer called in its body, or a body section is missing from the header's list,
+# and the sweep passes.
+HD="$TMP/hd"; mkdir -p "$HD/tests"
+hdr_suite() { # <name> <header entry keys, space-separated, - for none> <body section titles, | separated>
+  local out="$HD/tests/$1.test.sh" k t
+  { printf '#!/bin/bash\n# A suite header.\n#\n'
+    for k in $2; do [ "$k" = "-" ] || printf '#   §%s   what the section holds\n' "$k"; done
+    printf '# See §ZZ of the plan, a sentence naming a section of something else.\n\n. lib.sh\n'
+    printf '%s\n' "$3" | tr '|' '\n' | while IFS= read -r t; do printf 'section "%s"\nexpect_eq a 1 1\n' "$t"; done
+    printf 'finish\n'; } > "$out"
+}
+hdr_suite equal   "ONE TWO THREE" "ONE — the first|§TWO: the second|THREE|a sentence that names no key"
+hdr_suite ghost   "ONE TWO GHOST" "ONE: the first|TWO: the second"
+hdr_suite short   "ONE" "ONE: the first|TWO: the second"
+hdr_suite both    "ONE GHOST" "ONE: the first|TWO: the second"
+hdr_suite bare    "-" "ONE: the first|TWO: the second"
+hdr_suite shared  "TWO" "TWO: the first|TWO: the second"
+printf '%s\n' "cat > scratch.sh <<'PLANT'" 'section "HIDDEN: inside a heredoc"' 'PLANT' 'section "ONE: real"' > "$HD/tests/hidden.sh"
+{ printf '#!/bin/bash\n#\n#   §ONE   real\n\n'; cat "$HD/tests/hidden.sh"; } > "$HD/tests/hidden.test.sh"; rm -f "$HD/tests/hidden.sh"
+expect_eq "the sweep reads the scratch header: three entries for equal, in order" "ONE|THREE|TWO" \
+  "$(header_entries "$HD/tests/equal.test.sh" | paste -sd'|' -)"
+expect_eq "…and the entry in a sentence (§ZZ) is not one, and a bare header lists none" "" \
+  "$(header_entries "$HD/tests/bare.test.sh")"
+expect_eq "…the body keys of equal are the census keys cut at the first space, § dropped, and a title that is a sentence has none" "ONE|THREE|TWO" \
+  "$(body_keys "$(census_calls "$HD/tests")" equal.test.sh | paste -sd'|' -)"
+expect_eq "control: a header whose entries equal its body's keys, a header with no entry, a shared key, and a section call inside a heredoc body are refused for nothing" "" \
+  "$(header_refusals "$HD/tests" | /usr/bin/grep -v '^ghost\|^short\|^both')"
+expect_eq "a header entry with no section is refused naming the suite and the entry" \
+  "ghost.test.sh: header lists §GHOST with no section" "$(header_refusals "$HD/tests" | /usr/bin/grep '^ghost')"
+expect_eq "a body section the header does not list is refused naming the suite and the key" \
+  "short.test.sh: body has §TWO with no header entry" "$(header_refusals "$HD/tests" | /usr/bin/grep '^short')"
+expect_eq "both differences on one suite are named on one line" \
+  "both.test.sh: header lists §GHOST with no section; body has §TWO with no header entry" \
+  "$(header_refusals "$HD/tests" | /usr/bin/grep '^both')"
+SL_COPY="$TMP/hd-self"; mkdir -p "$SL_COPY"; cp "$TESTS_DIR/shell-lint.test.sh" "$SL_COPY/shell-lint.test.sh"
+SL_CALLS="$(census_calls "$SL_COPY")"
+expect_eq "shell-lint's own header lists exactly the sections its body calls" \
+  "$(body_keys "$SL_CALLS" shell-lint.test.sh | paste -sd' ' -)" "$(header_entries "$SL_COPY/shell-lint.test.sh" | paste -sd' ' -)"
+awk 'NR == 2 { print "#   §GHOST   a sweep the body never runs" } { print }' "$TESTS_DIR/shell-lint.test.sh" > "$SL_COPY/shell-lint.test.sh"
+expect_eq "mutant: a sweep named in shell-lint's header that its body lacks is refused naming the suite" \
+  "shell-lint.test.sh: header lists §GHOST with no section" "$(header_refusals "$SL_COPY")"
+expect_eq "control: the unmutated copy beside it is refused for nothing" "" \
+  "$(cp "$TESTS_DIR/shell-lint.test.sh" "$SL_COPY/shell-lint.test.sh"; header_refusals "$SL_COPY")"
+HD_LISTED=0
+for f in "$TESTS_DIR"/*.test.sh; do [ -z "$(header_entries "$f")" ] || HD_LISTED=$((HD_LISTED + 1)); done
+expect_true "the real sweep judges suites: ${HD_LISTED} headers list their sections" [ "$HD_LISTED" -gt 0 ]
+expect_eq "every suite header of the real tests tree lists only sections its body calls, and every body section it lists: no refusal" "" \
+  "$(header_refusals "$TESTS_DIR")"
 
 finish
