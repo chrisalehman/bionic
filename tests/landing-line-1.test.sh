@@ -1016,7 +1016,8 @@ ww_ends() { ww_report "$@" | grep '^hand-holds window: '; }   # <root> [flags…
 ww_proof() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; shift; proof_line "$@"' _ "$REPO/payload/scripts/lib" "$@"; }
 ww_sdlc() {  # <root> <line>… -> each line under ## SDLC State, after the rows' step lines
   local p; p="$(ll_plan "$1")"; shift
-  awk -v add="$(printf '%s\n' "$@")" '{ print } /^- T2: / && !d { print add; d = 1 }' "$p" > "$p.w" && mv "$p.w" "$p"
+  # through the environment: macOS awk refuses a -v value holding a line break
+  WW_ADD="$(printf '%s\n' "$@")" awk '{ print } /^- T2: / && !d { print ENVIRON["WW_ADD"]; d = 1 }' "$p" > "$p.w" && mv "$p.w" "$p"
 }
 ww_matrix() {  # <root> <waiver value>… -> a matrix whose row AC-1.<n> carries the n-th waiver line in its block
   local p n=0 v; p="$(ll_plan "$1")"; shift
@@ -1069,6 +1070,8 @@ ww_sdlc "$RW2" "$(ww_proof regression "$WW_D" 2026-10-20T09:00:00Z record/wave-x
   "moved: record/wave-x/rev.md#3 to=fixed row=T1 by=Dana at=2026-10-20T14:30:00Z"
 ww_matrix "$RW2" 'Dana Fixture 2026-10-20T10:30:00Z "waive the row" — fixture' \
   'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — fixture' 'Dana Fixture 2026-10-20T14:30:00Z "waive the row" — fixture'
+expect_eq "WINDOW-1c-0 precondition: the plan holds the four regression proofs, three waived: and three moved: lines" "4/3/3" \
+  "$(grep -c '^proved: kind=regression ' "$WW_PL")/$(grep -c '^waived: question=' "$WW_PL")/$(grep -c '^moved: ' "$WW_PL")"
 expect_eq "WINDOW-1c a wide window reads three of every kind, the regressions past the first, and the adoption it cannot place" \
   "hand-holds: total=33 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · second-regressions=3 · adoptions=0 · fixed=3 · unplaced=1" \
   "$(ww_hh "$RW2" --since 2026-10-20T08:00:00Z --until 2026-10-20T16:00:00Z)"
