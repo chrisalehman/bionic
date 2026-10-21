@@ -21,6 +21,9 @@
 #                   release, each pass with one `known-limits:` line saying so.
 #   §LIMITS-2       a deferral rated `defer` whose `deferred:` line states no sentence, or a dash for one, refuses
 #                   the release in one line naming the finding; the same deferral stated and carried passes.
+#   §LIMITS-3       the deferral rule bites from a named floor release on: a plan naming 1.23.0 with an unstated or
+#                   dashed defer deferral passes, naming 1.24.0 refuses; a stated deferral is held at every release;
+#                   the comparison is dotted integers (1.9.9 is below 1.24.0).
 #   §FROM-REPORT    `release-note` renders the entry's landing numbers: `landing-report --rows` over the landing
 #                   record through the head's last landing. The check renders them again at the head the entry names
 #                   and refuses a number that disagrees, naming both; the gate's killed count is not held to it.
@@ -289,6 +292,85 @@ expect_contains "(L2-4) MUTANT …and it ran: the sentence is carried" "known-li
 mut_check "$TMP/l2-bare"
 expect_status "(L2-4) MUTANT on the unstated fixture: the check passes, so L2-1 would go red" 0 "$RC"
 expect_absent "(L2-4) MUTANT …and the line naming the finding is gone" "with no stated sentence" "$OUT"
+
+section "§LIMITS-3 — the deferral rule bites from its floor release on; an earlier release is passed over"
+
+# The same fixture world as §LIMITS-2, with the release named by the plan varied. Releases before the floor shipped
+# under the older rule, so an unstated or dashed deferral of one is neither counted nor refused and its known-limits
+# line reads as it did; a stated deferral is held to Known limits at every release. The comparison is dotted
+# integers, so 1.9.9 is below 1.24.0 where a string compare would put it above.
+L3_PLAN() { printf '%s' "$(cd "$1" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md"; }
+R="$TMP/l3-old"; fx_repo "$R" 1.23.0 1.23.0; lim_plan "$R" 1.23.0 "$LIM_UNSTATED"
+run_check "$R"
+expect_status "(L3-1) §LIMITS-3 a plan naming 1.23.0 with an unstated defer deferral: the check passes" 0 "$RC"
+expect_absent "(L3-1) …no line says it has no stated sentence" "no stated sentence" "$OUT"
+expect_contains "(L3-1) …and the known-limits line reads as before: the plan states none" "known-limits: 1.23.0 — $(L3_PLAN "$R") states no deferred sentence" "$OUT"
+expect_eq "(L3-1) …no release-check line" "0" "$(lines_of "$OUT")"
+
+R="$TMP/l3-old-dash"; fx_repo "$R" 1.23.0 1.23.0; lim_plan "$R" 1.23.0 "$LIM_DASH"
+run_check "$R"
+expect_status "(L3-1b) the same release with a dash for the sentence: the check passes" 0 "$RC"
+expect_contains "(L3-1b) …and the known-limits line reads as before" "known-limits: 1.23.0 — $(L3_PLAN "$R") states no deferred sentence" "$OUT"
+expect_eq "(L3-1b) …no release-check line" "0" "$(lines_of "$OUT")"
+
+R="$TMP/l3-old-stated"; fx_repo "$R" 1.23.0 1.23.0; lim_plan "$R" 1.23.0 "$LIM_DEFERRED"
+run_check "$R"
+expect_status "(L3-1c) a stated deferral of 1.23.0 whose sentence its Known limits omit: the check still fails" 1 "$RC"
+expect_contains "(L3-1c) …naming the omission" "release-check: Known limits of 1.23.0 omit the deferred sentence of record/w/critic.md#1" "$OUT"
+
+R="$TMP/l3-floor"; fx_repo "$R" 1.24.0 1.24.0; lim_plan "$R" 1.24.0 "$LIM_UNSTATED"
+run_check "$R"
+expect_status "(L3-2) the same plan naming 1.24.0: the check fails" 1 "$RC"
+expect_contains "(L3-2) …naming the finding" "release-check: 1.24.0 defers record/w/critic.md#3 with no stated sentence; state it or fix it" "$OUT"
+expect_eq "(L3-2) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
+
+R="$TMP/l3-floor-dash"; fx_repo "$R" 1.24.0 1.24.0; lim_plan "$R" 1.24.0 "$LIM_DASH"
+run_check "$R"
+expect_status "(L3-2b) a dash for the sentence at 1.24.0: the check fails" 1 "$RC"
+expect_contains "(L3-2b) …naming the finding" "release-check: 1.24.0 defers record/w/critic.md#3 with no stated sentence; state it or fix it" "$OUT"
+
+R="$TMP/l3-nine"; fx_repo "$R" 1.9.9 1.9.9; lim_plan "$R" 1.9.9 "$LIM_UNSTATED"
+run_check "$R"
+expect_status "(L3-2c) 1.9.9, below 1.24.0 by digits and above it as a string: the check passes" 0 "$RC"
+expect_contains "(L3-2c) …and the known-limits line says the plan states none" "known-limits: 1.9.9 — $(L3_PLAN "$R") states no deferred sentence" "$OUT"
+
+# L3-3 the comparison itself. The check runs its checks when loaded, so the function is cut out of its source and
+# defined in a subshell; the cut is proved non-empty before any answer is read.
+FN="$(awk '/^lim_version_at_least\(\) \{/ { f = 1 } f { print } f && /^\}/ { exit }' "$CHECK")"
+expect_nonempty "(L3-3) setup: lim_version_at_least is defined in the check" "$FN"
+vge() { ( eval "$FN"; lim_version_at_least "$1" "$2" ) >/dev/null 2>&1; }
+expect_true "(L3-3) 1.24.0 is at or past 1.24.0" vge 1.24.0 1.24.0
+expect_true "(L3-3) 1.24.1 is at or past 1.24.0" vge 1.24.1 1.24.0
+expect_true "(L3-3) 1.25.0 is at or past 1.24.0" vge 1.25.0 1.24.0
+expect_true "(L3-3) 2.0.0 is at or past 1.24.0" vge 2.0.0 1.24.0
+expect_false "(L3-3) 1.23.0 is below 1.24.0" vge 1.23.0 1.24.0
+expect_false "(L3-3) 1.9.9 is below 1.24.0 (digits, not strings)" vge 1.9.9 1.24.0
+expect_false "(L3-3) 0.99.99 is below 1.24.0" vge 0.99.99 1.24.0
+
+# L3-4 MUTATION: the floor raised past every release turns L3-2 red (the unstated deferral is passed over), and the
+# comparison made true for every release turns L3-1 red (1.23.0 is refused).
+l3_mutant() {  # <name> <sed script> -> $MUT_DIR/tests/lib/release-check.sh with one line changed
+  MUT_DIR="$TMP/$1"; mkdir -p "$MUT_DIR/tests/lib"
+  cp "$BIONIC_SCRIPTS_DIR/tests/lib/name-scan.sh" "$MUT_DIR/tests/lib/name-scan.sh"
+  ln -s "$BIONIC_SCRIPTS_DIR/payload" "$MUT_DIR/payload"; ln -s "$BIONIC_SCRIPTS_DIR/hooks" "$MUT_DIR/hooks"
+  sed "$2" "$CHECK" > "$MUT_DIR/tests/lib/release-check.sh"
+}
+l3_mut_check() { OUT="$(cd "$1" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash "$MUT_DIR/tests/lib/release-check.sh" "$LIST" 2>&1)"; RC=$?; }
+l3_mutant l3-mut-floor 's/^LIM_RULE_FROM=.*/LIM_RULE_FROM=99.0.0/'
+expect_eq "(L3-4) setup: the floor mutant changes one line and nothing else" "1" "$(diff "$CHECK" "$MUT_DIR/tests/lib/release-check.sh" | /usr/bin/grep -c '^>')"
+l3_mut_check "$TMP/l3-old"
+expect_status "(L3-4) MUTANT floor raised, on the 1.23.0 fixture: still passes (L3-1 stays green)" 0 "$RC"
+expect_contains "(L3-4) MUTANT …and it ran: the known-limits line is there" "known-limits: 1.23.0" "$OUT"
+l3_mut_check "$TMP/l3-floor"
+expect_status "(L3-4) MUTANT floor raised, on the 1.24.0 fixture: the check passes, so L3-2 would go red" 0 "$RC"
+expect_absent "(L3-4) MUTANT …and the line naming the finding is gone" "no stated sentence" "$OUT"
+l3_mutant l3-mut-cmp 's/^\(  *\)if ! lim_version_at_least \(.*\); then$/\1if false; then/'
+expect_eq "(L3-4) setup: the gate mutant changes one line and nothing else" "1" "$(diff "$CHECK" "$MUT_DIR/tests/lib/release-check.sh" | /usr/bin/grep -c '^>')"
+l3_mut_check "$TMP/l3-floor"
+expect_status "(L3-4) MUTANT gate off, on the 1.24.0 fixture: still refuses (L3-2 stays green)" 1 "$RC"
+l3_mut_check "$TMP/l3-old"
+expect_status "(L3-4) MUTANT gate off, on the 1.23.0 fixture: refused, so L3-1 would go red" 1 "$RC"
+expect_contains "(L3-4) MUTANT …by the line naming the finding" "no stated sentence" "$OUT"
 
 section "§FROM-REPORT — release-note renders the landing numbers at a head; the check holds the entry to them"
 
