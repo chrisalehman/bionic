@@ -165,6 +165,9 @@ $ship_trio")" > /dev/null
 # human actually said it; a fabricated `chris 2026-08-19 ...` passes the form.
 # The form buys a record that names who and when — it does not buy honesty, and
 # it is not sold as if it did.
+# WHERE IT BITES. The ruling is demanded from step 8, the merge advance, where the release approval card
+# settles it; from step 6 the arm asks only for a verdict, and a T4 row's `user-confirmed:` line is one. So
+# every arm below is written at current: 8, and 30m pins the step-6 half beside them.
 section "Section 30: T4 rows discharge on user-confirmed, impostors do not"
 
 # $1 = tier, $2 = auditor cell, $3 = the block's user-confirmed value.
@@ -193,19 +196,19 @@ GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and conf
 # 30a — the case the blind spot refused: a real user confirmation, no auditor
 # verdict, no waiver → allow.
 h30a=$(make_home)
-write_plan "$h30a" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")")" > /dev/null
 
 # 30b — an agent-shaped claim: no attributed human, no date. Still refused.
 h30b=$(make_home)
-write_plan "$h30b" "$(wave_plan 6 "$step6_body" \
-  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
+write_plan "$h30b" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
+  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")")" > /dev/null
 expect_block "30b T4 + agent-shaped user-confirmed → block (no attributed user)" \
   "$h30b" 'git commit -m "x"' "CONFIRMED"
 
 # 30c — a date with nobody attached is not an attribution either.
 h30c=$(make_home)
-write_plan "$h30c" "$(wave_plan 6 "$step6_body" \
-  "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")" > /dev/null
+write_plan "$h30c" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
+  "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")")" > /dev/null
 expect_block "30c T4 + dated but unattributed user-confirmed → block" \
   "$h30c" 'git commit -m "x"' "CONFIRMED"
 
@@ -213,13 +216,13 @@ expect_block "30c T4 + dated but unattributed user-confirmed → block" \
 # auditor by writing a user's name into its block: T3's evidence is a live
 # reading an auditor CAN re-take independently, so the verdict still stands.
 h30d=$(make_home)
-write_plan "$h30d" "$(wave_plan 6 "$step6_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30d" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")")" > /dev/null
 expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-only)" \
   "$h30d" 'git commit -m "x"' "CONFIRMED"
 
 # 30e — no regression: a T4 row an auditor DID confirm still passes.
 h30e=$(make_home)
-write_plan "$h30e" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30e" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
 expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
   "$h30e" 'git commit -m "x"'
 
@@ -227,8 +230,7 @@ expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
 # only. At current: 5 the row is still being discharged and the contract there
 # is the one it always was — `user-confirmed` present, non-empty, not a
 # placeholder. An impostor value passes the VERIFY gate and meets the form
-# check on the 5->6 advance, which is where the authority claim is actually
-# made. Widening the check to Step 5 would false-block mid-discharge commits
+# check on the advance to 8, which is where the ruling is demanded. Widening the check to Step 5 would false-block mid-discharge commits
 # on plans written before this contract existed.
 h30f=$(make_home)
 write_plan "$h30f" "$(wave_plan 5 "$step5_base" \
@@ -249,7 +251,7 @@ expect_allow "30f impostor at current: 5 → allow (form check is post-Verify on
 # than the attribution, because the attribution is fine and re-writing it is
 # not the fix.
 h30h=$(make_home)
-write_plan "$h30h" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30h" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")")" > /dev/null
 expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" \
   "$h30h" 'git commit -m "x"' "REFUTED"
 
@@ -257,9 +259,22 @@ expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" \
 # evidence could not be checked, which is not the same as nobody having looked.
 # Same arm, same reason.
 h30i=$(make_home)
-write_plan "$h30i" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30i" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")")" > /dev/null
 expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" \
   "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
+
+# 30m — the step-6 half of the move. At current: 6 the arm asks for a verdict, not a ruling: the impostor of
+# 30b and the standing finding of 30h each carry a `user-confirmed:` line, which is a T4 row's verdict, so the
+# gate admits both there; 30b and 30h refuse the same rows at current: 8.
+h30m=$(make_home)
+write_plan "$h30m" "$(wave_plan 6 "$step6_body" \
+  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
+expect_allow "30m T4 + agent-shaped user-confirmed at current 6 → allow (a verdict; the ruling is step 8's)" \
+  "$h30m" 'git commit -m "x"'
+h30m2=$(make_home)
+write_plan "$h30m2" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "30m2 T4 + well-formed user-confirmed + auditor REFUTED at current 6 → allow" \
+  "$h30m2" 'git commit -m "x"'
 
 # (30j — an arm asserting the refusal SENTENCE ("does not overturn") on the same
 # fixture 30h already blocks on — deleted at epic-18 W1: its only failure mode
@@ -271,7 +286,7 @@ expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → blo
 # refutation twin so a future edit that broke the agreement case would fail
 # next to the one that proves the refusal.)
 h30k=$(make_home)
-write_plan "$h30k" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" > /dev/null
+write_plan "$h30k" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
 
 # 30g — META-EVIDENCE, and the durable half of this section.
 #
@@ -317,7 +332,7 @@ cp "$HOOK" "$DOCTORED_HOOK"
 H30G_LIB="$h30g_dir/scripts/lib/walls.sh"
 H30G_LIB_REAL="$(dirname "$H30G_LIB")/.walls-real.sh"
 cp "$H30G_LIB" "$H30G_LIB_REAL"
-sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
+sed 's#^user_confirmed_attributed() {#user_confirmed_attributed() { [ -n "$1" ]; return; #' \
   "$H30G_LIB_REAL" > "$H30G_LIB"
 
 if ! diff -q "$H30G_LIB_REAL" "$H30G_LIB" > /dev/null 2>&1; then
