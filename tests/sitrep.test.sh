@@ -739,8 +739,8 @@ expect_eq "FL3 the page has no Predicted close section beside its Bottom line, a
   "$(printf '%s\n' "$OUT" | sr_heads | cut -d'|' -f1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^Predicted close$')|$(sr_page | /usr/bin/grep -ciE 'not before|about ')"
 sr_run --basis "$SR_PLAN"
 expect_eq "FL3b --basis prints the work and the width, the chain, the pace, and the floor and likely instants" \
-  "- The work left is 480 min as planned, 240 min over the 2 suite runs the gate admits; the longest chain left, T8 → T9, is 150 min; the larger is 240 min.|- The pace: 1.2×, the median over 4 landings of the minutes from dispatch to landing over the minutes planned.|- The floor: 240 min at 1× from now, 7:00 PM; the likely close: 288 min at 1.2×, 7:48 PM." \
-  "$(sr_line '- The work left ')|$(sr_line '- The pace: ')|$(sr_line '- The floor: ')"
+  "- The work left is 480 min as planned, 240 min over the 2 suite runs the gate admits; the longest chain left, T8 → T9, is 150 min; the larger is 240 min.|- The pace: 1.2×, the median over 4 landings of the minutes from dispatch to landing over the minutes planned.|- The earliest instant: 240 min at 1× from now, 7:00 PM; the likely close: 288 min at 1.2×, 7:48 PM." \
+  "$(sr_line '- The work left ')|$(sr_line '- The pace: ')|$(sr_line '- The earliest instant: ')"
 
 # ============================================================
 section "§GUESS: the schedule always has a best guess — the likely close against the forecast end (the Step-3 approval plus the typed forecast:, else the plan's own minutes), ✅ inside, ➖ over by at most a quarter, ✖️ beyond; before the first one-file landing the bar half is words and the mark is the clock's; a likely close at or before the floor is the one instant"
@@ -835,7 +835,7 @@ SR_AT=$SR_NINE sr_run "$SR_PLAN"
 expect_eq "G-5d a likely close equal to the floor is the one instant too" "- Close: likely 1:15 PM (wave-40's 1×)." "$(sr_line '- Close: ')"
 SR_AT=$SR_NINE sr_run --basis "$SR_PLAN"
 expect_eq "G-5e …and --basis still prints both instants (the arithmetic is whole)" "yes" \
-  "$(sr_line '- The floor: ' | /usr/bin/grep -q '^- The floor: 255 min at 1× from now, 1:15 PM; the likely close: 255 min at 1×, 1:15 PM\.$' && echo yes)"
+  "$(sr_line '- The earliest instant: ' | /usr/bin/grep -q '^- The earliest instant: 255 min at 1× from now, 1:15 PM; the likely close: 255 min at 1×, 1:15 PM\.$' && echo yes)"
 
 # ============================================================
 section "§LINE: --line is the one-line form, the three indicator glyphs in order · owed: <n> · the close"

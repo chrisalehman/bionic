@@ -1312,7 +1312,7 @@ SITREP_SIT
     set -- "Nothing is left to forecast."
     btext="delivered at $cl"; ltext="delivered"
   elif [ -z "$appr_at" ]; then
-    set -- "The close will be the plan's chain from now, at 1× for its floor and at the measured pace for its likely close, never a typed number."
+    set -- "The close will be the plan's chain from now, at 1× for its earliest instant and at the measured pace for its likely close, never a typed number."
     btext="no forecast until the plan is approved at Step 3"; ltext="no forecast until approved"
   else
     IFS='	' read -r fl lk ratio whose nland work per larger cids cmins admitted <<< "$clo"
@@ -1340,7 +1340,7 @@ SITREP_SIT
         lk_txt="the likely close: $(awk -v l="$larger" -v r="$ratio" 'BEGIN { printf "%d", l * r + 0.5 }') min at $(sitrep_ratio_fmt "$ratio")×, $lkc"
       else
         btext="not before $cl ($pt)"; ltext="closes ≥$cl"
-        lk_txt="at $(sitrep_ratio_fmt "$ratio")× the likely close falls at or before now, so the floor stands alone"
+        lk_txt="at $(sitrep_ratio_fmt "$ratio")× the likely close falls at or before now, so the earliest instant stands alone"
       fi
     fi
     if [ "$admitted" -eq 0 ]; then wtxt="over 1 suite run, none admitted now"
@@ -1348,7 +1348,7 @@ SITREP_SIT
     else wtxt="over the $admitted suite runs the gate admits"; fi
     set -- "The work left is $work min as planned, $per min $wtxt; the longest chain left, $(printf '%s' "$cids" | sed 's/,/ → /g'), is $cmins min; the larger is $larger min." \
            "The pace: $pace_txt." \
-           "The floor: $larger min at 1× from now, $cl; $lk_txt." \
+           "The earliest instant: $larger min at 1× from now, $cl; $lk_txt." \
            "It assumes what you owe is answered now."
   fi
   if [ "$line" = basis ]; then
