@@ -93,6 +93,11 @@ _bionic_cols_into() {  # <string> — sets BIONIC_COLS; no subshell, for the loo
   # stripped environment hands a hook. (Under a UTF-8 locale `${#s}` already
   # counts characters, which is why nothing noticed.)
   s="${s//→/.}"; s="${s//•/.}"
+  # THE MARKS AND THE TASK LIST'S ICONS ARE TWO COLUMNS. A terminal draws ✅ ⬜ ✖ ❔ ➖ as emoji, two columns each, and
+  # the variation selector U+FE0F that turns ✖ into ✖️ takes none, so it goes first. Read at their bytes they measured
+  # three, and a card line holding one folded a column early.
+  s="${s//️/}"
+  s="${s//✅/..}"; s="${s//⬜/..}"; s="${s//✖/..}"; s="${s//❔/..}"; s="${s//➖/..}"
   BIONIC_COLS="${#s}"
 }
 

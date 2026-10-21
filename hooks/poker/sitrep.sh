@@ -211,7 +211,7 @@ handoff_running_lines() {  # <root> -> `  - <run id> · pid <pid> · log <path>`
   done
 }
 # THE COMPOSED SECTIONS, RENDERED. `handoff_items <composed> <section>` is that section's items as lib/handoff.sh
-# `handoff_compose` read them; `handoff_render <composed> <section>` prints the section's lines as sitrep_fold takes
+# `handoff_compose` read them; `handoff_render <composed> <section>` prints the section's lines as card.sh's fold takes
 # them (`<continuation indent> TAB <text>`). Summary is its four labelled lines in their order, a missing one
 # `(not given)`; Next is numbered; a Finding that names no source (a path, a file with its line, a URL or a commit) and
 # does not say `unverified` is marked `unverified` on its line; any other section is its items as bullets. An empty
@@ -618,37 +618,6 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # when set, fill-report's seam.
 SITREP_SHEET_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
 SITREP_STEP_NAMES="Configure Scope Design Plan Implement Verify Review Document Integrate Close-out"
-
-# _sitrep_cw_awk -> the awk source of `cw(s)`, a text's display columns, counted byte-wise so no locale decides it: a
-# character is one column, a four-byte one two, the three-byte glyphs (✅ ⬜ ⛔ ❔ ➖ ✖) two, U+FE0F none.
-_sitrep_cw_awk() {
-  printf '%s' '
-    function cw(s,   t, n, w) {
-      t = s; n = gsub(/[\200-\277]/, "", t); w = length(s) - n
-      t = s; w -= gsub(/\357\270\217/, "", t)
-      t = s; w += gsub(/[\360-\364]/, "", t)
-      t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t)
-      return w
-    }'
-}
-
-# sitrep_fold -> stdin's `<continuation indent><TAB><text>` lines, each folded at 92 display columns: a wider text
-# breaks at its last space that fits, every continuation opening on that many spaces. A word wider than the page
-# prints whole.
-sitrep_fold() {
-  LC_ALL=C awk "$(_sitrep_cw_awk)"'
-    {
-      i = index($0, "\t"); k = substr($0, 1, i - 1) + 0; s = substr($0, i + 1)
-      if (cw(s) <= 92) { print s; next }
-      match(s, /^ */); lead = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
-      pad = sprintf("%" k "s", ""); n = split(s, wd, / /); l = lead wd[1]
-      for (j = 2; j <= n; j++) {
-        if (cw(l " " wd[j]) <= 92) l = l " " wd[j]
-        else { print l; l = pad wd[j] }
-      }
-      print l
-    }'
-}
 
 # _sitrep_name_awk -> the awk source of `task_name(cell)`: the task's cell up to the first of " (", ": ", ". " or " · ",
 # trimmed, a closing "." dropped; a cell that opens on one of them keeps its whole trimmed text, so no task prints
@@ -1492,7 +1461,7 @@ sitrep_tick_line() {
   # integration branches, open tasks and Patrol; a closed run's resume point and branch lines are close-out.sh's
   # (`closed-form`, the one writer of both). Every other section is composed by the session and read on stdin
   # (lib/handoff.sh `handoff_compose`); a composed State or Resume is dropped. The whole page passes the redaction
-  # (lib/handoff.sh `handoff_redact`) and folds at 92 columns (sitrep_fold); the last line is never folded: bound,
+  # (lib/handoff.sh `handoff_redact`) and folds at the shared width (card.sh fold); the last line is never folded: bound,
   # `/bionic:canonical-sdlc <path>`, the door that rebinds the run; with no run, `Read <path> whole, then do Next 1.`
   # There is no safe-to-clear line: the source session is disposable, and anything in flight is in State.
   # Bound, the plan's `## Handoff` then becomes the heading and one pointer line, through the plan transaction,
@@ -1729,7 +1698,7 @@ sitrep_tick_line() {
           printf '0\t\n'
         done
         printf '0\tResume\n'
-      } | handoff_redact "$HO_CF" | sitrep_fold
+      } | handoff_redact "$HO_CF" | "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" fold
       printf '%s\n' "$HO_LAST"
     } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
     # WHAT IT SAYS IS HOW THE NEXT SESSION RESUMES, and nothing more: the resume line carries the file's path as its
@@ -2180,8 +2149,11 @@ sitrep_tick_line() {
   }
 
   # THE SITUATION REPORT. Its reasoning is above the verbs, beside `sitrep_gather`: the sheet, or with --line the
-  # Patrol's status. The plan is resolved as landing-report resolves its own: a named one first, else the session's
-  # bound run.
+  # Patrol's status, or with `card` the card payload/scripts/card.sh draws from the sheet and the judgment on stdin.
+  # The plan is resolved as landing-report resolves its own: a named one first, else the session's bound run. Before
+  # the sheet or the card is gathered, the register is settled against the ledger (`decisions_settle`), so a decision
+  # ruled there is never shown as owed and never left open for the next reader. The card prints only when card.sh
+  # draws it (exit 0); a card it refuses prints nothing, card.sh's reasons reach stderr, and the verb exits 1.
   poker_verb_sitrep() {
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -2220,12 +2192,25 @@ sitrep_tick_line() {
     fi
     SR_ROOT="$(cd "$(project_root "${SR_PLAN%/*}")" 2>/dev/null && pwd -P)"
     [ -n "$SR_ROOT" ] || SR_ROOT="$REPO_REAL"
+    REPO_REAL="$SR_ROOT" decisions_settle "$SR_PLAN" "$(docs_root "$SR_ROOT")/record/$(proof_plan_slug "$SR_PLAN")/design-ledger.md"
     if [ "$SR_LINE" = yes ]; then
       sitrep_gather "$SR_PLAN" "$SR_ROOT" line
       sitrep_status
-    else
-      sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet
-      sitrep_sheet
+      exit 0
     fi
-    exit 0
+    sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet
+    if [ "$SR_CARD" = no ]; then
+      sitrep_sheet
+      exit 0
+    fi
+    SR_SHEET="$(mktemp "${TMPDIR:-/tmp}/bionic-sheet.XXXXXX")" || { die "REFUSED — no temporary file for the sheet; no card is drawn."; exit 2; }
+    sitrep_sheet > "$SR_SHEET"
+    SR_RC=0
+    SR_CARD_TEXT="$("${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" sitrep "$SR_SHEET")" || SR_RC=$?
+    rm -f "$SR_SHEET"
+    case "$SR_RC" in
+      0) printf '%s\n' "$SR_CARD_TEXT"; exit 0 ;;
+      1) die "REFUSED — the sitrep card failed its check, so nothing of it is shown: write the judgment again for the reasons above."; exit 1 ;;
+      *) die "REFUSED — card.sh sitrep could not draw the card (exit $SR_RC); nothing is shown."; exit 2 ;;
+    esac
   }

@@ -35,7 +35,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (settles ruled decisions on the register)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
@@ -548,7 +549,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sheet's pace, correctness and waste (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet: one fact per line, <key>: <value> — the run, the steps, every task with its state, the metrics in numbers, each goal's status, the predicted close and its arithmetic, every ask open on the run's register with what it holds, and every review; the model reads it and the user sees the card; --line prints the Patrol's status, <k> of <m> tasks · owed: <n> · close <time> (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet: one fact per line, <key>: <value> — the run, the steps, every task with its state, the metrics in numbers, each goal's status, the predicted close and its arithmetic, every ask open on the run's register with what it holds, and every review; the model reads it and the user sees the card; --line prints the Patrol's status, <k> of <m> tasks · owed: <n> · close <time> (closes the asks of decisions the ledger ruled)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card: the judgment on stdin, one tagged line each (call:, grade: <A-F>, point:, ask <key>: <what> — recommend <answer>, ask +:, close:), drawn with the sheet's facts; a card that fails its check prints nothing and exits 1, every reason on stderr"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
@@ -1254,19 +1256,21 @@ $1"; shift ;;
     [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
     { [ -z "$LR_SINCE" ] && [ -z "$LR_UNTIL" ]; } || [ "$LR_HH" = yes ] || usage "landing-report takes --since and --until only with --hand-holds: they bound its window."
     ;;
-  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` prints the fact sheet, or with --line the Patrol's status,
-  # read-only but for the gate's own scan. The plan, when named, is the one operand; without it, the session's bound
-  # run, as landing-report's. Any other flag or a second operand is a word the verb does not know: the usage error (2).
+  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` prints the fact sheet, or with --line the Patrol's status;
+  # `sitrep card [<plan>]` draws the card from the sheet and the judgment on stdin. The plan, when named, is the one
+  # operand; without it, the session's bound run, as landing-report's. `card` with --line, any other flag or a second
+  # operand is a word the verb does not know: the usage error (2).
   sitrep)
-    SR_LINE=no; SR_ARG=""; _sr_n=0; _sr_first=""
+    SR_LINE=no; SR_CARD=no; SR_ARG=""; _sr_n=0; _sr_first=""
+    if [ "${1:-}" = card ]; then SR_CARD=yes; shift; fi
     for _sr_a in "$@"; do
       case "$_sr_a" in
-        --line) [ "$SR_LINE" = no ] || usage "sitrep takes --line once."; SR_LINE=yes ;;
-        -*) usage "sitrep: unknown flag '$(printf '%s' "${_sr_a:0:24}" | tr -d '[:cntrl:]')'; it takes --line and at most one plan." ;;
+        --line) [ "$SR_LINE" = no ] && [ "$SR_CARD" = no ] || usage "sitrep takes --line once, and never with card."; SR_LINE=yes ;;
+        -*) usage "sitrep: unknown flag '$(printf '%s' "${_sr_a:0:24}" | tr -d '[:cntrl:]')'; it takes card or --line, and at most one plan." ;;
         *) _sr_n=$((_sr_n + 1)); [ -n "$_sr_first" ] || _sr_first="$_sr_a"; SR_ARG="$_sr_a" ;;
       esac
     done
-    [ "$_sr_n" -le 1 ] || usage "sitrep: unknown word '$(printf '%s' "${_sr_first:0:24}" | tr -d '[:cntrl:]')'; it takes --line and at most one plan."
+    [ "$_sr_n" -le 1 ] || usage "sitrep: unknown word '$(printf '%s' "${_sr_first:0:24}" | tr -d '[:cntrl:]')'; it takes card or --line, and at most one plan."
     ;;
   # THE BASIS VERB (wave-37 T8; D8, REQ-4 AC-4.2). Two operands: the question the judge holds a range by, and
   # the range `<a>..<b>` its `review <q> … uncovered <a>..<b>` line names. Read-only; the lines are

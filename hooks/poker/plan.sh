@@ -2375,6 +2375,15 @@ RR_MATRIX
     return 1
   }
 
+  rr_carry_ruled() {  # <record dir> <finding id> -> 0 when an answered page of this run carried it, so its reply ruled it
+    local f
+    for f in "$1"/release-approval-*.md "$1/$RR_OLD_VERB"-*.md; do
+      [ -f "$f" ] || continue
+      /usr/bin/grep -q '^replied: ' "$f" 2>/dev/null && /usr/bin/grep -qxF "carried: $2" "$f" 2>/dev/null && return 0
+    done
+    return 1
+  }
+
   rr_add() {  # <kind> <key> <default verb> <other verb> <why> <subject> <default label> <other label> <default phrase> <other phrase>
     RR_KIND[RR_N]="$1"; RR_KEY[RR_N]="$2"; RR_DO[RR_N]="$3"; RR_ELSE[RR_N]="$4"; RR_WHYS[RR_N]="$5"
     RR_SUBJ[RR_N]="$6"; RR_DLAB[RR_N]="$7"; RR_OLAB[RR_N]="$8"; RR_DPH[RR_N]="$9"; RR_OPH[RR_N]="${10}"
@@ -2743,7 +2752,11 @@ RR_AGAINST_EOF
           "poker: ${key#*:} is decision $((num + 1)) on the release approval card at $RR_H8" >/dev/null 2>&1 || : ;;
       esac
     done
-    [ "$RR_N" -eq 0 ] || rr_record "$RR_TEXT"
+    # A card with no decision still records its page while it carries a finding no answered page carried, so the reply
+    # that answers it rules the carry; one whose carries were all ruled writes nothing, as before.
+    RR_CARRY_OPEN=""
+    while IFS= read -r fid; do [ -z "$fid" ] || rr_carry_ruled "$RR_DIR" "$fid" || RR_CARRY_OPEN=yes; done <<< "$RR_CARRY"
+    { [ "$RR_N" -eq 0 ] && [ -z "$RR_CARRY_OPEN" ]; } || rr_record "$RR_TEXT"
     exit 0
   }
 
