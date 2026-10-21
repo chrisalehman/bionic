@@ -1133,6 +1133,26 @@ expect_eq "NM4 a 40-task plan: ten step lines, forty task lines, every id once" 
   "$(sr_val metric.completed)|$(sr_lines step | /usr/bin/grep -c .)|$(sr_lines task | /usr/bin/grep -c .)|$(sr_tasks_f id | sort -u | /usr/bin/grep -c .)"
 
 # ============================================================
+section "§HELD-NOTE: a task held on you says what it waits on, whether it is building or not yet started"
+# ============================================================
+# FIXTURE FIDELITY: the decisions put in the shape `decisions put` writes them into the design ledger, the world's plan
+# bound by the bind verb. fails-when: a task that has started and reads an approval still owed says building.
+sr_world heldnote "6 6 12 12"
+sr_bind
+printf '# Design ledger — wave-02-fx\n\n## Δ0 — D1 put (orchestrator 2026-10-20 6:44 AM PDT): the stop rule\n\nAnswered now or in an hour.\n## Δ1 — D2 put (orchestrator 2026-10-20 6:45 AM PDT): the second rule\n\nAnswered now or in an hour.\n' > "$SR_DIR/design-ledger.md"
+awk -v a="$(sr_row T5 "Row 5 body · complexity: standard" approval:D1 30 active)" -v b="$(sr_row T6 "Row 6 body · complexity: standard" "approval:D1, approval:D2" 30 active)" \
+  '/^\| T5 \|/ { print a; next } /^\| T6 \|/ { print b; next } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "HN1 precondition: both decisions are owed on the sheet" "decide:D1|decide:D2" \
+  "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)"
+expect_eq "HN2 a started task reading an approval still owed is held, and its note names the approval, not building" \
+  "held|waits on your approval of D1" "$(sr_f "$(sr_task T5)" state)|$(sr_f "$(sr_task T5)" note)"
+expect_eq "HN2b …reading two, it names the first and counts the other" "held|waits on your approval of D1 +1" \
+  "$(sr_f "$(sr_task T6)" state)|$(sr_f "$(sr_task T6)" note)"
+expect_eq "HN2c …a started task reading nothing owed is still running and building (HN2 read the same sheet)" "running|building" \
+  "$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)"
+
+# ============================================================
 section "§SCORECARD: the scorecard's last three lines are the sheet's pace, correctness and waste; its landing target is LINE_LANDING_BAR in lib/line.sh"
 # ============================================================
 SR_FORECAST=240h SR_EXTRA=22 sr_world scorecard "6 6 12 12"

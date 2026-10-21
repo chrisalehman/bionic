@@ -34,10 +34,11 @@
 # poker, close-out, the sweeper and the door are the sandbox's own copies, so a kept sandbox is read by the same
 # plugin that played it. The plugin's context files are laid beside its scripts, as an install lays them out.
 #
-# WHAT IS WRITTEN BY HAND is what a run's people and agents write by hand: the plan's prose, the project's config, a
-# row's code and its suite, a criterion's evidence, the walk and audit records, a record row's report, a review's
-# record, the release's changelog entry, and the user's typed reply in the session's transcript with the session's
-# start record (the CLI and session-start write those two in a real session). A register, a ledger line a verb owns,
+# WHAT IS WRITTEN BY HAND is what a run's people and agents write by hand: the plan's prose and the person's Step-3
+# approval line, stamped when the rehearsal starts, the project's config, a row's code and its suite, a criterion's
+# evidence, the walk and audit records, a record row's report, a review's record, the release's changelog entry, and
+# the user's typed reply in the session's transcript with the session's start record (the CLI and session-start write
+# those two in a real session). A register, a ledger line a verb owns,
 # a proof line, a step line, an approval or a landing record is never written here: each comes from its command.
 #
 # THE ROSTER ROW of each reviewer is written through the roster's production writer (`roster_row`, by
@@ -223,6 +224,11 @@ EOF
   awk '{ print } $0 == "working-branch: wave/x" && !d { print "integration-branch: main"; d = 1 }' "$RH_PLAN" > "$RH_PLAN.rh" \
     && mv "$RH_PLAN.rh" "$RH_PLAN" || return 1
   _rh_hand "the plan's Step-3 prose, $DOOR_PLAN_REL (door_world), naming integration-branch: main"
+  # The person approves the plan at Step 3 just before the build, so the approval is stamped now: a stamp from the
+  # fixture's own past would make the pace read the hours between it and the first landing, and the close land weeks out.
+  awk -v at="$(date -u +%Y-%m-%dT%H:%MZ)" '/^approved-by:/ { print "approved-by: user " at " \"approved\""; next } { print }' "$RH_PLAN" > "$RH_PLAN.rh" \
+    && mv "$RH_PLAN.rh" "$RH_PLAN" && /usr/bin/grep -q '^approved-by: user ' "$RH_PLAN" || return 1
+  _rh_hand "the plan's Step-3 approval line, approved-by: user <now> \"approved\" (the person's words, at the rehearsal's start)"
   case "$state" in
     clean)
       _rh_build || return 1 ;;

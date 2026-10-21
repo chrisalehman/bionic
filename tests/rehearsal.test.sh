@@ -7,6 +7,8 @@
 #   §RELEASE-WAITING  the release approval card rendered and waiting on its reply: the sheet owes what the card put
 #   §STOP-RULE        a stop-rule decision put with a row reading its approval: the sheet owes the decision
 #   §CLEAN            mid-build, nothing owed: the sheet says so
+#   §TRUE             across the four: the person accepting the release reads a pace taken in minutes, a close that
+#                     is not weeks out, a held task naming what it waits on, and a card head with no invented wave
 #
 # EACH SECTION, ONE SHAPE. The sandbox's own `hooks/session-poker.sh sitrep <plan>` prints the sheet, whose `ask:`
 # lines are exactly the state's asks; a judgment naming every open ask renders through `sitrep card` (rc 0, every
@@ -115,7 +117,7 @@ expect_eq "FR-1 rehearse reaches the state and prints the sandbox's plan (exit 0
 if [ "$RT_RC" = 0 ]; then
   expect_eq "FR-1b …through the door's landing, a failing review registered by its verb, and close-out refused" \
     "yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'proof-add review')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'close-out.sh')" -ge 1 ] && echo yes)"
-  rt_sheet_and_card FR "hold:merge waive:structure" "hold:merge>T4 waive:structure>T4" waive:structure
+  rt_sheet_and_card FR "hold:merge waive:structure" "hold:merge>8/4 waive:structure>8/4" waive:structure
 fi
 
 # ============================================================
@@ -129,7 +131,7 @@ expect_eq "RW-1 rehearse reaches the state and prints the sandbox's plan (exit 0
 if [ "$RT_RC" = 0 ]; then
   expect_eq "RW-1b …through the door's landing, the regression run and the release approval card's own verb" \
     "yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'regression-run')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'release-approval')" -ge 1 ] && echo yes)"
-  rt_sheet_and_card RW "approve:merge approve:release" "approve:merge>T4 approve:release>T4" approve:release
+  rt_sheet_and_card RW "approve:merge approve:release" "approve:merge>8/4 approve:release>8/4" approve:release
 fi
 
 # ============================================================
@@ -143,7 +145,7 @@ expect_eq "SR-1 rehearse reaches the state and prints the sandbox's plan (exit 0
 if [ "$RT_RC" = 0 ]; then
   expect_eq "SR-1b …through decisions put and the row's reads set by task-set" "yes|yes" \
     "$([ "$(rt_ran 'decisions put D1')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'reads+=approval:D1')" -ge 1 ] && echo yes)"
-  rt_sheet_and_card SR "decide:D1" "decide:D1>T2" decide:D1
+  rt_sheet_and_card SR "decide:D1" "decide:D1>4/2" decide:D1
 fi
 
 # ============================================================
@@ -158,6 +160,51 @@ if [ "$RT_RC" = 0 ]; then
   expect_eq "CL-1b …through the door's landing of one build row, the other still building" "yes" \
     "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)"
   rt_sheet_and_card CL "" "" ""
+fi
+
+
+# ============================================================
+section "§TRUE: the four sheets read true to the person who accepts the release on them"
+# ============================================================
+# FIXTURE FIDELITY: the sandboxes of the four sections above, read again with their own poker. The rehearsal's plan
+# is approved when the rehearsal starts, as a person approves it at Step 3 just before the build.
+# fails-when: the plan carries an approval from weeks before the run, so the pace reads hundreds of hours and the
+# close lands weeks out; a task held on a decision says it is building; the head names a wave the plan lacks.
+rt_pace_min() {  # <sheet> -> the minutes the sheet's pace says the landings took, nothing when it names none
+  printf '%s\n' "$1" | sed -n 's/^metric\.pace: [0-9][0-9]* tasks* in \(.*\); the plan allowed.*/\1/p' \
+    | awk '{ m = 0; for (i = 2; i <= NF; i++) { if ($i == "h") m += $(i - 1) * 60; if ($i == "min") m += $(i - 1) } print m }'
+}
+rt_taskline() { printf '%s\n' "$1" | /usr/bin/grep "^task: id=$2 "; }   # <sheet> <id> -> its task line
+for TR_ST in failed-review release-waiting stop-rule clean; do
+  RT_ROOT="$WORLD_ROOT/$TR_ST/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
+  if [ ! -f "$RT_PLAN" ]; then
+    expect_eq "TR-0 $TR_ST: the sandbox of its section is there to be read again" "yes" "no"
+    continue
+  fi
+  rt_poker sitrep "$RT_PLAN"
+  TR_SHEET="$RT_OUT"
+  TR_MIN="$(rt_pace_min "$TR_SHEET")"
+  expect_eq "TR-1 $TR_ST: the sheet's pace names the time the landings took, and it is under an hour (it says $TR_MIN min)" "yes" \
+    "$([ -n "$TR_MIN" ] && [ "$TR_MIN" -lt 60 ] && echo yes)"
+  expect_eq "TR-2 $TR_ST: the predicted close and the forecast name no day, so neither is weeks out" "" \
+    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -E '^close\.(predicted|forecast): ' | /usr/bin/grep -E '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
+  expect_eq "TR-3 $TR_ST: no task held on you says it is building or gives no note" "" \
+    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: .* state=held ' | /usr/bin/grep -vE 'note=waits on ')"
+  TR_ASKS="$(rt_asks "$TR_SHEET")"
+  # shellcheck disable=SC2086  # one word per key
+  rt_poker sitrep card "$RT_PLAN" <<< "$(rt_judgment $TR_ASKS)"
+  expect_eq "TR-4 $TR_ST: the plan has no wave number, and the card's head leaves the wave out (exit 0)" \
+    "run.wave: -|0|Sitrep · project 99.0.0" \
+    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^run\.wave: ')|$RT_PRC|$(printf '%s\n' "$RT_OUT" | head -1 | sed 's/ · [A-Za-z]* [0-9:]* [AP]M$//')"
+done
+RT_ROOT="$WORLD_ROOT/stop-rule/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
+if [ -f "$RT_PLAN" ]; then
+  rt_poker sitrep "$RT_PLAN"
+  expect_eq "TR-5 stop-rule: T2 reads the decision and is held, and its note names the decision, not building" \
+    "state=held|note=waits on your approval of D1" \
+    "$(rt_taskline "$RT_OUT" T2 | /usr/bin/grep -o 'state=[a-z]*')|$(rt_taskline "$RT_OUT" T2 | /usr/bin/grep -o 'note=.*$')"
+  expect_eq "TR-5b …and T1, landed, says when (TR-5 read the same sheet)" "yes" \
+    "$(rt_taskline "$RT_OUT" T1 | /usr/bin/grep -q 'state=done .* note=landed ' && echo yes)"
 fi
 
 finish

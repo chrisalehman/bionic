@@ -15,6 +15,7 @@
 #   §WORDS     "reader" and its kin in the judgment refuse the card; a goal nobody measures says "not measured"
 #   §REFUSE    a refused card prints nothing on stdout, every reason on stderr
 #   §JUDGMENT  the judgment's own floors: one grade A to F, one to five points, a call, one close, known tags
+#   §HEAD      the head names the wave only when the run has one
 #   §VERB      the verb draws the card from the run's own sheet, and settles a decision the ledger ruled first
 #   §SKILL     the skill writes the tags the verb takes and shows only what the verb printed, in one fenced block
 #
@@ -388,6 +389,21 @@ expect_eq "JU10 two ask lines for one key" "1|" "$(sc_j "$SC_J_OWED
 ask decide:D3: D3 again — recommend fix")"
 expect_eq "JU11 each grade A to F prints" "0 0 0 0 0 0" \
   "$(for g in A B C D E F; do sc_jrc "$(printf '%s\n' "$SC_J_OWED" | sed "s/^grade: B/grade: $g/")"; echo; done | paste -sd' ' -)"
+
+# ============================================================
+section "§HEAD: the head names the wave only when the run has one"
+# ============================================================
+# fails-when: a run whose plan carries no wave number prints "wave -" in its head, or a numbered run loses its wave.
+sc_card "$SC_OWED" "$SC_J_OWED"
+expect_eq "HD1 a numbered run keeps its wave in the head" "Sitrep · bionic 1.24.0 · wave 41 · Tuesday 2:40 PM" \
+  "$(printf '%s\n' "$SC_OUT" | head -1)"
+SC_NOWAVE="$(printf '%s\n' "$SC_OWED" | sed 's/^run.wave: 41$/run.wave: -/')"
+expect_eq "HD1a precondition: the sheet carries no wave number" "run.wave: -" "$(printf '%s\n' "$SC_NOWAVE" | /usr/bin/grep '^run.wave: ')"
+sc_card "$SC_NOWAVE" "$SC_J_OWED"
+expect_eq "HD2 a run with no wave number: the card prints (exit 0) and its head leaves the wave out" \
+  "0|Sitrep · bionic 1.24.0 · Tuesday 2:40 PM" "$SC_RC|$(printf '%s\n' "$SC_OUT" | head -1)"
+sc_check "$SC_NOWAVE" "$SC_OUT"
+expect_eq "HD2b …and the check passes that card (exit 0, nothing said)" "0||" "$SC_RC|$SC_OUT|$SC_ERR"
 
 # ============================================================
 section "§VERB: sitrep card draws the run's own sheet and the judgment through card.sh, and settles a ruled decision first"
