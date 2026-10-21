@@ -19,6 +19,8 @@
 #                   exits 1 in one line naming it; all present is green; a sentence elsewhere in the entry or
 #                   only under an older entry is an omission; no stated deferral, and no plan naming the
 #                   release, each pass with one `known-limits:` line saying so.
+#   §LIMITS-2       a deferral rated `defer` whose `deferred:` line states no sentence, or a dash for one, refuses
+#                   the release in one line naming the finding; the same deferral stated and carried passes.
 #   §FROM-REPORT    `release-note` renders the entry's landing numbers: `landing-report --rows` over the landing
 #                   record through the head's last landing. The check renders them again at the head the entry names
 #                   and refuses a number that disagrees, naming both; the gate's killed count is not held to it.
@@ -168,8 +170,10 @@ section "§LIMITS — the shipped release's Known limits carry every deferred se
 # the run's plan on disk under the project's docs root (never committed, as `.bionic/` is ignored in a real
 # project), in the shapes the writers write: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
 # `## SDLC State` with the ` stated="…"` field `finding-stated` appends (a `"` written `\"`, a `\` written `\\`).
-# Four deferrals: #1 and #2 stated and deferred by the policy, #3 deferred and unstated, #4 stated but rated fix
-# (S2 on under S1,S2-on), so only #1 and #2 are held. SYNTHESIZED: the sentences, the versions, the records.
+# Three deferrals: #1 and #2 stated and deferred by the policy, #4 stated but rated fix (S2 on under S1,S2-on), so
+# only #1 and #2 are held. #3, deferred and unstated, is kept apart (LIM_UNSTATED, LIM_DASH): a deferral rated
+# defer with no sentence refuses the release, so it joins a plan only where that refusal is the thing proved.
+# SYNTHESIZED: the sentences, the versions, the records.
 LIM_A='The first limit says "quoted" words and a back\slash.'
 LIM_B='The second limit is long enough that a changelog wraps it across two lines.'
 lim_plan() {  # <repo> <release> [<deferred lines>] -> the run's plan under the repository's docs root
@@ -181,8 +185,10 @@ lim_plan() {  # <repo> <release> [<deferred lines>] -> the run's plan under the 
 }
 LIM_DEFERRED='deferred: record/w/critic.md#1 S3 on "a first title" stated="The first limit says \"quoted\" words and a back\\slash."
 deferred: record/w/critic.md#2 S3 on "a second title" stated="The second limit is long enough that a changelog wraps it across two lines."
-deferred: record/w/critic.md#3 S3 on "an unstated one"
 deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
+LIM_UNSTATED='deferred: record/w/critic.md#3 S3 on "an unstated one"'
+LIM_DASH='deferred: record/w/critic.md#3 S3 on "an unstated one" stated="-"'
+LIM_FIXED='deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
 lim_changelog() {  # <repo> <Known limits body of 2.3.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.3.4
   { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
     printf '## 0.0.1 — 2026-01-01\n\n- first\n%s\n' "${3-}"; } > "$1/CHANGELOG.md"
@@ -220,9 +226,9 @@ expect_status "(l4) the sentence only under an older entry's Known limits: the c
 expect_contains "(l4) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
 
 R="$TMP/lim-none"; fx_repo "$R" 2.3.4 2.3.4
-lim_plan "$R" 2.3.4 'deferred: record/w/critic.md#3 S3 on "an unstated one"'; lim_changelog "$R" "- Known limit: none of note."
+lim_plan "$R" 2.3.4 "$LIM_FIXED"; lim_changelog "$R" "- Known limit: none of note."
 run_check "$R"
-expect_status "(l5) a plan with no stated deferral: the check passes" 0 "$RC"
+expect_status "(l5) a plan with no deferral rated defer: the check passes" 0 "$RC"
 expect_contains "(l5) …in one line saying so" "known-limits: 2.3.4 — $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md states no deferred sentence" "$OUT"
 expect_eq "(l5) …one such line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits:')"
 
@@ -233,6 +239,56 @@ lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
 run_check "$R"
 expect_status "(l6) …positive, the same repository once the plan names 2.3.4: the omissions fail it" 1 "$RC"
 expect_eq "(l6) …one line for each of the two sentences" "2" "$(lines_of "$OUT")"
+
+section "§LIMITS-2 — a deferral rated defer with no stated sentence, or a dash for one, refuses the release"
+
+# The same fixture world as §LIMITS: one deferral, #3, rated defer by the policy. Unstated it is no limit anyone
+# can carry, so the check names it and refuses; stated and carried it passes. The mutant is a copy of the check
+# beside the real name scan, the real payload and the real hooks, with the arm's `if` made `if false`.
+L2_LINE() { printf 'release-check: 2.3.4 defers record/w/critic.md#3 with no stated sentence; state it or fix it'; }
+R="$TMP/l2-bare"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
+run_check "$R"
+expect_status "(L2-1) §LIMITS-2 a deferral rated defer with no sentence: the check fails" 1 "$RC"
+expect_contains "(L2-1) …one line naming the finding" "$(L2_LINE)" "$OUT"
+expect_eq "(L2-1) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
+expect_eq "(L2-1) …no known-limits: line says the plan holds none" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits:')"
+
+R="$TMP/l2-dash"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DASH"; lim_changelog "$R" "- Known limit: none of note."
+run_check "$R"
+expect_status "(L2-2) a dash for the sentence: the check fails" 1 "$RC"
+expect_contains "(L2-2) …the same line, naming the finding" "$(L2_LINE)" "$OUT"
+expect_eq "(L2-2) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
+
+R="$TMP/l2-stated"; fx_repo "$R" 2.3.4 2.3.4
+lim_plan "$R" 2.3.4 'deferred: record/w/critic.md#3 S3 on "an unstated one" stated="The third limit is stated and carried."'
+lim_changelog "$R" "- Known limit: The third limit is stated and carried."
+run_check "$R"
+expect_status "(L2-3) the same deferral with its sentence stated and carried in Known limits: the check passes" 0 "$RC"
+expect_contains "(L2-3) …and the known-limits: line says one sentence carried" "known-limits: 2.3.4 carries the 1 deferred sentences of $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md" "$OUT"
+expect_eq "(L2-3) …no release-check line" "0" "$(lines_of "$OUT")"
+
+# A stated deferral beside an unstated one: the unstated one alone is named, and the stated one is still held to Known limits.
+R="$TMP/l2-both"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED
+$(printf '%s\n' "$LIM_DEFERRED" | sed -n '2p')"
+lim_changelog "$R" "- Known limit: The second limit is long enough that a changelog wraps it across two lines."
+run_check "$R"
+expect_status "(L2-3b) one unstated beside one stated and carried: the check fails" 1 "$RC"
+expect_eq "(L2-3b) …naming the unstated one alone" "1 1" "$(lines_of "$OUT") $(printf '%s\n' "$OUT" | /usr/bin/grep -cF "$(L2_LINE)")"
+
+# L2-4 MUTATION: the arm disabled turns L2-1 red (the check passes) and L2-3 stays green.
+MUT="$TMP/l2-mut"; mkdir -p "$MUT/tests/lib"
+cp "$BIONIC_SCRIPTS_DIR/tests/lib/name-scan.sh" "$MUT/tests/lib/name-scan.sh"
+ln -s "$BIONIC_SCRIPTS_DIR/payload" "$MUT/payload"; ln -s "$BIONIC_SCRIPTS_DIR/hooks" "$MUT/hooks"
+sed 's/^\(  *\)if \[ -z "\$st" \] || \[ "\$st" = - \]; then$/\1if false; then/' "$CHECK" > "$MUT/tests/lib/release-check.sh"
+expect_false "(L2-4) setup: the mutant differs from the check" cmp -s "$CHECK" "$MUT/tests/lib/release-check.sh"
+expect_eq "(L2-4) setup: the mutant has the arm disabled and nothing else" "1" "$(diff "$CHECK" "$MUT/tests/lib/release-check.sh" | /usr/bin/grep -c '^>')"
+mut_check() { OUT="$(cd "$1" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash "$MUT/tests/lib/release-check.sh" "$LIST" 2>&1)"; RC=$?; }
+mut_check "$TMP/l2-stated"
+expect_status "(L2-4) MUTANT on the stated fixture: still passes (L2-3 stays green)" 0 "$RC"
+expect_contains "(L2-4) MUTANT …and it ran: the sentence is carried" "known-limits: 2.3.4 carries the 1 deferred sentences" "$OUT"
+mut_check "$TMP/l2-bare"
+expect_status "(L2-4) MUTANT on the unstated fixture: the check passes, so L2-1 would go red" 0 "$RC"
+expect_absent "(L2-4) MUTANT …and the line naming the finding is gone" "with no stated sentence" "$OUT"
 
 section "§FROM-REPORT — release-note renders the landing numbers at a head; the check holds the entry to them"
 
