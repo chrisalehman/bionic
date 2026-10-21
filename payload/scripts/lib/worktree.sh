@@ -993,14 +993,130 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
   return 0
 }
 
+# THE CHECK'S CLOSURE: the declared check's script and every file it loads, as a commit holds them. The script is
+# the first word of the command that names a file the commit holds; a member's loads are the words after `.`,
+# `source`, `bash` or `sh` that resolve without running anything: from the member's own directory (`dirname "$0"`
+# and its `cd … && pwd` and BASH_SOURCE forms), from simple assignments of such paths, and from plain `for v in
+# words` lists. A load that does not resolve, or names a path the commit lacks, is no member, so the closure never
+# names a file the check cannot have read. The closure is read from the declaration each time, never listed, so a
+# check that comes to load a new library brings it into its closure by that load alone.
+_wt_check_closure() {  # <repo dir> <rev> <check command> -> the members' paths, one per line · 1 when no script
+  local dir="$1" rev="$2" cmd="$3" nl='
+' held w script queue f seen
+  held="$(git -C "$dir" ls-tree -r --name-only "$rev" 2>/dev/null)" || return 1
+  script=""
+  while IFS= read -r w; do
+    w="${w#./}"
+    case "$w" in ''|/*|-*) continue ;; esac
+    case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) script="$w"; break ;; esac
+  done <<EOF
+$(printf '%s\n' "$cmd" | tr -s ' \t' '\n\n')
+EOF
+  [ -n "$script" ] || return 1
+  queue="$script"; seen="${nl}${script}${nl}"
+  while [ -n "$queue" ]; do
+    f="${queue%%"$nl"*}"
+    case "$queue" in *"$nl"*) queue="${queue#*"$nl"}" ;; *) queue="" ;; esac
+    printf '%s\n' "$f"
+    while IFS= read -r w; do
+      [ -n "$w" ] || continue
+      case "$seen" in *"${nl}${w}${nl}"*) continue ;; esac
+      case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) : ;; *) continue ;; esac
+      seen="${seen}${w}${nl}"; queue="${queue:+${queue}${nl}}${w}"
+    done <<EOF
+$(git -C "$dir" show "${rev}:${f}" 2>/dev/null | _wt_check_loads "$(dirname "$f")")
+EOF
+  done
+}
+# The loads one member names, resolved against <dir>, its directory under the repository root ("." for the root).
+_wt_check_loads() {  # <dir> < the member's text -> one repository path per resolved load
+  awk -v d="$1" -v sq="'" '
+    function norm(p,   n, a, i, o, k, r) {
+      n = split(p, a, "/"); k = 0
+      for (i = 1; i <= n; i++) {
+        if (a[i] == "" || a[i] == ".") continue
+        if (a[i] == "..") { if (k == 0) return ""; k--; continue }
+        o[++k] = a[i]
+      }
+      r = ""; for (i = 1; i <= k; i++) r = r (i > 1 ? "/" : "") o[i]
+      return r
+    }
+    # Every $NAME or ${NAME} in s replaced by its value; "" when one has none. A loop variable, the last one met,
+    # is left as @L for the caller to expand.
+    function subst(s,   out, name, m) {
+      out = ""
+      while (match(s, /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) {
+        name = substr(s, RSTART, RLENGTH); gsub(/[${}]/, "", name)
+        out = out substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
+        if (name in val) out = out val[name]
+        else if (name in loop) { out = out "@L"; lv = name }
+        else return ""
+      }
+      return out s
+    }
+    function emit(p,   n, a, i) {
+      if (p == "" || index(p, "$") || index(p, "`")) return
+      if (index(p, "@D") == 1) p = d substr(p, 3)
+      else if (substr(p, 1, 1) == "/") return
+      if (index(p, "@L")) {
+        n = split(loop[lv], a, " ")
+        for (i = 1; i <= n; i++) { q = p; sub(/@L/, a[i], q); q = norm(q); if (q != "") print q }
+        return
+      }
+      p = norm(p); if (p != "") print p
+    }
+    {
+      l = $0
+      gsub(/\$\(dirname (-- )?"(\$0|\$\{0\}|\$BASH_SOURCE|\$\{BASH_SOURCE\}|\$\{BASH_SOURCE\[0\]\})"\)/, "@D", l)
+      gsub(/\$\{(0|BASH_SOURCE|BASH_SOURCE\[0\])%\/\*\}/, "@D", l)
+      gsub(/\$\(cd "@D"[^)]*\)/, "@D", l)
+      if (match(l, /^[ \t]*((local|export|readonly)[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=/)) {
+        a = substr(l, RSTART, RLENGTH); sub(/^[ \t]*((local|export|readonly)[ \t]+)?/, "", a); sub(/=$/, "", a)
+        v = substr(l, RSTART + RLENGTH)
+        if (substr(v, 1, 1) == "\"") { v = substr(v, 2); sub(/".*$/, "", v) } else sub(/[ \t;|&)].*$/, "", v)
+        if (!(a in val) && v != "") { v = subst(v); if (v != "" && index(v, "@L") == 0) val[a] = v }
+      }
+      if (match(l, /for[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]+[^;]*;[ \t]*do/)) {
+        f = substr(l, RSTART, RLENGTH); sub(/^for[ \t]+/, "", f)
+        a = f; sub(/[ \t].*$/, "", a)
+        sub(/^[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]+/, "", f); sub(/[ \t]*;[ \t]*do$/, "", f)
+        if (f ~ /^[A-Za-z0-9_.\/ -]+$/) loop[a] = f
+      }
+      r = ";" l
+      while (match(r, /([;&|({!][ \t]*|[ \t;](then|do|else)[ \t]+)(\.|source|bash|sh)[ \t]+/)) {
+        r = substr(r, RSTART + RLENGTH)
+        if (substr(r, 1, 1) == "\"") { w = substr(r, 2); sub(/".*$/, "", w) }
+        else if (substr(r, 1, 1) == sq) { w = substr(r, 2); w = substr(w, 1, index(w sq, sq) - 1); emit(w); continue }
+        else { w = r; sub(/[ \t;|&)<>].*$/, "", w) }
+        emit(subst(w))
+      }
+    }'
+}
+# WHAT THE LANDING CHANGES OF ITS JUDGE: the closure of the check as <base> holds it, met with the paths <base>..<head>
+# changes. Prints `<script> <path>[,<path>]` and returns 0 when the range changes a member; 1 otherwise.
+_wt_check_judge() {  # <repo dir> <base> <head> <check command>
+  local cl ch hit="" p nl='
+'
+  cl="$(_wt_check_closure "$1" "$2" "$4")" || return 1
+  ch="$(git -C "$1" diff --name-only "$2" "$3" 2>/dev/null)" || return 1
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "${nl}${ch}${nl}" in *"${nl}${p}${nl}"*) hit="${hit:+${hit}${nl}}${p}" ;; esac
+  done <<EOF
+$cl
+EOF
+  [ -n "$hit" ] || return 1
+  printf '%s %s\n' "${cl%%"$nl"*}" "$(printf '%s\n' "$hit" | LC_ALL=C sort | paste -sd, -)"
+}
+
 # THE PROJECT'S DECLARED CHECK, AS ONE FUNCTION (wave-28 T3; recheck Q3): factored out of
 # `worktree_land`, which calls it as before, and called by `line_publish`, read from the accepted head.
 # <run dir> is the checkout that holds the branch, or a landing tree pointed at the accepted head when
 # none does; <writer tree> is the piece whose cleanliness the check must also leave as it found it.
 # 0 when no check is declared or it passed and left nothing; 2 having refused.
-_wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <onto> -> 0 | 2
-  local root="$1" co="$2" onto_head="$3" head="$4" wt_abs="$5" branch="$6" onto="$7"
-  local check_cmd check_was check_out rc left said moved fix
+_wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <onto> [<row>] -> 0 | 2
+  local root="$1" co="$2" onto_head="$3" head="$4" wt_abs="$5" branch="$6" onto="$7" row="${8:-<row>}"
+  local check_cmd check_was check_out rc left said moved fix judge
   check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
   if [ -n "$check_cmd" ]; then
     check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
@@ -1021,6 +1137,15 @@ _wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <
     left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
     if [ "$rc" -ne 0 ]; then
       [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
+      # A LANDING THAT CHANGES ITS OWN JUDGE. The copy that ran is the target's at the accepted head, so when the
+      # candidate's range (accepted head to candidate, never the writer's own base) changes a member of the
+      # check's closure, the advice to fix what it names on the branch is wrong: the branch may be the fix. The
+      # refusal names the copy that judged and what of it the landing changes, and the route by which a person
+      # lands a fix the door cannot judge: a merge by git, then the hand mark, whose scan runs the landed copy and
+      # says so on the row's line. The door itself never runs the candidate's copy.
+      if judge="$(_wt_check_judge "$co" "$onto_head" "$head" "$check_cmd")"; then
+        _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} judged-by=target script=${judge%% *}@${onto_head:0:12} changed-here=${judge#* } — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before judged-by}. It ran as the target holds it at ${onto_head:0:12}, and this landing changes that check: a landing never rewrites the check that judges it, so a fix to the check cannot pass its own door. Run this landing's copy over the same range to see whether the fix holds (cd ${wt_abs} && BIONIC_CHECK_BASE=${onto_head} BIONIC_CHECK_HEAD=${head} ${check_cmd}); if it does and the fix is wanted, a person lands it by hand: merge ${branch} into ${onto} with git, then session-poker.sh row-landed ${row} <merge> <at> --by-hand '<who>' '<why>', whose scan runs the landed copy and writes judged-by=candidate on the row's line"; return 2
+      fi
       _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
     fi
     if [ -n "$left" ]; then
