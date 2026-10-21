@@ -41,7 +41,7 @@
 #                   stated sentence of the bound plan; Migration names every row that added a refusal; every
 #                   build row names its record; the 1.18.0 block is as released; help.md and version.md
 #                   read the version and `render.sh --check` is green. Each rule has a doctored copy.
-#   §REL-1.24.0     the 1.24.0 entry (REQ-15 AC-15.1): the version pair reads 1.24.0, the entry is dated, names ADR-066,
+#   §REL-1.24.0     the 1.24.0 entry: the version pair reads 1.24.0, the entry is dated, names ADR-066,
 #                   ADR-067 and ADR-068, and its Migration paragraph names the rows that changed what a script may meet.
 #                   The release check is run on a repository holding the real entry and the run's real deferred lines:
 #                   every deferred sentence stands under Known limits and the check passes; the same entry with its
