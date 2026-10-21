@@ -23,6 +23,12 @@
 # a value is folded to a space on the way in: no value can forge a field. A key is
 # `<kind>:<id>` (`approve:step1`, `gate:<hash>`), letters, digits and `:._-` only.
 #
+# A DECISION HAS ONE KEY, `decide:D<n>`. A row that waits on a numbered decision reads it as
+# `approval:D<n>`, so the tick and the dispatch wall open `approve:D<n>` and the approve verb closes
+# it, while the pages owe the same decision from the design ledger's put. One reply answers both,
+# so `owed_key` folds the approval spelling onto the decision's key on every read and write here:
+# every writer opens the same item, every closer closes it, and the person is owed it once.
+#
 # THE ITEM IS A NEED, NEVER THE DECISION. The title is a short ASCII label (it becomes a push
 # notification's Title header), the reply is the one line the run printed for the block. What
 # the person decided is recorded by the verb that heard it, in the plan, as before (wave-29's
@@ -72,6 +78,14 @@ _owed_key_ok() {  # <key>
     *:*) return 0 ;;
   esac
   return 1
+}
+
+# owed_key <key> -> the key the store files it under: `approve:D<n>` is `decide:D<n>`, every other key itself.
+owed_key() {
+  case "${1:-}" in
+    approve:D[0-9]*) case "${1#approve:D}" in *[!0-9]*) printf '%s\n' "$1" ;; *) printf 'decide:%s\n' "${1#approve:}" ;; esac ;;
+    *) printf '%s\n' "${1:-}" ;;
+  esac
 }
 
 _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
@@ -131,11 +145,16 @@ _owed_rewrite() {
   return "$rc"
 }
 
-# The fields of one line, by name: the awk every reader and writer below shares.
+# The fields of one line, by name, and a line's key as `owed_key` files it: the awk every reader and
+# writer below shares, so a line written under the approval spelling of a decision reads as the decision.
 _OWED_AWK_FIELD='function fld(line, name,   n, i, a, p) {
   n = split(line, a, "|"); p = name "="
   for (i = 2; i <= n; i++) if (index(a[i], p) == 1) return substr(a[i], length(p) + 1)
   return ""
+}
+function key_of(line,   k) {
+  k = fld(line, "key")
+  return (k ~ /^approve:D[0-9]+$/) ? "decide:" substr(k, 9) : k
 }'
 
 # owed_open <key> <title> <reply> -> rc 0. IDEMPOTENT PER KEY: an item already open is left as it
@@ -144,6 +163,7 @@ _OWED_AWK_FIELD='function fld(line, name,   n, i, a, p) {
 owed_open() {
   local key="${1:-}" title reply f
   _owed_key_ok "$key" || return 1
+  key="$(owed_key "$key")"
   title="$(_owed_clean "${2:-}")"
   reply="$(_owed_clean "${3:-}")"
   f="$(owed_file)" || return 1
@@ -151,7 +171,7 @@ owed_open() {
   # backslash in a printed line as an escape and store a different line than the one printed.
   OWED_T="$title" OWED_R="$reply" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
-    { k = fld($0, "key"); if (k == key) { last = $0; next } print }
+    { if (key_of($0) == key) { last = $0; next } print }
     END {
       if (last != "" && fld(last, "state") == "open") print last
       else printf "owed/v1|key=%s|state=open|sent=-|at=%s|title=%s|reply=%s\n", key, now, ENVIRON["OWED_T"], ENVIRON["OWED_R"]
@@ -162,13 +182,16 @@ owed_open() {
 owed_close() {
   local key="${1:-}" by f
   _owed_key_ok "$key" || return 1
+  key="$(owed_key "$key")"
   by="$(_owed_clean "${2:-}")"
   f="$(owed_file)" || return 1
   [ -f "$f" ] || return 0
-  /usr/bin/grep -qF "|key=$key|state=open|" "$f" 2>/dev/null || return 0
+  awk -v key="$key" "$_OWED_AWK_FIELD"'
+    index($0, "owed/v1|") == 1 && key_of($0) == key && fld($0, "state") == "open" { y = 1; exit }
+    END { exit !y }' "$f" 2>/dev/null || return 0
   OWED_B="$by" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
-    fld($0, "key") == key && fld($0, "state") == "open" {
+    key_of($0) == key && fld($0, "state") == "open" {
       printf "owed/v1|key=%s|state=closed|by=%s|at=%s\n", key, ENVIRON["OWED_B"], now; next
     }
     { print }' -v key="$key" -v now="$(_owed_now)"
@@ -181,7 +204,7 @@ owed_list() {
   [ -f "$f" ] && [ ! -L "$f" ] || return 0
   awk "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
-    fld($0, "state") == "open" { printf "%s\t%s\t%s\t%s\n", fld($0, "key"), fld($0, "sent"), fld($0, "title"), fld($0, "reply") }
+    fld($0, "state") == "open" { printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "sent"), fld($0, "title"), fld($0, "reply") }
   ' "$f" 2>/dev/null
 }
 
@@ -209,11 +232,12 @@ owed_unsent() {
 owed_mark_sent() {
   local key="${1:-}" f
   _owed_key_ok "$key" || return 1
+  key="$(owed_key "$key")"
   f="$(owed_file)" || return 1
   [ -f "$f" ] || return 1
   _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
-    fld($0, "key") == key && fld($0, "state") == "open" && fld($0, "sent") == "-" { sub(/\|sent=-\|/, "|sent=" now "|") }
+    key_of($0) == key && fld($0, "state") == "open" && fld($0, "sent") == "-" { sub(/\|sent=-\|/, "|sent=" now "|") }
     { print }' -v key="$key" -v now="$(_owed_now)"
 }
 
@@ -223,11 +247,12 @@ owed_mark_sent() {
 owed_unmark_sent() {
   local key="${1:-}" f
   _owed_key_ok "$key" || return 1
+  key="$(owed_key "$key")"
   f="$(owed_file)" || return 1
   [ -f "$f" ] || return 1
   _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
-    fld($0, "key") == key && fld($0, "state") == "open" && fld($0, "sent") != "-" { sub(/\|sent=[^|]*\|/, "|sent=-|") }
+    key_of($0) == key && fld($0, "state") == "open" && fld($0, "sent") != "-" { sub(/\|sent=[^|]*\|/, "|sent=-|") }
     { print }' -v key="$key"
 }
 

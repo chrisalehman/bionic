@@ -334,18 +334,84 @@ decisions_rounds() {  # <ledger> -> `D<n><TAB><rounds><TAB><ruled|withdrawn|open
     END { for (i = 1; i <= n; i++) printf "%s\t%d\t%s\n", o[i], r[o[i]], st[o[i]] }'
 }
 
-# sitrep_open_decisions <ledger> -> the decisions put to the user and not yet ruled, each as an owed item in the
-# owed store's field order: `decide:<D<n>><TAB>-<TAB>reply to D<n><TAB>D<n> · <title>: reply with the option number`.
-# Open is `decisions_rounds`' word for it; the title is the newest put's.
-sitrep_open_decisions() {
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  local open
-  open="$(decisions_rounds "$1" | awk -F'\t' '$3 == "open" { printf "%s ", $1 }')"
-  [ -n "$open" ] || return 0
-  decisions_list "$1" puts | awk -F' · ' -v open="$open" '
-    BEGIN { n = split(open, a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
-    $2 == "put" && ($1 in want) { t = $4; for (i = 5; i <= NF; i++) t = t " · " $i; title[$1] = t }
-    END { for (i = 1; i <= n; i++) printf "decide:%s\t-\treply to %s\t%s · %s: reply with the option number\n", a[i], a[i], a[i], title[a[i]] }'
+# THE OPEN DECISIONS AND THE LANDED READINGS, ONE READER FOR BOTH PAGES. The sitrep and the resume recap each show
+# every decision put to the user and not yet ruled and every reading that landed with its result, and both read them
+# here, so the two pages cannot disagree on what is open.
+# pages_open <plan> <ledger> ->
+#   `D<TAB>D<n><TAB><title><TAB><wait line>` per open decision, in order of first entry: open is `decisions_rounds`'
+#     word, the title the newest put's, the wait line the first line under that put's heading (what `decisions put`
+#     wrote there), empty when it has none;
+#   `R<TAB><question><TAB><scope><TAB><result><TAB><at>` per reading line of the plan's unfenced ## SDLC State
+#     (`proof_fields`: kind review with a question and a record), in the plan's order, a repeated record and result once.
+pages_open() {
+  local plan="$1" led="$2" open
+  if [ -f "$led" ] && [ ! -L "$led" ]; then
+    open="$(decisions_rounds "$led" | awk -F'\t' '$3 == "open" { printf "%s ", $1 }')"
+    if [ -n "$open" ]; then
+      { decisions_list "$led" puts | awk -F' · ' '$2 == "put" { t = $4; for (i = 5; i <= NF; i++) t = t " · " $i; print "T\t" $1 "\t" t }'
+        awk '{ sub(/\r$/, "") }
+          /^[ \t]*```/ { f = !f; next }
+          f { next }
+          index($0, "## ") == 1 { d = ""
+            if (match($0, /^## Δ[0-9]+ — D[0-9]+ put /)) { d = $0; sub(/^## Δ[0-9]+ — /, "", d); sub(/ .*$/, "", d); print "W\t" d "\t" }
+            next }
+          d != "" && NF { print "W\t" d "\t" $0; d = "" }' "$led" 2>/dev/null
+      } | awk -F'\t' -v open="$open" '
+        $1 == "T" { t[$2] = $3; next }
+        $1 == "W" { w[$2] = $3 }
+        END { n = split(open, a, " "); for (i = 1; i <= n; i++) printf "D\t%s\t%s\t%s\n", a[i], t[a[i]], w[a[i]] }'
+    fi
+  fi
+  { [ -f "$plan" ] && [ ! -L "$plan" ] && declare -F proof_awk >/dev/null 2>&1; } || return 0
+  awk "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" && !((PROOF_EVIDENCE SUBSEP PROOF_RESULT) in seen) {
+      seen[PROOF_EVIDENCE SUBSEP PROOF_RESULT] = 1; at = ""
+      if (match($0, /[ \t]at=[^ \t]+/)) at = substr($0, RSTART + 4, RLENGTH - 4)
+      printf "R\t%s\t%s\t%s\t%s\n", PROOF_QUESTION, PROOF_SCOPE, PROOF_RESULT, at
+    }' "$plan" 2>/dev/null
+}
+
+# pages_owed <pages_open output> -> stdin's owed items (owed_list's field order) with each open decision as the item the
+# person owes, `decide:D<n><TAB>-<TAB>reply to D<n><TAB>D<n> · <title>: reply with the option number. <wait line>`. A
+# store item on the same key, a row's approval of that decision (lib/owed.sh `owed_key`), is the same need: the
+# decision's item takes its place, so one reply is owed once. The rest keep the store's order, each key once.
+pages_owed() {
+  PAGES_OPEN="$1" awk -F'\t' '
+    BEGIN { n = split(ENVIRON["PAGES_OPEN"], L, "\n")
+      for (i = 1; i <= n; i++) {
+        if (split(L[i], f, "\t") < 2 || f[1] != "D") continue
+        k = "decide:" f[2]; ord[++m] = k
+        item[k] = k "\t-\treply to " f[2] "\t" f[2] " · " f[3] ": reply with the option number" ((f[4] != "") ? ". " f[4] : "")
+      } }
+    NF && $1 != "" { if ($1 in item) { if (!done[$1]++) print item[$1]; next } if (!seen[$1]++) print }
+    END { for (i = 1; i <= m; i++) if (!done[ord[i]]++) print item[ord[i]] }'
+}
+
+# pages_readings <pages_open output> <now epoch> -> `<mark><TAB><question>[ on the whole| on a piece]: <passed|flagged|
+# failed> at <clock>` per landed reading. The mark holds the result against a pass: within, near for a flag, over for a
+# fail, not measurable for any other word.
+pages_readings() {
+  local l q sc res at mark word where e when tab=$'\t'
+  while IFS= read -r l; do
+    case "$l" in "R$tab"*) ;; *) continue ;; esac
+    l="${l#R$tab}"; q="${l%%$tab*}"; l="${l#*$tab}"; sc="${l%%$tab*}"; l="${l#*$tab}"; res="${l%%$tab*}"; at="${l#*$tab}"
+    case "$res" in
+      pass) mark="$SITREP_MARK_WITHIN"; word=passed ;;
+      flag) mark="$SITREP_MARK_NEAR"; word=flagged ;;
+      fail) mark="$SITREP_MARK_OVER"; word=failed ;;
+      *) mark="$SITREP_MARK_NONE"; word="no result" ;;
+    esac
+    case "$sc" in whole) where=" on the whole" ;; piece) where=" on a piece" ;; *) where="" ;; esac
+    e="$(iso_epoch "$at" 2>/dev/null)"; when=""
+    case "$e" in ''|*[!0-9]*) ;; *) when=" at $(sitrep_clock "$e" "$2")" ;; esac
+    printf '%s\t%s%s: %s%s\n' "$mark" "$q" "$where" "$word" "$when"
+  done <<PAGES_READINGS
+$1
+PAGES_READINGS
 }
 
 # sitrep_decisions <ledger> <record dir> -> the decisions indicator line. Each release approval page the run put is a
@@ -540,15 +606,18 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # its rationale, is the /bionic:sitrep skill's, recorded through `sitrep grade` and printed back by the verb (a
 # hook never judges). The page, in order, a blank line between sections, every line folded at 92 columns:
 #
-#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9 · <k> of <m> tasks done (<p>%)
+#   Sitrep · <project> <release> · <weekday> <H:MM AM/PM> · step <n> of 9[ · work at step <w> (<tasks>)] · <k> of <m>
+#                      tasks done (<p>%), the clause when a landed or active task stands at a step past current:
 #   Bottom line        four bullets: what you owe, what is next, what is done, when it closes
 #   Task list          <glyph> <step>: <name> for steps 0 to 3 and each later step with no task of its own, and
 #                      <glyph> <step>/<task>: <short description> for every task in execution order; a time in
 #                      parentheses, a state after " — "
 #   Score: <grade> (graded <time>), or Score: not graded yet
 #                      <mark> schedule, correctness, waste, decisions, goals — what each measured, in words; then
+#                      `<mark> reading — …` per landed reading with its result (`pages_readings`); then
 #                      `- <rationale>` when graded
-#   Blocked on you     one bullet per open approve:, waive:, finding:, gate: or decide: item of the plan's run, one sentence each
+#   Blocked on you     one bullet per open approve:, waive:, finding:, gate: or decide: item of the plan's run, one sentence each,
+#                      every decision put and not ruled among them with its wait line (`pages_owed`), each once
 #   Predicted close    the close and its basis, or why there is none
 #
 # and `--line` prints only `<schedule><correctness><waste marks> · owed: <n> · <the close>`.
@@ -820,7 +889,7 @@ sitrep_render() {
   local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
   local s_mark s_text c_mark c_text w_mark w_text ty gl lab desc kind note glyph
   local idle_min elapsed i_pct d_pct prev ratio s_med s_decl width admitted chain cids cmins work
-  local landed=0 active=0 pending=0 redn=0 total=0 approvals lmed="" appr_at dlv_at cur
+  local landed=0 active=0 pending=0 redn=0 total=0 approvals lmed="" appr_at dlv_at cur pages ahead
   now="$(sitrep_now)"
   slug="$(proof_plan_slug "$plan")"
   recdir="$(docs_root "$root")/record/$slug"
@@ -828,7 +897,6 @@ sitrep_render() {
   rows="$(units_rows "$plan" 2>/dev/null)"
   # What the person owes: the four kinds that are theirs, from the stores of the sessions bound to this plan.
   owed="$( { owed_list_plan "$plan" "$root" 2>/dev/null || :; } | awk -F'\t' '$1 ~ /^(approve|waive|finding|gate|decide):/')"
-  approvals="$(printf '%s\n' "$owed" | awk -F'\t' 'index($1, "approve:") == 1 { print substr($1, 9) }')"
   reds="$(sitrep_reds "$rec")"
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
   nred="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
@@ -837,13 +905,22 @@ sitrep_render() {
   local gk gt
   gk="$(plan_goals_read "$plan" "$rec" "$lr" | awk -F'\t' '$1 == "reached" { print $2 }' | while IFS= read -r gt; do printf 'decide:goal:%s ' "$(plan_goal_slug "$gt")"; done)"
   [ -z "$gk" ] || owed="$(printf '%s\n' "$owed" | awk -F'\t' -v ks="$gk" 'BEGIN { n = split(ks, a, " "); for (i = 1; i <= n; i++) drop[a[i]] = 1 } !($1 in drop)')"
-  # a decision put to the user and not yet ruled is owed by them as much as an item of the owed store is
-  owed="$(printf '%s\n' "$owed"; sitrep_open_decisions "$recdir/design-ledger.md")"
+  # a decision put to the user and not yet ruled is owed by them as much as an item of the owed store is, and once
+  pages="$(pages_open "$plan" "$recdir/design-ledger.md")"
+  owed="$(printf '%s\n' "$owed" | pages_owed "$pages")"
+  # an approval the person owes, a numbered decision a row reads as approval:D<n> among them, blocks the rows that read it
+  approvals="$(printf '%s\n' "$owed" | awk -F'\t' 'index($1, "approve:") == 1 { print substr($1, 9) } $1 ~ /^decide:D[0-9]+$/ { print substr($1, 8) }')"
   # the schedule's bar half reads the one-file landings alone (lib/plan.sh), so a landing of many files moves it not
   lmed="$(plan_one_file_median "$plan" "$lr")"; lmed="${lmed%%	*}"
   appr_at="$(sitrep_approved_at "$plan")"
   dlv_at="$(sitrep_delivered_at "$plan")"
   cur="$(awk '/^[[:space:]]*```/ { f = !f; next } !f && /^[[:space:]]*current[[:space:]]*:/ { s = $0; sub(/^[^:]*:[ \t]*/, "", s); sub(/[^0-9].*$/, "", s); print s; exit }' "$plan")"
+  # THE WORK'S OWN STEP: current: moves only by its advance, which may wait on a gate while later tasks already run, so
+  # the title says the furthest step a landed or active task stands at, and the tasks there, when it is ahead.
+  ahead="$(printf '%s\n' "$rows" | awk -F'\t' -v cur="$cur" '
+    { s = tolower($10); gsub(/[ \t]/, "", s); st = $2; gsub(/[ \t]/, "", st); id = $1; gsub(/[ \t]/, "", id) }
+    (s == "landed" || s == "active") && st ~ /^[0-9]+$/ { if (st + 0 > mx) { mx = st + 0; ids = id } else if (st + 0 == mx) ids = ids " " id }
+    END { if (cur ~ /^[0-9]+$/ && mx > cur + 0) print mx " " ids }')"
 
   # ---- The Task list: the attended steps 0 to 3, each with its approval time, then every task in EXECUTION ORDER,
   # then each later step with no task of its own. One line each, `<glyph> <step>/<task>: <short>`, then a time in
@@ -1110,7 +1187,7 @@ SITREP_SIT
   fi
 
   # ---- What is owed, in words: what to do, then what waits on it
-  local blk="" whats="" nown=0 k sent ttl rep what det wids
+  local blk="" whats="" nown=0 k sent ttl rep what det wids pair
   while IFS='	' read -r k sent ttl rep; do
     [ -n "$k" ] || continue
     rep="${rep#poker: }"; [ -n "$rep" ] || rep="$ttl"
@@ -1118,24 +1195,27 @@ SITREP_SIT
     case "$k" in
       approve:step[0-9]*) what="approve the Step ${k#approve:step} card" ;;
       approve:*) what="approve ${k#approve:}" ;;
+      decide:D[0-9]*) what="reply to ${k#decide:}" ;;
       waive:*) what="waive or read ${k#waive:}" ;;
       *) what="$(printf '%s' "$ttl" | awk '{ print tolower(substr($0, 1, 1)) substr($0, 2) }')" ;;
     esac
+    # a decision's own item carries its sentence and its wait line; one a row's approval read opened, with no put
+    # open on the ledger, says who waits on it as an approval does
+    pair=no
+    case "$k" in approve:*|waive:*) pair=yes ;; decide:D[0-9]*) [ "$ttl" = "$what" ] || pair=yes ;; esac
     case "$k" in
-      approve:*)
-        wids="$(printf '%s\n' "$rows" | awk -F'\t' -v want="approval:${k#approve:}" '
+      approve:*|decide:D[0-9]*)
+        wids="$(printf '%s\n' "$rows" | awk -F'\t' -v want="approval:${k#*:}" '
           { s = tolower($10); gsub(/[ \t]/, "", s); if (s == "landed" || s == "dropped") next
             n = split($13, a, ","); for (i = 1; i <= n; i++) { x = a[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (x == want) { print $1; next } } }')"
-        if [ -n "$wids" ]; then
+        if [ "$pair" = yes ] && [ -n "$wids" ]; then
           # shellcheck disable=SC2086
           det="$(sitrep_list 5 $wids) $([ "$(printf '%s\n' "$wids" | grep -c .)" -gt 1 ] && echo wait || echo waits) on it"
         fi ;;
     esac
     nown=$((nown + 1))
-    case "$k" in
-      approve:*|waive:*) blk="${blk}2	- $what: $det"$'\n' ;;
-      *) blk="${blk}2	- $det"$'\n' ;;   # a decision, finding or gate: the item's own sentence, never its title beside it
-    esac
+    if [ "$pair" = yes ]; then blk="${blk}2	- $what: $det"$'\n'
+    else blk="${blk}2	- $det"$'\n'; fi   # a decision, finding or gate: the item's own sentence, never its title beside it
     whats="${whats}${what}"$'\n'
   done <<SITREP_OWED
 $owed
@@ -1204,8 +1284,10 @@ SITREP_OWED
     gh="Score: not graded yet"
   fi
   {
-    printf '0\tSitrep · %s%s · %s · step %s of 9%s\n' "$proj" "${title_rel:+ $title_rel}" "$(sitrep_date "$now" '%A %-I:%M %p')" \
-      "${cur:--}" "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done (%d%%)' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) )))"
+    # shellcheck disable=SC2086
+    printf '0\tSitrep · %s%s · %s · step %s of 9%s%s\n' "$proj" "${title_rel:+ $title_rel}" "$(sitrep_date "$now" '%A %-I:%M %p')" \
+      "${cur:--}" "${ahead:+ · work at step ${ahead%% *} ($(sitrep_list 3 ${ahead#* }))}" \
+      "$([ "$total" -gt 0 ] && printf ' · %d of %d tasks done (%d%%)' "$landed" "$total" $(( (landed * 200 + total) / (total * 2) )))"
     printf '0\t\n0\tBottom line\n'
     printf '2\t- %s\n' "$b_owe" "$b_next" "$b_done" "Close: $btext."
     printf '0\t\n0\tTask list\n'
@@ -1224,6 +1306,7 @@ SITREP_SIT
     printf '0\t\n0\t%s\n' "$gh"
     printf '3\t%s\n' "$s_text" "$c_text" "$w_text"
     sitrep_decisions "$recdir/design-ledger.md" "$recdir"
+    pages_readings "$pages" "$now" | awk -F'\t' 'NF >= 2 { print "3\t" $1 " reading — " $2 }'
     sitrep_goals "$plan" "$rec" "$lr"
     [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
     printf '0\t\n0\tBlocked on you\n'
@@ -1986,12 +2069,19 @@ sitrep_grade() {
     else printf 'settled: none — no ruling in %s\n' "${RS_LEDGER#"$REPO_REAL"/}"; fi
     RS_OWED="$( { bind_sessions "$RS_PLAN" 2>/dev/null; printf '%s\n' "$SESSION_ID"; } | awk 'NF && !s[$0]++' \
       | while IFS= read -r RS_S; do OWED_ROOT="$REPO_REAL" OWED_SID="$RS_S" owed_list 2>/dev/null; done | awk -F'\t' 'NF && !k[$1]++')"
-    RS_OPEN="$(printf '%s\n' "$RS_OWED" | awk -F'\t' 'NF && $1 != "" { r = $4; sub(/^poker: /, "", r); if (r == "") r = $3; print "open: " $1 " — " r }')"
+    # the page's own reader of the open decisions and the readings: a decision put and not ruled is open here as there,
+    # and owed once whether or not a row's approval read opened it too
+    RS_PAGES="$(pages_open "$RS_PLAN" "$RS_LEDGER")"
+    RS_OWED="$(printf '%s\n' "$RS_OWED" | pages_owed "$RS_PAGES")"
+    RS_OPEN="$(printf '%s\n' "$RS_OWED" | awk -F'\t' 'NF && $1 != "" { k = $1; r = $4; sub(/^poker: /, "", r); if (r == "") r = $3
+      if (k ~ /^decide:D[0-9]+$/ && $3 == "reply to " substr(k, 8)) { k = substr(k, 8); sub(/^D[0-9]+ · /, "", r) }
+      print "open: " k " — " r }')"
     if [ -n "$RS_OPEN" ]; then printf '%s\n' "$RS_OPEN"; else printf 'open: none — no decision is open\n'; fi
+    pages_readings "$RS_PAGES" "$(sitrep_now)" | awk -F'\t' 'NF >= 2 { print "reading: " $2 }'
     RS_OWN="$(printf '%s\n' "$RS_OPEN" | awk '{ k = $2 } k ~ /^(approve|waive|finding|gate):/ { sub(/^open: /, "owned-by-user: "); print }')"
     RS_APPR="$(units_waiting "$RS_PLAN" "$(fill_step_token "$RS_PLAN" 2>/dev/null)" 2>/dev/null | awk -F'\t' -v have="$(printf '%s\n' "$RS_OWED" | cut -f1 | tr '\n' ' ')" '
       { r = $2; sub(/^live:/, "", r); if (r !~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) next
-        nmv = substr(r, 10); if (index(" " have, " approve:" nmv " ")) next
+        nmv = substr(r, 10); if (index(" " have, " approve:" nmv " ") || index(" " have, " decide:" nmv " ")) next
         if (!(nmv in ids)) { ord[++n] = nmv; ids[nmv] = $1 } else if (index(", " ids[nmv] ", ", ", " $1 ", ") == 0) ids[nmv] = ids[nmv] ", " $1 }
       END { for (i = 1; i <= n; i++) print "owned-by-user: approval:" ord[i] " — " ids[ord[i]] " wait on it; record it: approve " ord[i] " '"'"'<the user'"'"'s words>'"'"'" }')"
     RS_OWN="$(printf '%s\n%s\n' "$RS_OWN" "$RS_APPR" | awk 'NF')"
