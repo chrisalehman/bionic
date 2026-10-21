@@ -169,6 +169,8 @@ section "§NAME: the card is the release approval card; the old name is read onl
 # The old spelling is built from parts so this file, which the sweep reads too, never spells it.
 RN_W="review"
 RN_ROOT="$(cd "${BIONIC_HOOKS_DIR}/.." && pwd)"
+# The sweep reads the shipped trees only. CHANGELOG.md and docs/adrs/ are history: they say what a thing was called when it
+# was written, and are outside these five trees, so nothing here exempts them by name.
 rn_sweep() {  # <root> -> file:line:text for every line under the shipped trees that spells the old name, either way
   ( cd "$1" && /usr/bin/grep -rniE "${RN_W}[ -]results" payload hooks tests skills agents-src 2>/dev/null )
 }
