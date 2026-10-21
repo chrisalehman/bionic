@@ -608,12 +608,15 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 # cores of room; HOME is a fresh directory, so no share file is read). The first row is asked with
 # nothing owed and each row offered owes one promise more, so a busy reading of 7.0 leaves room for
 # exactly one writer (7 <= 7.36 < 7 + the suite cost, wave-38 T5), and 8.0 for none.
+# The plan is one the commit gate admits (its version line and a Step-4 block), so a plan verb's dry
+# commit, which GAP3 runs, judges the cells it writes and not the fixture.
 gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n---\n\n# fixture plan\n\n'
-    printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\ncanonical_sdlc_version: 14\n---\n\n# fixture plan\n\n'
+    printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/37-fixture\n  base-sha: abc1234\n  branch: wave/37-fixture\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
