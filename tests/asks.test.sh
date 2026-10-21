@@ -11,6 +11,11 @@
 # §ONE-REGISTER  a close-out preflight's `waive:` reaches the plan's register; a bound session reads it as its own;
 #                closed in one session, closed for all; an ask with no run, or under a name that is no plan, stays
 #                with its session
+# §HELD          a close-out refused at Step 8 holds the merge, `hold:merge`, its reason the title, from `run` and from
+#                `check` alike; a refusal before Step 8 holds nothing; the run that delivers closes it
+# §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
+# §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
+#                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -26,6 +31,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
@@ -95,8 +101,8 @@ as_owed "$PA" "$AS_SIDD" owed_open gate:free "gate act: free" "poker: GATE free"
 run_close_as "$AS_SIDA" "$PA" check
 expect_contains "ONE-1 precondition: check names the failing structure reading the merge would refuse on" \
   "$(printf 'review\tstructure\tbionic:critic\tpiece\tfailing')" "$CO_OUT"
-expect_eq "ONE-2 the preflight's waiver is an open ask in the plan's register (owed_list_plan)" \
-  "waive:structure" "$(as_register "$PA" "$PA_PLAN")"
+expect_eq "ONE-2 the preflight's waiver is an open ask in the plan's register (owed_list_plan), beside the merge it holds" \
+  "hold:merge waive:structure" "$(as_register "$PA" "$PA_PLAN")"
 expect_contains "ONE-2b …filed at record/<run>/asks.state, carrying the refusal the commit gate printed" \
   "|key=waive:structure|state=open|" "$(cat "$PA_REG" 2>/dev/null)"
 expect_eq "ONE-3 only the run-less session has a session file: no stand-in close-out session holds an ask" \
@@ -107,19 +113,19 @@ expect_contains "ONE-3b …and that file holds the run-less ask" "|key=gate:free
 bound_marker "$PA" "$AS_SIDB" "$PA_PLAN"
 bound_marker "$PA" "$AS_SIDC" "$PA_PLAN"
 expect_eq "ONE-4 a session bound to the run reads the preflight's waiver as its own open ask (owed_list)" \
-  "waive:structure" "$(as_owed "$PA" "$AS_SIDC" owed_list | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+  "hold:merge waive:structure" "$(as_owed "$PA" "$AS_SIDC" owed_list | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 as_owed "$PA" "$AS_SIDB" owed_open approve:release "approval: release" "poker: approve the release" >/dev/null
 expect_eq "ONE-5 precondition: a second session's ask joins the same register" \
-  "approve:release waive:structure" "$(as_register "$PA" "$PA_PLAN")"
+  "approve:release hold:merge waive:structure" "$(as_register "$PA" "$PA_PLAN")"
 as_owed "$PA" "$AS_SIDB" owed_close waive:structure waive >/dev/null
-expect_eq "ONE-6 answered in one session, the waiver is closed for the run; the other ask stays open" \
-  "approve:release" "$(as_register "$PA" "$PA_PLAN")"
+expect_eq "ONE-6 answered in one session, the waiver is closed for the run; the other asks stay open" \
+  "approve:release hold:merge" "$(as_register "$PA" "$PA_PLAN")"
 expect_eq "ONE-6b …and for every session bound to it" \
-  "approve:release" "$(as_owed "$PA" "$AS_SIDC" owed_list | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+  "approve:release hold:merge" "$(as_owed "$PA" "$AS_SIDC" owed_list | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "ONE-6c …the register records who closed it" "|key=waive:structure|state=closed|by=waive|" \
   "$(cat "$PA_REG" 2>/dev/null)"
 as_owed "$PA" "$AS_SIDC" owed_close approve:release approve >/dev/null
-expect_eq "ONE-6d …and a third session's answer closes the second" "" "$(as_register "$PA" "$PA_PLAN")"
+expect_eq "ONE-6d …and a third session's answer closes the second" "hold:merge" "$(as_register "$PA" "$PA_PLAN")"
 
 # A scratch copy's name ends past `.plan.md`: it names no run, so its session keeps its own file and no record
 # directory is made for the copy.
@@ -132,5 +138,149 @@ expect_contains "ONE-7 a session bound to a name that is no plan keeps its ask i
 expect_eq "ONE-7b …and the record holds the run's directory alone" "generic-evidence.md wave-01-fixture" \
   "$(ls -A "$PA/.bionic/docs/record" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 rm -f "$AS_COPY"
+
+# as_ask <root> <plan> <key> <field 2-4> -> that field of the plan's open ask on <key> (2 sent, 3 title, 4 reply)
+as_ask() {
+  bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && owed_list_plan "$2" "$3"' _ "$AS_LIB" "$2" "$1" 2>/dev/null \
+    | awk -F'\t' -v k="$3" -v f="$4" '$1 == k { print $f; exit }'
+}
+# as_reading <project> <at> <record> <result> -> a structure reading of the working head planted in the plan, as
+# close-out-1's E2E plants one
+as_reading() {
+  local plan="$1/$PLAN_REL"
+  bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" "$4" "$5" structure w-read "$6" piece)"' \
+    _ "$AS_LIB" "$plan" "$(fixture_git "$1" rev-parse wave/01-fixture)" "$2" "$3" "$4" > "$plan.n" && mv "$plan.n" "$plan"
+}
+as_refusal() { printf '%s\n' "$CO_OUT" | sed -n 's/^bionic: close-out refused — //p' | tail -1; }
+as_has() { case "$1" in *"$2"*) echo yes ;; esac; }  # <haystack> <needle> -> yes when it holds it
+
+# ============================================================
+section "§HELD: a close-out refused at Step 8 holds the merge on the run's register, its reason the title; the run that delivers closes it"
+# ============================================================
+# fails-when: a refused close-out leaves no held merge on the sheet (the plan's register, read by owed_list_plan).
+# A refusal before Step 8 is a run not yet at its merge, so it holds nothing: the same fixture, advanced, then holds.
+PH="$(mk_fixture as-held)"
+PH_PLAN="$PH/$PLAN_REL"
+as_reading "$PH" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-fail.md fail
+run_close_as "$AS_SIDA" "$PH" run
+expect_eq "HELD-0 precondition: at Step 7 run refuses on the step (rc 2)" "2|yes" \
+  "$CO_RC|$(as_has "$(as_refusal)" 'current: 7')"
+expect_eq "HELD-0b …and holds nothing: the run is not at its merge" "" "$(as_register "$PH" "$PH_PLAN")"
+advance_to "$PH" 8
+run_close_as "$AS_SIDA" "$PH" run
+PH_WHY="$(as_refusal)"
+expect_eq "HELD-1 at Step 8 run refuses on the failing reading (rc 2), naming a reason" "2|yes" "$CO_RC|$([ -n "$PH_WHY" ] && echo yes)"
+expect_eq "HELD-2 the refusal opens hold:merge on the plan's register (HELD-0b read the same extractor empty)" \
+  "hold:merge" "$(as_register "$PH" "$PH_PLAN")"
+expect_eq "HELD-3 …its title the refusal's reason, as close-out printed it" "$PH_WHY" "$(as_ask "$PH" "$PH_PLAN" hold:merge 3)"
+expect_eq "HELD-3b …its reply the refusal's whole line" "bionic: close-out refused — $PH_WHY" "$(as_ask "$PH" "$PH_PLAN" hold:merge 4)"
+run_close_as "$AS_SIDA" "$PH" run
+expect_eq "HELD-4 refused again for the same reason: one ask, the title unchanged" "hold:merge|$PH_WHY" \
+  "$(as_register "$PH" "$PH_PLAN")|$(as_ask "$PH" "$PH_PLAN" hold:merge 3)"
+
+PK="$(mk_fixture as-held-check)"; advance_to "$PK" 8
+PK_PLAN="$PK/$PLAN_REL"
+as_reading "$PK" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-fail.md fail
+run_close_as "$AS_SIDA" "$PK" check
+PK_WHY="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -m1 'WOULD REFUSE')"
+expect_eq "HELD-5 check at Step 8 reports a refusal (rc 0, a WOULD REFUSE line)" "0|yes" "$CO_RC|$([ -n "$PK_WHY" ] && echo yes)"
+expect_eq "HELD-6 …and holds the merge, its title the first refusal check reports" "hold:merge|$PK_WHY" \
+  "$(as_register "$PK" "$PK_PLAN" | tr ' ' '\n' | /usr/bin/grep -x hold:merge)|$(as_ask "$PK" "$PK_PLAN" hold:merge 3)"
+
+# The reading is read again and passes: the next run delivers, and the merge it held is closed for the run.
+as_reading "$PH" 2026-10-04T14:00:00Z record/wave-01-fixture/structure-pass.md pass
+run_close_as "$AS_SIDA" "$PH" run
+expect_eq "HELD-7 precondition: the reading passing, run delivers (rc 0)" "0" "$CO_RC"
+[ "$CO_RC" = 0 ] || printf '      close-out said: %s\n' "$(printf '%s\n' "$CO_OUT" | tail -5)"
+PH_REG="$PH/.bionic/docs/record/wave-01-fixture/asks.state"
+expect_contains "HELD-8 the delivering run closes hold:merge on the register" "|key=hold:merge|state=closed|by=close-out delivered|" \
+  "$(cat "$PH_REG" 2>/dev/null)"
+expect_absent "HELD-8b …and no line of the register leaves it open after that (HELD-2 read it open)" \
+  "|key=hold:merge|state=open|" "$(cat "$PH_REG" 2>/dev/null)"
+
+# ---------- a run of the poker's own verbs, for the openers below ----------
+# FIXTURE FIDELITY: session-poker-3 §FACT's shape, the plan bound to this session (s42_plan), its working branch
+# checked out in a linked worktree with real commits, roster rows from the production writer with questions= appended.
+AS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RF="$(make_repo as-verbs)"; ( cd "$RF" && git commit -q --allow-empty -m init )
+git -C "$RF" config user.name "Dana Fixture"
+RF_B="$(git -C "$RF" rev-parse HEAD)"
+PF="$(s42_plan "$RF" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${RF_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF" > "$PF.tmp" && mv "$PF.tmp" "$PF"
+s42_builds_landed "$PF"
+( cd "$RF" && git add -f "$PF" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RF/.worktrees/01-fixture" "$RF_B" ) >/dev/null 2>&1
+RF_WT="$RF/.worktrees/01-fixture"
+RF_C1="$(s57_commit "$RF_WT" lib/a.sh C1)"
+RF_DIR="$RF/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RF_DIR"
+RF_REG="$RF_DIR/asks.state"
+new_roster "$RF"
+roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$(roster_of "$RF")"
+printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud agent_id=a-w-aud subagent_type=bionic:auditor \
+  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md)" >> "$(roster_of "$RF")"
+as_rec() {  # <file> <head> <result> -> an evidence piece reading over base..<head>
+  printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: %s\nscope: piece\n\nwhat the reader found\n' \
+    "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"
+}
+expect_regex "AS-0 precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$RF_C1"
+
+# ============================================================
+section "§FAILED: a failing reading recorded opens the waiver at once; a passing reading of the question closes it"
+# ============================================================
+# fails-when: the register lacks waive:<question> until an advance or a commit is refused. No advance and no commit
+# is asked between the proof and the read below.
+as_rec ev-fail.md "$RF_C1" fail
+poke "$RF" proof-add review record/wave-01-fixture/ev-fail.md --question evidence --reader w-aud
+expect_eq "FL-0 precondition: proof-add registers the failing reading (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      proof-add said: %s\n' "$OUT"
+expect_eq "FL-1 the waiver is an open ask on the run's register at once" "waive:evidence" "$(as_register "$RF" "$PF")"
+expect_eq "FL-1b …titled as the judge titles it, its reply naming the reading and what it asks" \
+  "waiver: evidence|yesyes" \
+  "$(as_ask "$RF" "$PF" waive:evidence 3)|$(as_has "$(as_ask "$RF" "$PF" waive:evidence 4)" ev-fail.md)$(as_has "$(as_ask "$RF" "$PF" waive:evidence 4)" 'waive evidence')"
+RF_C2="$(s57_commit "$RF_WT" lib/a.sh C2)"
+as_rec ev-pass.md "$RF_C2" pass
+poke "$RF" proof-add review record/wave-01-fixture/ev-pass.md --question evidence --reader w-aud
+expect_eq "FL-2 precondition: a passing reading of the same question registers (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      proof-add said: %s\n' "$OUT"
+expect_eq "FL-3 …and closes the waiver for the run (FL-1 read the same extractor holding it)" "" "$(as_register "$RF" "$PF")"
+expect_contains "FL-3b …the register says a passing reading closed it" "|key=waive:evidence|state=closed|by=passing reading|" \
+  "$(cat "$RF_REG" 2>/dev/null)"
+
+# ============================================================
+section "§STOP: a decision put opens its ask and its ruling closes it; a carry the orchestrator chose opens an ask"
+# ============================================================
+# fails-when: `decisions put` or a deferred disposition writes no ask on the register.
+RF_LED="$RF_DIR/design-ledger.md"
+poke "$RF" decisions put D5 'stop the run: three fixes on one component'
+expect_eq "ST-0 precondition: decisions put exits 0 on the bound run" "0" "$RC"
+expect_eq "ST-1 the put opens decide:D5 on the run's register" "decide:D5" "$(as_register "$RF" "$PF")"
+expect_eq "ST-1b …titled as the page owes a decision, its reply carrying the decision's own words" \
+  "reply to D5|yes" \
+  "$(as_ask "$RF" "$PF" decide:D5 3)|$(as_has "$(as_ask "$RF" "$PF" decide:D5 4)" 'D5 · stop the run: three fixes on one component: ')"
+printf '\n## Δ9 — D5 ruled "1" (Dana Fixture 2026-10-21): stop the run: three fixes on one component\n' >> "$RF_LED"
+poke "$RF" decisions put D6 'a second decision'
+expect_eq "ST-2 D5 ruled in the ledger: the next decisions call closes its ask; D6's is open (ST-1 read D5 open)" \
+  "decide:D6" "$(as_register "$RF" "$PF")"
+expect_contains "ST-2b …the register says the ruling closed it" "|key=decide:D5|state=closed|by=ruled|" "$(cat "$RF_REG" 2>/dev/null)"
+printf '\n## Δ10 — D6 ruled "2" (Dana Fixture 2026-10-21): a second decision\n' >> "$RF_LED"
+poke "$RF" decisions
+expect_eq "ST-2c the register read closes a ruled decision too" "0|" "$RC|$(as_register "$RF" "$PF")"
+
+# A reader's S2 off finding is deferred by the severity table, a carry no person ruled; the disposition opens it.
+RF_CR="record/wave-01-fixture/adv-carry.md"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: flag\nscope: piece\nfindings: 1\nfinding: 1 S2 off - a side path broken\n' \
+  "${RF_B:0:10}" "$RF_C1" > "$RF/.bionic/docs/$RF_CR"
+RF_PL="$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-21T12:00:00Z "$3" adversarial w-crit flag piece' _ "$AS_LIB" "$RF_C1" "$RF_CR")"
+RF_PL="$RF_PL" RF_CR="$RF_CR" awk '{ print } /^current: / && !p { print ENVIRON["RF_PL"]; print "deferred: " ENVIRON["RF_CR"] "#1 S2 off \"a side path broken\""; p = 1 }' \
+  "$PF" > "$PF.tmp" && mv "$PF.tmp" "$PF"
+poke "$RF" disposition
+expect_contains "ST-3 precondition: the disposition reads the finding deferred" "state=deferred" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep "finding $RF_CR#1 ")"
+expect_eq "ST-4 …and opens carry:<record>#<n> on the run's register" "carry:record:wave-01-fixture:adv-carry.md:1" \
+  "$(as_register "$RF" "$PF")"
+expect_contains "ST-4b …its reply naming the finding" "$RF_CR#1" "$(as_ask "$RF" "$PF" carry:record:wave-01-fixture:adv-carry.md:1 4)"
+POKE_BOUND="$AS_BOUND_WAS"
 
 finish

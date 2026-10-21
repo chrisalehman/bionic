@@ -164,7 +164,46 @@ say() { printf '%s\n' "$*"; }
 # Same rename spawn-worktree.sh's private helper took (`_wt_refuse`, ruling D-6).
 _co_refuse() {
   printf 'bionic: close-out refused — %s\n' "$*"
+  co_hold "$*" "bionic: close-out refused — $*"
   exit 2
+}
+
+# THE HELD MERGE IS THE RUN'S ASK. A close-out refused while the plan reads current: 8 leaves the run's merge waiting on
+# whatever the refusal names, so it opens `hold:merge` on the register of the plan it closes (lib/owed.sh, `OWED_PLAN`),
+# its reason the title and the printed line the reply, where every reader of the run's asks finds it; the run that
+# delivers closes it. `check` holds it for the first refusal it reports: it still changes nothing of the run, and only
+# says on the register what holds it. Before Step 8 the run is not at its merge, so a refusal holds nothing. A refusal
+# inside a command substitution is a preview the caller reports, never this script's own exit, so it opens nothing. One
+# ask for the run: the same reason again leaves it as it is, a new reason replaces it, so the title says what holds the
+# merge now. The session is this script's own, else a stand-in, because the register is named by the plan and the store
+# still asks for a session to write under.
+CO_HOLD=no
+CO_HOLD_WHY=""
+co_hold() {  # <reason> <the printed line> -> always 0, prints nothing
+  local t
+  [ "$CO_HOLD" = yes ] && [ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  t="$(OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_list 2>/dev/null \
+    | awk -F'\t' '$1 == "hold:merge" { print $3; exit }')"
+  if [ -n "$t" ]; then
+    [ "$t" = "$(printf '%s' "$1" | tr '|\t\r\n' '    ')" ] && return 0
+    OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_close hold:merge "close-out refused again" >/dev/null 2>&1
+  fi
+  OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_open hold:merge "$1" "$2" >/dev/null 2>&1
+  return 0
+}
+# co_hold_release -> always 0, prints nothing: the run delivered, its merge is no longer held, and no later refusal holds it
+co_hold_release() {
+  [ "$CO_HOLD" = yes ] || return 0
+  CO_HOLD=no
+  declare -F owed_close >/dev/null 2>&1 || return 0
+  OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_close hold:merge "close-out delivered" >/dev/null 2>&1
+  return 0
+}
+# co_would <line> -> the line said; the first such line `check` reports is the reason it holds the merge for
+co_would() {
+  say "$1"
+  [ -n "$CO_HOLD_WHY" ] || CO_HOLD_WHY="$1"
 }
 
 usage() {
@@ -279,6 +318,7 @@ WORKING="$(plan_working_branch "$PLAN")"
 # never writes, and above 8 there is nothing left for it to close.
 CURRENT="$(sdlc_header current "$SECTION")"
 STEP_REFUSAL="the plan reads current: ${CURRENT:-<none>} — advance the plan to Step 8 first"
+[ "$CURRENT" != 8 ] || [ "$VERB" = closed-form ] || CO_HOLD=yes
 
 # A PARKED WAVE IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit
 # `## Wake Note` (steps/8.md): a plan carrying a flush-left `## Wake Note` whose body is not empty and not the old
@@ -2129,15 +2169,15 @@ do_check() {
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
-    say "step: WOULD REFUSE — $STEP_REFUSAL"
+    co_would "step: WOULD REFUSE — $STEP_REFUSAL"
   fi
   MISSING="$(presence_missing)"
-  [ -z "$MISSING" ] || say "presence: WOULD REFUSE — $MISSING"
+  [ -z "$MISSING" ] || co_would "presence: WOULD REFUSE — $MISSING"
   facts_judge
   if [ "$FACTS_RC" -eq 0 ]; then
     say "facts: every fact the run owes holds at $FACTS_HEAD"
   else
-    say "facts: WOULD REFUSE — $FACTS_WHY"
+    co_would "facts: WOULD REFUSE — $FACTS_WHY"
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
   step8_present "$PLAN" || say 'step8: no Step 8 line in ## SDLC State — run writes it with the block (after the Step-7 block)'
@@ -2154,14 +2194,14 @@ do_check() {
   else
     verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
   fi
-  say "merge: $verdict"
+  case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" ;; *) say "merge: $verdict" ;; esac
   CO_LANDS="$(co_lands_rows)"
   if [ "$PARKED" = yes ]; then
     say "rows-landed: none — parked, no merge lands a row"
   elif [ -z "$CO_LANDS" ]; then
     say "rows-landed: none — no open integrate or close row"
   elif [ -n "$(co_lands_refusal "$CO_LANDS")" ]; then
-    say "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")"
+    co_would "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")"
   else
     say "rows-landed: run would land $CO_LANDS at $INTEGRATION @ ${is:-?}"
   fi
@@ -2193,7 +2233,7 @@ do_check() {
   if [ "$PARKED" = yes ]; then
     say "worktree-removed: $(co_parked_wt_line)"
   elif [ -n "$unreached" ]; then
-    say "worktree-removed: ${wt_desc} WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
+    co_would "worktree-removed: ${wt_desc} WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
   else
     say "worktree-removed: ${wt_desc}"
   fi
@@ -2213,7 +2253,7 @@ do_check() {
   say "$(co_debt_card)"
   co_debt_notes
   CO_DEBT_BAD="$(co_debt_refusal)"
-  [ -z "$CO_DEBT_BAD" ] || say "debt-lines: WOULD REFUSE — $CO_DEBT_BAD"
+  [ -z "$CO_DEBT_BAD" ] || co_would "debt-lines: WOULD REFUSE — $CO_DEBT_BAD"
   if [ -f "$CONT" ]; then
     if ! co_cont_has_deferrals; then
       CK_LINE="continuation: $CONT_REL already written — run appends the ## Deferrals section"
@@ -2237,7 +2277,7 @@ do_check() {
   elif epic_has_row; then
     say "epic-row: wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/}"
   elif [ -n "$(epic_row_missing)" ]; then
-    say "epic-row: WOULD REFUSE — $(epic_row_missing)"
+    co_would "epic-row: WOULD REFUSE — $(epic_row_missing)"
   elif [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
     say "epic-row: $(epic_row) — no | wave | table with a shipped column in ${EPIC_PLAN##*/}: run adds the shipped table's header first"
   else
@@ -2280,9 +2320,9 @@ do_check() {
   if [ "$PREFLIGHT_RC" -eq 0 ]; then
     say "gate: ok against the plan run would write"
   elif [ "$PREFLIGHT_RC" -eq 9 ]; then
-    say "gate: WOULD REFUSE before the gate is asked — $PREFLIGHT_LINE"
+    co_would "gate: WOULD REFUSE before the gate is asked — $PREFLIGHT_LINE"
   else
-    say "gate: WOULD REFUSE the plan run would write (rc=$PREFLIGHT_RC): $PREFLIGHT_LINE"
+    co_would "gate: WOULD REFUSE the plan run would write (rc=$PREFLIGHT_RC): $PREFLIGHT_LINE"
   fi
   return 0
 }
@@ -2357,6 +2397,7 @@ do_run() {
                     say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
   gate_dry_run
   write_plan_blocks 9
+  co_hold_release
   if [ "$PARKED" = yes ]; then
     # A PARKED RUN IS NOT ARCHIVED AND SENDS NO DELIVERY NOTICE: its plan is where the resume reads it (wave-38 T15).
                     say "handoff: the closed form ($(co_resume_point)) written to $CO_HO_REL; the plan's ## Handoff points to it"
@@ -2395,6 +2436,6 @@ co_deliver_notice() {
 
 case "$VERB" in
   run)   do_run ;;
-  check) do_check ;;
+  check) do_check; [ -z "$CO_HOLD_WHY" ] || co_hold "$CO_HOLD_WHY" "close-out check: $CO_HOLD_WHY" ;;
 esac
 exit 0

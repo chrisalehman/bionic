@@ -362,19 +362,19 @@ s42_unchanged "SEV-cur §CUR8-sev AC-8.5 the newest adversarial fact holds a fin
 expect_contains "SEV-cur2 …naming that reading failing" \
   "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/c-fix.md')" "$OUT"
 # ---------- §ASK-WAIVE (T35; AC-2.2): a failing question is the person's to waive, and opens one item ----------
-# A refusal on a failing reading leaves the person the call: fix it or waive the question. The
-# refusal opens `waive:<question>`, the key the waive verb closes, carrying the failing line it
-# printed; a second refusal on the same question opens nothing new; the waive verb closes it; and
-# once the question holds again (a passing reading over the fix), current 8 closes what is left.
+# A failing reading leaves the person the call: fix it or waive the question. Its registration opens
+# `waive:<question>`, the key the waive verb closes (proof-add); a refusal on it keeps that one item; a
+# second refusal opens nothing new; the waive verb closes it; a refusal after the waiver is taken back
+# opens it again; and once the question holds again (a passing reading over the fix), current 8 closes
+# what is left.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 sev_store() { cat "$RSEV/.bionic/tmp/owed-$SID.state" 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
 expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
   "waive:adversarial" "$SEV_WKEYS"
 expect_absent "AW-1a …and none for the questions that hold (same reader)" "waive:evidence" "$SEV_WKEYS"
-expect_eq "AW-1b …carrying the failing line current 8 printed" \
-  "review adversarial bionic:critic piece failing record/wave-01-fixture/c-fix.md" \
-  "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
+expect_contains "AW-1b …the item the first failing reading's registration opened, which the refusal keeps" \
+  "proof-add: the adversarial reading record/wave-01-fixture/" "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
 poke "$RSEV" current 8
 expect_eq "AW-2 a second refusal on the same failing question opens nothing new" "1|1" \
   "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|')"
