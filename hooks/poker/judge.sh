@@ -33,7 +33,7 @@ cur8_owed_waivers() {  # <facts_state output> [<unruled AC ids, one per line>] -
   done
   while IFS= read -r k; do
     case "$k" in row:?*) : ;; *) continue ;; esac
-    printf '%s\n' "$2" | /usr/bin/grep -qxF "${k#row:}" || poker_owed_close "$PV_REPO" "$k" "ruled"
+    /usr/bin/grep -qxF "${k#row:}" <<< "$2" || poker_owed_close "$PV_REPO" "$k" "ruled"
   done <<OWED_ROWS
 $(OWED_ROOT="$PV_REPO" owed_list 2>/dev/null | cut -f1)
 OWED_ROWS
