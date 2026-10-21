@@ -100,7 +100,8 @@ channel_on() {  # <config dir> — the declared channel: topic named in cron.env
 channel_off() { rm -f "$1/bionic/notify"; }
 
 # nt_owed <repo> <function> [args...] -> what owed.sh answers, in that repo, for the fixture
-# session. Sourced from the shipped library, so the reader is the code under test.
+# session. Sourced from the shipped library, so the reader is the code under test; `owed_file`
+# names the store the session's asks resolve to, the run's register where the session is bound.
 nt_owed() {
   local repo="$1"; shift
   ( cd "$repo" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && shift && "$@"' _ "$NT_LIB" "$@" ) 2>/dev/null
@@ -269,6 +270,10 @@ expect_contains "N2c …under the declared title prefix" "|title=bionic-fixture 
 expect_regex "N2c2 …with ONE space between the prefix and the title, not two" '[|]title=bionic-fixture [^ ]' "$(nt_last)"
 expect_eq "N2d …and the item is marked sent: nothing is unsent" "" "$(nt_owed "$RO" owed_unsent)"
 expect_contains "N2e …while it stays open (the block is unresolved)" "approve:step1" "$(nt_owed "$RO" owed_list | cut -f1)"
+expect_regex "N2f the bound session's store is its run's register under record/" \
+  '/\.bionic/docs/record/wave-01-fixture/asks\.state$' "$(nt_owed "$RO" owed_file)"
+expect_contains "N2g …where the Stop stamped the item it sent" "|key=approve:step1|state=open|sent=20" \
+  "$(cat "$RO/.bionic/docs/record/wave-01-fixture/asks.state" 2>/dev/null)"
 
 nt_stop "$RO"
 expect_eq "N3 AC-2.2 a later turn on the same unresolved block sends nothing" "1" "$(nt_calls)"
@@ -535,7 +540,7 @@ POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK5 the approve verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AK5a …and closes the item it answers" "|key=approve:release|state=closed|by=approve|" \
-  "$(cat "$RK/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+  "$(cat "$(nt_owed "$RK" owed_file)" 2>/dev/null)"
 poke_pressure "$RK" 8192 1.0 tick
 nt_stop "$RK"
 expect_eq "AK5b …so the next tick reopens nothing and the next Stop sends nothing" "1" "$(nt_calls)"
@@ -744,7 +749,7 @@ POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK-9b precondition: waive records the waiver (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "AK-9 AC-4.2 waiving structure closes both of its finding items; adversarial's stays open" "$FW_KA" "$(cw_open "$RFW")"
-expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(cat "$RFW/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(cat "$(nt_owed "$RFW" owed_file)" 2>/dev/null)"
 
 # ============================================================
 section "§QUIET: progress never sends — a landing, a dispatch, a quiet tick (AC-2.4)"

@@ -2573,7 +2573,9 @@ RR_ASIDE_EOF
     RR_N=0; RR_ASIDE=""
     RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=()
 
-    # WAIVERS: the person's open waive: items, then the ones the red check owes, each once; never the regression.
+    # WAIVERS: the run's open waive: items, then the ones the red check owes, each once; never the regression. The asks
+    # are read from the run's register (lib/owed.sh `owed_list_plan`), never the caller's session alone: a waiver a
+    # close-out preflight or another session of the run raised is owed here as well.
     RR_WAIVE=""
     while IFS='	' read -r key _ _ reply; do
       case "$key" in
@@ -2582,7 +2584,7 @@ RR_ASIDE_EOF
         gate:?*) RR_ASIDE="${RR_ASIDE}${reply#poker: }"$'\n' ;;
       esac
     done <<RR_OWED
-$(OWED_ROOT="$PV_REPO" owed_list 2>/dev/null)
+$(owed_list_plan "$PV_PLAN" "$PV_REPO" 2>/dev/null)
 RR_OWED
     RR_WAIVE="$(printf '%s%s\n' "$RR_WAIVE" "$(printf '%s\n' "$RR_SETTLE" | /usr/bin/grep '^waive:' | /usr/bin/grep -vx 'waive:regression')" | awk 'NF && !seen[$0]++')"
     while IFS= read -r key; do
@@ -2791,7 +2793,7 @@ RR_AGAINST_EOF
     for ((num = 0; num < RR_N; num++)); do
       key="${RR_KEY[$num]}"
       case "$key" in
-        approve:*|waive:*) OWED_ROOT="$PV_REPO" owed_open "$key" "${RR_KIND[$num]}: ${key#*:}" \
+        approve:*|waive:*) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$key" "${RR_KIND[$num]}: ${key#*:}" \
           "poker: ${key#*:} is decision $((num + 1)) on the release approval card at $RR_H8" >/dev/null 2>&1 || : ;;
       esac
     done
