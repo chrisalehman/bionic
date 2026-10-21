@@ -943,6 +943,44 @@ assert_eq "ac10_e2e_oldgit misplaced artifact blocked" 2 "$HOOK_EXIT"
 assert_contains "ac10_e2e_oldgit names the artifact's own repo, not the session cwd" \
   "$ac10_og/.bionic/docs/plans/" "$HOOK_VSTDERR"
 
+
+# ============================================================
+section "THEMES: at wave and epic scale a requirements write holds its REQs under three to six theme sections, each opening on one sentence"
+# ============================================================
+# fails-when: the flat list writes, or a themed one is refused.
+# th_req <scale> <body> -> a requirements artifact: the shared frontmatter and Goal, then <body>.
+th_req() { printf '%s\n%s' "$(build_plan scale="$1" step=1 matrix=no skill=agent-skills:idea-refine)" "$2"; }
+# th_theme <heading> <first body line> <REQ id...> -> one `## ` section holding those REQs.
+th_theme() {
+  local h="$1" first="$2" r; shift 2
+  printf '\n## %s\n\n%s\n' "$h" "$first"
+  for r in "$@"; do printf '\n### REQ-%s — requirement %s\n\nprovenance: fixture\n\n- AC-%s.1 It holds. Fails when: it does not.\n' "$r" "$r" "$r"; done
+}
+TH_P=$(make_project)
+TH_F="$TH_P/.bionic/docs/specs/epic-01-demo/wave-01-x.requirements.md"
+TH_THREE="$(th_theme 'The run closes itself' 'The run reaches its card without a person.' 1 2)$(th_theme 'Rules tested where they run' 'Every rule the door runs is tested through the door.' 3)$(th_theme 'The pages' 'The pages say what the run knows.' 4 5)"
+run_write "$TH_F" "$(th_req wave "$TH_THREE")"
+assert_eq "THEMES-1 three themed sections, each opening on a sentence, are written" 0 "$HOOK_EXIT"
+run_write "$TH_F" "$(th_req wave "$(th_theme 'Requirements' 'Everything the wave ships.' 1 2 3 4 5)")"
+assert_eq "THEMES-2 the flat list under ## Requirements is refused" 2 "$HOOK_EXIT"
+assert_contains "THEMES-2b …naming the first REQ under it" "REQ-1 is under '## Requirements'" "$HOOK_STDERR"
+assert_contains "THEMES-2c …and the rule" "theme rule" "$HOOK_STDERR"
+run_write "$TH_F" "$(th_req wave "$(th_theme 'The run closes itself' 'The run reaches its card.' 1 2)$(th_theme 'The pages' 'The pages say it.' 3)")"
+assert_eq "THEMES-3 two theme sections are refused" 2 "$HOOK_EXIT"
+assert_contains "THEMES-3b …naming the count and the rule" "2 theme sections, not 3 to 6 (theme rule" "$HOOK_STDERR"
+TH_SEVEN=""; for th_i in 1 2 3 4 5 6 7; do TH_SEVEN="$TH_SEVEN$(th_theme "Theme $th_i" "The wave does thing $th_i." "$th_i")"; done
+run_write "$TH_F" "$(th_req epic "$TH_SEVEN")"
+assert_eq "THEMES-4 seven theme sections at epic scale are refused" 2 "$HOOK_EXIT"
+assert_contains "THEMES-4b …naming the count" "7 theme sections, not 3 to 6" "$HOOK_STDERR"
+run_write "$TH_F" "$(th_req wave "$(th_theme 'The run closes itself' 'provenance: charter theme 1' 1 2)$(th_theme 'Rules tested where they run' 'Every rule is tested through the door.' 3)$(th_theme 'The pages' 'The pages say it.' 4)")"
+assert_eq "THEMES-5 a theme whose first body line is a provenance: line is refused" 2 "$HOOK_EXIT"
+assert_contains "THEMES-5b …naming the theme's heading" "'The run closes itself' opens on no sentence" "$HOOK_STDERR"
+run_write "$TH_F" "$(th_req wave "$(th_theme 'The run closes itself' '- a list item, not a sentence.' 1 2)$(th_theme 'Rules tested where they run' 'Every rule is tested through the door.' 3)$(th_theme 'The pages' 'The pages say it.' 4)")"
+assert_eq "THEMES-6 a theme whose first body line is a list item is refused" 2 "$HOOK_EXIT"
+assert_contains "THEMES-6b …naming the theme's heading" "'The run closes itself' opens on no sentence" "$HOOK_STDERR"
+run_write "$TH_F" "$(th_req task "$(th_theme 'Requirements' 'Everything the task ships.' 1 2 3 4 5)")"
+assert_eq "THEMES-7 at task scale the flat list is written" 0 "$HOOK_EXIT"
+
 # ============================================================
 # AC-11 / AC-12: tree creation on first lifecycle use
 # ============================================================

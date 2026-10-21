@@ -873,16 +873,31 @@ sitrep_reds() {
 
 # sitrep_render <plan> <root> <line yes|no> -> the page, or with `yes` the one line; rc 0
 # sitrep_goals <plan> <landing record> <landing report with rows> -> the goals indicator as fold lines: `goals — <r> of
-# <n> reached`, ✅ when all are, ✖️ when one is missed, else ❔; then one line per goal not reached, its mark, theme,
-# measure and reading (lib/plan.sh `plan_goals_read`), so a reached goal is in the count only. `goals — none
-# declared`, ❔, for a plan with no goals: line.
+# <n> reached`, ✅ when all are, ✖️ when one is missed or overdue, else ❔ when one is unmeasured, else ➖; then one line
+# per requirements theme, reached or not, `<mark> <theme> — <d> of <n> criteria discharged; open: …` (lib/plan.sh
+# `plan_goals_read`, whose theme rows come first), then one line per measured goal not reached, its mark, theme,
+# measure and reading, so a reached measured goal is in the count only. With nothing to read, a task-scale plan says
+# `goals — none declared`; a wave or epic plan says which half of its requirements is missing, never "none declared".
 sitrep_goals() {
-  local g
+  local g k
   g="$(plan_goals_read "$1" "$2" "$3")"
-  if [ -z "$g" ]; then printf '3\t%s goals — none declared\n' "$SITREP_MARK_NONE"; return 0; fi
-  printf '%s\n' "$g" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
-    { n++; if ($1 == "reached") r++; else { if ($1 == "missed") miss = 1; k++; l[k] = "6\t   " (($1 == "missed") ? O : N) " " $2 ": " $3 " — " $4 } }
-    END { printf "3\t%s goals — %d of %d reached\n", (r == n) ? W : (miss ? O : N), r, n; for (i = 1; i <= k; i++) print l[i] }'
+  if [ -z "$g" ]; then
+    case "$(plan_scale "$1")" in
+      wave|epic)
+        if [ -n "$(plan_requirements_file "$1")" ]; then printf '3\t%s goals — the requirements hold no theme\n' "$SITREP_MARK_NONE"
+        else printf '3\t%s goals — no requirements file found for the plan\n' "$SITREP_MARK_NONE"; fi ;;
+      *) printf '3\t%s goals — none declared\n' "$SITREP_MARK_NONE" ;;
+    esac
+    return 0
+  fi
+  k="$(plan_themes "$1" | awk 'NF { n++ } END { print n + 0 }')"
+  printf '%s\n' "$g" | awk -F'\t' -v k="$k" -v W="$SITREP_MARK_WITHIN" -v E="$SITREP_MARK_NEAR" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
+    { n++
+      if ($1 == "reached") { r++; mk = W } else if ($1 == "missed" || $1 == "overdue") { miss = 1; mk = O }
+      else if ($1 == "pending") { pend = 1; mk = E } else { unk = 1; mk = N }
+      if (n <= k) l[++j] = "6\t   " mk " " $2 " — " $3 (($1 == "reached") ? "" : "; " $4)
+      else if ($1 != "reached") l[++j] = "6\t   " mk " " $2 ": " $3 " — " $4 }
+    END { printf "3\t%s goals — %d of %d reached\n", miss ? O : (unk ? N : (pend ? E : W)), r, n; for (i = 1; i <= j; i++) print l[i] }'
 }
 
 sitrep_render() {

@@ -1774,6 +1774,54 @@ Fix: open with a '## Goal' section — one concise paragraph — immediately aft
     ;;
 esac
 
+# ---------- the theme rule: a wave's or an epic's requirements are grouped under its themes ----------
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+#
+# The situation report reads the requirements document's themes as the run's goals (lib/plan.sh `plan_themes`), so
+# the document's shape is the goal list: a theme is a `## ` section holding a `### REQ-` heading, named by its heading
+# and opening on one sentence that says what the run is for in that respect. Three to six of them keep the goals few
+# enough to read and many enough to mean something; a flat `## Requirements` list is one theme that says nothing, so
+# it is refused by name, as is a REQ under no `## ` section at all. The REQs stay `###`: session-poker.sh `readreq`
+# and payload/scripts/card.sh both read a requirement by its `### REQ-` heading whatever section holds it.
+#
+# SCOPE: *.requirements.md at wave and epic scale, Write only, for the reasons K5.4 gives above; a task-scale
+# requirements file is untouched. A document with no `### REQ-` heading yet is not judged: there is nothing to group.
+# "A sentence" is the first non-blank body line, not a heading, list item, table row, quote, fence or `key:` line,
+# ending on `.`, `!` or `?`.
+case "$BASENAME" in
+  *.requirements.md)
+    if [ "$TOOL" = "Write" ] && { [ "$SCALE" = "wave" ] || [ "$SCALE" = "epic" ]; }; then
+      THEME_FAULT=$(printf '%s\n' "$CONTENT" | awk '
+        /^[[:space:]]*```/ { if (h != "" && first == "") first = "```"; fence = !fence; next }
+        fence { next }
+        /^## / { h = substr($0, 4); sub(/[ \t]+$/, "", h); first = ""; next }
+        /^### REQ-/ {
+          id = substr($0, 5); sub(/[ \t].*$/, "", id)
+          if (h == "") { if (fault == "") fault = "none\t" id; next }
+          if (h ~ /^Requirements([ \t]|$)/) { if (fault == "") fault = "flat\t" id; next }
+          if (!(h in theme)) { theme[h] = 1; n++
+            if (fault == "" && !(first ~ /^[^#>|*+ \t-]/ && first !~ /^[0-9]+[.)][ \t]/ && first !~ /^[A-Za-z_-]+:/ && first ~ /[.!?]$/)) fault = "sentence\t" h }
+          next }
+        h != "" && first == "" && /[^[:space:]]/ { first = $0; sub(/[ \t]+$/, "", first) }
+        END { if (fault == "" && n && (n < 3 || n > 6)) fault = "count\t" n; print fault }')
+      if [ -n "$THEME_FAULT" ]; then
+        _th_what="${THEME_FAULT#*	}"
+        case "${THEME_FAULT%%	*}" in
+          flat)  _th_fact="$_th_what is under '## Requirements', no theme" ;;
+          none)  _th_fact="$_th_what is under no ## section" ;;
+          count) _th_fact="$_th_what theme sections, not 3 to 6" ;;
+          *)     [ "${#_th_what}" -le 24 ] || _th_what="${_th_what:0:23}…"
+                 _th_fact="'$_th_what' opens on no sentence" ;;
+        esac
+        _gs_detail="canonical-sdlc requirements '$BASENAME' (scale: $SCALE): $_th_fact.
+Path: $FILE_PATH
+Fix: group the REQs under three to six '## <theme>' sections, each opening on one sentence that says what the run is for in that respect, the '### REQ-' headings under them."
+        refuse exit2 write "$_th_fact" "theme rule: 3-6 ## themes" "$_gs_detail"
+      fi
+    fi
+    ;;
+esac
+
 # ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
