@@ -445,6 +445,11 @@ doctor.test.sh | §LOADED — no record: the registry's line | duplicate | paylo
 doctor.test.sh | §LOADED | keep | payload/scripts/version.sh: the line built from the registry instead of detect_loaded_line, so a live record's "(in place) · C · R" is not printed (LV3); doctor.sh's header the same (LD2) | none (searched '(in place)' in tests/; detect.test.sh drives detect_loaded_line alone)
 doctor.test.sh | §LOADED — a record that is not a live session's, or names no checkout | duplicate | payload/scripts/lib/detect.sh detect_loaded_line: a dead session's record or a record naming no commit read as in place (LV5, LV6, LD4) | detect.test.sh §LOADED — a record is not a live session's (unverified), detect.test.sh §LOADED — only a checkout is in place (unverified)
 
+## door-card.test.sh
+
+door-card.test.sh | §CLOSE | keep | hooks/poker/proof.sh poker_verb_release_check: the kind=check proof line not written after a passing run, so the judge holds the declared check absent, the verbs cannot carry the run to current 7 (c22, c29) and the card never renders (c33 to c36); also: the card's approve:release settle deleted is caught here (c33) and by door-card.test.sh §CLOSE-MUTANT and release-approval.test.sh §EARLY | none (searched 'kind=check' and '" release-check' in tests/: door-cover and units write the line by hand, session-poker-4 reads only the verb's exit)
+door-card.test.sh | §CLOSE-MUTANT | keep | payload/scripts/card.sh _card_unapproved: the refusal's format taken from a second spelling in the card instead of from hooks/poker/judge.sh cur8_unapproved_line, so a refusal reworded in the judge leaves the card early (m2c) and the words are spelled twice (s1 to s3) | none (searched 'cur8_unapproved_line' and 'approved for release, and' in tests/)
+
 ## door-cover.test.sh
 
 door-cover.test.sh | §REAL | keep | rule: check pin — payload/scripts/lib/proof.sh _proof_release_path: the arm that admits tests/release-check.test.sh deleted, so the judge's cover of each real release merge, a check passing at it, reads owes, not release (r1-r3) | door-cover.test.sh §MUTANT, units.test.sh §JUDGE, units.test.sh §WALK
