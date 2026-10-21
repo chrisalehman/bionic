@@ -2207,10 +2207,19 @@ CF_OPEN
   return 0
 }
 
+# _card_t4_confirm_key -> the key a T4 row's block carries beside `evidence:`, the user's confirmation of the row's own
+# check, as walls.sh `keys_for_tier` names it; nothing when walls.sh cannot be loaded, so the refusal stays early.
+_card_t4_confirm_key() {
+  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F keys_for_tier >/dev/null 2>&1 || exit 1
+    for _ck in $(keys_for_tier T4); do [ "$_ck" = evidence ] || { printf '%s' "$_ck"; break; }; done )
+}
+
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
-# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`) and a question
-# whose newest reading fails (`waive <q>`). Anything else the check prints is early: a missing or red whole run (the
+# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`), a T4 row whose
+# user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `confirm-row`, or
+# waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
+# evidence that was never recorded. Anything else the check prints is early: a missing or red whole run (the
 # regression is run before review and is never waived), a missing proof, another refused dry commit, an uncovered or
 # absent reading, a declared check or debt not held, a judge that could not deal the plan. The dry commit stops at
 # its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it
@@ -2220,12 +2229,16 @@ CF_OPEN
 # it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. The advance
 # prints no refusal for the merge approval, so none is read here.
 _card_settles() {
-  local l q judge=0 reading=0 any=0
+  local l q k judge=0 reading=0 any=0
   local -a _cs_f=()
   while IFS= read -r l; do
     case "$l" in
       "bionic: commit refused — the auditor has not confirmed "*)
         q="${l#bionic: commit refused — the auditor has not confirmed }"; q="${q%% *}"
+        CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
+      "bionic: commit refused — "*" has placeholder "*" evidence (record what actually ran)")
+        q="${l#bionic: commit refused — }"; k="${q#* has placeholder }"; k="${k%% evidence (*}"; q="${q%% *}"
+        [ "$k" = "$(_card_t4_confirm_key)" ] || return 1
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
       "bionic: commit refused — a reading question is unanswered "*) reading=1; any=1 ;;
       "bionic: "*) return 1 ;;

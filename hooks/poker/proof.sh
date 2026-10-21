@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, the regression and the debt
-# ledger (approve, proof-add, waive, waive-row, finding-stated, finding-move, disposition, release-check, regression,
-# regression-run, debt).
+# hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
+# and the debt ledger (approve, proof-add, waive, waive-row, confirm-row, finding-stated, finding-move, disposition,
+# release-check, regression, regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -183,6 +183,76 @@ release_deferrals() {
     plan_verb_swap waive-row "the waiver of $WR_AC" writer
     poker_owed_close "$PV_REPO" "waive-row:$WR_AC" "waive-row"
     say "waive-row — $WR_AC waived on the user's words, by $(clean "$WR_WHO"): its waiver: line and status are on $PV_PLAN; dry-committed first."
+    exit 0
+  }
+
+  # THE USER'S CONFIRMATION OF A T4 ROW. A T4 criterion's check is the user's own, and the gate rules such a row on
+  # its block's attributed confirmation under an empty-like auditor cell (walls.sh `matrix_row_ruled`). This verb
+  # writes that line from the user's words, so it is never typed by hand:
+  #
+  #   <key>: <user> <YYYY-MM-DD> "<the user's words>"[ — <why>]
+  #
+  # <user> is git user.name, as approve and waive-row record it, folded to the one word the attributed form takes:
+  # each run of characters outside [A-Za-z0-9._-] becomes one '-'. The date is UTC, as a waiver's is. The line
+  # replaces the block's pending stub where it stands. The value is held to walls.sh `user_confirmed_attributed`,
+  # the one form test, before it is written, so the verb never writes a line the gate would not rule on. The words
+  # are held to lib/said.sh `user_said` as a waiver's are. The key is spelled once, on CR_KEY's line: every reader
+  # of it lives in walls.sh, and bash-walls.test.sh allows that one line and nothing else outside it.
+  # REFUSED (1), the plan unchanged: no such row, a row that is not T4, no block, no git user.name, a name that
+  # folds to no attributed form, words the user did not type. (2): lib/said.sh or walls.sh cannot be loaded.
+  poker_verb_confirm_row() {
+    CR_KEY=user-confirmed
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
+      . "$BIONIC_LIB/said.sh"
+    fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    CR_WORDS="$(said_fold "$CR_RAW")"; CR_WHY="$(deferral_fold "$CR_WHY_RAW")"
+    plan_verb_open confirm-row
+    if [ -z "$(matrix_row_cell "$PV_PLAN" "$CR_AC" 1)" ]; then
+      die "REFUSED — the matrix table has no row $CR_AC; the plan is unchanged."
+      exit 1
+    fi
+    CR_TIER="$(matrix_row_cell "$PV_PLAN" "$CR_AC" 2)"
+    if [ "$CR_TIER" != T4 ]; then
+      die "REFUSED — $CR_AC is a ${CR_TIER:-tierless} row, and only a T4 row's check is the user's own to confirm; the auditor or a waiver rules it. The plan is unchanged."
+      exit 1
+    fi
+    CR_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null \
+      | LC_ALL=C sed -e 's/[^A-Za-z0-9._-][^A-Za-z0-9._-]*/-/g' -e 's/^-*//' -e 's/-*$//')"
+    if [ -z "$CR_WHO" ]; then
+      die "REFUSED — no git user.name is set for $PV_REPO, and a confirmation records who made it; set it, then confirm again. The plan is unchanged."
+      exit 1
+    fi
+    user_said "$CR_RAW" "$PV_PLAN"; CR_SAID=$?
+    if [ "$CR_SAID" -ne 0 ]; then
+      said_refuse "$CR_SAID" "$CR_WORDS" "a confirmation"
+      exit 1
+    fi
+    CR_VALUE="$CR_WHO $(date -u +%Y-%m-%d) \"$(deferral_escape "$CR_WORDS")\"${CR_WHY:+ — $CR_WHY}"
+    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F user_confirmed_attributed >/dev/null 2>&1 || exit 2
+      user_confirmed_attributed "$CR_VALUE" ); CR_FORM=$?
+    case "$CR_FORM" in
+      0) : ;;
+      1) die "REFUSED — git user.name folds to '$(clean "$CR_WHO")', which is not the one word, starting with a letter, that the gate reads as who confirmed; set user.name so it does. The plan is unchanged."
+         exit 1 ;;
+      *) die "REFUSED — the confirmation's form is walls.sh's to judge, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
+         exit 2 ;;
+    esac
+    PV_RC=0
+    matrix_block_key "$PV_PLAN" "$CR_AC" "$CR_KEY" "$CR_VALUE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    case "$PV_RC" in
+      0) : ;;
+      3) die "REFUSED — the matrix has no $CR_AC: block to hold the confirmation; matrix-render writes it. The plan is unchanged."
+         pv_next matrix-render
+         exit 1 ;;
+      *) die "REFUSED — the confirmation cannot be written (exit $PV_RC); the plan is unchanged."
+         exit 2 ;;
+    esac
+    plan_verb_swap confirm-row "the confirmation of $CR_AC" writer
+    say "confirm-row — $CR_AC confirmed on the user's words: $CR_KEY: $(clean "$CR_VALUE") is in its block on $PV_PLAN; dry-committed first."
     exit 0
   }
 
