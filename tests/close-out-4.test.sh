@@ -501,7 +501,8 @@ ow_doors() {  # <label> <project> <sid> -> close-out's document kept at $SANDBOX
   cp "$(ow_file "$2")" "$SANDBOX/ow-copy-$1" 2>/dev/null
   lands_bind "$2" "$3"
   lands_poker "$2" "$3" handoff < /dev/null
-  OW_RC="$LP_RC"; OW_FILE="$(printf '%s\n' "$LP_OUT" | sed -n 's/^.*handoff — written to //p' | head -1)"
+  # The verb prints only the resume line, so the file it wrote is found where every reader finds it: the plan's pointer.
+  OW_RC="$LP_RC"; OW_FILE="$(handoff_file_of "$2/$PLAN_REL" "$2")"
 }
 OW_SID="closeout-onewriter-sid"
 OW_PK="$(ow_file "$PPK")"
