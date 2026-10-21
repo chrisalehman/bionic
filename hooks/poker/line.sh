@@ -216,7 +216,7 @@ DELIVER_FILES
 # its fast-forward and then calls this verb, so a hand landing through `land --by-hand` meets it twice; the second
 # run sees the whole release range, which the first did not. Exits on a refusal; returns when the mark may be written.
 row_landed_scan() {
-  local cmd wb co p out rc
+  local cmd wb co p out rc scan n
   cmd="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
   [ -n "$cmd" ] || return 0
   if ! { declare -F proof_check_passes >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -240,9 +240,23 @@ row_landed_scan() {
      && _wt_check_judge "$co" "$p" "$RL_COMMIT" "$cmd" >/dev/null 2>&1; then
     RL_JUDGED=candidate
   fi
+  # A LANDING PAST THE RELEASE IS JUDGED AT ITS NUMBERS. The line publishes such a landing with the release numbers
+  # rendered again in a commit on its candidate (lib/line.sh `_line_numbers`) and moves the branch to that commit;
+  # the candidate alone still carries the numbers rendered before it, which the check rightly refuses as landed after
+  # them. So when the record's published line for this row and commit names a numbers commit whose parent is the
+  # commit, the scan runs to that commit. The row's line and the landing's record keep the commit itself.
+  scan="$RL_COMMIT"
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" 2>/dev/null)"
+  n="$(awk -F'|' -v r="$PV_ID" -v c="$p" "${_LINE_FIELDS_AWK:-}"'
+    line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c && line_kv("numbers") != "" { n = line_kv("numbers") }
+    END { print n }' "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" 2>/dev/null)"
+  if [ -n "$n" ] && [ -n "$p" ] && [ "$(git -C "$co" rev-parse --verify -q "$n^1" 2>/dev/null)" = "$p" ]; then
+    scan="$n"
+  fi
   for p in $(proof_check_passes "$PV_PLAN" "$co"); do
-    if git -C "$co" merge-base --is-ancestor "$RL_COMMIT" "$p" 2>/dev/null; then
-      say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
+    if git -C "$co" merge-base --is-ancestor "$scan" "$p" 2>/dev/null; then
+      say "row-landed — release-check: ${scan:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
       return 0
     fi
   done
@@ -250,22 +264,22 @@ row_landed_scan() {
     die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) has no range to run over: no tag reachable from the plan's integration-branch (${RB_IB:-none named}) is a proper ancestor of $RL_COMMIT and its base-sha (${RB_BS:-none}) is no commit here; name the last release as the plan's base-sha, or tag it. The plan is unchanged."
     exit 1
   fi
-  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$RL_COMMIT" 2>/dev/null)" = 0 ]; then
+  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$scan" 2>/dev/null)" = 0 ]; then
     RL_JUDGED=""
     say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
     return 0
   fi
   out="$(cd "$co" 2>/dev/null || exit 1
     set -f
-    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$RL_COMMIT" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
+    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$scan" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
     # shellcheck disable=SC2086  # the configured command is meant to split on blanks
     exec $cmd </dev/null 2>&1)"; rc=$?
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out"
-    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")), judged-by=$RL_JUDGED, exited $rc over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${RL_COMMIT:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")), judged-by=$RL_JUDGED, exited $rc over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${scan:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
     exit 1
   fi
-  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${RL_COMMIT:0:12} ($RB_FROM), judged-by=$RL_JUDGED."
+  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), judged-by=$RL_JUDGED."
   return 0
 }
 # ---------------------------------------------------------------- the run's numbers

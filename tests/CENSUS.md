@@ -460,6 +460,7 @@ door-landing.test.sh | §NAMED | keep | rule: door refusal — payload/scripts/l
 door-landing.test.sh | §JUDGED | keep | hooks/poker/line.sh poker_verb_row_landed: the judged-by field dropped from the hand line, so a person's merge of a fix to the check is marked with no word that the landed copy judged it (j2) | none (searched 'judged-by=candidate' in tests/)
 door-landing.test.sh | §HAND | keep | rule: door refusal — payload/scripts/lib/line.sh line_publish: the _wt_release_check call deleted, so a planted listed name lands by hand instead of REFUSED reason=check-failed (hm1) | none (searched 'DOOR_MUTANT_FN' and 'line_publish' mutants in tests/)
 door-landing.test.sh | §COVER | keep | payload/scripts/lib/proof.sh proof_door_cover: the loop that names each path outside the release set deleted, so the release row's landing prints `COVER T2 <merge> owes` with no outside path (v2) | none (searched 'proof_door_cover' in tests/)
+door-landing.test.sh | §RERENDER | keep | payload/scripts/lib/line.sh line_publish: the numbers step deleted, so a fix landing past the landed release leaves the release check at the new head refusing "landed after them" and the plan unwritten (rr2, rr2d); or its refusal dropped, so a render that fails is not refused in the words of the renderer (rr5c, rr5d) | none (searched 'release-note', 'numbers=' and 'landed after them' in tests/)
 
 ## engage.test.sh
 
