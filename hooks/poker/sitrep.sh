@@ -1034,6 +1034,30 @@ sitrep_goals() {
     END { printf "3\t%s goals — %d of %d reached\n", miss ? O : (unk ? N : (pend ? E : W)), r, n; for (i = 1; i <= j; i++) print l[i] }'
 }
 
+# sitrep_test_ratio <plan> <root> -> `<tests> <code> <head>`: the two counts of shell lines the plan's newest release
+# check printed, and the head it ran at; nothing when no check has run or its log holds no count. The check prints its
+# count into the log it writes (`test-ratio: <tests>/<code>` on a pass, `release-check: test-ratio <tests>/<code> — …` on
+# a refusal), so the pages quote the check and never count a tree again, and a project whose declared check prints no
+# such line shows none. The evidence is a path under the docs root and never leaves it.
+sitrep_test_ratio() {
+  local line ev h log r
+  line="$(proof_last_line "$1" check 2>/dev/null)"
+  [ -n "$line" ] || return 0
+  ev="${line#* evidence=}"; [ "$ev" != "$line" ] || return 0; ev="${ev%% *}"
+  h="${line#* head=}"; h="${h%% *}"
+  case "$ev" in ''|/*|*..*) return 0 ;; esac
+  log="$(docs_root "$2")/$ev"
+  [ -f "$log" ] && [ ! -L "$log" ] || return 0
+  r="$(awk 'match($0, /^(release-check: )?test-ratio:? [0-9]+\/[0-9]+/) {
+    s = substr($0, RSTART, RLENGTH); sub(/^(release-check: )?test-ratio:? /, "", s); split(s, a, "/"); print a[1] " " a[2]; exit }' "$log" 2>/dev/null)"
+  [ -z "$r" ] || printf '%s %s\n' "$r" "$h"
+}
+
+# sitrep_thousands <n> -> the whole number with a comma before each group of three digits, `85334` as `85,334`.
+sitrep_thousands() {
+  awk -v n="$1" 'BEGIN { s = ""; while (length(n) > 3) { s = "," substr(n, length(n) - 2) s; n = substr(n, 1, length(n) - 3) } print n s }'
+}
+
 sitrep_render() {
   local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1
   local s_mark s_text c_mark c_text w_mark w_text ty gl lab desc kind note glyph
@@ -1250,7 +1274,8 @@ SITREP_SIT
   c_text="$c_mark correctness — $c_reds; $c_find"
   # Waste: discarded runs over runs (landing_report's counts), idle-width minutes (fill-report's) over the
   # minutes the fill ledger spans (its first line to now while the run is open, else to its last line).
-  local rg rr rn rd rk w_disc w_idle
+  # Then the cap on tests, in words and no mark: the check's own two counts (sitrep_test_ratio).
+  local rg rr rn rd rk w_disc w_idle tr_t tr_c
   case "$lr1" in
     *'· runs: green='*)
       rg="${lr1#*runs: green=}"; rg="${rg%% *}"; rr="${lr1#* red=}"; rr="${rr%% *}"
@@ -1275,6 +1300,9 @@ SITREP_SIT
   if [ -z "$i_pct" ]; then w_idle="idle time unverified"
   else w_idle="$(awk -v i="$i_pct" 'BEGIN { r = int(i + 0.5); if (i + 0 == 0) print "no writer slot sat idle"; else if (r == 0) print "a writer slot sat idle under 1% of the time"; else printf "a writer slot sat idle %d%% of the time\n", r }')"; fi
   w_text="$w_mark waste — $w_disc; $w_idle"
+  # the cap on tests rides the same line, in words: the shell lines under tests/ against the rest, as the check printed them
+  read -r tr_t tr_c _ <<< "$(sitrep_test_ratio "$plan" "$root")"
+  [ -z "${tr_c:-}" ] || w_text="$w_text; tests $(sitrep_thousands "$tr_t") lines against code $(sitrep_thousands "$tr_c")"
 
   # ---- The close: sitrep_close's floor and likely instants on one line; their arithmetic is the basis's
   local fl lk whose nland per larger wtxt ltext btext pace_txt lk_txt pt cl lkc

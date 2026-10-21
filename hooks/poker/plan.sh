@@ -2256,6 +2256,7 @@ BRF_EOF
   #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
   #   Goals         each goal the plan declares, its mark and its reading, reached ones included
   #   hand-holds    one line, landing-report's counts over the window from the last build landing to this render
+  #   test-ratio    one line beside it, the release check's count of shell lines under tests/ against the rest
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
@@ -2461,7 +2462,11 @@ RR_ASIDE_EOF
           NF { n++; if ($1 == "reached") r++; l[n] = "3\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) " " $2 " — " $3 ", " $4 }
           END { printf "0\tGoals — %d of %d reached\n", r, n; for (i = 1; i <= n; i++) print l[i] }'
       fi
-      [ -z "${RR_HH:-}" ] || printf '0\t\n3\t%s\n' "$RR_HH"
+      if [ -n "${RR_HH:-}" ] || [ -n "${RR_TR:-}" ]; then
+        printf '0\t\n'
+        [ -z "${RR_HH:-}" ] || printf '3\t%s\n' "$RR_HH"
+        [ -z "${RR_TR:-}" ] || printf '3\t%s\n' "$RR_TR"
+      fi
       printf '0\t\n0\tTests\n3\t%s\n3\t%s\n' "$RR_TACC" "$RR_TREG"
       printf '0\t\n0\tReviews\n'
       printf '%s\n' "$RR_REVIEWS" | awk 'NF { print "3\t" $0 }'
@@ -2768,6 +2773,16 @@ RR_AGAINST_EOF
     IFS=$'\t' read -r RR_HHS _ _ _ <<< "$(hand_holds_ends "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")"
     [ "${RR_HHS:--}" != - ] || RR_HHS=""
     RR_HH="$(hand_holds_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN" ${RR_HHS:+--since "$RR_HHS"} --until "$RR_AT")"
+
+    # THE CAP ON TESTS, as the release check printed it: the line is read from the log of the newest check proof
+    # (`sitrep_test_ratio`, the reader the situation report's waste line uses), so the page quotes the check and
+    # counts nothing. A check that ran at an earlier head says which, and no check says nothing.
+    RR_TR=""
+    read -r _rr_t _rr_c _rr_h <<< "$(sitrep_test_ratio "$PV_PLAN" "$PV_REPO")"
+    if [ -n "${_rr_c:-}" ]; then
+      RR_TR="test-ratio: $_rr_t/$_rr_c"
+      [ "${_rr_h:-}" = "$RR_HEAD" ] || RR_TR="$RR_TR at ${_rr_h:0:8}"
+    fi
 
     RR_TEXT="$(rr_page)"
     printf '%s\n' "$RR_TEXT"

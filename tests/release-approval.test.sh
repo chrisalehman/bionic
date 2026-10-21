@@ -29,6 +29,7 @@
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
 # §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
 # §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
+# §RATIO     the page prints the release check's test-ratio line once, read from the log of the newest check proof
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -855,6 +856,40 @@ expect_regex "WINDOW-2a waive-row writes the waiver with the ISO-UTC time, never
 expect_contains "WINDOW-2a-1 …a window around its time counts it" "waivers=1 " "$(hh_lr --since "$HH_T0")"
 expect_contains "WINDOW-2a-2 …a window that ends before it does not" "waivers=0 " "$(hh_lr --since 2026-10-12T08:00:00Z --until "$HH_T0")"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC/fill-ledger.log" "$FC_REC"/release-approval-*.md
+
+# ============================================================
+section "§RATIO: the card prints the release check's test-ratio line once, among the facts it states about the head"
+# ============================================================
+# The line is the check's own, read from the log of the plan's newest release-check proof, so the page and the check
+# cannot differ. fails-when: the page lacks the line, prints it twice, differs from the check's output at the same
+# head, moves when the log does not, or prints a number when no check has run.
+RT_LIST="$TMPROOT/rt-names.list"; printf 'zq-ratio-entry-4417\n' > "$RT_LIST"
+RT_OUT="$( cd "$RFC" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_TREE BIONIC_CHECK_HEAD="$FC_R" bash "${BIONIC_SCRIPTS_DIR}/tests/lib/release-check.sh" "$RT_LIST" 2>&1 )"
+RT_LINE="$(printf '%s\n' "$RT_OUT" | /usr/bin/grep '^test-ratio: ')"
+expect_regex "RATIO-0 precondition: the real check, run at the fixture head, prints its ratio line" '^test-ratio: [0-9]+/[0-9]+$' "$RT_LINE"
+rt_log() { printf 'head=%s rc=0\n\n%s\n' "$1" "$2" > "$FC_REC/release-check-$1.log"; }   # <head> <output>
+rt_plan() { fc_plan "$FC_GOOD
+$(fc_line check "$1" 2026-10-12T14:00:00Z "record/wave-x/release-check-$1.log")"; }   # <head the check ran at>
+rt_log "$FC_R" "$RT_OUT"
+rt_plan "$FC_R"
+fc_page
+expect_eq "RATIO-1 the page renders and prints the line once, equal to the check's output at the same head" \
+  "0|$RT_LINE|1" "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^test-ratio: ')"
+expect_eq "RATIO-2 …no section is added by it" "Bottom line|Goals|Tests|Reviews|Findings|Decisions" "$(fc_heads)"
+rt_log "$FC_R" "test-ratio: 7/9"
+fc_page
+expect_eq "RATIO-3 a planted number in the log moves the page's line: the page quotes the check and counts nothing" \
+  "test-ratio: 7/9" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')"
+rt_log "$FC_C" "test-ratio: 7/9"
+rt_plan "$FC_C"
+fc_page
+expect_eq "RATIO-4 a check that ran at an earlier head says which head, so the page never states a stale count as the head's" \
+  "test-ratio: 7/9 at ${FC_C:0:8}" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')"
+fc_plan "$FC_GOOD"
+fc_page
+expect_eq "RATIO-5 with no check proof the page prints no number (it still renders)" "0|0" \
+  "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^test-ratio: ')"
+rm -f "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
