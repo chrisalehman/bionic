@@ -28,6 +28,7 @@
 # §POST      a reader row past the landed release keeps the card early until its piece reading is registered
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
 # §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
+# §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -225,7 +226,12 @@ expect_eq "SHAPE-11b AC-13.4 …in plain text: no markdown label" "0" "$(printf 
 expect_eq "SHAPE-11c …no record path" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c 'record/')"
 expect_eq "SHAPE-11d …no quotation above the reply line" "0" "$(printf '%s\n' "$FC_OUT" | sed '$d' | /usr/bin/grep -c '"')"
 expect_eq "SHAPE-11e …and never the old name" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -ci 'final card')"
-expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | LC_ALL=en_US.UTF-8 awk 'length($0) > 92' | /usr/bin/grep -c .)"
+# Columns are counted as sitrep_fold counts them, byte-wise: macOS awk's length() counts bytes in every locale, so a
+# line with a two-byte `·` would read wider than it prints.
+fc_cols() { LC_ALL=C awk '{ s = $0; t = s; w = length(s) - gsub(/[\200-\277]/, "", t); t = s; w -= gsub(/\357\270\217/, "", t)
+  t = s; w += gsub(/[\360-\364]/, "", t); t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t); print w }'; }
+expect_eq "SHAPE-11f-0 precondition: the column count reads a two-byte middle dot as one column" "3" "$(printf 'a\302\267b\n' | fc_cols)"
+expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 92' | /usr/bin/grep -c .)"
 expect_eq "SHAPE-12 the page is written to the run's record, one file at the head" "release-approval-$FC_H8.md" "$(fc_pages)"
 expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
   "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
@@ -806,6 +812,49 @@ expect_eq "POST-2c …its decisions are the unrun row and the two approvals, no 
   "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_P8.md" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }')"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md
+
+# ============================================================
+section "§HANDHOLDS: the card prints the hand-holds line read over the window, from the last build landing to the card"
+# ============================================================
+# The page carries one line in the counts' shape, `hand-holds: total=… · unplaced=<n>`, read over the window whose
+# start is the newest published landing of a build row and whose end is the page's own replay time. The report read
+# after the page names the same two ends, so `landing-report --hand-holds` prints the same line. fails-when: the
+# page prints the run's total, a hand-hold before the last build landing counted; or the report and the page differ.
+# The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
+fc_plan "$FC_GOOD"
+printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_REC/landing-proofs.log"
+{ printf 'fill-ledger/v1|at=2026-10-12T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n'
+  printf 'fill-ledger/v1|at=2026-10-12T11:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T2|launched=|declined=no room|missed=0|idle=|room=|named=T2\n'
+} > "$FC_REC/fill-ledger.log"
+hh_lr() {  # [flags…] -> the counts line of landing-report --hand-holds over the fixture plan, as this session
+  ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$@" "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds: '
+}
+hh_page_line() {  # -> the page's hand-holds line, its fold joined back into one line
+  printf '%s\n' "$FC_OUT" | awk 'f && /^ / { sub(/^ +/, ""); l = l " " $0; next } f { exit } /^hand-holds: / { f = 1; l = $0 } END { if (l != "") print l }'
+}
+expect_contains "HANDHOLDS-0 precondition: the report over a window opening before both declines reads both: the ledger is read" \
+  "declines=2 " "$(hh_lr --since 2026-10-12T08:00:00Z)"
+fc_page
+expect_eq "HANDHOLDS-1 the acting render exits 0 and writes its page" "0|release-approval-$FC_H8.md" "$FC_RC|$(fc_pages)"
+HH_PAGE="$(hh_page_line)"
+expect_contains "HANDHOLDS-2 the page prints the windowed line: the decline after the last build landing, not the one before it" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · " "$HH_PAGE"
+expect_regex "HANDHOLDS-2b …in the counts' shape, its last count the lines the window could not place" ' · unplaced=[0-9]+$' "$HH_PAGE"
+expect_eq "HANDHOLDS-3 the page's line equals the report's, read after it over the same ends" "$HH_PAGE" "$(hh_lr)"
+expect_eq "HANDHOLDS-3b …and the report's end is the page's replay time" \
+  "$(/usr/bin/grep '^release-approval/v1|plan=' "$FC_REC/release-approval-$FC_H8.md" | sed 's/.*|at=\([^|]*\)|.*/\1/')" \
+  "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z' | tail -1)"
+expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
+# WINDOW-2a: waive-row, through the card's reply, writes the matrix waiver with the ISO time, and the window places it.
+HH_T0="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "WINDOW-2a-0 precondition: reply all default applies the row's waive-row (exit 0)" "0|waived" "$RC|$(fc_row AC-1.2)"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_regex "WINDOW-2a waive-row writes the waiver with the ISO-UTC time, never the date alone" \
+  "^  waiver: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z \"$FC_WD\"" "$(/usr/bin/grep '^  waiver:' "$PFC")"
+expect_contains "WINDOW-2a-1 …a window around its time counts it" "waivers=1 " "$(hh_lr --since "$HH_T0")"
+expect_contains "WINDOW-2a-2 …a window that ends before it does not" "waivers=0 " "$(hh_lr --since 2026-10-12T08:00:00Z --until "$HH_T0")"
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC/fill-ledger.log" "$FC_REC"/release-approval-*.md
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"

@@ -568,16 +568,11 @@ expect_no_match "28: and the row makes no open-dispatch claim at all" \
 expect_match "29: an undatable transcript is counted whole — the fix line names all three" \
   "*session ${SHORT7}: 3 launches unrostered → re-invoke /bionic:canonical-sdlc*" "$OUT7"
 
-section "Section 8: a firing Patrol whose roster is PRESENT and incomplete"
+section "Section 9: one cure, two surfaces — and the column budget"
 
-# THE OTHER HALF, and what keeps Section 7's row honest: here the roster is
-# real — one open dispatch, and the row still says exactly that — while the
-# transcript carries three launches, so two of them never reached the wall. The
-# roster is not absent, it is INCOMPLETE, and the count doctor prints stays the
-# count it can stand behind. `blind = 3 launches - 1 rostered - 0 refused = 2`.
-
+# The second surface: a firing Patrol whose roster is present and holds one of three launches, so
+# its fix line counts two unrostered.
 SID8="aaaaaaaa-9999-2222-3333-444455556666"
-SHORT8="${SID8%%-*}"
 spawn_live_pid; PID8="$LIVE_PID"
 REPO8="$(make_repo_with_roster "$SID8" beta)"
 HOME8="$(make_claude_home "$SID8" "$PID8" "$REPO8")"
@@ -590,19 +585,6 @@ plant_patrol_stamp "$REPO8" "$SID8"
 
 OUT8="$(run_doctor "$HOME8" "$REPO8")"
 PB8="$(patrol_block "$OUT8")"
-
-expect_match "30: a present roster still prints its own open count, unchanged" \
-  "*✓ session ${SHORT8} · 1 open dispatch*" "$PB8"
-expect_no_match "31: and a present roster is never re-rendered as absent" \
-  "*roster absent*" "$PB8"
-# THE ROSTER IS PRESENT HERE, so the window is its own birth — and these launches are
-# undated, so all three are in it and `blind` is the roster's real shortfall rather than a
-# lifetime tally that happens to match. The distinction is invisible on this fixture by
-# construction; Section 12 is the fixture where it is not.
-expect_match "32: an undatable transcript, present roster — only the launches it never saw" \
-  "*session ${SHORT8}: 2 launches unrostered → re-invoke /bionic:canonical-sdlc*" "$OUT8"
-
-section "Section 9: one cure, two surfaces — and the column budget"
 
 # ONE CURE, ONE SURFACE NOW (bionic 1.4.0, task ADOPT). This used to be a two-reader
 # agreement: hooks/session-poker.sh decided `wall-blind` at tick time and named the

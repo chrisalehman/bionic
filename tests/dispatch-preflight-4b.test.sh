@@ -536,12 +536,15 @@ expect_contains "BARE2b …it still names no deliverable" "this brief names no d
 t7_gate bare3 '' w99-bare implementor "$(t7_bare 'version 1.12.0 of the notes')"
 expect_contains "BARE3 a version number is no file name: still no deliverable" "this brief names no deliverable" "$(t7_first)"
 
-section "§RIGOR — the dealing is single or double, the same at either scale, and a refusal prints the level by its word (wave-28 T44; wave-30 T11: REQ-1 AC-1.4, D1)"
 # ============================================================================
-# The wall asks lib/proof.sh `facts_owed`, which reads the plan's word through lib/run.sh
-# `rigor_level`: `single` deals the critic every question, `double` the auditor evidence and the
-# critic the rest, at task scale as at wave scale, and a refusal names the level as `rigor_print`
-# prints it. §Q's fixtures and helpers, the plan's rigor line (and scale line) set per case.
+section "§RET — the structure reader is retired: a brief naming bionic:reviewer is refused, and says where structure went (wave-30 T20; REQ-1 AC-1.6, D2)"
+# ============================================================================
+# fails-when: the wall admits `subagent_type: bionic:reviewer` at either level or with no bound plan,
+# the refusal does not name the retirement and the role that holds `structure`, or its first line is
+# wider than 100 columns. Each refusal is read beside the critic admitted on the same plan, so a wall
+# that refuses everything cannot pass.
+# One dispatch per call, on a fresh repository whose plan carries the rigor (and the scale) given;
+# a line is measured in columns, as the refusal library measures it.
 RV_N=0
 rv_gate() {  # <tag> <rigor> <role> <questions line or empty> [<scale>] -> GATE_* for that dispatch
   # The repository is named by a counter, never by the rigor word, so no path in a refusal carries it.
@@ -553,66 +556,7 @@ rv_gate() {  # <tag> <rigor> <role> <questions line or empty> [<scale>] -> GATE_
   fi
   q_gate "$REPO" "rv-$1" "$3" "$(q_brief "rv-$1" "$4")"
 }
-# The reviewer row is the retired role (wave-30 T20): still refused, now as retired (§RET reads the line).
-for rv_case in "single|bionic:auditor|Questions: evidence|deny" \
-               "single|bionic:critic|Questions: evidence, adversarial, structure|allow" \
-               "double|bionic:auditor|Questions: evidence|allow" \
-               "double|bionic:critic|Questions: adversarial, structure|allow" \
-               "double|bionic:reviewer|Questions: structure|deny" \
-               "double|bionic:critic|Questions: adversarial|deny" \
-               "double|bionic:auditor|Questions: evidence, structure|deny"; do
-  IFS='|' read -r rv_l rv_role rv_q rv_want <<< "$rv_case"
-  rv_gate w "$rv_l" "$rv_role" "$rv_q"; rv_wv="$GATE_VERDICT"; rv_wq="$(roster_field "$(q_row "$REPO")" questions)"
-  rv_gate t "$rv_l" "$rv_role" "$rv_q" task
-  expect_eq "RV1 $rv_l, $rv_role, '$rv_q': $rv_want" "$rv_want" "$rv_wv"
-  expect_eq "RV1 …and a task-scale plan gives the same verdict" "$rv_wv" "$GATE_VERDICT"
-  [ "$rv_want" = allow ] && expect_eq "RV1 …and records the same set" "$rv_wq" "$(roster_field "$(q_row "$REPO")" questions)"
-done
-
-# THE PRINTED FORM: the role dealt nothing, and the set the rigor deals, each with its level.
-for rv_s in wave task; do
-  rv_gate p single bionic:auditor 'Questions: evidence' "$rv_s"
-  expect_eq "RV2 single ($rv_s): an auditor is dealt nothing and refused" "deny" "$GATE_VERDICT"
-  for rv_old in "independent reader)" "independent readers)" "three independent"; do
-    expect_absent "RV2 …and never the printed form before 1.14.0 ('$rv_old')" "$rv_old" "$GATE_VERR"
-  done
-done
-for rv_s in wave task; do
-  rv_gate s double bionic:auditor 'Questions: evidence, structure' "$rv_s"
-  expect_eq "RV3 double ($rv_s): an auditor naming more than it is dealt is refused" "deny" "$GATE_VERDICT"
-  for rv_old in "independent reader)" "independent readers)" "three independent"; do
-    expect_absent "RV3 …and never the printed form before 1.14.0 ('$rv_old')" "$rv_old" "$GATE_VERR"
-  done
-done
-for rv_s in wave task; do
-  rv_gate m double bionic:critic '' "$rv_s"
-  expect_eq "RV4 double ($rv_s): a critic with no Questions: line is refused" "deny" "$GATE_VERDICT"
-  expect_absent "RV4 …and never the printed form before 1.14.0" "independent readers" "$GATE_VERR"
-done
-
-# THE LONGEST VALUES, UNDER THE STRICT WIDTH (A-orch-17). Each refusal is driven at the widest value
-# it can carry: single deals the critic all three questions, and the retired reviewer is refused as retired.
-# Under BIONIC_REFUSE_STRICT=1 an over-wide line refuses its own call, so a whole line here is the
-# proof it fits.
 rv_cols() { bionic_cols "$1"; }
-expect_eq "RV5 precondition: this suite runs with the strict refusal width" "1" "${BIONIC_REFUSE_STRICT:-}"
-rv_gate w single bionic:critic 'Questions: evidence'
-expect_eq "RV5 single: a critic naming one of its three questions is refused" "deny" "$GATE_VERDICT"
-RV5_LINE="bionic: dispatch refused — single rigor deals critic: evidence,adversarial,structure (use that set)"
-# MEASURED IN COLUMNS (wave-30 T20, A-T20.2): A-T11.9 read this line as 101 columns, one over the budget,
-# from an awk `length` that counts the em dash as three bytes under macOS awk; the line is 99 columns, and
-# `bionic_cols` (lib/width.sh, the measure the refusal library and §T49 use) says so. rv_cols is that measure.
-expect_eq "RV5 …which is 99 columns, inside the 100 budget" "99" "$(rv_cols "$RV5_LINE")"
-expect_eq "RV5 …and the line the wall printed is no wider than 100" "ok" \
-  "$([ "$(rv_cols "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')")" -le 100 ] && echo ok || echo wide)"
-expect_contains "RV5 …the detail names the role as typed" "Role:  bionic:critic" "$GATE_VERR"
-# ============================================================================
-section "§RET — the structure reader is retired: a brief naming bionic:reviewer is refused, and says where structure went (wave-30 T20; REQ-1 AC-1.6, D2)"
-# ============================================================================
-# fails-when: the wall admits `subagent_type: bionic:reviewer` at either level or with no bound plan,
-# the refusal does not name the retirement and the role that holds `structure`, or its first line is
-# wider than 100 columns. Each refusal is read beside the critic admitted on the same plan, so a wall
-# that refuses everything cannot pass.
 RET_LINE="bionic: dispatch refused — bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)"
 for ret_l in single double; do
   rv_gate ret-$ret_l "$ret_l" bionic:reviewer 'Questions: structure'

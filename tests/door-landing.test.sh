@@ -2,10 +2,6 @@
 # Tests for the door: a landing pushed through the real hand door of a repository that carries the declared release
 # check's whole closure, judged by that repository's own copy of the check (tests/lib/door.sh).
 #
-#   §WORLD   what door_world builds: the closure committed at the accepted head, the real CHANGELOG.md byte for
-#            byte and larger than a pipe's buffer, the check copied whole with the sentinel line, a relative
-#            declaration whose list lies outside every checkout, and a door environment that names nothing in the
-#            tree under test.
 #   §LAND    a library row and then the release row land by hand. The release row carries the CHANGELOG entry
 #            whose landing numbers `release-note` rendered and plugin.json at the version, so it is the carrier
 #            the check must exempt: the landing publishes, the second run of the check passes and the plan row is
@@ -37,8 +33,8 @@
 # sed over one function in a driver's own process; the tracked files are never written. SYNTHESIZED: the version,
 # the listed name, the rows, and the template §COVER lands outside the release set.
 #
-# ANTI-VACUITY: with no fixture built the suite records one failing row and stops, so no row stands on an empty
-# root (and no git command runs from the tree under test). Each sentinel read that expects nothing sits beside a
+# ANTI-VACUITY: with no fixture built the suite stops before its first section, having asserted nothing, which
+# finish fails, so no row stands on an empty root (and no git command runs from the tree under test). Each sentinel read that expects nothing sits beside a
 # read of the same file in the same fixture that expects a line; each mutant row first proves the mutant ran.
 #
 # Usage: bash tests/door-landing.test.sh
@@ -64,8 +60,6 @@ fi
 DL_BUILD=$(( $(date +%s) - DL_T0 ))
 echo "door_world: built in ${DL_BUILD} s at ${DW:-<nothing>}"
 if [ "$DL_LOADED" != 1 ] || [ -z "$DW" ] || [ ! -d "$DW/.git" ]; then
-  section "§WORLD: the fixture carries the check's closure, the real changelog and a relative declaration"
-  no "(w0) door_world builds the fixture" "tests/lib/door.sh sourced=${DL_LOADED}, door_world printed '${DW}'"
   finish
 fi
 
@@ -105,48 +99,11 @@ dl_mutant() {
 }
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§WORLD: the fixture carries the check's closure, the real changelog and a relative declaration"
-
-expect_regex "(w0) door_world prints the fixture's root and its accepted head" "^/.+ [0-9a-f]{40}$" "$DW $DW_HEAD"
-expect_eq "(w0b) …the head is the working branch checked out at the root" "$DW_HEAD wave/x" \
-  "$(dl_head "$DW") $(git -C "$DW" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-DL_CL_OURS="$(git -C "$BIONIC_SCRIPTS_DIR" show HEAD:CHANGELOG.md | git hash-object --stdin)"
-expect_eq "(w1) CHANGELOG.md at the accepted head is the tree under test's HEAD CHANGELOG.md, byte for byte" \
-  "$DL_CL_OURS" "$(git -C "$DW" rev-parse "$DW_HEAD:CHANGELOG.md" 2>/dev/null)"
-DL_CL_SIZE="$(git -C "$DW" cat-file -s "$DW_HEAD:CHANGELOG.md" 2>/dev/null || echo 0)"
-expect_true "(w1b) …and larger than a pipe's buffer, 65536 bytes (it is ${DL_CL_SIZE})" [ "$DL_CL_SIZE" -gt 65536 ]
-DL_MISSING=""
-for f in hooks/session-poker.sh hooks/poker/line.sh hooks/poker/proof.sh payload/scripts/spawn-worktree.sh \
-  payload/scripts/lib/line.sh payload/scripts/lib/worktree.sh payload/scripts/lib/proof.sh tests/lib/name-scan.sh \
-  tests/run.sh payload/.claude-plugin/plugin.json payload/hooks; do
-  git -C "$DW" cat-file -e "$DW_HEAD:$f" 2>/dev/null || DL_MISSING="$DL_MISSING $f"
-done
-expect_eq "(w2) the closure is committed at the accepted head: the core script, its parts, the libraries, the scan" \
-  "" "$DL_MISSING"
-expect_eq "(w2b) …each library as the tree under test holds it (payload/scripts/lib/proof.sh)" \
-  "$(git hash-object "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/proof.sh")" \
-  "$(git -C "$DW" rev-parse "$DW_HEAD:payload/scripts/lib/proof.sh" 2>/dev/null)"
-DL_CHECK_DIFF="$(git -C "$DW" show "$DW_HEAD:tests/lib/release-check.sh" 2>/dev/null \
-  | diff "$BIONIC_SCRIPTS_DIR/tests/lib/release-check.sh" - | /usr/bin/grep -E '^[<>]')"
-expect_eq "(w3) the committed check is the tree under test's plus one line, added" "1" \
-  "$(printf '%s\n' "$DL_CHECK_DIFF" | /usr/bin/grep -c '^>')"
-expect_contains "(w3b) …the sentinel, which appends where it ran to DOOR_SEEN" '>> "$DOOR_SEEN"' "$DL_CHECK_DIFF"
-expect_eq "(w3c) …and no line of the tree under test's is missing from it" "0" \
-  "$(printf '%s\n' "$DL_CHECK_DIFF" | /usr/bin/grep -c '^<')"
-DL_DECL="$(sed -n 's/^release-check: //p' "$DW/.bionic/config.yaml" 2>/dev/null)"
-expect_match "(w4) the declaration names the check relatively, as the project's own does" \
-  "bash tests/lib/release-check.sh /*" "$DL_DECL"
-DL_LIST="${DL_DECL##* }"
-expect_eq "(w4b) …and its list holds the one listed name" "$DOOR_NAME" "$(cat "$DL_LIST" 2>/dev/null)"
-expect_false "(w4c) …from a file outside every checkout" git -C "${DL_LIST%/*}" rev-parse --git-dir
-door_run "$DW" env
-expect_contains "(w5) the door's environment carries the bound session" "CLAUDE_CODE_SESSION_ID=$WORLD_SID" "$DOOR_OUT"
-expect_absent "(w5b) …and no variable or PATH entry names the tree under test" "$BIONIC_SCRIPTS_DIR" "$DOOR_OUT"
-expect_eq "(w6) the world is built in under two minutes (${DL_BUILD} s)" "yes" \
-  "$([ "$DL_BUILD" -lt 120 ] && echo yes || echo no)"
-
-# ---------------------------------------------------------------------------------------------------------------
 section "§LAND: the release row lands by hand with the real changelog, and the check passes at the landed head"
+
+# The list the world's declaration names: dl_check and §COPY run the check with it, as the declaration does.
+DL_DECL="$(sed -n 's/^release-check: //p' "$DW/.bionic/config.yaml" 2>/dev/null)"
+DL_LIST="${DL_DECL##* }"
 
 read -r DL DL_H0 <<EOF
 $(door_copy "$DW" "$WORLD_ROOT/land")

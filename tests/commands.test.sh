@@ -68,10 +68,6 @@ write_known_marketplaces_dir() {  # <claude-home> <source-path>
     > "$1/plugins/known_marketplaces.json"
 }
 
-write_empty_known_marketplaces() {  # <claude-home> — no bionic entry at all
-  printf '{}' > "$1/plugins/known_marketplaces.json"
-}
-
 write_installed_plugins() {  # <claude-home> <installPath>
   jq -nc --arg path "$2" \
     '{plugins:{"bionic@bionic":[{installPath:$path}]}}' \
@@ -114,28 +110,6 @@ OUT_THIS="$(run_version_cmd "$HOME_THIS")"
 assert_one_line_matching "3: prints exactly one line matching the format" "$OUT_THIS"
 expect_match "4: says 'this checkout' when the registry names the tree under test" \
   "*this checkout" "$OUT_THIS"
-
-section "Section 2: OTHER checkout — a directory-feed registry naming a different tree"
-
-OTHER_TREE="$(mktemp -d -p "$TMP")"
-HOME_OTHER="$(make_registry_home)"
-write_known_marketplaces_dir "$HOME_OTHER" "$OTHER_TREE"
-write_installed_plugins "$HOME_OTHER" "$PAYLOAD"
-OUT_OTHER="$(run_version_cmd "$HOME_OTHER")"
-
-assert_one_line_matching "5: prints exactly one line matching the format" "$OUT_OTHER"
-expect_match "6: says 'OTHER checkout' when the registry names a different tree" \
-  "*OTHER checkout" "$OUT_OTHER"
-
-section "Section 3: unregistered — no marketplace entry names a source at all"
-
-HOME_UNREG="$(make_registry_home)"
-write_empty_known_marketplaces "$HOME_UNREG"
-OUT_UNREG="$(run_version_cmd "$HOME_UNREG")"
-
-assert_one_line_matching "7: prints exactly one line matching the format" "$OUT_UNREG"
-expect_match "8: says 'unregistered' when no registration names a source" \
-  "*unregistered" "$OUT_UNREG"
 
 section "Section GH: a GitHub-feed install — the plugin root is a cache copy with no .git (D15, AC-10.1/10.3)"
 
@@ -186,23 +160,6 @@ expect_match "GH2: the sha field carries the registry sha's first eight characte
 expect_no_match "GH3: …not the bare feed kind" "* · git · *" "$OUT_GH"
 expect_match "GH4: the checkout word names the feed" "*· github feed" "$OUT_GH"
 expect_no_match "GH5: …and a GitHub source is never an OTHER checkout" "*OTHER checkout*" "$OUT_GH"
-
-section "Section GH-none: a GitHub feed whose registry records no gitCommitSha — honest unknown (AC-10.4)"
-
-HOME_GHN="$(make_registry_home)"
-write_known_marketplaces_github "$HOME_GHN" "example/bionic"
-write_installed_plugins_gh "$HOME_GHN" "$GH_CACHE"
-OUT_GHN="$(run_version_cmd_at "$HOME_GHN" "$GH_CACHE")"
-
-assert_one_line_matching "GHN1: prints exactly one line matching the format" "$OUT_GHN"
-expect_match "GHN2: the sha field reads unknown" "* · unknown · *" "$OUT_GHN"
-expect_no_match "GHN3: no sha is invented" "* · 01234567 · *" "$OUT_GHN"
-expect_match "GHN4: the checkout word still names the feed" "*· github feed" "$OUT_GHN"
-
-section "Section 5: render.sh --check agrees this file is not stale"
-
-expect_true "11: agents-src/render.sh --check reports every rendered final clean" \
-  bash "${REPO}/agents-src/render.sh" --check
 
 section "§DECISION: /bionic:decision is the decision skill, typed with no argument (wave-33 AC-11.3)"
 

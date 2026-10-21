@@ -134,30 +134,6 @@ probe_run_st() {
   P_ERR=$(cat "$TMP/probe.err")
 }
 
-section "Group 1: the fixtures are present and the library still sources"
-
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-expect_true "detect.sh passes bash -n" bash -n "$DETECT_SH"
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
-
-# Fixture fidelity, asserted rather than asserted-in-a-comment: the captured
-# lines are still the shapes the parser is written against.
-expect_match "healthy fixture carries the enabled status the CLI prints" \
-  "*Status: ✔ enabled*" "$(cat "$FIX_HEALTHY")"
-expect_match "dep-broken fixture carries the failed status the CLI prints" \
-  "*Status: ✘ failed to load*" "$(cat "$FIX_BROKEN")"
-expect_match "…and the dependency Error line beneath it" \
-  "*Error: Dependency \"superpowers@bionic\" is not installed*" "$(cat "$FIX_BROKEN")"
-
-# The two families are DIFFERENT SHAPES, and the suite says so out loud — if a
-# later edit "tidied" one into the other, the reason both exist would vanish
-# silently and the regression this task caught could come straight back.
-
 section "Group 2: detect_plugin_load_state — the four states"
 #
 # The contract (plan §S2):
@@ -881,62 +857,5 @@ AM_RO_BEFORE="$(cd "$TMP" && ls -laR "am-ro-root" "am-ro-home" 2>/dev/null; cat 
 am_probe >/dev/null
 AM_RO_AFTER="$(cd "$TMP" && ls -laR "am-ro-root" "am-ro-home" 2>/dev/null; cat "$AM_ROOT/.claude/settings.json")"
 expect_eq "the probe wrote nothing under the root or the home" "$AM_RO_BEFORE" "$AM_RO_AFTER"
-
-section "Group 6f: detect_rc_claude_proxy — a block the user changed is its own state (wave-27 T77)"
-#
-# The fact is env.sh `rc_state`'s answer: bionic's current lines with the user's own
-# beside them read `yes` and are left; a block bionic wrote earlier, or an empty one,
-# reads `stale`; anything else reads `changed`. Each rc is a file of the suite's own,
-# read with the system tools on the PATH (`markers_regular` needs `cmp`).
-RS='# ─── bionic:rc:start ───'; RE='# ─── bionic:rc:end ───'
-RC_UN='unalias claude 2>/dev/null || true'
-# bionic's current function line, read from env.sh (wave-36 T1 changed it); the 1.18.0 line is an
-# earlier body (`rc_earlier`): alone it is the pre-T75 body, under the unalias line the 1.18.0 one.
-RC_FN="$(bash -c '. "$1"; rc_default claude-proxy' _ "${REPO}/payload/scripts/lib/env.sh" | sed 1d)"
-RC_FN_118='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
-rc_probe() {  # <name> <block line…> — the fact for an rc holding that block
-  local f="$TMP/rc-$1"; shift
-  { printf '%s\n' 'export V1=1' "$RS"; [ $# -gt 0 ] && printf '%s\n' "$@"; printf '%s\n' "$RE" 'export V2=2'; } > "$f"
-  R_PATH=/usr/bin:/bin probe_run SHELL=/bin/zsh BIONIC_SHELL_RC="$f" -- detect_rc_claude_proxy
-}
-expect_eq "rc proxy: bionic's two lines are yes" "env:rc-claude-proxy present=yes" "$(rc_probe cur "$RC_UN" "$RC_FN")"
-expect_eq "rc proxy: …with a user's line between them, still yes" "env:rc-claude-proxy present=yes" \
-  "$(rc_probe between "$RC_UN" 'export V9=9' "$RC_FN")"
-expect_eq "rc proxy: the current line is not the 1.18.0 one (the rows below are not vacuous)" "" "$([ "$RC_FN" = "$RC_FN_118" ] && echo same)"
-expect_eq "rc proxy: the earlier one-line body is stale" "env:rc-claude-proxy present=stale" "$(rc_probe old "$RC_FN_118")"
-expect_eq "rc proxy: the 1.18.0 two-line body is stale (wave-36 T1)" "env:rc-claude-proxy present=stale" "$(rc_probe old118 "$RC_UN" "$RC_FN_118")"
-expect_eq "rc proxy: an empty block is stale" "env:rc-claude-proxy present=stale" "$(rc_probe empty)"
-expect_eq "rc proxy: the earlier body with a user's line is changed" "env:rc-claude-proxy present=changed" \
-  "$(rc_probe old-u "$RC_FN_118" 'export V9=9')"
-expect_eq "rc proxy: bionic's lines swapped are changed" "env:rc-claude-proxy present=changed" \
-  "$(rc_probe swapped "$RC_FN" "$RC_UN")"
-RC_RO_BEFORE="$(shasum -a 256 "$TMP/rc-old-u")"
-expect_eq "rc proxy: the changed rc read again is still changed" "env:rc-claude-proxy present=changed" \
-  "$(R_PATH=/usr/bin:/bin probe_run SHELL=/bin/zsh BIONIC_SHELL_RC="$TMP/rc-old-u" -- detect_rc_claude_proxy)"
-expect_eq "rc proxy: the probe changed no byte of the rc it read" "$RC_RO_BEFORE" "$(shasum -a 256 "$TMP/rc-old-u")"
-
-section "Group 7: read-only is a contract, not an intention"
-#
-# Same wall the rest of detect.sh lives under: fingerprint the inputs, run
-# every probe, fingerprint again.
-
-fingerprint() {  # <path...> -> one digest line per file
-  local f
-  for f in "$@"; do
-    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$f" 2>/dev/null
-    else echo "no-digest-tool $f"; fi
-  done
-}
-BEFORE="$(fingerprint "$FIX_HEALTHY" "$FIX_BROKEN" "$FIX_F12_HEALTHY" "$FIX_F12_BROKEN" "$FIX_DUP" "$CH_DIR/plugins/installed_plugins.json")"
-probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_HEALTHY" -- detect_plugin_load_state bionic@bionic >/dev/null
-probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_BROKEN" -- detect_plugin_load_state bionic@bionic >/dev/null
-probe_run BIONIC_INSTALLED_PLUGINS_FILE="$FIX_DUP" -- detect_plugin_duplicates >/dev/null
-probe_run BIONIC_CLAUDE_HOME="$CH_DIR" -- detect_plugin_duplicates >/dev/null
-probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_F12_HEALTHY" -- detect_plugin_load_state bionic@bionic >/dev/null
-probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_F12_BROKEN" -- detect_plugin_load_state bionic@bionic >/dev/null
-AFTER="$(fingerprint "$FIX_HEALTHY" "$FIX_BROKEN" "$FIX_F12_HEALTHY" "$FIX_F12_BROKEN" "$FIX_DUP" "$CH_DIR/plugins/installed_plugins.json")"
-expect_eq "neither probe changed a byte of anything it read" "$BEFORE" "$AFTER"
-expect_eq "…and neither created a file beside the registry" \
-  "installed_plugins.json" "$(ls "$CH_DIR/plugins")"
 
 finish

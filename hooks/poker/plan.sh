@@ -2411,6 +2411,7 @@ BRF_EOF
   #   Release approval · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
   #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
   #   Goals         each goal the plan declares, its mark and its reading, reached ones included
+  #   hand-holds    one line, landing-report's counts over the window from the last build landing to this render
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
@@ -2616,6 +2617,7 @@ RR_ASIDE_EOF
           NF { n++; if ($1 == "reached") r++; l[n] = "3\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) " " $2 " — " $3 ", " $4 }
           END { printf "0\tGoals — %d of %d reached\n", r, n; for (i = 1; i <= n; i++) print l[i] }'
       fi
+      [ -z "${RR_HH:-}" ] || printf '0\t\n3\t%s\n' "$RR_HH"
       printf '0\t\n0\tTests\n3\t%s\n3\t%s\n' "$RR_TACC" "$RR_TREG"
       printf '0\t\n0\tReviews\n'
       printf '%s\n' "$RR_REVIEWS" | awk 'NF { print "3\t" $0 }'
@@ -2667,7 +2669,7 @@ RR_ASIDE_EOF
     [ ! -L "$f" ] || return 0
     {
       printf '%s\n\n## Replay\n\n' "$1"
-      printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "$(iso_now)" "$RR_N"
+      printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "${RR_AT:-$(iso_now)}" "$RR_N"
       for ((i = 0; i < RR_N; i++)); do
         printf 'release-approval/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
           "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "$(rr_word "${RR_DLAB[$i]}")" "$(rr_word "${RR_OLAB[$i]}")" "${RR_WHYS[$i]}"
@@ -2914,6 +2916,14 @@ RR_AGAINST_EOF
         *) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, ${r:-no result}"$'\n' ;;
       esac
     done
+
+    # THE HAND-HOLDS, over the window from the last build landing to this render (line.sh `hand_holds_ends`). The
+    # render's own instant is the end and the replay line's `at=`, so landing-report read after the page over the
+    # same ends prints this same line.
+    RR_AT="$(iso_now)"
+    IFS=$'\t' read -r RR_HHS _ _ _ <<< "$(hand_holds_ends "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")"
+    [ "${RR_HHS:--}" != - ] || RR_HHS=""
+    RR_HH="$(hand_holds_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN" ${RR_HHS:+--since "$RR_HHS"} --until "$RR_AT")"
 
     RR_TEXT="$(rr_page)"
     printf '%s\n' "$RR_TEXT"

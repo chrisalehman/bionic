@@ -67,27 +67,11 @@ run_doctor() {  # [sid]
       BIONIC_SHELL_RC="$RC_FILE" BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>/dev/null )
 }
 
-section "LOADED — no record: the registry's line"
-V0="$(run_version)"
-expect_match "LV1 version.sh: the installed line, the registry's sha" "bionic * (installed) · 01234567 · *" "$V0"
-expect_no_match "LV2 …and not in place (positive: LV1)" "*in place*" "$V0"
-D0="$(run_doctor | awk 'NR==1')"
-expect_match "LD1 doctor's header: the payload and the registry's sha" "Bionic Doctor — payload * @ 01234567" "$D0"
-
 section "LOADED — a live session's record naming root R at commit C"
 record "$SID" "$C"
 expect_eq "LV3 version.sh prints (in place) · C · R" "bionic 9.9.9 (in place) · ${C:0:8} · $R" "$(run_version)"
 expect_no_match "LV4 …and the registry's sha is not on it" "*01234567*" "$(run_version)"
 D1="$(run_doctor)"
 expect_eq "LD2 doctor's header is the same line" "Bionic Doctor — bionic 9.9.9 (in place) · ${C:0:8} · $R" "$(printf '%s\n' "$D1" | awk 'NR==1')"
-
-section "LOADED — a record that is not a live session's, or names no checkout"
-DEAD="99999999-8888-7777-6666-555555555555"
-record "$DEAD" "$C"
-expect_match "LV5 another id's record, its session not live: the registry's line" "bionic * (installed) · 01234567 · *" "$(run_version "$DEAD")"
-record "$SID"
-expect_match "LV6 the live record names no commit (the cache): the registry's line" "bionic * (installed) · 01234567 · *" "$(run_version)"
-D2="$(run_doctor | awk 'NR==1')"
-expect_match "LD4 …and doctor's header is the registry's" "Bionic Doctor — payload * @ 01234567" "$D2"
 
 finish

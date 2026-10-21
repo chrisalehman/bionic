@@ -948,6 +948,10 @@ census_calls() {
     | awk '{ loc = $1; kind = $2; key = $0; sub(/^[^ ]+ [^ ]+ §/, "", key); sub(/^\.\//, "", loc); sub(/:[0-9]+$/, "", loc)
              printf "%s\t%s\t%s\n", loc, kind, key }'
 }
+# census_records <census file> -> `R TAB <suite> TAB <key> TAB <verdict> TAB <defect>` per record line.
+census_records() {
+  awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\n", $1, k, $3, $4 }' "$1" 2>/dev/null
+}
 # census_refusals <tests dir> <census file> -> one line per refusal, none when the census covers the tree:
 #   no heading: a suite with no `## <suite>` heading
 #   no line: a suite with no section call and no `no section` line
@@ -960,7 +964,7 @@ census_refusals() {
   {
     for f in "$1"/*.test.sh; do [ -f "$f" ] && printf 'S\t%s\n' "${f##*/}"; done
     sed -n 's/^## \(.*\.test\.sh\)$/H\t\1/p' "$2" 2>/dev/null
-    awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\n", $1, k, $3, $4 }' "$2" 2>/dev/null
+    census_records "$2"
     census_calls "$1" | sed 's/^/C\t/'
   } | LC_ALL=C awk -F'\t' '
     $1 == "S" { suite[$2] = 1 }
@@ -1056,5 +1060,116 @@ expect_contains "the sweep reads the real tree: it finds this suite's own sectio
 expect_eq "the census file is there, with a heading for this suite" "yes" \
   "$(/usr/bin/grep -q '^## shell-lint.test.sh$' "$CENSUS_MD" 2>/dev/null && echo yes)"
 expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(census_refusals "$TESTS_DIR" "$CENSUS_MD")"
+
+
+# ── the cut ──────────────────────────────────────────────────────────────────
+# The census is also the cut: a section whose verdict is a cull is deleted from its suite, and a section the census
+# keeps stays. A key's calls in its suite must number its keep lines, so a culled section still called and a kept
+# one gone are both refused, by suite and key. `## Culled` lists the cull as `<suite> §<key> — <verdict>`, the
+# verdict after the last ` — ` because a key may hold one. A line there whose verdict is keep, or whose key carries a
+# `rule:` record (a door refusal, a lint or a check pin), culls what the rubric never lets go.
+# census_cull_refusals <tests dir> <census file> -> one line per refusal, none when the tree is cut as the census says:
+#   culled section present: a key with a cull line still called more often than it has keep lines
+#   kept section absent: a key with more keep lines than calls in its suite
+#   keep in the culled list: a `## Culled` line whose verdict is keep
+#   rule pin culled: a `## Culled` line whose key has a record line with a `rule:` defect
+census_cull_refusals() {
+  {
+    census_records "$2"
+    sed -n '/^## Culled$/,$p' "$2" 2>/dev/null | LC_ALL=C awk '/^[A-Za-z0-9._-]+\.test\.sh §/ {
+      sep = " — "; s = $0; sub(/ .*/, "", s); r = substr($0, length(s) + length(" §") + 1); v = r
+      while ((i = index(v, sep)) > 0) v = substr(v, i + length(sep))
+      printf "U\t%s\t%s\t%s\n", s, substr(r, 1, length(r) - length(v) - length(sep)), v }'
+    census_calls "$1" | sed 's/^/C\t/'
+  } | LC_ALL=C awk -F'\t' '
+    $1 == "R" { if ($3 == "—") next; key = $2 SUBSEP $3; seen[key] = 1
+                if ($4 == "keep") nkeep[key]++; else ncull[key]++
+                if ($5 ~ /^rule: /) rule[key] = 1 }
+    $1 == "U" { key = $2 SUBSEP $3
+                if ($4 == "keep") print "keep in the culled list: " $2 " §" $3
+                U[key] = 1 }
+    $1 == "C" { called[$2 SUBSEP $4]++ }
+    END {
+      for (key in U) if (key in rule) { split(key, p, SUBSEP); print "rule pin culled: " p[1] " §" p[2] }
+      for (key in seen) {
+        split(key, p, SUBSEP)
+        if (ncull[key] > 0 && called[key] > nkeep[key]) print "culled section present: " p[1] " §" p[2]
+        if (nkeep[key] > called[key]) print "kept section absent: " p[1] " §" p[2]
+      }
+    }' | LC_ALL=C sort
+}
+CS_THREE='x.test.sh | §THREE | duplicate | lib/x.sh: the third arm deleted | x.test.sh §ONE'
+
+# ============================================================
+section "CENSUS-1: a section the census culls that is still in its suite is refused by suite and key"
+# ============================================================
+# fails-when: a suite still calls a section whose only census line is a cull, and the sweep passes.
+CN1="$TMP/cn1"; census_scratch "$CN1"
+printf '%s\n' 'section "THREE: the third"' 'expect_eq c 1 1' >> "$CN1/tests/x.test.sh"
+census_file "$CN1/cut.md" "$CS_ONE" "$CS_TWO" "$CS_THREE"
+printf '\n## Culled\n\nx.test.sh §TWO — prose pin\nx.test.sh §THREE — duplicate\n' >> "$CN1/cut.md"
+expect_eq "the sweep reads the scratch tree: three sections of x" "ONE|TWO|THREE" \
+  "$(census_calls "$CN1/tests" | awk -F'\t' '$1 == "x.test.sh" { print $3 }' | paste -sd'|' -)"
+expect_eq "both culled sections still called are refused, each by suite and key" \
+  "culled section present: x.test.sh §THREE|culled section present: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CN1/tests" "$CN1/cut.md" | paste -sd'|' -)"
+sed -e '/^section "THREE/,$d' "$CN1/tests/x.test.sh" > "$CN1/x.one" && mv "$CN1/x.one" "$CN1/tests/x.test.sh"
+expect_eq "…with the third cut, the second alone is refused" "culled section present: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CN1/tests" "$CN1/cut.md")"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CN1/tests/x.test.sh"
+expect_eq "control: with both culled sections cut and the kept one called, nothing is refused" "" \
+  "$(census_cull_refusals "$CN1/tests" "$CN1/cut.md")"
+printf '%s\n' 'section "ONE: the first"' 'section "TWO: twice"' 'section "TWO: again"' > "$CN1/tests/x.test.sh"
+census_file "$CN1/twice.md" "$CS_ONE" 'x.test.sh | §TWO: twice | vacuous | the branch is never taken | none (searched x in tests/)' \
+  'x.test.sh | §TWO: again | keep | lib/x.sh: the second arm deleted | none (searched x in tests/)'
+printf '\n## Culled\n\nx.test.sh §TWO: twice — vacuous\n' >> "$CN1/twice.md"
+expect_eq "a shared key is read by whole title, and the culled one of the two is refused alone" \
+  "culled section present: x.test.sh §TWO: twice" "$(census_cull_refusals "$CN1/tests" "$CN1/twice.md")"
+
+# ============================================================
+section "CENSUS-2: a section the census keeps that is gone from its suite is refused by suite and key"
+# ============================================================
+# fails-when: a section whose census line is a keep is deleted from its suite, and the sweep passes.
+CN2="$TMP/cn2"; census_scratch "$CN2"
+census_file "$CN2/keep.md" "$CS_ONE" "$CS_TWO"
+printf '\n## Culled\n\nx.test.sh §TWO — prose pin\n' >> "$CN2/keep.md"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CN2/tests/x.test.sh"
+expect_eq "control: the kept section called and the culled one cut are refused for nothing" "" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+printf '%s\n' 'echo the first section went' > "$CN2/tests/x.test.sh"
+expect_eq "the kept section deleted is refused naming the suite and the key" "kept section absent: x.test.sh §ONE" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+rm -f "$CN2/tests/x.test.sh"
+expect_eq "…and so is a kept section whose whole suite is gone" "kept section absent: x.test.sh §ONE" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+
+# ============================================================
+section "CENSUS-3: a culled-list line that culls a keep or a rule pin is refused"
+# ============================================================
+# fails-when: `## Culled` names a section whose verdict is keep, or whose record carries a door refusal, lint or
+# check pin, and the sweep passes.
+CN3="$TMP/cn3"; census_scratch "$CN3"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CN3/tests/x.test.sh"
+CS_RULE='x.test.sh | §ONE | keep | rule: lint — a shape planted | none (searched x in tests/)'
+census_file "$CN3/ok.md" "$CS_RULE" "$CS_TWO"
+printf '\n## Culled\n\nx.test.sh §TWO — prose pin\n' >> "$CN3/ok.md"
+expect_eq "control: a rule: keep left out of the culled list is refused for nothing" "" \
+  "$(census_cull_refusals "$CN3/tests" "$CN3/ok.md")"
+{ cat "$CN3/ok.md"; printf 'x.test.sh §ONE — duplicate\n'; } > "$CN3/rule.md"
+expect_contains "a culled-list line for the rule: record is refused naming the suite and the key" \
+  "rule pin culled: x.test.sh §ONE" "$(census_cull_refusals "$CN3/tests" "$CN3/rule.md")"
+{ cat "$CN3/ok.md"; printf 'x.test.sh §ONE — keep\n'; } > "$CN3/keep.md"
+expect_contains "a culled-list line whose verdict is keep is refused naming the suite and the key" \
+  "keep in the culled list: x.test.sh §ONE" "$(census_cull_refusals "$CN3/tests" "$CN3/keep.md")"
+
+# ============================================================
+section "CENSUS-4: the tests tree is cut as tests/CENSUS.md says"
+# ============================================================
+# fails-when: a suite under tests/ still calls a section the census culls, a kept section is gone, or the culled
+# list holds a keep or a rule pin.
+CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep -c '\.test\.sh §')"
+expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
+expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled" "" \
+  "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD")"
 
 finish
