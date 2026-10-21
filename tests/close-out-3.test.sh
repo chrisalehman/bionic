@@ -37,8 +37,8 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
 # HH_GATE: hoisted to tests/close-out.prelude.sh (a later part reads it)
 HH_C="$(printf 'd%.0s' $(seq 40))"
-# The report reads from the last build landing, T2's at 10:40, so the decline, the lift, the 10:00 amend and T2's own
-# hand landing fall before the window, and the date-only matrix waiver's day holds that start, so it is unplaced.
+# The report reads from the last build landing, the second build row's at 10:40, so the decline, the lift, the 10:00
+# amend and that row's own hand landing fall before the window, and the date-only matrix waiver's day holds that start, so it is unplaced.
 HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=1"
 HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=0"
 # hh_report: hoisted to tests/close-out.prelude.sh (a later part reads it)

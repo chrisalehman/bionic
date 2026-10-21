@@ -1019,7 +1019,7 @@ ww_sdlc() {  # <root> <line>… -> each line under ## SDLC State, after the rows
   # through the environment: macOS awk refuses a -v value holding a line break
   WW_ADD="$(printf '%s\n' "$@")" awk '{ print } /^- T2: / && !d { print ENVIRON["WW_ADD"]; d = 1 }' "$p" > "$p.w" && mv "$p.w" "$p"
 }
-ww_matrix() {  # <root> <waiver value>… -> a matrix whose row AC-1.<n> carries the n-th waiver line in its block
+ww_matrix() {  # <root> <waiver value>… -> a matrix whose n-th row carries the n-th waiver line in its block
   local p n=0 v; p="$(ll_plan "$1")"; shift
   { printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     for v in "$@"; do n=$((n + 1)); printf '| AC-1.%d | T1 | waived | see AC-1.%d | — |\n' "$n" "$n"; done
@@ -1031,7 +1031,7 @@ WW_D="$(printf 'd%.0s' $(seq 40))"
 ww_pub() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=%s|by=-|why=-|at=%s\n' "$1" "$WW_C" "$2" "$3"; }   # <row> <kind> <at>
 ww_dec() { printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=%s|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n' "$1" "$2"; }   # <at> <state>
 
-# (w1) AC-7.1: one hand landing before the window, one decline inside it.
+# (w1) one hand landing before the window, one decline inside it.
 RW1="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW1")")"
 ww_pub T1 hand 2026-10-20T10:00:00Z > "$(ll_rec "$RW1")"
 ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_rec "$RW1")")/fill-ledger.log"
@@ -1079,7 +1079,7 @@ expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every s
   "hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=1 · unplaced=1" \
   "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
-# (w2) AC-7.2: the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
+# (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
 # a day the window's start falls inside cannot be placed. That waive-row writes the ISO form is read where the card's
 # reply writes it, tests/release-approval.test.sh §HANDHOLDS (WINDOW-2a).
 RW3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW3")")"
@@ -1093,7 +1093,7 @@ expect_eq "WINDOW-2c …and with no window at all (no build landing, no page), b
   "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · second-regressions=0 · adoptions=0 · fixed=0" \
   "$(ww_hh "$RW3")"
 
-# (w3) AC-7.3: the ends from records. With no page the window runs to now, and no end but the start prints.
+# (w3) the ends from records. With no page the window runs to now, and no end but the start prints.
 RW4="$(ll_world)"; WW_RD4="$(dirname "$(ll_rec "$RW4")")"; mkdir -p "$WW_RD4"
 { ww_pub T1 queue 2026-10-20T11:00:00Z; ww_pub T9 hand 2026-10-20T11:30:00Z; } > "$(ll_rec "$RW4")"
 ww_dec 2026-10-20T10:00:00Z decline > "$WW_RD4/fill-ledger.log"

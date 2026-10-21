@@ -820,7 +820,7 @@ section "§HANDHOLDS: the card prints the hand-holds line read over the window, 
 # start is the newest published landing of a build row and whose end is the page's own replay time. The report read
 # after the page names the same two ends, so `landing-report --hand-holds` prints the same line. fails-when: the
 # page prints the run's total, a hand-hold before the last build landing counted; or the report and the page differ.
-# The fixture's landing record holds T1's queue landing at 10:00; its fill ledger a decline before it and one after.
+# The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
 fc_plan "$FC_GOOD"
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_REC/landing-proofs.log"
 { printf 'fill-ledger/v1|at=2026-10-12T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n'
