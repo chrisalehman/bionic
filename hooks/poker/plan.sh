@@ -2250,10 +2250,12 @@ BRF_EOF
   #
   # THE PAGE THE AUTONOMOUS HALF WAITS ON. `release-approval [--preview] [--against <key>]... [<plan>]` renders, from
   # the record and nothing else, what the run reached, what the machine proved, what the readers judged and what is
-  # the user's, in that order, each line folded at 92 columns (`sitrep_fold`), a blank line between sections:
+  # the user's, in that order, a blank line between sections. The verb gathers the facts and `card.sh release` draws
+  # the page from them, each line folded at the shared width as every card is:
   #
   #   Release approval · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
-  #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
+  #   Bottom line   whether every check holds, what the release changes of its own check, the criteria not proved,
+  #                 what is owed, the recommendation
   #   Goals         each goal the plan declares, its mark and its reading, reached ones included
   #   hand-holds    one line, landing-report's counts over the window from the last build landing to this render
   #   test-ratio    one line beside it, the release check's count of shell lines under tests/ against the rest
@@ -2396,116 +2398,35 @@ RR_MATRIX
     if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
   }
 
-  rr_page() {  # -> the page on stdout, from the RR_* facts the verb gathered; every line through sitrep_fold
-    local i k p l g n t sub lab
-    local -a ph=() ap=() cf=() wv=() rn=()
-    {
-      printf '0\tRelease approval · %s%s · %s · head %s%s\n' "$RR_PROJ" "${RR_REL:+ $RR_REL}" \
-        "$(sitrep_date "$(sitrep_now)" '%A %-I:%M %p')" "$RR_H8" \
-        "$([ "$RR_TOTAL" -gt 0 ] && printf ' · %d of %d tasks landed' "$RR_LANDED" "$RR_TOTAL")"
-      printf '0\t\n0\tBottom line\n'
-      if [ -n "$RR_EARLY" ]; then printf '2\t- Not ready for your decisions: %s.\n' "${RR_EARLY#CARD-EARLY — }"
-      elif [ "$RR_N" -gt 0 ]; then printf '2\t- Ready for your decisions: every check holds at %s.\n' "$RR_H8"
-      else printf '2\t- Every check holds at %s.\n' "$RR_H8"; fi
-      if [ -n "$RR_MISS" ]; then
-        set -- $RR_MISS
-        l="$(rr_plural "$#" criterion criteria) not proved: $(sitrep_list 6 "$@")"
-        n=""; for p in "$@"; do k="$(rr_dec_of "row:$p")" && n="$n $k"; done
-        # shellcheck disable=SC2086  # the decision numbers, one word each; a run of them said as a range
-        if [ -n "$n" ]; then
-          set -- $n
-          if [ "$#" -eq 1 ]; then l="$l (decision $1)"
-          elif [ "$(( ${!#} - $1 + 1 ))" -eq "$#" ]; then l="$l (decisions $1 to ${!#})"
-          else l="$l (decisions $(sitrep_list 6 "$@"))"; fi
-        fi
-        printf '2\t- %s.\n' "$l"
-      elif [ "$RR_ACW" -gt 0 ]; then printf '2\t- Every criterion is proved or waived by you.\n'
-      elif [ "$RR_ACT" -gt 0 ]; then printf '2\t- Every criterion is proved.\n'
-      else printf '2\t- The matrix holds no criterion.\n'; fi
-      if [ "$RR_N" -gt 0 ]; then
-        printf '2\t- You owe %s, listed below. Everything else has a default the record supports.\n' "$(rr_plural "$RR_N" decision decisions)"
-      else
-        printf '2\t- You owe nothing: every approval and waiver is recorded.\n'
-      fi
-      while IFS= read -r l; do [ -z "$l" ] || printf '2\t- Also yours, outside the run: %s.\n' "${l%.}"; done <<RR_ASIDE_EOF
-$RR_ASIDE
-RR_ASIDE_EOF
-      if [ "$RR_N" -gt 0 ]; then
-        # One phrase per decision, the rows' said once per choice over their criteria, the approvals given last.
-        for ((i = 0; i < RR_N; i++)); do
-          if [ "${RR_KIND[$i]}" = approve ] && [ "${RR_PICK[$i]}" = default ]; then ap[${#ap[@]}]="${RR_KEY[$i]#approve:}"
-          elif [ "${RR_KIND[$i]}" = row ]; then
-            if [ "${RR_PICK[$i]}" = default ]; then p="${RR_DPH[$i]}"; else p="${RR_OPH[$i]}"; fi
-            case "${p%% *}" in
-              confirm) cf[${#cf[@]}]="${RR_KEY[$i]#row:}" ;;
-              waive) wv[${#wv[@]}]="${RR_KEY[$i]#row:}" ;;
-              *) rn[${#rn[@]}]="${RR_KEY[$i]#row:}" ;;
-            esac
-          elif [ "${RR_PICK[$i]}" = default ]; then ph[${#ph[@]}]="${RR_DPH[$i]}"
-          else ph[${#ph[@]}]="${RR_OPH[$i]}"; fi
-          if [ "${RR_KIND[$i]}" = row ] && { [ "$((i + 1))" -eq "$RR_N" ] || [ "${RR_KIND[$((i + 1))]}" != row ]; }; then
-            [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(sitrep_list 6 "${cf[@]}")"
-            [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(sitrep_list 6 "${wv[@]}")"
-            [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(sitrep_list 6 "${rn[@]}")"
-          fi
-        done
-        l=""
-        for ((i = 0; i < ${#ph[@]}; i++)); do l="${l:+$l, }${ph[$i]}"; done
-        if [ "${#ap[@]}" -gt 0 ]; then l="${l:+$l, then }$(sitrep_list 6 "${ap[@]}")"; fi
-        printf '2\t- Recommended: %s.\n' "$l"
-      fi
-      printf '0\t\n'
-      if [ -z "$RR_GOALS" ]; then
-        printf '0\tGoals — none declared\n'
-      else
-        printf '%s\n' "$RR_GOALS" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
-          NF { n++; if ($1 == "reached") r++; l[n] = "3\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) " " $2 " — " $3 ", " $4 }
-          END { printf "0\tGoals — %d of %d reached\n", r, n; for (i = 1; i <= n; i++) print l[i] }'
-      fi
-      if [ -n "${RR_HH:-}" ] || [ -n "${RR_TR:-}" ]; then
-        printf '0\t\n'
-        [ -z "${RR_HH:-}" ] || printf '3\t%s\n' "$RR_HH"
-        [ -z "${RR_TR:-}" ] || printf '3\t%s\n' "$RR_TR"
-      fi
-      printf '0\t\n0\tTests\n3\t%s\n3\t%s\n' "$RR_TACC" "$RR_TREG"
-      printf '0\t\n0\tReviews\n'
-      printf '%s\n' "$RR_REVIEWS" | awk 'NF { print "3\t" $0 }'
-      printf '0\t\n'
-      if [ "$RR_FN" -eq 0 ]; then
-        printf '0\tFindings — none\n'
-      else
-        l=""
-        [ "$RR_FNF" -eq 0 ] || l="$RR_FNF fixed"
-        [ "$RR_FNA" -eq 0 ] || l="${l:+$l · }$RR_FNA for your decision"
-        [ "$RR_FNC" -eq 0 ] || l="${l:+$l · }$RR_FNC carried"
-        printf '0\tFindings — %s: %s\n' "$RR_FN" "$l"
-        for g in F A C; do
-          sub="$(printf '%s\n' "$RR_FLINES" | awk -F'\t' -v g="$g" '$1 == g')"
-          [ -n "$sub" ] || continue
-          case "$g" in
-            F) lab="Fixed"; [ -z "$RR_FROWS" ] || lab="Fixed by $(sitrep_list 6 $RR_FROWS)" ;;
-            A) lab="Awaiting your decision" ;;
-            C) lab="Carried as known limits" ;;
-          esac
-          printf '0\t%s\n' "$lab"
-          printf '%s\n' "$sub" | awk -F'\t' '{ printf "7\t  %s   %s\n", $2, $3 }'
-        done
-      fi
-      printf '0\t\n0\tDecisions\n'
-      if [ "$RR_N" -eq 0 ]; then
-        printf '3\tNone wait on you.\n'
-      else
-        for ((i = 0; i < RR_N; i++)); do
-          if [ "${RR_PICK[$i]}" = default ]; then lab="${RR_DLAB[$i]}"; else lab="${RR_OLAB[$i]}"; fi
-          printf '3\t%d. %s — recommended: %s · default: %s\n' "$((i + 1))" "${RR_SUBJ[$i]}" "$lab" "${RR_DLAB[$i]}"
-        done
-      fi
-      if [ "$RR_PREVIEW" = yes ]; then
-        printf '0\t\n0\tPreview only: nothing is recorded, and reply cannot act on it.\n'
-      elif [ "$RR_N" -gt 0 ]; then
-        printf '0\t\n0\tReply "all recommended", "all default", or by number, as "1 %s, rest default".\n' "$(rr_word "${RR_OLAB[0]}")"
-      fi
-    } | sitrep_fold
+  rr_fact() {  # <tag> <field>... -> one fact line, its fields tab-separated; a tab or newline inside a field is a space
+    local f out="$1"; shift
+    for f in "$@"; do f="${f//$'\t'/ }"; out="$out"$'\t'"${f//$'\n'/ }"; done
+    printf '%s\n' "$out"
+  }
+
+  rr_facts() {  # -> the RR_* facts the verb gathered, in the tagged lines `card.sh release` draws the page from
+    local i l
+    rr_fact title "$RR_PROJ" "$RR_REL" "$(sitrep_date "$(sitrep_now)" '%A %-I:%M %p')" "$RR_H8" "$RR_LANDED" "$RR_TOTAL"
+    [ -z "$RR_EARLY" ] || rr_fact early "${RR_EARLY#CARD-EARLY — }"
+    [ "$RR_PREVIEW" != yes ] || rr_fact preview
+    rr_fact criteria "$RR_ACT" "$RR_ACW"
+    for l in $RR_MISS; do rr_fact miss "$l"; done
+    printf '%s\n' "$RR_CHG" | tr ',' '\n' | while IFS= read -r l; do [ -z "$l" ] || rr_fact check "$l"; done
+    printf '%s\n' "$RR_ASIDE" | while IFS= read -r l; do [ -z "$l" ] || rr_fact aside "$l"; done
+    for ((i = 0; i < RR_N; i++)); do
+      rr_fact decision "${RR_KIND[$i]}" "${RR_KEY[$i]}" "${RR_PICK[$i]}" "${RR_SUBJ[$i]}" "${RR_DLAB[$i]}" "${RR_OLAB[$i]}" \
+        "${RR_DPH[$i]}" "${RR_OPH[$i]}"
+    done
+    [ "$RR_N" -eq 0 ] || rr_fact reply "$(rr_word "${RR_OLAB[0]}")"
+    [ -z "$RR_GOALS" ] || printf '%s\n' "$RR_GOALS" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
+      NF { print "goal\t" $1 "\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) "\t" $2 "\t" $3 "\t" $4 }'
+    [ -z "${RR_HH:-}" ] || rr_fact handholds "$RR_HH"
+    [ -z "${RR_TR:-}" ] || rr_fact ratio "$RR_TR"
+    rr_fact acceptance "$RR_TACC"
+    rr_fact regression "$RR_TREG"
+    printf '%s\n' "$RR_REVIEWS" | while IFS= read -r l; do [ -z "$l" ] || rr_fact review "$l"; done
+    rr_fact findings "$RR_FN" "$RR_FNF" "$RR_FNA" "$RR_FNC" "$RR_FROWS"
+    printf '%s\n' "$RR_FLINES" | awk 'NF { print "finding\t" $0 }'
   }
 
   rr_record() {  # <page text> -> writes the page and its replay table beside the run's records; prints nothing
@@ -2784,7 +2705,21 @@ RR_AGAINST_EOF
       [ "${_rr_h:-}" = "$RR_HEAD" ] || RR_TR="$RR_TR at ${_rr_h:0:8}"
     fi
 
-    RR_TEXT="$(rr_page)"
+    # WHAT THE RELEASE CHANGES OF ITS OWN CHECK: the files of the declared release check's closure that the range from
+    # the last release (`release_base`, the release check's own start) to the head changes, read by the door's own
+    # reading (lib/worktree.sh `_wt_check_judge`), so the user approving the release knows the check it passed was
+    # changed in it.
+    RR_CHG=""
+    line="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
+    if [ -n "$line" ] && release_base "$PV_PLAN" "$PV_REPO" "$RR_HEAD"; then
+      RR_CHG="$(_wt_check_judge "$PV_REPO" "$RB_BASE" "$RR_HEAD" "$line")" && RR_CHG="${RR_CHG#* }" || RR_CHG=""
+    fi
+
+    # THE PAGE IS card.sh's (`release`), the renderer every card is drawn by; a page it refuses is never written.
+    if ! RR_TEXT="$(rr_facts | "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" release)"; then
+      die "REFUSED — card.sh release could not draw the release approval card from its facts; nothing is written."
+      exit 2
+    fi
     printf '%s\n' "$RR_TEXT"
     [ "$RR_PREVIEW" != yes ] || exit 0
     # THE ACTING RENDER OPENS WHAT IT PUTS on the person's ledger, so the ledger and the page agree, and records it.

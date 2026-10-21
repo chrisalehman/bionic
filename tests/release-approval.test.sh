@@ -9,7 +9,8 @@
 # first, grouped fixed / awaiting your decision / carried. The regression is never a decision: a head with no green
 # whole run is early, not waived. The page refuses to render, `CARD-EARLY — <reason>` on stderr and exit 1, while
 # a reader row is open, an owed reading is unregistered at the head, or `current <N> --check` is red for N = 6, 7
-# or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. One
+# or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. The
+# verb gathers the facts and `card.sh release` draws the page at the shared width. One
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
 # approve, waive, waive-row, confirm-row and finding-move with the user's words.
 #
@@ -30,6 +31,7 @@
 # §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
 # §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
 # §RATIO     the page prints the release check's test-ratio line once, read from the log of the newest check proof
+# §CHECK-CHANGED the Bottom line says when the release changes a file of the declared release check's closure
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -227,12 +229,12 @@ expect_eq "SHAPE-11b AC-13.4 …in plain text: no markdown label" "0" "$(printf 
 expect_eq "SHAPE-11c …no record path" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c 'record/')"
 expect_eq "SHAPE-11d …no quotation above the reply line" "0" "$(printf '%s\n' "$FC_OUT" | sed '$d' | /usr/bin/grep -c '"')"
 expect_eq "SHAPE-11e …and never the old name" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -ci 'final card')"
-# Columns are counted as sitrep_fold counts them, byte-wise: macOS awk's length() counts bytes in every locale, so a
-# line with a two-byte `·` would read wider than it prints.
+# Columns are counted byte-wise, each glyph at its printed width: macOS awk's length() counts bytes in every locale,
+# so a line with a two-byte `·` would read wider than it prints. The card folds at the shared 100-column width.
 fc_cols() { LC_ALL=C awk '{ s = $0; t = s; w = length(s) - gsub(/[\200-\277]/, "", t); t = s; w -= gsub(/\357\270\217/, "", t)
   t = s; w += gsub(/[\360-\364]/, "", t); t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t); print w }'; }
 expect_eq "SHAPE-11f-0 precondition: the column count reads a two-byte middle dot as one column" "3" "$(printf 'a\302\267b\n' | fc_cols)"
-expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 92' | /usr/bin/grep -c .)"
+expect_eq "SHAPE-11f …every line within 100 columns" "0" "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 100' | /usr/bin/grep -c .)"
 expect_eq "SHAPE-12 the page is written to the run's record, one file at the head" "release-approval-$FC_H8.md" "$(fc_pages)"
 expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
   "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
@@ -892,6 +894,30 @@ expect_eq "RATIO-5 with no check proof the page prints no number (it still rende
 rm -f "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
 
 # ============================================================
+section "§CHECK-CHANGED: the card says when the release changes the declared release check (AC-10.2)"
+# ============================================================
+# The release range is the fixture's base-sha to its head, which changes lib/x.sh and CHANGELOG.md. A check whose
+# script is lib/x.sh is changed by this release; one whose script is tests/a.test.sh is not. fails-when: the card is
+# silent about a release that changes its check, or names a change to a check the release leaves alone.
+cc_line() { printf '%s\n' "$FC_OUT" | /usr/bin/grep 'changes the release check'; }
+printf 'release-check: bash lib/x.sh\n' > "$RFC/.bionic/config.yaml"
+rt_log "$FC_R" "test-ratio: 1/2"
+rt_plan "$FC_R"
+fc_page
+expect_eq "CHECK-CHANGED-1 the page renders on a release that changes its check's script (exit 0, nothing on stderr)" \
+  "0|" "$FC_RC|$FC_ERR"
+expect_eq "CHECK-CHANGED-2 …and its Bottom line names the check's changed file, once" \
+  "- This release changes the release check: lib/x.sh." "$(cc_line)"
+expect_eq "CHECK-CHANGED-2b …under Bottom line" "1" "$(fc_under 'Bottom line' | /usr/bin/grep -c 'changes the release check')"
+printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
+rt_plan "$FC_R"
+fc_page
+expect_eq "CHECK-CHANGED-3 a release that leaves its check alone renders with its Bottom line" "0|1" \
+  "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^Bottom line$')"
+expect_eq "CHECK-CHANGED-3b …and says nothing of the check" "" "$(cc_line)"
+rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
+
+# ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
 # ============================================================
 {
@@ -909,5 +935,7 @@ expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, unde
 expect_eq "STEP0-2 …its sections in the 1.20.0 order" "Purpose|Seed|Run|Branches|Paths|Shape|Gates|Models" \
   "$(printf '%s\n' "$FC_OUT" | sed -n 's/^  \([A-Z][A-Za-z]*\)$/\1/p' | paste -sd'|' -)"
 expect_eq "STEP0-6 rendered for the session's own run, it opens the person's approve:step0 item" "approve:step0" "$(fc_owed)"
+expect_eq "STEP0-7 every line of the card is within the shared 100 columns" "0" \
+  "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 100' | /usr/bin/grep -c .)"
 
 finish
