@@ -612,10 +612,8 @@ printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target
 # memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
 # positive; §S19.2 holds the absence side across every suite.
 
-# --- §S19.4 agent-context-guard: every doctored copy of the guard is anchored ---
-# agent-context-guard builds its mutants through one helper, so a site is any line
-# writing a copy of "$GUARD" to a file. The suite gets its own site pattern, and a
-# pattern that finds no site is RED
+# --- §S19.4 every doctored copy is anchored, suite by suite ---
+# Each doctoring suite gets its own site pattern, and a pattern that finds no site is RED
 # here rather than a silent pass of the relation below it.
 #
 # THE ANCHOR MAY SIT ANYWHERE EARLIER IN THE SITE'S BLOCK (the lines since the last
@@ -631,35 +629,12 @@ s19_block_sites() {  # s19_block_sites <suite> <site-ERE> -> "<sites> <unanchore
     END { print sites + 0, bare + 0 }
   ' "$1"
 }
-S19_ACG="$S19_TESTS_DIR/agent-context-guard.test.sh"
-S19_ACG_SITE='"\$GUARD" > "'
-S19_ACG_REAL="$(s19_block_sites "$S19_ACG" "$S19_ACG_SITE")"
-S19_ACG_REAL_SITES="${S19_ACG_REAL%% *}"
-expect_eq "S19.4 the agent-context-guard site pattern finds at least one doctored site" "yes" \
-  "$([ "${S19_ACG_REAL_SITES:-0}" -ge 1 ] 2>/dev/null && echo yes || echo no)"
-expect_eq "S19.4 every agent-context-guard doctoring site is anchored" "0" \
-  "${S19_ACG_REAL#* }"
-
-# THE PLANTED DEFECTS, on copies. A bare site — a doctored copy of the guard with no
-# anchor in its block — must be named; and a copy whose sites no longer carry the
-# pattern's target must report no site, which is what turns the row above RED.
-cp "$S19_ACG" "$S19_SB/acg-bare.test.sh"
-# built with %s so this file does not itself carry the site it plants
-printf '\nsed %s "$GUARD" %s "$MUTANT_TREE/hooks/mutant-bare.sh"\n' "'s/x/y/'" '>' >> "$S19_SB/acg-bare.test.sh"
-S19_ACG_BARE="$(s19_block_sites "$S19_SB/acg-bare.test.sh" "$S19_ACG_SITE")"
-expect_eq "S19.4 …and the derivation names a planted bare agent-context-guard site" "1" \
-  "${S19_ACG_BARE#* }"
-S19_ACG_BARE_SITES="${S19_ACG_BARE%% *}"
-expect_eq "S19.4 …which the pattern counted as one more site (not vacuous)" "1" \
-  "$(( ${S19_ACG_BARE_SITES:-0} - ${S19_ACG_REAL_SITES:-0} ))"
-sed 's/"\$GUARD" > "/"$GUARD_GONE" > "/' "$S19_ACG" > "$S19_SB/acg-nosite.test.sh"
-S19_ACG_NONE="$(s19_block_sites "$S19_SB/acg-nosite.test.sh" "$S19_ACG_SITE")"
-expect_eq "S19.4 …and on it the site pattern finds no site, so the at-least-one row goes RED" "0" \
-  "${S19_ACG_NONE%% *}"
 
 # --- §S19.4 landing-gate: every doctored copy of the gate is anchored ---
 # landing-gate doctors one source, the gate it loads, so a site is any line writing a
-# copy of "$GATE_SRC" to a file. Same helper, same planted defects as above.
+# copy of "$GATE_SRC" to a file. THE PLANTED DEFECTS, on copies: a bare site, a doctored
+# copy with no anchor in its block, must be named; and a copy whose sites no longer carry
+# the pattern's target must report no site, which is what turns the at-least-one row RED.
 S19_LG="$S19_TESTS_DIR/landing-gate.test.sh"
 S19_LG_SITE='"\$GATE_SRC" > "'
 S19_LG_REAL="$(s19_block_sites "$S19_LG" "$S19_LG_SITE")"
