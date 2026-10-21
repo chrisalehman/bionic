@@ -38,7 +38,7 @@ by severity.
   when no finding sets it higher.
 - Its disposition is burn-when-touched, never fix now and never note.
 
-Only readers rate: a finding's severity and its user-facing answer are written by the reader that found it, and no
+Only reviewers rate: a finding's severity and its user-facing answer are written by the reviewer that found it, and no
 agent, the orchestrator included, moves a rating in either direction; a user's re-rating is
 recorded with attribution.
 

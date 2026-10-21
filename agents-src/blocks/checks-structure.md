@@ -1,4 +1,4 @@
-Is the change built from what already exists, and shaped well? Read the code in the range. You are shown no other reader's verdict. Answer `reuse` and `one-site` each on its own `check:` line: PASS, FLAG, FAIL, or `n/a` with the reason it cannot apply to this range. An unanswered one makes the verb refuse the record. A check answers FLAG when its failing case holds, a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity; FAIL only when copies already disagree where a user meets it, a finding the harm table sends to fix; PASS otherwise. "Looks clean" is not an answer: a PASS names what you compared it against. Age does not lower a rating. Say "older than the reviewed range" beside it.
+Is the change built from what already exists, and shaped well? Read the code in the range. You are shown no other reviewer's verdict. Answer `reuse` and `one-site` each on its own `check:` line: PASS, FLAG, FAIL, or `n/a` with the reason it cannot apply to this range. An unanswered one makes the verb refuse the record. A check answers FLAG when its failing case holds, a debt finding rated on the debt table in `severity.md` by kind and concept, never by a severity; FAIL only when copies already disagree where a user meets it, a finding the harm table sends to fix; PASS otherwise. "Looks clean" is not an answer: a PASS names what you compared it against. Age does not lower a rating. Say "older than the reviewed range" beside it.
 
 ## Inputs
 
@@ -25,7 +25,7 @@ You may raise these as findings when their case holds. They are not checks: writ
 
 ## A whole read
 
-When the range is the whole run (`scope: whole`), read only what the pieces duplicate between them. Ask `reuse` and `one-site` when two pieces each added a site for one concept; a check no cross-piece case can reach is `n/a`. How the pieces interact is the adversarial reader's.
+When the range is the whole run (`scope: whole`), read only what the pieces duplicate between them. Ask `reuse` and `one-site` when two pieces each added a site for one concept; a check no cross-piece case can reach is `n/a`. How the pieces interact is the adversarial reviewer's.
 
 ## The record
 

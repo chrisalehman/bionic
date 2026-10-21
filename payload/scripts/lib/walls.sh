@@ -1395,7 +1395,7 @@ _eg_placed() {
     place)
       [ "$_EG_COMMIT_NC" -eq 0 ] || { _EG_PLACED_WHY="the commit carries a -C that is not absolute"; return 1; }
       _eg_git_only "$COMMAND" cd || { _EG_PLACED_WHY="$_EG_GO_WHY"; return 1; } ;;
-    env-C) _EG_PLACED_WHY="env -C moves the commit, and the wall places only git -C or the placement reader's answer"; return 1 ;;
+    env-C) _EG_PLACED_WHY="env -C moves the commit, and the wall places only git -C or the placement check's answer"; return 1 ;;
     *) _EG_PLACED_WHY="the wall could not read where the commit runs"; return 1 ;;
   esac
 }
@@ -2511,9 +2511,9 @@ _eg_refuse_readings() {
   gaps="$(_eg_reading_gaps "$2")"
   [ -n "$gaps" ] || return 0
   lines="$(printf '%s\n' "$gaps" | awk -F'\t' '
-    $1 == "unreadable" { print "- the reading record cannot be read here: lib/proof.sh is not loaded beside units.sh" }
-    $1 == "absent"     { print "- " $2 ": no reading, and no waiver" }
-    $1 == "failing"    { print "- " $2 ": the newest reading is result=fail (evidence=" $3 "), and no waiver is newer" }')"
+    $1 == "unreadable" { print "- the review record cannot be read here: lib/proof.sh is not loaded beside units.sh" }
+    $1 == "absent"     { print "- " $2 ": no review, and no waiver" }
+    $1 == "failing"    { print "- " $2 ": the newest review is result=fail (evidence=" $3 "), and no waiver is newer" }')"
   # A DECLARED DEBT ALONE is not a reading (wave-27 T31; D23): its own fact and fix.
   if [ -z "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 != "debt"')" ]; then
     lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no regression or task proof is recorded after that cleared" }')"
@@ -2531,13 +2531,13 @@ ${_eg_debts}"
   local _eg_q _eg_ev
   while IFS=$'\t' read -r _ _eg_q _eg_ev; do
     [ -n "$_eg_q" ] || continue
-    _eg_owe "waive:${_eg_q}" "waiver: ${_eg_q}" "commit refused — ${_eg_q}: the newest reading is result=fail (evidence=${_eg_ev}), and no waiver is newer; waive it with: session-poker.sh waive ${_eg_q} '<your reply>'"
+    _eg_owe "waive:${_eg_q}" "waiver: ${_eg_q}" "commit refused — ${_eg_q}: the newest review is result=fail (evidence=${_eg_ev}), and no waiver is newer; waive it with: session-poker.sh waive ${_eg_q} '<your reply>'"
   done <<< "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "failing"')"
-  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a reading whose newest is not result=fail, or a newer waiver:
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at review rigor $(rigor_level "$2" || printf '%s' "$2") needs a review whose newest is not result=fail, or a newer waiver:
 ${lines}
 Plan: $PLAN
-Fix: register each reading with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
-  refuse exit2 commit "a reading question is unanswered" "record or waive each reading" "$_eg_detail"
+Fix: register each review with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
+  refuse exit2 commit "a review question is unanswered" "record or waive each review" "$_eg_detail"
 }
 
 # THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key
@@ -5774,7 +5774,7 @@ _bsg_git_relocates() {
   local _line _oldifs="$IFS" _hadf
   case "$COMMAND" in
     *GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
-      _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement reader does not read"
+      _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement check does not read"
       return 0 ;;
   esac
   while IFS= read -r _line; do
@@ -5783,7 +5783,7 @@ _bsg_git_relocates() {
     case " $_BSG_COMMIT_VERBS " in *" $GIT_SUB "*) : ;; *) continue ;; esac
     _git_argv_skip "$_line"
     if [ -n "$GIT_ARGV_ENV_CHDIR" ]; then
-      _BSG_JUR_WHY="env -C moves the commit to a directory the placement reader does not read; cd there and commit"
+      _BSG_JUR_WHY="env -C moves the commit to a directory the placement check does not read; cd there and commit"
       return 0
     fi
     [ -n "$GIT_ARGV_REST" ] || continue
@@ -5799,7 +5799,7 @@ _bsg_git_relocates() {
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|--git-dir|--git-dir=*|--work-tree|--work-tree=*)
-          _BSG_JUR_WHY="the commit names its repository itself (git -C, --git-dir or --work-tree), which the placement reader does not read; cd into that repository and commit there"
+          _BSG_JUR_WHY="the commit names its repository itself (git -C, --git-dir or --work-tree), which the placement check does not read; cd into that repository and commit there"
           return 0 ;;
         -c|--namespace|--exec-path|--config-env|--super-prefix) shift; [ $# -gt 0 ] && shift ;;
         -*) shift ;;

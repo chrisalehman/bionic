@@ -472,7 +472,7 @@ command: %s
       exit 1
     fi
     if [ -n "$PF_QUESTION" ] && ! proof_question_ok "$PF_QUESTION"; then
-      die "REFUSED — '$(clean "$PF_QUESTION")' is not a reading question: name evidence, adversarial or structure. The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_QUESTION")' is not a review question: name evidence, adversarial or structure. The plan is unchanged."
       exit 1
     fi
     # THE READER'S NAME IS MATCHED AS TYPED (wave-27 T41; review pass 10 F3): letters, digits, `_`
@@ -480,7 +480,7 @@ command: %s
     # escape a reader of it might decode, and no character the space-separated line cannot hold.
     case "$PF_READER" in
       *[!"$PV_ID_ALNUM"_-]*)
-        die "REFUSED — the reader name '$(clean "$PF_READER")' carries a character outside A-Z, a-z, 0-9, _ and -, and a reader name is matched byte for byte against its roster row; name the reader as its roster row does. The plan is unchanged."
+        die "REFUSED — the reviewer name '$(clean "$PF_READER")' carries a character outside A-Z, a-z, 0-9, _ and -, and a reviewer name is matched byte for byte against its roster row; name the reviewer as its roster row does. The plan is unchanged."
         exit 1 ;;
     esac
     plan_verb_open proof-add
@@ -607,16 +607,16 @@ PF_EVIDS_LIST
 *}"
       case "$PF_ROLE" in
         none)
-          die "REFUSED — no roster row on this machine names the reader $(clean "$PF_READER"), so nothing records it as a reader; register a reading under the name its dispatch recorded. The plan is unchanged."
+          die "REFUSED — no roster row on this machine names the reviewer $(clean "$PF_READER"), so nothing records it as a reviewer; register a review under the name its dispatch recorded. The plan is unchanged."
           exit 1 ;;
         writer*)
-          die "REFUSED — the reader $(clean "$PF_READER") has a roster row of role $(clean "${PF_ROLE#*	}"), which is not a reader role ($PROOF_READER_ROLES); a reading is registered for a reader, never a writer. The plan is unchanged."
+          die "REFUSED — the reviewer $(clean "$PF_READER") has a roster row of role $(clean "${PF_ROLE#*	}"), which is not a reviewer role ($PROOF_READER_ROLES); a review is registered for a reviewer, never a writer. The plan is unchanged."
           exit 1 ;;
         undealt)
-          die "REFUSED — the reader $(clean "$PF_READER") was not dealt the $PF_QUESTION question (the questions= of its roster row does not name it); register the reading for the reader dealt it. The plan is unchanged."
+          die "REFUSED — the reviewer $(clean "$PF_READER") was not dealt the $PF_QUESTION question (the questions= of its roster row does not name it); register the review for the reviewer dealt it. The plan is unchanged."
           exit 1 ;;
         intended)
-          die "REFUSED — the reader $(clean "$PF_READER") dealt the $PF_QUESTION question has no roster row past status=intended: its launch was recorded and never started, so it read nothing; register the reading once its agent has run. The plan is unchanged."
+          die "REFUSED — the reviewer $(clean "$PF_READER") dealt the $PF_QUESTION question has no roster row past status=intended: its launch was recorded and never started, so it read nothing; register the review once its agent has run. The plan is unchanged."
           exit 1 ;;
       esac
       PF_OWN=""
@@ -628,7 +628,7 @@ PF_EVIDS_LIST
 $(printf '%s\n' "$PF_LOOK" | sed 1d)
 PF_OWN_LIST
       if [ -z "$PF_OWN" ]; then
-        die "REFUSED — the record $(clean "$PF_REL") was not written by the reader $(clean "$PF_READER"): no roster row of that reader names it as its deliverable= or among its files=, and a reading is the record its reader was dispatched to write; register it under the reader whose row names it. The plan is unchanged."
+        die "REFUSED — the record $(clean "$PF_REL") was not written by the reviewer $(clean "$PF_READER"): no roster row of that reviewer names it as its deliverable= or among its files=, and a review is the record its reviewer was dispatched to write; register it under the reviewer whose row names it. The plan is unchanged."
         exit 1
       fi
       # A RECORD IS ONE READER'S (wave-27 T45; review pass 16 finding 2). A pass carries no reader of
@@ -663,7 +663,7 @@ $(PF_WANT="$PF_READER" PF_OPEN="$_pf_open" awk "$_ROSTER_OPEN_AWK"'
 PF_OTHER_LIST
       done
       if [ -n "$PF_OTHER" ]; then
-        die "REFUSED — the record $(clean "$PF_REL") is also named by the roster row $(clean "$PF_OTHER") as its deliverable= or among its files=; a reading record is one reader's, so each reader writes a record of its own. The plan is unchanged."
+        die "REFUSED — the record $(clean "$PF_REL") is also named by the roster row $(clean "$PF_OTHER") as its deliverable= or among its files=; a review record is one reviewer's, so each reviewer writes a record of its own. The plan is unchanged."
         exit 1
       fi
       PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
@@ -755,12 +755,12 @@ PF_PAIRS_LIST
         PF_BASEWHY="it names no base-sha:"
         if [ -n "$PF_BASE" ] && ! proof_base_id "$PF_BASE"; then PF_BASEWHY="its base-sha: $(clean "$PF_BASE") is not a commit id"
         elif [ -n "$PF_BASE" ]; then PF_BASEWHY="its base-sha: $(clean "$PF_BASE") is no commit here"; fi
-        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but $PF_BASEWHY, so nothing shows it read from the start of the run; add base-sha: <the commit the work started from> to the frontmatter of $PV_PLAN, or write scope: piece. The plan is unchanged."
+        die "REFUSED — the review $(clean "$PF_REL") says scope: whole, but $PF_BASEWHY, so nothing shows it read from the start of the run; add base-sha: <the commit the work started from> to the frontmatter of $PV_PLAN, or write scope: piece. The plan is unchanged."
         exit 1
       fi
       PF_FROMH="$(git -C "$PV_REPO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
       if [ -z "$PF_FROMH" ] || ! git -C "$PV_REPO" merge-base --is-ancestor "$PF_FROMH" "$PF_BASEH" 2>/dev/null; then
-        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but its range starts at $(clean "$(printf '%s' "${PF_FROMH:-$PF_FROM}" | cut -c1-12)"), past the plan's base ${PF_BASEH:0:12}; a whole reading reads from the base, so write reviewed: ${PF_BASEH:0:12}..<b>, or scope: piece. The plan is unchanged."
+        die "REFUSED — the review $(clean "$PF_REL") says scope: whole, but its range starts at $(clean "$(printf '%s' "${PF_FROMH:-$PF_FROM}" | cut -c1-12)"), past the plan's base ${PF_BASEH:0:12}; a whole review reads from the base, so write reviewed: ${PF_BASEH:0:12}..<b>, or scope: piece. The plan is unchanged."
         exit 1
       fi
     fi
@@ -843,7 +843,7 @@ $PF_PLANL"
     if [ "$PF_KIND" = review ] && [ -n "$PF_QUESTION" ]; then
       case "$PF_RESULT" in
         fail) proof_owed open "waive:$PF_QUESTION" "waiver: $PF_QUESTION" \
-                "proof-add: the $PF_QUESTION reading $PF_REL failed at ${PF_HEAD:0:12}: fix it, or waive $PF_QUESTION" ;;
+                "proof-add: the $PF_QUESTION review $PF_REL failed at ${PF_HEAD:0:12}: fix it, or waive $PF_QUESTION" ;;
         pass) proof_owed close "waive:$PF_QUESTION" "passing reading" ;;
       esac
     fi
@@ -851,7 +851,7 @@ $PF_PLANL"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l"; done
-    [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that reading."
+    [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
   }
@@ -1005,13 +1005,13 @@ $PF_PLANL"
       /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
       insdlc && /^proved:[ \t]/ { m = split($0, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] == "evidence=" ev) hit = 1 }
       END { exit !hit }' "$PV_PLAN"; then
-      die "REFUSED — $(clean "$FM_REC") is no reading registered under ## SDLC State (no proved: line names it as its evidence), and only a registered finding is moved; the plan is unchanged."
+      die "REFUSED — $(clean "$FM_REC") is no review registered under ## SDLC State (no proved: line names it as its evidence), and only a registered finding is moved; the plan is unchanged."
       exit 1
     fi
     FM_DOCS="$(docs_root "$PV_REPO")"
     FM_F="$(proof_findings "$FM_DOCS/$FM_REC" 2>/dev/null | awk -F'\t' -v n="$FM_N" '$1 == n { print; exit }')"
     if [ -z "$FM_F" ]; then
-      die "REFUSED — the reading $(clean "$FM_REC") holds no finding $FM_N (read as $(clean "$FM_DOCS/$FM_REC")); the plan is unchanged."
+      die "REFUSED — the review $(clean "$FM_REC") holds no finding $FM_N (read as $(clean "$FM_DOCS/$FM_REC")); the plan is unchanged."
       exit 1
     fi
     IFS='	' read -r _ FM_S FM_R _ _ _ FM_TITLE <<FM_FINDING
@@ -1145,7 +1145,7 @@ FM_FINDING
       [ -n "$DSP_EV" ] || continue
       DSP_NR=$((DSP_NR + 1))
       if ! DSP_GOT="$(proof_findings "$DSP_DOCS/$DSP_EV" 2>&1)"; then
-        say "reading $(clean "$DSP_EV") ($DSP_Q) cannot be read: $(clean "$DSP_GOT")"
+        say "review $(clean "$DSP_EV") ($DSP_Q) cannot be read: $(clean "$DSP_GOT")"
         continue
       fi
       _proof_fixed_var "$DSP_FIXED" "$DSP_EV" "$DSP_H" "$PV_REPO"
@@ -1220,7 +1220,7 @@ DSP_FINDINGS
     done <<DSP_READINGS
 $DSP_READS
 DSP_READINGS
-    say "disposition — $DSP_NF findings in $DSP_NR registered readings; $DSP_NP need the person's ruling (disposition <record>#<n> fix|defer '<their words>' '<why>' ['<changelog sentence>'])."
+    say "disposition — $DSP_NF findings in $DSP_NR registered reviews; $DSP_NP need the person's ruling (disposition <record>#<n> fix|defer '<their words>' '<why>' ['<changelog sentence>'])."
     exit 0
   }
 
@@ -1708,7 +1708,7 @@ DSP_READINGS
       mkdir -p "${DEBT_FILE%/*}" 2>/dev/null
     fi
     if [ ! -d "${DEBT_FILE%/*}" ] || { [ "$DEBT_SUB" != add ] && [ "$DEBT_SUB" != adopt ] && [ ! -f "$DEBT_FILE" ]; }; then
-      die "REFUSED — no debt ledger at $DEBT_REL; debt add writes it from a reading's debt: lines."
+      die "REFUSED — no debt ledger at $DEBT_REL; debt add writes it from a review's debt: lines."
       exit 1
     fi
     launch_sync_lock "$DEBT_FILE.lock" yes; DEBT_LRC=$?

@@ -1475,6 +1475,13 @@ width.test.sh | §Section 3b | keep | payload/scripts/lib/width.sh bionic_trunc:
 width.test.sh | §Section 4 | keep | payload/scripts/lib/width.sh bionic_line: the cut taken from the instruction instead of the label, so " → run /bionic:setup" does not survive (9) | none (searched 'bionic_line' in tests/)
 width.test.sh | §Section 5 | keep | payload/scripts/lib/width.sh bionic_wrap: an over-long word dropped instead of split at the budget (13) | none (searched 'bionic_wrap' in tests/; doctor-version.test.sh reads doctor's rows, not the fold)
 
+## words.test.sh
+
+words.test.sh | §TEXTS | keep | rule: lint — a review-sense "reader", "readers", "readings" or noun "reading" (or "no reader for") written into a skill, command, agent or context text, an agents-src source, or a string hooks/poker/*.sh, lib/plan.sh, lib/proof.sh, lib/walls.sh, lib/units.sh or hooks/dispatch-preflight.sh prints, so the sweep names the line | none (searched 'readers?' and 'reading' refusals in tests/; decision-skill.test.sh words_ok refuses other words, in skills/decision only)
+words.test.sh | §PLANT | keep | tests/words.test.sh words_surfaces: a surface or a whole class dropped from the list, or words_text reading nothing of one file kind, so the "reader" planted in that file passes | none (searched 'words_surfaces' in tests/)
+words.test.sh | §SENSE | keep | tests/words.test.sh words_refused: the determiner rule or the placeholder read dropped, so "the $q reading" or "${q:-a reading}" passes; or words_text's comment cut or code-span cut dropped, so a code comment or a `--reader` flag is refused | none (searched 'words_refused' in tests/)
+words.test.sh | §ALLOW | keep | rule: lint — an allow entry with no reason, with no refused word in its string, or left behind after its line was reworded, so the sweep names it | none (searched 'WORDS_ALLOW' in tests/)
+
 ## worktree.test.sh
 
 worktree.test.sh | §Group 1 | duplicate | payload/scripts/lib/worktree.sh: worktree_land_for_session, worktree_checkout_of or worktree_lease_overruns renamed or the file made unparseable | worktree.test.sh §Group 3

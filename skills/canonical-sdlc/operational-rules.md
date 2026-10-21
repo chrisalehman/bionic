@@ -65,7 +65,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 |---|---|
 | approval | `approved: <name> by <who> <ISO-UTC> head=<40-hex> "<reply>"`, written by `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim, at the working head |
 | proof | `proved: kind=<regression\|review\|task\|check> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`, written by `session-poker.sh proof-add <kind> <evidence>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
-| reading | `proof-add review <record> --question <q> --reader <name>` adds ` question=<q> reader=<name> result=<pass\|flag\|fail> scope=<piece\|whole>`; the reader's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
+| review | `proof-add review <record> --question <q> --reader <name>` adds ` question=<q> reader=<name> result=<pass\|flag\|fail> scope=<piece\|whole>`; the reviewer's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
 | declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and the `kind=check` line (` result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |
 | declared regression | `regression-command:` (run by `regression-run`) in `.bionic/config.yaml`, its record `steps/5.md`'s; with neither, the regression is `tests/run.sh`'s whole run |
 | landing record | `<docs-root>/record/<plan name less .plan.md>/landing-proofs.log`, appended by `ready` and the hand landing (`spawn-worktree.sh land <tree> --by-hand --reason '<why>'`), never rewritten: one `line/v1\|ev=<act>\|…` line per act, and per publish a `landed: row=<id> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>` header. A row's landing is the `merge=` of its last header. An unwritable record refuses `why=proofs-unwritable` |
@@ -121,7 +121,7 @@ or lets it stand.
 
 ### The ownership table
 
-The load-bearing row of the section, and the only part later steps consume mechanically: the `structure` checks `reuse` and `one-site` anchor on the owner column, and the `structure` reader reads the agreement-test column back. Shape:
+The load-bearing row of the section, and the only part later steps consume mechanically: the `structure` checks `reuse` and `one-site` anchor on the owner column, and the `structure` reviewer reads the agreement-test column back. Shape:
 
 ```
 | concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
@@ -177,7 +177,7 @@ SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-s
 
 ## Debt ledger
 
-Findings are classed by payment date, not by reader: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
+Findings are classed by payment date, not by reviewer: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
 
 **The file.** `<docs-root>/record/<run>/debt.md`, under the header:
 
@@ -193,7 +193,7 @@ one line per item, its last cell `—` while open and `burned <row>` once a row 
 
 **The verbs.** `session-poker.sh debt` is the ledger's one writer, each subcommand taking the plan last, or the session's bound run:
 
-- `debt add <reading record>` writes a line per debt line of a reading, each concept and kind once.
+- `debt add <review record>` writes a line per debt line of a review, each concept and kind once.
 - `debt touched <concept>` adds one to the touches of each unburned item of the concept.
 - `debt burn <concept> <row>` writes `burned <row>`.
 - `debt list` prints the items.
