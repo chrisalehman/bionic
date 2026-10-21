@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (decline,
 # budget, amend, task-add, task-set, ledger-add, ledger-set, step-line, step-field, matrix-render, discharge,
-# matrix-set, tasks-prose, epic-row, continuation-fill, brief, task-split, review-results, reply).
+# matrix-set, tasks-prose, epic-row, continuation-fill, brief, task-split, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -2402,13 +2402,13 @@ BRF_EOF
     exit 0
   }
 
-  # ---------------------------------------------------------------- the review results page
+  # ---------------------------------------------------------------- the release approval card
   #
-  # THE PAGE THE AUTONOMOUS HALF WAITS ON. `review-results [--preview] [--against <key>]... [<plan>]` renders, from
+  # THE PAGE THE AUTONOMOUS HALF WAITS ON. `release-approval [--preview] [--against <key>]... [<plan>]` renders, from
   # the record and nothing else, what the run reached, what the machine proved, what the readers judged and what is
   # the user's, in that order, each line folded at 92 columns (`sitrep_fold`), a blank line between sections:
   #
-  #   Review results · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
+  #   Release approval · <project> <release> · <weekday> <H:MM AM/PM> · head <8> · <k> of <m> tasks landed
   #   Bottom line   whether every check holds, the criteria not proved, what is owed, the recommendation
   #   Goals         each goal the plan declares, its mark and its reading, reached ones included
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
@@ -2425,17 +2425,18 @@ BRF_EOF
   #
   # THE ACTING RENDER. On the session's bound run, when `card.sh early` holds, the page is printed, each approval and
   # waiver it puts is opened on the person's ledger, and the page is written beside the run's records as
-  # `review-results-<head8>.md` with its replay table, which `reply` reads:
+  # `release-approval-<head8>.md` with its replay table, which `reply` reads:
   #
-  #   review-results/v1|plan=<plan>|head=<40-hex>|at=<ISO>|decisions=<n>
-  #   review-results/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|choices=<word>/<word>|why=<why|->
+  #   release-approval/v1|plan=<plan>|head=<40-hex>|at=<ISO>|decisions=<n>
+  #   release-approval/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|choices=<word>/<word>|why=<why|->
   #
   # `choices=` holds the word a reply names each choice by, the default's then the other's: the first word of its label.
   #
   # Early, it prints `CARD-EARLY — <reason>` on stderr, exit 1, and writes nothing. `--preview` renders the page
   # whatever the facts, the reason first when it is early, and records no page and opens no item. REFUSED (1),
   # nothing written: a plan that is not the bound run, a branch naming no commit, an `--against` naming nothing the
-  # page holds.
+  # page holds. A page written under the card's old name (`$RR_OLD_VERB`, set in session-poker.sh) is read all the same, by
+  # `reply` and the situation report, and is never written again: only the new stem and tag are written.
   rr_field() {  # <disposition line> <name> -> the value of name="…" or of name=<word>
     local l="$1" n="$2" v
     case "$l" in
@@ -2503,7 +2504,7 @@ BRF_EOF
 
   rr_carried() {  # <record dir> <finding id> -> 0 when a replied page of this run applied its carry
     local f
-    for f in "$1"/review-results-*.md; do
+    for f in "$1"/release-approval-*.md "$1/$RR_OLD_VERB"-*.md; do
       [ -f "$f" ] || continue
       /usr/bin/grep -qxF "applied: finding:$2 carried" "$f" 2>/dev/null && return 0
     done
@@ -2537,7 +2538,7 @@ BRF_EOF
     local i k p l g n t sub lab
     local -a ph=() ap=() wv=() rn=()
     {
-      printf '0\tReview results · %s%s · %s · head %s%s\n' "$RR_PROJ" "${RR_REL:+ $RR_REL}" \
+      printf '0\tRelease approval · %s%s · %s · head %s%s\n' "$RR_PROJ" "${RR_REL:+ $RR_REL}" \
         "$(sitrep_date "$(sitrep_now)" '%A %-I:%M %p')" "$RR_H8" \
         "$([ "$RR_TOTAL" -gt 0 ] && printf ' · %d of %d tasks landed' "$RR_LANDED" "$RR_TOTAL")"
       printf '0\t\n0\tBottom line\n'
@@ -2636,17 +2637,17 @@ RR_ASIDE_EOF
 
   rr_record() {  # <page text> -> writes the page and its replay table beside the run's records; prints nothing
     local f n=2 i
-    f="$RR_DIR/review-results-$RR_H8.md"
+    f="$RR_DIR/release-approval-$RR_H8.md"
     while [ -f "$f" ] && /usr/bin/grep -q '^replied: ' "$f" 2>/dev/null; do
-      f="$RR_DIR/review-results-$RR_H8-$n.md"; n=$((n + 1))
+      f="$RR_DIR/release-approval-$RR_H8-$n.md"; n=$((n + 1))
     done
     mkdir -p "$RR_DIR" 2>/dev/null || return 0
     [ ! -L "$f" ] || return 0
     {
       printf '%s\n\n## Replay\n\n' "$1"
-      printf 'review-results/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "$(iso_now)" "$RR_N"
+      printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "$(iso_now)" "$RR_N"
       for ((i = 0; i < RR_N; i++)); do
-        printf 'review-results/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
+        printf 'release-approval/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
           "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "$(rr_word "${RR_DLAB[$i]}")" "$(rr_word "${RR_OLAB[$i]}")" "${RR_WHYS[$i]}"
       done
     } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
@@ -2654,26 +2655,26 @@ RR_ASIDE_EOF
     return 0
   }
 
-  poker_verb_review_results() {
+  poker_verb_release_approval() {
     local nm line key reply ac st au wl why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1; then
-      die "REFUSED — the review results are read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       exit 2
     fi
-    plan_verb_open review-results
+    plan_verb_open release-approval
     if [ -n "$RR_ARG" ]; then
       nm="$(cd "$(dirname "$RR_ARG")" 2>/dev/null && pwd -P)/$(basename "$RR_ARG")"
       line="$(cd "$(dirname "$PV_PLAN")" 2>/dev/null && pwd -P)/$(basename "$PV_PLAN")"
       if [ "$nm" != "$line" ]; then
-        die "REFUSED — '$(clean "$RR_ARG")' is not the run this session is bound to ($PV_PLAN); the review results are the bound run's, and nothing is written."
+        die "REFUSED — '$(clean "$RR_ARG")' is not the run this session is bound to ($PV_PLAN); the release approval card is the bound run's, and nothing is written."
         exit 1
       fi
     fi
     RR_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || RR_HEAD=""
     case "$RR_HEAD" in
       [0-9a-f]*) : ;;
-      *) die "REFUSED — the plan's working branch names no commit, so there is no head to render the review results at; nothing is written."; exit 1 ;;
+      *) die "REFUSED — the plan's working branch names no commit, so there is no head to render the release approval card at; nothing is written."; exit 1 ;;
     esac
     RR_H8="${RR_HEAD:0:8}"
     RR_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
@@ -2780,7 +2781,7 @@ RR_ROWS
         [ "$state" = fixed ] || [ -z "$dec" ] || sent="$sent (not landed yet)"
         dec=""
       elif printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" && ! rr_carried "$RR_DIR" "$fid"; then
-        rr_add finding "finding:$fid" "-" "finding-move $fid fix" "the review results: fixed instead of carried" \
+        rr_add finding "finding:$fid" "-" "finding-move $fid fix" "the release approval card: fixed instead of carried" \
           "$sent (${q:-a reading} #$num)" carry "fix now, one row" "carry ${q:-a} finding $num" "fix ${q:-a} finding $num"
         grp=A; dec="$RR_N"
       else
@@ -2818,7 +2819,7 @@ RR_DISP_EOF
       [ -n "$key" ] || continue
       rr_dec_of "$key" >/dev/null && continue
       printf '%s' "$RR_FIDS" | /usr/bin/grep -qxF -- "$key" && continue
-      die "REFUSED — --against $(clean "$key") names nothing the review results hold; nothing is written."
+      die "REFUSED — --against $(clean "$key") names nothing the release approval card holds; nothing is written."
       exit 1
     done <<RR_AGAINST_EOF
 $RR_AGAINST
@@ -2880,14 +2881,14 @@ RR_AGAINST_EOF
       key="${RR_KEY[$num]}"
       case "$key" in
         approve:*|waive:*) OWED_ROOT="$PV_REPO" owed_open "$key" "${RR_KIND[$num]}: ${key#*:}" \
-          "poker: ${key#*:} is decision $((num + 1)) on the review results at $RR_H8" >/dev/null 2>&1 || : ;;
+          "poker: ${key#*:} is decision $((num + 1)) on the release approval card at $RR_H8" >/dev/null 2>&1 || : ;;
       esac
     done
     [ "$RR_N" -eq 0 ] || rr_record "$RR_TEXT"
     exit 0
   }
 
-  # THE REPLY TO THE REVIEW RESULTS, REPLAYED. `review-results` writes the page with its replay table, one line per
+  # THE REPLY TO THE RELEASE APPROVAL CARD, REPLAYED. `release-approval` writes the page with its replay table, one line per
   # decision with its default, its other choice and the recommendation (`pick=`); the user answers it once, and
   # this verb replays that answer into the record with the user's words. `all default` takes every default, `all
   # recommended` every recommendation. Or the reply orders the decisions by number, items split by commas: `<n>
@@ -2927,7 +2928,7 @@ RR_AGAINST_EOF
       fi
       row="$(printf '%s\n' "$RP_TABLE" | /usr/bin/grep -m1 -F "|dec=$n|")"
       if [ -z "$row" ]; then
-        die "REFUSED — the reply's item \"$it\" names decision $n, and the review results hold decisions 1 to $k; nothing is applied and the plan is unchanged."
+        die "REFUSED — the reply's item \"$it\" names decision $n, and the release approval card holds decisions 1 to $k; nothing is applied and the plan is unchanged."
         return 1
       fi
       case "$RP_PICKS" in *" $n="*)
@@ -2970,25 +2971,25 @@ RR_AGAINST_EOF
     plan_verb_open reply
     RP_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
     # The newest page by its time of writing: a re-render at a head writes over that head's page, a later head's is newer.
-    # shellcheck disable=SC2012  # page names are review-results-<hex>[-<n>].md, no blank or line break in any
-    RP_CARD="$(ls -t "$RP_DIR"/review-results-*.md 2>/dev/null | head -1)"
+    # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, or the old stem's, no blank or line break in any
+    RP_CARD="$(ls -t "$RP_DIR"/release-approval-*.md "$RP_DIR/$RR_OLD_VERB"-*.md 2>/dev/null | head -1)"
     if [ -z "$RP_CARD" ] || [ ! -f "$RP_CARD" ] || [ -L "$RP_CARD" ]; then
-      die "REFUSED — no review results are recorded for $PV_PLAN: render them with review-results, show the page to the user, and replay their reply; the plan is unchanged."
+      die "REFUSED — no release approval card is recorded for $PV_PLAN: render it with release-approval, show the page to the user, and replay their reply; the plan is unchanged."
       exit 1
     fi
-    RP_HDR="$(/usr/bin/grep -m1 '^review-results/v1|plan=' "$RP_CARD" 2>/dev/null)"
+    RP_HDR="$(/usr/bin/grep -m1 -E "^(release-approval|$RR_OLD_VERB)/v1\|plan=" "$RP_CARD" 2>/dev/null)"
     RP_RHEAD="${RP_HDR#*|head=}"; RP_RHEAD="${RP_RHEAD%%|*}"
     RP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || RP_HEAD=""
     if [ -z "$RP_HDR" ] || [ "$RP_RHEAD" != "$RP_HEAD" ]; then
-      die "REFUSED — the review results $RP_CARD were rendered at $(printf '%.8s' "${RP_RHEAD:-(no head)}") and the working head is $(printf '%.8s' "${RP_HEAD:-(none)}") now: render them again with review-results and show that page to the user; the plan is unchanged."
+      die "REFUSED — the release approval card $RP_CARD was rendered at $(printf '%.8s' "${RP_RHEAD:-(no head)}") and the working head is $(printf '%.8s' "${RP_HEAD:-(none)}") now: render it again with release-approval and show that page to the user; the plan is unchanged."
       exit 1
     fi
     if /usr/bin/grep -q '^replied: ' "$RP_CARD" 2>/dev/null; then
-      die "REFUSED — the review results $RP_CARD are already answered ($(clean "$(/usr/bin/grep -m1 '^replied: ' "$RP_CARD")")); render them again for what is still open; the plan is unchanged."
+      die "REFUSED — the release approval card $RP_CARD is already answered ($(clean "$(/usr/bin/grep -m1 '^replied: ' "$RP_CARD")")); render it again for what is still open; the plan is unchanged."
       exit 1
     fi
     RP_NORM="$(printf '%s' "$RP_TEXT" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]"]*//' -e 's/[[:space:]".!]*$//' -e 's/[[:space:]][[:space:]]*/ /g')"
-    RP_TABLE="$(/usr/bin/grep '^review-results/v1|dec=' "$RP_CARD" 2>/dev/null)"
+    RP_TABLE="$(/usr/bin/grep -E "^(release-approval|$RR_OLD_VERB)/v1\|dec=" "$RP_CARD" 2>/dev/null)"
     case "$RP_NORM" in
       'all default'|'all defaults') RP_HOW=all-default; RP_REST=default; RP_PICKS=" " ;;
       'all recommended') RP_HOW=all-recommended; RP_REST=recommended; RP_PICKS=" " ;;
@@ -2996,7 +2997,7 @@ RR_AGAINST_EOF
     esac
     user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
     if [ "$RP_SAID" -ne 0 ]; then
-      said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the review results"
+      said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the release approval card"
       exit 1
     fi
     RP_DONE=0; RP_HELD=0
@@ -3040,7 +3041,7 @@ $RP_TABLE
 RP_TABLE
     printf 'replied: at=%s reply=%s words="%s"\n' "$(iso_now)" "$RP_HOW" "$(clean "$RP_TEXT")" >> "$RP_CARD"
     if [ "$RP_HELD" -gt 0 ]; then
-      say "reply — \"$(clean "$RP_TEXT")\" replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded, $RP_HELD held back; render the review results again once what is held is settled."
+      say "reply — \"$(clean "$RP_TEXT")\" replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded, $RP_HELD held back; render the release approval card again once what is held is settled."
     else
       say "reply — \"$(clean "$RP_TEXT")\" replayed from $RP_CARD on the user's words: $RP_DONE decision(s) recorded; nothing on the page is left open."
     fi

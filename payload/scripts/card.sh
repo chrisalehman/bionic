@@ -49,7 +49,7 @@
 #     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
-#     bash card.sh early <plan>                         (the CARD-EARLY line, or what the review results settle)
+#     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
 #
 # One row per input line, cells separated by TABS, in the card's own column order.
 # A missing trailing cell renders empty rather than refusing: a card is a display,
@@ -2097,9 +2097,9 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   return 0
 }
 
-# ── WHETHER THE REVIEW RESULTS PAGE MAY RENDER ───────────────────────────────
+# ── WHETHER THE RELEASE APPROVAL CARD MAY RENDER ───────────────────────────────
 #
-# The page itself is `session-poker.sh review-results`; this file keeps the one owner of the three facts it is
+# The page itself is `session-poker.sh release-approval`; this file keeps the one owner of the three facts it is
 # refused on, because the tick asks them too. `early <plan>` asks, cheapest first: an open reader row on the
 # session's roster (an auditor or a critic, not acked), an owed reading unregistered at the working head
 # (lib/units.sh `_units_readings_state`, the tick's own reading), and `current <N> --check` for 6, 7 and 8 (the
@@ -2122,13 +2122,13 @@ _card_early_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ER
   local bound=""
   CF_ERR=""
   CF_SID="${CLAUDE_CODE_SESSION_ID:-}"
-  [ -n "$CF_SID" ] || { CF_ERR="no session key (CLAUDE_CODE_SESSION_ID is unset), and the review results are a session's own run"; return 1; }
+  [ -n "$CF_SID" ] || { CF_ERR="no session key (CLAUDE_CODE_SESSION_ID is unset), and the release approval card is a session's own run"; return 1; }
   CF_PLAN="$(_card_phys "$1")" || { CF_ERR="no plan at '$1'"; return 1; }
   CF_ROOT="$(project_root "${CF_PLAN%/*}" 2>/dev/null)"
   [ -n "$CF_ROOT" ] || { CF_ERR="'$1' is under no project root"; return 1; }
   bound="$(session_plan "$CF_ROOT" "$CF_SID" 2>/dev/null)" && bound="$(_card_phys "$bound" 2>/dev/null)" || bound=""
   [ "$bound" = "$CF_PLAN" ] || {
-    CF_ERR="'$1' is not the run this session is bound to (${bound:-none}); the review results check the bound run"
+    CF_ERR="'$1' is not the run this session is bound to (${bound:-none}); the release approval card checks the bound run"
     return 1
   }
   CF_HEAD="$(proof_branch_head "$CF_PLAN" "$CF_ROOT" 2>/dev/null)" || CF_HEAD=""
@@ -2290,7 +2290,7 @@ case "$1" in
     _card_inherited "$2" | awk -F '\t' '$1 == "open" && index($2, "debt: ") == 1 { print substr($0, 6) }'
     exit 0 ;;
   early)
-    # Whether the review results page may render: the three facts, and what a red check owes that the page settles.
+    # Whether the release approval card may render: the three facts, and what a red check owes that the page settles.
     [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one plan path (got $(( $# - 1 )))"
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
     _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }

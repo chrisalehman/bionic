@@ -155,7 +155,7 @@ A reply that names a form gets that form directly, with no form in between. The 
 
 - Any decision put to the user, at any step and with no run open. The requirements interview and the design interview are its heaviest users.
 - Small decisions may share a turn, at your discretion, when they make sense together: each in the full shape, with its own number and reply line. A momentous decision always goes alone.
-- Approvals and reversible calls stay out. Approvals wait for the final card. A reversible call is yours: make it and say so.
+- Approvals and reversible calls stay out. Approvals wait for the release approval card. A reversible call is yours: make it and say so.
 - A settled decision, one the run's design ledger records, is put again only as `reopening D<n>: <one sentence of new evidence>`; with no new evidence, the ruling stands.
 
 During a run, a decision is put with one command before it is shown: `bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'`. It writes the put line to `record/<wave>/design-ledger.md`, the run's register, and prints a `wait:` line: what changes if the decision is answered in an hour rather than now, computed from the tasks that wait on it and the longest chain. That line ends Significance as printed, never typed. Each put is a round, so a re-put or a reopening is put the same way. Once ruled, the decision is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` delta in the same ledger, which closes the round. With no run open, nothing is written. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.
