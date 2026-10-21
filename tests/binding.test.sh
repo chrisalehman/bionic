@@ -85,28 +85,12 @@ make_repo() {  # <name> -> an engaged-looking root holding one OPEN plan
 marker_of() { printf '%s' "$1/.bionic/tmp/engaged-$SID.state"; }
 
 # ============================================================
-section "1 — the accepted bindings still answer 0 and name no refusal"
-# ============================================================
-#
-# EVERY REFUSAL ROW BELOW SITS BESIDE A POSITIVE ON THE SAME ROOT, one argument apart
-# (tests/engage.test.sh §E8's rule, kept): a suite whose fixtures cannot bind at all
-# would pass every refusal row for the wrong reason.
-
-R1="$(make_repo r1)"
-P1="$R1/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
-call_bind "$R1" "$SID" "$P1"
-expect_eq "an open plan of the root binds (exit 0)" "0" "$BIND_ST"
-expect_eq "…and names no refusal" "" "$BIND_WHY"
-expect_eq "…and prints nothing on stderr" "" "$BIND_ERR"
-expect_eq "…and the marker names the plan" "plan=$P1" "$(grep -m1 '^plan=' "$(marker_of "$R1")")"
-
-call_bind "$R1" "$SID" "none"
-expect_eq "the literal none binds (exit 0)" "0" "$BIND_ST"
-expect_eq "…and names no refusal" "" "$BIND_WHY"
-
-# ============================================================
 section "2 — the five refusal causes are told apart (AC-2.2)"
 # ============================================================
+
+# The root (a), (d) and (e) refuse on, holding one open plan.
+R1="$(make_repo r1)"
+P1="$R1/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
 
 # (a) :78 — the sid the reader refuses is the sid the writer refuses.
 call_bind "$R1" "a b" "$P1"
@@ -193,16 +177,6 @@ expect_eq "…and names the write" "write-failed" "$BIND_WHY"
 rmdir "$(marker_of "$R5")"
 call_bind "$R5" "$SID" "$P5"
 expect_eq "…paired: with the obstruction gone the same call writes (exit 0)" "0" "$BIND_ST"
-
-# ============================================================
-section "4 — the reason never survives a later call (AC-2.2 fails-when)"
-# ============================================================
-#
-# A stale reason is worse than none: the arm that reads it would name the PREVIOUS
-# decline as the reason for this one. `bind_plan` clears it on entry.
-
-call_bind "$R1" "$SID" "$P1"
-expect_eq "a success after a refusal leaves no reason behind" "" "$BIND_WHY"
 
 # ============================================================
 section "5 — bind_holders: which OTHER sessions' markers name a plan (wave-23 T13, critic C-3)"

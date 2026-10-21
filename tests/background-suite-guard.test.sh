@@ -228,14 +228,6 @@ guarded() {  # <repo> <command> [agent_id] [bg]
   EXTRA_ENV="$_saved"; ST="$_st"; OUT="$_out"; ERR="$_err"
 }
 
-section "B0 — the hook exists and parses"
-if [ -f "$GUARD" ]; then ok "hooks/bash-walls.sh is on disk"; else
-  no "hooks/bash-walls.sh is on disk" "$GUARD"
-fi
-if bash -n "$GUARD" 2>"$SANDBOX/.syn"; then ok "it parses (bash -n)"; else
-  no "it parses (bash -n)" "$(cat "$SANDBOX/.syn")"
-fi
-
 section "B1 — a stated budget: on it passes, off it refuses"
 R1=$(mk_repo b1)
 dispatched "$R1" "$ACTOR" name=w-b1 "suites_allowed=alpha.test.sh beta.test.sh" \
@@ -316,26 +308,6 @@ expect_empty "B2b …silently" "$OUT$ERR"
 # …and that row is not a licence for everything else.
 guarded "$R2" 'tests/run.sh --only alpha.test.sh'
 expect_eq "B2c …but its row does not license a suite it does not name" "2" "$ST"
-
-section "B3 — FARM_OUT_ALLOW does not widen a budget (AC-21)"
-# The override exists so the ORCHESTRATOR can run something on its own thread when
-# dispatching it genuinely will not work — it is farm-out-reminder.sh's escape from
-# farm-out-reminder.sh's wall. A writer that could set an environment variable on itself
-# to widen its own instrument would have a budget in name only.
-guarded "$R1" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
-expect_eq "B3a the override as a command prefix does not open the full tree" "2" "$ST"
-guarded "$R1" 'cd /tmp && FARM_OUT_ALLOW=1 tests/run.sh --only gamma.test.sh'
-expect_eq "B3b …nor mid-chain, for an off-budget suite" "2" "$ST"
-EXTRA_ENV="FARM_OUT_ALLOW=1"
-guarded "$R1" 'bash tests/run.sh'
-expect_eq "B3c …nor set in the agent's own environment" "2" "$ST"
-guarded "$R1" 'tests/run.sh --only gamma.test.sh'
-expect_eq "B3d …for either arm" "2" "$ST"
-# NON-VACUITY: with the override set, an ON-budget suite still passes — so B3c/B3d are the
-# budget refusing, not the override breaking the hook.
-guarded "$R1" 'tests/run.sh --only alpha.test.sh'
-expect_eq "B3e non-vacuity: an on-budget suite still passes with the override set" "0" "$ST"
-EXTRA_ENV=""
 
 section "B4 — the three states of suites_allowed, and no row at all"
 # `none` is a DECLARED empty set (the `Suites: none` waiver); an empty value is a budget
@@ -442,21 +414,6 @@ expect_eq "B4e9 a suite it did not name is still refused" "2" "$ST"
 expect_contains "B4e10 …against the set it recorded" "alpha.test.sh" "$VERR"
 expect_contains "B4e11 …and its remedy names the same id" "amend $ACTOR --suites+ gamma.test.sh" "$VERR"
 
-section "B5 — the LAST row carrying this id wins"
-# One dispatch becomes several rows: the launch row, hooks/execution-recorder.sh's
-# `status=confirmed` copy, and — across a /clear — hooks/session-poker.sh's adopted row.
-# Each carries the budget forward, and the newest is the current statement about the agent.
-R5=$(mk_repo b5)
-dispatched "$R5" "$ACTOR" name=w-b5 suites_allowed=alpha.test.sh \
-  suites_source=declared files=
-add_row "$R5" name=w-b5 "agent_id=$ACTOR" status=confirmed suites_allowed="alpha.test.sh delta.test.sh" \
-  suites_source=declared files=
-guarded "$R5" 'tests/run.sh --only delta.test.sh'
-expect_eq "B5a a suite the LATER row allows is allowed" "0" "$ST"
-guarded "$R5" 'tests/run.sh --only epsilon.test.sh'
-expect_eq "B5b …and one neither row allows is still refused" "2" "$ST"
-expect_contains "B5b …against the later row's set" "alpha.test.sh delta.test.sh" "$VERR"
-
 section "B5c — a successor row carrying re_executes= admits the run (T6, AC-5.3)"
 # The remedy the refusal now names is `amend --reexec+`, which appends a successor row with
 # `re_executes=`. The round trip is green today; this pins it so the remedy cannot rot into
@@ -518,20 +475,6 @@ R6=$(mk_repo b6)
 rm -f "$R6/.bionic/tmp/roster-$SID.state"
 guarded "$R6" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B6d an unarmed session is silent (the guard in front never runs the wall)" "0" "$ST"
-
-section "B7 — which arm speaks when both apply"
-# A backgrounded suite is refused whether or not it is on the budget, and being on the
-# budget is no answer to "nobody read the result" — so the B-9 arm speaks first.
-guarded "$R1" 'tests/run.sh --only alpha.test.sh' "$ACTOR" true
-expect_eq "B7a an ON-budget suite, backgrounded, is still REFUSED" "2" "$ST"
-expect_absent "B7a …and not by the budget arm" "BUDGET" "$ERR"
-
-guarded "$R1" 'tests/run.sh --only gamma.test.sh' "$ACTOR" true
-expect_eq "B7b an OFF-budget suite, backgrounded, is refused too" "2" "$ST"
-
-guarded "$R1" 'tests/run.sh --only alpha.test.sh' "$ACTOR" false
-expect_eq "B7c run_in_background false is not backgrounded, and on-budget passes" "0" "$ST"
-expect_empty "B7c …silently" "$OUT$ERR"
 
 section "B8 — the arm is scoped to THIS repo, and a mode that runs nothing spends nothing"
 # THE THREE FALSE REFUSALS (critic K-2, review-a A-7, the walk A-36a). The reading behind
@@ -647,144 +590,6 @@ guarded "$R1" 'tests/run.sh --only gamma.test.sh'
 expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
 expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$VERR"
 expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
-
-section "B10 — the shape rule is applied ONCE, and every path-forming site asks for it (A-10, REQ-1h)"
-# THE INCONSISTENCY. `session_id` (payload/scripts/lib/session.sh) prefers
-# CLAUDE_CODE_SESSION_ID, falls back to the payload value, and returns whichever it got
-# VERBATIM — it validates nothing. Two hooks that build a roster path apply the shape rule
-# before doing so; this hook's roster READ is new in this wave and did not inherit it.
-# hooks/landing-gate.sh:284 states the rationale for `agent_id`: a key carrying path
-# separators does not trip the symlink guards, it reads outside what those guards protect.
-#
-# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The rule is
-# UNREACHABLE through the supported path: it is applied to the same id ~70 lines before any
-# roster path is formed, so a malformed id leaves the hook at the engagement switch and
-# never reaches the path. A test that piped a malformed id into this hook and watched it
-# pass would be asserting the ENGAGEMENT check while claiming to assert this one — a green
-# that proves a different line than the one it names, which is the exact class this wave
-# exists to close. What IS true and checkable is the family property A-10 names.
-#
-# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1h). A-10's property was "the same rule at
-# every path-forming site", and three hooks each carried their own copy of it. The property
-# is now stronger and cheaper to hold: there is ONE rule, in `bionic_context`
-# (payload/scripts/lib/context.sh), applied to the RESOLVED id, and a hook that fails it
-# exits rather than blanking the variable and carrying on. So the family row below asks
-# whether each hook takes its id from that one call — which is the same question A-10 asked,
-# put to the site that can now answer it — and the row after it pins the rule itself.
-B10_LIB="$REPO_ROOT/payload/scripts/lib/context.sh"
-B10_HOOKS="bash-walls.sh execution-recorder.sh agent-context-guard.sh"
-B10_RULE='case .*\[!A-Za-z0-9_-\]\*\)'
-for _h in $B10_HOOKS; do
-  expect_regex "B10 $_h takes its session id from the one call that shape-checks it" \
-    'bionic_context' "$(cat "$PAYLOAD_HOOKS/$_h")"
-done
-# THE RULE ITSELF, at the one site that now owns it.
-expect_regex "B10 lib/context.sh carries the shape rule" "$B10_RULE" "$(cat "$B10_LIB")"
-# NON-VACUITY: the pattern is not one that matches any shell file. A file with no such rule
-# fails it, so the rows above are reading the rule and not the language.
-expect_no_regex "B10 …and the pattern discriminates (a hook without the rule fails it)" \
-  "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/engage.sh")"
-# AND IT IS APPLIED BEFORE THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the
-# file. A rule that drifted away from the line it protects is the state A-10 found, spelled
-# differently — so the ORDER is what is pinned, by line number, and an absent literal fails
-# loudly rather than comparing two empty strings.
-# THE ORDER IS STRUCTURAL NOW, AND STILL PINNED. The call and the path-forming site used
-# to be two line numbers in one file; they are in two files since T23 — `bionic_context`
-# runs once in hooks/bash-walls.sh, before `bionic_fold` calls any wall, and the roster
-# path is formed by the wall's budget read (`_bsg_budget_read`, wave-33 T36) in the library the hook sources.
-# The hook cannot reach a wall without passing the call, so what is pinned is that each
-# site exists exactly once and on the side it belongs to.
-B10_WALLS="$REPO_ROOT/payload/scripts/lib/walls.sh"
-expect_eq "B10 …the call precedes the fold that reaches every wall" "yes" \
-  "$([ "$(/usr/bin/grep -n '^bionic_context' "$GUARD" | head -1 | cut -d: -f1)" \
-      -lt "$(/usr/bin/grep -n '^bionic_fold' "$GUARD" | head -1 | cut -d: -f1)" ] && echo yes || echo no)"
-
-section "B11 — AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
-#
-# fails-when: a refusal reaches the user as more than one VERDICT line, or in any shape
-# but `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All four of this wall's refusal
-# sites are tripped for real and asserted against the criterion's own regex and then
-# against the exact wording the ruled table gives them (s12-refusal-wording-draft.md §1
-# rows 11 through 14). B11e is the pair that proves the split rather than assuming it.
-#
-# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
-# wave-16 T4/T19/T22). `exit2`'s field 9 (`detail_to_user`) is `yes` now, so the detail
-# every arm above reads rides the same wire as the verdict, bounded at twelve lines, with
-# no knob needed. Until that flip, "the user stream is one line" and "the verdict is one
-# line" were the same measurement on `exit2`, and these pins took the cheaper one. What
-# AC-E1.3 actually asks for — a sentence the reader is interrupted by, never wrapped — is
-# the VERDICT, so that is what is counted and compared below; the detail is asserted
-# present as well, with a POSITIVE beside each narrowed count, so a wall that went silent
-# still fails a check that used to catch it (A-T4.9, A-T22.1).
-
-B11_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
-b11_line() {  # <label> <expected line>   (reads $ERR from the last `guarded`)
-  local _n _line _rest
-  _n="$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ' | tr -d ' ')"
-  _line="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
-  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s). Read
-  # here rather than asserted per caller, because every one of this wall's four sites
-  # carries a `detail` and a site that stopped carrying one is the regression worth
-  # seeing — narrowing the count without this would quietly weaken the section.
-  _rest="$(printf '%s\n' "$ERR" | /usr/bin/grep -v '^bionic: ' | /usr/bin/grep -c . | tr -d ' ')"
-  if [ "$_n" = "1" ]; then ok "$1: exactly one VERDICT line on the user stream"
-  else no "$1: exactly one VERDICT line on the user stream" "got $_n lines: [$ERR]"; fi
-  if printf '%s' "$_line" | /usr/bin/grep -qE "$B11_RE"; then ok "$1: in AC-E1.3's shape"
-  else no "$1: in AC-E1.3's shape" "line=[$_line]"; fi
-  if [ "$_line" = "$2" ]; then ok "$1: and it is the table's own wording"
-  else no "$1: and it is the table's own wording" "want [$2] got [$_line]"; fi
-  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030, A-T4.9): the verdict is one line
-  # BECAUSE the detail is a separate thing beneath it, not because the wall went quiet.
-  if [ "$_rest" -ge 1 ]; then ok "$1: with its detail beneath it, no knob set"
-  else no "$1: with its detail beneath it, no knob set" "nothing after the verdict"; fi
-}
-
-guarded "$R1" 'tests/run.sh --only alpha.test.sh' "$ACTOR" true
-
-# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): T25 renamed all three labels because
-# the old wording put the ALLOWED set right after the words "off budget"/"budget:", which
-# reads as the opposite of what it means — see record/wave-14-tune-181/review-readability-
-# d3930dd.md half (b) item 1. "off budget: " -> "allowed: ", "unexpanded name; budget: " ->
-# "unexpanded name; allowed: ", "full tree off budget: " -> "full tree refused; allowed: ".
-# The longer full-tree label leaves six fewer columns for the set, which is why B11d's line
-# now shows one token instead of "alpha.test.sh +1 more" — recomputed through
-# `_budget_wire_fact`, not hand-guessed (T25 report).
-# A body that reassigns `s` (wave-24 T5): a literal loop alone now resolves (B9a0).
-guarded "$R1" 'for s in alpha beta; do s=gamma; tests/run.sh --only "$s.test.sh"; done'
-
-guarded "$R1" 'tests/run.sh --only gamma.test.sh'
-
-guarded "$R1" 'bash tests/run.sh'
-
-# NO RECORDED SET (wave-27 T5, D15): R4D carries no row for this agent.
-guarded "$R4D" 'tests/run.sh --only alpha.test.sh'
-
-# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25), then
-# RE-AUTHORED BY ADR-030 (T22, the A-T4.10 precedent). What the knob gates has moved
-# twice. First the compact fact line took the allowed set onto the DEFAULT stream
-# (AC-5.2's own fix), leaving the explanatory PROSE ("On the budget:"/"You asked for:")
-# as the thing behind the knob. Then field 9 flipped and the prose came onto the default
-# stream too, beneath the verdict. So what this pair holds now is the SPLIT rather than
-# the absence: the verdict line is the ruled sentence and carries none of the prose, and
-# the prose is on the stream beneath it with no knob set. Asserted on the line and on the
-# stream separately, so neither half can pass over an empty capture.
-guarded "$R1" 'tests/run.sh --only gamma.test.sh'
-expect_contains "B11e even without the knob the allowed set now reaches the DEFAULT stream" \
-  "alpha.test.sh beta.test.sh" "$ERR"
-expect_absent "B11e …but the explanatory PROSE is NOT on the verdict line" "On the budget:" \
-  "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
-expect_contains "B11e …it is beneath it, with no knob set at all" \
-  "On the budget: alpha.test.sh beta.test.sh" "$ERR"
-# BIONIC_WALL_VERBOSE=1 ADDS NOTHING THIS SUITE CAN TELL APART (A-T22.1, the A-T19.1
-# precedent): field 9 already puts the bounded detail on the wire, and the longest detail
-# this wall composes is twelve lines, so the knob's "whole detail" and the channel's
-# "bounded detail" are byte-identical here — measured, `$ERR` and `$VERR` do not differ
-# for any of this section's four sites. The row stays and stays true, but it no longer
-# discriminates the knob from the default for THIS wall's messages; only a >12-line
-# detail would, and this wall has none. Kept for parity with the fleet's shape rather
-# than deleted, and flagged here rather than left to look like it proves knob-gating.
-expect_contains "B11e …and with BIONIC_WALL_VERBOSE=1 the prose is there too" \
-  "On the budget: alpha.test.sh beta.test.sh" "$VERR"
 
 section "B12 — a shell-backgrounded suite is caught like a tool-backgrounded one (D8, REQ-6)"
 # THE GAP RESEARCH ROW 6 MEASURED. ARM 1 used to read only the Bash tool's

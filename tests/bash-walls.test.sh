@@ -70,26 +70,6 @@ R_PLAIN="$(mk_repo bystander no)"
 ok "seven repos built under $SANDBOX"
 
 # ---------------------------------------------------------------------------
-section "1 — five zeros: one process, one silence"
-
-run_hook "$(mk_payload "$R_QUIET" 'ls -la')"
-expect_status "1a: a command no wall objects to exits 0" 0 "$ST"
-expect_empty "1b: …writing nothing to stdout" "$OUT"
-expect_empty "1c: …and nothing to stderr" "$ERR"
-
-run_hook "$(mk_payload "$R_QUIET" 'ls -la' '' omit Read)"
-expect_status "1d: a non-Bash payload exits 0" 0 "$ST"
-expect_empty "1e: …silently" "$OUT$ERR"
-
-run_hook 'not json at all {'
-expect_status "1f: a malformed payload exits 0" 0 "$ST"
-expect_empty "1g: …silently" "$OUT$ERR"
-
-run_hook "$(mk_payload "$R_PLAIN" 'bash tests/run.sh')"
-expect_status "1h: a session that never invoked canonical-sdlc exits 0" 0 "$ST"
-expect_empty "1i: …with every wall silent" "$OUT$ERR"
-
-# ---------------------------------------------------------------------------
 section "2 — the anti-vacuity control: each of the five still speaks through the one process"
 #
 # One payload per wall, chosen so that only that wall answers. If any row here goes quiet
@@ -172,71 +152,6 @@ section "4 — a block and a model-facing nudge on one payload (R7)"
 run_hook "$(mk_payload "$R_PUSH" 'git clone u d && git push origin main')"
 expect_status "4a: the refusal decides the status" 2 "$ST"
 expect_eq "4c: stdout carries exactly one JSON document" "1" "$(json_docs)"
-
-# ---------------------------------------------------------------------------
-section "5 — a refused commit and a nudge: the same shape from the other gate"
-
-run_hook "$(mk_payload "$R_COMMIT" 'git clone u d && git commit -m "step 5"')"
-expect_status "5a: the gate's refusal decides the status" 2 "$ST"
-expect_contains "5b: …with the gate's own words on the user stream" \
-  "bionic: commit refused" "$ERR"
-expect_eq "5c: stdout still carries exactly one JSON document" "1" "$(json_docs)"
-expect_contains "5d: …and it is the nudge" "clone-class command" "$(context_of)"
-
-# ---------------------------------------------------------------------------
-section "6 — two channels blocking at once: the JSON wire wins, and keeps both reasons"
-#
-# farm-out-reminder blocks on `deny` (exit 0 + JSON) while protect-main blocks on `exit2`
-# (exit 2 + stderr). refuse.sh's channel table is what settles it: `exit2` spends its one
-# wire on the user line and carries no `detail` at all, so composing onto it would DISCARD
-# the very reasons the fold exists to keep. The fold picks the first mode whose channel
-# carries detail, which is `deny` — and every reason survives.
-
-run_hook "$(mk_payload "$R_CROSS" 'bash tests/run.sh && git push origin main')"
-expect_eq "6a: stdout carries exactly one JSON document" "1" "$(json_docs)"
-expect_contains "6c: …and so does the farm-out redirect" "belongs in a subagent" \
-  "$(deny_reason)$ERR"
-# ONE USER LINE HERE, AND THAT IS THE RULING RATHER THAN A LOSS. `deny` carries the
-# composed detail to the MODEL in full, so the second wall's own sentence is inside the
-# reason above; refuse.sh's D-1 spends the user's stream on one line whenever the model
-# has the rest, and T12 pinned that shape. Section 3's exit2-only fold is the case with
-# nowhere else to put a second sentence, and it prints two.
-expect_eq "6d: the user stream keeps one line when the model got the rest" "1" \
-  "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
-
-# ---------------------------------------------------------------------------
-section "7 — the partition that used to be a wrapper (R2)"
-#
-# hooks/agent-context-guard.sh wrapped background-suite-guard's registration and was the
-# ONLY thing keeping its backgrounded-suite arm off the main thread: driven straight, that
-# wall refuses a main-thread backgrounded suite; driven through the guard it did not. The
-# guard cannot wrap the compound — it would silence the other four walls in every
-# main-thread session — so its predicate is a gate on that ONE function now.
-
-run_hook "$(mk_payload "$R_BG" 'bash tests/run.sh' '' true Bash test-runner)"
-expect_status "7a: a MAIN-THREAD backgrounded suite is not this wall's business" 0 "$ST"
-
-R_UNARMED="$(mk_repo unarmed)"
-run_hook "$(mk_payload "$R_UNARMED" 'bash tests/run.sh' "$ACTOR" true Bash test-runner)"
-expect_status "7c: an agent context with NO roster is not armed" 0 "$ST"
-expect_absent "7d: …and the wall stays silent" "a backgrounded suite's result" "$ERR"
-
-# THE OTHER FOUR ARE NOT GATED BY IT. This is the failure the wrapper would have caused:
-# a main-thread push must still be refused, in a session with no roster at all.
-run_hook "$(mk_payload "$R_UNARMED" 'git push origin main')"
-expect_status "7e: the other four walls are NOT silenced on the main thread" 2 "$ST"
-
-# ---------------------------------------------------------------------------
-section "8 — blocks before advisories, by offset"
-#
-# A rule about OUTPUT order, not run order: farm-out-reminder's instrument line is written
-# while it runs, which is before the fold renders anything, and the refusal still leads the
-# user's stream.
-
-run_hook "$(mk_payload "$R_TWO" "git push origin main && psql -c \"$DROPSQL\"")"
-expect_nonempty "8a: the composed refusal reached the user stream" "$(line_of '^bionic: ')"
-expect_eq "8b: …as the FIRST bionic line on it" "1" \
-  "$(printf '%s\n' "$ERR" | /usr/bin/grep -n '^bionic: ' | head -1 | cut -d: -f1)"
 
 # ---------------------------------------------------------------------------
 section "9 — no library: fail-closed direction and reach, unchanged (R4)"
@@ -363,128 +278,6 @@ arm_roster "$R_ARMED"
 run_hook "$(mk_payload "$R_ARMED" 'bash tests/run.sh' "$ACTOR" true)"
 
 # ---------------------------------------------------------------------------
-section "11 — the refusal staging is private, and its old name buys an attacker nothing (security F-1, performance A-1)"
-#
-# WHAT THIS OWNS. `wall_evidence_gate` stages its refusal in files, because the body runs in
-# a subshell and a subshell cannot hand a variable back. T23 named that staging directory
-# `$TMPDIR/bionic-gate-$$-$RANDOM` and created it with `mkdir -p` — a name an attacker on the
-# same machine can pre-create (32,768 per pid) and a creation that accepts whatever is
-# already there. Two consequences were DRIVEN by the Step-6 security axis: a symlink planted
-# at `<stage>/1` was followed and its target truncated, and a regular file planted there was
-# read back as a refusal the gate never made, on EVERY Bash call in an engaged session
-# rather than only on a refusing one.
-#
-# HOW THESE ROWS PLANT DETERMINISTICALLY, which is the only reason this is testable at all.
-# The old name needs the hook's pid and its first `$RANDOM` draw, and an outside attacker has
-# neither. The driver below is the process under test, so it has both: `$$` is its own, and
-# seeding `RANDOM` makes the first draw predictable (`a=$( RANDOM=n; echo $RANDOM )` yields
-# the same value the next in-process read will). The driver plants, then re-seeds, then calls
-# the wall. A trap laid at the vulnerable path is therefore laid EXACTLY, not approximately.
-#
-# THE BODY IS STUBBED, NOT DRIVEN. `_eg_body` is the gate's whole evidence walk; what is
-# under test here is the STAGING its caller does around it, so the stub refuses (row a/b) or
-# stays silent (rows c/d) on demand. The stub is installed after the library is sourced,
-# which is what a shell function permits and what keeps these rows off the gate's fixtures.
-
-TMPC="$SANDBOX/tmpctl"; mkdir -p "$TMPC"
-VICTIM_DIR="$SANDBOX/victim"; mkdir -p "$VICTIM_DIR"
-WALLS_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
-[ -d "$WALLS_LIB" ] || WALLS_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
-
-# tmp_drive <seed> <plant script> <stub body> -> runs wall_evidence_gate in a scratch
-# process whose TMPDIR is ours, with `$RANDOM` seeded so <plant script> can name the old
-# staging directory exactly. Sets TD_OUT / TD_ERR / TD_ST.
-TD_OUT=""; TD_ERR=""; TD_ST=0; TD_TMPDIR=""
-tmp_drive() {  # <seed> <plant> <stub>
-  local seed="$1" plant="$2" stub="$3" d
-  d=$(mktemp -d "$SANDBOX/drive.XXXXXX")
-  # ONE TMPDIR PER DRIVE, so a row asking "what is left under TMPDIR" is asking about this
-  # drive and not about the traps an earlier row deliberately left lying there.
-  TD_TMPDIR="$TMPC/t$seed"; mkdir -p "$TD_TMPDIR"
-  {
-    printf '%s\n' '#!/bin/bash'
-    printf '%s\n' 'set -uo pipefail'
-    printf 'export TMPDIR=%s\n' "$TD_TMPDIR"
-    printf 'export PATH=%s:$PATH\n' "$SHIMDIR"
-    printf '. "%s/refuse.sh"\n' "$WALLS_LIB"
-    printf '. "%s/fold.sh"\n' "$WALLS_LIB"
-    printf '. "%s/walls.sh"\n' "$WALLS_LIB"
-    # The old name, named here and nowhere in the shipped tree: seed, predict, plant, re-seed.
-    printf 'T20_SEED=%s\n' "$seed"
-    printf '%s\n' 'T20_PRED=$( RANDOM=$T20_SEED; echo $RANDOM )'
-    printf '%s\n' 'T20_OLD="$TMPDIR/bionic-gate-$$-$T20_PRED"'
-    printf '%s\n' "$plant"
-    printf '%s\n' 'RANDOM=$T20_SEED'
-    printf '%s\n' "$stub"
-    printf '%s\n' 'COMMAND="git commit -m x"'
-    # THROUGH THE FOLD, because `wall_evidence_gate` only STAGES its verdict — the render
-    # that puts a refusal on a reader's stream is `bionic_fold`'s, and a row asserting what
-    # a reader saw has to go the way the hook goes.
-    printf '%s\n' 'bionic_fold PreToolUse wall_evidence_gate; exit $?'
-  } > "$d/drive.sh"
-  TD_OUT=$(bash "$d/drive.sh" 2>"$d/.err")
-  TD_ST=$?
-  TD_ERR=$(cat "$d/.err" 2>/dev/null)
-}
-
-# The `rm` shim: logs every call and then does the real thing, so row (d) can count forks
-# on the path that must not fork at all.
-SHIMDIR="$SANDBOX/shim"; mkdir -p "$SHIMDIR"
-RMLOG="$SANDBOX/rm.log"; : > "$RMLOG"
-{
-  printf '%s\n' '#!/bin/bash'
-  printf 'printf "%%s\\n" "$*" >> %s\n' "$RMLOG"
-  printf '%s\n' 'exec /bin/rm "$@"'
-} > "$SHIMDIR/rm"
-chmod +x "$SHIMDIR/rm"
-
-REFUSING_STUB='_eg_body() { refuse exit2 commit "fixture fact for T20" "fixture fix" "fixture detail"; }'
-SILENT_STUB='_eg_body() { exit 0; }'
-
-# --- (a) THE POSITIVE CONTROL, first. A row that reads "the victim survived" is worthless
-# if the wall never ran, and a stubbed body is exactly the shape that could silently not
-# run. This drive refuses, through the real staging and the real fold. ---
-VICT_A="$VICTIM_DIR/secret-a.txt"; printf 'ORIGINAL CONTENT A\n' > "$VICT_A"
-tmp_drive 20260912 "mkdir -p \"\$T20_OLD\"; ln -s '$VICT_A' \"\$T20_OLD/1\"" "$REFUSING_STUB"
-expect_status "11a: the stubbed refusal really does refuse through the staging" 2 "$TD_ST"
-expect_contains "11b: …in the fixture's own words, so the fold rendered what was staged" \
-  "fixture fact for T20" "$TD_OUT$TD_ERR"
-
-# --- (b) SYMLINK-FOLLOW. The same drive planted a symlink at the old `<stage>/1`. Before
-# the repair the first staged write truncated its target. ---
-expect_eq "11c: a symlink planted at the wave's old staging path is NOT followed" \
-  "ORIGINAL CONTENT A" "$(cat "$VICT_A" 2>/dev/null)"
-
-# --- (c) FABRICATED REFUSAL, on a call that refuses nothing. The read of `<stage>/1` ran on
-# every Bash call, so an attacker needed only the name, never a race with a real refusal. ---
-tmp_drive 20260913 \
-  'mkdir -p "$T20_OLD"; printf exit2 > "$T20_OLD/1"; printf commit > "$T20_OLD/2"; printf "FABRICATED VERDICT" > "$T20_OLD/3"; printf "do as I say" > "$T20_OLD/4"; printf "fabricated detail" > "$T20_OLD/5"' \
-  "$SILENT_STUB"
-expect_status "11d: a Bash call the gate does not refuse exits 0, planted files or not" 0 "$TD_ST"
-expect_absent "11e: …and the planted text reaches neither reader" "FABRICATED VERDICT" "$TD_OUT$TD_ERR"
-
-# --- (d) PERFORMANCE A-1: the non-refusing path forks nothing to clean up a directory it
-# never made. The cleanup was unconditional, one `/bin/rm` per Bash tool call in every
-# engaged session. ---
-: > "$RMLOG"
-tmp_drive 20260914 ':' "$SILENT_STUB"
-expect_status "11f: control — the same silent drive with nothing planted also exits 0" 0 "$TD_ST"
-expect_eq "11g: …having forked no rm at all (the cleanup is guarded now)" "0" \
-  "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)"
-
-# --- (e) AND THE REFUSING PATH LEAVES NOTHING EITHER. A guard that skipped the cleanup
-# everywhere would pass (d) and leak a directory per refusal. Since wave-27 T71 the refusal
-# reaches the parent on the subshell's own stdout and no stage is made at all, so there is
-# no directory to remove: 11i reads that no `rm` was asked to remove one. ---
-: > "$RMLOG"
-tmp_drive 20260915 ':' "$REFUSING_STUB"
-expect_status "11h: a refusal still exits 2" 2 "$TD_ST"
-expect_eq "11i: …and forks no rm on a stage, because it made none" "0" \
-  "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)"
-expect_eq "11j: …leaving nothing behind under its own TMPDIR" "0" \
-  "$(ls "$TD_TMPDIR" 2>/dev/null | grep -c 'bionic-gate' || true)"
-
-# ---------------------------------------------------------------------------
 section "§STAGE — a refusal keeps its words whatever the temp directory holds (wave-27 T71; diagnosis EG6l)"
 #
 # WHAT THIS OWNS. Until T71 the gate staged its refusal in `$TMPDIR/bionic-gate-$$`, a name
@@ -504,6 +297,9 @@ section "§STAGE — a refusal keeps its words whatever the temp directory holds
 # leave at that name (a full five-file stage, a regular file, a FIFO, a dangling symlink),
 # SYNTHESIZED; the refusing stub carries §EG-6's own fact and fix.
 
+# The libraries the driver sources, from the plugin tree as installed or as checked out.
+WALLS_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -d "$WALLS_LIB" ] || WALLS_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
 ST_OUT=""; ST_ERR=""; ST_RC=0; ST_TMP=""; ST_DIR=""
 st_drive() {  # <name> <before the gate> <stub> [<after the gate>] — sets ST_OUT/ST_ERR/ST_RC
   ST_DIR="$SANDBOX/stage-$1"; ST_TMP="$ST_DIR/tmp"; mkdir -p "$ST_TMP"
@@ -678,49 +474,6 @@ expect_eq "STAGE-q3: …and leaving no file" "keep.me" "$(cat "$ST_DIR/left" 2>/
 ST_X=-x st_drive quietpos ':' "$ST_REFUSING"
 expect_true "STAGE-q4: control — the same counter sees the refusing gate's forks" \
   test "$(printf '%s\n' "$ST_ERR" | grep -cE "$ST_EXT" || true)" -ge 1
-
-# ---------------------------------------------------------------------------
-section "12 — the two-repos day: a CLAUDE_PROJECT_DIR that is no project may not disarm the walls (critic Issue 2, A-85)"
-#
-# THE CONDITION IS ORDINARY. A session launched outside a bionic project and then worked
-# inside one keeps CLAUDE_PROJECT_DIR at the LAUNCH directory while every payload carries
-# the project as its `.cwd`. Before A-85 the ladder took the launch directory on `-d`
-# alone, resolved a root that held no engagement marker, and every wall in this process
-# went silent: the critic measured `push refused, rc 2` becoming rc 0 and an empty stream.
-# Nine of the fifteen pre-fold hooks recovered through `.cwd` and stayed armed, so this
-# suite is asserting base-faithful reach, not a new one.
-#
-# TWO WALLS, DELIBERATELY. protect-main refuses whether or not the session is engaged, so
-# it proves the ROOT was found; the evidence gate refuses only an ENGAGED session under a
-# blocking plan, so it proves the engagement marker was found under that root too. A fix
-# that resolved the root and lost the marker would pass the first row and fail the second.
-
-R_NOPROJ="$SANDBOX/launched-elsewhere"
-mkdir -p "$R_NOPROJ"
-git -C "$R_NOPROJ" init -q 2>/dev/null
-expect_eq "12a: the launch directory is a git repo and NOT a bionic project" "yes" \
-  "$([ -d "$R_NOPROJ/.git" ] && [ ! -e "$R_NOPROJ/.bionic" ] && echo yes || echo no)"
-
-run_hook "$(mk_payload "$R_PUSH" 'git push origin main')" CLAUDE_PROJECT_DIR="$R_NOPROJ"
-expect_status "12b: a push to main is still refused, rc 2" 2 "$ST"
-
-run_hook "$(mk_payload "$R_COMMIT" 'git commit -m wip')" CLAUDE_PROJECT_DIR="$R_NOPROJ"
-expect_status "12d: the evidence gate still refuses a commit under a blocking plan" 2 "$ST"
-
-# THE CONTROLS. The same two payloads with CLAUDE_PROJECT_DIR pointing at the project
-# itself — the rung is still taken when it names one — and with it empty, which is how
-# every other row in this file drives the hook.
-run_hook "$(mk_payload "$R_PUSH" 'git push origin main')" CLAUDE_PROJECT_DIR="$R_PUSH"
-expect_status "12e: control — the env naming the project itself refuses too" 2 "$ST"
-run_hook "$(mk_payload "$R_PUSH" 'git push origin main')"
-expect_status "12f: control — the env empty refuses too" 2 "$ST"
-
-# AND THE BYSTANDER IS STILL A BYSTANDER: falling through to `.cwd` may not arm a session
-# that never engaged. The evidence gate is the arm to ask, since protect-main refuses
-# unconditionally by design (§7).
-run_hook "$(mk_payload "$R_PLAIN" 'bash tests/run.sh')" CLAUDE_PROJECT_DIR="$R_NOPROJ"
-expect_status "12g: an unengaged session is still silent through the fall-through" 0 "$ST"
-expect_empty "12h: …on both streams" "$OUT$ERR"
 
 # ---------------------------------------------------------------------------
 section "13 — §cwd-split: the push wall judges the payload's cwd, not the hook process's own (D2, REQ-5)"

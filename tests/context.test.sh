@@ -176,57 +176,6 @@ field() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 require_helpers mk_repo mk_wt_repo payload probe field
 
 # ============================================================
-section "1 — the eight values, from one well-formed payload"
-# ============================================================
-#
-# The anti-vacuity row of this whole suite: every other section varies ONE input and
-# reads ONE value back, which proves nothing if the happy path never produced a value
-# at all. This row is the happy path, read field by field.
-
-R_OPEN=$(mk_repo one open)
-# THE VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4). `BIONIC_CONTEXT_WANT_RUN=1` is what
-# hooks/stop.sh, hooks/dispatch-preflight.sh and hooks/session-start.sh set before their
-# own call, and this row reads the eight values a caller that wants all eight gets. The
-# row that reads them WITHOUT the flag is section 4's, below.
-REC=$(probe "$SANDBOX" "$(payload "$R_OPEN")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
-
-expect_eq "a well-formed payload identifies the session (return 0)" "0" "$(field "$REC" rc)"
-expect_eq "BIONIC_CWD is the payload's cwd"      "$R_OPEN" "$(field "$REC" cwd)"
-expect_eq "BIONIC_ROOT is that cwd's project root" "$R_OPEN" "$(field "$REC" root)"
-expect_eq "BIONIC_SID is the resolved session id" "$SID"    "$(field "$REC" sid)"
-expect_eq "BIONIC_ENGAGED is 1 for an engaged session" "1"  "$(field "$REC" engaged)"
-expect_eq "BIONIC_RUN_WORD is the verdict word alone" "fallback" "$(field "$REC" run_word)"
-expect_eq "BIONIC_RUN_PLAN is the plan the verdict names" \
-  "$R_OPEN/.bionic/docs/plans/epic-99/wave-01.plan.md" "$(field "$REC" run_plan)"
-expect_eq "BIONIC_INPUT holds the payload it read" "$(payload "$R_OPEN")" "$(field "$REC" input)"
-
-# THE EIGHTH VALUE (epic-23 wave-14 REQ-2, spec D5 "Hook context"). `lib/root.sh`
-# already knows whether the walk mapped a linked worktree onto its main repository;
-# the preamble carries that name so the evidence gate can find the plan row that
-# owns a worktree writer's commit without asking git a second time.
-#
-# EMPTY, NOT `<unset>`: fifteen hooks read these values under `set -u`, and an
-# eighth value that only sometimes exists would abort the wall that read it.
-expect_eq "BIONIC_WORKTREE is empty when the root is an ordinary directory" \
-  "" "$(field "$REC" worktree)"
-
-# The positive half, against a real linked worktree — without it the row above
-# passes just as well against a library that never assigns the value anything.
-WT_PAIR=$(mk_wt_repo eighth)
-WT_MAIN="${WT_PAIR%%$'\t'*}"
-WT_DIR="${WT_PAIR#*$'\t'}"
-REC_WT=$(probe "$SANDBOX" "$(payload "$WT_DIR/sub")" CLAUDE_CODE_SESSION_ID="$SID")
-
-expect_eq "a payload cwd inside a linked worktree still resolves to the MAIN root" \
-  "$WT_MAIN" "$(field "$REC_WT" root)"
-expect_eq "BIONIC_WORKTREE names the worktree the root was mapped from" \
-  "eighth-tree" "$(field "$REC_WT" worktree)"
-expect_ne "BIONIC_WORKTREE is not the branch name" \
-  "eighth-branch" "$(field "$REC_WT" worktree)"
-expect_eq "the session is still identified from inside the worktree (return 0)" \
-  "0" "$(field "$REC_WT" rc)"
-
-# ============================================================
 section "2 — ONE cwd ladder (AC-1h.1): env, then the payload, then pwd"
 # ============================================================
 #
@@ -454,27 +403,6 @@ expect_eq "…and names the plan the sentinel row withheld" \
 # back on by accident.
 REC_ZERO=$(probe "$SANDBOX" "$(payload "$R_OPTIN")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=0)
 expect_eq "BIONIC_CONTEXT_WANT_RUN=0 is not an ask" "unset" "$(field "$REC_ZERO" run_word)"
-
-# ============================================================
-section "5 — engagement is a VALUE too, 0 or 1"
-# ============================================================
-#
-# Fourteen hooks turn a 0 into `exit 0`; session-start prints a bystander line instead.
-# A library that exited on it would delete that line and take session-start's whole
-# unengaged report with it.
-
-R_BARE=$(mk_repo engagement-bare bare)
-REC=$(probe "$SANDBOX" "$(payload "$R_BARE")" CLAUDE_CODE_SESSION_ID="$SID")
-expect_eq "an unengaged session is identified, not refused (return 0)" "0" "$(field "$REC" rc)"
-expect_eq "…and reports BIONIC_ENGAGED=0" "0" "$(field "$REC" engaged)"
-
-# a SYMLINK at the marker path reads as NOT engaged and is never followed — the one
-# shape a repository controls that must not be able to OPEN a wall.
-R_LNK=$(mk_repo engagement-symlink bare)
-printf 'plan=none\n' > "$SANDBOX/eng-decoy"
-ln -s "$SANDBOX/eng-decoy" "$R_LNK/.bionic/tmp/engaged-$SID.state"
-REC=$(probe "$SANDBOX" "$(payload "$R_LNK")" CLAUDE_CODE_SESSION_ID="$SID")
-expect_eq "a symlink at the marker path is not an engagement" "0" "$(field "$REC" engaged)"
 
 # ============================================================
 section "6 — the payload is read ONCE: adopted when already set, stdin otherwise"

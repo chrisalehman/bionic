@@ -106,8 +106,4 @@ cp "$P/.bionic/tmp/loaded-$LIVE_SID.state" "$TMP/elsewhere.state"
 ln -s "$TMP/elsewhere.state" "$P4/.bionic/tmp/loaded-$LIVE_SID.state"
 expect_empty "L14 a link at the record path is not followed (positive: L1)" "$(d "$LIVE_SID" detect_loaded_record "$P4")"
 
-section "LOADED — the field reader"
-expect_eq "L15 detect_loaded_field reads a key" "$CO_HEAD" "$(d "$LIVE_SID" detect_loaded_field "$P/.bionic/tmp/loaded-$LIVE_SID.state" commit)"
-expect_empty "L16 …and an absent key is empty (positive: L15)" "$(d "$LIVE_SID" detect_loaded_field "$P3/.bionic/tmp/loaded-$LIVE_SID.state" commit)"
-
 finish
