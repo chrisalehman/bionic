@@ -8,21 +8,25 @@
 # reading fresh for one stale window, then goes stale where only a dispatch
 # attempt or a hand-run doctor would ever look. This Stop hook is the thing that
 # looks. On every orchestrator turn end, if a Patrol stamp exists for THIS session
-# and is older than 2x the poker-interval, it blocks once with the notice in the
-# terminal and the two-part re-arm the operator's model then performs.
+# and is older than one fire window (the poker-interval plus the scheduler's jitter)
+# with an idle stretch that long and no tick in it, it refuses the turn in ONE line that
+# names the three acts in order: look at the cron table, create the job if it is absent,
+# arm. The explanation behind the line is not in the line; `session-poker.sh patrol
+# --explain` prints it.
 #
 # THE THREE STAMP STATES, and why only one of them speaks here:
 #   absent  — never armed. Nothing engaged a run on this session, or nothing armed
 #             one yet; that is hooks/dispatch-preflight.sh's refusal to make when a
 #             dispatch is actually attempted, not a monitor's to raise every turn.
 #   fresh   — firings are landing. Silent.
-#   stale   — armed, then died. THE notice.
+#   stale   — armed, then died. THE refusal.
 #
 # THE HOOK MUST NOT STAMP. `session-poker.sh arm` would freshen the stamp and
 # satisfy the arming wall over a cron table that still holds nothing — a Patrol
 # that reads alive and never fires again, which is worse than the state it
-# replaced. Group 5 asserts the stamp's mtime is untouched; Group 4's reason
-# assertions demand the CronCreate half is named, for the same reason
+# replaced. Group 5 asserts the stamp's mtime is untouched; Group 4 demands the line
+# name CronCreate before arm, and the explanation rows demand the rule that a refused
+# CronCreate is never followed by arm, for the same reason
 # tests/dispatch-preflight.test.sh S21 demands it.
 #
 # ACCELERATED CLOCK, NEVER A WAIT. The interval is pinned tiny through the
@@ -536,57 +540,91 @@ write_stamp "$WT" "$SID"; backdate "$(stamp_path "$WT" "$SID")" 600
 fire "$WT"; expect_quiet "17: a stale stamp under the WORKTREE's own tree is not read"
 rm -rf "$WTBASE"
 
-section "Group 4: what the notice says"
+section "Group 4: what the refusal says, and what decides it"
 
-# A 1m interval, so the limit it reports is a deterministic 120s. The AGE is not
-# asserted as a literal anywhere: a second can elapse between the backdate and the
-# read, and a suite that pinned "600s" would flake on a slow machine. What is
-# asserted is that an age is stated at all (assertion 22).
+# THE REFUSAL IS ONE LINE, and the line names no age, no limit and no path: a repeat over the same
+# stale stamp has to be the same line, so everything that varies with the stamp lives behind the
+# explanation (read below, once), never in the reason. What the hook DECIDES on is the stamp's state
+# and the project's own knob, so those are driven by behaviour: a refreshed stamp ends the refusal,
+# and the window the age is judged against follows `poker-interval:`.
 D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
 fire "$D"
+G4_FIRST="$(reason_of)"
 
-# The path is a computed fact, not prose: the operator (and the model re-arming)
-# has to be able to see WHICH stamp went stale.
-expect_reason_names "18: the notice names the stamp file" "$(stamp_path "$D" "$SID")"
+# THE STAMP BY ITS STATE. Refused while it is stale; the very same file touched fresh is silent. A
+# silence read after a refusal on the same fixture is the only silence that proves the hook looked
+# at the stamp rather than at nothing.
+expect_block "18: a stale stamp is refused, with the refusal headline" 
+expect_reason_names "18a: …under the refusal's headline" "bionic: stop refused"
+touch "$(stamp_path "$D" "$SID")"
+fire "$D"; expect_quiet "18b: …and the same stamp refreshed is silent — the state decides, not the file"
+backdate "$(stamp_path "$D" "$SID")" 600
 
-# BOTH HALVES OF THE RE-ARM, and the CronCreate half first in importance: a re-arm
-# that stamps without re-creating the cron job buys a Patrol that reads alive and
-# never fires. This is the assertion tests/dispatch-preflight.test.sh S21 makes
-# for the same reason.
-expect_reason_names "19: …and the CronCreate half of the re-arm" "CronCreate"
-expect_reason_names "20: …and the arm half, as a runnable command" "session-poker.sh arm"
-
-# The hook is invoked as <plugin-root>/hooks/patrol-revive.sh, so the poker it
-# names is the sibling it actually measured against — never a placeholder a model
-# would paste into a `command not found` (SKILL.md §Dispatch, the resolved-root
-# rule).
-expect_reason_names "21: …with the poker resolved to an absolute path" "${BIONIC_HOOKS_DIR}/session-poker.sh arm"
-
-# The measurement itself, so the notice is a finding rather than an assertion —
-# an age in seconds, and the limit it was judged against, which follows the
-# project's own knob (1m here, so 120s).
-# MATCHED WITHOUT A PIPE INTO `grep -q`. Under `set -o pipefail` (line 37) a `grep -q` that
-# exits on its first match SIGPIPEs the producer, and the pipeline reports 141 — this very
-# assertion failed that way once on a reason that plainly said "600s old" (wave-1.3.2 task
-# 4/9). The text is captured first and matched in the shell.
-R22_REASON="$(reason_of)"
-if [[ "$R22_REASON" =~ [0-9]+s\ old ]]; then
-  ok "22: …and states the age it measured"
+# THE THREE ACTS, in the order that is a safety property: `arm` alone freshens the stamp over an
+# empty cron table and buys a Patrol that reads alive and never fires, so the line must look
+# (CronList) and create (CronCreate) before it stamps (arm), and the creating is conditional on the
+# looking. One line, because the CLI prints a reason as its own error line.
+fire "$D"
+G4_REASON="$(reason_of)"
+G4_LINES="$(printf '%s\n' "$G4_REASON" | awk 'END{print NR}')"
+G4_PRE="${G4_REASON%%CronList*}"; G4_MID="${G4_REASON%%CronCreate*}"; G4_ARM="${G4_REASON%%; arm*}"
+expect_reason_names "19: …it names the CronCreate half, conditional on the looking" "CronCreate if absent"
+if [ "$G4_LINES" = 1 ] && [ "${#G4_PRE}" -lt "${#G4_MID}" ] && [ "${#G4_MID}" -lt "${#G4_ARM}" ] \
+   && [ "$G4_REASON" != "$G4_ARM" ]; then
+  ok "20: …in one line, the acts in order: CronList, CronCreate, then arm"
 else
-  no "22: the notice states no age" "$R22_REASON"
+  no "20: the reason is not one line naming CronList, CronCreate, arm in order" "lines=$G4_LINES reason=<$G4_REASON>"
 fi
-# AMENDED at REQ-1 (T1): the notice measured against a "120s limit", 2x the interval. It
-# measures against the FIRE WINDOW now — the interval plus a tenth for the scheduler's
-# jitter, 66s for this fixture's 1m — and the number it quotes is that.
-expect_reason_names "22b: …against the fire window this project's interval sets" "66s fire window"
-expect_reason_names "22c: …naming that interval as its source" "60s poker-interval"
 
-# Why the operator is seeing this at all: the cron table is in process memory and
-# a plugin update takes it with no file left behind.
-expect_reason_names "23: …and the cause the operator can act on" "plugin update"
+# A REPEAT IS THE SAME LINE. The same stamp, older: an age in the line would make the second refusal
+# longer than the first, and the CLI shows the user every one.
+backdate "$(stamp_path "$D" "$SID")" 1100
+fire "$D"
+expect_block "22 meta: the older stamp is refused again"
+if [ -n "$G4_FIRST" ] && [ "$(reason_of)" = "$G4_FIRST" ]; then
+  ok "22: …and a repeat over the same stale stamp is the identical line"
+else
+  no "22: a repeat over the same stale stamp differs from the first" "first=<$G4_FIRST> repeat=<$(reason_of)>"
+fi
 
-# The way out. Without it a blocked stop reads as a wedge.
-expect_reason_names "24: …and that it blocks once" "blocks once"
+# THE WINDOW IS THE FIRE WINDOW OF THE PROJECT'S OWN KNOB, driven rather than quoted. The knob is 1m,
+# so the window is 66s (the interval plus a tenth for the scheduler's jitter). A stamp 40s old is inside
+# it and silent; one 90s old is past it and inside twice the interval, which the hook used to judge by,
+# so it is refused only by a hook that measures the window. The ages clear both edges by over twenty
+# seconds, and no row sleeps.
+D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 40
+fire "$D"; expect_quiet "22b: a stamp inside the project's fire window (40s of a 1m knob) is silent"
+backdate "$(stamp_path "$D" "$SID")" 90
+fire "$D"; expect_block "22c: …and one past it (90s), still inside twice the interval, is refused"
+
+# THE EXPLANATION is what the line leaves out, asked for through the poker beside the hook under test.
+# It is static text over that poker's own path, so it is read once. Its words are a document's, not a
+# computed fact's: the rows below pin the facts a reader acts on, and each needs the verb to have
+# printed before an absence or a phrase means anything.
+G4_EXPLAIN="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" patrol --explain 2>&1)"
+G4_EXPLAIN_RC=$?
+if [ "$G4_EXPLAIN_RC" -eq 0 ] && [ -n "$G4_EXPLAIN" ]; then
+  ok "21a meta: patrol --explain prints, rc 0"
+else
+  no "21a meta: patrol --explain printed nothing or failed" "rc=$G4_EXPLAIN_RC out=<$G4_EXPLAIN>"
+fi
+explain_names() {  # <label> <substring>
+  case "$G4_EXPLAIN" in
+    *"$2"*) ok "$1" ;;
+    *)      no "$1" "the explanation does not name <$2>" ;;
+  esac
+}
+
+# The poker it names is the sibling this hook measured against, never a placeholder a model would paste
+# into a `command not found` (the resolved-root rule).
+explain_names "21: the explanation names the arm act with the poker as an absolute path" "${BIONIC_HOOKS_DIR}/session-poker.sh arm"
+
+# Why the operator is seeing a refusal at all: the cron table is in process memory and a plugin
+# update takes it with no file left behind.
+explain_names "23: …and the cause the operator can act on" "plugin update"
+
+# 24 retired: that a refusal comes once per turn is row 9's fact (a re-entered stop passes), and the
+# line never said it.
 
 section "Group 6: registration"
 
@@ -733,26 +771,22 @@ if [ -e "$(stamp_path "$D" "$SID")" ]; then
 fi
 fire "$D"; expect_quiet "34: …and one stale window later there is still no notice to fire"
 
-# ---------- what the notice says about the footgun in its own step 2 ----------
+# ---------- what the explanation says about the footgun in its own third act ----------
 #
-# STEP 1 IS THE REFUSABLE HALF. `CronCreate` is measured non-deterministically refusable by
-# the auto-mode classifier (.bionic/docs/record/epic-19/w1/t3-probes.md finding 1), and a
-# model that runs step 2 alone freshens the stamp over an EMPTY cron table — a Patrol that
-# reads alive to this hook, to the arming wall and to /bionic:doctor, and never fires again.
-# The header argues at length that this is strictly worse than the death it heals; the text
-# has to carry that argument to the reader who acts on it, not just to the reader of the
-# source.
+# CREATING IS THE REFUSABLE HALF. `CronCreate` is measured non-deterministically refusable by the
+# auto-mode classifier, and a model that stamps without it freshens the stamp over an EMPTY cron
+# table: a Patrol that reads alive to this hook, to the arming wall and to /bionic:doctor, and never
+# fires again. The header argues that this is strictly worse than the death it heals. The line is too
+# short to carry the argument (it says "if absent"), so the explanation carries it, and these rows
+# hold it there for the reader who acts on it.
 D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
 fire "$D"
-expect_block "35: the stale fixture blocks, so there is a notice to read"
-# AMENDED at REQ-1 (T1): the re-arm is three steps now, because the notice LOOKS before it
-# creates (CronList is step 1, AC-1.2). The conditional and the refusal direction are
-# unchanged in substance — they moved one step down with the half they guard.
-expect_reason_names "36: step 3 is conditional on step 2 in the text itself" \
-  "ONLY IF step 2 succeeded"
-expect_reason_names "37: …and a refused CronCreate is told to stop, not to arm" \
+expect_block "35: the stale fixture is refused, so there is a refusal to explain"
+explain_names "36: the arm act is conditional on the create act in the text itself" \
+  "Only once step 2 returned a job"
+explain_names "37: …and a refused CronCreate is told to stop, not to arm" \
   "do NOT run step 3"
-expect_reason_names "38: …and the deliberate-stop path is named, not left to be guessed" \
+explain_names "38: …and the deliberate-stop path is named, not left to be guessed" \
   "session-poker.sh disarm"
 
 # ---------- the header's own honesty about its backstop ----------
