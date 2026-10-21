@@ -4,8 +4,8 @@
 # THE VERB PRINTS THE WHOLE PAGE BUT ONE JUDGMENT. The title (project, release, weekday and time, the
 # step of nine, the tasks done), the Bottom line's four answers (what you owe, what is next, what is
 # done, when it closes), the Task list (a glyph, `step/task: description`, a time in parentheses or a
-# state after " — "), the Score's five indicator lines, Blocked on you and Predicted close,
-# every section bulleted and every line folded at 92 columns. The one judgment is the grade and its
+# state after " — "), the Score's five indicator lines and Blocked on you, every section bulleted
+# and every line folded at 92 columns; `--basis` prints the close's arithmetic. The one judgment is the grade and its
 # rationale, which the skill writes through `sitrep grade <A-F> '<rationale>'`, refused unless the
 # rationale names an indicator line; the page prints the newest one recorded. `--line` is the Patrol's
 # one-line form.
@@ -69,9 +69,13 @@ SR_H="$(printf 'a%.0s' $(seq 40))"
 # NOW; SR_APPROVED=none leaves the line out, an unapproved plan) and declares `forecast: $SR_FORECAST` (48h when
 # unset; an empty SR_FORECAST declares none). SR_EXTRA
 # appends that many more pending 30-minute rows (T18…), reading nothing, so the plan's total grows and the
-# chain does not.
+# chain does not. SR_SCALE, when set, declares `scale:`.
+# THE DISPATCH LEDGER: each landed row of SR_DISPATCH_ROWS (all four when unset) has a `dispatched` instant,
+# at its ready instant, or SR_DISPATCH_LEAD minutes before its landing when set, minute-precise as the
+# roster writes it. At the ready instant the pace is the queue's own 1.2×, so the close moves only where a
+# world sets a lead apart from the queue time.
 sr_world() {
-  local label="$1" mins="$2" r d p
+  local label="$1" mins="$2" r d p led=""
   r="$TMPROOT/$label"; mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-01-fx"
   ( cd "$r" && git init -q . 2>/dev/null )
   d="$r/.bionic/docs/record/wave-02-fx"; mkdir -p "$d"
@@ -81,6 +85,7 @@ sr_world() {
   [ "$mins" = none ] && { st1=pending; land=no; }
   {
     printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
+    [ -z "${SR_SCALE:-}" ] || printf 'scale: %s\n' "$SR_SCALE"
     [ -z "${SR_FORECAST-48h}" ] || printf 'forecast: %s\n' "${SR_FORECAST-48h}"
     [ -z "${SR_GOALS:-}" ] || printf '%s\n' "$SR_GOALS" | sed 's/^/goals: /'
     printf -- '---\n'
@@ -101,6 +106,9 @@ sr_world() {
       sr_ev "ev=ready|row=T$i|name=w-T$i|commit=$SR_C1|branch=wt/02-T$i|tree=$r/.worktrees/02-T$i|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T${rd}Z"
       sr_ev "ev=verdict|row=T$i|commit=$SR_C1|suite=a.test.sh|result=green|log=/rec/T$i.log|at=$(sr_iso $((e - 60)))"
       sr_ev "ev=published|row=T$i|commit=$SR_C1|kind=queue|by=-|why=-|at=$at"
+      case " ${SR_DISPATCH_ROWS-1 2 3 4} " in
+        *" $i "*) led="$led$(sr_disp "T$i" $(( e - ${SR_DISPATCH_LEAD:-${!i}} * 60 )))"$'\n' ;;
+      esac
       i=$((i + 1))
     done
   fi
@@ -120,6 +128,7 @@ sr_world() {
     sr_row T12 "Release-gated row · complexity: standard" approval:release 30 pending
     sr_row T17 "Merge-gated row · complexity: standard" approval:merge 30 pending
     i=18; while [ "$i" -le $((17 + ${SR_EXTRA:-0})) ]; do sr_row "T$i" "Row $i body · complexity: standard" — 30 pending; i=$((i + 1)); done
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n%s' "$led"
     printf '\n## Not Doing\n\n- nothing\n'
   } >> "$p"
   # The fill ledger: two turns, nothing idle, the first at 10:00Z (elapsed 720 min at NOW).
@@ -134,6 +143,9 @@ sr_world() {
 sr_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 sr_hms() { local h="${1%%:*}" r="${1#*:}"; printf '%d' $(( 10#$h * 3600 + 10#${r%%:*} * 60 + 10#${r#*:} - 36000 )); }
 sr_ev() { printf 'line/v1|%s\n' "$1" >> "$SR_REC"; }
+sr_disp() {  # <id> <epoch> -> its dispatch ledger row, dispatched at that minute
+  printf '| %s | implementor (w-%s) | %s | 30 min | — | — | — |' "$1" "$1" "$(date -u -r "$2" +%Y-%m-%dT%H:%MZ 2>/dev/null || date -u -d "@$2" +%Y-%m-%dT%H:%MZ)"
+}
 sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
@@ -141,21 +153,26 @@ sr_row() {  # <id> <task> <reads> <size> <status>
 sr_owed() {  # <owed/v1 fields after the schema> [<session>] -> one line in that session's owed store (this world's own by default)
   printf 'owed/v1|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-${2:-$SID}.state"
 }
-# sr_prev <minutes> -> a delivered plan beside this one (wave-01-prev, T1 of 60 min declared) whose
-# landing record lands T1 in <minutes>: the previous wave's measured ratio is <minutes> / 60.
+# sr_prev <minutes> [<scale>] -> a delivered plan beside this one (wave-40-prev, T1 of 60 min declared,
+# declaring `scale: <scale>` when given) whose T1 is dispatched at 10:00Z the day before and lands <minutes>
+# later: the previous wave's measured ratio is <minutes> / 60. Its queue time is 1 minute, so a pace read
+# from the queue would be 1/60.
 sr_prev() {
-  local p="$SR_REPO/.bionic/docs/plans/epic-01-fx/wave-01-prev.plan.md" d="$SR_REPO/.bionic/docs/record/wave-01-prev"
+  local p="$SR_REPO/.bionic/docs/plans/epic-01-fx/wave-40-prev.plan.md" d="$SR_REPO/.bionic/docs/record/wave-40-prev"
+  local land=$((SR_E0 - 86400 + $1 * 60))
   mkdir -p "$d"
   {
-    printf -- '---\nwave: wave-01-prev\nrelease: 9.8.0\n---\n# prev\n\n## SDLC State\n\ncurrent: 9\n\n'
-    printf -- '- Step 9: delivered: 2026-10-05T20:00Z wave-01-prev 9.8.0 — closed by close-out.sh\n'
+    printf -- '---\nwave: wave-40-prev\nrelease: 9.8.0\n%s---\n# prev\n\n## SDLC State\n\ncurrent: 9\n\n' "${2:+scale: $2$'\n'}"
+    printf -- '- Step 9: delivered: 2026-10-05T20:00Z wave-40-prev 9.8.0 — closed by close-out.sh\n'
     printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | Prev row · complexity: standard | — | — | — | 60 | REQ-1 | lib/p1.sh | — | — | landed | — | — | — |\n'
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n|---|---|---|---|---|---|---|\n%s\n' \
+      "$(sr_disp T1 $((SR_E0 - 86400)))"
   } > "$p"
   {
-    printf 'line/v1|ev=ready|row=T1|name=p-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-05T10:00:00Z\n' "$SR_C1" "$SR_REPO"
-    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$SR_C1" "$(sr_iso $((SR_E0 - 86400 + $1 * 60)))"
+    printf 'line/v1|ev=ready|row=T1|name=p-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=%s\n' "$SR_C1" "$SR_REPO" "$(sr_iso $((land - 60)))"
+    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$SR_C1" "$(sr_iso "$land")"
   } > "$d/landing-proofs.log"
 }
 sr_run() {  # <args after the verb…> -> OUT (stdout), ERR (stderr), RC; the world's plan is named last by the caller
@@ -228,7 +245,7 @@ expect_eq "R4 every task line opens with one of the four glyphs in column 1, the
 expect_eq "R6 no UTC instant anywhere on the page (no ISO Z time, no UTC word)" "" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z|UTC')"
 expect_eq "R7 the section headings in order, each after a blank line" \
-  "Bottom line|Task list|Score: not graded yet|Blocked on you|Predicted close" "$(printf '%s\n' "$OUT" | sr_heads)"
+  "Bottom line|Task list|Score: not graded yet|Blocked on you" "$(printf '%s\n' "$OUT" | sr_heads)"
 expect_eq "R8 …and no line of rule characters" "" "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
 # A task done on another day than now's carries its local date after the time.
 SR_AT=$((SR_NOW + 86400)) sr_run "$SR_PLAN"
@@ -477,7 +494,7 @@ expect_eq "BP6 …and the scorecard's target reads it too" \
   "widest landing ready→landed: T1 20.0 min · target < 25" "$(printf '%s\n' "$SR_MUT_SC" | /usr/bin/grep '^widest landing ')"
 
 # ============================================================
-section "§SHAPE: the page is the prototype's — title with the step and the task count, Bottom line, Task list, Score, Blocked on you, Predicted close; no glyph before the Bottom line; every section bulleted; every line at most 92 columns; a task in flight carries its state in words"
+section "§SHAPE: the page is the prototype's — title with the step and the task count, Bottom line, Task list, Score, Blocked on you; no glyph before the Bottom line; every section bulleted; every line at most 92 columns; a task in flight carries its state in words"
 # ============================================================
 # sr_breaks -> the first physical line that breaks its section's form, or nothing: a bulleted section's lines open
 # on `- ` or a two-space continuation; a Task list line on a glyph or a five-space continuation; a Score line on a
@@ -497,7 +514,7 @@ sr_world shape "6 6 12 12"
 awk -v t="$SR_LONG" -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $5 = " " t " · complexity: standard " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "H1 the sections, in the prototype's order, each heading after a blank line" \
-  "Bottom line|Task list|Score: not graded yet|Blocked on you|Predicted close" "$(printf '%s\n' "$OUT" | sr_heads)"
+  "Bottom line|Task list|Score: not graded yet|Blocked on you" "$(printf '%s\n' "$OUT" | sr_heads)"
 SR_GL1="$(printf '%s\n' "$OUT" | /usr/bin/grep -nE '✅|🔄|⬜|⛔|❔|➖|✖' | head -1 | cut -d: -f1)"
 SR_BL1="$(printf '%s\n' "$OUT" | /usr/bin/grep -n '^Bottom line$' | head -1 | cut -d: -f1)"
 expect_eq "H3 no glyph before the Bottom line: the first glyph sits below its heading, which is line 3" "3|yes" \
@@ -556,7 +573,8 @@ awk '/^\| T21 \| / { sub(/\| landed \|/, "| active |") } { print }' "$SR_PLAN" >
 sr_run "$SR_PLAN"
 SR_PAGE_D="$OUT"
 expect_eq "SC4 precondition: the delivered plan still holds an open task" "🔄 4/T21: Row 21 of wave 38 — building" "$(sr_rows | /usr/bin/grep '/T21: ')"
-expect_eq "SC6 …no closing time anywhere on its page (the forecast page above prints one: FC1)" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'About ')"
+expect_eq "SC6 …no closing time anywhere on its page, its close the delivery (the forecast page below prints one: FC1b)" "0|1" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -cE 'not before|likely|About ')|$(sr_line '- Close: ' | /usr/bin/grep -c '^- Close: delivered at ')"
 sr_run --line "$SR_PLAN"
 expect_eq "SC7 …and the one-line form says delivered, no time" "yes" "$(printf '%s\n' "$OUT" | /usr/bin/grep -qE ' · delivered$' && echo yes)"
 for SR_W in A D; do
@@ -566,56 +584,117 @@ for SR_W in A D; do
 done
 
 # ============================================================
-section "§FORECAST: the close is the open work at the measured pace, the larger of the longest chain and the work over the count the gate admits; before approval it is the no-forecast sentence; no typed number moves it, and admitting more never shortens one chain"
+section "§FORECAST: the close is the open work, the larger of the longest chain and the work over the count the gate admits, from now: a floor at the plan's own minutes and a likely close at the measured pace; no typed number moves it, and admitting more never shortens one chain"
 # ============================================================
+# The work left is 480 min over 2 admitted, 240 min, above the 150-min chain: the floor is 3:00 PM + 4 h, the
+# likely close the same 240 min at this run's 1.2× (its four rows land 1.2× their planned minutes after dispatch).
 sr_world forecast "6 6 12 12"
 sr_run "$SR_PLAN"
-expect_eq "FC1b …and the Bottom line's close is the same time" "- Close: about 7:48 PM." "$(sr_line '- Close: ')"
-SR_FC1_ABOUT="$(sr_line '- About ')"
+expect_eq "FC1b the Bottom line's close is the floor and the likely close, naming whose pace" \
+  "- Close: not before 7:00 PM · likely 7:48 PM (this run's 1.2×)." "$(sr_line '- Close: ')"
+SR_FC1_CLOSE="$(sr_line '- Close: ')"
 awk '{ sub(/^forecast: 48h$/, "forecast: 24h") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "FC2 a typed number moves nothing: the plan's forecast: halved, the close is the same (the schedule line did read it: it needs 9 by now)" \
-  "$SR_FC1_ABOUT|yes" "$(sr_line '- About ')|$(sr_ind schedule | /usr/bin/grep -q 'needs 9 by now' && echo yes)"
-# One admitted request, not two: the work is no longer divided and outweighs the chain.
-rm -f "$SR_GATE/requests/2"
-sr_run "$SR_PLAN"
-rm -f "$SR_GATE/requests/1"
-sr_run "$SR_PLAN"
-# Before the first landing: the previous delivered run's measured pace, and the line says so.
-sr_world forecast-none none
-sr_prev 96
-sr_run "$SR_PLAN"
-sr_world forecast-bare none
-sr_run "$SR_PLAN"
-SR_APPROVED=none sr_world forecast-unapproved "6 6 12 12"
-sr_run "$SR_PLAN"
+  "$SR_FC1_CLOSE|yes" "$(sr_line '- Close: ')|$(sr_ind schedule | /usr/bin/grep -q 'needs 9 by now' && echo yes)"
 # The close on the local clock: a time on now's day bare, past midnight with its date.
 sr_world forecast-late "6 6 12 12"
 SR_AT=$((SR_NOW - 6 * 3600)) sr_run "$SR_PLAN"
-expect_eq "FC8 at 9:00 AM, 4 h 48 min on is the same local day: no date" "- About 1:48 PM." "$(sr_line '- About ')"
+expect_eq "FC8 at 9:00 AM, 4 h and 4 h 48 min on are the same local day: no date" \
+  "- Close: not before 1:00 PM · likely 1:48 PM (this run's 1.2×)." "$(sr_line '- Close: ')"
 SR_AT=$((SR_NOW + 12 * 3600)) sr_run "$SR_PLAN"
-expect_eq "FC9 …at 3:00 AM the next morning, now's own day: no date" "- About 7:48 AM." "$(sr_line '- About ')"
+expect_eq "FC9 …at 3:00 AM the next morning, now's own day: no date" \
+  "- Close: not before 7:00 AM · likely 7:48 AM (this run's 1.2×)." "$(sr_line '- Close: ')"
 SR_AT=$((SR_NOW + 8 * 3600 + 1800)) sr_run "$SR_PLAN"
-expect_eq "FC10 …at 11:30 PM, 4 h 48 min on is past midnight: the date follows" "- About 4:18 AM 2026-10-07." "$(sr_line '- About ')"
+expect_eq "FC10 …at 11:30 PM, both are past midnight: the date follows each" \
+  "- Close: not before 3:30 AM 2026-10-07 · likely 4:18 AM 2026-10-07 (this run's 1.2×)." "$(sr_line '- Close: ')"
 # One chain: every open task reads what the one before it writes, so no width can shorten it.
 sr_world one-chain "6 6 12 12"
 awk -F'|' 'BEGIN { OFS = "|" }
   $2 ~ /^ T([5-9]|1[0-7]) $/ { n = $2; gsub(/[ T]/, "", n); if (n + 0 > 5) $8 = " lib/t" (n - 1) ".sh " }
   { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-sr_run "$SR_PLAN"
-SR_OC2="$(sr_line '- About ')"; SR_OC2W="$(sr_line '- The work left ' | /usr/bin/grep -oE 'over the [0-9]+ suite runs')"
+sr_run "$SR_PLAN"; SR_OC2="$(sr_line '- Close: ')"
+sr_run --basis "$SR_PLAN"
+SR_OC2W="$(sr_line '- The work left ' | /usr/bin/grep -oE 'over the [0-9]+ suite runs')"
 SR_OC2MAX="$(printf '%s\n' "$OUT" | sr_maxw)"
 for i in 3 4; do
   printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T%d\ntree=/elsewhere/project\nasked=%d\nholder=%s:\nadmitted=%d\npromise=5:0.1:30\n' \
     "$SID" "$((i + 4))" "$((SR_NOW - 600))" "$$" "$((SR_NOW - 590))" > "$SR_GATE/requests/$i"
 done
-sr_run "$SR_PLAN"
-expect_eq "FC11 precondition: the chain is every open task, and the gate's count reached the page, 2 then 4" \
+sr_run --basis "$SR_PLAN"
+expect_eq "FC11 precondition: the chain is every open task, and the gate's count reached the basis, 2 then 4" \
   "yes|over the 2 suite runs|over the 4 suite runs" \
   "$(sr_line '- The work left ' | /usr/bin/grep -q 'T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12 → T13 → T14 → T15 → T16 → T17, is 480 min' && echo yes)|$SR_OC2W|$(sr_line '- The work left ' | /usr/bin/grep -oE 'over the [0-9]+ suite runs')"
-expect_eq "FC12 admitted 2 then 4 on one chain: the close does not move, 480 min at 1.2× either way" \
-  "- About 12:36 AM 2026-10-07.|- About 12:36 AM 2026-10-07." "$SR_OC2|$(sr_line '- About ')"
-expect_eq "FC13 …and the long chain folds within 92 columns (widest $SR_OC2MAX)" "yes" "$([ "${SR_OC2MAX:-999}" -le 92 ] && echo yes)"
+sr_run "$SR_PLAN"
+expect_eq "FC12 admitted 2 then 4 on one chain: the close does not move, 480 min at 1× and at 1.2× either way" \
+  "- Close: not before 11:00 PM · likely 12:36 AM 2026-10-07 (this run's 1.2×).|$SR_OC2" "$(sr_line '- Close: ')|$SR_OC2"
+expect_eq "FC13 …and the long chain folds within 92 columns on the basis (widest $SR_OC2MAX)" "yes" "$([ "${SR_OC2MAX:-999}" -le 92 ] && echo yes)"
+
+# ============================================================
+section "§PACE: the pace is the median, over this run's queue landings with a dispatched instant and a declared size, of landed less dispatched over the planned minutes; the queue's ready-to-landed time feeds nothing; a pace that is not positive is unmeasured"
+# ============================================================
+# Three rows sized 60 min, dispatched 90 min before each landing and ready 5 min before it: the pace is 1.5×,
+# never the queue's 5/60. T4 lands too, with no ledger row, and joins nothing.
+SR_DISPATCH_LEAD=90 SR_DISPATCH_ROWS="1 2 3" sr_world pace "5 5 5 5"
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-3] $/ { $9 = " 60 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run --basis "$SR_PLAN"
+expect_eq "PA1 --basis names this run's pace, 1.5×, over the three landings with a dispatched instant" \
+  "- The pace: 1.5×, the median over 3 landings of the minutes from dispatch to landing over the minutes planned." \
+  "$(sr_line '- The pace: ')"
+sr_run "$SR_PLAN"
+expect_regex "PA1b …and the page's close names it" " \(this run's 1\.5×\)\.$" "$(sr_line '- Close: ')"
+# Landings 0 min after ready and no dispatched instant: nothing measures a pace, so the floor alone prints.
+SR_DISPATCH_ROWS="" sr_world pace-zero "0 0 0 0"
+sr_run "$SR_PLAN"
+expect_eq "PA2 no dispatched instant: the floor with no pace, and no likely close or About" \
+  "- Close: not before 7:00 PM (no pace yet).|0" "$(sr_line '- Close: ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE 'likely|About ')"
+# Dispatched at the very minute each lands: every ratio is 0, a pace that is not positive, unmeasured.
+SR_DISPATCH_LEAD=0 sr_world pace-nil "0 0 0 0"
+sr_run "$SR_PLAN"
+expect_eq "PA3 a zero pace is unmeasured: the floor with no pace, and now's clock nowhere in the close" \
+  "- Close: not before 7:00 PM (no pace yet)." "$(sr_line '- Close: ')"
+
+# ============================================================
+section "§FLOOR: before this run measures a pace, the newest delivered run on the same project at the same scale lends its pace, named; with none the floor stands alone; a likely close at or before the floor never prints; the page states the close once and --basis prints its arithmetic"
+# ============================================================
+# No landing: the work left is 510 min over 2 admitted, 255 min, so the floor is 7:15 PM; at wave-40's 72/60 the
+# likely close is 306 min on, 8:06 PM.
+SR_SCALE=wave sr_world floor none
+sr_prev 72 wave
+sr_run "$SR_PLAN"
+expect_eq "FL1 a delivered run at the same scale lends its pace, named" \
+  "- Close: not before 7:15 PM · likely 8:06 PM (wave-40's 1.2×).|0" "$(sr_line '- Close: ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE 'No forecast|About ')"
+sr_run --line "$SR_PLAN"
+expect_eq "FL1b …and the one-line form carries both" "closes ≥7:15 PM ~8:06 PM" "${OUT##* · }"
+SR_SCALE=wave sr_world floor-epic none
+sr_prev 72 epic
+sr_run "$SR_PLAN"
+expect_eq "FL1c a delivered run at another scale lends nothing: the floor, no pace yet" \
+  "- Close: not before 7:15 PM (no pace yet)." "$(sr_line '- Close: ')"
+sr_run --line "$SR_PLAN"
+expect_eq "FL1d …and the one-line form carries the floor alone" "closes ≥7:15 PM" "${OUT##* · }"
+SR_SCALE=wave sr_world floor-bare none
+sr_run "$SR_PLAN"
+expect_eq "FL1e no delivered run at all: the floor, no pace yet" "- Close: not before 7:15 PM (no pace yet)." "$(sr_line '- Close: ')"
+# This run's pace 0.001× (three rows sized 1000 min, each landed 1 min after dispatch) over a 10-minute chain, one
+# task open: the likely close is now's own minute, so the floor prints with the pace named.
+SR_DISPATCH_LEAD=1 SR_DISPATCH_ROWS="1 2 3" sr_world floor-fast "5 5 5 5"
+awk -F'|' 'BEGIN { OFS = "|" }
+  $2 ~ /^ T[1-3] $/ { $9 = " 1000 " }
+  $2 ~ /^ T([5-9]|1[0-7]) $/ { $14 = ($2 == " T9 ") ? " pending " : " dropped "; if ($2 == " T9 ") $9 = " 10 " }
+  { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "FL2 a likely close at or before now prints the floor, never now's clock" \
+  "- Close: not before 3:10 PM (this run's 0.001×).|0" "$(sr_line '- Close: ')|$(sr_line '- Close: ' | /usr/bin/grep -c '3:00 PM')"
+# The page states the close once; the arithmetic is --basis's.
+sr_world floor-basis "6 6 12 12"
+sr_run "$SR_PLAN"
+expect_eq "FL3 the page has no Predicted close section beside its Bottom line, and one close line" "Bottom line|0|1" \
+  "$(printf '%s\n' "$OUT" | sr_heads | cut -d'|' -f1)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^Predicted close$')|$(sr_page | /usr/bin/grep -ciE 'not before|about ')"
+sr_run --basis "$SR_PLAN"
+expect_eq "FL3b --basis prints the work and the width, the chain, the pace, and the floor and likely instants" \
+  "- The work left is 480 min as planned, 240 min over the 2 suite runs the gate admits; the longest chain left, T8 → T9, is 150 min; the larger is 240 min.|- The pace: 1.2×, the median over 4 landings of the minutes from dispatch to landing over the minutes planned.|- The floor: 240 min at 1× from now, 7:00 PM; the likely close: 288 min at 1.2×, 7:48 PM." \
+  "$(sr_line '- The work left ')|$(sr_line '- The pace: ')|$(sr_line '- The floor: ')"
 
 # ============================================================
 section "§LINE: --line is the one-line form, the three indicator glyphs in order · owed: <n> · the close"
@@ -623,20 +702,20 @@ section "§LINE: --line is the one-line form, the three indicator glyphs in orde
 sr_world line "6 6 12 12"
 sr_bind
 sr_run --line "$SR_PLAN"
-expect_eq "L1 the clean world: one line, exit 0" "0|$SR_MARK_WITHIN$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ~7:48 PM" "$RC|$OUT"
+expect_eq "L1 the clean world: one line, exit 0" "0|$SR_MARK_WITHIN$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ≥7:00 PM ~7:48 PM" "$RC|$OUT"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 sr_owed "key=gate:abc|state=open|sent=-|at=2026-10-06T20:00:00Z|title=gate act: merge|reply=poker: GATE T28 — merge: approve it"
 sr_run --line "$SR_PLAN"
 expect_eq "L2 a red at head and two owed items: the correctness glyph moves, owed counts them" \
-  "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 2 · closes ~7:48 PM" "$OUT"
+  "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN · owed: 2 · closes ≥7:00 PM ~7:48 PM" "$OUT"
 sr_run "$SR_PLAN"
 expect_eq "L3 …the one line's glyphs are the full page's first three marks, in order" \
   "$SR_MARK_WITHIN$SR_MARK_OVER$SR_MARK_WITHIN" "$(sr_page | awk '$2 == "schedule" || $2 == "correctness" || $2 == "waste" { printf "%s", $1 }')"
 SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
-expect_eq "L4 an indicator the record cannot compute (no forecast:, no landing) prints ❔ in the one line, and so does an unverified close" \
-  "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes unverified" "$OUT"
+expect_eq "L4 an indicator the record cannot compute (no forecast:, no landing) prints ❔ in the one line, and a close with no pace is its floor" \
+  "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · closes ≥7:15 PM" "$OUT"
 SR_APPROVED=none sr_world line-unapproved "6 6 12 12"
 sr_run --line "$SR_PLAN"
 expect_eq "L5 an unapproved plan: no forecast, said" "$SR_MARK_NONE$SR_MARK_WITHIN$SR_MARK_WITHIN · owed: 0 · no forecast until approved" "$OUT"
@@ -647,6 +726,8 @@ section "§ARGS: the verb's operands"
 sr_world args "6 6 12 12"
 sr_run --line --line "$SR_PLAN"
 expect_eq "A1 --line twice is the usage error (2)" "2" "$RC"
+sr_run --line --basis "$SR_PLAN"
+expect_eq "A1b --line with --basis is the usage error (2), one form at a time" "2" "$RC"
 sr_run "$SR_REPO/no/such.plan.md"
 expect_eq "A2 a named plan that is no file is refused (2), naming it" \
   "2|1" "$RC|$(printf '%s\n' "$ERR" | /usr/bin/grep -c 'no plan file at')"
@@ -689,11 +770,11 @@ sr_check() {  # <report file> <page file> -> `ok`, or the first rule the report 
 }
 
 # ============================================================
-section "§SKILL: the skill's page opens Sitrep · …, then Bottom line, Task list, Score, Blocked on you, Predicted close; it records only the grade and its rationale, and shows the verb's page unaltered"
+section "§SKILL: the skill's page opens Sitrep · …, then Bottom line, Task list, Score, Blocked on you; it records only the grade and its rationale, and shows the verb's page unaltered"
 # ============================================================
 SR_SHAPE="$(sr_shape)"
 expect_eq "O2 …its headings, in order, the prototype's" \
-  "Bottom line|Task list|Score: <grade> (graded <time>)|Blocked on you|Predicted close" "$(printf '%s\n' "$SR_SHAPE" | sr_heads)"
+  "Bottom line|Task list|Score: <grade> (graded <time>)|Blocked on you" "$(printf '%s\n' "$SR_SHAPE" | sr_heads)"
 expect_eq "O3 …and no rule line in the shape (the same block O1 read)" "" "$(printf '%s\n' "$SR_SHAPE" | /usr/bin/grep -E '^[-=─━_]{3,}$')"
 expect_eq "O3b the skill shows the page in one code block and stops: it names no confirmation line to quote under it" "yes|0" \
   "$(/usr/bin/grep -q 'inside one fenced code block' "$SR_SKILL" && echo yes)|$(/usr/bin/grep -ci 'confirmation line' "$SR_SKILL")"
@@ -701,11 +782,11 @@ sr_world skill "6 6 12 12"
 sr_run grade C 'the schedule line holds; nothing else is graded yet' "$SR_PLAN"
 sr_run "$SR_PLAN"; printf '%s\n' "$OUT" > "$TMPROOT/page.txt"
 expect_eq "O4 the verb's page after a grade: its headings are the shape's, the Score heading carrying the letter and time" \
-  "Bottom line|Task list|Score: C (graded 3:00 PM)|Blocked on you|Predicted close" "$(sr_heads "$TMPROOT/page.txt")"
+  "Bottom line|Task list|Score: C (graded 3:00 PM)|Blocked on you" "$(sr_heads "$TMPROOT/page.txt")"
 cp "$TMPROOT/page.txt" "$TMPROOT/rep.txt"
 expect_eq "O5 the page shown unaltered meets the contract" "ok" "$(sr_check "$TMPROOT/rep.txt" "$TMPROOT/page.txt")"
-awk '$0 == "Blocked on you" { print "Predicted close"; next } $0 == "Predicted close" { print "Blocked on you"; next } { print }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_regex "O6 …Blocked on you and Predicted close swapped: refused on the headings" "^headings: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
+awk '$0 == "Blocked on you" { print "Task list"; next } $0 == "Task list" { print "Blocked on you"; next } { print }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
+expect_regex "O6 …Task list and Blocked on you swapped: refused on the headings" "^headings: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 sed 's/^Task list$/TASK LIST/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
 expect_regex "O7 …a heading uppercased: refused on the headings" "^headings: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 awk '{ print } index($0, "- the schedule line holds") == 1 { print "- diagnosis: the gate is the bottleneck" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
@@ -723,8 +804,8 @@ expect_eq "FA3 …a planted task the verb never printed: refused, naming it" "fa
   "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 sed '/^- Done: /s/4 of 17 tasks/5 of 17 tasks/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
 expect_regex "FA4 …a rendered line altered (the Done line's count): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-awk '{ print } index($0, "- It assumes ") == 1 { print "- the release ships tonight" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_eq "FA5 …an unlabelled claim appended to Predicted close: refused on the fact" "fact: > - the release ships tonight" \
+awk '{ print } index($0, "- Close: ") == 1 { print "- the release ships tonight" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
+expect_eq "FA5 …an unlabelled claim appended to the close: refused on the fact" "fact: > - the release ships tonight" \
   "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 
 # ============================================================
