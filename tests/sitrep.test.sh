@@ -1149,8 +1149,9 @@ section "§ONE-LINE: every task of the plan has one Task list line, never contin
 # any line beyond one per step 0 to 3 and per task.
 # sr_rawsit -> the Task list's physical lines as printed (nothing unfolded), heading excluded, to the first blank.
 sr_rawsit() { printf '%s\n' "$OUT" | awk 'on && /^$/ { exit } on { print } $0 == "Task list" { on = 1 }'; }
-# sr_cell <id> <cell> -> SR_PLAN with that task's description cell replaced
-sr_cell() { awk -v id=" $1 " -v t="$2" -F'|' 'BEGIN { OFS = "|" } $2 == id { $5 = " " t " " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }
+# sr_cell <id> <cell> -> SR_PLAN with that task's description cell replaced, in the Tasks table alone (a row of the
+# dispatch ledger names the same id)
+sr_cell() { awk -v id=" $1 " -v t="$2" -F'|' 'BEGIN { OFS = "|" } $2 == id && NF > 12 { $5 = " " t " " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }
 SR_LONG300="$(awk 'BEGIN { for (i = 1; length(s) < 300; i++) s = s (i > 1 ? " " : "") "wordnumber" i; print substr(s, 1, 300) }')"
 sr_world oneline "6 6 12 12"
 sed -i.bak -e 's#^\(| T10 | 4 | build | [^|]*| — | — | \)—#\1lib/t5.sh,lib/t6.sh,lib/t7.sh#' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
@@ -1158,7 +1159,7 @@ sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending
 for SR_T in T1 T5 T10 T11; do sr_cell "$SR_T" "$SR_LONG300"; done
 sr_run "$SR_PLAN"
 expect_eq "ONE0 precondition: the world renders, four task cells are 300 characters, and T10 waits on three open tasks, T11 is held" "0|4|yes|yes" \
-  "$RC|$(/usr/bin/grep -E '^\| (T1|T5|T10|T11) \|' "$SR_PLAN" | awk -F'|' 'length($5) == 302 { n++ } END { print n + 0 }')|$(/usr/bin/grep -q '^| T10 | .*lib/t5.sh,lib/t6.sh,lib/t7.sh' "$SR_PLAN" && echo yes)|$(/usr/bin/grep -q '^| T11 | .*| held |' "$SR_PLAN" && echo yes)"
+  "$RC|$(/usr/bin/grep -E '^\| (T1|T5|T10|T11) \|' "$SR_PLAN" | awk -F'|' 'NF > 12 && length($5) == 302 { n++ } END { print n + 0 }')|$(/usr/bin/grep -q '^| T10 | .*lib/t5.sh,lib/t6.sh,lib/t7.sh' "$SR_PLAN" && echo yes)|$(/usr/bin/grep -q '^| T11 | .*| held |' "$SR_PLAN" && echo yes)"
 SR_ONE_LINES="$(for SR_T in T1 T5 T10 T11; do sr_rawsit | /usr/bin/grep -E "^[^ ]+ 4/$SR_T: "; done)"
 expect_eq "ONE1 a 300-character cell in each state (done, building, waiting on three, held) prints one line each, and the list has no continuation line" "4|0" \
   "$(printf '%s\n' "$SR_ONE_LINES" | /usr/bin/grep -c .)|$(sr_rawsit | /usr/bin/grep -c '^ ')"
