@@ -488,7 +488,7 @@ decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
 # WHAT WAITS ON A DECISION, the one reader the wait line and the fact sheet share. Three things wait on D<n>: every task
 # not landed or dropped whose reads name it as an approval, `approval:D<n>`, whatever its state; the release, while the
 # newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
-# names D<n> as a whole word (D3 is not D30) in its reason or its line.
+# names D<n> as a whole word (the third decision is not the thirtieth) in its reason or its line.
 decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id, in the plan's order, then `release`, then `merge`
   local root dir page
   units_rows "$1" 2>/dev/null | awk -F'\t' -v k="approval:$2" '

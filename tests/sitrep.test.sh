@@ -1352,7 +1352,7 @@ section "§WAIT: a decision's wait line names everything that waits on it: a row
 # FIXTURE FIDELITY: the world's plan bound by the bind verb, the put through the real `decisions put`, the held merge
 # opened on the run's register through lib/owed.sh as close-out opens it, and the release approval page's replay
 # line in the shape plan.sh `rr_record` writes. fails-when: a held merge naming D<n> leaves the put's wait line
-# saying nothing waits (wave 41's D20).
+# saying nothing waits, as a run's put once did while its merge waited on that decision.
 SR_WLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 sr_wait() {  # <D<n>> -> the wait: line the put prints, its label stripped
   sr_poke decisions put "$1" "the decision $1" 2>&1 | sed -n 's/^wait: //p'
