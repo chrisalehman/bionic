@@ -4,7 +4,7 @@
 # THE VERB PRINTS FACTS, NEVER A PAGE. `sitrep [<plan>]` prints the sheet: a first line saying it is the model's
 # input, then one fact per line, `<key>: <value>`, in a fixed order — the run (its release, name, wave, now, step,
 # project, start and last landing), the ten steps, every task in execution order with its step, state, short
-# description and a few words of note, the metrics in numbers (completed, pace, correctness, waste, suite runs,
+# description and a few words of note, the metrics in numbers (completed, pace, correctness, waste,
 # goals) and each goal's status, the close (predicted, forecast end and the arithmetic in words), every ask open on
 # the run's register with what it holds, and every review result with its open findings. Every clock time is
 # local and 12-hour. `--line` is the Patrol's status, `<k> of <m> tasks · owed: <n> · close <time>`. The page,
@@ -223,18 +223,9 @@ sr_keys() { printf '%s\n' "$OUT" | tail -n +2 | awk -F': ' '$1 != p { print $1; 
 SR_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
 SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|metric.completed|metric.pace|metric.correctness|metric.waste|metric.goals|goal|close.predicted|close.forecast|close.basis|ask|review"
 
-# ============================================================
-section "§FIELDS: the suite's field reader, proved on known lines before it reads a sheet"
-# ============================================================
-expect_eq "F0 a task line's five fields, the description and the note holding spaces" \
-  "T7|4|failed|Row 7 body|red at head" \
-  "$(for f in id step state desc note; do sr_f 'task: id=T7 step=4 state=failed desc=Row 7 body note=red at head' "$f"; done | sr_join)"
-expect_eq "F0b an ask line's four fields" "approve:release|T12 and T17|approval: release|1:00 PM" \
-  "$(for f in key holds title raised; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM' "$f"; done | sr_join)"
-
 # ---------- the world that holds every fact kind ----------
 #
-# sr_sheet_world -> the §ROWS world moved so it holds one of each fact: T7 red at head (failed), T11 held, T13 a
+# sr_sheet_world -> the world moved so it holds one of each fact: T7 red at head (failed), T11 held, T13 a
 # review row in flight, T16 dropped, one discarded suite run, a 72-minute idle turn, a review of the whole failing
 # with one open S2 finding and a review of a piece passing, three goals (one met, one not met, one not measured),
 # five asks of five kinds open on the register beside one closed, and a decision put and not ruled.
@@ -282,7 +273,13 @@ handoff · a fresh session continues a no-run handoff (record/reader-test-handof
 # ============================================================
 section "§SHEET: the sheet over a run holding every fact kind — each fact appears as its key, in the sheet's order"
 # ============================================================
-# fails-when: a fact of the fixture is missing from the sheet.
+# fails-when: a fact of the fixture is missing from the sheet. The field reader every later section reads through is
+# proved on known lines first (F0), so a reader that returns nothing cannot pass for an absence.
+expect_eq "F0 a task line's five fields, the description and the note holding spaces" \
+  "T7|4|failed|Row 7 body|red at head" \
+  "$(for f in id step state desc note; do sr_f 'task: id=T7 step=4 state=failed desc=Row 7 body note=red at head' "$f"; done | sr_join)"
+expect_eq "F0b an ask line's four fields" "approve:release|T12 and T17|approval: release|1:00 PM" \
+  "$(for f in key holds title raised; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM' "$f"; done | sr_join)"
 sr_sheet_world sheet
 sr_run "$SR_PLAN"
 SR_SHEET="$OUT"

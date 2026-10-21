@@ -680,11 +680,12 @@ co_hand_holds() {  # -> sets CO_HH_LINE
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
 }
-# THE SCORECARD, READ BEFORE THE WIPE (wave-38 T15; D26). `landing-report --scorecard` prints four lines, each against
-# its target (human stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed,
-# human-wait minutes), then the sitrep's three indicator lines (hooks/session-poker.sh `scorecard_report` owns the
-# rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads the lines before the wipe into
-# CO_SC_LINES and the card and the continuation print that one reading. A report that cannot be read is a sentence.
+# THE SCORECARD, READ BEFORE THE WIPE. `landing-report --scorecard` prints four lines, each against its target (human
+# stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
+# minutes), then the fact sheet's pace, correctness and waste lines, byte for byte (hooks/session-poker.sh
+# `scorecard_report` owns the rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads
+# the lines before the wipe into CO_SC_LINES and the card and the continuation print that one reading. A report that
+# cannot be read is a sentence.
 CO_SC_LINES=""
 co_scorecard() {  # -> sets CO_SC_LINES
   local out
