@@ -687,7 +687,7 @@ expect_contains "GAP3c …on every row the command named" "| pending | approval:
 GAP_X3="$(mktemp)"
 jq -nc '{type:"user",uuid:"u-gap3",isSidechain:false,timestamp:"2026-09-19T00:01:00Z",message:{role:"user",content:"carry on"}}' > "$GAP_X3"
 BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$GAP_D2" "$GAP_X3"
-expect_contains "GAP3d meta: the next turn's ledger line still counts one free slot" "|free=1|" "$(gap_led "$GAP_D2" | tail -1)"
+expect_contains "GAP3d meta: the wall read the next turn, its ledger line is that turn's" "|turn=u-gap3|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_contains "GAP3e …and no row ready" "|ready=|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_eq "GAP3f the rows wait on the ruling: the turn passes" "" \
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
