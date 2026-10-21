@@ -553,8 +553,8 @@ roster_header > "$HF_PRED_ROSTER"
 roster_row_fixture session="$HF_PRED" status=identified name=w-pred agent_id=a-w-pred-3800000000000001 \
   subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$HF_R/.bionic/docs/record/w-pred.md" \
   duration="45 minutes" cadence="10 minutes" plan="$HF_P" >> "$HF_PRED_ROSTER"
-printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-08T12:00:00Z|title=Approve release|reply=poker: approve release — reply with your words\n' \
-  > "$HF_R/.bionic/tmp/owed-$HF_PRED.state"
+( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_R" OWED_SID="$HF_PRED" OWED_PLAN="$HF_P" \
+    owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
 hf_resume_new_session
 expect_false "RS0d precondition: …and unarmed (no stamp)" test -e "$(stamp_of "$HF_R")"
 poke "$HF_R" prompt; HF_PROMPT="$OUT"

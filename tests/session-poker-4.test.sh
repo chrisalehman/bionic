@@ -367,7 +367,7 @@ expect_contains "SEV-cur2 …naming that reading failing" \
 # printed; a second refusal on the same question opens nothing new; the waive verb closes it; and
 # once the question holds again (a passing reading over the fix), current 8 closes what is left.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
-sev_store() { cat "$RSEV/.bionic/tmp/owed-$SID.state" 2>/dev/null; }
+sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
 expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
   "waive:adversarial" "$SEV_WKEYS"
@@ -414,6 +414,18 @@ expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and
 expect_contains "AW-5 T35 once the question holds again, current 8 closes its waiver item" \
   "|key=waive:adversarial|state=closed|by=no longer failing|" "$(sev_store)"
 expect_eq "AW-5a …and no waiver item is left open" "" "$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
+# ---------- §ASK-RULING: a ruling shown closes its ruling: item wherever the run keeps it ----------
+# The tick's backstop opens `ruling:<id>` for a ruling a writer ended unread; showing the ruling closes it at once.
+# This fixture's session is bound to a plan, so the item lives in the run's register, not in the session's file; the
+# positive read of the open item comes first, through the extractor that then reads its absence.
+SEV_ROSTER="$(roster_of "$RSEV" "$SID")"
+SEV_RL="${S46_LIB%/*}"
+SEV_RID="$( ( . "$SEV_RL/roster.sh" && { [ -f "$SEV_ROSTER" ] || roster_header > "$SEV_ROSTER"; } && ruling_record "$SEV_ROSTER" w-ruled 'hold the line' ) )"
+( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_open "ruling:$2" "ruling unread: $2" "poker: ruling unread"' _ "$SEV_RL" "$SEV_RID" ) >/dev/null 2>&1
+expect_contains "RPC-1 the unread ruling's item is open on the session's ledger, in the run's register" "ruling:$SEV_RID" "$(sev_owed | cut -f1)"
+( . "$SEV_RL/roster.sh" && ruling_stamp "$SEV_ROSTER" "$SEV_RID" w-ruled shown=1 by=ack ) >/dev/null 2>&1
+expect_eq "RPC-2 …showing the ruling closes it at once: nothing left open for it" "" "$(sev_owed | cut -f1 | /usr/bin/grep "^ruling:$SEV_RID")"
+expect_contains "RPC-3 …and the register keeps the item, closed" "|key=ruling:$SEV_RID|state=closed|by=ruling read|" "$(sev_store)"
 POKE_BOUND="$SEV_BOUND_WAS"
 
 # ============================================================

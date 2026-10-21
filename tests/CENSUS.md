@@ -2,9 +2,9 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 114 · sections: 1034 · keep: 840 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 115 · sections: 1036 · keep: 842 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
 
-The section-list command counts 1064 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1064 - 22 - 8 = 1034.
+The section-list command counts 1066 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1066 - 22 - 8 = 1036.
 
 ## agent-context-guard.test.sh
 
@@ -31,6 +31,10 @@ archive.test.sh | §4 | keep | payload/scripts/lib/archive.sh archive_run: the o
 archive.test.sh | §5 | duplicate | payload/scripts/lib/archive.sh archive_run: the archive-on-close false arm deleted, so the run moves (5b); "5d: the printed line names the opt-out" is a prose pin carried by exit 0 with the source in place | close-out-4.test.sh §ONE-WRITER (unverified; OW-3 reads the plan still in place under archive-on-close: false)
 archive.test.sh | §6 | duplicate | payload/scripts/lib/roots.sh archive_root: the $HOME/bionic-archive default changed (6a); archive_run's aroot stops reading archive_root (6b) | roots.test.sh §1a (unverified), archive.test.sh §1
 archive.test.sh | §7 | vacuous | its one assertion is that the tracked skill file steps/9.md exists, a document no program reads by a field; the two spans it extracts are never asserted | none (searched 'steps/9.md' in tests/)
+
+## asks.test.sh
+
+asks.test.sh | §ONE-REGISTER | keep | payload/scripts/close-out.sh gate_ask: the commit wall run without OWED_PLAN="$PLAN", so the preflight's waiver is filed under its stand-in session's file and the run's page, which reads the register, says nothing is owed (ONE-2, ONE-3); payload/scripts/lib/owed.sh owed_register: the register path made the session's own file, so a bound session no longer reads the run's asks as its own | none (searched 'owed_list_plan' and 'closeout-preflight' in tests/; release-approval.test.sh §REGISTER reads the card's decisions off the register, not the preflight's write)
 
 ## background-suite-guard.test.sh
 
@@ -1015,6 +1019,7 @@ release-approval.test.sh | §POST | keep | payload/scripts/card.sh early: the ch
 release-approval.test.sh | §STEP0 | keep | payload/scripts/card.sh step0: the approve:step0 opener deleted, so rendering the session's own configuration card owes nothing; (STEP0-6) goes red | none (searched 'approve:step0' at 05b5b9dec in tests/)
 release-approval.test.sh | §HANDHOLDS | keep | hooks/poker/plan.sh the release approval verb: the hand-holds line read with no --since, so the decline before the last build landing counts and "HANDHOLDS-2 the page prints the windowed line" goes red; also proof.sh waive-row writes the date alone (WINDOW-2a) | none (searched 'hand-holds:' and 'waiver: ' in tests/)
 release-approval.test.sh | §RATIO | keep | hooks/poker/plan.sh poker_verb_release_approval:2468 the RR_TR line dropped from the head facts block, so the page prints no test-ratio line and (RATIO-1) goes red; the planted log (RATIO-3) and the earlier head (RATIO-4) move the line with the log | none (searched 'test-ratio' in tests/)
+release-approval.test.sh | §REGISTER | keep | hooks/poker/plan.sh the card's waiver decisions: owed_list_plan "$PV_PLAN" "$PV_REPO" read as the rendering session's own owed_list, so a waiver another session of the run raised is no decision on the card (REG-2, REG-2b, REG-3b, REG-4) | none (searched 'owed_list_plan' in tests/; asks.test.sh §ONE-REGISTER reads the register through owed_list_plan itself, never the card)
 
 ## release-check.test.sh
 

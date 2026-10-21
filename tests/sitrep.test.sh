@@ -150,8 +150,12 @@ sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
 }
+# sr_owed_f [<session>] -> the store that session's asks are filed in, as the owed functions resolve it: the register
+# of the run it is bound to, else its own file
+sr_owed_f() { ( OWED_ROOT="$SR_REPO" OWED_SID="${1:-$SID}"; . "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/owed.sh" && owed_file ); }
 sr_owed() {  # <owed/v1 fields after the schema> [<session>] -> one line in that session's owed store (this world's own by default)
-  printf 'owed/v1|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-${2:-$SID}.state"
+  local f; f="$(sr_owed_f "${2:-}")" || return 1
+  mkdir -p "${f%/*}" && printf 'owed/v1|%s\n' "$1" >> "$f"
 }
 # sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
 # declaring `scale: <scale>` when given) whose T1 is dispatched at 10:00Z the day before and lands <minutes>
@@ -1080,7 +1084,7 @@ section "§GOAL-MISS: the first landing that misses a goal makes the tick open d
 # ============================================================
 SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
 handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" SR_APPROVED=none sr_tick_world goal-miss "20 20 20 20"
-SR_OWED_F="$SR_REPO/.bionic/tmp/owed-$SID.state"
+SR_OWED_F="$(sr_owed_f)"
 sr_tick
 expect_eq "GM1 four 20-minute one-file landings miss the 15-minute goal: the tick opens decide:goal:fast-landings, and nothing for the unmeasured goal" \
   "decide:goal:fast-landings" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' "$SR_OWED_F" 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
@@ -1242,7 +1246,7 @@ canonical_sdlc_version: 14/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sr_ledger_put D21 "the gate the judge holds" "Answered in an hour rather than now, T20 starts an hour later and the predicted close holds: it is off the longest chain."
 sr_tick
 expect_eq "ON0 precondition: the tick says T20 waits on approval:D21 and opens an item for it on the person's ledger" "yes|1" \
-  "$(/usr/bin/grep -q '^poker: WAIT T20 — approval:D21$' "$TMPROOT/tick.out" && echo yes)|$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REPO/.bionic/tmp/owed-$SID.state")"
+  "$(/usr/bin/grep -q '^poker: WAIT T20 — approval:D21$' "$TMPROOT/tick.out" && echo yes)|$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$(sr_owed_f)")"
 sr_run "$SR_PLAN"
 expect_eq "ON1 You owe counts the decision once, beside the two approvals the tick opened" \
   "- You owe 3: approve release, approve merge and reply to D21." "$(sr_line '- You owe')"
@@ -1256,7 +1260,7 @@ expect_eq "ON4 the recap names D21 on one open: line and owes no second approval
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^owned-by-user: approval:D21')"
 sr_poke approve D21 "1" >/dev/null 2>&1
 expect_eq "ON5 the approve verb closes the tick's item: nothing for D21 is left open on the person's ledger" "0" \
-  "$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REPO/.bionic/tmp/owed-$SID.state")"
+  "$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$(sr_owed_f)")"
 
 # ============================================================
 section "§TITLE: the title says the step of nine, and the step the work stands at when a landed or active task is ahead of it"
