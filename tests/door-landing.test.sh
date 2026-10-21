@@ -24,6 +24,11 @@
 #            the repository path it names, so the rewrite is refused as §COPY-2 refuses it and a code-only piece
 #            lands; an absolute word outside the checkout (a prefix sibling, a path that only ends like a held one)
 #            names no member.
+#   §COPY-4  every word of the closure is read against the roots of the repository by one normalizer: a check declared
+#            by the main checkout's absolute path and run from a landing tree (no checkout holds the branch), one
+#            declared with `/./` or `//` in its path, and one whose helper beside it is sourced by absolute path: a
+#            piece that rewrites the check, or the helper alone, is refused by name. A code-only piece from the
+#            landing tree lands, and a word that leaves the root by `..`, or lies beside it, names no member.
 #   §NAMED   the target's committed check carries a bug and a piece fixes it: the hand door refuses the fix with
 #            `judged-by=target script=<path>@<accepted head> changed-here=<path>`, says a fix to the check cannot
 #            pass its own door and names the person's route. With the arm deleted the refusal carries no field;
@@ -395,6 +400,88 @@ expect_eq "(c3-3b) a declaration whose absolute word outside the checkout ends i
 DQ_OUT="$(dl_c3_closure "bash /nonexistent-c3/x.sh tests/lib/release-check.sh")"
 expect_eq "(c3-3c) …and it is skipped, not the end of the declaration: a relative script after it is the member" \
   "tests/lib/release-check.sh rc=0" "$(printf '%s\n' "$DQ_OUT" | /usr/bin/grep -xF -e tests/lib/release-check.sh -e rc=0 | paste -sd' ' -)"
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§COPY-4: every word of the closure is read against the roots of the repository by one normalizer"
+
+# The declaration is read from the main checkout, and the door runs it in the checkout that holds the branch or, when
+# none does, in a landing tree pointed at the accepted head: an absolute word under the main checkout names the same
+# file from either. The file a word names is a member whatever its spelling, and so is a file a member sources by
+# absolute path; a word outside every root names none.
+dl_detach() { _door_inside "$1" && git -C "$1" checkout --quiet --detach; }   # <root>: no checkout holds wave/x
+dl_c4_closure() { ( . "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$1" "$DQ_H0" "$2"; echo "rc=$?" ); }   # <run dir> <declaration>
+
+dl_copy2 copy4-tree rewrite
+dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
+dl_detach "$DQ"
+expect_eq "(c4-1-0) precondition: no checkout holds the working branch, and the target copy passes over the piece" \
+  "1 0" "$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; worktree_checkout_of "$DQ" wave/x >/dev/null; echo $?) ) $DQ_RC"
+door_land "$DQ" "$DL_QP"
+expect_eq "(c4-1a) land --by-hand of the rewrite, judged from a landing tree, is refused (exit 2) and the branch does not move" \
+  "2 $DQ_H0" "$DOOR_RC $(dl_head "$DQ")"
+expect_contains "(c4-1b) …by the declared check, whose run passed" \
+  "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1 base=$DQ_H0" "$DOOR_OUT"
+expect_contains "(c4-1c) …naming the judge by its repository path and the one file of it this landing changes" \
+  "judged-by=target script=tests/lib/release-check.sh@${DQ_H0:0:12} changed-here=tests/lib/release-check.sh —" "$DOOR_OUT"
+DQ_SEEN="$(door_seen)"
+expect_eq "(c4-1d) the check ran once, from a landing tree under the root" \
+  "1 1" "$(printf '%s\n' "$DQ_SEEN" | /usr/bin/grep -c .) $(printf '%s\n' "$DQ_SEEN" | /usr/bin/grep -c "^pwd=$DQ/.bionic/tmp/landing/[0-9]* ")"
+expect_contains "(c4-1e) …and the copy it ran is the one the absolute word names, the main checkout copy" \
+  " script=$DQ/tests/lib/release-check.sh" "$DQ_SEEN"
+
+dl_copy2 copy4-dot rewrite
+dl_abs "$DQ" "$DQ/./tests/lib/release-check.sh"
+door_land "$DQ" "$DL_QP"
+dl_judged c4-2 "$DQ" "$DQ_H0"
+
+dl_copy2 copy4-slash rewrite
+dl_abs "$DQ" "$DQ//tests/lib/release-check.sh"
+door_land "$DQ" "$DL_QP"
+dl_judged c4-2s "$DQ" "$DQ_H0"
+
+# The target check sources a helper beside it by absolute path; the piece changes the helper alone.
+read -r DQ DQ_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/copy4-load")
+EOF
+DL_HELP=tests/lib/door-helper.sh
+printf 'door_helped() { :; }\n' > "$DQ/$DL_HELP"
+awk -v h="$DQ/$DL_HELP" 'NR == 2 { print; print ". \"" h "\""; next } { print }' "$DQ/tests/lib/release-check.sh" \
+  > "$DQ/tests/lib/release-check.sh.new" && mv "$DQ/tests/lib/release-check.sh.new" "$DQ/tests/lib/release-check.sh" \
+  && chmod +x "$DQ/tests/lib/release-check.sh" && dl_commit "$DQ" "the check sources a helper by absolute path"
+DQ_H0="$(dl_head "$DQ")"
+DL_QP="$(door_piece "$DQ" T1)"
+printf '# a note on the helper\n' >> "$DL_QP/$DL_HELP"
+dl_commit "$DL_QP" "the piece: the helper alone"
+dl_check "$DQ" "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)"; DQ_RC="$DOOR_RC"
+expect_eq "(c4-3-0) precondition: the target check sources the helper by absolute path, the piece changes the helper alone, and the target copy passes over it" \
+  "1 $DL_HELP 0" "$(git -C "$DQ" show "$DQ_H0:tests/lib/release-check.sh" | /usr/bin/grep -cxF ". \"$DQ/$DL_HELP\"") $(git -C "$DQ" diff --name-only "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)") $DQ_RC"
+: > "$DOOR_SEEN"
+door_land "$DQ" "$DL_QP"
+expect_eq "(c4-3a) land --by-hand of the helper change is refused (exit 2) and the working branch does not move" \
+  "2 $DQ_H0" "$DOOR_RC $(dl_head "$DQ")"
+expect_contains "(c4-3b) …by the declared check, whose run passed" \
+  "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1 base=$DQ_H0" "$DOOR_OUT"
+expect_contains "(c4-3c) …naming the helper as the file of the judge this landing changes" \
+  "judged-by=target script=tests/lib/release-check.sh@${DQ_H0:0:12} changed-here=$DL_HELP —" "$DOOR_OUT"
+expect_eq "(c4-3d) the check ran once, the copy the target holds, in the target checkout" \
+  "pwd=$DQ script=$DQ/tests/lib/release-check.sh" "$(door_seen)"
+
+dl_copy2 copy4-code code
+dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
+dl_detach "$DQ"
+door_land "$DQ" "$DL_QP"
+expect_eq "(c4-4a) CONTROL the absolute declaration from a landing tree and a piece that changes one code file: lands by hand (exit 0)" \
+  "0" "$DOOR_RC"
+expect_contains "(c4-4b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
+expect_absent "(c4-4c) CONTROL …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+DQ_LT="$(cd "$DQ/.bionic/tmp/landing" 2>/dev/null && for t in */; do [ -e "$t.git" ] && { printf '%s' "$PWD/${t%/}"; break; }; done)"
+DQ_IN="$(dl_c4_closure "$DQ_LT" "bash $DQ/tests/lib/release-check.sh $DL_LIST")"
+expect_contains "(c4-4d-0) CONTROL precondition: run from the landing tree the door used, the closure of the word under the main root holds the check" \
+  "tests/lib/release-check.sh" "$DQ_IN"
+expect_eq "(c4-4d) CONTROL …while a word that leaves the root by .. names no member (rc 1)" \
+  "rc=1" "$(dl_c4_closure "$DQ_LT" "bash $DQ/../elsewhere/tests/lib/release-check.sh")"
+expect_eq "(c4-4e) CONTROL …and so does a list beside the root, outside every root (rc 1)" \
+  "rc=1" "$(dl_c4_closure "$DQ_LT" "bash ${DQ}-names.list")"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§NAMED: a landing that changes the check which judges it is refused naming the judge, the change and the route"
