@@ -379,27 +379,6 @@ expect_nonempty "…and the same pattern DOES find the walk in a hook that walks
 # family shares is engagement rather than the plan.
 
 # ============================================================
-setup_section "Sections 2-5: THE OBSERVATION RECORD IS GONE (epic-23 wave-15, REQ-2; ADR-028)"
-# ============================================================
-#
-# Four sections drove the arm this script no longer has: that a run of hooks/stop-check.sh
-# produced a record (§2), that a refused or mistyped one produced none (§3), that the record
-# named its observer (§4), and that the file was versioned, key-addressed and bounded (§5).
-#
-# The record existed for one reader, hooks/stop-guard.sh, which spent it to admit a stop. That
-# gate takes its own look now — `observe_agent` in payload/scripts/lib/observe.sh, in process,
-# at the instant of the stop — because a record is a claim about a PAST look and the wall was
-# refusing correct stops on the strength of one nobody had taken (2026-09-15; ADR-028). With
-# no reader there is nothing to write, and one writer of a state nobody reads is a state that
-# should not exist.
-#
-# WHAT CARRIES THESE CLAIMS FORWARD. tests/stop-guard.test.sh §5 drives the look itself, over
-# the same worlds these sections built; tests/stop-check.test.sh §7 still pins the machine
-# line the verb prints for a reader's own eyes. What is NOT carried forward is anything about
-# a record's provenance, freshness or ownership — those questions are answered by construction
-# once the reader takes its own look.
-
-# ============================================================
 section "Section 6: the roster arm — intended → confirmed (AC-1, confirmation half)"
 # ============================================================
 
