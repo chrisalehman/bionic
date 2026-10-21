@@ -890,9 +890,17 @@ or_plan "$OR_REG" "$OR_REV" "$OR_REL"
 expect_eq "ORD-1 control: regression at 5, review at 6, release at 7: no violation (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 expect_eq "ORD-1b …and units_order names the regression row" "T5|0" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
 or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+OR_REGLINE='T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6'
+expect_eq "ORD-2 the regression after the release (the old order): refused with rc 1, one line naming T5 and the first row it follows, T6" \
+  "$OR_REGLINE|1" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 expect_eq "ORD-2b …and units_order reads no order" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
 or_plan "$OR_REV" "${OR_REG/| 5 | test |/| 6 | test |}" "$OR_REL"
+expect_eq "ORD-3 the regression at the review's step, after it in the table: refused with rc 1, one line naming T5 and T6" \
+  "$OR_REGLINE|1" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 or_plan "$OR_REG" "$OR_REL" "${OR_REV/| 6 | review |/| 7 | review |}"
+expect_eq "ORD-4 the release ahead of a review row: refused with rc 1, one line naming T7 and T6" \
+  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6|1" \
+  "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
 or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
 sed 's/ pending | approval/ landed | approval/' "$OR_P" > "$OR_P.x" && mv "$OR_P.x" "$OR_P"
 expect_eq "ORD-5 the ORD-2 plan with every row landed: history is not judged (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
