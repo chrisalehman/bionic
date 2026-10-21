@@ -26,6 +26,11 @@
 #   §COVER   the release row, a doc row at step 7, lands with the release and a template outside the release set:
 #            it publishes, and its landing prints the judge's cover over its own candidate naming the template. A
 #            release whose every path is in the set lands with the cover read as release; the build row, none.
+#   §RERENDER a fix row lands by hand past the landed release row: the line commits the refreshed landing numbers
+#            on the working branch as its own commit, so the release check at the new head passes and the block
+#            equals what `release-note` renders for the head and instant it names. With the renderer refusing
+#            the plan, the landing is refused in the renderer's words and the branch does not move. While the
+#            release row is open, a landing leaves CHANGELOG.md as it was.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under the world directory with real commits; the door is
 # the tree under test's spawn-worktree.sh and session-poker.sh, run from the fixture with every variable that names
@@ -382,5 +387,108 @@ door_land "$DV" "$DL_P2"
 expect_eq "(v3) CONTROL the release row whose every path is in the set lands by hand (exit 0)" "0" "$DOOR_RC"
 expect_contains "(v3b) CONTROL …and its landing reads the cover over its candidate as release" \
   "COVER T2 $(dl_head "$DV") release" "$DOOR_OUT"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§RERENDER: a row landing past the landed release has its release numbers rendered and committed by the line"
+
+# dl_rr_world <dir> -> DR, DR_H0: a copy whose T2 is the release row (a doc row at step 7) and whose plan gains the
+# fix row T3, one code file; with RR_RELEASE=1, T1 and then the release row T2 land by hand first (DR_T1_RC, DR_T2_RC,
+# DR_H2 the head after the release).
+dl_rr_world() {
+  read -r DR DR_H0 <<EOF2
+$(door_copy "$DW" "$WORLD_ROOT/$1")
+EOF2
+  awk '{ sub(/^\| T2 \| 4 \| doc \|/, "| T2 | 7 | doc |"); print }
+    /^\| T2 \| 7 \| doc \|/ { print "| T3 | 4 | build | a fix after the release | dw-T3 | — | | 10 | REQ-1 | fix.sh | .worktrees/T3 | | active |" }
+    /^- T2: active$/ { print "- T3: active" }' "$DR/$DOOR_PLAN_REL" > "$DR/$DOOR_PLAN_REL.new" \
+    && mv "$DR/$DOOR_PLAN_REL.new" "$DR/$DOOR_PLAN_REL"
+  DR_T1_RC=-; DR_T2_RC=-; DR_H2="$DR_H0"
+  [ "${RR_RELEASE:-0}" = 1 ] || return 0
+  dl_lib_row "$DR"; DR_T1_RC="$DOOR_RC"
+  dl_release_row "$DR"; DR_T2_RC="$DOOR_RC"; DR_H2="$(dl_head "$DR")"
+}
+# dl_fix_row <root> -> DL_P3, the fix row T3's tree, one code file committed (DL_P3_HEAD), landed by hand.
+dl_fix_row() {
+  DL_P3="$(door_piece "$1" T3)" || return 1
+  printf 'door_fixed() { :; }\n' > "$DL_P3/fix.sh" && dl_commit "$DL_P3" "the fix after the release" || return 1
+  DL_P3_HEAD="$(git -C "$DL_P3" rev-parse HEAD)"
+  door_land "$1" "$DL_P3"
+}
+# dl_numbers <root> <rev> -> the release entry part `### The landing numbers` of CHANGELOG.md at <rev>, its heading
+# included, up to the next heading of another name.
+dl_numbers() {
+  git -C "$1" show "$2:CHANGELOG.md" 2>/dev/null | awk -v v="## $DOOR_VERSION " '
+    /^## / { inb = (index($0, v) == 1); inp = 0 }
+    inb && /^### / { t = $0; sub(/[[:space:]]+$/, "", t); inp = (t == "### The landing numbers") }
+    inb && inp'
+}
+dl_published() { dl_record "$1" | /usr/bin/grep -F "line/v1|ev=published|row=$2|"; }   # <root> <row>
+
+RR_RELEASE=1 dl_rr_world rerender
+expect_eq "(rr0) precondition: T2 is the release row and the plan holds T3; T1 and the release row landed by hand" \
+  "1 1 0 0" "$(/usr/bin/grep -c '^| T2 | 7 | doc |' "$DR/$DOOR_PLAN_REL") $(/usr/bin/grep -c '^| T3 | 4 | build |' "$DR/$DOOR_PLAN_REL") $DR_T1_RC $DR_T2_RC"
+DR_OLD="$(dl_numbers "$DR" "$DR_H2")"
+expect_contains "(rr0b) precondition: the release head carries numbers rendered at the head before it" \
+  "\`landing-report --rows\` at $(git -C "$DR" rev-parse "$DR_H2^1") on " "$DR_OLD"
+dl_fix_row "$DR"
+DR_OUT="$DOOR_OUT"; DR_RC="$DOOR_RC"; DR_H3="$(dl_head "$DR")"
+DR_C3="$(git -C "$DR" rev-parse --verify -q "$DR_H3^1" 2>/dev/null)"
+expect_eq "(rr1) the fix row lands by hand past the release (exit 0)" "0" "$DR_RC"
+expect_contains "(rr1b) …onto the working branch" "LANDED branch=wt/T3 onto=wave/x" "$DR_OUT"
+expect_eq "(rr1c) the head is one commit on the published candidate, the merge of the fix onto the release head" \
+  "$DR_H2 $DL_P3_HEAD" "$(git -C "$DR" rev-parse "$DR_C3^1" "$DR_C3^2" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+DR_PUB="$(dl_published "$DR" T3)"
+expect_contains "(rr1d) the record publishes the candidate" "line/v1|ev=published|row=T3|commit=$DR_C3|kind=hand|" "$DR_PUB"
+expect_contains "(rr1e) …and names the numbers commit the line made" "|numbers=$DR_H3|" "$DR_PUB"
+dl_check "$DR" "$DR_H0" "$DR_H3"
+expect_eq "(rr2) the declared release check at the new head exits 0" "0" "$DOOR_RC"
+expect_contains "(rr2b) …its numbers agree with the report at the published candidate" \
+  "landing-numbers: $DOOR_VERSION agrees with the landing report at ${DR_C3:0:12}" "$DOOR_OUT"
+expect_absent "(rr2c) …and no row landed after them" "landed after them" "$DOOR_OUT"
+expect_contains "(rr2d) the post-landing scan passed: the plan line of T3 is written landed by hand" \
+  "landed-by-hand:" "$(dl_plan_line "$DR" T3)"
+expect_absent "(rr2e) …and the door printed no unwritten plan" "PLAN-UNWRITTEN" "$DR_OUT"
+DR_NEW="$(dl_numbers "$DR" "$DR_H3")"
+DR_ON="$(printf '%s\n' "$DR_NEW" | sed -n 's/^`landing-report --rows` at [0-9a-f]* on \([0-9TZ:-]*\):$/\1/p')"
+expect_contains "(rr3) the block at the working head names the published candidate" \
+  "\`landing-report --rows\` at $DR_C3 on $DR_ON:" "$DR_NEW"
+door_run "$DR" bash "$DOOR_POKER" release-note --at "$DR_C3" --on "${DR_ON:-none}" "$DR/$DOOR_PLAN_REL"
+expect_eq "(rr3b) …and equals what release-note renders for that head and instant" "$DOOR_OUT" "$DR_NEW"
+expect_ne "(rr3c) …which is not the block the release carried" "$DR_OLD" "$DR_NEW"
+expect_eq "(rr4) the commit that wrote it is the line one: its author and its message" \
+  "bionic line <line@bionic.invalid>|line: release numbers T3" "$(git -C "$DR" log -1 --format='%an <%ae>|%s' "$DR_H3")"
+expect_eq "(rr4b) …and it changes CHANGELOG.md alone" "CHANGELOG.md" \
+  "$(git -C "$DR" diff-tree --no-commit-id --name-only -r "$DR_H3")"
+expect_eq "(rr4c) of the commits the landing brought, the line one is the only one to touch CHANGELOG.md" \
+  "line: release numbers T3" "$(git -C "$DR" log --format=%s "$DR_H2..$DR_H3" -- CHANGELOG.md)"
+expect_eq "(rr4d) …the piece wrote none of it" "" "$(git -C "$DR" log --format=%s "$DR_H2..$DL_P3_HEAD" -- CHANGELOG.md)"
+
+# The renderer made to fail: the bound plan is a link, which release-note refuses to read as a plan.
+RR_RELEASE=1 dl_rr_world rerender-fail
+mv "$DR/$DOOR_PLAN_REL" "${DR}/${DOOR_PLAN_REL%.plan.md}.real.md" \
+  && ln -s "$(basename "${DOOR_PLAN_REL%.plan.md}").real.md" "$DR/$DOOR_PLAN_REL"
+expect_eq "(rr5) precondition: T1 and the release row landed, and the bound plan is now a link" "0 0 yes" \
+  "$DR_T1_RC $DR_T2_RC $([ -L "$DR/$DOOR_PLAN_REL" ] && [ -f "$DR/$DOOR_PLAN_REL" ] && echo yes)"
+dl_fix_row "$DR"
+expect_eq "(rr5b) the fix row past the release is refused (exit 2) and the working branch does not move" "2 $DR_H2" \
+  "$DOOR_RC $(dl_head "$DR")"
+expect_contains "(rr5c) …in the words of the renderer" "no plan file at" "$DOOR_OUT"
+expect_contains "(rr5d) …named as the numbers refusal" "REFUSED reason=numbers-unrendered row=T3" "$DOOR_OUT"
+expect_contains "(rr5e) the record holds the fix row ready" "line/v1|ev=ready|row=T3|" "$(dl_record "$DR")"
+expect_eq "(rr5f) …and never published" "" "$(dl_published "$DR" T3)"
+
+# The release row still open: a landing changes nothing in CHANGELOG.md.
+dl_rr_world rerender-open
+dl_fix_row "$DR"
+DR_H3="$(dl_head "$DR")"
+expect_eq "(rr6) with the release row open, the fix row lands by hand (exit 0) as the merge of its head" "0 $DL_P3_HEAD" \
+  "$DOOR_RC $(git -C "$DR" rev-parse "$DR_H3^2" 2>/dev/null)"
+DR_B0="$(git -C "$DR" rev-parse "$DR_H0:CHANGELOG.md" 2>/dev/null)"
+expect_true "(rr6b) CHANGELOG.md is read at the head before the landing" [ -n "$DR_B0" ]
+expect_eq "(rr6c) …and the head after it carries the same file" "$DR_B0" "$(git -C "$DR" rev-parse "$DR_H3:CHANGELOG.md" 2>/dev/null)"
+DR_PUB="$(dl_published "$DR" T3)"
+expect_contains "(rr6d) the record publishes the landing at the head" "line/v1|ev=published|row=T3|commit=$DR_H3|" "$DR_PUB"
+expect_absent "(rr6e) …with no numbers commit" "numbers=" "$DR_PUB"
 
 finish
