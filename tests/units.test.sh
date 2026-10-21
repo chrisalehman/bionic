@@ -27,6 +27,8 @@
 #            never a second whole run
 #   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's
 #            cover reads it
+#   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one
+#            line with nothing run, and at the head the whole run read it does not refuse
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
