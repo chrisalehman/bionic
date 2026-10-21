@@ -374,7 +374,7 @@ expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<
   "waive:adversarial" "$SEV_WKEYS"
 expect_absent "AW-1a …and none for the questions that hold (same reader)" "waive:evidence" "$SEV_WKEYS"
 expect_contains "AW-1b …the item the first failing reading's registration opened, which the refusal keeps" \
-  "proof-add: the adversarial reading record/wave-01-fixture/" "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
+  "proof-add: the adversarial review record/wave-01-fixture/" "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
 poke "$RSEV" current 8
 expect_eq "AW-2 a second refusal on the same failing question opens nothing new" "1|1" \
   "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|')"
