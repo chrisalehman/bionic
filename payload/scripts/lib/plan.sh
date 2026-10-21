@@ -252,7 +252,7 @@ plan_goals_read() {
         # the count the measure names, its first number, `zero`, `none` or `no` read as 0
         tgt="$(printf '%s\n' "$m" | awk '{ s = tolower($0) } s ~ /^(zero|none|no)([^a-z]|$)/ { print 0; exit } match(s, /[0-9]+/) { print substr(s, RSTART, RLENGTH) + 0; exit }')"
         if [ -z "$tgt" ]; then rd="the measure names no target count"
-        elif ! declare -F hand_holds_ends >/dev/null 2>&1 || ! declare -F hand_holds_report >/dev/null 2>&1; then rd="no hand-holds reader is loaded"
+        elif ! declare -F hand_holds_ends >/dev/null 2>&1 || ! declare -F hand_holds_report >/dev/null 2>&1; then rd="the hand-holds count is not loaded"
         else
           h="$(project_root "${plan%/*}" 2>/dev/null)"
           # read into a variable first: a here-string of the call would run it under the tab IFS, and its own read

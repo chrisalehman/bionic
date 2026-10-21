@@ -936,7 +936,7 @@ DP_SUBAGENT=$(_jq '.tool_input.subagent_type')
 case "$DP_SUBAGENT" in
   bionic:reviewer)
     dp_finding "bionic:reviewer is retired (1.14.0)" "dispatch bionic:critic" \
-      "The structure reader is not a role any more, so a brief cannot name it:
+      "The structure reviewer is not a role any more, so a brief cannot name it:
     Role: ${DP_SUBAGENT}
 
 Fix: structure is the critic's question; dispatch bionic:critic. Its Questions: line is the
@@ -996,10 +996,10 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]
     DP_APPROVED=yes
   fi
   if [ "$DP_APPROVED" = unreadable ]; then
-    dp_finding "the approval reader lib/fill.sh cannot be loaded" "reinstall the plugin" \
+    dp_finding "the approval check lib/fill.sh cannot be loaded" "reinstall the plugin" \
       "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
 Plan: ${PLAN}
-Reader: fill_plan_approved, from ${BIONIC_LIB:-<no library directory>}/fill.sh — not there, or it
+Lookup: fill_plan_approved, from ${BIONIC_LIB:-<no library directory>}/fill.sh — not there, or it
         does not define the function, so whether this plan is approved cannot be read.
 
 A writer is admitted only on an approval this hook has read; one it cannot read is no approval.
@@ -2528,7 +2528,7 @@ case "$DP_SUBAGENT" in
         "The brief carries the Questions: label more than once, on lines ${_q_nums}:
     Role: ${DP_SUBAGENT}
 
-A reader's questions are one set, read off one line. A second line is not merged into the
+A reviewer's questions are one set, read off one line. A second line is not merged into the
 first and not ignored, so the brief is refused rather than guessed at. A line inside a
 fenced block is an example, and does not count.
 
@@ -2539,12 +2539,12 @@ Then retry the dispatch."
     fi
     if [ -n "$_q_bad" ]; then
       dp_finding "unknown question: $(bionic_trunc "${_q_bad%% *}" 16)" "use evidence/adversarial/structure" \
-        "The Questions: line names a word that is not a reading question:
+        "The Questions: line names a word that is not a review question:
     ${_q_bad}
 
-A reader answers one or more of three questions: evidence, adversarial and structure. Its
+A reviewer answers one or more of three questions: evidence, adversarial and structure. Its
 checks are pushed to it at start by name, so a word outside the three is a question no
-reader is held to.
+reviewer is held to.
 
 Fix: name only the three questions, on a line of its own —
     ${_q_fixline}
@@ -2553,7 +2553,7 @@ Then retry the dispatch."
     fi
     if [ -n "$_q_dealable" ] && [ -z "$_q_dealt" ]; then
       dp_finding "${_q_short} rigor deals ${_q_role}: nothing" "dispatch its holder" \
-        "The plan's rigor deals this reader no question, so there is nothing to dispatch it for:
+        "The plan's rigor deals this reviewer no question, so there is nothing to dispatch it for:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set:-(no Questions: line)}
     Dealt: nothing at ${_q_level}, scale ${_q_scale}
@@ -2564,15 +2564,15 @@ Fix: dispatch the role that holds the question, with its own Questions: line.
 
 Then retry the dispatch."
     elif [ -z "$_q_set" ] && [ -z "$_q_bad" ]; then
-      _q_why="With no bound plan the dealing is not checked: name the questions this reader answers,
+      _q_why="With no bound plan the dealing is not checked: name the questions this reviewer answers,
 from evidence, adversarial and structure."
       [ -n "$PLAN" ] && _q_why="The bound plan's rigor (${_q_rigor:-none}) and scale (${_q_scale:-none}) deal nothing, so the
-dealing is not checked: name the questions this reader answers, from evidence,
+dealing is not checked: name the questions this reviewer answers, from evidence,
 adversarial and structure."
       [ -n "$_q_dealt" ] && _q_why="The plan deals this role the set below at ${_q_level}, and its checks are
 pushed to it at start from that line."
       dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \
-        "A reader is dispatched for its questions, and this brief names none:
+        "A reviewer is dispatched for its questions, and this brief names none:
     Role: ${DP_SUBAGENT}
 
 ${_q_why}
@@ -2583,7 +2583,7 @@ Fix: add this line to the brief, on a line of its own —
 Then retry the dispatch."
     elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
       dp_finding "${_q_short} rigor deals ${_q_role}: ${_q_dealt}" "use that set" \
-        "The Questions: line names a set the plan's rigor does not deal this reader:
+        "The Questions: line names a set the plan's rigor does not deal this reviewer:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set//,/, }
     Dealt: ${_q_dealt//,/, } (${_q_level}, scale ${_q_scale})
@@ -2686,14 +2686,14 @@ Then retry the dispatch."
         _q_pl="s"; [ "$_q_nr" -eq 1 ] && _q_pl=""
         _q_ql="s"; [ "$_q_nq" -eq 1 ] && _q_ql=""
         dp_finding "dealt ${_q_nq} question${_q_ql}, names ${_q_nr} record${_q_pl}" "one Files: record per question" \
-          "A reader writes one record per question it is dealt, and this brief names fewer records:
+          "A reviewer writes one record per question it is dealt, and this brief names fewer records:
     Role:      ${DP_SUBAGENT}
     Questions: ${_q_set//,/, }
     Records:   ${_q_nr} (each path under ${_q_rroot#"$BIONIC_ROOT"/}/, the Expected artifact: and the Files: line, counted once)
 
-The fact verb (proof-add review) takes a record only from the reader's own roster row: its
-deliverable= or one of its files=. A record the brief never named is one the reader cannot
-register, and amend cannot add it once the reader has closed.
+The fact verb (proof-add review) takes a record only from the reviewer's own roster row: its
+deliverable= or one of its files=. A record the brief never named is one the reviewer cannot
+register, and amend cannot add it once the reviewer has closed.
 
 Fix: list one record per question under Files:, the Expected artifact: among them —
     Files: path/one.md, path/two.md

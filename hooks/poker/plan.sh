@@ -328,7 +328,7 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
     printf '%s' "$POKER_BRIEF_WORDS" >&2
     case "$POKER_BRIEF_FACTS" in
       *-run\ cap*) dp_is_reader "$role" \
-        && die "A reader its start did not place is held to three in all: stop it and dispatch it again." \
+        && die "A reviewer its start did not place is held to three in all: stop it and dispatch it again." \
         && die "($aid started as $role; the NOTIFY line asks the same.)" ;;
     esac
     return 1
@@ -1148,7 +1148,7 @@ EOF
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
-    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every reading's cover (D9), and it counts against no fix-cap."
+    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every review's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
@@ -2523,7 +2523,7 @@ RR_OWED
       q="${key#waive:}"
       line="$(proof_last_line "$PV_PLAN" review "$q" 2>/dev/null)"
       if [ "$(rr_proof_field "$line" result)" = fail ]; then why="failing at this head"; else why="not held at this head"; fi
-      rr_add waive "$key" "waive $q" "-" "-" "The $q reading, $why" waive withhold "waive the $q reading" "hold the $q waiver"
+      rr_add waive "$key" "waive $q" "-" "-" "The $q review, $why" waive withhold "waive the $q review" "hold the $q waiver"
     done <<RR_WAIVES
 $RR_WAIVE
 RR_WAIVES
@@ -2609,7 +2609,7 @@ RR_ROWS_EOF
         dec=""
       elif printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" && ! rr_carried "$RR_DIR" "$fid"; then
         rr_add finding "finding:$fid" "-" "finding-move $fid fix" "the release approval card: fixed instead of carried" \
-          "$sent (${q:-a reading} #$num)" carry "fix now, one row" "carry ${q:-a} finding $num" "fix ${q:-a} finding $num"
+          "$sent (${q:-a review} #$num)" carry "fix now, one row" "carry ${q:-a} finding $num" "fix ${q:-a} finding $num"
         grp=A; dec="$RR_N"
       else
         for ac in $(printf '%s' "$sent" | /usr/bin/grep -oE 'AC-[0-9]+\.[0-9]+'); do
@@ -2933,7 +2933,7 @@ RP_TABLE
   poker_verb_order() {
     local sid mode=log root log open line
     if ! declare -F gate_order_of >/dev/null 2>&1; then
-      die "REFUSED — the order reader (lib/gate.sh gate_order_of) cannot be loaded from $BIONIC_LIB; nothing was written."
+      die "REFUSED — the order lookup (lib/gate.sh gate_order_of) cannot be loaded from $BIONIC_LIB; nothing was written."
       exit 2
     fi
     case "$OR_WORDS" in

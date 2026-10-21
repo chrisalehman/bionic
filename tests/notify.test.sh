@@ -596,10 +596,10 @@ CW_FAIL="$(eg6_reading "$H_EG6" evidence pass)
 $(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 expect_eq "AK-6a precondition: no adversarial reading and a failing structure one: refused (exit 2)" "2" "$CW_RC"
-expect_contains "AK-6b …naming the failing question" "- structure: the newest reading is result=fail" "$CW_ERR"
+expect_contains "AK-6b …naming the failing question" "- structure: the newest review is result=fail" "$CW_ERR"
 expect_eq "AK-6 AC-4.1 the question refusal opens waive:structure, the waive verb's key, and nothing for the absent question" \
   "waive:structure" "$(cw_open "$RCW")"
-expect_contains "AK-6d …carrying the refusal's line for it" "structure: the newest reading is result=fail (evidence=record/w27/structure-new.md)" \
+expect_contains "AK-6d …carrying the refusal's line for it" "structure: the newest review is result=fail (evidence=record/w27/structure-new.md)" \
   "$(nk_reply "$RCW" waive:structure)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 

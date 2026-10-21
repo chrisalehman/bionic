@@ -1769,7 +1769,7 @@ ADOPT_READERS
 
         # A READER SAYS SO on its verdict line (wave-36 T29): it holds no tree and no writer slot.
         ADOPT_ROLE_WORD=""
-        role_is_readonly "$RTYPE" && ADOPT_ROLE_WORD=" · reader"
+        role_is_readonly "$RTYPE" && ADOPT_ROLE_WORD=" · read-only"
         say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — ${VERDICT}${ADOPT_ROLE_WORD}"
         # THE PATH, ON EVERY UNREADABLE ROW WHATEVER ITS ID, because the cure is on the plan.
         [ "$PARTITION" = unreadable ] \
