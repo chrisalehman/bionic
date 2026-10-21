@@ -487,6 +487,11 @@ forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
 expect_eq "OR-8 AC-6.5 the gate line prints each open landing in age order with the gate's answer: the oldest its width, the others 0" \
   "or:w01:LC=3,or:w01:LB=0,or:w01:LA=0" "$(or_gate)"
 expect_regex "OR-8b …on the one gate line, after room=" '^poker: gate share=.* room=(yes|no) widths: or:w01:LC=3,' "$(s47_lines gate)"
+# A gate read under a tab IFS (bash runs a here-string's command substitution under a builtin's temporary IFS)
+# compares each carrier's start as any other read does, so the three leases stay held and LC keeps its width.
+OR_TAB="$( . "$OR_LIB/gate.sh" && IFS='	' read -r w <<< "$(gate_width_ask or:w01:LC)" && printf '%s' "$w" )"
+expect_eq "OR-8c a gate read under a tab IFS answers LC its width and keeps all three leases" \
+  "3|3" "$OR_TAB|$(ls "$BIONIC_GATE_DIR/leases/" | /usr/bin/grep -c '\.lease$' | tr -d ' ')"
 # LC's carrier leaves it WAITING: the lease is kept but orders no one, so LB is the oldest the gate answers.
 bash -c '. "$1/gate.sh" && gate_landing_leave "$2" "$3"' _ "$OR_LIB" or:w01:LC "$$"
 forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
