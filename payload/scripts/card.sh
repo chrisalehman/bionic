@@ -2459,7 +2459,11 @@ _card_release_bottom() {
   elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every criterion is proved or waived by you."
   elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every criterion is proved."
   else _card_hang 2 "- The matrix holds no criterion."; fi
-  if [ "$RL_N" -gt 0 ]; then
+  # An early run puts no decision: the acting render refuses it, so a preview says what the user will owe, never that
+  # they owe it now, and the card says one thing.
+  if [ "$RL_N" -gt 0 ] && [ -n "$RL_EARLY" ]; then
+    _card_hang 2 "- Once the run is ready, you will owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+  elif [ "$RL_N" -gt 0 ]; then
     _card_hang 2 "- You owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
   else
     _card_hang 2 "- You owe nothing: every approval and waiver is recorded."
