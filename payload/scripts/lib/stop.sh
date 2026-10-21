@@ -2633,7 +2633,7 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
 
 stop_patrol_revive() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local HOOK_DIR _RUN_PLAN STAMP_FILE POKER INTERVAL WINDOW MTIME AGE REASON
+  local HOOK_DIR _RUN_PLAN STAMP_FILE POKER INTERVAL WINDOW MTIME AGE
   local _rival_now _rival_sf _rival_sid _rival_mt _rival_age
   local TRANSCRIPT VERDICT VLINE GAP WHY
 
@@ -2828,72 +2828,36 @@ esac
 
 # ---------- the notice ----------
 #
-# WHAT IT OWES THE READER, in order: the fact, the measurement it rests on, the
-# cause they can recognise, and the two commands that fix it. The path, the age and
-# both numbers are interpolated through `jq --arg`, so nothing here has a
-# JSON-quoting surface. The poker is named at its RESOLVED ABSOLUTE path, never as
-# `<plugin-root>/...`: this text is read by a model that will type it into its own
-# shell, where `${CLAUDE_PLUGIN_ROOT}` is unset, and a cron job carrying a
-# placeholder fires into a `command not found` every interval and reports nothing
-# (SKILL.md §Dispatch states the rule; this is the same rule obeyed by a hook that
-# already knows the answer).
+# ONE LINE, AND THE SAME LINE EVERY TURN. The CLI prints a blocking hook's reason as its own
+# "Stop hook error:" line, so the plugin cannot make that line quieter, only shorter: the notice
+# is the refusal's headline with no detail, and the headline is the whole reason. It names the three
+# acts in their order and nothing else. It carries no age, no idle gap and no path, so a repeat over
+# the same stale stamp is byte-identical to the first and the line can never grow. The explanation
+# (why the clock dies, the refused CronCreate, the deliberate stop) is printed only when asked for,
+# by `session-poker.sh patrol --explain`.
 #
-# THE CRON HALF IS FIRST because the order is a safety property, not a style: `arm`
-# alone freshens the stamp and buys a Patrol that reads alive and never fires. And
-# FIRST IS NOT ENOUGH, because step 1 is the refusable half — `CronCreate` is measured
-# non-deterministically refused by the auto-mode classifier
-# (.bionic/docs/record/epic-19/w1/t3-probes.md finding 1) — so the conditional is stated
-# in the text a model acts on, not only in this header a model never reads. A step 2 run
-# after a refused step 1 produces the exact state the header above argues is worse than
-# the death: an undetectably dead Patrol. The way OUT is named too, because a notice that
-# offers only "re-arm" to a run that meant to stop is the loop critic C-2 found.
-# THE CLOCK THAT FIRES AND NEVER TICKS (wave-20 REQ-6, AC-6.3; D6). `patrol_verdict` reads a
-# Patrol marker turn after the stamp as a firing that ran no tick, and says so in its reason.
-# The repair is not the one below: the job exists and fires, so re-creating it as it is buys
-# the same silence, and arming the stamp over it would make a Patrol that never decides read
-# alive. The job's prompt is what is wrong, and the canonical one is printed by a verb.
+# THE CRON HALF IS FIRST because the order is a safety property: `arm` alone freshens the stamp
+# over an empty cron table and buys a Patrol that reads alive and never fires, which is worse than
+# the death because the death is at least detectable. This function therefore reads and names the
+# acts and never arms. CronCreate is the refusable half (the auto-mode classifier refuses it
+# non-deterministically), so "if absent" is in the line and the rule that a refused CronCreate is
+# never followed by `arm` is in the dispatch rules and the explanation.
+#
+# THE CLOCK THAT FIRES AND NEVER TICKS. `patrol_verdict` reads a Patrol marker turn after the stamp
+# as a firing that ran no tick. The job exists and fires, so re-creating it as it is buys the same
+# silence, and arming the stamp over it would make a Patrol that never decides read alive. The repair
+# is the tick, a look at the cron table, then a job carrying the prompt the prompt verb prints, and
+# its line names the tick first.
 case "$WHY" in
   *"marker turn"*)
-    REASON="The Patrol fires but never ticks.
-
-Its last tick stamp is ${AGE}s old, and since then ${WHY%% marker turn*} Patrol marker turn(s) have run on this session without the tick stamping — the clock is firing into turns that never run \`bash ${POKER} tick\`, so nothing has decided anything since the stamp:
-    ${STAMP_FILE}
-
-Repair the job, not the clock:
-  1. Run the tick now: bash ${POKER} tick
-  2. CronList, and CronDelete this session's Patrol job.
-  3. CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying exactly the prompt \`bash ${POKER} prompt\` prints — it leads with this session's marker and runs the tick.
-
-Then stop again — this notice blocks once per turn, and it returns on the next turn until a tick stamps."
-    fold_block block stop "the Patrol fires but never ticks" "run the tick; replace the job" \
-      "$REASON"
+    fold_block block stop "Patrol never ticks" "tick; CronList; replace its job" ""
     return 2
     ;;
 esac
 
-REASON="The Patrol died mid-run and nothing said so.
-
-Its last stamp is ${AGE}s old, and this session has since sat idle for ${GAP}s in one stretch with no tick in it — past the ${WINDOW}s fire window, which is the ${INTERVAL}s poker-interval in force for this project plus the scheduler's jitter. An idle session is exactly when a session cron fires, so a whole window of idleness with no firing is the job being gone, not the machine being busy:
-    ${STAMP_FILE}
-
-The CLI holds its cron table in process memory with no file behind it, so a plugin update, a /reload-plugins, a session continue or a /clear+resume deletes the job and leaves the stamp as the only trace. Nothing is ticking the poker now: no dispatched row is being judged against its declared duration, and anything this run launched is waiting on a clock that stopped.
-
-Re-arm it — LOOK FIRST, then the clock, then the stamp. The listing is free and tells you which of the two repairs you are doing; creating a second job over one that is still there is two clocks on one run, and arming the stamp over an empty cron table buys a Patrol that reads alive and never fires:
-  1. CronList — is this session's Patrol job still listed?
-  2. ONLY IF it is ABSENT: CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying the patrol prompt (the canonical-sdlc skill's Dispatch section).
-  3. ONLY IF step 2 succeeded and returned a job, or step 1 showed the job already listed: bash ${POKER} arm
-
-If step 2 is refused or fails, do NOT run step 3 — a fresh stamp over an empty cron table reads ALIVE to this hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death this notice is reporting. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
-
-If this Patrol was stopped ON PURPOSE, record that instead of re-arming: \`bash ${POKER} disarm\` removes the stamp, and this notice goes with it.
-
-Then stop again — this notice blocks once per turn, and it returns on the next turn until the stamp is re-armed or removed."
-
-# The JSON decision payload on STDOUT with return "$_adv" — the same Stop-hook block
-# channel hooks/patrol-duties-gate.sh uses. (hooks/landing-gate.sh refuses through
-# exit 2 + stderr instead; both are live in this CLI, and gates that share no code
-# path deliberately do not share a mechanism either.)
-fold_block block stop "the Patrol died mid-run and nothing said so" "re-arm it, the clock first" \
-  "$REASON"
+# The JSON decision payload on STDOUT with return 2 is the Stop-hook block channel that
+# hooks/patrol-duties-gate.sh uses too; the landing arm refuses through exit 2 and stderr instead.
+# Both are live in this CLI, and gates that share no code path do not share a mechanism either.
+fold_block block stop "Patrol dead" "CronList; CronCreate if absent; arm" ""
 return 2
 }

@@ -427,7 +427,42 @@ HOLD_REASON_SLOT="'why it stays up'"
 # v=7: the decline is gone, so a session armed under v=6 asks for a verb that answers unknown. A FILL
 # is answered by its dispatch; a row that should wait is made not ready instead, by the forms the stop
 # wall prints, and the tick's re-arm note asks for the new job.
-PATROL_PROMPT_VERSION=7
+# v=8: the prompt carries the one sentence the orchestrator says after re-arming, and no other
+# instruction about what to say there, so a session armed under v=7 lacks it and the tick's re-arm
+# note asks for the new job.
+PATROL_PROMPT_VERSION=8
+
+# THE ONE SENTENCE THE ORCHESTRATOR SAYS AFTER RE-ARMING A PATROL, kept in one double-quoted literal
+# because it holds an apostrophe. The dispatch rules (agents-src/blocks/orchestrator-dispatch.md) carry
+# the same words, and tests/stop.test.sh §PATROL pins both sites to this one.
+PATROL_REARM_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
+
+# THE EXPLANATION OF A DEAD PATROL CLOCK, printed by `patrol --explain` and by nothing else. The stop
+# hook's refusal is one line and the tick prints none of this, so a user sees it only by asking.
+# Static text over this script's own path: it reads no project and no session, so it answers anywhere.
+poker_patrol_explain() {
+  cat <<EXPLAIN_EOF
+Why the Patrol clock dies, and the acts that revive it
+
+The CLI holds the session's cron table in process memory, with no file behind it. A plugin update, a /reload-plugins, a session continue or a /clear and resume therefore deletes the Patrol job and leaves the stamp as the only trace. Nothing ticks the poker after that: no dispatched row is judged against its declared duration, and anything the run launched waits on a clock that stopped.
+
+The stop hook reads the stamp and the transcript. A stamp older than one fire window (the poker interval plus the scheduler's jitter), with an idle stretch that long and no tick in it, is a dead clock. The hook refuses the turn once per turn, in one line, until the stamp is fresh or removed.
+
+The three acts, in this order. Look first: creating a second job over one that is still there is two clocks on one run.
+  1. CronList. Is this session's bionic-patrol job still listed?
+  2. Only if it is absent: CronCreate a RECURRING session job at the interval that bash ${POKER_WORD} interval prints, carrying exactly the prompt that bash ${POKER_WORD} prompt prints.
+  3. Only once step 2 returned a job, or step 1 showed the job listed: bash ${POKER_WORD} arm
+
+If CronCreate is refused or fails, do NOT run step 3. A fresh stamp over an empty cron table reads alive to the stop hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
+
+If the Patrol was stopped ON PURPOSE, record that instead of re-arming: bash ${POKER_WORD} disarm removes the stamp, and the notice goes with it.
+
+The clock that fires and never ticks. When a Patrol marker turn has run since the stamp and no tick stamped, the job exists and fires but its prompt never runs the tick, so nothing has decided anything. Re-creating the job as it is buys the same silence, and arming the stamp over it makes a Patrol that never decides read alive. Repair the job, not the clock:
+  1. Run the tick now: bash ${POKER_WORD} tick
+  2. CronList, and CronDelete this session's Patrol job.
+  3. CronCreate a RECURRING session job at the interval bash ${POKER_WORD} interval prints, carrying exactly the prompt bash ${POKER_WORD} prompt prints. It leads with this session's marker and runs the tick.
+EXPLAIN_EOF
+}
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -466,6 +501,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
+  die "  bash ${HOOK_DIR}/session-poker.sh patrol --explain   why the Patrol clock dies and the acts that revive it: the explanation the stop hook's one-line refusal leaves out (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (92 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
@@ -1172,6 +1208,10 @@ $1"; shift ;;
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
+  # ONE FLAG: the explanation of a dead Patrol clock, the only thing this verb prints.
+  patrol)
+    { [ $# -eq 1 ] && [ "$1" = --explain ]; } || usage "patrol takes one flag: --explain."
     ;;
   # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). No operand prints it; one operand sets it. The
   # value's own shape is the verb's refusal (1); a second operand is the usage error.
@@ -3396,6 +3436,11 @@ case "$VERB" in
   # WAITING, and `v=` after the
   # marker names the prompt's version so `arm` can record it and a later tick can ask for a
   # re-arm when the poker has moved on.
+  patrol)
+    poker_patrol_explain
+    exit 0
+    ;;
+
   prompt)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -3403,8 +3448,8 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand); a row that should wait is made not ready instead, by one of the three forms the stop wall prints. Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
-      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand); a row that should wait is made not ready instead, by one of the three forms the stop wall prints. Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. After you re-arm this Patrol, say exactly: "%s" Continue the run toward its goal until a wall only when something is ready or changed.\n' \
+      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT" "$PATROL_REARM_SAY"
     exit 0
     ;;
 

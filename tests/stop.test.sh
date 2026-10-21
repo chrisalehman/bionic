@@ -984,7 +984,7 @@ PT_RULES="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
 PT_ARMING="$(/usr/bin/grep -E '^\*\*(The Patrol|The arming wall)\.\*\*' "$PT_RULES")"
 expect_eq "PATROL6 meta: both arming paragraphs are found" "2" "$(printf '%s\n' "$PT_ARMING" | /usr/bin/grep -c .)"
 expect_eq "PATROL6b the rules carry the sentence once" "1" "$(/usr/bin/grep -c 'Patrol re-armed: the session' "$PT_RULES")"
-expect_contains "PATROL6c …whole, with its two slots" "$PT_SAY" "$PT_RULES"
+expect_contains "PATROL6c …whole, with its two slots" "$PT_SAY" "$(cat "$PT_RULES")"
 expect_eq "PATROL6d the prompt carries it once" "1" "$(printf '%s\n' "$PT_PROMPT" | /usr/bin/grep -c 'Patrol re-armed: the session')"
 expect_contains "PATROL6e …whole, with its two slots" "$PT_SAY" "$PT_PROMPT"
 PT_SAYRE='(^|[^[:alpha:]])(say|says|tell|tells)([^[:alpha:]]|$)'
