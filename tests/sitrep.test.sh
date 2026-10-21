@@ -1141,5 +1141,51 @@ printf 'release-approval/v1|dec=2|key=approve:D30|default=approve D30|other=-|pi
 expect_eq "WA-4 the release and the merge both wait on D30" \
   "Answered in an hour rather than now, the predicted close moves an hour later: the release and the merge wait on it." "$(sr_wait D30)"
 
+# ============================================================
+section "§SKILL: the sitrep skill reads the sheet and shows only the card the card verb printed; it never tells the model to show the sheet"
+# ============================================================
+# FIXTURE FIDELITY: the shipped skill text, read in place; each plant is a scratch copy of it with one line appended.
+# fails-when: the skill text tells the model to show the sheet, or to show anything but the card verb's output.
+SR_SKILL="$BIONIC_SKILLS_DIR/sitrep/SKILL.md"
+sr_show_lines() {  # <skill file> -> every line that tells the model to show something (show, shows, display), a negated show cut first
+  awk '{ l = tolower($0); gsub(/(never|not|n.t) (show|display)/, "", l) } l ~ /(^|[^a-z])(shows?|display)([^a-z]|$)/ { print }' "$1"
+}
+sr_show_bad() {  # <skill file> -> each show line that shows the sheet or the page, or anything but the card
+  sr_show_lines "$1" | awk '{ l = tolower($0) } l ~ /sheet|page/ || l !~ /card/ { print }'
+}
+expect_contains "SK0 the skill runs the sheet verb" 'hooks/session-poker.sh sitrep [<plan>]' "$(cat "$SR_SKILL")"
+expect_contains "SK0b …and the card verb, the judgment on its stdin" 'hooks/session-poker.sh sitrep card [<plan>]' "$(cat "$SR_SKILL")"
+expect_nonempty "SK1 the skill has lines that say what to show (the extractor reads the real text)" "$(sr_show_lines "$SR_SKILL")"
+expect_eq "SK1b …one of them shows the card exactly as printed, in one fenced code block, with nothing after it" "1" \
+  "$(sr_show_lines "$SR_SKILL" | /usr/bin/grep -i 'card' | /usr/bin/grep -i 'exactly as printed' | /usr/bin/grep -i 'one fenced code block' | /usr/bin/grep -ci 'nothing after')"
+expect_eq "SK2 the sheet is named as the model's input, never shown" "1" \
+  "$(/usr/bin/grep -i 'sheet' "$SR_SKILL" | /usr/bin/grep -i 'input' | /usr/bin/grep -ci 'never show')"
+expect_empty "SK3 no line of the skill shows the sheet, the page or anything but the card (SK1 read the same lines)" "$(sr_show_bad "$SR_SKILL")"
+for sr_plant in 'Show the sheet to the user.' 'Then show its page inside one fenced code block.' 'Show the card and the sheet beside it.' 'Display the facts as a list.'; do
+  cp "$SR_SKILL" "$TMPROOT/skill-plant.md"; printf '%s\n' "$sr_plant" >> "$TMPROOT/skill-plant.md"
+  expect_eq "SK4 a planted '$sr_plant' is found" "$sr_plant" "$(sr_show_bad "$TMPROOT/skill-plant.md")"
+done
+
+# ============================================================
+section "§RECORD: the sitrep and canonical-sdlc skills record an ask through its verb before they put it to the user"
+# ============================================================
+# FIXTURE FIDELITY: the shipped skill texts read in place, the canonical-sdlc skill as rendered and as its source; the
+# plant is a scratch copy with the verb cut from the line.
+# fails-when: a skill puts an ask to the user with no recording verb named.
+sr_put_lines() {  # <skill file> -> every line that puts something to the user, in chat or otherwise
+  awk '{ l = tolower($0) } l ~ /(^|[^a-z])put(s|ting)?[^.]*(to the user|in chat)/ { print }' "$1"
+}
+sr_put_bad() {  # <skill file> -> each such line that names no recording verb before the put
+  sr_put_lines "$1" | awk 'index($0, "`decisions put") == 0 || tolower($0) !~ /before/ { print }'
+}
+for sr_f in "$BIONIC_SKILLS_DIR/sitrep/SKILL.md" "$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md" \
+  "$BIONIC_SCRIPTS_DIR/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"; do
+  sr_rel="${sr_f#"$BIONIC_SCRIPTS_DIR"/}"
+  expect_nonempty "RC1 $sr_rel puts an ask to the user (the extractor reads the real text)" "$(sr_put_lines "$sr_f")"
+  expect_empty "RC2 $sr_rel names the recording verb, decisions put, before every put (RC1 read the same lines)" "$(sr_put_bad "$sr_f")"
+  sed 's/`decisions put[^`]*`/the decision skill/' "$sr_f" > "$TMPROOT/record-plant.md"
+  expect_nonempty "RC3 $sr_rel with the verb cut from its put line is found" "$(sr_put_bad "$TMPROOT/record-plant.md")"
+done
+
 
 finish

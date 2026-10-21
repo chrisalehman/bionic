@@ -326,10 +326,10 @@ new_roster "$RFC"
 add_row "$RFC" name=w38-T13 agent_id=a013 subagent_type=bionic:critic
 fc_page
 expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 1" "1" "$FC_RC"
-expect_eq "EARLY-1b …saying CARD-EARLY and the reader, on stderr" "CARD-EARLY — reader w38-T13 open" "$FC_ERR"
+expect_eq "EARLY-1b …saying CARD-EARLY and the reviewer, on stderr" "CARD-EARLY — reviewer w38-T13 open" "$FC_ERR"
 expect_eq "EARLY-1c …rendering nothing and writing no page" "|" "$FC_OUT|$(fc_pages)"
 fc_card early
-expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 1)" "1|CARD-EARLY — reader w38-T13 open" "$FC_RC|$FC_ERR"
+expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 1)" "1|CARD-EARLY — reviewer w38-T13 open" "$FC_RC|$FC_ERR"
 ack_rows "$RFC" w38-T13
 fc_page
 expect_eq "EARLY-2 the same critic acked: the page renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
@@ -825,16 +825,16 @@ expect_eq "POST-0 precondition: the working head is the fix's landing, and the r
   "$(git -C "$RFC" rev-parse wave/01-fixture)|$(/usr/bin/grep -E '^\| T[2456] \|' "$PFC" | awk -F'|' '{ gsub(/ /, "", $2); gsub(/ /, "", $13); printf "%s%s:%s", (n++ ? " " : ""), $2, $13 }')"
 fc_card early
 expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 1)" \
-  "1|CARD-EARLY — reader row T5 reads what landed after the release, and its reading is not registered" "$FC_RC|$FC_ERR"
+  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_page
 expect_eq "POST-1b …release-approval says the same, renders nothing and writes no page" \
-  "1|CARD-EARLY — reader row T5 reads what landed after the release, and its reading is not registered||" \
+  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered||" \
   "$FC_RC|$FC_ERR|$FC_OUT|$(fc_pages)"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)"
 fc_card early
 expect_eq "POST-1c the critic's two readings registered, the auditor's not: early, naming the auditor's row T6 (exit 1)" \
-  "1|CARD-EARLY — reader row T6 reads what landed after the release, and its reading is not registered" "$FC_RC|$FC_ERR"
+  "1|CARD-EARLY — review row T6 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)
 $(fc_post_read evidence)"

@@ -24,9 +24,9 @@
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
+#     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
-#     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a reading question, or all three, at the working head (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a review question, or all three, at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
@@ -532,17 +532,17 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
-  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
+  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
-  die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|all> '<reply>'   record the user's waiver of that question, or of all three, at the working head, one waived: line each under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-run   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the reading or after it, as a moved: to=fixed line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered readings (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
+  die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a moved: to=fixed line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered reviews (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -573,7 +573,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, write the decision's put line to record/<wave>/design-ledger.md and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a reading's, a writer's, an assumptions.md hole line), each concept and kind once"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   write each debt: line the continuation carries under ## Deferrals into the run's ledger, its touches and raised-by kept"
@@ -749,7 +749,7 @@ case "$VERB" in
   # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
     TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
-    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reviewer's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
       # THE OPERAND'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the row is not written.
@@ -1092,7 +1092,7 @@ case "$VERB" in
   # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
   # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    PF_USAGE="proof-add takes two arguments, <regression|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
+    PF_USAGE="proof-add takes two arguments, <regression|review|task> <evidence path under record/>, and for a review two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
     if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
     # SEVERAL LOGS ON ONE LINE (wave-36 T35; D13, AC-7.10): a floor may be the logs of several runners, each its own
     # operand after the first, newline-joined in PF_EVIDS (a path holding a line break is refused below, by name).
@@ -1173,7 +1173,7 @@ $1"; shift ;;
   # a direction, an id of another shape or a sentence on a fix is the usage error; the rules the ruling is held to
   # are finding-move's and finding-stated's, the verb's own refusals (1).
   disposition)
-    DSP_USAGE="disposition takes no argument (it renders every finding of the registered readings), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
+    DSP_USAGE="disposition takes no argument (it renders every finding of the registered reviews), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
     DSP_ID=""; DSP_TO=""; DSP_RAW=""; DSP_WHY=""; DSP_SENT=""
     if [ $# -gt 0 ]; then
       { [ $# -eq 4 ] || [ $# -eq 5 ]; } && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$DSP_USAGE"
@@ -2050,7 +2050,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
   case "$fst" in
     covered*) : ;;
-    *) UNITS_FACTS_STATE="the readings are judged once the regression holds"; return 0 ;;
+    *) UNITS_FACTS_STATE="the reviews are judged once the regression holds"; return 0 ;;
   esac
   if ! declare -F facts_state >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
@@ -2724,13 +2724,13 @@ finding_read() {
     insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE == ev { q = PROOF_QUESTION; h = PROOF_HEAD }
     END { if (q != "") print q "\t" h }' "$plan")"
   if [ -z "$got" ]; then
-    FR_WHY="$(clean "$rec") is no reading registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
+    FR_WHY="$(clean "$rec") is no review registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
     return 1
   fi
   FR_Q="${got%%	*}"; FR_H="${got#*	}"
   got="$(proof_findings "$(docs_root "$repo")/$rec" 2>/dev/null)" || got=""
   if ! printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { f = 1 } END { exit !f }'; then
-    FR_WHY="the reading $(clean "$rec") holds no finding $n (it holds $(printf '%s\n' "$got" | awk -F'\t' '$1 ~ /^[0-9]+$/ { printf "%s%s", (k++ ? ", " : ""), $1 } END { if (!k) printf "none" }'))"
+    FR_WHY="the review $(clean "$rec") holds no finding $n (it holds $(printf '%s\n' "$got" | awk -F'\t' '$1 ~ /^[0-9]+$/ { printf "%s%s", (k++ ? ", " : ""), $1 } END { if (!k) printf "none" }'))"
     return 1
   fi
   IFS='	' read -r _ FR_S FR_R FR_W _ _ FR_T <<FINDING_READ
