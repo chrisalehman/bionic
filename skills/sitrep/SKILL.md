@@ -45,7 +45,7 @@ Bottom line
 - You owe <what, or nothing now>.
 - Next: <tasks in flight; blocked; then the next ones>.
 - Done: <steps and tasks, the last one at its time>.
-- Close: likely <clock> (<whose pace>), or not before <floor> · likely <clock> (<whose pace>) when the likely is after the floor, or why there is none.
+- Close: likely <clock> (<whose pace>), or not before <earliest> · likely <clock> (<whose pace>) when the likely is after the earliest, or why there is none.
 
 Task list
 <glyph> <step>: <name> (<time>), or — <state>             (steps 0 to 3 only)
