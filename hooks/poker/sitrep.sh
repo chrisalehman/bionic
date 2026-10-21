@@ -618,26 +618,29 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #                      `- <rationale>` when graded
 #   Blocked on you     one bullet per open approve:, waive:, finding:, gate: or decide: item of the plan's run, one sentence each,
 #                      every decision put and not ruled among them with its wait line (`pages_owed`), each once
-#   Predicted close    the close and its basis, or why there is none
 #
-# and `--line` prints only `<schedule><correctness><waste marks> · owed: <n> · <the close>`.
+# The close is stated once, on the Bottom line. `--line` prints only `<schedule><correctness><waste marks> · owed: <n> ·
+# <the close>`, and `--basis` prints the close's line and its arithmetic: the work left, the chain, the width, the
+# pace and whose it is, the floor and the likely instants.
 #
 # EVERY FACT IS ANOTHER READER'S, CALLED: the tasks and sizes are `units_rows`', the longest open chain
 # `units_chain`'s over `units_edges`, the landings, runs and the median ready→landed `landing_report`'s, the idle
 # minutes `fill-report`'s own line, the open items `owed_list_plan`'s (the sessions bound to the plan, never the
 # caller's), the admitted count `gate_state`'s, the findings `proof_findings` at `proof_finding_rating` less
-# `proof_fixed`. What no reader computes is computed here, once: the declared median of the done tasks, the pace
-# ratio, the marks, a red not yet answered by a green, the close.
+# `proof_fixed`, the dispatch instants `launch_sync_ledger`'s. What no reader computes is computed here, once: the
+# pace, the marks, a red not yet answered by a green, the close.
 #
 # THE MARKS ENCODE DEVIATION FROM A TOLERANCE, never a work state: a measurement held against its bar is ✅ within
 # it, ➖ near it, ✖️ over it, or ❔ not measurable, and its line says the bar in words. The decisions line is
 # `sitrep_decisions`', the goals line `sitrep_goals`'.
 #
-# THE CLOSE: now + max(the longest open chain, all open work ÷ the admitted count) × the measured pace, so admitting
-# more can shorten the work's share and never one chain. The pace is this run's median landing over its median
-# declared size, else the newest delivered run's, else there is no forecast. A plan not approved at Step 3 prints
-# the no-forecast sentence; a delivered one prints its delivery and no close. No typed number feeds it: the plan's
-# own `forecast:` grades the schedule mark and nothing else.
+# THE CLOSE IS A FLOOR OR A FORECAST, NEVER NOW. L = max(the longest open chain, all open work ÷ the admitted count) in
+# the plan's own minutes, so admitting more can shorten the work's share and never one chain. The floor is now + L at
+# 1×; the likely close is now + L × the pace, printed only when it falls after the floor. The pace is the median of a
+# landing's dispatched-to-landed minutes over its planned minutes, this run's, else the newest delivered run's at the
+# same scale on the same project, named; with neither the floor stands alone. The queue's ready-to-landed time is a
+# wait at the gate and feeds nothing. A plan not approved at Step 3 prints the no-forecast sentence; a delivered one
+# prints its delivery and no close. No typed number feeds it: the plan's own `forecast:` grades the schedule mark.
 #
 # THE PLAN'S TABLE WORDS NEVER PRINT: no "rows", no status name, no cell value; a read prints in words.
 #
@@ -721,30 +724,41 @@ sitrep_delivered_at() {
   iso_epoch "$at"
 }
 
-sitrep_ratio_fmt() {  # <ratio> -> two places, trailing zeros dropped: 1.2, 1.37, 2
-  awk -v r="$1" 'BEGIN { s = sprintf("%.2f", r); sub(/0+$/, "", s); sub(/\.$/, "", s); print s }'
+sitrep_ratio_fmt() {  # <ratio> -> two places, trailing zeros dropped: 1.2, 1.37, 2; below 0.01, one significant digit: 0.001
+  awk -v r="$1" 'BEGIN { s = (r > 0 && r < 0.01) ? sprintf("%.1g", r) : sprintf("%.2f", r); if (index(s, ".") && s !~ /e/) { sub(/0+$/, "", s); sub(/\.$/, "", s) }; print s }'
 }
 
-# sitrep_pace <plan> <root> -> `<median ready→landed, as landing_report prints it><TAB><median declared><TAB><ratio>`
-# for the plan's queue landings, or nothing when it has none (or no row of them declares a size). The median is
-# landing_report's own figure; the declared median is the same rule over the sizes of the rows it measured.
+# sitrep_pace <plan> <root> -> `<landings><TAB><ratio>`: over the plan's queue landings whose dispatch ledger row
+# carries a `dispatched` instant and whose task declares a size, the median of (landed − dispatched) in minutes over
+# the declared minutes; nothing when no landing qualifies or the median is not a positive number. A row's landing
+# is its earliest queue `published` at or after its dispatch. The queue's ready-to-landed time is a wait at the
+# gate, not the work's own time, so it feeds nothing here.
 sitrep_pace() {
-  local rep med
-  rep="$(landing_report "$(_wt_proofs_path "$2" "$1")" "$2" yes 2>/dev/null)"
-  case "$rep" in 'landings: queue='*) : ;; *) return 0 ;; esac
-  med="${rep%%$'\n'*}"; med="${med#*ready-to-landed median=}"; med="${med%%m *}"
-  { printf '%s\n' "$rep" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") print "L\t" $1 }'
+  local rec
+  rec="$(_wt_proofs_path "$2" "$1")"
+  [ -f "$rec" ] && [ ! -L "$rec" ] || return 0
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  [ -n "${_LINE_FIELDS_AWK:-}" ] || return 0
+  { launch_sync_ledger "$1" | awk -F'\037' '{ print "D\t" $1 "\t" $3 }'
     units_rows "$1" 2>/dev/null | awk -F'\t' '{ print "R\t" $1 "\t" $7 }'
-  } | awk -F'\t' -v med="$med" '
-    $1 == "R" { m = ""; if (match($3, /^[0-9]+/)) m = substr($3, RSTART, RLENGTH); size[$2] = m; next }
-    $1 == "L" { want[++n] = $2 }
+    awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("kind") == "queue" { print "P\t" line_kv("row") "\t" line_kv("at") }' "$rec"
+  } | awk -F'\t' "$_PATROL_ISO_AWK"'
+    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+    $1 == "D" { e = iso2epoch(norm($3)); if (e >= 0) disp[$2] = e; next }
+    $1 == "R" { if (match($3, /^[0-9]+/) && substr($3, RSTART, RLENGTH) + 0 > 0) size[$2] = substr($3, RSTART, RLENGTH) + 0; next }
+    $1 == "P" { e = iso2epoch(norm($3)); if (e >= 0) { np++; pr[np] = $2; pe[np] = e } }
     END {
-      for (i = 1; i <= n; i++) if (size[want[i]] != "") s[++k] = size[want[i]] + 0
+      for (i = 1; i <= np; i++) {
+        r = pr[i]
+        if (!(r in disp) || !(r in size) || pe[i] < disp[r]) continue
+        if (!(r in land) || pe[i] < land[r]) land[r] = pe[i]
+      }
+      for (r in land) v[++k] = (land[r] - disp[r]) / 60 / size[r]
       if (k == 0) exit
-      for (i = 2; i <= k; i++) { t = s[i]; for (j = i - 1; j >= 1 && s[j] > t; j--) s[j + 1] = s[j]; s[j + 1] = t }
-      d = (k % 2) ? s[(k + 1) / 2] : (s[k / 2] + s[k / 2 + 1]) / 2
-      if (d <= 0) exit
-      printf "%s\t%g\t%.6f\n", med, d, med / d
+      for (i = 2; i <= k; i++) { t = v[i]; for (j = i - 1; j >= 1 && v[j] > t; j--) v[j + 1] = v[j]; v[j + 1] = t }
+      d = (k % 2) ? v[(k + 1) / 2] : (v[k / 2] + v[k / 2 + 1]) / 2
+      if (!(d > 0)) exit
+      printf "%d\t%.6f\n", k, d
     }'
 }
 
@@ -798,11 +812,14 @@ sitrep_schedule() {
 }
 
 # sitrep_prev <root> <plan> -> `<slug><TAB><ratio>` of the newest delivered run under the docs root other than
-# <plan> (its Step 9 line's `delivered:` instant, newest; `bind_delivered`'s test), measured by `sitrep_pace`
-# over its own landing record; nothing when there is none or it measured no landing.
+# <plan> that declares the same `scale:` as <plan> (its Step 9 line's `delivered:` instant, newest;
+# `bind_delivered`'s test), measured by `sitrep_pace` over its own record; nothing when there is none, it measured
+# no pace, or <plan> declares no scale. A run of another size is no measure of this one's pace.
 sitrep_prev() {
-  local root="$1" self f c at best="" bestat="" pace
+  local root="$1" self f c at best="" bestat="" pace scale
   declare -F _run_candidates >/dev/null 2>&1 && declare -F bind_delivered >/dev/null 2>&1 || return 0
+  scale="$(plan_frontmatter_get "$2" scale 2>/dev/null)"
+  [ -n "$scale" ] || return 0
   self="$(_bind_resolve "$2" 2>/dev/null)" || self="$2"
   while IFS= read -r -d '' f; do
     c="$(_bind_resolve "$f" 2>/dev/null)" || continue
@@ -810,6 +827,7 @@ sitrep_prev() {
     at="$(awk '/^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:/ && match($0, /delivered:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z?/) {
                  s = substr($0, RSTART, RLENGTH); sub(/^delivered:[ \t]*/, "", s); print s; exit }' "$f" 2>/dev/null)"
     [ -n "$at" ] || continue
+    [ "$(plan_frontmatter_get "$f" scale 2>/dev/null)" = "$scale" ] || continue
     bind_delivered "$root" "$c" || continue
     if [ -z "$bestat" ] || [[ "$at" > "$bestat" ]]; then best="$f"; bestat="$at"; fi
   done < <(_run_candidates "$(docs_root "$root")" 2>/dev/null)
@@ -817,6 +835,49 @@ sitrep_prev() {
   pace="$(sitrep_pace "$best" "$root")"
   [ -n "$pace" ] || return 0
   printf '%s\t%s\n' "$(proof_plan_slug "$best")" "${pace##*$'\t'}"
+}
+
+# sitrep_close <plan> <root> <now epoch> [<units_rows output>] -> the close, one tab-separated line, for every reader
+# of it (the page, its basis, the schedule mark); nothing when no task is open. The fields, `-` where none:
+#   1 floor     now + L minutes at 1×, rounded to the minute, and always after now: L is the larger of the longest
+#               open chain and all open work over the admitted count, in the plan's own minutes
+#   2 likely    now + L × the pace, rounded to the minute; `-` with no pace or when it falls at or before the floor,
+#               since a likely close earlier than the floor contradicts it
+#   3 ratio     the pace: this run's (`sitrep_pace`), else the newest same-scale delivered run's (`sitrep_prev`)
+#   4 whose     `this run`, or the lending run's short name, a wave slug's first two words
+#   5 landings  how many of this run's landings the pace is the median of (`-` when borrowed)
+#   6 work · 7 per · 8 larger   the open minutes, those over the admitted count, and L, each rounded
+#   9 chain · 10 chain min · 11 admitted   the chain's ids comma-joined, its minutes, the gate's admitted count
+# Admitting more can shorten the work's share and never one chain.
+sitrep_close() {
+  local plan="$1" root="$2" now="$3" rows="${4:-}" chain cids cmins work admitted width pace ratio="-" whose="-" n="-"
+  [ -n "$rows" ] || rows="$(units_rows "$plan" 2>/dev/null)"
+  chain="$(sitrep_chain "$plan" "$rows")"
+  cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
+  [ -n "$cids" ] || return 0
+  work="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
+            if (match($7, /^[0-9]+/)) t += substr($7, RSTART, RLENGTH) } END { print t + 0 }')"
+  admitted="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
+  case "$admitted" in ''|*[!0-9]*) admitted=0 ;; esac
+  width="$admitted"; [ "$width" -gt 0 ] || width=1
+  pace="$(sitrep_pace "$plan" "$root")"
+  if [ -n "$pace" ]; then
+    n="${pace%%$'\t'*}"; ratio="${pace##*$'\t'}"; whose="this run"
+  else
+    pace="$(sitrep_prev "$root" "$plan")"
+    if [ -n "$pace" ]; then
+      ratio="${pace##*$'\t'}"
+      whose="$(printf '%s' "${pace%%$'\t'*}" | awk -F- '$1 == "wave" && NF >= 2 { print $1 "-" $2; next } { print }')"
+    fi
+  fi
+  awk -v now="$now" -v c="$cmins" -v t="$work" -v w="$width" -v r="$ratio" 'BEGIN {
+    p = t / w; l = (p > c) ? p : c
+    f = int((now + l * 60) / 60 + 0.5) * 60; if (f <= now) f = (int(now / 60) + 1) * 60
+    y = 0; if (r != "-" && r + 0 > 0) y = int((now + l * r * 60) / 60 + 0.5) * 60
+    if (y > f) printf "%d\t%d\t", f, y; else printf "%d\t-\t", f }'
+  printf '%s\t%s\t%s\t' "$ratio" "$whose" "$n"
+  awk -v c="$cmins" -v t="$work" -v w="$width" 'BEGIN { p = t / w; l = (p > c) ? p : c; printf "%d\t%d\t%d\t", t, p + 0.5, l + 0.5 }'
+  printf '%s\t%s\t%s\n' "$cids" "$cmins" "$admitted"
 }
 
 # sitrep_open_s12 <plan> <root> -> `<open S1 count> <open S2 count>` over the plan's registered readings: a
@@ -886,9 +947,9 @@ sitrep_goals() {
 }
 
 sitrep_render() {
-  local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1 pace
+  local plan="$1" root="$2" line="$3" now slug recdir rec rows owed reds red_rows nred lr lr1
   local s_mark s_text c_mark c_text w_mark w_text ty gl lab desc kind note glyph
-  local idle_min elapsed i_pct d_pct prev ratio s_med s_decl width admitted chain cids cmins work
+  local idle_min elapsed i_pct d_pct ratio admitted cids cmins work
   local landed=0 active=0 pending=0 redn=0 total=0 approvals lmed="" appr_at dlv_at cur pages ahead
   now="$(sitrep_now)"
   slug="$(proof_plan_slug "$plan")"
@@ -1083,9 +1144,7 @@ $sit
 SITREP_SIT
 
   # ---- The Score's indicators
-  # the schedule mark: the clock and the bar (sitrep_schedule); the declared-size pace feeds the close only
-  pace="$(sitrep_pace "$plan" "$root")"
-  [ -z "$pace" ] || IFS='	' read -r s_med s_decl ratio <<< "$pace"
+  # the schedule mark: the clock and the bar (sitrep_schedule); the pace feeds the close only
   IFS='	' read -r s_mark s_text <<< "$(sitrep_schedule "$plan" "$landed" "$total" "$now" "$lmed")"
   s_text="$s_mark $s_text"
   local lred="${lr1#*· runs: green=}" s12 s1n s2n c_reds c_find
@@ -1134,56 +1193,55 @@ SITREP_SIT
   else w_idle="$(awk -v i="$i_pct" 'BEGIN { r = int(i + 0.5); if (i + 0 == 0) print "no writer slot sat idle"; else if (r == 0) print "a writer slot sat idle under 1% of the time"; else printf "a writer slot sat idle %d%% of the time\n", r }')"; fi
   w_text="$w_mark waste — $w_disc; $w_idle"
 
-  # ---- The close: the longest open chain (the tick's CHAIN) and all open work, the pace, the admitted count
-  local nodes larger per wtxt cmin_txt ctext ltext btext pace_txt closes cl
-  nodes="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "pending" || s == "active" {
-             m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH); printf "N\t%s\t%d\n", $1, m }')"
-  work="$(printf '%s\n' "$nodes" | awk -F'\t' '$1 == "N" { s += $3 } END { print s + 0 }')"
-  chain="$(sitrep_chain "$plan" "$rows")"
-  cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
-  admitted="$(gate_state 2>/dev/null | sed -n 's/.* admitted=\([0-9][0-9]*\) .*/\1/p')"
-  case "$admitted" in ''|*[!0-9]*) admitted=0 ;; esac
-  width="$admitted"; [ "$width" -gt 0 ] || width=1
-  if [ -n "$pace" ]; then
-    pace_txt="the median landing takes $(sitrep_ratio_fmt "$s_med") min against $(sitrep_ratio_fmt "$s_decl") min planned, $(sitrep_ratio_fmt "$ratio")×"
-  else
-    prev="$(sitrep_prev "$root" "$plan")"
-    if [ -n "$prev" ]; then
-      ratio="${prev##*$'\t'}"
-      pace_txt="$(printf '%s' "${prev%%$'\t'*}" | awk -F- '$1 == "wave" && NF >= 2 { print $1 "-" $2; next } { print }')'s measured $(sitrep_ratio_fmt "$ratio")×; no landing yet on this run"
-    else
-      ratio=""
-    fi
-  fi
+  # ---- The close: sitrep_close's floor and likely instants on one line; their arithmetic is the basis's
+  local fl lk whose nland per larger wtxt ltext btext pace_txt lk_txt pt cl lkc
   set --
   if [ -n "$dlv_at" ]; then
     cl="$(sitrep_clock "$dlv_at" "$now")"
-    set -- "Delivered at $cl; nothing is left to forecast."
+    set -- "Nothing is left to forecast."
     btext="delivered at $cl"; ltext="delivered"
   elif [ -z "$appr_at" ]; then
-    set -- "No forecast until the plan is approved at Step 3." \
-           "The forecast will be the plan's chain at the line's measured pace, never a typed number."
+    set -- "The close will be the plan's chain from now, at 1× for its floor and at the measured pace for its likely close, never a typed number."
     btext="no forecast until the plan is approved at Step 3"; ltext="no forecast until approved"
-  elif [ -z "$cids" ]; then
-    set -- "No task is open, so nothing is left to forecast."
-    btext="nothing left to forecast; no task is open"; ltext="closes — no task open"
-  elif [ -z "$ratio" ]; then
-    set -- "No forecast: no pace is measured on this run or a delivered one."
-    btext="no forecast; no pace is measured on this run or a delivered one"; ltext="closes unverified"
   else
-    IFS='	' read -r per larger closes <<< "$(awk -v now="$now" -v c="$cmins" -v t="$work" -v w="$width" -v r="$ratio" 'BEGIN {
-      p = t / w; l = (p > c) ? p : c; s = now + l * r * 60
-      printf "%d\t%d\t%d\n", p + 0.5, l + 0.5, int(s / 60 + 0.5) * 60 }')"
-    cl="$(sitrep_clock "$closes" "$now")"
+    IFS='	' read -r fl lk ratio whose nland work per larger cids cmins admitted <<< "$(sitrep_close "$plan" "$root" "$now" "$rows")"
+  fi
+  if [ -n "$dlv_at" ] || [ -z "$appr_at" ]; then :
+  elif [ -z "$fl" ]; then
+    btext="nothing left to forecast; no task is open"; ltext="closes — no task open"
+  else
+    cl="$(sitrep_clock "$fl" "$now")"
+    if [ "$ratio" = - ]; then
+      btext="not before $cl (no pace yet)"; ltext="closes ≥$cl"
+      pace_txt="none yet; no landing on this run measures one, and no delivered run at the same scale lends one"
+      lk_txt="no likely close without a pace"
+    else
+      pt="$whose's $(sitrep_ratio_fmt "$ratio")×"
+      if [ "$whose" = "this run" ]; then
+        pace_txt="$(sitrep_ratio_fmt "$ratio")×, the median over $nland landing$([ "$nland" = 1 ] || echo s) of the minutes from dispatch to landing over the minutes planned"
+      else
+        pace_txt="$pt measured; no landing on this run measures one yet"
+      fi
+      if [ "$lk" != - ]; then
+        lkc="$(sitrep_clock "$lk" "$now")"
+        btext="not before $cl · likely $lkc ($pt)"; ltext="closes ≥$cl ~$lkc"
+        lk_txt="the likely close: $(awk -v l="$larger" -v r="$ratio" 'BEGIN { printf "%d", l * r + 0.5 }') min at $(sitrep_ratio_fmt "$ratio")×, $lkc"
+      else
+        btext="not before $cl ($pt)"; ltext="closes ≥$cl"
+        lk_txt="at $(sitrep_ratio_fmt "$ratio")× the likely close falls no later than the floor, so the floor stands"
+      fi
+    fi
     if [ "$admitted" -eq 0 ]; then wtxt="over 1 suite run, none admitted now"
     elif [ "$admitted" -eq 1 ]; then wtxt="over the 1 suite run the gate admits"
     else wtxt="over the $admitted suite runs the gate admits"; fi
-    cmin_txt="$(awk -v c="$cmins" -v t="$work" -v w="$width" -v r="$ratio" 'BEGIN { p = t / w; l = (p > c) ? p : c; printf "%.4f\n", l * r }')"
-    set -- "About $cl." \
-           "The work left is $work min as planned, $per min $wtxt; the longest chain left, $(printf '%s' "$cids" | sed 's/,/ → /g'), is $cmins min; the larger, $larger min, at the pace below is $(sitrep_dur "$cmin_txt")." \
+    set -- "The work left is $work min as planned, $per min $wtxt; the longest chain left, $(printf '%s' "$cids" | sed 's/,/ → /g'), is $cmins min; the larger is $larger min." \
            "The pace: $pace_txt." \
+           "The floor: $larger min at 1× from now, $cl; $lk_txt." \
            "It assumes what you owe is answered now."
-    btext="about $cl"; ltext="closes ~$cl"
+  fi
+  if [ "$line" = basis ]; then
+    printf '2\t- %s\n' "Close: $btext." "$@" | sitrep_fold
+    return 0
   fi
 
   # ---- What is owed, in words: what to do, then what waits on it
@@ -1311,8 +1369,6 @@ SITREP_SIT
     [ -z "$gline" ] || printf '2\t- %s\n' "$grade_why"
     printf '0\t\n0\tBlocked on you\n'
     if [ -n "$blk" ]; then printf '%s' "$blk"; else printf '2\t- Nothing: no decision or action is owed by you.\n'; fi
-    printf '0\t\n0\tPredicted close\n'
-    for k in "$@"; do printf '2\t- %s\n' "$k"; done
   } | sitrep_fold
   return 0
 }

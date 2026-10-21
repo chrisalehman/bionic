@@ -153,7 +153,7 @@ sr_row() {  # <id> <task> <reads> <size> <status>
 sr_owed() {  # <owed/v1 fields after the schema> [<session>] -> one line in that session's owed store (this world's own by default)
   printf 'owed/v1|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-${2:-$SID}.state"
 }
-# sr_prev <minutes> [<scale>] -> a delivered plan beside this one (wave-40-prev, T1 of 60 min declared,
+# sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
 # declaring `scale: <scale>` when given) whose T1 is dispatched at 10:00Z the day before and lands <minutes>
 # later: the previous wave's measured ratio is <minutes> / 60. Its queue time is 1 minute, so a pace read
 # from the queue would be 1/60.
@@ -450,13 +450,14 @@ SR_FORECAST=24h SR_EXTRA=22 sr_world clock "120 120 134 134"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
 expect_eq "CK0 precondition: 39 tasks, 4 done, read by the title" "4 of 39 tasks done" "$(sr_tasks)"
 SR_CK1="$(sr_ind schedule)"
-SR_CK1_PACE="$(sr_line '- The pace: ')"
-# The declared sizes change and nothing else: the mark and its line do not move. The forecast's pace line, which
-# still reads the sizes, is the proof the rewrite reached the renderer.
+SR_AT=$((SR_NOW - 3600)) sr_run --basis "$SR_PLAN"; SR_CK1_PACE="$(sr_line '- The pace: ')"
+# The declared sizes change and nothing else: the mark and its line do not move. The close's pace, which still
+# reads the sizes, is the proof the rewrite reached the renderer: 127 min over 500 planned, 0.25×.
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 500 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+SR_AT=$((SR_NOW - 3600)) sr_run --basis "$SR_PLAN"
+expect_eq "CK2a precondition: the sizes rewrite reached the renderer (the pace moved to 0.25×)" \
+  "yes|yes" "$(sr_line '- The pace: ' | /usr/bin/grep -q '^- The pace: 0\.25×, ' && echo yes)|$([ "$(sr_line '- The pace: ')" != "$SR_CK1_PACE" ] && echo yes)"
 SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
-expect_eq "CK2a precondition: the sizes rewrite reached the page (the pace line moved: 500 min planned)" \
-  "yes|yes" "$(sr_line '- The pace: ' | /usr/bin/grep -q 'against 500 min planned' && echo yes)|$([ "$(sr_line '- The pace: ')" != "$SR_CK1_PACE" ] && echo yes)"
 expect_eq "CK2 …and the schedule line is byte for byte what it was: the declared sizes feed nothing of the mark" \
   "$SR_CK1" "$(sr_ind schedule)"
 # Ahead of pace: a 240-hour forecast needs 39 × 11/240 = 1.8, so 2, and 4 done in a 9-minute median.
@@ -657,7 +658,7 @@ expect_eq "PA3 a zero pace is unmeasured: the floor with no pace, and now's cloc
 # ============================================================
 section "§FLOOR: before this run measures a pace, the newest delivered run on the same project at the same scale lends its pace, named; with none the floor stands alone; a likely close at or before the floor never prints; the page states the close once and --basis prints its arithmetic"
 # ============================================================
-# No landing: the work left is 510 min over 2 admitted, 255 min, so the floor is 7:15 PM; at wave-40's 72/60 the
+# No landing: the work left is 510 min over 2 admitted, 255 min, so the floor is 7:15 PM; at the delivered run's 72/60 the
 # likely close is 306 min on, 8:06 PM.
 SR_SCALE=wave sr_world floor none
 sr_prev 72 wave
