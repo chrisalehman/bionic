@@ -609,7 +609,16 @@ expect_contains "AK-7a …in the matrix arm's words" "AC-1 calls its evidence ev
 expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive-row:AC-1, the waive-row verb's key" \
   "waive-row:AC-1,waive:structure" "$(cw_open "$RCW")"
 expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive-row:AC-1)"
-CW_T4="$(eg6_plan 6 wave "$CW_READ" | sed -e 's/AC-1/AC-2/g' \
+# The ruling is demanded on the advance to 8, the merge: a plan at current: 8 carries the lines of the steps behind it
+# and Step 8's own, so the commit is judged by the matrix arm and not by the missing line.
+CW_AT8='- Step 6: review at record/w27/review.md
+- Step 7: documented at record/w27/docs.md
+  n/a: no decision this run
+- Step 8: merging
+  merge: merged feature/t23 into main
+  worktree-removed: n/a
+  cleanup: n/a'
+CW_T4="$(eg6_plan 8 wave "$CW_READ" "$CW_AT8" | sed -e 's/AC-1/AC-2/g' \
   -e 's/^| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |$/| AC-2 | T4 | discharged | see AC-2 | REFUTED |/' \
   | awk '{ print } $0 == "  evidence: record/generic-evidence.md" { print "  user-confirmed: Dana 2026-10-01 the fixture works" }')"
 cw_commit "$RCW" "$CW_T4"
