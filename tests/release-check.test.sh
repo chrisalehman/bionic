@@ -41,6 +41,11 @@
 #                   stated sentence of the bound plan; Migration names every row that added a refusal; every
 #                   build row names its record; the 1.18.0 block is as released; help.md and version.md
 #                   read the version and `render.sh --check` is green. Each rule has a doctored copy.
+#   §REL-1.24.0     the 1.24.0 entry (REQ-15 AC-15.1): the version pair reads 1.24.0, the entry is dated, names ADR-066,
+#                   ADR-067 and ADR-068, and its Migration paragraph names the rows that changed what a script may meet.
+#                   The release check is run on a repository holding the real entry and the run's real deferred lines:
+#                   every deferred sentence stands under Known limits and the check passes; the same entry with its
+#                   Known limits removed fails one line for each deferred sentence.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -666,5 +671,59 @@ doctor c_born sed 's/T33, T36, T37, T38, T39 and T40/the six rows/'
 doctor c_edit1180 awk '{ print } /^## 1\.18\.0 — /{ print "" }'
 printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$TMP/plugin.old.json"
 doctor c_nodate sed 's/^## 1\.19\.0 — .*/## 1.19.0 —/'
+
+section "§REL-1.24.0 — the 1.24.0 entry names its rows and carries the run's deferred sentences (REQ-15 AC-15.1)"
+
+REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-41-run-closes-itself.plan.md"
+# The rows whose Migration bullets name what a script of yours may meet at 1.24.0
+REL_MIG_ROWS="T1 T5 T10 T13 T18 T19 T20 T26 T36 T39 T43"
+
+# rel_check <file> <plugin.json> — one `rel:` line per broken rule; no output when all hold
+rel_check() {
+  local f="$1" pj="$2" blk mig s
+  blk="$(cl_block "$f" 1.24.0)"
+  [ -n "$blk" ] || { echo "rel: no 1.24.0 block"; return 0; }
+  grep -q -E '^## 1\.24\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rel: the 1.24.0 heading carries no date"
+  mig="$(cl_lead "$f" 1.24.0 | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
+  [ -n "$mig" ] || echo "rel: no Migration paragraph"
+  for s in $REL_MIG_ROWS; do
+    grep -q -w -- "$s" <<<"$mig" || echo "rel: Migration does not name $s"
+  done
+  for s in ADR-066 ADR-067 ADR-068; do
+    has "$blk" "$s" || echo "rel: the entry does not name $s"
+  done
+  [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = 1.24.0 ] || echo "rel: plugin.json does not read 1.24.0"
+}
+# rel_world <dir> <changelog> — a committed repository holding <changelog> as its CHANGELOG and the run's real
+# deferred lines as its plan, so the declared check judges the entry as the door will
+rel_world() {
+  fx_repo "$1" 2.3.4 1.24.0 && lim_plan "$1" 1.24.0 "$(/usr/bin/grep '^deferred: ' "$REL_PLAN")" &&
+  { cat "$2"; printf '\n## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$1/CHANGELOG.md" &&
+  git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the 1.24.0 entry"
+}
+
+expect_eq "(n1) the version pair reads the newest heading" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
+expect_eq "(n1) …which is 1.24.0" "1.24.0" "$(/usr/bin/grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$PLUGIN_JSON")"
+doctor r_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T19/, "Tnn") } { print }'
+expect_contains "(n2) a Migration paragraph that does not name T19: red" "rel: Migration does not name T19" "$(rel_check "$TMP/doctored.r_nomig" "$PLUGIN_JSON")"
+doctor r_noadr sed 's/ADR-068/the third record/g'
+expect_contains "(n2) an entry that does not name ADR-068: red" "rel: the entry does not name ADR-068" "$(rel_check "$TMP/doctored.r_noadr" "$PLUGIN_JSON")"
+
+if [ -r "$REL_PLAN" ]; then
+  REL_N="$(plan_deferred "$REL_PLAN" | /usr/bin/grep -c .)"
+  expect_true "(n0) setup: the run's plan states at least one deferred sentence" [ "$REL_N" -gt 0 ]
+  cl_block "$CL" 1.24.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel.entry"
+  cl_block "$CL" 1.24.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel.nolimits"
+  R="$TMP/rel-real"; rel_world "$R" "$TMP/rel.entry"
+  run_check "$R"
+  expect_status "(n3) the real entry, every deferred sentence of the run's plan under Known limits: the check passes" 0 "$RC"
+  expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.24.0 carries the $REL_N deferred sentences" "$OUT"
+  R="$TMP/rel-nolimits"; rel_world "$R" "$TMP/rel.nolimits"
+  run_check "$R"
+  expect_status "(n4) the same entry with its Known limits removed: the check fails" 1 "$RC"
+  expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
+  expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/wave-41-run-closes-itself/critic-adversarial.md#2" "$OUT"
+fi
 
 finish
