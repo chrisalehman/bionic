@@ -15,8 +15,7 @@
 #             key sends 1
 #   §SOURCES  AC-2.3 (tick half) a tick deciding GATE sends 1, and the next tick 0
 #   §QUIET    AC-2.4 a landing, a dispatch, a quiet tick send 0
-#   §ASKS     AC-2.2 a named approval a row waits on opens one item, at the tick and at the dispatch
-#             wall
+#   §ASKS     a named approval a row waits on opens one item, at the tick and at the dispatch wall
 # T12 adds §SETUP (AC-2.1: setup's notify item and doctor's read-only report), the close-out half
 # of §SOURCES (D: a delivered run sends one notification), the gate item's closer (C) and the
 # wipe's sparing of a live neighbour's ledger (W).
