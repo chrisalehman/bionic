@@ -611,9 +611,10 @@ NR_P="$(s47_plan "$RNR" 8 \
   "| T3 | 4 | build | waits on T2 | implementor | — | 10 | REQ-x | payload/c.sh | pending | approval:plan, $NR_REC |" \
   "| T4 | 4 | build | waits on nothing | implementor | — | 10 | REQ-x | payload/d.sh | pending | |")"
 nr_led() { tail -1 "$RNR/.bionic/docs/record/wave-01-fixture/fill-ledger.log" 2>/dev/null; }
+nr_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T'; }   # -> the FILL line, never its "FILL —" sentence
 poke_pressure "$RNR" 8192 1.0 tick
 expect_eq "NR-0 the tick over the table exits 0" "0" "$RC"
-expect_eq "NR-1 FILL names only the row that waits on nothing" "poker: FILL T4" "$(s47_lines FILL)"
+expect_eq "NR-1 FILL names only the row that waits on nothing" "poker: FILL T4" "$(nr_fill)"
 expect_contains "NR-2 the row reading the unruled D3 prints its WAIT, naming the read" "poker: WAIT T1 — approval:D3" "$OUT"
 expect_contains "NR-3 the row reading the record of the open T2 prints its WAIT, naming the writer" \
   "poker: WAIT T3 — reads $NR_REC, written by T2 (active)" "$OUT"
@@ -626,7 +627,7 @@ expect_contains "NR-5b …naming T4 alone" "ready with room: T4 " "$(s31_reason)
 awk '{ if (index($0, "| T4 |") == 1) sub(/\| pending \|/, "| landed |"); print }' "$NR_P" > "$NR_P.t" && mv "$NR_P.t" "$NR_P"
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_contains "NR-6 precondition: the waits still print" "poker: WAIT T1 — approval:D3" "$OUT"
-expect_eq "NR-6b …and no row is offered" "" "$(s47_lines FILL)"
+expect_eq "NR-6b …and no row is offered" "" "$(nr_fill)"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
 expect_contains "NR-7 meta: the wall read the turn, its ledger line is there" "fill-ledger/v1|" "$(nr_led)"
 expect_contains "NR-7b …and no row was ready" "|ready=|" "$(nr_led)"
@@ -639,13 +640,13 @@ awk '{ if (index($0, "| T4 |") == 1) sub(/\| landed \|/, "| pending |"); print }
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_contains "NR-8 under an open order the tick says so, quoting the words" \
   "no FILL — the user's order stands: given 2026-10-20T00:00:00Z \"hold the fleet while I read\"" "$OUT"
-expect_eq "NR-8b …and offers no row" "" "$(s47_lines FILL)"
+expect_eq "NR-8b …and offers no row" "" "$(nr_fill)"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
 expect_eq "NR-8c …and the wall ends the turn" "" "$(s31_decision)"
 printf 'order: lifted 2026-10-20T00:30:00Z "hold the fleet while I read"\n' > "$NR_P.o"
 awk -v f="$NR_P.o" '{ print } /^order: given/ { while ((getline l < f) > 0) print l }' "$NR_P" > "$NR_P.t" && mv "$NR_P.t" "$NR_P"
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
-expect_eq "NR-9 the control: the order lifted, T4 is offered again" "poker: FILL T4" "$(s47_lines FILL)"
+expect_eq "NR-9 the control: the order lifted, T4 is offered again" "poker: FILL T4" "$(nr_fill)"
 
 # ============================================================
 section "§STEP: the approval line alone readies nothing: a plan at current: 2 that carries approved-by: offers no FILL and the wall ends the turn; at current: 4 the same table fills"
@@ -667,13 +668,13 @@ expect_contains "ST-0b precondition: …and carries its approved-by: line" "$SP_
 poke_pressure "$RST" 8192 1.0 tick
 expect_eq "ST-1 the tick at current: 2 exits 0" "0" "$RC"
 expect_contains "ST-1b …says the step holds the fill" "no FILL — plan at current: 2" "$OUT"
-expect_eq "ST-1c …and offers no row" "" "$(s47_lines FILL)"
+expect_eq "ST-1c …and offers no row" "" "$(nr_fill)"
 s31_stop "$RST" "$(s31_transcript "$RST" "carry on")"
 expect_eq "ST-2 the wall at current: 2 ends the turn" "" "$(s31_decision)"
 expect_eq "ST-3 the table reader at current: 2 names no ready row" "" "$(st_ready)"
 st_at 4; forget_digest "$RST"
 poke_pressure "$RST" 8192 1.0 tick
-expect_eq "ST-4 at current: 4 the same table fills" "poker: FILL T1" "$(s47_lines FILL)"
+expect_eq "ST-4 at current: 4 the same table fills" "poker: FILL T1" "$(nr_fill)"
 s31_stop "$RST" "$(s31_transcript "$RST" "carry on")"
 expect_eq "ST-5 …the wall refuses the turn that left it" "block" "$(s31_decision)"
 expect_eq "ST-6 …and the table reader names T1" "T1" "$(st_ready)"
