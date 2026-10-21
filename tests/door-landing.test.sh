@@ -12,11 +12,14 @@
 #   §COPY    a piece that rewrites tests/lib/release-check.sh to exit 0 and commits a listed name is refused
 #            `check-failed` and nothing is merged, and the one run of the check is the target checkout's copy. A
 #            driver that lands as the verb does refuses the same; with the door's check moved into the writer's
-#            tree, the same piece publishes, so these rows can fail.
+#            tree the target's copy never runs, and with the closure test gone as well the same piece publishes, so
+#            these rows can fail.
 #   §COPY-2  a piece that replaces the check with `exit 0`, or adds one comment line to it, and plants nothing: the
 #            target's copy passes over its range, and the door still refuses it with judged-by and changed-here and
 #            the person's route, nothing merged, the target's copy the one run. A piece that changes one code file
-#            outside the closure lands, beside it.
+#            outside the closure lands, beside it, and so does one that changes a closure member outside the
+#            directory of the declared script (payload/scripts/lib/said.sh): the arm reaches the check, not the code
+#            it loads.
 #   §NAMED   the target's committed check carries a bug and a piece fixes it: the hand door refuses the fix with
 #            `judged-by=target script=<path>@<accepted head> changed-here=<path>`, says a fix to the check cannot
 #            pass its own door and names the person's route. With the arm deleted the refusal carries no field;
@@ -260,11 +263,17 @@ expect_eq "(cd1b) …and the check it ran is the target's" "pwd=$DD script=$DD/t
 : > "$DOOR_SEEN"
 door_run "$DD" env 'DOOR_MUTANT=s|cd "$co"|cd "$wt_abs"|' \
   bash "$DL_DRIVER" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$DL_PC" "door fixture"
-expect_eq "(cdm) MUTANT the check run in the writer's tree: the piece's copy judges, and the landing publishes" "0" \
+expect_contains "(cdm) MUTANT the check run in the writer tree: the mutant ran, refused by the closure test alone" \
+  "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1" "$DOOR_OUT"
+expect_eq "(cdm-a) MUTANT …and the copy the target holds never ran, so (c4) and (cd1b) read a run that is not there" "" "$(door_seen)"
+: > "$DOOR_SEEN"
+door_run "$DD" env 'DOOR_MUTANT=s|cd "$co"|cd "$wt_abs"|; s|_wt_check_judge "$co"|false "$co"|' \
+  bash "$DL_DRIVER" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$DL_PC" "door fixture"
+expect_eq "(cdm-b) MUTANT with the closure test gone as well, the copy in the piece judges and the landing publishes" "0" \
   "$DOOR_RC"
-expect_eq "(cdm-b) MUTANT …the working branch now holds the planted blob" "$DC_BLOB" \
+expect_eq "(cdm-c) MUTANT …the working branch now holds the planted blob" "$DC_BLOB" \
   "$(git -C "$DD" rev-parse "$(dl_head "$DD"):planted.txt" 2>/dev/null | cut -c1-12)"
-expect_eq "(cdm-c) MUTANT …and the target's copy never ran" "" "$(door_seen)"
+expect_eq "(cdm-d) MUTANT …and the copy the target holds never ran" "" "$(door_seen)"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§COPY-2: a piece that changes the check and plants nothing is judged by the copy the target holds and refused"
@@ -273,6 +282,7 @@ section "§COPY-2: a piece that changes the check and plants nothing is judged b
 # check the candidate carries, and a passing run of the old copy says nothing of the new one.
 DL_LIBDIR="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
 DL_CODE=payload/scripts/lib/notify.sh
+DL_LIB=payload/scripts/lib/said.sh
 # dl_copy2 <dir> <what> -> DQ, DQ_H0 a copy of its own, DL_QP the row T1's tree with <what> done and committed, the
 # target's own copy then run over the candidate's range (DQ_RC), and the sentinel emptied for the landing alone.
 dl_copy2() {
@@ -284,6 +294,7 @@ EOF
     rewrite) printf '#!/bin/bash\nexit 0\n' > "$DL_QP/tests/lib/release-check.sh" ;;
     comment) printf '# a note on the check\n' >> "$DL_QP/tests/lib/release-check.sh" ;;
     code) printf 'door_noted() { :; }\n' >> "$DL_QP/$DL_CODE" ;;
+    library) printf 'door_landed() { :; }\n' >> "$DL_QP/$DL_LIB" ;;
   esac
   dl_commit "$DL_QP" "the piece: $2" || return 1
   dl_check "$DQ" "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)"; DQ_RC="$DOOR_RC"
@@ -330,6 +341,18 @@ expect_eq "(c2-3) CONTROL the piece that changes one code file and no member of 
   "0" "$DOOR_RC"
 expect_contains "(c2-3b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
 expect_absent "(c2-3c) CONTROL …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+
+# The edge on the other side: project code the check loads, outside the directory of the declared script, keeps the
+# plain arms, so a piece that changes it lands while the copy the target holds passes.
+dl_copy2 copy2-library library
+DQ_CL="$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "$DL_DECL") )"
+expect_eq "(c2-4-0) precondition: the closure holds the library file the piece changes, and the check passes over its range" \
+  "1 0" "$(printf '%s\n' "$DQ_CL" | /usr/bin/grep -cxF "$DL_LIB") $DQ_RC"
+door_land "$DQ" "$DL_QP"
+expect_eq "(c2-4) a piece that changes a closure member outside the directory of the check lands by hand (exit 0)" \
+  "0" "$DOOR_RC"
+expect_contains "(c2-4b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
+expect_absent "(c2-4c) …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§NAMED: a landing that changes the check which judges it is refused naming the judge, the change and the route"

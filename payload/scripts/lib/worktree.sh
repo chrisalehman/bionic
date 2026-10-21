@@ -1108,6 +1108,17 @@ EOF
   [ -n "$hit" ] || return 1
   printf '%s %s\n' "${cl%%"$nl"*}" "$(printf '%s\n' "$hit" | LC_ALL=C sort | paste -sd, -)"
 }
+# Whether a changed member lies in the check script's own directory, not below it: the files that are the check
+# itself, as distinct from the project code it loads. 0 when one does; 1 otherwise.
+_wt_check_beside() {  # <script> <path>[,<path>] -> 0 | 1
+  local dir="" rest="$2," p
+  case "$1" in */*) dir="${1%/*}/" ;; esac
+  while [ -n "$rest" ]; do
+    p="${rest%%,*}"; rest="${rest#*,}"
+    case "$p" in "$dir"*) case "${p#"$dir"}" in ''|*/*) ;; *) return 0 ;; esac ;; esac
+  done
+  return 1
+}
 
 # THE PROJECT'S DECLARED CHECK, AS ONE FUNCTION (wave-28 T3; recheck Q3): factored out of
 # `worktree_land`, which calls it as before, and called by `line_publish`, read from the accepted head.
@@ -1116,7 +1127,7 @@ EOF
 # 0 when no check is declared or it passed and left nothing; 2 having refused.
 _wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <onto> [<row>] -> 0 | 2
   local root="$1" co="$2" onto_head="$3" head="$4" wt_abs="$5" branch="$6" onto="$7" row="${8:-<row>}"
-  local check_cmd check_was check_out rc left said moved fix judge
+  local check_cmd check_was check_out rc left said moved fix judge verdict
   check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
   if [ -n "$check_cmd" ]; then
     check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
@@ -1135,17 +1146,24 @@ _wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <
     # is refused for the failure, which names what it left. `land` restores nothing: the user sees
     # what the check did.
     left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
+    # A LANDING THAT CHANGES ITS OWN JUDGE. The copy that ran is the target's at the accepted head, so when the
+    # candidate's range (accepted head to candidate, never the writer's own base) changes a member of the check's
+    # closure, that run judged a check the landing replaces. When the check failed, the advice to fix what it names
+    # on the branch is wrong, since the branch may be the fix. When it passed and the range changes a file beside
+    # the declared script, the check itself, the pass says nothing of the copy every later landing meets, so the
+    # closure test is taken whatever the run returned. A change only to project code the check loads, from outside
+    # that directory, keeps the plain arms: the door would otherwise send most code landings to a person. The
+    # refusal names the copy that judged and what of it the landing changes, and the route by which a person lands
+    # a fix the door cannot judge: a merge by git, then the hand mark, whose scan runs the landed copy and says so
+    # on the row's line. The door itself never runs the candidate's copy.
+    judge="$(_wt_check_judge "$co" "$onto_head" "$head" "$check_cmd")" || judge=""
+    if [ -n "$judge" ] && { [ "$rc" -ne 0 ] || _wt_check_beside "${judge%% *}" "${judge#* }"; }; then
+      [ "$rc" -eq 0 ] || [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
+      verdict="fails over"; [ "$rc" -ne 0 ] || verdict="passes over"
+      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} judged-by=target script=${judge%% *}@${onto_head:0:12} changed-here=${judge#* } — the project's declared release-check (${check_cmd}) ${verdict} this landing's range${left:+ and left changes, named before judged-by}. It ran as the target holds it at ${onto_head:0:12}, and this landing changes that check: a landing never rewrites the check that judges it, so a fix to the check cannot pass its own door. Run this landing's copy over the same range to see whether the fix holds (cd ${wt_abs} && BIONIC_CHECK_BASE=${onto_head} BIONIC_CHECK_HEAD=${head} ${check_cmd}); if it does and the fix is wanted, a person lands it by hand: merge ${branch} into ${onto} with git, then session-poker.sh row-landed ${row} <merge> <at> --by-hand '<who>' '<why>', whose scan runs the landed copy and writes judged-by=candidate on the row's line"; return 2
+    fi
     if [ "$rc" -ne 0 ]; then
       [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
-      # A LANDING THAT CHANGES ITS OWN JUDGE. The copy that ran is the target's at the accepted head, so when the
-      # candidate's range (accepted head to candidate, never the writer's own base) changes a member of the
-      # check's closure, the advice to fix what it names on the branch is wrong: the branch may be the fix. The
-      # refusal names the copy that judged and what of it the landing changes, and the route by which a person
-      # lands a fix the door cannot judge: a merge by git, then the hand mark, whose scan runs the landed copy and
-      # says so on the row's line. The door itself never runs the candidate's copy.
-      if judge="$(_wt_check_judge "$co" "$onto_head" "$head" "$check_cmd")"; then
-        _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} judged-by=target script=${judge%% *}@${onto_head:0:12} changed-here=${judge#* } — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before judged-by}. It ran as the target holds it at ${onto_head:0:12}, and this landing changes that check: a landing never rewrites the check that judges it, so a fix to the check cannot pass its own door. Run this landing's copy over the same range to see whether the fix holds (cd ${wt_abs} && BIONIC_CHECK_BASE=${onto_head} BIONIC_CHECK_HEAD=${head} ${check_cmd}); if it does and the fix is wanted, a person lands it by hand: merge ${branch} into ${onto} with git, then session-poker.sh row-landed ${row} <merge> <at> --by-hand '<who>' '<why>', whose scan runs the landed copy and writes judged-by=candidate on the row's line"; return 2
-      fi
       _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
     fi
     if [ -n "$left" ]; then
