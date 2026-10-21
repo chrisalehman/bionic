@@ -33,7 +33,8 @@
 # §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
 # §RATIO     the page prints the release check's test-ratio line once, read from the log of the newest check proof
 # §CHECK-CHANGED the Bottom line says when the release changes a file of the declared release check's closure
-# §CARRY     a finding the run carries by its own choice is an ask on the run's register; the page records it and the reply closes it
+# §CARRY     a finding the run carries by its own choice is an ask on the run's register; the page records it, decisions
+#            or none, and the reply closes it
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -990,6 +991,21 @@ expect_eq "CARRY-3 reply all default exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_absent "CARRY-4 the reply rules the carry: it is no longer open (CARRY-1 read it open)" "$FC_CK" "$(fc_owed)"
 expect_contains "CARRY-4b …the register says the reply closed it" "|key=$FC_CK|state=closed|by=release approval reply|" "$(fc_reg)"
+# A card left with no decision still carries what it shows: its page is written, so the reply that answers it rules
+# the carry. fails-when: a decisionless card writes no page and its carry stays open.
+FC_CK2="carry:record:wave-x:structure.md:1"
+fc_record structure structure piece 'finding: 1 S3 on lib/x.sh:1 a name could be clearer'
+fc_page
+expect_eq "CARRY-5 precondition: after the reply the card renders with no decision (exit 0)" "0|None wait on you." "$FC_RC|$(fc_under Decisions)"
+expect_contains "CARRY-5b …and its render opens the new carry on the run's register" "$FC_CK2" "$(fc_owed)"
+expect_contains "CARRY-5c the decisionless card still records its page, with the carry it puts" "carried: record/wave-x/structure.md#1" \
+  "$(cat "$FC_REC/release-approval-$FC_H8-2.md" 2>/dev/null)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "CARRY-6 reply all default answers that page (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_contains "CARRY-6b …and rules its carry: the register says the reply closed it" \
+  "|key=$FC_CK2|state=closed|by=release approval reply|" "$(fc_reg)"
+fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
 
 finish

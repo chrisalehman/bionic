@@ -66,6 +66,17 @@ for g in '✓' '✗' '–' '—' '≥' '…' '·' '→' '•' '§' '“' '”' '
   expect_eq "1c.${g}: '${g}' measures 1 under LC_ALL=C" "1" "$(cols_c "$g")"
 done
 
+# THE MARKS AND THE TASK LIST'S ICONS ARE TWO COLUMNS WIDE. A terminal lays out ✅ ⬜ ✖️ ❔ ➖ as emoji, two
+# columns each; the variation selector U+FE0F after ✖ takes none. Read at their bytes they measured three (four
+# and six for ✖️), so a card line holding one folded early and a padded cell stepped left.
+section "Section 1b: the marks and icons measure two columns, the variation selector none"
+for g in '✅' '⬜' '✖️' '✖' '❔' '➖'; do
+  expect_eq "1b.${g}: '${g}' measures 2 under a UTF-8 locale" "2" "$(bionic_cols "$g")"
+  expect_eq "1bc.${g}: '${g}' measures 2 under LC_ALL=C" "2" "$(cols_c "$g")"
+done
+expect_eq "1bd: a task row measures its icon at two and each other character at one" "13" "$(cols_c "✅ 4/1: a row")"
+expect_eq "1be: a bullet row measures its bullet at one" "8" "$(cols_c "    • ab")"
+
 expect_eq "2: ASCII is measured verbatim" "5" "$(bionic_cols "abcde")"
 expect_eq "3: a mixed string counts glyphs as one each" "7" "$(cols_c "ab → cd")"
 
@@ -118,9 +129,11 @@ else
     _g="${CARD_PRINTED%"${CARD_PRINTED#?}"}"
     CARD_PRINTED="${CARD_PRINTED#?}"
     _w="$(cols_c "$_g")"
-    [ "$_w" = "1" ] || _bad="${_bad}${_bad:+ }${_g}(${_w})"
+    # The task list's icons are the two-column glyphs Section 1b pins; every other glyph is one column.
+    case "$_g" in ✅|⬜) _want=2 ;; *) _want=1 ;; esac
+    [ "$_w" = "$_want" ] || _bad="${_bad}${_bad:+ }${_g}(${_w})"
   done
-  if [ -z "$_bad" ]; then ok "5b: every glyph a card row can carry measures one column"
+  if [ -z "$_bad" ]; then ok "5b: every glyph a card row can carry measures its columns: one, two for an icon"
   else no "5b: a glyph a card row can carry is not in width.sh's closed set" "$_bad"; fi
 fi
 

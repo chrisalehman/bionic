@@ -820,7 +820,7 @@ check_artifact_resolves "68e: …the Step-1 card over this wave's own requiremen
 check_artifact_resolves "68f: …the Step-2 card over this wave's own spec" "$S2_REAL"
 check_artifact_resolves "68g: …the Step-3 card over this wave's own plan" "$S3_REAL"
 
-section "§KINDS: the release kind draws the release approval card from the facts on stdin"
+section "§KINDS: the release and sitrep kinds draw their cards from the facts their verbs gather"
 # fails-when: the release card is drawn anywhere but this renderer, a fact is dropped or reordered on the way, or a
 # fact the renderer does not know is drawn as nothing instead of refused. The sitrep kind joins this section with
 # the sitrep card.
@@ -901,8 +901,44 @@ expect_eq "KINDS-6b …and no shipped file defines or calls rr_page" "" \
   "$(cd "$REPO" && /usr/bin/grep -rn 'rr_page' hooks payload 2>/dev/null)"
 expect_eq "KINDS-6c …and the release path folds through no sitrep_fold" "" \
   "$(/usr/bin/grep -n 'sitrep_fold' "$REPO/hooks/poker/plan.sh" 2>/dev/null)"
+# The sitrep kind: the sheet is a file the verb names, the judgment comes on stdin. The full card and its check are
+# tests/sitrep-card.test.sh's; this holds that the kind is this renderer's and that no second fold is left.
+SIT_SHEET='sheet/v1 — facts for the model; the user sees the card, never this sheet
+run.release: 1.2.0
+run.wave: 3
+run.now: Tuesday 9:05 AM
+run.project: proj
+step: n=0 name=Configure state=done tasks=0
+step: n=1 name=Scope state=running tasks=1
+task: id=T1 step=1 state=running desc=the scope note=building
+metric.completed: 0 of 1 tasks (0%)
+metric.goals: none declared
+close.predicted: 11:00 AM
+close.forecast: -'
+SIT_JUDGE='call: Nothing is owed; let T1 land.
+grade: A
+point: The one task is building.
+close: Depends on T1 landing.'
+sit_card() {  # <sheet> <judgment> — sets WC_OUT, WC_RC, WC_ERR of `card.sh sitrep <sheet file>` with the judgment on stdin
+  printf '%s\n' "$1" > "${CARD_SANDBOX}/.sheet"
+  WC_RC=0
+  printf '%s\n' "$2" | bash "$CARD_SH" sitrep "${CARD_SANDBOX}/.sheet" >"${CARD_SANDBOX}/.out" 2>"${CARD_SANDBOX}/.err" || WC_RC=$?
+  WC_OUT="$(cat "${CARD_SANDBOX}/.out" 2>/dev/null)"
+  WC_ERR="$(cat "${CARD_SANDBOX}/.err" 2>/dev/null)"
+}
+sit_card "$SIT_SHEET" "$SIT_JUDGE"
+expect_eq "KINDS-7 card.sh sitrep draws the sitrep card from a sheet and a judgment (exit 0, nothing on stderr)" \
+  "0||Sitrep · proj 1.2.0 · wave 3 · Tuesday 9:05 AM" "$WC_RC|$WC_ERR|$(printf '%s\n' "$WC_OUT" | head -1)"
+expect_eq "KINDS-7b …its last section the predicted close, with no forecast to set it against" "  Predicted close|    • 11:00 AM|    • Depends on T1 landing." \
+  "$(printf '%s\n' "$WC_OUT" | tail -3 | paste -sd'|' -)"
+WC_RC=0; bash "$CARD_SH" sitrep </dev/null >"${CARD_SANDBOX}/.out" 2>/dev/null || WC_RC=$?
+expect_eq "KINDS-7c card.sh sitrep with no sheet file is the usage error, nothing drawn" "64|" "$WC_RC|$(cat "${CARD_SANDBOX}/.out")"
+KINDS_SIT="$(cd "$REPO" && /usr/bin/grep -rln 'card.sh" sitrep' hooks payload 2>/dev/null)"
+expect_eq "KINDS-8 precondition: the sitrep verb calls the sitrep kind" "hooks/poker/sitrep.sh" "$KINDS_SIT"
+expect_eq "KINDS-8b …and no shipped file defines or calls sitrep_fold, the sitrep's own fold" "" \
+  "$(cd "$REPO" && /usr/bin/grep -rn 'sitrep_fold' hooks payload 2>/dev/null)"
 
-section "§WIDTH: every line of the release and Step cards fits the shared width, and the release card folds at it"
+section "§WIDTH: every line of the release, sitrep and Step cards fits the shared width, and the release and sitrep cards fold at it"
 # fails-when: a line exceeds BIONIC_LINE_WIDTH, or the release card folds a line that fits it (the old fold at 92).
 REL_FIT="✅ evidence — auditor at abcdef12"
 while [ "$(cols "$REL_FIT")" -lt "$(( BIONIC_LINE_WIDTH - 3 ))" ]; do REL_FIT="$REL_FIT x"; done
@@ -922,6 +958,21 @@ expect_empty "WIDTH-3 no line of the release card exceeds the width" "$(over_bud
 expect_empty "WIDTH-4 nor of the Step-1, Step-2 and Step-3 cards" "$(over_budget "$S1_IT
 $S2_IT
 $S3_IT")"
+SIT_FIT="Let T1 land"
+while [ "$(cols "    • $SIT_FIT")" -lt "$(( BIONIC_LINE_WIDTH - 2 ))" ]; do SIT_FIT="$SIT_FIT x"; done
+SIT_LONG="a call that runs well past the shared width of the card, so the renderer folds it under its own text and keeps every one of its words"
+sit_card "$SIT_SHEET" "$SIT_JUDGE
+call: $SIT_FIT
+call: $SIT_LONG"
+expect_eq "WIDTH-6 precondition: the wide sitrep judgment renders (exit 0) and its fitting row is wider than 92 columns" "0|yes" \
+  "$WC_RC|$([ "$(cols "    • $SIT_FIT")" -gt 92 ] && echo yes)"
+expect_eq "WIDTH-6b a sitrep row that fits the shared width prints whole on one line" "1" \
+  "$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -cxF "    • $SIT_FIT")"
+SIT_FOLD="$(printf '%s\n' "$WC_OUT" | awk '/^    • a call that/ { f = 1; print; next } f && /^      [^ ]/ { print; next } { f = 0 }')"
+expect_eq "WIDTH-6c a wider one folds under its own text, six columns in, its words all kept" \
+  "$SIT_LONG" "$(printf '%s\n' "$SIT_FOLD" | sed 's/^    • //; s/^      //' | paste -sd' ' -)"
+expect_eq "WIDTH-6d …on more than one line" "yes" "$([ "$(printf '%s\n' "$SIT_FOLD" | /usr/bin/grep -c .)" -gt 1 ] && echo yes)"
+expect_empty "WIDTH-6e no line of the sitrep card exceeds the width" "$(over_budget "$WC_OUT")"
 expect_nonempty "WIDTH-5 precondition: the renderer folds at the shared width" \
   "$(/usr/bin/grep -n 'BIONIC_LINE_WIDTH' "$CARD_SH")"
 expect_eq "WIDTH-5b …and holds no 92" "" "$(/usr/bin/grep -nw '92' "$CARD_SH")"
