@@ -2417,11 +2417,12 @@ BRF_EOF
   #   Decisions     numbered, the recommendation first and the default second, then the reply line
   #
   # WHAT IS A DECISION. Every approval an open row reads that is not yet given; every question waiver the person
-  # owes; every matrix row neither proved nor waived (only the user waives a criterion); and a finding only when the
-  # orchestrator recommends against the policy's default, `--against finding:<record>#<n>`. Every other finding
-  # follows the policy by severity and is a line under Findings; one that names a criterion put as a decision waits
-  # on that decision. A decision has two choices, its default and the other one; the recommendation is the default
-  # unless `--against <key>` names it. The regression is never a decision: a head without a green whole run is early.
+  # owes; every matrix row neither proved nor waived (only the user waives a criterion, or confirms a T4 row's own
+  # check); and a finding only when the orchestrator recommends against the policy's default,
+  # `--against finding:<record>#<n>`. Every other finding follows the policy by severity and is a line under
+  # Findings; one that names a criterion put as a decision waits on that decision. A decision has two choices, its
+  # default and the other one; the recommendation is the default unless `--against <key>` names it. The regression
+  # is never a decision: a head without a green whole run is early.
   #
   # THE ACTING RENDER. On the session's bound run, when `card.sh early` holds, the page is printed, each approval and
   # waiver it puts is opened on the person's ledger, and the page is written beside the run's records as
@@ -2447,16 +2448,31 @@ BRF_EOF
     printf '%s' "$v"
   }
 
-  rr_rows() {  # <plan> -> `<AC><TAB><status><TAB><auditor>` per matrix row, table order
-    awk -F'|' '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
-      inm && /^[ \t]*\|/ {
-        a = $2; s = $4; u = $6; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", u)
-        if (a == "" || a == "AC" || a ~ /^-+$/) next
-        printf "%s\t%s\t%s\n", a, s, (u == "" ? "-" : u)
-      }' "$1"
+  # rr_rows <plan> -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0>` per five-cell matrix row, table order.
+  # THE RULING IS walls.sh's: each row is read by its readers (`matrix_section`, `matrix_block`, `user_confirmed_value`,
+  # `matrix_row_waiver`) and judged by `matrix_row_ruled`, sourced in a subshell as the facts judge sources it, so the
+  # card and the gate cannot answer one row two ways. The auditor cell is printed as `placeholder_cell` folds it, `-`
+  # when it means none, so `—`, `-`, `n/a` and an empty cell read alike. Exit 2 when walls.sh cannot be loaded: the
+  # card never guesses a ruling.
+  rr_rows() {
+    [ -f "$BIONIC_LIB/walls.sh" ] || return 2
+    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 || exit 2
+      PLAN="$1"; MATRIX="$(matrix_section)"
+      while IFS=$'\037' read -r ac tier status ev aud; do
+        [ -n "$ac" ] || continue
+        block="$(matrix_block "$ac")"
+        waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
+        ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" && ruled=1
+        aud="$(placeholder_cell "$aud")"
+        printf '%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled"
+      done <<RR_MATRIX
+$(awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
+    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
+    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
+    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
+  }' <<< "$MATRIX")
+RR_MATRIX
+    )
   }
 
   rr_block_key() {  # <plan> <AC> <key> -> the first value of <key>: in the AC's block, or nothing
@@ -2536,7 +2552,7 @@ BRF_EOF
 
   rr_page() {  # -> the page on stdout, from the RR_* facts the verb gathered; every line through sitrep_fold
     local i k p l g n t sub lab
-    local -a ph=() ap=() wv=() rn=()
+    local -a ph=() ap=() cf=() wv=() rn=()
     {
       printf '0\tRelease approval · %s%s · %s · head %s%s\n' "$RR_PROJ" "${RR_REL:+ $RR_REL}" \
         "$(sitrep_date "$(sitrep_now)" '%A %-I:%M %p')" "$RR_H8" \
@@ -2572,11 +2588,17 @@ RR_ASIDE_EOF
         # One phrase per decision, the rows' said once per choice over their criteria, the approvals given last.
         for ((i = 0; i < RR_N; i++)); do
           if [ "${RR_KIND[$i]}" = approve ] && [ "${RR_PICK[$i]}" = default ]; then ap[${#ap[@]}]="${RR_KEY[$i]#approve:}"
-          elif [ "${RR_KIND[$i]}" = row ] && [ "${RR_PICK[$i]}" = default ]; then wv[${#wv[@]}]="${RR_KEY[$i]#row:}"
-          elif [ "${RR_KIND[$i]}" = row ]; then rn[${#rn[@]}]="${RR_KEY[$i]#row:}"
+          elif [ "${RR_KIND[$i]}" = row ]; then
+            if [ "${RR_PICK[$i]}" = default ]; then p="${RR_DPH[$i]}"; else p="${RR_OPH[$i]}"; fi
+            case "${p%% *}" in
+              confirm) cf[${#cf[@]}]="${RR_KEY[$i]#row:}" ;;
+              waive) wv[${#wv[@]}]="${RR_KEY[$i]#row:}" ;;
+              *) rn[${#rn[@]}]="${RR_KEY[$i]#row:}" ;;
+            esac
           elif [ "${RR_PICK[$i]}" = default ]; then ph[${#ph[@]}]="${RR_DPH[$i]}"
           else ph[${#ph[@]}]="${RR_OPH[$i]}"; fi
           if [ "${RR_KIND[$i]}" = row ] && { [ "$((i + 1))" -eq "$RR_N" ] || [ "${RR_KIND[$((i + 1))]}" != row ]; }; then
+            [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(sitrep_list 6 "${cf[@]}")"
             [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(sitrep_list 6 "${wv[@]}")"
             [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(sitrep_list 6 "${rn[@]}")"
           fi
@@ -2656,7 +2678,7 @@ RR_ASIDE_EOF
   }
 
   poker_verb_release_approval() {
-    local nm line key reply ac st au wl why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind
+    local nm line key reply ac tier st au ruled why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -2722,30 +2744,50 @@ RR_OWED
 $RR_WAIVE
 RR_WAIVES
 
-    # ROWS: every matrix row; a decision when neither proved (discharged, CONFIRMED) nor waived on its waiver: line.
-    RR_ACT=0; RR_ACP=0; RR_ACW=0; RR_ACU=0; RR_ACR=0; RR_MISS=""
-    while IFS='	' read -r ac st au; do
+    # ROWS: every matrix row, ruled or not as walls.sh rules it (rr_rows). Proved when discharged and ruled, and a T4 row
+    # so ruled under an empty-like auditor cell is one the user confirmed; waived when ruled with status waived. Every
+    # other row is a decision: a discharged T4 row under an empty-like cell is the user's own check, to confirm
+    # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words.
+    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_MISS=""
+    if ! RR_ROWS="$(rr_rows "$PV_PLAN")"; then
+      die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded; nothing is written."
+      exit 2
+    fi
+    while IFS=$'\037' read -r ac tier st au ruled; do
       [ -n "$ac" ] || continue
       RR_ACT=$((RR_ACT + 1))
-      if [ "$st" = discharged ] && [ "$au" = CONFIRMED ]; then RR_ACP=$((RR_ACP + 1)); continue; fi
-      wl="$(rr_block_key "$PV_PLAN" "$ac" waiver)"
-      if [ "$st" = waived ] && [ -n "$wl" ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
-      if [ "$st" = discharged ]; then RR_ACU=$((RR_ACU + 1)); else RR_ACR=$((RR_ACR + 1)); fi
+      if [ "$ruled" = 1 ] && [ "$st" = discharged ]; then
+        RR_ACP=$((RR_ACP + 1))
+        [ "$tier" != T4 ] || [ "$au" != - ] || RR_ACY=$((RR_ACY + 1))
+        continue
+      fi
+      if [ "$ruled" = 1 ] && [ "$st" = waived ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
+      if [ "$tier" = T4 ] && [ "$au" = - ] && [ "$st" = discharged ]; then
+        RR_ACA=$((RR_ACA + 1))
+        rr_add row "row:$ac" "confirm-row $ac" "waive-row $ac" "a T4 criterion, the user's own check" \
+          "$ac, your own check, not confirmed yet" confirm waive "confirm $ac" "waive $ac"
+        continue
+      fi
+      if [ "$st" = discharged ]; then RR_ACU=$((RR_ACU + 1)); else RR_ACR=$((RR_ACR + 1)); fi
       why="$(rr_block_key "$PV_PLAN" "$ac" reason)"
       if [ -z "$why" ]; then
-        if [ "$st" = discharged ]; then why="not confirmed by the auditor on this release"; else why="not run on this release"; fi
+        if [ "$st" != discharged ]; then why="not run on this release"
+        elif [ "$tier" = T4 ] && [ "$au" != - ]; then why="the auditor's finding stands ($au)"
+        else why="not confirmed by the auditor on this release"; fi
       fi
       rr_add row "row:$ac" "waive-row $ac" "-" "$why" "$ac, $why" waive "run it" "waive $ac" "run $ac"
-    done <<RR_ROWS
-$(rr_rows "$PV_PLAN")
-RR_ROWS
+    done <<RR_ROWS_EOF
+$RR_ROWS
+RR_ROWS_EOF
     if [ "$RR_ACT" -eq 0 ]; then
       RR_TACC="❔ acceptance — the matrix holds no criterion"
     else
       line=""
-      [ "$RR_ACW" -eq 0 ] || line="$RR_ACW waived by you"
+      [ "$RR_ACY" -eq 0 ] || line="$RR_ACY confirmed by you"
+      [ "$RR_ACW" -eq 0 ] || line="${line:+$line, }$RR_ACW waived by you"
       [ "$RR_ACU" -eq 0 ] || line="${line:+$line, }$RR_ACU not confirmed by the auditor"
+      [ "$RR_ACA" -eq 0 ] || line="${line:+$line, }$RR_ACA awaiting your confirmation"
       [ "$RR_ACR" -eq 0 ] || line="${line:+$line, }$RR_ACR not run"
       if [ -z "$RR_MISS" ]; then RR_TACC="✅"; else RR_TACC="✖️"; fi
       RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
