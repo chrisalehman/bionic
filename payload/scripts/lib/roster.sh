@@ -966,15 +966,16 @@ ruling_stamp() {  # <roster> <id> <writer> <key=value>...
 # THE PAGE CLOSES WHERE THE RULING IS READ (wave-34 T4; REQ-3 AC-3.1, D13). The tick's backstop opens
 # `ruling:<id>` on the person's ledger for a ruling a writer ended without reading; whoever then shows
 # it (the ack, a successor's commit, `ready` or `deliver`) has read it, so the item closes with the
-# stamp. The ledger is the roster's sibling, `owed-<sid>.state` beside `roster-<sid>.state`, and
-# lib/owed.sh is loaded only when that ledger holds the item open.
+# stamp. The ledger is wherever lib/owed.sh files the session's asks (the register of the run it is bound to, else
+# its own file beside `roster-<sid>.state`), so the item is looked for through `owed_list`, and lib/owed.sh is
+# loaded only for a roster that names a session.
 ruling_page_close() {  # <roster> <id>
   local f="${1:-}" base sid root
   case "$f" in */.bionic/tmp/roster-?*.state) ;; *) return 0 ;; esac
   base="${f##*/}"; sid="${base#roster-}"; sid="${sid%.state}"; root="${f%/.bionic/tmp/*}"
-  /usr/bin/grep -qF "|key=ruling:${2:-}|state=open|" "$root/.bionic/tmp/owed-$sid.state" 2>/dev/null || return 0
   declare -F owed_close >/dev/null 2>&1 || { [ -r "$_RULING_LIB_DIR/owed.sh" ] && . "$_RULING_LIB_DIR/owed.sh"; } 2>/dev/null
   declare -F owed_close >/dev/null 2>&1 || return 0
+  [ -n "$(OWED_ROOT="$root" OWED_SID="$sid" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep -xF "ruling:${2:-}")" ] || return 0
   OWED_ROOT="$root" OWED_SID="$sid" owed_close "ruling:$2" "ruling read" >/dev/null 2>&1
   return 0
 }

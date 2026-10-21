@@ -598,6 +598,9 @@ ru_poke() {  # <verb args...> -> RU_OUT (both streams), RU_RC of session-poker.s
     CLAUDE_PROJECT_DIR= bash "$RU_POKER" "$@" 2>&1 )"; RU_RC=$?
 }
 ru_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null | cut -f1 | sort | paste -sd, -; }
+# ru_owed_clear -> the store the session's asks are filed in, as ru_owed reads it (the run's register when the session is
+# bound), removed
+ru_owed_clear() { rm -f "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null)"; }
 RU_CONFIRM='Dana 2026-10-20 opened the page and read the line back'
 
 # §VERDICT-1 — a REFUTED row with no waiver is a verdict: the advance to 6 takes it.
@@ -616,7 +619,7 @@ ru_poke current 6 --check
 expect_eq "VERDICT-3: a confirmed T4 row under UNVERIFIABLE — current 6 --check passes" "0" "$RU_RC"
 
 # §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens its row item.
-rm -f "$R_RU/.bionic/tmp/owed-$SID.state"
+ru_owed_clear
 ru_put 7 'T1 | discharged | see AC-2 | REFUTED'
 ru_poke current 8 --check
 expect_eq "RULED-1: an unruled REFUTED row — current 8 --check refuses" "1" "$RU_RC"
@@ -677,7 +680,7 @@ expect_contains "PT-1b: …saying it would advance" "current 6 --check: would ad
 ru_plan 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING" | sed 's/^current: 7$/current: 6/' > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
 ru_poke current 7 --check
 expect_eq "PT-2: the same row — current 7 --check passes" "0" "$RU_RC"
-rm -f "$R_RU/.bionic/tmp/owed-$SID.state"
+ru_owed_clear
 ru_put 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
 ru_poke current 8 --check
 expect_eq "PT-3: the same row — current 8 --check refuses" "1" "$RU_RC"
