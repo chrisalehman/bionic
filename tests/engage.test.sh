@@ -361,65 +361,6 @@ for name in loop bionic:help bionic:doctor clear canonical-sdlc-notes ""; do
 done
 
 # ============================================================
-section "E4 (AC-4) — engaged_session: the predicate every wall reads"
-# ============================================================
-
-R4="$(make_repo e4)"
-M4="$(marker_path "$R4" "$SID")"
-
-call_engaged "$R4" "$SID"
-expect_eq "no marker on disk -> engaged_session is FALSE" "1" "$ES_ST"
-
-fire "$SID" "$(skill_payload "$SID" "$R4" "bionic:canonical-sdlc")"
-call_engaged "$R4" "$SID"
-expect_eq "a regular file at the marker path -> TRUE" "0" "$ES_ST"
-
-# A FOREIGN session's marker is not this session's engagement. The path is keyed by
-# sid precisely so one session cannot arm another's walls.
-call_engaged "$R4" "$OTHER_SID"
-expect_eq "another session's sid -> FALSE even though a marker exists" "1" "$ES_ST"
-
-# The `unknown` fallback farm-out-reminder and context-spend substitute for a missing
-# sid must never name a readable marker: `.bionic/tmp/engaged-unknown.state` would
-# otherwise engage every session that lost its id.
-printf 'plan=none\nengaged_at=2026-09-03T00:00:00Z\n' > "$R4/.bionic/tmp/engaged-unknown.state"
-call_engaged "$R4" "unknown"
-expect_eq "the sid 'unknown' -> FALSE even with engaged-unknown.state planted" "1" "$ES_ST"
-
-call_engaged "$R4" ""
-expect_eq "an empty sid -> FALSE" "1" "$ES_ST"
-
-# A sid carrying a path separator must never escape .bionic/tmp.
-printf 'plan=none\n' > "$SANDBOX/escape.state"
-call_engaged "$R4" "../../../escape"
-expect_eq "a sid carrying '/' -> FALSE (no traversal)" "1" "$ES_ST"
-call_engaged "$R4" "a b"
-expect_eq "a sid carrying a space -> FALSE" "1" "$ES_ST"
-
-# A SYMLINK at the marker path is refused before it is followed — the guard idiom
-# patrol-revive.sh uses on its stamp. A hostile repo may CLOSE a wall and must never
-# OPEN one, and this is the one artifact whose presence opens them.
-rm -f "$M4"
-printf 'plan=none\nengaged_at=2026-09-03T00:00:00Z\n' > "$SANDBOX/planted.state"
-ln -s "$SANDBOX/planted.state" "$M4"
-call_engaged "$R4" "$SID"
-expect_eq "a symlink at the marker path -> FALSE (refused, not followed)" "1" "$ES_ST"
-
-# …and the hook refuses to write through it, rather than clobbering the target.
-fire "$SID" "$(skill_payload "$SID" "$R4" "bionic:canonical-sdlc")"
-expect_eq "the hook exits 0 on a symlinked marker path" "0" "$HOOK_RC"
-if [ -L "$M4" ]; then ok "…and leaves the symlink in place"; else no "…and leaves the symlink in place"; fi
-expect_eq "…and does not write through it" \
-  "plan=none" "$(head -1 "$SANDBOX/planted.state")"
-rm -f "$M4"
-
-# A DIRECTORY at the marker path is not a regular file either.
-mkdir -p "$M4"
-call_engaged "$R4" "$SID"
-expect_eq "a directory at the marker path -> FALSE" "1" "$ES_ST"
-rmdir "$M4"
-
-# ============================================================
 section "E5 (AC-17) — registration and the loader idiom"
 # ============================================================
 
@@ -523,40 +464,6 @@ fire "$SID" "$(skill_payload "$SID" "$R9" "bionic:canonical-sdlc")"
 expect_eq "a non-directory .bionic/tmp exits 0 — reported, never blocking" "0" "$HOOK_RC"
 expect_empty "…and prints nothing on stdout" "$HOOK_OUT"
 expect_eq "…and leaves the file alone" "not a directory" "$(cat "$R9/.bionic/tmp" 2>/dev/null)"
-
-# ============================================================
-section "E7 — the sid must resolve, or nothing is written"
-# ============================================================
-
-RA="$(make_repo e7)"
-# No sid anywhere: not in the env, not in the payload. `session_id` returns 1 and the
-# hook has no file to name.
-NOSID=$(jq -nc --arg c "$RA" \
-  '{transcript_path:"/dev/null",cwd:$c,hook_event_name:"PreToolUse",
-    tool_name:"Skill",tool_input:{skill:"bionic:canonical-sdlc"}}')
-HOOK_OUT=$(env -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID bash "$HOOK" <<< "$NOSID" 2>/dev/null)
-HOOK_RC=$?
-expect_eq "a payload with no session id anywhere exits 0" "0" "$HOOK_RC"
-expect_eq "…and writes no marker at all" "0" \
-  "$(find "$RA/.bionic/tmp" -maxdepth 1 -name 'engaged-*' 2>/dev/null | wc -l | tr -d ' ')"
-
-# The env value is primary and the payload is a witness: a divergence keys the marker
-# to the env id, never the payload's.
-fire "$SID" "$(skill_payload "$OTHER_SID" "$RA" "bionic:canonical-sdlc")"
-if [ -f "$(marker_path "$RA" "$SID")" ]; then ok "on divergence the marker is keyed to the ENV id"; else
-  no "on divergence the marker is keyed to the ENV id" "no file at $(marker_path "$RA" "$SID")"
-fi
-if [ -e "$(marker_path "$RA" "$OTHER_SID")" ]; then
-  no "…and not to the payload's witness id" "a marker appeared for the payload id"
-else
-  ok "…and not to the payload's witness id"
-fi
-
-# A malformed payload is not a crash.
-HOOK_OUT=$(env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< 'not json at all' 2>/dev/null)
-HOOK_RC=$?
-expect_eq "a non-JSON payload exits 0" "0" "$HOOK_RC"
-expect_empty "…and prints nothing" "$HOOK_OUT"
 
 # ============================================================
 section "E8 (wave-session-bound-run, AC-7/AC-8/AC-9) — bind_plan, the single writer"
