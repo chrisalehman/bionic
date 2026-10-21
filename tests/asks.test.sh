@@ -11,8 +11,9 @@
 # §ONE-REGISTER  a close-out preflight's `waive:` reaches the plan's register; a bound session reads it as its own;
 #                closed in one session, closed for all; an ask with no run, or under a name that is no plan, stays
 #                with its session
-# §HELD          a close-out refused at Step 8 holds the merge, `hold:merge`, its reason the title, from `run` and from
-#                `check` alike; a refusal before Step 8 holds nothing; the run that delivers closes it
+# §HELD          a close-out refused at Step 8 holds the merge, `hold:merge`, titled `merge held: <what holds it>` in a
+#                person's words, the refusal its reply, from `run` and from `check` alike; a refusal before Step 8
+#                holds nothing; the run that delivers closes it
 # §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
@@ -155,7 +156,7 @@ as_refusal() { printf '%s\n' "$CO_OUT" | sed -n 's/^bionic: close-out refused �
 as_has() { case "$1" in *"$2"*) echo yes ;; esac; }  # <haystack> <needle> -> yes when it holds it
 
 # ============================================================
-section "§HELD: a close-out refused at Step 8 holds the merge on the run's register, its reason the title; the run that delivers closes it"
+section "§HELD: a close-out refused at Step 8 holds the merge on the run's register, titled what holds it, the refusal its reply; the run that delivers closes it"
 # ============================================================
 # fails-when: a refused close-out leaves no held merge on the sheet (the plan's register, read by owed_list_plan).
 # A refusal before Step 8 is a run not yet at its merge, so it holds nothing: the same fixture, advanced, then holds.
@@ -172,10 +173,15 @@ PH_WHY="$(as_refusal)"
 expect_eq "HELD-1 at Step 8 run refuses on the failing reading (rc 2), naming a reason" "2|yes" "$CO_RC|$([ -n "$PH_WHY" ] && echo yes)"
 expect_eq "HELD-2 the refusal opens hold:merge on the plan's register (HELD-0b read the same extractor empty)" \
   "hold:merge" "$(as_register "$PH" "$PH_PLAN")"
-expect_eq "HELD-3 …its title the refusal's reason, as close-out printed it" "$PH_WHY" "$(as_ask "$PH" "$PH_PLAN" hold:merge 3)"
+PH_TITLE="$(as_ask "$PH" "$PH_PLAN" hold:merge 3)"
+expect_eq "HELD-3 …its title the reason in product words: what holds the merge, not the refusal" \
+  "merge held: the structure review failed" "$PH_TITLE"
+expect_eq "HELD-3c …no hash, no function, no instruction in it: the refusal names all three, the title none" \
+  "yes|yes|yes||||" \
+  "$([ -n "$(printf '%s' "$PH_WHY" | /usr/bin/grep -oE '[0-9a-f]{40}')" ] && echo yes)|$(as_has "$PH_WHY" facts_state)|$(as_has "$PH_WHY" proof-add)|$(printf '%s' "$PH_TITLE" | /usr/bin/grep -oE '[0-9a-f]{7,}')|$(as_has "$PH_TITLE" facts_state)|$(as_has "$PH_TITLE" proof-add)|$(as_has "$PH_TITLE" 'nothing was done')"
 expect_eq "HELD-3b …its reply the refusal's whole line" "bionic: close-out refused — $PH_WHY" "$(as_ask "$PH" "$PH_PLAN" hold:merge 4)"
 run_close_as "$AS_SIDA" "$PH" run
-expect_eq "HELD-4 refused again for the same reason: one ask, the title unchanged" "hold:merge|$PH_WHY" \
+expect_eq "HELD-4 refused again for the same reason: one ask, the title unchanged" "hold:merge|$PH_TITLE" \
   "$(as_register "$PH" "$PH_PLAN")|$(as_ask "$PH" "$PH_PLAN" hold:merge 3)"
 
 PK="$(mk_fixture as-held-check)"; advance_to "$PK" 8
@@ -184,8 +190,11 @@ as_reading "$PK" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-fail.md f
 run_close_as "$AS_SIDA" "$PK" check
 PK_WHY="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -m1 'WOULD REFUSE')"
 expect_eq "HELD-5 check at Step 8 reports a refusal (rc 0, a WOULD REFUSE line)" "0|yes" "$CO_RC|$([ -n "$PK_WHY" ] && echo yes)"
-expect_eq "HELD-6 …and holds the merge, its title the first refusal check reports" "hold:merge|$PK_WHY" \
+expect_eq "HELD-6 …and holds the merge, its title what the first refusal check reports holds it" \
+  "hold:merge|merge held: the structure review failed" \
   "$(as_register "$PK" "$PK_PLAN" | tr ' ' '\n' | /usr/bin/grep -x hold:merge)|$(as_ask "$PK" "$PK_PLAN" hold:merge 3)"
+expect_eq "HELD-6b …its reply that refusal, as check printed it" "close-out check: ${PK_WHY#"${PK_WHY%%[! ]*}"}" \
+  "$(as_ask "$PK" "$PK_PLAN" hold:merge 4)"
 
 # The reading is read again and passes: the next run delivers, and the merge it held is closed for the run.
 as_reading "$PH" 2026-10-04T14:00:00Z record/wave-01-fixture/structure-pass.md pass
