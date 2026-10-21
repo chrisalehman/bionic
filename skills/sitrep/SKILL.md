@@ -45,7 +45,7 @@ Bottom line
 - You owe <what, or nothing now>.
 - Next: <tasks in flight; blocked; then the next ones>.
 - Done: <steps and tasks, the last one at its time>.
-- Close: <about a time, or why there is none>.
+- Close: not before <floor> · likely <clock> (<whose pace>), or why there is none.
 
 Task list
 <glyph> <step>: <name> (<time>), or — <state>
@@ -61,9 +61,6 @@ Score: <grade> (graded <time>)
 
 Blocked on you
 - <what to do>: <what waits on it>
-
-Predicted close
-- <the close, its basis and the pace, or why there is none>
 ```
 
 ## The rules
