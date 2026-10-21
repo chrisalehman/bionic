@@ -853,8 +853,8 @@ sr_bind
 printf '# Design ledger — wave-02-fx\n\n## Δ0 — D19 put (orchestrator 2026-10-20 6:44 AM PDT): the regression rule the judge holds\n\nAnswered now or in an hour.\n' > "$SR_DIR/design-ledger.md"
 sr_run "$SR_PLAN"
 expect_eq "OD1 one put with no ruling: You owe counts it" "- You owe 1: reply to D19." "$(sr_line '- You owe')"
-expect_eq "OD2 …Blocked on you prints one sentence with its number, its title and the reply asked" \
-  "- D19 · the regression rule the judge holds: reply with the option number" "$(sr_sect 'Blocked on you' | sr_join)"
+expect_eq "OD2 …Blocked on you prints one sentence with its number, its title, the reply asked and its wait line" \
+  "- D19 · the regression rule the judge holds: reply with the option number. Answered now or in an hour." "$(sr_sect 'Blocked on you' | sr_join)"
 sr_run --line "$SR_PLAN"
 expect_eq "OD3 …the one-line form's owed number counts it" "owed: 1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'owed: [0-9]+')"
 printf '\n## Δ1 — D19 ruled "2" (Chris Lehman 2026-10-20): the regression rule the judge holds\n' >> "$SR_DIR/design-ledger.md"
@@ -862,5 +862,119 @@ sr_run "$SR_PLAN"
 expect_eq "OD4 the same decision ruled: the page owes nothing and says so, and the decisions line reads it ruled" \
   "- You owe nothing now.|- Nothing: no decision or action is owed by you.|yes" \
   "$(sr_line '- You owe')|$(sr_sect 'Blocked on you' | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'decisions — 1 ruled in 1 round;' && echo yes)"
+
+
+# ============================================================
+section "§DECISIONS: every decision put and not ruled is on the page with its wait line, and every landed reading with its result, one line each"
+# ============================================================
+# FIXTURE FIDELITY: the put heading and the wait line under it in the shape `decisions put` writes them, and the
+# reading lines in the shape `proof-add review` writes them under ## SDLC State. fails-when: the open decision, its
+# wait line, or a reading's result is absent from the page.
+SR_D_WAIT="Answered now or in an hour, nothing moves: no task waits on it."
+sr_ledger_put() {  # <D<n>> <title> <wait line> -> the run's design ledger holds one put of it, nothing ruled
+  printf '# Design ledger — wave-02-fx\n\n## Δ0 — %s put (orchestrator 2026-10-06 1:30 PM PDT): %s\n\n%s\n' "$1" "$2" "$3" > "$SR_DIR/design-ledger.md"
+}
+sr_readings() {  # -> two readings landed on the plan: the evidence reading of the whole failing, the adversarial one of a piece passing
+  awk -v h="$SR_H" '{ print } /^current: [0-9]+$/ {
+    print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/auditor-evidence.md question=evidence reader=w-T20 result=fail scope=whole"
+    print "proved: kind=review head=" h " at=2026-10-06T20:05:00Z evidence=record/wave-02-fx/critic-adversarial.md question=adversarial reader=w-T21 result=pass scope=piece" }' \
+    "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+}
+sr_world decisions "6 6 12 12"
+sr_bind
+sr_ledger_put D21 "the gate the judge holds" "$SR_D_WAIT"
+sr_readings
+sr_run "$SR_PLAN"
+expect_eq "DE1 the open decision is one bullet under Blocked on you: its number, its title, the reply asked, then its wait line" \
+  "- D21 · the gate the judge holds: reply with the option number. $SR_D_WAIT" "$(sr_sect 'Blocked on you' | /usr/bin/grep 'D21')"
+expect_eq "DE2 each landed reading is one line of the Score with its result in words, the failing one first as the plan has it" \
+  "$SR_MARK_OVER reading — evidence on the whole: failed at 1:00 PM|$SR_MARK_WITHIN reading — adversarial on a piece: passed at 1:05 PM" \
+  "$(sr_sect 'Score: .*' | /usr/bin/grep -E '^[^ ]+ reading — ' | sr_join)"
+printf '\n## Δ1 — D21 ruled "1" (Chris Lehman 2026-10-06): the gate the judge holds\n' >> "$SR_DIR/design-ledger.md"
+sr_run "$SR_PLAN"
+expect_eq "DE3 the decision ruled: Blocked on you no longer names it and says nothing is owed, while both readings still print" \
+  "- Nothing: no decision or action is owed by you.|2" \
+  "$(sr_sect 'Blocked on you' | sr_join)|$(sr_sect 'Score: .*' | /usr/bin/grep -cE '^[^ ]+ reading — ')"
+
+# ============================================================
+section "§RECAP: the resume recap reads the same open decisions and readings through the same reader as the page"
+# ============================================================
+# The handoff document in the shape the handoff verb writes its first lines (its kind line, resume point, written,
+# plan, working branch), read by the real resume verb. fails-when: the recap prints "open: none" while the ledger
+# holds an unruled put.
+sr_handoff() {  # -> SR_HF, a handoff document naming this world's plan
+  SR_HF="$SR_REPO/.bionic/handoffs/handoff.md"; mkdir -p "${SR_HF%/*}"
+  printf 'bionic-handoff/v1\nresume point: Step 4, the build in flight\nwritten: 2026-10-06 2:00 PM PDT\nplan: %s\nworking branch: wave/02-fx\n' \
+    "${SR_PLAN#"$SR_REPO"/}" > "$SR_HF"
+}
+sr_recap() {  # -> RECAP, the recap file the resume verb wrote, after resuming from SR_HF
+  sr_poke resume "$SR_HF" > "$TMPROOT/rs.out" 2> "$TMPROOT/rs.err"; RC=$?
+  RECAP="$(cat "$SR_DIR/resume-recap.md" 2>/dev/null)"
+}
+sr_world recap "6 6 12 12"
+sr_bind
+sr_ledger_put D21 "the gate the judge holds" "$SR_D_WAIT"
+sr_readings
+sr_handoff
+sr_recap
+expect_eq "RC1 resume exits 0 and the recap names the open decision with its title and wait line, and no open: none" \
+  "0|open: D21 — the gate the judge holds: reply with the option number. $SR_D_WAIT|0" \
+  "$RC|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^open: D21 ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: none')"
+expect_eq "RC2 …and each landed reading with its result, in the page's words" \
+  "reading: evidence on the whole: failed at 1:00 PM|reading: adversarial on a piece: passed at 1:05 PM" \
+  "$(printf '%s\n' "$RECAP" | /usr/bin/grep '^reading: ' | sr_join)"
+printf '\n## Δ1 — D21 ruled "1" (Chris Lehman 2026-10-06): the gate the judge holds\n' >> "$SR_DIR/design-ledger.md"
+sr_recap
+expect_eq "RC3 the decision ruled: no open: line names it while the tick's approvals still read open, and the recap lists it settled" \
+  "0|2|settled: D21 · \"1\" · Chris Lehman 2026-10-06 · the gate the judge holds" \
+  "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: approve:')|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^settled: D21')"
+
+# ============================================================
+section "§ONCE: a decision a row waits on is owed once, not as the tick's approval item and the page's decision item both"
+# ============================================================
+# The real tick opens the owed item for the row's approval read; the real approve verb closes it. fails-when: You owe
+# counts the decision twice, or the recap names it on two lines.
+SR_D_ROW="$(sr_row T20 "Decision-gated row · complexity: standard" approval:D21 30 pending)"
+sr_tick_world once "6 6 12 12"
+awk -v r="$SR_D_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+# the approve verb dry-commits the plan through the commit gate, which reads the declared SDLC version
+sed -i.bak 's/^wave: wave-02-fx$/&\
+canonical_sdlc_version: 14/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_ledger_put D21 "the gate the judge holds" "Answered in an hour rather than now, T20 starts an hour later and the predicted close holds: it is off the longest chain."
+sr_tick
+expect_eq "ON0 precondition: the tick says T20 waits on approval:D21 and opens an item for it on the person's ledger" "yes|1" \
+  "$(/usr/bin/grep -q '^poker: WAIT T20 — approval:D21$' "$TMPROOT/tick.out" && echo yes)|$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REPO/.bionic/tmp/owed-$SID.state")"
+sr_run "$SR_PLAN"
+expect_eq "ON1 You owe counts the decision once, beside the two approvals the tick opened" \
+  "- You owe 3: approve release, approve merge and reply to D21." "$(sr_line '- You owe')"
+expect_eq "ON2 …Blocked on you names D21 on one bullet, the decision's own" "1|yes" \
+  "$(sr_sect 'Blocked on you' | /usr/bin/grep -c 'D21')|$(sr_sect 'Blocked on you' | /usr/bin/grep -q '^- D21 · the gate the judge holds: reply with the option number\. ' && echo yes)"
+expect_eq "ON3 …and the row waiting on it is blocked on the person" "yes" \
+  "$(sr_rows | /usr/bin/grep -q '^⛔ 4/T20: ' && echo yes)"
+sr_handoff
+sr_recap
+expect_eq "ON4 the recap names D21 on one open: line and owes no second approval line for it" "1|0" \
+  "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^owned-by-user: approval:D21')"
+sr_poke approve D21 "1" >/dev/null 2>&1
+expect_eq "ON5 the approve verb closes the tick's item: nothing for D21 is left open on the person's ledger" "0" \
+  "$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REPO/.bionic/tmp/owed-$SID.state")"
+
+# ============================================================
+section "§TITLE: the title says the step of nine, and the step the work stands at when a landed or active task is ahead of it"
+# ============================================================
+# fails-when: a plan at current: 5 with an active step-7 task prints step 5 alone, or an agreeing plan prints the clause.
+sr_title() { sr_page | head -1 | /usr/bin/grep -oE 'step [0-9]+ of 9( · work at step [0-9]+ \([^)]*\))?'; }
+sr_world title-ahead "6 6 12 12"
+sed -i.bak -e 's/^current: 4$/current: 5/' -e 's/^| T7 | 4 | build |/| T7 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_run "$SR_PLAN"
+expect_eq "TI1 current: 5 with T7 active at step 7: the title names both" "step 5 of 9 · work at step 7 (T7)" "$(sr_title)"
+sr_world title-agree "6 6 12 12"
+sed -i.bak -e 's/^current: 4$/current: 5/' -e 's/^| T7 | 4 | build |/| T7 | 5 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_run "$SR_PLAN"
+expect_eq "TI2 current: 5 with the furthest active task at step 5: one step alone" "step 5 of 9" "$(sr_title)"
+sr_world title-pending "6 6 12 12"
+sed -i.bak -e 's/^current: 4$/current: 5/' -e 's/^| T9 | 4 | build |/| T9 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_run "$SR_PLAN"
+expect_eq "TI3 a pending task at step 7 is not work at step 7: one step alone" "step 5 of 9" "$(sr_title)"
 
 finish
