@@ -1770,7 +1770,7 @@ _proof_floor_judge() {
 # at the commit it ran at, or at the row head a merge commit brought in as its second parent.
 # CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" files="" c f cls
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" files="" c f isdoc isrel
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -1781,10 +1781,12 @@ _proof_past_f() {
   case "${droot:-}" in "$top"/?*) pfx="${droot#"$top"/}"; pfx="${pfx%/}/" ;; esac
   while IFS= read -r f; do
     case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
-    cls=code
-    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then cls=doc
-    elif _proof_release_path "$f"; then cls=rel; fi
-    files="$files${files:+$'\n'}C	$c	$cls"
+    # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
+    # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
+    isdoc=0; isrel=0
+    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then isdoc=1; fi
+    ! _proof_release_path "$f" || isrel=1
+    files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
   done <<PROOF_PAST_FILES
 $(git -C "$tree" log --no-renames --first-parent -m --name-only --format='%x01%H' "$from..$to" 2>/dev/null)
 PROOF_PAST_FILES
@@ -1799,7 +1801,7 @@ PROOF_PAST_FILES
       if ($6 == "verdict") { if (!(k in vat) || $2 >= vat[k]) { vat[k] = $2; vres[k] = $5 }; vs[$3] = vs[$3] "," $4 }
       next
     }
-    $1 == "C" { touched[$2] = 1; if ($3 != "doc") nondoc[$2] = 1; if ($3 != "rel") notrel[$2] = 1; next }
+    $1 == "C" { touched[$2] = 1; if ($3 != 1) nondoc[$2] = 1; if ($4 != 1) notrel[$2] = 1; next }
     function at(c, q, s,   r) { r = ""; if ((c SUBSEP s) in rat) { r = rres[c, s]; w = rat[c, s] }
       if (q != "" && (q SUBSEP s) in rat && (r == "" || rat[q, s] >= w)) r = rres[q, s]; return r }
     END {
@@ -2564,6 +2566,28 @@ facts_cover() {
   fixed="$(proof_fixed "$plan" "$tree")"
   _facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" "$(_facts_born_landings "$plan" "$tree" "$fixed")" "${4:-}" \
     "$(proof_check_passes "$plan" "$tree")"
+}
+
+# proof_door_cover <tree> <from> <candidate> -> THE JUDGE'S BASIS OF A CANDIDATE AT ITS DOOR: `release`, `prose`, or
+# `owes`, a tab, and each path the range touched outside the release set, comma-joined, read by the walk facts_cover
+# reads, over <from>..<candidate>, with the check that has just passed at the door taken as passing at <candidate>.
+# A release row's merge first exists at its landing, before any release check line names it, so this is the one
+# place a path the set lacks can be named before the judge reads the release as owing. Exit 1, nothing printed, when
+# the range cannot be read or holds no commit.
+proof_door_cover() {
+  local tree="${1:-}" from="${2:-}" c b f out=""
+  c="$(git -C "$tree" rev-parse --verify -q "${3:-}^{commit}" 2>/dev/null)" || return 1
+  _proof_roots_load
+  b="$(_facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$from" "$c" "" "" "$c" \
+    | awk '$3 == "owes" { o = 1 } $3 == "release" { r = 1 } NF { n = 1 } END { if (n) print (o ? "owes" : (r ? "release" : "prose")) }')"
+  [ -n "$b" ] || return 1
+  [ "$b" = owes ] || { printf '%s\n' "$b"; return 0; }
+  while IFS= read -r f; do
+    [ -z "$f" ] || _proof_release_path "$f" || case ",$out," in *",$f,"*) ;; *) out="${out:+$out,}$f" ;; esac
+  done <<PROOF_DOOR_COVER
+$(git -C "$tree" log --first-parent -m --no-renames --name-only --format= "$from..$c" 2>/dev/null)
+PROOF_DOOR_COVER
+  printf 'owes\t%s\n' "$out"
 }
 
 
