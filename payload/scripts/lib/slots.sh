@@ -52,9 +52,13 @@ _slots_alive() {  # <pid> — rc 0 while that process exists
 }
 
 # _slots_since <pid> -> when that process started, one space between fields; nothing when
-# it is gone. The C locale and UTC make it the same string whoever asks.
+# it is gone. The C locale and UTC make it the same string whoever asks, and the IFS is this
+# function's own: ps pads the field, and the split below drops the padding only when IFS holds a
+# space. bash runs a here-string's command substitution under a builtin's temporary IFS, so a
+# caller's `IFS=<tab> read … <<< "$(…)"` reaches here with no space in it, and a start joined by
+# that IFS keeps the padding, matches no record, and reads every live holder as dead.
 _slots_since() {
-  local s
+  local s IFS=$' \t\n'
   s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null)"
   # shellcheck disable=SC2086
   set -- $s

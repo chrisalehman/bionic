@@ -724,6 +724,15 @@ expect_nonempty "GAP4a precondition: the tick printed its gate line" "$GAP4_LINE
 expect_contains "GAP4b …which counts the one waiting request and gives room: the room reads admitted runs, not waiters" \
   "waiting=1 room=yes" "$GAP4_LINE"
 expect_contains "GAP4c the tick offers FILL though a request waits at the gate" "poker: FILL T13" "$GAP_T4"
+# GAP4d: THE RULE READS ONE START WHATEVER IFS ITS READER HOLDS. bash runs a here-string's command
+# substitution under a builtin's temporary IFS, so `IFS=<tab> read … <<< "$(gate_state)"` reads the gate with
+# no space in IFS. The start ps prints is padded, and a start joined by that IFS kept the padding, matched no
+# record, and read this live shell as dead: the scan ended its waiting request as holder-gone.
+GAP4_TAB="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/gate.sh" && export BIONIC_GATE_DIR="$GAP4_GATE" \
+  && IFS='	' read -r GAP4_TL <<< "$(gate_state)" && printf '%s' "$GAP4_TL" )"
+expect_contains "GAP4d a gate read under a tab IFS counts the request waiting: its holder lives" "waiting=1" "$GAP4_TAB"
+expect_eq "GAP4e …and leaves it open" "open" \
+  "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "UB: unbound means no run — two plans, two sessions, the real Stop per session (wave-23-fixit-1810, REQ-1, AC-1.1/AC-1.2)"
