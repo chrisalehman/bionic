@@ -153,7 +153,7 @@ _plan_theme_reads() {
       m && col && /^\|[ \t]*AC-/ { a = $2; s = $col; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); print "M\t" a "\t" tolower(s) }'
   } | awk -F'\t' -v cur="$cur" '
     $1 == "T" { n++; nm[n] = $2; k[n] = split($3, r, " "); for (i = 1; i <= k[n]; i++) { own[r[i]] = n; rq[n, i] = r[i] }; next }
-    $1 == "M" { req = substr($2, 4); sub(/\.[^.]*$/, "", req); t = own[req]; if (!t) next
+    $1 == "M" { req = $2; sub(/^AC-/, "", req); sub(/\.[^.]*$/, "", req); t = own[req]; if (!t) next
       tot[t]++
       if ($3 == "discharged") d[t]++; else if ($3 == "waived") w[t]++; else { p[t]++; op[t, req] = 1 } }
     END {
