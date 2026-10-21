@@ -665,7 +665,7 @@ section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at
 # `user_confirmed_attributed` (the one reader of the confirmation) does not take it.
 # Fixture fidelity: the plan is §VERDICT's `ru_plan`, in a real repository, with a T4 row whose block carries the
 # stub in the shape `matrix-render` writes it.
-# fails-when: the stub is refused at 6 or 7; the stub is admitted at 8; the advance to 8 opens no row:AC-2 item; or the
+# fails-when: the stub is refused at 6 or 7; the stub is admitted at 8; the advance to 8 opens no row item for the card; or the
 #   key loop goes back to refusing it and the check still passes.
 RU_PENDING='  user-confirmed: pending'
 ru_put 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
