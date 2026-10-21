@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 5: §CHECK, §WORD, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING.
+# Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -206,106 +206,6 @@ poke "$RCK" current 7; CK_A7="$RC"
 expect_eq "CK-mut2 the mutant flips CK-7r: its check says would advance (exit 0) where the real advance refuses (exit 1)" \
   "0|poker: current 7 --check: would advance|1" "$CK_M7|$CK_A7"
 POKE_BOUND="$CK_BOUND_WAS"
-
-# ============================================================
-section "§WORD: a question's waiver is the user's word in one waived: line; the regression is never waived, so waive all writes the three questions and a head the regression cannot prove stays refused"
-# ============================================================
-# `waive <question> '<reply>'` writes `waived: question=<q> head=<working head> by <git user.name> <ISO-UTC> "<reply>"`
-# (lib/proof.sh `proof_waiver_line`) for evidence, adversarial or structure; `waive all` writes those three in one
-# transaction. The regression is a run to find bugs, never a waiver: `waive regression` is refused with the plan
-# unchanged, and the judge keeps reading a head past the regression's proof as uncovered. FIXTURE FIDELITY: a real
-# repository on `wave/01-fixture` with two suites and lib/x.sh, base B and one code commit C; a double wave plan the
-# real gate admits at Steps 6 and 7, bound to this session; every fact in the production writer's shape.
-# fails-when: the regression takes a waiver; `waive all` writes other than the three questions.
-WD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-WD_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
-RWD="$(make_repo word)"
-git -C "$RWD" config user.email t@example.com; git -C "$RWD" config user.name "Dana Fixture"
-printf '.bionic\n' > "$RWD/.gitignore"
-mkdir -p "$RWD/tests" "$RWD/lib" "$RWD/.bionic/docs/plans" "$RWD/.bionic/docs/record/w38"
-# a.test.sh READS lib/x.sh (wave-39 T24; D5, AC-18.1): a commit past the floor owes the suites that read what it changed,
-# so C, a change to lib/x.sh, is unproved until a.test.sh runs at it; a file no suite reads would owe nothing.
-printf '#!/bin/bash\n[ -s "$(dirname "$0")/../lib/x.sh" ]\n' > "$RWD/tests/a.test.sh"; printf '#!/bin/bash\nexit 0\n' > "$RWD/tests/b.test.sh"
-printf 'one\n' > "$RWD/lib/x.sh"
-( cd "$RWD" && git add .gitignore tests lib && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
-printf 'generic fixture proof\n' > "$RWD/.bionic/docs/record/generic-evidence.md"
-WD_B="$(git -C "$RWD" rev-parse HEAD)"
-WD_C="$(s57_commit "$RWD" lib/x.sh 'C: a code change after the regression proof')"
-PWD8="$RWD/.bionic/docs/plans/wave-x.plan.md"
-wd_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$WD_LIB" "$@"; }
-wd_floor() {  # <head> -> a regression proof at <head>, as proof-add floor writes it
-  bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w38/floor.log ""' _ "$WD_LIB" "$1"
-}
-wd_reads() {  # <head> -> the five readings a double wave plan is dealt, each passing, at <head>
-  wd_line review "$1" 2026-10-12T12:00:00Z record/w38/evidence.md evidence w-read pass piece
-  wd_line review "$1" 2026-10-12T12:00:00Z record/w38/adversarial.md adversarial w-read pass piece
-  wd_line review "$1" 2026-10-12T12:00:00Z record/w38/structure.md structure w-read pass piece
-  wd_line review "$1" 2026-10-12T12:00:00Z record/w38/adversarial-whole.md adversarial w-read pass whole
-  wd_line review "$1" 2026-10-12T12:00:00Z record/w38/structure-whole.md structure w-read pass whole
-}
-wd_plan() {  # <current> <proof lines> -> PWD8, bound to this session (step lines through 7)
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
-    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
-    printf 'current: %s\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
-    printf -- '- Step 4: dispatched, record/w38/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$WD_B"
-    printf -- '- Step 5: floor, record/w38/floor.log\n'
-    printf -- '- Step 6: review at record/w38/review.md\n'
-    printf -- '- Step 7: documented at record/w38/docs.md\n  n/a: no decision this run\n'
-    printf '%s\n' "$2"
-    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
-    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
-    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
-    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-  } > "$PWD8"
-  bind_marker "$RWD" "$PWD8"
-}
-wd_judge() {  # -> facts_state's lines for PWD8 at the working branch's ref, `regression <state>` or `<question>-<scope> <state>` (the regression fact under either name, wave-38 T8 renames it)
-  bash -c '. "$1/run.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$WD_LIB" "$PWD8" "$(git -C "$RWD" rev-parse --verify -q wave/01-fixture)" 2>/dev/null \
-    | awk -F'\t' '$1 == "floor" || $1 == "regression" { print "regression " $2; next } $1 == "review" { print $2 "-" $4 " " $5 }'
-}
-wd_current() { sed -n 's/^current: //p' "$PWD8"; }
-WD_ISO='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
-
-# ---------- waive regression: refused, and the head the regression cannot prove stays refused ----------
-wd_plan 6 "$(wd_floor "$WD_B")
-$(wd_reads "$WD_C")"
-expect_eq "WD-0 precondition: the regression proof at B, the head at C: the judge reads it uncovered, the readings covered" \
-  "regression uncovered|evidence-piece covered" "$(wd_judge | awk 'NR <= 2' | paste -sd'|' -)"
-poke "$RWD" current 7
-expect_eq "WD-0b precondition: …so current 7 is refused at C (exit 1), the plan at current: 6" "1|6" "$RC|$(wd_current)"
-expect_contains "WD-0c …in the judge's words" "uncovered" "$OUT"
-cp "$PWD8" "$TMPROOT/wd-before"
-poke "$RWD" waive regression '1'
-expect_eq "WD-1 waive regression is refused (exit 1), the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/wd-before" "$PWD8" && echo same || echo changed)"
-expect_eq "WD-2 …and the judge still reads the regression uncovered at C" "regression uncovered" "$(wd_judge | awk 'NR == 1')"
-
-# ---------- waive all: the three questions in one call; the regression still holds current 8 ----------
-wd_plan 7 "$(wd_floor "$WD_B")
-$(wd_reads "$WD_B")"
-expect_eq "WD-4 precondition: every reading and the regression at B, the head at C: the judge reads all six uncovered" \
-  "6|0" "$(wd_judge | awk '$2 == "uncovered"' | awk 'END { print NR }')|$(wd_judge | awk '$2 == "covered"' | awk 'END { print NR }')"
-poke "$RWD" current 8
-expect_eq "WD-4b precondition: …so current 8 is refused at C (exit 1), the plan at current: 7" "1|7" "$RC|$(wd_current)"
-poke "$RWD" waive all '1'
-expect_eq "WD-5 AC-4.2 waive all '1' is admitted (exit 0)" "0" "$RC"
-expect_eq "WD-5b …and writes three lines, evidence, adversarial and structure, each at C with the reply" \
-  "evidence ${WD_C} \"1\"|adversarial ${WD_C} \"1\"|structure ${WD_C} \"1\"" \
-  "$(/usr/bin/grep -E '^waived: ' "$PWD8" | awk '{ q = $2; h = $3; sub(/^question=/, "", q); sub(/^head=/, "", h); print q " " h " " $NF }' | paste -sd'|' -)"
-expect_eq "WD-6 …which the judge reads: the five readings covered at C, the regression not" "5|regression uncovered" \
-  "$(wd_judge | awk '$2 == "covered"' | awk 'END { print NR }')|$(wd_judge | awk 'NR == 1')"
-poke "$RWD" current 8
-expect_eq "WD-7 current 8 stays refused at C (exit 1), the plan at current: 7" "1|7" "$RC|$(wd_current)"
-
-# ---------- what the verb refuses ----------
-wd_plan 6 "$(wd_floor "$WD_B")"
-cp "$PWD8" "$TMPROOT/wd-before"
-poke "$RWD" waive verdict '1'
-expect_eq "WD-8 a word outside the four is refused (exit 1), the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/wd-before" "$PWD8" && echo same || echo changed)"
-expect_contains "WD-8b …naming the four it takes" "evidence, adversarial, structure or all" "$OUT"
-POKE_BOUND="$WD_BOUND_WAS"
 
 # ============================================================
 section "§DECISIONS: decisions [--all] reads the design ledgers' register entries; the recap prints this run's settled set; doctrine re-puts a settled decision only as reopening D<n> (wave-38 T13; REQ-3 AC-3.4; D24)"

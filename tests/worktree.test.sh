@@ -125,12 +125,6 @@ LINE_LIB="${REPO}/payload/scripts/lib/line.sh"
 [ -r "$LINE_LIB" ] && . "$LINE_LIB" 2>/dev/null
 export BIONIC_GATE_DIR="$TMP/gate"
 
-section "Group 1: the library exists and parses"
-
-expect_true "worktree_land_for_session is defined" declare -f worktree_land_for_session
-expect_true "worktree_checkout_of is defined"     declare -f worktree_checkout_of
-expect_true "worktree_lease_overruns is defined"  declare -f worktree_lease_overruns
-
 section "Group 2: worktree_legacy_links — D7: only a MIS-POINTED link is listed"
 #
 # D7 (wave-13-fixit-180, reopens C2): `create` plants

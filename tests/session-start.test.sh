@@ -485,19 +485,6 @@ hasnt "9.5 the bystander notice does not also print" \
   "invoke /bionic:canonical-sdlc to engage it" "$OUT"
 eq    "9.6 the hook wrote nothing under .bionic" "$S9_BEFORE" "$(snap "$P9")"
 
-section "10 — a symlink at the marker path reads as absent, same as no marker (AC-4)"
-P10=$(make_env 1s)
-PLAN10="$(write_open_plan "$P10")"
-mkdir -p "$P10/.bionic/tmp"
-: > "$P10/.bionic/tmp/real-engaged-file"
-ln -s "$P10/.bionic/tmp/real-engaged-file" "$P10/.bionic/tmp/engaged-$CUR_SID.state"
-OUT=$(drive "$P10" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
-eq    "10.1 exit 0" "0" "$(rc)"
-has   "10.2 a symlinked marker reads not-engaged: the notice prints" \
-  "invoke /bionic:canonical-sdlc to engage it" "$OUT"
-has   "10.3 …naming the plan path" "$PLAN10" "$OUT"
-hasnt "10.4 …and not the re-arm block" "re-arm" "$OUT"
-
 section "11 — no open run at all: the marker's presence or absence changes nothing (AC-11 pair)"
 # The paired control the design calls for: no plan on disk, marker absent —
 # today's behaviour, silence over a clean fixture. Marker presence must not

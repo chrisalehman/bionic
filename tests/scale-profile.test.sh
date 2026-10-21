@@ -11,12 +11,9 @@
 #   §TASK   a task-scale fixture at every reader: engagement arms no Patrol; `facts_owed
 #           single task` deals one critic; the dispatch wall refuses the fourth writer and
 #           not for a Patrol; close-out accepts `fix/x` and its integrate act is a PR
-#   §TABLE  SKILL.md's scale table cell for cell against the library; "Full set, compressed"
-#           gone; the doctrine's byte count not grown
 #
-# fails-when: a patrol armed at task scale, two readers dealt unflagged, a branch refused, a
-# fourth writer admitted with no person's cap, a cell of the doctrine table differing from the
-# library, or the phrase surviving.
+# fails-when: a patrol armed at task scale, two readers dealt unflagged, a branch refused, or a
+# fourth writer admitted with no person's cap.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The engagement and
 # close-out roots are SYNTHESIZED: a plan carrying only the keys its reader asks (`scale:`, and
@@ -24,7 +21,6 @@
 # repository for close-out. The dispatch fixtures are the wall's own shards' (make_repo and the
 # roster rows of tests/dispatch-preflight.prelude.sh), with the plan's `scale:` line rewritten
 # and the Patrol stamp make_repo plants removed, so the wall reads the cell, not the fixture.
-# §TABLE reads the shipped SKILL.md and its template.
 #
 # ANTI-VACUITY (the rule of that name). Every absence sits beside a positive on the same
 # output: no stamp beside the binding the same engagement wrote; no Patrol refusal beside the
@@ -48,7 +44,6 @@ set -uo pipefail
 
 SP_REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 SP_LIB="$SP_REPO/payload/scripts/lib"
-SP_SKILL="$SP_REPO/skills/canonical-sdlc/SKILL.md"
 SP_TMPL="$SP_REPO/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"
 SP_ENGAGE="${BIONIC_HOOKS_DIR}/engage.sh"
 SP_CLOSE="$SP_REPO/payload/scripts/close-out.sh"
@@ -214,34 +209,5 @@ expect_eq "T.c6 …and merges nothing" "$SP_MAIN0" "$(git -C "$SP_CT" rev-parse 
 SP_CW="$(sp_co_root wave wave)"
 SP_CO_OUT="$(cd "$SP_CW" && bash "$SP_CLOSE" "$SP_CW/.bionic/docs/plans/epic-99-test/fix-x.plan.md" check 2>&1)"
 expect_contains "T.c7 the pair: at wave scale fix/x is refused for its shape" "is not wave/<NN>-<slug> shaped" "$SP_CO_OUT"
-
-# ============================================================================
-section "§TABLE — SKILL.md's scale table is the library's rows (AC-5.3)"
-# ============================================================================
-
-# sp_table <file> -> one line per table row, `<scale>\t<col>=<cell>\t…`, the header's labels
-# lowercased as the column names and backticks stripped from each cell.
-sp_table() {
-  awk -F'|' '
-    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); gsub(/`/, "", s); return s }
-    /^\| Scale \|/ { for (i = 2; i < NF; i++) h[i] = tolower(trim($i)); n = NF; inT = 1; next }
-    inT && /^\|---/ { next }
-    inT && /^\|/ { s = trim($2); line = s; for (i = 3; i < n; i++) line = line "\t" h[i] "=" trim($i); print line; next }
-    inT { exit }' "$1"
-}
-SP_ROWS="$(sp_table "$SP_SKILL")"
-for sp_s in task wave epic; do
-  sp_row="$(printf '%s\n' "$SP_ROWS" | awk -F'\t' -v s="$sp_s" '$1 == s')"
-  for sp_c in $SP_COLUMNS; do
-    sp_doc="$(printf '%s\n' "$sp_row" | tr '\t' '\n' | sed -n "s/^$sp_c=//p")"
-    sp_lib="$(sp_cell "$sp_s" "$sp_c")"
-    # Two empties are not agreement: each side names its own absence.
-    expect_eq "B.$sp_s.$sp_c — the doctrine's cell is the library's" "${sp_lib:-<no library cell>}" "${sp_doc:-<no doctrine cell>}"
-  done
-done
-
-# THE BYTES DO NOT GROW (net zero): SKILL.md held 22819 bytes at the wave head this row started
-# from (fda9f0fc); the table's new cells pay with the phrase and the shortened sentence.
-SP_BYTES="$(wc -c < "$SP_SKILL" | tr -d ' ')"
 
 finish

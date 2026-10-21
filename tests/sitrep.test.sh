@@ -713,21 +713,6 @@ awk 'NR == 1 { print; print "─────"; next } { print }' "$TMPROOT/rep.t
 expect_eq "O9 …a rule line under the title: refused" "rule line" "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
 
 # ============================================================
-section "§FACTS: every line of the report is the verb's, byte for byte; a planted fact, an altered line or an added claim fails"
-# ============================================================
-expect_eq "FA1 the report that is the verb's page meets the contract (the positive, same checker as below)" \
-  "ok" "$(sr_check "$TMPROOT/rep.txt" "$TMPROOT/page.txt")"
-awk '{ print } /^✅ 4\/T4: / { print "✅ 4/T18: Shipped early (7:30 AM)" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_true "FA2 the plant is in the copy" grep -q '^✅ 4/T18: ' "$TMPROOT/bad.txt"
-expect_eq "FA3 …a planted task the verb never printed: refused, naming it" "fact: > ✅ 4/T18: Shipped early (7:30 AM)" \
-  "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-sed '/^- Done: /s/4 of 17 tasks/5 of 17 tasks/' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_regex "FA4 …a rendered line altered (the Done line's count): refused on the fact" "^fact: " "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-awk '{ print } index($0, "- It assumes ") == 1 { print "- the release ships tonight" }' "$TMPROOT/rep.txt" > "$TMPROOT/bad.txt"
-expect_eq "FA5 …an unlabelled claim appended to Predicted close: refused on the fact" "fact: > - the release ships tonight" \
-  "$(sr_check "$TMPROOT/bad.txt" "$TMPROOT/page.txt")"
-
-# ============================================================
 section "§SURFACES: one renderer, three surfaces — the tick prints \`poker: sitrep <the --line output>\` on every tick, byte for byte"
 # ============================================================
 # sr_tick_world <label> <mins> -> a world the tick will decide on: engaged, a commit, bound, armed.

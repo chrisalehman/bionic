@@ -426,6 +426,11 @@ doctor.test.sh | §LOADED — no record: the registry's line | duplicate | paylo
 doctor.test.sh | §LOADED | keep | payload/scripts/version.sh: the line built from the registry instead of detect_loaded_line, so a live record's "(in place) · C · R" is not printed (LV3); doctor.sh's header the same (LD2) | none (searched '(in place)' in tests/; detect.test.sh drives detect_loaded_line alone)
 doctor.test.sh | §LOADED — a record that is not a live session's, or names no checkout | duplicate | payload/scripts/lib/detect.sh detect_loaded_line: a dead session's record or a record naming no commit read as in place (LV5, LV6, LD4) | detect.test.sh §LOADED — a record is not a live session's (unverified), detect.test.sh §LOADED — only a checkout is in place (unverified)
 
+## door-cover.test.sh
+
+door-cover.test.sh | §REAL | keep | rule: check pin — payload/scripts/lib/proof.sh _proof_release_path: the arm that admits tests/release-check.test.sh deleted, so the judge's cover of each real release merge, a check passing at it, reads owes, not release (r1-r3) | door-cover.test.sh §MUTANT, units.test.sh §JUDGE, units.test.sh §WALK
+door-cover.test.sh | §MUTANT | keep | §REAL's mutation proof: payload/scripts/lib/proof.sh _facts_walk: a commit whose paths leave the release set read release when a check passes at it, so a set missing the check suite's arm still reads each real merge release (m2-m4) and §REAL could not fail | door-cover.test.sh §REAL, door-landing.test.sh §COVER
+
 ## door-landing.test.sh
 
 door-landing.test.sh | §WORLD: the fixture carries the check's closure, the real changelog and a relative declaration | vacuous | the first of the two sections with this title, at line 54: its one assertion (w0) runs only when door_world built no fixture, a branch the suite as written never takes | none (searched 'door_world' in tests/)
@@ -435,6 +440,7 @@ door-landing.test.sh | §COPY | keep | rule: door refusal — payload/scripts/li
 door-landing.test.sh | §NAMED | keep | rule: door refusal — payload/scripts/lib/worktree.sh _wt_release_check: the judged-by arm deleted (nm1), or changed-here read over the writer's head instead of the candidate (nm2), so a landing that changes the check which judges it is refused with the advice to fix it on its own branch and no judge named | none (searched 'judged-by=' and 'changed-here=' in tests/)
 door-landing.test.sh | §JUDGED | keep | hooks/poker/line.sh poker_verb_row_landed: the judged-by field dropped from the hand line, so a person's merge of a fix to the check is marked with no word that the landed copy judged it (j2) | none (searched 'judged-by=candidate' in tests/)
 door-landing.test.sh | §HAND | keep | rule: door refusal — payload/scripts/lib/line.sh line_publish: the _wt_release_check call deleted, so a planted listed name lands by hand instead of REFUSED reason=check-failed (hm1) | none (searched 'DOOR_MUTANT_FN' and 'line_publish' mutants in tests/)
+door-landing.test.sh | §COVER | keep | payload/scripts/lib/proof.sh proof_door_cover: the loop that names each path outside the release set deleted, so the release row's landing prints `COVER T2 <merge> owes` with no outside path (v2) | none (searched 'proof_door_cover' in tests/)
 
 ## engage.test.sh
 
@@ -909,7 +915,7 @@ rc-item-1.test.sh | §wave-27 T55 | keep | payload/scripts/remove.sh: its copy o
 
 ## rc-item-2.test.sh
 
-rc-item-2.test.sh | §wave-27 T75: the markers are the whole rule, proven by bytes | keep | payload/scripts/setup.sh: the retired-alias step takes bionic's bare alias line outside any marker pair, so the a-top-sev rc is not left byte for byte (the generated oracle rows) | none (searched 'rc-gen.pl' and 'outside bionic's markers' in tests/)
+rc-item-2.test.sh | §wave-27 T75 | keep | payload/scripts/setup.sh: the retired-alias step takes bionic's bare alias line outside any marker pair, so the a-top-sev rc is not left byte for byte (the generated oracle rows) | none (searched 'rc-gen.pl' and 'outside bionic's markers' in tests/)
 rc-item-2.test.sh | §wave-27 T75: bionic's claude() block clears the name it defines (A-orch-185) | duplicate | payload/scripts/lib/env.sh rc_default: the unalias line dropped or changed, so the function line errors under an alias; rc_get reads an earlier or swapped body as written | rc-item-1.test.sh §env.sh: the roster, the literals and the default, rc-item-2.test.sh §wave-27 T77
 rc-item-2.test.sh | §wave-27 T77 | keep | payload/scripts/lib/env.sh rc_set: the line guarding a changed block deleted, so a block holding a user's line is rewritten and the line lost ("T77 rc_set (old-u-below): refused with its own reason" reads 0) | none (searched 'rc_state' and 'a changed block is never written' in tests/)
 rc-item-2.test.sh | §wave-27 T78 | keep | payload/scripts/remove.sh _rm_rc_unset: the line guarding a changed claude() block deleted, so remove strips a block holding a user's line (rc=5 becomes 0, the rc changes) | none (searched '_rm_rc_unset' and 'never stripped' in tests/)
@@ -1224,8 +1230,8 @@ shell-lint.test.sh | §PARSE | keep | rule: lint — a shell file that does not 
 shell-lint.test.sh | §LOAD | keep | rule: lint — a library under payload/scripts/lib that writes to stderr or leaves a function undefined when loaded by a bare /bin/bash, planted, so the sweep names it | none (searched 'env -i' library loads in tests/)
 shell-lint.test.sh | §CASE | keep | rule: lint — a case arm with no opening paren inside `$( … )` planted in a hook, so the sweep names the file and line | none (searched '\$(case' in tests/)
 shell-lint.test.sh | §HEREDOC | keep | rule: lint — a heredoc inside `$( … )` whose body holds a lone `)`, or a paren-less case arm in an unquoted heredoc body, planted, so the sweep names it | none (searched 'HEREDOC-PAREN' and 'HEREDOC-CASE' in tests/)
-shell-lint.test.sh | §CENSUS-COMPLETE-1 | vacuous | every row runs the suite's own census_refusals over scratch trees and censuses the suite builds, so no program of the plugin can turn one red | none (searched 'census_refusals' in tests/)
-shell-lint.test.sh | §CENSUS-COMPLETE-2 | vacuous | every row runs the suite's own census_refusals over scratch censuses the suite builds, so no program of the plugin can turn one red | none (searched 'census_refusals' in tests/)
+shell-lint.test.sh | §CENSUS-COMPLETE-1 | keep | rule: lint — shell-lint.test.sh census_refusals loses its no-verdict arm, so a scratch census missing x's second section's line passes (also: the no-heading and no-line arms) | none (searched 'census_refusals' in tests/)
+shell-lint.test.sh | §CENSUS-COMPLETE-2 | keep | rule: lint — shell-lint.test.sh census_refusals loses its bad-verdict arm, so a record line whose verdict reads maybe passes (also: the rule-mark-on-a-cull arm) | none (searched 'census_refusals' in tests/)
 shell-lint.test.sh | §CENSUS-COMPLETE-3 | keep | rule: lint — a section call added to a suite under tests/ with no record line under its key, or a suite with no heading, planted in the tree, so the sweep over the real tests tree names it | none (searched 'CENSUS.md' in tests/)
 shell-lint.test.sh | §CENSUS-1 | keep | rule: lint — a section whose only census line is a cull left called in a suite, planted in a scratch tree (also a shared key's culled half, read by whole title), so census_cull_refusals names the suite and the key | none (searched 'census_cull_refusals' and 'culled section present' in tests/)
 shell-lint.test.sh | §CENSUS-2 | keep | rule: lint — a section whose census line is a keep deleted from its suite, or its whole suite deleted, planted in a scratch tree, so census_cull_refusals names the suite and the key | none (searched 'census_cull_refusals' and 'kept section absent' in tests/)
@@ -1364,6 +1370,7 @@ units.test.sh | §9 | keep | payload/scripts/lib/units.sh _units_read's trim() r
 units.test.sh | §ORDER | keep | payload/scripts/lib/units.sh units_order drops `$2 + 0 <= 5`, so a regression row at Step 7 is read as the order; "ORD-2b …and units_order reads no order" goes red | none (searched 'units_order' in tests/: canonical-sdlc-evidence-gate-2 §AH and session-poker-4 assert only an ordered plan)
 units.test.sh | §POST | keep | payload/scripts/lib/units.sh units_validate: the release-landed test dropped from the post-release admission, so a reader past a release that is still open is admitted instead of refused with the order text (POST-2) | none (searched 'the release row comes ahead' and 'units_add_row' in tests/)
 units.test.sh | §JUDGE | keep | payload/scripts/lib/line.sh _line_proved matches its commit argument against a verdict's reads= key as well as commit=, so "…and a reads key in its place is refused" goes red | none (searched '_line_proved' and '_proof_floor_judge' in tests/: landing-line-2 §GRAMMAR reads field order only)
+units.test.sh | §WALK | keep | payload/scripts/lib/proof.sh _proof_past_f: the release-set question asked through the docs class again, so CHANGELOG.md reads as prose and a real release merge with a check passing at it is named not proved (WALK-0, WALK-1b to WALK-3b) | none (searched '_proof_past_f' in tests/)
 
 ## version-compare.test.sh
 
@@ -1572,8 +1579,6 @@ session-start.test.sh §10 — duplicate
 session-sweep.test.sh §7. session-start.sh's own silent auto-sweep (R2, ticket-30, AC-R2.1/2.2/2.3) — duplicate
 session-sweep.test.sh §7b. AC-R2.2 — duplicate
 session.test.sh §Group 0 — duplicate
-shell-lint.test.sh §CENSUS-COMPLETE-1 — vacuous
-shell-lint.test.sh §CENSUS-COMPLETE-2 — vacuous
 sitrep.test.sh §FACTS — duplicate
 spawn-worktree.test.sh §Group 1 — duplicate
 spawn-worktree.test.sh §Group 2 — duplicate
