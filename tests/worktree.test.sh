@@ -986,7 +986,7 @@ expect_eq    "(hd3b) a hand landing held 3 s behind an entry lands, with one can
   "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(grep '|ev=candidate|row=wt/bh-T5|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 section "§CLOSURE: the declared check's closure is its script and what the script loads, read at a commit"
 CL="$(new_repo "$TMP/closure")"; mkdir -p "$CL/chk/lib" "$CL/lib"; : > "$CL/chk/lib/a.sh"; : > "$CL/lib/b.sh"
-printf '#!/bin/bash\nHERE="$(cd "$(dirname "$0")" && pwd)"\n. "$HERE/lib/a.sh"\nfor f in b.sh; do [ -f "$HERE/../lib/$f" ] && . "$HERE/../lib/$f"; done\n. "$HERE/lib/gone.sh"\n' > "$CL/chk/run.sh" && git -C "$CL" add chk lib && git -C "$CL" commit -qm "a check and the two libraries it sources"
+printf '#!/bin/bash\nHERE="$(cd "$(dirname "$0")"'' && pwd)"\n. "$HERE/lib/a.sh"\nfor f in b.sh; do [ -f "$HERE/../lib/$f" ] && . "$HERE/../lib/$f"; done\n. "$HERE/lib/gone.sh"\n' > "$CL/chk/run.sh" && git -C "$CL" add chk lib && git -C "$CL" commit -qm "a check and the two libraries it sources"
 expect_eq "(cl1) 'bash chk/run.sh <list>': the script and both libraries it sources, never a path the commit lacks" \
   "chk/lib/a.sh chk/run.sh lib/b.sh" "$(_wt_check_closure "$CL" HEAD "bash chk/run.sh /elsewhere/list" | sort | paste -sd' ' -)"
 expect_eq "(cl2) a declaration naming no script the commit holds has no closure (rc 1)" "1|" "$(o="$(_wt_check_closure "$CL" HEAD "bash /x/run.sh")"; echo "$?|$o")"

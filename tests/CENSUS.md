@@ -429,7 +429,7 @@ doctor.test.sh | §LOADED — a record that is not a live session's, or names no
 ## door-cover.test.sh
 
 door-cover.test.sh | §REAL | keep | rule: check pin — payload/scripts/lib/proof.sh _proof_release_path: the arm that admits tests/release-check.test.sh deleted, so the judge's cover of each real release merge, a check passing at it, reads owes, not release (r1-r3) | door-cover.test.sh §MUTANT, units.test.sh §JUDGE, units.test.sh §WALK
-door-cover.test.sh | §MUTANT | keep | §REAL's mutation proof: payload/scripts/lib/proof.sh _facts_walk: a commit whose paths leave the release set read release when a check passes at it, so a set missing the check suite's arm still reads each real merge release (m2-m4) and §REAL could not fail | door-cover.test.sh §REAL, door-landing.test.sh §COVER
+door-cover.test.sh | §MUTANT | keep | rule: check pin — payload/scripts/lib/proof.sh facts_cover: the cover reader admits a real release merge as release with a release-set arm removed (the check suite's or the promoted records'), which §REAL alone cannot show at the real merges without the planted mutant (m2 to m4b) | door-cover.test.sh §REAL, door-landing.test.sh §COVER
 
 ## door-landing.test.sh
 
