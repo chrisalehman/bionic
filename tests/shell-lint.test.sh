@@ -37,6 +37,34 @@
 # every function the lexer finds it defining at load to be defined after, with nothing on
 # stderr. A hook or a payload command is parsed (§PARSE), never run.
 #
+# §ADR and §HEADER hold a document to the fact it restates. An ADR says its state twice, in its front
+# matter's `status:` and under its `## Status` heading, and the first word of each must be the same word
+# (`Accepted`, `Proposed`, `Superseded`); every ADR under docs/adrs/, and under .bionic/docs/adrs/ where
+# that directory exists, is read, and a disagreement is refused naming the file and both words. A suite
+# header lists the sections it holds as `#   §KEY` lines, and the keys must be exactly the keys of the
+# body's `section` calls; a suite is refused naming the key it lists that the body lacks and the key the
+# body has that it omits. A `§` inside a sentence is a reference and a header with no list makes no claim,
+# but this suite's own list is pinned to its body, so a sweep named here that the body never runs is refused.
+#
+# THE SECTIONS, in the order the body runs them:
+#
+#   §LEXER               the lexer reads every shipped file to its end with every frame closed.
+#   §PARSE               every shell file in the tree parses under the system interpreter.
+#   §LOAD                every library loads in a bare /bin/bash with its functions defined.
+#   §CASE                no `case` arm without its opening paren inside `$( … )`.
+#   §HEREDOC             the two heredoc shapes: a paren-less arm in an unquoted body, a lone `)` in a body.
+#   §BP                  no writer is piped into a reader that quits early where the status is read.
+#   §BP-PIN              a writer of more than 64 KB into the fixed form returns 0 under pipefail.
+#   §CENSUS-COMPLETE-1   a section with no census line, a suite with no heading and a suite with no line are refused.
+#   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
+#   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
+#   §CENSUS-1            a section the census culls that is still in its suite is refused.
+#   §CENSUS-2            a section the census keeps that is gone from its suite is refused.
+#   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
+#   §CENSUS-4            the real tests tree is cut as tests/CENSUS.md says.
+#   §ADR                 an ADR whose `status:` word differs from its `## Status` word is refused by file.
+#   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
+#
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
 # proven to be the hazard it stands for: it parses under `/bin/bash -n`, and run under
@@ -1601,11 +1629,12 @@ header_entries() {
     | sed 's/[._-]*$//' | LC_ALL=C sort -u
 }
 # body_keys <census_calls output> <suite file name> -> the keys of the suite's `section` calls, one per line: the
-# census key cut again at its first space.
+# census key cut again at its first space. A title with no ` — ` or `: ` and more than one word is a sentence, not a
+# key, and is left out.
 body_keys() {
   printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v S="$2" '$1 == S && $2 == "section" {
     k = $3; i = index(k, " — "); j = index(k, ": ")
-    if (i && (!j || i < j)) k = substr(k, 1, i - 1); else if (j) k = substr(k, 1, j - 1)
+    if (i && (!j || i < j)) k = substr(k, 1, i - 1); else if (j) k = substr(k, 1, j - 1); else if (k ~ /[ \t]/) next
     sub(/[ \t].*$/, "", k); sub(/[.,;:-]*$/, "", k); print k }' | LC_ALL=C sort -u
 }
 # header_refusals <tests dir> -> one line per suite whose header lists a section its body lacks, or whose body has a
@@ -1680,7 +1709,7 @@ hdr_suite() { # <name> <header entry keys, space-separated, - for none> <body se
     printf '%s\n' "$3" | tr '|' '\n' | while IFS= read -r t; do printf 'section "%s"\nexpect_eq a 1 1\n' "$t"; done
     printf 'finish\n'; } > "$out"
 }
-hdr_suite equal   "ONE TWO THREE" "ONE — the first|§TWO: the second|THREE"
+hdr_suite equal   "ONE TWO THREE" "ONE — the first|§TWO: the second|THREE|a sentence that names no key"
 hdr_suite ghost   "ONE TWO GHOST" "ONE: the first|TWO: the second"
 hdr_suite short   "ONE" "ONE: the first|TWO: the second"
 hdr_suite both    "ONE GHOST" "ONE: the first|TWO: the second"
@@ -1692,7 +1721,7 @@ expect_eq "the sweep reads the scratch header: three entries for equal, in order
   "$(header_entries "$HD/tests/equal.test.sh" | paste -sd'|' -)"
 expect_eq "…and the entry in a sentence (§ZZ) is not one, and a bare header lists none" "" \
   "$(header_entries "$HD/tests/bare.test.sh")"
-expect_eq "…the body keys of equal are the census keys cut at the first space, § dropped" "ONE|THREE|TWO" \
+expect_eq "…the body keys of equal are the census keys cut at the first space, § dropped, and a title that is a sentence has none" "ONE|THREE|TWO" \
   "$(body_keys "$(census_calls "$HD/tests")" equal.test.sh | paste -sd'|' -)"
 expect_eq "control: a header whose entries equal its body's keys, a header with no entry, a shared key, and a section call inside a heredoc body are refused for nothing" "" \
   "$(header_refusals "$HD/tests" | /usr/bin/grep -v '^ghost\|^short\|^both')"

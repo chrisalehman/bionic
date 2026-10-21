@@ -25,6 +25,7 @@
 #   §6  ADR-030, with `BIONIC_WALL_VERBOSE` UNSET — the state a real refusal runs in and
 #       the one no other detail assertion in this tree is taken in: an `exit2` wall's
 #       computed detail reaches the reader, at most twelve lines of it plus a `+N more`.
+#   §T47  a refusal never loses its own line to a long value.
 #
 # THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 rows say
 # what the stream IS — a verdict line, then the detail behind it — as a literal

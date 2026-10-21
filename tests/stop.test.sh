@@ -19,6 +19,18 @@
 #   §1  two verdicts block on one Stop -> BOTH reasons, blocks before advisories
 #   §2  one block and one advisory     -> the block first, the advisory kept
 #   §4  a SubagentStop payload         -> only the landing arm can speak
+#   §7  the real tick's turn, judged by the wall's own ready set
+#   §8  an amended Files: is the one the landing reads
+#   §9  the fill refusal's headline names only the rows the turn left out
+#   §GAP     one width fact and one refusal: the wall asks the gate as the tick does, and names
+#            every unanswered row once
+#   §UB      unbound means no run: two plans, two sessions, the real Stop per session
+#   §WAIT    a row waits by a dependency, a read of a ruling or an order; the refusal names the
+#            three, and a waiting row is not ready, so the turn ends
+#   §GONE    no verb records a wait in prose: decline is an unknown verb, nothing writes a decline
+#            or a lapse, and the Patrol prompt names none
+#   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
+#            the explanation is asked for, and the one report sentence is in the rules and the prompt
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the

@@ -22,7 +22,7 @@ created: 2026-10-18
 
 ## Status
 
-**Proposed** (Step 2, 2026-10-18). On Chris Lehman's ruling at wave-39 D7 "1". Reverses wave-36 D16 "2" and amends ADR-056's decision text ("a row born of that reading").
+**Accepted** (close-out, 2026-10-19; Proposed at Step 2, 2026-10-18). On Chris Lehman's ruling at wave-39 D7 "1". Reverses wave-36 D16 "2" and amends ADR-056's decision text ("a row born of that reading").
 
 ## Context
 

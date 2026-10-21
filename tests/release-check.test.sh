@@ -31,18 +31,6 @@
 #                   stated sentence of the bound plan; Migration names every row that added a refusal; every
 #                   build row names its record; the 1.18.0 block is as released; help.md and version.md
 #                   read the version and `render.sh --check` is green. Each rule has a doctored copy.
-#   §REL-1.22.0     the 1.22.0 entry (wave-39 AC-19.1, AC-13.2, AC-20.3): dated; one summary sentence reverses
-#                   1.21.0's fold of the Step-0 card (T17) and the summary quotes D3; the Migration paragraph says the
-#                   typed and config `floor` spellings are removed and names `rigor-minimum:`; every landed build row
-#                   names its record; D1 to D24 each head a section and D25 to D27 are named; the landing numbers carry
-#                   reused=8, the median and the one-file sentence, which states the 58.4 minutes T47 and T48
-#                   measured; Known limits state AC-2.4's measured 62 of 63 and the entry says nothing "never
-#                   measured", "was not measured", "unproven" or "replaced by an index count", and the five
-#                   sentences the first correction left wrong read as corrected (the second whole run ends at 12:30 PM PDT,
-#                   the landing numbers are over the six multi-file build rows, the measured-rows limit cites
-#                   auditor-evidence-2.md finding 4, the regression limit names the regression log and what it shows);
-#                   Standing reds and Known limits stand, the latter with the critic's two deferred sentences. Each
-#                   rule has a doctored copy that goes red.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
