@@ -74,7 +74,7 @@ task: id=T41 step=5 state=pending desc=the whole regression at the build head no
 task: id=T47 step=8 state=pending desc=merge into main note=waits on the release card
 metric.completed: 5 of 10 tasks (50%)
 metric.pace: 5 tasks in 3 h 50 min; the plan allowed 3 h 10 min for them
-metric.correctness: 1 tests red; no reviews yet; 0 open findings
+metric.correctness: 1 test red; no reviews yet; 0 open findings
 metric.waste: 2 tasks dropped; 0 of 25 suite runs discarded; 60 minutes idle
 metric.goals: 0 of 3 met; 3 not measured yet
 goal: name=owed status=not measured measure=the user says what they owe — not measured
@@ -123,7 +123,7 @@ SC_WANT_OWED='Sitrep · bionic 1.24.0 · wave 41 · Tuesday 2:40 PM
   Metrics
     • Completed: 5 of 10 tasks (50%)
     • Pace: 5 tasks in 3 h 50 min; the plan allowed 3 h 10 min for them
-    • Correctness: 1 tests red; no reviews yet; 0 open findings
+    • Correctness: 1 test red; no reviews yet; 0 open findings
     • Waste: 2 tasks dropped; 0 of 25 suite runs discarded; 60 minutes idle
     • Goals: 0 of 3 met; 3 not measured yet
 
@@ -258,8 +258,14 @@ expect_eq "SH2 a step row above its own tasks is refused" "1" "$SC_RC"
 expect_contains "SH2b …naming the step" "4: " "$SC_ERR"
 SC_DONE4="$(printf '%s\n' "$SC_OWED" | sed 's/^step: n=4 name=Implement state=running/step: n=4 name=Implement state=done/')"
 sc_card "$SC_DONE4" "$SC_J_OWED"
-expect_eq "SH2c a sheet whose finished step still holds open tasks draws the step row above them, and the card is refused" \
-  "1|" "$SC_RC|$SC_OUT"
+expect_eq "SH2c a step the run has finished that still holds open tasks is drawn as a running step: the card prints (exit 0), no step row for 4, its open tasks on their own rows" "0|0|1|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    [✅⬜] 4: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ⬜ 4/40: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ✅ 4/3–4/13: 3 tasks finished$')"
+SC_PASSED="$(printf '%s\n' "$SC_OWED" | sed -e 's/^\(step: n=[4567] name=[A-Za-z]* state=\)[a-z]*/\1done/')"
+expect_eq "SH2d precondition: the fixture is at a later step, steps 4 to 7 done, with 5/41 still pending" "4|1" \
+  "$(printf '%s\n' "$SC_PASSED" | /usr/bin/grep -c '^step: n=[4567] .* state=done')|$(printf '%s\n' "$SC_PASSED" | /usr/bin/grep -c '^task: id=T41 step=5 state=pending')"
+sc_card "$SC_PASSED" "$SC_J_OWED"
+expect_eq "SH2e a passed step with an open task draws no step row above it: the card prints, 5/41 on its own row, no row for step 5, and the finished steps without tasks stay one row" "0|1|0|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ⬜ 5/41: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    [✅⬜] 5: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ✅ 6: Review$')"
 sc_check "$SC_OWED" "$(printf '%s\n' "$SC_WANT_OWED" | awk '{ print } /^    ⬜ 4\/40:/ { print }')"
 expect_eq "SH3 an open task on two rows is refused" "1" "$SC_RC"
 expect_contains "SH3b …naming the task" "4/40" "$SC_ERR"
@@ -281,6 +287,43 @@ expect_eq "SH7 a long point folds, its continuation hung under its text, and the
 expect_eq "SH7b …every line within the width (SH7 rendered it)" "" "$(sc_wide "$SC_WRAP")"
 expect_nonempty "SH7c …the continuation opens six spaces in, under the bullet's text" \
   "$(printf '%s\n' "$SC_WRAP" | /usr/bin/grep -E '^      word ')"
+
+# A task row is one line. Its description is cut at a word and ends in "…" so the label, the glyph and the note print
+# whole; the check refuses a row that spans two lines.
+SC_LONG="Open the pull request from wave/42-sitrep-owes to main on the release approval card's word and wait for the merge"
+SC_LONGSHEET="$(printf '%s\n' "$SC_OWED" | sed "s|desc=a check rewrite never passes unjudged|desc=$SC_LONG|")"
+sc_card "$SC_LONGSHEET" "$SC_J_OWED"
+SC_LONGCARD="$SC_OUT"
+SC_ROW="$(printf '%s\n' "$SC_LONGCARD" | /usr/bin/grep -F '    ⬜ 4/40: ')"
+expect_eq "SH8 a task description too long for its row: the card passes (exit 0), the open task on exactly one row" "0|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_LONGCARD" | /usr/bin/grep -c '^    ⬜ 4/40: ')"
+expect_eq "SH8b …the line after it is the next task's own row, not a continuation" "    ⬜ 4/7: the width pins — red" \
+  "$(printf '%s\n' "$SC_LONGCARD" | awk 'f { print; exit } index($0, "    ⬜ 4/40: ") == 1 { f = 1 }')"
+expect_eq "SH8c …the description ends in an ellipsis before the note, which prints whole" "yes" \
+  "$([ "${SC_ROW%… — running}" != "$SC_ROW" ] && echo yes)"
+SC_CUT="${SC_ROW#    ⬜ 4/40: }"; SC_CUT="${SC_CUT%… — running}"
+expect_eq "SH8d …cut at a word: what is left is the description's start, not empty, and the next character is a space" "yes|yes" \
+  "$([ -n "$SC_CUT" ] && [ "${SC_LONG:0:${#SC_CUT}}" = "$SC_CUT" ] && echo yes)|$([ "${SC_LONG:${#SC_CUT}:1}" = " " ] && echo yes)"
+SC_NEXTW="${SC_LONG:$((${#SC_CUT} + 1))}"; SC_NEXTW="${SC_NEXTW%% *}"
+_bionic_cols_into "    ⬜ 4/40: $SC_CUT ${SC_NEXTW}… — running"
+expect_eq "SH8e …and not cut short: the next word would not have fitted in $BIONIC_LINE_WIDTH columns" "yes" \
+  "$([ "$BIONIC_COLS" -gt "$BIONIC_LINE_WIDTH" ] && echo yes)"
+expect_eq "SH8f …every line of the card is within the width" "" "$(sc_wide "$SC_LONGCARD")"
+sc_check "$SC_LONGSHEET" "$SC_LONGCARD"
+expect_eq "SH9 control: that card passes the check (exit 0, nothing said)" "0||" "$SC_RC|$SC_OUT|$SC_ERR"
+SC_WRAPPED="$(printf '%s\n' "$SC_LONGCARD" | awk 'index($0, "    ⬜ 4/40: ") == 1 { i = index($0, " — running"); print substr($0, 1, i - 1); print "       " substr($0, i + 1); next } { print }')"
+expect_eq "SH9a precondition: the planted card has the 4/40 row on two lines, one line more than the card" "yes" \
+  "$([ "$(printf '%s\n' "$SC_WRAPPED" | wc -l)" -eq $(( $(printf '%s\n' "$SC_LONGCARD" | wc -l) + 1 )) ] && echo yes)"
+sc_check "$SC_LONGSHEET" "$SC_WRAPPED"
+expect_eq "SH9b a task row continued on a second line is refused" "1" "$SC_RC"
+expect_contains "SH9c …saying the row spans two lines" "spans two lines" "$SC_ERR"
+SC_WRAPPED2="$(printf '%s\n' "$SC_WANT_OWED" | awk '$0 == "    ✅ 3: Plan — 2 tasks" { print "    ✅ 3: Plan"; print "       — 2 tasks"; next } { print }')"
+sc_check "$SC_OWED" "$SC_WRAPPED2"
+expect_eq "SH9d a finished row continued on a second line is refused too" "1" "$SC_RC"
+SC_LONGDONE="$(printf '%s\n' "$SC_OWED" | sed -e "s|^task: id=T13 step=4 state=done|task: id=T13 step=4 state=running|" -e "s|^task: id=T4 step=4 state=done|task: id=T4 step=4 state=running|" -e "s|desc=The register|desc=$SC_LONG $SC_LONG|")"
+sc_card "$SC_LONGDONE" "$SC_J_OWED"
+expect_eq "SH10 a finished task's row, alone in its step, is one line too: within the width, ending in an ellipsis" "0||yes" \
+  "$SC_RC|$(sc_wide "$SC_OUT")|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -F '    ✅ 4/3: ' | /usr/bin/grep -c '…$' | sed 's/^1$/yes/')"
 
 # ============================================================
 section "§WORDS: \"reader\" in the judgment refuses the card; an unmeasured goal prints \"not measured\""

@@ -593,7 +593,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # stands (read-only: no git counting, no liveness), saying what each does: `in its landing, <n> of <m> suites green`,
 # `queued behind <task>`, `next on the line`, or `building`. The rest in dependency order over `units_edges`, each
 # saying what it `waits on` (`units_waiting`: the writer task, else the read in words, the first named and the others
-# counted, `waits on <task> +8`). A task with a red at head is failed (`red`); one waiting on an approval the user owes, or
+# counted, `waits on <label> +8`; a task is named by the label its card row prints, its step, a slash and its id
+# without the T, as `queued behind <label>` names one). A task with a red at head is failed (`red`); one waiting on an approval the user owes, or
 # whose status is held, is held. The description is the task's cell up to its first " (", ": ", ". " or " · ".
 #
 # THE CLOSE IS A FLOOR OR A FORECAST, NEVER NOW. L = max(the longest open chain, all open work ÷ the admitted count) in
@@ -642,6 +643,9 @@ sitrep_dur() {
   awk -v m="$1" 'BEGIN { m = int(m + 0.5); h = int(m / 60); r = m - h * 60
     if (h == 0) printf "%d min\n", r; else if (r == 0) printf "%d h\n", h; else printf "%d h %d min\n", h, r }'
 }
+
+# sitrep_noun <n> <singular> <plural> -> the word that agrees with <n>: one task, two tasks
+sitrep_noun() { if [ "$1" = 1 ]; then printf '%s' "$2"; else printf '%s' "$3"; fi; }
 
 # sitrep_list <cap> <word>… -> the words as prose, `A`, `A and B`, `A, B and C`, the first <cap> named and the rest
 # counted (`A, B, C and 6 more`); nothing for no word
@@ -801,8 +805,10 @@ sitrep_close() {
 }
 
 # sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`), then `N<TAB><count>`
-# of red runs at head. A red is at head while it is its row and suite's newest verdict and the row has not been
-# published since; a later green on that row and suite, or the row's landing, answers it.
+# of the reds at head. A row's red is at head while it is its row and suite's newest verdict and the row has not been
+# published since; a later green on that row and suite, or the row's landing, answers it. A suite the line recorded
+# `standing` is red at head too, whoever added the red, until a later green verdict of that suite (any row) answers
+# it; it marks no row red, and a standing suite that a row's red run also names is counted once.
 sitrep_reds() {
   [ -f "$1" ] && [ ! -L "$1" ] || { printf 'N\t0\n'; return 0; }
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
@@ -810,10 +816,19 @@ sitrep_reds() {
     (ev = line_ev()) == "" { next }
     { rk = line_kv("row") }
     ev == "verdict" && line_kv("kind") == "regression" { next }   # facts of the whole run: no row holds them
-    ev == "verdict" && rk != "" { k = rk SUBSEP line_kv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = line_kv("result"); next }
+    ev == "standing" { st = line_kv("suite"); sub(/.*\//, "", st); if (st != "") stand[st] = 1; next }
+    ev == "verdict" && rk != "" {
+      k = rk SUBSEP line_kv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = line_kv("result")
+      st = line_kv("suite"); sub(/.*\//, "", st); if (line_kv("result") == "green") delete stand[st]
+      next
+    }
     ev == "published" && rk != "" { for (i = 1; i <= n; i++) { split(ord[i], p, SUBSEP); if (p[1] == rk) last[ord[i]] = "landed" } }
     END {
-      for (i = 1; i <= n; i++) if (last[ord[i]] == "red") { split(ord[i], p, SUBSEP); c++; if (!(p[1] in said)) { said[p[1]] = 1; printf "R\t%s\n", p[1] } }
+      for (i = 1; i <= n; i++) if (last[ord[i]] == "red") {
+        split(ord[i], p, SUBSEP); c++; st = p[2]; sub(/.*\//, "", st); red[st] = 1
+        if (!(p[1] in said)) { said[p[1]] = 1; printf "R\t%s\n", p[1] }
+      }
+      for (st in stand) if (!(st in red)) c++
       printf "N\t%d\n", c + 0
     }' "$1"
 }
@@ -1022,6 +1037,10 @@ sitrep_gather() {
       if (index(r, "step:") == 1) return "step " substr(r, 6)
       return r
     }
+    function label(w) {   # a task is named by the label its row prints on the card: its step, a slash, its id without the T
+      if (!(w in at)) return w
+      return (stp[at[w]] == "" ? "-" : stp[at[w]]) "/" ((substr(w, 1, 1) == "T") ? substr(w, 2) : w)
+    }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
       d = task_name(tk[i]); if (d == "") d = "-"
@@ -1058,8 +1077,8 @@ sitrep_gather() {
       for (q = 1; q <= nq; q++) {
         i = at[qr[q]]; if (i == "" || st[i] != "active" || (i in placed)) continue
         placed[i] = 1
-        if (qc[q] != "-" && qc[q] != "") note = ((qo[q] == "stalled") ? "stalled in its landing, " : "in its landing, ") ((qm[q] + 0 > 0) ? qg[q] " of " qm[q] " suites green" : "no suite to run")
-        else note = (prev == "") ? "next on the line" : "queued behind " prev
+        if (qc[q] != "-" && qc[q] != "") note = ((qo[q] == "stalled") ? "stalled in its landing, " : "in its landing, ") ((qm[q] + 0 > 0) ? qg[q] " of " qm[q] ((qm[q] + 0 == 1) ? " suite" : " suites") " green" : "no suite to run")
+        else note = (prev == "") ? "next on the line" : "queued behind " label(prev)
         row(i, "s", note); prev = qr[q]
       }
       for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) row(i, "s", "building")
@@ -1080,7 +1099,7 @@ sitrep_gather() {
         for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
         if (st[pick] == "held") { row(pick, "s", "held"); continue }
         if (st[pick] != "pending" || !(id[pick] in wfirst)) { row(pick, "b", ""); continue }
-        note = "waits on " wfirst[id[pick]]   # the first blocker, the others counted
+        note = "waits on " label(wfirst[id[pick]])   # the first blocker, the others counted
         if (wcount[id[pick]] > 1) note = note " +" (wcount[id[pick]] - 1)
         row(pick, "s", note)
       }
@@ -1103,8 +1122,8 @@ sitrep_gather() {
   done <<SITREP_SIT
 $sit
 SITREP_SIT
-  SG_COMPLETED="$landed of $total tasks ($([ "$total" -gt 0 ] && echo $(( (landed * 200 + total) / (total * 2) )) || echo 0)%)"
-  SG_TASKCOUNT="$landed of $total tasks"
+  SG_COMPLETED="$landed of $total $(sitrep_noun "$total" task tasks) ($([ "$total" -gt 0 ] && echo $(( (landed * 200 + total) / (total * 2) )) || echo 0)%)"
+  SG_TASKCOUNT="$landed of $total $(sitrep_noun "$total" task tasks)"
   SG_LAST="-"; [ -z "$last_id" ] || SG_LAST="$last_id at $(sitrep_clock "$last_at" "$now")"
 
   # ---- the steps: before current: done, current: and any later step a landed or active task stands at running
@@ -1192,7 +1211,7 @@ SITREP_SIT
   local pf k took planned rv q sc res at ev nf passed=0 failed=0 running=0 open dropped idle_min idle_words rg rr rn rd rk g m st t md rdg
   pf="$(sitrep_pace_facts "$plan" "$root")"
   IFS='	' read -r k _ took planned <<< "$pf"
-  SG_PACE="${k:-0} tasks in $(sitrep_dur "${took:-0}"); the plan allowed $(sitrep_dur "${planned:-0}") for them"
+  SG_PACE="${k:-0} $(sitrep_noun "${k:-0}" task tasks) in $(sitrep_dur "${took:-0}"); the plan allowed $(sitrep_dur "${planned:-0}") for them"
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
   while IFS='	' read -r q sc res at ev nf; do
@@ -1214,7 +1233,7 @@ $(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); 
 SITREP_RUNNING
   # a record read twice (a re-run's result beside the first) counts its findings once, as it stands now
   open="$(printf '%s\n' "$rv" | awk -F'\t' 'NF >= 6 { o[$5] = $6 } END { for (e in o) t += o[e]; print t + 0 }')"
-  SG_CORRECT="${SG_NRED:-0} tests red; $passed reviews passed, $failed failed, $running running; $open open findings"
+  SG_CORRECT="${SG_NRED:-0} $(sitrep_noun "${SG_NRED:-0}" test tests) red; $passed $(sitrep_noun "$passed" review reviews) passed, $failed failed, $running running; $open open $(sitrep_noun "$open" finding findings)"
   dropped="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "dropped" { n++ } END { print n + 0 }')"
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
@@ -1225,8 +1244,8 @@ SITREP_RUNNING
     *) rg=0 rr=0 rn=0 rd=0 ;;
   esac
   rk="${lr1##*killed=}"; case "$rk" in ''|*[!0-9]*) rk=0 ;; esac
-  if [ -n "$idle_min" ]; then idle_words="$idle_min minutes idle"; else idle_words="idle minutes unverified"; fi
-  SG_WASTE="$dropped tasks dropped; $((rd + rk)) of $((rg + rr + rn + rd + rk)) suite runs discarded; $idle_words"
+  if [ -n "$idle_min" ]; then idle_words="$idle_min $(sitrep_noun "$idle_min" minute minutes) idle"; else idle_words="idle minutes unverified"; fi
+  SG_WASTE="$dropped $(sitrep_noun "$dropped" task tasks) dropped; $((rd + rk)) of $((rg + rr + rn + rd + rk)) suite $(sitrep_noun "$((rg + rr + rn + rd + rk))" run runs) discarded; $idle_words"
   # the goals, each status the one function's
   SG_GOAL_LINES=""; g=0; m=0; k=0
   # split by hand: a goal with no measure has an empty field, which a tab-split read would close up
