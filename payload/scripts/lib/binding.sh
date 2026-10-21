@@ -315,7 +315,13 @@ bind_record_session() {  # <plan> <sid> <act>
   case " $BIND_SESSION_ACTS " in *" $act "*) ;; *) BIND_SESSION="act"; return 2 ;; esac
   case "$sid" in ''|unknown|*[!A-Za-z0-9_-]*) BIND_SESSION="failed"; return 3 ;; esac
   { [ -f "$plan" ] && [ ! -L "$plan" ]; } || { BIND_SESSION="failed"; return 3; }
-  if bind_sessions "$plan" | grep -qxF -- "$sid"; then BIND_SESSION="present"; return 1; fi
+  # PRESENCE IS READ FROM THE WHOLE LIST. The ids are collected, then tested, so no reader sits on a writer's pipe
+  # to quit at the first match: under `set -o pipefail` a writer killed by that closed pipe fails the pipeline, a
+  # session already on a long plan reads absent, and the call records it a second time. An unreadable plan reads
+  # as no ids, as the failed pipeline read as absent.
+  local ids nl=$'\n'
+  ids=$(bind_sessions "$plan") || ids=""
+  case "$nl$ids$nl" in *"$nl$sid$nl"*) BIND_SESSION="present"; return 1 ;; esac
   iso=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) && [ -n "$iso" ] || { BIND_SESSION="failed"; return 3; }
   line="- session: $sid bound $iso by $act"
   sum=$(cksum < "$plan" 2>/dev/null) || { BIND_SESSION="failed"; return 3; }

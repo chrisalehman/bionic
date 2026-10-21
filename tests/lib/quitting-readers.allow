@@ -20,5 +20,4 @@ hooks/poker/roster.sh:roster_open_names "$ROSTER_FILE" # the writer prints the o
 hooks/poker/tick.sh:landing_carrier_names "$POKER_RUN_PLAN" | /usr/bin/grep -qxF # the writer prints one name per live landing carrier of one plan
 payload/scripts/close-out.sh:epic_shipped_table "$EPIC_PLAN" | grep -qE # the writer prints the shipped table of one epic plan, a row per wave
 payload/scripts/lib/alias.sh:printf '%s\n' "$text" | awk -v k="$mo" # the writer is one config file or one frontmatter, read once
-payload/scripts/lib/binding.sh:bind_sessions "$plan" | grep -qxF # fixed by its own row, which reads the list to the end
 payload/scripts/lib/walls.sh:if head -c 8192 "$f" # the writer is head -c 8192, so at most 8 KB
