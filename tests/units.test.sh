@@ -42,6 +42,8 @@
 # HERMETIC. Every fixture is a file under one mktemp sandbox; nothing reads the repository's
 # own plans, no hook runs, and the library is sourced in a CHILD shell per call so no row can
 # be answered by a function an earlier row left defined in this one.
+# §WALK alone is live tier: it reads this repository's own release merges, read-only, and skips
+# by version and hash a merge the history does not hold.
 #
 # Usage: bash tests/units.test.sh
 
@@ -1012,6 +1014,36 @@ git -C "$RR" add -A; git -C "$RR" commit -qm release; RH="$(git -C "$RR" rev-par
 printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\nproved: kind=check head=%s at=2026-01-01T00:00:00Z evidence=check.log\n' "$RH" > "$RR/plan.md"
 cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RB" "$RH"; }
 expect_eq "a release commit with the check suite and a promoted ADR, a check passing at it: release" "$(printf 'cover %s release\nrc=0' "$RH")" "$(cover)"
+
+section "§WALK — the regression walk excuses a real release merge whose check passed, as the judge's cover reads it"
+# ============================================================
+
+# A path's place in the release set is asked apart from its place in the docs: CHANGELOG.md is in both, and a release
+# merge whose every path is in the set is excused by the check that passed at it, never sent to a landing row. Live
+# tier, read-only: this repository's own release merges, pinned by hash, skipped by version and hash when absent.
+# Without the check line the same merge is named as not proved, so the excuse is the check's.
+WK_PASS="$SANDBOX/walk-pass.md"; WK_NONE="$SANDBOX/walk-none.md"
+printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\n' > "$WK_NONE"
+cp "$WK_NONE" "$WK_PASS"
+walk() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4^1" "$4" ""; echo "rc=$?"' _ "$PROOF_LIB" "$1" "$REPO_ROOT" "$2" </dev/null; }
+expect_eq "WALK-0 the release commit built above, CHANGELOG.md among its paths, a check passing at it: excused (rc 0)" "rc=0" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" ""; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RR" "$RB" "$RH" </dev/null)"
+WK_N=0
+while read -r v m; do
+  if ! git -C "$REPO_ROOT" cat-file -e "$m^{commit}" 2>/dev/null || ! git -C "$REPO_ROOT" cat-file -e "$m^1^{commit}" 2>/dev/null; then
+    echo "SKIP: WALK $v merge ${m:0:12}: the merge $m or its first parent is absent from this repository"; continue
+  fi
+  WK_N=$((WK_N + 1))
+  printf 'proved: kind=check head=%s at=2026-10-20T00:00:00Z evidence=check-%s.log\n' "$m" "$v" >> "$WK_PASS"
+  expect_eq "WALK-$WK_N the $v merge ${m:0:12} with no check and no landing row: the walk names it not proved (rc 1)" \
+    "$(printf 'commit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it\nrc=1' "$m")" \
+    "$(walk "$WK_NONE" "$m")"
+  expect_eq "WALK-${WK_N}b …with a check passing at it: excused, nothing printed (rc 0)" "rc=0" "$(walk "$WK_PASS" "$m")"
+done <<EOF
+1.23.0 f75f8bbc7cd78a963f6b9f922bb2fd1af2933335
+1.22.0 1c451183069a6c78a53d57135f36b7bb1a2b2d1e
+1.21.0 7d5a0f719fbbf106226a41cf93c17f1d0355ee12
+EOF
 
 # ============================================================
 finish

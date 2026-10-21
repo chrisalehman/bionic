@@ -460,6 +460,35 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
   roster_mark_landed "$roster" "$LINE_WRITER" "$4" "$5" && LINE_MARKED="$LINE_WRITER"
 }
 
+# THE RELEASE ROW'S COVER. The release row is a doc row at step 7 or later, as the plan's order check and
+# units_order read it. Its merge first exists here, so its landing prints the judge's basis of its own candidate
+# (lib/proof.sh `proof_door_cover`): `COVER <row> <candidate> release`, or `… owes outside=<paths>` naming each
+# path outside the release set, since past such a merge no reading reaches. A line, never a refusal: a release may
+# have to touch a path the set lacks, and the person who reads the line decides.
+_line_release_row() {  # <plan> <row> -> 0 when the row is a doc row at step 7 or later
+  local rec s
+  _wt_units_load || return 1
+  while IFS= read -r rec; do
+    [ "$(units_field "$rec" id)" = "$2" ] || continue
+    [ "$(units_field "$rec" kind)" = doc ] || return 1
+    s="$(units_field "$rec" step)"
+    case "$s" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$s" -ge 7 ]; return
+  done <<EOF
+$(units_rows "$1" 2>/dev/null)
+EOF
+  return 1
+}
+_line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
+  local b
+  _line_release_row "$1" "$2" && _line_load_proof && declare -F proof_door_cover >/dev/null 2>&1 || return 0
+  b="$(proof_door_cover "$3" "$4" "$5")" || return 0
+  case "$b" in
+    owes*) printf 'COVER %s %s owes outside=%s — the release row touches paths outside the release set, so the judge reads its merge as owing and no reading reaches past it; land them in a row of their own, or add them to the set (lib/proof.sh _proof_release_path)\n' "$2" "$5" "${b#*	}" ;;
+    *) printf 'COVER %s %s %s\n' "$2" "$5" "$b" ;;
+  esac
+}
+
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
   local name com present base cand out sui car cbase cat br tr co rc run moved at rundir lt
@@ -533,6 +562,7 @@ EOF
   [ -z "$LINE_DEBT_ID" ] \
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
          "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$rec"
+  _line_cover "$plan" "$row" "$root" "$head" "$cand"
   # 9. THE PLAN WRITE (T6): the row's status, its `- T<n>:` line and its ledger line, in one
   # transaction, at the publish's own instant. A refusal now is after the publish: it is printed, with
   # what is owed by hand, and the publish stands.
