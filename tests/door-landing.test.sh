@@ -20,6 +20,10 @@
 #            outside the closure lands, beside it, and so does one that changes a closure member outside the
 #            directory of the declared script (payload/scripts/lib/said.sh): the arm reaches the check, not the code
 #            it loads.
+#   §COPY-3  the same pieces under a check declared by absolute path under the checkout: the closure reads that word as
+#            the repository path it names, so the rewrite is refused as §COPY-2 refuses it and a code-only piece
+#            lands; an absolute word outside the checkout (a prefix sibling, a path that only ends like a held one)
+#            names no member.
 #   §NAMED   the target's committed check carries a bug and a piece fixes it: the hand door refuses the fix with
 #            `judged-by=target script=<path>@<accepted head> changed-here=<path>`, says a fix to the check cannot
 #            pass its own door and names the person's route. With the arm deleted the refusal carries no field;
@@ -353,6 +357,44 @@ expect_eq "(c2-4) a piece that changes a closure member outside the directory of
   "0" "$DOOR_RC"
 expect_contains "(c2-4b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
 expect_absent "(c2-4c) …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§COPY-3: a check declared by absolute path has the same closure as one declared relative"
+
+# The door runs the declaration in the target checkout, so an absolute path under that checkout names the same file
+# as the relative one, and the always-refuse arm must judge it.
+dl_abs() { printf 'release-check: bash %s %s\n' "$2" "$DL_LIST" > "$1/.bionic/config.yaml"; }   # <root> <script word>
+
+dl_copy2 copy3-rewrite rewrite
+dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
+DQ_CL="$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "bash $DQ/tests/lib/release-check.sh $DL_LIST") )"
+expect_eq "(c3-1-0) precondition: the closure of the absolute declaration holds the check, as the relative one does, and the target's copy passes over the piece" \
+  "1 0" "$(printf '%s\n' "$DQ_CL" | /usr/bin/grep -cxF tests/lib/release-check.sh) $DQ_RC"
+door_land "$DQ" "$DL_QP"
+dl_judged c3-1 "$DQ" "$DQ_H0"
+
+dl_copy2 copy3-code code
+dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
+door_land "$DQ" "$DL_QP"
+expect_eq "(c3-2) CONTROL the same absolute declaration and a piece that changes one code file: lands by hand (exit 0)" \
+  "0" "$DOOR_RC"
+expect_contains "(c3-2b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
+expect_absent "(c3-2c) CONTROL …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+
+# A word outside the checkout names no member: one that only shares the checkout name as a prefix (the fixture's own
+# list is such a sibling), one whose tail repeats a path the commit holds, and one before the real script.
+dl_c3_closure() { ( . "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "$1"; echo "rc=$?" ); }   # <declaration>
+DQ_IN="$(dl_c3_closure "bash $DQ/tests/lib/release-check.sh $DL_LIST")"
+expect_contains "(c3-3-0) CONTROL precondition: the closure of the declaration inside the checkout holds the check" \
+  "tests/lib/release-check.sh" "$DQ_IN"
+DQ_OUT="$(dl_c3_closure "bash ${DQ}-names.list")"
+expect_eq "(c3-3a) a declaration whose absolute word shares only the checkout's name as a prefix names no member (rc 1)" "rc=1" "$DQ_OUT"
+DQ_OUT="$(dl_c3_closure "bash /nonexistent-c3/tests/lib/release-check.sh")"
+expect_eq "(c3-3b) a declaration whose absolute word outside the checkout ends in a path the commit holds names no member (rc 1)" \
+  "rc=1" "$DQ_OUT"
+DQ_OUT="$(dl_c3_closure "bash /nonexistent-c3/x.sh tests/lib/release-check.sh")"
+expect_eq "(c3-3c) …and it is skipped, not the end of the declaration: a relative script after it is the member" \
+  "tests/lib/release-check.sh rc=0" "$(printf '%s\n' "$DQ_OUT" | /usr/bin/grep -xF -e tests/lib/release-check.sh -e rc=0 | paste -sd' ' -)"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§NAMED: a landing that changes the check which judges it is refused naming the judge, the change and the route"

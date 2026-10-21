@@ -1002,11 +1002,24 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
 # check that comes to load a new library brings it into its closure by that load alone.
 _wt_check_closure() {  # <repo dir> <rev> <check command> -> the members' paths, one per line · 1 when no script
   local dir="$1" rev="$2" cmd="$3" nl='
-' held w script queue f seen
+' held w script queue f seen top rel p
   held="$(git -C "$dir" ls-tree -r --name-only "$rev" 2>/dev/null)" || return 1
+  top="$(cd "$dir" 2>/dev/null && pwd -P)" || top=""
   script=""
   while IFS= read -r w; do
     w="${w#./}"
+    # The command runs in the checkout, so an absolute word under it names the file its relative path names; one
+    # outside it (a list in the user's own directory) is no file the commit holds. The match is on whole path
+    # components, so a sibling that shares the checkout's name as a prefix stays outside.
+    case "$w" in
+      /*) rel=""
+          for p in "$top" "${dir%/}"; do
+            [ -n "$p" ] || continue
+            case "$w" in "$p"/?*) rel="${w#"$p"/}"; break ;; esac
+          done
+          [ -n "$rel" ] || continue
+          w="$rel" ;;
+    esac
     case "$w" in ''|/*|-*) continue ;; esac
     case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) script="$w"; break ;; esac
   done <<EOF
