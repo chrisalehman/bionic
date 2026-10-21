@@ -24,7 +24,8 @@ set +x +v
 #      fold the sentence was written through. A missing one is ONE line naming the finding and the
 #      sentence, and exit 1. An open deferral rated `defer` that states none, or a `-` for one (the form a
 #      carried unstated deferral is written in), is ONE line naming the finding, and exit 1: no sentence is
-#      no limit to carry. The plan is read from the working files: `.bionic/` is ignored, so the
+#      no limit to carry, for a release at or past LIM_RULE_FROM only: an earlier release's unstated deferral is
+#      passed over, its known-limits line unchanged. The plan is read from the working files: `.bionic/` is ignored, so the
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
 #      sentences held says how many, in one such line. Generalised from the §CORR rule of
@@ -83,6 +84,25 @@ elif [ "$chg_version" != "$plugin_version" ]; then
 fi
 
 # ---- the Known limits of the release being shipped -------------------------------------------
+# The first release the unstated-deferral refusal applies to. Releases before it shipped under the older rule,
+# which let a deferral go unstated, so theirs are passed over: not counted, not refused. From this release on an
+# unstated or dashed defer deferral refuses the release. A stated deferral is held to Known limits at every release.
+LIM_RULE_FROM=1.24.0
+# lim_version_at_least <a> <b> -> exit 0 when dotted version <a> is at or past <b>, compared part by part as
+# integers (1.9.9 is below 1.24.0, which a string compare gets wrong); a missing part reads as 0.
+lim_version_at_least() {
+  local a="$1" b="$2" x y
+  while [ -n "$a$b" ]; do
+    x="${a%%.*}"; y="${b%%.*}"
+    case "$a" in *.*) a="${a#*.}" ;; *) a="" ;; esac
+    case "$b" in *.*) b="${b#*.}" ;; *) b="" ;; esac
+    x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"
+    x=$((10#${x:-0})); y=$((10#${y:-0}))
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+  done
+  return 0
+}
 # entry_part <changelog text> <version> <part> -> the lines of that entry's `### <part>`, up to the next `### ` or
 # `## ` heading.
 entry_part() {
@@ -136,6 +156,10 @@ lim_check() {  # <version> <changelog text> -> one line per omission, or one kno
     while read -r id s r p t; do
       [ "$p" = defer ] || continue
       st="$(said_fold "$(lim_sentence "$plan" "$id")")"
+      # Before the floor an unstated deferral, or a dash for one, is passed over as the older rule passed it.
+      if ! lim_version_at_least "$ver" "$LIM_RULE_FROM"; then
+        { [ -z "$st" ] || [ "$st" = - ]; } && continue
+      fi
       # A deferral with no sentence, or a dash where it would stand, leaves nothing for Known limits to carry.
       if [ -z "$st" ] || [ "$st" = - ]; then
         echo "release-check: $ver defers $id with no stated sentence; state it or fix it"
