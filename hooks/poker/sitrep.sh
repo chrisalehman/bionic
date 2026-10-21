@@ -348,21 +348,22 @@ sitrep_open_decisions() {
     END { for (i = 1; i <= n; i++) printf "decide:%s\t-\treply to %s\t%s · %s: reply with the option number\n", a[i], a[i], a[i], title[a[i]] }'
 }
 
-# sitrep_decisions <ledger> <record dir> -> the decisions indicator line. Each review results page the run put is a
-# round of the review results, ruled once the newest is replied. The mark is the most rounds any one decision took:
+# sitrep_decisions <ledger> <record dir> -> the decisions indicator line. Each release approval page the run put is a
+# round of the release approval card, ruled once the newest is replied; a page written under the card's old stem
+# (`$RR_OLD_VERB`, set in session-poker.sh) counts as a round too. The mark is the most rounds any one decision took:
 # one within the bar, two near it, three or more over it; with nothing put or ruled, the no-record form.
 sitrep_decisions() {
   local f rr=""
-  for f in "$2"/review-results-*.md; do
+  for f in "$2"/release-approval-*.md "$2/$RR_OLD_VERB"-*.md; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
-    rr="$rr$(awk '
-      index($0, "review-results/v1|plan=") == 1 && match($0, /\|at=[^|]*/) { a = substr($0, RSTART + 4, RLENGTH - 4) }
+    rr="$rr$(awk -v OLD="$RR_OLD_VERB/v1|plan=" '
+      (index($0, "release-approval/v1|plan=") == 1 || index($0, OLD) == 1) && match($0, /\|at=[^|]*/) { a = substr($0, RSTART + 4, RLENGTH - 4) }
       index($0, "replied: ") == 1 { y = 1 }
       END { printf "%s\t%s\n", a, y ? "ruled" : "open" }' "$f" 2>/dev/null)
 "
   done
   { [ -f "$1" ] && [ ! -L "$1" ] && decisions_rounds "$1"
-    [ -z "$rr" ] || printf '%s' "$rr" | awk -F'\t' 'NF { n++; if ($1 >= a) { a = $1; s = $2 } } END { if (n) printf "the review results\t%d\t%s\n", n, s }'
+    [ -z "$rr" ] || printf '%s' "$rr" | awk -F'\t' 'NF { n++; if ($1 >= a) { a = $1; s = $2 } } END { if (n) printf "the release approval card\t%d\t%s\n", n, s }'
   } | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v R="$SITREP_MARK_NEAR" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
     function word(k,   w) { split("one two three four five six seven eight nine ten", w, " "); return (k >= 1 && k <= 10) ? w[k] : k }
     function list(a, m,   i, s, c) {  # the first six, then how many more
@@ -475,8 +476,9 @@ decisions_all() {
 #                   no launch of this plan on any roster.
 #   widest landing  `landing_report`'s rows: the queue landing with the largest `minutes=`, as printed. unverified when
 #                   no landing is measured.
-#   human-wait      the review results records (review-results-*.md beside the run's records, and the final-card-*.md
-#                   an older run wrote): each page's `at=` on its `review-results/v1|plan=` (or `final-card/v1|plan=`)
+#   human-wait      the release approval records (release-approval-*.md beside the run's records, and the pages an
+#                   older run wrote under the old stem or as final-card-*.md): each page's `at=` on its
+#                   `release-approval/v1|plan=` (or the old tags')
 #                   line to its `replied: at=`, summed and rounded. unverified with no record, or a record with no reply.
 # READ-ONLY. The rosters live in .bionic/tmp, which close-out's act 3 wipes, so close-out reads this before the wipe.
 # Set in hooks/session-poker.sh, before any part loads: SCORECARD_STOP_GAP.
@@ -510,10 +512,10 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
     NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
     END { if (b != "") print r " " b " min" }')"
-  wait="$(for f in "$recdir"/review-results-*.md "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk "$_PATROL_ISO_AWK"'
+  wait="$(for f in "$recdir"/release-approval-*.md "$recdir/$RR_OLD_VERB"-*.md "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v OLD="$RR_OLD_VERB/v1|plan=" "$_PATROL_ISO_AWK"'
     { file = $0; a = ""; r = ""
       while ((getline l < file) > 0) {
-        if (index(l, "review-results/v1|plan=") == 1 || index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
+        if (index(l, "release-approval/v1|plan=") == 1 || index(l, OLD) == 1 || index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
         else if (index(l, "replied: at=") == 1) { r = substr(l, 13); sub(/ .*/, "", r) }
       }
       close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
@@ -1153,11 +1155,11 @@ SITREP_OWED
   [ -z "$inflight" ] || parts="$(sitrep_list 5 $inflight) in flight"
   # shellcheck disable=SC2086
   [ -z "$blocked" ] || parts="${parts:+$parts; }$(sitrep_list 5 $blocked) blocked"
-  # THE STOPS AHEAD ARE NAMED, IN ORDER: while the review results card has no reply and an integrate row still
+  # THE STOPS AHEAD ARE NAMED, IN ORDER: while the release approval card has no reply and an integrate row still
   # waits, the card to the user stands between the tasks before that row and the row itself.
   local intids nbefore="" nafter="" t seq
   intids=" $(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } $3 == "integrate" && s == "pending" { printf "%s ", $1 }')"
-  if [ -n "$nextup" ] && ! /usr/bin/grep -qs '^replied: at=' "$recdir"/review-results-*.md; then
+  if [ -n "$nextup" ] && ! /usr/bin/grep -qs '^replied: at=' "$recdir"/release-approval-*.md "$recdir/$RR_OLD_VERB"-*.md; then
     for t in $nextup; do
       if [ -n "$nafter" ] || { [ "$intids" != " " ] && case "$intids" in *" $t "*) true ;; *) false ;; esac; }; then nafter="$nafter $t"; else nbefore="$nbefore $t"; fi
     done
@@ -1165,7 +1167,7 @@ SITREP_OWED
   # shellcheck disable=SC2086
   if [ -n "$nextup" ]; then
     if [ -n "$nafter" ]; then
-      seq="${nbefore:+$(sitrep_list 3 $nbefore), then }the review results card to you, then $(sitrep_list 3 $nafter)"
+      seq="${nbefore:+$(sitrep_list 3 $nbefore), then }the release approval card to you, then $(sitrep_list 3 $nafter)"
     else seq="$(sitrep_list 3 $nextup)"; fi
     if [ -n "$parts" ]; then parts="$parts; then $seq"; else parts="$seq"; fi
   fi

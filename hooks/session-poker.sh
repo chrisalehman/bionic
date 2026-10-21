@@ -458,6 +458,8 @@ die()  { printf 'poker: %s\n' "$1" >&2; }
 # other usage error here, and one verb spelling it differently is a surface the operator has
 # to learn per verb. Reverted at S8 with the `USAGE_EXIT` indirection deleted with it —
 # tests/session-poker.test.sh 16g asserts the 2.
+# THE RELEASE APPROVAL CARD'S ONE LINE OF USAGE, said by `usage` and by `release-approval --help`, so the two cannot disagree.
+RA_USAGE="release-approval [--preview] [--against <key>]... [<plan>]   the release approval card of the bound run: Bottom line, Goals, Tests, Reviews, Findings and Decisions; --against names a decision or finding the orchestrator recommends against its default; --preview renders it whatever the facts and records nothing"
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
@@ -522,8 +524,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
-  die "  bash ${HOOK_DIR}/session-poker.sh review-results [--preview] [--against <key>]... [<plan>]   the review results page of the bound run: Bottom line, Goals, Tests, Reviews, Findings and Decisions; --against names a decision or finding the orchestrator recommends against its default; --preview renders it whatever the facts and records nothing"
-  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the review results, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
+  die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
+  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
   die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
@@ -548,6 +550,13 @@ usage() {  # [message]
 # lib/alias.sh names the new one.
 VERB="$1"; shift
 if declare -F alias_gone >/dev/null 2>&1 && alias_gone verb "$VERB"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing was run."; exit 1; fi
+# THE CARD'S OLD NAME. The card the autonomous half waits on was called by another name before it was the release approval
+# card, and the person's decision it asks for is the release's. The old verb still runs, as the new one, and says so once
+# on stderr. Pages already written carry the old stem and
+# tag, and the readers (`reply`, the situation report) go on reading them through this variable: it is the only place the
+# old name is spelled, so a sweep for it finds one line and a page written under it stays readable.
+RR_OLD_VERB="review-results"
+if [ "$VERB" = "$RR_OLD_VERB" ]; then die "$RR_OLD_VERB is now release-approval"; VERB="release-approval"; fi
 
 # `--report-only` IS THE ONE FLAG MOST VERBS TAKE, and `adopt` and `sweep` are the two that
 # take it — the same word for the same promise on both, so an operator who has learned it
@@ -1002,27 +1011,29 @@ case "$VERB" in
       esac
     fi
     ;;
-  # THE REPLY TO THE REVIEW RESULTS. One operand: the user's reply to the page `review-results` rendered, verbatim.
+  # THE REPLY TO THE RELEASE APPROVAL CARD. One operand: the user's reply to the page `release-approval` rendered, verbatim.
   # Its words, and whether the user typed them, are the verb's own refusals (1).
   reply)
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } \
-      || usage "reply takes exactly one argument: the user's reply to the review results, verbatim."
+      || usage "reply takes exactly one argument: the user's reply to the release approval card, verbatim."
     RP_TEXT="$1"
     ;;
-  # THE REVIEW RESULTS PAGE. `--preview` once, `--against <key>` any number of times, at most one plan. A key's
-  # shape is the usage error (2); whether it names anything on the page is the verb's own refusal (1).
-  review-results)
+  # THE RELEASE APPROVAL CARD. `--preview` once, `--against <key>` any number of times, at most one plan; `--help` says the
+  # verb's usage line and exits 0 before anything else is read. A key's shape is the usage error (2); whether it names
+  # anything on the page is the verb's own refusal (1).
+  release-approval)
     RR_PREVIEW=no; RR_AGAINST=""; RR_ARG=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --preview) [ "$RR_PREVIEW" = no ] || usage "review-results takes --preview once."; RR_PREVIEW=yes ;;
+        -h|--help) printf 'poker: %s\n' "$RA_USAGE"; exit 0 ;;
+        --preview) [ "$RR_PREVIEW" = no ] || usage "release-approval takes --preview once."; RR_PREVIEW=yes ;;
         --against)
           case "${2:-}" in
             approve:?*|waive:?*|row:?*|finding:?*) RR_AGAINST="${RR_AGAINST}$2"$'\n'; shift ;;
-            *) usage "review-results --against takes one key: approve:<name>, waive:<question>, row:<AC> or finding:<record>#<n>." ;;
+            *) usage "release-approval --against takes one key: approve:<name>, waive:<question>, row:<AC> or finding:<record>#<n>." ;;
           esac ;;
-        -*) usage "review-results takes --preview, --against <key> and at most one plan." ;;
-        *) [ -z "$RR_ARG" ] || usage "review-results takes at most one plan."; RR_ARG="$1" ;;
+        -*) usage "release-approval takes --preview, --against <key> and at most one plan." ;;
+        *) [ -z "$RR_ARG" ] || usage "release-approval takes at most one plan."; RR_ARG="$1" ;;
       esac
       shift
     done
@@ -3455,7 +3466,7 @@ case "$VERB" in
   task-split) poker_verb_task_split "$@" ;;
   current) poker_verb_current "$@" ;;
   reply) poker_verb_reply "$@" ;;
-  review-results) poker_verb_review_results "$@" ;;
+  release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;
   order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;

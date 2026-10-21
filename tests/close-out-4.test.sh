@@ -621,6 +621,20 @@ expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe 
   "$SC_VERB" "$(sc_section "$PSC/$CONT_REL")"
 expect_eq "SC-4 …the heading sits before the Resume instruction" "yes" \
   "$(awk '/^## Scorecard$/ { a = NR } /^## Resume instruction/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PSC/$CONT_REL")"
+# the wait is read from the card's record under each name it has had: the release approval stem and tag, the old stem and
+# tag a run wrote before the rename, and the final card's
+sc_wait() { printf '%s\n' "$1" | /usr/bin/grep '^human-wait minutes: '; }
+expect_eq "SC-5 precondition: the final-card record gives the 12-minute wait" "$SC_TAIL" "$(sc_wait "$SC_VERB")"
+SC_OLDW="review"
+for sc_stem in release-approval "${SC_OLDW}-results"; do
+  PSW="$(mk_fixture "scorecard-$sc_stem")"; advance_to "$PSW" 8
+  sc_plant "$PSW"
+  SC_REC="$PSW/.bionic/docs/record/wave-01-fixture"
+  sed -e "s#^final-card/v1|#${sc_stem}/v1|#" "$SC_REC/final-card-abcdef12.md" > "$SC_REC/${sc_stem}-abcdef12.md"
+  rm -f "$SC_REC/final-card-abcdef12.md"
+  expect_eq "SC-5b the record named $sc_stem-<head8>.md with the $sc_stem/v1 tag gives the same wait" "$SC_TAIL" \
+    "$(sc_wait "$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSW" --scorecard)")"
+done
 # a record that cannot compute a number prints unverified on that line, never a literal
 PSU="$(mk_fixture scorecard2)"; advance_to "$PSU" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSU" run

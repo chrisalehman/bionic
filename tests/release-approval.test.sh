@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/review-results.test.sh — THE REVIEW RESULTS PAGE: hooks/session-poker.sh `review-results` and `reply`, and
+# tests/release-approval.test.sh — THE RELEASE APPROVAL CARD: hooks/session-poker.sh `release-approval` and `reply`, and
 # payload/scripts/card.sh `early`.
 #
 # WHAT IT HOLDS. The autonomous half of a run waits for its human once, at one page the tool renders from the
@@ -13,6 +13,7 @@
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
 # approve, waive, waive-row and finding-move with the user's words.
 #
+# §NAME      the card is named release-approval everywhere; the old verb is an alias that says so once
 # §SHAPE     the prototype's sections in order, plain text, no record path, no quotation, the title, the record
 # §TRIGGERS  a carried S3 stays under Findings; a criterion miss and a recommendation against the default decide
 # §NO-WAIVER no surface offers waiving the regression: an absent or red whole run is early
@@ -23,6 +24,7 @@
 # §BORN      two fix rows born of different questions render the page with no re-read
 # §JUDGE     the Tests line names the floor judge's answer: covered after a later green, the owed suite while none
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
+# §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -36,7 +38,7 @@
 # is read from a page whose presence was read first; every refusal of reply is held to a byte-identical plan (cmp)
 # beside a reply that wrote.
 #
-# Usage: bash tests/review-results.test.sh
+# Usage: bash tests/release-approval.test.sh
 
 set -uo pipefail
 
@@ -117,7 +119,7 @@ fc_plan() {  # <proof lines> [<sed edit>] -> PFC at current: 8, bound to this se
     printf 'AC-1.2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
     printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
   } | sed -e "${2:-}" > "$PFC"
-  rm -f "$FC_REC"/review-results-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
+  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
   bind_marker "$RFC" "$PFC"
 }
 FC_GOOD="$(fc_floor "$FC_C")
@@ -141,16 +143,16 @@ FC_WD='all default'
 FC_WR='all recommended'
 fc_typed "$FC_WD" "$FC_WR"
 
-fc_page() {  # [<arg>...] -> FC_RC, FC_OUT (stdout), FC_ERR (stderr) of `review-results <arg>... <plan>`, as this session
-  ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" review-results "$@" "$PFC" ) > "$TMPROOT/fc.out" 2> "$TMPROOT/fc.err"
+fc_page() {  # [<arg>...] -> FC_RC, FC_OUT (stdout), FC_ERR (stderr) of `release-approval <arg>... <plan>`, as this session
+  ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" release-approval "$@" "$PFC" ) > "$TMPROOT/fc.out" 2> "$TMPROOT/fc.err"
   FC_RC=$?; FC_OUT="$(cat "$TMPROOT/fc.out")"; FC_ERR="$(cat "$TMPROOT/fc.err")"
 }
 fc_card() {  # <verb> -> FC_RC, FC_OUT, FC_ERR of card.sh <verb> <plan>, run in the repository as this session
   ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$CARD" "$1" "$PFC" ) > "$TMPROOT/fc.out" 2> "$TMPROOT/fc.err"
   FC_RC=$?; FC_OUT="$(cat "$TMPROOT/fc.out")"; FC_ERR="$(cat "$TMPROOT/fc.err")"
 }
-fc_pages() { ( cd "$FC_REC" && ls review-results-*.md 2>/dev/null ) | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
-fc_table() { /usr/bin/grep '^review-results/v1|dec=' "$FC_REC/review-results-$FC_H8.md" 2>/dev/null; }  # the record's replay table
+fc_pages() { ( cd "$FC_REC" && ls release-approval-*.md 2>/dev/null ) | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
+fc_table() { /usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null; }  # the record's replay table
 fc_keys() { fc_table | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }'; }
 fc_row() { /usr/bin/grep -E "^\| $1 \|" "$PFC" | awk -F'|' '{ gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4 }'; }  # <AC> -> its status cell
 fc_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$FC_LIB" "$RFC" "$SID" 2>/dev/null | cut -f1; }
@@ -207,9 +209,9 @@ for fc_n in 6 7 8; do
     "0|poker: current $fc_n --check: would advance" "$RC|$(printf '%s\n' "$OUT" | head -1)"
 done
 fc_page
-expect_eq "SHAPE-1 review-results renders on the settled run (exit 0, nothing on stderr)" "0|" "$FC_RC|$FC_ERR"
+expect_eq "SHAPE-1 release-approval renders on the settled run (exit 0, nothing on stderr)" "0|" "$FC_RC|$FC_ERR"
 expect_regex "SHAPE-2 the title names the page, the release, the head and the tasks landed" \
-  "^Review results · [^ ]+ 1\\.0\\.0 · [A-Z][a-z]+day [0-9]{1,2}:[0-9]{2} [AP]M · head $FC_H8 · 2 of 3 tasks landed\$" \
+  "^Release approval · [^ ]+ 1\\.0\\.0 · [A-Z][a-z]+day [0-9]{1,2}:[0-9]{2} [AP]M · head $FC_H8 · 2 of 3 tasks landed\$" \
   "$(printf '%s\n' "$FC_OUT" | head -1)"
 expect_eq "SHAPE-3 the sections in the prototype's order" "Bottom line|Goals|Tests|Reviews|Findings|Decisions" "$(fc_heads)"
 expect_eq "SHAPE-5 Goals with none declared says so" "Goals — none declared" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')"
@@ -219,13 +221,13 @@ expect_eq "SHAPE-11c …no record path" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bi
 expect_eq "SHAPE-11d …no quotation above the reply line" "0" "$(printf '%s\n' "$FC_OUT" | sed '$d' | /usr/bin/grep -c '"')"
 expect_eq "SHAPE-11e …and never the old name" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -ci 'final card')"
 expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | LC_ALL=en_US.UTF-8 awk 'length($0) > 92' | /usr/bin/grep -c .)"
-expect_eq "SHAPE-12 the page is written to the run's record, one file at the head" "review-results-$FC_H8.md" "$(fc_pages)"
+expect_eq "SHAPE-12 the page is written to the run's record, one file at the head" "release-approval-$FC_H8.md" "$(fc_pages)"
 expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
-  "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/review-results-$FC_H8.md" 2>/dev/null)"
+  "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
 expect_eq "SHAPE-12c …its replay table one line per decision, in the page's order" \
   "row:AC-1.2 approve:release approve:merge" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "SHAPE-12d …each with its default, its other choice and the recommendation" \
-  "review-results/v1|dec=1|key=row:AC-1.2|default=waive-row AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
+  "release-approval/v1|dec=1|key=row:AC-1.2|default=waive-row AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
 fc_card final
 expect_eq "SHAPE-13 card.sh final is gone: a usage error, nothing rendered" "64|" "$FC_RC|$FC_OUT"
 expect_contains "SHAPE-13b …naming final as no row kind" "unknown row kind 'final'" "$FC_ERR"
@@ -305,7 +307,7 @@ fc_plan "$FC_GOOD"
 new_roster "$RFC"
 add_row "$RFC" name=w38-T13 agent_id=a013 subagent_type=bionic:critic
 fc_page
-expect_eq "EARLY-1 an open critic row on the roster: review-results exits 1" "1" "$FC_RC"
+expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 1" "1" "$FC_RC"
 expect_eq "EARLY-1b …saying CARD-EARLY and the reader, on stderr" "CARD-EARLY — reader w38-T13 open" "$FC_ERR"
 expect_eq "EARLY-1c …rendering nothing and writing no page" "|" "$FC_OUT|$(fc_pages)"
 fc_card early
@@ -329,7 +331,7 @@ poke "$RFC" current 7 --check
 expect_eq "EARLY-4 precondition: the Step-7 line names no adr, rca or n/a, so current 7 --check refuses on it" \
   "1|poker: current 7 --check: would refuse" "$RC|$(printf '%s\n' "$OUT" | head -1)"
 fc_page
-expect_eq "EARLY-4b review-results exits 1, CARD-EARLY with the check's own verdict line, nothing written" \
+expect_eq "EARLY-4b release-approval exits 1, CARD-EARLY with the check's own verdict line, nothing written" \
   "1|CARD-EARLY — current 7 --check: would refuse|" "$FC_RC|$FC_ERR|$(fc_pages)"
 new_roster "$RFC"; forget_digest "$RFC"
 poke "$RFC" tick
@@ -396,7 +398,7 @@ expect_eq "EARLY-9 precondition: current 6 and 7 --check are green, and current 
   "001|1" "$FC_CK$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')"
 expect_contains "EARLY-9a …naming the missing approved: release line" "carries no approved: release line" "$OUT"
 fc_page
-expect_eq "EARLY-9b …and the page renders (exit 0, no refusal, a page written)" "0||review-results-$FC_H8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
+expect_eq "EARLY-9b …and the page renders (exit 0, no refusal, a page written)" "0||release-approval-$FC_H8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
 expect_eq "EARLY-9c …putting the release approval and the merge approval" "approve:release approve:merge" \
   "$(fc_keys | /usr/bin/grep '^approve:' | tr '\n' ' ' | sed 's/ $//')"
 
@@ -434,25 +436,25 @@ fc_expected() {  # -> the keys the sources owe, sorted: owed approvals and waive
 }
 fc_agree() {  # <record> <against key>... -> same or differs: the record's table keys against the sources'
   local r="$1"; shift
-  if [ "$(awk -F'|' '/^review-results\/v1\|dec=/ { for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' "$r" | LC_ALL=C sort)" \
+  if [ "$(awk -F'|' '/^release-approval\/v1\|dec=/ { for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' "$r" | LC_ALL=C sort)" \
      = "$(fc_expected "$@")" ]; then echo same; else echo differs; fi
 }
 expect_eq "AGREE-0 precondition: the sources owe four items (two approvals, a waiver, the row)" \
   "approve:merge approve:release row:AC-1.2 waive:structure" "$(fc_expected | tr '\n' ' ' | sed 's/ $//')"
 fc_page
-expect_eq "AGREE-1 review-results renders (exit 0)" "0" "$FC_RC"
-expect_eq "AGREE-2 the decisions are exactly the sources' items" "same" "$(fc_agree "$FC_REC/review-results-$FC_H8.md")"
+expect_eq "AGREE-1 release-approval renders (exit 0)" "0" "$FC_RC"
+expect_eq "AGREE-2 the decisions are exactly the sources' items" "same" "$(fc_agree "$FC_REC/release-approval-$FC_H8.md")"
 expect_eq "AGREE-2b …one numbered line each" "4" "$(fc_under Decisions | /usr/bin/grep -cE '^[0-9]+\. ')"
 expect_eq "AGREE-2c …in the order: waivers, rows, findings, approvals" \
   "waive:structure row:AC-1.2 approve:release approve:merge" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
-cp "$FC_REC/review-results-$FC_H8.md" "$TMPROOT/fc-planted.md"
-printf 'review-results/v1|dec=5|key=approve:ship|default=approve ship|other=-|pick=default|why=-\n' >> "$TMPROOT/fc-planted.md"
+cp "$FC_REC/release-approval-$FC_H8.md" "$TMPROOT/fc-planted.md"
+printf 'release-approval/v1|dec=5|key=approve:ship|default=approve ship|other=-|pick=default|why=-\n' >> "$TMPROOT/fc-planted.md"
 expect_eq "AGREE-3 a planted extra decision goes red" "differs" "$(fc_agree "$TMPROOT/fc-planted.md")"
-/usr/bin/grep -v '|key=row:AC-1.2|' "$FC_REC/review-results-$FC_H8.md" > "$TMPROOT/fc-dropped.md"
+/usr/bin/grep -v '|key=row:AC-1.2|' "$FC_REC/release-approval-$FC_H8.md" > "$TMPROOT/fc-dropped.md"
 expect_eq "AGREE-3b …and so does a dropped one" "differs" "$(fc_agree "$TMPROOT/fc-dropped.md")"
 fc_plan "$FC_GOOD"
 fc_page --against "finding:$FC_FID"
-expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agree "$FC_REC/review-results-$FC_H8.md" "finding:$FC_FID")"
+expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agree "$FC_REC/release-approval-$FC_H8.md" "finding:$FC_FID")"
 
 # ============================================================
 section "§REPLY: all default and all recommended replay into their verbs with the user's words; anything else writes nothing"
@@ -471,13 +473,13 @@ expect_regex "REPLY-1c approved: merge, the same" \
   "^approved: merge by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z( head=$FC_R)? \"$FC_WD\"\$" "$(/usr/bin/grep '^approved: merge ' "$PFC")"
 expect_eq "REPLY-1d the unproved row's status is waived" "waived" "$(fc_row AC-1.2)"
 expect_eq "REPLY-1f …the discharged row is untouched" "discharged" "$(fc_row AC-1.1)"
-expect_contains "REPLY-1g the record keeps the reply" "replied: " "$(cat "$FC_REC/review-results-$FC_H8.md")"
+expect_contains "REPLY-1g the record keeps the reply" "replied: " "$(cat "$FC_REC/release-approval-$FC_H8.md")"
 expect_eq "REPLY-1h the reply closed the person's two approval items" "" "$(fc_owed | /usr/bin/grep '^approve:')"
 fc_page
 expect_eq "REPLY-2 a second render after the reply refuses nothing (exit 0)" "0|" "$FC_RC|$FC_ERR"
 expect_contains "REPLY-2c …the Decisions say so" "None wait on you." "$(fc_under Decisions)"
 expect_absent "REPLY-2d …offering no reply line" "Reply " "$FC_OUT"
-expect_eq "REPLY-2e …and writes no second page" "review-results-$FC_H8.md" "$(fc_pages)"
+expect_eq "REPLY-2e …and writes no second page" "release-approval-$FC_H8.md" "$(fc_pages)"
 fc_plan "$FC_GOOD"
 fc_page --against approve:release
 poke "$RFC" reply "$FC_WR"
@@ -502,7 +504,7 @@ fc_page --against "finding:$FC_FID"
 poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-5 the same page, reply all default: the finding is carried, not moved" "0|" \
   "$RC|$(/usr/bin/grep -F "moved: $FC_FID " "$PFC")"
-expect_contains "REPLY-5b …the carry recorded" "applied: finding:$FC_FID carried" "$(cat "$FC_REC/review-results-$FC_H8.md")"
+expect_contains "REPLY-5b …the carry recorded" "applied: finding:$FC_FID carried" "$(cat "$FC_REC/release-approval-$FC_H8.md")"
 fc_page --against "finding:$FC_FID"
 expect_absent "REPLY-5c …and a carried finding is not put again" "a message could be clearer" "$(fc_under Decisions)"
 expect_contains "REPLY-5d …it stays a line under Findings" "  S3   a message could be clearer" "$(fc_under Findings)"
@@ -526,9 +528,9 @@ s57_commit "$RFC" CHANGELOG.md 'a later release line' >/dev/null
 poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-9 the head moved since the page was rendered: refused, exit 1, the plan unchanged" "1|same" \
   "$RC|$(cmp -s "$TMPROOT/fc-before" "$PFC" && echo same || echo changed)"
-expect_contains "REPLY-9b …saying to render it again" "review-results" "$OUT"
+expect_contains "REPLY-9b …saying to render it again" "release-approval" "$OUT"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC"/review-results-*.md
+rm -f "$FC_REC"/release-approval-*.md
 poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-10 no page rendered for the run: refused, exit 1, the plan unchanged" "1|same" \
   "$RC|$(cmp -s "$TMPROOT/fc-before" "$PFC" && echo same || echo changed)"
@@ -539,6 +541,28 @@ poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-11 reply all default over an open waive:adversarial item exits 0" "0" "$RC"
 expect_regex "REPLY-11b …writing the waiver at the working head with the reply's words" \
   "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
+
+# ============================================================
+section "§LEGACY: a page written under the card's old name is still replied to; the alias writes the new page"
+# ============================================================
+# fails-when: a record written before the rename can no longer be answered, or the alias writes a page under the old stem.
+fc_plan "$FC_GOOD"
+( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "${RN_W}-results" "$PFC" ) > "$TMPROOT/fc.out" 2> "$TMPROOT/fc.err"; LG_RC=$?
+expect_eq "LEGACY-1 the old verb renders the card (exit 0), says the new name once, and writes the new stem's page" \
+  "0|poker: ${RN_W}-results is now release-approval|release-approval-$FC_H8.md" "$LG_RC|$(cat "$TMPROOT/fc.err")|$(fc_pages)"
+sed -e "s#^release-approval/v1|#${RN_W}-results/v1|#" "$FC_REC/release-approval-$FC_H8.md" > "$TMPROOT/fc-old-page.md"
+rm -f "$FC_REC"/release-approval-*.md
+cp "$TMPROOT/fc-old-page.md" "$FC_REC/${RN_W}-results-$FC_H8.md"
+expect_eq "LEGACY-2 precondition: only a page under the old stem and tag is recorded, with its replay rows" "yes|0|4" \
+  "$([ "$(ls "$FC_REC" | /usr/bin/grep -c '^release-approval-')" = 0 ] && echo yes)|$(ls "$FC_REC" | /usr/bin/grep -c '^release-approval-')|$(/usr/bin/grep -c "^${RN_W}-results/v1|" "$FC_REC/${RN_W}-results-$FC_H8.md")"
+cp "$PFC" "$TMPROOT/fc-before-legacy"
+poke "$RFC" reply "$FC_WD"
+expect_eq "LEGACY-3 reply all default over the old page replays it (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_regex "LEGACY-3b …approving the release with the reply's words" "^approved: release by Dana Fixture [0-9T:Z-]+( head=$FC_R)? \"$FC_WD\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC")"
+expect_contains "LEGACY-3c …recording the reply on the old page" "replied: " "$(cat "$FC_REC/${RN_W}-results-$FC_H8.md")"
+expect_eq "LEGACY-3d …and writing no page under the new stem" "0" "$(ls "$FC_REC" | /usr/bin/grep -c '^release-approval-')"
+rm -f "$FC_REC/${RN_W}-results"-*.md
 
 # ============================================================
 section "§BORN: two fix rows born of different questions' findings render the page with no re-read (AC-11.1)"
@@ -568,8 +592,8 @@ expect_eq "BORN-0 precondition: the working head is T5's landing, two code commi
   "$FC_F2|lib/x.sh|lib/x.sh" \
   "$(git -C "$RFC" rev-parse wave/01-fixture)|$(git -C "$RFC" show --name-only --format= "$FC_F1")|$(git -C "$RFC" show --name-only --format= "$FC_F2")"
 fc_page
-expect_eq "BORN-1 review-results renders past the two born rows with no re-read: exit 0, nothing on stderr" "0|" "$FC_RC|$FC_ERR"
-expect_eq "BORN-1b …and writes the page at T5's landing" "review-results-${FC_F2:0:8}.md" "$(fc_pages)"
+expect_eq "BORN-1 release-approval renders past the two born rows with no re-read: exit 0, nothing on stderr" "0|" "$FC_RC|$FC_ERR"
+expect_eq "BORN-1b …and writes the page at T5's landing" "release-approval-${FC_F2:0:8}.md" "$(fc_pages)"
 expect_contains "BORN-1c …the two findings fixed by their rows" "Fixed by T4 and T5" "$(fc_under Findings)"
 new_roster "$RFC"; forget_digest "$RFC"
 poke "$RFC" tick
@@ -582,7 +606,7 @@ expect_regex "BORN-3 the control: one code commit past the fixes that no row was
   "^CARD-EARLY — (evidence|adversarial|structure) unregistered at ${FC_F3:0:8}\$" "$FC_ERR"
 expect_eq "BORN-3b …exit 1, nothing rendered, no page written" "1||" "$FC_RC|$FC_OUT|$(fc_pages)"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/review-results-*.md
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md
 fc_record structure structure piece
 
 # ============================================================
@@ -615,7 +639,7 @@ expect_contains "JUDGE-2 the control: no landing greened it, the page names a.te
   "$(fc_under Tests | fc_flat)"
 expect_absent "JUDGE-2b …and does not read covered" "covered" "$(fc_under Tests | fc_flat)"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/review-results-*.md
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"

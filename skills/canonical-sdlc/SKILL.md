@@ -39,7 +39,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **No ceremony.** Do everything necessary, once. A task, check, review or approval earns its place only if it can fail in a way nothing already run can: never re-run a suite a gate already runs, never re-review a fix that carries its own red test. Read the record before you dispatch, and cite what is done.
 
-**Decisions.** Every decision you put to the user, at any step and with no run open, goes through the `decision` skill: invoke it, never restate its shape. The Step-1 and Step-2 interviews are its heaviest users; small decisions may share a turn, a momentous one goes alone. Approvals wait for the review results page (`review-results`, answered by `reply`); a reversible call is yours to make.
+**Decisions.** Every decision you put to the user, at any step and with no run open, goes through the `decision` skill: invoke it, never restate its shape. The Step-1 and Step-2 interviews are its heaviest users; small decisions may share a turn, a momentous one goes alone. Approvals wait for the release approval card (`release-approval`, answered by `reply`); a reversible call is yours to make.
 
 **Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
@@ -191,7 +191,7 @@ Deliverable-waiver: <reason>  # only for a report returned by message
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
 
-**Engagement:** a clean run has five human stops: the configuration, requirements, design and plan cards, then the final card. Steps 4–9 are unattended within the stop-and-wake rules.
+**Engagement:** a clean run has five human stops: the configuration, requirements, design and plan cards, then the release approval card. Steps 4–9 are unattended within the stop-and-wake rules.
 
 **Per-intent deltas.** `bugfix`: Step 4's failing test is the repro. `refactor`: the Step-2 spec is "behavior preserved"; a new acceptance criterion means reclassify as `build`. `tune`: Step 1 routes to the domain skill (`impeccable` for UX, `security-and-hardening`, `performance-optimization`) and Step 5 is the baseline→target→re-measure loop. `spike`: no plan file at all. `incident-response`: Step 1 compresses to triage, and triage asks first whether service can be restored NOW — if a revert restores it, revert and verify before debugging anything; Step 7 is an RCA (summary, timeline, root cause, contributing factors, the fix, prevention with commit links, monitoring-gap analysis); Step 9 is deploy with rollback → monitor ≥1 cycle → close the monitoring gap or prove there is none.
 

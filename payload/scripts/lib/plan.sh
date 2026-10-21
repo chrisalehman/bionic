@@ -8,7 +8,7 @@
 #                        the value of `integration-branch:` under the plan's `## SDLC State`, else the same key in
 #                        its leading frontmatter; nothing when neither names one, or <plan> is no file. Always rc 0.
 #     plan_goals, plan_goals_read, plan_one_file_median, plan_goal_slug
-#                        the goals and their readings, below; the situation report, the review results page and the
+#                        the goals and their readings, below; the situation report, the release approval card and the
 #                        tick read them here, so no page measures a goal its own way.
 #
 # THE ONE READER (burns debt integration-branch-reader; critic-structure-2). Two orders stood: close-out.sh read
