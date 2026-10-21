@@ -2568,6 +2568,28 @@ facts_cover() {
     "$(proof_check_passes "$plan" "$tree")"
 }
 
+# proof_door_cover <tree> <from> <candidate> -> THE JUDGE'S BASIS OF A CANDIDATE AT ITS DOOR: `release`, `prose`, or
+# `owes`, a tab, and each path the range touched outside the release set, comma-joined, read by the walk facts_cover
+# reads, over <from>..<candidate>, with the check that has just passed at the door taken as passing at <candidate>.
+# A release row's merge first exists at its landing, before any release check line names it, so this is the one
+# place a path the set lacks can be named before the judge reads the release as owing. Exit 1, nothing printed, when
+# the range cannot be read or holds no commit.
+proof_door_cover() {
+  local tree="${1:-}" from="${2:-}" c b f out=""
+  c="$(git -C "$tree" rev-parse --verify -q "${3:-}^{commit}" 2>/dev/null)" || return 1
+  _proof_roots_load
+  b="$(_facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$from" "$c" "" "" "$c" \
+    | awk '$3 == "owes" { o = 1 } $3 == "release" { r = 1 } NF { n = 1 } END { if (n) print (o ? "owes" : (r ? "release" : "prose")) }')"
+  [ -n "$b" ] || return 1
+  [ "$b" = owes ] || { printf '%s\n' "$b"; return 0; }
+  while IFS= read -r f; do
+    [ -z "$f" ] || _proof_release_path "$f" || case ",$out," in *",$f,"*) ;; *) out="${out:+$out,}$f" ;; esac
+  done <<PROOF_DOOR_COVER
+$(git -C "$tree" log --first-parent -m --no-renames --name-only --format= "$from..$c" 2>/dev/null)
+PROOF_DOOR_COVER
+  printf 'owes\t%s\n' "$out"
+}
+
 
 # ---------- THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3, AC-11.4) ----------
 #
