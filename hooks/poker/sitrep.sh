@@ -1855,7 +1855,9 @@ sitrep_grade() {
     # THE HAND-HOLDS LINE sits under the landings line, above the rows (D17).
     LR_TEXT="$(landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS")"
     printf '%s\n' "${LR_TEXT%%$'\n'*}"
-    hand_holds_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_PLAN"
+    # The counts over the window, then its two ends (line.sh `hand_holds_verb`): --since and --until when named, else
+    # the last build landing and the release approval page.
+    hand_holds_verb "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_PLAN" "$LR_SINCE" "$LR_UNTIL"
     case "$LR_TEXT" in *$'\n'*) printf '%s\n' "${LR_TEXT#*$'\n'}" ;; esac
     exit 0
   }

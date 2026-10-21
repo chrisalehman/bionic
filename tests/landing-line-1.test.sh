@@ -997,4 +997,124 @@ expect_eq "(rr1) ready lands the row (exit 0), and its verdicts name the release
   "$LL_RC $(ll_ev "$RR" verdict | sed 's/.*|suite=\([^|]*\)|result=\([^|]*\)|.*/\1=\2/' | paste -sd' ' -)"
 
 # ---------------------------------------------------------------------------
+section "§WINDOW: the hand-holds count is read over a window, every source by its own time"
+#
+# `landing-report --hand-holds [--since <ISO>] [--until <ISO>]` counts a hand-hold only when its line's own time falls
+# after the window's start and at or before its end. A line with no time of its own cannot be placed inside a window
+# with an end: it is not counted, and the line's last count, `unplaced=`, says how many there were. With no flags the
+# two ends are read from records: the start is the newest published landing of a row of kind build, the end the
+# release approval page's replay `at=`; with no page the window runs to now and the report says the card has not
+# rendered. Every source is planted in its writer's shape: the landing record's line/v1 lines, the fill ledger's
+# fill-ledger/v1 lines, the roster through the one production row writer, the plan's proof lines through lib/proof.sh.
+ww_report() {  # <root> [flags…] -> landing-report --hand-holds over the root's plan, stdout only
+  local root="$1"; shift
+  ( cd "$root" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$@" "$(ll_plan "$root")" 2>/dev/null )
+}
+ww_hh() { ww_report "$@" | grep '^hand-holds: '; }   # <root> [flags…] -> the counts line
+ww_ends() { ww_report "$@" | grep '^hand-holds window: '; }   # <root> [flags…] -> the ends line
+ww_proof() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; shift; proof_line "$@"' _ "$REPO/payload/scripts/lib" "$@"; }
+ww_sdlc() {  # <root> <line>… -> each line under ## SDLC State, after the rows' step lines
+  local p; p="$(ll_plan "$1")"; shift
+  # through the environment: macOS awk refuses a -v value holding a line break
+  WW_ADD="$(printf '%s\n' "$@")" awk '{ print } /^- T2: / && !d { print ENVIRON["WW_ADD"]; d = 1 }' "$p" > "$p.w" && mv "$p.w" "$p"
+}
+ww_matrix() {  # <root> <waiver value>… -> a matrix whose n-th row carries the n-th waiver line in its block
+  local p n=0 v; p="$(ll_plan "$1")"; shift
+  { printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    for v in "$@"; do n=$((n + 1)); printf '| AC-1.%d | T1 | waived | see AC-1.%d | — |\n' "$n" "$n"; done
+    n=0; for v in "$@"; do n=$((n + 1)); printf '\nAC-1.%d:\n  fails-when: a planted defect\n  waiver: %s\n' "$n" "$v"; done
+  } >> "$p"
+}
+WW_C="$(printf 'c%.0s' $(seq 40))"
+WW_D="$(printf 'd%.0s' $(seq 40))"
+ww_pub() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=%s|by=-|why=-|at=%s\n' "$1" "$WW_C" "$2" "$3"; }   # <row> <kind> <at>
+ww_dec() { printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=%s|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n' "$1" "$2"; }   # <at> <state>
+
+# (w1) one hand landing before the window, one decline inside it.
+RW1="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW1")")"
+ww_pub T1 hand 2026-10-20T10:00:00Z > "$(ll_rec "$RW1")"
+ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_rec "$RW1")")/fill-ledger.log"
+expect_eq "WINDOW-1 a hand landing before the window and a decline inside it read declines=1 by-hand=0" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "$(ww_hh "$RW1" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+expect_contains "WINDOW-1a …and a window that opens before the landing counts it: the record is read, the window moved it" \
+  "hand-holds: total=2 · by-hand=1 · stop-runs=0 · declines=1 " "$(ww_hh "$RW1" --since 2026-10-20T09:00:00Z --until 2026-10-20T13:00:00Z)"
+expect_contains "WINDOW-1b …and one that closes before the decline drops it" \
+  "hand-holds: total=1 · by-hand=1 · stop-runs=0 · declines=0 " "$(ww_hh "$RW1" --since 2026-10-20T09:00:00Z --until 2026-10-20T11:00:00Z)"
+
+# (w1c) every source by its own time: each planted before, inside and after the window 11:00 to 13:00.
+RW2="$(ll_world)"; WW_RD="$(dirname "$(ll_rec "$RW2")")"; mkdir -p "$WW_RD"
+WW_PL="$(ll_plan "$RW2")"; WW_RO="$RW2/.bionic/tmp/roster-$WORLD_SID.state"
+for t in 10:30 12:30 14:30; do
+  ww_pub T9 hand "2026-10-20T$t:00Z"
+  printf 'line/v1|ev=stop-run|request=21|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked|at=2026-10-20T%s:00Z\n' "$t"
+done > "$(ll_rec "$RW2")"
+for t in 10:30 12:30 14:30; do ww_dec "2026-10-20T$t:00Z" decline; ww_dec "2026-10-20T$t:05Z" lift; done > "$WW_RD/fill-ledger.log"
+for t in 10:30 12:30 14:30; do
+  roster_row_fixture status=identified name=w-a agent_id=aa plan="$WW_PL" amended="2026-10-20T$t:00Z widen the files"
+  roster_row_fixture status=confirmed name=w-a agent_id=aa plan="$WW_PL" amended="2026-10-20T$t:00Z widen the files"
+  roster_row_fixture status=identified name=w-b agent_id=ab plan="$WW_PL" held="2026-10-20T$t:00Z waiting on the reader"
+  roster_row_fixture status=identified name=w-c agent_id=ac plan="$WW_PL" extended="2026-10-20T$t:00Z more work"
+done >> "$WW_RO"
+roster_row_fixture status=identified name=w-ad agent_id=ad source=adopted adopted_from=old-sid plan="$WW_PL" >> "$WW_RO"
+ww_sdlc "$RW2" "$(ww_proof regression "$WW_D" 2026-10-20T09:00:00Z record/wave-x/floor.log)" \
+  "$(ww_proof regression "$WW_D" 2026-10-20T10:30:00Z record/wave-x/floor-2.log)" \
+  "$(ww_proof regression "$WW_D" 2026-10-20T12:30:00Z record/wave-x/floor-3.log)" \
+  "$(ww_proof regression "$WW_D" 2026-10-20T14:30:00Z record/wave-x/floor-4.log)" \
+  "waived: question=adversarial head=$WW_D by Dana 2026-10-20T10:30:00Z \"waive it\"" \
+  "waived: question=structure head=$WW_D by Dana 2026-10-20T12:30:00Z \"waive it\"" \
+  "waived: question=evidence head=$WW_D by Dana 2026-10-20T14:30:00Z \"waive it\"" \
+  "moved: record/wave-x/rev.md#1 to=fixed row=T1 by=Dana at=2026-10-20T10:30:00Z" \
+  "moved: record/wave-x/rev.md#2 to=fixed row=T1 by=Dana at=2026-10-20T12:30:00Z" \
+  "moved: record/wave-x/rev.md#3 to=fixed row=T1 by=Dana at=2026-10-20T14:30:00Z"
+ww_matrix "$RW2" 'Dana Fixture 2026-10-20T10:30:00Z "waive the row" — fixture' \
+  'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — fixture' 'Dana Fixture 2026-10-20T14:30:00Z "waive the row" — fixture'
+expect_eq "WINDOW-1c-0 precondition: the plan holds the four regression proofs, three waived: and three moved: lines" "4/3/3" \
+  "$(grep -c '^proved: kind=regression ' "$WW_PL")/$(grep -c '^waived: question=' "$WW_PL")/$(grep -c '^moved: ' "$WW_PL")"
+expect_eq "WINDOW-1c a wide window reads three of every kind, the regressions past the first, and the adoption it cannot place" \
+  "hand-holds: total=33 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · second-regressions=3 · adoptions=0 · fixed=3 · unplaced=1" \
+  "$(ww_hh "$RW2" --since 2026-10-20T08:00:00Z --until 2026-10-20T16:00:00Z)"
+expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every source filtered by its own time" \
+  "hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=1 · unplaced=1" \
+  "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+
+# (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
+# a day the window's start falls inside cannot be placed. That waive-row writes the ISO form is read where the card's
+# reply writes it, tests/release-approval.test.sh §HANDHOLDS (WINDOW-2a).
+RW3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW3")")"
+ww_matrix "$RW3" 'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — inside' 'Dana Fixture 2026-10-20T14:30:00Z "waive the row" — after' \
+  'Dana Fixture 2026-10-19 "waive the row" — a whole day before' 'Dana Fixture 2026-10-20 "waive the row" — the start falls inside this day'
+expect_contains "WINDOW-2 a waiver at a time inside the window counts, the one after it does not, the day before is placed outside, the day the start falls in is unplaced" \
+  "waivers=1 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=1" "$(ww_hh "$RW3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+expect_contains "WINDOW-2b …and with no end, every form counts, the date-only ones too" \
+  "waivers=4 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" "$(ww_hh "$RW3" --since 2026-01-01T00:00:00Z)"
+expect_eq "WINDOW-2c …and with no window at all (no build landing, no page), both forms count and nothing is unplaced" \
+  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "$(ww_hh "$RW3")"
+
+# (w3) the ends from records. With no page the window runs to now, and no end but the start prints.
+RW4="$(ll_world)"; WW_RD4="$(dirname "$(ll_rec "$RW4")")"; mkdir -p "$WW_RD4"
+{ ww_pub T1 queue 2026-10-20T11:00:00Z; ww_pub T9 hand 2026-10-20T11:30:00Z; } > "$(ll_rec "$RW4")"
+ww_dec 2026-10-20T10:00:00Z decline > "$WW_RD4/fill-ledger.log"
+WW_E4="$(ww_ends "$RW4")"
+expect_contains "WINDOW-3 with no release approval page the ends line says the card has not rendered" "the card has not rendered" "$WW_E4"
+expect_eq "WINDOW-3a …and prints one time, the start: the last build row's landing, never an end" \
+  "2026-10-20T11:00:00Z" "$(printf '%s\n' "$WW_E4" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z' | paste -sd' ' -)"
+expect_contains "WINDOW-3b …and the counts read from that landing to now: the later hand landing of a row that is no build row counts, the earlier decline does not" \
+  "hand-holds: total=1 · by-hand=1 · stop-runs=0 · declines=0 " "$(ww_hh "$RW4")"
+printf '# page\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=2026-10-20T11:20:00Z|decisions=1\n' "$(ll_plan "$RW4")" "$WW_C" > "$WW_RD4/release-approval-cccccccc.md"
+WW_E4="$(ww_ends "$RW4")"
+expect_eq "WINDOW-3c with a page the ends line prints both ends, the start and the page's replay time, and says no more that the card has not rendered" \
+  "2026-10-20T11:00:00Z 2026-10-20T11:20:00Z|0" \
+  "$(printf '%s\n' "$WW_E4" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z' | paste -sd' ' -)|$(printf '%s\n' "$WW_E4" | grep -c 'has not rendered')"
+expect_contains "WINDOW-3d …and the count stops at the page: the hand landing after it is not counted" \
+  "hand-holds: total=0 · by-hand=0 · " "$(ww_hh "$RW4")"
+WW_RN="review"
+rm -f "$WW_RD4/release-approval-cccccccc.md"
+printf '# page\n\n## Replay\n\n%s-results/v1|plan=%s|head=%s|at=2026-10-20T11:40:00Z|decisions=1\n' "$WW_RN" "$(ll_plan "$RW4")" "$WW_C" > "$WW_RD4/$WW_RN-results-cccccccc.md"
+expect_contains "WINDOW-3e a page written under the card's old stem is read for the end as well" \
+  "2026-10-20T11:40:00Z" "$(ww_ends "$RW4")"
+
+# ---------------------------------------------------------------------------
 finish

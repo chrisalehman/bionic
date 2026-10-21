@@ -702,6 +702,7 @@ landing-line-1.test.sh | §ANCHORS | keep | rule: door refusal — payload/scrip
 landing-line-1.test.sh | §NOVERDICT | keep | rule: door refusal — payload/scripts/lib/line.sh the verdict reader takes a run that exits 0 with no end line as green, so an unproved candidate publishes; "(v2) a run that exits 0 with no end line is no verdict, not green" goes red | none (searched 'result=none' in tests/)
 landing-line-1.test.sh | §STALLED | keep | rule: door refusal — payload/scripts/lib/line.sh _line_first_in_line counts a stalled entry ahead as present, so T2 behind it is refused; "(t4) the publish passes over the stalled entry: T2 is published (rc 0)" goes red. also: t6m reads a mutant's absence | none (searched 'ev=stalled' and '_line_first_in_line' in tests/)
 landing-line-1.test.sh | §RELEASE-ROW | duplicate | payload/scripts/lib/line.sh line_ready: every tests/*.test.sh run instead of the Lands-on suites, so other.test.sh gets a verdict beside the release check (rr1) | landing-line-1.test.sh §GATE
+landing-line-1.test.sh | §WINDOW | keep | hooks/poker/line.sh hand_holds_report: the fill ledger's `at=` no longer placed in the window, so a decline before the window counts and "WINDOW-1d …the window 11:00 to 13:00 reads one of each" goes red; also hand_holds_ends prints an end with no release approval page (WINDOW-3a) | none (searched 'hand-holds' and '--since' in tests/; close-out-3 §HAND-HOLDS reads the default window only)
 
 ## landing-line-2.test.sh
 
@@ -952,6 +953,7 @@ release-approval.test.sh | §BORN | keep | payload/scripts/card.sh early: the bo
 release-approval.test.sh | §JUDGE | keep | hooks/session-poker.sh release-approval: the Tests line built from the whole run's owed list instead of the floor judge, so a suite a later landing greened still reads red; (JUDGE-1) goes red | none (searched 'regression — ' Tests lines at 05b5b9dec in tests/; canonical-sdlc-evidence-gate-2 reads the judge, not the page)
 release-approval.test.sh | §POST | keep | payload/scripts/card.sh early: the check of a reader row placed after the landed release dropped, so the card renders while that row's reading is unregistered instead of CARD-EARLY naming the row (POST-1, POST-1b) | none (searched 'reads what landed after the release' in tests/; units.test.sh §POST reads the validator's admission, not the card)
 release-approval.test.sh | §STEP0 | keep | payload/scripts/card.sh step0: the approve:step0 opener deleted, so rendering the session's own configuration card owes nothing; (STEP0-6) goes red | none (searched 'approve:step0' at 05b5b9dec in tests/)
+release-approval.test.sh | §HANDHOLDS | keep | hooks/poker/plan.sh the release approval verb: the hand-holds line read with no --since, so the decline before the last build landing counts and "HANDHOLDS-2 the page prints the windowed line" goes red; also proof.sh waive-row writes the date alone (WINDOW-2a) | none (searched 'hand-holds:' and 'waiver: ' in tests/)
 
 ## release-check.test.sh
 

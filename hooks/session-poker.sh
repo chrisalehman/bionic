@@ -511,7 +511,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
-  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sitrep's three indicators (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's page: the Bottom line (what you owe, what is next, what is done, when it closes), every task with its glyph, the Score's five indicator lines, what is blocked on you, the completion and the predicted close; --line prints the one-line form (read-only)"
@@ -1222,17 +1222,29 @@ $1"; shift ;;
   # binding left (close-out writes its continuation after its tmp is wiped).
   release-note) : ;;
   landing-report)
-    LR_ROWS=no; LR_HH=no; LR_SC=no; LR_ARG=""
-    for _lr_a in "$@"; do
+    LR_ROWS=no; LR_HH=no; LR_SC=no; LR_ARG=""; LR_SINCE=""; LR_UNTIL=""
+    # A window end is an ISO-UTC instant, the shape every source the count places carries; any other value is the
+    # usage error, so a typo never reads as an open end.
+    while [ $# -gt 0 ]; do
+      _lr_a="$1"; shift
       case "$_lr_a" in
         --rows) [ "$LR_ROWS" = no ] || usage "landing-report takes --rows once."; LR_ROWS=yes ;;
         --hand-holds) [ "$LR_HH" = no ] || usage "landing-report takes --hand-holds once."; LR_HH=yes ;;
         --scorecard) [ "$LR_SC" = no ] || usage "landing-report takes --scorecard once."; LR_SC=yes ;;
-        -*) usage "landing-report takes the flags --rows and --hand-holds, and at most one plan." ;;
-        *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds, and at most one plan."; LR_ARG="$_lr_a" ;;
+        --since|--until)
+          case "${1:-}" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+            *) usage "landing-report $_lr_a takes an ISO-UTC instant, as 2026-10-20T16:43:24Z." ;;
+          esac
+          if [ "$_lr_a" = --since ]; then [ -z "$LR_SINCE" ] || usage "landing-report takes --since once."; LR_SINCE="$1"
+          else [ -z "$LR_UNTIL" ] || usage "landing-report takes --until once."; LR_UNTIL="$1"; fi
+          shift ;;
+        -*) usage "landing-report takes the flags --rows and --hand-holds (with --since and --until), and at most one plan." ;;
+        *) [ -z "$LR_ARG" ] || usage "landing-report takes the flags --rows and --hand-holds (with --since and --until), and at most one plan."; LR_ARG="$_lr_a" ;;
       esac
     done
     [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
+    { [ -z "$LR_SINCE" ] && [ -z "$LR_UNTIL" ]; } || [ "$LR_HH" = yes ] || usage "landing-report takes --since and --until only with --hand-holds: they bound its window."
     ;;
   # THE SITUATION REPORT. `sitrep [--line] [<plan>]` renders, read-only but for the gate's own scan;
   # `sitrep grade <A-F> '<rationale>' [<plan>]` records the grade. The plan, when named, is the last operand and
