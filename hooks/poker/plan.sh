@@ -2418,8 +2418,16 @@ RR_MATRIX
         "${RR_DPH[$i]}" "${RR_OPH[$i]}"
     done
     [ "$RR_N" -eq 0 ] || rr_fact reply "$(rr_word "${RR_OLAB[0]}")"
-    [ -z "$RR_GOALS" ] || printf '%s\n' "$RR_GOALS" | awk -F'\t' -v W="$SITREP_MARK_WITHIN" -v O="$SITREP_MARK_OVER" -v N="$SITREP_MARK_NONE" '
-      NF { print "goal\t" $1 "\t" (($1 == "reached") ? W : (($1 == "missed") ? O : N)) "\t" $2 "\t" $3 "\t" $4 }'
+    # each goal's mark is its status, lib/plan.sh plan_goal_status's, the one the sitrep's sheet prints
+    [ -z "$RR_GOALS" ] || printf '%s\n' "$RR_GOALS" | while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      case "$(plan_goal_status "${l%%	*}")" in
+        met) m="$SITREP_MARK_WITHIN" ;;
+        'not met') m="$SITREP_MARK_OVER" ;;
+        *) m="$SITREP_MARK_NONE" ;;
+      esac
+      printf 'goal\t%s\t%s\t%s\n' "${l%%	*}" "$m" "${l#*	}"
+    done
     [ -z "${RR_HH:-}" ] || rr_fact handholds "$RR_HH"
     [ -z "${RR_TR:-}" ] || rr_fact ratio "$RR_TR"
     rr_fact acceptance "$RR_TACC"

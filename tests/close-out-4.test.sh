@@ -576,14 +576,15 @@ debt_plant "$PTE"; printf '%s\n' "$TL_PROSE" >> "$PTE/.bionic/docs/record/wave-0
 run_close "$PTE" run
 
 # ============================================================
-section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, each against its target, and the sitrep's three indicators"
+section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, each against its target, and the sitrep sheet's pace, correctness and waste"
 # ============================================================
 # Under `## Scorecard`, fenced, exactly:
 #   human stops (autonomous half): <n> · target 1           approved: lines after the plan's approved-by:, one per reply
 #   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the approved: merge line
 #   widest landing ready→landed: <row> <m> min · target < 15   landing-report --rows, the largest minutes=; 15 is LINE_LANDING_BAR (wave-39 T9)
 #   human-wait minutes: <n> · no target (the user's)        the final-card records, render to reply
-# then the sitrep's schedule, correctness and waste lines at close. A number the record cannot compute is `unverified`.
+# then the sitrep sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`. A number the
+# record cannot compute is `unverified`.
 # `landing-report --scorecard <plan>` prints the same lines; close-out reads them before the tmp wipe (the roster).
 # fails-when: a line is missing, carries a number the record does not hold, or prints a literal where it is unverified.
 sc_section() { awk '/^## / { s = ($0 == "## Scorecard"); next } s && NF && !/^```/ { print }' "$1"; }
@@ -614,8 +615,8 @@ SC_TAIL='human-wait minutes: 12 · no target (the user'"'"'s)'
 PSC="$(mk_fixture scorecard1)"; advance_to "$PSC" 8
 sc_plant "$PSC"
 SC_VERB="$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSC" --scorecard)"
-expect_eq "SC-0b …then the sitrep's three indicator lines, schedule, correctness and waste, and nothing more" "schedule|correctness|waste|7" \
-  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d' ' -f2)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
+expect_eq "SC-0b …then the sitrep sheet's pace, correctness and waste, and nothing more" "pace|correctness|waste|7" \
+  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSC" run
 expect_nonempty "SC-1b precondition: the extractor finds lines under the heading" "$(sc_section "$PSC/$CONT_REL")"
 expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe (the roster's launch counted)" \

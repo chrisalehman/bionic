@@ -332,13 +332,14 @@ expect_eq "DG-4 decisions --all exits 0" "0" "$RC"
 # The resume recap's settled: lines are this parser's output too, and handoff-file §RESUME reads them there.
 
 # ============================================================
-section "§ROUNDS: decisions put writes a put line to the run's ledger and its ruling closes it, so the sitrep's decisions line counts rounds; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
+section "§ROUNDS: decisions put writes a put line to the run's ledger and its ruling closes it, so the sitrep's sheet owes the decision from its put to its ruling; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
 # ============================================================
 # A put opens a round and the next ruling of the same number closes it; a ruling with no put open is a round of its
 # own, the shape of a ledger written before puts. The wait line reads the tasks whose reads cell names the decision
 # as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, §DECISIONS's
 # plan shape with a reads column, the ruling headings in the register's grammar written as the person's word is.
-# fails-when: a re-put is uncounted; the wait line is absent, or reads the same whether its task is on the chain.
+# fails-when: a put is not owed on the sheet, or a ruled one still is; the wait line is absent, or reads the same whether
+# its task is on the chain.
 RW="$(make_repo rounds)"; PW="$(s34_plan "$RW" 4)"
 RW_L="$RW/.bionic/docs/record/wave-01-fixture/design-ledger.md"; mkdir -p "${RW_L%/*}"
 rw_table() {  # <the side task's size> -> the task table: a side task reads one decision; the last reads another and the long one's file
@@ -353,14 +354,16 @@ rw_table() {  # <the side task's size> -> the task table: a side task reads one 
 rw_table 30
 printf '# design ledger\n\n## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds\n' > "$RW_L"
 rw_rule() { printf '\n## Δ%s — D3 %s (Dana Fixture 2026-10-06): the third\n' "$1" "$2" >> "$RW_L"; }  # the person's word, as recorded
-rw_line() { poke "$RW" sitrep; printf '%s\n' "$OUT" | grep ' decisions — '; }
+rw_asks() { poke "$RW" sitrep; printf '%s\n' "$OUT" | sed -n 's/^ask: key=\(decide:D[0-9]*\) .*/\1/p' | tr '\n' ' '; }   # the decisions the sheet owes
 poke "$RW" decisions put D3 'the third'
 expect_eq "RD-1 decisions put exits 0 on the bound run" "0" "$RC"
 expect_eq "RD-1b …and writes one put line for it to the run's ledger" "1" "$(grep -c '^## Δ[0-9]* — D3 put (' "$RW_L")"
-rw_rule 50 'ruled "1"'; poke "$RW" decisions put D3 'the third, again'; rw_rule 51 'amended "2"'
-RD_TWO="$(rw_line)"
+RD_PUT="$(rw_asks)"
+rw_rule 50 'ruled "1"'; RD_RULED="$(rw_asks)"
+poke "$RW" decisions put D3 'the third, again'; RD_AGAIN="$(rw_asks)"; rw_rule 51 'amended "2"'
 poke "$RW" decisions put D3 'the third, once more'; rw_rule 52 'amended "3"'; poke "$RW" decisions put D2 'the second'
-expect_contains "RD-2 two puts, each ruled, read as two rounds" "D3 two" "$RD_TWO"
+expect_eq "RD-2 a put is owed on the sheet, its ruling closes it, and a second put opens it again" "decide:D3 ||decide:D3 " \
+  "$RD_PUT|$RD_RULED|$RD_AGAIN"
 poke "$RW" decisions
 expect_contains "RD-4 the register still lists the rulings" 'D3 · amended "3"' "$OUT"
 expect_absent "RD-4b …and no put (RD-4 read the same output)" " put" "$OUT"

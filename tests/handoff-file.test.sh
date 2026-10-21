@@ -355,6 +355,22 @@ expect_absent "T10d …no wait line (T10b read the same file)" "wait " "$(grep -
 kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
 
 # ============================================================
+section "§HEAD: the head is the title, bound the run's status line, then Blocked on you: yes or no and one line per open ask with what it holds"
+# ============================================================
+# The asks are the run's register, opened through lib/owed.sh's own opener; the status line is `sitrep --line`'s.
+# fails-when: an ask open on the run is missing from the head, or the head says nothing is blocked while one is.
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "HD1 bound, nothing owed: the title, the run's status line, Blocked on you: no, then the blank line" "yes|Blocked on you: no|" \
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -qE '^[0-9]+ of [0-9]+ tasks · owed: 0 · close ' && echo yes)|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F")"
+( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_R" OWED_SID="$SID" OWED_PLAN="$HF_P" \
+    owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "HD2 an ask open on the run: owed counts it, Blocked on you: yes, and its line says what it is and what it holds" \
+  "owed: 1|Blocked on you: yes|yes" \
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -oE 'owed: [0-9]+')|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F" | /usr/bin/grep -qE '^- Approve release — holds [^ ]' && echo yes)"
+expect_eq "HD3 with no run, the head is the title and Blocked on you: no" "Blocked on you: no|" "$(sed -n 3p "$HF_NR_F")|$(sed -n 4p "$HF_NR_F")"
+
+# ============================================================
 section "§PORTABLE: an argument tailors the document; secrets and addresses are redacted; a copied block is left out for its path; no safe-to-clear line exists"
 # ============================================================
 HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C" handoff 'measure the judge cold and warm'
