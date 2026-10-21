@@ -650,7 +650,7 @@ expect_regex "PA1b …and the page's close names it" " \(this run's 1\.5×\)\.$"
 SR_DISPATCH_ROWS="" sr_world pace-zero "0 0 0 0"
 sr_run "$SR_PLAN"
 expect_eq "PA2 no dispatched instant: the floor with no pace, and no likely close or About" \
-  "- Close: not before 7:00 PM (no pace yet).|0" "$(sr_line '- Close: ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE 'likely|About ')"
+  "- Close: not before 7:00 PM (no pace yet).|0" "$(sr_line '- Close: ')|$(sr_line '- Close: ' | /usr/bin/grep -cE 'likely|About ')"
 # Dispatched at the very minute each lands: every ratio is 0, a pace that is not positive, unmeasured.
 SR_DISPATCH_LEAD=0 sr_world pace-nil "0 0 0 0"
 sr_run "$SR_PLAN"
@@ -769,6 +769,18 @@ SR_APPROVED=none sr_world guess-unapproved none
 sr_run "$SR_PLAN"
 expect_eq "G-4d no Step 3 approval: the sentence stays, ❔, and the bar half is words" \
   "$SR_MARK_NONE schedule — the clock cannot be graded, no Step 3 approval time; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
+# Nothing left to forecast: every task landed, the run not yet delivered, the guess is now; delivered, it is the
+# delivery instant. Neither says it cannot be graded.
+sr_world guess-done "6 6 12 12"
+awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T([5-9]|1[0-7]) $/ { $14 = " landed " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "G-6 every task landed and the run open: the guess is now, 3:00 PM, inside the 48 h forecast" \
+  "$SR_MARK_WITHIN schedule — likely 3:00 PM against 3:00 AM 2026-10-08, 2160 min inside the 48 h forecast; every task done; the median one-file landing takes 9 min, within the 15 min bar" "$(sr_ind schedule)"
+sr_w38_world
+awk '{ print } /^current: 9$/ && !d { print "approved-by: fixture 2026-10-18T03:00:00Z \"approved\""; d = 1 }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "G-6b a delivered run: the delivery instant against the forecast end (727 of 2880 minutes), the pace \"delivered\", never cannot be graded" \
+  "$SR_MARK_WITHIN schedule — closed 8:07 AM 2026-10-18 against 8:00 PM 2026-10-19, 2153 min inside the 48 h forecast; delivered; no one-file landing yet against the 15 min bar" "$(sr_ind schedule)"
 # A pace of 0.36× on this run (four rows sized 100 min, dispatched 36 min before they land) puts the likely close at
 # 4:26 PM, before the 7:00 PM floor: the one instant, the floor omitted.
 SR_DISPATCH_LEAD=36 sr_world guess-fast "5 5 5 5"
@@ -784,7 +796,7 @@ SR_SCALE=wave sr_world guess-equal none
 sr_prev 60 wave
 SR_AT=$SR_NINE sr_run "$SR_PLAN"
 expect_eq "G-5d a likely close equal to the floor is the one instant too" "- Close: likely 1:15 PM (wave-40's 1×)." "$(sr_line '- Close: ')"
-sr_run --basis "$SR_PLAN"
+SR_AT=$SR_NINE sr_run --basis "$SR_PLAN"
 expect_eq "G-5e …and --basis still prints both instants (the arithmetic is whole)" "yes" \
   "$(sr_line '- The floor: ' | /usr/bin/grep -q '^- The floor: 255 min at 1× from now, 1:15 PM; the likely close: 255 min at 1×, 1:15 PM\.$' && echo yes)"
 
@@ -1053,7 +1065,8 @@ expect_eq "GM4 the goal now reads reached: the tick closes its open decision, an
 # ============================================================
 section "§ONE-FILE: the schedule's bar half and the one-file goal read the one-file landings only; a landing of more files moves neither"
 # ============================================================
-SR_GOALS="fast landings · one-file median under 5m (landing-report --rows)" sr_world one-file "90 90 10 10"
+# The forecast is 200 h: the landings' pace puts the likely close far out, and only the bar half is under test here.
+SR_FORECAST=200h SR_GOALS="fast landings · one-file median under 5m (landing-report --rows)" sr_world one-file "90 90 10 10"
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[12] $/ { $11 = " lib/t1.sh, lib/x.sh " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file landings: the schedule mark reads 10 min, ✅ within the bar" \
