@@ -442,6 +442,43 @@ SR_FORECAST= sr_world marks-bare none
 sr_run "$SR_PLAN"
 
 # ============================================================
+section "§RATIO: the waste line carries the two shell-line counts the release check printed, in words, on the same line; a planted count moves it"
+# ============================================================
+# sr_check <log line> -> a passing release-check proof at SR_H whose log holds that line, written in the shapes the
+# release-check verb writes (the log's head=/rc= lines, the command's output after a blank line), and the plan's
+# section carrying the proof once. The log is rewritten on every call, so a planted count is the same proof read again.
+SR_CHK_REL="record/wave-02-fx/release-check-$SR_H.log"
+sr_check() {
+  printf 'head=%s rc=0\nbase=%s (tag)\ncommand: bash tests/lib/release-check.sh /x\n\n%s\n' "$SR_H" "$SR_C1" "$1" > "$SR_REPO/.bionic/docs/$SR_CHK_REL"
+  /usr/bin/grep -q 'kind=check' "$SR_PLAN" && return 0
+  awk -v h="$SR_H" -v e="$SR_CHK_REL" '{ print } /^current: 4$/ { print "proved: kind=check head=" h " at=2026-10-06T20:00:00Z evidence=" e }' "$SR_PLAN" > "$SR_PLAN.t" \
+    && mv "$SR_PLAN.t" "$SR_PLAN"
+}
+sr_world ratio "6 6 12 12"
+sr_run "$SR_PLAN"
+SR_Z_LINES="$(sr_sect 'Score: .*' | /usr/bin/grep -c .)"
+expect_regex "RT0 precondition: with no check proof the waste line reads its two measures and no count of lines" \
+  "^[^ ]+ waste — [^;]*; [^;]*\$" "$(sr_ind waste)"
+expect_eq "RT0b …and the Score holds its five indicator lines" "5" \
+  "$(sr_sect 'Score: .*' | /usr/bin/grep -cE '^[^ ]+ (schedule|correctness|waste|decisions|goals) ')"
+sr_check "test-ratio: 85334/95969"
+sr_run "$SR_PLAN"
+expect_eq "RT1 a passing check whose log prints test-ratio: 85334/95969: the waste line ends on both counts, in words" \
+  "yes" "$(sr_ind waste | /usr/bin/grep -qE 'waste — [^;]*; [^;]*; tests 85,334 lines against code 95,969$' && echo yes)"
+expect_eq "RT1b …on the same line: the Score holds as many lines as without the clause" "$SR_Z_LINES" "$(sr_sect 'Score: .*' | /usr/bin/grep -c .)"
+sr_check "test-ratio: 950/12345678"
+sr_run "$SR_PLAN"
+expect_eq "RT2 a planted count moves the line: 950 against 12,345,678, grouped by thousands" \
+  "yes" "$(sr_ind waste | /usr/bin/grep -qE '; tests 950 lines against code 12,345,678$' && echo yes)"
+sr_check "release-check: test-ratio 96000/95000 — tests exceed code at HEAD"
+sr_run "$SR_PLAN"
+expect_eq "RT3 a refused ratio in the log reads the same: both counts on the line" \
+  "yes" "$(sr_ind waste | /usr/bin/grep -qE '; tests 96,000 lines against code 95,000$' && echo yes)"
+sr_check "known-limits: nothing to say about the ratio"
+sr_run "$SR_PLAN"
+expect_regex "RT4 a log with no ratio line says no count, beside the three that did" "^[^ ]+ waste — [^;]*; [^;]*\$" "$(sr_ind waste)"
+
+# ============================================================
 section "§CLOCK: the schedule mark grades the likely close against the forecast end, the Step-3 approval plus the plan's forecast:; the pace behind the likely close is the run's own, whose sizes it reads; the median landing against the 15-minute bar beside it"
 # ============================================================
 # 39 tasks, 4 done, 11 hours after approval, against a 24-hour forecast. The four landings take 120 120 134 134
