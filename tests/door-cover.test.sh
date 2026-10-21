@@ -103,7 +103,8 @@ dc_mutant() {
   sed "$2" "$DC_PROOF" > "$out" && ! cmp -s "$DC_PROOF" "$out" && printf '%s' "$out"
 }
 # dc_changed <copy> -> the number of lines the copy adds against proof.sh: one for a one-arm mutant.
-dc_changed() { diff "$DC_PROOF" "$1" | /usr/bin/grep -c '^>'; }
+# diff exits 1 on a difference, which pipefail would hand on, so the count is the answer and the status is 0.
+dc_changed() { diff "$DC_PROOF" "$1" | /usr/bin/grep -c '^>'; return 0; }
 # dc_classes <copy> <path> -> `in` or `out`: the copy's release set, asked directly.
 dc_classes() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_release_path "$2" && echo in || echo out' _ "$1" "$2"; }
 
