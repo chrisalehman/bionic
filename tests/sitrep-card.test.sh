@@ -258,8 +258,14 @@ expect_eq "SH2 a step row above its own tasks is refused" "1" "$SC_RC"
 expect_contains "SH2b …naming the step" "4: " "$SC_ERR"
 SC_DONE4="$(printf '%s\n' "$SC_OWED" | sed 's/^step: n=4 name=Implement state=running/step: n=4 name=Implement state=done/')"
 sc_card "$SC_DONE4" "$SC_J_OWED"
-expect_eq "SH2c a sheet whose finished step still holds open tasks draws the step row above them, and the card is refused" \
-  "1|" "$SC_RC|$SC_OUT"
+expect_eq "SH2c a step the run has finished that still holds open tasks is drawn as a running step: the card prints (exit 0), no step row for 4, its open tasks on their own rows" "0|0|1|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    [✅⬜] 4: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ⬜ 4/40: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ✅ 4/3–4/13: 3 tasks finished$')"
+SC_PASSED="$(printf '%s\n' "$SC_OWED" | sed -e 's/^\(step: n=[4567] name=[A-Za-z]* state=\)[a-z]*/\1done/')"
+expect_eq "SH2d precondition: the fixture is at a later step, steps 4 to 7 done, with 5/41 still pending" "4|1" \
+  "$(printf '%s\n' "$SC_PASSED" | /usr/bin/grep -c '^step: n=[4567] .* state=done')|$(printf '%s\n' "$SC_PASSED" | /usr/bin/grep -c '^task: id=T41 step=5 state=pending')"
+sc_card "$SC_PASSED" "$SC_J_OWED"
+expect_eq "SH2e a passed step with an open task draws no step row above it: the card prints, 5/41 on its own row, no row for step 5, and the finished steps without tasks stay one row" "0|1|0|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ⬜ 5/41: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    [✅⬜] 5: ')|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c '^    ✅ 6: Review$')"
 sc_check "$SC_OWED" "$(printf '%s\n' "$SC_WANT_OWED" | awk '{ print } /^    ⬜ 4\/40:/ { print }')"
 expect_eq "SH3 an open task on two rows is refused" "1" "$SC_RC"
 expect_contains "SH3b …naming the task" "4/40" "$SC_ERR"

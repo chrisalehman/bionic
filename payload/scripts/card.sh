@@ -2578,7 +2578,9 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # on its icon; a row too wide folds under its own text. The facts draw the head, the Task list, Metrics, what each ask
 # holds and the close's time; the judgment draws the rest, and never a decision's options.
 #
-# THE TASK LIST. A finished step is one row, with its task count when it had tasks. Inside a step not finished, its
+# THE TASK LIST. A step collapses to one row, with its task count when it had tasks, only when the sheet calls it done
+# and every task in it is finished; a step the run has passed that still holds an open task is drawn as a step not
+# finished, whatever the run's current step. Inside a step not finished, its
 # finished tasks are one row, labelled by the range of their numbers (one finished task is its own row), and every
 # task that can still move has its own row with its note; a step not finished with no task is one row of its own. A
 # task's label is its step, a slash and its id without the T. Every row is one line: a task's description is cut at a
@@ -2635,11 +2637,10 @@ _card_sitrep_tasks() {
     $1 == "T" { nt++; ti[nt] = $2; ts[nt] = $3; tt[nt] = $4; td[nt] = $5; tn[nt] = $6; next }
     END {
       for (i = 1; i <= ns; i++) {
-        s = sn[i]; has = 0
-        for (j = 1; j <= nt; j++) if (ts[j] == s) has = 1
-        if (ss[i] == "done") {
+        s = sn[i]; has = 0; opn = 0
+        for (j = 1; j <= nt; j++) if (ts[j] == s) { has = 1; if (tt[j] != "done") opn = 1 }
+        if (ss[i] == "done" && !opn) {
           print "✅ " s ": " sm[i] ((sk[i] > 0) ? " — " sk[i] " task" ((sk[i] == 1) ? "" : "s") : "")
-          for (j = 1; j <= nt; j++) if (ts[j] == s && tt[j] != "done") print open_row(j)
           continue
         }
         nd = 0; num = 1
