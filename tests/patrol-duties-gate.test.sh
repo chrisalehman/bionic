@@ -205,7 +205,7 @@ a_tool_agentid() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
-# The orchestrator's own words: a turn's prose, and one of the places a decline may be
+# The orchestrator's own words: a turn's prose, and the one place a stand-down decline may be
 # written. DEFINED WITH THE OTHER ENTRY BUILDERS, above every case (wave-21 T14): §4's 35e calls
 # it, and a definition in §5 left those calls printing "command not found" while the case passed.
 a_text() {  # <dir> <text>
@@ -278,47 +278,6 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
       *"$3"*) no "$1" "reason wrongly names <$3>: $r"; return ;;
     esac
   fi
-  ok "$1"
-}
-
-# THE ROW LIST, NOT THE WHOLE TEXT (wave-27 T37; review pass 42 S1, A-orch-112). The fill refusal
-# prints `bash <hooks dir>/session-poker.sh decline <ids> …`, so a must-not over the whole reason
-# also reads the checkout's path, and a tree whose path holds `T20` turned 69c red. A row that says
-# an id is NOT named reads the ids of the refusal's `decline` operand and matches one as a whole
-# word there. The list must be non-empty, so the absence is read off a real list.
-refusal_rows() {  # -> the ids the fill refusal's decline operand names, space-joined
-  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
-    | sed 's/.* decline //' | tr ',' ' '
-}
-expect_block_unnamed() {  # <label> <id the refusal's row list must not hold>
-  local d rows; d=$(decision_of); rows=$(refusal_rows)
-  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
-    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
-  fi
-  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
-  case " $rows " in
-    *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;;
-  esac
-  ok "$1"
-}
-# THE SAME READ FOR A ROW THAT NAMES ONE ID AND NOT ANOTHER (wave-31 T34; A-orch-53 (1)). 60c, 60e, 71c and
-# L8a asked `expect_block ... "T3" "T2"`, whose must-not is a substring of the WHOLE reason, and the reason
-# prints the checkout's path (`bash <hooks dir>/session-poker.sh decline ...` and the scratch path in the
-# note), so a tree under `.worktrees/31-T24` held `T2` and all four read red. Both ids are read off the
-# refusal's decline operand instead, as whole words, and the list must be non-empty.
-expect_block_rows() {  # <label> <id the row list must hold> <id it must not hold>
-  local d rows; d=$(decision_of); rows=$(refusal_rows)
-  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
-    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
-  fi
-  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
-  case " $rows " in
-    *" $2 "*) ;;
-    *) no "$1" "the row list <$rows> does not name <$2>"; return ;;
-  esac
-  case " $rows " in
-    *" $3 "*) no "$1" "the row list <$rows> names <$3>"; return ;;
-  esac
   ok "$1"
 }
 
@@ -594,8 +553,8 @@ section "Section 5b: the fourth duty — a stand-down the tick ordered is answer
 #
 # ANSWERED = a main-thread `TaskStop` tool_use naming the agent (by its name or by the address
 # the roster carries for it) that the harness did not refuse, an ack closing the row, or a
-# `standdown-declined: <name> <reason>` line at the start of a line of the model's own text —
-# the fill-declined rule (AC-5.4). The decline is the point, not a loophole: an agent still
+# `standdown-declined: <name> <reason>` line at the start of a line of the model's own text,
+# never a quote of one. The decline is the point, not a loophole: an agent still
 # writing its record is a good reason not to stop it, and it is worth one line in the record.
 
 # The stop itself, shaped as the harness sends it: the id may be the agent's name or the

@@ -221,7 +221,7 @@ remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 c
 #
 # EVERY DECISION IS ADVISORY. The tick prints; the orchestrator dispatches, stops and edits
 # the plan. hooks/patrol-duties-gate.sh is what makes a printed FILL binding — the tick's
-# turn may not end until the named dispatches or an explicit decline appear — and that is a
+# turn may not end while a named row is still ready and undispatched — and that is a
 # wall on the ORCHESTRATOR, not an action taken here. A hook that dispatched agents or
 # stopped them would be a hook taking irreversible action off a reading it cannot confirm.
 
@@ -251,7 +251,7 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
 # duties gate (hooks/patrol-duties-gate.sh) refuses the turn until every named task is
-# either dispatched or explicitly declined — and dispatching into a plan that has not
+# either dispatched or made not ready — and dispatching into a plan that has not
 # reached Step 4 sends a writer against a task table nobody has ratified: Steps 0-3 are
 # research/spec/plan/REVIEW, and `current:` only reaches 4 once Step 3's approval is given
 # (SKILL.md §Steps). Observed 2026-09-05T17:54Z: the tick printed `FILL S1 S2 S3 S4 S12 S14
@@ -506,7 +506,7 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
     tick_owed_approval "${base#* — }" "poker: $wl"
   done <<TICK_WAIT
 $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n' "$rows" "$waiting" "$susp" "$held" | awk -F'\t' \
-    -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
+    -v offered=" $offered " -v all=" $all " -v gap="${SCHED_GAP:-0}" '
   $0 == SUBSEP "rows" { part = 1; next }
   $0 == SUBSEP "wait" { part = 2; next }
   $0 == SUBSEP "susp" { part = 3; next }
@@ -550,8 +550,7 @@ $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n' "$rows" "$wa
         }
         if (sfx != "") reason = reason "\037" sfx
       } else if (index(all, " " i " ")) {
-        if (index(declined, " " i " ")) reason = "ready; answered by the standing fill-declined"
-        else reason = "ready; no writer slot free (gap " gap ")"
+        reason = "ready; no writer slot free (gap " gap ")"
       } else if (i in hold) {
         reason = hold[i]
       } else continue
@@ -990,7 +989,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     # pressure band (its state and rung), `current:`, every row's verdict as `name|state|acked`
     # sorted, and the named lines the tick printed reduced to their kind and subject (a
     # STANDDOWN, a held row, a GONE report, a duplicate tell, an ext: hold, a ledger finding, a
-    # standing fill decline, a note). Never an instant, an age or a measurement: those move on every tick by themselves.
+    # note). Never an instant, an age or a measurement: those move on every tick by themselves.
     # DISARM is terminal and a tick over the share names what holds the memory, so both always
     # print in full.
     #
@@ -1074,7 +1073,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
             $2 == "NOTIFY" && index($0, " started without its checks: ") > 0 { print; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY|SPLIT)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY|SPLIT)$/ { print $2, $3, $4 }
             # An open check is told once (wave-28 T41; D33): a new one, or one settled, moves the hash.
             $2 == "FINDING" && $6 == "check" { print $2, $3, $6 }
           ' "$TICK_BUF" | LC_ALL=C sort
@@ -1140,10 +1139,10 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     # two channels agree on one tick (D5).
     #
     # AND THE READY ROWS BEHIND THE GAP (wave-28 T74; A-orch-226). The rows the width parked (`WAIT <id> — ready; no
-    # writer slot free`) are named too, because declining every FILL row frees their slot and the stop wall then
-    # asks for them: one decline answers the set the wall counts. The `poker: FILL <ids>` line keeps its own ids.
+    # writer slot free`) are named too, because a FILL row made to wait frees its slot and the stop wall then asks
+    # for them, in the same turn. The `poker: FILL <ids>` line keeps its own ids.
     tick_fill_sentence() {
-      say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them${SCHED_BEHIND:+ · behind the gap: ${SCHED_BEHIND} — a decline of a FILL row frees their slot; dispatch or decline them in the same turn}."
+      say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them${SCHED_BEHIND:+ · behind the gap: ${SCHED_BEHIND} — a FILL row made to wait frees its slot for them; dispatch them, or make each wait, in the same turn}."
     }
 
     # THE STOP ORDERS THIS TICK OWES, written once the decision is known (wave-24 T7; D1, D4). An
@@ -2168,7 +2167,7 @@ EOF
     # THE UNTRIMMED READY SET, ASKED ONCE FOR EVERY ARM (wave-26 T13; review-6 F3). The WAIT
     # lines read it, and so does the WAITING line below the decision: "nothing ready" is said
     # only when this is empty. A row that is ready and not offered — a full writer budget, a
-    # standing decline, a machine HOLD — is not "nothing ready".
+    # machine HOLD — is not "nothing ready".
     SCHED_READY_ALL=""; SCHED_IDLE_AT=""; SCHED_IDLE_OWED=""
     if [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
       SCHED_READY_ALL="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
@@ -2218,10 +2217,20 @@ EOF
       SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
       say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
     elif [ -n "$SCHED_PLAN" ] && ! fill_plan_approved "$SCHED_PLAN"; then
-      # THE GATE IS THE APPROVAL LINE, NOT THE STEP (wave-26 T13; D3, AC-6.2): the one fact
-      # `fill_ledger_live` and the dispatch wall key on. The step is named because it is
-      # what a reader looks for; the line says which fact is missing.
+      # THE APPROVAL LINE FIRST: the fact the dispatch wall keys on, and
+      # one half of `fill_ledger_live`; the step, its other half, is the arm below. The step is
+      # named because it is what a reader looks for; the line says which fact is missing.
       say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
+    elif [ -n "$SCHED_PLAN" ] && [ "$SCHED_STEP" -lt 4 ]; then
+      # THE APPROVAL LINE ALONE READIES NOTHING. A plan approved and still at Step 2 or 3 holds a
+      # table nobody has started: `fill_ledger_live` and the table reader's `approval:plan` both wait
+      # for `current:` to reach 4, so the line names the step that holds the fill.
+      say "no FILL — plan at current: ${SCHED_CURRENT:-$SCHED_STEP}; a row is ready only from Step 4, and approved-by: alone readies none"
+    elif [ -n "$SCHED_PLAN" ] && SCHED_ORDER="$(fill_order_open "$SCHED_PLAN")"; then
+      # THE USER'S ORDER HOLDS THE FILL (lib/fill.sh `fill_order_open`): no row is offered while it
+      # stands, and the stop wall, reading the same order, asks for none. The WAIT lines still print.
+      say "no FILL — an order of the user stands: $(clean_whole "$SCHED_ORDER"); order lift ends it"
+      tick_wait_report
     elif [ -z "$SCHED_PLAN" ]; then
       note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
     else
@@ -2231,53 +2240,12 @@ EOF
       # gate's alone (`fill_cap` answers nothing, so `fill_gate_width` runs uncapped).
       # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above, and `SCHED_HOLDS`
       # still carries the step holds for the no-FILL line below (wave-21 T13).
-      # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
-      # treats the rows the session's latest `fill-declined:` answered as answered until the
-      # ready set gains a row it did not see (wave-26 T15; D16), so a FILL naming them asked
-      # again for an answer already given.
-      # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
-      # prints the decline while it stands and the ready set below leaves its rows out.
-      #
-      # A DECLINE ENDS WHEN ROOM APPEARS (wave-37 T18; REQ-11 AC-11.4; D13). The reader is told the
-      # gate's `room=` answer (gate_report, above) and the writer slots free to ALL the ready writer rows,
-      # the declined ones too, sized by the same `fill_gate_width` the offer below uses. It holds the decline
-      # only while room is no or no slot is free (`fill_decline_holds`, lib/fill.sh); with room and a slot
-      # the tick records the lapse once, says so, and the rows are offered below like any ready row.
       SCHED_CAP="$(fill_cap "$SCHED_PLAN")"
-      SCHED_FREE_PRE=0
-      if [ "${SCHED_GATE_ROOM:-}" = yes ]; then
-        SCHED_FREE_PRE="$(fill_gate_width "$TICK_OCCUPIED" "$SCHED_OWED" \
-          "$(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$2 == "w" { n++ } END { print n + 0 }')" "$SCHED_CAP")"
-        case "$SCHED_FREE_PRE" in ''|*[!0-9]*) SCHED_FREE_PRE="$TICK_OCCUPIED" ;; esac
-        SCHED_FREE_PRE=$(( SCHED_FREE_PRE - TICK_OCCUPIED ))
-        [ "$SCHED_FREE_PRE" -lt 0 ] && SCHED_FREE_PRE=0
-      fi
-      SCHED_LED="$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)"
-      SCHED_LAPSE="$(fill_decline_lapsing "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"
-      if [ -n "$SCHED_LAPSE" ]; then
-        IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_LAPSE"
-        SCHED_LAPSE_LINE="fill-ledger/v1|at=$(iso_now)|session=${SESSION_ID}|turn=|current=$(_fill_current_field "$SCHED_PLAN" | tr '|' ' ')|state=lapsed"
-        SCHED_LAPSE_LINE="${SCHED_LAPSE_LINE}|ceiling=${SCHED_WRITERS:-}|width=|open=|free=${SCHED_FREE_PRE}|ready=|launched=|declined=|missed=0|idle=|room=${SCHED_GATE_ROOM}"
-        SCHED_LAPSE_LINE="${SCHED_LAPSE_LINE}|lapsed-at=${SCHED_SD_AT}|lapsed=${SCHED_SD_IDS// /,}|lapsed-why=${SCHED_SD_WHY//|/ }"
-        if [ -n "$SCHED_LED" ] && [ ! -L "$SCHED_LED" ] && printf '%s\n' "$SCHED_LAPSE_LINE" >> "$SCHED_LED" 2>/dev/null; then
-          say "fill-declined lapsed — room=${SCHED_GATE_ROOM}, ${SCHED_FREE_PRE} writer slot(s) free; ${SCHED_SD_IDS// /,} asked again (declined since ${SCHED_SD_AT}: $(clean "$SCHED_SD_WHY"))"
-        else
-          say "fill-declined lapsed — room=${SCHED_GATE_ROOM}, ${SCHED_FREE_PRE} writer slot(s) free; ${SCHED_SD_IDS// /,} asked again, but the ledger ${SCHED_LED:-has no path} could not be written, so the lapse is not recorded"
-        fi
-      fi
-      SCHED_SD="$(fill_standing_decline "$SCHED_LED" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")" "${SCHED_GATE_ROOM:-}" "${SCHED_FREE_PRE:-}" "$SCHED_PLAN")"
-      SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
-      if [ -n "$SCHED_SD" ]; then
-        IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"
-        say "fill-declined standing since ${SCHED_SD_AT} — $(clean "$SCHED_SD_WHY")"
-      fi
-      # THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.5). The writer rows ready and not
-      # answered by the standing decline are offered one at a time: `fill_gate_width` asks
-      # `gate_room` once per row, with the open writers not yet showing plus the rows already
+      # THE WIDTH IS THE GATE'S. The writer rows ready are offered one
+      # at a time: `fill_gate_width` asks `gate_room` once per row, with the open writers not yet showing plus the rows already
       # offered on this reading counted as owed, and stops at the first no or at a person's cap.
       # A gate line that read no room offers none, so the line and the fill never disagree.
-      SCHED_READY_W="$(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null \
-        | awk -F'\t' -v sd=" $SCHED_SD_IDS " '$2 == "w" && index(sd, " " $1 " ") == 0 { n++ } END { print n + 0 }')"
+      SCHED_READY_W="$(fill_ready_tagged "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$2 == "w" { n++ } END { print n + 0 }')"
       SCHED_WIDTH="$TICK_OCCUPIED"
       [ "${SCHED_GATE_ROOM:-}" = yes ] \
         && SCHED_WIDTH="$(fill_gate_width "$TICK_OCCUPIED" "$SCHED_OWED" "$SCHED_READY_W" "$SCHED_CAP")"
@@ -2296,7 +2264,7 @@ EOF
       # the set is asked at a closed gap too, and "the budget is full" is said only when it
       # offered nothing.
       SCHED_RO_READY=""
-      [ "$SCHED_GAP" -eq 0 ] && SCHED_RO_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
+      [ "$SCHED_GAP" -eq 0 ] && SCHED_RO_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")"
       if [ "$SCHED_GAP" -eq 0 ] && [ -z "$SCHED_RO_READY" ] && [ "$SCHED_READY_W" -gt 0 ]; then
         SCHED_READY=""
         if [ -n "$SCHED_CAP" ] && [ "$TICK_OCCUPIED" -ge "$SCHED_CAP" ]; then
@@ -2324,7 +2292,7 @@ EOF
         # the roster's unacked rows after this tick's own acks. The wall measures both the
         # same way (the width from `fill_gate_width`, the occupancy by the same predicate:
         # wave-19 audit V-2, T2d), so what it names is what this prints.
-        SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
+        SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")}"
         SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
         while IFS= read -r TASK_ID; do
           [ -n "$TASK_ID" ] || continue
@@ -2396,17 +2364,11 @@ EOF_MV
 $(units_live_rows "$SCHED_PLAN" 2>/dev/null)
 EOF
         else
-          # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
-          # which answer holds the rows, and the standing line above says why.
-          if [ -n "$SCHED_SD_IDS" ] && [ -n "${SCHED_READY_ALL// /}" ]; then
-            say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready."
-          else
-            # THE REASONS ARE PER ROW NOW (wave-26 T13; D9, AC-6.6). Through 1.10 this line
-            # carried one sentence for every waiting row and named only the step holds; each
-            # waiting row is on its own WAIT line below, with the read it lacks and the row
-            # that writes it, the step holds among them.
-            say "no FILL — width=${SCHED_WIDTH} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready."
-          fi
+          # THE REASONS ARE PER ROW NOW (wave-26 T13; D9, AC-6.6). Through 1.10 this line
+          # carried one sentence for every waiting row and named only the step holds; each
+          # waiting row is on its own WAIT line below, with the read it lacks and the row
+          # that writes it, the step holds among them.
+          say "no FILL — width=${SCHED_WIDTH} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready."
         fi
       fi
       tick_wait_report
@@ -2684,8 +2646,8 @@ EOF
       # line, and the duty above is none, so the turn ends here.
       #
       # ONLY WHEN NOTHING IS READY (wave-26 T13; review-6 F3). A QUIET tick can also be one
-      # where a row IS ready and not offered: the writer budget is full, or the standing
-      # fill-declined answered it. "nothing ready" is false there, and each such row already
+      # where a row IS ready and not offered: the writer budget is full. "nothing ready" is
+      # false there, and each such row already
       # has its WAIT line saying why, so the line is left out.
       case "${SCHED_READY_ALL:-}" in
         *[!\ ]*) : ;;

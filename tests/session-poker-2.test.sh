@@ -226,7 +226,8 @@ case "$OUT" in
 esac
 expect_contains "36c …and carries the tick command, by this poker's absolute path" "bash $POKER tick" "$OUT"
 expect_eq "36d …on one line (a CronCreate prompt)" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-expect_contains "36e …and names the fill answer, the decline verb (wave-27 T34)" "session-poker.sh decline IDS" "$OUT"
+expect_contains "36e …and names the fill answer: dispatch, or a row made not ready, never an answer in words" \
+  "a row that should wait is made not ready instead, by one of the three forms the stop wall prints" "$OUT"
 OUT="$( cd "$R36" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" prompt 2>&1 )"; RC=$?
 expect_eq "36f with no session key there is no marker to print (exit 3)" "3" "$RC"
 poke "$R36" prompt extra
@@ -553,7 +554,8 @@ R41P="$(make_repo s41-prompt)"
 poke "$R41P" prompt
 S41_PROMPT="$OUT"
 expect_nonempty "41a precondition: the prompt printed" "$S41_PROMPT"
-expect_contains "41a4 …and the fill answer is still named: the decline verb (wave-27 T34)" 'decline IDS' "$S41_PROMPT"
+expect_contains "41a4 …and the fill answer is still named" 'Answer a FILL only if a "poker: FILL" line printed' "$S41_PROMPT"
+expect_absent "41a4b …and names no decline" 'decline' "$S41_PROMPT"
 expect_regex "41a7 AC-4.11 …and it carries its version after the session token" \
   "^bionic-patrol session=${SID:0:8} v=[0-9]+ — " "$S41_PROMPT"
 
@@ -757,53 +759,6 @@ BIONIC_PROBE_USED_PCT=90 poke "$R41X" tick
 expect_contains "41h2 the second tick over the same facts still prints in full" "poker: over share" "$OUT"
 expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
 unset CLAUDE_CONFIG_DIR
-
-# ---------- §SD-tick (AC-4.7; D2): the tick prints the standing fill decline ----------
-#
-# THE DEFECT (wave-24 Step-6 review C2). The stop wall read the session's latest declined fill-
-# ledger line as the standing answer for the ready rows it saw, and the tick read nothing: it
-# still printed `FILL ONE` and `decision=FILL` for a row the wall treated as answered, so the
-# prompt asked for the answer again. The tick now asks the same reader the wall asks
-# (`fill_standing_decline`, lib/fill.sh), prints `fill-declined standing since <at> — <reason>`,
-# and names no standing row in its FILL. The ledger line is the recorder's shape
-# (stop.sh `stop_fill_ledger`); the plan is mk_rung_repo's, at `current: 4` with four ready rows.
-s41_sd_line() {  # <repo> <session> <current> <ready> <declined>
-  local d="$1/.bionic/docs/record/wave-01-fixture"
-  mkdir -p "$d"
-  printf 'fill-ledger/v1|at=2026-10-03T09:00:00Z|session=%s|turn=u-1|current=%s|state=ok|ceiling=8|width=8|open=0|free=8|ready=%s|launched=|declined=%s|missed=4\n' \
-    "$2" "$3" "$4" "$5" >> "$d/fill-ledger.log"
-}
-s41_fill_line() { printf '%s\n' "$1" | /usr/bin/grep '^poker: FILL ' | head -1; }
-# A DECLINE STANDS WHILE THE GATE GIVES NO ROOM (wave-37 T18; REQ-11 AC-11.4; D13). With room=yes and a writer
-# slot free it lapses (tests/session-poker-4.test.sh §REOPEN), so the pins of what a standing decline answers read
-# the tick at room=no (BIONIC_PROBE_BUSY_CORES_5M=8.0 over the rung fixture's share, session-poker.test.sh 11a), and the control ticks at room=yes.
-R41S="$(mk_rung_repo s41-sd-some)"
-s41_sd_line "$R41S" "$SID" 4 ONE,TWO "ONE and TWO wait on the BASE merge"
-BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_rung "$R41S" 60 0 tick
-expect_eq "41i2 …and with no room names no FILL, the declined rows answered" "" "$(s41_fill_line "$OUT")"
-forget_digest "$R41S"; poke_rung "$R41S" 60 0 tick
-expect_contains "41i2b AC-11.4 …and with room and a free slot the decline lapses and the tick asks every ready row" \
-  "poker: fill-declined lapsed — room=yes" "$OUT"
-R41A="$(mk_rung_repo s41-sd-all)"
-s41_sd_line "$R41A" "$SID" 4 ONE,TWO,THREE,FOUR "the batch waits on the BASE merge"
-BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_rung "$R41A" 60 0 tick
-expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
-expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
-forget_digest "$R41A"; poke_rung "$R41A" 60 0 tick
-# A moved current: is not one of the ways a line stands for nothing (wave-26 T15; D16).
-R41M="$(mk_rung_repo s41-sd-moved)"
-s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
-BIONIC_PROBE_BUSY_CORES_5M=8.0 poke_rung "$R41M" 60 0 tick
-expect_contains "41i6 wave-26 T15 (D16) a decline taken at another current: still stands over the same ready set" \
-  "fill-declined standing since " "$OUT"
-expect_eq "41i7 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
-R41O="$(mk_rung_repo s41-sd-other)"
-s41_sd_line "$R41O" "ffffffff-0000-4000-8000-000000000000" 4 ONE,TWO,THREE,FOUR "another session's answer"
-poke_rung "$R41O" 60 0 tick
-R41D2="$(mk_rung_repo s41-sd-dash)"
-s41_sd_line "$R41D2" "$SID" 4 ONE,TWO,THREE,FOUR "—"
-poke_rung "$R41D2" 60 0 tick
-expect_absent "41i10 …and no standing line" "fill-declined standing" "$OUT"
 
 # ============================================================
 finish

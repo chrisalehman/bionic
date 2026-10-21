@@ -533,8 +533,8 @@ expect_contains "9b: T11b the headline names the row left out, alone (wave-36 T3
   "ready with room: T14 (" "$(s9_headline)"
 expect_contains "9c: …and names the row that was not launched" "ready with room: T14" "$(s9_headline)"
 expect_contains "9d: …as the reason does" "T14" "$(reason_of)"
-# The hook's own path is taken out of the reason first: the decline command the refusal prints
-# names it, and a checkout whose path holds the row id (a worktree for row T13) would match there.
+# The hook's own path is taken out of the reason first: the commands the refusal prints name it,
+# and a checkout whose path holds the row id (a worktree for row T13) would match there.
 expect_absent "9e: T11b the row this turn launched is never named as missed, pending or not" \
   "T13" "$(s9_headline)$(reason_of | sed -E 's#[^ ]*session-poker\.sh##g')"
 S9_LED="$S9_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
@@ -547,8 +547,8 @@ S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
 s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing names both ready rows" "ready with room: T13 T14 (" "$(s9_headline)"
 
-# T16 (wave-26, D17): the ledger line ends with `idle=` and `room=`, the ready rows no launch and no
-# decline covered while a slot was free, and the free slots at that moment. Positive on the same
+# The ledger line ends with `idle=` and `room=`, the ready rows no launch
+# covered while a slot was free, and the free slots at that moment. Positive on the same
 # line first: the launched row is out of idle, the unlaunched one is in, and room is the line's own free.
 S9_LED0="$S9_D0/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
 S9_FREE="$(sed -n 's/.*|free=\([0-9]*\)|.*/\1/p' "$S9_LED" 2>/dev/null)"
@@ -598,29 +598,31 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 
 # THE DEFECT (found in wave-36's own run; record/wave-36-zero-machine-errors/fill-ledger.log from
 # 2026-10-14T00:07Z). With one writer slot free and fourteen ready rows, the wall named only
-# `min(free, ready)` of them, one, and its printed decline answered that one; the next turn named
-# the next row, and the run declined by hand fourteen times. Its paragraph ran six lines. Now the
+# `min(free, ready)` of them, one; the next turn named the next row, fourteen turns in all. Now the
 # wall's room is the gate's answer to the tick's own question, on one reading (`fill_gate_width`,
 # whose first ask is the tick's gate line, `gate_room --owed <owed>`), and a refusal names every
-# ready row no standing decline answers, in one line the user reads. The model's copy adds one line:
-# the decline command, pasteable, with the rows comma-joined.
+# ready row in one line the user reads. The model's copy adds the rows comma-joined in one dispatch
+# line and the three forms that make a row wait: a dependency, a read of a ruling, an order.
 #
 # THE READING IS PINNED for the tick and the wall alike: 8 cores at the default share 92 (7.36
 # cores of room; HOME is a fresh directory, so no share file is read). The first row is asked with
 # nothing owed and each row offered owes one promise more, so a busy reading of 7.0 leaves room for
 # exactly one writer (7 <= 7.36 < 7 + the suite cost, wave-38 T5), and 8.0 for none.
-gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15, an empty roster
+# The plan is one the commit gate admits (its version line and a Step-4 block), so a plan verb's dry
+# commit, which GAP3 runs, judges the cells it writes and not the fixture.
+gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n---\n\n# fixture plan\n\n'
-    printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\ncanonical_sdlc_version: 14\n---\n\n# fixture plan\n\n'
+    printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/37-fixture\n  base-sha: abc1234\n  branch: wave/37-fixture\n\n'
     printf '## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T13 | 4 | build | first | implementor | — | 15m | REQ-x | a.sh | pending |\n'
-    printf '| T14 | 4 | build | second | implementor | — | 15m | REQ-x | b.sh | pending |\n'
-    printf '| T15 | 4 | build | third | implementor | — | 15m | REQ-x | c.sh | pending |\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T13 | 4 | build | first | implementor | — | 15m | REQ-x | a.sh | pending |  |\n'
+    printf '| T14 | 4 | build | second | implementor | — | 15m | REQ-x | b.sh | pending |  |\n'
+    printf '| T15 | 4 | build | third | implementor | — | 15m | REQ-x | c.sh | pending |  |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
@@ -648,7 +650,7 @@ expect_contains "GAP1c …recording the gate's hold, three rows ready, none free
 expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 
 # GAP2: ROOM FOR ONE, THREE READY. The tick on the reading offers one row; the wall refuses once,
-# naming all three, so one decline answers them.
+# naming all three.
 GAP_D2="$(gap_fixture)"
 GAP_T2="$(gap_tick "$GAP_D2" 7.0)"
 expect_contains "GAP2a precondition: the tick on this reading offers exactly one row" \
@@ -661,25 +663,33 @@ expect_eq "GAP2c the turn is refused" "block" "$(printf '%s' "$STOP_OUT" | jq -r
 GAP_LINE="$(s9_headline)"
 expect_true "GAP2e …under 100 columns" \
   test "$(printf '%s' "$GAP_LINE" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -lt 100
-expect_contains "GAP2f the model's copy carries the decline for all three, comma-joined" \
-  "decline T13,T14,T15 'why they wait'" "$(reason_of)"
-expect_eq "GAP2g …and is the line and that one command, nothing else" "3" \
+expect_contains "GAP2f the model's copy names all three rows, comma-joined, in one dispatch line" \
+  "dispatch T13,T14,T15, or make each wait by one of three forms:" "$(reason_of)"
+expect_eq "GAP2g …and is the line, a blank, that dispatch line and the three forms, nothing else" "6" \
   "$(reason_of | awk 'END { print NR }')"
 expect_contains "GAP2h meta: the reason is the refusal's" "ready with room: T13 T14 T15" "$(reason_of)"
 expect_absent "GAP2i …and the six-line paragraph is gone" "Fillable gap" "$(reason_of)"
+expect_contains "GAP2j the tick that offered one row names the two behind the gap" \
+  "behind the gap: T14 T15" "$GAP_T2"
+expect_absent "GAP2k …and the tick names no decline" "decline" "$GAP_T2"
 
-# GAP3: ONE DECLINE ANSWERS THEM ALL. The command the refusal printed, with a reason in the slot,
-# then the same turn ends again: no refusal, and the ledger charges the turn to the decline.
-GAP_CMD="$(reason_of | /usr/bin/grep -o "bash [^ ]*session-poker.sh'\{0,1\} decline T13,T14,T15 'why they wait'" | head -1)"
-expect_contains "GAP3a precondition: the reason holds a runnable decline" "decline T13,T14,T15" "$GAP_CMD"
-GAP_CMD="${GAP_CMD%\'why they wait\'}'T3 has not landed'"
+# GAP3: THE RULING FORM, RUN AS PRINTED, MAKES THE ROWS WAIT. The refusal's read-of-a-ruling line, its
+# ID and DN filled in, is a task-set the poker takes: each row keeps its kind's reads and gains the
+# decision, which is unruled, so the next turn end finds no row ready and passes.
+GAP_CMD="$(reason_of | sed -n 's/^a read of a ruling: \(bash .* task-set ID reads+=approval:DN\).*$/\1/p' | head -1)"
+expect_contains "GAP3a precondition: the reason holds the ruling form" "task-set ID reads+=approval:DN" "$GAP_CMD"
+GAP_CMD="${GAP_CMD/ ID / T13,T14,T15 }"; GAP_CMD="${GAP_CMD/approval:DN/approval:D3}"
 ( cd "$GAP_D2" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c "$GAP_CMD" >/dev/null 2>&1 )
+GAP_P2="$GAP_D2/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+expect_contains "GAP3b the read is appended after the kind's default reads, which the empty cell stood for" \
+  "| T13 | 4 | build | first | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, approval:D3 |" "$(cat "$GAP_P2")"
+expect_contains "GAP3c …on every row the command named" "| pending | approval:plan, approval:D3 |" "$(grep -F '| T15 |' "$GAP_P2")"
 GAP_X3="$(mktemp)"
 jq -nc '{type:"user",uuid:"u-gap3",isSidechain:false,timestamp:"2026-09-19T00:01:00Z",message:{role:"user",content:"carry on"}}' > "$GAP_X3"
 BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$GAP_D2" "$GAP_X3"
-expect_contains "GAP3b meta: the next turn's ledger line still counts one free slot" "|free=1|" "$(gap_led "$GAP_D2" | tail -1)"
-expect_contains "GAP3c …and charges the turn to the decline" "|declined=T3 has not landed|" "$(gap_led "$GAP_D2" | tail -1)"
-expect_eq "GAP3d one decline answered the three rows: the turn passes" "" \
+expect_contains "GAP3d meta: the wall read the next turn, its ledger line is that turn's" "|turn=u-gap3|" "$(gap_led "$GAP_D2" | tail -1)"
+expect_contains "GAP3e …and no row ready" "|ready=|" "$(gap_led "$GAP_D2" | tail -1)"
+expect_eq "GAP3f the rows wait on the ruling: the turn passes" "" \
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 
 # GAP4: A WAITING REQUEST ALONE LEAVES ROOM (wave-38 T5; D21, ADR-060). The gate's room reads its
@@ -784,116 +794,117 @@ expect_absent "UB2c: …and A hears no unbound advisory" "session unbound" "$STO
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "SD: a fill decline stands against the ready set it answered (wave-24 T8, REQ-4, AC-4.7; D2)"
+section "WAIT: a row waits by a dependency, a read of a ruling or an order; the refusal names the three, and a waiting row is not ready, so the turn ends"
 
-# THE DEFECT. A `fill-declined: <reason>` answered the turn it was written in and no other, so
-# a decline with a reason that still held ("T7 waits on T6's merge") had to be written again on
-# every turn end until the reason went away. The fill ledger already records each Stop's ready
-# set, `current:` and decline. The collector now reads the session's latest declined line from
-# it, and the wall refuses only when a row is ready that the decline did not answer, or when
-# `current:` has moved. The predicate is "an unanswered row exists", not "a decline exists".
-# Each turn is its own transcript, keyed by its own prompt uuid; the ledger is what carries.
-sd_fixture() {  # -> project dir; T7 pending, writers=8, current: 4
-  local d
+# THE DEFECT. A ready row the run meant to hold was answered by a reason in prose, which the wall
+# read again on every turn end and the tick could not judge. A wait is a fact of the plan now: a
+# read of the record of a row still open, a read of a decision nobody has ruled, or the user's order
+# under ## SDLC State. Each leaves the row not ready, so the wall has nothing to refuse and the turn
+# ends. Each wait has a control beside it, the same fixture with the wait removed, which is refused,
+# so every pass below is the wait's doing and not a fixture the wall never reads.
+wait_fixture() {  # <extra ## SDLC State lines, or ""> <row>... -> project dir; a reads table, bound, an empty roster
+  local d extra="$1" r
+  shift
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
-    printf '## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n---\n\n# fixture plan\n\n'
+    printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
+    [ -z "$extra" ] || printf '%s\n' "$extra"
+    printf '\n- Step 4: in progress\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T7 | 4 | build | the row behind a merge | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
-  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
-  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+    for r in "$@"; do printf '%s\n' "$r"; done
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
 }
-sd_turn() {  # <file> <prompt uuid> [assistant text]
-  { jq -nc --arg u "$2" '{type:"user",uuid:$u,isSidechain:false,timestamp:"2026-10-03T00:00:00Z",message:{role:"user",content:"carry on"}}'
-    [ -z "${3:-}" ] || jq -nc --arg t "$3" '{type:"assistant",isSidechain:false,timestamp:"2026-10-03T00:00:01Z",
-                                          message:{role:"assistant",content:[{type:"text",text:$t}]}}'
-  } > "$1"
+wait_fire() {  # <project> -> the real Stop on an ordinary turn that dispatched nothing
+  local tx
+  tx="$(mktemp)"
+  jq -nc '{type:"user",uuid:"u-wait",isSidechain:false,timestamp:"2026-10-20T00:00:00Z",message:{role:"user",content:"carry on"}}' > "$tx"
+  s7_fire "$1" "$tx"
 }
-sd_led() { cat "$1/.bionic/docs/record/wave-24-sd/fill-ledger.log" 2>/dev/null; }
-sd_field() {  # <ledger line> <key>
-  printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'
-}
-sd_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
-require_helpers sd_fixture sd_turn sd_led sd_field sd_decision
+wait_led() { cat "$1/.bionic/docs/record/wave-09-wait/fill-ledger.log" 2>/dev/null; }
+wait_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+require_helpers wait_fixture wait_fire wait_led wait_decision s7_fire reason_of
 
-SD_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$SD_RING"
-export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+WT_READY='| T13 | 4 | build | ready | implementor | — | 15m | REQ-x | a.sh | pending |  |'
+WT_RULED='| T13 | 4 | build | reads a ruling | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, approval:D3 |'
+WT_REC='.bionic/docs/record/wave-09-wait/T12-held.md'
 
-SD_D="$(sd_fixture)"
-SD_P="$SD_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
-SD_TX="$(mktemp)"
+# WAIT1: THE REFUSAL NAMES THE THREE FORMS. One ready row, room, nothing launched.
+W_D1="$(wait_fixture "" "$WT_READY")"
+wait_fire "$W_D1"
+expect_eq "WAIT1 a ready row with room and nothing launched is refused" "block" "$(wait_decision)"
+W_R="$(reason_of)"
+expect_contains "WAIT1b the refusal names the first form, a dependency" "a dependency: bash " "$W_R"
+expect_contains "WAIT1c …a task-set that reads the record of the row it waits on" "task-set ID reads+=RECORD" "$W_R"
+expect_contains "WAIT1d the second, a read of a ruling" "a read of a ruling: bash " "$W_R"
+expect_contains "WAIT1e …a task-set that reads the decision" "task-set ID reads+=approval:DN" "$W_R"
+expect_contains "WAIT1f the third, an order" "an order: bash " "$W_R"
+expect_contains "WAIT1g …the order verb with what the user said" "order 'WORDS'" "$W_R"
+expect_absent "WAIT1h …and no decline anywhere in the refusal" "decline" "$W_R$STOP_ERR"
+expect_contains "WAIT1i the line the user reads names the row and the fix" "ready with room: T13 (dispatch, or make each wait)" "$STOP_ERR"
 
-# SD1: the turn that declines is answered by its own line.
-sd_turn "$SD_TX" u-sd-1 "fill-declined: T7 waits on the T6 merge"
-s7_fire "$SD_D" "$SD_TX"
-expect_eq "SD1: the declining turn ends" "" "$(sd_decision)"
-expect_contains "SD1b: …and its ledger line carries the reason against ready {T7}" \
-  "|ready=T7|" "$(sd_led "$SD_D" | tail -1)"
+# WAIT2: A READ OF AN UNRULED DECISION. The row reads D3, which no approved: line rules.
+W_D2="$(wait_fixture "" "$WT_RULED")"
+wait_fire "$W_D2"
+expect_contains "WAIT2 meta: the wall read the turn, its ledger line is there" "fill-ledger/v1|" "$(wait_led "$W_D2" | tail -1)"
+expect_contains "WAIT2b …and the row reading the unruled D3 is not ready" "|ready=|" "$(wait_led "$W_D2" | tail -1)"
+expect_eq "WAIT2c the turn ends: no refusal" "" "$(wait_decision)"
+W_D2R="$(wait_fixture 'approved: D3 fixture "go"' "$WT_RULED")"
+wait_fire "$W_D2R"
+expect_eq "WAIT2d the control: D3 ruled, the same row is ready and refused" "block" "$(wait_decision)"
+expect_contains "WAIT2e …naming it" "ready with room: T13" "$STOP_ERR"
 
-# SD2: the next turn, no text, the ready set unchanged. The decline stands.
-sd_turn "$SD_TX" u-sd-2
-s7_fire "$SD_D" "$SD_TX"
-expect_eq "SD2: AC-4.7 next turn, ready {T7}, no text — passes on the standing decline" "" "$(sd_decision)"
-expect_contains "SD2b: …and its ledger line carries the standing reason, so the report keeps the idle cost with it" \
-  "T7 waits on the T6 merge" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
+# WAIT3: A DEPENDENCY ON AN OPEN ROW. T13 reads the record T12 writes, and T12 is active.
+W_D3="$(wait_fixture "" \
+  "| T12 | 4 | build | the open row | implementor | — | 15m | REQ-x | $WT_REC, z.sh | active |  |" \
+  "| T13 | 4 | build | waits on T12 | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, $WT_REC |")"
+wait_fire "$W_D3"
+expect_contains "WAIT3 meta: the wall read the turn" "fill-ledger/v1|" "$(wait_led "$W_D3" | tail -1)"
+expect_contains "WAIT3b …and the row waiting on the open T12 is not ready" "|ready=|" "$(wait_led "$W_D3" | tail -1)"
+expect_eq "WAIT3c the turn ends: no refusal" "" "$(wait_decision)"
+W_D3L="$(wait_fixture "" \
+  "| T12 | 4 | build | the landed row | implementor | — | 15m | REQ-x | $WT_REC, z.sh | landed |  |" \
+  "| T13 | 4 | build | waits on T12 | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, $WT_REC |")"
+wait_fire "$W_D3L"
+expect_eq "WAIT3d the control: T12 landed, T13 is ready and refused" "block" "$(wait_decision)"
+expect_contains "WAIT3e …naming it" "ready with room: T13" "$STOP_ERR"
 
-# SD3: a row the decline never saw is ready. Refused, naming that row and not the declined one.
-printf '| T8 | 4 | build | a row nobody declined | implementor | — | 15m | REQ-x | b.sh | pending | — |\n' >> "$SD_P"
-sd_turn "$SD_TX" u-sd-3
-s7_fire "$SD_D" "$SD_TX"
-expect_eq "SD3: AC-4.7 ready {T7,T8}, no text — refused" "block" "$(sd_decision)"
-expect_contains "SD3b: …naming T8" "ready with room: T8" "$STOP_ERR"
-expect_absent "SD3c: …and not T7, which the decline answered" "T7" "$(printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ')"
-expect_eq "SD3d: …and the refused turn's line carries no decline, so the standing set does not grow" \
-  "" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
+# WAIT4: THE USER'S ORDER. An open order makes no row ready; the order lifted, the row is owed again.
+W_D4="$(wait_fixture 'order: given 2026-10-20T00:00:00Z "hold the fleet while I read"' "$WT_READY")"
+wait_fire "$W_D4"
+expect_contains "WAIT4 meta: the wall read the turn" "fill-ledger/v1|" "$(wait_led "$W_D4" | tail -1)"
+expect_contains "WAIT4b …and under the open order no row is ready" "|ready=|" "$(wait_led "$W_D4" | tail -1)"
+expect_eq "WAIT4c the turn ends: no refusal" "" "$(wait_decision)"
+W_D4L="$(wait_fixture 'order: given 2026-10-20T00:00:00Z "hold the fleet while I read"
+order: lifted 2026-10-20T00:30:00Z "hold the fleet while I read"' "$WT_READY")"
+wait_fire "$W_D4L"
+expect_eq "WAIT4d the control: the order lifted, the row is ready and refused" "block" "$(wait_decision)"
+expect_contains "WAIT4e …naming it" "ready with room: T13" "$STOP_ERR"
 
-# SD4 (the `current:` move) is §DECLINE's D2 now: since wave-26 T15 (D16) a move of `current:`
-# alone no longer voids a standing decline, so the row that pinned the refusal was inverted there.
+# ─────────────────────────────────────────────────────────────────────────────
+section "GONE: no verb records a wait in prose: decline is an unknown verb, nothing writes a decline or a lapse, and the Patrol prompt names none"
 
-# SD5: an empty `fill-declined:` is not an answer, in its own turn or the next.
-SD_D5="$(sd_fixture)"
-sd_turn "$SD_TX" u-sd5-1 "fill-declined:   "
-s7_fire "$SD_D5" "$SD_TX"
-expect_eq "SD5: an empty fill-declined: does not answer the gap" "block" "$(sd_decision)"
-expect_eq "SD5b: …and records no decline" "" "$(sd_field "$(sd_led "$SD_D5" | tail -1)" declined)"
-sd_turn "$SD_TX" u-sd5-2
-s7_fire "$SD_D5" "$SD_TX"
-expect_eq "SD5c: …so nothing stands on the next turn" "block" "$(sd_decision)"
+# THE HISTORY READER. A run's old fill ledger keeps its decline and lapse lines, and the hand-holds
+# count (hooks/poker/line.sh) still counts them as history, so its text spells the state. Every
+# other hit of the three shapes in the shipped code is a writer, or a reader of the reply form.
+GONE_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+GONE_HITS="$(/usr/bin/grep -rlE 'state=decline|state=lapsed|fill-declined' "$BIONIC_HOOKS_DIR" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null \
+  | sed "s#^$BIONIC_SCRIPTS_DIR/##" | sort -u)"
+expect_contains "GONE1 the grep reads the shipped tree: the hand-holds reader is found" "hooks/poker/line.sh" "$GONE_HITS"
+expect_eq "GONE1b …and is the only hit" "hooks/poker/line.sh" "$GONE_HITS"
 
-# SD6: the decline is this session's. A line another session wrote into the same plan's ledger
-# was an answer the model in this conversation never gave.
-SD_D6="$(sd_fixture)"
-sd_turn "$SD_TX" u-sd6-1 "fill-declined: T7 waits on the T6 merge"
-s7_fire "$SD_D6" "$SD_TX"
-sed -i.bak "s/|session=$SID|/|session=ffffffff-0000-4000-8000-000000000000|/" \
-  "$SD_D6/.bionic/docs/record/wave-24-sd/fill-ledger.log"
-expect_contains "SD6 precondition: the decline now belongs to another session" \
-  "|session=ffffffff-" "$(sd_led "$SD_D6")"
-sd_turn "$SD_TX" u-sd6-2
-s7_fire "$SD_D6" "$SD_TX"
-expect_eq "SD6: another session's decline does not stand in this one" "block" "$(sd_decision)"
+GONE_OUT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$GONE_POKER" decline T1 'why they wait' 2>&1)"
+GONE_RC=$?
+expect_eq "GONE2 the decline verb exits as any unknown verb does" "2" "$GONE_RC"
+expect_contains "GONE2b …and says it is unknown" "unknown verb: decline" "$GONE_OUT"
 
-# SD7 (wave-24 T27; Step-6 review C4): a ledger line written before the reason rule (A-T8.7),
-# whose decline is only a dash, is not an answer either. The reader holds the line to the rule
-# the turn's own decline is held to: a letter or a digit.
-SD_D7="$(sd_fixture)"
-sd_turn "$SD_TX" u-sd7-1 "fill-declined: T7 waits on the T6 merge"
-s7_fire "$SD_D7" "$SD_TX"
-expect_eq "SD7 precondition: the declining turn ends" "" "$(sd_decision)"
-sed -i.bak 's/|declined=[^|]*|/|declined=—|/' "$SD_D7/.bionic/docs/record/wave-24-sd/fill-ledger.log"
-expect_eq "SD7 precondition: the ledger line now carries a dash for its decline" \
-  "—" "$(sd_field "$(sd_led "$SD_D7" | tail -1)" declined)"
-sd_turn "$SD_TX" u-sd7-2
-s7_fire "$SD_D7" "$SD_TX"
-expect_eq "SD7: C4 a pre-upgrade declined=— does not stand" "block" "$(sd_decision)"
-expect_contains "SD7b: …and the refusal names T7" "ready with room: T7" "$STOP_ERR"
-unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+GONE_PROMPT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$GONE_POKER" prompt 2>/dev/null)"
+expect_contains "GONE3 the Patrol prompt still says how a FILL is answered" 'Answer a FILL only if a "poker: FILL" line printed' "$GONE_PROMPT"
+expect_absent "GONE3b …and names no decline" "decline" "$GONE_PROMPT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish
