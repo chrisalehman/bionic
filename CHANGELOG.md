@@ -85,9 +85,11 @@ capability, and no verb is removed. `canonical_sdlc_version` stays 14.
 - T10 (`T10-release.md`): this entry, plugin.json 1.25.0, the help and version pages rendered by
   `agents-src/render.sh`, `rendered.sha256` refreshed, and ADR-069.
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T8): the card and the verbs used as a user would, whose findings T21 fixed.
+- The critic's review of the whole (`critic.md`, T9): evidence flag, adversarial fail, structure flag; its one S2 finding, a false card passing the check, fixed by T26 with 24 new tests, red first; the adversarial verdict waived by Chris Lehman on 2026-10-22 on that fix.
+- Chris Lehman's verdict on the four cards (`cards.md`, T8, 2026-10-22): "all four yes": from each card alone, what he owes, what it holds and what each answer does.
 
 ### Known limits
 
@@ -334,7 +336,7 @@ Thirty-eight rows landed through the line and five by hand. T26 and T43 changed 
 refused them by design (D4) and the orchestrator landed them by hand on the candidate's own green suites. T27, T44 and
 T45 wrote only their records.
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T44): the pages and the verbs used as a user would, at the build head.
 - The regression (`T27-regression.md`, T27): one whole run at 00943de4, 117 suites green and 1 red. The red,
@@ -755,7 +757,7 @@ Land these by hand", a writer ran only the suites that pin its own change, RED t
 the tree by hand on the report. The landing report below counts forty-one rows landed by hand and three through
 the line. The whole regression after the build is the proof for everything else (D16).
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T34): the pages and a landing used as a user would, from the main checkout and a spawned tree.
 - The regression (`T39-regression.md`, T39): one whole run at f7205ad6, 2:20 to 2:39 AM PDT, 101 of 113 suites green
@@ -1038,7 +1040,7 @@ Four of those hand landings each left a red that a later landing found and fixed
 left a reads-hash anchor (fixed by T17) (A-orch-28, A-orch-71). T26's writer was stopped and its record written by the
 orchestrator (A-orch-36).
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T27): eight scenes, no criterion named; its observations are below.
 - The matrix (`T28-matrix-fill.md`, T28): 45 of 49 rows discharged; AC-13.2, AC-19.1 and AC-20.3 wait for this row
@@ -1346,7 +1348,7 @@ D7, the sitrep taken verbatim from the notes, was withdrawn on the user's word, 
 principles (D8 onward). D15 set the walk order of the strategic cards. The design ledger, `design-ledger.md`, holds
 every ruling with the user's words.
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T23): bionic used as a user would on this branch, with six observations, below.
 - The matrix (`T24-matrix-fill.md`, T24): 48 of 52 rows discharged from landed records; AC-1.5 and AC-6.6 wait for
