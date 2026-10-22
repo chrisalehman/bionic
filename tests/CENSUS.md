@@ -2,9 +2,9 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1046 · keep: 855 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1049 · keep: 857 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
 
-The section-list command counts 1075 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1075 - 22 - 8 = 1045.
+The section-list command counts 1078 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1078 - 22 - 8 = 1048.
 
 ## agent-context-guard.test.sh
 
@@ -198,6 +198,9 @@ close-out-4.test.sh | §TOLERANT | keep | payload/scripts/close-out.sh co_debt_n
 close-out-4.test.sh | §SCORECARD | keep | payload/scripts/close-out.sh co_scorecard: the scorecard read after the wipe instead of before it, so the roster's launch is not counted and the section differs from the verb's seven lines (SC-2) | none (searched 'co_scorecard' and 'scorecard' in tests/)
 close-out-4.test.sh | §APPROVED-HEAD | duplicate | the facts judge's approved-head check deleted, so a working head past the approved head closes (AH-C1) and a missing approved: release line passes (AH-C2) | canonical-sdlc-evidence-gate-2.test.sh §ORDER-VERB (unverified; full title "ORDER-VERB, §WHOLE-RUN, §FIX-ROW, §APPROVED-HEAD")
 close-out-4.test.sh | §ASKS-NOTHING | keep | rule: lint — a `read -p` or a read of /dev/tty planted in payload/scripts/close-out.sh, so the sweep of its reads finds it (AN-1, AN-2) | none (searched '/dev/tty' and 'read -p' in tests/)
+close-out-4.test.sh | §NO-SCORECARD | keep | payload/scripts/close-out.sh: the `scorecard: ` card lines printed again on check or run stdout (NS-1, NS-4); skills/canonical-sdlc/steps/9.md or its template naming the scorecard again (NS-7, NS-9) | none (searched 'scorecard: ' and 'grep -c scorecard' in tests/; close-out-4.test.sh §SCORECARD reads the continuation, not stdout)
+close-out-4.test.sh | §REVIEWS-RENDERED | keep | payload/scripts/close-out.sh co_reviews_part: a waiver or a failing review line left out of the part, or the hand-written part kept (RV-5, RV-6); co_reviews_entry: the part not added before ### Known limits (RV-13); co_reviews_publish: the branch moved without the ev=close-out record line, or by update-ref under a checkout that holds it (RV-10, RV-11) | none (searched 'ev=close-out', 'The reviews' and 'co_reviews' in tests/)
+close-out-4.test.sh | §MOCK-UP | prose pin | skills/canonical-sdlc/steps/2.md and its template: the rule that a card put for approval is the verb's or marked a mock-up deleted (MU-1 to MU-3) | none (searched 'mock-up' in tests/)
 
 ## close-replay.test.sh
 
