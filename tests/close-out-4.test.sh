@@ -545,6 +545,8 @@ printf '%s\n' "bionic-handoff/v1" "sitrep head: Bottom line" "- You owe nothing 
   "mid-flight: zebra row is halfway" "order: quince goes first" "rulings: D99 mango stays" \
   "lessons: ferret waits for the gate" "risks: walnut will conflict" "/bionic:canonical-sdlc old/path.md" > "$OWO_FILE"
 run_close "$OWO" run
+expect_regex "OW-6 close-out writes the pair the handoff verb writes: written: on the local 12-hour clock…" '^written: [0-9]{1,2}:[0-9]{2} (AM|PM)$' "$(/usr/bin/grep -m1 '^written: ' "$OWO_FILE")"
+expect_regex "OW-6b …and instant: the ISO instant, a line of its own (OW-6 read the same file)" '^instant: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(/usr/bin/grep -m1 '^instant: ' "$OWO_FILE")"
 expect_eq "OW-5 close-out carries an old-shape handoff file: the human lines under their sections, the facts under State" \
   "0|Open|Next|Decisions|Findings|Open|State|State|State" \
   "$CO_RC|$(ow_sec_of "$OWO_FILE" zebra)|$(ow_sec_of "$OWO_FILE" quince)|$(ow_sec_of "$OWO_FILE" mango)|$(ow_sec_of "$OWO_FILE" ferret)|$(ow_sec_of "$OWO_FILE" walnut)|$(ow_sec_of "$OWO_FILE" 'step: 4')|$(ow_sec_of "$OWO_FILE" 'w-T9')|$(ow_sec_of "$OWO_FILE" 'Bottom line')"

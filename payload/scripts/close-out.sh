@@ -1642,13 +1642,14 @@ STEP9
 # risks into Open, order into Next, rulings into Decisions, lessons into Findings, every other line into State after
 # the closed run's own, a line under a key State writes itself marked `was`. The page is not folded: every reader
 # joins a folded line back, so a long line reads the same. The plan's section becomes the one pointer line `handoff: <path> written <local time>`.
-CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
+CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""; CO_HO_CLOCK=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
   [ -z "$CO_HO_FILE" ] || return 0
   CO_HO_FILE="$(handoff_file_of "$PLAN" "$ROOT")"
   CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
   CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"
+  CO_HO_CLOCK="$(date '+%-I:%M %p')"
 }
 handoff_block() {
   co_handoff_where
@@ -1678,8 +1679,8 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   tmp="$CO_HO_FILE.close-out.$$"
   {
     printf 'bionic-handoff/v1\n%s\n\n' "$title"
-    CO_HO_STATE="$(printf 'written: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
-        "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
+    CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
+        "$CO_HO_CLOCK" "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
         "$CONT_REL" "$PATROL_LINE")" \
       awk -v secs="$HANDOFF_SECTIONS" -v old="$old" '
         BEGIN {
@@ -1687,7 +1688,7 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
           # an old-shape file: its five human lines go to the section that holds their kind of thing
           M["mid-flight"] = "Open"; M["order"] = "Next"; M["rulings"] = "Decisions"; M["lessons"] = "Findings"; M["risks"] = "Open"
           # the keys the closed State writes itself: an old line under one of them is kept, marked "was"
-          K["written"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
+          K["written"] = K["instant"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
         }
         FNR == 1 { next }
         old {

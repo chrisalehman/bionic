@@ -1494,10 +1494,10 @@ sitrep_tick_line() {
   # bound`, and `for <purpose>` when the one argument names it), bound the run's status line (`sitrep --line`'s),
   # `Blocked on you: yes|no` and one `- <title> — holds <what>` line per open ask; then the sections in order:
   #   Summary · Goal · State · Findings · Decisions · Ruled out · Open · Suggested skills · Next · Resume
-  # State is this verb's alone: `written:`, the tree (handoff_tree_lines), what runs (handoff_running_lines and, bound,
+  # State is this verb's alone: `written:` (the local clock) and `instant:` (the ISO instant readers compare), the tree (handoff_tree_lines), what runs (handoff_running_lines and, bound,
   # handoff_landing_lines), the agents (the harness's newest ListAgents answer, else the roster's open rows marked
   # unverified) with each one's type, run, brief and progress file, and, bound, the plan, step, working and
-  # integration branches, open tasks and Patrol; a closed run's resume point and branch lines are close-out.sh's
+  # integration branches, open tasks (the sheet's: every task it does not read as done) and Patrol; a closed run's resume point and branch lines are close-out.sh's
   # (`closed-form`, the one writer of both). Every other section is composed by the session and read on stdin
   # (lib/handoff.sh `handoff_compose`); a composed State or Resume is dropped. The whole page passes the redaction
   # (lib/handoff.sh `handoff_redact`) and folds at the shared width (card.sh fold); the last line is never folded: bound,
@@ -1666,11 +1666,7 @@ sitrep_tick_line() {
         HO_HEADS="${HO_HEADS:+$HO_HEADS
 }$([ -n "$HO_B" ] && printf '%s' "$(clean "$HO_B")" || printf '(none named)') @ ${HO_H:-(no such branch)}"
       done
-      HO_ROWS="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '
-        { st = $10; wt = $11; ag = $5
-          if (ag == "") ag = "—"
-          has = (wt != "" && wt != "—" && wt != "-")
-          if (st == "active" || (st == "pending" && has)) print "  - " $1 " · " ag " · " (has ? wt : "—") " · " st }')"
+      HO_ROWS=""
     fi
     # THE HEAD: bound, the run's status line and one `<title> — holds <what>` line per open ask, the sheet's own facts
     # (sitrep_gather), so the head and the sitrep cannot disagree on what is owed; with no run, the session's own
@@ -1682,6 +1678,15 @@ sitrep_tick_line() {
       if declare -F proof_plan_slug >/dev/null 2>&1 && [ -n "$HO_SRR" ]; then
         sitrep_gather "$PV_PLAN" "$HO_SRR" line 2>/dev/null
         HO_RUNLINE="$(sitrep_status)"; HO_ASKS="$(sitrep_ask_words)"
+        # The open tasks are the sheet's: every task it does not read as done, so the list is the run line's own
+        # `m` less its `k`; each is joined to its row for the agent and the worktree it names.
+        HO_ROWS="$( { printf '%s\n' "$SG_TASKS" | awk '/^task: id=/ { id = $2; sub(/^id=/, "", id)
+                          st = $4; sub(/^state=/, "", st); if (st != "done") print "S\t" id "\t" st }'
+                      units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' 'NF >= 11 { print "U\t" $1 "\t" $5 "\t" $11 }'
+                    } | awk -F'\t' '
+          $1 == "U" { ag[$2] = ($3 == "") ? "—" : $3; wt[$2] = ($4 == "" || $4 == "-") ? "—" : $4; next }
+          $1 == "S" { n++; id[n] = $2; st[n] = $3 }
+          END { for (i = 1; i <= n; i++) print "  - " id[i] " · " ((id[i] in ag) ? ag[id[i]] : "—") " · " ((id[i] in wt) ? wt[id[i]] : "—") " · " st[i] }')"
       fi
     elif [ -n "$HO_SID" ] && declare -F owed_list >/dev/null 2>&1; then
       HO_ASKS="$(OWED_ROOT="$HO_ROOT" OWED_SID="$HO_SID" owed_list 2>/dev/null | awk -F'\t' 'NF >= 3 && $1 != "" { print (($3 != "") ? $3 : $1) " — holds nothing" }')"
@@ -1692,7 +1697,8 @@ sitrep_tick_line() {
     if [ "$HO_MODE" = none ]; then HO_LAST="Read $HO_REL whole, then do Next 1."; else HO_LAST="/bionic:canonical-sdlc $HO_REL"; fi
     HO_TMP="$HO_FILE.tmp.$$"; [ "$HO_MODE" = none ] || HO_TMP="$PV_NEW.2"
     ho_state() {  # -> the State section's lines, each with its fold indent
-      printf '2\twritten: %s\n' "$HO_NOW"
+      printf '2\twritten: %s\n' "$(sitrep_clock "$HO_E" "$HO_E")"
+      printf '2\tinstant: %s\n' "$HO_NOW"
       printf '%s\n' "$HO_TREE" | awk '{ print (/^  - / ? "4" : "2") "\t" $0 }'
       if [ -n "$HO_RUNS" ]; then printf '2\trunning (%s):\n' "$HO_N_RUN"; printf '%s\n' "$HO_RUNS" | awk '{ print "4\t" $0 }'
       else printf '2\trunning: none\n'; fi
@@ -2168,7 +2174,8 @@ sitrep_tick_line() {
     done <<< "$(roster_open_names "$RS_RF" "$REPO_REAL/.bionic/tmp/sweeper-$SESSION_ID.state" "$SESSION_ID")"
     if [ -n "$RS_AG" ]; then printf 'running (%s):\n%s\n' "$(printf '%s\n' "$RS_AG" | grep -c .)" "$RS_AG"
     else printf 'running: none\n'; fi
-    RS_AT="$(handoff_line "$RS_FILE" written)"; RS_AT="${RS_AT#written: }"
+    RS_AT="$(handoff_line "$RS_FILE" instant)"; RS_AT="${RS_AT#instant: }"
+    [ -n "$RS_AT" ] || { RS_AT="$(handoff_line "$RS_FILE" written)"; RS_AT="${RS_AT#written: }"; }
     RS_LANDED="$(awk -v at="$RS_AT" '
       /^[[:space:]]*```/ { fence = !fence; next }
       fence { next }

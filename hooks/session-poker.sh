@@ -3038,7 +3038,9 @@ plan_verb_swap() {
 RUN_LOG=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
 RUN_STATE=""; RUN_RC=""; RUN_ID=""; RUN_LAST_WRITTEN=""; RUN_PROGRESS=""; RUN_ELAPSED=""
 ADOPT_READS_SCHEMA="adopt-read/v1"
-_HANDOFF_ISO_RE='^written: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
+# The handoff's two time lines: `written:` is the local clock a person reads, `instant:` the ISO instant a reader
+# compares. A file from before the pair carries the instant on `written:` alone, so that form reads as a fallback.
+_HANDOFF_ISO_RE='^(written|instant): [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
 _ROW_SHORT_AWK='
   function row_short(t,   c, i) {
     c = length(t) + 1
