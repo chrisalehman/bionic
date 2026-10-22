@@ -25,17 +25,17 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
    The sheet is input for you; never show it, quote it or summarize it to the user. A refusal (no plan bound, no plan at the path) is the answer: say it in one line and stop.
 
 2. Before you write, weigh these six questions against the sheet:
-   - **Pace.** Is the run on pace? Compare the predicted close with the forecast, and say why it is ahead or behind.
+   - **Pace.** Is the work running on pace? Compare the time the landed tasks took with the time the plan allowed for them. Then compare the predicted close with the forecast, and say why it moved: slower work, or work added.
    - **Correctness.** Of the red tests, failed reviews and open findings, which matter and which are cosmetic?
    - **Waste.** What effort was lost to dropped tasks, discarded runs, idle time or waiting on the user?
    - **Goals.** Which goals are met, which are not, and which are not measured yet?
    - **Leverage.** What single thing would most change the outcome now?
    - **Change.** What is new since the last sitrep? What does the user need to know that the numbers don't show?
 
-3. Grade the run by this rubric. The grade is for the run, not the code.
+3. Grade the run by this rubric. The grade is for the run, not the code. Pace grades the run: on pace means the landed tasks took no longer than the plan allowed for them, and behind means they took longer. A close pushed later because work was added is not behind: say it in the Assessment, and never grade it down.
    - **A**: on pace, correct, and nothing held on the user.
    - **B**: one thing held or slipping, with a clear way through.
-   - **C**: behind, or a real defect open.
+   - **C**: behind pace, or a real defect open.
    - **D**: at risk of missing the close or shipping something wrong.
    - **F**: stopped.
 
