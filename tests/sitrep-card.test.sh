@@ -19,6 +19,9 @@
 #   §ROWS      the Task list covers every step in the sheet's order, by labels the sheet holds, its icons drawn from the
 #              sheet, each task's row in words its state allows; the five metrics in order, their numbers their own
 #              lines' measured values, the Goals counts the goal: lines'; the predicted close in a close row
+#   §BOUND     a metric row's number is the measured value of the line whose word stands beside it: two numbers
+#              traded between their words refuse the card, the same row in place prints
+#   §FORECAST  a Pace row may cite the forecast's hours and end clock, each number beside its own word like every other
 #   §SHAPE     a 101-column line, a step row above its tasks, an open task twice or not at all: each refused
 #   §WORDS     "reader", "reading" and their kin, or "unmeasured", in the judgment refuse the card, each word with its rule
 #   §REFUSE    a refused card prints nothing on stdout, every reason on stderr
@@ -443,6 +446,67 @@ sc_card "$SC_GREENDESC" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^task: 5\/41: .*/
 expect_eq "RO8f control: a row copying its task's own description, and saying not landed, prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
 sc_card "$SC_OWED" "$SC_J_RANGE"
 expect_eq "RO8g control: a range holding open tasks may say some landed, and a step row may say done (RO4, RO4b): the range prints" "0|" "$SC_RC|$SC_ERR"
+
+# ============================================================
+section "§BOUND: a metric row's number is the measured value of the line whose word stands beside it, so two numbers traded between their words refuse the card"
+# ============================================================
+# Every number a row states is a value its own lines hold (RO6), and the line it belongs to is the one whose word
+# stands beside it in the row: the number before its word, "37% of the work", "60% of the time".
+# fails-when: a Pace row with its two numbers traded, a Completed row with its numbers on each other's words or a
+# Correctness row with the open findings' count on the reviews' words prints, or the same row with the numbers in their
+# places is refused.
+expect_eq "BO0 precondition: the planted sheet holds work-landed 37 and time-used 60, each on its own line" "yes|yes" \
+  "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^pace.work-landed: 37% ' && echo yes)|$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^pace.time-used: 60% ' && echo yes)"
+SC_J_TRADED="$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 60% of the work landed in 37% of the time./')"
+expect_eq "BO0b precondition: the traded row is the planted judgment's Pace row with 37 and 60 on each other's words" "metric: Pace: 60% of the work landed in 37% of the time." "$(sc_row "$SC_J_TRADED" 'metric: Pace: ')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time./')"
+expect_eq "BO1 control: the Pace row with 37 beside work and 60 beside time prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$SC_J_TRADED"
+expect_eq "BO2 a Pace row giving 60% of the work landed in 37% of the time refuses the card: exit 1, nothing printed" "1|" "$SC_RC|$SC_OUT"
+expect_eq "BO2b …a reason naming the Pace row, the number 60 and the word it stands beside" "1" \
+  "$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 60 beside "work"' | /usr/bin/grep -cF 'pace.work-landed')"
+expect_eq "BO2c …and the other traded number, 37 beside time, named the same way" "1" \
+  "$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 37 beside "time"' | /usr/bin/grep -cF 'pace.time-used')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: work landed 60%, time used 37%./')"
+expect_eq "BO3 a number after its word binds the same way: a Pace row giving work landed 60% and time used 37% refuses the card, naming 60 beside landed" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 60 beside "landed"' | /usr/bin/grep -cF 'pace.work-landed')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: work landed 37%, time used 60%./')"
+expect_eq "BO3b control: the same row with the numbers behind their own words prints" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed, 60% of the time used./')"
+expect_eq "BO3c control: each number before its own word, a comma between the two phrases, prints" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Completed: .*/metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 37%; 37 left, 330 minutes./')"
+expect_eq "BO4 a Completed row giving work.landed's 37 beside the word left refuses the card, naming Completed, 37 and work.left" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Completed: says 37 beside "left"' | /usr/bin/grep -cF 'work.left')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Correctness: .*/metric: Correctness: 12 suites run, 11 green and 1 red; 0 review running; 1 open findings./')"
+expect_eq "BO5 a Correctness row giving the reviews' 1 as the open findings refuses the card, naming 1 beside findings" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Correctness: says 1 beside "open"' | /usr/bin/grep -cF 'findings.open')"
+sc_card "$SC_OWED" "$SC_J_OWED"
+expect_eq "BO6 control: the planted judgment, every metric number beside its own word, prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Waste: .*/metric: Waste: 2 tasks dropped, 0 of 25 suite runs thrown away, 60 minutes waiting on you./')"
+expect_eq "BO7 control: a Waste row of three comma phrases prints, each number beside its own word, the 0 of 25 count taking the words after the 25 and not the dropped before it" "0|" "$SC_RC|$SC_ERR"
+
+# ============================================================
+section "§FORECAST: a Pace row may cite the forecast's hours, each number beside its own word like every other"
+# ============================================================
+# The sheet's clock.forecast line is a Pace line: the hours the plan said the run would take, and the end clock.
+# fails-when: a Pace row giving clock.forecast's hours or its end clock is refused, or a row giving hours the sheet
+# does not hold, or the forecast's 10 as the share of the work landed, prints.
+expect_eq "FC0 precondition: the planted sheet's clock.forecast is 10 h 30 min, ending 6:50 PM" "yes" \
+  "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^clock.forecast: 10 h 30 min, ends 6:50 PM — ' && echo yes)"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time; the forecast is 10 h 30 min./')"
+expect_eq "FC1 a Pace row citing the forecast's 10 h 30 min prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+expect_contains "FC1b …drawn with the forecast's hours in the row" "the forecast is 10 h 30 min." "$SC_OUT"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time; the forecast is 10 h 30 min, ending 6:50 PM./')"
+expect_eq "FC2 …and with the end clock the forecast line holds beside them" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time; the forecast is 11 h 45 min./')"
+expect_eq "FC3 control: a Pace row giving a forecast of 11 h 45 min, hours no sheet line holds, refuses the card, naming 11" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -cF 'metric Pace: says 11,')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 10% of the work landed in 60% of the time./')"
+expect_eq "FC4 the forecast's 10 beside the work landed is refused, naming 10 and the word: the forecast's numbers bind to their own words" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 10 beside "work"' | /usr/bin/grep -cF 'pace.work-landed')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Completed: .*/metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 37%; 5 left, 330 minutes, against a forecast of 10 h./')"
+expect_eq "FC5 the forecast is a Pace line only: a Completed row citing its hours is refused, naming Completed and 10" "1|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -cF 'metric Completed: says 10,')"
 
 # ============================================================
 section "§SHAPE: a 101-column line, a step row above its tasks, an open task twice or missing — each planted fault is refused"

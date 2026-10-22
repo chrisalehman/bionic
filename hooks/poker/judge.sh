@@ -96,6 +96,15 @@ cur8_unapproved_line() {
   printf '%s' "REFUSED — current: 8 in the order (the regression row %s before review and the release) is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
 }
 
+# cur8_stale_line -> the printf format of the refusal `current 8` prints in the release order while the newest `approved:
+# release` line names a head the working head has moved past with code or a release-set file, its two %s the working
+# head and the approved one. THE ONE SPELLING of that refusal, read by the release approval card as
+# `cur8_unapproved_line` is: a stale approval is the card's decision to renew, as a missing one is, so the card knows the
+# refusal by these words and a reworded refusal is reworded for both.
+cur8_stale_line() {
+  printf '%s' "REFUSED — current: 8 is admitted at the head the user approved for release: the working head %s is not the head the user approved for release, %s, and a commit past it is code or a release-set file. Land only docs past the approval, or have the user approve this head (approve release '<reply>'). The plan is unchanged."
+}
+
 # cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8, or a head on its
 # first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
 # exit 1, naming both heads, the plan unchanged.
@@ -111,7 +120,9 @@ cur8_approved_head() {
     exit 1
   fi
   if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
-    die "REFUSED — current: 8 is admitted at the head the user approved for release: the working head ${PV_HEAD8:0:12} is not the head the user approved for release, ${ah:0:12}, and a commit past it is code or a release-set file. Land only docs past the approval, or have the user approve this head (approve release '<reply>'). The plan is unchanged."
+    fmt="$(cur8_stale_line)"
+    # shellcheck disable=SC2059  # the format is cur8_stale_line, whose only conversions are its two %s
+    die "$(printf "$fmt" "${PV_HEAD8:0:12}" "${ah:0:12}")"
     exit 1
   fi
 }
