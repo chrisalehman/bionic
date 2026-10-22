@@ -11,9 +11,10 @@
 #                     is not weeks out, a held task naming what it waits on, and a card head with no invented wave
 #
 # EACH SECTION, ONE SHAPE. The sandbox's own `hooks/session-poker.sh sitrep <plan>` prints the sheet, whose `ask:`
-# lines are exactly the state's asks; a judgment naming every open ask renders through `sitrep card` (rc 0, every
-# line at most 100 columns); a judgment that drops one is refused (rc 1, stdout empty). The clean state has no ask to
-# drop, so its refusal is a judgment naming an ask the register lacks, the same floor read from the other side.
+# lines are exactly the state's asks; a judgment written from the sheet, answering every open ask, renders through
+# `sitrep card` (rc 0, every line at most 100 columns); a judgment that drops one is refused (rc 1, stdout empty). The
+# clean state has no ask to drop, so its refusal is a judgment naming an ask the register lacks, the same floor read
+# from the other side.
 #
 # FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts, a
 # plan in its Step-3 shape and the release check's closure. Every later state is a command's: the poker's verbs,
@@ -61,14 +62,36 @@ rt_asks() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) .*/\1/p' | LC_ALL
 # <sheet> -> each ask as <key>><what it holds>, sorted, space-joined
 rt_holds() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) holds=\(.*\) title=.*/\1>\2/p' | LC_ALL=C sort | paste -sd' ' -; }
 rt_ran() { /usr/bin/grep -c -F -- "$1" "$RT_LOG" 2>/dev/null; }   # <command text> -> how many logged commands hold it
-# rt_judgment <ask key…> -> a judgment naming each key, its call naming the first by its id
+# rt_judgment <sheet> -> a judgment in the card's grammar written from the sheet: a row for each task, or for its step
+# when it has none, in the sheet's order; the five metrics as the sheet states them; every open ask answered, naming
+# what it holds; the predicted close
 rt_judgment() {
-  local k
-  if [ "$#" -gt 0 ]; then printf 'call: Answer %s: the run waits on it.\n' "${1#*:}"
-  else printf 'call: Nothing is owed: let the build land.\n'; fi
-  printf 'grade: B\npoint: The run moved through its own commands to this state.\n'
-  for k in "$@"; do printf 'ask %s: %s — recommend the default\n' "$k" "$k"; done
-  printf 'close: Depends on the next command landing first time.\n'
+  printf '%s\n' "$1" | awk '
+    function val(f, nxt,   s, r, e) {
+      s = index($0, " " f "="); if (!s) return ""
+      r = substr($0, s + length(f) + 2)
+      if (nxt != "") { e = index(r, " " nxt "="); if (e) r = substr(r, 1, e - 1) }
+      return r
+    }
+    /^step: / { $0 = " " substr($0, 7); ns++; sn[ns] = val("n", "name"); nm[ns] = val("name", "state"); known[sn[ns]] = 1; next }
+    /^task: / { $0 = " " substr($0, 7); nt++; ts[nt] = val("step", "state"); id = val("id", "step"); sub(/^T/, "", id); tl[nt] = ts[nt] "/" id; td[nt] = val("desc", "note"); next }
+    /^metric\.[a-z]+: / { k = substr($0, 8, index($0, ": ") - 8); mv[k] = substr($0, index($0, ": ") + 2); next }
+    /^close\.predicted: / { pr = substr($0, 18); next }
+    /^ask: / { $0 = " " substr($0, 6); na++; ak[na] = val("key", "holds"); ah[na] = val("holds", "title"); next }
+    END {
+      if (na) print "call: Answer what the run waits on, below."; else print "call: Nothing is owed: let the build land."
+      for (i = 1; i <= ns; i++) {
+        has = 0
+        for (j = 1; j <= nt; j++) if (ts[j] == sn[i]) { has = 1; print "task: " tl[j] ": " td[j] }
+        if (!has) print "task: " sn[i] ": " nm[i]
+      }
+      for (j = 1; j <= nt; j++) if (!(ts[j] in known)) print "task: " tl[j] ": " td[j]
+      print "metric: Completed: " mv["completed"]; print "metric: Pace: " mv["pace"]; print "metric: Correctness: " mv["correctness"]
+      print "metric: Waste: " mv["waste"]; print "metric: Goals: " mv["goals"]
+      print "grade: B"; print "point: The run moved through its own commands to this state."
+      for (i = 1; i <= na; i++) print "ask " ak[i] ": The ask that holds " ah[i] " — recommend the default"
+      print "close: " ((pr == "" || pr == "-") ? "No close predicted yet" : pr) ", if the next command lands first time."
+    }'
 }
 rt_wide() {  # <text> -> each line wider than BIONIC_LINE_WIDTH columns, as `<columns>: <line>`
   local l
@@ -88,8 +111,7 @@ rt_sheet_and_card() {
   [ -z "$want" ] || expect_eq "$lb-3a …each holding the row that reads it" "$holds" "$(rt_holds "$RT_OUT")"
   [ -n "$want" ] || expect_eq "$lb-3b …the same sheet read line by line: its tasks are there, and no ask: line" "yes|0" \
     "$([ "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c '^task: ')" -ge 1 ] && echo yes)|$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c '^ask: ')"
-  # shellcheck disable=SC2086  # one word per key
-  j="$(rt_judgment $asks)"
+  j="$(rt_judgment "$RT_OUT")"
   rt_poker sitrep card "$RT_PLAN" <<< "$j"
   expect_eq "$lb-4 a judgment naming every open ask renders the card (exit 0, nothing on stderr)" "0|" "$RT_PRC|$RT_ERR"
   expect_eq "$lb-4b …the card's head and its Blocked on you section" "yes|yes" \
@@ -190,9 +212,7 @@ for TR_ST in failed-review release-waiting stop-rule clean; do
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -E '^close\.(predicted|forecast): ' | /usr/bin/grep -E '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
   expect_eq "TR-3 $TR_ST: no task held on you says it is building or gives no note" "" \
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: .* state=held ' | /usr/bin/grep -vE 'note=waits on ')"
-  TR_ASKS="$(rt_asks "$TR_SHEET")"
-  # shellcheck disable=SC2086  # one word per key
-  rt_poker sitrep card "$RT_PLAN" <<< "$(rt_judgment $TR_ASKS)"
+  rt_poker sitrep card "$RT_PLAN" <<< "$(rt_judgment "$TR_SHEET")"
   expect_eq "TR-4 $TR_ST: the plan has no wave number, and the card's head leaves the wave out (exit 0)" \
     "run.wave: -|0|Sitrep · project 99.0.0" \
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^run\.wave: ')|$RT_PRC|$(printf '%s\n' "$RT_OUT" | head -1 | sed 's/ · [A-Za-z]* [0-9:]* [AP]M$//')"
