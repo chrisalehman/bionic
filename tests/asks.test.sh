@@ -14,6 +14,8 @@
 # §HELD          a close-out refused at Step 8 holds the merge, `hold:merge`, titled `merge held: <what holds it>` in a
 #                person's words, the refusal its reply, from `run` and from `check` alike; a refusal before Step 8
 #                holds nothing; the run that delivers closes it
+# §HELD-FILL     while `hold:merge` is open the tick offers no FILL naming the integrate row and the stop wall ends the
+#                turn; with the hold closed the same fixture offers it and the wall refuses (the differential control)
 # §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
@@ -35,6 +37,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "asks: jq absent — suite cannot run"; exit 1; }
@@ -235,6 +238,47 @@ as_rec() {  # <file> <head> <result> -> an evidence piece reading over base..<he
     "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"
 }
 expect_regex "AS-0 precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$RF_C1"
+
+# ============================================================
+section "§HELD-FILL: while hold:merge is open on the run's register the tick offers no FILL naming the integrate row and the stop wall ends the turn; with the hold closed the same fixture offers it and the wall refuses"
+# ============================================================
+# The register is the run's: a merge held by a refused close-out is not a row to dispatch, so readiness reads it
+# (lib/fill.sh through lib/owed.sh `owed_list_plan`) and the tick and the wall, which ask the one library, agree.
+# Only the integrate row is held; a work row ready beside it is offered whatever the register holds.
+# FIXTURE FIDELITY: session-poker-5 §STEP's shape (s47_plan's reads table, the shipped tick and hooks/stop.sh), the plan
+# at current: 8 with a ready integrate row; the hold is opened and closed by owed.sh's own writers on the run's register.
+# fails-when: the tick prints FILL T1 while the hold is open, the wall refuses the turn that left it, the hold held a
+# work row, or closing it leaves the integrate row unoffered.
+HF="$(make_repo heldfill)"; new_roster "$HF"
+HF_P="$(s47_plan "$HF" 8 \
+  "| T1 | 8 | integrate | the merge | orchestrator | — | 10 | REQ-x | — | pending | approval:plan |")"
+awk '!d && /^current:/ { print "current: 8"; d = 1; next } { print }' "$HF_P" > "$HF_P.t" && mv "$HF_P.t" "$HF_P"
+hf_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T'; }
+hf_tick() { forget_digest "$HF"; poke_pressure "$HF" 8192 1.0 tick; }
+hf_wall() { s31_stop "$HF" "$(s31_transcript "$HF" "carry on")"; s31_decision; }
+hf_hold() { OWED_PLAN="$HF_P" as_owed "$HF" hf-sid owed_open hold:merge "merge held: the structure review failed" "bionic: close-out refused"; }
+hf_release() { OWED_PLAN="$HF_P" as_owed "$HF" hf-sid owed_close hold:merge "close-out delivered"; }
+hf_tick
+expect_eq "HF-0 the control: with no hold the tick over the Step-8 table exits 0 and offers the integrate row" "0|poker: FILL T1" "$RC|$(hf_fill)"
+expect_eq "HF-0b …and the wall refuses the turn that left it" "block" "$(hf_wall)"
+hf_hold
+expect_eq "HF-1 precondition: the run's register holds hold:merge open" "hold:merge" "$(as_register "$HF" "$HF_P")"
+hf_tick
+expect_eq "HF-2 AC-8.1 with the hold open the tick exits 0 and offers no FILL naming the integrate row" "0|" "$RC|$(hf_fill)"
+expect_eq "HF-3 …and the stop wall's answer is clean" "" "$(hf_wall)"
+hf_release
+hf_tick
+expect_eq "HF-4 the hold closed, the same fixture offers the integrate row again" "poker: FILL T1" "$(hf_fill)"
+expect_eq "HF-4b …and the wall refuses again" "block" "$(hf_wall)"
+# Only the integrate row is held: a work row ready under the same open hold is offered, and the wall refuses its turn.
+HW="$(make_repo heldwork)"; new_roster "$HW"
+HW_P="$(s47_plan "$HW" 8 "| T1 | 4 | build | a work row | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
+OWED_PLAN="$HW_P" as_owed "$HW" hw-sid owed_open hold:merge "merge held: the structure review failed" "bionic: close-out refused"
+expect_eq "HF-5 precondition: the hold is open on the second run's register" "hold:merge" "$(as_register "$HW" "$HW_P")"
+forget_digest "$HW"; poke_pressure "$HW" 8192 1.0 tick
+expect_eq "HF-5b the hold open, the tick still offers the ready work row" "poker: FILL T1" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T')"
+s31_stop "$HW" "$(s31_transcript "$HW" "carry on")"
+expect_eq "HF-5c …and the wall refuses the turn that left it" "block" "$(s31_decision)"
 
 # ============================================================
 section "§FAILED: a failing reading recorded opens the waiver at once; a passing reading of the question closes it"
