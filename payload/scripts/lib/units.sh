@@ -1273,18 +1273,53 @@ _units_questions_awk() {
 '
 }
 
-# _units_post_awk -> the awk functions `after(a, b)` and `post_reader(j, r)`, over the row arrays `n`, `stp`, `fil`,
-# `rd` and `sta` the caller filled in table order; it needs `cell_covers` (`_units_files_awk`) before it.
+# _units_publish_order <plan> <rows> -> `<id>=<n> <id>=<n> ...`, the landing record's place for each row that has landed:
+# the line number of the row's LAST `published` event or `landed:` header in `<docs-root>/record/<plan name>/
+# landing-proofs.log`, which is appended in the order the rows were published. Nothing printed when the plan has no
+# landed release row to compare with (the common case, which then pays no git call), when no record can be named, or
+# when the record is not a file: the callers then judge by the plan's order.
+_units_publish_order() {
+  local plan="${1:-}" rec
+  printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
+  declare -F proof_debt_record >/dev/null 2>&1 || return 0
+  rec="$(proof_debt_record "$plan" 2>/dev/null)" && [ -f "$rec" ] || return 0
+  awk '
+    { sub(/\r$/, ""); r = "" }
+    /^line\/v1\|ev=published\|/ { m = split($0, f, "|"); for (k = 3; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
+    /^landed:[ \t]/ { m = split($0, f, /[ \t]+/); for (k = 2; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
+    r != "" { pos[r] = NR }
+    END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }' "$rec" 2>/dev/null
+}
+
+# _units_post_awk -> the awk functions `after(a, b)`, `later(w, r)` and `post_reader(j, r)`, over the row arrays `n`,
+# `id`, `stp`, `fil`, `rd` and `sta` the caller filled in table order, and the awk variable `pubs`
+# (`_units_publish_order`'s answer); it needs `cell_covers` (`_units_files_awk`) before it.
 # A FIX LANDED AFTER THE RELEASE IS READ AS A PIECE: its reader row stands after the release row, so the order check
-# admits a review row there only when what it reads was written after the release. `after(a, b)` is the order the
-# check judges by, the step and then the table position. `post_reader(j, r)` is 1 when the review row j reads only
-# `approval:plan`, `head` and paths that rows placed after the release row r write, and names at least one such path:
-# a row that names none would read the whole head, which belongs ahead of the release. A path some row at or before
+# admits a review row there only when what it reads was written after the release. `after(a, b)` is the plan's order,
+# the step and then the table position. `later(w, r)` is whether row w was written after the release row r, and
+# AFTER THE RELEASE IS PUBLISH ORDER: a fix row born at step 4 stands ahead of the release in the plan and publishes
+# behind it, so w is later when the landing record published it after r, and when it has not published at all while r
+# has. Where the record is silent on r, or on a w the plan calls landed, the plan's order stands. The numbers
+# re-renderer reads the same record the same way. `post_reader(j, r)` is 1 when the review row j reads only
+# `approval:plan`, `head` and paths that rows later than the release row r write, and names at least one such path:
+# a row that names none would read the whole head, which belongs ahead of the release. A path some row not later than
 # r also writes is pre-release work and refuses the row, and so does a path no row but j writes. ONE PREDICATE, TWO
 # READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
 _units_post_awk() {
   printf '%s' '
     function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
+    function later(w, r,   m, a, k, p) {
+      if (!pub_done) {
+        pub_done = 1
+        m = split(pubs, a, " ")
+        for (k = 1; k <= m; k++) { p = index(a[k], "="); if (p) pubpos[substr(a[k], 1, p - 1)] = substr(a[k], p + 1) + 0 }
+      }
+      if (id[r] in pubpos) {
+        if (id[w] in pubpos) return (pubpos[id[w]] > pubpos[id[r]])
+        if (sta[w] != "landed") return 1
+      }
+      return after(w, r)
+    }
     function post_reader(j, r,   m, a, k, t, w, hit, named) {
       named = 0
       m = split(rd[j], a, ",")
@@ -1294,7 +1329,7 @@ _units_post_awk() {
         hit = 0
         for (w = 1; w <= n; w++) {
           if (w == j || sta[w] == "dropped" || !cell_covers(fil[w], t)) continue
-          if (!after(w, r)) return 0
+          if (!later(w, r)) return 0
           hit = 1
         }
         if (!hit) return 0
@@ -1314,7 +1349,7 @@ units_post_readers() {
   local plan="${1:-}" rows
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] && units_has_column "$plan" reads || return 0
-  printf '%s\n' "$rows" | awk -F'\t' "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+  printf '%s\n' "$rows" | awk -F'\t' -v pubs="$(_units_publish_order "$plan" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     FNR == NR { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -2028,7 +2063,7 @@ units_validate() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
+      -v pubs="$(_units_publish_order "$plan" "$rows")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
