@@ -22,7 +22,7 @@
 # as the run's. One line per item, the last word on a key winning:
 #
 #   owed/v1|key=<key>|state=open|sent=<ISO-UTC or ->|at=<ISO-UTC>|title=<title>|reply=<line>
-#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>
+#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>|opened=<the open line's at>
 #
 # The file is rewritten whole, beside-then-rename, under a mkdir lock, so a reader never sees a
 # half-written line and two writers cannot lose each other's item. A `|`, a tab, a CR or a LF in
@@ -214,7 +214,8 @@ owed_open() {
     }' -v key="$key" -v now="$(_owed_now)"
 }
 
-# owed_close <key> <by> -> rc 0. Closes an open item; a key that is not open is left alone.
+# owed_close <key> <by> -> rc 0. Closes an open item; a key that is not open is left alone. The closed line keeps
+# the open line's instant as `opened=`, so the minutes the item stood open can still be counted once it is closed.
 owed_close() {
   local key="${1:-}" by f
   _owed_key_ok "$key" || return 1
@@ -228,7 +229,7 @@ owed_close() {
   OWED_B="$by" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
     key_of($0) == key && fld($0, "state") == "open" {
-      printf "owed/v1|key=%s|state=closed|by=%s|at=%s\n", key, ENVIRON["OWED_B"], now; next
+      printf "owed/v1|key=%s|state=closed|by=%s|at=%s|opened=%s\n", key, ENVIRON["OWED_B"], now, fld($0, "at"); next
     }
     { print }' -v key="$key" -v now="$(_owed_now)"
 }

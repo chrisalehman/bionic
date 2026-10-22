@@ -65,9 +65,11 @@ rt_asks() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) .*/\1/p' | LC_ALL
 # <sheet> -> each ask as <key>><what it holds>, sorted, space-joined
 rt_holds() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) holds=\(.*\) title=.*/\1>\2/p' | LC_ALL=C sort | paste -sd' ' -; }
 rt_ran() { /usr/bin/grep -c -F -- "$1" "$RT_LOG" 2>/dev/null; }   # <command text> -> how many logged commands hold it
+# rt_m <sheet> <key> -> a measured line's value alone, the part before its ` — `
+rt_m() { printf '%s\n' "$1" | awk -v k="$2: " 'index($0, k) == 1 { v = substr($0, length(k) + 1); i = index(v, " — "); print (i ? substr(v, 1, i - 1) : v); exit }'; }   # <sheet> <key>
 # rt_judgment <sheet> -> a judgment in the card's grammar written from the sheet: a row for each task, or for its step
-# when it has none, in the sheet's order; the five metrics as the sheet states them; every open ask answered, naming
-# what it holds; the predicted close
+# when it has none, in the sheet's order; the five metrics from the sheet's measurements, each the value before its
+# ` — `; every open ask answered, naming what it holds; the predicted close
 rt_judgment() {
   printf '%s\n' "$1" | awk '
     function val(f, nxt,   s, r, e) {
@@ -78,8 +80,9 @@ rt_judgment() {
     }
     /^step: / { $0 = " " substr($0, 7); ns++; sn[ns] = val("n", "name"); nm[ns] = val("name", "state"); known[sn[ns]] = 1; next }
     /^task: / { $0 = " " substr($0, 7); nt++; ts[nt] = val("step", "state"); id = val("id", "step"); sub(/^T/, "", id); tl[nt] = ts[nt] "/" id; td[nt] = val("desc", "note"); next }
-    /^metric\.[a-z]+: / { k = substr($0, 8, index($0, ": ") - 8); mv[k] = substr($0, index($0, ": ") + 2); next }
-    /^close\.predicted: / { pr = substr($0, 18); next }
+    /^goal: / { $0 = " " substr($0, 7); gl = gl (gl == "" ? "" : ", ") val("name", "status") " " val("status", "measure"); next }
+    /^[a-z][a-z.-]*: / && index($0, " — ") { k = substr($0, 1, index($0, ": ") - 1); v = substr($0, index($0, ": ") + 2); mv[k] = substr(v, 1, index(v, " — ") - 1) }
+    /^close\.predicted: / { pr = mv["close.predicted"]; next }
     /^ask: / { $0 = " " substr($0, 6); na++; ak[na] = val("key", "holds"); ah[na] = val("holds", "title"); next }
     END {
       if (na) print "call: Answer what the run waits on, below."; else print "call: Nothing is owed: let the build land."
@@ -89,8 +92,12 @@ rt_judgment() {
         if (!has) print "task: " sn[i] ": " nm[i]
       }
       for (j = 1; j <= nt; j++) if (!(ts[j] in known)) print "task: " tl[j] ": " td[j]
-      print "metric: Completed: " mv["completed"]; print "metric: Pace: " mv["pace"]; print "metric: Correctness: " mv["correctness"]
-      print "metric: Waste: " mv["waste"]; print "metric: Goals: " mv["goals"]
+      print "metric: Completed: " mv["work.landed"] " landed; " mv["work.left"] " left."
+      print "metric: Pace: " mv["pace.work-landed"] " of the work landed in " mv["pace.time-used"] " of the forecast time."
+      print "metric: Correctness: suites run " mv["tests.suites-run"] "; reviews " mv["reviews"] "; " mv["findings.open"] " open findings."
+      w = mv["waste.waiting-on-you"]; sub(/:.*/, "", w)
+      print "metric: Waste: " mv["waste.runs-discarded"] " suite runs thrown away; " w " waiting on you."
+      print "metric: Goals: " ((gl == "") ? "none declared" : gl) "."
       print "grade: B"; print "point: The run moved through its own commands to this state."
       for (i = 1; i <= na; i++) print "ask " ak[i] ": The ask that holds " ah[i] " — recommend the default"
       print "close: " ((pr == "" || pr == "-") ? "No close predicted yet" : pr) ", if the next command lands first time."
@@ -195,8 +202,8 @@ section "§TRUE: the four sheets read true to the person who accepts the release
 # is approved when the rehearsal starts, as a person approves it at Step 3 just before the build.
 # fails-when: the plan carries an approval from weeks before the run, so the pace reads hundreds of hours and the
 # close lands weeks out; a task held on a decision says it is building; the head names a wave the plan lacks.
-rt_pace_min() {  # <sheet> -> the minutes the sheet's pace says the landings took, nothing when it names none
-  printf '%s\n' "$1" | sed -n 's/^metric\.pace: [0-9][0-9]* tasks* in \(.*\); the plan allowed.*/\1/p' \
+rt_elapsed_min() {  # <sheet> -> the minutes clock.elapsed says have passed since the approval, nothing when it names none
+  rt_m "$1" clock.elapsed | /usr/bin/grep -E '^[0-9]' \
     | awk '{ m = 0; for (i = 2; i <= NF; i++) { if ($i == "h") m += $(i - 1) * 60; if ($i == "min") m += $(i - 1) } print m }'
 }
 rt_taskline() { printf '%s\n' "$1" | /usr/bin/grep "^task: id=$2 "; }   # <sheet> <id> -> its task line
@@ -208,11 +215,11 @@ for TR_ST in failed-review release-waiting stop-rule clean; do
   fi
   rt_poker sitrep "$RT_PLAN"
   TR_SHEET="$RT_OUT"
-  TR_MIN="$(rt_pace_min "$TR_SHEET")"
-  expect_eq "TR-1 $TR_ST: the sheet's pace names the time the landings took, and it is under an hour (it says $TR_MIN min)" "yes" \
+  TR_MIN="$(rt_elapsed_min "$TR_SHEET")"
+  expect_eq "TR-1 $TR_ST: the sheet's clock names the time since the approval, and it is under an hour (it says $TR_MIN min)" "yes" \
     "$([ -n "$TR_MIN" ] && [ "$TR_MIN" -lt 60 ] && echo yes)"
   expect_eq "TR-2 $TR_ST: the predicted close and the forecast name no day, so neither is weeks out" "" \
-    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -E '^close\.(predicted|forecast): ' | /usr/bin/grep -E '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
+    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -E '^(close\.predicted|clock\.forecast): ' | /usr/bin/grep -E '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
   expect_eq "TR-3 $TR_ST: no task held on you says it is building or gives no note" "" \
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: .* state=held ' | /usr/bin/grep -vE 'note=waits on ')"
   rt_poker sitrep card "$RT_PLAN" <<< "$(rt_judgment "$TR_SHEET")"
@@ -231,12 +238,21 @@ if [ -f "$RT_PLAN" ]; then
 fi
 
 # ============================================================
-section "§FACTS: the four sheets' facts read true: every goal the plan declares, a close not scaled by a pace of under three landings, a review counted once by its latest result, the suites and the whole run named, every read a held task waits on"
+section "§FACTS: the four sheets' facts read true: every line a measurement naming what it measures, its unit and its source; every goal the plan declares, a close not scaled by fewer than three landed tasks, a review counted once by its latest result, the suites and the whole run named, every read a held task waits on"
 # ============================================================
 # FIXTURE FIDELITY: the sandboxes of the four sections above, read again with their own poker. The rehearsal's plan
 # declares three goals measured by records: one it writes passing, one failing, one it never writes.
-# fails-when: a sheet draws no goal, or a goal reads another status; the close is scaled by a pace drawn from one or two
-# landings; a review that passed and then failed counts as both; a note counts the reads it leaves out.
+# fails-when: a measured line is missing or names no measure, unit and source; a metric. line prints; a sheet draws no
+# goal, or a goal reads another status; the close is scaled by one or two landed tasks; a review that passed and then
+# failed counts as both; a note counts the reads it leaves out.
+RT_MEASURED="clock.now clock.approved clock.forecast clock.elapsed clock.elapsed-share work.planned work.added work.dropped work.landed work.left work.width work.task-time pace.time-used pace.work-landed close.chain close.predicted close.unscaled close.waits-on-you tests.suites-run tests.suites-total tests.whole-run reviews findings.open waste.dropped waste.runs-discarded waste.ready-unstarted waste.waiting-on-you"
+rt_unlabelled() {  # <sheet> -> each measured key with no line, or whose line names no measure, unit and source (or basis)
+  local k l
+  for k in $RT_MEASURED; do
+    l="$(printf '%s\n' "$1" | /usr/bin/grep -F "$k: " | head -1)"
+    case "$l" in "$k: "?*' — '?*' · unit: '*' · source: '?*|"$k: "?*' — '?*' · unit: '*' · basis: '?*) ;; *) printf '%s ' "$k" ;; esac
+  done
+}
 rt_goal_lines() { printf '%s\n' "$1" | sed -n 's/^goal: name=\([^ ]*\) status=\(.*\) measure=.*/\1=\2/p' | paste -sd'|' -; }   # <sheet>
 for TR_ST in failed-review release-waiting stop-rule clean; do
   RT_ROOT="$WORLD_ROOT/$TR_ST/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
@@ -246,14 +262,17 @@ for TR_ST in failed-review release-waiting stop-rule clean; do
   fi
   rt_poker sitrep "$RT_PLAN"
   TR_SHEET="$RT_OUT"
-  expect_eq "FA-1 $TR_ST: the sheet's goal: lines, one per declared goal, met, not met and not measured, and the metric counting them" \
-    "shown=met|asks=not met|walked=not measured|metric.goals: 1 of 3 met; 1 not measured yet" \
-    "$(rt_goal_lines "$TR_SHEET")|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^metric\.goals: ')"
-  TR_N="$(printf '%s\n' "$TR_SHEET" | sed -n 's/^metric\.pace: \([0-9][0-9]*\) tasks* in .*/\1/p')"
-  expect_eq "FA-2 $TR_ST: $TR_N landing(s), under 3: the close is the floor at 1×, and the basis says so" "yes|yes|0" \
-    "$([ -n "$TR_N" ] && [ "$TR_N" -lt 3 ] && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.basis: ' | /usr/bin/grep -q "the pace ratio rests on $TR_N landings*, under 3, so 1× stands" && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.basis: ' | /usr/bin/grep -c 'likely close')"
-  expect_eq "FA-3 $TR_ST: correctness names the suites run and the whole run before the reviews" "yes" \
-    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -qE '^metric\.correctness: [0-9]+ suites? run(: [0-9]+ green and [0-9]+ red at (its|their) last run)?; whole run: (not run yet|green at [0-9a-f]{8}|red at [0-9a-f]{8}); [0-9]+ reviews? passed, ' && echo yes)"
+  expect_eq "FA-0b $TR_ST: every measured line is there and names what it measures, its unit and its source; no metric. line" "|0|yes" \
+    "$(rt_unlabelled "$TR_SHEET")|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -c '^metric\.')|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -q '^clock\.now: ' && echo yes)"
+  expect_eq "FA-1 $TR_ST: the sheet's goal: lines, one per declared goal, met, not met and not measured" \
+    "shown=met|asks=not met|walked=not measured" "$(rt_goal_lines "$TR_SHEET")"
+  TR_N="$(rt_m "$TR_SHEET" work.task-time | sed -n 's/^\([0-9][0-9]*\) tasks*[,:].*/\1/p')"
+  expect_eq "FA-2 $TR_ST: $TR_N landed task(s) with a launch, under 3: the close is the chain at 1×, unscaled, and the basis says so" "yes|yes|yes" \
+    "$([ -n "$TR_N" ] && [ "$TR_N" -lt 3 ] && echo yes)|$([ "$(rt_m "$TR_SHEET" close.predicted)" = "$(rt_m "$TR_SHEET" close.unscaled)" ] && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.predicted: ' | /usr/bin/grep -q 'basis: clock.now plus close.chain at 1×: .*under 3' && echo yes)"
+  expect_eq "FA-2b $TR_ST: pace states two shares of one unit, the work landed and the forecast time used" "yes|yes" \
+    "$(rt_m "$TR_SHEET" pace.work-landed | /usr/bin/grep -qE '^[0-9]+%$' && echo yes)|$(rt_m "$TR_SHEET" pace.time-used | /usr/bin/grep -qE '^[0-9]+%$' && echo yes)"
+  expect_eq "FA-3 $TR_ST: correctness names the suites run by their last run and the whole run" "yes|yes" \
+    "$(rt_m "$TR_SHEET" tests.suites-run | /usr/bin/grep -qE '^[0-9]+: [0-9]+ green, [0-9]+ red$' && echo yes)|$(rt_m "$TR_SHEET" tests.whole-run | /usr/bin/grep -qE '^(not run yet|green at [0-9a-f]{8}|red at [0-9a-f]{8})$' && echo yes)"
   expect_eq "FA-4 $TR_ST: no task's note counts what it leaves out (FA-1 read the same sheet)" "0" \
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: ' | /usr/bin/grep -cE ' note=.* \+[0-9]+$')"
 done
@@ -261,8 +280,8 @@ RT_ROOT="$WORLD_ROOT/failed-review/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
 if [ -f "$RT_PLAN" ]; then
   rt_poker sitrep "$RT_PLAN"
   expect_eq "FA-5 failed-review: the structure review of the whole passed, then failed: it counts once, failed, beside the four that passed" \
-    "2|4 reviews passed, 1 failed, 0 running" \
-    "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c '^review: question=structure scope=whole ')|$(printf '%s\n' "$RT_OUT" | sed -n 's/^metric\.correctness: //p' | awk -F'; ' '{ print $3 }')"
+    "2|4 passed, 1 failed, 0 running" \
+    "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c '^review: question=structure scope=whole ')|$(rt_m "$RT_OUT" reviews)"
 fi
 RT_ROOT="$WORLD_ROOT/release-waiting/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
 if [ -f "$RT_PLAN" ]; then
@@ -271,7 +290,7 @@ if [ -f "$RT_PLAN" ]; then
     "note=waits on step 8, your approval of the release and your approval of the merge" \
     "$(rt_taskline "$RT_OUT" T4 | /usr/bin/grep -o 'note=.*$')"
   expect_eq "FA-6b …and the whole run the regression row ran is green at its head" "yes" \
-    "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -qE '^metric\.correctness: .*; whole run: green at [0-9a-f]{8}; ' && echo yes)"
+    "$(rt_m "$RT_OUT" tests.whole-run | /usr/bin/grep -qE '^green at [0-9a-f]{8}$' && echo yes)"
 fi
 
 finish

@@ -17,6 +17,7 @@
 # §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
+# §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -291,5 +292,20 @@ expect_eq "ST-4 …and opens carry:<record>#<n> on the run's register" "carry:re
   "$(as_register "$RF" "$PF")"
 expect_contains "ST-4b …its reply naming the finding" "$RF_CR#1" "$(as_ask "$RF" "$PF" carry:record:wave-01-fixture:adv-carry.md:1 4)"
 POKE_BOUND="$AS_BOUND_WAS"
+
+# ============================================================
+section "§OPENED: a closed ask keeps the instant it was opened, so the minutes it held a task can be counted"
+# ============================================================
+# fails-when: owed_close writes the closed line without the open line's instant.
+AO="$(cd "$(mktemp -d "$TMPROOT/ao.XXXXXX")" && pwd -P)"; mkdir -p "$AO/.bionic/tmp"
+AO_F="$AO/.bionic/tmp/owed-ao-sid.state"
+as_owed "$AO" ao-sid owed_open approve:design "approval: design" "poker: WAIT T9 — approval:design"
+AO_AT="$(sed -n 's/^owed\/v1|key=approve:design|state=open|.*|at=\([^|]*\)|title=.*/\1/p' "$AO_F" 2>/dev/null)"
+expect_nonempty "OP-0 precondition: the open line carries the instant it was opened" "$AO_AT"
+as_owed "$AO" ao-sid owed_close approve:design approve
+expect_contains "OP-1 the closed line carries opened=, the open line's instant" \
+  "|key=approve:design|state=closed|by=approve|at=" "$(cat "$AO_F" 2>/dev/null)"
+expect_eq "OP-1b …its value the open line's at=" "$AO_AT" \
+  "$(sed -n 's/^owed\/v1|key=approve:design|state=closed|.*|opened=\([^|]*\).*/\1/p' "$AO_F" 2>/dev/null)"
 
 finish
