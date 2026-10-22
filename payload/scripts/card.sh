@@ -2589,8 +2589,8 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 #   metric: <Label>: <text>                           five: Completed, Pace, Correctness, Waste, Goals, in that order
 #   grade: <A-F>                                      one
 #   point: <row>                                      one to five: the Assessment's rows
-#   ask <key>[, <key>...]: <what> — recommend <answer>   every ask open on the sheet answered once; one row may answer
-#                                                     several keys that are one decision
+#   ask <key>[, <key>...]: <what> — recommend <answer>   every ask open on the sheet answered once, held or not; one row
+#                                                     may answer several keys that are one decision
 #   ask +: <row>                                      any number: an ask the register lacks
 #   close: <row>                                      one to three: the predicted close and what it depends on
 #
@@ -2602,6 +2602,14 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # first letter. A task row's icon is the sheet's: done when its step is done with no open task, its task is done, or
 # every task of its range is done. A row too wide folds under its own text; a task row is one line.
 #
+# WHERE AN ASK IS DRAWN IS THE SHEET'S FACT, NEVER THE MODEL'S. An ask blocks the user when it holds a task, the release
+# or the merge: the sheet's `blocks=` says so (a sheet without the field reads it from `holds=`: anything but nothing
+# blocks). Blocked on you lists the rows that answer a blocking ask, in the judgment's order, and reads None when no
+# ask blocks. A row that answers only asks blocking nothing is the Assessment's, drawn after the model's points under
+# the words "Open, blocking nothing:", so every ask stays on the card exactly once and none sits under Blocked on you
+# that holds nothing. A row answering both kinds of key is a blocking row; an `ask +:` row, the model's own claim of
+# an ask the register lacks, is a blocking row too.
+#
 # THE CHECK. Nothing prints until the judgment and the drawn text both pass, because a card that drops or contradicts
 # a fact would tell the user something the run does not hold. The judgment is refused when its Task list leaves out a
 # step on the sheet, names a label the sheet does not hold, runs out of the sheet's step order, or writes a task's row
@@ -2610,15 +2618,16 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # or sets a number beside the word of another line than the one that holds it ("60% of the work landed in 37% of the
 # time" over work landed 37 and time used 60), or gives a goal status another count than the goal: lines hold; when
 # no close row names the sheet's predicted
-# close; when its call says nothing is owed while an ask is open, or names a register key while none is; when it
-# leaves an open ask unanswered or answers one twice, names a key the register lacks, or writes an ask row that does
+# close; when its call says nothing is owed while a blocking ask is open, or names a register key while none is; when it
+# leaves an open ask, blocking or not, unanswered or answers one twice, names a key the register lacks, or writes an ask row that does
 # not name the label of every task its keys hold, or with no recommended answer, or as a decision's options; when it
 # grades outside A to F, has no call, no point or more than five, no close or more than three, a tag the card does
 # not know, or a refused word (reader, readers, reading, readings, unmeasured). The drawn text (`_card_sitrep_check`, also `card.sh sitrep-check`, so a planted card can
 # prove each test) is refused for a line over BIONIC_LINE_WIDTH, a row with no bullet or icon, the sections out of
 # their order or one with no row, a step row above its own tasks, a Task list row spanning two lines, and an open task
 # with no row or two. A refusal prints every reason on stderr and nothing on stdout.
-CARD_SITREP_NOTHING="Nothing: no decision or action is owed right now."
+CARD_SITREP_NOTHING="None"
+CARD_SITREP_UNHELD="Open, blocking nothing:"
 CARD_SITREP_SECTIONS="Call to action|Task list|Metrics|Assessment|Blocked on you|Predicted close"
 CARD_SITREP_METRICS="Completed Pace Correctness Waste Goals"
 # The sheet lines each metric is written from, `<Label>=<key>:<word>,<word>...`: the line's key and the words that
@@ -2645,7 +2654,7 @@ Waste=waste.waiting-on-you:waiting,waited,wait"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
 # run. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
-# task; `A <key> <holds> <title> <raised>` per ask. A list line's value runs to the next field's ` <name>=`. A measured
+# task; `A <key> <holds> <title> <raised> <blocks>` per ask. A list line's value runs to the next field's ` <name>=`. A measured
 # line names what it measures after its value, `<value> — <what it measures> · unit: …`; its value is the part before.
 _card_sitrep_sheet() {
   awk '
@@ -2664,7 +2673,7 @@ _card_sitrep_sheet() {
       print "R\t" k "\t" v; next }
     index($0, "step: ") == 1 { rec("S", "step", "n name state tasks"); next }
     index($0, "task: ") == 1 { rec("T", "task", "id step state desc note"); next }
-    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised"); next }' "$1"
+    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks"); next }' "$1"
 }
 
 # _card_sitrep_fact <key> -> the sheet's value for a run. or close. key in SR_RECS, `-` when it has none
@@ -2890,7 +2899,7 @@ _card_sitrep_metrics_judge() {
 _card_sitrep_judge() {
   local l v key k ks i j m n pred hit lb text="" seen=" "
   SJ_CALL=(); SJ_POINT=(); SJ_GRADE=""; SJ_NG=0; SJ_CLOSE=(); SJ_TLAB=(); SJ_TTXT=(); SJ_TDONE=(); SJ_MLAB=(); SJ_MTXT=()
-  SJ_ASK=(); SJ_AKEYS=()   # each Blocked on you row the judgment writes, in its order, and its keys (empty for ask +:)
+  SJ_ASK=(); SJ_AKEYS=(); SJ_AHELD=()   # each ask row the judgment writes, in its order, its keys (empty for ask +:), and 1 when it blocks the user
   SJ_WHY=""
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in *[![:space:]]*) ;; *) continue ;; esac
@@ -2960,14 +2969,18 @@ _card_sitrep_judge() {
     case "$seen" in *" ${SR_AKEY[$i]} "*) ;; *) SJ_WHY="${SJ_WHY}the ask ${SR_AKEY[$i]} is open on the register and the judgment has no ask ${SR_AKEY[$i]}: line"$'\n' ;; esac
   done
   for ((j = 0; j < ${#SJ_ASK[@]}; j++)); do
+    # a row blocks the user when it answers a blocking ask, or no ask of the sheet's (the model's own claim)
+    SJ_AHELD[$j]=0; [ -n "${SJ_AKEYS[$j]}" ] || SJ_AHELD[$j]=1
     # shellcheck disable=SC2086  # one word per key
     for k in ${SJ_AKEYS[$j]}; do
       m=-1
       for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do [ "${SR_AKEY[$i]}" != "$k" ] || m=$i; done
       if [ "$m" -lt 0 ]; then
+        SJ_AHELD[$j]=1
         SJ_WHY="${SJ_WHY}ask $k: names a key the register lacks: copy the key from the sheet's ask: lines, or write ask +: for an ask it lacks"$'\n'
         continue
       fi
+      [ "${SR_ABLOCK[$m]}" != yes ] || SJ_AHELD[$j]=1
       # What an ask holds is on the card: its row names the label of every task the sheet says it holds.
       while IFS= read -r lb; do
         [ -z "$lb" ] || _card_sitrep_names "${SJ_ASK[$j]}" "$lb" \
@@ -2984,22 +2997,23 @@ _card_sitrep_judge() {
         printf "the judgment says \"%s\" (in: %s): the card says %s\n", w, substr($0, 1, 60), r } }')"
 }
 
-# _card_sitrep_call_judge -> every refusal of the call rows in SJ_WHY. With an ask open, a call that says nothing is
-# owed, in the Nothing row's words or a plain form of them, tells the user the opposite of the register; with none
-# open, a call naming a register key (`<kind>:<id>`) points at an ask that is not there.
+# _card_sitrep_call_judge -> every refusal of the call rows in SJ_WHY. With an ask blocking the user open, a call that
+# says nothing is owed, in plain words, tells the user the opposite of the register; with none blocking, a call naming
+# a register key (`<kind>:<id>`) points at an ask that holds nothing. An ask holding nothing is owed nothing, so the
+# call may say so over it.
 _card_sitrep_call_judge() {
   local i open="" k
-  for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do open="${open:+$open, }${SR_AKEY[$i]}"; done
+  for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do [ "${SR_ABLOCK[$i]}" != yes ] || open="${open:+$open, }${SR_AKEY[$i]}"; done
   for ((i = 0; i < ${#SJ_CALL[@]}; i++)); do
     if [ -n "$open" ]; then
       k="$(printf '%s\n' "${SJ_CALL[$i]}" | awk '{ l = " " tolower($0) " "
         n = split("nothing is owed|nothing owed|nothing for you|no decision|no action is owed|nothing waits on you|nothing is waiting on you", p, "|")
         for (j = 1; j <= n; j++) if ((c = index(l, p[j])) > 0 && substr(l, c - 1, 1) !~ /[a-z]/ && substr(l, c + length(p[j]), 1) !~ /[a-z]/) { print p[j]; exit } }')"
-      [ -z "$k" ] || SJ_WHY="${SJ_WHY}call: says \"$k\", that nothing is owed, while the register holds $open open: the call is the first of them to answer, in words"$'\n'
+      [ -z "$k" ] || SJ_WHY="${SJ_WHY}call: says \"$k\", that nothing is owed, while the register holds $open open and blocking: the call is the first of them to answer, in words"$'\n'
     else
       k="$(printf '%s\n' "${SJ_CALL[$i]}" | awk '{ l = " " $0
         if (match(l, /[^A-Za-z0-9_][a-z]+:[A-Za-z0-9][A-Za-z0-9._-]*/)) print substr(l, RSTART + 1, RLENGTH - 1) }')"
-      [ -z "$k" ] || SJ_WHY="${SJ_WHY}call: names the register key $k, and no ask is open: the call says in words what comes next, never a key"$'\n'
+      [ -z "$k" ] || SJ_WHY="${SJ_WHY}call: names the register key $k, and no open ask blocks you: the call says in words what comes next, never a key"$'\n'
     fi
   done
 }
@@ -3010,7 +3024,7 @@ _card_sitrep_row() {  # <text> -> the row at 4 columns on a bullet, folded under
 
 # _card_sitrep_draw -> the card from SR_* and SJ_*: the head from the sheet, every row from the judgment
 _card_sitrep_draw() {
-  local i h rel wave icon
+  local i h rel wave icon held
   rel="$(_card_sitrep_fact run.release)"; wave="$(_card_sitrep_fact run.wave)"
   h="Sitrep · $(_card_sitrep_fact run.project)"; [ "$rel" = - ] || h="$h $rel"
   [ "$wave" = - ] || h="$h · wave $wave"
@@ -3025,9 +3039,14 @@ _card_sitrep_draw() {
   for ((i = 0; i < ${#SJ_MLAB[@]}; i++)); do _card_sitrep_row "${SJ_MLAB[$i]}: ${SJ_MTXT[$i]}"; done
   printf '\n  Assessment: %s\n' "${SJ_GRADE:--}"
   for ((i = 0; i < ${#SJ_POINT[@]}; i++)); do _card_sitrep_row "${SJ_POINT[$i]}"; done
+  for ((i = 0; i < ${#SJ_ASK[@]}; i++)); do [ "${SJ_AHELD[$i]}" = 1 ] || _card_sitrep_row "$CARD_SITREP_UNHELD ${SJ_ASK[$i]}"; done
   printf '\n  Blocked on you\n'
-  for ((i = 0; i < ${#SJ_ASK[@]}; i++)); do _card_sitrep_row "${SJ_ASK[$i]}"; done
-  [ "${#SJ_ASK[@]}" -gt 0 ] || _card_sitrep_row "$CARD_SITREP_NOTHING"
+  held=0
+  for ((i = 0; i < ${#SJ_ASK[@]}; i++)); do
+    [ "${SJ_AHELD[$i]}" = 1 ] || continue
+    held=$((held + 1)); _card_sitrep_row "${SJ_ASK[$i]}"
+  done
+  [ "$held" -gt 0 ] || _card_sitrep_row "$CARD_SITREP_NOTHING"
   printf '\n  Predicted close\n'
   for ((i = 0; i < ${#SJ_CLOSE[@]}; i++)); do _card_sitrep_row "${SJ_CLOSE[$i]}"; done
 }
@@ -3096,8 +3115,8 @@ _card_sitrep_check() {
 # prints no goal count. A clock, a date, the release, a step number or a unit's words are no metric's measured value,
 # so none of them vouches for a number.
 _card_sitrep_load() {
-  local k h
-  SR_RECS="$(_card_sitrep_sheet "$1")"; SR_AKEY=(); SR_AHOLDS=()
+  local k h b
+  SR_RECS="$(_card_sitrep_sheet "$1")"; SR_AKEY=(); SR_AHOLDS=(); SR_ABLOCK=()
   SR_MNUMS="$(awk -v lines="$CARD_SITREP_MLINES" '
     BEGIN { n = split(lines, a, " ")
       for (i = 1; i <= n; i++) {
@@ -3113,10 +3132,13 @@ _card_sitrep_load() {
       while (match(v, /[0-9]+/)) { x = substr(v, RSTART, RLENGTH); v = substr(v, RSTART + RLENGTH); sub(/^0+/, "", x); if (x == "") x = "0"
         if (!seen[m SUBSEP x SUBSEP k]++) print "N\t" m "\t" x "\t" k } }
     END { print "G\ttotal\t" gt + 0; for (s in g) print "G\t" s "\t" g[s] }' "$1")"
-  while IFS="$CARD_TAB" read -r _ k h _; do
+  # a placeholder for each empty field, so the tab-split read cannot close a gap up and shift the ones after it
+  while IFS="$CARD_TAB" read -r k h b; do
     [ -n "$k" ] || continue
-    SR_AKEY[${#SR_AKEY[@]}]="$k"; SR_AHOLDS[${#SR_AHOLDS[@]}]="${h:-nothing}"
-  done <<< "$(printf '%s\n' "$SR_RECS" | awk -F'\t' '$1 == "A"')"
+    SR_AKEY[${#SR_AKEY[@]}]="$k"; SR_AHOLDS[${#SR_AHOLDS[@]}]="$h"
+    case "$b" in yes|no) ;; *) if [ "$h" = nothing ]; then b=no; else b=yes; fi ;; esac
+    SR_ABLOCK[${#SR_ABLOCK[@]}]="$b"
+  done <<< "$(printf '%s\n' "$SR_RECS" | awk -F'\t' '$1 == "A" { print $2 "\t" ($3 == "" ? "nothing" : $3) "\t" ($6 == "" ? "-" : $6) }')"
 }
 
 _card_sitrep() {  # <sheet file>, the judgment on stdin -> the card, or 1 and every reason on stderr
