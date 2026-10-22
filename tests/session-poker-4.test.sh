@@ -1056,6 +1056,77 @@ expect_nonempty "BP-7 setup: the search finds the pins reader in hooks/" "$(/usr
 expect_eq "BP-7b AC-12.2 /usr/bin/grep -rn 'reads_suites\\|poker_brief_index_suites' hooks/ prints nothing" "" \
   "$(/usr/bin/grep -rn "reads_suites\|poker_brief_index_suites" "$BIONIC_HOOKS_DIR")"
 
+# ============================================================
+section "§HAND-SUITES: a hand landing records the suites it names, and the judge proves the commit by them"
+# ============================================================
+# `row-landed <id> <commit> <at> --by-hand <who> <why> --suites <a,b> --green-at <commit> --log <path>` writes the row's
+# `ready` event with its suites and one green verdict per suite at the commit they were green at, before the `published`
+# line, through the writer `land --by-hand` uses (lib/line.sh `_line_hand_ready`, `_line_hand_verdicts`), so the floor's
+# judge (`_proof_past_f`) proves the landing; without the three flags the record holds the `published` line alone and the
+# judge finds no run of the row's suites. Fixture: a row's head R and the person's merge M of it onto the base F, two rows
+# landed the same way (the control without the flags).
+HS="$(make_repo hand-suites)"; ( cd "$HS" && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+git -C "$HS" config user.name "Dana Fixture"
+HS_PLAN="$(s34_plan "$HS" 4)"
+sed -e 's/^- T1: landed at record\/T1.md$/- T1: dispatched to w-T1/' -e 's/^\(| T1 | .*\) landed |$/\1 pending |/' \
+  -e 's/^- T2: dispatched to w-T2$/- T2: dispatched to w-T2\
+- T3: dispatched to w-T3/' \
+  -e 's/^\(| T2 | .*\)$/\1\
+| T3 | 4 | build | a row given two of the three flags | implementor | — | 30 | REQ-1 | c.sh | — | — | pending |/' \
+  "$HS_PLAN" > "$HS_PLAN.tmp" && mv "$HS_PLAN.tmp" "$HS_PLAN"
+HS_F="$(git -C "$HS" rev-parse HEAD)"
+hs_merge() {  # <row> <path> -> sets HS_R (the row's head) and HS_M (the person's merge of it onto the base)
+  git -C "$HS" checkout -q -b "wt/$1" "$HS_F" >/dev/null 2>&1
+  HS_R="$(s57_commit "$HS" "$2" "the $1 row")"
+  git -C "$HS" checkout -q - >/dev/null 2>&1
+  ( cd "$HS" && git merge --no-ff -q -m "merge wt/$1" "wt/$1" ) >/dev/null 2>&1
+  HS_M="$(git -C "$HS" rev-parse HEAD)"
+  HS_F="$HS_M"
+}
+hs_rec() { cat "$HS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null; }
+hs_judge() {  # <base> <head> -> the floor judge's verdict on the commits after <base> to <head>: its exit code and words
+  local o rc; o="$(bash -c '. "$1" && _proof_past_f "$2" "$3" "$4" "$5" ""' _ "$S46_LIB" "$HS_PLAN" "$HS" "$1" "$2" 2>&1)"; rc=$?
+  printf '%s|%s' "$rc" "$o"
+}
+HS_AT="2026-10-20T10:00:00Z"
+HS_BASE="$HS_F"
+hs_merge T1 lib/a.sh; HS_R1="$HS_R"; HS_M1="$HS_M"
+poke "$HS" row-landed T1 "$HS_M1" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites session-poker-4.test.sh,units.test.sh --green-at "$HS_R1" --log "$HS/.bionic/docs/record/wave-01-fixture/T1-green.log"
+expect_eq "HS-1 AC-6.1 row-landed --by-hand with --suites, --green-at and --log exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "HS-1b …the record holds the row's ready event with its suites" \
+  "line/v1|ev=ready|row=T1|name=-|commit=$HS_M1|" "$(hs_rec)"
+expect_contains "HS-1c …naming both suites" "suites=session-poker-4.test.sh,units.test.sh|" "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+expect_eq "HS-1d …one green verdict per suite, at the commit they were green at, with the log" \
+  "line/v1|ev=verdict|row=T1|commit=$HS_R1|suite=session-poker-4.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log
+line/v1|ev=verdict|row=T1|commit=$HS_R1|suite=units.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log" \
+  "$(hs_rec | /usr/bin/grep '^line/v1|ev=verdict|row=T1|' | sed 's/|admitted=.*//')"
+expect_eq "HS-1e …in the order ready, verdicts, published" "ready verdict verdict published" \
+  "$(hs_rec | /usr/bin/grep '|row=T1|' | sed 's/^line\/v1|ev=\([a-z]*\)|.*/\1/' | paste -sd' ' -)"
+expect_contains "HS-1f …the published line is the hand landing's, field for field" \
+  "line/v1|ev=published|row=T1|commit=$HS_M1|kind=hand|by=Dana Fixture|why=landed on the report|at=$HS_AT" "$(hs_rec)"
+expect_eq "HS-2 AC-6.1 the floor's judge proves the commit by the verdicts the landing wrote (exit 0, nothing printed)" \
+  "0|" "$(hs_judge "$HS_BASE" "$HS_M1")"
+HS_BASE2="$HS_M1"
+hs_merge T2 lib/b.sh; HS_M2="$HS_M"
+poke "$HS" row-landed T2 "$HS_M2" "$HS_AT" --by-hand "Dana Fixture" "landed on the report"
+expect_eq "HS-3 control: the same call without the three flags exits 0" "0" "$RC"
+expect_eq "HS-3b …and writes the published line alone: no ready event, no verdict for T2" "0|1" \
+  "$(hs_rec | /usr/bin/grep -c '^line/v1|ev=\(ready\|verdict\)|row=T2|')|$(hs_rec | /usr/bin/grep -c '^line/v1|ev=published|row=T2|commit='"$HS_M2"'|kind=hand|')"
+expect_contains "HS-3c …and the judge finds no run of the row's suites at the commit" \
+  "1|commit ${HS_M2:0:12} (row T2) is not proved: no run of its row's suites is recorded at it" "$(hs_judge "$HS_BASE2" "$HS_M2")"
+# A RUN AGAIN OF THE SAME LANDING WRITES NOTHING MORE: the published line is the landing recorded.
+poke "$HS" row-landed T1 "$HS_M1" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites session-poker-4.test.sh,units.test.sh --green-at "$HS_R1" --log "$HS/.bionic/docs/record/wave-01-fixture/T1-green.log"
+expect_eq "HS-4 a run again of the landing exits 0 and the record's T1 lines are the four there were" "0|4" \
+  "$RC|$(hs_rec | /usr/bin/grep -c '|row=T1|')"
+# THE THREE FLAGS ARE ALL OR NONE, and the commit they name is one the landing holds.
+hs_merge T3 lib/c.sh; HS_M3="$HS_M"; HS_BEFORE="$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites units.test.sh --green-at "$HS_R"
+expect_eq "HS-5 two of the three flags is refused (exit 2, a usage error) and writes nothing" "2|$HS_BEFORE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
+HS_NOT="$(git -C "$HS" commit-tree -m "a commit no branch holds" "$(git -C "$HS" rev-parse "$HS_M3^{tree}")")"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites units.test.sh --green-at "$HS_NOT" --log "$HS/x.log"
+expect_eq "HS-5b a --green-at the landing does not hold is refused (exit 1) and writes nothing" "1|$HS_BEFORE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
+expect_contains "HS-5c …naming the commit" "${HS_NOT:0:12}" "$OUT"
 
 # ============================================================
 section "§REVIEW-FILES §DELIVER-CELL §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb that does"

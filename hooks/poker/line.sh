@@ -216,6 +216,38 @@ DELIVER_FILES
   RL_COMMIT="$head"; RL_AT="$(iso_now)"; RL_ARTIFACT="$art"
 }
 
+# THE HAND LANDING'S SUITES ARE THE PERSON'S WORDS, read before anything is written. `row-landed --by-hand` given
+# `--suites <a,b> --green-at <commit> --log <path>` (all three, the dispatcher holds that) says which suites ran, the
+# commit they were green at and the log that shows it; a hand landing runs nothing, so these are all the record can hold
+# of the row's run. The suites must read as suites (lib/line.sh `_line_suites`, the reader every landing uses), the log
+# must fit a `|`-separated line, and the commit must be one the landed commit holds, for a verdict at a commit outside
+# the landing proves nothing about it. Sets RL_SUITES to the suites as the line spells them and RL_GREEN to the commit
+# in full. A refusal exits 1 with the plan unchanged.
+row_landed_suites() {
+  local g
+  [ -n "$RL_SUITES" ] || return 0
+  if ! declare -F _line_hand_ready >/dev/null 2>&1; then
+    { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  fi
+  if ! declare -F _line_hand_ready >/dev/null 2>&1; then
+    die "REFUSED — row-landed --by-hand: the landing line (lib/line.sh) cannot be loaded from $BIONIC_LIB, so the suites cannot be recorded; the plan is unchanged."
+    exit 2
+  fi
+  if ! RL_SUITES="$(_line_suites "$RL_SUITES")" || [ "$RL_SUITES" = none ]; then
+    die "REFUSED — row-landed --by-hand: --suites names something that is no suite; name suites bare or by path, comma-separated. The plan is unchanged."
+    exit 1
+  fi
+  case "$RL_VLOG" in
+    *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: the --log path holds a | or a line break, which no record line can hold; the plan is unchanged."; exit 1 ;;
+  esac
+  if ! g="$(git -C "$PV_REPO" rev-parse --verify -q "${RL_GREEN}^{commit}" 2>/dev/null)" \
+     || ! git -C "$PV_REPO" merge-base --is-ancestor "$g" "$RL_COMMIT" 2>/dev/null; then
+    die "REFUSED — row-landed --by-hand: --green-at $(clean "$RL_GREEN") is no commit that $RL_COMMIT holds, so the suites' green runs say nothing of the landing; name the row's own head or a commit under it. The plan is unchanged."
+    exit 1
+  fi
+  RL_GREEN="$g"
+}
+
 # THE HAND LANDING'S SCAN (wave-39 T13; REQ-9 AC-9.1, AC-9.3; D14). `row-landed --by-hand` marks a landing no line
 # made: wave 38 fast-forwarded fourteen rows by hand and marked each so, a route that ran no check, and the private
 # name that reached history through it cost a rewrite of 99 commits (A-orch-71, A-orch-78; D32). With `release-check:`
@@ -247,15 +279,13 @@ row_landed_scan() {
     exit 1
   fi
   # WHAT THE LANDING CHANGES OF THE CHECK. The judge is the release base, a commit no landing writes, so a landing
-  # that changes the check's own files is judged like any other; what it changes of them (lib/worktree.sh
-  # `_wt_check_judge` over the landing's own range, its commit's first parent to the commit) is said on the row's
-  # line beside the judge, `judged-by=<judge> changed-here=<paths>`, so a change to the check is never silent.
+  # that changes the check's own files is judged like any other. The files it changes among those the project declares
+  # as the check's (`release-check-files:`, read by lib/worktree.sh `_wt_check_judge` over the landing's own range, its
+  # commit's first parent to the commit) are said on the row's line beside the judge, `judged-by=<judge>
+  # changed-here=<paths>`, so a change to the check is never silent. The paths come back comma-joined and are kept whole.
   RL_JUDGED=""; RL_CHG=""
-  if p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^1" 2>/dev/null)" \
-     && RL_CHG="$(_wt_check_judge "$co" "$p" "$RL_COMMIT" "$cmd" 2>/dev/null)"; then
-    RL_CHG="${RL_CHG#* }"
-  else
-    RL_CHG=""
+  if p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^1" 2>/dev/null)"; then
+    RL_CHG="$(_wt_check_judge "$co" "$p" "$RL_COMMIT" 2>/dev/null)" || RL_CHG=""
   fi
   # A LANDING PAST THE RELEASE IS JUDGED AT ITS NUMBERS. The line publishes such a landing with the release numbers
   # rendered again in a commit on its candidate (lib/line.sh `_line_numbers`) and moves the branch to that commit;
@@ -778,7 +808,7 @@ hand_holds_verb() {
     plan_verb_open row-landed
     [ "$VERB" != deliver ] || deliver_check
     RL_JUDGED=""
-    [ "$RL_HAND" -eq 0 ] || row_landed_scan
+    if [ "$RL_HAND" -eq 1 ]; then row_landed_suites; row_landed_scan; fi
     PV_RC=0
     units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
@@ -835,7 +865,7 @@ hand_holds_verb() {
     fi
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
-    # A hand landing's record carries no verdict, so it writes none. Same copy, same dry commit, same swap.
+    # A hand landing's verdicts are written after this, with its published line, so it writes none here. Same copy, same dry commit, same swap.
     RL_SLUG="$(proof_plan_slug "$PV_PLAN")"
     RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
@@ -858,6 +888,17 @@ hand_holds_verb() {
       if ! awk -F'|' -v r="$PV_ID" -v c="$RL_COMMIT" "${_LINE_FIELDS_AWK:-}"'
         line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c { f = 1 } END { exit !f }' "$RL_REC" 2>/dev/null; then
         mkdir -p "${RL_REC%/*}" 2>/dev/null
+        # The suites the person named go first: the row's `ready` event, which the judge reads the row's suites from
+        # (the last one before the published line), and its green verdicts, both through the writers `land --by-hand`
+        # uses (lib/line.sh `_line_hand_ready`, `_line_hand_verdicts`).
+        if [ -n "$RL_SUITES" ]; then
+          if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" - - "$RL_SUITES" >/dev/null \
+             || ! _line_hand_verdicts "$PV_PLAN" "$PV_ID" "$RL_GREEN" "$RL_SUITES" "$RL_VLOG"; then
+            die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take the suites' ready and verdict lines${LINE_UNWRITTEN:+ (the verdict for $LINE_UNWRITTEN)}; make it writable and run the same row-landed again."
+            exit 1
+          fi
+          say "row-landed — $PV_ID: ev=ready and a green verdict for each of $RL_SUITES at ${RL_GREEN:0:12} written to $RL_REC"
+        fi
         if ! _wt_proofs_put "$RL_REC" "line/v1|ev=published|row=${PV_ID}|commit=${RL_COMMIT}|kind=hand|by=${RL_BY}|why=${RL_WHY}|at=${RL_AT}"; then
           die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take its published line; make it writable and run the same row-landed again."
           exit 1
