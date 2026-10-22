@@ -60,14 +60,17 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #     a row with a tree lands through `ready`, from that tree;
 #   - it is not a live review row (`units_live_rows`): `proof-add` returns that row to `pending` at
 #     each reading and the next landing makes it ready again, so landing it would end its passes;
-#   - its artifact: the ledger line's `artifact` cell, else the one record under `<docs-root>/record/`
-#     its Files name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The
-#     file exists, is no symbolic link, and lies under the docs root's `record/`;
+#   - its artifact: the ledger line's `artifact` cell, else the row's own `## Tasks` artifact cell (a
+#     task-scale plan carries no ledger), else the one record under `<docs-root>/record/` its Files
+#     name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The file exists,
+#     is no symbolic link, and lies under the docs root's `record/`. A row naming none, or several,
+#     is refused naming the verb that writes a cell this plan carries: task-set's artifact= when the
+#     Tasks header has the column, the ledger's verb when the plan has a ledger, else task-set's Files=;
 #   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call wb head sid roster rulings
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call fix wb head sid roster rulings
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -113,6 +116,10 @@ deliver_check() {
     { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id && ac) { v = $ac; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$PV_PLAN" 2>/dev/null)"
   case "$art" in *[A-Za-z0-9]*) : ;; *) art="" ;; esac
   if [ -z "$art" ]; then
+    art="$(poker_brief_cell "$PV_PLAN" Tasks "$PV_ID" artifact 2>/dev/null)" || art=""
+    case "$art" in *[A-Za-z0-9]*) : ;; *) art="" ;; esac
+  fi
+  if [ -z "$art" ]; then
     while IFS= read -r e; do
       e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
       case "$e" in *[A-Za-z0-9]*) : ;; *) continue ;; esac
@@ -123,12 +130,19 @@ deliver_check() {
 $(printf '%s\n' "$files" | tr ',' '\n')
 DELIVER_FILES
     [ "$hasl" = 1 ] && launch_sync_ledger "$PV_PLAN" | awk -F'\037' -v id="$PV_ID" '$1 == id { f = 1 } END { exit !f }' || lverb=ledger-add
+    if pv_header_cells "$PV_PLAN" tasks 2>/dev/null | /usr/bin/grep -ix artifact >/dev/null; then
+      fix="$call task-set $PV_ID artifact=<path>"
+    elif [ "$hasl" = 1 ]; then
+      fix="$call $lverb $PV_ID artifact=<path>"
+    else
+      fix="$call task-set $PV_ID Files=<path>"
+    fi
     if [ "$n" -eq 0 ]; then
-      die "REFUSED — $PV_ID names no artifact: its ledger line has no artifact cell and its Files name no record under record/; name it: $call $lverb $PV_ID artifact=<path>, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID names no artifact: no artifact cell names one and its Files name no record under record/; name it: $fix, then $call deliver $PV_ID. The plan is unchanged."
       exit 2
     fi
     if [ "$n" -gt 1 ]; then
-      die "REFUSED — $PV_ID names no artifact in its ledger line and its Files name $n records ($(clean "$cands")); name the one it delivers: $call $lverb $PV_ID artifact=<path>, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID names no artifact in an artifact cell and its Files name $n records ($(clean "$cands")); name the one it delivers: $fix, then $call deliver $PV_ID. The plan is unchanged."
       exit 2
     fi
   fi

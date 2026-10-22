@@ -12,6 +12,9 @@
 #            step-field), and that verb's call on the cell, then the refused call again, exit 0
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
 #            `pr create --base main --head wave/x`
+#   §ENTRY   after close-out, the release entry's reviews part, at the working branch's final head, names the review
+#            the run failed and fixed as the plan registered it, and every commit on the branch after the fix's landing
+#            is one the landing record names, as a published or a close-out event
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
 #            and every hand write in the log is one a person, an agent or the harness writes in a real run
 #
@@ -76,6 +79,41 @@ cr_ask() {
     for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }
     print s "|" b }' "$CR_REC/asks.state" 2>/dev/null | tail -1
 }
+cr_closer_is_waiver() {  # <by> -> yes when a waiver or close-out closed the ask, else no
+  case "$1" in
+    (waive|close-out*) echo yes ;;
+    (*) echo no ;;
+  esac
+}
+# cr_field <line> <key> -> the value of <key>= in a `|`-separated landing-record line
+cr_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2=" '{ for (i = 1; i <= NF; i++) if (index($i, k) == 1) { print substr($i, length(k) + 1); exit } }'; }
+# cr_entry_part <changelog text on stdin> <version> -> the `### The reviews` part of that version's entry, heading
+# to the next heading
+cr_entry_part() {
+  awk -v v="## $1 " '
+    /^## / { inb = (index($0, v) == 1); inp = 0 }
+    /^### / { t = $0; sub(/[[:space:]]+$/, "", t); inp = inb && (t == "### The reviews") }
+    inp { print }'
+}
+# cr_review_bullet <plan> <reader> -> the bullet the plan's review line by <reader> is listed as, built here from
+# the line's own fields: `- <question> review, <scope>: <result> at <head8> by <reader>, <at> (`<evidence file>`)`
+cr_review_bullet() {
+  awk -v r="$2" '
+    /^proved: kind=review / {
+      q = ""; rd = ""; res = ""; sc = ""; h = ""; at = ""; ev = ""
+      for (i = 2; i <= NF; i++) {
+        if ($i ~ /^question=/) q = substr($i, 10)
+        else if ($i ~ /^reader=/) rd = substr($i, 8)
+        else if ($i ~ /^result=/) res = substr($i, 8)
+        else if ($i ~ /^scope=/) sc = substr($i, 7)
+        else if ($i ~ /^head=/) h = substr($i, 6)
+        else if ($i ~ /^at=/) at = substr($i, 4)
+        else if ($i ~ /^evidence=/) ev = substr($i, 10)
+      }
+      if (rd == r) { n = split(ev, e, "/"); b = sprintf("- %s review, %s: %s at %s by %s, %s (`%s`)", q, sc, res, substr(h, 1, 8), rd, at, e[n]) }
+    }
+    END { if (b != "") print b }' "$1" 2>/dev/null
+}
 cr_reached() {  # -> 0 when the replay reached delivered:; else the failure asserted, with where it stopped
   [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ] && return 0
   expect_eq "$1 the replay reached delivered: (rehearse exit 0), so this section can be read" "0" "$CR_RC"
@@ -101,7 +139,7 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
   expect_eq "CL-3 the structure review's waiver ask is on the register (read beside the next row)" "yes" \
     "$([ -n "$CL_W" ] && echo yes)"
   expect_eq "CL-3b …and closed, by neither a waiver nor close-out" "closed|no" \
-    "${CL_W%%|*}|$(case "${CL_W#*|}" in (waive|close-out*) echo yes ;; (*) echo no ;; esac)"
+    "${CL_W%%|*}|$(cr_closer_is_waiver "${CL_W#*|}")"
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' "$CR_REC/landing-proofs.log" 2>/dev/null)"
   expect_eq "CL-4b …and the release check holds at the head main holds (a kind=check line there, not result=fail)" "yes|no" \
@@ -159,6 +197,46 @@ if [ -n "$(cr_rc 'the integrate row opens the pull request')" ]; then
     "$(cr_rc 'the person merges the pull request' | tail -1)|$(/usr/bin/grep -q "^proved: kind=check head=$(git -C "$CR_ROOT" rev-parse --verify -q refs/heads/main) " "$CR_PLAN" 2>/dev/null && echo yes)"
 else
   expect_eq "PR-0 the replay reached the integrate row's pull request, so this section can be read" "reached" "not reached"
+fi
+
+# ============================================================
+section "§ENTRY: the release entry names the review the run failed and fixed, and the record names every commit after the fix"
+# ============================================================
+# fails-when: the replay stops before close-out, close-out leaves the working branch's release entry without the
+# reviews part as the plan registered the failing review, lists a different number of reviews than the plan
+# registers, or the branch holds a commit after the fix's landing that no published or close-out event names.
+if cr_reached "EN-0"; then
+  EN_BR="$(sed -n 's/^working-branch:[[:space:]]*//p' "$CR_PLAN" | head -1)"
+  EN_VER="$(sed -n 's/^release:[[:space:]]*//p' "$CR_PLAN" | head -1)"
+  EN_REC="$CR_REC/landing-proofs.log"
+  EN_PART="$(git -C "$CR_ROOT" show "refs/heads/$EN_BR:CHANGELOG.md" 2>/dev/null | cr_entry_part "$EN_VER")"
+  EN_WANT="$(cr_review_bullet "$CR_PLAN" w-structure-whole-2)"
+  expect_eq "EN-1 the plan's proof line for the failing review is read: a bullet is built from its fields" "yes" \
+    "$([ -n "$EN_WANT" ] && echo yes)"
+  expect_contains "EN-1b …and it reads as the failing structure review of the whole" "- structure review, whole: fail at " "$EN_WANT"
+  expect_eq "EN-2 the working branch's release entry holds a reviews part at its final head" "### The reviews" \
+    "$(printf '%s\n' "$EN_PART" | sed -n 1p)"
+  expect_eq "EN-3 …and lists the failed review exactly as the plan registered it" "$EN_WANT" \
+    "$([ -n "$EN_WANT" ] && printf '%s\n' "$EN_PART" | /usr/bin/grep -x -F -- "$EN_WANT")"
+  EN_PLAN_N="$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    s && (/^proved: kind=review / || /^waived:[[:space:]]/) { n++ } END { print n + 0 }' "$CR_PLAN")"
+  expect_eq "EN-4 the part lists as many reviews and waivers as the plan registers (the plan registers some)" "$EN_PLAN_N|yes" \
+    "$(printf '%s\n' "$EN_PART" | /usr/bin/grep -c '^- ')|$([ "$EN_PLAN_N" -ge 1 ] && echo yes)"
+  EN_PUB="$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5"' "$EN_REC" 2>/dev/null | tail -1)"
+  EN_FIX="$(cr_field "$EN_PUB" numbers)"; [ -n "$EN_FIX" ] || EN_FIX="$(cr_field "$EN_PUB" commit)"
+  EN_ON="$([ -n "$EN_FIX" ] && git -C "$CR_ROOT" merge-base --is-ancestor "$EN_FIX" "refs/heads/$EN_BR" 2>/dev/null && echo yes)"
+  expect_eq "EN-5 the record names where the fix row's landing put the branch, and that commit is on the branch" "yes" "$EN_ON"
+  EN_AFTER=""; [ "$EN_ON" != yes ] || EN_AFTER="$(git -C "$CR_ROOT" rev-list "$EN_FIX..refs/heads/$EN_BR" 2>/dev/null)"
+  EN_NAMED="$(awk -F'|' '$2 == "ev=published" || $2 == "ev=close-out" {
+      for (i = 3; i <= NF; i++) if ($i ~ /^(commit|numbers)=[0-9a-f]+$/) print substr($i, index($i, "=") + 1) }' "$EN_REC" 2>/dev/null)"
+  expect_eq "EN-6 commits follow the fix on the branch (read beside the unnamed ones)" "yes" \
+    "$([ "$(printf '%s\n' "$EN_AFTER" | /usr/bin/grep -c .)" -ge 1 ] && echo yes)"
+  expect_eq "EN-6b …and each is named by a published or close-out event in the landing record" "" \
+    "$(printf '%s\n' "$EN_AFTER" | while IFS= read -r c; do
+        [ -z "$c" ] || printf '%s\n' "$EN_NAMED" | /usr/bin/grep -q -x -F -- "$c" || printf '%s\n' "$c"; done)"
+  expect_eq "EN-6c …among them the branch's final head, named by the close-out event for the reviews part" \
+    "$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/$EN_BR")" \
+    "$(awk -F'|' '$2 == "ev=close-out" && $3 == "part=reviews"' "$EN_REC" 2>/dev/null | tail -1 | awk -F'|' '{ for (i = 4; i <= NF; i++) if ($i ~ /^commit=/) print substr($i, 8) }')"
 fi
 
 # ============================================================

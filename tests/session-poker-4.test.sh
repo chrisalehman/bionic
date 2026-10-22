@@ -1128,4 +1128,157 @@ poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on t
 expect_eq "HS-5b a --green-at the landing does not hold is refused (exit 1) and writes nothing" "1|$HS_BEFORE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
 expect_contains "HS-5c …naming the commit" "${HS_NOT:0:12}" "$OUT"
 
+# ============================================================
+section "§REVIEW-FILES §DELIVER-CELL §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb that does"
+# ============================================================
+# A close met four verbs that sent it in a circle: a review row's Files held one record for three questions, deliver
+# read an artifact only from a ## Dispatch ledger a task-scale plan does not carry and named ledger-add, which refuses
+# there; task-set sent a launched row's Files to amend, and amend sent a closed contract to a new dispatch; step-field
+# refused the cleanup keys the gate's Step-8 block reads. FIXTURE FIDELITY: a task-scale plan at single rigor with a
+# reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
+# main; roster rows and acks in their writers' shapes (roster_row_fixture, s20_ack). Every write goes through the
+# real verb; the one planted line is a review proof in proof_line's shape, as §DISPOSITION plants one.
+vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
+  local repo="$1" f row; shift
+  f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")" "$repo/.bionic/docs/specs/epic-99-fixture" "$repo/.bionic/docs/record/wave-01-fixture"
+  printf '# requirements\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: single\nscale: task\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=3 suites=2 worktrees=8 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture task\n\n## SDLC State\n\ncurrent: 4\nworking-branch: main\n%s\n\n' "$SP_APPROVED_LINE"
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: abc1234\n  branch: main\n'
+    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w-T2\n- T3: landed at record/T3.md\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads | artifact |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  } > "$f"
+  bind_marker "$repo" "$f"
+  ( cd "$repo" && git add -f "$f" && git commit -qm plan ) >/dev/null 2>&1
+  printf '%s' "$f"
+}
+vc_cell() { s48_row "$VC_P" "$1" | cut -d'|' -f"$2"; }  # <row> <9 Files | 10 status | 12 artifact>
+VC_VERBS="task-set amend step-field step-line ledger-set ledger-add"
+vc_named() {  # <refusal text> -> the first call of a verb that writes a cell, `<verb> <operands…>`, as the refusal prints it
+  printf '%s\n' "$1" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*[^,;]*' | sed 's/^session-poker\.sh //; s/\. .*$//; s/\.$//' \
+    | awk -v set=" $VC_VERBS " '{ if (index(set, " " $1 " ")) { print; exit } }'
+}
+VC="$(make_repo verb-cells)"; ( cd "$VC" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
+git -C "$VC" config user.name "Dana Fixture"
+VC_REC=".bionic/docs/record/wave-01-fixture"
+VC_P="$(vc_plan "$VC" \
+  '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |' \
+  '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | lib/b.sh | active | — | — |' \
+  '| T3 | 4 | build | the third build | implementor | — | 30 | REQ-1 | lib/c.sh | landed | — | — |')"
+new_roster "$VC"
+printf '%s\n' "$(roster_row_fixture session="$SID" name=w-T2 agent_id=a-w-T2 launched_at=2026-10-22T10:00:00Z row=T2 plan="$VC_P" files=lib/b.sh suites_allowed=b.test.sh suites_source=declared)" >> "$(roster_of "$VC")"
+printf '%s\n' "$(roster_row_fixture session="$SID" name=w-T3 agent_id=a-w-T3 launched_at=2026-10-22T10:00:00Z row=T3 plan="$VC_P" files=lib/c.sh suites_allowed=c.test.sh suites_source=declared)" >> "$(roster_of "$VC")"
+s20_ack "$VC" w-T3 2026-10-22T11:00:00Z
+
+# ---------- §REVIEW-FILES: a review row's Files are its questions' records, its artifact the first ----------
+VC_THREE="$VC_REC/critic-evidence.md, $VC_REC/critic-adversarial.md, $VC_REC/critic-structure.md"
+poke "$VC" task-add T6 6 review "the critic's review" critic — 30 REQ-1 — head
+expect_eq "RF-0 setup: task-add of a review row on the single-rigor plan exits 0" "0" "$RC"
+expect_eq "RF-1 AC-9.1 the row's Files hold one record per question the rigor deals, evidence, adversarial, structure" \
+  "$VC_THREE" "$(vc_cell T6 9)"
+expect_eq "RF-1b …and its artifact cell names the first, the record deliver takes" "$VC_REC/critic-evidence.md" "$(vc_cell T6 12)"
+s42_snap "$VC" "$VC_P"
+poke "$VC" task-add T7 6 review "a review on one record" critic — 30 REQ-1 "$VC_REC/critic.md" head
+s42_unchanged "RF-2 a review row written with one record for three questions" 1 "$VC_P"
+expect_contains "RF-2b …and the refusal names the rendered list" "$VC_THREE" "$OUT"
+poke "$VC" task-add T7 6 review "a review on its three records" critic — 30 REQ-1 "$VC_THREE" head
+expect_eq "RF-3 control: a review row whose Files name its three records goes in as written, its artifact the first" \
+  "0|$VC_THREE|$VC_REC/critic-evidence.md" "$RC|$(vc_cell T7 9)|$(vc_cell T7 12)"
+poke "$VC" task-add T8 5 verify "the floor" test-runner — 30 REQ-1 —
+expect_eq "RF-4 control: a verify row keeps the reader-row rule, one record named for the row, and no artifact cell written" \
+  "0|$VC_REC/T8.md|—" "$RC|$(vc_cell T8 9)|$(vc_cell T8 12)"
+
+# ---------- §DELIVER-CELL: with no ledger, deliver lands the row its artifact cell names ----------
+printf 'question: evidence\nresult: pass\nscope: piece\n' > "$VC/$VC_REC/critic-evidence.md"
+VC_HEAD="$(git -C "$VC" rev-parse main)"
+VC_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-22T12:00:00Z "$3" evidence w-crit pass piece' _ "$S46_LIB" "$VC_HEAD" "record/wave-01-fixture/critic-evidence.md")"
+VC_PL="$VC_PL" awk '{ print } /^current: / && !p { print ENVIRON["VC_PL"]; p = 1 }' "$VC_P" > "$VC_P.tmp" && mv "$VC_P.tmp" "$VC_P"
+expect_eq "DC-0 setup: the plan carries no ## Dispatch ledger" "0" "$(/usr/bin/grep -c '^## Dispatch ledger' "$VC_P")"
+poke "$VC" deliver T6
+expect_eq "DC-1 AC-9.2 deliver lands the review row from its artifact cell (exit 0), the row landed" "0|landed" "$RC|$(vc_cell T6 10)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "DC-1b …naming the artifact it read" "artifact $VC_REC/critic-evidence.md present" "$OUT"
+poke "$VC" task-add T9 6 review "a second review" critic — 30 REQ-1 — head
+poke "$VC" task-set T9 artifact=—
+s42_snap "$VC" "$VC_P"
+poke "$VC" deliver T9
+s42_unchanged "DC-2 control: a review row with three records and no artifact cell is refused" 2 "$VC_P"
+VC_DREF="$OUT"
+expect_contains "DC-2b …the refusal names the Tasks artifact cell's writer" "task-set T9 artifact=" "$VC_DREF"
+expect_no_regex "DC-2c …and on a plan with no ledger it never names ledger-set or ledger-add" "ledger-(set|add)" "$VC_DREF"
+
+# ---------- §FILES-UNHELD: task-set writes Files on a row no live contract holds ----------
+poke "$VC" task-set T1 "Files=lib/a.sh, lib/a2.sh"
+expect_eq "FU-1 AC-10.1 task-set Files= writes a landed row's cell (exit 0)" "0|lib/a.sh, lib/a2.sh" "$RC|$(vc_cell T1 9)"
+poke "$VC" task-set T3 "Files=lib/c.sh, lib/c2.sh"
+expect_eq "FU-2 …and a row whose roster row is closed by its ack (exit 0)" "0|lib/c.sh, lib/c2.sh" "$RC|$(vc_cell T3 9)"
+s42_snap "$VC" "$VC_P"
+poke "$VC" task-set T2 "Files=lib/b.sh, lib/b2.sh"
+s42_unchanged "FU-3 control: a row a live roster row holds" 1 "$VC_P"
+VC_TREF="$OUT"
+expect_contains "FU-3b …and the refusal names amend on the live contract's name" "amend w-T2 --files+" "$VC_TREF"
+s42_snap "$VC" "$VC_P"
+poke "$VC" amend w-T3 --files+ lib/c3.sh --reason 'the closed contract'
+VC_AREF="$OUT"
+expect_eq "FU-4 amend on a closed contract is refused (exit 1)" "1" "$RC"
+expect_contains "FU-4b AC-10.1 …and names task-set on the row its contract held" "task-set T3 Files=" "$VC_AREF"
+expect_absent "FU-4c …not a new dispatch" "dispatch the work again" "$VC_AREF"
+
+# ---------- §STEP8-KEYS: step-field 8 writes the cleanup keys the gate's Step-8 block reads ----------
+poke "$VC" step-line 8 "integrated"
+expect_eq "S8-0 setup: step-line writes the Step 8 line (exit 0)" "0" "$RC"
+VC_S8=""
+for VC_KV in merge=abc1234 worktree-removed=yes cleanup=done tmp-wiped=yes tasks-completed=yes; do
+  poke "$VC" step-field 8 "$VC_KV"; VC_S8="$VC_S8 $RC"
+  [ "$RC" = 0 ] || printf '      step-field 8 %s said: %s\n' "$VC_KV" "$OUT"
+done
+expect_eq "S8-1 AC-10.2 step-field 8 takes merge, worktree-removed, cleanup, tmp-wiped and tasks-completed (each exit 0)" " 0 0 0 0 0" "$VC_S8"
+expect_eq "S8-1b …and writes the block the gate reads, under the Step 8 line" \
+  "  merge: abc1234|  worktree-removed: yes|  cleanup: done|  tmp-wiped: yes|  tasks-completed: yes" \
+  "$(awk '/^- Step 8:/ { f = 1; next } f && /^  [a-z-]+: / { printf "%s%s", (n++ ? "|" : ""), $0; next } f { exit }' "$VC_P")"
+s42_snap "$VC" "$VC_P"
+poke "$VC" step-field 5 cleanup=done
+s42_unchanged "S8-2 control: cleanup is read from the Step 8 block alone, so Step 5's is" 1 "$VC_P"
+VC_SREF="$OUT"
+
+# ---------- §NAMES-A-VERB: each refusal names a verb that writes the cell, and that verb then does ----------
+# The refusals planted above, plus a field on a step with no line. For each: the first call of a verb from the set it
+# prints is run on the cell, with the refusal's own operands and a value for its slot, and exits 0.
+s42_snap "$VC" "$VC_P"
+poke "$VC" step-field 6 head=abc1234
+s42_unchanged "NV-0 setup: a field on a step with no line" 1 "$VC_P"
+VC_LREF="$OUT"
+vc_follow() {  # <label> <refusal> <slot value> -> the named call, run with the slot filled
+  local label="$1" q="'" call; call="$(vc_named "$2")"
+  expect_nonempty "$label — the refusal names a verb from the set" "$call"
+  [ -n "$call" ] || { printf '      the refusal: %s\n' "$2"; return; }
+  call="${call//$q</<}"; call="${call//>$q/>}"
+  call="${call//<path>/$q$3$q}"; call="${call//<list>/$q$3$q}"; call="${call//<value>/$q$3$q}"; call="${call//<text>/$q$3$q}"
+  call="${call//<why>/${q}the cell the refusal named$q}"
+  case "$call" in *'<'*'>'*) expect_eq "$label — …and the call it names fills every slot this test knows ($call)" "" "$call"; return ;; esac
+  eval "set -- $call"
+  poke "$VC" "$@"
+  expect_eq "$label — …and that verb's call on the cell exits 0 ($call)" "0" "$RC"
+  [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+}
+vc_follow "NV-1 deliver's refusal of an artifact" "$VC_DREF" "$VC_REC/critic-evidence.md"
+vc_follow "NV-2 task-set's refusal of a held row's Files" "$VC_TREF" "lib/b2.sh"
+vc_follow "NV-3 amend's refusal of a closed contract" "$VC_AREF" "lib/c.sh"
+vc_follow "NV-4 step-field's refusal of a key at the wrong step" "$VC_SREF" "done"
+vc_follow "NV-5 step-field's refusal of a step with no line" "$VC_LREF" "the regression"
+
 finish
