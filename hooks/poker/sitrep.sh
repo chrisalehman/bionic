@@ -1364,9 +1364,19 @@ SITREP_GOALS
   return 0
 }
 
+# sitrep_ask_lines -> one `ask:` line per ask of sitrep_gather's facts, the sheet's asks
+sitrep_ask_lines() {
+  local k h t r
+  while IFS='	' read -r k h t r; do
+    [ -n "$k" ] || continue
+    printf 'ask: key=%s holds=%s title=%s raised=%s\n' "$k" "$h" "$t" "$r"
+  done <<SITREP_SHEET_ASKS
+$SG_ASKS
+SITREP_SHEET_ASKS
+}
+
 # sitrep_sheet -> the sheet from sitrep_gather's SG_* facts, in its order
 sitrep_sheet() {
-  local k h t r
   printf '%s\n' "$SITREP_SHEET_HEAD"
   printf 'run.release: %s\nrun.name: %s\nrun.wave: %s\nrun.now: %s\nrun.step: %s\n' "$SG_RELEASE" "$SG_NAME" "$SG_WAVE" "$SG_NOWW" "$SG_STEP"
   printf 'run.project: %s\nrun.started: %s\nrun.last-landing: %s\n' "$SG_PROJECT" "$SG_STARTED" "$SG_LAST"
@@ -1376,13 +1386,51 @@ sitrep_sheet() {
     "$SG_COMPLETED" "$SG_PACE" "$SG_CORRECT" "$SG_WASTE" "$SG_GOALS"
   printf '%s' "$SG_GOAL_LINES"
   printf 'close.predicted: %s\nclose.forecast: %s\nclose.basis: %s\n' "$SG_PREDICTED" "$SG_FORECAST" "$SG_BASIS"
-  while IFS='	' read -r k h t r; do
-    [ -n "$k" ] || continue
-    printf 'ask: key=%s holds=%s title=%s raised=%s\n' "$k" "$h" "$t" "$r"
-  done <<SITREP_SHEET_ASKS
-$SG_ASKS
-SITREP_SHEET_ASKS
+  sitrep_ask_lines
   printf '%s' "$SG_REVIEWS"
+}
+
+# THE SHEET THE JUDGMENT IS WRITTEN FROM. `sitrep` saves the sheet it prints beside a stamp, `<epoch><TAB><plan's real
+# path>`, under the project's .bionic/tmp; `sitrep card` checks and draws the judgment against that sheet while it is
+# under SITREP_SAVED_MAX seconds old, because the sheet's clock and its predicted close move while the model writes and
+# a true judgment must not be refused for a minute's drift. The stamp sits beside the sheet, never in it: card.sh reads
+# every run of digits in the sheet as a number the metrics may state. The asks are never the saved ones: a card is
+# drawn with the register's asks as they stand, so an ask opened since the sheet was read is still owed.
+SITREP_SAVED_MAX=600
+
+sitrep_saved() {  # <root> <plan> -> the path of the plan's saved sheet
+  local b="${2##*/}"
+  b="${b%.md}"; b="${b%.plan}"
+  printf '%s/.bionic/tmp/sitrep/%s.sheet\n' "$1" "$b"
+}
+
+sitrep_plan_real() { printf '%s/%s\n' "$(cd "${1%/*}" 2>/dev/null && pwd -P)" "${1##*/}"; }   # <plan> -> its real path
+
+# sitrep_save <root> <plan> -> the sheet on stdout; saved with its stamp when .bionic/tmp takes a write, else printed
+# alone, and the card verb then finds no sheet to draw from
+sitrep_save() {
+  local f
+  f="$(sitrep_saved "$1" "$2")"
+  if tmp_dir_ok "$1/.bionic/tmp" && mkdir -p "${f%/*}" 2>/dev/null && [ ! -L "${f%/*}" ] \
+     && sitrep_sheet > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" \
+     && printf '%s\t%s\n' "$(sitrep_now)" "$(sitrep_plan_real "$2")" > "$f.at" 2>/dev/null; then
+    cat "$f"
+  else
+    rm -f "$f.$$" 2>/dev/null
+    sitrep_sheet
+  fi
+}
+
+# sitrep_saved_age <root> <plan> -> the saved sheet's age in seconds, or `missing` when there is none for this plan
+sitrep_saved_age() {
+  local f at plan now
+  f="$(sitrep_saved "$1" "$2")"
+  [ -f "$f" ] && [ ! -L "$f" ] && [ -f "$f.at" ] && [ ! -L "$f.at" ] || { printf 'missing\n'; return 0; }
+  IFS='	' read -r at plan < "$f.at"
+  case "$at" in ''|*[!0-9]*) printf 'missing\n'; return 0 ;; esac
+  [ "$plan" = "$(sitrep_plan_real "$2")" ] || { printf 'missing\n'; return 0; }
+  now="$(sitrep_now)"
+  if [ "$now" -gt "$at" ]; then printf '%s\n' "$((now - at))"; else printf '0\n'; fi
 }
 
 # sitrep_status -> the Patrol's status from sitrep_gather's facts: `<k> of <m> tasks · owed: <n> · close <time>`
@@ -2271,7 +2319,8 @@ sitrep_tick_line() {
   }
 
   # THE SITUATION REPORT. Its reasoning is above the verbs, beside `sitrep_gather`: the sheet, or with --line the
-  # Patrol's status, or with `card` the card payload/scripts/card.sh draws from the sheet and the judgment on stdin.
+  # Patrol's status, or with `card` the card payload/scripts/card.sh draws from the judgment on stdin and the sheet
+  # `sitrep` last saved for the plan (THE SHEET THE JUDGMENT IS WRITTEN FROM), its asks read fresh.
   # The plan is resolved as landing-report resolves its own: a named one first, else the session's bound run. Before
   # the sheet or the card is gathered, the register is settled against the ledger (`decisions_settle`), so a decision
   # ruled there is never shown as owed and never left open for the next reader. The card prints only when card.sh
@@ -2322,11 +2371,19 @@ sitrep_tick_line() {
     fi
     sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet
     if [ "$SR_CARD" = no ]; then
-      sitrep_sheet
+      sitrep_save "$SR_ROOT" "$SR_PLAN"
       exit 0
     fi
+    SR_AGE="$(sitrep_saved_age "$SR_ROOT" "$SR_PLAN")"
+    if [ "$SR_AGE" = missing ]; then
+      die "REFUSED — the sheet you wrote from is missing: run sitrep again."
+      exit 1
+    elif [ "$SR_AGE" -ge "$SITREP_SAVED_MAX" ]; then
+      die "REFUSED — the sheet you wrote from is $((SR_AGE / 60)) min old: run sitrep again."
+      exit 1
+    fi
     SR_SHEET="$(mktemp "${TMPDIR:-/tmp}/bionic-sheet.XXXXXX")" || { die "REFUSED — no temporary file for the sheet; no card is drawn."; exit 2; }
-    sitrep_sheet > "$SR_SHEET"
+    { awk 'index($0, "ask: ") != 1' "$(sitrep_saved "$SR_ROOT" "$SR_PLAN")"; sitrep_ask_lines; } > "$SR_SHEET"
     SR_RC=0
     SR_CARD_TEXT="$("${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" sitrep "$SR_SHEET")" || SR_RC=$?
     rm -f "$SR_SHEET"

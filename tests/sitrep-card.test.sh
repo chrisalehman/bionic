@@ -20,7 +20,8 @@
 #   §REFUSE    a refused card prints nothing on stdout, every reason on stderr
 #   §JUDGMENT  the judgment's own floors: one grade A to F, one to five points, a call, one to three closes, known tags
 #   §HEAD      the head names the wave only when the run has one
-#   §VERB      the verb draws the card from the run's own sheet, and settles a decision the ledger ruled first
+#   §VERB      the verb draws the card from the sheet the judgment was written from, under 10 minutes old, its asks
+#              read fresh, and settles a decision the ledger ruled first
 #   §SKILL     the skill writes the tags the verb takes and shows only what the verb printed, in one fenced block
 #
 # HERMETIC. card.sh is fed fixture sheets in the verb's own `sheet/v1` shape (the verb's sheet is proved to parse
@@ -539,9 +540,9 @@ SV_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "${REPO}/payload/scripts
   printf 'owed/v1|key=decide:D5|state=open|sent=-|at=2026-10-06T20:01:00Z|title=reply to D5|reply=D5 · the width: reply with the option number.\n'
 } > "$SV_REG"
 printf '# Design ledger — wave-02-fx\n\n## Δ0 — D5 put (orchestrator 2026-10-06 1:00 PM PDT): the width\n\nNothing waits on it.\n## Δ1 — D5 ruled "1" (Fixture Person 2026-10-06): the width\n' > "$SV_D/design-ledger.md"
-sv_run() {  # <args after `sitrep`…> [stdin from the caller] -> SV_RC, SV_OUT, SV_ERR
+sv_run() {  # <args after `sitrep`…> [stdin from the caller] -> SV_RC, SV_OUT, SV_ERR; the clock is SV_AT, else SV_NOW
   SV_RC=0
-  ( cd "$SV_R" && exec env CLAUDE_CODE_SESSION_ID="$SV_SID" BIONIC_NOW_EPOCH="$SV_NOW" BIONIC_GATE_DIR="$SV_GATE" \
+  ( cd "$SV_R" && exec env CLAUDE_CODE_SESSION_ID="$SV_SID" BIONIC_NOW_EPOCH="${SV_AT:-$SV_NOW}" BIONIC_GATE_DIR="$SV_GATE" \
       bash "$POKER" sitrep "$@" ) > "$TMPROOT/sv.out" 2> "$TMPROOT/sv.err" || SV_RC=$?
   SV_OUT="$(cat "$TMPROOT/sv.out")"; SV_ERR="$(cat "$TMPROOT/sv.err")"
 }
@@ -592,6 +593,47 @@ expect_eq "VE5 the verb refuses a judgment that drops the open ask: exit 1, stdo
 expect_contains "VE5b …the renderer's reason reaching stderr" "approve:release" "$SV_ERR"
 sv_run card --line "$SV_P" <<< "$SV_J"
 expect_eq "VE6 card with --line is a usage error (2)" "2" "$SV_RC"
+
+# THE SHEET THE JUDGMENT WAS WRITTEN FROM. The card is checked against the sheet `sitrep` printed and saved, while it is
+# under 10 minutes old, so a clock that moves while the model writes never refuses a true judgment; the asks are read
+# fresh, so an ask opened since is still owed.
+# fails-when: the card verb recomputes the sheet (a judgment true at 3:00 PM is refused at 3:02 PM), draws from a sheet
+# 10 minutes old or none, or takes the asks from the saved sheet.
+SV_SAVED="$SV_R/.bionic/tmp/sitrep/wave-02-fx.sheet"
+sv_run "$SV_P" < /dev/null
+expect_eq "VE7 sitrep saves the sheet it prints, byte for byte, beside its stamp" "0|yes|yes" \
+  "$SV_RC|$([ -f "$SV_SAVED" ] && [ "$(cat "$SV_SAVED")" = "$SV_OUT" ] && echo yes)|$([ -f "$SV_SAVED.at" ] && echo yes)"
+SV_AT=$((SV_NOW + 120)) sv_run "$SV_P" < /dev/null
+SV_LATER="$SV_OUT"
+sv_run "$SV_P" < /dev/null
+expect_eq "VE8 precondition: two minutes on, the run's sheet predicts another close than the judgment copied" "yes|yes" \
+  "$([ -n "$(sv_fact close.predicted)" ] && echo yes)|$(printf '%s\n' "$SV_LATER" | /usr/bin/grep -q "^close.predicted: " && ! printf '%s\n' "$SV_LATER" | /usr/bin/grep -qxF "close.predicted: $(sv_fact close.predicted)" && echo yes)"
+SV_AT=$((SV_NOW + 120)) sv_run card "$SV_P" <<< "$SV_J"
+expect_eq "VE8b the judgment written from the saved sheet prints its card two minutes later (exit 0, nothing on stderr)" "0|" "$SV_RC|$SV_ERR"
+expect_eq "VE8c …its head the saved sheet's clock, 3:00 PM" "Sitrep · $(basename "$SV_R") 9.9.0 · wave 2 · Tuesday 3:00 PM" \
+  "$(printf '%s\n' "$SV_OUT" | head -1)"
+SV_AT=$((SV_NOW + 660)) sv_run card "$SV_P" <<< "$SV_J"
+expect_eq "VE9 a saved sheet 11 minutes old refuses the card: exit 1, stdout empty" "1|" "$SV_RC|$SV_OUT"
+expect_contains "VE9b …in one line naming its age" "the sheet you wrote from is 11 min old: run sitrep again" "$SV_ERR"
+SV_AT=$((SV_NOW + 540)) sv_run card "$SV_P" <<< "$SV_J"
+expect_eq "VE9c control: at 9 minutes old it prints (exit 0)" "0" "$SV_RC"
+mv "$SV_SAVED" "$SV_SAVED.away"
+sv_run card "$SV_P" <<< "$SV_J"
+expect_eq "VE9d no saved sheet refuses the card, saying so" "1||yes" \
+  "$SV_RC|$SV_OUT|$(printf '%s\n' "$SV_ERR" | /usr/bin/grep -qF 'the sheet you wrote from is missing: run sitrep again' && echo yes)"
+mv "$SV_SAVED.away" "$SV_SAVED"
+cp "$SV_SAVED.at" "$TMPROOT/stamp"; printf '%s\t%s\n' "$SV_NOW" "$SV_R/.bionic/docs/plans/epic-01-fx/other.plan.md" > "$SV_SAVED.at"
+sv_run card "$SV_P" <<< "$SV_J"
+expect_eq "VE9e a saved sheet of another plan is no sheet of this one: refused" "1|" "$SV_RC|$SV_OUT"
+cp "$TMPROOT/stamp" "$SV_SAVED.at"
+printf 'owed/v1|key=approve:merge|state=open|sent=-|at=2026-10-06T22:01:00Z|title=approval: merge|reply=poker: WAIT — approval:merge\n' >> "$SV_REG"
+SV_AT=$((SV_NOW + 60)) sv_run card "$SV_P" <<< "$SV_J"
+expect_eq "VE10 an ask opened after the sheet was saved is owed: the judgment written before it is refused" "1||yes" \
+  "$SV_RC|$SV_OUT|$(printf '%s\n' "$SV_ERR" | /usr/bin/grep -qF 'approve:merge' && echo yes)"
+SV_AT=$((SV_NOW + 60)) sv_run card "$SV_P" <<< "$SV_J
+ask approve:merge: approve the merge into main — recommend approve once 4/2 lands"
+expect_eq "VE10b …and a judgment answering it prints, the new ask under Blocked on you" "0|    • Approve the merge into main — recommend approve once 4/2 lands" \
+  "$SV_RC|$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -F 'merge into main')"
 
 # ============================================================
 section "§SKILL: the skill writes the judgment in the tags the verb takes and shows only what the verb printed, in one fenced block"

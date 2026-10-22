@@ -77,7 +77,7 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
    - `ask +:` is optional: an ask the sheet lacks.
    - `close:` gives one to three rows. The first opens on the sheet's predicted close time; the others say what the close depends on, and agree with the work the Task list has left.
 
-   The card verb capitalizes the first letter of each row.
+   The card verb capitalizes the first letter of each row. It checks your rows against the sheet you wrote from, the one step 1 printed, with the open asks read again from the register. Draw the card within 10 minutes of that sheet: after that, the card verb refuses it and you run step 1 again.
 
 5. If the card verb exits with rc 1, it prints the reasons and no card. Fix the judgment and run it again. Never show a refused card, and never write a card by hand.
 
