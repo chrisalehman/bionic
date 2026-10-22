@@ -43,6 +43,8 @@
 # and §SENSE pairs each passing sense with a refused one in the same copies.
 #
 # Usage: bash tests/run.sh --only words.test.sh
+#
+# pins: agents-src/blocks/implementor-mechanics.md agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/0.md agents-src/templates/skills/canonical-sdlc/steps/0.md.tmpl skills/canonical-sdlc/steps/5.md agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl skills/canonical-sdlc/steps/7.md agents-src/templates/skills/canonical-sdlc/steps/7.md.tmpl skills/canonical-sdlc/operational-rules.md payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl hooks/dispatch-preflight.sh hooks/poker/tick.sh skills/sitrep/SKILL.md payload/scripts/card.sh
 
 set -uo pipefail
 

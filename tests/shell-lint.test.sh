@@ -80,6 +80,8 @@
 # with `env -i`, a throwaway HOME and cwd, and GIT_CEILING_DIRECTORIES at that directory.
 #
 # Usage: bash tests/shell-lint.test.sh
+#
+# pins: tests/CENSUS.md tests/*.test.sh
 
 set -uo pipefail
 

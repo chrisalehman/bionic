@@ -970,4 +970,90 @@ expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on eac
   "0|withheld: row:AC-9.1|applied: finding:$RS_F carried" "$RC|$(rs_done)"
 export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
+# ============================================================
+section "§BRIEF-PINS: a suite declares the files it pins with one header line, and the brief names them on Files, each marked"
+# ============================================================
+# A row's Suites name the suites a writer runs; each suite's `# pins: <path> [<path>…]` header line names the files
+# whose changes it holds, so a brief carries them on Files and the writer is not left waiting on an amend. The reader
+# is the suite's own header, never a search of its text. Fixture: scratch suites under a scratch repository, one
+# declaring two pins, one declaring nothing (the control), one repeating a pin the first declares.
+BP="$(make_repo brief-pins)"; ( cd "$BP" && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+git -C "$BP" config user.name "Dana Fixture"
+mkdir -p "$BP/tests"
+printf '#!/bin/bash\n# a scratch suite that pins two files\n# pins: tests/fixtures/x tests/fixtures/y\nset -u\n# pins: tests/fixtures/body-only\n' > "$BP/tests/pinned.test.sh"
+printf '#!/bin/bash\n# a scratch suite that declares no pins\nset -u\n' > "$BP/tests/plain.test.sh"
+printf '#!/bin/bash\n# pins: tests/fixtures/x\nset -u\n' > "$BP/tests/shared.test.sh"
+BP_PLAN="$(s47_plan "$BP" 4 \
+  '| T1 | 4 | build | the pinned build | implementor | — | 30 | REQ-12 | lib/a.sh, tests/pinned.test.sh | pending |' \
+  '| T2 | 4 | build | the control build | implementor | — | 30 | REQ-12 | lib/b.sh, tests/plain.test.sh | pending |' \
+  '| T3 | 4 | build | a pin the Files already hold | implementor | — | 30 | REQ-12 | lib/c.sh, tests/fixtures/x, tests/pinned.test.sh | pending |' \
+  '| T4 | 4 | build | one pin, two suites | implementor | — | 30 | REQ-12 | lib/d.sh, tests/pinned.test.sh, tests/shared.test.sh | pending |')"
+bind_marker "$BP" "$BP_PLAN"
+BP_REC="$BP/.bionic/docs/record/wave-01-fixture/briefs"
+bp_files() {  # <row> -> the brief's Files field: its line and the continuation lines under it
+  awk '/^Files:/ { f = 1; print; next } f && (/^$/ || /^[A-Za-z][A-Za-z -]*: /) { exit } f { print }' "$BP_REC/$1.md"
+}
+bp_brief() { poke "$BP" brief "$1"; }
+bp_brief T1
+expect_eq "BP-0 setup: the brief verb wrote T1's brief (exit 0)" "0" "$RC"
+expect_eq "BP-1 AC-12.1 a suite in the row's Suites declaring # pins: tests/fixtures/x puts that path on the brief's Files, marked" \
+  "Files: lib/a.sh, tests/pinned.test.sh
+tests/fixtures/x  # (pinned by pinned.test.sh)
+tests/fixtures/y  # (pinned by pinned.test.sh)" "$(bp_files T1)"
+expect_absent "BP-1b …and a pins line below the header block is not a declaration" "body-only" "$(bp_files T1)"
+bp_brief T2
+expect_eq "BP-2 control: a suite with no header adds nothing, the Files line is the row's cell (exit 0)" \
+  "0|Files: lib/b.sh, tests/plain.test.sh" "$RC|$(bp_files T2)"
+bp_brief T3
+expect_eq "BP-3 a pin the row's Files already name is not written twice" \
+  "Files: lib/c.sh, tests/fixtures/x, tests/pinned.test.sh
+tests/fixtures/y  # (pinned by pinned.test.sh)" "$(bp_files T3)"
+bp_brief T4
+expect_eq "BP-4 a path two suites pin is one entry, marked by both" \
+  "Files: lib/d.sh, tests/pinned.test.sh, tests/shared.test.sh
+tests/fixtures/x  # (pinned by pinned.test.sh, shared.test.sh)
+tests/fixtures/y  # (pinned by pinned.test.sh)" "$(bp_files T4)"
+BP_LIFT="$(bash -c '. "$1" && lift_contract_fields "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" "$(cat "$BP_REC/T1.md")" 2>&1)"
+expect_contains "BP-5 the dispatch wall's reader lifts the pins as paths of the brief, no marker read as one" \
+  "files=lib/a.sh,tests/pinned.test.sh,tests/fixtures/x,tests/fixtures/y" "$(printf '%s\n' "$BP_LIFT" | /usr/bin/grep '^files=')"
+expect_absent "BP-5b …and refuses no entry of the Files span" "files_bad" "$BP_LIFT"
+# THE PINS ARE READ AT THE WORKING HEAD: a suite committed on the plan's working branch and absent from the checkout.
+( cd "$BP" && git checkout -q -b wave/01-fixture && git add -f tests && git commit -qm suites && git checkout -q - ) >/dev/null 2>&1
+rm -rf "$BP/tests"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$BP_PLAN" > "$BP_PLAN.tmp" && mv "$BP_PLAN.tmp" "$BP_PLAN"
+bp_brief T1
+expect_eq "BP-6 with a working branch, the pins come from the suite at its tip, not the checkout (exit 0)" \
+  "0|Files: lib/a.sh, tests/pinned.test.sh
+tests/fixtures/x  # (pinned by pinned.test.sh)
+tests/fixtures/y  # (pinned by pinned.test.sh)" "$RC|$(bp_files T1)"
+# THE SUITES THAT DECLARE THEIR PINS, read as shipped: each real header reaches the brief of a row that runs it, and every
+# path declared is a file of this repository (a stale pin names a file a writer is then told it may write). The plan
+# names no working branch here, so the headers are read from the copies under the scratch checkout.
+sed '/^working-branch: /d' "$BP_PLAN" > "$BP_PLAN.tmp" && mv "$BP_PLAN.tmp" "$BP_PLAN"
+printf '%s\n' '| T5 | 4 | build | the declaring suites | implementor | — | 30 | REQ-12 | lib/e.sh, tests/words.test.sh, tests/sitrep-card.test.sh, tests/door-landing.test.sh, tests/release-check.test.sh, tests/shell-lint.test.sh | pending |' >> "$BP_PLAN"
+mkdir -p "$BP/tests"
+for BP_S in words sitrep-card door-landing release-check shell-lint; do cp "$(dirname "$0")/$BP_S.test.sh" "$BP/tests/$BP_S.test.sh"; done
+bp_brief T5
+BP_F5="$(bp_files T5)"
+expect_contains "BP-8 words.test.sh declares the files its allow list names" "agents-src/blocks/implementor-mechanics.md  # (pinned by words.test.sh)" "$BP_F5"
+expect_contains "BP-8b sitrep-card.test.sh declares the verb whose sheet its fixtures copy" "hooks/poker/sitrep.sh  # (pinned by sitrep-card.test.sh)" "$BP_F5"
+expect_contains "BP-8c door-landing.test.sh declares the fixture it sources" "tests/lib/door.sh  # (pinned by door-landing.test.sh)" "$BP_F5"
+expect_contains "BP-8d door-landing.test.sh and release-check.test.sh both declare the check" "tests/lib/release-check.sh  # (pinned by door-landing.test.sh, release-check.test.sh)" "$BP_F5"
+expect_contains "BP-8e shell-lint.test.sh declares the census" "tests/CENSUS.md  # (pinned by shell-lint.test.sh)" "$BP_F5"
+expect_contains "BP-8f …and every suite" "tests/*.test.sh  # (pinned by shell-lint.test.sh)" "$BP_F5"
+BP_PATHS="$(printf '%s\n' "$BP_F5" | sed -n 's/^\([^ ]*\)  # (pinned by .*/\1/p')"
+expect_nonempty "BP-9 setup: the declared paths are read off the brief" "$BP_PATHS"
+BP_MISSING=""
+while IFS= read -r BP_P; do
+  [ -n "$BP_P" ] || continue
+  [ -n "$(cd "${BIONIC_SCRIPTS_DIR}" && ls -d $BP_P 2>/dev/null)" ] || BP_MISSING="$BP_MISSING $BP_P"
+done <<BP_EOF
+$BP_PATHS
+BP_EOF
+expect_eq "BP-9b every path a suite declares it pins is a file of this repository" "" "$BP_MISSING"
+# THE DEAD INDEX IS GONE: the verb calls no function the tree does not hold. Beside the positive on the same search.
+expect_nonempty "BP-7 setup: the search finds the pins reader in hooks/" "$(/usr/bin/grep -rn "poker_brief_pins" "$BIONIC_HOOKS_DIR")"
+expect_eq "BP-7b AC-12.2 /usr/bin/grep -rn 'reads_suites\\|poker_brief_index_suites' hooks/ prints nothing" "" \
+  "$(/usr/bin/grep -rn "reads_suites\|poker_brief_index_suites" "$BIONIC_HOOKS_DIR")"
+
 finish
