@@ -279,7 +279,7 @@ fi
 # A PLAN VERB'S DRY COMMIT IS BOUND TO A COPY of the plan (wave-27 T76; review pass 60 P0-1): the
 # copy keeps `BIONIC_DEBTS_PLAN`, the plan the gate judges, and the record is the one of the plan the
 # copy was made from, which the verb wrote into its marker as `dry_of=` (lib/proof.sh
-# `proof_debt_origin`, which honours it for a plan verb's session and copy alone). So a dry commit
+# `proof_debt_origin`, which reads `dry_of=` for any session's copy). So a dry commit
 # and a real commit of the same plan text at the same step get the same answer from the debt arm,
 # and from the readings arm (wave-37 T2; REQ-9 AC-9.1, D12): the origin is named FIRST, before the
 # readings are derived, and handed to the deriver as the plan whose record it reads, so a finding a
