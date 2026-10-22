@@ -993,154 +993,25 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
   return 0
 }
 
-# THE CHECK'S CLOSURE: the declared check's script and every file it loads, as a commit holds them. The script is
-# the first word of the command that names a file the commit holds; a member's loads are the words after `.`,
-# `source`, `bash` or `sh` that resolve without running anything: from the member's own directory (`dirname "$0"`
-# and its `cd … && pwd` and BASH_SOURCE forms), from simple assignments of such paths, and from plain `for v in
-# words` lists. A load that does not resolve, or names a path the commit lacks, is no member, so the closure never
-# names a file the check cannot have read. The closure is read from the declaration each time, never listed, so a
-# check that comes to load a new library brings it into its closure by that load alone. Every word, the
-# declaration's and each load's, becomes a repository path in one place, `_wt_repo_paths`, so the two can never
-# disagree on a spelling. Its roots are every directory the check may be run from or may name: the run dir, physical
-# and as named, and the main checkout, since the declaration is read there while the door runs it in the checkout
-# that holds the branch, in a landing tree under the main checkout, or in a linked worktree elsewhere.
-_wt_check_closure() {  # <repo dir> <rev> <check command> -> the members' paths, one per line · 1 when no script
-  local dir="$1" rev="$2" cmd="$3" nl='
-' held w script queue f seen roots
-  held="$(git -C "$dir" ls-tree -r --name-only "$rev" 2>/dev/null)" || return 1
-  roots="$(_wt_abs "$dir")${nl}${dir%/}${nl}$(worktree_root "$dir")"
-  script=""
-  while IFS= read -r w; do
-    [ -n "$w" ] || continue
-    case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) script="$w"; break ;; esac
-  done <<EOF
-$(printf '%s\n' "$cmd" | tr -s ' \t' '\n\n' | _wt_repo_paths "$roots")
-EOF
-  [ -n "$script" ] || return 1
-  queue="$script"; seen="${nl}${script}${nl}"
-  while [ -n "$queue" ]; do
-    f="${queue%%"$nl"*}"
-    case "$queue" in *"$nl"*) queue="${queue#*"$nl"}" ;; *) queue="" ;; esac
-    printf '%s\n' "$f"
-    while IFS= read -r w; do
-      [ -n "$w" ] || continue
-      case "$seen" in *"${nl}${w}${nl}"*) continue ;; esac
-      case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) : ;; *) continue ;; esac
-      seen="${seen}${w}${nl}"; queue="${queue:+${queue}${nl}}${w}"
-    done <<EOF
-$(git -C "$dir" show "${rev}:${f}" 2>/dev/null | _wt_check_loads "$(dirname "$f")" | _wt_repo_paths "$roots")
-EOF
-  done
-}
-# A WORD AS THE REPOSITORY PATH IT NAMES, the one place the closure decides it. A relative word is read against the
-# repository root, where the check runs; an absolute one under the longest of <roots> it lies in, matched on whole
-# components, so a sibling sharing a root as a name prefix stays outside. Components are normalized once: an empty one
-# or `.` dropped, `..` taken back. A relative word that climbs out of the root, an absolute one under no root (a list
-# in the user's own directory) and the root itself name nothing: an empty line, so every word keeps its place.
-_wt_repo_paths() {  # <roots, one per line> < words, one per line -> per word its repository path, or an empty line
-  _WT_ROOTS="$1" awk '
-    function norm(p,   n, a, i, o, k, r, abs) {
-      abs = (substr(p, 1, 1) == "/"); n = split(p, a, "/"); k = 0
-      for (i = 1; i <= n; i++) {
-        if (a[i] == "" || a[i] == ".") continue
-        if (a[i] == "..") { if (k > 0) k--; else if (!abs) return ""; continue }
-        o[++k] = a[i]
-      }
-      r = ""; for (i = 1; i <= k; i++) r = r (i > 1 || abs ? "/" : "") o[i]
-      return (abs && r == "") ? "/" : r
-    }
-    BEGIN {
-      n = split(ENVIRON["_WT_ROOTS"], t, "\n")
-      for (i = 1; i <= n; i++) if (substr(t[i], 1, 1) == "/" && (r = norm(t[i])) != "/") root[++nr] = r
-    }
-    substr($0, 1, 1) != "/" { print norm($0); next }
-    {
-      p = norm($0); best = ""
-      for (i = 1; i <= nr; i++) if (index(p, root[i] "/") == 1 && length(root[i]) > length(best)) best = root[i]
-      print (best == "" ? "" : substr(p, length(best) + 2))
-    }'
-}
-# The loads one member names, as the words a shell would read: a load from the member's own directory prefixed with
-# <dir>, its directory under the repository root ("." for the root), a relative load as written, read from the root
-# where the check runs, an absolute one as written. `_wt_repo_paths` turns each into the path it names.
-_wt_check_loads() {  # <dir> < the member's text -> one word per resolved load
-  awk -v d="$1" -v sq="'" '
-    # Every $NAME or ${NAME} in s replaced by its value; "" when one has none. A loop variable, the last one met,
-    # is left as @L for the caller to expand.
-    function subst(s,   out, name, m) {
-      out = ""
-      while (match(s, /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) {
-        name = substr(s, RSTART, RLENGTH); gsub(/[${}]/, "", name)
-        out = out substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
-        if (name in val) out = out val[name]
-        else if (name in loop) { out = out "@L"; lv = name }
-        else return ""
-      }
-      return out s
-    }
-    function emit(p,   n, a, i) {
-      if (p == "" || index(p, "$") || index(p, "`")) return
-      if (index(p, "@D") == 1) p = d substr(p, 3)
-      if (index(p, "@L")) {
-        n = split(loop[lv], a, " ")
-        for (i = 1; i <= n; i++) { q = p; sub(/@L/, a[i], q); print q }
-        return
-      }
-      print p
-    }
-    {
-      l = $0
-      gsub(/\$\(dirname (-- )?"(\$0|\$\{0\}|\$BASH_SOURCE|\$\{BASH_SOURCE\}|\$\{BASH_SOURCE\[0\]\})"\)/, "@D", l)
-      gsub(/\$\{(0|BASH_SOURCE|BASH_SOURCE\[0\])%\/\*\}/, "@D", l)
-      gsub(/\$\(cd "@D"[^)]*\)/, "@D", l)
-      if (match(l, /^[ \t]*((local|export|readonly)[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=/)) {
-        a = substr(l, RSTART, RLENGTH); sub(/^[ \t]*((local|export|readonly)[ \t]+)?/, "", a); sub(/=$/, "", a)
-        v = substr(l, RSTART + RLENGTH)
-        if (substr(v, 1, 1) == "\"") { v = substr(v, 2); sub(/".*$/, "", v) } else sub(/[ \t;|&)].*$/, "", v)
-        if (!(a in val) && v != "") { v = subst(v); if (v != "" && index(v, "@L") == 0) val[a] = v }
-      }
-      if (match(l, /for[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]+[^;]*;[ \t]*do/)) {
-        f = substr(l, RSTART, RLENGTH); sub(/^for[ \t]+/, "", f)
-        a = f; sub(/[ \t].*$/, "", a)
-        sub(/^[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]+/, "", f); sub(/[ \t]*;[ \t]*do$/, "", f)
-        if (f ~ /^[A-Za-z0-9_.\/ -]+$/) loop[a] = f
-      }
-      r = ";" l
-      while (match(r, /([;&|({!][ \t]*|[ \t;](then|do|else)[ \t]+)(\.|source|bash|sh)[ \t]+/)) {
-        r = substr(r, RSTART + RLENGTH)
-        if (substr(r, 1, 1) == "\"") { w = substr(r, 2); sub(/".*$/, "", w) }
-        else if (substr(r, 1, 1) == sq) { w = substr(r, 2); w = substr(w, 1, index(w sq, sq) - 1); emit(w); continue }
-        else { w = r; sub(/[ \t;|&)<>].*$/, "", w) }
-        emit(subst(w))
-      }
-    }'
-}
-# WHAT THE LANDING CHANGES OF ITS JUDGE: the closure of the check as <base> holds it, met with the paths <base>..<head>
-# changes. Prints `<script> <path>[,<path>]` and returns 0 when the range changes a member; 1 otherwise.
-_wt_check_judge() {  # <repo dir> <base> <head> <check command>
-  local cl ch hit="" p nl='
-'
-  cl="$(_wt_check_closure "$1" "$2" "$4")" || return 1
-  ch="$(git -C "$1" diff --name-only "$2" "$3" 2>/dev/null)" || return 1
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    case "${nl}${ch}${nl}" in *"${nl}${p}${nl}"*) hit="${hit:+${hit}${nl}}${p}" ;; esac
-  done <<EOF
-$cl
-EOF
-  [ -n "$hit" ] || return 1
-  printf '%s %s\n' "${cl%%"$nl"*}" "$(printf '%s\n' "$hit" | LC_ALL=C sort | paste -sd, -)"
-}
-# Whether a changed member lies in the check script's own directory, not below it: the files that are the check
-# itself, as distinct from the project code it loads. 0 when one does; 1 otherwise.
-_wt_check_beside() {  # <script> <path>[,<path>] -> 0 | 1
-  local dir="" rest="$2," p
-  case "$1" in */*) dir="${1%/*}/" ;; esac
-  while [ -n "$rest" ]; do
-    p="${rest%%,*}"; rest="${rest#*,}"
-    case "$p" in "$dir"*) case "${p#"$dir"}" in ''|*/*) ;; *) return 0 ;; esac ;; esac
-  done
-  return 1
+# WHAT A RANGE CHANGES OF THE CHECK'S FILES: the project's declared list, `release-check-files:` in its config, met
+# with the paths <base>..<head> changes. The config is the main checkout's, so <repo dir> may be any checkout of the
+# repository. The list is space-separated paths or globs relative to the repository root, read as git's glob
+# pathspecs, so a `*` stays within one directory and `**` crosses them. The check's files are declared, never read off
+# its command or its loads: a library the check comes to source is its file only once the project says so. It is
+# information alone, said on a hand landing's line and on the release approval card; it gates nothing, for the check
+# is run as the release base holds it, which no landing writes. Prints the changed files joined by commas and returns
+# 0 when the range changes one; 1 otherwise, and when no list is declared.
+_wt_check_judge() {  # <repo dir> <base> <head> -> <path>[,<path>]
+  local decl w ch root
+  local -a spec=() words=()
+  root="$(worktree_root "$1")" || root="$1"
+  decl="$(config_value "$root" release-check-files "" 2>/dev/null)"
+  read -r -a words <<< "$decl"
+  for w in "${words[@]+"${words[@]}"}"; do spec+=(":(top,glob)$w"); done
+  [ "${#spec[@]}" -gt 0 ] || return 1
+  ch="$(git -C "$1" diff --name-only "$2" "$3" -- "${spec[@]}" 2>/dev/null)" || return 1
+  [ -n "$ch" ] || return 1
+  printf '%s\n' "$ch" | LC_ALL=C sort | paste -sd, -
 }
 
 # THE LAST RELEASE: release_base <plan> <checkout> <head> sets RB_BASE, the 40-hex start of the release range, and
