@@ -34,8 +34,8 @@
 # poker, close-out, the sweeper and the door are the sandbox's own copies, so a kept sandbox is read by the same
 # plugin that played it. The plugin's context files are laid beside its scripts, as an install lays them out.
 #
-# WHAT IS WRITTEN BY HAND is what a run's people and agents write by hand: the plan's prose and the person's Step-3
-# approval line, stamped when the rehearsal starts, the project's config, a row's code and its suite, a criterion's
+# WHAT IS WRITTEN BY HAND is what a run's people and agents write by hand: the plan's prose and its goals, the
+# person's Step-3 approval line, stamped when the rehearsal starts, the records two of the goals are measured by, the project's config, a row's code and its suite, a criterion's
 # evidence, the walk and audit records, a record row's report, a review's record, the release's changelog entry, and
 # the user's typed reply in the session's transcript with the session's start record (the CLI and session-start write
 # those two in a real session). A register, a ledger line a verb owns,
@@ -61,6 +61,9 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "${BIONIC_SCRIPTS_DIR}/tests/lib/roster-row.sh" || return 1 2>/dev/null || exit 1
 fi
+
+# The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
+RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
 
 # rh_state_known <state> -> 0 for one of the four
 rh_state_known() {
@@ -220,10 +223,15 @@ EOF
   export CLAUDE_CONFIG_DIR="$dir/config"
   mkdir -p "$CLAUDE_CONFIG_DIR/bionic" "$dir/home/.claude"
   printf '# rehearse %s: door_world built %s at %s, its plan bound to %s\n' "$state" "$RH_ROOT" "$RH_BASE" "$WORLD_SID" >> "$RH_LOG"
-  # The planner names the branch the run merges into; door_world's plan, which never merges, leaves it out.
-  awk '{ print } $0 == "working-branch: wave/x" && !d { print "integration-branch: main"; d = 1 }' "$RH_PLAN" > "$RH_PLAN.rh" \
-    && mv "$RH_PLAN.rh" "$RH_PLAN" || return 1
-  _rh_hand "the plan's Step-3 prose, $DOOR_PLAN_REL (door_world), naming integration-branch: main"
+  # The planner names the branch the run merges into; door_world's plan, which never merges, leaves it out. It also
+  # declares the run's goals, each measured by a record: one the rehearsal writes passing, one failing, and one it
+  # never writes, so every state's sheet reads a goal met, one not met and one not measured yet.
+  awk -v g="$RH_GOALS" '{ print } $0 == "working-branch: wave/x" && !d { print "integration-branch: main"; print "goals: " g; d = 1 }' \
+    "$RH_PLAN" > "$RH_PLAN.rh" && mv "$RH_PLAN.rh" "$RH_PLAN" || return 1
+  _rh_hand "the plan's Step-3 prose, $DOOR_PLAN_REL (door_world), naming integration-branch: main and the run's three goals"
+  printf '# the card read\n\nverdict: pass\n' > "$RH_REC/goal-shown.md" \
+    && printf '# the asks checked\n\nverdict: fail\n' > "$RH_REC/goal-asks.md" || return 1
+  _rh_hand "the goal records record/wave-x/goal-shown.md (verdict: pass) and record/wave-x/goal-asks.md (verdict: fail)"
   # The person approves the plan at Step 3 just before the build, so the approval is stamped now: a stamp from the
   # fixture's own past would make the pace read the hours between it and the first landing, and the close land weeks out.
   awk -v at="$(date -u +%Y-%m-%dT%H:%MZ)" '/^approved-by:/ { print "approved-by: user " at " \"approved\""; next } { print }' "$RH_PLAN" > "$RH_PLAN.rh" \

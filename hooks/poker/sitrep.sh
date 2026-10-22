@@ -570,7 +570,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   task: id=<Tn> step=<n> state=<done|running|held|failed|pending> desc=<short description> note=<few words or ->
 #                      one line per task not dropped, in execution order
 #   metric.completed · metric.pace · metric.correctness · metric.waste · metric.goals
-#   goal: name=<goal> status=<met|not met|not measured> measure=<what measures it — what it read, or ->
+#   goal: name=<goal> status=<met|not met|not measured|unreadable> measure=<what measures it — what it read, or ->
 #   close.predicted · close.forecast · close.basis
 #   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or ->
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
@@ -585,21 +585,25 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # session), the admitted count `gate_state`'s, the findings `proof_findings` at `proof_finding_rating` less
 # `proof_fixed`, the landings the landing record's `landed:` headers, a goal's status lib/plan.sh `plan_goal_status`'s, the
 # one the release approval card reads too. What no reader computes is computed here, once: the pace, a red not yet
-# answered by a green, the close.
+# answered by a green, each suite by its last run, the whole run's newest verdict, a review by its latest result per
+# question and scope, the close.
 #
 # THE TASKS, IN EXECUTION ORDER. Done by landing time, the time read from the task's `- T<n>:` line wherever it sits on
 # it, `landed <sha> <ISO>` or `landed-by-hand: <who> <ISO> "<why>"` (said `by hand`), the earlier of the two when both
 # appear; a done task whose line names no instant follows them, so said. In flight by place on the line, read as it
 # stands (read-only: no git counting, no liveness), saying what each does: `in its landing, <n> of <m> suites green`,
 # `queued behind <task>`, `next on the line`, or `building`. The rest in dependency order over `units_edges`, each
-# saying what it `waits on` (`units_waiting`: the writer task, else the read in words, the first named and the others
-# counted, `waits on <label> +8`; a task is named by the label its card row prints, its step, a slash and its id
-# without the T, as `queued behind <label>` names one). A task with a red at head is failed (`red`); one waiting on an approval the user owes, or
-# whose status is held, is held. The description is the task's cell up to its first " (", ": ", ". " or " · ".
+# saying everything it `waits on`, in the order its reads are read (`units_waiting`), joined `A, B and C`, never a
+# count of the rest: `step N`, `your approval of D<n>`, `your approval of the <name>`, `the reviews`, `the last build
+# row landing`, `the merge`, and any other read another task writes as that task, named by the label its card row
+# prints, its step, a slash and its id without the T, as `queued behind <label>` names one. A task with a red at head
+# is failed (`red`); one waiting on an approval the user owes, or whose status is held, is held, a started one naming
+# each approval it waits on. The description is the task's cell up to its first " (", ": ", ". " or " · ".
 #
 # THE CLOSE IS A FLOOR OR A FORECAST, NEVER NOW. L = max(the longest open chain, all open work ÷ the admitted count) in
 # the plan's own minutes, so admitting more can shorten the work's share and never one chain. The floor is now + L at
-# 1×; the likely close is now + L × the pace, read only when it falls after now. The predicted close runs from the
+# 1×; the likely close is now + L × the pace, read only when it falls after now, and a pace this run took over fewer
+# than 3 landings is 1×: the predicted close is then the floor, and the basis says why. The predicted close runs from the
 # floor to the likely close, is the likely close alone when that falls at or before the floor (a pace of 1× or less),
 # and the floor alone with no pace. The pace is the minutes from the Step-3 approval to the last landing over the
 # minutes the plan allowed for the landed tasks, this run's, else the newest delivered run's at the same scale on the
@@ -781,7 +785,8 @@ sitrep_prev() {
 #               open chain and all open work over the admitted count, in the plan's own minutes
 #   2 likely    now + L × the pace, rounded to the minute; `-` with no pace or when it falls at or before now. A pace
 #               under 1× puts it before the floor, and it still prints: it is the estimate, the floor the plan's own
-#   3 ratio     the pace: this run's (`sitrep_pace_facts`), else the newest same-scale delivered run's (`sitrep_prev`)
+#   3 ratio     the pace: this run's (`sitrep_pace_facts`), 1 while it rests on under 3 landings, else the newest
+#               same-scale delivered run's (`sitrep_prev`)
 #   4 whose     `this run`, or the lending run's short name, a wave slug's first two words
 #   5 landings  how many of this run's landings the pace is taken over (`-` when borrowed)
 #   6 work · 7 per · 8 larger   the open minutes, those over the admitted count, and L, each rounded
@@ -803,7 +808,9 @@ sitrep_close() {
   pace="$(sitrep_pace_facts "$plan" "$root")"
   case "$pace" in
     ''|*$'\t-\t'*) pace="" ;;
-    *) IFS='	' read -r n ratio took planned <<< "$pace"; whose="this run" ;;
+    *) IFS='	' read -r n ratio took planned <<< "$pace"; whose="this run"
+       # one or two landings are too few to scale the close by: their ratio stands at 1×
+       [ "$n" -ge 3 ] || ratio=1 ;;
   esac
   if [ -z "$pace" ]; then
     pace="$(sitrep_prev "$root" "$plan")"
@@ -822,33 +829,68 @@ sitrep_close() {
   printf '%s\t%s\t%s\t%s\t%s\n' "$cids" "$cmins" "$admitted" "$took" "$planned"
 }
 
-# sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`), then `N<TAB><count>`
-# of the reds at head. A row's red is at head while it is its row and suite's newest verdict and the row has not been
-# published since; a later green on that row and suite, or the row's landing, answers it. A suite the line recorded
-# `standing` is red at head too, whoever added the red, until a later green verdict of that suite (any row) answers
-# it; it marks no row red, and a standing suite that a row's red run also names is counted once.
+# sitrep_reds <landing record> -> one line per row holding a red at head (`R<TAB><row>`). A row's red is at head while
+# it is its row and suite's newest verdict and the row has not been published since; a later green on that row and
+# suite, or the row's landing, answers it. The suites red at their last run are `sitrep_suites`'.
 sitrep_reds() {
-  [ -f "$1" ] && [ ! -L "$1" ] || { printf 'N\t0\n'; return 0; }
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   awk -F'|' "${_LINE_FIELDS_AWK:-}"'
     (ev = line_ev()) == "" { next }
     { rk = line_kv("row") }
     ev == "verdict" && line_kv("kind") == "regression" { next }   # facts of the whole run: no row holds them
-    ev == "standing" { st = line_kv("suite"); sub(/.*\//, "", st); if (st != "") stand[st] = 1; next }
     ev == "verdict" && rk != "" {
       k = rk SUBSEP line_kv("suite"); if (!(k in seen)) { seen[k] = 1; ord[++n] = k }; last[k] = line_kv("result")
-      st = line_kv("suite"); sub(/.*\//, "", st); if (line_kv("result") == "green") delete stand[st]
       next
     }
     ev == "published" && rk != "" { for (i = 1; i <= n; i++) { split(ord[i], p, SUBSEP); if (p[1] == rk) last[ord[i]] = "landed" } }
     END {
       for (i = 1; i <= n; i++) if (last[ord[i]] == "red") {
-        split(ord[i], p, SUBSEP); c++; st = p[2]; sub(/.*\//, "", st); red[st] = 1
+        split(ord[i], p, SUBSEP)
         if (!(p[1] in said)) { said[p[1]] = 1; printf "R\t%s\n", p[1] }
       }
-      for (st in stand) if (!(st in red)) c++
-      printf "N\t%d\n", c + 0
     }' "$1"
+}
+
+# sitrep_suites <landing record> -> `<suites><TAB><green><TAB><red>`: every suite the line ran for a row, by its last run,
+# green or red. A `standing` event is the line's own red run of the suite at the head; a discarded run, or one that
+# ran nothing, is no verdict on it. A suite named by a path is the suite its file name is. The whole run's verdicts
+# (`kind=regression`) are no row's and are read by `sitrep_whole`.
+sitrep_suites() {
+  [ -f "$1" ] && [ ! -L "$1" ] || { printf '0\t0\t0\n'; return 0; }
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  awk -F'|' "${_LINE_FIELDS_AWK:-}"'
+    (ev = line_ev()) == "" { next }
+    ev == "verdict" && line_kv("kind") == "regression" { next }
+    ev == "verdict" { r = line_kv("result"); if (r != "green" && r != "red") next }
+    ev == "standing" { r = "red" }
+    ev == "verdict" || ev == "standing" { st = line_kv("suite"); sub(/.*\//, "", st); if (st != "") last[st] = r }
+    END { for (st in last) { n++; if (last[st] == "green") g++; else rd++ }; printf "%d\t%d\t%d\n", n, g, rd }' "$1"
+}
+
+# sitrep_whole <plan> <landing record> -> the whole run in words: `not run (regression: no, Step 0)` when the plan owes
+# none; else the newer of the plan's last whole-run proof line (green at its head) and the record's last whole-run head
+# (red when a suite's last verdict at it is red, else green), `green at <head8>` or `red at <head8>`; else `not run yet`.
+sitrep_whole() {
+  local plan="$1" rec="$2" line ph pa
+  if declare -F plan_regression >/dev/null 2>&1 && [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then
+    printf 'not run (regression: no, Step 0)\n'; return 0
+  fi
+  declare -F proof_last_line >/dev/null 2>&1 && line="$(proof_last_line "$plan" regression 2>/dev/null)"
+  ph="$(printf '%s\n' "${line:-}" | tr ' ' '\n' | sed -n 's/^head=//p' | head -1)"
+  pa="$(printf '%s\n' "${line:-}" | tr ' ' '\n' | sed -n 's/^at=//p' | head -1)"
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  { [ -f "$rec" ] && [ ! -L "$rec" ] && cat "$rec"; } 2>/dev/null | awk -F'|' -v ph="$ph" -v pa="$pa" "${_LINE_FIELDS_AWK:-}"'
+    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+    line_ev() == "verdict" && line_kv("kind") == "regression" && line_kv("commit") != "" {
+      c = line_kv("commit"); r = line_kv("result"); if (r != "green" && r != "red") next
+      if (c != h) { h = c; delete w }
+      w[line_kv("suite")] = r; at = norm(line_kv("at"))
+    }
+    END {
+      if (h != "" && (ph == "" || at > norm(pa))) { s = "green"; for (k in w) if (w[k] == "red") s = "red"; print s " at " substr(h, 1, 8); exit }
+      if (ph != "") { print "green at " substr(ph, 1, 8); exit }
+      print "not run yet" }'
 }
 
 # sitrep_test_ratio <plan> <root> -> `<tests> <code> <head>`: the two counts of shell lines the plan's newest release
@@ -1004,7 +1046,6 @@ sitrep_gather() {
   rows="$(units_rows "$plan" 2>/dev/null)"
   reds="$(sitrep_reds "$rec")"
   red_rows="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "R" { print $2 }')"
-  SG_NRED="$(printf '%s\n' "$reds" | awk -F'\t' '$1 == "N" { print $2 }')"
   lr="$(landing_report "$rec" "$root" yes 2>/dev/null)"; lr1="${lr%%$'\n'*}"
   SG_GOALS_READ="$(plan_goals_read "$plan" "$rec" "$lr")"
   SG_ASKS="$(sitrep_asks "$plan" "$root" "$rows" "$SG_GOALS_READ" "$now")"
@@ -1048,12 +1089,28 @@ sitrep_gather() {
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
           } | LC_ALL=C awk -F'\t' "$(_sitrep_name_awk)$(_sitrep_label_awk)"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function words(r) {   # a read, in words: an approval is the user'"'"'s, a step its number, a proof its facts
-      sub(/^live:/, "", r)
-      if (index(r, "proof:") == 1) { sub(/: .*$/, "", r); return "the " substr(r, 7) " facts at the head" }
-      if (index(r, "approval:") == 1) return "your approval of " substr(r, 10)
-      if (index(r, "step:") == 1) return "step " substr(r, 6)
+    function words(r,   t) {   # a read, in words: the step, the user'"'"'s approval, the reviews, the build, the merge
+      sub(/^live:/, "", r); t = r; sub(/: .*$/, "", t)
+      if (index(t, "step:") == 1) return "step " substr(t, 6)
+      if (t ~ /^approval:D[0-9]+$/) return "your approval of " substr(t, 10)
+      if (index(t, "approval:") == 1) return "your approval of the " substr(t, 10)
+      if (t == "proof:review") return "the reviews"
+      if (index(t, "proof:") == 1) return "the " substr(t, 7) " facts at the head"
+      if (r == "head") return "the last build row landing"
+      if (r == "merge") return "the merge"
       return r
+    }
+    function wait_on(i, e) {   # one thing task i waits on, once: words, or "@" and the writer task named at the end
+      if ((i, e) in wseen) return
+      wseen[i, e] = 1; wn[i]++; we[i, wn[i]] = e
+    }
+    function waits(i,   k, e, s) {   # everything task i waits on, joined: "A", "A and B", "A, B and C"
+      s = ""
+      for (k = 1; k <= wn[i]; k++) {
+        e = we[i, k]; if (substr(e, 1, 1) == "@") e = label(substr(e, 2))
+        s = s ((k == 1) ? "" : (k == wn[i]) ? " and " : ", ") e
+      }
+      return "waits on " s
     }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
@@ -1064,7 +1121,11 @@ sitrep_gather() {
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
     $1 == "Q" { nq++; qr[nq] = $2; qc[nq] = $3; qo[nq] = $4; qg[nq] = $5; qm[nq] = $6; next }
-    $1 == "W" { w = ($4 != "" && $4 != "-") ? $4 : words($3); if (!(($2, w) in wseen)) { wseen[$2, w] = 1; if (!($2 in wfirst)) wfirst[$2] = w; wcount[$2]++ }; next }
+    # a read another task writes is that task, by its label; the step, an approval, the reviews, the build and the merge
+    # are said in words whoever writes them
+    $1 == "W" { t = $3; sub(/^live:/, "", t); sub(/: .*$/, "", t)
+      w = ($4 != "" && $4 != "-" && t !~ /^(step:|approval:|proof:review$|head$|merge$)/) ? "@" $4 : words($3)
+      wait_on($2, w); next }
     $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
@@ -1075,7 +1136,7 @@ sitrep_gather() {
         m = split(rd[n], a, ",")
         for (k = 1; k <= m; k++) {
           x = trim(a[k]); sub(/^live:/, "", x)
-          if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) { b = 1; if (nb[n]++ == 0) bk[n] = words(x) }
+          if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) { b = 1; nb[n]++; wait_on("held:" id[n], words(x)) }
         }
       }
       g[n] = (s == "landed") ? "L" : (b ? "X" : (s == "active" ? "A" : "P"))
@@ -1101,7 +1162,7 @@ sitrep_gather() {
       # an active task reading an approval still owed is held on it, and says so rather than building
       for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) {
         note = "building"
-        if (g[i] == "X" && nb[i] > 0) { note = "waits on " label(bk[i]); if (nb[i] > 1) note = note " +" (nb[i] - 1) }
+        if (g[i] == "X" && nb[i] > 0) note = waits("held:" id[i])
         row(i, "s", note)
       }
       # the rest: dependency order, the lowest table position first among the free
@@ -1120,10 +1181,8 @@ sitrep_gather() {
         out[pick] = 1; done++
         for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
         if (st[pick] == "held") { row(pick, "s", "held"); continue }
-        if (st[pick] != "pending" || !(id[pick] in wfirst)) { row(pick, "b", ""); continue }
-        note = "waits on " label(wfirst[id[pick]])   # the first blocker, the others counted
-        if (wcount[id[pick]] > 1) note = note " +" (wcount[id[pick]] - 1)
-        row(pick, "s", note)
+        if (st[pick] != "pending" || !wn[id[pick]]) { row(pick, "b", ""); continue }
+        row(pick, "s", waits(id[pick]))
       }
     }')"
   SG_TASKS=""
@@ -1206,6 +1265,8 @@ SITREP_SIT
       SG_PREDICTED="$cl"; SG_LINE_CLOSE="$cl"
       if [ "$ratio" = - ]; then
         lkw="no pace yet: no landing on this run measures one, and no delivered run at the same scale lends one"
+      elif [ "$whose" = "this run" ] && [ "$nland" -lt 3 ]; then
+        lkw="the pace ratio rests on $nland landing$([ "$nland" = 1 ] || echo s), under 3, so 1× stands"
       else
         if [ "$whose" = "this run" ]; then
           pw="this run's $(sitrep_ratio_fmt "$ratio")×, $(sitrep_dur "$ptook") from the plan's approval to the last of $nland landing$([ "$nland" = 1 ] || echo s) over the $(sitrep_dur "$pplan") the plan allowed for $([ "$nland" = 1 ] && echo it || echo them)"
@@ -1231,14 +1292,19 @@ SITREP_SIT
 
   # ---- the metrics, numbers only
   local pf k took planned rv q sc res at ev nf passed=0 failed=0 running=0 open dropped idle_min idle_words rg rr rn rd rk g m st t md rdg
+  local u sn sg sr su
   pf="$(sitrep_pace_facts "$plan" "$root")"
   IFS='	' read -r k _ took planned <<< "$pf"
   SG_PACE="${k:-0} $(sitrep_noun "${k:-0}" task tasks) in $(sitrep_dur "${took:-0}"); the plan allowed $(sitrep_dur "${planned:-0}") for them"
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
+  # a review is counted once per question and scope, by its latest result: a pass a later fail supersedes is no pass
+  read -r passed failed <<< "$(printf '%s\n' "$rv" | awk -F'\t' '
+    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+    NF >= 6 { k = $1 SUBSEP $2; a = norm($4); if (!(k in r) || a == "-" || t[k] == "-" || a >= t[k]) { r[k] = $3; t[k] = a } }
+    END { for (k in r) { if (r[k] == "pass" || r[k] == "flag") p++; else if (r[k] == "fail") f++ }; print p + 0, f + 0 }')"
   while IFS='	' read -r q sc res at ev nf; do
     [ -n "$q" ] || continue
-    case "$res" in pass|flag) passed=$((passed + 1)) ;; fail) failed=$((failed + 1)) ;; esac
     k="$(iso_epoch "$at" 2>/dev/null)"
     case "$k" in ''|*[!0-9]*) at="-" ;; *) at="$(sitrep_clock "$k" "$now")" ;; esac
     SG_REVIEWS="${SG_REVIEWS}review: question=$q scope=$sc result=$res at=$at open-findings=$nf record=$ev"$'\n'
@@ -1255,7 +1321,11 @@ $(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); 
 SITREP_RUNNING
   # a record read twice (a re-run's result beside the first) counts its findings once, as it stands now
   open="$(printf '%s\n' "$rv" | awk -F'\t' 'NF >= 6 { o[$5] = $6 } END { for (e in o) t += o[e]; print t + 0 }')"
-  SG_CORRECT="${SG_NRED:-0} $(sitrep_noun "${SG_NRED:-0}" test tests) red; $passed $(sitrep_noun "$passed" review reviews) passed, $failed failed, $running running; $open open $(sitrep_noun "$open" finding findings)"
+  # the suites the line ran, each by its last run, then the whole run, then the reviews and their findings
+  IFS='	' read -r sn sg sr <<< "$(sitrep_suites "$rec")"
+  if [ "${sn:-0}" -eq 0 ]; then su="0 suites run"
+  else su="$sn $(sitrep_noun "$sn" suite suites) run: $sg green and $sr red at $(sitrep_noun "$sn" its their) last run"; fi
+  SG_CORRECT="$su; whole run: $(sitrep_whole "$plan" "$rec"); $passed $(sitrep_noun "$passed" review reviews) passed, $failed failed, $running running; $open open $(sitrep_noun "$open" finding findings)"
   dropped="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "dropped" { n++ } END { print n + 0 }')"
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
@@ -1269,14 +1339,14 @@ SITREP_RUNNING
   if [ -n "$idle_min" ]; then idle_words="$idle_min $(sitrep_noun "$idle_min" minute minutes) idle"; else idle_words="idle minutes unverified"; fi
   SG_WASTE="$dropped $(sitrep_noun "$dropped" task tasks) dropped; $((rd + rk)) of $((rg + rr + rn + rd + rk)) suite $(sitrep_noun "$((rg + rr + rn + rd + rk))" run runs) discarded; $idle_words"
   # the goals, each status the one function's
-  SG_GOAL_LINES=""; g=0; m=0; k=0
+  SG_GOAL_LINES=""; g=0; m=0; k=0; u=0
   # split by hand: a goal with no measure has an empty field, which a tab-split read would close up
   while IFS= read -r st; do
     t="${st#*	}"; md="${t#*	}"; rdg="${md#*	}"; st="${st%%	*}"; t="${t%%	*}"; md="${md%%	*}"
     [ -n "$t" ] || continue
     g=$((g + 1))
     st="$(plan_goal_status "$st")"
-    case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; esac
+    case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; unreadable) u=$((u + 1)) ;; esac
     # the status already says a goal is not measured; its measure prints once
     [ "$rdg" != "not measured" ] || rdg=""
     if [ -n "$md" ] && [ -n "$rdg" ]; then md="$md — $rdg"; elif [ -z "$md" ]; then md="${rdg:--}"; fi
@@ -1284,7 +1354,13 @@ SITREP_RUNNING
   done <<SITREP_GOALS
 $SG_GOALS_READ
 SITREP_GOALS
-  SG_GOALS="$m of $g met; $k not measured yet"
+  # a clause counting none is left out; a plan declaring no goal says so
+  if [ "$g" -eq 0 ]; then SG_GOALS="none declared"
+  else
+    SG_GOALS="$m of $g met"
+    [ "$k" -eq 0 ] || SG_GOALS="$SG_GOALS; $k not measured yet"
+    [ "$u" -eq 0 ] || SG_GOALS="$SG_GOALS; $u with no measure the sitrep can read"
+  fi
   return 0
 }
 
