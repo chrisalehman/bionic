@@ -89,6 +89,12 @@ capability, and no verb is removed. `canonical_sdlc_version` stays 14.
 
 - The walk (`walk.md`, T8): the card and the verbs used as a user would, whose findings T21 fixed.
 
+### Known limits
+
+- An ask other than a decision that was closed before 1.25.0 adds no minutes to the sitrep's waiting-on-you count,
+  because the register kept no opened time before this release; asks closed from 1.25.0 on are counted.
+  (`record/wave-42-sitrep-owes/critic-adversarial.md#2`)
+
 ### The landing numbers
 
 `landing-report --rows` at 1aa62e49459f9803d4b1f1bfa8476c4d6486b0af on 2026-10-22T04:49:11Z:
