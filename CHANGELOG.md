@@ -218,10 +218,10 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 
 ### The landing numbers
 
-`landing-report --rows` at 162070ebed32814b8a9e71728615e52b0d3dae71 on 2026-10-22T22:51:14Z:
+`landing-report --rows` at a56649f52ae2099fb699a072f630f8bccc837141 on 2026-10-22T23:35:18Z:
 
 ```
-landings: queue=21 hand=1 git=0 · ready-to-landed median=5.4m p75=6.8m max=11.3m · runs: green=71 red=11 none=4 discarded=3 red-then-green=0 run=218 reused=0 absent=0 · waited median=15s · killed=3
+landings: queue=24 hand=1 git=0 · ready-to-landed median=5.5m p75=7.1m max=11.3m · runs: green=76 red=11 none=4 discarded=3 red-then-green=0 run=246 reused=0 absent=0 · waited median=15s · killed=3
 T1 queue ready=2026-10-22T17:18:08Z landed=2026-10-22T17:23:07Z minutes=5.0 runs=1 waited=14s wait=0.2 prove=4.8 rework=0.0 width=3
   close-replay.test.sh red promised=277s actual=285s ratio=1.03
 T11 queue ready=2026-10-22T17:42:45Z landed=2026-10-22T17:47:20Z minutes=4.6 runs=4 waited=14s wait=0.2 prove=4.1 rework=0.3 width=3
@@ -332,6 +332,13 @@ T19 queue ready=2026-10-22T22:24:53Z landed=2026-10-22T22:31:34Z minutes=6.7 run
 T28 queue ready=2026-10-22T22:43:43Z landed=2026-10-22T22:45:58Z minutes=2.2 runs=2 waited=15s wait=0.2 prove=2.0 rework=0.0 width=2
   dispatch-preflight-4a.test.sh green promised=68s actual=79s ratio=1.16
   session-poker-4.test.sh green promised=83s actual=119s ratio=1.43
+T29 queue ready=2026-10-22T22:45:00Z landed=2026-10-22T22:51:20Z minutes=6.3 runs=1 waited=73s wait=1.2 prove=5.1 rework=0.0 width=3
+  door-card.test.sh green promised=307s actual=306s ratio=1.00
+T27 queue ready=2026-10-22T22:52:29Z landed=2026-10-22T23:00:35Z minutes=8.1 runs=1 waited=15s wait=0.2 prove=7.8 rework=0.0 width=4
+  close-replay.test.sh green promised=334s actual=470s ratio=1.41
+T34 queue ready=2026-10-22T23:20:57Z landed=2026-10-22T23:23:46Z minutes=2.8 runs=2 waited=15s wait=0.2 prove=2.6 rework=0.0 width=4
+  sitrep.test.sh green promised=151s actual=154s ratio=1.02
+  sitrep-card.test.sh green promised=30s actual=34s ratio=1.13
 ```
 
 ## 1.25.0 — 2026-10-21

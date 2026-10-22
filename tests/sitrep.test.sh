@@ -203,7 +203,7 @@ sr_lines() { printf '%s\n' "$OUT" | awk -v k="$1: " 'index($0, k) == 1'; }
 sr_join() { tr '\n' '|' | sed 's/|$//'; }
 # THE FIELD READER. A list line is `<kind>: f1=<v> f2=<v> …` with its fields in a fixed order, a value running to
 # the next field's ` <name>=` or the line's end, so a value may hold spaces. Proved on a known line (F0) first.
-SR_FIELDS_AWK='BEGIN { o["task"] = "id step state desc note"; o["ask"] = "key holds title raised"
+SR_FIELDS_AWK='BEGIN { o["task"] = "id step state desc note"; o["ask"] = "key holds title raised blocks"
   o["review"] = "question scope result at open-findings record"; o["goal"] = "name status measure"; o["step"] = "n name state tasks" }
 function fv(line, f,   k, b, n, a, i, s, r, e) {
   k = line; sub(/: .*$/, "", k); b = " " substr(line, length(k) + 3)
@@ -284,8 +284,8 @@ section "§SHEET: the sheet over a run holding every fact kind — each fact app
 expect_eq "F0 a task line's five fields, the description and the note holding spaces" \
   "T7|4|failed|Row 7 body|red at head" \
   "$(for f in id step state desc note; do sr_f 'task: id=T7 step=4 state=failed desc=Row 7 body note=red at head' "$f"; done | sr_join)"
-expect_eq "F0b an ask line's four fields" "approve:release|T12 and T17|approval: release|1:00 PM" \
-  "$(for f in key holds title raised; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM' "$f"; done | sr_join)"
+expect_eq "F0b an ask line's five fields" "approve:release|T12 and T17|approval: release|1:00 PM|yes" \
+  "$(for f in key holds title raised blocks; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM blocks=yes' "$f"; done | sr_join)"
 sr_sheet_world sheet
 sr_run "$SR_PLAN"
 SR_SHEET="$OUT"
@@ -324,6 +324,14 @@ expect_eq "SH12 every ask open on the register is one ask line, the decision put
 expect_eq "SH13 an ask's line: what it holds, its title and when it was raised, on the local clock" \
   "4/12|approval: release|1:00 PM|nothing|D21 · the gate the judge holds|1:30 PM" \
   "$(for k in approve:release decide:D21; do for f in holds title raised; do sr_f "$(sr_ask "$k")" "$f"; done; done | sr_join)"
+# WHETHER AN ASK BLOCKS IS A FACT: blocks=yes when the ask holds a task, the release or the merge, blocks=no when it
+# holds nothing; the card places the ask from it and the model never decides it.
+# fails-when: an ask that holds nothing reads blocks=yes (it would sit under Blocked on you), a held one reads blocks=no,
+# or an ask line carries no blocks= field.
+expect_eq "SH13b an ask holding a task reads blocks=yes, one holding nothing blocks=no" "yes|no" \
+  "$(sr_f "$(sr_ask approve:release)" blocks)|$(sr_f "$(sr_ask decide:D21)" blocks)"
+expect_eq "SH13c every ask line's blocks= is yes exactly when its holds= is not nothing, and both values occur on this sheet (SH13b read the two)" "0|yes|yes" \
+  "$(sr_lines ask | while IFS= read -r l; do h="$(sr_f "$l" holds)"; b="$(sr_f "$l" blocks)"; if [ "$h" = nothing ]; then [ "$b" = no ] || echo bad; else [ "$b" = yes ] || echo bad; fi; done | /usr/bin/grep -c bad)|$(sr_lines ask | /usr/bin/grep -q ' blocks=yes$' && echo yes)|$(sr_lines ask | /usr/bin/grep -q ' blocks=no$' && echo yes)"
 expect_eq "SH14 every review: its question, scope, result, time, open findings and record; the review in flight with them" \
   "evidence whole fail 1:00 PM 1 record/wave-02-fx/auditor-evidence.md|adversarial piece pass 1:05 PM 0 record/wave-02-fx/critic-adversarial.md|T13 whole running - 0 -" \
   "$(sr_lines review | while IFS= read -r l; do printf '%s %s %s %s %s %s\n' "$(sr_f "$l" question)" "$(sr_f "$l" scope)" "$(sr_f "$l" result)" "$(sr_f "$l" at)" "$(sr_f "$l" open-findings)" "$(sr_f "$l" record)"; done | sr_join)"
@@ -1359,6 +1367,8 @@ expect_eq "GM2 …it is owed: the tick's sitrep line counts it" "owed: 1" \
 sr_run "$SR_PLAN"
 expect_eq "GM3 the sheet carries it as one ask, its title naming the goal" "decide:goal:fast-landings|Goal missed: fast landings" \
   "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$(sr_f "$(sr_ask decide:goal:fast-landings)" title)"
+expect_eq "GM3a …a goal missed holds no task, the release or the merge: the ask reads holds=nothing and blocks=no" "nothing|no" \
+  "$(sr_f "$(sr_ask decide:goal:fast-landings)" holds)|$(sr_f "$(sr_ask decide:goal:fast-landings)" blocks)"
 sed -i.bak 's/one-file median under 15m/one-file median under 30m/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
@@ -1401,6 +1411,7 @@ sr_run "$SR_PLAN"
 expect_eq "DE1 one put with no ruling: one ask, its number and title, what it holds and when it was put" \
   "decide:D19|D19 · the regression rule the judge holds|nothing|6:44 AM" \
   "$(for f in key title holds raised; do sr_f "$(sr_lines ask)" "$f"; done | sr_join)"
+expect_eq "DE1b …holding nothing, it blocks nothing: blocks=no" "no" "$(sr_f "$(sr_lines ask)" blocks)"
 sr_run --line "$SR_PLAN"
 expect_eq "DE2 …the Patrol's status counts it" "owed: 1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'owed: [0-9]+')"
 # The put's own ask on the register, as `decisions put` opens it, and a held merge naming the decision.
@@ -1410,6 +1421,7 @@ sr_run "$SR_PLAN"
 expect_eq "DE2b the decision is still one ask, now holding the merge a held merge names it in, raised when its ask was opened" \
   "decide:D19|the merge|1:30 PM|hold:merge" \
   "$(sr_f "$(sr_ask decide:D19)" key)|$(sr_f "$(sr_ask decide:D19)" holds)|$(sr_f "$(sr_ask decide:D19)" raised)|$(sr_f "$(sr_ask hold:merge)" key)"
+expect_eq "DE2c …and holding the merge, it blocks: blocks=yes" "yes" "$(sr_f "$(sr_ask decide:D19)" blocks)"
 printf '\n## Δ1 — D19 ruled "2" (Chris Lehman 2026-10-20): the regression rule the judge holds\n' >> "$SR_DIR/design-ledger.md"
 sr_run "$SR_PLAN"
 expect_eq "DE3 the same decision ruled: no ask for it though its own ask is not yet closed, the held merge still one, both reviews still print" \
@@ -1628,6 +1640,10 @@ for sr_plant in 'Show the sheet to the user.' 'Then show its page inside one fen
   cp "$SR_SKILL" "$TMPROOT/skill-plant.md"; printf '%s\n' "$sr_plant" >> "$TMPROOT/skill-plant.md"
   expect_eq "SK4 a planted '$sr_plant' is found" "$sr_plant" "$(sr_show_bad "$TMPROOT/skill-plant.md")"
 done
+# The card places each ask from the fact: a held ask under Blocked on you, an unheld one under the Assessment, and
+# Blocked on you reads None when nothing is held. The skill says so, in the model's own register.
+expect_eq "SK4b the skill says the card puts a held ask under Blocked on you, an unheld one under the Assessment, and Blocked on you is None when nothing is held" "1|1" \
+  "$(/usr/bin/grep -i 'blocked on you' "$SR_SKILL" | /usr/bin/grep -i 'held' | /usr/bin/grep -i 'assessment' | /usr/bin/grep -ci 'none')|$(/usr/bin/grep -i 'ask <key>' "$SR_SKILL" | /usr/bin/grep -i 'never choose' | /usr/bin/grep -ci 'section')"
 # The skill weighs measurements: each fact states what it measures, and two are compared only when they share a unit.
 # Pace is the work landed against the forecast time used, the grade's rubric is that same comparison, and the close's
 # basis is said in words. The example judgment states the sheet's measurements, never the plan's allowance.

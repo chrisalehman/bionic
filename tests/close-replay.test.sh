@@ -16,7 +16,8 @@
 #            the run failed and fixed as the plan registered it, and every commit on the branch after the fix's landing
 #            is one the landing record names, as a published or a close-out event
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
-#            and every hand write in the log is one a person, an agent or the harness writes in a real run
+#            and every hand write in the log is one a person, an agent or the harness writes in a real run, and the log
+#            is valid UTF-8 throughout, so every reader reads the whole of it
 #
 # ONE SANDBOX, READ BY EVERY SECTION: `rehearse delivered` builds it once, under WORLD_ROOT; each command it ran is
 # in its rehearsal.log, the replay's own commands after the `# replay:` line.
@@ -243,7 +244,8 @@ fi
 section "§REAL: the sandbox declares the project's real check, and nothing a verb writes is written by hand"
 # ============================================================
 # fails-when: the sandbox declares a stand-in check, the check that ran is not the sandbox's own copy, or a hand
-# write in the log is of a kind a person does not write, or names a file a verb writes.
+# write in the log is of a kind a person does not write or names a file a verb writes, or a line of the log is not
+# valid UTF-8.
 if [ -f "$CR_ROOT/.bionic/config.yaml" ] && [ -s "$CR_LOG" ]; then
   RE_CMD="$(sed -n 's/^release-check:[[:space:]]*//p' "$CR_ROOT/.bionic/config.yaml")"
   expect_eq "RE-1 the config declares the sandbox's release check, the file its repository commits" \
@@ -264,6 +266,10 @@ if [ -f "$CR_ROOT/.bionic/config.yaml" ] && [ -s "$CR_LOG" ]; then
         case " $RH_HAND_KINDS " in (*" $k "*) : ;; (*) printf '%s\n' "$h" ;; esac; done)"
   expect_eq "RE-5 no hand write names a file or a line a verb writes" "" \
     "$(printf '%s\n' "$RE_HAND" | /usr/bin/grep -E 'asks\.state|landing-proofs\.log|proved:|approved: |current:|- Step [0-9]|Dispatch ledger|## Tasks')"
+  # A line no UTF-8 reader can decode stops macOS awk partway through the log, so the rows reading the replay's
+  # part would read nothing and name the wrong cause; this row names it.
+  expect_eq "RE-6 the log is text its readers can decode: valid UTF-8 throughout, the replay's part among them (iconv exit 0)" \
+    "0" "$(/usr/bin/iconv -f UTF-8 -t UTF-8 "$CR_LOG" >/dev/null 2>&1; echo $?)"
 else
   expect_eq "RE-0 the sandbox and its log were built, so this section can be read" "built" "not built"
 fi
