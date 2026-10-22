@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1064 · keep: 872 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1065 · keep: 872 · duplicate: 158 · prose pin: 20 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1078 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1078 - 22 - 8 = 1048.
 
@@ -1078,7 +1078,8 @@ release-check.test.sh | §ENTRY-1.18.0 | prose pin | "(e2g) entry: the count say
 release-check.test.sh | §CORR | keep | agents-src/templates/commands/help.md.tmpl: the bionic @@PLUGIN_VERSION@@ (installed) line deleted and the pages rendered again, so render.sh --check stays green and (c1) goes red. also: 4 prose pins on the 1.19.0 block | none (searched '(installed)' and 'PLUGIN_VERSION' in tests/)
 release-check.test.sh | §ADR | prose pin | "(a2) the repository's ADR-053 and ADR-054 keep every rule" reads the status lines of ADRs under an ignored tree — carried by the release commits that accepted them | none (searched 'adr_status' in tests/)
 release-check.test.sh | §REL-1.24.0 | prose pin | "(n2) …name the head and instant"-style pins of the 1.24.0 entry (its Migration rows and ADR-066 to ADR-068) read the released 1.24.0 block's wording — carried by the 1.24.0 release commit; "(n1) the newest CHANGELOG heading is 1.24.0" is a tally of the newest release | release-check.test.sh §VERSION-PAIR
-release-check.test.sh | §REL-1.25.0 | keep | rule: check pin — tests/lib/release-check.sh lim_check: the omission test (`case "$kl" in *"$st"*) continue ;; esac`) made an unconditional `continue`, so a 1.25.0 entry whose Known limits omit a deferred sentence of its plan passes (n5: the real entry with its Known limits removed, on the run's plan plus one planted deferral, run through the declared check on a fixture repository; n3 and n4 hold the run's own zero). also: prose pins on the released entry (n2) | release-check.test.sh §LIMITS (the same defect on a fixture entry; kept by rule)
+release-check.test.sh | §REL-1.26.0 | keep | rule: check pin — tests/lib/release-check.sh lim_check: the omission test (`case "$kl" in *"$st"*) continue ;; esac`) made an unconditional `continue`, so a 1.26.0 entry whose Known limits omit a deferred sentence of its plan passes (n5: the real entry with its Known limits removed, on the run's plan plus one planted deferral, run through the declared check on a fixture repository; n3 and n4 hold the run's own zero). also: prose pins on the released entry (n2) | release-check.test.sh §LIMITS (the same defect on a fixture entry; kept by rule)
+release-check.test.sh | §REL-1.25.0 | prose pin | "(n2) …name the head and instant"-style pins of the 1.25.0 entry (its Migration rows and ADR-069) read the released 1.25.0 block's wording — carried by the 1.25.0 release commit; "(n1) the newest CHANGELOG heading is 1.25.0" is a tally of the newest release | release-check.test.sh §VERSION-PAIR
 release-check.test.sh | §REL-1.20.0 | prose pin | "(r2b) rel: no Known limits section", "(r2c) rel: no landing numbers section", "(r2e) rel: no section for D7" read the 1.20.0 block's wording through the suite's own rel_check — carried by the 1.20.0 release commit | none (searched 'rel_check' and '1.20.0' in tests/)
 release-check.test.sh | §REVERSE | prose pin | "(v2d) rev: no 1.21.0 block" and the doctor setups read the 1.21.0 summary's wording — carried by the 1.21.0 release commit | none (searched 'rev_check' and 'until bionic2' in tests/)
 release-check.test.sh | §REL-1.23.0 | prose pin | "(n2) …name the head and instant" and "(n4) …states the amended rule" read the released 1.23.0 block and ADR prose — carried by the 1.23.0 release commit; "(n1) the newest CHANGELOG heading is 1.23.0" is a tally of the newest release | release-check.test.sh §VERSION-PAIR
@@ -1718,6 +1719,7 @@ release-check.test.sh §REL-1.20.0 — prose pin
 release-check.test.sh §REVERSE — prose pin
 release-check.test.sh §REL-1.23.0 — prose pin
 release-check.test.sh §REL-1.24.0 — prose pin
+release-check.test.sh §REL-1.25.0 — prose pin
 render.test.sh §Section 2 — duplicate
 render.test.sh §Section 10 — vacuous
 render.test.sh §Section 11 — prose pin
