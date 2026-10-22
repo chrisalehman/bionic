@@ -140,7 +140,7 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
   local unruled="" ac
   if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
-    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix reader (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix check (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
@@ -180,7 +180,7 @@ COVER_LINE
   done <<COVER_JUDGED
 $(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')
 COVER_JUDGED
-  die "Take the reading or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged. A red suite of the whole run is a fix row's: its own suites plus the red one."
+  die "Take the review or the regression run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged. A red suite of the whole run is a fix row's: its own suites plus the red one."
   exit 1
 }
 

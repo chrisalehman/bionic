@@ -1,4 +1,4 @@
-> bionic checks for the `evidence` question — pushed at start to the reader dealt it. They bind.
+> bionic checks for the `evidence` question — pushed at start to the reviewer dealt it. They bind.
 
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from agents-src/templates/context/checks-evidence.md.tmpl and the shared

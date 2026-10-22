@@ -77,8 +77,8 @@ hf_sec() {  # <file> <heading> -> the lines under that heading, unfolded, up to 
 hf_label() {  # <file> <label> -> the first line that starts `<label>: `, unfolded
   hf_unfold "$1" | awk -v k="$2: " 'index($0, k) == 1 { print; exit }'
 }
-hf_wide() {  # <file> -> how many of its lines are wider than 92 columns (a UTF-8 character is one)
-  LC_ALL=C awk '{ t = $0; n = gsub(/[\200-\277]/, "", t); if (length($0) - n > 92) c++ } END { print c + 0 }' "$1" 2>/dev/null
+hf_wide() {  # <file> -> how many of its lines are wider than 100 columns, the shared width (a UTF-8 character is one)
+  LC_ALL=C awk '{ t = $0; n = gsub(/[\200-\277]/, "", t); if (length($0) - n > 100) c++ } END { print c + 0 }' "$1" 2>/dev/null
 }
 hf_section() {  # <plan> -> the lines of ## Handoff, the heading excluded
   awk '/^```/ { f = !f } !f && /^## / { h = ($0 ~ /^## Handoff[ \t]*$/); next } h { print }' "$1"
@@ -119,6 +119,9 @@ hf_poke() {  # <repo> <stdin file> <args...> -> OUT, RC: the poker with that fil
 
 # ---------- the composed sections, as the skill pipes them ----------
 HF_LONG="The closed index is never cached, so a warm call still pays for the whole scan of the tree text and the declarations on every call, twelve seconds of it measured warm — time-keys-head.log"
+# A finding that fits the shared width and not the old fold: its line is 96 columns, whole.
+HF_FIT="lib/fit.sh holds a finding that fits the shared width of the page"
+while [ "$(printf '%s' "- $HF_FIT" | LC_ALL=C awk '{ t = $0; n = gsub(/[\200-\277]/, "", t); print length($0) - n }')" -lt 96 ]; do HF_FIT="$HF_FIT x"; done
 HF_C="$TMPROOT/hf-compose.md"
 cat > "$HF_C" <<COMPOSE
 Summary
@@ -137,6 +140,7 @@ Findings
 - The walk is _proof_walk — payload/scripts/lib/proof.sh:1248
 - Each key derivation runs the closed scan three times per cold call
 - $HF_LONG
+- $HF_FIT
 - Deriving once per commit saves about 22 s — unverified
 
 Decisions
@@ -281,7 +285,7 @@ expect_eq "OL-3e …and the step's last non-blank line closes that fence" '```' 
 
 
 # ============================================================
-section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; the page folds at 92 columns"
+section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; the page folds at the shared 100 columns"
 # ============================================================
 expect_eq "S1 line 1 is the kind line" "bionic-handoff/v1" "$(sed -n 1p "$HF_NR_F")"
 expect_eq "S3 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_NR_F")"
@@ -292,7 +296,14 @@ expect_eq "S5 an empty Ruled out is one line" "- none." "$(hf_sec "$HF_NR_F" "Ru
 expect_eq "S9 Resume is the last section and the last line" "Read $HF_HOME/2026-10-06-$HF_NR_BR.md whole, then do Next 1." \
   "$(hf_sec "$HF_NR_F" Resume)"
 expect_contains "S10 precondition: the long finding's last words are in the file" "time-keys-head.log" "$(cat "$HF_NR_F")"
-expect_eq "S11 State is computed: its written: line is the instant" "written: $HF_ISO" "$(hf_label "$HF_NR_F" written)"
+expect_eq "S10a …folded, so no line of the page is wider than the shared 100 columns" "0" "$(hf_wide "$HF_NR_F")"
+expect_ne "S10b …and the fold is real: the long finding spans more than one line" "1" \
+  "$(awk '/^- The closed index/ { f = 1 } f { n++ } f && /time-keys-head\.log/ { print n; exit }' "$HF_NR_F")"
+expect_eq "S10c a 96-column finding prints whole on one line: the page folds at 100, not at 92" "1" \
+  "$(/usr/bin/grep -cxF -- "- $HF_FIT" "$HF_NR_F")"
+expect_eq "S11 State is computed: its written: line is the pinned instant on the local 12-hour clock, as the title's time is" "written: 3:00 PM" "$(hf_label "$HF_NR_F" written)"
+expect_eq "S11a …and the instant stays a line of its own for the readers that compare it" "instant: $HF_ISO" "$(hf_label "$HF_NR_F" instant)"
+expect_absent "S11a2 …the UTC text appears only on that line (S11a read the same extractor)" "Z" "$(hf_sec "$HF_NR_F" State | grep -v '^instant: ')"
 expect_absent "S11b …and a composed State line is not in the file (S11 read the same file)" "not computed" "$(cat "$HF_NR_F")"
 expect_eq "S11c State: the branch" "branch: $HF_NR_BR" "$(hf_label "$HF_NR_F" branch)"
 expect_eq "S11d State: the head and its subject" "head: $(git -C "$HF_NR" rev-parse HEAD) the first file" "$(hf_label "$HF_NR_F" head)"
@@ -335,10 +346,13 @@ expect_eq "T6 plan: the bound plan, project-root-relative" "plan: $HF_PLAN_REL" 
 expect_eq "T6b step: the plan's current:" "step: 4" "$(hf_label "$HF_F" step)"
 expect_eq "T6c working branch: the run's branch and its head" "working branch: wave/01-fixture @ $HF_WORK" "$(hf_label "$HF_F" 'working branch')"
 expect_eq "T6d integration: the integration branch and its head" "integration: trunk @ $HF_INT" "$(hf_label "$HF_F" integration)"
-expect_eq "T6e open tasks: the count" "open tasks (3):" "$(hf_sec "$HF_F" State | grep '^open tasks')"
-expect_contains "T6f …the active row with its agent, worktree and status" "  - T2 · w-T2 · 01-T2 · active" "$(hf_sec "$HF_F" State)"
+HF_OPEN_N="$(sed -n 3p "$HF_F" | awk '/^[0-9]+ of [0-9]+ tasks/ { print $3 - $1 }')"
+expect_regex "T6e open tasks: the head's own \`k of m tasks\` leaves some open (so the count below is not vacuous)" '^[1-9][0-9]*$' "$HF_OPEN_N"
+expect_eq "T6e2 …the count is what the head leaves open: m minus k" "open tasks ($HF_OPEN_N):" "$(hf_sec "$HF_F" State | grep '^open tasks')"
+expect_eq "T6e3 …and as many rows are listed" "$HF_OPEN_N" "$(hf_sec "$HF_F" State | awk '/^open tasks/ { f = 1; next } f && /^  - / { n++ } f && /^[a-z]/ { exit } END { print n + 0 }')"
+expect_contains "T6f …the building row with its agent, worktree and the sheet's word for it" "  - T2 · w-T2 · 01-T2 · running" "$(hf_sec "$HF_F" State)"
 expect_contains "T6g …a pending row with a worktree" "  - T6 · — · .worktrees/01-T6 · pending" "$(hf_sec "$HF_F" State)"
-expect_absent "T6h …not a pending row with none (T6f read the same section)" "  - T5 ·" "$(hf_sec "$HF_F" State)"
+expect_regex "T6h …and a pending row with none: the sheet lists it, so the head does (T6g read the same section)" '^  - T5 · [^·]+ · — · pending' "$(hf_sec "$HF_F" State)"
 expect_eq "T6i patrol: not armed (no stamp for this session)" "patrol: not armed" "$(hf_label "$HF_F" patrol)"
 HF_FD="$(hf_sec "$HF_F" Findings)"
 expect_contains "T7 a Finding with its source keeps it" "- The walk is _proof_walk — payload/scripts/lib/proof.sh:1248" "$HF_FD"
@@ -353,6 +367,22 @@ expect_eq "T10 a landing in flight: handoff exits 0" "0" "$RC"
 expect_eq "T10c …and the run that ended is no longer running (T4's extractor)" "running (1):" "$(hf_sec "$HF_F" State | grep '^running')"
 expect_absent "T10d …no wait line (T10b read the same file)" "wait " "$(grep -E '^wait [0-9]+ minutes' "$HF_F")"
 kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
+
+# ============================================================
+section "§HEAD: the head is the title, bound the run's status line, then Blocked on you: yes or no and one line per open ask with what it holds"
+# ============================================================
+# The asks are the run's register, opened through lib/owed.sh's own opener; the status line is `sitrep --line`'s.
+# fails-when: an ask open on the run is missing from the head, or the head says nothing is blocked while one is.
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "HD1 bound, nothing owed: the title, the run's status line, Blocked on you: no, then the blank line" "yes|Blocked on you: no|" \
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -qE '^[0-9]+ of [0-9]+ tasks · owed: 0 · close ' && echo yes)|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F")"
+( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_R" OWED_SID="$SID" OWED_PLAN="$HF_P" \
+    owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "HD2 an ask open on the run: owed counts it, Blocked on you: yes, and its line says what it is and what it holds" \
+  "owed: 1|Blocked on you: yes|yes" \
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -oE 'owed: [0-9]+')|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F" | /usr/bin/grep -qE '^- Approve release — holds [^ ]' && echo yes)"
+expect_eq "HD3 with no run, the head is the title and Blocked on you: no" "Blocked on you: no|" "$(sed -n 3p "$HF_NR_F")|$(sed -n 4p "$HF_NR_F")"
 
 # ============================================================
 section "§PORTABLE: an argument tailors the document; secrets and addresses are redacted; a copied block is left out for its path; no safe-to-clear line exists"
@@ -492,20 +522,28 @@ section "§READERS: adopt's STALE note reads the document's written instant thro
 hf_world readers no
 poke "$HF_R" handoff
 expect_eq "R0 precondition: the handoff is written" "0" "$RC"
-expect_eq "R0b precondition: …its written: line is the instant adopt reads" "written: $HF_ISO" "$(hf_label "$HF_F" written)"
-sed 's/^written: .*/written: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
+expect_eq "R0b precondition: …its instant: line is the instant adopt reads, and its written: line is the local clock" "written: 3:00 PM|instant: $HF_ISO" \
+  "$(hf_label "$HF_F" written)|$(hf_label "$HF_F" instant)"
+sed 's/^instant: .*/instant: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 new_roster "$HF_R"
 add_row "$HF_R" name=w-after status=intended agent_id= plan="$HF_P" launched_at=2026-06-01T00:00:00Z
 poke "$HF_R" adopt --report-only
+expect_contains "R1 a handoff written before a dispatch reads STALE through its instant: line, though its written: line is the local clock" \
+  "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
 s42_snap "$HF_R" "$HF_P"
 cp "$HF_F" "$TMPROOT/hf-unmarked"
 poke "$HF_R" launch-sync
 expect_eq "R2 launch-sync exits 0 with a later dispatch" "0" "$RC"
 expect_true "R2b …the document is byte-identical: it has no safe line to mark (cmp)" cmp -s "$TMPROOT/hf-unmarked" "$HF_F"
 expect_true "R2c …and the plan is byte-identical: the pointer stands (cmp)" cmp -s "$TMPROOT/s42-before" "$HF_P"
-sed 's/^written: .*/written: 2027-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
+sed 's/^instant: .*/instant: 2027-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 poke "$HF_R" adopt --report-only
 expect_absent "R3b …not STALE (R1 read STALE through the same verb)" "STALE" "$OUT"
+# A handoff an earlier release wrote carries one ISO written: line and no instant: line; it must still read.
+awk '/^instant: / { next } /^written: / { print "written: 2026-01-01T00:00:00Z"; next } { print }' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
+poke "$HF_R" adopt --report-only
+expect_contains "R4 an old-shape handoff (an ISO written: line, no instant:) still reads STALE after a later dispatch" \
+  "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
 awk '
   /^## Handoff[ \t]*$/ { print; print ""; print "written: 2026-01-01T00:00:00Z"; print "- safe to exit: yes"; print "- safe to /clear: yes"; print ""; h = 1; next }
   h && /^## / { h = 0 }
@@ -553,8 +591,8 @@ roster_header > "$HF_PRED_ROSTER"
 roster_row_fixture session="$HF_PRED" status=identified name=w-pred agent_id=a-w-pred-3800000000000001 \
   subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$HF_R/.bionic/docs/record/w-pred.md" \
   duration="45 minutes" cadence="10 minutes" plan="$HF_P" >> "$HF_PRED_ROSTER"
-printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-08T12:00:00Z|title=Approve release|reply=poker: approve release — reply with your words\n' \
-  > "$HF_R/.bionic/tmp/owed-$HF_PRED.state"
+( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_R" OWED_SID="$HF_PRED" OWED_PLAN="$HF_P" \
+    owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
 hf_resume_new_session
 expect_false "RS0d precondition: …and unarmed (no stamp)" test -e "$(stamp_of "$HF_R")"
 poke "$HF_R" prompt; HF_PROMPT="$OUT"

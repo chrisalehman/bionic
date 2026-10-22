@@ -12,11 +12,17 @@
 # again by the next caller, so the person may hear of an item twice and never not at all
 # (wave-34 T5; D10 "1").
 #
-# THE STORE. `.bionic/tmp/owed-<session>.state` under the project root, session-keyed like every
-# other `<class>-<session>.state` there. One line per item, the last word on a key winning:
+# THE STORE IS THE RUN'S REGISTER. An ask belongs to the run it holds, not to the session that raised
+# it: `<docs>/record/<run>/asks.state`, <run> the plan's file name less `.plan.md`. Every session acting
+# for the run, a helper's stand-in session included, writes it there and every reader reads it there,
+# so an ask answered in one session is closed for all of them. It lives under record/, not tmp/, so an
+# ask raised late in a run survives the tmp wipe and the close-out can still read it. A session acting
+# for no run keeps `.bionic/tmp/owed-<session>.state`, session-keyed like every other
+# `<class>-<session>.state` there. A session file written before its run had a register is not read
+# as the run's. One line per item, the last word on a key winning:
 #
 #   owed/v1|key=<key>|state=open|sent=<ISO-UTC or ->|at=<ISO-UTC>|title=<title>|reply=<line>
-#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>
+#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>|opened=<the open line's at>
 #
 # The file is rewritten whole, beside-then-rename, under a mkdir lock, so a reader never sees a
 # half-written line and two writers cannot lose each other's item. A `|`, a tab, a CR or a LF in
@@ -36,9 +42,13 @@
 #
 # WHERE IT RESOLVES. The root is `OWED_ROOT`, else `BIONIC_ROOT` (a hook's context), else
 # `project_root` of the working directory; the session is `OWED_SID`, else `BIONIC_SID`, else
-# `CLAUDE_CODE_SESSION_ID`. No session, no root, or a store or tmp directory that is a symlink:
-# every function returns 1 and writes nothing. Silent at source time; nothing here prints on
-# stderr, so a caller's output is the same with or without a store.
+# `CLAUDE_CODE_SESSION_ID`. The run is the plan `OWED_PLAN` names, else the session's bound plan
+# (lib/run.sh `session_plan`); a caller that acts for a plan under a session no marker binds to it
+# (the close-out's dry commits) names the plan. A plan names a run only while it is a file whose name
+# ends `.plan.md`: a scratch copy, an archived run or a plan that is gone names none, and its asks stay
+# with the session. No session, no root, or a store or its directory that is a symlink: every
+# function returns 1 and writes nothing. Silent at source time; nothing here prints on stderr, so a
+# caller's output is the same with or without a store.
 #
 # BASH 3.2. No associative arrays.
 
@@ -51,6 +61,10 @@ if ! declare -F project_root >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/root.sh" ];
   # shellcheck source=/dev/null
   . "$_OWED_LIB_DIR/root.sh"
 fi
+if ! declare -F session_plan >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/run.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_OWED_LIB_DIR/run.sh"
+fi
 if ! declare -F notify_send >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/notify.sh" ]; then
   # shellcheck source=/dev/null
   . "$_OWED_LIB_DIR/notify.sh"
@@ -58,9 +72,25 @@ fi
 
 OWED_SCHEMA="owed/v1"
 
-# owed_file -> the store's absolute path on stdout; rc 1 when there is no session or no root.
+# owed_register <root> <plan> -> the run's register, `<docs>/record/<run>/asks.state`, on stdout; rc 1 when
+# <plan> names no run: not a file, or a name that does not end `.plan.md` (a scratch copy's does not).
+owed_register() {
+  local root="${1:-}" plan="${2:-}" run docs
+  [ -n "$root" ] && [ -n "$plan" ] || return 1
+  case "$plan" in *.plan.md) ;; *) return 1 ;; esac
+  [ -f "$plan" ] || return 1
+  run="${plan##*/}"; run="${run%.plan.md}"
+  case "$run" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  declare -F docs_root >/dev/null 2>&1 || return 1
+  docs="$(docs_root "$root" 2>/dev/null)" && [ -n "$docs" ] || return 1
+  printf '%s/record/%s/asks.state\n' "$docs" "$run"
+}
+
+# owed_file -> the store's absolute path on stdout: the run's register, else the session's own file; rc 1
+# when there is no session or no root. The session is required even where the run names the store, so a
+# caller that sets an invalid session to write nothing (a preview) writes nothing.
 owed_file() {
-  local root sid
+  local root sid plan
   sid="${OWED_SID:-${BIONIC_SID:-${CLAUDE_CODE_SESSION_ID:-}}}"
   [ -n "$sid" ] || return 1
   case "$sid" in *[!A-Za-z0-9._-]*|.|..) return 1 ;; esac
@@ -69,6 +99,11 @@ owed_file() {
     root="$(project_root "$PWD" 2>/dev/null)"
   fi
   [ -n "$root" ] || return 1
+  plan="${OWED_PLAN:-}"
+  if [ -z "$plan" ] && declare -F session_plan >/dev/null 2>&1; then
+    plan="$(session_plan "$root" "$sid" 2>/dev/null)" || plan=""
+  fi
+  owed_register "$root" "$plan" && return 0
   printf '%s/.bionic/tmp/owed-%s.state\n' "$root" "$sid"
 }
 
@@ -96,7 +131,8 @@ _owed_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # _owed_dir_ok <store path> -> 0 when its directory may be written: neither it nor the store is a
 # link. The worktree's `.bionic` link to the main checkout is the one link a tree carries, and it
-# is followed as the rest of bionic's tmp writers follow it; the tmp directory itself may not be.
+# is followed as the rest of bionic's writers follow it; the store's own directory (tmp/, or the
+# run's record directory) may not be.
 _owed_dir_ok() {
   local d="${1%/*}"
   [ -L "$d" ] && return 1
@@ -178,7 +214,8 @@ owed_open() {
     }' -v key="$key" -v now="$(_owed_now)"
 }
 
-# owed_close <key> <by> -> rc 0. Closes an open item; a key that is not open is left alone.
+# owed_close <key> <by> -> rc 0. Closes an open item; a key that is not open is left alone. The closed line keeps
+# the open line's instant as `opened=`, so the minutes the item stood open can still be counted once it is closed.
 owed_close() {
   local key="${1:-}" by f
   _owed_key_ok "$key" || return 1
@@ -192,34 +229,34 @@ owed_close() {
   OWED_B="$by" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
     key_of($0) == key && fld($0, "state") == "open" {
-      printf "owed/v1|key=%s|state=closed|by=%s|at=%s\n", key, ENVIRON["OWED_B"], now; next
+      printf "owed/v1|key=%s|state=closed|by=%s|at=%s|opened=%s\n", key, ENVIRON["OWED_B"], now, fld($0, "at"); next
     }
     { print }' -v key="$key" -v now="$(_owed_now)"
+}
+
+_owed_list_file() {  # <store> -> owed_list's lines for that store
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  awk "$_OWED_AWK_FIELD"'
+    index($0, "owed/v1|") != 1 { next }
+    fld($0, "state") == "open" { printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "sent"), fld($0, "title"), fld($0, "reply") }
+  ' "$1" 2>/dev/null
 }
 
 # owed_list -> one line per OPEN item: <key> TAB <sent ISO or -> TAB <title> TAB <reply>.
 owed_list() {
   local f
   f="$(owed_file)" || return 1
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
-  awk "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    fld($0, "state") == "open" { printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "sent"), fld($0, "title"), fld($0, "reply") }
-  ' "$f" 2>/dev/null
+  _owed_list_file "$f"
 }
 
-# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, never the caller's session: the
-# open items of every session whose binding act under <root> names that plan (lib/binding.sh `bind_sessions`
-# with a root; a line it refuses is skipped), each key once, in the order the plan records its sessions. rc 1
-# when there is no plan, no root, or no binding reader loaded; nothing printed when no session is bound to it.
+# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, read from its register under <root>,
+# never the caller's session. rc 1 when there is no plan or no root; nothing printed when <plan> names no run or its
+# register holds no open item.
 owed_list_plan() {
-  local plan="${1:-}" root="${2:-}" sid
-  [ -n "$plan" ] && [ -n "$root" ] || return 1
-  declare -F bind_sessions >/dev/null 2>&1 || return 1
-  bind_sessions "$plan" "$root" 2>/dev/null | while IFS= read -r sid; do
-    case "$sid" in ''|*' '*) continue ;; esac
-    OWED_ROOT="$root" OWED_SID="$sid" owed_list 2>/dev/null
-  done | awk -F'\t' 'NF && !k[$1]++'
+  local f
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  f="$(owed_register "$2" "$1")" || return 0
+  _owed_list_file "$f"
 }
 
 # owed_unsent [<key prefix>] -> the keys of the open items not yet sent, one per line, in the order

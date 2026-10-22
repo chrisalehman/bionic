@@ -1,4 +1,4 @@
-> bionic severity scale — pushed at start to the reader dealt `adversarial` or `structure`, beside its checks. It binds.
+> bionic severity scale — pushed at start to the reviewer dealt `adversarial` or `structure`, beside its checks. It binds.
 
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered by agents-src/render.sh from agents-src/templates/context/severity.md.tmpl and the shared
@@ -46,7 +46,7 @@ by severity.
   when no finding sets it higher.
 - Its disposition is burn-when-touched, never fix now and never note.
 
-Only readers rate: a finding's severity and its user-facing answer are written by the reader that found it, and no
+Only reviewers rate: a finding's severity and its user-facing answer are written by the reviewer that found it, and no
 agent, the orchestrator included, moves a rating in either direction; a user's re-rating is
 recorded with attribution.
 

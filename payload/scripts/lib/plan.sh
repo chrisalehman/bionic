@@ -71,8 +71,9 @@ plan_integration_branch() {  # <plan>
 #                    `verdict:` or `result:` line, pass (or passed, reached) reached, fail (or failed, missed) missed.
 #   <suite> §<name>  the suite's newest verdict in the landing record (the section is the reader's, the record keys
 #                    by suite): green reached, red missed.
-# Anything else, or a measure with no target to compare, is unmeasured, and says so. A goal reads reached only with a
-# record behind it.
+# A measure with no target to compare is unmeasured, and says so. A reader of any other form, or none, is unreadable:
+# no record will ever move it, so it never reads as a goal not measured yet, and its reading names the forms read.
+# A goal reads reached only with a record behind it.
 #
 # AT WAVE AND EPIC SCALE THE REQUIREMENTS' THEMES ARE THE FIRST GOALS, read and never typed. A theme is a `## ` section
 # of the plan's requirements file that holds a `### REQ-` heading (the governing-skill hook holds the document to three
@@ -218,10 +219,23 @@ plan_one_file_median() {
       printf "%.1f\t%d\n", d, m }'
 }
 
+# plan_goal_status <state> -> the goal's status as every surface prints it, from `plan_goals_read`'s state word: reached
+# is `met`; missed, and a theme overdue past Step 6 with criteria open, `not met`; unreadable `unreadable`; pending,
+# unmeasured or any other word `not measured`. The one reading of a goal: the sitrep's sheet and the release approval
+# card both call it, so the same plan cannot give one goal two statuses.
+plan_goal_status() {
+  case "${1:-}" in
+    reached) printf 'met\n' ;;
+    missed|overdue) printf 'not met\n' ;;
+    unreadable) printf 'unreadable\n' ;;
+    *) printf 'not measured\n' ;;
+  esac
+}
+
 # plan_goals_read <plan> <landing record> <landing report with rows> -> `<state><TAB><theme><TAB><measure><TAB><reading>`
 # per goal: the requirements' themes first (`_plan_theme_reads`), then the `goals:` line's in the plan's order. A theme's
-# state is reached, pending, overdue or unmeasured; a measured goal's is reached, missed or unmeasured; the reading
-# says in words what was read. The record's directory is the run's record directory; the docs root is two above it.
+# state is reached, pending, overdue or unmeasured; a measured goal's is reached, missed, unmeasured or unreadable; the
+# reading says in words what was read. The record's directory is the run's record directory; the docs root is two above it.
 # Always rc 0.
 plan_goals_read() {
   local plan="${1:-}" rec="${2:-}" rep="${3:-}" recdir docs t m r st rd tgt v n line ev f h s hs hrow hu hst
@@ -240,7 +254,7 @@ plan_goals_read() {
         # the count the measure names, its first number, `zero`, `none` or `no` read as 0
         tgt="$(printf '%s\n' "$m" | awk '{ s = tolower($0) } s ~ /^(zero|none|no)([^a-z]|$)/ { print 0; exit } match(s, /[0-9]+/) { print substr(s, RSTART, RLENGTH) + 0; exit }')"
         if [ -z "$tgt" ]; then rd="the measure names no target count"
-        elif ! declare -F hand_holds_ends >/dev/null 2>&1 || ! declare -F hand_holds_report >/dev/null 2>&1; then rd="no hand-holds reader is loaded"
+        elif ! declare -F hand_holds_ends >/dev/null 2>&1 || ! declare -F hand_holds_report >/dev/null 2>&1; then rd="the hand-holds count is not loaded"
         else
           h="$(project_root "${plan%/*}" 2>/dev/null)"
           # read into a variable first: a here-string of the call would run it under the tab IFS, and its own read
@@ -314,7 +328,8 @@ plan_goals_read() {
           red) st=missed; rd="$s red at ${v#*	}" ;;
           *) rd="$s not run on the line yet" ;;
         esac ;;
-      *) rd="no reader for $r" ;;
+      *) st=unreadable
+         rd="the sitrep reads no measure of this form: name a record/<file>.md with a verdict: line, a <suite> §<section>, the run log, the landing report or the hand-holds count" ;;
     esac
     printf '%s\t%s\t%s\t%s\n' "$st" "$t" "$m" "$rd"
   done <<PLAN_GOALS_EOF

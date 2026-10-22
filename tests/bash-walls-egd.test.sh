@@ -63,14 +63,14 @@ $(eg6_reading "$H_EG6" adversarial fail record/w28t60/adv.md)"
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE")"
 expect_status "EGD-1 the newest adversarial reading is result=fail and no line re-rates it: the commit is refused (the control)" 2 "$ST"
 expect_contains "EGD-1b …naming the failing reading and its evidence" \
-  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/adv.md)" "$ERR"
+  "- adversarial: the newest review is result=fail (evidence=record/w28t60/adv.md)" "$ERR"
 expect_eq "EGD-1c …and the judge reads that piece line as failing, on the same text" "failing" "$(egd_judge adversarial)"
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_DEFERRED")"
 expect_eq "EGD-2c precondition: the judge derives flag for the reading its proof line writes as fail (its only finding moved to defer)" \
   "flag|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
 expect_status "EGD-2 §EG-6 AC-8.6 the only finding moved to defer by a moved: line, the Step-6 commit is admitted" 0 "$ST"
-expect_absent "EGD-2b …and no reading question is named unanswered" "a reading question is unanswered" "$ERR"
+expect_absent "EGD-2b …and no reading question is named unanswered" "a review question is unanswered" "$ERR"
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_REFUTED")"
 expect_eq "EGD-2d §FINAL-RATING an old refuted check: line re-rates nothing (wave-31 T32): the judge derives fail and holds the piece line failing" \
@@ -104,7 +104,7 @@ expect_eq "EGD-6 precondition: the judge derives fail for it once a moved: line 
   "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
 expect_status "EGD-6b §EG-6 AC-8.6 the moved priority is the one the wall reads: the commit is refused" 2 "$ST"
 expect_contains "EGD-6c …naming the reading failing at its derived result" \
-  "- adversarial: the newest reading is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
+  "- adversarial: the newest review is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
 
 # ---------- the mutation arm: the wall back on the written result= ----------
 EGD_MUT="$SANDBOX/derive-mutant"

@@ -24,9 +24,9 @@
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
+#     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
-#     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a reading question, or all three, at the working head (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a review question, or all three, at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
@@ -35,7 +35,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line|--basis] [<plan>] | sitrep grade <A-F> '<rationale>' [<plan>]   the situation report's page, its one line, or the close's arithmetic (read-only); record the run's grade and its rationale (writes record/<wave>/sitrep.log)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (settles ruled decisions on the register)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
@@ -531,25 +532,25 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
-  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's reading too), then row-landed at the working head"
+  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
-  die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|all> '<reply>'   record the user's waiver of that question, or of all three, at the working head, one waived: line each under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-run   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the reading or after it, as a moved: to=fixed line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered readings (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
+  die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a moved: to=fixed line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered reviews (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
-  die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sitrep's three indicators (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sheet's pace, correctness and waste (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line|--basis] [<plan>]   the situation report's page: the Bottom line (what you owe, what is next, what is done, when it closes), every task with its glyph, the Score's five indicator lines and what is blocked on you; --line prints the one-line form, --basis the close's arithmetic (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep grade <A-F> '<rationale>' [<plan>]   record the run's grade and one rationale that names an indicator line (schedule, correctness, waste, decisions or goals), with the time, to record/<wave>/sitrep.log"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet: one fact per line, <key>: <value> — the run, the steps, every task with its state, the metrics in numbers, each goal's status, the predicted close and its arithmetic, every ask open on the run's register with what it holds, and every review; the model reads it and the user sees the card; --line prints the Patrol's status, <k> of <m> tasks · owed: <n> · close <time> (closes the asks of decisions the ledger ruled)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card: the judgment on stdin, every row of the card, one tagged line each (call:, task: <label>: <text>, metric: <Label>: <text>, grade: <A-F>, point:, ask <key>[, <key>]: <what> — recommend <answer>, ask +:, close:), checked against the sheet's facts; a card that fails its check prints nothing and exits 1, every reason on stderr"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
@@ -572,7 +573,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, write the decision's put line to record/<wave>/design-ledger.md and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a reading's, a writer's, an assumptions.md hole line), each concept and kind once"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   write each debt: line the continuation carries under ## Deferrals into the run's ledger, its touches and raised-by kept"
@@ -748,7 +749,7 @@ case "$VERB" in
   # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
     TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
-    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reader's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
+    case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reviewer's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
       # THE OPERAND'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the row is not written.
@@ -1091,7 +1092,7 @@ case "$VERB" in
   # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
   # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    PF_USAGE="proof-add takes two arguments, <regression|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
+    PF_USAGE="proof-add takes two arguments, <regression|review|task> <evidence path under record/>, and for a review two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
     if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
     # SEVERAL LOGS ON ONE LINE (wave-36 T35; D13, AC-7.10): a floor may be the logs of several runners, each its own
     # operand after the first, newline-joined in PF_EVIDS (a path holding a line break is refused below, by name).
@@ -1172,7 +1173,7 @@ $1"; shift ;;
   # a direction, an id of another shape or a sentence on a fix is the usage error; the rules the ruling is held to
   # are finding-move's and finding-stated's, the verb's own refusals (1).
   disposition)
-    DSP_USAGE="disposition takes no argument (it renders every finding of the registered readings), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
+    DSP_USAGE="disposition takes no argument (it renders every finding of the registered reviews), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
     DSP_ID=""; DSP_TO=""; DSP_RAW=""; DSP_WHY=""; DSP_SENT=""
     if [ $# -gt 0 ]; then
       { [ $# -eq 4 ] || [ $# -eq 5 ]; } && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$DSP_USAGE"
@@ -1255,29 +1256,21 @@ $1"; shift ;;
     [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
     { [ -z "$LR_SINCE" ] && [ -z "$LR_UNTIL" ]; } || [ "$LR_HH" = yes ] || usage "landing-report takes --since and --until only with --hand-holds: they bound its window."
     ;;
-  # THE SITUATION REPORT. `sitrep [--line|--basis] [<plan>]` renders, read-only but for the gate's own scan;
-  # `sitrep grade <A-F> '<rationale>' [<plan>]` records the grade. The plan, when named, is the last operand and
-  # ends in `.plan.md`; without it, the session's bound run, as landing-report's. The letter's and the rationale's
-  # own rules are the verb's refusal (1); the count is the usage error (2).
+  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` prints the fact sheet, or with --line the Patrol's status;
+  # `sitrep card [<plan>]` draws the card from the sheet and the judgment on stdin. The plan, when named, is the one
+  # operand; without it, the session's bound run, as landing-report's. `card` with --line, any other flag or a second
+  # operand is a word the verb does not know: the usage error (2).
   sitrep)
-    SR_LINE=no; SR_GRADE=no; SR_ARG=""; SR_LETTER=""; SR_WHY=""
-    if [ "${1:-}" = grade ]; then
-      SR_GRADE=yes; shift
-      if [ $# -gt 0 ]; then
-        case "${!#}" in *.plan.md) SR_ARG="${!#}"; set -- "${@:1:$(($# - 1))}" ;; esac
-      fi
-      [ $# -eq 2 ] || usage "sitrep grade takes a letter, A to F, and one rationale that names an indicator line, then optionally the plan."
-      SR_LETTER="$1"; SR_WHY="$2"
-    else
-      for _sr_a in "$@"; do
-        case "$_sr_a" in
-          --line|--basis) [ "$SR_LINE" = no ] || usage "sitrep takes one of --line and --basis, once."
-                          SR_LINE=yes; [ "$_sr_a" = --line ] || SR_LINE=basis ;;
-          -*) usage "sitrep takes one of the flags --line and --basis and at most one plan, or grade <A-F> '<rationale>' [<plan>]." ;;
-          *) [ -z "$SR_ARG" ] || usage "sitrep takes at most one plan."; SR_ARG="$_sr_a" ;;
-        esac
-      done
-    fi
+    SR_LINE=no; SR_CARD=no; SR_ARG=""; _sr_n=0; _sr_first=""
+    if [ "${1:-}" = card ]; then SR_CARD=yes; shift; fi
+    for _sr_a in "$@"; do
+      case "$_sr_a" in
+        --line) [ "$SR_LINE" = no ] && [ "$SR_CARD" = no ] || usage "sitrep takes --line once, and never with card."; SR_LINE=yes ;;
+        -*) usage "sitrep: unknown flag '$(printf '%s' "${_sr_a:0:24}" | tr -d '[:cntrl:]')'; it takes card or --line, and at most one plan." ;;
+        *) _sr_n=$((_sr_n + 1)); [ -n "$_sr_first" ] || _sr_first="$_sr_a"; SR_ARG="$_sr_a" ;;
+      esac
+    done
+    [ "$_sr_n" -le 1 ] || usage "sitrep: unknown word '$(printf '%s' "${_sr_first:0:24}" | tr -d '[:cntrl:]')'; it takes card or --line, and at most one plan."
     ;;
   # THE BASIS VERB (wave-37 T8; D8, REQ-4 AC-4.2). Two operands: the question the judge holds a range by, and
   # the range `<a>..<b>` its `review <q> … uncovered <a>..<b>` line names. Read-only; the lines are
@@ -2057,7 +2050,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
   case "$fst" in
     covered*) : ;;
-    *) UNITS_FACTS_STATE="the readings are judged once the regression holds"; return 0 ;;
+    *) UNITS_FACTS_STATE="the reviews are judged once the regression holds"; return 0 ;;
   esac
   if ! declare -F facts_state >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
@@ -2731,13 +2724,13 @@ finding_read() {
     insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE == ev { q = PROOF_QUESTION; h = PROOF_HEAD }
     END { if (q != "") print q "\t" h }' "$plan")"
   if [ -z "$got" ]; then
-    FR_WHY="$(clean "$rec") is no reading registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
+    FR_WHY="$(clean "$rec") is no review registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
     return 1
   fi
   FR_Q="${got%%	*}"; FR_H="${got#*	}"
   got="$(proof_findings "$(docs_root "$repo")/$rec" 2>/dev/null)" || got=""
   if ! printf '%s\n' "$got" | awk -F'\t' -v n="$n" '$1 == n { f = 1 } END { exit !f }'; then
-    FR_WHY="the reading $(clean "$rec") holds no finding $n (it holds $(printf '%s\n' "$got" | awk -F'\t' '$1 ~ /^[0-9]+$/ { printf "%s%s", (k++ ? ", " : ""), $1 } END { if (!k) printf "none" }'))"
+    FR_WHY="the review $(clean "$rec") holds no finding $n (it holds $(printf '%s\n' "$got" | awk -F'\t' '$1 ~ /^[0-9]+$/ { printf "%s%s", (k++ ? ", " : ""), $1 } END { if (!k) printf "none" }'))"
     return 1
   fi
   IFS='	' read -r _ FR_S FR_R FR_W _ _ FR_T <<FINDING_READ
@@ -3045,7 +3038,9 @@ plan_verb_swap() {
 RUN_LOG=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
 RUN_STATE=""; RUN_RC=""; RUN_ID=""; RUN_LAST_WRITTEN=""; RUN_PROGRESS=""; RUN_ELAPSED=""
 ADOPT_READS_SCHEMA="adopt-read/v1"
-_HANDOFF_ISO_RE='^written: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
+# The handoff's two time lines: `written:` is the local clock a person reads, `instant:` the ISO instant a reader
+# compares. A file from before the pair carries the instant on `written:` alone, so that form reads as a fallback.
+_HANDOFF_ISO_RE='^(written|instant): [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
 _ROW_SHORT_AWK='
   function row_short(t,   c, i) {
     c = length(t) + 1
@@ -3059,10 +3054,9 @@ LAUNCH_SYNC_STALE=120
 LAUNCH_SYNC_LOCK=""
 LS_PROOFS=""; LS_PROOFS_READ=no
 SWEEP_SCHEMA="poker-sweep/v1"
-# the situation report
+# the situation report; the release approval card marks a goal met, not met or not measured with these three
 SCORECARD_STOP_GAP=600
 SITREP_MARK_WITHIN='✅'
-SITREP_MARK_NEAR='➖'
 SITREP_MARK_OVER='✖️'
 SITREP_MARK_NONE='❔'
 # the tick

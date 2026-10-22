@@ -164,7 +164,56 @@ say() { printf '%s\n' "$*"; }
 # Same rename spawn-worktree.sh's private helper took (`_wt_refuse`, ruling D-6).
 _co_refuse() {
   printf 'bionic: close-out refused — %s\n' "$*"
+  co_hold "${CO_HOLD_SAYS:-close-out stopped}" "bionic: close-out refused — $*"
   exit 2
+}
+# _co_held <what holds the merge, in a few words> <sentence> -> _co_refuse's line and exit 2, the words the ask's title
+_co_held() {
+  CO_HOLD_SAYS="$1"
+  _co_refuse "$2"
+}
+
+# THE HELD MERGE IS THE RUN'S ASK. A close-out refused while the plan reads current: 8 leaves the run's merge waiting on
+# whatever the refusal names, so it opens `hold:merge` on the register of the plan it closes (lib/owed.sh, `OWED_PLAN`),
+# titled `merge held: <what holds it>` and the printed line the reply, where every reader of the run's asks finds it;
+# the run that delivers closes it. The title is a person's words, and a notification's title too: what holds the merge
+# in a few words, never a hash, a function or an instruction to an agent, all of which the refusal carries in the reply
+# for a model to read. A refusal that says no words of its own (`_co_held`, `co_would`'s second word) is titled
+# "close-out stopped". `check` holds it for the first refusal it reports: it still changes nothing of the run, and only
+# says on the register what holds it. Before Step 8 the run is not at its merge, so a refusal holds nothing. A refusal
+# inside a command substitution is a preview the caller reports, never this script's own exit, so it opens nothing. One
+# ask for the run: the same refusal again leaves it as it is, a new one replaces it, so the title says what holds the
+# merge now. The session is this script's own, else a stand-in, because the register is named by the plan and the store
+# still asks for a session to write under.
+CO_HOLD=no
+CO_HOLD_WHY=""
+CO_HOLD_SAYS=""
+co_hold() {  # <what holds the merge, in a few words> <the printed line> -> always 0, prints nothing
+  local r
+  [ "$CO_HOLD" = yes ] && [ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0
+  declare -F owed_open >/dev/null 2>&1 || return 0
+  r="$(OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_list 2>/dev/null \
+    | awk -F'\t' '$1 == "hold:merge" { print $4; exit }')"
+  if [ -n "$r" ]; then
+    [ "$r" = "$(printf '%s' "$2" | tr '|\t\r\n' '    ')" ] && return 0
+    OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_close hold:merge "close-out refused again" >/dev/null 2>&1
+  fi
+  OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_open hold:merge "merge held: $1" "$2" >/dev/null 2>&1
+  return 0
+}
+# co_hold_release -> always 0, prints nothing: the run delivered, its merge is no longer held, and no later refusal holds it
+co_hold_release() {
+  [ "$CO_HOLD" = yes ] || return 0
+  CO_HOLD=no
+  declare -F owed_close >/dev/null 2>&1 || return 0
+  OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_close hold:merge "close-out delivered" >/dev/null 2>&1
+  return 0
+}
+# co_would <line> [<what holds the merge, in a few words>] -> the line said; the first such line `check` reports is the
+# refusal it holds the merge for, and its words the title
+co_would() {
+  say "$1"
+  [ -n "$CO_HOLD_WHY" ] || { CO_HOLD_WHY="$1"; CO_HOLD_SAYS="${2:-}"; }
 }
 
 usage() {
@@ -279,6 +328,7 @@ WORKING="$(plan_working_branch "$PLAN")"
 # never writes, and above 8 there is nothing left for it to close.
 CURRENT="$(sdlc_header current "$SECTION")"
 STEP_REFUSAL="the plan reads current: ${CURRENT:-<none>} — advance the plan to Step 8 first"
+[ "$CURRENT" != 8 ] || [ "$VERB" = closed-form ] || CO_HOLD=yes
 
 # A PARKED WAVE IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit
 # `## Wake Note` (steps/8.md): a plan carrying a flush-left `## Wake Note` whose body is not empty and not the old
@@ -437,7 +487,8 @@ act_merge() {
     MERGE_LINE="$(co_pr_line "$ws" "$is")"
     return 0
   fi
-  _co_refuse "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
+  _co_held "the working branch is not merged" \
+    "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
 }
 
 # ─── Act 1b: the rows the merge lands (wave-36 T14; D13, AC-7.7; C70) ─────────
@@ -572,7 +623,8 @@ refuse_unreached() {
   local unreached
   unreached="$(wt_unreached)"
   if [ -n "$unreached" ]; then
-    _co_refuse "$(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took (git cherry) — nothing was deleted, and nothing else was done"
+    _co_held "a branch holds commits the run never took" \
+      "$(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took (git cherry) — nothing was deleted, and nothing else was done"
   fi
   return 0
 }
@@ -640,11 +692,12 @@ co_hand_holds() {  # -> sets CO_HH_LINE
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
 }
-# THE SCORECARD, READ BEFORE THE WIPE (wave-38 T15; D26). `landing-report --scorecard` prints four lines, each against
-# its target (human stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed,
-# human-wait minutes), then the sitrep's three indicator lines (hooks/session-poker.sh `scorecard_report` owns the
-# rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads the lines before the wipe into
-# CO_SC_LINES and the card and the continuation print that one reading. A report that cannot be read is a sentence.
+# THE SCORECARD, READ BEFORE THE WIPE. `landing-report --scorecard` prints four lines, each against its target (human
+# stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
+# minutes), then the fact sheet's pace, correctness and waste lines, byte for byte (hooks/session-poker.sh
+# `scorecard_report` owns the rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads
+# the lines before the wipe into CO_SC_LINES and the card and the continuation print that one reading. A report that
+# cannot be read is a sentence.
 CO_SC_LINES=""
 co_scorecard() {  # -> sets CO_SC_LINES
   local out
@@ -1589,13 +1642,14 @@ STEP9
 # risks into Open, order into Next, rulings into Decisions, lessons into Findings, every other line into State after
 # the closed run's own, a line under a key State writes itself marked `was`. The page is not folded: every reader
 # joins a folded line back, so a long line reads the same. The plan's section becomes the one pointer line `handoff: <path> written <local time>`.
-CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""
+CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""; CO_HO_CLOCK=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
   [ -z "$CO_HO_FILE" ] || return 0
   CO_HO_FILE="$(handoff_file_of "$PLAN" "$ROOT")"
   CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
   CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"
+  CO_HO_CLOCK="$(date '+%-I:%M %p')"
 }
 handoff_block() {
   co_handoff_where
@@ -1625,8 +1679,8 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   tmp="$CO_HO_FILE.close-out.$$"
   {
     printf 'bionic-handoff/v1\n%s\n\n' "$title"
-    CO_HO_STATE="$(printf 'written: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
-        "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
+    CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
+        "$CO_HO_CLOCK" "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
         "$CONT_REL" "$PATROL_LINE")" \
       awk -v secs="$HANDOFF_SECTIONS" -v old="$old" '
         BEGIN {
@@ -1634,7 +1688,7 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
           # an old-shape file: its five human lines go to the section that holds their kind of thing
           M["mid-flight"] = "Open"; M["order"] = "Next"; M["rulings"] = "Decisions"; M["lessons"] = "Findings"; M["risks"] = "Open"
           # the keys the closed State writes itself: an old line under one of them is kept, marked "was"
-          K["written"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
+          K["written"] = K["instant"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
         }
         FNR == 1 { next }
         old {
@@ -1868,6 +1922,11 @@ write_plan_blocks() {
 # The environment agrees with the payload because on a real call it does: lib/session.sh
 # takes the env value as primary and the payload as a witness, and a dry-run whose two
 # disagreed would be answered for a session that does not exist.
+#
+# THE ASKS IT RAISES ARE THE RUN'S. The stand-in session is in no plan's session list and its
+# marker may name the scratch copy, so `OWED_PLAN` names the plan this close-out acts for: a
+# waiver the gate asks for is opened in that run's register (lib/owed.sh), where the run's
+# pages read it, never in a session file nothing reads.
 GATE_RC=0
 GATE_ERR=""
 GATE_LINE=""
@@ -1887,7 +1946,7 @@ gate_ask() {
       tool_name: "Bash",
       tool_input: {command: "git commit -m close-out"},
       tool_use_id: "toolu_closeout"}')"
-  GATE_ERR="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
+  GATE_ERR="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" OWED_PLAN="$PLAN" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
   GATE_RC=$?
   rm -f "$marker"
   GATE_LINE="$(grep -m1 '^bionic: ' <<< "$GATE_ERR")"
@@ -1992,8 +2051,9 @@ presence_missing() {
 # head; `run` and `check` ask the same function of the same head, the working branch's, and refuse
 # the same way, so a fix landed after `current 8` is read before the tail runs. FACTS_RC is the
 # judge's rc (0 covered, 1 not, 2 the plan cannot be dealt, 9 the judge could not be asked),
-# FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence.
-FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""
+# FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence, FACTS_SAYS what it
+# holds the merge on in a person's few words.
+FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""; FACTS_SAYS="the run's proofs cannot be read"
 facts_judge() {
   local out err ah
   if ! declare -F facts_state >/dev/null 2>&1; then
@@ -2006,6 +2066,7 @@ facts_judge() {
   FACTS_HEAD="$(proof_branch_head "$PLAN" "$ROOT" 2>/dev/null)" || FACTS_HEAD=""
   if [ -z "$FACTS_HEAD" ]; then
     FACTS_WHY="the working branch $WORKING names no commit here, so the regression is uncovered and there is no head to judge the facts the run owes at"
+    FACTS_SAYS="the working branch has no commit"
     return 0
   fi
   # THE APPROVED HEAD: in the order build, regression, review, release (lib/units.sh `units_order`) the
@@ -2017,11 +2078,13 @@ facts_judge() {
     if [ -z "$ah" ]; then
       FACTS_RC=1
       FACTS_WHY="the plan is in the release order and no approved: release line names a head, so the head the user approved for release cannot be read; the user's word for the working head $FACTS_HEAD is approve release '<reply>'"
+      FACTS_SAYS="the release is not approved"
       return 0
     fi
     if [ "$ah" != "$FACTS_HEAD" ] && ! proof_prose_past "$PLAN" "$ah" "$FACTS_HEAD"; then
       FACTS_RC=1
       FACTS_WHY="the working head ${FACTS_HEAD:0:12} is not the head the user approved for release, ${ah:0:12}, and a commit past it is code or a release-set file; land only docs past the approval, or have the user approve this head (approve release '<reply>')"
+      FACTS_SAYS="code landed after the release approval"
       return 0
     fi
   fi
@@ -2033,9 +2096,28 @@ facts_judge() {
        FACTS_WHY="the judge could not deal this plan (facts_state exit 2), so the facts the run owes cannot be judged; what the judge said is printed with this line" ;;
     *) FACTS_RC=1
        FACTS_LINES="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')"
-       FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question" ;;
+       FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question"
+       FACTS_SAYS="$(co_facts_says "$FACTS_LINES")" ;;
   esac
   return 0
+}
+
+# co_facts_says <facts_state lines that do not hold> -> what the first of them holds the merge on, in a few words, and
+# how many more there are: "the structure review failed, and 1 more". A review's piece and whole are one review here.
+co_facts_says() {
+  printf '%s\n' "$1" | awk -F'\t' '
+    NF == 0 { next }
+    { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent)$/) { st = $i; break }
+      if ($1 == "review") w = "the " $2 " review"; else if ($1 == "floor") w = "the regression"
+      else if ($1 == "check") w = "the release check"; else if ($1 == "debt") w = $2; else w = "a proof the run owes"
+      if (w in seen) next
+      seen[w] = 1; n++
+      if (n > 1) next
+      if ($1 == "debt") s = w " is still red"
+      else if (st == "failing") s = w " failed"
+      else if (st == "owed") s = w " has red suites"
+      else s = w " has not run at this head" }
+    END { if (n == 0) s = "the run\047s proofs do not all hold"; else if (n > 1) s = s ", and " (n - 1) " more"; print s }'
 }
 
 gate_preflight() {
@@ -2124,15 +2206,15 @@ do_check() {
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
-    say "step: WOULD REFUSE — $STEP_REFUSAL"
+    co_would "step: WOULD REFUSE — $STEP_REFUSAL"
   fi
   MISSING="$(presence_missing)"
-  [ -z "$MISSING" ] || say "presence: WOULD REFUSE — $MISSING"
+  [ -z "$MISSING" ] || co_would "presence: WOULD REFUSE — $MISSING" "the epic plan's row cannot be written"
   facts_judge
   if [ "$FACTS_RC" -eq 0 ]; then
     say "facts: every fact the run owes holds at $FACTS_HEAD"
   else
-    say "facts: WOULD REFUSE — $FACTS_WHY"
+    co_would "facts: WOULD REFUSE — $FACTS_WHY" "$FACTS_SAYS"
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
   step8_present "$PLAN" || say 'step8: no Step 8 line in ## SDLC State — run writes it with the block (after the Step-7 block)'
@@ -2149,14 +2231,14 @@ do_check() {
   else
     verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
   fi
-  say "merge: $verdict"
+  case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" "the working branch is not merged" ;; *) say "merge: $verdict" ;; esac
   CO_LANDS="$(co_lands_rows)"
   if [ "$PARKED" = yes ]; then
     say "rows-landed: none — parked, no merge lands a row"
   elif [ -z "$CO_LANDS" ]; then
     say "rows-landed: none — no open integrate or close row"
   elif [ -n "$(co_lands_refusal "$CO_LANDS")" ]; then
-    say "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")"
+    co_would "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")" "this session is not bound to the run"
   else
     say "rows-landed: run would land $CO_LANDS at $INTEGRATION @ ${is:-?}"
   fi
@@ -2188,7 +2270,8 @@ do_check() {
   if [ "$PARKED" = yes ]; then
     say "worktree-removed: $(co_parked_wt_line)"
   elif [ -n "$unreached" ]; then
-    say "worktree-removed: ${wt_desc} WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
+    co_would "worktree-removed: ${wt_desc} WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took" \
+      "a branch holds commits the run never took"
   else
     say "worktree-removed: ${wt_desc}"
   fi
@@ -2208,7 +2291,7 @@ do_check() {
   say "$(co_debt_card)"
   co_debt_notes
   CO_DEBT_BAD="$(co_debt_refusal)"
-  [ -z "$CO_DEBT_BAD" ] || say "debt-lines: WOULD REFUSE — $CO_DEBT_BAD"
+  [ -z "$CO_DEBT_BAD" ] || co_would "debt-lines: WOULD REFUSE — $CO_DEBT_BAD" "a carried debt line does not parse"
   if [ -f "$CONT" ]; then
     if ! co_cont_has_deferrals; then
       CK_LINE="continuation: $CONT_REL already written — run appends the ## Deferrals section"
@@ -2232,7 +2315,7 @@ do_check() {
   elif epic_has_row; then
     say "epic-row: wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/}"
   elif [ -n "$(epic_row_missing)" ]; then
-    say "epic-row: WOULD REFUSE — $(epic_row_missing)"
+    co_would "epic-row: WOULD REFUSE — $(epic_row_missing)" "the epic plan's row cannot be written"
   elif [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
     say "epic-row: $(epic_row) — no | wave | table with a shipped column in ${EPIC_PLAN##*/}: run adds the shipped table's header first"
   else
@@ -2275,9 +2358,9 @@ do_check() {
   if [ "$PREFLIGHT_RC" -eq 0 ]; then
     say "gate: ok against the plan run would write"
   elif [ "$PREFLIGHT_RC" -eq 9 ]; then
-    say "gate: WOULD REFUSE before the gate is asked — $PREFLIGHT_LINE"
+    co_would "gate: WOULD REFUSE before the gate is asked — $PREFLIGHT_LINE" "the commit gate would refuse the closed plan"
   else
-    say "gate: WOULD REFUSE the plan run would write (rc=$PREFLIGHT_RC): $PREFLIGHT_LINE"
+    co_would "gate: WOULD REFUSE the plan run would write (rc=$PREFLIGHT_RC): $PREFLIGHT_LINE" "the commit gate would refuse the closed plan"
   fi
   return 0
 }
@@ -2295,10 +2378,10 @@ do_run() {
   # every branch, every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
   MISSING="$(presence_missing)"
-  [ -z "$MISSING" ] || _co_refuse "$MISSING — nothing was done"
+  [ -z "$MISSING" ] || _co_held "the epic plan's row cannot be written" "$MISSING — nothing was done"
   # A DEBT LINE THAT WOULD NOT PARSE IS REFUSED HERE, NAMED (wave-36 T13; AC-7.8), never carried.
   CO_DEBT_BAD="$(co_debt_refusal)"
-  [ -z "$CO_DEBT_BAD" ] || _co_refuse "$CO_DEBT_BAD — nothing was done"
+  [ -z "$CO_DEBT_BAD" ] || _co_held "a carried debt line does not parse" "$CO_DEBT_BAD — nothing was done"
   # THE ROWS THE MERGE LANDS NEED THIS SESSION BOUND TO THIS PLAN (wave-36 T14; AC-7.7), asked before any act.
   # A PARKED PLAN IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; AC-4.3): no rows a merge lands, no merge readback, and
   # no branch census, because nothing is deleted.
@@ -2306,20 +2389,21 @@ do_run() {
   if [ "$PARKED" = no ]; then
     CO_LANDS="$(co_lands_rows)"
     CO_LANDS_BAD="$(co_lands_refusal "$CO_LANDS")"
-    [ -z "$CO_LANDS_BAD" ] || _co_refuse "$CO_LANDS_BAD — nothing was done"
+    [ -z "$CO_LANDS_BAD" ] || _co_held "this session is not bound to the run" "$CO_LANDS_BAD — nothing was done"
     act_merge
     refuse_unreached
   fi
   facts_judge
   if [ "$FACTS_RC" -ne 0 ]; then
     [ -n "$FACTS_LINES" ] && printf '%s\n' "$FACTS_LINES"
-    _co_refuse "$FACTS_WHY — nothing was done"
+    _co_held "$FACTS_SAYS" "$FACTS_WHY — nothing was done"
   fi
   gate_preflight
-  [ "$PREFLIGHT_RC" -eq 9 ] && _co_refuse "$PREFLIGHT_LINE — nothing was done"
+  [ "$PREFLIGHT_RC" -eq 9 ] && _co_held "the commit gate would refuse the closed plan" "$PREFLIGHT_LINE — nothing was done"
   if [ "$PREFLIGHT_RC" -ne 0 ]; then
     [ -n "$PREFLIGHT_ERR" ] && printf '%s\n' "$PREFLIGHT_ERR"
-    _co_refuse "the commit gate would refuse the plan this run would write (rc=$PREFLIGHT_RC) — nothing was done: no branch deleted, no tmp wiped, no continuation or epic row written"
+    _co_held "the commit gate would refuse the closed plan" \
+      "the commit gate would refuse the plan this run would write (rc=$PREFLIGHT_RC) — nothing was done: no branch deleted, no tmp wiped, no continuation or epic row written"
   fi
                     say "preflight: the commit gate allows the plan this run will write"
   if [ "$PARKED" = yes ]; then
@@ -2352,6 +2436,7 @@ do_run() {
                     say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
   gate_dry_run
   write_plan_blocks 9
+  co_hold_release
   if [ "$PARKED" = yes ]; then
     # A PARKED RUN IS NOT ARCHIVED AND SENDS NO DELIVERY NOTICE: its plan is where the resume reads it (wave-38 T15).
                     say "handoff: the closed form ($(co_resume_point)) written to $CO_HO_REL; the plan's ## Handoff points to it"
@@ -2390,6 +2475,6 @@ co_deliver_notice() {
 
 case "$VERB" in
   run)   do_run ;;
-  check) do_check ;;
+  check) do_check; [ -z "$CO_HOLD_WHY" ] || co_hold "${CO_HOLD_SAYS:-close-out stopped}" "close-out check: $CO_HOLD_WHY" ;;
 esac
 exit 0

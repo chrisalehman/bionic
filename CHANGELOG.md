@@ -8,6 +8,211 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.25.0 — 2026-10-21
+
+This is the sitrep owes release. The sitrep tells the user what they owe. It is a card drawn by the one card
+renderer, the same one the Step 0 to 3 cards use (D1), and the release approval card moved onto that renderer too
+(Δ2). The verb gives facts and no page: `sitrep` prints a fact sheet of measurements, each naming what it measures, its
+unit and its source (D7), and the model writes every row of the card from it (D1, reopened as Δ17). The Metrics are
+numbers and the Assessment is judgment: a grade by pace, weighed against six questions (D2). Code checks what must
+never be wrong against the sheet the judgment was written from: every ask, step and open task is on the card, no number
+is one the sheet lacks, no line is wider than 100 columns, and the sheet is under ten minutes old (Δ19). Every ask
+belongs to the run, in one register that every session of the run writes and reads, so a card drawn by any session shows
+every ask; the 8:14 AM page that said "Nothing" over a held merge cannot recur (D3, ADR-069). The four run states a
+person can owe something in (a failed review, a release card waiting on its reply, an open stop-rule question, and
+nothing owed) are rehearsed with the real tool in a sandbox, and their cards are kept (D5). The words are one
+vocabulary on every surface the user reads: "review", never "reading" or "reader", and a goal nobody measures is "not
+measured". This is a minor release by the policy above: the register, the rehearsal and the card check are new
+capability, and no verb is removed. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script may meet:
+- T1: an ask of a run lives in `record/<run>/asks.state`, one register per run, in the line format of the session
+  store (`owed/v1`). A session bound to a run writes and reads it, close-out's stand-in sessions included; read it
+  through `owed_file`, never through `owed-<sid>.state` by path. With no run open an ask stays in the session's own
+  store. Asks raised before 1.25.0 are not moved into a register.
+- T22: the handoff's State writes `written:` as a local 12-hour clock time (`3:00 PM`) and an `instant: <ISO>` line
+  beside it. The STALE reader takes `instant:` first and falls back to an ISO `written:`, so a handoff written at
+  1.24.x still reads.
+- T24: `sitrep card` takes the judgment as rows: `call:`, `task: <label>: <text>`, `metric: <Label>: <text>`,
+  `grade:`, `point:`, `ask <key>[, <key>]: <text>`, and one to three `close:` rows. It draws only from the sheet that
+  `sitrep` last saved under `.bionic/tmp`, and refuses when that sheet is ten minutes old or more; the asks it checks
+  are read fresh. A card that fails a check prints its reasons and none of itself.
+- T25: the sheet's `metric.*` lines are gone. The measured lines of the sheet's definitions page replace them (see
+  `sheet-definitions.md`): clock, work, pace and close, correctness, waste, goals and asks.
+
+### Asks belong to the run (D3, ADR-069)
+
+- T1 (`T1-register.md`): the register, and the release approval card offering a waiver for every ask recorded for the
+  run, not only the caller's session.
+- T2 (`T2-asks-raised.md`): every ask is recorded when it is raised. A refused close-out holds the merge as an ask with
+  its reason; a failed review is an ask from the moment its result is recorded; a stop-rule call and a carried gap have
+  verbs; a decision's wait line names every row, merge or release held on it.
+- T13 (`T13-stragglers.md`): the readers and suites that went to the session file by path now go through the register.
+
+### The sitrep is a card of measurements and judgment (D1, D2, D7, Δ17, Δ19)
+
+- T3 (`T3-fact-sheet.md`): the verb prints a fact sheet, local 12-hour times throughout; the Score indicators, the
+  reading rows and the grade verb are deleted with their writers and tests.
+- T5 (`T5-sitrep-card.md`): the seven-section card and its check at the shared 100 columns: Call to action, Task list,
+  Metrics, `Assessment: <grade>`, Blocked on you, Predicted close.
+- T4 (`T4-release-card.md`): the release approval card is drawn by `card.sh release` on the same renderer, and says
+  when the release changed the release check. The verb's own page renderer is deleted.
+- T24 (`T24-model-rows.md`): the model writes every row; code draws the bullets and icons, capitalizes each row, and
+  refuses a card that drops an ask, step or open task, or prints a number the sheet does not hold. The card is checked
+  against the sheet the judgment was written from.
+- T25 (`T25-measurements.md`): the sheet as measurements to the definitions page.
+- T14, T18, T19, T20, T23 (`T14-sheet-fixes.md`, `T18-card-defects.md`, `T19-holds-labels.md`,
+  `T20-runs-read-true.md`, `T23-sheet-facts.md`): defects found by using the card. Pace counts the run's landed tasks;
+  a task row is one line; a held task is named by its label and by everything it waits on; no pace from under three
+  landings scales the close; a goal the sitrep cannot measure says so.
+- T22 (`T22-handoff-head.md`): the handoff head counts the sheet's open tasks and writes its clock in local time.
+
+### The four run states, rehearsed (D5)
+
+- T7 (`T7-rehearsal.md`): `tests/rehearsal.test.sh` plays a small run forward in a sandbox through the real commands
+  to a failed review, a release card waiting on its reply, an open stop-rule question, and nothing owed, and draws each
+  state's sheet and card.
+
+### One vocabulary (REQ-9)
+
+- T15 (`T15-vocabulary.md`), T16 (`T16-skill.md`), T17 (`T17-reworded-readers.md`) and T21 (`T21-walk-findings.md`):
+  "review" and "not measured" on the skill texts, the release card, the handoff's head and the Patrol's status line,
+  with a lint over those surfaces and their sources under agents-src/; the sitrep skill tells the model to record an
+  ask before it puts it to the user in chat; the card's word check refuses "reading", "reader" and "unmeasured".
+
+### The release
+
+- T10 (`T10-release.md`): this entry, plugin.json 1.25.0, the help and version pages rendered by
+  `agents-src/render.sh`, `rendered.sha256` refreshed, and ADR-069.
+
+### The reviews
+
+- The walk (`walk.md`, T8): the card and the verbs used as a user would, whose findings T21 fixed.
+- The critic's review of the whole (`critic.md`, T9): evidence flag, adversarial fail, structure flag; its one S2 finding, a false card passing the check, fixed by T26 with 24 new tests, red first; the adversarial verdict waived by Chris Lehman on 2026-10-22 on that fix.
+- Chris Lehman's verdict on the four cards (`cards.md`, T8, 2026-10-22): "all four yes": from each card alone, what he owes, what it holds and what each answer does.
+
+### Known limits
+
+- An ask other than a decision that was closed before 1.25.0 adds no minutes to the sitrep's waiting-on-you count,
+  because the register kept no opened time before this release; asks closed from 1.25.0 on are counted.
+  (`record/wave-42-sitrep-owes/critic-adversarial.md#2`)
+
+### The landing numbers
+
+`landing-report --rows` at 32b08f7f7d6ef842750481eb927a62593a8a4e67 on 2026-10-22T06:00:29Z:
+
+```
+landings: queue=20 hand=0 git=0 · ready-to-landed median=5.6m p75=9.2m max=22.4m · runs: green=90 red=4 none=0 discarded=0 red-then-green=0 run=258 reused=0 absent=0 · waited median=20s · killed=0
+T1 queue ready=2026-10-21T19:21:16Z landed=2026-10-21T19:26:23Z minutes=5.1 runs=4 waited=18s wait=0.3 prove=4.8 rework=0.0 width=3
+  asks.test.sh green promised=4s actual=7s ratio=1.75
+  release-approval.test.sh green promised=283s actual=287s ratio=1.01
+  notify.test.sh green promised=57s actual=68s ratio=1.19
+  stop.test.sh green promised=37s actual=39s ratio=1.05
+T4 queue ready=2026-10-21T19:23:51Z landed=2026-10-21T19:31:31Z minutes=7.7 runs=2 waited=170s wait=2.8 prove=4.8 rework=0.0 width=4
+  card.test.sh green promised=11s actual=11s ratio=1.00
+  release-approval.test.sh green promised=295s actual=289s ratio=0.98
+T13 queue ready=2026-10-21T19:56:19Z landed=2026-10-21T20:00:44Z minutes=4.4 runs=7 waited=53s wait=0.9 prove=3.5 rework=0.0 width=2
+  sitrep.test.sh green promised=129s actual=148s ratio=1.15
+  session-poker-4.test.sh green promised=98s actual=109s ratio=1.11
+  session-poker-5.test.sh green promised=88s actual=104s ratio=1.18
+  handoff-file.test.sh green promised=44s actual=49s ratio=1.11
+  bash-walls.test.sh green promised=23s actual=24s ratio=1.04
+  patrol-stale.test.sh green promised=2s actual=3s ratio=1.50
+  shell-lint.test.sh red promised=30s actual=34s ratio=1.13
+T2 queue ready=2026-10-21T20:37:30Z landed=2026-10-21T20:43:00Z minutes=5.5 runs=6 waited=20s wait=0.3 prove=4.8 rework=0.4 width=3
+  asks.test.sh green promised=14s actual=23s ratio=1.64
+  sitrep.test.sh green promised=99s actual=149s ratio=1.51
+  close-out-4.test.sh green promised=210s actual=285s ratio=1.36
+  session-poker-3.test.sh green promised=71s actual=87s ratio=1.23
+  session-poker-4.test.sh green promised=94s actual=106s ratio=1.13
+  session-poker-5.test.sh green promised=100s actual=102s ratio=1.02
+T3 queue ready=2026-10-21T20:42:32Z landed=2026-10-21T21:04:58Z minutes=22.4 runs=6 waited=45s wait=0.8 prove=6.3 rework=15.4 width=4
+  sitrep.test.sh green promised=88s actual=112s ratio=1.27
+  session-poker-2.test.sh green promised=51s actual=102s ratio=2.00
+  session-poker-5.test.sh green promised=81s actual=103s ratio=1.27
+  handoff-file.test.sh green promised=38s actual=63s ratio=1.66
+  release-approval.test.sh green promised=298s actual=310s ratio=1.04
+  close-out-4.test.sh green promised=285s actual=259s ratio=0.91
+T15 queue ready=2026-10-21T21:45:01Z landed=2026-10-21T21:46:29Z minutes=1.5 runs=3 waited=20s wait=0.3 prove=1.1 rework=0.0 width=2
+  words.test.sh green promised=4s actual=5s ratio=1.25
+  shell-lint.test.sh red promised=32s actual=33s ratio=1.03
+  render.test.sh green promised=17s actual=16s ratio=0.94
+T5 queue ready=2026-10-21T21:56:46Z landed=2026-10-21T22:10:12Z minutes=13.4 runs=11 waited=20s wait=0.3 prove=13.1 rework=0.0 width=3
+  sitrep-card.test.sh green promised=8s actual=10s ratio=1.25
+  card.test.sh green promised=11s actual=14s ratio=1.27
+  handoff-file.test.sh green promised=59s actual=65s ratio=1.10
+  width.test.sh green promised=1s actual=1s ratio=1.00
+  release-approval.test.sh red promised=274s actual=368s ratio=1.34
+  close-out-4.test.sh green promised=256s actual=327s ratio=1.28
+  door-card.test.sh green promised=187s actual=298s ratio=1.59
+  landing-line-1.test.sh green promised=287s actual=313s ratio=1.09
+  session-poker-4.test.sh green promised=106s actual=101s ratio=0.95
+  sitrep.test.sh green promised=97s actual=85s ratio=0.88
+  shell-lint.test.sh red promised=32s actual=31s ratio=0.97
+T14 queue ready=2026-10-21T22:20:37Z landed=2026-10-21T22:25:57Z minutes=5.3 runs=4 waited=21s wait=0.3 prove=5.0 rework=0.0 width=4
+  sitrep.test.sh green promised=62s actual=111s ratio=1.79
+  handoff-file.test.sh green promised=65s actual=70s ratio=1.08
+  shell-lint.test.sh green promised=25s actual=40s ratio=1.60
+  close-out-4.test.sh green promised=281s actual=298s ratio=1.06
+T17 queue ready=2026-10-21T22:32:13Z landed=2026-10-21T22:37:57Z minutes=5.7 runs=5 waited=19s wait=0.3 prove=5.4 rework=0.0 width=4
+  release-approval.test.sh green promised=159s actual=324s ratio=2.04
+  bash-walls-egd.test.sh green promised=22s actual=47s ratio=2.14
+  notify.test.sh green promised=54s actual=80s ratio=1.48
+  session-poker-4.test.sh green promised=71s actual=109s ratio=1.54
+  asks.test.sh green promised=23s actual=21s ratio=0.91
+T18 queue ready=2026-10-21T22:58:40Z landed=2026-10-21T23:00:45Z minutes=2.1 runs=4 waited=21s wait=0.3 prove=1.7 rework=0.0 width=3
+  sitrep-card.test.sh green promised=9s actual=10s ratio=1.11
+  sitrep.test.sh green promised=97s actual=103s ratio=1.06
+  card.test.sh green promised=12s actual=15s ratio=1.25
+  shell-lint.test.sh green promised=32s actual=34s ratio=1.06
+T16 queue ready=2026-10-21T23:00:27Z landed=2026-10-21T23:02:52Z minutes=2.4 runs=6 waited=39s wait=0.7 prove=1.8 rework=0.0 width=3
+  words.test.sh green promised=8s actual=9s ratio=1.12
+  sitrep.test.sh green promised=103s actual=105s ratio=1.02
+  sitrep-card.test.sh green promised=10s actual=11s ratio=1.10
+  render.test.sh green promised=16s actual=18s ratio=1.12
+  shell-lint.test.sh green promised=34s actual=36s ratio=1.06
+  card.test.sh green promised=15s actual=15s ratio=1.00
+T7 queue ready=2026-10-21T23:05:35Z landed=2026-10-21T23:14:41Z minutes=9.1 runs=2 waited=20s wait=0.3 prove=8.8 rework=0.0 width=3
+  rehearsal.test.sh green promised=537s actual=526s ratio=0.98
+  shell-lint.test.sh green promised=22s actual=34s ratio=1.55
+T19 queue ready=2026-10-21T23:11:53Z landed=2026-10-21T23:16:35Z minutes=4.7 runs=3 waited=188s wait=3.1 prove=1.6 rework=0.0 width=4
+  sitrep.test.sh green promised=79s actual=93s ratio=1.18
+  sitrep-card.test.sh green promised=9s actual=10s ratio=1.11
+  shell-lint.test.sh green promised=26s actual=32s ratio=1.23
+T21 queue ready=2026-10-22T00:02:47Z landed=2026-10-22T00:08:41Z minutes=5.9 runs=5 waited=20s wait=0.3 prove=5.6 rework=0.0 width=4
+  sitrep-card.test.sh green promised=9s actual=15s ratio=1.67
+  asks.test.sh green promised=16s actual=27s ratio=1.69
+  release-approval.test.sh green promised=262s actual=332s ratio=1.27
+  close-out-4.test.sh green promised=243s actual=308s ratio=1.27
+  shell-lint.test.sh green promised=32s actual=38s ratio=1.19
+T20 queue ready=2026-10-22T00:06:46Z landed=2026-10-22T00:17:43Z minutes=10.9 runs=4 waited=137s wait=2.3 prove=8.7 rework=0.0 width=4
+  rehearsal.test.sh green promised=538s actual=520s ratio=0.97
+  sitrep.test.sh green promised=92s actual=102s ratio=1.11
+  sitrep-card.test.sh green promised=12s actual=13s ratio=1.08
+  shell-lint.test.sh green promised=36s actual=35s ratio=0.97
+T22 queue ready=2026-10-22T00:44:24Z landed=2026-10-22T00:46:23Z minutes=2.0 runs=3 waited=21s wait=0.3 prove=1.6 rework=0.0 width=4
+  handoff-file.test.sh green promised=40s actual=54s ratio=1.35
+  sitrep.test.sh green promised=59s actual=97s ratio=1.64
+  shell-lint.test.sh green promised=21s actual=33s ratio=1.57
+T23 queue ready=2026-10-22T01:55:47Z landed=2026-10-22T02:04:59Z minutes=9.2 runs=3 waited=20s wait=0.3 prove=8.9 rework=0.0 width=4
+  sitrep.test.sh green promised=69s actual=110s ratio=1.59
+  rehearsal.test.sh green promised=332s actual=530s ratio=1.60
+  handoff-file.test.sh green promised=34s actual=56s ratio=1.65
+T24 queue ready=2026-10-22T03:24:14Z landed=2026-10-22T03:33:26Z minutes=9.2 runs=4 waited=20s wait=0.3 prove=8.9 rework=0.0 width=4
+  sitrep-card.test.sh green promised=21s actual=27s ratio=1.29
+  card.test.sh green promised=11s actual=15s ratio=1.36
+  rehearsal.test.sh green promised=505s actual=530s ratio=1.05
+  words.test.sh green promised=8s actual=12s ratio=1.50
+T10 queue ready=2026-10-22T04:18:33Z landed=2026-10-22T04:19:59Z minutes=1.4 runs=2 waited=16s wait=0.3 prove=1.2 rework=0.0 width=3
+  render.test.sh green promised=13s actual=17s ratio=1.31
+  doctor-version.test.sh green promised=73s actual=68s ratio=0.93
+T25 queue ready=2026-10-22T04:39:43Z landed=2026-10-22T04:49:17Z minutes=9.6 runs=4 waited=16s wait=0.3 prove=9.3 rework=0.0 width=4
+  sitrep.test.sh green promised=118s actual=120s ratio=1.02
+  sitrep-card.test.sh green promised=23s actual=30s ratio=1.30
+  rehearsal.test.sh green promised=532s actual=555s ratio=1.04
+  asks.test.sh green promised=20s actual=25s ratio=1.25
+```
+
 ## 1.24.0 — 2026-10-21
 
 This is the run closes itself release. After the last build row lands, a run reaches its release approval card
@@ -131,7 +336,7 @@ Thirty-eight rows landed through the line and five by hand. T26 and T43 changed 
 refused them by design (D4) and the orchestrator landed them by hand on the candidate's own green suites. T27, T44 and
 T45 wrote only their records.
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T44): the pages and the verbs used as a user would, at the build head.
 - The regression (`T27-regression.md`, T27): one whole run at 00943de4, 117 suites green and 1 red. The red,
@@ -552,7 +757,7 @@ Land these by hand", a writer ran only the suites that pin its own change, RED t
 the tree by hand on the report. The landing report below counts forty-one rows landed by hand and three through
 the line. The whole regression after the build is the proof for everything else (D16).
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T34): the pages and a landing used as a user would, from the main checkout and a spawned tree.
 - The regression (`T39-regression.md`, T39): one whole run at f7205ad6, 2:20 to 2:39 AM PDT, 101 of 113 suites green
@@ -835,7 +1040,7 @@ Four of those hand landings each left a red that a later landing found and fixed
 left a reads-hash anchor (fixed by T17) (A-orch-28, A-orch-71). T26's writer was stopped and its record written by the
 orchestrator (A-orch-36).
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T27): eight scenes, no criterion named; its observations are below.
 - The matrix (`T28-matrix-fill.md`, T28): 45 of 49 rows discharged; AC-13.2, AC-19.1 and AC-20.3 wait for this row
@@ -1143,7 +1348,7 @@ D7, the sitrep taken verbatim from the notes, was withdrawn on the user's word, 
 principles (D8 onward). D15 set the walk order of the strategic cards. The design ledger, `design-ledger.md`, holds
 every ruling with the user's words.
 
-### The readings
+### The reviews
 
 - The walk (`walk.md`, T23): bionic used as a user would on this branch, with six observations, below.
 - The matrix (`T24-matrix-fill.md`, T24): 48 of 52 rows discharged from landed records; AC-1.5 and AC-6.6 wait for

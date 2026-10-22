@@ -39,7 +39,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **No ceremony.** Do everything necessary, once. A task, check, review or approval earns its place only if it can fail in a way nothing already run can: never re-run a suite a gate already runs, never re-review a fix that carries its own red test. Read the record before you dispatch, and cite what is done.
 
-**Decisions.** Every decision you put to the user, at any step and with no run open, goes through the `decision` skill: invoke it, never restate its shape. The Step-1 and Step-2 interviews are its heaviest users; small decisions may share a turn, a momentous one goes alone. Approvals wait for the release approval card (`release-approval`, answered by `reply`); a reversible call is yours to make.
+**Decisions.** Every decision you put to the user, at any step and with no run open, goes through the `decision` skill: invoke it, never restate its shape. The Step-1 and Step-2 interviews are its heaviest users; small decisions may share a turn, a momentous one goes alone. An ask that holds the run is recorded in the run's register by its verb before it is put to the user — a decision or a stop-rule call by `decisions put D<n> '<what is decided>'` — so the sitrep cannot miss it. Approvals wait for the release approval card (`release-approval`, answered by `reply`); a reversible call is yours to make.
 
 **Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
@@ -71,22 +71,22 @@ plan mode serves them better than any row in this table, `spike` included: it sh
 any rigor, but its writeup is a timeboxed research artifact, not a general document-production
 mode.
 
-**rigor** — how many independent minds answer the questions: `single` (one) or `double` (two). A level sets four things, each the user's to set at Step 0: the readers, `review-cadence:`, `fix-policy:` and `fix-cap:`.
+**rigor** — how many independent minds answer the questions: `single` (one) or `double` (two). A level sets four things, each the user's to set at Step 0: the reviewers, `review-cadence:`, `fix-policy:` and `fix-cap:`.
 
 Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the regression: one whole run plus the greens of what changed. The other three are read by independent minds: `evidence`, is the proof honest; `adversarial`, what is wrong that nobody asked about; `structure`, is it built from what exists, and shaped well.
 
-Findings are classed by payment date, not by reader: harm (the user, now), evidence (the claim, now), debt (the next change). The reader roster follows from the classes, not the other way round.
+Findings are classed by payment date, not by reviewer: harm (the user, now), evidence (the claim, now), debt (the next change). The reviewer roster follows from the classes, not the other way round.
 
 Rigor follows one principle: the moment of a check is set by its cost model; machine checks run early and often, mind checks run once, on the settled whole. A fix row born of a registered review finding covers every question once it lands.
 
 | | `single` | `double` |
 |---|---|---|
-| readers | one: the critic holds every question | two: the auditor takes `evidence` |
+| reviewers | one: the critic holds every question | two: the auditor takes `evidence` |
 | when (`review-cadence:`) | once, at Step 6, on the settled whole | once, at Step 6 |
 | becomes a row unasked (`fix-policy:`) | S1 + S2-on, in-diff | S1 + S2-on, in-diff |
 | cap on review-born rows (`fix-cap:`) | 2 | 10% of the plan |
 
-`steps/6.md` holds the review findings disposition and turns a reading into a fact.
+`steps/6.md` holds the review findings disposition and turns a review into a fact.
 
 **scale** — the decomposition unit; rows are `lib/scale.sh`'s. At `pr`, close-out merges nothing and records `gh pr create`; at `piece+whole`, each code question also owes `scope=whole`.
 
@@ -142,7 +142,7 @@ of the three opens with a `## Goal` section — one concise paragraph, first aft
 write whose first section is not Goal, or whose Goal section is empty.
 
 **Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
-reading records, test-run captures — the matrix names them by path, so
+review records, test-run captures — the matrix names them by path, so
 they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
 with it — everything, that is, except a live session's own keyed state, which the wipe spares
 by owner liveness, not file name. Give an agent a `record/` path in its brief.
@@ -177,10 +177,10 @@ Progress artifact: <path>  (tasks of 15 min or more)
 Cadence: <N> min  (tasks of 15 min or more)
 Done marker: <path>  # optional
 Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional
-Files: <every path the task may create or edit>  # a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it
-Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names 1 to 3 runs across both labels
+Files: <every path the task may create or edit>  # a reviewer lists its records here, one per question, its artifact among them; a researcher or test-runner omits it
+Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reviewer dealt evidence names 1 to 3 runs across both labels
 Re-executes: `<cmd>`
-Questions: <q>[, <q>]  # reader roles only
+Questions: <q>[, <q>]  # reviewer roles only
 Row: <id>  # the plan row a writer runs
 Lands-on: <suite>[, <suite>] | none <reason>  # what ready proves, within Suites:
 Lands-red: <suite> until <ext:slug | approval:name>  # optional

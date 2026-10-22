@@ -417,6 +417,8 @@ _bw_rc=$?
 # words, one `<key> TAB <title> TAB <reply>` line each in BIONIC_WALL_OWED; the wall itself writes nothing (the
 # freeze), so its caller opens the items on the person's ledger (lib/owed.sh), keyed as the answer verb closes them.
 # Opening is idempotent per key. owed.sh is not in BIONIC_LIB_WANT (A-56.1) and is sourced only when there is an ask.
+# The ledger is the run's register: the session's bound plan names it, or `OWED_PLAN` from a caller that drives this
+# wall for a plan under a stand-in session (close-out.sh `gate_ask`), passed through as it came.
 # A plan verb's dry commit (`planverb-<pid>`, hooks/session-poker.sh `plan_verb_dry`) is a synthetic session whose
 # ledger nobody reads: its refusal is printed to the verb's caller, and the real commit opens the item.
 if [ -n "$BIONIC_WALL_OWED" ]; then
@@ -426,7 +428,7 @@ if [ -n "$BIONIC_WALL_OWED" ]; then
       if { declare -F owed_open >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/owed.sh" ] && . "$BIONIC_LIB/owed.sh"; }; } 2>/dev/null; then
         while IFS=$'\t' read -r _bw_key _bw_title _bw_reply; do
           [ -n "$_bw_key" ] || continue
-          OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
+          OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" OWED_PLAN="${OWED_PLAN:-}" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
         done <<< "$BIONIC_WALL_OWED"
       fi ;;
   esac

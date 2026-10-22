@@ -9,7 +9,8 @@
 # first, grouped fixed / awaiting your decision / carried. The regression is never a decision: a head with no green
 # whole run is early, not waived. The page refuses to render, `CARD-EARLY — <reason>` on stderr and exit 1, while
 # a reader row is open, an owed reading is unregistered at the head, or `current <N> --check` is red for N = 6, 7
-# or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. One
+# or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. The
+# verb gathers the facts and `card.sh release` draws the page at the shared width. One
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
 # approve, waive, waive-row, confirm-row and finding-move with the user's words.
 #
@@ -18,8 +19,9 @@
 # §TRIGGERS  a carried S3 stays under Findings; a criterion miss and a recommendation against the default decide
 # §NO-WAIVER no surface offers waiving the regression: an absent or red whole run is early
 # §EARLY     each of the three facts refuses the render in its own words; the tick says the same line as advice
-# §PREVIEW   --preview renders an early run's page and writes nothing
+# §PREVIEW   --preview renders an early run's page and writes nothing; its Bottom line owes a decision only once ready
 # §AGREE     the decisions are exactly the owed items, the unproved rows and the findings recommended against
+# §REGISTER  a waiver another session of the run raised is a decision on the card, and the reply closes it for that session
 # §REPLY     all default and all recommended replay into their verbs; anything else writes nothing
 # §T4        a T4 row through the gate's predicate: confirmed by you is proved; pending or a standing finding decides
 # §CONFIRM   confirm-row writes the attributed confirmation; the card offers confirm or waive; reply applies either
@@ -30,6 +32,9 @@
 # §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
 # §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
 # §RATIO     the page prints the release check's test-ratio line once, read from the log of the newest check proof
+# §CHECK-CHANGED the Bottom line says when the release changes a file of the declared release check's closure
+# §CARRY     a finding the run carries by its own choice is an ask on the run's register; the page records it, decisions
+#            or none, and the reply closes it
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -124,7 +129,8 @@ fc_plan() {  # <proof lines> [<sed edit>] -> PFC at current: 8, bound to this se
     printf 'AC-1.2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
     printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
   } | sed -e "${2:-}" > "$PFC"
-  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
+  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" \
+    "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
   bind_marker "$RFC" "$PFC"
 }
 FC_GOOD="$(fc_floor "$FC_C")
@@ -164,6 +170,7 @@ fc_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "
 fc_owe() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_open "$4" "fixture: $4" "poker: fixture item $4"' _ "$FC_LIB" "$RFC" "$SID" "$1"; }
 fc_heads() { printf '%s\n' "$FC_OUT" | sed -n -E 's/^(Bottom line|Goals|Tests|Reviews|Findings|Decisions)( — .*)?$/\1/p' | paste -sd'|' -; }
 fc_flat() { tr '\n' ' ' | tr -s ' ' | sed 's/ $//'; }  # folded lines read as one, for a phrase the fold may break
+fc_has() { case "$1" in *"$2"*) echo yes ;; esac; }  # <haystack> <needle> -> yes when it holds it
 fc_under() {  # <section> -> the page's lines under that section head, to the next blank line
   printf '%s\n' "$FC_OUT" | awk -v h="$1" 'f && $0 == "" { exit } f { print } $0 == h || index($0, h " — ") == 1 { f = 1 }'
 }
@@ -227,12 +234,12 @@ expect_eq "SHAPE-11b AC-13.4 …in plain text: no markdown label" "0" "$(printf 
 expect_eq "SHAPE-11c …no record path" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c 'record/')"
 expect_eq "SHAPE-11d …no quotation above the reply line" "0" "$(printf '%s\n' "$FC_OUT" | sed '$d' | /usr/bin/grep -c '"')"
 expect_eq "SHAPE-11e …and never the old name" "0" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -ci 'final card')"
-# Columns are counted as sitrep_fold counts them, byte-wise: macOS awk's length() counts bytes in every locale, so a
-# line with a two-byte `·` would read wider than it prints.
+# Columns are counted byte-wise, each glyph at its printed width: macOS awk's length() counts bytes in every locale,
+# so a line with a two-byte `·` would read wider than it prints. The card folds at the shared 100-column width.
 fc_cols() { LC_ALL=C awk '{ s = $0; t = s; w = length(s) - gsub(/[\200-\277]/, "", t); t = s; w -= gsub(/\357\270\217/, "", t)
   t = s; w += gsub(/[\360-\364]/, "", t); t = s; w += gsub(/\342\234\205|\342\254\234|\342\233\224|\342\235\224|\342\236\226|\342\234\226/, "", t); print w }'; }
 expect_eq "SHAPE-11f-0 precondition: the column count reads a two-byte middle dot as one column" "3" "$(printf 'a\302\267b\n' | fc_cols)"
-expect_eq "SHAPE-11f …every line within 92 columns" "0" "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 92' | /usr/bin/grep -c .)"
+expect_eq "SHAPE-11f …every line within 100 columns" "0" "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 100' | /usr/bin/grep -c .)"
 expect_eq "SHAPE-12 the page is written to the run's record, one file at the head" "release-approval-$FC_H8.md" "$(fc_pages)"
 expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
   "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
@@ -320,10 +327,10 @@ new_roster "$RFC"
 add_row "$RFC" name=w38-T13 agent_id=a013 subagent_type=bionic:critic
 fc_page
 expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 1" "1" "$FC_RC"
-expect_eq "EARLY-1b …saying CARD-EARLY and the reader, on stderr" "CARD-EARLY — reader w38-T13 open" "$FC_ERR"
+expect_eq "EARLY-1b …saying CARD-EARLY and the reviewer, on stderr" "CARD-EARLY — reviewer w38-T13 open" "$FC_ERR"
 expect_eq "EARLY-1c …rendering nothing and writing no page" "|" "$FC_OUT|$(fc_pages)"
 fc_card early
-expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 1)" "1|CARD-EARLY — reader w38-T13 open" "$FC_RC|$FC_ERR"
+expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 1)" "1|CARD-EARLY — reviewer w38-T13 open" "$FC_RC|$FC_ERR"
 ack_rows "$RFC" w38-T13
 fc_page
 expect_eq "EARLY-2 the same critic acked: the page renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
@@ -431,6 +438,25 @@ expect_eq "PREV-7b …and opens no item on the person's ledger, the finding's no
 fc_page
 expect_contains "PREV-7c the acting render of the same run opens the finding's item (the reader is not vacuous)" \
   "finding:" "$(fc_owed)"
+# fails-when: an early preview with a decision in it says both that the run is not ready for decisions and that the
+# user owes one now. Not ready is the card's own answer, the one the acting render refuses on, so the owed line
+# follows it.
+fc_plan "$FC_FAILR"
+new_roster "$RFC"
+add_row "$RFC" name=w38-T14 agent_id=a014 subagent_type=bionic:critic
+fc_page --preview
+FC_BL="$(fc_under 'Bottom line' | fc_flat)"
+expect_eq "PREV-8 a failing review and an open reviewer: the preview renders, saying not ready and naming the reviewer" \
+  "0|yes" "$FC_RC|$(fc_has "$FC_BL" 'Not ready for your decisions: reviewer w38-T14 open.')"
+expect_eq "PREV-8b …and says the decisions are the user's once the run is ready, never that they are owed now" "yes|" \
+  "$(fc_has "$FC_BL" 'Once the run is ready, you will owe ')|$(fc_has "$FC_BL" 'You owe')"
+ack_rows "$RFC" w38-T14
+fc_page --preview
+FC_BL="$(fc_under 'Bottom line' | fc_flat)"
+expect_eq "PREV-8c control: the reviewer acked, the same run is ready and the decisions owed now (PREV-8b read the same lines)" \
+  "yes|yes|" \
+  "$(fc_has "$FC_BL" 'Ready for your decisions')|$(fc_has "$FC_BL" 'You owe ')|$(fc_has "$FC_BL" 'Once the run is ready')"
+new_roster "$RFC"
 
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
@@ -467,6 +493,36 @@ expect_eq "AGREE-3b …and so does a dropped one" "differs" "$(fc_agree "$TMPROO
 fc_plan "$FC_GOOD"
 fc_page --against "finding:$FC_FID"
 expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agree "$FC_REC/release-approval-$FC_H8.md" "finding:$FC_FID")"
+
+# ============================================================
+section "§REGISTER: the card's waivers are the run's asks, whichever session of the run raised them (AC-6.6)"
+# ============================================================
+# fails-when: a waiver another session of the run raised has no decision on the card. A question failing at the head
+# is settled by the card's own check whichever session holds its ask, so here the question passes at the head and only
+# the run's register owes its waiver, as when a close-out preflight raised it on a failing reading at an earlier head.
+FC_SID2="fc-other-session-7e7e7e7e"
+fc_ask2() {  # <key> <reply> -> the item opened as the run's other session
+  bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_open "$4" "fixture: $4" "$5"' _ "$FC_LIB" "$RFC" "$FC_SID2" "$1" "$2"
+}
+fc_owed2() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$FC_LIB" "$RFC" "$FC_SID2" 2>/dev/null | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
+fc_plan "$FC_GOOD"
+rm -f "$RFC/.bionic/tmp/owed-$FC_SID2.state"
+bind_marker "$RFC" "$PFC" "$FC_SID2"
+fc_ask2 waive:structure "commit refused — structure: the newest review is result=fail; waive it with: session-poker.sh waive structure '<your reply>'"
+fc_ask2 gate:fixture "poker: GATE fixture — the other session's gate act"
+expect_eq "REG-0 precondition: the other session holds the waiver open, and a gate act the card does not decide" \
+  "gate:fixture waive:structure" "$(fc_owed2)"
+fc_page
+expect_eq "REG-1 release-approval renders as this session (exit 0)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "REG-2 the other session's waiver is a decision on the card" "waive:structure" "$(fc_keys)"
+expect_contains "REG-2b …with its replay line, waive or withhold" "|key=waive:structure|default=waive structure|" "$(fc_table)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "REG-3 reply all default applies it (exit 0)" "0" "$RC"
+expect_regex "REG-3b …writing the waiver with the reply's words" \
+  "^waived: question=structure head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=structure ' "$PFC")"
+expect_eq "REG-4 answered here, the waiver is closed for the session that raised it; its gate act stays open" \
+  "gate:fixture" "$(fc_owed2)"
+rm -f "$RFC/.bionic/tmp/engaged-$FC_SID2.state" "$RFC/.bionic/tmp/owed-$FC_SID2.state"
 
 # ============================================================
 section "§REPLY: all default and all recommended replay into their verbs with the user's words; anything else writes nothing"
@@ -789,16 +845,16 @@ expect_eq "POST-0 precondition: the working head is the fix's landing, and the r
   "$(git -C "$RFC" rev-parse wave/01-fixture)|$(/usr/bin/grep -E '^\| T[2456] \|' "$PFC" | awk -F'|' '{ gsub(/ /, "", $2); gsub(/ /, "", $13); printf "%s%s:%s", (n++ ? " " : ""), $2, $13 }')"
 fc_card early
 expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 1)" \
-  "1|CARD-EARLY — reader row T5 reads what landed after the release, and its reading is not registered" "$FC_RC|$FC_ERR"
+  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_page
 expect_eq "POST-1b …release-approval says the same, renders nothing and writes no page" \
-  "1|CARD-EARLY — reader row T5 reads what landed after the release, and its reading is not registered||" \
+  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered||" \
   "$FC_RC|$FC_ERR|$FC_OUT|$(fc_pages)"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)"
 fc_card early
 expect_eq "POST-1c the critic's two readings registered, the auditor's not: early, naming the auditor's row T6 (exit 1)" \
-  "1|CARD-EARLY — reader row T6 reads what landed after the release, and its reading is not registered" "$FC_RC|$FC_ERR"
+  "1|CARD-EARLY — review row T6 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)
 $(fc_post_read evidence)"
@@ -892,6 +948,30 @@ expect_eq "RATIO-5 with no check proof the page prints no number (it still rende
 rm -f "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
 
 # ============================================================
+section "§CHECK-CHANGED: the card says when the release changes the declared release check (AC-10.2)"
+# ============================================================
+# The release range is the fixture's base-sha to its head, which changes lib/x.sh and CHANGELOG.md. A check whose
+# script is lib/x.sh is changed by this release; one whose script is tests/a.test.sh is not. fails-when: the card is
+# silent about a release that changes its check, or names a change to a check the release leaves alone.
+cc_line() { printf '%s\n' "$FC_OUT" | /usr/bin/grep 'changes the release check'; }
+printf 'release-check: bash lib/x.sh\n' > "$RFC/.bionic/config.yaml"
+rt_log "$FC_R" "test-ratio: 1/2"
+rt_plan "$FC_R"
+fc_page
+expect_eq "CHECK-CHANGED-1 the page renders on a release that changes its check's script (exit 0, nothing on stderr)" \
+  "0|" "$FC_RC|$FC_ERR"
+expect_eq "CHECK-CHANGED-2 …and its Bottom line names the check's changed file, once" \
+  "- This release changes the release check: lib/x.sh." "$(cc_line)"
+expect_eq "CHECK-CHANGED-2b …under Bottom line" "1" "$(fc_under 'Bottom line' | /usr/bin/grep -c 'changes the release check')"
+printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
+rt_plan "$FC_R"
+fc_page
+expect_eq "CHECK-CHANGED-3 a release that leaves its check alone renders with its Bottom line" "0|1" \
+  "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^Bottom line$')"
+expect_eq "CHECK-CHANGED-3b …and says nothing of the check" "" "$(cc_line)"
+rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
+
+# ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
 # ============================================================
 {
@@ -901,7 +981,7 @@ section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 sha
   printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
   printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
 } > "$PFC"
-rm -f "$RFC/.bionic/tmp/owed-$SID.state"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state"
 bind_marker "$RFC" "$PFC"
 fc_card step0
 expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \
@@ -909,5 +989,43 @@ expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, unde
 expect_eq "STEP0-2 …its sections in the 1.20.0 order" "Purpose|Seed|Run|Branches|Paths|Shape|Gates|Models" \
   "$(printf '%s\n' "$FC_OUT" | sed -n 's/^  \([A-Z][A-Za-z]*\)$/\1/p' | paste -sd'|' -)"
 expect_eq "STEP0-6 rendered for the session's own run, it opens the person's approve:step0 item" "approve:step0" "$(fc_owed)"
+expect_eq "STEP0-7 every line of the card is within the shared 100 columns" "0" \
+  "$(printf '%s\n' "$FC_OUT" | fc_cols | awk '$1 > 100' | /usr/bin/grep -c .)"
+
+# ============================================================
+section "§CARRY: a carry the run chose is the run's ask until the release approval card's reply rules it"
+# ============================================================
+# A reading's S3 on finding is deferred by the severity table and moved by no person: the run carries it. The acting
+# render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
+# page closes each. fails-when: the reply leaves the carry open on the run's register.
+FC_CK="carry:record:wave-x:adversarial.md:1"
+fc_reg() { cat "$FC_REC/asks.state" 2>/dev/null; }
+fc_record adversarial adversarial piece 'finding: 1 S3 on lib/x.sh:1 a message could be clearer'
+fc_plan "$FC_GOOD"
+fc_page
+expect_eq "CARRY-0 precondition: the page renders (exit 0)" "0|" "$FC_RC|$FC_ERR"
+expect_contains "CARRY-1 the render's disposition opens the carry on the run's register" "$FC_CK" "$(fc_owed)"
+expect_contains "CARRY-2 …and the page records the carry it puts" "carried: $FC_FID" "$(cat "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "CARRY-3 reply all default exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_absent "CARRY-4 the reply rules the carry: it is no longer open (CARRY-1 read it open)" "$FC_CK" "$(fc_owed)"
+expect_contains "CARRY-4b …the register says the reply closed it" "|key=$FC_CK|state=closed|by=release approval reply|" "$(fc_reg)"
+# A card left with no decision still carries what it shows: its page is written, so the reply that answers it rules
+# the carry. fails-when: a decisionless card writes no page and its carry stays open.
+FC_CK2="carry:record:wave-x:structure.md:1"
+fc_record structure structure piece 'finding: 1 S3 on lib/x.sh:1 a name could be clearer'
+fc_page
+expect_eq "CARRY-5 precondition: after the reply the card renders with no decision (exit 0)" "0|None wait on you." "$FC_RC|$(fc_under Decisions)"
+expect_contains "CARRY-5b …and its render opens the new carry on the run's register" "$FC_CK2" "$(fc_owed)"
+expect_contains "CARRY-5c the decisionless card still records its page, with the carry it puts" "carried: record/wave-x/structure.md#1" \
+  "$(cat "$FC_REC/release-approval-$FC_H8-2.md" 2>/dev/null)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "CARRY-6 reply all default answers that page (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_contains "CARRY-6b …and rules its carry: the register says the reply closed it" \
+  "|key=$FC_CK2|state=closed|by=release approval reply|" "$(fc_reg)"
+fc_record structure structure piece
+fc_record adversarial adversarial piece "$FC_S3"
 
 finish

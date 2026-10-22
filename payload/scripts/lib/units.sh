@@ -1120,13 +1120,13 @@ _units_floor_state() {
 _units_readings_state() {
   local plan="${1:-}" tree head out rc
   declare -F facts_state >/dev/null 2>&1 && declare -F proof_branch_head >/dev/null 2>&1 \
-    || { printf 'the readings cannot be judged here (lib/proof.sh)'; return 0; }
+    || { printf 'the reviews cannot be judged here (lib/proof.sh)'; return 0; }
   # THE DOCS ROOT IS PROSE TO THE WALK (wave-36 T28): facts_state reads it through lib/roots.sh `docs_root`,
   # which a shell that sourced this file alone has not loaded; without it a docs-only landing would owe.
   declare -F _proof_roots_load >/dev/null 2>&1 && _proof_roots_load
   tree="$(_units_plan_tree "$plan")"
   head="$(proof_branch_head "$plan" "$tree" 2>/dev/null)" \
-    || { printf 'the working branch names no commit, so there is no head to judge the readings at'; return 0; }
+    || { printf 'the working branch names no commit, so there is no head to judge the reviews at'; return 0; }
   out="$(facts_state "$plan" "$head" 2>/dev/null)"; rc=$?
   [ "$rc" -ne 2 ] || { printf "the plan's rigor and scale cannot be dealt"; return 0; }
   out="$(printf '%s\n' "$out" | awk -F'\t' '$1 == "review" && $NF != "covered" { $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')"
@@ -1602,8 +1602,8 @@ _units_sched_awk() {
     # live_judge(i) -> 1 when row i, past its reading, is owed one; else 0 with why in lwhy: what the judge reads per
     # question, or why it could not be asked. Not handed in, it is asked (needread; the program exits 4 first).
     function live_judge(i,   k, q, s, m, Q) {
-      if (readst == "") { needread = 1; lwhy = "the readings are judged by facts_state and are not known here"; return 0 }
-      if (!rdparse()) { lwhy = "the readings are not known here: " readst; return 0 }
+      if (readst == "") { needread = 1; lwhy = "the reviews are judged by facts_state and are not known here"; return 0 }
+      if (!rdparse()) { lwhy = "the reviews are not known here: " readst; return 0 }
       if (live_owes(i)) return 1
       s = ""
       if (nq[i]) m = nq[i]; else m = split(pq, Q, " ")
@@ -1671,9 +1671,9 @@ _units_sched_awk() {
         if (a == "review") {
           if (nw) return 0
           if (knd[i] != "integrate") {
-            if (readst == "") { needread = 1; lwhy = "the readings are judged by facts_state and are not known here"; return 0 }
+            if (readst == "") { needread = 1; lwhy = "the reviews are judged by facts_state and are not known here"; return 0 }
             if (readst == "covered") return 1
-            lwhy = "the readings do not hold (facts_state): " readst
+            lwhy = "the reviews do not hold (facts_state): " readst
             return 0
           }
           if (factsst == "covered") return 1
