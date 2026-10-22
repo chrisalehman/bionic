@@ -781,10 +781,16 @@ function flush_adr(   line, path, rest, id) {
   # AN ADR LINE CARRIES ITS GROUP (wave-35 T8; AC-6.6): a backticked adr- path with no (D<n>) group beside it
   # names an ADR no decision cites, and the ADR column would leave it out in silence.
   if (rest !~ /\(D[0-9]+[^)]*\)/) { err("ADR line names " path " with no (D<n>) group"); return }
+  # EVERY DECISION A GROUP NAMES IS CREDITED (wave-43 D11; AC-13.2): `(D3; D4; REQ-2)` records the ADR
+  # against D3 and D4 both. Reading the first id alone left the cell of D4 as none beside the ADR that records it.
   while (match(rest, /\(D[0-9]+[^)]*\)/)) {
-    id = substr(rest, RSTART + 1, RLENGTH - 2); sub(/[^0-9D].*$/, "", id)
-    print "ADR" OFS id OFS path
-    rest = substr(rest, RSTART + RLENGTH)
+    gs = RSTART; gl = RLENGTH
+    grp = substr(rest, gs + 1, gl - 2)
+    while (match(grp, /D[0-9]+/)) {
+      print "ADR" OFS substr(grp, RSTART, RLENGTH) OFS path
+      grp = substr(grp, RSTART + RLENGTH)
+    }
+    rest = substr(rest, gs + gl)
   }
 }
 function flush_all() { flush_nd(); flush_req(); flush_dec(); flush_adr(); flush_worth() }
@@ -1744,15 +1750,19 @@ _card_step1() {  # <citation path> <artifact path as given>
   printf 'explain <requirement> · set <flag>=<value>\n'
 }
 
-# THE TASK-SCALE STEP-2 CARD IS A PARAGRAPH, BECAUSE THE DESIGN IS ONE (D8). A wave
-# design is a document with decisions, an ownership table and an eval-design table, and
-# the card renders those three batches. A task run writes "a design paragraph per
-# non-trivial task, in the session plan — a prose obligation the reviewer reads, with no
-# wall at task scale at all" (steps/2.md:60), so there are no decisions to tabulate and
-# no eval design to count: the card shows the paragraph, names the artifact, and asks
-# its question. It does NOT offer `show evals` or `explain <decision>`, because a card
-# that offers an affordance over content it is not carrying is the same lying surface
-# the regression line was.
+# THE PARAGRAPH CARD IS FOR A DESIGN THAT IS ONE (D8), AND THE SHAPE FOLLOWS THE SPEC, NEVER
+# THE SCALE (wave-43 D11; AC-13.2). A wave design is a document with decisions, an ownership
+# table and an eval-design table, and the card renders those three batches. A task run may write
+# "a design paragraph per non-trivial task, in the session plan" (steps/2.md:60), and for that
+# spec there are no decisions to tabulate and no eval design to count: the card shows the
+# paragraph, names the artifact, and asks its question, and does NOT offer `show evals` or
+# `explain <decision>`, because a card that offers an affordance over content it is not carrying
+# is the same lying surface the regression line was. But a task-scale run that writes the full
+# spec (waves 42 and 43 did) gets the full card: keying the shape on `scale:` alone drew the
+# paragraph over nine decisions and 37 evals, and the decisions reached the user by hand
+# (wave-42 A-orch.8). `_card_step2_paragraph` is the one test: no decision row and no eval row.
+_card_step2_paragraph() { [ "${#WCARD_DROW[@]}" -eq 0 ] && [ "${#WCARD_EROW[@]}" -eq 0 ]; }
+
 _card_step2_task() {  # <citation path>
   local d="$WCARD_DESIGN"
   [ -n "$d" ] || d="$WCARD_GOAL"
@@ -1838,7 +1848,7 @@ _card_path_line() {  # <label> <path>
 # opens. Ownership and one requirement's evals are not on it — they are asked for, as the
 # sub-views the last line offers.
 _card_step2() {  # <artifact path>
-  if [ "$CARD_SCALE" = "task" ]; then _card_step2_task "$1"; return 0; fi
+  if [ "$CARD_SCALE" = "task" ] && _card_step2_paragraph; then _card_step2_task "$1"; return 0; fi
   local e dp
   printf 'Step 2 · Design\n\n  Goal\n'
   _card_fold_at 4 "$WCARD_GOAL"
@@ -1944,12 +1954,12 @@ _card_step2_refuse() {  # <what was wrong>
   exit 2
 }
 
-# `step2 <spec> [ownership | evals <REQ-id>]`, the arguments after the artifact. A task-scale
-# card offers neither view, so it refuses both.
+# `step2 <spec> [ownership | evals <REQ-id>]`, the arguments after the artifact. The paragraph
+# card offers neither view, so it refuses both; a task-scale spec holding the tables has them.
 _card_step2_view() {  # <artifact path as given> <args...>
   shift
   local view="${1:-}" known=0 row r
-  [ "$CARD_SCALE" != "task" ] || _card_step2_refuse "a task-scale design has no sub-views"
+  if [ "$CARD_SCALE" = "task" ] && _card_step2_paragraph; then _card_step2_refuse "a paragraph design has no sub-views"; fi
   case "$view" in
     ownership)
       [ "$#" -eq 1 ] || _card_step2_refuse "ownership takes no argument"

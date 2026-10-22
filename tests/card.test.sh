@@ -987,5 +987,61 @@ expect_eq "WIDTH-5b …and holds no 92" "" "$(/usr/bin/grep -nw '92' "$CARD_SH")
 
 card_intree_cleanup
 
+# ============================================================
+section "§CONTENT: the Step-2 card's shape follows what the spec holds, never the scale (wave-43 D11; REQ-13 AC-13.2)"
+# ============================================================
+# Wave 42 and wave 43 both wrote a wave-shaped spec at task scale, and the renderer drew the
+# paragraph card for it, since one line keyed the shape on `scale:`. The decisions and the eval
+# counts the user was approving never reached the card, and wave 42 drew them by hand (A-orch.8).
+# The rule now: a spec that holds decision rows or an eval table gets the full card and its
+# sub-views, whatever the scale; a spec that holds neither keeps the paragraph card, the
+# task-scale form. An ADR line naming several decisions, `(D1; D2; REQ-1)`, credits each.
+# fails-when: the dispatch keys on CARD_SCALE alone (CONTENT-2 to CONTENT-4, CONTENT-6), or
+# flush_adr takes only the first D of a group (CONTENT-5).
+TASK_SPEC="${CARD_SANDBOX}/wave-98-task.spec.md"
+sed -e 's/^sdlc-step: 2$/sdlc-step: 2\nscale: task/' \
+    -e 's/`adrs\/epic-99\/adr-099-fixture.md` (D1)\./`adrs\/epic-99\/adr-099-fixture.md` (D1; D2; REQ-1)./' \
+    "$SPEC_FIX" > "$TASK_SPEC"
+expect_contains "CONTENT-0 precondition: the task spec declares scale: task" "scale: task" "$(cat "$TASK_SPEC")"
+expect_contains "CONTENT-0b precondition: its ADR line names D1 and D2" "(D1; D2; REQ-1)" "$(cat "$TASK_SPEC")"
+whole_card step2 "$TASK_SPEC"; S2_TASK="$WC_OUT"
+expect_eq "CONTENT-1 step2 exits 0 on a task-scale spec that holds decisions and evals" "0" "$WC_RC"
+expect_contains "CONTENT-2 …and the card carries the Decisions section with D1" "D1" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p')"
+expect_contains "CONTENT-2b …and D2" "D2" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p')"
+expect_contains "CONTENT-3 …and the Eval design section with its total row" "total" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Eval design/,/^  Artifacts/p')"
+expect_contains "CONTENT-4 …and the sub-view line, since the content is there to show" "show evals <req>" "$S2_TASK"
+expect_eq "CONTENT-5 an ADR line naming D1 and D2 credits both decisions with the ADR" "2" \
+  "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p' | /usr/bin/grep -c 'adr-099-fixture.md')"
+whole_card step2 "$TASK_SPEC" ownership
+expect_eq "CONTENT-6 the ownership sub-view is offered on that spec too" "0" "$WC_RC"
+expect_contains "CONTENT-6b …and carries the table's rows" "lib/first.sh" "$WC_OUT"
+PARA_SPEC="${CARD_SANDBOX}/wave-97-para.spec.md"
+cat > "$PARA_SPEC" <<'FIXEOF'
+---
+sdlc-step: 2
+scale: task
+working-branch: wave/97-para
+integration-branch: main
+base-sha: abc1234
+---
+
+# fixture wave 97 · spec
+
+## Goal
+
+One small thing, designed in a paragraph.
+
+## Design
+
+The one thing lives in one file and is read by one caller; nothing else changes.
+FIXEOF
+whole_card step2 "$PARA_SPEC"; S2_PARA="$WC_OUT"
+expect_eq "CONTENT-7 a task-scale spec holding neither decisions nor evals still exits 0" "0" "$WC_RC"
+expect_contains "CONTENT-7b …and draws the paragraph card" "The one thing lives in one file" "$S2_PARA"
+expect_eq "CONTENT-7c …with no Decisions section and no sub-view line" "" \
+  "$(printf '%s\n' "$S2_PARA" | /usr/bin/grep -e '^  Decisions' -e 'show evals')"
+whole_card step2 "$PARA_SPEC" ownership
+expect_eq "CONTENT-7d …and refuses the sub-view, as before" "2" "$WC_RC"
+
 
 finish

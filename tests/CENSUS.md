@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 115 · sections: 1041 · keep: 850 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 115 · sections: 1042 · keep: 851 · duplicate: 158 · prose pin: 18 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1071 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1071 - 22 - 8 = 1041.
 
@@ -142,6 +142,7 @@ card.test.sh | §Section 6 | keep | payload/scripts/card.sh: the ownership owner
 card.test.sh | §Section 7 | keep | payload/scripts/card.sh step1: the missing-provenance refusal deleted, so a REQ heading with no provenance line renders a card at exit 0 (64, 64b) | none (searched 'provenance' and 'card.sh step1' in tests/)
 card.test.sh | §KINDS | keep | payload/scripts/card.sh release: a fact dropped or reordered on the way to the page, or an unknown fact drawn as nothing instead of refused, so the release card differs from REL_WANT (KINDS-2) or exits 0 on an unknown fact (KINDS-4, KINDS-4b); a second renderer (rr_page, sitrep_fold) left on the release path (KINDS-6b, KINDS-6c) or anywhere shipped (KINDS-8b); the sitrep kind's dispatch arm deleted (KINDS-7, KINDS-7c) | none (searched 'card.sh release' and 'rr_page' in tests/; release-approval.test.sh renders through the verb, never the kind on raw facts)
 card.test.sh | §WIDTH | keep | payload/scripts/card.sh _card_hang: the fold set back to 92, so a line that fits BIONIC_LINE_WIDTH folds (WIDTH-1, WIDTH-5b, WIDTH-6b), or the fold removed, so a release, sitrep, Step-1, Step-2 or Step-3 card line exceeds the width (WIDTH-3, WIDTH-4, WIDTH-6e) | none (searched 'BIONIC_LINE_WIDTH' and 'over_budget' in tests/; release-approval.test.sh STEP0-7 holds the Step 0 card alone)
+card.test.sh | §CONTENT | keep | payload/scripts/card.sh _card_step2: the dispatch keyed on CARD_SCALE alone, so a task-scale spec holding decisions and evals draws the paragraph card (CONTENT-2 to CONTENT-4, CONTENT-6); flush_adr reading the first D of a group, so D2 on a (D1; D2) line shows none (CONTENT-5) | none (searched '_card_step2_task' and 'scale: task' in tests/)
 
 ## close-out-1.test.sh
 
