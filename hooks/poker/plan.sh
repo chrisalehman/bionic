@@ -1077,27 +1077,28 @@ EOF
     # row has no column for, so here it is a note and the row goes in.
     # A REVIEW ROW'S FILES ARE ITS QUESTIONS' RECORDS. Its reader writes one record per question the rigor deals and
     # registers each, so a cell naming fewer leaves deliver a record no proof names, or several and no way to choose.
-    # A cell naming no record is given the rendered list (`poker_review_records`); a cell naming records must name
-    # each of them, by its file name, or is refused with the list. The first is the record deliver takes, written to
-    # the row's artifact cell below when the table has one.
+    # A cell naming no record is given the rendered list (`poker_review_records`). A cell that already names a record
+    # for every question keeps the names it wrote: the brief and the roster row carry the row's own names, and the
+    # reviewer's registration is judged against them, so a rendered name the cell never used is no name to demand.
+    # A cell naming some records but fewer than the questions is refused with the rendered list. The first record the
+    # cell names is the one deliver takes, written to the row's artifact cell below when the table has one.
     TA_REV_ART=""
     if [ "$TA_KIND" = review ] && TA_REVIEW="$(poker_review_records "$TA_PLAN" "$REPO_REAL")"; then
       TA_HAVE="$(printf '%s\n' "$TA_FILES" | tr ',' '\n' | awk '
         { gsub(/`/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
-        index($0, "record/") && /\.md$/ { n = split($0, p, "/"); b = p[n]; if (b !~ /\.progress\.md$/ && b != "assumptions.md") print b }')"
+        index($0, "record/") && /\.md$/ { n = split($0, p, "/"); b = p[n]; if (b !~ /\.progress\.md$/ && b != "assumptions.md" && !seen[$0]++) print $0 }')"
       if [ -z "$TA_HAVE" ]; then
         case "$TA_FILES" in ''|'—'|'-') TA_FILES="$TA_REVIEW" ;; *) TA_FILES="$TA_FILES, $TA_REVIEW" ;; esac
+        TA_REV_ART="${TA_REVIEW%%,*}"
       else
-        TA_MISS=""
-        for TA_R in $(printf '%s' "$TA_REVIEW" | tr ',' ' '); do
-          /usr/bin/grep -qxF -- "${TA_R##*/}" <<< "$TA_HAVE" || TA_MISS="${TA_MISS:+$TA_MISS, }${TA_R##*/}"
-        done
-        if [ -n "$TA_MISS" ]; then
-          die "REFUSED — $TA_ID is a review row, whose Files name one record per question the plan's rigor deals, and its Files name no $TA_MISS; its Files are: $TA_REVIEW (give that list as the Files operand, or — to have it written). The plan is unchanged."
+        TA_NHAVE="$(printf '%s\n' "$TA_HAVE" | awk 'NF' | wc -l | tr -d ' ')"
+        TA_NWANT="$(printf '%s' "$TA_REVIEW" | tr ',' '\n' | awk 'NF' | wc -l | tr -d ' ')"
+        if [ "$TA_NHAVE" -lt "$TA_NWANT" ]; then
+          die "REFUSED — $TA_ID is a review row, whose Files name one record per question the plan's rigor deals: $TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (give that list as the Files operand, or name a record of your own for each question, or — to have the list written). The plan is unchanged."
           exit 1
         fi
+        TA_REV_ART="$(printf '%s\n' "$TA_HAVE" | sed -n 1p)"
       fi
-      TA_REV_ART="${TA_REVIEW%%,*}"
     fi
     poker_files_cell "$TA_ID" "$TA_KIND" "$TA_AGENT" "$TA_FILES" "$REPO_REAL" "$TA_PLAN" || exit $?
     TA_FILES="$PFC_OUT"; TA_ART="$PFC_ART"
