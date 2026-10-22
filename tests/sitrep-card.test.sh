@@ -36,6 +36,8 @@
 # fault is read by the same check that passes the unplanted card in the same call.
 #
 # Usage: bash tests/sitrep-card.test.sh
+#
+# pins: payload/scripts/card.sh payload/scripts/lib/width.sh hooks/poker/sitrep.sh skills/sitrep/SKILL.md
 
 set -uo pipefail
 

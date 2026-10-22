@@ -64,6 +64,8 @@
 # read of the same file in the same fixture that expects a line; each mutant row first proves the mutant ran.
 #
 # Usage: bash tests/door-landing.test.sh
+#
+# pins: tests/lib/door.sh tests/lib/release-check.sh tests/lib/name-scan.sh
 
 set -uo pipefail
 

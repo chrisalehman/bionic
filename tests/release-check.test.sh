@@ -54,6 +54,8 @@
 # doctored copies under the scratch directory. SYNTHESIZED: the versions and the entry.
 #
 # Usage: bash tests/release-check.test.sh
+#
+# pins: tests/lib/release-check.sh tests/lib/name-scan.sh
 
 set -uo pipefail
 

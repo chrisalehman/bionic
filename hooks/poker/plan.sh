@@ -149,12 +149,13 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 #                       which its Files line then carries (wave-35 T8; AC-6.1); else the slot, marked
 #   Progress artifact   the Files entry that ends .progress.md, else <record dir>/<row>.progress.md; Cadence is
 #                       the 15-minute rule's own number. Both only for a size of 15 or more
-#   Files               the row's Files cell, verbatim; no line for a row whose cell is empty or a dash
+#   Files               the row's Files cell, verbatim, then each path the row's Suites declare they pin (their
+#                       `# pins:` header line), one to a line and marked `(pinned by <suite>)`; no line for a row
+#                       whose cell is empty or a dash and whose suites pin nothing
 #   Suites, Lands-on    the row's `suites` / `lands-on` cells when the table has them and the row fills them;
 #                       else the *.test.sh entries of Files by file name; else, for a row whose Files write
-#                       code, the suites `anchors index` names for those files at the working head, or the
-#                       slot marked for the orchestrator, never none (wave-35 T8; AC-6.3); `Suites: none`
-#                       and `Lands-on: none <reason>` only for a row that writes no code
+#                       code, the slot marked for the orchestrator, never none; `Suites: none` and
+#                       `Lands-on: none <reason>` only for a row that writes no code
 #   Row                 the row's id
 # The file starts with the scaffold lines, so no prose after them is a label's first hit (lib/brief.sh reads the
 # first hit of an unpinned label). A re-render keeps everything from `## Judgment` on: that section is the
@@ -240,30 +241,36 @@ poker_brief_task_record() {
   }'
 }
 
-# poker_brief_index_suites <root> <at> <Files cell> -> lib/anchors.sh `reads_suites`, comma-joined: the suites the reads
-# index names, at <at> (a commit, or - for the files under <root>), for any file an entry of the cell covers. Nothing
-# when no suite reads such a file, or the library cannot be loaded (wave-35 T8; REQ-6 AC-6.3; D15, D9). THE ONE
-# READER (wave-37 T3; D4): the dispatch wall's Lands-on arm calls the same `reads_suites`, and the floor's cover rule
-# reads the same index.
-poker_brief_index_suites() {
-  declare -F reads_suites >/dev/null 2>&1 \
-    || { [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh"; } || return 0
-  declare -F reads_suites >/dev/null 2>&1 || return 0
-  reads_suites "$1" "$2" "$3" | awk 'NF { o = o (o == "" ? "" : ", ") $0 } END { printf "%s", o }'
+# poker_brief_pins <root> <at> <suite> -> the paths the suite's header declares it pins, one per line: every
+# `# pins: <path> [<path>…]` line of the comment block that opens the file, paths from the repository root. The suite
+# is read at <at> (a commit) when one is given, else under <root>; a suite that cannot be read, or declares none,
+# yields nothing. Declared, never inferred: the header is the only place it looks, so a line of the suite's body that
+# quotes the shape is not a declaration.
+poker_brief_pins() {
+  { if [ -n "$2" ]; then git -C "$1" show "$2:tests/${3##*/}" 2>/dev/null
+    else cat "$1/tests/${3##*/}" 2>/dev/null; fi; } | awk '
+    /^[ \t]*$/ { next }
+    /^#/ { if ($0 ~ /^# pins:[ \t]/) { sub(/^# pins:[ \t]+/, ""); for (i = 1; i <= NF; i++) print $i } next }
+    { exit }'
 }
 
-# poker_brief_union <list>... -> the suites of every list (each comma-separated), in the order given, once each by file
-# name (a spelling `tests/x.test.sh` and `x.test.sh` is one suite), comma-joined. The one fold of a row's own cells and
-# the reads index (wave-39 T23; REQ-17 AC-17.1; D22).
-poker_brief_union() {
-  printf '%s\n' "$@" | awk '{
-    n = split($0, s, /[ \t]*,[ \t]*/)
-    for (i = 1; i <= n; i++) {
-      t = s[i]; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
-      b = t; sub(/^.*\//, "", b)
-      if (b != "" && !(b in seen)) { seen[b] = 1; o = o (o == "" ? "" : ", ") t }
-    } }
-    END { printf "%s", o }'
+# poker_brief_pinned <root> <at> <Files cell> <suites, comma-joined> -> one line per path the suites pin that the Files
+# cell does not already name: `<path>  # (pinned by <suite>[, <suite>])`, first-seen order, a path two suites pin once.
+# The mark is a trailing comment, which the Files reader strips, so the path is the entry and the mark never is.
+poker_brief_pinned() {
+  local s
+  printf '%s\n' "$4" | tr ',' '\n' | sed 's/^[ \t]*//; s/[ \t]*$//' | while IFS= read -r s; do
+    case "$s" in ''|*[[:space:]]*|*'<'*) continue ;; esac
+    poker_brief_pins "$1" "$2" "$s" | awk -v s="${s##*/}" '{ print $0 "\t" s }'
+  done | awk -F'\t' -v files="$3" '
+    BEGIN {
+      n = split(files, f, ",")
+      for (i = 1; i <= n; i++) { e = f[i]; gsub(/`/, "", e); gsub(/^[ \t]+|[ \t]+$/, "", e); if (e != "") held[e] = 1 }
+    }
+    ($1 in held) { next }
+    { if (!($1 in by)) order[++m] = $1
+      if (index(", " by[$1] ",", ", " $2 ",") == 0) by[$1] = by[$1] (by[$1] == "" ? "" : ", ") $2 }
+    END { for (i = 1; i <= m; i++) print order[i] "  # (pinned by " by[order[i]] ")" }'
 }
 
 # poker_reader_kind <kind> -> 0 for a reader row's kind (verify, test, review): its artifact is a record it writes.
@@ -2098,32 +2105,32 @@ EOF
     fi
 
     # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files' *.test.sh entries, in
-    # order, and then (a row whose Files write the head) every further suite that reads those files at the working
-    # head (wave-35 T8; wave-36 T27, REQ-6 AC-6.1, D12: the reads index, the fact the dispatch wall holds Lands-on:
-    # to), sorted, once each; else the slot: `none` is a waiver nobody chose for a row that writes code.
+    # order; else, for a row that writes code, the slot: `none` is a waiver nobody chose for it.
     BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
     BRF_SUITE_SLOT=""
     BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
     poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
-    BRF_IDX=""
     if units_writes_head "$BRF_FILES"; then
-      # THE INDEX IS UNIONED WHETHER OR NOT THE ROW HAS CELLS (wave-39 T23; REQ-17 AC-17.1; D22): the dispatch wall
-      # refuses a Lands-on: that omits a suite the index names for the Files, and one outside Suites:, so a row's own
-      # cells end nothing: Suites: is them with the index's suites after, and Lands-on: is its cell (else the Suites)
-      # with the same after. A `none` Lands-on cell is the wall's refusal for a row that writes code, so it is not carried.
-      BRF_IDX="$(poker_brief_index_suites "$PV_REPO" "${BRF_SHA:--}" "$BRF_FILES")"
-      BRF_SUITES="$(poker_brief_union "$BRF_SUITES" "$BRF_IDX")"
-      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: no suite reads these Files (reads index); write the suites that pin them>"
+      # A ROW THAT WRITES CODE NAMES ITS SUITES: `none` is a waiver nobody chose, so the slot is the orchestrator's to
+      # fill. A `none` Lands-on cell is the dispatch wall's refusal for such a row, so it is not carried.
+      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: the row names no suite; write the suites that pin its Files>"
       case "$BRF_LANDS" in none|none[[:space:]]*) BRF_LANDS="" ;; esac
     fi
     if poker_brief_none "$BRF_LANDS"; then
       BRF_LANDS="$BRF_SUITES"
       [ -n "$BRF_LANDS" ] || BRF_LANDS="$BRF_SUITE_SLOT"
       [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
-    else
-      BRF_LANDS="$(poker_brief_union "$BRF_LANDS" "$BRF_IDX")"
     fi
     [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
+
+    # THE PINS OF THE SUITES: each suite in Suites declares the files it pins in its own header, and they follow the
+    # row's Files on lines of their own, each marked with the suite that pins it (a suite with no header adds nothing).
+    # The Files reader takes a line's trailing comment off, so the mark is read by people and never as a path.
+    BRF_PINNED="$(poker_brief_pinned "$PV_REPO" "$BRF_SHA" "$BRF_FILES" "$BRF_SUITES")"
+    if [ -n "$BRF_PINNED" ]; then
+      if poker_brief_none "$BRF_FILES_LINE"; then BRF_FILES_LINE="$BRF_PINNED"; else BRF_FILES_LINE="$BRF_FILES_LINE
+$BRF_PINNED"; fi
+    fi
 
     # THE SCAFFOLD, in the shipped order. A label the verb has no value for is the orchestrator's: it is named, not written.
     BRF_SLOT="<ORCHESTRATOR: the row has none; write it>"
