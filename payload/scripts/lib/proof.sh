@@ -1999,30 +1999,42 @@ proof_debt_record() {
 }
 
 # proof_debt_origin <sid> <marker> <bound plan> -> the plan whose landing record holds the debts a
-# commit bound to <bound plan> owes (wave-27 T76; review pass 60 P0-1; A-orch-170, A-orch-171). A
-# plan verb proves its change by a dry commit of a COPY, `<plan>.<verb>-dry.<pid>`, under a session
-# `planverb-<pid>` whose marker it writes with `dry_of=<plan>` beside `plan=<copy>` (hooks/
-# session-poker.sh `plan_verb_dry`); the copy's own name names no record, so the dry commit reads the
-# record of the plan it was made from. The field is honoured only when all three hold: the session
-# is a plan verb's (`planverb-<pid>`), the marker says `dry_of=`, and the bound file is named
-# `<dry_of>.<verb>-dry.<pid>`, the same pid.
+# commit bound to <bound plan> owes. A dry commit is bound to a COPY of a plan, and the copy's own name
+# names no record, so the dry commit reads the record of the plan it was made from, which its session's
+# marker says in `dry_of=<plan>` beside `plan=<copy>`. Two callers make such a copy: a plan verb proves its change by a dry commit of
+# `<plan>.<verb>-dry.<pid>` under `planverb-<pid>`, and close-out's preflight judges the plan it would
+# write as `<dir>/.<plan file>.preflight.<pid>` under `closeout-preflight-<pid>`. One record per plan,
+# whichever file carries its text: the answer to "is this review question answered" is the same on the
+# plan and on its copy.
+# The field is honoured only when all three hold: the marker says `dry_of=`, the session id ends in
+# `-<pid>`, and the bound file is one of the two names above for that same pid.
 # A real session bound to a real plan names no such file, so it reads exactly its own plan's record,
 # whatever a marker line says. No fork: the marker is two or three lines, read here.
 proof_debt_origin() {
-  local sid="${1:-}" marker="${2:-}" plan="${3:-}" line from="" verb pid=""
-  case "$sid" in planverb-*) pid="${sid#planverb-}" ;; esac
+  local sid="${1:-}" marker="${2:-}" plan="${3:-}" line from="" verb pid="" dir="" base="" ok=0
+  case "$sid" in *-[0-9]*) pid="${sid##*-}" ;; esac
   case "$pid" in ''|*[!0-9]*) printf '%s' "$plan"; return 0 ;; esac
   if [ -f "$marker" ] && [ ! -L "$marker" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in dry_of=?*) from="${line#dry_of=}"; break ;; esac
     done < "$marker"
   fi
-  verb=""
-  case "$from" in ?*) case "$plan" in "$from".?*-dry."$pid") verb="${plan#"$from".}"; verb="${verb%-dry."$pid"}" ;; esac ;; esac
-  case "$verb" in
-    ''|*[!a-z-]*) printf '%s' "$plan" ;;
-    *) printf '%s' "$from" ;;
+  case "$from" in
+    '') printf '%s' "$plan"; return 0 ;;
   esac
+  case "$plan" in
+    "$from".?*-dry."$pid")
+      verb="${plan#"$from".}"; verb="${verb%-dry."$pid"}"
+      case "$verb" in ''|*[!a-z-]*) : ;; *) ok=1 ;; esac ;;
+  esac
+  case "$from" in */*) dir="${from%/*}"; base="${from##*/}" ;; *) base="$from" ;; esac
+  if [ "$ok" = 0 ] && [ -n "$base" ]; then
+    case "$dir" in
+      '') [ "$plan" = ".$base.preflight.$pid" ] && ok=1 ;;
+      *) [ "$plan" = "$dir/.$base.preflight.$pid" ] && ok=1 ;;
+    esac
+  fi
+  if [ "$ok" = 1 ]; then printf '%s' "$from"; else printf '%s' "$plan"; fi
 }
 
 # proof_plan_slug <plan> -> the plan's slug, its file name less `.plan.md`, the directory its run's records live
