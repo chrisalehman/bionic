@@ -12,7 +12,7 @@
 #   §CALL      the clean card's call names no ask and Blocked on you is one row; the owed card's call names one
 #   §FLOOR     an open ask key the judgment leaves out refuses the card
 #   §SHAPE     a 101-column line, a step row above its tasks, an open task twice or not at all: each refused
-#   §WORDS     "reader" and its kin in the judgment refuse the card; a goal nobody measures says "not measured"
+#   §WORDS     "reader", "reading" and their kin, or "unmeasured", in the judgment refuse the card, each word with its rule
 #   §REFUSE    a refused card prints nothing on stdout, every reason on stderr
 #   §JUDGMENT  the judgment's own floors: one grade A to F, one to five points, a call, one close, known tags
 #   §VERB      the verb draws the card from the run's own sheet, and settles a decision the ledger ruled first
@@ -327,7 +327,7 @@ expect_eq "SH10 a finished task's row, alone in its step, is one line too: withi
   "$SC_RC|$(sc_wide "$SC_OUT")|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -F '    ✅ 4/3: ' | /usr/bin/grep -c '…$' | sed 's/^1$/yes/')"
 
 # ============================================================
-section "§WORDS: \"reader\" in the judgment refuses the card; an unmeasured goal prints \"not measured\""
+section "§WORDS: \"reader\", \"reading\" or \"unmeasured\" in the judgment refuses the card; an unmeasured goal prints \"not measured\""
 # ============================================================
 # fails-when: the card prints "reader" or "no reader for".
 for w in 'the reader saw it' 'two readers agree' 'the readings hold' 'a reading of the run' 'the reading is late' 'no reader for the goal' 'The Reader says so'; do
@@ -344,6 +344,25 @@ expect_eq "WO3 control: read, spreadsheet and readiness are other words, and the
 expect_eq "WO4 a goal nobody measures says not measured on the card" "    • Goals: 0 of 3 met; 3 not measured yet" \
   "$(sc_under "$SC_OUT" Metrics | /usr/bin/grep -F 'Goals: ')"
 expect_absent "WO4b …and the card says no reader (WO4 read the same card)" "reader" "$SC_OUT"
+# fails-when: "reading" with no article before it, or "unmeasured", prints on the card.
+for w in 'The structure reading has not run yet.' 'Readings differ.' 'Goals are unmeasured.'; do
+  sc_card "$SC_OWED" "$SC_J_OWED
+point: $w"
+  expect_eq "WO5 \"$w\" in a point refuses the card: exit 1, nothing printed" "1|" "$SC_RC|$SC_OUT"
+done
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^call: Rule on D3:/call: Rule on D3 before the reading:/')"
+expect_eq "WO6 \"reading\" in the call refuses it too" "1|" "$SC_RC|$SC_OUT"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^close: Depends/close: Goals stay unmeasured; depends/')"
+expect_eq "WO7 \"unmeasured\" in the close refuses it too" "1|" "$SC_RC|$SC_OUT"
+sc_card "$SC_OWED" "$SC_J_OWED
+point: The structure reading has not run; readers are idle and goals are unmeasured."
+expect_eq "WO8 one line with three refused words names each, and each with its own rule" \
+  "1|reading:review|readers:review|unmeasured:not measured" \
+  "$SC_RC|$(printf '%s\n' "$SC_ERR" | sed -n 's/^.*refused: the judgment says "\([a-z]*\)" .*: the card says \(.*\)$/\1:\2/p' | sed 's/:a goal nobody measures is /:/' | paste -sd'|' -)"
+sc_card "$SC_OWED" "$SC_J_OWED
+point: Goals are not yet measured; the structure review has not run."
+expect_eq "WO9 control: \"not measured\" and \"review\" are the card's words, and the card prints" "0|" "$SC_RC|$SC_ERR"
+expect_nonempty "WO9b …on stdout" "$SC_OUT"
 
 # ============================================================
 section "§REFUSE: a refused card leaves stdout empty and says every reason on stderr"

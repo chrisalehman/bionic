@@ -19,7 +19,7 @@
 # §TRIGGERS  a carried S3 stays under Findings; a criterion miss and a recommendation against the default decide
 # §NO-WAIVER no surface offers waiving the regression: an absent or red whole run is early
 # §EARLY     each of the three facts refuses the render in its own words; the tick says the same line as advice
-# §PREVIEW   --preview renders an early run's page and writes nothing
+# §PREVIEW   --preview renders an early run's page and writes nothing; its Bottom line owes a decision only once ready
 # §AGREE     the decisions are exactly the owed items, the unproved rows and the findings recommended against
 # §REGISTER  a waiver another session of the run raised is a decision on the card, and the reply closes it for that session
 # §REPLY     all default and all recommended replay into their verbs; anything else writes nothing
@@ -170,6 +170,7 @@ fc_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "
 fc_owe() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_open "$4" "fixture: $4" "poker: fixture item $4"' _ "$FC_LIB" "$RFC" "$SID" "$1"; }
 fc_heads() { printf '%s\n' "$FC_OUT" | sed -n -E 's/^(Bottom line|Goals|Tests|Reviews|Findings|Decisions)( — .*)?$/\1/p' | paste -sd'|' -; }
 fc_flat() { tr '\n' ' ' | tr -s ' ' | sed 's/ $//'; }  # folded lines read as one, for a phrase the fold may break
+fc_has() { case "$1" in *"$2"*) echo yes ;; esac; }  # <haystack> <needle> -> yes when it holds it
 fc_under() {  # <section> -> the page's lines under that section head, to the next blank line
   printf '%s\n' "$FC_OUT" | awk -v h="$1" 'f && $0 == "" { exit } f { print } $0 == h || index($0, h " — ") == 1 { f = 1 }'
 }
@@ -437,6 +438,25 @@ expect_eq "PREV-7b …and opens no item on the person's ledger, the finding's no
 fc_page
 expect_contains "PREV-7c the acting render of the same run opens the finding's item (the reader is not vacuous)" \
   "finding:" "$(fc_owed)"
+# fails-when: an early preview with a decision in it says both that the run is not ready for decisions and that the
+# user owes one now. Not ready is the card's own answer, the one the acting render refuses on, so the owed line
+# follows it.
+fc_plan "$FC_FAILR"
+new_roster "$RFC"
+add_row "$RFC" name=w38-T14 agent_id=a014 subagent_type=bionic:critic
+fc_page --preview
+FC_BL="$(fc_under 'Bottom line' | fc_flat)"
+expect_eq "PREV-8 a failing review and an open reviewer: the preview renders, saying not ready and naming the reviewer" \
+  "0|yes" "$FC_RC|$(fc_has "$FC_BL" 'Not ready for your decisions: reviewer w38-T14 open.')"
+expect_eq "PREV-8b …and says the decisions are the user's once the run is ready, never that they are owed now" "yes|" \
+  "$(fc_has "$FC_BL" 'Once the run is ready, you will owe ')|$(fc_has "$FC_BL" 'You owe')"
+ack_rows "$RFC" w38-T14
+fc_page --preview
+FC_BL="$(fc_under 'Bottom line' | fc_flat)"
+expect_eq "PREV-8c control: the reviewer acked, the same run is ready and the decisions owed now (PREV-8b read the same lines)" \
+  "yes|yes|" \
+  "$(fc_has "$FC_BL" 'Ready for your decisions')|$(fc_has "$FC_BL" 'You owe ')|$(fc_has "$FC_BL" 'Once the run is ready')"
+new_roster "$RFC"
 
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"

@@ -2459,7 +2459,11 @@ _card_release_bottom() {
   elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every criterion is proved or waived by you."
   elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every criterion is proved."
   else _card_hang 2 "- The matrix holds no criterion."; fi
-  if [ "$RL_N" -gt 0 ]; then
+  # An early run puts no decision: the acting render refuses it, so a preview says what the user will owe, never that
+  # they owe it now, and the card says one thing.
+  if [ "$RL_N" -gt 0 ] && [ -n "$RL_EARLY" ]; then
+    _card_hang 2 "- Once the run is ready, you will owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+  elif [ "$RL_N" -gt 0 ]; then
     _card_hang 2 "- You owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
   else
     _card_hang 2 "- You owe nothing: every approval and waiver is recorded."
@@ -2589,7 +2593,7 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # THE CHECK. Nothing prints until the judgment and the drawn text both pass. The judgment is refused when it drops an
 # open ask, names a key the sheet lacks, says no recommended answer, lists a decision's options, names none of the
 # open asks in its call while one is open, grades outside A to F, has no point or more than five, no call, no close
-# or two, a tag the card does not know, or a refused word (reader, readers, readings, a reading, the reading). The
+# or two, a tag the card does not know, or a refused word (reader, readers, reading, readings, unmeasured). The
 # drawn text (`_card_sitrep_check`, also `card.sh sitrep-check`, so a planted card can prove each test) is refused
 # for a line over BIONIC_LINE_WIDTH, a row with no bullet or icon, the sections out of their order or one with no
 # row, a step row above its own tasks, a Task list row spanning two lines, and an open task with no row or two. A
@@ -2751,11 +2755,13 @@ _card_sitrep_judge() {
      && ! _card_sitrep_names "$(printf '%s\n' "${SJ_CALL[@]}")" $ids; then
     SJ_WHY="${SJ_WHY}the call names none of the open asks: name one by its id ($(_card_list 6 $(for key in "${SR_AKEY[@]}"; do printf '%s ' "${key#*:}"; done)))"$'\n'
   fi
-  # The card says review, never reading or reader, in the review sense or any other: the words are refused whole.
-  SJ_WHY="$SJ_WHY$(printf '%s' "$text" | awk '{ l = tolower($0)
-      if (match(l, /(^|[^a-z])(readers?|readings|(a|the) reading)([^a-z]|$)/)) {
-        w = substr(l, RSTART, RLENGTH); gsub(/^[^a-z]+|[^a-z]+$/, "", w)
-        printf "the judgment says \"%s\" (in: %s): the card says review, and a goal nobody measures is not measured\n", w, substr($0, 1, 60) } }')"
+  # The card says review, never reading or reader, in the review sense or any other, and a goal nobody measures is
+  # not measured, never unmeasured: the words are refused whole, each one on a line named with its own rule.
+  SJ_WHY="$SJ_WHY$(printf '%s' "$text" | awk '{ l = " " tolower($0) " "
+      while (match(l, /[^a-z](readers?|readings?|unmeasured)[^a-z]/)) {
+        w = substr(l, RSTART + 1, RLENGTH - 2); l = substr(l, RSTART + RLENGTH - 1)
+        r = (w == "unmeasured") ? "a goal nobody measures is not measured" : "review"
+        printf "the judgment says \"%s\" (in: %s): the card says %s\n", w, substr($0, 1, 60), r } }')"
 }
 
 _card_sitrep_row() {  # <text> -> the row at 4 columns opening on a bullet, folded under its text
