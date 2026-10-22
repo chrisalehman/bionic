@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1057 · keep: 865 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1058 · keep: 866 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1078 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1078 - 22 - 8 = 1048.
 
@@ -1056,6 +1056,7 @@ release-approval.test.sh | §RATIO | keep | hooks/poker/plan.sh poker_verb_relea
 release-approval.test.sh | §REGISTER | keep | hooks/poker/plan.sh the card's waiver decisions: owed_list_plan "$PV_PLAN" "$PV_REPO" read as the rendering session's own owed_list, so a waiver another session of the run raised is no decision on the card (REG-2, REG-2b, REG-3b, REG-4) | none (searched 'owed_list_plan' in tests/; asks.test.sh §ONE-REGISTER reads the register through owed_list_plan itself, never the card)
 release-approval.test.sh | §CHECK-CHANGED | keep | hooks/poker/plan.sh rr_facts: the check-changed fact dropped, so a release that changes a file its check declares says nothing of it under Bottom line (CHECK-CHANGED-2, CHECK-CHANGED-2b); emitted whatever the range, so a release that leaves the check alone names it (CHECK-CHANGED-3b) | none (searched 'changes the release check' and 'check-changed' in tests/; release-check tests read the log line, not the card)
 release-approval.test.sh | §CARRY | keep | hooks/poker/plan.sh poker_verb_reply: the carry closer after replied: deleted, so the reply leaves the carry open on the run's register (CARRY-4, CARRY-4b); rr_record's carried: lines deleted, so the page records no carry (CARRY-2); the release-approval verb writes no page for a card with no decision, so its carry is never ruled (CARRY-5c, CARRY-6b) | none (searched 'carried: ' and 'carry:' in tests/; asks.test.sh §STOP opens a carry by disposition and never replies)
+release-approval.test.sh | §STALE | keep | payload/scripts/card.sh _card_settles: the stale-approval refusal (hooks/poker/judge.sh cur8_stale_line) not settled as the page's approve:release, so after a fix lands past the approved head the card is CARD-EARLY and the approval is never renewed (STALE-2 to STALE-4); hooks/poker/plan.sh the APPROVALS loop: a given approval skipped whatever the settle says, so no renewal is put (STALE-2b), or the renewal names neither the earlier head nor the landing (STALE-2c, STALE-2d); hooks/poker/proof.sh poker_verb_approve: a second approval at the head the newest line names admitted (STALE-5) | none (searched 'cur8_approved_head', 'approved at' and 'approve release' in tests/; session-poker-4.test.sh §CUR7-COVERED holds an approval over prose, never a renewal)
 
 ## release-check.test.sh
 
