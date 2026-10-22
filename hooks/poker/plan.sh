@@ -1205,7 +1205,7 @@ EOF
       mv -f "$PV_NEW.2" "$PV_NEW"; TA_ART_CELL="$TA_REV_ART"
     fi
 
-    TA_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+    TA_VIOL="$(units_validate "$PV_NEW" "$PV_PLAN" 2>&1)"
     if [ -n "$TA_VIOL" ]; then
       die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TA_VIOL" >&2
@@ -1478,7 +1478,7 @@ EOF
       PV_WHAT="${PV_WHAT:+$PV_WHAT; }$PV_SET_ID ${PV_SET_PAIRS[*]}"
     done
     if [ "$VERB" = task-set ]; then
-      PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+      PV_VIOL="$(units_validate "$PV_NEW" "$PV_PLAN" 2>&1)"
       if [ -n "$PV_VIOL" ]; then
         die "REFUSED — with that change, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
         printf '%s\n' "$PV_VIOL" >&2
@@ -2297,7 +2297,7 @@ BRF_EOF
       die "REFUSED — the split of $TS_ID cannot be written (units_split_row exit $PV_RC: a value no table cell can hold, or no ## SDLC State); the plan is unchanged."
       exit 1
     fi
-    TS_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+    TS_VIOL="$(units_validate "$PV_NEW" "$PV_PLAN" 2>&1)"
     if [ -n "$TS_VIOL" ]; then
       die "REFUSED — with $TS_ID split into $TS_IDS, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TS_VIOL" >&2
