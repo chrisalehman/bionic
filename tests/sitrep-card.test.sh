@@ -79,15 +79,34 @@ task: id=T7 step=4 state=failed desc=the width pins note=red
 task: id=T8 step=4 state=held desc=the skill texts note=held on D3
 task: id=T41 step=5 state=pending desc=the whole regression at the build head note=-
 task: id=T47 step=8 state=pending desc=merge into main note=waits on the release card
-metric.completed: 5 of 10 tasks (50%)
-metric.pace: 5 tasks in 3 h 50 min; the plan allowed 3 h 10 min for them
-metric.correctness: 1 test red; no reviews yet; 0 open findings
-metric.waste: 2 tasks dropped; 0 of 25 suite runs discarded; 60 minutes idle
-metric.goals: 0 of 3 met; 3 not measured yet
+clock.now: 2:40 PM — when this sheet was printed · unit: local time · source: the verb'"'"'s clock
+clock.approved: 8:20 AM — when you approved the plan at Step 3 · unit: local time · source: the plan'"'"'s approved-by: line
+clock.forecast: 10 h 30 min, ends 6:50 PM — how long the plan said the run would take, and when that ends · unit: wall-clock hours, local time · source: the plan'"'"'s forecast: plus clock.approved
+clock.elapsed: 6 h 20 min — wall clock since the approval · unit: h min · source: clock.now less clock.approved
+clock.elapsed-share: 60% — the forecast used so far · unit: % of clock.forecast · source: clock.elapsed over the forecast'"'"'s hours
+work.planned: 10 tasks, 520 min — the tasks in the plan at the approval · unit: count, sized minutes · source: the Tasks rows whose own line names no joining after the approval
+work.added: 2 tasks, 60 min — the tasks added since the approval · unit: count, sized minutes · source: the Tasks rows whose own line says task-add added them after the approval
+work.dropped: 2 tasks, 60 min — the tasks dropped · unit: count, sized minutes · source: the rows with status dropped
+work.landed: 5 tasks, 190 of 520 min, 37% — the tasks landed · unit: count, sized minutes of the live work'"'"'s sized minutes, % of them · source: the rows with status landed
+work.left: 5 tasks, 330 min — the tasks neither landed nor dropped · unit: count, sized minutes · source: the remaining rows
+work.width: median 2, peak 3 — how many tasks ran at once, launch to landing or to now · unit: tasks, the median over the minutes any task ran and the peak · source: the rosters'"'"' launches and the landing record'"'"'s landed: lines
+work.task-time: 5 tasks, 228 min against 190 sized min — the landed tasks'"'"' own time, launch to landing, against their size · unit: minutes against sized minutes · source: the rosters'"'"' first launch of each row and the landing record'"'"'s landed: lines
+pace.time-used: 60% — the share of the forecast time used, as clock.elapsed-share · unit: % · source: clock.elapsed over the forecast'"'"'s hours
+pace.work-landed: 37% — the share of the live work landed, as in work.landed · unit: % of the live work'"'"'s sized minutes · source: work.landed
+close.chain: 4/40 → 5/41 → 8/47, 300 min — the longest run of tasks left that must go one after another · unit: task labels, sized minutes · source: the open rows'"'"' reads
+close.predicted: 8:40 PM — when the run is expected to end · unit: local time · basis: clock.now plus close.chain scaled by the 5 landed tasks'"'"' own time over their size, 228 min over 190 sized min
+close.unscaled: 7:40 PM — the same, with no scaling · unit: local time · source: clock.now plus close.chain'"'"'s sized minutes
+close.waits-on-you: yes: decide:D3 and approve:release — whether the prediction assumes you answer now · unit: yes or no, and which asks · source: the open asks that hold a task on close.chain, the release or the merge
+tests.suites-run: 12: 11 green, 1 red — the suites run this wave, each by its last run · unit: count run: count green, count red · source: the landing record'"'"'s verdicts
+tests.suites-total: 120 — the suites in the project · unit: count · source: the project'"'"'s tests/*.test.sh, every suite tests/run.sh runs
+tests.whole-run: not run yet — the whole regression · unit: not run (and why), or green or red at a commit · source: the plan'"'"'s regression: and its proof
+reviews: 0 passed, 0 failed, 1 running — the reviews, each question and scope once by its latest result · unit: count passed, failed, running · source: the review proofs and the review tasks in flight
+findings.open: 0 — the review findings not yet closed · unit: count · source: the review records
+waste.dropped: 2 tasks, 60 min — the tasks dropped, as work.dropped · unit: count, sized minutes · source: the rows with status dropped
+waste.runs-discarded: 0 of 25 — the suite runs thrown away · unit: count of all suite runs · source: the landing record and the gate
+waste.ready-unstarted: 0 min — the minutes a ready task sat while the machine had room · unit: minutes · source: the fill record
+waste.waiting-on-you: 60 min: decide:D3 — the minutes a task waited on an ask, overlaps counted once · unit: minutes, and which asks · source: the register'"'"'s opened and closed times
 goal: name=owed status=not measured measure=the user says what they owe — not measured
-close.predicted: 8:40 PM
-close.forecast: 6:50 PM
-close.basis: 300 min of work left
 review: question=evidence scope=whole result=running at=- open-findings=0 record=-'
 SC_ASKS='ask: key=decide:D3 holds=4/8 title=D3 · waive or fix raised=1:00 PM
 ask: key=approve:release holds=8/47 title=approval: release raised=1:05 PM'
@@ -111,10 +130,10 @@ task: 6: Review
 task: 7: Document
 task: 8/47: merge into main, waiting on your approval of the release
 task: 9: Close-out'
-SC_J_METRICS='metric: Completed: 5 of 10 tasks, 50%.
-metric: Pace: 5 tasks landed in 3 h 50 min, against the 3 h 10 min the plan allowed.
-metric: Correctness: 1 test red, no review yet, 0 open findings.
-metric: Waste: 2 tasks dropped, 60 minutes idle, 0 of 25 suite runs thrown away.
+SC_J_METRICS='metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 37%; 5 left, 330 minutes.
+metric: Pace: 37% of the work landed in 60% of the forecast time.
+metric: Correctness: 12 suites run, 11 green and 1 red; 1 review running; 0 open findings.
+metric: Waste: 2 tasks dropped; 0 of 25 suite runs thrown away; 60 minutes waiting on you.
 metric: Goals: 0 of 3 met; 3 not measured yet.'
 SC_J_OWED="call: rule on D3: the skill texts and the merge wait on it.
 $SC_J_TASKS
@@ -155,10 +174,10 @@ SC_WANT_OWED='Sitrep · bionic 1.24.0 · wave 41 · Tuesday 2:40 PM
     ⬜ 9: Close-out
 
   Metrics
-    • Completed: 5 of 10 tasks, 50%.
-    • Pace: 5 tasks landed in 3 h 50 min, against the 3 h 10 min the plan allowed.
-    • Correctness: 1 test red, no review yet, 0 open findings.
-    • Waste: 2 tasks dropped, 60 minutes idle, 0 of 25 suite runs thrown away.
+    • Completed: 5 tasks landed, 190 of 520 sized minutes, 37%; 5 left, 330 minutes.
+    • Pace: 37% of the work landed in 60% of the forecast time.
+    • Correctness: 12 suites run, 11 green and 1 red; 1 review running; 0 open findings.
+    • Waste: 2 tasks dropped; 0 of 25 suite runs thrown away; 60 minutes waiting on you.
     • Goals: 0 of 3 met; 3 not measured yet.
 
   Assessment: B
@@ -328,10 +347,10 @@ expect_eq "RO5c a metric with a label the card does not know refuses it, naming 
 sc_card "$SC_OWED" "$SC_J_OWED
 metric: Goals: 3 not measured yet."
 expect_eq "RO5d a metric written twice refuses the card" "1|" "$SC_RC|$SC_OUT"
-sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Completed: 5 of 10 tasks, 50%\./metric: Completed: 5 of 10 tasks, 51%./')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 37%;/metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 51%;/')"
 expect_eq "RO6 a metric number the sheet does not hold refuses the card, naming the number and the metric" "1|yes" \
   "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'Completed' | /usr/bin/grep -qF '51' && echo yes)"
-sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: 5 tasks landed in 3 h 50 min,/metric: Pace: 5 tasks landed by 5:46 PM,/')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: 37% of the work landed in 60% of the forecast time\./metric: Pace: 5 tasks landed by 5:46 PM./')"
 expect_eq "RO6b a clock in a metric is two numbers: 5 is the sheet's, 46 is not, and the card is refused naming 46" "1|yes" \
   "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'Pace' | /usr/bin/grep -qF '46' && echo yes)"
 sc_card "$SC_OWED" "$(sc_judge_without "$SC_J_OWED" 'close: 8:40 PM')"
@@ -339,6 +358,10 @@ expect_eq "RO7 a judgment whose close rows leave out the sheet's predicted close
   "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -qF '8:40 PM' && echo yes)"
 sc_card "$(printf '%s\n' "$SC_OWED" | sed 's/^close.predicted: .*/close.predicted: -/')" "$(sc_judge_without "$SC_J_OWED" 'close: 8:40 PM')"
 expect_eq "RO7b a sheet that predicts no close asks no time of the close rows: the card prints" "0|" "$SC_RC|$SC_ERR"
+expect_eq "RO7c precondition: the planted close names its measure and basis after its value" "yes" \
+  "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^close.predicted: 8:40 PM — when the run is expected to end · unit: local time · basis: ' && echo yes)"
+sc_card "$SC_OWED" "$SC_J_OWED"
+expect_eq "RO7d …and the close rows name the time alone, the value before the measure's words: the card prints" "0|" "$SC_RC|$SC_ERR"
 
 # ============================================================
 section "§SHAPE: a 101-column line, a step row above its tasks, an open task twice or missing — each planted fault is refused"
@@ -375,7 +398,7 @@ expect_eq "SH4c a judgment leaving an open task out is refused, naming it" "1|ye
   "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -qF '4/7' && echo yes)"
 sc_check "$SC_OWED" "$(printf '%s\n' "$SC_WANT_OWED" | sed 's/^    • Completed: /    Completed: /')"
 expect_eq "SH5 a row with no bullet or icon is refused" "1" "$SC_RC"
-expect_contains "SH5b …quoting it" "Completed: 5 of 10" "$SC_ERR"
+expect_contains "SH5b …quoting it" "Completed: 5 tasks landed" "$SC_ERR"
 sc_check "$SC_OWED" "$(printf '%s\n' "$SC_WANT_OWED" | awk '/^  Metrics$/ { m = 1 } m && /^$/ { m = 0; next } !m')"
 expect_eq "SH6 a section missing is refused" "1" "$SC_RC"
 expect_contains "SH6b …naming the section" "Metrics" "$SC_ERR"
@@ -555,6 +578,7 @@ expect_contains "VE2 the sheet settled the register against the ledger: D5, rule
 expect_absent "VE2b …and the sheet shows no D5 (VE1 read the asks of the same sheet)" "decide:D5" "$SV_OUT"
 printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
 sv_fact() { sed -n "s/^$1: //p" "$TMPROOT/verb-sheet"; }   # <key> -> the verb sheet's value for it
+sv_m() { sv_fact "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, 1, i - 1) : $0) }'; }   # <key> -> its measurement alone
 SV_J="call: approve the release once 4/2 lands.
 task: 0: Configure
 task: 1: Scope
@@ -567,15 +591,15 @@ task: 6: Review
 task: 7: Document
 task: 8/3: merge it, waiting on your approval of the release
 task: 9: Close-out
-metric: Completed: $(sv_fact metric.completed)
-metric: Pace: $(sv_fact metric.pace)
-metric: Correctness: $(sv_fact metric.correctness)
-metric: Waste: $(sv_fact metric.waste)
-metric: Goals: $(sv_fact metric.goals)
+metric: Completed: $(sv_m work.landed)
+metric: Pace: $(sv_m pace.work-landed) of the work landed in $(sv_m pace.time-used) of the forecast time
+metric: Correctness: $(sv_m tests.suites-run)
+metric: Waste: $(sv_m waste.runs-discarded) suite runs discarded
+metric: Goals: as the goal lines say
 grade: C
 point: One task is in flight and nothing is red.
 ask approve:release: the release approval, which holds 8/3 — recommend approve once 4/2 lands
-close: $(sv_fact close.predicted), if 4/2 lands first time."
+close: $(sv_m close.predicted), if 4/2 lands first time."
 expect_nonempty "VE2c precondition: the verb's sheet predicts a close the judgment copies" "$(sv_fact close.predicted)"
 sv_run card "$SV_P" <<< "$SV_J"
 expect_eq "VE3 sitrep card prints the card (exit 0, nothing on stderr)" "0|" "$SV_RC|$SV_ERR"

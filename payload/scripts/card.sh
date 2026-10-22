@@ -2605,8 +2605,9 @@ CARD_SITREP_SECTIONS="Call to action|Task list|Metrics|Assessment|Blocked on you
 CARD_SITREP_METRICS="Completed Pace Correctness Waste Goals"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
-# run., metric. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
-# task; `A <key> <holds> <title> <raised>` per ask. A list line's value runs to the next field's ` <name>=`.
+# run. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
+# task; `A <key> <holds> <title> <raised>` per ask. A list line's value runs to the next field's ` <name>=`. A measured
+# line names what it measures after its value, `<value> — <what it measures> · unit: …`; its value is the part before.
 _card_sitrep_sheet() {
   awk '
     function fv(b, f, nxt,   s, r, e) {
@@ -2620,13 +2621,14 @@ _card_sitrep_sheet() {
       for (i = 1; i <= n; i++) out = out "\t" fv(b, a[i], (i < n) ? a[i + 1] : "")
       print out
     }
-    /^(run|metric|close)\.[A-Za-z.-]+: / { k = $0; sub(/: .*$/, "", k); print "R\t" k "\t" substr($0, length(k) + 3); next }
+    /^(run|close)\.[A-Za-z.-]+: / { k = $0; sub(/: .*$/, "", k); v = substr($0, length(k) + 3); i = index(v, " — "); if (i) v = substr(v, 1, i - 1)
+      print "R\t" k "\t" v; next }
     index($0, "step: ") == 1 { rec("S", "step", "n name state tasks"); next }
     index($0, "task: ") == 1 { rec("T", "task", "id step state desc note"); next }
     index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised"); next }' "$1"
 }
 
-# _card_sitrep_fact <key> -> the sheet's value for a run., metric. or close. key in SR_RECS, `-` when it has none
+# _card_sitrep_fact <key> -> the sheet's value for a run. or close. key in SR_RECS, `-` when it has none
 _card_sitrep_fact() {
   printf '%s\n' "$SR_RECS" | awk -F'\t' -v k="$1" '$1 == "R" && $2 == k { v = $3; f = 1; exit } END { print (f && v != "") ? v : "-" }'
 }

@@ -24,15 +24,15 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
 
    The sheet is input for you; never show it, quote it or summarize it to the user. A refusal (no plan bound, no plan at the path) is the answer: say it in one line and stop.
 
-2. Before you write, weigh these six questions against the sheet:
-   - **Pace.** Is the work running on pace? Compare the time the landed tasks took with the time the plan allowed for them. Then compare the predicted close with the forecast, and say why it moved: slower work, or work added.
+2. Before you write, weigh these six questions against the sheet. Each fact states what it measures, its unit and its source after its value: read that before you use a number, and compare only measurements that share a unit. A task's sized minutes are never wall clock, so never set them against a clock time or an elapsed time.
+   - **Pace.** Is the work running on pace? Compare `pace.work-landed` with `pace.time-used`: the share of the work landed against the share of the forecast time used. Then compare `close.predicted` with the end in `clock.forecast`, and say why it moved: slower work, or work added (`work.added`).
    - **Correctness.** Of the red tests, failed reviews and open findings, which matter and which are cosmetic?
-   - **Waste.** What effort was lost to dropped tasks, discarded runs, idle time or waiting on the user?
+   - **Waste.** What effort was lost to dropped tasks, discarded runs, ready tasks left unstarted, or the minutes the work waited on the user?
    - **Goals.** Which goals are met, which are not, and which are not measured yet?
    - **Leverage.** What single thing would most change the outcome now?
    - **Change.** What is new since the last sitrep? What does the user need to know that the numbers don't show?
 
-3. Grade the run by this rubric. The grade is for the run, not the code. Pace grades the run: on pace means the landed tasks took no longer than the plan allowed for them, and behind means they took longer. A close pushed later because work was added is not behind: say it in the Assessment, and never grade it down.
+3. Grade the run by this rubric. The grade is for the run, not the code. Pace sets it: the run is on pace when `pace.work-landed` is at least `pace.time-used`, and behind when it is lower. When work added since the approval is the reason it is behind, name the added work in the Assessment; never hide it.
    - **A**: on pace, correct, and nothing held on the user.
    - **B**: one thing held or slipping, with a clear way through.
    - **C**: behind pace, or a real defect open.
@@ -54,28 +54,29 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
    task: 7: Document
    task: 8/9: Merge into main, waiting on your ruling on the failed review
    task: 9: Close-out
-   metric: Completed: 8 of 9 tasks landed, 89%.
-   metric: Pace: 8 tasks took 3 h 10 min, against the 4 h 30 min the plan allowed.
-   metric: Correctness: 23 suites ran, all green at their last run; 1 review failed.
-   metric: Waste: Nothing dropped and no suite run thrown away; 12 minutes idle.
-   metric: Goals: 1 of 2 met; 1 not measured yet.
-   grade: C
-   point: The build is done and green; only the structure review stands between it and the merge.
-   point: The failed review names two findings, both in the card's check.
+   metric: Completed: 8 tasks landed, 380 of 420 sized minutes, 90%; 1 task left, 40 minutes.
+   metric: Pace: 90% of the work landed in 80% of the forecast time.
+   metric: Correctness: 23 suites run, 23 green and 0 red; 1 review failed, with 2 open findings.
+   metric: Waste: Nothing dropped and no suite run thrown away; 25 minutes waiting on you.
+   metric: Goals: The asks check met; your verdict on the cards not measured yet.
+   grade: B
+   point: The build is done and green, and the work is ahead of the time: 90% landed in 80% of the forecast.
+   point: Only the failed structure review stands between it and the merge; its two findings are in the card's check.
    ask waive:structure, hold:merge: Waive the failed structure review and merge 8/9 anyway? — recommend no; fix the two findings and review again
-   close: 7:40 PM, against the 8:15 PM forecast.
-   close: It holds if the fix lands in one pass and the second review passes.
+   close: 7:40 PM, against the forecast end of 8:15 PM.
+   close: That is the 40 minutes of the merge row from now, at the pace the landed tasks kept against their size.
+   close: It holds if you answer the review now and the fix lands in one pass.
    JUDGMENT
    ```
 
    - `call:` is the single first move, in words. Never restate the whole Blocked on you list.
    - `task:` is the Task list, written `task: <label>: <text>`, in the sheet's step order. Every step on the sheet has a row: by its own label `N`, by one of its tasks `N/x`, or by a range of its finished tasks `N/a–N/b`. Every open task has a row of its own, and a step's own row never sits above its tasks. A row for a waiting task says what it waits on in words: "waiting on your approval of the release", never "waits on step 8 +2". A task row is one line, so keep it short. The card verb draws the icon from the sheet: done or open.
-   - `metric:` is five rows, `metric: <Label>: <text>`: Completed, Pace, Correctness, Waste and Goals, in that order. Each states the sheet's numbers in a sentence. The card verb refuses a number the sheet does not hold, so never round one, add two or work one out.
+   - `metric:` is five rows, `metric: <Label>: <text>`: Completed, Pace, Correctness, Waste and Goals, in that order. Each states the sheet's measurements in a sentence: Completed from `work.landed` and `work.left`, Pace from `pace.work-landed` and `pace.time-used`, Correctness from the `tests.`, `reviews` and `findings.open` lines, Waste from the `waste.` lines, Goals from the `goal:` lines. A comparison sets side by side only two measurements of one unit. The card verb refuses a number the sheet does not hold, so never round one, add two or work one out.
    - `grade:` is one letter, A to F.
    - `point:` gives one to five lines, each a row of the Assessment.
    - `ask <key>:` answers every `ask:` line on the sheet once. Copy its key into the tag, then write what is asked, naming the label of every task it holds (the sheet's `holds=`), and `— recommend <answer>`. When two keys are one decision, such as a waiver and the merge it holds, answer both in one row: `ask <key>, <key>: <what> — recommend <answer>`. Never list a decision's options.
    - `ask +:` is optional: an ask the sheet lacks.
-   - `close:` gives one to three rows. The first opens on the sheet's predicted close time; the others say what the close depends on, and agree with the work the Task list has left.
+   - `close:` gives one to three rows. The first opens on the time in `close.predicted`. Restate its basis in words, never as a ratio: the chain left (`close.chain`) from now, scaled or not by the landed tasks' own time against their size. Say what it depends on, `close.waits-on-you` among it, and agree with the work the Task list has left.
 
    The card verb capitalizes the first letter of each row. It checks your rows against the sheet you wrote from, the one step 1 printed, with the open asks read again from the register. Draw the card within 10 minutes of that sheet: after that, the card verb refuses it and you run step 1 again.
 
