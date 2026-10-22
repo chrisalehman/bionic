@@ -301,7 +301,9 @@ expect_ne "S10b …and the fold is real: the long finding spans more than one li
   "$(awk '/^- The closed index/ { f = 1 } f { n++ } f && /time-keys-head\.log/ { print n; exit }' "$HF_NR_F")"
 expect_eq "S10c a 96-column finding prints whole on one line: the page folds at 100, not at 92" "1" \
   "$(/usr/bin/grep -cxF -- "- $HF_FIT" "$HF_NR_F")"
-expect_eq "S11 State is computed: its written: line is the instant" "written: $HF_ISO" "$(hf_label "$HF_NR_F" written)"
+expect_eq "S11 State is computed: its written: line is the pinned instant on the local 12-hour clock, as the title's time is" "written: 3:00 PM" "$(hf_label "$HF_NR_F" written)"
+expect_eq "S11a …and the instant stays a line of its own for the readers that compare it" "instant: $HF_ISO" "$(hf_label "$HF_NR_F" instant)"
+expect_absent "S11a2 …the UTC text appears only on that line (S11a read the same extractor)" "Z" "$(hf_sec "$HF_NR_F" State | grep -v '^instant: ')"
 expect_absent "S11b …and a composed State line is not in the file (S11 read the same file)" "not computed" "$(cat "$HF_NR_F")"
 expect_eq "S11c State: the branch" "branch: $HF_NR_BR" "$(hf_label "$HF_NR_F" branch)"
 expect_eq "S11d State: the head and its subject" "head: $(git -C "$HF_NR" rev-parse HEAD) the first file" "$(hf_label "$HF_NR_F" head)"
@@ -344,10 +346,13 @@ expect_eq "T6 plan: the bound plan, project-root-relative" "plan: $HF_PLAN_REL" 
 expect_eq "T6b step: the plan's current:" "step: 4" "$(hf_label "$HF_F" step)"
 expect_eq "T6c working branch: the run's branch and its head" "working branch: wave/01-fixture @ $HF_WORK" "$(hf_label "$HF_F" 'working branch')"
 expect_eq "T6d integration: the integration branch and its head" "integration: trunk @ $HF_INT" "$(hf_label "$HF_F" integration)"
-expect_eq "T6e open tasks: the count" "open tasks (3):" "$(hf_sec "$HF_F" State | grep '^open tasks')"
-expect_contains "T6f …the active row with its agent, worktree and status" "  - T2 · w-T2 · 01-T2 · active" "$(hf_sec "$HF_F" State)"
+HF_OPEN_N="$(sed -n 3p "$HF_F" | awk '/^[0-9]+ of [0-9]+ tasks/ { print $3 - $1 }')"
+expect_regex "T6e open tasks: the head's own \`k of m tasks\` leaves some open (so the count below is not vacuous)" '^[1-9][0-9]*$' "$HF_OPEN_N"
+expect_eq "T6e2 …the count is what the head leaves open: m minus k" "open tasks ($HF_OPEN_N):" "$(hf_sec "$HF_F" State | grep '^open tasks')"
+expect_eq "T6e3 …and as many rows are listed" "$HF_OPEN_N" "$(hf_sec "$HF_F" State | awk '/^open tasks/ { f = 1; next } f && /^  - / { n++ } f && /^[a-z]/ { exit } END { print n + 0 }')"
+expect_contains "T6f …the building row with its agent, worktree and the sheet's word for it" "  - T2 · w-T2 · 01-T2 · running" "$(hf_sec "$HF_F" State)"
 expect_contains "T6g …a pending row with a worktree" "  - T6 · — · .worktrees/01-T6 · pending" "$(hf_sec "$HF_F" State)"
-expect_absent "T6h …not a pending row with none (T6f read the same section)" "  - T5 ·" "$(hf_sec "$HF_F" State)"
+expect_regex "T6h …and a pending row with none: the sheet lists it, so the head does (T6g read the same section)" '^  - T5 · [^·]+ · — · pending' "$(hf_sec "$HF_F" State)"
 expect_eq "T6i patrol: not armed (no stamp for this session)" "patrol: not armed" "$(hf_label "$HF_F" patrol)"
 HF_FD="$(hf_sec "$HF_F" Findings)"
 expect_contains "T7 a Finding with its source keeps it" "- The walk is _proof_walk — payload/scripts/lib/proof.sh:1248" "$HF_FD"
@@ -517,20 +522,28 @@ section "§READERS: adopt's STALE note reads the document's written instant thro
 hf_world readers no
 poke "$HF_R" handoff
 expect_eq "R0 precondition: the handoff is written" "0" "$RC"
-expect_eq "R0b precondition: …its written: line is the instant adopt reads" "written: $HF_ISO" "$(hf_label "$HF_F" written)"
-sed 's/^written: .*/written: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
+expect_eq "R0b precondition: …its instant: line is the instant adopt reads, and its written: line is the local clock" "written: 3:00 PM|instant: $HF_ISO" \
+  "$(hf_label "$HF_F" written)|$(hf_label "$HF_F" instant)"
+sed 's/^instant: .*/instant: 2026-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 new_roster "$HF_R"
 add_row "$HF_R" name=w-after status=intended agent_id= plan="$HF_P" launched_at=2026-06-01T00:00:00Z
 poke "$HF_R" adopt --report-only
+expect_contains "R1 a handoff written before a dispatch reads STALE through its instant: line, though its written: line is the local clock" \
+  "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
 s42_snap "$HF_R" "$HF_P"
 cp "$HF_F" "$TMPROOT/hf-unmarked"
 poke "$HF_R" launch-sync
 expect_eq "R2 launch-sync exits 0 with a later dispatch" "0" "$RC"
 expect_true "R2b …the document is byte-identical: it has no safe line to mark (cmp)" cmp -s "$TMPROOT/hf-unmarked" "$HF_F"
 expect_true "R2c …and the plan is byte-identical: the pointer stands (cmp)" cmp -s "$TMPROOT/s42-before" "$HF_P"
-sed 's/^written: .*/written: 2027-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
+sed 's/^instant: .*/instant: 2027-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 poke "$HF_R" adopt --report-only
 expect_absent "R3b …not STALE (R1 read STALE through the same verb)" "STALE" "$OUT"
+# A handoff an earlier release wrote carries one ISO written: line and no instant: line; it must still read.
+awk '/^instant: / { next } /^written: / { print "written: 2026-01-01T00:00:00Z"; next } { print }' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
+poke "$HF_R" adopt --report-only
+expect_contains "R4 an old-shape handoff (an ISO written: line, no instant:) still reads STALE after a later dispatch" \
+  "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
 awk '
   /^## Handoff[ \t]*$/ { print; print ""; print "written: 2026-01-01T00:00:00Z"; print "- safe to exit: yes"; print "- safe to /clear: yes"; print ""; h = 1; next }
   h && /^## / { h = 0 }

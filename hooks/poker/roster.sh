@@ -449,15 +449,19 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
 # lib/handoff.sh since wave-39 T16 (D18; burns debt handoff-pointer-reader): `handoff_pointer_of` is the absolute
 # path the pointer names, project-root relative, empty when the plan has none, and close-out.sh reads it there too.
 # Set in hooks/session-poker.sh, before any part loads: _HANDOFF_ISO_RE.
-handoff_written_at() {  # <plan file> -> the handoff's `written:` instant (the file's, through the pointer), empty when none
+handoff_instant_pick() {  # stdin: a handoff's lines -> its `instant:` ISO, else the first ISO `written:`, empty when neither
+  awk -v re="$_HANDOFF_ISO_RE" '$0 ~ re { v = substr($0, index($0, ": ") + 2); if (index($0, "instant: ") == 1) { print v; got = 1; exit } if (w == "") w = v }
+    END { if (!got && w != "") print w }' 2>/dev/null
+}
+handoff_written_at() {  # <plan file> -> the handoff's instant (the file's, through the pointer), empty when none
   local f
   f="$(handoff_pointer_of "$1")"
   if [ -n "$f" ]; then
     [ -f "$f" ] && [ ! -L "$f" ] || return 0
-    awk -v re="$_HANDOFF_ISO_RE" '$0 ~ re { print substr($0, 10); exit }' "$f" 2>/dev/null
+    handoff_instant_pick < "$f"
     return 0
   fi
-  awk -v re="$_HANDOFF_ISO_RE" "$_HANDOFF_SEC_AWK"'ho_track($0) && $0 ~ re { print substr($0, 10); exit }' "$1" 2>/dev/null
+  awk "$_HANDOFF_SEC_AWK"'ho_track($0) { print }' "$1" 2>/dev/null | handoff_instant_pick
 }
 
 adopt_handoff_note() {  # <bound plan, raw> <repo root> <state dir>
