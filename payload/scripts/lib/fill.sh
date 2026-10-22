@@ -54,6 +54,8 @@
 #                                      and `adopt` both ask (wave-36 T10; AC-4.4, D10).
 #   fill_held_ids <plan> <ids>         of <ids>, the ones a roster holds open, with the name
 #                                      and the session; the fill leaves them out.
+#   fill_merge_hold <plan>             0, printing the ask's title, while `hold:merge` is open on
+#                                      the run's register; the fill leaves the integrate row out.
 #
 # WHY A LIBRARY AT ALL (D2). Both of these lived inside `hooks/session-poker.sh` — the ready
 # set inline in the `tick` verb, reading five shell variables the tick had built, and
@@ -113,6 +115,14 @@ fi
 if ! declare -F gate_room >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/gate.sh" ]; then
   # shellcheck source=/dev/null
   . "$_FILL_LIB_DIR/gate.sh"
+fi
+
+# THE RUN'S REGISTER, SOURCED THE SAME WAY: `fill_merge_hold` reads it through `owed_list_plan`. A copy of this
+# file whose directory holds no owed.sh leaves the function undefined, and no merge is then held: a register nobody can
+# read holds nothing, the same posture `gate_room` takes above.
+if ! declare -F owed_list_plan >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/owed.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_FILL_LIB_DIR/owed.sh"
 fi
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
@@ -316,7 +326,7 @@ fill_ready_set() {  # <plan> <rung> <open> -> ready ids, one per line
 # above ask only the approval line (read once per process with `current:`) and arithmetic, so a
 # ledger that is not live still reads no table at all.
 _fill_ready_rows() {  # <plan> <gap> [tagged]
-  local plan="${1:-}" gap="${2:-0}" tag="${3:-}" step ready id n=0 ro held tab=$'\t'
+  local plan="${1:-}" gap="${2:-0}" tag="${3:-}" step ready id n=0 ro held merge tab=$'\t'
   step="$(fill_step_token "$plan")"
   [ -n "$step" ] || return 0
   ready="$(units_ready "$plan" "$step")" || return 0
@@ -328,6 +338,13 @@ _fill_ready_rows() {  # <plan> <gap> [tagged]
   # every roster is subtracted here, by the same id-to-name rule (`fill_row_launched`).
   held=" $(fill_held_ids "$plan" "$ready" | cut -f1 | tr '\n' ' ') "
   ro=" $(fill_readonly_ids "$plan") "
+  # A MERGE THE RUN HOLDS IS NOT OFFERED: while `hold:merge` is open on the run's register the integrate row is left
+  # out, whatever else it reads (`fill_merge_hold`, below). The tick and the stop wall both take their set from this
+  # body, so neither can offer the merge the other counts held. Only the integrate row is held.
+  merge="$(fill_integrate_ids "$plan")"
+  if [ -n "$merge" ] && fill_merge_hold "$plan" >/dev/null; then
+    held="$held$merge "
+  fi
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     case "$held" in *" $id "*) continue ;; esac
@@ -855,6 +872,26 @@ FILL_HOLD_ROWS
 $(fill_roster_walk "$d")
 FILL_HOLD_WALK
   return 0
+}
+
+# fill_integrate_ids <plan> -> the ids, space-joined, of the rows whose kind is `integrate`, in table order.
+fill_integrate_ids() {  # <plan> -> ids, space-joined
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '$3 == "integrate" { printf "%s%s", (n++ ? " " : ""), $1 }'
+}
+
+# fill_merge_hold <plan> -> rc 0, printing the open ask's title, while `hold:merge` is open on the register of the run
+# <plan> names; rc 1 and nothing printed otherwise.
+#
+# THE REGISTER IS READ THROUGH lib/owed.sh (`owed_list_plan`), THE READER THE RUN'S PAGES READ, NEVER A SECOND PARSER OF
+# THE FILE: a merge a refused close-out holds is closed by the close-out that delivers, and the closing is what this
+# reads. A plan that names no run, a root that cannot be found or a library without owed.sh holds nothing, so a
+# readiness question never fails on a register nobody can read.
+fill_merge_hold() {  # <plan> -> rc 0 and the title while held
+  local plan="${1:-}" root t
+  [ -n "$plan" ] && declare -F owed_list_plan >/dev/null 2>&1 || return 1
+  root="$(project_root "${plan%/*}" 2>/dev/null)" && [ -n "$root" ] || return 1
+  t="$(owed_list_plan "$plan" "$root" 2>/dev/null | awk -F'\t' '$1 == "hold:merge" { print $3; f = 1; exit } END { exit !f }')" || return 1
+  printf '%s\n' "$t"
 }
 
 # fill_held_ids <plan> <ids, one per line> -> id TAB name TAB sid, for each id a roster holds open
