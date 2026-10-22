@@ -6,8 +6,8 @@
 > 3. **PROMOTE** — kept only with one of two homes: **(a) a trigger** — the named
 >    EVENT that reactivates it ("diagnose the flake when it next fires — output now
 >    preserved"), or **(b) a charter** — promotion into a named future effort (an
->    ideas/ seed or epic charter), carried by default. Close-out asks no ruling; it
->    prints the scorecard. A charter gives the work its own document that competes
->    for prioritization openly. What stays forbidden is the homeless deferral: an
+>    ideas/ seed or epic charter), carried by default. Close-out asks no ruling.
+>    A charter gives the work its own document that competes for prioritization
+>    openly. What stays forbidden is the homeless deferral: an
 >    item on a wave's continuation list with no decision, no home, no identity —
 >    that is what schedules cleanup waves by momentum.

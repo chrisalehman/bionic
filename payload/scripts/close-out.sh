@@ -696,8 +696,9 @@ co_hand_holds() {  # -> sets CO_HH_LINE
 # stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
 # minutes), then the fact sheet's pace, correctness and waste lines, byte for byte (hooks/session-poker.sh
 # `scorecard_report` owns the rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads
-# the lines before the wipe into CO_SC_LINES and the card and the continuation print that one reading. A report that
-# cannot be read is a sentence.
+# the lines before the wipe into CO_SC_LINES and the continuation's `## Scorecard` prints that one reading. Nothing
+# prints them on stdout: the close-out report shows its ten parts, and the lines live in the continuation. A report
+# that cannot be read is a sentence.
 CO_SC_LINES=""
 co_scorecard() {  # -> sets CO_SC_LINES
   local out
@@ -705,12 +706,146 @@ co_scorecard() {  # -> sets CO_SC_LINES
   if [ -n "$out" ]; then CO_SC_LINES="$out"
   else CO_SC_LINES="scorecard: not read — session-poker.sh landing-report --scorecard $PLAN could not be read"; fi
 }
-co_scorecard_card() {  # -> the reading on the card, one `scorecard: ` line each
-  [ -n "$CO_SC_LINES" ] || co_scorecard
-  case "$CO_SC_LINES" in
-    "scorecard: not read "*) printf '%s\n' "$CO_SC_LINES" ;;
-    *) printf '%s\n' "$CO_SC_LINES" | sed 's/^/scorecard: /' ;;
+
+# THE RELEASE ENTRY'S REVIEWS, RENDERED FROM THE PLAN. The entry's `### The reviews` part names every review the run
+# registered and every waiver the user gave. Typed by hand after the reviews, it was a commit on the working branch
+# the landing record never named, so close-out writes it from the record instead, and a person writes only the
+# entry's prose, before the reviews. The part is one fixed first line, then one bullet per `proved: kind=review` line
+# and per `waived:` line of the plan's unfenced `## SDLC State`, in the order the verbs wrote them. It replaces the
+# entry's own `### The reviews` part (its heading to the next heading; a doubled heading is one part), or goes in
+# before the entry's `### Known limits` or `### The landing numbers`, whichever comes first, else at the entry's end.
+# The commit is made in the object store on the working branch's tip, under close-out's own author, as the line makes
+# its numbers commit (lib/line.sh `_line_numbers`). `run` makes it before its first act, so a commit that cannot be
+# made refuses with nothing done, and publishes it after the merge acts: the branch moves to it (a fast-forward in
+# the checkout that holds the branch, so that checkout is never left behind it) and the landing record gains
+# `ev=close-out|part=reviews|commit=<c>|branch=<working>`, so the branch holds no commit the record does not name.
+# No `release:`, no CHANGELOG.md on the branch, no entry for the release, no review or waiver registered, or a part
+# that already reads as rendered: nothing is made.
+# Sets CO_RV_LINE (the `reviews:` line's words), CO_RV_COMMIT (the commit, made, not yet published), CO_RV_BASE.
+CO_RV_AUTHOR="bionic close-out"; CO_RV_EMAIL="close-out@bionic.invalid"
+CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
+co_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing
+  awk "$(proof_awk)"'
+    function base(p,   n, e) { n = split(p, e, "/"); return e[n] }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      at = ""; if (match($0, /[ \t]at=[^ \t]+/)) at = substr($0, RSTART + 4, RLENGTH - 4)
+      b[++n] = sprintf("- %s review%s: %s at %s by %s%s%s", PROOF_QUESTION, (PROOF_SCOPE != "" ? ", " PROOF_SCOPE : ""),
+        PROOF_RESULT, substr(PROOF_HEAD, 1, 8), PROOF_READER, (at != "" ? ", " at : ""),
+        (PROOF_EVIDENCE != "" ? " (`" base(PROOF_EVIDENCE) "`)" : ""))
+      next
+    }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      k = index($0, " by "); if (q == "" || !k) next
+      r = substr($0, k + 4); k = index(r, "\"")
+      if (k) { who = substr(r, 1, k - 1); words = substr(r, k) } else { who = r; words = "" }
+      sub(/[ \t]+$/, "", who); at = who; sub(/.*[ \t]/, "", at)
+      if (at ~ /^[0-9][0-9][0-9][0-9]-/ && length(at) < length(who)) { who = substr(who, 1, length(who) - length(at)); sub(/[ \t]+$/, "", who) }
+      else at = ""
+      b[++n] = sprintf("- %s review: waived at %s by %s%s%s", q, substr(h, 1, 8), who, (at != "" ? ", " at : ""),
+        (words != "" ? ": " words : ""))
+    }
+    END {
+      if (!n) exit
+      print "### The reviews"; print ""
+      print "Rendered by close-out from the plan'"'"'s review and waiver lines, in the order they were registered."; print ""
+      for (i = 1; i <= n; i++) print b[i]
+      print ""
+    }' "$1"
+}
+co_reviews_entry() {  # <changelog> <version> <part file> -> the changelog with the entry's part rendered
+  awk -v v="## $2 " -v pf="$3" '
+    function put(   l) { if (last != "") print ""; while ((getline l < pf) > 0) print l; close(pf); done = 1; last = "" }
+    /^## / { if (inb && !done) put(); inb = (index($0, v) == 1); inp = 0 }
+    /^### / {
+      t = $0; sub(/[[:space:]]+$/, "", t); inp = 0
+      if (inb && t == "### The reviews") { if (!done) put(); inp = 1; next }
+      if (inb && !done && (t == "### Known limits" || t == "### The landing numbers")) put()
+    }
+    inp { next }
+    { print; last = $0 }
+    END { if (inb && !done) put() }' "$1"
+}
+co_line_load() {  # -> 0 once lib/line.sh (the landing record's writer and the checkout reader) is loaded
+  declare -F line_event >/dev/null 2>&1 && declare -F worktree_checkout_of >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$CO_LIB/line.sh" ] && . "$CO_LIB/line.sh" >/dev/null 2>&1
+  declare -F line_event >/dev/null 2>&1 && declare -F worktree_checkout_of >/dev/null 2>&1
+}
+co_reviews_prepare() {  # <check|run> -> CO_RV_LINE, and in run CO_RV_COMMIT; rc 1 when run cannot make the commit
+  local mode="$1" tip tmp n mode_bits blob tree c co rc ver="$RELEASE"
+  CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
+  [ -n "$ver" ] || { CO_RV_LINE="none — the plan names no release:"; return 0; }
+  tip="$(git -C "$ROOT" rev-parse --verify -q "refs/heads/${WORKING}^{commit}" 2>/dev/null)" \
+    || { CO_RV_LINE="none — $WORKING is not a branch in $ROOT"; return 0; }
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/close-out-reviews.XXXXXX")" || { CO_RV_LINE="not rendered — no temporary directory"; return 1; }
+  if ! git -C "$ROOT" show "${tip}:CHANGELOG.md" > "$tmp/old" 2>/dev/null; then
+    rm -rf "$tmp"; CO_RV_LINE="none — $WORKING holds no CHANGELOG.md"; return 0
+  fi
+  if ! /usr/bin/grep -q "^## ${ver} " "$tmp/old"; then
+    rm -rf "$tmp"; CO_RV_LINE="none — CHANGELOG.md on $WORKING holds no ## $ver entry"; return 0
+  fi
+  co_reviews_part "$PLAN" > "$tmp/part"
+  n="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
+  [ "${n:-0}" -gt 0 ] || { rm -rf "$tmp"; CO_RV_LINE="none — the plan registers no review and no waiver"; return 0; }
+  co_reviews_entry "$tmp/old" "$ver" "$tmp/part" > "$tmp/new"
+  if cmp -s "$tmp/old" "$tmp/new"; then
+    rm -rf "$tmp"; CO_RV_LINE="the $ver entry's ### The reviews already lists the plan's $n review and waiver lines"; return 0
+  fi
+  if [ "$mode" = check ]; then
+    rm -rf "$tmp"
+    CO_RV_LINE="run would render $n review and waiver lines under ### The reviews of the $ver entry and commit them on $WORKING @ ${tip:0:12}"
+    return 0
+  fi
+  # The checkout that holds the branch takes the commit by a fast-forward, which a changed CHANGELOG.md there would
+  # refuse after the merge acts: asked here, before any act.
+  co_line_load || { rm -rf "$tmp"; CO_RV_LINE="not rendered — $CO_LIB/line.sh, the landing record's writer, cannot be loaded"; return 1; }
+  co="$(worktree_checkout_of "$ROOT" "$WORKING")"; rc=$?
+  if [ "$rc" -ge 2 ]; then
+    rm -rf "$tmp"; CO_RV_LINE="not rendered — $WORKING is checked out in more than one place (${co// /, })"; return 1
+  fi
+  if [ "$rc" -eq 0 ] && [ -n "$(git -C "$co" status --porcelain -- CHANGELOG.md 2>/dev/null)" ]; then
+    rm -rf "$tmp"; CO_RV_LINE="not rendered — CHANGELOG.md is changed in $co, the checkout holding $WORKING: commit or restore it"; return 1
+  fi
+  mode_bits="$(git -C "$ROOT" ls-tree "$tip" CHANGELOG.md 2>/dev/null | awk '{ print $1 }')"
+  if blob="$(git -C "$ROOT" hash-object -w --path CHANGELOG.md "$tmp/new" 2>&1)" \
+     && GIT_INDEX_FILE="$tmp/index" git -C "$ROOT" read-tree "$tip" >/dev/null 2>&1 \
+     && GIT_INDEX_FILE="$tmp/index" git -C "$ROOT" update-index --cacheinfo "${mode_bits:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
+     && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$ROOT" write-tree 2>&1)" \
+     && c="$(GIT_AUTHOR_NAME="$CO_RV_AUTHOR" GIT_AUTHOR_EMAIL="$CO_RV_EMAIL" \
+              git -C "$ROOT" commit-tree "$tree" -p "$tip" -m "close-out: the $ver entry's reviews, rendered from the plan" 2>&1)"; then
+    rm -rf "$tmp"
+    CO_RV_COMMIT="$c"; CO_RV_BASE="$tip"
+    CO_RV_LINE="$n review and waiver lines rendered under ### The reviews of the $ver entry, committed ${c:0:12} on $WORKING"
+    return 0
+  fi
+  rm -rf "$tmp"
+  CO_RV_LINE="not rendered — the commit on $WORKING @ ${tip:0:12} cannot be made: ${c:-${tree:-${blob:-git refused}}}"
+  return 1
+}
+co_reviews_publish() {  # -> the branch at CO_RV_COMMIT and its close-out event recorded; rc 1 with CO_RV_LINE saying why
+  local co rc
+  [ -n "$CO_RV_COMMIT" ] || return 0
+  co="$(worktree_checkout_of "$ROOT" "$WORKING")"; rc=$?
+  case $rc in
+    0) GIT_REFLOG_ACTION="close-out: reviews" git -C "$co" merge --ff-only -q "$CO_RV_COMMIT" >/dev/null 2>&1; rc=$? ;;
+    1) git -C "$ROOT" update-ref -m "close-out: reviews" "refs/heads/$WORKING" "$CO_RV_COMMIT" "$CO_RV_BASE" >/dev/null 2>&1; rc=$? ;;
   esac
+  if [ "$rc" -ne 0 ]; then
+    CO_RV_LINE="not published — $WORKING could not be moved from ${CO_RV_BASE:0:12} to ${CO_RV_COMMIT:0:12}${co:+ in $co}"
+    return 1
+  fi
+  line_event "$PLAN" close-out part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" && return 0
+  CO_RV_LINE="$WORKING moved to ${CO_RV_COMMIT:0:12}, and the landing record could not be written: append ev=close-out|part=reviews|commit=$CO_RV_COMMIT|branch=$WORKING to $(line_record "$PLAN" 2>/dev/null || printf 'the record')"
+  return 1
 }
 # WHAT GOVERNED THE RUN, READ BEFORE THE WIPE (wave-36 T2; D7, REQ-1 AC-1.4, ADR-055). hooks/session-start.sh writes
 # one load record per session start under the project's tmp (wave-36 T1): `root=`, `commit=` when the root is a
@@ -2275,6 +2410,8 @@ do_check() {
   else
     say "worktree-removed: ${wt_desc}"
   fi
+  co_reviews_prepare check
+  say "reviews: $CO_RV_LINE"
 
   co_orphans check
   co_regression_runs
@@ -2283,8 +2420,6 @@ do_check() {
   say "$CO_HH_LINE"
   co_governed
   say "$CO_GOV_LINES"
-  co_scorecard
-  co_scorecard_card
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
@@ -2406,6 +2541,7 @@ do_run() {
       "the commit gate would refuse the plan this run would write (rc=$PREFLIGHT_RC) — nothing was done: no branch deleted, no tmp wiped, no continuation or epic row written"
   fi
                     say "preflight: the commit gate allows the plan this run will write"
+  co_reviews_prepare run || _co_held "the release entry's reviews cannot be rendered" "$CO_RV_LINE — nothing was done"
   if [ "$PARKED" = yes ]; then
     MERGE_LINE="$(co_parked_merge_line)"; say "merge: $MERGE_LINE"
     LANDS_LINE="none — parked, no merge lands a row"; say "rows-landed: $LANDS_LINE"
@@ -2415,11 +2551,14 @@ do_run() {
     act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
     act_worktrees;  say "worktree-removed: $WT_LINE"
   fi
+  co_reviews_publish || _co_held "the release entry's reviews are not published" "$CO_RV_LINE"
+                    say "reviews: $CO_RV_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
   co_hand_holds;    say "$CO_HH_LINE"
   co_governed;      say "$CO_GOV_LINES"
-  co_scorecard;     co_scorecard_card
+  # Read before act_tmp wipes the rosters it counts: the continuation's `## Scorecard` prints this reading.
+  co_scorecard
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
