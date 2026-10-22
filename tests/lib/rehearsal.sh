@@ -95,13 +95,19 @@ rh_state_known() {
   return 1
 }
 
+# _rh_cmdline <cmd> [args] -> the command as one shell line, `$ ` first, quoted in the C locale. Under a UTF-8 locale
+# bash 3.2's %q escapes a multibyte character's trailing bytes and leaves its lead byte raw, a line no UTF-8 reader
+# can decode (macOS awk stops at it, and every row reading past it reads nothing); in C every byte past ASCII is
+# escaped, so the log stays valid text and the line still runs as the same command.
+_rh_cmdline() { ( LC_ALL=C; printf '$'; printf ' %q' "$@"; printf '\n' ); }
+
 # _rh_do <label> <cmd> [args] -> runs <cmd> from the sandbox root as the bound session, logging the label, the
 # command, its exit and its output; a non-zero exit is reported on stderr and returned.
 _rh_do() {
   local label="$1" t0="$SECONDS"
   shift
   door_run "${RH_CWD:-$RH_ROOT}" "$@"
-  { printf '$'; printf ' %q' "$@"; printf '\n'; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'; printf '  rc=%s  (%s, %s s)\n' "$DOOR_RC" "$label" "$((SECONDS - t0))"; } >> "$RH_LOG"
+  { _rh_cmdline "$@"; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'; printf '  rc=%s  (%s, %s s)\n' "$DOOR_RC" "$label" "$((SECONDS - t0))"; } >> "$RH_LOG"
   [ "$DOOR_RC" = 0 ] && return 0
   printf 'rehearse %s: %s failed (rc %s): %s\n' "$RH_STATE" "$label" "$DOOR_RC" "$*" >&2
   printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
