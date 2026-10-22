@@ -17,7 +17,7 @@ set +x +v
 #   3. the Known limits (wave-38 T20; REQ-11 AC-11.4, L8): the release being shipped is the newest
 #      heading the pair reads, and its plan is the run whose frontmatter says `release: <version>`,
 #      found by the walk every reader of a project's runs uses (lib/run.sh `_run_candidates` under
-#      `docs_root` of this checkout's top). Every OPEN deferral of that plan (lib/proof.sh
+#      `docs_root` of the project: BIONIC_CHECK_PROJECT when set, else this checkout's top). Every OPEN deferral of that plan (lib/proof.sh
 #      `proof_findings_owed` rating it `defer`, the reader close-out's continuation carries by) that
 #      states its sentence (the ` stated="…"` field `finding-stated` writes, unescaped) must stand
 #      under the entry's `### Known limits`, both sides folded by lib/said.sh `said_fold`, the one
@@ -129,7 +129,11 @@ rel_load() {
     # shellcheck source=/dev/null
     [ -f "$lib/$f" ] && . "$lib/$f" >/dev/null 2>&1 || { echo "release-check: refused — $1 cannot load $lib/$f"; return 2; }
   done
-  TOP="$(git rev-parse --show-toplevel 2>/dev/null)" && TOP="$(cd "$TOP" && pwd -P)" || {
+  # The project is BIONIC_CHECK_PROJECT when the runner names it: the check then runs in a landing tree at the
+  # release base, which holds no plan and no record of its own. Unset, it is this checkout's top.
+  TOP="${BIONIC_CHECK_PROJECT:-}"
+  [ -n "$TOP" ] || TOP="$(git rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$TOP" ] && TOP="$(cd "$TOP" && pwd -P)" || {
     echo "release-check: refused — $1 finds no checkout top"; return 2; }
   DROOT="$(docs_root "$TOP")" || DROOT=""
 }
@@ -213,7 +217,7 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
     return 0
   fi
   h12="${at:0:12}"
-  rep="$(bash "$HERE/../../hooks/session-poker.sh" release-note --at "$at" --on "$on" "$plan" 2>&1)" || {
+  rep="$(cd "$TOP" && bash "$HERE/../../hooks/session-poker.sh" release-note --at "$at" --on "$on" "$plan" 2>&1)" || {
     echo "release-check: refused — release-note cannot render the landing report at $h12: $(printf '%s\n' "$rep" | head -n 1)"; return 2; }
   said="$(nums_fence "$(entry_part "$cl" "$ver" 'The landing numbers')")"
   rep="$(nums_fence "$rep")"

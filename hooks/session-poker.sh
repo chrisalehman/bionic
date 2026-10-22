@@ -2741,38 +2741,7 @@ FINDING_READ
   return 0
 }
 
-# THE LAST RELEASE (wave-27 T31; review pass 22 S2; one function since wave-39 T13, read by the release-check verb and
-# by the hand landing's scan): release_base <plan> <checkout> <head> sets RB_BASE, the 40-hex start of the release range,
-# and RB_FROM saying where it came from (`tag <t> on <branch>` | `base-sha <s>`), and RB_IB and RB_BS for a refusal to
-# name; 1 when there is none. The nearest tag reachable from the plan's `integration-branch:` that is a PROPER ancestor
-# of <head> (the fewest commits from it to <head>): a tag on <head>, or on a commit not on its history, is no base, for
-# the range it opens would hold nothing or the wrong thing. With none, the plan's `base-sha:` (lib/proof.sh
-# `proof_plan_base`, which the caller has loaded).
-release_base() {  # <plan> <checkout> <head>
-  local plan="$1" co="$2" head="$3" t tc tn best=""
-  RB_BASE=""; RB_FROM=""; RB_BS=""
-  RB_IB="$(plan_integration_branch "$plan")"
-  if [ -n "$RB_IB" ]; then
-    while IFS= read -r t; do
-      [ -n "$t" ] || continue
-      tc="$(git -C "$co" rev-parse --verify -q "refs/tags/$t^{commit}" 2>/dev/null)" || continue
-      [ "$tc" != "$head" ] || continue
-      git -C "$co" merge-base --is-ancestor "$tc" "$head" 2>/dev/null || continue
-      tn="$(git -C "$co" rev-list --count "$tc..$head" 2>/dev/null)" || continue
-      if [ -z "$best" ] || [ "$tn" -lt "$best" ]; then
-        best="$tn"; RB_BASE="$tc"; RB_FROM="tag $t on $RB_IB"
-      fi
-    done <<RB_TAGS
-$(git -C "$co" tag --merged "refs/heads/$RB_IB" 2>/dev/null)
-RB_TAGS
-  fi
-  if [ -z "$RB_BASE" ]; then
-    RB_BS="$(proof_plan_base "$plan" "$co")"
-    [ -z "$RB_BS" ] || RB_BASE="$(git -C "$co" rev-parse --verify -q "$RB_BS^{commit}" 2>/dev/null)"
-    RB_FROM="base-sha $RB_BS"
-  fi
-  [ -n "$RB_BASE" ]
-}
+# THE LAST RELEASE is lib/worktree.sh `release_base`, the one judge the verb, the hand scan and the release card read.
 
 launch_sync_unlock() {
   [ -n "$LAUNCH_SYNC_LOCK" ] && rm -rf "$LAUNCH_SYNC_LOCK" 2>/dev/null

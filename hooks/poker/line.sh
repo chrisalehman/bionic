@@ -207,16 +207,17 @@ DELIVER_FILES
 # name that reached history through it cost a rewrite of 99 commits (A-orch-71, A-orch-78; D32). With `release-check:`
 # declared in `.bionic/config.yaml`, the mark is written only when the commit is held: by a passing `kind=check` proof
 # at it or at a commit that holds it (lib/proof.sh `proof_check_passes`, the last check line at each head deciding
-# it), else by the declared check itself, run as the release-check verb runs it (its words split on blanks, globbing
-# off) over the release range, `release_base` to the commit, in the checkout of the plan's working branch (the
-# project root when none holds it), with BIONIC_CHECK_BRANCH naming that branch for the rewrite a hit prints
+# it), else by the declared check itself, run by the one runner the release-check verb uses (lib/worktree.sh
+# `worktree_check_run`, as the release base holds it) over the release range, `release_base` to the commit, read in
+# the checkout of the plan's working branch (the project root when none holds it), with BIONIC_CHECK_BRANCH naming
+# that branch for the rewrite a hit prints
 # (tests/lib/name-scan.sh). A check that exits non-zero refuses: its output is printed, each hit with the commit and
 # path that brought it and its fix, and the plan is unchanged. A commit the base already holds is in a release and
 # is not scanned again. With no key nothing runs. The `line_publish` route ran the check over its own range before
 # its fast-forward and then calls this verb, so a hand landing through `land --by-hand` meets it twice; the second
 # run sees the whole release range, which the first did not. Exits on a refusal; returns when the mark may be written.
 row_landed_scan() {
-  local cmd wb co p out rc scan n
+  local cmd wb co p out rc scan n rb
   cmd="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
   [ -n "$cmd" ] || return 0
   if ! { declare -F proof_check_passes >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -231,14 +232,16 @@ row_landed_scan() {
     die "REFUSED — row-landed --by-hand: $RL_COMMIT is no commit in $co, so the declared release-check has nothing to run over; the plan is unchanged."
     exit 1
   fi
-  # WHICH COPY JUDGES. The scan runs in the checkout after the landing, so it reads the landed copy of the check; a
-  # passing proof at a commit that holds this one read a copy past it too. When this landing's own range (its
-  # commit's first parent to the commit) changes a file of the check's closure, that copy is the candidate's, not the
-  # target's the door ran before the merge: the row's line says which, so a copy change is never silent.
-  RL_JUDGED=target
+  # WHAT THE LANDING CHANGES OF THE CHECK. The judge is the release base, a commit no landing writes, so a landing
+  # that changes the check's own files is judged like any other; what it changes of them (lib/worktree.sh
+  # `_wt_check_judge` over the landing's own range, its commit's first parent to the commit) is said on the row's
+  # line beside the judge, `judged-by=<judge> changed-here=<paths>`, so a change to the check is never silent.
+  RL_JUDGED=""; RL_CHG=""
   if p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^1" 2>/dev/null)" \
-     && _wt_check_judge "$co" "$p" "$RL_COMMIT" "$cmd" >/dev/null 2>&1; then
-    RL_JUDGED=candidate
+     && RL_CHG="$(_wt_check_judge "$co" "$p" "$RL_COMMIT" "$cmd" 2>/dev/null)"; then
+    RL_CHG="${RL_CHG#* }"
+  else
+    RL_CHG=""
   fi
   # A LANDING PAST THE RELEASE IS JUDGED AT ITS NUMBERS. The line publishes such a landing with the release numbers
   # rendered again in a commit on its candidate (lib/line.sh `_line_numbers`) and moves the branch to that commit;
@@ -254,13 +257,15 @@ row_landed_scan() {
   if [ -n "$n" ] && [ -n "$p" ] && [ "$(git -C "$co" rev-parse --verify -q "$n^1" 2>/dev/null)" = "$p" ]; then
     scan="$n"
   fi
+  rb=0; release_base "$PV_PLAN" "$co" "$RL_COMMIT" || rb=1
+  [ "$rb" -ne 0 ] || RL_JUDGED="${RB_BASE:0:12}${RL_CHG:+ changed-here=$RL_CHG}"
   for p in $(proof_check_passes "$PV_PLAN" "$co"); do
     if git -C "$co" merge-base --is-ancestor "$scan" "$p" 2>/dev/null; then
       say "row-landed — release-check: ${scan:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
       return 0
     fi
   done
-  if ! release_base "$PV_PLAN" "$co" "$RL_COMMIT"; then
+  if [ "$rb" -ne 0 ]; then
     die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) has no range to run over: no tag reachable from the plan's integration-branch (${RB_IB:-none named}) is a proper ancestor of $RL_COMMIT and its base-sha (${RB_BS:-none}) is no commit here; name the last release as the plan's base-sha, or tag it. The plan is unchanged."
     exit 1
   fi
@@ -269,11 +274,15 @@ row_landed_scan() {
     say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
     return 0
   fi
-  out="$(cd "$co" 2>/dev/null || exit 1
-    set -f
-    export BIONIC_CHECK_BASE="$RB_BASE" BIONIC_CHECK_HEAD="$scan" BIONIC_CHECK_TREE="$(pwd -P)" BIONIC_CHECK_BRANCH="$wb"
-    # shellcheck disable=SC2086  # the configured command is meant to split on blanks
-    exec $cmd </dev/null 2>&1)"; rc=$?
+  # THE RUN IS THE ONE RUNNER'S (lib/worktree.sh `worktree_check_run`), as the release base holds the check, with
+  # BIONIC_CHECK_BRANCH naming the working branch for the rewrite a hit prints.
+  worktree_check_run "$PV_REPO" "$PV_PLAN" "$RB_BASE" "$RB_BASE" "$scan" "$co" "$wb"; n=$?
+  [ "$n" -ne 1 ] || return 0
+  if [ "$n" -ne 0 ]; then
+    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) cannot be run as the release base ${RB_BASE:0:12} ($RB_FROM) holds it: $(clean "$WT_CHECK_OUT"). The plan is unchanged."
+    exit 1
+  fi
+  out="$WT_CHECK_OUT"; rc="$WT_CHECK_RC"
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out"
     die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")), judged-by=$RL_JUDGED, exited $rc over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${scan:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
@@ -729,8 +738,8 @@ hand_holds_verb() {
   # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
   # 60 and 63: the dry copy is `plan_verb_open`'s own, so the gate resolves it to the real plan).
   # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
-  # <who> <at> "<why>" judged-by=<target|candidate>`, the hand landing's interface, the field present when the
-  # scan judged), once: a text already there is not added
+  # <who> <at> "<why>" judged-by=<judge> [changed-here=<paths>]`, the hand landing's interface, the fields present
+  # when the scan judged or a passing check proof held the commit), once: a text already there is not added
   # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
   # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
   # same landing finds the plan already so and writes nothing.

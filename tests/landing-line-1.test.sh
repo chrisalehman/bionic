@@ -1092,6 +1092,47 @@ rm -f "$WW_RD4/release-approval-cccccccc.md"
 printf '# page\n\n## Replay\n\n%s-results/v1|plan=%s|head=%s|at=2026-10-20T11:40:00Z|decisions=1\n' "$WW_RN" "$(ll_plan "$RW4")" "$WW_C" > "$WW_RD4/$WW_RN-results-cccccccc.md"
 expect_contains "WINDOW-3e a page written under the card's old stem is read for the end as well" \
   "2026-10-20T11:40:00Z" "$(ww_ends "$RW4")"
+# ---------------------------------------------------------------------------
+section "§NUMBERS-JUDGE: the release numbers a landing past the release writes are the judge copy's release-note"
+# The judge is the commit the plan's release range starts from (here its `base-sha:`, the world having no tag). It
+# holds a release-note that prints the block one way; the accepted head's own copy prints one field more. A row landing
+# past the published release row has its numbers rendered by the judge's copy, the copy its release check compares
+# with, so the entry's block is the judge's output and never carries the head's field. fails-when: the renderer is
+# the plugin root's or the head's, so the landing is refused in the renderer's words or the block carries extra=1.
+nj_stub() {  # <extra field> -> a release-note stand-in: the heading, the head and instant line, one fenced line
+  printf '%s\n' '#!/bin/bash' '[ "$1" = release-note ] || exit 2' \
+    "printf '### The landing numbers\\n\\n\`landing-report --rows\` at %s on %s:\\n\\n\`\`\`\\nlandings: judge=1$1\\n\`\`\`\\n' \"\$3\" \"\$5\""
+}
+RJ="$(ll_world)"; PJ="$(ll_plan "$RJ")"
+mkdir -p "$RJ/hooks"; nj_stub "" > "$RJ/hooks/session-poker.sh"
+printf '# Changelog\n\n## 9.9.9 — 2026-10-20\n\n### The landing numbers\n\n`landing-report --rows` at 0 on 2026-10-20T00:00:00Z:\n\n```\nlandings: as released\n```\n\n## 9.9.8 — 2026-10-01\n\n- before\n' \
+  > "$RJ/CHANGELOG.md"
+git -C "$RJ" add hooks/session-poker.sh CHANGELOG.md && git -C "$RJ" commit -qm "the release and its renderer"
+NJ_JUDGE="$(ll_head "$RJ")"
+nj_stub " extra=1" > "$RJ/hooks/session-poker.sh" && git -C "$RJ" commit -qam "the renderer prints a field more"
+NJ_HEAD="$(ll_head "$RJ")"
+awk -v j="$NJ_JUDGE" '{ print } /^working-branch: / { print "release: 9.9.9"; print "base-sha: " j }
+  /^\| T2 \| 4 \| build \|/ { print "| T9 | 7 | doc | the release 9.9.9 | wx-T9 | — | | 10 | REQ-1 | CHANGELOG.md | .worktrees/T9 | | active |" }' \
+  "$PJ" > "$PJ.n" && mv "$PJ.n" "$PJ"
+mkdir -p "$(dirname "$(ll_rec "$RJ")")"
+printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=t|why=w|at=2026-10-20T00:00:00Z\n' "$NJ_JUDGE" >> "$(ll_rec "$RJ")"
+expect_eq "(nj0) precondition: the judge's copy and the head's differ by the one field, and the plan names the judge as its base" \
+  "1 0 1 base-sha: $NJ_JUDGE" \
+  "$(git -C "$RJ" show "$NJ_HEAD:hooks/session-poker.sh" | grep -c 'judge=1 extra=1') $(git -C "$RJ" show "$NJ_JUDGE:hooks/session-poker.sh" | grep -c 'extra=1') $(grep -c '^| T9 | 7 | doc |' "$PJ") $(grep '^base-sha: ' "$PJ")"
+ll_ready "$RJ" T1 "$(ll_carrier)" >/dev/null
+KJ="$(ll_cand "$RJ" T1 "$NJ_HEAD")"; ll_green "$RJ" T1 "$KJ"
+ll_pub "$RJ" T1
+NJ_TIP="$(ll_head "$RJ")"
+expect_eq "(nj1) the row past the release lands (exit 0)" "0" "$LL_RC"
+expect_contains "(nj1b) …its publish names the numbers commit on the candidate" "|row=T1|commit=$KJ|kind=queue|by=-|why=-|numbers=$NJ_TIP|" \
+  "$(ll_ev "$RJ" published)"
+NJ_BLOCK="$(git -C "$RJ" show "$NJ_TIP:CHANGELOG.md" 2>/dev/null | awk '/^## 9\.9\.9 / { f = 1; next } /^## / { f = 0 } f && NF')"
+NJ_ON="$(printf '%s\n' "$NJ_BLOCK" | sed -n 's/^`landing-report --rows` at [0-9a-f]* on \([0-9TZ:-]*\):$/\1/p')"
+expect_regex "(nj2-0) the entry's block names the candidate and an instant" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$NJ_ON"
+expect_eq "(nj2) …and equals, line for line, what the judge's copy prints for that head and instant" \
+  "$(git -C "$RJ" show "$NJ_JUDGE:hooks/session-poker.sh" | bash -s release-note --at "$KJ" --on "$NJ_ON" "$PJ" | awk NF)" "$NJ_BLOCK"
+expect_absent "(nj2b) …never the head's field" "extra=1" "$NJ_BLOCK"
+
 
 # ---------------------------------------------------------------------------
 finish
