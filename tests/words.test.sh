@@ -300,6 +300,7 @@ mkdir -p "$TMP/rendered"
 # The judgment writes every row; its metrics and its close copy the sheet's own numbers, which the card verb holds it to.
 wr_poke sitrep "$WR_P" > "$TMP/wr-sheet"
 wr_fact() { sed -n "s/^$1: //p" "$TMP/wr-sheet"; }   # <key> -> the run's sheet's value for it
+wr_m() { wr_fact "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, 1, i - 1) : $0) }'; }   # <key> -> its measurement alone
 expect_nonempty "RD0 precondition: the run's sheet predicts a close the judgment copies" "$(wr_fact close.predicted)"
 wr_poke sitrep card "$WR_P" > "$TMP/rendered/card.txt" <<WR_JUDGMENT_EOF
 call: Approve the release once 4/2 lands.
@@ -314,15 +315,15 @@ task: 6: Review
 task: 7: Document
 task: 8/3: Merge it, waiting on your approval of the release
 task: 9: Close-out
-metric: Completed: $(wr_fact metric.completed)
-metric: Pace: $(wr_fact metric.pace)
-metric: Correctness: $(wr_fact metric.correctness)
-metric: Waste: $(wr_fact metric.waste)
-metric: Goals: $(wr_fact metric.goals)
+metric: Completed: $(wr_m work.landed)
+metric: Pace: $(wr_m pace.work-landed) of the work landed in $(wr_m pace.time-used) of the forecast time
+metric: Correctness: $(wr_m tests.suites-run)
+metric: Waste: $(wr_m waste.runs-discarded) suite runs discarded
+metric: Goals: as the goal lines say
 grade: C
 point: One task is in flight and nothing is red.
 ask approve:release: The release approval, which holds 8/3 — recommend approve once 4/2 lands
-close: $(wr_fact close.predicted), if 4/2 lands first time.
+close: $(wr_m close.predicted), if 4/2 lands first time.
 WR_JUDGMENT_EOF
 expect_eq "RD1 the sitrep card is drawn (exit 0) and holds the open approval under Blocked on you" "0|1" \
   "$WR_RC|$(/usr/bin/grep -c '^    • The release approval, which holds 8/3' "$TMP/rendered/card.txt")"
