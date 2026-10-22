@@ -251,18 +251,21 @@ handoff_render() {  # <composed> <section>
 }
 # THE REGISTER (wave-38 T13; D24, AC-3.4; wave-39 T11, D15, AC-7.1). Every ruling is a `## Δn — D<n> [qualifier] <verb>
 # ["<reply>"] (<who> <date>)[: <title>]` heading in record/<wave>/design-ledger.md, or a `- D<n> …` bullet of that shape
-# under a Δ (the Step-1 rulings folded in). The verbs are ruled, re-ruled, amended, amended again, ratified, final and
-# withdrawn; the qualifier is one word between the number and the verb; the heading form `D<n> ruled: <title> (<who>
+# under a Δ (the Step-1 rulings folded in). The verbs are ruled, re-ruled, amended, amended again, ratified, settled,
+# final and withdrawn; the qualifier is one word between the number and the verb; the heading form `D<n> ruled: <title> (<who>
 # <date>)` has no reply; a tail after the parenthesis that is not `: <title>` is the title. A `put (…)` proposal, a
 # line of any other shape, a body line and a fenced example are not entries, so a ledger written before D24 reads as
 # having none. ONE PARSER: `decisions` prints it and the resume recap's settled: lines are
-# it, prefixed. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
+# it, prefixed. With `times`, the entries are put and ruling alike, one tab-separated line each, `D<n> verb date
+# clock ampm line title` (clock and ampm empty when the parenthesis names none): the one reader of the ledger's
+# headings that the clock readers (`sitrep_ledger_times`, `pages_open`) read through, so no program of the sheet
+# parses a heading beside this one. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
 # parenthesis is `(untitled)`. With `puts`, a put is an entry too, `D<n> · put · <who> <date> · <title>`: the line
 # `decisions put` writes, read only by the rounds count, never by the register.
 decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
   awk -v puts="${2:-}" '
     function lead_verb(s,   i, n, vs, c) {  # the verb s opens with, followed by a space or a colon; "" when none
-      n = split("amended again|amended|re-ruled|ruled|ratified|final|withdrawn" (puts == "puts" ? "|put" : ""), vs, "|")
+      n = split("amended again|amended|re-ruled|ruled|ratified|settled|final|withdrawn" (puts != "" ? "|put" : ""), vs, "|")
       for (i = 1; i <= n; i++) {
         if (index(s, vs[i]) != 1) continue
         c = substr(s, length(vs[i]) + 1, 1)
@@ -270,7 +273,7 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
       }
       return ""
     }
-    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field) {
+    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field, after, clock, ap, w) {
       if (!match(s, /^D[0-9]+ /)) return
       n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1)
       verb = lead_verb(rest); qual = ""
@@ -309,10 +312,16 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
         else { title = tail; sub(/^[ \t:,;]+/, "", title) }
       }
       if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return
-      date = substr(paren, RSTART, RLENGTH); who = substr(paren, 1, RSTART - 1)
+      date = substr(paren, RSTART, RLENGTH); who = substr(paren, 1, RSTART - 1); after = substr(paren, RSTART + RLENGTH)
       sub(/^[ \t]+/, "", who); sub(/[ \t,]+$/, "", who)
       if (who == "") return
       sub(/[ \t]+$/, "", title); if (title == "") title = "(untitled)"
+      if (puts == "times") {
+        clock = ""; ap = ""
+        if (match(after, /^ [0-9][0-9]?:[0-9][0-9] [AP]M/)) { split(substr(after, 2, RLENGTH - 1), w, " "); clock = w[1]; ap = w[2] }
+        print n "\t" verb "\t" date "\t" clock "\t" ap "\t" NR "\t" title
+        return
+      }
       field = verb; if (qual != "") field = qual " " verb
       if (hasreply) field = (field == "ruled") ? "\"" reply "\"" : field " \"" reply "\""
       print n " · " field " · " who " " date " · " title
@@ -341,20 +350,18 @@ decisions_rounds() {  # <ledger> -> `D<n><TAB><rounds><TAB><ruled|withdrawn|open
 #   put's heading (what `decisions put` wrote there), empty when it has none, the clock the newest put's heading
 #   names (`h:mm AM|PM`), empty when it names none. <plan> is not read; the callers name it beside its ledger.
 pages_open() {
-  local led="$2" open
+  local led="$2" open pm
   [ -f "$led" ] && [ ! -L "$led" ] || return 0
   open="$(decisions_rounds "$led" | awk -F'\t' '$3 == "open" { printf "%s ", $1 }')"
   [ -n "$open" ] || return 0
-  { decisions_list "$led" puts | awk -F' · ' '$2 == "put" { t = $4; for (i = 5; i <= NF; i++) t = t " · " $i; print "T\t" $1 "\t" t }'
-    awk '{ sub(/\r$/, "") }
+  pm="$(decisions_list "$led" times | awk -F'\t' '$2 == "put" { printf "%s:%s ", $6, $1 }')"
+  { decisions_list "$led" times | awk -F'\t' '$2 == "put" { print "T\t" $1 "\t" $7; print "K\t" $1 "\t" ($4 == "" ? "" : $4 " " $5) }'
+    # the wait line: the first line under a put's heading, whichever lines `decisions_list` named as the puts
+    awk -v pm="$pm" 'BEGIN { n = split(pm, a, " "); for (i = 1; i <= n; i++) { split(a[i], b, ":"); at[b[1]] = b[2] } }
+      { sub(/\r$/, "") }
       /^[ \t]*```/ { f = !f; next }
       f { next }
-      index($0, "## ") == 1 { d = ""
-        if (match($0, /^## Δ[0-9]+ — D[0-9]+ put /)) {
-          d = $0; sub(/^## Δ[0-9]+ — /, "", d); sub(/ .*$/, "", d); print "W\t" d "\t"
-          c = ""; if (match($0, / put \([^)]*\)/)) { p = substr($0, RSTART, RLENGTH); if (match(p, /[0-9]?[0-9]:[0-9][0-9] [AP]M/)) c = substr(p, RSTART, RLENGTH) }
-          print "K\t" d "\t" c }
-        next }
+      index($0, "## ") == 1 { d = (NR in at) ? at[NR] : ""; if (d != "") print "W\t" d "\t"; next }
       d != "" && NF { print "W\t" d "\t" $0; d = "" }' "$led" 2>/dev/null
   } | awk -F'\t' -v open="$open" '
     $1 == "T" { t[$2] = $3; next }
@@ -739,16 +746,16 @@ sitrep_added() {
 sitrep_launches() {
   local key="" p r a seen="" pk=""
   declare -F adopt_plan_key >/dev/null 2>&1 && key="$(adopt_plan_key "$1")"
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   while IFS='	' read -r p r a; do
     [ -n "$r" ] || continue
     case "$seen" in *"|$p|"*) ;; *) seen="$seen|$p|"; pk="$p"; declare -F adopt_plan_key >/dev/null 2>&1 && pk="$(adopt_plan_key "$p")" ;; esac
     [ "$pk" = "${key:-$1}" ] || [ "$p" = "$1" ] || continue
     printf '%s\t%s\n' "$r" "$a"
   done <<SITREP_LAUNCHES
-$(for f in "$2"/.bionic/tmp/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"; done 2>/dev/null | awk -F'|' "$_PATROL_ISO_AWK"'
-    function kv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+$(for f in "$2"/.bionic/tmp/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"; done 2>/dev/null | awk -F'|' "$_PATROL_ISO_AWK$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") != 1 { next }
-    { p = kv("plan"); r = kv("row"); e = iso2epoch(kv("launched_at")) }
+    { p = line_kv("plan"); r = line_kv("row"); e = iso2epoch(line_kv("launched_at")) }
     p == "" || p == "none" || r == "" || e < 0 { next }
     { k = p "\t" r; if (!(k in first) || e < first[k]) first[k] = e }
     END { for (k in first) print k "\t" first[k] }' | LC_ALL=C sort)
@@ -813,20 +820,16 @@ sitrep_work() {
 }
 
 # sitrep_ledger_times <ledger> -> `<D<n>><TAB><put epoch><TAB><ruling epoch or ->` per decision the design ledger puts:
-# its first put's clock and the clock of the first heading after it that rules it (any verb but put), each read from
-# the heading's `(<who> <YYYY-MM-DD> <h:mm> <AM|PM>` on the local clock; a ruling whose heading names no clock is `-`.
+# its first put that names a clock, and the first entry after it that rules it (any verb but put), each read from
+# `decisions_list`'s records on the local clock; a ruling that names no clock is `-`. A put naming no clock starts no
+# span; a later put of the same decision does not move the start.
 sitrep_ledger_times() {
   local d pd pc pa rd rc ra k e
   [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  awk '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence || !/^## Δ[0-9]+ — D[0-9]+ / { next }
-    { d = $4; v = $5; c = ""
-      if (match($0, /\([^)]* [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]?:[0-9][0-9] [AP]M/)) {
-        c = substr($0, RSTART, RLENGTH); n = split(c, w, " "); c = w[n - 2] "\t" w[n - 1] "\t" w[n] }
-      if (v == "put") { if (!(d in put) && c != "") { put[d] = c; ord[++m] = d } }
-      else if ((d in put) && !(d in rul)) rul[d] = (c == "") ? "-" : c }
-    END { for (i = 1; i <= m; i++) print ord[i] "\t" put[ord[i]] "\t" ((ord[i] in rul) ? rul[ord[i]] : "") }' "$1" \
+  decisions_list "$1" times | awk -F'\t' '
+    $2 == "put" { if (!($1 in put) && $4 != "") { put[$1] = $3 "\t" $4 "\t" $5; ord[++m] = $1 }; next }
+    ($1 in put) && !($1 in rul) { rul[$1] = ($4 == "") ? "-" : $3 "\t" $4 "\t" $5 }
+    END { for (i = 1; i <= m; i++) print ord[i] "\t" put[ord[i]] "\t" ((ord[i] in rul) ? rul[ord[i]] : "") }' \
   | while IFS='	' read -r d pd pc pa rd rc ra; do
       k="$(sitrep_local_epoch "$pd" "$pc" "$pa")"; [ -n "$k" ] || continue
       e="-"; [ -z "$rc" ] || e="$(sitrep_local_epoch "$rd" "$rc" "$ra")"
@@ -834,14 +837,49 @@ sitrep_ledger_times() {
     done
 }
 
+# sitrep_record_spans <plan> -> `<key><TAB><start ISO><TAB><end ISO or empty>` per ask the plan's `## SDLC State` times,
+# for the asks the register closed with no `opened=`: a review waiver (`waive:<question>`) runs from the failing
+# review's `at=` to the `waived:` line's instant, the last waiver of the question and the fail that began the failing
+# state it answers (a passing reading, or a waiver, ends that state); a carry (`carry:<record>#<n>`, the register's
+# key writing each character a key may not hold as `:`) runs from the `at=` of the review that registered its record,
+# the reading `proof-add` wrote the `deferred:` line beside, to its ruling, which only the register holds (no end here).
+# A `deferred:` line names no instant of its own. Fields are read by name through lib/line.sh's `line_kv`.
+sitrep_record_spans() {
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  [ -n "${_LINE_FIELDS_AWK:-}" ] && [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  plan_lines "$1" | awk "$_LINE_FIELDS_AWK"'
+    function ckey(id) { gsub(/[^A-Za-z0-9._-]/, ":", id); return "carry:" id }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { sdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
+    !sdlc { next }
+    $1 == "proved:" && line_kv("kind") == "review" {
+      q = line_kv("question"); r = line_kv("result"); a = line_kv("at"); ev = line_kv("evidence")
+      if (ev != "" && !(ev in rat)) rat[ev] = a
+      if (q == "") next
+      if (r == "fail") { if (!(q in fail)) fail[q] = a } else delete fail[q]
+      next }
+    $1 == "deferred:" && !($2 in dseen) { dseen[$2] = 1; ev = $2; sub(/#[0-9]+$/, "", ev); if (ev in rat) cs[ckey($2)] = rat[ev]; next }
+    $1 == "waived:" {
+      q = line_kv("question"); w = ""
+      for (i = 2; i <= NF && $i != "by"; i++) ;
+      for (i++; i <= NF && substr($i, 1, 1) != "\""; i++) if ($i ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z$/) { w = $i; break }
+      if (q != "" && w != "") { if (q in fail) { ws["waive:" q] = fail[q]; we["waive:" q] = w } else { delete ws["waive:" q]; delete we["waive:" q] } ; delete fail[q] }
+      next }
+    END {
+      for (k in ws) printf "%s\t%s\t%s\n", k, ws[k], we[k]
+      for (k in cs) printf "%s\t%s\t\n", k, cs[k] }'
+}
+
 # sitrep_waiting <plan> <root> <units_rows output> <now> <sitrep_asks output> -> `<minutes><TAB><keys>`: the minutes a
 # task waited on an ask, every ask's span joined so an overlap counts once, and the keys whose span counted, in the
 # order they opened. A span runs from the ask's opening (an open line's at=, a closed line's opened=) to its close (the
 # closed line's at=), or to now while it is open. A decision with no opening on the register runs from its first put in
-# the design ledger, and one the register never closed to its ruling's clock there. An open ask held a task when its
-# holds are not nothing; a closed one when a row not dropped reads it as approval:<id>, it was a step card or a gate
-# act, or it was a waiver, finding, matrix row or held merge in a plan with an integrate row (what each holds while
-# open, `sitrep_holds`). An ask whose span cannot be read counts no minute.
+# the design ledger, and one the register never closed to its ruling's clock there; a waiver or a carry with none runs
+# from the plan's own record of it (`sitrep_record_spans`). An open ask held a task when its holds are not nothing; a
+# closed one when a row not dropped reads it as approval:<id>, it was a step card or a gate act, or it was a waiver,
+# finding, carry, matrix row or held merge in a plan with an integrate row (what each holds while open, `sitrep_holds`).
+# An ask no record can start counts no minute, and the minutes are printed `partial` with how many asks went untimed.
 sitrep_waiting() {
   local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k
   reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
@@ -852,6 +890,7 @@ sitrep_waiting() {
         if (k == "integrate") print "I"
         n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (index(x, "approval:") == 1) print "A\t" substr(x, 10) } }'
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
+      sitrep_record_spans "$plan" | awk -F'\t' '{ print "S\t" $1 "\t" $2 "\t" $3 }'
       { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
           index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") }' "$reg"; } 2>/dev/null
     } | awk -F'\t' -v now="$now" "$_PATROL_ISO_AWK"'
@@ -861,7 +900,7 @@ sitrep_waiting() {
       function held(k,   x) {
         if (k in open) return open[k] != "nothing"
         if (k ~ /^approve:step[0-9]+$/ || index(k, "gate:") == 1) return 1
-        if (k ~ /^(waive|finding|row|hold):/) return integ
+        if (k ~ /^(waive|finding|carry|row|hold):/) return integ
         if (index(k, "approve:") == 1) return ("approval:" substr(k, 9)) in rd
         if (k ~ /^decide:D[0-9]+$/) return ("approval:" substr(k, 8)) in rd
         return 0
@@ -871,16 +910,20 @@ sitrep_waiting() {
       $1 == "A" { rd["approval:" $2] = 1; next }
       $1 == "D" { put[$2] = $3; rul[$2] = $4; want($2); next }
       $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; want($2); next }
+      $1 == "S" { sp[$2] = $3; se[$2] = $4; next }
       END {
         for (i = 1; i <= nk; i++) {
           k = ord[i]; if (!held(k)) continue
-          s = -1; e = -1
+          s = -1; e = -1; fromrec = 0
           if (k in rs) s = ep(rs[k] == "open" ? ra[k] : ro[k])
           if (s < 0 && (k in put)) s = put[k] + 0
+          if (s < 0 && (k in sp)) { s = ep(sp[k]); fromrec = 1 }
           if (k in open) e = now + 0
+          else if (fromrec && ep(se[k]) >= 0) e = ep(se[k])
           else if ((k in rs) && rs[k] == "closed") e = ep(ra[k])
           else if ((k in rul) && rul[k] != "-") e = rul[k] + 0
-          if (s < 0 || e <= s) continue
+          if (s < 0) { lost++; continue }
+          if (e <= s) continue
           n++; bs[n] = s; be[n] = e; bk[n] = k
         }
         # the spans by their opening, joined where they overlap
@@ -890,13 +933,21 @@ sitrep_waiting() {
           if (bs[i] > ce) { t += be[i] - bs[i]; ce = be[i] } else if (be[i] > ce) { t += be[i] - ce; ce = be[i] }
           keys = keys (keys == "" ? "" : " ") bk[i]
         }
-        printf "%d\t%s\n", t / 60 + 0.5, keys
+        printf "%d\t%d\t%s\n", t / 60 + 0.5, lost, keys
       }')"
-  m="${out%%	*}"; k="${out#*	}"
-  if [ -z "$k" ] || [ "$k" = "$out" ]; then printf '%s min\n' "${m:-0}"
+  IFS='	' read -r m u k <<SITREP_WAITING
+$out
+SITREP_WAITING
+  m="${m:-0}"; u="${u:-0}"
+  if [ "$u" -gt 0 ]; then
+    m="$m min partial, $u $(sitrep_noun "$u" ask asks) not timed"
+  else
+    m="$m min"
+  fi
+  if [ -z "$k" ]; then printf '%s\n' "$m"
   else
     # shellcheck disable=SC2086
-    printf '%s min: %s\n' "$m" "$(sitrep_list 99 $k)"
+    printf '%s: %s\n' "$m" "$(sitrep_list 99 $k)"
   fi
 }
 
