@@ -2,9 +2,9 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 115 · sections: 1045 · keep: 853 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1049 · keep: 857 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
 
-The section-list command counts 1071 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1071 - 22 - 8 = 1041.
+The section-list command counts 1078 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1078 - 22 - 8 = 1048.
 
 ## agent-context-guard.test.sh
 
@@ -201,6 +201,13 @@ close-out-4.test.sh | §ASKS-NOTHING | keep | rule: lint — a `read -p` or a re
 close-out-4.test.sh | §NO-SCORECARD | keep | payload/scripts/close-out.sh: the `scorecard: ` card lines printed again on check or run stdout (NS-1, NS-4); skills/canonical-sdlc/steps/9.md or its template naming the scorecard again (NS-7, NS-9) | none (searched 'scorecard: ' and 'grep -c scorecard' in tests/; close-out-4.test.sh §SCORECARD reads the continuation, not stdout)
 close-out-4.test.sh | §REVIEWS-RENDERED | keep | payload/scripts/close-out.sh co_reviews_part: a waiver or a failing review line left out of the part, or the hand-written part kept (RV-5, RV-6); co_reviews_entry: the part not added before ### Known limits (RV-13); co_reviews_publish: the branch moved without the ev=close-out record line, or by update-ref under a checkout that holds it (RV-10, RV-11) | none (searched 'ev=close-out', 'The reviews' and 'co_reviews' in tests/)
 close-out-4.test.sh | §MOCK-UP | prose pin | skills/canonical-sdlc/steps/2.md and its template: the rule that a card put for approval is the verb's or marked a mock-up deleted (MU-1 to MU-3) | none (searched 'mock-up' in tests/)
+
+## close-replay.test.sh
+
+close-replay.test.sh | §CLOSE | keep | payload/scripts/lib/worktree.sh _wt_land_checks: the past-judgment rule refusing every landing at current: 8 (today's code is this mutant: the replay stops at the fix row's ready, CL-1); also lib/line.sh line_publish: the review's waive:<q> left open after the born fix lands (CL-3b); lib/line.sh _line_numbers: the release numbers not rendered on a landing past the release (CL-4); close-out.sh: a hand-hold counted at the close (CL-7b) | none (searched 'delivered:' and 'past-judgment' in tests/: close-out-*.test.sh plant their plans' states, landing-line-*.test.sh refuse past-judgment on planted plans; no other suite plays a run from a failed review to delivered: through the verbs)
+close-replay.test.sh | §VERBS | keep | hooks/poker/line.sh poker_verb_deliver: a refusal naming ledger-add or ledger-set for a plan with no ## Dispatch ledger, a verb outside deliver, amend, task-set and step-field (VB-2b); or task-set refusing the cell the refusal named (VB-3) | session-poker-4.test.sh §NAMES-A-VERB (unverified: planted refusals, not the ones a played close meets)
+close-replay.test.sh | §PR | keep | tests/lib/rehearsal.sh _rh_gh: the stand-in left off the PATH or another gh left on it, so the real gh answers (PR-3); the pull request's command drops --base or --head (PR-2) | none (searched 'pr create' in tests/: close-out-*.test.sh read the command close-out prints at task scale, never a call of it)
+close-replay.test.sh | §REAL | keep | tests/lib/rehearsal.sh rehearse: the delivered state's config declaring the name scan, as the other states do (RE-1, RE-2, RE-3b); _rh_hand: a hand write tagged with a kind outside RH_HAND_KINDS, or one naming a register, a landing record or a plan line a verb writes (RE-4b, RE-5) | none (searched 'release-check.sh' and 'by hand' in tests/: door-*.test.sh run the real check over planted landings, not a played close)
 
 ## cmd-class.test.sh
 
