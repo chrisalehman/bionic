@@ -267,8 +267,8 @@ for TR_ST in failed-review release-waiting stop-rule clean; do
   expect_eq "FA-1 $TR_ST: the sheet's goal: lines, one per declared goal, met, not met and not measured" \
     "shown=met|asks=not met|walked=not measured" "$(rt_goal_lines "$TR_SHEET")"
   TR_N="$(rt_m "$TR_SHEET" work.task-time | sed -n 's/^\([0-9][0-9]*\) tasks*[,:].*/\1/p')"
-  expect_eq "FA-2 $TR_ST: $TR_N landed task(s) with a launch, under 3: the close is the chain at 1×, unscaled, and the basis says so" "yes|yes|yes" \
-    "$([ -n "$TR_N" ] && [ "$TR_N" -lt 3 ] && echo yes)|$([ "$(rt_m "$TR_SHEET" close.predicted)" = "$(rt_m "$TR_SHEET" close.unscaled)" ] && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.predicted: ' | /usr/bin/grep -q 'basis: clock.now plus close.chain at 1×: .*under 3' && echo yes)"
+  expect_eq "FA-2 $TR_ST: $TR_N landed task(s) with a launch, under 3: the close is unscaled, build tasks at 1×, and the basis says so" "yes|yes|yes" \
+    "$([ -n "$TR_N" ] && [ "$TR_N" -lt 3 ] && echo yes)|$([ "$(rt_m "$TR_SHEET" close.predicted)" = "$(rt_m "$TR_SHEET" close.unscaled)" ] && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.predicted: ' | /usr/bin/grep -q 'basis: .*at 1×.*under 3' && echo yes)"
   expect_eq "FA-2b $TR_ST: pace states two shares of one unit, the work landed and the forecast time used" "yes|yes" \
     "$(rt_m "$TR_SHEET" pace.work-landed | /usr/bin/grep -qE '^[0-9]+%$' && echo yes)|$(rt_m "$TR_SHEET" pace.time-used | /usr/bin/grep -qE '^[0-9]+%$' && echo yes)"
   expect_eq "FA-3 $TR_ST: correctness names the suites run by their last run and the whole run" "yes|yes" \
