@@ -97,10 +97,10 @@ capability, and no verb is removed. `canonical_sdlc_version` stays 14.
 
 ### The landing numbers
 
-`landing-report --rows` at 1aa62e49459f9803d4b1f1bfa8476c4d6486b0af on 2026-10-22T04:49:11Z:
+`landing-report --rows` at 32b08f7f7d6ef842750481eb927a62593a8a4e67 on 2026-10-22T06:00:29Z:
 
 ```
-landings: queue=19 hand=0 git=0 · ready-to-landed median=5.5m p75=9.1m max=22.4m · runs: green=84 red=4 none=0 discarded=0 red-then-green=0 run=246 reused=0 absent=0 · waited median=20s · killed=0
+landings: queue=20 hand=0 git=0 · ready-to-landed median=5.6m p75=9.2m max=22.4m · runs: green=90 red=4 none=0 discarded=0 red-then-green=0 run=258 reused=0 absent=0 · waited median=20s · killed=0
 T1 queue ready=2026-10-21T19:21:16Z landed=2026-10-21T19:26:23Z minutes=5.1 runs=4 waited=18s wait=0.3 prove=4.8 rework=0.0 width=3
   asks.test.sh green promised=4s actual=7s ratio=1.75
   release-approval.test.sh green promised=283s actual=287s ratio=1.01
@@ -204,6 +204,11 @@ T24 queue ready=2026-10-22T03:24:14Z landed=2026-10-22T03:33:26Z minutes=9.2 run
 T10 queue ready=2026-10-22T04:18:33Z landed=2026-10-22T04:19:59Z minutes=1.4 runs=2 waited=16s wait=0.3 prove=1.2 rework=0.0 width=3
   render.test.sh green promised=13s actual=17s ratio=1.31
   doctor-version.test.sh green promised=73s actual=68s ratio=0.93
+T25 queue ready=2026-10-22T04:39:43Z landed=2026-10-22T04:49:17Z minutes=9.6 runs=4 waited=16s wait=0.3 prove=9.3 rework=0.0 width=4
+  sitrep.test.sh green promised=118s actual=120s ratio=1.02
+  sitrep-card.test.sh green promised=23s actual=30s ratio=1.30
+  rehearsal.test.sh green promised=532s actual=555s ratio=1.04
+  asks.test.sh green promised=20s actual=25s ratio=1.25
 ```
 
 ## 1.24.0 — 2026-10-21
