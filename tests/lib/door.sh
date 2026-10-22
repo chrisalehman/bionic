@@ -33,7 +33,8 @@
 # the copies a relative `bash tests/lib/release-check.sh` opens there; CHANGELOG.md as the tree under test's HEAD
 # commits it, the real file of more than a pipe's buffer, never a filler; payload/.claude-plugin/plugin.json.
 # Ignored and so never landed: .bionic/config.yaml declaring `release-check: bash tests/lib/release-check.sh
-# <list>`, the list a file beside <dir>, outside every checkout; the bound plan with `release: DOOR_VERSION`,
+# <list>`, the list a file beside <dir>, outside every checkout, and the check's files as bionic declares its own,
+# `release-check-files:`; the bound plan with `release: DOOR_VERSION`,
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
 # (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
 # writes and no verb creates: `rigor: double` and `scale: wave`, without which the judge cannot deal the readings a
@@ -110,7 +111,8 @@ door_world() (  # <dir> -> `<root> <accepted head>`
   list="$root-names.list"
   printf '%s\n' "$DOOR_NAME" > "$list" || exit 1
   mkdir -p "$root/.bionic/tmp" "$root/.bionic/docs/record/wave-x"
-  printf 'release-check: bash tests/lib/release-check.sh %s\n' "$list" > "$root/.bionic/config.yaml"
+  printf 'release-check: bash tests/lib/release-check.sh %s\nrelease-check-files: %s\n' "$list" \
+    'tests/lib/*.sh payload/scripts/lib/*.sh hooks/session-poker.sh hooks/poker/*.sh' > "$root/.bionic/config.yaml"
   plan="$root/$DOOR_PLAN_REL"
   mkdir -p "${plan%/*}"
   cat > "$plan" <<PLAN
