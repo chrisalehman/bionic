@@ -1073,7 +1073,10 @@ sitrep_gather() {
       if (s != "landed") {
         if (id[n] in red) b = 1
         m = split(rd[n], a, ",")
-        for (k = 1; k <= m; k++) { x = trim(a[k]); sub(/^live:/, "", x); if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) b = 1 }
+        for (k = 1; k <= m; k++) {
+          x = trim(a[k]); sub(/^live:/, "", x)
+          if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) { b = 1; if (nb[n]++ == 0) bk[n] = words(x) }
+        }
       }
       g[n] = (s == "landed") ? "L" : (b ? "X" : (s == "active" ? "A" : "P"))
     }
@@ -1095,7 +1098,12 @@ sitrep_gather() {
         else note = (prev == "") ? "next on the line" : "queued behind " label(prev)
         row(i, "s", note); prev = qr[q]
       }
-      for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) row(i, "s", "building")
+      # an active task reading an approval still owed is held on it, and says so rather than building
+      for (i = 1; i <= n; i++) if (st[i] == "active" && !(i in placed)) {
+        note = "building"
+        if (g[i] == "X" && nb[i] > 0) { note = "waits on " label(bk[i]); if (nb[i] > 1) note = note " +" (nb[i] - 1) }
+        row(i, "s", note)
+      }
       # the rest: dependency order, the lowest table position first among the free
       for (k = 1; k <= ne; k++) {
         a1 = at[ef[k]]; b1 = at[et[k]]
