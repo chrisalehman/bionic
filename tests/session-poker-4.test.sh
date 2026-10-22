@@ -1113,7 +1113,7 @@ printf '%s\n' "$(roster_row_fixture session="$SID" name=w-T2 agent_id=a-w-T2 lau
 printf '%s\n' "$(roster_row_fixture session="$SID" name=w-T3 agent_id=a-w-T3 launched_at=2026-10-22T10:00:00Z row=T3 plan="$VC_P" files=lib/c.sh suites_allowed=c.test.sh suites_source=declared)" >> "$(roster_of "$VC")"
 s20_ack "$VC" w-T3 2026-10-22T11:00:00Z
 
-# ---------- §REVIEW-FILES (AC-9.1): a review row's Files are its questions' records, its artifact the first ----------
+# ---------- §REVIEW-FILES: a review row's Files are its questions' records, its artifact the first ----------
 VC_THREE="$VC_REC/critic-evidence.md, $VC_REC/critic-adversarial.md, $VC_REC/critic-structure.md"
 poke "$VC" task-add T6 6 review "the critic's review" critic — 30 REQ-1 — head
 expect_eq "RF-0 setup: task-add of a review row on the single-rigor plan exits 0" "0" "$RC"
@@ -1131,7 +1131,7 @@ poke "$VC" task-add T8 5 verify "the floor" test-runner — 30 REQ-1 —
 expect_eq "RF-4 control: a verify row keeps the reader-row rule, one record named for the row, and no artifact cell written" \
   "0|$VC_REC/T8.md|—" "$RC|$(vc_cell T8 9)|$(vc_cell T8 12)"
 
-# ---------- §DELIVER-CELL (AC-9.2): with no ledger, deliver lands the row its artifact cell names ----------
+# ---------- §DELIVER-CELL: with no ledger, deliver lands the row its artifact cell names ----------
 printf 'question: evidence\nresult: pass\nscope: piece\n' > "$VC/$VC_REC/critic-evidence.md"
 VC_HEAD="$(git -C "$VC" rev-parse main)"
 VC_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-22T12:00:00Z "$3" evidence w-crit pass piece' _ "$S46_LIB" "$VC_HEAD" "record/wave-01-fixture/critic-evidence.md")"
@@ -1150,7 +1150,7 @@ VC_DREF="$OUT"
 expect_contains "DC-2b …the refusal names the Tasks artifact cell's writer" "task-set T9 artifact=" "$VC_DREF"
 expect_no_regex "DC-2c …and on a plan with no ledger it never names ledger-set or ledger-add" "ledger-(set|add)" "$VC_DREF"
 
-# ---------- §FILES-UNHELD (AC-10.1): task-set writes Files on a row no live contract holds ----------
+# ---------- §FILES-UNHELD: task-set writes Files on a row no live contract holds ----------
 poke "$VC" task-set T1 "Files=lib/a.sh, lib/a2.sh"
 expect_eq "FU-1 AC-10.1 task-set Files= writes a landed row's cell (exit 0)" "0|lib/a.sh, lib/a2.sh" "$RC|$(vc_cell T1 9)"
 poke "$VC" task-set T3 "Files=lib/c.sh, lib/c2.sh"
@@ -1167,7 +1167,7 @@ expect_eq "FU-4 amend on a closed contract is refused (exit 1)" "1" "$RC"
 expect_contains "FU-4b AC-10.1 …and names task-set on the row its contract held" "task-set T3 Files=" "$VC_AREF"
 expect_absent "FU-4c …not a new dispatch" "dispatch the work again" "$VC_AREF"
 
-# ---------- §STEP8-KEYS (AC-10.2): step-field 8 writes the cleanup keys the gate's Step-8 block reads ----------
+# ---------- §STEP8-KEYS: step-field 8 writes the cleanup keys the gate's Step-8 block reads ----------
 poke "$VC" step-line 8 "integrated"
 expect_eq "S8-0 setup: step-line writes the Step 8 line (exit 0)" "0" "$RC"
 VC_S8=""
@@ -1184,7 +1184,7 @@ poke "$VC" step-field 5 cleanup=done
 s42_unchanged "S8-2 control: cleanup is read from the Step 8 block alone, so Step 5's is" 1 "$VC_P"
 VC_SREF="$OUT"
 
-# ---------- §NAMES-A-VERB (AC-10.3): each refusal names a verb that writes the cell, and that verb then does ----------
+# ---------- §NAMES-A-VERB: each refusal names a verb that writes the cell, and that verb then does ----------
 # The refusals planted above, plus a field on a step with no line. For each: the first call of a verb from the set it
 # prints is run on the cell, with the refusal's own operands and a value for its slot, and exits 0.
 s42_snap "$VC" "$VC_P"
