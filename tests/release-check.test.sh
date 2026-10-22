@@ -29,11 +29,16 @@
 #                   and refuses a number that disagrees, naming both; the gate's killed count is not held to it.
 #   §LAST           a landing the entry's head does not hold, other than the one that carried the entry, refuses it
 #                   until the entry is rendered again.
+#   §PROJECT        the check run from a tree that holds no plan reads the project's plan and record from
+#                   BIONIC_CHECK_PROJECT, so an unstated deferral refuses from that tree as it does from the project's own.
 #   §RATIO          the cap on tests: the tracked shell lines under tests/ against the tracked shell lines everywhere
 #                   else, counted in the tree at BIONIC_CHECK_HEAD. A head whose tests exceed its code is refused in
 #                   one line naming both counts; a head under passes with `test-ratio: <tests>/<code>`; the counts are
 #                   the head's, never the working files'; a directory reached through a symlink counts once; a head
 #                   with no shell code outside tests/ is a refusal, never a pass.
+#   §RATIO-BASE     a head over the cap is admitted when its test lines are at or under the tree at BIONIC_CHECK_BASE's
+#                   and refused when they rose; the line then carries `(base <tests>/<code>)`; a head under the cap
+#                   passes as before; a base that names no commit compares nothing, so the head alone is judged.
 #   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
 #                   AC-9.2): the block exists at its own heading, dated; the Corrections
 #                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
@@ -540,6 +545,55 @@ run_check "$R"
 expect_status "(R-5) a head with no shell outside tests/: the check refuses (exit 2)" 2 "$RC"
 expect_contains "(R-5) …in a line that says so" "no shell file outside tests/" "$OUT"
 expect_eq "(R-5) …one line" "1" "$(lines_of "$OUT")"
+
+section "§RATIO-BASE — a head over the cap is admitted when its test lines are at or under the base's, refused when they rose"
+
+# run_check_base <repo> <base> — the check at HEAD with BIONIC_CHECK_BASE=<base>, the range the release runner passes; sets OUT and RC
+run_check_base() {
+  OUT="$(cd "$1" && env -u BIONIC_CHECK_HEAD BIONIC_CHECK_BASE="$2" bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+}
+# fx_retest <dir> <tests lines> — the tests file rewritten to that many lines and committed
+fx_retest() {
+  fx_lines "$2" > "$1/tests/big.test.sh" && git -C "$1" add -A && git -C "$1" commit -q -m "tests at $2 lines"
+}
+
+# (RB-1) over the cap at the base, one test line cut: the landing is admitted and the line carries both sides.
+R="$TMP/ratiob-cut"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_retest "$R" 49
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-1) over the cap at the base, one test line cut: the check passes" 0 "$RC"
+expect_contains "(RB-1) …and prints the head's ratio beside the base's" "test-ratio: 49/10 (base 50/10)" "$OUT"
+expect_absent "(RB-1) …with no refusal beside it" "tests exceed code" "$OUT"
+
+# (RB-2) over the cap at the base, one test line added: refused, in one line that names both sides.
+R="$TMP/ratiob-rise"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_retest "$R" 51
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-2) over the cap at the base, one test line added: the check fails" 1 "$RC"
+expect_contains "(RB-2) …the line names both counts and says tests exceed code at the head" "test-ratio 51/10 — tests exceed code at HEAD" "$OUT"
+expect_contains "(RB-2) …and the base's counts it rose from" "(base 50/10)" "$OUT"
+expect_eq "(RB-2) …in one line" "1" "$(lines_of "$OUT")"
+
+# (RB-3) the same test lines as the base is not a rise.
+R="$TMP/ratiob-same"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+printf ':\n' >> "$R/code.sh"; git -C "$R" add -A; git -C "$R" commit -q -m "one code line more"
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-3) over the cap at the base, test lines unchanged: the check passes" 0 "$RC"
+expect_contains "(RB-3) …printing both ratios" "test-ratio: 50/11 (base 50/10)" "$OUT"
+
+# (RB-4) the control: under the cap at the head, lines added, the base beside the ratio and no refusal.
+R="$TMP/ratiob-under"; fx_ratio "$R" 10 50; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_retest "$R" 20
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-4) under the cap at the head, test lines added: the check passes" 0 "$RC"
+expect_contains "(RB-4) …printing both ratios" "test-ratio: 20/50 (base 10/50)" "$OUT"
+
+# (RB-5) a base the repository cannot read compares nothing: the head alone is judged, as with no base.
+R="$TMP/ratiob-nobase"; fx_ratio "$R" 50 10
+run_check_base "$R" "0000000000000000000000000000000000000000"
+expect_status "(RB-5) a base that names no commit, a head over the cap: the check fails" 1 "$RC"
+expect_contains "(RB-5) …on the head's counts" "test-ratio 50/10 — tests exceed code at HEAD" "$OUT"
+expect_absent "(RB-5) …with no base counts invented" "(base" "$OUT"
 
 section "§CORR — the 1.19.0 entry names the run and corrects 1.18.0 (REQ-8 AC-8.1, AC-8.3, AC-8.4; REQ-9 AC-9.1, AC-9.2)"
 
