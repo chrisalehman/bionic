@@ -577,6 +577,137 @@ EOF
   LINE_NUMBERS="$c"
 }
 
+# THE RELEASE ENTRY'S REVIEWS PART, RENDERED FROM THE PLAN. The entry's `### The reviews` part names every review the run
+# registered and every waiver the user gave, so it is the machine's, as the numbers are: one fixed first line, then one
+# bullet per `proved: kind=review` line and per `waived:` line of the plan's unfenced `## SDLC State`, in the order the
+# verbs wrote them. It replaces the entry's own part (its heading to the next heading; a doubled heading is one part), or
+# goes in before the entry's `### Known limits` or `### The landing numbers`, whichever comes first, else at the entry's
+# end. Two verbs write it through these functions, so the two cannot render it differently: the integrate row's
+# `reviews-part`, before the pull request opens, so the merge carries the part to the integration branch, and close-out,
+# for a run whose part no earlier verb wrote. The judge holds a commit of the part covered by what holds at its parent
+# only while it is byte-equal to this render (lib/proof.sh `proof_part_base`), so the render must stay deterministic:
+# the plan's lines and the entry alone decide it.
+line_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing
+  _line_load_proof || return 1
+  awk "$(proof_awk)"'
+    function base(p,   n, e) { n = split(p, e, "/"); return e[n] }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      at = ""; if (match($0, /[ \t]at=[^ \t]+/)) at = substr($0, RSTART + 4, RLENGTH - 4)
+      b[++n] = sprintf("- %s review%s: %s at %s by %s%s%s", PROOF_QUESTION, (PROOF_SCOPE != "" ? ", " PROOF_SCOPE : ""),
+        PROOF_RESULT, substr(PROOF_HEAD, 1, 8), PROOF_READER, (at != "" ? ", " at : ""),
+        (PROOF_EVIDENCE != "" ? " (`" base(PROOF_EVIDENCE) "`)" : ""))
+      next
+    }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      k = index($0, " by "); if (q == "" || !k) next
+      r = substr($0, k + 4); k = index(r, "\"")
+      if (k) { who = substr(r, 1, k - 1); words = substr(r, k) } else { who = r; words = "" }
+      sub(/[ \t]+$/, "", who); at = who; sub(/.*[ \t]/, "", at)
+      if (at ~ /^[0-9][0-9][0-9][0-9]-/ && length(at) < length(who)) { who = substr(who, 1, length(who) - length(at)); sub(/[ \t]+$/, "", who) }
+      else at = ""
+      b[++n] = sprintf("- %s review: waived at %s by %s%s%s", q, substr(h, 1, 8), who, (at != "" ? ", " at : ""),
+        (words != "" ? ": " words : ""))
+    }
+    END {
+      if (!n) exit
+      print "### The reviews"; print ""
+      print "Rendered from the plan'"'"'s review and waiver lines, in the order they were registered."; print ""
+      for (i = 1; i <= n; i++) print b[i]
+      print ""
+    }' "$1"
+}
+line_reviews_entry() {  # <changelog> <version> <part file> -> the changelog with the entry's part rendered
+  awk -v v="## $2 " -v pf="$3" '
+    function put(   l) { if (last != "") print ""; while ((getline l < pf) > 0) print l; close(pf); done = 1; last = "" }
+    /^## / { if (inb && !done) put(); inb = (index($0, v) == 1); inp = 0 }
+    /^### / {
+      t = $0; sub(/[[:space:]]+$/, "", t); inp = 0
+      if (inb && t == "### The reviews") { if (!done) put(); inp = 1; next }
+      if (inb && !done && (t == "### Known limits" || t == "### The landing numbers")) put()
+    }
+    inp { next }
+    { print; last = $0 }
+    END { if (inb && !done) put() }' "$1"
+}
+# line_reviews_state <plan> <root> <commit> <name> <out file> -> what the render would do to <commit>'s CHANGELOG.md
+# (<name> is what the words call the commit, a branch or a head): LINE_RV_STATE `none` (nothing to render, the reason in
+# LINE_RV_SAID), `listed` (the entry already reads as rendered) or `renders` (<out file> holds the file with the part
+# rendered); LINE_RV_VER the release, LINE_RV_N the bullets. rc 1, LINE_RV_SAID saying why, when the render cannot run.
+LINE_RV_STATE=""; LINE_RV_VER=""; LINE_RV_N=0; LINE_RV_SAID=""
+line_reviews_state() {
+  local plan="$1" root="$2" c="$3" nm="$4" out="$5" tmp
+  LINE_RV_STATE=none; LINE_RV_VER=""; LINE_RV_N=0; LINE_RV_SAID=""
+  _line_load_run || { LINE_RV_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
+  LINE_RV_VER="$(plan_frontmatter_get "$plan" release)"
+  [ -n "$LINE_RV_VER" ] || { LINE_RV_SAID="the plan names no release:"; return 0; }
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-reviews.XXXXXX")" || { LINE_RV_SAID="no temporary directory"; return 1; }
+  if ! git -C "$root" show "${c}:CHANGELOG.md" > "$tmp/old" 2>/dev/null; then
+    rm -rf "$tmp"; LINE_RV_SAID="$nm holds no CHANGELOG.md"; return 0
+  fi
+  if ! /usr/bin/grep -q "^## ${LINE_RV_VER} " "$tmp/old"; then
+    rm -rf "$tmp"; LINE_RV_SAID="CHANGELOG.md on $nm holds no ## $LINE_RV_VER entry"; return 0
+  fi
+  if ! line_reviews_part "$plan" > "$tmp/part"; then
+    rm -rf "$tmp"; LINE_RV_SAID="the proof library ($_LINE_LIB_DIR/proof.sh) cannot be loaded to read the plan's reviews"; return 1
+  fi
+  LINE_RV_N="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
+  [ "${LINE_RV_N:-0}" -gt 0 ] || { rm -rf "$tmp"; LINE_RV_N=0; LINE_RV_SAID="the plan registers no review and no waiver"; return 0; }
+  line_reviews_entry "$tmp/old" "$LINE_RV_VER" "$tmp/part" > "$out"
+  if cmp -s "$tmp/old" "$out"; then LINE_RV_STATE=listed; else LINE_RV_STATE=renders; fi
+  rm -rf "$tmp"
+}
+# line_reviews_checkout <root> <branch> -> nothing when the branch can take a commit of CHANGELOG.md, else why not: the
+# checkout that holds it takes the commit by a fast-forward, which a changed CHANGELOG.md there would refuse, so this is
+# asked before the commit is made, and a branch held in two places has no one checkout to move.
+line_reviews_checkout() {
+  local co rc
+  co="$(worktree_checkout_of "$1" "$2")"; rc=$?
+  if [ "$rc" -ge 2 ]; then printf '%s is checked out in more than one place (%s)' "$2" "${co// /, }"; return 0; fi
+  if [ "$rc" -eq 0 ] && [ -n "$(git -C "$co" status --porcelain -- CHANGELOG.md 2>/dev/null)" ]; then
+    printf 'CHANGELOG.md is changed in %s, the checkout holding %s: commit or restore it' "$co" "$2"
+  fi
+}
+# line_reviews_commit <root> <parent> <file> <author> <email> <message> -> LINE_RV_COMMIT, the commit of <file> as
+# CHANGELOG.md on <parent>, made in the object store alone (nothing moves); rc 1 with LINE_RV_SAID saying why
+LINE_RV_COMMIT=""
+line_reviews_commit() {
+  local root="$1" tip="$2" f="$3" tmp mode blob tree c
+  LINE_RV_COMMIT=""
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-reviews-commit.XXXXXX")" || { LINE_RV_SAID="no temporary directory"; return 1; }
+  mode="$(git -C "$root" ls-tree "$tip" CHANGELOG.md 2>/dev/null | awk '{ print $1 }')"
+  if blob="$(git -C "$root" hash-object -w --path CHANGELOG.md "$f" 2>&1)" \
+     && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$tip" >/dev/null 2>&1 \
+     && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
+     && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
+     && c="$(GIT_AUTHOR_NAME="$4" GIT_AUTHOR_EMAIL="$5" git -C "$root" commit-tree "$tree" -p "$tip" -m "$6" 2>&1)"; then
+    rm -rf "$tmp"; LINE_RV_COMMIT="$c"; return 0
+  fi
+  rm -rf "$tmp"
+  LINE_RV_SAID="the commit on ${tip:0:12} cannot be made: ${c:-${tree:-${blob:-git refused}}}"
+  return 1
+}
+# line_reviews_move <root> <branch> <commit> <old> <reflog words> -> the branch at <commit>: a fast-forward in the
+# checkout that holds it, so that checkout is never left behind it, else the ref moved from <old>; rc 1 when it cannot.
+# The branch moves on this machine alone: pushing it is the person's act.
+line_reviews_move() {
+  local co rc
+  co="$(worktree_checkout_of "$1" "$2")"; rc=$?
+  case $rc in
+    0) GIT_REFLOG_ACTION="$5" git -C "$co" merge --ff-only -q "$3" >/dev/null 2>&1 ;;
+    1) git -C "$1" update-ref -m "$5" "refs/heads/$2" "$3" "$4" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
 # THE FIX BORN OF A FAILING REVIEW. Once the plan reads `current: 8` or `9` the run has been judged for integration,
 # and the door refuses every landing but one: a row whose born marker (`task-add --born <record>#<n>`, lib/units.sh
 # `units_born_findings`) names a finding of the review that is its question's newest reading and derives `fail`.

@@ -21,8 +21,9 @@
 #                      verbs to close-out's delivered: (rehearse prints the archived plan's path): the sweeper acks
 #                      the failing reviewer, a fix row born of the review's finding is added, cut, launched and
 #                      landed through ready, the release check runs at its head, the release approval card is
-#                      rendered there and the user's reply approves it, the integrate row opens the pull request
-#                      through gh, the person merges it, the integrate row delivers its record, and close-out runs.
+#                      rendered there and the user's reply approves it, the integrate row renders the release entry's
+#                      reviews part on the working branch and opens the pull request through gh, the person merges
+#                      it, the integrate row delivers its record, and close-out runs.
 #     failed-review    the release-waiting run, then the user's reply "all recommended", Step 8, a whole structure
 #                      review registered failing, the working branch merged into main as the pull request lands
 #                      it, and close-out refused on the failing review: the register holds waive:structure and
@@ -320,6 +321,8 @@ _rh_replay() {
   _rh_poker "the release approval card at the fix's head" release-approval "$RH_PLAN" || return 1
   _rh_typed 'all recommended' || return 1
   _rh_poker "the user's reply to the card at the fix's head" reply 'all recommended' || return 1
+  # The part goes on the branch before the pull request opens, so the merge carries it to main.
+  _rh_poker "the integrate row renders the entry's reviews part" reviews-part T4 || return 1
   _rh_gh "$dir" || { echo "rehearse $RH_STATE: the stand-in gh could not be written in $dir/bin" >&2; return 1; }
   _rh_do "the gh on the integrate row's PATH" env PATH="$RH_GHPATH" bash -c 'type -a gh' || return 1
   _rh_do "the integrate row opens the pull request" env PATH="$RH_GHPATH" gh pr create --base main --head wave/x --fill || return 1
