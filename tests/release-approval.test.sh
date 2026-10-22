@@ -950,20 +950,21 @@ rm -f "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
 # ============================================================
 section "§CHECK-CHANGED: the card says when the release changes the declared release check (AC-10.2)"
 # ============================================================
-# The release range is the fixture's base-sha to its head, which changes lib/x.sh and CHANGELOG.md. A check whose
-# script is lib/x.sh is changed by this release; one whose script is tests/a.test.sh is not. fails-when: the card is
-# silent about a release that changes its check, or names a change to a check the release leaves alone.
+# The release range is the fixture's base-sha to its head, which changes lib/x.sh and CHANGELOG.md. The check's files
+# are the declared `release-check-files:`, never its command's words: a check run as tests/a.test.sh that declares
+# lib/*.sh is changed by this release; one run as lib/x.sh that declares tests/a.test.sh is not. fails-when: the card
+# is silent about a release that changes its check's files, or names a change to a check the release leaves alone.
 cc_line() { printf '%s\n' "$FC_OUT" | /usr/bin/grep 'changes the release check'; }
-printf 'release-check: bash lib/x.sh\n' > "$RFC/.bionic/config.yaml"
+printf 'release-check: bash tests/a.test.sh\nrelease-check-files: lib/*.sh\n' > "$RFC/.bionic/config.yaml"
 rt_log "$FC_R" "test-ratio: 1/2"
 rt_plan "$FC_R"
 fc_page
-expect_eq "CHECK-CHANGED-1 the page renders on a release that changes its check's script (exit 0, nothing on stderr)" \
+expect_eq "CHECK-CHANGED-1 the page renders on a release that changes a file its check declares (exit 0, nothing on stderr)" \
   "0|" "$FC_RC|$FC_ERR"
 expect_eq "CHECK-CHANGED-2 …and its Bottom line names the check's changed file, once" \
   "- This release changes the release check: lib/x.sh." "$(cc_line)"
 expect_eq "CHECK-CHANGED-2b …under Bottom line" "1" "$(fc_under 'Bottom line' | /usr/bin/grep -c 'changes the release check')"
-printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
+printf 'release-check: bash lib/x.sh\nrelease-check-files: tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
 rt_plan "$FC_R"
 fc_page
 expect_eq "CHECK-CHANGED-3 a release that leaves its check alone renders with its Bottom line" "0|1" \

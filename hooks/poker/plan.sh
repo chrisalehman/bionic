@@ -2734,14 +2734,14 @@ RR_AGAINST_EOF
       [ "${_rr_h:-}" = "$RR_HEAD" ] || RR_TR="$RR_TR at ${_rr_h:0:8}"
     fi
 
-    # WHAT THE RELEASE CHANGES OF ITS OWN CHECK: the files of the declared release check's closure that the range from
-    # the last release (`release_base`, the release check's own start) to the head changes, read by the door's own
-    # reading (lib/worktree.sh `_wt_check_judge`), so the user approving the release knows the check it passed was
-    # changed in it.
+    # WHAT THE RELEASE CHANGES OF ITS OWN CHECK: the check's declared files (`release-check-files:`) that the range
+    # from the last release (`release_base`, the release check's own start) to the head changes, read by the one
+    # reading the hand landing's line uses (lib/worktree.sh `_wt_check_judge`), so the user approving the release
+    # knows the check it passed was changed in it.
     RR_CHG=""
     line="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
     if [ -n "$line" ] && release_base "$PV_PLAN" "$PV_REPO" "$RR_HEAD"; then
-      RR_CHG="$(_wt_check_judge "$PV_REPO" "$RB_BASE" "$RR_HEAD" "$line")" && RR_CHG="${RR_CHG#* }" || RR_CHG=""
+      RR_CHG="$(_wt_check_judge "$PV_REPO" "$RB_BASE" "$RR_HEAD")" || RR_CHG=""
     fi
 
     # THE PAGE IS card.sh's (`release`), the renderer every card is drawn by; a page it refuses is never written.

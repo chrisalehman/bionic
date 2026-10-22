@@ -15,14 +15,12 @@
 #            scan refuses that merge's mark: each run is the judge's copy in a landing tree, never the target's or the
 #            head's, and each names the judge. With the runner pointed at the head, the piece publishes; the three
 #            call one runner, which alone runs the declared command.
-#   §COPY-2  a piece that changes one code file outside the closure lands, and so does one that changes a closure
-#            member outside the directory of the declared script (payload/scripts/lib/said.sh).
-#   §COPY-3  under a check declared by absolute path under the checkout a code-only piece lands; an absolute word
-#            outside the checkout (a prefix sibling, a path that only ends like a held one) names no member.
+#   §DECLARED the check's files are `release-check-files:`: a piece changing a declared file the check never loads
+#            lands, and its line and the release approval card name the file; a piece changing an undeclared file
+#            lands named by neither. Of the closure's functions only the intersection is named in the tree.
 #   §COPY-4  a check declared by the main checkout's absolute path, no checkout holding the branch: a piece that
 #            rewrites the check lands, and every run of the check is the judge's copy in a landing tree, the absolute
-#            word read inside it. A code-only piece lands, and a word that leaves the root by `..`, or lies beside it,
-#            names no member.
+#            word read inside it.
 #   §INFO    the target's committed check carries a bug and a piece fixes it: the piece lands by hand, both runs the
 #            judge's copy, its plan line names the judge and the check file it changes, and the release approval
 #            card names that file.
@@ -332,96 +330,69 @@ for DL_F in hooks/poker/proof.sh hooks/poker/line.sh payload/scripts/lib/worktre
 done
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§COPY-2: a piece that changes code the check loads, or no file of it, lands"
+section "§DECLARED: the check's files are the declared list; a landing names the ones it changes, and no other"
 
-# The judge's copy passes over these ranges, and neither piece touches the check script itself.
-DL_LIBDIR="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
-DL_CODE=payload/scripts/lib/notify.sh
-DL_LIB=payload/scripts/lib/said.sh
-# dl_copy2 <dir> <what> -> DQ, DQ_H0 a copy of its own, DL_QP the row T1's tree with <what> done and committed, the
-# target's own copy then run over the candidate's range (DQ_RC), and the sentinel emptied for the landing alone.
-dl_copy2() {
-  read -r DQ DQ_H0 <<EOF
+# The fixture declares `release-check-files:` as bionic does (tests/lib/door.sh). payload/scripts/lib/session.sh is
+# declared by a glob and loaded by no file of the check; payload/scripts/doctor.sh lies outside every glob.
+# dl_declared <dir> <path> -> DQ, DQ_H0 a copy of its own, and after a landing by hand of the row T1's tree with one
+# line added to <path>: DQ_OUT the landing's output, DQ_LINE the judged-by field of T1's line, DQ_CARD the release
+# approval card.
+dl_declared() {
+  local p
+  read -r DQ DQ_H0 <<EOF2
 $(door_copy "$DW" "$WORLD_ROOT/$1")
-EOF
-  DL_QP="$(door_piece "$DQ" T1)" || return 1
-  case "$2" in
-    rewrite) printf '#!/bin/bash\nexit 0\n' > "$DL_QP/tests/lib/release-check.sh" ;;
-    comment) printf '# a note on the check\n' >> "$DL_QP/tests/lib/release-check.sh" ;;
-    code) printf 'door_noted() { :; }\n' >> "$DL_QP/$DL_CODE" ;;
-    library) printf 'door_landed() { :; }\n' >> "$DL_QP/$DL_LIB" ;;
-  esac
-  dl_commit "$DL_QP" "the piece: $2" || return 1
-  dl_check "$DQ" "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)"; DQ_RC="$DOOR_RC"
-  : > "$DOOR_SEEN"
+EOF2
+  p="$(door_piece "$DQ" T1)" || return 1
+  printf 'door_noted() { :; }\n' >> "$p/$2"
+  dl_commit "$p" "the piece: $2" || return 1
+  door_land "$DQ" "$p"; DQ_OUT="$DOOR_OUT"
+  DQ_LINE="$(dl_plan_line "$DQ" T1 | /usr/bin/grep -o 'judged-by=.*$')"
+  door_run "$DQ" bash "$DOOR_POKER" release-approval --preview; DQ_CARD="$DOOR_OUT"
 }
-dl_copy2 copy2-code code
-DQ_CL="$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "$DL_DECL") )"
-expect_contains "(c2-3-0) CONTROL precondition: the closure read at the accepted head holds the check" \
-  "tests/lib/release-check.sh" "$DQ_CL"
-expect_absent "(c2-3-0b) CONTROL …and not the code file the piece changes" "$DL_CODE" "$DQ_CL"
-expect_eq "(c2-3-0c) CONTROL …over whose range the copy the target holds passes" "0" "$DQ_RC"
-door_land "$DQ" "$DL_QP"
-expect_eq "(c2-3) CONTROL the piece that changes one code file and no member of the closure lands by hand (exit 0)" \
-  "0" "$DOOR_RC"
-expect_contains "(c2-3b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c2-3c) CONTROL …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
+expect_contains "(d0) precondition: the fixture declares the check's files by glob" \
+  "payload/scripts/lib/*.sh" "$(sed -n 's/^release-check-files: //p' "$DW/.bionic/config.yaml" 2>/dev/null)"
 
-# The edge on the other side: project code the check loads, outside the directory of the declared script, keeps the
-# plain arms, so a piece that changes it lands while the copy the target holds passes.
-dl_copy2 copy2-library library
-DQ_CL="$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "$DL_DECL") )"
-expect_eq "(c2-4-0) precondition: the closure holds the library file the piece changes, and the check passes over its range" \
-  "1 0" "$(printf '%s\n' "$DQ_CL" | /usr/bin/grep -cxF "$DL_LIB") $DQ_RC"
-door_land "$DQ" "$DL_QP"
-expect_eq "(c2-4) a piece that changes a closure member outside the directory of the check lands by hand (exit 0)" \
-  "0" "$DOOR_RC"
-expect_contains "(c2-4b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c2-4c) …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
+dl_declared declared payload/scripts/lib/session.sh
+expect_contains "(d1) a piece that changes a declared file the check never loads lands by hand" \
+  "LANDED branch=wt/T1 onto=wave/x" "$DQ_OUT"
+expect_eq "(d2) …its line names the judge and the declared file it changes" \
+  "judged-by=${DQ_H0:0:12} changed-here=payload/scripts/lib/session.sh" "$DQ_LINE"
+expect_eq "(d3) …and the release approval card names it as a change to the release check" \
+  "- This release changes the release check: payload/scripts/lib/session.sh." \
+  "$(printf '%s\n' "$DQ_CARD" | /usr/bin/grep 'changes the release check')"
 
-# ---------------------------------------------------------------------------------------------------------------
-section "§COPY-3: under a check declared by absolute path a code-only piece lands; an outside word names no member"
+dl_declared undeclared payload/scripts/doctor.sh
+expect_contains "(d4) CONTROL a piece that changes a file no glob declares lands by hand" \
+  "LANDED branch=wt/T1 onto=wave/x" "$DQ_OUT"
+expect_eq "(d4b) CONTROL …its line names the judge alone" "judged-by=${DQ_H0:0:12}" "$DQ_LINE"
+expect_contains "(d4c) CONTROL …the release approval card renders" "Bottom line" "$DQ_CARD"
+expect_absent "(d4d) CONTROL …and says nothing of the check" "changes the release check" "$DQ_CARD"
 
-# An absolute path under the checkout names the same file as the relative one.
-dl_abs() { printf 'release-check: bash %s %s\n' "$2" "$DL_LIST" > "$1/.bionic/config.yaml"; }   # <root> <script word>
-
-dl_copy2 copy3-code code
-dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
-door_land "$DQ" "$DL_QP"
-expect_eq "(c3-2) CONTROL the same absolute declaration and a piece that changes one code file: lands by hand (exit 0)" \
-  "0" "$DOOR_RC"
-expect_contains "(c3-2b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c3-2c) CONTROL …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
-
-# A word outside the checkout names no member: one that only shares the checkout name as a prefix (the fixture's own
-# list is such a sibling), one whose tail repeats a path the commit holds, and one before the real script.
-dl_c3_closure() { ( . "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "$1"; echo "rc=$?" ); }   # <declaration>
-DQ_IN="$(dl_c3_closure "bash $DQ/tests/lib/release-check.sh $DL_LIST")"
-expect_contains "(c3-3-0) CONTROL precondition: the closure of the declaration inside the checkout holds the check" \
-  "tests/lib/release-check.sh" "$DQ_IN"
-DQ_OUT="$(dl_c3_closure "bash ${DQ}-names.list")"
-expect_eq "(c3-3a) a declaration whose absolute word shares only the checkout's name as a prefix names no member (rc 1)" "rc=1" "$DQ_OUT"
-DQ_OUT="$(dl_c3_closure "bash /nonexistent-c3/tests/lib/release-check.sh")"
-expect_eq "(c3-3b) a declaration whose absolute word outside the checkout ends in a path the commit holds names no member (rc 1)" \
-  "rc=1" "$DQ_OUT"
-DQ_OUT="$(dl_c3_closure "bash /nonexistent-c3/x.sh tests/lib/release-check.sh")"
-expect_eq "(c3-3c) …and it is skipped, not the end of the declaration: a relative script after it is the member" \
-  "tests/lib/release-check.sh rc=0" "$(printf '%s\n' "$DQ_OUT" | /usr/bin/grep -xF -e tests/lib/release-check.sh -e rc=0 | paste -sd' ' -)"
+# What decides the check's files is the declaration alone: of the five functions that read the check's own loads to
+# find them, the one that meets the declaration with the range is all that stands, and the three readers call it.
+DL_FNS="$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rhoE '_wt_(check_(closure|loads|judge|beside)|repo_paths)' payload hooks tests | sort -u)"
+expect_eq "(d5) of the closure's functions only the intersection is named in payload/, hooks/ and tests/" "_wt_check_judge" "$DL_FNS"
+for DL_F in hooks/poker/line.sh hooks/poker/plan.sh; do
+  expect_true "(d5b) $DL_F reads what a range changes of the check's files through the intersection" \
+    /usr/bin/grep -q '_wt_check_judge "' "$BIONIC_SCRIPTS_DIR/$DL_F"
+done
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§COPY-4: a check declared by the main checkout's absolute path is run as the judge holds it"
 
 # The declaration is read from the main checkout, and the door runs it in a landing tree pointed at the judge: an
-# absolute word under the main checkout names the file the judge's tree holds at that path. A word outside every
-# root names no member.
-dl_detach() { _door_inside "$1" && git -C "$1" checkout --quiet --detach; }   # <root>: no checkout holds wave/x
-dl_c4_closure() { ( . "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$1" "$DQ_H0" "$2"; echo "rc=$?" ); }   # <run dir> <declaration>
-
-dl_copy2 copy4-tree rewrite
-dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
-dl_detach "$DQ"
-expect_eq "(c4-1-0) precondition: no checkout holds the working branch, and the target copy passes over the piece" \
-  "1 0" "$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; worktree_checkout_of "$DQ" wave/x >/dev/null; echo $?) ) $DQ_RC"
+# absolute word under the main checkout names the file the judge's tree holds at that path.
+read -r DQ DQ_H0 <<EOF2
+$(door_copy "$DW" "$WORLD_ROOT/copy4-tree")
+EOF2
+DL_QP="$(door_piece "$DQ" T1)" && printf '#!/bin/bash\nexit 0\n' > "$DL_QP/tests/lib/release-check.sh" \
+  && dl_commit "$DL_QP" "the piece: rewrite"
+dl_check "$DQ" "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)"; DQ_RC="$DOOR_RC"
+_door_inside "$DQ" && sed -i.orig "s|^release-check: bash tests/|release-check: bash $DQ/tests/|" "$DQ/.bionic/config.yaml" \
+  && rm -f "$DQ/.bionic/config.yaml.orig" && git -C "$DQ" checkout --quiet --detach
+: > "$DOOR_SEEN"
+expect_eq "(c4-1-0) precondition: the check is declared by absolute path, no checkout holds the working branch, and the target copy passes over the piece" \
+  "1 1 0" "$(/usr/bin/grep -c "^release-check: bash $DQ/tests/lib/release-check.sh " "$DQ/.bionic/config.yaml") $( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; worktree_checkout_of "$DQ" wave/x >/dev/null; echo $?) ) $DQ_RC"
 door_land "$DQ" "$DL_QP"
 DQ_SEEN="$(door_seen)"
 expect_eq "(c4-1a) land --by-hand of the rewrite, declared by absolute path, from a landing tree: lands (exit 0)" "0" "$DOOR_RC"
@@ -429,23 +400,6 @@ expect_contains "(c4-1b) …LANDED onto the working branch" "LANDED branch=wt/T1
 expect_eq "(c4-1c) each run of the check (the door's, the scan's) is the judge's copy in a landing tree: the absolute word is read inside it" \
   "2 2" "$(dl_seen_judge "$DQ")"
 expect_absent "(c4-1d) …never the main checkout's working copy the word names" " script=$DQ/tests/lib/release-check.sh" "$DQ_SEEN"
-
-dl_copy2 copy4-code code
-dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
-dl_detach "$DQ"
-door_land "$DQ" "$DL_QP"
-expect_eq "(c4-4a) CONTROL the absolute declaration from a landing tree and a piece that changes one code file: lands by hand (exit 0)" \
-  "0" "$DOOR_RC"
-expect_contains "(c4-4b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c4-4c) CONTROL …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
-DQ_LT="$(cd "$DQ/.bionic/tmp/landing" 2>/dev/null && for t in */; do [ -e "$t.git" ] && { printf '%s' "$PWD/${t%/}"; break; }; done)"
-DQ_IN="$(dl_c4_closure "$DQ_LT" "bash $DQ/tests/lib/release-check.sh $DL_LIST")"
-expect_contains "(c4-4d-0) CONTROL precondition: run from the landing tree the door used, the closure of the word under the main root holds the check" \
-  "tests/lib/release-check.sh" "$DQ_IN"
-expect_eq "(c4-4d) CONTROL …while a word that leaves the root by .. names no member (rc 1)" \
-  "rc=1" "$(dl_c4_closure "$DQ_LT" "bash $DQ/../elsewhere/tests/lib/release-check.sh")"
-expect_eq "(c4-4e) CONTROL …and so does a list beside the root, outside every root (rc 1)" \
-  "rc=1" "$(dl_c4_closure "$DQ_LT" "bash ${DQ}-names.list")"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§INFO: a landing that changes the check lands; its line and the release approval card name what it changes"
