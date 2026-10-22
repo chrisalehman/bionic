@@ -911,8 +911,8 @@ run.project: proj
 step: n=0 name=Configure state=done tasks=0
 step: n=1 name=Scope state=running tasks=1
 task: id=T1 step=1 state=running desc=the scope note=building
-metric.completed: 0 of 1 tasks (0%)
-metric.goals: none declared
+work.landed: 0 tasks, 0 of 1 min, 0% — the tasks landed · unit: count, sized minutes, % of them · source: the rows with status landed
+work.left: 1 task, 1 min — the tasks neither landed nor dropped · unit: count, sized minutes · source: the remaining rows
 close.predicted: 11:00 AM
 close.forecast: -'
 SIT_JUDGE='call: Nothing is owed; let 1/1 land.
