@@ -452,6 +452,77 @@ sr_run "$SR_PLAN"
 expect_eq "WS6 …and with no line on the register, to the ruling's own time in the ledger" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
 
 # ============================================================
+section "§ONE-PARSER: one reader of the design ledger's headings, one rule for what rules a decision, settled among its verbs"
+# ============================================================
+# fails-when: a ledger whose only ruling of D<n> is a `settled` heading is open to one reader and ruled to the other, a
+# ruling the ledger writes as a bullet is no ruling to the clock reader, or a second program parses a ledger heading.
+sr_world one-parser "6 6 12 12"
+awk -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $8 = " approval:D5 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_bind
+printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-10-06 1:30 PM PDT): the thing\n\n%s\n\n## Δ2 — D5 settled "1" (fixture 2026-10-06 2:00 PM PDT): the thing\n' \
+  "$SR_D_WAIT" > "$SR_DIR/design-ledger.md"
+sr_owed "key=decide:D5|state=closed|by=ruled|at=2026-10-06T21:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "OP1 a decision whose only ruling is a settled heading is ruled to the register's reader: the decisions verb prints it" \
+  'D5 · settled "1" · fixture 2026-10-06 · the thing' "$(sr_poke decisions 2>&1)"
+expect_eq "OP1b …and to the clock reader: from its put to the ruling's own clock, 30 minutes" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
+expect_eq "OP1c …and open to neither: the sheet owes no ask for it" "0" "$(sr_lines ask | /usr/bin/grep -c 'key=decide:D5 ')"
+# A ruling the ledger writes as a bullet under a Δ is a ruling to the clock reader too: with no register line, the
+# bullet's clock ends the span.
+printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-10-06 1:30 PM PDT): the thing\n\n%s\n\n## Δ2 — steps folded\n\n- D5 ruled "1" (fixture 2026-10-06 2:00 PM PDT): the thing\n' \
+  "$SR_D_WAIT" > "$SR_DIR/design-ledger.md"
+rm -f "$(sr_reg)"
+sr_run "$SR_PLAN"
+expect_eq "OP2 a bullet ruling ends the span at its own clock, as a heading's does" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
+# The static row: the code recognises a ledger heading (`## Δn — `) in one program. The control plants the same line
+# twice, and once beside a comment that names the shape, through the same counter.
+op_count() { /usr/bin/grep -vE '^[[:space:]]*#' "$1" | /usr/bin/grep -cE 'Δ\[0-9\]\+ — '; }
+OP_P="$TMPROOT/op-plant.sh"
+printf '%s\n' "# a comment naming Δ[0-9]+ — is no parser" "  index(\$0, 1) { sub(/^## Δ[0-9]+ — /, \"\") }" > "$OP_P"
+expect_eq "OP3a (control) the counter finds one parser in a file with one, and passes a comment by" "1" "$(op_count "$OP_P")"
+printf '%s\n' "  \$0 ~ /^## Δ[0-9]+ — D[0-9]+ / { next }" >> "$OP_P"
+expect_eq "OP3b (control) …and two in a file with a second" "2" "$(op_count "$OP_P")"
+expect_eq "OP3 the sheet's code holds one heading parser of the design ledger" "1" "$(op_count "${BIONIC_HOOKS_DIR}/poker/sitrep.sh")"
+
+# ============================================================
+section "§SPAN: an ask closed with no opened= takes its span from the run's record, or the count says it is partial"
+# ============================================================
+# fails-when: a closed waiver or carry with no opened= adds no minute though the plan holds its span, the opened= it
+# has is passed over for the record, or an ask the record cannot time leaves the count unmarked.
+sr_mw_world span
+awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | — | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"; next } { print }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+SP_REC="record/wave-02-fx/critic-structure.md"
+awk -v h="$SR_H" -v rec="$SP_REC" '{ print } /^current: 4$/ {
+  print "proved: kind=review head=" h " at=2026-10-06T12:00:00Z evidence=" rec " question=structure reader=w-T2 result=flag scope=whole"
+  print "deferred: " rec "#2 S2 on \"a thing\""
+  print "proved: kind=review head=" h " at=2026-10-06T13:00:00Z evidence=record/wave-02-fx/critic-evidence.md question=evidence reader=w-T1 result=fail scope=whole"
+  print "waived: question=evidence head=" h " by Chris Lehman 2026-10-06T14:00:00Z \"waive it\"" }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+SP_CARRY="carry:record:wave-02-fx:critic-structure.md:2"
+sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "SP1 a closed waiver with no opened=: from the review's fail line to the waived: line, 60 minutes, nothing partial" \
+  "60 min: waive:evidence" "$(sr_m waste.waiting-on-you)"
+rm -f "$(sr_reg)"
+sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z|opened=2026-10-06T13:30:00Z"
+sr_run "$SR_PLAN"
+expect_eq "SP2 (control) the same waiver with opened= present uses it: 30 minutes" "30 min: waive:evidence" "$(sr_m waste.waiting-on-you)"
+rm -f "$(sr_reg)"
+sr_owed "key=$SP_CARRY|state=closed|by=ruled|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "SP3 a closed carry with no opened=: from the reading that raised its deferral to its ruling, 120 minutes" \
+  "120 min: $SP_CARRY" "$(sr_m waste.waiting-on-you)"
+rm -f "$(sr_reg)"
+sr_owed "key=finding:record:wave-02-fx:nowhere.md:1|state=closed|by=ruled|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "SP4 a closed ask the record holds no span for: the count is marked partial and says how many asks it could not time" \
+  "0 min partial, 1 ask not timed" "$(sr_m waste.waiting-on-you)"
+sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z"
+sr_run "$SR_PLAN"
+expect_eq "SP4b …beside the asks it did time, whose minutes stand" "60 min partial, 1 ask not timed: waive:evidence" "$(sr_m waste.waiting-on-you)"
+
+# ============================================================
 section "§WAITS: a held or pending task's note names everything it waits on, in words, never a count of the rest"
 # ============================================================
 # fails-when: a note names one read and counts the others (`waits on step 8 +5`), or prints a read's token
