@@ -17,6 +17,8 @@
 # §HELD-FILL     while `hold:merge` is open the tick offers no FILL naming the integrate row and the stop wall ends the
 #                turn; with the hold closed the same fixture offers it and the wall refuses (the differential control)
 # §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
+# §FLAG          a review whose result is `flag` opens no `waive:`, recorded by the verb or met by the preflight (a finding of it
+#                fixed by a landed row); the same projects with a failing reading newest open it (the differential control)
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
 # §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
@@ -47,10 +49,10 @@ AS_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 # The close-out fixture's builders, read by name out of tests/close-out.prelude.sh, so this suite holds no second
 # copy of the fixture and a builder that changes there changes here.
 CO_TESTS="$(dirname "$0")/close-out.prelude.sh"
-as_import_fn() {  # <name> -> the function, defined here, read out of close-out.prelude.sh
+as_import_fn() {  # <name> [<file>] -> the function, defined here, read out of close-out.prelude.sh, else out of <file>
   local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$CO_TESTS")"
-  if [ -z "$body" ]; then echo "as_import_fn: no $1 in $CO_TESTS" >&2; return 1; fi
+  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "${2:-$CO_TESTS}")"
+  if [ -z "$body" ]; then echo "as_import_fn: no $1 in ${2:-$CO_TESTS}" >&2; return 1; fi
   eval "$body"
 }
 REPO_ROOT="$BIONIC_SCRIPTS_DIR"
@@ -232,7 +234,7 @@ RF_REG="$RF_DIR/asks.state"
 new_roster "$RF"
 roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$(roster_of "$RF")"
 printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud agent_id=a-w-aud subagent_type=bionic:auditor \
-  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md)" >> "$(roster_of "$RF")"
+  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md,.bionic/docs/record/wave-01-fixture/ev-flag.md,.bionic/docs/record/wave-01-fixture/ev-flag-fail.md,.bionic/docs/record/wave-01-fixture/ev-flag-pass.md)" >> "$(roster_of "$RF")"
 as_rec() {  # <file> <head> <result> -> an evidence piece reading over base..<head>
   printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: %s\nscope: piece\n\nwhat the reader found\n' \
     "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"
@@ -301,6 +303,52 @@ expect_eq "FL-2 precondition: a passing reading of the same question registers (
 expect_eq "FL-3 …and closes the waiver for the run (FL-1 read the same extractor holding it)" "" "$(as_register "$RF" "$PF")"
 expect_contains "FL-3b …the register says a passing reading closed it" "|key=waive:evidence|state=closed|by=passing reading|" \
   "$(cat "$RF_REG" 2>/dev/null)"
+
+# ============================================================
+section "§FLAG: a review whose result is flag opens no waiver, recorded or through the preflight; a failing one does"
+# ============================================================
+# A flag answers a question and is never read as failed. Recorded, the verb opens an ask only for a fail. Through the
+# preflight, a flag whose finding a landed row fixed is settled by the run's landing record, which the preflight copy
+# reads through the origin its marker names, so the gate never meets a failing reading and stages no ask.
+# FIXTURE FIDELITY: the verb half is §FAILED's project and records (the verb dry-commits and writes the plan); the preflight
+# half is close-out-4's flag_fixture, read out of that suite by name (the Step-8 project, the review flag over a record
+# with a fixed finding and a note, the landed row's green verdict in the run's landing record), and the preflight is the
+# one `close-out.sh check` runs.
+# ANTI-VACUITY: in each half the same fixture, a failing reading made newest, opens `waive:evidence` or `waive:structure`
+# and the register reader returns it, so the empty register before it is that reader's honest answer.
+# fails-when: hooks/poker/proof.sh poker_verb_proof_add opens the waiver for any result but pass, so a recorded flag
+# opens the ask (FLAG-2).
+RF_C3="$(s57_commit "$RF_WT" lib/a.sh C3)"
+as_rec ev-flag.md "$RF_C3" flag
+poke "$RF" proof-add review record/wave-01-fixture/ev-flag.md --question evidence --reader w-aud
+expect_eq "FLAG-1 precondition: proof-add registers the flag reading (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      proof-add said: %s\n' "$OUT"
+expect_eq "FLAG-2 a recorded flag opens no ask: the register holds no waive:evidence" "" "$(as_register "$RF" "$PF")"
+RF_C4="$(s57_commit "$RF_WT" lib/a.sh C4)"
+as_rec ev-flag-fail.md "$RF_C4" fail
+poke "$RF" proof-add review record/wave-01-fixture/ev-flag-fail.md --question evidence --reader w-aud
+expect_eq "FLAG-3 the same project, a failing reading recorded after it: the register holds the waiver" "waive:evidence" \
+  "$(as_register "$RF" "$PF")"
+RF_C5="$(s57_commit "$RF_WT" lib/a.sh C5)"
+as_rec ev-flag-pass.md "$RF_C5" pass
+poke "$RF" proof-add review record/wave-01-fixture/ev-flag-pass.md --question evidence --reader w-aud
+expect_eq "FLAG-3a precondition: the passing reading registers (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      proof-add said: %s\n' "$OUT"
+expect_eq "FLAG-3b …and a passing reading closes it again, so the sections below meet the register as they did" "" \
+  "$(as_register "$RF" "$PF")"
+as_import_fn flag_fixture "$(dirname "$0")/close-out-4.test.sh" || echo "FLAG-0 flag_fixture not read out of close-out-4.test.sh"
+PG="$(flag_fixture as-flag)"
+PG_PLAN="$PG/$PLAN_REL"
+rm -f "$PG"/.bionic/tmp/owed-*.state
+run_close_as "$AS_SIDA" "$PG" check
+expect_eq "FLAG-4 precondition: check asked the gate twice, the plan as it stands and the preflight (two gate lines)" "2" \
+  "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^gate: ')"
+expect_eq "FLAG-5 through the preflight a flag opens no ask: no waive:structure, and no hold on the merge" "" "$(as_register "$PG" "$PG_PLAN")"
+bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-22T11:00:00Z record/wave-01-fixture/structure-fail.md structure w-read fail piece)"' \
+  _ "$AS_LIB" "$PG_PLAN" "$(fixture_git "$PG" rev-parse wave/01-fixture)" > "$PG_PLAN.n" && mv "$PG_PLAN.n" "$PG_PLAN"
+run_close_as "$AS_SIDA" "$PG" check
+expect_eq "FLAG-6 the same project with a failing reading newest: the register holds the waiver, beside the merge it holds" \
+  "hold:merge waive:structure" "$(as_register "$PG" "$PG_PLAN")"
 
 # ============================================================
 section "§STOP: a decision put opens its ask and its ruling closes it; a carry the orchestrator chose opens an ask"
