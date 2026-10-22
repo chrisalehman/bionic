@@ -2568,39 +2568,41 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # ── THE SITREP CARD ──────────────────────────────────────────────────────────
 #
 # The sitrep verb (hooks/poker/sitrep.sh) gathers the run's facts into the sheet and names its file; the model writes
-# the judgment, which comes on stdin, one tagged line each:
+# every row of the card as the judgment, which comes on stdin, one tagged line each:
 #
-#   call: <text>                              one or more: what the user should do now
-#   grade: <A-F>                              one
-#   point: <text>                             one to five: the Assessment's rows
-#   ask <key>: <what> — recommend <answer>    one per ask open on the sheet, its key copied from the sheet
-#   ask +: <text>                             any number: an ask the register lacks
-#   close: <text>                             one: what the predicted close depends on
+#   call: <row>                                       one or more: what the user should do now
+#   task: <label>: <text>                             the Task list, in the sheet's step order
+#   metric: <Label>: <text>                           five: Completed, Pace, Correctness, Waste, Goals, in that order
+#   grade: <A-F>                                      one
+#   point: <row>                                      one to five: the Assessment's rows
+#   ask <key>[, <key>...]: <what> — recommend <answer>   every ask open on the sheet answered once; one row may answer
+#                                                     several keys that are one decision
+#   ask +: <row>                                      any number: an ask the register lacks
+#   close: <row>                                      one to three: the predicted close and what it depends on
 #
-# The card is seven sections in this order: the head; Call to action; Task list; Metrics; Assessment: <grade>; Blocked
-# on you; Predicted close. A label sits at 2 columns and its rows at 4, each opening on a bullet, or in the Task list
-# on its icon; a row too wide folds under its own text. The facts draw the head, the Task list, Metrics, what each ask
-# holds and the close's time; the judgment draws the rest, and never a decision's options.
+# A task label is a step `N`, a task `N/x` (its id without the T) or a range of one step's tasks `N/a–N/b`.
 #
-# THE TASK LIST. A step collapses to one row, with its task count when it had tasks, only when the sheet calls it done
-# and every task in it is finished; a step the run has passed that still holds an open task is drawn as a step not
-# finished, whatever the run's current step. Inside a step not finished, its
-# finished tasks are one row, labelled by the range of their numbers (one finished task is its own row), and every
-# task that can still move has its own row with its note; a step not finished with no task is one row of its own. A
-# task's label is its step, a slash and its id without the T. Every row is one line: a task's description is cut at a
-# word and ends in "…" when the label, the glyph and the note after " — " would not otherwise print whole in the width.
+# The facts are the sheet's and the words the model's: the renderer draws the head, the seven sections in this order
+# (the head; Call to action; Task list; Metrics; Assessment: <grade>; Blocked on you; Predicted close), a label at 2
+# columns and its rows at 4, each opening on a bullet, or in the Task list on its icon, and capitalizes each row's
+# first letter. A task row's icon is the sheet's: done when its step is done with no open task, its task is done, or
+# every task of its range is done. A row too wide folds under its own text; a task row is one line.
 #
-# THE CHECK. Nothing prints until the judgment and the drawn text both pass. The judgment is refused when it drops an
-# open ask, names a key the sheet lacks, says no recommended answer, lists a decision's options, names none of the
-# open asks in its call while one is open, grades outside A to F, has no point or more than five, no call, no close
-# or two, a tag the card does not know, or a refused word (reader, readers, reading, readings, unmeasured). The
-# drawn text (`_card_sitrep_check`, also `card.sh sitrep-check`, so a planted card can prove each test) is refused
-# for a line over BIONIC_LINE_WIDTH, a row with no bullet or icon, the sections out of their order or one with no
-# row, a step row above its own tasks, a Task list row spanning two lines, and an open task with no row or two. A
-# refusal prints every reason on stderr
-# and nothing on stdout: a card that dropped an ask would tell the user they owe less than they do.
+# THE CHECK. Nothing prints until the judgment and the drawn text both pass, because a card that drops or contradicts
+# a fact would tell the user something the run does not hold. The judgment is refused when its Task list leaves out a
+# step on the sheet, names a label the sheet does not hold or runs out of the sheet's step order; when its metrics
+# are not the five in their order, or one states a number (each run of digits) the sheet does not hold; when no close
+# row names the sheet's predicted close; when it leaves an open ask unanswered or answers one twice, names a key the
+# register lacks, or writes an ask row that does not name the label of every task its keys hold, or with no
+# recommended answer, or as a decision's options; when it grades outside A to F, has no call, no point or more than
+# five, no close or more than three, a tag the card does not know, or a refused word (reader, readers, reading,
+# readings, unmeasured). The drawn text (`_card_sitrep_check`, also `card.sh sitrep-check`, so a planted card can
+# prove each test) is refused for a line over BIONIC_LINE_WIDTH, a row with no bullet or icon, the sections out of
+# their order or one with no row, a step row above its own tasks, a Task list row spanning two lines, and an open task
+# with no row or two. A refusal prints every reason on stderr and nothing on stdout.
 CARD_SITREP_NOTHING="Nothing: no decision or action is owed right now."
 CARD_SITREP_SECTIONS="Call to action|Task list|Metrics|Assessment|Blocked on you|Predicted close"
+CARD_SITREP_METRICS="Completed Pace Correctness Waste Goals"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
 # run., metric. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
@@ -2629,60 +2631,11 @@ _card_sitrep_fact() {
   printf '%s\n' "$SR_RECS" | awk -F'\t' -v k="$1" '$1 == "R" && $2 == k { v = $3; f = 1; exit } END { print (f && v != "") ? v : "-" }'
 }
 
-# _card_sitrep_tasks -> the Task list's rows from SR_RECS, one per line, without their indent (THE TASK LIST, above),
-# each as `<lead>US<description>US<tail>` (US the unit separator): the row is the three joined, and only the
-# description is cut to fit (`_card_sitrep_fit`). A row with no task description is all lead.
-# A task on a step the sheet does not list keeps its row, after the steps.
-_card_sitrep_tasks() {
-  printf '%s\n' "$SR_RECS" | awk -F'\t' '
-    function lab(id) { return (substr(id, 1, 1) == "T") ? substr(id, 2) : id }
-    function open_row(j) { return "⬜ " ts[j] "/" lab(ti[j]) ": \037" td[j] "\037" ((tn[j] != "" && tn[j] != "-") ? " — " tn[j] : "") }
-    $1 == "S" { ns++; sn[ns] = $2; sm[ns] = $3; ss[ns] = $4; sk[ns] = $5 + 0; known[$2] = 1; next }
-    $1 == "T" { nt++; ti[nt] = $2; ts[nt] = $3; tt[nt] = $4; td[nt] = $5; tn[nt] = $6; next }
-    END {
-      for (i = 1; i <= ns; i++) {
-        s = sn[i]; has = 0; opn = 0
-        for (j = 1; j <= nt; j++) if (ts[j] == s) { has = 1; if (tt[j] != "done") opn = 1 }
-        if (ss[i] == "done" && !opn) {
-          print "✅ " s ": " sm[i] ((sk[i] > 0) ? " — " sk[i] " task" ((sk[i] == 1) ? "" : "s") : "")
-          continue
-        }
-        nd = 0; num = 1
-        for (j = 1; j <= nt; j++) if (ts[j] == s && tt[j] == "done") { d[++nd] = j; if (lab(ti[j]) !~ /^[0-9]+$/) num = 0 }
-        if (nd == 1) print "✅ " s "/" lab(ti[d[1]]) ": \037" td[d[1]] "\037"
-        else if (nd > 1) {
-          lo = lab(ti[d[1]]); hi = lab(ti[d[nd]])
-          if (num) for (k = 1; k <= nd; k++) { x = lab(ti[d[k]]) + 0; if (x < lo + 0) lo = x; if (x > hi + 0) hi = x }
-          print "✅ " s "/" lo "–" s "/" hi ": " nd " tasks finished"
-        }
-        for (j = 1; j <= nt; j++) if (ts[j] == s && tt[j] != "done") print open_row(j)
-        if (!has) print "⬜ " s ": " sm[i] ((ss[i] == "running") ? " — running" : "")
-      }
-      for (j = 1; j <= nt; j++) if (!(ts[j] in known) && tt[j] != "done") print open_row(j)
-    }'
-}
-
-# _card_sitrep_fit <lead> <description> <tail> -> the row at 4 columns of indent, in one line: the description whole when
-# the row fits BIONIC_LINE_WIDTH, else cut at the last word that lets the row fit and ended in "…", so the label and the
-# tail (the note) always print whole. A row that fits no word prints its "…" alone.
-_card_sitrep_fit() {
-  local lead="$1" desc="$2" tail="$3" cut
-  _bionic_cols_into "    $lead$desc$tail"
-  if [ "$BIONIC_COLS" -le "$BIONIC_LINE_WIDTH" ]; then printf '%s%s%s\n' "$lead" "$desc" "$tail"; return 0; fi
-  cut="$desc"
-  while :; do
-    case "$cut" in *' '*) cut="${cut% *}" ;; *) cut="" ;; esac
-    _bionic_cols_into "    $lead$cut…$tail"
-    if [ "$BIONIC_COLS" -le "$BIONIC_LINE_WIDTH" ] || [ -z "$cut" ]; then break; fi
-  done
-  printf '%s%s…%s\n' "$lead" "$cut" "$tail"
-}
-
-# _card_sitrep_names <calls> <id>... -> 0 when a call names one of the ids as a whole word: no letter, digit or _ on
-# either side, so D30 never names D3
+# _card_sitrep_names <text> <id>... -> 0 when the text names one of the ids as a whole word: no letter, digit or _ on
+# either side, so 4/80 never names 4/8
 _card_sitrep_names() {
-  local calls="$1"; shift
-  printf '%s\n' "$calls" | awk -v ids="$*" '
+  local text="$1"; shift
+  printf '%s\n' "$text" | awk -v ids="$*" '
     function edge(c) { return c == "" || c !~ /[A-Za-z0-9_]/ }
     { t = t $0 "\n" }
     END {
@@ -2697,21 +2650,127 @@ _card_sitrep_names() {
       exit 1 }'
 }
 
+# _card_sitrep_cap <text> -> the text, its first letter capitalized when it is a to z. The letters are spelled out,
+# never a range, so a locale that collates A inside a-z cannot drop a capital.
+_card_sitrep_cap() {
+  local lo=abcdefghijklmnopqrstuvwxyz up=ABCDEFGHIJKLMNOPQRSTUVWXYZ c="${1:0:1}" p
+  case "$c" in ''|*[!abcdefghijklmnopqrstuvwxyz]*) printf '%s' "$1"; return 0 ;; esac
+  p="${lo%%"$c"*}"
+  printf '%s%s' "${up:${#p}:1}" "${1:1}"
+}
+
+# _card_sitrep_tasks_judge -> SJ_TDONE (1 when a task row's label is done on the sheet) and every refusal of the Task
+# list in SJ_WHY: a label the sheet does not hold, a range across steps, a row out of the sheet's step order, a step
+# with no row. A range's tasks are its step's tasks numbered from one end to the other, or, when a label is not a
+# number, the tasks between its two ends in the sheet's order.
+_card_sitrep_tasks_judge() {
+  local i out tag val
+  SJ_TDONE=()
+  out="$( { printf '%s\n' "$SR_RECS"; for ((i = 0; i < ${#SJ_TLAB[@]}; i++)); do printf 'J\t%s\n' "${SJ_TLAB[$i]}"; done; } \
+    | awk -F'\t' -v dash="–" '
+    function lab(id) { return (substr(id, 1, 1) == "T") ? substr(id, 2) : id }
+    function num(x) { return x ~ /^[0-9]+$/ }
+    function why(m) { print "W\t" m }
+    $1 == "S" { ns++; sn[ns] = $2; at[$2] = ns; nm[$2] = $3; ss[$2] = $4; next }
+    $1 == "T" { nt++; ts[nt] = $3; tl[nt] = lab($2); td[nt] = ($4 == "done"); tk[$3 "/" lab($2)] = nt; if ($4 != "done") opn[$3] = 1; next }
+    $1 == "J" { nj++; jl[nj] = $2 }
+    END {
+      last = 0
+      for (i = 1; i <= nj; i++) {
+        l = jl[i]; dn = 0; st = ""
+        if (num(l)) {
+          if (!(l in at)) why("the task row " l ": names a step the sheet does not hold")
+          else { st = l; dn = (ss[l] == "done" && !(l in opn)) }
+        } else if ((d = index(l, dash)) > 0) {
+          a = substr(l, 1, d - 1); b = substr(l, d + length(dash))
+          if (!(a in tk) || !(b in tk) || ts[tk[a]] != ts[tk[b]])
+            why("the task row " l ": is no range the sheet holds: a range runs from one task of a step to another of the same step, as 4/1" dash "4/9")
+          else {
+            st = ts[tk[a]]; x = tl[tk[a]]; y = tl[tk[b]]; dn = 1
+            if (num(x) && num(y)) {
+              lo = (x + 0 < y + 0) ? x + 0 : y + 0; hi = (x + 0 < y + 0) ? y + 0 : x + 0
+              for (j = 1; j <= nt; j++) if (ts[j] == st && num(tl[j]) && tl[j] + 0 >= lo && tl[j] + 0 <= hi && !td[j]) dn = 0
+            } else {
+              lo = (tk[a] < tk[b]) ? tk[a] : tk[b]; hi = (tk[a] < tk[b]) ? tk[b] : tk[a]
+              for (j = lo; j <= hi; j++) if (ts[j] == st && !td[j]) dn = 0
+            }
+          }
+        } else if (index(l, "/") > 0) {
+          if (!(l in tk)) why("the task row " l ": names a task the sheet does not hold")
+          else { st = ts[tk[l]]; dn = td[tk[l]] }
+        } else why("the task row \"" l "\" has no label: write it as task: <step>: <text>, task: <step>/<task>: <text> or task: <step>/<a>" dash "<step>/<b>: <text>")
+        print "D\t" dn
+        if (st != "") {
+          cov[st] = 1; o = (st in at) ? at[st] : ns + 1
+          if (o < last) why("the task row " l ": comes after a row of a later step: the Task list runs in step order, as the sheet lists the steps")
+          else last = o
+        }
+      }
+      for (k = 1; k <= ns; k++) if (!(sn[k] in cov))
+        why("the step " sn[k] " (" nm[sn[k]] ") has no row on the Task list: write it by its own label " sn[k] ", by one of its tasks or by a range of them")
+    }')"
+  while IFS="$CARD_TAB" read -r tag val; do
+    case "$tag" in
+      D) SJ_TDONE[${#SJ_TDONE[@]}]="$val" ;;
+      W) SJ_WHY="$SJ_WHY$val"$'\n' ;;
+    esac
+  done <<< "$out"
+}
+
+# _card_sitrep_metrics_judge -> every refusal of the Metrics in SJ_WHY: the five labels once each in their order, and
+# every number a metric row states (each run of digits, so 5:46 is 5 and 46) one the sheet holds, SR_NUMS
+_card_sitrep_metrics_judge() {
+  local i m got="" miss="" bad=""
+  for ((i = 0; i < ${#SJ_MLAB[@]}; i++)); do
+    m="${SJ_MLAB[$i]}"
+    case " $CARD_SITREP_METRICS " in
+      *" $m "*) case " $got " in *" $m "*) bad=1; SJ_WHY="${SJ_WHY}metric: $m: is written twice: each metric has one row"$'\n' ;; esac ;;
+      *) bad=1; SJ_WHY="${SJ_WHY}metric: ${m:0:30}: is no metric of the card: its metrics are $CARD_SITREP_METRICS"$'\n' ;;
+    esac
+    got="${got:+$got }$m"
+  done
+  for m in $CARD_SITREP_METRICS; do
+    case " $got " in *" $m "*) ;; *) miss="${miss:+$miss, }$m" ;; esac
+  done
+  [ -z "$miss" ] || SJ_WHY="${SJ_WHY}the judgment has no metric row for $miss: the Metrics are $CARD_SITREP_METRICS, one row each"$'\n'
+  [ -n "$miss" ] || [ -n "$bad" ] || [ "$got" = "$CARD_SITREP_METRICS" ] \
+    || SJ_WHY="${SJ_WHY}the metrics run $got: the card has them in the order $CARD_SITREP_METRICS"$'\n'
+  m="$(for ((i = 0; i < ${#SJ_MLAB[@]}; i++)); do printf '%s\t%s\n' "${SJ_MLAB[$i]}" "${SJ_MTXT[$i]}"; done \
+    | awk -F'\t' -v nums="$SR_NUMS" '
+    BEGIN { n = split(nums, a, " "); for (i = 1; i <= n; i++) h[a[i]] = 1 }
+    { s = $2
+      while (match(s, /[0-9]+/)) {
+        x = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH); y = x; sub(/^0+/, "", y); if (y == "") y = "0"
+        if (!(y in h) && !seen[$1 SUBSEP y]++) printf "metric %s: says %s, a number the sheet does not hold: a metric states the numbers of the sheet\n", $1, x
+      } }')"
+  [ -z "$m" ] || SJ_WHY="$SJ_WHY$m"$'\n'
+}
+
 # _card_sitrep_judge -> the judgment on stdin read into SJ_*, every refusal of it one line in SJ_WHY. Reads the open
-# asks' keys from SR_AKEY.
+# asks from SR_AKEY and SR_AHOLDS, the sheet's numbers from SR_NUMS.
 _card_sitrep_judge() {
-  local l v key what ans i n ids="" text=""
-  SJ_CALL=(); SJ_POINT=(); SJ_GRADE=""; SJ_NG=0; SJ_CLOSE=""; SJ_NC=0; SJ_AKEY=(); SJ_AWHAT=(); SJ_AANS=(); SJ_PLUS=()
+  local l v key k ks i j m n pred hit lb text="" seen=" "
+  SJ_CALL=(); SJ_POINT=(); SJ_GRADE=""; SJ_NG=0; SJ_CLOSE=(); SJ_TLAB=(); SJ_TTXT=(); SJ_TDONE=(); SJ_MLAB=(); SJ_MTXT=()
+  SJ_ASK=(); SJ_AKEYS=()   # each Blocked on you row the judgment writes, in its order, and its keys (empty for ask +:)
   SJ_WHY=""
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in *[![:space:]]*) ;; *) continue ;; esac
     v="${l#*:}"; v="${v#"${v%%[! ]*}"}"
     case "$l" in
       call:*) SJ_CALL[${#SJ_CALL[@]}]="$v" ;;
+      task:*|metric:*)
+        case "$v" in
+          *': '*) lb="${v%%: *}"; v="${v#*: }"; v="${v#"${v%%[! ]*}"}" ;;
+          *:) lb="${v%:}"; v="" ;;
+          *) lb="$v"; v="" ;;
+        esac
+        [ -n "$v" ] || SJ_WHY="${SJ_WHY}the line '${l:0:60}' has no text after its label: write it as ${l%%:*}: <label>: <text>"$'\n'
+        if [ "${l%%:*}" = task ]; then SJ_TLAB[${#SJ_TLAB[@]}]="$lb"; SJ_TTXT[${#SJ_TTXT[@]}]="$v"
+        else SJ_MLAB[${#SJ_MLAB[@]}]="$lb"; SJ_MTXT[${#SJ_MTXT[@]}]="$v"; fi ;;
       grade:*) SJ_GRADE="$v"; SJ_NG=$((SJ_NG + 1)) ;;
       point:*) SJ_POINT[${#SJ_POINT[@]}]="$v" ;;
-      close:*) SJ_CLOSE="$v"; SJ_NC=$((SJ_NC + 1)) ;;
-      'ask +:'*) SJ_PLUS[${#SJ_PLUS[@]}]="$v" ;;
+      close:*) SJ_CLOSE[${#SJ_CLOSE[@]}]="$v" ;;
+      'ask +:'*) SJ_ASK[${#SJ_ASK[@]}]="$v"; SJ_AKEYS[${#SJ_AKEYS[@]}]="" ;;
       'ask '*)
         key="${l#ask }"
         case "$key" in
@@ -2719,19 +2778,24 @@ _card_sitrep_judge() {
           *:) key="${key%:}"; v="" ;;
           *) SJ_WHY="${SJ_WHY}the line '${l:0:60}' is no ask line: write it as ask <key>: <what> — recommend <answer>"$'\n'; continue ;;
         esac
-        v="${v#"${v%%[! ]*}"}"
-        for ((i = 0; i < ${#SJ_AKEY[@]}; i++)); do
-          [ "${SJ_AKEY[$i]}" != "$key" ] || SJ_WHY="${SJ_WHY}two ask lines name $key: the card has one row per ask"$'\n'
+        v="${v#"${v%%[! ]*}"}"; ks=""
+        # shellcheck disable=SC2046  # one word per key
+        for k in $(printf '%s' "$key" | tr ',' ' '); do ks="${ks:+$ks }$k"; done
+        key="$ks"
+        # shellcheck disable=SC2086  # one word per key
+        for k in $key; do
+          case "$seen" in *" $k "*) SJ_WHY="${SJ_WHY}two ask lines name $k: the card has one row per ask"$'\n' ;; esac
+          seen="$seen$k "
         done
         case "$v" in
-          *' — recommend '?*) what="${v% — recommend *}"; ans="${v##* — recommend }" ;;
-          *) what="$v"; ans=""; SJ_WHY="${SJ_WHY}ask $key: says no recommended answer: write it as ask $key: <what> — recommend <answer>"$'\n' ;;
+          *' — recommend '?*) ;;
+          *) SJ_WHY="${SJ_WHY}ask ${key// /, }: says no recommended answer: write it as ask <key>: <what> — recommend <answer>"$'\n' ;;
         esac
         if printf '%s\n' "$v" | awk '/(^|[^0-9A-Za-z])[1-9][.)] .*[^0-9A-Za-z][1-9][.)] / { f = 1 } END { exit !f }'; then
-          SJ_WHY="${SJ_WHY}ask $key: lists numbered options: the card names the ask and the recommended answer, never a decision's options"$'\n'
+          SJ_WHY="${SJ_WHY}ask ${key// /, }: lists numbered options: the card names the ask and the recommended answer, never a decision's options"$'\n'
         fi
-        n=${#SJ_AKEY[@]}; SJ_AKEY[n]="$key"; SJ_AWHAT[n]="$what"; SJ_AANS[n]="$ans" ;;
-      *) SJ_WHY="${SJ_WHY}the line '${l:0:60}' has a tag the card does not know: it takes call:, grade:, point:, ask <key>:, ask +: and close:"$'\n'; continue ;;
+        SJ_ASK[${#SJ_ASK[@]}]="$v"; SJ_AKEYS[${#SJ_AKEYS[@]}]="$key" ;;
+      *) SJ_WHY="${SJ_WHY}the line '${l:0:60}' has a tag the card does not know: it takes call:, task:, metric:, grade:, point:, ask <key>:, ask +: and close:"$'\n'; continue ;;
     esac
     text="$text$v"$'\n'
   done
@@ -2741,20 +2805,36 @@ _card_sitrep_judge() {
   else case "$SJ_GRADE" in [A-F]) ;; *) SJ_WHY="${SJ_WHY}grade: '${SJ_GRADE:0:20}' is not one of A to F"$'\n' ;; esac; fi
   n=${#SJ_POINT[@]}
   [ "$n" -ge 1 ] && [ "$n" -le 5 ] || SJ_WHY="${SJ_WHY}$n point: lines: the Assessment holds one to five"$'\n'
-  if [ "$SJ_NC" -eq 0 ]; then SJ_WHY="${SJ_WHY}no close: line: Predicted close says what the close depends on"$'\n'
-  elif [ "$SJ_NC" -gt 1 ]; then SJ_WHY="${SJ_WHY}$SJ_NC close: lines: Predicted close says what it depends on once"$'\n'; fi
-  for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do
-    key="${SR_AKEY[$i]}"; ids="$ids $key ${key#*:}"
-    case " ${SJ_AKEY[*]:-} " in *" $key "*) ;; *) SJ_WHY="${SJ_WHY}the ask $key is open on the register and the judgment has no ask $key: line"$'\n' ;; esac
-  done
-  for ((i = 0; i < ${#SJ_AKEY[@]}; i++)); do
-    case " ${SR_AKEY[*]:-} " in *" ${SJ_AKEY[$i]} "*) ;; *) SJ_WHY="${SJ_WHY}ask ${SJ_AKEY[$i]}: names a key the register lacks: copy the key from the sheet's ask: lines, or write ask +: for an ask it lacks"$'\n' ;; esac
-  done
-  # shellcheck disable=SC2086,SC2046  # one word per id
-  if [ "${#SR_AKEY[@]}" -gt 0 ] && [ "${#SJ_CALL[@]}" -gt 0 ] \
-     && ! _card_sitrep_names "$(printf '%s\n' "${SJ_CALL[@]}")" $ids; then
-    SJ_WHY="${SJ_WHY}the call names none of the open asks: name one by its id ($(_card_list 6 $(for key in "${SR_AKEY[@]}"; do printf '%s ' "${key#*:}"; done)))"$'\n'
+  n=${#SJ_CLOSE[@]}
+  [ "$n" -ge 1 ] && [ "$n" -le 3 ] || SJ_WHY="${SJ_WHY}$n close: lines: Predicted close holds one to three"$'\n'
+  pred="$(_card_sitrep_fact close.predicted)"
+  if [ "$pred" != - ] && [ "$n" -ge 1 ]; then
+    hit=""
+    for ((i = 0; i < n; i++)); do case "${SJ_CLOSE[$i]}" in *"$pred"*) hit=1 ;; esac; done
+    [ -n "$hit" ] || SJ_WHY="${SJ_WHY}no close: line names the predicted close, $pred: the first close row opens on it"$'\n'
   fi
+  [ "${#SJ_TLAB[@]}" -gt 0 ] || SJ_WHY="${SJ_WHY}no task: line: the Task list names every step on the sheet"$'\n'
+  _card_sitrep_tasks_judge
+  _card_sitrep_metrics_judge
+  for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do
+    case "$seen" in *" ${SR_AKEY[$i]} "*) ;; *) SJ_WHY="${SJ_WHY}the ask ${SR_AKEY[$i]} is open on the register and the judgment has no ask ${SR_AKEY[$i]}: line"$'\n' ;; esac
+  done
+  for ((j = 0; j < ${#SJ_ASK[@]}; j++)); do
+    # shellcheck disable=SC2086  # one word per key
+    for k in ${SJ_AKEYS[$j]}; do
+      m=-1
+      for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do [ "${SR_AKEY[$i]}" != "$k" ] || m=$i; done
+      if [ "$m" -lt 0 ]; then
+        SJ_WHY="${SJ_WHY}ask $k: names a key the register lacks: copy the key from the sheet's ask: lines, or write ask +: for an ask it lacks"$'\n'
+        continue
+      fi
+      # What an ask holds is on the card: its row names the label of every task the sheet says it holds.
+      while IFS= read -r lb; do
+        [ -z "$lb" ] || _card_sitrep_names "${SJ_ASK[$j]}" "$lb" \
+          || SJ_WHY="${SJ_WHY}ask $k: holds $lb and its row does not name it: write $lb in the row, so what the ask holds is on the card"$'\n'
+      done <<< "$(printf '%s\n' "${SR_AHOLDS[$m]}" | awk '{ s = $0; while (match(s, /[0-9]+\/[0-9A-Za-z._-]+/)) { print substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH) } }')"
+    done
+  done
   # The card says review, never reading or reader, in the review sense or any other, and a goal nobody measures is
   # not measured, never unmeasured: the words are refused whole, each one on a line named with its own rule.
   SJ_WHY="$SJ_WHY$(printf '%s' "$text" | awk '{ l = " " tolower($0) " "
@@ -2764,46 +2844,32 @@ _card_sitrep_judge() {
         printf "the judgment says \"%s\" (in: %s): the card says %s\n", w, substr($0, 1, 60), r } }')"
 }
 
-_card_sitrep_row() {  # <text> -> the row at 4 columns opening on a bullet, folded under its text
-  _card_hang 6 "    • $1"
+_card_sitrep_row() {  # <text> -> the row at 4 columns on a bullet, folded under its text, its first letter a capital
+  _card_hang 6 "    • $(_card_sitrep_cap "$1")"
 }
 
-# _card_sitrep_draw -> the card from SR_* and SJ_*
+# _card_sitrep_draw -> the card from SR_* and SJ_*: the head from the sheet, every row from the judgment
 _card_sitrep_draw() {
-  local i j h rel wave pred fc lead desc tail
+  local i h rel wave icon
   rel="$(_card_sitrep_fact run.release)"; wave="$(_card_sitrep_fact run.wave)"
   h="Sitrep · $(_card_sitrep_fact run.project)"; [ "$rel" = - ] || h="$h $rel"
   [ "$wave" = - ] || h="$h · wave $wave"
   printf '%s · %s\n\n  Call to action\n' "$h" "$(_card_sitrep_fact run.now)"
   for ((i = 0; i < ${#SJ_CALL[@]}; i++)); do _card_sitrep_row "${SJ_CALL[$i]}"; done
   printf '\n  Task list\n'
-  while IFS=$'\037' read -r lead desc tail; do
-    [ -z "$lead" ] || _card_hang 7 "    $(_card_sitrep_fit "$lead" "$desc" "$tail")"
-  done <<< "$(_card_sitrep_tasks)"
+  for ((i = 0; i < ${#SJ_TLAB[@]}; i++)); do
+    if [ "${SJ_TDONE[$i]:-0}" = 1 ]; then icon="✅"; else icon="⬜"; fi
+    _card_hang 7 "    $icon ${SJ_TLAB[$i]}: $(_card_sitrep_cap "${SJ_TTXT[$i]}")"
+  done
   printf '\n  Metrics\n'
-  _card_sitrep_row "Completed: $(_card_sitrep_fact metric.completed)"
-  _card_sitrep_row "Pace: $(_card_sitrep_fact metric.pace)"
-  _card_sitrep_row "Correctness: $(_card_sitrep_fact metric.correctness)"
-  _card_sitrep_row "Waste: $(_card_sitrep_fact metric.waste)"
-  _card_sitrep_row "Goals: $(_card_sitrep_fact metric.goals)"
+  for ((i = 0; i < ${#SJ_MLAB[@]}; i++)); do _card_sitrep_row "${SJ_MLAB[$i]}: ${SJ_MTXT[$i]}"; done
   printf '\n  Assessment: %s\n' "${SJ_GRADE:--}"
   for ((i = 0; i < ${#SJ_POINT[@]}; i++)); do _card_sitrep_row "${SJ_POINT[$i]}"; done
   printf '\n  Blocked on you\n'
-  for ((i = 0; i < ${#SR_AKEY[@]}; i++)); do
-    for ((j = 0; j < ${#SJ_AKEY[@]}; j++)); do
-      [ "${SJ_AKEY[$j]}" = "${SR_AKEY[$i]}" ] || continue
-      _card_sitrep_row "${SJ_AWHAT[$j]} — holds ${SR_AHOLDS[$i]} — recommend ${SJ_AANS[$j]}"
-      break
-    done
-  done
-  for ((i = 0; i < ${#SJ_PLUS[@]}; i++)); do _card_sitrep_row "${SJ_PLUS[$i]}"; done
-  [ "$(( ${#SR_AKEY[@]} + ${#SJ_PLUS[@]} ))" -gt 0 ] || _card_sitrep_row "$CARD_SITREP_NOTHING"
+  for ((i = 0; i < ${#SJ_ASK[@]}; i++)); do _card_sitrep_row "${SJ_ASK[$i]}"; done
+  [ "${#SJ_ASK[@]}" -gt 0 ] || _card_sitrep_row "$CARD_SITREP_NOTHING"
   printf '\n  Predicted close\n'
-  pred="$(_card_sitrep_fact close.predicted)"; fc="$(_card_sitrep_fact close.forecast)"
-  if [ "$pred" = - ]; then _card_sitrep_row "none predicted yet"
-  elif [ "$fc" = - ]; then _card_sitrep_row "$pred"
-  else _card_sitrep_row "$pred, against a $fc forecast"; fi
-  [ -z "$SJ_CLOSE" ] || _card_sitrep_row "$SJ_CLOSE"
+  for ((i = 0; i < ${#SJ_CLOSE[@]}; i++)); do _card_sitrep_row "${SJ_CLOSE[$i]}"; done
 }
 
 # _card_sitrep_check <card> -> one line per way the drawn card breaks its shape (THE CHECK, above), nothing when it
@@ -2862,9 +2928,13 @@ _card_sitrep_check() {
     }'
 }
 
-_card_sitrep_load() {  # <sheet file> -> SR_RECS and the open asks, SR_AKEY and SR_AHOLDS
+# _card_sitrep_load <sheet file> -> SR_RECS, the open asks SR_AKEY and SR_AHOLDS, and SR_NUMS: every number the sheet
+# holds, each run of its digits once, without leading zeros, space-separated
+_card_sitrep_load() {
   local k h
   SR_RECS="$(_card_sitrep_sheet "$1")"; SR_AKEY=(); SR_AHOLDS=()
+  SR_NUMS=" $(awk '{ s = $0; while (match(s, /[0-9]+/)) { n = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+    sub(/^0+/, "", n); if (n == "") n = "0"; if (!seen[n]++) printf "%s ", n } }' "$1")"
   while IFS="$CARD_TAB" read -r _ k h _; do
     [ -n "$k" ] || continue
     SR_AKEY[${#SR_AKEY[@]}]="$k"; SR_AHOLDS[${#SR_AHOLDS[@]}]="${h:-nothing}"
@@ -2876,8 +2946,9 @@ _card_sitrep() {  # <sheet file>, the judgment on stdin -> the card, or 1 and ev
   _card_sitrep_load "$1"
   _card_sitrep_judge
   card="$(_card_sitrep_draw)"
-  why="$SJ_WHY$(_card_sitrep_check "$card")"
-  if [ -n "$why" ]; then
+  # the two lists joined on a line break, since a command substitution drops the last one of the first
+  why="$SJ_WHY"$'\n'"$(_card_sitrep_check "$card")"
+  if [ -n "${why//[[:space:]]/}" ]; then
     printf '%s\n' "$why" | awk 'NF { print "card.sh: sitrep card refused: " $0 }' >&2
     return 1
   fi

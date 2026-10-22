@@ -915,10 +915,18 @@ metric.completed: 0 of 1 tasks (0%)
 metric.goals: none declared
 close.predicted: 11:00 AM
 close.forecast: -'
-SIT_JUDGE='call: Nothing is owed; let T1 land.
+SIT_JUDGE='call: Nothing is owed; let 1/1 land.
+task: 0: Configure
+task: 1/1: the scope, building
+metric: Completed: 0 of 1 tasks, 0%.
+metric: Pace: no task has landed yet.
+metric: Correctness: nothing has run yet.
+metric: Waste: nothing lost.
+metric: Goals: none declared.
 grade: A
 point: The one task is building.
-close: Depends on T1 landing.'
+close: 11:00 AM, with no forecast to set it against.
+close: depends on 1/1 landing.'
 sit_card() {  # <sheet> <judgment> — sets WC_OUT, WC_RC, WC_ERR of `card.sh sitrep <sheet file>` with the judgment on stdin
   printf '%s\n' "$1" > "${CARD_SANDBOX}/.sheet"
   WC_RC=0
@@ -929,7 +937,7 @@ sit_card() {  # <sheet> <judgment> — sets WC_OUT, WC_RC, WC_ERR of `card.sh si
 sit_card "$SIT_SHEET" "$SIT_JUDGE"
 expect_eq "KINDS-7 card.sh sitrep draws the sitrep card from a sheet and a judgment (exit 0, nothing on stderr)" \
   "0||Sitrep · proj 1.2.0 · wave 3 · Tuesday 9:05 AM" "$WC_RC|$WC_ERR|$(printf '%s\n' "$WC_OUT" | head -1)"
-expect_eq "KINDS-7b …its last section the predicted close, with no forecast to set it against" "  Predicted close|    • 11:00 AM|    • Depends on T1 landing." \
+expect_eq "KINDS-7b …its last section the predicted close, its rows the judgment's, each opening on a capital" "  Predicted close|    • 11:00 AM, with no forecast to set it against.|    • Depends on 1/1 landing." \
   "$(printf '%s\n' "$WC_OUT" | tail -3 | paste -sd'|' -)"
 WC_RC=0; bash "$CARD_SH" sitrep </dev/null >"${CARD_SANDBOX}/.out" 2>/dev/null || WC_RC=$?
 expect_eq "KINDS-7c card.sh sitrep with no sheet file is the usage error, nothing drawn" "64|" "$WC_RC|$(cat "${CARD_SANDBOX}/.out")"
@@ -960,7 +968,7 @@ $S2_IT
 $S3_IT")"
 SIT_FIT="Let T1 land"
 while [ "$(cols "    • $SIT_FIT")" -lt "$(( BIONIC_LINE_WIDTH - 2 ))" ]; do SIT_FIT="$SIT_FIT x"; done
-SIT_LONG="a call that runs well past the shared width of the card, so the renderer folds it under its own text and keeps every one of its words"
+SIT_LONG="A call that runs well past the shared width of the card, so the renderer folds it under its own text and keeps every one of its words"
 sit_card "$SIT_SHEET" "$SIT_JUDGE
 call: $SIT_FIT
 call: $SIT_LONG"
@@ -968,7 +976,7 @@ expect_eq "WIDTH-6 precondition: the wide sitrep judgment renders (exit 0) and i
   "$WC_RC|$([ "$(cols "    • $SIT_FIT")" -gt 92 ] && echo yes)"
 expect_eq "WIDTH-6b a sitrep row that fits the shared width prints whole on one line" "1" \
   "$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -cxF "    • $SIT_FIT")"
-SIT_FOLD="$(printf '%s\n' "$WC_OUT" | awk '/^    • a call that/ { f = 1; print; next } f && /^      [^ ]/ { print; next } { f = 0 }')"
+SIT_FOLD="$(printf '%s\n' "$WC_OUT" | awk '/^    • A call that/ { f = 1; print; next } f && /^      [^ ]/ { print; next } { f = 0 }')"
 expect_eq "WIDTH-6c a wider one folds under its own text, six columns in, its words all kept" \
   "$SIT_LONG" "$(printf '%s\n' "$SIT_FOLD" | sed 's/^    • //; s/^      //' | paste -sd' ' -)"
 expect_eq "WIDTH-6d …on more than one line" "yes" "$([ "$(printf '%s\n' "$SIT_FOLD" | /usr/bin/grep -c .)" -gt 1 ] && echo yes)"
