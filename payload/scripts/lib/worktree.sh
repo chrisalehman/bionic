@@ -965,11 +965,15 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
   # integration on the judge at the working head; a landing after it would move the working branch
   # past the head that was judged, and nothing would judge it again. So with a bound plan at
   # `current: 8` or later (its letter dropped) nothing lands: the step is set back first, which the
-  # `current` verb allows (`current 7`, dry-committed at 7 like any move).
+  # `current` verb allows (`current 7`, dry-committed at 7 like any move). One row is the exception: a
+  # fix born of a finding of a review the judge reads failing, since its landing is what answers that
+  # review (lib/line.sh `line_born_failing`, which `ready` and the hand landing load; a caller that has
+  # not loaded it keeps the refusal).
   if [ -n "$plan" ]; then
     judged_cur="$(_wt_plan_current "$plan")"
     case "${judged_cur%[ab]}" in
-      8|9) _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2 ;;
+      8|9) declare -F line_born_failing >/dev/null 2>&1 && line_born_failing "$plan" "$root" "$wt_abs" || {
+           _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2; } ;;
     esac
   fi
 

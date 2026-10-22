@@ -577,6 +577,71 @@ EOF
   LINE_NUMBERS="$c"
 }
 
+# THE FIX BORN OF A FAILING REVIEW. Once the plan reads `current: 8` or `9` the run has been judged for integration,
+# and the door refuses every landing but one: a row whose born marker (`task-add --born <record>#<n>`, lib/units.sh
+# `units_born_findings`) names a finding of the review that is its question's newest reading and derives `fail`.
+# That row is what answers the review, so the step never has to move back for it. Which review that is, and whether it
+# fails, is the judge's own answer (lib/proof.sh `facts_state`: the reading's result through `_proof_reading_derive`
+# over `proof_fixed`), so the door, the step advance and the gate cannot disagree on it. A row born of a regression's
+# red names no review record and is not admitted. When the row publishes, the same judge is asked again: a question
+# its born records answer that no longer derives `fail` has its `waive:<q>` ask closed on the run's register
+# (lib/owed.sh `owed_close`), so neither a waiver nor a step back is needed. Fail closed: a judge that cannot answer
+# admits nothing and closes nothing.
+_line_born_records() {  # <plan> <row> -> each review record the row's born marker names, once each
+  _wt_units_load || return 1
+  units_born_findings "$1" 2>/dev/null | awk -F'\t' -v r="$2" '
+    $1 == r { sub(/#[0-9]+$/, "", $3); if (!($3 in s)) { s[$3] = 1; print $3 } }'
+}
+_line_judged() {  # <plan> -> the judge's lines at the accepted head; 1 when it cannot answer
+  local head out rc
+  _line_load_proof && declare -F facts_state >/dev/null 2>&1 || return 1
+  head="$(line_head "$1")" && [ -n "$head" ] || return 1
+  out="$(facts_state "$1" "$head" 2>/dev/null)"; rc=$?
+  [ "$rc" -le 1 ] || return 1
+  printf '%s\n' "$out"
+}
+_line_failing() {  # <judge's lines> <records, one a line> -> the question of each review failing on one of the records
+  printf '%s\n' "$1" | LINE_RECS="$2" awk -F'\t' '
+    BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
+    $1 == "review" && $5 == "failing" && ($6 in want) && !($2 in s) { s[$2] = 1; print $2 }'
+}
+line_born_failing() {  # <plan> <root> <tree abs> -> 0 when the tree's row is born of a finding of a failing review
+  local row recs judged
+  row="$(_wt_proofs_row "$2" "$1" "$3")" && [ -n "$row" ] || return 1
+  recs="$(_line_born_records "$1" "$row")" && [ -n "$recs" ] || return 1
+  judged="$(_line_judged "$1")" || return 1
+  [ -n "$(_line_failing "$judged" "$recs")" ]
+}
+_line_load_owed() {
+  declare -F owed_close >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/owed.sh" ] && . "$_LINE_LIB_DIR/owed.sh" 2>/dev/null
+  declare -F owed_close >/dev/null 2>&1
+}
+# The questions a born row's records were read for are those of the plan's review proof lines naming one of them;
+# each that the judge no longer finds failing has its ask closed, by the landing.
+_line_born_close() {  # <plan> <root> <row>
+  local recs qs judged q
+  recs="$(_line_born_records "$1" "$3")" && [ -n "$recs" ] || return 0
+  _line_load_proof || return 0
+  qs="$(LINE_RECS="$recs" awk "$(proof_awk)"'
+    BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && (PROOF_EVIDENCE in want) \
+      && !(PROOF_QUESTION in s) { s[PROOF_QUESTION] = 1; print PROOF_QUESTION }' "$1" 2>/dev/null)"
+  [ -n "$qs" ] || return 0
+  judged="$(_line_judged "$1")" || return 0
+  _line_load_owed || return 0
+  for q in $qs; do
+    printf '%s\n' "$judged" | awk -F'\t' -v q="$q" '$1 == "review" && $2 == q && $5 == "failing" { y = 1 } END { exit !y }' \
+      && continue
+    OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${LINE_SID:-line}" owed_close "waive:${q}" "landing ${3}" >/dev/null 2>&1
+  done
+  return 0
+}
+
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
   local name com present base cand out sui car cbase cat br tr co rc run moved at tip
@@ -667,6 +732,9 @@ EOF
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
+  # 11. THE REVIEW A BORN ROW ANSWERS, asked again once the row reads landed (`_line_born_close`), outside the lock:
+  # the judge reads git and the record, and no publish waits on it.
+  _line_born_close "$plan" "$root" "$row"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
   return 0
 }

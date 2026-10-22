@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1054 · keep: 862 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1056 · keep: 864 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1078 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1078 - 22 - 8 = 1048.
 
@@ -41,6 +41,7 @@ asks.test.sh | §FAILED | keep | hooks/poker/proof.sh poker_verb_proof_add: the 
 asks.test.sh | §FLAG | keep | hooks/poker/proof.sh poker_verb_proof_add: the waive:<question> opener widened from result=fail to any result but pass, so a recorded flag opens the ask (FLAG-2) | none (searched 'proof-add review' and 'result: flag' in tests/: session-poker-3 and -4 record flags and read the proof line, never the register)
 asks.test.sh | §STOP | keep | hooks/poker/sitrep.sh decisions_put: the decide:D<n> opener deleted, so a put leaves no ask on the register (ST-1, ST-1b); decisions_settle deleted, so a decision the ledger reads ruled stays open (ST-2, ST-2b, ST-2c); hooks/poker/proof.sh poker_verb_disposition: the carry opener deleted, so a deferral no person ruled is no ask (ST-4, ST-4b) | none (searched 'decide:D' and 'carry:' in tests/; release-approval.test.sh §CARRY closes a carry, it does not open one by disposition alone)
 asks.test.sh | §OPENED | keep | payload/scripts/lib/owed.sh owed_close: the closed line written without opened=, so the minutes an ask held a task are lost once it is closed (OP-1b) | sitrep.test.sh §WASTE (reads opened= off a planted register)
+asks.test.sh | §BORN-CLOSES | keep | payload/scripts/lib/line.sh line_publish: the call to `_line_born_close` deleted, so a born fix's green landing at Step 8 leaves `waive:<q>` open (BC-2, BC-2b); the failing-question test dropped there, so the ask closes while the review still derives fail (BC-4) | none (searched 'waive:structure' and 'by=landing' in tests/; close-replay.test.sh §CLOSE CL-3b reads the same close through the whole replay)
 
 ## background-suite-guard.test.sh
 
@@ -769,6 +770,7 @@ landing-line-1.test.sh | §STALLED | keep | rule: door refusal — payload/scrip
 landing-line-1.test.sh | §RELEASE-ROW | duplicate | payload/scripts/lib/line.sh line_ready: every tests/*.test.sh run instead of the Lands-on suites, so other.test.sh gets a verdict beside the release check (rr1) | landing-line-1.test.sh §GATE
 landing-line-1.test.sh | §WINDOW | keep | hooks/poker/line.sh hand_holds_report: the fill ledger's `at=` no longer placed in the window, so a decline before the window counts and "WINDOW-1d …the window 11:00 to 13:00 reads one of each" goes red; also hand_holds_ends prints an end with no release approval page (WINDOW-3a) | none (searched 'hand-holds' and '--since' in tests/; close-out-3 §HAND-HOLDS reads the default window only)
 landing-line-1.test.sh | §NUMBERS-JUDGE | keep | payload/scripts/lib/line.sh _line_numbers: the release numbers rendered by the plugin root's or the head's release-note instead of the release base's, so the entry's block carries what the judge's copy would not print (nj2, nj2b) | none (searched '_line_numbers' and 'release-note' in tests/; door-landing §RERENDER renders with one copy only)
+landing-line-1.test.sh | §BORN-AT-8 | keep | payload/scripts/lib/worktree.sh _wt_land_checks: the born arm deleted, so the fix born of the failing review is refused past-judgment at current 8 (ba3); or it admits a row the rule does not name: unborn (ba1), regression-born (ba2), born of a review no longer failing (ba4) | none (searched 'past-judgment' in tests/; close-replay.test.sh §CLOSE CL-1 reaches the same landing through the whole replay)
 
 ## landing-line-2.test.sh
 

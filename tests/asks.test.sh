@@ -22,6 +22,8 @@
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
 # §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
+# §BORN-CLOSES   a fix born of a failing review's finding lands by `ready` at Step 8 and its green landing closes
+#                `waive:<question>`, with no step advance; a landing after which the review still derives fail leaves it open
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -399,5 +401,60 @@ expect_contains "OP-1 the closed line carries opened=, the open line's instant" 
   "|key=approve:design|state=closed|by=approve|at=" "$(cat "$AO_F" 2>/dev/null)"
 expect_eq "OP-1b …its value the open line's at=" "$AO_AT" \
   "$(sed -n 's/^owed\/v1|key=approve:design|state=closed|.*|opened=\([^|]*\).*/\1/p' "$AO_F" 2>/dev/null)"
+
+# ============================================================
+section "§BORN-CLOSES: a born fix's green landing at Step 8 closes the review's waiver; a review still failing keeps it open"
+# ============================================================
+# FIXTURE FIDELITY: the landing line's model world (tests/lib/world.sh), built by the landing-line prelude's own
+# `ll_world` and `ll_launch`, read by name, so this suite holds no second copy of it. The plan reads `current: 8` with a
+# failing structure reading newest; T1's `- T1:` line carries the born marker `task-add --born` writes for finding 1.
+# The ask is opened as the failing registration opens it (§FAILED drives the verb); the landing is the writer's `ready`.
+# The control world differs in one fact: its record holds a second finding to fix that no row answers, so after the
+# same landing the review still derives fail.
+# ANTI-VACUITY: each world's register reads waive:structure open before the landing, through the extractor read after it.
+# fails-when: lib/line.sh `line_publish` leaves the register alone after a born row's landing (BC-2, BC-2b), or closes
+# the ask while the review still derives fail (BC-4).
+. "$(dirname "$0")/lib/world.sh"
+as_import_fn ll_world "$(dirname "$0")/landing-line.prelude.sh" || echo "BC-0 ll_world not read out of landing-line.prelude.sh"
+as_import_fn ll_launch "$(dirname "$0")/landing-line.prelude.sh" || echo "BC-0 ll_launch not read out of landing-line.prelude.sh"
+ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+bc_world() {  # <findings to fix: 1 | 2> -> a world at current 8 whose register holds waive:structure open
+  local r p h b n="$1"
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T1 a.test.sh
+  p="$(ll_plan "$r")"; h="$(git -C "$r" rev-parse wave/x)"; b="$(git -C "$r" rev-parse main)"
+  mkdir -p "$r/.bionic/docs/record/wave-x"
+  { printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: %s\n' "$b" "$h" "$n"
+    printf 'finding: 1 S1 off T1.txt:1 the row is wrong\nshown: 1 cat T1.txt\n'
+    [ "$n" = 1 ] || printf 'finding: 2 S1 off T2.txt:1 the other row is wrong\nshown: 2 cat T2.txt\n'; } > "$r/.bionic/docs/record/wave-x/rev.md"
+  BC_H="$h" BC_B="$b" awk '
+    /^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["BC_B"]; next }
+    /^current: 4$/ { print "current: 8"; print "proved: kind=review head=" ENVIRON["BC_H"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/rev.md question=structure reader=w-rev result=fail scope=piece"; next }
+    /^- T1: active$/ { print "- T1: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next }
+    { print }' "$p" > "$p.n" && mv "$p.n" "$p"
+  OWED_ROOT="$r" OWED_SID="$WORLD_SID" OWED_PLAN="$p" bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && owed_open waive:structure "waiver: structure" "waive structure"' \
+    _ "$AS_LIB" 2>/dev/null
+  printf '%s' "$r"
+}
+bc_ready() {  # <root> -> BC_OUT, BC_RC: T1's ready, from its tree, as the world's session
+  BC_OUT="$( cd "$1/.worktrees/T1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$BIONIC_SCRIPTS_DIR/payload/scripts/spawn-worktree.sh" ready 2>&1 )"; BC_RC=$?
+}
+BC="$(bc_world 1)"; BC_P="$(ll_plan "$BC")"
+expect_eq "BC-0 precondition: at current 8 the register holds waive:structure open" "8|waive:structure" \
+  "$(sed -n 's/^current: //p' "$BC_P")|$(as_register "$BC" "$BC_P")"
+bc_ready "$BC"
+expect_eq "BC-1 the born row lands by ready (exit 0)" "0" "$BC_RC"
+[ "$BC_RC" = 0 ] || printf '      ready said: %s\n' "$BC_OUT"
+expect_eq "BC-2 …and its green landing closes waive:structure: the register holds no open ask (BC-0 read it open)" "" \
+  "$(as_register "$BC" "$BC_P")"
+expect_contains "BC-2b …closed by the landing" "|key=waive:structure|state=closed|by=landing T1|" \
+  "$(cat "$BC/.bionic/docs/record/wave-x/asks.state" 2>/dev/null)"
+expect_eq "BC-2c …with no step advance" "8" "$(sed -n 's/^current: //p' "$BC_P")"
+BC2="$(bc_world 2)"; BC2_P="$(ll_plan "$BC2")"
+expect_eq "BC-3 precondition: the control world's register holds waive:structure open" "waive:structure" "$(as_register "$BC2" "$BC2_P")"
+bc_ready "$BC2"
+expect_eq "BC-3b the same born row lands in the control world (exit 0)" "0" "$BC_RC"
+expect_eq "BC-4 …and with the review still deriving fail (finding 2 unanswered) waive:structure stays open" "waive:structure" \
+  "$(as_register "$BC2" "$BC2_P")"
 
 finish
