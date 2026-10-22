@@ -5,38 +5,29 @@
 #   §LAND    a library row and then the release row land by hand. The release row carries the CHANGELOG entry
 #            whose landing numbers `release-note` rendered and plugin.json at the version, so it is the carrier
 #            the check must exempt: the landing publishes, the second run of the check passes and the plan row is
-#            written, both runs are the fixture's copy, and the release-check verb at the landed head says the
+#            written, both runs are the judge's copy in a landing tree, and the release-check verb at the landed head says the
 #            numbers agree. The same landings under a copy whose carrier test quits at its match (`grep -qxF`)
 #            leave the plan unwritten and the verb red; with a CHANGELOG that fits a pipe's buffer the same mutant
 #            passes, so the size of the real file is what these rows exercise.
-#   §COPY    a piece that rewrites tests/lib/release-check.sh to exit 0 and commits a listed name is refused
-#            `check-failed` and nothing is merged, and the one run of the check is the target checkout's copy. A
-#            driver that lands as the verb does refuses the same; with the door's check moved into the writer's
-#            tree the target's copy never runs, and with the closure test gone as well the same piece publishes, so
-#            these rows can fail.
-#   §COPY-2  a piece that replaces the check with `exit 0`, or adds one comment line to it, and plants nothing: the
-#            target's copy passes over its range, and the door still refuses it with judged-by and changed-here and
-#            the person's route, nothing merged, the target's copy the one run. A piece that changes one code file
-#            outside the closure lands, beside it, and so does one that changes a closure member outside the
-#            directory of the declared script (payload/scripts/lib/said.sh): the arm reaches the check, not the code
-#            it loads.
-#   §COPY-3  the same pieces under a check declared by absolute path under the checkout: the closure reads that word as
-#            the repository path it names, so the rewrite is refused as §COPY-2 refuses it and a code-only piece
-#            lands; an absolute word outside the checkout (a prefix sibling, a path that only ends like a held one)
+#   §JUDGE   the judge is the release base, the plan's `base-sha:` in a fixture with no tag. The target moves past it
+#            with a copy of the check that marks its runs, and a piece rewrites the check to exit 0 and plants a listed
+#            name. The door refuses the piece, the release-check verb refuses the person's merge of it, and the hand
+#            scan refuses that merge's mark: each run is the judge's copy in a landing tree, never the target's or the
+#            head's, and each names the judge. With the runner pointed at the head, the piece publishes; the three
+#            call one runner, which alone runs the declared command.
+#   §COPY-2  a piece that changes one code file outside the closure lands, and so does one that changes a closure
+#            member outside the directory of the declared script (payload/scripts/lib/said.sh).
+#   §COPY-3  under a check declared by absolute path under the checkout a code-only piece lands; an absolute word
+#            outside the checkout (a prefix sibling, a path that only ends like a held one) names no member.
+#   §COPY-4  a check declared by the main checkout's absolute path, no checkout holding the branch: a piece that
+#            rewrites the check lands, and every run of the check is the judge's copy in a landing tree, the absolute
+#            word read inside it. A code-only piece lands, and a word that leaves the root by `..`, or lies beside it,
 #            names no member.
-#   §COPY-4  every word of the closure is read against the roots of the repository by one normalizer: a check declared
-#            by the main checkout's absolute path and run from a landing tree (no checkout holds the branch), one
-#            declared with `/./` or `//` in its path, and one whose helper beside it is sourced by absolute path: a
-#            piece that rewrites the check, or the helper alone, is refused by name. A code-only piece from the
-#            landing tree lands, and a word that leaves the root by `..`, or lies beside it, names no member.
-#   §NAMED   the target's committed check carries a bug and a piece fixes it: the hand door refuses the fix with
-#            `judged-by=target script=<path>@<accepted head> changed-here=<path>`, says a fix to the check cannot
-#            pass its own door and names the person's route. With the arm deleted the refusal carries no field;
-#            with the change read over the writer's head instead of the candidate, changed-here names a file the
-#            candidate does not change.
-#   §JUDGED  the same fix merged by a person and marked with `row-landed --by-hand`: the scan runs the landed copy
-#            and the row's line says so, `judged-by=candidate`, where §LAND's release row, which changes no file
-#            the check loads, says `judged-by=target`.
+#   §INFO    the target's committed check carries a bug and a piece fixes it: the piece lands by hand, both runs the
+#            judge's copy, its plan line names the judge and the check file it changes, and the release approval
+#            card names that file.
+#   §JUDGED  the same fix merged by a person and marked with `row-landed --by-hand`: the scan runs the judge's copy,
+#            and the row's line names the judge and the check file the landing changes.
 #   §HAND    a piece that plants a listed name and leaves the check alone is refused by `land --by-hand`, with no
 #            changed-here; with the check's call deleted from the publish path, the same piece publishes.
 #   §COVER   the release row, a doc row at step 7, lands with the release and a template outside the release set:
@@ -126,6 +117,21 @@ dl_mutant() {
     && rm -f "$1/tests/lib/release-check.sh.orig" && dl_commit "$1" "the carrier test quits at its match"
 }
 
+# dl_judge_at <root> — the plan's release base moved to the working branch's head, so the copy committed there judges.
+dl_judge_at() {
+  local p="$1/$DOOR_PLAN_REL"
+  _door_inside "$1" && sed -i.orig "s/^base-sha: .*/base-sha: $(dl_head "$1")/" "$p" && rm -f "$p.orig"
+}
+# dl_seen_judge <root> -> `<runs> <judged>`: the sentinel's lines, and of them the runs made in a landing tree under
+# <root> by the copy that tree holds, unmarked (a target or a fix copy marks its runs after the script).
+dl_seen_judge() {
+  door_seen | awk -v r="$1/.bionic/tmp/landing/" '
+    { n++ }
+    index($0, "pwd=" r) == 1 { t = substr($0, 5); sub(/ .*$/, "", t)
+      if (t ~ /\/[0-9]+$/ && $0 == "pwd=" t " script=" t "/tests/lib/release-check.sh") k++ }
+    END { print n + 0, k + 0 }'
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 section "§LAND: the release row lands by hand with the real changelog, and the check passes at the landed head"
 
@@ -150,14 +156,13 @@ expect_contains "(l3) the record holds the release row's published landing, by h
 expect_contains "(l4) the check's second run passed: the plan's T2 line is written landed by hand" \
   "landed-by-hand:" "$(dl_plan_line "$DL" T2)"
 expect_absent "(l4b) …and the door printed no unwritten plan" "PLAN-UNWRITTEN" "$DL_OUT"
-expect_eq "(l4c) the scan's copy is on each line: the release row changes nothing the check loads, the library row does" \
-  "judged-by=target judged-by=candidate" \
-  "$(dl_plan_line "$DL" T2 | /usr/bin/grep -o 'judged-by=[a-z]*$') $(dl_plan_line "$DL" T1 | /usr/bin/grep -o 'judged-by=[a-z]*$')"
+expect_eq "(l4c) each line names the judge, and the library row's the file of the check it changes" \
+  "judged-by=${DL_H0:0:12}|judged-by=${DL_H0:0:12} changed-here=payload/scripts/lib/said.sh" \
+  "$(dl_plan_line "$DL" T2 | /usr/bin/grep -o 'judged-by=.*$')|$(dl_plan_line "$DL" T1 | /usr/bin/grep -o 'judged-by=.*$')"
 DL_SEEN="$(door_seen)"
 expect_eq "(l5) the check ran twice, before the fast-forward and at row-landed" "2" \
   "$(printf '%s\n' "$DL_SEEN" | /usr/bin/grep -c '^pwd=')"
-expect_eq "(l5b) …both times the fixture's copy, in the fixture's checkout" \
-  "pwd=$DL script=$DL/tests/lib/release-check.sh" "$(printf '%s\n' "$DL_SEEN" | sort -u)"
+expect_eq "(l5b) …both times the judge's copy, in a landing tree" "2 2" "$(dl_seen_judge "$DL")"
 door_run "$DL" bash "$DOOR_POKER" release-check
 expect_eq "(l6) session-poker.sh release-check at the landed head exits 0" "0" "$DOOR_RC"
 DL_LOG="$DL/.bionic/docs/record/wave-x/release-check-$DL_H2.log"
@@ -165,23 +170,22 @@ expect_contains "(l7) …its log is the landed head's, with rc 0" "head=$DL_H2 r
 expect_contains "(l7b) …and the landing numbers agree with the report" \
   "landing-numbers: $DOOR_VERSION agrees with the landing report at ${DL_H1:0:12}" "$(cat "$DL_LOG" 2>/dev/null)"
 expect_contains "(l7c) …and the name scan is clean over the release range" "hits=0" "$(cat "$DL_LOG" 2>/dev/null)"
-expect_eq "(l7d) …the verb's run is the fixture's copy too" "3 1" \
-  "$(door_seen | /usr/bin/grep -c "^pwd=$DL script=$DL/tests/lib/release-check.sh\$") $(door_seen | sort -u | /usr/bin/grep -c .)"
+expect_eq "(l7d) …the verb's run is the judge's copy too" "3 3" "$(dl_seen_judge "$DL")"
 
 # The carrier test planted back as `grep -qxF`: on the real changelog the reader quits at line 13 of a file far
 # past a pipe's buffer, the writer dies of SIGPIPE, and pipefail makes the test false.
 read -r DM DM_H0 <<EOF
 $(door_copy "$DW" "$WORLD_ROOT/mutant")
 EOF
-dl_mutant "$DM"
+dl_mutant "$DM" && dl_judge_at "$DM"
 expect_eq "(lm0) MUTANT precondition: the committed check's carrier test is the quitting reader" "1" \
   "$(git -C "$DM" show HEAD:tests/lib/release-check.sh | /usr/bin/grep -c 'grep -qxF -- "\$2"$')"
 dl_lib_row "$DM"
 DM_H1="$(dl_head "$DM")"
 dl_release_row "$DM"
 DM_OUT="$DOOR_OUT"; DM_H2="$(dl_head "$DM")"
-expect_eq "(lm1) MUTANT the mutant ran: both runs are the mutant fixture's copy" \
-  "pwd=$DM script=$DM/tests/lib/release-check.sh" "$(door_seen | sort -u)"
+expect_eq "(lm1) MUTANT the mutant ran: the plan's base is the mutant, and both runs are its copy in a landing tree" \
+  "$(git -C "$DM" rev-parse "$DM_H1^1" 2>/dev/null) 2 2" "$(sed -n 's/^base-sha: //p' "$DM/$DOOR_PLAN_REL") $(dl_seen_judge "$DM")"
 expect_contains "(lm2) MUTANT the second run refuses the carrier as a landing after the numbers" \
   "T2 landed after them at ${DM_H2:0:12}" "$DM_OUT"
 expect_contains "(lm2b) MUTANT …and the plan row is not written" "PLAN-UNWRITTEN T2" "$DM_OUT"
@@ -199,7 +203,7 @@ EOF
 dl_mutant "$DS"
 # One awk, no pipe into a reader that stops early: under pipefail that is the failure this control measures.
 awk '/^## [0-9]/ { n++ } n < 2 && NR <= 40 { print }' "$DS/CHANGELOG.md" > "$DS/CHANGELOG.small" \
-  && mv "$DS/CHANGELOG.small" "$DS/CHANGELOG.md" && dl_commit "$DS" "a changelog of a few lines"
+  && mv "$DS/CHANGELOG.small" "$DS/CHANGELOG.md" && dl_commit "$DS" "a changelog of a few lines" && dl_judge_at "$DS"
 DS_SIZE="$(git -C "$DS" cat-file -s HEAD:CHANGELOG.md 2>/dev/null || echo 0)"
 expect_true "(ls0) CONTROL precondition: the small changelog fits a pipe's buffer (${DS_SIZE} bytes)" \
   [ "$DS_SIZE" -gt 0 -a "$DS_SIZE" -lt 65536 ]
@@ -213,8 +217,17 @@ expect_eq "(ls2) CONTROL …and the declared check at the landed head is green, 
 expect_contains "(ls2b) CONTROL …its numbers agreeing" "landing-numbers: $DOOR_VERSION agrees" "$DOOR_OUT"
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§COPY: a piece that rewrites the check is judged by the target's copy and refused"
+section "§JUDGE: the verb, the door and the hand scan judge with the release base's copy, never the target's or the head's"
 
+# The fixture has no tag, so its release base is the plan's `base-sha:`, the copy's first head: that commit's check
+# is the judge. The target then commits a copy that marks its runs `copy=target`, so a run of it is told apart.
+DL_LIBDIR="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
+# dl_target_copy <root> — the target's check marks its runs, committed past the judge.
+dl_target_copy() {
+  local c="$1/tests/lib/release-check.sh"
+  _door_inside "$1" && sed -i.orig '2s/script=%s\\n/script=%s copy=target\\n/' "$c" && rm -f "$c.orig" \
+    && dl_commit "$1" "the target's copy marks its runs"
+}
 # dl_copy_piece <root> -> DL_PC: the row T1's tree, its check rewritten to pass and the listed name committed.
 dl_copy_piece() {
   DL_PC="$(door_piece "$1" T1)" || return 1
@@ -223,30 +236,55 @@ dl_copy_piece() {
   dl_commit "$DL_PC" "plant the name and tidy the check"
 }
 read -r DC DC_H0 <<EOF
-$(door_copy "$DW" "$WORLD_ROOT/copy")
+$(door_copy "$DW" "$WORLD_ROOT/judge")
 EOF
+dl_target_copy "$DC"; DC_H1="$(dl_head "$DC")"
 dl_copy_piece "$DC"
 door_run "$DC" env BIONIC_CHECK_HEAD=HEAD bash "$DL_PC/tests/lib/release-check.sh" "$DL_LIST"
-expect_eq "(c0) precondition: the piece's own copy passes, so a landing it judged would publish" "0" "$DOOR_RC"
+expect_eq "(c0) precondition: the piece's own copy passes, the target's marks its runs, and the plan's base is the judge" \
+  "0 1 $DC_H0" "$DOOR_RC $(git -C "$DC" show "$DC_H1:tests/lib/release-check.sh" | /usr/bin/grep -c 'copy=target') $(sed -n 's/^base-sha: //p' "$DC/$DOOR_PLAN_REL")"
 DC_BLOB="$(git -C "$DL_PC" rev-parse HEAD:planted.txt | cut -c1-12)"
+
+# The door.
 : > "$DOOR_SEEN"
 door_land "$DC" "$DL_PC"
 DC_OUT="$DOOR_OUT"
-expect_eq "(c1) land --by-hand is refused (exit 2) and the working branch does not move" "2 $DC_H0" \
+expect_eq "(c1) the door: land --by-hand is refused (exit 2) and the working branch does not move" "2 $DC_H1" \
   "$DOOR_RC $(dl_head "$DC")"
 expect_contains "(c1b) …by the declared check" \
-  "REFUSED reason=check-failed why=release-check rc=1 branch=wt/T1 base=$DC_H0" "$DC_OUT"
+  "REFUSED reason=check-failed why=release-check rc=1 branch=wt/T1 base=$DC_H1" "$DC_OUT"
+expect_contains "(c1c) …naming the judge" "judged-by=${DC_H0:0:12}" "$DC_OUT"
 expect_contains "(c2) …which names the planted blob" "HIT entry=1 at blob $DC_BLOB line 1" "$DC_OUT"
 expect_absent "(c2b) …and prints no listed name" "$DOOR_NAME" "$DC_OUT"
 expect_eq "(c3) the record holds T1's ready line and no published one" "1 0" \
   "$(dl_record "$DC" | /usr/bin/grep -c '^line/v1|ev=ready|row=T1|') $(dl_record "$DC" | /usr/bin/grep -c '^line/v1|ev=published|row=T1|')"
-DC_SEEN="$(door_seen)"
-expect_eq "(c4) the check ran once, as the target checkout holds it: the recorded pwd -P is the fixture's root" \
-  "pwd=$DC script=$DC/tests/lib/release-check.sh" "$DC_SEEN"
-expect_absent "(c4b) …never in the piece's tree" "$DL_PC" "$DC_SEEN"
-expect_absent "(c4c) …nor the tree under test's" "$BIONIC_SCRIPTS_DIR" "$DC_SEEN"
+expect_eq "(c4) the check ran once, the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DC")"
+expect_absent "(c4b) …never the target's copy" "copy=target" "$(door_seen)"
 
-# The verb's own land, in a process of its own, so one function can be replaced in it.
+# The verb, at the person's git merge of the piece.
+_door_inside "$DC" && git -C "$DC" merge --no-ff -q -m "merge wt/T1 by hand" wt/T1 >/dev/null 2>&1
+DC_M="$(dl_head "$DC")"
+expect_eq "(c5-0) precondition: the person's merge puts the piece's exit 0 on the working head" "1" \
+  "$(git -C "$DC" show "$DC_M:tests/lib/release-check.sh" 2>/dev/null | /usr/bin/grep -cx 'exit 0')"
+: > "$DOOR_SEEN"
+door_run "$DC" bash "$DOOR_POKER" release-check
+DC_LOG="$(cat "$DC/.bionic/docs/record/wave-x/release-check-$DC_M.log" 2>/dev/null)"
+expect_eq "(c5) the verb: release-check at the working head exits 1" "1" "$DOOR_RC"
+expect_contains "(c5b) …its log names the judge" "judged-by=$DC_H0 (base-sha $DC_H0)" "$DC_LOG"
+expect_contains "(c5c) …and the planted blob" "HIT entry=1 at blob $DC_BLOB line 1" "$DC_LOG"
+expect_eq "(c5d) …the one run the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DC")"
+
+# The hand scan, at the person's mark of the same merge.
+: > "$DOOR_SEEN"
+door_run "$DC" bash "$DOOR_POKER" row-landed T1 "$DC_M" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --by-hand door "the piece merged by a person"
+expect_eq "(c6) the hand scan: row-landed --by-hand of the merge is refused (exit 1)" "1" "$DOOR_RC"
+expect_contains "(c6b) …naming the judge" "judged-by=${DC_H0:0:12}" "$DOOR_OUT"
+expect_contains "(c6c) …and the planted blob" "HIT entry=1 at blob $DC_BLOB line 1" "$DOOR_OUT"
+expect_contains "(c6d) …the plan's T1 line is as it was" "- T1: active" "$(dl_plan_line "$DC" T1)"
+expect_absent "(c6e) …not landed" "landed-by-hand:" "$(dl_plan_line "$DC" T1)"
+expect_eq "(c6f) …the one run the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DC")"
+
+# The door's land, in a process of its own, so one function can be replaced in it.
 DL_DRIVER="$WORLD_ROOT/door-driver.sh"
 cat > "$DL_DRIVER" <<'DRIVER'
 #!/bin/bash
@@ -263,34 +301,40 @@ fi
 line_land_by_hand "$2" "$(worktree_root "$2")" "$(session_id)" "$3"
 DRIVER
 read -r DD DD_H0 <<EOF
-$(door_copy "$DW" "$WORLD_ROOT/driver")
+$(door_copy "$DW" "$WORLD_ROOT/judge-driver")
 EOF
+dl_target_copy "$DD"; DD_H1="$(dl_head "$DD")"
 dl_copy_piece "$DD"
 : > "$DOOR_SEEN"
-door_run "$DD" bash "$DL_DRIVER" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$DL_PC" "door fixture"
-expect_eq "(cd1) the driver, unmutated, is refused as the verb is: exit 2, the branch unmoved" "2 $DD_H0" \
-  "$DOOR_RC $(dl_head "$DD")"
-expect_eq "(cd1b) …and the check it ran is the target's" "pwd=$DD script=$DD/tests/lib/release-check.sh" "$(door_seen)"
+door_run "$DD" bash "$DL_DRIVER" "$DL_LIBDIR" "$DL_PC" "door fixture"
+expect_eq "(cd1) the driver, unmutated, is refused as the door is: exit 2, the branch unmoved, the judge's copy" \
+  "2 $DD_H1 1 1" "$DOOR_RC $(dl_head "$DD") $(dl_seen_judge "$DD")"
 : > "$DOOR_SEEN"
-door_run "$DD" env 'DOOR_MUTANT=s|cd "$co"|cd "$wt_abs"|' \
-  bash "$DL_DRIVER" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$DL_PC" "door fixture"
-expect_contains "(cdm) MUTANT the check run in the writer tree: the mutant ran, refused by the closure test alone" \
-  "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1" "$DOOR_OUT"
-expect_eq "(cdm-a) MUTANT …and the copy the target holds never ran, so (c4) and (cd1b) read a run that is not there" "" "$(door_seen)"
-: > "$DOOR_SEEN"
-door_run "$DD" env 'DOOR_MUTANT=s|cd "$co"|cd "$wt_abs"|; s|_wt_check_judge "$co"|false "$co"|' \
-  bash "$DL_DRIVER" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$DL_PC" "door fixture"
-expect_eq "(cdm-b) MUTANT with the closure test gone as well, the copy in the piece judges and the landing publishes" "0" \
-  "$DOOR_RC"
-expect_eq "(cdm-c) MUTANT …the working branch now holds the planted blob" "$DC_BLOB" \
+door_run "$DD" env DOOR_MUTANT_FN=worktree_check_run 'DOOR_MUTANT=s|"${judge}^{commit}"|"${head}^{commit}"|' \
+  bash "$DL_DRIVER" "$DL_LIBDIR" "$DL_PC" "door fixture"
+expect_eq "(cdm) MUTANT the runner's judge made the head: the piece's copy judges, and the landing publishes (exit 0)" "0" "$DOOR_RC"
+expect_eq "(cdm-b) MUTANT …the working branch now holds the planted blob" "$DC_BLOB" \
   "$(git -C "$DD" rev-parse "$(dl_head "$DD"):planted.txt" 2>/dev/null | cut -c1-12)"
-expect_eq "(cdm-d) MUTANT …and the copy the target holds never ran" "" "$(door_seen)"
+expect_eq "(cdm-c) MUTANT …the door's run was the piece's copy: the one judge's run seen is the hand scan's, unmutated, after the publish" \
+  "1 1" "$(dl_seen_judge "$DD")"
+expect_contains "(cdm-d) MUTANT …which refuses the plan line the publish left owed" "PLAN-UNWRITTEN T1" "$DOOR_OUT"
+
+# One runner: of the four files that run the check, only the runner execs the declared command.
+DL_EXECS="$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -nE 'exec ("\$@"|\$[A-Za-z_]+) </dev/null' hooks/poker/proof.sh hooks/poker/line.sh payload/scripts/lib/line.sh payload/scripts/lib/worktree.sh)"
+expect_eq "(c7) one exec of the declared command, in lib/worktree.sh" "1 1" \
+  "$(printf '%s\n' "$DL_EXECS" | /usr/bin/grep -c .) $(printf '%s\n' "$DL_EXECS" | /usr/bin/grep -c '^payload/scripts/lib/worktree.sh:')"
+DL_RUNNER_AT="$(awk '/^worktree_check_run\(\) *\{/ { s = NR } s && /^\}/ { print s, NR; exit }' "$DL_LIBDIR/worktree.sh")"
+DL_EXEC_AT="$(printf '%s\n' "$DL_EXECS" | cut -d: -f2)"
+dl_inside_runner() { [ -n "$DL_RUNNER_AT" ] && [ "${DL_EXEC_AT:-0}" -gt "${DL_RUNNER_AT% *}" ] && [ "${DL_EXEC_AT:-0}" -lt "${DL_RUNNER_AT#* }" ]; }
+expect_true "(c7b) …inside worktree_check_run (lines ${DL_RUNNER_AT:-none}, the exec at ${DL_EXEC_AT:-none})" dl_inside_runner
+for DL_F in hooks/poker/proof.sh hooks/poker/line.sh payload/scripts/lib/worktree.sh; do
+  expect_true "(c7c) $DL_F calls the runner" /usr/bin/grep -q 'worktree_check_run ' "$BIONIC_SCRIPTS_DIR/$DL_F"
+done
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§COPY-2: a piece that changes the check and plants nothing is judged by the copy the target holds and refused"
+section "§COPY-2: a piece that changes code the check loads, or no file of it, lands"
 
-# The target's copy passes over these ranges, so only the closure test can refuse them: the check that ran is not the
-# check the candidate carries, and a passing run of the old copy says nothing of the new one.
+# The judge's copy passes over these ranges, and neither piece touches the check script itself.
 DL_LIBDIR="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
 DL_CODE=payload/scripts/lib/notify.sh
 DL_LIB=payload/scripts/lib/said.sh
@@ -311,36 +355,6 @@ EOF
   dl_check "$DQ" "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)"; DQ_RC="$DOOR_RC"
   : > "$DOOR_SEEN"
 }
-# dl_judged <label> <root> <head0>: the refusal rows a piece that changes the check meets, with the target's copy
-# passing, read from DOOR_OUT and DOOR_RC.
-dl_judged() {
-  expect_eq "($1a) land --by-hand is refused (exit 2) and the working branch does not move" "2 $3" "$DOOR_RC $(dl_head "$2")"
-  expect_contains "($1b) …by the declared check, whose run passed" \
-    "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1 base=$3" "$DOOR_OUT"
-  expect_contains "($1c) …naming the judge at the accepted head and the one file of it this landing changes" \
-    "judged-by=target script=tests/lib/release-check.sh@${3:0:12} changed-here=tests/lib/release-check.sh —" "$DOOR_OUT"
-  expect_contains "($1d) …and the route a person takes" \
-    "merge wt/T1 into wave/x with git, then session-poker.sh row-landed T1 <merge> <at> --by-hand" "$DOOR_OUT"
-  expect_eq "($1e) the record holds a ready line for T1 and no published one" "1 0" \
-    "$(dl_record "$2" | /usr/bin/grep -c '^line/v1|ev=ready|row=T1|') $(dl_record "$2" | /usr/bin/grep -c '^line/v1|ev=published|row=T1|')"
-  expect_eq "($1f) the check ran once, the copy the target holds, in the target checkout" \
-    "pwd=$2 script=$2/tests/lib/release-check.sh" "$(door_seen)"
-}
-
-dl_copy2 copy2-rewrite rewrite
-expect_eq "(c2-1-0) precondition: the copy the target holds passes over the range of the piece that replaces it with exit 0" \
-  "0 1" "$DQ_RC $(git -C "$DL_QP" show HEAD:tests/lib/release-check.sh | /usr/bin/grep -cx 'exit 0')"
-door_land "$DQ" "$DL_QP"
-dl_judged c2-1 "$DQ" "$DQ_H0"
-expect_eq "(c2-1g) the working head still carries the check the target held, its sentinel line after the shebang" "1" \
-  "$(git -C "$DQ" show "$(dl_head "$DQ"):tests/lib/release-check.sh" | /usr/bin/grep -c 'DOOR_SEEN')"
-
-dl_copy2 copy2-comment comment
-expect_eq "(c2-2-0) precondition: the copy the target holds passes over the range of the piece that adds one comment line to it" \
-  "0 1" "$DQ_RC $(git -C "$DQ" diff --numstat "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)" -- tests/lib/release-check.sh | awk '{ print $1 }')"
-door_land "$DQ" "$DL_QP"
-dl_judged c2-2 "$DQ" "$DQ_H0"
-
 dl_copy2 copy2-code code
 DQ_CL="$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "$DL_DECL") )"
 expect_contains "(c2-3-0) CONTROL precondition: the closure read at the accepted head holds the check" \
@@ -351,7 +365,7 @@ door_land "$DQ" "$DL_QP"
 expect_eq "(c2-3) CONTROL the piece that changes one code file and no member of the closure lands by hand (exit 0)" \
   "0" "$DOOR_RC"
 expect_contains "(c2-3b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c2-3c) CONTROL …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+expect_absent "(c2-3c) CONTROL …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
 
 # The edge on the other side: project code the check loads, outside the directory of the declared script, keeps the
 # plain arms, so a piece that changes it lands while the copy the target holds passes.
@@ -363,22 +377,13 @@ door_land "$DQ" "$DL_QP"
 expect_eq "(c2-4) a piece that changes a closure member outside the directory of the check lands by hand (exit 0)" \
   "0" "$DOOR_RC"
 expect_contains "(c2-4b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c2-4c) …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+expect_absent "(c2-4c) …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§COPY-3: a check declared by absolute path has the same closure as one declared relative"
+section "§COPY-3: under a check declared by absolute path a code-only piece lands; an outside word names no member"
 
-# The door runs the declaration in the target checkout, so an absolute path under that checkout names the same file
-# as the relative one, and the always-refuse arm must judge it.
+# An absolute path under the checkout names the same file as the relative one.
 dl_abs() { printf 'release-check: bash %s %s\n' "$2" "$DL_LIST" > "$1/.bionic/config.yaml"; }   # <root> <script word>
-
-dl_copy2 copy3-rewrite rewrite
-dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
-DQ_CL="$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$DQ" "$DQ_H0" "bash $DQ/tests/lib/release-check.sh $DL_LIST") )"
-expect_eq "(c3-1-0) precondition: the closure of the absolute declaration holds the check, as the relative one does, and the target's copy passes over the piece" \
-  "1 0" "$(printf '%s\n' "$DQ_CL" | /usr/bin/grep -cxF tests/lib/release-check.sh) $DQ_RC"
-door_land "$DQ" "$DL_QP"
-dl_judged c3-1 "$DQ" "$DQ_H0"
 
 dl_copy2 copy3-code code
 dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
@@ -386,7 +391,7 @@ door_land "$DQ" "$DL_QP"
 expect_eq "(c3-2) CONTROL the same absolute declaration and a piece that changes one code file: lands by hand (exit 0)" \
   "0" "$DOOR_RC"
 expect_contains "(c3-2b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c3-2c) CONTROL …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+expect_absent "(c3-2c) CONTROL …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
 
 # A word outside the checkout names no member: one that only shares the checkout name as a prefix (the fixture's own
 # list is such a sibling), one whose tail repeats a path the commit holds, and one before the real script.
@@ -404,12 +409,11 @@ expect_eq "(c3-3c) …and it is skipped, not the end of the declaration: a relat
   "tests/lib/release-check.sh rc=0" "$(printf '%s\n' "$DQ_OUT" | /usr/bin/grep -xF -e tests/lib/release-check.sh -e rc=0 | paste -sd' ' -)"
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§COPY-4: every word of the closure is read against the roots of the repository by one normalizer"
+section "§COPY-4: a check declared by the main checkout's absolute path is run as the judge holds it"
 
-# The declaration is read from the main checkout, and the door runs it in the checkout that holds the branch or, when
-# none does, in a landing tree pointed at the accepted head: an absolute word under the main checkout names the same
-# file from either. The file a word names is a member whatever its spelling, and so is a file a member sources by
-# absolute path; a word outside every root names none.
+# The declaration is read from the main checkout, and the door runs it in a landing tree pointed at the judge: an
+# absolute word under the main checkout names the file the judge's tree holds at that path. A word outside every
+# root names no member.
 dl_detach() { _door_inside "$1" && git -C "$1" checkout --quiet --detach; }   # <root>: no checkout holds wave/x
 dl_c4_closure() { ( . "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; _wt_check_closure "$1" "$DQ_H0" "$2"; echo "rc=$?" ); }   # <run dir> <declaration>
 
@@ -419,54 +423,12 @@ dl_detach "$DQ"
 expect_eq "(c4-1-0) precondition: no checkout holds the working branch, and the target copy passes over the piece" \
   "1 0" "$( (. "$DL_LIBDIR/worktree.sh" >/dev/null 2>&1; worktree_checkout_of "$DQ" wave/x >/dev/null; echo $?) ) $DQ_RC"
 door_land "$DQ" "$DL_QP"
-expect_eq "(c4-1a) land --by-hand of the rewrite, judged from a landing tree, is refused (exit 2) and the branch does not move" \
-  "2 $DQ_H0" "$DOOR_RC $(dl_head "$DQ")"
-expect_contains "(c4-1b) …by the declared check, whose run passed" \
-  "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1 base=$DQ_H0" "$DOOR_OUT"
-expect_contains "(c4-1c) …naming the judge by its repository path and the one file of it this landing changes" \
-  "judged-by=target script=tests/lib/release-check.sh@${DQ_H0:0:12} changed-here=tests/lib/release-check.sh —" "$DOOR_OUT"
 DQ_SEEN="$(door_seen)"
-expect_eq "(c4-1d) the check ran once, from a landing tree under the root" \
-  "1 1" "$(printf '%s\n' "$DQ_SEEN" | /usr/bin/grep -c .) $(printf '%s\n' "$DQ_SEEN" | /usr/bin/grep -c "^pwd=$DQ/.bionic/tmp/landing/[0-9]* ")"
-expect_contains "(c4-1e) …and the copy it ran is the one the absolute word names, the main checkout copy" \
-  " script=$DQ/tests/lib/release-check.sh" "$DQ_SEEN"
-
-dl_copy2 copy4-dot rewrite
-dl_abs "$DQ" "$DQ/./tests/lib/release-check.sh"
-door_land "$DQ" "$DL_QP"
-dl_judged c4-2 "$DQ" "$DQ_H0"
-
-dl_copy2 copy4-slash rewrite
-dl_abs "$DQ" "$DQ//tests/lib/release-check.sh"
-door_land "$DQ" "$DL_QP"
-dl_judged c4-2s "$DQ" "$DQ_H0"
-
-# The target check sources a helper beside it by absolute path; the piece changes the helper alone.
-read -r DQ DQ_H0 <<EOF
-$(door_copy "$DW" "$WORLD_ROOT/copy4-load")
-EOF
-DL_HELP=tests/lib/door-helper.sh
-printf 'door_helped() { :; }\n' > "$DQ/$DL_HELP"
-awk -v h="$DQ/$DL_HELP" 'NR == 2 { print; print ". \"" h "\""; next } { print }' "$DQ/tests/lib/release-check.sh" \
-  > "$DQ/tests/lib/release-check.sh.new" && mv "$DQ/tests/lib/release-check.sh.new" "$DQ/tests/lib/release-check.sh" \
-  && chmod +x "$DQ/tests/lib/release-check.sh" && dl_commit "$DQ" "the check sources a helper by absolute path"
-DQ_H0="$(dl_head "$DQ")"
-DL_QP="$(door_piece "$DQ" T1)"
-printf '# a note on the helper\n' >> "$DL_QP/$DL_HELP"
-dl_commit "$DL_QP" "the piece: the helper alone"
-dl_check "$DQ" "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)"; DQ_RC="$DOOR_RC"
-expect_eq "(c4-3-0) precondition: the target check sources the helper by absolute path, the piece changes the helper alone, and the target copy passes over it" \
-  "1 $DL_HELP 0" "$(git -C "$DQ" show "$DQ_H0:tests/lib/release-check.sh" | /usr/bin/grep -cxF ". \"$DQ/$DL_HELP\"") $(git -C "$DQ" diff --name-only "$DQ_H0" "$(git -C "$DL_QP" rev-parse HEAD)") $DQ_RC"
-: > "$DOOR_SEEN"
-door_land "$DQ" "$DL_QP"
-expect_eq "(c4-3a) land --by-hand of the helper change is refused (exit 2) and the working branch does not move" \
-  "2 $DQ_H0" "$DOOR_RC $(dl_head "$DQ")"
-expect_contains "(c4-3b) …by the declared check, whose run passed" \
-  "REFUSED reason=check-failed why=release-check rc=0 branch=wt/T1 base=$DQ_H0" "$DOOR_OUT"
-expect_contains "(c4-3c) …naming the helper as the file of the judge this landing changes" \
-  "judged-by=target script=tests/lib/release-check.sh@${DQ_H0:0:12} changed-here=$DL_HELP —" "$DOOR_OUT"
-expect_eq "(c4-3d) the check ran once, the copy the target holds, in the target checkout" \
-  "pwd=$DQ script=$DQ/tests/lib/release-check.sh" "$(door_seen)"
+expect_eq "(c4-1a) land --by-hand of the rewrite, declared by absolute path, from a landing tree: lands (exit 0)" "0" "$DOOR_RC"
+expect_contains "(c4-1b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
+expect_eq "(c4-1c) each run of the check (the door's, the scan's) is the judge's copy in a landing tree: the absolute word is read inside it" \
+  "2 2" "$(dl_seen_judge "$DQ")"
+expect_absent "(c4-1d) …never the main checkout's working copy the word names" " script=$DQ/tests/lib/release-check.sh" "$DQ_SEEN"
 
 dl_copy2 copy4-code code
 dl_abs "$DQ" "$DQ/tests/lib/release-check.sh"
@@ -475,7 +437,7 @@ door_land "$DQ" "$DL_QP"
 expect_eq "(c4-4a) CONTROL the absolute declaration from a landing tree and a piece that changes one code file: lands by hand (exit 0)" \
   "0" "$DOOR_RC"
 expect_contains "(c4-4b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
-expect_absent "(c4-4c) CONTROL …with no judged-by refusal" "changed-here=" "$DOOR_OUT"
+expect_absent "(c4-4c) CONTROL …refused by nothing" "REFUSED reason=" "$DOOR_OUT"
 DQ_LT="$(cd "$DQ/.bionic/tmp/landing" 2>/dev/null && for t in */; do [ -e "$t.git" ] && { printf '%s' "$PWD/${t%/}"; break; }; done)"
 DQ_IN="$(dl_c4_closure "$DQ_LT" "bash $DQ/tests/lib/release-check.sh $DL_LIST")"
 expect_contains "(c4-4d-0) CONTROL precondition: run from the landing tree the door used, the closure of the word under the main root holds the check" \
@@ -486,7 +448,7 @@ expect_eq "(c4-4e) CONTROL …and so does a list beside the root, outside every 
   "rc=1" "$(dl_c4_closure "$DQ_LT" "bash ${DQ}-names.list")"
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§NAMED: a landing that changes the check which judges it is refused naming the judge, the change and the route"
+section "§INFO: a landing that changes the check lands; its line and the release approval card name what it changes"
 
 # dl_named <root> -> DL_NP, the row T1's tree, and DL_NH1, the accepted head. The target's committed check carries a
 # bug (it exits 3 after the sentinel); T1 restores the check and marks its own sentinel line `copy=fix`; then a
@@ -504,55 +466,48 @@ dl_named() {
   DL_NH1="$(dl_head "$1")"
 }
 read -r DN DN_H0 <<EOF
-$(door_copy "$DW" "$WORLD_ROOT/named")
+$(door_copy "$DW" "$WORLD_ROOT/info")
 EOF
 dl_named "$DN"
-DN_JUDGE="judged-by=target script=tests/lib/release-check.sh@${DL_NH1:0:12} changed-here=tests/lib/release-check.sh —"
 expect_eq "(n0) precondition: the piece's copy carries the fix's mark, the target's the bug" "1 1" \
   "$(/usr/bin/grep -c 'copy=fix' "$DL_NP/tests/lib/release-check.sh") $(/usr/bin/grep -cx 'exit 3' "$DN/tests/lib/release-check.sh")"
 : > "$DOOR_SEEN"
+DN_P="$(git -C "$DL_NP" rev-parse HEAD)"
 door_land "$DN" "$DL_NP"
-DN_OUT="$DOOR_OUT"
-expect_eq "(n1) land --by-hand of the fix is refused (exit 2) and the working branch does not move" "2 $DL_NH1" \
-  "$DOOR_RC $(dl_head "$DN")"
-expect_contains "(n1b) …by the declared check, over the accepted head" \
-  "REFUSED reason=check-failed why=release-check rc=3 branch=wt/T1 base=$DL_NH1" "$DN_OUT"
-expect_contains "(n2) …naming the judge, its copy at the accepted head, and the one file of it this landing changes" \
-  "$DN_JUDGE" "$DN_OUT"
-expect_contains "(n3) …saying a fix to the check cannot pass its own door" "a fix to the check cannot pass its own door" \
-  "$DN_OUT"
-expect_contains "(n4) …and naming the route a person takes" \
-  "merge wt/T1 into wave/x with git, then session-poker.sh row-landed T1 <merge> <at> --by-hand" "$DN_OUT"
-expect_eq "(n5) the one run of the check is the target's copy, without the fix's mark" \
-  "pwd=$DN script=$DN/tests/lib/release-check.sh" "$(door_seen)"
-
-: > "$DOOR_SEEN"
-door_run "$DN" env 'DOOR_MUTANT=s|_wt_check_judge "$co"|false "$co"|' bash "$DL_DRIVER" "$DL_LIBDIR" "$DL_NP" "door fixture"
-expect_eq "(nm1) MUTANT the arm deleted: the mutant ran, refused by the target's copy as before" \
-  "2 pwd=$DN script=$DN/tests/lib/release-check.sh" "$DOOR_RC $(door_seen)"
-expect_contains "(nm1b) MUTANT …its refusal is the check's" "REFUSED reason=check-failed why=release-check rc=3" "$DOOR_OUT"
-expect_absent "(nm1c) MUTANT …and carries no judged-by field" "judged-by=" "$DOOR_OUT"
-door_run "$DN" env 'DOOR_MUTANT=s|_wt_check_judge "$co" "$onto_head" "$head"|_wt_check_judge "$co" "$onto_head" "$(git -C "$wt_abs" rev-parse HEAD)"|' \
-  bash "$DL_DRIVER" "$DL_LIBDIR" "$DL_NP" "door fixture"
-expect_contains "(nm2) MUTANT the change read over the writer's head: changed-here names the person's note as well" \
-  "changed-here=tests/lib/name-scan.sh,tests/lib/release-check.sh —" "$DOOR_OUT"
-expect_absent "(nm2b) MUTANT …so the line (n2) reads is not there" "$DN_JUDGE" "$DOOR_OUT"
+DN_OUT="$DOOR_OUT"; DN_H="$(dl_head "$DN")"
+expect_eq "(n1) land --by-hand of the fix to the check lands (exit 0), the working branch at a merge of the fix" \
+  "0 $DN_P" "$DOOR_RC $(git -C "$DN" rev-parse "$DN_H^2" 2>/dev/null)"
+expect_contains "(n1b) …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DN_OUT"
+expect_absent "(n1c) …refused by nothing" "REFUSED reason=" "$DN_OUT"
+expect_contains "(n2) T1's line names the judge and the file of the check the landing changes" \
+  "judged-by=${DN_H0:0:12} changed-here=tests/lib/release-check.sh" "$(dl_plan_line "$DN" T1)"
+expect_eq "(n3) both runs, the door's and the scan's, are the judge's copy" "2 2" "$(dl_seen_judge "$DN")"
+expect_absent "(n3b) …never the target's bug nor the fix's mark" "copy=fix" "$(door_seen)"
+door_run "$DN" bash "$DOOR_POKER" release-approval --preview
+DN_CARD="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -F 'changes the release check')"
+expect_nonempty "(n4-0) the release approval card has its check line" "$DN_CARD"
+expect_contains "(n4) …naming the check's file the release changes" "tests/lib/release-check.sh" "$DN_CARD"
 
 # ---------------------------------------------------------------------------------------------------------------
-section "§JUDGED: the fix merged by a person and marked by hand records on its line which copy judged it"
+section "§JUDGED: the fix merged by a person and marked by hand is judged by the release base's copy, and its line says so"
 
+read -r DN DN_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/judged")
+EOF
+dl_named "$DN"
 : > "$DOOR_SEEN"
-git -C "$DN" merge --no-ff -q -m "merge wt/T1 by hand" wt/T1 >/dev/null 2>&1
+_door_inside "$DN" && git -C "$DN" merge --no-ff -q -m "merge wt/T1 by hand" wt/T1 >/dev/null 2>&1
 DN_M="$(dl_head "$DN")"
 DN_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 expect_eq "(j0) precondition: the person's merge holds the fix on the working branch" "$DL_NH1 $(git -C "$DL_NP" rev-parse HEAD)" \
   "$(git -C "$DN" rev-parse "$DN_M^1" "$DN_M^2" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 door_run "$DN" bash "$DOOR_POKER" row-landed T1 "$DN_M" "$DN_AT" --by-hand door "a fix to the check lands by a person"
 expect_eq "(j1) row-landed --by-hand of the merged fix exits 0" "0" "$DOOR_RC"
-expect_contains "(j2) T1's line is landed by hand and names the copy that judged it: the landed one, the candidate's" \
-  "landed-by-hand: door $DN_AT \"a fix to the check lands by a person\" judged-by=candidate" "$(dl_plan_line "$DN" T1)"
-expect_eq "(j3) …and the scan's one run is that copy, the fix's mark, in the fixture's checkout" \
-  "pwd=$DN script=$DN/tests/lib/release-check.sh copy=fix" "$(door_seen)"
+expect_contains "(j2) T1's line is landed by hand and names the judge and the check file the landing changes" \
+  "landed-by-hand: door $DN_AT \"a fix to the check lands by a person\" judged-by=${DN_H0:0:12} changed-here=tests/lib/release-check.sh" \
+  "$(dl_plan_line "$DN" T1)"
+expect_eq "(j3) …and the scan's one run is the judge's copy" "1 1" "$(dl_seen_judge "$DN")"
+expect_absent "(j3b) …never the landed copy, the fix's mark" "copy=fix" "$(door_seen)"
 
 # ---------------------------------------------------------------------------------------------------------------
 section "§HAND: the hand route meets the check: a planted name is refused, and without the check's call it publishes"
@@ -570,7 +525,7 @@ expect_eq "(h1) land --by-hand of a planted name is refused (exit 2) and the wor
 expect_contains "(h1b) …check-failed, naming the planted blob" "HIT entry=1 at blob $DH_BLOB line 1" "$DOOR_OUT"
 expect_contains "(h1c) …by the declared check" "REFUSED reason=check-failed why=release-check rc=1 branch=wt/T1" "$DOOR_OUT"
 expect_absent "(h1d) …which this landing leaves alone, so no changed-here" "changed-here=" "$DOOR_OUT"
-expect_eq "(h2) the check ran, the target's copy" "pwd=$DH script=$DH/tests/lib/release-check.sh" "$(door_seen)"
+expect_eq "(h2) the check ran once, the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DH")"
 : > "$DOOR_SEEN"
 door_run "$DH" env DOOR_MUTANT_FN=line_publish 'DOOR_MUTANT=s|_wt_release_check "$root"|: "$root"|' \
   bash "$DL_DRIVER" "$DL_LIBDIR" "$DL_HP" "door fixture"
@@ -755,7 +710,7 @@ expect_contains "(ra1b) …check-failed, by the declared check" "REFUSED reason=
 expect_contains "(ra1c) …with the test-ratio line naming both counts" "test-ratio $DA_NEWT/$DA_NEWC — tests exceed code at " "$DA_OUT"
 expect_eq "(ra1d) …nothing is published: the working head has no tests/big.test.sh and the record no published line" \
   "gone 0" "$(git -C "$DA" cat-file -e "$(dl_head "$DA"):tests/big.test.sh" 2>/dev/null && echo here || echo gone) $(dl_record "$DA" | /usr/bin/grep -c 'ev=published|row=T1|')"
-expect_eq "(ra1e) …and the check that refused is the target's copy, run once" "pwd=$DA script=$DA/tests/lib/release-check.sh" "$(door_seen)"
+expect_eq "(ra1e) …and the check that refused is the judge's copy in a landing tree, run once" "1 1" "$(dl_seen_judge "$DA")"
 
 # The same piece under the cap, in a copy of its own: the refusal above is the count, not the file.
 read -r DK DK_H0 <<EOF

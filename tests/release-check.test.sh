@@ -445,6 +445,43 @@ expect_eq "(t3) setup: the carrier is a merge of two parents" "2" "$(git -C "$R"
 rn_check "$M"
 expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
 
+
+section "§PROJECT — the check run from a tree with no plan reads the project's plan and record from BIONIC_CHECK_PROJECT"
+
+# FIXTURE FIDELITY: the judge runs in a landing tree, a detached worktree of the project with no `.bionic` beside it,
+# so the plan and the landing record are only where the project keeps them. Two projects: §LIMITS's world with one
+# unstated deferral of 2.3.4, and §LAST's world at the merge whose numbers agree. Each is judged from a tree of its
+# own, once with BIONIC_CHECK_PROJECT naming the project and once without it. SYNTHESIZED: as §LIMITS and §LAST.
+pj_tree() {  # <repo> <rev> -> a detached worktree of <repo> at <rev>, under its own ignored tmp, with no .bionic
+  local t="$1/.bionic/tmp/landing/1"
+  git -C "$1" worktree add -q --detach "$t" "$2" >/dev/null 2>&1 && printf '%s' "$(cd "$t" && pwd -P)"
+}
+pj_check() {  # <tree> <head> [<project>] -> OUT, RC: the check run in <tree>, the project named only when given
+  OUT="$(cd "$1" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_PROJECT BIONIC_CHECK_HEAD="$2" \
+    ${3:+BIONIC_CHECK_PROJECT="$3"} bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+}
+R="$TMP/pj-lim"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
+PJ_T="$(pj_tree "$R" HEAD)"
+expect_eq "(pj0) setup: the tree is the project's head, and holds no plan" "$(git -C "$R" rev-parse HEAD) no" \
+  "$(git -C "${PJ_T:-/nonexistent}" rev-parse HEAD 2>/dev/null) $([ -e "${PJ_T:-/nonexistent}/.bionic" ] && echo yes || echo no)"
+pj_check "$PJ_T" HEAD "$(cd "$R" && pwd -P)"
+expect_status "(pj1) §PROJECT AC-2.2 with BIONIC_CHECK_PROJECT naming the project, an unstated deferral refuses from the tree" 1 "$RC"
+expect_contains "(pj1b) …naming the deferral of the project's plan" "$(L2_LINE)" "$OUT"
+pj_check "$PJ_T" HEAD
+expect_status "(pj2) CONTROL with the variable unset, the same tree passes" 0 "$RC"
+expect_contains "(pj2b) CONTROL …saying no plan under the tree's own docs names the release" \
+  "known-limits: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
+
+# §LAST's world: its numbers agree at the merge M, the plan and the record read from the project.
+R="$TMP/rn"; PJ_T="$(pj_tree "$R" "$M")"
+pj_check "$PJ_T" "$M" "$(cd "$R" && pwd -P)"
+expect_status "(pj3) the landing numbers judged from a tree, the project named: the check passes" 0 "$RC"
+expect_contains "(pj3b) …its numbers rendered from the project's plan and record, and agreeing" \
+  "landing-numbers: 2.3.4 agrees with the landing report at" "$OUT"
+pj_check "$PJ_T" "$M"
+expect_contains "(pj4) CONTROL the variable unset: no plan holds the numbers" \
+  "landing-numbers: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
+
 section "§RATIO — tests may not outgrow the code: shell lines under tests/ against shell lines elsewhere, at the head"
 
 # fx_ratio <dir> <tests lines> <code lines> — a committed pair whose tracked shell files hold exactly that many lines.
@@ -698,9 +735,10 @@ rel_check() {
   [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = 1.25.0 ] || echo "rel: plugin.json does not read 1.25.0"
 }
 # rel_world <dir> <changelog> [<extra deferred line>] — a committed repository holding <changelog> as its CHANGELOG and the run's real
-# deferred lines as its plan, so the declared check judges the entry as the door will
+# deferred lines as its plan, each with the moved: lines that later changed its state, so the declared check judges the
+# entry as the door will
 rel_world() {
-  fx_repo "$1" 2.3.4 1.25.0 && lim_plan "$1" 1.25.0 "$(/usr/bin/grep '^deferred: ' "$REL_PLAN")${3:+
+  fx_repo "$1" 2.3.4 1.25.0 && lim_plan "$1" 1.25.0 "$(/usr/bin/grep -E '^(deferred|moved): ' "$REL_PLAN")${3:+
 $3}" &&
   { cat "$2"; printf '\n## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$1/CHANGELOG.md" &&
   git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the 1.25.0 entry"

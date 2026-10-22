@@ -1225,9 +1225,9 @@ DSP_READINGS
   }
 
   # THE RELEASE CHECK (wave-27 T16; D12). A project may name one command in `.bionic/config.yaml`
-  # under `release-check:`. This verb runs it in the checkout of the plan's working branch, with
-  # BIONIC_CHECK_BASE at the last release and BIONIC_CHECK_HEAD at the working head, its words
-  # split on blanks with globbing off.
+  # under `release-check:`. This verb runs it as the last release holds it, through the one runner
+  # (lib/worktree.sh `worktree_check_run`), with BIONIC_CHECK_BASE at the last release and
+  # BIONIC_CHECK_HEAD at the head of the checkout of the plan's working branch.
   # THE LAST RELEASE is the nearest tag reachable from the plan's `integration-branch:` that is a
   # PROPER ancestor of the working head (the fewest commits from it to the head): a tag on the head,
   # or on a commit that is not on the head's history, is no base, for the range it opens would hold
@@ -1290,11 +1290,15 @@ DSP_READINGS
         git --literal-pathspecs -C "$RC_CO" diff --quiet "$RC_BASE" "$RC_HEAD" -- "$RC_P" >/dev/null 2>&1 \
           || printf 'check-changed: %s\n' "$RC_P"
       done | awk '!seen[$0]++')"
-    RC_OUT="$(cd "$RC_CO" 2>/dev/null || exit 1
-      set -f
-      export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD" BIONIC_CHECK_TREE="$(pwd -P)"
-      # shellcheck disable=SC2086  # the configured command is meant to split on blanks
-      exec $RC_CMD </dev/null 2>&1)"; RC_RC=$?
+    # THE JUDGE IS THE RELEASE BASE (lib/worktree.sh `worktree_check_run`): the command runs as the range's start
+    # holds it, never as the head being judged holds it, so a head cannot pass by rewriting its own check.
+    worktree_check_run "$PV_REPO" "$PV_PLAN" "$RC_BASE" "$RC_BASE" "$RC_HEAD" "$RC_CO"; RC_RUN=$?
+    [ "$RC_RUN" -ne 1 ] || exit 0
+    if [ "$RC_RUN" -ne 0 ]; then
+      die "REFUSED — the declared release-check ($(clean "$RC_CMD")) cannot be run as the release base ${RC_BASE:0:12} ($RC_FROM) holds it: $(clean "$WT_CHECK_OUT"). Nothing was run and the plan is unchanged."
+      exit 1
+    fi
+    RC_OUT="$WT_CHECK_OUT"; RC_RC="$WT_CHECK_RC"; RC_JUDGED="judged-by=${WT_CHECK_JUDGE:0:12}"
     # WHAT THE CHECK LEFT (wave-27 T67; review pass 46 N7), looked at as `land` looks after its own run
     # (lib/worktree.sh `_wt_check_left`): the checkout's HEAD where it was, and no tracked file changed
     # (the index refreshed first). A check that moved either is refused as a failing check is: its log,
@@ -1315,7 +1319,7 @@ DSP_READINGS
     fi
     if ! mkdir -p "${RC_LOG%/*}" 2>/dev/null \
        || ! { [ -z "$RC_CHG" ] || printf '%s\n' "$RC_CHG"
-              printf 'head=%s rc=%s\nbase=%s (%s)\ncommand: %s\n' "$RC_HEAD" "$RC_RC" "$RC_BASE" "$RC_FROM" "$RC_CMD"
+              printf 'head=%s rc=%s\nbase=%s (%s)\njudged-by=%s (%s)\ncommand: %s\n' "$RC_HEAD" "$RC_RC" "$RC_BASE" "$RC_FROM" "$WT_CHECK_JUDGE" "$RC_FROM" "$RC_CMD"
               [ -z "$RC_LEFT" ] || printf 'check-dirtied: the check %s\n' "$RC_LEFT"
               printf '\n'
               [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"; } > "$RC_LOG" 2>/dev/null; then
@@ -1332,7 +1336,7 @@ DSP_READINGS
         die "REFUSED — check-dirtied: the declared release-check ($(clean "$RC_CMD")) $RC_LEFT, as land refuses a check that does; its log $RC_REL and a result=fail check fact at ${RC_HEAD:0:12} were written. Put back what it changed, make the check change nothing, and run release-check again.$RC_SAID"
         exit 1
       fi
-      die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM); its log $RC_REL and a result=fail check fact at that head were written. Fix what it names, commit, and run release-check again.$RC_SAID"
+      die "REFUSED — the declared release-check ($(clean "$RC_CMD")), $RC_JUDGED, exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM); its log $RC_REL and a result=fail check fact at that head were written. Fix what it names, commit, and run release-check again.$RC_SAID"
       exit 1
     fi
     if ! RC_AT="$(proof_attested check "$RC_LOG" "$RC_CO")"; then

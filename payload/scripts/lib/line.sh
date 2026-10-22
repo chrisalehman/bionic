@@ -514,7 +514,7 @@ _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
 # Sets LINE_NUMBERS (the commit, or empty) and, on a refusal, LINE_NUMBERS_SAID (the renderer's words).
 LINE_NUMBERS_AUTHOR="bionic line"; LINE_NUMBERS_EMAIL="line@bionic.invalid"
 _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothing to make · 1 refused
-  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" r landed="" ver tmp now on note mode blob tree c
+  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" r landed="" ver tmp now on note mode blob tree c jt rn nrc
   LINE_NUMBERS=""; LINE_NUMBERS_SAID=""
   _line_release_row "$plan" "$row" && return 0
   while IFS= read -r r; do
@@ -535,8 +535,22 @@ EOF
     END { exit !f }' "$tmp/old" || { rm -rf "$tmp"; return 0; }
   now="$(date -u +%s)"
   on="$(date -u -r "$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  if ! note="$(cd "$root" 2>/dev/null && bash "$(plugin_root 2>/dev/null)/hooks/session-poker.sh" release-note \
-         --at "$cand" --on "${on:-unreadable}" "$plan" 2>&1)"; then
+  # THE JUDGE'S COPY RENDERS. The release check compares the block with its own release-note, and the copy that runs
+  # is the release base's (lib/worktree.sh `worktree_check_run`), so the block is rendered by that copy too, checked
+  # out in a landing tree: a change to the renderer reaches the entry one release later, never refused by its own
+  # check. A judge that holds no renderer has no copy to compare with, and the plugin's renders.
+  jt=""; rn="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
+  if release_base "$plan" "$root" "$cand" && git -C "$root" cat-file -e "${RB_BASE}:hooks/session-poker.sh" 2>/dev/null; then
+    if ! jt="$(landing_tree_take "$root")" || ! landing_tree_point "$jt" "$RB_BASE"; then
+      [ -z "$jt" ] || landing_tree_free "$jt"
+      LINE_NUMBERS_SAID="no landing tree can be checked out at the release base ${RB_BASE} to render with its release-note"
+      rm -rf "$tmp"; return 1
+    fi
+    rn="${jt}/hooks/session-poker.sh"
+  fi
+  note="$(cd "$root" 2>/dev/null && bash "$rn" release-note --at "$cand" --on "${on:-unreadable}" "$plan" 2>&1)"; nrc=$?
+  [ -z "$jt" ] || landing_tree_free "$jt"
+  if [ "$nrc" -ne 0 ]; then
     LINE_NUMBERS_SAID="${note:-release-note printed nothing}"; rm -rf "$tmp"; return 1
   fi
   printf '%s\n' "$note" > "$tmp/note"
@@ -565,7 +579,7 @@ EOF
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
-  local name com present base cand out sui car cbase cat br tr co rc run moved at rundir lt tip
+  local name com present base cand out sui car cbase cat br tr co rc run moved at tip
   rec="$(line_record "$plan")" && root="$(_line_root "$plan")" && branch="$(_line_branch "$plan")" \
     || { _wt_refuse "line-unreadable plan=${plan:-<none>}"; return 2; }
   lk="$(_line_lock_dir "$rec")"
@@ -607,14 +621,9 @@ EOF
     return 2
   fi
   tip="${LINE_NUMBERS:-$cand}"
-  # 5. THE PROJECT'S RELEASE CHECK, READ FROM THE ACCEPTED HEAD: in the checkout that holds the
-  # branch, or in a landing tree pointed at the accepted head when none does (recheck Q3, O3).
-  rundir="$co"; lt=""
-  if [ -z "$rundir" ] && [ -n "$(config_value "$root" release-check "" 2>/dev/null)" ]; then
-    lt="$(landing_tree_take "$root")" && landing_tree_point "$lt" "$head" && rundir="$lt"
-  fi
-  _wt_release_check "$root" "${rundir:-$root}" "$head" "$tip" "$tr" "$br" "$branch" "$row"; rc=$?
-  [ -z "$lt" ] || landing_tree_free "$lt"
+  # 5. THE PROJECT'S RELEASE CHECK over the accepted head to the tip, as the release base holds it
+  # (lib/worktree.sh `worktree_check_run`, in a landing tree of its own).
+  _wt_release_check "$root" "$plan" "$head" "$tip" "$tr" "$br" "$branch" "$row"; rc=$?
   [ "$rc" -eq 0 ] || { _line_lock_drop "$lk"; return 2; }
   # 6. THE DEBT WRITE (wave-28 T5; D8, AC-9.4): a declared red's `debt:` line, at the publish's own
   # instant, before the fast-forward (else rc 2, nothing published).
