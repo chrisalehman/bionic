@@ -2603,7 +2603,9 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 # step on the sheet, names a label the sheet does not hold, runs out of the sheet's step order, or writes a task's row
 # in words its state on the sheet contradicts (an open task landed, a done one waiting); when its metrics are not
 # the five in their order, or one states a number (each run of digits) that no measured value of its own lines holds,
-# or gives a goal status another count than the goal: lines hold; when no close row names the sheet's predicted
+# or sets a number beside the word of another line than the one that holds it ("60% of the work landed in 37% of the
+# time" over work landed 37 and time used 60), or gives a goal status another count than the goal: lines hold; when
+# no close row names the sheet's predicted
 # close; when its call says nothing is owed while an ask is open, or names a register key while none is; when it
 # leaves an open ask unanswered or answers one twice, names a key the register lacks, or writes an ask row that does
 # not name the label of every task its keys hold, or with no recommended answer, or as a decision's options; when it
@@ -2615,10 +2617,27 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
 CARD_SITREP_NOTHING="Nothing: no decision or action is owed right now."
 CARD_SITREP_SECTIONS="Call to action|Task list|Metrics|Assessment|Blocked on you|Predicted close"
 CARD_SITREP_METRICS="Completed Pace Correctness Waste Goals"
-# The sheet lines each metric is written from, `<Label>=<key>`, a key ending `.*` naming every line under its prefix.
-# Goals is written from the goal: lines' counts by status, which _card_sitrep_load counts.
-CARD_SITREP_MLINES="Completed=work.landed Completed=work.left Pace=pace.work-landed Pace=pace.time-used Pace=work.added \
-Correctness=tests.* Correctness=reviews Correctness=findings.open Waste=waste.*"
+# The sheet lines each metric is written from, `<Label>=<key>:<word>,<word>...`: the line's key and the words that
+# name it in a row. A number a row states is the measured value of the line whose word stands beside it, so each
+# line's words are declared here once, and the judge and the load both read them from here. A word is matched whole,
+# in lower case; two lines of one metric may share a word. Pace may cite the forecast: clock.forecast's hours and end
+# clock are its numbers, beside forecast, hours, min or ends. Goals is written from the goal: lines' counts by status,
+# which _card_sitrep_load counts, and binds its counts to a status in its own pattern.
+CARD_SITREP_MLINES="Completed=work.landed:landed,land,done,finished,complete,completed \
+Completed=work.left:left,remaining,remain,open \
+Pace=pace.work-landed:work,landed,done \
+Pace=pace.time-used:time,used,elapsed \
+Pace=work.added:added,new \
+Pace=clock.forecast:forecast,h,hr,hrs,hour,hours,min,mins,minute,minutes,ends,end,ending \
+Correctness=tests.suites-run:suites,suite,run,ran,green,red \
+Correctness=tests.suites-total:total,project,suites,suite \
+Correctness=tests.whole-run:whole,regression \
+Correctness=reviews:review,reviews,passed,failed,running \
+Correctness=findings.open:finding,findings,open \
+Waste=waste.dropped:dropped,drop \
+Waste=waste.runs-discarded:discarded,thrown,run,runs,suite,suites \
+Waste=waste.ready-unstarted:ready,unstarted,idle \
+Waste=waste.waiting-on-you:waiting,waited,wait"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
 # run. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
@@ -2765,8 +2784,10 @@ _card_sitrep_tasks_judge() {
 }
 
 # _card_sitrep_metrics_judge -> every refusal of the Metrics in SJ_WHY: the five labels once each in their order;
-# every number a metric row states (each run of digits, so 5:46 is 5 and 46) one its own lines measure, SR_MNUMS; and
-# each count a Goals row puts on a goal status that status's own count
+# every number a metric row states (each run of digits, so 5:46 is 5 and 46) one its own lines measure, SR_MNUMS, and
+# the measured value of the line whose word stands beside it in the row, so the pace's two shares cannot trade places
+# and the forecast's hours are the forecast's own; and each count a Goals row puts on a goal status that status's own
+# count
 _card_sitrep_metrics_judge() {
   local i m got="" miss="" bad=""
   for ((i = 0; i < ${#SJ_MLAB[@]}; i++)); do
@@ -2786,21 +2807,66 @@ _card_sitrep_metrics_judge() {
   # A Goals row's count of a status is that status's count and its of-count the total: in "3 of 3 met" with 1 met,
   # every number is one the goal: lines hold, so only binding each count to its status refuses it.
   m="$( { printf '%s\n' "$SR_MNUMS"; for ((i = 0; i < ${#SJ_MLAB[@]}; i++)); do printf 'J\t%s\t%s\n' "${SJ_MLAB[$i]}" "${SJ_MTXT[$i]}"; done; } \
-    | awk -F'\t' -v lines="$CARD_SITREP_MLINES" '
+    | awk -F'\t' '
     function strip(x) { sub(/^0+/, "", x); return (x == "") ? "0" : x }
-    BEGIN { n = split(lines, a, " ")
-      for (i = 1; i <= n; i++) { c = index(a[i], "="); l = substr(a[i], 1, c - 1); from[l] = from[l] (from[l] == "" ? "" : ", ") substr(a[i], c + 1) }
-      from["Goals"] = "the counts of the goal: lines"
+    # the row as tokens: N a run of digits, W a run of letters, C a comma, B a clause end (; or a full stop before a space)
+    function tokenize(s,   c) {
+      nt = 0; delete tt; delete tv; s = tolower(s)
+      while (s != "") {
+        if (match(s, /^[0-9]+/)) { nt++; tt[nt] = "N"; tv[nt] = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1); continue }
+        if (match(s, /^[a-z]+/)) { nt++; tt[nt] = "W"; tv[nt] = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1); continue }
+        c = substr(s, 1, 1)
+        if (c == ",") { nt++; tt[nt] = "C" }
+        else if (c == ";" || ((c == "." || c == "!" || c == "?") && (length(s) == 1 || substr(s, 2, 1) == " "))) { nt++; tt[nt] = "B" }
+        s = substr(s, 2)
+      }
+    }
+    # the lines a metric words name among tokens a to b, each once, and in WORD the first word that named one
+    function named(m, a, b,   i, out) {
+      out = ""
+      for (i = a; i <= b; i++) if (tt[i] == "W" && ((m SUBSEP tv[i]) in wl)) { out = out " " wl[m SUBSEP tv[i]]; if (WORD == "") WORD = tv[i] }
+      return out
+    }
+    # the refusal of the number at token i of metric m, or nothing: its word is the first of its own words after it,
+    # up to the next number, comma or clause end (an N of M count takes the words after M), else the nearest word
+    # before it in the clause; the line that word names must hold the number. A number with no word of the metric
+    # beside it has none to bind to, and keeps the membership test alone.
+    function binding(m, i,   k, e, j, ln, n, ks, q, y, names, why) {
+      y = strip(tv[i]); k = i
+      while (tt[k + 1] == "W" && tv[k + 1] == "of" && tt[k + 2] == "N") k += 2
+      e = k + 1; while (e <= nt && tt[e] == "W") e++
+      WORD = ""; ln = named(m, k + 1, e - 1)
+      if (ln == "") for (j = i - 1; j >= 1 && tt[j] != "B"; j--)
+        if (tt[j] == "W" && ((m SUBSEP tv[j]) in wl)) { WORD = tv[j]; ln = " " wl[m SUBSEP tv[j]]; break }
+      if (ln == "") return ""
+      n = split(ln, ks, " "); names = ""
+      for (q = 1; q <= n; q++) {
+        if ((m SUBSEP y SUBSEP ks[q]) in hk) return ""
+        if (index(" " names " ", " " ks[q] " ") == 0) names = names " " ks[q]
+      }
+      n = split(names, ks, " "); why = ""
+      for (q = 1; q <= n; q++) why = why (q > 1 ? "; " : "") ks[q] ", which holds" hn[m SUBSEP ks[q]]
+      return sprintf("metric %s: says %s beside \"%s\", the word of %s: a metric number is the measured value of the line whose word stands beside it\n", m, tv[i], WORD, why)
+    }
+    BEGIN { from["Goals"] = "the counts of the goal: lines"
       split("met|not met|not measured|unreadable", gs, "|"); for (i in gs) gc[gs[i]] = 0 }
-    $1 == "N" { h[$2 SUBSEP $3] = 1; next }
+    $1 == "L" { from[$2] = from[$2] (from[$2] == "" ? "" : ", ") $3; next }
+    $1 == "W" { wl[$2 SUBSEP $3] = wl[$2 SUBSEP $3] " " $4; next }
+    $1 == "N" { h[$2 SUBSEP $3] = 1; hk[$2 SUBSEP $3 SUBSEP $4] = 1; hn[$2 SUBSEP $4] = hn[$2 SUBSEP $4] " " $3; next }
     $1 == "G" { if ($2 == "total") gt = $3; else if ($2 in gc) gc[$2] = $3; next }
     $1 != "J" || !($2 in from) { next }
     $2 == "Goals" && !gd++ { h["Goals" SUBSEP strip(gt)] = 1; for (s in gc) h["Goals" SUBSEP gc[s]] = 1 }
-    { s = $3
-      while (match(s, /[0-9]+/)) {
-        x = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH); y = strip(x)
-        if (!(($2 SUBSEP y) in h) && !seen[$2 SUBSEP y]++)
-          printf "metric %s: says %s, a number its own lines (%s) do not hold: a metric states the measured values of the lines it is written from\n", $2, x, from[$2]
+    { tokenize($3)
+      for (i = 1; i <= nt; i++) {
+        if (tt[i] != "N") continue
+        y = strip(tv[i])
+        if (!(($2 SUBSEP y) in h)) {
+          if (!seen[$2 SUBSEP y]++)
+            printf "metric %s: says %s, a number its own lines (%s) do not hold: a metric states the measured values of the lines it is written from\n", $2, tv[i], from[$2]
+        } else if ($2 != "Goals") {
+          w = binding($2, i)
+          if (w != "" && !said[$2 SUBSEP y SUBSEP WORD]++) printf "%s", w
+        }
       } }
     $2 == "Goals" { s = tolower($3)
       while (match(s, /[0-9]+ (of [0-9]+ )?(goals? )?(are |is )?(not met|not measured|met|missed|unreadable)/)) {
@@ -3019,24 +3085,29 @@ _card_sitrep_check() {
 }
 
 # _card_sitrep_load <sheet file> -> SR_RECS, the open asks SR_AKEY and SR_AHOLDS, and SR_MNUMS: what each metric may
-# say, as tab-separated records: `N <Label> <number>` per run of digits in the measured value (the text before ` — `)
-# of a line the metric is written from (CARD_SITREP_MLINES), leading zeros cut; `G <status> <count>` per goal status
-# and `G total <count>`, counted from the goal: lines, since the sheet prints no goal count. A clock, a date, the
-# release, a step number or a unit's words are no metric's measured value, so none of them vouches for a number.
+# say, as tab-separated records, the table's declarations first and the sheet's values after: `L <Label> <key>` per
+# line the metric is written from (CARD_SITREP_MLINES), `W <Label> <word> <key>` per word that names a line, then
+# `N <Label> <number> <key>` per run of digits in the measured value (the text before ` — `) of such a line, leading
+# zeros cut; `G <status> <count>` per goal status and `G total <count>`, counted from the goal: lines, since the sheet
+# prints no goal count. A clock, a date, the release, a step number or a unit's words are no metric's measured value,
+# so none of them vouches for a number.
 _card_sitrep_load() {
   local k h
   SR_RECS="$(_card_sitrep_sheet "$1")"; SR_AKEY=(); SR_AHOLDS=()
   SR_MNUMS="$(awk -v lines="$CARD_SITREP_MLINES" '
-    BEGIN { n = split(lines, a, " "); for (i = 1; i <= n; i++) { c = index(a[i], "="); lab[substr(a[i], c + 1)] = substr(a[i], 1, c - 1) } }
-    function label_of(k,   p) { if (k in lab) return lab[k]; p = k; sub(/\..*$/, ".*", p); return (p in lab) ? lab[p] : "" }
+    BEGIN { n = split(lines, a, " ")
+      for (i = 1; i <= n; i++) {
+        c = index(a[i], "="); l = substr(a[i], 1, c - 1); r = substr(a[i], c + 1)
+        d = index(r, ":"); k = substr(r, 1, d - 1); lab[k] = l; print "L\t" l "\t" k
+        m = split(substr(r, d + 1), w, ","); for (j = 1; j <= m; j++) print "W\t" l "\t" w[j] "\t" k } }
     index($0, "goal: ") == 1 {
       st = $0; s = index(st, " status="); st = s ? substr(st, s + 8) : ""; e = index(st, " measure="); if (e) st = substr(st, 1, e - 1)
       g[st]++; gt++; next }
     /^[a-z][a-z.-]*: / {
-      k = $0; sub(/: .*$/, "", k); m = label_of(k); if (m == "") next
+      k = $0; sub(/: .*$/, "", k); if (!(k in lab)) next; m = lab[k]
       v = substr($0, length(k) + 3); i = index(v, " — "); if (i) v = substr(v, 1, i - 1)
       while (match(v, /[0-9]+/)) { x = substr(v, RSTART, RLENGTH); v = substr(v, RSTART + RLENGTH); sub(/^0+/, "", x); if (x == "") x = "0"
-        if (!seen[m SUBSEP x]++) print "N\t" m "\t" x } }
+        if (!seen[m SUBSEP x SUBSEP k]++) print "N\t" m "\t" x "\t" k } }
     END { print "G\ttotal\t" gt + 0; for (s in g) print "G\t" s "\t" g[s] }' "$1")"
   while IFS="$CARD_TAB" read -r _ k h _; do
     [ -n "$k" ] || continue
