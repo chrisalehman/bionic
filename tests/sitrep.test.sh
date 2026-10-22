@@ -317,7 +317,7 @@ expect_eq "SH10b …each with what measures it and what it read" "yes|yes" \
   "$(sr_f "$(sr_lines goal | /usr/bin/grep 'name=tests ')" measure | /usr/bin/grep -q '^whole run under 45 min at the approved head — the whole run took 50 min' && echo yes)|$(sr_f "$(sr_lines goal | /usr/bin/grep 'name=fast landings ')" measure | /usr/bin/grep -q 'median is 9 min' && echo yes)"
 expect_eq "SH11 the close: the chain from now at 1× with no launch on record, its basis in words, the forecast end" \
   "5:30 PM|yes|48 h, ends 3:00 AM 2026-10-08" \
-  "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'basis: clock.now plus close.chain at 1×: 0 landed tasks have a launch and a landing on record, under 3' && echo yes)|$(sr_m clock.forecast)"
+  "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'basis: .*build tasks at 1×: 0 landed build tasks have a launch and a landing on record, under 3' && echo yes)|$(sr_m clock.forecast)"
 expect_eq "SH12 every ask open on the register is one ask line, the decision put on the ledger among them; the closed one is not" \
   "approve:release|waive:adversarial|row:AC-1.2|ruling:r1|gate:abc|decide:D21|0" \
   "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$(sr_lines ask | /usr/bin/grep -c 'key=approve:merge ')"
@@ -388,20 +388,20 @@ sr_mw_world pace-close
 sr_run "$SR_PLAN"
 expect_eq "PC1 pace: the forecast time used and the work landed, both shares" "25%|20%" "$(sr_m pace.time-used)|$(sr_m pace.work-landed)"
 expect_eq "PC2 the chain left, by label, and its sized minutes" "4/8 → 4/9, 150 min" "$(sr_m close.chain)"
-expect_eq "PC3 the close: 150 min × 180 over 120 from 3:00 PM, and the chain from now unscaled" "6:45 PM|5:30 PM" \
+expect_eq "PC3 the close: T8, 120 min in, has its 15 min cadence left, then T9 at 60 × 180 over 120 = 90; the same unscaled, 15 then 60" "4:45 PM|4:15 PM" \
   "$(sr_m close.predicted)|$(sr_m close.unscaled)"
 expect_eq "PC3b …its basis in words names the landed tasks' own time and their size" "yes" \
-  "$(sr_d close.predicted | /usr/bin/grep -q 'basis: .*4 landed tasks.* 180 min .* 120 sized min' && echo yes)"
+  "$(sr_d close.predicted | /usr/bin/grep -q 'basis: .*4 landed build tasks.* 180 min .* 120 sized min' && echo yes)"
 sr_run --line "$SR_PLAN"
-expect_eq "PC4 the Patrol's status carries the predicted close" "close 6:45 PM" "${OUT##* · }"
+expect_eq "PC4 the Patrol's status carries the predicted close" "close 4:45 PM" "${OUT##* · }"
 # T4's launch gone: three tasks measure the scale, 120 min against 90.
 awk '!/\|row=T4$/' "$SR_REPO/.bionic/tmp/roster-$SID.state" > "$SR_REPO/.bionic/tmp/r.t" && mv "$SR_REPO/.bionic/tmp/r.t" "$SR_REPO/.bionic/tmp/roster-$SID.state"
 sr_run "$SR_PLAN"
-expect_eq "PC5 three landed tasks with a launch scale the chain: 150 × 120 over 90; the one with none is said" \
-  "3 tasks, 120 min against 90 sized min; 1 landed task with no launch or landing on record|6:20 PM" "$(sr_m work.task-time)|$(sr_m close.predicted)"
+expect_eq "PC5 three landed tasks with a launch scale the chain: T9 at 60 × 120 over 90 = 80 after T8's 15; the one with none is said" \
+  "3 tasks, 120 min against 90 sized min; 1 landed task with no launch or landing on record|4:35 PM" "$(sr_m work.task-time)|$(sr_m close.predicted)"
 awk '!/\|row=T3$/' "$SR_REPO/.bionic/tmp/roster-$SID.state" > "$SR_REPO/.bionic/tmp/r.t" && mv "$SR_REPO/.bionic/tmp/r.t" "$SR_REPO/.bionic/tmp/roster-$SID.state"
 sr_run "$SR_PLAN"
-expect_eq "PC6 two: the chain at 1×, the predicted close the unscaled one, and the basis says under 3" "5:30 PM|5:30 PM|yes" \
+expect_eq "PC6 two: the chain at 1×, the predicted close the unscaled one, and the basis says under 3" "4:15 PM|4:15 PM|yes" \
   "$(sr_m close.predicted)|$(sr_m close.unscaled)|$(sr_d close.predicted | /usr/bin/grep -q 'basis: .*at 1×.*under 3' && echo yes)"
 # What the prediction assumes of you: an ask holding a task off the chain assumes nothing; one holding a chain task does.
 sr_mw_world pace-waits
@@ -413,6 +413,122 @@ sr_owed "key=approve:design|state=open|sent=-|at=2026-10-06T20:00:00Z|title=appr
 sr_run "$SR_PLAN"
 expect_eq "PC8 an ask holding 4/9, on the chain: the prediction assumes it is answered now, and names it" "yes: approve:design" \
   "$(sr_m close.waits-on-you)"
+
+# ============================================================
+# The close counts what is running and scales by kind. The world: T1 to T4 landed, each 100 sized min and launched 6 min
+# before its landing, so the landed build tasks' own time is 24 min over 400 sized min, a ratio of 0.06 that any build
+# row left pending is scaled by; every other row is landed, and a test opens the rows it reads. A row's reads is set
+# to approval:plan, met, so no default read (head, the proofs) joins it to another row. Now is 3:00 PM.
+sr_set() {  # <id> <kind|reads|size|status> <value> -> that cell of the row, in this world's plan
+  awk -F'|' -v id=" $1 " -v k="$2" -v v=" $3 " 'BEGIN { OFS = "|"; c["kind"] = 4; c["reads"] = 8; c["size"] = 9; c["status"] = 14 }
+    $2 == id && NF > 12 { i = c[k]; $i = v } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+}
+sr_open() {  # <id> <kind> <size> <status> [<reads>] -> the row opened as that kind, size and status, reading approval:plan
+  sr_set "$1" kind "$2"; sr_set "$1" size "$3"; sr_set "$1" status "$4"; sr_set "$1" reads "${5:-approval:plan}"
+}
+sr_close_world() {  # <label> -> the world above
+  local i
+  sr_world "$1" "5 5 5 5"
+  for i in 1 2 3 4; do sr_set "T$i" size 100; done
+  sr_launch T1 09:59:00; sr_launch T2 10:29:00; sr_launch T3 10:59:00; sr_launch T4 11:59:00
+  for i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_set "T$i" status landed; done
+}
+
+# ============================================================
+section "§CLOSE-RUNNING: the predicted close counts a running row off the chain at its size less its elapsed, floored at its cadence"
+# ============================================================
+# fails-when: a sheet with a running 90-minute row five minutes in, off the chain, predicts a close before that row's
+# remaining time, a running row past its size counts nothing, or the roster's cadence is not the floor.
+sr_close_world close-running
+sr_open T5 verify 90 active
+sr_open T6 build 30 pending; sr_open T7 build 30 pending lib/t6.sh
+sr_launch T5 21:55:00
+sr_run "$SR_PLAN"
+expect_eq "CR0 precondition: the build ratio is in force, 24 min over 400 sized min" \
+  "4 tasks, 24 min against 400 sized min" "$(sr_m work.task-time | sed 's/;.*$//')"
+expect_eq "CR1 a verify row of 90 min five minutes in, off the chain: the close is 85 min out, the row's remaining, not the chain's" \
+  "4:25 PM" "$(sr_m close.predicted)"
+expect_eq "CR1b …the basis says a running task counts at its size less its elapsed" "yes" \
+  "$(sr_d close.predicted | /usr/bin/grep -q 'basis: .*a running task at its size less its elapsed' && echo yes)"
+sr_set T5 status landed
+sr_run "$SR_PLAN"
+expect_eq "CR2 control: the same row landed, the close follows the chain: T6 then T7 at 2 min each" "3:04 PM" "$(sr_m close.predicted)"
+sr_close_world close-running-late
+sr_open T5 verify 90 active
+sr_open T6 build 30 pending; sr_open T7 build 30 pending lib/t6.sh
+sr_launch T5 20:00:00
+sr_run "$SR_PLAN"
+expect_eq "CR3 a running row past its size has a cadence left, 15 min when its roster row names none" "3:15 PM" "$(sr_m close.predicted)"
+sr_close_world close-running-cad
+sr_open T5 verify 90 active
+sr_open T6 build 30 pending; sr_open T7 build 30 pending lib/t6.sh
+printf 'roster-state/v1|status=intended|session=%s|name=w-T5|agent_id=|launched_at=2026-10-06T20:00:00Z|plan=%s|row=T5|cadence=30 min\n' \
+  "$SID" "$SR_PLAN" >> "$SR_REPO/.bionic/tmp/roster-$SID.state"
+sr_run "$SR_PLAN"
+expect_eq "CR4 …and the cadence its roster row holds when it names one: 30 min" "3:30 PM" "$(sr_m close.predicted)"
+
+# ============================================================
+section "§CLOSE-KIND: a build row is scaled by the landed build rows' ratio; every other kind sits at face value; a row held on you is unscaled and named"
+# ============================================================
+# fails-when: a 45-minute review row is scaled by a build ratio, a held row is scaled or not named, or a landed review's
+# own time enters the build ratio.
+sr_close_world close-kind
+sr_open T5 review 45 pending
+sr_run "$SR_PLAN"
+expect_eq "KD0 precondition: the ratio is in force, 24 min over 400 sized min" "4 tasks, 24 min against 400 sized min" "$(sr_m work.task-time | sed 's/;.*$//')"
+expect_eq "KD1 a 45-minute review row is at face value under a build ratio of 0.06: 45 min out" "3:45 PM" "$(sr_m close.predicted)"
+sr_set T5 kind build
+sr_run "$SR_PLAN"
+expect_eq "KD1b control: the same 45 minutes as a build row are scaled, 3 min out" "3:03 PM" "$(sr_m close.predicted)"
+KD2=""
+for sr_k in build verify doc integrate close; do
+  sr_open T5 "$sr_k" 20 pending
+  sr_run "$SR_PLAN"
+  KD2="$KD2$sr_k $(sr_m close.predicted)|"
+done
+expect_eq "KD2 by kind: a 20-minute build row is scaled to 1 min; verify, doc, integrate and close rows sit at their 20" \
+  "build 3:01 PM|verify 3:20 PM|doc 3:20 PM|integrate 3:20 PM|close 3:20 PM|" "$KD2"
+sr_open T5 build 90 pending approval:design
+sr_owed "key=approve:design|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: design|reply=poker: WAIT T5 — approval:design"
+sr_run "$SR_PLAN"
+expect_eq "KD3 a build row held on an ask open on you is unscaled, 90 min out, and the ask is named" "4:30 PM|yes: approve:design" \
+  "$(sr_m close.predicted)|$(sr_m close.waits-on-you)"
+sr_close_ask approve:design
+sr_run "$SR_PLAN"
+expect_eq "KD3b control: the ask answered, the same row is scaled to 5 min and nothing is waited on" "3:05 PM|no" \
+  "$(sr_m close.predicted)|$(sr_m close.waits-on-you)"
+sr_close_world close-kind-own
+sr_set T4 kind review
+awk '!/\|row=T4$/' "$SR_REPO/.bionic/tmp/roster-$SID.state" > "$SR_REPO/.bionic/tmp/r.t" && mv "$SR_REPO/.bionic/tmp/r.t" "$SR_REPO/.bionic/tmp/roster-$SID.state"
+sr_launch T4 10:25:00
+sr_open T5 build 45 pending
+sr_run "$SR_PLAN"
+expect_eq "KD4 a landed review's own time, 100 min, is no build row's: three landed build rows set the ratio, 18 over 300" \
+  "3:03 PM|yes" "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'scaled by the 3 landed build tasks. own time over their size, 18 min over 300 sized min' && echo yes)"
+
+# ============================================================
+section "§CLOSE-UPSTREAM: a verify row counts as upstream of the integrate row whether or not a read names it"
+# ============================================================
+# fails-when: an open verify row is absent from the chain the integrate row heads, a landed one is on it, or the added
+# edge joins two rows that already wait on each other the other way round.
+sr_close_world close-upstream
+sr_open T5 verify 60 pending
+sr_open T9 integrate 30 pending
+sr_open T6 build 20 pending
+sr_run "$SR_PLAN"
+expect_eq "UP1 no read joins the verify row to the integrate row: the chain still runs 4/5 then 4/9, and the close is 90 min out" \
+  "4/5 → 4/9, 90 min|4:30 PM" "$(sr_m close.chain)|$(sr_m close.predicted)"
+sr_set T5 status landed
+sr_run "$SR_PLAN"
+expect_eq "UP2 control: the verify row landed, it is off the chain, which is the integrate row alone" "4/9, 30 min" "$(sr_m close.chain)"
+sr_open T5 verify 60 active
+sr_launch T5 21:55:00
+sr_run "$SR_PLAN"
+expect_eq "UP3 a running verify row is on the chain the integrate row heads" "4/5 → 4/9, 90 min" "$(sr_m close.chain)"
+sr_open T5 verify 60 pending lib/t9.sh
+sr_run "$SR_PLAN"
+expect_eq "UP4 a verify row that reads what the integrate row writes keeps that order: no cycle, the chain 4/9 then 4/5" \
+  "0|4/9 → 4/5, 90 min" "$RC|$(sr_m close.chain)"
 
 # ============================================================
 section "§WASTE: correctness and waste as measurements; the minutes a task waited on you, overlaps counted once"
@@ -931,7 +1047,7 @@ sr_world pace-zero none
 sr_run "$SR_PLAN"
 expect_eq "PA2 no landing: the chain at 1×, nothing landed to measure" \
   "5:30 PM|0 tasks: none has landed|yes" \
-  "$(sr_m close.predicted)|$(sr_m work.task-time)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 0 landed tasks have a launch and a landing on record, under 3' && echo yes)"
+  "$(sr_m close.predicted)|$(sr_m work.task-time)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 0 landed build tasks have a launch and a landing on record, under 3' && echo yes)"
 # Fewer than three landings scale nothing: two of the four rows land (T3's and T4's headers gone); then one; then three.
 sr_world pace-two "5 5 5 5"
 sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
@@ -940,19 +1056,19 @@ sr_run "$SR_PLAN"
 expect_eq "PA4 two landings: their time counted, the rows with no landing header said (precondition)" \
   "2 tasks, 60 min against 60 sized min; 2 landed tasks with no launch or landing on record" "$(sr_m work.task-time)"
 expect_eq "PA4b …the close is the chain at 1×, and the basis says 2, under 3" "5:30 PM|yes" \
-  "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 2 landed tasks have a launch and a landing on record, under 3' && echo yes)"
+  "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 2 landed build tasks have a launch and a landing on record, under 3' && echo yes)"
 sr_run --line "$SR_PLAN"
 expect_eq "PA4c …and the Patrol's status carries it" "close 5:30 PM" "${OUT##* · }"
 awk '!/^landed: row=T2 /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
 sr_run "$SR_PLAN"
 expect_eq "PA4d one landing: the same, said for 1" "yes" \
-  "$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 1 landed task has a launch and a landing on record, under 3' && echo yes)"
+  "$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 1 landed build task has a launch and a landing on record, under 3' && echo yes)"
 sr_world pace-three "5 5 5 5"
 sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
 awk '!/^landed: row=T4 /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
 sr_run "$SR_PLAN"
 expect_eq "PA4e three landings scale the chain: 90 min against 90, the basis names them, and no 1× stands" "5:30 PM|yes|0" \
-  "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'scaled by the 3 landed tasks.* 90 min over 90 sized min' && echo yes)|$(sr_d close.predicted | /usr/bin/grep -c 'under 3')"
+  "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'scaled by the 3 landed build tasks.* 90 min over 90 sized min' && echo yes)|$(sr_d close.predicted | /usr/bin/grep -c 'under 3')"
 # Landings and no approval: the own time is measured, and nothing is predicted.
 SR_APPROVED=none sr_world pace-unapproved "5 5 5 5"
 sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
@@ -996,14 +1112,14 @@ expect_eq "CC4 a delivered run with a task still open after the delivery: its cl
 sr_run --line "$SR_PLAN"
 expect_eq "CC5 …and the Patrol's status closes at the delivery" "close 8:07 AM 2026-10-18" "${OUT##* · }"
 # Four rows sized 100 min each, each launched 6 min before it landed: 24 min of their own against 400 sized, so the
-# 150-min chain takes 9 min: the close is 3:09 PM.
+# 150-min chain takes 9 min; T8 is running, so it has its 15 min cadence left, not 5: the close is 3:19 PM.
 sr_world guess-fast "5 5 5 5"
 awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 100 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_launch T1 09:59:00; sr_launch T2 10:29:00; sr_launch T3 10:59:00; sr_launch T4 11:59:00
 sr_run "$SR_PLAN"
 SR_CC6="$(sr_m close.predicted)"
 sr_run --line "$SR_PLAN"
-expect_eq "CC6 landed tasks far under their size: the chain scaled down, on the sheet and in the Patrol's status" "3:09 PM|close 3:09 PM" "$SR_CC6|${OUT##* · }"
+expect_eq "CC6 landed tasks far under their size: the chain scaled down, on the sheet and in the Patrol's status" "3:19 PM|close 3:19 PM" "$SR_CC6|${OUT##* · }"
 
 # ============================================================
 section "§LINE: --line is the Patrol's status, <k> of <m> tasks · owed: <n> · close <time>"
