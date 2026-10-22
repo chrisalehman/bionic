@@ -647,7 +647,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   tests.suites-run · tests.suites-total · tests.whole-run · reviews · findings.open
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
 #   goal: name=<goal> status=<met|not met|not measured|unreadable> measure=<what measures it — what it read, or ->
-#   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or ->
+#   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no>
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
 #
 # A list line's fields stand in that fixed order and a value runs to the next field's ` <name>=`, so a value may hold
@@ -1604,12 +1604,15 @@ SITREP_GOALS
   return 0
 }
 
-# sitrep_ask_lines -> one `ask:` line per ask of sitrep_gather's facts, the sheet's asks
+# sitrep_ask_lines -> one `ask:` line per ask of sitrep_gather's facts, the sheet's asks. `blocks=` is the fact the card
+# places the ask from: yes when the ask holds a task, the release or the merge, no when it holds nothing. It stands last
+# so a reader of the fields before it reads them as they stood. The model never decides it.
 sitrep_ask_lines() {
-  local k h t r
+  local k h t r b
   while IFS='	' read -r k h t r; do
     [ -n "$k" ] || continue
-    printf 'ask: key=%s holds=%s title=%s raised=%s\n' "$k" "$h" "$t" "$r"
+    if [ "$h" = nothing ]; then b=no; else b=yes; fi
+    printf 'ask: key=%s holds=%s title=%s raised=%s blocks=%s\n' "$k" "$h" "$t" "$r" "$b"
   done <<SITREP_SHEET_ASKS
 $SG_ASKS
 SITREP_SHEET_ASKS

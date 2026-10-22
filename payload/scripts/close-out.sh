@@ -2166,7 +2166,7 @@ co_facts_says() {
   printf '%s\n' "$1" | awk -F'\t' '
     NF == 0 { next }
     { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent)$/) { st = $i; break }
-      if ($1 == "review") w = "the " $2 " review"; else if ($1 == "floor") w = "the regression"
+      if ($1 == "review") w = "the " $2 " review"; else if ($1 == "regression") w = "the regression"
       else if ($1 == "check") w = "the release check"; else if ($1 == "debt") w = $2; else w = "a proof the run owes"
       if (w in seen) next
       seen[w] = 1; n++
