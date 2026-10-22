@@ -297,13 +297,13 @@ expect_eq "SH5 ten steps, each with its number, name, state and task count: 0 to
 expect_eq "SH6 one task line per task not dropped: sixteen, T16 among none of them while T15 is there" "16|0|1" \
   "$(sr_lines task | /usr/bin/grep -c .)|$(sr_lines task | /usr/bin/grep -c '^task: id=T16 ')|$(sr_lines task | /usr/bin/grep -c '^task: id=T15 ')"
 expect_eq "SH7 each task's step, state and few words: done with its landing time, failed red, held, a review in flight, waiting" \
-  "4|done|landed 3:06 AM|failed|red|held|held|held|waits on your approval of release|running|pending|waits on 4/8|pending|-" \
+  "4|done|landed 3:06 AM|failed|red|held|held|held|waits on your approval of the release|running|pending|waits on 4/8|pending|-" \
   "$(sr_f "$(sr_task T1)" step)|$(sr_f "$(sr_task T1)" state)|$(sr_f "$(sr_task T1)" note)|$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)|$(sr_f "$(sr_task T11)" state)|$(sr_f "$(sr_task T11)" note)|$(sr_f "$(sr_task T12)" state)|$(sr_f "$(sr_task T12)" note)|$(sr_f "$(sr_task T13)" state)|$(sr_f "$(sr_task T9)" state)|$(sr_f "$(sr_task T9)" note)|$(sr_f "$(sr_task T10)" state)|$(sr_f "$(sr_task T10)" note)"
 expect_eq "SH8 each task's short description: the cell up to its first ' (', ': ', '. ' or ' · '" \
   "Row one the thing|Haiku 5.5 at high|Third row|The long one" \
   "$(for t in T1 T2 T3 T8; do sr_f "$(sr_task "$t")" desc; done | sr_join)"
 expect_eq "SH9 the five metrics, in numbers: completed, pace (the approval to the last landing), correctness, the one waste line, goals; no metric.runs" \
-  "4 of 16 tasks (25%)|4 tasks in 2 h 12 min; the plan allowed 2 h for them|1 test red; 1 review passed, 1 failed, 1 running; 1 open finding|1 task dropped; 1 of 6 suite runs discarded; 72 minutes idle|1 of 3 met; 1 not measured yet|0" \
+  "4 of 16 tasks (25%)|4 tasks in 2 h 12 min; the plan allowed 2 h for them|1 suite run: 0 green and 1 red at its last run; whole run: green at aaaaaaaa; 1 review passed, 1 failed, 1 running; 1 open finding|1 task dropped; 1 of 6 suite runs discarded; 72 minutes idle|1 of 3 met; 1 not measured yet|0" \
   "$(for k in metric.completed metric.pace metric.correctness metric.waste metric.goals; do sr_val "$k"; done | sr_join)|$(sr_lines metric.runs | /usr/bin/grep -c .)"
 expect_eq "SH10 each goal's name and status, in the plan's order" "fast landings=met|tests=not met|handoff=not measured" \
   "$(sr_lines goal | while IFS= read -r l; do printf '%s=%s\n' "$(sr_f "$l" name)" "$(sr_f "$l" status)"; done | sr_join)"
@@ -320,6 +320,35 @@ expect_eq "SH13 an ask's line: what it holds, its title and when it was raised, 
 expect_eq "SH14 every review: its question, scope, result, time, open findings and record; the review in flight with them" \
   "evidence whole fail 1:00 PM 1 record/wave-02-fx/auditor-evidence.md|adversarial piece pass 1:05 PM 0 record/wave-02-fx/critic-adversarial.md|T13 whole running - 0 -" \
   "$(sr_lines review | while IFS= read -r l; do printf '%s %s %s %s %s %s\n' "$(sr_f "$l" question)" "$(sr_f "$l" scope)" "$(sr_f "$l" result)" "$(sr_f "$l" at)" "$(sr_f "$l" open-findings)" "$(sr_f "$l" record)"; done | sr_join)"
+
+# ============================================================
+section "§WAITS: a held or pending task's note names everything it waits on, in words, never a count of the rest"
+# ============================================================
+# fails-when: a note names one read and counts the others (`waits on step 8 +5`), or prints a read's token
+# (approval:release, proof:review, head, merge) where the words belong. The words: step N; your approval of D<n>; your
+# approval of the <name>; the reviews; the last build row landing; the writer task's label; the merge, in the order the
+# reads are read. T18 at Step 8 reads six things, T19 the merge T18 makes, and T5, building, reads two approvals owed.
+sr_world waits "6 6 12 12"
+awk -F'|' 'BEGIN { OFS = "|" } $2 == " T5 " && NF > 12 { $8 = " approval:release, approval:D4 " } { print }
+  /^\| T17 / {
+    print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | proof:review, head, approval:release, lib/t8.sh, approval:D4 | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"
+    print "| T19 | 9 | close | Close · complexity: standard | — | — | — | 10 | REQ-1 | .bionic/docs/record/wave-02-fx/close.md | — | — | pending | — | — | — |" }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ledger_put D4 "the width" "$SR_D_WAIT"
+sr_run "$SR_PLAN"
+expect_eq "WA0 precondition: the sheet prints (exit 0), T18 held, T19 pending, T5 held on what it reads" "0|held|pending|held" \
+  "$RC|$(sr_f "$(sr_task T18)" state)|$(sr_f "$(sr_task T19)" state)|$(sr_f "$(sr_task T5)" state)"
+expect_eq "WA1 T18 names its six reads in words, in the order read: the step, the reviews, the build, the two approvals and the writer" \
+  "waits on step 8, the reviews, the last build row landing, your approval of the release, 4/8 and your approval of D4" \
+  "$(sr_f "$(sr_task T18)" note)"
+expect_eq "WA2 T19 names its step and the merge" "waits on step 9 and the merge" "$(sr_f "$(sr_task T19)" note)"
+expect_eq "WA3 T5, building, is held on both approvals and names both" \
+  "waits on your approval of the release and your approval of D4" "$(sr_f "$(sr_task T5)" note)"
+expect_eq "WA4 one read alone: T12 names the release approval, T9 its writer by label" \
+  "waits on your approval of the release|waits on 4/8" "$(sr_f "$(sr_task T12)" note)|$(sr_f "$(sr_task T9)" note)"
+expect_eq "WA5 no note counts what it leaves out (WA1 read the notes of the same sheet)" "0" \
+  "$(sr_tasks_f note | /usr/bin/grep -cE ' \+[0-9]+$')"
 
 # ============================================================
 section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) open on the register are asks on the sheet"
@@ -507,18 +536,18 @@ section "§METRICS: correctness, waste and suite runs are numbers read from the 
 # ============================================================
 sr_world metrics "6 6 12 12"
 sr_run "$SR_PLAN"
-expect_eq "ME0 the clean world: no test red, no review, no finding; nothing discarded, no minute idle" \
-  "0 tests red; 0 reviews passed, 0 failed, 0 running; 0 open findings|0 tasks dropped; 0 of 4 suite runs discarded; 0 minutes idle" \
+expect_eq "ME0 the clean world: its one suite green at its last run, no whole run, no review, no finding; nothing discarded, no minute idle" \
+  "1 suite run: 1 green and 0 red at its last run; whole run: not run yet; 0 reviews passed, 0 failed, 0 running; 0 open findings|0 tasks dropped; 0 of 4 suite runs discarded; 0 minutes idle" \
   "$(sr_val metric.correctness)|$(sr_val metric.waste)"
 # A planted red run, not answered: one test red, and the task it is on is failed.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME1 a red at head: one test red, its task failed" "1 test red|failed" \
+expect_eq "ME1 a red at head: the suite red at its last run, its task failed" "1 suite run: 0 green and 1 red at its last run|failed" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_f "$(sr_task T8)" state)"
 # The red answered: a later green on the same task and suite.
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=green|log=/rec/T8b.log|at=2026-10-06T15:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME2 …answered by a later green: none red, the task running again" "0 tests red|running" \
+expect_eq "ME2 …answered by a later green: the suite green at its last run, the task running again" "1 suite run: 1 green and 0 red at its last run|running" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_f "$(sr_task T8)" state)"
 # Open findings of a registered review, one then two.
 printf 'reviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
@@ -528,7 +557,7 @@ SR_ME3="$(sr_val metric.correctness)"
 printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\nshown: 2 bash tests/y.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
 sr_run "$SR_PLAN"
 expect_eq "ME3 one failing review with one open S2 finding, then the same record holding an S1 too" \
-  "0 tests red; 0 reviews passed, 1 failed, 0 running; 1 open finding|2 open findings|2" \
+  "1 suite run: 1 green and 0 red at its last run; whole run: not run yet; 0 reviews passed, 1 failed, 0 running; 1 open finding|2 open findings|2" \
   "$SR_ME3|$(sr_val metric.correctness | sed 's/.*; //')|$(sr_f "$(sr_lines review)" open-findings)"
 # A run discarded, then a run killed at the gate (rc 137): each a discarded suite run.
 sr_world metrics-runs "6 6 12 12"
@@ -553,21 +582,65 @@ expect_eq "ME5 two tasks dropped and a 72-minute idle turn: the waste in numbers
 sr_world metrics-standing "6 6 12 12"
 sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME6 a suite red standing at the head: one test red, and no task is failed by it" "1 test red|0" \
+expect_eq "ME6 a suite red standing at the head is a suite red at its last run, and no task is failed by it" "2 suites run: 1 green and 1 red at their last run|0" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_tasks_f state | /usr/bin/grep -c '^failed$')"
 sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b2.log|cause=code|against=-|at=2026-10-06T14:30:00Z"
 sr_ev "ev=standing|head=$SR_H|suite=c.test.sh|lines=1|log=/rec/standing-c.log|cause=environment|against=stamp|at=2026-10-06T14:31:00Z"
 sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=d.test.sh|result=red|log=/rec/T7d.log|at=2026-10-06T14:40:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME6b a suite standing twice counts once; a standing suite and a row's own red add: three tests red, T7 failed" "3 tests red|1" \
+expect_eq "ME6b a suite standing twice counts once; a standing suite and a row's own red add: three suites red, T7 failed" "4 suites run: 1 green and 3 red at their last run|1" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_tasks_f state | /usr/bin/grep -c '^failed$')"
 sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=red|log=/rec/T6c.log|at=2026-10-06T14:50:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME6c a row's red of a suite already standing is one red, not two: still three" "3 tests red|2" \
+expect_eq "ME6c a row's red of a suite already standing is one red, not two: still three" "4 suites run: 1 green and 3 red at their last run|2" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_tasks_f state | /usr/bin/grep -c '^failed$')"
 sr_ev "ev=verdict|row=T5|commit=$SR_C1|suite=b.test.sh|result=green|log=/rec/T5b.log|at=2026-10-06T15:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "ME6d a later green of the standing suite answers it: two tests red" "2 tests red" "$(sr_val metric.correctness | cut -d';' -f1)"
+expect_eq "ME6d a later green of the standing suite answers it: two suites red" "4 suites run: 2 green and 2 red at their last run" "$(sr_val metric.correctness | cut -d';' -f1)"
+
+# A review is counted once per question and scope, by its latest result: structure on the whole passed then failed
+# (one failed), adversarial on a piece failed then passed (one passed), evidence on the whole passed once.
+sr_world metrics-reviews "6 6 12 12"
+for f in s1 s2 a1 a2 e1; do printf 'reviewed: %s..%s\nfindings: 0\n' "$SR_C1" "$SR_H" > "$SR_DIR/$f.md"; done
+awk -v h="$SR_H" '{ print } /^current: 4$/ {
+  print "proved: kind=review head=" h " at=2026-10-06T19:00:00Z evidence=record/wave-02-fx/s1.md question=structure reader=c1 result=pass scope=whole"
+  print "proved: kind=review head=" h " at=2026-10-06T19:05:00Z evidence=record/wave-02-fx/a1.md question=adversarial reader=c2 result=fail scope=piece"
+  print "proved: kind=review head=" h " at=2026-10-06T19:10:00Z evidence=record/wave-02-fx/e1.md question=evidence reader=a1 result=pass scope=whole"
+  print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/s2.md question=structure reader=c3 result=fail scope=whole"
+  print "proved: kind=review head=" h " at=2026-10-06T20:05:00Z evidence=record/wave-02-fx/a2.md question=adversarial reader=c4 result=pass scope=piece" }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "RV1 five review results, each still a review: line, and the count by question and scope at its latest: 2 passed, 1 failed" \
+  "5|2 reviews passed, 1 failed, 0 running" \
+  "$(sr_lines review | /usr/bin/grep -c .)|$(sr_val metric.correctness | awk -F'; ' '{ print $3 }')"
+
+# Correctness names the suites run, each by its last verdict on the line, then the whole run. A suite named by its
+# path is the suite its bare name is; the whole run's own verdicts are no suite's run here.
+sr_world metrics-suites "6 6 12 12"
+sr_run "$SR_PLAN"
+expect_eq "SU0 the clean world: its one suite green at its last run, and no whole run yet" \
+  "1 suite run: 1 green and 0 red at its last run; whole run: not run yet" "$(sr_val metric.correctness | awk -F'; ' '{ print $1 "; " $2 }')"
+sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=tests/b.test.sh|result=red|log=/rec/T8b.log|at=2026-10-06T14:00:00Z"
+sr_ev "ev=verdict|row=T5|commit=$SR_C1|suite=c.test.sh|result=red|log=/rec/T5c.log|at=2026-10-06T14:05:00Z"
+sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=green|log=/rec/T6c.log|at=2026-10-06T14:10:00Z"
+sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=discarded|log=/rec/T6c2.log|at=2026-10-06T14:12:00Z"
+sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=z.test.sh|result=green|log=/rec/z.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:20:00Z"
+sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=y.test.sh|result=red|log=/rec/y.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:21:00Z"
+sr_run "$SR_PLAN"
+expect_eq "SU1 three suites by their last verdict (a discarded run is none), the whole run red at its head, the reviews after" \
+  "3 suites run: 2 green and 1 red at their last run; whole run: red at aaaaaaaa; 0 reviews passed, 0 failed, 0 running; 0 open findings" \
+  "$(sr_val metric.correctness)"
+SR_H2="$(printf 'b%.0s' $(seq 40))"
+awk -v h="$SR_H2" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T15:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "SU2 a later whole run proved green: green at its head" "whole run: green at bbbbbbbb" \
+  "$(sr_val metric.correctness | awk -F'; ' '{ print $2 }')"
+awk 'NR > 1 && /^---$/ && !d { print "regression: no"; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"
+expect_eq "SU3 a plan that owes no whole run says so, beside the suites it ran" \
+  "3 suites run: 2 green and 1 red at their last run; whole run: not run (regression: no, Step 0)" \
+  "$(sr_val metric.correctness | awk -F'; ' '{ print $1 "; " $2 }')"
 
 section "§COUNTS: a count agrees in number with what it counts — one task, two tasks; the sheet never says 1 tests"
 # ============================================================
@@ -580,8 +653,8 @@ printf 'fill-ledger/v1|at=2026-10-06T16:01:00Z|session=%s|turn=t3|current=4|stat
 sr_run "$SR_PLAN"
 expect_eq "CN0 precondition: the plan holds the one task, landed, and the sheet draws it" "1|1" \
   "$(sr_lines task | /usr/bin/grep -c .)|$(sr_tasks_f state | /usr/bin/grep -c '^done$')"
-expect_eq "CN1 one task: completed says 1 of 1 task, the pace says 1 task, correctness says 1 test red" \
-  "1 of 1 task (100%)|1 task in |1 test red" \
+expect_eq "CN1 one task: completed says 1 of 1 task, the pace says 1 task, correctness counts its two suites" \
+  "1 of 1 task (100%)|1 task in |2 suites run: 1 green and 1 red at their last run" \
   "$(sr_val metric.completed)|$(sr_val metric.pace | cut -c1-10)|$(sr_val metric.correctness | cut -d';' -f1)"
 expect_eq "CN2 one minute idle says minute" "yes" \
   "$(sr_val metric.waste | /usr/bin/grep -q '; 1 minute idle$' && echo yes)"
@@ -591,7 +664,7 @@ sr_world counts-two "6 6 12 12"
 sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
 sr_ev "ev=standing|head=$SR_H|suite=c.test.sh|lines=2|log=/rec/standing-c.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "CN4 two of each stays plural: tests, and a plan of many tasks" "2 tests red|4 of 17 tasks (24%)" \
+expect_eq "CN4 two of each stays plural: suites, and a plan of many tasks" "3 suites run: 1 green and 2 red at their last run|4 of 17 tasks (24%)" \
   "$(sr_val metric.correctness | cut -d';' -f1)|$(sr_val metric.completed)"
 sr_world counts-landing "6 6 12 12"
 sr_ev "ev=candidate|row=T8|base=$SR_C1|commit=$(printf 'd%.0s' $(seq 40))|tree=/landing/1|at=2026-10-06T13:35:00Z"
@@ -663,6 +736,28 @@ sr_run "$SR_PLAN"
 expect_eq "PA2 no landing: the floor alone, no pace yet, nothing measured" \
   "8:00 PM|yes|0 tasks in 0 min; the plan allowed 0 min for them" \
   "$(sr_val close.predicted)|$(sr_val close.basis | /usr/bin/grep -q '; no pace yet: ' && echo yes)|$(sr_val metric.pace)"
+# Fewer than three landings measure no pace the close is scaled by: the ratio is 1×, and the basis says why. Two of the
+# four rows land (T1 at 10:05Z, T2 at 10:35Z, 35 min over the 60 the plan allowed, 0.58×); then one alone; then three.
+sr_world pace-two "5 5 5 5"
+awk '!/^landed: row=T[34] /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_run "$SR_PLAN"
+SR_PF="$(sr_val close.basis | sed -n 's/.* at 1× ends \([^;]*\);.*/\1/p')"
+expect_eq "PA4 two landings: the metric counts them, and the floor is read (precondition)" "2 tasks in 35 min; the plan allowed 1 h for them|yes" \
+  "$(sr_val metric.pace)|$([ -n "$SR_PF" ] && echo yes)"
+expect_eq "PA4b …the close is the floor at 1×, and the basis says the ratio rests on 2 landings, under 3" \
+  "$SR_PF|yes|0" \
+  "$(sr_val close.predicted)|$(sr_val close.basis | /usr/bin/grep -q '; the pace ratio rests on 2 landings, under 3, so 1× stands; ' && echo yes)|$(sr_val close.basis | /usr/bin/grep -c 'likely close')"
+sr_run --line "$SR_PLAN"
+expect_eq "PA4c …and the Patrol's status carries the floor" "close $SR_PF" "${OUT##* · }"
+awk '!/^landed: row=T2 /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_run "$SR_PLAN"
+expect_eq "PA4d one landing: the same, said for 1 landing" "yes" \
+  "$(sr_val close.basis | /usr/bin/grep -q '; the pace ratio rests on 1 landing, under 3, so 1× stands; ' && echo yes)"
+sr_world pace-three "5 5 5 5"
+awk '!/^landed: row=T4 /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_run "$SR_PLAN"
+expect_eq "PA4e three landings measure the pace: the basis names this run's ratio, and no 1× stands" "yes|0" \
+  "$(sr_val close.basis | /usr/bin/grep -q "at this run's [0-9.]*×, .* the last of 3 landings" && echo yes)|$(sr_val close.basis | /usr/bin/grep -c 'under 3, so 1× stands')"
 # Landings and no approval: there is no start to the span, so nothing is measured.
 SR_APPROVED=none sr_world pace-unapproved "5 5 5 5"
 sr_run "$SR_PLAN"
@@ -831,6 +926,10 @@ section "§GOALS: each goal of the plan's goals: line is read from what it names
 # ============================================================
 sr_goal_st() { sr_lines goal | while IFS= read -r l; do printf '%s=%s\n' "$(sr_f "$l" name)" "$(sr_f "$l" status)"; done | sr_join; }
 sr_goal_m() { sr_f "$(sr_lines goal | /usr/bin/grep -F "goal: name=$1 status=")" measure; }   # <name> -> its measure and what it read
+sr_world goals-none "6 6 12 12"
+sr_run "$SR_PLAN"
+expect_eq "G0 a plan that declares no goal: none declared, and no goal: line beside it" "none declared|0" \
+  "$(sr_val metric.goals)|$(sr_lines goal | /usr/bin/grep -c .)"
 SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
 tests · whole run under 45 min at the approved head (the Step-5 run log)
 handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)
@@ -838,16 +937,16 @@ taste · the user likes the card" sr_world goals "6 6 12 12"
 printf 'Gating: 9 passed, 0 failed\nWall: 3000s · work 9000s · width 4\n' > "$SR_DIR/regression-run-$SR_H.log"
 awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "G1 four goals: the one-file median of 9 min met, the 50-minute whole run not met, the record and the measure nobody reads not measured" \
-  "fast landings=met|tests=not met|handoff=not measured|taste=not measured|1 of 4 met; 2 not measured yet" "$(sr_goal_st)|$(sr_val metric.goals)"
-expect_eq "G2 …each with what it read: 50 min for the whole run; a measure nothing reads prints once, the status saying it is not measured, never a missing reader or a repeat" \
-  "yes|the user likes the card|0" \
+expect_eq "G1 four goals: the one-file median of 9 min met, the 50-minute whole run not met, the record not measured yet, the measure the sitrep cannot read unreadable" \
+  "fast landings=met|tests=not met|handoff=not measured|taste=unreadable|1 of 4 met; 1 not measured yet; 1 with no measure the sitrep can read" "$(sr_goal_st)|$(sr_val metric.goals)"
+expect_eq "G2 …each with what it read: 50 min for the whole run; a measure the sitrep cannot read says so and names the forms it reads, never a missing reader" \
+  "yes|the user likes the card — the sitrep reads no measure of this form: name a record/<file>.md with a verdict: line, a <suite> §<section>, the run log, the landing report or the hand-holds count|0" \
   "$(sr_goal_m tests | /usr/bin/grep -q 'the whole run took 50 min' && echo yes)|$(sr_goal_m taste)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'no reader')"
-expect_eq "G2b the status says a goal is not measured once: two goals say it, and no goal line's measure ends in it" "2|0|yes" \
+expect_eq "G2b the status says a goal is not measured once: one goal says it, and no goal line's measure ends in it" "1|0|yes" \
   "$(sr_lines goal | /usr/bin/grep -c ' status=not measured ')|$(sr_lines goal | /usr/bin/grep -c ' — not measured$')|$(sr_goal_m taste | /usr/bin/grep -q . && echo yes)"
 printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
 sr_run "$SR_PLAN"
-expect_eq "G3 a record that passes flips its goal to met" "handoff=met|2 of 4 met; 1 not measured yet" \
+expect_eq "G3 a record that passes flips its goal to met; a clause of none is left out" "handoff=met|2 of 4 met; 1 with no measure the sitrep can read" \
   "$(sr_goal_st | tr '|' '\n' | /usr/bin/grep '^handoff=')|$(sr_val metric.goals)"
 
 # sr_themes <current> <nine statuses> -> this world's plan made
@@ -894,11 +993,11 @@ expect_eq "RG1-1b …each theme with its criteria discharged and its open REQs" 
 sr_world rg1-late "6 6 12 12"; sr_themes 7 $SR_MIXED
 sr_run "$SR_PLAN"
 expect_eq "RG1-2 past step 6 a theme with a pending row is not met" \
-  "The run closes itself=not met|Rules tested where they run=not met|The pages=met|1 of 3 met; 0 not measured yet" \
+  "The run closes itself=not met|Rules tested where they run=not met|The pages=met|1 of 3 met" \
   "$(sr_goal_st)|$(sr_val metric.goals)"
 sr_world rg1-done "6 6 12 12"; sr_themes 7 discharged discharged discharged discharged waived discharged discharged discharged waived
 sr_run "$SR_PLAN"
-expect_eq "RG1-3 every row discharged or waived: every theme met" "3 of 3 met; 0 not measured yet" "$(sr_val metric.goals)"
+expect_eq "RG1-3 every row discharged or waived: every theme met" "3 of 3 met" "$(sr_val metric.goals)"
 
 # ============================================================
 section "§REQ-GOALS-2: a goals: line's measured goals follow the theme goals"
@@ -994,7 +1093,7 @@ SR_W_ROW="$(sr_row T19 "Review-gated row · complexity: standard" proof:review 3
 awk -v r="$SR_W_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 SR_W_LINE="$(sr_task T19)"
-expect_eq "WW1 the review-gated task's note names the review facts at the head, with no facts string and no record path" "waits on the review facts at the head|0" \
+expect_eq "WW1 the review-gated task's note names the reviews, with no facts string and no record path" "waits on the reviews|0" \
   "$(sr_f "$SR_W_LINE" note)|$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -cE 'facts_state|record/|\.md')"
 
 # ============================================================
@@ -1123,8 +1222,8 @@ expect_eq "NM1 a 300-character cell with no delimiter is the whole description, 
 expect_eq "NM2 the description stops at the first of \" (\", \": \", \". \" and \" · \", and the rest of the cell never prints" \
   "Alpha one|Beta two|Gamma three|Delta four|0" \
   "$(for t in T13 T14 T15 T16; do sr_f "$(sr_task "$t")" desc; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'and the rest')"
-expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on the first and a count, waiting on one, held" \
-  "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5 +2|T9 waits on 4/8|T11 held" \
+expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on each of three, waiting on one, held" \
+  "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5, 4/6 and 4/7|T9 waits on 4/8|T11 held" \
   "$(for t in T1 T8 T6 T5 T7 T10 T9 T11; do printf '%s %s\n' "$t" "$(sr_f "$(sr_task "$t")" note)"; done | sr_join)"
 # a 40-task plan: one line per step and per task
 SR_EXTRA=23 sr_world names-forty "6 6 12 12"
@@ -1147,7 +1246,7 @@ expect_eq "HN1 precondition: both decisions are owed on the sheet" "decide:D1|de
   "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)"
 expect_eq "HN2 a started task reading an approval still owed is held, and its note names the approval, not building" \
   "held|waits on your approval of D1" "$(sr_f "$(sr_task T5)" state)|$(sr_f "$(sr_task T5)" note)"
-expect_eq "HN2b …reading two, it names the first and counts the other" "held|waits on your approval of D1 +1" \
+expect_eq "HN2b …reading two, it names both" "held|waits on your approval of D1 and your approval of D2" \
   "$(sr_f "$(sr_task T6)" state)|$(sr_f "$(sr_task T6)" note)"
 expect_eq "HN2c …a started task reading nothing owed is still running and building (HN2 read the same sheet)" "running|building" \
   "$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)"

@@ -9,6 +9,9 @@
 #   §CLEAN            mid-build, nothing owed: the sheet says so
 #   §TRUE             across the four: the person accepting the release reads a pace taken in minutes, a close that
 #                     is not weeks out, a held task naming what it waits on, and a card head with no invented wave
+#   §FACTS            across the four: three goals declared, met, not met and not measured; a close at 1× under three
+#                     landings; a review counted once by its latest result; the suites and the whole run named; a
+#                     held task naming every read it waits on
 #
 # EACH SECTION, ONE SHAPE. The sandbox's own `hooks/session-poker.sh sitrep <plan>` prints the sheet, whose `ask:`
 # lines are exactly the state's asks; a judgment naming every open ask renders through `sitrep card` (rc 0, every
@@ -205,6 +208,50 @@ if [ -f "$RT_PLAN" ]; then
     "$(rt_taskline "$RT_OUT" T2 | /usr/bin/grep -o 'state=[a-z]*')|$(rt_taskline "$RT_OUT" T2 | /usr/bin/grep -o 'note=.*$')"
   expect_eq "TR-5b …and T1, landed, says when (TR-5 read the same sheet)" "yes" \
     "$(rt_taskline "$RT_OUT" T1 | /usr/bin/grep -q 'state=done .* note=landed ' && echo yes)"
+fi
+
+# ============================================================
+section "§FACTS: the four sheets' facts read true: every goal the plan declares, a close not scaled by a pace of under three landings, a review counted once by its latest result, the suites and the whole run named, every read a held task waits on"
+# ============================================================
+# FIXTURE FIDELITY: the sandboxes of the four sections above, read again with their own poker. The rehearsal's plan
+# declares three goals measured by records: one it writes passing, one failing, one it never writes.
+# fails-when: a sheet draws no goal, or a goal reads another status; the close is scaled by a pace drawn from one or two
+# landings; a review that passed and then failed counts as both; a note counts the reads it leaves out.
+rt_goal_lines() { printf '%s\n' "$1" | sed -n 's/^goal: name=\([^ ]*\) status=\(.*\) measure=.*/\1=\2/p' | paste -sd'|' -; }   # <sheet>
+for TR_ST in failed-review release-waiting stop-rule clean; do
+  RT_ROOT="$WORLD_ROOT/$TR_ST/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
+  if [ ! -f "$RT_PLAN" ]; then
+    expect_eq "FA-0 $TR_ST: the sandbox of its section is there to be read again" "yes" "no"
+    continue
+  fi
+  rt_poker sitrep "$RT_PLAN"
+  TR_SHEET="$RT_OUT"
+  expect_eq "FA-1 $TR_ST: the sheet's goal: lines, one per declared goal, met, not met and not measured, and the metric counting them" \
+    "shown=met|asks=not met|walked=not measured|metric.goals: 1 of 3 met; 1 not measured yet" \
+    "$(rt_goal_lines "$TR_SHEET")|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^metric\.goals: ')"
+  TR_N="$(printf '%s\n' "$TR_SHEET" | sed -n 's/^metric\.pace: \([0-9][0-9]*\) tasks* in .*/\1/p')"
+  expect_eq "FA-2 $TR_ST: $TR_N landing(s), under 3: the close is the floor at 1×, and the basis says so" "yes|yes|0" \
+    "$([ -n "$TR_N" ] && [ "$TR_N" -lt 3 ] && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.basis: ' | /usr/bin/grep -q "the pace ratio rests on $TR_N landings*, under 3, so 1× stands" && echo yes)|$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^close\.basis: ' | /usr/bin/grep -c 'likely close')"
+  expect_eq "FA-3 $TR_ST: correctness names the suites run and the whole run before the reviews" "yes" \
+    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep -qE '^metric\.correctness: [0-9]+ suites? run(: [0-9]+ green and [0-9]+ red at (its|their) last run)?; whole run: (not run yet|green at [0-9a-f]{8}|red at [0-9a-f]{8}); [0-9]+ reviews? passed, ' && echo yes)"
+  expect_eq "FA-4 $TR_ST: no task's note counts what it leaves out (FA-1 read the same sheet)" "0" \
+    "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: ' | /usr/bin/grep -cE ' note=.* \+[0-9]+$')"
+done
+RT_ROOT="$WORLD_ROOT/failed-review/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
+if [ -f "$RT_PLAN" ]; then
+  rt_poker sitrep "$RT_PLAN"
+  expect_eq "FA-5 failed-review: the structure review of the whole passed, then failed: it counts once, failed, beside the four that passed" \
+    "2|4 reviews passed, 1 failed, 0 running" \
+    "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c '^review: question=structure scope=whole ')|$(printf '%s\n' "$RT_OUT" | sed -n 's/^metric\.correctness: //p' | awk -F'; ' '{ print $3 }')"
+fi
+RT_ROOT="$WORLD_ROOT/release-waiting/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
+if [ -f "$RT_PLAN" ]; then
+  rt_poker sitrep "$RT_PLAN"
+  expect_eq "FA-6 release-waiting: the merge row names every read it waits on, in words: its step and both approvals" \
+    "note=waits on step 8, your approval of the release and your approval of the merge" \
+    "$(rt_taskline "$RT_OUT" T4 | /usr/bin/grep -o 'note=.*$')"
+  expect_eq "FA-6b …and the whole run the regression row ran is green at its head" "yes" \
+    "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -qE '^metric\.correctness: .*; whole run: green at [0-9a-f]{8}; ' && echo yes)"
 fi
 
 finish
