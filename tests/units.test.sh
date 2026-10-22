@@ -1003,6 +1003,21 @@ ap_plan landed; : > "$AP_REC"
 for r in T1 T5 T6 T8 T7; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
 expect_eq "AP-5b …and with those headers reversed the differential control refuses" "$PO_ORD|1|" "$(ap_state)"
 
+# A PLAN VERB'S DRY COPY NAMES NO RECORD, so the origin plan is the second operand: the record is read from the plan the
+# copy was made from, and the copy is judged as the plan is. The copy sits beside the plan under the name a verb gives it.
+AP_COPY="$AP_P.task-add-dry.4242"
+ap_copy_state() { printf '%s|%s|%s' "$(call units_validate "$AP_COPY" "$1")" "$(call_rc units_validate "$AP_COPY" "$1")" \
+  "$(call units_post_readers "$AP_COPY" "$1")"; }
+ap_plan landed; ap_pub T1 T5 T6 T7 T8; cp "$AP_P" "$AP_COPY"
+expect_eq "AP-6 the copy of a plan whose record published the fix row after the release, judged with the plan as origin: admitted and listed as the plan is" \
+  "$(ap_state)" "$(ap_copy_state "$AP_P")"
+expect_eq "AP-6b …and that answer is an admission, so the equality above is not two refusals" "|0|$AP_T9" "$(ap_copy_state "$AP_P")"
+expect_eq "AP-7 the control: the same copy with no origin names no record and is refused by plan order, nothing listed" "$PO_ORD|1|" "$(ap_copy_state "")"
+ap_pub T1 T5 T6 T8 T7
+expect_eq "AP-8 the copy with the origin whose record published the fix row BEFORE the release: refused with the order text, as the plan is" \
+  "$PO_ORD|1|" "$(ap_copy_state "$AP_P")"
+rm -f "$AP_COPY"
+
 section "§JUDGE — covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run"
 # ============================================================
 
