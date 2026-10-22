@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1056 · keep: 864 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 116 · sections: 1057 · keep: 865 · duplicate: 158 · prose pin: 19 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1078 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1078 - 22 - 8 = 1048.
 
@@ -1243,6 +1243,7 @@ session-poker-4.test.sh | §RC-DEFER §RC-STATED §RC-PARSE | keep | hooks/sessi
 session-poker-4.test.sh | §STEP-FIELD §COPIED-LOG §REVIEW-RANGE §CUR7-COVERED | keep | hooks/session-poker.sh step-field: the auditor= field written under the named step rather than the Step 5 block alone, so "VG-1b … so Step 4's is" refused nothing; or a copied log matched by name instead of sha256 (VG-3) | none (searched 'step-field' and 'whole-copy.log' in tests/)
 session-poker-4.test.sh | §REPLY-SEQ | keep | hooks/session-poker.sh reply: an item naming a decision the page does not hold applied up to it instead of refusing the whole reply (RS-1, RS-1b) | none (searched 'release-approval/v1' with ' reply ' in tests/; release-approval.test.sh not read to its verdict)
 session-poker-4.test.sh | §BRIEF-PINS | keep | hooks/poker/plan.sh poker_verb_brief: the BRF_PINNED lines left off the Files value, so a suite's declared pins never reach the brief (BP-1, BP-3, BP-4, BP-6, BP-8); poker_brief_pins reading any `# pins:` line of the file, not the opening comment block (BP-1b); a path two suites pin written twice (BP-4) | none (searched 'pinned by' and '# pins:' in tests/; no other section renders a brief's Files)
+session-poker-4.test.sh | §HAND-SUITES | keep | hooks/poker/line.sh poker_verb_row_landed: the `_line_hand_ready` and `_line_hand_verdicts` calls deleted, so a hand landing given --suites, --green-at and --log writes the published line alone and the floor's judge finds no run of its row's suites (HS-1b to HS-1f, HS-2); the writes made outside the not-yet-recorded branch, so a run again of the landing opens a second ready entry (HS-4); the green-at held to no ancestor check, so a verdict is recorded at a commit the landing does not hold (HS-5b) | none (searched 'row-landed' with '--by-hand' in tests/; door-landing.test.sh §JUDGED marks a hand landing with no suites, and notify.test.sh calls it with a bare reason)
 
 ## session-poker-5.test.sh
 

@@ -769,6 +769,24 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   plan="$(session_plan "$root" "$sid")" || { _wt_refuse "no-bound-plan sid=${sid}"; return 2; }
   ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" "$suites" "$at" "$log" )
 }
+# THE WRITER'S RUN, IN THE PERSON'S WORDS: the two writers of what a hand landing records of the row's suites, one for
+# both hand landings (`land --by-hand` above and `session-poker.sh row-landed --by-hand`), so the record they leave is
+# one shape and the floor's judge (lib/proof.sh `_proof_past_f`) proves either. `_line_hand_ready` writes the row's
+# `ready` event, naming the suites (`none` when the person named none), and sets LINE_ME, the carrier a publish locks
+# by. `_line_hand_verdicts` writes one green verdict per suite, keyed by the commit they were green at, the log that
+# source; a suite it cannot write is left in LINE_UNWRITTEN. The ready event goes before the published line the
+# judge reads the row's suites from, the verdicts anywhere after it.
+_line_hand_ready() {  # <plan> <row> <commit> <branch> <tree> <suites | empty> -> 0 written
+  _line_me
+  line_event "$1" ready "row=$2" "name=-" "commit=$3" "branch=$4" "tree=$5" "suites=${6:-none}" debt=- "carrier=${LINE_ME}"
+}
+_line_hand_verdicts() {  # <plan> <row> <green-at> <suites> <log> -> 0 written; 1 with LINE_UNWRITTEN the suite that was not
+  local s
+  LINE_UNWRITTEN=""
+  for s in $(printf '%s\n' "$4" | tr ',' ' '); do
+    LINE_WIDTH=- _line_verdict_put "$1" "$2" "$3" "$s" green "$5" >/dev/null || { LINE_UNWRITTEN="$s"; return 1; }
+  done
+}
 _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <log> — the carrier's own subshell
   local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt lb rc i n s g="" lo lc
   _wt_land_checks "$target" "$onto" "$plan" 0 || return 2
@@ -790,9 +808,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   by="$(git -C "$root" config user.name 2>/dev/null)"
   [ -n "$by" ] || by="$(git -C "$root" var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/ <.*//')"
   by="${by//|/}"; [ -n "$by" ] || by="-"
-  _line_me
-  line_event "$plan" ready "row=${row}" "name=-" "commit=${head}" "branch=${branch}" "tree=${wt}" "suites=${suites:-none}" debt=- \
-    "carrier=${LINE_ME}" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
+  _line_hand_ready "$plan" "$row" "$head" "$branch" "$wt" "$suites" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
   LINE_KIND=hand; LINE_BY="$by"; LINE_WHY="$why"; LINE_SID="$sid"
   n="${BIONIC_LINE_HAND_WAIT:-900}"; case "$n" in ''|*[!0-9]*) n=900 ;; esac
   lt=""; lb=""; i=0; rc=3
@@ -834,10 +850,8 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
   if [ -n "$suites" ]; then
-    for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
-      LINE_WIDTH=- _line_verdict_put "$plan" "$row" "$g" "$s" green "$vlog" >/dev/null \
-        || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — published ${LINE_PUBLISHED}; the verdict for ${s} at ${g} is not recorded"; return 2; }
-    done
+    _line_hand_verdicts "$plan" "$row" "$g" "$suites" "$vlog" \
+      || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — published ${LINE_PUBLISHED}; the verdict for ${LINE_UNWRITTEN} at ${g} is not recorded"; return 2; }
     printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
   fi
   _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
