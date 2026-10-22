@@ -2698,6 +2698,23 @@ case "$BIONIC_RUN_WORD" in
     ;;
 esac
 
+# ---------- does the bound run's scale have a Patrol at all ----------
+#
+# THE SCALE TABLE'S `patrol` CELL (lib/scale.sh), read through `scale_cell` as resume, the tick and the dispatch wall
+# read it: a scale whose cell is `no`, the task row, has no Patrol, so any stamp on this session is not one to judge
+# and nothing here is `Patrol dead`. The scale is the bound plan's frontmatter `scale:`, the file this arm already
+# holds the path of. A plan whose scale cannot be read, or a library without scale.sh, judges as before: a Patrol
+# is assumed, so a wave-scale run loses nothing. Sourced here and not at file scope, behind the guard patrol.sh
+# carries below, for the same reason: a bystander turn does not parse a table it will not ask.
+if ! declare -F scale_cell >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/scale.sh" 2>/dev/null || :
+fi
+if declare -F scale_cell >/dev/null 2>&1 \
+   && [ "$(scale_cell "$(plan_frontmatter_get "$_RUN_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" = no ]; then
+  return "$_adv"
+fi
+
 # ---------- was a Patrol ever armed on this session ----------
 #
 # The filename is hooks/session-poker.sh's, and the two spellings are held together

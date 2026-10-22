@@ -291,7 +291,7 @@ fi
 # Nor for one placed outside that the gate refuses for the split (`_EG_JUR_UNPLACED`, wave-35 T4),
 # nor for one whose move the placement reader cannot follow (`_EG_CWD_SRC` moving, wave-36 T25):
 # those refusals read no plan either.
-BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""
+BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_ORIGIN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""
 case "$COMMAND" in
   *commit*)
     if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
@@ -300,6 +300,10 @@ case "$COMMAND" in
       if [ -n "$_bw_from" ] && declare -F proof_debt_origin >/dev/null 2>&1; then
         _bw_from="$(proof_debt_origin "$BIONIC_SID" "$(engaged_marker_path "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" "$_bw_from")"
       fi
+      # THE ORIGIN IS HANDED TO THE READER RULE TOO. "After the release" is the publish order in a landing record,
+      # and a copy's own name names none, so the gate's table judgment (lib/walls.sh `validate_dispatch_ledger`)
+      # reads the origin beside the plan it judges, and a dry commit of a copy is judged as a commit of the plan.
+      BIONIC_DEBTS_ORIGIN="$_bw_from"
       # THE READINGS' RESULTS AS THE JUDGE DERIVES THEM (wave-28 T60; D33, AC-8.6; A-orch-161). A
       # reading re-rated by a `check:`, `deferred:` or `moved:` line is judged on its derived result,
       # which needs the record its findings are in; the gate reads no record, so the collector reads it
