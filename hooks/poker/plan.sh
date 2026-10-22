@@ -2420,6 +2420,16 @@ RR_MATRIX
       insdlc && /^approved:[ \t]/ { split($0, w, /[ \t]+/); if (w[2] == ENVIRON["RR_NM"] && w[3] == "by") { print; exit } }' "$1"
   }
 
+  rr_since() {  # <approved head> -> `approved at <head8>, <n> commit(s) landed since[ (<rows>)]`, the rows from the landing record
+    local n rows
+    n="$(git -C "$PV_REPO" rev-list --first-parent --count "$1..$RR_HEAD" 2>/dev/null)" || n=""
+    rows="$(git -C "$PV_REPO" rev-list --first-parent "$1..$RR_HEAD" 2>/dev/null \
+      | units_rows_in_range "$PV_PLAN" "$1..$RR_HEAD" "$RR_DIR/landing-proofs.log" 2>/dev/null | cut -f1 | paste -sd' ' -)"
+    printf 'approved at %s' "${1:0:8}"
+    [ -z "$n" ] || printf ', %s landed since' "$(rr_plural "$n" commit commits)"
+    [ -z "$rows" ] || printf ' (%s)' "$rows"
+  }
+
   rr_sdlc_value() {  # <plan> <field> -> the value of `<field>:` under ## SDLC State, or nothing
     RR_F="$2" awk '
       /^[[:space:]]*```/ { fence = !fence; next }
@@ -2544,7 +2554,7 @@ RR_MATRIX
   }
 
   poker_verb_release_approval() {
-    local nm line key reply ac tier st au ruled why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind
+    local nm line key reply ac tier st au ruled why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -2708,7 +2718,10 @@ $RR_DISP
 RR_DISP_EOF
     RR_FROWS="$(printf '%s\n' $RR_FROWS | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//')"
 
-    # APPROVALS: every name an open row reads, release and merge first, each not yet given.
+    # APPROVALS: every name an open row reads, release and merge first, each not yet given. A release approval the head
+    # has moved past is put again: the advance to 8 refuses on it as on a missing one, and `card.sh early` settles that
+    # refusal as this page's decision (`settles: approve:release`), so the user gives it at the new head, and the reply
+    # writes a second line beside the first. Only the judge says it is stale; the page never judges the heads itself.
     RR_NAMES=""
     RR_INTO="$(plan_integration_branch "$PV_PLAN")"
     for nm in release merge $(units_approval_names "$PV_PLAN" 2>/dev/null); do
@@ -2716,9 +2729,15 @@ RR_DISP_EOF
       case " $RR_NAMES " in *" $nm "*) continue ;; esac
       units_approval_names "$PV_PLAN" 2>/dev/null | /usr/bin/grep -qxF "$nm" || continue
       RR_NAMES="$RR_NAMES $nm"
-      [ -z "$(rr_approved "$PV_PLAN" "$nm")" ] || continue
+      again=""
+      if [ -n "$(rr_approved "$PV_PLAN" "$nm")" ]; then
+        [ "$nm" = release ] || continue
+        case $'\n'"$RR_SETTLE"$'\n' in *$'\n'approve:release$'\n'*) : ;; *) continue ;; esac
+        h="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || h=""
+        again="again at this head${h:+: $(rr_since "$h")}"
+      fi
       case "$nm" in
-        release) line="Release${RR_REL:+ $RR_REL}" ;;
+        release) line="Release${RR_REL:+ $RR_REL}${again:+ $again}" ;;
         merge) line="Merge${RR_INTO:+ into $RR_INTO}" ;;
         *) line="Approval $nm" ;;
       esac

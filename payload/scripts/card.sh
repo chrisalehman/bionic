@@ -2239,13 +2239,14 @@ _card_t4_confirm_key() {
     for _ck in $(keys_for_tier T4); do [ "$_ck" = evidence ] || { printf '%s' "$_ck"; break; }; done )
 }
 
-# _card_unapproved -> the format of the refusal `current 8` prints while the release approval is missing, as the judge
-# spells it (hooks/poker/judge.sh `cur8_unapproved_line`), read from the judge beside CF_POKER. judge.sh defines
-# functions only, so sourcing it in a subshell runs nothing and defines nothing here. Nothing when the judge cannot be
-# read, and then no line is settled as that refusal, so the page stays early.
-_card_unapproved() {
-  ( . "${CF_POKER%/*}/poker/judge.sh" >/dev/null 2>&1 && declare -F cur8_unapproved_line >/dev/null 2>&1 || exit 1
-    cur8_unapproved_line )
+# _card_judge_line <function> -> the format of a refusal `current 8` prints about the release approval, as the judge
+# spells it (hooks/poker/judge.sh `cur8_unapproved_line` while it is missing, `cur8_stale_line` while the head has
+# moved past it), read from the judge beside CF_POKER. judge.sh defines functions only, so sourcing it in a subshell
+# runs nothing and defines nothing here. Nothing when the judge cannot be read, and then no line is settled as that
+# refusal, so the page stays early.
+_card_judge_line() {
+  ( . "${CF_POKER%/*}/poker/judge.sh" >/dev/null 2>&1 && declare -F "$1" >/dev/null 2>&1 || exit 1
+    "$1" )
 }
 
 # _card_review_fact, _card_review_failing -> the fact of the evidence gate's refusal while an owed review question is
@@ -2293,19 +2294,22 @@ _card_fmt_is() {
 # its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it
 # finds, and the rows are read from the matrix, so the page puts each of them whichever refusal the dry commit
 # stopped on. In the release order the advance to 8 refuses first on the missing release approval (no `approved:
-# release` line, or one naming no head), before it reads any other fact: that approval is the page's own decision, so
-# it is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print. That refusal is
-# known by the judge's own format (`_card_unapproved`), never by a second spelling of its words here. The advance
+# release` line, or one naming no head) or on a stale one (its head moved past by code or a release-set file), before
+# it reads any other fact: that approval is the page's own decision, given again at the new head when it is stale, so
+# either refusal is settled (`approve:release`) and the page is early only for what the advances to 6 and 7 print.
+# Each refusal is known by the judge's own format (`_card_judge_line`), never by a second spelling of its words here. The advance
 # prints no refusal for the merge approval, so none is read here. The wall's refusal for an unanswered review question,
 # and its line for a failing one, are known the same way, by the wall's own spellings (`_card_review_fact`,
 # `_card_review_failing`).
 _card_settles() {
-  local l q k judge=0 reading=0 any=0 unap rfact rfail
+  local l q k judge=0 reading=0 any=0 unap stale rfact rfail
   local -a _cs_f=()
-  unap="$(_card_unapproved)"
+  unap="$(_card_judge_line cur8_unapproved_line)"; stale="$(_card_judge_line cur8_stale_line)"
   rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"
   while IFS= read -r l; do
-    if [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; then CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue; fi
+    if { [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; } || { [ -n "$stale" ] && _card_fmt_is "poker: $stale" "$l"; }; then
+      CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue
+    fi
     if [ -n "$rfact" ]; then
       case "$l" in "bionic: commit refused — $rfact "*) reading=1; any=1; continue ;; esac
     fi
