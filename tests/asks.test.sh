@@ -14,8 +14,9 @@
 # §HELD          a close-out refused at Step 8 holds the merge, `hold:merge`, titled `merge held: <what holds it>` in a
 #                person's words, the refusal its reply, from `run` and from `check` alike; a refusal before Step 8
 #                holds nothing; the run that delivers closes it
-# §HELD-FILL     while `hold:merge` is open the tick offers no FILL naming the integrate row and the stop wall ends the
-#                turn; with the hold closed the same fixture offers it and the wall refuses (the differential control)
+# §HELD-FILL     while `hold:merge` is open the tick offers no FILL naming the integrate row, says `WAIT T<n> — hold:merge
+#                open: <title>` for it, and the stop wall ends the turn; with the hold closed the same fixture offers it,
+#                says no hold and the wall refuses (the differential control)
 # §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
 # §FLAG          a review whose result is `flag` opens no `waive:`, recorded by the verb or met by the preflight (a finding of it
 #                fixed by a landed row); the same projects with a failing reading newest open it (the differential control)
@@ -251,13 +252,16 @@ section "§HELD-FILL: while hold:merge is open on the run's register the tick of
 # Only the integrate row is held; a work row ready beside it is offered whatever the register holds.
 # FIXTURE FIDELITY: session-poker-5 §STEP's shape (s47_plan's reads table, the shipped tick and hooks/stop.sh), the plan
 # at current: 8 with a ready integrate row; the hold is opened and closed by owed.sh's own writers on the run's register.
+# The tick says why the row waits: `WAIT T<n> — hold:merge open: <the ask's title>`, through `fill_merge_hold`.
 # fails-when: the tick prints FILL T1 while the hold is open, the wall refuses the turn that left it, the hold held a
-# work row, or closing it leaves the integrate row unoffered.
+# work row, closing it leaves the integrate row unoffered, or the tick names no hold on the row it holds back (or still
+# names one after the hold closes).
 HF="$(make_repo heldfill)"; new_roster "$HF"
 HF_P="$(s47_plan "$HF" 8 \
   "| T1 | 8 | integrate | the merge | orchestrator | — | 10 | REQ-x | — | pending | approval:plan |")"
 awk '!d && /^current:/ { print "current: 8"; d = 1; next } { print }' "$HF_P" > "$HF_P.t" && mv "$HF_P.t" "$HF_P"
 hf_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T'; }
+hf_wait() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: WAIT T1 — hold:merge open'; }
 hf_tick() { forget_digest "$HF"; poke_pressure "$HF" 8192 1.0 tick; }
 hf_wall() { s31_stop "$HF" "$(s31_transcript "$HF" "carry on")"; s31_decision; }
 hf_hold() { OWED_PLAN="$HF_P" as_owed "$HF" hf-sid owed_open hold:merge "merge held: the structure review failed" "bionic: close-out refused"; }
@@ -269,10 +273,13 @@ hf_hold
 expect_eq "HF-1 precondition: the run's register holds hold:merge open" "hold:merge" "$(as_register "$HF" "$HF_P")"
 hf_tick
 expect_eq "HF-2 AC-8.1 with the hold open the tick exits 0 and offers no FILL naming the integrate row" "0|" "$RC|$(hf_fill)"
+expect_eq "HF-2b …and its WAIT line names the held merge and what holds it" \
+  "poker: WAIT T1 — hold:merge open: merge held: the structure review failed" "$(hf_wait)"
 expect_eq "HF-3 …and the stop wall's answer is clean" "" "$(hf_wall)"
 hf_release
 hf_tick
 expect_eq "HF-4 the hold closed, the same fixture offers the integrate row again" "poker: FILL T1" "$(hf_fill)"
+expect_eq "HF-4c …and its WAIT line about the hold is gone (HF-2b's extractor)" "" "$(hf_wait)"
 expect_eq "HF-4b …and the wall refuses again" "block" "$(hf_wall)"
 # Only the integrate row is held: a work row ready under the same open hold is offered, and the wall refuses its turn.
 HW="$(make_repo heldwork)"; new_roster "$HW"

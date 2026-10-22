@@ -483,7 +483,7 @@ tick_card_early() {  # <units_rows output> -> always 0; says the card's CARD-EAR
 }
 
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
-  local rows waiting all offered held line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl
+  local rows waiting all offered held line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl mhold mh_title mh_id
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
@@ -495,6 +495,13 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
   # session's or another's, is left out of the ready set (`fill_held_ids`, lib/fill.sh), and its WAIT
   # names the writer and the roster's session: `WAIT <id> — <name> open on roster <sid, first 8>`.
   held="$(fill_held_ids "$SCHED_PLAN" "$(printf '%s\n' "$rows" | awk -F'\t' '$10 == "pending" { print $1 }')" 2>/dev/null)"
+  # THE MERGE THE REGISTER HOLDS: while `hold:merge` is open on the run's register the integrate row is left out of
+  # the ready set (`fill_ready_set`), and its WAIT names the ask that holds it — `WAIT <id> — hold:merge open: <title>`,
+  # the title `fill_merge_hold` prints — in place of whatever else the row would wait for.
+  mhold=""
+  if mh_title="$(fill_merge_hold "$SCHED_PLAN" 2>/dev/null)"; then
+    for mh_id in $(fill_integrate_ids "$SCHED_PLAN"); do mhold="${mhold}${mh_id}"$'\t'"${mh_title}"$'\n'; done
+  fi
   SCHED_BEHIND=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -505,12 +512,14 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
     say "$wl"
     tick_owed_approval "${base#* — }" "poker: $wl"
   done <<TICK_WAIT
-$(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n' "$rows" "$waiting" "$susp" "$held" | awk -F'\t' \
+$(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n\034mhold\n%s' "$rows" "$waiting" "$susp" "$held" "$mhold" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v gap="${SCHED_GAP:-0}" '
   $0 == SUBSEP "rows" { part = 1; next }
   $0 == SUBSEP "wait" { part = 2; next }
   $0 == SUBSEP "susp" { part = 3; next }
   $0 == SUBSEP "held" { part = 4; next }
+  $0 == SUBSEP "mhold" { part = 5; next }
+  part == 5 && $1 != "" { mh[$1] = $2; next }
   part == 3 && $1 != "" { sus[$1, $2] = $3; next }
   part == 4 && $1 != "" { hold[$1] = $2 " open on roster " substr($3, 1, 8); next }
   part == 1 && $1 != "" { n++; id[n] = $1; knd[$1] = $3; st[$1] = $10; next }
@@ -525,7 +534,9 @@ $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n' "$rows" "$wa
       i = id[k]
       if (st[i] != "pending" || index(offered, " " i " ")) continue
       reason = ""
-      if (nr[i] > 0) {
+      if (i in mh) {
+        reason = "hold:merge open: " mh[i]
+      } else if (nr[i] > 0) {
         for (m = 1; m <= nr[i]; m++) {
           r = rd[i, m]; key = i SUBSEP r
           if (substr(r, 1, 5) == "step:") {
@@ -759,6 +770,26 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   return 1
 }
 
+# ---------------------------------------------------------------- does the bound run owe a Patrol stamp?
+
+# tick_patrol_owed <session-id> -> rc 1 only when the bound plan's scale has no Patrol (`scale_cell <scale> patrol`
+# is `no`); rc 0 otherwise.
+#
+# THE SCALE IS READ THE WAY RESUME READS IT: the plan this session's run resolves to, its frontmatter's `scale:`.
+# `resolve_run` answers once per process and is the selection every later read of the tick takes, so asking it here
+# first changes nothing below. A tick that resolves no plan, a plan with no readable `scale:` or a library without
+# scale.sh keeps the behaviour from before the table: a Patrol is assumed and the stamp is written, so a wave-scale
+# run loses nothing and an unreadable scale never silences a Patrol that may be needed.
+tick_patrol_owed() {  # <session-id>
+  local root
+  root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" && [ -n "$root" ] || return 0
+  resolve_run "$root" "$1"
+  [ -n "${POKER_RUN_PLAN:-}" ] || return 0
+  { declare -F scale_cell >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+  declare -F scale_cell >/dev/null 2>&1 || return 0
+  [ "$(scale_cell "$(plan_frontmatter_get "$POKER_RUN_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" != no ]
+}
+
 # ---------------------------------------------------------------- the decision line
 #
 # THE TICK'S LAST LINE, AND THE ONLY PLACE THIS SCHEMA IS PRINTED (REQ-10 AC-10.2/10.4; D5).
@@ -893,8 +924,15 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
     # nothing to say about. What the stamp attests is the firing, so it is taken here — the
     # first thing after the session key exists to name the file with.
-    write_patrol_stamp "$SESSION_ID" tick \
-      || die "WARN — the Patrol stamp could not be written; the tick itself is unaffected."
+    #
+    # A SCALE WITH NO PATROL STAMPS NOTHING (the scale table's `patrol` cell, lib/scale.sh). Resume
+    # removes the stamp a task-scale run never owed and the stop wall judges none, so a tick that
+    # wrote one on every plan re-created what resume had removed and the wall then demanded the
+    # Patrol resume said does not exist. The tick still reads and decides; only the stamp is the cell's.
+    if tick_patrol_owed "$SESSION_ID"; then
+      write_patrol_stamp "$SESSION_ID" tick \
+        || die "WARN — the Patrol stamp could not be written; the tick itself is unaffected."
+    fi
 
     # ---------- THE TICK SAYS WHAT CHANGED, OR "unchanged" (wave-24 T7, REQ-4; D4, D5) ----------
     #
