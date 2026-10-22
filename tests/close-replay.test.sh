@@ -101,7 +101,7 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
   expect_eq "CL-3 the structure review's waiver ask is on the register (read beside the next row)" "yes" \
     "$([ -n "$CL_W" ] && echo yes)"
   expect_eq "CL-3b …and closed, by neither a waiver nor close-out" "closed|no" \
-    "${CL_W%%|*}|$(case "${CL_W#*|}" in waive|close-out*) echo yes ;; *) echo no ;; esac)"
+    "${CL_W%%|*}|$(case "${CL_W#*|}" in (waive|close-out*) echo yes ;; (*) echo no ;; esac)"
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' "$CR_REC/landing-proofs.log" 2>/dev/null)"
   expect_eq "CL-4b …and the release check holds at the head main holds (a kind=check line there, not result=fail)" "yes|no" \
@@ -135,7 +135,7 @@ if cr_reached "VB-0"; then
   expect_eq "VB-2 the replay's marks are read: its hand writes are there" "yes" "$([ -n "$(cr_marks 'by hand')" ] && echo yes)"
   expect_eq "VB-2b …and every refusal names a verb of $RH_FOLLOW_VERBS" "" \
     "$(cr_marks refused | while IFS= read -r m; do v="${m##* · names: }"
-        case " $RH_FOLLOW_VERBS " in *" $v "*) : ;; *) printf '%s\n' "$m" ;; esac; done)"
+        case " $RH_FOLLOW_VERBS " in (*" $v "*) : ;; (*) printf '%s\n' "$m" ;; esac; done)"
   expect_eq "VB-3 each named verb's call on the cell, then the refused call again, exits 0" "" \
     "$(cr_marks refused | while IFS= read -r m; do l="${m% · names: *}"
         f="$(cr_part | awk -v m="# refused: $m" 'index($0, m) == 1 { f = 1; next } f && /^  rc=[0-9]+  \(follow: / { sub(/^  rc=/, ""); sub(/ .*/, ""); print; exit }')"
@@ -183,7 +183,7 @@ if [ -f "$CR_ROOT/.bionic/config.yaml" ] && [ -s "$CR_LOG" ]; then
     "$(printf '%s\n' "$RE_HAND" | /usr/bin/grep -q '^# by hand: \[code\] ' && echo yes)|$(printf '%s\n' "$RE_HAND" | /usr/bin/grep -q '^# by hand: \[record\] ' && echo yes)"
   expect_eq "RE-4b …and every kind is one of $RH_HAND_KINDS" "" \
     "$(printf '%s\n' "$RE_HAND" | while IFS= read -r h; do k="${h#\# by hand: [}"; k="${k%%]*}"
-        case " $RH_HAND_KINDS " in *" $k "*) : ;; *) printf '%s\n' "$h" ;; esac; done)"
+        case " $RH_HAND_KINDS " in (*" $k "*) : ;; (*) printf '%s\n' "$h" ;; esac; done)"
   expect_eq "RE-5 no hand write names a file or a line a verb writes" "" \
     "$(printf '%s\n' "$RE_HAND" | /usr/bin/grep -E 'asks\.state|landing-proofs\.log|proved:|approved: |current:|- Step [0-9]|Dispatch ledger|## Tasks')"
 else
