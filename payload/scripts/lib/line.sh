@@ -14,6 +14,8 @@
 #   line_publish <plan> <row>       the one publish, under the lock, in the interface's order
 #   line_land_by_hand <tree> <root> <sid> <why> [<suites> <green-at> <log>]  `spawn-worktree.sh land <tree> --by-hand`
 #   line_ready <tree> <root> <sid> <within> <again>  `spawn-worktree.sh ready [--within <s>]` (T4)
+#   line_reviews_state <plan> <root> <commit> <name> <out>   the release entry's `### The reviews`, rendered from the
+#                                   plan (with line_reviews_checkout, line_reviews_commit, line_reviews_move)
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
 # file copied by one write(2), no lock), so two writers' lines never interleave. Nine events:
@@ -33,6 +35,8 @@
 #   stop-run  request who kind key by why, or run name by why   (hooks/session-poker.sh `stop-run`,
 #             through `line_event`; wave-36 T11, D8): an act, not an entry's — the fold below reads no
 #             row from it, and the hand-hold count (`hand_holds_report`) counts it as `stop-runs`
+#   integrate row part commit branch, and close-out part commit branch   (part=reviews: the commit of the release
+#             entry's reviews part, by the verb that made it, `line_reviews_state`): acts, read by no fold
 # A value holding `|` or a line break is refused unwritten: the line is `|`-separated.
 #
 # THE FOLD. `line_state` prints one tab-separated line per entry neither published nor returned:
