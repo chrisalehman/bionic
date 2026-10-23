@@ -889,6 +889,23 @@ expect_eq "VE10b …and a judgment answering it prints; no task reads its approv
   "$SV_RC|$(sc_under "$SV_OUT" "Assessment" | /usr/bin/grep -F 'merge into main')|$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -F 'merge into main')"
 expect_eq "VE10c …while the release approval, which holds the merge task, stays under Blocked on you (VE10b read the same card)" "1" \
   "$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -c 'release approval')"
+# THE RULING ASK, END TO END: the tick opens ruling:<id> when a row holds until its writer reads a ruling, its reply
+# naming the row. The verb reads that row as held, so the card draws the ask under Blocked on you, never as an open
+# ask blocking nothing.
+# fails-when: the ruling ask reads holds=nothing, so it is drawn under the Assessment with Blocked on you holding
+# only the release approval.
+printf 'owed/v1|key=ruling:r9|state=open|sent=-|at=2026-10-06T22:02:00Z|title=ruling unread: T2|reply=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it\n' >> "$SV_REG"
+SV_AT=$((SV_NOW + 120)) sv_run "$SV_P" < /dev/null
+printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
+expect_eq "VE10d the verb's sheet reads the ruling ask as holding the row its reply names (4/2), blocking" "ask: key=ruling:r9 holds=4/2 title=ruling unread: T2 raised=3:02 PM blocks=yes" \
+  "$(sv_fact ask | /usr/bin/grep '^key=ruling:r9 ' | sed 's/^/ask: /')"
+SV_JR="$(printf '%s\n' "$SV_J" | sed -e 's/^call: .*/call: Re-dispatch 4\/2 or drop it: its ruling is unread./' -e "s/^close: .*/close: $(sv_m close.predicted), if 4\/2 lands first time./")
+ask approve:merge: approve the merge into main — recommend approve once 4/2 lands
+ask ruling:r9: the ruling on 4/2 is unread and the row holds — re-dispatch the row or drop it — recommend re-dispatch"
+SV_AT=$((SV_NOW + 120)) sv_run card "$SV_P" <<< "$SV_JR"
+expect_eq "VE10e the call, in words that owe something, prints, the ruling ask under Blocked on you and not under the Assessment" \
+  "0|1|0" \
+  "$SV_RC|$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -c 'ruling on 4/2 is unread')|$(sc_under "$SV_OUT" "Assessment" | /usr/bin/grep -c 'ruling on 4/2 is unread')"
 
 # ============================================================
 section "§SKILL: the skill writes the judgment in the tags the verb takes and shows only what the verb printed, in one fenced block"
