@@ -226,10 +226,10 @@ The integrate row renders this part from the plan's review and waiver lines befo
 
 ### The landing numbers
 
-`landing-report --rows` at 46a9683ec58e2c2e5ccbed119a709799e90b1738 on 2026-10-22T23:36:36Z:
+`landing-report --rows` at 26c554748bb64aa58ec9854e03768add67825f45 on 2026-10-23T00:19:02Z:
 
 ```
-landings: queue=25 hand=1 git=0 · ready-to-landed median=5.4m p75=6.8m max=11.3m · runs: green=77 red=11 none=4 discarded=3 red-then-green=0 run=247 reused=0 absent=0 · waited median=15s · killed=3
+landings: queue=26 hand=1 git=0 · ready-to-landed median=5.2m p75=6.8m max=11.3m · runs: green=80 red=11 none=4 discarded=3 red-then-green=0 run=269 reused=0 absent=0 · waited median=15s · killed=6
 T1 queue ready=2026-10-22T17:18:08Z landed=2026-10-22T17:23:07Z minutes=5.0 runs=1 waited=14s wait=0.2 prove=4.8 rework=0.0 width=3
   close-replay.test.sh red promised=277s actual=285s ratio=1.03
 T11 queue ready=2026-10-22T17:42:45Z landed=2026-10-22T17:47:20Z minutes=4.6 runs=4 waited=14s wait=0.2 prove=4.1 rework=0.3 width=3
@@ -350,6 +350,8 @@ T34 queue ready=2026-10-22T23:20:57Z landed=2026-10-22T23:23:46Z minutes=2.8 run
 T31 queue ready=2026-10-22T23:31:11Z landed=2026-10-22T23:35:24Z minutes=4.2 runs=2 waited=15s wait=0.2 prove=4.0 rework=0.0 width=3
   regression-rename.test.sh green promised=11s actual=14s ratio=1.27
   close-out-4.test.sh green promised=200s actual=237s ratio=1.19
+T32 queue ready=2026-10-22T23:35:10Z landed=2026-10-22T23:36:43Z minutes=1.6 runs=1 waited=31s wait=0.5 prove=0.2 rework=0.8 width=3
+  rehearsal.test.sh green promised=13s actual=12s ratio=0.92
 ```
 
 ## 1.25.0 — 2026-10-21
