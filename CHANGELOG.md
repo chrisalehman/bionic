@@ -161,7 +161,14 @@ removed were defects of their own. `canonical_sdlc_version` stays 14.
 
 ### The reviews
 
-The integrate row renders this part from the plan's review and waiver lines before the pull request opens.
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- evidence review, whole: fail at 29cfb97b by w43-T18, 2026-10-22T22:34:22Z (`critic-evidence.md`)
+- adversarial review, whole: fail at 29cfb97b by w43-T18, 2026-10-22T22:34:25Z (`critic-adversarial.md`)
+- structure review, whole: flag at 29cfb97b by w43-T18, 2026-10-22T22:34:27Z (`critic-structure.md`)
+- evidence review, piece: fail at 8d99ee4a by w43-T35, 2026-10-23T00:00:29Z (`critic-evidence-2.md`)
+- adversarial review, piece: fail at 8d99ee4a by w43-T35, 2026-10-23T00:00:31Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 8d99ee4a by w43-T35, 2026-10-23T00:00:33Z (`critic-structure-2.md`)
 
 ### Known limits
 
