@@ -1177,7 +1177,8 @@ SITREP_REVIEWS
 # sitrep_holds <plan> <root> <units_rows output> <key> <reply> -> what waits on the ask, in words: task labels, the release
 # and the merge (the first five named, the rest counted), `step <n>` for a step card, or `nothing`. An approval holds
 # the open tasks that read it; a decision what `decision_waiters` names; a waiver, a finding, a matrix row or a held
-# merge the open integrate tasks, the merge they make; a gate act the task its line names.
+# merge the open integrate tasks, the merge they make; a gate act the task its line names; an unread ruling the row its
+# reply says holds until a writer reads it.
 sitrep_holds() {
   local plan="$1" root="$2" rows="$3" key="$4" ids="" w
   local -a words=()
@@ -1192,6 +1193,7 @@ sitrep_holds() {
       ids="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k) }
         k == "integrate" && s != "landed" && s != "dropped" { print $1 }')" ;;
     gate:*) ids="$(printf '%s\n' "$5" | sed -n 's/.*GATE \(T[0-9A-Za-z._-]*\).*/\1/p' | head -n 1)" ;;
+    ruling:*) ids="$(printf '%s\n' "$5" | sed -n 's/.*NOT-LANDED \(T[0-9A-Za-z._-]*\).*/\1/p' | head -n 1)" ;;
   esac
   while IFS= read -r w; do
     case "$w" in '') ;; release|merge) words[${#words[@]}]="the $w" ;; *) words[${#words[@]}]="$(sitrep_task_label "$rows" "$w")" ;; esac

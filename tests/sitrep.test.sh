@@ -681,10 +681,16 @@ section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) op
 # fails-when: either is open and missing from the sheet.
 sr_world kinds "6 6 12 12"
 sr_owed "key=row:AC-2.1|state=open|sent=-|at=2026-10-06T21:00:00Z|title=ruling: row AC-2.1|reply=poker: AC-2.1 is not proved — rule it"
-sr_owed "key=ruling:r9|state=open|sent=-|at=2026-10-06T21:01:00Z|title=ruling unread: F9|reply=poker: a ruling waits to be read"
+sr_owed "key=ruling:r9|state=open|sent=-|at=2026-10-06T21:01:00Z|title=ruling unread: T5|reply=poker: NOT-LANDED T5 — w-T5 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it"
 sr_run "$SR_PLAN"
 expect_eq "KI1 the open row: and ruling: asks are on the sheet, raised at their local times" "row:AC-2.1 2:00 PM|ruling:r9 2:01 PM" \
   "$(sr_lines ask | while IFS= read -r l; do printf '%s %s\n' "$(sr_f "$l" key)" "$(sr_f "$l" raised)"; done | sr_join)"
+# FIXTURE FIDELITY: the reply is the one the tick writes when a row holds until its writer reads a ruling. The ask holds
+# the row that reply names, so the card places it under Blocked on you and never as an open ask blocking nothing.
+# fails-when: the ruling ask reads holds=nothing or blocks=no while its reply names a row the tick holds.
+expect_eq "KI1b the ruling ask holds the row its reply names, and so blocks (the open row: ask beside it holds nothing)" \
+  "4/5|yes|nothing|no" \
+  "$(sr_f "$(sr_ask ruling:r9)" holds)|$(sr_f "$(sr_ask ruling:r9)" blocks)|$(sr_f "$(sr_ask row:AC-2.1)" holds)|$(sr_f "$(sr_ask row:AC-2.1)" blocks)"
 sr_close_ask ruling:r9
 sr_run "$SR_PLAN"
 expect_eq "KI2 the ruling read and closed: its ask is gone, the row's stays" "row:AC-2.1" \
