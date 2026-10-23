@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
-# (row-landed, deliver, release-note).
+# (row-landed, deliver, reviews-part, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -194,6 +194,26 @@ DELIVER_FILES
   if [ -z "$head" ]; then
     die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>), then $call deliver $PV_ID. The plan is unchanged."
     exit 2
+  fi
+  # THE INTEGRATE ROW LANDS WITH THE ENTRY'S REVIEWS LISTED: its pull request carries the branch to the integration
+  # branch, so a part still to render there would never reach it. A part the renderer would change refuses, naming
+  # the verb that renders it; nothing to render (no release, entry or registered review) holds nothing back.
+  if [ "$kind" = integrate ]; then
+    if ! { declare -F line_reviews_state >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+       || ! declare -F line_reviews_state >/dev/null 2>&1 || ! e="$(mktemp "${TMPDIR:-/tmp}/deliver-reviews.XXXXXX")"; then
+      die "REFUSED — $PV_ID is the integrate row, and whether the release entry lists the plan's reviews cannot be read (lib/line.sh from $BIONIC_LIB); the plan is unchanged."
+      exit 2
+    fi
+    if ! line_reviews_state "$PV_PLAN" "$PV_REPO" "$head" "$wb" "$e"; then
+      rm -f "$e"
+      die "REFUSED — $PV_ID is the integrate row, and whether the release entry lists the plan's reviews cannot be read: $LINE_RV_SAID; the plan is unchanged."
+      exit 2
+    fi
+    rm -f "$e"
+    if [ "$LINE_RV_STATE" = renders ]; then
+      die "REFUSED — $PV_ID is the integrate row, and the $LINE_RV_VER entry's ### The reviews on $wb does not list the plan's $LINE_RV_N review and waiver lines, so its pull request would carry the entry without them; render them before the pull request: $call reviews-part $PV_ID, then $call deliver $PV_ID. The plan is unchanged."
+      exit 2
+    fi
   fi
   # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
   # record row's artifact is gitignored and never commits, so deliver is its only landing. The writer
@@ -910,6 +930,89 @@ hand_holds_verb() {
     [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
     exit 0
   }
+
+# ---------------------------------------------------------------- the release entry's reviews, before the pull request
+#
+# THE INTEGRATE ROW RENDERS THE ENTRY'S REVIEWS PART BEFORE IT OPENS ITS PULL REQUEST. `reviews-part <row>` renders the
+# release entry's `### The reviews` part from the plan (lib/line.sh `line_reviews_state`, close-out's renderer too) and
+# commits it on the working branch under the line's author, so the branch the pull request is opened from carries it,
+# and the merge brings it to the integration branch. Its last lines are the release reply's waivers, so in the release
+# order it refuses until `approved: release` is written: a part rendered before the reply would miss them. The judge
+# holds the commit covered by the release check and the approval at its parent while it is the fresh render (lib/proof.sh
+# `proof_part_base`), so nothing is approved or checked again. The landing record gains
+# `ev=integrate|row=<row>|part=reviews|commit=<c>|branch=<working>`, so the branch holds no commit the record does not
+# name. Nothing to render, or the part already listed: nothing is made, exit 0. The branch moves on this machine alone;
+# it leaves it by the person's push. `deliver` refuses the integrate row while the part would still render.
+REVIEWS_PART_AUTHOR="bionic line"; REVIEWS_PART_EMAIL="line@bionic.invalid"
+poker_verb_reviews_part() {
+  local row kind status wb head ah tmp why call="bash $HOOK_DIR/session-poker.sh"
+  if ! plan_verb_id_ok "$PV_ID"; then
+    die "REFUSED — '$(clean "$PV_ID")' is not one row id; nothing was rendered."
+    exit 1
+  fi
+  plan_verb_open reviews-part
+  if ! { declare -F line_reviews_state >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+     || ! declare -F line_reviews_state >/dev/null 2>&1 || ! declare -F proof_branch_head >/dev/null 2>&1; then
+    die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
+    exit 2
+  fi
+  row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id { print; exit }')"
+  if [ -z "$row" ]; then
+    die "REFUSED — the ## Tasks table of $PV_PLAN carries no row $PV_ID; nothing was rendered."
+    exit 2
+  fi
+  kind="$(units_field "$row" kind)"; status="$(units_field "$row" status)"
+  if [ "$kind" != integrate ]; then
+    die "REFUSED — $PV_ID is a $(clean "$kind") row, and the integrate row renders the entry's reviews before its pull request; nothing was rendered."
+    exit 2
+  fi
+  case "$status" in
+    pending|active) : ;;
+    *) die "REFUSED — $PV_ID reads $(clean "$status"), and the part is rendered before the integrate row lands; nothing was rendered."; exit 2 ;;
+  esac
+  if units_order "$PV_PLAN" >/dev/null 2>&1; then
+    ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
+    if [ -z "$ah" ]; then
+      die "REFUSED — the plan is in the release order and no approved: release line names a head, so the release reply's waivers may still come and the part would miss them; render it after the reply: $call reviews-part $PV_ID. Nothing was rendered."
+      exit 2
+    fi
+  fi
+  wb="$(plan_working_branch "$PV_PLAN")"
+  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
+  if [ -z "$head" ]; then
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO; nothing was rendered."
+    exit 2
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/reviews-part.XXXXXX")" || { die "REFUSED — no temporary directory; nothing was rendered."; exit 2; }
+  if ! line_reviews_state "$PV_PLAN" "$PV_REPO" "$head" "$wb" "$tmp/new"; then
+    rm -rf "$tmp"; die "REFUSED — the part cannot be rendered: $LINE_RV_SAID. Nothing was rendered."; exit 2
+  fi
+  case "$LINE_RV_STATE" in
+    none) rm -rf "$tmp"; say "reviews-part — nothing to render: $LINE_RV_SAID."; exit 0 ;;
+    listed) rm -rf "$tmp"
+      say "reviews-part — the $LINE_RV_VER entry's ### The reviews on $wb already lists the plan's $LINE_RV_N review and waiver lines; nothing was made."
+      exit 0 ;;
+  esac
+  why="$(line_reviews_checkout "$PV_REPO" "$wb")"
+  if [ -n "$why" ]; then
+    rm -rf "$tmp"; die "REFUSED — $why; nothing was rendered."; exit 2
+  fi
+  if ! line_reviews_commit "$PV_REPO" "$head" "$tmp/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" \
+       "line: the $LINE_RV_VER entry's reviews, rendered from the plan before the pull request"; then
+    rm -rf "$tmp"; die "REFUSED — on $wb: $LINE_RV_SAID; nothing was rendered."; exit 2
+  fi
+  rm -rf "$tmp"
+  if ! line_reviews_move "$PV_REPO" "$wb" "$LINE_RV_COMMIT" "$head" "reviews-part: $PV_ID"; then
+    die "REFUSED — $wb could not be moved from ${head:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
+    exit 2
+  fi
+  if ! line_event "$PV_PLAN" integrate "row=$PV_ID" part=reviews "commit=$LINE_RV_COMMIT" "branch=$wb"; then
+    die "REFUSED — $wb moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=integrate|row=$PV_ID|part=reviews|commit=$LINE_RV_COMMIT|branch=$wb to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
+    exit 1
+  fi
+  say "reviews-part — $LINE_RV_N review and waiver lines rendered under ### The reviews of the $LINE_RV_VER entry, committed ${LINE_RV_COMMIT:0:12} on $wb; open the pull request from it."
+  exit 0
+}
 
 # ---------------------------------------------------------------- the release note
 #

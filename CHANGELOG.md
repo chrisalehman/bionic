@@ -89,6 +89,12 @@ removed were defects of their own. `canonical_sdlc_version` stays 14.
 - T26: `units_validate <plan> [<origin>]` and `units_post_readers <plan> [<origin>]` take an optional origin plan whose
   landing record is read in place of the copy's. An absent operand reads the plan itself. The commit gate hands
   `BIONIC_DEBTS_ORIGIN` to its one table judgment, only when `BIONIC_DEBTS_PLAN` is the plan it judges.
+- T33: the integrate row runs `session-poker.sh reviews-part <row>` before its push and `gh pr create`. It commits the
+  entry's `### The reviews` on the working branch under `bionic line`, appends `ev=integrate|row=<row>|part=reviews` to
+  the landing record, and never pushes. `deliver` refuses an integrate row while the part would still render. The
+  judge (`proof_part_base` in `lib/proof.sh`) holds that commit covered by the release check and the approval at its
+  parent while it is byte for byte a fresh render. Close-out writes the part only when no earlier verb did. The renderer
+  is `line_reviews_state` in `lib/line.sh`, and the part's first line no longer names close-out.
 
 ### The judge is the last release (D3, D5, ADR-070)
 
@@ -155,7 +161,7 @@ removed were defects of their own. `canonical_sdlc_version` stays 14.
 
 ### The reviews
 
-Close-out renders this part from the plan's review and waiver lines, in the order they were registered.
+The integrate row renders this part from the plan's review and waiver lines before the pull request opens.
 
 ### Known limits
 
@@ -207,14 +213,16 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 - `hooks/stop.sh`'s library list does not name `scale.sh`. The stop wall sources it from its own library directory, and
   a directory without it keeps a Patrol assumed. (`T9.md` Holes, A-T9.3)
 - A pin read from a suite changed after the branch tip is not seen by `brief` until the suite lands. (`T10.md` Holes)
-- The reviews part is committed on the working branch only. A branch merged before close-out runs leaves main's entry
-  without it. (`T11.md` Holes, A-T11.1)
 - The tick's FILL, the dispatch wall and the stop wall disagree on the writer cap's arithmetic, so a FILL may name a row
   the wall refuses, and none says when writer slots sit idle behind one pending row. (A-orch.33, A-orch.4)
 - A goal missed by a red the plan declares opens a `decide:goal:<name>` ask that needs no ruling. (A-orch.19)
 - A plan's `deps` cell that names a task id is refused beside a `reads` column, though the Step 3 card draws it. (A-orch.1)
 - A writer reads a reply only when it is idle, and a writer that goes from suite to suite to `ready` has no idle turn,
   so a question to the orchestrator waits for the writer's next idle turn. (A-orch.10)
+- The door-landing §COPY-4 arm c4-1 stays: its subject is the new runner reading an absolute word under the root in the
+  judge tree, which no other suite pins.
+- The handoff head says Blocked on you: yes over any open ask, while the sitrep card lists only the asks that hold a
+  task, the release or the merge; the handoff follows the card next release.
 
 ### The landing numbers
 

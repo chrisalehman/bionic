@@ -698,14 +698,15 @@ section "§REVIEWS-RENDERED — close-out renders the release entry's reviews fr
 # it into the working branch's CHANGELOG.md, replacing a hand-written part or adding one before `### Known limits`,
 # commits it as close-out's own commit on that branch, and appends an `ev=close-out` line naming the commit to the
 # landing record, so the branch holds no commit the record does not name. `check` says what `run` would do and writes
-# nothing. A plan naming no `release:` gets no part and no commit.
+# nothing. A plan naming no `release:` gets no part and no commit. A part the integrate row rendered before the pull
+# request is already listed, so close-out writes none (the rows after RV-16).
 # FIXTURE FIDELITY: mk_fixture's plan and branches; the release entry is committed on the working branch and merged
 # into main, as a release row's landing and the merge bring it; the proof lines are the product's (`proof_line` and
 # `proof_waiver_line`, placed by `proof_add_line`, the writers `proof-add` and `waive` call), and the floor and the
 # dealt reviews are planted again at the new head by plant_facts, as a run registers them after its release row.
 # fails-when: the part differs from the plan's lines, the hand-written line survives, the rest of the file moves, the
 # commit is not close-out's or touches another path, the checkout is left behind its branch, the record names no such
-# commit, check writes, or a plan with no release gets a commit.
+# commit, check writes, a plan with no release gets a commit, or a run with no pull request finds another writer.
 rv_fixture() {  # <name> <yes|no: the entry carries a hand-written ### The reviews> -> the project at Step 8, echoed
   local p wt
   p="$(mk_fixture "$1")" && advance_to "$p" 8 || return 1
@@ -765,7 +766,7 @@ BIONIC_GATE_DIR="$LAND_GATE" run_close "$PRV" run
 expect_eq "RV-4 run closes the plan (rc 0)" "0" "$CO_RC"
 RV_TIP="$(rv_tip "$PRV")"
 RV_WANT="$(
-  printf '### The reviews\n\nRendered by close-out from the plan'"'"'s review and waiver lines, in the order they were registered.\n\n'
+  printf '### The reviews\n\nRendered from the plan'"'"'s review and waiver lines, in the order they were registered.\n\n'
   while read -r q s; do rv_bullet "$q" "$s" pass "$RV_H1" w-read 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$s.md"; done <<RV
 $RV_DEALT
 RV
@@ -792,6 +793,9 @@ expect_contains "RV-11 the landing record names the commit as close-out's" \
   "line/v1|ev=close-out|part=reviews|commit=$RV_TIP|branch=wave/01-fixture|at=" "$RV_EV"
 expect_contains "RV-12 run's reviews line names the commit" "$(printf '%.12s' "$RV_TIP")" \
   "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
+expect_eq "RV-17 control: the plan has no integrate row, so no pull request came first and close-out is the part's one writer" \
+  "0|1|ev=close-out" \
+  "$(/usr/bin/grep -c '^| T[0-9]* | [0-9]* | integrate |' "$PRV/$PLAN_REL")|$(/usr/bin/grep -c '|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null)|$(/usr/bin/grep '|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null | awk -F'|' '{ print $2 }')"
 # an entry with no part gets one, before ### Known limits
 PRA="$(rv_fixture reviews-added no)"
 plant_facts "$PRA"
@@ -809,6 +813,85 @@ BIONIC_GATE_DIR="$LAND_GATE" run_close "$PRN" run
 RN_LINE="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
 expect_contains "RV-15 a plan naming no release: says so" "names no release:" "$RN_LINE"
 expect_eq "RV-16 …and its branch is where it was" "$RN_H" "$(rv_tip "$PRN")"
+# THE PART RENDERED BEFORE THE PULL REQUEST. The integrate row runs `reviews-part <row>` before the push and
+# `gh pr create`: the same render, committed on the working branch under the line's author and named by an
+# `ev=integrate` line, so the person's merge carries the part to main and close-out finds it already listed. The judge
+# holds that commit covered by the release check at its parent, and by an approval there, only while it is byte-equal to
+# a fresh render of the plan: a part edited by hand is a release-set change past the approval like any other.
+# FIXTURE FIDELITY: rv_fixture's entry; the plan gains the integrate and close rows (lands_rows) and the session is bound
+# (lands_bind), as a run at Step 8 is; the project declares a release check and its proof line names the release head,
+# as `release-check` writes it; the integrate row's record is a file under record/ its Files name; the person's merge is
+# a plain merge into main. The hand-edited part is a commit on a side branch, made by git's plumbing.
+# fails-when: deliver lands the integrate row while the part is missing, the verb's part differs from close-out's or
+# touches another path, the record does not name the commit, main's entry lacks the part after the merge, close-out
+# commits or records a second part, or the judge holds a hand-edited part covered.
+bp_judge() {  # <project> <head> -> `<proof_prose_past rc from the release head>|<facts_state's check state at head>`
+  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/run.sh" && . "$1/proof.sh" || exit 9
+    proof_prose_past "$2" "$3" "$4"; p=$?
+    s="$(facts_state "$2" "$4" 2>/dev/null | awk -F"\t" "\$1 == \"check\" { print \$2 }")"
+    printf "%s|%s\n" "$p" "$s"' _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "$BP_H" "$2"
+}
+bp_side() {  # <project> <parent> <changelog file> -> a commit of that CHANGELOG.md on <parent>, named refs/heads/side
+  local p="$1" b t c i="$SANDBOX/bp-side.index"
+  b="$(fixture_git "$p" hash-object -w --path CHANGELOG.md "$3")" \
+    && GIT_INDEX_FILE="$i" fixture_git "$p" read-tree "$2" \
+    && GIT_INDEX_FILE="$i" fixture_git "$p" update-index --cacheinfo "100644,$b,CHANGELOG.md" \
+    && t="$(GIT_INDEX_FILE="$i" fixture_git "$p" write-tree)" \
+    && c="$(fixture_git "$p" commit-tree "$t" -p "$2" -m "a part edited by hand")" \
+    && fixture_git "$p" update-ref refs/heads/side "$c" && rm -f "$i" && printf '%s\n' "$c"
+}
+BP_SID="closeout-reviews-pr-sid"
+PBP="$(rv_fixture reviews-before-pr no)"
+plant_facts "$PBP"; lands_rows "$PBP"
+lands_bind "$PBP" "$BP_SID"
+BP_H="$(rv_tip "$PBP")"
+BP_REC="$PBP/.bionic/docs/record/wave-01-fixture"
+printf 'release-check: bash tests/lib/release-check.sh\n' >> "$PBP/.bionic/config.yaml"
+inh_place "$PBP" "$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_line check "$2" 2026-10-05T10:00:00Z record/wave-01-fixture/release-check.log' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$BP_H")"
+printf '# T3: the pull request\n\n    gh pr create --base main --head wave/01-fixture --fill\n' > "$BP_REC/T3-pr.md"
+lands_poker "$PBP" "$BP_SID" task-set T3 Files=.bionic/docs/record/wave-01-fixture/T3-pr.md
+expect_eq "BP-0 precondition: the session is bound, the integrate row names its record, and the judge reads the check at the release head" \
+  "0|pending|0|covered" "$LP_RC|$(lands_cell "$PBP" T3 11)|$(bp_judge "$PBP" "$BP_H")"
+lands_poker "$PBP" "$BP_SID" deliver T3
+expect_eq "BP-1 deliver refuses the integrate row while the entry's reviews part is missing, the plan unchanged" "1|pending" \
+  "$([ "$LP_RC" -ne 0 ] && echo 1)|$(lands_cell "$PBP" T3 11)"
+expect_contains "BP-1b …naming the verb that renders it" "reviews-part T3" "$LP_OUT"
+lands_poker "$PBP" "$BP_SID" reviews-part T3
+BP_TIP="$(rv_tip "$PBP")"
+expect_eq "BP-2 reviews-part renders the part: exit 0, a commit by the line's author on the release head" "0|bionic line|$BP_H" \
+  "$LP_RC|$(fixture_git "$PBP" log -1 --format='%an|%P' "$BP_TIP")"
+expect_eq "BP-3 …touching CHANGELOG.md alone" "CHANGELOG.md" "$(fixture_git "$PBP" diff --name-only "$BP_H" "$BP_TIP")"
+BP_PART="$(fixture_git "$PBP" show "$BP_TIP:CHANGELOG.md" 2>/dev/null | rv_part /dev/stdin 9.9.9)"
+expect_eq "BP-4 …one bullet per review line of the plan, under the part's heading" \
+  "### The reviews|$(/usr/bin/grep -c '^proved: kind=review ' "$PBP/$PLAN_REL")" \
+  "$(printf '%s\n' "$BP_PART" | sed -n 1p)|$(printf '%s\n' "$BP_PART" | /usr/bin/grep -c '^- ')"
+expect_contains "BP-5 the landing record names the commit as the integrate row's" \
+  "line/v1|ev=integrate|row=T3|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|at=" \
+  "$(/usr/bin/grep '^line/v1|ev=integrate|' "$BP_REC/landing-proofs.log" 2>/dev/null)"
+expect_eq "BP-6 the checkout holding the branch is at the commit" "$BP_TIP" "$(fixture_git "$PBP-wave" rev-parse HEAD)"
+lands_poker "$PBP" "$BP_SID" reviews-part T3
+expect_eq "BP-7 a second reviews-part finds the part listed: exit 0, no commit" "0|$BP_TIP" "$LP_RC|$(rv_tip "$PBP")"
+expect_eq "BP-8 the judge holds the part commit covered: by an approval at the release head, and by the check there" \
+  "0|covered" "$(bp_judge "$PBP" "$BP_TIP")"
+fixture_git "$PBP" show "$BP_TIP:CHANGELOG.md" | awk '{ print } $0 == "### The reviews" { getline; print; print "- a bullet typed by hand" }' \
+  > "$SANDBOX/bp-hand.md"
+BP_SIDE="$(bp_side "$PBP" "$BP_H" "$SANDBOX/bp-hand.md")"
+expect_eq "BP-9 a hand-edited part on the release head is no fresh render: the approval and the check do not reach it" \
+  "1|uncovered" "$(bp_judge "$PBP" "$BP_SIDE" | sed 's/\(uncovered\).*/\1/')"
+lands_poker "$PBP" "$BP_SID" deliver T3
+expect_eq "BP-10 with the part rendered, deliver lands the integrate row" "0|landed" "$LP_RC|$(lands_cell "$PBP" T3 11)"
+fixture_git "$PBP" merge -q --no-ff -m "the pull request, merged" wave/01-fixture >/dev/null 2>&1
+BP_MAIN="$(fixture_git "$PBP" show "main:CHANGELOG.md" 2>/dev/null | rv_part /dev/stdin 9.9.9)"
+expect_eq "BP-11 after the person's merge, main's entry holds the part" "### The reviews" "$(printf '%s\n' "$BP_MAIN" | sed -n 1p)"
+expect_eq "BP-11b …byte for byte the part the branch holds" "$BP_PART" "$BP_MAIN"
+run_close_as "$BP_SID" "$PBP" run
+expect_eq "BP-12 close-out closes the run (rc 0) and says the part is already listed" "0|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ' | /usr/bin/grep -q 'already lists' && echo yes)"
+BP_PARTS="$(/usr/bin/grep '|part=reviews|' "$BP_REC/landing-proofs.log" 2>/dev/null)"
+expect_eq "BP-13 the record names one writer of the part, the integrate row (read beside close-out's absence)" "1|ev=integrate" \
+  "$(printf '%s\n' "$BP_PARTS" | /usr/bin/grep -c .)|$(printf '%s\n' "$BP_PARTS" | awk -F'|' '{ print $2 }')"
+expect_eq "BP-14 …and close-out made no commit: the branch is at the integrate row's" "$BP_TIP" "$(rv_tip "$PBP")"
 
 # ============================================================
 section "§PREFLIGHT-RECORD — close-out's preflight copy reads the landing record of the plan it copies"
