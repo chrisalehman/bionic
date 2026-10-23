@@ -29,11 +29,16 @@
 #                   and refuses a number that disagrees, naming both; the gate's killed count is not held to it.
 #   §LAST           a landing the entry's head does not hold, other than the one that carried the entry, refuses it
 #                   until the entry is rendered again.
+#   §PROJECT        the check run from a tree that holds no plan reads the project's plan and record from
+#                   BIONIC_CHECK_PROJECT, so an unstated deferral refuses from that tree as it does from the project's own.
 #   §RATIO          the cap on tests: the tracked shell lines under tests/ against the tracked shell lines everywhere
 #                   else, counted in the tree at BIONIC_CHECK_HEAD. A head whose tests exceed its code is refused in
 #                   one line naming both counts; a head under passes with `test-ratio: <tests>/<code>`; the counts are
 #                   the head's, never the working files'; a directory reached through a symlink counts once; a head
 #                   with no shell code outside tests/ is a refusal, never a pass.
+#   §RATIO-BASE     a head over the cap is admitted when its test lines are at or under the tree at BIONIC_CHECK_BASE's
+#                   and refused when they rose; the line then carries `(base <tests>/<code>)`; a head under the cap
+#                   passes as before; a base that names no commit compares nothing, so the head alone is judged.
 #   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
 #                   AC-9.2): the block exists at its own heading, dated; the Corrections
 #                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
@@ -41,12 +46,12 @@
 #                   stated sentence of the bound plan; Migration names every row that added a refusal; every
 #                   build row names its record; the 1.18.0 block is as released; help.md and version.md
 #                   read the version and `render.sh --check` is green. Each rule has a doctored copy.
-#   §REL-1.25.0     the 1.25.0 entry: the version pair reads 1.25.0, the entry is dated, names ADR-069,
+#   §REL-1.26.0     the 1.26.0 entry: the version pair reads 1.26.0, the entry is dated, names ADR-070,
 #                   and its Migration paragraph names the rows that changed what a script may meet.
 #                   The release check is run on a repository holding the real entry and the run's real deferred lines
 #                   (this run states none, so the Known limits arms hold at zero): every deferred sentence stands under
 #                   Known limits and the check passes; the same entry with its Known limits removed fails one line for
-#                   each deferred sentence, and passes when there are none.
+#                   each deferred sentence, and passes when there are none; one planted deferral keeps the omission arm live.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -54,6 +59,8 @@
 # doctored copies under the scratch directory. SYNTHESIZED: the versions and the entry.
 #
 # Usage: bash tests/release-check.test.sh
+#
+# pins: tests/lib/release-check.sh tests/lib/name-scan.sh
 
 set -uo pipefail
 
@@ -443,6 +450,43 @@ expect_eq "(t3) setup: the carrier is a merge of two parents" "2" "$(git -C "$R"
 rn_check "$M"
 expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
 
+
+section "§PROJECT — the check run from a tree with no plan reads the project's plan and record from BIONIC_CHECK_PROJECT"
+
+# FIXTURE FIDELITY: the judge runs in a landing tree, a detached worktree of the project with no `.bionic` beside it,
+# so the plan and the landing record are only where the project keeps them. Two projects: §LIMITS's world with one
+# unstated deferral of 2.3.4, and §LAST's world at the merge whose numbers agree. Each is judged from a tree of its
+# own, once with BIONIC_CHECK_PROJECT naming the project and once without it. SYNTHESIZED: as §LIMITS and §LAST.
+pj_tree() {  # <repo> <rev> -> a detached worktree of <repo> at <rev>, under its own ignored tmp, with no .bionic
+  local t="$1/.bionic/tmp/landing/1"
+  git -C "$1" worktree add -q --detach "$t" "$2" >/dev/null 2>&1 && printf '%s' "$(cd "$t" && pwd -P)"
+}
+pj_check() {  # <tree> <head> [<project>] -> OUT, RC: the check run in <tree>, the project named only when given
+  OUT="$(cd "$1" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_PROJECT BIONIC_CHECK_HEAD="$2" \
+    ${3:+BIONIC_CHECK_PROJECT="$3"} bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+}
+R="$TMP/pj-lim"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
+PJ_T="$(pj_tree "$R" HEAD)"
+expect_eq "(pj0) setup: the tree is the project's head, and holds no plan" "$(git -C "$R" rev-parse HEAD) no" \
+  "$(git -C "${PJ_T:-/nonexistent}" rev-parse HEAD 2>/dev/null) $([ -e "${PJ_T:-/nonexistent}/.bionic" ] && echo yes || echo no)"
+pj_check "$PJ_T" HEAD "$(cd "$R" && pwd -P)"
+expect_status "(pj1) §PROJECT AC-2.2 with BIONIC_CHECK_PROJECT naming the project, an unstated deferral refuses from the tree" 1 "$RC"
+expect_contains "(pj1b) …naming the deferral of the project's plan" "$(L2_LINE)" "$OUT"
+pj_check "$PJ_T" HEAD
+expect_status "(pj2) CONTROL with the variable unset, the same tree passes" 0 "$RC"
+expect_contains "(pj2b) CONTROL …saying no plan under the tree's own docs names the release" \
+  "known-limits: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
+
+# §LAST's world: its numbers agree at the merge M, the plan and the record read from the project.
+R="$TMP/rn"; PJ_T="$(pj_tree "$R" "$M")"
+pj_check "$PJ_T" "$M" "$(cd "$R" && pwd -P)"
+expect_status "(pj3) the landing numbers judged from a tree, the project named: the check passes" 0 "$RC"
+expect_contains "(pj3b) …its numbers rendered from the project's plan and record, and agreeing" \
+  "landing-numbers: 2.3.4 agrees with the landing report at" "$OUT"
+pj_check "$PJ_T" "$M"
+expect_contains "(pj4) CONTROL the variable unset: no plan holds the numbers" \
+  "landing-numbers: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
+
 section "§RATIO — tests may not outgrow the code: shell lines under tests/ against shell lines elsewhere, at the head"
 
 # fx_ratio <dir> <tests lines> <code lines> — a committed pair whose tracked shell files hold exactly that many lines.
@@ -501,6 +545,55 @@ run_check "$R"
 expect_status "(R-5) a head with no shell outside tests/: the check refuses (exit 2)" 2 "$RC"
 expect_contains "(R-5) …in a line that says so" "no shell file outside tests/" "$OUT"
 expect_eq "(R-5) …one line" "1" "$(lines_of "$OUT")"
+
+section "§RATIO-BASE — a head over the cap is admitted when its test lines are at or under the base's, refused when they rose"
+
+# run_check_base <repo> <base> — the check at HEAD with BIONIC_CHECK_BASE=<base>, the range the release runner passes; sets OUT and RC
+run_check_base() {
+  OUT="$(cd "$1" && env -u BIONIC_CHECK_HEAD BIONIC_CHECK_BASE="$2" bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+}
+# fx_retest <dir> <tests lines> — the tests file rewritten to that many lines and committed
+fx_retest() {
+  fx_lines "$2" > "$1/tests/big.test.sh" && git -C "$1" add -A && git -C "$1" commit -q -m "tests at $2 lines"
+}
+
+# (RB-1) over the cap at the base, one test line cut: the landing is admitted and the line carries both sides.
+R="$TMP/ratiob-cut"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_retest "$R" 49
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-1) over the cap at the base, one test line cut: the check passes" 0 "$RC"
+expect_contains "(RB-1) …and prints the head's ratio beside the base's" "test-ratio: 49/10 (base 50/10)" "$OUT"
+expect_absent "(RB-1) …with no refusal beside it" "tests exceed code" "$OUT"
+
+# (RB-2) over the cap at the base, one test line added: refused, in one line that names both sides.
+R="$TMP/ratiob-rise"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_retest "$R" 51
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-2) over the cap at the base, one test line added: the check fails" 1 "$RC"
+expect_contains "(RB-2) …the line names both counts and says tests exceed code at the head" "test-ratio 51/10 — tests exceed code at HEAD" "$OUT"
+expect_contains "(RB-2) …and the base's counts it rose from" "(base 50/10)" "$OUT"
+expect_eq "(RB-2) …in one line" "1" "$(lines_of "$OUT")"
+
+# (RB-3) the same test lines as the base is not a rise.
+R="$TMP/ratiob-same"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+printf ':\n' >> "$R/code.sh"; git -C "$R" add -A; git -C "$R" commit -q -m "one code line more"
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-3) over the cap at the base, test lines unchanged: the check passes" 0 "$RC"
+expect_contains "(RB-3) …printing both ratios" "test-ratio: 50/11 (base 50/10)" "$OUT"
+
+# (RB-4) the control: under the cap at the head, lines added, the base beside the ratio and no refusal.
+R="$TMP/ratiob-under"; fx_ratio "$R" 10 50; RB_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_retest "$R" 20
+run_check_base "$R" "$RB_BASE"
+expect_status "(RB-4) under the cap at the head, test lines added: the check passes" 0 "$RC"
+expect_contains "(RB-4) …printing both ratios" "test-ratio: 20/50 (base 10/50)" "$OUT"
+
+# (RB-5) a base the repository cannot read compares nothing: the head alone is judged, as with no base.
+R="$TMP/ratiob-nobase"; fx_ratio "$R" 50 10
+run_check_base "$R" "0000000000000000000000000000000000000000"
+expect_status "(RB-5) a base that names no commit, a head over the cap: the check fails" 1 "$RC"
+expect_contains "(RB-5) …on the head's counts" "test-ratio 50/10 — tests exceed code at HEAD" "$OUT"
+expect_absent "(RB-5) …with no base counts invented" "(base" "$OUT"
 
 section "§CORR — the 1.19.0 entry names the run and corrects 1.18.0 (REQ-8 AC-8.1, AC-8.3, AC-8.4; REQ-9 AC-9.1, AC-9.2)"
 
@@ -673,44 +766,45 @@ doctor c_edit1180 awk '{ print } /^## 1\.18\.0 — /{ print "" }'
 printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$TMP/plugin.old.json"
 doctor c_nodate sed 's/^## 1\.19\.0 — .*/## 1.19.0 —/'
 
-section "§REL-1.25.0 — the 1.25.0 entry names its rows and carries the run's deferred sentences"
+section "§REL-1.26.0 — the 1.26.0 entry names its rows and carries the run's deferred sentences"
 
-REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-42-sitrep-owes.plan.md"
-# The rows whose Migration bullets name what a script of yours may meet at 1.25.0
-REL_MIG_ROWS="T1 T22 T24 T25"
+REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-43-no-hand-hold.plan.md"
+# The rows whose Migration bullets name what a script of yours may meet at 1.26.0
+REL_MIG_ROWS="T2 T3 T4 T5 T6 T7 T8 T9 T10 T11 T12 T13 T14 T22 T23 T26"
 
 # rel_check <file> <plugin.json> — one `rel:` line per broken rule; no output when all hold
 rel_check() {
   local f="$1" pj="$2" blk mig s
-  blk="$(cl_block "$f" 1.25.0)"
-  [ -n "$blk" ] || { echo "rel: no 1.25.0 block"; return 0; }
-  grep -q -E '^## 1\.25\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rel: the 1.25.0 heading carries no date"
-  mig="$(cl_lead "$f" 1.25.0 | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
+  blk="$(cl_block "$f" 1.26.0)"
+  [ -n "$blk" ] || { echo "rel: no 1.26.0 block"; return 0; }
+  grep -q -E '^## 1\.26\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "rel: the 1.26.0 heading carries no date"
+  mig="$(cl_lead "$f" 1.26.0 | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
   [ -n "$mig" ] || echo "rel: no Migration paragraph"
   for s in $REL_MIG_ROWS; do
     grep -q -w -- "$s" <<<"$mig" || echo "rel: Migration does not name $s"
   done
-  for s in ADR-069; do
+  for s in ADR-070; do
     has "$blk" "$s" || echo "rel: the entry does not name $s"
   done
-  [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = 1.25.0 ] || echo "rel: plugin.json does not read 1.25.0"
+  [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = 1.26.0 ] || echo "rel: plugin.json does not read 1.26.0"
 }
 # rel_world <dir> <changelog> [<extra deferred line>] — a committed repository holding <changelog> as its CHANGELOG and the run's real
-# deferred lines as its plan, so the declared check judges the entry as the door will
+# deferred lines as its plan, each with the moved: lines that later changed its state, so the declared check judges the
+# entry as the door will
 rel_world() {
-  fx_repo "$1" 2.3.4 1.25.0 && lim_plan "$1" 1.25.0 "$(/usr/bin/grep '^deferred: ' "$REL_PLAN")${3:+
+  fx_repo "$1" 2.3.4 1.26.0 && lim_plan "$1" 1.26.0 "$(/usr/bin/grep -E '^(deferred|moved): ' "$REL_PLAN")${3:+
 $3}" &&
   { cat "$2"; printf '\n## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$1/CHANGELOG.md" &&
-  git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the 1.25.0 entry"
+  git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the 1.26.0 entry"
 }
 
 expect_eq "(n1) the version pair reads the newest heading" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
-expect_eq "(n1) …which is 1.25.0" "1.25.0" "$(/usr/bin/grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+expect_eq "(n1) …which is 1.26.0" "1.26.0" "$(/usr/bin/grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
 expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$PLUGIN_JSON")"
-doctor r_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T24/, "Tnn") } { print }'
-expect_contains "(n2) a Migration paragraph that does not name T24: red" "rel: Migration does not name T24" "$(rel_check "$TMP/doctored.r_nomig" "$PLUGIN_JSON")"
-doctor r_noadr sed 's/ADR-069/the third record/g'
-expect_contains "(n2) an entry that does not name ADR-069: red" "rel: the entry does not name ADR-069" "$(rel_check "$TMP/doctored.r_noadr" "$PLUGIN_JSON")"
+doctor r_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T23/, "Tnn") } { print }'
+expect_contains "(n2) a Migration paragraph that does not name T23: red" "rel: Migration does not name T23" "$(rel_check "$TMP/doctored.r_nomig" "$PLUGIN_JSON")"
+doctor r_noadr sed 's/ADR-070/the third record/g'
+expect_contains "(n2) an entry that does not name ADR-070: red" "rel: the entry does not name ADR-070" "$(rel_check "$TMP/doctored.r_noadr" "$PLUGIN_JSON")"
 
 if [ -r "$REL_PLAN" ]; then
   REL_N="$(plan_deferred "$REL_PLAN" | /usr/bin/grep -c .)"
@@ -718,15 +812,15 @@ if [ -r "$REL_PLAN" ]; then
   # strict form (the check fails without the Known limits, one line each) with no edit here.
   if [ "$REL_N" -gt 0 ]; then REL_WANT=1; else REL_WANT=0; fi
   expect_true "(n0) setup: the count of the run's deferred sentences is read" [ "$REL_N" -ge 0 ]
-  cl_block "$CL" 1.25.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel.entry"
-  cl_block "$CL" 1.25.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel.nolimits"
+  cl_block "$CL" 1.26.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel.entry"
+  cl_block "$CL" 1.26.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel.nolimits"
   R="$TMP/rel-real"; rel_world "$R" "$TMP/rel.entry"
   run_check "$R"
   expect_status "(n3) the real entry, every deferred sentence of the run's plan under Known limits: the check passes" 0 "$RC"
   if [ "$REL_N" -gt 0 ]; then
-    expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.25.0 carries the $REL_N deferred sentences" "$OUT"
+    expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.26.0 carries the $REL_N deferred sentences" "$OUT"
   else
-    expect_contains "(n3) …saying the plan states none" "known-limits: 1.25.0 — " "$OUT"
+    expect_contains "(n3) …saying the plan states none" "known-limits: 1.26.0 — " "$OUT"
     expect_contains "(n3) …in those words" "states no deferred sentence" "$OUT"
   fi
   R="$TMP/rel-nolimits"; rel_world "$R" "$TMP/rel.nolimits"

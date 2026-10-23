@@ -17,7 +17,7 @@ set +x +v
 #   3. the Known limits (wave-38 T20; REQ-11 AC-11.4, L8): the release being shipped is the newest
 #      heading the pair reads, and its plan is the run whose frontmatter says `release: <version>`,
 #      found by the walk every reader of a project's runs uses (lib/run.sh `_run_candidates` under
-#      `docs_root` of this checkout's top). Every OPEN deferral of that plan (lib/proof.sh
+#      `docs_root` of the project: BIONIC_CHECK_PROJECT when set, else this checkout's top). Every OPEN deferral of that plan (lib/proof.sh
 #      `proof_findings_owed` rating it `defer`, the reader close-out's continuation carries by) that
 #      states its sentence (the ` stated="…"` field `finding-stated` writes, unescaped) must stand
 #      under the entry's `### Known limits`, both sides folded by lib/said.sh `said_fold`, the one
@@ -45,7 +45,9 @@ set +x +v
 #      the tree at BIONIC_CHECK_HEAD, never the working files. A head whose tests exceed its code is ONE line naming
 #      both counts and exit 1; a head under (equal passes) prints `test-ratio: <tests>/<code>`, the line the release
 #      approval page and the situation report read. A head with no shell file outside tests/ has nothing to count
-#      against: ONE line and exit 2, never a pass. A symlink is a blob of mode 120000 and is not counted, so a
+#      against: ONE line and exit 2, never a pass. A head over its cap is admitted when its test lines are at or under
+#      the tree at BIONIC_CHECK_BASE's, and the line then carries `(base <tests>/<code>)` beside the ratio, so the trend
+#      shows per landing; one that raised them is refused. A symlink is a blob of mode 120000 and is not counted, so a
 #      directory reached through one counts once, by its real files. One `git ls-tree` and one `git cat-file --batch`
 #      read the head: a `git show` per file would cost a minute where this costs a second.
 #
@@ -129,7 +131,11 @@ rel_load() {
     # shellcheck source=/dev/null
     [ -f "$lib/$f" ] && . "$lib/$f" >/dev/null 2>&1 || { echo "release-check: refused — $1 cannot load $lib/$f"; return 2; }
   done
-  TOP="$(git rev-parse --show-toplevel 2>/dev/null)" && TOP="$(cd "$TOP" && pwd -P)" || {
+  # The project is BIONIC_CHECK_PROJECT when the runner names it: the check then runs in a landing tree at the
+  # release base, which holds no plan and no record of its own. Unset, it is this checkout's top.
+  TOP="${BIONIC_CHECK_PROJECT:-}"
+  [ -n "$TOP" ] || TOP="$(git rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$TOP" ] && TOP="$(cd "$TOP" && pwd -P)" || {
     echo "release-check: refused — $1 finds no checkout top"; return 2; }
   DROOT="$(docs_root "$TOP")" || DROOT=""
 }
@@ -213,7 +219,7 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
     return 0
   fi
   h12="${at:0:12}"
-  rep="$(bash "$HERE/../../hooks/session-poker.sh" release-note --at "$at" --on "$on" "$plan" 2>&1)" || {
+  rep="$(cd "$TOP" && bash "$HERE/../../hooks/session-poker.sh" release-note --at "$at" --on "$on" "$plan" 2>&1)" || {
     echo "release-check: refused — release-note cannot render the landing report at $h12: $(printf '%s\n' "$rep" | head -n 1)"; return 2; }
   said="$(nums_fence "$(entry_part "$cl" "$ver" 'The landing numbers')")"
   rep="$(nums_fence "$rep")"
@@ -248,40 +254,52 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
   return "$bad"
 }
-# ratio_check -> `test-ratio: <tests>/<code>` on a pass; one line and exit 1 when tests exceed code, one line and
-# exit 2 when the head cannot be read or holds no shell code outside tests/. The blobs of both sides ride one
-# `git cat-file --batch`: the code side's names follow a name no object has, whose `missing` line splits the stream.
-# A blob is its header line, its newline-counted content and the one newline git prints after it, so its lines are
-# the stream's lines less two. LC_ALL=C keeps awk off multibyte rules for files that are not valid text.
-ratio_check() {
-  local lst nt nc t c sentinel="0000000000000000000000000000000000000000"
+# ratio_count <rev> -> `<tests> <code>` shell lines of the tree at <rev> on stdout, status 0; status 1 when the tree
+# cannot be read, 2 when it holds no shell file outside tests/, 3 when its blobs cannot be read. The blobs of both sides
+# ride one `git cat-file --batch`: the code side's names follow a name no object has, whose `missing` line splits the
+# stream. A blob is its header line, its newline-counted content and the one newline git prints after it, so its lines
+# are the stream's lines less two. LC_ALL=C keeps awk off multibyte rules for files that are not valid text.
+ratio_count() {
+  local rev="$1" lst nt nc c sentinel="0000000000000000000000000000000000000000"
   # One tagged line per counted blob: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
-  lst="$(git ls-tree -r -z "$head" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
+  lst="$(git ls-tree -r -z "$rev" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
     { split($1, m, " "); p = substr($0, length($1) + 2)
       if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print (index(p, "tests/") == 1 ? "T " : "C ") m[3] }')" || lst=""
   nt="$(printf '%s\n' "$lst" | /usr/bin/grep -c '^T ')"
   nc="$(printf '%s\n' "$lst" | /usr/bin/grep -c '^C ')"
-  if [ -z "$lst" ] && ! git rev-parse --verify -q "$head^{tree}" >/dev/null 2>&1; then
-    echo "release-check: refused — test-ratio cannot read the tree at $head"
-    return 2
+  if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
+    return 1
   fi
-  if [ "$nc" -eq 0 ]; then
-    echo "release-check: refused — test-ratio finds no shell file outside tests/ at $head, so there is no code to count tests against"
-    return 2
-  fi
+  [ "$nc" -ne 0 ] || return 2
   c="$({ printf '%s\n' "$lst" | sed -n 's/^T //p'; printf '%s\n' "$sentinel"; printf '%s\n' "$lst" | sed -n 's/^C //p'; } \
     | git cat-file --batch 2>/dev/null | LC_ALL=C awk -v s="$sentinel missing" -v nt="$nt" -v nc="$nc" '
       $0 == s && !cut { cut = NR; next }
-      END { if (!cut) exit 1; printf "%d %d\n", cut - 1 - 2 * nt, NR - cut - 2 * nc }')" || {
-    echo "release-check: refused — test-ratio cannot read the shell files at $head"
-    return 2
-  }
+      END { if (!cut) exit 1; printf "%d %d\n", cut - 1 - 2 * nt, NR - cut - 2 * nc }')" || return 3
+  echo "$c"
+}
+# ratio_check -> `test-ratio: <tests>/<code>` on a pass, with ` (base <tests>/<code>)` when BIONIC_CHECK_BASE names a
+# tree that can be read; one line and exit 1 when tests exceed code, one line and exit 2 when the head cannot be read or
+# holds no shell code outside tests/. A head over the cap is admitted when its test lines are at or under the base's:
+# the cap cannot be met in one landing by a repository that is already over it, and the only landing that must be
+# refused is the one that grows the tests. A base that cannot be read compares nothing, so the head alone is judged.
+ratio_check() {
+  local t c rc t0 c0 base_note="" base="${BIONIC_CHECK_BASE:-}" bc
+  c="$(ratio_count "$head")"; rc=$?
+  case "$rc" in
+    0) : ;;
+    1) echo "release-check: refused — test-ratio cannot read the tree at $head"; return 2 ;;
+    2) echo "release-check: refused — test-ratio finds no shell file outside tests/ at $head, so there is no code to count tests against"; return 2 ;;
+    *) echo "release-check: refused — test-ratio cannot read the shell files at $head"; return 2 ;;
+  esac
   t="${c% *}"; c="${c#* }"
-  if [ "$t" -gt "$c" ]; then
-    echo "release-check: test-ratio $t/$c — tests exceed code at $head"
+  if [ -n "$base" ] && bc="$(ratio_count "$base")"; then
+    t0="${bc% *}"; c0="${bc#* }"; base_note=" (base $t0/$c0)"
+  fi
+  if [ "$t" -gt "$c" ] && ! { [ -n "$base_note" ] && [ "$t" -le "$t0" ]; }; then
+    echo "release-check: test-ratio $t/$c — tests exceed code at $head$base_note"
     return 1
   fi
-  echo "test-ratio: $t/$c"
+  echo "test-ratio: $t/$c$base_note"
 }
 # fold_rc <rc> -> a check's status read into the exit: 0 passes, 1 fails the release, anything else is a refusal.
 fold_rc() {

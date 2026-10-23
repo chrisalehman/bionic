@@ -23,6 +23,8 @@
 #            rows; units_order reads it
 #   §POST    a review row after a landed release is admitted when it reads only approval:plan, head
 #            and the rows landed past the release
+#   §AFTER-PUBLISH  after the release is the record's publish order: a step-4 fix row published past the release
+#            is read as a piece; the record's order reversed refuses; no record falls back to the plan's order
 #   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites,
 #            never a second whole run
 #   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's
@@ -948,6 +950,73 @@ expect_eq "POST-4 the release landed and T9 names no row it reads: refused with 
 po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md, .bionic/docs/record/w/T6.md'
 expect_eq "POST-5 the release landed and T9 reads the fix and a pre-release reading: refused with the order text (rc 1)" "$PO_ORD|1" \
   "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+
+section "§AFTER-PUBLISH — after the release is the order the landing record published in, not the plan's step and table position"
+# A fix row born at step 4 stands ahead of the release row in the plan's order and publishes after it. The reader
+# rule and the release card both ask whether what a review row reads was written after the release, and the numbers
+# re-renderer answers by the record's publish order, so the one question has one answer: the record's order, with
+# the plan's order only where no record names the release row. The plan sits in a repository of its own so the
+# record is found by the plan's name, the way every other reader finds it.
+AP_REPO="$SANDBOX/ap-repo"
+git init -q "$AP_REPO" && mkdir -p "$AP_REPO/.bionic/docs/plans" "$AP_REPO/.bionic/docs/record/ap"
+AP_P="$AP_REPO/.bionic/docs/plans/ap.plan.md"
+AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"
+AP_H="$(printf '%040d' 1)"
+ap_plan() {  # <fix row status> -> AP_P: the POST fixture with the fix row T8 born at step 4, after the release row in the table
+  { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
+    printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
+    printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
+    printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | landed | approval:plan, head |\n'
+    printf '| T8 | 4 | build | the fix born at step 4 | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | %s | approval:plan |\n' "$1"
+  } > "$AP_P"
+  call units_add_row "$AP_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
+    .bionic/docs/record/w/T9-adversarial.md 'approval:plan, head, .bionic/docs/record/w/T8.md' > "$AP_P.new" && mv "$AP_P.new" "$AP_P"
+}
+ap_pub() {  # <row>... -> AP_REC: a published event for each row, in the order given
+  : > "$AP_REC"
+  local r
+  for r in "$@"; do printf 'line/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" >> "$AP_REC"; done
+}
+ap_state() { printf '%s|%s|%s' "$(call units_validate "$AP_P")" "$(call_rc units_validate "$AP_P")" "$(call units_post_readers "$AP_P")"; }
+AP_T9="$(printf 'T9\tpending\tunread')"
+
+ap_plan landed; ap_pub T1 T5 T6 T7 T8
+expect_eq "AP-0 precondition: the record holds both the release row T7 and the fix row T8, T7 first" "T7 T8" \
+  "$(awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i ~ /^row=T[78]$/) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }' "$AP_REC")"
+expect_eq "AP-1 the fix row published after the release: T9 reading its record is admitted (no line, rc 0) and listed for the card" \
+  "|0|$AP_T9" "$(ap_state)"
+ap_pub T1 T5 T6 T8 T7
+expect_eq "AP-2 the same plan with the record's order reversed, the fix published before the release: refused with the order text, nothing listed" \
+  "$PO_ORD|1|" "$(ap_state)"
+rm -f "$AP_REC"
+expect_eq "AP-3 the same plan with no landing record: plan order decides, and the step-4 fix row is not past the release (refused, nothing listed)" \
+  "$PO_ORD|1|" "$(ap_state)"
+ap_plan pending; ap_pub T1 T5 T6 T7
+expect_eq "AP-4 the fix row open and unpublished, the release published: it will publish past the release, so T9 is admitted and listed" \
+  "|0|$AP_T9" "$(ap_state)"
+ap_plan landed; : > "$AP_REC"
+for r in T1 T5 T6 T7 T8; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
+expect_eq "AP-5 a record of landed: headers alone is read in its order too: T8 after T7 is admitted" "|0|$AP_T9" "$(ap_state)"
+ap_plan landed; : > "$AP_REC"
+for r in T1 T5 T6 T8 T7; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
+expect_eq "AP-5b …and with those headers reversed the differential control refuses" "$PO_ORD|1|" "$(ap_state)"
+
+# A PLAN VERB'S DRY COPY NAMES NO RECORD, so the origin plan is the second operand: the record is read from the plan the
+# copy was made from, and the copy is judged as the plan is. The copy sits beside the plan under the name a verb gives it.
+AP_COPY="$AP_P.task-add-dry.4242"
+ap_copy_state() { printf '%s|%s|%s' "$(call units_validate "$AP_COPY" "$1")" "$(call_rc units_validate "$AP_COPY" "$1")" \
+  "$(call units_post_readers "$AP_COPY" "$1")"; }
+ap_plan landed; ap_pub T1 T5 T6 T7 T8; cp "$AP_P" "$AP_COPY"
+expect_eq "AP-6 the copy of a plan whose record published the fix row after the release, judged with the plan as origin: admitted and listed as the plan is" \
+  "$(ap_state)" "$(ap_copy_state "$AP_P")"
+expect_eq "AP-6b …and that answer is an admission, so the equality above is not two refusals" "|0|$AP_T9" "$(ap_copy_state "$AP_P")"
+expect_eq "AP-7 the control: the same copy with no origin names no record and is refused by plan order, nothing listed" "$PO_ORD|1|" "$(ap_copy_state "")"
+ap_pub T1 T5 T6 T8 T7
+expect_eq "AP-8 the copy with the origin whose record published the fix row BEFORE the release: refused with the order text, as the plan is" \
+  "$PO_ORD|1|" "$(ap_copy_state "$AP_P")"
+rm -f "$AP_COPY"
 
 section "§JUDGE — covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run"
 # ============================================================

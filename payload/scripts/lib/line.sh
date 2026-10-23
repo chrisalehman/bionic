@@ -14,6 +14,8 @@
 #   line_publish <plan> <row>       the one publish, under the lock, in the interface's order
 #   line_land_by_hand <tree> <root> <sid> <why> [<suites> <green-at> <log>]  `spawn-worktree.sh land <tree> --by-hand`
 #   line_ready <tree> <root> <sid> <within> <again>  `spawn-worktree.sh ready [--within <s>]` (T4)
+#   line_reviews_state <plan> <root> <commit> <name> <out>   the release entry's `### The reviews`, rendered from the
+#                                   plan (with line_reviews_checkout, line_reviews_commit, line_reviews_move)
 #
 # THE RECORD. One append per line, by the landing record's one write (`_wt_proofs_put`: a private
 # file copied by one write(2), no lock), so two writers' lines never interleave. Nine events:
@@ -33,6 +35,8 @@
 #   stop-run  request who kind key by why, or run name by why   (hooks/session-poker.sh `stop-run`,
 #             through `line_event`; wave-36 T11, D8): an act, not an entry's — the fold below reads no
 #             row from it, and the hand-hold count (`hand_holds_report`) counts it as `stop-runs`
+#   integrate row part commit branch, and close-out part commit branch   (part=reviews: the commit of the release
+#             entry's reviews part, by the verb that made it, `line_reviews_state`): acts, read by no fold
 # A value holding `|` or a line break is refused unwritten: the line is `|`-separated.
 #
 # THE FOLD. `line_state` prints one tab-separated line per entry neither published nor returned:
@@ -514,7 +518,7 @@ _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
 # Sets LINE_NUMBERS (the commit, or empty) and, on a refusal, LINE_NUMBERS_SAID (the renderer's words).
 LINE_NUMBERS_AUTHOR="bionic line"; LINE_NUMBERS_EMAIL="line@bionic.invalid"
 _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothing to make · 1 refused
-  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" r landed="" ver tmp now on note mode blob tree c
+  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" r landed="" ver tmp now on note mode blob tree c jt rn nrc
   LINE_NUMBERS=""; LINE_NUMBERS_SAID=""
   _line_release_row "$plan" "$row" && return 0
   while IFS= read -r r; do
@@ -535,8 +539,22 @@ EOF
     END { exit !f }' "$tmp/old" || { rm -rf "$tmp"; return 0; }
   now="$(date -u +%s)"
   on="$(date -u -r "$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  if ! note="$(cd "$root" 2>/dev/null && bash "$(plugin_root 2>/dev/null)/hooks/session-poker.sh" release-note \
-         --at "$cand" --on "${on:-unreadable}" "$plan" 2>&1)"; then
+  # THE JUDGE'S COPY RENDERS. The release check compares the block with its own release-note, and the copy that runs
+  # is the release base's (lib/worktree.sh `worktree_check_run`), so the block is rendered by that copy too, checked
+  # out in a landing tree: a change to the renderer reaches the entry one release later, never refused by its own
+  # check. A judge that holds no renderer has no copy to compare with, and the plugin's renders.
+  jt=""; rn="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
+  if release_base "$plan" "$root" "$cand" && git -C "$root" cat-file -e "${RB_BASE}:hooks/session-poker.sh" 2>/dev/null; then
+    if ! jt="$(landing_tree_take "$root")" || ! landing_tree_point "$jt" "$RB_BASE"; then
+      [ -z "$jt" ] || landing_tree_free "$jt"
+      LINE_NUMBERS_SAID="no landing tree can be checked out at the release base ${RB_BASE} to render with its release-note"
+      rm -rf "$tmp"; return 1
+    fi
+    rn="${jt}/hooks/session-poker.sh"
+  fi
+  note="$(cd "$root" 2>/dev/null && bash "$rn" release-note --at "$cand" --on "${on:-unreadable}" "$plan" 2>&1)"; nrc=$?
+  [ -z "$jt" ] || landing_tree_free "$jt"
+  if [ "$nrc" -ne 0 ]; then
     LINE_NUMBERS_SAID="${note:-release-note printed nothing}"; rm -rf "$tmp"; return 1
   fi
   printf '%s\n' "$note" > "$tmp/note"
@@ -563,9 +581,205 @@ EOF
   LINE_NUMBERS="$c"
 }
 
+# THE RELEASE ENTRY'S REVIEWS PART, RENDERED FROM THE PLAN. The entry's `### The reviews` part names every review the run
+# registered and every waiver the user gave, so it is the machine's, as the numbers are: one fixed first line, then one
+# bullet per `proved: kind=review` line and per `waived:` line of the plan's unfenced `## SDLC State`, in the order the
+# verbs wrote them. It replaces the entry's own part (its heading to the next heading; a doubled heading is one part), or
+# goes in before the entry's `### Known limits` or `### The landing numbers`, whichever comes first, else at the entry's
+# end. Two verbs write it through these functions, so the two cannot render it differently: the integrate row's
+# `reviews-part`, before the pull request opens, so the merge carries the part to the integration branch, and close-out,
+# for a run whose part no earlier verb wrote. The judge holds a commit of the part covered by what holds at its parent
+# only while it is byte-equal to this render (lib/proof.sh `proof_part_base`), so the render must stay deterministic:
+# the plan's lines and the entry alone decide it.
+line_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing
+  _line_load_proof || return 1
+  awk "$(proof_awk)"'
+    function base(p,   n, e) { n = split(p, e, "/"); return e[n] }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      at = ""; if (match($0, /[ \t]at=[^ \t]+/)) at = substr($0, RSTART + 4, RLENGTH - 4)
+      b[++n] = sprintf("- %s review%s: %s at %s by %s%s%s", PROOF_QUESTION, (PROOF_SCOPE != "" ? ", " PROOF_SCOPE : ""),
+        PROOF_RESULT, substr(PROOF_HEAD, 1, 8), PROOF_READER, (at != "" ? ", " at : ""),
+        (PROOF_EVIDENCE != "" ? " (`" base(PROOF_EVIDENCE) "`)" : ""))
+      next
+    }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      k = index($0, " by "); if (q == "" || !k) next
+      r = substr($0, k + 4); k = index(r, "\"")
+      if (k) { who = substr(r, 1, k - 1); words = substr(r, k) } else { who = r; words = "" }
+      sub(/[ \t]+$/, "", who); at = who; sub(/.*[ \t]/, "", at)
+      if (at ~ /^[0-9][0-9][0-9][0-9]-/ && length(at) < length(who)) { who = substr(who, 1, length(who) - length(at)); sub(/[ \t]+$/, "", who) }
+      else at = ""
+      b[++n] = sprintf("- %s review: waived at %s by %s%s%s", q, substr(h, 1, 8), who, (at != "" ? ", " at : ""),
+        (words != "" ? ": " words : ""))
+    }
+    END {
+      if (!n) exit
+      print "### The reviews"; print ""
+      print "Rendered from the plan'"'"'s review and waiver lines, in the order they were registered."; print ""
+      for (i = 1; i <= n; i++) print b[i]
+      print ""
+    }' "$1"
+}
+line_reviews_entry() {  # <changelog> <version> <part file> -> the changelog with the entry's part rendered
+  awk -v v="## $2 " -v pf="$3" '
+    function put(   l) { if (last != "") print ""; while ((getline l < pf) > 0) print l; close(pf); done = 1; last = "" }
+    /^## / { if (inb && !done) put(); inb = (index($0, v) == 1); inp = 0 }
+    /^### / {
+      t = $0; sub(/[[:space:]]+$/, "", t); inp = 0
+      if (inb && t == "### The reviews") { if (!done) put(); inp = 1; next }
+      if (inb && !done && (t == "### Known limits" || t == "### The landing numbers")) put()
+    }
+    inp { next }
+    { print; last = $0 }
+    END { if (inb && !done) put() }' "$1"
+}
+# line_reviews_state <plan> <root> <commit> <name> <out file> -> what the render would do to <commit>'s CHANGELOG.md
+# (<name> is what the words call the commit, a branch or a head): LINE_RV_STATE `none` (nothing to render, the reason in
+# LINE_RV_SAID), `listed` (the entry already reads as rendered) or `renders` (<out file> holds the file with the part
+# rendered); LINE_RV_VER the release, LINE_RV_N the bullets. rc 1, LINE_RV_SAID saying why, when the render cannot run.
+LINE_RV_STATE=""; LINE_RV_VER=""; LINE_RV_N=0; LINE_RV_SAID=""
+line_reviews_state() {
+  local plan="$1" root="$2" c="$3" nm="$4" out="$5" tmp
+  LINE_RV_STATE=none; LINE_RV_VER=""; LINE_RV_N=0; LINE_RV_SAID=""
+  _line_load_run || { LINE_RV_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
+  LINE_RV_VER="$(plan_frontmatter_get "$plan" release)"
+  [ -n "$LINE_RV_VER" ] || { LINE_RV_SAID="the plan names no release:"; return 0; }
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-reviews.XXXXXX")" || { LINE_RV_SAID="no temporary directory"; return 1; }
+  if ! git -C "$root" show "${c}:CHANGELOG.md" > "$tmp/old" 2>/dev/null; then
+    rm -rf "$tmp"; LINE_RV_SAID="$nm holds no CHANGELOG.md"; return 0
+  fi
+  if ! /usr/bin/grep -q "^## ${LINE_RV_VER} " "$tmp/old"; then
+    rm -rf "$tmp"; LINE_RV_SAID="CHANGELOG.md on $nm holds no ## $LINE_RV_VER entry"; return 0
+  fi
+  if ! line_reviews_part "$plan" > "$tmp/part"; then
+    rm -rf "$tmp"; LINE_RV_SAID="the proof library ($_LINE_LIB_DIR/proof.sh) cannot be loaded to read the plan's reviews"; return 1
+  fi
+  LINE_RV_N="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
+  [ "${LINE_RV_N:-0}" -gt 0 ] || { rm -rf "$tmp"; LINE_RV_N=0; LINE_RV_SAID="the plan registers no review and no waiver"; return 0; }
+  line_reviews_entry "$tmp/old" "$LINE_RV_VER" "$tmp/part" > "$out"
+  if cmp -s "$tmp/old" "$out"; then LINE_RV_STATE=listed; else LINE_RV_STATE=renders; fi
+  rm -rf "$tmp"
+}
+# line_reviews_checkout <root> <branch> -> nothing when the branch can take a commit of CHANGELOG.md, else why not: the
+# checkout that holds it takes the commit by a fast-forward, which a changed CHANGELOG.md there would refuse, so this is
+# asked before the commit is made, and a branch held in two places has no one checkout to move.
+line_reviews_checkout() {
+  local co rc
+  co="$(worktree_checkout_of "$1" "$2")"; rc=$?
+  if [ "$rc" -ge 2 ]; then printf '%s is checked out in more than one place (%s)' "$2" "${co// /, }"; return 0; fi
+  if [ "$rc" -eq 0 ] && [ -n "$(git -C "$co" status --porcelain -- CHANGELOG.md 2>/dev/null)" ]; then
+    printf 'CHANGELOG.md is changed in %s, the checkout holding %s: commit or restore it' "$co" "$2"
+  fi
+}
+# line_reviews_commit <root> <parent> <file> <author> <email> <message> -> LINE_RV_COMMIT, the commit of <file> as
+# CHANGELOG.md on <parent>, made in the object store alone (nothing moves); rc 1 with LINE_RV_SAID saying why
+LINE_RV_COMMIT=""
+line_reviews_commit() {
+  local root="$1" tip="$2" f="$3" tmp mode blob tree c
+  LINE_RV_COMMIT=""
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-reviews-commit.XXXXXX")" || { LINE_RV_SAID="no temporary directory"; return 1; }
+  mode="$(git -C "$root" ls-tree "$tip" CHANGELOG.md 2>/dev/null | awk '{ print $1 }')"
+  if blob="$(git -C "$root" hash-object -w --path CHANGELOG.md "$f" 2>&1)" \
+     && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$tip" >/dev/null 2>&1 \
+     && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
+     && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
+     && c="$(GIT_AUTHOR_NAME="$4" GIT_AUTHOR_EMAIL="$5" git -C "$root" commit-tree "$tree" -p "$tip" -m "$6" 2>&1)"; then
+    rm -rf "$tmp"; LINE_RV_COMMIT="$c"; return 0
+  fi
+  rm -rf "$tmp"
+  LINE_RV_SAID="the commit on ${tip:0:12} cannot be made: ${c:-${tree:-${blob:-git refused}}}"
+  return 1
+}
+# line_reviews_move <root> <branch> <commit> <old> <reflog words> -> the branch at <commit>: a fast-forward in the
+# checkout that holds it, so that checkout is never left behind it, else the ref moved from <old>; rc 1 when it cannot.
+# The branch moves on this machine alone: pushing it is the person's act.
+line_reviews_move() {
+  local co rc
+  co="$(worktree_checkout_of "$1" "$2")"; rc=$?
+  case $rc in
+    0) GIT_REFLOG_ACTION="$5" git -C "$co" merge --ff-only -q "$3" >/dev/null 2>&1 ;;
+    1) git -C "$1" update-ref -m "$5" "refs/heads/$2" "$3" "$4" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# THE FIX BORN OF A FAILING REVIEW. Once the plan reads `current: 8` or `9` the run has been judged for integration,
+# and the door refuses every landing but one: a row whose born marker (`task-add --born <record>#<n>`, lib/units.sh
+# `units_born_findings`) names a finding of the review that is its question's newest reading and derives `fail`.
+# That row is what answers the review, so the step never has to move back for it. Which review that is, and whether it
+# fails, is the judge's own answer (lib/proof.sh `facts_state`: the reading's result through `_proof_reading_derive`
+# over `proof_fixed`), so the door, the step advance and the gate cannot disagree on it. A row born of a regression's
+# red names no review record and is not admitted. When the row publishes, the same judge is asked again: a question
+# its born records answer that no longer derives `fail` has its `waive:<q>` ask closed on the run's register
+# (lib/owed.sh `owed_close`), so neither a waiver nor a step back is needed. Fail closed: a judge that cannot answer
+# admits nothing and closes nothing.
+_line_born_records() {  # <plan> <row> -> each review record the row's born marker names, once each
+  _wt_units_load || return 1
+  units_born_findings "$1" 2>/dev/null | awk -F'\t' -v r="$2" '
+    $1 == r { sub(/#[0-9]+$/, "", $3); if (!($3 in s)) { s[$3] = 1; print $3 } }'
+}
+_line_judged() {  # <plan> -> the judge's lines at the accepted head; 1 when it cannot answer
+  local head out rc
+  _line_load_proof && declare -F facts_state >/dev/null 2>&1 || return 1
+  head="$(line_head "$1")" && [ -n "$head" ] || return 1
+  out="$(facts_state "$1" "$head" 2>/dev/null)"; rc=$?
+  [ "$rc" -le 1 ] || return 1
+  printf '%s\n' "$out"
+}
+_line_failing() {  # <judge's lines> <records, one a line> -> the question of each review failing on one of the records
+  printf '%s\n' "$1" | LINE_RECS="$2" awk -F'\t' '
+    BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
+    $1 == "review" && $5 == "failing" && ($6 in want) && !($2 in s) { s[$2] = 1; print $2 }'
+}
+line_born_failing() {  # <plan> <root> <tree abs> -> 0 when the tree's row is born of a finding of a failing review
+  local row recs judged
+  row="$(_wt_proofs_row "$2" "$1" "$3")" && [ -n "$row" ] || return 1
+  recs="$(_line_born_records "$1" "$row")" && [ -n "$recs" ] || return 1
+  judged="$(_line_judged "$1")" || return 1
+  [ -n "$(_line_failing "$judged" "$recs")" ]
+}
+_line_load_owed() {
+  declare -F owed_close >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/owed.sh" ] && . "$_LINE_LIB_DIR/owed.sh" 2>/dev/null
+  declare -F owed_close >/dev/null 2>&1
+}
+# The questions a born row's records were read for are those of the plan's review proof lines naming one of them;
+# each that the judge no longer finds failing has its ask closed, by the landing.
+_line_born_close() {  # <plan> <root> <row>
+  local recs qs judged q
+  recs="$(_line_born_records "$1" "$3")" && [ -n "$recs" ] || return 0
+  _line_load_proof || return 0
+  qs="$(LINE_RECS="$recs" awk "$(proof_awk)"'
+    BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && (PROOF_EVIDENCE in want) \
+      && !(PROOF_QUESTION in s) { s[PROOF_QUESTION] = 1; print PROOF_QUESTION }' "$1" 2>/dev/null)"
+  [ -n "$qs" ] || return 0
+  judged="$(_line_judged "$1")" || return 0
+  _line_load_owed || return 0
+  for q in $qs; do
+    printf '%s\n' "$judged" | awk -F'\t' -v q="$q" '$1 == "review" && $2 == q && $5 == "failing" { y = 1 } END { exit !y }' \
+      && continue
+    OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${LINE_SID:-line}" owed_close "waive:${q}" "landing ${3}" >/dev/null 2>&1
+  done
+  return 0
+}
+
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
-  local name com present base cand out sui car cbase cat br tr co rc run moved at rundir lt tip
+  local name com present base cand out sui car cbase cat br tr co rc run moved at tip
   rec="$(line_record "$plan")" && root="$(_line_root "$plan")" && branch="$(_line_branch "$plan")" \
     || { _wt_refuse "line-unreadable plan=${plan:-<none>}"; return 2; }
   lk="$(_line_lock_dir "$rec")"
@@ -607,14 +821,9 @@ EOF
     return 2
   fi
   tip="${LINE_NUMBERS:-$cand}"
-  # 5. THE PROJECT'S RELEASE CHECK, READ FROM THE ACCEPTED HEAD: in the checkout that holds the
-  # branch, or in a landing tree pointed at the accepted head when none does (recheck Q3, O3).
-  rundir="$co"; lt=""
-  if [ -z "$rundir" ] && [ -n "$(config_value "$root" release-check "" 2>/dev/null)" ]; then
-    lt="$(landing_tree_take "$root")" && landing_tree_point "$lt" "$head" && rundir="$lt"
-  fi
-  _wt_release_check "$root" "${rundir:-$root}" "$head" "$tip" "$tr" "$br" "$branch" "$row"; rc=$?
-  [ -z "$lt" ] || landing_tree_free "$lt"
+  # 5. THE PROJECT'S RELEASE CHECK over the accepted head to the tip, as the release base holds it
+  # (lib/worktree.sh `worktree_check_run`, in a landing tree of its own).
+  _wt_release_check "$root" "$plan" "$head" "$tip" "$tr" "$br" "$branch" "$row"; rc=$?
   [ "$rc" -eq 0 ] || { _line_lock_drop "$lk"; return 2; }
   # 6. THE DEBT WRITE (wave-28 T5; D8, AC-9.4): a declared red's `debt:` line, at the publish's own
   # instant, before the fast-forward (else rc 2, nothing published).
@@ -658,6 +867,9 @@ EOF
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
+  # 11. THE REVIEW A BORN ROW ANSWERS, asked again once the row reads landed (`_line_born_close`), outside the lock:
+  # the judge reads git and the record, and no publish waits on it.
+  _line_born_close "$plan" "$root" "$row"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
   return 0
 }
@@ -692,6 +904,24 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   plan="$(session_plan "$root" "$sid")" || { _wt_refuse "no-bound-plan sid=${sid}"; return 2; }
   ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" "$suites" "$at" "$log" )
 }
+# THE WRITER'S RUN, IN THE PERSON'S WORDS: the two writers of what a hand landing records of the row's suites, one for
+# both hand landings (`land --by-hand` above and `session-poker.sh row-landed --by-hand`), so the record they leave is
+# one shape and the floor's judge (lib/proof.sh `_proof_past_f`) proves either. `_line_hand_ready` writes the row's
+# `ready` event, naming the suites (`none` when the person named none), and sets LINE_ME, the carrier a publish locks
+# by. `_line_hand_verdicts` writes one green verdict per suite, keyed by the commit they were green at, the log that
+# source; a suite it cannot write is left in LINE_UNWRITTEN. The ready event goes before the published line the
+# judge reads the row's suites from, the verdicts anywhere after it.
+_line_hand_ready() {  # <plan> <row> <commit> <branch> <tree> <suites | empty> -> 0 written
+  _line_me
+  line_event "$1" ready "row=$2" "name=-" "commit=$3" "branch=$4" "tree=$5" "suites=${6:-none}" debt=- "carrier=${LINE_ME}"
+}
+_line_hand_verdicts() {  # <plan> <row> <green-at> <suites> <log> -> 0 written; 1 with LINE_UNWRITTEN the suite that was not
+  local s
+  LINE_UNWRITTEN=""
+  for s in $(printf '%s\n' "$4" | tr ',' ' '); do
+    LINE_WIDTH=- _line_verdict_put "$1" "$2" "$3" "$s" green "$5" >/dev/null || { LINE_UNWRITTEN="$s"; return 1; }
+  done
+}
 _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <log> — the carrier's own subshell
   local target="$1" onto="$2" plan="$3" sid="$4" why="$5" suites="$6" at="$7" vlog="$8" wt root branch head acc rec row by c lt lb rc i n s g="" lo lc
   _wt_land_checks "$target" "$onto" "$plan" 0 || return 2
@@ -713,9 +943,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   by="$(git -C "$root" config user.name 2>/dev/null)"
   [ -n "$by" ] || by="$(git -C "$root" var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/ <.*//')"
   by="${by//|/}"; [ -n "$by" ] || by="-"
-  _line_me
-  line_event "$plan" ready "row=${row}" "name=-" "commit=${head}" "branch=${branch}" "tree=${wt}" "suites=${suites:-none}" debt=- \
-    "carrier=${LINE_ME}" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
+  _line_hand_ready "$plan" "$row" "$head" "$branch" "$wt" "$suites" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
   LINE_KIND=hand; LINE_BY="$by"; LINE_WHY="$why"; LINE_SID="$sid"
   n="${BIONIC_LINE_HAND_WAIT:-900}"; case "$n" in ''|*[!0-9]*) n=900 ;; esac
   lt=""; lb=""; i=0; rc=3
@@ -757,10 +985,8 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
   if [ -n "$suites" ]; then
-    for s in $(printf '%s\n' "$suites" | tr ',' ' '); do
-      LINE_WIDTH=- _line_verdict_put "$plan" "$row" "$g" "$s" green "$vlog" >/dev/null \
-        || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — published ${LINE_PUBLISHED}; the verdict for ${s} at ${g} is not recorded"; return 2; }
-    done
+    _line_hand_verdicts "$plan" "$row" "$g" "$suites" "$vlog" \
+      || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — published ${LINE_PUBLISHED}; the verdict for ${LINE_UNWRITTEN} at ${g} is not recorded"; return 2; }
     printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
   fi
   _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?

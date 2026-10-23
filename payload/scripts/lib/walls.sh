@@ -4701,7 +4701,7 @@ validate_dispatch_ledger() {
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows id ev violations findings _eg_ph
+  local tasks rows id ev violations findings _eg_ph _eg_origin
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4744,7 +4744,12 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
   rows="$(units_rows "$PLAN")" || return 0
   [ -n "$rows" ] || return 0
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  violations="$(units_validate "$PLAN")" || true
+  # THE ORIGIN IS READ ONLY FOR THE PLAN THE COLLECTOR RESOLVED IT FOR. A dry commit is bound to a copy that names no
+  # landing record, so "after the release" is judged on the record of the plan the copy was made from; for any other
+  # plan the operand is empty and the plan is its own origin.
+  _eg_origin=""
+  [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || _eg_origin="${BIONIC_DEBTS_ORIGIN:-}"
+  violations="$(units_validate "$PLAN" "$_eg_origin")" || true
   if [ -n "$violations" ]; then
     _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan's '## Tasks' table breaks the Task invariants:
 ${violations}

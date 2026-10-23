@@ -696,8 +696,9 @@ co_hand_holds() {  # -> sets CO_HH_LINE
 # stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
 # minutes), then the fact sheet's pace, correctness and waste lines, byte for byte (hooks/session-poker.sh
 # `scorecard_report` owns the rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads
-# the lines before the wipe into CO_SC_LINES and the card and the continuation print that one reading. A report that
-# cannot be read is a sentence.
+# the lines before the wipe into CO_SC_LINES and the continuation's `## Scorecard` prints that one reading. Nothing
+# prints them on stdout: the close-out report shows its ten parts, and the lines live in the continuation. A report
+# that cannot be read is a sentence.
 CO_SC_LINES=""
 co_scorecard() {  # -> sets CO_SC_LINES
   local out
@@ -705,12 +706,69 @@ co_scorecard() {  # -> sets CO_SC_LINES
   if [ -n "$out" ]; then CO_SC_LINES="$out"
   else CO_SC_LINES="scorecard: not read — session-poker.sh landing-report --scorecard $PLAN could not be read"; fi
 }
-co_scorecard_card() {  # -> the reading on the card, one `scorecard: ` line each
-  [ -n "$CO_SC_LINES" ] || co_scorecard
-  case "$CO_SC_LINES" in
-    "scorecard: not read "*) printf '%s\n' "$CO_SC_LINES" ;;
-    *) printf '%s\n' "$CO_SC_LINES" | sed 's/^/scorecard: /' ;;
+
+# THE RELEASE ENTRY'S REVIEWS, RENDERED FROM THE PLAN. The entry's `### The reviews` part is the machine's: lib/line.sh
+# `line_reviews_state` renders it, the one renderer the integrate row's `reviews-part` uses too. That verb writes it
+# before the pull request opens, so the merge carries it to the integration branch and close-out finds it already
+# listed and writes nothing. A run whose part no earlier verb wrote, one with no pull request among them, gets it here:
+# the commit is made in the object store on the working branch's tip, under close-out's own author, as the line makes
+# its numbers commit. `run` makes it before its first act, so a commit that cannot be made refuses with nothing done,
+# and publishes it after the merge acts: the branch moves to it (lib/line.sh `line_reviews_move`) and the landing
+# record gains `ev=close-out|part=reviews|commit=<c>|branch=<working>`, so the branch holds no commit the record does
+# not name. No `release:`, no CHANGELOG.md on the branch, no entry for the release, no review or waiver registered, or a
+# part that already reads as rendered: nothing is made and no line is written.
+# Sets CO_RV_LINE (the `reviews:` line's words), CO_RV_COMMIT (the commit, made, not yet published), CO_RV_BASE.
+CO_RV_AUTHOR="bionic close-out"; CO_RV_EMAIL="close-out@bionic.invalid"
+CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
+co_line_load() {  # -> 0 once lib/line.sh (the renderer, the landing record's writer and the checkout reader) is loaded
+  declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$CO_LIB/line.sh" ] && . "$CO_LIB/line.sh" >/dev/null 2>&1
+  declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1
+}
+co_reviews_prepare() {  # <check|run> -> CO_RV_LINE, and in run CO_RV_COMMIT; rc 1 when run cannot make the commit
+  local mode="$1" tip tmp why
+  CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
+  [ -n "$RELEASE" ] || { CO_RV_LINE="none — the plan names no release:"; return 0; }
+  tip="$(git -C "$ROOT" rev-parse --verify -q "refs/heads/${WORKING}^{commit}" 2>/dev/null)" \
+    || { CO_RV_LINE="none — $WORKING is not a branch in $ROOT"; return 0; }
+  co_line_load || { CO_RV_LINE="not rendered — $CO_LIB/line.sh, the renderer and the landing record's writer, cannot be loaded"; return 1; }
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/close-out-reviews.XXXXXX")" || { CO_RV_LINE="not rendered — no temporary directory"; return 1; }
+  if ! line_reviews_state "$PLAN" "$ROOT" "$tip" "$WORKING" "$tmp/new"; then
+    rm -rf "$tmp"; CO_RV_LINE="not rendered — $LINE_RV_SAID"; return 1
+  fi
+  case "$LINE_RV_STATE" in
+    none) rm -rf "$tmp"; CO_RV_LINE="none — $LINE_RV_SAID"; return 0 ;;
+    listed) rm -rf "$tmp"
+      CO_RV_LINE="the $LINE_RV_VER entry's ### The reviews already lists the plan's $LINE_RV_N review and waiver lines"; return 0 ;;
   esac
+  if [ "$mode" = check ]; then
+    rm -rf "$tmp"
+    CO_RV_LINE="run would render $LINE_RV_N review and waiver lines under ### The reviews of the $LINE_RV_VER entry and commit them on $WORKING @ ${tip:0:12}"
+    return 0
+  fi
+  why="$(line_reviews_checkout "$ROOT" "$WORKING")"
+  [ -z "$why" ] || { rm -rf "$tmp"; CO_RV_LINE="not rendered — $why"; return 1; }
+  if line_reviews_commit "$ROOT" "$tip" "$tmp/new" "$CO_RV_AUTHOR" "$CO_RV_EMAIL" \
+       "close-out: the $LINE_RV_VER entry's reviews, rendered from the plan"; then
+    rm -rf "$tmp"
+    CO_RV_COMMIT="$LINE_RV_COMMIT"; CO_RV_BASE="$tip"
+    CO_RV_LINE="$LINE_RV_N review and waiver lines rendered under ### The reviews of the $LINE_RV_VER entry, committed ${CO_RV_COMMIT:0:12} on $WORKING"
+    return 0
+  fi
+  rm -rf "$tmp"
+  CO_RV_LINE="not rendered — on $WORKING: $LINE_RV_SAID"
+  return 1
+}
+co_reviews_publish() {  # -> the branch at CO_RV_COMMIT and its close-out event recorded; rc 1 with CO_RV_LINE saying why
+  [ -n "$CO_RV_COMMIT" ] || return 0
+  if ! line_reviews_move "$ROOT" "$WORKING" "$CO_RV_COMMIT" "$CO_RV_BASE" "close-out: reviews"; then
+    CO_RV_LINE="not published — $WORKING could not be moved from ${CO_RV_BASE:0:12} to ${CO_RV_COMMIT:0:12}"
+    return 1
+  fi
+  line_event "$PLAN" close-out part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" && return 0
+  CO_RV_LINE="$WORKING moved to ${CO_RV_COMMIT:0:12}, and the landing record could not be written: append ev=close-out|part=reviews|commit=$CO_RV_COMMIT|branch=$WORKING to $(line_record "$PLAN" 2>/dev/null || printf 'the record')"
+  return 1
 }
 # WHAT GOVERNED THE RUN, READ BEFORE THE WIPE (wave-36 T2; D7, REQ-1 AC-1.4, ADR-055). hooks/session-start.sh writes
 # one load record per session start under the project's tmp (wave-36 T1): `root=`, `commit=` when the root is a
@@ -1908,7 +1966,7 @@ write_plan_blocks() {
 
 # ─── The gate ────────────────────────────────────────────────────────────────
 
-# gate_ask <plan-file> <sid> -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
+# gate_ask <plan-file> <sid> [<dry_of>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
 # (its one refusal line) for a `git commit` judged against <plan-file>. Status 9, with
 # GATE_LINE saying why, when there is no gate to ask; 0 otherwise, whatever the verdict.
 #
@@ -1931,14 +1989,14 @@ GATE_RC=0
 GATE_ERR=""
 GATE_LINE=""
 gate_ask() {
-  local plan="$1" sid="$2" hook marker input
+  local plan="$1" sid="$2" dry_of="${3:-}" hook marker input
   GATE_RC=9; GATE_ERR=""; GATE_LINE=""
   hook="$(plugin_root)/hooks/bash-walls.sh"
   [ -f "$hook" ] || { GATE_LINE="no bash-walls.sh at $hook"; return 9; }
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
     || { GATE_LINE="could not build an engagement marker path for the dry-run"; return 9; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+  printf 'plan=%s\n%sengaged_at=%s\n' "$plan" "${dry_of:+dry_of=$dry_of$'\n'}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
       cwd: $cwd,
@@ -2108,7 +2166,7 @@ co_facts_says() {
   printf '%s\n' "$1" | awk -F'\t' '
     NF == 0 { next }
     { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent)$/) { st = $i; break }
-      if ($1 == "review") w = "the " $2 " review"; else if ($1 == "floor") w = "the regression"
+      if ($1 == "review") w = "the " $2 " review"; else if ($1 == "regression") w = "the regression"
       else if ($1 == "check") w = "the release check"; else if ($1 == "debt") w = $2; else w = "a proof the run owes"
       if (w in seen) next
       seen[w] = 1; n++
@@ -2139,7 +2197,7 @@ gate_preflight() {
     PREFLIGHT_LINE="${out#bionic: close-out refused — }"
     return 0
   fi
-  gate_ask "$copy" "closeout-preflight-$$"
+  gate_ask "$copy" "closeout-preflight-$$" "$PLAN"
   rm -f "$copy"; CO_SCRATCH=""
   [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
   PREFLIGHT_RC="$GATE_RC"
@@ -2275,6 +2333,8 @@ do_check() {
   else
     say "worktree-removed: ${wt_desc}"
   fi
+  co_reviews_prepare check
+  say "reviews: $CO_RV_LINE"
 
   co_orphans check
   co_regression_runs
@@ -2283,8 +2343,6 @@ do_check() {
   say "$CO_HH_LINE"
   co_governed
   say "$CO_GOV_LINES"
-  co_scorecard
-  co_scorecard_card
   count="$(tmp_count)"
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
@@ -2406,6 +2464,7 @@ do_run() {
       "the commit gate would refuse the plan this run would write (rc=$PREFLIGHT_RC) — nothing was done: no branch deleted, no tmp wiped, no continuation or epic row written"
   fi
                     say "preflight: the commit gate allows the plan this run will write"
+  co_reviews_prepare run || _co_held "the release entry's reviews cannot be rendered" "$CO_RV_LINE — nothing was done"
   if [ "$PARKED" = yes ]; then
     MERGE_LINE="$(co_parked_merge_line)"; say "merge: $MERGE_LINE"
     LANDS_LINE="none — parked, no merge lands a row"; say "rows-landed: $LANDS_LINE"
@@ -2415,11 +2474,14 @@ do_run() {
     act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
     act_worktrees;  say "worktree-removed: $WT_LINE"
   fi
+  co_reviews_publish || _co_held "the release entry's reviews are not published" "$CO_RV_LINE"
+                    say "reviews: $CO_RV_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
   co_hand_holds;    say "$CO_HH_LINE"
   co_governed;      say "$CO_GOV_LINES"
-  co_scorecard;     co_scorecard_card
+  # Read before act_tmp wipes the rosters it counts: the continuation's `## Scorecard` prints this reading.
+  co_scorecard
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"

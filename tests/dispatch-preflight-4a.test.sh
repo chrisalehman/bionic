@@ -372,7 +372,9 @@ walk_fill() {  # <questions> <records, ", "-joined> <suites value|none> -> a rea
       "Expected artifact") value="${recs%%,*}" ;;
       "Progress artifact") value=".bionic/docs/record/wave-01-test/T3-read.progress" ;;
       "Cadence")           value="15" ;;
-      "Files")             value="$recs" ;;
+      # The Files comment quotes `<suite>` of its own, so the placeholder ends at the FIRST `>`; the last one would
+      # keep a fragment of the comment in the cell.
+      "Files") line="Files: ${recs}${line#*>}"; value="" ;;
       # `<q>[, <q>]` holds a `>` before its `]`, so the span is cut at the `]`, comment kept.
       "Questions") line="Questions: ${qs}${line#*\]}"; value="" ;;
       "Suites") [ "$suites" = none ] || line="Suites: ${suites}${line#Suites: none}"; value="" ;;

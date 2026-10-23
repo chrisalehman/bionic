@@ -531,8 +531,9 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
-  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why>]   the landing's row: status, step line, ledger line, one write"
+  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path>]]   the landing's row: status, step line, ledger line, one write; a hand landing's suites, their green commit and log are written to the landing record with it"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
+  die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
@@ -962,12 +963,27 @@ case "$VERB" in
     fi
     ;;
   # THE LANDING'S ROW (wave-28 T6; D7, A-orch-81): an id, the landed commit (40 hex) and the
-  # publish's instant (ISO-UTC); a hand landing adds `--by-hand <who> <why>`. The shapes are the
+  # publish's instant (ISO-UTC); a hand landing adds `--by-hand <who> <why>` and may add the writer's suites,
+  # `--suites <a,b> --green-at <commit> --log <path>`, all three or none. The shapes are the
   # usage error's; the values a plan cannot hold are the verb's own refusal.
   row-landed)
-    RL_BY=""; RL_WHY=""; RL_HAND=0
-    if [ $# -eq 6 ] && [ "$4" = "--by-hand" ]; then RL_HAND=1; RL_BY="$5"; RL_WHY="$6"; set -- "$1" "$2" "$3"; fi
-    [ $# -eq 3 ] && [ -n "$1" ] || usage "row-landed takes <id> <40-hex commit> <ISO-UTC> [--by-hand <who> <why>]."
+    RL_BY=""; RL_WHY=""; RL_HAND=0; RL_SUITES=""; RL_GREEN=""; RL_VLOG=""
+    if [ $# -ge 6 ] && [ "$4" = "--by-hand" ]; then
+      RL_HAND=1; RL_BY="$5"; RL_WHY="$6"; RL_HEAD3=("$1" "$2" "$3"); shift 6
+      while [ $# -ge 2 ]; do
+        case "$1" in
+          --suites) RL_SUITES="$2" ;;
+          --green-at) RL_GREEN="$2" ;;
+          --log) RL_VLOG="$2" ;;
+          *) break ;;
+        esac
+        shift 2
+      done
+      set -- "${RL_HEAD3[@]}" "$@"
+      { [ -z "${RL_SUITES}${RL_GREEN}${RL_VLOG}" ] || { [ -n "$RL_SUITES" ] && [ -n "$RL_GREEN" ] && [ -n "$RL_VLOG" ]; }; } \
+        || usage "row-landed --by-hand: the writer's suites are --suites <a,b> --green-at <commit> --log <path>, all three or none."
+    fi
+    [ $# -eq 3 ] && [ -n "$1" ] || usage "row-landed takes <id> <40-hex commit> <ISO-UTC> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path>]]."
     case "$2" in *[!0-9a-f]*|'') usage "row-landed: '$2' is not a 40-hex commit." ;; esac
     [ "${#2}" -eq 40 ] || usage "row-landed: '$2' is not a 40-hex commit."
     case "$3" in
@@ -981,6 +997,11 @@ case "$VERB" in
   deliver)
     [ $# -eq 1 ] && [ -n "$1" ] || usage "deliver takes one argument: the row id (the head and the instant are the verb's own)."
     PV_ID="$1"; RL_COMMIT=""; RL_AT=""; RL_ARTIFACT=""; RL_BY=""; RL_WHY=""; RL_HAND=0
+    ;;
+  # THE INTEGRATE ROW'S RENDER OF THE ENTRY'S REVIEWS: the row id alone; the head is the working branch's.
+  reviews-part)
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "reviews-part takes one argument: the integrate row's id."
+    PV_ID="$1"
     ;;
   step-line)
     PV_APPEND=""
@@ -2741,38 +2762,7 @@ FINDING_READ
   return 0
 }
 
-# THE LAST RELEASE (wave-27 T31; review pass 22 S2; one function since wave-39 T13, read by the release-check verb and
-# by the hand landing's scan): release_base <plan> <checkout> <head> sets RB_BASE, the 40-hex start of the release range,
-# and RB_FROM saying where it came from (`tag <t> on <branch>` | `base-sha <s>`), and RB_IB and RB_BS for a refusal to
-# name; 1 when there is none. The nearest tag reachable from the plan's `integration-branch:` that is a PROPER ancestor
-# of <head> (the fewest commits from it to <head>): a tag on <head>, or on a commit not on its history, is no base, for
-# the range it opens would hold nothing or the wrong thing. With none, the plan's `base-sha:` (lib/proof.sh
-# `proof_plan_base`, which the caller has loaded).
-release_base() {  # <plan> <checkout> <head>
-  local plan="$1" co="$2" head="$3" t tc tn best=""
-  RB_BASE=""; RB_FROM=""; RB_BS=""
-  RB_IB="$(plan_integration_branch "$plan")"
-  if [ -n "$RB_IB" ]; then
-    while IFS= read -r t; do
-      [ -n "$t" ] || continue
-      tc="$(git -C "$co" rev-parse --verify -q "refs/tags/$t^{commit}" 2>/dev/null)" || continue
-      [ "$tc" != "$head" ] || continue
-      git -C "$co" merge-base --is-ancestor "$tc" "$head" 2>/dev/null || continue
-      tn="$(git -C "$co" rev-list --count "$tc..$head" 2>/dev/null)" || continue
-      if [ -z "$best" ] || [ "$tn" -lt "$best" ]; then
-        best="$tn"; RB_BASE="$tc"; RB_FROM="tag $t on $RB_IB"
-      fi
-    done <<RB_TAGS
-$(git -C "$co" tag --merged "refs/heads/$RB_IB" 2>/dev/null)
-RB_TAGS
-  fi
-  if [ -z "$RB_BASE" ]; then
-    RB_BS="$(proof_plan_base "$plan" "$co")"
-    [ -z "$RB_BS" ] || RB_BASE="$(git -C "$co" rev-parse --verify -q "$RB_BS^{commit}" 2>/dev/null)"
-    RB_FROM="base-sha $RB_BS"
-  fi
-  [ -n "$RB_BASE" ]
-}
+# THE LAST RELEASE is lib/worktree.sh `release_base`, the one judge the verb, the hand scan and the release card read.
 
 launch_sync_unlock() {
   [ -n "$LAUNCH_SYNC_LOCK" ] && rm -rf "$LAUNCH_SYNC_LOCK" 2>/dev/null
@@ -3484,6 +3474,7 @@ case "$VERB" in
   task-add) poker_verb_task_add "$@" ;;
   task-set|ledger-add|ledger-set) poker_verb_task_set "$@" ;;
   row-landed|deliver) poker_verb_row_landed "$@" ;;
+  reviews-part) poker_verb_reviews_part "$@" ;;
   step-line) poker_verb_step_line "$@" ;;
   step-field) poker_verb_step_field "$@" ;;
   matrix-render) poker_verb_matrix_render "$@" ;;

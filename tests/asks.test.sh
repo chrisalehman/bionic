@@ -14,10 +14,17 @@
 # §HELD          a close-out refused at Step 8 holds the merge, `hold:merge`, titled `merge held: <what holds it>` in a
 #                person's words, the refusal its reply, from `run` and from `check` alike; a refusal before Step 8
 #                holds nothing; the run that delivers closes it
+# §HELD-FILL     while `hold:merge` is open the tick offers no FILL naming the integrate row, says `WAIT T<n> — hold:merge
+#                open: <title>` for it, and the stop wall ends the turn; with the hold closed the same fixture offers it,
+#                says no hold and the wall refuses (the differential control)
 # §FAILED        `proof-add review … result=fail` opens `waive:<question>` at once; a passing reading of it closes it
+# §FLAG          a review whose result is `flag` opens no `waive:`, recorded by the verb or met by the preflight (a finding of it
+#                fixed by a landed row); the same projects with a failing reading newest open it (the differential control)
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
 # §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
+# §BORN-CLOSES   a fix born of a failing review's finding lands by `ready` at Step 8 and its green landing closes
+#                `waive:<question>`, with no step advance; a landing after which the review still derives fail leaves it open
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -35,6 +42,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "asks: jq absent — suite cannot run"; exit 1; }
@@ -44,10 +52,10 @@ AS_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 # The close-out fixture's builders, read by name out of tests/close-out.prelude.sh, so this suite holds no second
 # copy of the fixture and a builder that changes there changes here.
 CO_TESTS="$(dirname "$0")/close-out.prelude.sh"
-as_import_fn() {  # <name> -> the function, defined here, read out of close-out.prelude.sh
+as_import_fn() {  # <name> [<file>] -> the function, defined here, read out of close-out.prelude.sh, else out of <file>
   local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$CO_TESTS")"
-  if [ -z "$body" ]; then echo "as_import_fn: no $1 in $CO_TESTS" >&2; return 1; fi
+  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "${2:-$CO_TESTS}")"
+  if [ -z "$body" ]; then echo "as_import_fn: no $1 in ${2:-$CO_TESTS}" >&2; return 1; fi
   eval "$body"
 }
 REPO_ROOT="$BIONIC_SCRIPTS_DIR"
@@ -229,12 +237,59 @@ RF_REG="$RF_DIR/asks.state"
 new_roster "$RF"
 roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$(roster_of "$RF")"
 printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud agent_id=a-w-aud subagent_type=bionic:auditor \
-  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md)" >> "$(roster_of "$RF")"
+  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md,.bionic/docs/record/wave-01-fixture/ev-flag.md,.bionic/docs/record/wave-01-fixture/ev-flag-fail.md,.bionic/docs/record/wave-01-fixture/ev-flag-pass.md)" >> "$(roster_of "$RF")"
 as_rec() {  # <file> <head> <result> -> an evidence piece reading over base..<head>
   printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: %s\nscope: piece\n\nwhat the reader found\n' \
     "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"
 }
 expect_regex "AS-0 precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$RF_C1"
+
+# ============================================================
+section "§HELD-FILL: while hold:merge is open on the run's register the tick offers no FILL naming the integrate row and the stop wall ends the turn; with the hold closed the same fixture offers it and the wall refuses"
+# ============================================================
+# The register is the run's: a merge held by a refused close-out is not a row to dispatch, so readiness reads it
+# (lib/fill.sh through lib/owed.sh `owed_list_plan`) and the tick and the wall, which ask the one library, agree.
+# Only the integrate row is held; a work row ready beside it is offered whatever the register holds.
+# FIXTURE FIDELITY: session-poker-5 §STEP's shape (s47_plan's reads table, the shipped tick and hooks/stop.sh), the plan
+# at current: 8 with a ready integrate row; the hold is opened and closed by owed.sh's own writers on the run's register.
+# The tick says why the row waits: `WAIT T<n> — hold:merge open: <the ask's title>`, through `fill_merge_hold`.
+# fails-when: the tick prints FILL T1 while the hold is open, the wall refuses the turn that left it, the hold held a
+# work row, closing it leaves the integrate row unoffered, or the tick names no hold on the row it holds back (or still
+# names one after the hold closes).
+HF="$(make_repo heldfill)"; new_roster "$HF"
+HF_P="$(s47_plan "$HF" 8 \
+  "| T1 | 8 | integrate | the merge | orchestrator | — | 10 | REQ-x | — | pending | approval:plan |")"
+awk '!d && /^current:/ { print "current: 8"; d = 1; next } { print }' "$HF_P" > "$HF_P.t" && mv "$HF_P.t" "$HF_P"
+hf_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T'; }
+hf_wait() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: WAIT T1 — hold:merge open'; }
+hf_tick() { forget_digest "$HF"; poke_pressure "$HF" 8192 1.0 tick; }
+hf_wall() { s31_stop "$HF" "$(s31_transcript "$HF" "carry on")"; s31_decision; }
+hf_hold() { OWED_PLAN="$HF_P" as_owed "$HF" hf-sid owed_open hold:merge "merge held: the structure review failed" "bionic: close-out refused"; }
+hf_release() { OWED_PLAN="$HF_P" as_owed "$HF" hf-sid owed_close hold:merge "close-out delivered"; }
+hf_tick
+expect_eq "HF-0 the control: with no hold the tick over the Step-8 table exits 0 and offers the integrate row" "0|poker: FILL T1" "$RC|$(hf_fill)"
+expect_eq "HF-0b …and the wall refuses the turn that left it" "block" "$(hf_wall)"
+hf_hold
+expect_eq "HF-1 precondition: the run's register holds hold:merge open" "hold:merge" "$(as_register "$HF" "$HF_P")"
+hf_tick
+expect_eq "HF-2 AC-8.1 with the hold open the tick exits 0 and offers no FILL naming the integrate row" "0|" "$RC|$(hf_fill)"
+expect_eq "HF-2b …and its WAIT line names the held merge and what holds it" \
+  "poker: WAIT T1 — hold:merge open: merge held: the structure review failed" "$(hf_wait)"
+expect_eq "HF-3 …and the stop wall's answer is clean" "" "$(hf_wall)"
+hf_release
+hf_tick
+expect_eq "HF-4 the hold closed, the same fixture offers the integrate row again" "poker: FILL T1" "$(hf_fill)"
+expect_eq "HF-4c …and its WAIT line about the hold is gone (HF-2b's extractor)" "" "$(hf_wait)"
+expect_eq "HF-4b …and the wall refuses again" "block" "$(hf_wall)"
+# Only the integrate row is held: a work row ready under the same open hold is offered, and the wall refuses its turn.
+HW="$(make_repo heldwork)"; new_roster "$HW"
+HW_P="$(s47_plan "$HW" 8 "| T1 | 4 | build | a work row | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
+OWED_PLAN="$HW_P" as_owed "$HW" hw-sid owed_open hold:merge "merge held: the structure review failed" "bionic: close-out refused"
+expect_eq "HF-5 precondition: the hold is open on the second run's register" "hold:merge" "$(as_register "$HW" "$HW_P")"
+forget_digest "$HW"; poke_pressure "$HW" 8192 1.0 tick
+expect_eq "HF-5b the hold open, the tick still offers the ready work row" "poker: FILL T1" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T')"
+s31_stop "$HW" "$(s31_transcript "$HW" "carry on")"
+expect_eq "HF-5c …and the wall refuses the turn that left it" "block" "$(s31_decision)"
 
 # ============================================================
 section "§FAILED: a failing reading recorded opens the waiver at once; a passing reading of the question closes it"
@@ -257,6 +312,52 @@ expect_eq "FL-2 precondition: a passing reading of the same question registers (
 expect_eq "FL-3 …and closes the waiver for the run (FL-1 read the same extractor holding it)" "" "$(as_register "$RF" "$PF")"
 expect_contains "FL-3b …the register says a passing reading closed it" "|key=waive:evidence|state=closed|by=passing reading|" \
   "$(cat "$RF_REG" 2>/dev/null)"
+
+# ============================================================
+section "§FLAG: a review whose result is flag opens no waiver, recorded or through the preflight; a failing one does"
+# ============================================================
+# A flag answers a question and is never read as failed. Recorded, the verb opens an ask only for a fail. Through the
+# preflight, a flag whose finding a landed row fixed is settled by the run's landing record, which the preflight copy
+# reads through the origin its marker names, so the gate never meets a failing reading and stages no ask.
+# FIXTURE FIDELITY: the verb half is §FAILED's project and records (the verb dry-commits and writes the plan); the preflight
+# half is close-out-4's flag_fixture, read out of that suite by name (the Step-8 project, the review flag over a record
+# with a fixed finding and a note, the landed row's green verdict in the run's landing record), and the preflight is the
+# one `close-out.sh check` runs.
+# ANTI-VACUITY: in each half the same fixture, a failing reading made newest, opens `waive:evidence` or `waive:structure`
+# and the register reader returns it, so the empty register before it is that reader's honest answer.
+# fails-when: hooks/poker/proof.sh poker_verb_proof_add opens the waiver for any result but pass, so a recorded flag
+# opens the ask (FLAG-2).
+RF_C3="$(s57_commit "$RF_WT" lib/a.sh C3)"
+as_rec ev-flag.md "$RF_C3" flag
+poke "$RF" proof-add review record/wave-01-fixture/ev-flag.md --question evidence --reader w-aud
+expect_eq "FLAG-1 precondition: proof-add registers the flag reading (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      proof-add said: %s\n' "$OUT"
+expect_eq "FLAG-2 a recorded flag opens no ask: the register holds no waive:evidence" "" "$(as_register "$RF" "$PF")"
+RF_C4="$(s57_commit "$RF_WT" lib/a.sh C4)"
+as_rec ev-flag-fail.md "$RF_C4" fail
+poke "$RF" proof-add review record/wave-01-fixture/ev-flag-fail.md --question evidence --reader w-aud
+expect_eq "FLAG-3 the same project, a failing reading recorded after it: the register holds the waiver" "waive:evidence" \
+  "$(as_register "$RF" "$PF")"
+RF_C5="$(s57_commit "$RF_WT" lib/a.sh C5)"
+as_rec ev-flag-pass.md "$RF_C5" pass
+poke "$RF" proof-add review record/wave-01-fixture/ev-flag-pass.md --question evidence --reader w-aud
+expect_eq "FLAG-3a precondition: the passing reading registers (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      proof-add said: %s\n' "$OUT"
+expect_eq "FLAG-3b …and a passing reading closes it again, so the sections below meet the register as they did" "" \
+  "$(as_register "$RF" "$PF")"
+as_import_fn flag_fixture "$(dirname "$0")/close-out-4.test.sh" || echo "FLAG-0 flag_fixture not read out of close-out-4.test.sh"
+PG="$(flag_fixture as-flag)"
+PG_PLAN="$PG/$PLAN_REL"
+rm -f "$PG"/.bionic/tmp/owed-*.state
+run_close_as "$AS_SIDA" "$PG" check
+expect_eq "FLAG-4 precondition: check asked the gate twice, the plan as it stands and the preflight (two gate lines)" "2" \
+  "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^gate: ')"
+expect_eq "FLAG-5 through the preflight a flag opens no ask: no waive:structure, and no hold on the merge" "" "$(as_register "$PG" "$PG_PLAN")"
+bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-22T11:00:00Z record/wave-01-fixture/structure-fail.md structure w-read fail piece)"' \
+  _ "$AS_LIB" "$PG_PLAN" "$(fixture_git "$PG" rev-parse wave/01-fixture)" > "$PG_PLAN.n" && mv "$PG_PLAN.n" "$PG_PLAN"
+run_close_as "$AS_SIDA" "$PG" check
+expect_eq "FLAG-6 the same project with a failing reading newest: the register holds the waiver, beside the merge it holds" \
+  "hold:merge waive:structure" "$(as_register "$PG" "$PG_PLAN")"
 
 # ============================================================
 section "§STOP: a decision put opens its ask and its ruling closes it; a carry the orchestrator chose opens an ask"
@@ -307,5 +408,60 @@ expect_contains "OP-1 the closed line carries opened=, the open line's instant" 
   "|key=approve:design|state=closed|by=approve|at=" "$(cat "$AO_F" 2>/dev/null)"
 expect_eq "OP-1b …its value the open line's at=" "$AO_AT" \
   "$(sed -n 's/^owed\/v1|key=approve:design|state=closed|.*|opened=\([^|]*\).*/\1/p' "$AO_F" 2>/dev/null)"
+
+# ============================================================
+section "§BORN-CLOSES: a born fix's green landing at Step 8 closes the review's waiver; a review still failing keeps it open"
+# ============================================================
+# FIXTURE FIDELITY: the landing line's model world (tests/lib/world.sh), built by the landing-line prelude's own
+# `ll_world` and `ll_launch`, read by name, so this suite holds no second copy of it. The plan reads `current: 8` with a
+# failing structure reading newest; T1's `- T1:` line carries the born marker `task-add --born` writes for finding 1.
+# The ask is opened as the failing registration opens it (§FAILED drives the verb); the landing is the writer's `ready`.
+# The control world differs in one fact: its record holds a second finding to fix that no row answers, so after the
+# same landing the review still derives fail.
+# ANTI-VACUITY: each world's register reads waive:structure open before the landing, through the extractor read after it.
+# fails-when: lib/line.sh `line_publish` leaves the register alone after a born row's landing (BC-2, BC-2b), or closes
+# the ask while the review still derives fail (BC-4).
+. "$(dirname "$0")/lib/world.sh"
+as_import_fn ll_world "$(dirname "$0")/landing-line.prelude.sh" || echo "BC-0 ll_world not read out of landing-line.prelude.sh"
+as_import_fn ll_launch "$(dirname "$0")/landing-line.prelude.sh" || echo "BC-0 ll_launch not read out of landing-line.prelude.sh"
+ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+bc_world() {  # <findings to fix: 1 | 2> -> a world at current 8 whose register holds waive:structure open
+  local r p h b n="$1"
+  r="$(ll_world)" || return 1
+  ll_launch "$r" T1 a.test.sh
+  p="$(ll_plan "$r")"; h="$(git -C "$r" rev-parse wave/x)"; b="$(git -C "$r" rev-parse main)"
+  mkdir -p "$r/.bionic/docs/record/wave-x"
+  { printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: %s\n' "$b" "$h" "$n"
+    printf 'finding: 1 S1 off T1.txt:1 the row is wrong\nshown: 1 cat T1.txt\n'
+    [ "$n" = 1 ] || printf 'finding: 2 S1 off T2.txt:1 the other row is wrong\nshown: 2 cat T2.txt\n'; } > "$r/.bionic/docs/record/wave-x/rev.md"
+  BC_H="$h" BC_B="$b" awk '
+    /^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["BC_B"]; next }
+    /^current: 4$/ { print "current: 8"; print "proved: kind=review head=" ENVIRON["BC_H"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/rev.md question=structure reader=w-rev result=fail scope=piece"; next }
+    /^- T1: active$/ { print "- T1: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next }
+    { print }' "$p" > "$p.n" && mv "$p.n" "$p"
+  OWED_ROOT="$r" OWED_SID="$WORLD_SID" OWED_PLAN="$p" bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && owed_open waive:structure "waiver: structure" "waive structure"' \
+    _ "$AS_LIB" 2>/dev/null
+  printf '%s' "$r"
+}
+bc_ready() {  # <root> -> BC_OUT, BC_RC: T1's ready, from its tree, as the world's session
+  BC_OUT="$( cd "$1/.worktrees/T1" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$BIONIC_SCRIPTS_DIR/payload/scripts/spawn-worktree.sh" ready 2>&1 )"; BC_RC=$?
+}
+BC="$(bc_world 1)"; BC_P="$(ll_plan "$BC")"
+expect_eq "BC-0 precondition: at current 8 the register holds waive:structure open" "8|waive:structure" \
+  "$(sed -n 's/^current: //p' "$BC_P")|$(as_register "$BC" "$BC_P")"
+bc_ready "$BC"
+expect_eq "BC-1 the born row lands by ready (exit 0)" "0" "$BC_RC"
+[ "$BC_RC" = 0 ] || printf '      ready said: %s\n' "$BC_OUT"
+expect_eq "BC-2 …and its green landing closes waive:structure: the register holds no open ask (BC-0 read it open)" "" \
+  "$(as_register "$BC" "$BC_P")"
+expect_contains "BC-2b …closed by the landing" "|key=waive:structure|state=closed|by=landing T1|" \
+  "$(cat "$BC/.bionic/docs/record/wave-x/asks.state" 2>/dev/null)"
+expect_eq "BC-2c …with no step advance" "8" "$(sed -n 's/^current: //p' "$BC_P")"
+BC2="$(bc_world 2)"; BC2_P="$(ll_plan "$BC2")"
+expect_eq "BC-3 precondition: the control world's register holds waive:structure open" "waive:structure" "$(as_register "$BC2" "$BC2_P")"
+bc_ready "$BC2"
+expect_eq "BC-3b the same born row lands in the control world (exit 0)" "0" "$BC_RC"
+expect_eq "BC-4 …and with the review still deriving fail (finding 2 unanswered) waive:structure stays open" "waive:structure" \
+  "$(as_register "$BC2" "$BC2_P")"
 
 finish

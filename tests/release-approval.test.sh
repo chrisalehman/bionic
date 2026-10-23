@@ -35,6 +35,7 @@
 # §CHECK-CHANGED the Bottom line says when the release changes a file of the declared release check's closure
 # §CARRY     a finding the run carries by its own choice is an ask on the run's register; the page records it, decisions
 #            or none, and the reply closes it
+# §STALE     an approval the head has moved past is put again on the card, and the reply writes a second line beside it
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -950,20 +951,21 @@ rm -f "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
 # ============================================================
 section "§CHECK-CHANGED: the card says when the release changes the declared release check (AC-10.2)"
 # ============================================================
-# The release range is the fixture's base-sha to its head, which changes lib/x.sh and CHANGELOG.md. A check whose
-# script is lib/x.sh is changed by this release; one whose script is tests/a.test.sh is not. fails-when: the card is
-# silent about a release that changes its check, or names a change to a check the release leaves alone.
+# The release range is the fixture's base-sha to its head, which changes lib/x.sh and CHANGELOG.md. The check's files
+# are the declared `release-check-files:`, never its command's words: a check run as tests/a.test.sh that declares
+# lib/*.sh is changed by this release; one run as lib/x.sh that declares tests/a.test.sh is not. fails-when: the card
+# is silent about a release that changes its check's files, or names a change to a check the release leaves alone.
 cc_line() { printf '%s\n' "$FC_OUT" | /usr/bin/grep 'changes the release check'; }
-printf 'release-check: bash lib/x.sh\n' > "$RFC/.bionic/config.yaml"
+printf 'release-check: bash tests/a.test.sh\nrelease-check-files: lib/*.sh\n' > "$RFC/.bionic/config.yaml"
 rt_log "$FC_R" "test-ratio: 1/2"
 rt_plan "$FC_R"
 fc_page
-expect_eq "CHECK-CHANGED-1 the page renders on a release that changes its check's script (exit 0, nothing on stderr)" \
+expect_eq "CHECK-CHANGED-1 the page renders on a release that changes a file its check declares (exit 0, nothing on stderr)" \
   "0|" "$FC_RC|$FC_ERR"
 expect_eq "CHECK-CHANGED-2 …and its Bottom line names the check's changed file, once" \
   "- This release changes the release check: lib/x.sh." "$(cc_line)"
 expect_eq "CHECK-CHANGED-2b …under Bottom line" "1" "$(fc_under 'Bottom line' | /usr/bin/grep -c 'changes the release check')"
-printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
+printf 'release-check: bash lib/x.sh\nrelease-check-files: tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
 rt_plan "$FC_R"
 fc_page
 expect_eq "CHECK-CHANGED-3 a release that leaves its check alone renders with its Bottom line" "0|1" \
@@ -1027,5 +1029,73 @@ expect_contains "CARRY-6b …and rules its carry: the register says the reply cl
   "|key=$FC_CK2|state=closed|by=release approval reply|" "$(fc_reg)"
 fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
+
+# ============================================================
+section "§STALE: a release approval the head has moved past is put again on the card, and the reply records a second beside the first"
+# ============================================================
+# After a fix lands past the approved head, the advance to 8 refuses on that approval as it refuses on a missing one,
+# and the card is the only place the user approves the release, so the card settles the stale approval as its own
+# decision: it puts the release approval again, naming the head it was given at and what landed since, and the reply
+# writes a second approved: release line at the new head, the first kept. An approval is recorded once per head.
+# fails-when: the card is early on a stale approval; the renewal names neither the earlier head nor the landing; the
+# reply replaces the first line or writes none; current 8 --check stays red after it; a second approval at the same
+# head is admitted; a plan with nothing landed since its approval is offered a renewal.
+FC_ORD='s/^\(| AC-1\.2 | T1 \)| pending |/\1| discharged |/
+/^| T1 | 4 | build/a\
+| T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
+FC_APP="approved: release by Dana Fixture 2026-10-12T14:00:00Z head=$FC_R \"ship it\"
+approved: merge by Dana Fixture 2026-10-12T14:00:00Z head=$FC_R \"merge it\""
+fc_plan "$FC_GOOD
+$FC_APP" "$FC_ORD"
+poke "$RFC" current 8 --check
+expect_eq "STALE-0 control: approved at the working head, current 8 --check is green" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+fc_page
+expect_eq "STALE-0b …and the page renders with nothing for the user to decide, no renewal among it" \
+  "0||None wait on you." "$FC_RC|$FC_ERR|$(fc_under Decisions)"
+FC_X="$(s57_commit "$RFC" lib/x.sh 'T5: the fix')"
+FC_X8="${FC_X:0:8}"
+printf 'landed: row=T5 branch=wt/fix head=%s merge=%s at=2026-10-12T15:00:00Z\n' "$FC_X" "$FC_X" > "$FC_REC/landing-proofs.log"
+fc_plan "$(fc_floor "$FC_X")
+$(fc_reads "$FC_X")
+$FC_APP" "$FC_ORD
+/^- T2: landed/a\\
+- T5: landed $FC_X 2026-10-12T15:00:00Z
+/^| T2 | 7 | doc/i\\
+| T5 | 4 | build | the fix | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |"
+FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+poke "$RFC" current 8 --check
+expect_eq "STALE-1 precondition: a fix landed past the approval; current 6 and 7 --check are green, current 8 --check refuses" \
+  "001" "$FC_CK$RC"
+expect_contains "STALE-1b …on the approval alone, naming the head the user approved" \
+  "is not the head the user approved for release, ${FC_R:0:12}" "$OUT"
+fc_page
+expect_eq "STALE-2 the page renders at the new head (exit 0, no refusal, its page written)" \
+  "0||release-approval-$FC_X8.md" "$FC_RC|$FC_ERR|$(cd "$FC_REC" && ls release-approval-"$FC_X8"*.md 2>/dev/null)"
+expect_eq "STALE-2b …putting the release approval again, and not the merge it still holds" "approve:release" \
+  "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_X8.md" 2>/dev/null \
+    | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' | tr '\n' ' ' | sed 's/ $//')"
+FC_DEC="$(fc_under Decisions | fc_flat)"
+expect_contains "STALE-2c …the decision names the head the approval was given at" "approved at $FC_H8" "$FC_DEC"
+expect_contains "STALE-2d …and what landed since" "1 commit landed since (T5)" "$FC_DEC"
+expect_contains "STALE-2e …the person's approval item opened on the ledger" "approve:release" "$(fc_owed)"
+poke "$RFC" reply "$FC_WR"
+expect_eq "STALE-3 reply all recommended replays the renewal (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_eq "STALE-3b …a second approved: release line at the new head, beside the first" "2|$FC_R|$FC_X" \
+  "$(/usr/bin/grep -c '^approved: release ' "$PFC")|$(/usr/bin/grep '^approved: release ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
+expect_regex "STALE-3c …the new line with the reply's words" \
+  "^approved: release by Dana Fixture [0-9T:Z-]+ head=$FC_X \"$FC_WR\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC" | tail -1)"
+expect_eq "STALE-3d …the merge approval untouched, still one line" "1" "$(/usr/bin/grep -c '^approved: merge ' "$PFC")"
+poke "$RFC" current 8 --check
+expect_eq "STALE-4 …after which current 8 --check is green at the new head" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+cp "$PFC" "$TMPROOT/fc-before-again"
+poke "$RFC" approve release 'ship it again'
+expect_eq "STALE-5 a third approval at the head the newest line names: refused, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-again" "$PFC" && echo same || echo changed)"
+expect_contains "STALE-5b …an approval is recorded once at a head" "recorded once" "$OUT"
+rm -f "$FC_REC/landing-proofs.log"
+git -C "$RFC" reset -q --hard "$FC_R"
 
 finish

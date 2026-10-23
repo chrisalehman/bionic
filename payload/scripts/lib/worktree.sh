@@ -965,11 +965,15 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
   # integration on the judge at the working head; a landing after it would move the working branch
   # past the head that was judged, and nothing would judge it again. So with a bound plan at
   # `current: 8` or later (its letter dropped) nothing lands: the step is set back first, which the
-  # `current` verb allows (`current 7`, dry-committed at 7 like any move).
+  # `current` verb allows (`current 7`, dry-committed at 7 like any move). One row is the exception: a
+  # fix born of a finding of a review the judge reads failing, since its landing is what answers that
+  # review (lib/line.sh `line_born_failing`, which `ready` and the hand landing load; a caller that has
+  # not loaded it keeps the refusal).
   if [ -n "$plan" ]; then
     judged_cur="$(_wt_plan_current "$plan")"
     case "${judged_cur%[ab]}" in
-      8|9) _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2 ;;
+      8|9) declare -F line_born_failing >/dev/null 2>&1 && line_born_failing "$plan" "$root" "$wt_abs" || {
+           _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2; } ;;
     esac
   fi
 
@@ -993,221 +997,151 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
   return 0
 }
 
-# THE CHECK'S CLOSURE: the declared check's script and every file it loads, as a commit holds them. The script is
-# the first word of the command that names a file the commit holds; a member's loads are the words after `.`,
-# `source`, `bash` or `sh` that resolve without running anything: from the member's own directory (`dirname "$0"`
-# and its `cd … && pwd` and BASH_SOURCE forms), from simple assignments of such paths, and from plain `for v in
-# words` lists. A load that does not resolve, or names a path the commit lacks, is no member, so the closure never
-# names a file the check cannot have read. The closure is read from the declaration each time, never listed, so a
-# check that comes to load a new library brings it into its closure by that load alone. Every word, the
-# declaration's and each load's, becomes a repository path in one place, `_wt_repo_paths`, so the two can never
-# disagree on a spelling. Its roots are every directory the check may be run from or may name: the run dir, physical
-# and as named, and the main checkout, since the declaration is read there while the door runs it in the checkout
-# that holds the branch, in a landing tree under the main checkout, or in a linked worktree elsewhere.
-_wt_check_closure() {  # <repo dir> <rev> <check command> -> the members' paths, one per line · 1 when no script
-  local dir="$1" rev="$2" cmd="$3" nl='
-' held w script queue f seen roots
-  held="$(git -C "$dir" ls-tree -r --name-only "$rev" 2>/dev/null)" || return 1
-  roots="$(_wt_abs "$dir")${nl}${dir%/}${nl}$(worktree_root "$dir")"
-  script=""
-  while IFS= read -r w; do
-    [ -n "$w" ] || continue
-    case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) script="$w"; break ;; esac
-  done <<EOF
-$(printf '%s\n' "$cmd" | tr -s ' \t' '\n\n' | _wt_repo_paths "$roots")
-EOF
-  [ -n "$script" ] || return 1
-  queue="$script"; seen="${nl}${script}${nl}"
-  while [ -n "$queue" ]; do
-    f="${queue%%"$nl"*}"
-    case "$queue" in *"$nl"*) queue="${queue#*"$nl"}" ;; *) queue="" ;; esac
-    printf '%s\n' "$f"
-    while IFS= read -r w; do
-      [ -n "$w" ] || continue
-      case "$seen" in *"${nl}${w}${nl}"*) continue ;; esac
-      case "${nl}${held}${nl}" in *"${nl}${w}${nl}"*) : ;; *) continue ;; esac
-      seen="${seen}${w}${nl}"; queue="${queue:+${queue}${nl}}${w}"
-    done <<EOF
-$(git -C "$dir" show "${rev}:${f}" 2>/dev/null | _wt_check_loads "$(dirname "$f")" | _wt_repo_paths "$roots")
-EOF
-  done
-}
-# A WORD AS THE REPOSITORY PATH IT NAMES, the one place the closure decides it. A relative word is read against the
-# repository root, where the check runs; an absolute one under the longest of <roots> it lies in, matched on whole
-# components, so a sibling sharing a root as a name prefix stays outside. Components are normalized once: an empty one
-# or `.` dropped, `..` taken back. A relative word that climbs out of the root, an absolute one under no root (a list
-# in the user's own directory) and the root itself name nothing: an empty line, so every word keeps its place.
-_wt_repo_paths() {  # <roots, one per line> < words, one per line -> per word its repository path, or an empty line
-  _WT_ROOTS="$1" awk '
-    function norm(p,   n, a, i, o, k, r, abs) {
-      abs = (substr(p, 1, 1) == "/"); n = split(p, a, "/"); k = 0
-      for (i = 1; i <= n; i++) {
-        if (a[i] == "" || a[i] == ".") continue
-        if (a[i] == "..") { if (k > 0) k--; else if (!abs) return ""; continue }
-        o[++k] = a[i]
-      }
-      r = ""; for (i = 1; i <= k; i++) r = r (i > 1 || abs ? "/" : "") o[i]
-      return (abs && r == "") ? "/" : r
-    }
-    BEGIN {
-      n = split(ENVIRON["_WT_ROOTS"], t, "\n")
-      for (i = 1; i <= n; i++) if (substr(t[i], 1, 1) == "/" && (r = norm(t[i])) != "/") root[++nr] = r
-    }
-    substr($0, 1, 1) != "/" { print norm($0); next }
-    {
-      p = norm($0); best = ""
-      for (i = 1; i <= nr; i++) if (index(p, root[i] "/") == 1 && length(root[i]) > length(best)) best = root[i]
-      print (best == "" ? "" : substr(p, length(best) + 2))
-    }'
-}
-# The loads one member names, as the words a shell would read: a load from the member's own directory prefixed with
-# <dir>, its directory under the repository root ("." for the root), a relative load as written, read from the root
-# where the check runs, an absolute one as written. `_wt_repo_paths` turns each into the path it names.
-_wt_check_loads() {  # <dir> < the member's text -> one word per resolved load
-  awk -v d="$1" -v sq="'" '
-    # Every $NAME or ${NAME} in s replaced by its value; "" when one has none. A loop variable, the last one met,
-    # is left as @L for the caller to expand.
-    function subst(s,   out, name, m) {
-      out = ""
-      while (match(s, /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) {
-        name = substr(s, RSTART, RLENGTH); gsub(/[${}]/, "", name)
-        out = out substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
-        if (name in val) out = out val[name]
-        else if (name in loop) { out = out "@L"; lv = name }
-        else return ""
-      }
-      return out s
-    }
-    function emit(p,   n, a, i) {
-      if (p == "" || index(p, "$") || index(p, "`")) return
-      if (index(p, "@D") == 1) p = d substr(p, 3)
-      if (index(p, "@L")) {
-        n = split(loop[lv], a, " ")
-        for (i = 1; i <= n; i++) { q = p; sub(/@L/, a[i], q); print q }
-        return
-      }
-      print p
-    }
-    {
-      l = $0
-      gsub(/\$\(dirname (-- )?"(\$0|\$\{0\}|\$BASH_SOURCE|\$\{BASH_SOURCE\}|\$\{BASH_SOURCE\[0\]\})"\)/, "@D", l)
-      gsub(/\$\{(0|BASH_SOURCE|BASH_SOURCE\[0\])%\/\*\}/, "@D", l)
-      gsub(/\$\(cd "@D"[^)]*\)/, "@D", l)
-      if (match(l, /^[ \t]*((local|export|readonly)[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=/)) {
-        a = substr(l, RSTART, RLENGTH); sub(/^[ \t]*((local|export|readonly)[ \t]+)?/, "", a); sub(/=$/, "", a)
-        v = substr(l, RSTART + RLENGTH)
-        if (substr(v, 1, 1) == "\"") { v = substr(v, 2); sub(/".*$/, "", v) } else sub(/[ \t;|&)].*$/, "", v)
-        if (!(a in val) && v != "") { v = subst(v); if (v != "" && index(v, "@L") == 0) val[a] = v }
-      }
-      if (match(l, /for[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]+[^;]*;[ \t]*do/)) {
-        f = substr(l, RSTART, RLENGTH); sub(/^for[ \t]+/, "", f)
-        a = f; sub(/[ \t].*$/, "", a)
-        sub(/^[A-Za-z_][A-Za-z0-9_]*[ \t]+in[ \t]+/, "", f); sub(/[ \t]*;[ \t]*do$/, "", f)
-        if (f ~ /^[A-Za-z0-9_.\/ -]+$/) loop[a] = f
-      }
-      r = ";" l
-      while (match(r, /([;&|({!][ \t]*|[ \t;](then|do|else)[ \t]+)(\.|source|bash|sh)[ \t]+/)) {
-        r = substr(r, RSTART + RLENGTH)
-        if (substr(r, 1, 1) == "\"") { w = substr(r, 2); sub(/".*$/, "", w) }
-        else if (substr(r, 1, 1) == sq) { w = substr(r, 2); w = substr(w, 1, index(w sq, sq) - 1); emit(w); continue }
-        else { w = r; sub(/[ \t;|&)<>].*$/, "", w) }
-        emit(subst(w))
-      }
-    }'
-}
-# WHAT THE LANDING CHANGES OF ITS JUDGE: the closure of the check as <base> holds it, met with the paths <base>..<head>
-# changes. Prints `<script> <path>[,<path>]` and returns 0 when the range changes a member; 1 otherwise.
-_wt_check_judge() {  # <repo dir> <base> <head> <check command>
-  local cl ch hit="" p nl='
-'
-  cl="$(_wt_check_closure "$1" "$2" "$4")" || return 1
-  ch="$(git -C "$1" diff --name-only "$2" "$3" 2>/dev/null)" || return 1
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    case "${nl}${ch}${nl}" in *"${nl}${p}${nl}"*) hit="${hit:+${hit}${nl}}${p}" ;; esac
-  done <<EOF
-$cl
-EOF
-  [ -n "$hit" ] || return 1
-  printf '%s %s\n' "${cl%%"$nl"*}" "$(printf '%s\n' "$hit" | LC_ALL=C sort | paste -sd, -)"
-}
-# Whether a changed member lies in the check script's own directory, not below it: the files that are the check
-# itself, as distinct from the project code it loads. 0 when one does; 1 otherwise.
-_wt_check_beside() {  # <script> <path>[,<path>] -> 0 | 1
-  local dir="" rest="$2," p
-  case "$1" in */*) dir="${1%/*}/" ;; esac
-  while [ -n "$rest" ]; do
-    p="${rest%%,*}"; rest="${rest#*,}"
-    case "$p" in "$dir"*) case "${p#"$dir"}" in ''|*/*) ;; *) return 0 ;; esac ;; esac
-  done
-  return 1
+# WHAT A RANGE CHANGES OF THE CHECK'S FILES: the project's declared list, `release-check-files:` in its config, met
+# with the paths <base>..<head> changes. The config is the main checkout's, so <repo dir> may be any checkout of the
+# repository. The list is space-separated paths or globs relative to the repository root, read as git's glob
+# pathspecs, so a `*` stays within one directory and `**` crosses them. The check's files are declared, never read off
+# its command or its loads: a library the check comes to source is its file only once the project says so. It is
+# information alone, said on a hand landing's line and on the release approval card; it gates nothing, for the check
+# is run as the release base holds it, which no landing writes. Prints the changed files joined by commas and returns
+# 0 when the range changes one; 1 otherwise, and when no list is declared.
+_wt_check_judge() {  # <repo dir> <base> <head> -> <path>[,<path>]
+  local decl w ch root
+  local -a spec=() words=()
+  root="$(worktree_root "$1")" || root="$1"
+  decl="$(config_value "$root" release-check-files "" 2>/dev/null)"
+  read -r -a words <<< "$decl"
+  for w in "${words[@]+"${words[@]}"}"; do spec+=(":(top,glob)$w"); done
+  [ "${#spec[@]}" -gt 0 ] || return 1
+  ch="$(git -C "$1" diff --name-only "$2" "$3" -- "${spec[@]}" 2>/dev/null)" || return 1
+  [ -n "$ch" ] || return 1
+  printf '%s\n' "$ch" | LC_ALL=C sort | paste -sd, -
 }
 
-# THE PROJECT'S DECLARED CHECK, AS ONE FUNCTION (wave-28 T3; recheck Q3): factored out of
-# `worktree_land`, which calls it as before, and called by `line_publish`, read from the accepted head.
-# <run dir> is the checkout that holds the branch, or a landing tree pointed at the accepted head when
-# none does; <writer tree> is the piece whose cleanliness the check must also leave as it found it.
-# 0 when no check is declared or it passed and left nothing; 2 having refused.
-_wt_release_check() {  # <root> <run dir> <base> <head> <writer tree> <branch> <onto> [<row>] -> 0 | 2
-  local root="$1" co="$2" onto_head="$3" head="$4" wt_abs="$5" branch="$6" onto="$7" row="${8:-<row>}"
-  local check_cmd check_was check_out rc left said moved fix judge verdict
-  check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
-  if [ -n "$check_cmd" ]; then
-    check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
-    check_out="$(cd "$co" 2>/dev/null || exit 1
-      set -f
-      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
-      # shellcheck disable=SC2086  # the configured command is meant to split on blanks
-      exec $check_cmd </dev/null 2>&1)"; rc=$?
-    # WHAT THE CHECK LEFT (wave-27 T50, T58; review passes 27 S2, 34 N5). The command runs in the shared
-    # target, beside the piece. After it, and before the merge, the target's HEAD is the commit it was
-    # before the check, the target is clean in what git tracks (the test above, taken again), and the
-    # piece's checkout is as clean as it was (the dirty-tree test above, taken again). A check that
-    # committed on the target would have its commit merged onto unjudged; one that dirtied the piece
-    # would leave the merge standing and the tree unremovable. Either refuses this landing
-    # `reason=check-dirtied`, saying which, with nothing merged; a check that fails AND left something
-    # is refused for the failure, which names what it left. `land` restores nothing: the user sees
-    # what the check did.
-    left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
-    # A LANDING THAT CHANGES ITS OWN JUDGE. The copy that ran is the target's at the accepted head, so when the
-    # candidate's range (accepted head to candidate, never the writer's own base) changes a member of the check's
-    # closure, that run judged a check the landing replaces. When the check failed, the advice to fix what it names
-    # on the branch is wrong, since the branch may be the fix. When it passed and the range changes a file beside
-    # the declared script, the check itself, the pass says nothing of the copy every later landing meets, so the
-    # closure test is taken whatever the run returned. A change only to project code the check loads, from outside
-    # that directory, keeps the plain arms: the door would otherwise send most code landings to a person. The
-    # refusal names the copy that judged and what of it the landing changes, and the route by which a person lands
-    # a fix the door cannot judge: a merge by git, then the hand mark, whose scan runs the landed copy and says so
-    # on the row's line. The door itself never runs the candidate's copy.
-    judge="$(_wt_check_judge "$co" "$onto_head" "$head" "$check_cmd")" || judge=""
-    if [ -n "$judge" ] && { [ "$rc" -ne 0 ] || _wt_check_beside "${judge%% *}" "${judge#* }"; }; then
-      [ "$rc" -eq 0 ] || [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
-      verdict="fails over"; [ "$rc" -ne 0 ] || verdict="passes over"
-      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} judged-by=target script=${judge%% *}@${onto_head:0:12} changed-here=${judge#* } — the project's declared release-check (${check_cmd}) ${verdict} this landing's range${left:+ and left changes, named before judged-by}. It ran as the target holds it at ${onto_head:0:12}, and this landing changes that check: a landing never rewrites the check that judges it, so a fix to the check cannot pass its own door. Run this landing's copy over the same range to see whether the fix holds (cd ${wt_abs} && BIONIC_CHECK_BASE=${onto_head} BIONIC_CHECK_HEAD=${head} ${check_cmd}); if it does and the fix is wanted, a person lands it by hand: merge ${branch} into ${onto} with git, then session-poker.sh row-landed ${row} <merge> <at> --by-hand '<who>' '<why>', whose scan runs the landed copy and writes judged-by=candidate on the row's line"; return 2
-    fi
-    if [ "$rc" -ne 0 ]; then
-      [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
-      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
-    fi
-    if [ -n "$left" ]; then
-      # WHO MOVED THE HEAD (wave-27 T63; review pass 43 S1). A head that moved while the check ran was
-      # moved by the check or by another landing into the same branch, and the tool cannot tell which:
-      # the line says that, and does not tell the user to put back what may be a landed merge.
-      said=""; moved=""; fix=""
-      case " $left" in *" head_was="*)
-        moved="${left#*head_was=}"; moved="${moved%% *}"; said="${left#*head_now=}"; said="${said%% *}"
-        moved="the target checkout's HEAD moved from ${moved} to ${said} while the project's declared release-check (${check_cmd}) ran, by the check or by another landing into ${onto} (git -C ${co} reflog -2)"
-        said=""
-        fix="if the move is another landing's merge, land again; if it is the check's own commit, take it off the target, make the check change nothing, land again" ;;
-      esac
-      case " $left" in *" paths="*) said="left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
-      case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
-      if [ -n "$said" ]; then
-        said="the project's declared release-check (${check_cmd}) ${said}"
-        fix="put back what it changed, make the check change nothing, land again${fix:+ (for the HEAD: ${fix})}"
+# THE LAST RELEASE: release_base <plan> <checkout> <head> sets RB_BASE, the 40-hex start of the release range, and
+# RB_FROM saying where it came from (`tag <t> on <branch>` | `base-sha <s>`), and RB_IB and RB_BS for a refusal to
+# name; 1 when there is none. The nearest tag reachable from the plan's `integration-branch:` that is a PROPER ancestor
+# of <head> (the fewest commits from it to <head>): a tag on <head>, or on a commit not on its history, is no base, for
+# the range it opens would hold nothing or the wrong thing. With none, the plan's `base-sha:`. It is the release range's
+# start for the release-check verb, the hand landing's scan and the release card, and the judge every run of the
+# declared check is run as (`worktree_check_run`), so all of them name one commit. Its readers, lib/plan.sh
+# `plan_integration_branch` and lib/proof.sh `proof_plan_base`, are loaded on first use, so a caller that never asks
+# for the judge keeps its own load order.
+_wt_judge_load() {  # -> 0 once the plan's integration branch and base readers are defined
+  local d
+  declare -F plan_integration_branch >/dev/null 2>&1 && declare -F proof_plan_base >/dev/null 2>&1 && return 0
+  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
+  # shellcheck source=/dev/null
+  declare -F _run_lines >/dev/null 2>&1 || . "$d/run.sh" 2>/dev/null
+  # shellcheck source=/dev/null
+  declare -F plan_integration_branch >/dev/null 2>&1 || . "$d/plan.sh" 2>/dev/null
+  # shellcheck source=/dev/null
+  declare -F proof_plan_base >/dev/null 2>&1 || . "$d/proof.sh" 2>/dev/null
+  declare -F plan_integration_branch >/dev/null 2>&1 && declare -F proof_plan_base >/dev/null 2>&1
+}
+release_base() {  # <plan> <checkout> <head>
+  local plan="$1" co="$2" head="$3" t tc tn best=""
+  RB_BASE=""; RB_FROM=""; RB_BS=""; RB_IB=""
+  _wt_judge_load || return 1
+  RB_IB="$(plan_integration_branch "$plan")"
+  if [ -n "$RB_IB" ]; then
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      tc="$(git -C "$co" rev-parse --verify -q "refs/tags/$t^{commit}" 2>/dev/null)" || continue
+      [ "$tc" != "$head" ] || continue
+      git -C "$co" merge-base --is-ancestor "$tc" "$head" 2>/dev/null || continue
+      tn="$(git -C "$co" rev-list --count "$tc..$head" 2>/dev/null)" || continue
+      if [ -z "$best" ] || [ "$tn" -lt "$best" ]; then
+        best="$tn"; RB_BASE="$tc"; RB_FROM="tag $t on $RB_IB"
       fi
-      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — ${moved}${moved:+${said:+; }}${said}, and nothing is merged; ${fix}"; return 2
-    fi
+    done <<RB_TAGS
+$(git -C "$co" tag --merged "refs/heads/$RB_IB" 2>/dev/null)
+RB_TAGS
+  fi
+  if [ -z "$RB_BASE" ]; then
+    RB_BS="$(proof_plan_base "$plan" "$co")"
+    [ -z "$RB_BS" ] || RB_BASE="$(git -C "$co" rev-parse --verify -q "$RB_BS^{commit}" 2>/dev/null)"
+    RB_FROM="base-sha $RB_BS"
+  fi
+  [ -n "$RB_BASE" ]
+}
+
+# THE ONE RUNNER OF THE DECLARED CHECK. The release-check verb, the door and the hand landing's scan all run the
+# project's `release-check:` command here and nowhere else, so every run over a range is judged by one copy: the
+# judge's, the release base, which no landing it judges can have written. A head judged by its own copy could
+# rewrite its check to pass; a target's copy changes with every landing. The judge is <judge> when the caller names
+# it, else `release_base` for <plan> and <head>, else the range's own <base> (a plan with no tag and no base-sha),
+# and WT_CHECK_FROM says which. It is checked out in a landing tree the tool owns, the command's words split on
+# blanks with globbing off, an absolute word under <root> read as the same path inside that tree, so a declaration
+# that names the main checkout's file still runs the judge's. The tree holds no plan, so BIONIC_CHECK_PROJECT names
+# <root>, where the check reads the plan, the record and the renderer's plan; BIONIC_CHECK_BASE and _HEAD are the
+# range, BIONIC_CHECK_TREE <tree> (the tree itself when none is given), BIONIC_CHECK_BRANCH <branch> when given.
+# Sets WT_CHECK_CMD, WT_CHECK_OUT (stdout and stderr), WT_CHECK_RC, WT_CHECK_JUDGE, WT_CHECK_FROM, WT_CHECK_DIR (the
+# tree it ran in) and WT_CHECK_LEFT (`_wt_check_left` over that tree and <tree>, when <tree> is given).
+worktree_check_run() {  # <root> <plan> <judge> <base> <head> [<tree>] [<branch>] -> 0 ran · 1 none declared · 2 not run
+  local root="$1" plan="$2" judge="$3" base="$4" head="$5" tree="${6:-}" branch="${7:-}" lt rp
+  WT_CHECK_OUT=""; WT_CHECK_RC=0; WT_CHECK_JUDGE=""; WT_CHECK_FROM=""; WT_CHECK_DIR=""; WT_CHECK_LEFT=""
+  WT_CHECK_CMD="$(config_value "$root" release-check "" 2>/dev/null)"
+  [ -n "$WT_CHECK_CMD" ] || return 1
+  if [ -n "$judge" ]; then
+    WT_CHECK_FROM="named by the caller"
+  elif release_base "$plan" "$root" "$head"; then
+    judge="$RB_BASE"; WT_CHECK_FROM="$RB_FROM"
+  else
+    judge="$base"; WT_CHECK_FROM="the range's base: the plan names no tag and no base-sha"
+  fi
+  WT_CHECK_JUDGE="$(git -C "$root" rev-parse --verify -q "${judge}^{commit}" 2>/dev/null)" \
+    || { WT_CHECK_OUT="the judge ${judge:-<none>} is no commit in ${root}"; return 2; }
+  lt="$(landing_tree_take "$root")" || { WT_CHECK_OUT="no landing tree can be taken under ${root}"; return 2; }
+  if ! landing_tree_point "$lt" "$WT_CHECK_JUDGE"; then
+    landing_tree_free "$lt"
+    WT_CHECK_OUT="the landing tree ${lt} cannot be checked out at the judge ${WT_CHECK_JUDGE}"; return 2
+  fi
+  WT_CHECK_DIR="$lt"; rp="$(_wt_abs "$root")"
+  WT_CHECK_OUT="$(cd "$lt" 2>/dev/null || exit 1
+    set -f; set --
+    # shellcheck disable=SC2086  # the configured command is meant to split on blanks
+    for w in $WT_CHECK_CMD; do
+      # Each arm opens with `(`: bash 3.2 reads an unopened arm's `)` inside `$( )` as the substitution's end.
+      case "$w" in
+        ("${root%/}"/*) w="${lt}/${w#"${root%/}"/}" ;;
+        ("${rp:-/nonexistent}"/*) w="${lt}/${w#"$rp"/}" ;;
+      esac
+      set -- "$@" "$w"
+    done
+    export BIONIC_CHECK_PROJECT="$root" BIONIC_CHECK_BASE="$base" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="${tree:-$lt}"
+    [ -z "$branch" ] || export BIONIC_CHECK_BRANCH="$branch"
+    exec "$@" </dev/null 2>&1)"; WT_CHECK_RC=$?
+  [ -z "$tree" ] || WT_CHECK_LEFT="$(_wt_check_left "$lt" "$WT_CHECK_JUDGE" "$tree")"
+  landing_tree_free "$lt"
+  return 0
+}
+
+# THE DOOR'S RUN OF THE DECLARED CHECK, for `line_publish` and `worktree_land`: the one runner over <base>..<head>,
+# judged by the release base of <plan>; <writer tree> is the piece whose cleanliness the check must leave as it found
+# it. A landing that changes the check's own files is judged like any other: the judge is a commit no landing writes,
+# so a fix to the check lands, and what it changes is said on the plan line by the hand scan and on the release card.
+# 0 when no check is declared or it passed and left nothing; 2 having refused, nothing merged.
+_wt_release_check() {  # <root> <plan> <base> <head> <writer tree> <branch> <onto> [<row>] -> 0 | 2
+  local root="$1" plan="$2" onto_head="$3" head="$4" wt_abs="$5" branch="$6" onto="$7" rc left said judged
+  worktree_check_run "$root" "$plan" "" "$onto_head" "$head" "$wt_abs"; rc=$?
+  case "$rc" in
+    1) return 0 ;;
+    2) _wt_refuse "check-unrun why=release-check branch=${branch} onto=${onto} base=${onto_head} head=${head} — the project's declared release-check (${WT_CHECK_CMD}) cannot be run as the release base holds it: ${WT_CHECK_OUT}; nothing is merged"; return 2 ;;
+  esac
+  left="$WT_CHECK_LEFT"; judged="judged-by=${WT_CHECK_JUDGE:0:12}"
+  if [ "$WT_CHECK_RC" -ne 0 ]; then
+    [ -z "$WT_CHECK_OUT" ] || printf '%s\n' "$WT_CHECK_OUT" >&2
+    _wt_refuse "check-failed why=release-check rc=${WT_CHECK_RC} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} ${judged} — the project's declared release-check (${WT_CHECK_CMD}), run as the release base ${WT_CHECK_JUDGE:0:12} holds it (${WT_CHECK_FROM}), fails over this landing's range${left:+ and left changes, named before judged-by}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
+  fi
+  if [ -n "$left" ]; then
+    # WHAT THE CHECK LEFT: the judge's tree off the judge or changed, or the piece's checkout changed. A check that
+    # moves or dirties what it was handed would leave the merge standing on something it did not judge.
+    said=""
+    case " $left" in *" head_was="*) said="moved the judge's landing tree ${WT_CHECK_DIR} off the judge (git -C ${WT_CHECK_DIR} reflog -2)" ;; esac
+    case " $left" in *" paths="*) said="${said:+${said}; }left tracked files changed in the judge's landing tree ${WT_CHECK_DIR}" ;; esac
+    case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
+    _wt_refuse "check-dirtied why=release-check checkout=${WT_CHECK_DIR} ${left} branch=${branch} ${judged} — the project's declared release-check (${WT_CHECK_CMD}) ${said}, and nothing is merged; put back what it changed, make the check change nothing, land again"; return 2
   fi
   return 0
 }
@@ -1284,15 +1218,13 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
-  # THE PROJECT'S DECLARED CHECK (wave-27 T16; D12). When `.bionic/config.yaml` names
-  # `release-check: <command>`, the command runs over this landing's range before anything is
-  # touched: in the TARGET checkout as it stands before the merge, never the task's tree (review
-  # pass 22 B1; A-orch-75), so a command naming its script relatively runs the target's copy and a
-  # piece cannot rewrite the check that judges it; the task's commits are read from the shared
-  # object store. BIONIC_CHECK_BASE is the working branch's head and BIONIC_CHECK_HEAD the task's
-  # head, its words split on blanks with globbing off. A non-zero exit refuses the landing and
-  # shows the command's output on stderr. With no key nothing runs and nothing prints.
-  _wt_release_check "$root" "$co" "$onto_head" "$head" "$wt_abs" "$branch" "$onto" || return 2
+  # THE PROJECT'S DECLARED CHECK. When the project's config names `release-check: <command>`, the
+  # command runs over this landing's range before anything is touched, as the release base holds it
+  # (`worktree_check_run`), so a piece cannot rewrite the check that judges it; the task's commits are
+  # read from the shared object store. BIONIC_CHECK_BASE is the working branch's head and
+  # BIONIC_CHECK_HEAD the task's head. A non-zero exit refuses the landing and shows the command's
+  # output on stderr. With no key nothing runs and nothing prints.
+  _wt_release_check "$root" "$plan" "$onto_head" "$head" "$wt_abs" "$branch" "$onto" || return 2
 
   # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
   # the run's `landing-proofs.log` is proved writable here, and created by nothing but the append

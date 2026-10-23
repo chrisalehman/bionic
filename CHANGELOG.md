@@ -8,6 +8,363 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.26.0 — 2026-10-22
+
+This is the run closes with no hand-hold release. Two runs in a row closed by hand: wave 41 spent its last six hours on
+the door's check closure, and wave 42 built in seven hours and spent nine more on hand edits to the plan, verb refusals
+in a loop, and a Patrol the stop wall demanded and resume denied. This release is measured on the close itself. A
+scripted replay takes a run from the failed-review state to `delivered:` through the verbs alone, with the project's
+real release check declared, and this run's own close counts its hand-holds at zero (D2). The replay was built first
+and red first. The judge of a landing is now the last release's check, a fixed commit no landing can rewrite, run
+against the project's own plan and record (D3, ADR-070). The check's files are a declared list the card prints as
+information, and the code that guessed them is deleted (D5). A fix born of a failing review is the one landing admitted
+past judgment, and its green landing answers the review and closes its ask (D4). The preflight reads the run's own
+record, the tick never offers a held merge, a hand landing records its suites, and the four verbs that refused each
+other on a plan with no ledger now write their cells or name the verb that does (D6, D7). The four places that decide
+whether a Patrol is owed read one rule, the scale cell, and a suite declares the files it pins so the brief names them
+(D8). The close says less, and close-out renders the release entry's review list from the record, so a person types
+only the prose (D12). Two 1.24.0 limits close: "after the release" is publish order, and the cap on tests compares
+with the base (D9). The release approval card renews a stale approval, which the replay found as a deadlock. Theme 7,
+the sitrep's four leftovers, comes last: one parser for the design ledger, numbers bound to the words that name them,
+waiting spans taken from the record, and a predicted close that counts running rows at what they have left (D10,
+D13). The design was approved on one condition, which held for every row: "I only approve if we delete the tests
+associated with the code we're deleting." Each row that deletes code deleted the tests that pinned only that code, in
+the same landing (Δ8). This is a minor release by the policy above: the replay, the fixed judge, the declared list,
+the born fix, the renewed approval and the scale cell's four checks are new capability, and the verbs and functions
+removed were defects of their own. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T2: the release check runs from one function, `worktree_check_run` in `lib/worktree.sh`, for the `release-check`
+  verb, the door and the hand scan. It checks out the release base in a landing tree and runs the declared command
+  there with `BIONIC_CHECK_PROJECT=<project root>`. A check of yours reads its plan, its record and `release-note`
+  from that variable, and falls back to the working directory's top when it is unset. `judged-by=` now names the judge
+  commit (`judged-by=<judge12>`, with `changed-here=<paths>` after it when a declared file changed). The
+  `judged-by=target` refusal is gone: a landing that changes the check's files is judged like any other.
+- T3: `release-check-files:` in `.bionic/config.yaml` is a space-separated list of paths or globs, one `*` staying
+  within one directory. A project that declares none has no files to name. `_wt_check_judge` takes three arguments
+  (repository, base, head), and `_wt_check_closure`, `_wt_check_loads`, `_wt_repo_paths` and `_wt_check_beside` no longer
+  exist.
+- T4: at `current: 8` or `9` the door admits one landing, a row whose `--born <record>#<n>` marker names a finding of
+  the newest failing review. That landing re-derives the review, and when it no longer fails, `waive:<question>` is
+  closed on the run's register with `by=landing <row>`. A row born of a regression's red is still refused.
+- T5: a plan verb's copy and close-out's preflight copy carry `dry_of=<plan>` on their session marker, and
+  `proof_debt_origin` reads the named plan's landing record for either. A review that derives `flag` opens no
+  `waive:` ask.
+- T6: `row-landed <row> <merge> <at> --by-hand <who> <why>` takes `--suites <a,b>`, `--green-at <commit>` and `--log
+  <path>`, all three or none (a partial set is a usage error, exit 2). It writes the `ready` event and one green verdict
+  per suite, as `spawn-worktree.sh land --by-hand` does.
+- T7: while `hold:merge` is open on the run's register, the tick's FILL does not name the integrate row and the stop
+  wall counts it not ready.
+- T8: `task-add` for a review row renders `Files` from the questions the plan's rigor and scale deal, one
+  `record/<wave>/critic-<question>.md` each, and the first goes to the `artifact` cell. `deliver` reads the `## Tasks`
+  artifact cell when the plan has no `## Dispatch ledger`. `task-set <row> Files=` writes any row no open contract
+  holds, and `amend` on a closed contract names it. `step-field 8` takes `cleanup`, `tmp-wiped` and `tasks-completed`,
+  one pair per call, at Step 8 only. Refusals name the verb that writes the cell.
+- T9: the tick writes no Patrol stamp, and the stop wall judges none, when the plan's scale cell says `no` (task
+  scale). Resume and the dispatch wall already read the cell. For a held integrate row the tick prints `WAIT T<n> —
+  hold:merge open: <title>`.
+- T10: a suite declares the files it pins in a `# pins: <path> [<path>…]` line of its opening comment block.
+  `brief <row>` adds one `<path>  # (pinned by <suite>)` line under `Files:` for each pinned path the row's cell lacks,
+  and the dispatch wall's Files check accepts them. `poker_brief_index_suites` is deleted.
+- T11: `close-out.sh` prints no `scorecard:` line. `continuation.md` keeps `## Landings` and `## Scorecard`. `run`
+  renders the release entry's `### The reviews` from the plan, commits it on the working branch under the author
+  `bionic close-out`, and appends `line/v1|ev=close-out|part=reviews|commit=<sha>|branch=<name>|at=<ISO-UTC>` to the
+  landing record. `check` prints what `run` would do and writes nothing.
+- T12: "after the release" is read from the landing record's publish order (`_units_publish_order` in `lib/units.sh`),
+  as the line already read it. A plan with no readable record keeps plan order.
+- T13: `ratio_check` reads `BIONIC_CHECK_BASE`. A head over the cap is admitted when its test lines are at or under the
+  base's and refused when they rose, and the line prints `test-ratio: <tests>/<code> (base <tests>/<code>)`. With no
+  readable base the head is judged alone.
+- T14: `CARD_SITREP_MLINES` entries are `Label=key:word,word`, the one place a sheet line's words are declared. The
+  card check binds each number in a Metrics row to the first declared word that follows it, and refuses a number placed
+  before the other line's word. `clock.forecast` is a Pace line.
+- T22: the sheet's `close.*` lines read a new basis: the predicted close is now plus the longer of `close.chain` and the
+  longest remaining time of a running task. A running task counts its size less its elapsed time, floored at its
+  cadence. Build tasks scale by the landed build tasks' own time over their size once three have landed, and every other
+  kind counts at face value. A task held on an ask is unscaled and named. `close.unscaled` is the same basis at 1×.
+- T23: after a fix lands past the approved head, the release approval card puts the release approval again, naming the
+  earlier head and what landed since. `reply` then writes a second `approved: release` line at the new head, and
+  `current 8 --check` and close-out read the newest one. The stale refusal has one spelling, `cur8_stale_line` in
+  `hooks/poker/judge.sh`.
+- T26: `units_validate <plan> [<origin>]` and `units_post_readers <plan> [<origin>]` take an optional origin plan whose
+  landing record is read in place of the copy's. An absent operand reads the plan itself. The commit gate hands
+  `BIONIC_DEBTS_ORIGIN` to its one table judgment, only when `BIONIC_DEBTS_PLAN` is the plan it judges.
+- T33: the integrate row runs `session-poker.sh reviews-part <row>` before its push and `gh pr create`. It commits the
+  entry's `### The reviews` on the working branch under `bionic line`, appends `ev=integrate|row=<row>|part=reviews` to
+  the landing record, and never pushes. `deliver` refuses an integrate row while the part would still render. The
+  judge (`proof_part_base` in `lib/proof.sh`) holds that commit covered by the release check and the approval at its
+  parent while it is byte for byte a fresh render. Close-out writes the part only when no earlier verb did. The renderer
+  is `line_reviews_state` in `lib/line.sh`, and the part's first line no longer names close-out.
+
+### The judge is the last release (D3, D5, ADR-070)
+
+- T2 (`T2.md`): the one runner and the one judge. The release base, the nearest release tag below the head, is checked
+  out in a landing tree for every run of the check. The line renders the entry's landing numbers through the judge's copy
+  of `release-note`, so a format change takes effect one release late.
+- T3 (`T3.md`): the declared list. The closure that guessed the check's files is deleted with the door-landing and
+  worktree sections that pinned only it. Bionic's own line names `tests/lib/*.sh`, `payload/scripts/lib/*.sh`,
+  `hooks/session-poker.sh` and `hooks/poker/*.sh`.
+- T6 (`T6.md`): a hand landing records its suites, so the one route past the door is no longer a landing with no
+  evidence behind it. The hand scan's call into the declared list is tidied.
+- T13 (`T13.md`): the cap on tests compares with the base, so a head over the cap is admitted only when it cut its tests.
+
+### The close is one state machine (D2, D4, D6, D7, D12)
+
+- T1 (`T1.md`): the replay, `tests/close-replay.test.sh`, over the rehearsal's sandbox from the failed-review state to
+  `delivered:`. It landed red, and its seven holes named the rows below.
+- T4 (`T4.md`): the born fix lands at step 8 and closes its review's ask. The step never moves back.
+- T5 (`T5.md`): the preflight reads the run's own record, so a fix that answered a review is no longer read as failing
+  at the close, and a flag opens no ask.
+- T7 (`T7.md`): the tick never offers a held merge.
+- T8 (`T8.md`): the verbs write their cells. No `deliver`, `amend`, `task-set` or `step-field` call is refused for a
+  cell the verbs cannot write.
+- T11 (`T11.md`): the close says less, and close-out renders the entry's reviews. Step 9 shows the ten parts and no
+  scorecard block, and Step 2 says a card put for approval is the real verb's or marked a mock-up.
+- T23 (`T23.md`): the release approval card renews a stale approval. This was the deadlock the replay found: the only
+  place to renew the approval refused to draw.
+- T24 (`T24.md`): the replay reads the entry. After close-out the entry's reviews part names the failed-then-fixed
+  review as registered.
+
+### The Patrol and the brief (D8)
+
+- T9 (`T9.md`): the tick and the stop wall read the scale cell, and the tick names a held merge.
+- T10 (`T10.md`): a suite declares its pins and the brief names them. The dead suite index is deleted.
+- T25 (`T25.md`): the dispatch text and the brief scaffold say so.
+
+### After the release, and the one record (D6, D9)
+
+- T12 (`T12.md`): "after the release" is publish order.
+- T26 (`T26.md`): the commit gate and the plan verbs hand the origin's record to the reader rule, so a born fix row's
+  reader is no longer refused on a dry copy.
+
+### Theme 7: the sitrep's leftovers (D10, D13)
+
+- T14 (`T14.md`): the card check binds each number to the word beside it, and Pace may cite the forecast.
+- T15 (`T15.md`): one parser for the design ledger and one for the landing record, and waiting spans from the record or
+  marked partial. The second landing-record parser is deleted, which turned a red section green.
+- T22 (`T22.md`): the predicted close counts what is running and scales by kind, and a verify row is upstream of the
+  integrate row.
+
+### The walk, the regression and the critic
+
+- T16 (`walk.md`): the walk. The replay and the sandbox's close-out are read as a user would, and the
+  verification matrix is filled from the landings' logs.
+- T17 (`T17.md`): the whole regression, once after the build.
+- T18 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's review of the whole, one record
+  for each question.
+
+### The release
+
+- T19 (`T19.md`): this entry, `plugin.json` 1.26.0, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, and ADR-070. T20 (`T20-pr.md`) opens the pull request on the release card's word, and
+  T21 (`continuation.md`) closes the run.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- evidence review, whole: fail at 29cfb97b by w43-T18, 2026-10-22T22:34:22Z (`critic-evidence.md`)
+- adversarial review, whole: fail at 29cfb97b by w43-T18, 2026-10-22T22:34:25Z (`critic-adversarial.md`)
+- structure review, whole: flag at 29cfb97b by w43-T18, 2026-10-22T22:34:27Z (`critic-structure.md`)
+- evidence review, piece: fail at 8d99ee4a by w43-T35, 2026-10-23T00:00:29Z (`critic-evidence-2.md`)
+- adversarial review, piece: fail at 8d99ee4a by w43-T35, 2026-10-23T00:00:31Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 8d99ee4a by w43-T35, 2026-10-23T00:00:33Z (`critic-structure-2.md`)
+
+### Known limits
+
+- A second `reply` after a second release card is untested as a pair. The replay's `reply` at the fix's head ran, but
+  `approve merge` still refuses a second approval ("An approval is recorded once"), and no test drives a `reply` that
+  replays both after two cards. (`T1.md` hole 7, `T23.md`)
+- The replay's own log part is not yet held by its tests. At the build's last row the whole regression showed the
+  replay reaching `delivered:` through the verbs (CL-1), the person's merge leaving main on the head the check held
+  (PR-4), and the entry's reviews part as registered (EN-1 to EN-6c). Three rows failed: CL-8, VB-1 and VB-2, which read
+  the commands, exits and hand-write marks the replay logs for itself. (`record/wave-43-no-hand-hold/regression-run-29cfb97b21fffa6c6db602e7ecccceb2954a21e6.log`)
+- The first landing of the pinned judge, T2, went in by hand: the old door refused it for changing a file its closure
+  named, and `row-landed` recorded no suites until T6. It is the one hand landing the pin removes for every later wave.
+  (A-orch.11)
+- A project whose release base predates its `release-check:` script is refused by the check's own missing file until its
+  next release. (`T2.md` Holes)
+- The judge at 1.26.0 is the 1.25.0 check, which ignores `BIONIC_CHECK_PROJECT`, so this run's landings passed the Known
+  limits and the landing numbers with "no plan names release". From the first landing after this release the judge is 1.26.0's check, which reads the plan.
+  (`T2.md` Holes)
+- No suite pins the door's check-dirtied arm. (`T2.md` Holes)
+- A head over the cap on tests whose base was under it is admitted when its test lines are unchanged or cut, so a
+  code-only deletion that tips a clean base over the cap lands. The rule is also judged by the release base's copy, so
+  it bites from the next release. (`T13.md`, A-T13.1, A-orch.15)
+- A hand landing with `--suites` writes its verdicts after the line publishes, so a born row landed by hand at step 8
+  leaves the review's ask open until a regression covers it. (A-T4.4)
+- `row-landed`'s `ready` event carries `branch=-` and `tree=-`, since the verb is given neither, and `--green-at` finds
+  a commit only in the project root, not one only a linked worktree holds. (`T6.md` Holes)
+- `step-field` takes one pair per call, so the Step 8 triple is three calls, and its usage line still lists the old
+  fields. An unknown key's refusal names no verb. (`T8.md` Holes, A-T8.8)
+- On a plan with neither an artifact column nor a ledger, `deliver`, `task-set` and `amend` point at each other, and
+  `amend` can widen a contract but not narrow it to one record. (`T8.md` Holes, A-T8.5)
+- session-poker-5 was not run on T8's final commit. The landing re-ran the other suites there, and the whole regression
+  covers it. (`T8.md` Holes)
+- `stop-orders.sh stopped` removes a row's tree through the session's own workspace record. After a `/clear` it cannot
+  resolve a tree a predecessor session spawned, says nothing, and leaves the tree standing. (A-orch.23)
+- The dispatch wall admits a `Suites:` or `Lands-on:` entry that is not a suite under `tests/`, and no verb narrows a
+  contract's suites, since `amend` only widens. A header comment in `render.test.sh` still names the deleted
+  `docs-pins.test.sh`. (A-orch.29)
+- The card check binds a number to the word beside it, not to its place inside the line. A line that holds several
+  numbers passes any of them against its word, so "1 green and 11 red" over "11 green, 1 red" passes. (A-T14.4)
+- The words, rehearsal and sitrep-card suites feed metric rows through `card.sh` and were outside T14's suites, so
+  the binding rule was traced against them by hand and not run. (A-orch.32, A-T14.2)
+- A ledger heading of the form `D6 settled by …` with no reply or parenthesis after the verb is no entry to the one
+  ledger parser. Wave 42's ruling on its Δ19 plan has no clock, so its waiting span is lost. (`T15.md` Holes,
+  A-orch.16)
+- `approve <name>` at a second head is unchanged for every name but `release`. The stale card re-puts only the release.
+  (A-T23.4)
+- `hooks/poker/line.sh`, `hooks/poker/roster.sh` and the governing-skill hook's temporary copy each judge a plan copy
+  with no origin, so a born fix row's reader keeps the plan-order answer there. (A-T26.4, `T12.md` Holes)
+- `hooks/stop.sh`'s library list does not name `scale.sh`. The stop wall sources it from its own library directory, and
+  a directory without it keeps a Patrol assumed. (`T9.md` Holes, A-T9.3)
+- A pin read from a suite changed after the branch tip is not seen by `brief` until the suite lands. (`T10.md` Holes)
+- The tick's FILL, the dispatch wall and the stop wall disagree on the writer cap's arithmetic, so a FILL may name a row
+  the wall refuses, and none says when writer slots sit idle behind one pending row. (A-orch.33, A-orch.4)
+- A goal missed by a red the plan declares opens a `decide:goal:<name>` ask that needs no ruling. (A-orch.19)
+- A plan's `deps` cell that names a task id is refused beside a `reads` column, though the Step 3 card draws it. (A-orch.1)
+- A writer reads a reply only when it is idle, and a writer that goes from suite to suite to `ready` has no idle turn,
+  so a question to the orchestrator waits for the writer's next idle turn. (A-orch.10)
+- The door-landing §COPY-4 arm c4-1 stays: its subject is the new runner reading an absolute word under the root in the
+  judge tree, which no other suite pins.
+- The handoff head says Blocked on you: yes over any open ask, while the sitrep card lists only the asks that hold a
+  task, the release or the merge; the handoff follows the card next release.
+
+### The landing numbers
+
+`landing-report --rows` at 9349e5ddd5a457e3a73433d082a05d347ea5b8de on 2026-10-23T00:23:30Z:
+
+```
+landings: queue=27 hand=1 git=0 · ready-to-landed median=5.4m p75=7.5m max=11.3m · runs: green=82 red=11 none=4 discarded=3 red-then-green=0 run=271 reused=0 absent=0 · waited median=15s · killed=6
+T1 queue ready=2026-10-22T17:18:08Z landed=2026-10-22T17:23:07Z minutes=5.0 runs=1 waited=14s wait=0.2 prove=4.8 rework=0.0 width=3
+  close-replay.test.sh red promised=277s actual=285s ratio=1.03
+T11 queue ready=2026-10-22T17:42:45Z landed=2026-10-22T17:47:20Z minutes=4.6 runs=4 waited=14s wait=0.2 prove=4.1 rework=0.3 width=3
+  close-out-4.test.sh green promised=227s actual=244s ratio=1.07
+  close-out-1.test.sh green promised=255s actual=178s ratio=0.70
+  render.test.sh green promised=17s actual=16s ratio=0.94
+  words.test.sh green promised=9s actual=11s ratio=1.22
+T7 queue ready=2026-10-22T17:46:51Z landed=2026-10-22T17:49:13Z minutes=2.4 runs=3 waited=51s wait=0.8 prove=1.5 rework=0.0 width=3
+  asks.test.sh green promised=30s actual=35s ratio=1.17
+  session-poker-2.test.sh green promised=102s actual=90s ratio=0.88
+  stop.test.sh green promised=39s actual=39s ratio=1.00
+T10 queue ready=2026-10-22T18:17:45Z landed=2026-10-22T18:29:04Z minutes=11.3 runs=4 waited=583s wait=9.7 prove=1.6 rework=0.0 width=3
+  session-poker-4.test.sh green promised=91s actual=95s ratio=1.04
+  words.test.sh green promised=9s actual=12s ratio=1.33
+  sitrep-card.test.sh green promised=28s actual=33s ratio=1.18
+  shell-lint.test.sh red promised=35s actual=35s ratio=1.00
+T2 hand ready=- landed=2026-10-22T18:40:37Z minutes=- runs=5 waited=- wait=- prove=- rework=- width=-
+  door-landing.test.sh green promised=255s actual=360s ratio=1.41
+  release-check.test.sh green promised=50s actual=73s ratio=1.46
+  landing-line-1.test.sh red promised=276s actual=339s ratio=1.23
+  landing-line-2.test.sh green promised=152s actual=174s ratio=1.14
+  worktree.test.sh green promised=37s actual=38s ratio=1.03
+T5 queue ready=2026-10-22T18:46:37Z landed=2026-10-22T18:52:01Z minutes=5.4 runs=4 waited=49s wait=0.8 prove=4.6 rework=0.0 width=1
+  close-out-4.test.sh green promised=244s actual=274s ratio=1.12
+  asks.test.sh green promised=36s actual=44s ratio=1.22
+  close-out-1.test.sh green promised=197s actual=193s ratio=0.98
+  shell-lint.test.sh red promised=35s actual=36s ratio=1.03
+T12 queue ready=2026-10-22T18:55:46Z landed=2026-10-22T19:05:21Z minutes=9.6 runs=3 waited=12s wait=0.2 prove=9.4 rework=0.0 width=3
+  units.test.sh green promised=10s actual=19s ratio=1.90
+  landing-line-1.test.sh red promised=209s actual=283s ratio=1.35
+  canonical-sdlc-evidence-gate-2.test.sh green promised=26s actual=53s ratio=2.04
+T13 queue ready=2026-10-22T18:57:10Z landed=2026-10-22T19:07:13Z minutes=10.1 runs=2 waited=536s wait=8.9 prove=1.1 rework=0.0 width=4
+  release-check.test.sh green promised=48s actual=65s ratio=1.35
+  shell-lint.test.sh red promised=17s actual=32s ratio=1.88
+T15 queue ready=2026-10-22T19:39:39Z landed=2026-10-22T19:45:09Z minutes=5.5 runs=4 waited=13s wait=0.2 prove=5.3 rework=0.0 width=3
+  sitrep.test.sh green promised=108s actual=141s ratio=1.31
+  landing-line-1.test.sh green promised=243s actual=315s ratio=1.30
+  sitrep-card.test.sh green promised=33s actual=34s ratio=1.03
+  shell-lint.test.sh red promised=33s actual=35s ratio=1.06
+T3 queue ready=2026-10-22T19:47:14Z landed=2026-10-22T19:53:15Z minutes=6.0 runs=4 waited=13s wait=0.2 prove=5.5 rework=0.3 width=3
+  door-landing.test.sh green promised=210s actual=307s ratio=1.46
+  worktree.test.sh green promised=22s actual=45s ratio=2.05
+  release-approval.test.sh green promised=211s actual=331s ratio=1.57
+  shell-lint.test.sh red promised=31s actual=35s ratio=1.13
+T4 queue ready=2026-10-22T19:54:02Z landed=2026-10-22T19:59:36Z minutes=5.6 runs=5 waited=12s wait=0.2 prove=5.0 rework=0.3 width=4
+  landing-line-1.test.sh green promised=191s actual=300s ratio=1.57
+  landing-line-2.test.sh green promised=85s actual=162s ratio=1.91
+  asks.test.sh green promised=31s actual=60s ratio=1.94
+  worktree.test.sh green promised=24s actual=45s ratio=1.88
+  shell-lint.test.sh red promised=35s actual=36s ratio=1.03
+T24 queue ready=2026-10-22T20:21:44Z landed=2026-10-22T20:22:31Z minutes=0.8 runs=1 waited=13s wait=0.2 prove=0.6 rework=0.0 width=2
+  shell-lint.test.sh green promised=36s actual=33s ratio=0.92
+T8 queue ready=2026-10-22T20:39:10Z landed=2026-10-22T20:45:59Z minutes=6.8 runs=4 waited=15s wait=0.2 prove=6.3 rework=0.3 width=4
+  session-poker-4.test.sh green promised=109s actual=115s ratio=1.06
+  session-poker-3.test.sh green promised=71s actual=79s ratio=1.11
+  landing-line-1.test.sh green promised=305s actual=294s ratio=0.96
+  shell-lint.test.sh green promised=35s actual=34s ratio=0.97
+T6 queue ready=2026-10-22T20:41:04Z landed=2026-10-22T20:52:12Z minutes=11.1 runs=4 waited=309s wait=5.2 prove=5.6 rework=0.4 width=3
+  session-poker-4.test.sh green promised=94s actual=132s ratio=1.40
+  landing-line-1.test.sh green promised=246s actual=335s ratio=1.36
+  door-landing.test.sh green promised=222s actual=323s ratio=1.45
+  shell-lint.test.sh green promised=34s actual=36s ratio=1.06
+T25 queue ready=2026-10-22T21:01:02Z landed=2026-10-22T21:03:45Z minutes=2.7 runs=6 waited=135s wait=2.2 prove=0.5 rework=0.0 width=2
+  render.test.sh green promised=12s actual=16s ratio=1.33
+  docs-pins.test.sh none promised=116s actual=1s ratio=0.01
+  bash-walls.test.sh green promised=17s actual=22s ratio=1.29
+  docs-pins.test.sh none promised=1s actual=1s ratio=1.00
+  docs-pins.test.sh none promised=1s actual=1s ratio=1.00
+  docs-pins.test.sh none promised=1s actual=2s ratio=2.00
+T23 queue ready=2026-10-22T21:01:12Z landed=2026-10-22T21:09:35Z minutes=8.4 runs=9 waited=59s wait=1.0 prove=7.4 rework=0.0 width=4
+  release-approval.test.sh discarded promised=379s actual=- ratio=-
+  card.test.sh green promised=9s actual=16s ratio=1.78
+  shell-lint.test.sh discarded promised=27s actual=- ratio=-
+  release-approval.test.sh discarded promised=379s actual=- ratio=-
+  card.test.sh green promised=11s actual=15s ratio=1.36
+  shell-lint.test.sh green promised=36s actual=33s ratio=0.92
+  release-approval.test.sh green promised=379s actual=336s ratio=0.89
+  card.test.sh green promised=16s actual=14s ratio=0.88
+  shell-lint.test.sh green promised=34s actual=34s ratio=1.00
+T14 queue ready=2026-10-22T21:08:26Z landed=2026-10-22T21:10:20Z minutes=1.9 runs=1 waited=83s wait=1.4 prove=0.5 rework=0.0 width=3
+  sitrep-card.test.sh green promised=25s actual=29s ratio=1.16
+T26 queue ready=2026-10-22T21:14:42Z landed=2026-10-22T21:16:44Z minutes=2.0 runs=3 waited=13s wait=0.2 prove=0.9 rework=0.9 width=3
+  canonical-sdlc-evidence-gate-2.test.sh green promised=32s actual=56s ratio=1.75
+  units.test.sh green promised=16s actual=22s ratio=1.38
+  bash-walls.test.sh green promised=20s actual=25s ratio=1.25
+T9 queue ready=2026-10-22T21:22:48Z landed=2026-10-22T21:23:52Z minutes=1.1 runs=2 waited=14s wait=0.2 prove=0.8 rework=0.0 width=3
+  patrol-revive.test.sh green promised=31s actual=28s ratio=0.90
+  asks.test.sh green promised=57s actual=50s ratio=0.88
+T22 queue ready=2026-10-22T21:40:17Z landed=2026-10-22T21:43:10Z minutes=2.9 runs=2 waited=14s wait=0.2 prove=2.4 rework=0.3 width=4
+  sitrep.test.sh green promised=140s actual=141s ratio=1.01
+  sitrep-card.test.sh green promised=16s actual=31s ratio=1.94
+T19 queue ready=2026-10-22T22:24:53Z landed=2026-10-22T22:31:34Z minutes=6.7 runs=15 waited=23s wait=0.4 prove=4.3 rework=2.0 width=3
+  release-check.test.sh green promised=62s actual=82s ratio=1.32
+  commands.test.sh green promised=1s actual=1s ratio=1.00
+  doctor-version.test.sh green promised=38s actual=76s ratio=2.00
+  render.test.sh green promised=12s actual=21s ratio=1.75
+  words.test.sh red promised=6s actual=13s ratio=2.17
+  release-check.test.sh green promised=82s actual=81s ratio=0.99
+  commands.test.sh green promised=1s actual=1s ratio=1.00
+  doctor-version.test.sh green promised=76s actual=75s ratio=0.99
+  render.test.sh green promised=21s actual=16s ratio=0.76
+  words.test.sh red promised=13s actual=9s ratio=0.69
+  release-check.test.sh green promised=82s actual=75s ratio=0.91
+  commands.test.sh green promised=1s actual=1s ratio=1.00
+  doctor-version.test.sh green promised=49s actual=70s ratio=1.43
+  render.test.sh green promised=16s actual=18s ratio=1.12
+  words.test.sh green promised=10s actual=11s ratio=1.10
+T28 queue ready=2026-10-22T22:43:43Z landed=2026-10-22T22:45:58Z minutes=2.2 runs=2 waited=15s wait=0.2 prove=2.0 rework=0.0 width=2
+  dispatch-preflight-4a.test.sh green promised=68s actual=79s ratio=1.16
+  session-poker-4.test.sh green promised=83s actual=119s ratio=1.43
+T29 queue ready=2026-10-22T22:45:00Z landed=2026-10-22T22:51:20Z minutes=6.3 runs=1 waited=73s wait=1.2 prove=5.1 rework=0.0 width=3
+  door-card.test.sh green promised=307s actual=306s ratio=1.00
+T27 queue ready=2026-10-22T22:52:29Z landed=2026-10-22T23:00:35Z minutes=8.1 runs=1 waited=15s wait=0.2 prove=7.8 rework=0.0 width=4
+  close-replay.test.sh green promised=334s actual=470s ratio=1.41
+T34 queue ready=2026-10-22T23:20:57Z landed=2026-10-22T23:23:46Z minutes=2.8 runs=2 waited=15s wait=0.2 prove=2.6 rework=0.0 width=4
+  sitrep.test.sh green promised=151s actual=154s ratio=1.02
+  sitrep-card.test.sh green promised=30s actual=34s ratio=1.13
+T31 queue ready=2026-10-22T23:31:11Z landed=2026-10-22T23:35:24Z minutes=4.2 runs=2 waited=15s wait=0.2 prove=4.0 rework=0.0 width=3
+  regression-rename.test.sh green promised=11s actual=14s ratio=1.27
+  close-out-4.test.sh green promised=200s actual=237s ratio=1.19
+T32 queue ready=2026-10-22T23:35:10Z landed=2026-10-22T23:36:43Z minutes=1.6 runs=1 waited=31s wait=0.5 prove=0.2 rework=0.8 width=3
+  rehearsal.test.sh green promised=13s actual=12s ratio=0.92
+T33 queue ready=2026-10-23T00:08:18Z landed=2026-10-23T00:19:08Z minutes=10.8 runs=3 waited=142s wait=2.4 prove=8.5 rework=0.0 width=3
+  close-out-4.test.sh green promised=253s actual=306s ratio=1.21
+  close-replay.test.sh green promised=470s actual=506s ratio=1.08
+  landing-line-1.test.sh green promised=335s actual=348s ratio=1.04
+```
+
 ## 1.25.0 — 2026-10-21
 
 This is the sitrep owes release. The sitrep tells the user what they owe. It is a card drawn by the one card

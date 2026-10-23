@@ -30,8 +30,11 @@
 #                              or ->` for every pending row that is not ready (wave-26 T2, D9).
 #   units_edges <plan>         `<from id><TAB><to id><TAB><the read that joins them>`, one per
 #                              wait between two open rows (wave-26 T2, D1).
-#   units_validate <plan>      one line per broken invariant, each naming the offending id
-#                              and the rule. Exit 1 if any line was printed, else 0.
+#   units_validate <plan> [<origin>]
+#                              one line per broken invariant, each naming the offending id
+#                              and the rule. Exit 1 if any line was printed, else 0. <origin>
+#                              is the plan whose landing record "after the release" reads,
+#                              when <plan> is a copy that names none (default: <plan>).
 #   units_findings <plan> <rosters>
 #                              one line per ledger finding — `status <id> <value>`,
 #                              `evidence <id>`, `launch <id> <agent>` — the one reader the
@@ -1273,18 +1276,54 @@ _units_questions_awk() {
 '
 }
 
-# _units_post_awk -> the awk functions `after(a, b)` and `post_reader(j, r)`, over the row arrays `n`, `stp`, `fil`,
-# `rd` and `sta` the caller filled in table order; it needs `cell_covers` (`_units_files_awk`) before it.
+# _units_publish_order <origin plan> <rows> -> `<id>=<n> <id>=<n> ...`, the landing record's place for each row that has landed:
+# the line number of the row's LAST `published` event or `landed:` header in `<docs-root>/record/<plan name>/
+# landing-proofs.log`, which is appended in the order the rows were published. Nothing printed when the plan has no
+# landed release row to compare with (the common case, which then pays no git call), when no record can be named, or
+# when the record is not a file: the callers then judge by the plan's order. The plan named is the one whose record is
+# read, so a caller judging a copy of a plan hands the plan it was copied from: a copy's own name names no record.
+_units_publish_order() {
+  local plan="${1:-}" rec
+  printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
+  declare -F proof_debt_record >/dev/null 2>&1 || return 0
+  rec="$(proof_debt_record "$plan" 2>/dev/null)" && [ -f "$rec" ] || return 0
+  awk '
+    { sub(/\r$/, ""); r = "" }
+    /^line\/v1\|ev=published\|/ { m = split($0, f, "|"); for (k = 3; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
+    /^landed:[ \t]/ { m = split($0, f, /[ \t]+/); for (k = 2; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
+    r != "" { pos[r] = NR }
+    END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }' "$rec" 2>/dev/null
+}
+
+# _units_post_awk -> the awk functions `after(a, b)`, `later(w, r)` and `post_reader(j, r)`, over the row arrays `n`,
+# `id`, `stp`, `fil`, `rd` and `sta` the caller filled in table order, and the awk variable `pubs`
+# (`_units_publish_order`'s answer); it needs `cell_covers` (`_units_files_awk`) before it.
 # A FIX LANDED AFTER THE RELEASE IS READ AS A PIECE: its reader row stands after the release row, so the order check
-# admits a review row there only when what it reads was written after the release. `after(a, b)` is the order the
-# check judges by, the step and then the table position. `post_reader(j, r)` is 1 when the review row j reads only
-# `approval:plan`, `head` and paths that rows placed after the release row r write, and names at least one such path:
-# a row that names none would read the whole head, which belongs ahead of the release. A path some row at or before
+# admits a review row there only when what it reads was written after the release. `after(a, b)` is the plan's order,
+# the step and then the table position. `later(w, r)` is whether row w was written after the release row r, and
+# AFTER THE RELEASE IS PUBLISH ORDER: a fix row born at step 4 stands ahead of the release in the plan and publishes
+# behind it, so w is later when the landing record published it after r, and when it has not published at all while r
+# has. Where the record is silent on r, or on a w the plan calls landed, the plan's order stands. The numbers
+# re-renderer reads the same record the same way. `post_reader(j, r)` is 1 when the review row j reads only
+# `approval:plan`, `head` and paths that rows later than the release row r write, and names at least one such path:
+# a row that names none would read the whole head, which belongs ahead of the release. A path some row not later than
 # r also writes is pre-release work and refuses the row, and so does a path no row but j writes. ONE PREDICATE, TWO
 # READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
 _units_post_awk() {
   printf '%s' '
     function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
+    function later(w, r,   m, a, k, p) {
+      if (!pub_done) {
+        pub_done = 1
+        m = split(pubs, a, " ")
+        for (k = 1; k <= m; k++) { p = index(a[k], "="); if (p) pubpos[substr(a[k], 1, p - 1)] = substr(a[k], p + 1) + 0 }
+      }
+      if (id[r] in pubpos) {
+        if (id[w] in pubpos) return (pubpos[id[w]] > pubpos[id[r]])
+        if (sta[w] != "landed") return 1
+      }
+      return after(w, r)
+    }
     function post_reader(j, r,   m, a, k, t, w, hit, named) {
       named = 0
       m = split(rd[j], a, ",")
@@ -1294,7 +1333,7 @@ _units_post_awk() {
         hit = 0
         for (w = 1; w <= n; w++) {
           if (w == j || sta[w] == "dropped" || !cell_covers(fil[w], t)) continue
-          if (!after(w, r)) return 0
+          if (!later(w, r)) return 0
           hit = 1
         }
         if (!hit) return 0
@@ -1305,16 +1344,17 @@ _units_post_awk() {
 '
 }
 
-# units_post_readers <plan> -> `<id>\t<status>\t<read|unread>` for each review row standing after a landed release row
+# units_post_readers <plan> [<origin>] -> `<id>\t<status>\t<read|unread>` for each review row standing after a landed release row
 # that `post_reader` admits there, in table order. `read` when every record path in its Files is the evidence of a
 # registered review reading (`proved: kind=review … evidence=`), in either spelling the record takes; `unread`
 # otherwise. The release approval card waits on an open row that is unread: what landed after the release is read
-# before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column.
+# before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column. <origin> is
+# the plan whose landing record orders the rows, when <plan> is a copy (default: <plan>), as `units_validate` takes it.
 units_post_readers() {
-  local plan="${1:-}" rows
+  local plan="${1:-}" origin="${2:-}" rows
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] && units_has_column "$plan" reads || return 0
-  printf '%s\n' "$rows" | awk -F'\t' "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+  printf '%s\n' "$rows" | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     FNR == NR { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -1939,7 +1979,12 @@ _units_sched_awk() {
   '
 }
 
-# units_validate <plan> -> one line per broken invariant; exit 1 if any, else 0.
+# units_validate <plan> [<origin>] -> one line per broken invariant; exit 1 if any, else 0.
+#
+# ONE RULE FOR A PLAN AND FOR ITS COPY. "After the release" is the publish order in a landing record, and a record is
+# named by a plan's name; a plan verb's dry copy and the governing skill's temp copy carry names of their own, which name
+# none. <origin> is the plan the copy was made from, the one whose record is read, so the copy is judged as the plan is.
+# Absent, the plan is its own origin and the rest of this library is unchanged.
 #
 # `worktree` AND `base` EACH CARRY ONE INVARIANT, and both stop short of the machine: an
 # `active` row must name a tree (§12), and a `base` cell, when it holds anything, must be a
@@ -1975,7 +2020,7 @@ _units_sched_awk() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads
+  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads
 
   out="$(_units_table "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -2028,7 +2073,7 @@ units_validate() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
+      -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1

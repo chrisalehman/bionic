@@ -771,6 +771,114 @@ if [ -e "$(stamp_path "$D" "$SID")" ]; then
 fi
 fire "$D"; expect_quiet "34: …and one stale window later there is still no notice to fire"
 
+section "§TASK-SCALE: the scale table's patrol cell is the one rule four readers keep — a task-scale run has no Patrol to arm, stamp, judge or ask for"
+
+# THE CONTRACT. Whether a Patrol exists is the scale table's `patrol` cell (lib/scale.sh), read through
+# `scale_cell` by resume, the tick, the stop wall and the dispatch wall. At `no` the tick writes no stamp,
+# the stop wall judges none and the dispatch wall asks for none; at `yes`, or on a plan whose scale cannot
+# be read, each behaves as it always has. Before the tick and the stop wall read it, a hand tick on a
+# task-scale run wrote the stamp resume had removed and the wall then demanded the Patrol resume said
+# does not exist.
+# FIXTURE FIDELITY: make_env's own project with `scale:` written into its plan's frontmatter; the real
+# poker, the real hooks/stop.sh process and the dispatch wall's own builders (tests/dispatch-preflight.prelude.sh).
+# ANTI-VACUITY: every task-scale absence has a wave-scale control in the same fixture shape that returns the
+# stamp, the block or the refusal, so each extractor is proven to find what it reports missing.
+# fails-when: the tick stamps a task-scale run, the stop wall blocks `Patrol dead` on its stamp, the dispatch wall
+# asks a task-scale dispatch for a stamp, resume arms one — or any of them stops acting at wave scale.
+ts_env() {  # <scale> -> make_env's project whose plan carries `scale: <scale>`
+  local d; d=$(make_env 1m)
+  cat > "$d/.bionic/docs/plans/wave-01.plan.md" <<TSPLAN
+---
+canonical_sdlc_version: 14
+scale: $1
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: tasks in flight
+TSPLAN
+  # An empty roster is a run with nothing dispatched yet, which the tick reads as a lull and carries on from;
+  # with no roster file at all it refuses, and a refusal is not the reading TS-2b asks for.
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+ts_tick() {  # <project> -> the real tick, in that project
+  ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$1/no-config" bash "$POKER_FOR_DISARM" tick 2>&1 )
+}
+
+# (1) THE TICK. The wave-scale control stamps; the task-scale tick writes nothing and exits clean.
+TS_W=$(ts_env wave); ts_tick "$TS_W" >/dev/null
+if [ -f "$(stamp_path "$TS_W" "$SID")" ]; then
+  ok "TS-1 the control: a tick over a wave-scale run writes the Patrol stamp"
+else
+  no "TS-1 the control: a tick over a wave-scale run wrote no stamp" "$(ls "$TS_W/.bionic/tmp")"
+fi
+TS_T=$(ts_env task); TS_OUT=$(ts_tick "$TS_T"); TS_RC=$?
+expect_absent_file() { if [ ! -e "$2" ]; then ok "$1"; else no "$1" "found $2"; fi; }
+expect_absent_file "TS-2 a tick over a task-scale run writes no Patrol stamp" "$(stamp_path "$TS_T" "$SID")"
+if [ "$TS_RC" -eq 0 ] && [ -n "$TS_OUT" ]; then
+  ok "TS-2b …and the tick itself still ran: it exited 0 and printed its reading"
+else
+  no "TS-2b …the tick did not run to its reading" "rc=$TS_RC out=<$TS_OUT>"
+fi
+# A plan whose scale cannot be read keeps today's behaviour: a Patrol is assumed.
+TS_U=$(make_env 1m); ts_tick "$TS_U" >/dev/null
+if [ -f "$(stamp_path "$TS_U" "$SID")" ]; then
+  ok "TS-2c a plan with no scale: line is stamped as before (a Patrol is assumed)"
+else
+  no "TS-2c a plan with no scale: line was not stamped" "$(ls "$TS_U/.bionic/tmp")"
+fi
+
+# (2) THE STOP WALL. A stale stamp on a wave-scale run blocks `Patrol dead`; the same stamp on a task-scale
+# run is no Patrol's, and the wall judges none.
+TS_W=$(ts_env wave); write_stamp "$TS_W" "$SID"; backdate "$(stamp_path "$TS_W" "$SID")" 600
+fire "$TS_W"; expect_block "TS-3 the control: a stale stamp on a wave-scale run is refused"
+TS_T=$(ts_env task); write_stamp "$TS_T" "$SID"; backdate "$(stamp_path "$TS_T" "$SID")" 600
+fire "$TS_T"; expect_quiet "TS-4 a stale stamp on a task-scale run is not judged: the wall says nothing"
+
+# (3) THE DISPATCH WALL. The same dispatch with no stamp: refused for the Patrol at wave scale, admitted at
+# task scale. The wall runs in a subshell so the prelude's sandbox, traps and fixture guard stay out of this suite.
+ts_dispatch() {  # <scale> -> "<verdict>|<yes if the refusal names a missing Patrol stamp>"
+  (
+    . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/lib/live-answer.sh"; . "$(dirname "$0")/lib/swept-marker.sh"
+    . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+    r="$(make_repo "ts-$1" yes)"; write_attestation "$r" "$SID_A"
+    p="$r/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+    sed "s/^scale: wave$/scale: $1/" "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+    rm -f "$r/.bionic/tmp/patrol-$SID_A.state"
+    mk_transcript "$SANDBOX/ts-none.jsonl" none
+    run_gate "$(mk_agent_payload "$SID_A" "$r" "$BRIEF_FULL" "W-ONE" "claude-sonnet-5" "$SANDBOX/ts-none.jsonl" "implementor")"
+    case "$GATE_VERR" in *"no Patrol stamp exists"*) w=yes ;; *) w=no ;; esac
+    printf '%s|%s' "$GATE_VERDICT" "$w"
+  )
+}
+expect_eq "TS-5 the control: at wave scale a dispatch with no stamp is refused for the Patrol" "deny|yes" "$(ts_dispatch wave)"
+expect_eq "TS-6 at task scale the same dispatch asks for no stamp and is admitted" "allow|no" "$(ts_dispatch task)"
+
+# (4) RESUME. Typed over a task-scale run it makes no Patrol: it says so, and arms no stamp.
+TS_R=$(ts_env task)
+mkdir -p "$TS_R/.bionic/docs/record/x"
+printf 'bionic-handoff/v1\nsitrep head: (none recorded)\nplan: .bionic/docs/plans/wave-01.plan.md\nbranch: wave/01-fixture @ x\nstep: 4\nsafe to clear\n/bionic:canonical-sdlc .bionic/docs/record/x/h.md\n' \
+  > "$TS_R/.bionic/docs/record/x/h.md"
+TS_RES=$( cd "$TS_R" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$TS_R/no-config" bash "$POKER_FOR_DISARM" resume .bionic/docs/record/x/h.md 2>&1 )
+case "$TS_RES" in
+  *"patrol: none — a task-scale run has no Patrol"*) ok "TS-7 resume over a task-scale run says it has no Patrol" ;;
+  *) no "TS-7 resume did not say a task-scale run has no Patrol" "$TS_RES" ;;
+esac
+expect_absent_file "TS-7b …and arms no stamp" "$(stamp_path "$TS_R" "$SID")"
+TS_RW=$(ts_env wave)
+mkdir -p "$TS_RW/.bionic/docs/record/x"
+cp "$TS_R/.bionic/docs/record/x/h.md" "$TS_RW/.bionic/docs/record/x/h.md"
+( cd "$TS_RW" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$TS_RW/no-config" bash "$POKER_FOR_DISARM" resume .bionic/docs/record/x/h.md ) >/dev/null 2>&1
+if [ -f "$(stamp_path "$TS_RW" "$SID")" ]; then
+  ok "TS-7c the control: resume over a wave-scale run arms the Patrol stamp"
+else
+  no "TS-7c the control: resume over a wave-scale run armed no stamp" "$(ls "$TS_RW/.bionic/tmp")"
+fi
+
 # ---------- what the explanation says about the footgun in its own third act ----------
 #
 # CREATING IS THE REFUSABLE HALF. `CronCreate` is measured non-deterministically refusable by the

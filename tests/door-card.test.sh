@@ -196,7 +196,10 @@ expect_eq "(m0) an unchanged copy of the tree renders the card on a copy of the 
   "$DOOR_RC $(dc_keys "$DCM0_R/.bionic/docs/record/wave-x" "$DC_H8")"
 
 DCM1="$WORLD_ROOT/tree-unsettled"; dcm_tree "$DCM1"
-sed -i.orig '/approve:release"\$/d' "$DCM1/payload/scripts/card.sh"
+# The cut replaces the settle statement with a no-op instead of deleting its line: the settle is the whole body of an
+# if, and an emptied body leaves a card.sh that does not parse, so the mutant would fail on syntax, not on the
+# missing settle.
+sed -i.orig 's/^\( *\).*approve:release"\$.*$/\1:/' "$DCM1/payload/scripts/card.sh"
 expect_eq "(m1a) the mutant deleted the approve:release settle from its card" "yes" \
   "$(cmp -s "$DCM1/payload/scripts/card.sh" "$DCM1/payload/scripts/card.sh.orig" && echo no || echo yes)"
 read -r DCM1_R _ <<EOF

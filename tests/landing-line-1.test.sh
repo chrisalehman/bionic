@@ -1092,6 +1092,103 @@ rm -f "$WW_RD4/release-approval-cccccccc.md"
 printf '# page\n\n## Replay\n\n%s-results/v1|plan=%s|head=%s|at=2026-10-20T11:40:00Z|decisions=1\n' "$WW_RN" "$(ll_plan "$RW4")" "$WW_C" > "$WW_RD4/$WW_RN-results-cccccccc.md"
 expect_contains "WINDOW-3e a page written under the card's old stem is read for the end as well" \
   "2026-10-20T11:40:00Z" "$(ww_ends "$RW4")"
+# ---------------------------------------------------------------------------
+section "§NUMBERS-JUDGE: the release numbers a landing past the release writes are the judge copy's release-note"
+# The judge is the commit the plan's release range starts from (here its `base-sha:`, the world having no tag). It
+# holds a release-note that prints the block one way; the accepted head's own copy prints one field more. A row landing
+# past the published release row has its numbers rendered by the judge's copy, the copy its release check compares
+# with, so the entry's block is the judge's output and never carries the head's field. fails-when: the renderer is
+# the plugin root's or the head's, so the landing is refused in the renderer's words or the block carries extra=1.
+nj_stub() {  # <extra field> -> a release-note stand-in: the heading, the head and instant line, one fenced line
+  printf '%s\n' '#!/bin/bash' '[ "$1" = release-note ] || exit 2' \
+    "printf '### The landing numbers\\n\\n\`landing-report --rows\` at %s on %s:\\n\\n\`\`\`\\nlandings: judge=1$1\\n\`\`\`\\n' \"\$3\" \"\$5\""
+}
+RJ="$(ll_world)"; PJ="$(ll_plan "$RJ")"
+mkdir -p "$RJ/hooks"; nj_stub "" > "$RJ/hooks/session-poker.sh"
+printf '# Changelog\n\n## 9.9.9 — 2026-10-20\n\n### The landing numbers\n\n`landing-report --rows` at 0 on 2026-10-20T00:00:00Z:\n\n```\nlandings: as released\n```\n\n## 9.9.8 — 2026-10-01\n\n- before\n' \
+  > "$RJ/CHANGELOG.md"
+git -C "$RJ" add hooks/session-poker.sh CHANGELOG.md && git -C "$RJ" commit -qm "the release and its renderer"
+NJ_JUDGE="$(ll_head "$RJ")"
+nj_stub " extra=1" > "$RJ/hooks/session-poker.sh" && git -C "$RJ" commit -qam "the renderer prints a field more"
+NJ_HEAD="$(ll_head "$RJ")"
+awk -v j="$NJ_JUDGE" '{ print } /^working-branch: / { print "release: 9.9.9"; print "base-sha: " j }
+  /^\| T2 \| 4 \| build \|/ { print "| T9 | 7 | doc | the release 9.9.9 | wx-T9 | — | | 10 | REQ-1 | CHANGELOG.md | .worktrees/T9 | | active |" }' \
+  "$PJ" > "$PJ.n" && mv "$PJ.n" "$PJ"
+mkdir -p "$(dirname "$(ll_rec "$RJ")")"
+printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=t|why=w|at=2026-10-20T00:00:00Z\n' "$NJ_JUDGE" >> "$(ll_rec "$RJ")"
+expect_eq "(nj0) precondition: the judge's copy and the head's differ by the one field, and the plan names the judge as its base" \
+  "1 0 1 base-sha: $NJ_JUDGE" \
+  "$(git -C "$RJ" show "$NJ_HEAD:hooks/session-poker.sh" | grep -c 'judge=1 extra=1') $(git -C "$RJ" show "$NJ_JUDGE:hooks/session-poker.sh" | grep -c 'extra=1') $(grep -c '^| T9 | 7 | doc |' "$PJ") $(grep '^base-sha: ' "$PJ")"
+ll_ready "$RJ" T1 "$(ll_carrier)" >/dev/null
+KJ="$(ll_cand "$RJ" T1 "$NJ_HEAD")"; ll_green "$RJ" T1 "$KJ"
+ll_pub "$RJ" T1
+NJ_TIP="$(ll_head "$RJ")"
+expect_eq "(nj1) the row past the release lands (exit 0)" "0" "$LL_RC"
+expect_contains "(nj1b) …its publish names the numbers commit on the candidate" "|row=T1|commit=$KJ|kind=queue|by=-|why=-|numbers=$NJ_TIP|" \
+  "$(ll_ev "$RJ" published)"
+NJ_BLOCK="$(git -C "$RJ" show "$NJ_TIP:CHANGELOG.md" 2>/dev/null | awk '/^## 9\.9\.9 / { f = 1; next } /^## / { f = 0 } f && NF')"
+NJ_ON="$(printf '%s\n' "$NJ_BLOCK" | sed -n 's/^`landing-report --rows` at [0-9a-f]* on \([0-9TZ:-]*\):$/\1/p')"
+expect_regex "(nj2-0) the entry's block names the candidate and an instant" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$NJ_ON"
+expect_eq "(nj2) …and equals, line for line, what the judge's copy prints for that head and instant" \
+  "$(git -C "$RJ" show "$NJ_JUDGE:hooks/session-poker.sh" | bash -s release-note --at "$KJ" --on "$NJ_ON" "$PJ" | awk NF)" "$NJ_BLOCK"
+expect_absent "(nj2b) …never the head's field" "extra=1" "$NJ_BLOCK"
+
+section "§BORN-AT-8: past judgment only a fix born of a failing review lands; any other row is refused past-judgment"
+#
+# A plan at `current: 8` that the judge can answer (rigor, scale, base-sha) carries a registered structure reading whose
+# newest result is fail, its record holding one finding to fix. T1's `- T1:` line carries the born marker task-add
+# writes for that finding; T2 is unborn, then regression-born, then born of the same finding once T1 has answered it.
+# FIXTURE FIDELITY: the reading and the markers are planted in the shapes `proof-add review` and `task-add --born` write
+# them (the replay drives the verbs themselves: tests/close-replay.test.sh §CLOSE); the landing is the writer's `ready`.
+# fails-when: lib/worktree.sh `_wt_land_checks` keeps the past-judgment refusal for the born row (ba3), or admits a row
+# the born rule does not name: unborn (ba1), regression-born (ba2), born of a review no longer failing (ba4).
+ba_world() {  # -> a world at current 8: T1 born of rev.md#1, a failing structure reading of it newest
+  local r p h b
+  r="$(ll_rworld)" || return 1
+  p="$(ll_plan "$r")"; h="$(ll_head "$r")"; b="$(git -C "$r" rev-parse main)"
+  mkdir -p "$r/.bionic/docs/record/wave-x"
+  printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off T1.txt:1 the row is wrong\nshown: 1 cat T1.txt\n' \
+    "$b" "$h" > "$r/.bionic/docs/record/wave-x/rev.md"
+  BA_H="$h" BA_B="$b" awk '
+    { print }
+    /^working-branch: / && !fm { fm = 1; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["BA_B"] }
+    ' "$p" | BA_H="$h" awk '
+    /^current: 4$/ { print "current: 8"; print "proved: kind=review head=" ENVIRON["BA_H"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/rev.md question=structure reader=w-rev result=fail scope=piece"; next }
+    /^- T1: active$/ { print "- T1: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next }
+    { print }' > "$p.n" && mv "$p.n" "$p"
+  printf '%s' "$r"
+}
+ba_mark_t2() {  # <root> <born marker | empty> — T2's `- T2:` line as task-add writes it, with that marker
+  local p
+  p="$(ll_plan "$1")"
+  BA_M="$2" awk '/^- T2: / { print "- T2: active — added by task-add at 2026-10-20T00:00:00Z" (ENVIRON["BA_M"] != "" ? " born: " ENVIRON["BA_M"] : ""); next } { print }' \
+    "$p" > "$p.n" && mv "$p.n" "$p"
+}
+ba_ready_rows() { ll_ev "$1" ready | sed -n 's/^line\/v1|ev=ready|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ' | sed 's/ $//'; }   # <root>
+RB="$(ba_world)"; PB="$(ll_plan "$RB")"
+expect_eq "(ba0) precondition: the plan reads current 8 and the judge reads structure failing on rev.md" "8|failing	record/wave-x/rev.md" \
+  "$(sed -n 's/^current: //p' "$PB")|$(bash -c '. "$1/proof.sh" && facts_state "$2" "$3"' _ "$REPO/payload/scripts/lib" "$PB" "$(ll_head "$RB")" 2>/dev/null \
+     | awk -F'\t' '$1 == "review" && $2 == "structure" { print $5 "\t" $6 }')"
+ll_verb "$RB" T2
+expect_eq "(ba1) an unborn row is refused (exit 2)" "2" "$LL_RC"
+expect_contains "(ba1) …past-judgment, as before" "REFUSED reason=past-judgment why=current-8" "$LL_OUT"
+ba_mark_t2 "$RB" 'regression a.test.sh of=floor'
+expect_contains "(ba2-pre) T2 carries the regression-born marker" "born: regression a.test.sh of=floor" "$(/usr/bin/grep '^- T2: ' "$PB")"
+ll_verb "$RB" T2
+expect_eq "(ba2) a row born of a regression's red is refused past-judgment too (exit 2)" "2 yes" \
+  "$LL_RC $(printf '%s' "$LL_OUT" | grep -qF 'REFUSED reason=past-judgment why=current-8' && echo yes || echo no)"
+ll_verb "$RB" T1
+expect_eq "(ba3) the row born of the failing review's finding lands by ready at current 8 (exit 0)" "0" "$LL_RC"
+expect_contains "(ba3) …printing LANDED" "LANDED T1 " "$LL_OUT"
+expect_contains "(ba3) …published by the queue" "|row=T1|commit=$(ll_head "$RB")|kind=queue|" "$(ll_ev "$RB" published)"
+expect_eq "(ba3) …the step never moved back" "8" "$(sed -n 's/^current: //p' "$PB")"
+expect_eq "(ba1-ba2) the refused rows entered nothing: the record's ready events are T1's alone (ba3 read the same extractor)" "T1" \
+  "$(ba_ready_rows "$RB")"
+ba_mark_t2 "$RB" 'review S1 off of=record/wave-x/rev.md#1'
+ll_verb "$RB" T2
+expect_eq "(ba4) once T1 answered the review, a row born of the same finding is refused past-judgment (exit 2)" "2 yes" \
+  "$LL_RC $(printf '%s' "$LL_OUT" | grep -qF 'REFUSED reason=past-judgment why=current-8' && echo yes || echo no)"
+
 
 # ---------------------------------------------------------------------------
 finish

@@ -982,4 +982,51 @@ expect_eq "PA-2 …and one commit later that no landing proves: refused (exit 1)
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "commit ${OD_D:0:12} .*is not proved" && echo yes || echo no)"
 expect_absent "PA-2b …and the same refusal offers no second whole run (the positive above reads this output)" "run the whole" "$OD_OUT"
 
+section "§DRY-ORIGIN — a plan verb's dry commit of a copy judges the reader rule on the origin's landing record, as a commit of the plan does"
+# ============================================================
+# FIXTURE FIDELITY: the order fixture's repository and plan builder above; the copy is named the way a plan verb names
+# it, `<plan>.task-add-dry.<pid>`, bound under `planverb-<pid>` by a marker carrying `plan=<copy>` and, when the verb
+# wrote it, `dry_of=<plan>`; the commit goes through bash-walls.sh as the verb sends it. The plan holds a landed release
+# row, a fix row born at step 4 and published after it, and a review row at step 7 that reads the fix row's record: the
+# reader rule admits it by the landing record's publish order and refuses it by the plan's order.
+# fails-when: a dry commit of such a copy is refused by plan order although the origin's record published the fix row
+# after the release, or the copy with no `dry_of=` is admitted.
+OD_DPID=4343
+OD_DCOPY="$OD_PLAN.task-add-dry.$OD_DPID"; OD_DMARK="$OD/.bionic/tmp/engaged-planverb-$OD_DPID.state"
+od_dry() {  # <dry_of plan, or empty for a marker with none> -> OD_OUT, OD_RC: the copy's dry commit through the gate
+  local sid="planverb-$OD_DPID"
+  # the ledger arm judges only a plan that declares multi_agent, and a step-4 plan reaches it only when it declares a
+  # worktree: the order fixture's frontmatter declares neither
+  sed -e 's/^scale: wave$/scale: wave\nmulti_agent: true/' -e 's/^use_worktree: false$/use_worktree: true/' "$OD_PLAN" > "$OD_DCOPY"
+  { printf 'plan=%s\n' "$OD_DCOPY"; [ -z "$1" ] || printf 'dry_of=%s\n' "$1"; printf 'engaged_at=2026-10-12T00:00:00Z\n'; } > "$OD_DMARK"
+  OD_RC=0
+  OD_OUT="$(cd "$OD" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" HOME="$OD_ROOT/home" CLAUDE_CONFIG_DIR="$OD_ROOT/config" \
+    BIONIC_GATE_DIR="$OD_ROOT/gate" BIONIC_WALL_VERBOSE=1 bash "$HOOK" 2>&1 >/dev/null <<< "$(jq -n --arg s "$sid" --arg cwd "$OD" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m task-add"}, tool_use_id: "toolu_dry"}')")" || OD_RC=$?
+  rm -f "$OD_DCOPY" "$OD_DMARK"
+}
+od_dplan() {  # the order's rows with a fix row T6 born at step 4 and a review row T9 at step 7 reading its record
+  od_plan 4 "$(printf -- '- T2: landed at %s/dispatch.md\n- T3: landed at %s/dispatch.md\n- T4: landed at %s/dispatch.md\n- T6: landed at %s/dispatch.md' "$OD_RL" "$OD_RL" "$OD_RL" "$OD_RL")" \
+    "$(od_rows landed landed landed)" \
+    "$(od_row T6 4 build 'the fix born at step 4' implementor 'lib/b.sh, .bionic/docs/record/w/T6.md' landed 'approval:plan')" \
+    "$(od_row T9 7 review 'the critic reads the fix as a piece' critic .bionic/docs/record/w/T9.md pending 'approval:plan, head, .bionic/docs/record/w/T6.md')"
+}
+od_dpub() {  # <row>... -> the landing record: a published event for each row, in the order given
+  : > "$(od_lrec)"
+  local r
+  for r in "$@"; do printf 'line/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T00:00:00Z\n' "$r" "$OD_B" >> "$(od_lrec)"; done
+}
+DO_ORD='T4: the release row comes ahead of the review row T9'
+od_dplan; od_dpub T1 T2 T3 T4 T6
+od_dry "$OD_PLAN"
+expect_eq "DO-1 AC-15.1 the dry commit of the copy, dry_of= naming the plan whose record published the fix row T6 after the release T4: the reader rule admits T9 (exit 0)" "0" "$OD_RC"
+expect_absent "DO-1b …and the order refusal is not printed (the refusal below reads the same output)" "$DO_ORD" "$OD_OUT"
+od_dry ""
+expect_eq "DO-2 the same copy under a marker with no dry_of=: refused (exit 2) by plan order, the copy naming no record" "2" "$OD_RC"
+expect_contains "DO-2b …and the refusal is the reader rule's order text for T9 the plan-order judgment prints" "$DO_ORD" "$OD_OUT"
+od_dpub T1 T2 T3 T6 T4
+od_dry "$OD_PLAN"
+expect_eq "DO-3 dry_of= naming a plan whose record published the fix row BEFORE the release: refused (exit 2), as a commit of the plan is" "2" "$OD_RC"
+expect_contains "DO-3b …with the order text" "$DO_ORD" "$OD_OUT"
+
 finish

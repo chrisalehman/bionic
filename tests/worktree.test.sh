@@ -984,10 +984,19 @@ bh_land "$BHT5" --by-hand --reason "behind an entry" >/dev/null & BHPID=$!
 sleep 3; printf 'line/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHREC"; wait "$BHPID"; RCHW=$?
 expect_eq    "(hd3b) a hand landing held 3 s behind an entry lands, with one candidate on the entry's and one on the head it published onto" \
   "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(grep '|ev=candidate|row=wt/bh-T5|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
-section "§CLOSURE: the declared check's closure is its script and what the script loads, read at a commit"
-CL="$(new_repo "$TMP/closure")"; mkdir -p "$CL/chk/lib" "$CL/lib"; : > "$CL/chk/lib/a.sh"; : > "$CL/lib/b.sh"
-printf '#!/bin/bash\nHERE="$(cd "$(dirname "$0")"'' && pwd)"\n. "$HERE/lib/a.sh"\nfor f in b.sh; do [ -f "$HERE/../lib/$f" ] && . "$HERE/../lib/$f"; done\n. "$HERE/lib/gone.sh"\n' > "$CL/chk/run.sh" && git -C "$CL" add chk lib && git -C "$CL" commit -qm "a check and the two libraries it sources"
-expect_eq "(cl1) 'bash chk/run.sh <list>': the script and both libraries it sources, never a path the commit lacks" \
-  "chk/lib/a.sh chk/run.sh lib/b.sh" "$(_wt_check_closure "$CL" HEAD "bash chk/run.sh /elsewhere/list" | sort | paste -sd' ' -)"
-expect_eq "(cl2) a declaration naming no script the commit holds has no closure (rc 1)" "1|" "$(o="$(_wt_check_closure "$CL" HEAD "bash /x/run.sh")"; echo "$?|$o")"
+section "§CHECK-FILES: what a range changes of the check's files is the declared list met with the range"
+CF="$(new_repo "$TMP/check-files")"; mkdir -p "$CF/chk/sub" "$CF/lib"
+: > "$CF/chk/a.sh"; : > "$CF/chk/sub/c.sh"; : > "$CF/lib/b.sh"; : > "$CF/lib/d.sh"
+git -C "$CF" add chk lib && git -C "$CF" commit -qm "the files"; CF0="$(git -C "$CF" rev-parse HEAD)"
+for f in chk/a.sh chk/sub/c.sh lib/b.sh lib/d.sh file.txt; do echo x >> "$CF/$f"; done
+git -C "$CF" commit -qam "a range that changes each"; CF1="$(git -C "$CF" rev-parse HEAD)"
+printf 'release-check: bash chk/a.sh\nrelease-check-files: chk/*.sh lib/b.sh\n' > "$CF/.bionic/config.yaml"
+expect_eq "(cf1) a glob names the files of its own directory, a path itself, and an undeclared file nothing (rc 0)" \
+  "0|chk/a.sh,lib/b.sh" "$(o="$(_wt_check_judge "$CF" "$CF0" "$CF1")"; echo "$?|$o")"
+printf 'release-check: bash chk/a.sh\nrelease-check-files: docs/*.md\n' > "$CF/.bionic/config.yaml"
+expect_eq "(cf2) a declaration the range changes no file of says nothing (rc 1)" "1|" \
+  "$(o="$(_wt_check_judge "$CF" "$CF0" "$CF1")"; echo "$?|$o")"
+printf 'release-check: bash chk/a.sh\n' > "$CF/.bionic/config.yaml"
+expect_eq "(cf3) with no declared list the check has no files, whatever its command names (rc 1)" "1|" \
+  "$(o="$(_wt_check_judge "$CF" "$CF0" "$CF1")"; echo "$?|$o")"
 finish

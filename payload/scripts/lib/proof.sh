@@ -1999,30 +1999,42 @@ proof_debt_record() {
 }
 
 # proof_debt_origin <sid> <marker> <bound plan> -> the plan whose landing record holds the debts a
-# commit bound to <bound plan> owes (wave-27 T76; review pass 60 P0-1; A-orch-170, A-orch-171). A
-# plan verb proves its change by a dry commit of a COPY, `<plan>.<verb>-dry.<pid>`, under a session
-# `planverb-<pid>` whose marker it writes with `dry_of=<plan>` beside `plan=<copy>` (hooks/
-# session-poker.sh `plan_verb_dry`); the copy's own name names no record, so the dry commit reads the
-# record of the plan it was made from. The field is honoured only when all three hold: the session
-# is a plan verb's (`planverb-<pid>`), the marker says `dry_of=`, and the bound file is named
-# `<dry_of>.<verb>-dry.<pid>`, the same pid.
+# commit bound to <bound plan> owes. A dry commit is bound to a COPY of a plan, and the copy's own name
+# names no record, so the dry commit reads the record of the plan it was made from, which its session's
+# marker says in `dry_of=<plan>` beside `plan=<copy>`. Two callers make such a copy: a plan verb proves its change by a dry commit of
+# `<plan>.<verb>-dry.<pid>` under `planverb-<pid>`, and close-out's preflight judges the plan it would
+# write as `<dir>/.<plan file>.preflight.<pid>` under `closeout-preflight-<pid>`. One record per plan,
+# whichever file carries its text: the answer to "is this review question answered" is the same on the
+# plan and on its copy.
+# The field is honoured only when all three hold: the marker says `dry_of=`, the session id ends in
+# `-<pid>`, and the bound file is one of the two names above for that same pid.
 # A real session bound to a real plan names no such file, so it reads exactly its own plan's record,
 # whatever a marker line says. No fork: the marker is two or three lines, read here.
 proof_debt_origin() {
-  local sid="${1:-}" marker="${2:-}" plan="${3:-}" line from="" verb pid=""
-  case "$sid" in planverb-*) pid="${sid#planverb-}" ;; esac
+  local sid="${1:-}" marker="${2:-}" plan="${3:-}" line from="" verb pid="" dir="" base="" ok=0
+  case "$sid" in *-[0-9]*) pid="${sid##*-}" ;; esac
   case "$pid" in ''|*[!0-9]*) printf '%s' "$plan"; return 0 ;; esac
   if [ -f "$marker" ] && [ ! -L "$marker" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in dry_of=?*) from="${line#dry_of=}"; break ;; esac
     done < "$marker"
   fi
-  verb=""
-  case "$from" in ?*) case "$plan" in "$from".?*-dry."$pid") verb="${plan#"$from".}"; verb="${verb%-dry."$pid"}" ;; esac ;; esac
-  case "$verb" in
-    ''|*[!a-z-]*) printf '%s' "$plan" ;;
-    *) printf '%s' "$from" ;;
+  case "$from" in
+    '') printf '%s' "$plan"; return 0 ;;
   esac
+  case "$plan" in
+    "$from".?*-dry."$pid")
+      verb="${plan#"$from".}"; verb="${verb%-dry."$pid"}"
+      case "$verb" in ''|*[!a-z-]*) : ;; *) ok=1 ;; esac ;;
+  esac
+  case "$from" in */*) dir="${from%/*}"; base="${from##*/}" ;; *) base="$from" ;; esac
+  if [ "$ok" = 0 ] && [ -n "$base" ]; then
+    case "$dir" in
+      '') [ "$plan" = ".$base.preflight.$pid" ] && ok=1 ;;
+      *) [ "$plan" = "$dir/.$base.preflight.$pid" ] && ok=1 ;;
+    esac
+  fi
+  if [ "$ok" = 1 ]; then printf '%s' "$from"; else printf '%s' "$plan"; fi
 }
 
 # proof_plan_slug <plan> -> the plan's slug, its file name less `.plan.md`, the directory its run's records live
@@ -2168,7 +2180,7 @@ proof_debts_open() {
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
-  local x pt pr ph pe wt wr we wh fixed="" born="" chk="" walked="|"
+  local x pt pr ph pe wt wr we wh cb fixed="" born="" chk="" walked="|"
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
@@ -2287,15 +2299,13 @@ PROOF_CHAIN
         fi ;;
       check)
         x=""; [ -z "$tree" ] || x="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
-        x="$(awk -v h="$head" -v hh="${x:-$head}" "$(proof_awk)"'
-                /^[[:space:]]*```/ { fence = !fence; next }
-          fence { next }
-          /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-          insdlc && proof_fields($0) && PROOF_KIND == "check" {
-            last = PROOF_HEAD
-            if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); ev = PROOF_EVIDENCE }
-          }
-          END { if (at && fail) print "failing\t" ev; else if (at) print "covered"; else print last }' "$plan")"
+        x="$(_facts_check_at "$plan" "$head" "${x:-$head}")"
+        # The reviews part rendered fresh on the checked head is the release the check passed: judged at that head.
+        case "$x" in
+          covered|failing"	"*|'') : ;;
+          *) [ -z "$tree" ] || { cb="$(proof_part_base "$plan" "$tree" "$head")"
+               [ "$cb" = "$head" ] || x="$(_facts_check_at "$plan" "$cb" "$cb")"; } ;;
+        esac
         case "$x" in
           covered) st=covered ;;
           failing"	"*) st="$x" ;;
@@ -2315,6 +2325,21 @@ PROOF_DEBT
 $owed
 PROOF_FACTS
   return "$rc"
+}
+
+# _facts_check_at <plan> <head> <head in full> -> the check fact's state at <head> from the plan's `proved: kind=check`
+# lines: `covered`, `failing<TAB><evidence>` when the last line at <head> carries result=fail, else the newest line's
+# head (nothing when there is none), which the caller reads as uncovered from it.
+_facts_check_at() {
+  awk -v h="$2" -v hh="$3" "$(proof_awk)"'
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && proof_fields($0) && PROOF_KIND == "check" {
+      last = PROOF_HEAD
+      if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); ev = PROOF_EVIDENCE }
+    }
+    END { if (at && fail) print "failing\t" ev; else if (at) print "covered"; else print last }' "$1"
 }
 
 # _facts_debt <plan> <tree> <suite> <token> -> `covered`, or `absent` with any reason after a tab, for
@@ -2562,20 +2587,44 @@ _facts_holds() {
   _facts_walk "$@" >/dev/null
 }
 
+# proof_part_base <plan> <tree> <commit> -> <commit>'s parent when <commit> is the release entry's reviews part rendered
+# on it, else <commit> itself. A part commit has one parent, changes CHANGELOG.md alone, and its CHANGELOG.md is byte
+# for byte what lib/line.sh `line_reviews_state` renders on that parent from the plan as it stands now. The part is
+# written after the release check and the approval, from the lines they and the reviews left, so what holds at its
+# parent holds at it; any other change to the entry, a hand edit of the part among them, is no fresh render and gets
+# nothing from its parent. A plan whose lines changed since the render reads its part commit as stale, which is the
+# safe direction.
+proof_part_base() {
+  local plan="${1:-}" tree="${2:-}" c="${3:-}" p tmp
+  p="$(git -C "$tree" rev-parse --verify -q "${c}^1" 2>/dev/null)" \
+    && ! git -C "$tree" rev-parse --verify -q "${c}^2" >/dev/null 2>&1 \
+    && [ "$(git -C "$tree" diff-tree --no-commit-id --no-renames --name-only -r "$p" "$c" 2>/dev/null)" = CHANGELOG.md ] \
+    && _proof_line_load && declare -F line_reviews_state >/dev/null 2>&1 \
+    && tmp="$(mktemp "${TMPDIR:-/tmp}/proof-part.XXXXXX")" || { printf '%s\n' "$c"; return 0; }
+  if line_reviews_state "$plan" "$tree" "$p" "${p:0:12}" "$tmp" && [ "$LINE_RV_STATE" = renders ] \
+     && git -C "$tree" show "${c}:CHANGELOG.md" 2>/dev/null | cmp -s - "$tmp"; then
+    rm -f "$tmp"; printf '%s\n' "$p"; return 0
+  fi
+  rm -f "$tmp"; printf '%s\n' "$c"
+}
+
 # proof_prose_past <plan> <from> <to> -> exit 0 when <from> is on <to>'s first-parent line and nothing an approval at
 # <from> covers changed after it: every later commit is prose by the walk's basis (`_facts_walk`, no born landing, no
 # release check) and no path differs between the two in the release set (`_proof_release_path`), so the release the
-# user approved is the one at <to>. Exit 1 otherwise, or when the plan or either head cannot be read.
+# user approved is the one at <to>. A <to> that is the reviews part rendered fresh on its parent (`proof_part_base`) is
+# judged at that parent. Exit 1 otherwise, or when the plan or either head cannot be read.
 proof_prose_past() {
-  local plan="${1:-}" tree f
+  local plan="${1:-}" tree f to
   [ -f "$plan" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ] || return 1
   tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)" || return 1
   _proof_roots_load
-  _facts_holds "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" || return 1
+  to="$(git -C "$tree" rev-parse --verify -q "${3}^{commit}" 2>/dev/null)" || return 1
+  to="$(proof_part_base "$plan" "$tree" "$to")"
+  _facts_holds "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$to" || return 1
   while IFS= read -r f; do
     [ -z "$f" ] || ! _proof_release_path "$f" || return 1
   done <<PROOF_PROSE_PAST
-$(git -C "$tree" diff --no-renames --name-only "$2" "$3" 2>/dev/null)
+$(git -C "$tree" diff --no-renames --name-only "$2" "$to" 2>/dev/null)
 PROOF_PROSE_PAST
 }
 

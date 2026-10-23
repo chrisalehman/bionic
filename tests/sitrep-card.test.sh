@@ -8,17 +8,22 @@
 # letter, then holds the judgment to the sheet and the drawn text to the card's shape before it prints a byte. A card
 # that drops a step, an open task, a metric, the predicted close or an open ask, names a label or a key the sheet
 # lacks, states a metric number its own lines do not measure or a goal count the goal: lines do not hold, says nothing
-# is owed while an ask is open, writes an open task landed or a done one waiting, leaves out a task an ask holds, says
+# is owed while an ask that blocks is open, writes an open task landed or a done one waiting, leaves out a task an ask holds, says
 # "reader", runs a line past 100 columns or puts a step row above its own tasks is refused: every reason on stderr,
 # nothing on stdout, rc 1.
 #
 #   §SECTIONS  seven sections in order, every row bulleted or iconed, each row's first letter capitalized, no options
-#   §CALL      the clean card's Blocked on you is one row; a call is words, and needs no ask's key or id; with an ask
-#              open it never says nothing is owed, and with none open it names no key
+#   §CALL      the clean card's Blocked on you is one row, None; a call is words, and needs no ask's key or id; with an
+#              ask that blocks open it never says nothing is owed, and with none blocking it names no key
 #   §FLOOR     an open ask the judgment leaves out, answers twice or names without the tasks it holds refuses the card
+#   §BLOCKS    an ask holding nothing blocks nothing: the card draws it under the Assessment and Blocked on you reads None;
+#              a held ask is under Blocked on you; the floor and the call's rule bind the held asks as they bound all
 #   §ROWS      the Task list covers every step in the sheet's order, by labels the sheet holds, its icons drawn from the
 #              sheet, each task's row in words its state allows; the five metrics in order, their numbers their own
 #              lines' measured values, the Goals counts the goal: lines'; the predicted close in a close row
+#   §BOUND     a metric row's number is the measured value of the line whose word stands beside it: two numbers
+#              traded between their words refuse the card, the same row in place prints
+#   §FORECAST  a Pace row may cite the forecast's hours and end clock, each number beside its own word like every other
 #   §SHAPE     a 101-column line, a step row above its tasks, an open task twice or not at all: each refused
 #   §WORDS     "reader", "reading" and their kin, or "unmeasured", in the judgment refuse the card, each word with its rule
 #   §REFUSE    a refused card prints nothing on stdout, every reason on stderr
@@ -36,6 +41,8 @@
 # fault is read by the same check that passes the unplanted card in the same call.
 #
 # Usage: bash tests/sitrep-card.test.sh
+#
+# pins: payload/scripts/card.sh payload/scripts/lib/width.sh hooks/poker/sitrep.sh skills/sitrep/SKILL.md
 
 set -uo pipefail
 
@@ -256,7 +263,7 @@ section "§CALL: the clean card's Blocked on you is one row; a call is words, ne
 # fails-when: the clean card shows an ask, or a call written in words is refused for naming no key.
 sc_card "$SC_CLEAN" "$SC_J_CLEAN"
 expect_eq "CA1 the clean fixture renders (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
-expect_eq "CA2 …Blocked on you is the one row saying nothing is owed" "    • Nothing: no decision or action is owed right now." \
+expect_eq "CA2 …Blocked on you is the one row, None" "    • None" \
   "$(sc_under "$SC_OUT" "Blocked on you")"
 expect_eq "CA3 …and the call names no ask key or id of the owed fixture (CA2 read the same card)" "" \
   "$(sc_under "$SC_OUT" "Call to action" | /usr/bin/grep -E 'D3|release|decide:|approve:')"
@@ -321,6 +328,87 @@ expect_eq "FL7b …naming the ask and the task's label" "yes|yes" \
   "$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'decide:D3' | /usr/bin/grep -qF '4/8' && echo yes)|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -qF 'holds' && echo yes)"
 sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^ask decide:D3: D3 · waive the failed review or fix first; it holds 4\/8/ask decide:D3: D3 · waive the failed review or fix first; it holds 4\/80/')"
 expect_eq "FL7c …and a longer label is not the task's: 4/80 does not name 4/8" "1|" "$SC_RC|$SC_OUT"
+
+# ============================================================
+section "§BLOCKS: an ask that holds nothing is not blocked on you: it is drawn under the Assessment, and Blocked on you reads None"
+# ============================================================
+# FIXTURE FIDELITY: the sheet's own ask line, `holds=nothing` as the verb prints a goal-missed decision; the held twin
+# is the same ask with a task in its holds=, the sheet's other value.
+# fails-when: an unheld ask is drawn under Blocked on you, Blocked on you is empty or says more than None with nothing
+# held, a held ask leaves Blocked on you, an ask left unanswered or answered twice prints, or the call's nothing-owed
+# rule fires over unheld asks or stops firing over a held one.
+SC_UNHELD="$SC_BASE
+ask: key=decide:goal:replay holds=nothing title=Goal missed: replay raised=1:00 PM blocks=no"
+SC_HELDTWIN="$SC_BASE
+ask: key=decide:goal:replay holds=4/8 title=Goal missed: replay raised=1:00 PM blocks=yes"
+SC_J_UNHELD="$(printf '%s\n' "$SC_J_CLEAN" | sed 's/^call: .*/call: Let 4\/40 land, then fix the width pins./')
+ask decide:goal:replay: the replay goal was missed; 4/8 is not held — recommend accept it"
+sc_card "$SC_UNHELD" "$SC_J_UNHELD"
+expect_eq "BL1 a sheet whose only open ask holds nothing, the ask answered: the card prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+expect_eq "BL1b …Blocked on you reads None" "    • None" "$(sc_under "$SC_OUT" "Blocked on you")"
+expect_eq "BL1c …and the ask is the Assessment's last row, after the model's point, under its own words" \
+  "    • The last build task is running; once it lands, the regression runs, about 25 minutes.|    • Open, blocking nothing: the replay goal was missed; 4/8 is not held — recommend accept it" \
+  "$(sc_under "$SC_OUT" "Assessment" | paste -sd'|' -)"
+expect_eq "BL1d …and nowhere else on the card: the ask's row is once in the whole text" "1" "$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -c 'replay goal was missed')"
+sc_card "$SC_HELDTWIN" "$SC_J_UNHELD"
+expect_eq "BL2 the same judgment over the sheet where the ask holds 4/8: it prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+expect_eq "BL2b …the ask now under Blocked on you, as written (BL1b read the same ask under the Assessment)" \
+  "    • The replay goal was missed; 4/8 is not held — recommend accept it" \
+  "$(sc_under "$SC_OUT" "Blocked on you")"
+expect_eq "BL2c …and the Assessment holds only the model's own point" "    • The last build task is running; once it lands, the regression runs, about 25 minutes." \
+  "$(sc_under "$SC_OUT" "Assessment")"
+sc_card "$(printf '%s\n' "$SC_UNHELD" | sed 's/ blocks=no$/ blocks=yes/')" "$SC_J_UNHELD"
+expect_eq "BL3 the sheet's blocks= is the fact the card reads: an ask with blocks=yes is under Blocked on you whatever its holds= says" \
+  "0|    • The replay goal was missed; 4/8 is not held — recommend accept it" \
+  "$SC_RC|$(sc_under "$SC_OUT" "Blocked on you")"
+sc_card "$(printf '%s\n' "$SC_UNHELD" | sed 's/ blocks=no$//')" "$SC_J_UNHELD"
+expect_eq "BL3b a sheet with no blocks= field reads the ask by its holds=: holds=nothing is unheld (BL1b over the same ask)" "0|    • None" \
+  "$SC_RC|$(sc_under "$SC_OUT" "Blocked on you")"
+sc_card "$(printf '%s\n' "$SC_HELDTWIN" | sed 's/ blocks=yes$//')" "$SC_J_UNHELD"
+expect_eq "BL3c …and a held one is held (BL2b over the same ask)" "0|1" \
+  "$SC_RC|$(sc_under "$SC_OUT" "Blocked on you" | /usr/bin/grep -c 'replay goal was missed')"
+sc_card "$SC_UNHELD" "$(sc_judge_without "$SC_J_UNHELD" 'ask decide:goal:replay:')"
+expect_eq "BL4 an ask holding nothing, left unanswered, is still refused: exit 1, stdout empty" "1|" "$SC_RC|$SC_OUT"
+expect_contains "BL4b …naming the key it dropped" "decide:goal:replay" "$SC_ERR"
+sc_card "$SC_UNHELD" "$SC_J_UNHELD
+ask decide:goal:replay: the replay goal again — recommend accept"
+expect_eq "BL5 an ask holding nothing, answered twice, is still refused" "1|" "$SC_RC|$SC_OUT"
+expect_contains "BL5b …naming the key" "decide:goal:replay" "$SC_ERR"
+# the call
+SC_J_UNHELD_NONE="$(printf '%s\n' "$SC_J_UNHELD" | sed 's/^call: .*/call: Nothing is owed: let 4\/40 land, then fix the width pins./')"
+sc_card "$SC_UNHELD" "$SC_J_UNHELD_NONE"
+expect_eq "BL6 over the unheld ask, a call that says nothing is owed prints (exit 0): the call row stands as written" \
+  "0|    • Nothing is owed: let 4/40 land, then fix the width pins." "$SC_RC|$(sc_under "$SC_OUT" "Call to action")"
+sc_card "$SC_HELDTWIN" "$SC_J_UNHELD_NONE"
+expect_eq "BL6b control: over the held twin the same judgment is refused (exit 1, nothing printed)" "1|" "$SC_RC|$SC_OUT"
+expect_eq "BL6c …in one line naming the call rule and the held key" "1" \
+  "$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'call:' | /usr/bin/grep -F 'nothing is owed' | /usr/bin/grep -cF 'decide:goal:replay')"
+SC_MIXED="$SC_BASE
+$SC_ASKS
+ask: key=decide:goal:replay holds=nothing title=Goal missed: replay raised=1:30 PM"
+SC_J_MIXED="$SC_J_OWED
+ask decide:goal:replay: the replay goal was missed — recommend accept the miss"
+sc_card "$SC_MIXED" "$SC_J_MIXED"
+expect_eq "BL7 one sheet, two held asks and one unheld: the card prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+expect_eq "BL7b …the held asks under Blocked on you in the judgment's order, the unheld one not among them" \
+  "    • D3 · waive the failed review or fix first; it holds 4/8 — recommend waive|    • Approve release 1.24.0; it holds 8/47 — recommend approve once the regression is green" \
+  "$(sc_under "$SC_OUT" "Blocked on you" | paste -sd'|' -)"
+expect_eq "BL7c …and the unheld one the Assessment's last row, after both of the model's points" \
+  "    • The last build task is running; once it lands, the regression runs, about 25 minutes.|    • The run is 1 h 50 min over plan, mostly the test cull.|    • Open, blocking nothing: the replay goal was missed — recommend accept the miss" \
+  "$(sc_under "$SC_OUT" "Assessment" | paste -sd'|' -)"
+sc_card "$SC_MIXED" "$(printf '%s\n' "$SC_J_MIXED" | sed 's/^call: .*/call: Nothing is owed: go for a walk./')"
+expect_eq "BL8 on the mixed sheet a call saying nothing is owed is refused, naming the held keys and not the unheld one" "1|1|0" \
+  "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'nothing is owed' | /usr/bin/grep -F 'decide:D3' | /usr/bin/grep -cF 'approve:release')|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'nothing is owed' | /usr/bin/grep -cF 'decide:goal:replay')"
+sc_card "$SC_UNHELD" "$(printf '%s\n' "$SC_J_UNHELD" | sed 's/^call: .*/call: Let 4\/40 land; decide:goal:replay can wait./')"
+expect_eq "BL9 with only an unheld ask open, a call naming a register key is refused: nothing blocks you, and a call says in words, never a key" "1|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'call:' | /usr/bin/grep -F 'register key' | /usr/bin/grep -cF 'decide:goal')"
+sc_card "$SC_MIXED" "$(printf '%s\n' "$SC_J_MIXED" | sed 's/^ask decide:D3: .*/ask decide:D3, decide:goal:replay: D3 · waive the failed review or fix first and take the replay miss; it holds 4\/8 — recommend waive/; /^ask decide:goal:replay: /d')"
+expect_eq "BL10 one row answering a held key and an unheld one is a held row: it prints under Blocked on you, not the Assessment" "0|1|0" \
+  "$SC_RC|$(sc_under "$SC_OUT" "Blocked on you" | /usr/bin/grep -c 'take the replay miss')|$(sc_under "$SC_OUT" "Assessment" | /usr/bin/grep -c 'take the replay miss')"
+sc_card "$SC_UNHELD" "$SC_J_UNHELD
+ask +: the operator owes a gate act outside the run"
+expect_eq "BL11 an ask the register lacks (ask +:) is the model's own claim and stays under Blocked on you, beside no None" \
+  "0|    • The operator owes a gate act outside the run" "$SC_RC|$(sc_under "$SC_OUT" "Blocked on you")"
 
 # ============================================================
 section "§ROWS: the Task list covers every step in the sheet's order by labels the sheet holds; each task row true to its state; five metrics, their own lines' numbers; the close"
@@ -441,6 +529,67 @@ sc_card "$SC_GREENDESC" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^task: 5\/41: .*/
 expect_eq "RO8f control: a row copying its task's own description, and saying not landed, prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
 sc_card "$SC_OWED" "$SC_J_RANGE"
 expect_eq "RO8g control: a range holding open tasks may say some landed, and a step row may say done (RO4, RO4b): the range prints" "0|" "$SC_RC|$SC_ERR"
+
+# ============================================================
+section "§BOUND: a metric row's number is the measured value of the line whose word stands beside it, so two numbers traded between their words refuse the card"
+# ============================================================
+# Every number a row states is a value its own lines hold (RO6), and the line it belongs to is the one whose word
+# stands beside it in the row: the number before its word, "37% of the work", "60% of the time".
+# fails-when: a Pace row with its two numbers traded, a Completed row with its numbers on each other's words or a
+# Correctness row with the open findings' count on the reviews' words prints, or the same row with the numbers in their
+# places is refused.
+expect_eq "BO0 precondition: the planted sheet holds work-landed 37 and time-used 60, each on its own line" "yes|yes" \
+  "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^pace.work-landed: 37% ' && echo yes)|$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^pace.time-used: 60% ' && echo yes)"
+SC_J_TRADED="$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 60% of the work landed in 37% of the time./')"
+expect_eq "BO0b precondition: the traded row is the planted judgment's Pace row with 37 and 60 on each other's words" "metric: Pace: 60% of the work landed in 37% of the time." "$(sc_row "$SC_J_TRADED" 'metric: Pace: ')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time./')"
+expect_eq "BO1 control: the Pace row with 37 beside work and 60 beside time prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$SC_J_TRADED"
+expect_eq "BO2 a Pace row giving 60% of the work landed in 37% of the time refuses the card: exit 1, nothing printed" "1|" "$SC_RC|$SC_OUT"
+expect_eq "BO2b …a reason naming the Pace row, the number 60 and the word it stands beside" "1" \
+  "$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 60 beside "work"' | /usr/bin/grep -cF 'pace.work-landed')"
+expect_eq "BO2c …and the other traded number, 37 beside time, named the same way" "1" \
+  "$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 37 beside "time"' | /usr/bin/grep -cF 'pace.time-used')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: work landed 60%, time used 37%./')"
+expect_eq "BO3 a number after its word binds the same way: a Pace row giving work landed 60% and time used 37% refuses the card, naming 60 beside landed" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 60 beside "landed"' | /usr/bin/grep -cF 'pace.work-landed')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: work landed 37%, time used 60%./')"
+expect_eq "BO3b control: the same row with the numbers behind their own words prints" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed, 60% of the time used./')"
+expect_eq "BO3c control: each number before its own word, a comma between the two phrases, prints" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Completed: .*/metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 37%; 37 left, 330 minutes./')"
+expect_eq "BO4 a Completed row giving work.landed's 37 beside the word left refuses the card, naming Completed, 37 and work.left" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Completed: says 37 beside "left"' | /usr/bin/grep -cF 'work.left')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Correctness: .*/metric: Correctness: 12 suites run, 11 green and 1 red; 0 review running; 1 open findings./')"
+expect_eq "BO5 a Correctness row giving the reviews' 1 as the open findings refuses the card, naming 1 beside findings" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Correctness: says 1 beside "open"' | /usr/bin/grep -cF 'findings.open')"
+sc_card "$SC_OWED" "$SC_J_OWED"
+expect_eq "BO6 control: the planted judgment, every metric number beside its own word, prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Waste: .*/metric: Waste: 2 tasks dropped, 0 of 25 suite runs thrown away, 60 minutes waiting on you./')"
+expect_eq "BO7 control: a Waste row of three comma phrases prints, each number beside its own word, the 0 of 25 count taking the words after the 25 and not the dropped before it" "0|" "$SC_RC|$SC_ERR"
+
+# ============================================================
+section "§FORECAST: a Pace row may cite the forecast's hours, each number beside its own word like every other"
+# ============================================================
+# The sheet's clock.forecast line is a Pace line: the hours the plan said the run would take, and the end clock.
+# fails-when: a Pace row giving clock.forecast's hours or its end clock is refused, or a row giving hours the sheet
+# does not hold, or the forecast's 10 as the share of the work landed, prints.
+expect_eq "FC0 precondition: the planted sheet's clock.forecast is 10 h 30 min, ending 6:50 PM" "yes" \
+  "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -q '^clock.forecast: 10 h 30 min, ends 6:50 PM — ' && echo yes)"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time; the forecast is 10 h 30 min./')"
+expect_eq "FC1 a Pace row citing the forecast's 10 h 30 min prints (exit 0, nothing on stderr)" "0|" "$SC_RC|$SC_ERR"
+expect_contains "FC1b …drawn with the forecast's hours in the row" "the forecast is 10 h 30 min." "$SC_OUT"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time; the forecast is 10 h 30 min, ending 6:50 PM./')"
+expect_eq "FC2 …and with the end clock the forecast line holds beside them" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 37% of the work landed in 60% of the time; the forecast is 11 h 45 min./')"
+expect_eq "FC3 control: a Pace row giving a forecast of 11 h 45 min, hours no sheet line holds, refuses the card, naming 11" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -cF 'metric Pace: says 11,')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Pace: .*/metric: Pace: 10% of the work landed in 60% of the time./')"
+expect_eq "FC4 the forecast's 10 beside the work landed is refused, naming 10 and the word: the forecast's numbers bind to their own words" "1||1" \
+  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'metric Pace: says 10 beside "work"' | /usr/bin/grep -cF 'pace.work-landed')"
+sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^metric: Completed: .*/metric: Completed: 5 tasks landed, 190 of 520 sized minutes, 37%; 5 left, 330 minutes, against a forecast of 10 h./')"
+expect_eq "FC5 the forecast is a Pace line only: a Completed row citing its hours is refused, naming Completed and 10" "1|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -cF 'metric Completed: says 10,')"
 
 # ============================================================
 section "§SHAPE: a 101-column line, a step row above its tasks, an open task twice or missing — each planted fault is refused"
@@ -735,8 +884,28 @@ expect_eq "VE10 an ask opened after the sheet was saved is owed: the judgment wr
   "$SV_RC|$SV_OUT|$(printf '%s\n' "$SV_ERR" | /usr/bin/grep -qF 'approve:merge' && echo yes)"
 SV_AT=$((SV_NOW + 60)) sv_run card "$SV_P" <<< "$SV_J
 ask approve:merge: approve the merge into main — recommend approve once 4/2 lands"
-expect_eq "VE10b …and a judgment answering it prints, the new ask under Blocked on you" "0|    • Approve the merge into main — recommend approve once 4/2 lands" \
-  "$SV_RC|$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -F 'merge into main')"
+expect_eq "VE10b …and a judgment answering it prints; no task reads its approval, so the sheet says it blocks nothing and the card draws it under the Assessment, the row's words as the model wrote them" \
+  "0|    • Open, blocking nothing: approve the merge into main — recommend approve once 4/2 lands|" \
+  "$SV_RC|$(sc_under "$SV_OUT" "Assessment" | /usr/bin/grep -F 'merge into main')|$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -F 'merge into main')"
+expect_eq "VE10c …while the release approval, which holds the merge task, stays under Blocked on you (VE10b read the same card)" "1" \
+  "$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -c 'release approval')"
+# THE RULING ASK, END TO END: the tick opens ruling:<id> when a row holds until its writer reads a ruling, its reply
+# naming the row. The verb reads that row as held, so the card draws the ask under Blocked on you, never as an open
+# ask blocking nothing.
+# fails-when: the ruling ask reads holds=nothing, so it is drawn under the Assessment with Blocked on you holding
+# only the release approval.
+printf 'owed/v1|key=ruling:r9|state=open|sent=-|at=2026-10-06T22:02:00Z|title=ruling unread: T2|reply=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it\n' >> "$SV_REG"
+SV_AT=$((SV_NOW + 120)) sv_run "$SV_P" < /dev/null
+printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
+expect_eq "VE10d the verb's sheet reads the ruling ask as holding the row its reply names (4/2), blocking" "ask: key=ruling:r9 holds=4/2 title=ruling unread: T2 raised=3:02 PM blocks=yes" \
+  "$(sv_fact ask | /usr/bin/grep '^key=ruling:r9 ' | sed 's/^/ask: /')"
+SV_JR="$(printf '%s\n' "$SV_J" | sed -e 's/^call: .*/call: Re-dispatch 4\/2 or drop it: its ruling is unread./' -e "s/^close: .*/close: $(sv_m close.predicted), if 4\/2 lands first time./")
+ask approve:merge: approve the merge into main — recommend approve once 4/2 lands
+ask ruling:r9: the ruling on 4/2 is unread and the row holds — re-dispatch the row or drop it — recommend re-dispatch"
+SV_AT=$((SV_NOW + 120)) sv_run card "$SV_P" <<< "$SV_JR"
+expect_eq "VE10e the call, in words that owe something, prints, the ruling ask under Blocked on you and not under the Assessment" \
+  "0|1|0" \
+  "$SV_RC|$(sc_under "$SV_OUT" "Blocked on you" | /usr/bin/grep -c 'ruling on 4/2 is unread')|$(sc_under "$SV_OUT" "Assessment" | /usr/bin/grep -c 'ruling on 4/2 is unread')"
 
 # ============================================================
 section "§SKILL: the skill writes the judgment in the tags the verb takes and shows only what the verb printed, in one fenced block"
