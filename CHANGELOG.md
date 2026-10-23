@@ -221,6 +221,8 @@ The integrate row renders this part from the plan's review and waiver lines befo
   so a question to the orchestrator waits for the writer's next idle turn. (A-orch.10)
 - The door-landing §COPY-4 arm c4-1 stays: its subject is the new runner reading an absolute word under the root in the
   judge tree, which no other suite pins.
+- The handoff head says Blocked on you: yes over any open ask, while the sitrep card lists only the asks that hold a
+  task, the release or the merge; the handoff follows the card next release.
 
 ### The landing numbers
 
