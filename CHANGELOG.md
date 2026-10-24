@@ -173,10 +173,10 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 
 ### The landing numbers
 
-`landing-report --rows` at 17db10f66eb254907ccb5f9ed7599653ed5aaaa8 on 2026-10-24T08:59:37Z:
+`landing-report --rows` at 008dc04bfd6bc9b8791959dee61796b226052f81 on 2026-10-24T10:12:52Z:
 
 ```
-landings: queue=7 hand=1 git=0 · ready-to-landed median=5.5m p75=8.1m max=17.1m · runs: green=27 red=2 none=0 discarded=0 red-then-green=0 run=57 reused=0 absent=0 · waited median=19s · killed=0
+landings: queue=8 hand=1 git=0 · ready-to-landed median=4.3m p75=7.8m max=17.1m · runs: green=31 red=2 none=0 discarded=0 red-then-green=0 run=66 reused=0 absent=0 · waited median=15s · killed=0
 T2 queue ready=2026-10-24T07:02:27Z landed=2026-10-24T07:09:54Z minutes=7.5 runs=2 waited=20s wait=0.3 prove=7.1 rework=0.0 width=1
   asks.test.sh green promised=59s actual=70s ratio=1.19
   release-approval.test.sh green promised=351s actual=357s ratio=1.02
@@ -210,6 +210,10 @@ T10 queue ready=2026-10-24T08:48:52Z landed=2026-10-24T08:50:07Z minutes=1.2 run
   doctor-version.test.sh green promised=75s actual=63s ratio=0.84
   render.test.sh green promised=18s actual=19s ratio=1.06
   words.test.sh green promised=10s actual=11s ratio=1.10
+T15 queue ready=2026-10-24T08:56:31Z landed=2026-10-24T08:59:44Z minutes=3.2 runs=3 waited=10s wait=0.2 prove=3.0 rework=0.0 width=4
+  shell-lint.test.sh green promised=29s actual=34s ratio=1.17
+  sitrep.test.sh green promised=192s actual=182s ratio=0.95
+  handoff-file.test.sh green promised=58s actual=55s ratio=0.95
 ```
 
 ## 1.26.0 — 2026-10-22
