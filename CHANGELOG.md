@@ -182,10 +182,10 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 
 ### The landing numbers
 
-`landing-report --rows` at 2e442c654763e7cd4a660a69b19420b605bf1fcb on 2026-10-24T15:56:58Z:
+`landing-report --rows` at 01f38b51335bf6f5cf349c363a18b7adae885f83 on 2026-10-24T17:13:33Z:
 
 ```
-landings: queue=10 hand=1 git=0 · ready-to-landed median=3.1m p75=7.0m max=17.1m · runs: green=32 red=3 none=0 discarded=0 red-then-green=0 run=75 reused=0 absent=0 · waited median=20s · killed=0
+landings: queue=10 hand=2 git=0 · ready-to-landed median=3.1m p75=7.0m max=17.1m · runs: green=35 red=3 none=0 discarded=0 red-then-green=0 run=80 reused=0 absent=0 · waited median=20s · killed=0
 T2 queue ready=2026-10-24T07:02:27Z landed=2026-10-24T07:09:54Z minutes=7.5 runs=2 waited=20s wait=0.3 prove=7.1 rework=0.0 width=1
   asks.test.sh green promised=59s actual=70s ratio=1.19
   release-approval.test.sh green promised=351s actual=357s ratio=1.02
@@ -231,6 +231,7 @@ T16 queue ready=2026-10-24T10:10:17Z landed=2026-10-24T10:13:00Z minutes=2.7 run
 T18 queue ready=2026-10-24T10:30:45Z landed=2026-10-24T10:31:37Z minutes=0.9 runs=2 waited=25s wait=0.4 prove=0.5 rework=0.0 width=4
   sitrep-card.test.sh green promised=17s actual=26s ratio=1.53
   card.test.sh red promised=10s actual=14s ratio=1.40
+wt/44-T20 hand ready=- landed=2026-10-24T15:57:06Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 ```
 
 ## 1.26.0 — 2026-10-22
