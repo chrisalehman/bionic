@@ -1186,24 +1186,24 @@ s20_ack "$VC" w-T3 2026-10-22T11:00:00Z
 
 # ---------- §REVIEW-FILES: a review row's Files are its questions' records, its artifact the first ----------
 VC_THREE="$VC_REC/critic-evidence.md, $VC_REC/critic-adversarial.md, $VC_REC/critic-structure.md"
-poke "$VC" task-add T6 6 review "the critic's review" critic — 30 REQ-1 — head
+poke "$VC" task-add T6 6 review "the critic's review. The critic reads the run once." critic — 30 REQ-1 — head
 expect_eq "RF-0 setup: task-add of a review row on the single-rigor plan exits 0" "0" "$RC"
 expect_eq "RF-1 AC-9.1 the row's Files hold one record per question the rigor deals, evidence, adversarial, structure" \
   "$VC_THREE" "$(vc_cell T6 9)"
 expect_eq "RF-1b …and its artifact cell names the first, the record deliver takes" "$VC_REC/critic-evidence.md" "$(vc_cell T6 12)"
 s42_snap "$VC" "$VC_P"
-poke "$VC" task-add T7 6 review "a review on one record" critic — 30 REQ-1 "$VC_REC/critic.md" head
+poke "$VC" task-add T7 6 review "a review on one record. The critic writes one record." critic — 30 REQ-1 "$VC_REC/critic.md" head
 s42_unchanged "RF-2 a review row written with one record for three questions" 1 "$VC_P"
 expect_contains "RF-2b …and the refusal names the rendered list" "$VC_THREE" "$OUT"
-poke "$VC" task-add T7 6 review "a review on its three records" critic — 30 REQ-1 "$VC_THREE" head
+poke "$VC" task-add T7 6 review "a review on its three records. The critic writes three records." critic — 30 REQ-1 "$VC_THREE" head
 expect_eq "RF-3 control: a review row whose Files name its three records goes in as written, its artifact the first" \
   "0|$VC_THREE|$VC_REC/critic-evidence.md" "$RC|$(vc_cell T7 9)|$(vc_cell T7 12)"
 VC_OWN="$VC_REC/T10-evidence.md, $VC_REC/T10-adversarial.md, $VC_REC/T10-structure.md"
-poke "$VC" task-add T10 6 review "a review on its own three records" critic — 30 REQ-1 "$VC_OWN" head
+poke "$VC" task-add T10 6 review "a review on its own three records. The critic writes its own three records." critic — 30 REQ-1 "$VC_OWN" head
 expect_eq "RF-3b a review row whose Files already name one record of its own per question keeps those names verbatim, its artifact the first" \
   "0|$VC_OWN|$VC_REC/T10-evidence.md" "$RC|$(vc_cell T10 9)|$(vc_cell T10 12)"
 expect_absent "RF-3c …and no rendered critic-<q>.md name is added beside them" "critic-" "$(vc_cell T10 9)"
-poke "$VC" task-add T8 5 verify "the floor" test-runner — 30 REQ-1 —
+poke "$VC" task-add T8 5 verify "the floor. The regression runs once." test-runner — 30 REQ-1 —
 expect_eq "RF-4 control: a verify row keeps the reader-row rule, one record named for the row, and no artifact cell written" \
   "0|$VC_REC/T8.md|—" "$RC|$(vc_cell T8 9)|$(vc_cell T8 12)"
 
@@ -1217,7 +1217,7 @@ poke "$VC" deliver T6
 expect_eq "DC-1 AC-9.2 deliver lands the review row from its artifact cell (exit 0), the row landed" "0|landed" "$RC|$(vc_cell T6 10)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "DC-1b …naming the artifact it read" "artifact $VC_REC/critic-evidence.md present" "$OUT"
-poke "$VC" task-add T9 6 review "a second review" critic — 30 REQ-1 — head
+poke "$VC" task-add T9 6 review "a second review. The critic reads the run again." critic — 30 REQ-1 — head
 poke "$VC" task-set T9 artifact=—
 s42_snap "$VC" "$VC_P"
 poke "$VC" deliver T9

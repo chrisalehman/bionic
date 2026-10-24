@@ -238,8 +238,8 @@ _rh_verify() {
 _rh_release_card() {
   local h1 qs t2
   _rh_poker "move the release row to step 7" task-set T2 step=7 --reason 'the release is the doc row at step 7' || return 1
-  _rh_poker "add the regression row" task-add T3 5 test 'the regression' orchestrator — 10 REQ-1 — || return 1
-  _rh_poker "add the integrate row" task-add T4 8 integrate 'merge into main' orchestrator — 10 REQ-1 — \
+  _rh_poker "add the regression row" task-add T3 5 test 'the regression. The whole suite runs once.' orchestrator — 10 REQ-1 — || return 1
+  _rh_poker "add the integrate row" task-add T4 8 integrate 'merge into main. The run reaches main by its merge.' orchestrator — 10 REQ-1 — \
     'approval:release, approval:merge, head' || return 1
   _rh_verify || return 1
   h1="$(_rh_head)"
@@ -344,7 +344,7 @@ _rh_replay() {
   # row's landing settles that finding too, so no move follows the landing.
   _rh_review w-adversarial-whole-2 adversarial whole "$RH_BASE" "$(_rh_head)" fail || return 1
   _rh_do "the sweeper acks the second failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-adversarial-whole-2 || return 1
-  _rh_poker "the fix row born of the finding" task-add T5 4 build 'answer the structure finding: a caller reaches the library change' \
+  _rh_poker "the fix row born of the finding" task-add T5 4 build 'answer the structure finding: a caller reaches the library change. The caller and the library agree again.' \
     orchestrator — 10 REQ-1 'payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh' \
     --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1

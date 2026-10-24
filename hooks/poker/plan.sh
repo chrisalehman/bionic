@@ -1019,6 +1019,26 @@ EOF
     exit 0
   }
 
+  # A TASKS CELL IS HELD TO THE STEP-3 CARD'S SENTENCE RULE WHERE IT IS TYPED: a cell the card would refuse is
+  # refused here, before anything is written, by the card's own check (`card.sh task-cell`), so the words are the
+  # card's and there is one rule. Every refused cell of the call is named in the one refusal.
+  pv_task_cells_or_refuse() {  # <id> <cell> [<id> <cell>]... -> returns when the card would draw every cell, else exits 1
+    local card out
+    card="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh"
+    if [ ! -f "$card" ]; then
+      die "REFUSED — the Step-3 card's check ($card) cannot be found to judge the Tasks cell; the plan is unchanged."
+      exit 1
+    fi
+    out="$("${BASH:-bash}" "$card" task-cell "$@" 2>&1 >/dev/null)" && return 0
+    while IFS= read -r PV_TC_LINE; do
+      [ -n "$PV_TC_LINE" ] && die "$PV_TC_LINE"
+    done <<EOF
+$out
+EOF
+    die "The Tasks cell opens on its title, then one plain sentence saying what the row makes true; the plan is unchanged."
+    exit 1
+  }
+
   # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
   # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row and its
   # `- <id>:` line, and no other row), the copy is
@@ -1192,6 +1212,7 @@ EOF
       TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"
     fi
 
+    pv_task_cells_or_refuse "$TA_ID" "$TA_CELL_TASK"
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
          "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_SUITE:+regression $TA_BORN_SUITE of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
@@ -1275,6 +1296,7 @@ EOF
       for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do _pv_rest="${_pv_rest:+$_pv_rest$'\037'}$_pv_a"; done
       PV_SETS=("$PV_ID"$'\037'"$_pv_rest")
     fi
+    PV_TASK_CELLS=()
     # pv_set_pairs <set> -> PV_SET_ID and PV_SET_PAIRS, the set taken apart.
     pv_set_pairs() {
       local r="${1#*$'\037'}" p
@@ -1315,6 +1337,7 @@ EOF
         esac
         case "$_pv_l" in
           files) PV_FILES_ASKED=1; continue ;;  # a fixed column, judged after the plan is open, not an optional one the header lists
+          task) PV_TASK_CELLS+=("$PV_SET_ID" "${_pv_a#*=}") ;;
           id)
             die "REFUSED — id is the key task-set finds $PV_SET_ID by, not a cell to set; the plan is unchanged."
             exit 1 ;;
@@ -1323,6 +1346,7 @@ EOF
         PV_COLS="${PV_COLS:-} $_pv_l"
       done
     done
+    [ "${#PV_TASK_CELLS[@]}" -eq 0 ] || pv_task_cells_or_refuse "${PV_TASK_CELLS[@]}"
     if [ -n "${PV_REASON:-}" ]; then
       if ! plan_verb_value_ok "$PV_REASON"; then
         die "REFUSED — the reason carries a |, a tab or a line break, which no step line can hold; the plan is unchanged."
