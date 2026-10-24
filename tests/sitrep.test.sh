@@ -1946,10 +1946,18 @@ expect_eq "SK6 the Pace question is pace.work-landed against pace.time-used" "1"
   "$(/usr/bin/grep -F '**Pace.**' "$SR_SKILL" | /usr/bin/grep -F 'pace.work-landed' | /usr/bin/grep -cF 'pace.time-used')"
 expect_eq "SK7 the rubric: on pace when pace.work-landed is at least pace.time-used, behind when lower" "1" \
   "$(/usr/bin/grep -i 'on pace' "$SR_SKILL" | /usr/bin/grep -F 'pace.work-landed' | /usr/bin/grep -F 'pace.time-used' | /usr/bin/grep -ci 'behind')"
-expect_eq "SK8 the close's basis is restated in words" "1" \
+expect_eq "SK8 the close row is the condition in words, and the card draws the basis" "1" \
   "$(/usr/bin/grep -F 'close:' "$SR_SKILL" | /usr/bin/grep -i 'basis' | /usr/bin/grep -ci 'in words')"
-expect_eq "SK9 the example's Pace row states the two shares, and no row compares the plan's allowance" "1|0" \
-  "$(/usr/bin/grep -E '^ *metric: Pace: [0-9]+% .*[0-9]+%' "$SR_SKILL" | /usr/bin/grep -c .)|$(/usr/bin/grep -E '^ *metric: ' "$SR_SKILL" | /usr/bin/grep -ci 'the plan allowed')"
+# The example is the seven lines of the judgment and nothing else: code draws the Metrics, so the example holds no
+# metric: or task: line and does not restate the Pace; it opens on the purpose.
+sr_example() {  # <skill file> -> the lines of the skill's one example judgment, between the heredoc and its terminator
+  awk '/<<.JUDGMENT.$/ { f = 1; next } /^ *JUDGMENT$/ { f = 0 } f { sub(/^ +/, ""); print }' "$1"
+}
+expect_eq "SK9 the example judgment is seven lines, opens on purpose:, and holds no metric: or task: line" "7|purpose|0" \
+  "$(sr_example "$SR_SKILL" | /usr/bin/grep -c .)|$(sr_example "$SR_SKILL" | head -1 | cut -d: -f1)|$(sr_example "$SR_SKILL" | /usr/bin/grep -cE '^(metric|task):')"
+sed 's/^\( *\)grade: .*/\1grade: B\n\1metric: Pace: 37% of the work landed in 60% of the time./' "$SR_SKILL" > "$TMPROOT/skill-plant.md"
+expect_eq "SK9b a planted metric: line in the example is found (SK9 read the same lines)" "1" \
+  "$(sr_example "$TMPROOT/skill-plant.md" | /usr/bin/grep -cE '^(metric|task):')"
 
 # ============================================================
 section "§RECORD: the sitrep and canonical-sdlc skills record an ask through its verb before they put it to the user"
