@@ -840,11 +840,8 @@ fm == 1 {
   else sub2 = ""
   next
 }
-sec == "goal" && goaldone != 1 {
-  if (trim($0) == "") { if (GOAL != "") goaldone = 1 }
-  else GOAL = GOAL (GOAL == "" ? "" : " ") clean($0)
-  next
-}
+# THE GOAL TEXT IS READ BY lib/plan.sh plan_goal_paragraph AFTER THIS PARSE; the section only has to exist here.
+sec == "goal" { next }
 # THE APPROACH AND WORTH YOUR EYE (wave-26 D13). Both are `###` sections of `## Design`; they
 # are read BEFORE the design-paragraph arm below, which would otherwise take an Approach
 # that happens to be the first text under the heading for the design paragraph.
@@ -955,7 +952,6 @@ END {
   # refused the very artifact the arm exists to render (research R3: exit 64 at d7e841c).
   if (verb == "step2" && !saweval && SCALE != "task") err("the spec has no ## Eval design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
-  print "GOAL" OFS GOAL
   print "META" OFS "base" OFS BASE
   print "META" OFS "rigor" OFS RIGOR
   print "META" OFS "walk" OFS WALK
@@ -997,7 +993,6 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
     key="${line%%"$CARD_TAB"*}"; rest="${line#*"$CARD_TAB"}"
     case "$key" in
       ERR)  WCARD_ERR="$rest"; return 1 ;;
-      GOAL) WCARD_GOAL="$rest" ;;
       META)
         k="${rest%%"$CARD_TAB"*}"; v="${rest#*"$CARD_TAB"}"
         [ "$v" != "$rest" ] || v=""
@@ -1028,6 +1023,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   # `max_writers=9 writers=3` read 9 here and 3 to every other reader, and it took a probe's
   # number for a ceiling. With no cap the card says the writers are not declared.
   WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
+  # WHAT THE ARTIFACT IS FOR is the one reader's, the one the sitrep's sheet carries as run.goal.
+  WCARD_GOAL="$(plan_goal_paragraph "$2")"
   # THE WORKING BRANCH IS THE ANSWER OF lib/run.sh `plan_working_branch` (wave-35 T7; D14), the reader `ready`,
   # the walls and the judge ask: SDLC State, then frontmatter. The card used to read the frontmatter alone,
   # so a plan naming its branch under SDLC State showed `not declared` for a branch `ready` lands on.
