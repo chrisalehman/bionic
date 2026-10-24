@@ -94,9 +94,9 @@ section "§CLOSE: the verbs carry the fixture to the end state, and the card ren
 # ============================================================
 DC_T0="$SECONDS"
 dc_verb "(c1) task-set moves the release row to step 7" task-set T2 step=7 --reason 'the release is the doc row at step 7'
-dc_verb "(c2) task-add adds the regression row at step 5" task-add T3 5 test 'the regression' orchestrator — 10 REQ-1 —
+dc_verb "(c2) task-add adds the regression row at step 5" task-add T3 5 test 'the regression. The whole suite runs once.' orchestrator — 10 REQ-1 —
 dc_verb "(c3) task-add adds the integrate row that reads both approvals" \
-  task-add T4 8 integrate 'merge into main' orchestrator — 10 REQ-1 — 'approval:release, approval:merge, head'
+  task-add T4 8 integrate 'merge into main. The run reaches main by its merge.' orchestrator — 10 REQ-1 — 'approval:release, approval:merge, head'
 expect_eq "(c4) the plan is in the release order, its regression row T3" "T3" \
   "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$DC_LIB" "$DC_PLAN" 2>/dev/null)"
 

@@ -50,6 +50,7 @@
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
+#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's sentence rule; task-add's and task-set's)
 #     bash card.sh release                 < facts      (the release approval card, from the facts its verb gathers)
 #     bash card.sh sitrep <sheet>          < judgment   (the sitrep card, from the sheet and the model's judgment)
 #     bash card.sh sitrep-check <sheet>    < card       (the sitrep card's check alone, over a card drawn elsewhere)
@@ -110,7 +111,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh task-cell <id> <cell> [<id> <cell>]..., or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -178,7 +179,9 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
     task)
       CARD_SECTION="Tasks"
       CARD_HDRCOLS="2:serves 3:kind 4:depends 5:agent"
-      CARD_FMT_1='    %-5s %-30s %-12s %-9s %-12s %s';  CARD_NF_1=6; CARD_FOLD_1=1 ;;
+      # The seventh cell is the task's sentence, drawn under the row as a requirement's is.
+      CARD_FMT_1='    %-5s %-30s %-12s %-9s %-12s %s';  CARD_NF_1=6; CARD_FOLD_1=1
+      _card_sentence_line ;;
     *) return 1 ;;
   esac
   return 0
@@ -908,9 +911,12 @@ sec == "tasks" && /^[ \t]*\|/ {
   n = cells($0, c)
   if (n < 6) next
   # THE WHOLE CELL TRAVELS WITH THE ROW: the card takes its title from it, and `show task` prints it.
+  # The cell travels raw too, last, because the sentence after the title is refused for a backtick
+  # the cleaned cell no longer carries.
   sv = (servc <= n) ? c[servc] : ""
   if (sv !~ /[A-Za-z0-9]/) sv = ""
-  print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv
+  tr = craw[4]; gsub(/\t/, " ", tr)
+  print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv OFS tr
   next
 }
 # THE APPROACH CELL IS THE REQUIREMENT\047S PROOF IN ONE PLAIN LINE, the same on every row of the requirement:
@@ -1087,6 +1093,10 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
 # requirement heading and a decision are titled by their heading, so their text is the title as
 # the parse hands it over.
+#
+# A TASKS CELL'S SENTENCE is what follows its title's `. `, through its own period: the cell's next
+# `. `, or its first ` · `, where a tag (` · complexity:`, ` · born:`) begins, or the cell's end. A
+# cell that is its title alone, or its title and a tag, has none.
 CARD_TITLE_CAP=30
 # The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
 CARD_APPROACH_CAP=60
@@ -1102,6 +1112,15 @@ _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
     item)
       case "$t" in *": "*) t="${t%%: *}" ;; esac ;;
   esac
+  printf '%s' "$t"
+}
+
+_card_cell_sentence() {  # <Tasks cell> -> its sentence, on stdout, or nothing
+  local t="${1:-}"
+  case "$t" in *". "*) t=" ${t#*. }" ;; *) return 0 ;; esac
+  case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
+  case "$t" in *". "*) t="${t%%". "*}." ;; esac
+  t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
   printf '%s' "$t"
 }
 
@@ -1133,6 +1152,7 @@ _card_title_refusals() {  # <step1|step2|step3> — sets CARD_TITLE_BAD to one R
       for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
         _card_split "$row"
         _card_title_check task "${CARD_CELLS[0]}" "$(_card_title cell "${CARD_CELLS[1]:-}")"
+        _card_sentence_check task "${CARD_CELLS[0]}" "$(_card_cell_sentence "${CARD_CELLS[6]:-}")" "after its title"
       done ;;
   esac
 }
@@ -2202,14 +2222,15 @@ _card_step3() {  # <citation path> <artifact path as given>
 }
 
 # THE TASK ROWS: the title alone, `serves` in a column of its own, and the depends cell with each
-# run of three or more consecutive ids folded to a range. The whole cell is `show task`'s.
+# run of three or more consecutive ids folded to a range; the task's sentence goes under the row.
+# The whole cell is `show task`'s.
 _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   local row serves
   CARD_ROWS=()
   for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
     _card_split "$row"
     serves="${CARD_CELLS[5]:-}"; [ -n "$serves" ] || serves="—"
-    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}${CARD_TAB}$(_card_cell_sentence "${CARD_CELLS[6]:-}")"
   done
 }
 
@@ -3592,6 +3613,18 @@ case "$1" in
       case "$_card_k" in ''|*[!0-9]*) _card_k=0 ;; esac
       _card_hang "$_card_k" "$_card_l"
     done
+    exit 0 ;;
+  task-cell)
+    # A TASKS CELL, JUDGED BY THE STEP-3 CARD'S OWN SENTENCE RULE where a verb writes it (task-add,
+    # task-set): the refusal is the card's, word for word, every refused cell named in it, exit 1.
+    [ "$#" -ge 3 ] && [ $(( ($# - 1) % 2 )) -eq 0 ] || _card_usage "task-cell takes <id> <cell> pairs (got $(( $# - 1 )) arguments)"
+    shift
+    CARD_TITLE_BAD=""
+    while [ "$#" -ge 2 ]; do
+      _card_sentence_check task "$1" "$(_card_cell_sentence "$2")" "after its title"
+      shift 2
+    done
+    [ -z "$CARD_TITLE_BAD" ] || { printf '%s' "$CARD_TITLE_BAD" >&2; exit 1; }
     exit 0 ;;
   release)
     # The release approval card, drawn from the facts the release-approval verb gathers, on stdin.

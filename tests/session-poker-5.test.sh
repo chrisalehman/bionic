@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP.
+# §NOTREADY, §STEP, §TSENTENCE.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -688,4 +688,67 @@ expect_eq "ST-5 …the wall refuses the turn that left it" "block" "$(s31_decisi
 expect_eq "ST-6 …and the table reader names T1" "T1" "$(st_ready)"
 
 # ============================================================
+# ============================================================
+section "§TSENTENCE: task-add and task-set refuse a Tasks cell with no sentence after its title, or with a backticked one, in the Step-3 card's words"
+# ============================================================
+# A Tasks cell opens on its title, then one plain sentence saying what the row makes true; the Step-3 card prints the
+# sentence under the row and refuses a cell without one. The two verbs that write the cell refuse it where it is typed,
+# through the card's own check (`card.sh task-cell`), so the words are the card's and the plan is left as it was.
+# FIXTURE FIDELITY: s34's plan at current: 5, bound to this session; every write is the real verb.
+# fails-when: a verb writes a cell the card would refuse, refuses a cell the card would draw, says other words than the
+# card's check, refuses a task-set that does not write the task cell, or changes a byte of the plan when it refuses.
+TS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+TS_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
+RTS="$(make_repo tsentence)"; ( cd "$RTS" && git commit -q --allow-empty -m init )
+PTS="$(s34_plan "$RTS" 5)"
+ts_card_says() {  # <id> <cell> -> what the card's check prints for that cell
+  bash "$TS_CARD" task-cell "$1" "$2" 2>&1 >/dev/null
+}
+ts_row() {  # <id> -> the plan's ## Tasks row for <id>
+  /usr/bin/grep "^| $1 |" "$PTS"
+}
+
+poke "$RTS" task-add T7 7 doc 'Release the fixture. The fixture ships as one release. The entry names `CHANGELOG.md`.' bionic:implementor 'T5' 30 REQ-1 '—'
+expect_eq "TSENT-1 task-add writes a cell that opens on its title and a plain sentence (exit 0)" "0" "$RC"
+expect_contains "TSENT-1b …the cell as typed, its detail's backtick too" \
+  '| T7 | 7 | doc | Release the fixture. The fixture ships as one release. The entry names `CHANGELOG.md`. |' "$(ts_row T7)"
+
+TS_BEFORE="$(cat "$PTS")"
+poke "$RTS" task-add T8 7 doc 'Release the fixture.' bionic:implementor 'T5' 30 REQ-1 '—'
+TS_WORDS="$(ts_card_says T8 'Release the fixture.')"
+expect_eq "TSENT-2 precondition: the card's check refuses that cell with its line" \
+  "REFUSED — task T8: no sentence after its title" "$TS_WORDS"
+expect_eq "TSENT-2a task-add of a cell with no sentence is refused (exit 1)" "1" "$RC"
+expect_contains "TSENT-2b …in the card's words" "$TS_WORDS" "$OUT"
+expect_eq "TSENT-2c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
+
+poke "$RTS" task-add T8 7 doc 'Release the fixture. The fixture ships `v2` as one release.' bionic:implementor 'T5' 30 REQ-1 '—'
+TS_WORDS="$(ts_card_says T8 'Release the fixture. The fixture ships `v2` as one release.')"
+expect_eq "TSENT-3 precondition: the card's check refuses that cell with its line" \
+  'REFUSED — task T8: the sentence carries a backtick: The fixture ships `v2` as one release.' "$TS_WORDS"
+expect_eq "TSENT-3a task-add of a cell whose sentence carries a backtick is refused (exit 1)" "1" "$RC"
+expect_contains "TSENT-3b …in the card's words" "$TS_WORDS" "$OUT"
+expect_eq "TSENT-3c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
+
+# task-set judges the task cell it writes, and only that: s34's own cells carry no sentence, and setting another
+# column of their rows is not refused for it.
+poke "$RTS" task-set T5 size=45
+expect_eq "TSENT-4 task-set of another column on a row whose cell has no sentence is not refused (exit 0)" "0" "$RC"
+poke "$RTS" task-set T5 'task=The floor. It proves the two builds together.'
+expect_eq "TSENT-5 task-set writes a cell with a plain sentence (exit 0)" "0" "$RC"
+expect_contains "TSENT-5b …as typed" "| T5 | 5 | verify | The floor. It proves the two builds together. |" "$(ts_row T5)"
+
+TS_BEFORE="$(cat "$PTS")"
+poke "$RTS" task-set T2 'task=The second build.'
+expect_eq "TSENT-6 task-set of a cell with no sentence is refused (exit 1)" "1" "$RC"
+expect_contains "TSENT-6b …in the card's words" "$(ts_card_says T2 'The second build.')" "$OUT"
+expect_eq "TSENT-6c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
+poke "$RTS" task-set T2 'task=The second build. It builds `b.sh` too.' -- T5 'task=The floor.'
+expect_eq "TSENT-7 task-set of two groups, one cell backticked and one with no sentence, is refused (exit 1)" "1" "$RC"
+expect_contains "TSENT-7b …naming the backticked one in the card's words" \
+  "$(ts_card_says T2 'The second build. It builds `b.sh` too.')" "$OUT"
+expect_contains "TSENT-7c …and the other in the same refusal" "$(ts_card_says T5 'The floor.')" "$OUT"
+expect_eq "TSENT-7d …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
+POKE_BOUND="$TS_BOUND_WAS"
+
 finish
