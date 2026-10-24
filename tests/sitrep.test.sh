@@ -7,7 +7,7 @@
 # description and a few words of note, the measurements (the clock, the work, pace and the close, correctness and
 # waste, each line naming what it measures, its unit and its source), each goal's status, every ask open on
 # the run's register with what it holds, and every review result with its open findings. Every clock time is
-# local and 12-hour. `--line` is the Patrol's status, `<k> of <m> tasks · owed: <n> · close <time>`. The page,
+# local and 12-hour. `--line` is the Patrol's status, `<k> of <m> tasks · owed: <n> on you · <m> on events · close <time>`. The page,
 # its Score marks, the review rows, the grade verb and its log are gone; the card a later verb draws reads this.
 #
 # HERMETIC. One repository per world under a temp root: a 17-task plan, its landing record, its fill
@@ -203,7 +203,7 @@ sr_lines() { printf '%s\n' "$OUT" | awk -v k="$1: " 'index($0, k) == 1'; }
 sr_join() { tr '\n' '|' | sed 's/|$//'; }
 # THE FIELD READER. A list line is `<kind>: f1=<v> f2=<v> …` with its fields in a fixed order, a value running to
 # the next field's ` <name>=` or the line's end, so a value may hold spaces. Proved on a known line (F0) first.
-SR_FIELDS_AWK='BEGIN { o["task"] = "id step state desc note"; o["ask"] = "key holds title raised blocks"
+SR_FIELDS_AWK='BEGIN { o["task"] = "id step state desc note"; o["ask"] = "key holds title raised blocks waits"
   o["review"] = "question scope result at open-findings record"; o["goal"] = "name status measure"; o["step"] = "n name state tasks" }
 function fv(line, f,   k, b, n, a, i, s, r, e) {
   k = line; sub(/: .*$/, "", k); b = " " substr(line, length(k) + 3)
@@ -284,8 +284,8 @@ section "§SHEET: the sheet over a run holding every fact kind — each fact app
 expect_eq "F0 a task line's five fields, the description and the note holding spaces" \
   "T7|4|failed|Row 7 body|red at head" \
   "$(for f in id step state desc note; do sr_f 'task: id=T7 step=4 state=failed desc=Row 7 body note=red at head' "$f"; done | sr_join)"
-expect_eq "F0b an ask line's five fields" "approve:release|T12 and T17|approval: release|1:00 PM|yes" \
-  "$(for f in key holds title raised blocks; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM blocks=yes' "$f"; done | sr_join)"
+expect_eq "F0b an ask line's six fields, the last holding spaces" "approve:release|T12 and T17|approval: release|1:00 PM|no|event review adversarial re-run" \
+  "$(for f in key holds title raised blocks waits; do sr_f 'ask: key=approve:release holds=T12 and T17 title=approval: release raised=1:00 PM blocks=no waits=event review adversarial re-run' "$f"; done | sr_join)"
 sr_sheet_world sheet
 sr_run "$SR_PLAN"
 SR_SHEET="$OUT"
@@ -324,14 +324,17 @@ expect_eq "SH12 every ask open on the register is one ask line, the decision put
 expect_eq "SH13 an ask's line: what it holds, its title and when it was raised, on the local clock" \
   "4/12|approval: release|1:00 PM|nothing|D21 · the gate the judge holds|1:30 PM" \
   "$(for k in approve:release decide:D21; do for f in holds title raised; do sr_f "$(sr_ask "$k")" "$f"; done; done | sr_join)"
-# WHETHER AN ASK BLOCKS IS A FACT: blocks=yes when the ask holds a task, the release or the merge, blocks=no when it
-# holds nothing; the card places the ask from it and the model never decides it.
-# fails-when: an ask that holds nothing reads blocks=yes (it would sit under Blocked on you), a held one reads blocks=no,
-# or an ask line carries no blocks= field.
-expect_eq "SH13b an ask holding a task reads blocks=yes, one holding nothing blocks=no" "yes|no" \
-  "$(sr_f "$(sr_ask approve:release)" blocks)|$(sr_f "$(sr_ask decide:D21)" blocks)"
-expect_eq "SH13c every ask line's blocks= is yes exactly when its holds= is not nothing, and both values occur on this sheet (SH13b read the two)" "0|yes|yes" \
-  "$(sr_lines ask | while IFS= read -r l; do h="$(sr_f "$l" holds)"; b="$(sr_f "$l" blocks)"; if [ "$h" = nothing ]; then [ "$b" = no ] || echo bad; else [ "$b" = yes ] || echo bad; fi; done | /usr/bin/grep -c bad)|$(sr_lines ask | /usr/bin/grep -q ' blocks=yes$' && echo yes)|$(sr_lines ask | /usr/bin/grep -q ' blocks=no$' && echo yes)"
+# WHETHER AN ASK BLOCKS IS A FACT: blocks=yes only when the ask holds a task, the release or the merge AND waits on the
+# user, blocks=no otherwise; waits= says what the ask waits on, `user` or `event <what>`, and stands last. The card places
+# the ask from them and the model never decides either.
+# fails-when: an ask that holds nothing reads blocks=yes (it would sit under Blocked on you), a held one that waits on the
+# user reads blocks=no, or an ask line carries no waits= field.
+expect_eq "SH13b an ask holding a task reads blocks=yes, one holding nothing blocks=no, both waiting on the user" "yes|user|no|user" \
+  "$(sr_f "$(sr_ask approve:release)" blocks)|$(sr_f "$(sr_ask approve:release)" waits)|$(sr_f "$(sr_ask decide:D21)" blocks)|$(sr_f "$(sr_ask decide:D21)" waits)"
+expect_eq "SH13c every ask line's blocks= is yes exactly when its holds= is not nothing and its waits= is user, and both values occur on this sheet (SH13b read the two)" "0|yes|yes" \
+  "$(sr_lines ask | while IFS= read -r l; do h="$(sr_f "$l" holds)"; b="$(sr_f "$l" blocks)"; w="$(sr_f "$l" waits)"; if [ "$h" != nothing ] && [ "$w" = user ]; then [ "$b" = yes ] || echo bad; else [ "$b" = no ] || echo bad; fi; done | /usr/bin/grep -c bad)|$(sr_lines ask | /usr/bin/grep -q ' blocks=yes waits=' && echo yes)|$(sr_lines ask | /usr/bin/grep -q ' blocks=no waits=' && echo yes)"
+expect_eq "SH13d every ask line ends in its waits= field, user or event <what> (the field reader returned a value for each, SH13b read two)" "0|6" \
+  "$(sr_lines ask | while IFS= read -r l; do w="$(sr_f "$l" waits)"; [ "$w" = user ] || [ "${w#event ?}" != "$w" ] || echo bad; done | /usr/bin/grep -c bad)|$(sr_lines ask | /usr/bin/grep -c ' waits=')"
 expect_eq "SH14 every review: its question, scope, result, time, open findings and record; the review in flight with them" \
   "evidence whole fail 1:00 PM 1 record/wave-02-fx/auditor-evidence.md|adversarial piece pass 1:05 PM 0 record/wave-02-fx/critic-adversarial.md|T13 whole running - 0 -" \
   "$(sr_lines review | while IFS= read -r l; do printf '%s %s %s %s %s %s\n' "$(sr_f "$l" question)" "$(sr_f "$l" scope)" "$(sr_f "$l" result)" "$(sr_f "$l" at)" "$(sr_f "$l" open-findings)" "$(sr_f "$l" record)"; done | sr_join)"
@@ -1136,23 +1139,23 @@ sr_run --line "$SR_PLAN"
 expect_eq "CC6 landed tasks far under their size: the chain scaled down, on the sheet and in the Patrol's status" "3:19 PM|close 3:19 PM" "$SR_CC6|${OUT##* · }"
 
 # ============================================================
-section "§LINE: --line is the Patrol's status, <k> of <m> tasks · owed: <n> · close <time>"
+section "§LINE: --line is the Patrol's status, <k> of <m> tasks · owed: <n> on you · <m> on events · close <time>"
 # ============================================================
 sr_world line "6 6 12 12"
 sr_bind
 sr_run --line "$SR_PLAN"
-expect_eq "L1 the clean world: one line, exit 0" "0|4 of 17 tasks · owed: 0 · close 5:30 PM" "$RC|$OUT"
+expect_eq "L1 the clean world: one line, exit 0" "0|4 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$RC|$OUT"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 sr_owed "key=gate:abc|state=open|sent=-|at=2026-10-06T20:00:00Z|title=gate act: merge|reply=poker: GATE T28 — merge: approve it"
 sr_run --line "$SR_PLAN"
 SR_L2="$OUT"
 sr_run "$SR_PLAN"
-expect_eq "L2 two asks open: owed counts them, the same asks the sheet lists" "4 of 17 tasks · owed: 2 · close 5:30 PM|2" \
+expect_eq "L2 two asks open: owed counts them, the same asks the sheet lists" "4 of 17 tasks · owed: 2 on you · 0 on events · close 5:30 PM|2" \
   "$SR_L2|$(sr_lines ask | /usr/bin/grep -c .)"
 SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
-expect_eq "L3 no landing: the close is the chain at 1×" "0 of 17 tasks · owed: 0 · close 5:30 PM" "$OUT"
+expect_eq "L3 no landing: the close is the chain at 1×" "0 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$OUT"
 
 # ============================================================
 section "§ARGS: the verb's operands"
@@ -1458,7 +1461,7 @@ expect_eq "RC1 resume exits 0 and the recap names the open decision on its open:
   "0|open: D21 — the gate the judge holds: reply with the option number. $SR_D_WAIT|0" \
   "$RC|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^open: D21 ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: none')"
 expect_eq "RC2 …the run's status line, and the decision as an ask with what it holds" "yes|ask: D21 · the gate the judge holds — holds nothing" \
-  "$(printf '%s\n' "$RECAP" | /usr/bin/grep -qE '^run: 4 of 17 tasks · owed: [0-9]+ · close [0-9]{1,2}:[0-9]{2} [AP]M$' && echo yes)|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^ask: D21 ')"
+  "$(printf '%s\n' "$RECAP" | /usr/bin/grep -qE '^run: 4 of 17 tasks · owed: [0-9]+ on you · [0-9]+ on events · close [0-9]{1,2}:[0-9]{2} [AP]M$' && echo yes)|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^ask: D21 ')"
 printf '\n## Δ1 — D21 ruled "1" (Chris Lehman 2026-10-06): the gate the judge holds\n' >> "$SR_DIR/design-ledger.md"
 sr_recap
 expect_eq "RC3 the decision ruled: no open: and no ask: line names it while the tick's approvals still read open, and the recap lists it settled" \
@@ -1621,6 +1624,140 @@ printf 'release-approval/v1|dec=2|key=approve:D30|default=approve D30|other=-|pi
   >> "$SR_DIR/release-approval-${SR_H:0:8}.md"
 expect_eq "WA-4 the release and the merge both wait on D30" \
   "Answered in an hour rather than now, the predicted close moves an hour later: the release and the merge wait on it." "$(sr_wait D30)"
+
+# ============================================================
+section "§ONE-BLOCKS: the sheet, the handoff head and the Patrol line read the one function, so what blocks the user reads the same on all three"
+# ============================================================
+# FIXTURE FIDELITY: the asks are lines on the run's register, written as lib/owed.sh writes them; a waiver the user
+# turned back is answered `no` by owed_answer itself, the call the release reply makes; the waiver holds an integrate
+# row, so the old rule (blocked when something is held) would read it as blocking. The three surfaces are the real
+# verbs: `sitrep` for the sheet, `handoff` for the head, `sitrep --line` for the Patrol's status.
+# fails-when: a waiver answered `no` reads blocks=yes, the head says Blocked on you: yes over asks that all wait on an
+# event, the Patrol counts an event-waiting ask as owed by the user, or any two surfaces read the same asks differently.
+sr_ob_world() {  # <label> <with approval: yes|no> -> an integrate row held by a waiver answered no, and optionally an approval the user owes
+  sr_world "$1" "6 6 12 12"
+  sr_set T17 kind integrate
+  sr_bind
+  sr_owed "key=waive:adversarial|state=open|sent=-|at=2026-10-06T20:01:00Z|title=waiver: adversarial|reply=poker: the adversarial review failed at the head"
+  ( cd "$SR_REPO" && OWED_ROOT="$SR_REPO" OWED_SID="$SID" OWED_PLAN="$SR_PLAN" bash -c '. "$1" && owed_answer "$2" no "$3"' _ "$SR_OWED_LIB" waive:adversarial "review adversarial re-run" )
+  [ "$2" != yes ] || sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+}
+sr_ob_read() {  # <poker> -> `<sheet blocks=yes>|<sheet waits=user>|<sheet waits=event>|<head word>|<Patrol on you>|<Patrol on events>`
+  local pk="$1" sheet line head f
+  sheet="$(sr_poke_with "$pk" sitrep "$SR_PLAN" 2>/dev/null)"
+  line="$(sr_poke_with "$pk" sitrep --line "$SR_PLAN" 2>/dev/null)"
+  rm -rf "$SR_REPO/.bionic/docs/record/handoffs"
+  sr_poke_with "$pk" handoff < /dev/null > /dev/null 2>&1
+  f="$(ls "$SR_REPO"/.bionic/docs/record/handoffs/*.md 2>/dev/null | head -n 1)"
+  head="$(awk -F': ' '$1 == "Blocked on you" { print $2; exit }' "$f" 2>/dev/null)"
+  printf '%s|%s|%s|%s|%s|%s\n' \
+    "$(printf '%s\n' "$sheet" | /usr/bin/grep -c '^ask: .* blocks=yes waits=')" \
+    "$(printf '%s\n' "$sheet" | /usr/bin/grep -c '^ask: .* waits=user$')" \
+    "$(printf '%s\n' "$sheet" | /usr/bin/grep -c '^ask: .* waits=event ')" \
+    "$head" \
+    "$(printf '%s\n' "$line" | sed -n 's/.* owed: \([0-9]*\) on you .*/\1/p')" \
+    "$(printf '%s\n' "$line" | sed -n 's/.* on you · \([0-9]*\) on events .*/\1/p')"
+}
+sr_ob_agree() {  # <read> -> agree when the head says yes exactly when the sheet has a blocking ask, no ask blocks that does not wait on the user, and the Patrol counts the sheet's asks by what they wait on
+  awk -F'|' '{ ok = (($1 > 0) == ($4 == "yes")) && $1 <= $2 && $5 == $2 && $6 == $3 && $4 != ""; print ok ? "agree" : "disagree" }' <<< "$1"
+}
+sr_ob_world one-blocks-a no
+SR_OB_A="$(sr_ob_read "$POKER")"
+expect_eq "OB1 only a waiver answered no, waiting on its review: no ask blocks the user — the sheet reads blocks=no and waits=event, the head says no, the Patrol counts it on events" \
+  "0|0|1|no|0|1" "$SR_OB_A"
+SR_OB_AL="$(sr_poke_with "$POKER" sitrep "$SR_PLAN" 2>/dev/null | /usr/bin/grep '^ask: key=waive:adversarial ')"
+expect_eq "OB1b …that ask holds the integrate row and still blocks=no, its waits= naming the event (OB1 counted it; the held row is why the old rule read yes)" \
+  "4/17|no|event review adversarial re-run" "$(sr_f "$SR_OB_AL" holds)|$(sr_f "$SR_OB_AL" blocks)|$(sr_f "$SR_OB_AL" waits)"
+sr_ob_world one-blocks-b yes
+SR_OB_B="$(sr_ob_read "$POKER")"
+expect_eq "OB2 the approval the user owes beside it: one ask blocks — the sheet reads one blocks=yes and one waits=user, the head says yes, the Patrol counts one on you and one on events" \
+  "1|1|1|yes|1|1" "$SR_OB_B"
+expect_eq "OB3 the three surfaces agree in both worlds" "agree|agree" "$(sr_ob_agree "$SR_OB_A")|$(sr_ob_agree "$SR_OB_B")"
+expect_eq "OB3b the agreement reader returns a disagreement for a planted split (it is not a constant)" "disagree|disagree" \
+  "$(sr_ob_agree '0|0|1|yes|0|1')|$(sr_ob_agree '1|0|1|yes|0|1')"
+expect_eq "OB3c …and returns agree for the two worlds' own reads (OB3 read the same reader)" "agree|agree" "$(sr_ob_agree '0|0|1|no|0|1')|$(sr_ob_agree '1|1|1|yes|1|1')"
+# THE PLANTS: a copy of the tree with one reader put back to its own rule; the surfaces then read the same register apart.
+SR_OBM="$TMPROOT/ob-mut"; mkdir -p "$SR_OBM/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$SR_OBM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_OBM/payload/scripts"
+SR_OBM_F="$SR_OBM/hooks/poker/sitrep.sh"; SR_OBM_ORIG="$TMPROOT/ob-sitrep.orig"; cp "$SR_OBM_F" "$SR_OBM_ORIG"
+sr_ob_plant() {  # <sed script> -> the copy's sitrep.sh is the shipped one with that edit; rc 1 when the edit changed nothing
+  sed "$1" "$SR_OBM_ORIG" > "$SR_OBM_F"; ! cmp -s "$SR_OBM_ORIG" "$SR_OBM_F"
+}
+sr_ob_world one-blocks-p no
+expect_eq "OB4 precondition: the shipped tree on this world still agrees (the plants below start from agreement)" "0|0|1|no|0|1|agree" \
+  "$(sr_ob_read "$POKER")|$(sr_ob_agree "$(sr_ob_read "$POKER")")"
+sr_ob_plant 's/"\$HO_BLOCKED"/"$([ -n "$HO_ASKS" ] \&\& echo yes || echo no)"/'; SR_PL1=$?
+expect_eq "OB5 the head put back to say yes over any open ask: it says yes while the sheet blocks nothing, and the row reddens" "0|disagree" \
+  "$SR_PL1|$(sr_ob_agree "$(sr_ob_read "$SR_OBM/hooks/session-poker.sh")")"
+sr_ob_plant 's/index(\$5, "event ") == 1/0/'; SR_PL2=$?
+expect_eq "OB6 the Patrol put back to count every ask as owed by the user: it counts the waiver on you, and the row reddens" "0|disagree" \
+  "$SR_PL2|$(sr_ob_agree "$(sr_ob_read "$SR_OBM/hooks/session-poker.sh")")"
+sr_ob_plant 's/\[ "\$w" = user \]/true/'; SR_PL3=$?
+expect_eq "OB7 the sheet put back to block on what an ask holds alone: the waiver blocks=yes while it waits on an event, and the row reddens" "0|disagree" \
+  "$SR_PL3|$(sr_ob_agree "$(sr_ob_read "$SR_OBM/hooks/session-poker.sh")")"
+# THE CARD HAS NO RULE OF ITS OWN: it reads the sheet's blocks= and waits= fields and decides nothing from holds= (comment lines aside).
+expect_eq "OB8 the card draws from the sheet's fields: no line of card.sh outside its comments names a blocks= rule" "0" \
+  "$(/usr/bin/grep -v '^[[:space:]]*#' "$BIONIC_HOOKS_DIR/../payload/scripts/card.sh" | /usr/bin/grep -c 'nothing.*blocks\|blocks=')"
+
+# ============================================================
+section "§FAST: the sheet verb and the card verb, run one after the other on a copy of the wave-43 plan and its record, finish together in under 5 seconds; the card verb reads the saved sheet and refreshes its asks from the register alone"
+# ============================================================
+# FIXTURE FIDELITY: a shipped 35-task plan and its whole record, copied into a repository of their own because the
+# verbs write the repository's tmp folder and settle its register; the clock is the end of that run. The card verb is
+# timed with a judgment on its stdin that the card refuses, since drawing is card.sh's and its judgment is not this
+# section's subject; the verb's own work is what is timed. A second tree has card.sh replaced by a stub that keeps the sheet it was
+# handed, and sitrep_gather counted, so the sheet the card draws from is read and the one gather is proved.
+# fails-when: the two verbs together take 5 seconds or more, the card verb gathers a second time, or the sheet the card
+# draws from carries the asks as they stood when the sheet was saved rather than as they stand now.
+SR_FAST_SRC="$BIONIC_HOOKS_DIR/../.bionic/docs"
+SR_FAST_PLAN_REL="plans/epic-23-bionic-tech-debt/wave-43-no-hand-hold.plan.md"
+SR_FAST_REC_REL="record/wave-43-no-hand-hold"
+expect_true "FA0 precondition: the wave-43 plan and its record are on this tree" test -f "$SR_FAST_SRC/$SR_FAST_PLAN_REL" -a -d "$SR_FAST_SRC/$SR_FAST_REC_REL"
+SR_REPO="$TMPROOT/fast"; mkdir -p "$SR_REPO/.bionic/tmp" "$SR_REPO/.bionic/docs/plans/epic-23-bionic-tech-debt" "$SR_REPO/.bionic/docs/record"
+( cd "$SR_REPO" && git init -q . 2>/dev/null )
+cp "$SR_FAST_SRC/$SR_FAST_PLAN_REL" "$SR_REPO/.bionic/docs/$SR_FAST_PLAN_REL"
+cp -R "$SR_FAST_SRC/$SR_FAST_REC_REL" "$SR_REPO/.bionic/docs/$SR_FAST_REC_REL"
+SR_PLAN="$SR_REPO/.bionic/docs/$SR_FAST_PLAN_REL"
+SR_GATE="$TMPROOT/gate-fast"; mkdir -p "$SR_GATE/requests" "$SR_GATE/cost"
+SR_FAST_AT=1792739640     # 2026-10-23T07:14:00Z, the end of that run
+SR_FAST_J="$TMPROOT/fast-judgment.txt"; printf 'call: Nothing is owed.\n' > "$SR_FAST_J"
+sr_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+SR_FA_T0="$(sr_ms)"
+SR_AT="$SR_FAST_AT" sr_run "$SR_PLAN"
+SR_FA_RC1="$RC"; SR_FA_SHEET="$OUT"
+SR_AT="$SR_FAST_AT" sr_run card "$SR_PLAN" < "$SR_FAST_J"
+SR_FA_RC2="$RC"; SR_FA_ERR2="$ERR"
+SR_FA_T1="$(sr_ms)"
+expect_eq "FA1 the sheet verb prints the sheet (rc 0, a first line, the wave's own open asks among them)" "0|$SR_HEAD|yes" \
+  "$SR_FA_RC1|$(printf '%s\n' "$SR_FA_SHEET" | head -1)|$(printf '%s\n' "$SR_FA_SHEET" | /usr/bin/grep -q '^ask: key=finding:' && echo yes)"
+expect_eq "FA2 the card verb read the saved sheet and ran the check: it refused the judgment (rc 1), and said nothing of a sheet that is missing or old" "1|0" \
+  "$SR_FA_RC2|$(printf '%s\n' "$SR_FA_ERR2" | /usr/bin/grep -c 'the sheet you wrote from')"
+expect_eq "FA3 the two verbs, one after the other on the wave-43 plan, finish in under 5 seconds" "yes" \
+  "$([ $((SR_FA_T1 - SR_FA_T0)) -lt 5000 ] && echo yes || echo "no: $((SR_FA_T1 - SR_FA_T0)) ms")"
+# the stub tree: card.sh keeps the sheet it was handed; sitrep_gather counts its calls
+SR_FM="$TMPROOT/fast-mut"; mkdir -p "$SR_FM/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$SR_FM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_FM/payload/scripts"
+sed 's|^sitrep_gather() {$|sitrep_gather() { [ -z "${SR_GATHER_MARK:-}" ] \|\| echo gather >> "$SR_GATHER_MARK";|' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
+printf '#!/bin/bash\ncat "$2" > "$SR_CARD_KEPT"\necho drawn\n' > "$SR_FM/payload/scripts/card.sh"
+expect_eq "FA4 precondition: the counting plant took effect (the shipped file and the plant differ)" "yes" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)"
+SR_FA_MARK="$TMPROOT/fast-gathers"; SR_FA_KEPT="$TMPROOT/fast-kept"; : > "$SR_FA_MARK"
+export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT"
+SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$SR_PLAN" > "$TMPROOT/fast-sheet2.out" 2>/dev/null
+SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"
+# an ask opened after the sheet was saved, and one answered no; neither is in the saved sheet
+sr_owed "key=approve:release|state=open|sent=-|at=2026-10-23T07:10:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep card "$SR_PLAN" < "$SR_FAST_J" > "$TMPROOT/fast-card.out" 2>"$TMPROOT/fast-card.err"
+SR_FA_RC3=$?
+SR_FA_G2="$(/usr/bin/grep -c gather "$SR_FA_MARK")"
+unset SR_GATHER_MARK SR_CARD_KEPT
+expect_eq "FA5 the sheet verb gathers (at least once), the card verb after it gathers not at all, and the card is drawn from the stub (rc 0)" "yes|0|0" \
+  "$([ "$SR_FA_G1" -ge 1 ] && echo yes)|$((SR_FA_G2 - SR_FA_G1))|$SR_FA_RC3"
+expect_eq "FA6 the sheet the card draws from keeps every line of the saved sheet but its asks (the saved sheet read through the same extractor is not empty)" "yes|0" \
+  "$([ "$(awk 'index($0, "ask: ") != 1' "$TMPROOT/fast-sheet2.out" | /usr/bin/grep -c .)" -gt 20 ] && echo yes)|$(diff <(awk 'index($0, "ask: ") != 1' "$TMPROOT/fast-sheet2.out") <(awk 'index($0, "ask: ") != 1' "$SR_FA_KEPT") | /usr/bin/grep -c '^[<>]')"
+expect_eq "FA7 …and its ask lines are the register as it stands: the approval opened after the sheet was saved is there, with waits=user, the finding asks beside it each ending in a waits= field" "yes|yes|0" \
+  "$(/usr/bin/grep -q '^ask: key=approve:release .* waits=user$' "$SR_FA_KEPT" && echo yes)|$([ "$(/usr/bin/grep -c '^ask: key=finding:.* waits=' "$SR_FA_KEPT")" -ge 1 ] && echo yes)|$(/usr/bin/grep '^ask: ' "$SR_FA_KEPT" | /usr/bin/grep -vc ' waits=')"
+expect_eq "FA7b …and the saved sheet did not have the approval (so FA7 read a refresh)" "0" "$(/usr/bin/grep -c '^ask: key=approve:release ' "$TMPROOT/fast-sheet2.out")"
 
 # ============================================================
 section "§SKILL: the sitrep skill reads the sheet and shows only the card the card verb printed; it never tells the model to show the sheet"
