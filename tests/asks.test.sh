@@ -533,7 +533,8 @@ section "§ANSWER: the register stores the answer on the open ask without closin
 # the answer stored; the landing closes one carried finding and leaves the two whose events have not come.
 # fails-when: lib/owed.sh `owed_answer` closes the ask or drops its answer on a re-open (AN-2, AN-4); lib/line.sh's
 # landing arm leaves a finding carried to the landed row open (AN-9) or closes one carried to another row (AN-10);
-# hooks/poker/proof.sh stops closing a finding moved fixed at once (AN-12).
+# hooks/poker/proof.sh stops closing a finding moved fixed at once (AN-12), or `carried` closes the finding at once, drops
+# its answer or its row-named event, or accepts a row the table lacks (AN-13, AN-14).
 AA="$(cd "$(mktemp -d "$TMPROOT/aa.XXXXXX")" && pwd -P)"; mkdir -p "$AA/.bionic/tmp"
 AA_F="$AA/.bionic/tmp/owed-aa-sid.state"
 aa() { as_owed "$AA" aa-sid "$@"; }
@@ -588,6 +589,22 @@ poke "$RF" finding-move "$RF_CR#1" fixed T2
 expect_eq "AN-12 finding-move … fixed T2 exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      finding-move said: %s\n' "$OUT"
 expect_contains "AN-12b …and closes the finding at once" "|key=$RF_FK|state=closed|by=finding-move fixed T2|" "$(cat "$RF_REG" 2>/dev/null)"
+# A finding carried to a row by the verb is answered carry with the row named, and stays open: the row landing closes it.
+printf 'finding: 2 S2 off - another side path broken\n' >> "$RF/.bionic/docs/$RF_CR"
+sed 's/^findings: 1$/findings: 2/' "$RF/.bionic/docs/$RF_CR" > "$RF/.bionic/docs/$RF_CR.tmp" && mv "$RF/.bionic/docs/$RF_CR.tmp" "$RF/.bionic/docs/$RF_CR"
+RF_FK2="$(printf 'finding:%s' "$(printf '%s' "$RF_CR#2" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')")"
+OWED_PLAN="$PF" as_owed "$RF" "$SID" owed_open "$RF_FK2" "Finding S2 needs a ruling" "rule it" >/dev/null
+expect_contains "AN-13 precondition: the second finding is open on the run's register" "$RF_FK2" "$(as_register "$RF" "$PF")"
+cp "$PF" "$TMPROOT/an-plan-before"; cp "$RF_REG" "$TMPROOT/an-reg-before"
+poke "$RF" finding-move "$RF_CR#2" carried T99
+expect_eq "AN-14 finding-move … carried T99, a row the table lacks, is refused (exit 1) and plan and register are byte-identical" "1|same|same" \
+  "$RC|$(cmp -s "$TMPROOT/an-plan-before" "$PF" && echo same || echo changed)|$(cmp -s "$TMPROOT/an-reg-before" "$RF_REG" && echo same || echo changed)"
+poke "$RF" finding-move "$RF_CR#2" carried T2
+expect_eq "AN-13 finding-move … carried T2 exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      finding-move said: %s\n' "$OUT"
+expect_eq "AN-13 …the register holds the finding open, answered carry, its event naming the row" "carry|T2 lands|open" \
+  "$(OWED_PLAN="$PF" as_owed "$RF" "$SID" owed_answer_of "$RF_FK2" | awk -F'\t' '{ print $1 "|" $3 }')|$(as_register "$RF" "$PF" | tr ' ' '\n' | /usr/bin/grep -qxF "$RF_FK2" && echo open || echo gone)"
+expect_contains "AN-13b …and the plan carries its moved: line naming the row" "moved: $RF_CR#2 to=carried row=T2 by=Dana Fixture at=" "$(cat "$PF")"
 POKE_BOUND="$AS_BOUND_WAS"
 
 finish
