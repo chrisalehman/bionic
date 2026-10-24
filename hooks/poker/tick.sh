@@ -442,7 +442,9 @@ TOA
 # lib/plan.sh `plan_goals_read`; one read missed opens `decide:goal:<theme>` on the person's ledger (lib/owed.sh),
 # carrying the reading, and the tick says it once. A key the ledger already holds, open or closed, opens nothing: the
 # person's ruling on a miss stands, so a later tick on the same miss puts no second decision. A goal that reads
-# reached closes its item if one is open, so a miss the run recovered from stops asking.
+# reached closes its item if one is open, so a miss the run recovered from stops asking. A suite goal whose miss is a red
+# the plan itself declared, a standing `debt:` line of the landing record for that suite, opens nothing: the red is
+# owed and tracked as a debt, so a decision on the goal would ask the person about a red already on their ledger.
 tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per goal it opens
   local f st t m rd k
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
@@ -454,6 +456,8 @@ tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per go
       continue
     fi
     [ "$st" = missed ] || continue
+    # a suite goal missed by a red the plan declared (a Lands-red: row's standing debt line) is no new decision
+    if declare -F plan_goal_declared_red >/dev/null 2>&1 && plan_goal_declared_red "$2" "$rd"; then continue; fi
     [ -f "$f" ] && /usr/bin/grep -qF "|key=$k|" "$f" 2>/dev/null && continue
     OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "$k" "Goal missed: $t" "poker: GOAL $t missed — $m: $rd; keep the target or change course" >/dev/null 2>&1 \
       && say "GOAL $t missed — $m: $rd; owed: $k"
