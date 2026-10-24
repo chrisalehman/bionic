@@ -984,7 +984,7 @@ so_roster_row "$RT" w45-T2 ".bionic/docs/record/never-t2.md" "" "w45-T2@session-
 so_mark "$RT" w45-T2 "$RT_C1"
 RTSLUG=$(so_slug "$RT"); mkdir -p "$R8CFG/projects/$RTSLUG"
 plant_live "$R8CFG/projects/$RTSLUG/$SID.jsonl" fresh
-rt_ws() {  # <sid> -> the tree the session's workspace record names for w45-T1, then rc=<n>
+rt_ws() {  # <sid> -> the tree the session's workspace record names for the first row's agent, then rc=<n>
   bash -c '. "$1" && workspace_for_name "$2" "$3" w45-T1; echo "rc=$?"' _ \
     "$HERE/../payload/scripts/lib/worktree.sh" "$RT_REAL" "$1" 2>/dev/null
 }
