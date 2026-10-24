@@ -160,7 +160,43 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 
 ### The landing numbers
 
+`landing-report --rows` at 17db10f66eb254907ccb5f9ed7599653ed5aaaa8 on 2026-10-24T08:59:37Z:
+
 ```
+landings: queue=7 hand=1 git=0 · ready-to-landed median=5.5m p75=8.1m max=17.1m · runs: green=27 red=2 none=0 discarded=0 red-then-green=0 run=57 reused=0 absent=0 · waited median=19s · killed=0
+T2 queue ready=2026-10-24T07:02:27Z landed=2026-10-24T07:09:54Z minutes=7.5 runs=2 waited=20s wait=0.3 prove=7.1 rework=0.0 width=1
+  asks.test.sh green promised=59s actual=70s ratio=1.19
+  release-approval.test.sh green promised=351s actual=357s ratio=1.02
+T4 queue ready=2026-10-24T07:08:30Z landed=2026-10-24T07:17:15Z minutes=8.8 runs=2 waited=162s wait=2.7 prove=5.6 rework=0.5 width=4
+  sitrep.test.sh green promised=122s actual=166s ratio=1.36
+  release-approval.test.sh green promised=270s actual=334s ratio=1.24
+T1 hand ready=- landed=2026-10-24T07:21:49Z minutes=- runs=2 waited=- wait=- prove=- rework=- width=-
+  sitrep-card.test.sh red promised=29s actual=31s ratio=1.07
+  card.test.sh green promised=11s actual=13s ratio=1.18
+T14 queue ready=2026-10-24T07:41:11Z landed=2026-10-24T07:44:11Z minutes=3.0 runs=1 waited=120s wait=2.0 prove=1.0 rework=0.0 width=4
+  asks.test.sh green promised=51s actual=59s ratio=1.16
+T13 queue ready=2026-10-24T07:46:22Z landed=2026-10-24T07:46:45Z minutes=0.4 runs=1 waited=10s wait=0.2 prove=0.2 rework=0.0 width=3
+  card.test.sh green promised=14s actual=13s ratio=0.93
+T3 queue ready=2026-10-24T07:37:03Z landed=2026-10-24T07:54:07Z minutes=17.1 runs=4 waited=19s wait=0.3 prove=9.0 rework=7.7 width=4
+  sitrep.test.sh red promised=131s actual=191s ratio=1.46
+  handoff-file.test.sh green promised=37s actual=58s ratio=1.57
+  sitrep.test.sh green promised=144s actual=183s ratio=1.27
+  handoff-file.test.sh green promised=50s actual=54s ratio=1.08
+T5 queue ready=2026-10-24T08:31:42Z landed=2026-10-24T08:37:11Z minutes=5.5 runs=8 waited=8s wait=0.1 prove=5.3 rework=0.0 width=4
+  words.test.sh green promised=5s actual=10s ratio=2.00
+  rehearsal.test.sh green promised=6s actual=11s ratio=1.83
+  rehearsal-failed-review.test.sh green promised=314s actual=320s ratio=1.02
+  rehearsal-release-waiting.test.sh green promised=306s actual=315s ratio=1.03
+  rehearsal-stop-rule.test.sh green promised=14s actual=15s ratio=1.07
+  sitrep-card.test.sh green promised=21s actual=28s ratio=1.33
+  sitrep.test.sh green promised=194s actual=199s ratio=1.03
+  card.test.sh green promised=12s actual=16s ratio=1.33
+T10 queue ready=2026-10-24T08:48:52Z landed=2026-10-24T08:50:07Z minutes=1.2 runs=5 waited=7s wait=0.1 prove=1.1 rework=0.0 width=4
+  release-check.test.sh green promised=72s actual=67s ratio=0.93
+  commands.test.sh green promised=1s actual=1s ratio=1.00
+  doctor-version.test.sh green promised=75s actual=63s ratio=0.84
+  render.test.sh green promised=18s actual=19s ratio=1.06
+  words.test.sh green promised=10s actual=11s ratio=1.10
 ```
 
 ## 1.26.0 — 2026-10-22
