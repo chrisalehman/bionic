@@ -21,8 +21,10 @@
 # `<class>-<session>.state` there. A session file written before its run had a register is not read
 # as the run's. One line per item, the last word on a key winning:
 #
-#   owed/v1|key=<key>|state=open|sent=<ISO-UTC or ->|at=<ISO-UTC>|title=<title>|reply=<line>
+#   owed/v1|key=<key>|state=open|sent=<ISO-UTC or ->|at=<ISO-UTC>|title=<title>|reply=<line>[|answer=<word>|answered=<ISO-UTC>|event=<what or ->]
 #   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>|opened=<the open line's at>
+#
+# The bracketed fields are an answer the user gave the open ask (THE ANSWER, below); a closed line carries none.
 #
 # The file is rewritten whole, beside-then-rename, under a mkdir lock, so a reader never sees a
 # half-written line and two writers cannot lose each other's item. A `|`, a tab, a CR or a LF in
@@ -257,6 +259,114 @@ owed_list_plan() {
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   f="$(owed_register "$2" "$1")" || return 0
   _owed_list_file "$f"
+}
+
+
+# THE ANSWER AND WHAT AN ASK WAITS ON. An answer is what the user has said to an ask that is not yet closed: `no` to a
+# waiver, `carry` to a finding. It is stored on the open line, after every other field, and it never closes the ask:
+#
+#   owed/v1|key=<key>|state=open|sent=…|at=…|title=…|reply=…|answer=<word>|answered=<ISO-UTC>|event=<what or ->
+#
+# The ask closes at the event the answer names, where it closes today: a waiver when its review passes, is waived or a
+# born row's landing settles it; a finding carried to a row at that row's landing (lib/line.sh); a finding carried with
+# no row at the release approval card's reply. Because `owed_open` leaves an open line as it is, the re-open a failing
+# pass makes keeps the answer, and a fresh open after a close starts with none. What an ask waits on is never stored:
+# `ask_waits_on` derives it from the key's kind and its answer, so every reader asks the one function and no opener
+# has a field to forget.
+
+# _owed_store_for [<plan> <root>] -> the store a reader reads: the run's register <plan> names under <root> when both
+# are given, else `owed_file`. rc 1 when there is none.
+_owed_store_for() {
+  if [ -n "${1:-}" ] && [ -n "${2:-}" ]; then owed_register "$2" "$1"; return; fi
+  owed_file
+}
+
+# owed_answer <key> <word> [<event>] -> rc 0 with the answer on the key's open line, the instant it was given and the
+# event it waits on (`-` when none is named); a later answer replaces an earlier one. rc 1, nothing written, when the
+# key is not open, the word is not one word of letters, digits and `._-`, or there is no store.
+owed_answer() {
+  local key="${1:-}" word="${2:-}" event f
+  _owed_key_ok "$key" || return 1
+  case "$word" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  key="$(owed_key "$key")"
+  event="$(_owed_clean "${3:-}")"
+  f="$(owed_file)" || return 1
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  awk -v key="$key" "$_OWED_AWK_FIELD"'
+    index($0, "owed/v1|") == 1 && key_of($0) == key && fld($0, "state") == "open" { y = 1; exit }
+    END { exit !y }' "$f" 2>/dev/null || return 1
+  # The answer fields are always the last on the line and no value holds a `|`, so cutting at `|answer=` drops an
+  # earlier answer and nothing else.
+  OWED_W="$word" OWED_E="${event:--}" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
+    index($0, "owed/v1|") != 1 { next }
+    key_of($0) == key && fld($0, "state") == "open" {
+      l = $0; i = index(l, "|answer="); if (i) l = substr(l, 1, i - 1)
+      printf "%s|answer=%s|answered=%s|event=%s\n", l, ENVIRON["OWED_W"], now, ENVIRON["OWED_E"]; next
+    }
+    { print }' -v key="$key" -v now="$(_owed_now)"
+}
+
+_owed_answers_file() {  # <store> -> owed_answers' lines for that store
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  awk "$_OWED_AWK_FIELD"'
+    index($0, "owed/v1|") != 1 { next }
+    fld($0, "state") == "open" && fld($0, "answer") != "" {
+      printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "answer"), fld($0, "answered"), fld($0, "event")
+    }' "$1" 2>/dev/null
+}
+
+# owed_answers [<plan> <root>] -> one line per OPEN item that holds an answer: <key> TAB <word> TAB <answered ISO> TAB
+# <event or ->, read from the run's register <plan> names under <root>, else from `owed_file`.
+owed_answers() {
+  local f
+  f="$(_owed_store_for "${1:-}" "${2:-}")" || return 1
+  _owed_answers_file "$f"
+}
+
+# owed_answer_of <key> [<plan> <root>] -> the key's answer, `<word> TAB <answered ISO> TAB <event or ->`, while it is
+# open and answered; nothing otherwise.
+owed_answer_of() {
+  local key
+  key="$(owed_key "${1:-}")"
+  owed_answers "${2:-}" "${3:-}" 2>/dev/null | awk -F'\t' -v k="$key" '$1 == k { print $2 "\t" $3 "\t" $4; exit }'
+}
+
+# ask_waits_on <key> [<plan> <root>] -> `user` or `event <what>` on one line, rc 0, from the key's kind and its answer.
+# An unanswered waiver or finding, and every kind the user rules (a decision, a goal declared missed, an approval, a
+# gate, a ruling, a matrix row), wait on the user; so does a kind this function does not know, because doubt is the
+# user's. A waiver answered no waits on its review's next run; a finding answered carry on the event its answer names,
+# else on the release card; a carry the run chose on the release card; a delivery on the close-out; a held merge on
+# what the open waivers holding it wait on, the user while one is unanswered or none is open.
+ask_waits_on() {
+  local key ans word ev
+  key="$(owed_key "${1:-}")"
+  case "$key" in
+    carry:*) printf 'event release card\n'; return 0 ;;
+    delivered:*) printf 'event close-out\n'; return 0 ;;
+    hold:merge) _owed_hold_waits "${2:-}" "${3:-}"; return 0 ;;
+    waive:*|finding:*) : ;;
+    *) printf 'user\n'; return 0 ;;
+  esac
+  ans="$(owed_answer_of "$key" "${2:-}" "${3:-}")"
+  word="${ans%%	*}"; ev="${ans##*	}"; [ "$ev" != - ] || ev=""
+  case "$key|$word" in
+    waive:*\|no) printf 'event %s\n' "${ev:-review ${key#waive:} re-run}" ;;
+    finding:*\|carry) printf 'event %s\n' "${ev:-release card}" ;;
+    *) printf 'user\n' ;;
+  esac
+  return 0
+}
+
+_owed_hold_waits() {  # [<plan> <root>] -> what hold:merge waits on: the open waivers' events, or user
+  local f k w out="" any=""
+  f="$(_owed_store_for "${1:-}" "${2:-}" 2>/dev/null)" || f=""
+  for k in $(_owed_list_file "$f" | cut -f1); do
+    case "$k" in waive:*) : ;; *) continue ;; esac
+    any=1
+    w="$(ask_waits_on "$k" "${1:-}" "${2:-}")"
+    case "$w" in event\ *) out="${out:+$out, }${w#event }" ;; *) printf 'user\n'; return 0 ;; esac
+  done
+  if [ -n "$any" ]; then printf 'event %s\n' "$out"; else printf 'user\n'; fi
 }
 
 # owed_unsent [<key prefix>] -> the keys of the open items not yet sent, one per line, in the order

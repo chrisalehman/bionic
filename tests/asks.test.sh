@@ -25,6 +25,11 @@
 # §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
 # §BORN-CLOSES   a fix born of a failing review's finding lands by `ready` at Step 8 and its green landing closes
 #                `waive:<question>`, with no step advance; a landing after which the review still derives fail leaves it open
+# §WAITS         `ask_waits_on` says `user` for every kind the user owes and for an unanswered waiver or finding, and
+#                `event <what>` for a waiver answered no, a finding answered carry, a carry and a delivery; a held merge
+#                waits on what its waivers wait on
+# §ANSWER        `owed_answer` stores the answer on the open ask and leaves it open; a re-open keeps it, a fresh open has
+#                none; the landing of the row a finding was carried to closes it; a finding moved fixed closes at once
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -463,5 +468,126 @@ bc_ready "$BC2"
 expect_eq "BC-3b the same born row lands in the control world (exit 0)" "0" "$BC_RC"
 expect_eq "BC-4 …and with the review still deriving fail (finding 2 unanswered) waive:structure stays open" "waive:structure" \
   "$(as_register "$BC2" "$BC2_P")"
+
+
+# ============================================================
+section "§WAITS: one function says what each ask waits on, the user or an event, from its kind and its answer"
+# ============================================================
+# FIXTURE FIDELITY: a session store written by owed.sh's own writers, one open ask of each kind the run raises, two
+# waivers and three findings of which the answered ones were answered through `owed_answer`, as the verbs answer them.
+# ANTI-VACUITY: every key reads through the same call; the kinds that wait on the user stand beside the answered ones
+# that read an event, and `owed_answer_of` returns the stored answer before an unanswered key reads none through it.
+# fails-when: lib/owed.sh `ask_waits_on` reads a waiver answered no as `user` (WA-3), or a finding answered carry as
+# `user` (WA-5), or any kind that waits on the user as an event.
+AW="$(cd "$(mktemp -d "$TMPROOT/aw.XXXXXX")" && pwd -P)"; mkdir -p "$AW/.bionic/tmp"
+aw() { as_owed "$AW" aw-sid "$@"; }
+for _k in decide:D3 decide:goal:speed approve:step2 approve:merge gate:abc123 ruling:r1 row:AC-1.1 waive-row:AC-1.2 \
+  waive:structure waive:adversarial finding:rec:a.md:1 finding:rec:a.md:2 finding:rec:a.md:3 carry:rec:a.md:4 \
+  delivered:wave-x zz:odd; do
+  aw owed_open "$_k" "fixture: $_k" "poker: fixture $_k" >/dev/null
+done
+aw owed_answer waive:adversarial no "review adversarial re-run"; AW_RC1=$?
+aw owed_answer finding:rec:a.md:2 carry "T9 lands"; AW_RC2=$?
+aw owed_answer finding:rec:a.md:3 carry; AW_RC3=$?
+expect_eq "WA-0 precondition: every ask is open in the store and the three answers were taken (rc 0 each)" "16|0 0 0" \
+  "$(aw owed_list | wc -l | tr -d ' ')|$AW_RC1 $AW_RC2 $AW_RC3"
+expect_eq "WA-0b …the answered waiver's answer reads back through owed_answer_of" "no|review adversarial re-run" \
+  "$(aw owed_answer_of waive:adversarial | awk -F'\t' '{ print $1 "|" $3 }')"
+expect_eq "WA-0c …and the unanswered waiver reads none through the same call" "" "$(aw owed_answer_of waive:structure)"
+AW_USER=""
+for _k in decide:D3 decide:goal:speed approve:step2 approve:merge approve:D3 gate:abc123 ruling:r1 row:AC-1.1 waive-row:AC-1.2 \
+  waive:structure finding:rec:a.md:1 zz:odd; do
+  AW_USER="$AW_USER $_k=$(aw ask_waits_on "$_k")"
+done
+expect_eq "WA-1 a decision, a goal declared missed, an approval, a gate, a ruling, a matrix ruling, an unanswered waiver, an unanswered finding and an unknown kind wait on the user" \
+  " decide:D3=user decide:goal:speed=user approve:step2=user approve:merge=user approve:D3=user gate:abc123=user ruling:r1=user row:AC-1.1=user waive-row:AC-1.2=user waive:structure=user finding:rec:a.md:1=user zz:odd=user" \
+  "$AW_USER"
+expect_eq "WA-2 …each on one line, the word alone" "1" "$(aw ask_waits_on waive:structure | wc -l | tr -d ' ')"
+expect_eq "WA-3 a waiver answered no waits on its review's next run" "event review adversarial re-run" "$(aw ask_waits_on waive:adversarial)"
+expect_eq "WA-4 a finding answered carry with its row named waits on that row's landing" "event T9 lands" "$(aw ask_waits_on finding:rec:a.md:2)"
+expect_eq "WA-5 a finding answered carry with no row named waits on the release card" "event release card" "$(aw ask_waits_on finding:rec:a.md:3)"
+expect_eq "WA-6 a carry the run chose waits on the release card" "event release card" "$(aw ask_waits_on carry:rec:a.md:4)"
+expect_eq "WA-7 a delivery waits on the close-out" "event close-out" "$(aw ask_waits_on delivered:wave-x)"
+# hold:merge waits on the waivers that hold the merge: the user while one is unanswered or none is open, else their event.
+AH="$(cd "$(mktemp -d "$TMPROOT/ah.XXXXXX")" && pwd -P)"; mkdir -p "$AH/.bionic/tmp"
+ah() { as_owed "$AH" ah-sid "$@"; }
+ah owed_open hold:merge "merge held: a failing review" "bionic: close-out refused" >/dev/null
+expect_eq "WA-8 a merge held with no waiver open waits on the user" "user" "$(ah ask_waits_on hold:merge)"
+ah owed_open waive:structure "waiver: structure" "waive structure" >/dev/null
+ah owed_answer waive:structure no "review structure re-run"
+expect_eq "WA-9 a merge held by one waiver answered no waits on that review's next run" "event review structure re-run" \
+  "$(ah ask_waits_on hold:merge)"
+ah owed_open waive:evidence "waiver: evidence" "waive evidence" >/dev/null
+expect_eq "WA-10 …and on the user once a second waiver holding it is unanswered" "user" "$(ah ask_waits_on hold:merge)"
+ah owed_answer waive:evidence no "review evidence re-run"
+expect_eq "WA-11 …and on both reviews once both are answered no" "event review structure re-run, review evidence re-run" \
+  "$(ah ask_waits_on hold:merge)"
+
+# ============================================================
+section "§ANSWER: the register stores the answer on the open ask without closing it; the ask closes at its event"
+# ============================================================
+# FIXTURE FIDELITY: the answer is written through `owed_answer`, the one writer the verbs call; the landing is the
+# writer's own `ready` in §BORN-CLOSES's model world (`bc_world`), and `to=fixed` is `finding-move` run as the poker
+# runs it on §STOP's project.
+# ANTI-VACUITY: each absence is read through the extractor that, in the same fixture, first returned the item open or
+# the answer stored; the landing closes one carried finding and leaves the two whose events have not come.
+# fails-when: lib/owed.sh `owed_answer` closes the ask or drops its answer on a re-open (AN-2, AN-4); lib/line.sh's
+# landing arm leaves a finding carried to the landed row open (AN-9) or closes one carried to another row (AN-10);
+# hooks/poker/proof.sh stops closing a finding moved fixed at once (AN-12).
+AA="$(cd "$(mktemp -d "$TMPROOT/aa.XXXXXX")" && pwd -P)"; mkdir -p "$AA/.bionic/tmp"
+AA_F="$AA/.bionic/tmp/owed-aa-sid.state"
+aa() { as_owed "$AA" aa-sid "$@"; }
+aa owed_open waive:structure "waiver: structure" "waive structure" >/dev/null
+aa owed_answer waive:structure no "review structure re-run"; AA_RC=$?
+expect_eq "AN-1 the answer is taken (rc 0) and reads back: the word, the instant it was given, the event" \
+  "0|no|yes|review structure re-run" \
+  "$AA_RC|$(aa owed_answer_of waive:structure | awk -F'\t' '{ print $1 "|" ($2 ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$/ ? "yes" : "no") "|" $3 }')"
+expect_eq "AN-2 …and the ask stays open" "waive:structure" "$(aa owed_list | cut -f1)"
+expect_contains "AN-2b …the open line carries answer= answered= event=" "|state=open|" \
+  "$(/usr/bin/grep -F '|answer=no|answered=' "$AA_F" | /usr/bin/grep -F '|event=review structure re-run')"
+expect_eq "AN-3 owed_list keeps its four tab columns for an answered ask" "4" "$(aa owed_list | awk -F'\t' '{ print NF }' | LC_ALL=C sort -u)"
+aa owed_open waive:structure "waiver: structure" "waive structure" >/dev/null
+expect_eq "AN-4 a re-open of the open ask, as a failing pass makes, keeps its answer" "no" "$(aa owed_answer_of waive:structure | cut -f1)"
+aa owed_open finding:rec:b.md:1 "Finding S2 needs a ruling" "rule it" >/dev/null
+aa owed_answer finding:rec:b.md:1 carry
+aa owed_answer finding:rec:b.md:1 carry "T4 lands"
+expect_eq "AN-5 the last answer on a key wins" "carry|T4 lands" "$(aa owed_answer_of finding:rec:b.md:1 | awk -F'\t' '{ print $1 "|" $3 }')"
+cp "$AA_F" "$TMPROOT/aa-before"
+aa owed_answer gate:never no; AA_RC=$?
+expect_eq "AN-6 an answer to a key that is not open is refused (rc 1) and the store is byte-identical" "1|same" \
+  "$AA_RC|$(cmp -s "$TMPROOT/aa-before" "$AA_F" && echo same || echo changed)"
+aa owed_close waive:structure waive >/dev/null
+aa owed_open waive:structure "waiver: structure" "waive structure" >/dev/null
+expect_eq "AN-7 a fresh open after a close starts with no answer (AN-4 read the answer through the same call)" "waive:structure|" \
+  "$(aa owed_list | cut -f1 | /usr/bin/grep -x waive:structure)|$(aa owed_answer_of waive:structure)"
+# The landing of the row a finding was carried to closes it; the findings carried elsewhere stay open.
+AL="$(bc_world 1)"; AL_P="$(ll_plan "$AL")"
+al() { OWED_ROOT="$AL" OWED_SID="$WORLD_SID" OWED_PLAN="$AL_P" bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && shift && "$@"' _ "$AS_LIB" "$@" 2>/dev/null; }
+for _k in finding:rec:x.md:1 finding:rec:x.md:2 finding:rec:x.md:3; do al owed_open "$_k" "Finding S2 needs a ruling" "rule it" >/dev/null; done
+al owed_answer finding:rec:x.md:1 carry "T1 lands"
+al owed_answer finding:rec:x.md:2 carry "T7 lands"
+al owed_answer finding:rec:x.md:3 carry
+expect_eq "AN-8 precondition: the run's register holds the three findings open, read through the plan's register" \
+  "finding:rec:x.md:1 finding:rec:x.md:2 finding:rec:x.md:3 waive:structure" "$(as_register "$AL" "$AL_P")"
+expect_eq "AN-8b …the one carried to T1 waits on T1's landing, read through the plan and root" "event T1 lands" \
+  "$(bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && ask_waits_on finding:rec:x.md:1 "$2" "$3"' _ "$AS_LIB" "$AL_P" "$AL" 2>/dev/null)"
+bc_ready "$AL"
+expect_eq "AN-9 T1 lands by ready (exit 0)" "0" "$BC_RC"
+[ "$BC_RC" = 0 ] || printf '      ready said: %s\n' "$BC_OUT"
+expect_contains "AN-9b …and its landing closes the finding carried to it" "|key=finding:rec:x.md:1|state=closed|by=landing T1|" \
+  "$(cat "$AL/.bionic/docs/record/wave-x/asks.state" 2>/dev/null)"
+expect_eq "AN-10 …the finding carried to T7 and the one waiting on the release card stay open (AN-8 read all three open)" \
+  "finding:rec:x.md:2 finding:rec:x.md:3" "$(as_register "$AL" "$AL_P")"
+# A finding moved fixed by a row is answered by that row, and closes at once, answered or not.
+POKE_BOUND=180
+RF_FK="$(printf 'finding:%s' "$(printf '%s' "$RF_CR#1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')")"
+OWED_PLAN="$PF" as_owed "$RF" "$SID" owed_open "$RF_FK" "Finding S2 needs a ruling" "rule it" >/dev/null
+OWED_PLAN="$PF" as_owed "$RF" "$SID" owed_answer "$RF_FK" carry
+expect_contains "AN-11 precondition: the finding is open on the run's register, answered carry" "$RF_FK" "$(as_register "$RF" "$PF")"
+poke "$RF" finding-move "$RF_CR#1" fixed T2
+expect_eq "AN-12 finding-move … fixed T2 exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      finding-move said: %s\n' "$OUT"
+expect_contains "AN-12b …and closes the finding at once" "|key=$RF_FK|state=closed|by=finding-move fixed T2|" "$(cat "$RF_REG" 2>/dev/null)"
+POKE_BOUND="$AS_BOUND_WAS"
 
 finish

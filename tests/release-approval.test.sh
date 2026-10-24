@@ -293,6 +293,25 @@ fc_plan "$FC_GOOD"
 fc_page
 expect_absent "TRIG-5b …and is not a decision of its own" "measured and missed" "$(fc_under Decisions)"
 fc_record adversarial adversarial piece "$FC_S3"
+# A waiver the reply holds back is the user's answer, no: the register stores it on the waiver, which stays open and
+# now waits on its review's next run, not on the user. fails-when: hooks/poker/plan.sh `reply` writes the withheld line
+# and leaves the register blind (TRIG-7), or closes the waiver at the answer (TRIG-7b).
+fc_ans() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" "${@:4}"' _ "$FC_LIB" "$RFC" "$SID" "$@" 2>/dev/null; }
+fc_plan "$FC_GOOD"
+fc_owe waive:adversarial
+fc_page --against waive:adversarial
+expect_contains "TRIG-6 precondition: the card puts the open waiver and recommends holding it" \
+  "key=waive:adversarial|default=waive adversarial|other=-|pick=other" "$(fc_table)"
+expect_eq "TRIG-6a …and before the reply the waiver carries no answer" "" "$(fc_ans owed_answer_of waive:adversarial)"
+poke "$RFC" reply "$FC_WR"
+expect_eq "TRIG-6b reply all recommended exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_contains "TRIG-6c …holding the waiver back" "withheld: waive:adversarial" "$OUT"
+expect_eq "TRIG-7 the register stores the answer on the waiver: no, and the event it waits on" "no|review adversarial re-run" \
+  "$(fc_ans owed_answer_of waive:adversarial | awk -F'\t' '{ print $1 "|" $3 }')"
+expect_contains "TRIG-7b …and leaves it open" "waive:adversarial" "$(fc_owed)"
+expect_eq "TRIG-7c …so it waits on the review's next run, not on the user" "event review adversarial re-run" \
+  "$(fc_ans ask_waits_on waive:adversarial)"
 
 # ============================================================
 section "§NO-WAIVER: no surface offers waiving the regression (AC-7.3; D16)"
@@ -1027,6 +1046,32 @@ expect_eq "CARRY-6 reply all default answers that page (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_contains "CARRY-6b …and rules its carry: the register says the reply closed it" \
   "|key=$FC_CK2|state=closed|by=release approval reply|" "$(fc_reg)"
+# A finding the person defers through disposition is answered carry on the run's register and stays open, waiting on the
+# release approval card; the reply that answers the page closes it. fails-when: hooks/poker/proof.sh closes the finding at
+# the ruling (CARRY-8b), or hooks/poker/plan.sh `reply` leaves the answered finding open (CARRY-10).
+FC_FK="finding:record:wave-x:adversarial.md:1"
+FC_DW='carry this finding to the next release'
+fc_record adversarial adversarial piece $'finding: 1 S2 on lib/x.sh:1 a path could break\nshown: 1 cat lib/x.sh'
+fc_plan "$FC_GOOD"
+poke "$RFC" disposition
+expect_contains "CARRY-7 precondition: the disposition owes the person's ruling on the S2" "$FC_FK" "$(fc_owed)"
+[ "$RC" = 0 ] || printf '      disposition said: %s\n' "$OUT"
+fc_typed "$FC_WD" "$FC_WR" "$FC_DW"
+poke "$RFC" disposition "$FC_FID" defer "$FC_DW" 'the fix waits on the next release'
+expect_eq "CARRY-8 the person's deferral is recorded (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      disposition said: %s\n' "$OUT"
+expect_contains "CARRY-8b …and the finding stays open" "$FC_FK" "$(fc_owed)"
+expect_eq "CARRY-8c …answered carry, waiting on the release card" "carry|event release card" \
+  "$(fc_ans owed_answer_of "$FC_FK" | cut -f1)|$(fc_ans ask_waits_on "$FC_FK")"
+fc_page
+expect_contains "CARRY-9 precondition: the page records the carry it puts" "carried: $FC_FID" \
+  "$(cat "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
+poke "$RFC" reply "$FC_WD"
+expect_eq "CARRY-9b reply all default answers the page (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_absent "CARRY-10 the reply closes the answered finding (CARRY-8b read it open)" "$FC_FK" "$(fc_owed)"
+expect_contains "CARRY-10b …the register says the reply closed it" "|key=$FC_FK|state=closed|by=release approval reply|" "$(fc_reg)"
+fc_typed "$FC_WD" "$FC_WR"
 fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
 

@@ -777,6 +777,18 @@ _line_born_close() {  # <plan> <root> <row>
   return 0
 }
 
+# A finding the user answered carry to a row waits on that row's landing (lib/owed.sh `ask_waits_on`); the landing is
+# that event, so each open `finding:` ask answered carry with the event `<row> lands` closes here, by the landing.
+_line_carried_close() {  # <plan> <root> <row>
+  local k
+  _line_load_owed || return 0
+  declare -F owed_answers >/dev/null 2>&1 || return 0
+  for k in $(owed_answers "$1" "$2" 2>/dev/null | awk -F'\t' -v ev="$3 lands" 'index($1, "finding:") == 1 && $2 == "carry" && $4 == ev { print $1 }'); do
+    OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${3}" >/dev/null 2>&1
+  done
+  return 0
+}
+
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
   local name com present base cand out sui car cbase cat br tr co rc run moved at tip
@@ -868,8 +880,9 @@ EOF
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
   # 11. THE REVIEW A BORN ROW ANSWERS, asked again once the row reads landed (`_line_born_close`), outside the lock:
-  # the judge reads git and the record, and no publish waits on it.
+  # the judge reads git and the record, and no publish waits on it. The findings carried to this row close with it.
   _line_born_close "$plan" "$root" "$row"
+  _line_carried_close "$plan" "$root" "$row"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
   return 0
 }

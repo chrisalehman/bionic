@@ -2989,6 +2989,12 @@ RR_AGAINST_EOF
       if [ "$RP_CMD" = - ]; then
         if [ "$RP_SIDE" = default ]; then RP_REC="applied: $RP_KEY carried"; RP_DONE=$((RP_DONE + 1))
         else RP_REC="withheld: $RP_KEY"; RP_HELD=$((RP_HELD + 1)); fi
+        # A WAIVER HELD BACK IS ANSWERED NO: the register keeps the ask open and stores the answer, so every reader sees
+        # it waits on the review's next run and not on the user.
+        case "$RP_SIDE|$RP_KEY" in
+          other\|waive:?*) declare -F owed_answer >/dev/null 2>&1 \
+            && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_answer "$RP_KEY" no "review ${RP_KEY#waive:} re-run" >/dev/null 2>&1 ;;
+        esac
         printf '%s\n' "$RP_REC" >> "$RP_CARD"; say "reply — $RP_REC"
         continue
       fi
@@ -3008,10 +3014,16 @@ $RP_TABLE
 RP_TABLE
     printf 'replied: at=%s reply=%s words="%s"\n' "$(iso_now)" "$RP_HOW" "$(clean "$RP_TEXT")" >> "$RP_CARD"
     # THE REPLY IS THE RULING ON EVERY CARRY THE PAGE PUT: carried as shown, or moved by the decision the reply took (whose
-    # finding-move closed it already), so the carry's ask on the run's register closes here.
+    # finding-move closed it already), so the carry's ask on the run's register closes here, and so does a finding the
+    # user answered carry with no row named, which waits on this card (lib/owed.sh `ask_waits_on`).
     if declare -F owed_close >/dev/null 2>&1 && declare -F carry_owed_key >/dev/null 2>&1; then
       sed -n 's/^carried: //p' "$RP_CARD" 2>/dev/null | while IFS= read -r RP_X; do
-        [ -z "$RP_X" ] || OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$(carry_owed_key "$RP_X")" "release approval reply" >/dev/null 2>&1
+        [ -n "$RP_X" ] || continue
+        OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$(carry_owed_key "$RP_X")" "release approval reply" >/dev/null 2>&1
+        declare -F ask_waits_on >/dev/null 2>&1 && declare -F finding_owed_key >/dev/null 2>&1 || continue
+        RP_FK="$(finding_owed_key "$RP_X")"
+        [ "$(ask_waits_on "$RP_FK" "$PV_PLAN" "$PV_REPO")" = "event release card" ] \
+          && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$RP_FK" "release approval reply" >/dev/null 2>&1
       done
     fi
     if [ "$RP_HELD" -gt 0 ]; then

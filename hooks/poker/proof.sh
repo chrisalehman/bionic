@@ -52,13 +52,15 @@ waive_owed_findings() {
   return 0
 }
 
-# proof_owed <open|close> <key> <title or closer> [<reply>] -> always 0, prints nothing: the item opened or closed on the
-# register of the run this verb writes (PV_PLAN), never a session file, whichever session runs the verb.
+# proof_owed <open|close|answer> <key> <title, closer or answer> [<reply or event>] -> always 0, prints nothing: the item
+# opened, closed or answered on the register of the run this verb writes (PV_PLAN), never a session file, whichever
+# session runs the verb.
 proof_owed() {
   declare -F owed_open >/dev/null 2>&1 || return 0
   case "$1" in
-    open)  OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$2" "$3" "${4:-}" >/dev/null 2>&1 ;;
-    close) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$2" "$3" >/dev/null 2>&1 ;;
+    open)   OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$2" "$3" "${4:-}" >/dev/null 2>&1 ;;
+    close)  OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$2" "$3" >/dev/null 2>&1 ;;
+    answer) declare -F owed_answer >/dev/null 2>&1 && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_answer "$2" "$3" "${4:-}" >/dev/null 2>&1 ;;
   esac
   return 0
 }
@@ -1075,6 +1077,9 @@ FM_FINDING
     mv -f "$PV_NEW.2" "$PV_NEW"
     plan_verb_swap finding-move "the move of $FM_ID" writer
     proof_owed close "$(carry_owed_key "$FM_ID")" "finding-move $FM_TO"
+    # A DEFERRAL IS THE USER'S ANSWER, NOT THE END OF THE ASK: the finding is carried, so its item stays open answered
+    # carry and waits on the release approval card, whose reply closes it.
+    [ "$FM_TO" != defer ] || proof_owed answer "$(finding_owed_key "$FM_ID")" carry "release card"
     if [ -n "$FM_ROW" ]; then
       poker_owed_close "$PV_REPO" "$(finding_owed_key "$FM_ID")" "finding-move fixed $FM_ROW"
       say "finding-move — $(clean "$FM_ID") fixed by $FM_ROW, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first. It reads fixed once $FM_ROW has landed green, and counts against no fix-cap."
@@ -1102,7 +1107,8 @@ FM_FINDING
   #
   # A RULING (four or five operands) is the person's word on one finding, recorded through finding-move (their
   # words, typed, at least SAID_MIN_WORDS whole words; an S1 is never deferred) and, for a deferral given a sentence,
-  # finding-stated, each run as a child so each keeps its own transaction; then the finding's owed item closes.
+  # finding-stated, each run as a child so each keeps its own transaction; then a fix closes the finding's owed item,
+  # and a deferral leaves it open, answered carry, until the release approval card's reply.
   poker_verb_disposition() {
     if ! { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_fixed >/dev/null 2>&1; then
@@ -1122,6 +1128,12 @@ FM_FINDING
         DSP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" finding-stated "$DSP_ID" "$DSP_SENT" 2>&1 )"; DSP_RC=$?
         [ -z "$DSP_OUT" ] || printf '%s\n' "$DSP_OUT"
         [ "$DSP_RC" = 0 ] || { die "disposition — the move of $(clean "$DSP_ID") is written; its sentence is not: run finding-stated $(clean "$DSP_ID") '<sentence>' again."; exit "$DSP_RC"; }
+      fi
+      # A fix ends the ask: a row born of it answers the finding. A deferral was answered carry by finding-move and
+      # its item stays open until the event it waits on.
+      if [ "$DSP_TO" = defer ]; then
+        say "disposition — $(clean "$DSP_ID") ruled defer on the person's words; its owed item stays open, answered carry: it waits on the release approval card."
+        exit 0
       fi
       poker_owed_close "$PV_REPO" "$(finding_owed_key "$DSP_ID")" "disposition"
       say "disposition — $(clean "$DSP_ID") ruled $DSP_TO on the person's words; its owed item is closed."
