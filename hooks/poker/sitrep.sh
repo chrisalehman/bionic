@@ -637,7 +637,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # the model reads the sheet and writes the judgment, the card is drawn from both, and the user sees the card, never
 # the sheet. A first line says so; then one fact per line, `<key>: <value>`, in this order:
 #
-#   run.release · run.name · run.wave · run.now · run.step · run.project · run.started · run.last-landing
+#   run.release · run.name · run.wave · run.now · run.step · run.project · run.started · run.last-landing · run.goal
 #   step: n=<0-9> name=<name> state=<done|running|pending> tasks=<k>          one line per step, 0 to 9
 #   task: id=<Tn> step=<n> state=<done|running|held|failed|pending> desc=<short description> note=<few words or ->
 #                      one line per task not dropped, in execution order
@@ -646,10 +646,13 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   pace.time-used · pace.work-landed · close.chain · close.predicted · close.unscaled · close.waits-on-you
 #   tests.suites-run · tests.suites-total · tests.whole-run · reviews · findings.open
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
-#   goal: name=<goal> status=<met|not met|not measured|unreadable> measure=<what measures it — what it read, or ->
+#   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
 #   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no> waits=<user|event <what>>
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
 #
+# `run.goal:` is the plan's `## Goal` first paragraph, one line, as the Step-1 card prints it; a plan with no Goal prints
+# no such line. A goal line's `for=` stands last and is present only for a theme that opens on a sentence, a measured
+# goal of the `goals:` line carrying none; the fields before it keep their names and their order.
 # A list line's fields stand in that fixed order and a value runs to the next field's ` <name>=`, so a value may hold
 # spaces. A measured line (clock. to waste.) is `<key>: <value> — <what it measures> · unit: <unit> · source: <source>`,
 # the close's `basis:` in place of its source, so the model reads what each number measures before it compares two.
@@ -1540,7 +1543,7 @@ SITREP_SIT
   [ "$mode" = sheet ] || return 0
 
   # ---- correctness and waste
-  local k rv q sc res at ev nf passed=0 failed=0 running=0 open idle_min rg rr rn rd rk g m st t md rdg u sn sg sr nsu
+  local k rv q sc res at ev nf passed=0 failed=0 running=0 open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
   # a review is counted once per question and scope, by its latest result: a pass a later fail supersedes is no pass
@@ -1589,18 +1592,21 @@ SITREP_RUNNING
   SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(sitrep_noun "$SG_T_FINDINGS" finding findings)"
   SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you"
   # the goals, each status the one function's
+  SG_GOAL="$(plan_goal_paragraph "$plan")"
   SG_GOAL_LINES=""; g=0; m=0; k=0; u=0
   # split by hand: a goal with no measure has an empty field, which a tab-split read would close up
   while IFS= read -r st; do
     t="${st#*	}"; md="${t#*	}"; rdg="${md#*	}"; st="${st%%	*}"; t="${t%%	*}"; md="${md%%	*}"
     [ -n "$t" ] || continue
+    # a theme's row ends in its opener, a fifth tab-separated field; a measured goal's has none
+    fr=""; case "$rdg" in *'	'*) fr="${rdg#*	}"; rdg="${rdg%%	*}" ;; esac
     g=$((g + 1))
     st="$(plan_goal_status "$st")"
     case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; unreadable) u=$((u + 1)) ;; esac
     # the status already says a goal is not measured; its measure prints once
     [ "$rdg" != "not measured" ] || rdg=""
     if [ -n "$md" ] && [ -n "$rdg" ]; then md="$md — $rdg"; elif [ -z "$md" ]; then md="${rdg:--}"; fi
-    SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md"$'\n'
+    SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md${fr:+ for=$fr}"$'\n'
   done <<SITREP_GOALS
 $SG_GOALS_READ
 SITREP_GOALS
@@ -1631,6 +1637,7 @@ sitrep_sheet() {
   printf '%s\n' "$SITREP_SHEET_HEAD"
   printf 'run.release: %s\nrun.name: %s\nrun.wave: %s\nrun.now: %s\nrun.step: %s\n' "$SG_RELEASE" "$SG_NAME" "$SG_WAVE" "$SG_NOWW" "$SG_STEP"
   printf 'run.project: %s\nrun.started: %s\nrun.last-landing: %s\n' "$SG_PROJECT" "$SG_STARTED" "$SG_LAST"
+  [ -z "$SG_GOAL" ] || printf 'run.goal: %s\n' "$SG_GOAL"
   printf '%s\n' "$SG_STEPS"
   printf '%s' "$SG_TASKS"
   sitrep_m clock.now "$SG_C_NOW" "when this sheet was printed" "local time" "source: the verb's clock"

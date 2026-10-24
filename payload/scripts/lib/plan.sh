@@ -11,7 +11,11 @@
 #                        the goals and their readings, below; the situation report, the release approval card and the
 #                        tick read them here, so no page measures a goal its own way.
 #     plan_scale, plan_requirements_file, plan_themes
-#                        the requirements document's theme sections, the goals a wave or an epic reads first.
+#                        the requirements document's theme sections, the goals a wave or an epic reads first; at task
+#                        scale the one theme, the run, over every criterion the matrix measures.
+#     plan_goal_paragraph, plan_goal_status, plan_goal_declared_red
+#                        what a document is for, one goal's status word, and whether the plan declared the red that
+#                        missed a suite goal.
 #
 # THE ONE READER (burns debt integration-branch-reader; critic-structure-2). Two orders stood: close-out.sh read
 # ## SDLC State and refused a plan whose frontmatter alone named the branch, its `closed-form` then fell back to the
@@ -82,7 +86,10 @@ plan_integration_branch() {  # <plan>
 # Step 6 or later with one still pending, since the advance from 5 to 6 demands a verdict on every row; unmeasured
 # when the matrix holds none of its criteria. Its measure is `<d> of <n> criteria discharged`, `, <w> waived` added
 # when any is, and its reading names at most two open REQs. The `goals:` line is optional beside them and carries
-# measured goals only; theme rows come first. A task-scale plan reads no themes: it has no requirements document.
+# measured goals only; theme rows come first. A theme's row carries its opener last, the first sentence under its
+# heading, so a reader that prints the goal can say what the theme is for. A task-scale plan reads one theme, `the run`,
+# over every REQ its matrix measures, its opener the first sentence of the plan's own Goal. A theme is on course while
+# it is pending with at least one criterion discharged.
 
 # plan_scale <plan> -> the plan's `scale:`, from its leading frontmatter, else from `## SDLC State`; nothing when
 # neither names one. Always rc 0.
@@ -118,42 +125,117 @@ plan_requirements_file() {
   return 0
 }
 
-# plan_themes <plan> -> `<theme><TAB><REQ ids, space-separated>` per theme of the plan's requirements file, in the
-# document's order (the id is the word after `### REQ-`); nothing at task scale, when no requirements file is found, or when
-# it holds no REQ under a `## ` section. Fenced lines are not read. Always rc 0.
-plan_themes() {
-  local plan="${1:-}" q
-  case "$(plan_scale "$plan")" in wave|epic) ;; *) return 0 ;; esac
-  q="$(plan_requirements_file "$plan")"
-  [ -n "$q" ] || return 0
-  _run_lines "$q" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { h = substr($0, 4); sub(/[ \t]+$/, "", h); next }
-    /^### REQ-/ && h != "" {
-      id = substr($0, 9); if (!match(id, /^[A-Za-z0-9]+/)) next; id = substr(id, 1, RLENGTH)
-      if (!(h in seen)) { seen[h] = 1; ord[++n] = h }
-      ids[h] = ids[h] (ids[h] == "" ? "" : " ") id }
-    END { for (i = 1; i <= n; i++) print ord[i] "\t" ids[ord[i]] }'
+# plan_goal_paragraph <file> -> the first paragraph of the file's `## Goal` section on one line: the lines joined by a
+# blank, backticks and tabs dropped, the leading frontmatter and the section's `###` headings not read; nothing when the
+# file is no file or has no Goal text. The one reader of what a document is for: the Step-1 and Step-3 cards print it
+# and the sitrep's sheet carries it, so a card and a sheet cannot read one paragraph two ways. Always rc 0.
+plan_goal_paragraph() {
+  local f="${1:-}"
+  [ -n "$f" ] && [ -f "$f" ] || return 0
+  _run_lines "$f" | awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm == 1 && $0 == "---" { fm = 0; next }
+    fm == 1 { next }
+    /^## / { sec = (substr($0, 4) == "Goal"); next }
+    /^### / { next }
+    sec && !done {
+      if (trim($0) == "") { if (g != "") done = 1 }
+      else g = g (g == "" ? "" : " ") clean($0)
+      next }
+    END { if (g != "") print g }'
   return 0
 }
 
-# _plan_theme_reads <plan> -> one plan_goals_read row per theme, `<state><TAB><theme><TAB><measure><TAB><reading>`.
+# _plan_first_sentence <text> -> the text up to and including its first sentence end (a full stop and a blank), else
+# the whole text. Stdin-free; prints nothing for no text.
+_plan_first_sentence() {
+  printf '%s\n' "${1:-}" | awk 'NF { if (match($0, /\. /)) print substr($0, 1, RSTART); else print; exit }'
+}
+
+# _plan_matrix_acs <plan> -> `M<TAB><AC id><TAB><status, lower case>` per row of the plan's `## Verification Matrix`
+# table, the status column found by the header's own name; fenced lines are not read.
+_plan_matrix_acs() {
+  _run_lines "${1:-}" | awk -F'|' '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { m = ($0 ~ /^## Verification Matrix/); col = 0; next }
+    m && /^\|[ \t]*AC[ \t]*\|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c); if (tolower(c) == "status") col = i }; next }
+    m && col && /^\|[ \t]*AC-/ { a = $2; s = $col; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); print "M\t" a "\t" tolower(s) }'
+}
+
+# _plan_task_theme <plan> -> the one theme a task-scale plan reads, `the run<TAB><REQ ids><TAB><opener>`: the REQs are the
+# `### REQ-` headings of the plan's requirements file (else of the plan itself) that have at least one matrix row, in the
+# document's order; a plan whose documents hold no REQ heading reads the REQs its matrix rows name. The opener is the
+# first sentence of the plan's own `## Goal`. Nothing when the matrix holds no row of any such REQ.
+_plan_task_theme() {
+  local plan="$1" q ids heads goal
+  q="$(plan_requirements_file "$plan")"
+  heads="$([ -z "$q" ] || _run_lines "$q" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^### REQ-/ { id = substr($0, 9); if (match(id, /^[A-Za-z0-9]+/)) print "R\t" substr(id, 1, RLENGTH) }')"
+  [ -n "$heads" ] || heads="$(_run_lines "$plan" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^### REQ-/ { id = substr($0, 9); if (match(id, /^[A-Za-z0-9]+/)) print "R\t" substr(id, 1, RLENGTH) }')"
+  ids="$({ printf '%s\n' "$heads"; _plan_matrix_acs "$plan" | awk -F'\t' '{ r = $2; sub(/^AC-/, "", r); sub(/\.[^.]*$/, "", r); print "M\t" r }'; } | awk -F'\t' '
+    $1 == "R" { if (!($2 in rs)) { rs[$2] = 1; ro[++rn] = $2 }; next }
+    $1 == "M" { if (!($2 in ms)) { ms[$2] = 1; mo[++mn] = $2 } }
+    END { if (rn) { for (i = 1; i <= rn; i++) if (ro[i] in ms) printf "%s%s", (c++ ? " " : ""), ro[i] }
+          else { for (i = 1; i <= mn; i++) printf "%s%s", (i > 1 ? " " : ""), mo[i] }
+          if (c || (!rn && mn)) print "" }')"
+  [ -n "$ids" ] || return 0
+  goal="$(_plan_first_sentence "$(plan_goal_paragraph "$plan")")"
+  printf 'the run\t%s\t%s\n' "$ids" "$goal"
+}
+
+# plan_themes <plan> -> `<theme><TAB><REQ ids, space-separated><TAB><opener>` per theme of the plan's requirements file,
+# in the document's order (the id is the word after `### REQ-`); the opener is the first sentence of the first body line
+# under the `## ` heading, empty when a heading or no text follows it. Nothing when no requirements file is found or
+# when it holds no REQ under a `## ` section. At task scale there is one theme, `the run`, over every REQ the matrix
+# measures (`_plan_task_theme`). Fenced lines are not read. Always rc 0.
+plan_themes() {
+  local plan="${1:-}" q
+  case "$(plan_scale "$plan")" in
+    wave|epic) ;;
+    task) _plan_task_theme "$plan"; return 0 ;;
+    *) return 0 ;;
+  esac
+  q="$(plan_requirements_file "$plan")"
+  [ -n "$q" ] || return 0
+  _run_lines "$q" | awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { h = substr($0, 4); sub(/[ \t]+$/, "", h); oh = 1; next }
+    /^#/ { oh = 0 }
+    /^### REQ-/ && h != "" {
+      id = substr($0, 9); if (!match(id, /^[A-Za-z0-9]+/)) next; id = substr(id, 1, RLENGTH)
+      if (!(h in seen)) { seen[h] = 1; ord[++n] = h }
+      ids[h] = ids[h] (ids[h] == "" ? "" : " ") id; next }
+    oh && h != "" && $0 ~ /[^ \t]/ {
+      oh = 0; t = $0; gsub(/`/, "", t); gsub(/\t/, " ", t); t = trim(t)
+      if (match(t, /\. /)) t = substr(t, 1, RSTART)
+      if (!(h in op)) op[h] = t }
+    END { for (i = 1; i <= n; i++) print ord[i] "\t" ids[ord[i]] "\t" op[ord[i]] }'
+  return 0
+}
+
+# _plan_theme_reads <plan> -> one plan_goals_read row per theme, `<state><TAB><theme><TAB><measure><TAB><reading>` and, when
+# the theme has an opener, `<TAB><opener>`. The state is unmeasured, reached, pending (nothing discharged yet), oncourse
+# (pending with at least one criterion discharged) or overdue (open at step 6 or later).
 _plan_theme_reads() {
   local plan="$1" themes cur
   themes="$(plan_themes "$plan")"
   [ -n "$themes" ] || return 0
   cur=""; declare -F _fill_current_field >/dev/null 2>&1 && { fill_current_forget; cur="$(_fill_current_field "$plan")"; }
-  { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "T\t" $1 "\t" $2 }'
-    # the matrix table's rows, each AC with its status cell, the column found by the header's own name
-    _run_lines "$plan" | awk -F'|' '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^## / { m = ($0 ~ /^## Verification Matrix/); col = 0; next }
-      m && /^\|[ \t]*AC[ \t]*\|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c); if (tolower(c) == "status") col = i }; next }
-      m && col && /^\|[ \t]*AC-/ { a = $2; s = $col; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); print "M\t" a "\t" tolower(s) }'
+  { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "T\t" $1 "\t" $2 "\t" $3 }'
+    # the matrix table's rows, each AC with its status cell
+    _plan_matrix_acs "$plan"
   } | awk -F'\t' -v cur="$cur" '
-    $1 == "T" { n++; nm[n] = $2; k[n] = split($3, r, " "); for (i = 1; i <= k[n]; i++) { own[r[i]] = n; rq[n, i] = r[i] }; next }
+    $1 == "T" { n++; nm[n] = $2; fr[n] = $4; k[n] = split($3, r, " "); for (i = 1; i <= k[n]; i++) { own[r[i]] = n; rq[n, i] = r[i] }; next }
     $1 == "M" { req = $2; sub(/^AC-/, "", req); sub(/\.[^.]*$/, "", req); t = own[req]; if (!t) next
       tot[t]++
       if ($3 == "discharged") d[t]++; else if ($3 == "waived") w[t]++; else { p[t]++; op[t, req] = 1 } }
@@ -161,12 +243,13 @@ _plan_theme_reads() {
       step = cur; sub(/[^0-9].*$/, "", step)
       for (t = 1; t <= n; t++) {
         m = (d[t] + 0) " of " (tot[t] + 0) " criteria discharged" (w[t] ? ", " w[t] " waived" : "")
-        if (!tot[t]) { print "unmeasured\t" nm[t] "\t" m "\tthe matrix holds none of its criteria"; continue }
-        if (!p[t]) { print "reached\t" nm[t] "\t" m "\tnone open"; continue }
+        f = (fr[t] != "" ? "\t" fr[t] : "")
+        if (!tot[t]) { print "unmeasured\t" nm[t] "\t" m "\tthe matrix holds none of its criteria" f; continue }
+        if (!p[t]) { print "reached\t" nm[t] "\t" m "\tnone open" f; continue }
         o = ""; c = 0
         for (i = 1; i <= k[t]; i++) if ((t, rq[t, i]) in op) { c++; if (c <= 2) o = o (c > 1 ? ", " : "") "REQ-" rq[t, i] }
         if (c > 2) o = o " and " (c - 2) " more"
-        print ((step != "" && step + 0 >= 6) ? "overdue" : "pending") "\t" nm[t] "\t" m "\topen: " o }
+        print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\topen: " o f }
     }'
 }
 
@@ -220,22 +303,42 @@ plan_one_file_median() {
 }
 
 # plan_goal_status <state> -> the goal's status as every surface prints it, from `plan_goals_read`'s state word: reached
-# is `met`; missed, and a theme overdue past Step 6 with criteria open, `not met`; unreadable `unreadable`; pending,
-# unmeasured or any other word `not measured`. The one reading of a goal: the sitrep's sheet and the release approval
-# card both call it, so the same plan cannot give one goal two statuses.
+# is `met`; missed, and a theme overdue past Step 6 with criteria open, `not met`; a theme pending with at least one
+# criterion discharged (`oncourse`) `on course`; unreadable `unreadable`; pending with none discharged, unmeasured or any
+# other word `not measured`. The one reading of a goal: the sitrep's sheet and the release approval card both call it,
+# so the same plan cannot give one goal two statuses.
 plan_goal_status() {
   case "${1:-}" in
     reached) printf 'met\n' ;;
     missed|overdue) printf 'not met\n' ;;
+    oncourse) printf 'on course\n' ;;
     unreadable) printf 'unreadable\n' ;;
     *) printf 'not measured\n' ;;
   esac
 }
 
+# plan_goal_declared_red <landing record> <reading> -> rc 0 when a suite goal's reading, `<suite>.test.sh red at <sha>`,
+# names a suite the record holds a standing `debt:` line for: the line a landing of a `Lands-red:` row writes at its
+# publish (lib/line.sh `_line_debt_write`), not voided by a `void:` line. The plan declared that red, so the miss it
+# causes is no new decision for the person. rc 1 for any other reading or suite, and for no record.
+plan_goal_declared_red() {
+  local rec="${1:-}" suite="${2:-}"
+  suite="${suite%% red at *}"
+  case "$suite" in *.test.sh) ;; *) return 1 ;; esac
+  [ -n "$rec" ] && [ -f "$rec" ] || return 1
+  awk -v s="${suite##*/}" '
+    /^debt: / { id = ""; su = ""; n = split($0, a, " ")
+      for (i = 2; i <= n; i++) { if (index(a[i], "id=") == 1) id = substr(a[i], 4); else if (index(a[i], "suite=") == 1) su = substr(a[i], 7) }
+      b = su; sub(/.*\//, "", b); if (id != "" && b == s) debt[id] = 1; next }
+    /^void: / { n = split($0, a, " "); for (i = 2; i <= n; i++) if (index(a[i], "id=") == 1) void[substr(a[i], 4)] = 1; next }
+    END { for (i in debt) if (!(i in void)) exit 0; exit 1 }' "$rec" 2>/dev/null
+}
+
 # plan_goals_read <plan> <landing record> <landing report with rows> -> `<state><TAB><theme><TAB><measure><TAB><reading>`
 # per goal: the requirements' themes first (`_plan_theme_reads`), then the `goals:` line's in the plan's order. A theme's
-# state is reached, pending, overdue or unmeasured; a measured goal's is reached, missed, unmeasured or unreadable; the
-# reading says in words what was read. The record's directory is the run's record directory; the docs root is two above it.
+# state is reached, pending, oncourse, overdue or unmeasured, and its row ends in a fifth column, the opener, when it has
+# one; a measured goal's state is reached, missed, unmeasured or unreadable and its row has four; the reading says in
+# words what was read. The record's directory is the run's record directory; the docs root is two above it.
 # Always rc 0.
 plan_goals_read() {
   local plan="${1:-}" rec="${2:-}" rep="${3:-}" recdir docs t m r st rd tgt v n line ev f h s hs hrow hu hst
