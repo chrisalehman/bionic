@@ -10,6 +10,8 @@
 #   door_world <dir>               builds the fixture repository at <dir> (absent or empty, under WORLD_ROOT) and
 #                                  prints one line, `<root> <accepted head>`: the physical path and the 40-hex head
 #                                  of the working branch `wave/x`, checked out at <root>. Build it once per suite.
+#   door_world_single <dir>        the same fixture, its plan at `rigor: single`: the run a single-rigor review reads,
+#                                  where one critic answers the evidence question and no auditor is dealt.
 #   door_copy <root> <dir>         copies a built fixture to <dir>, binds the copy's own plan, and prints the same
 #                                  line for the copy. A section that changes the fixture changes a copy.
 #   door_piece <root> <row>        cuts the tree <root>/.worktrees/<row> on `wt/<row>` off the accepted head, with
@@ -37,9 +39,10 @@
 # `release-check-files:`; the bound plan with `release: DOOR_VERSION`,
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
 # (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
-# writes and no verb creates: `rigor: double` and `scale: wave`, without which the judge cannot deal the readings a
-# run owes, and the matrix skeleton, one `## Eval design` row and its `## Verification Matrix` table row at tier T1,
-# which matrix-render, matrix-set and discharge fill. Every later state of the plan is a verb's.
+# writes and no verb creates: `rigor: double` (`single` from door_world_single) and `scale: wave`, without which
+# the judge cannot deal the readings a run owes, and the matrix skeleton, one `## Eval design` row and its
+# `## Verification Matrix` table row at tier T1, which matrix-render, matrix-set and discharge fill. Every later
+# state of the plan is a verb's.
 #
 # WHICH COPY RAN. The fixture's committed release-check.sh carries one line more than the tree under test's, after
 # its shebang: when DOOR_SEEN names a file, it appends where it ran and which script it is. A run of the tree
@@ -80,16 +83,20 @@ _door_inside() {  # <path> -> 0 when it lies under WORLD_ROOT
   return 1
 }
 
-door_world() (  # <dir> -> `<root> <accepted head>`
+door_world() { _door_world door_world double "${1:-}"; }          # <dir> -> `<root> <accepted head>`
+door_world_single() { _door_world door_world_single single "${1:-}"; }   # <dir> -> the same, at `rigor: single`
+
+# _door_world <name> <rigor> <dir> -> the fixture at <dir>, its plan at <rigor>; <name> heads every refusal
+_door_world() (
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
-  local src="$BIONIC_SCRIPTS_DIR" dir="${1:-}" root list head plan
-  case "$dir" in ''|*[[:space:]]*) echo "door_world: name a directory, without blanks" >&2; exit 2 ;; esac
+  local src="$BIONIC_SCRIPTS_DIR" me="$1" rigor="$2" dir="${3:-}" root list head plan
+  case "$dir" in ''|*[[:space:]]*) echo "$me: name a directory, without blanks" >&2; exit 2 ;; esac
   mkdir -p "$dir" && root="$(cd "$dir" && pwd -P)" || exit 1
-  _door_inside "$root" || { echo "door_world: $root is outside WORLD_ROOT" >&2; exit 2; }
-  [ -z "$(ls -A "$root")" ] || { echo "door_world: $root is not empty" >&2; exit 2; }
+  _door_inside "$root" || { echo "$me: $root is outside WORLD_ROOT" >&2; exit 2; }
+  [ -z "$(ls -A "$root")" ] || { echo "$me: $root is not empty" >&2; exit 2; }
   git -C "$root" init --quiet && git -C "$root" symbolic-ref HEAD refs/heads/main || exit 1
   [ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" = "$root" ] \
-    || { echo "door_world: git's toplevel is not $root — refusing" >&2; exit 1; }
+    || { echo "$me: git's toplevel is not $root — refusing" >&2; exit 1; }
   # The repository's own identity: a hand landing records `by=` from it, so no person's name reaches the record.
   git -C "$root" config user.name door && git -C "$root" config user.email door@example.invalid \
     && git -C "$root" config commit.gpgsign false || exit 1
@@ -120,7 +127,7 @@ door_world() (  # <dir> -> `<root> <accepted head>`
 working-branch: wave/x
 base-sha: $head
 release: $DOOR_VERSION
-rigor: double
+rigor: $rigor
 scale: wave
 canonical_sdlc_version: 14
 ---
