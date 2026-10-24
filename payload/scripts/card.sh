@@ -146,43 +146,15 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
   case "${1:-}" in
     requirement)
       CARD_SECTION="Requirements"
-      # RULE 5 (Chris's third read, one stream): the title and the provenance
-      # are not two cells any more, or two lines — they are ONE word-wrapped
-      # stream, title then the seam " · " then provenance, filling the text
-      # column greedily. When the title leaves room on a line, provenance
-      # keeps going on that same line rather than starting a fresh one
-      # (rule 5's own picture: "that names none · provenance seed row 4…" on
-      # the SAME line). `_CARD_AWK`'s `flush_req` builds that single string
-      # for a whole card, and a hand-fed TSV row builds the identical seam by
-      # hand, before this kind's row is even reached — so the fold field here
-      # is ordinary text like any other kind's, no per-kind label mechanism
-      # needed for it any more (rules 1/4's old CARD_LABEL_2/CARD_FMT_2 retire
-      # with them; ownership's `surfaces` label is unrelated and unchanged).
-      #
-      # `ACs n` still lives on the row's own first line (rule 3), so the
-      # stream's column still needs a width of its OWN rather than the "rest
-      # of the line" fallback a trailing-less fold field would get — the
-      # fallback that would otherwise let the stream run to the edge and abut
-      # `ACs n` (rule 2). `_rq1_lit` is the two literals around it (id + one
-      # separating space, and two spaces + "ACs" + one space); the reserve
-      # past that is four columns — no shipped card has ever carried ten or
-      # more acceptance criteria on one requirement, so two digits already
-      # covers every real value, and the extra headroom is what keeps a
-      # same-shaped-but-wider ACs cell (this suite's own placeholder, `<n>`,
-      # is three columns) from tripping `_card_shrink_line`'s overflow path —
-      # which has nothing safe to shrink on this line but `id`, and would
-      # fold it (A-T23.1). Because the stream is now the row's ONLY fold
-      # field and nothing else trails `ACs`, rule 4's right-edge bound (the
-      # stream never running under `ACs n`) falls out of this ONE declared
-      # width for free — there is no second field left to keep it in step
-      # with.
-      local _rq1_lit=$(( 4 + 7 + 1 + 2 + 3 + 1 )) _rq1_w
-      _rq1_w=$(( BIONIC_LINE_WIDTH - _rq1_lit - 4 ))
-      CARD_FMT_1="    %-7s %-${_rq1_w}s  ACs %s"; CARD_NF_1=3; CARD_FOLD_1=1 ;;
+      # THE ROW IS THE ID, THE TITLE AND THE CRITERIA COUNT ON ONE LINE. The title is at most 30
+      # characters, so its column is 30 wide and `ACs n` trails it; a hand-fed row with a longer
+      # title folds inside the column, as every folding cell does. The provenance and the
+      # criteria are the requirement's `explain`, never the card's.
+      CARD_FMT_1='    %-7s %-30s  ACs %s'; CARD_NF_1=3; CARD_FOLD_1=1 ;;
     decision)
       CARD_SECTION="Decisions"
       CARD_HDRCOLS="2:serves 3:ADR"
-      CARD_FMT_1='    %-4s %-44s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1 ;;
+      CARD_FMT_1='    %-4s %-30s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1 ;;
     ownership)
       CARD_SECTION="Ownership"
       # `surfaces ` moves out of the literal and into the folding cell's value
@@ -201,8 +173,8 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       CARD_FMT_1='    %-8s %-36s %6s %5s %9s %5s %6s';  CARD_NF_1=7; CARD_FOLD_1=1 ;;
     task)
       CARD_SECTION="Tasks"
-      CARD_HDRCOLS="2:kind 3:depends 4:agent"
-      CARD_FMT_1='    %-5s %-30s %-10s %-13s %s';       CARD_NF_1=5; CARD_FOLD_1=1 ;;
+      CARD_HDRCOLS="2:serves 3:kind 4:depends 5:agent"
+      CARD_FMT_1='    %-5s %-30s %-12s %-9s %-12s %s';  CARD_NF_1=6; CARD_FOLD_1=1 ;;
     *) return 1 ;;
   esac
   return 0
@@ -724,19 +696,21 @@ function cells(line, arr,   n, i) {
 }
 function err(m) { if (ERRMSG == "") ERRMSG = m }
 function flush_nd() { if (ndbuf != "") { print "ND" OFS clean(ndbuf); ndbuf = "" } }
-function flush_req(   stream) {
+function crit_close() { if (rcur != "") { rcrit = rcrit (rcrit == "" ? "" : "\037") rcur; rcur = "" } }
+# A requirement is three cells on the card (id, title, criteria count); its provenance and criteria
+# travel beside it for `explain`. The heading text is the title as written: the card measures it.
+function flush_req() {
   if (rid == "") return
+  crit_close()
   if (rprov == "") { err("REQ-" rid " has no provenance: line"); rid = ""; return }
-  # RULE 5 (one stream): the title and the provenance are ONE folding cell,
-  # joined here by the seam " · provenance " before the row kind ever sees
-  # two separate cells — a hand-fed TSV row builds the identical string, so
-  # AC-10.3 byte identity holds by construction, not by two code paths
-  # agreeing to build the same seam twice.
-  stream = rtext " · provenance " rprov
-  print "RROW" OFS "REQ-" rid OFS stream OFS racs
-  rid = ""; rtext = ""; rprov = ""; racs = 0
+  print "RROW" OFS "REQ-" rid OFS rtext OFS racs
+  print "RDET" OFS "REQ-" rid OFS rprov OFS rcrit
+  rid = ""; rtext = ""; rprov = ""; racs = 0; rcrit = ""; rcur = ""
 }
-function flush_dec(   line, id, serves) {
+# THE TITLE OF A DECISION IS ITS LEADING BOLD SPAN, `**D<n> — <title>**` (a bold span without the label
+# is the title as it stands); a bullet with no bold span opens on its first sentence. The rest of the
+# bullet, up to the (D<n>; REQ-...) group, is the detail `explain` prints.
+function flush_dec(   line, id, serves, title, detail) {
   if (dbuf == "") return
   line = dbuf; dbuf = ""
   if (match(line, /\(D[0-9]+;[^)]*\)/)) {
@@ -744,18 +718,27 @@ function flush_dec(   line, id, serves) {
     serves = id; sub(/^D[0-9]+;[ \t]*/, "", serves)
     sub(/;.*$/, "", id)
     line = substr(line, 1, RSTART - 1)
-    gsub(/\*\*/, "", line)
-    # THE LABEL PRINTS ONCE (wave-26 D13). The spec writes `**D1 — title**` and the row has an
-    # id column of its own, so the leading `D<n> —` is the same word twice; it comes off here,
-    # before the first sentence is taken, and a text that carries no label is left alone.
-    line = clean(line)
-    sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", line)
-    print "DROW" OFS id OFS clean(firstsent(line)) OFS clean(serves)
+    line = trim(line)
+    if (match(line, /^\*\*[^*]+\*\*/)) {
+      title = substr(line, 3, RLENGTH - 4)
+      detail = substr(line, RLENGTH + 1)
+    } else {
+      gsub(/\*\*/, "", line)
+      title = firstsent(clean(line)); detail = clean(line)
+    }
+    gsub(/\*\*/, "", detail)
+    title = clean(title)
+    sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", title)
+    sub(/\.$/, "", title)
+    detail = clean(detail)
+    while (detail ~ /^(\.|:|—|--)/) { sub(/^(\.|:|—|--)[ \t]*/, "", detail) }
+    print "DROW" OFS id OFS title OFS clean(serves)
+    print "DDET" OFS id OFS detail
     return
   }
-  # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT (wave-35 T8; REQ-6 AC-6.6; D15): the section parses one
-  # shape, and a bullet out of it was dropped in silence, so a spec of untagged decisions rendered an empty
-  # Decisions table at exit 0. Refused as a requirement with no provenance is, naming the bullet.
+  # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT: the section parses one shape, and a bullet out of it
+  # was dropped in silence, so a spec of untagged decisions rendered an empty Decisions table at exit 0.
+  # Refused as a requirement with no provenance is, naming the bullet.
   gsub(/\*\*/, "", line)
   err("decision bullet carries no (D<n>; REQ-…) tag: " words(clean(line), 10))
 }
@@ -830,21 +813,22 @@ fm == 1 {
     sec = "reqs"; sub2 = ""; sub(/^REQ-/, "", h)
     rid = h; sub(/[ \t].*$/, "", rid)
     rtext = h; sub(/^[^ \t]+[ \t]*/, "", rtext); sub(/^— */, "", rtext)
-    rtext = clean(rtext); rprov = ""; racs = 0
+    rtext = clean(rtext); rprov = ""; racs = 0; rcrit = ""; rcur = ""
   }
   else if (h ~ /Component boundaries/) sub2 = "dec"
   else if (h ~ /Ownership table/) { sub2 = "own"; orow = 0 }
   else if (h ~ /ADR pointers/) sub2 = "adr"
   else if (h ~ /^Approach[ \t]*$/) sub2 = "approach"
-  else if (h ~ /^Worth your eye[ \t]*$/) sub2 = "worth"
+  else if (h ~ /^(Risks|Worth your eye)[ \t]*$/) sub2 = "worth"
   else sub2 = ""
   next
 }
 # THE GOAL TEXT IS READ BY lib/plan.sh plan_goal_paragraph AFTER THIS PARSE; the section only has to exist here.
 sec == "goal" { next }
-# THE APPROACH AND WORTH YOUR EYE (wave-26 D13). Both are `###` sections of `## Design`; they
-# are read BEFORE the design-paragraph arm below, which would otherwise take an Approach
-# that happens to be the first text under the heading for the design paragraph.
+# THE APPROACH AND THE RISKS. Both are `###` sections of `## Design`; they are read BEFORE the
+# design-paragraph arm below, which would otherwise take an Approach that happens to be the first
+# text under the heading for the design paragraph. A spec written before the Risks section was
+# renamed carries `### Worth your eye`, and the same arm reads it.
 sub2 == "approach" {
   if (trim($0) != "") APPROACH = APPROACH (APPROACH == "" ? "" : " ") clean($0)
   next
@@ -878,7 +862,9 @@ sec == "nd" {
 }
 sec == "reqs" && rid != "" {
   if (/^provenance:/) rprov = clean(substr($0, 12))
-  else if (/^- AC-/) racs++
+  else if (/^- AC-/) { crit_close(); racs++; rcur = clean(substr($0, 3)) }
+  else if (trim($0) == "") crit_close()
+  else if (rcur != "") rcur = rcur " " trim($0)
   next
 }
 sec == "tasks" && /^[ \t]*\|/ {
@@ -889,13 +875,10 @@ sec == "tasks" && /^[ \t]*\|/ {
   if (trow <= 2) next
   n = cells($0, c)
   if (n < 6) next
-  # EACH TASK WITH THE CRITERIA IT SERVES (wave-26 D12). The serves cell joins the first
-  # sentence as one folding stream, the way the requirement row joins its provenance, so the
-  # row kind and its widths are unchanged and a hand-fed row builds the same string.
-  t = clean(firstsent(c[4]))
+  # THE WHOLE CELL TRAVELS WITH THE ROW: the card takes its title from it, and `show task` prints it.
   sv = (servc <= n) ? c[servc] : ""
-  if (sv ~ /[A-Za-z0-9]/) t = t " · serves " sv
-  print "TROW" OFS c[1] OFS t OFS c[3] OFS c[6] OFS c[5]
+  if (sv !~ /[A-Za-z0-9]/) sv = ""
+  print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv
   next
 }
 sec == "eval" && /^[ \t]*\|/ {
@@ -984,6 +967,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_LEDGER=""; WCARD_REQS=""; WCARD_APPROACH=""; WCARD_WORTH=(); WCARD_CROW=()
   WCARD_SPEC=""; WCARD_DPTR=""
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
+  WCARD_RDET=(); WCARD_DDET=()
   WCARD_ADRK=(); WCARD_ADRV=()
   local out line key rest k v
   out="$(awk -v verb="$1" "$_CARD_AWK" "$2" 2>/dev/null)" || {
@@ -1009,7 +993,9 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
       WORTH) WCARD_WORTH[${#WCARD_WORTH[@]}]="$rest" ;;
       CROW) WCARD_CROW[${#WCARD_CROW[@]}]="$rest" ;;
       RROW) WCARD_RROW[${#WCARD_RROW[@]}]="$rest" ;;
+      RDET) WCARD_RDET[${#WCARD_RDET[@]}]="$rest" ;;
       DROW) WCARD_DROW[${#WCARD_DROW[@]}]="$rest" ;;
+      DDET) WCARD_DDET[${#WCARD_DDET[@]}]="$rest" ;;
       OROW) WCARD_OROW[${#WCARD_OROW[@]}]="$rest" ;;
       EROW) WCARD_EROW[${#WCARD_EROW[@]}]="$rest" ;;
       TROW) WCARD_TROW[${#WCARD_TROW[@]}]="$rest" ;;
@@ -1036,6 +1022,76 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
     task) CARD_SCALE="task" ;;
     *)    CARD_SCALE="wave" ;;
   esac
+  return 0
+}
+
+# ── THE TITLE RULE, ONE FUNCTION (all three cards) ───────────────────────────
+#
+# An item on a step card opens on a title of at most CARD_TITLE_CAP characters. The card prints
+# the title and nothing else of the item; `explain` (or `show task`) prints the rest. A title
+# over the cap is REFUSED, never cut: a cut title is a different sentence that the person then
+# approves, and an ellipsis is the same cut with a mark on it.
+#
+# THE TITLE OF EACH KIND OF ITEM. A Tasks cell: the text before its first `. `, or all of it when
+# it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
+# requirement heading and a decision are titled by their heading, so their text is the title as
+# the parse hands it over.
+CARD_TITLE_CAP=30
+
+_card_title() {  # <cell|item|heading> <text> -> the title, on stdout
+  local t="${2:-}"
+  case "$1" in
+    cell)
+      case "$t" in
+        *". "*) t="${t%%. *}" ;;
+        *.)     t="${t%.}" ;;
+      esac ;;
+    item)
+      case "$t" in *": "*) t="${t%%: *}" ;; esac ;;
+  esac
+  printf '%s' "$t"
+}
+
+# Every title the verb draws is measured before anything prints, in columns through the width
+# library (characters, never bytes), and EVERY offender is named in the one refusal. The ids of
+# a Not Doing item are its place in the section, since the item has no other name.
+CARD_TITLE_BAD=""
+_card_title_refusals() {  # <step1|step2|step3> — sets CARD_TITLE_BAD to one REFUSED line per title over the cap
+  local row i=0
+  CARD_TITLE_BAD=""
+  case "$1" in
+    step1)
+      for row in ${WCARD_RROW[@]+"${WCARD_RROW[@]}"}; do
+        _card_split "$row"
+        _card_title_check requirement "${CARD_CELLS[0]}" "${CARD_CELLS[1]:-}"
+      done
+      for row in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do
+        i=$(( i + 1 ))
+        _card_title_check not-doing "$i" "$(_card_title item "$row")"
+      done ;;
+    step2)
+      for row in ${WCARD_DROW[@]+"${WCARD_DROW[@]}"}; do
+        _card_split "$row"
+        _card_title_check decision "${CARD_CELLS[0]}" "${CARD_CELLS[1]:-}"
+      done ;;
+    step3)
+      for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
+        _card_split "$row"
+        _card_title_check task "${CARD_CELLS[0]}" "$(_card_title cell "${CARD_CELLS[1]:-}")"
+      done ;;
+  esac
+}
+
+_card_title_check() {  # <kind> <id> <title> — appends the REFUSED line to CARD_TITLE_BAD when it is over the cap
+  _bionic_cols_into "$3"
+  [ "$BIONIC_COLS" -gt "$CARD_TITLE_CAP" ] || return 0
+  CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: title is ${BIONIC_COLS} characters, the cap is ${CARD_TITLE_CAP}: $3"$'\n'
+}
+
+# THE REFUSAL IS EXIT 1 WITH NOTHING ON STDOUT: the artifact parsed, and what it says is not a card.
+_card_titles_or_refuse() {  # <step1|step2|step3> — returns when every title fits, else exits 1
+  _card_title_refusals "$1"
+  [ -z "$CARD_TITLE_BAD" ] || { printf '%s' "$CARD_TITLE_BAD" >&2; exit 1; }
   return 0
 }
 
@@ -1739,12 +1795,52 @@ _card_step1() {  # <citation path> <artifact path as given>
   _card_render_batch requirement
   printf '\n  Not Doing\n'
   local b
-  for b in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do _card_fold_at 4 "$b"; done
+  for b in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do _card_fold_at 4 "$(_card_title item "$b")"; done
   printf '\n'
   _card_inherited_line "$inh" "$2"
   printf '\n  Artifacts\n    requirements  %s\n\n' "$1"
   printf '%s\n' "$CARD_Q_STEP1"
-  printf 'explain <requirement> · set <flag>=<value>\n'
+  printf 'explain <requirement> · explain not-doing · set <flag>=<value>\n'
+}
+
+# THE VIEWS OF THE REQUIREMENTS CARD: `explain <requirement>` prints what the card leaves out of
+# one requirement (its provenance and every criterion), `explain not-doing` the excluded items
+# whole. The requirement is named by its id or by the bare number.
+_card_step1_view() {  # <artifact path as given> <args...>
+  shift
+  local key row id title
+  if [ "${1:-}" != explain ] || [ "$#" -ne 2 ]; then
+    _card_view_refuse "unknown sub-view '${*:-}'" "step1 <requirements> · step1 <requirements> explain <REQ-id> · step1 <requirements> explain not-doing"
+  fi
+  key="$2"
+  if [ "$key" = not-doing ]; then
+    printf '  Not Doing\n'
+    for row in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do _card_entry "$row"; done
+    return 0
+  fi
+  case "$key" in REQ-*) ;; *[0-9]) key="REQ-${key}" ;; esac
+  for row in ${WCARD_RROW[@]+"${WCARD_RROW[@]}"}; do
+    _card_split "$row"
+    [ "${CARD_CELLS[0]}" = "$key" ] || continue
+    printf '  %s · %s\n' "$key" "${CARD_CELLS[1]}"
+    for row in ${WCARD_RDET[@]+"${WCARD_RDET[@]}"}; do
+      _card_split "$row"
+      [ "${CARD_CELLS[0]}" = "$key" ] || continue
+      _card_labelled 4 provenance "${CARD_CELLS[1]:-}" 12
+      local crit rest="${CARD_CELLS[2]:-}"
+      while [ -n "$rest" ]; do
+        case "$rest" in
+          *$'\037'*) crit="${rest%%$'\037'*}"; rest="${rest#*$'\037'}" ;;
+          *) crit="$rest"; rest="" ;;
+        esac
+        _card_entry "$crit"
+      done
+    done
+    return 0
+  done
+  id=""
+  for row in ${WCARD_RROW[@]+"${WCARD_RROW[@]}"}; do _card_split "$row"; id="${id}${id:+ }${CARD_CELLS[0]}"; done
+  _card_view_refuse "no requirement '$2' in the file" "step1 <requirements> explain <REQ-id> (REQ-id: ${id}) · step1 <requirements> explain not-doing"
 }
 
 # THE PARAGRAPH CARD IS FOR A DESIGN THAT IS ONE (D8), AND THE SHAPE FOLLOWS THE SPEC, NEVER
@@ -1840,7 +1936,7 @@ _card_path_line() {  # <label> <path>
 }
 
 # ONE CARD THE DESIGN IS APPROVED ON (wave-26 D13). The head says what is being built and why
-# it is shaped so (Goal, Approach, Worth your eye); the tables below it say what is decided and
+# it is shaped so (Goal, Approach, Risks); the tables below it say what is decided and
 # how each criterion is proven; the Artifacts say where each piece lives, by the path a reader
 # opens. Ownership and one requirement's evals are not on it — they are asked for, as the
 # sub-views the last line offers.
@@ -1856,8 +1952,8 @@ _card_step2() {  # <artifact path>
     printf '\n'
   fi
   if [ "${#WCARD_WORTH[@]}" -gt 0 ]; then
-    printf '  Worth your eye\n'
-    for e in "${WCARD_WORTH[@]}"; do _card_worth_entry "$e"; done
+    printf '  Risks\n'
+    for e in "${WCARD_WORTH[@]}"; do _card_entry "$e"; done
     printf '\n'
   fi
   _card_branches
@@ -1881,10 +1977,11 @@ _card_step2() {  # <artifact path>
   printf 'show evals <req> · explain <decision> · show ownership\n'
 }
 
-# A `Worth your eye` entry: its first line flush at the block's indent, every continuation
-# line two columns further in, so one entry is one visible unit. The fold budget is the
-# continuation's (the narrower), which leaves the first line two columns of slack.
-_card_worth_entry() {  # <text>
+# One entry of a block (a risk, a Not Doing item, a criterion): its first line flush at the block's
+# indent, every continuation line two columns further in, so one entry is one visible unit. It is
+# drawn whole, with no cap on its length. The fold budget is the continuation's (the narrower),
+# which leaves the first line two columns of slack.
+_card_entry() {  # <text>
   local line first=1
   while IFS= read -r line; do
     if [ "$first" -eq 1 ]; then
@@ -1938,6 +2035,13 @@ _card_step2_evals() {  # <REQ id>
   done
 }
 
+# A SUB-VIEW THE CARD DOES NOT HAVE is one line on stderr and exit 2 (not 64: the artifact was fine,
+# the request was not), with the forms the card does offer.
+_card_view_refuse() {  # <what was wrong> <valid forms>
+  printf 'card.sh: %s — valid forms: %s\n' "$1" "$2" >&2
+  exit 2
+}
+
 # THE REFUSAL IS ONE LINE AND EXIT 2 (not 64: the artifact was fine, the request was not).
 _card_step2_refuse() {  # <what was wrong>
   local ids="" row r
@@ -1946,9 +2050,7 @@ _card_step2_refuse() {  # <what was wrong>
     case "$r" in total|'') continue ;; esac
     ids="${ids}${ids:+ }${r}"
   done
-  printf 'card.sh: %s — valid forms: step2 <spec> · step2 <spec> ownership · step2 <spec> evals <REQ-id>%s\n' \
-    "$1" "${ids:+ (REQ-id: ${ids})}" >&2
-  exit 2
+  _card_view_refuse "$1" "step2 <spec> · step2 <spec> ownership · step2 <spec> evals <REQ-id>${ids:+ (REQ-id: ${ids})} · step2 <spec> explain <D-id>"
 }
 
 # `step2 <spec> [ownership | evals <REQ-id>]`, the arguments after the artifact. The paragraph
@@ -1969,8 +2071,33 @@ _card_step2_view() {  # <artifact path as given> <args...>
       done
       [ "$known" -eq 1 ] || _card_step2_refuse "no requirement '$2' in the Eval design"
       _card_step2_evals "$2" ;;
+    explain)
+      [ "$#" -eq 2 ] || _card_step2_refuse "explain takes one decision id"
+      _card_step2_explain "$2" ;;
     *) _card_step2_refuse "unknown sub-view '${view}'" ;;
   esac
+}
+
+# `explain <decision>`: the title, the detail the card leaves out, and the two columns the card
+# prints beside it. The decision is named by its id or by the bare number.
+_card_step2_explain() {  # <D-id or number>
+  local key="$1" row
+  case "$key" in D*) ;; *) key="D${key}" ;; esac
+  for row in ${WCARD_DROW[@]+"${WCARD_DROW[@]}"}; do
+    _card_split "$row"
+    [ "${CARD_CELLS[0]}" = "$key" ] || continue
+    printf '  %s · %s\n' "$key" "${CARD_CELLS[1]}"
+    local serves="${CARD_CELLS[2]:-}"
+    for row in ${WCARD_DDET[@]+"${WCARD_DDET[@]}"}; do
+      _card_split "$row"
+      [ "${CARD_CELLS[0]}" = "$key" ] || continue
+      _card_fold_at 4 "${CARD_CELLS[1]:-}"
+    done
+    _card_labelled 4 serves "$serves" 12
+    _card_labelled 4 adr "$(_card_adr_for "$key")" 12
+    return 0
+  done
+  _card_step2_refuse "no decision '$1' in the Decisions"
 }
 
 # TWO PATHS, AND THEY ARE NOT THE SAME PATH. `$1` is the CITATION — the
@@ -1992,7 +2119,7 @@ _card_step3() {  # <citation path> <artifact path as given>
   printf 'Step 3 · Plan\n\n'
   _card_branches
   printf '\n'
-  CARD_ROWS=( ${WCARD_TROW[@]+"${WCARD_TROW[@]}"} )
+  _card_task_rows
   _card_render_batch task
   printf '\n'
   _card_chain_block "$2"
@@ -2004,6 +2131,71 @@ _card_step3() {  # <citation path> <artifact path as given>
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
   printf '\n%s\n' "$CARD_Q_STEP3"
   printf 'show evals <req> · show task <n> · explain <decision>\n'
+}
+
+# THE TASK ROWS: the title alone, `serves` in a column of its own, and the depends cell with each
+# run of three or more consecutive ids folded to a range. The whole cell is `show task`'s.
+_card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
+  local row serves
+  CARD_ROWS=()
+  for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
+    _card_split "$row"
+    serves="${CARD_CELLS[5]:-}"; [ -n "$serves" ] || serves="—"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}"
+  done
+}
+
+# Consecutive ids in a depends cell are one range: four ids in a row print as the first and the last
+# joined by an en dash. A run of two stays two ids, and ids that skip stay as written, so the cell
+# never says a task is depended on that is not.
+_card_range() {  # <depends cell> -> the cell, runs of three or more folded
+  local cell="$1" re='^([A-Za-z]+)([0-9]+)$' rest tok i=0 j k n m out="" part
+  local -a t=()
+  rest="${cell//,/ }"
+  for tok in $rest; do t[${#t[@]}]="$tok"; done
+  n="${#t[@]}"
+  [ "$n" -gt 0 ] || { printf '—'; return 0; }
+  while [ "$i" -lt "$n" ]; do
+    j="$i"
+    if [[ "${t[$i]}" =~ $re ]]; then
+      local pre="${BASH_REMATCH[1]}" num="${BASH_REMATCH[2]}"
+      while [ "$(( j + 1 ))" -lt "$n" ] && [[ "${t[$(( j + 1 ))]}" =~ $re ]] \
+            && [ "${BASH_REMATCH[1]}" = "$pre" ] && [ "$(( 10#${BASH_REMATCH[2]} ))" -eq "$(( 10#$num + 1 ))" ]; do
+        j=$(( j + 1 )); num="${BASH_REMATCH[2]}"
+      done
+    fi
+    if [ "$(( j - i + 1 ))" -ge 3 ]; then
+      part="${t[$i]}–${t[$j]}"
+    else
+      part=""; k="$i"
+      while [ "$k" -le "$j" ]; do part="${part}${part:+, }${t[$k]}"; k=$(( k + 1 )); done
+    fi
+    out="${out}${out:+, }${part}"
+    i=$(( j + 1 ))
+  done
+  printf '%s' "$out"
+}
+
+# `show task <n>`: the whole Tasks cell, folded, under the task's id. The task is named by its id
+# or by the bare number.
+_card_step3_view() {  # <artifact path as given> <args...>
+  shift
+  local key row
+  if [ "${1:-}" != task ] || [ "$#" -ne 2 ]; then
+    _card_view_refuse "unknown sub-view '${*:-}'" "step3 <plan> · step3 <plan> task <n>"
+  fi
+  key="$2"
+  case "$key" in T*) ;; *) key="T${key}" ;; esac
+  for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
+    _card_split "$row"
+    [ "${CARD_CELLS[0]}" = "$key" ] || continue
+    printf '  Task %s\n' "$key"
+    _card_fold_at 4 "${CARD_CELLS[1]:-}"
+    return 0
+  done
+  row=""
+  for key in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do row="${row}${row:+ }${key%%"$CARD_TAB"*}"; done
+  _card_view_refuse "no task '$2' in the plan" "step3 <plan> task <n> (task: ${row})"
 }
 
 # ── THE REVIEW RIGOR, PRINTED (wave-28 T44; AC-16.2) ─────────────────────────
@@ -3275,16 +3467,20 @@ case "$1" in
     printf '%s' "$CF_SETTLE" | awk 'NF && !seen[$0]++ { print "settles: " $0 }'
     exit 0 ;;
   step0|step1|step2|step3)
-    if [ "$1" = step2 ]; then
-      [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
-    else
-      [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
-    fi
+    case "$1" in
+      step1|step2|step3) [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))" ;;
+      *) [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))" ;;
+    esac
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable artifact at '$2'"
     _card_load "$1" "$2" || _card_usage "$2: ${WCARD_ERR}"
-    if [ "$1" = step2 ] && [ "$#" -gt 2 ]; then
-      shift
-      _card_step2_view "$@"
+    # A TITLE OVER THE CAP REFUSES THE CARD AND EVERY VIEW OF IT, before anything prints.
+    case "$1" in step1|step2|step3) _card_titles_or_refuse "$1" ;; esac
+    if [ "$#" -gt 2 ]; then
+      case "$1" in
+        step1) shift; _card_step1_view "$@" ;;
+        step2) shift; _card_step2_view "$@" ;;
+        step3) shift; _card_step3_view "$@" ;;
+      esac
       exit 0
     fi
     _card_art="$(_card_artifact_rel "$2")"

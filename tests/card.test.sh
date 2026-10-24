@@ -42,19 +42,16 @@ CARD_SH="${REPO}/payload/scripts/card.sh"
 WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
 # ── the formats card.sh now owns, as the three cards stated them at 89f6944 ──
-# REQ_A is the ONE exception: T23 (epic-23 wave-15, Chris's three reads
-# 2026-09-16/17) collapsed the row to ONE line whose folding cell is a single
-# stream — title, the seam " · provenance ", then the provenance text, fed as
-# one already-joined TSV cell — with `ACs n` trailing on that same line (18
-# fixed literal columns before the stream — id field + separators + "  ACs "
-# — plus a four-column reserve, against BIONIC_LINE_WIDTH=100, which
-# tests/lib/resolve-roots.sh never overrides). REQ_A states that CURRENT
-# shape rather than the 89f6944 baseline the other four constants still do.
-OLD_FMT_REQ_A='    %-7s %-78s  ACs %s'
-OLD_FMT_DEC='    %-4s %-44s %-14s %s'
+# THREE OF THESE ARE NOT THE 89f6944 BASELINE ANY MORE: a title is at most 30
+# characters on every card, so the requirement, decision and task rows give their
+# title cell 30 columns, and the task row carries a `serves` column of its own
+# after the title. The constants state the CURRENT shapes; the ownership and
+# eval-design formats are still the baseline.
+OLD_FMT_REQ_A='    %-7s %-30s  ACs %s'
+OLD_FMT_DEC='    %-4s %-30s %-14s %s'
 OLD_FMT_OWN='    %-12s owner %-14s surfaces %-22s test %s'
 OLD_FMT_EVAL='    %-8s %-36s %6s %5s %9s %5s %6s'
-OLD_FMT_TASK='    %-5s %-30s %-10s %-13s %s'
+OLD_FMT_TASK='    %-5s %-30s %-12s %-9s %-12s %s'
 
 section "Section 1: the renderer is there, and it refuses what it cannot render"
 
@@ -152,24 +149,17 @@ card() {  # <kind> — TSV rows on stdin
   bash "$CARD_SH" "$@" 2>/dev/null
 }
 
-# --- requirement (ONE physical line's worth of text-column stream, no header) ---
-# T23 rule 5 (one stream): the title and the provenance are ONE folding cell
-# — title, the seam " · provenance ", then the provenance text — fed to
-# card.sh as ONE already-joined TSV cell (the seam is content, not a
-# card-runtime label any more), with the trailing ACs count on the row's own
-# first line (rule 3). Short placeholders here so the merged stream fits on
-# one line with no fold, matching the ORIGINAL single-line intent of this
-# section; Sections 3/4/9 pin the fold and the multi-line shapes.
+# --- requirement (the id, the title, and the criteria count on one line) ---
+# The row is three cells: the title is the folding cell and the count trails it
+# on the row's first line. The provenance is not on the card; `explain` prints it.
 REQ_ID="REQ-<id>"
 REQ_TITLE="<title>"
-REQ_PROV_TEXT="<provenance>"
 REQ_ACS="<n>"
-REQ_STREAM="${REQ_TITLE} · provenance ${REQ_PROV_TEXT}"
 REQ_WANT="$(printf '%s\n' \
   "  Requirements" \
-  "$(fmt_render "$OLD_FMT_REQ_A" "$REQ_ID" "$REQ_STREAM" "$REQ_ACS")")"
-REQ_GOT="$(printf '%s\t%s\t%s\n' "$REQ_ID" "$REQ_STREAM" "$REQ_ACS" | card requirement)"
-expect_eq "6: the requirement kind renders the card's own one-line stream, ACs on it" "$REQ_WANT" "$REQ_GOT"
+  "$(fmt_render "$OLD_FMT_REQ_A" "$REQ_ID" "$REQ_TITLE" "$REQ_ACS")")"
+REQ_GOT="$(printf '%s\t%s\t%s\n' "$REQ_ID" "$REQ_TITLE" "$REQ_ACS" | card requirement)"
+expect_eq "6: the requirement kind renders the card's own one-line row, ACs on it" "$REQ_WANT" "$REQ_GOT"
 
 # --- decision ---
 DEC_VALS=("D<n>" "<the decision in one line>" "<REQ ids>" "<file | none>")
@@ -202,14 +192,14 @@ EVAL_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS1[@]}"
 expect_eq "9: the eval-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
 
 # --- task ---
-TASK_VALS1=("<n>" "<the task in one line>" "build" "—" "senior-implementor")
-TASK_VALS2=("<n>" "<the task in one line>" "test" "<n>" "implementor")
+TASK_VALS1=("<n>" "<the task title>" "REQ-<n>" "build" "—" "senior-implementor")
+TASK_VALS2=("<n>" "<the task title>" "REQ-<n>" "test" "<n>" "implementor")
 TASK_WANT="$(printf '%s\n' \
-  "$(hdr_build "Tasks" "$OLD_FMT_TASK" "2:kind" "3:depends" "4:agent")" \
+  "$(hdr_build "Tasks" "$OLD_FMT_TASK" "2:serves" "3:kind" "4:depends" "5:agent")" \
   "$(fmt_render "$OLD_FMT_TASK" "${TASK_VALS1[@]}")" \
   "$(fmt_render "$OLD_FMT_TASK" "${TASK_VALS2[@]}")")"
-TASK_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS1[@]}"
-               printf '%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS2[@]}"; } | card task)"
+TASK_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS1[@]}"
+               printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS2[@]}"; } | card task)"
 expect_eq "10: the task kind renders the card's own header and both rows" "$TASK_WANT" "$TASK_GOT"
 
 section "Section 3: the free cell folds inside its column — the shape Chris chose"
@@ -219,15 +209,15 @@ section "Section 3: the free cell folds inside its column — the shape Chris ch
 # (the pre-T10 shape, trailing columns on a line of their own) and WRAPPED. He
 # chose WRAPPED — "D4: I want the wrapped version" — so the expected block below
 # is his picture, transcribed, not a shape this suite invented.
-WRAPPED_WANT='    D2   A decision whose text runs well past the     REQ-2, REQ-3   none
-         forty-four column limit'
-WRAPPED_GOT="$(printf 'D2\tA decision whose text runs well past the forty-four column limit\tREQ-2, REQ-3\tnone\n' \
+WRAPPED_WANT='    D2   A decision whose text runs      REQ-2, REQ-3   none
+         past the thirty column limit'
+WRAPPED_GOT="$(printf 'D2\tA decision whose text runs past the thirty column limit\tREQ-2, REQ-3\tnone\n' \
   | card decision | grep -v '^  Decisions')"
 
 # The two shapes it is NOT, asserted as absences against the same row, so a
 # renderer that regressed to either one fails here and names which.
 case "$WRAPPED_GOT" in
-  *'forty-four column limit   REQ-2, REQ-3'*|*'limit REQ'*)
+  *'thirty column limit   REQ-2, REQ-3'*|*'limit REQ'*)
     no "12: the row does not OVERFLOW (trailing columns pushed right by the long cell)" "$WRAPPED_GOT" ;;
   *) ok "12: the row does not OVERFLOW (trailing columns pushed right by the long cell)" ;;
 esac
@@ -247,7 +237,7 @@ expect_absent "14b: …and does not repeat the row id" "D2" "$FOLD_CONT"
 
 # The fold is by WORD, never mid-word, and no word is lost.
 FOLD_WORDS="$(printf '%s\n' "$WRAPPED_GOT" | sed -n '2p' | sed 's/^ *//')"
-expect_eq "15: the fold breaks on a word boundary" "forty-four column limit" "$FOLD_WORDS"
+expect_eq "15: the fold breaks on a word boundary" "past the thirty column limit" "$FOLD_WORDS"
 
 section "Section 4: every kind's free cell folds, and every line stays inside the budget"
 
@@ -262,7 +252,7 @@ over_budget() {  # <rendered block> -> the lines wider than the budget, if any
   printf '%s' "$_bad"
 }
 
-REQ_LONG="$(printf 'REQ-9\t%s · provenance %s\t4\n' "$LONG" "$LONG" | card requirement)"
+REQ_LONG="$(printf 'REQ-9\t%s\t4\n' "$LONG" | card requirement)"
 expect_empty "16: requirement — no line exceeds the budget on a repo-scale row" "$(over_budget "$REQ_LONG")"
 DEC_LONG="$(printf 'D4\t%s\tREQ-7, REQ-9\tadr-027-close-out-split.md\n' "$LONG" | card decision)"
 expect_empty "17: decision — no line exceeds the budget on a repo-scale row" "$(over_budget "$DEC_LONG")"
@@ -270,7 +260,7 @@ OWN_LONG="$(printf 'derivation bound\tbounds.sh\t%s\ttests/stop.test.sh\n' "$LON
 expect_empty "18: ownership — no line exceeds the budget on a repo-scale row" "$(over_budget "$OWN_LONG")"
 EVAL_LONG="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$LONG" | card eval-design)"
 expect_empty "19: eval-design — no line exceeds the budget on a repo-scale row" "$(over_budget "$EVAL_LONG")"
-TASK_LONG="$(printf 'T36\t%s\tbuild\t—\tsenior-implementor\n' "$LONG" | card task)"
+TASK_LONG="$(printf 'T36\t%s\tREQ-7, REQ-9\tbuild\t—\tsenior-implementor\n' "$LONG" | card task)"
 expect_empty "20: task — no line exceeds the budget on a repo-scale row" "$(over_budget "$TASK_LONG")"
 
 # …and the fold actually happened, in every one of them: a cell this long cannot
@@ -286,10 +276,10 @@ for _pair in "21:requirement:$REQ_LONG" "22:decision:$DEC_LONG" "23:ownership:$O
 done
 
 # NOTHING IS LOST IN THE FOLD. Every word of the cell comes back out, in order.
-# The cell occupies columns 10-53 of every line of a decision row (the format's own
+# The cell occupies columns 10-39 of every line of a decision row (the format's own
 # second field), so the cell is read back by COLUMN rather than by stripping the
 # trailing text with a pattern that would have to know what is in it.
-DEC_WORDS="$(printf '%s\n' "$DEC_LONG" | grep -v '^  Decisions' | cut -c10-53 \
+DEC_WORDS="$(printf '%s\n' "$DEC_LONG" | grep -v '^  Decisions' | cut -c10-39 \
   | sed -e 's/ *$//' | tr '\n' ' ' | sed -e 's/  *$//')"
 
 section "Section 5: columns, not bytes — and the edges"
@@ -297,8 +287,8 @@ section "Section 5: columns, not bytes — and the edges"
 # THE EM DASH IS THE BUG A-T31.3 NAMED. Three bytes, one column: a row padded by
 # `printf %-Ns` comes out two columns short from that cell on. The renderer pads
 # through width.sh, so the trailing column lands where it lands without it.
-EM_GOT="$(printf 'T1\tan em — dash\tbuild\t—\timplementor\n' | card task | sed -n '2p')"
-PLAIN_GOT="$(printf 'T1\tan em x dash\tbuild\tx\timplementor\n' | card task | sed -n '2p')"
+EM_GOT="$(printf 'T1\tan em — dash\tREQ-1\tbuild\t—\timplementor\n' | card task | sed -n '2p')"
+PLAIN_GOT="$(printf 'T1\tan em x dash\tREQ-1\tbuild\tx\timplementor\n' | card task | sed -n '2p')"
 expect_eq "27: an em dash in a cell pads by columns, not bytes (the row is as wide as its ASCII twin)" \
   "$(cols "$PLAIN_GOT")" "$(cols "$EM_GOT")"
 expect_eq "27a: …and the em-dash row's trailing column starts where the ASCII row's does" \
@@ -311,7 +301,7 @@ expect_eq "27a: …and the em-dash row's trailing column starts where the ASCII 
 # both places"). What this row pins is the property that matters for a card: the
 # same bytes out under LC_ALL=C and under the ambient locale, and never a line
 # over the budget.
-CJK_ROW='T2	a 設計 decision cell	build	—	implementor'
+CJK_ROW='T2	a 設計 decision cell	REQ-1	build	—	implementor'
 CJK_U="$(printf '%s\n' "$CJK_ROW" | card task)"
 CJK_C="$(printf '%s\n' "$CJK_ROW" | LC_ALL=C bash "$CARD_SH" task 2>/dev/null)"
 expect_eq "28: a glyph outside the closed set renders the same under LC_ALL=C and under the ambient locale" \
@@ -328,7 +318,7 @@ fi
 # that broke one.
 LONGWORD='payload/scripts/lib/a-single-unbreakable-path-longer-than-its-own-column.sh'
 LW_GOT="$(printf 'D5\t%s\tREQ-9\tnone\n' "$LONGWORD" | card decision | grep -v '^  Decisions')"
-LW_BACK="$(printf '%s\n' "$LW_GOT" | cut -c10-53 | sed -e 's/ *$//' | tr -d '\n')"
+LW_BACK="$(printf '%s\n' "$LW_GOT" | cut -c10-39 | sed -e 's/ *$//' | tr -d '\n')"
 expect_eq "29: an over-long word is split at the column, never dropped" \
   "$LONGWORD" "$LW_BACK"
 expect_empty "29a: …and the split row stays inside the budget" "$(over_budget "$LW_GOT")"
@@ -379,9 +369,9 @@ PLAIN_FOLD='a x x xxx x'
 # column, so the two twins — same word count, glyphs vs their ASCII
 # stand-ins, placed as the provenance half of the stream — must measure the
 # same rendered width.
-REQ9_G="$(printf 'REQ-9\treq text · provenance %s\t3\n' "$GLYPH_FOLD" | card requirement | sed -n '2p')"
-REQ9_P="$(printf 'REQ-9\treq text · provenance %s\t3\n' "$PLAIN_FOLD" | card requirement | sed -n '2p')"
-expect_eq "33: requirement — § — “ ” … in the stream measure the same width as their ASCII twin" \
+REQ9_G="$(printf 'REQ-9\t%s\t3\n' "$GLYPH_FOLD" | card requirement | sed -n '2p')"
+REQ9_P="$(printf 'REQ-9\t%s\t3\n' "$PLAIN_FOLD" | card requirement | sed -n '2p')"
+expect_eq "33: requirement — § — “ ” … in the title measure the same width as their ASCII twin" \
   "$(cols "$REQ9_P")" "$(cols "$REQ9_G")"
 
 DEC9_G="$(printf 'D9\t%s\tREQ-9\tnone\n' "$GLYPH_FOLD" | card decision | grep -v '^  Decisions')"
@@ -399,8 +389,8 @@ EVAL9_P="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$PLAIN_FOLD" | card eval-design 
 expect_eq "36: eval-design — § — “ ” … in the description cell keep every count column aligned" \
   "$(cols "$EVAL9_P")" "$(cols "$EVAL9_G")"
 
-TASK9_G="$(printf 'T9\t%s\tbuild\t—\timplementor\n' "$GLYPH_FOLD" | card task | grep -v '^  Tasks')"
-TASK9_P="$(printf 'T9\t%s\tbuild\t—\timplementor\n' "$PLAIN_FOLD" | card task | grep -v '^  Tasks')"
+TASK9_G="$(printf 'T9\t%s\tREQ-9\tbuild\t—\timplementor\n' "$GLYPH_FOLD" | card task | grep -v '^  Tasks')"
+TASK9_P="$(printf 'T9\t%s\tREQ-9\tbuild\t—\timplementor\n' "$PLAIN_FOLD" | card task | grep -v '^  Tasks')"
 expect_eq "37: task — § — “ ” … in the task cell do not move build" \
   "$(cols "${TASK9_P%%build*}")" "$(cols "${TASK9_G%%build*}")"
 
@@ -503,18 +493,18 @@ Not part of any card; here so the parser has a section to walk past.
 
 ## Not Doing
 
-- The excluded item, and the one-line reason it is out.
-- A second excluded item.
+- The excluded item: the one-line reason it is out.
+- A second excluded item: why it is out too.
 
 ## Requirements and acceptance criteria
 
-### REQ-1 — the first requirement in one line
+### REQ-1 — the first requirement
 
 provenance: user 2026-09-16 "do the thing"
 - AC-1.1 the first criterion. Fails when: it does not hold.
 - AC-1.2 the second criterion. Fails when: it does not hold.
 
-### REQ-2 — the second requirement in one line
+### REQ-2 — the second requirement
 
 provenance: seed row 2; research row 2
 - AC-2.1 the only criterion here. Fails when: it does not hold.
@@ -609,8 +599,8 @@ current: 4
 
 | id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | REQ-1: the first task in one line. It also has a second sentence the card does not show. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | .worktrees/99-T1 | pending |
-| T2 | 4 | test | REQ-2: the second task in one line. complexity: complex | senior-implementor | T1 | 45 | REQ-2 | lib/second.sh | — | pending |
+| T1 | 4 | build | REQ-1: the first task. It also has a second sentence the card does not show. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | .worktrees/99-T1 | pending |
+| T2 | 4 | test | REQ-2: the second task. complexity: complex | senior-implementor | T1 | 45 | REQ-2 | lib/second.sh | — | pending |
 
 ## Verification Matrix
 
@@ -639,13 +629,13 @@ expect_eq "44c: the Step-1 card carries a Purpose block and no Branches block" "
 # Every REQ row, whole: id, text, provenance and AC COUNT, each read from the
 # artifact. The count is the row most likely to drift in a transcription and the
 # one a reader cannot check without opening the file.
-expect_contains "45a: …and its provenance verbatim" \
-  'provenance user 2026-09-16 "do the thing"' "$S1"
+expect_absent "45a: …and no provenance, which only explain prints" 'user 2026-09-16 "do the thing"' "$S1"
 expect_contains "45b: …and its AC count, which is 2" "ACs 2" "$S1"
-expect_contains "46a: …and its own provenance" "provenance seed row 2; research row 2" "$S1"
+expect_absent "46a: …nor the second requirement's provenance" "seed row 2; research row 2" "$S1"
 expect_contains "46b: …and its AC count, which is 1" "ACs 1" "$S1"
 
-expect_contains "47a: …and its second" "A second excluded item." "$S1"
+expect_contains "47a: …and its second, by its title" "A second excluded item" "$S1"
+expect_absent "47b: …and no reason beside either" "why it is out too" "$S1"
 expect_contains "48: Artifacts names the artifact it was rendered from" "$REQ_FIX" "$S1"
 expect_contains "49a: …and offers the explain affordance" "explain <requirement>" "$S1"
 
@@ -668,7 +658,7 @@ expect_contains "51b: …and so does the integration branch" \
 # `card.sh requirement` as TSV. Not a spot check of one cell: `cmp` over the
 # whole block, so a different fold, a different pad, a different batch width or
 # a different header all fail here rather than being discovered on a card.
-printf 'REQ-1\tthe first requirement in one line · provenance user 2026-09-16 "do the thing"\t2\nREQ-2\tthe second requirement in one line · provenance seed row 2; research row 2\t1\n' \
+printf 'REQ-1\tthe first requirement\t2\nREQ-2\tthe second requirement\t1\n' \
   | card requirement > "${CARD_SANDBOX}/tsv.txt"
 printf '%s\n' "$S1" | sed -n '/^  Requirements$/,/^$/p' | sed -e '/^$/d' \
   > "${CARD_SANDBOX}/whole.txt"
@@ -704,7 +694,8 @@ expect_contains "58a: …and opens with the Step-3 title" "Step 3 · Plan" "$S3"
 # ledger cell would pass a `contains` on the opening words and fail here, which
 # is the failure worth catching: the ledger cell is a brief, the card is a line.
 expect_contains "59: the Tasks section carries T1's text, folded in its column" \
-  "REQ-1: the first task in one" "$S3"
+  "REQ-1: the first task" "$S3"
+expect_absent "59d: …nor the sentence after the title" "a second sentence" "$S3"
 expect_absent "59e: …nor the ledger's own complexity tag" "complexity: standard" "$S3"
 expect_contains "59a: …and T1's kind, depends and agent cells" "implementor" "$S3"
 expect_contains "59b: …and T2, whose depends cell is T1" "T2" "$S3"
@@ -763,20 +754,23 @@ whole_card step3 "${CARD_INTREE}/wave-99-fixture.plan.md"; S3_IT="$WC_OUT"
 # THE WAVE'S OWN ARTIFACTS: not synthetic — the real requirements/spec/plan this
 # very card renders from at every Step-1/2/3 approval gate in this wave, which
 # is the case the fix exists for.
-REAL_REQ="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-15-fixit-182.requirements.md"
-# THE STEP-2 CARD READS A SPEC IN THE SHAPE IT PARSES (wave-35 T8; REQ-6 AC-6.6): wave-15's spec predates the
-# `(D<n>; REQ-…)` tag, so its card is now refused (exit 64, stdout empty) where it rendered an empty Decisions table;
-# the width pin reads the newest spec, which carries the tag on every decision bullet.
-REAL_SPEC="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-35-no-workarounds.spec.md"
-REAL_PLAN="${CARD_ROOT_FOR_TEST}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-15-fixit-182.plan.md"
-whole_card step1 "$REAL_REQ"; S1_REAL="$WC_OUT"
+REAL_REQ="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-44-every-hand.requirements.md"
+# THE CARDS READ ARTIFACTS IN THE SHAPE THEY PARSE: a decision bullet carries its `(D<n>; REQ-…)` tag and every title is
+# at most 30 characters, so an older run's artifacts are refused (or drew an empty table); the width pins read the newest.
+REAL_SPEC="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-44-every-hand.spec.md"
+REAL_PLAN="${CARD_ROOT_FOR_TEST}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-44-every-hand.plan.md"
+whole_card step1 "$REAL_REQ"; S1_REAL="$WC_OUT"; S1_REAL_RC="$WC_RC"
 whole_card step2 "$REAL_SPEC"; S2_REAL="$WC_OUT"; S2_REAL_RC="$WC_RC"
-whole_card step3 "$REAL_PLAN"; S3_REAL="$WC_OUT"
+whole_card step3 "$REAL_PLAN"; S3_REAL="$WC_OUT"; S3_REAL_RC="$WC_RC"
 
 expect_empty "67: no line of the in-tree Step-1 fixture card exceeds the budget, Artifacts included" \
   "$(over_budget "$S1_IT")"
 expect_empty "67a: …nor of the in-tree Step-2 fixture card" "$(over_budget "$S2_IT")"
 expect_empty "67b: …nor of the in-tree Step-3 fixture card" "$(over_budget "$S3_IT")"
+expect_eq "67c0: precondition: the Step-1 card over this wave's own requirements renders (exit 0, its REQ-1 row present)" "0|yes" \
+  "$S1_REAL_RC|$(printf '%s\n' "$S1_REAL" | /usr/bin/grep -q '^ *REQ-1 ' && echo yes)"
+expect_eq "67e0: precondition: the Step-3 card over this wave's own plan renders (exit 0, its T1 row present)" "0|yes" \
+  "$S3_REAL_RC|$(printf '%s\n' "$S3_REAL" | /usr/bin/grep -q '^ *T1 ' && echo yes)"
 expect_empty "67c: nor of the Step-1 card over this wave's own requirements" \
   "$(over_budget "$S1_REAL")"
 expect_eq "67d0: precondition: the Step-2 card over the real spec renders (exit 0, its D8 row present)" "0|yes" \
@@ -1037,6 +1031,335 @@ expect_eq "CONTENT-7c …with no Decisions section and no sub-view line" "" \
   "$(printf '%s\n' "$S2_PARA" | /usr/bin/grep -e '^  Decisions' -e 'show evals')"
 whole_card step2 "$PARA_SPEC" ownership
 expect_eq "CONTENT-7d …and refuses the sub-view, as before" "2" "$WC_RC"
+
+
+# ============================================================
+section "§TITLES: a Tasks cell opens on a title of at most 30 characters, and the Step-3 card prints the title alone"
+# ============================================================
+# fails-when: the card prints the detail after the title, the serves column is not its own, consecutive ids in depends
+# print one by one, `task <n>` prints less than the whole cell, a 31-character title is drawn or cut, or the Step-3
+# text lacks the rule.
+# The names below are invented; a fixture never carries a real project, client or person.
+T30="Title of exactly thirty chars!"
+T31="A title that is thirty-one long"
+T30_EM="Thirty — characters — in title"
+expect_eq "TITLES-0 precondition: the boundary title is 30 characters and the over-long one is 31" "30|31" "${#T30}|${#T31}"
+expect_eq "TITLES-0b precondition: the dashed title is 30 characters and more than 30 bytes" "30|yes" \
+  "$(cols "$T30_EM")|$([ "$(printf '%s' "$T30_EM" | wc -c | tr -d ' ')" -gt 30 ] && echo yes)"
+TITLES_PLAN="${CARD_SANDBOX}/wave-02-flock.plan.md"
+cat > "$TITLES_PLAN" <<FIXEOF
+---
+sdlc-step: 3
+walk: required
+rigor: single
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
+working-branch: wave/02-flock
+integration-branch: main
+base-sha: abc1234
+---
+
+# flock wave 2 · plan
+
+## Goal
+
+Land the flock app's six tasks so the Step-3 card has a ledger to read.
+
+## SDLC State
+
+integration-branch: main
+current: 4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Parse the ledger. DETAIL-ALPHA the parser reads the table and nothing else, so a later row cannot change it. complexity: standard | implementor | — | 30 | REQ-1 | lib/a.sh | — | pending |
+| T2 | 4 | build | ${T30}. DETAIL-BETA the boundary title is drawn whole. complexity: standard | implementor | — | 30 | REQ-1, REQ-2 | lib/b.sh | — | pending |
+| T3 | 4 | build | ${T30_EM}. DETAIL-GAMMA a title of thirty characters with dashes in it. complexity: standard | implementor | — | 30 | REQ-2 | lib/c.sh | — | pending |
+| T4 | 4 | build | Join the rows. DETAIL-DELTA joins what T1 parsed. complexity: complex | senior-implementor | T1, T3 | 45 | REQ-2 | lib/d.sh | — | pending |
+| T5 | 5 | test | Prove the join. DETAIL-EPSILON runs after the four. complexity: standard | implementor | T1, T2, T3, T4 | 45 | REQ-2 | tests/d.test.sh | — | pending |
+| T6 | 5 | test | Prove the pair. DETAIL-ZETA runs after two. complexity: standard | implementor | T1, T2 | 45 | REQ-1 | tests/e.test.sh | — | pending |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T0 | pending | — | — |
+FIXEOF
+whole_card step3 "$TITLES_PLAN"; TT="$WC_OUT"
+expect_eq "TITLES-1 step3 draws a plan whose cells open on titles of at most 30 characters, silently" "0|" "$WC_RC|$WC_ERR"
+expect_contains "TITLES-2 each task row opens on its title" "Parse the ledger" "$TT"
+expect_contains "TITLES-3 a title of exactly 30 characters is drawn whole" "$T30" "$TT"
+expect_contains "TITLES-3b …and so is a 30-character title that is more than 30 bytes (characters are counted, not bytes)" "$T30_EM" "$TT"
+expect_eq "TITLES-4 no detail after a title is on the card" "" "$(printf '%s\n' "$TT" | /usr/bin/grep -e DETAIL- -e 'complexity:' -e 'the parser reads')"
+TT_HDR="$(printf '%s\n' "$TT" | /usr/bin/grep '^  Tasks')"
+TT_T1="$(printf '%s\n' "$TT" | /usr/bin/grep '^    T1 ')"
+TT_T2="$(printf '%s\n' "$TT" | /usr/bin/grep '^    T2 ')"
+expect_eq "TITLES-5 serves is a column of its own: the header names it and T1's REQ-1 starts under it" "yes" \
+  "$([ -n "$TT_HDR" ] && [ "$(awk -v h="$TT_HDR" -v r="$TT_T1" 'BEGIN { print (index(h, "serves") == index(r, "REQ-1")) }')" = 1 ] && echo yes)"
+expect_contains "TITLES-5b …and a row serving two requirements lists both there" "REQ-1, REQ-2" "$TT_T2"
+expect_eq "TITLES-5c …before kind, depends and agent, which keep their columns" "yes" \
+  "$(awk -v h="$TT_HDR" 'BEGIN { print (index(h, "serves") < index(h, "kind") && index(h, "kind") < index(h, "depends") && index(h, "depends") < index(h, "agent")) }' | sed 's/^1$/yes/')"
+expect_contains "TITLES-6 four consecutive ids in depends print as a range" "T1–T4" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T5 ')"
+expect_eq "TITLES-6b …and not one by one" "" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T5 ' | /usr/bin/grep 'T1, T2')"
+expect_contains "TITLES-7 a run of two prints both ids" "T1, T2" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T6 ')"
+expect_absent "TITLES-7b …with no range" "T1–T2" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T6 ')"
+expect_contains "TITLES-7c ids that are not consecutive stay as written" "T1, T3" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T4 ')"
+expect_empty "TITLES-8 no line of the card exceeds the width, the out-of-project artifact path aside" "$(over_budget "$(printf '%s\n' "$TT" | /usr/bin/grep -v '^    plan  ')")"
+expect_contains "TITLES-8b the footer still offers the sub-views" "show evals <req> · show task <n> · explain <decision>" "$TT"
+
+whole_card step3 "$TITLES_PLAN" task 1; TT_V="$WC_OUT"
+expect_eq "TITLES-9 show task 1 exits 0" "0" "$WC_RC"
+expect_contains "TITLES-9b …and prints the title" "Parse the ledger" "$TT_V"
+expect_contains "TITLES-9c …and the whole cell, the detail and the tag too" "DETAIL-ALPHA the parser reads the table and nothing else, so a later row cannot change it. complexity: standard" \
+  "$(printf '%s\n' "$TT_V" | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_empty "TITLES-9d …folded inside the width" "$(over_budget "$TT_V")"
+expect_absent "TITLES-9e …and no other task's cell" "DETAIL-BETA" "$TT_V"
+whole_card step3 "$TITLES_PLAN" task T4; TT_V4="$WC_OUT"
+expect_contains "TITLES-9f the id may be given with its letter" "DETAIL-DELTA" "$TT_V4"
+whole_card step3 "$TITLES_PLAN" task 99
+expect_eq "TITLES-9g a task the plan lacks exits 2 and prints nothing on stdout" "2|" "$WC_RC|$WC_OUT"
+
+# A 31-character title, and a second offender, in one plan: both named, no card drawn, nothing cut.
+TITLES_BAD="${CARD_SANDBOX}/wave-03-flock.plan.md"
+sed -e "s/^| T3 | 4 | build | ${T30_EM}\./| T3 | 4 | build | ${T31}./" \
+    -e 's/Prove the pair\. DETAIL-ZETA/Prove the pair of rows is right. DETAIL-ZETA/' "$TITLES_PLAN" > "$TITLES_BAD"
+whole_card step3 "$TITLES_BAD"; TB_OUT="$WC_OUT"; TB_ERR="$WC_ERR"; TB_RC="$WC_RC"
+expect_eq "TITLES-10 a plan with a 31-character title is refused: exit 1, no card on stdout" "1|" "$TB_RC|$TB_OUT"
+expect_contains "TITLES-10b …naming the row, the length, the cap and the title whole" \
+  "REFUSED — task T3: title is 31 characters, the cap is 30: ${T31}" "$TB_ERR"
+expect_contains "TITLES-10c …and every other offender in the same refusal" \
+  "REFUSED — task T6: title is 31 characters, the cap is 30: Prove the pair of rows is right" "$TB_ERR"
+expect_eq "TITLES-10d …on two lines and no more" "2" "$(printf '%s\n' "$TB_ERR" | /usr/bin/grep -c .)"
+expect_absent "TITLES-10e …and no title cut or ellipsised" "…" "$TB_ERR"
+whole_card step3 "$TITLES_BAD" task 1
+expect_eq "TITLES-10f the sub-view is refused with the card" "1|" "$WC_RC|$WC_OUT"
+expect_eq "TITLES-11 the Step-3 text and its template each state the rule once" "1|1" \
+  "$(/usr/bin/grep -c 'title of at most 30' "${REPO}/skills/canonical-sdlc/steps/3.md")|$(/usr/bin/grep -c 'title of at most 30' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl")"
+
+# ============================================================
+section "§REQ-TITLES: a requirement heading carries a title of at most 30 characters, and the Step-1 card prints id, title and count"
+# ============================================================
+# fails-when: the card prints a provenance or a criterion, the count is wrong, `explain <requirement>` lacks the
+# provenance, a 31-character title is drawn, or the Step-1 text lacks the rule.
+RT_REQ="${CARD_SANDBOX}/wave-04-flock.requirements.md"
+cat > "$RT_REQ" <<FIXEOF
+---
+sdlc-step: 1
+working-branch: wave/04-flock
+integration-branch: main
+base-sha: abc1234
+---
+
+# flock wave 4 · requirements
+
+## Goal
+
+Ship the flock app's two requirements so the Step-1 card has titles to draw.
+
+## Not Doing
+
+- Nothing else: this fixture holds no excluded work.
+
+## Requirements and acceptance criteria
+
+### REQ-1 — ${T30}
+
+provenance: user 2026-09-16 "PROV-ALPHA the flock must sync"
+- AC-1.1 The flock syncs when two phones meet. Fails when: the second phone shows a stale list.
+- AC-1.2 A conflict keeps both edits and says so,
+  on one line. Fails when: an edit is dropped.
+- AC-1.3 The sync is quiet. Fails when: it prompts.
+
+### REQ-2 — Short title
+
+provenance: report §4 PROV-BETA
+- AC-2.1 The only criterion here. Fails when: it does not hold.
+FIXEOF
+whole_card step1 "$RT_REQ"; RT="$WC_OUT"
+expect_eq "REQ-TITLES-1 step1 draws a requirements file whose titles are within the cap, silently" "0|" "$WC_RC|$WC_ERR"
+RT_R1="$(printf '%s\n' "$RT" | /usr/bin/grep '^    REQ-1 ')"
+expect_eq "REQ-TITLES-2 a requirement prints its id, its title and its criteria count on one line" \
+  "    REQ-1   ${T30}  ACs 3" "$RT_R1"
+expect_eq "REQ-TITLES-2b …and the second likewise, its count in the same column" "    REQ-2   $(printf '%-30s' 'Short title')  ACs 1" \
+  "$(printf '%s\n' "$RT" | /usr/bin/grep '^    REQ-2 ')"
+expect_eq "REQ-TITLES-3 the card prints no provenance and no criterion" "" \
+  "$(printf '%s\n' "$RT" | /usr/bin/grep -e 'PROV-' -e provenance -e 'The flock syncs' -e 'Fails when')"
+expect_empty "REQ-TITLES-3b no line of the card exceeds the width, the out-of-project artifact path aside" "$(over_budget "$(printf '%s\n' "$RT" | /usr/bin/grep -v '^    requirements  ')")"
+expect_contains "REQ-TITLES-3c the footer offers explain for a requirement and for Not Doing" \
+  "explain <requirement> · explain not-doing" "$RT"
+whole_card step1 "$RT_REQ" explain REQ-1; RT_E="$WC_OUT"
+expect_eq "REQ-TITLES-4 explain REQ-1 exits 0" "0" "$WC_RC"
+expect_contains "REQ-TITLES-4b …and prints the title" "$T30" "$RT_E"
+expect_contains "REQ-TITLES-4c …and the provenance whole" 'user 2026-09-16 "PROV-ALPHA the flock must sync"' \
+  "$(printf '%s\n' "$RT_E" | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_contains "REQ-TITLES-4d …and every criterion, a wrapped one joined" "A conflict keeps both edits and says so, on one line. Fails when: an edit is dropped." \
+  "$(printf '%s\n' "$RT_E" | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_absent "REQ-TITLES-4e …and nothing of the other requirement" "PROV-BETA" "$RT_E"
+expect_empty "REQ-TITLES-4f …folded inside the width" "$(over_budget "$RT_E")"
+whole_card step1 "$RT_REQ" explain 2
+expect_contains "REQ-TITLES-4g the bare number names a requirement too" "PROV-BETA" "$WC_OUT"
+whole_card step1 "$RT_REQ" explain REQ-9
+expect_eq "REQ-TITLES-4h a requirement the file lacks exits 2 and prints nothing on stdout" "2|" "$WC_RC|$WC_OUT"
+
+RT_BAD="${CARD_SANDBOX}/wave-05-flock.requirements.md"
+sed -e "s/^### REQ-2 — Short title/### REQ-2 — ${T31}/" "$RT_REQ" > "$RT_BAD"
+whole_card step1 "$RT_BAD"
+expect_eq "REQ-TITLES-5 a 31-character requirement title is refused: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
+expect_contains "REQ-TITLES-5b …naming the requirement, the length, the cap and the title whole" \
+  "REFUSED — requirement REQ-2: title is 31 characters, the cap is 30: ${T31}" "$WC_ERR"
+whole_card step1 "$RT_BAD" explain REQ-1
+expect_eq "REQ-TITLES-5c …and the sub-view is refused with it" "1|" "$WC_RC|$WC_OUT"
+expect_eq "REQ-TITLES-6 the Step-1 text and its template each state the rule on one line" "1|1" \
+  "$(/usr/bin/grep -c 'at most 30' "${REPO}/skills/canonical-sdlc/steps/1.md")|$(/usr/bin/grep -c 'at most 30' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/1.md.tmpl")"
+
+# ============================================================
+section "§NOT-DOING-TITLES: a Not Doing item opens on a title and a colon, and the card prints the titles"
+# ============================================================
+# fails-when: the card prints a reason, `explain not-doing` prints less than the items, a 31-character title is drawn,
+# or the Step-1 text lacks the rule.
+ND_REQ="${CARD_SANDBOX}/wave-06-flock.requirements.md"
+sed -e '/^- Nothing else: this fixture holds no excluded work\.$/d' "$RT_REQ" > "$ND_REQ"
+awk '{ print } /^## Not Doing$/ { print ""
+  print "- Offline mode: ND-REASON-ALPHA the flock only syncs when two phones are in range, so no queue is kept."
+  print "  A second line of the same reason, ND-REASON-BETA."
+  print "- Group chat: ND-REASON-GAMMA out of scope."
+  print "- Short item without a reason" }' "$ND_REQ" > "${ND_REQ}.n" && mv "${ND_REQ}.n" "$ND_REQ"
+whole_card step1 "$ND_REQ"; NT="$WC_OUT"
+NT_BLOCK="$(printf '%s\n' "$NT" | sed -n '/^  Not Doing$/,/^$/p')"
+expect_eq "NOT-DOING-TITLES-1 step1 draws, silently" "0|" "$WC_RC|$WC_ERR"
+expect_eq "NOT-DOING-TITLES-2 the Not Doing block is each item's title on a line of its own" \
+  "  Not Doing
+    Offline mode
+    Group chat
+    Short item without a reason
+" "${NT_BLOCK}
+"
+expect_eq "NOT-DOING-TITLES-3 no reason is on the card" "" "$(printf '%s\n' "$NT" | /usr/bin/grep -e ND-REASON -e 'only syncs' -e 'out of scope')"
+whole_card step1 "$ND_REQ" explain not-doing; NT_E="$WC_OUT"
+NT_E_FLAT="$(printf '%s\n' "$NT_E" | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_eq "NOT-DOING-TITLES-4 explain not-doing exits 0" "0" "$WC_RC"
+expect_contains "NOT-DOING-TITLES-4b …and prints the first item whole, its wrapped line joined" \
+  "Offline mode: ND-REASON-ALPHA the flock only syncs when two phones are in range, so no queue is kept. A second line of the same reason, ND-REASON-BETA." "$NT_E_FLAT"
+expect_contains "NOT-DOING-TITLES-4c …and the second whole" "Group chat: ND-REASON-GAMMA out of scope." "$NT_E_FLAT"
+expect_empty "NOT-DOING-TITLES-4d …folded inside the width" "$(over_budget "$NT_E")"
+
+ND_BAD="${CARD_SANDBOX}/wave-07-flock.requirements.md"
+sed -e "s/^- Group chat: ND-REASON-GAMMA/- ${T31}: ND-REASON-GAMMA/" "$ND_REQ" > "$ND_BAD"
+whole_card step1 "$ND_BAD"
+expect_eq "NOT-DOING-TITLES-5 a 31-character title is refused: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
+expect_contains "NOT-DOING-TITLES-5b …naming the item, the length and the title whole" \
+  "REFUSED — not-doing 2: title is 31 characters, the cap is 30: ${T31}" "$WC_ERR"
+ND_NOCOLON="${CARD_SANDBOX}/wave-08-flock.requirements.md"
+sed -e "s/^- Short item without a reason$/- ${T31} and no colon after it/" "$ND_REQ" > "$ND_NOCOLON"
+whole_card step1 "$ND_NOCOLON"
+expect_contains "NOT-DOING-TITLES-5c an item with no colon is all title, and refused when it is over the cap" \
+  "REFUSED — not-doing 3: title is 53 characters, the cap is 30: ${T31} and no colon after it" "$WC_ERR"
+expect_eq "NOT-DOING-TITLES-6 the Step-1 text states the colon rule" "1|1" \
+  "$(/usr/bin/grep -c '<title>: <reason>' "${REPO}/skills/canonical-sdlc/steps/1.md")|$(/usr/bin/grep -c '<title>: <reason>' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/1.md.tmpl")"
+
+# ============================================================
+section "§DESIGN-TITLES: a decision carries a title of at most 30 characters, and the Risks section is drawn whole"
+# ============================================================
+# fails-when: the card prints a decision's detail, a 31-character decision title is drawn, a risk is cut or refused
+# for its length, the section still reads Worth your eye, or the Step-2 text lacks either rule.
+DT_SPEC="${CARD_SANDBOX}/wave-09-flock.spec.md"
+RISK_LONG="The sync trusts the phone clock, so two phones a minute apart can each believe the other edit is newer, and the list then keeps whichever edit it saw last. We have not measured how often that happens in the field, and a wrong guess here loses a real edit. A fix would add a counter to every row, which is a larger change than this run takes."
+cat > "$DT_SPEC" <<FIXEOF
+---
+sdlc-step: 2
+working-branch: wave/09-flock
+integration-branch: main
+base-sha: abc1234
+adrs: adrs/epic-99/adr-001-sync.md
+---
+
+# flock wave 9 · spec
+
+## Goal
+
+Answer the flock's two requirements with a design small enough to read whole.
+
+## Design
+
+The flock syncs two phones and draws one list.
+
+### Component boundaries and interfaces
+
+- **D1 — ${T30}** DETAIL-ONE the sync owns the merge and hands the list to the view. (D1; REQ-1)
+- **D2 — Short title.** DETAIL-TWO the view only draws. (D2; REQ-1, REQ-2)
+
+### ADR pointers
+
+- ADR-001 — the sync ruling: \`adrs/epic-99/adr-001-sync.md\` (D1).
+
+### Approach
+
+The sync first, then the view.
+
+### Risks
+
+- ${RISK_LONG}
+- A short one.
+
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture run | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
+FIXEOF
+whole_card step2 "$DT_SPEC"; DT="$WC_OUT"
+expect_eq "DESIGN-TITLES-1 step2 draws a spec whose decision titles are within the cap, silently" "0|" "$WC_RC|$WC_ERR"
+DT_D1="$(printf '%s\n' "$DT" | /usr/bin/grep '^    D1 ')"
+DT_HDR="$(printf '%s\n' "$DT" | /usr/bin/grep '^  Decisions')"
+expect_contains "DESIGN-TITLES-2 a decision prints its id and its title, a 30-character one whole" "D1   ${T30}" "$DT_D1"
+expect_contains "DESIGN-TITLES-2b …its serves and its ADR" "REQ-1" "$DT_D1"
+expect_contains "DESIGN-TITLES-2c …the ADR by file name" "adr-001-sync.md" "$DT_D1"
+expect_contains "DESIGN-TITLES-2d …and none for a decision no ADR names" "none" "$(printf '%s\n' "$DT" | /usr/bin/grep '^    D2 ')"
+expect_eq "DESIGN-TITLES-2e …the title with its trailing period taken off" "Short title" \
+  "$(printf '%s\n' "$DT" | /usr/bin/grep '^    D2 ' | sed -e 's/^    D2   //' -e 's/ *REQ-.*$//')"
+expect_eq "DESIGN-TITLES-3 no decision detail is on the card" "" "$(printf '%s\n' "$DT" | /usr/bin/grep 'DETAIL-')"
+expect_contains "DESIGN-TITLES-3b the header names serves and ADR" "serves" "$DT_HDR"
+expect_empty "DESIGN-TITLES-3c no line of the card exceeds the width, the out-of-project artifact path aside" "$(over_budget "$(printf '%s\n' "$DT" | /usr/bin/grep -v '^    spec  ')")"
+whole_card step2 "$DT_SPEC" explain D1; DT_E="$WC_OUT"
+expect_eq "DESIGN-TITLES-4 explain D1 exits 0" "0" "$WC_RC"
+expect_contains "DESIGN-TITLES-4b …and prints the detail" "DETAIL-ONE the sync owns the merge and hands the list to the view." \
+  "$(printf '%s\n' "$DT_E" | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_absent "DESIGN-TITLES-4c …and not the other decision's" "DETAIL-TWO" "$DT_E"
+whole_card step2 "$DT_SPEC" explain D9
+expect_eq "DESIGN-TITLES-4d a decision the spec lacks exits 2 and prints nothing on stdout" "2|" "$WC_RC|$WC_OUT"
+
+DT_RISKS="$(printf '%s\n' "$DT" | sed -n '/^  Risks$/,/^$/p')"
+expect_eq "DESIGN-TITLES-5 the section is drawn under the word Risks" "1|0" \
+  "$(printf '%s\n' "$DT" | /usr/bin/grep -c '^  Risks$')|$(printf '%s\n' "$DT" | /usr/bin/grep -c 'Worth your eye')"
+expect_eq "DESIGN-TITLES-5b a three-sentence risk is drawn whole, folded, none of its words cut" "$RISK_LONG" \
+  "$(printf '%s\n' "$DT_RISKS" | sed -n '2,$p' | awk '/^    A short one\./ { exit } { print }' | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_eq "DESIGN-TITLES-5c …on more than one line, each inside the width" "yes|" \
+  "$([ "$(printf '%s\n' "$DT_RISKS" | /usr/bin/grep -c .)" -gt 3 ] && echo yes)|$(over_budget "$DT_RISKS")"
+expect_contains "DESIGN-TITLES-5d …and a short risk beside it" "    A short one." "$DT_RISKS"
+expect_absent "DESIGN-TITLES-5e …and no ellipsis anywhere in the section" "…" "$DT_RISKS"
+
+DT_OLD="${CARD_SANDBOX}/wave-10-flock.spec.md"
+sed -e 's/^### Risks$/### Worth your eye/' "$DT_SPEC" > "$DT_OLD"
+whole_card step2 "$DT_OLD"
+expect_eq "DESIGN-TITLES-6 a spec written with the old heading still draws, under the word Risks" "0|1|0" \
+  "$WC_RC|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c '^  Risks$')|$(printf '%s\n' "$WC_OUT" | /usr/bin/grep -c 'Worth your eye')"
+expect_contains "DESIGN-TITLES-6b …with the risk whole" "$(printf '%s' "$RISK_LONG" | cut -c1-40)" "$WC_OUT"
+
+DT_BAD="${CARD_SANDBOX}/wave-11-flock.spec.md"
+sed -e "s/^- \*\*D2 — Short title\.\*\*/- **D2 — ${T31}**/" "$DT_SPEC" > "$DT_BAD"
+whole_card step2 "$DT_BAD"
+expect_eq "DESIGN-TITLES-7 a 31-character decision title is refused: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
+expect_contains "DESIGN-TITLES-7b …naming the decision, the length and the title whole" \
+  "REFUSED — decision D2: title is 31 characters, the cap is 30: ${T31}" "$WC_ERR"
+whole_card step2 "$DT_BAD" ownership
+expect_eq "DESIGN-TITLES-7c …and the sub-views are refused with it" "1|" "$WC_RC|$WC_OUT"
+yn() { [ "$1" -ge 1 ] && echo yes || echo no; }
+D2_TXT="${REPO}/skills/canonical-sdlc/steps/2.md"; D2_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl"
+expect_eq "DESIGN-TITLES-8 the Step-2 text and its template name the Risks section and not the old heading" "yes|yes|0|0" \
+  "$(yn "$(/usr/bin/grep -c '### Risks' "$D2_TXT")")|$(yn "$(/usr/bin/grep -c '### Risks' "$D2_TMPL")")|$(/usr/bin/grep -c 'Worth your eye' "$D2_TXT")|$(/usr/bin/grep -c 'Worth your eye' "$D2_TMPL")"
+expect_eq "DESIGN-TITLES-8b …and state the decision title rule and the judged, uncapped risk" "1|1" \
+  "$(/usr/bin/grep -c 'the title at most 30 characters' "$D2_TXT")|$(/usr/bin/grep -c 'own judgment, one to three sentences' "$D2_TXT")"
 
 
 finish

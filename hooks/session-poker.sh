@@ -1169,12 +1169,13 @@ $1"; shift ;;
   # shape is the usage error; whether the words stand in a typed prompt is the verb's own refusal (1).
   # OR THREE (wave-36 T8; D9): the finding, `fixed`, and the row that fixed it, `T<n>`; words or a why
   # after it are the usage error. Whether the plan's table carries the row is the verb's own refusal (1).
+  # `carried` takes the same three: the finding stays open and closes when the named row lands.
   finding-move)
-    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why; or <record>#<n>, fixed, and the row that fixed it."
+    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it."
     FM_ROW=""
     case "${2:-}" in
       defer|fix) [ $# -eq 4 ] && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE" ;;
-      fixed)
+      fixed|carried)
         [ $# -eq 3 ] || usage "$FM_USAGE"
         case "$3" in T[0123456789]*) : ;; *) usage "$FM_USAGE" ;; esac
         case "${3#T}" in *[!0123456789]*) usage "$FM_USAGE" ;; esac
