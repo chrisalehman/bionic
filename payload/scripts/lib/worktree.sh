@@ -1431,15 +1431,20 @@ _wt_units_load() {  # -> 0 once lib/units.sh's table readers are loaded
   [ -r "$lib" ] && . "$lib" 2>/dev/null
   declare -F units_rows >/dev/null 2>&1
 }
+# A Tasks `worktree` cell as the tree it names: a leading `./` and any trailing slashes are not part of the name,
+# and a relative cell is joined to <root>. rc 1 for an empty cell (`-`, `—`).
+_wt_cell_tree() {  # <root> <cell>
+  local cell="${2:-}"
+  while :; do
+    case "$cell" in ./*) cell="${cell#./}" ;; */) cell="${cell%/}" ;; *) break ;; esac
+  done
+  case "$cell" in ''|-|—) return 1 ;; /*) printf '%s' "$cell" ;; *) printf '%s/%s' "${1%/}" "$cell" ;; esac
+}
 _wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
   local rec cell id
   _wt_units_load || return 1
   while IFS= read -r rec; do
-    cell="$(units_field "$rec" worktree)"
-    while :; do   # a leading `./` and any trailing slashes are not part of the name (wave-27 T50, N4)
-      case "$cell" in ./*) cell="${cell#./}" ;; */) cell="${cell%/}" ;; *) break ;; esac
-    done
-    case "$cell" in ''|-|—) continue ;; /*) : ;; *) cell="${1}/${cell}" ;; esac
+    cell="$(_wt_cell_tree "$1" "$(units_field "$rec" worktree)")" || continue
     if [ "$cell" = "$3" ]; then
       # An id holding white space would break the header's `key=value` grammar: no row (`—`).
       id="$(units_field "$rec" id)"
@@ -2029,6 +2034,82 @@ worktree_marker() {  # <tree>
   gd="$(git -C "${1:-}" rev-parse --absolute-git-dir 2>/dev/null)" && [ -f "$gd/bionic-agent" ] || return 1
   IFS= read -r m < "$gd/bionic-agent" || [ -n "$m" ] || return 1
   [ -n "$m" ] && printf '%s' "$m"
+}
+
+# THE TREE'S OWN RECORD: identity from place. `spawn-worktree.sh create --for <name>` gives a linked tree one
+# `tree/v1` line in its own git directory, `<git-dir>/bionic-tree`, beside the marker above:
+#   tree/v1|path=<abs tree>|plan=<abs plan or none>|row=<id or ->|worker=<name>|spawned-by=<session>|at=<ISO-UTC>
+# the plan the spawning session is bound to, the plan row whose agent cell holds the name when one does at spawn,
+# the worker and the spawning session. It lives exactly as long as the tree (`git worktree remove` takes it, and no
+# session's clear or state sweep can), so a landing needs no session that remembers the spawn: every reader
+# of a tree asks it before any session's binding (lib/line.sh `line_tree_run`). The path is the key, read back and
+# compared: a record that names another tree's path is no record of this one.
+TREE_RECORD_SCHEMA="tree/v1"
+
+_wt_tree_record_file() {  # <tree> -> <its own git-dir>/bionic-tree; rc 1 when <tree> is no linked tree
+  local out common="" gd=""
+  out="$(git -C "${1:-}" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
+  { IFS= read -r common; IFS= read -r gd; } <<< "$out"
+  [ -n "$gd" ] && [ -d "$gd" ] && [ "$gd" != "$common" ] || return 1
+  printf '%s/bionic-tree' "$gd"
+}
+
+# The plan's `## Tasks` row whose <column> cell is <value>, as units_rows prints it; rc 1 when none is.
+_wt_row_where() {  # <plan> <column> <value>
+  local rec
+  [ -n "${3:-}" ] && [ -f "${1:-}" ] && _wt_units_load || return 1
+  while IFS= read -r rec; do
+    [ -n "$rec" ] && [ "$(units_field "$rec" "$2")" = "$3" ] || continue
+    printf '%s\n' "$rec"; return 0
+  done <<EOF
+$(units_rows "$1" 2>/dev/null)
+EOF
+  return 1
+}
+
+# Write the record for <name>'s tree. Silent rc 0, or the reason on stdout and rc 1.
+worktree_record_tree() {  # <root> <sid> <name> <abs tree>
+  local root="${1:-}" sid="${2:-}" name="${3:-}" tree="${4:-}" f plan row="" rec v
+  f="$(_wt_tree_record_file "$tree")" || { printf 'not-a-linked-worktree'; return 1; }
+  plan="$(_wt_workspace_plan "$root" "$sid")" || { printf 'run-library-unloadable'; return 1; }
+  [ "$plan" = none ] || ! _wt_units_load || { rec="$(_wt_row_where "$plan" agent "$name")" && row="$(units_field "$rec" id)"; }
+  case "$row" in ''|*[[:space:]]*) row=- ;; esac
+  for v in "$tree" "$plan" "$row" "$name" "$sid"; do
+    _wt_workspace_value_bad "$v" && { printf 'tree-field-unrecordable'; return 1; }
+  done
+  printf '%s|path=%s|plan=%s|row=%s|worker=%s|spawned-by=%s|at=%s\n' "$TREE_RECORD_SCHEMA" \
+    "$tree" "$plan" "$row" "$name" "$sid" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f.$$" 2>/dev/null \
+    && mv -f "$f.$$" "$f" 2>/dev/null \
+    || { rm -f "$f.$$"; printf 'tree-record-unwritable'; return 1; }
+}
+
+# worktree_tree_record <tree> -> the tree's record line; rc 1 when it carries none of its own.
+worktree_tree_record() {  # <tree>
+  local tree f line=""
+  tree="$(_wt_abs "${1:-}")" || return 1
+  f="$(_wt_tree_record_file "$tree")" && [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  IFS= read -r line < "$f" || [ -n "$line" ] || return 1
+  line="${line%$'\r'}"
+  case "$line" in "${TREE_RECORD_SCHEMA}|"*) : ;; *) return 1 ;; esac
+  [ "$(_wt_field "$line" path)" = "$tree" ] || return 1
+  printf '%s\n' "$line"
+}
+
+# A ROW'S TREE BY THE PLAN'S TABLE: the `worktree` cell of the `## Tasks` row whose agent cell is <name>, in the plan
+# each <sid> in turn is bound to, the first that names one. It is printed whether or not a tree stands there, so the
+# caller can say where it looked. rc 1 when no bound plan names a tree for the name. The session's workspace record
+# answers a tree its own carrier made; this answers one a predecessor made, which the record of no live session holds.
+worktree_for_agent() {  # <root> <name> <sid>...
+  local root="${1:-}" name="${2:-}" s plan rec
+  shift 2
+  _wt_units_load || return 1
+  for s in "$@"; do
+    [ -n "$s" ] || continue
+    plan="$(_wt_workspace_plan "$root" "$s")" && [ "$plan" != none ] || continue
+    rec="$(_wt_row_where "$plan" agent "$name")" || continue
+    _wt_cell_tree "$root" "$(units_field "$rec" worktree)" && return 0
+  done
+  return 1
 }
 
 # rc 0 when no component of the absolute <path> is a symbolic link, so the path is its own

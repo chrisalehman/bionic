@@ -156,9 +156,12 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
         session or when the record could not be written. --for also writes
         the name, one line, to the tree's own git directory as bionic-agent,
-        which the gate reads as who asks when no name is carried. Refused when the
-        project's volume has less free space than the largest tree already
-        there (disk-low, naming both figures in KB).
+        which the gate reads as who asks when no name is carried, and the
+        tree's own record beside it as bionic-tree (its path, the session's
+        bound plan, the row whose agent cell is <name>, the worker and the
+        session), which ready and land read before any session's binding.
+        Refused when the project's volume has less free space than the
+        largest tree already there (disk-low, naming both figures in KB).
 mark    re-dispatch: rewrites a linked tree's bionic-agent to <name>, so
         the successor row's suites ask the gate as it. Refused on the main
         checkout (not-a-linked-worktree) and on a name that would break the
@@ -438,6 +441,11 @@ cmd_create() {
     # shellcheck source=/dev/null
     why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
             worktree_mark "$wt" "$name" )" || abort_created "${why:-marker-unwritable}"
+    # The tree's own record: its plan, row, worker and spawning session, read by every later landing before any
+    # session's binding, so a tree that cannot describe itself is undone like one nobody can find by its name.
+    # shellcheck source=/dev/null
+    why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
+            worktree_record_tree "$main_root" "$sid" "$name" "$wt" )" || abort_created "${why:-tree-record-unwritable}"
   fi
 
   # After the tree is verified and recorded, so an aborted create leaves no exclude line behind;

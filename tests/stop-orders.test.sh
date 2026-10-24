@@ -372,7 +372,7 @@ section "Section 6: standdown LANDS NOTHING; a row is stoppable by its roster ma
 # THE LANDING IS THE LINE'S (wave-28 T6; D7). Until 1.13.0 standdown merged each discharged row's
 # tree (bionic 1.4.0, AC-28, C1) through `worktree_land_for_session`. A row now lands through `ready`
 # (the line's one publish), which marks its roster line `landed=<40-hex> landed_at=<ISO-UTC>`, and
-# the writer's tree goes at `stopped <name>` (Section 10). So standdown merges nothing, removes
+# the writer's tree goes at `stopped <name>` (§TREE). So standdown merges nothing, removes
 # nothing and moves no ref: it reports each tree as it stands. A row carrying the mark is stoppable
 # whatever its deliverable says: the mark is the landing's own fact.
 #
@@ -937,6 +937,69 @@ if [ -d "$R14/.worktrees/still-working" ] && [ -f "$R14/.worktrees/still-working
 else
   no "…its tree stands, the partial work still in it"
 fi
+
+
+# ============================================================
+section "§TREE: stopped finds a landed row's tree by the plan's Tasks cell when the session's record lacks it, removes it, and names it"
+# ============================================================
+#
+# THE TREE GOES AT THE STOP, WHOEVER SPAWNED IT. A row's tree is recorded under the session whose carrier made
+# it; after a `/clear` that is a predecessor, and the name's convention spelling (`.worktrees/w45-t1`) is never
+# the dispatcher's (`.worktrees/45-T1`). So `stopped` reads the plan's `## Tasks` worktree cell for the row whose
+# agent cell is the name, removes that tree when the row carries the landing's mark, and says what it removed;
+# where it finds no tree there, it says that too, naming where it looked.
+# FIXTURE FIDELITY: the tree is made by `spawn-worktree.sh create --for` under a predecessor session, the mark by
+# the roster's one marker (`so_mark`), the panel by tests/lib/live-answer.sh.
+# fails-when: a predecessor's tree is left standing in silence.
+RT="$(make_repo stopped-tree)"; RT_REAL="$(cd "$RT" && pwd -P)"
+echo seed > "$RT/README.md"; git -C "$RT" add README.md >/dev/null 2>&1; git -C "$RT" commit -qm seed >/dev/null 2>&1
+RT_P="$RT/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${RT_P%/*}"
+cat > "$RT_P" <<'RTP'
+---
+working-branch: wave/fixture
+---
+# fixture plan
+
+## SDLC State
+
+current: 4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | row one | w45-T1 | — | | 10 | REQ-1 | T1.txt | .worktrees/45-T1 | | active |
+| T2 | 4 | build | row two | w45-T2 | — | | 10 | REQ-1 | T2.txt | .worktrees/45-T2 | | active |
+RTP
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$RT_P" > "$RT/.bionic/tmp/engaged-$SID.state"
+RT_PRED="77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+( cd "$RT" && CLAUDE_CODE_SESSION_ID="$RT_PRED" bash "$HERE/../payload/scripts/spawn-worktree.sh" create \
+    "$(git -C "$RT" rev-parse HEAD)" wt/45-T1 --for w45-T1 >/dev/null 2>&1 )
+RT_T1="$RT_REAL/.worktrees/45-T1"
+echo one > "$RT_T1/T1.txt"; git -C "$RT_T1" add T1.txt >/dev/null 2>&1; git -C "$RT_T1" commit -qm "T1 work" >/dev/null 2>&1
+RT_C1="$(git -C "$RT_T1" rev-parse HEAD)"
+so_roster_row "$RT" w45-T1 ".bionic/docs/record/never-t1.md" "" "w45-T1@session-6c85684c"
+so_mark "$RT" w45-T1 "$RT_C1"
+so_roster_row "$RT" w45-T2 ".bionic/docs/record/never-t2.md" "" "w45-T2@session-6c85684c"
+so_mark "$RT" w45-T2 "$RT_C1"
+RTSLUG=$(so_slug "$RT"); mkdir -p "$R8CFG/projects/$RTSLUG"
+plant_live "$R8CFG/projects/$RTSLUG/$SID.jsonl" fresh
+rt_ws() {  # <sid> -> the tree the session's workspace record names for w45-T1, then rc=<n>
+  bash -c '. "$1" && workspace_for_name "$2" "$3" w45-T1; echo "rc=$?"' _ \
+    "$HERE/../payload/scripts/lib/worktree.sh" "$RT_REAL" "$1" 2>/dev/null
+}
+expect_eq "(tt0) the predecessor's record names the tree" "$(printf '%s\nrc=0' "$RT_T1")" "$(rt_ws "$RT_PRED")"
+expect_eq "(tt0b) …and this session's names none" "rc=1" "$(rt_ws "$SID")"
+run_orders_cfg "$RT" stopped w45-T1
+expect_status "(tt1) stopped closes the landed row (exit 0)" 0 "$ST"
+expect_contains "(tt1b) …finds its tree by the Tasks cell, removes it and names it" \
+  "stopped: w45-T1 — its tree is removed: ${RT_T1} (branch wt/45-T1 stays; landed ${RT_C1:0:12}" "$OUT"
+expect_false "(tt2) …the tree is gone" test -d "$RT_T1"
+expect_eq "(tt2b) …and its branch stays" "$RT_C1" "$(git -C "$RT" rev-parse --verify -q wt/45-T1)"
+run_orders_cfg "$RT" stopped w45-T2
+expect_status "(tt3) stopped closes a landed row whose cell names no tree on disk (exit 0)" 0 "$ST"
+expect_contains "(tt3b) …and says it found no tree, naming where it looked" \
+  "stopped: w45-T2 — its tree is not found: ${RT_REAL}/.worktrees/45-T2" "$OUT"
 
 
 # ============================================================

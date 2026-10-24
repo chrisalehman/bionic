@@ -999,4 +999,126 @@ expect_eq "(cf2) a declaration the range changes no file of says nothing (rc 1)"
 printf 'release-check: bash chk/a.sh\n' > "$CF/.bionic/config.yaml"
 expect_eq "(cf3) with no declared list the check has no files, whatever its command names (rc 1)" "1|" \
   "$(o="$(_wt_check_judge "$CF" "$CF0" "$CF1")"; echo "$?|$o")"
+section "§SUCCESSOR: a tree spawned under one session lands by ready from another; the tree's own record names its run"
+#
+# THE TREE DESCRIBES ITSELF. `create --for` gives a tree its own record (its plan, its row, its worker and the
+# spawning session), and `ready` reads it before the session's binding: a conversation cleared between the spawn
+# and the landing leaves a new session id with no binding and no roster, and the row still lands. The launch row
+# is found on the spawning session's roster when the asking session's holds none.
+# FIXTURE FIDELITY: the landing line's model world (tests/lib/world.sh), built by the landing-line prelude's own
+# `ll_world`, `ll_launch` and `ll_carrier_env`, read by name; every row tree here is made by `spawn-worktree.sh
+# create --for`, the verb whose record it stands for.
+# fails-when: `ready` from a successor session refuses `no-bound-plan` or `no-launch-row`.
+# This suite's own `bind_plan` (Group 7) writes a bare marker and prints the plan; the world binds through the real
+# one (lib/binding.sh, by tests/lib/bound-marker.sh), so the suite's is put away before the world is built.
+unset -f bind_plan
+. "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/world.sh"
+wt_import_fn() {  # <name> -> the function, defined here, read out of the landing-line prelude
+  local body
+  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$(dirname "$0")/landing-line.prelude.sh")"
+  [ -n "$body" ] || { echo "wt_import_fn: no $1 in landing-line.prelude.sh" >&2; return 1; }
+  eval "$body"
+}
+for f in ll_world ll_launch ll_carrier_env; do wt_import_fn "$f" || no "($f is read out of landing-line.prelude.sh)" "absent"; done
+ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+ll_carrier_env
+sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made under <sid>, its plan row and one commit of its own
+  local r="$1" t="$2" s="$3" p out tree
+  p="$(ll_plan "$r")"
+  printf '| %s | 4 | build | row %s | wx-%s | — | | 10 | REQ-1 | %s.txt | .worktrees/%s | | active |\n' "$t" "$t" "$t" "$t" "$t" >> "$p"
+  awk -v t="$t" '{ print } /^- T2: active$/ { print "- " t ": active" }' "$p" > "$p.n" && mv "$p.n" "$p"
+  out="$( cd "$r" && CLAUDE_CODE_SESSION_ID="$s" bash "$SPAWN" create "$(git -C "$r" rev-parse wave/x)" "wt/$t" --for "wx-$t" 2>/dev/null )" || return 1
+  tree="$(printf '%s\n' "$out" | tr ' ' '\n' | sed -n 's/^path=//p')"
+  [ -d "$tree" ] || return 1
+  printf '%s work\n' "$t" > "$tree/$t.txt"
+  git -C "$tree" add "$t.txt" && git -C "$tree" commit -qm "$t: one commit" || return 1
+  printf '%s' "$tree"
+}
+sc_ready() {  # <tree> <sid> -> SC_OUT, SC_RC: ready from the tree, as <sid>
+  case "$1" in "$WORLD_ROOT"/*) [ -d "$1" ] || { SC_OUT="no tree at $1"; SC_RC=99; return; } ;; *) SC_OUT="not a world tree: $1"; SC_RC=99; return ;; esac
+  SC_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$2" bash "$SPAWN" ready 2>&1 )"; SC_RC=$?
+}
+sc_head() {  # <ready's output> -> its LANDED line's first two words, else its first line's
+  local l
+  l="$(printf '%s\n' "$1" | grep -m1 '^LANDED ')" || l="$(printf '%s\n' "$1" | head -1)"
+  printf '%s\n' "$l" | cut -d' ' -f1-2
+}
+SUCC="33333333-4444-4555-8666-777777777777"     # the successor: no binding, no roster
+SUCC2="44444444-5555-4666-8777-888888888888"    # a successor rebound to the same plan, its roster empty
+
+SC="$(ll_world)"; SC_P="$(ll_plan "$SC")"
+SC_T3="$(sc_spawn "$SC" T3 "$WORLD_SID")"; ll_launch "$SC" T3 a.test.sh
+expect_match "(su0) the spawned tree's own record names its plan, its row, its worker and the spawning session" \
+  "tree/v1|path=${SC_T3}|plan=${SC_P}|row=T3|worker=wx-T3|spawned-by=${WORLD_SID}|at=*" "$(worktree_tree_record "$SC_T3" 2>/dev/null)"
+expect_false "(su0b) …and the successor holds no binding of its own" test -e "$SC/.bionic/tmp/engaged-${SUCC}.state"
+sc_ready "$SC_T3" "$SUCC"
+expect_eq "(su1) ready from a successor session with no binding lands the tree a predecessor spawned (exit 0)" "0 LANDED T3" \
+  "$SC_RC $(sc_head "$SC_OUT")"
+[ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
+SC_K3="$(git -C "$SC" rev-parse wave/x)"
+expect_contains "(su2) …and the landing is marked on the launch row, on the spawning session's roster" "|landed=${SC_K3}|" \
+  "$(grep '|name=wx-T3|' "$SC/.bionic/tmp/roster-${WORLD_SID}.state" | tail -1)"
+# The binding still decides for a tree that carries no record of its own: the world's T1 was made by `git worktree add`.
+sc_ready "$SC/.worktrees/T1" "$SUCC"
+expect_eq "(su3) a tree with no record of its own, from the same successor, is refused by the binding as before (exit 2)" \
+  "2 spawn-worktree: REFUSED" "$SC_RC $(sc_head "$SC_OUT")"
+expect_contains "(su3b) …naming the fallback" "reason=no-bound-plan state=fallback" "$SC_OUT"
+# A successor bound to the same plan, whose own roster holds no row: the launch row is the spawning session's.
+bound_marker "$SC" "$SUCC2" "$SC_P" >/dev/null
+SC_T4="$(sc_spawn "$SC" T4 "$WORLD_SID")"; ll_launch "$SC" T4 b.test.sh
+sc_ready "$SC_T4" "$SUCC2"
+expect_eq "(su4) ready from a rebound successor whose roster holds no row lands on the spawning session's launch row (exit 0)" \
+  "0 LANDED T4" "$SC_RC $(sc_head "$SC_OUT")"
+[ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
+expect_contains "(su4b) …proved on that launch row's suite" "|ev=ready|row=T4|" \
+  "$(grep '|suites=b.test.sh|' "$SC/.bionic/docs/record/wave-x/landing-proofs.log" 2>/dev/null)"
+
+section "§MISMATCH: a tree whose record names another plan than the binding is refused naming both; close-out's own last landing on a closed plan is admitted"
+#
+# The binding is a check on the tree's record: a session bound to a different plan than the tree's is refused,
+# naming both, and nothing moves. A closed plan is admitted only for the session bound to it, the one close-out
+# lands its last rows from; any other session is refused naming the closed plan.
+# fails-when: a stale tree lands on the wrong plan silently, or close-out's last landing is refused.
+SC_Q="$SC/.bionic/docs/plans/epic-x/wave-y.plan.md"
+printf -- '---\nworking-branch: wave/x\n---\n# another run\n\n## SDLC State\n\ncurrent: 4\n' > "$SC_Q"
+SQ="55555555-6666-4777-8888-999999999999"
+bound_marker "$SC" "$SQ" "$SC_Q" >/dev/null
+SC_T5="$(sc_spawn "$SC" T5 "$WORLD_SID")"; ll_launch "$SC" T5 a.test.sh
+SC_REFS="$(git -C "$SC" for-each-ref --format='%(refname) %(objectname)')"
+sc_ready "$SC_T5" "$SQ"
+expect_eq "(mm1) ready from a session bound to another plan is refused (exit 2)" "2 spawn-worktree: REFUSED" "$SC_RC $(sc_head "$SC_OUT")"
+expect_contains "(mm1b) …naming the tree's plan and the session's" \
+  "reason=plan-mismatch tree-plan=${SC_P} session-plan=${SC_Q}" "$SC_OUT"
+expect_eq "(mm1c) …and no ref moved" "$SC_REFS" "$(git -C "$SC" for-each-ref --format='%(refname) %(objectname)')"
+sc_ready "$SC_T5" "$WORLD_SID"
+expect_eq "(mm2) the same tree from the session bound to its plan lands (exit 0)" "0 LANDED T5" "$SC_RC $(sc_head "$SC_OUT")"
+[ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
+
+SD="$(ll_world)"; SD_P="$(ll_plan "$SD")"
+SD_T3="$(sc_spawn "$SD" T3 "$WORLD_SID")"; ll_launch "$SD" T3 a.test.sh
+# Delivered at current 9, as close-out leaves it; T3 is a fix born of a finding of the review the judge reads failing,
+# the one landing a judged run admits (lib/worktree.sh, THE RUN HAS BEEN JUDGED FOR INTEGRATION), in the shape
+# `proof-add review` and `task-add --born` write (tests/asks.test.sh's world at current 8 is the same plant).
+SD_H="$(git -C "$SD" rev-parse wave/x)"; SD_B="$(git -C "$SD" rev-parse main)"
+mkdir -p "$SD/.bionic/docs/record/wave-x"
+printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off T3.txt:1 the row is wrong\nshown: 1 cat T3.txt\n' \
+  "$SD_B" "$SD_H" > "$SD/.bionic/docs/record/wave-x/rev.md"
+SD_H="$SD_H" SD_B="$SD_B" awk '
+  /^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["SD_B"]; next }
+  /^current: 4$/ { print "current: 9"; print "proved: kind=review head=" ENVIRON["SD_H"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/rev.md question=structure reader=w-rev result=fail scope=piece"; next }
+  /^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; print "- Step 9: closed delivered: 2026-10-24T00:00:00Z"; next }
+  { print }' "$SD_P" > "$SD_P.n" && mv "$SD_P.n" "$SD_P"
+expect_eq "(mc0) the plan is closed" "closed" "$( . "$REPO/payload/scripts/lib/run.sh" && { run_open "$SD_P" && echo open || echo closed; } )"
+SD_REFS="$(git -C "$SD" for-each-ref --format='%(refname) %(objectname)')"
+sc_ready "$SD_T3" "$SUCC"
+expect_eq "(mc1) ready on a closed plan from a session not bound to it is refused (exit 2)" "2 spawn-worktree: REFUSED" \
+  "$SC_RC $(sc_head "$SC_OUT")"
+expect_contains "(mc1b) …naming the closed plan" "reason=plan-closed plan=${SD_P}" "$SC_OUT"
+expect_eq "(mc1c) …and no ref moved" "$SD_REFS" "$(git -C "$SD" for-each-ref --format='%(refname) %(objectname)')"
+sc_ready "$SD_T3" "$WORLD_SID"
+expect_eq "(mc2) close-out's own last landing, from the session bound to the closed plan, is admitted (exit 0)" "0 LANDED T3" \
+  "$SC_RC $(sc_head "$SC_OUT")"
+[ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
+
 finish
