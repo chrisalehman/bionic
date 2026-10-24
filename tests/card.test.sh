@@ -915,17 +915,12 @@ work.landed: 0 tasks, 0 of 1 min, 0% — the tasks landed · unit: count, sized 
 work.left: 1 task, 1 min — the tasks neither landed nor dropped · unit: count, sized minutes · source: the remaining rows
 close.predicted: 11:00 AM
 close.forecast: -'
-SIT_JUDGE='call: Nothing is owed; let 1/1 land.
-task: 0: Configure
-task: 1/1: the scope, building
-metric: Completed: 0 of 1 tasks, 0%.
-metric: Pace: no task has landed yet.
-metric: Correctness: nothing has run yet.
-metric: Waste: nothing lost.
-metric: Goals: none declared.
+SIT_JUDGE='purpose: the scope is set before the build; on course.
+call: Nothing is owed; let 1/1 land.
 grade: A
 point: The one task is building.
-close: 11:00 AM, with no forecast to set it against.
+point: Nothing has landed yet.
+point: The scope is the only open step.
 close: depends on 1/1 landing.'
 sit_card() {  # <sheet> <judgment> — sets WC_OUT, WC_RC, WC_ERR of `card.sh sitrep <sheet file>` with the judgment on stdin
   printf '%s\n' "$1" > "${CARD_SANDBOX}/.sheet"
@@ -937,7 +932,7 @@ sit_card() {  # <sheet> <judgment> — sets WC_OUT, WC_RC, WC_ERR of `card.sh si
 sit_card "$SIT_SHEET" "$SIT_JUDGE"
 expect_eq "KINDS-7 card.sh sitrep draws the sitrep card from a sheet and a judgment (exit 0, nothing on stderr)" \
   "0||Sitrep · proj 1.2.0 · wave 3 · Tuesday 9:05 AM" "$WC_RC|$WC_ERR|$(printf '%s\n' "$WC_OUT" | head -1)"
-expect_eq "KINDS-7b …its last section the predicted close, its rows the judgment's, each opening on a capital" "  Predicted close|    • 11:00 AM, with no forecast to set it against.|    • Depends on 1/1 landing." \
+expect_eq "KINDS-7b …its last section the predicted close: the sheet's time drawn, then the judgment's condition, opening on a capital" "  Predicted close|    • 11:00 AM.|    • Depends on 1/1 landing." \
   "$(printf '%s\n' "$WC_OUT" | tail -3 | paste -sd'|' -)"
 WC_RC=0; bash "$CARD_SH" sitrep </dev/null >"${CARD_SANDBOX}/.out" 2>/dev/null || WC_RC=$?
 expect_eq "KINDS-7c card.sh sitrep with no sheet file is the usage error, nothing drawn" "64|" "$WC_RC|$(cat "${CARD_SANDBOX}/.out")"
