@@ -2419,4 +2419,78 @@ expect_eq "TSENTENCE-8d …and names every refused cell of several, a born tag b
   "1|REFUSED — task T4: no sentence after its title|REFUSED — task T6: no sentence after its title" \
   "$TS_CELL_RC|$(paste -sd'|' - < "${CARD_SANDBOX}/.tc-err")"
 
+# ============================================================
+section "§SETTLED: a card render opens no ask for an approval the plan already records"
+# ============================================================
+# A card leaves the person a decision, so its render opens the step's approval on the run's register. That is only true
+# while the approval is still owed: a step below the plan's current:, Step 3 once approved-by: is written, and a
+# dispatched writer's own check (the tree's git directory holds bionic-agent) put "Blocked on you" on the sitrep an hour
+# after the person had answered. fails-when: any of those renders opens an ask, or the unchanged case (a plan at
+# current: 3 with no approved-by:, rendered by the orchestrator) opens none.
+. "$(dirname "$0")/lib/bound-marker.sh"
+ST_SID="card-settled-session-s1s1s1s1"
+ST_STEM="wave-99-fixture"
+st_plan_text() {  # <current> <approved 0|1> -> the plan, on stdout
+  sed -e "s/^current: 4\$/current: $1/" -e 's/^# flock wave 30/# fixture wave 99/' "$TS_PLAN" \
+    | { if [ "$2" = 1 ]; then awk '{ print } /^current: / { print "approved-by: Dana Fixture 2026-10-11T00:00:00Z \"approved\"" }'; else cat; fi; }
+}
+st_root() {  # <label> <current> <approved 0|1> -> a committed git project bound to its plan, requirements beside it
+  local r="${CARD_SANDBOX}/st-$1"
+  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture"
+  ( cd "$r" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@example.invalid ) >/dev/null 2>&1
+  st_plan_text "$2" "$3" > "$r/.bionic/docs/plans/epic-99-fixture/$ST_STEM.plan.md"
+  cp "$REQ_FIX" "$r/.bionic/docs/specs/epic-99-fixture/$ST_STEM.requirements.md"
+  printf '%s' "$r"
+}
+st_bind() { bound_marker "$1" "$ST_SID" "$1/.bionic/docs/plans/epic-99-fixture/$ST_STEM.plan.md"; }
+st_commit() { ( cd "$1" && git add -A -f . && git commit -qm fixture ) >/dev/null 2>&1; }
+st_plan() { printf '%s/.bionic/docs/plans/epic-99-fixture/%s.plan.md' "$1" "$ST_STEM"; }
+st_req()  { printf '%s/.bionic/docs/specs/epic-99-fixture/%s.requirements.md' "$1" "$ST_STEM"; }
+# st_render <cwd> <verb> <artifact> -> ST_RC; the renderer runs as the session, from <cwd>
+ST_RC=0
+st_render() { ST_RC=0; ( cd "$1" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" "$2" "$3" >"${CARD_SANDBOX}/.st-out" 2>&1 0<&- ) || ST_RC=$?; }
+# st_open <root> -> the keys of the asks the run's register holds open, one line
+st_open() {
+  awk -F'|' '{ k = ""; s = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7) } if (s == "open") print k }' \
+    "$1/.bionic/docs/record/$ST_STEM/asks.state" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+}
+
+ST_A="$(st_root a 3 0)"; st_bind "$ST_A"; st_commit "$ST_A"
+st_render "$ST_A" step3 "$(st_plan "$ST_A")"
+expect_eq "SETTLED-1 the unchanged case: a plan at current: 3 with no approved-by:, rendered by its orchestrator, opens approve:step3 (the extractor reads an open ask)" \
+  "0|approve:step3" "$ST_RC|$(st_open "$ST_A")"
+
+ST_B="$(st_root b 4 1)"; st_bind "$ST_B"; st_commit "$ST_B"
+st_render "$ST_B" step3 "$(st_plan "$ST_B")"
+expect_eq "SETTLED-2 a plan at current: 4 carrying approved-by: renders step3 (exit 0) and opens no approve:step3" "0|" "$ST_RC|$(st_open "$ST_B")"
+expect_contains "SETTLED-2b …the card still printed (a settled render changes nothing it prints)" "Step 3" "$(cat "${CARD_SANDBOX}/.st-out")"
+
+ST_C="$(st_root c 3 1)"; st_bind "$ST_C"; st_commit "$ST_C"
+st_render "$ST_C" step3 "$(st_plan "$ST_C")"
+expect_eq "SETTLED-3 Step 3 at current: 3 once approved-by: is written opens none either" "0|" "$ST_RC|$(st_open "$ST_C")"
+
+ST_D="$(st_root d 3 0)"; st_bind "$ST_D"; st_commit "$ST_D"
+st_render "$ST_D" step1 "$(st_req "$ST_D")"
+expect_eq "SETTLED-4 a plan at current: 3 and its requirements: step1 opens no approve:step1 (a step below current:)" "0|" "$ST_RC|$(st_open "$ST_D")"
+ST_E="$(st_root e 1 0)"; st_bind "$ST_E"; st_commit "$ST_E"
+st_render "$ST_E" step1 "$(st_req "$ST_E")"
+expect_eq "SETTLED-4b …while the same requirements at current: 1 open it (the differential control)" "0|approve:step1" "$ST_RC|$(st_open "$ST_E")"
+
+# A DISPATCHED WRITER'S RENDER. spawn-worktree.sh writes the name to the linked tree's own git directory.
+ST_F="$(st_root f 3 0)"; st_bind "$ST_F"; st_commit "$ST_F"
+git -C "$ST_F" worktree add -q -b wt/st-writer "${CARD_SANDBOX}/st-f-writer" >/dev/null 2>&1
+git -C "$ST_F" worktree add -q -b wt/st-other "${CARD_SANDBOX}/st-f-other" >/dev/null 2>&1
+ST_FGD="$(git -C "${CARD_SANDBOX}/st-f-writer" rev-parse --absolute-git-dir 2>/dev/null)"
+printf 'w99-T1\n' > "$ST_FGD/bionic-agent"
+expect_eq "SETTLED-5 precondition: the writer's tree holds its marker and the other linked tree does not" \
+  "yes|no" "$([ -f "$ST_FGD/bionic-agent" ] && echo yes || echo no)|$([ -f "$(git -C "${CARD_SANDBOX}/st-f-other" rev-parse --absolute-git-dir)/bionic-agent" ] && echo yes || echo no)"
+st_render "${CARD_SANDBOX}/st-f-other" step3 "$(st_plan "$ST_F")"
+expect_eq "SETTLED-5b a linked tree with no marker renders the orchestrator's plan and opens approve:step3 (the differential control)" \
+  "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
+rm -f "$ST_F/.bionic/docs/record/$ST_STEM/asks.state"
+st_render "${CARD_SANDBOX}/st-f-writer" step3 "$(st_plan "$ST_F")"
+expect_eq "SETTLED-5c the same render from the writer's tree (bionic-agent in its git directory) opens nothing" "0|" "$ST_RC|$(st_open "$ST_F")"
+ST_RC=0; ( cd "$ST_F" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" step3 "$(st_plan "$ST_F")" >/dev/null 2>&1 0<&- ) || ST_RC=$?
+expect_eq "SETTLED-5d …and the orchestrator's own render of the same plan opens it after all" "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
+
 finish
