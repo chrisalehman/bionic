@@ -1121,4 +1121,38 @@ expect_eq "(mc2) close-out's own last landing, from the session bound to the clo
   "$SC_RC $(sc_head "$SC_OUT")"
 [ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
 
+section "§HAND: a hand landing writes the person's verdicts before it publishes, so the born row's landing closes the review's ask"
+#
+# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, as `row-landed
+# --by-hand` does, and writes them before the publish: the publish reads the reviews the row answers again once the row
+# reads landed, judging the row by those verdicts. T3 is born of the one finding of a failing adversarial review that
+# `proof-add review` registered, which opened the waiver ask.
+# fails-when: the ask stays open after the hand landing's publish, or the verdicts follow the published line.
+HN="$(ll_world)"; HN_P="$(ll_plan "$HN")"; HN_RD="$HN/.bionic/docs/record/wave-x"; mkdir -p "$HN_RD"
+HN_T3="$(sc_spawn "$HN" T3 "$WORLD_SID")"
+HN_H="$(git -C "$HN" rev-parse wave/x)"; HN_B="$(git -C "$HN" rev-parse main)"
+# The planner's frontmatter: the rigor and scale the judge deals by, and where the work started, the base an
+# adversarial chain is held from.
+HN_B="$HN_B" awk '/^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["HN_B"]; next } { print }' \
+  "$HN_P" > "$HN_P.n" && mv "$HN_P.n" "$HN_P"
+printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off T3.txt:1 the row is wrong\nshown: 1 cat T3.txt\n' \
+  "$HN_B" "$HN_H" > "$HN_RD/rev.md"
+printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$WORLD_SID" name=w-rev agent_id=a-w-rev subagent_type=bionic:critic \
+  launched_at=2026-10-01T00:00:00Z deliverable="$HN_RD/rev.md")" >> "$HN/.bionic/tmp/roster-$WORLD_SID.state"
+HN_PA="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$REPO/hooks/session-poker.sh" proof-add review record/wave-x/rev.md --question adversarial --reader w-rev 2>&1 )"; HN_PARC=$?
+awk '/^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next } { print }' \
+  "$HN_P" > "$HN_P.n" && mv "$HN_P.n" "$HN_P"
+hn_ask() { awk -F'|' '$2 == "key=waive:adversarial" { s = ""; b = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }; l = s "|" b } END { print l }' "$HN_RD/asks.state" 2>/dev/null; }
+expect_eq "(hn0) proof-add registers the failing review (exit 0) and its waiver ask is open" "0|open|" "$HN_PARC|$(hn_ask)"
+[ "$HN_PARC" = 0 ] || printf '      proof-add said: %s\n' "$HN_PA"
+HN_C="$(git -C "$HN_T3" rev-parse HEAD)"; printf 'a.test.sh: 1/1 passed\n' > "$HN_RD/T3-green.log"
+HN_OUT="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$HN_T3" --by-hand --reason "landed on the report" \
+  --suites a.test.sh --green-at "$HN_C" --log "$HN_RD/T3-green.log" 2>&1 )"; HN_RC=$?
+expect_eq "(hn1) the hand landing of the born row exits 0" "0" "$HN_RC"
+[ "$HN_RC" = 0 ] || printf '      land said: %s\n' "$HN_OUT"
+HN_REC="$HN_RD/landing-proofs.log"
+expect_eq "(hn2) the row's verdict is written before its published line" "verdict published" \
+  "$(awk -F'|' '$3 == "row=T3" && ($2 == "ev=verdict" || $2 == "ev=published") { sub(/^ev=/, "", $2); printf "%s%s", s, $2; s = " " }' "$HN_REC" 2>/dev/null)"
+expect_eq "(hn3) …and the review's waiver ask is closed by the landing, with no regression and no waiver" "closed|landing T3" "$(hn_ask)"
+
 finish

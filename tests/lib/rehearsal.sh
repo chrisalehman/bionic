@@ -19,8 +19,8 @@
 #   The states:
 #     delivered        the failed-review run, its project declaring its real release check, carried through the
 #                      verbs to close-out's delivered: (rehearse prints the archived plan's path): the sweeper acks
-#                      the failing reviewer, a fix row born of the review's finding is added, cut, launched and
-#                      landed through ready, the release check runs at its head, the release approval card is
+#                      the failing reviewer, a second review failing on the same site is registered, a fix row born
+#                      of the first review's finding is added, cut, launched and landed through ready, settling both, the release check runs at its head, the release approval card is
 #                      rendered there and the user's reply approves it, the integrate row renders the release entry's
 #                      reviews part on the working branch and opens the pull request through gh, the person merges
 #                      it, the integrate row delivers its record, and close-out runs.
@@ -29,14 +29,14 @@
 #                      it, and close-out refused on the failing review: the register holds waive:structure and
 #                      hold:merge.
 #     release-waiting  the release order (the release row at step 7, a regression row, an integrate row reading both
-#                      approvals), the build landed, the matrix discharged, Steps 5 to 7 with the regression, its row
+#                      approvals), the build landed through ready, the matrix discharged by its landing, Steps 5 to 7 with the regression, its row
 #                      delivered, five passing reviews and the release check, the release landed, and the release
 #                      approval card rendered: the register holds approve:release and approve:merge.
 #     stop-rule        the build row landed; the release row reads the approval of a stop-rule decision, which
 #                      is put through `decisions put`: the register holds that decision's decide: ask.
 #     clean            the build row landed and the release row is still active: the register holds no open ask.
-#     single-verify    the run at single rigor (door_world_single), carried to the Verify gate: the build landed,
-#                      its criterion discharged by status, the walk and Step 5 written, current: 5. No `discharge`:
+#     single-verify    the run at single rigor (door_world_single), carried to the Verify gate: the build landed
+#                      through ready, its criterion discharged by that landing, the walk and Step 5 written, current: 5. No `discharge`:
 #                      the auditor cell stays empty for the single-rigor review that answers the evidence question.
 #
 # THE SANDBOX is tests/lib/door.sh's `door_world`: a real repository carrying the plugin's hooks and scripts and a
@@ -166,6 +166,24 @@ _rh_build() {
   _rh_land T1
 }
 
+# _rh_build_ready -> the build row written in a tree the create verb makes for its writer, with a one-row suite, and
+# landed through ready on that suite: its landing writes the criterion's evidence and status (lib/line.sh `line_settle`)
+_rh_build_ready() {
+  local t="$RH_ROOT/.worktrees/T1"
+  _rh_do "the build row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T1 --for dw-T1 || return 1
+  _rh_launch dw-T1 T1 rehearsal-row.test.sh || return 1
+  _rh_poker "the build row's launch written to the plan" launch-sync || return 1
+  printf 'rehearsal_landed() { :; }\n' >> "$t/payload/scripts/lib/said.sh"
+  printf '#!/bin/bash\n. "$(dirname "$0")/lib/assert.sh"\nsection "the rehearsal holds"\nexpect_eq "one is one" 1 1\nfinish\n' \
+    > "$t/tests/rehearsal-row.test.sh"
+  _rh_commit "$t" "a library change and its suite" || { echo "rehearse $RH_STATE: the build's commit in .worktrees/T1 failed" >&2; return 1; }
+  _rh_hand code "T1's code and its suite, committed in .worktrees/T1"
+  RH_CWD="$t" _rh_do "the build row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within 300 || return 1
+  printf '# T1: the build\n\nThe library change and its suite.\n' > "$RH_REC/T1.md" || return 1
+  _rh_hand record "T1's report record/wave-x/T1.md"
+  _rh_do "the sweeper acks the build row's writer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack dw-T1
+}
+
 # _rh_review <name> <question> <scope> <a> <b> <pass|fail> -> the reviewer's record and roster row
 _rh_review() {
   local nm="$1" q="$2" sc="$3" res="$6" t=bionic:critic n=0
@@ -190,17 +208,17 @@ _rh_review() {
 # _rh_rigor -> the plan's rigor: word, as its planner wrote it
 _rh_rigor() { awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print; exit }' "$RH_PLAN"; }
 
-# _rh_verify -> the build landed, its criterion's evidence written and the matrix row discharged, the walk, Step 5's
-# line and fields, and Step 5 entered. Only a double-rigor run deals an auditor, so only there does `discharge` write
-# the auditor cell and the auditor's record and Step 5's `auditor:` pointer exist; at single rigor the evidence
-# question is the critic's, and the auditor cell stays empty for the review that answers it.
+# _rh_verify -> the matrix rendered, the build landed through ready, which writes its criterion's evidence and the
+# matrix row's status discharged in one act, the walk, Step 5's line and fields, and Step 5 entered. Only a double-rigor
+# run deals an auditor, so only there does `discharge` write the auditor cell and the auditor's record and Step 5's
+# `auditor:` pointer exist; at single rigor the evidence question is the critic's, and the auditor cell stays empty for
+# the review that answers it.
 _rh_verify() {
   local dbl=no
   [ "$(_rh_rigor)" != double ] || dbl=yes
-  _rh_build || return 1
-  printf 'the library change holds\n' > "$RH_REC/ac-1.1.md"; _rh_hand record "the criterion's evidence record/wave-x/ac-1.1.md"
   _rh_poker "render the matrix" matrix-render || return 1
-  _rh_poker "discharge the row" matrix-set AC-1.1 status=discharged evidence=record/wave-x/ac-1.1.md task=T1 || return 1
+  _rh_build_ready || return 1
+  _rh_poker "the criterion's task" matrix-set AC-1.1 task=T1 || return 1
   [ "$dbl" = no ] || _rh_poker "the auditor cell" discharge AC-1.1 || return 1
   printf 'the walk the build row needed\n' > "$RH_REC/walk.md"
   if [ "$dbl" = yes ]; then
@@ -322,6 +340,10 @@ _rh_replay() {
   local dir="$1" t f h
   printf '# replay: from failed-review, through the verbs to delivered:\n' >> "$RH_LOG"
   _rh_do "the sweeper acks the failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-structure-whole-2 || return 1
+  # A second reader of the same head names the same site under another question, dealt it on its roster row: the fix
+  # row's landing settles that finding too, so no move follows the landing.
+  _rh_review w-adversarial-whole-2 adversarial whole "$RH_BASE" "$(_rh_head)" fail || return 1
+  _rh_do "the sweeper acks the second failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-adversarial-whole-2 || return 1
   _rh_poker "the fix row born of the finding" task-add T5 4 build 'answer the structure finding: a caller reaches the library change. The caller and the library agree again.' \
     orchestrator — 10 REQ-1 'payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh' \
     --born record/wave-x/w-structure-whole-2.md#1 || return 1
@@ -396,9 +418,11 @@ EOF
   # The planner names the branch the run merges into; door_world's plan, which never merges, leaves it out. It also
   # declares the run's goals, each measured by a record: one the rehearsal writes passing, one failing, and one it
   # never writes, so every state's sheet reads a goal met, one not met and one not measured yet.
+  # Its Eval design names the build row's own suite, so the build's landing proves the criterion.
   awk -v g="$RH_GOALS" '{ print } $0 == "working-branch: wave/x" && !d { print "integration-branch: main"; print "goals: " g; d = 1 }' \
-    "$RH_PLAN" > "$RH_PLAN.rh" && mv "$RH_PLAN.rh" "$RH_PLAN" || return 1
-  _rh_hand prose "the plan's Step-3 prose, $DOOR_PLAN_REL (door_world), naming integration-branch: main and the run's three goals"
+    "$RH_PLAN" | sed 's/| `tests\/run.sh` | the whole run is red |/| `rehearsal-row.test.sh` | the build row'"'"'s suite is red |/' > "$RH_PLAN.rh" \
+    && mv "$RH_PLAN.rh" "$RH_PLAN" && /usr/bin/grep -q '`rehearsal-row.test.sh`' "$RH_PLAN" || return 1
+  _rh_hand prose "the plan's Step-3 prose, $DOOR_PLAN_REL (door_world), naming integration-branch: main, the run's three goals and the build row's suite as AC-1.1's eval"
   printf '# the card read\n\nverdict: pass\n' > "$RH_REC/goal-shown.md" \
     && printf '# the asks checked\n\nverdict: fail\n' > "$RH_REC/goal-asks.md" || return 1
   _rh_hand record "the goal records record/wave-x/goal-shown.md (verdict: pass) and record/wave-x/goal-asks.md (verdict: fail)"

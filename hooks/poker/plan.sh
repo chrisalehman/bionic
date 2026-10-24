@@ -1812,6 +1812,13 @@ EOF
       die "REFUSED — the matrix table has no row $MS_AC; the plan is unchanged."
       exit 1
     fi
+    # A STATUS A LANDING SETTLED IS THE LANDING'S (lib/line.sh `line_settle`): the landing that wrote the criterion's
+    # evidence wrote its status in the same act, so a status written over it is refused, naming that landing.
+    if [ "$MS_HAS_S" = 1 ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+       && MS_BY_LANDING="$(line_settled_by "$PV_PLAN" cells "$MS_AC")"; then
+      die "REFUSED — the status of $MS_AC was settled by the landing of ${MS_BY_LANDING% *} at ${MS_BY_LANDING#* }, which wrote its evidence and its status in one act; the plan is unchanged."
+      exit 1
+    fi
     if [ "$MS_HAS_T" = 1 ]; then
       MS_ROWS=" $(units_rows "$PV_PLAN" 2>/dev/null | cut -f1 | tr '\n' ' ')"
       MS_IDS=""; MS_MISS=""
