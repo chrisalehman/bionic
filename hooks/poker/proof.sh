@@ -1029,6 +1029,18 @@ FM_FINDING
       die "REFUSED — $FM_ROW is no row of the ## Tasks table of $PV_PLAN, and a finding is $([ "$FM_TO" = carried ] && echo carried || echo fixed) only by a row the plan carries; the plan is unchanged."
       exit 1
     fi
+    # A FINDING A LANDING SETTLED IS THE LANDING'S (lib/line.sh `line_settle`): the move is a correction of a cell the
+    # landing wrote, and is refused naming that landing.
+    { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+    if declare -F line_settled_by >/dev/null 2>&1 && FM_BY_LANDING="$(line_settled_by "$PV_PLAN" findings "$FM_ID")"; then
+      die "REFUSED — $(clean "$FM_ID") was settled by the landing of ${FM_BY_LANDING% *} at ${FM_BY_LANDING#* }: that landing wrote it fixed and closed its ask, so no move corrects it; the plan is unchanged."
+      exit 1
+    fi
+    # A CARRY TO A ROW THAT WILL NOT LAND AGAIN closes at once: to a landed row it is that row's fix, written as a move
+    # to fixed; to a dropped row nothing will land, so only its ask closes and the line records the person's choice.
+    FM_ROW_ST=""
+    [ "$FM_TO" != carried ] || FM_ROW_ST="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v r="$FM_ROW" '$1 == r { print $10; exit }')"
+    [ "$FM_ROW_ST" != landed ] || FM_TO=fixed
     FM_WHO="$(deferral_fold "$(git -C "$PV_REPO" config user.name 2>/dev/null)")"
     if [ -z "$FM_WHO" ]; then
       die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
@@ -1083,6 +1095,11 @@ FM_FINDING
     # A CARRY TO A ROW IS AN ANSWER, NOT AN END: the item stays open answered carry with the row named, and the
     # landing of that row closes it. The line is a record of the person's choice only; it is no move to fixed, so
     # the finding reads as before until the row lands.
+    if [ "$FM_TO" = carried ] && [ "$FM_ROW_ST" = dropped ]; then
+      poker_owed_close "$PV_REPO" "$(finding_owed_key "$FM_ID")" "finding-move carried $FM_ROW, dropped"
+      say "finding-move — $(clean "$FM_ID") carried to $FM_ROW, by $(clean "$FM_WHO"): $FM_ROW is dropped and will not land, so its ask is closed now; the finding reads as before."
+      exit 0
+    fi
     if [ "$FM_TO" = carried ]; then
       proof_owed answer "$(finding_owed_key "$FM_ID")" carry "$FM_ROW lands"
       say "finding-move — $(clean "$FM_ID") carried to $FM_ROW, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first. The finding stays open and closes when $FM_ROW lands."
@@ -1090,6 +1107,7 @@ FM_FINDING
     fi
     if [ -n "$FM_ROW" ]; then
       poker_owed_close "$PV_REPO" "$(finding_owed_key "$FM_ID")" "finding-move fixed $FM_ROW"
+      [ "$FM_ROW_ST" != landed ] || say "finding-move — $(clean "$FM_ID") carried to $FM_ROW, which has landed: the carry is that row's fix, written as a move to fixed, and its ask is closed now."
       say "finding-move — $(clean "$FM_ID") fixed by $FM_ROW, by $(clean "$FM_WHO"): its moved: line is on $PV_PLAN; dry-committed first. It reads fixed once $FM_ROW has landed green, and counts against no fix-cap."
       exit 0
     fi

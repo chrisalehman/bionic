@@ -21,9 +21,11 @@
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
 #            and every hand write in the log is one a person, an agent or the harness writes in a real run, and the log
 #            is valid UTF-8 throughout, so every reader reads the whole of it
+#   §SR      the replay plants a second review naming the fix row's site under another question; the fix row's landing
+#            writes it fixed, no finding-move follows the landing, and the close reads zero
 #   §SINGLE  the rehearsal's single-rigor state (`rehearse single-verify`, on door.sh's `door_world_single`) stands at
-#            current: 5 with the build's criterion discharged and its auditor cell empty, its log naming the verbs that
-#            brought it there and no discharge: the bed a single-rigor review's verdicts are carried on
+#            current: 5 with the build's criterion discharged by the build's landing and its auditor cell empty, its log
+#            naming the verbs that brought it there and no discharge: the bed a single-rigor review's verdicts are carried on
 #
 # NAMED, NOT COUNTED: the rows reading the replay's part (CL-8, VB-1, VB-2) name each verb the replay runs and each kind
 # of hand write it makes, so a log that lost one of them is red however long it is.
@@ -204,6 +206,26 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
 fi
 
 # ============================================================
+section "§SR: a second record at the fix row's site is settled by the fix row's landing, with no move after it"
+# ============================================================
+# fails-when: the second record names another site, the replay's log shows a finding-move after the fix row's landing,
+# the second finding is not written fixed by the landing, or the close reads above zero.
+if cr_reached "SR-0"; then
+  SR_A="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-structure-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
+  SR_B="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-adversarial-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
+  expect_eq "SR-1 the replay plants a second review, registered under adversarial, naming the fix row's site" "yes|$SR_A" \
+    "$(/usr/bin/grep -q '^proved: kind=review .*evidence=record/wave-x/w-adversarial-whole-2.md question=adversarial ' "$CR_PLAN" && echo yes)|$SR_B"
+  expect_contains "SR-1b …the site is a line of the library the fix answers" "payload/scripts/lib/said.sh:" "$SR_A"
+  SR_AFTER="$(cr_part | awk '/^\$ / { c = $0; next } /^  rc=[0-9]+  \(the fix row says ready, / { f = 1; next } f && /^  rc=/ { print c }')"
+  expect_contains "SR-2 commands follow the fix row's landing in the replay's log (read beside the moves)" "close-out.sh" "$SR_AFTER"
+  expect_eq "SR-2b …and none of them is a finding-move" "" "$(printf '%s\n' "$SR_AFTER" | /usr/bin/grep 'session-poker\.sh finding-move')"
+  expect_eq "SR-3 the second finding is written fixed by the fix row's landing" "yes" \
+    "$(/usr/bin/grep -q '^moved: record/wave-x/w-adversarial-whole-2\.md#1 to=fixed row=T5 by=landing ' "$CR_PLAN" && echo yes)"
+  expect_contains "SR-4 the close reads zero with the window at delivered:" "hand-holds: total=0 " \
+    "$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
+fi
+
+# ============================================================
 section "§VERBS: every refusal the replay met names the verb that writes the cell, and that verb then writes it"
 # ============================================================
 # fails-when: a refusal names no verb of deliver, amend, task-set and step-field, a refused call is left unfollowed,
@@ -351,10 +373,12 @@ if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
     "$(awk -F'|' '$2 ~ /^ *AC-1\.1 *$/ { s = $4; a = $6; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", a); print s "|" a }' "$SG_PLAN")"
   SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
   expect_eq "SG-5 the log names the verbs that brought it there" \
-    "session-poker.sh matrix-render|session-poker.sh matrix-set|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
-    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|session-poker.sh matrix-set|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
+    "session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
+    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
   expect_eq "SG-5b …and discharge is not among them" "" \
     "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh discharge')"
+  expect_eq "SG-6 the status is the landing's: no matrix-set writes a status (rehearsal.sh holds none), the block's evidence is the landing's log" "0|yes" \
+    "$(/usr/bin/grep -c 'matrix-set.*status=' "$BIONIC_SCRIPTS_DIR/tests/lib/rehearsal.sh")|$(awk '/^AC-1\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence: record\/wave-x\/line\/T1-rehearsal-row-/ { y = 1 } END { if (y) print "yes" }' "$SG_PLAN")"
 else
   printf '    the single-rigor rehearsal stopped; rehearse said:\n'
   sed 's/^/    | /' "$WORLD_ROOT/single-verify.err" 2>/dev/null | cut -c1-400 | tail -12

@@ -1,5 +1,6 @@
 #!/bin/bash
-# tests/landing-line-2.test.sh — the landing line, part 2 of 2: §INPUTS through §LAND-RC-HAND.
+# tests/landing-line-2.test.sh — the landing line, part 2 of 2: §INPUTS through §LAND-RC-HAND, then the landing's
+# settlement: §SAMESITE, §CARRIED, §CELL.
 #
 # THE SUITE IS TWO PARTS (wave-39 T35; D1, D13, REQ-3 AC-3.3). One landing-line.test.sh promised more than the suite
 # bar, ten minutes of the gate's promise, so it runs as two suites cut at a section boundary. Its governing header, its
@@ -853,6 +854,119 @@ printf '%s\n' '# see docs/adrs/adr-001.md' '# scratch goes under .bionic/tmp/scr
 git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm tracked
 LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_CITED" "$(git -C "$LN_REPO" rev-parse HEAD)")"; LN_RC=$?
 expect_eq "(ln2) AC-16.2 a tracked docs path and a .bionic/tmp path in a script, and a test's T12 waits on T2, are accepted: rc 0, nothing named" "0|" "$LN_RC|$LN_OUT"
+
+# ============================================================================ the landing's settlement
+#
+# A landing settles everything it proves in one act (lib/line.sh `line_settle`, called by the landing's plan write):
+# the findings its row was born for, the findings any registered review names at the same site, the findings carried to
+# the row, and the matrix table's status cell of each criterion whose evidence the landing writes. Nothing is settled
+# by hand afterwards, and the correcting verbs refuse what the landing settled, naming it.
+#
+# THE WORLD. On the working branch, s.txt is three lines (H1), then two lines are put above them (H2). Four reviews are
+# registered as `proof-add review` writes them: A at H1 names s.txt:1 and T1 is born of it; B at H2 names s.txt:3, the
+# same line moved down two; C at H2 names s.txt:1, a line H1 did not have; E at H1 names s.txt:3. The register is
+# opened by `disposition`, E is carried to T1 by `finding-move`, and T1 lands through ready on a.test.sh. The plan's
+# Eval design names tests/a.test.sh for AC-1.1 and AC-1.2, the matrix is rendered by `matrix-render`, and AC-1.2's row
+# reads waived.
+ll_settle_rev() {  # <record dir> <name> <base> <head> <path:line> — a failing review naming one finding at that site
+  printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off %s the line is wrong\nshown: 1 cat %s\n' \
+    "$3" "$4" "$5" "${5%%:*}" > "$1/$2.md"
+}
+ll_poker() { ( cd "$1" && shift && bash "$REPO/hooks/session-poker.sh" "$@" 2>&1 ); }   # <root> <verb> [args] -> its output; rc its exit
+ll_ask() {  # <root> <record>#<n> -> the register's newest line for that finding's ask, as <state>|<by>
+  local k
+  k="finding:$(printf '%s' "$2" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
+  awk -F'|' -v k="key=$k" '$2 == k { s = ""; b = ""
+    for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }
+    l = s "|" b } END { print l }' "$1/.bionic/docs/record/wave-x/asks.state" 2>/dev/null
+}
+ll_fixed() {  # <root> -> proof_fixed's `<record>#<n> <row> <how>` for the plan, one a line, sorted
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; proof_fixed "$(ll_plan "$1")" ) 2>/dev/null \
+    | awk -F'\t' '{ sub(/^record\/wave-x\//, "", $1); print $1 " " $2 " " $4 }' | sort
+}
+ll_settle_world() {  # -> root, the world above, T1 not yet landed
+  local r p rd b h1 h2
+  r="$(ll_world)" || return 1; p="$(ll_plan "$r")"; rd="$r/.bionic/docs/record/wave-x"; mkdir -p "$rd" || return 1
+  b="$(git -C "$r" rev-parse HEAD)"
+  printf 'a\nb\nc\n' > "$r/s.txt" && git -C "$r" add s.txt && git -C "$r" commit -qm "s: three lines" || return 1
+  h1="$(git -C "$r" rev-parse HEAD)"
+  printf 'x\ny\na\nb\nc\n' > "$r/s.txt" && git -C "$r" commit -qam "s: two lines above" || return 1
+  h2="$(git -C "$r" rev-parse HEAD)"
+  ll_settle_rev "$rd" recA "$b" "$h1" s.txt:1; ll_settle_rev "$rd" recB "$b" "$h2" s.txt:3
+  ll_settle_rev "$rd" recC "$b" "$h2" s.txt:1; ll_settle_rev "$rd" recE "$b" "$h1" s.txt:3
+  H1="$h1" H2="$h2" awk '
+    function pr(n, h) { print "proved: kind=review head=" h " at=2026-10-20T00:00:00Z evidence=record/wave-x/" n ".md question=structure reader=w-" n " result=fail scope=piece" }
+    /^- T1: active$/ { print "- T1: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/recA.md#1"
+      pr("recA", ENVIRON["H1"]); pr("recB", ENVIRON["H2"]); pr("recC", ENVIRON["H2"]); pr("recE", ENVIRON["H1"]); next }
+    { print }
+    END {
+      print ""; print "## Eval design"; print ""
+      print "| Requirement | Approach | Criterion | Eval type | Eval | Fails when |"; print "|---|---|---|---|---|---|"
+      print "| REQ-1 | the row | AC-1.1 | hermetic | `tests/a.test.sh` | a is red |"
+      print "| REQ-1 | the row | AC-1.2 | hermetic | `tests/a.test.sh` | a is red |"
+      print ""; print "## Verification Matrix"; print ""
+      print "| AC | tier | status | evidence | auditor |"; print "|---|---|---|---|---|"
+      print "| AC-1.1 | T1 | pending | — | — |"; print "| AC-1.2 | T1 | waived | — | — |"
+    }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
+  ll_launch "$r" T1 a.test.sh
+  printf '%s' "$r"
+}
+
+ST="$(ll_settle_world)"; STP="$(ll_plan "$ST")"
+ST_R="$(ll_poker "$ST" matrix-render)"; ST_RRC=$?
+ST_D="$(ll_poker "$ST" disposition)"; ST_DRC=$?
+ST_M="$(ll_poker "$ST" finding-move record/wave-x/recE.md#1 carried T1)"; ST_MRC=$?
+expect_eq "(st0) the world is built by the verbs: matrix-render, disposition and finding-move carried exit 0" "0|0|0" "$ST_RRC|$ST_DRC|$ST_MRC"
+[ "$ST_RRC|$ST_DRC|$ST_MRC" = "0|0|0" ] || printf '      render: %s\n      disposition: %s\n      move: %s\n' "$ST_R" "$ST_D" "$ST_M"
+expect_eq "(st0b) …the open findings B, C and E each hold an open ask, E's answered carry to T1's landing" "open|open|open" \
+  "$(ll_ask "$ST" record/wave-x/recB.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recE.md#1 | cut -d'|' -f1)"
+expect_eq "(st0c) …before the landing no finding reads fixed" "" "$(ll_fixed "$ST")"
+ll_verb "$ST" T1
+expect_eq "(st0d) T1 lands through ready" "0" "$LL_RC"
+[ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT"
+ST_C="$(ll_field "$(ll_ev "$ST" published | /usr/bin/grep '|row=T1|' | tail -1)" commit)"
+expect_nonempty "(st0e) the landing record names T1's published commit, which the rows below read" "$ST_C"
+
+section "§SAMESITE: a fix row's landing reads fixed every finding at the site of the finding it was born for, with no move (AC-4.1)"
+# fails-when: a second record's finding at the same site still needs `finding-move … fixed` after the landing.
+expect_contains "(ss1) B's finding, the born finding's line moved down two at B's head, reads fixed by T1 with no move" \
+  "recB.md#1 T1 moved" "$(ll_fixed "$ST")"
+expect_eq "(ss1b) …its move line is the landing's, naming the landing's commit" \
+  "moved: record/wave-x/recB.md#1 to=fixed row=T1 by=landing" "$(/usr/bin/grep '^moved: record/wave-x/recB.md#1 to=fixed' "$STP" | sed 's/ at=.*//')"
+expect_contains "(ss1c) …and the landing record names it settled by T1 at that commit" "|row=T1|commit=${ST_C}|" \
+  "$(ll_ev "$ST" settled | /usr/bin/grep 'findings=[^|]*record/wave-x/recB.md#1')"
+expect_eq "(ss2) …its ask is closed by the landing" "closed|landing T1" "$(ll_ask "$ST" record/wave-x/recB.md#1)"
+expect_absent "(ss3) C's finding, at a line the born finding's head did not have, is not settled" "recC.md#1" "$(ll_fixed "$ST")"
+expect_eq "(ss3b) …and its ask stays open" "open" "$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)"
+ST_FM="$(ll_poker "$ST" finding-move record/wave-x/recB.md#1 fixed T2)"; ST_FMRC=$?
+expect_eq "(ss4) finding-move on a finding the landing settled is refused (exit 1)" "1" "$ST_FMRC"
+expect_contains "(ss4b) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_FM"
+
+section "§CARRIED: a carried finding reads fixed when its row lands; a carry to a landed row closes at once (AC-4.2)"
+# fails-when: the carried finding stays open past the row's landing, or a carry to a landed row never closes.
+expect_contains "(ca1) E's finding, carried to T1, reads fixed by T1 once T1 lands" "recE.md#1 T1 moved" "$(ll_fixed "$ST")"
+expect_eq "(ca1b) …and its ask, answered carry to T1's landing, is closed by the landing" "closed|landing T1" \
+  "$(ll_ask "$ST" record/wave-x/recE.md#1)"
+ST_CM="$(ll_poker "$ST" finding-move record/wave-x/recC.md#1 carried T1)"; ST_CMRC=$?
+expect_eq "(ca2) a carry of C to T1, already landed, exits 0" "0" "$ST_CMRC"
+expect_eq "(ca2b) …and its ask closes at once" "closed" "$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)"
+expect_contains "(ca2c) …and C reads fixed by T1" "recC.md#1 T1 moved" "$(ll_fixed "$ST")"
+
+section "§CELL: the landing that writes a criterion's evidence writes the table's status discharged in the same act (AC-5.1)"
+# fails-when: a row whose block carries a green log still reads pending in the table, or a settled cell takes a matrix-set.
+ll_cell() { awk -F'|' -v a="$2" '$2 ~ "^ *" a " *$" { s = $4; gsub(/^ +| +$/, "", s); print s }' "$1"; }   # <plan> <AC> -> its status cell
+ll_block_ev() { awk -v a="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence:/ { sub(/^[ \t]+evidence:[ \t]*/, ""); print; exit }' "$1"; }   # <plan> <AC>
+expect_contains "(ce1) AC-1.1's block evidence is the landing's log for a.test.sh" "record/wave-x/line/T1-a" "$(ll_block_ev "$STP" AC-1.1)"
+expect_eq "(ce1b) …and its table status reads discharged, from the landing alone" "discharged" "$(ll_cell "$STP" AC-1.1)"
+expect_eq "(ce2) AC-1.2, waived, keeps its waived status: a landing never overwrites a waiver" "waived" "$(ll_cell "$STP" AC-1.2)"
+expect_contains "(ce2b) …the landing record names AC-1.1 settled and not AC-1.2" "cells=AC-1.1|" "$(ll_ev "$ST" settled)"
+ST_P0="$(cat "$STP")"
+ST_MS="$(ll_poker "$ST" matrix-set AC-1.1 status=pending)"; ST_MSRC=$?
+expect_eq "(ce3) matrix-set on the status cell the landing settled is refused (exit 1), the plan unchanged" "1|same" \
+  "$ST_MSRC|$([ "$ST_P0" = "$(cat "$STP")" ] && echo same)"
+expect_contains "(ce3b) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_MS"
+ST_MW="$(ll_poker "$ST" matrix-set AC-1.2 task=T1)"; ST_MWRC=$?
+expect_eq "(ce4) matrix-set on a row no landing settled still writes (exit 0)" "0" "$ST_MWRC"
 
 # ---------------------------------------------------------------------------
 finish
