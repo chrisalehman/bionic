@@ -1342,7 +1342,7 @@ sr_goal_put() {
 # sr_goal_card <goal text> -> the Purpose line the Step-1 card prints over a requirements artifact holding that Goal,
 # drawn at a width no line folds at.
 sr_goal_card() {
-  printf -- '---\nscale: wave\n---\n# fx\n\n## Goal\n\n%b\n\n## Theme\n\nOpener.\n\n### REQ-1 — one\n\nprovenance: fixture\n\n- AC-1.1 a. Fails when: b.\n\n## Not Doing\n\n- nothing\n' "$1" > "$SR_REPO/g.requirements.md"
+  printf -- '---\nscale: wave\n---\n# fx\n\n## Goal\n\n%b\n\n## Theme\n\nOpener.\n\n### REQ-1 — one\n\nThe fixture holds one requirement.\n\nprovenance: fixture\n\n- AC-1.1 a. Fails when: b.\n\n## Not Doing\n\n- nothing\n' "$1" > "$SR_REPO/g.requirements.md"
   ( cd "$SR_REPO" && env BIONIC_LINE_WIDTH=400 bash "$BIONIC_SCRIPTS_DIR/payload/scripts/card.sh" step1 g.requirements.md 2>/dev/null ) \
     | awk '/^  Purpose$/ { on = 1; next } on { sub(/^ +/, ""); print; exit }'
 }
