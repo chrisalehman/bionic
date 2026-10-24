@@ -831,4 +831,67 @@ expect_eq "a symlinked .bionic/tmp is refused too" \
   "$(printf 'spawn-worktree: FAIL reason=workspace-file-symlinked\nrc=2')" "$WOUT11"
 
 
+
+section "§TREE-RECORD: a named create gives the tree its own record, keyed by its path"
+#
+# THE TREE DESCRIBES ITSELF. `create … --for <name>` writes one `tree/v1` line into the tree's own git
+# directory (`bionic-tree`, beside the `bionic-agent` marker): the tree's path, the spawning session's bound
+# plan, the plan row whose agent cell holds the name, the worker and the spawning session. A landing from any
+# later session reads it first (lib/line.sh), so the session that spawned the tree need not be the one that
+# lands it. Read through the library's one reader, `worktree_tree_record`, never off the file.
+# fails-when: create writes no record, or one keyed by the session rather than the tree.
+TR="$(new_repo "$TMP/tree-record")"
+TRSID="tr-session-01"
+TRBASE="$(sha_of "$TR")"
+mkdir -p "$TR/.bionic/docs/plans/epic-x" "$TR/.bionic/tmp"
+TRPLAN="$TR/.bionic/docs/plans/epic-x/wave-x.plan.md"
+cat > "$TRPLAN" <<'TRP'
+---
+working-branch: wave/25-demo
+---
+# plan
+
+## SDLC State
+
+current: 4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | row one | w45-T1 | — | | 10 | REQ-1 | a.txt | — | | active |
+| T2 | 4 | build | row two | — | — | | 10 | REQ-1 | b.txt | — | | pending |
+TRP
+printf 'plan=%s\nengaged_at=2026-10-03T00:00:00Z\n' "$TRPLAN" > "$TR/.bionic/tmp/engaged-${TRSID}.state"
+tr_rec() { ( . "$WSLIB" 2>/dev/null || exit 9; worktree_tree_record "$1"; echo "rc=$?" ); }
+
+TROUT="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T1 --for w45-T1)"
+TR1="$(ws_path "$TROUT")"
+expect_eq "(tr0) the named create exits 0 and names its tree" "rc=0|${TR}/.worktrees/45-T1" \
+  "$(printf '%s\n' "$TROUT" | tail -n1)|$TR1"
+TRL="$(tr_rec "$TR1")"
+expect_match "(tr1) the tree's record names its path, the plan, the row whose agent cell holds the name, the worker and the spawning session" \
+  "tree/v1|path=${TR1}|plan=${TRPLAN}|row=T1|worker=w45-T1|spawned-by=${TRSID}|at=*" "$(printf '%s\n' "$TRL" | sed -n 1p)"
+expect_eq "(tr1b) …one line, read with rc 0" "rc=0" "$(printf '%s\n' "$TRL" | sed -n 2p)"
+expect_regex "(tr1c) …closed by an ISO-UTC stamp" '\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' \
+  "$(printf '%s\n' "$TRL" | sed -n 1p)"
+
+# A name no row's agent cell holds is recorded with row=-; an unbound session records plan=none.
+TROUT2="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T2 --for w45-T2)"
+expect_match "(tr2) a name no agent cell holds is recorded row=-" \
+  "tree/v1|path=$(ws_path "$TROUT2")|plan=${TRPLAN}|row=-|worker=w45-T2|spawned-by=${TRSID}|at=*" \
+  "$(tr_rec "$(ws_path "$TROUT2")" | sed -n 1p)"
+TROUT3="$(ws_create tr-session-unbound "$TR" "$TRBASE" wt/45-T3 --for w45-T3)"
+expect_match "(tr3) an unbound session's tree is recorded plan=none row=-" \
+  "tree/v1|path=$(ws_path "$TROUT3")|plan=none|row=-|worker=w45-T3|spawned-by=tr-session-unbound|at=*" \
+  "$(tr_rec "$(ws_path "$TROUT3")" | sed -n 1p)"
+
+# An unnamed create records nothing, beside the named one the same reader reads (tr1).
+TROUT4="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T4)"
+expect_eq "(tr4) an unnamed create's tree has no record: nothing, rc 1" "rc=1" "$(tr_rec "$(ws_path "$TROUT4")")"
+# A record moved to another tree is not that tree's: the path it names is the key.
+cp "$(git -C "$TR1" rev-parse --absolute-git-dir)/bionic-tree" "$(git -C "$(ws_path "$TROUT4")" rev-parse --absolute-git-dir)/bionic-tree" 2>/dev/null
+expect_eq "(tr5) a record naming another tree's path is no record of this one" "rc=1" "$(tr_rec "$(ws_path "$TROUT4")")"
+
+
 finish

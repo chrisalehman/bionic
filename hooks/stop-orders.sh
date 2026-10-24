@@ -816,7 +816,7 @@ EOF
       say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
     fi
     # THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2). Only for a row carrying the mark: the tree
-    # recorded for the name (`workspace_for_name`), else the convention's, removed by
+    # recorded for the name (`workspace_for_name`), else the plan's cell, else the convention's, removed by
     # lib/worktree.sh `worktree_remove_landed` — never the branch, never a tree whose head is not in the
     # landed commit. A row with no mark (abandoned, read-only) keeps its tree, as it always has.
     if [ -n "$_mark" ]; then
@@ -826,15 +826,18 @@ EOF
       [ -f "$_wt_lib" ] && . "$_wt_lib"
       if declare -f worktree_remove_landed >/dev/null 2>&1; then
         # The tree is recorded under the session whose carrier made it: this one's, else the mark's (a row
-        # adopted from the session that launched it), else the convention's.
+        # adopted from the session that launched it). A tree a predecessor made is in neither record, so the
+        # plan's Tasks `worktree` cell for the row whose agent is the name answers next, and the convention last.
         _tree="$(workspace_for_name "$REPO_REAL" "$SESSION_ID" "$_target" 2>/dev/null)" \
           || { [ -n "$_mark_sid" ] && _tree="$(workspace_for_name "$REPO_REAL" "$_mark_sid" "$_target" 2>/dev/null)"; } \
+          || _tree="$(worktree_for_agent "$REPO_REAL" "$_target" "$SESSION_ID" "$_mark_sid" 2>/dev/null)" \
           || _tree="$(worktree_for_row "$REPO_REAL" "$_target")"
         _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
         _c="${_mark%%$'\t'*}"
         _kept="$(worktree_remove_landed "$REPO_REAL" "$_tree" "$_c")"
         case $? in
           0) say "stopped: $_target — its tree is removed: $_tree (branch ${_tbr:-unknown} stays; landed ${_c:0:12}${_mark_sid:+; mark on roster ${_mark_sid:0:8}})" ;;
+          1) say "stopped: $_target — its tree is not found: $_tree is no directory, so nothing was removed" ;;
           2) say "stopped: $_target — its tree stands: $_tree; $_kept" ;;
         esac
       fi

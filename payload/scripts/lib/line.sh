@@ -887,6 +887,60 @@ EOF
   return 0
 }
 
+# ---------------------------------------------------------------------------- the tree's run
+# THE TREE'S RUN, READ OFF THE TREE FIRST. A landing's plan and working branch come from the tree's own record
+# (lib/worktree.sh `worktree_tree_record`), so a session that never saw the spawn, a conversation cleared between the
+# spawn and the landing, lands what it is handed: the session's binding is a check on the record, never its source. A
+# session bound to another plan than the tree's is refused naming both. A plan no longer open is admitted only to the
+# session bound to it, whose run closes with these last landings (lib/run.sh `session_working_branch` admits a closed
+# bound plan for the same reason). A tree with no record of its own is read through the binding alone, as before.
+# Sets LINE_RUN_PLAN, LINE_RUN_ONTO and LINE_RUN_BY (the spawning session; empty for a tree with no record); rc 1 with
+# the refusal's words in LINE_RUN_WHY. Needs lib/run.sh loaded (`_line_load_run`).
+_line_same_file() {  # <path> <path> -> 0 when both name one file, spelled alike or through links
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  [ "$1" = "$2" ] && return 0
+  [ "$(cd "${1%/*}" 2>/dev/null && pwd -P)/${1##*/}" = "$(cd "${2%/*}" 2>/dev/null && pwd -P)/${2##*/}" ]
+}
+line_tree_run() {  # <tree> <root> <sid>
+  local tree="${1:-}" root="${2:-}" sid="${3:-}" rec tp sp="" verdict st
+  LINE_RUN_PLAN=""; LINE_RUN_ONTO=""; LINE_RUN_BY=""; LINE_RUN_WHY=""
+  rec="$(worktree_tree_record "$tree" 2>/dev/null)" || rec=""
+  tp="$(_wt_field "$rec" plan)"
+  case "$tp" in
+    /*) : ;;
+    *) LINE_RUN_ONTO="$(session_working_branch "$root" "$sid")" \
+         || { LINE_RUN_WHY="${LINE_RUN_ONTO:-no-bound-plan}"; LINE_RUN_ONTO=""; return 1; }
+       LINE_RUN_PLAN="$(session_plan "$root" "$sid")" || { LINE_RUN_WHY="no-bound-plan sid=${sid}"; return 1; }
+       return 0 ;;
+  esac
+  LINE_RUN_BY="$(_wt_field "$rec" spawned-by)"
+  verdict="$(session_run "$root" "$sid")"
+  case "$verdict" in bound-*) sp="${verdict#* }" ;; esac
+  if [ -n "$sp" ] && ! _line_same_file "$sp" "$tp"; then
+    LINE_RUN_WHY="plan-mismatch tree-plan=${tp} session-plan=${sp} — the tree belongs to another run than this session's; land it from a session bound to its plan"
+    return 1
+  fi
+  run_open "$tp"; st=$?
+  case "$st" in
+    0) : ;;
+    3) LINE_RUN_WHY="bound-unreadable plan=${tp}"; return 1 ;;
+    *) case "$verdict" in
+         bound-closed\ *) : ;;
+         *) LINE_RUN_WHY="plan-closed plan=${tp} — the tree's run is closed; only the session bound to it lands its last rows"; return 1 ;;
+       esac ;;
+  esac
+  LINE_RUN_ONTO="$(plan_working_branch "$tp")"
+  [ -n "$LINE_RUN_ONTO" ] || { LINE_RUN_WHY="no-working-branch plan=${tp}"; return 1; }
+  LINE_RUN_PLAN="$tp"
+}
+# THE SESSION A LANDING RUNS UNDER. The publish writes the plan through a plan verb, which writes only the plan its
+# session is bound to, and marks the launch row on that session's roster; so the landing takes a session whose binding
+# names the tree's plan: the asking session's, else the spawning session's. rc 0 when <sid>'s binding names <plan>.
+_line_bound_to() {  # <root> <sid> <plan>
+  local p
+  [ -n "${2:-}" ] && p="$(session_plan "$1" "$2")" && _line_same_file "$p" "$3"
+}
+
 # ---------------------------------------------------------------------------- the hand landing
 # `spawn-worktree.sh land <tree> --by-hand --reason '<why>'` (D9, AC-5.1): the person's landing.
 # The tree is judged as land judged it (lib/worktree.sh `_wt_land_checks`) and by the `.bionic` guard
@@ -901,7 +955,7 @@ EOF
 # for the row keyed by that commit, written by the line's one verdict writer, its log that source. All
 # three or none: with none the landing records the row alone, as before.
 line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -> LANDED | REFUSED
-  local target="${1:-}" root="${2:-}" sid="${3:-}" why="${4:-}" suites="${5:-}" at="${6:-}" log="${7:-}" onto plan
+  local target="${1:-}" root="${2:-}" sid="${3:-}" why="${4:-}" suites="${5:-}" at="${6:-}" log="${7:-}" onto plan s
   [ -n "$why" ] || { _wt_refuse "no-reason path=${target:-<none>} — a hand landing says why: land <tree> --by-hand --reason '<why>'"; return 2; }
   case "$why" in *'|'*|*$'\n'*|*$'\r'*) _wt_refuse "reason-unwritable path=${target:-<none>} — the reason holds a | or a line break; say it on one line without |"; return 2 ;; esac
   if [ -n "${suites}${at}${log}" ]; then
@@ -913,9 +967,11 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   fi
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
   _line_load_run || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
-  onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  plan="$(session_plan "$root" "$sid")" || { _wt_refuse "no-bound-plan sid=${sid}"; return 2; }
-  ( _line_hand "$target" "$onto" "$plan" "$sid" "$why" "$suites" "$at" "$log" )
+  line_tree_run "$target" "$root" "$sid" || { _wt_refuse "$LINE_RUN_WHY"; return 2; }
+  onto="$LINE_RUN_ONTO"; plan="$LINE_RUN_PLAN"
+  for s in "$sid" "$LINE_RUN_BY"; do _line_bound_to "$root" "$s" "$plan" && break; s=""; done
+  [ -n "$s" ] || { _wt_refuse "no-bound-session plan=${plan} path=${target:-<none>} — no session bound to the tree's plan, so its row cannot be written; bind this session to it (session-poker.sh bind ${plan}), land again"; return 2; }
+  ( _line_hand "$target" "$onto" "$plan" "$s" "$why" "$suites" "$at" "$log" )
 }
 # THE WRITER'S RUN, IN THE PERSON'S WORDS: the two writers of what a hand landing records of the row's suites, one for
 # both hand landings (`land --by-hand` above and `session-poker.sh row-landed --by-hand`), so the record they leave is
@@ -1152,12 +1208,12 @@ _line_lands() {  # <the roster row>
 
 line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command> -> 0 · 1 · 2 · 75
   local target="${1:-}" root="${2:-}" sid="${3:-}" within="${4:-}" again="${5:-}"
-  local onto plan wt branch head acc c row roster launch now key name lands suites debt rec deadline=""
+  local onto plan wt branch head acc c row roster roster0="" lsid launch now key name lands suites debt rec deadline=""
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
   _line_load_run || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
   _line_load_gate || { _wt_refuse "gate-library-unloadable path=${_LINE_LIB_DIR}/gate.sh"; return 2; }
-  onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  plan="$(session_plan "$root" "$sid")" || { _wt_refuse "no-bound-plan sid=${sid}"; return 2; }
+  line_tree_run "$target" "$root" "$sid" || { _wt_refuse "$LINE_RUN_WHY"; return 2; }
+  onto="$LINE_RUN_ONTO"; plan="$LINE_RUN_PLAN"
   # THE TREE, JUDGED ONCE: on its branch, then land's own checks.
   git -C "$target" symbolic-ref -q HEAD >/dev/null 2>&1 \
     || { _wt_refuse "detached path=${target:-<none>} — ready lands the row's branch; check it out in the tree, say ready again"; return 2; }
@@ -1177,11 +1233,18 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   fi
   # THE ROSTER'S LAUNCH LINE AND THE ROW THE WALL READS (`line_row_writer`). The suites are the current
   # row's `lands_on=`; the debt is the launch line's `lands_red=` suite, carried on the `ready` event for
-  # T5's debt write (`line_publish` step 6).
-  roster="${root%/}/.bionic/tmp/roster-${sid}.state"
-  line_row_writer "$roster" "$plan" "$row"
+  # the debt write (`line_publish` step 6). The asking session's roster first, which holds a row adopted
+  # after a clear, then the spawning session's, which holds the launch line a successor never saw.
+  for lsid in "$sid" "$LINE_RUN_BY"; do
+    [ -n "$lsid" ] || continue
+    roster="${root%/}/.bionic/tmp/roster-${lsid}.state"
+    [ -n "$roster0" ] || roster0="$roster"
+    line_row_writer "$roster" "$plan" "$row"
+    [ -z "$LINE_NOW" ] || break
+  done
   launch="$LINE_LAUNCH"; now="$LINE_NOW"; name="$LINE_WRITER"
-  [ -n "$now" ] || { _wt_refuse "no-launch-row row=${row} roster=${roster} — ready reads the row's suites off the roster row the walls read"; return 2; }
+  [ -n "$now" ] || { _wt_refuse "no-launch-row row=${row} roster=${roster0} — ready reads the row's suites off the roster row the walls read"; return 2; }
+  _line_bound_to "$root" "$lsid" "$plan" || { _wt_refuse "no-bound-session row=${row} plan=${plan} roster=${roster} — the session that holds the row's launch line is not bound to the tree's plan, so its row cannot be written; bind this session to it (session-poker.sh bind ${plan}), say ready again"; return 2; }
   [ -n "$launch" ] || launch="$now"
   # AN UNREAD RULING HOLDS THE LANDING (wave-33 T10; REQ-1 AC-1.4, D1). A ruling the orchestrator
   # recorded for this writer and nobody has shown it is printed here, marked shown (lib/roster.sh
@@ -1218,7 +1281,7 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   # promise now against the --within it was given. A suite whose promise the time left cannot hold is waited,
   # never started short (`_line_time_for`, D3); this line says the sum up front. No --within, no line.
   [ -z "$within" ] || printf 'promised %ss of %ss\n' "$(_line_promise_total "$suites" "$wt" "$root" "$acc" "$head")" "$((10#$within))"
-  LINE_SID="$sid"   # the session the publish's plan write and roster mark run under (T6)
+  LINE_SID="$lsid"   # the session the publish's plan write and roster mark run under: the one holding the launch line
   _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
 }
