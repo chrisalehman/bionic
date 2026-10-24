@@ -2824,6 +2824,8 @@ CARD_SITREP_POINTS=3
 # beside one of them is a value one of its lines holds. Only words that name a measure belong here: a word as common
 # as open, time or running would bind a count of tasks to a count of findings. `goals` is the goal: lines' counts by
 # status, `asks` the counted line, `steps` the step numbers and `run.wave` the wave, each a value the sheet holds.
+# `criteria` and `discharged` name the criteria counts of any goal (`goal.*`), and a goal name set beside a number names
+# that goal alone (`goal.<name>`); `open` is left out, since it stands beside findings and asks as often.
 CARD_SITREP_WORDS="landed=work.landed,pace.work-landed left=work.left remaining=work.left added=work.added \
 dropped=waste.dropped,work.dropped work=pace.work-landed forecast=pace.time-used,clock.forecast \
 elapsed=clock.elapsed,pace.time-used h=clock.forecast,clock.elapsed hours=clock.forecast,clock.elapsed \
@@ -2831,14 +2833,17 @@ suites=tests.suites-run,tests.suites-total suite=tests.suites-run,tests.suites-t
 red=tests.suites-run total=tests.suites-total reviews=reviews review=reviews passed=reviews failed=reviews \
 findings=findings.open,asks finding=findings.open,asks discarded=waste.runs-discarded \
 waiting=waste.waiting-on-you,asks chain=close.chain goals=goals goal=goals met=goals notmet=goals \
-notmeasured=goals oncourse=goals items=asks item=asks carried=asks rulings=asks step=steps steps=steps wave=run.wave"
+notmeasured=goals oncourse=goals items=asks item=asks carried=asks rulings=asks step=steps steps=steps wave=run.wave \
+criteria=goal.* discharged=goal.*"
 # The words the sheet itself sets after its numbers, so a number set before one is that number: 11 green, 1 red; 4
 # passed, 2 failed; 0 of 4 met, 4 on course; 14 items, 8 carried findings, 6 rulings given.
 CARD_SITREP_PLACED="green red passed failed met notmet notmeasured oncourse items carried rulings"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
 # run. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
-# task; `A <key> <holds> <title> <raised> <blocks> <waits>` per ask. A list line's value runs to the next field's
+# task; `A <key> <holds> <title> <raised> <blocks> <waits>` per ask; `G <name> <status> <k> <n> <waived> <open>
+# <more>` per goal, the criteria discharged k of n, the waived count, the open REQs named and the count of those left
+# unnamed, each empty when the goal's measure does not hold it. A list line's value runs to the next field's
 # ` <name>=`, the last field to the end of the line. A measured line names what it measures after its value,
 # `<value> — <what it measures> · unit: …`; its value is the part before.
 _card_sitrep_sheet() {
@@ -2858,7 +2863,13 @@ _card_sitrep_sheet() {
       print "R\t" k "\t" v; next }
     index($0, "step: ") == 1 { rec("S", "step", "n name state tasks"); next }
     index($0, "task: ") == 1 { rec("T", "task", "id step state desc note"); next }
-    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks waits"); next }' "$1"
+    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks waits"); next }
+    index($0, "goal: ") == 1 { b = " " substr($0, 7); m = fv(b, "measure", "for"); k = ""; n = ""; w = ""; o = ""; mo = ""
+      if (match(m, /^[0-9]+ of [0-9]+ criteria discharged/)) {
+        split(substr(m, 1, RLENGTH), h, " "); k = h[1]; n = h[3]; r = substr(m, RLENGTH + 1)
+        if (match(r, /^, [0-9]+ waived/)) w = substr(r, 3, RLENGTH - 9)
+        if (sub(/^.* — open: /, "", r)) { o = r; if (match(o, / and [0-9]+ more$/)) { mo = substr(o, RSTART + 5, RLENGTH - 10); o = substr(o, 1, RSTART - 1) } } }
+      print "G\t" fv(b, "name", "status") "\t" fv(b, "status", "measure") "\t" k "\t" n "\t" w "\t" o "\t" mo; next }' "$1"
 }
 
 # _card_sitrep_fact <key> -> the sheet's value for a run. or close. key in SR_RECS, `-` when it has none
@@ -2919,7 +2930,9 @@ _card_sitrep_break() {
 #   placed    when a word the sheet sets after its own numbers (CARD_SITREP_PLACED) stands in the words after it,
 #             one of the numbers the sheet sets before that word, an `N of M` count's M before `of <word>`;
 #   named     when a word of CARD_SITREP_WORDS stands in the words after it, or else is the nearest such word before
-#             it in its clause, a value of one of the lines that word names.
+#             it in its clause, a value of one of the lines that word names. The name of a goal, which the sheet
+#             holds as `goal.<name>`, is such a word; a count of criteria beside it is that goal's, and `k of n`
+#             criteria are one count: the goal that holds k holds n with it.
 # A number gets one reason, the first rule it breaks.
 _card_bind() {
   # The scan is byte by byte in the C locale: every class it tests is ASCII, and macOS awk mis-reads a glyph such
@@ -2931,6 +2944,7 @@ _card_bind() {
       nt = 0; split("", tt); split("", tv)
       s = " " tolower(s) " "
       gsub(/not met/, "notmet", s); gsub(/not measured/, "notmeasured", s); gsub(/on course/, "oncourse", s)
+      if (judging) s = names(s)
       L = length(s); i = 1
       while (i <= L) {
         c = substr(s, i, 1)
@@ -2948,6 +2962,22 @@ _card_bind() {
         i++
       }
     }
+    # the text with each goal name that holds a character other than a letter set as the letters alone, so the name is
+    # one word to the scan: sign-up is signup
+    function names(s,   i, from, to, out, p, b, a) {
+      for (i = 1; i <= ng; i++) {
+        from = gtxt[i]; to = gsig[i]; if (from == to) continue
+        out = ""
+        while ((p = index(s, from)) > 0) {
+          b = substr(s, p - 1, 1); a = substr(s, p + length(from), 1)
+          if (b !~ /[a-z0-9_-]/ && a !~ /[a-z0-9_-]/) out = out substr(s, 1, p - 1) to
+          else out = out substr(s, 1, p + length(from) - 1)
+          s = substr(s, p + length(from))
+        }
+        s = out s
+      }
+      return s
+    }
     # the token an N at i counts through: an N of M count is read as one, its last number at the returned index
     function span(i) { return (tt[i + 1] == "W" && tv[i + 1] == "of" && tt[i + 2] == "N") ? i + 2 : i }
     # the first placed word in the run of words after token k, or ""
@@ -2956,17 +2986,29 @@ _card_bind() {
       n = split(words, a, " "); for (i = 1; i <= n; i++) { e = index(a[i], "="); wl[substr(a[i], 1, e - 1)] = substr(a[i], e + 1) }
       n = split(placed, a, " "); for (i = 1; i <= n; i++) pw[a[i]] = 1
     }
-    $1 == "V" { tokenize($3)
+    $1 == "V" { tokenize($3); gk = ($2 ~ /^goal\./) ? "goal.*" : ""
+      if (gk != "") {
+        # the goal named by the key: the name as written, and as one word of letters
+        ng++; gtxt[ng] = tolower(substr($2, 6)); gsig[ng] = gtxt[ng]; gsub(/[^a-z]/, "", gsig[ng])
+        if (gsig[ng] != "" && !(gsig[ng] in wl)) wl[gsig[ng]] = $2
+        gw[gsig[ng]] = $2
+      }
       for (i = 1; i <= nt; i++) {
         if (tt[i] != "N") continue
         held[tv[i]] = 1; lh[$2 SUBSEP tv[i]] = 1; lv[$2] = lv[$2] (lv[$2] == "" ? "" : ", ") tv[i]
-        k = span(i); f = placedafter(k)
+        k = span(i)
+        if (gk != "") {
+          lh[gk SUBSEP tv[i]] = 1; lv[gk] = lv[gk] (lv[gk] == "" ? "" : ", ") tv[i]
+          if (k > i) { held[tv[k]] = 1; lh[$2 SUBSEP tv[k]] = 1; lh[gk SUBSEP tv[k]] = 1; gp[$2 SUBSEP tv[i] SUBSEP tv[k]] = 1; gp[gk SUBSEP tv[i] SUBSEP tv[k]] = 1
+            gs[$2] = gs[$2] (gs[$2] == "" ? "" : "; ") tv[i] " of " tv[k]; gs[gk] = gs[gk] (gs[gk] == "" ? "" : "; ") tv[i] " of " tv[k] }
+        }
+        f = placedafter(k)
         if (f == "") continue
         pl[f SUBSEP tv[i]] = 1; pn[f] = pn[f] (pn[f] == "" ? "" : ", ") tv[i]
         if (k > i) { held[tv[k]] = 1; lh[$2 SUBSEP tv[k]] = 1; pl["of:" f SUBSEP tv[k]] = 1; pn["of:" f] = pn["of:" f] (pn["of:" f] == "" ? "" : ", ") tv[k] }
       }
       next }
-    $1 == "J" { tokenize($3); tag = $2
+    $1 == "J" { judging = 1; tokenize($3); tag = $2
       for (i = 1; i <= nt; i++) {
         if (tt[i] != "N") continue
         k = span(i)
@@ -2983,6 +3025,14 @@ _card_bind() {
           for (e = k + 1; e <= nt && tt[e] == "W"; e++) if (tv[e] in wl) { w = tv[e]; ln = wl[w]; break }
           if (ln == "") for (e = i - 1; e >= 1 && tt[e] != "B"; e--) if (tt[e] == "W" && (tv[e] in wl)) { w = tv[e]; ln = wl[w]; break }
           if (ln == "") continue
+          # criteria and discharged name every goal; a goal name before the count narrows them to that goal
+          if (ln == "goal.*") for (e = i - 1; e >= 1 && tt[e] != "B"; e--) if (tt[e] == "W" && (tv[e] in gw)) { w = tv[e]; ln = gw[w]; break }
+          # a count of criteria is one pair, k of n: the goal that holds k must hold n with it
+          if (k > i && ln ~ /^goal\./) {
+            if (x == i && (tv[k] in held) && !((ln SUBSEP tv[i] SUBSEP tv[k]) in gp))
+              printf "%s: says %s of %s beside \"%s\", and %s holds %s: a count of criteria is the k of n a goal measures\n", tag, tv[i], tv[k], w, ln, ((ln in gs) ? gs[ln] : "nothing")
+            continue
+          }
           m = split(ln, ks, ","); ok = 0; hold = ""
           for (j = 1; j <= m; j++) { if ((ks[j] SUBSEP y) in lh) ok = 1; hold = hold (j > 1 ? "; " : "") ks[j] " holds " ((ks[j] in lv) ? lv[ks[j]] : "nothing") }
           if (!ok) printf "%s: says %s beside \"%s\", the word of %s: a number is the value of the line whose word stands beside it\n", tag, y, w, hold
@@ -3071,11 +3121,11 @@ _card_sitrep_tasklist() {
     }'
 }
 
-# _card_sitrep_cells -> the five Metrics rows from SR_VALS and the goal counts, `<Label> TAB <values> TAB <values>`:
+# _card_sitrep_cells -> the five Metrics rows from SR_VALS and the goal lines, `<Label> TAB <values> TAB <values>`:
 # each group the sheet's own measured values, reworded only by the words that say which value is which, the pace
 # comparison first in its row. A value the sheet lacks prints as -.
 _card_sitrep_cells() {
-  printf '%s\n' "$SR_VALS" | awk -F'\t' -v ga="$SR_GOALA" -v gb="$SR_GOALB" '
+  printf '%s\n' "$SR_VALS" | awk -F'\t' '
     function has(k) { return (k in v) && v[k] != "" && v[k] != "-" }
     function g(k) { return has(k) ? v[k] : "-" }
     $1 == "V" { v[$2] = $3 }
@@ -3095,8 +3145,20 @@ _card_sitrep_cells() {
       x = g("waste.runs-discarded"); x = has("waste.runs-discarded") ? x " runs discarded" : "runs discarded -"
       b = g("waste.waiting-on-you"); if (has("waste.waiting-on-you")) { sub(/:.*$/, "", b); b = b " waiting on you" }
       print "Waste\t" a " · " x "\t" b
-      print "Goals\t" ga "\t" gb
     }'
+  printf 'Goals\t%s\t\n' "$(_card_sitrep_goals)"
+}
+
+# _card_sitrep_goals -> the Goals cell, one entry per goal in the sheet's order joined by ` · `: the goal's name and its
+# criteria discharged, `<name> <k> of <n>`, then `, <REQ-a>, <REQ-b> open and <N> more` for the open REQs its measure
+# names; a goal whose measure holds no count prints `<name> <status>`; a sheet with no goal prints `no goals`.
+_card_sitrep_goals() {
+  printf '%s\n' "$SR_RECS" | awk -F'\t' '
+    $1 == "G" { e = $2 " "
+      if ($4 == "") e = e $3
+      else { e = e $4 " of " $5; if ($7 != "") e = e ", " $7 " open" ($8 != "" ? " and " $8 " more" : "") }
+      s = s (s == "" ? "" : " · ") e }
+    END { print (s == "") ? "no goals" : s }'
 }
 
 # _card_sitrep_metrics -> the Metrics table: each label at 4 columns in a 13-column field, its first group after it,
@@ -3107,7 +3169,8 @@ _card_sitrep_metrics() {
   while IFS="$CARD_TAB" read -r lab a b; do
     [ -n "$lab" ] || continue
     L[$n]="$lab"; A[$n]="$a"; B[$n]="$b"
-    _bionic_cols_into "$a"; WA[$n]="$BIONIC_COLS"; [ "$BIONIC_COLS" -le "$maxa" ] || maxa="$BIONIC_COLS"
+    # a row with no second group is not a column: the Goals row runs as long as its themes need
+    _bionic_cols_into "$a"; WA[$n]="$BIONIC_COLS"; [ "$BIONIC_COLS" -le "$maxa" ] || [ -z "$b" ] || maxa="$BIONIC_COLS"
     _bionic_cols_into "$b"; [ "$BIONIC_COLS" -le "$maxb" ] || maxb="$BIONIC_COLS"
     n=$((n + 1))
   done <<< "$(_card_sitrep_cells)"
@@ -3325,7 +3388,7 @@ _card_sitrep_check() {
 # _card_sitrep_load <sheet file> -> SR_RECS; the open asks SR_AKEY, SR_AHOLDS, SR_ATITLE, SR_ABLOCK (yes when the ask
 # waits on the user and its blocks field says yes, never inferred from what it holds) and SR_AWAIT (`user` or
 # `event <what>`); SR_VALS, `V <key> <value>` per measured sheet line (the text before ` — `), the wave, the step
-# numbers, the goal counts by status and the counted line; SR_GOALA and SR_GOALB, the Goals row's two groups;
+# numbers, the goal counts by status, each theme's criteria discharged under its name and the counted line;
 # SR_COUNTED, the counted line of the asks that wait on events; SR_NEXT, the next event the run waits on.
 _card_sitrep_load() {
   local k h t b w i first="" lead="" kinds="" chain
@@ -3364,19 +3427,17 @@ _card_sitrep_load() {
       if (k !~ /^(goal|task|step|ask|review)$/) { v = substr($0, length(k) + 3); print "V\t" k "\t" substr(v, 1, index(v, " — ") - 1); next } }
     index($0, "run.wave: ") == 1 { print "V\trun.wave\t" substr($0, 11); next }
     index($0, "step: n=") == 1 { s = substr($0, 9); sub(/ .*$/, "", s); st = st (st == "" ? "" : " ") s; next }
-    index($0, "goal: ") == 1 {
-      g = $0; s = index(g, " status="); g = s ? substr(g, s + 8) : ""; e = index(g, " measure="); if (e) g = substr(g, 1, e - 1)
-      if (!(g in gc)) go[++ng] = g; gc[g]++; gt++ }
     END {
       print "V\tsteps\t" st
-      if (counted != "") print "V\tasks\t" counted
+      if (counted != "") print "V\tasks\t" counted }' "$1")"
+  # the goals: the counts by status the word goals names, and each theme's criteria discharged under its own name
+  SR_VALS="$SR_VALS"$'\n'"$(printf '%s\n' "$SR_RECS" | awk -F'\t' '
+    $1 == "G" { if (!($3 in gc)) go[++ng] = $3; gc[$3]++; gt++
+      if ($4 != "") print "V\tgoal." $2 "\t" $4 " of " $5 " criteria discharged" ($6 != "" ? ", " $6 " waived" : "") ($8 != "" ? ", " $8 " more open" : "") }
+    END {
       s = (gc["met"] + 0) " of " (gt + 0) " met"; b = ""
       for (i = 1; i <= ng; i++) if (go[i] != "met") b = b (b == "" ? "" : ", ") gc[go[i]] " " go[i]
-      print "V\tgoals\t" s (b == "" ? "" : ", " b)
-      print "GA\t" ((gt + 0) ? s : "no goals")
-      print "GB\t" b }' "$1")"
-  SR_GOALA="$(printf '%s\n' "$SR_VALS" | awk -F'\t' '$1 == "GA" { print $2 }')"
-  SR_GOALB="$(printf '%s\n' "$SR_VALS" | awk -F'\t' '$1 == "GB" { print $2 }')"
+      print "V\tgoals\t" s (b == "" ? "" : ", " b) }')"
 }
 
 _card_sitrep() {  # <sheet file>, the judgment on stdin -> the card, or 1 and every reason on stderr
