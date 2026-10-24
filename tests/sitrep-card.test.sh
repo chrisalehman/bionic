@@ -164,7 +164,7 @@ SC_WANT_OWED='Sitrep · bionic 1.24.0 · wave 41 · Tuesday 2:40 PM
     Pace         37% of the work in 60% of the forecast time            2 tasks added since approval
     Correctness  11 suites green, 1 red · 0 reviews passed, 0 failed, 1 running   0 findings open
     Waste        2 tasks dropped, 60 min · 0 of 25 runs discarded       60 min waiting on you
-    Goals        0 of 1 met                                             1 not measured
+    Goals        owed not measured
 
   Assessment: B
     • Purpose: the run lets the user see what they owe; on course, 0 of 1 goals met.
@@ -269,10 +269,10 @@ waste.dropped: 2 tasks, 390 min — the tasks dropped, as work.dropped · unit: 
 waste.runs-discarded: 0 of 61 — the suite runs thrown away · unit: count of all suite runs · source: the landing record and the gate
 waste.ready-unstarted: 0 min — the minutes a ready task sat while the machine had room · unit: minutes · source: the fill record
 waste.waiting-on-you: 935 min: decide:D2 — the minutes a task waited on an ask, overlaps counted once · unit: minutes, and which asks · source: the register'"'"'s opened and closed times
-goal: name=sign-up status=on course measure=2 of 3 criteria discharged — on course
-goal: name=reach status=on course measure=1 of 2 criteria discharged — on course
-goal: name=pages status=on course measure=3 of 5 criteria discharged — on course
-goal: name=studio status=on course measure=1 of 4 criteria discharged — on course
+goal: name=sign-up status=on course measure=2 of 3 criteria discharged — open: REQ-3
+goal: name=reach status=on course measure=1 of 2 criteria discharged — open: REQ-2
+goal: name=pages status=on course measure=3 of 5 criteria discharged — open: REQ-4, REQ-5
+goal: name=studio status=on course measure=1 of 4 criteria discharged — open: REQ-6, REQ-7 and 1 more
 '"$SC_FLOCK_ASKS"'
 review: question=structure scope=whole result=fail at=4:10 PM open-findings=4 record=record/wave-02-flock/critic-structure.md'
 SC_J_FLOCK='purpose: members sign up and reach each other on master, every page verified by eye. On course: nothing missed, every goal waiting on your reads and the final reviews.
@@ -317,7 +317,8 @@ SC_WANT_FLOCK='Sitrep · flock-app · wave 2 · Friday 10:49 PM
     Pace         87% of the work in 31% of the forecast time           54 tasks added since approval
     Correctness  4 suites green, 0 red · 4 reviews passed, 2 failed, 0 running   8 findings open
     Waste        2 tasks dropped, 390 min · 0 of 61 runs discarded     935 min waiting on you
-    Goals        0 of 4 met                                            4 on course
+    Goals        sign-up 2 of 3, REQ-3 open · reach 1 of 2, REQ-2 open · pages 3 of 5, REQ-4, REQ-5
+                 open · studio 1 of 4, REQ-6, REQ-7 open and 1 more
 
   Assessment: B
     • Purpose: members sign up and reach each other on master, every page verified by eye. On
@@ -421,9 +422,9 @@ waste.dropped: 1 task, 15 min — the tasks dropped, as work.dropped · unit: co
 waste.runs-discarded: 3 of 100 — the suite runs thrown away · unit: count of all suite runs · source: the landing record and the gate
 waste.ready-unstarted: 0 min — the minutes a ready task sat while the machine had room · unit: minutes · source: the fill record
 waste.waiting-on-you: 328 min: approve:step0, approve:step1, approve:step2, approve:step3, waive:evidence, waive:adversarial — the minutes a task waited on an ask, overlaps counted once · unit: minutes, and which asks · source: the register's opened and closed times
-goal: name=replay status=met measure=a scripted close from the failed-review state reaches delivered: through the verbs alone — close-replay.test.sh green at 26c55474
-goal: name=judge status=met measure=the release check that judges a landing runs from the release base in every place it runs — door-landing.test.sh green at 29cfb97b
-goal: name=verbs status=met measure=no deliver, amend, task-set or step-field call in the replay is refused for a cell the verbs cannot write — close-replay.test.sh green at 26c55474
+goal: name=replay status=met measure=4 of 4 criteria discharged — none open
+goal: name=judge status=met measure=3 of 3 criteria discharged — none open
+goal: name=verbs status=met measure=2 of 2 criteria discharged — none open
 ask: key=finding:record:wave-43-no-hand-hold:critic-evidence.md:3 holds=nothing title=Finding S2 needs a ruling raised=3:34 PM 2026-10-22 blocks=no
 ask: key=finding:record:wave-43-no-hand-hold:critic-evidence.md:4 holds=nothing title=Finding S2 needs a ruling raised=3:34 PM 2026-10-22 blocks=no
 ask: key=finding:record:wave-43-no-hand-hold:critic-adversarial.md:1 holds=nothing title=Finding S2 needs a ruling raised=3:34 PM 2026-10-22 blocks=no
@@ -571,7 +572,8 @@ expect_eq "DR6 a judgment with a metric: line refuses the card, naming the tag" 
 section "§TABLE: the Metrics are five lines, every number a measured value of its own line, the pace comparison first"
 # ============================================================
 # fails-when: a Metrics row holds a number its own sheet lines do not, the five are not five or out of order, the Pace
-# row opens on anything but the comparison, or a row is prose.
+# row opens on anything but the comparison, a row is prose, or the Goals row counts goals by status instead of stating
+# each theme's criteria discharged and open REQs.
 sc_card "$SC_OWED" "$SC_J_OWED"
 SC_TABLE="$(sc_rows "$SC_OUT" "Metrics")"
 expect_eq "TB1 five rows, Completed, Pace, Correctness, Waste, Goals, in that order" "Completed|Pace|Correctness|Waste|Goals" \
@@ -593,11 +595,27 @@ expect_eq "TB3 the Pace row opens on the comparison: the work landed against the
 expect_empty "TB4 no row is prose: no clause end inside the table (TB1 read the same rows)" \
   "$(printf '%s\n' "$SC_TABLE" | /usr/bin/grep -E '[.;!?]( |$)')"
 sc_card "$SC_FLOCK" "$SC_J_FLOCK"
-expect_eq "TB5 the table moves with the sheet: the flock sheet's rows carry its own numbers" "0|0 of 4 met|4 on course" \
-  "$SC_RC|$(sc_row "$SC_OUT" '    Goals ' | sed 's/^    Goals *//; s/   .*//')|$(sc_row "$SC_OUT" '    Goals ' | sed 's/.*   //')"
+expect_eq "TB5 the table moves with the sheet: the flock sheet's Goals row states each theme's criteria discharged and open REQs" \
+  "0|sign-up 2 of 3, REQ-3 open · reach 1 of 2, REQ-2 open · pages 3 of 5, REQ-4, REQ-5 open · studio 1 of 4, REQ-6, REQ-7 open and 1 more" \
+  "$SC_RC|$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
 sc_card "$(printf '%s\n' "$SC_OWED" | sed 's/^findings.open: 0 /findings.open: 3 /')" "$SC_J_OWED"
 expect_eq "TB6 a moved sheet value moves its cell: findings.open at 3 draws 3 findings open" "0|1" \
   "$SC_RC|$(sc_rows "$SC_OUT" "Metrics" | /usr/bin/grep -c '3 findings open$')"
+SC_W43G="$(printf '%s\n' "$SC_W43" | awk '
+  index($0, "goal: name=judge ") == 1 { print "goal: name=judge status=on course measure=1 of 2 criteria discharged — open: REQ-4"; next }
+  index($0, "goal: name=verbs ") == 1 { print "goal: name=verbs status=on course measure=2 of 5 criteria discharged, 1 waived — open: REQ-5, REQ-6 and 2 more"; next }
+  { print }')"
+sc_card "$SC_W43G" "$SC_J_W43"
+SC_GOALROW="$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
+expect_eq "TB7 the wave-43 sheet's Goals row reads each theme in order: its k of n and the REQs it has open, no count by status" \
+  "0|replay 4 of 4 · judge 1 of 2, REQ-4 open · verbs 2 of 5, REQ-5, REQ-6 open and 2 more" "$SC_RC|$SC_GOALROW"
+expect_empty "TB7a …and no status-count phrase (a moved status moves no count)" "$(printf '%s\n' "$SC_GOALROW" | /usr/bin/grep -E '[0-9]+ of [0-9]+ (met|on course)|[0-9] (met|on course)')"
+sc_card "$SC_OWED" "$SC_J_OWED"
+expect_eq "TB7b a theme with no k of n in its measure prints its status word" "0|owed not measured" \
+  "$SC_RC|$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
+sc_card "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -v '^goal: ')" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^purpose: .*/purpose: the run lets the user see what they owe./')"
+expect_eq "TB7c a sheet with no goal: line prints no goals on the row" "0|no goals" \
+  "$SC_RC|$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
 
 # ============================================================
 section "§COUNTED: the asks that wait on events are one counted line under the Assessment, by kind, never a row each"
@@ -738,7 +756,8 @@ section "§BIND: every number in a judgment line is a sheet value, bound to the 
 # and versions are no counts and are never bound.
 # fails-when: "1 green and 11 red" over "11 green, 1 red" draws, a number no sheet value holds draws, a goal count
 # another status holds draws, two numbers traded between their words draw, a long point is refused for its length,
-# or a label, id, clock or version is refused.
+# or a label, id, clock or version is refused, or a theme's true count is refused, or one off by one or set beside another
+# theme's name draws.
 expect_eq "BI0 precondition: the owed sheet holds 11 green and 1 red on one line" "1" "$(printf '%s\n' "$SC_OWED" | /usr/bin/grep -c '^tests.suites-run: 12: 11 green, 1 red ')"
 sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^point: 11 suites green and 1 red;/point: 1 green and 11 red;/')"
 expect_eq "BI1 a point saying 1 green and 11 red refuses the card: exit 1, nothing printed" "1|" "$SC_RC|$SC_OUT"
@@ -786,6 +805,27 @@ expect_eq "BI8b a point calling the done T13 running refuses it" "1|1" "$SC_RC|$
 sc_card "$SC_OWED" "$SC_J_OWED
 point: 4/8 has not landed; T13 landed at noon."
 expect_eq "BI8c control: an open task not landed and a done one landed draw" "0|" "$SC_RC|$SC_ERR"
+# A theme's count is a sheet value bound to the theme's name and to the words criteria and discharged.
+SC_ONE="$(printf '%s\n' "$SC_OWED" | sed 's/^goal: .*/goal: name=run status=on course measure=24 of 25 criteria discharged — open: REQ-3/')"
+SC_J_ONE="$(printf '%s\n' "$SC_J_OWED" | sed 's/^purpose: .*/purpose: the run lets the user see what they owe; PURPOSE_COUNT./')"
+sc_purpose() { printf '%s\n' "$SC_J_ONE" | sed "s/PURPOSE_COUNT/$1/"; }   # <text> -> the judgment with that text ending the purpose
+sc_card "$SC_ONE" "$(sc_purpose '24 of 25 criteria discharged')"
+expect_eq "BI9 the true per-theme count in the purpose draws: 24 of 25 criteria discharged over a theme measuring it" "0|" "$SC_RC|$SC_ERR"
+expect_eq "BI9a …and the purpose row says it" "    • Purpose: the run lets the user see what they owe; 24 of 25 criteria discharged." \
+  "$(sc_rows "$SC_OUT" "Assessment" | head -1)"
+sc_card "$SC_ONE" "$(sc_purpose '25 of 25 criteria discharged')"
+expect_eq "BI9b a count off by one is refused, naming the number: 25 of 25 over 24 of 25" "1||1" "$SC_RC|$SC_OUT|$(sc_why 'purpose:' 'says 25 of 25')"
+sc_card "$SC_ONE" "$(sc_purpose '24 of 26 criteria discharged')"
+expect_eq "BI9b2 …a total no theme holds is named too: 24 of 26" "1|1" "$SC_RC|$(sc_why 'purpose:' 'says 26')"
+sc_card "$SC_FLOCK" "$(printf '%s\n' "$SC_J_FLOCK" | sed 's/^purpose: .*/purpose: members sign up and reach each other; reach has 1 of 2 criteria discharged, sign-up 2 of 3./')"
+expect_eq "BI9c control: each theme's count beside its own name draws" "0|" "$SC_RC|$SC_ERR"
+sc_card "$SC_FLOCK" "$(printf '%s\n' "$SC_J_FLOCK" | sed 's/^purpose: .*/purpose: members sign up and reach each other; reach has 2 of 3 criteria discharged./')"
+expect_eq "BI9d a count bound to another theme's name is refused: reach holds 1 of 2, and 2 of 3 is sign-up's" "1||1" \
+  "$SC_RC|$SC_OUT|$(sc_why 'purpose:' 'says 2 of 3')"
+sc_card "$SC_OWED" "$(sc_purpose '24 of 25 criteria discharged')"
+expect_eq "BI9e a sheet whose goal measures no count refuses the same purpose: nothing holds 24" "1|1" "$SC_RC|$(sc_why 'purpose:' 'says 24')"
+sc_card "$SC_ONE" "$(sc_purpose '3 of 4 goals met')"
+expect_eq "BI9f a goals count still comes from the status counts: 3 of 4 goals met over one goal on course is refused" "1|1" "$SC_RC|$(sc_why 'purpose:' 'says 3')"
 
 # ============================================================
 section "§SHAPE: the drawn card's own shape: width, a step row above its tasks, an open task twice or missing"
