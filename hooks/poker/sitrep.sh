@@ -1727,9 +1727,15 @@ SITREP_COUNT
 }
 
 # sitrep_blocked_on_you -> yes when some ask of sitrep_gather's facts blocks the user, else no: the sheet's own
-# `blocks=` lines, so the handoff's head says what the sheet says.
+# `blocks=` lines, so the handoff's head says what the sheet says. The lines are read whole into a variable before
+# they are matched, so no reader quits early on a writer still feeding it and the answer cannot flip under pipefail.
 sitrep_blocked_on_you() {
-  if sitrep_ask_lines | /usr/bin/grep -q ' blocks=yes waits='; then printf 'yes\n'; else printf 'no\n'; fi
+  local lines
+  lines="$(sitrep_ask_lines)"
+  case "$lines" in
+    *' blocks=yes waits='*) printf 'yes\n' ;;
+    *) printf 'no\n' ;;
+  esac
 }
 
 # sitrep_ask_words -> one `<title> — holds <what>` line per ask of sitrep_gather's facts, ` · waits on <what>` ending
