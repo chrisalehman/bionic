@@ -1856,7 +1856,10 @@ section "§FAST: the sheet verb and the card verb, run one after the other on a 
 # handed, and sitrep_gather counted, so the sheet the card draws from is read and the one gather is proved.
 # fails-when: the two verbs together take 5 seconds or more, the card verb gathers a second time, or the sheet the card
 # draws from carries the asks as they stood when the sheet was saved rather than as they stand now.
+# The docs tree lives beside the repository, not in a checkout of it: this checkout when it holds one, else the
+# main checkout the git directory belongs to (a landing checkout holds none).
 SR_FAST_SRC="$BIONIC_HOOKS_DIR/../.bionic/docs"
+[ -d "$SR_FAST_SRC" ] || SR_FAST_SRC="$(cd "$(git -C "$BIONIC_HOOKS_DIR" rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd -P)/.bionic/docs"
 SR_FAST_PLAN_REL="plans/epic-23-bionic-tech-debt/wave-43-no-hand-hold.plan.md"
 SR_FAST_REC_REL="record/wave-43-no-hand-hold"
 expect_true "FA0 precondition: the wave-43 plan and its record are on this tree" test -f "$SR_FAST_SRC/$SR_FAST_PLAN_REL" -a -d "$SR_FAST_SRC/$SR_FAST_REC_REL"
