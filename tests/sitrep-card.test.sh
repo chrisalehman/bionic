@@ -317,8 +317,9 @@ SC_WANT_FLOCK='Sitrep · flock-app · wave 2 · Friday 10:49 PM
     Pace         87% of the work in 31% of the forecast time           54 tasks added since approval
     Correctness  4 suites green, 0 red · 4 reviews passed, 2 failed, 0 running   8 findings open
     Waste        2 tasks dropped, 390 min · 0 of 61 runs discarded     935 min waiting on you
-    Goals        sign-up 2 of 3, REQ-3 open · reach 1 of 2, REQ-2 open · pages 3 of 5, REQ-4, REQ-5
-                 open · studio 1 of 4, REQ-6, REQ-7 open and 1 more
+    Goals        sign-up on course, 2 of 3, REQ-3 open · reach on course, 1 of 2, REQ-2 open · pages
+                 on course, 3 of 5, REQ-4, REQ-5 open · studio on course, 1 of 4, REQ-6, REQ-7 open
+                 and 1 more
 
   Assessment: B
     • Purpose: members sign up and reach each other on master, every page verified by eye. On
@@ -596,7 +597,7 @@ expect_empty "TB4 no row is prose: no clause end inside the table (TB1 read the 
   "$(printf '%s\n' "$SC_TABLE" | /usr/bin/grep -E '[.;!?]( |$)')"
 sc_card "$SC_FLOCK" "$SC_J_FLOCK"
 expect_eq "TB5 the table moves with the sheet: the flock sheet's Goals row states each theme's criteria discharged and open REQs" \
-  "0|sign-up 2 of 3, REQ-3 open · reach 1 of 2, REQ-2 open · pages 3 of 5, REQ-4, REQ-5 open · studio 1 of 4, REQ-6, REQ-7 open and 1 more" \
+  "0|sign-up on course, 2 of 3, REQ-3 open · reach on course, 1 of 2, REQ-2 open · pages on course, 3 of 5, REQ-4, REQ-5 open · studio on course, 1 of 4, REQ-6, REQ-7 open and 1 more" \
   "$SC_RC|$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
 sc_card "$(printf '%s\n' "$SC_OWED" | sed 's/^findings.open: 0 /findings.open: 3 /')" "$SC_J_OWED"
 expect_eq "TB6 a moved sheet value moves its cell: findings.open at 3 draws 3 findings open" "0|1" \
@@ -607,9 +608,32 @@ SC_W43G="$(printf '%s\n' "$SC_W43" | awk '
   { print }')"
 sc_card "$SC_W43G" "$SC_J_W43"
 SC_GOALROW="$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
-expect_eq "TB7 the wave-43 sheet's Goals row reads each theme in order: its k of n and the REQs it has open, no count by status" \
-  "0|replay 4 of 4 · judge 1 of 2, REQ-4 open · verbs 2 of 5, REQ-5, REQ-6 open and 2 more" "$SC_RC|$SC_GOALROW"
-expect_empty "TB7a …and no status-count phrase (a moved status moves no count)" "$(printf '%s\n' "$SC_GOALROW" | /usr/bin/grep -E '[0-9]+ of [0-9]+ (met|on course)|[0-9] (met|on course)')"
+expect_eq "TB7 the wave-43 sheet's Goals row reads each theme in order: its standing, its k of n and the REQs it has open, no count by status" \
+  "0|replay met, 4 of 4 · judge on course, 1 of 2, REQ-4 open · verbs on course, 2 of 5, REQ-5, REQ-6 open and 2 more" "$SC_RC|$SC_GOALROW"
+sc_goal_entries() {  # <sheet> -> `<name> <status>, <k> of <n>` for each goal: line holding a count, one per line
+  printf '%s\n' "$1" | awk 'index($0, "goal: name=") == 1 && match($0, / status=[a-z ]+ measure=[0-9]+ of [0-9]+ criteria/) {
+    nm = substr($0, 12, RSTART - 12); r = substr($0, RSTART + 8, RLENGTH - 8); sub(/ measure=.*$/, "", r)
+    m = substr($0, RSTART, RLENGTH); sub(/^.* measure=/, "", m); split(m, h, " "); print nm " " r ", " h[1] " of " h[3] }'
+}
+expect_eq "TB7a precondition: the extractor reads the wave-43 sheet's three themes with their standing" \
+  "replay met, 4 of 4|judge on course, 1 of 2|verbs on course, 2 of 5" "$(sc_goal_entries "$SC_W43G" | paste -sd'|' -)"
+SC_MISS=""
+while IFS= read -r e; do printf '%s\n' "$SC_GOALROW" | /usr/bin/grep -qF -- "$e" || SC_MISS="$SC_MISS|$e"; done <<< "$(sc_goal_entries "$SC_W43G")"
+expect_eq "TB7a each theme's standing word is drawn beside its count, as the sheet's status reads" "" "$SC_MISS"
+expect_empty "TB7a2 …and no status-count phrase (a moved status moves no count)" "$(printf '%s\n' "$SC_GOALROW" | /usr/bin/grep -E '[0-9]+ of [0-9]+ (met|on course)|[0-9] (met|on course)')"
+SC_W43N="$(printf '%s\n' "$SC_W43G" | awk '{ print } index($0, "goal: name=verbs ") == 1 { print "goal: name=gate status=not met measure=1 of 3 criteria discharged — open: REQ-8" }')"
+sc_card "$SC_W43N" "$(printf '%s\n' "$SC_J_W43" | sed 's/^purpose: .*/purpose: the run lands the close replay./')"
+SC_GOALROWN="$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
+expect_eq "TB7d a theme at status not met draws its standing, a missed criterion open: gate not met, 1 of 3, REQ-8 open" \
+  "0|1" "$SC_RC|$(printf '%s\n' "$SC_GOALROWN" | /usr/bin/grep -cF 'gate not met, 1 of 3, REQ-8 open')"
+expect_eq "TB7d2 …after the three themes of TB7, in the sheet order" \
+  "replay met, 4 of 4 · judge on course, 1 of 2, REQ-4 open · verbs on course, 2 of 5, REQ-5, REQ-6 open and 2 more · gate not met, 1 of 3, REQ-8 open" "$SC_GOALROWN"
+SC_NM="$(printf '%s\n' "$SC_OWED" | sed 's/^goal: .*/goal: name=run status=not met measure=24 of 25 criteria discharged — open: REQ-9/')"
+SC_OC="$(printf '%s\n' "$SC_OWED" | sed 's/^goal: .*/goal: name=run status=on course measure=24 of 25 criteria discharged — open: REQ-9/')"
+sc_card "$SC_NM" "$SC_J_OWED"; SC_ROWNM="$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"; SC_RCNM="$SC_RC"
+sc_card "$SC_OC" "$SC_J_OWED"; SC_ROWOC="$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
+expect_eq "TB7e a not met theme and an on course theme at the same k of n draw differently, each its own standing" \
+  "0|0|run not met, 24 of 25, REQ-9 open|run on course, 24 of 25, REQ-9 open" "$SC_RCNM|$SC_RC|$SC_ROWNM|$SC_ROWOC"
 sc_card "$SC_OWED" "$SC_J_OWED"
 expect_eq "TB7b a theme with no k of n in its measure prints its status word" "0|owed not measured" \
   "$SC_RC|$(sc_row "$(sc_rows "$SC_OUT" "Metrics")" 'Goals' | sed 's/^    Goals *//')"
