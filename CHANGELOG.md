@@ -112,7 +112,22 @@ titled cards are new capability. `canonical_sdlc_version` stays 14.
 
 ### The reviews
 
-Close-out renders this part from the plan's review and waiver lines, in the order they were registered.
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at afb40d25 by w44-T9, 2026-10-24T09:58:24Z (`critic-adversarial.md`)
+- structure review, whole: flag at afb40d25 by w44-T9, 2026-10-24T09:58:26Z (`critic-structure.md`)
+- evidence review, whole: fail at afb40d25 by w44-T9, 2026-10-24T10:00:14Z (`critic-evidence.md`)
+- evidence review, piece: fail at 268aaf74 by w44-T17, 2026-10-24T10:23:29Z (`critic-evidence-2.md`)
+- adversarial review, piece: fail at 268aaf74 by w44-T17, 2026-10-24T10:23:31Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 268aaf74 by w44-T17, 2026-10-24T10:23:34Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 32f7ba24 by w44-T19, 2026-10-24T10:40:49Z (`critic-evidence-3.md`)
+- adversarial review, piece: flag at 32f7ba24 by w44-T19, 2026-10-24T10:40:51Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at 32f7ba24 by w44-T19, 2026-10-24T10:40:54Z (`critic-structure-3.md`)
+- evidence review: waived at 47787455 by Chris Lehman, 2026-10-24T15:45:51Z: "D12: 1 — the later green at 477874555 stands as the proof; T18 landed red through T19 title since fixed"
+- adversarial review: waived at 47787455 by Chris Lehman, 2026-10-24T15:45:52Z: "D12: 1 — the later green at 477874555 stands as the proof; T18 landed red through T19 title since fixed"
+- evidence review: waived at aee9451a by Chris Lehman, 2026-10-24T16:28:17Z: "D15: 1 — the T20 landing, four lines of sitrep skill text on D13, waived over on my word; sitrep-card.test.sh green at 3225216af"
+- adversarial review: waived at aee9451a by Chris Lehman, 2026-10-24T16:28:17Z: "D15: 1 — the T20 landing, four lines of sitrep skill text on D13, waived over on my word; sitrep-card.test.sh green at 3225216af"
+- structure review: waived at aee9451a by Chris Lehman, 2026-10-24T16:28:17Z: "D15: 1 — the T20 landing, four lines of sitrep skill text on D13, waived over on my word; sitrep-card.test.sh green at 3225216af"
 
 ### Known limits
 
