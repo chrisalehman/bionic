@@ -100,7 +100,7 @@ titled cards are new capability. `canonical_sdlc_version` stays 14.
 - T6 (`walk.md`): the walk. The card drawn on the prior run's plan and on the mock-up fixture is read as a user would,
   and the verification matrix is filled from the landings' logs.
 - T7 (`T7.md`): the whole regression, once after the build.
-- T8 (`sitrep-timing.md`): three sitreps timed, typed command to shown card, against the thirty seconds the goal names.
+- T8 (`sitrep-timing.md`): two sitreps timed, typed command to shown card: 64 s and 40 s against the thirty seconds the goal names; the row waived on the user's words and the limit stated.
 - T9 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's review of the whole, one record
   for each question.
 
@@ -169,7 +169,7 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 - The task-list rule that a row added by task-add gets its entry the same turn is stated nowhere after the step text was tightened. (`critic-structure.md#2`)
 - The explain verb on a decision prints no detail on a real spec; the pin places the detail where no real spec writes it. (`critic-evidence.md#3`)
 - The approved mock-up is in no record: the golden of the mock-up card is the code own output, and under forty rows is the pin count of a card that prints 54 lines. (`critic-evidence.md#4`)
-- The thirty-second sitrep is a human measure that waits on the user typing it; nothing in the run proves it yet. (`critic-evidence.md#5`)
+- A sitrep takes about forty seconds from the typed command to the shown card, over the thirty-second target; the verbs take under three seconds and the rest is the model writing its judgment. (`critic-evidence.md#5`)
 - The critic's piece read of T16 (`critic-evidence-2.md`, `critic-adversarial-2.md`, `critic-structure-2.md`) deferred four more S3 findings on the goal binding, stated here as the record states them:
 - A lone count beside the word criteria binds to either half of a k of n pair, so all 25 criteria discharged draws over a theme at 24 of 25. (`critic-adversarial-2.md#2`)
 - A theme name binds to its count only when it stands before the count in the same clause, so a count written after the name with a colon or for is not held to that theme. (`critic-adversarial-2.md#3`)
