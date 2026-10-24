@@ -299,39 +299,23 @@ wr_poke() {  # <args after the poker…> [stdin from the caller] -> the verb's s
   ( cd "$WR_R" && exec env CLAUDE_CODE_SESSION_ID="$WR_SID" bash "$REPO/hooks/session-poker.sh" "$@" ) 2> "$TMP/wr.err" || WR_RC=$?
 }
 mkdir -p "$TMP/rendered"
-# The judgment writes every row; its metrics and its close copy the sheet's own numbers, which the card verb holds it to.
+# The judgment is the seven lines the card verb takes; code draws every fact row from the sheet.
 wr_poke sitrep "$WR_P" > "$TMP/wr-sheet"
 wr_fact() { sed -n "s/^$1: //p" "$TMP/wr-sheet"; }   # <key> -> the run's sheet's value for it
-wr_m() { wr_fact "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, 1, i - 1) : $0) }'; }   # <key> -> its measurement alone
-expect_nonempty "RD0 precondition: the run's sheet predicts a close the judgment copies" "$(wr_fact close.predicted)"
+expect_nonempty "RD0 precondition: the run's sheet predicts a close the card draws" "$(wr_fact close.predicted)"
 wr_poke sitrep card "$WR_P" > "$TMP/rendered/card.txt" <<WR_JUDGMENT_EOF
+purpose: the first row lands and the release goes out; on course.
 call: Approve the release once 4/2 lands.
-task: 0: Configure
-task: 1: Scope
-task: 2: Design
-task: 3: Plan
-task: 4/1: The first row landed
-task: 4/2: The second row, building
-task: 5: Verify
-task: 6: Review
-task: 7: Document
-task: 8/3: Merge it, waiting on your approval of the release
-task: 9: Close-out
-metric: Completed: $(wr_m work.landed)
-metric: Pace: $(wr_m pace.work-landed) of the work landed in $(wr_m pace.time-used) of the forecast time
-metric: Correctness: $(wr_m tests.suites-run)
-metric: Waste: $(wr_m waste.runs-discarded) suite runs discarded
-metric: Goals: as the goal lines say
 grade: C
 point: One task is in flight and nothing is red.
 ask approve:release: The release approval, which holds 8/3 — recommend approve once 4/2 lands
-close: $(wr_m close.predicted), if 4/2 lands first time.
+close: if 4/2 lands first time.
 WR_JUDGMENT_EOF
 expect_eq "RD1 the sitrep card is drawn (exit 0) and holds the open approval under Blocked on you" "0|1" \
   "$WR_RC|$(/usr/bin/grep -c '^    • The release approval, which holds 8/3' "$TMP/rendered/card.txt")"
 wr_poke sitrep --line "$WR_P" > "$TMP/rendered/line.txt"
 expect_eq "RD2 the Patrol line is drawn (exit 0): one line, the approval owed" "0|1|1" \
-  "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/line.txt")|$(/usr/bin/grep -c ' tasks · owed: 1 · close ' "$TMP/rendered/line.txt")"
+  "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/line.txt")|$(/usr/bin/grep -c ' tasks · owed: 1 on you · 0 on events · close ' "$TMP/rendered/line.txt")"
 wr_poke handoff > /dev/null <<'WR_HANDOFF_EOF'
 Summary
 - Doing: the fixture run.
@@ -342,7 +326,7 @@ WR_HANDOFF_EOF
 WR_HF="$(ls "$WR_R/.bionic/docs/record/handoffs/"*.md 2>/dev/null | head -1)"
 awk 'NR > 1 && $0 == "" { exit } NR > 1 { print }' "$WR_HF" > "$TMP/rendered/head.txt" 2>/dev/null
 expect_eq "RD3 the handoff head is drawn (exit 0): the title, the run line, Blocked on you: yes and the approval's line" "0|1|1|1" \
-  "$WR_RC|$(/usr/bin/grep -c ' tasks · owed: 1 · close ' "$TMP/rendered/head.txt")|$(/usr/bin/grep -cx 'Blocked on you: yes' "$TMP/rendered/head.txt")|$(/usr/bin/grep -c '^- approval: release — holds ' "$TMP/rendered/head.txt")"
+  "$WR_RC|$(/usr/bin/grep -c ' tasks · owed: 1 on you · 0 on events · close ' "$TMP/rendered/head.txt")|$(/usr/bin/grep -cx 'Blocked on you: yes' "$TMP/rendered/head.txt")|$(/usr/bin/grep -c '^- approval: release — holds ' "$TMP/rendered/head.txt")"
 for wr_s in card line head; do
   expect_nonempty "$wr_s: the lint reads the rendered text (the extractor reads the real output)" "$(words_text "$TMP/rendered/$wr_s.txt")"
   expect_empty "$wr_s: no refused word on it" "$(words_hits "$TMP/rendered/$wr_s.txt" "rendered/$wr_s.txt")"

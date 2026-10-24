@@ -998,8 +998,8 @@ expect_eq "VE10c …while the release approval, which holds the merge task, stay
 printf 'owed/v1|key=ruling:r9|state=open|sent=-|at=2026-10-06T22:02:00Z|title=ruling unread: T2|reply=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it\n' >> "$SV_REG"
 SV_AT=$((SV_NOW + 120)) sv_run "$SV_P" < /dev/null
 printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
-expect_eq "VE10d the verb's sheet reads the ruling ask as holding the row its reply names (4/2), blocking" "ask: key=ruling:r9 holds=4/2 title=ruling unread: T2 raised=3:02 PM blocks=yes" \
-  "$(sv_fact ask | /usr/bin/grep '^key=ruling:r9 ' | sed 's/^/ask: /; s/ waits=.*$//')"
+expect_eq "VE10d the verb's sheet reads the ruling ask as holding the row its reply names (4/2), blocking" "ask: key=ruling:r9 holds=4/2 title=ruling unread: T2 raised=3:02 PM blocks=yes waits=user" \
+  "$(sv_fact ask | /usr/bin/grep '^key=ruling:r9 ' | sed 's/^/ask: /')"
 SV_JR="$(printf '%s\n' "$SV_J" | sed -e 's/^call: .*/call: Re-dispatch 4\/2 or drop it: its ruling is unread./')
 ask approve:merge: approve the merge into main — recommend approve once 4/2 lands
 ask ruling:r9: the ruling on 4/2 is unread and the row holds — recommend re-dispatch"
@@ -1032,7 +1032,6 @@ sk_unshown() {  # <skill file> -> each line that shows the card yet lets other t
 SK_TAGS="$(sk_tags)"
 expect_eq "SK0 the verb names the seven tags it takes (the extractor reads card.sh's own refusal)" \
   "purpose:|call:|grade:|point:|ask <key>:|close:" "$(printf '%s\n' "$SK_TAGS" | paste -sd'|' -)"
-# Red until the skill text is rewritten to the seven lines: the shipped SKILL.md does not yet name purpose:.
 expect_empty "SK1 the skill names every tag the verb takes, each in code (SK0 read them)" "$(sk_missing "$SK_SKILL")"
 expect_eq "SK2 the skill shows the card exactly as printed, inside one fenced code block, nothing after it" "1" \
   "$(/usr/bin/grep -i 'card' "$SK_SKILL" | /usr/bin/grep -i 'exactly as printed' | /usr/bin/grep -i 'one fenced code block' | /usr/bin/grep -ci 'nothing after')"
@@ -1042,7 +1041,7 @@ expect_eq "SK3 rc 1: the skill fixes the judgment and runs it again, never shows
 cp "$SK_SKILL" "$TMPROOT/sk-plant.md"; printf '%s\n' 'Show the card to the user in your own words.' >> "$TMPROOT/sk-plant.md"
 expect_eq "SK4 a planted paraphrase of the card is found" "Show the card to the user in your own words." "$(sk_unshown "$TMPROOT/sk-plant.md")"
 sed 's/`call:`/the call tag/g' "$SK_SKILL" > "$TMPROOT/sk-plant.md"
-expect_eq "SK5 a copy with call: left out is found missing it, beside what the shipped text misses (SK1)" " call:" \
-  "$(comm -13 <(sk_missing "$SK_SKILL" | tr ' ' '\n' | sort) <(sk_missing "$TMPROOT/sk-plant.md" | tr ' ' '\n' | sort) | sed 's/^/ /' | paste -sd'\0' -)"
+expect_eq "SK5 a copy with call: left out is found missing it, beside what the shipped text misses (nothing, by SK1)" " call:" \
+  "$(comm -13 <(sk_missing "$SK_SKILL" | tr ' ' '\n' | /usr/bin/grep . | sort) <(sk_missing "$TMPROOT/sk-plant.md" | tr ' ' '\n' | /usr/bin/grep . | sort) | sed 's/^/ /' | paste -sd'\0' -)"
 
 finish

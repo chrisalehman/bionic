@@ -28,9 +28,10 @@ rt_holds() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) holds=\(.*\) tit
 rt_ran() { /usr/bin/grep -c -F -- "$1" "$RT_LOG" 2>/dev/null; }   # <command text> -> how many logged commands hold it
 # rt_m <sheet> <key> -> a measured line's value alone, the part before its ` — `
 rt_m() { printf '%s\n' "$1" | awk -v k="$2: " 'index($0, k) == 1 { v = substr($0, length(k) + 1); i = index(v, " — "); print (i ? substr(v, 1, i - 1) : v); exit }'; }   # <sheet> <key>
-# rt_judgment <sheet> -> a judgment in the card's grammar written from the sheet: a row for each task, or for its step
-# when it has none, in the sheet's order; the five metrics from the sheet's measurements, each the value before its
-# ` — `; every open ask answered, naming what it holds; the predicted close
+# rt_judgment <sheet> -> a judgment in the card's grammar written from the sheet: the seven lines. The purpose is the
+# sheet's run.goal, else a plain sentence; the call has two arms; one point; one `ask <key>:` for each ask whose line
+# waits on the user (or names no wait), since the card counts the ones that wait on events; the predicted close. Code
+# draws every other row, so the judgment writes none of them.
 rt_judgment() {
   printf '%s\n' "$1" | awk '
     function val(f, nxt,   s, r, e) {
@@ -39,26 +40,15 @@ rt_judgment() {
       if (nxt != "") { e = index(r, " " nxt "="); if (e) r = substr(r, 1, e - 1) }
       return r
     }
-    /^step: / { $0 = " " substr($0, 7); ns++; sn[ns] = val("n", "name"); nm[ns] = val("name", "state"); known[sn[ns]] = 1; next }
-    /^task: / { $0 = " " substr($0, 7); nt++; ts[nt] = val("step", "state"); id = val("id", "step"); sub(/^T/, "", id); tl[nt] = ts[nt] "/" id; td[nt] = val("desc", "note"); next }
-    /^goal: / { $0 = " " substr($0, 7); gl = gl (gl == "" ? "" : ", ") val("name", "status") " " val("status", "measure"); next }
+    /^run\.goal: / { goal = substr($0, 11); next }
     /^[a-z][a-z.-]*: / && index($0, " — ") { k = substr($0, 1, index($0, ": ") - 1); v = substr($0, index($0, ": ") + 2); mv[k] = substr(v, 1, index(v, " — ") - 1) }
     /^close\.predicted: / { pr = mv["close.predicted"]; next }
-    /^ask: / { $0 = " " substr($0, 6); na++; ak[na] = val("key", "holds"); ah[na] = val("holds", "title"); next }
+    /^ask: / { w = $0; $0 = " " substr($0, 6)
+      if (w ~ / waits=event/) next
+      na++; ak[na] = val("key", "holds"); ah[na] = val("holds", "title"); next }
     END {
+      print "purpose: " ((goal == "") ? "the run ships its rows; on course" : goal)
       if (na) print "call: Answer what the run waits on, below."; else print "call: Nothing is owed: let the build land."
-      for (i = 1; i <= ns; i++) {
-        has = 0
-        for (j = 1; j <= nt; j++) if (ts[j] == sn[i]) { has = 1; print "task: " tl[j] ": " td[j] }
-        if (!has) print "task: " sn[i] ": " nm[i]
-      }
-      for (j = 1; j <= nt; j++) if (!(ts[j] in known)) print "task: " tl[j] ": " td[j]
-      print "metric: Completed: " mv["work.landed"] " landed; " mv["work.left"] " left."
-      print "metric: Pace: " mv["pace.work-landed"] " of the work landed in " mv["pace.time-used"] " of the forecast time."
-      print "metric: Correctness: suites run " mv["tests.suites-run"] "; reviews " mv["reviews"] "; " mv["findings.open"] " open findings."
-      w = mv["waste.waiting-on-you"]; sub(/:.*/, "", w)
-      print "metric: Waste: " mv["waste.runs-discarded"] " suite runs thrown away; " w " waiting on you."
-      print "metric: Goals: " ((gl == "") ? "none declared" : gl) "."
       print "grade: B"; print "point: The run moved through its own commands to this state."
       for (i = 1; i <= na; i++) print "ask " ak[i] ": The ask that holds " ah[i] " — recommend the default"
       print "close: " ((pr == "" || pr == "-") ? "No close predicted yet" : pr) ", if the next command lands first time."
@@ -73,7 +63,7 @@ rt_wide() {  # <text> -> each line wider than BIONIC_LINE_WIDTH columns, as `<co
 }
 # rt_sheet_and_card <label> <want asks> <want holds> <drop key|""> -> the sheet, the card and the refusal of one state
 rt_sheet_and_card() {
-  local lb="$1" want="$2" holds="$3" drop="$4" asks j
+  local lb="$1" want="$2" holds="$3" drop="$4" asks j lab
   rt_poker sitrep "$RT_PLAN"
   expect_eq "$lb-2 the sandbox's poker prints the sheet (exit 0)" "0|yes" \
     "$RT_PRC|$(printf '%s\n' "$RT_OUT" | head -1 | /usr/bin/grep -q '^sheet/v1' && echo yes)"
@@ -90,13 +80,17 @@ rt_sheet_and_card() {
   expect_eq "$lb-5 every line of the card is at most $BIONIC_LINE_WIDTH columns (it has $(printf '%s\n' "$RT_OUT" | wc -l | tr -d ' ') lines)" \
     "" "$(rt_wide "$RT_OUT")"
   if [ -n "$drop" ]; then
+    # An ask the judgment leaves out is repaired, never refused: the card draws it alone, its title then ` · holds <label>`.
+    lab="$(printf '%s\n' "$holds" | tr ' ' '\n' | sed -n "s|^$drop>||p")"
     rt_poker sitrep card "$RT_PLAN" <<< "$(printf '%s\n' "$j" | /usr/bin/grep -v -F "ask $drop: ")"
-    expect_eq "$lb-6 a judgment that drops $drop is refused: exit 1, stdout empty" "1|" "$RT_PRC|$RT_OUT"
+    expect_eq "$lb-6 a judgment that drops $drop still draws (exit 0): the ask is drawn alone, with what it holds" "0|yes" \
+      "$RT_PRC|$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -qF -- " · holds $lab" && echo yes)"
+    expect_nonempty "$lb-6b …naming what it holds (the label $drop>$lab was read from the state's holds)" "$lab"
   else
     rt_poker sitrep card "$RT_PLAN" <<< "$(printf '%s\nask decide:D9: a decision nobody put — recommend 1\n' "$j")"
     expect_eq "$lb-6 a judgment naming an ask the register lacks is refused: exit 1, stdout empty" "1|" "$RT_PRC|$RT_OUT"
+    expect_contains "$lb-6b …the reason naming the key on stderr" "decide:D9" "$RT_ERR"
   fi
-  expect_contains "$lb-6b …the reason naming the key on stderr" "${drop:-decide:D9}" "$RT_ERR"
 }
 
 rt_elapsed_min() {  # <sheet> -> the minutes clock.elapsed says have passed since the approval, nothing when it names none
