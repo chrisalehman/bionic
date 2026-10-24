@@ -3146,15 +3146,15 @@ _card_sitrep_cells() {
       b = g("waste.waiting-on-you"); if (has("waste.waiting-on-you")) { sub(/:.*$/, "", b); b = b " waiting on you" }
       print "Waste\t" a " · " x "\t" b
     }'
-  printf 'Goals\t%s\t\n' "$(_card_sitrep_goals)"
+  printf 'Goals\t%s\t\n' "$(_card_goals_cell)"
 }
 
-# _card_sitrep_goals -> the Goals cell, one entry per goal in the sheet's order joined by ` · `: the goal's name and its
+# _card_goals_cell -> the Goals cell, one entry per goal in the sheet's order joined by ` · `: the goal's name and its
 # standing, the sheet's own status word, `<name> <status>`, then `, <k> of <n>` criteria discharged and `, <REQ-a>,
 # <REQ-b> open and <N> more` for the open REQs its measure names; a goal whose measure holds no count prints
 # `<name> <status>` alone; a sheet with no goal prints `no goals`. The standing is drawn beside the count because a
 # theme that is not met and one on course can hold the same k of n: the count alone would draw them alike.
-_card_sitrep_goals() {
+_card_goals_cell() {
   printf '%s\n' "$SR_RECS" | awk -F'\t' '
     $1 == "G" { e = $2 " " $3
       if ($4 != "") { e = e ", " $4 " of " $5; if ($7 != "") e = e ", " $7 " open" ($8 != "" ? " and " $8 " more" : "") }

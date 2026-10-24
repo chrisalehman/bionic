@@ -1921,8 +1921,9 @@ sr_show_lines() {  # <skill file> -> every line that tells the model to show som
 sr_show_bad() {  # <skill file> -> each show line that shows the sheet or the page, or anything but the card
   sr_show_lines "$1" | awk '{ l = tolower($0) } l ~ /sheet|page/ || l !~ /card/ { print }'
 }
-expect_contains "SK0 the skill runs the sheet verb" 'hooks/session-poker.sh sitrep [<plan>]' "$(cat "$SR_SKILL")"
-expect_contains "SK0b …and the card verb, the judgment on its stdin" 'hooks/session-poker.sh sitrep card [<plan>]' "$(cat "$SR_SKILL")"
+expect_contains "SK0 the skill runs the sheet verb" 'hooks/session-poker.sh sitrep' "$(cat "$SR_SKILL")"
+expect_contains "SK0b …and the card verb, the judgment on its stdin" 'hooks/session-poker.sh sitrep card <<' "$(cat "$SR_SKILL")"
+expect_eq "SK0c the skill offers no plan operand (D13: the sitrep takes no argument)" "0" "$(/usr/bin/grep -c '\[<plan>\]' "$SR_SKILL")"
 expect_nonempty "SK1 the skill has lines that say what to show (the extractor reads the real text)" "$(sr_show_lines "$SR_SKILL")"
 expect_eq "SK1b …one of them shows the card exactly as printed, in one fenced code block, with nothing after it" "1" \
   "$(sr_show_lines "$SR_SKILL" | /usr/bin/grep -i 'card' | /usr/bin/grep -i 'exactly as printed' | /usr/bin/grep -i 'one fenced code block' | /usr/bin/grep -ci 'nothing after')"
