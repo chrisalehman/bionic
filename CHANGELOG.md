@@ -175,8 +175,7 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 - A theme name binds to its count only when it stands before the count in the same clause, so a count written after the name with a colon or for is not held to that theme. (`critic-adversarial-2.md#3`)
 - The Goals row draws the open requirement ids and the check refuses a purpose that repeats one, because a requirement number reads as a count. (`critic-adversarial-2.md#4`)
 - A theme named by a word the binding already knows, such as work, keeps that word old binding, so the row own shape repeated in the purpose is refused. (`critic-adversarial-2.md#5`)
-- The critic's piece read of T18 (`critic-evidence-3.md`, `critic-adversarial-3.md`, `critic-structure-3.md`) confirmed the fix and deferred three S3 findings, stated as the record states them:
-- No design decision in the spec names the goal requirements among those it serves, so the chain from those requirements to a decision has a hole the record carries rather than closes. (`critic-evidence-3.md#1`)
+- The critic's piece read of T18 (`critic-evidence-3.md`, `critic-adversarial-3.md`, `critic-structure-3.md`) confirmed the fix and deferred three S3 findings, one since ruled fixed on D11, stated as the record states them:
 - A status word written right before a count in the purpose binds the count to the goals counted by status, so repeating the Goals row own shape, such as the run on course, 24 of 25, is refused. (`critic-adversarial-3.md#1`)
 - The card suite reads the live plan, so a plan row title over the thirty-character cap turns that suite red at every landing until the plan row is retitled. (`critic-adversarial-3.md#2`)
 
