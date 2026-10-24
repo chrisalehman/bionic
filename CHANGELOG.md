@@ -8,6 +8,247 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.27.0 — 2026-10-24
+
+This is the sitrep changes what you do next release. The run was chartered as the hand-holds measure and cut to the
+sitrep at the design frame, on Chris's words at a card that cost him time (Δ8). The 63-row card of an earlier run
+restated a ruling as its call to action, drew fourteen register items under its Assessment and named a merge blocked
+that waited on a re-review. The sitrep measured at a median of about 95 seconds, nine tenths of it the model typing and
+retyping rows that are facts (`research-sitrep-latency.md`). The card had been built for completeness against the
+register and checked for it, and its promise was materiality. Code now draws the facts and the model judges (D6,
+ADR-071): the verb prints the head, the task list, the metrics, Blocked on you and the predicted close as finished
+rows, and the model writes the purpose, the call, the grade with at most three points, a recommendation for each ask
+that waits on you, and the close's condition, in six tags the check reads. The card is the handful of facts that change
+what you do next (D7): the register tells an ask that waits on you from an item that waits on an event, only the first
+can block you or drive the call, and the items that wait on events are one counted line. To tell them apart the
+register stores the answer given to an ask without closing it, and one function, `ask_waits_on`, says what an ask waits
+on (D8); the blocked flag, the call, the handoff head and the Patrol line all call it. The Assessment opens on what the
+wave is for and whether it is on course (D1), from a new `run.goal:` line on the sheet and a per-theme standing. The
+check follows one rule (Δ11): code decides the structure, the model decides the words, and the check refuses only what
+would make the card false and repairs the rest. Three cards show titles (Δ13, Δ14): every task, requirement, Not Doing
+item and decision opens on a title of at most 30 characters, and `explain` prints the rest. The charter's Themes 1 to 4
+and its Known-limit leftovers are carried whole to `ideas/bionic-1.28.0-charter.md`. This is a minor release by the
+policy above: the drawn card, the seven-line judgment and its check, the stored answer, the sheet's purpose and the
+titled cards are new capability. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T1: `card.sh sitrep` takes six tags in the judgment: `purpose:`, `call:`, `grade:`, `point:`, `ask <key>:` and
+  `close:`. A `task:`, `metric:` or `ask +:` line is refused by name, and so is a judgment with no purpose, call, grade
+  or close. The verb draws the Task list, the Metrics table, the counted line, Blocked on you and the close rows from the
+  sheet. A fourth `point:` is drawn with a note on stderr. The
+  check refuses a falsehood and names every reason in one refusal: a number no sheet value holds, a number placed
+  against the other line's word ("1 green and 11 red" over "11 green, 1 red"), an open task called landed, a done one
+  called running, and a call saying nothing is owed over an ask that blocks. It repairs the rest and exits 0: an ask
+  line on an event-waiting key is set aside with a note, an ask that leaves out a label it holds is drawn with
+  `· holds <labels>`, and a missing "— recommend" or numbered options are drawn as written. `_card_bind` replaces
+  `_card_sitrep_metrics_judge`. The A record on the sheet gains `waits` after `blocks`, and the fallback that read
+  blocking off `holds=` is deleted: an ask line with no `blocks=` reads no, and one with no `waits=` reads as waiting on
+  you.
+- T2: `lib/owed.sh` gains `owed_answer <key> <word> [<event>]`, `owed_answer_of`, `owed_answers` and `ask_waits_on
+  <key> [<plan> <root>]`, which prints exactly `user` or `event <what>`. An open item's line gains the last fields
+  `|answer=|answered=|event=`. `reply` with a no on a `waive:<q>` row answers it `no` and leaves it open, and
+  `disposition <id> defer` and `finding-move <id> defer` answer the finding `carry` and leave it open instead of closing
+  it. `line_publish` closes a finding answered carry when its row lands, through `_line_carried_close`, and the release
+  reply closes one whose event is the release card.
+- T3: the sheet's `ask:` line ends `waits=user` or `waits=event <what>` as its last field, and carries `blocks=yes`
+  only when the ask holds something and waits on you. The status line reads `<k> of <m> tasks · owed: <a> on you · <b> on
+  events · close <time>`, and the tick's line carries the same words. `Blocked on you:` in the handoff head follows the
+  sheet's rule through `sitrep_blocked_on_you`. `sitrep card` no longer re-gathers: it refreshes the saved sheet's ask
+  lines from the register and draws.
+- T4: the sheet prints `run.goal:` after `run.last-landing:` (none when the plan has no Goal), and a `goal:` line ends
+  `for=<opener>` when its theme has one. A theme with a criterion discharged and the goal still open reads `on course`,
+  a new status word beside `met`, `not met`, `missed`, `not measured` and `unreadable`; the release card draws it with the open-box
+  mark. At task scale `plan_themes` yields one theme, `the run`. `plan_goal_paragraph` moved out of `card.sh` into
+  `lib/plan.sh`. A suite goal whose red a standing `debt:` line declares opens no `decide:goal:` ask.
+- T5: `skills/sitrep/SKILL.md` is the seven-line shape and names the six tags. The sitrep row of the help page reads the
+  new shape, and the `sitrep card` and `sitrep --line` usage text names the tags and the `owed: <n> on you · <m> on
+  events` form. A script that pipes `task:` or `metric:` lines to `sitrep card` meets the refusal.
+- T13: a task title, a requirement title, a Not Doing item and a decision title of more than 30 columns are refused by
+  `card.sh step1`, `step2` and `step3` before any card prints, one line per offender: `REFUSED — <kind> <id>: title is <n>
+  characters, the cap is 30: <title>`, exit 1. The Step 3 task row is `id  title  serves  kind  depends  agent`, a run of
+  three or more consecutive ids folds to `T1–T4`, and `card.sh step3 <plan> task <n>` prints the whole cell. `step1
+  <requirements> explain <REQ-id|n|not-doing>` and `step2 <spec> explain <D-id|n>` print what the row leaves out. The
+  Step 2 section is `### Risks`, drawn whole with no cap, and the old `### Worth your eye` heading is still accepted.
+- T14: `session-poker.sh finding-move <record>#<n> carried T<n>` writes `moved: <id> to=carried row=T<n>`, closes the
+  carry key, and answers the finding `carry` with the event `T<n> lands`, leaving it open until that row lands.
+
+### Code draws the facts, the model judges (D6, D7, Δ11, ADR-071)
+
+- T1 (`T1.md`): the card draws every fact row and checks the model's judgment for truth. It landed with the mock-up
+  fixture, a sheet shaped like that run, and a card pinned line for line to the approved shape.
+- T5 (`T5.md`): the skill is seven lines of judgment and names the tags, and every judgment fixture in the suites is the
+  same seven lines. The four rehearsal suites now pin that a dropped ask is repaired, not refused.
+
+### The register knows what you owe (D7, D8)
+
+- T2 (`T2.md`): the register stores the answer, and `ask_waits_on` is the one function that says what an ask waits on.
+- T3 (`T3.md`): the sheet, the handoff head, the Patrol line and the card verb read that function, and the card verb
+  re-gathers nothing.
+- T14 (`T14.md`): a carry names its row, so a finding carried to a task waits for that task and not for the release card.
+
+### The card says what the wave is for (D1)
+
+- T4 (`T4.md`): the sheet carries the wave's goal and each theme's standing, and a red the plan declares is no new ask.
+
+### The cards show titles (Δ13, Δ14)
+
+- T13 (`T13.md`): one title rule, 30 columns, on the plan, requirements and design cards, with `explain` for the rest and
+  Risks in place of Worth your eye.
+
+### The walk, the regression, the timing and the critic
+
+- T6 (`walk.md`): the walk. The card drawn on the prior run's plan and on the mock-up fixture is read as a user would,
+  and the verification matrix is filled from the landings' logs.
+- T7 (`T7.md`): the whole regression, once after the build.
+- T8 (`sitrep-timing.md`): two sitreps timed, typed command to shown card: 64 s and 40 s against the thirty seconds the goal names; the row waived on the user's words and the limit stated.
+- T9 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's review of the whole, one record
+  for each question.
+
+### The release
+
+- T10 (`T10.md`): this entry, `plugin.json` 1.27.0, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, and ADR-071. T11 (`T11-pr.md`) opens the pull request on the release card's word, and T12
+  (`continuation.md`) closes the run.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at afb40d25 by w44-T9, 2026-10-24T09:58:24Z (`critic-adversarial.md`)
+- structure review, whole: flag at afb40d25 by w44-T9, 2026-10-24T09:58:26Z (`critic-structure.md`)
+- evidence review, whole: fail at afb40d25 by w44-T9, 2026-10-24T10:00:14Z (`critic-evidence.md`)
+- evidence review, piece: fail at 268aaf74 by w44-T17, 2026-10-24T10:23:29Z (`critic-evidence-2.md`)
+- adversarial review, piece: fail at 268aaf74 by w44-T17, 2026-10-24T10:23:31Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 268aaf74 by w44-T17, 2026-10-24T10:23:34Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 32f7ba24 by w44-T19, 2026-10-24T10:40:49Z (`critic-evidence-3.md`)
+- adversarial review, piece: flag at 32f7ba24 by w44-T19, 2026-10-24T10:40:51Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at 32f7ba24 by w44-T19, 2026-10-24T10:40:54Z (`critic-structure-3.md`)
+- evidence review: waived at 47787455 by Chris Lehman, 2026-10-24T15:45:51Z: "D12: 1 — the later green at 477874555 stands as the proof; T18 landed red through T19 title since fixed"
+- adversarial review: waived at 47787455 by Chris Lehman, 2026-10-24T15:45:52Z: "D12: 1 — the later green at 477874555 stands as the proof; T18 landed red through T19 title since fixed"
+- evidence review: waived at aee9451a by Chris Lehman, 2026-10-24T16:28:17Z: "D15: 1 — the T20 landing, four lines of sitrep skill text on D13, waived over on my word; sitrep-card.test.sh green at 3225216af"
+- adversarial review: waived at aee9451a by Chris Lehman, 2026-10-24T16:28:17Z: "D15: 1 — the T20 landing, four lines of sitrep skill text on D13, waived over on my word; sitrep-card.test.sh green at 3225216af"
+- structure review: waived at aee9451a by Chris Lehman, 2026-10-24T16:28:17Z: "D15: 1 — the T20 landing, four lines of sitrep skill text on D13, waived over on my word; sitrep-card.test.sh green at 3225216af"
+
+### Known limits
+
+- The first row, T1, landed by hand with one pin red: the skill-text check in the sitrep-card suite needs the skill to
+  name `purpose:`, and the skill was row T5's. T5 turned it green. The hand landing stands in the record. (A-orch.2,
+  `T1.md` Left)
+- The release-check name scan refused T1's range for the mock-up fixture's project name, so the branch was squashed to one
+  commit and the fixture renamed. T1's earlier commits are unreachable from the working branch, and the run's untracked
+  spec and plan still describe the fixture by its first shape. (A-orch.3)
+- T13's rule text grew the loaded doctrine by about a kilobyte, and the net-zero wall wanted a matching removal, so four
+  passages in the Step 1, 2 and 3 templates were shortened where they restate the skill or a neighbouring paragraph. Each
+  cut is one `git revert` away. (A-orch.5, `T13.md` Doctrine growth paid for)
+- The waiting-on-you measures, `close.waits-on-you` and `waste.waiting-on-you`, and the held words still count every ask
+  that holds a task, event-waiting ones included, so they count an event as waiting on you. (A-orch.6,
+  `T3.md` Left)
+- `proof_move_of` does not read `to=carried`, so a finding carried to a task keeps its earlier disposition state until
+  that task lands and closes its register item. The register half is proved. (A-T14.1, A-orch.7)
+- The carry verb and the landing that closes its finding are proved apart, in two fixtures, not as one run. (`T14.md`
+  Proof)
+- The usage list and the header comment of `hooks/session-poker.sh` do not yet name `carried`, though the case's own
+  usage string does. (A-T14.2)
+- The card's no-rule pin counts `nothing.*blocks` over code lines only. The literal grep over `card.sh` reads 1, because a
+  comment there says a call may not claim nothing is owed while an ask blocks. (A-T3.1)
+- A waiver answered no stays a decision on the next release card, since the card's waiver arm is unchanged. (A-T2.7)
+- At task scale the `the run` theme takes its criteria from the `### REQ-` headings of the plan's requirements file that
+  have a matrix row, so a plan without that file falls back to the REQs its matrix names. (A-T4.6)
+- A suite goal's red is declared only by a `debt:` line of the form `<suite>.test.sh red at <sha>`, and any other record
+  of a red is a new decision. (A-T4.7)
+- The release card's mark for `on course` takes its default inline in `hooks/poker/plan.sh`, because the file that sets
+  its three siblings was outside the row. (A-T4.5)
+- A saved sheet written before `waits=` and `blocks=` reads each ask as waiting on you and blocking nothing, so an old
+  sheet's held ask is drawn as open and event-waiting asks are not counted on the event line. (A-T1.1, A-T1.2)
+- The check's state scan reads four words after a task label, so a wrong claim about a task set further from its label
+  passes. (A-T1.15)
+- The sitrep suite's speed pins read the plan and record under the checkout's `.bionic/docs`, else under the main
+  checkout, so in a landing checkout with no docs tree they read nothing. (A-T3.6)
+- A session at task scale is still told to arm the Patrol by the compaction's start text, and `arm` still writes a stamp
+  without reading the scale cell, so the stop wall can refuse a turn for a marker with no tick. The debt is open as
+  `arm-at-task-scale`. (A-orch.1, `debt.md`)
+- Three debts raised by the previous run's critic stay open: `tick-idle-width`, `landing-record-parser` and
+  `publish-order`. (`debt.md`)
+- No verb writes a design-ledger ruling, the plan's `approved-by:` line, an Eval design row or a requirement edit, so this
+  run wrote them by hand, 14 hand-edit lines at the time of this entry, each named with its time. (`assumptions.md` Hand edits)
+- The Known limits of 1.26.0 that this run did not touch stand as they are written in that entry.
+- The critic's review of the whole (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`) deferred twelve S3 findings, each a limit of this release, listed here in the sentence the record states:
+- The card check admits a goal state the sheet denies in words: a purpose saying a goal is met draws over a goal the sheet reads not measured. (`critic-adversarial.md#2`)
+- The card check refuses a true label whose digits match no sheet value, such as a wave or requirement number, or the thirty seconds and forty rows of the goal itself. (`critic-adversarial.md#3`)
+- A number some sheet value holds passes beside a word no sheet line sets, so a judgment line can state a figure the sheet never measured. (`critic-adversarial.md#4`)
+- The state and call checks are fixed word lists, and a synonym walks past them: a task called complete, or a call saying all clear. (`critic-adversarial.md#5`)
+- On a real spec, explain of a decision prints only its title, serves and ADR: the parser drops the detail written after the decision group. (`critic-adversarial.md#6`)
+- A title is cut at an abbreviation: a first sentence holding an abbreviation such as vs. is cut there instead of refused. (`critic-adversarial.md#7`)
+- Asks that wait on events still drive the close waits-on-you fact and the Waste row of the Metrics, and the skill folds that fact into the close line. (`critic-adversarial.md#8`)
+- A finding carried to a row is not read as fixed when the row lands, and a carry to a row already landed or dropped never closes on the register. (`critic-adversarial.md#9`)
+- The task-list rule that a row added by task-add gets its entry the same turn is stated nowhere after the step text was tightened. (`critic-structure.md#2`)
+- The explain verb on a decision prints no detail on a real spec; the pin places the detail where no real spec writes it. (`critic-evidence.md#3`)
+- The approved mock-up is in no record: the golden of the mock-up card is the code own output, and under forty rows is the pin count of a card that prints 54 lines. (`critic-evidence.md#4`)
+- A sitrep takes about forty seconds from the typed command to the shown card, over the thirty-second target; the verbs take under three seconds and the rest is the model writing its judgment. (`critic-evidence.md#5`)
+- At the critic's reviews no design decision named REQ-6 and REQ-8 among those it serves; the design was amended after review to name D6 as serving both, and no reviewer has read the amendment. (`critic-evidence.md#2`, `critic-evidence-2.md#2`, `critic-evidence-3.md#1`)
+- The critic's piece read of T16 (`critic-evidence-2.md`, `critic-adversarial-2.md`, `critic-structure-2.md`) deferred four more S3 findings on the goal binding, stated here as the record states them:
+- A lone count beside the word criteria binds to either half of a k of n pair, so all 25 criteria discharged draws over a theme at 24 of 25. (`critic-adversarial-2.md#2`)
+- A theme name binds to its count only when it stands before the count in the same clause, so a count written after the name with a colon or for is not held to that theme. (`critic-adversarial-2.md#3`)
+- The Goals row draws the open requirement ids and the check refuses a purpose that repeats one, because a requirement number reads as a count. (`critic-adversarial-2.md#4`)
+- A theme named by a word the binding already knows, such as work, keeps that word old binding, so the row own shape repeated in the purpose is refused. (`critic-adversarial-2.md#5`)
+- The critic's piece read of T18 (`critic-evidence-3.md`, `critic-adversarial-3.md`, `critic-structure-3.md`) confirmed the fix and deferred three S3 findings, one since ruled fixed on D11, stated as the record states them:
+- A status word written right before a count in the purpose binds the count to the goals counted by status, so repeating the Goals row own shape, such as the run on course, 24 of 25, is refused. (`critic-adversarial-3.md#1`)
+- The card suite reads the live plan, so a plan row title over the thirty-character cap turns that suite red at every landing until the plan row is retitled. (`critic-adversarial-3.md#2`)
+
+### The landing numbers
+
+`landing-report --rows` at 01f38b51335bf6f5cf349c363a18b7adae885f83 on 2026-10-24T17:13:33Z:
+
+```
+landings: queue=10 hand=2 git=0 · ready-to-landed median=3.1m p75=7.0m max=17.1m · runs: green=35 red=3 none=0 discarded=0 red-then-green=0 run=80 reused=0 absent=0 · waited median=20s · killed=0
+T2 queue ready=2026-10-24T07:02:27Z landed=2026-10-24T07:09:54Z minutes=7.5 runs=2 waited=20s wait=0.3 prove=7.1 rework=0.0 width=1
+  asks.test.sh green promised=59s actual=70s ratio=1.19
+  release-approval.test.sh green promised=351s actual=357s ratio=1.02
+T4 queue ready=2026-10-24T07:08:30Z landed=2026-10-24T07:17:15Z minutes=8.8 runs=2 waited=162s wait=2.7 prove=5.6 rework=0.5 width=4
+  sitrep.test.sh green promised=122s actual=166s ratio=1.36
+  release-approval.test.sh green promised=270s actual=334s ratio=1.24
+T1 hand ready=- landed=2026-10-24T07:21:49Z minutes=- runs=2 waited=- wait=- prove=- rework=- width=-
+  sitrep-card.test.sh red promised=29s actual=31s ratio=1.07
+  card.test.sh green promised=11s actual=13s ratio=1.18
+T14 queue ready=2026-10-24T07:41:11Z landed=2026-10-24T07:44:11Z minutes=3.0 runs=1 waited=120s wait=2.0 prove=1.0 rework=0.0 width=4
+  asks.test.sh green promised=51s actual=59s ratio=1.16
+T13 queue ready=2026-10-24T07:46:22Z landed=2026-10-24T07:46:45Z minutes=0.4 runs=1 waited=10s wait=0.2 prove=0.2 rework=0.0 width=3
+  card.test.sh green promised=14s actual=13s ratio=0.93
+T3 queue ready=2026-10-24T07:37:03Z landed=2026-10-24T07:54:07Z minutes=17.1 runs=4 waited=19s wait=0.3 prove=9.0 rework=7.7 width=4
+  sitrep.test.sh red promised=131s actual=191s ratio=1.46
+  handoff-file.test.sh green promised=37s actual=58s ratio=1.57
+  sitrep.test.sh green promised=144s actual=183s ratio=1.27
+  handoff-file.test.sh green promised=50s actual=54s ratio=1.08
+T5 queue ready=2026-10-24T08:31:42Z landed=2026-10-24T08:37:11Z minutes=5.5 runs=8 waited=8s wait=0.1 prove=5.3 rework=0.0 width=4
+  words.test.sh green promised=5s actual=10s ratio=2.00
+  rehearsal.test.sh green promised=6s actual=11s ratio=1.83
+  rehearsal-failed-review.test.sh green promised=314s actual=320s ratio=1.02
+  rehearsal-release-waiting.test.sh green promised=306s actual=315s ratio=1.03
+  rehearsal-stop-rule.test.sh green promised=14s actual=15s ratio=1.07
+  sitrep-card.test.sh green promised=21s actual=28s ratio=1.33
+  sitrep.test.sh green promised=194s actual=199s ratio=1.03
+  card.test.sh green promised=12s actual=16s ratio=1.33
+T10 queue ready=2026-10-24T08:48:52Z landed=2026-10-24T08:50:07Z minutes=1.2 runs=5 waited=7s wait=0.1 prove=1.1 rework=0.0 width=4
+  release-check.test.sh green promised=72s actual=67s ratio=0.93
+  commands.test.sh green promised=1s actual=1s ratio=1.00
+  doctor-version.test.sh green promised=75s actual=63s ratio=0.84
+  render.test.sh green promised=18s actual=19s ratio=1.06
+  words.test.sh green promised=10s actual=11s ratio=1.10
+T15 queue ready=2026-10-24T08:56:31Z landed=2026-10-24T08:59:44Z minutes=3.2 runs=3 waited=10s wait=0.2 prove=3.0 rework=0.0 width=4
+  shell-lint.test.sh green promised=29s actual=34s ratio=1.17
+  sitrep.test.sh green promised=192s actual=182s ratio=0.95
+  handoff-file.test.sh green promised=58s actual=55s ratio=0.95
+T16 queue ready=2026-10-24T10:10:17Z landed=2026-10-24T10:13:00Z minutes=2.7 runs=4 waited=112s wait=1.9 prove=0.8 rework=0.0 width=4
+  sitrep-card.test.sh green promised=22s actual=24s ratio=1.09
+  card.test.sh green promised=8s actual=13s ratio=1.62
+  sitrep-card.test.sh green promised=18s actual=25s ratio=1.39
+  card.test.sh green promised=8s actual=14s ratio=1.75
+T18 queue ready=2026-10-24T10:30:45Z landed=2026-10-24T10:31:37Z minutes=0.9 runs=2 waited=25s wait=0.4 prove=0.5 rework=0.0 width=4
+  sitrep-card.test.sh green promised=17s actual=26s ratio=1.53
+  card.test.sh red promised=10s actual=14s ratio=1.40
+wt/44-T20 hand ready=- landed=2026-10-24T15:57:06Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+```
+
 ## 1.26.0 — 2026-10-22
 
 This is the run closes with no hand-hold release. Two runs in a row closed by hand: wave 41 spent its last six hours on

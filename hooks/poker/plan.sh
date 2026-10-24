@@ -2513,15 +2513,17 @@ RR_MATRIX
         "${RR_DPH[$i]}" "${RR_OPH[$i]}"
     done
     [ "$RR_N" -eq 0 ] || rr_fact reply "$(rr_word "${RR_OLAB[0]}")"
-    # each goal's mark is its status, lib/plan.sh plan_goal_status's, the one the sitrep's sheet prints
+    # each goal's mark is its status, lib/plan.sh plan_goal_status's, the one the sitrep's sheet prints; a theme's row
+    # carries its opener as a fifth field the page does not draw, so the row is cut to its four before it is sent
     [ -z "$RR_GOALS" ] || printf '%s\n' "$RR_GOALS" | while IFS= read -r l; do
       [ -n "$l" ] || continue
       case "$(plan_goal_status "${l%%	*}")" in
         met) m="$SITREP_MARK_WITHIN" ;;
         'not met') m="$SITREP_MARK_OVER" ;;
+        'on course') m="${SITREP_MARK_COURSE:-⬜}" ;;
         *) m="$SITREP_MARK_NONE" ;;
       esac
-      printf 'goal\t%s\t%s\t%s\n' "${l%%	*}" "$m" "${l#*	}"
+      printf 'goal\t%s\t%s\t%s\n' "${l%%	*}" "$m" "$(printf '%s\n' "${l#*	}" | cut -f1-3)"
     done
     [ -z "${RR_HH:-}" ] || rr_fact handholds "$RR_HH"
     [ -z "${RR_TR:-}" ] || rr_fact ratio "$RR_TR"
@@ -2989,6 +2991,12 @@ RR_AGAINST_EOF
       if [ "$RP_CMD" = - ]; then
         if [ "$RP_SIDE" = default ]; then RP_REC="applied: $RP_KEY carried"; RP_DONE=$((RP_DONE + 1))
         else RP_REC="withheld: $RP_KEY"; RP_HELD=$((RP_HELD + 1)); fi
+        # A WAIVER HELD BACK IS ANSWERED NO: the register keeps the ask open and stores the answer, so every reader sees
+        # it waits on the review's next run and not on the user.
+        case "$RP_SIDE|$RP_KEY" in
+          other\|waive:?*) declare -F owed_answer >/dev/null 2>&1 \
+            && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_answer "$RP_KEY" no "review ${RP_KEY#waive:} re-run" >/dev/null 2>&1 ;;
+        esac
         printf '%s\n' "$RP_REC" >> "$RP_CARD"; say "reply — $RP_REC"
         continue
       fi
@@ -3008,10 +3016,16 @@ $RP_TABLE
 RP_TABLE
     printf 'replied: at=%s reply=%s words="%s"\n' "$(iso_now)" "$RP_HOW" "$(clean "$RP_TEXT")" >> "$RP_CARD"
     # THE REPLY IS THE RULING ON EVERY CARRY THE PAGE PUT: carried as shown, or moved by the decision the reply took (whose
-    # finding-move closed it already), so the carry's ask on the run's register closes here.
+    # finding-move closed it already), so the carry's ask on the run's register closes here, and so does a finding the
+    # user answered carry with no row named, which waits on this card (lib/owed.sh `ask_waits_on`).
     if declare -F owed_close >/dev/null 2>&1 && declare -F carry_owed_key >/dev/null 2>&1; then
       sed -n 's/^carried: //p' "$RP_CARD" 2>/dev/null | while IFS= read -r RP_X; do
-        [ -z "$RP_X" ] || OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$(carry_owed_key "$RP_X")" "release approval reply" >/dev/null 2>&1
+        [ -n "$RP_X" ] || continue
+        OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$(carry_owed_key "$RP_X")" "release approval reply" >/dev/null 2>&1
+        declare -F ask_waits_on >/dev/null 2>&1 && declare -F finding_owed_key >/dev/null 2>&1 || continue
+        RP_FK="$(finding_owed_key "$RP_X")"
+        [ "$(ask_waits_on "$RP_FK" "$PV_PLAN" "$PV_REPO")" = "event release card" ] \
+          && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$RP_FK" "release approval reply" >/dev/null 2>&1
       done
     fi
     if [ "$RP_HELD" -gt 0 ]; then

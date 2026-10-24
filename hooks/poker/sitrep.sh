@@ -637,7 +637,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # the model reads the sheet and writes the judgment, the card is drawn from both, and the user sees the card, never
 # the sheet. A first line says so; then one fact per line, `<key>: <value>`, in this order:
 #
-#   run.release · run.name · run.wave · run.now · run.step · run.project · run.started · run.last-landing
+#   run.release · run.name · run.wave · run.now · run.step · run.project · run.started · run.last-landing · run.goal
 #   step: n=<0-9> name=<name> state=<done|running|pending> tasks=<k>          one line per step, 0 to 9
 #   task: id=<Tn> step=<n> state=<done|running|held|failed|pending> desc=<short description> note=<few words or ->
 #                      one line per task not dropped, in execution order
@@ -646,14 +646,17 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   pace.time-used · pace.work-landed · close.chain · close.predicted · close.unscaled · close.waits-on-you
 #   tests.suites-run · tests.suites-total · tests.whole-run · reviews · findings.open
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
-#   goal: name=<goal> status=<met|not met|not measured|unreadable> measure=<what measures it — what it read, or ->
-#   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no>
+#   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
+#   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no> waits=<user|event <what>>
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
 #
+# `run.goal:` is the plan's `## Goal` first paragraph, one line, as the Step-1 card prints it; a plan with no Goal prints
+# no such line. A goal line's `for=` stands last and is present only for a theme that opens on a sentence, a measured
+# goal of the `goals:` line carrying none; the fields before it keep their names and their order.
 # A list line's fields stand in that fixed order and a value runs to the next field's ` <name>=`, so a value may hold
 # spaces. A measured line (clock. to waste.) is `<key>: <value> — <what it measures> · unit: <unit> · source: <source>`,
 # the close's `basis:` in place of its source, so the model reads what each number measures before it compares two.
-# `--line` prints the Patrol's status from the same facts, `<k> of <m> tasks · owed: <n> · close <time>`, and
+# `--line` prints the Patrol's status from the same facts, `<k> of <m> tasks · owed: <n> on you · <m> on events · close <time>`, and
 # the tick prints it as `poker: sitrep <the status>`; the handoff's head and the resume recap read the same asks.
 #
 # EVERY FACT IS ANOTHER READER'S, CALLED: the tasks and sizes are `units_rows`', the longest open chain
@@ -1204,7 +1207,8 @@ SITREP_HOLDS
 }
 
 # sitrep_asks <plan> <root> <units_rows output> <plan_goals_read output> <now epoch> ->
-# `<key><TAB><holds><TAB><title><TAB><raised>` per ask: every item open on the run's register, in its order, with
+# `<key><TAB><holds><TAB><title><TAB><raised><TAB><waits>` per ask, `waits` what `ask_waits_on` says the ask waits on,
+# `user` or `event <what>`, so the sheet, the handoff, the Patrol and the card read one answer: every item open on the run's register, in its order, with
 # each decision put and not ruled in the place of its key or after them (`pages_owed`), a goal decision whose goal
 # reads reached and a decision the ledger reads ruled or withdrawn dropped. Raised is the item's opening instant on the local clock, else a decision's put clock as its
 # heading wrote it, else `-`; a decision's title is its number and the put's title.
@@ -1238,7 +1242,7 @@ sitrep_asks() {
           c="${d#*	}"; [ "$raised" != - ] || [ -z "$c" ] || raised="$c"
         fi ;;
     esac
-    printf '%s\t%s\t%s\t%s\n' "$k" "$(sitrep_holds "$plan" "$root" "$rows" "$k" "$rep")" "${ttl:-$k}" "$raised"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$k" "$(sitrep_holds "$plan" "$root" "$rows" "$k" "$rep")" "${ttl:-$k}" "$raised" "$(ask_waits_on "$k" "$plan" "$root")"
   done <<SITREP_ASKS
 $owed
 SITREP_ASKS
@@ -1539,7 +1543,7 @@ SITREP_SIT
   [ "$mode" = sheet ] || return 0
 
   # ---- correctness and waste
-  local k rv q sc res at ev nf passed=0 failed=0 running=0 open idle_min rg rr rn rd rk g m st t md rdg u sn sg sr nsu
+  local k rv q sc res at ev nf passed=0 failed=0 running=0 open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
   # a review is counted once per question and scope, by its latest result: a pass a later fail supersedes is no pass
@@ -1588,18 +1592,21 @@ SITREP_RUNNING
   SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(sitrep_noun "$SG_T_FINDINGS" finding findings)"
   SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you"
   # the goals, each status the one function's
+  SG_GOAL="$(plan_goal_paragraph "$plan")"
   SG_GOAL_LINES=""; g=0; m=0; k=0; u=0
   # split by hand: a goal with no measure has an empty field, which a tab-split read would close up
   while IFS= read -r st; do
     t="${st#*	}"; md="${t#*	}"; rdg="${md#*	}"; st="${st%%	*}"; t="${t%%	*}"; md="${md%%	*}"
     [ -n "$t" ] || continue
+    # a theme's row ends in its opener, a fifth tab-separated field; a measured goal's has none
+    fr=""; case "$rdg" in *'	'*) fr="${rdg#*	}"; rdg="${rdg%%	*}" ;; esac
     g=$((g + 1))
     st="$(plan_goal_status "$st")"
     case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; unreadable) u=$((u + 1)) ;; esac
     # the status already says a goal is not measured; its measure prints once
     [ "$rdg" != "not measured" ] || rdg=""
     if [ -n "$md" ] && [ -n "$rdg" ]; then md="$md — $rdg"; elif [ -z "$md" ]; then md="${rdg:--}"; fi
-    SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md"$'\n'
+    SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md${fr:+ for=$fr}"$'\n'
   done <<SITREP_GOALS
 $SG_GOALS_READ
 SITREP_GOALS
@@ -1607,14 +1614,16 @@ SITREP_GOALS
 }
 
 # sitrep_ask_lines -> one `ask:` line per ask of sitrep_gather's facts, the sheet's asks. `blocks=` is the fact the card
-# places the ask from: yes when the ask holds a task, the release or the merge, no when it holds nothing. It stands last
-# so a reader of the fields before it reads them as they stood. The model never decides it.
+# places the ask from: yes only when the ask holds a task, the release or the merge AND waits on the user, since an ask
+# that waits on an event blocks nobody; `waits=` is what the ask waits on, `user` or `event <what>`, and stands last.
+# The handoff's head reads this same rule, so no reader decides what blocks. The model never decides either field.
 sitrep_ask_lines() {
-  local k h t r b
-  while IFS='	' read -r k h t r; do
+  local k h t r w b
+  while IFS='	' read -r k h t r w; do
     [ -n "$k" ] || continue
-    if [ "$h" = nothing ]; then b=no; else b=yes; fi
-    printf 'ask: key=%s holds=%s title=%s raised=%s blocks=%s\n' "$k" "$h" "$t" "$r" "$b"
+    [ -n "$w" ] || w=user
+    if [ "$h" != nothing ] && [ "$w" = user ]; then b=yes; else b=no; fi
+    printf 'ask: key=%s holds=%s title=%s raised=%s blocks=%s waits=%s\n' "$k" "$h" "$t" "$r" "$b" "$w"
   done <<SITREP_SHEET_ASKS
 $SG_ASKS
 SITREP_SHEET_ASKS
@@ -1628,6 +1637,7 @@ sitrep_sheet() {
   printf '%s\n' "$SITREP_SHEET_HEAD"
   printf 'run.release: %s\nrun.name: %s\nrun.wave: %s\nrun.now: %s\nrun.step: %s\n' "$SG_RELEASE" "$SG_NAME" "$SG_WAVE" "$SG_NOWW" "$SG_STEP"
   printf 'run.project: %s\nrun.started: %s\nrun.last-landing: %s\n' "$SG_PROJECT" "$SG_STARTED" "$SG_LAST"
+  [ -z "$SG_GOAL" ] || printf 'run.goal: %s\n' "$SG_GOAL"
   printf '%s\n' "$SG_STEPS"
   printf '%s' "$SG_TASKS"
   sitrep_m clock.now "$SG_C_NOW" "when this sheet was printed" "local time" "source: the verb's clock"
@@ -1705,15 +1715,33 @@ sitrep_saved_age() {
   if [ "$now" -gt "$at" ]; then printf '%s\n' "$((now - at))"; else printf '0\n'; fi
 }
 
-# sitrep_status -> the Patrol's status from sitrep_gather's facts: `<k> of <m> tasks · owed: <n> · close <time>`
+# sitrep_status -> the Patrol's status from sitrep_gather's facts:
+# `<k> of <m> tasks · owed: <n> on you · <m> on events · close <time>`, <n> the asks that wait on the user and <m> the
+# rest; an ask whose wait is not read as an event is the user's, since doubt is the user's.
 sitrep_status() {
-  printf '%s · owed: %s · close %s\n' "$SG_TASKCOUNT" "$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF && $1 != "" { n++ } END { print n + 0 }')" "$SG_LINE_CLOSE"
+  local on ev
+  read -r on ev <<SITREP_COUNT
+$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF && $1 != "" { if (index($5, "event ") == 1) e++; else n++ } END { print n + 0, e + 0 }')
+SITREP_COUNT
+  printf '%s · owed: %s on you · %s on events · close %s\n' "$SG_TASKCOUNT" "$on" "$ev" "$SG_LINE_CLOSE"
 }
 
-# sitrep_ask_words -> one `<title> — holds <what>` line per ask of sitrep_gather's facts, the asks the handoff's head and
-# the resume recap carry
+# sitrep_blocked_on_you -> yes when some ask of sitrep_gather's facts blocks the user, else no: the sheet's own
+# `blocks=` lines, so the handoff's head says what the sheet says. The lines are read whole into a variable before
+# they are matched, so no reader quits early on a writer still feeding it and the answer cannot flip under pipefail.
+sitrep_blocked_on_you() {
+  local lines
+  lines="$(sitrep_ask_lines)"
+  case "$lines" in
+    *' blocks=yes waits='*) printf 'yes\n' ;;
+    *) printf 'no\n' ;;
+  esac
+}
+
+# sitrep_ask_words -> one `<title> — holds <what>` line per ask of sitrep_gather's facts, ` · waits on <what>` ending
+# the line of an ask that waits on an event; the asks the handoff's head and the resume recap carry
 sitrep_ask_words() {
-  printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF >= 3 && $1 != "" { print $3 " — holds " $2 }'
+  printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF >= 3 && $1 != "" { w = ""; if (index($5, "event ") == 1) w = " · waits on " substr($5, 7); print $3 " — holds " $2 w }'
 }
 
 # sitrep_tick_line <plan> -> `poker: sitrep <the Patrol's status>`, the tick's one-line form: the same facts the `--line`
@@ -2067,13 +2095,13 @@ sitrep_tick_line() {
     # THE HEAD: bound, the run's status line and one `<title> — holds <what>` line per open ask, the sheet's own facts
     # (sitrep_gather), so the head and the sitrep cannot disagree on what is owed; with no run, the session's own
     # open asks, which no plan says anything waits on.
-    HO_RUNLINE=""; HO_ASKS=""
+    HO_RUNLINE=""; HO_ASKS=""; HO_BLOCKED=no
     if [ "$HO_MODE" != none ]; then
       { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
       HO_SRR="$(cd "$(project_root "${PV_PLAN%/*}")" 2>/dev/null && pwd -P)"
       if declare -F proof_plan_slug >/dev/null 2>&1 && [ -n "$HO_SRR" ]; then
         sitrep_gather "$PV_PLAN" "$HO_SRR" line 2>/dev/null
-        HO_RUNLINE="$(sitrep_status)"; HO_ASKS="$(sitrep_ask_words)"
+        HO_RUNLINE="$(sitrep_status)"; HO_ASKS="$(sitrep_ask_words)"; HO_BLOCKED="$(sitrep_blocked_on_you)"
         # The open tasks are the sheet's: every task it does not read as done, so the list is the run line's own
         # `m` less its `k`; each is joined to its row for the agent and the worktree it names.
         HO_ROWS="$( { printf '%s\n' "$SG_TASKS" | awk '/^task: id=/ { id = $2; sub(/^id=/, "", id)
@@ -2120,7 +2148,7 @@ sitrep_tick_line() {
       {
         printf '0\t%s\n' "$HO_TITLE"
         [ -z "$HO_RUNLINE" ] || printf '0\t%s\n' "$HO_RUNLINE"
-        printf '0\tBlocked on you: %s\n' "$([ -n "$HO_ASKS" ] && echo yes || echo no)"
+        printf '0\tBlocked on you: %s\n' "$HO_BLOCKED"
         printf '%s\n' "$HO_ASKS" | awk 'NF { print "2\t- " $0 }'
         printf '0\t\n'
         for HO_S in Summary Goal State Findings Decisions "Ruled out" Open "Suggested skills" Next; do
@@ -2641,8 +2669,8 @@ sitrep_tick_line() {
       sitrep_status
       exit 0
     fi
-    sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet
     if [ "$SR_CARD" = no ]; then
+      sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet
       sitrep_save "$SR_ROOT" "$SR_PLAN"
       exit 0
     fi
@@ -2655,7 +2683,14 @@ sitrep_tick_line() {
       exit 1
     fi
     SR_SHEET="$(mktemp "${TMPDIR:-/tmp}/bionic-sheet.XXXXXX")" || { die "REFUSED — no temporary file for the sheet; no card is drawn."; exit 2; }
-    { awk 'index($0, "ask: ") != 1' "$(sitrep_saved "$SR_ROOT" "$SR_PLAN")"; sitrep_ask_lines; } > "$SR_SHEET"
+    # The saved sheet is the facts; only its asks are read again, from the register alone, so a card is never the cost
+    # of a second gather. The goals a reached theme drops asks for are the saved sheet's own met goals.
+    SR_SAVED="$(sitrep_saved "$SR_ROOT" "$SR_PLAN")"
+    SR_GOALS_MET="$(awk 'index($0, "goal: name=") == 1 { l = substr($0, 12); i = index(l, " status="); if (!i) next
+      n = substr(l, 1, i - 1); r = substr(l, i + 8); j = index(r, " measure="); if (j) r = substr(r, 1, j - 1)
+      if (r == "met") print "reached\t" n }' "$SR_SAVED")"
+    SG_ASKS="$(sitrep_asks "$SR_PLAN" "$SR_ROOT" "$(units_rows "$SR_PLAN" 2>/dev/null)" "$SR_GOALS_MET" "$(sitrep_now)")"
+    { awk 'index($0, "ask: ") != 1' "$SR_SAVED"; sitrep_ask_lines; } > "$SR_SHEET"
     SR_RC=0
     SR_CARD_TEXT="$("${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" sitrep "$SR_SHEET")" || SR_RC=$?
     rm -f "$SR_SHEET"

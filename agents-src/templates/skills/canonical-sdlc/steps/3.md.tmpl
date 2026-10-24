@@ -24,6 +24,8 @@ current: <N>
 
 **Wave-scale variant.** The `## Tasks` table's columns, `deps` and `reads`, status vocabulary and `working-branch:` are documented in `operational-rules.md`.
 
+**A `## Tasks` cell opens on a title of at most 30 characters,** then a period and the detail; the card prints the title, `serves` in its own column and a run of `depends` ids as `T1–T5`, refuses a longer title and never cuts it; `show task <n>` prints the whole cell.
+
 **`## Tasks` is the register of in-flight units.** Run `task-set <id> worktree=<tree>` as you create the tree. A commit from it is judged by that row — its step at wave scale, its task arms at task scale — never by `current:`, and a row ahead of the run is refused. Optional: `—` while no tree exists.
 
 `## Assumptions` points to `record/<wave>/assumptions.md` — seeded from Step 1's "Not Doing" plus spec ambiguities; Step 4 appends there before each commit.
@@ -50,7 +52,7 @@ dispatch-preflight refuses every writer-class dispatch (implementor, senior-impl
 walls, and the fails-when wall beside them, bind at every scale. The Patrol's below-Step-4
 fill refusal is the second backstop.
 
-On approval, rebuild the task list from the plan before the first dispatch: delete every pending entry and recreate them in execution order — one `<step>/<n>: <short desc>` entry per `## Tasks` row, in the order the Step-3 card's batches print, for every step the table has rows at, then one `<step>: <desc>` entry for each remaining step. The task tool appends, so adding entries without recreating the later ones leaves the list out of order. Mark a row's entry in progress in the turn it is dispatched.
+On approval, rebuild the task list from the plan before the first dispatch, in execution order: one `<step>/<n>: <title>` entry per `## Tasks` row in the order the card's batches print, then one `<step>: <desc>` entry per remaining step; the tool appends, so recreate the later entries rather than insert among them. Mark a row's entry in progress in the turn it is dispatched.
 
 ```
 Step 3 · Plan
@@ -59,9 +61,9 @@ Step 3 · Plan
     working       <branch>              (from <base> @ <sha>)
     integration   <branch>              (Step 8 merges here)
 
-  Tasks                                  kind       depends       agent
-    <n>   <the task> · serves <REQ-n>    build      —             senior-implementor
-    <n>   <the task> · serves <REQ-n>    test       <n>           implementor
+  Tasks                                  serves       kind      depends      agent
+    <n>   <the task title>               <REQ-n>      build     —            senior-implementor
+    <n>   <the task title>               <REQ-n>      test      <n>          implementor
 
   Chain and width
     longest chain  <n> → <n> → <n> · <minutes> min
@@ -81,5 +83,5 @@ show evals <req> · show task <n> · explain <decision>
 
 Card: `bash <plugin-root>/scripts/card.sh step3 <plan.md>` renders it whole; no stdin.
 
-**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work: rows are added or changed by `task-add` and `task-set`, never by editing the table by hand. A row added by `task-add` gets its task-list entry the same turn, and the entries after it are recreated to keep the order. Any other discovery is a W+1 candidate; one that makes the wave structurally impossible surfaces a Wake Note and halts.
+**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work: rows are added or changed by `task-add` and `task-set`, never by editing the table by hand. Any other discovery is a W+1 candidate; one that makes the wave structurally impossible surfaces a Wake Note and halts.
 

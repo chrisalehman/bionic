@@ -29,7 +29,7 @@ Presentation contract — what the user sees from this command:
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
 
-bionic 1.26.0 (installed)
+bionic 1.27.0 (installed)
 
 # bionic
 
@@ -57,7 +57,7 @@ install it once and every project gets the same working discipline.
 | `/bionic:excalidraw-diagram` | hand-arranged Excalidraw diagrams that make a visual argument, rendered to PNG by a bundled renderer (installed by setup) |
 | `/bionic:decision` | puts a decision to you in one shape — goal, numbered options, recommendation, significance — ending on one reply line; typed bare, it reframes what was last discussed |
 | `/bionic:handoff` | writes the run's handoff file before you step away or `/clear` — the machine's facts, five lines from the session, safe to clear or wait N minutes — ending on the one command that resumes it, `/bionic:canonical-sdlc <path>` |
-| `/bionic:sitrep` | where the run stands — every row with its mark, schedule · correctness · waste, what you owe, when it closes — with a Bottom line and a Diagnosis on top; the Patrol prints its one-line form every tick |
+| `/bionic:sitrep` | where the run stands — the handful of facts that change what you do next: the task list, the metrics, what blocks you and when it closes, drawn by the verb, with the purpose, the call and the grade on top; the Patrol prints its one-line form every tick |
 
 ## Agents — ship with the plugin
 

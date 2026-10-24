@@ -173,7 +173,7 @@ current: 3
 
 | id | step | kind | task | agent | deps | size | serves | Files | worktree | status | reads |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | REQ-1: the first task in one line. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | — | pending | approval:release |
+| T1 | 4 | build | REQ-1: the first task. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | — | pending | approval:release |
 
 ## Verification Matrix
 
@@ -197,11 +197,11 @@ Ship the fixture wave so the cards have an artifact to read.
 
 ## Not Doing
 
-- The excluded item, and the one-line reason it is out.
+- The excluded item: why it is out.
 
 ## Requirements and acceptance criteria
 
-### REQ-1 — the first requirement in one line
+### REQ-1 — the first requirement
 
 provenance: user 2026-10-11 "do the thing"
 - AC-1.1 the first criterion. Fails when: it does not hold.

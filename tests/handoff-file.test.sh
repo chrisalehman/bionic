@@ -369,20 +369,34 @@ expect_absent "T10d …no wait line (T10b read the same file)" "wait " "$(grep -
 kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
 
 # ============================================================
-section "§HEAD: the head is the title, bound the run's status line, then Blocked on you: yes or no and one line per open ask with what it holds"
+section "§HEAD: the head is the title, bound the run's status line, then Blocked on you: yes only while an ask that waits on you holds something, and one line per open ask with what it holds"
 # ============================================================
-# The asks are the run's register, opened through lib/owed.sh's own opener; the status line is `sitrep --line`'s.
-# fails-when: an ask open on the run is missing from the head, or the head says nothing is blocked while one is.
+# The asks are the run's register, opened through lib/owed.sh's own opener and answered through its own answer; the
+# status line is `sitrep --line`'s. An ask that waits on an event blocks nobody, so a head over only such asks says no.
+# fails-when: an ask open on the run is missing from the head, the head says nothing is blocked while an ask that waits
+# on the user holds a task, or says blocked over asks that wait on an event.
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "HD1 bound, nothing owed: the title, the run's status line, Blocked on you: no, then the blank line" "yes|Blocked on you: no|" \
-  "$(sed -n 3p "$HF_F" | /usr/bin/grep -qE '^[0-9]+ of [0-9]+ tasks · owed: 0 · close ' && echo yes)|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F")"
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -qE '^[0-9]+ of [0-9]+ tasks · owed: 0 on you · 0 on events · close ' && echo yes)|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F")"
 ( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_R" OWED_SID="$SID" OWED_PLAN="$HF_P" \
-    owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
+    owed_open approve:step4 "Approve step 5" "poker: approve step 5 — reply with your words" )
 hf_poke "$HF_R" "$HF_C" handoff
-expect_eq "HD2 an ask open on the run: owed counts it, Blocked on you: yes, and its line says what it is and what it holds" \
-  "owed: 1|Blocked on you: yes|yes" \
-  "$(sed -n 3p "$HF_F" | /usr/bin/grep -oE 'owed: [0-9]+')|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F" | /usr/bin/grep -qE '^- Approve release — holds [^ ]' && echo yes)"
+expect_eq "HD2 a step approval the user owes, open on the run and holding the next step: owed counts it on you, Blocked on you: yes, and its line says what it is and what it holds" \
+  "owed: 1 on you · 0 on events|Blocked on you: yes|yes" \
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -oE 'owed: [0-9]+ on you · [0-9]+ on events')|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F" | /usr/bin/grep -qE '^- Approve step 5 — holds step 5$' && echo yes)"
+( . "${S46_LIB%/*}/owed.sh" && export OWED_ROOT="$HF_R" OWED_SID="$SID" OWED_PLAN="$HF_P" \
+  && owed_close approve:step4 fixture \
+  && owed_open waive:adversarial "Waiver adversarial" "poker: the adversarial review failed at the head" \
+  && owed_answer waive:adversarial no "review adversarial re-run" )
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "HD2b the step approval answered and a waiver the user turned back left open: it waits on its review's re-run, so the head says Blocked on you: no over it, the Patrol counts it on events, and its line ends with what it waits on" \
+  "owed: 0 on you · 1 on events|Blocked on you: no|yes" \
+  "$(sed -n 3p "$HF_F" | /usr/bin/grep -oE 'owed: [0-9]+ on you · [0-9]+ on events')|$(sed -n 4p "$HF_F")|$(sed -n 5p "$HF_F" | /usr/bin/grep -qE '^- Waiver adversarial — holds .+ · waits on review adversarial re-run$' && echo yes)"
 expect_eq "HD3 with no run, the head is the title and Blocked on you: no" "Blocked on you: no|" "$(sed -n 3p "$HF_NR_F")|$(sed -n 4p "$HF_NR_F")"
+( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_NR" OWED_SID="$SID" owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
+hf_poke "$HF_NR" "$HF_C" handoff
+expect_eq "HD3b with no run and a session's own ask open, the line is there and holds nothing, so the head still says Blocked on you: no" \
+  "Blocked on you: no|- Approve release — holds nothing" "$(sed -n 3p "$HF_NR_F")|$(sed -n 4p "$HF_NR_F")"
 
 # ============================================================
 section "§PORTABLE: an argument tailors the document; secrets and addresses are redacted; a copied block is left out for its path; no safe-to-clear line exists"
