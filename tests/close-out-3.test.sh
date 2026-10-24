@@ -376,7 +376,8 @@ DL_REQ="$PDL/.bionic/docs/specs/epic-fx/wave-02-next.requirements.md"; mkdir -p 
 printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
   '# next wave · requirements' '' '## Goal' '' 'Read the debt the predecessor carried.' '' \
   '## Not Doing' '' '- Nothing excluded.' '' '## Requirements and acceptance criteria' '' \
-  '### REQ-1 — the one requirement' '' 'provenance: user 2026-10-13 "carry it"' \
+  '### REQ-1 — the one requirement' '' 'The next run reads the debt its predecessor carried.' '' \
+  'provenance: user 2026-10-13 "carry it"' \
   '- AC-1.1 the criterion. Fails when: it does not hold.' > "$DL_REQ"
 DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
 expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \

@@ -203,6 +203,8 @@ Ship the fixture wave so the cards have an artifact to read.
 
 ### REQ-1 — the first requirement
 
+The fixture does the one thing the cards need to draw.
+
 provenance: user 2026-10-11 "do the thing"
 - AC-1.1 the first criterion. Fails when: it does not hold.
 FIXEOF

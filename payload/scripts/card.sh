@@ -148,9 +148,11 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       CARD_SECTION="Requirements"
       # THE ROW IS THE ID, THE TITLE AND THE CRITERIA COUNT ON ONE LINE. The title is at most 30
       # characters, so its column is 30 wide and `ACs n` trails it; a hand-fed row with a longer
-      # title folds inside the column, as every folding cell does. The provenance and the
-      # criteria are the requirement's `explain`, never the card's.
-      CARD_FMT_1='    %-7s %-30s  ACs %s'; CARD_NF_1=3; CARD_FOLD_1=1 ;;
+      # title folds inside the column, as every folding cell does. The fourth cell is the
+      # requirement's sentence, drawn under the row (`_card_sentence_line`). The provenance and
+      # the criteria are the requirement's `explain`, never the card's.
+      CARD_FMT_1='    %-7s %-30s  ACs %s'; CARD_NF_1=3; CARD_FOLD_1=1
+      _card_sentence_line ;;
     decision)
       CARD_SECTION="Decisions"
       CARD_HDRCOLS="2:serves 3:ADR"
@@ -178,6 +180,25 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
     *) return 1 ;;
   esac
   return 0
+}
+
+# THE SENTENCE LINE, ONE PIECE FOR EVERY ROW KIND WHOSE ITEM OPENS ON A PLAIN SENTENCE. The row
+# stays exactly as its kind draws it, and the cell after the row's own cells is the item's sentence,
+# printed on the line under the row: it starts where the title column starts, so it reads as indented
+# past the id, and it runs to the card's right edge and folds there, every continuation line at the
+# same indent. Nothing prints under a trailing column on the row's OWN lines; the sentence line is not
+# one of them. A row that hands no sentence (a hand-fed row of the row's own cells only) draws its one
+# line and nothing under it: `_card_render_batch` never prints a second line that would be blank.
+# Call it from a kind's `_card_spec` arm after CARD_FMT_1 and CARD_FOLD_1 are set.
+_card_sentence_line() {  # -> the kind's second line is the item's sentence
+  local i=0 ind=0
+  _card_parse "$CARD_FMT_1"
+  while [ "$i" -le "$CARD_FOLD_1" ]; do
+    _bionic_cols_into "${CARD_LIT[$i]}"; ind=$(( ind + BIONIC_COLS ))
+    [ "$i" -lt "$CARD_FOLD_1" ] && ind=$(( ind + ${CARD_W[$i]:-0} ))
+    i=$(( i + 1 ))
+  done
+  CARD_LINES=2; CARD_FMT_2="$(_card_spaces "$ind")%s"; CARD_NF_2=1; CARD_FOLD_2=0
 }
 
 # ── PARSING A FORMAT ─────────────────────────────────────────────────────────
@@ -697,15 +718,17 @@ function cells(line, arr,   n, i) {
 function err(m) { if (ERRMSG == "") ERRMSG = m }
 function flush_nd() { if (ndbuf != "") { print "ND" OFS clean(ndbuf); ndbuf = "" } }
 function crit_close() { if (rcur != "") { rcrit = rcrit (rcrit == "" ? "" : "\037") rcur; rcur = "" } }
-# A requirement is three cells on the card (id, title, criteria count); its provenance and criteria
-# travel beside it for `explain`. The heading text is the title as written: the card measures it.
+# A requirement is three cells on the card row (id, title, criteria count) and its sentence, the fourth
+# cell, on the line under it; its provenance and criteria travel beside it for `explain`. The heading text
+# is the title as written: the card measures it. The sentence keeps its backticks, because a backtick is
+# what the card refuses in it, and a cell cleaned of them could no longer be refused.
 function flush_req() {
   if (rid == "") return
   crit_close()
   if (rprov == "") { err("REQ-" rid " has no provenance: line"); rid = ""; return }
-  print "RROW" OFS "REQ-" rid OFS rtext OFS racs
+  print "RROW" OFS "REQ-" rid OFS rtext OFS racs OFS rsent
   print "RDET" OFS "REQ-" rid OFS rprov OFS rcrit
-  rid = ""; rtext = ""; rprov = ""; racs = 0; rcrit = ""; rcur = ""
+  rid = ""; rtext = ""; rprov = ""; racs = 0; rcrit = ""; rcur = ""; rsent = ""; rsentdone = 0
 }
 # THE TITLE OF A DECISION IS ITS LEADING BOLD SPAN, `**D<n> — <title>**` (a bold span without the label
 # is the title as it stands); a bullet with no bold span opens on its first sentence. The rest of the
@@ -813,7 +836,7 @@ fm == 1 {
     sec = "reqs"; sub2 = ""; sub(/^REQ-/, "", h)
     rid = h; sub(/[ \t].*$/, "", rid)
     rtext = h; sub(/^[^ \t]+[ \t]*/, "", rtext); sub(/^— */, "", rtext)
-    rtext = clean(rtext); rprov = ""; racs = 0; rcrit = ""; rcur = ""
+    rtext = clean(rtext); rprov = ""; racs = 0; rcrit = ""; rcur = ""; rsent = ""; rsentdone = 0
   }
   else if (h ~ /Component boundaries/) sub2 = "dec"
   else if (h ~ /Ownership table/) { sub2 = "own"; orow = 0 }
@@ -860,11 +883,15 @@ sec == "nd" {
   else if (trim($0) == "") flush_nd()
   next
 }
+# THE SENTENCE IS THE FIRST PARAGRAPH UNDER THE HEADING, BEFORE `provenance:`: its source lines join
+# with one space, and the blank line, the provenance line or a criterion ends it. A paragraph that
+# comes after the provenance line does not open the requirement, so it is not taken for one.
 sec == "reqs" && rid != "" {
-  if (/^provenance:/) rprov = clean(substr($0, 12))
-  else if (/^- AC-/) { crit_close(); racs++; rcur = clean(substr($0, 3)) }
-  else if (trim($0) == "") crit_close()
+  if (/^provenance:/) { rprov = clean(substr($0, 12)); rsentdone = 1 }
+  else if (/^- AC-/) { crit_close(); racs++; rcur = clean(substr($0, 3)); rsentdone = 1 }
+  else if (trim($0) == "") { crit_close(); if (rsent != "") rsentdone = 1 }
   else if (rcur != "") rcur = rcur " " trim($0)
+  else if (rsentdone != 1) { sline = $0; gsub(/\t/, " ", sline); rsent = rsent (rsent == "" ? "" : " ") trim(sline) }
   next
 }
 sec == "tasks" && /^[ \t]*\|/ {
@@ -1064,6 +1091,7 @@ _card_title_refusals() {  # <step1|step2|step3> — sets CARD_TITLE_BAD to one R
       for row in ${WCARD_RROW[@]+"${WCARD_RROW[@]}"}; do
         _card_split "$row"
         _card_title_check requirement "${CARD_CELLS[0]}" "${CARD_CELLS[1]:-}"
+        _card_sentence_check requirement "${CARD_CELLS[0]}" "${CARD_CELLS[3]:-}" "before its provenance: line"
       done
       for row in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do
         i=$(( i + 1 ))
@@ -1086,6 +1114,18 @@ _card_title_check() {  # <kind> <id> <title> — appends the REFUSED line to CAR
   _bionic_cols_into "$3"
   [ "$BIONIC_COLS" -gt "$CARD_TITLE_CAP" ] || return 0
   CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: title is ${BIONIC_COLS} characters, the cap is ${CARD_TITLE_CAP}: $3"$'\n'
+}
+
+# THE SENTENCE RULE, IN THE TITLE'S CHANNEL. An item that opens on a plain sentence is refused when
+# it has none, or when the sentence carries a backtick: a backticked token is an identifier, and the
+# sentence is the item said in plain words. The refusal names the item and, for a backtick, prints
+# the sentence whole; the sentence is never cut or cleaned to make it pass.
+_card_sentence_check() {  # <kind> <id> <sentence> <where the sentence belongs> — appends the REFUSED line to CARD_TITLE_BAD
+  case "$3" in
+    '')    CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: no sentence $4"$'\n' ;;
+    *'`'*) CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: the sentence carries a backtick: $3"$'\n' ;;
+  esac
+  return 0
 }
 
 # THE REFUSAL IS EXIT 1 WITH NOTHING ON STDOUT: the artifact parsed, and what it says is not a card.
@@ -2208,6 +2248,17 @@ _card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification
   rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (single or double)" "$1"
 }
 
+# A SECOND LINE WITH NO CELL AND NO LABEL WOULD PRINT AS A BLANK LINE, and a blank line inside a
+# section reads as the section's end; so it is not drawn. A labelled second line (`reuses`) is
+# never blank and draws as it always did.
+_card_line2_blank() {  # reads _card_b[] and CARD_FMT_2 -> 0 when the row's second line would be blank
+  local c lit
+  for c in ${_card_b[@]+"${_card_b[@]}"}; do [ -z "$c" ] || return 1; done
+  _card_parse "$CARD_FMT_2"
+  lit="${CARD_LIT[*]-}${CARD_TAIL}"
+  [ -z "${lit//[[:space:]]/}" ]
+}
+
 # ── ONE BATCH, RENDERED ──────────────────────────────────────────────────────
 #
 # EVERY ROW IS READ BEFORE ANY ROW IS RENDERED (AC-9.5). A batch's per-column
@@ -2233,7 +2284,7 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
       while [ "$_i" -lt "$CARD_NF_2" ]; do
         _card_b[$_i]="${CARD_CELLS[$(( CARD_NF_1 + _i ))]:-}"; _i=$(( _i + 1 ))
       done
-      _card_emit "$CARD_FMT_2" "$CARD_FOLD_2" "2" "${_card_b[@]}"
+      _card_line2_blank || _card_emit "$CARD_FMT_2" "$CARD_FOLD_2" "2" "${_card_b[@]}"
     fi
   done
   return 0

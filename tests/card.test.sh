@@ -500,11 +500,15 @@ Not part of any card; here so the parser has a section to walk past.
 
 ### REQ-1 — the first requirement
 
+The fixture does the first thing, so the card has a sentence to draw under its row.
+
 provenance: user 2026-09-16 "do the thing"
 - AC-1.1 the first criterion. Fails when: it does not hold.
 - AC-1.2 the second criterion. Fails when: it does not hold.
 
 ### REQ-2 — the second requirement
+
+The fixture does the second thing too.
 
 provenance: seed row 2; research row 2
 - AC-2.1 the only criterion here. Fails when: it does not hold.
@@ -658,7 +662,10 @@ expect_contains "51b: …and so does the integration branch" \
 # `card.sh requirement` as TSV. Not a spot check of one cell: `cmp` over the
 # whole block, so a different fold, a different pad, a different batch width or
 # a different header all fail here rather than being discovered on a card.
-printf 'REQ-1\tthe first requirement\t2\nREQ-2\tthe second requirement\t1\n' \
+# The sentence is each row's fourth cell, so the TSV carries it too.
+printf 'REQ-1\tthe first requirement\t2\t%s\nREQ-2\tthe second requirement\t1\t%s\n' \
+  "The fixture does the first thing, so the card has a sentence to draw under its row." \
+  "The fixture does the second thing too." \
   | card requirement > "${CARD_SANDBOX}/tsv.txt"
 printf '%s\n' "$S1" | sed -n '/^  Requirements$/,/^$/p' | sed -e '/^$/d' \
   > "${CARD_SANDBOX}/whole.txt"
@@ -668,6 +675,13 @@ else
   no "52: AC-10.3 — the whole card's Requirements block is byte-identical to the TSV-fed rows" \
     "$(diff "${CARD_SANDBOX}/tsv.txt" "${CARD_SANDBOX}/whole.txt" | head -8)"
 fi
+# THE ROWS' OWN LINES DO NOT MOVE: the block with its sentence lines taken out is byte for byte the
+# three-cell rows, which draw exactly what they drew before a requirement carried a sentence.
+printf 'REQ-1\tthe first requirement\t2\nREQ-2\tthe second requirement\t1\n' \
+  | card requirement > "${CARD_SANDBOX}/tsv3.txt"
+/usr/bin/grep -v '^            ' "${CARD_SANDBOX}/whole.txt" > "${CARD_SANDBOX}/whole-rows.txt"
+expect_eq "52b: …and with its sentence lines out, the block is the three-cell rows byte for byte (precondition: two sentence lines)" "2|same" \
+  "$(/usr/bin/grep -c '^            ' "${CARD_SANDBOX}/whole.txt" | tr -d ' ')|$(cmp -s "${CARD_SANDBOX}/tsv3.txt" "${CARD_SANDBOX}/whole-rows.txt" && echo same)"
 
 # ── AC-10.2: the Step-2 and Step-3 cards from their own artifacts ────────────
 whole_card step2 "$SPEC_FIX"; S2="$WC_OUT"
@@ -754,7 +768,206 @@ whole_card step3 "${CARD_INTREE}/wave-99-fixture.plan.md"; S3_IT="$WC_OUT"
 # THE WAVE'S OWN ARTIFACTS: not synthetic — the real requirements/spec/plan this
 # very card renders from at every Step-1/2/3 approval gate in this wave, which
 # is the case the fix exists for.
-REAL_REQ="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-44-every-hand.requirements.md"
+# THE STEP-1 ONE IS A COPY THIS SUITE OWNS, written in the tree beside the fixtures above: a real
+# run's requirements whole, each requirement given its opening sentence as the card now requires.
+# A live file changes under the suite and cannot be given what a newer rule asks of it. Its
+# inherited-deferral lines are left out, because they name another run's record and the newest
+# continuation they are read against moves with every close.
+REAL_REQ="${CARD_INTREE}/wave-44-every-hand.requirements.md"
+cat > "$REAL_REQ" <<'W44EOF'
+---
+governing-skill: agent-skills:idea-refine
+sdlc-step: 1
+epic: epic-23-bionic-tech-debt
+wave: wave-44-every-hand
+intent: build
+rigor: single
+review-cadence: once
+fix-policy: S1,S2-on
+fix-cap: 2
+regression: yes
+regression-override: Chris Lehman 2026-10-23 derived=no chosen=yes
+scale: task
+canonical_sdlc_version: 14
+surface_type: cli-plugin
+language: bash
+has_ui: false
+multi_agent: true
+deploy_target: n/a
+cleanup_on_finish: true
+use_worktree: false
+walk: required
+design-interview: true
+model_plan: orchestrator=claude-fable-5-1; implementor=sonnet-high; senior-implementor=opus-high; researcher=opus-high; test-runner=haiku-high; auditor=opus-high; critic=opus-high
+archive-root: /Users/admin/bionic-archive
+working-branch: wave/44-every-hand
+integration-branch: main
+base-sha: dd425be64
+seed: ideas/bionic-1.27.0-charter.md
+source: ideas/bionic-1.27.0-charter.md §Late addition and §Cut · record/wave-44-every-hand/research-sitrep-concept.md · record/wave-44-every-hand/research-sitrep-latency.md · record/wave-44-every-hand/design-ledger.md Δ1, Δ6, Δ7, Δ8
+release: 1.27.0
+---
+# bionic 1.27.0 — the sitrep changes what you do next · requirements
+
+## Goal
+
+A sitrep is the handful of facts that change what the user does next, drawn by code with the model's judgment on top, in well under a minute. Five themes, in the plan's order: the register tells an ask that waits on the user from an item that waits on an event, and only the first can block the user or drive the call; code draws every fact row, the head, the task list, the metrics, Blocked on you and the predicted close, and the model writes seven lines of judgment the check reads; the card says what the wave is for and whether it is on course, first under the Assessment; and the whole takes under thirty seconds of model output; and every card the run puts to the user, requirements, design and plan, prints a name per item and keeps the detail one keystroke away. Accepted when the card drawn on the wave-43 plan and on a fixture shaped like the large-app run reads in the approved mock-up's shape, and three sitreps in a row take under thirty seconds each.
+
+## Context
+
+The run was chartered as the hand-holds measure with the sitrep as a late addition, and cut to the sitrep at the design frame (charter §Cut; ledger Δ8). The cause: a large-app card of 63 rows whose Call to action restated a ruling already given, whose Assessment carried fourteen register items under five points, and whose Blocked on you named a merge that waited on a re-review, not on the user; and a measurement of the sitrep at a median of about 95 seconds, nine tenths of it the model typing and retyping rows that are facts (research-sitrep-latency.md: first judgment 43%, refusal rewrites 34%, retyping the printed card 14%, machine 10%). The concept review (research-sitrep-concept.md) found the card never states what the wave is for: the sheet carries neither the plan's Goal nor the themes' openers, and the Goals row may state only status counts. Chris ruled D7, materiality; D6, code draws the facts; D1, the purpose first under the Assessment; and approved a mock-up (ledger Δ1, Δ6, Δ7). The rulings of waves 38 to 43 that stand: the seven sections in order (w42 Δ0, Δ9), Metrics as numbers only (w42 D2), the grade (w42 D2), the task list as drawn today, bottom line up front (w38 D11), one renderer prints every fact (w38 D9, restored). Reopened on evidence: w42 D1 "2" (the model writes every word) and w42's "every open ask answered once".
+
+## Theme 1 — the register knows what you owe
+
+An ask waits on the user or on an event, and the register says which; only an ask that waits on the user can block the user or drive the call.
+
+### REQ-1 — An ask says what it waits on
+
+Every ask you are shown says whether it waits on you or on something else happening, so you can tell what is really yours.
+
+provenance: charter §Cut (the large-app card's "Blocked on you doesn't seem like it's truly blocked"); sheet-definitions.md (an ask line carries holds= and blocks=, nothing of who it waits on)
+
+- AC-1.1 Every ask on the register reads `waits-on=user` or `waits-on=event <what>`: a decision, an approval and an unanswered waiver wait on the user; a waiver answered "no" waits on the review's next run; a finding carried to a row waits on that row's landing; the sheet's `ask:` line carries the field. Fails when: a refused waiver reads `waits-on=user`, or an ask line lacks the field.
+- AC-1.2 A reply of "no" to a waiver, and a finding ruled "carry" or "defer", record the answer on the ask and move it to `waits-on=event` without closing it; the ask closes as it does today, when the review passes or the row lands. Fails when: the answered ask still reads `waits-on=user`, or it closes before its event.
+
+### REQ-2 — Blocked follows waits-on
+
+Only an ask that waits on you and holds up work is shown as blocking you.
+
+provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
+
+- AC-2.1 Blocked on you lists the asks that wait on the user and hold a task, the release or the merge, and nothing else; with none it reads `None` and names the nearest event the run waits on. Fails when: an ask waiting on an event is drawn there, or `None` is drawn while an ask waiting on the user holds the merge.
+- AC-2.2 The call may say nothing is owed while every open ask waits on an event, and must name the ask while one waits on the user and holds something; the check reads `waits-on`, not `holds`. Fails when: the check refuses "nothing tonight" over a refused waiver, or admits it over an unanswered one.
+- AC-2.3 The handoff head's `Blocked on you`, the sitrep card and the Patrol's `blocks=` read one function, pinned by one suite row that reddens when any two disagree; the `blocks-rule` and `blocked-on-you` duplicates are gone. Fails when: `/usr/bin/grep` finds the rule in two files, or a planted divergence passes.
+
+## Theme 2 — code draws the facts, the model writes the judgment
+
+Every row that is a fact is drawn by the verb; the model writes only what is judgment, and the check reads only that.
+
+### REQ-3 — The verb draws the fact rows
+
+The facts of a sitrep are drawn by code, so the model writes only the judgment on top of them.
+
+provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
+
+- AC-3.1 `sitrep` prints, beside the sheet, the drawn rows of the head, the Task list (every step and task row as today, its text from the plan's task title and its state words from the sheet), the Metrics table, Blocked on you and the first two lines of Predicted close, so the model writes none of them. Fails when: a task row's text or a metric number must be typed by the model, or a drawn row differs from the sheet fact it is drawn from.
+- AC-3.2 The Metrics are a five-line table, Completed, Pace, Correctness, Waste, Goals, each cell one sheet value, numbers only, the pace comparison first in its line. Fails when: a cell holds a number no sheet line holds, or a line is prose.
+- AC-3.3 Items that wait on events are one drawn line under the Assessment, counted by kind ("14 items wait on landings, not on you: 8 carried findings, 6 rulings given"), never one row each. Fails when: an ask waiting on an event is drawn as its own row.
+
+### REQ-4 — Seven lines, checked for truth
+
+The judgment on the sitrep card is seven kinds of line, and every number in it is checked against the facts.
+
+provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
+
+- AC-4.1 The judgment the model pipes to `sitrep card` is: `purpose:`, `call:`, `grade:`, one to three `point:` lines, one `ask <key>:` recommendation per ask that waits on the user, and one `close:` condition line; the check refuses any other tag, and refuses a missing one by name. Fails when: a `task:` or `metric:` line is accepted, or a missing `purpose:` draws a card.
+- AC-4.2 Every number in a judgment line is bound to the sheet value whose word stands beside it, by word and by place, as the metrics were; a line over the card's width is folded by the renderer, never refused. Fails when: "1 green and 11 red" over "11 green, 1 red" passes, or a long point is refused for its length.
+- AC-4.3 The tool shows the card; the skill tells the model to print the tool's output once inside one fenced block and never to retype it, and a refusal prints every reason at once. Fails when: the skill text asks the model to regenerate the card, or the second refusal names a reason the first could have.
+
+### REQ-5 — The skill is the new shape
+
+The sitrep skill describes the new card, so the model writes what the card now asks for.
+
+provenance: ledger Δ6, Δ7; skills/sitrep/SKILL.md (the six questions, the Goals question, "every open ask answered once")
+
+- AC-5.1 `skills/sitrep/SKILL.md` describes the two verbs, the seven judgment lines, the Purpose question in place of the Goals question, and the rule that an ask waiting on an event owes the user nothing; its example judgment is seven lines; `words.test.sh` and the sitrep-card suite's skill section pin it. Fails when: the skill text still asks for `task:` or `metric:` rows, or for every open ask.
+
+## Theme 3 — the card says what the wave is for
+
+The sitrep opens its judgment on what the wave set out to do and whether that is being accomplished, read from the run's own documents, at every scale.
+
+### REQ-6 — The sheet carries the goal
+
+The facts a sitrep reads carry what the wave is for, so its purpose is never guessed.
+
+provenance: charter §Late addition ("reasserting what the wave is doing"); research-sitrep-concept.md Q3; wave 41 D13
+
+- AC-6.1 The sheet carries `run.goal:`, the plan's `## Goal` paragraph, so the purpose is drawn from the verb and never fetched by the model. Fails when: a plan with a Goal paragraph prints no `run.goal:` line, or the line differs from the paragraph.
+- AC-6.2 Each theme's `goal:` line carries the theme's opening sentence as its last field, `for=`, with the fields the release card reads kept in place. Fails when: a theme that opens on a sentence prints no `for=`, or the release card's reading of the line changes.
+
+### REQ-7 — The purpose line comes first
+
+The sitrep card opens by saying what the wave is for and whether it is on course.
+
+provenance: charter §Late addition ("whether we're accomplishing the purpose of the wave"); ledger Δ1 (D1 "1")
+
+- AC-7.1 The Assessment's first row is the `purpose:` line, what the wave is for and whether it is on course; a judgment without it is refused, and its numbers are checked against the sheet as every line's are. Fails when: a card draws without it, or a purpose claiming a count the sheet lacks is drawn.
+
+### REQ-8 — Progress per theme on the card
+
+The card shows how far each theme has come, by its name.
+
+provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
+
+- AC-8.1 The Goals line of the Metrics states each theme's criteria discharged and open REQs, each number bound to its theme's name; a theme with at least one criterion discharged and none missed reads `on course`, distinct from `not measured`, on the sheet, the sitrep card and the release card. Fails when: a theme at 11 of 12 reads as one at 0 of 12, or "Identity 10 of 11" over a sheet reading 9 of 11 is drawn.
+- AC-8.2 At task scale the sheet reads one goal over the whole matrix, the run's criteria discharged and open REQs. Fails when: a task-scale sheet prints no `goal:` line.
+- AC-8.3 A goal missed by a red the plan itself declares opens no `decide:goal:<name>` ask. Fails when: the ask opens for a declared red.
+
+## Theme 4 — fast
+
+A sitrep costs the user the time it takes to read it, not the time it takes to write.
+
+### REQ-9 — Under thirty seconds
+
+A sitrep reaches you in under thirty seconds.
+
+provenance: charter §Cut ("Right now this is fucking wasting my time!"); research-sitrep-latency.md (74 to 108 s; model output 90%)
+
+- AC-9.1 Three sitreps run in a row on a live plan, measured from the typed command to the shown card in the transcript as research-sitrep-latency.md measured, each take under 30 seconds, with at most one card refusal among the three. Evidence is the measurement recorded at Step 5. Fails when: one takes 30 seconds or more, or two are refused.
+- AC-9.2 The machine side of a sitrep, the sheet and the card together, takes under 5 seconds on the wave-43 plan. Fails when: `time` reads 5 seconds or more.
+
+### REQ-10 — The approved shape is pinned
+
+The card shape you approved is held by a test, so it cannot drift.
+
+provenance: ledger Δ7 (the mock-up Chris approved: "Yes! That is what I want!")
+
+- AC-10.1 A fixture shaped like the large-app card (17 open tasks, 14 items waiting on events, a refused waiver holding the merge, 54 added tasks) draws the mock-up's shape: Call to action one line saying nothing is owed, the Task list as today, a five-line Metrics table, an Assessment of the purpose, at most three points and one counted line, Blocked on you `None` with the event named, Predicted close in three lines; the drawn card is under 40 rows. Fails when: a register item is drawn as a row, the merge reads blocked, or the card exceeds 40 rows.
+
+## Theme 5 — the cards read at a glance
+
+Every card the run puts to the user prints a name per item and keeps the detail one keystroke away, so a card is scanned, not read.
+
+### REQ-11 — The plan card shows titles
+
+The plan card shows each task by a short title, so the table reads at a glance.
+
+provenance: user 2026-10-23 "Each task description is far too long. It's not useful whatsoever. I need a brief summary or phrase that represents what the task is. Maybe 25-30 characters max." and "Yes! That's so much more useful OMG" at the mock-up (ledger Δ13); user 2026-10-23 "you need to do the same thing for the requirements card. Each requirement desc needs to be capped at 30 chars."
+
+- AC-11.1 A `## Tasks` cell opens on a title of at most 30 characters, then a period and the detail; the Step-3 card prints the title alone, `serves` in its own column and consecutive ids in `depends` as a range; `show task <n>` prints the whole cell; the Step-3 text states the rule; a longer title is refused by the card, which names the row and its length, never cut. Fails when: the card prints the detail, or a 31-character title is drawn.
+
+### REQ-12 — The requirements card too
+
+The requirements card shows each requirement by a short title and its count of criteria.
+
+provenance: user 2026-10-23 "Each task description is far too long. It's not useful whatsoever. I need a brief summary or phrase that represents what the task is. Maybe 25-30 characters max." and "Yes! That's so much more useful OMG" at the mock-up (ledger Δ13); user 2026-10-23 "you need to do the same thing for the requirements card. Each requirement desc needs to be capped at 30 chars."
+
+- AC-12.1 A `### REQ-<n> — <title>` heading's title is at most 30 characters; the Step-1 card prints each requirement as its id, its title and its criteria count on one line, the provenance under `explain <requirement>` only; a longer title is refused by the card, which names the requirement and its length, never cut; the Step-1 text states the rule. Fails when: the card prints a provenance, or a 31-character title is drawn.
+
+### REQ-13 — Not Doing in titles
+
+The excluded work on the requirements card is shown by title, one item per line.
+
+provenance: user 2026-10-23 "Not Doing is way too wordy! It needs to be summarized!"
+
+- AC-13.1 Every `## Not Doing` item opens on a title of at most 30 characters, then a colon and the reason; the Step-1 card prints the titles, one per line, and `explain not-doing` prints the items whole; a longer title is refused by the card, naming the item, never cut; the Step-1 text states the rule. Fails when: the card prints a reason, or a 31-character title is drawn.
+
+### REQ-14 — Decisions titled, Risks judged
+
+The design card shows each decision by a short title, and each risk is written as a judgment.
+
+provenance: user 2026-10-23 "Decisions capped to 30 characters"; "the Worth your eye section should probably be called Risks"; "I thought you were summarizing to the material points only"
+
+- AC-14.1 Every `- **D<n> — <title>**` decision title is at most 30 characters; the Step-2 card prints each decision as its id, its title, the requirements it serves and its ADR, `explain <decision>` printing the detail; a longer title is refused by the card, naming the decision, never cut. The spec's `### Worth your eye` section is `### Risks`: each item is the model's own judgment of one risk that could change the user's decision, a sentence or two, and nothing that is not such a risk; drawn whole and folded, with no cap and no required shape; the card accepts the old heading on a spec written before 1.27.0. The Step-2 text states both. Fails when: a 31-character decision title is drawn, a Risks item is cut or refused for its length, or the card's section still reads Worth your eye.
+
+## Not Doing
+
+- The measure work, to 1.28.0: Themes 1 to 4 of the charter and its Known-limit leftovers, the hand-holds window and kinds, every-cell-has-a-verb, the card and the gate reading one fact, the binding outliving the session, and REQ-23 to REQ-34 of this file's first approval, carried whole to `ideas/bionic-1.28.0-charter.md` with their research map and the debt items `tick-idle-width`, `landing-record-parser`, `publish-order` and `arm-at-task-scale`. The debt items `blocks-rule` and `blocked-on-you` burn here under REQ-2.
+- Hand-holds as a judge: this run's close is not judged by it; the close reports its reading as it does today, and what the orchestrator types by hand is logged in `assumptions.md` for 1.28.0 to read.
+- Reopening the card's rulings: the seven-section order, Metrics as numbers only, the grade and the task list's shape stay; Chris kept them at the mock-up.
+- A new section or epic scale: no new sitrep section, and no sitrep at epic scale beyond what the sheet reads today.
+- The merge and the tag: the person's, after the pull request (pr dealing).
+W44EOF
 # THE CARDS READ ARTIFACTS IN THE SHAPE THEY PARSE: a decision bullet carries its `(D<n>; REQ-…)` tag and every title is
 # at most 30 characters, so an older run's artifacts are refused (or drew an empty table); the width pins read the newest.
 REAL_SPEC="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-44-every-hand.spec.md"
@@ -767,11 +980,11 @@ expect_empty "67: no line of the in-tree Step-1 fixture card exceeds the budget,
   "$(over_budget "$S1_IT")"
 expect_empty "67a: …nor of the in-tree Step-2 fixture card" "$(over_budget "$S2_IT")"
 expect_empty "67b: …nor of the in-tree Step-3 fixture card" "$(over_budget "$S3_IT")"
-expect_eq "67c0: precondition: the Step-1 card over this wave's own requirements renders (exit 0, its REQ-1 row present)" "0|yes" \
-  "$S1_REAL_RC|$(printf '%s\n' "$S1_REAL" | /usr/bin/grep -q '^ *REQ-1 ' && echo yes)"
+expect_eq "67c0: precondition: the Step-1 card over the suite's copy of a real run's requirements renders (exit 0, its REQ-1 row present, 14 sentence lines at least)" "0|yes|yes" \
+  "$S1_REAL_RC|$(printf '%s\n' "$S1_REAL" | /usr/bin/grep -q '^ *REQ-1 ' && echo yes)|$([ "$(printf '%s\n' "$S1_REAL" | /usr/bin/grep -c '^            [A-Z]')" -ge 14 ] && echo yes)"
 expect_eq "67e0: precondition: the Step-3 card over this wave's own plan renders (exit 0, its T1 row present)" "0|yes" \
   "$S3_REAL_RC|$(printf '%s\n' "$S3_REAL" | /usr/bin/grep -q '^ *T1 ' && echo yes)"
-expect_empty "67c: nor of the Step-1 card over this wave's own requirements" \
+expect_empty "67c: nor of the Step-1 card over the suite's copy of a real run's requirements, its sentences included" \
   "$(over_budget "$S1_REAL")"
 expect_eq "67d0: precondition: the Step-2 card over the real spec renders (exit 0, its D8 row present)" "0|yes" \
   "$S2_REAL_RC|$(printf '%s\n' "$S2_REAL" | /usr/bin/grep -q '^ *D8 ' && echo yes)"
@@ -810,7 +1023,7 @@ check_artifact_resolves() {  # <label> <rendered card>
 check_artifact_resolves "68b: the in-tree Step-1 fixture card's Artifacts path resolves to a real file" "$S1_IT"
 check_artifact_resolves "68c: …the in-tree Step-2 fixture card's" "$S2_IT"
 check_artifact_resolves "68d: …the in-tree Step-3 fixture card's" "$S3_IT"
-check_artifact_resolves "68e: …the Step-1 card over this wave's own requirements" "$S1_REAL"
+check_artifact_resolves "68e: …the Step-1 card over the suite's copy of a real run's requirements" "$S1_REAL"
 check_artifact_resolves "68f: …the Step-2 card over this wave's own spec" "$S2_REAL"
 check_artifact_resolves "68g: …the Step-3 card over this wave's own plan" "$S3_REAL"
 
@@ -1165,6 +1378,8 @@ Ship the flock app's two requirements so the Step-1 card has titles to draw.
 
 ### REQ-1 — ${T30}
 
+Two phones that meet show the same list afterwards.
+
 provenance: user 2026-09-16 "PROV-ALPHA the flock must sync"
 - AC-1.1 The flock syncs when two phones meet. Fails when: the second phone shows a stale list.
 - AC-1.2 A conflict keeps both edits and says so,
@@ -1172,6 +1387,8 @@ provenance: user 2026-09-16 "PROV-ALPHA the flock must sync"
 - AC-1.3 The sync is quiet. Fails when: it prompts.
 
 ### REQ-2 — Short title
+
+The second requirement holds as well.
 
 provenance: report §4 PROV-BETA
 - AC-2.1 The only criterion here. Fails when: it does not hold.
@@ -1257,6 +1474,117 @@ expect_contains "NOT-DOING-TITLES-5c an item with no colon is all title, and ref
   "REFUSED — not-doing 3: title is 53 characters, the cap is 30: ${T31} and no colon after it" "$WC_ERR"
 expect_eq "NOT-DOING-TITLES-6 the Step-1 text states the colon rule" "1|1" \
   "$(/usr/bin/grep -c '<title>: <reason>' "${REPO}/skills/canonical-sdlc/steps/1.md")|$(/usr/bin/grep -c '<title>: <reason>' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/1.md.tmpl")"
+
+# ============================================================
+section "§SENTENCE: a requirement opens on its sentence, and the Step-1 card prints it under the row"
+# ============================================================
+# fails-when: a requirement with no opening paragraph renders, one whose paragraph carries a backtick renders, the
+# refusal does not name the requirement, the sentence is missing from under its row, cut, or folded inside the title
+# column, or the row's own line changes.
+SN_SHORT="The flock keeps one list on every phone that has met another."
+SN_LONG="Two people who edit the same list while apart both keep their edits when their phones meet again, and each of them is told which edits came from the other phone, so nothing they typed is ever silently lost in the merge."
+SN_REQ="${CARD_SANDBOX}/wave-10-flock.requirements.md"
+cat > "$SN_REQ" <<FIXEOF
+---
+sdlc-step: 1
+working-branch: wave/10-flock
+integration-branch: main
+base-sha: abc1234
+---
+
+# flock wave 10 · requirements
+
+## Goal
+
+Ship the flock app's two requirements so the Step-1 card has sentences to draw.
+
+## Not Doing
+
+- Nothing else: this fixture holds no excluded work.
+
+## Requirements and acceptance criteria
+
+### REQ-1 — The flock keeps one list
+
+${SN_SHORT}
+
+provenance: user 2026-10-24 "PROV-ALPHA the flock must sync"
+- AC-1.1 The flock syncs when two phones meet. Fails when: the second phone shows a stale list.
+
+### REQ-2 — Short title
+
+Two people who edit the same list while apart both keep their edits when their phones meet again,
+and each of them is told which edits came from the other phone, so nothing they typed is ever
+silently lost in the merge.
+
+provenance: report §4 PROV-BETA
+- AC-2.1 The only criterion here. Fails when: it does not hold.
+- AC-2.2 A second criterion. Fails when: it does not hold.
+FIXEOF
+whole_card step1 "$SN_REQ"; SN="$WC_OUT"
+expect_eq "SENTENCE-1 step1 draws a requirements file whose requirements open on their sentences, silently" "0|" "$WC_RC|$WC_ERR"
+SN_BLOCK="$(printf '%s\n' "$SN" | sed -n '/^  Requirements$/,/^$/p')"
+# The extractor is proved on the card first: the row line is found, so the line after it is read from a real block.
+expect_eq "SENTENCE-2 the row keeps its id, its title and its count on its own line" \
+  "    REQ-1   $(printf '%-30s' 'The flock keeps one list')  ACs 1" "$(printf '%s\n' "$SN_BLOCK" | /usr/bin/grep '^    REQ-1 ')"
+expect_eq "SENTENCE-2b …and the line under it is the requirement's sentence, indented past the id" \
+  "            ${SN_SHORT}" "$(printf '%s\n' "$SN_BLOCK" | awk '/^    REQ-1 / { getline; print; exit }')"
+SN_R2="$(printf '%s\n' "$SN_BLOCK" | awk '/^    REQ-2 / { on = 1; next } on && /^    REQ-/ { exit } on && NF { print }')"
+expect_eq "SENTENCE-3 a long sentence folds onto more than one line, every line indented past the id" "yes|0" \
+  "$([ "$(printf '%s\n' "$SN_R2" | /usr/bin/grep -c .)" -gt 1 ] && echo yes)|$(printf '%s\n' "$SN_R2" | /usr/bin/grep -vc '^            [^ ]' | tr -d ' ')"
+expect_eq "SENTENCE-3b …and the folded lines are the sentence whole, its source line breaks joined, nothing cut" \
+  "$SN_LONG" "$(printf '%s\n' "$SN_R2" | sed -e 's/^ *//' | paste -sd' ' -)"
+expect_eq "SENTENCE-3c …folded at the card's right edge, past the title and count columns, never inside the title column" "yes" \
+  "$([ "$(cols "$(printf '%s\n' "$SN_R2" | head -1)")" -gt 80 ] && echo yes)"
+expect_empty "SENTENCE-3d …and no line of the card exceeds the width, the out-of-project artifact path aside" \
+  "$(over_budget "$(printf '%s\n' "$SN" | /usr/bin/grep -v '^    requirements  ')")"
+expect_eq "SENTENCE-3e the second row keeps its own line too, its count in the same column" \
+  "    REQ-2   $(printf '%-30s' 'Short title')  ACs 2" "$(printf '%s\n' "$SN_BLOCK" | /usr/bin/grep '^    REQ-2 ')"
+# THE TSV KIND DRAWS THE SAME TWO LINES from a fourth cell, and a three-cell row draws its one line as before.
+printf 'REQ-1\tThe flock keeps one list\t1\t%s\nREQ-2\tShort title\t2\t%s\n' "$SN_SHORT" "$SN_LONG" | card requirement > "${CARD_SANDBOX}/sn-tsv.txt"
+printf '%s\n' "$SN_BLOCK" | sed -e '/^$/d' > "${CARD_SANDBOX}/sn-whole.txt"
+expect_true "SENTENCE-4 the whole card's block is byte-identical to the same rows fed as TSV with their sentences" \
+  cmp -s "${CARD_SANDBOX}/sn-tsv.txt" "${CARD_SANDBOX}/sn-whole.txt"
+expect_eq "SENTENCE-4b a three-cell TSV row draws its one line and nothing under it" \
+  "  Requirements
+    REQ-2   $(printf '%-30s' 'Short title')  ACs 2" "$(printf 'REQ-2\tShort title\t2\n' | card requirement)"
+whole_card step1 "$SN_REQ" explain REQ-2; SN_E="$WC_OUT"
+expect_eq "SENTENCE-5 explain keeps the provenance and the criteria" "PROV-BETA|A second criterion" \
+  "$(printf '%s\n' "$SN_E" | /usr/bin/grep -o 'PROV-BETA' | head -1)|$(printf '%s\n' "$SN_E" | /usr/bin/grep -o 'A second criterion' | head -1)"
+
+# The planted cases: the same file, one requirement's sentence taken away, then one given a backticked token.
+SN_NONE="${CARD_SANDBOX}/wave-11-flock.requirements.md"
+awk -v s="$SN_SHORT" '$0 != s { print }' "$SN_REQ" > "$SN_NONE"
+expect_eq "SENTENCE-6 precondition: the planted file lost exactly the one sentence line" "1" \
+  "$(( $(/usr/bin/grep -c . "$SN_REQ") - $(/usr/bin/grep -c . "$SN_NONE") ))"
+whole_card step1 "$SN_NONE"
+expect_eq "SENTENCE-6a a requirement with no opening paragraph is refused: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
+expect_contains "SENTENCE-6b …naming the requirement and what it lacks" \
+  "REFUSED — requirement REQ-1: no sentence before its provenance: line" "$WC_ERR"
+expect_eq "SENTENCE-6c …and naming only that one" "1|0" \
+  "$(printf '%s\n' "$WC_ERR" | /usr/bin/grep -c 'REQ-1')|$(printf '%s\n' "$WC_ERR" | /usr/bin/grep -c 'REQ-2')"
+whole_card step1 "$SN_NONE" explain REQ-2
+expect_eq "SENTENCE-6d …and the sub-view is refused with it" "1|" "$WC_RC|$WC_OUT"
+SN_TICK="${CARD_SANDBOX}/wave-12-flock.requirements.md"
+sed -e 's/^silently lost in the merge\.$/silently lost in `merge_lists`./' "$SN_REQ" > "$SN_TICK"
+expect_eq "SENTENCE-7 precondition: the planted file carries the backtick in REQ-2's paragraph" "1" \
+  "$(/usr/bin/grep -c '`merge_lists`' "$SN_TICK" | tr -d ' ')"
+whole_card step1 "$SN_TICK"
+expect_eq "SENTENCE-7a a sentence carrying a backtick is refused: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
+expect_contains "SENTENCE-7b …naming the requirement and the sentence whole" \
+  'REFUSED — requirement REQ-2: the sentence carries a backtick: Two people who edit the same list while apart both keep their edits when their phones meet again, and each of them is told which edits came from the other phone, so nothing they typed is ever silently lost in `merge_lists`.' "$WC_ERR"
+# A provenance line before the paragraph is not the opening: the sentence is the paragraph BEFORE provenance.
+SN_LATE="${CARD_SANDBOX}/wave-13-flock.requirements.md"
+awk -v s="$SN_SHORT" '$0 == s { held = 1; next } { print } held && /^provenance:/ { print ""; print s; held = 0 }' "$SN_REQ" > "$SN_LATE"
+whole_card step1 "$SN_LATE"
+expect_contains "SENTENCE-8 a paragraph after the provenance line does not open the requirement: refused" \
+  "REFUSED — requirement REQ-1: no sentence before its provenance: line" "$WC_ERR"
+# One refusal names every offender, a title over the cap beside a missing sentence.
+SN_BOTH="${CARD_SANDBOX}/wave-14-flock.requirements.md"
+sed -e "s/^### REQ-2 — Short title/### REQ-2 — ${T31}/" "$SN_NONE" > "$SN_BOTH"
+whole_card step1 "$SN_BOTH"
+expect_eq "SENTENCE-9 a missing sentence and a long title are named in the one refusal" "1|2" \
+  "$WC_RC|$(printf '%s\n' "$WC_ERR" | /usr/bin/grep -c '^REFUSED — requirement ')"
 
 # ============================================================
 section "§DESIGN-TITLES: a decision carries a title of at most 30 characters, and the Risks section is drawn whole"
