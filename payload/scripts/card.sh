@@ -156,7 +156,9 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
     decision)
       CARD_SECTION="Decisions"
       CARD_HDRCOLS="2:serves 3:ADR"
-      CARD_FMT_1='    %-4s %-30s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1 ;;
+      # The fifth cell is the decision's sentence, drawn under the row as a requirement's is.
+      CARD_FMT_1='    %-4s %-30s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1
+      _card_sentence_line ;;
     ownership)
       CARD_SECTION="Ownership"
       # `surfaces ` moves out of the literal and into the folding cell's value
@@ -712,7 +714,7 @@ function cells(line, arr,   n, i) {
   gsub(/\\\|/, "\001", line)
   sub(/^[ \t]*\|/, "", line); sub(/\|[ \t]*$/, "", line)
   n = split(line, arr, "|")
-  for (i = 1; i <= n; i++) { gsub(/\001/, "|", arr[i]); arr[i] = clean(arr[i]) }
+  for (i = 1; i <= n; i++) { gsub(/\001/, "|", arr[i]); craw[i] = trim(arr[i]); arr[i] = clean(arr[i]) }
   return n
 }
 function err(m) { if (ERRMSG == "") ERRMSG = m }
@@ -731,9 +733,11 @@ function flush_req() {
   rid = ""; rtext = ""; rprov = ""; racs = 0; rcrit = ""; rcur = ""; rsent = ""; rsentdone = 0
 }
 # THE TITLE OF A DECISION IS ITS LEADING BOLD SPAN, `**D<n> — <title>**` (a bold span without the label
-# is the title as it stands); a bullet with no bold span opens on its first sentence. The rest of the
-# bullet, up to the (D<n>; REQ-...) group, is the detail `explain` prints.
-function flush_dec(   line, id, serves, title, detail) {
+# is the title as it stands); a bullet with no bold span opens on its first sentence, which is its title.
+# The first sentence after the title is the decision\047s concept, the row\047s fifth cell, drawn under the
+# row; the rest of the bullet, up to the (D<n>; REQ-...) group, is the detail `explain` prints. The
+# sentence keeps its backticks, because a backtick is what the card refuses in it.
+function flush_dec(   line, id, serves, title, detail, sent) {
   if (dbuf == "") return
   line = dbuf; dbuf = ""
   if (match(line, /\(D[0-9]+;[^)]*\)/)) {
@@ -747,16 +751,17 @@ function flush_dec(   line, id, serves, title, detail) {
       detail = substr(line, RLENGTH + 1)
     } else {
       gsub(/\*\*/, "", line)
-      title = firstsent(clean(line)); detail = clean(line)
+      title = firstsent(line); detail = substr(line, length(title) + 1)
     }
     gsub(/\*\*/, "", detail)
     title = clean(title)
     sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", title)
     sub(/\.$/, "", title)
-    detail = clean(detail)
+    gsub(/\t/, " ", detail); detail = trim(detail)
     while (detail ~ /^(\.|:|—|--)/) { sub(/^(\.|:|—|--)[ \t]*/, "", detail) }
-    print "DROW" OFS id OFS title OFS clean(serves)
-    print "DDET" OFS id OFS detail
+    sent = firstsent(detail); detail = substr(detail, length(sent) + 1)
+    print "DROW" OFS id OFS title OFS clean(serves) OFS trim(sent)
+    print "DDET" OFS id OFS clean(detail)
     return
   }
   # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT: the section parses one shape, and a bullet out of it
@@ -908,6 +913,11 @@ sec == "tasks" && /^[ \t]*\|/ {
   print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv
   next
 }
+# THE APPROACH CELL IS THE REQUIREMENT\047S PROOF IN ONE PLAIN LINE, the same on every row of the requirement:
+# the card prints it once per requirement, so a second approach on a later row would never reach the card, and
+# a backticked token is an identifier where the cell is the proof said in plain words. Both are refused here,
+# naming the row by its requirement and criterion; the width is measured in columns by the loader, which owns
+# the width library, from the first row of each requirement (`EAPP`).
 sec == "eval" && /^[ \t]*\|/ {
   erow++
   if (erow <= 2) next
@@ -915,6 +925,12 @@ sec == "eval" && /^[ \t]*\|/ {
   if (n < 4) next
   r = c[1]
   ncrit++; crow[ncrit] = r OFS c[3] OFS c[4] OFS c[5] OFS c[6]
+  if (verb == "step2") {
+    erowid = c[3]; sub(/[ \t].*$/, "", erowid); erowid = "Eval design row " r " " erowid
+    if (craw[2] ~ /`/) err(erowid ": the Approach cell carries a backtick: " craw[2])
+    else if ((r in eapp) && eapp[r] != c[2]) err(erowid ": a second approach for " r ": " c[2] " (the first: " eapp[r] ")")
+    if (!(r in eapp)) print "EAPP" OFS erowid OFS c[2]
+  }
   if (!(r in eapp)) { eapp[r] = c[2]; enum++; eord[enum] = r }
   ecnt[r, c[4]]++
   tot[c[4]]++
@@ -996,7 +1012,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
   WCARD_RDET=(); WCARD_DDET=()
   WCARD_ADRK=(); WCARD_ADRV=()
-  local out line key rest k v
+  local out line key rest k v wide=""
   out="$(awk -v verb="$1" "$_CARD_AWK" "$2" 2>/dev/null)" || {
     WCARD_ERR="the artifact could not be parsed"; return 1; }
   while IFS= read -r line; do
@@ -1026,10 +1042,18 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
       OROW) WCARD_OROW[${#WCARD_OROW[@]}]="$rest" ;;
       EROW) WCARD_EROW[${#WCARD_EROW[@]}]="$rest" ;;
       TROW) WCARD_TROW[${#WCARD_TROW[@]}]="$rest" ;;
+      EAPP) [ -n "$wide" ] || {
+              _bionic_cols_into "${rest#*"$CARD_TAB"}"
+              [ "$BIONIC_COLS" -le "$CARD_APPROACH_CAP" ] \
+                || wide="${rest%%"$CARD_TAB"*}: the Approach cell is ${BIONIC_COLS} columns, the cap is ${CARD_APPROACH_CAP}: ${rest#*"$CARD_TAB"}"
+            } ;;
       ADR)  WCARD_ADRK[${#WCARD_ADRK[@]}]="${rest%%"$CARD_TAB"*}"
             WCARD_ADRV[${#WCARD_ADRV[@]}]="${rest#*"$CARD_TAB"}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  # AN APPROACH OVER THE CAP IS THE ARTIFACT'S DEFECT, refused as the parse's own are; a parse error the awk
+  # found was returned above, so it is the one named when the spec carries both.
+  [ -z "$wide" ] || { WCARD_ERR="$wide"; return 1; }
   # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
   # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole
   # `writers=` field. The card's own awk used to cut the first SUBSTRING `writers=`, so
@@ -1064,6 +1088,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # requirement heading and a decision are titled by their heading, so their text is the title as
 # the parse hands it over.
 CARD_TITLE_CAP=30
+# The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
+CARD_APPROACH_CAP=60
 
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
   local t="${2:-}"
@@ -1101,6 +1127,7 @@ _card_title_refusals() {  # <step1|step2|step3> — sets CARD_TITLE_BAD to one R
       for row in ${WCARD_DROW[@]+"${WCARD_DROW[@]}"}; do
         _card_split "$row"
         _card_title_check decision "${CARD_CELLS[0]}" "${CARD_CELLS[1]:-}"
+        _card_sentence_check decision "${CARD_CELLS[0]}" "${CARD_CELLS[3]:-}" "after its title"
       done ;;
     step3)
       for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
@@ -2001,7 +2028,8 @@ _card_step2() {  # <artifact path>
   CARD_ROWS=()
   local r
   for r in ${WCARD_DROW[@]+"${WCARD_DROW[@]}"}; do
-    CARD_ROWS[${#CARD_ROWS[@]}]="${r}${CARD_TAB}$(_card_adr_for "${r%%"$CARD_TAB"*}")"
+    _card_split "$r"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}${CARD_CELLS[1]:-}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_adr_for "${CARD_CELLS[0]}")${CARD_TAB}${CARD_CELLS[3]:-}"
   done
   _card_render_batch decision
   printf '\n'
@@ -2131,7 +2159,7 @@ _card_step2_explain() {  # <D-id or number>
     for row in ${WCARD_DDET[@]+"${WCARD_DDET[@]}"}; do
       _card_split "$row"
       [ "${CARD_CELLS[0]}" = "$key" ] || continue
-      _card_fold_at 4 "${CARD_CELLS[1]:-}"
+      [ -z "${CARD_CELLS[1]:-}" ] || _card_fold_at 4 "${CARD_CELLS[1]}"
     done
     _card_labelled 4 serves "$serves" 12
     _card_labelled 4 adr "$(_card_adr_for "$key")" 12
