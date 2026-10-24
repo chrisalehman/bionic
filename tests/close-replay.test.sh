@@ -21,9 +21,16 @@
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
 #            and every hand write in the log is one a person, an agent or the harness writes in a real run, and the log
 #            is valid UTF-8 throughout, so every reader reads the whole of it
+#   §SINGLE  the rehearsal's single-rigor state (`rehearse single-verify`, on door.sh's `door_world_single`) stands at
+#            current: 5 with the build's criterion discharged and its auditor cell empty, its log naming the verbs that
+#            brought it there and no discharge: the bed a single-rigor review's verdicts are carried on
 #
-# ONE SANDBOX, READ BY EVERY SECTION: `rehearse delivered` builds it once, under WORLD_ROOT; each command it ran is
-# in its rehearsal.log, the replay's own commands after the `# replay:` line.
+# NAMED, NOT COUNTED: the rows reading the replay's part (CL-8, VB-1, VB-2) name each verb the replay runs and each kind
+# of hand write it makes, so a log that lost one of them is red however long it is.
+#
+# ONE SANDBOX, READ BY EVERY SECTION BUT §SINGLE: `rehearse delivered` builds it once, under WORLD_ROOT; each command
+# it ran is in its rehearsal.log, the replay's own commands after the `# replay:` line. §SINGLE builds its own, beside
+# it, in a subshell of its own, so nothing it sets reaches the replay's readers.
 #
 # FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's repository carrying the plugin's hooks and scripts and the
 # release check's closure; every state past the plan's Step-3 prose is a command's. What `rehearse` writes by hand
@@ -35,7 +42,7 @@
 #
 # EXPECTED TIME: about seven minutes when the replay reaches delivered: (the rehearsal to failed-review, two release
 # check verb calls among them, is four and a half; the replay's own release check call is two more), about four and a
-# half when it stops at the fix row's landing.
+# half when it stops at the fix row's landing; §SINGLE's rehearsal, the build and Step 5 alone, about a minute more.
 #
 # Usage: bash tests/close-replay.test.sh
 
@@ -69,6 +76,34 @@ cr_rc() { awk -v l="  (${1}, " 'index($0, l) && match($0, /^  rc=[0-9]+/) { prin
 cr_rcs() { cr_part | sed -n 's/^  rc=\([0-9][0-9]*\)  (\(.*\), [0-9][0-9]* s)$/\1|\2/p'; }
 # cr_marks <tag> -> the text of each `# <tag>: ` line in the replay's part
 cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0, length(t) + 1) }'; }
+# The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
+# the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
+# length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
+CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|session-poker.sh launch-sync|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh deliver|close-out.sh run'
+# The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
+CR_HANDS='launch code record typed'
+# cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
+# (`*.sh`) or gh, its words every bare lowercase word after it (a path, a hash, a row id or a flag is none), and
+# <rc> the exit on the `  rc=` line that closes the command's block. A command naming no tool prints nothing.
+cr_names() {
+  awk 'function out() { if (nm != "") print rc "|" nm; nm = ""; rc = "" }
+    /^\$ / { out(); t = ""; v = ""
+      for (i = 2; i <= NF; i++) {
+        if (t == "") { if ($i ~ /\.sh$/ || $i ~ /(^|\/)gh$/) { t = $i; sub(/.*\//, "", t) }; continue }
+        if ($i ~ /^[a-z][a-z-]*$/) v = v " " $i
+      }
+      nm = t v; next }
+    /^  rc=[0-9]+  \(/ { if (nm != "") { rc = $1; sub(/^rc=/, "", rc); out() } }
+    END { out() }'
+}
+# cr_held <a|b|...> -> of the names given, `|`-joined in their order, each that a line on stdin is or begins with
+# (the name and a blank): the list again when every one is held
+cr_held() {
+  awk -v w="$1" 'BEGIN { n = split(w, want, "|") } { have[NR] = $0 }
+    END { for (i = 1; i <= n; i++) for (j = 1; j <= NR; j++)
+            if (have[j] == want[i] || index(have[j], want[i] " ") == 1) { printf "%s%s", s, want[i]; s = "|"; break }
+          print "" }'
+}
 # cr_out <label> -> the output the log holds for the command carrying that label (the last such command)
 cr_out() {
   awk -v l="  (${1}, " '
@@ -162,8 +197,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
   expect_eq "CL-7 close-out prints its hand-holds line" "yes" "$([ -n "$CL_HH" ] && echo yes)"
   expect_contains "CL-7b …and it counts none" "hand-holds: total=0 " "$CL_HH"
   CL_CMDS="$(cr_part | /usr/bin/grep '^\$ ')"
-  expect_eq "CL-8 the replay's part of the log holds the commands it ran" "yes" \
-    "$([ "$(printf '%s\n' "$CL_CMDS" | /usr/bin/grep -c .)" -ge 10 ] && echo yes)"
+  expect_eq "CL-8 the replay's part of the log holds a command for each verb the replay runs, named" "$CR_VERBS" \
+    "$(cr_part | cr_names | cut -d'|' -f2- | cr_held "$CR_VERBS")"
   expect_eq "CL-8b …none a hand landing, a hand merge, a step set back or a waiver, and no hand write of the plan's prose" "" \
     "$(printf '%s\n' "$CL_CMDS" | /usr/bin/grep -E -- '--by-hand|session-poker\.sh current [0-7]( |$)|session-poker\.sh waive |git .*(fetch|merge|update-ref)'; cr_marks 'by hand' | /usr/bin/grep '^\[prose\]')"
 fi
@@ -175,12 +210,14 @@ section "§VERBS: every refusal the replay met names the verb that writes the ce
 # or the named verb, or the refused call after it, exits non-zero.
 if cr_reached "VB-0"; then
   VB_RCS="$(cr_rcs)"
-  expect_eq "VB-1 the replay's part logs each command's exit" "yes" \
-    "$([ "$(printf '%s\n' "$VB_RCS" | /usr/bin/grep -c '^0|')" -ge 10 ] && echo yes)"
+  expect_eq "VB-1 the replay's part logs an exit 0 for each verb the replay runs, named" "$CR_VERBS" \
+    "$(cr_part | cr_names | sed -n 's/^0|//p' | cr_held "$CR_VERBS")"
   expect_eq "VB-1b …and every non-zero exit is a refusal the replay followed" "" \
     "$(printf '%s\n' "$VB_RCS" | awk -F'|' '$1 != 0 { print $2 }' | while IFS= read -r l; do
         cr_marks refused | /usr/bin/grep -q -F -- "$l · names: " || printf '%s\n' "$l"; done)"
-  expect_eq "VB-2 the replay's marks are read: its hand writes are there" "yes" "$([ -n "$(cr_marks 'by hand')" ] && echo yes)"
+  expect_eq "VB-2 the replay's marks are read: a hand write of each kind the replay makes, named ($CR_HANDS)" \
+    "$(printf '%s' "$CR_HANDS" | tr ' ' '|')" \
+    "$(cr_marks 'by hand' | sed -n 's/^\[\([a-z]*\)\] .*/\1/p' | cr_held "$(printf '%s' "$CR_HANDS" | tr ' ' '|')")"
   expect_eq "VB-2b …and every refusal names a verb of $RH_FOLLOW_VERBS" "" \
     "$(cr_marks refused | while IFS= read -r m; do v="${m##* · names: }"
         case " $RH_FOLLOW_VERBS " in (*" $v "*) : ;; (*) printf '%s\n' "$m" ;; esac; done)"
@@ -289,6 +326,38 @@ if [ -f "$CR_ROOT/.bionic/config.yaml" ] && [ -s "$CR_LOG" ]; then
     "0" "$(/usr/bin/iconv -f UTF-8 -t UTF-8 "$CR_LOG" >/dev/null 2>&1; echo $?)"
 else
   expect_eq "RE-0 the sandbox and its log were built, so this section can be read" "built" "not built"
+fi
+
+# ============================================================
+section "§SINGLE: the single-rigor run reaches the Verify gate with no discharge"
+# ============================================================
+# fails-when: the rehearsal's single-rigor state does not build, its plan is not at rigor: single, it does not stand at
+# current: 5 with the build's criterion discharged, the auditor cell holds a verdict, or its log runs discharge.
+SG_DIR="$WORLD_ROOT/single-verify"; SG_RC=0; SG_PLAN=""
+if [ "$CR_LOADED" = 1 ]; then
+  SG_PLAN="$(rehearse single-verify "$SG_DIR" 2> "$WORLD_ROOT/single-verify.err")" || SG_RC=$?
+else
+  SG_RC=127
+fi
+expect_eq "SG-1 the single-rigor rehearsal reaches its state (rehearse exit 0, its plan printed)" "0|yes" \
+  "$SG_RC|$([ -n "$SG_PLAN" ] && [ -f "$SG_PLAN" ] && echo yes)"
+if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
+  expect_eq "SG-2 the plan is the single-rigor fixture's: its frontmatter says rigor: single" "single" \
+    "$(awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print }' "$SG_PLAN")"
+  expect_eq "SG-3 the run stands at the Verify gate: current: 5, the Step 5 line written" "5|yes" \
+    "$(sed -n 's/^current:[[:space:]]*//p' "$SG_PLAN" | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
+  # The matrix row as the table holds it: status and auditor cells, so the empty auditor is read beside a status.
+  expect_eq "SG-4 the build's criterion is discharged by status, and its auditor cell is still empty (—)" "discharged|—" \
+    "$(awk -F'|' '$2 ~ /^ *AC-1\.1 *$/ { s = $4; a = $6; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", a); print s "|" a }' "$SG_PLAN")"
+  SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
+  expect_eq "SG-5 the log names the verbs that brought it there" \
+    "session-poker.sh matrix-render|session-poker.sh matrix-set|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
+    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|session-poker.sh matrix-set|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
+  expect_eq "SG-5b …and discharge is not among them" "" \
+    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh discharge')"
+else
+  printf '    the single-rigor rehearsal stopped; rehearse said:\n'
+  sed 's/^/    | /' "$WORLD_ROOT/single-verify.err" 2>/dev/null | cut -c1-400 | tail -12
 fi
 
 finish
