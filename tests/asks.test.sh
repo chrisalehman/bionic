@@ -607,4 +607,37 @@ expect_eq "AN-13 …the register holds the finding open, answered carry, its eve
 expect_contains "AN-13b …and the plan carries its moved: line naming the row" "moved: $RF_CR#2 to=carried row=T2 by=Dana Fixture at=" "$(cat "$PF")"
 POKE_BOUND="$AS_BOUND_WAS"
 
+# ============================================================
+section "§SWEEP: the Stop that ends a turn closes every open step ask once the plan carries approved-by:"
+# ============================================================
+# A card render opens a step's ask only while the approval is owed (card.test.sh §SETTLED); this is the other half of
+# one fact, one reading: the sweep at the person's turn end closes whatever the cards left open once the plan records
+# the approval, all four steps at once. fails-when: a step ask stays open past the Stop of an approved run, or the
+# sweep closes asks of a plan that is not approved.
+SW_KEYS="approve:step0 approve:step1 approve:step2 approve:step3"
+sw_open() {  # <root> <plan> -> the sweep's own asks the run's register holds open
+  as_register "$1" "$2" | tr ' ' '\n' | /usr/bin/grep '^approve:step' | tr '\n' ' ' | sed 's/ $//'
+}
+sw_plan() {  # <label> <approved 0|1> -> the path of a Step-4 plan, bound, the four step asks open on its register
+  local r p k
+  r="$(make_repo "$1")"; new_roster "$r"
+  p="$(SP_APPROVED_LINE="$([ "$2" = 1 ] && echo 'approved-by: Dana Fixture 2026-10-21T12:00:00Z "approved"')" \
+    s47_plan "$r" 8 "| T1 | 4 | build | a work row | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
+  bound_marker "$r" "$SID" "$p"
+  for k in $SW_KEYS; do OWED_PLAN="$p" as_owed "$r" sw-sid owed_open "$k" "approval: $k" "Do you approve?" >/dev/null; done
+  printf '%s' "$p"
+}
+SW_N="$(sw_plan sweepnot 0)"; SW_NR="${SW_N%%/.bionic/*}"
+expect_eq "SW-0 precondition: the four step asks are open on the run's register (the extractor reads them)" \
+  "$SW_KEYS" "$(sw_open "$SW_NR" "$SW_N")"
+s31_stop "$SW_NR" "$(s31_transcript "$SW_NR" "carry on")"
+expect_eq "SW-1 a Stop over a plan with no approved-by: closes none of them" "$SW_KEYS" "$(sw_open "$SW_NR" "$SW_N")"
+SW_Y="$(sw_plan sweepyes 1)"; SW_YR="${SW_Y%%/.bionic/*}"
+expect_eq "SW-2 precondition: the approved plan carries approved-by: and the same four asks are open" \
+  "1|$SW_KEYS" "$(/usr/bin/grep -c '^approved-by:' "$SW_Y")|$(sw_open "$SW_YR" "$SW_Y")"
+s31_stop "$SW_YR" "$(s31_transcript "$SW_YR" "carry on")"
+expect_eq "SW-3 the Stop over a plan carrying approved-by: closes all four at once" "" "$(sw_open "$SW_YR" "$SW_Y")"
+expect_contains "SW-3b …the register recording the sweep as the closer" "|key=approve:step3|state=closed|by=plan approved-by|" \
+  "$(cat "$SW_YR/.bionic/docs/record/wave-01-fixture/asks.state" 2>/dev/null)"
+
 finish

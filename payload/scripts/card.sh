@@ -2370,6 +2370,30 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
   printf '%s' "${b%.*}"
 }
 
+# WHETHER THE APPROVAL IS ALREADY RECORDED. A card is a question only while its answer is owed: a step
+# below the plan's `current:` was answered to get past it, and `approved-by:` is the person's answer to the
+# plan, which the Stop's sweep takes for every step. A dispatched writer checking its exit asks nobody
+# anything, so a render under a writer's name owes nothing either. The writer is told where the renderer
+# stands, as the gate tells it: the `bionic-agent` marker in the git directory of the linked tree it runs
+# in. The artifact's directory is not asked, because a bound plan resolves under the project's root and a
+# writer's tree never holds it. The agent name in the environment is not asked either: a suite run through
+# the runner inherits it, and a fixture's card would then open nothing for any writer who ran that suite.
+# A render that reopened any of these put "Blocked on you" on the sitrep for an answer already given.
+_card_writer() {  # -> 0 when the working tree is a linked tree marked with a dispatched writer's name
+  local out common gitdir
+  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
+  { IFS= read -r common; IFS= read -r gitdir; } <<< "$out"
+  [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
+}
+_card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
+  local step
+  _card_writer && return 0
+  fill_current_forget
+  fill_plan_approved "$2" && return 0
+  step="$(fill_step_token "$2")"
+  [ -n "$step" ] && [ "$1" -lt "$step" ] 2>/dev/null
+}
+
 _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   local n="$1" sid="${CLAUDE_CODE_SESSION_ID:-}" art root plan m q t
   [ -n "$sid" ] && [ -n "${2:-}" ] || return 0
@@ -2383,6 +2407,7 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   if [ "$art" != "$plan" ]; then
     case "$n" in 1|2) [ "$(_card_stem "$art")" = "$(_card_stem "$plan")" ] || return 0 ;; *) return 0 ;; esac
   fi
+  _card_settled "$n" "$plan" && return 0
   declare -F owed_open >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null || return 0
   case "$n" in
     0) q="$CARD_Q_STEP0"; t="approval: Step 0 configuration" ;;
