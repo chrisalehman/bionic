@@ -10,7 +10,7 @@ loading: deferred
 
 The situation report is one card: the handful of facts that change what you do next. The verb gathers the facts into a sheet. Code draws every row that is a fact: the head, the Task list, the Metrics table, one counted line of the asks that wait on events, Blocked on you, and the predicted close's time and basis. You write only the judgment, seven lines, and the card verb checks them against the sheet before it prints anything.
 
-Typed as `/bionic:sitrep` with no argument, it reports on this session's bound run. With an argument, it reports on the plan named (absolute, project-relative or docs-root-relative). Pass that plan as `[<plan>]` to both verbs below.
+Typed as `/bionic:sitrep`, it reports on this session's bound run and nothing else: a sitrep is about the run you are in.
 
 `<plugin-root>` below is the plugin's root, two directories above this skill's own.
 
@@ -19,10 +19,10 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
 1. Run the verb and read the fact sheet:
 
    ```bash
-   bash <plugin-root>/hooks/session-poker.sh sitrep [<plan>]
+   bash <plugin-root>/hooks/session-poker.sh sitrep
    ```
 
-   The sheet is input for you; never show it, quote it or summarize it to the user. A refusal (no plan bound, no plan at the path) is the answer: say it in one line and stop.
+   The sheet is input for you; never show it, quote it or summarize it to the user. A refusal (no plan bound) is the answer: say it in one line and stop.
 
 2. Before you write, weigh these six questions against the sheet. Each fact states what it measures, its unit and its source after its value: read that before you use a number, and compare only measurements that share a unit. A task's sized minutes are never wall clock, so never set them against a clock time or an elapsed time.
    - **Pace.** Is the work running on pace? Compare `pace.work-landed` with `pace.time-used`: the share of the work landed against the share of the forecast time used. Then compare `close.predicted` with the end in `clock.forecast`, and say why it moved: slower work, or work added (`work.added`).
@@ -39,10 +39,10 @@ Typed as `/bionic:sitrep` with no argument, it reports on this session's bound r
    - **D**: at risk of missing the close or shipping something wrong.
    - **F**: stopped.
 
-4. Write the judgment, in plain words and nothing else: the card draws the Task list, the Metrics and the rest, so you write no row for them. Pipe it to the card verb's stdin, one tagged line each, and pass the plan last when you named one:
+4. Write the judgment, in plain words and nothing else: the card draws the Task list, the Metrics and the rest, so you write no row for them. Pipe it to the card verb's stdin, one tagged line each:
 
    ```bash
-   bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] <<'JUDGMENT'
+   bash <plugin-root>/hooks/session-poker.sh sitrep card <<'JUDGMENT'
    purpose: The card gets short enough to act on at a glance; on course, the build done and green.
    call: Rule on the failed structure review: the merge into main waits on it.
    grade: B
