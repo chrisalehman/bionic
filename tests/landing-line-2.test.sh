@@ -866,8 +866,8 @@ expect_eq "(ln2) AC-16.2 a tracked docs path and a .bionic/tmp path in a script,
 # registered as `proof-add review` writes them: A at H1 names s.txt:1 and T1 is born of it; B at H2 names s.txt:3, the
 # same line moved down two; C at H2 names s.txt:1, a line H1 did not have; E at H1 names s.txt:3. The register is
 # opened by `disposition`, E is carried to T1 by `finding-move`, and T1 lands through ready on a.test.sh. The plan's
-# Eval design names tests/a.test.sh for AC-1.1 and AC-1.2, the matrix is rendered by `matrix-render`, and AC-1.2's row
-# reads waived.
+# Eval design names tests/a.test.sh for both of its criteria, the matrix is rendered by `matrix-render`, and the second
+# criterion's row reads waived.
 ll_settle_rev() {  # <record dir> <name> <base> <head> <path:line> — a failing review naming one finding at that site
   printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off %s the line is wrong\nshown: 1 cat %s\n' \
     "$3" "$4" "$5" "${5%%:*}" > "$1/$2.md"
