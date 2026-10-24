@@ -157,6 +157,19 @@ Close-out renders this part from the plan's review and waiver lines, in the orde
 - No verb writes a design-ledger ruling, the plan's `approved-by:` line, an Eval design row or a requirement edit, so this
   run wrote them by hand, 14 hand-edit lines at the time of this entry, each named with its time. (`assumptions.md` Hand edits)
 - The Known limits of 1.26.0 that this run did not touch stand as they are written in that entry.
+- The critic's review of the whole (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`) deferred twelve S3 findings, each a limit of this release, listed here in the sentence the record states:
+- The card check admits a goal state the sheet denies in words: a purpose saying a goal is met draws over a goal the sheet reads not measured. (`critic-adversarial.md#2`)
+- The card check refuses a true label whose digits match no sheet value, such as a wave or requirement number, or the thirty seconds and forty rows of the goal itself. (`critic-adversarial.md#3`)
+- A number some sheet value holds passes beside a word no sheet line sets, so a judgment line can state a figure the sheet never measured. (`critic-adversarial.md#4`)
+- The state and call checks are fixed word lists, and a synonym walks past them: a task called complete, or a call saying all clear. (`critic-adversarial.md#5`)
+- On a real spec, explain of a decision prints only its title, serves and ADR: the parser drops the detail written after the decision group. (`critic-adversarial.md#6`)
+- A title is cut at an abbreviation: a first sentence holding an abbreviation such as vs. is cut there instead of refused. (`critic-adversarial.md#7`)
+- Asks that wait on events still drive the close waits-on-you fact and the Waste row of the Metrics, and the skill folds that fact into the close line. (`critic-adversarial.md#8`)
+- A finding carried to a row is not read as fixed when the row lands, and a carry to a row already landed or dropped never closes on the register. (`critic-adversarial.md#9`)
+- The task-list rule that a row added by task-add gets its entry the same turn is stated nowhere after the step text was tightened. (`critic-structure.md#2`)
+- The explain verb on a decision prints no detail on a real spec; the pin places the detail where no real spec writes it. (`critic-evidence.md#3`)
+- The approved mock-up is in no record: the golden of the mock-up card is the code own output, and under forty rows is the pin count of a card that prints 54 lines. (`critic-evidence.md#4`)
+- The thirty-second sitrep is a human measure that waits on the user typing it; nothing in the run proves it yet. (`critic-evidence.md#5`)
 
 ### The landing numbers
 
