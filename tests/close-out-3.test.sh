@@ -817,4 +817,39 @@ expect_eq "REG-2 …which prints the whole suite red at the whole run's head, th
   "$(pah_cont_state "$PAH_P/$CONT_REL")|$(/usr/bin/grep -qF "the regression: whole suite red at ${PAH_F:0:8}, 2 landings before this head (proved 2026-10-04T12:00:00Z, record/wave-01-fixture/regression-run-$PAH_F.log)" "$PAH_P/$CONT_REL" && echo yes)"
 expect_absent "REG-3 …and never says the whole run holds" "holds at" "$(/usr/bin/grep -F 'the regression: ' "$PAH_P/$CONT_REL")"
 
+# ============================================================
+section "§SCORE: the continuation's scorecard is the landing report's, read off the run's register of asks"
+# ============================================================
+# Close-out formats no number of its own: its `## Scorecard` lines are `landing-report --scorecard` over the same
+# record, and that verb reads the human stops and the human-wait minutes off the register's rounds after the plan's
+# approved-by: instant.
+# FIXTURE FIDELITY: this suite's Step-8 project, whose plan is approved at 2026-09-14T00:00Z; the rounds are opened and
+# closed through lib/owed.sh's own writers for the plan, at instants the poker's clock seam fixes. Every round is closed,
+# so the reading does not move between the two verbs' clocks.
+# ANTI-VACUITY: SCR-1 reads the verb's two lines as the register's numbers before SCR-2 compares the section with them.
+# fails-when: close-out prints numbers the landing report does not (SCR-2), or the landing report reads them from
+# anything but the register's rounds (SCR-1).
+PSR="$(mk_fixture score-register)"; advance_to "$PSR" 8
+sc_round() {  # <open epoch> <close epoch> <key> -> one round of <key> on the plan's register, opened then closed
+  local e
+  for e in "$1" "$2"; do
+    BIONIC_NOW_EPOCH="$e" OWED_ROOT="$PSR" OWED_SID=score-sid OWED_PLAN="$PSR/$PLAN_REL" \
+      bash -c '. "$1/run.sh" && . "$1/owed.sh" && if [ "$2" = "$3" ]; then owed_open "$4" "fixture: $4" "reply to $4"; else owed_close "$4" fixture; fi' \
+      _ "$REPO_ROOT/payload/scripts/lib" "$e" "$1" "$3"
+  done
+}
+SC_T0=1789344000   # 2026-09-14T00:00:00Z, the plan's approved-by: instant
+sc_round $((SC_T0 - 3600)) "$SC_T0" approve:step3                   # before the approval: no stop
+sc_round $((SC_T0 + 3600)) $((SC_T0 + 4800)) decide:D1              # 20 min
+sc_round $((SC_T0 + 7200)) $((SC_T0 + 7800)) decide:D1              # 10 min, the same decision put again
+sc_round $((SC_T0 + 86400)) $((SC_T0 + 86700)) approve:release      # 5 min
+SC_REG_VERB="$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSR" --scorecard)"
+expect_eq "SCR-1 the landing report reads three stops and 35 minutes off the register's rounds after the approval" \
+  "human stops (autonomous half): 3 · target 1|human-wait minutes: 35 · no target (the user's)" \
+  "$(printf '%s\n' "$SC_REG_VERB" | /usr/bin/grep -E '^human( stops|-wait)' | tr '\n' '|' | sed 's/|$//')"
+BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSR" run
+SC_REG_SECTION="$(awk '/^## / { s = ($0 == "## Scorecard"); next } s && NF && !/^```/ { print }' "$PSR/$CONT_REL" 2>/dev/null)"
+expect_nonempty "SCR-1b precondition: close-out ran (exit $CO_RC) and its continuation has lines under ## Scorecard" "$SC_REG_SECTION"
+expect_eq "SCR-2 close-out's ## Scorecard is the landing report's lines over the same record" "$SC_REG_VERB" "$SC_REG_SECTION"
+
 finish
