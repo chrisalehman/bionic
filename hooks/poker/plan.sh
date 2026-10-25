@@ -1970,6 +1970,20 @@ EOF
          exit 2 ;;
     esac
     plan_verb_swap matrix-set "$MS_AC ${MS_PAIRS[*]}" writer
+    # A STATUS WRITTEN BY HAND IS RECORDED (hand_holds_report counts it as status-writes): one `ev=matrix-set` line in the
+    # landing record naming the criterion and the cells written, appended once the plan write is in. plan_verb_swap exits
+    # before this point when the plan already read so, and every refusal above exits earlier still, so a call that changed
+    # nothing or was refused writes none. The landing's settlement writes the cells through `matrix_row_cells` and never
+    # through this verb, so it is never one. A block key written alone (task) writes no cell and no line.
+    MS_WROTE=""
+    [ "$MS_HAS_S" = 0 ] || MS_WROTE="status"
+    [ "$MS_HAS_E" = 0 ] || MS_WROTE="${MS_WROTE:+$MS_WROTE,}evidence"
+    if [ -n "$MS_WROTE" ]; then
+      _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
+      { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+        && line_event "$PV_PLAN" matrix-set "ac=$MS_AC" "cells=$MS_WROTE" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
+        || say "matrix-set — $MS_AC: the plan is written, but its line in the landing record could not be, so the hand-holds count will miss this write."
+    fi
     say "matrix-set — $MS_AC: ${MS_PAIRS[*]} written to $PV_PLAN; dry-committed first."
     exit 0
   }
