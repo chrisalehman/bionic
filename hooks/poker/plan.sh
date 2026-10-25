@@ -308,6 +308,21 @@ poker_reader_kind() { case "$1" in verify|test|review) return 0 ;; esac; return 
 # its role and `Questions: evidence`, so the dispatch wall's own count in brief.sh holds it to three
 # in total, suites and runs together: the door cannot know which candidate launch was the agent's,
 # so it takes the strict side. A start that recorded no role is judged with none, as before.
+# THE SUITES THAT EXIST, LISTED ONCE PER CALL: the `*.test.sh` basenames under <root>/tests, space-separated, which the
+# dispatch wall's membership arm is handed (lib/brief.sh `brief_validate_fields`, fifth argument). The wall reaches for
+# no directory; this door, like the dispatch hook, is a collector. A root with no suite hands nothing, and the wall
+# then judges no membership.
+# THE ROW'S OWN OLD MEMBERS COUNT AS EXISTING (<held>, when the listing found any suite): they were admitted at its
+# dispatch, and a suite since renamed or deleted must not block an amend that adds a file or a run.
+poker_suites_listed() {  # <root> [<held suites>] -> the names on stdout
+  local f out=""
+  for f in "$1"/tests/*.test.sh; do
+    [ -f "$f" ] && out="${out:+$out }${f##*/}"
+  done
+  [ -z "$out" ] || out="$out ${2:-}"
+  printf '%s' "$out"
+}
+
 amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the verb's exit status
   local aid="$1" prior="$2" tr sub old_sa="" old_runs="" decl lift rc=0 sa new_runs r row pick
   local role="" span us
@@ -327,6 +342,10 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
       die "REFUSED — no row is named or carries the agent id $aid, and no agent $aid ran in this session (no transcript at $sub); nothing was written."
       return 1
     fi
+  fi
+  if [ -n "${AMEND_NARROW:-}" ]; then
+    die "REFUSED — $aid is an agent its start did not place, and it holds no suite set to narrow; add suites with --suites+ here, or amend its dispatched row by name. Nothing was written."
+    return 1
   fi
   if [ -n "$AMEND_FILES" ]; then
     die "REFUSED — $aid is an agent its start did not place, and a Files: contract belongs to its dispatched row; add suites or runs here, or amend that row by name. Nothing was written."
@@ -348,7 +367,7 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
   dp_is_reader "$role" && span="${span}"$'\n'"Questions: evidence"
   lift="$(lift_contract_fields "$span" "$role")"
   POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-  brief_validate_fields "$lift" "$role" "$REPO_REAL" poker_brief_sink || rc=$?
+  brief_validate_fields "$lift" "$role" "$REPO_REAL" poker_brief_sink "$(poker_suites_listed "$REPO_REAL" "$old_sa")" || rc=$?
   if [ "$rc" -ne 0 ]; then
     die "REFUSED — a dispatch carrying these additions for $aid would be refused; nothing was written:"
     printf '%s' "$POKER_BRIEF_WORDS" >&2
@@ -919,6 +938,34 @@ pv_roster_live_name() {
     # THE BUDGET IS THE OLD SET PLUS THE ADDED SUITES, carried into the span as declared, whatever
     # the row's label. `none` is a waiver, and it yields to the first suite actually added.
     AM_DECL="$(poker_union ' ' "$AM_OLD_SA" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
+    # A NARROWING (`--suites=<a,b>`) SETS THE BUDGET TO EXACTLY THOSE, and only members the row holds: a name it does
+    # not hold is a widening, which `--suites+` does. The row's `lands_on=` follows, because a row may land only on
+    # suites it may run (the dispatch wall's own rule), and a narrowing that leaves it landing on none of them is
+    # refused, so a contract is never narrowed into one the wall would have refused at dispatch.
+    AM_NEW_LO=""; AM_OLD_LO=""
+    row_has_key "$AM_ROW" lands_on && AM_OLD_LO="$(line_field "$AM_ROW" lands_on)"
+    if [ -n "${AMEND_NARROW:-}" ]; then
+      AM_NARROW="$(printf '%s' "${AMEND_NARROW:-}" | tr '\n,' '  ')"
+      for AM_N in $AM_NARROW; do
+        case " $AM_OLD_SA " in
+          *" $AM_N "*|*" ${AM_N##*/} "*) : ;;
+          *) die "REFUSED — $AMEND_NAME's row does not hold the suite $(clean "$AM_N"), so naming it would widen the set, and --suites= only narrows; add it with --suites+ $(clean "$AM_N"). Nothing was written."
+             exit 1 ;;
+        esac
+      done
+      AM_DECL="$(poker_union ' ' "$(printf '%s' "$AM_NARROW" | tr ' ' '\n' | sed 's#.*/##' | tr '\n' ' ')")"
+      AM_NEW_LO=""
+      for AM_E in $(printf '%s' "$AM_OLD_LO" | tr ',' ' '); do
+        if bionic_lands_cmd "$AM_E" >/dev/null 2>&1 || [ "$AM_E" = none ]; then
+          AM_NEW_LO="${AM_NEW_LO:+$AM_NEW_LO,}$AM_E"; continue
+        fi
+        case " $AM_DECL " in *" ${AM_E##*/} "*) AM_NEW_LO="${AM_NEW_LO:+$AM_NEW_LO,}$AM_E" ;; esac
+      done
+      if [ -n "$AM_OLD_LO" ] && [ -z "$AM_NEW_LO" ]; then
+        die "REFUSED — this narrowing would leave $AMEND_NAME landing on none of its suites (lands_on=$AM_OLD_LO is outside $AM_DECL); keep one of them in --suites=. Nothing was written."
+        exit 1
+      fi
+    fi
     case " $AM_DECL " in
       *" none "*) [ "$AM_DECL" = none ] \
                     || AM_DECL="$(printf '%s' "$AM_DECL" | tr ' ' '\n' | awk '$0 != "none" && $0 != ""' | tr '\n' ' ')"
@@ -934,7 +981,7 @@ pv_roster_live_name() {
     AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
     POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
     AM_RC=0
-    brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
+    brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink "$(poker_suites_listed "$REPO_REAL" "$AM_OLD_SA")" || AM_RC=$?
     AM_SA="$BRIEF_SUITES_ALLOWED"; AM_SRC="$BRIEF_SUITES_SOURCE"
     if [ "$AM_RC" -ne 0 ]; then
       die "REFUSED — a dispatch carrying $AMEND_NAME's amended contract would be refused; nothing was written:"
@@ -971,6 +1018,7 @@ EOF
       [ -n "$AM_SRC" ] && AM_ARGS+=("suites_source=$AM_SRC")
     fi
     { [ -n "$AM_NEW_RUNS" ] || row_has_key "$AM_ROW" re_executes; } && AM_ARGS+=("re_executes=$AM_NEW_RUNS")
+    [ -n "${AMEND_NARROW:-}" ] && row_has_key "$AM_ROW" lands_on && AM_ARGS+=("lands_on=$AM_NEW_LO")
     AM_ARGS+=("amended=$(iso_now) ${AMEND_BY:+widened-by: $AMEND_BY }$(clean "$AMEND_REASON")")
     AM_NEW_ROW="$(roster_row "${AM_ARGS[@]}")" || AM_NEW_ROW=""
     if [ -z "$AM_NEW_ROW" ]; then

@@ -1129,6 +1129,80 @@ expect_eq "HS-5b a --green-at the landing does not hold is refused (exit 1) and 
 expect_contains "HS-5c …naming the commit" "${HS_NOT:0:12}" "$OUT"
 
 # ============================================================
+section "§EVENT: a hand landing's ready event carries the branch and the tree it is given, and reads - when it is given neither"
+# ============================================================
+# `row-landed --by-hand … --suites … --green-at … --log …` writes the row's `ready` event, which has fields for the
+# branch and the tree the row was built on and wrote the literal `-` in both. `--branch <b>` and `--tree <t>` fill them.
+# They describe the ready event, which only `--suites` writes, so they are refused without it; a value no record line
+# can hold is refused too. This section lands the third row of §HAND-SUITES's fixture, which its HS-5 left unlanded.
+HS_PRE="$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --branch wt/T3 --tree "$HS/.worktrees/T3"
+expect_eq "EV-1 --branch and --tree without --suites are refused (exit 2, a usage error) and write nothing" "2|$HS_PRE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites units.test.sh --green-at "$HS_R" --log "$HS/T3-green.log" --branch 'wt|T3' --tree "$HS/.worktrees/T3"
+expect_eq "EV-1b a branch holding a | is refused (exit 1) and writes nothing" "1|$HS_PRE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites units.test.sh --green-at "$HS_R" --log "$HS/T3-green.log" --branch wt/T3 --tree "$HS/.worktrees/T3"
+expect_eq "EV-2 a hand landing given the suites, the branch and the tree exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "EV-2b …and its ready event carries both" "|commit=$HS_M3|branch=wt/T3|tree=$HS/.worktrees/T3|suites=units.test.sh|" \
+  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T3|')"
+expect_contains "EV-3 control: the landing given neither (T1, above) still reads - for both" "|commit=$HS_M1|branch=-|tree=-|suites=session-poker-4.test.sh,units.test.sh|" \
+  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+
+# ============================================================
+section "§AMEND-NARROW: amend --suites= narrows a live contract's suites and its lands_on= with them; the collector hands the wall the suites that exist"
+# ============================================================
+# `amend` was a union, old members first, never a narrowing. `--suites=<a,b>` sets the row's suite set to exactly those,
+# each of which the row already holds (a name it does not hold widens, and `--suites+` is the verb for that), and
+# `lands_on=` keeps only the suites still in the set: a row that lands on a suite it may not run is a contract the
+# dispatch wall refuses. A narrowing that would leave the row landing on nothing is refused, and `--suites=` with
+# `--suites+` is two instructions on one set. The wall's membership arm is handed the suites under tests/ here too.
+AN="$(make_repo amend-narrow)"; new_roster "$AN"
+s30_row "$AN" suites_allowed="a.test.sh b.test.sh c.test.sh" lands_on=a.test.sh,b.test.sh
+poke "$AN" amend w1 --suites=a.test.sh,b.test.sh --reason 'c is not run by this row'
+expect_eq "AN-1 narrowing to a subset exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "AN-1b …the successor row holds exactly the narrower set" "a.test.sh b.test.sh" "$(s30_field "$(s30_last "$AN")" suites_allowed)"
+expect_eq "AN-1c …and lands_on= is the same, both its suites still in the set" "a.test.sh,b.test.sh" "$(s30_field "$(s30_last "$AN")" lands_on)"
+poke "$AN" amend w1 --suites=a.test.sh --reason 'b is not run either'
+expect_eq "AN-2 narrowing again exits 0, with the set and lands_on= both cut to a" "0|a.test.sh|a.test.sh" \
+  "$RC|$(s30_field "$(s30_last "$AN")" suites_allowed)|$(s30_field "$(s30_last "$AN")" lands_on)"
+AN_ROWS="$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN")")"
+poke "$AN" amend w1 --suites=d.test.sh --reason 'a name the row never held'
+expect_eq "AN-3 a --suites= naming a suite the row does not hold is refused (exit 1) and writes nothing" "1|$AN_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN")")"
+expect_contains "AN-3b …naming it and the verb that widens" "d.test.sh" "$OUT"
+expect_contains "AN-3c …and --suites+" "--suites+" "$OUT"
+poke "$AN" amend w1 --suites=a.test.sh --suites+ b.test.sh --reason 'both at once'
+expect_eq "AN-4 --suites= beside --suites+ is a usage error (exit 2) and writes nothing" "2|$AN_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN")")"
+poke "$AN" amend w1 --suites+ b.test.sh --reason 'b again'
+expect_eq "AN-5 a widening still works (exit 0), the set old members first" "0|a.test.sh b.test.sh" \
+  "$RC|$(s30_field "$(s30_last "$AN")" suites_allowed)"
+expect_eq "AN-5b …and lands_on= is not widened with it" "a.test.sh" "$(s30_field "$(s30_last "$AN")" lands_on)"
+AN2="$(make_repo amend-narrow-lands)"; new_roster "$AN2"
+s30_row "$AN2" suites_allowed="a.test.sh b.test.sh" lands_on=b.test.sh
+AN2_ROWS="$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN2")")"
+poke "$AN2" amend w1 --suites=a.test.sh --reason 'drop b'
+expect_eq "AN-6 a narrowing that drops every suite the row lands on is refused (exit 1) and writes nothing" "1|$AN2_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN2")")"
+expect_contains "AN-6b …naming the suite it would orphan" "b.test.sh" "$OUT"
+poke "$AN2" amend w1 --suites=a.test.sh,b.test.sh --reason 'the same set'
+expect_eq "AN-7 a --suites= that names the set the row already holds changes nothing, and is refused (exit 1)" "1|$AN2_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN2")")"
+# THE COLLECTOR: amend hands the wall the suites under tests/, so an added name with no file is refused here as at a dispatch.
+AN3="$(make_repo amend-exists)"; new_roster "$AN3"
+mkdir -p "$AN3/tests"; printf '#!/bin/bash\nexit 0\n' > "$AN3/tests/real.test.sh"
+s30_row "$AN3" suites_allowed="a.test.sh"
+poke "$AN3" amend w1 --suites+ real.test.sh --reason 'a suite that exists'
+expect_eq "AN-8 --suites+ naming a file under tests/ is admitted (exit 0)" "0|a.test.sh real.test.sh" \
+  "$RC|$(s30_field "$(s30_last "$AN3")" suites_allowed)"
+AN3_ROWS="$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN3")")"
+poke "$AN3" amend w1 --suites+ nosuch.test.sh --reason 'a suite with no file'
+expect_eq "AN-8b --suites+ naming no file under tests/ is refused (exit 1) and writes nothing" "1|$AN3_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN3")")"
+expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
+
+# ============================================================
 section "§REVIEW-FILES §DELIVER-CELL §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb that does"
 # ============================================================
 # A close met four verbs that sent it in a circle: a review row's Files held one record for three questions, deliver
