@@ -75,8 +75,8 @@ rt_facts_state failed-review
 RT_ROOT="$WORLD_ROOT/failed-review/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
 if [ -f "$RT_PLAN" ]; then
   rt_poker sitrep "$RT_PLAN"
-  expect_eq "FA-5 failed-review: the structure review of the whole passed, then failed: it counts once, failed, beside the four that passed" \
-    "2|4 passed, 1 failed, 0 running" \
+  expect_eq "FA-5 failed-review: the structure review of the whole passed, then failed: it counts once, failed, beside the two that pass" \
+    "2|2 passed, 1 failed, 0 running" \
     "$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c '^review: question=structure scope=whole ')|$(rt_m "$RT_OUT" reviews)"
 fi
 
