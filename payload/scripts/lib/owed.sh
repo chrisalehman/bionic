@@ -22,9 +22,9 @@
 # as the run's. One line per item, the last word on a key winning:
 #
 #   owed/v1|key=<key>|state=open|sent=<ISO-UTC or ->|at=<ISO-UTC>|title=<title>|reply=<line>[|answer=<word>|answered=<ISO-UTC>|event=<what or ->]
-#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>|opened=<the open line's at>
+#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>|opened=<the open line's at>[|answer=…|answered=…|event=…]
 #
-# The bracketed fields are an answer the user gave the open ask (THE ANSWER, below); a closed line carries none.
+# The bracketed fields are an answer the user gave the open ask (THE ANSWER, below); a closed line keeps them.
 #
 # The file is rewritten whole, beside-then-rename, under a mkdir lock, so a reader never sees a
 # half-written line and two writers cannot lose each other's item. A `|`, a tab, a CR or a LF in
@@ -217,7 +217,8 @@ owed_open() {
 }
 
 # owed_close <key> <by> -> rc 0. Closes an open item; a key that is not open is left alone. The closed line keeps
-# the open line's instant as `opened=`, so the minutes the item stood open can still be counted once it is closed.
+# the open line's instant as `opened=`, so the minutes the item stood open can still be counted once it is closed, and
+# its answer fields, last, so what the item waited on once answered reads the same once it is closed.
 owed_close() {
   local key="${1:-}" by f
   _owed_key_ok "$key" || return 1
@@ -231,7 +232,8 @@ owed_close() {
   OWED_B="$by" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
     key_of($0) == key && fld($0, "state") == "open" {
-      printf "owed/v1|key=%s|state=closed|by=%s|at=%s|opened=%s\n", key, ENVIRON["OWED_B"], now, fld($0, "at"); next
+      a = (fld($0, "answer") != "") ? sprintf("|answer=%s|answered=%s|event=%s", fld($0, "answer"), fld($0, "answered"), fld($0, "event")) : ""
+      printf "owed/v1|key=%s|state=closed|by=%s|at=%s|opened=%s%s\n", key, ENVIRON["OWED_B"], now, fld($0, "at"), a; next
     }
     { print }' -v key="$key" -v now="$(_owed_now)"
 }
@@ -306,11 +308,11 @@ owed_answer() {
     { print }' -v key="$key" -v now="$(_owed_now)"
 }
 
-_owed_answers_file() {  # <store> -> owed_answers' lines for that store
+_owed_answers_file() {  # <store> [any] -> owed_answers' lines for that store; with `any`, closed items' answers too
   [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  awk "$_OWED_AWK_FIELD"'
+  awk -v any="${2:-}" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
-    fld($0, "state") == "open" && fld($0, "answer") != "" {
+    (any == "any" || fld($0, "state") == "open") && fld($0, "answer") != "" {
       printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "answer"), fld($0, "answered"), fld($0, "event")
     }' "$1" 2>/dev/null
 }
@@ -323,15 +325,18 @@ owed_answers() {
   _owed_answers_file "$f"
 }
 
-# owed_answer_of <key> [<plan> <root>] -> the key's answer, `<word> TAB <answered ISO> TAB <event or ->`, while it is
-# open and answered; nothing otherwise.
+# owed_answer_of <key> [<plan> <root>] -> the key's answer, `<word> TAB <answered ISO> TAB <event or ->`, from its line
+# open or closed, since a closed line keeps the answer it was given; nothing when it was never answered. A fresh open
+# after a close replaces the closed line, so it reads none.
 owed_answer_of() {
-  local key
+  local key f
   key="$(owed_key "${1:-}")"
-  owed_answers "${2:-}" "${3:-}" 2>/dev/null | awk -F'\t' -v k="$key" '$1 == k { print $2 "\t" $3 "\t" $4; exit }'
+  f="$(_owed_store_for "${2:-}" "${3:-}")" || return 0
+  _owed_answers_file "$f" any 2>/dev/null | awk -F'\t' -v k="$key" '$1 == k { print $2 "\t" $3 "\t" $4; exit }'
 }
 
-# ask_waits_on <key> [<plan> <root>] -> `user` or `event <what>` on one line, rc 0, from the key's kind and its answer.
+# ask_waits_on <key> [<plan> <root>] -> `user` or `event <what>` on one line, rc 0, from the key's kind and its answer,
+# read from its line open or closed.
 # An unanswered waiver or finding, and every kind the user rules (a decision, a goal declared missed, an approval, a
 # gate, a ruling, a matrix row), wait on the user; so does a kind this function does not know, because doubt is the
 # user's. A waiver answered no waits on its review's next run; a finding answered carry on the event its answer names,

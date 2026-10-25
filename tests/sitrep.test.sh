@@ -305,8 +305,8 @@ expect_eq "SH6 one task line per task not dropped: sixteen, T16 among none of th
 expect_eq "SH7 each task's step, state and few words: done with its landing time, failed red, held, a review in flight, waiting" \
   "4|done|landed 3:06 AM|failed|red|held|held|held|waits on your approval of the release|running|pending|waits on 4/8|pending|-" \
   "$(sr_f "$(sr_task T1)" step)|$(sr_f "$(sr_task T1)" state)|$(sr_f "$(sr_task T1)" note)|$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)|$(sr_f "$(sr_task T11)" state)|$(sr_f "$(sr_task T11)" note)|$(sr_f "$(sr_task T12)" state)|$(sr_f "$(sr_task T12)" note)|$(sr_f "$(sr_task T13)" state)|$(sr_f "$(sr_task T9)" state)|$(sr_f "$(sr_task T9)" note)|$(sr_f "$(sr_task T10)" state)|$(sr_f "$(sr_task T10)" note)"
-expect_eq "SH8 each task's short description: the cell up to its first ' (', ': ', '. ' or ' · '" \
-  "Row one the thing|Haiku 5.5 at high|Third row|The long one" \
+expect_eq "SH8 each task's title, the plan card's: the cell up to its first '. ', else up to its first ' · '" \
+  "Row one the thing (D1; AC-1.1)|Haiku 5.5 at high (REQ-8; AC-8.1)|Third row|The long one (D8)" \
   "$(for t in T1 T2 T3 T8; do sr_f "$(sr_task "$t")" desc; done | sr_join)"
 expect_eq "SH9 the measurements in numbers: landed, pace, correctness and waste; no metric line" \
   "4 tasks, 120 of 570 min, 21%|25%|21%|1: 0 green, 1 red|green at aaaaaaaa|1 passed, 1 failed, 1 running|1|1 task, 30 min|1 of 6|72 min|0" \
@@ -614,8 +614,9 @@ expect_eq "OP3 the sheet's code holds one heading parser of the design ledger" "
 # ============================================================
 section "§SPAN: an ask closed with no opened= takes its span from the run's record, or the count says it is partial"
 # ============================================================
-# fails-when: a closed waiver or carry with no opened= adds no minute though the plan holds its span, the opened= it
-# has is passed over for the record, or an ask the record cannot time leaves the count unmarked.
+# fails-when: a closed waiver with no opened= adds no minute though the plan holds its span, the opened= it has is
+# passed over for the record, a carry, which waits on the release card and never on you, counts its span, or an ask
+# the record cannot time leaves the count unmarked.
 sr_mw_world span
 awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | — | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"; next } { print }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
@@ -638,8 +639,8 @@ expect_eq "SP2 (control) the same waiver with opened= present uses it: 30 minute
 rm -f "$(sr_reg)"
 sr_owed "key=$SP_CARRY|state=closed|by=ruled|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "SP3 a closed carry with no opened=: from the reading that raised its deferral to its ruling, 120 minutes" \
-  "120 min: $SP_CARRY" "$(sr_m waste.waiting-on-you)"
+expect_eq "SP3 a closed carry waits on the release card, an event, never on you: it counts no minute and is no ask left untimed (SP1 timed the waiver through the same reader)" \
+  "0 min" "$(sr_m waste.waiting-on-you)"
 rm -f "$(sr_reg)"
 sr_owed "key=finding:record:wave-02-fx:nowhere.md:1|state=closed|by=ruled|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
@@ -1661,7 +1662,7 @@ sr_run "$SR_PLAN"
 expect_eq "TI2 a pending task at step 7 is not work at step 7" "pending 1" "$(sr_step 7)"
 
 # ============================================================
-section "§NAMES: every task has one line, its description the cell up to its first \" (\", \": \", \". \" or \" · \", whole; its note says its state in a few words"
+section "§NAMES: every task has one line, its description its title as the plan card prints it, whole; its note says its state in a few words"
 # ============================================================
 # sr_cell <id> <cell> -> SR_PLAN with that task's description cell replaced, in the Tasks table alone (a row of the
 # dispatch ledger names the same id)
@@ -1671,17 +1672,17 @@ sr_world names "6 6 12 12"
 sed -i.bak -e 's#^\(| T10 | 4 | build | [^|]*| — | — | \)—#\1lib/t5.sh,lib/t6.sh,lib/t7.sh#' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending/\1held/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sr_cell T1 "$SR_LONG300"
-sr_cell T13 "Alpha one (the aside) and the rest"
-sr_cell T14 "Beta two: and the rest"
-sr_cell T15 "Gamma three. And the rest"
+sr_cell T13 "Alpha one (the aside). and the rest"
+sr_cell T14 "Beta two: its colon. and the rest"
+sr_cell T15 "Gamma three. and the rest"
 sr_cell T16 "Delta four · and the rest"
 sr_ev "ev=ready|row=T6|name=w-T6|commit=$SR_C1|branch=wt/02-T6|tree=$SR_REPO/.worktrees/02-T6|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:30:00Z"
 sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T7.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "NM1 a 300-character cell with no delimiter is the whole description, on the one line" "yes|1" \
   "$([ "$(sr_f "$(sr_task T1)" desc)" = "$SR_LONG300" ] && echo yes)|$(sr_lines task | /usr/bin/grep -c '^task: id=T1 ')"
-expect_eq "NM2 the description stops at the first of \" (\", \": \", \". \" and \" · \", and the rest of the cell never prints" \
-  "Alpha one|Beta two|Gamma three|Delta four|0" \
+expect_eq "NM2 the description is the title: it stops at the first \". \", else at the first \" · \", keeping a paren or a colon before it, and the rest of the cell never prints" \
+  "Alpha one (the aside)|Beta two: its colon|Gamma three|Delta four|0" \
   "$(for t in T13 T14 T15 T16; do sr_f "$(sr_task "$t")" desc; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'and the rest')"
 expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on each of three, waiting on one, held" \
   "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5, 4/6 and 4/7|T9 waits on 4/8|T11 held" \

@@ -30,6 +30,8 @@
 #                waits on what its waivers wait on
 # §ANSWER        `owed_answer` stores the answer on the open ask and leaves it open; a re-open keeps it, a fresh open has
 #                none; the landing of the row a finding was carried to closes it; a finding moved fixed closes at once
+# §ONE-BLOCKS    a waiver answered no keeps its answer when it closes and waits on an event, open or closed: the close
+#                line, the held words, the card and the minutes waiting on you never count it
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -639,5 +641,96 @@ s31_stop "$SW_YR" "$(s31_transcript "$SW_YR" "carry on")"
 expect_eq "SW-3 the Stop over a plan carrying approved-by: closes all four at once" "" "$(sw_open "$SW_YR" "$SW_Y")"
 expect_contains "SW-3b …the register recording the sweep as the closer" "|key=approve:step3|state=closed|by=plan approved-by|" \
   "$(cat "$SW_YR/.bionic/docs/record/wave-01-fixture/asks.state" 2>/dev/null)"
+
+# ============================================================
+section "§ONE-BLOCKS: a waiver answered no waits on an event, open or closed: the close line, the held words, the card and the waste never count it as waiting on you"
+# ============================================================
+# FIXTURE FIDELITY: the register's lines are written by owed.sh's own writers (owed_open, owed_answer, owed_close) on the
+# run's register; only their instants are then set to the fixture's clock, since the writers stamp the machine's. The
+# surfaces are the real verbs over a plan approved at Step 3 whose one open task is the integrate row the waiver holds:
+# `sitrep` for close.waits-on-you, the close's basis (the held words) and waste.waiting-on-you, `sitrep card` for
+# Blocked on you.
+# ANTI-VACUITY: the control world differs in one fact, the waiver unanswered, and every reader counts it there, read
+# through the same extractors.
+# fails-when: lib/owed.sh `owed_close` drops the answer (OB-6), `ask_waits_on` reads a closed waiver answered no as user
+# (OB-7), or hooks/poker/sitrep.sh counts an ask that waits on an event in close.waits-on-you, the held words or the
+# minutes waiting on you (OB-2 to OB-5, OB-8).
+ob_world() {  # <label> -> OB_R, OB_P: an approved plan at Step 8, its integrate row T2 open, nothing on its register
+  OB_R="$TMPROOT/ob-$1"; OB_P="$OB_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+  mkdir -p "${OB_P%/*}" "$OB_R/.bionic/docs/record/wave-02-fx" "$OB_R/.bionic/tmp"; ( cd "$OB_R" && git init -q . )
+  : > "$OB_R/.bionic/docs/record/wave-02-fx/landing-proofs.log"
+  {
+    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
+    printf '# fixture plan\n\n## SDLC State\n\napproved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 8\n\n- Step 4: implementation opened\n'
+    printf -- '- T1: landed %s 2026-10-06T18:00:00Z — .worktrees/02-T1\n' "$(printf 'c%.0s' $(seq 40))"
+    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | The first row. It builds the thing · complexity: standard | — | — | — | 30 | REQ-1 | lib/t1.sh | — | — | landed | — | — | — |\n'
+    printf '| T2 | 8 | integrate | The merge row. It merges the wave · complexity: standard | — | — | — | 30 | REQ-1 | lib/t2.sh | — | — | pending | — | — | — |\n'
+    printf '\n## Not Doing\n\n- nothing\n'
+  } > "$OB_P"
+}
+ob_owed() { OWED_ROOT="$OB_R" OWED_SID="$SID" OWED_PLAN="$OB_P" as_owed "$OB_R" "$SID" "$@"; }   # <function> [args] -> on the run's register
+ob_reg() { bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && owed_register "$2" "$3"' _ "$AS_LIB" "$OB_R" "$OB_P" 2>/dev/null; }
+ob_clock() {  # <field> <ISO> -> that instant field of waive:structure's line set to the fixture's clock
+  local f; f="$(ob_reg)"
+  sed "/|key=waive:structure|/s/|$1=[^|]*/|$1=$2/" "$f" > "$f.t" && mv "$f.t" "$f"
+}
+ob_waiver() {  # <open|closed> <answered: yes|no> -> waive:structure on the register, opened 20:00Z, answered no at 20:00Z, closed 21:00Z
+  ob_owed owed_open waive:structure "waiver: structure" "poker: the structure review failed at the head" >/dev/null
+  ob_clock at 2026-10-06T20:00:00Z
+  if [ "$2" = yes ]; then ob_owed owed_answer waive:structure no "review structure re-run"; ob_clock answered 2026-10-06T20:00:00Z; fi
+  if [ "$1" = closed ]; then ob_owed owed_close waive:structure waive >/dev/null; ob_clock at 2026-10-06T21:00:00Z; ob_clock opened 2026-10-06T20:00:00Z; fi
+}
+ob_verb() {  # <args after the verb…> -> OB_OUT, OB_RC: the sitrep verb in the world, at 22:00Z
+  OB_RC=0
+  OB_OUT="$( cd "$OB_R" && env -u CLAUDE_CODE_SESSION_ID CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1791324000 TZ=America/Los_Angeles \
+    BIONIC_GATE_DIR="$TMPROOT/ob-gate" BIONIC_PLUGINS_DIR="$TMPROOT/ob-plugins" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 \
+    BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 \
+    BIONIC_PROBE_BUSY_CORES_5M=1.0 bash "$POKER" sitrep "$@" 2>/dev/null )" || OB_RC=$?
+}
+ob_m() { printf '%s\n' "$OB_OUT" | awk -v k="$1: " 'index($0, k) == 1 { v = substr($0, length(k) + 1); i = index(v, " — "); print (i ? substr(v, 1, i - 1) : v); exit }'; }
+ob_read() {  # -> `<close.waits-on-you>|<held on you: yes|no>|<waste.waiting-on-you>|<Blocked on you lines naming the waiver>`
+  local held card
+  ob_verb "$OB_P"; [ "$OB_RC" = 0 ] || { printf 'sheet rc=%s\n' "$OB_RC"; return; }
+  held=no; printf '%s\n' "$OB_OUT" | /usr/bin/grep -q '^close.predicted: .*a task held on you is unscaled' && held=yes
+  printf '%s|%s|%s|' "$(ob_m close.waits-on-you)" "$held" "$(ob_m waste.waiting-on-you)"
+  ob_verb card "$OB_P" <<'OBJ'
+purpose: The fixture merges its wave; on course.
+call: Rule on the structure review: the merge waits on it.
+grade: B
+point: The build is done and the merge row is next.
+close: It holds once the structure review is answered.
+OBJ
+  [ "$OB_RC" = 0 ] || { printf 'card rc=%s\n' "$OB_RC"; return; }
+  # a row under Blocked on you other than its None row, which names the next event
+  card="$(printf '%s\n' "$OB_OUT" | awk '/^  [A-Z]/ { s = $0; next } s == "  Blocked on you" && /^    • / && !/^    • None/' | /usr/bin/grep -c .)"
+  printf '%s\n' "$card"
+}
+mkdir -p "$TMPROOT/ob-gate/requests" "$TMPROOT/ob-gate/cost" "$TMPROOT/ob-plugins"
+ob_world control; ob_waiver open no
+expect_eq "OB-0 precondition: the waiver is open on the run's register, unanswered, and waits on the user" "waive:structure|user" \
+  "$(as_register "$OB_R" "$OB_P")|$(ob_owed ask_waits_on waive:structure "$OB_P" "$OB_R")"
+expect_eq "OB-1 control: the unanswered waiver holding the merge row waits on you on every reader — the close line names it, the close holds a task on you, two hours wait on you, the card blocks on it" \
+  "yes: waive:structure|yes|120 min: waive:structure|1" "$(ob_read)"
+ob_world open-no; ob_waiver open yes
+expect_eq "OB-2 precondition: the same waiver answered no at its opening waits on its review's next run" "waive:structure|event review structure re-run" \
+  "$(as_register "$OB_R" "$OB_P")|$(ob_owed ask_waits_on waive:structure "$OB_P" "$OB_R")"
+OB_OPEN="$(ob_read)"
+expect_eq "OB-3 answered no, the close line does not name it and the close holds no task on you (OB-1 read both through the same call)" \
+  "no|no" "$(printf '%s' "$OB_OPEN" | cut -d'|' -f1,2)"
+expect_eq "OB-4 …no minute waits on you from its answer on" "0 min" "$(printf '%s' "$OB_OPEN" | cut -d'|' -f3)"
+expect_eq "OB-5 …and the card does not block on it" "0" "$(printf '%s' "$OB_OPEN" | cut -d'|' -f4)"
+ob_world closed-no; ob_waiver closed yes
+expect_contains "OB-6 the closed line keeps the answer it was given" "|key=waive:structure|state=closed|by=waive|" \
+  "$(/usr/bin/grep -F '|answer=no|answered=2026-10-06T20:00:00Z|event=review structure re-run' "$(ob_reg)")"
+expect_eq "OB-7 a closed waiver answered no reads event, as it read open (OB-2 read the same call)" "event review structure re-run" \
+  "$(ob_owed ask_waits_on waive:structure "$OB_P" "$OB_R")"
+OB_CLOSED="$(ob_read)"
+ob_world closed-control; ob_waiver closed no
+OB_CLOSED_C="$(ob_read)"
+expect_eq "OB-8 control: the same waiver closed unanswered counts its hour on you" "60 min: waive:structure" "$(printf '%s' "$OB_CLOSED_C" | cut -d'|' -f3)"
+expect_eq "OB-9 …answered no at its opening it counts no minute, and no reader names it (OB-8 read the minutes through the same call)" \
+  "no|no|0 min|0" "$OB_CLOSED"
 
 finish

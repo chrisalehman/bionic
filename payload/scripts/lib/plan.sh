@@ -234,7 +234,7 @@ _plan_theme_reads() {
   { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "T\t" $1 "\t" $2 "\t" $3 }'
     # the matrix table's rows, each AC with its status cell
     _plan_matrix_acs "$plan"
-  } | awk -F'\t' -v cur="$cur" '
+  } | awk -F'\t' -v cur="$cur" "$_PLAN_GOAL_MEASURE_AWK"'
     $1 == "T" { n++; nm[n] = $2; fr[n] = $4; k[n] = split($3, r, " "); for (i = 1; i <= k[n]; i++) { own[r[i]] = n; rq[n, i] = r[i] }; next }
     $1 == "M" { req = $2; sub(/^AC-/, "", req); sub(/\.[^.]*$/, "", req); t = own[req]; if (!t) next
       tot[t]++
@@ -242,14 +242,13 @@ _plan_theme_reads() {
     END {
       step = cur; sub(/[^0-9].*$/, "", step)
       for (t = 1; t <= n; t++) {
-        m = (d[t] + 0) " of " (tot[t] + 0) " criteria discharged" (w[t] ? ", " w[t] " waived" : "")
+        m = goal_measure(d[t], tot[t], w[t])
         f = (fr[t] != "" ? "\t" fr[t] : "")
         if (!tot[t]) { print "unmeasured\t" nm[t] "\t" m "\tthe matrix holds none of its criteria" f; continue }
         if (!p[t]) { print "reached\t" nm[t] "\t" m "\tnone open" f; continue }
         o = ""; c = 0
         for (i = 1; i <= k[t]; i++) if ((t, rq[t, i]) in op) { c++; if (c <= 2) o = o (c > 1 ? ", " : "") "REQ-" rq[t, i] }
-        if (c > 2) o = o " and " (c - 2) " more"
-        print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\topen: " o f }
+        print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\t" goal_open(o, c - 2) f }
     }'
 }
 
@@ -315,6 +314,69 @@ plan_goal_status() {
     unreadable) printf 'unreadable\n' ;;
     *) printf 'not measured\n' ;;
   esac
+}
+
+# THE GOAL'S MEASURE, ONE GRAMMAR. A theme's measure reads `<d> of <n> criteria discharged[, <w> waived]`, its reading
+# `none open` or `open: REQ-a, REQ-b[ and <N> more]`, and the sheet carries the two joined as `<measure> — <reading>`.
+# The writer (`_plan_theme_reads`, `plan_goal_measure`) and the reader (`plan_goal_sheet`, and the card's counts) call
+# these awk functions, so a change to the words changes every surface at once and none parses a copy of them.
+_PLAN_GOAL_MEASURE_AWK='
+  function goal_measure(d, n, w) { return (d + 0) " of " (n + 0) " criteria discharged" (w ? ", " w " waived" : "") }
+  function goal_open(o, more) { return "open: " o (more > 0 ? " and " more " more" : "") }
+  function goal_join(m, r) {
+    if (r == "not measured") r = ""
+    if (m != "" && r != "") return m " — " r
+    return (m != "") ? m : ((r != "") ? r : "-")
+  }
+  # goal_read <sheet measure> -> 1 and GR_K, GR_N, GR_W, GR_O, GR_MORE set from a theme measure, each empty when the
+  # measure does not hold it; 0 and all empty for a measure that is no count of criteria
+  function goal_read(m,   h, r) {
+    GR_K = ""; GR_N = ""; GR_W = ""; GR_O = ""; GR_MORE = ""
+    if (!match(m, /^[0-9]+ of [0-9]+ criteria discharged/)) return 0
+    split(substr(m, 1, RLENGTH), h, " "); GR_K = h[1]; GR_N = h[3]; r = substr(m, RLENGTH + 1)
+    if (match(r, /^, [0-9]+ waived/)) GR_W = substr(r, 3, RLENGTH - 9)
+    if (sub(/^.* — open: /, "", r)) {
+      GR_O = r
+      if (match(GR_O, / and [0-9]+ more$/)) { GR_MORE = substr(GR_O, RSTART + 5, RLENGTH - 10); GR_O = substr(GR_O, 1, RSTART - 1) }
+    }
+    return 1
+  }'
+
+# plan_goal_measure <measure> <reading> -> the goal's measure as the sheet carries it: the measure, then ` — ` and what
+# it read; a goal not measured prints its measure alone, and one with neither prints `-`.
+plan_goal_measure() {
+  PGM_M="${1:-}" PGM_R="${2:-}" awk "$_PLAN_GOAL_MEASURE_AWK"'BEGIN { print goal_join(ENVIRON["PGM_M"], ENVIRON["PGM_R"]) }'
+}
+
+# plan_goal_sheet <sheet file> -> one `G<TAB><name><TAB><status><TAB><k><TAB><n><TAB><waived><TAB><open><TAB><more>`
+# per `goal: name=<n> status=<s> measure=<m>[ for=<f>]` line of a sitrep sheet, in its order: the one reader of the
+# line the sheet writes. The counts are read through the measure's grammar, each empty when the measure holds none.
+plan_goal_sheet() {
+  [ -f "${1:-}" ] || return 0
+  awk "$_PLAN_GOAL_MEASURE_AWK"'
+    function fv(b, f, nxt,   s, r, e) {
+      s = index(b, " " f "="); if (!s) return ""
+      r = substr(b, s + length(f) + 2)
+      if (nxt != "") { e = index(r, " " nxt "="); if (e) r = substr(r, 1, e - 1) }
+      return r
+    }
+    index($0, "goal: ") == 1 { b = " " substr($0, 7); goal_read(fv(b, "measure", "for"))
+      print "G\t" fv(b, "name", "status") "\t" fv(b, "status", "measure") "\t" GR_K "\t" GR_N "\t" GR_W "\t" GR_O "\t" GR_MORE }' "$1"
+}
+
+# plan_task_title <Tasks cell> -> the task's title, on stdout: the cell up to its first `. `, else up to its first
+# ` · ` where a tag begins, a closing `.` dropped, trimmed; a cell that would leave nothing keeps its whole trimmed
+# text. The one reading of a title: the cards and the sitrep's sheet both call it, so a task is never named two ways.
+plan_task_title() {
+  local t="${1:-}" w
+  case "$t" in
+    *". "*) t="${t%%. *}" ;;
+    *" · "*) t="${t%%" · "*}" ;;
+  esac
+  t="${t%.}"
+  t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
+  if [ -z "$t" ]; then w="${1:-}"; w="${w#"${w%%[![:space:]]*}"}"; t="${w%"${w##*[![:space:]]}"}"; fi
+  printf '%s' "$t"
 }
 
 # plan_goal_declared_red <landing record> <reading> -> rc 0 when a suite goal's reading, `<suite>.test.sh red at <sha>`,

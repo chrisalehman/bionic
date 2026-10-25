@@ -1104,11 +1104,7 @@ CARD_APPROACH_CAP=60
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
   local t="${2:-}"
   case "$1" in
-    cell)
-      case "$t" in
-        *". "*) t="${t%%. *}" ;;
-        *.)     t="${t%.}" ;;
-      esac ;;
+    cell) t="$(plan_task_title "$t")" ;;
     item)
       case "$t" in *": "*) t="${t%%: *}" ;; esac ;;
   esac
@@ -2988,13 +2984,8 @@ _card_sitrep_sheet() {
       print "R\t" k "\t" v; next }
     index($0, "step: ") == 1 { rec("S", "step", "n name state tasks"); next }
     index($0, "task: ") == 1 { rec("T", "task", "id step state desc note"); next }
-    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks waits"); next }
-    index($0, "goal: ") == 1 { b = " " substr($0, 7); m = fv(b, "measure", "for"); k = ""; n = ""; w = ""; o = ""; mo = ""
-      if (match(m, /^[0-9]+ of [0-9]+ criteria discharged/)) {
-        split(substr(m, 1, RLENGTH), h, " "); k = h[1]; n = h[3]; r = substr(m, RLENGTH + 1)
-        if (match(r, /^, [0-9]+ waived/)) w = substr(r, 3, RLENGTH - 9)
-        if (sub(/^.* — open: /, "", r)) { o = r; if (match(o, / and [0-9]+ more$/)) { mo = substr(o, RSTART + 5, RLENGTH - 10); o = substr(o, 1, RSTART - 1) } } }
-      print "G\t" fv(b, "name", "status") "\t" fv(b, "status", "measure") "\t" k "\t" n "\t" w "\t" o "\t" mo; next }' "$1"
+    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks waits"); next }' "$1"
+  plan_goal_sheet "$1"
 }
 
 # _card_sitrep_fact <key> -> the sheet's value for a run. or close. key in SR_RECS, `-` when it has none
@@ -3557,12 +3548,13 @@ _card_sitrep_load() {
       print "V\tsteps\t" st
       if (counted != "") print "V\tasks\t" counted }' "$1")"
   # the goals: the counts by status the word goals names, and each theme's criteria discharged under its own name
-  SR_VALS="$SR_VALS"$'\n'"$(printf '%s\n' "$SR_RECS" | awk -F'\t' '
+  # the word a met goal reads and the measure's words are lib/plan.sh's, never a copy here
+  SR_VALS="$SR_VALS"$'\n'"$(printf '%s\n' "$SR_RECS" | awk -F'\t' -v met="$(plan_goal_status reached)" "$_PLAN_GOAL_MEASURE_AWK"'
     $1 == "G" { if (!($3 in gc)) go[++ng] = $3; gc[$3]++; gt++
-      if ($4 != "") print "V\tgoal." $2 "\t" $4 " of " $5 " criteria discharged" ($6 != "" ? ", " $6 " waived" : "") ($8 != "" ? ", " $8 " more open" : "") }
+      if ($4 != "") print "V\tgoal." $2 "\t" goal_measure($4, $5, $6) ($8 != "" ? ", " $8 " more open" : "") }
     END {
-      s = (gc["met"] + 0) " of " (gt + 0) " met"; b = ""
-      for (i = 1; i <= ng; i++) if (go[i] != "met") b = b (b == "" ? "" : ", ") gc[go[i]] " " go[i]
+      s = (gc[met] + 0) " of " (gt + 0) " " met; b = ""
+      for (i = 1; i <= ng; i++) if (go[i] != met) b = b (b == "" ? "" : ", ") gc[go[i]] " " go[i]
       print "V\tgoals\t" s (b == "" ? "" : ", " b) }')"
 }
 
