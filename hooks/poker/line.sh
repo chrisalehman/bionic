@@ -72,8 +72,9 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - the row is in `## Tasks`, `pending` or `active`;
 #   - it has no tree of its own and its Files write nothing the head carries (`units_writes_head`):
 #     a row with a tree lands through `ready`, from that tree;
-#   - it is not a live review row (`units_live_rows`): `proof-add` returns that row to `pending` at
-#     each reading and the next landing makes it ready again, so landing it would end its passes;
+#   - a live review row (`units_live_rows`) lands only when the judge reads every question it carries covered at
+#     the working head (lib/units.sh `units_live_held`, over lib/proof.sh `facts_state`): until then a landing
+#     past its reading owes it another pass, and the refusal names each question that is not covered;
 #   - its artifact: the ledger line's `artifact` cell, else the row's own `## Tasks` artifact cell (a
 #     task-scale plan carries no ledger), else the one record under `<docs-root>/record/` its Files
 #     name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The file exists,
@@ -84,7 +85,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call fix wb head sid roster rulings
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call fix wb head sid roster rulings live lrc
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -113,8 +114,11 @@ deliver_check() {
     exit 2
   fi
   if [ -n "$(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id')" ]; then
-    die "REFUSED — $PV_ID is a live review row (it reads live:head): proof-add returns it to pending at each review and the next landing makes it ready again, so deliver does not land it. The plan is unchanged."
-    exit 2
+    live="$(units_live_held "$PV_PLAN" "$PV_ID")"; lrc=$?
+    if [ "$lrc" -ne 0 ]; then
+      die "REFUSED — $PV_ID is a live review row (it reads live:head), and it lands only once the judge reads every question it carries covered at the working head; not covered there: $(printf '%s\n' "$live" | awk 'NF { printf "%s%s", (n++ ? ", " : ""), $0 }'). Register the reading at the head (proof-add review), then deliver again. The plan is unchanged."
+      exit 2
+    fi
   fi
   docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
   drel=""; case "$docs" in "$PV_REPO"/*) drel="${docs#"$PV_REPO"/}" ;; esac

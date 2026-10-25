@@ -1845,6 +1845,11 @@ expect_eq "OB7 the sheet put back to block on what an ask holds alone: the waive
 # THE CARD HAS NO RULE OF ITS OWN: it reads the sheet's blocks= and waits= fields and decides nothing from holds= (comment lines aside).
 expect_eq "OB8 the card draws from the sheet's fields: no line of card.sh outside its comments names a blocks= rule" "0" \
   "$(/usr/bin/grep -v '^[[:space:]]*#' "$BIONIC_HOOKS_DIR/../payload/scripts/card.sh" | /usr/bin/grep -c 'nothing.*blocks\|blocks=')"
+SR_OB_CARD="$(/usr/bin/grep -v '^[[:space:]]*#' "$BIONIC_HOOKS_DIR/../payload/scripts/card.sh")"
+expect_eq "OB8b the card keeps the sheet's blocks field as the one function wrote it: one line stores it" "1" \
+  "$(printf '%s\n' "$SR_OB_CARD" | /usr/bin/grep -c 'SR_ABLOCK\[\${#SR_ABLOCK\[@\]}\]="\$b"')"
+expect_eq "OB8c …and no line before it decides blocks again from what the ask waits on (OB8b read the same lines)" "0" \
+  "$(printf '%s\n' "$SR_OB_CARD" | /usr/bin/grep -c 'event\*) b=')"
 
 # ============================================================
 section "§FAST: the sheet verb and the card verb, run one after the other on a copy of the wave-43 plan and its record, finish together in under 5 seconds; the card verb reads the saved sheet and refreshes its asks from the register alone"

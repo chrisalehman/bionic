@@ -2649,6 +2649,53 @@ facts_cover() {
     "$(proof_check_passes "$plan" "$tree")"
 }
 
+# facts_reviews <plan> <head> [--landings] -> THE ONE READING OF A REVIEW COVERED OR FAILING, one line per review question
+# the rigor deals, in the dealing's order: `<question><TAB><role><TAB><state><TAB><landings>`. <state> is the judge's
+# (`facts_state`) over every line it owes for the question: `failing` when one reads failing, else `absent` when one
+# has no reading, else `uncovered` when a commit past one is not held, else `covered`. Handed --landings, <landings>
+# names, for a covered question whose newest reading is behind <head>, each landing born of a review that the walk
+# holds it by from the question's newest link (`proof_chain_head`) to <head> (`facts_cover`'s `born-review` lines), oldest first, comma-joined as `<row>@<commit>`, the row `-` when no
+# fixed finding names the commit; `-` otherwise. The release card's Reviews lines and the situation report's reviews
+# count both read this, so a fix landing that answers a failed reading reads covered on both, and failing only while
+# a question is uncovered. rc as facts_state's: 0 when every question is covered, 1 when one is not, 2 (its sentence
+# on stderr, nothing printed) when the plan cannot be dealt or <head> is no commit.
+facts_reviews() {
+  local plan="${1:-}" head="${2:-}" want="${3:-}" out rc tree q role st ph fixed lands rows
+  out="$(facts_state "$plan" "$head")"; rc=$?
+  [ "$rc" -ne 2 ] || return 2
+  rows="$(printf '%s\n' "$out" | awk -F'\t' '
+    $1 == "review" { q = $2; if (!(q in st)) { o[++n] = q; role[q] = $3; st[q] = "covered" }
+      s = $5; r = (s == "failing") ? 4 : (s == "absent") ? 3 : (s == "uncovered") ? 2 : 1
+      c = (st[q] == "failing") ? 4 : (st[q] == "absent") ? 3 : (st[q] == "uncovered") ? 2 : 1
+      if (r > c) st[q] = s }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", o[i], role[o[i]], st[o[i]] }')"
+  if [ "$want" != --landings ]; then
+    printf '%s\n' "$rows" | awk -F'\t' 'NF >= 3 { print $0 "\t-" }'
+    return "$rc"
+  fi
+  tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
+  head="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
+  fixed="$(proof_fixed "$plan" "$tree")"
+  while IFS='	' read -r q role st; do
+    [ -n "$q" ] || continue
+    lands="-"
+    if [ "$st" = covered ]; then
+      ph="$(proof_chain_head "$plan" "$q")"; ph="${ph%% *}"
+      ph="$(git -C "$tree" rev-parse --verify -q "${ph:-none}^{commit}" 2>/dev/null)" || ph=""
+      if [ -n "$ph" ] && [ "$ph" != "$head" ]; then
+        lands="$(facts_cover "$plan" "$ph" "$head" "$q" 2>/dev/null | FIXED="$fixed" awk '
+          BEGIN { n = split(ENVIRON["FIXED"], f, "\n"); for (i = 1; i <= n; i++) { split(f[i], x, "\t"); if (x[3] != "" && !(x[3] in row)) row[x[3]] = x[2] } }
+          $1 == "cover" && $3 == "born-review" { printf "%s%s@%s", (k++ ? "," : ""), (($2 in row) ? row[$2] : "-"), $2 }')"
+        [ -n "$lands" ] || lands="-"
+      fi
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$q" "$role" "$st" "$lands"
+  done <<PROOF_REVIEWS
+$rows
+PROOF_REVIEWS
+  return "$rc"
+}
+
 # proof_door_cover <tree> <from> <candidate> -> THE JUDGE'S BASIS OF A CANDIDATE AT ITS DOOR: `release`, `prose`, or
 # `owes`, a tab, and each path the range touched outside the release set, comma-joined, read by the walk facts_cover
 # reads, over <from>..<candidate>, with the check that has just passed at the door taken as passing at <candidate>.

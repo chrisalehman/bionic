@@ -1286,6 +1286,42 @@ vc_follow "NV-3 amend's refusal of a closed contract" "$VC_AREF" "lib/c.sh"
 vc_follow "NV-4 step-field's refusal of a key at the wrong step" "$VC_SREF" "done"
 vc_follow "NV-5 step-field's refusal of a step with no line" "$VC_LREF" "the regression"
 
+# ---------- §LIVE: deliver on a live:head review row closes it when the judge reads its questions covered ----------
+# FIXTURE FIDELITY: the single-rigor task plan above, its base-sha a commit of this repository so the judge deals it,
+# the readings written by the proof writer (`proof_line`) at the working branch's head. T11 reads
+# live:head:adversarial, T12 live:head:structure; a code commit past the readings leaves structure uncovered.
+# fails-when: deliver refuses a live row whose every question is covered at the head, or lands one whose question
+# a commit past its reading leaves uncovered, or refuses without naming that question.
+LV="$(make_repo live-deliver)"; ( cd "$LV" && git commit -q --allow-empty -m base && git branch -M main ) >/dev/null 2>&1
+git -C "$LV" config user.name "Dana Fixture"
+LV_BASE="$(git -C "$LV" rev-parse main)"
+LV_RD="record/wave-01-fixture"
+LV_P="$(vc_plan "$LV" \
+  "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
+  "| T11 | 6 | review | the adversarial review | critic | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-adversarial.md | active | live:head:adversarial | .bionic/docs/$LV_RD/live-adversarial.md |" \
+  "| T12 | 6 | review | the structure review | critic | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-structure.md | active | live:head:structure | .bionic/docs/$LV_RD/live-structure.md |")"
+sed -i.bak "s/base-sha: abc1234/base-sha: $LV_BASE/" "$LV_P" && rm -f "$LV_P.bak"
+( cd "$LV" && git add -f "$LV_P" && git commit -qm base-sha ) >/dev/null 2>&1
+LV_H="$(git -C "$LV" rev-parse main)"
+for lv_q in evidence adversarial structure; do
+  printf 'question: %s\nresult: pass\nscope: piece\nreviewed: %s..%s\nfindings: 0\n' "$lv_q" "${LV_BASE:0:10}" "${LV_H:0:10}" > "$LV/.bionic/docs/$LV_RD/live-$lv_q.md"
+  LV_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-22T12:00:00Z "$3" "$4" w-crit pass piece' _ "$S46_LIB" "$LV_H" "$LV_RD/live-$lv_q.md" "$lv_q")"
+  LV_PL="$LV_PL" awk '{ print } /^current: / && !p { print ENVIRON["LV_PL"]; p = 1 }' "$LV_P" > "$LV_P.tmp" && mv "$LV_P.tmp" "$LV_P"
+done
+lv_cell() { s48_row "$LV_P" "$1" | cut -d'|' -f10; }
+expect_eq "LIVE-0 precondition: the judge deals the plan and reads every review question covered at the head" "covered" \
+  "$(cd "$LV" && bash -c '. "$1/units.sh"; . "$1/proof.sh"; _units_readings_state "$2"' _ "$(dirname "$S46_LIB")" "$LV_P" 2>/dev/null)"
+poke "$LV" deliver T11
+expect_eq "LIVE-1 AC-14.1 deliver on the live:head:adversarial row, its question covered at the head: exit 0, the row landed" \
+  "0|landed" "$RC|$(lv_cell T11)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+LV_X="$(s57_commit "$LV" lib/x.sh 'a code change past every reading')"
+s42_snap "$LV" "$LV_P"
+poke "$LV" deliver T12
+s42_unchanged "LIVE-2 the control: a code commit past the structure reading, deliver on the live:head:structure row" 2 "$LV_P"
+expect_contains "LIVE-2b …the refusal names the uncovered question" "structure" "$OUT"
+expect_contains "LIVE-2c …and says it is not covered at the head" "uncovered" "$OUT"
+expect_eq "LIVE-2d …and the row is still active" "active" "$(lv_cell T12)"
 
 # ============================================================
 section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regression's health reach the matrix by their verbs"

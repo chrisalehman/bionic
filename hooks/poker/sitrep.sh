@@ -1543,14 +1543,27 @@ SITREP_SIT
   [ "$mode" = sheet ] || return 0
 
   # ---- correctness and waste
-  local k rv q sc res at ev nf passed=0 failed=0 running=0 open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
+  local k rv q sc res at ev nf passed=0 failed=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
-  # a review is counted once per question and scope, by its latest result: a pass a later fail supersedes is no pass
-  read -r passed failed <<< "$(printf '%s\n' "$rv" | awk -F'\t' '
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    NF >= 6 { k = $1 SUBSEP $2; a = norm($4); if (!(k in r) || a == "-" || t[k] == "-" || a >= t[k]) { r[k] = $3; t[k] = a } }
-    END { for (k in r) { if (r[k] == "pass" || r[k] == "flag") p++; else if (r[k] == "fail") f++ }; print p + 0, f + 0 }')"
+  # THE COUNT IS THE JUDGE'S, as the release card's Reviews lines are: each question the rigor deals, failed only while
+  # lib/proof.sh `facts_reviews` reads it failing at the working branch's head, so a failed reading its fix landing
+  # answered counts passed here exactly when the card reads it covered. A question nobody has read is not counted.
+  # A plan the judge cannot deal (no rigor and scale, no base, no head) has no coverage to read: there each question
+  # and scope counts once by its latest recorded result, a pass a later fail supersedes being no pass.
+  jhead="$(proof_branch_head "$plan" "$root" 2>/dev/null)" || jhead=""
+  jv=""; jrc=2
+  if [ -n "$jhead" ] && declare -F facts_reviews >/dev/null 2>&1; then jv="$(facts_reviews "$plan" "$jhead" 2>/dev/null)"; jrc=$?; fi
+  if [ "$jrc" -ne 2 ]; then
+    SG_T_REVIEWS_WHAT="the reviews, each question once as the judge reads it at the head"
+    read -r passed failed <<< "$(printf '%s\n' "$jv" | awk -F'\t' 'NF >= 3 && $3 != "absent" { if ($3 == "failing") f++; else p++ } END { print p + 0, f + 0 }')"
+  else
+    SG_T_REVIEWS_WHAT="the reviews, each question and scope once by its latest result"
+    read -r passed failed <<< "$(printf '%s\n' "$rv" | awk -F'\t' '
+      function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+      NF >= 6 { k = $1 SUBSEP $2; a = norm($4); if (!(k in r) || a == "-" || t[k] == "-" || a >= t[k]) { r[k] = $3; t[k] = a } }
+      END { for (k in r) { if (r[k] == "pass" || r[k] == "flag") p++; else if (r[k] == "fail") f++ }; print p + 0, f + 0 }')"
+  fi
   while IFS='	' read -r q sc res at ev nf; do
     [ -n "$q" ] || continue
     k="$(iso_epoch "$at" 2>/dev/null)"
@@ -1661,7 +1674,7 @@ sitrep_sheet() {
   sitrep_m tests.suites-run "$SG_T_RUN" "the suites run this wave, each by its last run" "count run: count green, count red" "source: the landing record's verdicts"
   sitrep_m tests.suites-total "$SG_T_TOTAL" "the suites in the project" "count" "source: the project's tests/*.test.sh, every suite tests/run.sh runs"
   sitrep_m tests.whole-run "$SG_T_WHOLE" "the whole regression" "not run (and why), or green or red at a commit" "source: the plan's regression: and its proof"
-  sitrep_m reviews "$SG_T_REVIEWS" "the reviews, each question and scope once by its latest result" "count passed, failed, running" "source: the review proofs and the review tasks in flight"
+  sitrep_m reviews "$SG_T_REVIEWS" "${SG_T_REVIEWS_WHAT:-the reviews, each question and scope once by its latest result}" "count passed, failed, running" "source: the review proofs and the review tasks in flight"
   sitrep_m findings.open "$SG_T_FINDINGS" "the review findings not yet closed" "count" "source: the review records"
   sitrep_m waste.dropped "$SG_W_DROPPED" "the tasks dropped, as work.dropped" "count, sized minutes" "source: the rows with status dropped"
   sitrep_m waste.runs-discarded "$SG_X_RUNS" "the suite runs thrown away" "count of all suite runs" "source: the landing record and the gate"
