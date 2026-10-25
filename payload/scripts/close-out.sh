@@ -1595,7 +1595,7 @@ epic_adrs() {
 # many words, that the wave shipped none (`adrs: none`), or the value as written when it names an ADR by a
 # path with no `adr-<n>` (the record is named, it has no number to give). Exit 1, nothing printed, when no
 # source says either way. "None shipped" and "not recorded" look the same on disk, so only the first is
-# written; the second refuses the row (wave-33 T8; D8, AC-3.3) and the refusal says which line to write.
+# written; the second refuses the row, and the refusal says which line to write.
 epic_adrs_cell() {
   local raw nums word
   raw="$(epic_adrs_value)"
