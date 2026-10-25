@@ -242,6 +242,27 @@ current_admit() {
       fi
     fi
   fi
+  # THE DOCUMENT STEP'S POINTER IS RENDERED WHERE THE EPIC ROW READS IT. The Step 7 block names the ADR (`adr:`,
+  # written by step-field 7) and close-out's epic row reads the plan's `adrs:` frontmatter, so the advance to 7
+  # writes the one from the other: the `adr:` value as written, or `none` when the block says n/a. A plan whose
+  # frontmatter already names its ADRs keeps the line as written; a block that says neither renders nothing.
+  if [ "$PV_KEY" = 7 ] && [ -z "$(plan_frontmatter_get "$PV_NEW" adrs 2>/dev/null)" ]; then
+    PV_ADRS="$(units_step_field "$PV_NEW" 7 adr 2>/dev/null)" || PV_ADRS=""
+    case "$PV_ADRS" in
+      n/a|n/a:*|none) PV_ADRS=none ;;
+      '') if units_step_field "$PV_NEW" 7 n/a >/dev/null 2>&1; then PV_ADRS=none
+          else case "$(units_step_text "$PV_NEW" 7 2>/dev/null)" in *n/a:*) PV_ADRS=none ;; esac; fi ;;
+    esac
+    if [ -n "$PV_ADRS" ] && PV_ADRS="$PV_ADRS" awk '
+        NR == 1 && $0 == "---" { f = 1; print; next }
+        f && $0 == "---" { print "adrs: " ENVIRON["PV_ADRS"]; f = 0; closed = 1; print; next }
+        f && /^adrs[ \t]*:/ { next }
+        { print }
+        END { if (!closed) exit 1 }' "$PV_NEW" > "$PV_NEW.2" 2>/dev/null; then
+      mv -f "$PV_NEW.2" "$PV_NEW"
+      PV_FILLED="$PV_FILLED; the frontmatter gained adrs: $PV_ADRS, from the Step 7 block"
+    fi
+  fi
   # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
   # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
   # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its

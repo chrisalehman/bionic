@@ -31,6 +31,7 @@
 #            cover reads it
 #   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one
 #            line with nothing run, and at the head the whole run read it does not refuse
+#   §STEP-FIELD  units_step_field reads the first key line of the block units_step_fields writes
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
@@ -1138,6 +1139,35 @@ expect_eq "SEC-1 the working head is H+1, past the whole run at H: refused (exit
 expect_eq "SEC-1b …in one line, naming the whole run's head and that a fix row's landing proves the head" \
   "poker: REFUSED — the whole run runs once, and ${SEC_H:0:12} has it ($SEC_REL/regression-run-$SEC_H.log): a red suite is a fix row's, and a fix row's landing proves the head ${SEC_H1:0:12}. Nothing was run." \
   "$SEC_OUT"
+
+
+# ============================================================
+section "§STEP-FIELD — units_step_field reads the block units_step_fields writes: the first key line, fences skipped"
+# ============================================================
+# The Step-7 advance and close-out's epic row both read the Step 7 block's `adr:` pointer; this is their one reader,
+# beside the writer, reading the block the writer writes. FIXTURE FIDELITY: a planted plan whose Step 7 block is
+# written by `units_step_fields` itself, with a fenced decoy block above and a second `adr:` line under the first.
+# fails-when: the reader reads the fenced decoy, the second line, another step's block, or calls a missing key found.
+SF_PLAN="$SANDBOX/step-field.plan.md"
+printf '# plan\n\n## SDLC State\n\ncurrent: 7\n```\n- Step 7: a fenced example\n  adr: fenced.md\n```\n- Step 7: n/a: no ADR owed here\n- Step 8: merge: main @ 0123abc\n  cleanup: n/a\n\n## Tasks\n' > "$SF_PLAN"
+sf_lib() { bash -c '. "$1" || exit 9; shift; "$@"' _ "$LIB" "$@"; }
+sf_lib units_step_fields "$SF_PLAN" 7 "adr=adrs/epic-x/adr-061-the-pointer.md" > "$SF_PLAN.w" && mv "$SF_PLAN.w" "$SF_PLAN"
+printf '%s\n' "$(awk '{ print } /^  adr: adrs/ { print "  adr: second.md" }' "$SF_PLAN")" > "$SF_PLAN.w" && mv "$SF_PLAN.w" "$SF_PLAN"
+expect_contains "SF-0 precondition: the writer put the adr: line under the Step 7 line" \
+  "- Step 7: n/a: no ADR owed here
+  adr: adrs/epic-x/adr-061-the-pointer.md" "$(cat "$SF_PLAN")"
+sf_get() { SF_OUT="$(sf_lib units_step_field "$@")"; SF_RC=$?; }
+sf_get "$SF_PLAN" 7 adr
+expect_eq "SF-1 the first adr: line of the Step 7 block, not the fenced decoy's or the second (exit 0)" \
+  "0|adrs/epic-x/adr-061-the-pointer.md" "$SF_RC|$SF_OUT"
+sf_get "$SF_PLAN" 7 n/a
+expect_eq "SF-2 a key the step line itself opens with is read from the step line" "0|no ADR owed here" "$SF_RC|$SF_OUT"
+sf_get "$SF_PLAN" 8 cleanup
+expect_eq "SF-3 another step's block is its own: Step 8's cleanup:" "0|n/a" "$SF_RC|$SF_OUT"
+sf_get "$SF_PLAN" 8 adr
+expect_eq "SF-4 a key the block does not carry: exit 2, nothing printed" "2|" "$SF_RC|$SF_OUT"
+sf_get "$SF_PLAN" 5 adr
+expect_eq "SF-5 a step with no line: exit 1, nothing printed" "1|" "$SF_RC|$SF_OUT"
 
 
 # ============================================================

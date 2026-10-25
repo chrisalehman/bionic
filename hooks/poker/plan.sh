@@ -480,16 +480,22 @@ matrix_block_has() {
 # binding (A-orch-145), so their run is the `--plan` operand when given, else the session's own run, open
 # or closed. Neither file is a run plan: the commit gate reads neither, so their transaction is the
 # copy, the checksum taken before the projection, the compare and the move, with no dry commit.
+# ENGAGEMENT GUARDS A RUN STILL MOVING. A delivered run's continuation marks are filled after close-out's last
+# act wiped the engagement, so `continuation-fill --plan <a delivered plan>` is taken from any session; a live
+# plan, and every other verb here, still asks engagement first.
 # pv_file_open <verb> <operand>... -> PV_REPO, PV_RPLAN, and the cleanup armed; every refusal exits.
 pv_file_open() {
-  local verb="$1" sid run cand="" p
+  local verb="$1" sid run cand="" p named=""
   shift
   sid="$(session_id)" || sid=""
   if [ -z "$sid" ]; then
     die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
     exit 3
   fi
-  if ! engaged_session "$(project_root "$PWD")" "$sid"; then
+  if [ "$verb" = continuation-fill ] && [ -n "${PV_PLAN_ARG:-}" ]; then
+    named="$(pv_plan_arg_file)" && plan_delivered "$named" || named=""
+  fi
+  if [ -z "$named" ] && ! engaged_session "$(project_root "$PWD")" "$sid"; then
     say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
     exit 0
   fi
@@ -501,10 +507,7 @@ pv_file_open() {
   PV_NEW=""
   trap 'rm -f ${PV_NEW:+"$PV_NEW" "$PV_NEW.2"}' EXIT
   if [ -n "${PV_PLAN_ARG:-}" ]; then
-    for p in "$PV_PLAN_ARG" "$PV_REPO/$PV_PLAN_ARG"; do
-      case "$p" in /*) : ;; *) p="$PWD/$p" ;; esac
-      [ -f "$p" ] && { PV_RPLAN="$p"; return 0; }
-    done
+    p="$(pv_plan_arg_file)" && { PV_RPLAN="$p"; return 0; }
     die "REFUSED — --plan $(clean "$PV_PLAN_ARG") is no file (read from $PWD and from $PV_REPO); nothing was written."
     exit 1
   fi
@@ -1630,7 +1633,13 @@ EOF
         die "REFUSED — a step field is one line, and the value has a line break; the plan is unchanged."
         exit 1 ;;
     esac
-    plan_verb_open step-field
+    # A DELIVERED RUN TAKES ITS MERGE RECORD BY NAME: Step 8 opens a delivered plan `--plan` names from any session,
+    # engaged or not; every other step is written through the session's binding, so `--plan` there is refused.
+    if [ "$PV_KEY" = 8 ]; then plan_verb_open step-field delivered-ok; else plan_verb_open step-field; fi
+    if [ -n "${PV_PLAN_ARG:-}" ] && [ "$PV_KEY" != 8 ]; then
+      die "REFUSED — --plan names a delivered run, which takes its Step 8 merge record by name and nothing else; Step $PV_KEY is written through this session's binding. The plan is unchanged."
+      exit 1
+    fi
     PV_RC=0
     units_step_fields --replace "$PV_PLAN" "$PV_KEY" "$PV_FKEY=$PV_FVAL" > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in

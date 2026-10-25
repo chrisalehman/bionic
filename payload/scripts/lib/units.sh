@@ -3217,6 +3217,33 @@ units_step_fields() {
     }' "$plan"
 }
 
+# units_step_field <plan> <N> <key> -> the value of the block's first `key:` line, blanks trimmed, read from the
+#   block `units_step_fields` writes: the step line itself when its text opens with `key:`, else the indented lines
+#   under it, fences skipped, the first `- Step N:` line of `## SDLC State`. The first line wins, as the gate reads it.
+#   Exit 0 printed · 1 no `Step N:` line in `## SDLC State` · 2 the block carries no such key.
+units_step_field() {
+  local plan="${1:-}" n="${2:-}" key="${3:-}"
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$n" ] && [ -n "$key" ] || return 1
+  UF_N="$n" UF_KEY="$key" awk '
+    function val(s) { sub("^[ \t]*" kq "[ \t]*:[ \t]*", "", s); sub(/[ \t]+$/, "", s); print s; got = 1; exit }
+    BEGIN {
+      pat = "^[ \t]*-?[ \t]*Step[ \t]+" ENVIRON["UF_N"] "[ \t]*:"
+      kq = ENVIRON["UF_KEY"]; gsub(/[][\\.^$*+?(){}|]/, "\\\\&", kq)
+    }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { if (sdlc == 1) sdlc = 2; if (!seen && $0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }; next }
+    sdlc != 1 { next }
+    !at {
+      if (match($0, pat)) { at = 1; rest = substr($0, RLENGTH + 1); if (rest ~ ("^[ \t]*" kq "[ \t]*:")) val(rest) }
+      next
+    }
+    /^[ \t]*$/ { next }
+    /^[^ \t]/ || /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/ { exit }
+    $0 ~ ("^[ \t]*" kq "[ \t]*:") { val($0) }
+    END { if (got) exit 0; exit (at ? 2 : 1) }' "$plan"
+}
+
 # units_chain <writer ceiling> — the longest chain of dependent work and the widest the plan can
 # run (wave-26 T3, REQ-7). Pure over stdin; it reads no plan, so the card hands it the nodes and
 # the edges it already holds:

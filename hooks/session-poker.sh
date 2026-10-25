@@ -525,7 +525,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value> [--plan <delivered plan>]   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only); --plan names a delivered run, whose Step 8 block any session may write"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
@@ -1026,9 +1026,20 @@ case "$VERB" in
     ;;
   # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17): a step and one `<key>=<value>`. The shapes are the
   # usage error's (2); the key set, the line break, a step with no line and Step 9 are the verb's own refusals (1).
+  # `--plan <plan>` names a delivered run whose Step 8 merge record is written after close-out let go of the session;
+  # it may stand anywhere after the step number.
   step-field)
+    PV_PLAN_ARG=""; _pv_ops=()
+    while [ $# -gt 0 ]; do
+      if [ "$1" = --plan ] && [ ${#_pv_ops[@]} -gt 0 ]; then
+        [ $# -ge 2 ] && [ -n "${2//[[:space:]]/}" ] || usage "step-field: --plan takes the run's plan."
+        PV_PLAN_ARG="$2"; shift 2; continue
+      fi
+      _pv_ops+=("$1"); shift
+    done
+    set -- ${_pv_ops[@]+"${_pv_ops[@]}"}
     if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-      usage "step-field takes <N> <key>=<value>: a step number and one field."
+      usage "step-field takes <N> <key>=<value>: a step number and one field, then optionally --plan <a delivered plan>."
     fi
     case "$1" in
       [0-9]|[0-9][ab]) : ;;
@@ -2934,19 +2945,51 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 # Set here, before any verb runs, so a value in the caller's environment never chooses the exit
 # (wave-26 T54; review 17 N2).
 PV_RACE_RC=""
-# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
-# and arms the cleanup; exits on every refusal above. `closed-ok` (task-set --reason, wave-36 T14; AC-7.7) also
-# takes the session's own closed run (bound-closed) when its plan is on disk; engagement is asked first either way
-# (ruling r1791954201-85499: engagement is the consent boundary).
+# plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable),
+# its frontmatter carries no `abandoned:`, and a `Step 9:` line carries `delivered:`. 1 otherwise, silent. The plan
+# is judged where it lies, so an archived plan is still its run's: lib/binding.sh `bind_delivered` asks the same of a
+# docs-root candidate only, which an archived plan is not.
+plan_delivered() {
+  local lines rc=0
+  [ -f "${1:-}" ] || return 1
+  run_open "$1" || rc=$?
+  [ "$rc" -eq 1 ] || return 1
+  lines=$(_run_lines "$1")
+  awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^abandoned:/ { a = 1 } END { exit !a }' \
+    <<< "$lines" && return 1
+  grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"
+}
+
+# pv_plan_arg_file -> the file `--plan` (PV_PLAN_ARG) names, read from the working directory and then from the
+# project root; nothing, exit 1, when it names no file.
+pv_plan_arg_file() {
+  local root p
+  root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+  for p in "$PV_PLAN_ARG" ${root:+"$root/$PV_PLAN_ARG"}; do
+    case "$p" in /*) : ;; *) p="$PWD/$p" ;; esac
+    [ -f "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
+  return 1
+}
+
+# plan_verb_open <verb> [closed-ok|delivered-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK,
+# PV_SID and arms the cleanup; exits on every refusal above. `closed-ok` (task-set --reason) also takes the session's
+# own closed run (bound-closed) when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING,
+# so it is asked first, except where `delivered-ok` names the one write a delivered run accepts from any session:
+# then a delivered plan named by `--plan` is opened with no engagement asked (close-out's last act wiped it), the
+# bound-closed run is taken as `closed-ok` takes it, and `--plan` naming anything else is refused once engagement is.
 plan_verb_open() {
-  local verb="$1" closed="${2:-}" sid run
+  local verb="$1" closed="${2:-}" sid run named=""
   sid="$(session_id)" || sid=""
   if [ -z "$sid" ]; then
     die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
     die "$verb writes ONE session's bound plan, so without the key there is nothing to write."
     exit 3
   fi
-  if ! engaged_session "$(project_root "$PWD")" "$sid"; then
+  if [ "$closed" = delivered-ok ] && [ -n "${PV_PLAN_ARG:-}" ]; then
+    named="$(pv_plan_arg_file)" && plan_delivered "$named" || named=""
+  fi
+  if [ -z "$named" ] && ! engaged_session "$(project_root "$PWD")" "$sid"; then
     say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
     exit 0
   fi
@@ -2955,12 +2998,19 @@ plan_verb_open() {
     die "REFUSED — cannot resolve the working directory."
     exit 2
   fi
-  run="$(session_run "$PV_REPO" "$sid")"
   PV_PLAN=""
-  case "$run" in
-    'bound-open '*) PV_PLAN="${run#bound-open }" ;;
-    'bound-closed '*) [ "$closed" != closed-ok ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
-  esac
+  if [ -n "$named" ]; then
+    PV_PLAN="$named"; run="named-delivered $named"
+  elif [ "$closed" = delivered-ok ] && [ -n "${PV_PLAN_ARG:-}" ]; then
+    die "REFUSED — --plan $(clean "$PV_PLAN_ARG") is no delivered run's plan: $verb writes a delivered run by name, and a live run through this session's binding. The plan is unchanged."
+    exit 1
+  else
+    run="$(session_run "$PV_REPO" "$sid")"
+    case "$run" in
+      'bound-open '*) PV_PLAN="${run#bound-open }" ;;
+      'bound-closed '*) [ "$closed" = "" ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
+    esac
+  fi
   if [ -z "$PV_PLAN" ]; then
     die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
     die "Bind this session to its run first (this script's bind verb), then run $verb again."

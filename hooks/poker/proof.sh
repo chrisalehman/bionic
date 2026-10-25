@@ -353,19 +353,68 @@ proof_run_counts() {
   # checksum, swap), beside the approval lines already there — after the last `approved:` or
   # `approved-by:` line, else after `current:`. An approval is recorded once: a second `approve` of
   # a name the plan already carries is refused, so the first reply stands, except `release` at a
-  # head its newest line does not name: the release is approved per head. `plan` is refused
-  # by name: the plan's approval is the `approved-by:` line Step 3 writes, which `approval:plan` reads.
+  # head its newest line does not name: the release is approved per head.
+  #
+  # THE PLAN'S APPROVAL IS ITS OWN LINE. `approve plan '<reply>'` writes, at Step 3 on the user's reply,
+  #
+  #   approved-by: <who> <ISO-UTC> "<reply>"
+  #
+  # the line the commit gate reads from Step 4 (walls.sh `validate_approved_by`) and `approval:plan` reads,
+  # in that grammar and not `approved:`'s, through the same transaction and placement. Every row may read
+  # the plan's approval, so the name is not held to the rows' reads; a plan that carries the line keeps it.
+  # ap_place <line> <plan> -> the plan with <line> after the last `approved:` or `approved-by:` line of
+  # `## SDLC State`, else after `current:`; exit 1 when the section has neither. THE LINE GOES IN THROUGH
+  # THE ENVIRONMENT, not `-v`, which would read a backslash in the user's reply as an escape and write a
+  # different reply than the one given.
+  ap_place() {
+    AP_LINE="$1" awk '
+      { L[++n] = $0 }
+      END {
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
+          if (fence) continue
+          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
+          if (!insdlc) continue
+          if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) at = i
+          else if (!at && !cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
+        }
+        if (!at) at = cur
+        if (!at) exit 1
+        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["AP_LINE"] }
+      }' "$2"
+  }
   poker_verb_approve() {
-    if [ "$AP_NAME" = plan ]; then
-      die "REFUSED — approval:plan is the plan's approved-by: line, written at Step 3 when the user approves the plan card; approve records any other approval a row reads (approval:<name>). The plan is unchanged."
-      exit 1
-    fi
     case "$AP_REPLY" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — an approval line is one line, and the reply carries a line break; the plan is unchanged."
         exit 1 ;;
     esac
     plan_verb_open approve
+    if [ "$AP_NAME" = plan ]; then
+      AP_HAVE="$(awk '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && /^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/ { print; exit }' "$PV_PLAN")"
+      if [ -n "$AP_HAVE" ]; then
+        die "REFUSED — $PV_PLAN already records the plan's approval: $(clean "$AP_HAVE"). An approval is recorded once; the plan is unchanged."
+        exit 1
+      fi
+      AP_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+      if [ -z "$AP_WHO" ] || ! plan_verb_value_ok "$AP_WHO"; then
+        die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
+        exit 1
+      fi
+      AP_LINE="approved-by: $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$AP_REPLY\""
+      if ! ap_place "$AP_LINE" "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+        die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
+        exit 1
+      fi
+      plan_verb_swap approve "approved-by:" writer
+      poker_owed_close "$PV_REPO" "approve:plan" "approve"
+      say "approve — plan: $AP_LINE written to $PV_PLAN; dry-committed first. The commit gate reads it from Step 4."
+      exit 0
+    fi
     # A NAME NO ROW READS IS REFUSED (wave-26 T46; review 10 F6). `approve relase` used to be
     # recorded "once" while the release kept waiting in silence; the names the rows read, as
     # `approval:<name>` or `live:approval:<name>` (units.sh `units_approval_names`), are the only
@@ -402,23 +451,7 @@ proof_run_counts() {
       exit 1
     fi
     AP_LINE="approved: $AP_NAME by $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ)${AP_HEAD:+ head=$AP_HEAD} \"$AP_REPLY\""
-    # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
-    # user's reply as an escape and write a different reply than the one given.
-    if ! AP_LINE="$AP_LINE" awk '
-      { L[++n] = $0 }
-      END {
-        for (i = 1; i <= n; i++) {
-          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
-          if (fence) continue
-          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
-          if (!insdlc) continue
-          if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) at = i
-          else if (!at && !cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
-        }
-        if (!at) at = cur
-        if (!at) exit 1
-        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["AP_LINE"] }
-      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+    if ! ap_place "$AP_LINE" "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
       die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
       exit 1
     fi

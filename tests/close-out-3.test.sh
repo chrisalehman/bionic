@@ -725,4 +725,72 @@ expect_eq "ORDER-9 after the person merges the published tip, the run closes and
 expect_eq "ORDER-9b …and rendered no second part: the branch is where the first run left it" "$OM_TIP" \
   "$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
 
+# ============================================================
+section "§ADRS — the Step-7 advance renders adrs: from the Step 7 adr: line, and close-out's epic row reads either (REQ-9 AC-9.1)"
+# ============================================================
+# The document step's pointer is the Step 7 block's `adr:` line (`step-field 7 adr=…`); the epic row reads the plan's
+# `adrs:` frontmatter, which no verb wrote, so a plan with the first and not the second was refused its row. `current 7`
+# renders `adrs:` from the block when the frontmatter has none (`adrs: none` when the block says n/a), and never
+# rewrites one that is there; close-out reads the frontmatter, else the Step 7 `adr:` line. An ADR path with no
+# `adr-<n>` gives no number, so the row carries the path as written. FIXTURE FIDELITY: mk_fixture's plan with its
+# `adrs:` line taken out and its Step 7 line written as `step-line 7` and `step-field 7 adr=` write it; the advance is
+# the real verb, run as a session bound to the plan.
+# fails-when: a plan with `adr:` on its Step 7 line and no `adrs:` makes `epic_row_missing` refuse the row.
+ad_step7() {  # <project> <adr value> -> the plan without adrs:, its Step 7 line a block carrying adr: <value>
+  local plan="$1/$PLAN_REL"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "ad_step7: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  AD_V="$2" awk '
+    NR == 1 { fm = 1 } fm && NR > 1 && /^---$/ { fm = 0 }
+    fm && /^adrs:/ { next }
+    /^- Step 7:/ { print "- Step 7: document: the ADR is written"; print "  adr: " ENVIRON["AD_V"]; next }
+    { print }' "$plan" > "$plan.a" && mv "$plan.a" "$plan"
+}
+ad_adrs() { awk 'NR == 1 { fm = 1; next } fm && /^---$/ { exit } fm && /^adrs:/ { sub(/^adrs:[ \t]*/, ""); print }' "$1"; }
+ad_poke() {  # <project> <sid> <verb> [<arg>...] -> AD_RC, AD_OUT: the real poker verb, in the fixture, as that session
+  local proj="$1" sid="$2"; shift 2
+  ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      CLAUDE_CODE_SESSION_ID="$sid" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) > "$SANDBOX/ad-poker" 2>&1
+  AD_RC=$?; AD_OUT="$(cat "$SANDBOX/ad-poker")"
+}
+ad_bind() { ( in_fixture "$1" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$1" "$2" "$1/$PLAN_REL" ); }
+AD_ADR="adrs/epic-fx/adr-061-the-pointer.md"
+# close-out reads either: the plan carries the Step 7 adr: line and no adrs:
+PAD="$(mk_fixture adrs-either)"; ad_step7 "$PAD" "$AD_ADR"; advance_to "$PAD" 8
+expect_eq "AD-0 precondition: the plan carries no adrs: line, and its Step 7 block the adr: line" "|yes" \
+  "$(ad_adrs "$PAD/$PLAN_REL")|$(/usr/bin/grep -qxF "  adr: $AD_ADR" "$PAD/$PLAN_REL" && echo yes || echo no)"
+run_close "$PAD" run
+expect_eq "AD-1 close-out reads the Step 7 adr: line: run exits 0 and the epic row's ADR cell names its number" "0|061" "$CO_RC|$(adr_cell "$PAD")"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | /usr/bin/grep -i 'adrs\|refuse' | head -4 | sed 's/^/    | /'
+# the advance renders the line, from a session bound to the plan
+AD_SID="closeout-adrs-sid"
+PAV="$(mk_fixture adrs-advance)"; ad_step7 "$PAV" "$AD_ADR"; advance_to "$PAV" 6; ad_bind "$PAV" "$AD_SID"
+ad_poke "$PAV" "$AD_SID" current 7
+expect_eq "AD-2 current 7 renders adrs: from the Step 7 adr: line: rc 0, current: 7, the frontmatter names the ADR" \
+  "0|7|$AD_ADR" "$AD_RC|$(sed -n 's/^current: //p' "$PAV/$PLAN_REL")|$(ad_adrs "$PAV/$PLAN_REL")"
+[ "$AD_RC" = 0 ] || printf '%s\n' "$AD_OUT" | tail -6 | sed 's/^/    | /'
+expect_contains "AD-2b …and says what it rendered" "adrs: $AD_ADR" "$AD_OUT"
+advance_to "$PAV" 8
+run_close "$PAV" run
+expect_eq "AD-3 the rendered line closes the run: rc 0 and the epic row names 061" "0|061" "$CO_RC|$(adr_cell "$PAV")"
+# an ADR named by a path with no adr-<n>: the line is rendered, and the row carries the path
+PAP="$(mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 6; ad_bind "$PAP" "$AD_SID"
+ad_poke "$PAP" "$AD_SID" current 7
+expect_eq "AD-4 a path with no adr-<n> is rendered as written" "0|record/wave-01-fixture/adr.md" "$AD_RC|$(ad_adrs "$PAP/$PLAN_REL")"
+advance_to "$PAP" 8
+run_close "$PAP" run
+expect_eq "AD-5 …and the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
+# a Step 7 that says n/a renders adrs: none; an adrs: line already there is never rewritten
+PAN="$(mk_fixture adrs-na)"; advance_to "$PAN" 6; ad_bind "$PAN" "$AD_SID"
+awk 'NR == 1 { fm = 1 } fm && NR > 1 && /^---$/ { fm = 0 } fm && /^adrs:/ { next }
+  /^- Step 7:/ { print "- Step 7: document: no ADR"; print "  n/a: no ADR owed by a fixture"; next } { print }' \
+  "$PAN/$PLAN_REL" > "$PAN/plan.tmp" && mv "$PAN/plan.tmp" "$PAN/$PLAN_REL"
+ad_poke "$PAN" "$AD_SID" current 7
+expect_eq "AD-6 a Step 7 line that says n/a renders adrs: none" "0|none" "$AD_RC|$(ad_adrs "$PAN/$PLAN_REL")"
+[ "$AD_RC" = 0 ] || printf '%s\n' "$AD_OUT" | tail -6 | sed 's/^/    | /'
+PAK="$(mk_fixture adrs-kept)"; ad_step7 "$PAK" "$AD_ADR"; advance_to "$PAK" 6; ad_bind "$PAK" "$AD_SID"
+set_plan_keys "$PAK" "-" "adrs: adrs/epic-fx/adr-060-written-by-hand.md"
+ad_poke "$PAK" "$AD_SID" current 7
+expect_eq "AD-7 an adrs: line the plan carries is kept as written" "0|adrs/epic-fx/adr-060-written-by-hand.md" "$AD_RC|$(ad_adrs "$PAK/$PLAN_REL")"
+
 finish
