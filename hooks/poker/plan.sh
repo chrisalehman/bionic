@@ -3076,16 +3076,16 @@ RR_DISP_EOF
     done
 
     # THE MERGE WITHOUT A PASS AT THIS HEAD is the person's own decision, put beside the release and the merge while the
-    # whole suite is not green here (lib/proof.sh `proof_whole_text`, the one printer) and no word was given at this
-    # head (`proof_unproved_approved`): the gate at 8 holds the merge on it (`facts_state`'s unproved). Waiting for the
-    # pass is recommended and taking the default records nothing, so only the person's own `merge` writes the line. A
-    # plan that owes no whole run, or holds no proof of one, has no pass to wait for and is asked nothing here.
+    # whole suite did not run green here and no word was given at this head, by the rule the gate at 8 holds the merge
+    # on (lib/proof.sh `proof_merge_unproved`, `facts_state`'s unproved). Waiting for the pass is recommended and taking
+    # the default records nothing, so only the person's own `merge` writes the line. A plan that owes no whole run, or
+    # holds no proof of one, has no pass to wait for and is asked nothing here.
     RR_WHOLE="$(proof_whole_text "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
     case "$RR_WHOLE" in
-      "green at "*|none|'') : ;;
-      *) if [ "$(proof_regression "$PV_PLAN")" != no ] && ! proof_unproved_approved "$PV_PLAN" "$RR_HEAD"; then
+      none|'') : ;;
+      *) if [ "$(proof_regression "$PV_PLAN")" != no ] && line="$(proof_merge_unproved "$PV_PLAN" "$PV_REPO" "$RR_HEAD" 2>/dev/null)"; then
            rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
-             "Merge without a whole run at this head — $RR_WHOLE" "wait for the pass" "merge without it" \
+             "Merge without a whole run at this head — $line" "wait for the pass" "merge without it" \
              "wait for the pass" "merge without a whole run at this head"
          fi ;;
     esac

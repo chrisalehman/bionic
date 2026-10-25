@@ -1771,6 +1771,21 @@ proof_unproved_approved() {
   [ -n "${2:-}" ] && [ "$h" = "$2" ]
 }
 
+# proof_merge_unproved <plan> <tree> <head> -> the whole suite's state at <head> (`proof_whole_text`) and exit 0 when a
+# merge at <head> needs the person's word: no pass ran green at it and no word was given at it. Exit 1, nothing
+# printed, when the pass ran green there or the word was given there. A <head> that is the release entry's reviews part
+# rendered fresh on its parent is judged at that parent (`proof_part_base`): the part is written after the pass and the
+# word, from the lines they left, so it asks neither again. THE ONE RULE the release card's ask and the judge's
+# unproved state share, so the card asks exactly what the gate holds the merge on.
+proof_merge_unproved() {
+  local plan="$1" tree="$2" head="$3" at
+  at="$(proof_part_base "$plan" "$tree" "$head")"
+  proof_unproved_approved "$plan" "$head" && return 1
+  [ "$at" = "$head" ] || ! proof_unproved_approved "$plan" "$at" || return 1
+  case "$(proof_whole_text "$plan" "$tree" "$at")" in "green at "*) return 1 ;; esac
+  proof_whole_text "$plan" "$tree" "$head"
+}
+
 # proof_unproved_needs <plan> <tree> <head> -> the exit of a merge the whole suite has not run at, one line:
 # `needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass`,
 # <n> the decision number the newest release card rendered at <head> gives `approve:merge-unproved` (its replay table,
@@ -2297,7 +2312,7 @@ proof_debts_open() {
 # D3; wave-35 T9, D8): covered; owed with the reds of its whole run still open; or uncovered from its proof's
 # head to <head>, with the reason that names the first commit past it no recorded run proves. With no
 # regression proof it is absent. Covered holds only where the whole suite ran green at <head> or the person gave
-# their word at it (`proof_unproved_approved`); past F otherwise it is
+# their word at it (`proof_merge_unproved`); past F otherwise it is
 #     unproved<TAB><the whole suite's state, proof_whole_text's><TAB><its exit, proof_unproved_needs's>
 # the merge-without-a-pass the release card asks. <head> is the caller's, read from the working branch's ref
 # (`proof_branch_head`), never a checkout's (A-orch-45).
@@ -2388,12 +2403,8 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings 
           # holds only on the person's word given at this head (`approved: merge-unproved … head=<head>`), and is
           # unproved until then, naming that word and the pass as its two exits. A red the whole run left open is no
           # such head: the word never waives a suite.
-          if [ "$st" = covered ] && ! proof_unproved_approved "$plan" "$head"; then
-            ws="$(proof_whole_text "$plan" "$tree" "$head")"
-            case "$ws" in
-              "green at "*) : ;;
-              *) st="unproved	$ws	$(proof_unproved_needs "$plan" "$tree" "$head")" ;;
-            esac
+          if [ "$st" = covered ] && ws="$(proof_merge_unproved "$plan" "$tree" "$head")"; then
+            st="unproved	$ws	$(proof_unproved_needs "$plan" "$tree" "$head")"
           fi
           case "$st" in
             covered|owed"	"?*|unproved"	"?*) : ;;
