@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -829,6 +829,78 @@ expect_eq "OWED-2 a born row (CAP-3d's T8) ends on the same line, its title with
 poke "$RCP" task-add T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-3 a refused task-add says nothing is owed" "1|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed:')"
 POKE_BOUND="$CP_BOUND_WAS"
+# ============================================================
+section "§EXEMPT: a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts, and task-add says which count it applied"
+# ============================================================
+# A defect the wave made, the wave fixes, so the cap counts only the rows a review adds beyond them. A row rated inside
+# fix-policy: (here the default, S1,S2-on) lands however many the review raised; a finding the person moved to fix from
+# outside the policy, and a finding carried in from another plan's record directory, count against fix-cap:.
+# FIXTURE FIDELITY: s34's plan at current: 4 with `fix-cap: 2` in its frontmatter, as Step 3 writes the field; two
+# readings registered in the shape `proof-add review` writes, their records holding findings in the reader's shape, one
+# record this plan's own and one another plan's; the person's moves to fix planted as `finding-move` writes them; every
+# row is the real verb's.
+# fails-when: a third row inside the policy is refused at fix-cap: 2; a promoted or a carried row lands uncounted; a
+# third counted row lands; the refusal names neither the counted and exempt figures nor its exit; the line task-add
+# prints names the wrong count, or none.
+EX_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+REX="$(make_repo exempt)"; ( cd "$REX" && git commit -q --allow-empty -m init )
+PEX="$(s34_plan "$REX" 4)"; EX_H="$(git -C "$REX" rev-parse HEAD)"
+EX_OWN="record/wave-01-fixture/rev.md"; EX_CARRIED="record/wave-00-prior/critic.md"
+mkdir -p "$REX/.bionic/docs/record/wave-01-fixture" "$REX/.bionic/docs/record/wave-00-prior"
+printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 3\nfinding: 1 S3 on lib/p1.sh:1 the first promoted defect\nfinding: 2 S3 on lib/p2.sh:1 the second promoted defect\nfinding: 3 S3 on lib/p3.sh:1 the third promoted defect\nshown: 1 cat lib/p1.sh\nshown: 2 cat lib/p2.sh\nshown: 3 cat lib/p3.sh\n' \
+  "$EX_H" "$EX_H" > "$REX/.bionic/docs/$EX_OWN"
+printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S2 on lib/c1.sh:1 the carried defect\nshown: 1 cat lib/c1.sh\n' \
+  "$EX_H" "$EX_H" > "$REX/.bionic/docs/$EX_CARRIED"
+EX_H="$EX_H" EX_OWN="$EX_OWN" EX_CARRIED="$EX_CARRIED" awk '
+  { print }
+  /^rigor: / && !fm { fm = 1; print "fix-cap: 2" }
+  /^approved-by: / && !st {
+    st = 1
+    print "proved: kind=review head=" ENVIRON["EX_H"] " at=2026-10-20T00:00:00Z evidence=" ENVIRON["EX_OWN"] " question=structure reader=w-rev result=fail scope=piece"
+    print "proved: kind=review head=" ENVIRON["EX_H"] " at=2026-10-20T00:00:00Z evidence=" ENVIRON["EX_CARRIED"] " question=adversarial reader=w-adv result=fail scope=piece"
+    for (i = 1; i <= 3; i++) print "moved: " ENVIRON["EX_OWN"] "#" i " to=fix by=Dana at=2026-10-20T01:00:00Z words=\"fix it in this wave\" why=\"the user ruled it\""
+  }' "$PEX" > "$PEX.n" && mv "$PEX.n" "$PEX"
+ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row born of <born>
+  poke "$REX" task-add "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
+}
+ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
+ex_mark() { /usr/bin/grep "^- $1: " "$PEX" | sed -n 's/.* born: /born: /p'; }
+expect_eq "EX-0 precondition: the plan reads fix-cap: 2 and no fix-policy: (the default, S1,S2-on), and both findings are read" \
+  "2||3|1" "$(sed -n 's/^fix-cap: //p' "$PEX")|$(sed -n 's/^fix-policy: //p' "$PEX")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_OWN")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_CARRIED")"
+
+# Inside the policy, the review's own defects land however many there are.
+ex_add T6 lib/e6.sh 'review S2 on'
+expect_eq "EX-1 the first row born review S2 on lands (exit 0)" "0" "$RC"
+expect_contains "EX-1b …and says it was exempt under the policy (AC-1.3)" " · exempt under fix-policy: S1,S2-on" "$(ex_born_line)"
+ex_add T7 lib/e7.sh 'review S2 on'
+expect_eq "EX-2 the second lands (exit 0)" "0" "$RC"
+ex_add T8 lib/e8.sh 'review S2 on'
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "EX-3 the third born review S2 on row lands at fix-cap: 2 (exit 0): inside fix-policy: it is exempt (AC-1.1)" "0" "$RC"
+EX_LINE="$(ex_born_line)"
+expect_contains "EX-3b …its line ends exempt under fix-policy: S1,S2-on (AC-1.3)" " · exempt under fix-policy: S1,S2-on" "$EX_LINE"
+expect_absent "EX-3c …and names no count of the cap for an exempt row (AC-1.3)" "of cap" "$EX_LINE"
+expect_eq "EX-3d …its ledger marker is the plain rating" "born: review S2 on" "$(ex_mark T8)"
+
+# A carried finding and a promoted one count; the third counted row is refused.
+ex_add T9 lib/c1.sh "$EX_CARRIED#1"
+expect_eq "EX-4 a finding carried from another plan's record lands, counted (exit 0)" "0" "$RC"
+expect_contains "EX-4b …its line ends counted 1 of 2 (AC-1.3)" " · counted 1 of 2" "$(ex_born_line)"
+expect_eq "EX-4c …its marker names the carried record, as task-add has always written it" "born: review S2 on of=$EX_CARRIED#1" "$(ex_mark T9)"
+ex_add T10 lib/p1.sh "$EX_OWN#1"
+expect_eq "EX-5 a finding rated S3 on that the person moved to fix lands, counted (exit 0)" "0" "$RC"
+expect_contains "EX-5b …its line ends counted 2 of 2 (AC-1.3)" " · counted 2 of 2" "$(ex_born_line)"
+expect_eq "EX-5c …its marker says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
+EX_BEFORE="$(cat "$PEX")"
+ex_add T11 lib/p2.sh "$EX_OWN#2"
+expect_eq "EX-6 a third counted row, promoted from S3 on, is refused at fix-cap: 2 (exit 1) (AC-1.2)" "1" "$RC"
+expect_contains "EX-6b …the refusal names the counted and exempt figures and its exit" \
+  "task-add refused — review-born rows: 2 of cap 2 are counted (3 exempt under fix-policy: S1,S2-on); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=3 at the card." "$OUT"
+expect_eq "EX-6c …and the plan is unchanged" "$EX_BEFORE" "$(cat "$PEX")"
+ex_add T11 lib/e11.sh 'review S1 off'
+expect_eq "EX-7 control: with the cap full, a row born review S1 off still lands (exit 0): S1 is inside the policy at either reach" "0" "$RC"
+expect_contains "EX-7b …exempt" " · exempt under fix-policy: S1,S2-on" "$(ex_born_line)"
+POKE_BOUND="$EX_BOUND_WAS"
 
 # ============================================================
 section "§APPROVED-BY: approve plan '<reply>' writes the approved-by: line the walls read, with the user's words, once (REQ-9 AC-9.2)"
