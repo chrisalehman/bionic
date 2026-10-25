@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
-# (row-landed, deliver, reviews-part, release-note).
+# (row-landed, deliver, reviews-part, known-limits-part, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -28,15 +28,15 @@ landing_evidence() {
     END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' "$rec" 2>/dev/null )"
   if [ -z "$logs" ]; then printf '0'; return 0; fi
   LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
-    awk "$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
+    awk "$(units_ac_head_awk)$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
   n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
   case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
   if [ "$n" -gt 0 ]; then
     # The criteria whose block took a log: the pass replaces lines in place, so a line that differs is an evidence line.
-    awk '
+    awk "$(units_ac_head_awk)"'
       NR == FNR { a[FNR] = $0; next }
       /^## / { inm = ($0 ~ /^## Verification Matrix/); cur = ""; next }
-      inm && /^[^ \t|]/ { h = $0; sub(/^[-*+][ \t]+/, "", h); cur = ""; if (match(h, /^AC-[^ \t:]+:/)) cur = substr(h, 1, RLENGTH - 1); next }
+      inm && /^[^ \t|]/ { cur = ac_any($0); next }
       cur != "" && $0 != a[FNR] && !(cur in s) { s[cur] = 1; printf "%s%s", sep, cur; sep = " " }' "$in" "$out.le" > "$out.cells" 2>/dev/null
     mv -f "$out.le" "$out"
   else
@@ -1069,6 +1069,130 @@ poker_verb_reviews_part() {
     exit 1
   fi
   say "reviews-part — $LINE_RV_N review and waiver lines rendered under ### The reviews of the $LINE_RV_VER entry, committed ${LINE_RV_COMMIT:0:12} on $wb; open the pull request from it."
+  exit 0
+}
+
+# ---------------------------------------------------------------- the release entry's Known limits, from the deferrals
+#
+# THE ENTRY'S KNOWN LIMITS ARE THE RUN'S DEFERRALS. `known-limits-part <row>` renders the release entry's
+# `### Known limits` from the plan alone: one bullet per open deferral (lib/proof.sh `proof_findings_owed` rating it
+# `defer`), its stated sentence (`deferral_sentence`, unescaped), in the order the plan wrote them. That is the
+# release check's own reading of the deferrals (tests/lib/release-check.sh `lim_check`), so every sentence the check
+# looks for stands in the part it scans. The part replaces the entry's own (its heading to the next heading; a doubled
+# heading is one part), else goes in before `### The landing numbers`, else at the entry's end, and nothing else in
+# the file changes. It is committed on the working branch under the line's author through the reviews part's commit
+# path (lib/line.sh `line_reviews_checkout`, `line_reviews_commit`, `line_reviews_move`), so it is on the branch the
+# check judges, and the landing record gains `ev=<row kind>|row=<row>|part=known-limits|commit=<c>|branch=<working>`.
+# The rows that render it are the entry's own, the doc row that writes it and the integrate row that carries it, while
+# pending or active. A deferral with no sentence is refused, naming the verb that states it: the check refuses a part
+# without it. Nothing owed, or the part already as rendered: nothing is made, exit 0. The branch moves on this machine
+# alone; it leaves it by the person's push. Nothing records a stated assumption, so the deferrals are the whole part.
+KL_UNSTATED=""
+known_limits_part() {  # <plan> -> the part, heading to its closing blank line; nothing when no deferral is owed.
+  # rc 1, KL_UNSTATED naming it, at the first open deferral that states no sentence.
+  local plan="$1" id s r p t st n=0 body=""
+  KL_UNSTATED=""
+  while read -r id s r p t; do
+    [ "$p" = defer ] || continue
+    st="$(deferral_sentence "$plan" "$id")" || st=""
+    if [ -z "$st" ] || [ "$st" = - ]; then KL_UNSTATED="$id"; return 1; fi
+    body="${body}- ${st}"$'\n'; n=$((n + 1))
+  done < <(proof_findings_owed "$plan" 2>/dev/null)
+  [ "$n" -gt 0 ] || return 0
+  printf '### Known limits\n\n%s\n\n%s\n' \
+    "Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered." "$body"
+}
+known_limits_entry() {  # <changelog> <version> <part file> -> the changelog with the entry's Known limits rendered
+  awk -v v="## $2 " -v pf="$3" '
+    function put(   l) { if (last != "") print ""; while ((getline l < pf) > 0) print l; close(pf); done = 1; last = "" }
+    /^## / { if (inb && !done) put(); inb = (index($0, v) == 1); inp = 0 }
+    /^### / {
+      t = $0; sub(/[[:space:]]+$/, "", t); inp = 0
+      if (inb && t == "### Known limits") { if (!done) put(); inp = 1; next }
+      if (inb && !done && t == "### The landing numbers") put()
+    }
+    inp { next }
+    { print; last = $0 }
+    END { if (inb && !done) put() }' "$1"
+}
+poker_verb_known_limits_part() {
+  local row kind status wb head ver tmp why n call="bash $HOOK_DIR/session-poker.sh"
+  if ! plan_verb_id_ok "$PV_ID"; then
+    die "REFUSED — '$(clean "$PV_ID")' is not one row id; nothing was rendered."
+    exit 1
+  fi
+  plan_verb_open known-limits-part
+  if ! { declare -F line_reviews_commit >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+     || ! declare -F line_reviews_commit >/dev/null 2>&1 || ! _line_load_proof || ! declare -F proof_findings_owed >/dev/null 2>&1; then
+    die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
+    exit 2
+  fi
+  row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id { print; exit }')"
+  if [ -z "$row" ]; then
+    die "REFUSED — the ## Tasks table of $PV_PLAN carries no row $PV_ID; nothing was rendered."
+    exit 2
+  fi
+  kind="$(units_field "$row" kind)"; status="$(units_field "$row" status)"
+  case "$kind" in
+    doc|integrate) : ;;
+    *) die "REFUSED — $PV_ID is a $(clean "$kind") row, and the entry's Known limits are rendered by the row that writes the entry or carries it (doc or integrate); nothing was rendered."
+       exit 2 ;;
+  esac
+  case "$status" in
+    pending|active) : ;;
+    *) die "REFUSED — $PV_ID reads $(clean "$status"), and the part is rendered before its row lands; nothing was rendered."; exit 2 ;;
+  esac
+  ver="$(plan_frontmatter_get "$PV_PLAN" release)"
+  if [ -z "$ver" ]; then
+    say "known-limits-part — nothing to render: the plan names no release:."
+    exit 0
+  fi
+  wb="$(plan_working_branch "$PV_PLAN")"
+  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
+  if [ -z "$head" ]; then
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO; nothing was rendered."
+    exit 2
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/known-limits-part.XXXXXX")" || { die "REFUSED — no temporary directory; nothing was rendered."; exit 2; }
+  if ! known_limits_part "$PV_PLAN" > "$tmp/part"; then
+    rm -rf "$tmp"
+    die "REFUSED — $(clean "$KL_UNSTATED") is deferred with no stated sentence, and the release check refuses a deferral with none: state it, $call finding-stated $(clean "$KL_UNSTATED") '<sentence>', then render again. Nothing was rendered."
+    exit 2
+  fi
+  n="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
+  if [ "${n:-0}" -eq 0 ]; then
+    rm -rf "$tmp"; say "known-limits-part — nothing to render: the plan owes no deferral."
+    exit 0
+  fi
+  if ! git -C "$PV_REPO" show "${head}:CHANGELOG.md" > "$tmp/old" 2>/dev/null || ! /usr/bin/grep -q "^## ${ver} " "$tmp/old"; then
+    rm -rf "$tmp"
+    die "REFUSED — CHANGELOG.md on $wb holds no ## $ver entry for the plan's $n deferred sentences; write the entry, then render. Nothing was rendered."
+    exit 2
+  fi
+  known_limits_entry "$tmp/old" "$ver" "$tmp/part" > "$tmp/new"
+  if cmp -s "$tmp/old" "$tmp/new"; then
+    rm -rf "$tmp"
+    say "known-limits-part — the $ver entry's ### Known limits on $wb already lists the plan's $n deferred sentences; nothing was made."
+    exit 0
+  fi
+  why="$(line_reviews_checkout "$PV_REPO" "$wb")"
+  if [ -n "$why" ]; then
+    rm -rf "$tmp"; die "REFUSED — $why; nothing was rendered."; exit 2
+  fi
+  if ! line_reviews_commit "$PV_REPO" "$head" "$tmp/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" \
+       "line: the $ver entry's Known limits, rendered from the plan's deferrals"; then
+    rm -rf "$tmp"; die "REFUSED — on $wb: $LINE_RV_SAID; nothing was rendered."; exit 2
+  fi
+  rm -rf "$tmp"
+  if ! line_reviews_move "$PV_REPO" "$wb" "$LINE_RV_COMMIT" "$head" "known-limits-part: $PV_ID"; then
+    die "REFUSED — $wb could not be moved from ${head:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
+    exit 2
+  fi
+  if ! line_event "$PV_PLAN" "$kind" "row=$PV_ID" part=known-limits "commit=$LINE_RV_COMMIT" "branch=$wb"; then
+    die "REFUSED — $wb moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=$kind|row=$PV_ID|part=known-limits|commit=$LINE_RV_COMMIT|branch=$wb to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
+    exit 1
+  fi
+  say "known-limits-part — $n deferred sentences rendered under ### Known limits of the $ver entry, committed ${LINE_RV_COMMIT:0:12} on $wb."
   exit 0
 }
 

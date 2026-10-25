@@ -534,6 +534,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path>]]   the landing's row: status, step line, ledger line, one write; a hand landing's suites, their green commit and log are written to the landing record with it"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
+  die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
@@ -557,7 +558,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
@@ -1001,6 +1002,11 @@ case "$VERB" in
   # THE INTEGRATE ROW'S RENDER OF THE ENTRY'S REVIEWS: the row id alone; the head is the working branch's.
   reviews-part)
     [ $# -eq 1 ] && [ -n "$1" ] || usage "reviews-part takes one argument: the integrate row's id."
+    PV_ID="$1"
+    ;;
+  # THE ENTRY ROW'S RENDER OF THE KNOWN LIMITS: the row id alone; the head is the working branch's.
+  known-limits-part)
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "known-limits-part takes one argument: the doc or integrate row's id."
     PV_ID="$1"
     ;;
   step-line)
@@ -3120,8 +3126,12 @@ function eval_row(line,    nc, c, j, cr) {
   eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
   eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
   efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
+  etype[cr] = ("eval type" in col) ? c[col["eval type"]] : ""
 }'
-MR_AWK='
+# matrix-render reads the one AC heading matcher (lib/units.sh ac_any) and the one eval-type map (lib/scale.sh
+# tier_of), so its pass holds no copy of either.
+{ declare -F scale_tier_awk >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+MR_AWK="$(units_ac_head_awk)$(scale_tier_awk 2>/dev/null)"'
 # acline(line) -> the criterion id of a `- AC-<n> <text>` bullet (bold and a colon tolerated), its text in ACT; "" else.
 function acline(line,    id) {
   if (line !~ /^[-*][ \t]+/) return ""
@@ -3212,21 +3222,20 @@ END {
     if (!inm) continue
     if (line !~ /^[ \t]*$/) mlast = i
     if (line ~ /^[ \t]*\|/) {
-      cur = ""
+      cur = ""; if (!tabend) mtl = i
       if (line ~ /^[ \t]*\|[-|: \t]*$/) continue
       nc = cells(line, c)
-      if (c[1] == "AC" || c[1] == "") continue
+      if (c[1] == "AC") { if (!sawtab) { sawtab = 1; mnc = nc; for (j = 1; j <= nc; j++) mcol[j] = tolower(c[j]) }; continue }
+      if (c[1] == "") continue
       mrows++; if (!(c[1] in tier)) tier[c[1]] = c[2]
       continue
     }
+    if (sawtab) tabend = 1
     if (line ~ /^[ \t]*stack-health[ \t]*:/ && !hassh) hassh = i
     if (line ~ /^[ \t]*walk-artifact[ \t]*:/ && !haswa) haswa = i
     if (line ~ /^[^ \t]/) {
-      cur = ""; hdr = line; sub(/^[-*+][ \t]+/, "", hdr)
-      if (match(hdr, /^AC-[^ \t:]+:/)) {
-        cur = substr(hdr, 1, RLENGTH - 1)
-        if (cur in bstart) cur = ""; else { bstart[cur] = i; bend[cur] = i }
-      }
+      cur = ac_any(line)
+      if (cur != "") { if (cur in bstart) cur = ""; else { bstart[cur] = i; bend[cur] = i } }
       continue
     }
     if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
@@ -3234,16 +3243,26 @@ END {
     }
   }
   if (!sawev || ne == 0) { printf "noeval\t\n" > cf; exit 3 }
-  if (!sawm || mrows == 0) { printf "notable\t\n" > cf; exit 4 }
-  miss = ""; badt = ""
+  if (!sawm || !sawtab) { printf "notable\t\n" > cf; exit 4 }
+  # A CRITERION THE TABLE LACKS GAINS ITS ROW, at the tier its eval type maps to (tier_of), in Eval design order and
+  # after the table\047s last line, before any block is written: a criterion added after approval reaches the table and
+  # its block by this one pass. A type the map does not hold is refused, for a guessed tier owes the wrong keys.
+  miss = ""; badt = ""; rows = ""; nr = 0
   for (e = 1; e <= ne; e++) {
     cr = ec[e]
-    if (!(cr in tier)) miss = miss ((miss == "") ? "" : ", ") cr
-    else if (!(tier[cr] in keys) || keys[tier[cr]] == "") badt = badt ((badt == "") ? "" : ", ") cr " (" tier[cr] ")"
+    if (!(cr in tier)) {
+      t = tier_of(etype[cr])
+      if (t == "") { miss = miss ((miss == "") ? "" : ", ") cr " (eval type: " ((etype[cr] != "") ? etype[cr] : "none") ")"; continue }
+      tier[cr] = t; nr++; r = "|"
+      for (j = 1; j <= mnc; j++) r = r " " ((mcol[j] == "ac") ? cr : (mcol[j] == "tier") ? t : (mcol[j] == "status") ? "pending" : "—") " |"
+      rows = rows r "\n"
+    }
+    if (!(tier[cr] in keys) || keys[tier[cr]] == "") badt = badt ((badt == "") ? "" : ", ") cr " (" tier[cr] ")"
   }
   if (miss != "") { printf "norow\t%s\n", miss > cf; exit 5 }
   if (badt != "") { printf "badtier\t%s\n", badt > cf; exit 6 }
-  written = 0; added = 0; same = 0; nb = ""
+  written = 0; added = nr; same = 0; nb = ""
+  if (rows != "") ins[mtl] = ins[mtl] rows
   heads = ""
   if (!hassh) { heads = heads "stack-health: pending\n"; added++ }
   if (walk != "exempt" && !haswa && !haptr) { heads = heads "walk-artifact: pending\n"; added++ }
@@ -3298,11 +3317,8 @@ END {
     if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
     if (!inm || line ~ /^[ \t]*\|/) { if (inm) cur = ""; continue }
     if (line ~ /^[^ \t]/) {
-      cur = ""; hdr = line; sub(/^[-*+][ \t]+/, "", hdr)
-      if (match(hdr, /^AC-[^ \t:]+:/)) {
-        cur = substr(hdr, 1, RLENGTH - 1)
-        if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur }
-      }
+      cur = ac_any(line)
+      if (cur != "") { if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur } }
       continue
     }
     if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
@@ -3508,6 +3524,7 @@ case "$VERB" in
   task-set|ledger-add|ledger-set) poker_verb_task_set "$@" ;;
   row-landed|deliver) poker_verb_row_landed "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
+  known-limits-part) poker_verb_known_limits_part "$@" ;;
   step-line) poker_verb_step_line "$@" ;;
   step-field) poker_verb_step_field "$@" ;;
   matrix-render) poker_verb_matrix_render "$@" ;;

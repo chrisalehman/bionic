@@ -1290,5 +1290,82 @@ expect_eq "(ba4) once T1 answered the review, a row born of the same finding is 
   "$LL_RC $(printf '%s' "$LL_OUT" | grep -qF 'REFUSED reason=past-judgment why=current-8' && echo yes || echo no)"
 
 
+section "§KNOWN: the entry's Known limits are rendered from the plan's deferrals, by the verb, on the working branch"
+#
+# `known-limits-part <row>` renders the release entry's `### Known limits` from the plan's open deferrals: one bullet
+# per `deferred:` line whose priority is defer, its `stated=` sentence unescaped, in the order the lines were written.
+# The part replaces the entry's own and is committed on the working branch under the line's author, and the landing
+# record names the commit, so the release check's sentence scan reads it on the branch it judges.
+# FIXTURE FIDELITY: the plan names its release in frontmatter, as Step 0 writes it; the doc row is task-add's; each
+# `deferred:` line is lib/proof.sh `proof_finding_lines`' own output for a rated finding (proof-add review writes
+# them so), and each sentence is the `finding-stated` verb's; the entry and the hand edit are plain commits on the
+# working branch, as a writer's landing and a person's edit make them.
+# fails-when: a stated sentence is absent from the part, out of order, still escaped; a hand bullet survives, or
+# another entry's part changes; the part lands after The landing numbers; the commit is
+# not the line's, touches more than CHANGELOG.md, or no record line names it; a second render makes a commit; a
+# build row, or a deferral with no sentence, is rendered rather than refused.
+KL_V=9.9.9
+KL_S1='The first limit says "quoted" words, unescaped.'
+KL_S2='The second limit is the one registered after it.'
+kl_lib() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 9; shift; "$@"' _ "$REPO/payload/scripts/lib" "$@"; }   # <fn> [args…]
+kl_tip() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }   # <root>
+# kl_part <root> -> the lines of the ## 9.9.9 entry's ### Known limits on the branch tip, heading excluded
+kl_part() {
+  git -C "$1" show "$(kl_tip "$1"):CHANGELOG.md" 2>/dev/null | awk -v v="## $KL_V " '
+    /^## / { inb = (index($0, v) == 1); inp = 0; next }
+    inb && /^### / { inp = ($0 == "### Known limits"); next }
+    inb && inp'
+}
+kl_heads() { git -C "$1" show "$(kl_tip "$1"):CHANGELOG.md" 2>/dev/null | awk -v v="## $KL_V " '/^## / { inb = (index($0, v) == 1); next } inb && /^### / { printf "%s%s", s, $0; s = "|" } END { print "" }'; }   # <root>
+kl_old() { git -C "$1" show "$(kl_tip "$1"):CHANGELOG.md" 2>/dev/null | awk '/^## 9\.9\.8 /, 0'; }   # <root> -> the older entry, whole
+kl_world() {  # -> root: release 9.9.9, its entry on wave/x, the doc row T3, two stated deferrals
+  local r p
+  r="$(ll_world)" || return 1; p="$(ll_plan "$r")"
+  awk '{ print } /^working-branch: / && !d { print "release: '"$KL_V"'"; d = 1 }' "$p" > "$p.n" && mv "$p.n" "$p"
+  printf '# Changelog\n\n## %s — 2026-10-24\n\n### The work\n\n- one change\n\n### Known limits\n\n- a limit typed by hand\n\n### The landing numbers\n\nthe numbers\n\n## 9.9.8 — 2026-10-01\n\n### Known limits\n\n- an older limit\n' \
+    "$KL_V" > "$r/CHANGELOG.md"
+  git -C "$r" add CHANGELOG.md && git -C "$r" commit --quiet -m "the entry" || return 1
+  ww_poke "$r" task-add T3 7 doc 'the entry. The release entry is rendered.' orchestrator — 10 REQ-1 CHANGELOG.md >/dev/null || return 1
+  ww_sdlc "$r" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe first title\n3\tS3\ton\t-\tdefer\t-\tthe second title')")"
+  ww_poke "$r" finding-stated record/wave-x/critic.md#1 "$KL_S1" >/dev/null || return 1
+  ww_poke "$r" finding-stated record/wave-x/critic.md#3 "$KL_S2" >/dev/null || return 1
+  printf '%s' "$r"
+}
+RK="$(kl_world)"; PK="$(ll_plan "$RK")"; KL_H="$(kl_tip "$RK")"
+expect_eq "(k0) precondition: the owed list reads two deferrals, and the second's sentence is stated" \
+  "record/wave-x/critic.md#1 defer|record/wave-x/critic.md#3 defer|$KL_S2" \
+  "$(kl_lib proof_findings_owed "$PK" | awk '{ printf "%s%s %s", s, $1, $4; s = "|" }')|$(/usr/bin/grep -F 'critic.md#3 ' "$PK" | sed -n 's/^.* stated="\(.*\)"$/\1/p')"
+expect_eq "(k0b) …and the entry on the branch carries the hand's limit" "- a limit typed by hand" "$(kl_part "$RK" | /usr/bin/grep '^- ')"
+KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
+KL_T="$(kl_tip "$RK")"
+expect_eq "(k1) known-limits-part renders the part: exit 0, a commit by the line's author on the old head" "0|bionic line|$KL_H" \
+  "$KL_RC|$(git -C "$RK" log -1 --format='%an|%P' "$KL_T" 2>/dev/null)"
+[ "$KL_RC" = 0 ] || printf '%s\n' "$KL_OUT" | sed 's/^/    | /' | head -8
+expect_eq "(k2) …touching CHANGELOG.md alone" "CHANGELOG.md" "$(git -C "$RK" diff --name-only "$KL_H" "$KL_T" 2>/dev/null)"
+expect_eq "(k3) the part holds each stated sentence, unescaped, in the order registered, and nothing else" \
+  "- $KL_S1|- $KL_S2" "$(kl_part "$RK" | /usr/bin/grep '^- ' | paste -sd'|' -)"
+expect_eq "(k4) the part keeps its place before The landing numbers" "### The work|### Known limits|### The landing numbers" "$(kl_heads "$RK")"
+expect_contains "(k5) the older entry's part is untouched" "- an older limit" "$(kl_old "$RK")"
+expect_contains "(k6) the landing record names the commit as the row's render" \
+  "line/v1|ev=doc|row=T3|part=known-limits|commit=$KL_T|branch=wave/x|at=" "$(ll_ev "$RK" doc)"
+expect_eq "(k7) the checkout holding the branch is at the commit" "$KL_T" "$(git -C "$RK" rev-parse HEAD)"
+ww_poke "$RK" known-limits-part T3 >/dev/null; KL_RC=$?
+expect_eq "(k8) a second render finds the part listed: exit 0, no commit" "0|$KL_T" "$KL_RC|$(kl_tip "$RK")"
+# a bullet a person types into the part is not the render: the next render replaces it
+awk '{ print } $0 == "### Known limits" && !d { getline; print; print "- a bullet typed by hand"; d = 1 }' "$RK/CHANGELOG.md" > "$RK/CHANGELOG.md.n" \
+  && mv "$RK/CHANGELOG.md.n" "$RK/CHANGELOG.md" && git -C "$RK" commit --quiet -am "a hand edit of the part"
+expect_contains "(k9-pre) the hand's bullet is in the part on the branch" "- a bullet typed by hand" "$(kl_part "$RK")"
+ww_poke "$RK" known-limits-part T3 >/dev/null; KL_RC=$?
+expect_eq "(k9) the verb renders over a hand-written part: exit 0, the part is the plan's again" "0|- $KL_S1|- $KL_S2" \
+  "$KL_RC|$(kl_part "$RK" | /usr/bin/grep '^- ' | paste -sd'|' -)"
+KL_T="$(kl_tip "$RK")"
+KL_OUT="$(ww_poke "$RK" known-limits-part T1)"; KL_RC=$?
+expect_eq "(k10) a build row is refused, the branch unmoved" "1|$KL_T" "$([ "$KL_RC" -ne 0 ] && echo 1)|$(kl_tip "$RK")"
+expect_contains "(k10b) …naming the row's kind" "T1 is a build row" "$KL_OUT"
+ww_sdlc "$RK" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '4\tS3\ton\t-\tdefer\t-\tan unstated one')")"
+KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
+expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmoved" "1|$KL_T" "$([ "$KL_RC" -ne 0 ] && echo 1)|$(kl_tip "$RK")"
+expect_contains "(k11b) …naming the finding and the verb that states it" "finding-stated record/wave-x/critic.md#4" "$KL_OUT"
+
 # ---------------------------------------------------------------------------
 finish

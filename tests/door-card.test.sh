@@ -13,11 +13,13 @@
 #                  the card's `approve:release` settle deleted, the card is early. With the judge's refusal reworded in
 #                  the one place it is spelled, the judge prints the new words and the card still renders. The refusal's
 #                  text is spelled once, in hooks/poker/judge.sh, and read by payload/scripts/card.sh.
+#   §GROW          criteria the matrix table lacks, their eval types in words, gain their rows at the mapped tier from
+#                  matrix-render, before their blocks; an empty table renders whole; an unknown type is refused.
 #
 # FIXTURE FIDELITY: the repository is door_world's, a real `git init` with the check's closure, the real changelog and a
 # plan whose Step-3 state the library authors. Every later change to the plan is a verb's: task-set, task-add,
 # matrix-render, matrix-set, discharge, step-line, step-field, current, proof-add and the hand door's row line. This
-# file never writes the plan. What it writes are the records the run's actors write: a one-row suite in the build
+# file never writes the plan, save §GROW's Eval design rows, which no verb writes. What it writes are the records the run's actors write: a one-row suite in the build
 # row's commit, the matrix row's evidence, the walk and audit records, five reading records in the readers' grammar
 # (the structure reading answering every id the shipped checks file names), and each reader's roster row through the
 # production writer (`roster_row`), closed by the sweeper's own `ack`. SYNTHESIZED: the readers' names and the words
@@ -221,5 +223,77 @@ expect_contains "(m2b) the reworded judge prints its new words" "poker: REFUSED 
 dcm_card "$DCM2" "$DCM2_R"
 expect_eq "(m2c) …and the card still renders, settling the release approval" "0 approve:release approve:merge" \
   "$DOOR_RC $(dc_keys "$DCM2_R/.bionic/docs/record/wave-x" "$DC_H8")"
+
+# ============================================================
+section "§GROW: a criterion the matrix table lacks gains its row at its tier, by matrix-render, before its block"
+# ============================================================
+# The Eval design names each criterion's eval type in words; lib/scale.sh `tier_of_eval_type` is the one map from a
+# type to its tier (static, unit, hermetic, live, human to T0 to T4; a bare T<n> is itself). matrix-render adds a
+# `| AC | tier | status | evidence | auditor |` row for every Eval design row the table lacks, in Eval design order,
+# then writes the blocks at those tiers, so a criterion added after approval reaches the table and its block by the
+# one verb, and an empty table renders whole. A type the map does not hold is refused, the plan unchanged.
+# FIXTURE FIDELITY: a fresh door_world at its Step-3 state, then the Eval design rows a person adds after approval:
+# no verb writes an Eval design row, so the plan's own table is extended in the plan's grammar.
+# fails-when: a lacking row is left out, or lands at a tier the map does not give, or after the blocks; a type in
+# words is refused; an empty table is refused; an unknown type is guessed at.
+DCG_PLAN=""
+# dcg_world <dir> <table rows: keep | empty> -> the fixture's root, its Eval design grown by four criteria in words
+dcg_world() {
+  local r
+  read -r r _ <<EOF2
+$(door_world "$1")
+EOF2
+  [ -n "$r" ] || return 1
+  awk -v k="$2" '
+    /^\| REQ-1 \| fixture run \| AC-1\.1 / { print
+      print "| REQ-1 | a unit pin | AC-1.2 | unit | `tests/door.test.sh` | the pin is red |"
+      print "| REQ-1 | the line read | AC-1.3 | Live | `tests/door.test.sh` | the line is missed |"
+      print "| REQ-1 | a grep | AC-1.4 | static | `grep -c door payload/scripts/lib/said.sh` | the count is 0 |"
+      print "| REQ-1 | a person reads it | AC-1.5 | T4 | the walk | the reader is lost |"
+      next }
+    k == "empty" && /^\| AC-1\.1 \| T1 \|/ { next }
+    { print }' "$r/$DOOR_PLAN_REL" > "$r/$DOOR_PLAN_REL.n" && mv "$r/$DOOR_PLAN_REL.n" "$r/$DOOR_PLAN_REL"
+  printf '%s' "$r"
+}
+dcg_rows() { awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && /^\| AC-/ { split($0, c, /[ \t]*\|[ \t]*/); printf "%s%s %s %s", s, c[2], c[3], c[4]; s = "|" } END { print "" }' "$1"; }   # <plan> -> `<AC> <tier> <status>|…`
+dcg_eval() { awk -v a="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+eval:/ { sub(/^[ \t]+eval:[ \t]*/, ""); print; exit }' "$1"; }   # <plan> <AC> -> its block's eval: value
+# dcg_order <plan> -> `rows-first` when the last table row comes before the first AC block line
+dcg_order() { awk '/^\| AC-/ { lr = NR } /^AC-[^ \t:]+:/ && !fb { fb = NR } END { print ((lr && fb && lr < fb) ? "rows-first" : "blocks-first " lr " " fb) }' "$1"; }
+
+DCG="$(dcg_world "$WORLD_ROOT/grow" keep)"; DCG_PLAN="$DCG/$DOOR_PLAN_REL"
+expect_eq "(g0) precondition: the Eval design names five criteria, the table one" "AC-1.1 T1 pending" "$(dcg_rows "$DCG_PLAN")"
+door_run "$DCG" bash "$DOOR_POKER" matrix-render
+printf 'dc: matrix-render (grow) -> rc %s: %s\n' "$DOOR_RC" "$(printf '%s\n' "$DOOR_OUT" | awk 'NF { print; exit }')"
+expect_eq "(g1) matrix-render renders the criteria the table lacked, their types in words: exit 0" "0" "$DOOR_RC"
+expect_eq "(g2) the table carries a row for every Eval design row, in its order, at the tier the type maps to" \
+  "AC-1.1 T1 pending|AC-1.2 T1 pending|AC-1.3 T3 pending|AC-1.4 T0 pending|AC-1.5 T4 pending" "$(dcg_rows "$DCG_PLAN")"
+expect_eq "(g3) …the new rows' evidence and auditor cells are the dash the table's rows carry" "| AC-1.2 | T1 | pending | — | — |" \
+  "$(awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, "| AC-1.2 |") == 1' "$DCG_PLAN")"
+expect_eq "(g4) the rows are written before the blocks" "rows-first" "$(dcg_order "$DCG_PLAN")"
+expect_eq "(g5) each block reads its tier from its row" "T1 — \`tests/door.test.sh\`|T3 — \`tests/door.test.sh\`|T4 — the walk" \
+  "$(dcg_eval "$DCG_PLAN" AC-1.2)|$(dcg_eval "$DCG_PLAN" AC-1.3)|$(dcg_eval "$DCG_PLAN" AC-1.5)"
+expect_contains "(g5b) …and the T4 block owes the user's confirmation" "user-confirmed: pending" \
+  "$(awk '/^AC-1\.5:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b' "$DCG_PLAN")"
+door_run "$DCG" bash "$DOOR_POKER" matrix-render
+expect_eq "(g6) a second render adds nothing: exit 0, the table unchanged" "0|AC-1.1 T1 pending|AC-1.2 T1 pending|AC-1.3 T3 pending|AC-1.4 T0 pending|AC-1.5 T4 pending" \
+  "$DOOR_RC|$(dcg_rows "$DCG_PLAN")"
+
+DCE="$(dcg_world "$WORLD_ROOT/grow-empty" empty)"; DCE_PLAN="$DCE/$DOOR_PLAN_REL"
+expect_contains "(g7-pre) the empty world's table has its header and no row" "| AC | tier | status | evidence | auditor |" \
+  "$(awk '/^## Verification Matrix/ { m = 1 } m' "$DCE_PLAN")"
+expect_eq "(g7-pre2) …read by the same row reader (g2)" "" "$(dcg_rows "$DCE_PLAN")"
+door_run "$DCE" bash "$DOOR_POKER" matrix-render
+expect_eq "(g7) an empty tier table renders whole: exit 0, every row" \
+  "0|AC-1.1 T2 pending|AC-1.2 T1 pending|AC-1.3 T3 pending|AC-1.4 T0 pending|AC-1.5 T4 pending" "$DOOR_RC|$(dcg_rows "$DCE_PLAN")"
+expect_eq "(g7b) …the rows before the blocks" "rows-first" "$(dcg_order "$DCE_PLAN")"
+
+DCU="$(dcg_world "$WORLD_ROOT/grow-unknown" keep)"; DCU_PLAN="$DCU/$DOOR_PLAN_REL"
+sed -i.orig 's/| AC-1\.3 | Live |/| AC-1.3 | by eye |/' "$DCU_PLAN"
+expect_eq "(g8-pre) the unknown world's AC-1.3 is typed in words no map holds" "1" "$(/usr/bin/grep -c '| AC-1.3 | by eye |' "$DCU_PLAN")"
+cp "$DCU_PLAN" "$DCU_PLAN.before"
+door_run "$DCU" bash "$DOOR_POKER" matrix-render
+expect_eq "(g8) a type the map does not hold is refused, the plan unchanged" "1|same" \
+  "$DOOR_RC|$(cmp -s "$DCU_PLAN" "$DCU_PLAN.before" && echo same || echo changed)"
+expect_contains "(g8b) …naming the criterion and its type" "AC-1.3 (eval type: by eye)" "$DOOR_OUT"
 
 finish
