@@ -191,6 +191,12 @@ DELIVER_FILES
       die "REFUSED — the artifact $(clean "$art") of $PV_ID is not under record/ of the docs root ($docs/record/), and a record row delivers a record; the plan is unchanged."
       exit 2 ;;
   esac
+  # THE WALK ROW'S RECORD IS SETTLED BY ITS LANDING: a verify row whose artifact is a wave's walk record,
+  # record/<wave>/walk.md, is registered by walk_register in the landing's own write, so its confirmed cells need no
+  # status write after it. RL_WALK names the record from the docs root, RL_WALK_REAL its real path.
+  if [ "$kind" = verify ]; then
+    case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel"; RL_WALK_REAL="$real" ;; esac ;; esac
+  fi
   if [ "$kind" = review ]; then
     if [ -z "$(awk -v rec="$rel" "$(proof_awk)"'
         /^[[:space:]]*```/ { fence = !fence; next }
@@ -901,6 +907,7 @@ hand_holds_verb() {
       exit 1
     fi
     plan_verb_open row-landed
+    RL_WALK=""; RL_WALK_REAL=""
     [ "$VERB" != deliver ] || deliver_check
     RL_JUDGED=""
     if [ "$RL_HAND" -eq 1 ]; then row_landed_suites; row_landed_scan; fi
@@ -982,8 +989,16 @@ hand_holds_verb() {
       die "REFUSED — what the landing of $PV_ID settles cannot be written into the plan's copy; the plan is unchanged."
       exit 1
     fi
+    # THE WALK, SETTLED IN THE SAME COPY: its proof line, the cells it confirms and its pointer go in with the row's
+    # landing, and a record that does not register refuses the landing whole.
+    if [ -n "$RL_WALK" ] && ! walk_register "$PV_PLAN" "$PV_NEW" "$RL_WALK_REAL" "$RL_WALK" "$RL_COMMIT" "$PV_REPO"; then
+      die "REFUSED — $PV_ID delivers the walk record $RL_WALK, and it lands only with the record's verdicts settled: $(clean_whole "$WALK_WHY"); fix the record, then bash $HOOK_DIR/session-poker.sh deliver $PV_ID. The plan is unchanged."
+      exit 1
+    fi
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
+    [ -z "$RL_WALK" ] || walk_recorded "$PV_PLAN" "$RL_WALK"
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    [ -z "$RL_WALK" ] || say "row-landed — $PV_ID registered its walk at ${WALK_HEAD:0:12}: $(walk_said "$RL_WALK")"
     line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
     [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
     [ -z "$LINE_SETTLED_C" ] || say "row-landed — $PV_ID settled the matrix status of $LINE_SETTLED_C: discharged by its landing."

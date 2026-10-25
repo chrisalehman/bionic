@@ -146,30 +146,6 @@ proof_verdicts() {
   printf '%s\n' "$out"
 }
 
-# THE WALK POINTER'S ONE WRITER. The walk gate reads `walk-artifact:` from the Step-5 block alone (walls.sh
-# `step5_evidence_block`); the matrix head's `walk-artifact:` line, when the plan has one, takes the same value in the
-# same write, so the gate never meets the stub matrix-render left beside a filled block. A matrix with no such line
-# gains none. Both step-field and proof-add walk write the pointer through this function, so neither half of it can be
-# written without the other.
-# walk_pointer_put <plan copy> <path> -> the copy rewritten in place; exit 1 no Step 5 line, 5 the Step 5 line itself
-# carries walk-artifact (step-line owns that text), any other exit the copy could not be written. The copy is unchanged
-# on every non-zero exit.
-walk_pointer_put() {
-  local rc=0
-  units_step_fields --replace "$1" 5 "walk-artifact=$2" > "$1.wp" 2>/dev/null || rc=$?
-  if [ "$rc" -eq 0 ]; then
-    WP_V="$2" awk '
-      { if ($0 ~ /^[ \t]*```/) fence = !fence }
-      /^## / { m = ($0 ~ /^## Verification Matrix/) }
-      !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
-        ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["WP_V"]; done = 1; next }
-      { print }' "$1.wp" > "$1.wp2" 2>/dev/null || rc=2
-  fi
-  [ "$rc" -ne 0 ] || mv -f "$1.wp2" "$1" || rc=2
-  rm -f "$1.wp" "$1.wp2"
-  return "$rc"
-}
-
 # THE WALK'S HEAD. A walk reads cards at one head; a record that names it on a flush-left `head: <sha>` line, outside
 # fences, is held to it, and the head must be a commit on the working branch's history, as a review's range end is.
 # A record that names none read the working head, which is the head the proof names.
@@ -220,6 +196,48 @@ walk_settle() {
     WALK_DONE="${WALK_DONE:+$WALK_DONE }$ac"
   done
   return 0
+}
+
+# THE WALK'S REGISTRATION, one act over a plan copy: the record read as the critic's (proof_verdicts), its head
+# (walk_head), its `proved: kind=walk` line, the cells it confirms (walk_settle) and the pointer (plan.sh
+# walk_pointer_put). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the landing's own write,
+# so the row lands with its cells settled or does not land.
+# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with the copy
+# written and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY, the copy to be
+# dropped.
+walk_register() {
+  local plan="$1" copy="$2" real="$3" rel="$4" v rc=0
+  WALK_WHY=""; WALK_HEAD=""; WALK_N=0
+  if ! v="$(proof_verdicts "$real")"; then
+    WALK_WHY="$v; a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line"
+    return 1
+  fi
+  if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
+  if ! proof_add_line "$copy" "$(proof_line walk "$WALK_HEAD" "$(iso_now)" "$rel")" > "$copy.wr" 2>/dev/null \
+     || [ ! -s "$copy.wr" ] || ! mv -f "$copy.wr" "$copy"; then
+    rm -f "$copy.wr"; WALK_WHY="the plan carries no ## SDLC State section to hold the walk's proof line"; return 1
+  fi
+  walk_settle "$plan" "$copy" "$rel" <<< "$v" || return 1
+  walk_pointer_put "$copy" "$rel" || rc=$?
+  case "$rc" in
+    0) : ;;
+    1) WALK_WHY="the plan has no Step 5 line to hold walk-artifact:; write it with step-line 5 '<text>'"; return 1 ;;
+    *) WALK_WHY="walk-artifact: cannot be written into the Step 5 block (exit $rc)"; return 1 ;;
+  esac
+  WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
+  return 0
+}
+# THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line in the landing record naming the record and how
+# many rows it discharged, appended once the plan write is in. The hand-holds fold counts `ev=matrix-set` as a status
+# write and reads this line as nothing: the walk's verdicts are a reader's, registered as the critic's are.
+walk_recorded() {  # <plan> <record docs-relative>
+  { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+    && line_event "$1" walk "record=$2" "discharged=${WALK_N:-0}" >/dev/null 2>&1 \
+    || say "the plan is written, but the ev=walk line could not be appended to the landing record."
+}
+walk_said() {  # <record docs-relative> -> what the registration settled, one line
+  printf 'the walk discharged %s (%s); settled by a landing, kept: %s; left as they stood: %s; walk-artifact: %s; verdict: %s' \
+    "${WALK_DONE:-no row}" "${WALK_N:-0}" "${WALK_LANDED:-none}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
 }
 
   # THE REGRESSION SETTING (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4). Whether the run runs the
@@ -879,6 +897,20 @@ PF_OTHER_LIST
         die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
+    # A WALK IS REGISTERED WHOLE BY walk_register, the one act deliver also runs at the walk row's landing: its verdicts
+    # read as the critic's, its proof line, the cells it confirms and its pointer, in this one plan write.
+    if [ "$PF_KIND" = walk ]; then
+      cp "$PV_PLAN" "$PV_NEW"
+      if ! walk_register "$PV_PLAN" "$PV_NEW" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then
+        die "REFUSED — $(clean_whole "$WALK_WHY"), then proof-add walk again. The plan is unchanged."
+        exit 1
+      fi
+      plan_verb_swap proof-add "the walk proof at $WALK_HEAD" writer
+      walk_recorded "$PV_PLAN" "$PF_REL"
+      say "proof-add — kind=walk head=$WALK_HEAD evidence=$PF_REL: written to $PV_PLAN; dry-committed first."
+      say "proof-add — $(walk_said "$PF_REL")"
+      exit 0
+    fi
     # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The working head only
     # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
     # on its history, and the proof names what the evidence attests (lib/proof.sh
@@ -918,18 +950,6 @@ PF_PAIRS_LIST
         exit 1
       fi
       PF_HEAD="$PF_FH"; PF_REL="$PF_FRELS"
-    # A WALK IS READ AS THE CRITIC'S RECORD IS: its verdict table and its one verdict: line, through proof_verdicts, so a
-    # walk written as prose alone settles nothing and is refused before anything is written. Its head is the one its
-    # head: line names, else the working head.
-    elif [ "$PF_KIND" = walk ]; then
-      if ! PF_VERDICTS="$(proof_verdicts "$PF_REAL")"; then
-        die "REFUSED — $(clean "$PF_VERDICTS"); a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line, and proof-add walk reads its verdicts from it. The plan is unchanged."
-        exit 1
-      fi
-      if ! PF_HEAD="$(walk_head "$PF_REAL" "$PV_REPO" "$PF_HEAD")"; then
-        die "REFUSED — $(clean_whole "$PF_HEAD"), then proof-add walk again. The plan is unchanged."
-        exit 1
-      fi
     elif ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PV_REPO" "$PV_PLAN" "$PF_QUESTION" "$PV_REPO" "$PF_HEAD")"; then
       die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
@@ -998,7 +1018,7 @@ $PF_PLANL"
     # token the gate compares and any other verdict as the critic wrote it; a row the table does not name keeps its
     # cell. A criterion the matrix table has no row for refuses the whole registration.
     PF_CELLS=""; PF_WAVE=""
-    if [ -n "$PF_VERDICTS" ] && [ "$PF_KIND" = review ]; then
+    if [ -n "$PF_VERDICTS" ]; then
       while IFS='	' read -r _pf_ac _pf_v; do
         [ -n "$_pf_ac" ] || continue
         if [ "$_pf_ac" = wave ]; then PF_WAVE="$_pf_v"; continue; fi
@@ -1025,22 +1045,6 @@ PF_VERDICTS_LIST
         exit 1
       fi
       mv "$PV_NEW.v" "$PV_NEW"
-    fi
-    # THE WALK'S VERDICTS AND ITS POINTER GO IN THE PROOF'S OWN WRITE: the cells it confirms that no landing settled, the
-    # Step-5 block's walk-artifact: and the matrix head's, so the walk needs no status write and no pointer by hand.
-    if [ "$PF_KIND" = walk ]; then
-      if ! walk_settle "$PV_PLAN" "$PV_NEW" "$PF_REL" <<< "$PF_VERDICTS"; then
-        die "REFUSED — $(clean "$WALK_WHY"), then proof-add walk again. The plan is unchanged."
-        exit 1
-      fi
-      _pf_rc=0; walk_pointer_put "$PV_NEW" "$PF_REL" || _pf_rc=$?
-      case "$_pf_rc" in
-        0) : ;;
-        1) die "REFUSED — $PV_PLAN has no Step 5 line to hold walk-artifact:; write it with step-line 5 '<text>', then proof-add walk again. The plan is unchanged."
-           exit 1 ;;
-        *) die "REFUSED — walk-artifact: cannot be written into the Step 5 block of $PV_PLAN (exit $_pf_rc); write the Step 5 line with step-line 5 '<text>', then proof-add walk again. The plan is unchanged."
-           exit 1 ;;
-      esac
     fi
     # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is the judge's fact rendered by the one
     # function every writer calls (lib/proof.sh `proof_health_put`), read from the copy that holds the new proof line and
@@ -1104,15 +1108,6 @@ PF_VERDICTS_LIST
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
-    # THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line in the landing record naming the record and how
-    # many rows it discharged, appended once the plan write is in. The hand-holds fold counts `ev=matrix-set` as a status
-    # write and reads this line as nothing, for the walk's verdicts are a reader's, registered as the critic's are.
-    PF_WN=0
-    if [ "$PF_KIND" = walk ]; then
-      PF_WN="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
-      line_event "$PV_PLAN" walk "record=$PF_REL" "discharged=$PF_WN" >/dev/null 2>&1 \
-        || say "proof-add — the plan is written, but the ev=walk line could not be appended to the landing record."
-    fi
     # A FAILING READING IS THE PERSON'S TO WAIVE FROM THE MOMENT IT IS RECORDED: fix it, or waive the question. The ask
     # opens here, under the key the judge and the waive verb use, rather than waiting for an advance or a commit to be
     # refused on it; a passing reading of the same question closes it, as the judge closes a question no longer failing.
@@ -1126,7 +1121,6 @@ PF_VERDICTS_LIST
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     [ -z "$PF_CELLS" ] || say "proof-add — the auditor cells: $PF_CELLS; auditor-wave: $PF_WAVE"
-    [ "$PF_KIND" != walk ] || say "proof-add — the walk discharged ${WALK_DONE:-no row} ($PF_WN); settled by a landing, kept: ${WALK_LANDED:-none}; left as they stood: ${WALK_LEFT:-none}; walk-artifact: $PF_REL; verdict: $WALK_WAVE"
     [ -z "$PF_SH" ] || say "proof-add — stack-health: $PF_SH"
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l"; done
