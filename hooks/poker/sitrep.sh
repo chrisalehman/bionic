@@ -1071,7 +1071,7 @@ sitrep_reds() {
 # sitrep_suites <landing record> -> `<suites><TAB><green><TAB><red>`: every suite the line ran for a row, by its last run,
 # green or red. A `standing` event is the line's own red run of the suite at the head; a discarded run, or one that
 # ran nothing, is no verdict on it. A suite named by a path is the suite its file name is. The whole run's verdicts
-# (`kind=regression`) are no row's and are read by `sitrep_whole`.
+# (`kind=regression`) are no row's: the whole run is stated by lib/proof.sh `proof_whole_text`.
 sitrep_suites() {
   [ -f "$1" ] && [ ! -L "$1" ] || { printf '0\t0\t0\n'; return 0; }
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
@@ -1082,31 +1082,6 @@ sitrep_suites() {
     ev == "standing" { r = "red" }
     ev == "verdict" || ev == "standing" { st = line_kv("suite"); sub(/.*\//, "", st); if (st != "") last[st] = r }
     END { for (st in last) { n++; if (last[st] == "green") g++; else rd++ }; printf "%d\t%d\t%d\n", n, g, rd }' "$1"
-}
-
-# sitrep_whole <plan> <landing record> -> the whole run in words: `not run (regression: no, Step 0)` when the plan owes
-# none; else the newer of the plan's last whole-run proof line (green at its head) and the record's last whole-run head
-# (red when a suite's last verdict at it is red, else green), `green at <head8>` or `red at <head8>`; else `not run yet`.
-sitrep_whole() {
-  local plan="$1" rec="$2" line ph pa
-  if declare -F plan_regression >/dev/null 2>&1 && [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then
-    printf 'not run (regression: no, Step 0)\n'; return 0
-  fi
-  declare -F proof_last_line >/dev/null 2>&1 && line="$(proof_last_line "$plan" regression 2>/dev/null)"
-  ph="$(printf '%s\n' "${line:-}" | tr ' ' '\n' | sed -n 's/^head=//p' | head -1)"
-  pa="$(printf '%s\n' "${line:-}" | tr ' ' '\n' | sed -n 's/^at=//p' | head -1)"
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-  { [ -f "$rec" ] && [ ! -L "$rec" ] && cat "$rec"; } 2>/dev/null | awk -F'|' -v ph="$ph" -v pa="$pa" "${_LINE_FIELDS_AWK:-}"'
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    line_ev() == "verdict" && line_kv("kind") == "regression" && line_kv("commit") != "" {
-      c = line_kv("commit"); r = line_kv("result"); if (r != "green" && r != "red") next
-      if (c != h) { h = c; delete w }
-      w[line_kv("suite")] = r; at = norm(line_kv("at"))
-    }
-    END {
-      if (h != "" && (ph == "" || at > norm(pa))) { s = "green"; for (k in w) if (w[k] == "red") s = "red"; print s " at " substr(h, 1, 8); exit }
-      if (ph != "") { print "green at " substr(ph, 1, 8); exit }
-      print "not run yet" }'
 }
 
 # sitrep_test_ratio <plan> <root> -> `<tests> <code> <head>`: the two counts of shell lines the plan's newest release
@@ -1599,7 +1574,14 @@ SITREP_RUNNING
   SG_T_RUN="${sn:-0}: ${sg:-0} green, ${sr:-0} red"
   nsu="$(for k in "$root"/tests/*.test.sh; do [ -f "$k" ] && printf '%s\n' "$k"; done | awk 'END { print NR }')"
   SG_T_TOTAL="$nsu"; [ "$nsu" -gt 0 ] || SG_T_TOTAL="-"
-  SG_T_WHOLE="$(sitrep_whole "$plan" "$rec")"
+  # THE WHOLE RUN is the full pass's state at the head, from the one printer the release card and the continuation
+  # draw too (lib/proof.sh `proof_whole_text`); a plan that owes no whole run says so, and no proof is not run yet.
+  if [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then SG_T_WHOLE="not run (regression: no, Step 0)"
+  else
+    { declare -F proof_whole_text >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+    SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
+    case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
+  fi
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
   case "$lr1" in

@@ -309,7 +309,7 @@ expect_eq "SH8 each task's title, the plan card's: the cell up to its first '. '
   "Row one the thing (D1; AC-1.1)|Haiku 5.5 at high (REQ-8; AC-8.1)|Third row|The long one (D8)" \
   "$(for t in T1 T2 T3 T8; do sr_f "$(sr_task "$t")" desc; done | sr_join)"
 expect_eq "SH9 the measurements in numbers: landed, pace, correctness and waste; no metric line" \
-  "4 tasks, 120 of 570 min, 21%|25%|21%|1: 0 green, 1 red|green at aaaaaaaa|1 passed, 1 failed, 1 running|1|1 task, 30 min|1 of 6|72 min|0" \
+  "4 tasks, 120 of 570 min, 21%|25%|21%|1: 0 green, 1 red|red at aaaaaaaa, not in this head's history|1 passed, 1 failed, 1 running|1|1 task, 30 min|1 of 6|72 min|0" \
   "$(for k in work.landed pace.time-used pace.work-landed tests.suites-run tests.whole-run reviews findings.open waste.dropped waste.runs-discarded waste.ready-unstarted; do sr_m "$k"; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^metric\.')"
 expect_eq "SH10 each goal's name and status, in the plan's order" "fast landings=met|tests=not met|handoff=not measured" \
   "$(sr_lines goal | while IFS= read -r l; do printf '%s=%s\n' "$(sr_f "$l" name)" "$(sr_f "$l" status)"; done | sr_join)"

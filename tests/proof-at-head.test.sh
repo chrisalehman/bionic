@@ -160,7 +160,7 @@ pah_world one-split "$PAH_OWED" 2
 P2="$PAH_P"; P2_F="$PAH_F"
 PAH_MUT="$SANDBOX/mut-scripts"
 cp -R "$REPO_ROOT/payload/scripts" "$PAH_MUT"
-sed 's/whole_text="$(proof_whole_text "$PLAN" "$ROOT")"/whole_text="green at ${h:0:8}"/' "$REPO_ROOT/payload/scripts/close-out.sh" \
+sed 's/whole_text="$(proof_whole_text "$PLAN" "$ROOT")"/whole_text="green at $(proof_last "$PLAN" regression | cut -c1-8)"/' "$REPO_ROOT/payload/scripts/close-out.sh" \
   > "$PAH_MUT/close-out.sh"
 expect_eq "ONE-8 precondition: the copy differs from close-out.sh at the printer's call alone" "1" \
   "$(diff "$REPO_ROOT/payload/scripts/close-out.sh" "$PAH_MUT/close-out.sh" | /usr/bin/grep -c '^>')"
