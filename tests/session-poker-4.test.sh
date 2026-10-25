@@ -1273,7 +1273,7 @@ poke "$VC" task-add T7 6 review "a review on its three records. The critic write
 expect_eq "RF-3 control: a review row whose Files name its three records goes in as written, its artifact the first" \
   "0|$VC_THREE|$VC_REC/critic-evidence.md" "$RC|$(vc_cell T7 9)|$(vc_cell T7 12)"
 VC_OWN="$VC_REC/T10-evidence.md, $VC_REC/T10-adversarial.md, $VC_REC/T10-structure.md"
-poke "$VC" task-add T10 6 review "a review on its own three records. The critic writes its own three records." critic — 30 REQ-1 "$VC_OWN" head
+poke "$VC" task-add T10 6 review "A review on its own records. The critic writes its own three records." critic — 30 REQ-1 "$VC_OWN" head
 expect_eq "RF-3b a review row whose Files already name one record of its own per question keeps those names verbatim, its artifact the first" \
   "0|$VC_OWN|$VC_REC/T10-evidence.md" "$RC|$(vc_cell T10 9)|$(vc_cell T10 12)"
 expect_absent "RF-3c …and no rendered critic-<q>.md name is added beside them" "critic-" "$(vc_cell T10 9)"
