@@ -36,6 +36,8 @@
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
+#   §WHOLE-HOLDER the tick's whole run, held by regression@<h8> with budget run.sh, is admitted
+#                      alone when nothing is unfinished and waits while a landing runs
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
