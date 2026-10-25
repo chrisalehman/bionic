@@ -336,4 +336,38 @@ for wr_s in card line head; do
     "$(words_hits "$TMP/rendered/$wr_s.plant.txt" "rendered/$wr_s.txt")"
 done
 
+
+# ── §BIND ────────────────────────────────────────────────────────────────────
+section "§BIND: over the same fixture run, a judgment that sets 1 green and 3 red over a sheet of 3 green and 1 red is refused, not drawn"
+
+# The rendered texts above are read for refused words; a card the judgment filled with the wrong number beside a word
+# the sheet places is a wrong card with no refused word in it, so the same run is given a suite line of its own and the
+# card verb is asked the swap. The landing record holds four suites by their last verdict, three green and one red.
+# fails-when: the swap draws, the control in the sheet's order is refused, or the refusal leaves the card on stdout.
+WR_REC="$WR_R/.bionic/docs/record/wave-02-fx/landing-proofs.log"
+mkdir -p "${WR_REC%/*}"
+for wr_k in "a green" "b green" "c green" "d red"; do
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' \
+    "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
+done
+wr_poke sitrep "$WR_P" > "$TMP/wr-sheet"
+expect_eq "BN0 precondition: the sheet holds 3 green and 1 red on one line" "1" "$(/usr/bin/grep -c '^tests.suites-run: 4: 3 green, 1 red ' "$TMP/wr-sheet")"
+wr_bind() {  # <the point> -> the card verb's stdout over the sheet; WR_RC, and stderr in $TMP/wr.err
+  wr_poke sitrep card "$WR_P" <<WR_BIND_EOF
+purpose: the first row lands and the release goes out; on course.
+call: Approve the release once 4/2 lands.
+grade: C
+point: $1
+ask approve:release: The release approval, which holds 8/3 — recommend approve once 4/2 lands
+close: if 4/2 lands first time.
+WR_BIND_EOF
+}
+wr_bind "3 suites green and 1 red." > "$TMP/rendered/bind-ok.txt"
+expect_eq "BN1 control: the point in the sheet's order draws (exit 0) with its numbers on the card" "0|1" \
+  "$WR_RC|$(/usr/bin/grep -c '3 suites green and 1 red' "$TMP/rendered/bind-ok.txt")"
+wr_bind "1 suite green and 3 red." > "$TMP/rendered/bind-swap.txt"
+expect_eq "BN2 the swap is refused (exit 1) and nothing is drawn" "1|0" "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/bind-swap.txt")"
+expect_contains "BN2b …naming each number beside the word it does not stand by" 'says 1 beside "green"' "$(cat "$TMP/wr.err")"
+expect_contains "BN2c …and the other" 'says 3 beside "red"' "$(cat "$TMP/wr.err")"
+
 finish

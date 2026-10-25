@@ -358,7 +358,7 @@ _rh_replay() {
   # row's landing settles that finding too, so no move follows the landing.
   _rh_review w-adversarial-whole-2 adversarial whole "$RH_BASE" "$(_rh_head)" fail || return 1
   _rh_do "the sweeper acks the second failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-adversarial-whole-2 || return 1
-  _rh_poker "the fix row born of the finding" task-add T5 4 build 'answer the structure finding: a caller reaches the library change. The caller and the library agree again.' \
+  _rh_poker "the fix row born of the finding" task-add T5 4 build 'Answer the structure finding. A caller reaches the library change. The caller and the library agree again.' \
     orchestrator — 10 REQ-1 'payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh' \
     --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1

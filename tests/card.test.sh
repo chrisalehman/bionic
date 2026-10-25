@@ -1807,6 +1807,40 @@ expect_eq "TITLES-11 the Step-3 text and its template each state the rule once" 
   "$(/usr/bin/grep -c 'title of at most 30' "${REPO}/skills/canonical-sdlc/steps/3.md")|$(/usr/bin/grep -c 'title of at most 30' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl")"
 
 # ============================================================
+section "§ABBR: a sentence ends at a period followed by a space and a capital, so an abbreviation never cuts a title"
+# ============================================================
+# A Tasks cell's title is its first sentence. `vs.`, `e.g.` and `i.e.` end in a period and a space but a lowercase word
+# follows them, so the title runs on to the period that is followed by a capital or by the end of the cell. There is no
+# word list to keep: the case of the next letter says it. A title cut at an abbreviation would draw "Draw the facts vs"
+# at 17 columns and hide that the whole title is 31, over the cap.
+# fails-when: a title is cut at an abbreviation, an abbreviation title under the cap is not drawn whole with its
+# sentence beside it, one over the cap is drawn, or a period before a capital stops ending the title.
+ABBR_LONG="Draw the facts vs. the judgment"
+ABBR_SHORT="Fix vs. the old path"
+expect_eq "ABBR-0 precondition: the long abbreviation title is 31 columns and the short one 20" "31|20" "$(cols "$ABBR_LONG")|$(cols "$ABBR_SHORT")"
+ABBR_OK="${CARD_SANDBOX}/wave-04-flock.plan.md"
+sed -e "s/^| T6 | 5 | test | Prove the pair\. The pair is proved after two\./| T6 | 5 | test | ${ABBR_SHORT}. The path is fixed./" "$TITLES_PLAN" > "$ABBR_OK"
+expect_eq "ABBR-0b precondition: the plan holds the abbreviation row" "1" "$(/usr/bin/grep -c "^| T6 | 5 | test | ${ABBR_SHORT}\. The path is fixed\. " "$ABBR_OK")"
+whole_card step3 "$ABBR_OK"; AB_OUT="$WC_OUT"
+expect_eq "ABBR-1 a plan whose title holds an abbreviation within the cap draws (exit 0), silently" "0|" "$WC_RC|$WC_ERR"
+expect_contains "ABBR-1b …the title whole, the abbreviation in it" "${ABBR_SHORT}" "$(printf '%s\n' "$AB_OUT" | /usr/bin/grep '^    T6 ')"
+expect_contains "ABBR-1c …and the sentence after the period that is followed by a capital" "The path is fixed." "$AB_OUT"
+expect_absent "ABBR-1d …and no title cut at the abbreviation" "Fix vs  " "$(printf '%s\n' "$AB_OUT" | /usr/bin/grep '^    T6 ')"
+ABBR_BAD="${CARD_SANDBOX}/wave-05-flock.plan.md"
+sed -e "s/^| T6 | 5 | test | Prove the pair\. The pair is proved after two\./| T6 | 5 | test | ${ABBR_LONG}. The card draws both./" "$TITLES_PLAN" > "$ABBR_BAD"
+whole_card step3 "$ABBR_BAD"
+expect_eq "ABBR-2 a 31-column title holding an abbreviation is refused whole: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
+expect_contains "ABBR-2b …naming the row, the length, the cap and the whole title" \
+  "REFUSED — task T6: title is 31 characters, the cap is 30: ${ABBR_LONG}" "$WC_ERR"
+expect_absent "ABBR-2c …and never the cut one" "Draw the facts vs " "$(printf '%s\n' "$WC_ERR" | sed "s/${ABBR_LONG}//")"
+expect_eq "ABBR-2d …and task-cell, which the verbs call, says the same words" "REFUSED — task T6: title is 31 characters, the cap is 30: ${ABBR_LONG}" \
+  "$(bash "$CARD_SH" task-cell T6 "${ABBR_LONG}. The card draws both." 2>&1 >/dev/null)"
+expect_eq "ABBR-3 a title ending its cell on an abbreviation's period is the whole cell and has no sentence" \
+  "REFUSED — task T6: no sentence after its title" "$(bash "$CARD_SH" task-cell T6 "${ABBR_SHORT}." 2>&1 >/dev/null)"
+expect_eq "ABBR-3b control: a period before a capital ends the title, as it did" "0" \
+  "$(bash "$CARD_SH" task-cell T6 "Fix the path. The path is fixed." >/dev/null 2>&1; echo $?)"
+
+# ============================================================
 section "§REQ-TITLES: a requirement heading carries a title of at most 30 characters, and the Step-1 card prints id, title and count"
 # ============================================================
 # fails-when: the card prints a provenance or a criterion, the count is wrong, `explain <requirement>` lacks the
@@ -2045,8 +2079,11 @@ expect_eq "SENTENCE-9 a missing sentence and a long title are named in the one r
 # ============================================================
 section "§DESIGN-TITLES: a decision carries a title of at most 30 characters, and the Risks section is drawn whole"
 # ============================================================
-# fails-when: the card prints a decision's detail, a 31-character decision title is drawn, a risk is cut or refused
-# for its length, the section still reads Worth your eye, or the Step-2 text lacks either rule.
+# THE FIXTURE IS A REAL SPEC'S SHAPE: the `(D<n>; REQ-…)` group follows the title and the detail follows the group, as
+# the specs of the waves write it, so `explain` is read over text that comes after the group.
+# fails-when: the card prints a decision's detail, `explain` drops the detail written after the group, a 31-character
+# decision title is drawn, a risk is cut or refused for its length, the section still reads Worth your eye, or the
+# Step-2 text lacks either rule.
 DT_SPEC="${CARD_SANDBOX}/wave-09-flock.spec.md"
 RISK_LONG="The sync trusts the phone clock, so two phones a minute apart can each believe the other edit is newer, and the list then keeps whichever edit it saw last. We have not measured how often that happens in the field, and a wrong guess here loses a real edit. A fix would add a counter to every row, which is a larger change than this run takes."
 cat > "$DT_SPEC" <<FIXEOF
@@ -2070,8 +2107,8 @@ The flock syncs two phones and draws one list.
 
 ### Component boundaries and interfaces
 
-- **D1 — ${T30}** The sync owns the merge. DETAIL-ONE the sync owns the merge and hands the list to the view. (D1; REQ-1)
-- **D2 — Short title.** The view draws the list. DETAIL-TWO the view only draws. (D2; REQ-1, REQ-2)
+- **D1 — ${T30}** (D1; REQ-1). The sync owns the merge. DETAIL-ONE the sync owns the merge and hands the list to the view.
+- **D2 — Short title.** (D2; REQ-1, REQ-2). The view draws the list. DETAIL-TWO the view only draws.
 
 ### ADR pointers
 

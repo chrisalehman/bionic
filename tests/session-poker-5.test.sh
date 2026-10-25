@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -750,6 +750,85 @@ expect_contains "TSENT-7b …naming the backticked one in the card's words" \
 expect_contains "TSENT-7c …and the other in the same refusal" "$(ts_card_says T5 'The floor.')" "$OUT"
 expect_eq "TSENT-7d …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
 POKE_BOUND="$TS_BOUND_WAS"
+
+# ============================================================
+section "§CAP: task-add and task-set refuse a title over the card's cap where it is typed, in the card's words, the born suffix counted"
+# ============================================================
+# The Step-3 card refuses a title of more than 30 columns. A row added or reset with one landed in the plan and
+# reddened the card at the next draw, a step away from the hand that typed it, so the two verbs that write the cell
+# measure it first, through the card's own check (`card.sh task-cell`): the words are the card's, every refused cell
+# is named in the one refusal, and the plan is left as it was. The whole cell is judged as it will be written, the
+# ` · born: …` tag task-add appends included, so no tag can push a title the verb admitted over the cap.
+# FIXTURE FIDELITY: s34's plan at current: 5, bound to this session; every write is the real verb.
+# fails-when: a verb writes a title the card would refuse, refuses a title the card would draw, says other words than
+# the card's check, names only one of two refused cells, or changes a byte of the plan when it refuses.
+CP_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+CP_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
+RCP="$(make_repo cap)"; ( cd "$RCP" && git commit -q --allow-empty -m init )
+PCP="$(s34_plan "$RCP" 5)"
+CP_T30="Thirty columns of title, no more"; CP_T30="${CP_T30:0:30}"
+CP_T31="${CP_T30}x"
+cp_says() {  # <id> <cell> -> what the card's check prints for that cell
+  bash "$CP_CARD" task-cell "$1" "$2" 2>&1 >/dev/null
+}
+cp_row() { /usr/bin/grep "^| $1 |" "$PCP"; }
+expect_eq "CAP-0 precondition: the boundary title is 30 columns and the over-long one 31" "30|31" "${#CP_T30}|${#CP_T31}"
+
+poke "$RCP" task-add T7 7 doc "${CP_T30}. The fixture ships as one release." bionic:implementor 'T5' 30 REQ-1 '—'
+expect_eq "CAP-1 task-add writes a title of exactly 30 columns (exit 0)" "0" "$RC"
+expect_contains "CAP-1b …the cell as typed" "| T7 | 7 | doc | ${CP_T30}. The fixture ships as one release. |" "$(cp_row T7)"
+
+CP_BEFORE="$(cat "$PCP")"
+CP_CELL="${CP_T31}. The fixture ships as one release."
+CP_WORDS="$(cp_says T8 "$CP_CELL")"
+expect_eq "CAP-2 precondition: the card's check refuses that cell with the title's length, the cap and the title" \
+  "REFUSED — task T8: title is 31 characters, the cap is 30: ${CP_T31}" "$CP_WORDS"
+poke "$RCP" task-add T8 7 doc "$CP_CELL" bionic:implementor 'T5' 30 REQ-1 '—'
+expect_eq "CAP-2a task-add of a 31-column title is refused (exit 1)" "1" "$RC"
+expect_contains "CAP-2b …in the card's words" "$CP_WORDS" "$OUT"
+expect_eq "CAP-2c …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
+
+# The tag the verb appends is part of the cell it judges: a title that fits is admitted with it, one that does not is refused with it.
+poke "$RCP" task-add T8 7 doc "$CP_CELL" bionic:implementor 'T5' 30 REQ-1 '—' --born 'review S2 on'
+expect_eq "CAP-3 task-add of a 31-column title with a born tag is refused all the same (exit 1)" "1" "$RC"
+expect_contains "CAP-3b …in the card's words, the title whole" "$CP_WORDS" "$OUT"
+expect_eq "CAP-3c …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
+poke "$RCP" task-add T8 7 doc "${CP_T30}. The fixture ships as one release." bionic:implementor 'T5' 30 REQ-1 '—' --born 'review S2 on'
+expect_eq "CAP-3d control: the same cell with a 30-column title and the born tag is admitted (exit 0)" "0" "$RC"
+CP_BORN_LAST="$(printf '%s\n' "$OUT" | tail -1)"
+expect_contains "CAP-3e …with the tag written after the sentence" "| T8 | 7 | doc | ${CP_T30}. The fixture ships as one release. · born: review" "$(cp_row T8)"
+
+CP_BEFORE="$(cat "$PCP")"
+poke "$RCP" task-set T5 "task=${CP_T31}. It proves the two builds together."
+expect_eq "CAP-4 task-set of a 31-column title is refused (exit 1)" "1" "$RC"
+expect_contains "CAP-4b …in the card's words" "$(cp_says T5 "${CP_T31}. It proves the two builds together.")" "$OUT"
+expect_eq "CAP-4c …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
+poke "$RCP" task-set T2 "task=${CP_T31}. The second build." -- T5 "task=${CP_T31}. It proves the two builds together."
+expect_eq "CAP-5 task-set of two groups, both over the cap, is refused (exit 1)" "1" "$RC"
+expect_contains "CAP-5b …naming the first in the card's words" "$(cp_says T2 "${CP_T31}. The second build.")" "$OUT"
+expect_contains "CAP-5c …and the second in the same refusal" "$(cp_says T5 "${CP_T31}. It proves the two builds together.")" "$OUT"
+expect_eq "CAP-5d …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
+poke "$RCP" task-set T5 "task=${CP_T30}. It proves the two builds together."
+expect_eq "CAP-6 task-set writes a title of exactly 30 columns (exit 0)" "0" "$RC"
+expect_contains "CAP-6b …as typed" "| T5 | 5 | verify | ${CP_T30}. It proves the two builds together. |" "$(cp_row T5)"
+
+# ============================================================
+section "§OWED: task-add ends on one line naming the task-list entry the turn now owes, by the row's title"
+# ============================================================
+# A row added to the plan is a row the harness's task list lacks, and the entries after it are recreated to keep the
+# order. The rule is stated where the act happens: the verb's last line names the entry, as the task list names it
+# (`<step>/<id>: <title>`), so no step text carries it.
+# fails-when: task-add ends on anything but that line, names the entry by anything but the row's title, or says it
+# of a refusal.
+poke "$RCP" task-add T9 7 doc 'Make the entry. The entry is owed the same turn.' bionic:implementor 'T5' 30 REQ-1 '—'
+expect_eq "OWED-1 task-add of a row exits 0 and ends on one line naming the task-list entry by its title" \
+  "0|poker: task-add — owed: create the task-list entry 7/T9: Make the entry, and recreate the entries after it to keep the order." "$RC|$(printf '%s\n' "$OUT" | tail -1)"
+expect_eq "OWED-1b …the line is said once" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed: create the task-list entry')"
+expect_eq "OWED-2 a born row (CAP-3d's T8) ends on the same line, its title without the tag" \
+  "poker: task-add — owed: create the task-list entry 7/T8: ${CP_T30}, and recreate the entries after it to keep the order." "$CP_BORN_LAST"
+poke "$RCP" task-add T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
+expect_eq "OWED-3 a refused task-add says nothing is owed" "1|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed:')"
+POKE_BOUND="$CP_BOUND_WAS"
 
 # ============================================================
 section "§APPROVED-BY: approve plan '<reply>' writes the approved-by: line the walls read, with the user's words, once (REQ-9 AC-9.2)"

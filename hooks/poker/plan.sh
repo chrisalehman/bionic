@@ -1022,7 +1022,7 @@ EOF
     exit 0
   }
 
-  # A TASKS CELL IS HELD TO THE STEP-3 CARD'S SENTENCE RULE WHERE IT IS TYPED: a cell the card would refuse is
+  # A TASKS CELL IS HELD TO THE STEP-3 CARD'S TITLE CAP AND SENTENCE RULE WHERE IT IS TYPED: a cell the card would refuse is
   # refused here, before anything is written, by the card's own check (`card.sh task-cell`), so the words are the
   # card's and there is one rule. Every refused cell of the call is named in the one refusal.
   pv_task_cells_or_refuse() {  # <id> <cell> [<id> <cell>]... -> returns when the card would draw every cell, else exits 1
@@ -1262,6 +1262,10 @@ EOF
     # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
     # that shares no file with its holder is named, with the line that would loosen it, never run.
     suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
+    # WHAT THE TURN NOW OWES, SAID AT THE ACT: the harness's task list lacks the row, and the entries after it are
+    # recreated to keep the order. The entry is named as the task list names it, by the row's title, and the line is
+    # the verb's last so the rule is read where it fires and no step text has to carry it.
+    say "task-add — owed: create the task-list entry $TA_STEP/$TA_ID: $(clean_whole "$(plan_task_title "$TA_CELL_TASK")"), and recreate the entries after it to keep the order."
     exit 0
   }
 
@@ -2858,7 +2862,7 @@ RR_AGAINST_EOF
         failing:*) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
         covered:*) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm${clands:+, covered at this head by $clands}"$'\n' ;;
         uncovered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, not covered at this head"$'\n' ;;
-        absent:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, a reading still owed at this head"$'\n' ;;
+        absent:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, a review still owed at this head"$'\n' ;;
         :pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
         :fail) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
         *) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, ${r:-no result}"$'\n' ;;

@@ -116,7 +116,7 @@ deliver_check() {
   if [ -n "$(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id')" ]; then
     live="$(units_live_held "$PV_PLAN" "$PV_ID")"; lrc=$?
     if [ "$lrc" -ne 0 ]; then
-      die "REFUSED — $PV_ID is a live review row (it reads live:head), and it lands only once the judge reads every question it carries covered at the working head; not covered there: $(printf '%s\n' "$live" | awk 'NF { printf "%s%s", (n++ ? ", " : ""), $0 }'). Register the reading at the head (proof-add review), then deliver again. The plan is unchanged."
+      die "REFUSED — $PV_ID is a live review row (it reads live:head), and it lands only once the judge reads every question it carries covered at the working head; not covered there: $(printf '%s\n' "$live" | awk 'NF { printf "%s%s", (n++ ? ", " : ""), $0 }'). Register the review at the head (proof-add review), then deliver again. The plan is unchanged."
       exit 2
     fi
   fi

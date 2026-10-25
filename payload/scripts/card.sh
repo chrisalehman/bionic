@@ -50,7 +50,7 @@
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
-#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's sentence rule; task-add's and task-set's)
+#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's title cap and sentence rule; task-add's and task-set's)
 #     bash card.sh release                 < facts      (the release approval card, from the facts its verb gathers)
 #     bash card.sh sitrep <sheet>          < judgment   (the sitrep card, from the sheet and the model's judgment)
 #     bash card.sh sitrep-check <sheet>    < card       (the sitrep card's check alone, over a card drawn elsewhere)
@@ -713,6 +713,18 @@ function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
 # design bullet each carry their whole story; the card carries the opening of it
 # and the artifact path is the depth (steps/1.md: "never a paragraph").
 function firstsent(s) { if (match(s, /\. /)) return substr(s, 1, RSTART); return s }
+# A TITLE\047S sentence ends at a period followed by a space and an uppercase letter or the end of the cell, so
+# `vs. the` and `e.g. a` never end it and no word list is kept; the bash side (_card_cut) reads the same rule. The
+# concept sentence that follows a title stays firstsent: the text after it may open on a backtick or a bracket.
+function titlesent(s,   r, off, p, c) {
+  r = s; off = 0
+  while (match(r, /\. /)) {
+    p = RSTART; c = substr(r, p + 2, 1)
+    if (c == "" || c ~ /[[:upper:]]/) return substr(s, 1, off + p)
+    off += p + 1; r = substr(r, p + 2)
+  }
+  return s
+}
 function cells(line, arr,   n, i) {
   gsub(/\\\|/, "\001", line)
   sub(/^[ \t]*\|/, "", line); sub(/\|[ \t]*$/, "", line)
@@ -738,8 +750,17 @@ function flush_req() {
 # THE TITLE OF A DECISION IS ITS LEADING BOLD SPAN, `**D<n> — <title>**` (a bold span without the label
 # is the title as it stands); a bullet with no bold span opens on its first sentence, which is its title.
 # The first sentence after the title is the decision\047s concept, the row\047s fifth cell, drawn under the
-# row; the rest of the bullet, up to the (D<n>; REQ-...) group, is the detail `explain` prints. The
-# sentence keeps its backticks, because a backtick is what the card refuses in it.
+# row; the rest of the bullet is the detail `explain` prints, written before the (D<n>; REQ-...) group or after
+# it: a spec writes the group beside the title and the detail behind it, so the group is lifted out of the
+# bullet and the text on both sides is read as one. The sentence keeps its backticks, because a backtick is
+# what the card refuses in it.
+function decl_splice(line,   before, after) {
+  match(line, /\(D[0-9]+;[^)]*\)/)
+  before = trim(substr(line, 1, RSTART - 1)); after = trim(substr(line, RSTART + RLENGTH))
+  if (after == "") return before
+  if (after ~ /^[.,;:]/) return before after
+  return before " " after
+}
 function flush_dec(   line, id, serves, title, detail, sent) {
   if (dbuf == "") return
   line = dbuf; dbuf = ""
@@ -747,14 +768,13 @@ function flush_dec(   line, id, serves, title, detail, sent) {
     id = substr(line, RSTART + 1, RLENGTH - 2)
     serves = id; sub(/^D[0-9]+;[ \t]*/, "", serves)
     sub(/;.*$/, "", id)
-    line = substr(line, 1, RSTART - 1)
-    line = trim(line)
+    line = decl_splice(line)
     if (match(line, /^\*\*[^*]+\*\*/)) {
       title = substr(line, 3, RLENGTH - 4)
       detail = substr(line, RLENGTH + 1)
     } else {
       gsub(/\*\*/, "", line)
-      title = firstsent(line); detail = substr(line, length(title) + 1)
+      title = titlesent(line); detail = substr(line, length(title) + 1)
     }
     gsub(/\*\*/, "", detail)
     title = clean(title)
@@ -1089,22 +1109,48 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # over the cap is REFUSED, never cut: a cut title is a different sentence that the person then
 # approves, and an ellipsis is the same cut with a mark on it.
 #
-# THE TITLE OF EACH KIND OF ITEM. A Tasks cell: the text before its first `. `, or all of it when
-# it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
+# THE TITLE OF EACH KIND OF ITEM. A Tasks cell: the text before the period that ends its first sentence
+# (a period followed by a space and a capital, `_card_cut`), or all of it when it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
 # requirement heading and a decision are titled by their heading, so their text is the title as
 # the parse hands it over.
 #
-# A TASKS CELL'S SENTENCE is what follows its title's `. `, through its own period: the cell's next
-# `. `, or its first ` · `, where a tag (` · complexity:`, ` · born:`) begins, or the cell's end. A
+# A TASKS CELL'S SENTENCE is what follows its title's period, through its own: the cell's next
+# sentence end, or its first ` · `, where a tag (` · complexity:`, ` · born:`) begins, or the cell's end. A
 # cell that is its title alone, or its title and a tag, has none.
 CARD_TITLE_CAP=30
 # The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
 CARD_APPROACH_CAP=60
 
+# WHERE A SENTENCE ENDS: at a period followed by a space and an uppercase letter, or by the end of the text. `vs. the`
+# and `e.g. a` are followed by a lowercase word, so an abbreviation never ends one, and the rule keeps no word list.
+# Sets CARD_CUT_HEAD (the text through that period) and CARD_CUT_REST (what follows it) and returns 0 when the text has
+# such a period; otherwise returns 1 with the whole text in CARD_CUT_HEAD. The awk reader's firstsent reads the same rule.
+_card_cut() {  # <text>
+  local t="${1:-}" head=""
+  CARD_CUT_HEAD="$t"; CARD_CUT_REST=""
+  while :; do
+    case "$t" in *". "*) ;; *) return 1 ;; esac
+    head="${head}${t%%". "*}."
+    t="${t#*". "}"
+    case "$t" in
+      ''|[[:upper:]]*) CARD_CUT_HEAD="$head"; CARD_CUT_REST="$t"; return 0 ;;
+    esac
+    head="${head} "
+  done
+}
+
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
-  local t="${2:-}"
+  local t="${2:-}" w
   case "$1" in
-    cell) t="$(plan_task_title "$t")" ;;
+    cell)
+      # The cell up to the period that ends its first sentence, else up to the first ` · ` where a tag begins, a
+      # closing `.` dropped, trimmed; a cell that would leave nothing keeps its whole trimmed text.
+      if _card_cut "$t"; then t="$CARD_CUT_HEAD"
+      else case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
+      fi
+      t="${t%.}"
+      t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
+      if [ -z "$t" ]; then w="${2:-}"; w="${w#"${w%%[![:space:]]*}"}"; t="${w%"${w##*[![:space:]]}"}"; fi ;;
     item)
       case "$t" in *": "*) t="${t%%: *}" ;; esac ;;
   esac
@@ -1113,7 +1159,8 @@ _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
 
 _card_cell_sentence() {  # <Tasks cell> -> its sentence, on stdout, or nothing
   local t="${1:-}"
-  case "$t" in *". "*) t=" ${t#*. }" ;; *) return 0 ;; esac
+  _card_cut "$t" || return 0
+  t=" $CARD_CUT_REST"
   case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
   case "$t" in *". "*) t="${t%%". "*}." ;; esac
   t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
@@ -3632,12 +3679,13 @@ case "$1" in
     done
     exit 0 ;;
   task-cell)
-    # A TASKS CELL, JUDGED BY THE STEP-3 CARD'S OWN SENTENCE RULE where a verb writes it (task-add,
-    # task-set): the refusal is the card's, word for word, every refused cell named in it, exit 1.
+    # A TASKS CELL, JUDGED BY THE STEP-3 CARD'S OWN TITLE CAP AND SENTENCE RULE where a verb writes it
+    # (task-add, task-set): the refusal is the card's, word for word, every refused cell named in it, exit 1.
     [ "$#" -ge 3 ] && [ $(( ($# - 1) % 2 )) -eq 0 ] || _card_usage "task-cell takes <id> <cell> pairs (got $(( $# - 1 )) arguments)"
     shift
     CARD_TITLE_BAD=""
     while [ "$#" -ge 2 ]; do
+      _card_title_check task "$1" "$(_card_title cell "$2")"
       _card_sentence_check task "$1" "$(_card_cell_sentence "$2")" "after its title"
       shift 2
     done
