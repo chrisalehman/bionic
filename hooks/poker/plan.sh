@@ -1176,9 +1176,11 @@ EOF
 
     # A ROW REVIEW MADE UNASKED (wave-30 T21; REQ-10 AC-10.1, AC-10.2; D4, Δ3). Three guards, whatever the
     # policy says, each a refusal with the plan byte-identical: (1) the rating is inside the plan's
-    # fix-policy:, read verbatim (lib/run.sh `fix_policy_covers`; S1,S2-on when absent); (2) the row is
+    # fix-policy:, read verbatim (lib/run.sh `fix_policy_covers`; S1,S2-on when absent); (2) a counted row is
     # under fix-cap: (lib/units.sh `units_fix_cap`, the level's default when absent), counted off the
-    # ledger lines' born: markers (`units_born`, the one place the count reads); (3) no Files path outside
+    # ledger lines' born: markers (`units_born_counted`, the one place the count reads): a row inside the
+    # policy whose findings are this plan's own is the review's own defect and exempt, while a promoted or a
+    # carried one counts, so the cap bounds only the scope a review adds; (3) no Files path outside
     # the record already carries three review-born rows: the fourth fix on one component stops the run.
     # In-diff is the orchestrator's judgment and "never re-read" the proof's; neither is this verb's.
     # THE FINDINGS A ROW ANSWERS (wave-33 T13; REQ-5, D6): each is a finding of a reading the plan registered,
@@ -1188,11 +1190,8 @@ EOF
     # (`finding_read`'s FR_P, a `moved:` line) is fix, and `disposition` tells the orchestrator to born a row of
     # it, so the policy guard holds each finding to the policy OR to the person's move, the first that is
     # neither refused with the remedy. The marker keeps the reader's rating, never re-rated.
-    TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""
-    TA_POL="$(plan_frontmatter_get "$TA_PLAN" fix-policy)"
-    if [ -z "$TA_POL" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$TA_PLAN" 2>/dev/null; then
-      TA_POL="$FIX_POLICY_DEFAULT"
-    fi
+    TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""; TA_CLASS=""; TA_COUNT_SAID=""
+    TA_POL="$(units_fix_policy "$TA_PLAN")" || TA_POL=""
     # A FINDING THE PERSON MOVED TO DEFER IS BORN NO ROW (wave-36 T8; REQ-4 AC-4.5, D10): its newest move
     # (lib/proof.sh `proof_move_line`) is the person's last word, whatever its reader's rating, so an S2 on the
     # fix-policy admits is refused as an S3 off is, naming the move, before the policy is asked.
@@ -1218,6 +1217,10 @@ EOF
         die "task-add refused — born: $TA_OFF_RATING is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3). To fix $(clean "$TA_OFF") anyway: disposition $(clean "$TA_OFF") fix '<their words>' '<why>', then task-add again."
         exit 1
       fi
+      # A gravest rating outside the policy got here only by the person's move to fix: the marker says so, and
+      # the row counts against fix-cap: whatever the policy later becomes.
+      TA_RATING="${TA_BORN#review }"
+      fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }" || TA_BORN_MARK="$TA_BORN_MARK promoted"
     fi
     TA_CELL_TASK="$TA_TASK"
     if [ -n "$TA_BORN" ]; then
@@ -1226,16 +1229,26 @@ EOF
         die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3)."
         exit 1
       fi
-      if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
-        die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; the plan is unchanged."
+      if ! TA_COUNTED="$(units_born_counted "$TA_PLAN")"; then
+        die "task-add refused — the review-born rows of $TA_PLAN cannot be counted against fix-cap: (lib/run.sh, which reads fix-policy:, is not loaded); the plan is unchanged. Run /bionic:doctor to see which library answered."
         exit 1
+      fi
+      TA_NCOUNT="$(printf '%s\n' "$TA_COUNTED" | awk -F'\t' '$3 == "counted" { n++ } END { print n + 0 }')"
+      TA_NEXEMPT="$(printf '%s\n' "$TA_COUNTED" | awk -F'\t' '$3 == "exempt" { n++ } END { print n + 0 }')"
+      TA_CLASS="$(units_born_class "$TA_PLAN" "$TA_POL" "$TA_RATING" "${TA_BORN_MARK# }")"
+      TA_COUNT_SAID="exempt under fix-policy: $TA_POL"
+      if [ "$TA_CLASS" = counted ]; then
+        if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
+          die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; the plan is unchanged."
+          exit 1
+        fi
+        if [ "$TA_NCOUNT" -ge "$TA_CAP" ]; then
+          die "task-add refused — review-born rows: $TA_NCOUNT of cap $TA_CAP are counted ($TA_NEXEMPT exempt under fix-policy: $TA_POL); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=$((TA_NCOUNT + 1)) at the card."
+          exit 1
+        fi
+        TA_COUNT_SAID="counted $((TA_NCOUNT + 1)) of $TA_CAP"
       fi
       TA_BORN_ROWS="$(units_born "$TA_PLAN")"
-      TA_NBORN="$(printf '%s' "$TA_BORN_ROWS" | awk 'NF { n++ } END { print n + 0 }')"
-      if [ "$TA_NBORN" -ge "$TA_CAP" ]; then
-        die "task-add refused — review-born rows: $TA_NBORN of cap $TA_CAP; this finding goes to the review findings disposition (AC-10.3)."
-        exit 1
-      fi
       while IFS= read -r TA_PATH; do
         [ -n "$TA_PATH" ] || continue
         case "$TA_PATH" in .bionic/*|record/*) continue ;; esac
@@ -1291,7 +1304,7 @@ EOF
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question the rigor deals${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
-    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
+    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN); say so in the review findings disposition · $TA_COUNT_SAID"
     [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every review's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
