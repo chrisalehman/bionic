@@ -1402,25 +1402,6 @@ co_task_count() {
   units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "build" && $10 != "dropped" { n++ } END { print n + 0 }'
 }
 
-# co_regression_text -> the regression's result, from the floor's proof line (`proved: kind=floor`),
-# in the word the doctrine uses. A plan that says `regression: no` owed none.
-co_regression_text() {
-  local line h at ev
-  if [ "$(proof_regression "$PLAN")" = no ]; then
-    printf 'the regression was not owed (regression: no)'
-    return 0
-  fi
-  line="$(proof_last_line "$PLAN" regression)"
-  if [ -z "$line" ]; then
-    printf 'the regression: no proof is recorded in the plan'
-    return 0
-  fi
-  h="$(printf '%s\n' "$line" | sed -n 's/.* head=\([0-9a-f]*\).*/\1/p')"
-  at="$(printf '%s\n' "$line" | sed -n 's/.* at=\([^ ]*\).*/\1/p')"
-  ev="$(printf '%s\n' "$line" | sed -n 's/.* evidence=\([^ ]*\).*/\1/p')"
-  printf 'the regression: the whole run holds at %s (proved %s, %s)' "${h:0:12}" "${at:-?}" "${ev:-no record}"
-}
-
 # co_reviews_text -> `Reviews: <question> <scope> <result> (<reader>); …. ADRs: <cell>.`, one entry per
 # question and scope in the order the plan first records them, each with the result of its LAST line.
 co_reviews_text() {
@@ -1456,11 +1437,26 @@ co_patrol_sentence() {
 }
 
 continuation_template() {
-  local sha tasks regress reviews patrol inherited head resume ws
+  local sha tasks regress reviews patrol inherited head resume ws line at ev whole_text
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   inherited="$(co_inherited_section)"
   tasks="$(co_task_count)"
-  regress="$(co_regression_text)"
+  # THE REGRESSION is the full pass's state at the working head, from the one printer the release card and the
+  # scorecard draw too (lib/proof.sh `proof_whole_text`), then the proof's instant and log; it is never read off the
+  # proof line alone, whose head says nothing of the landings since. A plan that says `regression: no` owed none.
+  if [ "$(proof_regression "$PLAN")" = no ]; then
+    regress='the regression was not owed (regression: no)'
+  else
+    line="$(proof_last_line "$PLAN" regression)"
+    if [ -z "$line" ]; then
+      regress='the regression: no proof is recorded in the plan'
+    else
+      at="$(printf '%s\n' "$line" | sed -n 's/.* at=\([^ ]*\).*/\1/p')"
+      ev="$(printf '%s\n' "$line" | sed -n 's/.* evidence=\([^ ]*\).*/\1/p')"
+      whole_text="$(proof_whole_text "$PLAN" "$ROOT")"
+      regress="$(printf 'the regression: whole suite %s (proved %s, %s)' "${whole_text:-unverified}" "${at:-?}" "${ev:-no record}")"
+    fi
+  fi
   reviews="$(co_reviews_text)"
   patrol="$(co_patrol_sentence)"
   # A PARKED RUN SAYS SO IN ITS HEADER (wave-38 T15; AC-4.3): parked, where the work is, and why; nothing was merged.

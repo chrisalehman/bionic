@@ -309,7 +309,7 @@ expect_eq "SH8 each task's title, the plan card's: the cell up to its first '. '
   "Row one the thing (D1; AC-1.1)|Haiku 5.5 at high (REQ-8; AC-8.1)|Third row|The long one (D8)" \
   "$(for t in T1 T2 T3 T8; do sr_f "$(sr_task "$t")" desc; done | sr_join)"
 expect_eq "SH9 the measurements in numbers: landed, pace, correctness and waste; no metric line" \
-  "4 tasks, 120 of 570 min, 21%|25%|21%|1: 0 green, 1 red|green at aaaaaaaa|1 passed, 1 failed, 1 running|1|1 task, 30 min|1 of 6|72 min|0" \
+  "4 tasks, 120 of 570 min, 21%|25%|21%|1: 0 green, 1 red|red at aaaaaaaa, not in this head's history|1 passed, 1 failed, 1 running|1|1 task, 30 min|1 of 6|72 min|0" \
   "$(for k in work.landed pace.time-used pace.work-landed tests.suites-run tests.whole-run reviews findings.open waste.dropped waste.runs-discarded waste.ready-unstarted; do sr_m "$k"; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^metric\.')"
 expect_eq "SH10 each goal's name and status, in the plan's order" "fast landings=met|tests=not met|handoff=not measured" \
   "$(sr_lines goal | while IFS= read -r l; do printf '%s=%s\n' "$(sr_f "$l" name)" "$(sr_f "$l" status)"; done | sr_join)"
@@ -963,20 +963,59 @@ sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=discarded|log=/rec
 sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=z.test.sh|result=green|log=/rec/z.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:20:00Z"
 sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=y.test.sh|result=red|log=/rec/y.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:21:00Z"
 sr_run "$SR_PLAN"
-expect_eq "SU1 three suites by their last verdict (a discarded run is none), the whole run red at its head, the reviews after" \
-  "3: 2 green, 1 red|red at aaaaaaaa|0 passed, 0 failed, 0 running|0" \
+expect_eq "SU1 three suites by their last verdict (a discarded run is none); the whole run's own verdicts with no proof are no whole run; the reviews after" \
+  "3: 2 green, 1 red|not run yet|0 passed, 0 failed, 0 running|0" \
   "$(sr_correct)"
 SR_H2="$(printf 'b%.0s' $(seq 40))"
 awk -v h="$SR_H2" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T15:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "SU2 a later whole run proved green: green at its head" "green at bbbbbbbb" \
-  "$(sr_m tests.whole-run)"
+expect_eq "SU2 a whole run proved at a head this repository does not hold: red at its head, which is not behind the working head" \
+  "red at bbbbbbbb, not in this head's history" "$(sr_m tests.whole-run)"
 awk 'NR > 1 && /^---$/ && !d { print "regression: no"; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "SU3 a plan that owes no whole run says so, beside the suites it ran" \
   "3: 2 green, 1 red|not run (regression: no, Step 0)" \
   "$(sr_m tests.suites-run)|$(sr_m tests.whole-run)"
+
+section "§WHOLE: the whole run reads green only at the head it ran at with nothing owed; anywhere else it is red, the landings since it counted"
+# ============================================================
+# fails-when: a proof line reads green whatever its owed= says, or at a head the working head has moved past; or the
+# landings since the whole run go uncounted, or a count of one says landings.
+# FIXTURE FIDELITY: the world's tree committed and the working branch set on it, so the whole run's head is a commit
+# here; the proof line is the one `proof-add regression` writes (lib/proof.sh `proof_floor_line`); each later commit
+# is a commit on the working branch.
+# ANTI-VACUITY: WH1 reads green and WH2 red through the same measurement on the same world, one planted owed= apart.
+sr_proof() {  # <head> [<owed suites>] -> the plan's regression proof replaced by one at <head> that left <owed> red
+  local l
+  l="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-06T15:00:00Z "record/wave-02-fx/regression-run-$2.log" "${3:-}"' \
+    _ "$SR_PROOF_LIB" "$1" "${2:-}")"
+  awk -v l="$l" '/^proved: kind=regression / { next } { print } /^current: 4$/ { print l }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+}
+sr_commit() {  # <file> -> one more commit on the working branch, the branch moved to it; prints nothing
+  printf 'x\n' >> "$SR_REPO/$1"
+  ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm "$1" >/dev/null 2>&1 )
+  git -C "$SR_REPO" branch -f wave/02-fx HEAD >/dev/null 2>&1
+}
+SR_PROOF_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+sr_world whole-head "6 6 12 12"
+sr_commit lib/a.sh
+SR_F="$(git -C "$SR_REPO" rev-parse wave/02-fx)"
+sr_proof "$SR_F"
+sr_run "$SR_PLAN"
+expect_eq "WH1 a whole run at the working head with nothing owed: green at that head" "green at ${SR_F:0:8}" "$(sr_m tests.whole-run)"
+sr_proof "$SR_F" b.test.sh
+sr_run "$SR_PLAN"
+expect_eq "WH2 the same whole run with a suite owed: red at the working head, no landing since" "red at ${SR_F:0:8}, 0 landings before this head" \
+  "$(sr_m tests.whole-run)"
+sr_proof "$SR_F"
+sr_commit lib/b.sh
+sr_run "$SR_PLAN"
+expect_eq "WH3 the green whole run with one landing past it: red at the whole run's head, one landing before this head" \
+  "red at ${SR_F:0:8}, 1 landing before this head" "$(sr_m tests.whole-run)"
+sr_commit lib/c.sh
+sr_run "$SR_PLAN"
+expect_eq "WH4 …and with two: two landings" "red at ${SR_F:0:8}, 2 landings before this head" "$(sr_m tests.whole-run)"
 
 section "§COUNTS: a count agrees in number with what it counts — one task, two tasks; the sheet never says 1 tests"
 # ============================================================
