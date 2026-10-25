@@ -191,8 +191,8 @@ DELIVER_FILES
       die "REFUSED — the artifact $(clean "$art") of $PV_ID is not under record/ of the docs root ($docs/record/), and a record row delivers a record; the plan is unchanged."
       exit 2 ;;
   esac
-  # THE WALK ROW'S RECORD IS SETTLED BY ITS LANDING: a verify row whose artifact is a wave's walk record,
-  # record/<wave>/walk.md, is registered by walk_register in the landing's own write, so its confirmed cells need no
+  # THE WALK ROW'S RECORD IS SETTLED BY ITS LANDING: a verify row whose artifact is a run's walk record,
+  # record/<run>/walk.md, is registered by walk_register in the landing's own write, so its confirmed cells need no
   # status write after it. RL_WALK names the record from the docs root, RL_WALK_REAL its real path.
   if [ "$kind" = verify ]; then
     case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel"; RL_WALK_REAL="$real" ;; esac ;; esac
