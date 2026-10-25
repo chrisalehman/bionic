@@ -6,9 +6,13 @@
 # defines functions only, and is never run by itself.
 
 # landing_evidence <plan in> <plan out> <row> <commit> <landing record> <docs root> <plan slug> -> prints the number of
-# cells written; <plan out> holds the plan with them (and is left alone when none). rc 1 when the pass cannot run.
+# cells written; <plan out> holds the plan with them (and is left alone when none), and <plan out>.cells the criteria
+# whose block took a log, space-separated, for the landing's settlement. rc 1 when the pass cannot run.
+# A suite is named in an eval by its file name or by its path under tests/, where a bare Lands-on name runs, so a log
+# is keyed by both.
 landing_evidence() {
   local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
+  rm -f "$out.cells"
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   logs="$( [ -f "$rec" ] && awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "${_LINE_FIELDS_AWK:-}"'
     { e = line_ev() }
@@ -21,13 +25,23 @@ landing_evidence() {
       s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
       if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
     }
-    END { for (s in last) printf "%s\t%s\n", s, last[s] }' "$rec" 2>/dev/null )"
+    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' "$rec" 2>/dev/null )"
   if [ -z "$logs" ]; then printf '0'; return 0; fi
   LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
     awk "$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
   n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
   case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
-  if [ "$n" -gt 0 ]; then mv -f "$out.le" "$out"; else rm -f "$out.le"; fi
+  if [ "$n" -gt 0 ]; then
+    # The criteria whose block took a log: the pass replaces lines in place, so a line that differs is an evidence line.
+    awk '
+      NR == FNR { a[FNR] = $0; next }
+      /^## / { inm = ($0 ~ /^## Verification Matrix/); cur = ""; next }
+      inm && /^[^ \t|]/ { h = $0; sub(/^[-*+][ \t]+/, "", h); cur = ""; if (match(h, /^AC-[^ \t:]+:/)) cur = substr(h, 1, RLENGTH - 1); next }
+      cur != "" && $0 != a[FNR] && !(cur in s) { s[cur] = 1; printf "%s%s", sep, cur; sep = " " }' "$in" "$out.le" > "$out.cells" 2>/dev/null
+    mv -f "$out.le" "$out"
+  else
+    rm -f "$out.le"
+  fi
   printf '%s' "$n"
 }
 # ---------------------------------------------------------------- a record row lands itself
@@ -889,7 +903,8 @@ hand_holds_verb() {
     fi
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
-    # A hand landing's verdicts are written after this, with its published line, so it writes none here. Same copy, same dry commit, same swap.
+    # A hand landing's verdicts are keyed by the commit the person says they were green at, not this landing's, so it
+    # writes none here. Same copy, same dry commit, same swap.
     RL_SLUG="$(proof_plan_slug "$PV_PLAN")"
     RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
@@ -897,8 +912,24 @@ hand_holds_verb() {
       exit 1
     }
     [ ! -f "$PV_NEW.2" ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    RL_CELLS="$(cat "$PV_NEW.2.cells" 2>/dev/null)"; rm -f "$PV_NEW.2.cells"
+    # THE SETTLEMENT (lib/line.sh `line_settle`): what the landing proves goes into the same copy, so the row, its
+    # evidence, the findings it answers and the status cells its evidence fills are one write.
+    if ! { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+       || ! declare -F line_settle >/dev/null 2>&1; then
+      die "REFUSED — the landing's settlement (lib/line.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    LINE_SID="${LINE_SID:-${CLAUDE_CODE_SESSION_ID:-}}"
+    if ! line_settle "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$PV_NEW" "$RL_AT" "$RL_CELLS"; then
+      die "REFUSED — what the landing of $PV_ID settles cannot be written into the plan's copy; the plan is unchanged."
+      exit 1
+    fi
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
+    [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
+    [ -z "$LINE_SETTLED_C" ] || say "row-landed — $PV_ID settled the matrix status of $LINE_SETTLED_C: discharged by its landing."
     # A HAND LANDING IS RECORDED (wave-39 T10; D14, AC-6.2). The landing record gains the line the line's own hand
     # landing writes (lib/line.sh `line_publish`, field for field), at the landing's instant, so landing-report's
     # Landings list the row and `--hand-holds` counts it; a hand-marked landing used to reach the plan alone. Once:
