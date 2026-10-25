@@ -612,7 +612,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-regressions=<n> · adoptions=<n> · fixed=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -641,8 +641,13 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  `line_settle`) writes a cell through `matrix_row_cells` and writes no such line, so a status a landing
 #                  wrote is never one; a call the settled-cell rule refuses, or that only restates a key, writes none. An
 #                  evidence-only line is a write and no status: not counted.
-#   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
-#                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
+#   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
+#                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
+#                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first
+#                  whose `starter=person` (`regression-run --starter person`), each placed by its `at=`. A run line
+#                  older than `starter=` names no starter, and its run is counted as it was before the field: by its
+#                  `proved: kind=regression` line under `## SDLC State` past the first (lib/proof.sh `proof_fields`),
+#                  unless that proof cites a log whose run line names a starter, which the run lines count.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
 #                  `adopted_from=<sid>`), DISTINCT (agent_id, adopted_from) over the run's rosters, as the amends are
 #                  (wave-36 T14; D13, AC-7.6). Its printed `poker-adopt/v1|…` report is kept in no file, so the row is
@@ -703,7 +708,7 @@ _HH_PLACE_AWK='
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
-  local since="" until="" u1=0 u2=0 u3=0 u4=0 lands=""
+  local since="" until="" u1=0 u2=0 u3=0 u4=0 lands="" prs=0 started=""
   shift 3
   while [ $# -ge 2 ]; do
     case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
@@ -711,13 +716,20 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
-    read -r hand stp stw u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
+    read -r hand stp stw prs u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       { ev = line_ev() }
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
+      # a whole run past the first is a hand-hold only when a person started it
+      ev == "run" && (line_kv("kind") == "regression" || index(line_kv("log"), "regression-run-")) {
+        if (++r > 1 && line_kv("starter") == "person" && hh_take(line_kv("at"))) p++
+      }
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
       # only a line that names the status cell or the task key is a write the gate reads; an evidence-only one is neither placed nor counted
       ev == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(line_kv("at")) { w++ }
-      END { print n + 0, s + 0, w + 0, HH_UNPLACED + 0 }' "$rec")"
+      END { print n + 0, s + 0, w + 0, p + 0, HH_UNPLACED + 0 }' "$rec")"
+    # the logs whose run line names its starter, ` <log> ` words: a proof citing one is counted by its run line
+    started="$(awk -F'|' "$_LINE_FIELDS_AWK"'
+      line_ev() == "run" && line_kv("starter") != "" && line_kv("log") != "" { printf " %s ", line_kv("log") }' "$rec")"
     # each row's first landing, `<row>=<at>` words: what a move to fixed is placed against
     lands="$(awk -F'|' "$_LINE_FIELDS_AWK"'
       line_ev() == "published" && line_kv("row") != "" && !(line_kv("row") in f) { f[line_kv("row")] = 1; printf "%s=%s ", line_kv("row"), line_kv("at") }' "$rec")"
@@ -767,14 +779,16 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
     if ! declare -F units_ac_head_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/units.sh" ]; then . "$BIONIC_LIB/units.sh"; fi
     if declare -F proof_awk >/dev/null 2>&1 && declare -F units_ac_head_awk >/dev/null 2>&1; then
-      read -r fl wv fix u4 <<< "$(HH_LANDS="$lands" awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$(units_ac_head_awk)$_HH_PLACE_AWK"'
+      read -r fl wv fix u4 <<< "$(HH_LANDS="$lands" HH_STARTED="$started" awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$(units_ac_head_awk)$_HH_PLACE_AWK"'
         BEGIN { n = split(ENVIRON["HH_LANDS"], lw, " "); for (i = 1; i <= n; i++) { k = index(lw[i], "="); if (k > 1) LAND[substr(lw[i], 1, k - 1)] = substr(lw[i], k + 1) } }
+        # a proof whose evidence names a log the record holds a starter for: that run line is the count
+        function hh_started(ev,   m, e, i) { m = split(ev, e, ","); for (i = 1; i <= m; i++) if (e[i] != "" && index(ENVIRON["HH_STARTED"], " " e[i] " ")) return 1; return 0 }
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
         sec == "sdlc" {
-          # the first regression proof is the floor itself; each one past it is a hand-hold
-          if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && hh_take(hh_at($0))) f++ }
+          # the first regression proof is the floor itself; each one past it whose run names no starter is a hand-hold
+          if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && !hh_started(PROOF_EVIDENCE) && hh_take(hh_at($0))) f++ }
           else if ($0 ~ /^waived:[ \t]+question=/) { q = index($0, "\""); if (hh_take(hh_first(q ? substr($0, 1, q - 1) : $0))) w++ }
           else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/ && hh_kv($0, "by") != "landing") { if (hh_take_after(hh_at($0), LAND[hh_kv($0, "row")])) x++ }
           next
@@ -793,6 +807,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         END { print f + 0, w + 0, x + 0, HH_UNPLACED + 0 }' "$plan")"
     fi
   fi
+  fl=$(( ${fl:-0} + ${prs:-0} ))
   printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
     $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u2:-0} + ${u3:-0} + ${u4:-0} )); fi

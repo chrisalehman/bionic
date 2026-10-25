@@ -1180,30 +1180,6 @@ $res
 PROOF_FOLD
 }
 
-# proof_whole_run_behind <plan> <root> <tree> <head> -> `<run head><TAB><log>` of the plan's first whole run that read a
-# commit strictly behind <head> on its history, exit 0; nothing and exit 1 when the record holds none. THE ONE FACT
-# BEHIND "the whole run comes once": a whole run is the verb's own run line (`ev=run`, a log named
-# `record/<run>/regression-run-<head>`, a clean tree) or a whole run's per-suite fact (`ev=verdict`, `kind=regression`,
-# keyed by the commit it ran at). A run line that any other command wrote (booked.sh books every gated command)
-# names another log and is not one, and a dirty run proves no commit. A run at <head> itself is not behind it; a
-# run on a history that does not hold <head> proves nothing here and is passed over.
-proof_whole_run_behind() {
-  local plan="${1:-}" root="${2:-}" tree="${3:-}" head="${4:-}" rec h log
-  rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" && [ -f "$rec" ] && _proof_fields || return 1
-  head="$(git -C "$tree" rev-parse --verify -q "${head}^{commit}" 2>/dev/null)" || return 1
-  while IFS='	' read -r h log; do
-    [ -n "$h" ] && [ "$h" != "$head" ] || continue
-    git -C "$tree" merge-base --is-ancestor "$h" "$head" 2>/dev/null || continue
-    printf '%s\t%s' "$h" "$log"
-    return 0
-  done <<PROOF_WHOLE_BEHIND
-$(awk -F'|' "$_LINE_FIELDS_AWK"'
-    line_ev() == "run" && line_kv("dirty") == 0 && index(line_kv("log"), "record/") == 1 && index(line_kv("log"), "/regression-run-") { print line_kv("head") "\t" line_kv("log") }
-    line_ev() == "verdict" && line_kv("kind") == "regression" && line_kv("commit") != "" { print line_kv("commit") "\t" line_kv("log") }' "$rec" 2>/dev/null)
-PROOF_WHOLE_BEHIND
-  return 1
-}
-
 # _proof_floor_log <evidence> <working head> <checkout> [<plan>] [<root>] -> the 40-hex head the log read, exit 0;
 # or exit 1 with the refusal's sentence (wave-36 T35; D13, AC-7.10; the synth-vision filing). THE FLOOR'S ONE
 # GRAMMAR. What a project's regression is belongs to the project; the judge asks only that a run of it read a
