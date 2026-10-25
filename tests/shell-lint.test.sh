@@ -1554,6 +1554,15 @@ expect_contains "…matrix-retier for a row whose eval cannot fire" 'session-pok
 expect_contains "…and the user's waiver otherwise" 'needs: the user — a waiver' "$EXIT_LIVE"
 expect_eq "…and the live row's three evidence refusals each carry it" "3" \
   "$(LC_ALL=C grep -cF '"${live_exit:-' "$EXIT_WALLS")"
+# The release card's row decision is the reply surface for a waiver, so its exit is named by the wall that sends
+# the run there: both auditor refusals' detail, three lines from the call, names the user and the card's reply.
+EXIT_AUD="$(LC_ALL=C awk -v want='needs: the user — a waiver at the release card: reply <n> waive' '
+  index($0, "block_matrix \"the auditor has not confirmed ${ac}\"") { n++; at[n] = NR }
+  { L[NR] = $0 }
+  END { for (i = 1; i <= n; i++) { f = 0; for (k = at[i]; k <= at[i] + 2; k++) if (index(L[k], want)) f = 1; h += f }
+        print n + 0, h + 0 }' "$EXIT_WALLS")"
+expect_eq "EXIT-3c the gate's two auditor refusals the release card settles each name the user's waiver and the card's reply" \
+  "2 2" "$EXIT_AUD"
 
 # ── the census ───────────────────────────────────────────────────────────────
 # tests/CENSUS.md holds one record line per section of every suite under tests/, under a heading per

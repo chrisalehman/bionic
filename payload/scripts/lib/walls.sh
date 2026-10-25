@@ -4300,11 +4300,11 @@ validate_matrix() {
       if [ "$owed" = verdict ]; then
         block_matrix "the auditor has not confirmed ${ac}" "get the auditor's verdict on it" \
           "matrix row '${ac}' has no auditor verdict: the cell is '${aud:-empty}', not CONFIRMED, REFUTED or UNVERIFIABLE, at step ${CURRENT}." \
-          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or waive the row."
+          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or else needs: the user — a waiver at the release card: reply <n> waive, <n> being the decision the card gives ${ac}."
       fi
       block_matrix "the auditor has not confirmed ${ac}" "get the auditor to confirm it" \
         "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
-        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation."
+        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation. Short of a CONFIRMED verdict, needs: the user — a waiver at the release card: reply <n> waive, <n> being the decision the card gives ${ac}."
     fi
   done <<< "$rows"
 
