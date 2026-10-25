@@ -1221,6 +1221,26 @@ expect_contains "STATUS-6a a status line whose time cannot be placed is not coun
   "status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=1" "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 expect_contains "STATUS-6b …and with no window at all every status line counts, the evidence-only one still not" "status-writes=5 · second-regressions=0" "$(ww_hh "$RS2")"
 
+# (s3) a task write is counted. `task=` is the key that defers a pending row to its task's step (`matrix_owing_step`), so a
+# task-only call moves a row off every gate until then: it writes its line, naming `task`, and the count reads it as a
+# status write. A call that restates the key changes nothing and writes none; an evidence-only line is still no status.
+# fails-when: a task-only matrix-set writes no line, or a restated one writes a second, or hand_holds_report leaves a
+# cells=task line out of status-writes, or counts an evidence-only one.
+ss_cnt() { ww_hh "$1" $SS_WIDE | sed -n 's/^hand-holds: total=\([0-9]*\) .* status-writes=\([0-9]*\) .*/\1 \2/p'; }   # <root> -> `<total> <status-writes>`
+expect_eq "STATUS-7 precondition: the record holds two matrix-set lines and the count reads total=1 status-writes=1" "2|1 1" "$(ss_ms "$RS1")|$(ss_cnt "$RS1")"
+ww_poke "$RS1" matrix-set AC-1.3 task=T2 >/dev/null; SS_RC7=$?
+expect_eq "STATUS-7 a task written alone exits 0 and leaves one more matrix-set line, naming the criterion and cells=task" "0|3|cells=task" \
+  "$SS_RC7|$(ss_ms "$RS1")|$(grep '^line/v1|ev=matrix-set|ac=AC-1.3|' "$(ll_rec "$RS1")" | tail -n 1 | grep -o 'cells=[a-z,]*')"
+expect_eq "STATUS-7a …and the count reads it: status-writes and total each move by one" "2 2" "$(ss_cnt "$RS1")"
+ww_poke "$RS1" matrix-set AC-1.3 task=T2 >/dev/null; SS_RC8=$?
+expect_eq "STATUS-8 the same call again restates the key: it exits 0 and writes no further line" "0|3|2 2" "$SS_RC8|$(ss_ms "$RS1")|$(ss_cnt "$RS1")"
+RS3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS3")")"
+{ ss_line AC-1.1 task 2026-10-20T12:00:00Z; ss_line AC-1.2 evidence 2026-10-20T12:10:00Z
+  ss_line AC-1.3 status,task 2026-10-20T12:30:00Z; ss_line AC-1.4 task 2026-10-20T10:59:00Z; } > "$(ll_rec "$RS3")"
+expect_eq "STATUS-9 a task line inside the window counts, a status,task line too; an evidence-only line inside it and a task line before it do not" \
+  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "$(ww_hh "$RS3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+
 # ---------------------------------------------------------------------------
 section "§ORDER: the reader rule and the numbers re-renderer read one publish order"
 # Whether a row was written after the release is publish order: lib/units.sh `_units_publish_order` places each landed

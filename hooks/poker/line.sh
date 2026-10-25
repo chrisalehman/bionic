@@ -633,12 +633,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
 #                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
 #                  reader of the plan skips it.
-#   status-writes  the landing record's `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence>|by=<who>|at=<ISO-UTC>|`, one per
+#   status-writes  the landing record's `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>|`, one per
 #                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
-#                  `poker_verb_matrix_set`). It is counted when its cells name the status, placed by its `at=` like every
-#                  record kind. The landing's settlement (lib/line.sh `line_settle`) writes a cell through `matrix_row_cells`
-#                  and writes no such line, so a status a landing wrote is never one; a call the settled-cell rule refuses,
-#                  or that only restates a cell, writes none. An evidence-only line is a write and no status: not counted.
+#                  `poker_verb_matrix_set`). It is counted when its cells name the status or the task, placed by its `at=`
+#                  like every record kind. A task write counts: the task: key is what defers a pending row to its
+#                  task's step, so writing it by hand moves the row off every gate. The landing's settlement (lib/line.sh
+#                  `line_settle`) writes a cell through `matrix_row_cells` and writes no such line, so a status a landing
+#                  wrote is never one; a call the settled-cell rule refuses, or that only restates a key, writes none. An
+#                  evidence-only line is a write and no status: not counted.
 #   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
 #                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
@@ -713,8 +715,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       { ev = line_ev() }
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
-      # only a line that names the status cell is a status written; an evidence-only one is neither placed nor counted
-      ev == "matrix-set" && index("," line_kv("cells") ",", ",status,") && hh_take(line_kv("at")) { w++ }
+      # only a line that names the status cell or the task key is a write the gate reads; an evidence-only one is neither placed nor counted
+      ev == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(line_kv("at")) { w++ }
       END { print n + 0, s + 0, w + 0, HH_UNPLACED + 0 }' "$rec")"
     # each row's first landing, `<row>=<at>` words: what a move to fixed is placed against
     lands="$(awk -F'|' "$_LINE_FIELDS_AWK"'

@@ -1970,14 +1970,18 @@ EOF
          exit 2 ;;
     esac
     plan_verb_swap matrix-set "$MS_AC ${MS_PAIRS[*]}" writer
-    # A STATUS WRITTEN BY HAND IS RECORDED (hand_holds_report counts it as status-writes): one `ev=matrix-set` line in the
-    # landing record naming the criterion and the cells written, appended once the plan write is in. plan_verb_swap exits
-    # before this point when the plan already read so, and every refusal above exits earlier still, so a call that changed
-    # nothing or was refused writes none. The landing's settlement writes the cells through `matrix_row_cells` and never
-    # through this verb, so it is never one. A block key written alone (task) writes no cell and no line.
+    # A STATUS OR A TASK WRITTEN BY HAND IS RECORDED (hand_holds_report counts either as status-writes): one `ev=matrix-set`
+    # line in the landing record naming the criterion and the keys written, appended once the plan write is in.
+    # plan_verb_swap exits before this point when the plan already read so, and every refusal above exits earlier still, so
+    # a call that changed nothing or was refused writes none. The landing's settlement writes the cells through
+    # `matrix_row_cells` and never through this verb, so it is never one. A task key written alone writes the line, because
+    # the task: key is what the gate's deferral reads (`matrix_owing_step`): the write moves a pending row off every gate
+    # until its task's step, a hand-hold the count would otherwise never see. An evidence key alone is a write the gate
+    # never reads for a status: it is named, and the count leaves it out.
     MS_WROTE=""
     [ "$MS_HAS_S" = 0 ] || MS_WROTE="status"
     [ "$MS_HAS_E" = 0 ] || MS_WROTE="${MS_WROTE:+$MS_WROTE,}evidence"
+    [ "$MS_HAS_T" = 0 ] || MS_WROTE="${MS_WROTE:+$MS_WROTE,}task"
     if [ -n "$MS_WROTE" ]; then
       _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
       { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
